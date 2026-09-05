@@ -10,8 +10,7 @@
       "type": "object",
       "additionalProperties": true,
       "properties": {
-        "name": { "type": "string" },
-        "targetUser": { "type": "string" }
+        "name": { "type": "string" }
       }
     },
     "adapters": {

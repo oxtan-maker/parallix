@@ -190,14 +190,19 @@ test('performStaticReview accepts a bare repo path whose file exists (may contai
   );
 
   try {
+    // The fixture lives under the temp dir, so the review worktree root the
+    // gate resolves against must be that temp dir, not REPO_ROOT. Passing
+    // REPO_ROOT (as a prior version of this test did) only passed because a
+    // real backlog/tasks file happened to exist at the repository root; the
+    // assertion should depend on the fixture, not on repo layout.
     const result = performStaticReview('task-spacepath', {
       log: () => {},
       findMissionDir: () => missionDir,
       findCheckpoints: () => [checkpoint],
       readFileSync: fs.readFileSync,
       run: () => ({ status: 0, stdout: '' }),
-      resolveWorktree: () => REPO_ROOT,
-      rootDir: REPO_ROOT,
+      resolveWorktree: () => tmpDir,
+      rootDir: tmpDir,
     });
     assert.equal(result.ok, true, `Expected pass but got findings: ${result.findings.join('; ')}`);
   } finally {

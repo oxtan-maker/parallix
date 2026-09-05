@@ -164,7 +164,6 @@ integration are tracked in [TASK-2457](../backlog/tasks/task-2457%20-%20make-lif
 The following schema-declared fields are deliberately not presented as working
 overrides because the audit found no end-to-end runtime effect:
 
-- `product.targetUser`: [TASK-2455.01](../backlog/tasks/task-2455.01%20-%20make-product-target-user-config-effective.md)
 - `adapters.tasks.provider`: [TASK-2455.02](../backlog/tasks/task-2455.02%20-%20make-task-provider-config-effective.md)
 
 `px config` currently does not validate individual schema field types, enums,
