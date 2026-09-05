@@ -4,7 +4,7 @@ title: document config
 status: backlog
 assignee: []
 created_date: '2026-09-05 09:25'
-labels: []
+labels: [user_value]
 dependencies: []
 ordinal: 124917
 ---
