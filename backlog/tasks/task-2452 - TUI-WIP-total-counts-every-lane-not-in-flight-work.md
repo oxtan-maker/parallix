@@ -6,6 +6,7 @@ assignee: [custom]
 created_date: '2026-09-02 06:00'
 labels:
   - bug
+  - user_value
   - tui
   - board
   - projection
