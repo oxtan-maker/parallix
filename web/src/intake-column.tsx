@@ -11,7 +11,7 @@ import { C } from './palette.js';
 import { familyAccent, isSpinning, workText } from './format.js';
 
 function primaryAction(actions: readonly WebMissionCard['actions'][number][]) {
-  return actions.find((action) => action.state === 'enabled') ?? actions[0] ?? null;
+  return actions.find((action) => action.state === 'enabled') ?? null;
 }
 
 function IntakeCard({ card, onAction, onSelect, onDragStart, selected, pendingAction }: { card: WebMissionCard; onAction: (card: WebMissionCard, action: WebMissionCard['actions'][number], control: HTMLButtonElement) => void; onSelect: (id: string) => void; onDragStart: (card: WebMissionCard, event: DragEvent<HTMLElement>) => void; selected: boolean; pendingAction: { missionId: string; kind: WebMissionCard['actions'][number]['kind'] } | null }) {

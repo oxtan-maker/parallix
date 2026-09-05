@@ -40,7 +40,6 @@ export function TopBar({ snapshot, flowOpen, onFlowToggle }: {
       <div style={{ color: C.dim, whiteSpace: 'nowrap', flexShrink: 0 }}>
         {snapshot.wipCounts.length > 0 && <>wip <span style={{ color: C.text }}>{wip}</span> · </>}
         attention <span style={{ color: C.amber }}>{snapshot.attentionQueue.length}</span>
-        {unattributed !== null && <> · {unattributed}</>}
       </div>
       <div style={{ flex: 1, minWidth: 12 }} />
       <button
