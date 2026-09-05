@@ -1,8 +1,8 @@
 ---
 id: TASK-2455
 title: document config
-status: backlog
-assignee: []
+status: done
+assignee: [codex]
 created_date: '2026-09-05 09:25'
 labels: [user_value]
 dependencies: []
