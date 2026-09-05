@@ -17,6 +17,18 @@ Each mission has an isolated branch and worktree. The primary checkout is held
 for deliberate human integration. This separation makes parallel work possible
 without treating the source tree as a shared scratch space.
 
+Drafting is the step that first materializes a mission: before it runs, a
+backlog item exists only as a task, with no mission of its own. Starting a
+draft from an interface therefore requires no pre-existing mission, only a
+task still in the pre-draft state.
+
+Drafting from the command line treats the directory it was invoked in as the
+mission's launch context, which is how a mission based on a feature branch is
+recognized. A long-running board backend carries no such intent: whichever
+worktree it was started in, it anchors drafting to the primary checkout, so
+the branch, backlog task, and new worktree it produces do not depend on where
+the server happens to run.
+
 The common modes are:
 
 | Mode | Durable purpose |

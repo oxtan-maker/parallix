@@ -230,10 +230,12 @@ export class BoardCommandController implements BoardCommandDispatcher {
     if (!this.missionServices.draft) {
       return unavailableCapability('draft:create', 'no Mission authority is configured for this interface');
     }
-    // Dispatch backstop: only a mission still in the pre-draft state (backlog)
-    // is draftable. Every other state is rejected before the draft workflow
-    // port is reached, so projection drift or a stale card can never project
-    // a successful move.
+    // Dispatch backstop: only a mission still in the pre-draft state is
+    // draftable. Pre-draft means either "no aggregate yet" (the ordinary case:
+    // a backlog card straight off the task files, which draft's intake step
+    // materializes) or an aggregate still sitting in `backlog`. Every other
+    // state is rejected before the draft workflow port is reached, so
+    // projection drift or a stale card can never project a successful move.
     if (!this.missionStore) {
       return failure('unavailable', 'Mission authority is not configured for this interface');
     }
@@ -244,8 +246,7 @@ export class BoardCommandController implements BoardCommandDispatcher {
       return failure('unavailable', 'mission authority is unavailable');
     }
     if (loaded.kind === 'unavailable') { return failure('unavailable', loaded.reason); }
-    if (loaded.kind === 'missing') { return failure('unavailable', 'mission authority could not find the mission'); }
-    if (loaded.mission.status !== 'backlog') {
+    if (loaded.kind === 'found' && loaded.mission.status !== 'backlog') {
       return rejected('validation', `draft:create requires a mission in the pre-draft (backlog) state, current: ${loaded.mission.status}`);
     }
     this.emit(request.operationId, 1, 'draft', `drafting ${request.missionId}`);
@@ -306,6 +307,12 @@ export class BoardCommandController implements BoardCommandDispatcher {
         return failure('unavailable', loaded.reason);
       }
       if (loaded.kind === 'missing') {
+        // A backlog card the board projects from the task files has no Mission
+        // aggregate until draft's intake step materializes one. For
+        // `draft:create` that absence *is* the pre-draft state, so there is no
+        // status precondition to resolve; every other command needs the
+        // aggregate it claims to advance.
+        if (request.kind === 'draft:create') { return null; }
         return failure('unavailable', 'mission authority could not find the mission');
       }
       if (request.missionStatusAtRequest !== undefined && loaded.mission.status !== request.missionStatusAtRequest) {

@@ -99,6 +99,11 @@ function createBoardDraftService(deps: {
   const gitFn = deps.workflowDeps?.gitFn;
   const workflow: DraftWorkflowPort = deps.workflow ?? createDraftWorkflowAdapter({
     ...deps.workflowDeps,
+    // The board backend is a server: the directory it was started in carries no
+    // mission intent. Anchor draft's launch context to the primary checkout so
+    // a board served from a mission worktree resolves the same repository root,
+    // base branch, and backlog task as one served from the main checkout.
+    anchorLaunchDirToMainRepo: true,
     exitFn,
     logFn: (message: string): void => { emit('draft-log', message); },
     errorFn: (message: string): void => { emit('draft-error', message); },
