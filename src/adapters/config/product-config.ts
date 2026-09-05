@@ -8,7 +8,6 @@ const REQUIRED_ADAPTER_KEYS = ['tasks', 'missions', 'verification', 'review', 'a
 const DEFAULT_CONFIG = Object.freeze({
   product: {
     name: 'Workflow',
-    targetUser: 'Engineering teams using git, task tracking, and code review',
   },
   adapters: {
     tasks: { provider: 'backlog-md', storage: 'backlog', stateMap: 'state-map.json' },

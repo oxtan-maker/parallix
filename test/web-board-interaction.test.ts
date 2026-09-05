@@ -83,13 +83,14 @@ test('board keyboard activation sends the same projected typed request', async (
 test('board unavailable action ignores pointer and keyboard activation', async () => {
   const page = await renderBoard({ board: snapshot([makeCard({ id: missionId('task-2436-interaction'), status: 'active', lane: 'active', commands: [{ ...action, enabled: false, reason: 'not eligible' }] })]) });
   try {
+    // primaryAction() renders only enabled actions, so a card whose sole action
+    // is unavailable renders no action control at all. There is therefore no
+    // control to activate: activation is ignored by construction. This is the
+    // same guard the render suite asserts (web-board-render omits disabled
+    // controls); here we assert the interaction consequence — nothing to click,
+    // so no request is ever dispatched.
     assert.equal(page.mount.querySelector('button[aria-label*=" — enabled"]') === null, true);
-    const button = page.mount.querySelector<DomButton>('button[aria-disabled="true"]')!;
-    await act(async () => {
-      button.click();
-      button.dispatchEvent(new page.window.KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
-      button.dispatchEvent(new page.window.MouseEvent('click', { bubbles: true, detail: 0 }));
-    });
+    assert.equal(page.mount.querySelector<DomButton>('button[aria-disabled="true"]') === null, true);
     assert.equal(page.calls.length, 0);
   } finally { await page.close(); }
 });

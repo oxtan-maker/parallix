@@ -10,7 +10,7 @@ export function buildReviewAdapterConfig(answers: any) { const provider = answer
 export function buildWorkflowConfig(answers: any) {
   const missions: any = { baseDir: answers.missionsBaseDir || '', branchPrefix: answers.branchPrefix || '', worktreePattern: answers.worktreePattern || '' };
   if (typeof answers.primaryBranch === 'string' && answers.primaryBranch.trim() && !['main', 'master'].includes(answers.primaryBranch.trim())) {missions.primaryBranch = answers.primaryBranch.trim();}
-  return { product: { name: answers.productName || '', targetUser: 'Engineering teams using git, task tracking, and code review' }, adapters: { tasks: { provider: answers.tasksProvider || '', storage: answers.tasksStorage || '' }, missions, verification: { command: answers.verificationCommand || '', defaultArea: answers.verificationDefaultArea || '' }, review: buildReviewAdapterConfig(answers), agents: {} } };
+  return { product: { name: answers.productName || '' }, adapters: { tasks: { provider: answers.tasksProvider || '', storage: answers.tasksStorage || '' }, missions, verification: { command: answers.verificationCommand || '', defaultArea: answers.verificationDefaultArea || '' }, review: buildReviewAdapterConfig(answers), agents: {} } };
 }
 export function writeWorkflowConfig(rootDir: string, config: any): string { const configPath = path.join(rootDir, 'workflow.config.json'); fs.writeFileSync(configPath, `${JSON.stringify(config, null, 2)}\n`, 'utf8'); return configPath; }
 export function evaluateReviewSetup(rootDir?: string, options: any = {}) {

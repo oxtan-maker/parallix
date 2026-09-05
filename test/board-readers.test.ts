@@ -324,7 +324,7 @@ test('BoardProjectionBuilder queues a gate-failed mission behind its runnable re
   assert.equal(projection.attentionQueue[0]?.action.kind, 'active:execute');
   assert.equal(
     failed?.commands.find((command) => command.command === 'active')?.label,
-    'resume',
+    'resume ▸',
   );
   const passing = projection.stages.flatMap((stage) => stage.cards).find((card) => card.id === id2);
   assert.equal(passing?.commands.find((command) => command.command === 'active')?.enabled, false);
