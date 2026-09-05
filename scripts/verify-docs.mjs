@@ -7,7 +7,6 @@ import { fileURLToPath } from 'node:url';
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const authoredDocs = [
   'README.md',
-  'docs/authority-reference.md',
   'docs/use-cases.md',
   'docs/doc-standards.md'
 ];
@@ -53,6 +52,10 @@ function verifyLinks(file, text) {
 
 for (const file of authoredDocs) {
   const absolutePath = path.join(repoRoot, file);
+  if (!fs.existsSync(absolutePath)) {
+    report(file, 1, 'authored doc listed in verify-docs.mjs no longer exists; remove it from authoredDocs or restore the file');
+    continue;
+  }
   const text = fs.readFileSync(absolutePath, 'utf8');
   verifyImplementationEvidence(file, text);
   verifyLinks(file, text);
