@@ -22,7 +22,7 @@
           "description": "Task tracker and on-disk task storage.",
           "additionalProperties": true,
           "properties": {
-            "provider": { "type": "string", "description": "Task tracker provider, e.g. backlog-md." },
+            "provider": { "type": "string", "enum": ["backlog-md"], "description": "Task tracker provider. backlog-md is the only supported value; any other value is rejected." },
             "stateMap": { "type": "string", "description": "Repo-relative path to the virtual-to-actual Backlog state map." },
             "storage": {
               "description": "Task storage directory (string) or an object with tasksDir/completedDir.",

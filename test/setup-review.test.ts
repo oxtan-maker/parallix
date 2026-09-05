@@ -456,7 +456,6 @@ test('collectWizardAnswers supports custom layout and skipping bootstrap', async
       'acme/repo',
       'http://forgejo.local:3000',
       'review2',
-      'forgejo-tasks',
       'tracker',
       'missions',
       'feature/',
@@ -473,7 +472,7 @@ test('collectWizardAnswers supports custom layout and skipping bootstrap', async
     });
 
     assert.equal(result.productName, 'Acme Workflow');
-    assert.equal(result.tasksProvider, 'forgejo-tasks');
+    assert.equal(result.tasksProvider, 'backlog-md');
     assert.equal(result.tasksStorage, 'tracker');
     assert.equal(result.missionsBaseDir, 'missions');
     assert.equal(result.branchPrefix, 'feature/');

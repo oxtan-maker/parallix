@@ -3,6 +3,13 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 
+/**
+ * The task providers this release implements. Backlog Markdown is the only
+ * task adapter that exists, so any other value is a configuration error rather
+ * than an extension point (TASK-2455.02).
+ */
+export const SUPPORTED_TASK_PROVIDERS = ['backlog-md'] as const;
+
 const REQUIRED_ADAPTER_KEYS = ['tasks', 'missions', 'verification', 'review', 'agents'] as const;
 
 const DEFAULT_CONFIG = Object.freeze({
@@ -104,6 +111,32 @@ export function loadEffectiveConfig(rootDir: string = process.cwd()): typeof DEF
   return deepMerge(defaultConfig(), loaded.config as PlainObject) as typeof DEFAULT_CONFIG;
 }
 
+function isSupportedTaskProvider(value: unknown): boolean {
+  return typeof value === 'string' && (SUPPORTED_TASK_PROVIDERS as readonly string[]).includes(value);
+}
+
+function taskProviderIssue(value: unknown): string {
+  const supported = SUPPORTED_TASK_PROVIDERS.join(', ');
+  return `adapters.tasks.provider must be one of: ${supported} (got ${JSON.stringify(value)})`;
+}
+
+/**
+ * Resolve the configured task provider, rejecting values this release cannot
+ * implement. Task composition calls this before it selects the backlog-Markdown
+ * adapter, so an unsupported provider stops the lifecycle instead of silently
+ * running backlog-Markdown behavior under another provider name.
+ */
+export function resolveTaskProvider(rootDir: string = process.cwd()): string {
+  const tasks = loadAdapterConfig(rootDir).tasks as PlainObject | undefined || {};
+  if (!('provider' in tasks)) {
+    return DEFAULT_CONFIG.adapters.tasks.provider;
+  }
+  if (!isSupportedTaskProvider(tasks.provider)) {
+    throw new Error(taskProviderIssue(tasks.provider));
+  }
+  return tasks.provider as string;
+}
+
 export function validateWorkflowConfig(config: unknown): string[] {
   if (!isPlainObject(config)) {
     return ['top-level JSON object is required'];
@@ -125,6 +158,12 @@ export function validateWorkflowConfig(config: unknown): string[] {
         }
       }
     }
+  }
+  const tasks = isPlainObject((cfg.adapters as PlainObject | undefined)?.tasks)
+    ? ((cfg.adapters as PlainObject).tasks as PlainObject)
+    : null;
+  if (tasks && 'provider' in tasks && !isSupportedTaskProvider(tasks.provider)) {
+    issues.push(taskProviderIssue(tasks.provider));
   }
   const agents = isPlainObject((cfg.adapters as PlainObject | undefined)?.agents)
     ? ((cfg.adapters as PlainObject).agents as PlainObject)
@@ -366,7 +405,7 @@ export function adapterChecklist(): string[] {
     'Workflow runs on built-in defaults; no config file is required to start',
     'Create workflow.config.json only to override a default (schema: workflow/config/workflow.config.schema.json)',
     'Run `px config` to print the effective configuration',
-    'Override adapters.tasks for a different task tracker or storage path',
+    'Override adapters.tasks.storage or adapters.tasks.stateMap for task storage layout; adapters.tasks.provider only accepts backlog-md',
     'Override adapters.missions for mission document layout and branch/worktree conventions',
     'Override adapters.verification for your repo gate command',
     'Override adapters.review to enable a review provider and remote naming',
@@ -398,6 +437,8 @@ export function resolveTaskStorage(rootDir: string = process.cwd()): TaskStorage
     archiveTasksDir: path.join(fallbackBaseDir, 'archive', 'tasks'),
     draftsDir: path.join(fallbackBaseDir, 'drafts'),
   };
+
+  resolveTaskProvider(rootDir);
 
   const tasksAdapter = loadAdapterConfig(rootDir).tasks as PlainObject | undefined || {};
   const storage = (tasksAdapter.storagePath as string) || (tasksAdapter.storage as string);

@@ -90,7 +90,12 @@ test('board unavailable action ignores pointer and keyboard activation', async (
     // controls); here we assert the interaction consequence — nothing to click,
     // so no request is ever dispatched.
     assert.equal(page.mount.querySelector('button[aria-label*=" — enabled"]') === null, true);
-    assert.equal(page.mount.querySelector<DomButton>('button[aria-disabled="true"]') === null, true);
+    assert.equal(page.mount.querySelector('button[aria-disabled="true"]') === null, true);
+    const card = page.mount.querySelector<DomHtmlElement>('[data-board-card="task-2436-interaction"]')!;
+    await act(async () => {
+      card.dispatchEvent(new page.window.KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+      card.dispatchEvent(new page.window.MouseEvent('click', { bubbles: true, detail: 0 }));
+    });
     assert.equal(page.calls.length, 0);
   } finally { await page.close(); }
 });
