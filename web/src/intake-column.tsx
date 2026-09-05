@@ -41,7 +41,7 @@ function IntakeCard({ card, onAction, onSelect, onDragStart, selected, pendingAc
       <p style={{ margin: '5px 0 0', lineHeight: 1.4, color: C.muted, fontSize: 11 }}>{card.title}</p>
       {primary !== null && (
         <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 5, marginTop: 7, flexWrap: 'wrap' }}>
-          <ActionButton action={primary} label={primary.label} pending={pendingAction?.missionId === card.id && pendingAction.kind === primary.kind} onInvoke={(next, control) => onAction(card, next, control)} />
+          <ActionButton action={primary} label={primary.label} pending={pendingAction?.missionId === card.id && pendingAction.kind === primary.kind} working={isSpinning(card)} onInvoke={(next, control) => onAction(card, next, control)} />
         </div>
       )}
     </article>

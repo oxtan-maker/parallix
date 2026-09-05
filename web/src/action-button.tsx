@@ -14,12 +14,14 @@ function look(state: WebCommandAction['state']): CSSProperties {
     : { background: 'none', border: `1px solid ${C.cardEdge}`, color: C.faint };
 }
 
-export function ActionButton({ action, style, label, pending = false, onInvoke }: {
+export function ActionButton({ action, style, label, pending = false, working = false, onInvoke }: {
   action: WebCommandAction;
   style?: CSSProperties;
   /** A short face for the same action; the full display stays the accessible name. */
   label?: string;
   pending?: boolean;
+  /** Current-work from the refreshed server projection while this request is pending. */
+  working?: boolean;
   onInvoke?: (action: WebCommandAction, control: HTMLButtonElement) => void;
 }) {
   const enabled = action.state === 'enabled' && !pending;
@@ -39,10 +41,10 @@ export function ActionButton({ action, style, label, pending = false, onInvoke }
         whiteSpace: 'nowrap',
         ...style,
       }}
-      title={pending ? `Starting ${action.display}` : action.reason ?? (enabled ? action.display : UNAVAILABLE_HINT)}
-      aria-label={`${action.display} — ${pending ? 'starting' : action.state}${action.reason === null ? '' : `: ${action.reason}`}`}
+      title={pending ? `${working ? 'Working' : 'Starting'} ${action.display}` : action.reason ?? (enabled ? action.display : UNAVAILABLE_HINT)}
+      aria-label={`${action.display} — ${pending ? (working ? 'working' : 'starting') : action.state}${action.reason === null ? '' : `: ${action.reason}`}`}
     >
-      {pending ? `${label ?? action.display} · starting…` : label ?? action.display}
+      {pending ? `${label ?? action.display} · ${working ? 'working…' : 'starting…'}` : label ?? action.display}
     </button>
   );
 }
