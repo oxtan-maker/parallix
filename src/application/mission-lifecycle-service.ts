@@ -10,6 +10,7 @@
 import type { ApplicationOutcome, Capability, DurableEvidence } from './contracts.js';
 import { completed, failure } from './contracts.js';
 import type { MissionTransitionStore, MissionVersion } from './domain-ports.js';
+import { isDuplicateLaneEvent, isReplayedLaneEvent } from './lifecycle-lane-event.js';
 import {
   decisionFailure,
   isLoaded,
@@ -105,10 +106,34 @@ export class MissionLifecycleService {
         [this.evidence(decided, from, request)],
       );
     } catch (error) {
-      if (error instanceof Error && /Duplicate idempotency key/.test(error.message)) {
-        return failure('conflict', error.message);
+      if (!isDuplicateLaneEvent(error)) {
+        return writeFailure<MissionTransitionResult>(error);
       }
-      return writeFailure<MissionTransitionResult>(error);
+      // The store refused the lane event, which rolls its transaction back and
+      // discards the aggregate write with it. When the event already recorded
+      // under this key describes exactly this transition — a retried handoff
+      // reusing `handoff-${slug}` — the history is already complete and only
+      // the state is missing, so the aggregate is saved on its own rather than
+      // reported as a conflict. Anything else, including a stale expected
+      // version, stays a conflict.
+      if (event === null || !await isReplayedLaneEvent(this._store, event)) {
+        return failure('conflict', (error as Error).message);
+      }
+      try {
+        const replayedVersion = await this._store.save(decided, version);
+        return completed(
+          {
+            mission: decided,
+            version: replayedVersion,
+            from,
+            to: decided.status,
+            laneChanged: false,
+          },
+          [this.evidence(decided, from, request)],
+        );
+      } catch (replayError) {
+        return writeFailure<MissionTransitionResult>(replayError);
+      }
     }
   }
 

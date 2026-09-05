@@ -1,8 +1,8 @@
 ---
 id: TASK-2456
 title: handoff retry treats duplicate lane event as failure
-status: backlog
-assignee: []
+status: done
+assignee: [claude]
 created_date: '2026-09-05 13:55'
 labels: [ai_sdlc, bug]
 dependencies: []
