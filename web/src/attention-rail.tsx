@@ -69,11 +69,6 @@ function AttentionEntry({ item, onAction, onSelect, selected }: { item: WebAtten
         </span>
         <ActionButton action={item.action} label="run ▸" onInvoke={(_action, control) => onAction(item, control)} />
       </div>
-      {item.dependsOnSources.length > 0 && (
-        <p style={{ color: C.faint, fontSize: 10, margin: '7px 0 0 20px' }}>
-          sources: {item.dependsOnSources.join(', ')}
-        </p>
-      )}
     </article>
   );
 }

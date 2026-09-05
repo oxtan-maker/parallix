@@ -282,7 +282,7 @@ export function availableBoardCommands(
   const reviewPhase = mission.review === null ? null : currentReviewRound(mission.review).phase;
   const resumesFindings = mission.status === 'review' && reviewPhase === 'fixing';
   const resumesGate = mission.status === 'active' && facts.latestGate === 'failed';
-  const activeLabel = resumesFindings ? 'act on review' : resumesGate ? 'resume' : 'activate';
+  const activeLabel = resumesFindings ? 'findings ↩' : resumesGate ? 'resume ▸' : 'power ▸';
   const activeReason = mission.status === 'review'
     ? 'Resuming a review mission requires reviewer findings to act on'
     : mission.status === 'active'
@@ -298,13 +298,13 @@ export function availableBoardCommands(
       'active',
       activeLabel,
     ),
-    availability('handoff', open && mission.status === 'active' && hasCheckpointEvidence, 'Handoff requires an active mission with checkpoint evidence', 'review'),
-    availability('review', open && mission.status === 'review', 'Review is available only while the mission is in review', null),
-    availability('integrate', open && canIntegrate, 'Integration requires the integration queue or an approved review', 'integration'),
+    availability('handoff', open && mission.status === 'active' && hasCheckpointEvidence, 'Handoff requires an active mission with checkpoint evidence', 'review', 'review ▸'),
+    availability('review', open && mission.status === 'review', 'Review is available only while the mission is in review', null, 'review ▸'),
+    availability('integrate', open && canIntegrate, 'Integration requires the integration queue or an approved review', 'integration', 'integrate ▸'),
     // Pre-draft state: the mission exists as a card but no draft worktree has
     // been created yet. Once draft work exists the mission has moved on, and
     // re-drafting is refused by the dispatch backstop, not the projection.
-    availability('draft', open && mission.status === 'backlog', 'Draft is available only while the mission is in the pre-draft (backlog) state', 'refined'),
+    availability('draft', open && mission.status === 'backlog', 'Draft is available only while the mission is in the pre-draft (backlog) state', 'refined', 'draft ▸'),
   ];
 }
 

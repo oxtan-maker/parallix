@@ -44,9 +44,9 @@ function CumulativeFlow({ metrics }: { readonly metrics: WebBoardMetrics }) {
 }
 
 export function FlowPanel({ metrics }: { readonly metrics: WebBoardMetrics }) {
-  const throughput = metrics.weeklyThroughput.series.at(-1);
   const cycle = metrics.medianCycleTimeByState.series.filter((point) => point.value !== null);
   const longest = Math.max(1, ...cycle.map((point) => point.value!));
+  const total = cycle.reduce((sum, point) => sum + point.value!, 0);
   return <section id="flow-metrics" aria-label="FLOW metrics" style={{ display: 'flex', gap: 26, padding: '14px 18px', borderBottom: `1px solid ${C.rule}`, background: C.panel, flexShrink: 0, alignItems: 'flex-start', overflowX: 'auto' }}>
     <div style={{ flexShrink: 0 }}>
       <h2 style={{ color: C.dim, fontFamily: DISPLAY, fontSize: 10, fontWeight: 400, letterSpacing: 2, margin: '0 0 7px' }}>CUMULATIVE FLOW · {metrics.flowWindow?.label ?? 'RECORDED HISTORY'}</h2>
@@ -62,12 +62,11 @@ export function FlowPanel({ metrics }: { readonly metrics: WebBoardMetrics }) {
           <span style={{ color, fontSize: 10 }}>{minutes(point.value)} (n={point.observationCount ?? 0})</span>
         </div>;
       })}
-    </div>
-    <div style={{ maxWidth: 300, borderLeft: `1px solid ${C.rule}`, paddingLeft: 16, flexShrink: 0 }}>
-      <h2 style={{ color: C.dim, fontFamily: DISPLAY, fontSize: 10, fontWeight: 400, letterSpacing: 2, margin: '0 0 7px' }}>READ</h2>
-      <div style={{ color: C.muted, fontSize: 11, lineHeight: 1.6 }}>weekly throughput: {throughput?.value ?? 'unavailable'} (n={throughput?.observationCount ?? 0}) · {metrics.weeklyThroughput.missingHistoryFallback}</div>
-      <div style={{ color: C.muted, fontSize: 11, lineHeight: 1.6 }}>{metrics.bottleneck.sentence}</div>
-      <div style={{ color: C.faint, fontSize: 10, marginTop: 6 }}>statistics {metrics.health.state} · population n={metrics.provenance.sampleSize}</div>
+      {cycle.length > 0 && <div style={{ display: 'flex', alignItems: 'baseline', gap: 9, marginTop: 10, paddingTop: 9, borderTop: `1px solid ${C.rule}` }}>
+        <span style={{ width: 62, color: C.dim, fontSize: 10, textAlign: 'right' }}>cycle time</span>
+        <span style={{ color: C.text, fontSize: 15, fontWeight: 500 }}>{minutes(total)}</span>
+        <span style={{ color: C.faint, fontSize: 10 }}>refined → done, median</span>
+      </div>}
     </div>
   </section>;
 }

@@ -138,6 +138,26 @@ test('a card action renders the server\'s verb for the mission\'s state', () => 
   assert.match(html, /aria-label="px active task-0009 — enabled"/);
 });
 
+test('a card with no runnable action omits its disabled lifecycle controls', () => {
+  const html = render(snapshotOf({
+    stages: [{
+      lane: 'review',
+      count: 1,
+      cards: [makeCard({
+        id: 'task-0010' as MissionCard['id'],
+        lane: 'review',
+        status: 'review',
+        commands: [
+          { command: 'active', enabled: false, reason: 'Resuming a review mission requires reviewer findings to act on', targetLane: 'active', label: 'activate' },
+          { command: 'review', enabled: false, reason: 'review is in progress', targetLane: null },
+        ],
+      })],
+    }],
+  }));
+  assert.doesNotMatch(html, /px active task-0010/);
+  assert.doesNotMatch(html, /px review task-0010/);
+});
+
 test('every received card renders in its stage, including the collapsible done history', () => {
   const html = render(populated());
   for (const id of ['task-0001', 'task-0002', 'task-0003', 'task-0004', 'task-0005', 'task-0006']) {
@@ -183,13 +203,12 @@ test('operation progress deduplicates reconnects and evicts oldest entries', () 
   assert.equal(bounded.operationLog.at(-1)?.sequence, OPERATION_LOG_LIMIT + 2);
 });
 
-test('FLOW renders every projected metric health state without fabricated history', () => {
-  for (const state of ['healthy', 'partial', 'unavailable', 'no-telemetry', 'no-completions'] as const) {
-    const html = renderFlow(toWebBoardSnapshot({ ...makeProjection(), metrics: { ...emptyMetrics, health: { state }, provenance: { ...emptyMetrics.provenance, sampleSize: 7 } } }).metrics);
-    assert.match(html, new RegExp(`statistics ${state}`));
-    assert.match(html, /population n=7/);
-    assert.match(html, /weekly throughput: unavailable \(n=0\) · skip/);
-  }
+test('FLOW keeps the reference two-panel layout when projected history is unavailable', () => {
+  const html = renderFlow(toWebBoardSnapshot({ ...makeProjection(), metrics: emptyMetrics }).metrics);
+  assert.match(html, /CUMULATIVE FLOW/);
+  assert.match(html, /MEDIAN TIME IN STATE/);
+  assert.doesNotMatch(html, /READ/);
+  assert.doesNotMatch(html, /weekly throughput/);
 });
 
 test('FLOW renders populated projected values with their observation counts', () => {
@@ -204,7 +223,9 @@ test('FLOW renders populated projected values with their observation counts', ()
   assert.match(html, /Cumulative flow chart/);
   assert.match(html, /active/);
   assert.match(html, /42m \(n=2\)/);
-  assert.match(html, /weekly throughput: 3 \(n=3\)/);
+  assert.match(html, /cycle time/);
+  assert.match(html, /42m/);
+  assert.match(html, /refined → done, median/);
 });
 
 test('FLOW charts only the transport-projected latest week', () => {
@@ -255,9 +276,18 @@ test('omitted, null and observed-zero running sessions each render as themselves
   const html = render(populated());
   assert.match(html, /0 command sessions/, 'an observed zero renders as zero');
   assert.match(html, /command sessions unknown/, 'an unobserved liveness renders as unknown');
-  assert.match(html, /unattributed sessions unknown/);
   // mistral has no runningSessions key at all: it contributes no session text.
-  assert.equal(html.split('sessions unknown').length - 1, 2, 'only the null cases print unknown');
+  assert.equal(html.split('sessions unknown').length - 1, 1, 'only the agent-pill null case prints unknown');
+  assert.doesNotMatch(html, /unattributed sessions unknown/);
+});
+
+test('the audited reference treatment omits non-reference source and attribution text and retains its scrollbar', () => {
+  const html = render(populated());
+  assert.doesNotMatch(html, /sources: git, stats/);
+  assert.doesNotMatch(html, /unattributed sessions unknown/);
+  const css = browserSources.find((file) => file.name === 'style.css')?.text ?? '';
+  assert.match(css, /::-webkit-scrollbar\s*\{[^}]*width: 9px;[\s\S]*height: 9px;/);
+  assert.match(css, /::-webkit-scrollbar-thumb\s*\{[^}]*border-radius: 5px;/);
 });
 
 test('activity, coordinator recovery evidence, and reduced motion stay truthful', () => {
@@ -297,7 +327,7 @@ test('agent-block durations use human-sized units', () => {
 // Read-only boundary and reference-preserving overflow (SC4, SC5)
 // ---------------------------------------------------------------------------
 
-test('each card renders one enabled projected action, with unavailable controls still guarded', () => {
+test('each card renders at most one enabled projected action', () => {
   const html = render(populated());
   const buttons: string[] = Array.from(html.match(/<button[^>]*>/g) ?? []).filter((button) => !button.includes('aria-controls="flow-metrics"'));
   assert.ok(buttons.length > 0, 'the fixture renders at least one action');
@@ -305,7 +335,7 @@ test('each card renders one enabled projected action, with unavailable controls 
     assert.match(button, /aria-disabled="(?:true|false)"/, `action states availability: ${button}`);
   }
   assert.match(html, /px active task-0001/, "the server's display string is rendered verbatim");
-  assert.match(html, /px integrate task-0001/, 'an unavailable projected action remains a focusable, guarded control');
+  assert.doesNotMatch(html, /aria-label="px integrate task-0001/, 'a card does not fall back to an unavailable lifecycle control');
 });
 
 test('advertised actions dispatch directly without a confirmation dialog', () => {
