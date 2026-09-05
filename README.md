@@ -1,10 +1,13 @@
 # Parallix
 
-**Parallix is a local-first Git workflow CLI for running AI coding agents in isolated, reviewable missions instead of letting one long-lived agent session mutate your main checkout.**
+**Parallix is an agent-agnostic, local-first workflow for running multiple AI coding agents in parallel without giving up Git isolation, review, verification, or operator control.**
 
-It is for engineers who already use Git and terminal-first coding agents such as Claude Code, Codex, Qwen Code, Vibe/Mistral, or Local AI, and want branch isolation, resumable checkpoints, agent-family failover, and a forced review step without building that harness by hand.
+Coding agents become much more useful when you can run several pieces of work at once. But simply starting more agents quickly creates a new bottleneck: they compete for the same working tree, lose context across long runs, hit provider limits, and produce more changes than one engineer can safely supervise and integrate.
 
-It wraps your existing AI coding workflow without replacing it: each mission gets its own branch and worktree, long runs checkpoint to markdown, review is a separate phase, and integration still goes through your repo's own verification command. A human still chooses the mission, launches each phase, reads the output, and decides what lands.
+Parallix is the delivery layer around those agents. It gives every piece of work an isolated mission, lets multiple missions progress concurrently, preserves execution across sessions, separates implementation from review, runs repository-owned verification, and leaves the final integration decision with the human operator.
+
+Parallix is deliberately not tied to one agent vendor or model family. The same mission workflow can use different agent families for drafting, implementation, and review, including commercially hosted agents, locally hosted AI, and custom runtimes.
+
 
 **The first concrete thing you can do** is install the CLI and run one complete mission:
 
@@ -19,27 +22,30 @@ That path shows the whole value: isolate the work on its own branch and worktree
 
 ## Why Parallix?
 
-Running AI coding agents one session at a time hits a ceiling fast:
+Running AI coding agents one session at a time hits a ceiling fast. The main reason to use coding agents is leverage: while one agent is working, another can be working on something else. The useful ceiling is therefore not how fast one agent can type code, but **how much trustworthy work one engineer can keep moving in parallel**. Running AI coding agents one session at a time leaves much of that potential unused. Simply starting several agents, however, creates a new set of coordination problems:
 
-- **One working tree, many agents.** Point two agents at the same checkout and they fight over the index, the branch, and uncommitted files. You either serialize them — one idle while the other runs — or hand-manage `git worktree` and branch names yourself.
+
+- **One working tree, many agents.** Point two agents at the same checkout and they fight over the index, the branch, and uncommitted files. You either serialize them — throwing away the parallelism — or hand-manage `git worktree` and branch names yourself.
 - **Runs die on usage caps.** An agent prints "usage limit reached", the run stops, and you babysit it: restart later or hand-switch to a different model.
 - **Long tasks lose their place.** A crashed or context-exhausted agent leaves you reconstructing what was already done by re-reading diffs.
 - **The author grades its own homework.** The agent that wrote the change also declares it done. Nobody independent looks before it lands.
 
-Parallix is a mission-based development workflow that addresses each of these directly, with the mechanics living in tested code rather than in prompts. It is not another agent or model — it is the operator-owned layer around the agents you already use.
+Parallix is a mission-based development workflow that addresses each of these directly so parallel agents can translate into actual delivery throughput. The mechanics live in tested code rather than in prompts. It is not another agent or model — it is the operator-owned layer around the agents you already use.
 
 ## What it does
 
 Each capability below is tied to a use case in [`docs/use-cases.md`](docs/use-cases.md)
 
 - **Run several AI coding agents on one repo without clobbering each other**. Every mission gets its own `mission/<slug>` branch and its own sibling git worktree (`../<repo>-<slug>`) automatically, so N agents make progress independently and each lands by squash-merge.
+- **Use different agent families — including local AI — in the same workflow**. Parallix owns the mission lifecycle rather than one vendor's agent framework. Drafting, implementation, and review can use different eligible families, and custom/local runtimes participate in the same branch, checkpoint, review, and integration model.
 - **Fail over automatically when an agent hits its usage limit** Per-family limit messages are pattern-detected; the agent family is written to a timed blocklist and the run retries with the next eligible, unblocked family. Only when all are exhausted does it fail loudly. Agent usage limits stop a single session; they don't have to stop the mission.
 - **Resume a long mission deterministically**. Every checkpoint runs the gate, commits a checkpoint document with a literal `Next action:` line, and pushes it — so a later session or a different agent resumes from a written instruction, not a guess.
 - **Force a second, preferentially-different coding agent review before merge** Review is a separate step whose reviewer selection excludes the implementer to prefer a different agent family, and a self-approval is code-blocked at the provider. It falls back to the same family when no other agent is runnable, so this forces a second review *attempt* — it only guarantees a different reviewer when one is availible.
 - **Publish work to a Forgejo reviewer surface without making Forgejo your branch authority**. When the review provider is enabled, Parallix syncs the local baseline to a dedicated `review` ui running locally and opens or updates the PR there; if Forgejo is disabled, the branch/worktree flow still runs without it.
 - **Use a repo-local Graphify knowledge graph for smaller codebase context pulls**. In repositories where the operator has already installed the Graphify skill, the workflow keeps `graphify-out/` isolated per worktree and refreshes it during review/integration, while the installed agent guidance steers codebase questions toward `graphify query` / `path` / `explain` before full reports or raw grep. That reduces token-usage.
 - **Keep your existing verification gate instead of agent self-reporting**. The gate is a configured shell command with a no-op default: declare your existing `make` / `npm` / script command in `workflow.config.json` and it runs verbatim; declare nothing and verification is a documented no-op pass, not an invented gate.
-- **See which agent family actually pays off across every repo one runtime drives** A single operator-owned measurement database (`<PARALLIX_HOME>/parallix.db`) accumulates per-agent usage telemetry across repositories.
+- **Confine supported agent processes with Bubblewrap on Linux**. When Bubblewrap is available, Parallix mounts the host filesystem read-only and selectively grants write access required by the current mission. Implementation gets its mission worktree and required Git state writable; review keeps the worktree read-only. If Bubblewrap is unavailable, Parallix warns explicitly that the agent is running unsandboxed.
+- **Evaluate which agent family actually pays off across every repo one runtime drives** A single operator-owned measurement database (`<PARALLIX_HOME>/parallix.db`) accumulates per-agent usage telemetry across repositories.
 
 ## The core workflow
 
@@ -163,10 +169,10 @@ The durable capability guide and confidence boundaries are in [`docs/use-cases.m
 
 ## What Parallix is not
 
-- **Not a model and not an AI coding agent.** It does not generate code itself. It coordinates the agents and models you already use (Claude Code, Codex, OpenCode/custom, and Vibe/Mistral).
-- **Not an IDE or an editor plugin.** It is a CLI workflow harness around Git and your existing toolchain — there is no UI, no autocomplete, no inline suggestions.
+- **Not a model and not an AI coding agent.** It does not generate code itself. It is agent-agnostic infrastructure around the agents and models you already use, including hosted and local AI.
+- **Not an IDE or an editor plugin.** It is a CLI workflow harness around Git and your existing toolchain. It has a terminal mission board, but no code editor, autocomplete, or inline suggestions.
 - **Not a magic autonomous engineer.** This is a human-in-the-loop workflow. Nothing merges itself, and the safe operating model is that a human decides what to queue, when to run `px active`, how to respond to review findings, and whether `px integrate` should happen at all.
-- **Not a guaranteed throughput multiplier.** The observed gain varies with context. In the data we have, it ranges from roughly **+57%** on strict user-value output to about **+1,280%** on total completed-mission throughput in a later productized setup. Those are both real observations, but they are different mission-output measures and should be labeled that way.
+- **Not a guaranteed throughput multiplier.** The observed gain varies with context. In the data we have, it ranges from roughly **+57%** on strict user-value output to about **an order of magnitute increase** on total completed-mission throughput in a later productized setup. Those are both real observations, but they are different mission-output measures and should be labeled that way.
 
 ## Current status
 
