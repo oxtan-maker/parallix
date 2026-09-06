@@ -4,7 +4,7 @@ title: implement a better claude output visualizer
 status: backlog
 assignee: []
 created_date: '2026-09-06 17:35'
-labels: []
+labels: [user_value]
 dependencies: []
 ---
 
