@@ -14,10 +14,6 @@ fi
 #   docs             — verify documentation completeness
 #   static-analysis  — run ESLint, tsc typecheck, and test-hygiene checks
 #   integrate        — run configured integration-time gates for changed areas
-#   mutation-gate    — parallix-internal-only: diff-scoped mutation-testing ratchet
-#                      for parallix's own development (see docs/adr/adr-mutation-testing.md);
-#                      not a parallix user feature — cannot run on an arbitrary repo.
-#                      pass extra flags through, e.g. `./scripts/verify-local.sh mutation-gate --dry-run`
 #   all              — run the repo's general fast verification suite
 #   workflow         — alias for the general fast verification suite
 #   (other)          — fall back to the general fast verification suite
@@ -316,18 +312,6 @@ for (const gate of relevantGates) {
 NODE
 }
 
-# Parallix-internal-only pre-integrate gate: diff-scoped mutation-testing ratchet.
-# Runs against parallix's own lib/ tree and test suite; cannot execute on an
-# arbitrary user repository (see docs/adr/adr-mutation-testing.md). Invoked
-# directly via `./scripts/verify-local.sh mutation-gate` or through the
-# integration pipeline at config/integration-pipelines.json (order 40).
-gate_mutation() {
-  npm run --silent build
-  # Run the TypeScript source through tsx: the repository is ESM-only and the
-  # gate entry point is authored TypeScript, not a bare `node` entry point.
-  npx --yes tsx src/adapters/verification/mutation-gate.ts "$@"
-}
-
 case "$subcommand" in
   docs)
     # Verify key documentation files exist
@@ -357,11 +341,6 @@ case "$subcommand" in
     ;;
   static-analysis)
     gate_static_analysis || exit 1
-    exit 0
-    ;;
-  mutation-gate)
-    shift || true
-    gate_mutation "$@" || exit 1
     exit 0
     ;;
   integrate)

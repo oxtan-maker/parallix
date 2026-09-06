@@ -523,8 +523,6 @@ test('SC1 reverse: all durable-IO files under src/ are present in the inventory'
     'src/adapters/storage/storage.ts',
     // Package root detection (reads package.json for name, not a durable-state concept)
     'src/adapters/filesystem/package-root.ts',
-    // Mutation scoper (reads files to detect mutations, not a concept)
-    'src/adapters/git/mutation-scoper.ts',
     // Database adapter (SQLite infrastructure)
     'src/adapters/sqlite/database-adapter.ts',
     // Agent launchers — write config files for the agent runtime, not domain state

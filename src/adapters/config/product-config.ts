@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
+import { validateRepositoryGates } from './repository-gates.js';
 
 const REQUIRED_ADAPTER_KEYS = ['tasks', 'missions', 'verification', 'review', 'agents'] as const;
 
@@ -163,6 +164,7 @@ export function validateWorkflowConfig(config: unknown): string[] {
         }
       }
       validateAdapterSections(adapters, issues);
+      issues.push(...validateRepositoryGates(adapters));
     }
   }
   return issues;

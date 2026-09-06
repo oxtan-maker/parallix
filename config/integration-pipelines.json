@@ -13,11 +13,6 @@
       "run_last": false,
       "always": true
     },
-    "mutation": {
-      "command": "./scripts/verify-local.sh mutation-gate",
-      "order": 40,
-      "run_last": false
-    },
     "workflow": {
       "command": "node --import tsx test/e2e-mission-lifecycle.test.ts",
       "order": 50,

@@ -110,7 +110,13 @@ function makePorts(recorder: Recorder, overrides: Record<string, unknown> = {}):
       rebaseBeforeReviewRound: async () => ({ ok: true }),
     },
     gatekeeper: {
-      runGatekeeper: () => { recorder.gatekeeperCalls.push(1); return { ok: true }; },
+      runGatekeeper: () => { recorder.gatekeeperCalls.push(1); return { ok: true } },
+    },
+    repositoryGates: {
+      // Default: an unconfigured checkout runs no gate. Task-2457 tests inject
+      // a configured gate or a failing runner via overrides.
+      loadPhaseGates: () => [],
+      runPhaseGates: async () => ({ ok: true, skipped: true, executed: 0, failedGate: null, error: null }) as any,
     },
     verification: {
       formatVerificationCommand: () => 'npm run typecheck',
@@ -264,6 +270,46 @@ test('handoff use case completes the full workflow over mocked ports', async () 
   assert.deepEqual(recorder.transitions, ['review'], 'backlog task transitions to review');
   assert.deepEqual(recorder.spawned, ['npm run typecheck'], 'declared MISSION.md gate ran once');
   assert.ok(recorder.log.some(line => line.includes('NEL captured: 120 NEL')), 'NEL capture is reported');
+});
+
+// TASK-2457 wiring: the pre-handoff gate is invoked from the handoff checkout
+// and a non-zero exit blocks the active -> review transition.
+test('handoff use case blocks the transition when a pre-handoff gate fails', async () => {
+  const recorder = makeRecorder();
+  let ran = 0;
+  const ports = makePorts(recorder, {
+    repositoryGates: {
+      loadPhaseGates: () => [{ key: 'smoke', command: 'false', order: 0 }],
+      runPhaseGates: async (phase, opts) => {
+        ran++;
+        assert.equal(phase, 'handoff');
+        assert.equal(opts.slug, SLUG);
+        assert.equal(opts.checkoutPath, ROOT);
+        return { ok: false, skipped: false, executed: 1, failedGate: { key: 'smoke', command: 'false', exitCode: 1, stdout: '', stderr: 'fail' }, error: 'pre-handoff gate failed' };
+      },
+    },
+  });
+  const useCase = new HandoffCommandUseCase(ports);
+  const result = await useCase.performHandoff(SLUG, runOptions(recorder));
+
+  assert.equal(result.ok, false);
+  assert.equal(ran, 1, 'pre-handoff gate runs exactly once');
+  assert.deepEqual(recorder.transitions, [], 'mission stays in active, never advances to review');
+});
+
+test('handoff use case proceeds when the pre-handoff gate passes', async () => {
+  const recorder = makeRecorder();
+  const ports = makePorts(recorder, {
+    repositoryGates: {
+      loadPhaseGates: () => [{ key: 'smoke', command: 'true', order: 0 }],
+      runPhaseGates: async () => ({ ok: true, skipped: false, executed: 1, failedGate: null, error: null }),
+    },
+  });
+  const useCase = new HandoffCommandUseCase(ports);
+  const result = await useCase.performHandoff(SLUG, runOptions(recorder));
+
+  assert.equal(result.ok, true, recorder.errors.join('\n'));
+  assert.deepEqual(recorder.transitions, ['review'], 'mission advances to review after a passing gate');
 });
 
 test('handoff use case skips the final verification gate under --no-gate', async () => {

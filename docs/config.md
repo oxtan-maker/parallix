@@ -152,6 +152,62 @@ checkout. The command receives `INTEGRATE_HOOK_SLUG`,
 }
 ```
 
+## Lifecycle gates
+
+`adapters.gates` declares ordered, per-phase lifecycle gate commands. It is
+**disabled by default**: omit the section (or a single phase key) and that
+phase runs no gate. This keeps Parallix usable in any repository ecosystem
+without an implicit Node, npm, tsx, `scripts/verify-local.sh`, or directory
+layout requirement — a repository that does not configure gates selects none.
+
+Each phase is an ordered array of gate objects. A gate object has a required
+string `key` (used in logs and failure reports), a required string `command`
+(an exact runnable shell command with no trailing prose), and an optional
+numeric `order` (default `0`; gates run in ascending order).
+
+```json
+{
+  "adapters": {
+    "gates": {
+      "preHandoff": [
+        { "key": "docs-verification", "command": "./scripts/verify-local.sh docs", "order": 0 }
+      ],
+      "preIntegration": [
+        { "key": "build", "command": "npm run build", "order": 1 },
+        { "key": "integration-suite", "command": "npm run test:integration", "order": 2 }
+      ]
+    }
+  }
+}
+```
+
+Each configured command runs in the phase checkout — the mission's base
+worktree for handoff and integration, the review checkout for the review
+phase — and receives three environment values:
+
+- `PARALLIX_MISSION_SLUG` — the mission slug.
+- `PARALLIX_CHECKOUT_PATH` — the resolved checkout path the command runs in.
+- `PARALLIX_PHASE` — the exact phase identifier: `handoff`, `review`, or
+  `integration`.
+
+A non-zero exit from any configured gate blocks that phase's state transition
+or merge; a successful gate permits the normal transition. Gates are language
+and toolchain neutral: the command may be `cmake --build` and `ctest` for a
+C++ repository, `npm run build` for a Node one, or any other shell command.
+
+`preHandoff` gates run before the handoff (`active` → `review`) transition.
+`preReview` gates run before the review phase. `preIntegration` gates run
+before the integration merge. Configuring one phase does not require
+configuring the others; unconfigured phases remain gated-off.
+
+`requirePreIntegration` opts the repository into a fail-closed integration
+merge. It defaults to `false`, so an unconfigured repository completes the
+integration path with no lifecycle gate. Set `"requirePreIntegration": true`
+to make an empty or missing `preIntegration` list abort the merge instead of
+proceeding — the equivalent of the historical mandatory-gate invariant. It is
+repository configuration, not hardcoded product policy: one repository can
+fail closed while another selects no gate at all.
+
 ## Workflow safeguards
 
 Configuration does not waive the lifecycle checks. Before review, a handoff
@@ -160,11 +216,9 @@ branch, and runs verification plus any declared gates. A failed check keeps the
 mission with the implementer rather than consuming a reviewer round.
 
 Integration requires a recorded reviewer approval, reruns the repository's
-configured integration gates before merging, and verifies the exact resulting
-tree. These built-in lifecycle controls are language-neutral, but they are not
-configurable hooks. The only hook setting today is the post-integration
-maintenance command above; configurable hooks around handoff, review, and
-integration are tracked in [TASK-2457](../backlog/tasks/task-2457%20-%20make-lifecycle-guard-hooks-configurable.md).
+`adapters.gates.preIntegration` commands before merging, and verifies the exact
+resulting tree. These built-in lifecycle controls remain in force alongside the
+configurable gates above.
 
 ## Known configuration gaps
 

@@ -30,7 +30,7 @@ const REQUIRED_PREFIXES = [
   'build/config/', 'build/migrations/', 'build/prompts/', 'build/templates/',
 ];
 const FORBIDDEN_PATHS = new Set([
-  'tsconfig.json', 'tsconfig.test.json', 'eslint.config.mjs', 'stryker.conf.json',
+  'tsconfig.json', 'tsconfig.test.json', 'eslint.config.mjs',
   'workflow.config.json', 'AGENTS.md', 'CLAUDE.md',
 ]);
 const FORBIDDEN_PREFIXES = [

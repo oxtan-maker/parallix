@@ -800,15 +800,6 @@ export const ADR0053_PERSISTENCE_INVENTORY: readonly ADR0053BoundaryEntry[] = [
     cutoverTask: null,
   },
   {
-    id: 'artifacts-mutation-baseline',
-    concept: 'LargeArtifacts',
-    pathType: 'compatibility',
-    fileLocation: 'src/adapters/verification/mutation-gate.ts',
-    operation: 'write',
-    classification: 'generated-artifact',
-    cutoverTask: 'TASK-2322.02',
-  },
-  {
     // `px stats --output <file>` writes a rendered REPORT, not persistence.
     id: 'artifacts-stats-output',
     concept: 'LargeArtifacts',
@@ -877,11 +868,9 @@ export const ADR0053_PERSISTENCE_INVENTORY: readonly ADR0053BoundaryEntry[] = [
  * - `nel-record` ↔ `artifacts-handoff-nel`
  * - `review-state` ↔ retired by the TASK-2322.12 cutover (Review aggregate)
  * - `agent-blocklist` ↔ `agent-block-file-read` / `agent-block-file-write`
- * - `mutation-baseline` ↔ `artifacts-mutation-baseline`
  * - `forgejo-token` ↔ `secrets-forgejo-token`
  * - `workflow-config` ↔ `config-write-setup-review`
  * - `backlog-task` ↔ `task-intake-read-backlog`
- * - `mutation-run-config` ↔ (cache-scratch, not in ADR 0053 scope)
  */
 export const MACHINE_WRITTEN_PATH_INVENTORY: readonly MachineWrittenPathInventoryEntry[] = [
   {
@@ -920,25 +909,11 @@ export const MACHINE_WRITTEN_PATH_INVENTORY: readonly MachineWrittenPathInventor
     persistencePolicy: 'Document workflow; direct text edits remain outside the JSON API.',
   },
   {
-    id: 'mutation-baseline',
-    pathPattern: 'config/mutation-baseline.json',
-    writer: 'lib/commands/mutation-gate.ts#saveBaseline',
-    classification: 'generated-output',
-    persistencePolicy: 'Generated ratchet output; documented direct-write exception, not migrated.',
-  },
-  {
     id: 'coverage-manifest',
     pathPattern: '<tmp>/parallix-temp-root-manifests/<pid>.json',
     writer: 'lib/commands/coverage-gate.ts#flushCoverageManifest',
     classification: 'cache-scratch-data',
     persistencePolicy: 'PID-scoped scratch manifest for SIGKILL orphan recovery; documented direct-write exception.',
-  },
-  {
-    id: 'mutation-run-config',
-    pathPattern: '<tmp>/mutation-gate-*/stryker.conf.json',
-    writer: 'lib/commands/mutation-gate.ts#run',
-    classification: 'cache-scratch-data',
-    persistencePolicy: 'Ephemeral generated mutation configuration; documented direct-write exception.',
   },
   {
     id: 'forgejo-token',

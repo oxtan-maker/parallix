@@ -24,6 +24,7 @@ import * as setupReview from '../../review/setup-review.js';
 import * as gatekeeper from '../../verification/gatekeeper.js';
 import { createVerificationProofIdentity, formatVerificationCommand, isTransientVerificationFailure, readReusableVerificationProof, runVerificationGate, writeReusableVerificationProof } from '../../verification/verification.js';
 import { isForgejoReviewEnabled } from '../../config/product-config.js';
+import { loadPhaseGates, runPhaseGates } from '../../config/repository-gates.js';
 import { rebaseBeforeReviewRound } from '../../review/rebase.js';
 import { computeNELRecord } from '../../git/net-engineering-lines.js';
 import { writeJson } from '../../storage/storage.js';
@@ -94,6 +95,10 @@ export function createHandoffPorts(): HandoffWorkflowPorts {
     },
     gatekeeper: {
       runGatekeeper: (slug, options) => gatekeeper.runGatekeeper(slug, options),
+    },
+    repositoryGates: {
+      loadPhaseGates: (rootDir, phase) => loadPhaseGates(rootDir, phase),
+      runPhaseGates: (phase, options) => runPhaseGates(phase, options),
     },
     verification: {
       formatVerificationCommand: (area, rootDir) => formatVerificationCommand(area, rootDir),

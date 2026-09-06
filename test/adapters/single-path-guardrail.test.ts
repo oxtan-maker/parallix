@@ -47,7 +47,6 @@ const NON_BOARD_CONSUMERS = new Set([
   'src/adapters/backlog/backlog.ts',
   'src/adapters/review/review-state.ts',
   'src/adapters/review/review-loop.ts',
-  'src/adapters/verification/mutation-gate.ts',
   'src/adapters/cli/commands/setup-review.ts',
   'src/adapters/cli/commands/verify.ts',
 ]);

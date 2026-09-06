@@ -42,7 +42,6 @@ import { createReviewCommand } from '../interfaces/cli/review.js';
 import { createHandoffCommand } from '../interfaces/cli/handoff.js';
 import { createStatusCommand } from '../interfaces/cli/status.js';
 import missionStart from '../adapters/cli/mission-start.js';
-import mutationGate from '../adapters/verification/mutation-gate.js';
 import rebase from '../adapters/cli/commands/rebase.js';
 import { createRebaseCommand } from '../interfaces/cli/rebase.js';
 import resolveConflictWorkflow from '../adapters/cli/commands/resolve-conflict.js';
@@ -199,7 +198,6 @@ function createCommandRegistry(rootDir: string): Record<string, Command> {
       }, services.currentWork, () => inferSlug(undefined)))(args, options)),
     'mission-start': missionStart,
     'verify-env': missionStart,
-    'mutation-gate': mutationGate,
     rebase: createRebaseCommand((args, options) => withMissionFactories(missionServicesFn => rebase(args, { ...options, missionServicesFn }))),
     'resolve-conflict': resolveConflict,
     review: (args, options) => withMissionFactories(missionServicesFn =>

@@ -23,6 +23,7 @@ import { formatVerificationCommand, runVerificationGate } from '../verification/
 import { bootstrapReviewSurface } from './setup-review.js';
 import { resolveReviewAdapter } from '../config/product-config.js';
 import { buildMetadataFooter, postWorkflowComment, postWorkflowReview, consumeReviewerArtifacts, resolveArtifactDir } from './review-artifacts.js';
+import { runPhaseGates } from '../config/repository-gates.js';
 import { commitSafeMissionArtifacts } from './review-loop.js';
 import { flagValue, getHandoff, repeatedFlagValues } from './review-cli-flags.js';
 export { REVIEW_FLAGS, REVIEW_VALUE_FLAGS, unknownReviewFlags, flagValue, getHandoff, readTextFlag, repeatedFlagValues, unwrapHandoffModule } from './review-cli-flags.js';
@@ -899,6 +900,25 @@ export async function submitReviewRound(
 
   const worktree = options.worktree || resolveWorktree(slug) || process.cwd();
   const providerEnabled = isReviewProviderEnabledFn(worktree);
+
+  // Repository-configured pre-review gates (TASK-2457). The approve is the
+  // review -> integration transition; a configured gate that exits non-zero
+  // blocks it and leaves the mission in review. Runs from the review checkout
+  // with the mission slug, checkout path, and exact phase in its environment.
+  if (outcome === 'approve') {
+    const preReviewResult = await runPhaseGates('review', {
+      slug,
+      checkoutPath: worktree,
+      log: (/** @type {string} */ msg: string) => log(msg),
+      error: (/** @type {string} */ msg: string) => error(msg),
+    });
+    if (!preReviewResult.ok && !preReviewResult.skipped) {
+      error(fmt.status('FAIL', `Pre-review gate "${preReviewResult.failedGate?.key}" failed for ${slug}: ${preReviewResult.error}`));
+      error(fmt.status('FAIL', `Mission stays in review. Resolve the gate and retry px review ${slug} --submit-review approve.`));
+      exit(1);
+      return;
+    }
+  }
 
   // A verdict is a domain decision, not only a provider comment. Recording it
   // is what returns the mission to the implementer and leaves the round able to

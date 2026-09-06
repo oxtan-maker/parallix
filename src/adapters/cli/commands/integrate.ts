@@ -26,6 +26,7 @@ import { missionId } from '../../../domain/mission.js';
 import { applyReviewerCommand, ConfiguredReviewerEligibility, reviewStatus } from '../../../domain/review.js';
 import { agentFamily } from '../../../domain/agents.js';
 import { detectChangedAreas, isIntendedPayloadAtHead, parseFilesToAreas, orderIntegrationGates, gateMatchesChangedAreas, loadIntegrationConfig, getIntegrationGatePlan, printIntegrationGatePlan, buildIntegrationGateEnv, captureFinalIntegrationTree, resolveIntegrationVerificationWorktree, buildIntegrationVerificationInvocation, executeIntegrationGates } from './integrate-gates.js';
+import { loadPhaseGates, loadRequirePreIntegration, runPhaseGates } from '../../config/repository-gates.js';
 
 const VARIANT_B_AUTOMATION_SUMMARY = 'Variant B automation: Backlog task closeout, worktree-path rewrite, squash commit with hook-enforced validation, Forgejo sync-merged, and mission worktree cleanup.';
 
@@ -302,41 +303,64 @@ async function integrate(args: string[], options: {
         throw new IntegrationAbort();
       }
 
-      if (!noIntegrationGates) {
-        const verification = buildIntegrationVerificationInvocation(slug, { baseWorktree });
-        const finalTree = captureFinalIntegrationTree(verification.cwd);
+      if (noIntegrationGates) {
+        fmt.log.info('Integration gates skipped via --no-integration-gates flag');
+      } else {
+        // The integration checkout is the mission's own worktree. Verify the
+        // exact resulting tree is finalized before any gate runs, then run the
+        // repository's configured pre-integration gates from that checkout.
+        // An unconfigured repository runs no gate; a gate that exits non-zero
+        // aborts before the merge. This replaces the previous hardcoded
+        // `./scripts/verify-local.sh integrate` invocation so the live integration
+        // gate carries no Node/npm/tsx/verify-local.sh/Parallix-layout assumption
+        // (TASK-2457).
+        const checkout = resolveIntegrationVerificationWorktree(slug, { baseWorktree });
+        const finalTree = captureFinalIntegrationTree(checkout);
         if (!finalTree.ok) {
           fmt.log.fail(`Integration gates cannot start for ${slug}: ${finalTree.error}`);
           throw new IntegrationAbort();
         }
-        const env = buildIntegrationGateEnv(slug, { dryRun, baseBranch, baseWorktree: finalTree.rootDir, realAgent, realAgentModel });
-        
-        if (dryRun) {
-          fmt.log.info('Running integration gates (dry-run)...');
-        } else {
-          fmt.log.info('Running integration gates...');
-        }
-        
-        // Gate commands are project commands, not interactive login commands.
-        // A login shell can replace PATH or source a broken user profile.
-        fmt.log.info(`Integration gate target: slug=${slug} root=${finalTree.rootDir} commit=${finalTree.commit} tree=${finalTree.tree}`);
-        const result = child_process.spawnSync('bash', ['-c', verification.command], {
-          cwd: verification.cwd,
-          env,
-          stdio: 'inherit'
+        const gates = loadPhaseGates(checkout, 'preIntegration');
+        // The mandatory-gate invariant is repository-configured, not hardcoded
+        // product policy (task-2457 F11): a repository that opts in via
+        // adapters.gates.requirePreIntegration: true fails closed on an empty gate
+        // list; an unconfigured repository completes the integration path with
+        // no lifecycle gate. --no-integration-gates is rejected outside the test
+        // bypass, so the message below never points at it (task-2457 F12).
+        const requirePreIntegration = loadRequirePreIntegration(checkout);
+        fmt.log.info(`Integration gate target: slug=${slug} root=${finalTree.rootDir} commit=${finalTree.commit} tree=${finalTree.tree} requirePreIntegration=${requirePreIntegration}`);
+        const result = await runPhaseGates('integration', {
+          slug,
+          checkoutPath: checkout,
+          gates,
+          log: fmt.log.plain,
+          error: fmt.log.fail,
+          // Plan-only dry run executes nothing; self-development agent selection
+          // reaches the gate environment via buildGateEnv (F4 / TASK-2269).
+          dryRun,
+          realAgent,
+          realAgentModel,
         });
-        
-        if (result.status !== 0) {
-          fmt.log.fail(`\nIntegration gates failed for ${slug} (root=${finalTree.rootDir}, commit=${finalTree.commit}, tree=${finalTree.tree}) with exit code ${result.status}`);
+        if (dryRun) {
+          fmt.log.info(`Integration gate plan resolved for ${slug}: ${gates.length} gate(s) configured; nothing executed.`);
+        } else if (result.skipped) {
+          if (requirePreIntegration) {
+            // An unconfigured or self-edited branch that removes
+            // adapters.gates.preIntegration must fail closed here rather than
+            // merge with "All integration gates passed." (TASK-2300 / F1). The
+            // invariant is opt-in via adapters.gates.requirePreIntegration.
+            fmt.log.fail(`\nIntegration gates are mandatory for ${slug}: no preIntegration gates configured in workflow.config.json, but adapters.gates.requirePreIntegration is set. Configure adapters.gates.preIntegration to run gates.`);
+            fmt.log.fail('Aborting before merge.');
+            throw new IntegrationAbort();
+          }
+          fmt.log.info(`Integration gates for ${slug}: none configured and adapters.gates.requirePreIntegration is not set — proceeding without a lifecycle gate.`);
+        } else if (!result.ok) {
+          fmt.log.fail(`\nIntegration gates failed for ${slug} (root=${finalTree.rootDir}) — ${result.error}`);
           fmt.log.fail('Aborting before merge.');
           throw new IntegrationAbort();
-        }
-        
-        if (!dryRun) {
+        } else {
           fmt.log.pass('All integration gates passed.');
         }
-      } else {
-        fmt.log.info('Integration gates skipped via --no-integration-gates flag');
       }
 
       if (dryRun) {

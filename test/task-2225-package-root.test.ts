@@ -22,7 +22,6 @@ const active = mockModule<typeof import('../src/adapters/cli/commands/active.js'
 const stateMap = mockModule<typeof import('../src/adapters/config/state-map.js')>('../src/adapters/config/state-map.js', import.meta.url);
 const agentConfig = mockModule<typeof import('../src/adapters/agents/agent-config.js')>('../src/adapters/agents/agent-config.js', import.meta.url);
 const runtimeMatrix = mockModule<typeof import('../src/adapters/agents/runtime-matrix.js')>('../src/adapters/agents/runtime-matrix.js', import.meta.url);
-const mutationGate = mockModule<typeof import('../src/adapters/verification/mutation-gate.js')>('../src/adapters/verification/mutation-gate.js', import.meta.url);
 const stats = mockModule<typeof import('../src/adapters/cli/commands/stats.js')>('../src/adapters/cli/commands/stats.js', import.meta.url);
 const reviewLoop = mockModule<typeof import('../src/adapters/review/review-loop.js')>('../src/adapters/review/review-loop.js', import.meta.url);
 await installModuleMocks();
@@ -114,7 +113,6 @@ const MIGRATED_ASSETS = [
   { rel: 'config/agents.json', mustExist: true },                // agent-config.ts, runtime-matrix.ts
   { rel: 'config/state-map.json', mustExist: true },             // state-map.ts
   { rel: 'scripts/bootstrap.sh', mustExist: false },             // review-loop.ts
-  { rel: 'config/mutation-baseline.json', mustExist: false },    // mutation-gate.ts
 ];
 
 test('every migrated asset resolves under the package root from a temp CWD', () => {
@@ -147,10 +145,6 @@ test('every migrated call site resolves its package asset from a temp CWD', asyn
     assert.deepEqual(agentConfig.readAgentConfig().steps, JSON.parse(fs.readFileSync(path.join(ROOT, 'config', 'agents.json'), 'utf8')).steps);
     assert.equal(runtimeMatrix.buildAutonomousReviewMatrix().configPath, path.join(ROOT, 'config', 'agents.json'));
 
-    // These leaves are intentionally absent in the current source layout. The
-    // exported baseline path still proves its real call site anchors to the
-    // package, not the temporary CWD.
-    assert.equal(mutationGate.DEFAULT_BASELINE_PATH, path.join(ROOT, 'config', 'mutation-baseline.json'));
     // TASK-2322.08: stats.ts no longer resolves any shipped package asset —
     // `data/stats.seed.csv` and the whole stats-path resolver chain are gone.
 // @ts-expect-error -- TASK-2328: partial test double after ESM seam migration
