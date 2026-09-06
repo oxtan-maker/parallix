@@ -101,7 +101,6 @@ because they are infrastructure, not domain-boundary readers or writers
 - `src/adapters/storage/storage.ts` — defines the persistence API itself
 - `src/adapters/architecture/boundary-guards.ts` — internal guard helper
 - `src/adapters/filesystem/package-root.ts` — reads `package.json` for name resolution
-- `src/adapters/git/mutation-scoper.ts` — reads files to detect mutations
 - `src/adapters/sqlite/database-adapter.ts` — SQLite infrastructure
 - `src/adapters/agents/codex.ts`, `vibe.ts` — write agent runtime config
 - `src/adapters/agents/opencode-export.ts` — writes temporary scratch files

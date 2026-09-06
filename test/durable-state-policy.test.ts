@@ -18,8 +18,6 @@ const RUNTIME_LIB = path.join(ROOT, 'src');
 const DIRECT_JSON_EXCEPTIONS = new Map([
   ['src/adapters/verification/coverage-gate.ts:coverageManifestPath()', 'coverage-manifest'],
   ['src/adapters/verification/temp-root-registry.ts:manifestPath', 'coverage-manifest'],
-  ['src/adapters/verification/mutation-gate.ts:baselinePath', 'mutation-baseline'],
-  ['src/adapters/verification/mutation-gate.ts:configPath', 'mutation-run-config'],
   ['src/adapters/review/setup-review-config.ts:configPath', 'workflow-config'],
   ['src/adapters/agents/qwen.ts:targetSettings', 'qwen-settings'],
 ]);
@@ -63,7 +61,7 @@ function directJsonWritesInLib(libDir) {
 test('durable-state inventory assigns every required path exactly one recognized class', () => {
   const classes = new Set(['durable-state', 'user-authored-content', 'generated-output', 'cache-scratch-data', 'secrets-configuration']);
   const ids = new Set(MACHINE_WRITTEN_PATH_INVENTORY.map(entry => entry.id));
-  for (const required of ['session-metadata', 'nel-record', 'mutation-run-config', 'forgejo-token']) {
+  for (const required of ['session-metadata', 'nel-record', 'forgejo-token']) {
     assert.ok(ids.has(required), `missing inventory row: ${required}`);
   }
   for (const entry of MACHINE_WRITTEN_PATH_INVENTORY) {

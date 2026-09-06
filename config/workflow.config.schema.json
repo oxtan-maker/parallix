@@ -60,9 +60,59 @@
             "defaultArea": { "type": "string", "description": "Default verification area." }
           }
         },
+        "gates": {
+          "type": "object",
+          "description": "Ordered, per-phase lifecycle gate commands. Disabled by default: omit this section (or a phase key) to run no lifecycle gate for that phase. Each phase is an ordered array of gate objects; the array order is the execution order. A gate object has a required string `key`, a required string `command` (a runnable shell command, no trailing prose), and an optional numeric `order` (default 0, ascending). Each configured command runs in the phase checkout and receives PARALLIX_MISSION_SLUG, PARALLIX_CHECKOUT_PATH, and PARALLIX_PHASE in its environment; a non-zero exit blocks that phase's state transition or merge.",
+          "additionalProperties": false,
+          "properties": {
+            "requirePreIntegration": {
+              "type": "boolean",
+              "description": "When true, the integration merge boundary fails closed if no adapters.gates.preIntegration gates are configured. Defaults to false so an unconfigured repository completes the integration path with no lifecycle gate (mission task-2457 success criterion 1). Set true in a repository that wants the TASK-2300 mandatory-gate invariant."
+            },
+            "preHandoff": {
+              "type": "array",
+              "description": "Ordered gates run before the handoff (active -> review) transition.",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "key": { "type": "string", "description": "Stable identifier for the gate, used in logs and failure reports." },
+                  "command": { "type": "string", "description": "Exact runnable shell command. No trailing prose or outcome language." },
+                  "order": { "type": "number", "description": "Sort key; gates run in ascending order. Defaults to 0." }
+                }
+              }
+            },
+            "preReview": {
+              "type": "array",
+              "description": "Ordered gates run before the review phase (reviewer actions and the review -> integration approval).",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "key": { "type": "string" },
+                  "command": { "type": "string" },
+                  "order": { "type": "number" }
+                }
+              }
+            },
+            "preIntegration": {
+              "type": "array",
+              "description": "Ordered gates run before the integration merge (review -> integration approval path and the merge boundary).",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "key": { "type": "string" },
+                  "command": { "type": "string" },
+                  "order": { "type": "number" }
+                }
+              }
+            }
+          }
+        },
         "integrate": {
           "type": "object",
-          "description": "Optional post-integrate hook. When postIntegrateCommand is unset, `px integrate` behaves exactly as it does without this section.",
+          "description": "Optional post-integrate hook. When postIntegrateCommand is unset, `px integrate` behaves exactly as it does without this section.", 
           "additionalProperties": true,
           "properties": {
             "postIntegrateCommand": {

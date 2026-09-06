@@ -1052,19 +1052,19 @@ test('orderIntegrationGates skips gates with enabled:false (task-1419)', () => {
   assert.ok(!ordered.some(g => g.key === 'build'), 'disabled build gate should be omitted');
 });
 
-test('orderIntegrationGates includes legacy gates without enabled metadata (task-1419)', () => {
+test('orderIntegrationGates includes gates without enabled metadata (task-1419)', () => {
   const config = {
     gates: {
       lib: { command: './scripts/verify-local.sh static-analysis', order: 1, run_last: false },
-      mutation: { command: './scripts/verify-local.sh mutation-gate', order: 40, run_last: false }
+      legacy: { command: 'echo legacy', order: 40, run_last: false }
     }
   };
 
   const ordered = orderIntegrationGates(config);
 
-  assert.equal(ordered.length, 2, 'legacy gates without enabled should be treated as enabled');
+  assert.equal(ordered.length, 2, 'gates without enabled should be treated as enabled');
   assert.equal(ordered[0].key, 'lib');
-  assert.equal(ordered[1].key, 'mutation');
+  assert.equal(ordered[1].key, 'legacy');
 });
 
 test('orderIntegrationGates carries areas metadata through to gate objects (task-1419)', () => {
@@ -1211,7 +1211,6 @@ test('getIntegrationGatePlan preserves run_last ordering with build gate inserte
     gates: {
       lib: { command: './scripts/verify-local.sh static-analysis', order: 1, run_last: false },
       build: { command: 'npm run build:cjs', order: 2, run_last: false, areas: ['lib', 'workflow'] },
-      mutation: { command: './scripts/verify-local.sh mutation-gate', order: 40, run_last: false },
       workflow: { command: 'node --import tsx test/e2e-mission-lifecycle.test.ts', order: 50, run_last: true },
       'custom-agent-smoke': { command: 'node --import tsx test/e2e-real-agent-smoke.test.ts', order: 51, run_last: true }
     }
@@ -1325,11 +1324,10 @@ test('repo config declares build gate with correct metadata (task-1419)', () => 
   assert.deepEqual(buildGate.areas, ['lib', 'workflow'], 'build gate areas should be lib and workflow');
 });
 
-test('repo config preserves existing gate orders (task-1419)', () => {
+test('repo config preserves remaining gate orders (task-1419)', () => {
   const configPath = path.join(import.meta.dirname, '..', 'config', 'integration-pipelines.json');
   const config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
 
-  assert.equal(config.gates.mutation.order, 40, 'mutation gate remains order 40');
   assert.equal(config.gates.workflow.order, 50, 'workflow gate remains order 50');
   assert.equal(config.gates.workflow.run_last, true, 'workflow gate remains run_last');
   assert.equal(config.gates['custom-agent-smoke'].order, 51, 'custom-agent-smoke gate remains order 51');

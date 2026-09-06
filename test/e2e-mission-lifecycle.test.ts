@@ -629,14 +629,13 @@ function runScenario({ launchFromFeatureBranch = false, integrate = true, postIn
     runGit(worktree, ['commit', '-m', `test(${slug}): finalize review events`]);
 
     if (failIntegrationGate) {
-      // px integrate's own gate step reads adapters.verification.command from the
-      // mission worktree (not the base checkout), so flipping it to a failing
-      // command only here — after handoff/review already used the passing base
-      // config — makes integrate abort at its gate step, before any success seam
-      // that could invoke the post-integrate hook.
+      // px integrate reads repository gates from the mission worktree, so adding
+      // a failing gate only here — after handoff/review used the passing base
+      // config — makes integrate abort before any success seam can invoke the
+      // post-integrate hook.
       const worktreeConfigPath = path.join(worktree, 'workflow.config.json');
       const worktreeConfig = JSON.parse(fs.readFileSync(worktreeConfigPath, 'utf8'));
-      worktreeConfig.adapters.verification.command = 'exit 7';
+      worktreeConfig.adapters.gates = { preIntegration: [{ key: 'failing-gate', command: 'exit 7' }] };
       fs.writeFileSync(worktreeConfigPath, JSON.stringify(worktreeConfig, null, 2));
       runGit(worktree, ['add', '--', 'workflow.config.json']);
       runGit(worktree, ['commit', '-m', `test(${slug}): install failing integration gate`]);

@@ -16,6 +16,16 @@
     },
     "verification": { "command": "./scripts/verify-local.sh {{area}}", "defaultArea": "all" },
     "review": { "provider": "forgejo", "baseUrl": "http://localhost:3300", "remote": "review", "repo": "magnus/parallix" },
-    "integrate": { "postIntegrateCommand": "./scripts/refresh-global-px.sh" }
+    "integrate": { "postIntegrateCommand": "./scripts/refresh-global-px.sh" },
+    "gates": {
+      "requirePreIntegration": true,
+      "preIntegration": [
+        { "key": "build", "command": "npm run build", "order": 1 },
+        { "key": "verification", "command": "./scripts/verify-local.sh static-analysis", "order": 2 },
+        { "key": "integration-suite", "command": "npm run test:integration", "order": 3 },
+        { "key": "workflow", "command": "node --import tsx test/e2e-mission-lifecycle.test.ts", "order": 4 },
+        { "key": "agent-smoke", "command": "node --import tsx test/e2e-real-agent-smoke.test.ts", "order": 5 }
+      ]
+    }
   }
 }

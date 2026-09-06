@@ -129,6 +129,26 @@ export interface HandoffVerificationPort {
   isTransientVerificationFailure(_output: { stdout?: unknown; stderr?: unknown }): boolean;
 }
 
+export interface HandoffRepositoryGatesPort {
+  loadPhaseGates(_rootDir: string, _phase: 'preHandoff' | 'preReview' | 'preIntegration'): Array<{ key: string; command: string; order: number }>;
+  runPhaseGates(
+    _phase: 'handoff' | 'review' | 'integration',
+    _options: {
+      slug: string;
+      checkoutPath: string;
+      gates?: Array<{ key: string; command: string; order: number }>;
+      log?: Function;
+      error?: Function;
+    },
+  ): Promise<{
+    ok: boolean;
+    skipped: boolean;
+    executed: number;
+    failedGate: { key: string; command: string; exitCode: number | null; stdout: string; stderr: string } | null;
+    error: string | null;
+  }>;
+}
+
 export interface HandoffNelComputationPort {
   computeNELRecord(_range: string, _options: { cwd: string }): { nel: number; bucket: { label: string } };
 }
@@ -192,6 +212,7 @@ export interface HandoffWorkflowPorts {
   readonly rebase: HandoffRebasePort;
   readonly gatekeeper: HandoffGatekeeperPort;
   readonly verification: HandoffVerificationPort;
+  readonly repositoryGates: HandoffRepositoryGatesPort;
   readonly nel: HandoffNelComputationPort;
   readonly documentWriter: HandoffDocumentWriterPort;
   readonly productConfig: HandoffProductConfigPort;

@@ -71,8 +71,6 @@ export type LegacyInventoryId =
   | 'agent-blocklist'
   | 'backlog-task'
   | 'coverage-manifest'
-  | 'mutation-baseline'
-  | 'mutation-run-config'
   | 'forgejo-token'
   | 'workflow-config'
   | 'qwen-settings';
@@ -84,8 +82,6 @@ export const LEGACY_INVENTORY_AUTHORITY = {
   'review-state': MISSION_FIELD_AUTHORITY.review,
   'agent-blocklist': OPERATOR_CONCERN_AUTHORITY.agentBlocks,
   'backlog-task': MISSION_FIELD_AUTHORITY.status,
-  'mutation-baseline': targetSource,
-  'mutation-run-config': { owner: 'operator-local', role: 'cache' } as const,
   'coverage-manifest': { owner: 'operator-local', role: 'cache' } as const,
   'forgejo-token': localSource,
   'workflow-config': targetSource,

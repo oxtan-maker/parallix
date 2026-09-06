@@ -199,6 +199,70 @@ test('submitReviewRound exits on invalid outcome', async () => {
   assert.equal(exited, true);
 });
 
+// TASK-2457 wiring: a failing pre-review gate blocks the approve (review ->
+// integration) transition. The checkout declares one failing gate through its
+// own workflow.config.json; the real runner executes it and the approve exits
+// non-zero without recording an approved disposition or promoting the task.
+test('submitReviewRound blocks approve when a pre-review gate fails', async () => {
+  const checkout = fs.mkdtempSync(path.join(os.tmpdir(), 'px-review-gate-'));
+  try {
+    fs.writeFileSync(
+      path.join(checkout, 'workflow.config.json'),
+      JSON.stringify({ adapters: { gates: { preReview: [{ key: 'smoke', command: 'exit 3', order: 0 }] } } }),
+    );
+    let exited = 0;
+    let disp = null;
+    let transitioned = null;
+    const state = { round: 1, phase: 'reviewing', reviewer: 'rev', implementer: 'impl', transitionTo: () => {} };
+    await submitReviewRound(mockSlug, 'approve', 'msg', {
+      worktree: checkout,
+      isForgejoReviewEnabledFn: () => true,
+      readReviewStateFn: () => state,
+      writeReviewStateFn: (s, st) => { disp = st.disposition; },
+      transitionTaskFn: (slug, status) => { transitioned = { slug, status }; return true; },
+      readTokenFn: () => 'token',
+      postReviewFn: () => ({ ok: true }),
+      log: () => {},
+      error: () => {},
+      exit: () => { exited = 1; },
+    });
+    assert.equal(exited, 1, 'approve exits non-zero when the pre-review gate fails');
+    assert.equal(disp, null, 'no approved disposition is recorded on a blocked gate');
+    assert.equal(transitioned, null, 'backlog task is not promoted to approved');
+  } finally {
+    fs.rmSync(checkout, { recursive: true, force: true });
+  }
+});
+
+// TASK-2457 wiring: a passing pre-review gate permits the approve to complete.
+test('submitReviewRound permits approve when the pre-review gate passes', async () => {
+  const checkout = fs.mkdtempSync(path.join(os.tmpdir(), 'px-review-gate-'));
+  try {
+    fs.writeFileSync(
+      path.join(checkout, 'workflow.config.json'),
+      JSON.stringify({ adapters: { gates: { preReview: [{ key: 'smoke', command: 'true', order: 0 }] } } }),
+    );
+    let disp = null;
+    let transitioned = null;
+    const state = { round: 1, phase: 'reviewing', reviewer: 'rev', implementer: 'impl', transitionTo: () => {} };
+    await submitReviewRound(mockSlug, 'approve', 'msg', {
+      worktree: checkout,
+      isForgejoReviewEnabledFn: () => true,
+      readReviewStateFn: () => state,
+      writeReviewStateFn: (s, st) => { disp = st.disposition; },
+      transitionTaskFn: (slug, status) => { transitioned = { slug, status }; return true; },
+      readTokenFn: () => 'token',
+      postReviewFn: () => ({ ok: true }),
+      log: () => {},
+      error: () => {},
+    });
+    assert.equal(disp, 'APPROVED', 'a passing pre-review gate permits the approve');
+    assert.deepEqual(transitioned, { slug: mockSlug, status: 'approved' });
+  } finally {
+    fs.rmSync(checkout, { recursive: true, force: true });
+  }
+});
+
 test('submitReviewRound handles approve for forgejo', async () => {
   let disp = null;
   let transitioned = null;

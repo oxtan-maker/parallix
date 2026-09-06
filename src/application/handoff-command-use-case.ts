@@ -653,6 +653,25 @@ export class HandoffCommandUseCase {
     const rootDir = verification.rootDir;
     const missionDirPath = missionDir;
 
+    // Step -1: Repository-configured pre-handoff gates (TASK-2457). These run
+    // from the handoff checkout before any lifecycle transition. An unconfigured
+    // repository runs no gate; a configured gate that exits non-zero blocks
+    // handoff and leaves the task in its current lane (active), never advancing
+    // to review.
+    if (!skipGate) {
+      const preHandoffResult = await ports.repositoryGates.runPhaseGates('handoff', {
+        slug,
+        checkoutPath: rootDir,
+        log: (/** @type {string} */ msg: string) => log(msg),
+        error: (/** @type {string} */ msg: string) => error(msg),
+      });
+      if (!preHandoffResult.ok && !preHandoffResult.skipped) {
+        const msg = `Pre-handoff gate "${preHandoffResult.failedGate?.key}" failed for ${fmt.slug(slug)}: ${preHandoffResult.error}`;
+        error(msg);
+        return { ok: false, error: msg, reason: 'gate-failed' };
+      }
+    }
+
     // Step 0: Resolve Backlog task for identity derivation
     const taskResolution = ports.backlog.resolveTaskFile(slug, rootDir);
     if (!taskResolution.ok) {
