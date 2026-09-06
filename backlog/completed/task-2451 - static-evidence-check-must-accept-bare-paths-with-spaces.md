@@ -1,8 +1,8 @@
 ---
 id: TASK-2451
 title: static evidence check must accept bare repo paths with spaces
-status: backlog
-assignee: [custom]
+status: done
+assignee: [codex]
 created_date: '2026-09-01 20:15'
 labels:
   - ai_sdlc
