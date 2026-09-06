@@ -437,6 +437,141 @@ test('validateWorkflowConfig rejects invalid maxConcurrentCustom values', () => 
   }
 });
 
+test('validateWorkflowConfig accepts forgejo, none, and null review providers', () => {
+  for (const provider of ['forgejo', 'none', null]) {
+    assert.deepEqual(
+      validateWorkflowConfig({ adapters: { review: { provider } } }),
+      []
+    );
+  }
+});
+
+test('validateWorkflowConfig rejects an unsupported review provider enum value', () => {
+  assert.deepEqual(
+    validateWorkflowConfig({ adapters: { review: { provider: 'unsupported' } } }),
+    ['adapters.review.provider must be one of "forgejo", "none", or null']
+  );
+});
+
+test('validateWorkflowConfig rejects a non-string, non-null review provider type', () => {
+  assert.deepEqual(
+    validateWorkflowConfig({ adapters: { review: { provider: 1 } } }),
+    ['adapters.review.provider must be one of "forgejo", "none", or null']
+  );
+});
+
+test('validateWorkflowConfig accepts a string or object tasks.storage', () => {
+  assert.deepEqual(validateWorkflowConfig({ adapters: { tasks: { storage: 'backlog' } } }), []);
+  assert.deepEqual(
+    validateWorkflowConfig({ adapters: { tasks: { storage: { tasksDir: 'a', completedDir: 'b' } } } }),
+    []
+  );
+});
+
+test('validateWorkflowConfig accepts a tasks.storage object with schema-open extra keys', () => {
+  // The schema declares the storage object with additionalProperties:true, so a
+  // schema-valid config with an extra string-valued key stays valid (task-2455.03 F1).
+  assert.deepEqual(
+    validateWorkflowConfig({
+      adapters: { tasks: { storage: { tasksDir: 'a', completedDir: 'b', draftsDir: 'c' } } },
+    }),
+    []
+  );
+});
+
+test('validateWorkflowConfig rejects a non-string, non-object tasks.storage', () => {
+  assert.deepEqual(
+    validateWorkflowConfig({ adapters: { tasks: { storage: 42 } } }),
+    ['adapters.tasks.storage must be a string or an object of string values']
+  );
+});
+
+test('validateWorkflowConfig rejects a tasks.storage object with a non-string value', () => {
+  assert.deepEqual(
+    validateWorkflowConfig({
+      adapters: { tasks: { storage: { tasksDir: 'a', completedDir: 5 } } },
+    }),
+    ['adapters.tasks.storage must be a string or an object of string values']
+  );
+});
+
+test('validateWorkflowConfig rejects a non-string tasks.provider', () => {
+  assert.deepEqual(
+    validateWorkflowConfig({ adapters: { tasks: { provider: 5 } } }),
+    ['adapters.tasks.provider must be a string']
+  );
+});
+
+test('validateWorkflowConfig rejects a non-string mission field', () => {
+  assert.deepEqual(
+    validateWorkflowConfig({ adapters: { missions: { branchPrefix: 7 } } }),
+    ['adapters.missions.branchPrefix must be a string']
+  );
+});
+
+test('validateWorkflowConfig rejects a non-string review field', () => {
+  assert.deepEqual(
+    validateWorkflowConfig({ adapters: { review: { remote: 7 } } }),
+    ['adapters.review.remote must be a string']
+  );
+});
+
+test('validateWorkflowConfig accepts string-valued agent models and rejects non-string values', () => {
+  assert.deepEqual(
+    validateWorkflowConfig({ adapters: { agents: { models: { codex: 'gpt-5.4-mini' } } } }),
+    []
+  );
+  assert.deepEqual(
+    validateWorkflowConfig({ adapters: { agents: { models: { codex: { name: 'x' } } } } }),
+    ['adapters.agents.models.codex must be a string']
+  );
+});
+
+test('validateWorkflowConfig enforces the closed, enum-restricted runners.custom', () => {
+  assert.deepEqual(validateWorkflowConfig({ adapters: { agents: { runners: {} } } }), []);
+  assert.deepEqual(
+    validateWorkflowConfig({ adapters: { agents: { runners: { custom: 'opencode' } } } }),
+    []
+  );
+  assert.deepEqual(
+    validateWorkflowConfig({ adapters: { agents: { runners: { custom: 'pi' } } } }),
+    []
+  );
+  assert.deepEqual(
+    validateWorkflowConfig({ adapters: { agents: { runners: { custom: 'claude' } } } }),
+    ['adapters.agents.runners.custom must be one of "opencode", "pi"']
+  );
+  assert.deepEqual(
+    validateWorkflowConfig({ adapters: { agents: { runners: { claude: 'x' } } } }),
+    ['adapters.agents.runners may only contain "custom"']
+  );
+});
+
+test('validateWorkflowConfig enforces the closed, nullable non-negative subagents.maxParallel', () => {
+  assert.deepEqual(validateWorkflowConfig({ adapters: { agents: { subagents: {} } } }), []);
+  assert.deepEqual(validateWorkflowConfig({ adapters: { agents: { subagents: { maxParallel: 0 } } } }), []);
+  assert.deepEqual(validateWorkflowConfig({ adapters: { agents: { subagents: { maxParallel: null } } } }), []);
+  assert.deepEqual(
+    validateWorkflowConfig({ adapters: { agents: { subagents: { maxParallel: -1 } } } }),
+    ['adapters.agents.subagents.maxParallel must be a non-negative integer or null']
+  );
+  assert.deepEqual(
+    validateWorkflowConfig({ adapters: { agents: { subagents: { maxParallel: 1.5 } } } }),
+    ['adapters.agents.subagents.maxParallel must be a non-negative integer or null']
+  );
+  assert.deepEqual(
+    validateWorkflowConfig({ adapters: { agents: { subagents: { limit: 2 } } } }),
+    ['adapters.agents.subagents may only contain "maxParallel"']
+  );
+});
+
+test('validateWorkflowConfig preserves allowed unknown properties', () => {
+  assert.deepEqual(
+    validateWorkflowConfig({ unknownTop: true, adapters: { tasks: { anything: 1 } } }),
+    []
+  );
+});
+
 // ---------- resolveAgentModel ----------
 
 function withConfigDir(config, fn) {

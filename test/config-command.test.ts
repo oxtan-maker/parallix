@@ -52,6 +52,17 @@ test('config reports structurally invalid overrides as fallback defaults and exi
   });
 });
 
+test('config rejects an unsupported review provider enum value as fallback defaults and exits non-zero', async () => {
+  await withTempDir(async root => {
+    fs.writeFileSync(path.join(root, 'workflow.config.json'), JSON.stringify({ adapters: { review: { provider: 'unsupported' } } }));
+    const result = await runConfig(root);
+    assert.equal(result.exitCode, 1);
+    assert.match(result.errors.join('\n'), /structurally invalid/);
+    assert.match(result.errors.join('\n'), /provider/);
+    assert.doesNotMatch(result.logs.join('\n'), /built-in defaults \+/);
+  });
+});
+
 test('config leaves a non-git standalone directory unchanged', () => {
   return withTempDir(async root => {
     fs.mkdirSync(path.join(root, 'workflow'));
