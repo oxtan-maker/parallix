@@ -4,7 +4,7 @@ title: custom prompts
 status: backlog
 assignee: []
 created_date: '2026-09-06 17:37'
-labels: []
+labels: [ai_sdlc]
 dependencies: []
 ---
 
