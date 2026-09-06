@@ -83,6 +83,15 @@ export function weeklyDecisionWindows(today: string | Date = new Date()): Decisi
   };
 }
 
+/** Every UTC calendar day in the window, first to last, both ends inclusive. */
+export function decisionWindowDays(window: DecisionWindow): readonly string[] {
+  const days: string[] = [];
+  for (let day = window.startDate; day <= window.endDate; day = shiftDays(day, 1)) {
+    days.push(day);
+  }
+  return days;
+}
+
 /**
  * Whether a completion instant falls inside the window.
  *

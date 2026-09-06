@@ -1,10 +1,14 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import * as fs from 'node:fs';
+import * as path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 import {
   buildMetrics,
   bottleneckNarrative,
   cumulativeFlowByStateSeries,
+  weeklyCumulativeFlowByStateSeries,
   medianAgeByLaneSeries,
   medianCycleTimeByStateSeries,
   cumulativeFlowSeries,
@@ -17,6 +21,7 @@ import {
 import { agentFamily } from '../src/domain/agents.js';
 import { missionId } from '../src/domain/mission.js';
 import { missionOutcome } from './fixtures/mission-outcome.js';
+import { weeklyDecisionWindows } from '../src/application/services/decision-window.js';
 
 const id1 = missionId('task-0001');
 const id2 = missionId('task-0002');
@@ -325,4 +330,110 @@ test('wip fallback: null returns initial state counts when transitions are empty
   const series = wipSeries(new Map([[id1, 'backlog'], [id2, 'active']]), [], [now]);
   assert.equal(series.missingHistoryFallback, 'null');
   assert.equal(series.series[0]?.value, 2);
+});
+
+// ---------------------------------------------------------------------------
+// TASK-2459: the weekly cumulative-flow series
+//
+// One rolling seven-day UTC window, owned by the projection. The week starts
+// from the open work the boundary held, never from the completions of earlier
+// weeks, and only recorded transitions move a mission inside it.
+// ---------------------------------------------------------------------------
+
+const weekly = weeklyDecisionWindows('2026-08-31T12:00:00Z').current;
+
+/** `mission` transitioned to `to` on `day` at 09:00 UTC. */
+const move = (mission: typeof id1, from: 'backlog' | 'refined' | 'active' | 'review' | 'integration' | null, to: 'backlog' | 'refined' | 'active' | 'review' | 'integration' | 'done', day: string) => (
+  { missionId: mission, from, to, trigger: 'activate' as const, actor: 'codex', occurredAt: `${day}T09:00:00Z` }
+);
+
+test('weeklyCumulativeFlowByStateSeries scopes the series to the window days and label', () => {
+  const series = weeklyCumulativeFlowByStateSeries(new Map([[id1, 'active']]), [], weekly);
+  assert.deepEqual(series.window, { startDate: '2026-08-25', endDate: '2026-08-31', label: '2026-08-25 → 2026-08-31' });
+  assert.equal(series.series.length, 7);
+  assert.equal(series.series[0]?.at, '2026-08-25T23:59:59.999Z');
+  assert.equal(series.series.at(-1)?.at, '2026-08-31T23:59:59.999Z');
+});
+
+test('weeklyCumulativeFlowByStateSeries leaves a mission completed before the window out of every point', () => {
+  const transitions = [move(id1, null, 'backlog', '2026-07-01'), move(id1, 'backlog', 'done', '2026-07-10')];
+  const series = weeklyCumulativeFlowByStateSeries(new Map([[id1, 'done']]), transitions, weekly);
+  assert.deepEqual(series.series.map((point) => point.counts.done), [0, 0, 0, 0, 0, 0, 0]);
+  assert.deepEqual(series.series.map((point) => point.observationCount), [0, 0, 0, 0, 0, 0, 0]);
+});
+
+test('weeklyCumulativeFlowByStateSeries counts a completion recorded inside the window from that day on', () => {
+  const transitions = [move(id1, null, 'backlog', '2026-08-20'), move(id1, 'active', 'done', '2026-08-28')];
+  const series = weeklyCumulativeFlowByStateSeries(new Map([[id1, 'done']]), transitions, weekly);
+  assert.deepEqual(series.series.map((point) => point.counts.done), [0, 0, 0, 1, 1, 1, 1]);
+  assert.deepEqual(series.series.map((point) => point.counts.backlog), [1, 1, 1, 0, 0, 0, 0]);
+});
+
+test('weeklyCumulativeFlowByStateSeries moves a mission between lanes inside the window', () => {
+  const transitions = [
+    move(id1, null, 'backlog', '2026-08-20'),
+    move(id1, 'backlog', 'active', '2026-08-26'),
+    move(id1, 'active', 'review', '2026-08-30'),
+  ];
+  const series = weeklyCumulativeFlowByStateSeries(new Map([[id1, 'review']]), transitions, weekly);
+  assert.deepEqual(series.series.map((point) => point.counts.backlog), [1, 0, 0, 0, 0, 0, 0]);
+  assert.deepEqual(series.series.map((point) => point.counts.active), [0, 1, 1, 1, 1, 0, 0]);
+  assert.deepEqual(series.series.map((point) => point.counts.review), [0, 0, 0, 0, 0, 1, 1]);
+});
+
+test('weeklyCumulativeFlowByStateSeries reports missing lifecycle history as estimate or skip, never as zeroes', () => {
+  const noTransitions = weeklyCumulativeFlowByStateSeries(new Map([[id1, 'active']]), [], weekly);
+  assert.equal(noTransitions.missingHistoryFallback, 'estimate');
+  assert.deepEqual(noTransitions.series.map((point) => point.counts.active), [1, 1, 1, 1, 1, 1, 1]);
+
+  const noHistoryAtAll = weeklyCumulativeFlowByStateSeries(new Map(), [], weekly);
+  assert.equal(noHistoryAtAll.missingHistoryFallback, 'skip');
+  assert.deepEqual(noHistoryAtAll.series, []);
+});
+
+test('buildMetrics publishes the weekly series on the same window as the decision metrics', () => {
+  const windows = weeklyDecisionWindows('2026-08-31T12:00:00Z');
+  const metrics = buildMetrics({
+    initialStates: new Map([[id1, 'active']]),
+    transitions: [move(id1, null, 'backlog', '2026-08-26'), move(id1, 'backlog', 'active', '2026-08-27')],
+    outcomes: [],
+    instants: ['2026-08-27T09:00:00Z'],
+    asOf: '2026-08-31T12:00:00Z',
+    decisionWindows: windows,
+  });
+  assert.equal(metrics.weeklyCumulativeFlow?.window.label, metrics.decisionWindow?.current.label);
+  assert.equal(metrics.weeklyCumulativeFlow?.window.startDate, windows.current.startDate);
+  assert.equal(metrics.weeklyCumulativeFlow?.window.endDate, windows.current.endDate);
+});
+
+test('buildMetrics omits the weekly series when no decision window was injected', () => {
+  const input: MetricsInput = {
+    initialStates: new Map([[id1, 'active']]),
+    transitions: [],
+    outcomes: [],
+    instants: [now],
+  };
+  assert.equal(buildMetrics(input).weeklyCumulativeFlow, undefined);
+});
+
+test('px stats and the weekly FLOW series read the same injected-clock window authority', () => {
+  const repoRoot = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
+  const statsSource = fs.readFileSync(path.join(repoRoot, 'src', 'application', 'stats-command-use-case.ts'), 'utf8');
+  assert.match(statsSource, /weeklyDecisionWindows\(request\.today \?\? new Date\(\)\)\.current/);
+
+  const today = '2026-08-31T12:00:00Z';
+  const statsWindow = weeklyDecisionWindows(today).current;
+  const metrics = buildMetrics({
+    initialStates: new Map([[id1, 'active']]),
+    transitions: [move(id1, null, 'active', '2026-08-26')],
+    outcomes: [],
+    instants: ['2026-08-26T09:00:00Z'],
+    asOf: today,
+    decisionWindows: weeklyDecisionWindows(today),
+  });
+  assert.deepEqual(metrics.weeklyCumulativeFlow?.window, {
+    startDate: statsWindow.startDate,
+    endDate: statsWindow.endDate,
+    label: statsWindow.label,
+  });
 });

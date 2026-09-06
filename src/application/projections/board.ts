@@ -117,6 +117,21 @@ export interface StateFlowSeries {
   readonly missingHistoryFallback: MetricSeries['missingHistoryFallback'];
 }
 
+/**
+ * One reporting window's cumulative flow, with the window it is scoped to.
+ *
+ * The window travels with the series so no surface has to re-derive it: the
+ * browser renders exactly the days and counts the projection published.
+ */
+export interface WeeklyStateFlowSeries extends StateFlowSeries {
+  readonly window: {
+    readonly startDate: string;
+    readonly endDate: string;
+    /** Operator-facing range, e.g. `2026-08-25 → 2026-08-31`. */
+    readonly label: string;
+  };
+}
+
 export interface LaneMetricSeries {
   readonly series: readonly {
     readonly lane: BoardLane;
@@ -200,6 +215,13 @@ export interface BoardMetrics {
    */
   readonly unattributedRunningSessions?: number | null;
   readonly cumulativeFlowByState: StateFlowSeries;
+  /**
+   * Cumulative flow scoped to the current rolling reporting window. Optional
+   * because a projection cached before TASK-2459 carries none; when present it
+   * is what FLOW renders, so the week's `done` band cannot start loaded with
+   * missions completed before the window.
+   */
+  readonly weeklyCumulativeFlow?: WeeklyStateFlowSeries;
   /** Median mission lifetime in minutes: lane entry to closure, waiting included. */
   readonly medianStateTimes: MetricSeries;
   /**
@@ -337,6 +359,7 @@ function defaultHealth(): Pick<BoardMetrics, 'health' | 'provenance'> {
 export interface BoardMetricsInput {
   readonly cumulativeFlow: MetricSeries;
   readonly cumulativeFlowByState?: StateFlowSeries;
+  readonly weeklyCumulativeFlow?: WeeklyStateFlowSeries;
   readonly medianStateTimes: MetricSeries;
   readonly medianCycleTimeByState?: LaneMetricSeries;
   readonly throughput: MetricSeries;
