@@ -9,6 +9,7 @@ labels:
   - board
   - observability
   - web
+  - user_value
 dependencies:
   - TASK-2435
 priority: high
