@@ -3,14 +3,14 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 
+const REQUIRED_ADAPTER_KEYS = ['tasks', 'missions', 'verification', 'review', 'agents'] as const;
+
 /**
  * The task providers this release implements. Backlog Markdown is the only
  * task adapter that exists, so any other value is a configuration error rather
  * than an extension point (TASK-2455.02).
  */
 export const SUPPORTED_TASK_PROVIDERS = ['backlog-md'] as const;
-
-const REQUIRED_ADAPTER_KEYS = ['tasks', 'missions', 'verification', 'review', 'agents'] as const;
 
 const DEFAULT_CONFIG = Object.freeze({
   product: {
@@ -137,6 +137,11 @@ export function resolveTaskProvider(rootDir: string = process.cwd()): string {
   return tasks.provider as string;
 }
 
+// ponytail: this validator mirrors config/workflow.config.schema.json. The
+// schema is the authoritative contract; keep field checks in sync when it
+// changes. Unknown keys stay allowed everywhere the schema sets
+// additionalProperties:true (top level, product, and each adapter section);
+// only runners/subagents are closed objects and reject unknown keys.
 export function validateWorkflowConfig(config: unknown): string[] {
   if (!isPlainObject(config)) {
     return ['top-level JSON object is required'];
@@ -157,22 +162,137 @@ export function validateWorkflowConfig(config: unknown): string[] {
           issues.push(`adapters.${key} must be an object`);
         }
       }
+      validateAdapterSections(adapters, issues);
     }
   }
-  const tasks = isPlainObject((cfg.adapters as PlainObject | undefined)?.tasks)
-    ? ((cfg.adapters as PlainObject).tasks as PlainObject)
-    : null;
-  if (tasks && 'provider' in tasks && !isSupportedTaskProvider(tasks.provider)) {
-    issues.push(taskProviderIssue(tasks.provider));
-  }
-  const agents = isPlainObject((cfg.adapters as PlainObject | undefined)?.agents)
-    ? ((cfg.adapters as PlainObject).agents as PlainObject)
-    : null;
-  if (agents && 'maxConcurrentCustom' in agents &&
-    (!Number.isInteger(agents.maxConcurrentCustom) || (agents.maxConcurrentCustom as number) < 1)) {
-    issues.push('adapters.agents.maxConcurrentCustom must be a positive integer');
-  }
   return issues;
+}
+
+function validateAdapterSections(adapters: PlainObject, issues: string[]): void {
+  const tasks = isPlainObject(adapters.tasks) ? adapters.tasks : null;
+  if (tasks) {
+    validateStringField(tasks, 'provider', 'adapters.tasks.provider', issues);
+    if ('provider' in tasks && typeof tasks.provider === 'string' && !isSupportedTaskProvider(tasks.provider)) {
+      issues.push(taskProviderIssue(tasks.provider));
+    }
+    validateStringField(tasks, 'stateMap', 'adapters.tasks.stateMap', issues);
+    if ('storage' in tasks && !isValidTaskStorage(tasks.storage)) {
+      issues.push('adapters.tasks.storage must be a string or an object of string values');
+    }
+  }
+
+  const missions = isPlainObject(adapters.missions) ? adapters.missions : null;
+  if (missions) {
+    validateStringField(missions, 'baseDir', 'adapters.missions.baseDir', issues);
+    validateStringField(missions, 'branchPrefix', 'adapters.missions.branchPrefix', issues);
+    validateStringField(missions, 'worktreePattern', 'adapters.missions.worktreePattern', issues);
+    validateStringField(missions, 'primaryBranch', 'adapters.missions.primaryBranch', issues);
+  }
+
+  const verification = isPlainObject(adapters.verification) ? adapters.verification : null;
+  if (verification) {
+    validateStringField(verification, 'command', 'adapters.verification.command', issues);
+    validateStringField(verification, 'defaultArea', 'adapters.verification.defaultArea', issues);
+  }
+
+  const integrate = isPlainObject(adapters.integrate) ? adapters.integrate : null;
+  if (integrate) {
+    validateStringField(integrate, 'postIntegrateCommand', 'adapters.integrate.postIntegrateCommand', issues);
+  }
+
+  const review = isPlainObject(adapters.review) ? adapters.review : null;
+  if (review) {
+    validateStringField(review, 'baseUrl', 'adapters.review.baseUrl', issues);
+    validateStringField(review, 'remote', 'adapters.review.remote', issues);
+    validateStringField(review, 'repo', 'adapters.review.repo', issues);
+    if ('provider' in review && !isValidReviewProvider(review.provider)) {
+      issues.push('adapters.review.provider must be one of "forgejo", "none", or null');
+    }
+  }
+
+  const agents = isPlainObject(adapters.agents) ? adapters.agents : null;
+  if (agents) {
+    if ('maxConcurrentCustom' in agents &&
+      (!Number.isInteger(agents.maxConcurrentCustom) || (agents.maxConcurrentCustom as number) < 1)) {
+      issues.push('adapters.agents.maxConcurrentCustom must be a positive integer');
+    }
+    validateAgentModels(agents, issues);
+    validateRunnerSelection(agents, issues);
+    validateSubagents(agents, issues);
+  }
+}
+
+function validateStringField(obj: PlainObject, key: string, label: string, issues: string[]): void {
+  if (key in obj && typeof obj[key] !== 'string') {
+    issues.push(`${label} must be a string`);
+  }
+}
+
+function isValidTaskStorage(value: unknown): boolean {
+  if (typeof value === 'string') {return true;}
+  if (!isPlainObject(value)) {return false;}
+  // The schema declares the storage object with additionalProperties:true, so
+  // only assert every value is a string; never close the object to a fixed key
+  // set (task-2455.03 F1: schema-valid configs with extra storage keys must stay valid).
+  return Object.keys(value).every(key => typeof value[key] === 'string');
+}
+
+function isValidReviewProvider(value: unknown): boolean {
+  return value === null || value === 'forgejo' || value === 'none';
+}
+
+function validateAgentModels(agents: PlainObject, issues: string[]): void {
+  if (!('models' in agents)) {return;}
+  const models = agents.models;
+  if (!isPlainObject(models)) {
+    issues.push('adapters.agents.models must be an object');
+    return;
+  }
+  for (const [family, model] of Object.entries(models)) {
+    if (typeof model !== 'string') {
+      issues.push(`adapters.agents.models.${family} must be a string`);
+    }
+  }
+}
+
+function validateRunnerSelection(agents: PlainObject, issues: string[]): void {
+  if (!('runners' in agents)) {return;}
+  const runners = agents.runners;
+  if (!isPlainObject(runners)) {
+    issues.push('adapters.agents.runners must be an object');
+    return;
+  }
+  for (const key of Object.keys(runners)) {
+    if (key !== 'custom') {
+      issues.push('adapters.agents.runners may only contain "custom"');
+    }
+  }
+  if ('custom' in runners && typeof runners.custom !== 'string') {
+    issues.push('adapters.agents.runners.custom must be a string');
+  } else if ('custom' in runners && runners.custom !== 'opencode' && runners.custom !== 'pi') {
+    issues.push('adapters.agents.runners.custom must be one of "opencode", "pi"');
+  }
+}
+
+function validateSubagents(agents: PlainObject, issues: string[]): void {
+  if (!('subagents' in agents)) {return;}
+  const subagents = agents.subagents;
+  if (!isPlainObject(subagents)) {
+    issues.push('adapters.agents.subagents must be an object');
+    return;
+  }
+  for (const key of Object.keys(subagents)) {
+    if (key !== 'maxParallel') {
+      issues.push('adapters.agents.subagents may only contain "maxParallel"');
+    }
+  }
+  if ('maxParallel' in subagents) {
+    const value = subagents.maxParallel;
+    if (value === null) {return;}
+    if (!Number.isInteger(value) || (value as number) < 0) {
+      issues.push('adapters.agents.subagents.maxParallel must be a non-negative integer or null');
+    }
+  }
 }
 
 export function detectLegacyRepoLayout(rootDir: string = process.cwd()): boolean {
@@ -429,6 +549,8 @@ export interface TaskStorageResult {
 }
 
 export function resolveTaskStorage(rootDir: string = process.cwd()): TaskStorageResult {
+  resolveTaskProvider(rootDir);
+
   const fallbackBaseDir = path.join(rootDir, 'backlog');
   const fallback: TaskStorageResult = {
     baseDir: fallbackBaseDir,
@@ -437,8 +559,6 @@ export function resolveTaskStorage(rootDir: string = process.cwd()): TaskStorage
     archiveTasksDir: path.join(fallbackBaseDir, 'archive', 'tasks'),
     draftsDir: path.join(fallbackBaseDir, 'drafts'),
   };
-
-  resolveTaskProvider(rootDir);
 
   const tasksAdapter = loadAdapterConfig(rootDir).tasks as PlainObject | undefined || {};
   const storage = (tasksAdapter.storagePath as string) || (tasksAdapter.storage as string);
