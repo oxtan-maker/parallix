@@ -20,7 +20,7 @@ import { FlowPanel } from '../web/src/flow-panel.js';
 import { appendProgress, OPERATION_LOG_LIMIT } from '../web/src/operation-log.js';
 import { Shell } from '../web/src/shell.js';
 import { durationText } from '../web/src/format.js';
-import { toWebBoardSnapshot } from '../src/interfaces/web/transport.js';
+import { toWebBoardSnapshot, validateWebBoardSnapshot } from '../src/interfaces/web/transport.js';
 import type { WebBoardSnapshot } from '../src/interfaces/web/transport.js';
 import type { BoardProjection } from '../src/application/projections/board.js';
 import type { AgentAvailabilityMetric } from '../src/application/projections/board.js';
@@ -228,21 +228,73 @@ test('FLOW renders populated projected values with their observation counts', ()
   assert.match(html, /refined → done, median/);
 });
 
-test('FLOW charts only the transport-projected latest week', () => {
+test('FLOW charts the server-owned weekly series and never the historical stock beside it', () => {
   const html = renderFlow(toWebBoardSnapshot({ ...makeProjection(), metrics: {
     ...emptyMetrics,
-    decisionWindow: {
-      current: { label: '2026-08-24 → 2026-08-30', startDate: '2026-08-24', endDate: '2026-08-30', completedMissions: 0, cycleTime: { value: null, observationCount: 0 }, agentRuntime: { value: null, observationCount: 0 }, activeDwell: { value: null, observationCount: 0 }, reviewDwell: { value: null, observationCount: 0 }, integrationDwell: { value: null, observationCount: 0 }, reviewBounce: { value: null, observationCount: 0 } },
-      previous: { label: '2026-08-17 → 2026-08-23', startDate: '2026-08-17', endDate: '2026-08-23', completedMissions: 0, cycleTime: { value: null, observationCount: 0 }, agentRuntime: { value: null, observationCount: 0 }, activeDwell: { value: null, observationCount: 0 }, reviewDwell: { value: null, observationCount: 0 }, integrationDwell: { value: null, observationCount: 0 }, reviewBounce: { value: null, observationCount: 0 } },
-    },
+    // The all-history series still carries every pre-window completion...
     cumulativeFlowByState: { series: [
       { at: '2026-08-23T23:59:59.000Z', counts: { old: 99 }, observationCount: 99 },
-      { at: '2026-08-24T00:00:00.000Z', counts: { active: 2 }, observationCount: 2 },
     ], missingHistoryFallback: 'estimate' } as unknown as typeof emptyMetrics.cumulativeFlowByState,
+    // ...and FLOW charts the weekly series the projection published instead.
+    weeklyCumulativeFlow: { series: [
+      { at: '2026-08-24T23:59:59.999Z', counts: { active: 2 }, observationCount: 2 },
+      { at: '2026-08-30T23:59:59.999Z', counts: { active: 2 }, observationCount: 2 },
+    ], missingHistoryFallback: 'estimate', window: { startDate: '2026-08-24', endDate: '2026-08-30', label: '2026-08-24 → 2026-08-30' } } as unknown as NonNullable<typeof emptyMetrics.weeklyCumulativeFlow>,
   } }).metrics);
   assert.match(html, /2026-08-24 → 2026-08-30/);
   assert.match(html, / active<\/span>/);
   assert.doesNotMatch(html, / old<\/span>/);
+});
+
+test('the web transport carries the weekly cumulative-flow series and its window unchanged', () => {
+  const weekly = {
+    series: [
+      { at: '2026-08-25T23:59:59.999Z', counts: { backlog: 0, refined: 0, active: 1, review: 0, integration: 0, done: 0 }, observationCount: 1 },
+      { at: '2026-08-26T23:59:59.999Z', counts: { backlog: 0, refined: 0, active: 0, review: 0, integration: 0, done: 1 }, observationCount: 1 },
+    ],
+    missingHistoryFallback: 'estimate',
+    window: { startDate: '2026-08-25', endDate: '2026-08-26', label: '2026-08-25 → 2026-08-26' },
+  } as unknown as NonNullable<typeof emptyMetrics.weeklyCumulativeFlow>;
+  const snapshot = toWebBoardSnapshot({ ...makeProjection(), metrics: { ...emptyMetrics, weeklyCumulativeFlow: weekly } });
+  assert.deepEqual(snapshot.metrics.weeklyCumulativeFlow, JSON.parse(JSON.stringify(weekly)));
+  assert.deepEqual(validateWebBoardSnapshot(JSON.parse(JSON.stringify(snapshot))).ok, true);
+});
+
+test('a snapshot without a weekly series is still a valid transport payload', () => {
+  const snapshot = toWebBoardSnapshot({ ...makeProjection(), metrics: emptyMetrics });
+  assert.equal(snapshot.metrics.weeklyCumulativeFlow, undefined);
+  assert.deepEqual(validateWebBoardSnapshot(JSON.parse(JSON.stringify(snapshot))).ok, true);
+});
+
+test('FLOW draws every published weekly point without rebasing or inferring lane movement', () => {
+  const points = [0, 1, 2, 3, 4, 5, 6].map((offset) => ({
+    at: `2026-08-2${5 + offset > 9 ? 5 + offset - 10 : 5 + offset}T23:59:59.999Z`,
+    counts: { backlog: 0, refined: 0, active: offset < 4 ? 1 : 0, review: 0, integration: 0, done: offset < 4 ? 0 : 1 },
+    observationCount: 1,
+  }));
+  const html = renderFlow(toWebBoardSnapshot({ ...makeProjection(), metrics: {
+    ...emptyMetrics,
+    weeklyCumulativeFlow: { series: points, missingHistoryFallback: 'estimate', window: { startDate: '2026-08-25', endDate: '2026-08-31', label: '2026-08-25 → 2026-08-31' } } as unknown as NonNullable<typeof emptyMetrics.weeklyCumulativeFlow>,
+  } }).metrics);
+  // One polygon per lane; every one plots all seven published points (7 up + 7 down).
+  const polygons = [...html.matchAll(/points="([^"]+)"/g)].map((match) => match[1]!.split(' '));
+  assert.equal(polygons.length, 6);
+  assert.ok(polygons.every((polygon) => polygon.length === 14), 'every lane band must plot all seven published points');
+  // The `done` band (topmost stacked layer) has zero thickness on the four days
+  // the projection published `done: 0`, and thickness only where it published a
+  // completion — the browser adds no accumulation of its own.
+  const doneBand = polygons[5]!;
+  const thickness = [0, 1, 2, 3, 4, 5, 6].map((index) =>
+    Number(doneBand[13 - index]!.split(',')[1]) - Number(doneBand[index]!.split(',')[1]));
+  assert.deepEqual(thickness.slice(0, 4), [0, 0, 0, 0]);
+  assert.ok(thickness.slice(4).every((height) => height > 0), 'in-window completions must raise the done band');
+});
+
+test('the browser never filters, rebases, or infers the weekly flow it renders', () => {
+  const flowPanel = browserSources.find((source) => source.name === 'flow-panel.tsx')!.text;
+  assert.doesNotMatch(flowPanel, /cumulativeFlowByState\.series\.filter/);
+  assert.doesNotMatch(flowPanel, /startDate|endDate/, 'the browser must not re-derive the reporting window');
+  assert.match(flowPanel, /metrics\.weeklyCumulativeFlow \?\? metrics\.cumulativeFlowByState/);
 });
 
 // ---------------------------------------------------------------------------

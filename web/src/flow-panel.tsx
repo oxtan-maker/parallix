@@ -16,12 +16,13 @@ function minutes(value: number | null): string {
 }
 
 function CumulativeFlow({ metrics }: { readonly metrics: WebBoardMetrics }) {
-  const window = metrics.flowWindow;
-  const points = window === undefined
-    ? metrics.cumulativeFlowByState.series
-    : metrics.cumulativeFlowByState.series.filter((point) => point.at.slice(0, 10) >= window.startDate && point.at.slice(0, 10) <= window.endDate);
+  // The projection owns the reporting week: when it publishes the weekly
+  // series, these are exactly the points drawn — no filtering, no subtraction,
+  // no lane transition inferred here.
+  const flow = metrics.weeklyCumulativeFlow ?? metrics.cumulativeFlowByState;
+  const points = flow.series;
   if (points.length === 0) {
-    return <div style={{ color: C.faint, fontSize: 11 }}>history {metrics.cumulativeFlowByState.missingHistoryFallback}</div>;
+    return <div style={{ color: C.faint, fontSize: 11 }}>history {flow.missingHistoryFallback}</div>;
   }
   const lanes = Object.keys(points[0]!.counts);
   const max = Math.max(1, ...points.map((point) => Object.values(point.counts).reduce((total, count) => total + count, 0)));
@@ -49,7 +50,7 @@ export function FlowPanel({ metrics }: { readonly metrics: WebBoardMetrics }) {
   const total = cycle.reduce((sum, point) => sum + point.value!, 0);
   return <section id="flow-metrics" aria-label="FLOW metrics" style={{ display: 'flex', gap: 26, padding: '14px 18px', borderBottom: `1px solid ${C.rule}`, background: C.panel, flexShrink: 0, alignItems: 'flex-start', overflowX: 'auto' }}>
     <div style={{ flexShrink: 0 }}>
-      <h2 style={{ color: C.dim, fontFamily: DISPLAY, fontSize: 10, fontWeight: 400, letterSpacing: 2, margin: '0 0 7px' }}>CUMULATIVE FLOW · {metrics.flowWindow?.label ?? 'RECORDED HISTORY'}</h2>
+      <h2 style={{ color: C.dim, fontFamily: DISPLAY, fontSize: 10, fontWeight: 400, letterSpacing: 2, margin: '0 0 7px' }}>CUMULATIVE FLOW · {metrics.weeklyCumulativeFlow?.window.label ?? 'RECORDED HISTORY'}</h2>
       <CumulativeFlow metrics={metrics} />
     </div>
     <div style={{ minWidth: 270, flexShrink: 0 }}>

@@ -11,10 +11,11 @@ import type {
   LaneMetricSeries,
   MetricSeries,
   StateFlowSeries,
+  WeeklyStateFlowSeries,
 } from './board.js';
 import { buildBoardMetrics } from './board.js';
 import type { DecisionWindow, DecisionWindows } from '../services/decision-window.js';
-import { decisionWindowContains } from '../services/decision-window.js';
+import { decisionWindowContains, decisionWindowDays } from '../services/decision-window.js';
 
 // ---------------------------------------------------------------------------
 // Time-based metrics — derived from recorded events
@@ -304,6 +305,58 @@ export function cumulativeFlowByStateSeries(
       return { at, counts, observationCount: state.size };
     }),
     missingHistoryFallback: 'estimate',
+  };
+}
+
+/**
+ * Cumulative flow by lane across the reporting window's UTC calendar days.
+ *
+ * The all-history series above answers "what does the board hold now"; this one
+ * answers "what moved during the week the operator is reading". The difference
+ * is what the week starts from: a mission that was already `done` when the
+ * window opened is finished work from an earlier week, so it is left behind
+ * rather than carried into every point of this week's `done` band. Open work is
+ * carried in at the lane it held on the boundary, and only transitions recorded
+ * inside the window move it.
+ *
+ * Nothing is invented: the boundary state is folded from the same recorded
+ * transitions the historical series uses, and a mission with no recorded
+ * lifecycle keeps the `estimate` contract — the initial snapshot is all that is
+ * known. With no lifecycle facts at all the series is empty and `skip`, so a
+ * week with no evidence is reported as unavailable rather than as zeroes.
+ */
+export function weeklyCumulativeFlowByStateSeries(
+  initial: ReadonlyMap<MissionId, MissionStatus>,
+  transitions: readonly MissionTransition[],
+  window: DecisionWindow,
+): WeeklyStateFlowSeries {
+  const scopedWindow = { startDate: window.startDate, endDate: window.endDate, label: window.label };
+  if (transitions.length === 0 && initial.size === 0) {
+    return { series: [], missingHistoryFallback: 'skip', window: scopedWindow };
+  }
+  const ordered = [...transitions].sort((left, right) => left.occurredAt.localeCompare(right.occurredAt));
+  // State as the window opened: every transition recorded before its first day.
+  const boundary = new Map(initial);
+  for (const transition of ordered) {
+    if (transition.occurredAt.slice(0, 10) < window.startDate) { boundary.set(transition.missionId, transition.to); }
+  }
+  const carried = new Map([...boundary].filter(([, lane]) => lane !== 'done'));
+  const inWindow = ordered.filter((transition) => decisionWindowContains(window, transition.occurredAt));
+  return {
+    series: decisionWindowDays(window).map((day) => {
+      const at = `${day}T23:59:59.999Z`;
+      const state = new Map(carried);
+      for (const transition of inWindow) {
+        // A mission that opened inside the window has no boundary lane; its
+        // intake transition is what puts it on the board.
+        if (transition.occurredAt <= at) { state.set(transition.missionId, transition.to); }
+      }
+      const counts = emptyCounts();
+      for (const lane of state.values()) { counts[lane] += 1; }
+      return { at, counts, observationCount: state.size };
+    }),
+    missingHistoryFallback: 'estimate',
+    window: scopedWindow,
   };
 }
 
@@ -682,6 +735,12 @@ export function buildMetrics(input: MetricsInput): ReturnType<typeof buildBoardM
   const currentWindow = input.decisionWindows?.current;
   const currentMissions = missionsCompletedInWindow(input.outcomes, currentWindow);
   const stateFlow = cumulativeFlowByStateSeries(historicalInitialStates, input.transitions, input.instants);
+  // The weekly series is what FLOW renders. It shares the window with the
+  // decision metrics above, so the chart and the figures beside it cannot
+  // report two different weeks.
+  const weeklyCumulativeFlow = currentWindow === undefined
+    ? undefined
+    : weeklyCumulativeFlowByStateSeries(historicalInitialStates, input.transitions, currentWindow);
   const cycleByState = medianCycleTimeByStateSeries(input.transitions, currentMissions);
   // Recorded lane transitions are the evidence that there was lifecycle to
   // measure, so a week without completions can be reported as the zero it is.
@@ -704,6 +763,7 @@ export function buildMetrics(input: MetricsInput): ReturnType<typeof buildBoardM
     ...buildBoardMetrics({
       cumulativeFlow: cumulativeFlowSeries(historicalInitialStates, input.transitions, input.instants),
       cumulativeFlowByState: stateFlow,
+      ...(weeklyCumulativeFlow === undefined ? {} : { weeklyCumulativeFlow }),
       medianStateTimes: medianStateTimes(input.outcomes, input.instants, currentWindow),
       medianCycleTimeByState: cycleByState,
       throughput: throughputSeries(input.outcomes, input.instants),

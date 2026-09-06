@@ -240,6 +240,13 @@ export interface WebBoardMetrics {
   /** The rolling week that FLOW uses, shared with the board's decision metrics. */
   readonly flowWindow?: { readonly startDate: string; readonly endDate: string; readonly label: string };
   readonly cumulativeFlowByState: { readonly series: readonly { readonly at: string; readonly counts: Readonly<Record<string, number>>; readonly observationCount?: number }[]; readonly missingHistoryFallback: string };
+  /**
+   * The server-owned cumulative flow of the current reporting week, with the
+   * window it was computed for. FLOW renders these points as published: the
+   * browser never filters, rebases, or infers a lane transition. Optional
+   * because a projection cached before TASK-2459 carries none.
+   */
+  readonly weeklyCumulativeFlow?: { readonly series: readonly { readonly at: string; readonly counts: Readonly<Record<string, number>>; readonly observationCount?: number }[]; readonly missingHistoryFallback: string; readonly window: { readonly startDate: string; readonly endDate: string; readonly label: string } };
   readonly medianCycleTimeByState: { readonly series: readonly { readonly lane: string; readonly value: number | null; readonly observationCount?: number }[]; readonly missingHistoryFallback: string };
   readonly weeklyThroughput: { readonly series: readonly { readonly at: string; readonly value: number | null; readonly observationCount?: number }[]; readonly missingHistoryFallback: string };
   readonly bottleneck: { readonly sentence: string };
@@ -571,6 +578,11 @@ function toWebMetrics(metrics: BoardMetrics): WebBoardMetrics {
       label: metrics.decisionWindow.current.label,
     } }),
     cumulativeFlowByState: { ...metrics.cumulativeFlowByState, series: metrics.cumulativeFlowByState.series.map(point => ({ ...point, counts: { ...point.counts } })) },
+    ...(metrics.weeklyCumulativeFlow === undefined ? {} : { weeklyCumulativeFlow: {
+      missingHistoryFallback: metrics.weeklyCumulativeFlow.missingHistoryFallback,
+      window: { ...metrics.weeklyCumulativeFlow.window },
+      series: metrics.weeklyCumulativeFlow.series.map(point => ({ ...point, counts: { ...point.counts } })),
+    } }),
     medianCycleTimeByState: { ...metrics.medianCycleTimeByState, series: metrics.medianCycleTimeByState.series.map(point => ({ ...point })) },
     weeklyThroughput: { ...metrics.weeklyThroughput, series: metrics.weeklyThroughput.series.map(point => ({ ...point })) },
     bottleneck: { sentence: metrics.bottleneck.sentence },
@@ -1027,20 +1039,26 @@ function checkSourceFact(object: unknown, path: string, problems: string[]): voi
 
 function checkMetrics(object: unknown, path: string, problems: string[]): void {
   if (!isPlainObject(object)) { problems.push(`${path} must be an object`); return; }
-  checkKeys(object, ['health', 'provenance', 'flowWindow', 'cumulativeFlowByState', 'medianCycleTimeByState', 'weeklyThroughput', 'bottleneck'], ['health', 'provenance', 'cumulativeFlowByState', 'medianCycleTimeByState', 'weeklyThroughput', 'bottleneck'], path, problems);
+  checkKeys(object, ['health', 'provenance', 'flowWindow', 'cumulativeFlowByState', 'weeklyCumulativeFlow', 'medianCycleTimeByState', 'weeklyThroughput', 'bottleneck'], ['health', 'provenance', 'cumulativeFlowByState', 'medianCycleTimeByState', 'weeklyThroughput', 'bottleneck'], path, problems);
   if (!isPlainObject(object.health)) { problems.push(`${path}.health must be an object`); } else { checkKeys(object.health, ['state'], ['state'], `${path}.health`, problems); checkString(object.health, 'state', `${path}.health`, problems); }
   if (!isPlainObject(object.provenance)) { problems.push(`${path}.provenance must be an object`); } else { checkKeys(object.provenance, ['sampleSize', 'newestEventTimestamp'], ['sampleSize', 'newestEventTimestamp'], `${path}.provenance`, problems); checkFiniteNumber(object.provenance, 'sampleSize', `${path}.provenance`, problems); checkNullableString(object.provenance, 'newestEventTimestamp', `${path}.provenance`, problems); }
   if (object.flowWindow !== undefined) { if (!isPlainObject(object.flowWindow)) { problems.push(`${path}.flowWindow must be an object`); } else { checkKeys(object.flowWindow, ['startDate', 'endDate', 'label'], ['startDate', 'endDate', 'label'], `${path}.flowWindow`, problems); checkString(object.flowWindow, 'startDate', `${path}.flowWindow`, problems); checkString(object.flowWindow, 'endDate', `${path}.flowWindow`, problems); checkString(object.flowWindow, 'label', `${path}.flowWindow`, problems); } }
-  for (const key of ['cumulativeFlowByState', 'medianCycleTimeByState', 'weeklyThroughput'] as const) {
+  for (const key of ['cumulativeFlowByState', 'weeklyCumulativeFlow', 'medianCycleTimeByState', 'weeklyThroughput'] as const) {
     const series = object[key]; const seriesPath = `${path}.${key}`;
+    if (key === 'weeklyCumulativeFlow' && series === undefined) { continue; }
     if (!isPlainObject(series)) { problems.push(`${seriesPath} must be an object`); continue; }
-    checkKeys(series, ['series', 'missingHistoryFallback'], ['series', 'missingHistoryFallback'], seriesPath, problems);
+    const seriesKeys = key === 'weeklyCumulativeFlow' ? ['series', 'missingHistoryFallback', 'window'] : ['series', 'missingHistoryFallback'];
+    checkKeys(series, seriesKeys, seriesKeys, seriesPath, problems);
+    if (key === 'weeklyCumulativeFlow') {
+      if (!isPlainObject(series.window)) { problems.push(`${seriesPath}.window must be an object`); }
+      else { checkKeys(series.window, ['startDate', 'endDate', 'label'], ['startDate', 'endDate', 'label'], `${seriesPath}.window`, problems); checkString(series.window, 'startDate', `${seriesPath}.window`, problems); checkString(series.window, 'endDate', `${seriesPath}.window`, problems); checkString(series.window, 'label', `${seriesPath}.window`, problems); }
+    }
     checkString(series, 'missingHistoryFallback', seriesPath, problems);
     if (!Array.isArray(series.series)) { problems.push(`${seriesPath}.series must be an array`); continue; }
     series.series.forEach((point, index) => {
       const pointPath = `${seriesPath}.series[${index}]`;
       if (!isPlainObject(point)) { problems.push(`${pointPath} must be an object`); return; }
-      if (key === 'cumulativeFlowByState') { checkKeys(point, ['at', 'counts', 'observationCount'], ['at', 'counts'], pointPath, problems); checkString(point, 'at', pointPath, problems); if (!isPlainObject(point.counts)) { problems.push(`${pointPath}.counts must be an object`); } }
+      if (key === 'cumulativeFlowByState' || key === 'weeklyCumulativeFlow') { checkKeys(point, ['at', 'counts', 'observationCount'], ['at', 'counts'], pointPath, problems); checkString(point, 'at', pointPath, problems); if (!isPlainObject(point.counts)) { problems.push(`${pointPath}.counts must be an object`); } }
       else if (key === 'medianCycleTimeByState') { checkKeys(point, ['lane', 'value', 'observationCount'], ['lane', 'value'], pointPath, problems); checkString(point, 'lane', pointPath, problems); checkNullableFiniteNumber(point, 'value', pointPath, problems); }
       else { checkKeys(point, ['at', 'value', 'observationCount'], ['at', 'value'], pointPath, problems); checkString(point, 'at', pointPath, problems); checkNullableFiniteNumber(point, 'value', pointPath, problems); }
       checkOptionalNullableNumber(point, 'observationCount', pointPath, problems);
