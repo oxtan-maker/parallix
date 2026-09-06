@@ -4,7 +4,7 @@ title: tui has diverged from web
 status: backlog
 assignee: []
 created_date: '2026-09-06 08:02'
-labels: []
+labels: [user_value, bug]
 dependencies: []
 ---
 
