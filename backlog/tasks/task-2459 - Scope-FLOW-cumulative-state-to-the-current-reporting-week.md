@@ -1,5 +1,5 @@
 ---
-id: TASK-2446
+id: TASK-2459
 title: Scope FLOW cumulative state to the current reporting week
 status: backlog
 assignee: []
