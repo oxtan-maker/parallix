@@ -1,0 +1,25 @@
+---
+id: TASK-2460
+title: update config documentation
+status: backlog
+assignee: []
+created_date: '2026-09-06 11:46'
+labels: []
+dependencies: []
+---
+
+## Description
+
+<!-- SECTION:DESCRIPTION:BEGIN -->
+now with a lot of missions after the initial config documentation mission we need to ensure the actual config documentation is up-to-date with current product (just check last 48 hours of missions)
+<!-- SECTION:DESCRIPTION:END -->
+
+## Definition of Done
+<!-- DOD:BEGIN -->
+- [ ] #1 Verification gate ran and passed on the final tree with captured proof rather than an unverified claim
+- [ ] #2 Lint and static analysis report clean on every changed file
+- [ ] #3 No focused or unannotated skipped tests were introduced (no .only and no bare .skip)
+- [ ] #4 Final checkpoint Goal Check table cites real evidence using file:line references and test names
+- [ ] #5 Docs updated to reflect any workflow or user-facing behavior change
+- [ ] #6 Bug-labeled missions include a red-to-green reproduction test that fails before the fix and passes after
+<!-- DOD:END -->
