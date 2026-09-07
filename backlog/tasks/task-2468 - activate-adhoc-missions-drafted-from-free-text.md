@@ -25,6 +25,16 @@ The minimal-friction path rotted once without anyone noticing. Fixing the guard 
 - Every other command in that first-value path (`px status`, `px review`, `px integrate`) must be asserted to accept an `adhoc-` slug in the same run, so a future guard added elsewhere fails the suite instead of the user.
 - Update `test/execute-mission-characterization.test.ts`, which currently asserts the refusal.
 - Assertions cite files and symbols or test names, never `file.ts:<line>` from another file.
+## What broke it (history, so the fix targets the cause)
+
+- `2026-06-24` task-1341 shipped free-text drafting (`adhoc-` slugs, synthetic Backlog task) in `lib/commands/draft.js`. `px active` at that time had no slug-prefix check, so an adhoc mission could be activated: the minimal-friction path worked.
+- `2026-07-20` task-2276 added the stubbed-agent lifecycle e2e (`test/e2e-mission-lifecycle.test.ts`), but only for `task-` slugs — its fixtures use `task-2001`/`task-2002` and even the stub agent parses its slug with `/^Slug:\s*(task-[a-z0-9-]+)/im`. The free-text path was never covered.
+- `2026-07-21` task-2289 introduced `LegacyActiveAdapter.validateSlug` with `if (!slug.startsWith('task-'))` while moving activation behind a port. That is the commit that broke it; nothing failed, because no test exercised an adhoc activation.
+- `2026-08-03` task-2332.04 carried the same line into `src/application/execute-mission-service.ts` and added a characterization test asserting the refusal, cementing the regression as intended behavior.
+
+So: the guard was never a decision about adhoc missions, it was an assumption copied into a new layer during a refactor and then locked in by a characterization test. Fix the assumption, do not add a compatibility shim around it — and widen the stub's slug regex, or the new e2e will silently fall back to `task-unknown`.
+
+Related: task-1358 asked for exactly this stubbed lifecycle net in `2026-06-26` and was archived `2026-07-02` still in `backlog` status, three weeks before the break.
 <!-- SECTION:DESCRIPTION:END -->
 
 ## Definition of Done
