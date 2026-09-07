@@ -4,7 +4,7 @@ title: Split each prompt into a Parallix core and an overridable default
 status: backlog
 assignee: []
 created_date: '2026-09-07 08:21'
-labels: []
+labels: [ai_sdlc]
 dependencies: []
 ---
 
