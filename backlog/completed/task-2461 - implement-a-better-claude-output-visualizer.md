@@ -1,10 +1,11 @@
 ---
 id: TASK-2461
 title: implement a better claude output visualizer
-status: backlog
-assignee: []
+status: done
+assignee: [claude]
 created_date: '2026-09-06 17:35'
-labels: [user_value]
+labels:
+  - user_value
 dependencies: []
 ---
 

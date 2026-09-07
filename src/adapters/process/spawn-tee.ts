@@ -28,9 +28,18 @@ interface NoOutputWatchdog {
   intervalMs?: number;
 }
 
+/**
+ * Minimal terminal sink contract. Widened from `NodeJS.WriteStream` so a
+ * launcher can pass a renderer (see `claude-stream-view.ts`); the tail buffer
+ * is unaffected, since it is pushed before the sink is written.
+ */
+export interface TeeSink {
+  write(_chunk: Buffer | string): unknown;
+}
+
 interface SpawnTeeOptions {
-  stdoutSink?: NodeJS.WriteStream;
-  stderrSink?: NodeJS.WriteStream;
+  stdoutSink?: TeeSink;
+  stderrSink?: TeeSink;
   maxTailBytes?: number;
   noOutputWatchdog?: NoOutputWatchdog | null;
   cwd?: string;
