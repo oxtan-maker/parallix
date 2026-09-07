@@ -4,7 +4,7 @@ title: adhoc missions as first-class intake with db-owned ids
 status: backlog
 assignee: []
 created_date: '2026-09-07 16:54'
-labels: [user_value, bug]
+labels: [ai_sdlc, bug]
 dependencies: []
 ---
 
