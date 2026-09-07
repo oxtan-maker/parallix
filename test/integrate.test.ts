@@ -1699,6 +1699,42 @@ test('R4b: stale active approved recovery requires the provider approval', async
   assert.equal(state.status, 'active');
 });
 
+// R4b2 — no review provider configured (`review.provider !== 'forgejo'`): there
+// is no provider approval that could ever exist, so the stored ReviewerDecision
+// is the only approval authority and recovery must proceed. The R4b guard stays
+// fail-closed whenever a provider is configured.
+test('R4b2: stale active approved recovery proceeds when no review provider is configured', async () => {
+  const decidedAt = '2026-01-01T10:30:00Z';
+  const reviewEntryAt = '2026-01-01T10:00:00Z';
+  const calls: string[][] = [];
+  const state = {
+    status: 'active', assignee: 'codex',
+    review: { rounds: [{ startedAt: reviewEntryAt, decision: { kind: 'approved', decidedAt } }] },
+  };
+  const missionServices = {
+    store: { async load() { return { kind: 'found', mission: state, version: 7 }; } },
+    lifecycle: {
+      async transition(request) {
+        calls.push([request.command.type, request.occurredAt]);
+        if (request.command.type === 'submit-for-review') { state.status = 'review'; }
+        else if (request.command.type === 'approve') { state.status = 'integration'; }
+        return { status: 'completed' };
+      },
+    },
+  };
+
+  const result = await recoverMissionForIntegration(
+    {
+      slug: 'task-2460',
+      approval: { ok: true, reviewState: 'APPROVED', source: 'mission-store', providerDisabled: true },
+    },
+    { missionServices },
+  );
+
+  assert.deepEqual(calls, [['submit-for-review', reviewEntryAt], ['approve', decidedAt]]);
+  assert.deepEqual(result, { recovered: true, status: 'integration', occurredAt: decidedAt });
+});
+
 test('R4c: fresh awaiting-review recovery still uses the handoff operation', async () => {
   const state = {
     status: 'active', assignee: 'codex',
