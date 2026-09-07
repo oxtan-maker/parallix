@@ -19,11 +19,11 @@ async function withTempDir(fn) {
   }
 }
 
-function runConfig(root) {
+function runConfig(root, args: string[] = []) {
   const logs = [];
   const errors = [];
   let exitCode = null;
-  return config.default([], {
+  return config.default(args, {
     rootDir: root,
     logFn: message => logs.push(message),
     errorFn: message => errors.push(message),
@@ -60,6 +60,18 @@ test('config rejects an unsupported review provider enum value as fallback defau
     assert.match(result.errors.join('\n'), /structurally invalid/);
     assert.match(result.errors.join('\n'), /provider/);
     assert.doesNotMatch(result.logs.join('\n'), /built-in defaults \+/);
+  });
+});
+
+test('config --write exits non-zero when the working directory is not a repository root', async () => {
+  await withTempDir(async root => {
+    const result = await runConfig(root, ['--write']);
+    assert.equal(result.exitCode, 1);
+    assert.match(result.errors.join('\n'), /repository root/);
+    // read-only mode still prints the effective config as before
+    const readOnly = await runConfig(root, []);
+    assert.equal(readOnly.exitCode, null);
+    assert.match(readOnly.logs.join('\n'), /adapters/);
   });
 });
 

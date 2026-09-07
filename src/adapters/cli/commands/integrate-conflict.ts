@@ -238,6 +238,48 @@ export function restoreMainCheckoutStash({ message, rootDir = getPrimaryWorktree
   return gitRunner(['-C', rootDir, 'stash', 'pop', '--index'], { cwd: rootDir });
 }
 
+/**
+ * Decide whether a failed `git stash pop --index` can be resolved by simply
+ * dropping the temporary stash. The outcome is benign when it is a pure
+ * file-collision: a stashed *untracked* file could not be restored because it
+ * now already exists on disk (it was committed by the landed squash merge, so
+ * it is tracked and its content is intact). When the stash pop instead left
+ * unmerged index entries, or a colliding file is missing from disk, data may
+ * still be at stake and the caller must surface the failure instead.
+ *
+ * @returns {{ok: true, ref: string} | null} a drop token when safe to drop,
+ *   or null when the failure needs a human.
+ */
+export function maybeDropStashAfterCollision(
+  restoreResult: {stdout: string, stderr: string, status: number},
+  rootDir: string,
+  opts: {gitRunner?: Function} = {}
+): {ok: true, ref: string} | null {
+  const runner = opts.gitRunner || git;
+  const output = [restoreResult.stdout, restoreResult.stderr].filter(Boolean).join('\n');
+
+  // Unmerged index entries mean a real merge conflict that needs resolution.
+  const conflicts = getUnresolvedIndexConflicts(rootDir, {gitRunner: runner});
+  if (conflicts.ok && conflicts.files.length > 0) {
+    return null;
+  }
+
+  // Every file git refused to checkout because it already exists must in fact
+  // exist on disk for the data to be preserved. A collision file that is
+  // missing would mean the stash could not be recovered at all.
+  const collisionFiles = parseStashPopCollisionFiles(output);
+  const missing = collisionFiles.filter((file: string) => !fs.existsSync(path.join(rootDir, file)));
+  if (missing.length > 0) {
+    return null;
+  }
+
+  const drop = runner(['-C', rootDir, 'stash', 'drop', 'stash@{0}']);
+  if (drop.status !== 0) {
+    return null;
+  }
+  return { ok: true, ref: 'stash@{0}' };
+}
+
 /** @param {string} rootDir @param {string} slug */
 export function findExistingSquashCommit(rootDir: string, slug: string) {
   const result = git(['-C', rootDir, 'log', '--format=%H %s', '-50']);

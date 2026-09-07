@@ -1,8 +1,8 @@
 ---
 id: TASK-2463
 title: make first time usage autodetect and write config
-status: backlog
-assignee: []
+status: done
+assignee: [custom]
 created_date: '2026-09-06 17:40'
 labels: [user_value]
 dependencies: []

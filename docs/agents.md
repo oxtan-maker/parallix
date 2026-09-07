@@ -223,6 +223,8 @@ Note: these examples match the actual `parallix/config/agents.json` that control
 
 In an installed or published build the executable ships with a bundled `config/agents.json`. To change per-step eligibility without rebuilding or reinstalling, drop a copy at `<working-tree>/config/agents.json`; the working-tree copy is authoritative for `steps.*.eligible` and the bundled copy is used only when no working-tree copy exists.
 
+On a fresh checkout with no working-tree copy, Parallix writes one automatically on first use. The generated file lists only the agent families whose launcher is actually available on this workstation for each step, so the board and agent selection surface a self-consistent, availability-filtered set instead of every supported family. Once the working-tree copy exists, subsequent runs leave it untouched — your edits win — and you can regenerate it any time with `px config --write` (run from a repository root). Editing the generated file afterward is the normal way to trim or widen a step's eligible agents.
+
 To restrict a step to a specific agent, edit the `eligible` array. The top-level `px --help` command synopsis shows the current-invocation overrides: `px draft [<slug>] [--agent <family>]` and `px active [<slug>] [--implementer <family>]`. Use those CLI flags to force a specific agent for one command:
 
 ```sh
