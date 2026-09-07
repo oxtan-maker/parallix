@@ -2,12 +2,23 @@
 
 `workflow.config.json` is optional. Parallix merges its contents over built-in
 defaults; run `px config` to see the effective result for the current checkout.
-Use JSON values of the types listed below. Invalid JSON and invalid top-level
-or adapter-section shapes report a failure and print fallback defaults; the
-real CLI currently exits zero for those failures (see the known gaps below).
+Use JSON values of the types listed below.
 
-Field-level schema enforcement is not complete yet; see the known gaps below.
-Until that is fixed, use the documented types and the schema as the contract.
+Configuration is validated before it is merged. `px config` checks the JSON
+syntax, the top-level and adapter-section shapes, and each `adapters` field
+documented below — its type, its permitted values, and, for the closed
+sections noted in this reference, its key names. Two documented fields are
+exceptions that carry no type check: a non-string `product.name` or
+`adapters.review.tmpDir` is not reported as a configuration error, so give
+both fields string values. When any of the other checks fails, `px config`
+reports the specific issues, prints the built-in defaults it fell back to, and
+exits non-zero. The fallback is whole-file: a configuration with one rejected
+field contributes none of its overrides to the effective configuration, so fix
+the reported issue rather than relying on the rest of the file still applying.
+
+Sections not marked as closed below accept extra keys, matching the schema.
+An extra key is not an override: only the fields documented here have an
+effect.
 
 ## Product
 
@@ -30,11 +41,13 @@ failure and task storage refuses to resolve rather than silently running
 backlog-Markdown behavior under another provider name.
 
 `adapters.tasks.storage` is either a string (default `backlog`) or an object
-with string `tasksDir` and `completedDir` members. A string normally names the
-storage root, below which Parallix derives its `tasks`, `completed`, archive,
-and draft directories. If the string ends in `tasks`, it is the tasks directory
-itself and the sibling directories are derived from its parent. The object form
-overrides the two named directories.
+whose members are all strings. A string normally names the storage root, below
+which Parallix derives its `tasks`, `completed`, archive, and draft
+directories. If the string ends in `tasks`, it is the tasks directory itself
+and the sibling directories are derived from its parent. The object form
+recognises `tasksDir`, `completedDir`, and `archiveTasksDir`; each one it omits
+is derived from the parent of `tasksDir` as usual, and the drafts directory is
+always derived.
 
 `adapters.tasks.stateMap` is a string path, defaulting to `state-map.json`.
 When that relative file is absent, Parallix uses its shipped state map. Point it
@@ -101,6 +114,12 @@ string `baseUrl`, `remote`, and `repo` values identify the Forgejo server, Git
 remote (normally `review`), and `owner/repository` respectively. Environment
 values for Forgejo URL and repository take precedence where supported.
 
+`adapters.review.tmpDir` is an optional string naming the directory Parallix
+writes review artifacts into, resolved relative to the repository root when it
+is not absolute. Its default is the operating system temporary directory. Point
+it at a repository-local directory when the review sandbox may not reach the
+system temporary directory.
+
 ```json
 {
   "adapters": {
@@ -108,7 +127,8 @@ values for Forgejo URL and repository take precedence where supported.
       "provider": "forgejo",
       "baseUrl": "http://localhost:3300",
       "remote": "review",
-      "repo": "acme/delivery"
+      "repo": "acme/delivery",
+      "tmpDir": ".parallix/review-artifacts"
     }
   }
 }
@@ -121,7 +141,9 @@ default is unlimited custom-agent launches. `models` is an object whose keys
 are agent-family names and whose string values are model identifiers; unlisted
 families receive no model argument. `runners.custom` is `opencode` or `pi` and
 defaults to `opencode`. `subagents.maxParallel` is an integer or `null`,
-defaulting to no limit; zero also means no limit.
+defaulting to no limit; zero also means no limit. `runners` and `subagents` are
+closed objects: `custom` and `maxParallel` are their only permitted keys, and
+any other key is a configuration error.
 
 ```json
 {
@@ -161,9 +183,20 @@ without an implicit Node, npm, tsx, `scripts/verify-local.sh`, or directory
 layout requirement — a repository that does not configure gates selects none.
 
 Each phase is an ordered array of gate objects. A gate object has a required
-string `key` (used in logs and failure reports), a required string `command`
-(an exact runnable shell command with no trailing prose), and an optional
-numeric `order` (default `0`; gates run in ascending order).
+non-empty string `key` (used in logs and failure reports), a required
+non-empty string `command` (an exact runnable shell command with no trailing
+prose), and an optional numeric `order` (default `0`; gates run in ascending
+order).
+
+`adapters.gates` is a closed section: `requirePreIntegration`, `preHandoff`,
+`preReview`, and `preIntegration` are its only permitted keys, so a typo such
+as `requireIntegration` is a configuration error rather than a silently
+ignored setting. `requirePreIntegration` must be a boolean and each phase must
+be an array. The gate object is not closed by the same check: a key beyond
+`key`, `command`, and `order` passes validation and appears in the `px config`
+output, but gate execution reads only those three, so the extra key has no
+effect. The schema does declare the gate object closed, so do not use extra
+keys to carry data.
 
 ```json
 {
@@ -219,18 +252,3 @@ Integration requires a recorded reviewer approval, reruns the repository's
 `adapters.gates.preIntegration` commands before merging, and verifies the exact
 resulting tree. These built-in lifecycle controls remain in force alongside the
 configurable gates above.
-
-## Known configuration gaps
-
-The following schema-declared fields are deliberately not presented as working
-overrides because the audit found no end-to-end runtime effect:
-
-- `adapters.tasks.provider`: [TASK-2455.02](../backlog/tasks/task-2455.02%20-%20make-task-provider-config-effective.md)
-
-`px config` currently does not validate individual schema field types, enums,
-or unknown properties (except `adapters.tasks.provider` and
-`agents.maxConcurrentCustom`); that issue is
-tracked in [TASK-2455.03](../backlog/tasks/task-2455.03%20-%20enforce-workflow-config-schema-validation.md).
-
-Malformed JSON also currently reports a failure while the real CLI process exits
-zero; that process-status defect is tracked in [TASK-2455.04](../backlog/tasks/task-2455.04%20-%20preserve-config-command-failure-exit-status.md).

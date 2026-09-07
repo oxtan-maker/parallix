@@ -1,8 +1,8 @@
 ---
 id: TASK-2460
 title: update config documentation
-status: backlog
-assignee: []
+status: done
+assignee: [claude]
 created_date: '2026-09-06 11:46'
 labels: [user_value]
 dependencies: []

@@ -281,7 +281,13 @@ async function integrate(args: string[], options: {
         if (context.approval.ok !== true && missionLoad.mission.review) {
           const lastRound = missionLoad.mission.review.rounds[missionLoad.mission.review.rounds.length - 1];
           if (lastRound?.decision?.kind === 'approved') {
-            context.approval = { ok: true, reviewState: 'APPROVED', source: 'mission-store' };
+            // `providerDisabled` records that no review provider is configured
+            // at all (review.provider !== 'forgejo'), as opposed to a
+            // configured provider that could not be reached. Recovery may only
+            // treat the stored decision as the sole approval authority in the
+            // former case (see recoverMissionForIntegration).
+            const providerDisabled = context.approval.error === 'forgejo-off';
+            context.approval = { ok: true, reviewState: 'APPROVED', source: 'mission-store', providerDisabled };
           }
         }
       }
@@ -1212,7 +1218,14 @@ async function recoverMissionForIntegration(
     const entryRound = missionLoad.mission.review?.rounds?.length
       ? missionLoad.mission.review.rounds[missionLoad.mission.review.rounds.length - 1]
       : null;
-    if (entryRound?.decision?.kind === 'approved' && overrideApprovedAt === undefined) {
+    // A stored approval alone is not authority while a review provider exists:
+    // the provider approval must corroborate it. When no review provider is
+    // configured (`review.provider !== 'forgejo'`), there is no provider state
+    // to refresh and the stored ReviewerDecision is the only approval
+    // authority there can be — requiring a provider approval would make such a
+    // repository permanently unintegratable.
+    const providerlessStoredApproval = context.approval?.ok === true && context.approval.providerDisabled === true;
+    if (entryRound?.decision?.kind === 'approved' && overrideApprovedAt === undefined && !providerlessStoredApproval) {
       fmt.log.fail(`Mission ${missionId(context.slug)} has a stored approval without the required provider approval. Refresh provider review state before integration.`);
       throw new IntegrationAbort();
     }
