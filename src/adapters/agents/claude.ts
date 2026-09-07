@@ -1,5 +1,6 @@
 import { spawnAndTee } from '../process/spawn-tee.js';
 import { extractClaudeTelemetryFromStdout } from './claude-telemetry.js';
+import { createClaudeRenderSink } from './claude-stream-view.js';
 import type { SessionMarkerPort } from '../../application/domain-ports.js';
 import type { MissionId } from '../../domain/mission.js';
 import type { SessionRole } from '../../domain/session.js';
@@ -132,9 +133,25 @@ function startClaudeAgent({ prompt, worktree, env, resume = false, sessionId = n
     return result;
   }
 
+  // The Claude CLI's stream-json stdout is rendered for the operator on the
+  // terminal sink only (ADR 0056). spawnAndTee pushes each chunk into its tail
+  // buffer *before* writing this sink, so `extractClaudeTelemetryFromStdout`
+  // and `extractClaudeSessionId` still see the byte-identical raw JSONL.
+  // `PARALLIX_CLAUDE_RAW_STREAM=1` restores the verbatim passthrough.
+  function launch(invocation: any) {
+    const sink = createClaudeRenderSink();
+    const teeWithTail = {
+      maxTailBytes: CLAUDE_TELEMETRY_TAIL_BYTES,
+      stdoutSink: sink,
+      ...invocation.options,
+      ...teeOptions
+    };
+    return Promise.resolve(_spawnAndTee(invocation.command, invocation.args, teeWithTail))
+      .finally(() => sink.close());
+  }
+
   function staleSessionHandler(invocation: any) {
-    const teeWithTail = { maxTailBytes: CLAUDE_TELEMETRY_TAIL_BYTES, ...invocation.options, ...teeOptions };
-    return _spawnAndTee(invocation.command, invocation.args, teeWithTail)
+    return launch(invocation)
       .then(async (result: any) => {
         if (isStaleSessionResult(result) && worktree && resume) {
           try {
@@ -145,8 +162,7 @@ function startClaudeAgent({ prompt, worktree, env, resume = false, sessionId = n
             await port.delete(slug, role);
           } catch (error) { throw error; }
           const freshInv = buildClaudeInvocation({ prompt, worktree, env, resume: false, sessionId: null, model });
-          const freshTee = { maxTailBytes: CLAUDE_TELEMETRY_TAIL_BYTES, ...freshInv.options, ...teeOptions };
-          return _spawnAndTee(freshInv.command, freshInv.args, freshTee);
+          return launch(freshInv);
         }
         return result;
       })

@@ -23,6 +23,7 @@ ADR 0023 remains in WrGroceries and is cross-referenced here instead of copied.
 - `docs/adr/0053-persistence-inventory.md` — Executable inventory of all 15 ADR 0053 durable-state concepts: production readers/writers, six-class taxonomy, architecture guard enforcement, and how future cutover tasks consume the inventory
 - `docs/adr/0054-local-web-board-adapter.md` — React/Vite browser board with a Fastify loopback adapter, validated commands, SSE updates, and no browser-owned workflow authority
 - `docs/adr/0055-web-board-transport-contract.md` — Versioned, JSON-safe wire DTOs between the local web host and the browser: explicit encodings for indefinite blocks, session-count and liveness states, server-owned action states, fail-closed version handling
+- `docs/adr/0056-claude-stream-json-output-rendering.md` — Render the Claude CLI's `stream-json` stdout into a human-readable terminal view on the `spawnAndTee` `stdoutSink` seam, downstream of the telemetry tail; hand-rolled and dependency-free over the generalized-agent-library and `@anthropic-ai/claude-agent-sdk` options
 
 ## Cross-reference
 - `docs/adr/0023-ai-sdlc-configuration.md` remains in WrGroceries at `/home/magnus/code/visualBoard-task-1302/docs/adr/0023-ai-sdlc-configuration.md`.

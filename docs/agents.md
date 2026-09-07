@@ -95,6 +95,70 @@ The `qwen` family runs against the Alibaba Cloud Model Studio (Bailian) Token Pl
 - **Night discount**: qwen3.8-max calls between 22:00 and 08:00 consume credits at 50% discount (cost observation, no scheduler logic).
 - **Telemetry**: Client-side token counts are a lower bound on credit consumption (system prompt, tool schemas, and history also consume credits). Bailian console usage analytics is the authoritative credit source. `thoughts_tokens` column in stats tracks thinking/reasoning tokens separately.
 
+## Claude live output view
+
+The Claude CLI leaves no transcript on disk, so the only record of a run's
+model, session id, token usage, and cost is the machine-readable event stream
+the CLI prints while it works. Parallix therefore runs Claude in its structured
+streaming mode. That kept telemetry working but made the terminal unreadable,
+so Parallix renders the stream as human activity instead of printing the raw
+events.
+
+What you see while a claude stage runs:
+
+```
+● claude-opus-5 · session 6f1c… · 24 tools
+✳ thinking is dimmed and marked
+✳ thinking · 148 tokens
+assistant text streams as it arrives
+⚒ Bash npm test -- test/claude.test.ts
+  ✓ Bash 28 pass, 0 fail
+  ✗ Read ENOENT: no such file
+▶ sub-agent Explore · map the renderers
+  ↳ Task#1 Explore scanning src/adapters
+  ↳ Task#2 Plan drafting the plan
+◀ ✓ Task#1 Explore found 3 renderers
+● done 4m12s · 9 turns · 12400 in / 8100 out · $0.9021
+```
+
+Concurrent sub-agents (the `Agent`/`Task` tool) each get their own `#N` label,
+so parallel activity stays readable in a single flat stream. Bookkeeping the CLI
+emits but an operator cannot act on — hook and status records, rate-limit
+notices, tool-progress pings — is not rendered. A sub-agent that runs silently
+(a backgrounded one) has its own status reported instead, so no sub-agent is
+invisible.
+
+While the model is working with nothing to print, a progress indicator with
+elapsed time appears and is erased before the next line. It names what is
+happening rather than only that something is: the tool call that is outstanding,
+or the reasoning in flight. When Claude does not disclose its reasoning text,
+the token counter it does report is shown in the indicator and summarized as one
+`✳ thinking · N tokens` line, so a long pause is never unexplained.
+
+Colour follows the project's terminal-colour decision, [ADR 0042](adr/0042-workflow-cli-color-rendering-approach.md):
+`NO_COLOR`, `FORCE_COLOR=0`, and `TERM=dumb` all disable it. When stdout is not
+a TTY — a piped or captured log — there are no ANSI escapes, no spinner, and no
+cursor control at all.
+
+Two guarantees hold regardless of what is rendered:
+
+* **Rendering is display-only.** The telemetry Parallix records is read from the
+  unmodified event stream, so the recorded model, session id, token usage, and
+  cost are the same whether rendering is on or off.
+* **Unrecognized activity degrades, it does not fail.** An event kind the view
+  does not know is shown as a single dim line, and an unparseable record is
+  skipped. An upstream change to Claude's event vocabulary costs you a line of
+  output, not the run.
+
+### Restoring raw JSONL output
+
+Set `PARALLIX_CLAUDE_RAW_STREAM=1` to turn rendering off and write Claude's
+streaming events to the terminal verbatim, as before. Use it when a script
+consumes Parallix stdout, or to inspect activity the rendered view does not
+display. `PARALLIX_CLAUDE_RAW_STREAM=0` and leaving it unset both mean
+"render". The rationale, and the library alternatives that were rejected, are
+recorded in [ADR 0056](adr/0056-claude-stream-json-output-rendering.md).
+
 ## Launch output watchdog
 
 All workflow agent launches use the shared `startAgent` path and tee child stdout/stderr through the parent terminal. While the child process stays running, the harness emits a bounded status line after a configurable delay and then once per that interval until the agent result settles.
