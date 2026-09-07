@@ -32,9 +32,23 @@ The minimal-friction path rotted once without anyone noticing. Fixing the guard 
 - `2026-07-21` task-2289 introduced `LegacyActiveAdapter.validateSlug` with `if (!slug.startsWith('task-'))` while moving activation behind a port. That is the commit that broke it; nothing failed, because no test exercised an adhoc activation.
 - `2026-08-03` task-2332.04 carried the same line into `src/application/execute-mission-service.ts` and added a characterization test asserting the refusal, cementing the regression as intended behavior.
 
-So: the guard was never a decision about adhoc missions, it was an assumption copied into a new layer during a refactor and then locked in by a characterization test. Fix the assumption, do not add a compatibility shim around it — and widen the stub's slug regex, or the new e2e will silently fall back to `task-unknown`.
+So: the guard was never a decision about adhoc missions, it was an assumption copied into a new layer during a refactor and then locked in by a characterization test. Fix the assumption, do not add a compatibility shim around it — and widen the stub's slug regex (`/^Slug:\s*(task-[a-z0-9-]+)/im`), which today cannot parse an adhoc slug at all.
 
 Related: task-1358 asked for exactly this stubbed lifecycle net in `2026-06-26` and was archived `2026-07-02` still in `backlog` status, three weeks before the break.
+## Original design (pre-Parallix, `visualBoard/parallix`)
+
+The first implementation had no slug-prefix policy at all, and identity worked like this:
+
+- The mission slug is whatever follows the mission branch prefix: `extractSlugFromBranch` in `lib/core/mission-utils.js` returns `branch.slice(prefix.length).toLowerCase()` — free-form. Only the explicit-argument fast path in `inferSlug` short-circuited on `task-`; branch, directory name, and the worktree registry were the real sources of slug identity.
+- The Backlog task id is derived from the slug: `resolveTaskFile` in `lib/tools/backlog.js` sets `normalizedId = slug.toUpperCase()` and matches it against the task file's frontmatter `id:`, with filename-prefix match first and a base-id fallback for suffixed slugs (`task-1004-modern` -> `TASK-1004`).
+
+`slug.toUpperCase()` is still the rule today (`src/adapters/backlog/task-file-io.ts:85`). So the intended contract is: branch owns the slug, slug uppercased owns the task id, and nothing needs a `task-` prefix.
+
+## Task id handling (fix this too, or the guard fix is cosmetic)
+
+`syntheticTaskId` (`src/adapters/cli/commands/draft-setup.ts`) mints `ADHOC-FIX-HELLO-WORLD-GREETING-49BEDE6E` for slug `adhoc-fix-hello-world-greeting` — a sha1 suffix that breaks the slug<->id relation the resolver depends on. Lookup currently survives only because the filename prefix matches; the exact-frontmatter-id path (the resolver's hardening fallback, used when the filename no longer matches) can never hit for an adhoc mission.
+
+Make the synthetic id the slug uppercased, consistent with `task-file-io.ts` and the original design, and cover the resolver fallback in the new e2e (rename the task file, resolve by id).
 <!-- SECTION:DESCRIPTION:END -->
 
 ## Definition of Done
