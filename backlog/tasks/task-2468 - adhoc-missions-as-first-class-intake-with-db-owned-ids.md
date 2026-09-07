@@ -40,11 +40,19 @@ Keep writing to Backlog.md wherever a task file exists — a Backlog.md user sho
 
 ### Prompts
 
-`prompts/draft.md` and `prompts/execute.md` interpolate `{{taskPath}}` and instruct the agent to read the user's intent from the Backlog task file, edit its labels, and leave its `assignee` alone. For an adhoc mission there is no such file:
+`prompts/draft.md` and `prompts/execute.md` interpolate `{{taskPath}}` and instruct the agent to read the user's intent from the Backlog task file, edit its labels, and leave its `assignee` alone. For an adhoc mission there is no such file.
 
-- The draft prompt needs an adhoc form: intent comes from the free-text draft input recorded by Parallix, not from a task file.
-- Classification/labels (including the `bug` rule that gates the reproduction-test-first requirement in `prompts/draft.md`) must be readable and writable without a task file.
-- `prompts/execute.md`, `prompts/review.md`, and `prompts/act-on-review.md` must carry no stray Backlog task references in the adhoc case. Sweep every prompt and prompt builder, not only the two that interpolate `{{taskPath}}` today.
+Do NOT fork the prompt into a Backlog copy and an adhoc copy. Two near-identical prompt files is how prompt drift starts: the next agent edits one, the other rots, and nobody notices which intake got the fix. Keep one draft prompt whose body is intake-independent, and confine the difference to the intake-specific text that gets substituted in.
+
+The mechanism already exists and needs no new abstraction: `resolveClassificationInstructions` in `src/adapters/cli/commands/draft-prompts.ts` already swaps the classification paragraph based on whether the task file is synthetic, via the `{{classificationInstructions}}` placeholder. Extend that pattern:
+
+- One common draft prompt. The intake difference is a substituted block — where the intent comes from, and where classification/labels are written — not a second file.
+- Adhoc intent comes from the free-text draft input recorded by Parallix, not from a task file.
+- Classification/labels (including the `bug` rule that gates the reproduction-test-first requirement) must be readable and writable in both intakes; today the rule text names Backlog task labels.
+- `prompts/execute.md`, `prompts/review.md`, and `prompts/act-on-review.md` must carry no stray Backlog task reference in the adhoc case. Sweep every prompt and prompt builder, not only the two that interpolate `{{taskPath}}` today.
+- A test asserts the two intakes produce the same prompt except for the substituted intake block, so a future edit to one intake cannot silently skip the other.
+
+Coordinate with task-2465 (core/opinion split of every prompt): the intake difference belongs inside one of those halves as a substitution, not as a third file per stage. Whichever mission lands second reconciles.
 
 ## Guards (the point of this task)
 
