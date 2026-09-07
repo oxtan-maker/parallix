@@ -6,11 +6,12 @@ import { fileURLToPath } from 'node:url';
 import * as fmt from '../application/presentation/cli-format.js';
 import { packageRoot } from '../adapters/filesystem/package-root.js';
 import packageJson from '../../package.json' with { type: 'json' };
-import { ensureStandaloneGitRepo } from '../adapters/config/product-config.js';
+import { ensureStandaloneGitRepo, hasGitRepository } from '../adapters/config/product-config.js';
 import { loadStateMap } from '../adapters/config/state-map.js';
 import activeWorkflow from '../adapters/cli/commands/active.js';
 import { createActiveCommand } from '../interfaces/cli/active.js';
 import { recoverMissionCommand } from '../interfaces/cli/recover.js';
+import { ensureFirstRunAgentConfig } from '../adapters/agents/first-run-config.js';
 import { findTaskFile, getTaskStatus } from '../adapters/backlog/backlog.js';
 import type { BoardProgressSink } from '../application/controller/board-command.js';
 import {
@@ -523,6 +524,24 @@ export async function run(argv = process.argv.slice(2), options: RunOptions = {}
     if (parsed.command === 'verify-env') {
       const result = missionStart([], { command: 'verify-env', returnResult: true, log, error });
       return result && (result as { pass?: boolean }).pass ? 0 : 1;
+    }
+
+    // First-run agent-config autodetection runs once at workflow-command entry,
+    // never per-selection or per-render. It is strictly gated on "no working-tree
+    // config/agents.json exists" (idempotent) and degrades to the shipped default
+    // on any probe failure, so a flaky launcher can never break the command.
+    if (parsed.command === 'draft' || parsed.command === 'active' || parsed.command === 'review') {
+      // Best-effort first-run detection. Skip (do not abort the command) when the
+      // target is not a repository root: a supported non-git standalone layout
+      // must still run, and a best-effort probe should never hard-fail a command.
+      // ponytail: skip check is O(1); the write itself only happens on first run.
+      if (hasGitRepository(parsed.target)) {
+        try {
+          ensureFirstRunAgentConfig({ rootDir: parsed.target, worktree: parsed.target });
+        } catch {
+          // Detection is best-effort: fall back to the shipped default list.
+        }
+      }
     }
 
     let exitCode = 0;

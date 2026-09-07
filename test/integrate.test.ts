@@ -2376,3 +2376,66 @@ test('printIntegrationPreflight provides recovery commands when mission doc is m
     console.log = originalLog;
   }
 });
+
+test('maybeDropStashAfterCollision drops the stash on a benign file-collision', async () => {
+  const { maybeDropStashAfterCollision } = await import('../src/adapters/cli/commands/integrate-conflict.js');
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'stash-collision-benign-'));
+  try {
+    fs.mkdirSync(path.join(root, 'config'), { recursive: true });
+    // The landed squash commit already restored the file, so it exists on disk.
+    fs.writeFileSync(path.join(root, 'config', 'agents.json'), '{"filtered":true}');
+    const gitCalls: string[][] = [];
+    const gitRunner = (args: string[]) => {
+      gitCalls.push(args);
+      const cmd = args.join(' ');
+      if (cmd.includes('ls-files')) {return { status: 0, stdout: '', stderr: '' };}
+      if (cmd.includes('stash') && cmd.includes('drop')) {return { status: 0, stdout: '', stderr: '' };}
+      return { status: 1, stdout: '', stderr: '' };
+    };
+    const result = maybeDropStashAfterCollision(
+      { status: 1, stdout: '', stderr: 'config/agents.json already exists, no checkout\n' },
+      root,
+      { gitRunner }
+    );
+    assert.deepEqual(result, { ok: true, ref: 'stash@{0}' });
+    const dropCall = gitCalls.find((call) => call.includes('stash') && call.includes('drop'));
+    assert.ok(dropCall, 'a stash drop should have been issued');
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('maybeDropStashAfterCollision does not drop on a real merge conflict', async () => {
+  const { maybeDropStashAfterCollision } = await import('../src/adapters/cli/commands/integrate-conflict.js');
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'stash-collision-conflict-'));
+  try {
+    fs.mkdirSync(path.join(root, 'config'), { recursive: true });
+    fs.writeFileSync(path.join(root, 'config', 'agents.json'), '{}');
+    const gitRunner = (_args: string[]) => ({ status: 0, stdout: '100644,111111122222333344445555666677778888999,2\tconfig/agents.json\n', stderr: '' });
+    const result = maybeDropStashAfterCollision(
+      { status: 1, stdout: '', stderr: 'config/agents.json already exists, no checkout\n' },
+      root,
+      { gitRunner }
+    );
+    assert.equal(result, null);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('maybeDropStashAfterCollision does not drop when a colliding file is missing', async () => {
+  const { maybeDropStashAfterCollision } = await import('../src/adapters/cli/commands/integrate-conflict.js');
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'stash-collision-missing-'));
+  try {
+    // config/agents.json deliberately absent from disk.
+    const gitRunner = (_args: string[]) => ({ status: 0, stdout: '', stderr: '' });
+    const result = maybeDropStashAfterCollision(
+      { status: 1, stdout: '', stderr: 'config/agents.json already exists, no checkout\n' },
+      root,
+      { gitRunner }
+    );
+    assert.equal(result, null);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});

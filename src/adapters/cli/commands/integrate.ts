@@ -45,6 +45,7 @@ import {
   findExistingSquashCommit,
   resolveConflictsForMission,
   buildConflictResolutionPrompt,
+  maybeDropStashAfterCollision,
 } from './integrate-conflict.js';
 export {
   maybeUpdateGraphifyOnPrimary,
@@ -53,6 +54,7 @@ export {
   getUnresolvedIndexConflicts,
   areAllBacklogOnlyConflicts,
   parseStashPopCollisionFiles,
+  maybeDropStashAfterCollision,
   reportStashPopFailure,
   rewriteWorktreePaths,
   stashMainCheckoutIfNeeded,
@@ -747,8 +749,20 @@ async function integrate(args: string[], options: {
     if (temporaryStash?.created) {
         const restoreResult = restoreMainCheckoutStash(temporaryStash as any);
       if (restoreResult.status !== 0) {
-        reportStashPopFailure(slug, restoreResult, { rootDir: /** @type {any} */ (temporaryStash).rootDir });
-        exitCode = 1;
+        // A stash pop can fail on a pure file-collision when a stashed
+        // untracked working-tree file (e.g. a first-run config/agents.json)
+        // was committed by the landed squash merge and now already exists on
+        // disk. In that case the data is preserved and the temporary stash
+        // can be dropped; only a genuine conflict (or a missing file) should
+        // fail the run.
+        const stashRootDir = (temporaryStash as unknown as {rootDir: string}).rootDir;
+        const dropped = maybeDropStashAfterCollision(restoreResult, stashRootDir);
+        if (dropped) {
+          fmt.log.info('[RESTORE] Stashed working-tree change was preserved on disk by the landed commit; dropped the temporary stash.');
+        } else {
+          reportStashPopFailure(slug, restoreResult, { rootDir: stashRootDir });
+          exitCode = 1;
+        }
       }
     }
 
