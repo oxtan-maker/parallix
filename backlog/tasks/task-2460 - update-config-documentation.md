@@ -4,7 +4,7 @@ title: update config documentation
 status: backlog
 assignee: []
 created_date: '2026-09-06 11:46'
-labels: []
+labels: [user_value]
 dependencies: []
 ---
 
