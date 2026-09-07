@@ -4,7 +4,7 @@ title: replace parallix first value with a video
 status: backlog
 assignee: []
 created_date: '2026-09-07 09:26'
-labels: []
+labels: [user_value]
 dependencies: []
 ---
 
