@@ -27,15 +27,16 @@ Name adhoc missions `parallix-adhoc-<NNNN>` (propose a better name in the missio
 
 Slug, branch (`mission/<slug>`), worktree suffix, and mission id must stay one derivable identity, as in the original design (see below). Existing `adhoc-*` missions need a migration or a documented cutover.
 
-### Backlog.md as an external catalog, not an authority
+### Backlog.md as a mirror, not an authority
 
 ADR 0053 already decides this: `missions.status` and `missions.assignee` are operator-local authority (`src/adapters/sqlite/authority-map.ts`, `MISSIONS_AUTHORITY`), and an accepted external task is only a reference (`mission_external_task_refs`, migration `0005-mission-external-task-ref.sql`). The implementation has not followed: lifecycle status and implementer are written into, and read back from, the Backlog task file (`src/adapters/backlog/task-transitions.ts`), and ~20 source files call `resolveTaskFile`.
 
-After drafting, no command may require a task file to exist:
+Keep writing to Backlog.md wherever a task file exists — a Backlog.md user should keep seeing lifecycle state in that UI, and that mirror is good practice, not debt. What must change is that the mirror is never load-bearing: a missing, unreadable, or absent Backlog.md project degrades gracefully instead of failing the command.
 
-- `px active`, `px review`, `px integrate`, `px status`, handoff, rebase, and stats must work from the DB for an adhoc mission, and must not degrade to "synthetic/unknown task metadata" warnings (`src/adapters/cli/commands/integrate.ts`).
-- Agent assignment/implementer must be authoritative in the DB. The Backlog task file may mirror it for a Backlog-sourced mission; it must not be the only place it lives.
-- Where a Backlog task exists, record it as an external task ref, and keep the mirror one-directional.
+- `px active`, `px review`, `px integrate`, `px status`, handoff, rebase, and stats read their answers from the DB, and write the Backlog task file as a best-effort mirror when one exists. No task file means no mirror write, not an error and not a "synthetic/unknown task metadata" warning (`src/adapters/cli/commands/integrate.ts`).
+- Agent assignment/implementer and lifecycle status are authoritative in the DB. The task file mirrors them; it is never read back as the source of truth (`src/adapters/backlog/task-transitions.ts` does both today).
+- Where a Backlog task exists, record it as an external task ref and keep the mirror one-directional.
+- The one exception: drafting a Backlog.md task (`px draft task-<N>`) legitimately requires that task file, and must still fail clearly when it is missing or ambiguous.
 
 ### Prompts
 
@@ -53,6 +54,7 @@ The minimal-friction path rotted once without anyone noticing. Keeping it workin
 - Extend the stubbed-agent lifecycle e2e (`test/e2e-mission-lifecycle.test.ts`, which already runs draft -> active -> review -> integrate against stub `codex`/`opencode` binaries on a fixture PATH) to cover all three intakes: Backlog-only, adhoc-only in a repo with no `backlog/` directory, and mixed. No real model, so it runs in the default suite and is the regression net for the README first-value path.
 - The stub parses its slug with `/^Slug:\s*(task-[a-z0-9-]+)/im` and cannot see an adhoc slug at all; widen it with the identity change.
 - Assert in the same run that `px status`, `px review`, and `px integrate` accept an adhoc mission, so a prefix assumption added anywhere else fails the suite instead of the user.
+- Assert both directions of the mirror: with a Backlog task present, lifecycle transitions still land in the task file (a Backlog.md user keeps seeing them); with the `backlog/` directory deleted mid-mission, `px active`, `px review`, and `px integrate` still complete.
 - Cover the id-resolution fallback: rename or move the task file of a Backlog-sourced mission and confirm the mission still resolves.
 - Update `test/execute-mission-characterization.test.ts`, which asserts the current refusal.
 - Assertions cite files and symbols or test names, never `file.ts:<line>` from another file.
