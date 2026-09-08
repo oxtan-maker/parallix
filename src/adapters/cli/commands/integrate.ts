@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import child_process from 'node:child_process';
 import { detectRebaseState, git, getCurrentBranch } from '../../git/git.js';
-import { resolveTaskFile, getTaskStatus, setTaskStatus, completeTask, getTaskAssignee, getTaskClassification, getTaskLabels, setTaskLabels } from '../../backlog/backlog.js';
+import { resolveTaskFile, getTaskStatus, setTaskStatus, completeTask, getTaskAssignee, getTaskClassification, classificationFromLabels, CLASSIFICATION_LABELS, getTaskLabels, setTaskLabels } from '../../backlog/backlog.js';
 import { toVirtual, toActual } from '../../config/state-map.js';
 import { getPrStatus, getLatestReviewDecision, syncMerged, readToken, resolveTokenFile, listOpenPrsForSlug } from '../../forgejo/forgejo.js';
 import * as fmt from '../../../application/presentation/cli-format.js';
@@ -22,7 +22,7 @@ import { applyAgentFallback } from '../../review/review-loop.js';
 // tests keep a mock launch/transition/fallback port instead of a real agent.
 import { rebound, type ReboundContext } from '../../../application/rebound-kernel.js';
 
-import { missionId } from '../../../domain/mission.js';
+import { missionId, isDbAdhocIdentity } from '../../../domain/mission.js';
 import { applyReviewerCommand, ConfiguredReviewerEligibility, reviewStatus } from '../../../domain/review.js';
 import { agentFamily } from '../../../domain/agents.js';
 import { detectChangedAreas, isIntendedPayloadAtHead, parseFilesToAreas, orderIntegrationGates, gateMatchesChangedAreas, loadIntegrationConfig, getIntegrationGatePlan, printIntegrationGatePlan, buildIntegrationGateEnv, captureFinalIntegrationTree, resolveIntegrationVerificationWorktree, buildIntegrationVerificationInvocation, executeIntegrationGates } from './integrate-gates.js';
@@ -275,6 +275,7 @@ async function integrate(args: string[], options: {
       if (missionLoad.kind === 'found') {
         const missionContext = /** @type {Record<string, unknown>} */ (context as Record<string, unknown>);
         missionContext.missionStatus = missionLoad.mission.status;
+        missionContext.missionLabels = missionLoad.mission.labels;
         missionContext.missionReview = missionLoad.mission.review;
         missionContext.missionVersion = missionLoad.version;
         // architecture invariant: Use Mission store review as approval source when Forgejo is unavailable.
@@ -1442,6 +1443,30 @@ function printIntegrationPreflight(
     log(fmt.status('FAIL', `Backlog task: ambiguous slug ${context.slug}`));
     if (context.task.matches) {
       context.task.matches.forEach((match: string) => log(`  - ${match}`));
+    }
+  } else if (isDbAdhocIdentity(context.slug)) {
+    // An adhoc mission has no Backlog task to find: the Mission store carries
+    // its status and labels (ADR 0053), so read them there rather than warning
+    // about the absence of a file this intake never creates in the base
+    // checkout.
+    log(fmt.status('PASS', `Backlog task: none — adhoc mission, Mission store is authoritative`));
+    const classification = classificationFromLabels(context.missionLabels || []);
+    if (classification) {
+      log(fmt.status('PASS', `Mission classification: ${classification}`));
+    } else {
+      failures.push('classification');
+      log(fmt.status('FAIL', `Mission classification: expected exactly one of ${[...CLASSIFICATION_LABELS].join(', ')} in the Mission labels for ${context.slug}.`));
+    }
+
+    const adhocStatusCheck = evaluateTaskStatusForIntegration(context);
+    if (!adhocStatusCheck.ok) {
+      failures.push('task-status');
+      log(fmt.status('FAIL', `${adhocStatusCheck.message}`));
+    } else if (adhocStatusCheck.level === 'warn') {
+      warnings.push('task-status-review-approved');
+      log(fmt.status('WARN', `${adhocStatusCheck.message}`));
+    } else {
+      log(fmt.status('PASS', `${adhocStatusCheck.message}`));
     }
   } else {
     log(fmt.status('WARN', `Backlog task: no task file found for ${context.slug}; continuing with synthetic/unknown task metadata.`));

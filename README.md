@@ -8,16 +8,11 @@ Parallix is the delivery layer around those agents. It gives every piece of work
 
 Parallix is deliberately not tied to one agent vendor or model family. The same mission workflow can use different agent families for drafting, implementation, and review, including commercially hosted agents, locally hosted AI, and custom runtimes.
 
-**The first concrete thing you can do** is install the CLI and run one complete mission:
+**The first concrete thing you can do** is run one complete mission:
 
-```sh
-npm install -g @magnusekdahl/parallix
-px draft "create a hello world program"
-px active
-px integrate
-```
+[![Terminal demonstration showing a new directory, mission drafting, mission inspection, autonomous review, diff inspection, and operator integration](docs/assets/first-value-demo.gif)](docs/assets/first-value-demo.gif)
 
-That path shows the whole value: isolate the work on its own branch and worktree, let an agent execute it with checkpoints, autorun a separate review phase, and only then integrate it back when you are satisfied with the result.
+The operator inspects the drafted mission before execution, then inspects the reviewed diff and decides whether to run `px integrate`. Parallix does not merge autonomously.
 
 ## Why Parallix?
 
