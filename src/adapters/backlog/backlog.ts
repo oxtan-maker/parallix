@@ -13,9 +13,11 @@ export {
 } from './task-file-io.js';
 
 export {
+  CLASSIFICATION_LABELS,
   clearTaskAgentAssignee,
   enforceTaskAssignee,
   getTaskAssignee,
+  classificationFromLabels,
   getTaskClassification,
   getTaskImplementer,
   getTaskLabels,

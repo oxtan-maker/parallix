@@ -1263,6 +1263,49 @@ test('printIntegrationPreflight fails when no Forgejo token is available', () =>
   }
 });
 
+test('printIntegrationPreflight reads an adhoc mission from the Mission store instead of warning about a missing task file', () => {
+  const lines = [];
+  const originalLog = console.log;
+  console.log = line => lines.push(line);
+
+  try {
+    const result = printIntegrationPreflight({
+      slug: 'parallix-adhoc-0001',
+      branch: 'mission/parallix-adhoc-0001',
+      currentBranch: 'mission/parallix-adhoc-0001',
+      missionDir: '/tmp/project-parallix-adhoc-0001/missions/parallix-adhoc-0001',
+      task: { ok: false, reason: 'missing' },
+      taskStatus: null,
+      taskAssignee: null,
+      missionStatus: 'integration',
+      missionLabels: ['user_value', 'bug'],
+      forgejoUser: null,
+      taskAssigneeWarning: null,
+      pr: { exists: false, raw: 'no PR found' },
+      approval: { ok: true, reviewState: 'APPROVED' },
+      baseWorktree: '/tmp/project',
+      mainBranch: 'main',
+      mainDirty: false,
+      mainDirtyEntries: []
+    }, {
+      readTokenFn: () => 'token',
+      resolveTokenFileFn: () => '/tmp/token',
+      isForgejoReviewEnabledFn: () => false,
+      getUnresolvedIndexConflictsFn: () => ({ ok: true, files: [] })
+    });
+
+    const output = lines.join('\n');
+    assert.doesNotMatch(output, /no task file found/);
+    assert.doesNotMatch(output, /synthetic\/unknown task metadata/);
+    assert.match(output, /Backlog task: none — adhoc mission, Mission store is authoritative/);
+    assert.match(output, /Mission classification: user_value/);
+    assert.ok(!result.failures.includes('classification'), 'mission labels supply the classification');
+    assert.ok(!result.failures.includes('task-status'), 'mission lifecycle supplies the status');
+  } finally {
+    console.log = originalLog;
+  }
+});
+
 test('printIntegrationPreflight tolerates a missing task file and reports unknown classification', () => {
   const lines = [];
   const originalLog = console.log;

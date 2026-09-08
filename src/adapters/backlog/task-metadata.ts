@@ -180,15 +180,24 @@ function getTaskLabels(taskFilePath: string) {
   return parseTaskLabels(fs.readFileSync(taskFilePath, 'utf8'));
 }
 
-/** @param {string} taskFilePath */
-function getTaskClassification(taskFilePath: string) {
-  if (!taskFilePath || !fs.existsSync(taskFilePath)) {return null;}
-  const labels = getTaskLabels(taskFilePath);
+/**
+ * The mission-type classification carried by a label set: exactly one of the
+ * classification labels, or null. Shared by the Backlog task file path and the
+ * Mission store path (an adhoc mission has labels but no task file), so both
+ * answer the question the same way.
+ */
+function classificationFromLabels(labels: readonly string[]) {
   const matches = new Set();
   for (const label of labels) {
     if (CLASSIFICATION_LABELS.has(label)) {matches.add(label);}
   }
   return matches.size === 1 ? [...matches][0] : null;
+}
+
+/** @param {string} taskFilePath */
+function getTaskClassification(taskFilePath: string) {
+  if (!taskFilePath || !fs.existsSync(taskFilePath)) {return null;}
+  return classificationFromLabels(getTaskLabels(taskFilePath));
 }
 
 /** @param {string} taskFilePath */
@@ -426,6 +435,7 @@ function enforceTaskAssignee(taskFilePath: string, agentFamily: string) {
 
 export {
   CLASSIFICATION_LABELS,
+  classificationFromLabels,
   clearTaskAgentAssignee,
   enforceTaskAssignee,
   getSupportedAgents,
