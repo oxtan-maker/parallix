@@ -162,7 +162,6 @@ export interface BottleneckNarrative {
     readonly lane: BoardLane | null;
     readonly medianAgeMinutes: number | null;
     readonly reviewBounceRate: number | null;
-    readonly weeklyThroughput: number | null;
   };
 }
 
@@ -233,7 +232,6 @@ export interface BoardMetrics {
   readonly medianAgentRuntime: MetricSeries;
   readonly medianCycleTimeByState: LaneMetricSeries;
   readonly throughput: MetricSeries;
-  readonly weeklyThroughput: MetricSeries;
   /** Lifecycle `review → active` bounces per mission that entered review. */
   readonly reviewBounceRate: MetricSeries;
   readonly medianAgeByLane: LaneMetricSeries;
@@ -327,17 +325,16 @@ export function buildBoardStage(lane: BoardLane, cards: readonly MissionCard[]):
   return { lane, cards: laneCards, count: laneCards.length };
 }
 
-function emptyFlowMetrics(): Pick<BoardMetrics, 'cumulativeFlowByState' | 'medianCycleTimeByState' | 'medianAgentRuntime' | 'weeklyThroughput' | 'medianAgeByLane' | 'agentAvailability' | 'bottleneck'> {
+function emptyFlowMetrics(): Pick<BoardMetrics, 'cumulativeFlowByState' | 'medianCycleTimeByState' | 'medianAgentRuntime' | 'medianAgeByLane' | 'agentAvailability' | 'bottleneck'> {
   return {
     cumulativeFlowByState: { series: [], missingHistoryFallback: 'skip' },
     medianAgentRuntime: { series: [], missingHistoryFallback: 'null' },
     medianCycleTimeByState: { series: [], missingHistoryFallback: 'skip' },
-    weeklyThroughput: { series: [], missingHistoryFallback: 'skip' },
     medianAgeByLane: { series: [], missingHistoryFallback: 'skip' },
     agentAvailability: [],
     bottleneck: {
       sentence: 'Bottleneck unavailable: history is missing.',
-      inputs: { lane: null, medianAgeMinutes: null, reviewBounceRate: null, weeklyThroughput: null },
+      inputs: { lane: null, medianAgeMinutes: null, reviewBounceRate: null },
     },
   };
 }
@@ -363,7 +360,6 @@ export interface BoardMetricsInput {
   readonly medianStateTimes: MetricSeries;
   readonly medianCycleTimeByState?: LaneMetricSeries;
   readonly throughput: MetricSeries;
-  readonly weeklyThroughput?: MetricSeries;
   readonly reviewBounceRate: MetricSeries;
   readonly medianAgeByLane?: LaneMetricSeries;
   readonly agentAvailability?: readonly AgentAvailabilityMetric[];
@@ -382,7 +378,6 @@ export function buildBoardMetrics(input: BoardMetricsInput): BoardMetrics {
     medianStateTimes: input.medianStateTimes,
     medianCycleTimeByState: input.medianCycleTimeByState ?? defaults.medianCycleTimeByState,
     throughput: input.throughput,
-    weeklyThroughput: input.weeklyThroughput ?? defaults.weeklyThroughput,
     reviewBounceRate: input.reviewBounceRate,
     medianAgeByLane: input.medianAgeByLane ?? defaults.medianAgeByLane,
     agentAvailability: input.agentAvailability ?? defaults.agentAvailability,

@@ -351,13 +351,12 @@ export class BoardProjectionBuilder {
       medianStateTimes: { series: [], missingHistoryFallback: 'skip' },
       medianCycleTimeByState: { series: [], missingHistoryFallback: 'skip' },
       throughput: { series: [], missingHistoryFallback: 'skip' },
-      weeklyThroughput: { series: [], missingHistoryFallback: 'skip' },
       reviewBounceRate: { series: [], missingHistoryFallback: 'skip' },
       medianAgeByLane: { series: [], missingHistoryFallback: 'skip' },
       agentAvailability,
       bottleneck: {
         sentence: 'Bottleneck unavailable: history is missing.',
-        inputs: { lane: null, medianAgeMinutes: null, reviewBounceRate: null, weeklyThroughput: null },
+        inputs: { lane: null, medianAgeMinutes: null, reviewBounceRate: null },
       },
     });
   }

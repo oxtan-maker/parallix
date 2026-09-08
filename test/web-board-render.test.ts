@@ -90,6 +90,7 @@ function populated(): WebBoardSnapshot {
         metric({ family: agentFamily('mistral'), available: false, blockedForMs: Number.POSITIVE_INFINITY, reason: 'manual block' }),
       ],
       unattributedRunningSessions: null,
+      weeklyCumulativeFlow: { series: [{ at: '2026-08-30T23:59:59.999Z', counts: { backlog: 0, refined: 0, active: 0, review: 0, integration: 0, done: 21 }, observationCount: 21 }], missingHistoryFallback: 'estimate', window: { startDate: '2026-08-24', endDate: '2026-08-30', label: '2026-08-24 → 2026-08-30' } },
     },
   });
 }
@@ -211,20 +212,21 @@ test('FLOW keeps the reference two-panel layout when projected history is unavai
   assert.doesNotMatch(html, /weekly throughput/);
 });
 
-test('FLOW renders populated projected values with their observation counts', () => {
+test('FLOW renders populated projected values with whole-number display formatting', () => {
   const html = renderFlow(toWebBoardSnapshot({ ...makeProjection(), metrics: {
     ...emptyMetrics,
     health: { state: 'healthy' },
     provenance: { ...emptyMetrics.provenance, sampleSize: 4 },
     cumulativeFlowByState: { series: [{ at: '2026-08-30', counts: { active: 2, review: 1 }, observationCount: 3 }], missingHistoryFallback: 'skip' } as unknown as typeof emptyMetrics.cumulativeFlowByState,
-    medianCycleTimeByState: { series: [{ lane: 'active', value: 42, observationCount: 2 }], missingHistoryFallback: 'null' } as typeof emptyMetrics.medianCycleTimeByState,
-    weeklyThroughput: { series: [{ at: '2026-08-30', value: 3, observationCount: 3 }], missingHistoryFallback: 'skip' },
+    medianCycleTimeByState: { series: [{ lane: 'active', value: 42.5, observationCount: 2.5 }, { lane: 'review', value: 0.4, observationCount: 1 }], missingHistoryFallback: 'null' } as typeof emptyMetrics.medianCycleTimeByState,
   } }).metrics);
   assert.match(html, /Cumulative flow chart/);
   assert.match(html, /active/);
-  assert.match(html, /42m \(n=2\)/);
+  assert.match(html, /43m \(n=3\)/);
+  assert.match(html, /0m \(n=1\)/);
   assert.match(html, /cycle time/);
-  assert.match(html, /42m/);
+  assert.match(html, /43m/);
+  assert.doesNotMatch(html, /42\.5m/);
   assert.match(html, /refined → done, median/);
 });
 
@@ -324,13 +326,19 @@ test('an absent implementer renders as absent, never as an idle or named agent',
   assert.match(html, /no implementer/);
 });
 
-test('omitted, null and observed-zero running sessions each render as themselves', () => {
+test('running-agent summaries retain observed counts without command-session wording', () => {
   const html = render(populated());
-  assert.match(html, /0 command sessions/, 'an observed zero renders as zero');
-  assert.match(html, /command sessions unknown/, 'an unobserved liveness renders as unknown');
-  // mistral has no runningSessions key at all: it contributes no session text.
-  assert.equal(html.split('sessions unknown').length - 1, 1, 'only the agent-pill null case prints unknown');
+  assert.match(html, /codex<\/span><span[^>]*>0<\/span>/, 'an observed zero remains beside its agent');
+  assert.match(html, /claude<\/span><span[^>]*>blocked · 1m 30s · unknown<\/span>/, 'unknown liveness remains explicit');
+  assert.doesNotMatch(html, /command sessions?/, 'agent summaries omit the command-session phrase');
   assert.doesNotMatch(html, /unattributed sessions unknown/);
+});
+
+test('the top bar renders the server-owned decision-window completion count between WIP and attention', () => {
+  const html = renderToStaticMarkup(React.createElement(Board, {
+    snapshot: { ...populated(), inFlightWip: 5 }, onRefresh: async () => {},
+  }));
+  assert.match(html, /wip <span[^>]*>5<\/span> · 21 missions\/wk · attention <span[^>]*>1<\/span>/);
 });
 
 test('the audited reference treatment omits non-reference source and attribution text and retains its scrollbar', () => {
@@ -516,7 +524,7 @@ test('production browser code reads snapshots and uses the single guarded mutati
 test('production browser code contains no mock mission data or invented metric', () => {
   for (const file of browserSources) {
     assert.ok(!/task-\d/.test(file.text), `${file.name} must not embed a mission id`);
-    if (file.name === 'flow-panel.tsx') { continue; }
+    if (file.name === 'flow-panel.tsx' || file.name === 'top-bar.tsx') { continue; }
     for (const invented of ['missions/wk', 'median', 'throughput', 'bottleneck', 'cycle time']) {
       assert.ok(!file.text.toLowerCase().includes(invented.toLowerCase()), `${file.name} must not invent ${invented}`);
     }

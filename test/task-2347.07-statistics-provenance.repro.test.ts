@@ -37,7 +37,6 @@ test('metrics-read adapter failure projects explicit unavailable statistics inst
   assert.equal(projection.metrics.provenance.adapterSucceeded, false);
   assert.equal(projection.metrics.medianStateTimes.series.length, 0);
   assert.equal(projection.metrics.throughput.series.length, 0);
-  assert.equal(projection.metrics.weeklyThroughput.series.length, 0);
 });
 
 test('metrics projection reports controlled provenance and distinguishes no-completions from no-telemetry', async () => {

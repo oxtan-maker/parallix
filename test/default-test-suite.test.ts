@@ -25,7 +25,7 @@ const expectedIntegrationFiles = [
   'task-2350-reconcile-interrupted-handoff.test.ts', 'task-2357-certification.test.ts',
   'task-2357.a-historical-intake.test.ts', 'task-2357.c-unknown-review-fix-rounds.test.ts',
   'task-2357.d-completion-population.test.ts', 'task-2357.e-legacy-history-scope.test.ts',
-  'task-2357.f-measured-zero-throughput.test.ts', 'task-2357.g-per-metric-evidence.test.ts',
+  'task-2357.g-per-metric-evidence.test.ts',
   'task-2363-repository-identity.test.ts', 'task-2363-review-fix-rounds.test.ts',
   'task-2363-windowed-cohorts.test.ts', 'task-2367-certification.test.ts',
   'task-2367-regressions.test.ts', 'task-2367-repair.test.ts',

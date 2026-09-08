@@ -13,6 +13,7 @@ export function TopBar({ snapshot, flowOpen, onFlowToggle }: {
   onFlowToggle: () => void;
 }) {
   const wip = snapshot.inFlightWip;
+  const throughput = snapshot.metrics.weeklyCumulativeFlow?.series.at(-1)?.counts.done;
   const unattributed = 'unattributedRunningSessions' in snapshot
     ? snapshot.unattributedRunningSessions === null
       ? 'unattributed sessions unknown'
@@ -39,6 +40,7 @@ export function TopBar({ snapshot, flowOpen, onFlowToggle }: {
       </div>
       <div style={{ color: C.dim, whiteSpace: 'nowrap', flexShrink: 0 }}>
         {snapshot.wipCounts.length > 0 && <>wip <span style={{ color: C.text }}>{wip}</span> · </>}
+        {throughput === null || throughput === undefined ? 'missions/wk unknown · ' : `${throughput} missions/wk · `}
         attention <span style={{ color: C.amber }}>{snapshot.attentionQueue.length}</span>
       </div>
       <div style={{ flex: 1, minWidth: 12 }} />

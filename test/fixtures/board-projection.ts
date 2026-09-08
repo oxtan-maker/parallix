@@ -36,13 +36,12 @@ export const emptyMetrics: BoardMetrics = {
   medianAgentRuntime: emptySeries,
   medianCycleTimeByState: emptySeries as unknown as BoardMetrics['medianCycleTimeByState'],
   throughput: emptySeries,
-  weeklyThroughput: emptySeries,
   reviewBounceRate: emptySeries,
   medianAgeByLane: emptySeries as unknown as BoardMetrics['medianAgeByLane'],
   agentAvailability: [],
   bottleneck: {
     sentence: 'Bottleneck unavailable: history is missing.',
-    inputs: { lane: null, medianAgeMinutes: null, reviewBounceRate: null, weeklyThroughput: null },
+    inputs: { lane: null, medianAgeMinutes: null, reviewBounceRate: null },
   },
 };
 

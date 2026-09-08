@@ -211,7 +211,6 @@ export function buildTestRunPlan(options: TestRunPlanOptions): TestRunPlan {
     'task-2357.c-unknown-review-fix-rounds.test.ts',
     'task-2357.d-completion-population.test.ts',
     'task-2357.e-legacy-history-scope.test.ts',
-    'task-2357.f-measured-zero-throughput.test.ts',
     'task-2357.g-per-metric-evidence.test.ts',
     'task-2363-repository-identity.test.ts',
     'task-2363-review-fix-rounds.test.ts',

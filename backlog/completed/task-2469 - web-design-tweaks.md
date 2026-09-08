@@ -1,8 +1,8 @@
 ---
 id: TASK-2469
 title: web design tweaks
-status: backlog
-assignee: []
+status: done
+assignee: [codex]
 created_date: '2026-09-07 19:16'
 labels: [user_value]
 dependencies: []

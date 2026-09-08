@@ -749,10 +749,9 @@ test('transport version 2 rejects v1 payloads as incompatible clients, not inval
 });
 
 test('snapshot metrics are projected and malformed metrics fail closed', () => {
-  const snapshot = toWebBoardSnapshot(projectionWith({ metrics: { ...emptyMetrics, health: { state: 'healthy' }, provenance: { ...emptyMetrics.provenance, sampleSize: 3 }, weeklyThroughput: { series: [{ at: '2026-08-30', value: null, observationCount: 0 }], missingHistoryFallback: 'skip' } } }));
+  const snapshot = toWebBoardSnapshot(projectionWith({ metrics: { ...emptyMetrics, health: { state: 'healthy' }, provenance: { ...emptyMetrics.provenance, sampleSize: 3 } } }));
   assert.equal(snapshot.metrics.health.state, 'healthy');
   assert.equal(snapshot.metrics.provenance.sampleSize, 3);
-  assert.equal(snapshot.metrics.weeklyThroughput.series[0]?.value, null);
   assert.equal(validateWebBoardSnapshot({ ...snapshot, metrics: {} }).ok, false);
 });
 
