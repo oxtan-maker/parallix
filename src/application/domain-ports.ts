@@ -50,6 +50,12 @@ export interface MissionStore {
    * cannot have work in flight may omit it.
    */
   drain?(): Promise<void>;
+  /**
+   * Retire one mission's lifecycle rows. Irreversible, scoped to the single id,
+   * and never applied to recorded usage: a cancelled mission still cost what it
+   * cost. Stores with no cancellation authority omit it.
+   */
+  cancel?(_id: MissionId): Promise<void>;
 }
 
 /**

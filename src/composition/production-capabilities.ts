@@ -18,12 +18,16 @@ import { MissionHandoffService } from '../application/mission-handoff-service.js
 import { MissionIntakeService } from '../application/mission-intake-service.js';
 import { MissionLifecycleService } from '../application/mission-lifecycle-service.js';
 import { DraftCommandUseCase } from '../application/draft-command-use-case.js';
+import { MissionCancelService } from '../application/mission-cancel-service.js';
+import { archiveTask } from '../adapters/backlog/task-transitions.js';
 import { IntegrateCommandUseCase } from '../application/integrate-command-use-case.js';
 import type { DraftWorkflowPort } from '../application/ports/cli-workflows.js';
 import type { BoardMissionServices } from '../application/controller/board-controller.js';
 import type { CurrentWorkPort } from '../application/recording/current-work-recorder.js';
 import { createDraftWorkflowAdapter, ensureWorktree } from '../adapters/cli/commands/draft.js';
 import { readAgentConfig } from '../adapters/agents/agent-config.js';
+import { missionBranchName } from '../adapters/filesystem/mission-paths.js';
+import { conventionalWorktreePath, resolveWorktree } from '../adapters/git/worktree.js';
 import { performHandoff } from '../adapters/cli/commands/handoff.js';
 import { startReviewLoop } from '../adapters/review/review-loop.js';
 import type { SqliteDatabaseAdapter } from '../adapters/sqlite/database-adapter.js';
@@ -118,6 +122,17 @@ function createBoardDraftService(deps: {
     }),
   });
   return new DraftCommandUseCase(workflow, deps.currentWork);
+}
+
+/**
+ * The git cleanup a cancelled mission leaves behind, in the same construction
+ * `px status` prints for a stale worktree. It is advisory text: cancellation
+ * never runs git. An abandoned mission usually has no worktree left, so the
+ * conventional path stands in when `git worktree list` no longer knows the slug.
+ */
+export function missionCleanupCommand(slug: string, rootDir: string, gitFn?: Function): string {
+  const worktree = resolveWorktree(slug, { cwd: rootDir, gitFn: gitFn ?? null }) ?? conventionalWorktreePath(slug, rootDir);
+  return `git worktree remove ${worktree} && git branch -D ${missionBranchName(slug, rootDir)}`;
 }
 
 /** The browser hands off exactly as the CLI does: it supplies identity only. */
@@ -222,6 +237,17 @@ export function composeProductionCapabilities(
         workflowDeps: overrides.draftAdapterDeps,
       }),
       integrate,
+      // Only with Mission authority, and only when the store can actually
+      // perform the scoped delete.
+      ...(missionStore.cancel
+        ? {
+          cancel: new MissionCancelService(
+            missionStore as Required<Pick<MissionStore, 'cancel'>>,
+            (slug) => missionCleanupCommand(slug, rootDir),
+            (slug) => archiveTask(slug, rootDir),
+          ),
+        }
+        : {}),
     };
   }
   // Single dispatcher instance shared by CLI and TUI (TASK-2332.05)

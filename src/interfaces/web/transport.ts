@@ -74,7 +74,8 @@ export type WebBoardCommandKind =
   | 'review:submit'
   | 'review:act-on-findings'
   | 'approve:review'
-  | 'integrate:merge';
+  | 'integrate:merge'
+  | 'mission:cancel';
 export type WebCommandActionState = 'enabled' | 'ineligible' | 'unavailable';
 export type WebGateState = 'passed' | 'failed' | 'running' | 'unknown';
 export type WebWorkCertainty = 'live' | 'unknown' | 'stale';
@@ -316,7 +317,8 @@ export type WebCommandRequestKind =
   | 'draft:create'
   | 'integrate:merge'
   | 'handoff:record'
-  | 'review:submit';
+  | 'review:submit'
+  | 'mission:cancel';
 
 /** Wire artifact reference: a pointer plus observed size, never the material. */
 export interface WebHandoffArtifact {
@@ -406,6 +408,7 @@ const BOARD_COMMAND_KINDS: Readonly<Record<BoardCommand, WebBoardCommandKind>> =
   review: 'review:submit',
   integrate: 'integrate:merge',
   draft: 'draft:create',
+  cancel: 'mission:cancel',
 };
 
 const ATTENTION_KIND_COMMANDS: Readonly<Partial<Record<WebBoardCommandKind, BoardCommand>>> = {
@@ -739,11 +742,12 @@ const EVIDENCE_SOURCES: readonly string[] = ['task-markdown', 'git', 'stats', 'm
 const COMMAND_KINDS: readonly string[] = [
   'active:execute', 'mission:intake', 'draft:create', 'checkpoint:record',
   'handoff:record', 'review:submit', 'review:act-on-findings', 'approve:review',
-  'integrate:merge',
+  'integrate:merge', 'mission:cancel',
 ];
 /** The card-advertised kinds a mutation request may name (TASK-2433). */
 const COMMAND_REQUEST_KINDS: readonly string[] = [
   'active:execute', 'draft:create', 'integrate:merge', 'handoff:record', 'review:submit',
+  'mission:cancel',
 ];
 const BUCKET_LABELS: readonly string[] = ['Small', 'Medium', 'Large'];
 const ARTIFACT_KINDS: readonly string[] = ['file', 'git-range', 'url'];

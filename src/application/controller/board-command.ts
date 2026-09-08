@@ -21,7 +21,8 @@ export type BoardCommandKind =
   | 'review:submit'
   | 'review:act-on-findings'
   | 'approve:review'
-  | 'integrate:merge';
+  | 'integrate:merge'
+  | 'mission:cancel';
 
 /**
  * Domain-shaped input for the Mission commands this controller dispatches.
@@ -146,6 +147,7 @@ export const INTEGRATED_CAPABILITIES = new Set<BoardCommandKind>([
   'checkpoint:record',
   'handoff:record',
   'integrate:merge',
+  'mission:cancel',
 ]);
 
 /**

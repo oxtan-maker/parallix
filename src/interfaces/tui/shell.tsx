@@ -215,6 +215,13 @@ export function BoardShell({ projection, columns, rows, initialSelectedMissionId
     setConfirmation(null);
     const result = await controller.dispatch(request);
     setOutcome(result);
+    // A cancelled mission must leave the board without a restart: its rows are
+    // gone, so the next projection simply no longer carries the card.
+    if (kind === 'mission:cancel' && result.status === 'completed' && refreshProjection) {
+      projectionRef.current = await refreshProjection();
+      redraw();
+      return;
+    }
     if (result.error?.kind === 'conflict' && refreshProjection) {
       const refreshed = await refreshProjection();
       const refreshedMission = refreshed.stages.flatMap((stage) => stage.cards)
@@ -344,8 +351,8 @@ export function BoardShell({ projection, columns, rows, initialSelectedMissionId
         </Box>
         <Text color="gray">
           {showKeyboardHelp
-            ? 'arrows/WASD: move · Enter: execute · Ctrl+D/A/R: lifecycle · Shift+S: done · f: FLOW · ?: hide help · q/Ctrl+C: quit'
-            : 'arrows/WASD: move · Enter: execute · Ctrl+D/A/R: lifecycle · Shift+S: done · f: FLOW · ?: help · q: quit'}
+            ? 'arrows/WASD: move · Enter: execute · Ctrl+D/A/R: lifecycle · Shift+X: cancel · Shift+S: done · f: FLOW · ?: hide help · q/Ctrl+C: quit'
+            : 'arrows/WASD: move · Enter: execute · Ctrl+D/A/R: lifecycle · Shift+X: cancel · Shift+S: done · f: FLOW · ?: help · q: quit'}
         </Text>
       </Box>
 
@@ -539,6 +546,8 @@ function KeyHandler({ onExit, onNavigate, onToggleHelp, onToggleFlow, onToggleDo
     setFocusedArea,
   };
   const confirmationArmedRef = React.useRef(false);
+  /** Armed separately from Enter: cancellation deletes rows, so it takes its own key. */
+  const cancelArmedRef = React.useRef(false);
 
   useInput(React.useCallback((input, key) => {
     const {
@@ -550,6 +559,19 @@ function KeyHandler({ onExit, onNavigate, onToggleHelp, onToggleFlow, onToggleDo
     // Quit is process-wide and must not be swallowed by a confirmation modal.
     if ((input === 'q' && !key.ctrl && !key.meta) || (input === 'c' && key.ctrl)) {
       onExit();
+      return;
+    }
+    // The destructive confirmation answers only to a second Shift+X. Enter,
+    // which confirms every ordinary lifecycle command, does nothing here.
+    if (cancelArmedRef.current) {
+      if (input === 'X' && !key.ctrl && !key.meta) {
+        cancelArmedRef.current = false;
+        onConfirm();
+      }
+      if (key.escape) {
+        cancelArmedRef.current = false;
+        onCancel();
+      }
       return;
     }
     if (confirmationArmedRef.current) {
@@ -611,6 +633,12 @@ function KeyHandler({ onExit, onNavigate, onToggleHelp, onToggleFlow, onToggleDo
         confirmationArmedRef.current = onLifecycle(kind);
         return;
       }
+    }
+
+    /* Shift+X: arm cancellation for the selected mission. */
+    if (input === 'X' && !key.ctrl && !key.meta && selectedMissionId) {
+      cancelArmedRef.current = onLifecycle('mission:cancel');
+      return;
     }
 
     /* Shift+S: toggle done lane collapse.

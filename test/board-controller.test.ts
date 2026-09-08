@@ -247,8 +247,8 @@ test('isIntegratedCapability covers the Mission commands extracted so far', () =
 });
 
 test('INTEGRATED_CAPABILITIES contains active:execute and the Mission commands', () => {
-  assert.equal(INTEGRATED_CAPABILITIES.size, 6);
-  for (const kind of ['active:execute', 'mission:intake', 'draft:create', 'checkpoint:record', 'handoff:record', 'integrate:merge'] as const) {
+  assert.equal(INTEGRATED_CAPABILITIES.size, 7);
+  for (const kind of ['active:execute', 'mission:intake', 'draft:create', 'checkpoint:record', 'handoff:record', 'integrate:merge', 'mission:cancel'] as const) {
     assert.ok(INTEGRATED_CAPABILITIES.has(kind), `${kind} should be integrated`);
   }
 });

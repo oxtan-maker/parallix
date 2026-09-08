@@ -14,6 +14,7 @@ export const BOARD_ACTION_KINDS: readonly BoardCommandKind[] = [
   'review:act-on-findings',
   'approve:review',
   'integrate:merge',
+  'mission:cancel',
 ];
 
 export interface ActionBarProps {
@@ -49,7 +50,9 @@ export function ActionBar({ mission, selectedKind = null, onSelect, commandContr
               ? 'Mission cannot be activated from its current state'
               : kind === 'draft:create'
                 ? 'Draft is available only while the mission is in the pre-draft (backlog) state'
-                : 'This board dispatches active:execute and draft:create only');
+                : kind === 'mission:cancel'
+                  ? 'No cancellation authority is configured for this interface'
+                  : 'This board dispatches active:execute, draft:create and mission:cancel only');
         const selected = selectedKind === kind;
         return (
           <Box key={kind}>
@@ -89,6 +92,10 @@ export function canDispatchAction(
   if (kind === 'draft:create') {
     return Boolean(commandController?.canExecute(kind))
       && Boolean(mission?.commands.some((command) => command.command === 'draft' && command.enabled));
+  }
+  if (kind === 'mission:cancel') {
+    return Boolean(commandController?.canExecute(kind))
+      && Boolean(mission?.commands.some((command) => command.command === 'cancel' && command.enabled));
   }
   return false;
 }

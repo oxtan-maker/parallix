@@ -12,7 +12,13 @@ const outcomePresentation = {
 };
 
 export function outcomeMessage(outcome: BoardCommandResult): string {
-  if (outcome.status === 'completed') { return 'Command completed; re-query the board for durable state.'; }
+  if (outcome.status === 'completed') {
+    // A cancellation reports the git cleanup it deliberately did not run.
+    const value = outcome.value as { readonly cleanupCommand?: unknown } | undefined;
+    return typeof value?.cleanupCommand === 'string'
+      ? `Mission cancelled; usage statistics kept. Remove the git side yourself: ${value.cleanupCommand}`
+      : 'Command completed; re-query the board for durable state.';
+  }
   const evidence = outcome.durableEvidence.length > 0 ? ' Durable partial state exists; re-query the board.' : '';
   return `${outcome.error?.message ?? 'Command did not complete.'}${evidence}`;
 }

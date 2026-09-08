@@ -52,7 +52,12 @@ function CheckpointPips({ checkpoint }: { checkpoint: string }) {
 }
 
 function primaryAction(actions: readonly WebMissionCard['actions'][number][]) {
-  return actions.find((action) => action.state === 'enabled') ?? null;
+  // The destructive action never becomes the card's default button.
+  return actions.find((action) => action.state === 'enabled' && action.kind !== 'mission:cancel') ?? null;
+}
+
+function cancelAction(actions: readonly WebMissionCard['actions'][number][]) {
+  return actions.find((action) => action.state === 'enabled' && action.kind === 'mission:cancel') ?? null;
 }
 
 function FlightCard({ card, onAction, onSelect, onDragStart, selected, pendingAction }: { card: WebMissionCard; onAction: (card: WebMissionCard, action: WebMissionCard['actions'][number], control: HTMLButtonElement) => void; onSelect: (id: string) => void; onDragStart: (card: WebMissionCard, event: DragEvent<HTMLElement>) => void; selected: boolean; pendingAction: { missionId: string; kind: WebMissionCard['actions'][number]['kind'] } | null }) {
@@ -62,6 +67,7 @@ function FlightCard({ card, onAction, onSelect, onDragStart, selected, pendingAc
   const accent = card.gate === 'failed' ? C.red : familyAccent(agent);
   const actor = actorLine(card);
   const primary = primaryAction(card.actions);
+  const cancel = cancelAction(card.actions);
   // The footer carries the actions the server marked runnable for this card.
   // Which ones those are is the server's lifecycle decision, not a lane rule
   // evaluated here — the client only reads `state`.
@@ -167,7 +173,7 @@ function FlightCard({ card, onAction, onSelect, onDragStart, selected, pendingAc
         )}
       </div>
 
-      {primary !== null && (
+      {(primary !== null || cancel !== null) && (
         <div
           style={{
             display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 7,
@@ -175,7 +181,12 @@ function FlightCard({ card, onAction, onSelect, onDragStart, selected, pendingAc
             flexWrap: 'wrap',
           }}
         >
-          <ActionButton action={primary} label={primary.label} pending={pendingAction?.missionId === card.id && pendingAction.kind === primary.kind} working={spinning} onInvoke={(next, control) => onAction(card, next, control)} />
+          {cancel !== null && (
+            <ActionButton action={cancel} label={cancel.label} style={{ color: C.red, border: `1px solid ${C.red}` }} pending={pendingAction?.missionId === card.id && pendingAction.kind === cancel.kind} onInvoke={(next, control) => onAction(card, next, control)} />
+          )}
+          {primary !== null && (
+            <ActionButton action={primary} label={primary.label} pending={pendingAction?.missionId === card.id && pendingAction.kind === primary.kind} working={spinning} onInvoke={(next, control) => onAction(card, next, control)} />
+          )}
         </div>
       )}
       <Grille />

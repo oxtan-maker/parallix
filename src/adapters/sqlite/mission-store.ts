@@ -127,6 +127,10 @@ export class SqliteMissionStore implements MissionStore, MissionNelRecorder {
     return this.eventRepo.findByMissionId(missionId);
   }
 
+  async cancel(id: MissionId): Promise<void> {
+    return this.enqueue(() => this.cancelAggregate(id));
+  }
+
   private async loadAggregate(id: MissionId): Promise<MissionLoadResult> {
     const missionRows = await this.db.query<MissionRecord>(
       `SELECT id, repository_id, title, status, raw_status, assignee,
@@ -230,6 +234,38 @@ export class SqliteMissionStore implements MissionStore, MissionNelRecorder {
       reviewEvents,
     });
     return { kind: 'found', ...hydrated };
+  }
+
+  /**
+   * Delete one mission's lifecycle rows in a single transaction.
+   *
+   * Every statement filters on the one id. The `missions` row cascades
+   * `mission_labels`, `mission_checkpoints`, `mission_checkpoint_goal_checks`,
+   * `mission_reviews`, `mission_review_rounds`, `mission_review_findings`,
+   * `mission_review_resolutions`, `mission_review_stage_launches`,
+   * `mission_review_events` and `mission_external_task_refs`; the two tables
+   * below carry no foreign key and are deleted explicitly. `usage_statistics`
+   * is deliberately absent: a cancelled mission still cost what it cost.
+   */
+  private async cancelAggregate(id: MissionId): Promise<void> {
+    const pragma = await this.db.query<{ foreign_keys: number }>('PRAGMA foreign_keys');
+    if (pragma[0]?.foreign_keys !== 1) {
+      throw new Error(`Refusing to cancel ${id}: PRAGMA foreign_keys is not enabled on this connection`);
+    }
+    await this.db.beginTransaction();
+    try {
+      await this.db.execute('DELETE FROM session_markers WHERE mission_id = ?', [id]);
+      await this.db.execute('DELETE FROM board_lane_events WHERE mission_id = ?', [id]);
+      await this.db.execute('DELETE FROM missions WHERE id = ?', [id]);
+      const violations = await this.db.query('PRAGMA foreign_key_check');
+      if (violations.length > 0) {
+        throw new Error(`Refusing to commit cancel of ${id}: ${violations.length} foreign-key violation(s)`);
+      }
+      await this.db.commitTransaction();
+    } catch (error) {
+      await this.db.rollbackTransaction();
+      throw error;
+    }
   }
 
   private async saveAggregate(

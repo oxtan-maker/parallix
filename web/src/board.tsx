@@ -54,8 +54,9 @@ function setDragPreview(event: DragEvent<HTMLElement>, card: WebMissionCard) {
   requestAnimationFrame(() => preview.remove());
 }
 
-function isRequestKind(kind: WebCommandAction['kind']): kind is 'active:execute' | 'draft:create' | 'handoff:record' | 'integrate:merge' | 'review:submit' {
-  return kind === 'active:execute' || kind === 'draft:create' || kind === 'handoff:record' || kind === 'integrate:merge' || kind === 'review:submit';
+function isRequestKind(kind: WebCommandAction['kind']): kind is 'active:execute' | 'draft:create' | 'handoff:record' | 'integrate:merge' | 'review:submit' | 'mission:cancel' {
+  return kind === 'active:execute' || kind === 'draft:create' || kind === 'handoff:record'
+    || kind === 'integrate:merge' || kind === 'review:submit' || kind === 'mission:cancel';
 }
 
 export function Board({ snapshot, onRefresh }: { snapshot: WebBoardSnapshot; onRefresh: () => Promise<void> }) {
@@ -65,6 +66,12 @@ export function Board({ snapshot, onRefresh }: { snapshot: WebBoardSnapshot; onR
   const [pendingAction, setPendingAction] = useState<{ missionId: string; kind: WebCommandAction['kind'] } | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [dragged, setDragged] = useState<WebMissionCard | null>(null);
+  /**
+   * The pending destructive confirmation. Every other action dispatches on the
+   * click that invoked it; cancellation deletes rows, so it takes a second,
+   * separately labelled click that only this panel offers.
+   */
+  const [cancelPrompt, setCancelPrompt] = useState<{ card: WebMissionCard; action: WebCommandAction } | null>(null);
   const root = useRef<HTMLDivElement>(null);
   const moveSelection = (event: KeyboardEvent<HTMLDivElement>) => {
     if (event.key !== 'ArrowUp' && event.key !== 'ArrowDown') { return; }
@@ -103,7 +110,9 @@ export function Board({ snapshot, onRefresh }: { snapshot: WebBoardSnapshot; onR
       }
       if (result.status !== 'completed') { setOutcome(result.error?.message ?? result.status); return; }
       await onRefresh();
-      setOutcome(`${action.display} started.`);
+      setOutcome(action.kind === 'mission:cancel'
+        ? `Cancelled ${card.id}: its lifecycle rows are gone and its card has left the board.`
+        : `${action.display} started.`);
     } catch (error) {
       setOutcome(error instanceof Error ? error.message : String(error));
     } finally {
@@ -116,6 +125,7 @@ export function Board({ snapshot, onRefresh }: { snapshot: WebBoardSnapshot; onR
     if (action.state !== 'enabled') { return; }
     setSelectedId(card.id);
     setOutcome(null);
+    if (action.kind === 'mission:cancel') { setCancelPrompt({ card, action }); return; }
     void dispatch(card, action, control);
   };
   const dropAction = (lane: WebMissionCard['lane']) => {
@@ -177,6 +187,36 @@ export function Board({ snapshot, onRefresh }: { snapshot: WebBoardSnapshot; onR
           {shipped.map((stage) => <DoneRail key={stage.lane} stage={stage} />)}
         </div>
       </div>
+      {cancelPrompt !== null && (
+        <section
+          aria-label={`Confirm cancelling ${cancelPrompt.card.id}`}
+          style={{ margin: '0 14px 10px', padding: '9px 11px', border: '1px solid #7a2f2f', borderRadius: 5, background: '#1d1112', color: '#e0b7b7' }}
+        >
+          <p style={{ margin: 0, fontSize: 12 }}>
+            {`Cancelling ${cancelPrompt.card.id} deletes its lifecycle rows — lanes, checkpoints, review rounds, findings and session markers — and cannot be undone. Usage statistics are kept, and its git branch and worktree stay for you to remove.`}
+          </p>
+          <div style={{ display: 'flex', gap: 7, marginTop: 8 }}>
+            <button
+              type="button"
+              onClick={() => {
+                const pending = cancelPrompt;
+                setCancelPrompt(null);
+                void dispatch(pending.card, pending.action);
+              }}
+              style={{ background: '#3a1618', border: '1px solid #a83c3c', borderRadius: 4, color: '#f0a0a0', cursor: 'pointer', fontFamily: 'inherit', fontSize: 10.5, letterSpacing: 0.5, padding: '4px 10px' }}
+            >
+              {`delete ${cancelPrompt.card.id} lifecycle rows`}
+            </button>
+            <button
+              type="button"
+              onClick={() => { setCancelPrompt(null); setOutcome(`Kept ${cancelPrompt.card.id}. Nothing was deleted.`); }}
+              style={{ background: 'none', border: '1px solid #3a4550', borderRadius: 4, color: '#aab4bf', cursor: 'pointer', fontFamily: 'inherit', fontSize: 10.5, letterSpacing: 0.5, padding: '4px 10px' }}
+            >
+              keep mission
+            </button>
+          </div>
+        </section>
+      )}
       {outcome !== null && <p role="status" aria-live="polite" style={{ margin: '0 14px 10px', color: '#aab4bf' }}>{outcome}</p>}
       <OperationLog snapshot={snapshot} />
     </div>

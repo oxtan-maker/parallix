@@ -10,6 +10,7 @@ import type { MissionHandoffService } from '../mission-handoff-service.js';
 import type { MissionIntakeService } from '../mission-intake-service.js';
 import type { DraftCommandUseCase } from '../draft-command-use-case.js';
 import type { IntegrateCommandUseCase } from '../integrate-command-use-case.js';
+import type { MissionCancelService } from '../mission-cancel-service.js';
 import type { MissionId } from '../../domain/mission.js';
 import type { MissionStore, MissionVersion } from '../domain-ports.js';
 import {
@@ -55,6 +56,11 @@ export interface BoardMissionServices {
   readonly draft?: DraftCommandUseCase;
   /** Integration accepts only the mission identity; its workflow owns policy and effects. */
   readonly integrate?: Pick<IntegrateCommandUseCase, 'executeForSlug'>;
+  /**
+   * Cancellation, the one destructive lifecycle command. It too takes the
+   * mission identity alone, so no surface can widen the delete it performs.
+   */
+  readonly cancel?: Pick<MissionCancelService, 'executeForSlug'>;
 }
 
 // ---------------------------------------------------------------------------
@@ -89,6 +95,7 @@ export class BoardCommandController implements BoardCommandDispatcher {
     if (kind === 'handoff:record') { return Boolean(this.missionServices.handoffWorkflow); }
     if (kind === 'draft:create') { return Boolean(this.missionServices.draft); }
     if (kind === 'integrate:merge') { return Boolean(this.missionServices.integrate); }
+    if (kind === 'mission:cancel') { return Boolean(this.missionServices.cancel); }
     return true;
   }
 
@@ -126,6 +133,11 @@ export class BoardCommandController implements BoardCommandDispatcher {
       this.emit(operationId, 1, 'unavailable', reason);
       return unavailableCapability(kind, reason);
     }
+    if (kind === 'mission:cancel' && !this.canExecute(kind)) {
+      const reason = 'no cancellation authority is configured for this interface';
+      this.emit(operationId, 1, 'unavailable', reason);
+      return unavailableCapability(kind, reason);
+    }
     if (kind === 'handoff:record' && !this.canExecute(kind)) {
       return unavailableCapability(kind, 'no handoff workflow is configured for this interface');
     }
@@ -157,6 +169,9 @@ export class BoardCommandController implements BoardCommandDispatcher {
     }
     if (kind === 'integrate:merge') {
       return (await this.dispatchIntegrate(request)) as BoardCommandResult<T>;
+    }
+    if (kind === 'mission:cancel') {
+      return (await this.dispatchCancel(request)) as BoardCommandResult<T>;
     }
     // Unreachable: isIntegratedCapability guard above catches all non-integrated kinds
     return unavailableCapability(kind, 'unexpected integrated capability') as BoardCommandResult<T>;
@@ -273,6 +288,27 @@ export class BoardCommandController implements BoardCommandDispatcher {
     }
   }
 
+  /**
+   * Cancellation is irreversible, so the confirmation that precedes it lives on
+   * every surface (a distinct keypress on the TUI, a second explicitly labelled
+   * click on the web board, `--yes` on the CLI). This dispatch performs the
+   * delete and reports the git cleanup the operator still owns; it runs no git
+   * command of its own.
+   */
+  private async dispatchCancel(request: BoardCommandRequest): Promise<BoardCommandResult<unknown>> {
+    if (!this.missionServices.cancel) {
+      return unavailableCapability('mission:cancel', 'no cancellation authority is configured for this interface');
+    }
+    this.emit(request.operationId, 1, 'cancel', `cancelling ${request.missionId}`);
+    try {
+      const result = await this.missionServices.cancel.executeForSlug(request.missionId);
+      return completed(result);
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : 'cancellation failed';
+      return failure('execution', `mission:cancel for ${request.missionId} failed: ${reason}`);
+    }
+  }
+
   private async dispatchActive(request: BoardCommandRequest): Promise<BoardCommandResult<ExecuteMissionResult>> {
     const executeRequest: ExecuteMissionRequest = {
       operationId: request.operationId,
@@ -298,6 +334,11 @@ export class BoardCommandController implements BoardCommandDispatcher {
     // Intake creates the mission being recorded, so there is no existing status
     // precondition to resolve. Every command against an existing card is guarded.
     if (request.kind === 'mission:intake') { return null; }
+    // Cancellation has no status precondition to resolve: it deletes whatever
+    // lifecycle rows exist and archives the task file. A pre-draft card has no
+    // aggregate at all, and a stale lane is no reason to keep an abandoned
+    // mission on the board.
+    if (request.kind === 'mission:cancel') { return null; }
     if (!this.missionStore) {
       return failure('unavailable', 'Mission authority is not configured for this interface');
     }
