@@ -536,50 +536,6 @@ function hasRecordedIntake(
   );
 }
 
-/** Return the UTC ISO-week start for a timestamp. */
-function isoWeekStart(timestamp: string): string {
-  const date = new Date(timestamp);
-  const day = date.getUTCDay() || 7;
-  date.setUTCDate(date.getUTCDate() - day + 1);
-  date.setUTCHours(0, 0, 0, 0);
-  return date.toISOString();
-}
-
-/**
- * Completed outcomes grouped into ISO weeks.
- *
- * Zero completions is a measurement whenever the board has lifecycle activity
- * to measure: twelve missions moving through the lanes and none finishing is
- * the number `0`, not an absent series. The series is skipped only when there
- * is no lifecycle activity at all, because then nothing has been observed.
- */
-export function weeklyThroughputSeries(
-  outcomes: readonly MissionOutcome[],
-  asOf?: string,
-  hasLifecycleActivity = false,
-): MetricSeries {
-  if (outcomes.length === 0 && !(hasLifecycleActivity && asOf !== undefined)) {
-    return { series: [], missingHistoryFallback: 'skip' };
-  }
-  const byWeek = new Map<string, number>();
-  for (const outcome of outcomes) {
-    const week = isoWeekStart(outcome.closedAt);
-    byWeek.set(week, (byWeek.get(week) ?? 0) + 1);
-  }
-  // The injected projection clock makes the current operational week explicit
-  // when nothing has completed in it.
-  if (asOf !== undefined) {
-    const currentWeek = isoWeekStart(asOf);
-    if (!byWeek.has(currentWeek)) { byWeek.set(currentWeek, 0); }
-  }
-  return {
-    series: [...byWeek.entries()]
-      .sort(([left], [right]) => left.localeCompare(right))
-      .map(([at, value]) => ({ at, value, observationCount: value })),
-    missingHistoryFallback: 'skip',
-  };
-}
-
 /** Median age in each current lane, derived from transitions and lifecycle entries. */
 export function medianAgeByLaneSeries(
   transitions: readonly MissionTransition[],
@@ -626,24 +582,21 @@ export function medianAgeByLaneSeries(
 export function bottleneckNarrative(
   medianAgeByLane: LaneMetricSeries,
   reviewBounceRate: MetricSeries,
-  weeklyThroughput: MetricSeries,
 ): BottleneckNarrative {
   const oldest = medianAgeByLane.series
     .filter((entry): entry is { lane: BoardLane; value: number } => entry.value !== null && !TERMINAL_LANES.includes(entry.lane))
     .sort((left, right) => right.value - left.value)[0] ?? null;
   const bounceRate = reviewBounceRate.series.at(-1)?.value ?? null;
-  const throughput = weeklyThroughput.series.at(-1)?.value ?? null;
   if (!oldest) {
     return {
       sentence: 'Bottleneck unavailable: history is missing.',
-      inputs: { lane: null, medianAgeMinutes: null, reviewBounceRate: bounceRate, weeklyThroughput: throughput },
+      inputs: { lane: null, medianAgeMinutes: null, reviewBounceRate: bounceRate },
     };
   }
   const reviewText = bounceRate === null ? 'unavailable review-bounce data' : `review bounce ${bounceRate.toFixed(1)}`;
-  const throughputText = throughput === null ? 'unavailable weekly completions' : `${throughput} completed in the current reporting week`;
   return {
-    sentence: `${oldest.lane} is the oldest lane at ${formatDuration(oldest.value)} median age; ${reviewText}; ${throughputText}.`,
-    inputs: { lane: oldest.lane, medianAgeMinutes: oldest.value, reviewBounceRate: bounceRate, weeklyThroughput: throughput },
+    sentence: `${oldest.lane} is the oldest lane at ${formatDuration(oldest.value)} median age; ${reviewText}.`,
+    inputs: { lane: oldest.lane, medianAgeMinutes: oldest.value, reviewBounceRate: bounceRate },
   };
 }
 
@@ -742,9 +695,6 @@ export function buildMetrics(input: MetricsInput): ReturnType<typeof buildBoardM
     ? undefined
     : weeklyCumulativeFlowByStateSeries(historicalInitialStates, input.transitions, currentWindow);
   const cycleByState = medianCycleTimeByStateSeries(input.transitions, currentMissions);
-  // Recorded lane transitions are the evidence that there was lifecycle to
-  // measure, so a week without completions can be reported as the zero it is.
-  const weeklyThroughput = weeklyThroughputSeries(input.outcomes, input.asOf, input.transitions.length > 0);
   const medianAgeByLane = medianAgeByLaneSeries(
     input.transitions,
     input.asOf ?? input.instants.at(-1) ?? new Date(0).toISOString(),
@@ -767,11 +717,10 @@ export function buildMetrics(input: MetricsInput): ReturnType<typeof buildBoardM
       medianStateTimes: medianStateTimes(input.outcomes, input.instants, currentWindow),
       medianCycleTimeByState: cycleByState,
       throughput: throughputSeries(input.outcomes, input.instants),
-      weeklyThroughput,
       reviewBounceRate,
       medianAgeByLane,
       agentAvailability: input.agentAvailability ?? [],
-      bottleneck: bottleneckNarrative(medianAgeByLane, reviewBounceRate, weeklyThroughput),
+      bottleneck: bottleneckNarrative(medianAgeByLane, reviewBounceRate),
     }),
     medianAgentRuntime: medianAgentRuntime(input.outcomes, input.instants, currentWindow),
   };

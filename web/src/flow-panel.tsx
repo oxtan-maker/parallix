@@ -10,6 +10,8 @@ const LANE_COLORS: Readonly<Record<string, string>> = {
 
 function minutes(value: number | null): string {
   if (value === null) { return 'unavailable'; }
+  value = Math.round(value);
+  if (value === 0) { return '0m'; }
   if (value % 1440 === 0) { return `${value / 1440}d`; }
   if (value % 60 === 0) { return `${value / 60}h`; }
   return `${value}m`;
@@ -60,7 +62,7 @@ export function FlowPanel({ metrics }: { readonly metrics: WebBoardMetrics }) {
         return <div key={point.lane} style={{ display: 'flex', alignItems: 'center', gap: 9, marginBottom: 6 }}>
           <span style={{ width: 62, color: C.dim, fontSize: 10, textAlign: 'right' }}>{point.lane}</span>
           <span style={{ display: 'inline-block', height: 9, borderRadius: 2, width: `${Math.round(point.value! / longest * 145)}px`, background: color }} />
-          <span style={{ color, fontSize: 10 }}>{minutes(point.value)} (n={point.observationCount ?? 0})</span>
+          <span style={{ color, fontSize: 10 }}>{minutes(point.value)} (n={Math.round(point.observationCount ?? 0)})</span>
         </div>;
       })}
       {cycle.length > 0 && <div style={{ display: 'flex', alignItems: 'baseline', gap: 9, marginTop: 10, paddingTop: 9, borderTop: `1px solid ${C.rule}` }}>

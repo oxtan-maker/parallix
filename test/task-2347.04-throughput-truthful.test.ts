@@ -6,7 +6,6 @@ import {
   medianStateTimes,
   reviewBounceRateSeries,
   throughputSeries,
-  weeklyThroughputSeries,
 } from '../src/application/projections/metrics.js';
 import type { UsageRecord, UsageRepository } from '../src/application/ports/mission-measurements.js';
 import type { BoardLaneEventRepository } from '../src/application/ports/operation-history.js';
@@ -24,7 +23,7 @@ class InMemoryUsageRepository implements UsageRepository {
   async clear(): Promise<void> {}
 }
 
-test('throughput excludes active and review telemetry, and weekly buckets use closure week', async () => {
+test('throughput excludes active and review telemetry', async () => {
   const adapter = new ConcreteMetricsReadAdapter({
     // Partial double: this test only reads lane events, so the writing half of
     // the port is deliberately absent and the cast goes through `unknown`.
@@ -44,14 +43,6 @@ test('throughput excludes active and review telemetry, and weekly buckets use cl
   const metrics = await adapter.buildMetrics(new Map());
   assert.equal(metrics.throughput.series.at(-1)?.value, 1);
 
-  const weeks = weeklyThroughputSeries([
-    { missionId: 'task-old' as never, repositoryId: 'parallix' as never, createdAt: '2026-05-26T00:00:00Z', closedAt: '2026-06-01T00:00:00Z', cycleTimeMinutes: 10, reviewFixRounds: 0, runs: [] },
-    { missionId: 'task-current' as never, repositoryId: 'parallix' as never, createdAt: '2026-07-27T00:00:00Z', closedAt: '2026-08-02T00:00:00Z', cycleTimeMinutes: 10, reviewFixRounds: 0, runs: [] },
-  ] as unknown as readonly MissionOutcome[]);
-  assert.deepEqual(weeks.series, [
-    { at: '2026-06-01T00:00:00.000Z', value: 1, observationCount: 1 },
-    { at: '2026-07-27T00:00:00.000Z', value: 1, observationCount: 1 },
-  ]);
 });
 
 test('historical metrics exclude outcomes closed after each instant', () => {
@@ -71,7 +62,7 @@ test('historical metrics exclude outcomes closed after each instant', () => {
   assert.deepEqual(reviewBounceRateSeries(transitions, instants).series.map((point) => point.value), [1, 0.5]);
 });
 
-test('lifecycle completion survives absent telemetry, ignores later close, and emits current-week zero', async () => {
+test('lifecycle completion survives absent telemetry and ignores later close', async () => {
   const laneEventRepo = {
     async findByRepositoryId() {
       return [
@@ -93,10 +84,7 @@ test('lifecycle completion survives absent telemetry, ignores later close, and e
     { closedAt: '2026-07-06T23:30:00-02:00', cycleTimeMinutes: 8250 },
   ]);
   const metrics = await adapter.buildMetrics(new Map([['task-lifecycle-only' as never, 'done' as never]]));
-  assert.deepEqual(metrics.weeklyThroughput.series, [
-    { at: '2026-07-06T00:00:00.000Z', value: 1, observationCount: 1 },
-    { at: '2026-07-27T00:00:00.000Z', value: 0, observationCount: 0 },
-  ]);
+  assert.equal(metrics.decisionWindow?.current.completedMissions, 0);
 });
 
 test('cohort labels and implementer come from canonical Mission metadata, not telemetry', async () => {

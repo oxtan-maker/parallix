@@ -133,7 +133,6 @@ export function FlowPanel({ metrics, columns }: { readonly metrics: BoardMetrics
   const width = columns ?? dimensions.columns;
   const narrow = width < FLOW_NARROW_COLUMNS;
   const flow = metrics.cumulativeFlowByState.series.at(-1);
-  const throughput = metrics.weeklyThroughput.series.at(-1)?.value;
   const bounceRatePoint = metrics.reviewBounceRate.series.at(-1);
   // Provenance population is deliberately not displayed beside individual
   // statistics: it is the all-history telemetry the projection was derived from,
@@ -162,8 +161,6 @@ export function FlowPanel({ metrics, columns }: { readonly metrics: BoardMetrics
           <Text>{flow ? Object.entries(flow.counts).map(([lane, count]) => `${lane} ${count}`).join(' · ') : 'unavailable'}</Text>
           <Text dimColor>{history('Cumulative flow', metrics.cumulativeFlowByState.missingHistoryFallback)}</Text>
           <Text dimColor>{legend(flow)}</Text>
-          <Text>{`Weekly completions: ${display(throughput)}${coverage(metrics.weeklyThroughput.series.at(-1))}`}</Text>
-          <Text dimColor>{history('Weekly completions', metrics.weeklyThroughput.missingHistoryFallback)}</Text>
           <Text bold>READ</Text>
           <Text color="yellow">{metrics.bottleneck.sentence}</Text>
           <Text bold>Agents</Text>

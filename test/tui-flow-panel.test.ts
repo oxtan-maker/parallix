@@ -53,20 +53,20 @@ test('FLOW panel renders projection labels, values, unavailable agent, and bottl
 
   for (const expected of [
     'FLOW', 'CUMULATIVE FLOW', 'Legend', 'Median cycle time', 'Median lane age',
-    'Weekly completions: 1 (n=1)', 'Lifecycle review-bounce rate: 0 (n=1)', 'codex available',
+    'Lifecycle review-bounce rate: 0 (n=1)', 'codex available',
     'claude unavailable',
   ]) {
     assert.ok(output.includes(expected), `FLOW panel must display ${expected}. Got: ${output}`);
   }
   assert.match(output, /review is the oldest lane at 2\.0h median age;/, `FLOW panel must display the bottleneck lead. Got: ${output}`);
-  assert.match(output, /bounce 0\.0; 1 completed in the current reporting week\./, `FLOW panel must display the bottleneck detail. Got: ${output}`);
+  assert.match(output, /bounce 0\.0\./, `FLOW panel must display the bottleneck detail. Got: ${output}`);
 });
 
 test('FLOW panel states every fallback and survives a zero-history projection', async () => {
   const metrics = buildMetrics({ initialStates: new Map(), transitions: [], outcomes: [], instants: ['2026-07-22T12:00:00Z'] });
   const output = plain(renderToString(React.createElement(FlowPanel, { metrics, columns: 60 }), { columns: 60 }));
 
-  for (const expected of ['Cumulative flow history: estimate', 'Median cycle time history: null', 'Median lane age history: null', 'Weekly completions history: skip', 'Lifecycle review-bounce rate history: estimate', 'Bottleneck unavailable: history is missing.']) {
+  for (const expected of ['Cumulative flow history: estimate', 'Median cycle time history: null', 'Median lane age history: null', 'Lifecycle review-bounce rate history: estimate', 'Bottleneck unavailable: history is missing.']) {
     assert.ok(output.includes(expected), `Zero-history FLOW panel must display ${expected}. Got: ${output}`);
   }
 });
@@ -84,7 +84,6 @@ test('FLOW panel visibly labels unavailable and partial health without treating 
 
   assert.match(unavailableOutput, /Statistics: unavailable · population n=3/);
   assert.match(partialOutput, /Statistics: partial · population n=3/);
-  assert.match(partialOutput, /Weekly completions: 1 \(n=1\)/);
   assert.match(partialOutput, /Lifecycle review-bounce rate: 0 \(n=1\)/);
   assert.match(partialOutput, /review: 120 min \(n=1\)/);
 });
@@ -140,6 +139,5 @@ test('FLOW panel switches to textual layout at narrow width and after a resize',
   const output = stdout.lastFrame();
   instance.unmount();
   assert.match(output, /FLOW · textual/, `Resized FLOW layout must expose textual mode. Got: ${output}`);
-  assert.match(output, /Weekly completions: 1/, `Textual FLOW layout must retain its value. Got: ${output}`);
   assert.match(output, /Median lane age/, `Textual FLOW layout must retain its label. Got: ${output}`);
 });

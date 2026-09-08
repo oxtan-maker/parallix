@@ -281,21 +281,18 @@ test('FLOW projection derives lane rows, agent availability, and a deterministic
   assert.equal(metrics.medianCycleTimeByState.series.find((entry) => entry.lane === 'active')?.value, 90);
   assert.equal(metrics.medianCycleTimeByState.series.find((entry) => entry.lane === 'review')?.value, 120);
   assert.equal(metrics.medianAgeByLane.series.find((entry) => entry.lane === 'review')?.value, 120);
-  assert.equal(metrics.weeklyThroughput.series[0]?.value, 2);
   assert.deepEqual(metrics.agentAvailability.map((agent) => [agent.family, agent.available]), [['codex', true], ['claude', false]]);
-  assert.equal(metrics.bottleneck.sentence, 'review is the oldest lane at 2.0h median age; review bounce 0.5; 2 completed in the current reporting week.');
+  assert.equal(metrics.bottleneck.sentence, 'review is the oldest lane at 2.0h median age; review bounce 0.5.');
 });
 
 test('FLOW projection reports explicit missing history without fabricated values', () => {
   const metrics = buildMetrics({ initialStates: new Map(), transitions: [], outcomes: [], instants: [now], asOf: now });
   assert.equal(metrics.medianCycleTimeByState.missingHistoryFallback, 'null');
   assert.ok(metrics.medianCycleTimeByState.series.every((entry) => entry.value === null));
-  assert.equal(metrics.weeklyThroughput.missingHistoryFallback, 'skip');
-  assert.deepEqual(metrics.weeklyThroughput.series, []);
   assert.equal(metrics.bottleneck.sentence, 'Bottleneck unavailable: history is missing.');
   assert.deepEqual(medianAgeByLaneSeries([], now).series.map((entry) => entry.value), [null, null, null, null, null, null]);
   assert.equal(medianCycleTimeByStateSeries([]).missingHistoryFallback, 'null');
-  assert.equal(bottleneckNarrative(metrics.medianAgeByLane, metrics.reviewBounceRate, metrics.weeklyThroughput).sentence, 'Bottleneck unavailable: history is missing.');
+  assert.equal(bottleneckNarrative(metrics.medianAgeByLane, metrics.reviewBounceRate).sentence, 'Bottleneck unavailable: history is missing.');
 });
 
 // ---------------------------------------------------------------------------

@@ -136,7 +136,6 @@ export function BoardShell({ projection, columns, rows, initialSelectedMissionId
   const attnCount = projection.attentionQueue.filter(
     (item) => item.reason.kind !== 'none',
   ).length;
-  const throughput = projection.metrics.weeklyThroughput.series.at(-1)?.value ?? null;
   const maxVisibleCards = visibleCardsForHeight(mode, height);
   const [navigation, setNavigation] = React.useState(() => {
     const initial = createNavigationState(projection);
@@ -256,11 +255,6 @@ export function BoardShell({ projection, columns, rows, initialSelectedMissionId
           <Text color="gray">{` wip ${wipCount}`}</Text>
           <Text color="gray">{` · attention `}</Text>
           <Text color="yellow">{String(attnCount)}</Text>
-          {throughput !== null && (
-            <>
-              <Text color="gray">{` · ${throughput}/wk`}</Text>
-            </>
-          )}
         </Box>
         <Box>
           {(hasStale || hasUnavailable) && (

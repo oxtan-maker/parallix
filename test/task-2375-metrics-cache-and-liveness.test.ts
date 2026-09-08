@@ -97,13 +97,12 @@ test('TASK-2375 SC4: repeated refreshes during AgentBlock reuse slow metrics cac
         medianAgentRuntime: { series: [], missingHistoryFallback: 'null' },
         medianCycleTimeByState: { series: [], missingHistoryFallback: 'skip' },
         throughput: { series: [], missingHistoryFallback: 'skip' },
-        weeklyThroughput: { series: [], missingHistoryFallback: 'skip' },
         reviewBounceRate: { series: [], missingHistoryFallback: 'skip' },
         medianAgeByLane: { series: [], missingHistoryFallback: 'skip' },
         agentAvailability: _agentAvailability ?? [],
         bottleneck: {
           sentence: 'test',
-          inputs: { lane: null, medianAgeMinutes: null, reviewBounceRate: null, weeklyThroughput: null },
+          inputs: { lane: null, medianAgeMinutes: null, reviewBounceRate: null },
         },
       };
     },
@@ -189,13 +188,12 @@ test('TASK-2375 SC4: fresh agent availability delivered on cache hit', async () 
         medianAgentRuntime: { series: [], missingHistoryFallback: 'null' },
         medianCycleTimeByState: { series: [], missingHistoryFallback: 'skip' },
         throughput: { series: [], missingHistoryFallback: 'skip' },
-        weeklyThroughput: { series: [], missingHistoryFallback: 'skip' },
         reviewBounceRate: { series: [], missingHistoryFallback: 'skip' },
         medianAgeByLane: { series: [], missingHistoryFallback: 'skip' },
         agentAvailability: agentAvailability ?? [],
         bottleneck: {
           sentence: 'test',
-          inputs: { lane: null, medianAgeMinutes: null, reviewBounceRate: null, weeklyThroughput: null },
+          inputs: { lane: null, medianAgeMinutes: null, reviewBounceRate: null },
         },
       };
     },

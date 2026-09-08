@@ -121,7 +121,7 @@ export function sessionsText(metric: WebAgentAvailability): string {
     parts.push(`blocked · ${durationText(metric.blockedFor)}`);
   }
   if ('runningSessions' in metric) {
-    parts.push(metric.runningSessions === null ? 'command sessions unknown' : `${metric.runningSessions} command sessions`);
+    parts.push(metric.runningSessions === null ? 'unknown' : String(metric.runningSessions));
   }
   return parts.join(' · ');
 }
