@@ -394,7 +394,11 @@ async function integrate(args: string[], options: {
     const branch = missionBranchName(slug, baseWorktree);
     const mainTitle = missionTitle(slug) || slug;
     const summary = mainTitle.replace(/\s+/g, ' ').trim();
-    const mainTaskFile = ((context.task as any).taskFile as string).replace(executionDir, baseWorktree as string);
+    // A DB-owned adhoc identity has no Backlog task file; the closeout below is
+    // best-effort and guards every task-file access. Keep mainTaskFile empty for
+    // adhoc so the fs.existsSync guards below no-op rather than crash.
+    const rawTaskFile = (context.task as any)?.taskFile as string | undefined;
+    const mainTaskFile = rawTaskFile ? rawTaskFile.replace(executionDir, baseWorktree as string) : '';
     // The mission branch may contain an agent edit to the task file. Preserve
     // the base branch's valid classification if that edit drops or corrupts
     // the labels; post-integration stats resolve the completed file only after

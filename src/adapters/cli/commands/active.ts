@@ -10,6 +10,7 @@ import { resolveTaskFile, transitionTask, getTaskStatus, getTaskImplementer } fr
 import { recordStageStatsSafe, startReviewLoop } from '../../review/review-loop.js';
 import * as repairHandoff from './repair-handoff.js';
 import { runtimeAssetStore } from '../../assets/runtime-assets.js';
+import { isDbAdhocIdentity } from '../../../domain/mission.js';
 // TASK-2377.05 (SC3/SC4): both handoff relaunch loops run through the one
 // rebound kernel, so a bounce is only reported fixed when the check that failed
 // re-runs and passes. The kernel owns the per-occurrence budget in memory.
@@ -642,12 +643,28 @@ function buildCheckpointContext(slug) {
   return `Most recent checkpoint: ${path.basename(latest)} — ${firstLine}\nResume from there, or start the next checkpoint if that one is complete.`;
 }
 
-/** @param {string} slug @param {string} rootDir */
+/**
+ * Resolve the Backlog task path for an execute prompt, or null when there is
+ * no real task file (task-2468, F5). An adhoc mission has no Backlog backing in
+ * an adhoc-only repository, so the builder must not fabricate a path — the
+ * previous `<${slug}>.md` placeholder pointed at a file that does not exist and
+ * instructed the execute agent to preserve a literal path of angle brackets.
+ * The task file is a best-effort one-way mirror; its absence is not a failure.
+ *
+ * @param {string} slug
+ * @param {string} rootDir
+ * @returns {string | null}
+ */
 function resolveExecuteTaskPath(slug, rootDir) {
   const resolution = resolveTaskFile(slug, rootDir);
   if (resolution && resolution.ok && resolution.taskFile) {
     return resolution.taskFile;
   }
+  // Backlog-backed (`task-<N>`) missions anchor to their task file. When none
+  // exists yet the shared execute prompt still names the canonical slot so the
+  // agent preserves the right file once it is drafted; adhoc identities never
+  // reach this branch's rendered output because buildExecutePrompt strips the
+  // Backlog-task lines for them (isDbAdhocIdentity below).
   return path.join(rootDir, 'backlog', 'tasks', `<${slug}>.md`);
 }
 
@@ -659,12 +676,36 @@ function buildExecutePrompt(slug, checkpointContext, options = {}) {
   const missionPath = path.join(missionDirForSlug(rootDir, slug), 'MISSION.md');
   const missionDir = path.dirname(missionPath);
   const taskPath = resolveExecuteTaskPath(slug, rootDir);
-  return template
+
+  // Backlog task instructions are adhoc-inapplicable (task-2468, F5): a
+  // DB-owned adhoc mission has no Backlog backing in an adhoc-only repository,
+  // so the shared execute prompt must not carry the `Backlog task:` header, the
+  // "Backlog task presence" preflight bullet, or the preserve/lifecycle-
+  // metadata instructions that reference a file that does not exist. Strip
+  // those Backlog-task lines only for a DB-owned adhoc identity; Backlog-backed
+  // (`task-<N>`) missions keep them even when the task file is not yet on disk.
+  const adhocNoTaskFile = isDbAdhocIdentity(slug);
+  let body = template;
+  if (adhocNoTaskFile) {
+    body = body
+      .split('\n')
+      .filter((line) => {
+        const trimmed = line.trim();
+        if (trimmed.startsWith('Backlog task:')) {return false;}
+        if (trimmed === '- Backlog task presence') {return false;}
+        if (/preserve `\{\{taskPath\}\}`/.test(line)) {return false;}
+        if (/do not change the Backlog task's status/.test(line)) {return false;}
+        return true;
+      })
+      .join('\n');
+  }
+
+  return body
     .replaceAll('{{slug}}', slug)
     .replaceAll('YYYY', year)
     .replaceAll('{{missionPath}}', missionPath)
     .replaceAll('{{missionDir}}', missionDir)
-    .replaceAll('{{taskPath}}', taskPath)
+    .replaceAll('{{taskPath}}', taskPath || '')
     .replaceAll('{{checkpoint_context}}', checkpointContext || '');
 }
 

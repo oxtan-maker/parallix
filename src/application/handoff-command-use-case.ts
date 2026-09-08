@@ -26,8 +26,11 @@ import {
   reviewStatus,
 } from '../domain/review.js';
 import { agentFamily } from '../domain/agents.js';
+import type { AgentFamily } from '../domain/agents.js';
 import { artifactReference } from '../domain/net-engineering-lines.js';
+import { isDbAdhocIdentity } from '../domain/mission.js';
 import type { HandoffWorkflowPorts, HandoffResult } from './ports/handoff-workflow.js';
+import type { MissionStore } from './domain-ports.js';
 import { rebound } from './rebound-kernel.js';
 
 /**
@@ -601,6 +604,34 @@ export class HandoffCommandUseCase {
    * 3. Transitions Backlog task to 'review'.
    * 4. Commits and pushes the Backlog state change to Forgejo.
    */
+  /**
+   * Derive the implementer agent family for a DB-owned adhoc identity from the
+   * operator database. The Backlog task file is a best-effort one-way mirror
+   * only; a deleted mirror must not strand handoff. The mission store's
+   * `assignee` is set to the active-launch agent by the authoritative lifecycle
+   * transition (decideMission), so this resolves once `px active` has run.
+   */
+  private async deriveImplementerFromMissionStore(
+    slug: string,
+    missionServicesFn: (_rootDir: string, _options: Record<string, unknown>) => Promise<{ store: MissionStore }>,
+    rootDir: string,
+    missionDirPath: string,
+  ): Promise<AgentFamily | null> {
+    try {
+      const missionServices = await missionServicesFn(rootDir, { missionDir: missionDirPath });
+      // The port types the store load loosely; the adapter resolves the full
+      // Mission aggregate, so read the assignee through a typed cast.
+      const missionLoad = /** @type {any} */ (await missionServices.store.load(slug));
+      if (missionLoad?.kind === 'found' && missionLoad.mission?.assignee) {
+        return missionLoad.mission.assignee;
+      }
+    } catch (_) {
+      // A store read failure must not strand handoff; the caller's later
+      // identity checks remain authoritative.
+    }
+    return null;
+  }
+
   async performHandoff(slug: string, options = {}): Promise<HandoffResult> {
     const ports = this.ports;
     const opts = options;
@@ -672,12 +703,21 @@ export class HandoffCommandUseCase {
       }
     }
 
-    // Step 0: Resolve Backlog task for identity derivation
+    // Step 0: Resolve Backlog task for identity derivation.
+    // A DB-owned adhoc identity (`parallix-adhoc-<NNNN>`) is authoritative in the
+    // operator database; its Backlog task file is a best-effort one-way mirror
+    // only. A missing or deleted mirror must not block handoff — the identity
+    // and lifecycle are DB-authoritative. Backlog-backed missions keep the strict
+    // contract: a missing task file is still a hard failure.
     const taskResolution = ports.backlog.resolveTaskFile(slug, rootDir);
-    if (!taskResolution.ok) {
+    const dbAdhocIdentity = isDbAdhocIdentity(slug);
+    if (!taskResolution.ok && !dbAdhocIdentity) {
       const msg = `Backlog task file for ${fmt.slug(slug)} not found or ambiguous: ${taskResolution.reason}.`;
       error(msg);
       return { ok: false, error: msg };
+    }
+    if (dbAdhocIdentity && !taskResolution.ok) {
+      log(fmt.status('WARN', `No Backlog mirror for DB-owned adhoc identity ${fmt.slug(slug)}; identity and lifecycle are DB-authoritative.`));
     }
 
     // Pre-handoff Content Integrity Check
@@ -759,7 +799,12 @@ export class HandoffCommandUseCase {
     const forgejoEnabled = isForgejoReviewEnabledFn(rootDir);
 
     const { forgejoUser: reviewStateUser } = await ports.reviewIdentity.resolveReviewIdentity(slug, rootDir, {});
-    const forgejoUser = reviewStateUser || ports.backlog.getTaskImplementer(taskResolution.taskFile);
+    // Implementer derivation: prefer the review state, then the Backlog mirror
+    // (Backlog-backed missions), then the DB-authoritative mission store's
+    // assignee (DB-owned adhoc identities whose mirror was deleted).
+    const forgejoUser = reviewStateUser
+      || (taskResolution.taskFile ? ports.backlog.getTaskImplementer(taskResolution.taskFile) : null)
+      || (await this.deriveImplementerFromMissionStore(slug, missionServicesFn, rootDir, missionDirPath));
 
     if (!forgejoUser) {
       error('forgejoUser is required for performHandoff. Ensure the mission Review or the Backlog task has an agent family assigned.');
@@ -1180,9 +1225,15 @@ export class HandoffCommandUseCase {
 
     const taskImplementer = forgejoUser;
     if (!await ports.backlog.transitionTask(slug, 'review', { implementer: taskImplementer, rootDir, log })) {
-      const msg = `Could not transition task ${fmt.slug(slug)} to review.`;
-      error(msg);
-      return { ok: false, error: msg };
+      // A DB-owned adhoc identity has no Backlog mirror to transition; the
+      // authoritative lifecycle transition above already recorded the review
+      // state. Backlog-backed missions keep the hard failure.
+      if (!isDbAdhocIdentity(slug)) {
+        const msg = `Could not transition task ${fmt.slug(slug)} to review.`;
+        error(msg);
+        return { ok: false, error: msg };
+      }
+      log(fmt.status('WARN', `No Backlog mirror to transition for DB-owned adhoc identity ${fmt.slug(slug)}; DB-authoritative lifecycle already recorded the review transition.`));
     }
 
     if (forgejoEnabled && token) {

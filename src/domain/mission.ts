@@ -18,6 +18,42 @@ export function missionId(value: string): MissionId {
 
 export const missionSlug = missionId;
 
+/**
+ * A DB-owned adhoc identity is `parallix-adhoc-<NNNN>` (task-2468): its slug,
+ * mission id, branch, and worktree suffix all derive from a repository-scoped
+ * counter, so it needs no Backlog task file. Unlike `isMissionSlugCandidate`,
+ * this recognizes only the DB-owned namespace — the `task-` and legacy
+ * `adhoc-` backings are intentionally excluded — so callers can tell a
+ * DB-authoritative identity from a file-backed one without a filesystem read.
+ *
+ * @param {unknown} value
+ */
+export function isDbAdhocIdentity(value: unknown): boolean {
+  return typeof value === 'string' && /^parallix-adhoc-\d{4,}$/i.test(value.trim());
+}
+
+/**
+ * A mission slug candidate is one of three backings: `task-<…>` (a Backlog
+ * task), `adhoc-<…>` (the legacy free-text identity, still accepted so an
+ * existing `adhoc-*` mission stays resolvable), or `parallix-adhoc-<NNNN>` (the
+ * DB-owned, repository-scoped identity minted by `allocateAdhocIdentity`). No
+ * content hash: the counter is the sole origin, so slug, mission id, branch,
+ * and worktree suffix stay one derivable identity.
+ *
+ * Lives in the domain layer (task-2468, F7): it is a pure predicate over a slug
+ * string with no filesystem dependency, so the shared validator has no adapter
+ * edge and `execute-mission-service` can import it from the domain without a
+ * boundary-allowlisted application→adapter import.
+ *
+ * @param {unknown} value
+ */
+export function isMissionSlugCandidate(value: unknown): boolean {
+  return (
+    typeof value === 'string' &&
+    /^(?:(?:task|adhoc)-[a-z0-9][a-z0-9.-]*|parallix-adhoc-\d{4,})$/i.test(value.trim())
+  );
+}
+
 export const MISSION_STATUSES = [
   'backlog',
   'refined',

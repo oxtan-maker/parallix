@@ -20,7 +20,7 @@ interface StatsOptions {
 }
 
 import type { MissionStore } from '../../../application/domain-ports.js';
-import { missionId } from '../../../domain/mission.js';
+import { missionId, isDbAdhocIdentity } from '../../../domain/mission.js';
 
 interface StatsRow {
   date?: string;
@@ -446,6 +446,29 @@ function resolveMissionClassification(slug, rootDir = process.cwd()) {
 }
 
 /**
+ * Resolve the mission classification for a DB-owned adhoc identity from the
+ * operator store's mission labels. An adhoc identity has no Backlog task file,
+ * so its classification (the `unknown`/`ai_sdlc`/`user_value` label minted by the
+ * synthetic task at draft) is authoritative in the store. Returns null when the
+ * store has no readable classification.
+ */
+async function resolveAdhocClassification(slug: string, missionStore: MissionStore) {
+  if (!isDbAdhocIdentity(slug) || !missionStore) {return null;}
+  try {
+    const result = await missionStore.load(missionId(slug));
+    if (result.kind === 'found') {
+      const classification = (result.mission.labels || [])
+        .map((label: string) => String(label).toLowerCase())
+        .find((label: string) => isValidClassification(label));
+      if (classification) {return classification;}
+    }
+  } catch (_) {
+    // A store read failure falls through to null; the caller keeps its failure path.
+  }
+  return null;
+}
+
+/**
  * Persist one measurement through the `MeasurementStorePort`.
  *
  * The canonicalization and validation rules are unchanged; only the sink
@@ -497,11 +520,14 @@ async function recordIntegrationStats(options = {}) {
     );
   }
 
-  const resolution = resolveMissionClassification(slug, rootDir);
-  if (!resolution.classification) {
-    throw new Error(`Cannot record integration stats for ${slug}: ${resolution.error || 'missing classification'}`);
+  // A DB-owned adhoc identity has no Backlog task file; its classification is
+  // authoritative in the operator store. Resolve it from the store so
+  // post-integration stats remain DB-authoritative.
+  const classification = await resolveAdhocClassification(slug, missionStore)
+    ?? resolveMissionClassification(slug, rootDir).classification;
+  if (!classification) {
+    throw new Error(`Cannot record integration stats for ${slug}: missing classification`);
   }
-  const { classification } = resolution;
   const implementerInfo = await deriveImplementerAndFixRounds(slug, rootDir, missionStore);
  const result = upsertMeasurementRow({
     date,

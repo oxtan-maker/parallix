@@ -872,6 +872,24 @@ export const ADR0053_PERSISTENCE_INVENTORY: readonly ADR0053BoundaryEntry[] = [
     classification: 'database-owned-domain-state',
     cutoverTask: null,
   },
+  {
+    id: 'adhoc-counter-read',
+    concept: 'Mission',
+    pathType: 'default',
+    fileLocation: 'src/adapters/sqlite/adhoc-counter.ts',
+    operation: 'read',
+    classification: 'database-owned-domain-state',
+    cutoverTask: 'task-2468',
+  },
+  {
+    id: 'adhoc-counter-write',
+    concept: 'Mission',
+    pathType: 'default',
+    fileLocation: 'src/adapters/sqlite/adhoc-counter.ts',
+    operation: 'write',
+    classification: 'database-owned-domain-state',
+    cutoverTask: 'task-2468',
+  },
 ] as const;
 
 /**
