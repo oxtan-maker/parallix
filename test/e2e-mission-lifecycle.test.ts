@@ -98,9 +98,9 @@ function missionTitleFromTask(taskPath, slug) {
 }
 
 const prompt = process.argv[process.argv.length - 1] || '';
-const slug = match(prompt, /^Slug:\\s*(task-[a-z0-9-]+)/im)
-  || match(prompt, /^Mode: act-on-review\\. Branch:\\s*mission\\/(task-[a-z0-9-]+)/im)
-  || match(prompt, /^Mode: review\\. .*?Mission:\\s+.*?(task-[a-z0-9-]+)/im)
+const slug = match(prompt, /^Slug:\\s*((?:task-[a-z0-9-]+|parallix-adhoc-\\d+))/im)
+  || match(prompt, /^Mode: act-on-review\\. Branch:\\s*mission\\/((?:task-[a-z0-9-]+|parallix-adhoc-\\d+))/im)
+  || match(prompt, /^Mode: review\\. .*?Mission:\\s+.*?((?:task-[a-z0-9-]+|parallix-adhoc-\\d+))/im)
   || 'task-unknown';
 const missionPath = match(prompt, /^Mission path:\\s*(.+)$/m) || match(prompt, /^Mission:\\s*(.+)$/m);
 const missionDir = match(prompt, /^Mission dir:\\s*(.+)$/m) || (missionPath ? path.dirname(missionPath) : null);
@@ -179,7 +179,9 @@ if (/^Mode: execute after lock\\./m.test(prompt)) {
     '| Criterion | Evidence | Status |',
     '|-----------|----------|--------|',
     '| Mission scaffold exists | missions/' + slug + '/MISSION.md:1 | PASS |',
-    '| Backlog task preserved | backlog/tasks/' + path.basename(taskPath) + ':1 | PASS |',
+    ...(taskPath
+      ? ['| Backlog task preserved | backlog/tasks/' + path.basename(taskPath) + ':1 | PASS |']
+      : ['| Adhoc identity authoritative | test/task-2468-adhoc-lifecycle-repro.test.ts | PASS |']),
     '',
     'Next action: Run review.',
     ''
@@ -694,6 +696,284 @@ function runScenario({ launchFromFeatureBranch = false, integrate = true, postIn
   }
 }
 
+/**
+ * Discover the adhoc slug a free-text draft materialized. The draft writes the
+ * mission under the mission worktree's `missions/` dir; the worktree is the
+ * sibling of the base repo named `<repo>-<slug>` (the configured worktree
+ * pattern). The adhoc identity is the non-`task-` mission dir.
+ */
+function discoverAdhocSlug(repoRoot) {
+  const parent = path.dirname(repoRoot);
+  const base = path.basename(repoRoot);
+  if (!fs.existsSync(parent)) {return null;}
+  const siblings = fs.readdirSync(parent).filter((d) => d.startsWith(base + '-') && d !== base);
+  for (const sibling of siblings) {
+    const missionsDir = path.join(parent, sibling, 'missions');
+    if (!fs.existsSync(missionsDir)) {continue;}
+    const adhoc = fs.readdirSync(missionsDir)
+      .filter((d) => !d.startsWith('.'))
+      .find((d) => !d.startsWith('task-'));
+    if (adhoc) {return adhoc;}
+  }
+  return null;
+}
+
+/**
+ * Adhoc-only fixture: a repository with no `backlog/` directory at all. This is
+ * intake case (2) from task-2468. Without a backlog dir, `px draft` of a
+ * free-text prompt must still materialize a DB-owned `parallix-adhoc-<NNNN>`
+ * mission and reach the lifecycle.
+ */
+function setupAdhocRepository({ title }) {
+  const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'parallix-e2e-'));
+  const repoRoot = path.join(tmpRoot, 'repo');
+  const binDir = path.join(repoRoot, 'bin');
+  const stateHome = path.join(tmpRoot, 'parallix-home');
+  const reviewTmpDir = path.join(tmpRoot, 'review-artifacts');
+
+  // No backlog/ directory: the defining trait of the adhoc-only intake.
+  fs.mkdirSync(path.join(repoRoot, 'config'), { recursive: true });
+  fs.mkdirSync(reviewTmpDir, { recursive: true });
+
+  const agentStub = lifecycleStubSource();
+  writeExecutable(path.join(binDir, 'opencode'), agentStub);
+  writeExecutable(path.join(binDir, 'codex'), agentStub);
+  fs.symlinkSync(process.execPath, path.join(binDir, 'node'));
+  fs.symlinkSync(commandDir('git'), path.join(binDir, 'git'));
+  fs.symlinkSync(commandDir('bash'), path.join(binDir, 'bash'));
+  fs.symlinkSync(commandDir('id'), path.join(binDir, 'id'));
+  const graphifyPath = maybeCommandPath('graphify');
+  if (graphifyPath) {
+    fs.symlinkSync(graphifyPath, path.join(binDir, 'graphify'));
+  }
+
+  const adapters = {
+    tasks: { provider: 'backlog-md', storage: 'backlog', stateMap: 'config/state-map.json' },
+    agents: { models: { custom: 'stub/custom' } },
+    missions: { baseDir: 'missions', branchPrefix: 'mission/', worktreePattern: '../<repo>-<slug>' },
+    verification: { command: ':', defaultArea: 'all' },
+    review: { provider: 'none', tmpDir: reviewTmpDir },
+  };
+
+  fs.writeFileSync(path.join(repoRoot, 'workflow.config.json'), JSON.stringify({
+    product: { name: 'e2e-probe', targetUser: 'tests' },
+    adapters,
+  }, null, 2));
+
+  fs.writeFileSync(path.join(repoRoot, 'config', 'state-map.json'), JSON.stringify({
+    ready: 'refined',
+    approved: 'ready-for-integration',
+  }, null, 2));
+
+  fs.writeFileSync(path.join(repoRoot, 'README.md'), '# E2E Probe\n', 'utf8');
+
+  runGit(repoRoot, ['init']);
+  runGit(repoRoot, ['checkout', '-b', 'main']);
+  runGit(repoRoot, ['config', 'user.email', 'test@example.com']);
+  runGit(repoRoot, ['config', 'user.name', 'Parallix E2E']);
+  runGit(repoRoot, ['add', '.']);
+  runGit(repoRoot, ['commit', '-m', 'initial test repo']);
+
+  return { tmpRoot, repoRoot, binDir, stateHome, reviewTmpDir };
+}
+
+/**
+ * Adhoc-only lifecycle: draft a free-text prompt, then drive the real CLI
+ * through `active` and `review`. This is the regression net for the README's
+ * free-text first-value path and proves the DB-owned adhoc identity flows the
+ * full lifecycle without a Backlog task file.
+ */
+/**
+ * Run `px status` for a slug and return the normalized (ANSI-stripped) output.
+ * Read-only: the authority for review-loop state is the operator database, so
+ * status must resolve the DB-owned adhoc identity without a Backlog task file.
+ */
+function statusOutputFor(slug, rootDir, env) {
+  const result = runWorkflow(rootDir, env, ['status', slug]);
+  return `${result.stdout}${result.stderr}`.replace(/\x1B\[[0-9;]*m/g, '');
+}
+
+/**
+ * Locate the best-effort Backlog mirror the draft minted for a DB-owned adhoc
+ * identity under the worktree's `backlog/tasks/` dir. Returns the first task
+ * file found, or null when the mirror is absent.
+ */
+function findMirroredTaskFile(worktree, slug) {
+  const tasksDir = path.join(worktree, 'backlog', 'tasks');
+  if (!fs.existsSync(tasksDir)) {return null;}
+  const entries = fs.readdirSync(tasksDir).filter(f => f.endsWith('.md'));
+  return entries.length > 0 ? path.join(tasksDir, entries[0]) : null;
+}
+
+function runAdhocScenario() {
+  const title = 'fix hello world greeting';
+  const repo = setupAdhocRepository({ title });
+  const env = workflowEnv(repo.binDir, repo.stateHome, repo.repoRoot);
+
+  if (!shouldKeepTmp() || process.env.PARALLIX_E2E_CLEANUP_MARKER) {
+    // No worktree pre-known for adhoc (slug is discovered after draft); the
+    // interrupted-fixture watcher is a backlog-scenario concern.
+  }
+
+  try {
+    runWorkflow(repo.repoRoot, env, ['draft', 'fix hello world greeting', '--agent', 'custom']);
+
+    const slug = discoverAdhocSlug(repo.repoRoot);
+    assert.ok(slug, 'draft must materialize an adhoc mission under missions/');
+    assert.match(slug, /^parallix-adhoc-\d+$/i, 'adhoc identity must be the DB-owned parallix-adhoc-<NNNN> form');
+
+    const worktree = worktreePathFor(repo.repoRoot, slug);
+    assert.ok(fs.existsSync(worktree), `expected mission worktree at ${worktree}`);
+
+    // F1 (task-2468 round 2): delete the best-effort Backlog mirror immediately
+    // after draft — before `px active` — and prove the DB-authoritative lifecycle
+    // still drives active → review → integrate. When the mirror is gone, the
+    // execute path must not be mirror-gated: `px active` must still record the
+    // authoritative MissionLifecycleService.activate() transition and reach an
+    // approved review, and `px integrate` must still complete.
+    const mirrorBeforeActive = findMirroredTaskFile(worktree, slug);
+    if (mirrorBeforeActive) {
+      fs.rmSync(mirrorBeforeActive, { force: true });
+      assert.ok(!fs.existsSync(mirrorBeforeActive), 'the mirrored task file was removed before active');
+    }
+
+    // The red line on the parent commit: the `task-` prefix guard refuses this
+    // with "slug must begin with task-". Green once the DB-owned adhoc identity
+    // and shared-validator guard land.
+    runWorkflow(worktree, env, ['active', slug, '--implementer', 'custom']);
+
+    // F3 (task-2468): `px status` must resolve the DB-owned adhoc identity from
+    // the operator database, not a Backlog task file. A `task-`-shaped
+    // assumption would fail to recognize the namespace here.
+    const statusOutput = statusOutputFor(slug, worktree, env);
+    assert.match(statusOutput, /parallix-adhoc-\d+/i, 'px status must resolve the DB-owned adhoc identity');
+
+    // F4 (task-2468): the Backlog task file is a best-effort one-way mirror for
+    // a DB-owned adhoc identity. Delete it mid-mission and prove the operator
+    // database still resolves the identity — `px status` reads lifecycle state
+    // from the DB store, not the mirror. A reintroduced unguarded task-file
+    // read on the status/active path throws here exactly as the old
+    // missing-file read did.
+    const mirror = findMirroredTaskFile(worktree, slug);
+    if (mirror) {
+      fs.rmSync(mirror, { force: true });
+      assert.ok(!fs.existsSync(mirror), 'the mirrored task file was removed before status');
+    }
+    const statusAfterDeletion = statusOutputFor(slug, worktree, env);
+    assert.match(statusAfterDeletion, /parallix-adhoc-\d+/i, 'px status must still resolve the DB-owned adhoc identity after the mirror is deleted');
+
+    // `px review --status` reads lifecycle state from DB authority, not the
+    // (best-effort) Backlog mirror. A missing review state fails here exactly as
+    // the old missing-file read did.
+    const state = reviewState(worktree, slug, env);
+    assert.equal(state.phase, 'approved', 'adhoc mission should reach an approved review phase after a deleted mirror');
+
+    // F1 (task-2468 round 2): `px integrate` must complete for a DB-owned adhoc
+    // identity whose mirror was deleted before active. This drives the full
+    // lifecycle end to end with no Backlog task file. The execute agent's fallback
+    // commit and review artifacts leave the worktree dirty; commit them so the
+    // integration checkout is finalized, exactly as the Backlog scenarios do.
+    runGit(worktree, ['add', '-A']);
+    runGit(worktree, ['commit', '-m', 'adhoc: capture execute artifacts before integrate']);
+    runWorkflow(worktree, env, ['integrate', slug]);
+
+    return { slug, worktree, reviewPhase: state.phase };
+  } finally {
+    if (!shouldKeepTmp()) {
+      fs.rmSync(repo.tmpRoot, { recursive: true, force: true });
+    }
+  }
+}
+
+/**
+ * Mixed-repository lifecycle: one repo that carries a real Backlog task AND
+ * supports a DB-owned adhoc free-text draft (task-2468 round 3). This proves
+ * both intake cases complete in the same repository without cross-intake
+ * identity, lifecycle, or mirror interference.
+ *
+ * The Backlog task-2002 drives the full draft → active → review → integrate →
+ * done lifecycle. The free-text draft materializes a DB-owned
+ * parallix-adhoc-<NNNN> that drives draft → active → review (approved) in the
+ * same repo. Assertions confirm distinct slugs/worktrees, that the Backlog
+ * task reaches `done`, that the adhoc mirror lives in the adhoc worktree and
+ * never clobbers the base repo's Backlog task, and that the Backlog task still
+ * resolves after the adhoc draft.
+ */
+function runMixedScenario() {
+  const title = 'Primary Branch Lifecycle';
+  const repo = setupRepository({ slug: 'task-2002', title });
+  const env = workflowEnv(repo.binDir, repo.stateHome, repo.repoRoot);
+
+  try {
+    // --- Backlog intake: full lifecycle to done ---
+    runWorkflow(repo.repoRoot, env, ['draft', 'task-2002', '--agent', 'custom']);
+    assert.ok(taskFileIn(repo.repoRoot, 'task-2002'), 'draft should create the Backlog task in the base repo');
+
+    const backlogWorktree = worktreePathFor(repo.repoRoot, 'task-2002');
+    assert.ok(fs.existsSync(backlogWorktree), `expected Backlog mission worktree at ${backlogWorktree}`);
+
+    runWorkflow(backlogWorktree, env, ['active', 'task-2002', '--implementer', 'custom']);
+    const backlogState = reviewState(repo.repoRoot, 'task-2002', env);
+    assert.equal(backlogState.phase, 'approved', 'Backlog task should reach an approved review');
+
+    // Integrate the Backlog task: squash into main, mark done, delete worktree.
+    runGit(backlogWorktree, ['add', '-A']);
+    runGit(backlogWorktree, ['commit', '-m', 'task-2002: capture execute artifacts']);
+    runWorkflow(backlogWorktree, env, ['integrate', 'task-2002']);
+    const rootTask = taskFileIn(repo.repoRoot, 'task-2002');
+    assert.ok(rootTask, 'integrate should leave the Backlog task in the base repo');
+    assert.equal(taskStatus(rootTask), 'done', 'Backlog task should be done after integrate');
+    assert.ok(!fs.existsSync(backlogWorktree), 'integrate should clean up the Backlog worktree');
+
+    // --- Adhoc intake: draft in the SAME repo, prove it works alongside ---
+    runWorkflow(repo.repoRoot, env, ['draft', 'fix hello world greeting', '--agent', 'custom']);
+    const adhocSlug = discoverAdhocSlug(repo.repoRoot);
+    assert.ok(adhocSlug, 'adhoc draft must materialize under missions/');
+    assert.match(adhocSlug, /^parallix-adhoc-\d+$/i, 'adhoc identity must be DB-owned');
+    assert.notEqual(adhocSlug, 'task-2002', 'adhoc and Backlog identities must be distinct');
+
+    const adhocWorktree = worktreePathFor(repo.repoRoot, adhocSlug);
+    assert.ok(fs.existsSync(adhocWorktree), `expected adhoc mission worktree at ${adhocWorktree}`);
+    assert.notEqual(adhocWorktree, backlogWorktree, 'adhoc and Backlog worktrees must be distinct');
+
+    // The adhoc mirror lives in the adhoc worktree, not the base repo's Backlog.
+    // The base repo's Backlog task must survive the adhoc draft untouched.
+    assert.ok(taskFileIn(repo.repoRoot, 'task-2002'), 'base repo Backlog task must survive the adhoc draft');
+
+    runWorkflow(adhocWorktree, env, ['active', adhocSlug, '--implementer', 'custom']);
+    const adhocState = reviewState(repo.repoRoot, adhocSlug, env);
+    assert.equal(adhocState.phase, 'approved', 'adhoc mission should reach an approved review');
+
+    // Complete the adhoc half of the mixed scenario: integrate the DB-owned
+    // adhoc identity through the real CLI, proving it completes the full
+    // lifecycle end to end without a Backlog task file. The execute agent's
+    // fallback commit and review artifacts leave the worktree dirty; commit
+    // them so the integration checkout is finalized, exactly as the Backlog
+    // scenarios do. Integrate squashes into main and cleans up the worktree.
+    runGit(adhocWorktree, ['add', '-A']);
+    runGit(adhocWorktree, ['commit', '-m', 'adhoc: capture execute artifacts before integrate']);
+    runWorkflow(adhocWorktree, env, ['integrate', adhocSlug]);
+    assert.ok(!fs.existsSync(adhocWorktree), 'integrate should clean up the adhoc worktree');
+
+    // The Backlog task must still resolve after the adhoc draft (no mirror
+    // clobbering across intake). The DB-owned adhoc identity never appears in
+    // the base repo's Backlog task storage.
+    assert.ok(taskFileIn(repo.repoRoot, 'task-2002'), 'Backlog task must still resolve after the adhoc draft');
+
+    return {
+      backlogSlug: 'task-2002',
+      backlogStatus: 'done',
+      adhocSlug,
+      adhocReviewPhase: adhocState.phase,
+      adhocStatus: 'integrated',
+    };
+  } finally {
+    if (!shouldKeepTmp()) {
+      fs.rmSync(repo.tmpRoot, { recursive: true, force: true });
+    }
+  }
+}
+
 function runScenarioInChild(options) {
   const encoded = Buffer.from(JSON.stringify(options), 'utf8').toString('base64');
   const stdoutPath = path.join(os.tmpdir(), `parallix-e2e-child-stdout-${process.pid}-${Date.now()}.log`);
@@ -791,4 +1071,19 @@ test('artifact-focused run produces mission, checkpoint, milestone, and review a
   assert.deepEqual(summary.active.checkpointFiles, ['CP-1.md', 'CP-2.md']);
   assert.ok(summary.active.reviewEvents.some(name => name.includes('reviewer_findings')));
   assert.ok(summary.active.reviewEvents.some(name => name.includes('reviewer_outcome')));
+});
+
+test('adhoc-only intake: a free-text draft reaches an approved review with a DB-owned adhoc identity', () => {
+  const summary = runAdhocScenario();
+  assert.match(summary.slug, /^parallix-adhoc-\d+$/i, 'the materialized identity must be the DB-owned adhoc form');
+  assert.equal(summary.reviewPhase, 'approved', 'DB-authoritative review read must resolve the adhoc mission');
+});
+
+test('mixed intake: a Backlog task and a DB-owned adhoc mission both complete in one repository', () => {
+  const summary = runMixedScenario();
+  assert.equal(summary.backlogSlug, 'task-2002', 'the Backlog intake must run a task-<slug> mission');
+  assert.equal(summary.backlogStatus, 'done', 'the Backlog intake must integrate to done');
+  assert.match(summary.adhocSlug, /^parallix-adhoc-\d+$/i, 'the adhoc intake must materialize a DB-owned identity');
+  assert.equal(summary.adhocReviewPhase, 'approved', 'the DB-owned adhoc intake must reach an approved review');
+  assert.equal(summary.adhocStatus, 'integrated', 'the DB-owned adhoc intake must complete its lifecycle through px integrate');
 });

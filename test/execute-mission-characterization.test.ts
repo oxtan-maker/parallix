@@ -296,13 +296,21 @@ test('execute workflow: a missing dedicated worktree rejects with "dedicated exe
 // Request guards
 // ---------------------------------------------------------------------------
 
-test('execute workflow: a slug outside the task- namespace is rejected before preflight', async () => {
+test('execute workflow: an unrecognized slug is rejected before preflight', async () => {
   const { runtime, calls, transitionStore } = executeFixture();
   const outcome = await buildExecuteWorkflow(runtime, transitionStore)
     .execute(executeRequest({ slug: 'mission-1' }));
   assert.equal(outcome.status, 'rejected');
-  assert.equal(outcome.error.message, 'slug must begin with task-');
+  assert.equal(outcome.error.message, 'slug is not a recognized mission identity');
   assert.deepEqual(calls, []);
+});
+
+test('execute workflow: a DB-owned adhoc identity is accepted, not refused by a task- prefix assumption', async () => {
+  const { runtime, calls, transitionStore } = executeFixture();
+  const outcome = await buildExecuteWorkflow(runtime, transitionStore)
+    .execute(executeRequest({ slug: 'parallix-adhoc-0001' }));
+  assert.equal(outcome.status, 'completed');
+  assert.ok(calls.includes('preflight'), 'adhoc identity must reach preflight via the shared validator');
 });
 
 test('execute workflow: a request without active:execute is rejected before any mechanism port', async () => {

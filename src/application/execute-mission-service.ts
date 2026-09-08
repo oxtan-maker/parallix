@@ -2,7 +2,7 @@ import type { ApplicationOutcome, Cancellation, Capability, DurableEvidence } fr
 import { failure, rejected } from './contracts.js';
 import { MissionLifecycleService } from './mission-lifecycle-service.js';
 import { agentFamily } from '../domain/agents.js';
-import { missionId } from '../domain/mission.js';
+import { missionId, isMissionSlugCandidate, isDbAdhocIdentity } from '../domain/mission.js';
 import type {
   AgentLaunchOutcome,
   AgentLaunchPlan,
@@ -142,7 +142,7 @@ export class ExecuteMissionService {
    * their own remediation text.
    */
   private async resolveWorkspace(slug: string): Promise<ExecuteWorkspace | string> {
-    if (!slug.startsWith('task-')) {return 'slug must begin with task-';}
+    if (!isMissionSlugCandidate(slug)) {return 'slug is not a recognized mission identity';}
     if (!await this._ports.workspace.preflight(slug)) {return 'execute preflight failed';}
     const worktree = await this._ports.workspace.resolveWorktree(slug);
     if (!worktree) {return 'dedicated execute worktree is required';}
@@ -195,7 +195,14 @@ export class ExecuteMissionService {
   ): Promise<DurableEvidence> {
     await this._ports.workspace.enforceCommitSafety({ slug, worktree: prepared.worktree });
 
-    if (prepared.taskResolution.ok && prepared.taskResolution.taskFile) {
+    if (isDbAdhocIdentity(slug)) {
+      // DB-owned adhoc identity (task-2468): the mission store is the authority,
+      // not a Backlog task file. The best-effort mirror is optional — its
+      // absence (deleted or relocated after draft) must not suppress the
+      // authoritative active transition. The DB store is always the revision the
+      // transition writes through.
+      await this.synchronizeLifecycle(slug, launch.agent);
+    } else if (prepared.taskResolution.ok && prepared.taskResolution.taskFile) {
       const status = await this._ports.workspace.readTaskStatus(prepared.taskResolution.taskFile);
       // Whether the recorded lane still needs synchronizing is an observation of
       // the launch (a deferred rebase, or a task that is not yet active). What

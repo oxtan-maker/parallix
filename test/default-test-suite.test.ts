@@ -32,6 +32,7 @@ const expectedIntegrationFiles = [
   'task-2367-telemetry-schema.test.ts', 'task-2369-regressions.test.ts',
   'task-2373-shutdown.test.ts', 'task-2375-active-invocation-overlap.test.ts',
   'task-2375-current-work-operation-repro.test.ts',
+  'task-2468-adhoc-lifecycle-repro.test.ts',
   'bubblewrap-worktree-git.test.ts',
   'bootstrap-isolation.test.ts', 'documentation-verification.test.ts',
   'draft-command.test.ts', 'draft.test.ts',

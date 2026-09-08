@@ -56,10 +56,16 @@ export function missionBranchRef(slug: string, rootDir: string = process.cwd()):
   return 'refs/heads/' + missionBranchName(slug, rootDir);
 }
 
-/** @param {unknown} value */
-export function isMissionSlugCandidate(value: unknown): boolean {
-  return typeof value === 'string' && /^(task|adhoc)-[a-z0-9][a-z0-9.-]*$/i.test(value.trim());
-}
+/**
+ * Re-export of the single shared mission-slug validator, now owned by
+ * `src/domain/mission.ts` (task-2468, F7). This file keeps the re-export so
+ * existing `import … from mission-paths` callers resolve unchanged, but the
+ * definition lives in the domain layer — a pure predicate over a slug string
+ * with no filesystem dependency — so `execute-mission-service` imports it from
+ * the domain without an application→adapter boundary edge.
+ */
+import { isMissionSlugCandidate } from '../../domain/mission.js';
+export { isMissionSlugCandidate };
 
 /** @param {string} branch @param {string} [rootDir] */
 export function extractSlugFromBranch(branch: string, rootDir: string = process.cwd()): string | null {
@@ -187,7 +193,7 @@ export function inferSlug(slugCandidate: string | undefined): string | null {
   // 3. Check directory name
   const cwd = process.cwd();
   const dirName = path.basename(cwd);
-  const dirSlugMatch = dirName.match(/((?:task|adhoc)-[a-z0-9][a-z0-9.-]*)$/i);
+  const dirSlugMatch = dirName.match(/((?:task|adhoc)-[a-z0-9][a-z0-9.-]*|parallix-adhoc-\d{4,})$/i);
   if (dirSlugMatch) {
     return dirSlugMatch[1].toLowerCase();
   }

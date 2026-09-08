@@ -408,11 +408,15 @@ test('runDraftCommand accepts free-text intent and synthesizes a task slug', asy
     ensureStandaloneMissionBaselineFn: () => ({ committed: false }),
     ensureDraftRepoConfigCommittedFn: () => true,
     resolveTaskFileFn: () => ({ ok: false, reason: 'missing' }),
+    // Free-text intent now synthesizes a DB-owned, repository-scoped
+    // `parallix-adhoc-<NNNN>` identity (task-2468). Pin the counter here so the
+    // allocation stays deterministic regardless of the shared operator DB.
+    allocateAdhocIdentityFn: () => ({ slug: 'parallix-adhoc-0001', missionId: 'parallix-adhoc-0001', taskId: 'PARALLIX-ADHOC-0001' }),
     ensureMissionBranchFn: () => {},
     ensureWorktreeFn: () => {},
     ensureGraphifyWorkspaceFn: () => {},
     ensureGraphifyIgnoreFn: () => {},
-    ensureMissionFileFn: () => '/tmp/adhoc-create-a-hello-world-program/MISSION.md',
+    ensureMissionFileFn: () => '/tmp/parallix-adhoc-0001/MISSION.md',
     bootstrapBacklogTaskFn: (_wt, _repo, slug, options) => {
       calls.push({ slug, syntheticTask: options.syntheticTask });
       return true;
@@ -432,8 +436,8 @@ test('runDraftCommand accepts free-text intent and synthesizes a task slug', asy
   });
 
   assert.equal(calls.length, 1);
-  assert.equal(calls[0].slug, 'adhoc-create-a-hello-world-program');
-  assert.equal(calls[0].syntheticTask.source, 'synthetic-free-text');
+  assert.equal(calls[0].slug, 'parallix-adhoc-0001');
+  assert.equal(calls[0].syntheticTask.source, 'adhoc-db-identity');
 });
 
 test('runDraftCommand honors an explicit --agent override without consulting selectAgentFn or WORKFLOW_AGENT', async () => {

@@ -23,9 +23,18 @@ function slugifyDraftIntent(/** @type {string} */ value) {
 }
 
 function syntheticTaskId(/** @type {string} */ slug, /** @type {string} */ seed) {
+  // The DB-owned adhoc identity carries no content hash: the per-repository
+  // counter is its sole origin, so the task identity is the slug upper-cased,
+  // matching the resolver's own rule (`normalizedId = slug.toUpperCase()`,
+  // src/adapters/backlog/task-file-io.ts). A legacy `adhoc-*` free-text slug
+  // keeps its historical hashed identity so existing missions stay resolvable.
+  const trimmed = String(slug || '').trim();
+  if (/^parallix-adhoc-\d{4,}$/i.test(trimmed)) {
+    return trimmed.toUpperCase();
+  }
   const hash = crypto.createHash('sha1').update(String(seed || slug)).digest('hex').slice(0, 8).toUpperCase();
-  const prefix = slug.startsWith(SYNTHETIC_SLUG_PREFIX) ? 'ADHOC' : 'TASK';
-  const base = slug
+  const prefix = trimmed.startsWith(SYNTHETIC_SLUG_PREFIX) ? 'ADHOC' : 'TASK';
+  const base = trimmed
     .replace(/^(task|adhoc)-/i, '')
     .replace(/[^a-z0-9]+/gi, '-')
     .toUpperCase();
@@ -35,6 +44,19 @@ function syntheticTaskId(/** @type {string} */ slug, /** @type {string} */ seed)
 function resolveDraftTarget(/** @type {string} */ rawInput, cwd = process.cwd()) {
   const explicit = String(rawInput || '').trim();
   if (!explicit) {return null;}
+
+  // Re-entering an existing DB-owned adhoc identity (task-2468, F6): the
+  // `parallix-adhoc-<NNNN>` counter is repository-scoped and monotonic, so a
+  // fresh draft of the same identity must reuse the minted identity rather than
+  // minting a second one. Recognize the explicit input as an existing identity
+  // reference; the preflight step skips allocation for it.
+  if (/^parallix-adhoc-\d{4,}$/i.test(explicit)) {
+    return {
+      slug: explicit.toLowerCase(),
+      syntheticTask: null,
+      existingAdhocIdentity: true,
+    };
+  }
 
   if (explicit.toLowerCase().startsWith('task-')) {
     return {
@@ -339,6 +361,12 @@ function bootstrapBacklogTask(targetWorktree, mainRepo, slug, {
   }
 
   if (syntheticTask) {
+    // DB-owned adhoc identity (task-2468, F1): the mission's identity lives in
+    // the repository-scoped counter, not in a Backlog task file. The task file
+    // is a best-effort one-way mirror. It still carries the synthetic `unknown`
+    // classification the draft needs, so we create it — but a failure to commit
+    // it (read-only `backlog/`, a rejecting hook) must never make `px draft`
+    // load-bearing on Backlog. Warn and continue; the DB identity is authority.
     const { tasksDir } = getTaskStorage(targetWorktree);
     const taskPath = path.join(tasksDir, `${slug} - ${slugifyDraftIntent(/** @type {any} */ (syntheticTask).title || slug) || 'mission'}.md`);
     const body = [
@@ -369,8 +397,11 @@ function bootstrapBacklogTask(targetWorktree, mainRepo, slug, {
       gitFn(['-C', targetWorktree, 'commit', '-m', `backlog(${slug}): create synthetic task`]);
       logFn(fmt.status('PASS', 'Committed synthetic task in worktree.'));
     } catch (error) {
-      errorFn(fmt.status('FAIL', `Could not commit synthetic task: ${/** @type {any} */ (error).message}`));
-      return false;
+      // Best-effort mirror (task-2468, F1): the synthetic task file is a
+      // one-way Backlog mirror, not the mission's authority. A commit failure
+      // (read-only `backlog/`, a rejecting hook) warns but does not fail the
+      // draft — the DB-owned adhoc identity and lifecycle are unaffected.
+      errorFn(fmt.status('WARN', `Could not commit synthetic task: ${/** @type {any} */ (error).message}. The DB-owned adhoc identity is authoritative; the Backlog mirror is best-effort.`));
     }
     return true;
   }

@@ -8,6 +8,7 @@ import { fileURLToPath } from 'node:url';
 import * as fmt from '../../application/presentation/cli-format.js';
 import { git, run } from '../git/git.js';
 import { findMissionDir, resolveWorktree, missionBranchName, getPrimaryBranch } from '../filesystem/mission-utils.js';
+import { isDbAdhocIdentity } from '../../domain/mission.js';
 import type { PullRequestReference } from '../../domain/review.js';
 import { resolveTaskFile, getTaskImplementer, getTaskStatus, enforceTaskAssignee, transitionTask, reportTaskResolution } from '../backlog/backlog.js';
 import { toVirtual, transitionVirtual } from '../config/state-map.js';
@@ -277,9 +278,17 @@ export async function startReviewLoop(slug: string, opts: {
     log(fmt.status('WARN', `No implementer identity resolved for ${slug}; defaulting to "autonomous"`));
   }
   if (!taskResolution.ok) {
-    reportTaskResolution(taskResolution, slug, error);
-    exit(1);
-    return;
+    // A DB-owned adhoc identity has no Backlog task file to resolve; its identity
+    // and lifecycle are DB-authoritative. The implementer defaulted above (from
+    // persisted review state, or "autonomous"). Backlog-backed missions keep the
+    // hard failure.
+    if (isDbAdhocIdentity(slug)) {
+      log(fmt.status('WARN', `No Backlog task file for DB-owned adhoc identity ${slug}; identity and lifecycle are DB-authoritative.`));
+    } else {
+      reportTaskResolution(taskResolution, slug, error);
+      exit(1);
+      return;
+    }
   }
   const forgejoEnabledFn = isReviewProviderEnabledFn
     || legacyIsForgejoReviewEnabledFn

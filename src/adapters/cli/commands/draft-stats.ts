@@ -11,6 +11,8 @@ import * as stats from './stats.js';
 import { ensureStandaloneMissionBaseline, resolveAgentModel } from '../../config/product-config.js';
 import { ensureWorkflowGitignore } from '../../filesystem/gitignore.js';
 import { missionId } from '../../../domain/mission.js';
+import { allocateAdhocIdentity } from '../../sqlite/adhoc-counter.js';
+import { resolveCanonicalRepositoryId } from '../../git/repository-identity.js';
 import { resolveDraftTarget, ensureMissionBranch, ensureMissionBaseBranchRecorded, ensureWorktree, ensureGraphifyWorkspace, ensureGraphifyIgnore, ensureMissionFile, ensureDraftRepoConfigCommitted, ensureRepoExists, bootstrapBacklogTask } from './draft-setup.js';
 import { buildDraftPrompt, buildRestartPrompt, validateDraftClassification, normalizeDraftClassification } from './draft-prompts.js';
 import { enforceDraftCommitSafety } from './draft-conflicts.js';
@@ -133,18 +135,19 @@ function createDraftWorkflowAdapter(deps: Record<string, unknown> = {}) {
       const resolveTaskFileFn = merged.resolveTaskFileFn || resolveTaskFile;
       const reportTaskResolutionFn = merged.reportTaskResolutionFn || reportTaskResolution;
       const checkBacklogIntegrityFn = merged.checkBacklogIntegrityFn || checkBacklogIntegrity;
+      const allocateAdhocIdentityFn = merged.allocateAdhocIdentityFn || allocateAdhocIdentity;
 
       const explicitInput = args[0];
       const draftTarget = resolveDraftTarget(explicitInput) || { slug: inferSlugFn(explicitInput), syntheticTask: null };
-      const slug = draftTarget.slug;
+      let slug = draftTarget.slug;
       if (!slug) {
         errorFn(fmt.status('FAIL', 'Usage: px draft <slug> [--agent <family>]'));
         safeExit(1);
         return exitedContext({ slug: '', options });
       }
 
-      const normalizedSlug = slug.toLowerCase();
-      const syntheticTask = draftTarget.syntheticTask;
+      let normalizedSlug = slug.toLowerCase();
+      let syntheticTask = draftTarget.syntheticTask;
 
       // Allow operators to pin the agent family via CLI flag
       function flagValue(arr: string[], flag: string, name: string) {
@@ -164,6 +167,26 @@ function createDraftWorkflowAdapter(deps: Record<string, unknown> = {}) {
       const mainRepo = resolveMainRepoFn();
       if (ensureRepoExistsFn(mainRepo, exitFn, errorFn) === false) {
         return exitedContext({ slug: normalizedSlug, mainRepo, options });
+      }
+
+      // Free-text adhoc intake gets a DB-owned, repository-scoped identity
+      // (task-2468): the `adhoc-<text>` slug is replaced by `parallix-adhoc-<NNNN>`
+      // minted from a per-repository counter, so slug, mission id, branch, and
+      // worktree suffix stay one derivable identity with no content hash.
+      // Re-entering an existing DB-owned identity (F6) skips allocation: the
+      // counter is monotonic and repository-scoped, so a re-run reuses the
+      // minted identity instead of minting a second mission/branch/worktree.
+      if (syntheticTask && !draftTarget.existingAdhocIdentity) {
+        try {
+          const allocated = allocateAdhocIdentityFn(resolveCanonicalRepositoryId(mainRepo));
+          slug = allocated.slug;
+          normalizedSlug = slug.toLowerCase();
+          syntheticTask = { ...syntheticTask, id: allocated.taskId, source: 'adhoc-db-identity' };
+        } catch (allocError) {
+          errorFn(fmt.status('FAIL', `Could not allocate adhoc mission identity: ${/** @type {any} */ (allocError).message}`));
+          safeExit(1);
+          return exitedContext({ slug, mainRepo, options });
+        }
       }
 
       const baselineResult = ensureStandaloneMissionBaselineFn(mainRepo);
@@ -378,10 +401,18 @@ function createDraftWorkflowAdapter(deps: Record<string, unknown> = {}) {
     transition: async (ctx: DraftWorkflowContext): Promise<DraftWorkflowContext> => {
       const transitionTaskFn = (ctx.options as any).transitionTaskFn || transitionTask;
 
-      if (!await transitionTaskFn(ctx.slug, 'backlog', { rootDir: ctx.targetWorktree, log: ctx.logFn })) {
+      const transitionOk = await transitionTaskFn(ctx.slug, 'backlog', { rootDir: ctx.targetWorktree, log: ctx.logFn });
+      // Backlog-backed missions keep the strict contract: a task-file transition
+      // failure is fatal. A synthetic (adhoc) intake has no Backlog backing in an
+      // adhoc-only repository, so its lifecycle is DB-authoritative and the
+      // missing task-file transition is a best-effort no-op, not a failure.
+      if (!transitionOk && !ctx.syntheticTask) {
         errorFn(fmt.status('FAIL', `Could not transition task ${ctx.slug} to backlog status.`));
         safeExit(1);
         return exitedContext({ ...ctx });
+      }
+      if (!transitionOk && ctx.syntheticTask) {
+        logFn(fmt.status('WARN', `No Backlog task file to transition for ${ctx.slug}; lifecycle is DB-authoritative.`));
       }
 
       return ctx;
@@ -556,10 +587,17 @@ function createDraftWorkflowAdapter(deps: Record<string, unknown> = {}) {
         return;
       }
 
-      if (!(await transitionVirtualFn(transitionTaskFn, ctx.slug, 'ready', /** @type {{ rootDir: string, log: Function }} */ ({ rootDir: ctx.targetWorktree, log: ctx.logFn })))) {
+      const readyOk = await transitionVirtualFn(transitionTaskFn, ctx.slug, 'ready', /** @type {{ rootDir: string, log: Function }} */ ({ rootDir: ctx.targetWorktree, log: ctx.logFn }));
+      // Best-effort mirror for synthetic (adhoc) intakes: the DB authority
+      // records the refinement above, so a missing Backlog task-file transition
+      // in an adhoc-only repository is a no-op, not a failure.
+      if (!readyOk && !ctx.syntheticTask) {
         errorFn(fmt.status('FAIL', `Could not transition task ${ctx.slug} to ready status.`));
         safeExit(1);
         return;
+      }
+      if (!readyOk && ctx.syntheticTask) {
+        logFn(fmt.status('WARN', `No Backlog task file transition for ${ctx.slug}; lifecycle is DB-authoritative.`));
       }
 
       logFn('\n' + fmt.status('INFO', `Next: ${fmt.command(`cd ${ctx.targetWorktree}`)}`));
