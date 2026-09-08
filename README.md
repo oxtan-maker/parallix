@@ -86,6 +86,15 @@ px integrate task-042
 
 Parallix runs on built-in defaults with no config file; `px setup` writes one when you want to declare your own verification gate, mission layout, or Forgejo review wiring. See the [configuration reference](docs/config.md) for the supported overrides and their defaults. The verification gate that runs at each phase is whatever you declare in `workflow.config.json`. In this repo that dispatcher is `./scripts/verify-local.sh {{area}}`: earlier phases use the fast general suite, while `px integrate` calls `verify-local.sh integrate`, which resolves repo-side integration gates from `config/integration-pipelines.json` and runs the stricter pre-merge checks there.
 
+When a mission goes wrong and you want to start it over, `px cancel <slug> --yes`
+retires it: it deletes that one mission's lifecycle rows from the operator
+database, archives its Backlog task file so the card leaves the board, keeps its
+recorded usage and cost, and prints the
+`git worktree remove ... && git branch -D ...` cleanup for you to run yourself.
+The same action sits behind a confirmation on the TUI board (`Shift+X`) and on
+the web board (the `cancel ✕` button). See the [board guide](docs/tui-board.md)
+for the details.
+
 ## Working with Backlog.md and Forgejo
 
 Both are optional integrations, and each one is wired independently of the other.

@@ -178,7 +178,7 @@ describe('SC2: On-card action buttons — current rendering path', () => {
 
     assert.ok(output.includes('ACTIONS'), `ActionBar must render the ACTIONS heading. Got: ${output}`);
     assert.ok(output.includes('active:execute'), `ActionBar must list active:execute. Got: ${output}`);
-    assert.equal(BOARD_ACTION_KINDS.length, 7, `ActionBar must declare 7 command kinds`);
+    assert.equal(BOARD_ACTION_KINDS.length, 8, `ActionBar must declare 8 command kinds`);
   });
 });
 

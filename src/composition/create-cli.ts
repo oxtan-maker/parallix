@@ -39,6 +39,7 @@ import { createCheckpointCommand } from '../interfaces/cli/checkpoint.js';
 import { createDraftCommand } from '../interfaces/cli/draft.js';
 import type { HandoffMissionServicesPort } from '../application/ports/handoff-workflow.js';
 import { createIntegrateCommand } from '../interfaces/cli/integrate.js';
+import { createCancelCommand } from '../interfaces/cli/cancel.js';
 import { createReviewCommand } from '../interfaces/cli/review.js';
 import { createHandoffCommand } from '../interfaces/cli/handoff.js';
 import { createStatusCommand } from '../interfaces/cli/status.js';
@@ -197,6 +198,13 @@ function createCommandRegistry(rootDir: string): Record<string, Command> {
       createIntegrateCommand(new IntegrateCommandUseCase({
         execute: (innerArgs, innerOptions) => withMissionFactories(missionServicesFn => integrate(innerArgs, { ...innerOptions, missionServicesFn })),
       }, services.currentWork, () => inferSlug(undefined)))(args, options)),
+    // The destructive command runs through the same guarded controller the TUI
+    // and the web board dispatch: one database path, three surfaces.
+    cancel: (args) => withGraph(services => {
+      const controller = services.presentationCapabilities?.commandController;
+      if (!controller) { throw new Error('cancel requires BoardCommandController from presentation capabilities'); }
+      return createCancelCommand(controller)(args);
+    }),
     'mission-start': missionStart,
     'verify-env': missionStart,
     rebase: createRebaseCommand((args, options) => withMissionFactories(missionServicesFn => rebase(args, { ...options, missionServicesFn }))),

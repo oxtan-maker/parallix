@@ -12,7 +12,7 @@ test('action bar renders the declared command kinds with only active:execute ena
     mission: makeCard({ commands: [{ command: 'active', enabled: true, reason: null }] }),
     commandController: controller,
   }), { columns: 160 });
-  assert.equal(BOARD_ACTION_KINDS.length, 7);
+  assert.equal(BOARD_ACTION_KINDS.length, 8);
   assert.match(output, /● active:execute/);
   for (const kind of BOARD_ACTION_KINDS.filter((kind) => kind !== 'active:execute')) {
     assert.match(output, new RegExp(`○ ${kind.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`));
@@ -25,6 +25,14 @@ test('action bar cannot dispatch a disabled command', async () => {
   const mission = makeCard({ commands: [{ command: 'active', enabled: true, reason: null }] });
   assert.equal(canDispatchAction('active:execute', mission, controller), true);
   assert.equal(canDispatchAction('draft:create', mission, controller), false);
+  // The card advertises no cancel command, so the destructive row stays dark
+  // even though the controller reports the capability as integrated.
+  assert.equal(canDispatchAction('mission:cancel', mission, controller), false);
+  assert.equal(canDispatchAction(
+    'mission:cancel',
+    makeCard({ commands: [{ command: 'cancel', enabled: true, reason: null }] }),
+    { canExecute: () => true, async dispatch() { return { status: 'completed' as const, durableEvidence: [] }; } },
+  ), true);
 });
 
 test('canDispatchAction gates draft:create on wiring and pre-draft eligibility', async () => {

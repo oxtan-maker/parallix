@@ -1,8 +1,8 @@
 ---
 id: TASK-2466
 title: Cancel a mission from the TUI and web board
-status: refined
-assignee: []
+status: done
+assignee: [claude]
 created_date: '2026-09-07 11:30'
 labels:
   - ai_sdlc

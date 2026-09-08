@@ -89,6 +89,27 @@ function completeTask(slug: string, rootDir: string = process.cwd()): boolean {
 
 
 /**
+ * Move a task file into the archive store — the one board authority that hides
+ * a mission from every lane. Cancellation deletes lifecycle rows, which the
+ * board does not read; without this the cancelled card is re-projected from
+ * its task file on the very next refresh.
+ *
+ * @param {string} slug
+ * @param {string} [rootDir]
+ * @returns {boolean} whether a task file for the slug is now archived
+ */
+function archiveTask(slug: string, rootDir: string = process.cwd()): boolean {
+  const resolution = resolveTaskFile(slug, rootDir);
+  const taskFilePath = resolution.ok ? resolution.taskFile : undefined;
+  if (!taskFilePath) { return false; }
+  const { archiveTasksDir } = getTaskStorage(rootDir);
+  if (taskFilePath.startsWith(archiveTasksDir + path.sep)) { return true; }
+  fs.mkdirSync(archiveTasksDir, { recursive: true });
+  fs.renameSync(taskFilePath, path.join(archiveTasksDir, path.basename(taskFilePath)));
+  return true;
+}
+
+/**
  * Transition a task to a new status, optionally enforcing an implementer,
  * restoring a prior assignee, or clearing agent assignees,
  * and commit the change to the mission branch.
@@ -523,6 +544,7 @@ async function transitionTaskOnIntegrationBranch(
 const transitionTask = transitionTaskLocal;
 
 export {
+  archiveTask,
   completeTask,
   getTaskStatus,
   parseTaskStatus,

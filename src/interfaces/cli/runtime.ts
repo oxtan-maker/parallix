@@ -31,6 +31,7 @@ export const KNOWN_COMMANDS: string[] = [
   'review',
   'handoff',
   'integrate',
+  'cancel',
   'resolve-conflict',
   'rebase',
   'stats',
@@ -247,6 +248,7 @@ ${fmt.bold('Core Commands:')}
   review [<slug>] [--verify|--submit|--push [--force]|--comment "<msg>"|--comment-file <path>|--submit-review <outcome> [--message "<msg>"|--message-file <path>]|--start|--continue] [--implementer <a>] [--reviewer <a>] [--focus <f>] [--max-attempts <n>] [--dry-run] [--reset] [--no-gate]
   handoff [<slug>] [--no-gate] [--no-recover] [--force]  Sync, push, and transition mission to review.
   integrate [<slug>] [--dry-run] [--no-integration-gates] [--real-agent codex --real-agent-model gpt-5.6-luna]  Land a reviewed mission into the local integration checkout on main. --no-integration-gates skips integration-time staging/e2e gates; the paired real-agent flags override the Codex integration-gate runner.
+  cancel <slug> --yes   Delete one mission's lifecycle rows from the operator database. Irreversible; usage statistics are kept and the branch and worktree stay for you to remove.
   resolve-conflict [<slug>]       Detect merge conflicts in the mission worktree and emit resolution guidance.
   rebase [<slug>] [--push]          Rebase mission branch onto the primary integration branch (main) with auto-resolution of mission-specific conflicts.
   diff [<slug>]                Launch the primary local diff tool for branch-vs-main review.

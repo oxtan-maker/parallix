@@ -68,6 +68,12 @@ const expectedIntegrationFiles = [
   'task-2285-pack-install-smoke.test.ts',
   'task-2286-native-sea-smoke.test.ts',
   'task-2455-config-exit-status-repro.test.ts',
+  // The database half opens a migrated SQLite fixture on disk. The surface half
+  // runs no git at all, but it asserts on the advisory cleanup text a cancel
+  // prints, which names git commands the boundary heuristic reads as a real git
+  // dependency; both therefore run in the integration suite.
+  'task-2466-cancel-surfaces.test.ts',
+  'task-2466-mission-cancel.test.ts',
   'task-2234-push-to-reviewer-autobounce.test.ts',
   'task-2270-graphify-exclusion.test.ts',
   'task-2322.12-review-recovery.integration.test.ts',

@@ -147,8 +147,9 @@ board past the last row of the terminal.
 
 ## Keyboard controls
 
-The board is read-only. Navigation changes only the current selection; it does
-not run a workflow command or change repository state.
+Navigation changes only the current selection; it does not run a workflow
+command or change repository state. The two keys that do act on a mission open a
+confirmation before anything happens.
 
 | Keys | Result |
 |---|---|
@@ -157,13 +158,60 @@ not run a workflow command or change repository state.
 | `←` or `A` | Select the nearest populated lane to the left, wrapping across the board. |
 | `→` or `D` | Select the nearest populated lane to the right, wrapping across the board. |
 | `?` | Show or hide the keyboard reference in the board footer. |
+| `Shift+X` | Ask to cancel the selected mission. A second `Shift+X` confirms; `Escape` dismisses. See [Cancelling a mission](#cancelling-a-mission). |
 | `q` or `Ctrl+C` | Leave the board. |
 
 Arrow keys are the primary navigation controls; `W`, `A`, `S`, and `D` provide a
 left-hand alternative. Empty lanes are skipped when moving left or right. In a
 lane with more cards than fit, moving selection also scrolls the visible card
-window just enough to keep the focused card shown. The board is read-only, so it
-assigns no workflow actions to `Enter` or other letter keys.
+window just enough to keep the focused card shown. Navigation itself changes
+nothing; the keys that do act on a mission — `Enter` and `Shift+X` — each open a
+confirmation first.
+
+## Cancelling a mission
+
+A mission that went wrong and will be redone from scratch can be retired from the
+operator database. Cancelling deletes that one mission's lifecycle rows — its
+lane history, checkpoints and goal checks, review rounds, findings, resolutions,
+review events, external task reference, labels and session markers — and moves
+its Backlog task file into `backlog/archive/tasks/`. The board projects its
+cards from task markdown, so the archive move is what makes the card leave every
+lane; without it the deleted mission would be re-projected on the next refresh.
+Cancelling is irreversible, and it is scoped to the single mission you name:
+every other mission's rows and task files are untouched.
+
+Three ways to reach it, all running the same command against the database:
+
+| Surface | How |
+|---|---|
+| TUI board | Select the mission, press `Shift+X`, then press `Shift+X` again to confirm. `Escape` dismisses, and `Enter` — which confirms every other action — does nothing here. |
+| Web board | Click the red `cancel ✕` button on the card, then click `delete <mission> lifecycle rows` in the panel that opens. `keep mission` dismisses it. |
+| Terminal | `px cancel <slug> --yes`. Without `--yes` the command explains what would be deleted and exits without touching anything. |
+
+The confirmation is deliberately different from the ordinary lifecycle
+confirmation on every surface, so a reflexive keypress or click on the wrong card
+cannot delete a mission.
+
+### What cancelling keeps
+
+Recorded usage statistics survive. Those rows hold the tokens actually spent and
+the money actually charged; a cancelled mission still cost what it cost, so
+cancelling never punches a hole in cost history. Weekly stats and cohort reports
+keep counting the cancelled mission's spend.
+
+### What stays your job
+
+Cancelling touches the database only. It prints the git cleanup and stops:
+
+```sh
+git worktree remove <path> && git branch -D <branch>
+```
+
+Run that yourself when you are ready. Parallix never removes a branch, a
+worktree, a remote branch or a pull request as part of a cancellation. The task
+file is archived, not deleted, and keeps whatever `status` it had: move it back
+out of `backlog/archive/tasks/` and set its `status` to `backlog` if you plan to
+redo the work.
 
 ## Leaving
 
