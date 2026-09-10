@@ -8,6 +8,7 @@ import os from 'os';
 import path from 'path';
 import { spawnSync } from 'node:child_process';
 import { mockModule, installModuleMocks } from './lib/module-mock.js';
+import * as cliFormat from '../src/application/presentation/cli-format.js';
 const missionUtils = mockModule<typeof import('../src/adapters/filesystem/mission-utils.js')>('../src/adapters/filesystem/mission-utils.js', import.meta.url);
 const draftLib = mockModule<typeof import('../src/adapters/cli/commands/draft.js')>('../src/adapters/cli/commands/draft.js', import.meta.url);
 mockModule<typeof import('../src/adapters/cli/commands/draft-prompts.js')>('../src/adapters/cli/commands/draft-prompts.js', import.meta.url);
@@ -990,6 +991,15 @@ test('isExpectedDraftPath matches mission directory and Backlog task paths', () 
   assert.equal(isExpectedDraftPath('docs/missions/2026/task-other/MISSION.md', 'task-test', '/tmp/wt'), false);
 });
 
+test('isExpectedDraftPath accepts the collapsed untracked mission tree and the harness gitignore', () => {
+  // git reports a wholly untracked tree as its top directory (`?? missions/`),
+  // and the harness appends its own workflow entries to `.gitignore` during
+  // setup — neither is an unexpected file the operator should be warned about.
+  assert.equal(isExpectedDraftPath('missions/', 'task-test', '/tmp/wt'), true);
+  assert.equal(isExpectedDraftPath('.gitignore', 'task-test', '/tmp/wt'), true);
+  assert.equal(isExpectedDraftPath('src/', 'task-test', '/tmp/wt'), false);
+});
+
 // ---------- enforceDraftCommitSafety variants ----------
 
 test('enforceDraftCommitSafety returns false when no dirty entries', () => {
@@ -1716,4 +1726,384 @@ test('runDraftCommand leaves the Backlog task alone when refinement cannot be re
   assert.deepEqual(exitCodes, [1]);
   assert.ok(errors.some(msg => msg.includes('database is locked')), 'the refusal names the underlying failure');
   assert.ok(!calls.includes('transition:refined'), 'the Backlog task must not reach ready without a recorded refinement');
+});
+
+// --- TASK-2471: `px draft` default terminal output contract -----------------
+// These tests pin the externally visible happy-path output: internal plumbing is
+// demoted behind DEBUG, the run ends with a mission-oriented summary, and every
+// exceptional line stays on the default path.
+
+// The exact plumbing messages SC1 names. `Classification labels synced` is
+// deliberately absent: no such string is emitted anywhere in src/, so its
+// default-output count is trivially zero and asserting it would pin a phantom.
+const TASK_2471_PLUMBING_LINES = [
+  'Step 1: Setting up branch',
+  'Step 2: Ensuring dedicated worktree',
+  'Step 3: Scaffolding MISSION.md',
+  'Step 4: Ensuring Backlog task exists',
+  'Draft agent family',
+  'Mission materialized in SQLite',
+  'Recorded Base-Branch:',
+  'graphify-out directory',
+  'Post-draft mission type labels validated',
+  'Created branch',
+  'Created worktree',
+  'Scaffolded MISSION.md',
+  'Draft setup complete',
+];
+
+// Setup helpers own half the SC1 lines and emit them through the single `logFn`
+// the adapter hands them. These doubles reproduce the real messages (and one
+// real WARN) so the adapter's demote/keep routing is what is under test.
+function task2471DraftDeps(overrides = {}) {
+  return draftDepsForIntake(Object.assign({
+    ensureMissionBranchFn: (_repo, branchName, { logFn }) => {
+      logFn(cliFormat.status('PASS', `Created branch ${branchName} from main.`));
+    },
+    ensureWorktreeFn: (_repo, worktree, _branch, { logFn }) => {
+      logFn(cliFormat.status('PASS', `Created worktree at ${worktree}.`));
+    },
+    ensureGraphifyWorkspaceFn: (worktree, _repo, { logFn }) => {
+      logFn(cliFormat.status('PASS', `Created independent graphify-out directory in the mission worktree at ${worktree}/graphify-out.`));
+    },
+    ensureGraphifyIgnoreFn: () => {},
+    ensureMissionFileFn: (worktree, slug, { logFn }) => {
+      const missionFile = `${worktree}/missions/${slug}/MISSION.md`;
+      logFn(cliFormat.status('PASS', `Scaffolded MISSION.md at ${missionFile}`));
+      return missionFile;
+    },
+    ensureMissionBaseBranchRecordedFn: (missionFile, _base, { logFn }) => {
+      logFn(cliFormat.status('PASS', `Recorded Base-Branch: feat/x in ${missionFile}`));
+      return true;
+    },
+    recordDraftStatsFn: () => {},
+    transitionTaskFn: () => true,
+    transitionVirtualFn: async () => true,
+    exitFn: (code) => { throw new Error(`unexpected exit ${code}`); },
+    errorFn: (msg) => { throw new Error(`unexpected error: ${msg}`); },
+  }, overrides));
+}
+
+// Runs a draft with output captured, optionally with DEBUG set for the duration.
+async function runDraftCapturingOutput({ debug = false, overrides = {} } = {}) {
+  const logs = [];
+  const errors = [];
+  const previousDebug = process.env.DEBUG;
+  if (debug) { process.env.DEBUG = '1'; } else { delete process.env.DEBUG; }
+  try {
+    await runDraftCommand(['task-tst'], task2471DraftDeps(Object.assign({
+      logFn: (msg) => logs.push(String(msg)),
+    }, overrides)));
+  } finally {
+    if (previousDebug === undefined) { delete process.env.DEBUG; } else { process.env.DEBUG = previousDebug; }
+  }
+  return {
+    logs,
+    errors,
+    text: cliFormat.stripAnsi(logs.join('\n')),
+    errorText: cliFormat.stripAnsi(errors.join('\n')),
+  };
+}
+
+// Points the scaffold step at a specific mission file while still emitting the
+// real `Scaffolded MISSION.md` plumbing line the demotion contract covers.
+function missionFileStub(missionFile) {
+  return (_worktree, _slug, { logFn }) => {
+    logFn(cliFormat.status('PASS', `Scaffolded MISSION.md at ${missionFile}`));
+    return missionFile;
+  };
+}
+
+// Writes a real MISSION.md so the summary exercises the actual heading parse
+// rather than the slug fallback.
+function writeMissionFile(heading, body = '\n## Goal\nSomething.\n') {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'px-2471-'));
+  const missionFile = path.join(dir, 'MISSION.md');
+  fs.writeFileSync(missionFile, `${heading}\n${body}`);
+  return missionFile;
+}
+
+// A contract shaped like the real thing: a two-paragraph Goal, numbered
+// criteria, checkpoints with their documentation subsection, and gates.
+const TASK_2471_CONTRACT = `
+## Goal
+Correct the greeting string emitted by hello.sh so that running the script
+prints exactly \`Hello, World!\` and nothing else.
+
+A second paragraph that the digest must not print.
+
+## Refinement Signals
+- Predicted NEL bucket: Small (0-80)
+
+## Success Criteria
+1. First criterion.
+2. Second criterion.
+3. Third criterion.
+
+## Checkpoints
+- CP 1: fix the greeting.
+- CP 2: lock it with a test.
+
+### Checkpoint Documentation Requirements
+- Not a checkpoint.
+
+## Gates
+- [ ] ./scripts/verify-local.sh docs
+`;
+
+test('px draft default output omits every internal-plumbing line', async () => {
+  const missionFile = writeMissionFile('# Mission: Improve px draft default terminal output');
+  const { text } = await runDraftCapturingOutput({
+    overrides: { ensureMissionFileFn: missionFileStub(missionFile) },
+  });
+
+  for (const line of TASK_2471_PLUMBING_LINES) {
+    assert.equal(
+      text.split(line).length - 1,
+      0,
+      `internal-plumbing line must not appear in default output: ${line}`,
+    );
+  }
+});
+
+test('px draft default output ends with a mission summary naming px active', async () => {
+  const missionFile = writeMissionFile('# Mission: Improve px draft default terminal output');
+  const { text } = await runDraftCapturingOutput({
+    overrides: { ensureMissionFileFn: missionFileStub(missionFile) },
+  });
+
+  assert.match(text, /\[PASS\] Drafted task-tst in \d+s: Improve px draft default terminal output/);
+  assert.match(text, /agent\s+codex/, 'the summary must name the drafting agent family');
+  assert.match(text, /branch\s+mission\/task-tst/, 'the summary must name the mission branch');
+  assert.ok(text.includes(missionFile), 'the summary must give the mission file path to inspect');
+  assert.ok(text.includes('/wt-tst'), 'the summary must give the mission worktree');
+  assert.match(text, /Next: px active/, 'px active must be the stated next action');
+
+  // The mission result is the close-out, not a mid-run line.
+  const trailing = text.trimEnd().split('\n').slice(-2).join('\n');
+  assert.match(trailing, /px active/);
+});
+
+test('px draft default output keeps the live drafting-agent activity visible', async () => {
+  const missionFile = writeMissionFile('# Mission: Improve px draft default terminal output');
+  const { text } = await runDraftCapturingOutput({
+    overrides: { ensureMissionFileFn: missionFileStub(missionFile) },
+  });
+
+  assert.match(text, /Running codex to write the mission contract/);
+});
+
+test('px draft with DEBUG set restores every demoted plumbing line', async () => {
+  const missionFile = writeMissionFile('# Mission: Improve px draft default terminal output');
+  const { text } = await runDraftCapturingOutput({
+    debug: true,
+    overrides: { ensureMissionFileFn: missionFileStub(missionFile) },
+  });
+
+  for (const line of TASK_2471_PLUMBING_LINES) {
+    assert.ok(
+      text.includes(line),
+      `DEBUG=1 must restore the demoted plumbing line, proving it was demoted not deleted: ${line}`,
+    );
+  }
+  // Demotion must not cost the summary.
+  assert.match(text, /Next: px active/);
+});
+
+test('px draft keeps setup-helper warnings on the default path', async () => {
+  const missionFile = writeMissionFile('# Mission: Improve px draft default terminal output');
+  const { text } = await runDraftCapturingOutput({
+    overrides: {
+      ensureMissionFileFn: missionFileStub(missionFile),
+      ensureGraphifyWorkspaceFn: (worktree, _repo, { logFn }) => {
+        logFn(cliFormat.status('PASS', `Created independent graphify-out directory in the mission worktree at ${worktree}/graphify-out.`));
+        logFn(cliFormat.status('WARN', `${worktree}/graphify-out already exists and is not a directory. Leaving it unchanged.`));
+      },
+    },
+  });
+
+  assert.match(text, /\[WARN\] .*already exists and is not a directory/, 'WARN lines must never be demoted');
+  assert.ok(!text.includes('graphify-out directory'), 'the PASS sibling of that WARN must still be demoted');
+});
+
+test('px draft failure path keeps the FAIL line, the repair hint and a non-zero exit', async () => {
+  const logs = [];
+  const errors = [];
+  const exits = [];
+  const previousDebug = process.env.DEBUG;
+  delete process.env.DEBUG;
+  try {
+    await runDraftCommand(['task-tst'], task2471DraftDeps({
+      logFn: (msg) => logs.push(String(msg)),
+      errorFn: (msg) => errors.push(String(msg)),
+      exitFn: (code) => { exits.push(code); },
+      missionServicesFn: async () => { throw new Error('database is locked'); },
+    }));
+  } finally {
+    if (previousDebug === undefined) { delete process.env.DEBUG; } else { process.env.DEBUG = previousDebug; }
+  }
+
+  const errorText = cliFormat.stripAnsi(errors.join('\n'));
+  const logText = cliFormat.stripAnsi(logs.join('\n'));
+  assert.match(errorText, /\[FAIL\] Mission intake to SQLite failed for task-tst: database is locked/);
+  assert.match(logText, /Repair: ensure the operator-local database is reachable/);
+  assert.ok(exits.includes(1), 'the draft must still exit non-zero on intake failure');
+  assert.ok(!logText.includes('Drafted task-tst in'), 'a failed draft must not print the success summary');
+});
+
+test('px draft summary falls back to the slug when the mission file has no title heading', async () => {
+  const missionFile = writeMissionFile('Not a mission heading at all');
+  const { text } = await runDraftCapturingOutput({
+    overrides: { ensureMissionFileFn: missionFileStub(missionFile) },
+  });
+
+  assert.match(text, /\[PASS\] Drafted task-tst in \d+s: task-tst/);
+});
+
+test('px draft summary falls back to the slug when the mission file is missing', async () => {
+  const { text } = await runDraftCapturingOutput({
+    overrides: { ensureMissionFileFn: missionFileStub('/nonexistent/px-2471/MISSION.md') },
+  });
+
+  assert.match(text, /\[PASS\] Drafted task-tst in \d+s: task-tst/);
+});
+
+test('px draft demotes the .gitignore plumbing line and DEBUG restores it', async () => {
+  // `ensureWorkflowGitignore` is called directly rather than through a dep seam,
+  // so this is the one plumbing line that needs a real git worktree to fire.
+  const missionFile = writeMissionFile('# Mission: Improve px draft default terminal output');
+  const worktree = fs.mkdtempSync(path.join(os.tmpdir(), 'px-2471-wt-'));
+  spawnSync('git', ['init', '-q', worktree]);
+  const overrides = {
+    ensureMissionFileFn: missionFileStub(missionFile),
+    conventionalWorktreePathFn: () => worktree,
+  };
+
+  const quiet = await runDraftCapturingOutput({ overrides });
+  assert.ok(!quiet.text.includes('Created .gitignore'), 'the .gitignore line must not appear by default');
+
+  fs.rmSync(path.join(worktree, '.gitignore'), { force: true });
+  const verbose = await runDraftCapturingOutput({ debug: true, overrides });
+  assert.match(verbose.text, /Created \.gitignore with \d+ workflow entries/, 'DEBUG=1 must restore it');
+});
+
+test('px draft emits the worktree as the shell-init cd signal', async () => {
+  // `px shell-init` (src/composition/create-cli.ts) greps `[INFO] Next: cd ` and
+  // then `[INFO] Working directory: ` to cd the operator into the mission
+  // worktree. The summary rewrite dropped the former, so the latter must stay.
+  const missionFile = writeMissionFile('# Mission: Improve px draft default terminal output');
+  const { text } = await runDraftCapturingOutput({
+    overrides: { ensureMissionFileFn: missionFileStub(missionFile) },
+  });
+
+  assert.match(text, /\[INFO\] Working directory: \/wt-tst$/m);
+});
+
+
+// --- TASK-2471 round 2: the whole drafting experience, not just less noise ----
+
+test('px draft opens by naming the mission and where it will live', async () => {
+  const missionFile = writeMissionFile('# Mission: Improve px draft default terminal output');
+  const { text } = await runDraftCapturingOutput({
+    overrides: { ensureMissionFileFn: missionFileStub(missionFile) },
+  });
+
+  const head = text.split('\n').filter(line => line.trim() !== '').slice(0, 3).join('\n');
+  assert.match(head, /^Drafting mission task-tst$/m, 'the first line names the mission being drafted');
+  assert.match(head, /^ {2}branch {4}mission\/task-tst$/m, 'the operator is told which branch the mission gets');
+  assert.match(head, /^ {2}worktree {2}\/wt-tst$/m, 'the operator is told which worktree the mission gets');
+});
+
+test('px draft reports how long the draft took', async () => {
+  const missionFile = writeMissionFile('# Mission: Improve px draft default terminal output');
+  const { text } = await runDraftCapturingOutput({
+    overrides: { ensureMissionFileFn: missionFileStub(missionFile) },
+  });
+
+  assert.match(text, /\[PASS\] Drafted task-tst in \d+s: /, 'the summary reports elapsed wall-clock time');
+});
+
+test('px draft detail rows carry no trailing whitespace', async () => {
+  // `fmt.table` pads its last column, so every summary line an operator copied
+  // out of the terminal carried trailing spaces.
+  const missionFile = writeMissionFile('# Mission: Improve px draft default terminal output');
+  const { text } = await runDraftCapturingOutput({
+    overrides: { ensureMissionFileFn: missionFileStub(missionFile) },
+  });
+
+  const padded = text.split('\n').filter(line => /\s$/.test(line));
+  assert.deepEqual(padded, [], 'no emitted line may end in whitespace');
+});
+
+test('px draft demotes the routine safety-harness commit but keeps unexpected dirty files loud', async () => {
+  const missionFile = writeMissionFile('# Mission: Improve px draft default terminal output');
+  const { text } = await runDraftCapturingOutput({
+    overrides: {
+      ensureMissionFileFn: missionFileStub(missionFile),
+      enforceDraftCommitSafetyFn: ({ logFn, plumbingLogFn }) => {
+        // Mirrors the real helper's two channels.
+        plumbingLogFn(cliFormat.status('INFO', 'Draft safety harness: committing the changes the draft agent left behind.'));
+        logFn(cliFormat.status('WARN', 'Draft safety harness: capturing unexpected dirty files alongside mission artifacts:'));
+        return true;
+      },
+    },
+  });
+
+  assert.ok(!text.includes('committing the changes the draft agent left behind'), 'the routine fallback commit is plumbing');
+  assert.match(text, /\[WARN\] Draft safety harness: capturing unexpected dirty files/, 'unexpected dirty files stay visible');
+});
+
+test('px draft keeps an agent fallback visible while demoting assignee bookkeeping', async () => {
+  const missionFile = writeMissionFile('# Mission: Improve px draft default terminal output');
+  const { text } = await runDraftCapturingOutput({
+    overrides: {
+      ensureMissionFileFn: missionFileStub(missionFile),
+      recordDraftImplementerFn: async ({ log, plumbingLog }) => {
+        log(cliFormat.status('INFO', 'Draft agent fell back from claude to codex; enforcing backlog assignee.'));
+        plumbingLog(cliFormat.status('INFO', 'Enforcing draft agent codex as assignee...'));
+        return 'codex';
+      },
+    },
+  });
+
+  assert.match(text, /fell back from claude to codex/, 'an agent fallback is operator-relevant');
+  assert.ok(!text.includes('Enforcing draft agent codex as assignee'), 'the assignee write is plumbing');
+});
+
+test('px draft prints the contract goal and its shape so no pager is needed', async () => {
+  const missionFile = writeMissionFile('# Mission: Fix the hello.sh greeting output', TASK_2471_CONTRACT);
+  const { text } = await runDraftCapturingOutput({
+    overrides: { ensureMissionFileFn: missionFileStub(missionFile) },
+  });
+
+  assert.match(text, /^Goal$/m);
+  assert.match(text, /Correct the greeting string emitted by hello\.sh/);
+  assert.ok(!text.includes('A second paragraph'), 'only the first Goal paragraph is printed');
+  // The documentation subsection under ## Checkpoints is not a checkpoint.
+  assert.match(text, /3 success criteria · 2 checkpoints · 1 gate · NEL Small \(0-80\)/);
+});
+
+test('px draft counts bullet-style success criteria too', async () => {
+  // Drafted contracts bullet their criteria as often as they number them.
+  const contract = TASK_2471_CONTRACT.replace(
+    '1. First criterion.\n2. Second criterion.\n3. Third criterion.',
+    '> Falsifiability rule: each criterion is falsifiable.\n\n- First criterion.\n- Second criterion.',
+  );
+  const missionFile = writeMissionFile('# Mission: Fix the hello.sh greeting output', contract);
+  const { text } = await runDraftCapturingOutput({
+    overrides: { ensureMissionFileFn: missionFileStub(missionFile) },
+  });
+
+  assert.match(text, /2 success criteria · 2 checkpoints · 1 gate/);
+});
+
+test('px draft summary survives a contract with no Goal section', async () => {
+  const missionFile = writeMissionFile('# Mission: Untitled', '\n## Scope\nNothing.\n');
+  const { text } = await runDraftCapturingOutput({
+    overrides: { ensureMissionFileFn: missionFileStub(missionFile) },
+  });
+
+  assert.match(text, /\[PASS\] Drafted task-tst in \d+s: Untitled/);
+  assert.ok(!text.includes('\nGoal\n'), 'no empty Goal block is printed');
+  assert.match(text, /Next: px active/);
 });

@@ -165,6 +165,8 @@ All workflow agent launches use the shared `startAgent` path and tee child stdou
 
 The watchdog is purely observational: it never kills, times out, or cancels an agent, and its reports do not release custom capacity. Reporting continues **after** the agent's first visible output, so an agent that announces a plan and then stalls still produces liveness lines; only the process exiting (or the SDK session settling) stops them.
 
+A tick is suppressed while the agent is visibly streaming: once output has been seen, the harness reports only when that output is at least 15 seconds old. A live agent is its own liveness evidence, and the earlier unconditional report told the operator it was "still waiting" on a stream that was moving. Silence — before the first output or after the stream stops — is always reported.
+
 ### Default watchdog timings
 
 | Step | Initial delay |Interval |
@@ -195,7 +197,7 @@ When the watchdog fires, the harness emits:
 [INFO] No output yet from <agent> for step "<step>" after <elapsed> (pid <pid>, agent <stage>). Launcher is still running; stdout/stderr have not produced visible output.
 ```
 
-Once the agent has already produced visible output, the same watchdog keeps reporting with the age of that output instead:
+Once the agent has already produced visible output, the same watchdog reports the age of that output instead, and only after it has been stale for at least 15 seconds:
 
 ```text
 [INFO] Still waiting on <agent> for step "<step>" after <elapsed> (pid <pid>, agent <stage>). Launcher is still running; last visible output <elapsed> ago.
@@ -204,6 +206,10 @@ Once the agent has already produced visible output, the same watchdog keeps repo
 The `<stage>` field is `"starting up"` before the step-specific initial delay elapses and `"running"` afterwards. For draft, the threshold is 15 seconds; for all other steps it is 60 seconds.
 
 This means the launcher process is alive but silent. It is not a launch failure by itself. A launch failure is still reported separately when the process cannot start, exits non-zero, is killed by a signal, or produces a detected usage-limit transcript that triggers fallback.
+
+### Launch echo
+
+Each launch echoes the command it is about to run. The prompt is one of the launcher arguments and runs to hundreds of lines, so it is summarized as `<prompt: <n> chars>` by default; `DEBUG=1` echoes the verbatim command, prompt included, for reproducing a launch by hand.
 
 ## Per-step eligibility policy
 

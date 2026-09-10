@@ -676,7 +676,11 @@ function runRealAgentSmoke(agent, runner) {
     FORCE_COLOR: '0',
     PRIMARY_WORKTREE: repo.repoRoot,
     PARALLIX_HOME: repo.stateHome,
-    PATH: `${repo.binDir}${path.delimiter}${process.env.PATH || ''}`
+    PATH: `${repo.binDir}${path.delimiter}${process.env.PATH || ''}`,
+    // TASK-2471: the draft-stats line this gate parses is operator plumbing and
+    // ships behind DEBUG. This gate reads the harness's machine output, not the
+    // operator-facing default, so it asks for the verbose transport explicitly.
+    DEBUG: '1'
   };
   if (agent === 'codex') {
     // setupRepository's symlink is a test-controlled route to the production
@@ -740,9 +744,12 @@ function runRealAgentSmoke(agent, runner) {
       );
     }
 
+    // TASK-2471: the family is announced once before the agent runs, and again
+    // in the closing summary; the old trailing `Draft agent family:` line is
+    // DEBUG-only now.
     assert.match(
       draftResult.stdout,
-      new RegExp(`Draft agent family: ${agent}`),
+      new RegExp(`Running ${agent} to write the mission contract`),
       `[parallix-workflow-failure] expected the real run to select the ${agent} agent family`
     );
 

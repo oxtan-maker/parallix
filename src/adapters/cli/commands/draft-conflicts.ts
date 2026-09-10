@@ -48,7 +48,17 @@ function isExpectedDraftPath(filePath, slug, worktree) {
   const missionPrefix = missionDir
     ? `${path.relative(worktree, missionDir)}/`
     : path.relative(worktree, missionDirForSlug(worktree, slug)).split(path.sep).join('/') + '/';
-  return filePath.startsWith(missionPrefix) || isMissionTaskPath(filePath, slug);
+  // git collapses a wholly untracked tree to its top directory (`?? missions/`),
+  // so the mission's own artifacts can arrive as an ancestor of the mission dir
+  // rather than as the files themselves.
+  const isAncestorOfMissionDir = filePath.endsWith('/') && missionPrefix.startsWith(filePath);
+  // The harness appends its own workflow entries to `.gitignore` during setup;
+  // warning the operator about the harness's own edit is noise on every draft.
+  const isWorkflowGitignore = filePath === '.gitignore';
+  return filePath.startsWith(missionPrefix)
+    || isAncestorOfMissionDir
+    || isWorkflowGitignore
+    || isMissionTaskPath(filePath, slug);
 }
 
 // @ts-expect-error implicit any on dirtyEntries/slug/worktree
@@ -87,15 +97,19 @@ function resolveMissionSpecificDraftConflicts({ slug, worktree, conflictEntries,
 }
 
 // @ts-expect-error implicit any on slug/worktree/dirtyEntries
-function enforceDraftCommitSafety({ slug, worktree, dirtyEntries = getWorktreeStatus(worktree), gitImpl = git, logFn = fmt.log.plain, errorFn = fmt.log.plainError }) {
+function enforceDraftCommitSafety({ slug, worktree, dirtyEntries = getWorktreeStatus(worktree), gitImpl = git, logFn = fmt.log.plain, plumbingLogFn = logFn, errorFn = fmt.log.plainError }) {
   if (dirtyEntries.length === 0) {
-    logFn(fmt.status('PASS', 'Draft safety harness: no uncommitted changes left behind.'));
+    plumbingLogFn(fmt.status('PASS', 'Draft safety harness: no uncommitted changes left behind.'));
     return false;
   }
 
-  logFn(fmt.status('WARN', 'Draft safety harness: draft agent left uncommitted changes. Creating fallback commit.'));
+  // Every successful draft ends here: the agent writes MISSION.md and the task
+  // file and leaves them uncommitted for the harness. That is the designed hand-
+  // off, not a warning, so it travels on the plumbing channel. Genuine trouble
+  // (shared-file conflicts, unexpected dirty files) keeps its own WARN below.
+  plumbingLogFn(fmt.status('INFO', 'Draft safety harness: committing the changes the draft agent left behind.'));
   for (const entry of dirtyEntries) {
-    logFn(`  ${entry}`);
+    plumbingLogFn(`  ${entry}`);
   }
 
   const { conflictEntries, expectedEntries, unexpectedEntries } = classifyDraftEntries(dirtyEntries, slug, worktree);
@@ -150,7 +164,7 @@ function enforceDraftCommitSafety({ slug, worktree, dirtyEntries = getWorktreeSt
     throw new Error('Draft safety harness could not create fallback commit.');
   }
 
-  logFn(fmt.status('PASS', `Draft safety harness committed remaining changes with "${commitMessage}".`));
+  plumbingLogFn(fmt.status('PASS', `Draft safety harness committed remaining changes with "${commitMessage}".`));
   return true;
 }
 
