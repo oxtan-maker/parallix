@@ -86,56 +86,9 @@ function buildRelaunchPrompt(errorMsg: string, slug: string, worktree: string, g
   });
 }
 
-/** @param {string} file */
-function isRepoLocalImplementationPath(file: string): boolean {
-  if (!file || typeof file !== 'string') {return false;}
-
-  const normalized = file.replace(/\\/g, '/');
-  if (!normalized || normalized === '.' || normalized.startsWith('/') || /^[A-Za-z]:\//.test(normalized)) {
-    return false;
-  }
-  if (normalized === '..' || normalized.startsWith('../') || normalized.includes('/../')) {
-    return false;
-  }
-  if (normalized === '.git' || normalized.startsWith('.git/')) {
-    return false;
-  }
-  if (missionUtils.isWorkflowGeneratedArtifact(normalized)) {
-    return false;
-  }
-  const implementationDirs = new Set([
-    'lib',
-    'test',
-    'scripts',
-    'config',
-    'prompts',
-    'templates',
-    'examples',
-    'data'
-  ]);
-  const implementationRootFiles = new Set([
-    'px.ts',
-    'px.js',
-    'index.js',
-    'package.json',
-    'package-lock.json',
-    'tsconfig.json',
-    'eslint.config.js'
-  ]);
-  const pathParts = normalized.split('/');
-  const topLevel = pathParts[0];
-  if (!topLevel || topLevel.startsWith('.')) {
-    return false;
-  }
-  if (pathParts.length === 1) {
-    return implementationRootFiles.has(normalized);
-  }
-  return implementationDirs.has(topLevel);
-}
-
 /**
- * Attempt to repair a failed automated handoff by auto-committing mission
- * artifacts or rebasing.
+ * Attempt to repair a failed automated handoff by auto-committing dirty files
+ * or rebasing.
  *
  * @param {string} slug - Mission slug
  * @param {string} worktree - Path to the mission worktree
@@ -182,7 +135,7 @@ async function repairHandoff(slug: string, worktree: string, errorMsg: string, o
     return { repaired: false, blocker: null };
   }
 
-  // 1. Auto-commit mission artifacts if uncommitted
+  // 1. Auto-commit non-conflicted dirty files if uncommitted
   if (isGitBlocker) {
     const statusResult = gitFn(['-C', rootDir, 'status', '--porcelain']);
     if (statusResult.status === 0 && statusResult.stdout) {
@@ -203,33 +156,13 @@ async function repairHandoff(slug: string, worktree: string, errorMsg: string, o
 
       const dirtyFiles = dirtyFilesWithStatus.map((f: { xy: string; file: string }) => f.file);
 
-      const isSafeToCommit = (/** @type{string} */ file: string) =>
-        missionUtils.isMissionArtifact(file, slug, rootDir)
-        || isRepoLocalImplementationPath(file);
-
-      const safeFiles = dirtyFiles.filter(isSafeToCommit);
-      const unsafeFiles = dirtyFiles.filter((f: string) => !isSafeToCommit(f));
-
-      if (unsafeFiles.length > 0) {
-        log(`Cannot auto-commit: dirty files include non-mission paths:`);
-        unsafeFiles.forEach((f: string) => log(`       - ${f}`));
-        blocker = `dirty files include non-mission paths: ${unsafeFiles.join(', ')}`;
-        return { repaired: false, blocker };
-      } else if (safeFiles.length > 0) {
-        log(`Auto-committing mission artifacts:`);
-        const stageFailures: string[] = [];
-        safeFiles.forEach((f: string) => {
-          log(`       - ${f}`);
-          const addResult = gitFn(['-C', rootDir, 'add', '--', f]);
-          if (addResult.status === 0) {
-            return;
-          } else {
-            const failureText = [addResult.stderr, addResult.stdout].filter(Boolean).join('\n').trim();
-            stageFailures.push(`${f}${failureText ? `: ${failureText}` : ''}`);
-          }
-        });
-        if (stageFailures.length > 0) {
-          blocker = `failed to stage mission artifacts: ${stageFailures.join(', ')}`;
+      if (dirtyFiles.length > 0) {
+        log(`Auto-committing dirty files:`);
+        dirtyFiles.forEach((file: string) => log(`       - ${file}`));
+        const addResult = gitFn(['-C', rootDir, 'add', '--', ...dirtyFiles]);
+        if (addResult.status !== 0) {
+          const failureText = [addResult.stderr, addResult.stdout].filter(Boolean).join('\n').trim();
+          blocker = `failed to stage dirty files${failureText ? `: ${failureText}` : ''}`;
           error(fmt.status('FAIL', blocker));
           return { repaired: false, blocker };
         }

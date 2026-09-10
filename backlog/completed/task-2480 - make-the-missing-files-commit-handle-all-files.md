@@ -1,10 +1,10 @@
 ---
 id: TASK-2480
 title: make the missing files commit handle all files
-status: backlog
-assignee: []
+status: done
+assignee: [custom]
 created_date: '2026-09-10 10:54'
-labels: []
+labels: ["ai_sdlc"]
 dependencies: []
 ---
 
