@@ -75,7 +75,7 @@ The following checks are currently implemented across the harness lifecycle. Eac
 
 | # | Mechanism | Location | Coverage |
 |---|-----------|----------|----------|
-| 21 | Auto-commit mission artifacts | Repair lifecycle | Dirty mission files only (Class 5) |
+| 21 | Auto-commit non-conflicted dirty files | Repair lifecycle | Isolated mission-worktree dirty files; unmerged files block (Class 5) |
 | 22 | Auto-rebase | Repair lifecycle | Simple rebase only (Class 5) |
 | 23 | Agent relaunch (empty goal-check) | Repair lifecycle | Single error sub-class only (Class 4) |
 
@@ -91,7 +91,7 @@ Eight failure classes have been identified, each classified as auto-repair, auto
 | 2 | Malformed or non-runnable declared gates | **Auto-repair** | Static validation (file existence, syntax) can catch before execution |
 | 3 | Missing mandatory mission artifacts | **Auto-send-back** | Unambiguously the implementer's responsibility; no human judgment needed |
 | 4 | Incomplete checkpoint evidence | **Auto-send-back** | Agent-fixable content errors; fix prompt already exists for one sub-class |
-| 5 | Mechanical git/handoff blockers | **Auto-repair** (mission-only); **Human-only** (shared files) | Mission conflicts auto-resolvable; shared-file conflicts require judgment |
+| 5 | Mechanical git/handoff blockers | **Auto-repair** (non-conflicted dirty files); **Human-only** (unmerged conflicts) | Isolated-worktree dirty files can be committed together; unmerged conflicts require judgment |
 | 6 | Genuine gate failure (code issues) | **Auto-send-back** | Gate output sufficient for agent to diagnose; highest-ROI improvement |
 | 7 | Forgejo/infra blockers | **Human-only** | No agent relaunch will fix infrastructure issues |
 | 8 | Task state machine violations | **Human-only** | State confusion requires human determination of correct state |

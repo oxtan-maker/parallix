@@ -453,11 +453,10 @@ export async function startReviewLoop(slug: string, opts: {
   log(fmt.status('INFO', `Reviewer: ${reviewer}`));
   log(fmt.status('INFO', `Independence: ${reviewIndependence(implementer!, reviewer!)}`));
   log(fmt.status('INFO', `Branch: ${branch}`));
-  log(fmt.status('INFO', `Focus: ${focus}`));
   if (verbose) {
-    log(fmt.status('INFO', `Max attempts: ${maxAttempts}`));
+    log(fmt.status('INFO', `Focus: ${focus} | Max attempts: ${maxAttempts}`));
+    log(fmt.status('INFO', `Poll interval: ${Math.round(pollIntervalMs / 1000)}s | Poll timeout: ${Math.round(pollTimeoutMs / 1000)}s | Verbose: on`));
   }
-  log(fmt.status('INFO', `Poll interval: ${Math.round(pollIntervalMs / 1000)}s | Poll timeout: ${Math.round(pollTimeoutMs / 1000)}s`));
   if (dryRun) {
     log(fmt.status('DRY-RUN', 'No agents will be launched.'));
   }
