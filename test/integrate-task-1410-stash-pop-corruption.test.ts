@@ -65,6 +65,9 @@ function createTestRepo() {
 
   runGit(root, ['add', '.']);
   runGit(root, ['commit', '-m', 'initial commit']);
+  runGit(root, ['branch', '-M', 'main']);
+  runGit(root, ['branch', 'mission/task-1410']);
+  runGit(root, ['branch', 'mission/task-1404']);
 
   return root;
 }
@@ -201,6 +204,101 @@ test('reproduction: overlapping dirty paths trigger FAIL in preflight (blocks in
     } finally {
       console.error = originalError;
     }
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('dirty path in the mission squash payload still blocks integration', () => {
+  const root = createTestRepo();
+  try {
+    const taskFile = path.join(root, 'backlog', 'tasks',
+      'task-1410 - prevent-integrate-from-corrupting-main.md');
+    const context = {
+      slug: 'task-1410',
+      branch: 'mission/task-1410',
+      currentBranch: 'main',
+      missionDir: path.join(root, 'missions', 'task-1410'),
+      missionWorktree: root,
+      task: { ok: true, taskFile },
+      taskStatus: 'ready-for-integration',
+      taskAssignee: 'claude',
+      forgejoUser: 'claude',
+      taskAssigneeWarning: null,
+      pr: { exists: false },
+      siblingPrs: [],
+      approval: { ok: false, error: 'forgejo-off', reviewState: null },
+      baseBranch: 'main',
+      baseWorktree: root,
+      mainBranch: 'main',
+      mainDirty: true,
+      mainDirtyEntries: [' M src/adapters/cli/commands/integrate.ts']
+    };
+
+    const result = printIntegrationPreflight(context, {
+      readTokenFn: () => null,
+      resolveTokenFileFn: () => null,
+      isForgejoReviewEnabledFn: () => false,
+      getUnresolvedIndexConflictsFn: () => ({ ok: true, files: [] }),
+      gitFn: () => ({ status: 0, stdout: 'src/adapters/cli/commands/integrate.ts\n', stderr: '', signal: null })
+    });
+
+    assert.ok(result.failures.includes('main-dirty-overlap'));
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('unresolvable mission payload blocks a dirty integration checkout', () => {
+  const root = createTestRepo();
+  try {
+    const taskFile = path.join(root, 'backlog', 'tasks',
+      'task-1410 - prevent-integrate-from-corrupting-main.md');
+    const context = {
+      slug: 'task-1410', branch: 'mission/task-1410', currentBranch: 'main',
+      missionDir: path.join(root, 'missions', 'task-1410'), missionWorktree: root,
+      task: { ok: true, taskFile }, taskStatus: 'ready-for-integration',
+      taskAssignee: 'claude', forgejoUser: 'claude', taskAssigneeWarning: null,
+      pr: { exists: false }, siblingPrs: [],
+      approval: { ok: false, error: 'forgejo-off', reviewState: null },
+      baseBranch: 'main', baseWorktree: root, mainBranch: 'main',
+      mainDirty: true, mainDirtyEntries: [' M README.md']
+    };
+    const result = printIntegrationPreflight(context, {
+      readTokenFn: () => null, resolveTokenFileFn: () => null,
+      isForgejoReviewEnabledFn: () => false,
+      getUnresolvedIndexConflictsFn: () => ({ ok: true, files: [] }),
+      gitFn: () => ({ status: 128, stdout: '', stderr: 'unknown revision', signal: null })
+    });
+    assert.ok(result.failures.includes('main-dirty-payload'));
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('untracked first-run agent config is restored after a payload collision', () => {
+  const root = createTestRepo();
+  try {
+    const taskFile = path.join(root, 'backlog', 'tasks',
+      'task-1410 - prevent-integrate-from-corrupting-main.md');
+    const context = {
+      slug: 'task-1410', branch: 'mission/task-1410', currentBranch: 'main',
+      missionDir: path.join(root, 'missions', 'task-1410'), missionWorktree: root,
+      task: { ok: true, taskFile }, taskStatus: 'ready-for-integration',
+      taskAssignee: 'claude', forgejoUser: 'claude', taskAssigneeWarning: null,
+      pr: { exists: false }, siblingPrs: [],
+      approval: { ok: false, error: 'forgejo-off', reviewState: null },
+      baseBranch: 'main', baseWorktree: root, mainBranch: 'main',
+      mainDirty: true, mainDirtyEntries: ['?? config/agents.json']
+    };
+    const result = printIntegrationPreflight(context, {
+      readTokenFn: () => null, resolveTokenFileFn: () => null,
+      isForgejoReviewEnabledFn: () => false,
+      getUnresolvedIndexConflictsFn: () => ({ ok: true, files: [] }),
+      gitFn: () => ({ status: 0, stdout: 'config/agents.json\n', stderr: '', signal: null })
+    });
+    assert.ok(!result.failures.includes('main-dirty-overlap'));
+    assert.ok(result.warnings.includes('main-dirty'));
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
@@ -369,7 +467,7 @@ test('reproduction: dirty non-overlapping file restores cleanly (sanity)', () =>
   }
 });
 
-test('cross-task regression: dirty file from different backlog task triggers FAIL (reviewer reproduction)', () => {
+test('cross-task dirty backlog file is safe to stash and restore', () => {
   // Reproduces the reviewer's exact reproduction case:
   //   printIntegrationPreflight({ slug: 'task-1404', mainDirtyEntries: [' M backlog/tasks/task-1403 - something-else.md'] })
   // On unfixed code: returns failures=[], warnings=['main-dirty'] (WRONG — should be main-dirty-overlap)
@@ -411,19 +509,14 @@ test('cross-task regression: dirty file from different backlog task triggers FAI
       getUnresolvedIndexConflictsFn: () => ({ ok: true, files: [] })
     });
 
-    // Cross-task dirty file under backlog/tasks/ MUST trigger main-dirty-overlap FAIL
-    assert.ok(result.failures.includes('main-dirty-overlap'),
-      'Cross-task dirty file under backlog/tasks/ should trigger main-dirty-overlap FAIL. ' +
-      'On unfixed code this returns only main-dirty WARN, missing the overlap entirely.'
-    );
+    assert.ok(!result.failures.includes('main-dirty-overlap'));
+    assert.ok(result.warnings.includes('main-dirty'));
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
 });
 
-test('cross-task regression: dirty file in backlog/completed/ triggers FAIL', () => {
-  // backlog/completed/ is also in the broad overlap set because closeout can touch archived tasks.
-  // Test goes RED on unfixed code.
+test('cross-task dirty completed backlog file is safe to stash and restore', () => {
 
   const root = createTestRepo();
 
@@ -458,9 +551,8 @@ test('cross-task regression: dirty file in backlog/completed/ triggers FAIL', ()
       getUnresolvedIndexConflictsFn: () => ({ ok: true, files: [] })
     });
 
-    assert.ok(result.failures.includes('main-dirty-overlap'),
-      'Dirty file under backlog/completed/ should trigger main-dirty-overlap FAIL.'
-    );
+    assert.ok(!result.failures.includes('main-dirty-overlap'));
+    assert.ok(result.warnings.includes('main-dirty'));
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }

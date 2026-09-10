@@ -152,14 +152,14 @@ export class ClaudeStreamView {
         this.setActivity(event.isSubagent ? `sub-agent ${event.input || event.name}` : event.name);
         const label = event.isSubagent
           ? `${this.style(['magenta'], '▶ sub-agent')} ${this.style(['bold'], event.input || event.name)}`
-          : `${this.style(['cyan'], '⚒')} ${this.style(['bold'], event.name)}${event.input ? ` ${event.input}` : ''}`;
+          : `${this.style(['cyan'], '⚒')}${event.name === 'Bash' ? '' : ` ${this.style(['bold'], event.name)}`}${event.input ? ` ${event.input}` : ''}`;
         this.line(this.withAgent(label, event.agent));
         return;
       }
       case 'tool_result': {
         this.setActivity(null);
         const mark = event.isError ? this.style(['red'], '✗') : this.style(['green'], '✓');
-        const name = event.name ? `${event.name} ` : '';
+        const name = event.name && event.name !== 'Bash' ? `${event.name} ` : '';
         const body = event.summary ? this.style(['gray'], event.summary) : '';
         const prefix = event.isSubagent ? `${this.style(['magenta'], '◀')} ` : '  ';
         this.line(this.withAgent(`${prefix}${mark} ${name}${body}`.trimEnd(), event.agent));

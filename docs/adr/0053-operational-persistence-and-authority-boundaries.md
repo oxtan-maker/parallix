@@ -118,7 +118,9 @@ interfaces use application ports and never execute lifecycle SQL directly.
    database transaction. Their references are recorded, but the database does
    not replace those external facts.
 4. Current Mission state is read from Mission rows, not reconstructed from
-   events, usage, task files, UI caches, or provider projections.
+   events, usage, task files, UI caches, or provider projections. Integration
+   uses the Mission lifecycle for its gate and writes task status only as
+   closeout representation.
 5. Database unavailability or corruption fails closed for database-owned
    mutations. Parallix does not silently write a compatibility file instead.
 6. Imports validate all records before committing, are atomic and idempotent,
