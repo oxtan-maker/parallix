@@ -4,7 +4,9 @@ title: Update the README with a Defence in depth section
 status: backlog
 assignee: []
 created_date: '2026-09-08 10:12'
-labels: [user_value]
+updated_date: '2026-09-09 11:37'
+labels:
+  - ai_sdlc
 dependencies: []
 ---
 
