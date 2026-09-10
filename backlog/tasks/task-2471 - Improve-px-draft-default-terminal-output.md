@@ -4,7 +4,8 @@ title: Improve px draft default terminal output
 status: backlog
 assignee: []
 created_date: '2026-09-09 11:10'
-labels: []
+labels:
+- user_value
 dependencies: []
 ---
 
