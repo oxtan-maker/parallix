@@ -16,6 +16,19 @@ const { mock } = test;
 
 __mm1;
 const FAKE_ROOT = `/tmp/mission-${process.pid}`;
+// TASK-2479: the preflight success-path detail (approval/token/classification)
+// is demoted to DEBUG so the default happy path stays concise. The checks are
+// unchanged — failures still print and still block — so these regression locks
+// ask for the detail explicitly to keep coverage of the resolved value.
+function withDebug(fn) {
+  const previous = process.env.DEBUG;
+  process.env.DEBUG = '1';
+  try {
+    return fn();
+  } finally {
+    if (previous === undefined) { delete process.env.DEBUG; } else { process.env.DEBUG = previous; }
+  }
+}
 function installCommonMocks() {
   mock.method(backlog, 'getTaskClassification', () => 'ai_sdlc');
   mock.method(missionUtils, 'getPrimaryBranch', () => 'main');
@@ -175,7 +188,7 @@ test('printIntegrationPreflight PASS for approval when token and forgejo report 
   console.error = line => logs.push(line);
 
   try {
-    const result = printIntegrationPreflight({
+    const result = withDebug(() => printIntegrationPreflight({
       slug: 'task-1219',
       branch: 'mission/task-1219',
       currentBranch: 'mission/task-1219',
@@ -195,7 +208,7 @@ test('printIntegrationPreflight PASS for approval when token and forgejo report 
       resolveTokenFileFn: () => '/tmp/tokens/codex',
       isForgejoReviewEnabledFn: () => true,
       getUnresolvedIndexConflictsFn: () => ({ ok: true, files: [] })
-    });
+    }));
 
     // Forgejo path should PASS
     assert.ok(!result.failures.includes('pr-approval'));
@@ -362,18 +375,20 @@ test('printIntegrationPreflight accepts buildIntegrationContext local-review-sta
       mainDirtyEntries: []
     };
 
-    const result = printIntegrationPreflight(ctx, {
+    const result = withDebug(() => printIntegrationPreflight(ctx, {
       readTokenFn: () => null,
       resolveTokenFileFn: () => null,
       isForgejoReviewEnabledFn: () => true,
       getUnresolvedIndexConflictsFn: () => ({ ok: true, files: [] })
-    });
+    }));
 
     // Prevalent success criteria: no pr-approval or forgejo-token failure when local fallback is active
     assert.ok(!result.failures.includes('pr-approval'), 'pr-approval must not be in failures with local-review-state');
     assert.ok(!result.failures.includes('forgejo-token'), 'forgejo-token must not be in failures with local-review-state');
     const output = logs.join('\n');
-    assert.ok(output.includes('INFO'), 'should log INFO for local fallback, not FAIL');
+    // TASK-2479: the local-review-state fallback is demoted to DEBUG, so the
+    // benign fallback still resolves without a FAIL and is reported behind DEBUG.
+    assert.ok(output.includes('approval sourced from the local Review'), 'should report the local-review-state fallback behind DEBUG, not FAIL');
   } finally {
     console.log = originalLog;
     console.error = originalError;

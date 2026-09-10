@@ -23,6 +23,16 @@ import {
   statsRowActorKey,
 } from './stats.js';
 
+/** The agent-telemetry table header, in render order. */
+function agentTelemetryHeader() {
+  return ['# missions with telemetry', '# user value missions', '# AI SDLC missions', '# unknown missions'];
+}
+
+/** The agent-telemetry table row, in header order. */
+function agentTelemetryRow(total, userValue, aiSdlc, unknown) {
+  return [String(total), String(userValue), String(aiSdlc), String(unknown)];
+}
+
 // ---------------------------------------------------------------------------
 // Mission flow vs agent telemetry
 //
@@ -138,14 +148,14 @@ function renderWeeklyStatsReport(rows, options = {}) {
   lines.push('');
   lines.push(fmt.bold(`Agent telemetry — current week (${windows.current.label})`));
   lines.push(formatStatsTable(
-    ['# missions with telemetry', '# user value missions', '# AI SDLC missions', '# unknown missions'],
-    [[String(currentMissionStats.total), String(currentMissionStats.userValue), String(currentMissionStats.aiSdlc), String(currentMissionStats.unknown)]]
+    agentTelemetryHeader(),
+    [agentTelemetryRow(currentMissionStats.total, currentMissionStats.userValue, currentMissionStats.aiSdlc, currentMissionStats.unknown)]
   ));
   lines.push('');
   lines.push(fmt.bold(`Agent telemetry — previous week (${windows.previous.label})`));
   lines.push(formatStatsTable(
-    ['# missions with telemetry', '# user value missions', '# AI SDLC missions', '# unknown missions'],
-    [[String(previousMissionStats.total), String(previousMissionStats.userValue), String(previousMissionStats.aiSdlc), String(previousMissionStats.unknown)]]
+    agentTelemetryHeader(),
+    [agentTelemetryRow(previousMissionStats.total, previousMissionStats.userValue, previousMissionStats.aiSdlc, previousMissionStats.unknown)]
   ));
   lines.push('');
   lines.push(fmt.bold(`Agent performance this week (${windows.current.label}) — completed Missions`));
@@ -206,8 +216,8 @@ function renderRangeStatsReport(rows, options = {}) {
   lines.push('');
   lines.push(fmt.bold(`Agent telemetry missions (${window.label})`));
   lines.push(formatStatsTable(
-    ['# missions with telemetry', '# user value missions', '# AI SDLC missions', '# unknown missions'],
-    [[String(missionStats.total), String(missionStats.userValue), String(missionStats.aiSdlc), String(missionStats.unknown)]]
+    agentTelemetryHeader(),
+    [agentTelemetryRow(missionStats.total, missionStats.userValue, missionStats.aiSdlc, missionStats.unknown)]
   ));
   lines.push('');
   lines.push(fmt.bold(`Agent performance (${window.label}) — completed Missions`));

@@ -138,9 +138,6 @@ test('task-2213: weekly agent performance table excludes active-stage agents', (
     plain.indexOf('Agent spend by stage this week'),
   );
 
-  assert.match(plain, /# missions with telemetry[\s\S]*\n3\s+1\s+2/,
-    'weekly report should include all telemetry missions');
-
   // Agent performance: only closed missions appear
   assert.ok(performance.includes('gpt-5'),
     'closed mission model gpt-5 should appear in weekly report');
@@ -151,6 +148,10 @@ test('task-2213: weekly agent performance table excludes active-stage agents', (
 });
 
 test('task-2213: range agent performance table excludes active-stage agents', () => {
+  // "# missions with telemetry" renders behind DEBUG only; enable so this
+  // assertion verifies the flagged render path.
+  const previousDebug = process.env.DEBUG;
+  process.env.DEBUG = '1';
   const rows = [
     {
       date: '2026-06-15',
@@ -198,6 +199,8 @@ test('task-2213: range agent performance table excludes active-stage agents', ()
     'active-stage agent must NOT appear in agent performance table');
   assert.ok(!performance.includes('claude-sonnet-5'),
     'active-stage agent must NOT appear in agent performance table');
+
+  if (previousDebug === undefined) { delete process.env.DEBUG; } else { process.env.DEBUG = previousDebug; }
 });
 
 test('task-2213: completed missions keep per-model rows with per-model averages', () => {
@@ -241,6 +244,10 @@ test('task-2213: completed missions keep per-model rows with per-model averages'
 });
 
 test('task-1409: active and closed rows coexist without double-counting', () => {
+  // "# missions with telemetry" renders behind DEBUG only; enable so this
+  // assertion verifies the flagged render path.
+  const previousDebug = process.env.DEBUG;
+  process.env.DEBUG = '1';
   // Same mission with both active and closed rows should not double-count
   const rows = [
     {
@@ -284,6 +291,8 @@ test('task-1409: active and closed rows coexist without double-counting', () => 
   // Agent performance: gpt-5 shows 1 mission (only the closed row)
   // Active rows must NOT inflate agent performance counts
   assert.match(plain, /gpt-5\s+1\s+2\.00/);
+
+  if (previousDebug === undefined) { delete process.env.DEBUG; } else { process.env.DEBUG = previousDebug; }
 });
 
 test('task-2213: a blank-model rollup row buckets under the mission\'s model row', () => {

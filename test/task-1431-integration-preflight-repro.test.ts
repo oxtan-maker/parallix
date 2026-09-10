@@ -21,6 +21,20 @@ import os from 'os';
 import path from 'path';
 
 import { printIntegrationPreflight, buildIntegrationContext } from '../src/adapters/cli/commands/integrate.js';
+// TASK-2479: the preflight classification detail is demoted to DEBUG so the
+// default happy path stays concise. The checks are unchanged, so these
+// regression locks ask for the detail explicitly to keep coverage of the
+// resolved classification value.
+function withDebug(fn) {
+  const previous = process.env.DEBUG;
+  process.env.DEBUG = '1';
+  try {
+    return fn();
+  } finally {
+    if (previous === undefined) { delete process.env.DEBUG; } else { process.env.DEBUG = previous; }
+  }
+}
+
 function withTempBaseWorktree(fn) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'task-1431-base-'));
   try {
@@ -78,7 +92,7 @@ test('printIntegrationPreflight resolves classification from the mission base wo
     assert.notEqual(process.cwd(), root);
 
 // @ts-expect-error -- TASK-2328: partial test double after ESM seam migration
-    const result = printIntegrationPreflight(context, Object.assign({ log }, defaultPreflightOpts));
+    const result = withDebug(() => printIntegrationPreflight(context, Object.assign({ log }, defaultPreflightOpts)));
 
     const output = lines.join('\n');
     assert.ok(!result.failures.includes('classification'), `unexpected classification failure in:\n${output}`);
@@ -114,7 +128,7 @@ test('printIntegrationPreflight still warns and falls back to unknown classifica
   });
 
 // @ts-expect-error -- TASK-2328: partial test double after ESM seam migration
-  const result = printIntegrationPreflight(context, Object.assign({ log }, defaultPreflightOpts));
+  const result = withDebug(() => printIntegrationPreflight(context, Object.assign({ log }, defaultPreflightOpts)));
 
   const output = lines.join('\n');
   assert.ok(!result.failures.includes('task-missing'));

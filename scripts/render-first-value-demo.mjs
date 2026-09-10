@@ -6,8 +6,11 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 const root = new URL('..', import.meta.url).pathname;
-const castPath = join(root, 'docs/assets/first-value-demo.cast');
-const gifPath = join(root, 'docs/assets/first-value-demo.gif');
+// Optional argv overrides let a replay render a cast other than the checked-in
+// first-value demo (e.g. a focused integrate-phase recording) without clobbering
+// the committed artefacts. Defaults keep the existing command working.
+const castPath = process.argv[2] ?? join(root, 'docs/assets/first-value-demo.cast');
+const gifPath = process.argv[3] ?? join(root, 'docs/assets/first-value-demo.gif');
 const [, ...events] = readFileSync(castPath, 'utf8').trim().split('\n').map(JSON.parse);
 const frames = [];
 const frameDir = mkdtempSync(join(tmpdir(), 'parallix-demo-'));
