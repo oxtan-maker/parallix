@@ -172,6 +172,17 @@
               }
             }
           }
+        },
+        "prompts": {
+          "type": "object",
+          "description": "Prompt split configuration. Closed object with a single allowed property, override. Selects one repo-local default-opinion file to assemble in place of the shipped default-opinion half; unset keeps today's prompts byte for byte.",
+          "additionalProperties": false,
+          "properties": {
+            "override": {
+              "type": "string",
+              "description": "Repo-relative or absolute path to a repo-local default-opinion file. Parallix always assembles the mandatory core half; only the opinion half is replaced. Unknown keys beneath adapters.prompts are rejected."
+            }
+          }
         }
       }
     }

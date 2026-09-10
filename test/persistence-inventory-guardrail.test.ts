@@ -564,6 +564,10 @@ test('SC1 reverse: all durable-IO files under src/ are present in the inventory'
     // build/web output, integrity-checked against the build manifest. It owns
     // no ADR 0053 durable-state concept.
     'src/adapters/web/asset-store.ts',
+    // Packaged prompt loading (TASK-2465): reads only package-owned prompt
+    // templates to assemble stage prompts. It owns no ADR 0053 durable-state
+    // concept; the override path it resolves is configuration, not domain state.
+    'src/adapters/assets/runtime-assets.ts',
   ]);
 
   const durableIoFiles = new Set<string>();

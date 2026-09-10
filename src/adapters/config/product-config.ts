@@ -202,6 +202,22 @@ function validateAdapterSections(adapters: PlainObject, issues: string[]): void 
     validateStringField(integrate, 'postIntegrateCommand', 'adapters.integrate.postIntegrateCommand', issues);
   }
 
+  // One new configuration key: adapters.prompts. It is a closed object whose
+  // single allowed property is `override` (a repo-local default-opinion path).
+  // Unknown keys beneath it fail here, through the existing configuration-error
+  // path, so a repo cannot invent a second override surface.
+  const prompts = isPlainObject(adapters.prompts) ? adapters.prompts : null;
+  if (prompts) {
+    if ('override' in prompts && typeof prompts.override !== 'string') {
+      issues.push('adapters.prompts.override must be a string');
+    }
+    for (const key of Object.keys(prompts)) {
+      if (key !== 'override') {
+        issues.push('adapters.prompts may only contain "override"');
+      }
+    }
+  }
+
   const review = isPlainObject(adapters.review) ? adapters.review : null;
   if (review) {
     validateStringField(review, 'baseUrl', 'adapters.review.baseUrl', issues);
@@ -540,6 +556,21 @@ export function loadAdapterConfig(rootDir: string = process.cwd()): PlainObject 
     return {};
   }
   return isPlainObject(explicit.config.adapters) ? explicit.config.adapters as PlainObject : {};
+}
+
+/**
+ * Resolve the repo-local default-opinion override selected by the single
+ * `adapters.prompts.override` configuration key, or null when unconfigured. An
+ * unconfigured repository keeps today's shipped defaults byte for byte. The
+ * assets package reads the resolved absolute path; this resolver owns only the
+ * configuration boundary.
+ */
+export function resolvePromptOverride(rootDir: string = process.cwd()): string | null {
+  const prompts = loadAdapterConfig(rootDir).prompts;
+  if (!isPlainObject(prompts)) {return null;}
+  const override = prompts.override;
+  if (typeof override !== 'string' || override.trim() === '') {return null;}
+  return path.isAbsolute(override) ? override : path.resolve(rootDir, override);
 }
 
 export interface TaskStorageResult {

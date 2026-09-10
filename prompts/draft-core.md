@@ -1,0 +1,46 @@
+# Draft core
+Mode: draft. Do not implement the mission — produce the mission contract document only.
+Mission slug: {{slug}}
+Mission path: {{missionPath}}
+Backlog task: {{taskPath}}
+
+The harness has already created the mission branch, worktree, scaffolded `{{missionPath}}`, and ensured the backlog task exists. Your job is to read the user's intent from `{{taskPath}}` and fill `{{missionPath}}` with a real mission contract.
+
+Allowed actions:
+- read files (backlog task, MISSION.md scaffold, graphify index if present)
+- write/edit files (MISSION.md, backlog task labels)
+- run graphify queries and updates
+- run `{{verifyCmd}}` to verify the draft
+
+Forbidden actions:
+- implement any feature or fix described in the mission
+- modify source code outside MISSION.md and the backlog task file
+- run tests beyond the single `{{verifyCmd}}` gate
+- start a review, execute, or integrate phase
+
+Drafting requirements:
+- fill every scaffolded section in `{{missionPath}}` with concrete, non-generic content (no placeholders, no "TBD")
+- include a Goal, Why now, Scope, Out of scope, Success criteria, Risks/assumptions, Checkpoints, Gates, Restricted areas, and Stop rules
+- success criteria must be specific enough to derive a goal-check table during execution
+- {{classificationInstructions}}
+- preserve `{{taskPath}}`: update content as needed but do not delete, rename, or move the file
+- do not edit the backlog `assignee` field; the workflow records ownership itself
+- Refinement Signals section must use net engineering lines (NEL) bucket format (`Predicted NEL bucket: Small (0–80) / Medium (81–235) / Large (235+)`) and must NOT use the old agent-percentage-usage format
+- Every generated `MISSION.md` MUST keep the scaffolded `### Checkpoint Documentation Requirements` block under `## Checkpoints` and fill it with concrete instructions for the implementer.
+- That block must tell the agent to use the exact heading `## Goal Check` and the 3-column table `| Criterion | Evidence | Status |`.
+- That block must lead with durable evidence forms Parallix verifies today: exact test names, ADR references, test file paths, and recognized repo commands/paths such as backticked `npm ...`, `node ...`, `git ...`, `px ...`, or `./...`. It may mention file:line references parenthetically as accepted but discouraged because line numbers rot.
+- That block must make the weak-agent failure mode explicit: raw `stat`/`ls` output or generic prose alone is not enough; pair shell output with one of the accepted references above.
+- Every `## Gates` checklist item must contain only the exact runnable repository command (for example, `- [ ] ./scripts/verify-local.sh all`). Optional Markdown backticks around the whole command are allowed.
+- Never append outcome or explanatory prose to a gate command, including phrases such as "passes on the final tree". Put outcome expectations in Success Criteria or checkpoint documentation instead.
+
+Bug-labeled missions (regression-test-first / "lock the bug"):
+- this section applies only when the backlog task at `{{taskPath}}` carries a `bug` label (in addition to its `ai_sdlc` or `user_value` classification). If there is no `bug` label, ignore this section entirely.
+- make the **first checkpoint** the authoring of a failing reproduction test that locks the bug before any fix is written. Describe in that checkpoint: the test file location (under `test/`), the reproduction scenario, and the assertion that fails at the mission's parent commit (red) and will pass once the fix lands (green).
+- record the reproduction test's path in `{{missionPath}}` on its own line in the exact form `Reproduction-Test: <path>` (e.g. `Reproduction-Test: test/task-1354-repro.test.ts`). The handoff red→green gate reads this line to locate the test, so it must be present and accurate.
+- do not author the fix during draft — the reproduction test and its `Reproduction-Test:` declaration are the only bug-specific drafting outputs.
+
+Graphify-first: before drafting, check if `graphify-out/graph.json` exists. If it does, run `graphify query "{{slug}} mission scope and dependencies"` to understand the codebase context before filling in the mission contract. After drafting, run `graphify update .` if you modified any code files.
+
+Finishing:
+- verify the draft with `{{verifyCmd}}` before stopping
+- the harness will transition the task to `ready` after a clean draft; do not transition it yourself

@@ -161,6 +161,47 @@ any other key is a configuration error.
 }
 ```
 
+## Prompts
+
+Each shipped stage prompt (draft, execute, review, act-on-review, portfolio) is
+assembled from two files: a mandatory **Parallix core** half that the loop
+mechanically requires (artifact paths and filenames, `{{placeholders}}` the
+harness substitutes, parser-visible tokens and formats, permitted
+`px`/`git`/`Forgejo` commands, safety and separation-of-duties rules, and
+lifecycle mechanics), and an overridable **default-opinion** half that is taste
+(how to review, evidence standards, thoroughness, tone).
+
+`adapters.prompts` is a closed object with a single allowed property, `override`.
+When `override` is unset — the default — a repository keeps today's prompts
+byte for byte, because Parallix assembles the shipped core and default-opinion
+halves. A shipped default-opinion half may be empty when a stage has no
+tailorable opinion content.
+
+When `override` is set to a repo-relative or absolute path, Parallix assembles
+the same mandatory core half but reads every stage's opinion half from that one
+file instead of its shipped default (including an empty shipped default). The
+core half is always assembled in and cannot be dropped by an override, so no
+mechanically required instruction is removable.
+There is exactly one such key; there are no per-stage, per-agent, per-model,
+or per-user override keys.
+
+```json
+{
+  "adapters": {
+    "prompts": {
+      "override": "config/my-review-opinion.md"
+    }
+  }
+}
+```
+
+An unknown key beneath `adapters.prompts` (for example `adapters.prompts.draftOverride`,
+or any property other than `override`) is rejected through the existing
+configuration-error path, so a repository cannot invent a second or per-stage
+override surface. The five shipped default-opinion files selected when no
+override is configured are `prompts/draft.md`, `prompts/execute.md`, `prompts/review.md`,
+`prompts/act-on-review.md`, and `prompts/portfolio.md`.
+
 ## Integrate
 
 `adapters.integrate.postIntegrateCommand` is an optional string with no default.

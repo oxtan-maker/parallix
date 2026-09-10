@@ -1,10 +1,11 @@
 ---
 id: TASK-2465
 title: Split each prompt into a Parallix core and an overridable default
-status: backlog
-assignee: []
+status: done
+assignee: [claude]
 created_date: '2026-09-07 08:21'
-labels: [ai_sdlc]
+labels:
+  - ai_sdlc
 dependencies: []
 ---
 
