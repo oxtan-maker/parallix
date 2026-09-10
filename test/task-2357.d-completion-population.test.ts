@@ -103,6 +103,10 @@ describe('TASK-2357 defect D: lifecycle `done` is the only completion definition
 
       const lines: string[] = [];
       const store = new SqliteMeasurementStore(databasePath);
+      // "# missions with telemetry" renders behind DEBUG only; enable it so this
+      // test verifies the column renders when the flag is set.
+      const previousDebug = process.env.DEBUG;
+      process.env.DEBUG = '1';
       try {
         await stats(['--today', '2026-06-05'], {
           rootDir: process.cwd(),
@@ -116,6 +120,7 @@ describe('TASK-2357 defect D: lifecycle `done` is the only completion definition
         } as never);
       } finally {
         store.close();
+        if (previousDebug === undefined) { delete process.env.DEBUG; } else { process.env.DEBUG = previousDebug; }
       }
       const report = lines.join('\n').replace(/\[[0-9;]*m/g, '');
 

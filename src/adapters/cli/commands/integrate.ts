@@ -325,8 +325,12 @@ async function integrate(args: string[], options: {
         throw new IntegrationAbort();
       }
 
+      // The Verification row of the readiness view below reports exactly what
+      // ran; it never claims "passed" without a gate result behind it.
+      let verificationEvidence = 'no gate ran';
       if (noIntegrationGates) {
         fmt.log.info('Integration gates skipped via --no-integration-gates flag');
+        verificationEvidence = 'skipped via --no-integration-gates';
       } else {
         // The integration checkout is the mission's own worktree. Verify the
         // exact resulting tree is finalized before any gate runs, then run the
@@ -350,7 +354,7 @@ async function integrate(args: string[], options: {
         // no lifecycle gate. --no-integration-gates is rejected outside the test
         // bypass, so the message below never points at it (task-2457 F12).
         const requirePreIntegration = loadRequirePreIntegration(checkout);
-        fmt.log.info(`Integration gate target: slug=${slug} root=${finalTree.rootDir} commit=${finalTree.commit} tree=${finalTree.tree} requirePreIntegration=${requirePreIntegration}`);
+        fmt.log.debug(`Integration gate target: slug=${slug} root=${finalTree.rootDir} commit=${finalTree.commit} tree=${finalTree.tree} requirePreIntegration=${requirePreIntegration}`);
         const result = await runPhaseGates('integration', {
           slug,
           checkoutPath: checkout,
@@ -376,18 +380,22 @@ async function integrate(args: string[], options: {
             throw new IntegrationAbort();
           }
           fmt.log.info(`Integration gates for ${slug}: none configured and adapters.gates.requirePreIntegration is not set — proceeding without a lifecycle gate.`);
+          verificationEvidence = 'no pre-integration gate configured';
         } else if (!result.ok) {
           fmt.log.fail(`\nIntegration gates failed for ${slug} (root=${finalTree.rootDir}) — ${result.error}`);
           fmt.log.fail('Aborting before merge.');
           throw new IntegrationAbort();
         } else {
           fmt.log.pass('All integration gates passed.');
+          verificationEvidence = `${gates.length} integration gate(s) passed`;
         }
       }
 
+      printIntegrationReadiness(buildIntegrationReadiness(context, { verification: verificationEvidence }));
+
       if (dryRun) {
         await promoteTaskForIntegrationIfNeeded(context, { dryRun: true, missionServicesFn });
-        fmt.log.pass('\nDry run complete. Integration preflight passed.');
+        fmt.log.pass('Dry run complete. Integration preflight passed.');
         return;
       }
 
@@ -406,6 +414,9 @@ async function integrate(args: string[], options: {
     }
 
     const branch = missionBranchName(slug, baseWorktree);
+    // TASK-2479: capture the pre-integration base-branch tip so the landing
+    // result can show the `<before> → <after>` SHA transition.
+    const landedFromSha = git(['-C', baseWorktree, 'rev-parse', baseBranch]).stdout.trim();
     const mainTitle = missionTitle(slug) || slug;
     const summary = mainTitle.replace(/\s+/g, ' ').trim();
     // A DB-owned adhoc identity has no Backlog task file; the closeout below is
@@ -419,10 +430,10 @@ async function integrate(args: string[], options: {
         : 'Integration base worktree is unavailable; refusing to stage backlog closeout.');
       throw new IntegrationAbort();
     }
-    fmt.log.info('Selecting integration variant: Variant B (local squash-merge)');
-    fmt.log.info(`\nStep 1: Using base worktree ${baseWorktree} on ${baseBranch} as the squash-merge target...`);
+    fmt.log.debug(`Selecting integration variant: Variant B (local squash-merge)`);
+    fmt.log.debug(`\nStep 1: Using base worktree ${baseWorktree} on ${baseBranch} as the squash-merge target...`);
 
-    fmt.log.info(`Step 2: Checking merge conflicts against local ${baseBranch} in the base worktree...`);
+    fmt.log.debug(`Step 2: Checking merge conflicts against local ${baseBranch} in the base worktree...`);
     const dryMerge = git(['-C', baseWorktree, 'merge', '--no-commit', '--no-ff', branch]);
     const abortResult = git(['-C', baseWorktree, 'merge', '--abort']);
 
@@ -497,7 +508,7 @@ async function integrate(args: string[], options: {
           fmt.log.warn(`Squash commit already exists on local ${baseBranch} from a previous partial integration (${existingSquash.slice(0, 12)}). Resuming from sync-merged step.`);
           const mergedCommit = existingSquash;
           if (isForgejoReviewEnabled(baseWorktree)) {
-            fmt.log.info('Step 6 (resume): Syncing merged state to Forgejo...');
+            fmt.log.debug('Step 6 (resume): Syncing merged state to Forgejo...');
             const syncResult = syncMerged(branch, mergedCommit, {
               rootDir: baseWorktree,
               forgejoUser: context.forgejoUser,
@@ -509,21 +520,23 @@ async function integrate(args: string[], options: {
               throw new IntegrationAbort();
             }
           } else {
-            fmt.log.info('Step 6 (resume): Skipping Forgejo sync (review provider is not forgejo).');
+            fmt.log.debug('Step 6 (resume): Skipping Forgejo sync (review provider is not forgejo).');
           }
           if (fs.existsSync(baseWorktree)) {
             nextActionMessage = `Next: cd ${baseWorktree}`;
           }
           await persistLandedIntegrationOrAbort(slug, mergedCommit, missionServices, { rootDir: baseWorktree as string });
           await (recordPostIntegrationStatsOrAbort as any)(slug, { rootDir: baseWorktree, missionStore: missionServices.store });
-          fmt.log.info('Step 7 (resume): Cleaning up the local mission worktree...');
           if (!cleanupMissionWorktree(slug)) {
             fmt.log.fail('Mission worktree cleanup failed.');
             throw new IntegrationAbort();
           }
-          maybeUpdateGraphifyOnPrimary(baseWorktree);
+          fmt.log.pass('Mission worktree cleaned up.');
+          maybeUpdateGraphifyOnPrimary(baseWorktree, { log: fmt.log.debug });
           runPostIntegrateHookOrAbort(slug, { baseWorktree: baseWorktree as string, baseBranch: baseBranch as string, variant: 'variant-b-resumed' });
-          fmt.log.pass('Integration completed successfully (resumed from partial state).');
+          fmt.log.plain('');
+          fmt.log.pass(`✓ integrated into ${baseBranch} (resumed from partial state)`);
+          fmt.log.plain(`  ${baseBranch}  ${landedFromSha} → ${mergedCommit}`);
         } else {
           fmt.log.fail('Merge conflicts detected. Rebase the mission branch before integrating.');
           if (conflictFiles.length > 0) {
@@ -547,7 +560,7 @@ async function integrate(args: string[], options: {
     }
 
     if (dryMerge.status === 0 || proceedToSquash) {
-      fmt.log.info('Step 3: Squash-merging the mission branch...');
+      fmt.log.debug('Step 3: Squash-merging the mission branch...');
       let noisePatchState = null;
       if (softResetTrailingBacklogNoise(baseWorktree, git)) {
         noisePatchState = prepareNoisePatchForSquash(baseWorktree, { gitRunner: git });
@@ -587,7 +600,7 @@ async function integrate(args: string[], options: {
           .filter(Boolean)
       );
 
-      fmt.log.info('Step 4: Final closeout checks in the local integration checkout...');
+      fmt.log.debug('Step 4: Final closeout checks in the local integration checkout...');
       // Do not dirty the primary checkout before the probe merge and squash have
       // completed. The task file is commonly part of the mission branch, so an
       // early promotion can make `merge --abort` fail and leave index conflicts.
@@ -610,7 +623,7 @@ async function integrate(args: string[], options: {
         }
       }
 
-      fmt.log.info('Step 5: Creating the landed squash commit in the local integration checkout...');
+      fmt.log.debug('Step 5: Creating the landed squash commit in the local integration checkout...');
       let commitResult = git([
         '-C',
         /** @type {string} */ (baseWorktree),
@@ -703,7 +716,7 @@ async function integrate(args: string[], options: {
       const mergedCommit = git(['-C', baseWorktree, 'rev-parse', 'HEAD']).stdout.trim();
 
       if (isForgejoReviewEnabled(baseWorktree)) {
-        fmt.log.info('Step 6: Syncing merged state to Forgejo...');
+        fmt.log.debug('Step 6: Syncing merged state to Forgejo...');
         const syncResult = syncMerged(branch, mergedCommit, {
           rootDir: baseWorktree,
           forgejoUser: context.forgejoUser,
@@ -715,7 +728,7 @@ async function integrate(args: string[], options: {
           throw new IntegrationAbort();
         }
       } else {
-        fmt.log.info('Step 6: Skipping Forgejo sync (review provider is not forgejo).');
+        fmt.log.debug('Step 6: Skipping Forgejo sync (review provider is not forgejo).');
       }
 
       if (fs.existsSync(baseWorktree)) {
@@ -723,13 +736,14 @@ async function integrate(args: string[], options: {
       }
       await persistLandedIntegrationOrAbort(slug, mergedCommit, missionServices, { rootDir: baseWorktree as string });
       await (recordPostIntegrationStatsOrAbort as any)(slug, { rootDir: baseWorktree, missionStore: missionServices.store });
-      fmt.log.info('Step 7: Cleaning up the local mission worktree...');
-      if (!cleanupMissionWorktree(slug)) {
+      if (cleanupMissionWorktree(slug)) {
+        fmt.log.pass('Mission worktree cleaned up.');
+      } else {
         fmt.log.fail('Mission worktree cleanup failed.');
         throw new IntegrationAbort();
       }
 
-      maybeUpdateGraphifyOnPrimary(baseWorktree);
+      maybeUpdateGraphifyOnPrimary(baseWorktree, { log: fmt.log.debug });
       runPostIntegrateHookOrAbort(slug, { baseWorktree: baseWorktree as string, baseBranch: baseBranch as string, variant: 'variant-b' });
 
       // Proof capture after post-integrate hook so it represents the
@@ -749,7 +763,9 @@ async function integrate(args: string[], options: {
         throw new IntegrationAbort();
       }
 
-      fmt.log.pass('Integration completed successfully.');
+      fmt.log.plain('');
+      fmt.log.pass(`✓ integrated into ${baseBranch}`);
+      fmt.log.plain(`  ${baseBranch}  ${landedFromSha} → ${mergedCommit}`);
     }
   } catch (error) {
     if (error instanceof IntegrationAbort) {
@@ -786,7 +802,7 @@ async function integrate(args: string[], options: {
     }
 
     if (nextActionMessage) {
-      fmt.log.info(`\n${nextActionMessage}`);
+      fmt.log.info(nextActionMessage);
     }
     exitFn(exitCode);
     return { exitCode };
@@ -1360,6 +1376,85 @@ async function recoverMissionForIntegration(
 }
 
 /**
+ * True when the current process sits inside the mission's own worktree.
+ *
+ * Mirrors the pre-cleanup chdir check below: `px integrate` run from the
+ * mission worktree is the documented flow, not an anomaly.
+ *
+ * @param {string} slug
+ */
+function isCwdInsideMissionWorktree(slug: string) {
+  const missionWorktree = conventionalWorktreePath(slug);
+  const cwd = process.cwd();
+  return cwd === missionWorktree || cwd.startsWith(missionWorktree + path.sep);
+}
+
+/**
+ * The trust evidence a human needs to authorize landing, and nothing else.
+ *
+ * Every row is a claim Parallix can establish authoritatively: the Mission
+ * store's own Review (ADR 0053), the integration gate result (ADR 0041), and
+ * git. A claim that cannot be established is omitted rather than guessed —
+ * notably, invoking `px integrate` *is* the human decision, so no row ever
+ * asserts that a human inspected the diff.
+ *
+ * @param {any} context
+ * @param{{verification: string}} outcome
+ * @returns {[string, string][]}
+ */
+export function buildIntegrationReadiness(context: any, { verification }: { verification: string }): [string, string][] {
+  const rounds: any[] = context.missionReview?.rounds ?? [];
+  const approvedRound = [...rounds].reverse().find(round => round?.decision?.kind === 'approved') ?? null;
+  const lastRound = rounds.length > 0 ? rounds[rounds.length - 1] : null;
+  const evidenceRound = approvedRound ?? lastRound;
+
+  /** @type {[string, string][]} */
+  const rows: [string, string][] = [['Mission', context.slug]];
+
+  if (approvedRound) {
+    rows.push(['Review', `approved (round ${approvedRound.number})`]);
+  } else if (context.approval?.ok && context.approval?.reviewState === 'APPROVED') {
+    rows.push(['Review', 'approved']);
+  }
+
+  const reviewer = evidenceRound?.reviewer ?? null;
+  const implementer = evidenceRound?.implementer ?? null;
+  if (reviewer) {
+    rows.push(['Reviewer', String(reviewer)]);
+  }
+  if (reviewer && implementer) {
+    rows.push([
+      'Independence',
+      reviewer === implementer
+        ? `same agent family as the implementer (${implementer})`
+        : `different agent family from the implementer (${implementer})`,
+    ]);
+  }
+
+  rows.push(['Verification', verification]);
+  rows.push(['Target', String(context.baseBranch || getPrimaryBranch())]);
+  rows.push([
+    'Workspace',
+    context.mainDirty
+      ? `${context.mainDirtyEntries.length} uncommitted change(s) in the integration checkout`
+      : 'clean',
+  ]);
+
+  return rows;
+}
+
+/**
+ * @param {[string, string][]} rows
+ * @param{{log?: Function}} options
+ */
+export function printIntegrationReadiness(rows: [string, string][], { log = fmt.log.plain }: { log?: Function } = {}) {
+  log('');
+  log(fmt.bold('READY TO INTEGRATE'));
+  log(fmt.table(rows.map(([label, value]) => [label, value])));
+  log('');
+}
+
+/**
  * @param{{slug: string, branch: string, missionDir?: string, area: string, task: {ok: boolean, taskFile?: string, reason?: string, matches?: string[]}, taskStatus?: string, taskAssignee?: string|null, forgejoUser?: string|null, forgejoToken?: string|null, taskAssigneeWarning?: string|null, pr: {exists?: boolean, state?: string, number?: number, merged?: boolean, createdAt?: string | null, raw?: string}, siblingPrs: any[], approval: {ok?: boolean, error?: string, reviewState?: string, defaultUserApproved?: boolean, defaultUserApprovedAt?: string, source?: string}, baseBranch?: string, baseWorktree?: string, mainBranch: string, mainDirtyEntries: string[], mainDirty: boolean}} context
  */
 function printIntegrationPreflight(
@@ -1385,24 +1480,33 @@ function printIntegrationPreflight(
   const failures = [];
   const warnings = [];
 
+  // Implementation-level preflight facts are still checked exactly as before —
+  // every failure below stays loud and still blocks. Only the *successful*
+  // lines move behind DEBUG, so the default happy path carries the operator's
+  // trust decision (printIntegrationReadiness) instead of a PASS cascade of
+  // equal visual priority (TASK-2479).
+  const detail = (text: string) => {
+    if (process.env.DEBUG) { log(fmt.status('DEBUG', text)); }
+  };
+
   // The integration "checkout" is the mission's base worktree on its base branch.
   // For legacy missions these fall back to the primary worktree/branch, so the
   // preflight output and checks are byte-identical to today.
   const baseWorktree = context.baseWorktree || getPrimaryWorktree();
   const baseBranch = context.baseBranch || getPrimaryBranch();
 
-  log(fmt.status('INFO', `Integration preflight for ${context.slug}`));
+  detail(`Integration preflight for ${context.slug}`);
 
   const branchPrefix = missionBranchName(context.slug, baseWorktree);
   if ((/** @type {any} */ context).currentBranch === context.branch || (/** @type {any} */ context).currentBranch.startsWith(`${branchPrefix}-`)) {
-    log(fmt.status('PASS', `Mission branch: ${(/** @type {any} */ context).currentBranch}`));
+    detail(`Mission branch: ${(/** @type {any} */ context).currentBranch}`);
   } else {
     failures.push('branch');
     log(fmt.status('FAIL', `Mission branch: current branch is ${(/** @type {any} */ context).currentBranch}, expected ${context.branch} (or a branch with a suffix)`));
   }
 
   if (context.missionDir) {
-    log(fmt.status('PASS', `Mission doc: ${path.join(context.missionDir, 'MISSION.md')}`));
+    detail(`Mission doc: ${path.join(context.missionDir, 'MISSION.md')}`);
   } else {
     failures.push('mission-doc');
     // Use the base slug (e.g. architecture migration) for the canonical path even when the
@@ -1425,7 +1529,7 @@ function printIntegrationPreflight(
   }
 
   if (context.task.ok) {
-    log(fmt.status('PASS', `Backlog task: ${path.basename(/** @type {string} */ (context.task.taskFile))} (${context.missionStatus || 'mission store'})`));
+    detail(`Backlog task: ${path.basename(/** @type {string} */ (context.task.taskFile))} (${context.missionStatus || 'mission store'})`);
     
     try {
       const classification = getTaskClassification(/** @type {string} */ (context.task.taskFile));
@@ -1436,7 +1540,7 @@ function printIntegrationPreflight(
         failures.push('classification');
         log(fmt.status('FAIL', `Backlog classification: ${classificationError || 'missing'}`));
       } else {
-        log(fmt.status('PASS', `Backlog classification: ${classification}`));
+        detail(`Backlog classification: ${classification}`);
       }
     } catch (/** @type{any} */ error) {
       failures.push('classification');
@@ -1451,7 +1555,7 @@ function printIntegrationPreflight(
       warnings.push('task-status-review-approved');
       log(fmt.status('WARN', `${taskStatusCheck.message}`));
     } else {
-      log(fmt.status('PASS', `${taskStatusCheck.message}`));
+      detail(`${taskStatusCheck.message}`);
     }
   } else if (context.task.reason === 'ambiguous') {
     failures.push('task-ambiguity');
@@ -1464,10 +1568,10 @@ function printIntegrationPreflight(
     // its status and labels (ADR 0053), so read them there rather than warning
     // about the absence of a file this intake never creates in the base
     // checkout.
-    log(fmt.status('PASS', `Backlog task: none — adhoc mission, Mission store is authoritative`));
+    detail(`Backlog task: none — adhoc mission, Mission store is authoritative`);
     const classification = classificationFromLabels(context.missionLabels || []);
     if (classification) {
-      log(fmt.status('PASS', `Mission classification: ${classification}`));
+      detail(`Mission classification: ${classification}`);
     } else {
       failures.push('classification');
       log(fmt.status('FAIL', `Mission classification: expected exactly one of ${[...CLASSIFICATION_LABELS].join(', ')} in the Mission labels for ${context.slug}.`));
@@ -1481,11 +1585,11 @@ function printIntegrationPreflight(
       warnings.push('task-status-review-approved');
       log(fmt.status('WARN', `${adhocStatusCheck.message}`));
     } else {
-      log(fmt.status('PASS', `${adhocStatusCheck.message}`));
+      detail(`${adhocStatusCheck.message}`);
     }
   } else {
     log(fmt.status('WARN', `Backlog task: no task file found for ${context.slug}; continuing with synthetic/unknown task metadata.`));
-    log(fmt.status('PASS', 'Backlog classification: unknown'));
+    detail('Backlog classification: unknown');
   }
 
   if (isForgejoReviewEnabledFn(baseWorktree)) {
@@ -1499,14 +1603,14 @@ function printIntegrationPreflight(
     const recoveryWouldEstablishApproval = recoveryDecision.established && recoveryDecision.via !== 'lifecycle';
 
     if (context.pr.exists && context.pr.state === 'open') {
-      log(fmt.status('PASS', `Forgejo PR: PR #${context.pr.number} open`));
+      detail(`Forgejo PR: PR #${context.pr.number} open`);
       if (context.missionStatus === 'integration' || context.missionStatus === 'done') {
         // TASK-2379: recovery has established the authoritative approval in
         // the Mission lifecycle; the provider state read at context build
         // time is informational from here on.
-        log(fmt.status('PASS', `Forgejo approval: Mission lifecycle is authoritative (${context.missionStatus}); provider state informational (${context.approval.reviewState || 'missing'})`));
+        detail(`Forgejo approval: Mission lifecycle is authoritative (${context.missionStatus}); provider state informational (${context.approval.reviewState || 'missing'})`);
       } else if (localApprovalFallback) {
-        log(fmt.status('INFO', `Forgejo approval: token unavailable, approval sourced from the local Review (phase=approved)`));
+        detail(`Forgejo approval: token unavailable, approval sourced from the local Review (phase=approved)`);
       } else if (!context.approval.ok) {
         failures.push('pr-approval');
         log(fmt.status('FAIL', `Forgejo approval: could not verify an approved review (${context.approval.error})`));
@@ -1518,9 +1622,9 @@ function printIntegrationPreflight(
         // context-build time looks unapproved. Report the authority the real
         // run would establish instead of failing for exactly the case the
         // real run accepts.
-        log(fmt.status('INFO', `Forgejo approval: recovery would establish the authoritative approval (${recoveryDecision.via} at ${recoveryDecision.decidedAt || 'n/a'}); provider state informational (${context.approval.reviewState || 'missing'})`));
+        detail(`Forgejo approval: recovery would establish the authoritative approval (${recoveryDecision.via} at ${recoveryDecision.decidedAt || 'n/a'}); provider state informational (${context.approval.reviewState || 'missing'})`);
       } else {
-        log(fmt.status('PASS', `Forgejo approval: latest formal review state is ${context.approval.reviewState}`));
+        detail(`Forgejo approval: latest formal review state is ${context.approval.reviewState}`);
       }
     } else if (context.pr.exists && context.pr.state === 'merged') {
       failures.push('pr-merged');
@@ -1548,9 +1652,9 @@ function printIntegrationPreflight(
       const tokenPath = resolveTokenFileFn(/** @type {string} */ (context.forgejoUser));
       const token = readTokenFn(/** @type {string} */ (context.forgejoUser));
       if (token) {
-        log(fmt.status('PASS', `Forgejo token: resolved for ${context.forgejoUser} (${tokenPath || 'env:FORGEJO_TOKEN'})`));
+        detail(`Forgejo token: resolved for ${context.forgejoUser} (${tokenPath || 'env:FORGEJO_TOKEN'})`);
       } else if (localApprovalFallback) {
-        log(fmt.status('INFO', `Forgejo token: no token file found for ${context.forgejoUser} (approval sourced from the local Review)`));
+        detail(`Forgejo token: no token file found for ${context.forgejoUser} (approval sourced from the local Review)`);
       } else {
         failures.push('forgejo-token');
         log(fmt.status('FAIL', `Forgejo token: no token file found for ${context.forgejoUser}`));
@@ -1560,7 +1664,7 @@ function printIntegrationPreflight(
       log(fmt.status('FAIL', 'Forgejo token: no forgejoUser configured'));
     }
   } else {
-    log(fmt.status('INFO', 'Forgejo PR/approval checks skipped (review provider is not forgejo).'));
+    detail('Forgejo PR/approval checks skipped (review provider is not forgejo).');
   }
 
   if (context.taskAssigneeWarning) {
@@ -1570,7 +1674,7 @@ function printIntegrationPreflight(
 
   const expectedPrimaryBranch = baseBranch;
   if (context.mainBranch === expectedPrimaryBranch) {
-    log(fmt.status('PASS', `Integration checkout branch: ${baseWorktree} is on ${expectedPrimaryBranch}`));
+    detail(`Integration checkout branch: ${baseWorktree} is on ${expectedPrimaryBranch}`);
   } else {
     failures.push('main-branch');
     const branchLabel = context.mainBranch || '(detached HEAD)';
@@ -1611,7 +1715,7 @@ function printIntegrationPreflight(
     log(fmt.status('INFO', `  git -C ${baseWorktree} stash drop`));
     log(fmt.status('INFO', `Retry with: px integrate ${context.slug} --dry-run`));
   } else {
-    log(fmt.status('PASS', 'Integration checkout conflicts: no unresolved merge entries in the git index'));
+    detail('Integration checkout conflicts: no unresolved merge entries in the git index');
   }
 
   if (context.mainDirty) {
@@ -1688,29 +1792,35 @@ function printIntegrationPreflight(
       fmt.log.warn(`[STASH] Integration checkout dirty: ${baseWorktree} has uncommitted changes that will be stashed temporarily`);
       nonOverlappingEntries.forEach((entry: string) => log(fmt.status('INFO', `  - ${entry}`)));
     } else {
-      log(fmt.status('PASS', 'Integration checkout dirty state: clean'));
+      detail('Integration checkout dirty state: clean');
     }
   } else {
-    log(fmt.status('PASS', 'Integration checkout dirty state: clean'));
+    detail('Integration checkout dirty state: clean');
   }
 
   const gitDir = path.join(process.cwd(), '.git');
   const isMainRepo = fs.existsSync(gitDir) && !fs.lstatSync(gitDir).isSymbolicLink();
   const isCorrectPath = process.cwd() === baseWorktree;
   if (isMainRepo && isCorrectPath) {
-    log(fmt.status('PASS', 'Backlog context: resolves to main repository'));
+    detail('Backlog context: resolves to main repository');
+  } else if (isCwdInsideMissionWorktree(context.slug)) {
+    // Running `px integrate` from the mission's own worktree is the documented
+    // flow, and integrate chdir's to the integration checkout before any
+    // closeout write. Warning about it trained operators to ignore the
+    // warning line; keep the fact, drop the false alarm (TASK-2479).
+    detail(`Backlog context: invoked from the mission worktree; closeout runs in ${baseWorktree}`);
   } else {
     warnings.push('backlog-context');
     log(fmt.status('WARN', `Backlog context: does not resolve to ${baseWorktree}. (Ignore if running from worktree to test dry-run; post-squash closeout still requires the local integration checkout).`));
   }
 
-  log(fmt.status('INFO', 'Forgejo configuration: allow_manual_merge assumed enabled'));
+  detail('Forgejo configuration: allow_manual_merge assumed enabled');
 
   if (warnings.length > 0) {
     log(fmt.status('WARN', `Integration warnings: ${warnings.join(', ')}`));
   }
 
-  log(fmt.status('INFO', `${VARIANT_B_AUTOMATION_SUMMARY}`));
+  detail(`${VARIANT_B_AUTOMATION_SUMMARY}`);
 
   return { failures, warnings };
 }

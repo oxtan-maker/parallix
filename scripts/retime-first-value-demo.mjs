@@ -52,6 +52,13 @@ kinds.forEach((kind, index) => {
 
 /** Seconds this event stays on screen. */
 function hold(text, index) {
+  // The integration screen is the whole point of the landing. Hold it long
+  // enough to read the readiness view and the SHA transition, not flash past.
+  // Checked before the last-event fallback so the final landing event gets
+  // its own hold rather than the generic tail hold.
+  if (/READY TO INTEGRATE/.test(text)) { return 5; }
+  if (/✓ integrated into/.test(text)) { return 7; }
+  if (/ → /.test(text) && /^\s+\S+\s+\S+\s+→\s+\S+$/.test(text)) { return 5; }
   if (index === events.length - 1) { return 4; }
   if (kinds[index] === KEYSTROKE) { return 0.06; }
   if (kinds[index] === PROMPT) { return 0.4; }

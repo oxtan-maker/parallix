@@ -60,6 +60,24 @@ test.beforeEach(() => {
 });
 
 const FAKE_ROOT = `/tmp/mission-${process.pid}`;
+
+/**
+ * Run `fn` with DEBUG set.
+ *
+ * TASK-2479 moved preflight's implementation-level PASS/INFO detail behind
+ * DEBUG so the default happy path carries the operator's trust decision. The
+ * checks themselves are unchanged — failures still print and still block — so
+ * the tests that assert on that detail keep their coverage by asking for it.
+ */
+function withDebug(fn) {
+  const previous = process.env.DEBUG;
+  process.env.DEBUG = '1';
+  try {
+    return fn();
+  } finally {
+    if (previous === undefined) { delete process.env.DEBUG; } else { process.env.DEBUG = previous; }
+  }
+}
 test.afterEach(() => {
   if (previousPrimaryWorktree === undefined) delete process.env.PRIMARY_WORKTREE;
   else process.env.PRIMARY_WORKTREE = previousPrimaryWorktree;
@@ -388,7 +406,7 @@ test('printIntegrationPreflight reads classification from the selected task file
   const mockedGetTaskClassification = mock.method(backlog, 'getTaskClassification', (taskFile) => taskFile === worktreeTask ? 'ai_sdlc' : null);
   t.after(() => mockedGetTaskClassification.mock.restore());
 
-  const result = printIntegrationPreflight({
+  const result = withDebug(() => printIntegrationPreflight({
     slug: 'task-2200',
     branch: 'mission/task-2200',
     currentBranch: 'mission/task-2200',
@@ -416,7 +434,7 @@ test('printIntegrationPreflight reads classification from the selected task file
     isForgejoReviewEnabledFn: () => false,
     resolveMissionClassificationFn: () => ({ classification: null, error: 'stale base resolver should not be used' }),
     log: line => logs.push(line)
-  });
+  }));
 
   assert.ok(!result.failures.includes('classification'));
   assert.match(logs.join('\n'), /Backlog classification: ai_sdlc/);
@@ -703,10 +721,12 @@ test('recordPostIntegrationStats logs the persisted stats row including pr_fix_r
     console.log = originalLog;
   }
 
+  // TASK-2479: the recorded row still prints, but the weekly report body and
+  // mission-telemetry table no longer dump on the success path.
   assert.match(logs.join('\n'), /\[INFO\] Workflow stats recorded: task-2000: implementer=claude, pr_fix_rounds=8, classification=ai_sdlc, date=2026-05-18/);
-  assert.match(logs.join('\n'), /\[INFO\] Workflow stats updated:/);
-  assert.match(logs.join('\n'), /weekly report/);
-  assert.match(logs.join('\n'), /\[INFO\] Mission telemetry by phase: task-2000/);
+  assert.doesNotMatch(logs.join('\n'), /\[INFO\] Workflow stats updated:/);
+  assert.doesNotMatch(logs.join('\n'), /weekly report/);
+  assert.doesNotMatch(logs.join('\n'), /\[INFO\] Mission telemetry by phase: task-2000/);
 });
 
 test('recordPostIntegrationStats records an unknown classification row for a missing-task mission', async () => {
@@ -803,7 +823,7 @@ test('recordPostIntegrationStats passes no file path and stays anchored to PARAL
   }
 });
 
-test('recordPostIntegrationStats prints mission-phase telemetry after weekly stats', async () => {
+test('recordPostIntegrationStats does not print the weekly report or mission telemetry on the success path', async () => {
   const logs = [];
   const originalLog = console.log;
   console.log = message => logs.push(message);
@@ -831,17 +851,19 @@ test('recordPostIntegrationStats prints mission-phase telemetry after weekly sta
     });
 
     const combined = logs.join('\n');
-    assert.match(combined, /\[INFO\] Workflow stats updated:/);
-    assert.match(combined, /weekly report/);
-    assert.match(combined, /\[INFO\] Mission telemetry by phase: task-3000/);
-    assert.match(combined, /draft/);
-    assert.match(combined, /execute/);
+    // The recorded row still prints; the analytical body does not.
+    assert.match(combined, /\[INFO\] Workflow stats recorded: task-3000/);
+    assert.doesNotMatch(combined, /\[INFO\] Workflow stats updated:/);
+    assert.doesNotMatch(combined, /weekly report/);
+    assert.doesNotMatch(combined, /\[INFO\] Mission telemetry by phase: task-3000/);
+    assert.doesNotMatch(combined, /draft/);
+    assert.doesNotMatch(combined, /execute/);
   } finally {
     console.log = originalLog;
   }
 });
 
-test('recordPostIntegrationStats handles empty mission-phase rows gracefully', async () => {
+test('recordPostIntegrationStats stays silent past the recorded row for empty mission-phase rows', async () => {
   const logs = [];
   const originalLog = console.log;
   console.log = message => logs.push(message);
@@ -865,10 +887,12 @@ test('recordPostIntegrationStats handles empty mission-phase rows gracefully', a
     });
 
     const combined = logs.join('\n');
-    assert.match(combined, /\[INFO\] Workflow stats updated:/);
-    assert.match(combined, /weekly report/);
-    assert.match(combined, /\[INFO\] Mission telemetry by phase: task-4000/);
-    assert.match(combined, /No telemetry rows recorded for mission "task-4000"/);
+    assert.match(combined, /\[INFO\] Workflow stats recorded: task-4000/);
+    assert.doesNotMatch(combined, /\[INFO\] Workflow stats updated:/);
+    assert.doesNotMatch(combined, /weekly report/);
+    assert.doesNotMatch(combined, /No telemetry rows recorded for mission "task-4000"/);
+    // The recorded row is the only line emitted on this success path.
+    assert.equal(logs.filter(l => typeof l === 'string' && l.trim().length > 0).length, 1);
   } finally {
     console.log = originalLog;
   }
@@ -1189,7 +1213,7 @@ test('printIntegrationPreflight reports token resolution and detached-head recov
   console.log = line => lines.push(line);
 
   try {
-    const result = printIntegrationPreflight({
+    const result = withDebug(() => printIntegrationPreflight({
       slug: 'task-113',
       branch: 'mission/task-113',
       currentBranch: 'mission/task-113',
@@ -1210,7 +1234,7 @@ test('printIntegrationPreflight reports token resolution and detached-head recov
       resolveTokenFileFn: () => '/tmp/tokens/codex',
       isForgejoReviewEnabledFn: () => true,
       getUnresolvedIndexConflictsFn: () => ({ ok: true, files: [] })
-    });
+    }));
 
     assert.ok(result.failures.includes('main-branch'));
     const output = lines.join('\n');
@@ -1266,7 +1290,7 @@ test('printIntegrationPreflight reads an adhoc mission from the Mission store in
   console.log = line => lines.push(line);
 
   try {
-    const result = printIntegrationPreflight({
+    const result = withDebug(() => printIntegrationPreflight({
       slug: 'parallix-adhoc-0001',
       branch: 'mission/parallix-adhoc-0001',
       currentBranch: 'mission/parallix-adhoc-0001',
@@ -1289,7 +1313,7 @@ test('printIntegrationPreflight reads an adhoc mission from the Mission store in
       resolveTokenFileFn: () => '/tmp/token',
       isForgejoReviewEnabledFn: () => false,
       getUnresolvedIndexConflictsFn: () => ({ ok: true, files: [] })
-    });
+    }));
 
     const output = lines.join('\n');
     assert.doesNotMatch(output, /no task file found/);
@@ -1309,7 +1333,7 @@ test('printIntegrationPreflight tolerates a missing task file and reports unknow
   console.log = line => lines.push(line);
 
   try {
-    const result = printIntegrationPreflight({
+    const result = withDebug(() => printIntegrationPreflight({
       slug: 'task-unknown',
       branch: 'mission/task-unknown',
       currentBranch: 'mission/task-unknown',
@@ -1329,7 +1353,7 @@ test('printIntegrationPreflight tolerates a missing task file and reports unknow
       resolveTokenFileFn: () => '/tmp/tokens/codex',
       isForgejoReviewEnabledFn: () => false,
       getUnresolvedIndexConflictsFn: () => ({ ok: true, files: [] })
-    });
+    }));
 
     const output = lines.join('\n');
     assert.ok(!result.failures.includes('task-missing'));
@@ -2054,10 +2078,10 @@ test('F3: dry-run preflight accepts the override case the real run accepts', () 
     log: (message) => { logs.push(message); },
   };
 
-  const { failures } = printIntegrationPreflight(
+  const { failures } = withDebug(() => printIntegrationPreflight(
     makeContext({ ok: true, reviewState: 'REQUEST_CHANGES', defaultUserApproved: true, defaultUserApprovedAt: '2026-01-01T10:30:00Z' }),
     options,
-  );
+  ));
   assert.ok(!failures.includes('task-status'), `dry-run must not fail task-status for the override case: ${failures.join(', ')}`);
   assert.ok(!failures.includes('pr-approval'), `dry-run must not fail pr-approval for the override case: ${failures.join(', ')}`);
   assert.ok(logs.some((line) => line.includes('recovery would establish')), 'dry-run reports the authority the real run would record');

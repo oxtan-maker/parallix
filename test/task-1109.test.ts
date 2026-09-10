@@ -38,6 +38,19 @@ function loadIntegrate() {
 // @ts-expect-error -- TASK-2328: partial test double after ESM seam migration
   return Object.assign((...args) => __mm2.default(...args), __mm2);
 }
+// TASK-2479: preflight success-path detail (approval/variant lines) is demoted
+// to DEBUG so the default happy path stays concise. The checks are unchanged —
+// failures still print and still block — so these regression locks ask for the
+// detail explicitly to keep coverage of the resolved value.
+async function withDebug(fn) {
+  const previous = process.env.DEBUG;
+  process.env.DEBUG = '1';
+  try {
+    return await fn();
+  } finally {
+    if (previous === undefined) { delete process.env.DEBUG; } else { process.env.DEBUG = previous; }
+  }
+}
 
 function setupMocks() {
   statsCalls = [];
@@ -132,16 +145,23 @@ test('integrate full squash-merge (Variant B) success path', async (t) => {
   const originalLog = console.log;
   const logs = [];
   console.log = (msg) => logs.push(msg);
+  // TASK-2479: the variant-selection progress line is demoted to DEBUG so the
+  // default happy path stays concise. Ask for it explicitly here so this
+  // regression lock still verifies the Variant B squash-merge path runs and
+  // still records stats exactly once.
+  const previousDebug = process.env.DEBUG;
+  process.env.DEBUG = '1';
 
   try {
     await integrate([TEST_SLUG, '--no-integration-gates'], { missionServicesFn: composition.createMissionApplicationServices });
   } catch { /* expected */ }
 
   assert.ok(logs.some(l => l.includes('Selecting integration variant: Variant B')));
-  assert.ok(logs.some(l => l.includes('Integration completed successfully')));
+  assert.ok(logs.some(l => l.includes('integrated into')));
   assert.equal(statsCalls.length, 1);
 
   console.log = originalLog;
+  if (previousDebug === undefined) delete process.env.DEBUG; else process.env.DEBUG = previousDebug;
   cleanup();
 });
 
@@ -272,7 +292,7 @@ test('integrate resolves PR and approval using the task assignee Forgejo identit
   mock.method(process, 'exit', (code) => exitCodes.push(code));
 
   try {
-    await integrate([TEST_SLUG, '--dry-run', '--no-integration-gates'], { missionServicesFn: composition.createMissionApplicationServices });
+    await withDebug(() => integrate([TEST_SLUG, '--dry-run', '--no-integration-gates'], { missionServicesFn: composition.createMissionApplicationServices }));
 
     assert.equal(captured.prForgejoUser, 'gemini');
     assert.equal(captured.approvalForgejoUser, 'gemini');
@@ -322,7 +342,7 @@ test('integrate passes the pre-resolved Forgejo token into syncMerged', async ()
     assert.equal(captured.prToken, 'preflight-token');
     assert.equal(captured.approvalToken, 'preflight-token');
     assert.equal(readTokenCalls, 2);
-    assert.ok(logs.some(l => l.includes('Integration completed successfully')));
+    assert.ok(logs.some(l => l.includes('integrated into')));
   } finally {
     console.log = originalLog;
     cleanup();

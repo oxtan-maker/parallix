@@ -135,15 +135,11 @@ export async function recordPostIntegrationStats(
     missionStore,
   });
 
+  // TASK-2479: the recording itself stays (fail-closed, TASK-2378) but the full
+  // weekly report and mission-telemetry table move behind an analytical surface
+  // (px stats, an explicit flag, or DEBUG). A successful recording is a single
+  // confirmation line here, not a report dump in the hero path.
   fmt.log.info(`Workflow stats recorded: ${formatRecordedStatsRow(outcome.row)}`);
-  fmt.log.info('Workflow stats updated:');
-  fmt.log.plain(outcome.report);
-
-  const missionRows = outcome.data?.rows || [];
-  const missionReport = (stats as any).renderMissionPhaseReport(missionRows, slug);
-  const firstLine = missionReport.split('\n')[0];
-  fmt.log.info(firstLine);
-  fmt.log.plain(missionReport.split('\n').slice(1).join('\n'));
 
   return outcome;
 }

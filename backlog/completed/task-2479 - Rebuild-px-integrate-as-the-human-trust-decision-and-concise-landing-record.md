@@ -1,10 +1,10 @@
 ---
 id: TASK-2479
 title: Rebuild px integrate as the human trust decision and concise landing record
-status: backlog
-assignee: []
+status: done
+assignee: [custom]
 created_date: '2026-09-10 06:16'
-labels: []
+labels: ["user_value"]
 dependencies: []
 ---
 
