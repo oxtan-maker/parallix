@@ -4,9 +4,10 @@ import * as path from 'node:path';
 import * as fmt from '../../../application/presentation/cli-format.js';
 import { resolveTaskFile } from '../../backlog/backlog.js';
 import { getMissionYear, missionDirForSlug } from '../../filesystem/mission-utils.js';
+import { assembleStagePrompt } from '../../assets/runtime-assets.js';
+import { resolvePromptOverride } from '../../config/product-config.js';
 import * as stats from './stats.js';
 import { formatVerificationCommand } from '../../verification/verification.js';
-import { runtimeAssetStore } from '../../assets/runtime-assets.js';
 
 // @ts-expect-error implicit any on rootDir
 function resolveVerifyCmd(rootDir) {
@@ -35,8 +36,9 @@ function resolveClassificationInstructions(taskPath) {
 
 // @ts-expect-error implicit any on slug/rootDir/worktree
 function buildDraftPrompt(slug, { rootDir = process.cwd(), worktree = null } = {}) {
-  const template = runtimeAssetStore.readText('prompts/draft.md');
   const promptRoot = worktree || rootDir;
+  const overridePath = resolvePromptOverride(promptRoot);
+  const template = assembleStagePrompt('draft', { overridePath });
   const year = getMissionYear(slug, promptRoot) || String(new Date().getFullYear());
   const missionPath = path.join(missionDirForSlug(promptRoot, slug), 'MISSION.md');
   const missionDir = path.dirname(missionPath);

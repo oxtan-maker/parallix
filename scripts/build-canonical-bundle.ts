@@ -186,9 +186,13 @@ fs.writeFileSync(path.join(buildDir, 'package.json'), `${JSON.stringify({
 const RUNTIME_ASSET_KEYS = [
   'config/agents.json',
   'config/state-map.json',
+  'prompts/act-on-review-core.md',
   'prompts/act-on-review.md',
+  'prompts/draft-core.md',
   'prompts/draft.md',
+  'prompts/execute-core.md',
   'prompts/execute.md',
+  'prompts/review-core.md',
   'prompts/review.md',
   'templates/mission-scaffold.md',
   ...fs.readdirSync(path.join(root, 'src', 'adapters', 'sqlite', 'migrations'))

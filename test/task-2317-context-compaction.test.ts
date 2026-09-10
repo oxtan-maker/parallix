@@ -14,7 +14,9 @@ const reviewLoopSource = fs.readFileSync(
 );
 
 test('task-2317: successful declared-gate instruction compacts only after success and retains failed-gate diagnostics', () => {
-  const executePrompt = fs.readFileSync(path.join(repoRoot, 'prompts/execute.md'), 'utf8');
+  // The compaction requirement is a lifecycle mechanic, so it lives in the
+  // mandatory core half of the split execute prompt (task-2465).
+  const executePrompt = fs.readFileSync(path.join(repoRoot, 'prompts/execute-core.md'), 'utf8');
 
   assert.match(executePrompt, /Immediately after \*\*each successful mission-declared Gate\*\*, compact/i);
   assert.match(executePrompt, /Do not compact for a failed gate: retain its failure diagnostic/i);

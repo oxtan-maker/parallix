@@ -57,7 +57,11 @@ export interface TaskRecord {
 
 const FRONTMATTER_FENCE = /^---\s*$/;
 const KEY_LINE = /^([A-Za-z0-9_.-]+):(.*)$/;
-const BLOCK_ITEM = /^(\s+)-\s+(.*)$/;
+// YAML block-sequence items may sit at the same indent as their key (zero
+// leading spaces), so a `- label` at column 0 is a real block item. Requiring
+// `\s+` here silently dropped column-0 items on re-serialization, which is why
+// valid records like task-2471/2472 failed the round trip.
+const BLOCK_ITEM = /^(\s*)-\s+(.*)$/;
 const BLOCK_SCALAR_HEADER = /^[>|][-+]?\d*$/;
 const CHECKLIST_ITEM = /^\s*-\s+\[([ xX])\]\s*(?:#(\S+)\s*)?(.*)$/;
 

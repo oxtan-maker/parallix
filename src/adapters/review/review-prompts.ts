@@ -9,7 +9,8 @@
 
 import * as path from 'path';
 import { getMissionYear, getPrimaryBranch, missionPathForSlug } from '../filesystem/mission-utils.js';
-import { runtimeAssetStore } from '../assets/runtime-assets.js';
+import { assembleStagePrompt } from '../assets/runtime-assets.js';
+import { resolvePromptOverride } from '../config/product-config.js';
 import { resolveArtifactDir } from './review-artifacts.js';
 
 type PromptEntry = { review: string; actOnReview: string };
@@ -97,7 +98,8 @@ export function buildCompactReviewPrompt({ reviewer, branch, implementer, focus 
   const missionPath = resolveMissionPath(slug, repoRoot, missionPathOverride);
   const primaryBranch = resolvePrimaryBranch(repoRoot);
   const artifactDir = resolveArtifactDir(repoRoot || process.cwd());
-  const template = runtimeAssetStore.readText('prompts/review.md');
+  const overridePath = resolvePromptOverride(repoRoot || process.cwd());
+  const template = assembleStagePrompt('review', { overridePath });
   // Dry-run output preserves the runtime-selected agent as a placeholder.
   // Resolve its entrypoint from the configured reviewer instead, because the
   // placeholder is deliberately not a registered agent family.
@@ -130,7 +132,8 @@ export function buildCompactActOnReviewPrompt({ implementer, branch, attempt, re
   const missionPath = resolveMissionPath(slug, repoRoot, missionPathOverride);
   const primaryBranch = resolvePrimaryBranch(repoRoot);
   const artifactDir = resolveArtifactDir(repoRoot || process.cwd());
-  const template = runtimeAssetStore.readText('prompts/act-on-review.md');
+  const overridePath = resolvePromptOverride(repoRoot || process.cwd());
+  const template = assembleStagePrompt('act-on-review', { overridePath });
   return template
     .replaceAll('{{branch}}',                  branch)
     .replaceAll('{{implementer}}',             finalImplementer)

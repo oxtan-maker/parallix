@@ -9,7 +9,8 @@ import * as handoff from './handoff.js';
 import { resolveTaskFile, transitionTask, getTaskStatus, getTaskImplementer } from '../../backlog/backlog.js';
 import { recordStageStatsSafe, startReviewLoop } from '../../review/review-loop.js';
 import * as repairHandoff from './repair-handoff.js';
-import { runtimeAssetStore } from '../../assets/runtime-assets.js';
+import { assembleStagePrompt } from '../../assets/runtime-assets.js';
+import { resolvePromptOverride } from '../../config/product-config.js';
 import { isDbAdhocIdentity } from '../../../domain/mission.js';
 // TASK-2377.05 (SC3/SC4): both handoff relaunch loops run through the one
 // rebound kernel, so a bounce is only reported fixed when the check that failed
@@ -671,7 +672,8 @@ function resolveExecuteTaskPath(slug, rootDir) {
 /** @param {string} slug @param {string} checkpointContext @param {{rootDir?: string}} [options] */
 function buildExecutePrompt(slug, checkpointContext, options = {}) {
   const { rootDir = process.cwd() } = options;
-  const template = runtimeAssetStore.readText('prompts/execute.md');
+  const overridePath = resolvePromptOverride(rootDir);
+  const template = assembleStagePrompt('execute', { overridePath });
   const year = getMissionYear(slug, rootDir) || String(new Date().getFullYear());
   const missionPath = path.join(missionDirForSlug(rootDir, slug), 'MISSION.md');
   const missionDir = path.dirname(missionPath);

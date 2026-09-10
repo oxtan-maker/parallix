@@ -10,8 +10,11 @@ const assetStoreSource = fs.readFileSync(path.join(ROOT, 'src/adapters/assets/ru
 test('task-2279 routes shipped prompts and configuration through the runtime AssetStore', () => {
   const manifest = JSON.parse(fs.readFileSync(path.join(ROOT, 'build', 'asset-manifest.json'), 'utf8'));
   for (const asset of [
-    'config/agents.json', 'config/state-map.json', 'prompts/act-on-review.md',
-    'prompts/draft.md', 'prompts/execute.md', 'prompts/review.md',
+    'config/agents.json', 'config/state-map.json',
+    'prompts/act-on-review-core.md', 'prompts/act-on-review.md',
+    'prompts/draft-core.md', 'prompts/draft.md',
+    'prompts/execute-core.md', 'prompts/execute.md',
+    'prompts/review-core.md', 'prompts/review.md',
     'templates/mission-scaffold.md',
   ]) {
     assert.match(assetStoreSource, new RegExp(`'${asset.replace('.', '\\.')}'`));
@@ -26,7 +29,10 @@ test('task-2279 routes shipped prompts and configuration through the runtime Ass
     'src/adapters/config/state-map.ts',
   ]) {
     const source = fs.readFileSync(path.join(ROOT, file), 'utf8');
-    assert.match(source, /runtimeAssetStore\.readText/);
+    // Launch points and the config loader read shipped assets through the
+    // runtime AssetStore: review/config/state-map directly, the three prompt
+    // launch points through the assembleStagePrompt two-file loading path.
+    assert.match(source, /runtimeAssetStore\.readText|assembleStagePrompt/);
     assert.doesNotMatch(source, /packageRoot\(import.meta.dirname\).*'(prompts|templates|config)'/);
   }
 });
