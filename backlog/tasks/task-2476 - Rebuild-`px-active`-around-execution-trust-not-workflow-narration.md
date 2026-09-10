@@ -4,6 +4,7 @@ title: 'Rebuild `px active` around execution trust, not workflow narration'
 status: backlog
 assignee: []
 created_date: '2026-09-10 06:12'
+updated_date: '2026-09-10 06:14'
 labels: []
 dependencies: []
 ---
@@ -226,38 +227,6 @@ Then run focused test files directly and finally the repository gates.
 * GIF rendered and inspected.
 * `./scripts/verify-local.sh static-analysis`.
 * `./scripts/verify-local.sh all`.
-
----
-
-# TASK-2477 — Make autonomous review visibly prove independent scrutiny
-
-## Goal
-
-Rebuild the autonomous-review presentation so the user can immediately see:
-
-**who implemented the change → who is reviewing it → whether the review is actually independent → what the reviewer concluded → what findings matter.**
-
-The key product value is not that Parallix “runs a review loop.”
-
-The value is:
-
-> another agent inspected the implementation before the human is asked to integrate it.
-
-The default output must make that fact unmistakable.
-
-## Why Now
-
-The current first-value cast makes review look like a workflow engine trace.
-
-Examples include:
-
-```text
-Starting autonomous review loop (implementer: claude)...
-
-[INFO] Resuming persisted reviewer: custom (round 1)
-[INFO] Selected reviewer: custom (persisted)
-[INFO]
-```
 <!-- SECTION:DESCRIPTION:END -->
 
 ## Definition of Done
