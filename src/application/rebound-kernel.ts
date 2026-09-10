@@ -320,7 +320,7 @@ function recoveryDossier(reason: ReboundReason, context: ReboundContext, history
     : reason.kind === 'hook-failure'
       ? `Repair the reported ${reason.hook} hook failure, then rerun ${reason.operation || 'the failed Git operation'}${reason.operation?.includes('rebase') ? '; if the rebase cannot be resumed safely, run git rebase --abort' : ''}.`
       : reason.kind === 'artifact-incomplete'
-        ? `Create the missing artifacts named above, then rerun px handoff ${context.slug}.`
+        ? `Create the missing artifacts named above, then rerun px review ${context.slug} --continue.`
         : reason.kind === 'agent-timeout'
           ? `Produce the required ${reason.role} output named above, then rerun px review ${context.slug} --continue.`
           : `Repair the retained handoff failure, then rerun px handoff ${context.slug}.`;

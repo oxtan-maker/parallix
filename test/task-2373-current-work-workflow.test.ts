@@ -193,7 +193,7 @@ test('SC5: px review and px active publish nested review work through one seam',
     start: async (context: ReviewWorkflowContext) => {
       await (context.options.onAgentLaunched as (_agent: string, _phase: AgentLaunchPhase) => Promise<void>)('qwen', 'review');
     },
-    continue: operation(), comment: operation(), readComments: operation(),
+    continue: operation(), resume: operation(), comment: operation(), readComments: operation(),
     submitReview: operation(), consumeArtifacts: operation(), close: operation(),
     status: operation(), createEvent: operation(), backfillReview: operation(),
     reconcileReview: operation(), importLegacy: operation(),

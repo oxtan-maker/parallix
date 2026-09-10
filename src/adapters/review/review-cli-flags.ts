@@ -17,7 +17,7 @@ export async function getHandoff(): Promise<any> {
 }
 
 export const REVIEW_FLAGS = new Set([
-  '--actor', '--backfill-review', '--branch', '--close', '--comment', '--comment-file', '--comments', '--consume-artifacts', '--continue', '--create-event', '--disposition', '--dry-run', '--eligible-reviewer', '--focus', '--force', '--implementer', '--import-legacy', '--input-file', '--max-attempts', '--message', '--message-file', '--mission', '--no-gate', '--phase', '--poll-timeout-seconds', '--push', '--reconcile-review', '--revision', '--reset', '--reviewer', '--round', '--target', '--start', '--status', '--submit', '--submit-review', '--tmp-dir', '--type', '--verbose', '--verdict', '--verify'
+  '--actor', '--backfill-review', '--branch', '--close', '--comment', '--comment-file', '--comments', '--consume-artifacts', '--continue', '--create-event', '--disposition', '--dry-run', '--eligible-reviewer', '--focus', '--force', '--implementer', '--import-legacy', '--input-file', '--max-attempts', '--message', '--message-file', '--mission', '--no-gate', '--phase', '--poll-timeout-seconds', '--push', '--reconcile-review', '--resume', '--revision', '--reset', '--reviewer', '--round', '--target', '--start', '--status', '--submit', '--submit-review', '--tmp-dir', '--type', '--verbose', '--verdict', '--verify'
 ]);
 
 export const REVIEW_VALUE_FLAGS = new Set([

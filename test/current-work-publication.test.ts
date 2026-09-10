@@ -272,6 +272,7 @@ function makeReviewWorkflow(ran: string[]) {
     push: operation('push'),
     start: operation('start'),
     continue: operation('continue'),
+    resume: operation('resume'),
     comment: operation('comment'),
     readComments: operation('readComments'),
     submitReview: operation('submitReview'),

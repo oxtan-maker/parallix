@@ -89,7 +89,7 @@ function makeReviewWorkflow(overrides: Record<string, unknown> = {}) {
   return {
     preflight: (args: string[]) => ({ slug: 'task-2373', args, options: {} }),
     verify: operation(), submit: operation(), push: operation(), start: operation(),
-    continue: operation(), comment: operation(), readComments: operation(),
+    continue: operation(), resume: operation(), comment: operation(), readComments: operation(),
     submitReview: operation(), consumeArtifacts: operation(), close: operation(),
     status: operation(), createEvent: operation(), backfillReview: operation(),
     reconcileReview: operation(), importLegacy: operation(),
