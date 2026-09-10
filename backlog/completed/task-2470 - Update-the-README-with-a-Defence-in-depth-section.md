@@ -1,12 +1,11 @@
 ---
 id: TASK-2470
 title: Update the README with a Defence in depth section
-status: backlog
-assignee: []
+status: done
+assignee: [custom]
 created_date: '2026-09-08 10:12'
-updated_date: '2026-09-09 11:37'
 labels:
-  - ai_sdlc
+  - user_value
 dependencies: []
 ---
 
