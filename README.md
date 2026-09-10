@@ -30,7 +30,7 @@ Parallix is a mission-based development workflow that addresses each of these di
 - **Run several AI coding agents on one repo without clobbering each other**. Every mission gets its own `mission/<slug>` branch and its own sibling git worktree (`../<repo>-<slug>`) automatically, so N agents make progress independently and each lands by squash-merge.
 - **Use different agent families — including local AI — in the same workflow**. Parallix owns the mission lifecycle rather than one vendor's agent framework. Drafting, implementation, and review can use different eligible families, and custom/local runtimes participate in the same branch, checkpoint, review, and integration model.
 - **Fail over automatically when an agent hits its usage limit**. Per-family limit messages are pattern-detected; the agent family is written to a timed blocklist and the run retries with the next eligible, unblocked family. Only when all are exhausted does it fail loudly. Agent usage limits stop a single session; they don't have to stop the mission.
-- **Resume a long mission deterministically**. Every checkpoint runs the gate, commits a checkpoint document with a literal `Next action:` line, and pushes it — so a later session or a different agent resumes from a written instruction, not a guess.
+- **Resume a long mission deterministically**. The execution agent records completed checkpoints with evidence and a concrete next action, and commits them locally, so a later session or a different agent can resume from the recorded progress.
 - **Force a second, preferentially-different coding agent review before merge**. Review is a separate step whose reviewer selection excludes the implementer to prefer a different agent family, and a self-approval is code-blocked at the provider. It falls back to the same family when no other agent is runnable, so this forces a second review *attempt* — it only guarantees a different reviewer when one is available.
 - **Publish work to a Forgejo reviewer surface without making Forgejo your branch authority**. When the review provider is enabled, Parallix syncs the local baseline to a dedicated `review` remote running locally and opens or updates the PR there; if Forgejo is disabled, the branch/worktree flow still runs without it.
 - **Use a repo-local Graphify knowledge graph for smaller codebase context pulls**. In repositories where the operator has already installed the Graphify skill, the workflow keeps `graphify-out/` isolated per worktree and refreshes it during review/integration, while the installed agent guidance steers codebase questions toward `graphify query` / `path` / `explain` before full reports or raw grep. That reduces token-usage.
@@ -51,6 +51,22 @@ backlog → draft → active → review → approved → done
 ```
 
 In practice: a human drafts a mission, Parallix creates the branch and worktree, an agent runs and writes checkpoints, a verification gate runs, a second (preferentially different) agent reviews the diff, and only then is the work integrated back to your primary branch by squash-merge. Blocking review findings loop back to `active` on the same branch and PR.
+
+## Defence in depth
+
+Running several agents in parallel is only worth doing if you can trust what comes back. Parallix combines isolation, mission-specific checks, separate review, and automatic repair so confidence comes from checked results throughout delivery.
+
+1. **Isolation.** Every mission gets its own branch and sibling worktree, so parallel agents do not compete over the same working tree, index, or branch.
+2. **Confinement.** On Linux with Bubblewrap enabled, supported agent processes see a read-only host filesystem, with write access limited to the mission worktree and the Git, temporary, and agent-state paths needed for the current step. During review, the mission worktree is read-only too.
+3. **Your existing checks at lifecycle transitions.** Connect your test pyramid by assigning existing test commands to the stages where you want them to run. For example, run fast unit tests and static analysis before a mission moves from `active` to `review`, and reserve expensive integration and end-to-end suites for the final merge. Parallix runs the selected commands and blocks progress when they fail. The [lifecycle check configuration](docs/config.md#lifecycle-gates) shows how to connect those commands to each stage.
+4. **Defences tailored to the mission.** Parallix instructs the drafting agent to investigate the codebase and mission, define concrete success criteria, and select suitable verification commands. For bug fixes, it calls for a failing reproduction test before implementation. The mission's declared checks run before it moves from `active` to `review`, turning the plan into checks on the delivery.
+5. **Evidence for review.** Before a mission moves from `active` to `review`, Parallix checks that the final checkpoint connects success criteria to concrete references, such as tests or runnable repository commands. Missing mission or checkpoint documents block that transition. Reviewers get a stated goal and supporting evidence to examine; generic claims such as “verified” are insufficient.
+6. **Separate review.** A second agent reviews the delivery, using a different agent family when one is available. The pull request author cannot formally approve their own work.
+7. **Automatic, focused repair.** When checks detect a repairable delivery failure, Parallix sends the agent back with a tight prompt containing the specific failure, captured output, and the repair required. It reruns the failing check to confirm the fix. Retries are bounded, and unresolved failures are surfaced to the operator.
+8. **Validate the final tree before merge.** When you choose to integrate an approved mission, Parallix runs the checks you assigned to integration against the exact tree about to land. This is where the broader tests from your pyramid check that the change works with the rest of the system. A failing check stops the merge.
+9. **Operator decision.** Nothing merges itself. A human reads the diff and decides whether to integrate at all.
+
+Repository checks and mission-specific defences complement separate review: passing a command or finding an evidence reference does not prove the change meets its goal. Parallix runs the checks your repository and mission declare; the operator retains the final judgement. See [use cases](docs/use-cases.md) for supported capabilities.
 
 ## Example
 
@@ -119,7 +135,6 @@ The isolated worktree-per-mission model is the *specific* mechanic an internal r
 - **Review surface:** Forgejo is supported as the hosted PR viewer/publication surface, but the workflow remains local-first and can run without Forgejo when that provider is disabled.
 - **Telemetry:** structured token/usage telemetry exists for the codex and claude families; the local-custom and mistral paths record honest zeros by design rather than fabricated numbers.
 - **Graphify:** the knowledge-graph path is supported for codex, claude, and custom/opencode after one-time operator setup. It is optional, not a workflow prerequisite. The credible claim today is better-scoped context retrieval, not a proven token-savings benchmark.
-- **Review coverage** is best-effort, not guaranteed: a second review is always attempted, but a different reviewing agent family is only guaranteed when one is runnable.
 
 This is a tool for a local-first developer workflow on one machine, driven by an operator who reads the caveats.
 
@@ -129,7 +144,7 @@ This is a tool for a local-first developer workflow on one machine, driven by an
 - [`docs/forgejo-setup.md`](docs/forgejo-setup.md) — how the Forgejo review surface, tokens, and `review` remote are bootstrapped.
 - [`docs/operator-setup.md`](docs/operator-setup.md) — one-time Graphify skill installation for codex, claude, and custom/opencode.
 - [`AGENTS.md`](AGENTS.md) — hard rules, restricted actions, and verification entrypoints.
-- `docs/adr/` — architecture decision records, including ADR 0044 (distribution model).
+- `docs/adr/` — architecture decision records, including ADR 0044 (distribution model) and ADR 0048 (the fail-closed harness defence inventory cited above).
 
 ## Development
 
