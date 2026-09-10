@@ -375,7 +375,7 @@ export interface DraftWorkflowPort {
   transition(_context: DraftWorkflowContext): Promise<DraftWorkflowContext> | DraftWorkflowContext;
   /** Read agent config, select agent, launch draft agent, record implementer and stats. */
   launchAgent(_context: DraftWorkflowContext): Promise<DraftWorkflowContext> | DraftWorkflowContext;
-  /** Normalize classification (restart agent if needed), label sync, re-assert base branch. */
+  /** Normalize classification (restart agent if needed) and re-assert base branch. */
   postProcess(_context: DraftWorkflowContext): Promise<DraftWorkflowContext> | DraftWorkflowContext;
   /** Enforce draft commit safety — capture uncommitted changes. */
   commitSafety(_context: DraftWorkflowContext): DraftWorkflowContext;

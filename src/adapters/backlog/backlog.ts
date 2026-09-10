@@ -26,7 +26,6 @@ export {
   setTaskAssignee,
   setTaskImplementer,
   setTaskLabels,
-  syncTaskLabelsToBaseWorktree,
 } from './task-metadata.js';
 
 export {
@@ -38,4 +37,3 @@ export {
   transitionTask,
   transitionTaskOnIntegrationBranch,
 } from './task-transitions.js';
-

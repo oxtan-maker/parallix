@@ -1,13 +1,10 @@
 ---
 id: TASK-2472
 title: Validate draft classification in the mission worktree before recovery
-status: backlog
-assignee: []
+status: done
+assignee: [codex]
 created_date: '2026-09-09 00:00'
 labels: [ai_sdlc, bug]
-labels:
-- ai_sdlc
-- bug
 dependencies: []
 ---
 

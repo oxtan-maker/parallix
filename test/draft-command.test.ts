@@ -7,6 +7,7 @@ import assert from 'node:assert/strict';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
+import childProcess from 'child_process';
 import { mockModule, installModuleMocks } from './lib/module-mock.js';
 const runDraftCommandModule = mockModule<typeof import('../src/adapters/cli/commands/draft.js')>('../src/adapters/cli/commands/draft.js', import.meta.url);
 await installModuleMocks();
@@ -23,6 +24,64 @@ const missionServicesFn = async () => ({
       return { status: 'completed', value: { version: 1 }, durableEvidence: [] };
     },
   },
+});
+
+test('draft accepts a mission-worktree classification without touching the primary task', async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'draft-worktree-classification-'));
+  const worktree = path.join(root, 'mission-task-2472');
+  const slug = 'task-2472';
+  const taskName = `${slug} - isolation.md`;
+  const primaryTask = path.join(root, 'backlog', 'tasks', taskName);
+  const missionTask = path.join(worktree, 'backlog', 'tasks', taskName);
+  const primaryContent = '---\nid: TASK-2472\nstatus: backlog\nlabels: []\n---\n';
+  const previousCwd = process.cwd();
+  let restartCount = 0;
+
+  fs.mkdirSync(path.dirname(primaryTask), { recursive: true });
+  fs.writeFileSync(primaryTask, primaryContent);
+  for (const args of [
+    ['init'], ['symbolic-ref', 'HEAD', 'refs/heads/main'],
+    ['config', 'user.name', 'Test'], ['config', 'user.email', 'test@example.com'],
+    ['add', '.'], ['commit', '-m', 'seed'],
+    ['worktree', 'add', '-b', `mission/${slug}`, worktree, 'HEAD']
+  ]) {
+    assert.equal(childProcess.spawnSync('git', args, { cwd: root }).status, 0, `git ${args.join(' ')}`);
+  }
+  fs.writeFileSync(missionTask, '---\nid: TASK-2472\nstatus: backlog\nlabels: [ai_sdlc]\n---\n');
+
+  try {
+    process.chdir(root);
+    await runDraftCommand([slug], {
+      inferSlugFn: () => slug,
+      resolveMainRepoFn: () => root,
+      cwdFn: () => root,
+      conventionalWorktreePathFn: () => worktree,
+      ensureRepoExistsFn: () => true,
+      ensureStandaloneMissionBaselineFn: () => ({ committed: false }),
+      ensureDraftRepoConfigCommittedFn: () => true,
+      ensureMissionBranchFn: () => {}, ensureWorktreeFn: () => {},
+      ensureGraphifyWorkspaceFn: () => {}, ensureGraphifyIgnoreFn: () => {},
+      ensureMissionFileFn: () => path.join(worktree, 'missions', slug, 'MISSION.md'),
+      ensureMissionBaseBranchRecordedFn: () => {}, bootstrapBacklogTaskFn: () => true,
+      resolveTaskFileFn: (_slug, dir) => ({ ok: true, taskFile: path.join(dir, 'backlog', 'tasks', taskName) }),
+      checkBacklogIntegrityFn: () => [], transitionTaskFn: () => true,
+      readAgentConfigOrExitFn: () => ({}), selectAgentFn: () => 'codex',
+      startDraftAgentFn: async () => ({ agent: 'codex', result: { status: 0 } }),
+      recordDraftImplementerFn: () => {}, recordDraftStatsFn: () => {},
+      restartDraftAgentFn: async () => { restartCount += 1; return true; },
+      missionServicesFn, enforceDraftCommitSafetyFn: () => {},
+      exitFn: (code) => { throw new Error(`unexpected exit ${code}`); },
+      logFn: () => {}, errorFn: (message) => { throw new Error(message); }
+    });
+
+    assert.equal(fs.readFileSync(primaryTask, 'utf8'), primaryContent,
+      'draft must not write or commit labels in the primary checkout');
+    assert.equal(restartCount, 0, 'a valid mission-worktree classification must not recover');
+  } finally {
+    process.chdir(previousCwd);
+    childProcess.spawnSync('git', ['worktree', 'remove', '--force', worktree], { cwd: root });
+    fs.rmSync(root, { recursive: true, force: true });
+  }
 });
 
 test('runDraftCommand top-level flows are covered with injected dependencies', async () => {
@@ -373,7 +432,7 @@ test('runDraftCommand top-level flows are covered with injected dependencies', a
     });
 
     assert.equal(exitCode, 1);
-    assert.ok(errors.some(msg => msg.includes('still invalid after restart')));
+    assert.ok(errors.some(msg => msg.includes('Classification validation failed after recovery')));
   }
 
   {
