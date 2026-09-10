@@ -676,6 +676,22 @@ export function resolveMaxConcurrentCustom(rootDir: string = process.cwd()): num
   return Number.isInteger(max) && (max as number) > 0 ? max as number : Infinity;
 }
 
+/** The first worktree is Git's canonical checkout; mission worktrees are not policy authorities. */
+export function resolveCanonicalRepositoryRoot(rootDir: string = process.cwd()): string {
+  const result = spawnSync('git', ['-C', rootDir, 'worktree', 'list', '--porcelain'], { encoding: 'utf8' });
+  const first = result.status === 0 ? result.stdout.match(/^worktree (.+)$/m)?.[1] : null;
+  return first ? path.resolve(first) : path.resolve(rootDir);
+}
+
+export function resolveCanonicalMaxConcurrentCustom(rootDir: string = process.cwd()): number {
+  const canonicalRoot = resolveCanonicalRepositoryRoot(rootDir);
+  const loaded = loadWorkflowConfig(canonicalRoot);
+  if (loaded.found && (loaded.parseError || validateWorkflowConfig(loaded.config).length > 0)) {
+    throw new Error(`Invalid workflow.config.json at ${loaded.configPath}: adapters.agents.maxConcurrentCustom admission fails closed`);
+  }
+  return resolveMaxConcurrentCustom(canonicalRoot);
+}
+
 interface RepositoryReadinessResult {
   mode: string;
   configPath: string | null;

@@ -1,10 +1,10 @@
 ---
 id: TASK-2475
 title: Enforce machine-wide custom-agent concurrency with durable leases
-status: backlog
-assignee: []
+status: done
+assignee: [codex]
 created_date: '2026-09-10 05:37'
-labels: []
+labels: [user_value]
 dependencies: []
 ---
 

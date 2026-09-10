@@ -268,6 +268,15 @@ export class SqliteDatabaseAdapter {
     this.transactionDepth = 1;
   }
 
+  /** Acquire SQLite's writer lock before a read/count/write admission decision. */
+  async beginImmediateTransaction(): Promise<void> {
+    this.assertOpen();
+    if (this.inTransaction) { throw new Error('BEGIN IMMEDIATE cannot nest'); }
+    this.db!.exec('BEGIN IMMEDIATE;');
+    this.inTransaction = true;
+    this.transactionDepth = 1;
+  }
+
   /**
    * Commit the current transaction.
    * Only the outermost call executes COMMIT; inner callers are no-ops.

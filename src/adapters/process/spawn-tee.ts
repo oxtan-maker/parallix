@@ -50,6 +50,7 @@ interface SpawnTeeOptions {
    * board must exit on q/Ctrl+C while the action runs on (CP-4 ownership rule).
    */
   unrefChild?: boolean;
+  onSpawn?: (_child: ChildProcess) => void;
   [key: string]: unknown;
 }
 
@@ -106,8 +107,9 @@ export function spawnAndTee(command: string, args: string[], options: SpawnTeeOp
     stdoutSink = process.stdout,
     stderrSink = process.stderr,
     maxTailBytes = DEFAULT_MAX_TAIL_BYTES,
-    noOutputWatchdog = null,
-    unrefChild = false,
+      noOutputWatchdog = null,
+      unrefChild = false,
+      onSpawn,
     ...spawnOptions
   } = options;
 
@@ -136,6 +138,7 @@ export function spawnAndTee(command: string, args: string[], options: SpawnTeeOp
         env,
         stdio: ['inherit', 'pipe', 'pipe']
       } as SpawnOptions);
+      onSpawn?.(child);
       if (unrefChild) {
         // child.unref() alone does not release the piped stdio handles — the
         // pipes would still anchor the event loop. Unref all three.

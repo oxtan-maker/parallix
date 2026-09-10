@@ -136,8 +136,11 @@ system temporary directory.
 
 ## Agents
 
-`adapters.agents.maxConcurrentCustom` is an optional positive integer. Its
-default is unlimited custom-agent launches. `models` is an object whose keys
+`adapters.agents.maxConcurrentCustom` is an optional positive integer enforced
+across local custom-agent processes that share `PARALLIX_HOME`; its default is
+unlimited custom-agent launches. `subagents.maxParallel` is separate: it is an
+advisory prompt limit for subagents created inside one agent, not process
+admission control. `models` is an object whose keys
 are agent-family names and whose string values are model identifiers; unlisted
 families receive no model argument. `runners.custom` is `opencode` or `pi` and
 defaults to `opencode`. `subagents.maxParallel` is an integer or `null`,

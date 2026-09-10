@@ -34,6 +34,9 @@ const expectedIntegrationFiles = [
   'task-2375-current-work-operation-repro.test.ts',
   'task-2468-adhoc-lifecycle-repro.test.ts',
   'bubblewrap-worktree-git.test.ts',
+  // TASK-2475: two real child processes contend for one custom slot over a
+  // durable lease; the spawn process boundary keeps it in the integration suite.
+  'custom-capacity-multiprocess-repro.test.ts',
   'bootstrap-isolation.test.ts', 'documentation-verification.test.ts',
   'draft-command.test.ts', 'draft.test.ts',
   'draft_preflight_modern.test.ts', 'durable-state-policy.test.ts',
