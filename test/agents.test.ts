@@ -1025,6 +1025,69 @@ test('startAgent logs no-output diagnostics with agent, step, and child pid', as
   }
 });
 
+test('startAgent summarizes the prompt in the launch echo and restores it under DEBUG', async () => {
+  // The prompt is one of the launcher args and runs to hundreds of lines, so the
+  // verbatim echo buried the whole run in harness text nobody reads.
+  const previousDebug = process.env.DEBUG;
+  delete process.env.DEBUG;
+  try {
+    const log = [];
+    await startAgent('review', {
+      prompt: 'Mode: review.\nSecret harness paragraph nobody reads.',
+      selectAgentFn: () => 'claude',
+      log: msg => log.push(msg)
+    });
+    const launchLine = log.find(msg => msg.includes('Launching:'));
+    assert.ok(launchLine, `expected a launch echo in logs: ${log.join(' | ')}`);
+    assert.match(launchLine, /<prompt: \d+ chars>/);
+    assert.ok(!launchLine.includes('Secret harness paragraph'), 'the prompt body must not be echoed by default');
+
+    process.env.DEBUG = '1';
+    const debugLog = [];
+    await startAgent('review', {
+      prompt: 'Mode: review.\nSecret harness paragraph nobody reads.',
+      selectAgentFn: () => 'claude',
+      log: msg => debugLog.push(msg)
+    });
+    assert.ok(
+      debugLog.some(msg => msg.includes('Launching:') && msg.includes('Secret harness paragraph')),
+      'DEBUG=1 must restore the verbatim command'
+    );
+  } finally {
+    if (previousDebug === undefined) { delete process.env.DEBUG; } else { process.env.DEBUG = previousDebug; }
+  }
+});
+
+test('startAgent stays quiet while the agent is still streaming output', async () => {
+  const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-live-output-'));
+  try {
+    await withPathLaunchers({
+      opencode: 'if (process.argv.includes("--help")) process.exit(0); const t = setInterval(() => process.stdout.write("working\\n"), 10); setTimeout(() => { clearInterval(t); process.exit(0); }, 200);'
+    }, async () => {
+      const log = [];
+      const result = await startAgent('active', {
+        agent: 'custom',
+        prompt: 'Execute.',
+        worktree: tmpRoot,
+        log: msg => log.push(msg),
+        isAgentBlockedFn: () => false,
+        noOutputWatchdog: {
+          initialDelayMs: 20,
+          intervalMs: 20
+        }
+      });
+
+      assert.equal(result.result.status, 0);
+      assert.ok(
+        !log.some(message => /Still waiting on custom/.test(message)),
+        `a visibly streaming agent needs no watchdog chatter: ${log.join(' | ')}`
+      );
+    });
+  } finally {
+    fs.rmSync(tmpRoot, { recursive: true, force: true });
+  }
+});
+
 // ---------- Mistral launcher ----------
 test('buildVibeInvocation uses --prompt --trust --output text in the worktree', () => {
 

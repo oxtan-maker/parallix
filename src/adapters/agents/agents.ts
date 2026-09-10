@@ -288,6 +288,9 @@ async function updateAgentBlockChecked(agent: string, until: string, options: {r
   return new AgentBlockService(new SqliteBlocklistRepository(state.db)).block(agent, until, options.reason ?? null);
 }
 
+// A watchdog tick is only news once the agent's output has been silent this long.
+const QUIET_STREAM_REPORT_MS = 15_000;
+
 function formatElapsed(elapsedMs: number) {
   const seconds = Math.max(0, Math.round(elapsedMs / 1000));
   if (seconds < 60) {return `${seconds}s`;}
@@ -520,6 +523,12 @@ async function startAgent(step: string, opts: StartAgentOptions = { prompt: '' }
                 noOutputWatchdog: {
                   ...watchdogConfig,
                   onNoOutput: (evt: {pid: number, elapsedMs: number, sawOutput?: boolean, msSinceLastOutput?: number | null}) => {
+                    // The watchdog keeps ticking after the agent's first output,
+                    // so on a healthy run it announced "Still waiting ... last
+                    // visible output 0s ago" while the agent was visibly
+                    // streaming. Only speak up when the stream has actually
+                    // gone quiet; a live agent is its own progress report.
+                    if (evt.sawOutput && (evt.msSinceLastOutput ?? 0) < QUIET_STREAM_REPORT_MS) { return; }
                     const stage = evt.elapsedMs < (step === 'draft' ? DRAFT_NO_OUTPUT_INITIAL_DELAY_MS : DEFAULT_NO_OUTPUT_INITIAL_DELAY_MS)
                       ? 'starting up'
                       : 'running';
@@ -544,7 +553,13 @@ async function startAgent(step: string, opts: StartAgentOptions = { prompt: '' }
       const { invocation: launchedInvocation, resultPromise } = launchResult;
       invocation = launchedInvocation;
       if (invocation) {
-        log(fmt.status('INFO', `Launching: ${fmt.command(`${invocation.command} ${invocation.args.join(' ')}`)}`));
+        // The prompt is one of the args and runs to hundreds of lines. Echoing it
+        // buries the launch line (and the rest of the run) in harness text nobody
+        // reads, so summarize it by default and keep the verbatim command on DEBUG.
+        const echoedArgs = invocation.args
+          .map((arg: string) => (!process.env.DEBUG && String(arg).includes('\n') ? `<prompt: ${String(arg).length} chars>` : arg))
+          .join(' ');
+        log(fmt.status('INFO', `Launching: ${fmt.command(`${invocation.command} ${echoedArgs}`)}`));
         if (invocation.options && invocation.options.cwd) {
           log(fmt.status('INFO', `Working directory: ${fmt.path(invocation.options.cwd)}`));
         }
@@ -736,6 +751,7 @@ async function startDraftAgent(opts: StartAgentOptions = { prompt: '' }) {
 
 export {
   KNOWN_AGENT_NAMES,
+  formatElapsed,
   WORKFLOW_AGENT_NAMES,
   PinnedAgentUnavailableError,
   startAgent,

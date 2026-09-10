@@ -166,8 +166,15 @@ test('runDraftCommand top-level flows are covered with injected dependencies', a
       ['safety', 'task-1038', worktree],
       ['transition', 'task-1038', 'refined']
     ]);
-    assert.ok(logs.some(line => line.includes('Draft setup complete')));
-    assert.ok(logs.some(line => line.includes('Draft agent family: codex')));
+    // TASK-2471: setup plumbing and the trailing `Draft agent family:` line are
+    // internal and now appear only under DEBUG; the default happy path opens
+    // with the mission header, names the agent once before it runs, and ends
+    // with the mission summary.
+    assert.ok(!logs.some(line => line.includes('Draft setup complete')));
+    assert.ok(!logs.some(line => line.includes('Draft agent family: codex')));
+    assert.ok(logs.some(line => line.includes('Drafting mission task-1038')));
+    assert.ok(logs.some(line => line.includes('Running codex to write the mission contract')));
+    assert.ok(logs.some(line => line.includes('Drafted task-1038 in')));
   }
 
   {
@@ -497,6 +504,46 @@ test('runDraftCommand accepts free-text intent and synthesizes a task slug', asy
   assert.equal(calls.length, 1);
   assert.equal(calls[0].slug, 'parallix-adhoc-0001');
   assert.equal(calls[0].syntheticTask.source, 'adhoc-db-identity');
+});
+
+test('runDraftCommand announces the allocated adhoc identity, not the free-text placeholder', async () => {
+  // The header names the mission the operator will live with. Announcing it
+  // before allocation printed `adhoc-create-a-hello-world-program` above a
+  // branch called `mission/parallix-adhoc-0001`.
+  const logs = [];
+  await runDraftCommand(['create a hello world program'], {
+    detectLaunchBaseBranchFn: () => null,
+    resolveMainRepoFn: () => '/tmp/main',
+    conventionalWorktreePathFn: (slug) => `/tmp/${slug}`,
+    ensureRepoExistsFn: () => true,
+    ensureStandaloneMissionBaselineFn: () => ({ committed: false }),
+    ensureDraftRepoConfigCommittedFn: () => true,
+    resolveTaskFileFn: () => ({ ok: false, reason: 'missing' }),
+    allocateAdhocIdentityFn: () => ({ slug: 'parallix-adhoc-0001', missionId: 'parallix-adhoc-0001', taskId: 'PARALLIX-ADHOC-0001' }),
+    ensureMissionBranchFn: () => {},
+    ensureWorktreeFn: () => {},
+    ensureGraphifyWorkspaceFn: () => {},
+    ensureGraphifyIgnoreFn: () => {},
+    ensureMissionFileFn: () => '/tmp/parallix-adhoc-0001/MISSION.md',
+    bootstrapBacklogTaskFn: () => true,
+    validateDraftClassificationFn: () => ({ ok: true, classification: 'unknown' }),
+    transitionTaskFn: () => true,
+    missionServicesFn,
+    readAgentConfigOrExitFn: () => ({}),
+    selectAgentFn: () => 'codex',
+    startDraftAgentFn: async () => ({ agent: 'codex', result: { status: 0 } }),
+    recordDraftImplementerFn: () => {},
+    normalizeDraftClassificationFn: () => ({ ok: true, classification: 'unknown' }),
+    enforceDraftCommitSafetyFn: () => {},
+    exitFn: (code) => { throw new Error(`unexpected exit ${code}`); },
+    logFn: (msg) => logs.push(String(msg)),
+    errorFn: (msg) => { throw new Error(`unexpected error ${msg}`); }
+  });
+
+  const header = logs.find(line => line.includes('Drafting mission'));
+  assert.ok(header, `expected a draft header in output: ${logs.join(' | ')}`);
+  assert.ok(header.includes('parallix-adhoc-0001'), header);
+  assert.ok(!header.includes('hello world program'), header);
 });
 
 test('runDraftCommand honors an explicit --agent override without consulting selectAgentFn or WORKFLOW_AGENT', async () => {

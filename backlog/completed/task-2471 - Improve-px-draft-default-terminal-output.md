@@ -1,11 +1,10 @@
 ---
 id: TASK-2471
 title: Improve px draft default terminal output
-status: backlog
-assignee: []
+status: done
+assignee: [claude]
 created_date: '2026-09-09 11:10'
-labels:
-  - user_value
+labels: [user_value]
 dependencies: []
 ---
 

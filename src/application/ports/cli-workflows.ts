@@ -338,6 +338,8 @@ export interface DraftWorkflowContext {
   readonly mainRepo: string;
   /** Mission worktree path. */
   readonly targetWorktree: string;
+  /** Mission branch name (set once setup resolves it). */
+  readonly branchName?: string;
   /** Path to MISSION.md. */
   readonly missionFile: string;
   /** Recorded base branch (null if primary/detached HEAD). */
