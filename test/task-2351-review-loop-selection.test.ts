@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 
 import { agentFamily } from '../src/domain/agents.js';
 import { PreparedAgentSelection } from '../src/application/services/agent-selection.js';
-import { selectPreparedReviewer } from '../src/adapters/review/review-loop.js';
+import { renderReviewVerdict, reviewIndependence, selectPreparedReviewer } from '../src/adapters/review/review-loop.js';
 
 test('review-loop prepared selection skips SQLite-blocked reviewer before any launch (TASK-2351)', async () => {
   const codex = agentFamily('codex');
@@ -26,4 +26,21 @@ test('review-loop prepared selection skips SQLite-blocked reviewer before any la
   if (reviewer === 'codex') { launchCalls += 1; }
   assert.equal(reviewer, 'claude');
   assert.equal(launchCalls, 0, 'blocked codex receives zero launch calls');
+});
+
+test('review presentation classifies different-family and same-family fallback from agent-family identity', () => {
+  assert.equal(reviewIndependence('claude', 'custom'), 'different-family review');
+  assert.equal(reviewIndependence('claude', 'claude'), 'same-family fallback / self-review');
+  assert.doesNotMatch(reviewIndependence('claude', 'claude'), /different-family/);
+});
+
+test('review verdict presentation is authoritative and renders blocking findings before follow-up work', () => {
+  const logs: string[] = [];
+  renderReviewVerdict('REQUEST_CHANGES', ['missing validation', 'unhandled retry'], (line) => logs.push(line));
+  assert.match(logs[0], /CHANGES REQUESTED/);
+  assert.match(logs[1], /Blocking finding: missing validation/);
+  assert.match(logs[2], /Blocking finding: unhandled retry/);
+
+  renderReviewVerdict('COMMENT', ['must not appear'], (line) => logs.push(line));
+  assert.equal(logs.length, 3, 'non-authoritative states cannot produce an approval or changes verdict');
 });

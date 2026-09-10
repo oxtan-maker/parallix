@@ -58,6 +58,34 @@ export const DEFAULT_REBOUNDS_PER_ROUND = 6;
 /** Named escalation reason: the per-round relaunch cap is exhausted. */
 export const REBOUNDS_PER_ROUND_EXHAUSTED = 'REBOUNDS_PER_ROUND_EXHAUSTED';
 
+/** The review relationship is expressed using configured agent-family IDs. */
+export function reviewIndependence(implementer: string, reviewer: string): string {
+  return implementer === reviewer
+    ? 'same-family fallback / self-review'
+    : 'different-family review';
+}
+
+/** Render only a persisted, authoritative review state as the operator verdict. */
+export function renderReviewVerdict(reviewState: string | null, findings: readonly string[], log: (_msg: string) => void, verbose = false): void {
+  if (reviewState === 'APPROVED') {
+    log(fmt.status('PASS', '========== APPROVED =========='));
+    return;
+  }
+  if (reviewState === 'REQUEST_CHANGES') {
+    log(fmt.status('WARN', '====== CHANGES REQUESTED ======'));
+    for (const finding of findings) {
+      log(fmt.status('WARN', `Blocking finding: ${finding}`));
+    }
+    return;
+  }
+  // A non-binary outcome (e.g. COMMENT) used to be reported as `Round N:
+  // reviewer outcome = X`; demote it to verbose rather than delete it so a
+  // silent non-binary verdict is not a regression (TASK-2477/F2).
+  if (verbose && reviewState) {
+    log(fmt.status('INFO', `Reviewer outcome = ${reviewState}`));
+  }
+}
+
 export async function startReviewLoop(slug: string, opts: {
   implementer?: string;
   reviewer?: string;
@@ -391,8 +419,6 @@ export async function startReviewLoop(slug: string, opts: {
     return;
   }
   reviewer = resolvedReviewer.reviewer;
-  const reviewerSource = resolvedReviewer.reviewerSource;
-  log(fmt.status('INFO', `Selected reviewer: ${reviewer} (${reviewerSource})`));
   let state: ReviewState;
   if (persisted) {
     state = ReviewState.from(slug, persisted);
@@ -422,9 +448,11 @@ export async function startReviewLoop(slug: string, opts: {
     await onAutonomousStop?.(reason);
     log(fmt.status('INFO', `Autonomous review stopped: human review required after reviewer ${reason}.`));
   };
-  log(fmt.status('INFO', `Starting autonomous review loop for mission: ${slug}`));
+  log(fmt.status('INFO', `REVIEW — ${slug}`));
+  log(fmt.status('INFO', `Implementer: ${implementer}`));
+  log(fmt.status('INFO', `Reviewer: ${reviewer}`));
+  log(fmt.status('INFO', `Independence: ${reviewIndependence(implementer!, reviewer!)}`));
   log(fmt.status('INFO', `Branch: ${branch}`));
-  log(fmt.status('INFO', `Implementer: ${implementer} | Reviewer: ${reviewer} (${reviewerSource})`));
   log(fmt.status('INFO', `Focus: ${focus} | Max attempts: ${maxAttempts}`));
   log(fmt.status('INFO', `Poll interval: ${Math.round(pollIntervalMs / 1000)}s | Poll timeout: ${Math.round(pollTimeoutMs / 1000)}s${verbose ? ' | Verbose: on' : ''}`));
   if (dryRun) {
@@ -435,6 +463,7 @@ export async function startReviewLoop(slug: string, opts: {
   const initialRound = state.round;
   let reboundsUsedThisRound = 0;
   for (let attempt = initialRound; attempt <= maxAttempts; attempt++) {
+    let blockingFindings: string[] = [];
     log('\n' + fmt.status('INFO', `========== Round ${attempt} / ${maxAttempts} ==========`));
     // The per-round relaunch cap is round-local scratch (TASK-2377.04): every
     // round starts with a fresh counter; nothing is persisted.
@@ -475,7 +504,7 @@ export async function startReviewLoop(slug: string, opts: {
      */
     const verifyPreReviewSetup = async (): Promise<{ ok: boolean; diagnostic: string; reason?: any }> => {
       const rebaseRetry = await rebaseBeforeReviewRoundFn(slug, {
-        worktree, runFn: runFn as any, log, error,
+        worktree, runFn: runFn as any, log, error, verbose,
         taskFile: taskResolution.taskFile,
         gitFn,
         isReviewProviderEnabledFn: forgejoEnabledFn
@@ -526,7 +555,11 @@ export async function startReviewLoop(slug: string, opts: {
             reviewState = null;
           }
         } else {
-          log(fmt.status('INFO', `Round ${attempt}: review provider disabled; using workflow-owned review state.`));
+          // Provider plumbing: verbose-only so it does not compete with the
+          // reviewer launch on the provider=none happy path.
+          if (verbose) {
+            log(fmt.status('INFO', `Round ${attempt}: review provider disabled; using workflow-owned review state.`));
+          }
           reviewState = null;
         }
       }
@@ -542,7 +575,7 @@ export async function startReviewLoop(slug: string, opts: {
       } else {
         if (!reviewState) {
           const rebaseResult = await rebaseBeforeReviewRoundFn(slug, {
-            worktree, log, error,
+            worktree, log, error, verbose,
             taskFile: taskResolution.taskFile,
             gitFn,
             isReviewProviderEnabledFn: forgejoEnabledFn
@@ -688,8 +721,6 @@ export async function startReviewLoop(slug: string, opts: {
             log(fmt.status('PASS', `Declared gate repair verified for ${slug}; resuming this review round.`));
             reviewBaseline = captureReviewBaseline();
             await transitionTaskFn(slug, 'review', { rootDir: worktree, log });
-          } else {
-            log(fmt.status('PASS', `Pre-review gate passed for area "${preReviewGateResult.area}".`));
           }
         }
         preReviewSetupVerified = false;
@@ -733,6 +764,7 @@ export async function startReviewLoop(slug: string, opts: {
             postReviewFn,
             buildMetadataFooterFn: buildMetadataFooter,
             forgejoEnabled,
+            verbose,
             currentState: state,
             log,
             error,
@@ -786,6 +818,7 @@ export async function startReviewLoop(slug: string, opts: {
                     postReviewFn,
                     buildMetadataFooterFn: buildMetadataFooter,
                     forgejoEnabled,
+                    verbose,
                     log,
                     error,
                     missionStore,
@@ -818,8 +851,12 @@ export async function startReviewLoop(slug: string, opts: {
               }
               log(fmt.status('PASS', `Reviewer artifacts re-consumed and complete after ${reviewerDispatch.attempts} attempt(s).`));
               reviewState = recoveredReviewerArtifacts.reviewState;
+              // TASK-2477/F1: recovery carries findingSummaries too; restore them
+              // so the CHANGES REQUESTED summary is not empty on the recovery path.
+              blockingFindings = recoveredReviewerArtifacts.findingSummaries || [];
             } else {
               reviewState = reviewerArtifacts.reviewState;
+              blockingFindings = reviewerArtifacts.findingSummaries || [];
             }
           }
           if (!reviewState && forgejoEnabled) {
@@ -870,6 +907,7 @@ export async function startReviewLoop(slug: string, opts: {
               postReviewFn,
               buildMetadataFooterFn: buildMetadataFooter,
               forgejoEnabled,
+              verbose,
               log,
               error,
               missionStore,
@@ -899,7 +937,6 @@ export async function startReviewLoop(slug: string, opts: {
         }
       }
       if (dryRun) { return; }
-      log(fmt.status('INFO', `Round ${attempt}: reviewer outcome = ${reviewState}`));
       if (reviewState === 'APPROVED') {
         state.transitionTo('approved');
         state.disposition = reviewState as string;
@@ -913,6 +950,7 @@ export async function startReviewLoop(slug: string, opts: {
           error(fmt.status('FAIL', `Recovery: px integrate ${slug}`));
           return;
         }
+        renderReviewVerdict(state.disposition, [], log, verbose);
         log(fmt.status('PASS', 'Autonomous review stopped: reviewer approved the PR. Hand off to human review/integration.'));
         await transitionVirtualFn(transitionTaskFn, slug, 'approved', { log });
         return;
@@ -965,7 +1003,10 @@ export async function startReviewLoop(slug: string, opts: {
           disposition = null;
         }
       } else {
-        log(fmt.status('INFO', `Round ${attempt}: review provider disabled; using workflow-owned disposition state.`));
+        // Provider plumbing: verbose-only (see provider-disabled demotion).
+        if (verbose) {
+          log(fmt.status('INFO', `Round ${attempt}: review provider disabled; using workflow-owned disposition state.`));
+        }
         disposition = null;
       }
     }
@@ -979,6 +1020,7 @@ export async function startReviewLoop(slug: string, opts: {
         return;
       }
       await persistReviewStateOrThrow(writeReviewStateFn, slug, state, worktree, missionStore);
+      renderReviewVerdict(state.disposition, blockingFindings, log, verbose);
       await transitionTaskFn(slug, 'active', { implementer, rootDir: worktree, log });
       if (implementer === 'autonomous' && !forgejoEnabled) {
         log(fmt.status('INFO', `Round ${attempt}: implementer identity is autonomous; skipping implementer launch and using local review artifacts only.`));

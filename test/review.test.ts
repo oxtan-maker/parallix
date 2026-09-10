@@ -3774,7 +3774,7 @@ test('consumeReviewerArtifacts deletes artifacts only after successful comment a
     createEventFn: () => ({ ok: true, path: '/tmp/fake-event.md' }),
   });
 
-  assert.deepEqual(result, { consumed: true, ok: true, reviewState: 'APPROVED' });
+  assert.deepEqual(result, { consumed: true, ok: true, reviewState: 'APPROVED', findingSummaries: [] });
   assert.deepEqual(deleted, [
     '/tmp/task-089-review-findings.md',
     '/tmp/task-089-review-outcome.md',
@@ -3836,7 +3836,7 @@ test('consumeReviewerArtifacts proves persist-before-mirror ordering', async () 
     createEventFn: (slug, eventType, params, options) => { calls.push('createEvent'); return { ok: true, path: `/tmp/fake-${eventType}.md` }; },
   });
 
-  assert.deepEqual(result, { consumed: true, ok: true, reviewState: 'APPROVED' });
+  assert.deepEqual(result, { consumed: true, ok: true, reviewState: 'APPROVED', findingSummaries: [] });
   // Verify createEvent was called before any Forgejo posting
   const createEventIndices = calls.map((call, idx) => call === 'createEvent' ? idx : -1).filter(i => i !== -1);
   const forgejoIndices = calls.map((call, idx) => (call === 'postComment' || call === 'postReview') ? idx : -1).filter(i => i !== -1);

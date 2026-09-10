@@ -148,6 +148,11 @@ export async function rebaseBeforeReviewRound(slug: string, {
   worktree = resolveWorktree(slug) || process.cwd(),
   log = fmt.log.plain,
   error = fmt.log.plainError,
+  // TASK-2477/F3: defaults to `true` so the pre-review rebase skip line stays
+  // visible for callers that do not thread a `verbose` flag (the handoff use
+  // case and standalone rebase). The review loop always passes `verbose` at its
+  // own call sites, so the provider=none happy path is still demoted there.
+  verbose = true,
   isReviewProviderEnabledFn = undefined,
   legacyIsForgejoReviewEnabledFn = null,
   isForgejoReviewEnabledFn = null,
@@ -162,6 +167,7 @@ export async function rebaseBeforeReviewRound(slug: string, {
   worktree?: string;
   log?: (_msg: string) => void;
   error?: (_msg: string) => void;
+  verbose?: boolean;
   isReviewProviderEnabledFn?: ((_wt: string) => boolean) | undefined | null;
   legacyIsForgejoReviewEnabledFn?: ((_wt: string) => boolean) | null;
   isForgejoReviewEnabledFn?: ((_wt: string) => boolean) | null;
@@ -191,7 +197,13 @@ export async function rebaseBeforeReviewRound(slug: string, {
     || isProviderEnabled;
   const forgejoEnabled = forgejoEnabledFn(worktree);
   if (!forgejoEnabled) {
-    log(fmt.status('INFO', `Review provider disabled; committed worktree state and skipping pre-review rebase for ${fmt.branch(`mission/${slug}`)}.`));
+    // Provider plumbing: shown unless the caller explicitly opts out with
+    // `verbose = false`. The review loop passes `verbose` at its call sites so
+    // the default review start stays quiet; handoff/standalone callers keep the
+    // pre-mission visibility.
+    if (verbose) {
+      log(fmt.status('INFO', `Review provider disabled; committed worktree state and skipping pre-review rebase for ${fmt.branch(`mission/${slug}`)}.`));
+    }
     return { ok: true, sharedFileConflicts: false, hookFailure: false };
   }
 

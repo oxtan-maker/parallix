@@ -51,9 +51,12 @@ test('startReviewLoop falls back when the auto-derived reviewer is blocked but a
     0,
     `startReviewLoop must not exit when a fallback is available; errors: ${errors.join(' | ')}`
   );
+  // The review-start header emits the reviewer on its own line (mission
+  // task-2477 recomposed the header); the selection source stays on the
+  // `Selected reviewer:` line. Assert on that stable announcement.
   assert.ok(
-    logs.some(l => l.includes('Reviewer: vibe (auto-derived)')),
-    `Expected selected-reviewer=mistral log; got: ${logs.join(' | ')}`
+    logs.some(l => l.includes('Selected reviewer: vibe (auto-derived)')),
+    `Expected selected-reviewer=vibe log; got: ${logs.join(' | ')}`
   );
 });
 
