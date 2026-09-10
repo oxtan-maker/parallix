@@ -60,4 +60,8 @@ test('startReviewLoop skips reviewer and implementer launches for autonomous fal
   assert.equal(errors.length, 0, `expected no errors, got: ${errors.join(' | ')}`);
   assert.ok(logs.some(msg => msg.includes('skipping reviewer launch')), 'should log reviewer launch bypass');
   assert.ok(logs.some(msg => msg.includes('skipping implementer launch')), 'should log implementer launch bypass');
+  assert.equal(logs.filter(msg => msg.includes('Selected reviewer:')).length, 1, 'reviewer selection is announced once');
+  assert.ok(logs.some(msg => msg.includes('REVIEW — task-999')), 'operator header identifies the mission');
+  assert.ok(logs.some(msg => msg.includes('Independence: same-family fallback / self-review')), 'operator header states the fallback relationship');
+  assert.equal(logs.some(msg => /Poll interval|Poll timeout|Max attempts|Persisted reviewer artifacts/.test(msg)), false, 'default output hides review plumbing');
 });

@@ -1476,7 +1476,7 @@ test('REGRESSION task-1264: os.tmpdir() != /tmp + Forgejo off -> reviewer artifa
       error: () => {}
     });
 
-    assert.deepEqual(result, { consumed: true, ok: true, reviewState: 'APPROVED' });
+    assert.deepEqual(result, { consumed: true, ok: true, reviewState: 'APPROVED', findingSummaries: [] });
   } finally {
     if (origTmp === undefined) delete process.env.TMPDIR; else process.env.TMPDIR = origTmp;
     fs.rmSync(scratch, { recursive: true, force: true });

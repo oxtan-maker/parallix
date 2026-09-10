@@ -378,8 +378,9 @@ async function consumeReviewerArtifacts(
     lifecycleService?: MissionLifecycleService | null;
     recordRequestedChangesFn?: typeof recordRequestedChanges;
     recordApprovalFn?: typeof recordApproval;
+    verbose?: boolean;
   } = {}
-): Promise<{ consumed: boolean; ok?: boolean; reviewState?: string | null; diagnostic?: string | null }> {
+): Promise<{ consumed: boolean; ok?: boolean; reviewState?: string | null; diagnostic?: string | null; findingSummaries?: string[] }> {
   const log = options.log || fmt.log.plain;
   const error = options.error || fmt.log.plainError;
   const readArtifactFn = options.readArtifactFn || readArtifactFile;
@@ -471,7 +472,9 @@ async function consumeReviewerArtifacts(
     return { consumed: true, ok: false, diagnostic: `Reviewer artifact persist failed (outcome): ${outcomeErr}` };
   }
 
-  log(fmt.status('INFO', `Persisted reviewer artifacts to repo store: ${(findingsEventResult as { path?: string }).path}, ${(outcomeEventResult as { path?: string }).path}`));
+  if (options.verbose) {
+    log(fmt.status('INFO', `Persisted reviewer artifacts to repo store: ${(findingsEventResult as { path?: string }).path}, ${(outcomeEventResult as { path?: string }).path}`));
+  }
 
   // The decision itself, not just its prose. Without it the round keeps
   // `decision: null`, the Mission never leaves `review` through
@@ -545,7 +548,7 @@ async function consumeReviewerArtifacts(
     if (!reviewResult.ok) {
       return { consumed: true, ok: false, diagnostic: `Reviewer review post failed: ${(reviewResult as { error?: string }).error}` };
     }
-  } else {
+  } else if (options.verbose) {
     log(fmt.status('INFO', `Review provider disabled; skipping PR mirroring for ${slug}`));
   }
 
@@ -553,12 +556,15 @@ async function consumeReviewerArtifacts(
   deleteArtifactFn(outcomePath);
   deleteArtifactFn(verdictPath);
 
-  if (verdict === 'approve') { return { consumed: true, ok: true, reviewState: 'APPROVED' }; }
-  if (verdict === 'request-changes') { return { consumed: true, ok: true, reviewState: 'REQUEST_CHANGES' }; }
+  const findingSummaries = parseReviewFindings(findings).map((finding) => finding.summary);
+  if (verdict === 'approve') { return { consumed: true, ok: true, reviewState: 'APPROVED', findingSummaries }; }
+  if (verdict === 'request-changes') { return { consumed: true, ok: true, reviewState: 'REQUEST_CHANGES', findingSummaries }; }
   if (!providerEnabled) {
     const reviewState = verdict.toUpperCase().replace(/-/g, '_');
-    log(fmt.status('INFO', `Reviewer ${reviewer} produced verdict "${verdict}" with the provider disabled; normalizing to ${reviewState} for loop control.`));
-    return { consumed: true, ok: true, reviewState };
+    if (options.verbose) {
+      log(fmt.status('INFO', `Reviewer ${reviewer} produced verdict "${verdict}" with the provider disabled; normalizing to ${reviewState} for loop control.`));
+    }
+    return { consumed: true, ok: true, reviewState, findingSummaries };
   }
   log(fmt.status('WARN', `Reviewer ${reviewer} produced verdict "${verdict}". Falling back to provider polling for loop control.`));
   return { consumed: true, ok: true, reviewState: null };
