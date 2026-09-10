@@ -127,7 +127,11 @@ export const log: {
 } = {
   info: (text: string): string => {
     return text.toString().split('\n').map(line => {
-      const s = status('INFO', line);
+      // Do not wrap an already status-tagged line in a second prefix
+      // (SC4: no nested prefixes like `[INFO] [PASS]`). The inner tag is the
+      // authoritative level; narrative lines that carry no tag still get [INFO].
+      const tagged = /^\s*\[(INFO|PASS|WARN|FAIL|DEBUG)\]/.test(stripAnsi(line));
+      const s = tagged ? line : status('INFO', line);
       currentLogger.log(s);
       return s;
     }).join('\n');

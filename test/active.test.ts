@@ -36,8 +36,7 @@ test('active progress renderer preserves launch and handoff status order', () =>
   renderActiveProgress({ phase: 'handoff', agent: 'codex' }, message => logs.push(message));
 
   assert.deepEqual(logs, [
-    'Launching execute agent...',
-    '\nExecute agent (codex) completed successfully. Starting automated handoff...'
+    '[PASS] Implementation complete (codex).'
   ]);
 });
 
@@ -65,9 +64,8 @@ test('active() passes its progress renderer into a deferred execute-service fact
 
   assert.equal(typeof receivedProgress, 'function');
   assert.deepEqual(logs, [
-    'Running execute preflight...',
-    'Launching execute agent...',
-    '\nExecute agent (custom) completed successfully. Starting automated handoff...',
+    'Mission task-1038',
+    '[PASS] Implementation complete (custom).',
   ]);
 });
 
@@ -295,7 +293,7 @@ test('active() success path: preflight, launch, and handoff run in order', async
     ['launch', 'task-1038', '/tmp/project-task-1038', 'Execute task-1038'],
     ['handoff', 'task-1038', '/tmp/project-task-1038', 'codex']
   ]);
-  assert.ok(logs.some(line => line.includes('Running execute preflight')));
+  assert.ok(logs.some(line => line.includes('Mission task-1038')));
   assert.ok(!logs.some(line => line.includes('Launching execute agent')));
 });
 
@@ -2081,4 +2079,99 @@ test('runHandoffAndReview stops relaunching when agent relaunch itself fails (SC
   assert.equal(result, false, 'should return false when relaunch fails');
   assert.equal(handoffAttempts, 2, 'performHandoff: initial + 1 post-relaunch (first relaunch succeeded)');
   assert.equal(relaunchAttempts, 2, 'two launches: first verify fails, second exhausts the budget');
+});
+
+// --- TASK-2476: operator-facing active story ---
+//
+// The default `px active` output must open with the mission and the agent that
+// actually implements it, then hand straight over to the agent's own streamed
+// work. Preflight bookkeeping and launcher mechanics are diagnostics, available
+// under DEBUG, and must not be part of the normal execution record.
+
+test('px active opens with the mission identity and drops preflight/launch narration', async () => {
+  const logs: string[] = [];
+
+  await active(['task-2476'], {
+    inferSlugFn: () => 'task-2476',
+    rootDir: '/tmp/project-task-2476',
+    missionTitleFn: () => 'fix hello world greeting (task-2476)',
+    serviceFactory: async (_rootDir, progress) => ({
+      execute: async () => {
+        progress({ phase: 'launch' });
+        progress({ phase: 'handoff', agent: 'claude' });
+        return { status: 'completed', value: { agent: 'claude' }, durableEvidence: [] };
+      },
+    }),
+    exitFn: (code) => { throw new Error(`unexpected exit ${code}`); },
+    logFn: (message: string) => logs.push(message),
+    errorFn: (message: string) => { throw new Error(`unexpected error: ${message}`); },
+  });
+
+  const output = logs.join('\n');
+  assert.equal(logs[0], 'Mission task-2476: fix hello world greeting');
+  assert.ok(!output.includes('Running execute preflight'), output);
+  assert.ok(!output.includes('Launching execute agent'), output);
+});
+
+test('px active states implementation completion rather than handoff mechanics', () => {
+  const logs: string[] = [];
+  renderActiveProgress({ phase: 'launch' }, (message: string) => logs.push(message));
+  renderActiveProgress({ phase: 'handoff', agent: 'claude' }, (message: string) => logs.push(message));
+
+  assert.deepEqual(logs, ['[PASS] Implementation complete (claude).']);
+});
+
+test('selectLaunchAndRecord announces the implementer exactly once on the selected-agent path', async () => {
+  const logs: string[] = [];
+
+  await selectLaunchAndRecord({
+    slug: 'task-2476',
+    worktree: '/tmp/project-task-2476',
+    agentConfig: {},
+    taskResolution: { ok: true, taskFile: '/tmp/task-2476.md' },
+    prompt: 'prompt',
+    selectAgentFn: () => 'claude',
+    startAgentFn: async (_step: string, opts: any) => {
+      await opts.onLaunch({ agent: 'claude' });
+      return { agent: 'claude', result: { status: 0 } };
+    },
+    transitionTaskFn: async () => true,
+    getTaskStatusFn: () => 'refined',
+    getTaskImplementerFn: () => null,
+    log: (message: string) => logs.push(message),
+  });
+
+  const announcements = logs.filter(line => /Implementer:/.test(line));
+  assert.deepEqual(announcements, ['[INFO] Implementer: claude']);
+  assert.ok(!logs.join('\n').includes('Recording implementer'), logs.join('\n'));
+});
+
+test('selectLaunchAndRecord keeps the implementer announcement but drops the Backlog task-sync PASS', async () => {
+  const logs = [];
+
+  await selectLaunchAndRecord({
+    slug: 'task-2476',
+    worktree: '/tmp/project-task-2476',
+    agentConfig: {},
+    taskResolution: { ok: true, taskFile: '/tmp/task-2476.md' },
+    prompt: 'prompt',
+    selectAgentFn: () => 'claude',
+    startAgentFn: async (_step, opts) => {
+      await opts.onLaunch({ agent: 'claude' });
+      return { agent: 'claude', result: { status: 0 } };
+    },
+    // Mirror the real transitionTaskLocal: it emits a PASS commit confirmation
+    // through the `log` it receives (the suppressed wrapper), not directly.
+    transitionTaskFn: async (_slug, _status, opts) => {
+      opts.log('[PASS] Task task-2476 transitioned to active (assignee=claude) and committed.');
+      return true;
+    },
+    getTaskStatusFn: () => 'refined',
+    getTaskImplementerFn: () => null,
+    log: (message) => logs.push(message),
+  });
+
+  const joined = logs.join('\n').replace(/\x1B\[\d+m/g, '');
+  assert.ok(joined.includes('[INFO] Implementer: claude'), joined);
+  assert.ok(!joined.includes('transitioned to active'), `task-sync PASS must be suppressed: ${joined}`);
 });

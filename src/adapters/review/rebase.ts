@@ -308,7 +308,10 @@ export async function rebaseBeforeReviewRound(slug: string, {
 
   if (sharedFileConflicts) {
     error(fmt.status('FAIL', 'Shared-file rebase conflicts detected. Autonomous review loop cannot continue safely.'));
-    log(fmt.status('INFO', `Resolve the conflicts in the worktree, then re-run: px review ${slug} --start`));
+    // F8: emit the repair instruction at WARN, not INFO, so it reaches the
+    // operator through `px active`'s operator-critical filter without relying
+    // on the sentence containing a keyword like "conflict" (SC5).
+    log(fmt.status('WARN', `Resolve the conflicts in the worktree, then re-run: px review ${slug} --start`));
     return {
       ok: false, sharedFileConflicts: true, hookFailure: false,
       failure: { kind: 'conflict', operation: 'rebase', sharedFiles },

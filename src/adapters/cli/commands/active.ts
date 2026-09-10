@@ -4,7 +4,7 @@ import { git, getWorktreeStatus } from '../../git/git.js';
 import * as path from 'node:path';
 import * as fmt from '../../../application/presentation/cli-format.js';
 import * as agents from '../../agents/agents.js';
-import { findMissionDir, findCheckpoints, getFirstLine, readMissionFile, inferSlug, getMissionYear, missionDirForSlug, isWorkflowGeneratedArtifact } from '../../filesystem/mission-utils.js';
+import { findMissionDir, findCheckpoints, getFirstLine, missionTitle, readMissionFile, inferSlug, getMissionYear, missionDirForSlug, isWorkflowGeneratedArtifact } from '../../filesystem/mission-utils.js';
 import * as handoff from './handoff.js';
 import { resolveTaskFile, transitionTask, getTaskStatus, getTaskImplementer } from '../../backlog/backlog.js';
 import { recordStageStatsSafe, startReviewLoop } from '../../review/review-loop.js';
@@ -18,11 +18,22 @@ import { isDbAdhocIdentity } from '../../../domain/mission.js';
 import { rebound, DEFAULT_REBOUND_ATTEMPTS, type ReboundContext } from '../../../application/rebound-kernel.js';
 
 function renderActiveProgress(event, logFn) {
-  if (event.phase === 'launch') {
-    logFn('Launching execute agent...');
-  } else if (event.phase === 'handoff') {
-    logFn(`\nExecute agent (${fmt.agent(event.agent)}) completed successfully. Starting automated handoff...`);
+  if (event.phase === 'handoff') {
+    logFn(fmt.status('PASS', `Implementation complete (${fmt.agent(event.agent)}).`));
   }
+}
+
+// The active operator story already states the implementer above, so the Backlog
+// task-sync PASS ("transitioned to active ... and committed") is internal
+// bookkeeping, not an operator signal (SC4: task-synchronization narration stays
+// out of the normal active path). Keep genuine WARN lines; drop only the success
+// commit confirmation. Used only for the execute-path transition in onLaunch.
+/** @param {Function} l */
+function suppressTaskSyncCommitLog(l) {
+  return (/** @type{string} */ msg) => {
+    if (/^\[PASS\] Task .* transitioned to .* and committed\./.test(fmt.stripAnsi(msg))) {return;}
+    l(msg);
+  };
 }
 
 /**
@@ -39,7 +50,8 @@ async function active(args, options = {}) {
     rootDir = process.cwd(),
     exitFn = process.exit,
     logFn = fmt.log.info,
-    errorFn = fmt.log.fail
+    errorFn = fmt.log.fail,
+    missionTitleFn = missionTitle
   } = options;
   const explicitSlug = args[0];
   const slug = inferSlugFn(explicitSlug);
@@ -50,6 +62,13 @@ async function active(args, options = {}) {
   }
 
   const normalizedSlug = slug.toLowerCase();
+
+  // Strip a trailing mission id from the title so the headline never repeats
+  // the slug (SC4/Why Now: repeated identity is a defect). Works for any id
+  // shape, not just `task-NNNN` (e.g. `parallix-adhoc-<NNNN>` adhoc slugs).
+  const stripTrailingId = (t: string) => t.replace(/\s*\([\w.-]+\)\s*$/i, '');
+  const title = stripTrailingId(missionTitleFn(normalizedSlug) ?? '');
+  logFn(`Mission ${fmt.slug(normalizedSlug)}${title ? `: ${title}` : ''}`);
 
   // Allow operators to pin the implementer agent family via CLI flag instead of WORKFLOW_AGENT env var.
   /** @param {string[]} arr @param {string} flag @param {string} name */
@@ -67,7 +86,6 @@ async function active(args, options = {}) {
   const preselectedImplementer = flagValue(args, '--implementer', 'implementer');
   if (args.includes('--implementer') && !preselectedImplementer) {return;}
 
-  logFn('Running execute preflight...');
   const renderProgress = event => renderActiveProgress(event, logFn);
   // Route through BoardCommandController (canonical dispatcher) when injected;
   // fall back to direct service.execute() for backward compat.
@@ -163,8 +181,11 @@ async function selectLaunchAndRecord(opts) {
     }
 
     log(fmt.status('WARN', `Execute launch for ${fmt.slug(slug)} did not complete cleanly; rolling task state back to ${priorStatus} / ${priorImplementer || 'none'}.`));
+    // The rollback transition commits a task-sync PASS too; suppress that
+    // bookkeeping line exactly like the onLaunch transition does (F1) so the
+    // normal active path never carries task-synchronization narration.
     /** @type{{rootDir: string, log: Function, implementer?: string, clearAssignee?: boolean}} */
-    const rollbackOpts = { rootDir: worktree, log };
+    const rollbackOpts = { rootDir: worktree, log: suppressTaskSyncCommitLog(log) };
     if (priorImplementer) {
       rollbackOpts.implementer = priorImplementer;
     } else {
@@ -198,11 +219,12 @@ async function selectLaunchAndRecord(opts) {
           return;
         }
 
-        log(`Recording implementer ${fmt.agent(agent)} and status=active for ${fmt.slug(slug)}...`);
+        const fallback = agent !== preselected ? ` (selected ${fmt.agent(preselected)}; fallback)` : '';
+        log(fmt.status('INFO', `Implementer: ${fmt.agent(agent)}${fallback}`));
         if (!await transitionTaskFn(slug, 'active', {
           implementer: agent,
           rootDir: worktree,
-          log,
+          log: suppressTaskSyncCommitLog(log),
         })) {
           launchTransitionFailed = true;
           return;
@@ -215,6 +237,11 @@ async function selectLaunchAndRecord(opts) {
         // Roll back the intermediate active write so the retry's onLaunch starts
         // from a clean state, preventing a spurious committed implementer entry.
         rollbackIfNeeded({ throwOnFailure: false });
+      },
+      // The agent's own terminal stream is the progress record. Keep only
+      // conditions an operator must act on; the normal launcher trace is debug detail.
+      log: (message) => {
+        if (/\[(WARN|FAIL)\]|No output yet|Still waiting/.test(message)) { log(message); }
       }
     }));
   } catch (err) {

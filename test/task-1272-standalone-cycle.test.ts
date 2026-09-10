@@ -219,6 +219,10 @@ test('startReviewLoop uses the slug-derived mission path when --mission is absen
 test('standalone review loop completes a first round to APPROVED with no Forgejo calls', async () => {
   await withTempGitRepo(async (root) => {
     const { opts, logs, errors, exitCodes, mocks } = standaloneOpts(root, {
+      // SC4: the disabled-provider "Forgejo validation skipped" line is demoted
+      // to verbose by default (MISSION.md SC criterion 4). Reveal it here to
+      // prove no Forgejo calls while keeping default output SC4-clean.
+      verbose: true,
       consumeReviewerArtifactsFn: async () => ({ consumed: true, ok: true, reviewState: 'APPROVED' })
     });
 

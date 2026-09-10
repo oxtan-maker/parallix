@@ -835,6 +835,8 @@ test('polling configuration logic', async () => {
   process.env.AUTONOMOUS_REVIEW_POLL_TIMEOUT_MS = '1000';
 
   const logs = [];
+  // SC4: poll/max-attempts config is demoted to verbose by default
+  // (MISSION.md SC criterion 4). Enable verbose to inspect the resolved values.
   await startReviewLoop(TEST_SLUG, {
       eligibleAgentsForStepFn: () => ['codex', 'claude', 'gemini', 'custom'],
     resolveTaskFileFn: () => ({ ok: true, taskFile: '/tmp/task.md' }),

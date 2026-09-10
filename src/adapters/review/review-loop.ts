@@ -406,7 +406,7 @@ export async function startReviewLoop(slug: string, opts: {
       prNumber = pr.number as number | null;
       confirmedPullRequest = pullRequestReference(pr.number, pr.url);
     }
-  } else if (!dryRun && !forgejoEnabled) {
+  } else if (verbose && !dryRun && !forgejoEnabled) {
     log(fmt.status('INFO', 'Forgejo validation skipped (review provider is not forgejo). Using workflow-owned review surfaces.'));
   }
   const resolvedReviewer = resolveReviewerIdentity({

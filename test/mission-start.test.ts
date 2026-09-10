@@ -72,6 +72,45 @@ test('missionStart passes if the backlog task has classification', () => {
   assert.ok(output.includes('[PASS] Backlog classification: ai_sdlc'));
 });
 
+test('missionStart quiet mode drops routine PASS diagnostics and the PASS USABLE verdict but keeps WARN', () => {
+  const lines = [];
+  const errors = [];
+
+  // quiet:true mirrors the `active` execute-path preflight: the operator story
+  // must not drown in PWD/branch/backlog/last-commit PASS lines (SC4). Genuine
+  // WARN lines and the overall verdict still surface.
+  const result = missionStart(['task-test'], {
+    returnResult: true,
+    quiet: true,
+    cwdFn: () => '/tmp/project-task-test',
+    getCurrentBranchFn: () => 'mission/task-test',
+    resolveTaskFileFn: () => ({ ok: true, taskFile: '/tmp/task-test.md' }),
+    resolveMissionClassificationFn: () => ({ classification: 'ai_sdlc' }),
+    getTaskStatusFn: () => 'ready',
+    toVirtualFn: (s) => s,
+    findMissionDirFn: () => '/tmp/docs/missions/2026/task-test',
+    fsExistsSync: () => true,
+    findCheckpointsFn: () => [],
+    getMissionYearFn: () => '2026',
+    conventionalWorktreePathFn: () => '/tmp/project-task-test',
+    getLastCommitFn: () => ({ sha: 'abcdef123456', subject: 'Initial', date: '2026-04-30' }),
+    getPrStatusFn: () => ({ exists: false }),
+    log: line => lines.push(line),
+    error: line => errors.push(line)
+  });
+
+  assert.deepEqual(result, { pass: true });
+  const output = lines.join('\n').replace(/\x1B\[\d+m/g, ''); // Strip colors
+  assert.ok(!output.includes('Running mission startup preflight'), output);
+  assert.ok(!output.includes('[PASS] PWD:'), output);
+  assert.ok(!output.includes('[PASS] Branch:'), output);
+  assert.ok(!output.includes('[PASS] Backlog classification:'), output);
+  assert.ok(!output.includes('[PASS] Last commit:'), output);
+  assert.ok(!output.includes('Environment verdict: USABLE'), output);
+  // A genuine WARN (missing checkpoints) must still reach the operator.
+  assert.ok(output.includes('[WARN] Mission doc: found MISSION.md but no checkpoints yet'), output);
+});
+
 test('missionStart passes when the task file is missing and classification falls back to unknown', () => {
   const lines = [];
   const errors = [];
