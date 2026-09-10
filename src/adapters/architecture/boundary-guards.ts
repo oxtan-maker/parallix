@@ -72,8 +72,8 @@ export const adapterPackageDependencies: Readonly<Record<string, readonly string
   rebase: ['config', 'filesystem', 'forgejo', 'git', 'verification'],
   // mechanism: packaged assets, configuration, filesystem, Forgejo, Git, and verification tooling.
   review: ['assets', 'config', 'filesystem', 'forgejo', 'git', 'verification'],
-  // mechanism: durable storage path resolution.
-  sqlite: ['storage'],
+  // mechanism: durable storage path resolution and process-liveness facts for stale lease reaping.
+  sqlite: ['process', 'storage'],
   // mechanism: storage owns no sibling mechanism dependency.
   storage: [],
   // mechanism: packaged browser-asset loading (the package root is passed in by composition).

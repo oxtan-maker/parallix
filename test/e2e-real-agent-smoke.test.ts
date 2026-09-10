@@ -782,14 +782,22 @@ function runRealAgentSmoke(agent, runner) {
     // the drafting model may render it as "Hello World", "Hello, World!",
     // "hello-world", or "hello_world".
     const helloWorld = /hello[\s,_-]*world/i;
+    // A cold, weak, or contended local backend (this repo's quantized custom
+    // model streams a degenerate draft on some requests — an unfilled scaffold
+    // or a contract about the task *title* alone, ignoring the description it
+    // was given) can leave placeholder markers. The gate validates the launcher
+    // boundary, not model quality, so retry a bounded number of times. Each
+    // retried draft must fill the scaffold AND carry the task description; the
+    // final attempt still must pass, so the assertion below is unchanged. One
+    // retry (original behavior) only absorbs a single cold-start miss; a weak
+    // model can miss repeatedly, so allow a few attempts before failing.
     let foundPlaceholders = placeholderMarkers.filter((marker) => missionBody.includes(marker));
-    if (foundPlaceholders.length > 0 || !helloWorld.test(missionBody)) {
-      // Retry the draft once. A cold, weak, or contended local backend may
-      // stream a degenerate draft on its first real request: either an unfilled
-      // scaffold, or a contract written about the task *title* alone, ignoring
-      // the description it was given. Both are the same cold-start failure, so
-      // one retry absorbs them without weakening either assertion below — the
-      // retried draft must fill the scaffold AND carry the task description.
+    let draftAttempts = 0;
+    const MAX_DRAFT_ATTEMPTS = 3;
+    while (foundPlaceholders.length > 0 || !helloWorld.test(missionBody)) {
+      draftAttempts += 1;
+      if (draftAttempts >= MAX_DRAFT_ATTEMPTS) { break; }
+      console.log(`[benchmark] draft attempt ${draftAttempts} left ${foundPlaceholders.join(',') || 'no hello-world'}; retrying`);
       draftResult = runWorkflowAllowFail(repo.repoRoot, env, ['draft', slug, '--agent', agent], RUN_TIMEOUT_MS);
       missionBody = fs.readFileSync(missionFile, 'utf8');
       foundPlaceholders = placeholderMarkers.filter((marker) => missionBody.includes(marker));

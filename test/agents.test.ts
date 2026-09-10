@@ -81,14 +81,14 @@ test.after(() => {
   fs.rmSync(sharedLauncherBin, { recursive: true, force: true });
 });
 
-test.beforeEach(() => {
-  resetCustomCapacity();
+test.beforeEach(async () => {
+  await resetCustomCapacity();
   if (process.env.PARALLIX_HOME) {
     fs.writeFileSync(path.join(process.env.PARALLIX_HOME, 'agents.local.json'), '{"blocklist":{}}\n');
   }
 });
 
-test('custom capacity saturation selects an eligible non-custom agent and preserves explicit exhaustion', () => {
+test('custom capacity saturation reports at launch while selection remains eligible', async () => {
   const worktree = fs.mkdtempSync(path.join(os.tmpdir(), 'custom-capacity-selection-'));
   fs.writeFileSync(path.join(worktree, 'workflow.config.json'), JSON.stringify({
     adapters: { agents: { maxConcurrentCustom: 1 } }
@@ -99,14 +99,11 @@ test('custom capacity saturation selects an eligible non-custom agent and preser
       review: { eligible: ['custom'], selection: 'first' }
     }
   };
-  const reservation = tryAcquireCustomCapacity(worktree);
+  const reservation = await tryAcquireCustomCapacity(worktree);
   assert.ok(reservation, 'the first custom reservation should acquire the default capacity');
   try {
-    assert.equal(selectAgent('draft', { config, worktree }), 'codex');
-    assert.throws(
-      () => selectAgent('review', { config, worktree }),
-      /All eligible agents for step "review" are exhausted/
-    );
+    assert.equal(selectAgent('draft', { config, worktree }), 'custom');
+    assert.equal(selectAgent('review', { config, worktree }), 'custom');
   } finally {
     reservation.release();
     fs.rmSync(worktree, { recursive: true, force: true });
@@ -137,8 +134,8 @@ test('custom capacity releases after clean completion, launch failure, signal ca
     } catch (_err) {
       // Failed terminal paths reroute through the deliberately exhausted mock.
     }
-    assert.equal(activeCustomCapacityCount(), 0, 'terminal paths must not retain custom capacity');
-    const next = tryAcquireCustomCapacity();
+    assert.equal(await activeCustomCapacityCount(), 0, 'terminal paths must not retain custom capacity');
+    const next = await tryAcquireCustomCapacity();
     assert.ok(next, 'a released permit must allow exactly one subsequent launch');
     next.release();
   };

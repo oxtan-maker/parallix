@@ -488,7 +488,7 @@ async function startAgent(step: string, opts: StartAgentOptions = { prompt: '' }
 
     const watchdogConfig = resolveNoOutputWatchdogConfig(noOutputWatchdog, step);
     const customReservation = chosen === 'custom'
-      ? tryAcquireCustomCapacity(worktree)
+      ? await tryAcquireCustomCapacity(worktree)
       : null;
     if (chosen === 'custom' && !customReservation) {
       refuseFallbackWhenPinned('custom-agent capacity is saturated');
@@ -517,6 +517,7 @@ async function startAgent(step: string, opts: StartAgentOptions = { prompt: '' }
         role: sessionRole,
         sessionMarkerPort: launchSessionMarkerPort,
         teeOptions: {
+          ...(customReservation ? { onSpawn: (child: {pid?: number}) => customReservation.bindChild(child.pid) } : {}),
           ...(unrefChild ? { unrefChild: true } : {}),
           ...(watchdogConfig
             ? {
