@@ -298,3 +298,47 @@ test('review loop rebounces a pre-review rebase gate failure as a gate failure, 
     `a gate failure must never be reported as a hook failure, got: ${logs.join(' | ')}`,
   );
 });
+
+// F8 (task-2476 round 1): the shared-file rebase repair instruction must reach
+// the operator. It is emitted at WARN so the `px active` operator-critical
+// filter keeps it; emitting it at INFO (as before) would drop it and no test
+// would fail. This test drives the real conflict branch and pins the WARN tag.
+test('shared-file rebase conflict emits the repair instruction at WARN level', async () => {
+  const logs: string[] = [];
+  // Initial rebase onto `<branch>` lands on a shared-file conflict; the rest of
+  // the git surface resolves cleanly so the workflow launches the conflict
+  // agent and returns, letting the wrapper flag the shared-file conflict.
+  // The workflow drives `port.git`; auto-commit uses the gitFn option, so keep
+  // that clean and only make the workflow's rebase land on a shared conflict.
+  const git = (args: string[]) => {
+    if (args.includes('--show-current')) { return { status: 0, stdout: '', stderr: '' }; }
+    if (args.includes('rebase') && args.includes('--continue')) { return OK; }
+    if (args.includes('rebase')) {
+      return { status: 1, stdout: 'Merge conflict in src/shared/common.ts', stderr: '' };
+    }
+    if (args.includes('merge-base')) { return { status: 0, stdout: '', stderr: '' }; }
+    return OK;
+  };
+  // A conflict-agent that fails makes the workflow exit non-zero, which is the
+  // path the wrapper flags as a shared-file conflict and emits the repair line.
+  const startAgent = async (step: string) => (step === 'conflict-resolution'
+    ? { agent: 'tester', result: { status: 1 } }
+    : { agent: 'tester', result: { status: 0 } });
+
+  const result = await rebaseBeforeReviewRound(SLUG, preReviewOptions(stubPort({
+    git: git as any,
+    startAgent: startAgent as any,
+    resolveConflictsForMission: () => ({ ok: true, conflictFiles: [], missionSpecificFiles: [], sharedFiles: ['src/shared/common.ts'] }),
+  }), {
+    log: (line: string) => logs.push(line),
+    error: (line: string) => logs.push(line),
+  }));
+
+  assert.equal(result.ok, false);
+  assert.equal(result.sharedFileConflicts, true);
+  const repair = logs.find(line => /Resolve the conflicts in the worktree/.test(line));
+  assert.ok(repair, `expected a repair instruction in operator logs: ${logs.join(' | ')}`);
+  // The operator-critical filter only keeps WARN/FAIL lines; an INFO-tagged
+  // repair instruction would silently vanish. Pin the level so a revert fails.
+  assert.match(repair!, /^\[WARN\]/, `repair instruction must be WARN-tagged, got: ${repair}`);
+});

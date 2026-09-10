@@ -31,9 +31,9 @@ git config core.pager cat
 printf '# Hello world\n\nprintf "Helo, Wrld!\\n"\n' > hello.sh
 chmod +x hello.sh
 printf 'missions/*/review-events/\n' > .gitignore
-printf '#!/usr/bin/env bash\nexit 0\n' > scripts/verify-local.sh
+printf '#!/usr/bin/env bash\nset -euo pipefail\ntest "$(./hello.sh)" = "Hello, World!"\n' > scripts/verify-local.sh
 chmod +x scripts/verify-local.sh
-printf '{"adapters":{"verification":{"command":"./scripts/verify-local.sh {{area}}"},"review":{"provider":"none"},"agents":{"runners":{"custom":"pi"}}}}\n' > workflow.config.json
+printf '{"adapters":{"verification":{"command":"./scripts/verify-local.sh","defaultArea":"all"},"review":{"provider":"none"},"agents":{"runners":{"custom":"pi"}}}}\n' > workflow.config.json
 # Vendor-neutral: each step draws at random from whichever of these is available.
 agents='["codex", "claude", "custom"]'
 printf '{"steps":{"draft":{"eligible":%s},"active":{"eligible":%s},"review":{"eligible":%s}}}\n' \
@@ -50,7 +50,9 @@ commands = [
     f'px draft "fix hello world greeting"',
     f'cd ../hello-parallix-{slug}',
     f'less missions/{slug}/MISSION.md',
+    './scripts/verify-local.sh || echo "Expected: broken greeting rejected"',
     'px active',            # slug is inferred from the worktree
+    './scripts/verify-local.sh',
     'git diff main...HEAD -- hello.sh',   # the change under review
     'px integrate',
     'exit',

@@ -1,11 +1,12 @@
 ---
 id: TASK-2476
 title: 'Rebuild `px active` around execution trust, not workflow narration'
-status: backlog
-assignee: []
+status: done
+assignee: [custom]
 created_date: '2026-09-10 06:12'
 updated_date: '2026-09-10 06:14'
-labels: []
+labels:
+  - ai_sdlc
 dependencies: []
 ---
 
@@ -238,3 +239,7 @@ Then run focused test files directly and finally the repository gates.
 - [ ] #5 Docs updated to reflect any workflow or user-facing behavior change
 - [ ] #6 Bug-labeled missions include a red-to-green reproduction test that fails before the fix and passes after
 <!-- DOD:END -->
+
+## Round-2 F1 follow-up (RESOLVED — round 3)
+
+The committed cast + GIF were stale (byte-identical to round-1 revision, showing pre-fix narration: duplicate mission id, SC4 task-sync line, disabled-provider narration, review-start plumbing). RESOLVED in round 3: re-recorded via `scripts/record-first-value-demo.sh` on the final tree. The demo wires only `custom`→`pi`, but `px` ships a built-in `codex` runner, so the recorder's random selection executes without any config change. New cast SHA-256 `71a7829a4b3a76502aabe6b865bc8e4ea8c29a98918d5df0f8722cec8ecbe59a`; the four defects are all absent (0 hits each); GIF re-rendered and frames decode via `convert -layers optimize -coalesce`. CP-4 SC1/SC4/SC8 refreshed to PASS against the final-tree cast.

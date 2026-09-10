@@ -660,6 +660,9 @@ export class HandoffCommandUseCase {
       ,recoverGateFailure = false
     } = opts;
     const captureNel = captureNelFn || ((nelSlug, nelOptions) => this.captureNelAtHandoff(nelSlug, nelOptions));
+    const internalLog = (message: string) => {
+      if (/\[(WARN|FAIL)\]|failed|failure|conflict|missing|blocked|fallback|degraded/i.test(message)) { log(message); }
+    };
 
     // Recursion guard: prevent infinite retry loops when gatekeeper pushback
     // persists across relaunch attempts. Hard limit of 3 total handoff invocations.
@@ -811,17 +814,14 @@ export class HandoffCommandUseCase {
       return { ok: false, error: 'forgejoUser is required' };
     }
 
-    log(`Starting handoff for mission ${fmt.slug(slug)}...`);
-
-    // Step 1: Final Gate Run
     if (skipGate) {
-      fmt.log.warn('Step 1: Skipping final verification gate (--no-gate)');
+      log(fmt.status('WARN', 'Repository verification skipped (--no-gate).'));
     } else {
       const verificationCommand = ports.verification.formatVerificationCommand(area || 'docs', rootDir);
       // Bind a reusable proof to the inputs that existed before execution. A
       // successful process exit alone must not certify a tree changed mid-gate.
       const beforeGateProof = ports.verification.createVerificationProofIdentity(verificationCommand, rootDir);
-      log(`Step 1: Running final verification gate for area: ${fmt.bold(area || 'docs')}...`);
+      log(`Verifying the repository: ${verificationCommand}`);
       const verifyResult = runVerificationGateFn(area || 'docs', {
         rootDir,
         stdio: 'pipe',
@@ -881,17 +881,15 @@ export class HandoffCommandUseCase {
         ? ports.verification.writeReusableVerificationProof(verificationCommand, rootDir, { expectedIdentity: beforeGateProof.identity })
         : beforeGateProof;
       if (proofResult.ok) {
-        log(`Step 1: Gate executed; stored proof ${proofResult.identity}.`);
+        log(fmt.status('PASS', 'Repository verification passed.'));
       } else {
-        log(`Step 1: Gate executed; proof unavailable (${proofResult.error}). Later boundaries will execute independently.`);
+        log(fmt.status('WARN', `Repository verification passed, but its reusable proof is unavailable (${proofResult.error}).`));
       }
     }
 
-    // Step 1.5: Rebase mission branch onto latest primary before PR creation
-    log('Step 1.5: Rebasing onto primary branch before handoff...');
     const rebaseResult = await rebaseFn(slug, {
       worktree: worktree || undefined,
-      log,
+      log: internalLog,
       error,
       isForgejoReviewEnabledFn: isForgejoReviewEnabledFn,
     });
@@ -907,19 +905,15 @@ export class HandoffCommandUseCase {
       }
     }
 
-    // Step 1.7: NEL capture — compute actual NEL from merge diff and persist record.
     // architecture invariant: NEL is persisted through SqliteMissionStore.recordNel() via the Mission
     // use case; nel-record.json is no longer staged or committed because the SQLite
     // database is the sole durable authority for Mission state.
-    log('Step 1.7: Capturing Net Engineering Lines (NEL) at handoff...');
-    const nelResult = await captureNel(slug, { rootDir, missionDir: missionDirPath, log, error, missionServicesFn });
-    if (nelResult.ok) {
-      log(fmt.status('PASS', `NEL captured: ${nelResult.nel} NEL (${nelResult.bucket.label} bucket)`));
-    } else if (nelResult.persistenceFailed) {
+    const nelResult = await captureNel(slug, { rootDir, missionDir: missionDirPath, log: internalLog, error, missionServicesFn });
+    if (!nelResult.ok && nelResult.persistenceFailed) {
       const msg = `NEL persistence failed; handoff stopped before review state advanced: ${nelResult.error}`;
       error(msg);
       return { ok: false, error: msg };
-    } else {
+    } else if (!nelResult.ok) {
       log(fmt.status('WARN', `NEL capture skipped: ${nelResult.error}`));
     }
 
@@ -930,7 +924,7 @@ export class HandoffCommandUseCase {
     /** The pull request this handoff hands to the reviewer, when there is one. */
     let submittedPr: { id: string; url: string | null } | null = null;
     if (forgejoEnabled) {
-      log(`Step 2: Updating/Creating Forgejo PR as user ${fmt.agent(forgejoUser)}...`);
+      internalLog(`Updating/Creating Forgejo PR as user ${fmt.agent(forgejoUser)}...`);
       token = ports.forgejo.readToken(forgejoUser);
       if (!token) {
         // Token missing for the agent user — attempt non-interactive bootstrap
@@ -947,7 +941,7 @@ export class HandoffCommandUseCase {
         const bootstrapResult = await ports.setupReview.bootstrapReviewSurface(rootDir, bootstrapSetup, {
           interactive: false,
           requestFn: ports.setupReview.apiRequest,
-          log,
+          log: internalLog,
         });
 
         if (bootstrapResult.ok) {
@@ -970,7 +964,7 @@ export class HandoffCommandUseCase {
           token = ports.forgejo.readToken('human');
           if (token) {
             fallbackUser = 'human';
-            log(`Token not found for ${fmt.agent(forgejoUser)} and bootstrap did not succeed. Falling back to PR creation as ${fmt.agent(fallbackUser)}.`);
+          log(`Review submission fell back from ${fmt.agent(forgejoUser)} to ${fmt.agent(fallbackUser)}.`);
           } else {
             const msg = `No Forgejo token found for user "${fmt.agent(forgejoUser)}", bootstrap failed (${br.error || 'unknown'}), and no fallback token available for "${fmt.agent('human')}". Manual action required: create a token manually or run \`node parallix setup-review\` first.`;
             error(msg);
@@ -983,14 +977,14 @@ export class HandoffCommandUseCase {
       if (fallbackUser === 'human') {
         const reason = bootstrapFailureReason || 'agent token was missing and bootstrap did not provide a replacement token';
         const fallbackSummary = `## Fallback: PR submitted as ${fmt.agent(fallbackUser)}\n\nOriginal user: ${fmt.agent(forgejoUser)}\nBootstrap failure reason: ${reason}`;
-        if (!this.writeFallbackSummary(slug, fallbackSummary, { rootDir, log })) {
+        if (!this.writeFallbackSummary(slug, fallbackSummary, { rootDir, log: internalLog })) {
           log(fmt.status('WARN', `Could not persist fallback summary for ${fmt.slug(slug)}`));
         }
       }
 
       const prResult = ports.forgejo.createPr(branch || '', String(fallbackUser || forgejoUser || 'default'), String(token || ''), {
         rootDir,
-        log,
+        log: internalLog,
         forceWithLease
       });
       if (!prResult.ok) {
@@ -1001,26 +995,21 @@ export class HandoffCommandUseCase {
       if (prResult.prNumber) {
         submittedPr = { id: String(prResult.prNumber), url: prResult.url ?? null };
       }
-    } else {
-      log('Step 2: Skipping Forgejo PR (review provider is not forgejo).');
     }
 
     // Step 2.5: Gatekeeper pre-review validation
     // Run before transitioning Backlog to 'review' so missing artifacts are
     // flagged as a request-changes review instead of consuming a reviewer cycle.
-    log('Step 2.5: Running gatekeeper pre-review validation...');
-    const gatekeeperResult = runGatekeeperFn(slug, { rootDir, log });
+    const gatekeeperResult = runGatekeeperFn(slug, { rootDir, log: internalLog });
     let gatekeeperPushedBack = false;
     if (!gatekeeperResult.ok && gatekeeperResult.posted) {
       fmt.log.warn(`Gatekeeper posted pushback for ${fmt.slug(slug)}: missing ${gatekeeperResult.missing.join(', ')}.`);
       gatekeeperPushedBack = true;
-      log(`Keeping task ${fmt.slug(slug)} in active — not transitioning to review while artifacts are missing.`);
+      log(`Keeping task ${fmt.slug(slug)} active while required artifacts are missing.`);
     } else if (!gatekeeperResult.ok && (gatekeeperResult.skipped || !gatekeeperResult.posted)) {
       fmt.log.fail(`Gatekeeper detected missing artifacts for ${fmt.slug(slug)} but could not post pushback: skipped=${gatekeeperResult.skipped}, posted=${gatekeeperResult.posted}. Blocking handoff — task remains in active until artifacts are present.`);
       error(`Missing mandatory artifacts: ${gatekeeperResult.missing.join(', ')}.`);
       return { ok: false, error: `Gatekeeper detected missing artifacts but could not post pushback (skipped=${gatekeeperResult.skipped}, posted=${gatekeeperResult.posted}). Fix missing artifacts before handoff: ${gatekeeperResult.missing.join(', ')}.` };
-    } else {
-      log('Gatekeeper: all mandatory artifacts present.');
     }
 
     if (gatekeeperPushedBack) {
@@ -1046,8 +1035,7 @@ export class HandoffCommandUseCase {
     }
 
     // Step 2.6: Generic ## Gates runner — execute any gates declared in MISSION.md
-    log('Step 2.6: Running declared gates from MISSION.md...');
-    const gatesResult = this.runDeclaredGates(verification.missionDir || '', rootDir, { log, error });
+    const gatesResult = this.runDeclaredGates(verification.missionDir || '', rootDir, { log: internalLog, error });
     if (!gatesResult.ok) {
       const msg = `Declared gate "${gatesResult.gate}" failed for ${fmt.slug(slug)}: ${gatesResult.error || gatesResult.reason}. Blocking handoff — task remains in active.`;
       error(msg);
@@ -1090,11 +1078,6 @@ export class HandoffCommandUseCase {
       return outcome.outcome === 'fixed' && retried
         ? retried
         : { ...failure, recoveryAttempted: true, error: outcome.dossier || outcome.diagnostic || failure.error };
-    }
-    if (gatesResult.skipped) {
-      log(`No declared gates for ${fmt.slug(slug)} (${gatesResult.reason}).`);
-    } else {
-      log(`All ${gatesResult.count} declared gate(s) passed for ${fmt.slug(slug)}.`);
     }
 
     // architecture invariant: Transition Mission state through SqliteMissionStore FIRST.
@@ -1218,13 +1201,8 @@ export class HandoffCommandUseCase {
       error(msg);
       return { ok: false, error: msg };
     }
-    log(fmt.status('PASS', `Mission state transitioned to review (v${transitionResult.value.version})`));
-
-    // Step 3 & 4: Backlog Transition and Commit (external boundary effect after durable state committed).
-    log('Step 3 & 4: Transitioning and committing Backlog task to review...');
-
     const taskImplementer = forgejoUser;
-    if (!await ports.backlog.transitionTask(slug, 'review', { implementer: taskImplementer, rootDir, log })) {
+    if (!await ports.backlog.transitionTask(slug, 'review', { implementer: taskImplementer, rootDir, log: internalLog })) {
       // A DB-owned adhoc identity has no Backlog mirror to transition; the
       // authoritative lifecycle transition above already recorded the review
       // state. Backlog-backed missions keep the hard failure.
@@ -1244,14 +1222,14 @@ export class HandoffCommandUseCase {
         fallbackUser,
         forgejoUser,
         force,
-        log,
+        log: internalLog,
         error,
         gatekeeperPushedBack,
       });
       if (pushOutcome) { return pushOutcome; }
     }
 
-    fmt.log.pass(`Mission ${fmt.slug(slug)} handed off successfully.`);
+    log(fmt.status('PASS', 'Implementation is ready for independent review.'));
     return { ok: true, gatekeeperPushedBack };
   }
 

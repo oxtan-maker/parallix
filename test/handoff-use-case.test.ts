@@ -269,7 +269,7 @@ test('handoff use case completes the full workflow over mocked ports', async () 
   assert.equal(result.gatekeeperPushedBack, false);
   assert.deepEqual(recorder.transitions, ['review'], 'backlog task transitions to review');
   assert.deepEqual(recorder.spawned, ['npm run typecheck'], 'declared MISSION.md gate ran once');
-  assert.ok(recorder.log.some(line => line.includes('NEL captured: 120 NEL')), 'NEL capture is reported');
+  assert.ok(recorder.log.some(line => line.includes('Repository verification passed')), 'verification outcome is reported');
 });
 
 // TASK-2457 wiring: the pre-handoff gate is invoked from the handoff checkout
@@ -638,7 +638,7 @@ test('handoff use case never creates a Forgejo PR when the review provider is of
 
   assert.equal(result.ok, true, recorder.errors.join('\n'));
   assert.equal(prCalls, 0);
-  assert.ok(recorder.log.some(line => line.includes('Skipping Forgejo PR')));
+  assert.ok(!recorder.log.some(line => line.includes('Skipping Forgejo PR')));
 });
 
 test('handoff use case creates the Forgejo PR through the port when the provider is on', async () => {
@@ -670,4 +670,56 @@ test('handoff preserves a publication verifier failure as structured gate eviden
   const result = await new HandoffCommandUseCase(ports).performHandoff(SLUG, runOptions(recorder));
   assert.equal(result.ok, false);
   assert.deepEqual(result.gateFailure, gateFailure);
+});
+
+// --- TASK-2476: operator-facing handoff story ---
+//
+// `px active`'s handoff must read as an execution record — repository
+// verification, its result, and the start of independent review — not as the
+// numbered internal sequence used to obtain them. These are characterization
+// tests for that contract; they run over the same mocked ports as the happy
+// path above, so they assert presentation only and never a lifecycle change.
+
+const stripStatusColor = (text: string) => text.replace(/\x1B\[[0-9;]*m/g, '');
+
+test('handoff reports repository verification and its result instead of numbered steps', async () => {
+  const recorder = makeRecorder();
+  const useCase = new HandoffCommandUseCase(makePorts(recorder));
+  const result = await useCase.performHandoff(SLUG, runOptions(recorder));
+
+  assert.equal(result.ok, true, recorder.errors.join('\n'));
+  const output = stripStatusColor(recorder.log.join('\n'));
+  assert.match(output, /Verifying the repository: npm run typecheck/);
+  assert.match(output, /Repository verification passed/);
+  assert.doesNotMatch(output, /Step \d/, 'no numbered handoff steps on the happy path');
+});
+
+test('handoff never nests one status prefix inside another', async () => {
+  const recorder = makeRecorder();
+  const useCase = new HandoffCommandUseCase(makePorts(recorder));
+  await useCase.performHandoff(SLUG, runOptions(recorder));
+
+  const output = stripStatusColor(recorder.log.join('\n'));
+  assert.doesNotMatch(output, /\[(INFO|PASS|WARN|FAIL|DEBUG)\]\s+\[(INFO|PASS|WARN|FAIL|DEBUG)\]/);
+});
+
+test('handoff keeps proof hashes and lifecycle bookkeeping out of the operator story', async () => {
+  const recorder = makeRecorder();
+  const useCase = new HandoffCommandUseCase(makePorts(recorder));
+  await useCase.performHandoff(SLUG, runOptions(recorder));
+
+  const output = stripStatusColor(recorder.log.join('\n'));
+  assert.doesNotMatch(output, /stored proof|reused proof/);
+  assert.doesNotMatch(output, /Capturing Net Engineering Lines|NEL captured/);
+  assert.doesNotMatch(output, /Mission state transitioned to review/);
+  assert.doesNotMatch(output, /Skipping Forgejo PR|gatekeeper pre-review validation/);
+});
+
+test('handoff states that independent review is next', async () => {
+  const recorder = makeRecorder();
+  const useCase = new HandoffCommandUseCase(makePorts(recorder));
+  await useCase.performHandoff(SLUG, runOptions(recorder));
+
+  const output = stripStatusColor(recorder.log.join('\n'));
+  assert.match(output, /ready for independent review/);
 });

@@ -51,6 +51,17 @@ test('each execute mechanism port is a distinct narrow adapter', () => {
   assert.ok(ports.handoffReview instanceof HandoffReviewAdapter);
 });
 
+test('workspace adapter runs the execute preflight quiet (routine PASS diagnostics suppressed)', async () => {
+  let capturedOpts;
+  const ports = createExecuteMissionPorts('/repo', { missionTransitionStore: transitionStore }, runtimeStub({
+    // missionStart([slug], { returnResult, quiet }) — options are the 2nd arg.
+    preflight() { capturedOpts = arguments[1]; return { pass: true }; },
+  }));
+  assert.equal(await ports.workspace.preflight('task-1'), true);
+  assert.equal(capturedOpts.returnResult, true);
+  assert.equal(capturedOpts.quiet, true, 'active preflight must be quiet so the operator story leads with mission/implementer');
+});
+
 test('workspace adapter maps a failed preflight and an unresolved worktree to falsy verdicts', async () => {
   const ports = createExecuteMissionPorts('/repo', { missionTransitionStore: transitionStore }, runtimeStub({
     preflight() { return { pass: false }; },

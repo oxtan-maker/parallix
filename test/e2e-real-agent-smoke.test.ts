@@ -965,7 +965,7 @@ function runRealAgentSmoke(agent, runner) {
 
     assert.match(
       activeResult.stdout,
-      new RegExp(`Execute agent \\(${agent}\\)`),
+      new RegExp(`Implementation complete \\(${agent}\\)`),
       `[parallix-workflow-failure] expected active phase to select the ${agent} agent family`
     );
     console.log(`[benchmark] runner=${runner} phase=active duration_ms=${activeDurationMs}`);

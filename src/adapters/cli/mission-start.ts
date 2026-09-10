@@ -11,9 +11,25 @@ import { getPrStatus } from '../forgejo/forgejo.js';
 import { isForgejoReviewEnabled } from '../config/product-config.js';
 import stats from './commands/stats.js';
 
-/** @param {string[]} args @param {{log?: Function, error?: Function, cwdFn?: Function, getCurrentBranchFn?: Function, resolveTaskFileFn?: Function, getTaskStatusFn?: Function, toVirtualFn?: Function, findMissionDirFn?: Function, findCheckpointsFn?: Function, getFirstLineFn?: Function, inferSlugFn?: Function, getMissionYearFn?: Function, conventionalWorktreePathFn?: Function, getLastCommitFn?: Function, getPrStatusFn?: Function, evaluateRepositoryReadinessFn?: Function, evaluateReviewSetupFn?: Function, adapterChecklistFn?: Function, resolveMissionClassificationFn?: Function, isForgejoReviewEnabledFn?: Function, fsExistsSync?: Function, resolveMissionBaseBranchFn?: Function, getPrimaryBranchFn?: Function, gitFn?: Function, command?: string, returnResult?: boolean}} opts */
-function missionStart(args: string[], opts: { log?: Function, error?: Function, cwdFn?: Function, getCurrentBranchFn?: Function, resolveTaskFileFn?: Function, getTaskStatusFn?: Function, toVirtualFn?: Function, findMissionDirFn?: Function, findCheckpointsFn?: Function, getFirstLineFn?: Function, inferSlugFn?: Function, getMissionYearFn?: Function, conventionalWorktreePathFn?: Function, getLastCommitFn?: Function, getPrStatusFn?: Function, evaluateRepositoryReadinessFn?: Function, evaluateReviewSetupFn?: Function, adapterChecklistFn?: Function, resolveMissionClassificationFn?: Function, isForgejoReviewEnabledFn?: Function, fsExistsSync?: Function, resolveMissionBaseBranchFn?: Function, getPrimaryBranchFn?: Function, gitFn?: Function, command?: string, returnResult?: boolean } = {}) {
-  const log = opts.log || fmt.log.plain;
+/** @param {string[]} args @param {{log?: Function, error?: Function, cwdFn?: Function, getCurrentBranchFn?: Function, resolveTaskFileFn?: Function, getTaskStatusFn?: Function, toVirtualFn?: Function, findMissionDirFn?: Function, findCheckpointsFn?: Function, getFirstLineFn?: Function, inferSlugFn?: Function, getMissionYearFn?: Function, conventionalWorktreePathFn?: Function, getLastCommitFn?: Function, getPrStatusFn?: Function, evaluateRepositoryReadinessFn?: Function, evaluateReviewSetupFn?: Function, adapterChecklistFn?: Function, resolveMissionClassificationFn?: Function, isForgejoReviewEnabledFn?: Function, fsExistsSync?: Function, resolveMissionBaseBranchFn?: Function, getPrimaryBranchFn?: Function, gitFn?: Function, command?: string, returnResult?: boolean, quiet?: boolean}} opts */
+function missionStart(args: string[], opts: { log?: Function, error?: Function, cwdFn?: Function, getCurrentBranchFn?: Function, resolveTaskFileFn?: Function, getTaskStatusFn?: Function, toVirtualFn?: Function, findMissionDirFn?: Function, findCheckpointsFn?: Function, getFirstLineFn?: Function, inferSlugFn?: Function, getMissionYearFn?: Function, conventionalWorktreePathFn?: Function, getLastCommitFn?: Function, getPrStatusFn?: Function, evaluateRepositoryReadinessFn?: Function, evaluateReviewSetupFn?: Function, adapterChecklistFn?: Function, resolveMissionClassificationFn?: Function, isForgejoReviewEnabledFn?: Function, fsExistsSync?: Function, resolveMissionBaseBranchFn?: Function, getPrimaryBranchFn?: Function, gitFn?: Function, command?: string, returnResult?: boolean, quiet?: boolean } = {}) {
+  const baseLog = opts.log || fmt.log.plain;
+  // `quiet` suppresses routine PASS diagnostics and the preflight header while
+  // keeping every FAIL/WARN line. The NOT-USABLE verdict survives (it is a
+  // FAIL); the routine PASS USABLE verdict is dropped with other PASS lines
+  // (SC4), which is why the assertion below checks it is absent, not present. The
+  // `active` command opts in so its normal path leads with the operator story
+  // (mission -> implementer -> live work) instead of a PWD/branch/backlog dump;
+  // draft, review and verify-env keep the full diagnostic preflight.
+  const quiet = Boolean(opts.quiet);
+  const log = quiet
+    ? ((msg: unknown) => {
+      // Some lines (the final verdict) are prefixed with a newline, so allow
+      // leading whitespace before the status tag.
+      if (/^\s*\[PASS\]/.test(fmt.stripAnsi(String(msg)))) {return;}
+      baseLog(msg);
+    })
+    : baseLog;
   const error = opts.error || fmt.log.plainError;
   const cwdFn = opts.cwdFn || (() => process.cwd());
   const getCurrentBranchFn = opts.getCurrentBranchFn || getCurrentBranch;
@@ -45,7 +61,7 @@ function missionStart(args: string[], opts: { log?: Function, error?: Function, 
 
   if (isVerifyOnly) {
     log(fmt.status('INFO', 'Running environment diagnostics (verify-env)...'));
-  } else {
+  } else if (!quiet) {
     log(fmt.status('INFO', `Running mission startup preflight for: ${fmt.slug(slug)}`));
   }
 
