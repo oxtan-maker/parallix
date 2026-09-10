@@ -274,7 +274,7 @@ test('px integrate rejects malformed real-agent options before preflight or gate
   }
 });
 
-test('buildIntegrationContext reads task file and status from the base worktree only', async (t) => {
+test('buildIntegrationContext reads task file and status from the mission worktree', async (t) => {
   const worktree = '/tmp/project-task-2200';
   const baseWorktree = '/tmp/project-main';
   const worktreeTask = `${worktree}/backlog/tasks/task-2200 - fix.md`;
@@ -325,13 +325,11 @@ test('buildIntegrationContext reads task file and status from the base worktree 
     isForgejoReviewEnabledFn: () => false
   });
 
-  // The mission worktree status is a stale 'active'; the base worktree owns the
-  // authoritative 'ready-for-integration' status and the task-file path.
-  assert.equal(context.task.taskFile, baseTask);
-  assert.equal(context.taskStatus, 'ready-for-integration');
+  assert.equal(context.task.taskFile, worktreeTask);
+  assert.equal(context.taskStatus, undefined);
 });
 
-test('buildIntegrationContext does not let a mission-worktree status replace the base status (task-2244 regression)', async (t) => {
+test('buildIntegrationContext uses Mission lifecycle status, not task-file status', async (t) => {
   const worktree = '/tmp/project-task-2244';
   const baseWorktree = '/tmp/project-main-2244';
   const worktreeTask = `${worktree}/backlog/tasks/task-2244 - fix.md`;
@@ -358,7 +356,6 @@ test('buildIntegrationContext does not let a mission-worktree status replace the
     }
     return { ok: false, reason: 'missing', matches: [] };
   });
-  // Mission worktree still shows the pre-approval 'active'; base is 'ready-for-integration'.
   const mockedGetTaskStatus = mock.method(backlog, 'getTaskStatus', (taskFile) => taskFile === worktreeTask ? 'active' : 'ready-for-integration');
   const mockedGetTaskAssignee = mock.method(backlog, 'getTaskAssignee', () => 'claude');
   t.after(() => {
@@ -380,8 +377,8 @@ test('buildIntegrationContext does not let a mission-worktree status replace the
     isForgejoReviewEnabledFn: () => false
   });
 
-  assert.equal(context.task.taskFile, baseTask, 'context.task.taskFile must be the base worktree task file');
-  assert.equal(context.taskStatus, 'ready-for-integration', 'base status must not be replaced by mission-worktree status');
+  assert.equal(context.task.taskFile, worktreeTask, 'context.task.taskFile must be the mission worktree task file');
+  assert.equal(context.taskStatus, undefined, 'integration must use Mission lifecycle status');
 });
 
 test('printIntegrationPreflight reads classification from the selected task file, not by re-resolving in the base checkout', (t) => {
@@ -2135,14 +2132,18 @@ test('R9: normal integration state proceeds without rerunning approval', async (
 });
 
 test('promoteTaskForIntegrationIfNeeded updates the task file on a real integration run', async () => {
-  const taskFile = path.join(os.tmpdir(), `integrate-promote-${process.pid}.md`);
+  const baseWorktree = fs.mkdtempSync(path.join(os.tmpdir(), 'integrate-promote-'));
+  const taskFile = path.join(baseWorktree, 'backlog', 'tasks', 'task-2229 - test.md');
+  fs.mkdirSync(path.dirname(taskFile), { recursive: true });
   fs.writeFileSync(taskFile, 'Status: ○ review\n');
 
   try {
     const context = {
       slug: 'task-2229',
+      baseWorktree,
       task: { ok: true, taskFile },
       taskStatus: 'review',
+      missionStatus: 'review',
       pr: { merged: false },
       approval: { ok: true, reviewState: 'APPROVED' }
     };
@@ -2153,10 +2154,10 @@ test('promoteTaskForIntegrationIfNeeded updates the task file on a real integrat
     });
 
     assert.deepEqual(result, { changed: true, dryRun: false });
-    assert.equal(context.taskStatus, 'ready-for-integration');
+    assert.equal(context.missionStatus, 'review');
     assert.match(fs.readFileSync(taskFile, 'utf8'), /Status: ○ ready-for-integration/); // actual backlog.md state
   } finally {
-    fs.rmSync(taskFile, { force: true });
+    fs.rmSync(baseWorktree, { recursive: true, force: true });
   }
 });
 
@@ -2199,14 +2200,17 @@ for (const [label, read] of [
 test('promoteTaskForIntegrationIfNeeded writes the integration checkout instead of the mission task copy', async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'integrate-promote-base-'));
   const baseTask = path.join(root, 'backlog', 'tasks', 'task-2230 - base.md');
-  const missionTask = path.join(root, 'mission-task.md');
+  const missionRoot = path.join(root, 'mission');
+  const missionTask = path.join(missionRoot, 'backlog', 'tasks', 'task-2230 - base.md');
   fs.mkdirSync(path.dirname(baseTask), { recursive: true });
+  fs.mkdirSync(path.dirname(missionTask), { recursive: true });
   fs.writeFileSync(baseTask, 'id: TASK-2230\nstatus: review\n');
   fs.writeFileSync(missionTask, 'id: TASK-2230\nstatus: review\n');
   try {
     const context = {
-      slug: 'task-2230', baseWorktree: root,
+      slug: 'task-2230', baseWorktree: root, missionWorktree: missionRoot,
       task: { ok: true, taskFile: missionTask }, taskStatus: 'review',
+      missionStatus: 'review',
       pr: { merged: false }, approval: { ok: true, reviewState: 'APPROVED' }
     };
     assert.deepEqual(

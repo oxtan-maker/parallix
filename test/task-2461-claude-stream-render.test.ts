@@ -349,14 +349,16 @@ function renderFixture(
   return sink.text;
 }
 
-test('rendered fixture shows every required surface and no raw JSON envelope', () => {
+test('rendered Claude Bash command entries omit the label while preserving command, output, and status', () => {
   const out = renderFixture();
 
   assert.match(out, /● claude-opus-5 · session sess-2461 · 3 tools/, 'system/init line');
   assert.match(out, /Checking the launcher wiring\./, 'assistant text');
   assert.match(out, /✳ The tail buffer is fed before the sink\./, 'thinking block');
-  assert.match(out, /⚒ Bash ls src\/adapters/, 'tool call with name and condensed input');
-  assert.match(out, /✓ Bash/, 'tool result');
+  assert.match(out, /⚒ ls src\/adapters/, 'Bash command text remains visible');
+  assert.match(out, /✓ agents process/, 'Bash command output and success status remain visible');
+  assert.doesNotMatch(out, /⚒ Bash/, 'the structured Bash label is absent from command entries');
+  assert.doesNotMatch(out, /✓ Bash agents process/, 'the structured Bash label is absent from completion entries');
   assert.match(out, /✗ Read .*ENOENT/, 'tool error');
   assert.match(out, /▶ sub-agent Explore/, 'sub-agent activity');
   assert.match(out, /● done .*\$0\.1234/, 'final result line with cost');

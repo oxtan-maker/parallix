@@ -2,13 +2,13 @@ import fs from 'node:fs';
 import path from 'node:path';
 import child_process from 'node:child_process';
 import { detectRebaseState, git, getCurrentBranch } from '../../git/git.js';
-import { resolveTaskFile, getTaskStatus, setTaskStatus, completeTask, getTaskAssignee, getTaskClassification, classificationFromLabels, CLASSIFICATION_LABELS, getTaskLabels, setTaskLabels } from '../../backlog/backlog.js';
+import { resolveTaskFile, setTaskStatus, completeTask, getTaskAssignee, getTaskClassification, classificationFromLabels, CLASSIFICATION_LABELS } from '../../backlog/backlog.js';
 import { toVirtual, toActual } from '../../config/state-map.js';
 import { getPrStatus, getLatestReviewDecision, syncMerged, readToken, resolveTokenFile, listOpenPrsForSlug } from '../../forgejo/forgejo.js';
 import * as fmt from '../../../application/presentation/cli-format.js';
 
 import { buildAutonomousReviewMatrix, formatMatrixSummary } from '../../agents/runtime-matrix.js';
-import { findMissionDir, findMissionArea, missionTitle, parseConflictFilesFromMergeOutput, inferSlug, getPrimaryWorktree, getPrimaryBranch, conventionalWorktreePath, softResetTrailingBacklogNoise, findMissionDocInBranches, missionBranchName, missionDirForSlug, resolveMissionBaseBranch, resolveBaseWorktree } from '../../filesystem/mission-utils.js';
+import { findMissionDir, findMissionArea, missionTitle, parseConflictFilesFromMergeOutput, inferSlug, getPrimaryWorktree, getPrimaryBranch, conventionalWorktreePath, softResetTrailingBacklogNoise, findMissionDocInBranches, missionBranchName, missionDirForSlug, resolveMissionBaseBranch, resolveBaseWorktree, resolveWorktree } from '../../filesystem/mission-utils.js';
 import * as verification from '../../verification/verification.js';
 const { formatVerificationCommand } = verification;
 import { isForgejoReviewEnabled } from '../../config/product-config.js';
@@ -103,6 +103,18 @@ const REAL_AGENT_OPTION = '--real-agent';
 const REAL_AGENT_MODEL_OPTION = '--real-agent-model';
 const INTEGRATE_VALUE_OPTIONS = new Set([REAL_AGENT_OPTION, REAL_AGENT_MODEL_OPTION]);
 const CODEX_REAL_AGENT_MODEL = 'gpt-5.6-luna';
+
+/** Resolve a task file into the integration checkout without escaping either worktree. */
+function resolveIntegrationTaskPath(rawTaskFile: string | undefined, missionWorktree: string | null | undefined, baseWorktree: string | null | undefined): string | null {
+  if (!rawTaskFile) { return ''; }
+  if (!baseWorktree) { return null; }
+  if (missionWorktree) {
+    const relative = path.relative(missionWorktree, rawTaskFile);
+    if (!relative.startsWith('..') && !path.isAbsolute(relative)) { return path.join(baseWorktree, relative); }
+  }
+  const baseRelative = path.relative(baseWorktree, rawTaskFile);
+  return !baseRelative.startsWith('..') && !path.isAbsolute(baseRelative) ? rawTaskFile : null;
+}
 
 /** Parse only the public integrate flags before any preflight or gate work. */
 function parseIntegrateArgs(args: string[]) {
@@ -233,7 +245,7 @@ async function integrate(args: string[], options: {
   const { explicitSlug, dryRun, noIntegrationGates, noGate, realAgent, realAgentModel } = parsedArgs;
   const slug = inferSlug(explicitSlug);
 
-  /** @type {{slug: string, branch: string, currentBranch: string, missionDir?: string, area: string, task: {ok: boolean, taskFile?: string, reason?: string, matches?: string[]}, taskStatus?: string, taskAssignee?: string|null, forgejoUser?: string|null, forgejoToken?: string|null, taskAssigneeWarning?: string|null, pr: {exists?: boolean, state?: string, number?: number, merged?: boolean, createdAt?: string | null, raw?: string}, siblingPrs: any[], approval: {ok?: boolean, error?: string, reviewState?: string, defaultUserApproved?: boolean, defaultUserApprovedAt?: string, source?: string}, baseBranch?: string, baseWorktree?: string, mainBranch: string, mainDirtyEntries: string[], mainDirty: boolean}} */
+  /** @type {{slug: string, branch: string, currentBranch: string, missionDir?: string, area: string, task: {ok: boolean, taskFile?: string, reason?: string, matches?: string[]}, taskStatus?: string, taskAssignee?: string|null, forgejoUser?: string|null, forgejoToken?: string|null, taskAssigneeWarning?: string|null, pr: {exists?: boolean, state?: string, number?: number, merged?: boolean, createdAt?: string | null, raw?: string}, siblingPrs: any[], approval: {ok?: boolean, error?: string, reviewState?: string, defaultUserApproved?: boolean, defaultUserApprovedAt?: string, source?: string}, baseBranch?: string, baseWorktree?: string, mainBranch: string, mainDirtyEntries: string[], mainDirty: boolean, missionStatus?: string, missionReview?: any, promoteBacklogOnCloseout?: boolean}} */
   let context;
 
   if (process.env.FORGEJO_USER === 'gemini' || process.env.WORKFLOW_AGENT === 'gemini') {
@@ -297,6 +309,7 @@ async function integrate(args: string[], options: {
       // Backlog promotion remains delayed until closeout, because it can be
       // part of the candidate branch, but it is never lifecycle authority.
       if (!dryRun) {
+        context.promoteBacklogOnCloseout = context.missionStatus === 'review';
         await recoverMissionForIntegration(context, { missionServices });
       }
 
@@ -305,7 +318,7 @@ async function integrate(args: string[], options: {
       // the merge/commit/sync path byte-identical to today.
       const baseWorktree = context.baseWorktree;
       const baseBranch = context.baseBranch;
-      const { failures } = printIntegrationPreflight(context);
+      const { failures } = printIntegrationPreflight(context, { gitFn: git });
 
       if (failures.length > 0) {
         fmt.log.fail('\nIntegration preflight failed. Resolve the blockers above before running integrate.');
@@ -399,13 +412,13 @@ async function integrate(args: string[], options: {
     // best-effort and guards every task-file access. Keep mainTaskFile empty for
     // adhoc so the fs.existsSync guards below no-op rather than crash.
     const rawTaskFile = (context.task as any)?.taskFile as string | undefined;
-    const mainTaskFile = rawTaskFile ? rawTaskFile.replace(executionDir, baseWorktree as string) : '';
-    // The mission branch may contain an agent edit to the task file. Preserve
-    // the base branch's valid classification if that edit drops or corrupts
-    // the labels; post-integration stats resolve the completed file only after
-    // this squash/closeout step.
-    const baseTaskLabels = fs.existsSync(mainTaskFile) ? getTaskLabels(mainTaskFile) : [];
-    const baseTaskClassification = fs.existsSync(mainTaskFile) ? getTaskClassification(mainTaskFile) : null;
+    const mainTaskFile = resolveIntegrationTaskPath(rawTaskFile, context.missionWorktree, baseWorktree);
+    if (mainTaskFile === null) {
+      fmt.log.fail(baseWorktree
+        ? 'Mission task file is outside the integration checkout; refusing to stage an unsafe closeout path.'
+        : 'Integration base worktree is unavailable; refusing to stage backlog closeout.');
+      throw new IntegrationAbort();
+    }
     fmt.log.info('Selecting integration variant: Variant B (local squash-merge)');
     fmt.log.info(`\nStep 1: Using base worktree ${baseWorktree} on ${baseBranch} as the squash-merge target...`);
 
@@ -580,11 +593,6 @@ async function integrate(args: string[], options: {
       // early promotion can make `merge --abort` fail and leave index conflicts.
       await promoteTaskForIntegrationIfNeeded(context, { missionServicesFn });
       if (fs.existsSync(mainTaskFile)) {
-        const mergedTask = resolveTaskFile(slug, baseWorktree);
-        if (mergedTask.ok && mergedTask.taskFile && baseTaskClassification && getTaskClassification(mergedTask.taskFile) === null) {
-          setTaskLabels(mergedTask.taskFile, baseTaskLabels);
-          fmt.log.info(`Restored base Backlog classification label for ${slug} before closeout.`);
-        }
         completeTask(slug, baseWorktree);
         const originalTaskPath = path.relative(baseWorktree as string, mainTaskFile);
         intendedPayloadPaths.add(originalTaskPath);
@@ -828,16 +836,14 @@ async function buildIntegrationContext(slug: string, {
   if (!resolvedBaseWorktree) {
     try { resolvedBaseWorktree = resolveBaseWorktree(slug, { rootDir: process.cwd() }); } catch (_) { resolvedBaseWorktree = getPrimaryWorktree(); }
   }
-  // The primary integration checkout owns all authoritative Backlog task
-  // metadata (task file, status, assignee). Mission worktrees can retain an
-  // earlier status after primary records review approval, and Backlog.md is
-  // unreliable at picking up worktree copies, so integration reads the base
-  // worktree task file only — never the mission worktree as a fallback. If the
-  // base worktree cannot supply the task, resolution fails rather than silently
-  // trusting a stale mission copy.
+  // The mission branch owns the task payload that is about to be integrated.
+  // Read task metadata there so integration remains independent of uncommitted
+  // or stale files in the primary checkout.
+  const missionWorktree = resolveWorktree(slug, { cwd: process.cwd() }) || resolvedBaseWorktree || process.cwd();
   /** @type {ReturnType<typeof resolveTaskFile>} */
-  const task = resolveTaskFile(slug, /** @type {string} */ (resolvedBaseWorktree));
-  const taskStatus = task.ok ? getTaskStatus(task.taskFile as string) : null;
+  const task = isDbAdhocIdentity(slug)
+    ? { ok: false, matches: [], reason: 'adhoc mission has no Backlog task' }
+    : resolveTaskFile(slug, missionWorktree);
   const taskAssignee = task.ok ? getTaskAssignee(task.taskFile as string) : null;
   const forgejoEnabled = isForgejoReviewEnabledFn(/** @type {string} */ (resolvedBaseWorktree));
   
@@ -922,7 +928,9 @@ async function buildIntegrationContext(slug: string, {
     missionDir,
     area,
     task,
-    taskStatus,
+    missionWorktree,
+    missionStatus: undefined as string | undefined,
+    promoteBacklogOnCloseout: false,
     taskAssignee,
     forgejoUser: forgejoIdentity.forgejoUser,
     forgejoToken,
@@ -1013,8 +1021,9 @@ function recoveryEstablishesApproval(context: any): {
 
 /** @param {{slug: string, branch: string, currentBranch: string, missionDir?: string, area: string, task: {ok: boolean, taskFile?: string, reason?: string, matches?: string[]}, taskStatus?: string, taskAssignee?: string|null, forgejoUser?: string|null, forgejoToken?: string|null, taskAssigneeWarning?: string|null, pr: {exists?: boolean, state?: string, number?: number, merged?: boolean, createdAt?: string | null, raw?: string}, siblingPrs: any[], approval: {ok?: boolean, error?: string, reviewState?: string, defaultUserApproved?: boolean, defaultUserApprovedAt?: string, source?: string}, baseBranch?: string, baseWorktree?: string, mainBranch: string, mainDirtyEntries: string[], mainDirty: boolean, missionStatus?: string, missionReview?: any}} context */
 function evaluateTaskStatusForIntegration(context: any) {
+  const missionStatus = context.missionStatus ?? context.taskStatus;
   const stateMapOptions = { rootDir: /** @type {string} */ (context.baseWorktree) };
-  if (toVirtual(context.taskStatus, /** @type {any} */ (stateMapOptions)) === 'approved') {
+  if (toVirtual(missionStatus, /** @type {any} */ (stateMapOptions)) === 'approved') {
     return {
       ok: true,
       level: 'pass',
@@ -1022,11 +1031,9 @@ function evaluateTaskStatusForIntegration(context: any) {
     };
   }
 
-  // The Mission lifecycle is the approval authority (TASK-2379). Once it has
-  // left review through the approval boundary (or recovery), the Backlog
-  // status is a representation promoted at closeout — never a gate of its
-  // own, and no provider boolean stands in for it.
-  if (context.missionStatus === 'integration' || context.missionStatus === 'done') {
+  // The Mission lifecycle is the approval authority (TASK-2379). Backlog
+  // status is only a closeout representation and never an integration gate.
+  if (missionStatus === 'integration' || missionStatus === 'done') {
     return {
       ok: true,
       level: 'pass',
@@ -1046,13 +1053,13 @@ function evaluateTaskStatusForIntegration(context: any) {
     return {
       ok: true,
       level: 'warn',
-      message: `Backlog status: ${toVirtual(context.taskStatus, stateMapOptions)} accepted for integration because ${how} and recovery would move the Mission to integration`
+      message: `Mission status: ${toVirtual(missionStatus, stateMapOptions)} accepted for integration because ${how} and recovery would move the Mission to integration`
     };
   }
 
   const reviewApproved = context.approval?.ok && context.approval.reviewState === 'APPROVED';
   const localApproved = context.approval?.source === 'local-review-state';
-  const reviewCanProceed = context.taskStatus === 'review' && (reviewApproved || localApproved);
+  const reviewCanProceed = missionStatus === 'review' && (reviewApproved || localApproved);
 
   if (reviewCanProceed) {
     let reason;
@@ -1064,14 +1071,14 @@ function evaluateTaskStatusForIntegration(context: any) {
     return {
       ok: true,
       level: 'warn',
-      message: `Backlog status: review accepted for integration because ${reason}`
+      message: `Mission status: review accepted for integration because ${reason}`
     };
   }
 
   return {
     ok: false,
     level: 'fail',
-    message: `Backlog status: expected approved, or review with an approved Forgejo PR; found ${toVirtual(context.taskStatus, stateMapOptions)}`
+    message: `Mission status: expected approved, or review with an approved Forgejo PR; found ${toVirtual(missionStatus, stateMapOptions)}`
   };
 }
 
@@ -1084,13 +1091,18 @@ function printMergedPrRecoveryGuidance(log: Function, slug: string, baseWorktree
   log(fmt.status('INFO', `  px integrate ${slug} --dry-run`));
 }
 
-/** @param {{slug: string, branch: string, currentBranch: string, missionDir?: string, area: string, task: {ok: boolean, taskFile?: string, reason?: string, matches?: string[]}, taskStatus?: string, taskAssignee?: string|null, forgejoUser?: string|null, forgejoToken?: string|null, taskAssigneeWarning?: string|null, pr: {exists?: boolean, state?: string, number?: number, merged?: boolean, createdAt?: string | null, raw?: string}, siblingPrs: any[], approval: {ok?: boolean, error?: string, reviewState?: string, defaultUserApproved?: boolean, defaultUserApprovedAt?: string, source?: string}, baseBranch?: string, baseWorktree?: string, mainBranch: string, mainDirtyEntries: string[], mainDirty: boolean}} context */
+/** @param {{slug: string, branch: string, currentBranch: string, missionDir?: string, area: string, task: {ok: boolean, taskFile?: string, reason?: string, matches?: string[]}, taskStatus?: string, taskAssignee?: string|null, forgejoUser?: string|null, forgejoToken?: string|null, taskAssigneeWarning?: string|null, pr: {exists?: boolean, state?: string, number?: number, merged?: boolean, createdAt?: string | null, raw?: string}, siblingPrs: any[], approval: {ok?: boolean, error?: string, reviewState?: string, defaultUserApproved?: boolean, defaultUserApprovedAt?: string, source?: string}, baseBranch?: string, baseWorktree?: string, mainBranch: string, mainDirtyEntries: string[], mainDirty: boolean, missionStatus?: string, promoteBacklogOnCloseout?: boolean}} context */
 async function promoteTaskForIntegrationIfNeeded(
   context: any,
   { dryRun = false, missionServicesFn }: { dryRun?: boolean, missionServicesFn?: Function } = {},
 ) {
   const taskStatusCheck = evaluateTaskStatusForIntegration(context);
-  const needsPromotion = context.task?.ok && context.taskStatus === 'review' && taskStatusCheck.ok;
+  const needsPromotion = context.task?.ok
+    // Runtime integration always has Mission authority. taskStatus supports
+    // direct callers that supply an older, pre-store context.
+    && (context.missionStatus === 'review' || context.promoteBacklogOnCloseout === true
+      || (context.missionStatus === undefined && context.taskStatus === 'review'))
+    && taskStatusCheck.ok;
 
   if (!needsPromotion) {
     return { changed: false, dryRun: false };
@@ -1121,15 +1133,17 @@ async function promoteTaskForIntegrationIfNeeded(
   // External boundary effect after the durable lifecycle transition.
   const stateMapOptions = { rootDir: /** @type {string} */ (context.baseWorktree) };
   const approvedStatus = toActual('approved', stateMapOptions) || 'approved';
-  const baseTask = context.slug && context.baseWorktree
-    ? resolveTaskFile(context.slug, context.baseWorktree)
-    : context.task;
+  const taskPath = context.task?.taskFile
+    ? resolveIntegrationTaskPath(context.task.taskFile, context.missionWorktree, context.baseWorktree)
+      // buildIntegrationContext always supplies a worktree; direct callers may not.
+      || (!context.missionWorktree && context.baseWorktree ? resolveTaskFile(context.slug, context.baseWorktree).taskFile : null)
+    : '';
+  const baseTask = taskPath ? { ok: true, taskFile: taskPath } : context.task?.taskFile ? { ok: false } : context.task;
   if (!baseTask?.ok || !setTaskStatus(/** @type {string} */ (baseTask.taskFile || ''), approvedStatus)) {
     fmt.log.fail('Could not promote the Backlog task to approved before integration.');
     throw new IntegrationAbort();
   }
 
-  context.taskStatus = toActual('approved', stateMapOptions);
   fmt.log.info('Promoted Backlog status from review to approved because review is already fulfilled.');
 
   return { changed: true, dryRun: false };
@@ -1357,6 +1371,7 @@ function printIntegrationPreflight(
     getUnresolvedIndexConflictsFn = getUnresolvedIndexConflicts,
     findMissionDocInBranchesFn = findMissionDocInBranches,
     isForgejoReviewEnabledFn = isForgejoReviewEnabled,
+    gitFn = git,
     log = fmt.log.plain
   } = {}
 ) {
@@ -1410,7 +1425,7 @@ function printIntegrationPreflight(
   }
 
   if (context.task.ok) {
-    log(fmt.status('PASS', `Backlog task: ${path.basename(/** @type {string} */ (context.task.taskFile))} (${context.taskStatus})`));
+    log(fmt.status('PASS', `Backlog task: ${path.basename(/** @type {string} */ (context.task.taskFile))} (${context.missionStatus || 'mission store'})`));
     
     try {
       const classification = getTaskClassification(/** @type {string} */ (context.task.taskFile));
@@ -1601,12 +1616,25 @@ function printIntegrationPreflight(
 
   if (context.mainDirty) {
     // Detect dirty paths that overlap with files integrate mutates during closeout.
-    // Broad overlap set: any dirty path under backlog/tasks/ or backlog/completed/
-    // triggers FAIL, because closeout logic (completeTask, reorder/ordinal writes)
-    // can touch backlog files beyond the current mission's own slug.
-    // Editor swap files, .env, etc. are excluded by the path prefix check.
-    // Mission doc paths remain scoped to the current mission's slug.
+    // Unrelated backlog tasks are safe to stash and restore; only this mission's
+    // task, mission artifacts, and the squash payload can collide with writes.
     const overlapPaths: string[] = [];
+    const payloadResult = gitFn(['-C', baseWorktree, 'diff', '--name-only', '--no-renames', `${baseBranch}...${context.branch}`]);
+    if (payloadResult.status === 0) {
+      payloadResult.stdout.split('\n').map((file: string) => file.trim()).filter(Boolean).forEach((file: string) => overlapPaths.push(file));
+    } else {
+      failures.push('main-dirty-payload');
+      const payloadError = String(payloadResult.stderr || 'git diff failed').split('\n')[0];
+      fmt.log.fail(`[STASH] Could not determine the integration payload; refusing to stash a dirty checkout (${payloadError}).`);
+    }
+    const taskPath = context.task?.taskFile
+      ? resolveIntegrationTaskPath(context.task.taskFile, context.missionWorktree, baseWorktree)
+      : '';
+    if (taskPath) {
+      const taskRelativePath = path.relative(baseWorktree, taskPath);
+      overlapPaths.push(taskRelativePath.split(path.sep).join('/'));
+      overlapPaths.push(path.join('backlog/completed', path.basename(taskRelativePath)).split(path.sep).join('/'));
+    }
     if (context.missionDir) {
       const relMissionPath = path.relative(baseWorktree, context.missionDir);
       overlapPaths.push(relMissionPath);
@@ -1623,16 +1651,13 @@ function printIntegrationPreflight(
         return;
       }
 
+      // A first-run config is untracked by design. If the squash lands it,
+      // restore drops the stash after confirming the landed file is preserved.
+      const isRecoverableFirstRunConfig = entry.startsWith('?? ') && filePath === 'config/agents.json';
       let isOverlap = false;
 
-      // Any dirty path under backlog/tasks/ or backlog/completed/ overlaps
-      // with files integrate mutates during closeout (completeTask, reorder).
-      if (/^backlog\/(tasks|completed)\//.test(filePath)) {
-        isOverlap = true;
-      }
-
       // Check against mission doc paths (scoped to current mission)
-      if (!isOverlap) {
+      if (!isRecoverableFirstRunConfig) {
         for (const mp of overlapPaths) {
           if (mp && (filePath === mp || filePath.startsWith(mp + path.sep) || filePath.startsWith(mp + '/'))) {
             isOverlap = true;

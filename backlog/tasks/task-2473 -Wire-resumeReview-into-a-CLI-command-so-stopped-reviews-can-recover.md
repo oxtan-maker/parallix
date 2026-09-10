@@ -5,9 +5,9 @@ status: backlog
 assignee: [codex]
 created_date: '2026-09-09 14:30'
 labels:
-- ai_sdlc
-- bug
-- workflow
+  - ai_sdlc
+  - bug
+  - workflow
 dependencies: []
 priority: high
 ---

@@ -1,10 +1,11 @@
 ---
 id: TASK-2474
 title: claude agent is noicy
-status: backlog
-assignee: []
+status: done
+assignee: [codex]
 created_date: '2026-09-09 13:46'
-labels: []
+labels:
+  - ai_sdlc
 dependencies: []
 ---
 
