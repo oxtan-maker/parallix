@@ -84,7 +84,7 @@ export class DraftCommandUseCase {
       ctx = await this._workflow.launchAgent(ctx);
       if (ctx.exited) { abort(ctx); return; }
 
-      // Step 7: Post-process — classification normalize, label sync, re-assert base (async)
+      // Step 7: Post-process — normalize classification and re-assert base (async)
       ctx = await this._workflow.postProcess(ctx);
       if (ctx.exited) { abort(ctx); return; }
 

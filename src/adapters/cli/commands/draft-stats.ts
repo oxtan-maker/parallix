@@ -4,7 +4,7 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as fmt from '../../../application/presentation/cli-format.js';
 import { startDraftAgent, selectAgent, readAgentConfigOrExit } from '../../agents/agents.js';
-import { resolveTaskFile, reportTaskResolution, checkBacklogIntegrity, transitionTask, getTaskStatus, getTaskStorage, getTaskLabels, syncTaskLabelsToBaseWorktree } from '../../backlog/backlog.js';
+import { resolveTaskFile, reportTaskResolution, checkBacklogIntegrity, transitionTask, getTaskStatus, getTaskStorage, getTaskLabels } from '../../backlog/backlog.js';
 import { inferSlug, resolveMainRepo, conventionalWorktreePath, resolveWorktree, getPrimaryBranch, missionBranchName, detectLaunchBaseBranch } from '../../filesystem/mission-utils.js';
 import { transitionVirtual } from '../../config/state-map.js';
 import * as stats from './stats.js';
@@ -476,13 +476,12 @@ function createDraftWorkflowAdapter(deps: Record<string, unknown> = {}) {
       return { ...ctx, agent, actualAgent: actualAgent, agentResult: result };
     },
 
-    // Post-process: classification normalize, label sync, re-assert base
+    // Post-process: classification normalize and re-assert base
     postProcess: async (ctx: DraftWorkflowContext): Promise<DraftWorkflowContext> => {
       const merged = ctx.options as Record<string, unknown>;
       const normalizeDraftClassificationFn = merged.normalizeDraftClassificationFn || normalizeDraftClassification;
       const restartDraftAgentFn = merged.restartDraftAgentFn || restartDraftAgent;
       const readAgentConfigOrExitFn = merged.readAgentConfigOrExitFn || readAgentConfigOrExit;
-      const resolveTaskFileFn = merged.resolveTaskFileFn || resolveTaskFile;
       const ensureMissionBaseBranchRecordedFn = merged.ensureMissionBaseBranchRecordedFn || ensureMissionBaseBranchRecorded;
 
       const normalizationResult = normalizeDraftClassificationFn(ctx.slug, ctx.targetWorktree, {
@@ -505,7 +504,7 @@ function createDraftWorkflowAdapter(deps: Record<string, unknown> = {}) {
           errorFn
         });
         if (!postRestartNorm.ok) {
-          errorFn(fmt.status('FAIL', `Post-draft mission type labels are still invalid after restart (${postRestartNorm.reason}).`));
+          errorFn(fmt.status('FAIL', `Classification validation failed after recovery (${postRestartNorm.reason}).`));
           safeExit(1);
           return exitedContext({ ...ctx });
         } else {
@@ -513,24 +512,6 @@ function createDraftWorkflowAdapter(deps: Record<string, unknown> = {}) {
         }
       } else {
         logFn(fmt.status('PASS', `Post-draft mission type labels validated: ${normalizationResult.classification}`));
-      }
-
-      // Label sync
-      try {
-        const missionTaskResolution = resolveTaskFileFn(ctx.slug, ctx.targetWorktree);
-        if (missionTaskResolution.ok && missionTaskResolution.taskFile) {
-          const missionLabels = getTaskLabels(missionTaskResolution.taskFile);
-          if (missionLabels.length > 0) {
-            const syncOk = syncTaskLabelsToBaseWorktree(ctx.slug, ctx.targetWorktree);
-            if (syncOk) {
-              logFn(fmt.status('PASS', `Classification labels synced to base worktree: [${missionLabels.join(', ')}]`));
-            } else {
-              logFn(fmt.status('WARN', `Could not sync labels to base worktree for ${ctx.slug}. Labels remain valid on mission worktree.`));
-            }
-          }
-        }
-      } catch (labelSyncError) {
-        logFn(fmt.status('WARN', `Label sync skipped: ${/** @type {any} */ (labelSyncError).message}`));
       }
 
       // Re-assert base branch

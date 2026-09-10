@@ -1,7 +1,5 @@
 import fs from 'fs';
 import { WORKFLOW_AGENT_NAMES } from '../agents/agents.js';
-import { resolveBaseWorktree } from '../filesystem/mission-utils.js';
-import { commitTaskFileUpdate, resolveTaskFile } from './task-file-io.js';
 
 /** @returns {readonly string[]} */
 function getSupportedAgents() {
@@ -253,51 +251,6 @@ function setTaskLabels(taskFilePath: string, labels: string[]) {
 }
 
 /**
- * Sync classification labels from a mission worktree task file to the base
- * worktree task file. Reads labels from the mission worktree, writes them to
- * the base worktree using setTaskLabels, and commits the change.
- *
- * @param {string} slug - The mission slug (e.g., 'architecture migration')
- * @param {string} missionWorktree - Path to the mission worktree
- * @param {string} [baseRoot] - Optional base worktree root (resolved from missionWorktree if omitted)
- * @returns {boolean} - true if sync succeeded, false otherwise
- */
-function syncTaskLabelsToBaseWorktree(slug: string, missionWorktree: string, baseRoot?: string) {
-  try {
-    const missionResolution = resolveTaskFile(slug, missionWorktree);
-    if (!missionResolution.ok || !missionResolution.taskFile) {
-      return false;
-    }
-
-    const missionLabels = getTaskLabels(missionResolution.taskFile);
-    if (missionLabels.length === 0) {
-      return false;
-    }
-
-    const baseWorktree = baseRoot || resolveBaseWorktree(slug, { rootDir: missionWorktree });
-    const baseResolution = resolveTaskFile(slug, baseWorktree);
-    if (!baseResolution.ok || !baseResolution.taskFile) {
-      return false;
-    }
-
-    if (!setTaskLabels(baseResolution.taskFile, missionLabels)) {
-      return false;
-    }
-
-    commitTaskFileUpdate(
-      baseResolution.taskFile,
-      `backlog(${slug}): sync classification labels from mission worktree`,
-      baseWorktree
-    );
-
-    return true;
-  } catch (_) {
-    return false;
-  }
-}
-
-
-/**
  * @param {string} taskFilePath
  * @param {string} agentFamily
  * @param {{promote?: boolean}} [opts]
@@ -449,5 +402,4 @@ export {
   setTaskAssignee,
   setTaskImplementer,
   setTaskLabels,
-  syncTaskLabelsToBaseWorktree,
 };
