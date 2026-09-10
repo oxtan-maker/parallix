@@ -4,6 +4,7 @@ title: Validate draft classification in the mission worktree before recovery
 status: backlog
 assignee: []
 created_date: '2026-09-09 00:00'
+labels: [ai_sdlc, bug]
 labels:
 - ai_sdlc
 - bug
