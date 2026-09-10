@@ -1,13 +1,12 @@
 ---
 id: TASK-2473
 title: Wire resumeReview into a CLI command so stopped reviews can recover
-status: backlog
-assignee: [codex]
+status: done
+assignee: [custom]
 created_date: '2026-09-09 14:30'
 labels:
   - ai_sdlc
   - bug
-  - workflow
 dependencies: []
 priority: high
 ---

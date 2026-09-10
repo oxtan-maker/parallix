@@ -6,7 +6,7 @@ function mockedPort(calls: Array<{ operation: string; args: string[] }>) {
   const record = (operation: string) => async (context: { args: string[] }) => { calls.push({ operation, args: context.args }); };
   return {
     preflight: async (args: string[], options: Record<string, unknown> = {}) => ({ slug: 'task-2332.14', args, options }),
-    verify: record('verify'), submit: record('submit'), push: record('push'), start: record('start'), continue: record('continue'),
+    verify: record('verify'), submit: record('submit'), push: record('push'), start: record('start'), continue: record('continue'), resume: record('resume'),
     comment: record('comment'), readComments: record('readComments'), submitReview: record('submitReview'), consumeArtifacts: record('consumeArtifacts'),
     close: record('close'), status: record('status'), createEvent: record('createEvent'), backfillReview: record('backfillReview'),
     reconcileReview: record('reconcileReview'), importLegacy: record('importLegacy'),

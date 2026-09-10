@@ -12,6 +12,7 @@ export interface ReviewWorkflowPort {
   push(_context: ReviewWorkflowContext): Promise<void> | void;
   start(_context: ReviewWorkflowContext): Promise<void> | void;
   continue(_context: ReviewWorkflowContext): Promise<void> | void;
+  resume(_context: ReviewWorkflowContext): Promise<void> | void;
   comment(_context: ReviewWorkflowContext): Promise<void> | void;
   readComments(_context: ReviewWorkflowContext): Promise<void> | void;
   submitReview(_context: ReviewWorkflowContext): Promise<void> | void;

@@ -8,7 +8,7 @@ function workflow(calls: Operation[]) {
   const record = (operation: Operation) => async () => { calls.push(operation); };
   return {
     preflight: async (args: string[], options: Record<string, unknown> = {}) => ({ slug: 'task-2428', args, options }),
-    verify: async () => {}, submit: record('submit'), push: async () => {}, start: async () => {}, continue: async () => {},
+    verify: async () => {}, submit: record('submit'), push: async () => {}, start: async () => {}, continue: async () => {}, resume: async () => {},
     comment: async () => {}, readComments: async () => {}, submitReview: record('submitReview'), consumeArtifacts: record('consumeArtifacts'),
     close: async () => {}, status: async () => {}, createEvent: async () => {}, backfillReview: async () => {},
     reconcileReview: async () => {}, importLegacy: async () => {},

@@ -55,6 +55,7 @@ export class ReviewCommandUseCase {
     if (flags.has('--reconcile-review')) { return this.run(context, 'reconcileReview'); }
     if (flags.has('--start')) { return this.run(context, 'start'); }
     if (flags.has('--continue')) { return this.run(context, 'continue'); }
+    if (flags.has('--resume')) { return this.run(context, 'resume'); }
     return this.run(context, 'status');
   }
 
