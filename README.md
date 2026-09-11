@@ -8,11 +8,21 @@ Parallix is the delivery layer around those agents. It gives every piece of work
 
 Parallix is deliberately not tied to one agent vendor or model family. The same mission workflow can use different agent families for drafting, implementation, and review, including commercially hosted agents, locally hosted AI, and custom runtimes.
 
+## Install
+
+For Bash, install Parallix and load its bundled worktree-switching integration
+in one step:
+
+```sh
+npm install -g @magnusekdahl/parallix && eval "$(px shell-init bash)"
+```
+
 **The first concrete thing you can do** is run one complete mission:
 
 [![Terminal demonstration showing a new directory, mission drafting, mission inspection, autonomous review, diff inspection, and operator integration](docs/assets/first-value-demo.gif)](docs/assets/first-value-demo.gif)
 
 The operator inspects the drafted mission before execution, then inspects the reviewed diff and decides whether to run `px integrate`. Parallix does not merge autonomously.
+
 
 ## Why Parallix?
 
