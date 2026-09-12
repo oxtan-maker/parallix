@@ -10,7 +10,7 @@
 import test, { mock } from 'node:test';
 import assert from 'node:assert/strict';
 import { mockModule, installModuleMocks } from './lib/module-mock.js';
-const missionStart = mockModule<typeof import('../src/adapters/cli/mission-start.js')>('../src/adapters/cli/mission-start.js', import.meta.url);
+const missionStart = mockModule<typeof import('../src/adapters/cli/startup-preflight.js')>('../src/adapters/cli/startup-preflight.js', import.meta.url);
 await installModuleMocks();
 test.afterEach(() => mock.restoreAll());
 test('missionStart resolves classification using the mission worktree cwd, not process.cwd()', () => {

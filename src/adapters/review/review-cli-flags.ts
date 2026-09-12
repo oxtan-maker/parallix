@@ -1,21 +1,6 @@
 import * as fs from 'fs';
 import * as fmt from '../../application/presentation/cli-format.js';
 
-/** Lazily loaded handoff module. */
-let _handoff: any = null;
-/** Normalize ESM named exports and tsx's CommonJS default-export wrapper. */
-export function unwrapHandoffModule(loaded: any): any {
-  return loaded?.default || loaded;
-}
-
-export async function getHandoff(): Promise<any> {
-  if (!_handoff) {
-    const loaded = await import('../cli/commands/handoff.js');
-    _handoff = unwrapHandoffModule(loaded);
-  }
-  return _handoff as any;
-}
-
 export const REVIEW_FLAGS = new Set([
   '--actor', '--backfill-review', '--branch', '--close', '--comment', '--comment-file', '--comments', '--consume-artifacts', '--continue', '--create-event', '--disposition', '--dry-run', '--eligible-reviewer', '--focus', '--force', '--implementer', '--import-legacy', '--input-file', '--max-attempts', '--message', '--message-file', '--mission', '--no-gate', '--phase', '--poll-timeout-seconds', '--push', '--reconcile-review', '--resume', '--revision', '--reset', '--reviewer', '--round', '--target', '--start', '--status', '--submit', '--submit-review', '--tmp-dir', '--type', '--verbose', '--verdict', '--verify'
 ]);

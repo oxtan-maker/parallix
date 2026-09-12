@@ -1,8 +1,8 @@
 ---
 id: TASK-2482
 title: Remove the unused px checkpoint command and its verification footgun
-status: backlog
-assignee: []
+status: done
+assignee: [codex]
 created_date: '2026-09-10 18:38'
 labels:
   - ai_sdlc

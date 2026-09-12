@@ -57,6 +57,13 @@ export interface GateFailureReason {
   error?: string;
   /** Declared by the verification adapter; the kernel never infers this from prose. */
   transient?: boolean;
+  /**
+   * Declared coverage fact about the failing command, printed as a prompt fact
+   * rather than mixed into the diagnostic: an integration-only gate must say so
+   * explicitly, because a green ordinary verification command is then no
+   * evidence the failure is fixed (TASK-2492). The classifier never reads it.
+   */
+  coverageNote?: string;
 }
 
 /** A Git hook rejected a workflow-owned Git operation. */
@@ -323,7 +330,7 @@ function recoveryDossier(reason: ReboundReason, context: ReboundContext, history
         ? `Create the missing artifacts named above, then rerun px review ${context.slug} --continue.`
         : reason.kind === 'agent-timeout'
           ? `Produce the required ${reason.role} output named above, then rerun px review ${context.slug} --continue.`
-          : `Repair the retained handoff failure, then rerun px handoff ${context.slug}.`;
+          : `Repair the retained handoff failure, then rerun px review ${context.slug} --start.`;
   return [
     `Recovery dossier for ${context.slug}`,
     `Stage: ${reason.kind}`,
@@ -404,6 +411,7 @@ function promptSlotsFor(reason: ReboundReason): Pick<FixPromptSlots, 'area' | 'f
           ['Area', reason.area],
           ['Gate command', reason.command],
           ['Exit code', String(reason.exitCode)],
+          ...(reason.coverageNote ? [['Coverage', reason.coverageNote] as [string, string]] : []),
         ],
         remedy: `Start with the listed gate command in the listed worktree and the captured failure output. Repair the specific failing test or code path named there, including making a slow unit test hermetic when its budget is exceeded. Do not substitute a broader verification command or integration suite to rediscover the failure. Parallix reruns this exact gate after the repair.`,
       };

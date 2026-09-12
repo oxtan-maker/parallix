@@ -316,11 +316,9 @@ function reconcileMissionRebase({ slug, missionWorktree, authoritativeTaskFile, 
 /**
  * Record a lifecycle operation that changes no lane.
  *
- * `px checkpoint` records evidence without moving the mission between lanes, so
- * it has no `LaneTransitionEvent` to commit alongside. It still appends one
- * `operational_history` row through the same recorder and the same operator
- * database as the transition seam below, so the board's operation log carries
- * every lifecycle step rather than only the ones that changed lane.
+ * Non-transition operations have no `LaneTransitionEvent` to commit alongside.
+ * They still append an `operational_history` row through the same recorder and
+ * operator database as the transition seam below.
  *
  * Operator-local telemetry never blocks the command that produced it
  * (ADR 0051): a database that cannot be opened is a silent no-op.

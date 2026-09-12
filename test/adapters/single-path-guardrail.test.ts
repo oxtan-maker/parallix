@@ -35,7 +35,6 @@ const ALLOWED_ASSEMBLERS = new Set([
 
 const NON_BOARD_CONSUMERS = new Set([
   'src/adapters/cli/commands/handoff.ts',
-  'src/adapters/cli/commands/checkpoint.ts',
   'src/adapters/cli/commands/active.ts',
   'src/adapters/cli/commands/draft.ts',
   'src/adapters/cli/commands/review.ts',

@@ -1,0 +1,228 @@
+[0;32masciinema: recording asciicast to /home/magnus/code/parallix-task-2485/docs/assets/first-value-demo.cast[0m
+[0;32masciinema: exit opened program when you're done[0m
+[?2004h$ px draft "fix hello world greeting"
+[?2004lDrafting mission parallix-adhoc-0001
+  branch    mission/parallix-adhoc-0001
+  worktree  /tmp/parallix-demo-SADo9I/hello-parallix-parallix-adhoc-0001
+
+Running custom to write the mission contract...
+[INFO] Selected agent for step "draft": custom (pi)
+[INFO] Launching: /home/magnus/.nvm/versions/node/v24.15.0/bin/pi --print --mode json --approve <prompt: 5513 chars>
+[INFO] Working directory: /tmp/parallix-demo-SADo9I/hello-parallix-parallix-adhoc-0001
+I'll start by reading the backlog task, the MISSION.md scaffold, and checking for graphify output.
+
+No graphify index present. Let me inspect the repo to understand the actual code and the verify script.
+
+Now I understand the bug: `hello.sh` prints `"Helo, Wrld!"` but `verify-local.sh` expects `"Hello, World!"`. The backlog task has labels `[unknown]` — no `bug` label, so the bug-labeled section does not apply. Let me fill in the MISSION.md.
+
+Now update the backlog task file (preserving `assignee`, `unknown` label, and file identity) with progress notes.
+
+Now verify the draft with the gate.
+
+The gate exits `1` (red), which is the correct and expected state for a draft: I'm forbidden from implementing the fix, so `hello.sh` still prints the buggy string. The verification gate is the execution-phase gate, not a draft-completeness check.
+
+Summary of what I produced:
+
+- **`MISSION.md`** filled with concrete content across all scaffolded sections:
+  - **Goal**: make `hello.sh` print exactly `Hello, World!` so the gate passes.
+  - **Why Now**: the gate asserts `Hello, World!` but the script emits `Helo, Wrld!`, leaving the repo broken.
+  - **Refinement Signals**: NEL bucket `Small (0–80)`, confidence High, and preserved the `unknown` label (no separate mission-type frontmatter added).
+  - **Scope / Out of Scope / Success Criteria** (falsifiable, with byte-exact stdout requirement), **Risks and Assumptions**, **Checkpoints** (with the required `### Checkpoint Documentation Requirements` block, the exact `## Goal Check` heading, the 3-column `| Criterion | Evidence | Status |` table, durable-evidence emphasis on repo commands/paths like `./scripts/verify-local.sh` and `scripts/verify-local.sh`, and the explicit weak-agent failure-mode warning), **Gates** (only the runnable command, no outcome prose), **Restricted Areas**, and **Stop Rules**.
+- **Backlog task** updated with draft notes — `assignee` and `unknown` label preserved, file identity/renaming untouched.
+- No `bug` label present on the task, so the bug-labeled reproduction-test section was correctly skipped (no `Reproduction-Test:` line).
+- No graphify index existed; no code was modified (only `MISSION.md` and the backlog task).
+
+The harness will transition the task to `ready` after a clean draft; I have not transitioned it.
+[PASS] Drafted parallix-adhoc-0001 in 26s: fix hello world greeting (parallix-adhoc-0001)
+  contract  /tmp/parallix-demo-SADo9I/hello-parallix-parallix-adhoc-0001/missions/parallix-adhoc-0001/MISSION.md
+  branch    mission/parallix-adhoc-0001
+  agent     custom
+
+Goal
+  Make `hello.sh` print exactly `Hello, World!` (with a trailing newline) so
+  that the repository verification gate `./scripts/verify-local.sh` passes.
+  The script currently prints the mistyped string `Helo, Wrld!`, which fails
+  the gate's equality check `test "$(./hello.sh)" = "Hello, World!"`.
+
+  4 success criteria · 3 checkpoints · 1 gate · NEL Small (0–80)
+
+[INFO] Working directory: /tmp/parallix-demo-SADo9I/hello-parallix-parallix-adhoc-0001
+[INFO] Next: px active
+[px] Switched terminal context to: /tmp/parallix-demo-SADo9I/hello-parallix-parallix-adhoc-0001
+[?2004h$ sed -n '1,120p' missions/parallix-adhoc-0001/MISSION.md
+[?2004l# Mission: fix hello world greeting (parallix-adhoc-0001)
+
+## Goal
+Make `hello.sh` print exactly `Hello, World!` (with a trailing newline) so that the repository verification gate `./scripts/verify-local.sh` passes. The script currently prints the mistyped string `Helo, Wrld!`, which fails the gate's equality check `test "$(./hello.sh)" = "Hello, World!"`.
+
+## Why Now
+The repository's single source of truth for "correct" output lives in `scripts/verify-local.sh`, which asserts `hello.sh` emits `Hello, World!`. The current `hello.sh` output (`Helo, Wrld!`) does not match, so the gate fails on every run and the repo is in a broken state. Fixing the greeting restores a green verification gate and a coherent, working baseline.
+
+## Refinement Signals
+- Predicted NEL bucket: Small (0–80)
+- Confidence: High
+- Selection note: activate as-is
+- Main drivers: failing verification gate, single-line string correction in an existing script
+
+## Scope
+- Edit only the string literal inside `hello.sh` so its stdout is exactly `Hello, World!\n`.
+- Keep the `printf`-based implementation approach already used in `hello.sh`.
+- Verify the fix by running the existing gate `./scripts/verify-local.sh`.
+- Update the backlog task file `backlog/tasks/parallix-adhoc-0001 - fix-hello-world-greeting.md` with progress notes without altering its `assignee` field.
+
+## Out of Scope
+- Changing `scripts/verify-local.sh` or any other script.
+- Adding new files, dependencies, tests, or configuration.
+- Refactoring `hello.sh` into another language or build system.
+- Introducing locale, encoding, or argument-parsing features.
+- Any change outside `hello.sh`, the backlog task file, and this `MISSION.md`.
+
+## Success Criteria
+> **Falsifiability rule (ADR 0039 Part 2):** Each criterion must be falsifiable.
+
+- `./hello.sh` stdout equals the exact string `Hello, World!` followed by a single newline (verified via `./scripts/verify-local.sh`).
+- `./scripts/verify-local.sh` exits with status `0` (green) on the mission tree.
+- `hello.sh` still contains exactly one `printf` statement producing the greeting (no duplicate or extra output lines).
+- No other file in the working tree is modified beyond `hello.sh`, the backlog task file, and `MISSION.md`.
+
+## Risks and Assumptions
+- The gate compares full stdout, so any stray whitespace, missing newline, or extra character causes failure; the replacement must be byte-exact.
+- Assumption: `printf` is the intended output mechanism and is available in the shell running `hello.sh` (shebang `#!/usr/bin/env bash`).
+- Assumption: the correct target string is exactly `Hello, World!` as encoded in `scripts/verify-local.sh`.
+
+## Checkpoints
+- CP 1: Author a failing reproduction of the gate (confirm `./scripts/verify-local.sh` is red against the current `hello.sh`).
+- CP 2: Correct the greeting string literal in `hello.sh` to emit `Hello, World!`.
+- CP 3: Run `./scripts/verify-local.sh` and confirm it passes (green); record evidence in the checkpoint document.
+
+### Checkpoint Documentation Requirements
+Every checkpoint document (CP-N.md) MUST include:
+- A summary of work done
+- A `## Goal Check` section
+- A 3-column pipe-delimited markdown table with columns: Criterion | Evidence | Status
+- At least one evidence row per criterion using durable, verifiable references. Parallix already accepts:
+  1. **Recognized repo commands or paths** — e.g., `` `./scripts/verify-local.sh` ``, `` `./hello.sh` ``, or `` `git status` ``
+  2. **Test names** — e.g., a matching name from the repo's test suite (must match a test name in the repo)
+  3. **Test file paths** — e.g., `scripts/verify-local.sh` (must be an existing file)
+  4. **ADR references** — e.g., `ADR 0039` (must correspond to an existing file under `docs/adr/`)
+  5. **File:line references** — accepted when needed, but line numbers eventually rot; prefer the forms above
+- Raw `stat`/`ls` output or generic prose may appear as supplemental context, but pair them with one of the accepted references above. Concretely: a bare `ls` or `stat` of `hello.sh`, or prose saying "the script now prints the right text," is NOT sufficient evidence. Pair such output with a runnable command like `` `./scripts/verify-local.sh` `` or the exact path `scripts/verify-local.sh` to prove the behavior.
+- A non-generic `Next action:` line at the bottom
+
+Example Goal Check table:
+
+| Criterion | Evidence | Status |
+|---|---|---|
+| Draft prompt defines checkpoint evidence rules | `prompts/draft.md` | PASS |
+| Gate reproduces failure against current script | `` `./scripts/verify-local.sh` `` returns non-zero | RED |
+| Verification gate ran and passed | `` `./scripts/verify-local.sh` `` returns `0` | PASS |
+
+## Gates
+- [ ] ./scripts/verify-local.sh
+
+## Restricted Areas
+- Do not modify `scripts/verify-local.sh`, `workflow.config.json`, or any file under `config/`, `backlog/`, or `missions/` other than this `MISSION.md`.
+- Do not add, remove, or rename backlog task files.
+- Do not commit, branch, or run review/integrate phases; this is a draft-only mission.
+
+## Stop Rules
+- Stop editing once `./scripts/verify-local.sh` is green and all checkpoint documents are written.
+- Do not implement anything beyond the single greeting string correction.
+- Do not transition the backlog task; the harness transitions it to `ready` after a clean draft.
+- Stop immediately if the correct target string turns out to differ from what `scripts/verify-local.sh` asserts; re-read the gate and reconcile before proceeding.
+[?2004h$ px active
+[?2004l[INFO] Mission parallix-adhoc-0001: fix hello world greeting
+[WARN] Mission doc: found MISSION.md but no checkpoints yet. Start from CP-1.
+[INFO] Implementer: custom
+No `graphify-out/graph.json`, so I'll proceed without graphify. Starting with CP-1.
+
+Gate is red (exit 1), confirming the failure. Now writing CP-1.
+
+Gate is green (exit 0). Now updating the backlog task file's Draft Notes without altering the `assignee` field.
+
+I skipped CP-2.md. Writing it now.
+
+All checkpoints complete and the gate is green. Summary of work:
+
+- **CP-1**: Confirmed the gate was red (`./scripts/verify-local.sh` returned `1`) against the current `hello.sh` which printed `Helo, Wrld!`.
+- **CP-2**: Corrected the single `printf` literal in `hello.sh` to `Hello, World!`, preserving the printf-based implementation.
+- **CP-3**: Ran the gate — it now passes with exit `0`; `./hello.sh` prints exactly `Hello, World!\n`. Updated the backlog task file's Draft Notes without altering the `assignee` field.
+
+Gate check (`./scripts/verify-local.sh`) → exit `0` (green). `git status` confirms only allowed files changed: `hello.sh`, the backlog task file, and the CP docs under the mission directory. No commits were made (draft-only mission; commit/review phases are restricted). Stop rule satisfied: gate is green and all checkpoint documents are written.[WARN] Execute safety harness: execute agent left uncommitted changes. Creating fallback commit.
+   M backlog/tasks/parallix-adhoc-0001 - fix-hello-world-greeting.md
+   M hello.sh
+  ?? missions/parallix-adhoc-0001/CP-1.md
+  ?? missions/parallix-adhoc-0001/CP-2.md
+  ?? missions/parallix-adhoc-0001/CP-3.md
+[PASS] Execute safety harness committed remaining changes with "execute(parallix-adhoc-0001): capture agent output".
+[PASS] Implementation complete (custom).
+[PASS] Found all 3 declared checkpoint document(s) in /tmp/parallix-demo-SADo9I/hello-parallix-parallix-adhoc-0001/missions/parallix-adhoc-0001.
+[INFO] Repository gates (handoff): none configured — skipping.
+[FAIL] The final checkpoint at missions/parallix-adhoc-0001/CP-3.md is missing a "## Goal Check" section. Review requires a goal-check table with real evidence before handoff.
+
+Relaunchable error detected (IncompleteEvidence). Bouncing to the implementer...
+[INFO] Bouncing to implementer (custom) with a IncompleteEvidence fix prompt. Attempt 1/2.
+[INFO] Selected agent for step "active": custom (pi)
+[INFO] No prior custom session for parallix-adhoc-0001 (implementer); launching fresh.
+[INFO] Launching: /home/magnus/.nvm/versions/node/v24.15.0/bin/pi --print --mode json --approve <prompt: 1287 chars>
+[INFO] Working directory: /tmp/parallix-demo-SADo9I/hello-parallix-parallix-adhoc-0001
+Relaunched custom for repair. Session persistence will be used if available.
+The gate passes; the failure is purely that CP-3.md (and the other checkpoints) use plain `Goal Check:` text instead of the required `## Goal Check` heading. Fixing all checkpoints to comply:
+
+Fixed and verified.
+
+**Context compacted:**
+- **Mission:** `parallix-adhoc-0001` — fix `hello.sh` to print exactly `Hello, World!\n` so `./scripts/verify-local.sh` passes.
+- **Committed evidence:** CP-1 (red repro), CP-2 (literal corrected), CP-3 (gate green); `hello.sh` now `printf "Hello, World!\n"`.
+- **Gate diagnostic:** CP-3.md missing a `## Goal Check` section.
+- **Classification:** IncompleteEvidence — AutoSendBack. **Retry:** 1/2.
+- **Unresolved finding & resolution:** All checkpoint docs used plain `Goal Check:` text instead of the required `## Goal Check` heading; corrected all three (CP-1/2/3) to the proper H2 heading.
+- **Branch revision:** draft-only mission, no commits.
+
+**Fix applied:** Changed the `Goal Check:` line in `missions/parallix-adhoc-0001/CP-3.md` (and the sibling checkpoints for consistency) to the required `## Goal Check:` heading. The Goal Check table with evidence rows and non-generic `Next action:` line were already present.
+
+**Verification:**
+- `grep "^## Goal Check"` now matches in CP-1.md, CP-2.md, CP-3.md.
+- `./scripts/verify-local.sh` exits `0` (green); `hello.sh` outputs exactly `Hello, World!\n`.
+
+No remaining failures. The re-run should pass.[INFO] Repository gates (handoff): none configured — skipping.
+[FAIL] The latest checkpoint document is modified but uncommitted at missions/parallix-adhoc-0001/CP-3.md. Commit the implementation evidence before handoff.
+[INFO] Recovery incident changed; reclassified as IncompleteEvidence.
+[WARN] HANDOFF VERIFICATION FAILURE: the check still fails after attempt 1/2.
+[INFO] Bouncing to implementer (custom) with a IncompleteEvidence fix prompt. Attempt 2/2.
+[INFO] Selected agent for step "active": custom (pi)
+[INFO] Resuming custom session for parallix-adhoc-0001 (implementer). Session: 01a08fa9-00c4-7188-9e2b-0363cd8f7a06
+[INFO] Launching: /home/magnus/.nvm/versions/node/v24.15.0/bin/pi --print --mode json --approve --session-id 01a08fa9-00c4-7188-9e2b-0363cd8f7a06 <prompt: 1697 chars>
+[INFO] Working directory: /tmp/parallix-demo-SADo9I/hello-parallix-parallix-adhoc-0001
+Relaunched custom for repair. Session persistence will be used if available.
+[FAIL] HANDOFF VERIFICATION FAILURE: Could not launch implementer (custom): ENOENT: no such file or directory, mkdir '/home/magnus/.pi/agent/sessions/--tmp-parallix-demo-SADo9I-hello-parallix-parallix-adhoc-0001--'
+[FAIL] Recovery dossier for parallix-adhoc-0001
+Stage: handoff-verification
+HEAD: not captured
+Last action: stage recovery
+Failure history: handoff-verification:The final checkpoint at missions/parallix-adhoc-0001/CP-3.md is missing a "## Goal Check" section. Review requires a goal-check table with real evidence before handoff. -> handoff-verification:The final checkpoint at missions/parallix-adhoc-0001/CP-3.md is missing a "## Goal Check" section. Review requires a goal-check table with real evidence before handoff.
+The latest checkpoint document is modified but uncommitted at missions/parallix-adhoc-0001/CP-3.md. Commit the implementation evidence before handoff.
+Last diagnostic: Could not launch implementer (custom): ENOENT: no such file or directory, mkdir '/home/magnus/.pi/agent/sessions/--tmp-parallix-demo-SADo9I-hello-parallix-parallix-adhoc-0001--'
+Successful checks: none recorded before exhaustion
+Stopped because: launcher budget spent (1 session retries; 1 failed launches)
+Manual next action: Repair the retained handoff failure, then rerun px handoff parallix-adhoc-0001.
+Automated handoff failed: Gate failure persisting after 2 relaunch attempts. Manual intervention required.
+       You may need to complete the handoff manually:
+       px review parallix-adhoc-0001 --submit
+[FAIL] legacy handoff failed
+[?2004h$ git diff main...HEAD -- hello.sh
+[?2004l[1mdiff --git a/hello.sh b/hello.sh[m
+[1mindex 29408e2..ae03c97 100755[m
+[1m--- a/hello.sh[m
+[1m+++ b/hello.sh[m
+[36m@@ -1,3 +1,3 @@[m
+ # Hello world[m
+ [m
+[31m-printf "Helo, Wrld!\n"[m
+[32m+[m[32mprintf "Hello, World!\n"[m
+[?2004h$ px integrate
+[?2004l[FAIL] Mission parallix-adhoc-0001 is active with no authoritative Review. Run px handoff parallix-adhoc-0001 (or record a human decision through px review) before integration.
+[?2004h$ exit
+[?2004lexit
+[0;32masciinema: recording finished[0m
+[0;32masciinema: asciicast saved to /home/magnus/code/parallix-task-2485/docs/assets/first-value-demo.cast[0m

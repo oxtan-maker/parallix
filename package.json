@@ -1,7 +1,7 @@
 {
   "name": "@magnusekdahl/parallix",
-  "version": "1.5.98",
-  "description": "AI mission workflow toolkit with a px CLI — local-first, human-in-the-loop multi-agent development",
+  "version": "1.5.109",
+  "description": "Trust ladder for AI coding work — separate review, configured verification, conditional Linux confinement, and human-owned merges",
   "license": "AGPL-3.0-or-later",
   "private": false,
   "type": "module",
@@ -16,7 +16,7 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/magnusekdahl/parallix.git"
+    "url": "git+https://github.com/oxtan-maker/parallix.git"
   },
   "keywords": [
     "parallix",
@@ -28,9 +28,9 @@
     "cli"
   ],
   "bugs": {
-    "url": "https://github.com/magnusekdahl/parallix/issues"
+    "url": "https://github.com/oxtan-maker/parallix/issues"
   },
-  "homepage": "https://github.com/magnusekdahl/parallix#readme",
+  "homepage": "https://github.com/oxtan-maker/parallix#readme",
   "files": [
     "NOTICES",
     "build/",

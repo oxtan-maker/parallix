@@ -5,8 +5,9 @@
 // fallbacks, the review outcome, the diff, the result) get seconds, while the
 // agent token streams are skimmed.
 import { readFileSync, writeFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 
-const castPath = new URL('../docs/assets/first-value-demo.cast', import.meta.url).pathname;
+const castPath = process.argv[2] ?? new URL('../docs/assets/first-value-demo.cast', import.meta.url).pathname;
 const [header, ...lines] = readFileSync(castPath, 'utf8').trim().split('\n');
 const events = lines.map(line => JSON.parse(line));
 
@@ -56,19 +57,20 @@ function hold(text, index) {
   // enough to read the readiness view and the SHA transition, not flash past.
   // Checked before the last-event fallback so the final landing event gets
   // its own hold rather than the generic tail hold.
-  if (/READY TO INTEGRATE/.test(text)) { return 5; }
-  if (/✓ integrated into/.test(text)) { return 7; }
-  if (/ → /.test(text) && /^\s+\S+\s+\S+\s+→\s+\S+$/.test(text)) { return 5; }
-  if (index === events.length - 1) { return 4; }
+  if (/READY TO INTEGRATE/.test(text)) { return 7; }
+  if (/✓ integrated into/.test(text)) { return 9; }
+  if (/ → /.test(text) && /^\s+\S+\s+\S+\s+→\s+\S+$/.test(text)) { return 6; }
+  if (index === events.length - 1) { return 5; }
   if (kinds[index] === KEYSTROKE) { return 0.06; }
   if (kinds[index] === PROMPT) { return 0.4; }
-  if (dwell[index]) { return 4; }
-  if (/^# Mission:|^## (Goal|Success Criteria|Checkpoints)/m.test(text)) { return 3; }
-  if (/Integration completed successfully/.test(text)) { return 4; }
-  if (/reviewer outcome =|Autonomous review stopped|reviewer approved/.test(text)) { return 1.5; }
-  if (/Limit hit|fell back|blocked|\(attempt \d\)|safety harness|rolling task state back/.test(text)) { return 1.5; }
-  if (/Selected agent for step/.test(text)) { return 1.2; }
-  if (/^diff --git|^[+-]{1,3} /m.test(text)) { return 0.2; }             // diff under review
+  if (dwell[index]) { return 5; }
+  if (/^# Mission:|^## (Goal|Success Criteria|Checkpoints)/m.test(text)) { return 4; }
+  if (/Integration completed successfully/.test(text)) { return 5; }
+  if (/reviewer outcome =|Autonomous review stopped|reviewer approved/.test(text)) { return 3; }
+  if (/Limit hit|fell back|blocked|\(attempt \d\)|safety harness|rolling task state back/.test(text)) { return 2.5; }
+  if (/Selected agent for step/.test(text)) { return 2; }
+  if (/Mission .*:|Implementation complete|Repository verification passed|ready for independent review|REVIEW —/.test(text)) { return 3; }
+  if (/^diff --git|^[+-]{1,3} /m.test(text)) { return 3; }               // diff under review
   if (/\[(PASS|INFO|WARN|FAIL)\]|^Step \d/m.test(text)) { return 0.03; } // harness log
   return 0.008;                                                         // agent stream
 }
@@ -81,5 +83,5 @@ const retimed = events.map(([, kind, text], index) => {
   at += hold(plain(text), index);
   return line;
 });
-writeFileSync(castPath, [header, ...retimed].join('\n') + '\n');
+writeFileSync(resolve(castPath), [header, ...retimed].join('\n') + '\n');
 console.log(`retimed ${events.length} events to ${at.toFixed(1)}s`);

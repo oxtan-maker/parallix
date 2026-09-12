@@ -18,7 +18,6 @@ const STATE_COMMAND_MAP: Record<string, string> = {
 };
 
 export const KNOWN_COMMANDS: string[] = [
-  'mission-start',
   'verify-env',
   'verify',
   'setup',
@@ -27,9 +26,7 @@ export const KNOWN_COMMANDS: string[] = [
   'active',
   'recover',
   'status',
-  'checkpoint',
   'review',
-  'handoff',
   'integrate',
   'cancel',
   'resolve-conflict',
@@ -206,9 +203,6 @@ export function buildSuggestionSuffix(command: string): string {
   if (command === 'diff' || command === 'resolve-conflict') {
     return ' <slug>';
   }
-  if (command === 'checkpoint') {
-    return ' <slug> <cp-name> "<next-action>"';
-  }
   return '';
 }
 
@@ -235,19 +229,18 @@ export function printUsage(): void {
 Usage: px <command> [args]
 
 ${fmt.bold('Core Commands:')}
-  mission-start [<slug>] Implementer's startup preflight.
-  verify-env            Diagnostic preflight: prints a USABLE / NOT USABLE verdict with remediation.
-  verify [<area>]       Run the configured repository verification gate.
-  setup                 Interactive setup wizard: writes config, bootstraps Forgejo, and verifies the install.
-  setup-review          Legacy Forgejo-only bootstrap for tokens, repo creation, and git review remote.
   draft [<slug>] [--agent <family>]  Mission setup automation; use --agent to select the draft implementer family.
   active [<slug>] [--implementer <family>]  Run preflight and launch the execute agent; use --implementer to select its family.
+  review [<slug>] [--verify|--submit|--push [--force]|--comment "<msg>"|--comment-file <path>|--submit-review <outcome> [--message "<msg>"|--message-file <path>]|--start|--continue] [--implementer <a>] [--reviewer <a>] [--focus <f>] [--max-attempts <n>] [--dry-run] [--reset] [--no-gate]
+  integrate [<slug>] [--dry-run] [--no-integration-gates] [--real-agent codex --real-agent-model gpt-5.6-luna]  Land a reviewed mission into the local integration checkout on main. --no-integration-gates skips integration-time staging/e2e gates; the paired real-agent flags override the Codex integration-gate runner.
+
+${fmt.bold('Advanced Commands:')}
+  verify-env            Diagnostic preflight: prints a USABLE / NOT USABLE verdict with remediation.
+  verify [<area>]       Run the configured repository verification gate.
+  setup                 Interactive setup wizard: writes config, optionally bootstraps Forgejo, and verifies the install.
+  setup-review          Legacy Forgejo-only bootstrap for tokens, repo creation, and git review remote.
   recover <slug>        Reconcile an interrupted active task with its closed durable aggregate.
   status [<slug>]       Unified mission and repository overview.
-  checkpoint [<slug>] <cp> "<next>"  Verify, commit, and push checkpoint.
-  review [<slug>] [--verify|--submit|--push [--force]|--comment "<msg>"|--comment-file <path>|--submit-review <outcome> [--message "<msg>"|--message-file <path>]|--start|--continue] [--implementer <a>] [--reviewer <a>] [--focus <f>] [--max-attempts <n>] [--dry-run] [--reset] [--no-gate]
-  handoff [<slug>] [--no-gate] [--no-recover] [--force]  Sync, push, and transition mission to review.
-  integrate [<slug>] [--dry-run] [--no-integration-gates] [--real-agent codex --real-agent-model gpt-5.6-luna]  Land a reviewed mission into the local integration checkout on main. --no-integration-gates skips integration-time staging/e2e gates; the paired real-agent flags override the Codex integration-gate runner.
   cancel <slug> --yes   Delete one mission's lifecycle rows from the operator database. Irreversible; usage statistics are kept and the branch and worktree stay for you to remove.
   resolve-conflict [<slug>]       Detect merge conflicts in the mission worktree and emit resolution guidance.
   rebase [<slug>] [--push]          Rebase mission branch onto the primary integration branch (main) with auto-resolution of mission-specific conflicts.

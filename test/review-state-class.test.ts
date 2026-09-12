@@ -180,7 +180,7 @@ test('ReviewState save reports write-failed when the mission has no review', asy
     });
     const result = await state.save(root, store);
     assert.equal(result.outcome, 'write-failed');
-    assert.match(result.diagnostic, /px handoff starts the review/);
+    assert.match(result.diagnostic, /--start starts the review/);
   }, { seedReview: false });
 });
 

@@ -293,6 +293,17 @@ When editing live documentation:
 Run the repository's documentation verification after changing live
 documentation.
 
+The documentation verifier (`scripts/verify-docs.mjs`) enforces two contracts.
+First, live docs must not contain volatile implementation evidence (source
+paths or test inventories) and every relative link must resolve. Second, the
+npm manifest must point at the operator-confirmed canonical location: the
+verifier compares `package.json` `repository.url`, `homepage`, and `bugs.url`
+against `git remote get-url origin` and fails on disagreement, normalizing
+only representational differences (transport syntax, a trailing `.git`, a
+`#readme` fragment, or an `/issues` suffix). The comparison is offline; it
+never makes a network request. A regression test covers the failing case — a
+manifest whose URLs disagree with `origin` is rejected.
+
 ## 15. Review checklist
 
 Before committing a README or substantial documentation change, ask:

@@ -654,7 +654,13 @@ async function runHandoffAndReview(slug, worktree, agent, options = {}) {
   // The review loop launches other families on this same mission. Hand the
   // caller's publication seam straight through so the board follows the
   // reviewer and the implementer answering findings (TASK-2373).
-  await _startReviewLoop(slug, { implementer: agent, worktree, recordStageStatsSafeFn: recordStageStatsSafe, onAgentLaunched, onAutonomousStop });
+  // SC3: handoff already ran in this function. Tell the loop to skip its own
+  // handoff without flipping it into resume mode: px active post-execute is a
+  // fresh review start, not a --continue, so it must not take the resume-only
+  // behaviors (reviewer reuse, existing-review/disposition skip-poll) and must
+  // not run performHandoff a second time (which would resubmit/mutate the
+  // Review the active path just created).
+  await _startReviewLoop(slug, { implementer: agent, worktree, skipHandoff: true, recordStageStatsSafeFn: recordStageStatsSafe, onAgentLaunched, onAutonomousStop });
   return true;
 }
 

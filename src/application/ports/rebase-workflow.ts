@@ -113,7 +113,14 @@ export interface RebaseWorkflowPort {
 
   // --- agents adapter ----------------------------------------------------
   startAgent(_step: string, _options: Record<string, unknown>): Promise<AgentLaunchResult>;
-  selectAgent(_options: { role: string }): string | null;
+  // Production contract (launcher-selection.ts): `selectAgent(step, options)`
+  // where `options.exclude` is a Set of families to skip. Called with policy
+  // key `active` (config/agents.json key that owns implementation work) and an
+  // exclusion for the pinned/blocked implementer, so eligibility is read from
+  // config/agents.json (an unknown key falls back to all workflow families) and
+  // the blocked family is never re-selected (F1). Throws on pool
+  // exhaustion/unavailability; the caller treats that as no replacement (F2).
+  selectAgent(_step: string, _options?: { exclude?: Set<string>; worktree?: string }): string | null;
   // Real launcher-status contract: probe a *selected* agent. An absent launcher
   // returns { supported: false }, so only a supported family is launchable.
   workflowLauncherStatus(_agent: string, _worktree?: string): { supported: boolean; agent: string | null };

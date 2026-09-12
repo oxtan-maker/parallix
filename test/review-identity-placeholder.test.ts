@@ -17,7 +17,7 @@ test('buildCompactReviewPrompt uses actualReviewer when provided', () => {
     actualReviewer: 'vibe'
   });
 
-  assert.match(prompt, /The workflow runs the declared verification gate before this review\. Do not invoke `px` yourself, with one exception/);
+  assert.match(prompt, /Do not invoke `px` yourself, with one exception/);
   assert.match(prompt, /\$review all/);
   assert.doesNotMatch(prompt, /Reviewer: claude/);
   assert.doesNotMatch(prompt, /Reviewer: vibe/);

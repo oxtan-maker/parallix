@@ -150,7 +150,10 @@ test('buildCompactReviewPrompt inlines the contract instead of redirecting to do
     attempt: 1
   });
   assert.match(prompt, /Entrypoint: \$review all/);
-  assert.match(prompt, /workflow runs the declared verification gate before this review/i);
+  // task-2483 replaced the vague verification sentence with the machine-derived
+  // already-executed controls block and its explicit do-not-re-run rule.
+  assert.match(prompt, /which controls the workflow has already executed for this mission and which it has not/i);
+  assert.match(prompt, /Do not re-run a listed command whose recorded status is `passed`/);
   assert.match(prompt, /Do not invoke `px` yourself/);
   const artifactDir = resolveArtifactDir(process.cwd());
   assert.ok(prompt.includes(`${artifactDir}/task-089-review-findings.md`));

@@ -556,6 +556,11 @@ test('SC1 reverse: all durable-IO files under src/ are present in the inventory'
     'src/adapters/review/review-static-evidence.ts',
     'src/adapters/review/review-cli-flags.ts',
     'src/adapters/review/review-workflow-adapter.ts',
+    // Review prompt assembly reads the mission document and the gitignored
+    // `.workflow/gate-result.json` observation left by the verification gate
+    // (TASK-2483). Same category as `verification.ts` and `redgreen.ts`: gate
+    // metadata and mission markers, read-only, owning no ADR 0053 concept.
+    'src/adapters/review/review-prompts.ts',
     // Local Forgejo setup writes credentials and product configuration, not
     // domain state owned by the operator database.
     'src/adapters/review/setup-review-auth.ts',

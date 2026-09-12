@@ -144,6 +144,20 @@ C3 (error classifier) → C2 (gate-failure send-back) → C1 (pre-review gate) �
 
 C3 first because it provides the dispatch framework that C1 and C2 plug into. C2 before C1 because C2 is lower complexity and higher immediate ROI (handoff-time gate failures are already the blocking point; pre-review-round enforcement adds a new check point). C4-C7 remain sequenced backlog work rather than untracked ideas.
 
+## Refinements
+
+### Agent-capacity diagnostics are not infrastructure blockers (task-2494)
+
+The classifier gained one narrowly-scoped rule, checked before the infrastructure (`InfraBlocker`) rule: a diagnostic that names an agent usage / quota / rate limit (usage limit, `hit your ... limit`, quota, a `429` tied to rate/usage/quota, or a `resource_exhausted` / resource-exhausted signal) now classifies as the new `AgentCapacity` class with an `AutoRepair` dispatch action instead of falling through to the catch-all `InfraBlocker`/`HumanOnly` default.
+
+The rule requires an agent-capacity marker and never matches a generic `limit`. It also carries an explicit-infrastructure guard: when the diagnostic names an infrastructure marker (Forgejo, token, infrastructure, authentication failed, forbidden, unauthorized, connection refused, network error), the infra marker wins and the message stays `InfraBlocker`/`HumanOnly`. This prevents a `quota`-bearing infra diagnostic such as "Forgejo quota exceeded" or "network error: quota exhausted" from being misclassified as agent capacity (task-2494 round 3).
+
+`rate limit` is deliberately *not* an infra marker: agent-branded rate limits (Claude/Codex/Mistral/Vibe rate limit reached/exceeded, Qwen `Requests rate limit exceeded`, or a `429` rate limit) follow the `agent-limit.ts` patterns and classify as `AgentCapacity`. The capacity rule matches `rate limit`, `rate_limit`, and `ratelimit` (reached/exceeded) to cover Codex's underscore signature. Only an infra-branded rate limit carrying a separate network/infrastructure/token marker stays `InfraBlocker` (task-2494 round 4).
+
+This backs the `px rebase` shared-file conflict path: when a pinned implementer hits a usage limit mid-rebase, the launcher records the agent block and refuses a family fallback. The rebase path now either substitutes an eligible replacement family when mission policy permits (via the existing eligibility/selection surface) or emits a final diagnostic that names the usage block and its reset time — never an infrastructure or Forgejo framing, and never the old "does not substitute" hard-refusal.
+
+The `AgentCapacity` class is an additive entry in the dispatch table; the eight original classes and their mappings are unchanged.
+
 ## Consequences
 
 ### Positive

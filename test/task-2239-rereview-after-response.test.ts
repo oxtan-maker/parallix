@@ -29,6 +29,8 @@ function reviewLoopHarness(overrides: Record<string, unknown> = {}) {
     transitionTaskFn: () => true,
     transitionVirtualFn: () => true,
     rebaseBeforeReviewRoundFn: async () => ({ ok: true }),
+    // SC1: a provider-disabled --start now performs the handoff transition.
+    performHandoffFn: async () => ({ ok: true }),
     runPreReviewGateFn: async () => ({ ok: true, area: 'all', exitCode: 0 }),
     startAgentFn: async (step: string, options: { agent: string }) => {
       launches.push({ step, agent: options.agent });

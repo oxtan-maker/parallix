@@ -15,13 +15,13 @@ const [, ...events] = readFileSync(castPath, 'utf8').trim().split('\n').map(JSON
 const frames = [];
 const frameDir = mkdtempSync(join(tmpdir(), 'parallix-demo-'));
 
-const COLUMNS = 100;
-const ROWS = 24;
+const COLUMNS = 140;
+const ROWS = 32;
 const BACKGROUND = '#101418';
 const DEFAULT_FG = '#e6edf3';
-const FONT_SIZE = 15;
-const WIDTH = 960;
-const HEIGHT = 520;
+const FONT_SIZE = 16;
+const WIDTH = 1440;
+const HEIGHT = 780;
 // ImageMagick renders SVG with its own MSVG renderer, which ignores
 // `font-family` outright — every frame came out in a proportional face, so
 // column arithmetic could not line up. Frames are drawn with ImageMagick's text
@@ -29,8 +29,8 @@ const HEIGHT = 520;
 // derived from the font's metrics so the columns stay exact if the font changes.
 const FONT = 'DejaVu-Sans-Mono';
 const CHAR_WIDTH = measureAdvance();
-const LINE_HEIGHT = 20;
-const MARGIN_X = 28;
+const LINE_HEIGHT = 22;
+const MARGIN_X = 36;
 const MARGIN_Y = 42;
 const BOLD_PALETTE = {
   '#484f58': '#8b949e', '#ff7b72': '#ffa198', '#3fb950': '#56d364', '#d29922': '#e3b341',
@@ -133,7 +133,7 @@ function put(text) {
 }
 
 function renderArgs(frame) {
-  // The pty wraps at 100 columns without emitting newlines; do the same here.
+  // The pty wraps at 140 columns without emitting newlines; do the same here.
   const lines = screen.flatMap(wrap).slice(-ROWS);
   const draws = lines.flatMap((line, row) => {
     let column = 0;

@@ -596,7 +596,7 @@ async function createEvent(slug: string, eventType: string, params: CreateEventP
     error(fmt.status(
       'FAIL',
       `Cannot store review event for "${slug}": no Review in the operator database. ` +
-      `px handoff starts a review; px review ${slug} --backfill-review migrates a pre-cutover mission.`,
+      `px review ${slug} --start starts a review; px review ${slug} --backfill-review migrates a pre-cutover mission.`,
     ));
     return { ok: false, path: null, error: `No Review in the operator database for ${slug}` };
   }

@@ -91,7 +91,7 @@ test('writeReviewState reports write-failed when the mission has no review', asy
   await withMissionDatabase('task-rs-6', async ({ root, slug, store }) => {
     const result = await writeReviewState(slug, { reviewer: 'codex', implementer: 'claude' }, root, store);
     assert.equal(result.outcome, 'write-failed');
-    assert.match(result.diagnostic, /px handoff starts the review/);
+    assert.match(result.diagnostic, /--start starts the review/);
   }, { seedReview: false });
 });
 

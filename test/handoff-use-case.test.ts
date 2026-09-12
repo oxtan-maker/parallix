@@ -9,7 +9,6 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { HandoffCommandUseCase } from '../src/application/handoff-command-use-case.js';
 import { isTransientVerificationFailure } from '../src/adapters/verification/verification.js';
-import { createHandoffCommand, parseHandoffCliRequest, handoffExitCode } from '../src/interfaces/cli/handoff.js';
 import type { HandoffWorkflowPorts } from '../src/application/ports/handoff-workflow.js';
 
 const SLUG = 'task-2332.09';
@@ -159,104 +158,6 @@ function runOptions(recorder: Recorder, extra: Record<string, unknown> = {}) {
     ...extra,
   };
 }
-
-// --- CLI interface tests (SC3) ---
-
-test('handoff CLI interface parses public flags without adapter dependencies', () => {
-  assert.deepEqual(parseHandoffCliRequest([SLUG, '--no-gate', '--no-recover', '--force']), {
-    slug: SLUG,
-    skipGate: true,
-    force: true,
-    recoverGateFailure: false,
-  });
-});
-
-test('handoff CLI interface rejects unknown flags', () => {
-  assert.throws(
-    () => parseHandoffCliRequest(['task-999', '--unknown']),
-    { message: 'Unknown handoff option: --unknown' },
-  );
-});
-
-test('handoff CLI exposes a recovery opt-out', () => {
-  assert.equal(parseHandoffCliRequest([SLUG, '--no-recover']).recoverGateFailure, false);
-});
-
-test('handoff CLI interface rejects duplicate --no-gate', () => {
-  assert.throws(
-    () => parseHandoffCliRequest(['task-999', '--no-gate', '--no-gate']),
-    { message: '--no-gate may be supplied only once.' },
-  );
-});
-
-test('handoff CLI interface maps success to exit code 0 and failure to 1', () => {
-  assert.equal(handoffExitCode({ ok: true }), 0);
-  assert.equal(handoffExitCode({ ok: false }), 1);
-});
-
-test('handoff CLI interface leaves the slug optional so the use case can infer it', async () => {
-  const recorder = makeRecorder();
-  const seen: Array<{ slug?: string; skipGate: boolean; force: boolean }> = [];
-  const useCase = new HandoffCommandUseCase(makePorts(recorder));
-  useCase.execute = async (request) => { seen.push(request); return { ok: true }; };
-  await createHandoffCommand(useCase)([], {});
-  assert.deepEqual(seen, [{ slug: undefined, skipGate: false, force: false }]);
-});
-
-test('handoff CLI interface translates flags before invoking the use case', async () => {
-  const recorder = makeRecorder();
-  const seen: Array<{ slug?: string; skipGate: boolean; force: boolean }> = [];
-  let seenOptions: Record<string, unknown> = {};
-  const useCase = new HandoffCommandUseCase(makePorts(recorder));
-  useCase.execute = async (request, options) => { seen.push(request); seenOptions = options; return { ok: true }; };
-
-  await createHandoffCommand(useCase)([SLUG, '--no-gate', '--force'], {});
-
-  assert.deepEqual(seen, [{ slug: SLUG, skipGate: true, force: true }]);
-  assert.equal(seenOptions.recoverGateFailure, true);
-});
-
-test('handoff CLI default performs bounded gate repair through the real use case', async () => {
-  const recorder = makeRecorder();
-  let gateRuns = 0;
-  const ports = makePorts(recorder, {
-    agents: {
-      startAgent: async () => {
-        recorder.relaunches.push(1);
-        return { agent: 'claude', result: { status: 0 } };
-      },
-    },
-  });
-
-  await createHandoffCommand(new HandoffCommandUseCase(ports))([SLUG], runOptions(recorder, {
-    runVerificationGateFn: () => ++gateRuns === 1
-      ? { status: 1, stdout: 'unit assertion failed', stderr: '' }
-      : { status: 0, stdout: '', stderr: '' },
-  }));
-
-  assert.equal(gateRuns, 2);
-  assert.equal(recorder.relaunches.length, 1);
-  assert.equal(recorder.transitions.at(-1), 'review');
-});
-
-test('handoff CLI interface exits with code 1 when no slug can be inferred', async () => {
-  const recorder = makeRecorder();
-  const ports = makePorts(recorder, {
-    missionUtils: { ...makePorts(recorder).missionUtils, inferSlug: () => undefined },
-  });
-  const originalExit = process.exit;
-  let observed = -1;
-  process.exit = ((code?: number) => { observed = code ?? 0; throw new Error('exit'); }) as never;
-  try {
-    await createHandoffCommand(new HandoffCommandUseCase(ports))([], {});
-    assert.fail('Should have called process.exit');
-  } catch (err) {
-    if (!(err instanceof Error) || err.message !== 'exit') { throw err; }
-    assert.equal(observed, 1);
-  } finally {
-    process.exit = originalExit;
-  }
-});
 
 // --- SC5a: successful handoff over mocked ports ---
 

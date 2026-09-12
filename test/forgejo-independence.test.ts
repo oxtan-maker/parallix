@@ -23,7 +23,7 @@ const ADAPTERS = path.join(import.meta.dirname, '..', 'src', 'adapters');
 // `Module.prototype.require` interception are registered as mockable facades
 // once, before any of them is linked.
 const productConfig = mockModule<typeof import('../src/adapters/config/product-config.js')>('../src/adapters/config/product-config.js', import.meta.url);
-const missionStartModule = mockModule<typeof import('../src/adapters/cli/mission-start.js')>('../src/adapters/cli/mission-start.js', import.meta.url);
+const missionStartModule = mockModule<typeof import('../src/adapters/cli/startup-preflight.js')>('../src/adapters/cli/startup-preflight.js', import.meta.url);
 import { HandoffCommandUseCase } from '../src/application/handoff-command-use-case.js';
 const setupReviewModule = mockModule<typeof import('../src/adapters/review/setup-review.js')>('../src/adapters/review/setup-review.js', import.meta.url);
 const reviewCommandsModule = mockModule<typeof import('../src/adapters/review/review-commands.js')>('../src/adapters/review/review-commands.js', import.meta.url);

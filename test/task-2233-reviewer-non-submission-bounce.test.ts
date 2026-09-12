@@ -260,6 +260,8 @@ test('reviewer-non-submission: forgejoEnabled=false — recovery loop breaks on 
       exit: (code) => { throw new Error(`exit(${code})`); },
       // Forgejo disabled — no pollForReview call, reviewState stays null
       isReviewProviderEnabledFn: () => false,
+      // SC1: a provider-disabled --start still performs the handoff transition.
+      performHandoffFn: async () => ({ ok: true }),
       runPreReviewGateFn: async () => ({ ok: true, area: 'lib', command: 'echo ok', exitCode: 0, stdout: '', stderr: '' }),
     });
 

@@ -14,13 +14,6 @@ import { recoverMissionCommand } from '../interfaces/cli/recover.js';
 import { ensureFirstRunAgentConfig } from '../adapters/agents/first-run-config.js';
 import { findTaskFile, getTaskStatus } from '../adapters/backlog/backlog.js';
 import type { BoardProgressSink } from '../application/controller/board-command.js';
-import {
-  createCheckpointVerificationAdapter,
-  createCheckpointGitAdapter,
-  createCheckpointLifecycleAdapter,
-  createCheckpointLifecycleAuthorizationAdapter,
-  createCheckpointMissionAdapter,
-} from '../adapters/cli/commands/checkpoint-adapter.js';
 import configWorkflow from '../adapters/cli/commands/config.js';
 import { createConfigCommand } from '../interfaces/cli/config.js';
 import diffWorkflow from '../adapters/cli/commands/diff.js';
@@ -28,22 +21,20 @@ import { createDiffCommand } from '../interfaces/cli/diff.js';
 import { createDraftWorkflowAdapter } from '../adapters/cli/commands/draft.js';
 import { createHandoffPorts } from '../adapters/cli/commands/handoff.js';
 import integrate from '../adapters/cli/commands/integrate.js';
-import { CheckpointCommandUseCase } from '../application/checkpoint-command-use-case.js';
 import { DraftCommandUseCase } from '../application/draft-command-use-case.js';
 import { IntegrateCommandUseCase } from '../application/integrate-command-use-case.js';
 import { ReviewCommandUseCase } from '../application/review-command-use-case.js';
 import { StatsCommandUseCase } from '../application/stats-command-use-case.js';
 import { HandoffCommandUseCase } from '../application/handoff-command-use-case.js';
 import { StatusCommandUseCase } from '../application/status-command-use-case.js';
-import { createCheckpointCommand } from '../interfaces/cli/checkpoint.js';
 import { createDraftCommand } from '../interfaces/cli/draft.js';
 import type { HandoffMissionServicesPort } from '../application/ports/handoff-workflow.js';
 import { createIntegrateCommand } from '../interfaces/cli/integrate.js';
 import { createCancelCommand } from '../interfaces/cli/cancel.js';
 import { createReviewCommand } from '../interfaces/cli/review.js';
-import { createHandoffCommand } from '../interfaces/cli/handoff.js';
+
 import { createStatusCommand } from '../interfaces/cli/status.js';
-import missionStart from '../adapters/cli/mission-start.js';
+import startupPreflight from '../adapters/cli/startup-preflight.js';
 import rebase from '../adapters/cli/commands/rebase.js';
 import { createRebaseCommand } from '../interfaces/cli/rebase.js';
 import resolveConflictWorkflow from '../adapters/cli/commands/resolve-conflict.js';
@@ -168,16 +159,6 @@ function createCommandRegistry(rootDir: string): Record<string, Command> {
         store: services.mission.store,
       });
     }),
-    checkpoint: (args, options) => {
-      const verification = createCheckpointVerificationAdapter();
-      const gitPort = createCheckpointGitAdapter();
-      const lifecycle = createCheckpointLifecycleAdapter();
-      const lifecycleAuth = createCheckpointLifecycleAuthorizationAdapter();
-      const mission = createCheckpointMissionAdapter();
-      const useCase = new CheckpointCommandUseCase(verification, gitPort, lifecycle, lifecycleAuth, mission);
-      const cmd = createCheckpointCommand(useCase);
-      return cmd(args, options);
-    },
     config,
     diff,
     draft: (args, options) => {
@@ -189,11 +170,6 @@ function createCommandRegistry(rootDir: string): Record<string, Command> {
         return cmd(args, { ...options, missionServicesFn });
       }));
     },
-    handoff: (args, options) => withMissionFactories(missionServicesFn =>
-      createHandoffCommand(new HandoffCommandUseCase({
-        ...createHandoffPorts(),
-        missionServices: missionServicesFn as HandoffMissionServicesPort,
-      }))(args, { ...options, missionServicesFn })),
     integrate: (args, options) => withGraph(services =>
       createIntegrateCommand(new IntegrateCommandUseCase({
         execute: (innerArgs, innerOptions) => withMissionFactories(missionServicesFn => integrate(innerArgs, { ...innerOptions, missionServicesFn })),
@@ -205,8 +181,7 @@ function createCommandRegistry(rootDir: string): Record<string, Command> {
       if (!controller) { throw new Error('cancel requires BoardCommandController from presentation capabilities'); }
       return createCancelCommand(controller)(args);
     }),
-    'mission-start': missionStart,
-    'verify-env': missionStart,
+    'verify-env': startupPreflight,
     rebase: createRebaseCommand((args, options) => withMissionFactories(missionServicesFn => rebase(args, { ...options, missionServicesFn }))),
     'resolve-conflict': resolveConflict,
     review: (args, options) => withMissionFactories(missionServicesFn =>
@@ -493,11 +468,11 @@ export async function run(argv = process.argv.slice(2), options: RunOptions = {}
 
   const previousCwd = process.cwd();
   try {
-    const [missionStartModule, workflow] = await Promise.all([
-      import('../adapters/cli/mission-start.js'),
+    const [startupPreflightModule, workflow] = await Promise.all([
+      import('../adapters/cli/startup-preflight.js'),
       import('../interfaces/cli/runtime.js'),
     ]);
-    const missionStart = missionStartModule.default;
+    const startupPreflight = startupPreflightModule.default;
     process.chdir(parsed.target);
 
     if (parsed.command === 'review-event') {
@@ -530,7 +505,7 @@ export async function run(argv = process.argv.slice(2), options: RunOptions = {}
     }
 
     if (parsed.command === 'verify-env') {
-      const result = missionStart([], { command: 'verify-env', returnResult: true, log, error });
+      const result = startupPreflight([], { command: 'verify-env', returnResult: true, log, error });
       return result && (result as { pass?: boolean }).pass ? 0 : 1;
     }
 

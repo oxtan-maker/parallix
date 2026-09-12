@@ -25,7 +25,7 @@ test('writeReviewState does not report success when the write never reaches dura
     assert.notEqual(result.outcome, 'committed', 'a mission with no review must not report committed');
     assert.equal(result.outcome, 'write-failed');
     assert.equal(result.stage, 'write');
-    assert.match(result.diagnostic, /px handoff starts the review/);
+    assert.match(result.diagnostic, /--start starts the review/);
   }, { seedReview: false });
 });
 

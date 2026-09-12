@@ -508,6 +508,49 @@ test('review automation retains its five-round limit', async () => {
   assert.equal(received && received.maxAttempts, 5);
 });
 
+// SC1: a fresh `px review <slug> --start` must reach the handoff transition that
+// creates the Review aggregate. A fresh active mission has no persisted Review
+// yet, so the aggregate guard must be relaxed for `--start`.
+test('a fresh --start reaches the review loop even with no persisted Review aggregate', async () => {
+  let startReviewLoopCalled = 0;
+
+  await review(['task-2490', '--start'], {
+    inferSlugFn: (s) => s || 'task-2490',
+    log: () => {},
+    error: () => {},
+    exit: () => {},
+    requireReviewAggregate: true,
+    readReviewStateFn: async () => null,
+    startReviewLoopFn: async () => { startReviewLoopCalled += 1; },
+  });
+
+  assert.equal(startReviewLoopCalled, 1, `--start must reach the review loop with no persisted Review; guard should be relaxed. errors were never expected`);
+});
+
+// The aggregate guard is retained for every non-start operation: a `--continue`
+// on a mission with no persisted Review still exits with the reconcile review
+// diagnostic rather than proceeding.
+test('a --continue with no persisted Review aggregate exits with the reconcile diagnostic', async () => {
+  const errors = [];
+  let startReviewLoopCalled = 0;
+
+  await review(['task-2490', '--continue'], {
+    inferSlugFn: (s) => s || 'task-2490',
+    log: () => {},
+    error: (m) => errors.push(m),
+    exit: () => {},
+    requireReviewAggregate: true,
+    readReviewStateFn: async () => null,
+    startReviewLoopFn: async () => { startReviewLoopCalled += 1; },
+  });
+
+  assert.equal(startReviewLoopCalled, 0, `--continue must not reach the review loop without a persisted Review`);
+  assert.ok(
+    errors.some(e => /no valid Review aggregate/.test(e)),
+    `expected the reconcile-review diagnostic; got: ${errors.join(' | ')}`
+  );
+});
+
 test('review forwards current-work agent publication into the review loop', async () => {
   let received = null;
 
