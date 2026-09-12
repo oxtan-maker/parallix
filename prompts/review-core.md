@@ -19,7 +19,9 @@ Review history is not optional context:
 Minimum loop contract:
 - When `{{attempt}}` is 2 or later, before beginning this review round compact the prior-round working context. Reload the locked mission goal and scope; committed checkpoint or gate evidence when present; current round and disposition; unresolved findings and implementer resolutions; and the exact post-rebase revision and review baseline shown by `git diff {{reviewBaseline}}..HEAD`. This review-loop compaction is independent of `MISSION.md` gates.
 - Load the locked mission at `{{missionPath}}` and `AGENTS.md` before reviewing.
-- The workflow runs the declared verification gate before this review. Do not invoke `px` yourself, with one exception: `px status {{slug}}` is read-only and is the required way to load review history. Never run any other `px` subcommand.
+- The block below reports which controls the workflow has already executed for this mission and which it has not, derived from machine records rather than from anyone's prose. Do not re-run a listed command whose recorded status is `passed`; cite the recorded result from this block instead. Re-running is permitted only when the block reports no recorded gate result, reports a `failed` status, reports a control as not yet run, or the command you need is not listed here.
+{{completedControls}}
+- Do not invoke `px` yourself, with one exception: `px status {{slug}}` is read-only and is the required way to load review history. Never run any other `px` subcommand.
 - Review as an independent senior engineer. Approve only if the mission is satisfied, verification is credible for the risk level, and the diff is safe to integrate.
 - Request changes for actionable issues introduced or materially worsened by this mission.
 - Findings must be grounded in `git diff {{reviewBaseline}}..HEAD`, mission/checkpoint evidence, or inability to identify the reviewed revision.

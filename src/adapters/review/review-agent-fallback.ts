@@ -17,7 +17,6 @@ import { recordAgentSelectionOutcome } from '../../application/services/agent-se
 import { workflowLauncherStatus } from '../agents/agents.js';
 import { resolveStageTelemetry } from '../agents/stage-telemetry.js';
 import * as statsModule from '../cli/commands/stats.js';
-import * as handoffModule from '../cli/commands/handoff.js';
 import { updateGraphifyKnowledgeGraph } from '../filesystem/mission-utils.js';
 
 /** Lazily loaded stats module — loaded on first use to avoid circular dependency. */
@@ -27,15 +26,6 @@ export function getStats(): any {
     _stats = statsModule;
   }
   return _stats as any;
-}
-
-/** Lazily loaded handoff module. */
-let _handoff: any = null;
-export function getHandoff(): any {
-  if (!_handoff) {
-    _handoff = handoffModule;
-  }
-  return _handoff as any;
 }
 
 // Stage telemetry recording is best-effort: a failure must never break the

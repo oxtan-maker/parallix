@@ -8,7 +8,7 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import { mockModule, installModuleMocks } from './lib/module-mock.js';
-const missionStartModule = mockModule<typeof import('../src/adapters/cli/mission-start.js')>('../src/adapters/cli/mission-start.js', import.meta.url);
+const missionStartModule = mockModule<typeof import('../src/adapters/cli/startup-preflight.js')>('../src/adapters/cli/startup-preflight.js', import.meta.url);
 const statsModule = mockModule<typeof import('../src/adapters/cli/commands/stats.js')>('../src/adapters/cli/commands/stats.js', import.meta.url);
 await installModuleMocks();
 test.afterEach(() => mock.restoreAll());

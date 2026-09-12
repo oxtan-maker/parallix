@@ -1,7 +1,7 @@
 /**
  * ADR 0048 failure classification (single dispatch table).
  *
- * The eight failure classes, the three dispatch actions, and the pattern-based
+ * The nine failure classes, the three dispatch actions, and the pattern-based
  * classifier live here — in the application layer — so the rebound kernel and
  * the adapter-side repair path consume one table instead of maintaining
  * parallel classifiers. `src/adapters/cli/commands/repair-handoff.ts` re-exports
@@ -10,7 +10,7 @@
  * Application layer: pure string logic, no I/O.
  */
 
-// ── FailureClass: 8 classes from ADR 0048 ────────────────────────────────────
+// ── FailureClass: 9 classes from ADR 0048 (agent-capacity added by task-2494) ─
 export const FailureClass = {
   UnverifiableClaims: 'UnverifiableClaims',
   MalformedGates: 'MalformedGates',
@@ -18,6 +18,7 @@ export const FailureClass = {
   IncompleteEvidence: 'IncompleteEvidence',
   GitBlockers: 'GitBlockers',
   GateFailure: 'GateFailure',
+  AgentCapacity: 'AgentCapacity',
   InfraBlocker: 'InfraBlocker',
   StateMachineViolation: 'StateMachineViolation',
 } as const;
@@ -41,6 +42,7 @@ export const DISPATCH_TABLE: Record<FailureClassType, DispatchActionType> = {
   [FailureClass.IncompleteEvidence]: DispatchAction.AutoSendBack,
   [FailureClass.GitBlockers]: DispatchAction.AutoRepair,
   [FailureClass.GateFailure]: DispatchAction.AutoSendBack,
+  [FailureClass.AgentCapacity]: DispatchAction.AutoRepair,
   [FailureClass.InfraBlocker]: DispatchAction.HumanOnly,
   [FailureClass.StateMachineViolation]: DispatchAction.HumanOnly,
 };
@@ -48,7 +50,7 @@ export const DISPATCH_TABLE: Record<FailureClassType, DispatchActionType> = {
 /**
  * Look up the dispatch action for a given failure class.
  *
- * @param failureClass - One of the 8 failure class values from ADR 0048
+ * @param failureClass - One of the failure class values from ADR 0048
  * @returns The prescribed dispatch action, or null if unknown
  */
 export function getDispatchAction(failureClass: FailureClassType): DispatchActionType | null {
@@ -58,6 +60,10 @@ export function getDispatchAction(failureClass: FailureClassType): DispatchActio
 /**
  * Sub-reason for GitBlockers classification: distinguishes dirty-artifact from behind-branch errors.
  * Used by repairHandoff() to decide whether to auto-rebase (behind) vs auto-commit only (dirty).
+ *
+ * NOTE: ADR 0048 defines eight classes; `AgentCapacity` (task-2494) is a
+ * narrowly-scoped addition for agent usage/quota blocks so they are not
+ * misclassified as infrastructure blockers.
  */
 export type GitBlockerReason = 'dirty' | 'behind' | 'other';
 
@@ -71,7 +77,7 @@ export type GitBlockerReason = 'dirty' | 'behind' | 'other';
  * as an ad-hoc regex at the pre-review gate call site; it is now a named rule of
  * the classifier with no independent consumer.
  */
-const EXPLICIT_HUMAN_ONLY_DIAGNOSTIC_RE = /state\s+violation|invalid\s+state|transition\s+not\s+allowed|cannot\s+(move|transition)\s+(from|to)\s+\w+\s+(to|from)|forgejo|infrastructure|authentication\s+failed|token\s+(expired|invalid|missing)|forbidden|unauthorized\s+(access|request)|rate\s+limit|connection\s+(refused|timed?\s*out)|network\s+error/i;
+const EXPLICIT_HUMAN_ONLY_DIAGNOSTIC_RE = /state\s+violation|invalid\s+state|transition\s+not\s+allowed|cannot\s+(move|transition)\s+(from|to)\s+\w+\s+(to|from)|forgejo|infrastructure|authentication\s+failed|token\s+(expired|invalid|missing)|forbidden|unauthorized\s+(access|request)|connection\s+(refused|timed?\s*out)|network\s+error/i;
 
 /**
  * True when the diagnostic names a recognized infrastructure or state-machine
@@ -205,8 +211,48 @@ export function classifyError(errorMsg: string): { failureClass: FailureClassTyp
     return { failureClass: FailureClass.StateMachineViolation, dispatchAction: DispatchAction.HumanOnly };
   }
 
-  // 11. InfraBlocker: forgejo/infrastructure blockers
-  if (/forgejo|infrastructure|authentication\s+failed|token\s+(expired|invalid|missing)|forbidden|unauthorized\s+(access|request)|rate\s+limit|connection\s+(refused|timed?\s*out)|network\s+error/i.test(errorMsg)) {
+  // Guard: an explicit infrastructure marker (Forgejo/token/infrastructure/
+  // network) always wins over the agent-capacity rule. Without this, a message
+  // like "Forgejo quota exceeded" or "network error: quota exhausted" would be
+  // classified as AgentCapacity/AutoRepair — mislabeling a genuine infra/Forgejo
+  // failure. Preserve the InfraBlocker classification in that case (F1, task-2494
+  // round 3). This is exactly the EXPLICIT_HUMAN_ONLY_DIAGNOSTIC_RE infra
+  // marker set, so a usage-block rule never matches an explicit infra diagnostic.
+  // Note: a bare `rate limit` is intentionally NOT an infra marker — agent-
+  // branded rate limits (see agent-limit.ts) are agent-capacity events, so it
+  // is matched by the AgentCapacity branch below instead.
+  const hasInfraMarker = /forgejo|infrastructure|authentication\s+failed|token\s+(expired|invalid|missing)|forbidden|unauthorized\s+(access|request)|connection\s+(refused|timed?\s*out)|network\s+error/i.test(errorMsg);
+
+  // 10b. AgentCapacity: agent usage / quota / rate limit (an agent-capacity
+  // event, NOT infrastructure). Checked before the InfraBlocker rule so a
+  // usage-block diagnostic — e.g. the pinned-agent error a rebase handoff
+  // surfaces — is not misclassified as a Forgejo/network failure. Requires an
+  // agent-capacity marker (usage limit, quota, 429 usage/quota, resource
+  // exhausted, or an agent-branded rate limit); never a generic "limit", so it
+  // does not steal the infra markers below. Reset-time parsing itself lives in
+  // agent-limit.ts; this rule only reclassifies the diagnostic. Must not fire
+  // when an explicit infrastructure marker is present.
+  // Agent-branded rate limits (Claude/Codex/Mistral/Vibe rate limit
+  // reached/exceeded, Qwen Requests rate limit exceeded, 429 rate limit) follow
+  // agent-limit.ts and are agent-capacity, not infrastructure (F1, task-2494
+  // round 4).
+  if (!hasInfraMarker &&
+      (/usage\s+limit/i.test(errorMsg) ||
+      /hit\s+your\s+(?:weekly|daily|monthly|usage)\s+limit/i.test(errorMsg) ||
+      /rate[_\s]?limit\s+(?:reached|exceeded)/i.test(errorMsg) ||
+      /\bquota\b/i.test(errorMsg) ||
+      /\b429\b[^\n]*?\b(?:rate|usage|quota)\b/i.test(errorMsg) ||
+      /resource[_\s ]?(?:has\s+)?been[_\s ]+exhausted/i.test(errorMsg) ||
+      /resource_exhausted/i.test(errorMsg))) {
+    return { failureClass: FailureClass.AgentCapacity, dispatchAction: DispatchAction.AutoRepair };
+  }
+
+  // 11. InfraBlocker: forgejo/infrastructure blockers. A bare `rate limit` is
+  // intentionally omitted here — agent-branded rate limits are agent-capacity
+  // (handled by the AgentCapacity branch above); only infra-branded rate limits
+  // reach this point, and they are rare. `network error` still covers the
+  // common infra case.
+  if (/forgejo|infrastructure|authentication\s+failed|token\s+(expired|invalid|missing)|forbidden|unauthorized\s+(access|request)|connection\s+(refused|timed?\s*out)|network\s+error/i.test(errorMsg)) {
     return { failureClass: FailureClass.InfraBlocker, dispatchAction: DispatchAction.HumanOnly };
   }
 

@@ -30,6 +30,8 @@ function happyPathDeps(opts: { verbose?: boolean; outcome?: string; findings?: s
     eligibleAgentsForStepFn: () => ['codex'],
     selectAgentFn: () => { throw new Error('No agents available'); },
     rebaseBeforeReviewRoundFn: async () => ({ ok: true }),
+    // SC1: a provider-disabled --start now performs the handoff transition.
+    performHandoffFn: async () => ({ ok: true }),
     runPreReviewGateFn: async () => ({ ok: true, area: 'docs', command: './scripts/verify-local.sh', exitCode: 0, stdout: '', stderr: '' }),
     startAgentFn: async (mode: string) => { launches.push(mode); throw new Error(`unexpected ${mode} launch`); },
     consumeReviewerArtifactsFn: async () => ({ consumed: true, ok: true, reviewState: opts.outcome ?? 'APPROVED', findingSummaries: opts.findings ?? [] }),

@@ -676,6 +676,7 @@ function runRealAgentSmoke(agent, runner) {
     FORCE_COLOR: '0',
     PRIMARY_WORKTREE: repo.repoRoot,
     PARALLIX_HOME: repo.stateHome,
+    NPM_CONFIG_CACHE: path.join(repo.tmpRoot, 'npm-cache'),
     PATH: `${repo.binDir}${path.delimiter}${process.env.PATH || ''}`,
     // TASK-2471: the draft-stats line this gate parses is operator plumbing and
     // ships behind DEBUG. This gate reads the harness's machine output, not the

@@ -126,7 +126,7 @@ export function buildTestRunPlan(options: TestRunPlanOptions): TestRunPlan {
     'draft-command.test.ts',
     'draft_preflight_modern.test.ts',
     'durable-state-policy.test.ts',
-    'mission-start.test.ts',
+    'startup-preflight.test.ts',
     // The final CP-3 timing capture found these groups still crossing the
     // Forgejo/worktree, agent-launcher, rebase, or review-artifact boundary.
     // Their fakes protect assertions but do not make the groups hermetic.

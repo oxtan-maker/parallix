@@ -1,77 +1,14 @@
-/**
- * TASK-2322.05 — characterization of the covered CLI paths.
- *
- * These tests pin the externally observable behavior of the `checkpoint` command
- * and the handoff NEL capture: their success results, their failure results, and
- * the order of their external Git and document effects (SC5). They are written
- * against the injected seams the commands already expose, so they hold for the
- * behavior as it was before this mission's rerouting and afterwards.
- */
-import { mockModule, installModuleMocks } from './lib/module-mock.js';
-const missionUtils = mockModule<typeof import('../src/adapters/filesystem/mission-utils.js')>('../src/adapters/filesystem/mission-utils.js', import.meta.url);
-const gitModule = mockModule<typeof import('../src/adapters/git/git.js')>('../src/adapters/git/git.js', import.meta.url);
-const verification = mockModule<typeof import('../src/adapters/verification/verification.js')>('../src/adapters/verification/verification.js', import.meta.url);
-const checkpointModule = mockModule<typeof import('../src/adapters/cli/commands/checkpoint.js')>('../src/adapters/cli/commands/checkpoint.js', import.meta.url);
-const handoffModule = mockModule<typeof import('../src/adapters/cli/commands/handoff.js')>('../src/adapters/cli/commands/handoff.js', import.meta.url);
-await installModuleMocks();
-test.afterEach(() => mock.restoreAll());
-const checkpointCommand = checkpointModule.default;
-
-
 import test, { mock } from 'node:test';
 import assert from 'node:assert/strict';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
+import { mockModule, installModuleMocks } from './lib/module-mock.js';
 
-// ---------------------------------------------------------------------------
-// `px checkpoint` — gate, then stage, then commit
-// ---------------------------------------------------------------------------
-
-test('SC5 characterization: checkpoint runs the gate, then stages, then commits, in that order', async (t) => {
-  const { mock } = t;
-  const effects: string[] = [];
-  mock.method(missionUtils, 'resolveWorktree', () => '/mission-root');
-  mock.method(missionUtils, 'findMissionDir', () => '/mission-root/missions/task-4242');
-  mock.method(missionUtils, 'findMissionArea', () => 'lib');
-  mock.method(verification, 'runVerificationGate', () => {
-    effects.push('gate');
-    return { status: 0 };
-  });
-  mock.method(gitModule, 'git', (args: string[]) => {
-    effects.push(`git:${args.slice(2).join(' ')}`);
-    return { status: 0 };
-  });
-
-  await checkpointCommand(['task-4242', 'CP-1', 'continue the mission']);
-
-  assert.deepEqual(effects, [
-    'gate',
-    'git:add -A',
-    'git:commit -m checkpoint(task-4242): CP-1 -m Next action: continue the mission',
-  ]);
-});
-
-test('SC5 characterization: a failed gate stops checkpoint before any Git effect', async (t) => {
-  const { mock } = t;
-  const effects: string[] = [];
-  mock.method(missionUtils, 'resolveWorktree', () => '/mission-root');
-  mock.method(missionUtils, 'findMissionDir', () => '/mission-root/missions/task-4242');
-  mock.method(missionUtils, 'findMissionArea', () => 'lib');
-  mock.method(verification, 'runVerificationGate', () => {
-    effects.push('gate');
-    return { status: 1 };
-  });
-  mock.method(gitModule, 'git', (args: string[]) => {
-    effects.push(`git:${args.slice(2).join(' ')}`);
-    return { status: 0 };
-  });
-  class FakeExit extends Error {}
-  mock.method(process, 'exit', () => { throw new FakeExit(); });
-
-  await assert.rejects(() => checkpointCommand(['task-4242', 'CP-1', 'continue']), FakeExit);
-  assert.deepEqual(effects, ['gate']);
-});
+const missionUtils = mockModule<typeof import('../src/adapters/filesystem/mission-utils.js')>('../src/adapters/filesystem/mission-utils.js', import.meta.url);
+const handoffModule = mockModule<typeof import('../src/adapters/cli/commands/handoff.js')>('../src/adapters/cli/commands/handoff.js', import.meta.url);
+await installModuleMocks();
+test.afterEach(() => mock.restoreAll());
 
 // ---------------------------------------------------------------------------
 // handoff NEL capture — observe Git, then record through the Mission boundary

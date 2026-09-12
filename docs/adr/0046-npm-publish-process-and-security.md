@@ -21,7 +21,7 @@ web dependencies. Having no installed production dependency tree is a packaging
 choice, not an architecture constraint; bundled components remain dependencies
 for SBOM, license, vulnerability, and release review.
 
-The `@magnusekdahl` scope was verified available on the npm registry (task-1340 CP-0). `@magnusekdahl/parallix` returns 404, confirming the scoped name is unclaimed.
+The `@magnusekdahl` scope was verified on the npm registry (task-1340 CP-0) and `@magnusekdahl/parallix` is now published under it; the registry serves the package and the scope is claimed.
 
 ## Decision
 
@@ -56,9 +56,16 @@ An alternative is staged publishing (`npm stage publish` followed by `npm stage 
 The following procedures are consequences of this decision, not decisions themselves:
 
 1. **Pre-publish verification:** `npm pack --dry-run` inspects the file listing before each publish. The operator verifies all exclusion patterns are absent.
-2. **Manual publish sequence:** Clean working tree → version check → `npm pack --dry-run` → `npm publish --access public` → verify → git tag.
-3. **Token security:** npm tokens are stored in `~/.npmrc` only, never committed. Fine-grained tokens with minimal permissions are used.
-4. **Content audit:** An automated grep script checks `npm pack --dry-run` output against known exclusion patterns.
+2. **Version drift between integrations:** the version on disk is not operator-controlled. `scripts/refresh-global-px.sh` is wired as the post-integrate hook (`adapters.integrate.postIntegrateCommand` in `workflow.config.json`) and runs from the base checkout after every successful non-dry-run `px integrate`. It bumps the patch version (`npm version patch --no-git-tag-version`), commits the bump, rebuilds the canonical bundle, packs a tarball, and installs it globally. It does **not** publish to the npm registry. Any mission that lands therefore moves the version, including between the moment the operator decides to publish and the moment they publish.
+3. **Quiescing before a publish sequence:** concurrent mission integrations are drained or parked before a publish sequence begins, so the hook cannot bump the version mid-sequence. "Parked" means no mission is permitted to reach `px integrate` until the sequence completes.
+4. **Manual publish sequence:** Clean working tree → drain or park concurrent integrations → read the on-disk version immediately before this publish → `npm pack --dry-run` → `npm publish --access public` → post-publish verification → git tag. The version is read fresh at each publish rather than carried over from an earlier step, because the post-integrate hook may have changed it.
+5. **Distinct version per publish in a multi-step sequence:** npm rejects a publish at a version that already exists on the registry. A sequence that publishes more than once therefore needs a distinct version for every publish by construction; step 4's version read is repeated for each one.
+6. **Post-publish verification against the live registry:** some properties are observable only on the published registry page and cannot be checked from a local checkout or from `npm pack --dry-run`. After each publish the operator opens the package page on npmjs.com and checks:
+   - **README demo-image rendering:** the tarball ships `README.md` but not `docs/assets/` (the `files` allowlist in `package.json` covers `NOTICES`, `build/`, `LICENSE`, and `README.md`), so a relative image path has no target inside the package. The README therefore references the demo image by absolute `https://raw.githubusercontent.com/.../main/docs/assets/first-value-demo.gif` URL. The operator confirms the image actually renders on the registry page: the URL is fetched from the public repository at publish time, so a repository rename, a branch rename, or a moved asset breaks it silently in the published README while the local checkout still looks correct.
+   - **First-screen image loading:** the demo image is several megabytes and sits on the first screen of the README, so the operator checks how the top of the page behaves while it loads, on a throttled connection.
+7. **Download-count baseline before a repositioning publish:** the operator records the package's current npm download count before the first publish that carries the trust-layer repositioning pitch. The repositioning experiment's kill criterion in `docs/designs/reposition-as-trust-layer.md` is that people read the new pitch and none install; without a count captured before the publish, there is no baseline to compare installations against and the criterion cannot be evaluated.
+8. **Token security:** npm tokens are stored in `~/.npmrc` only, never committed. Fine-grained tokens with minimal permissions are used.
+9. **Content audit:** An automated grep script checks `npm pack --dry-run` output against known exclusion patterns.
 
 These procedures are operational guidance. They are subject to change as the operator gains experience with the publish process. They are not architectural decisions.
 
@@ -130,7 +137,7 @@ Assessment: Not needed for current workflow. Can be adopted later if CI is intro
 
 Positive: Alternative scopes (`@parallix/parallix`, `@px-cli/parallix`) would decouple the package from the operator's personal npm identity.
 
-Negative: `@magnusekdahl` scope is confirmed available and unclaimed. The operator is the sole maintainer. An organizational scope would require creating a new npm org, which is unnecessary overhead.
+Negative: `@magnusekdahl` is the operator's own scope and already carries the published package. The operator is the sole maintainer. An organizational scope would require creating a new npm org, which is unnecessary overhead.
 
 Assessment: `@magnusekdahl/parallix` is the correct scope for a solo-maintainer package. Revisit if a team or organization assumes maintenance.
 
@@ -142,6 +149,8 @@ Assessment: `@magnusekdahl/parallix` is the correct scope for a solo-maintainer 
 - task-1340 CP-0: npm scope availability verified
 - `package.json` — package metadata, `files` allowlist, `publishConfig.access`
 - `parallix/.npmignore` — secondary exclusion layer
+- `scripts/refresh-global-px.sh` — post-integrate hook that bumps the patch version, rebuilds, packs, and installs globally without publishing
+- `docs/designs/reposition-as-trust-layer.md` — trust-layer repositioning experiment; source of the installation-based kill criterion the download baseline serves
 - npm docs: Creating and publishing scoped public packages — https://docs.npmjs.com/creating-and-publishing-scoped-public-packages
 - npm docs: Unpublishing packages from the registry — https://docs.npmjs.com/unpublishing-packages-from-the-registry
 - npm docs: Requiring 2FA for package publishing — https://docs.npmjs.com/requiring-2fa-for-package-publishing-and-settings-modification

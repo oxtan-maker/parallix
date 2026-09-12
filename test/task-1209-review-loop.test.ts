@@ -31,6 +31,8 @@ test('startReviewLoop skips reviewer and implementer launches for autonomous fal
       resolveTaskFileFn: () => ({ ok: true, taskFile: '/tmp/task-999.md' }),
       getTaskImplementerFn: () => null,
       readReviewStateFn: () => null,
+      // SC1: a provider-disabled --start now performs the handoff transition.
+      performHandoffFn: async () => ({ ok: true }),
       eligibleAgentsForStepFn: () => ['codex'],
       selectAgentFn: () => { throw new Error('No agents available'); },
 // @ts-expect-error -- TASK-2328: partial test double after ESM seam migration

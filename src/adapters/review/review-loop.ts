@@ -38,7 +38,6 @@ import {
   hookFailureReason,
 } from './review-gate-handling.js';
 import {
-  getHandoff,
   applyAgentFallback,
   persistNormalizedPhaseRepair,
   selectPreparedReviewer,
@@ -96,6 +95,14 @@ export async function startReviewLoop(slug: string, opts: {
   reset?: boolean;
   continue?: boolean;
   isContinue?: boolean;
+  /**
+   * The caller already performed the handoff transition (e.g. `px active`
+   * post-execute repair, which is a fresh review start, not a resume) and the
+   * loop must not run performHandoff a second time. Distinct from `isContinue`,
+   * which also flips the resume-only behaviors (reviewer reuse, existing-review
+   * skip-poll, existing-disposition skip-poll) that a fresh start must not take.
+   */
+  skipHandoff?: boolean;
   verbose?: boolean;
   pollTimeoutSeconds?: number | null;
   worktree?: string;
@@ -170,6 +177,7 @@ export async function startReviewLoop(slug: string, opts: {
     reset = false,
     continue: continueFlag = false,
     isContinue = false,
+    skipHandoff: skipHandoffOpt = false,
     verbose = false,
     pollTimeoutSeconds = null,
     worktree: callerWorktree,
@@ -183,7 +191,6 @@ export async function startReviewLoop(slug: string, opts: {
     getTaskImplementerFn = getTaskImplementer,
     getTaskStatusFn = getTaskStatus,
     transitionTaskFn = transitionTask,
-    toVirtualFn = toVirtual,
     transitionVirtualFn = transitionVirtual,
     workflowLauncherStatusFn = workflowLauncherStatus,
     buildAutonomousReviewMatrixFn = buildAutonomousReviewMatrix,
@@ -233,7 +240,7 @@ export async function startReviewLoop(slug: string, opts: {
     onAgentLaunched = undefined,
     onAutonomousStop = undefined,
   } = opts;
-  const performHandoffFn = opts.performHandoffFn || (await getHandoff()).performHandoff;
+  const performHandoffFn = opts.performHandoffFn;
   let prNumber: number | null = null;
   let confirmedPullRequest: PullRequestReference | null = null;
   const pullRequestReference = (number: unknown, url: unknown): PullRequestReference | null => {
@@ -287,7 +294,7 @@ export async function startReviewLoop(slug: string, opts: {
     ? selectPreparedReviewer(preparedSelection, excludeSet)
     : selectAgentFn('review', { exclude: excludeSet });
   const agents = eligibleAgentsForStepFn('review');
-  const persisted = await Promise.resolve(readReviewStateFn(slug, worktree));
+  let persisted = await Promise.resolve(readReviewStateFn(slug, worktree));
   if (!implementer) {
     if (persisted) {
       implementer = persisted.implementer;
@@ -323,6 +330,20 @@ export async function startReviewLoop(slug: string, opts: {
     || isForgejoReviewEnabledFn
     || isProviderEnabled;
   const forgejoEnabled = forgejoEnabledFn(worktree);
+  // SC1: `px review <slug> --start` performs the sync/push and active -> review
+  // transition that `px handoff` used to own. The transition runs for every
+  // non-dry start that has no open review PR yet: a provider-disabled start
+  // always (it has no PR concept), and a Forgejo start only when no PR exists,
+  // which heals a missing PR. A Forgejo start with an already-open PR means a
+  // prior handoff already owns the transition, so it is skipped. PR-specific
+  // validation below applies only to the Forgejo path. Initialise from the
+  // caller-supplied opt so one flag covers both an already-open PR and an
+  // explicit skip request; the Forgejo branch below may raise it on an open PR.
+  let skipHandoff = skipHandoffOpt;
+  // Tracks whether this fresh --start just ran the handoff transition, so the
+  // handoff-created Review (with its reviewer/round) can be reloaded before
+  // reviewer resolution (round-3: preserve the handoff review assignment).
+  let handoffJustRan = false;
   if (!dryRun && forgejoEnabled) {
     const forgejoUrl = process.env.FORGEJO_URL || 'http://localhost:3300';
     const bootstrapScript = path.join(packageRoot(MODULE_DIR), 'scripts', 'bootstrap.sh');
@@ -342,72 +363,88 @@ export async function startReviewLoop(slug: string, opts: {
       log(fmt.status('INFO', `Review provider is running and reachable at ${forgejoUrl}.`));
     }
     const pr = getPrStatusFn(branch, worktree) as Record<string, unknown>;
-    if (!pr.exists || pr.state !== 'open') {
-      const taskStatus = taskResolution.ok ? getTaskStatusFn(taskResolution.taskFile!) : null;
-      const virtualStatus = taskStatus ? toVirtualFn(taskStatus) : null;
-      const isImplementationPhase = taskStatus === 'active' || virtualStatus === 'active';
-      if (isImplementationPhase) {
-        log(fmt.status('INFO', `PR not found for ${branch}. Task is in ${taskStatus} — create the PR first: px review ${slug} --push`));
+    if (pr.exists && pr.state === 'open') {
+      log(fmt.status('INFO', `Review PR #${pr.number} confirmed open for ${branch}.`));
+      prNumber = pr.number as number | null;
+      confirmedPullRequest = pullRequestReference(pr.number, pr.url);
+      skipHandoff = true;
+    }
+  } else if (verbose && !dryRun && !forgejoEnabled) {
+    log(fmt.status('INFO', 'Forgejo validation skipped (review provider is not forgejo). Using workflow-owned review surfaces.'));
+  }
+  // A fresh --start performs the handoff transition; a --continue resumes an
+  // existing review and must not re-run it.
+  if (!dryRun && !skipHandoff && !isContinue) {
+    if (!performHandoffFn) {
+      error(fmt.status('FAIL', `Cannot start ${slug}: no handoff transition wired into the review loop.`));
+      exit(1);
+      return;
+    }
+    const taskStatus = taskResolution.ok ? getTaskStatusFn(taskResolution.taskFile!) : null;
+    // An active task is the normal --start condition, not a reason to bail.
+    log(fmt.status('INFO', `No open review PR for ${branch} (task in ${taskStatus}) — performing handoff (attempting automatic handoff) via px review ${slug} --start...`));
+    const handoff = await performHandoffFn(slug, { forgejoUser: implementer, worktree, recoverGateFailure: true });
+    handoffJustRan = true;
+    if (handoff && handoff.gatekeeperPushedBack) {
+      error(fmt.status('FAIL', `Handoff blocked for ${branch}: mandatory mission artifacts are missing. Task stays in ${taskStatus}; supply the required artifacts and retry.`));
+      exit(1);
+      return;
+    }
+    if (!handoff || !handoff.ok) {
+      const handoffObj = handoff || {};
+      if (handoffObj.reason === 'validation-failed' && !handoffObj.recoveryAttempted) {
+        await transitionTaskFn(slug, 'active', { rootDir: worktree, log });
+        log(fmt.status('INFO', `Auto-bounced ${slug} to active: declared-gate validation failure. Fix the gate in MISSION.md and retry.`));
+        const persisted = await Promise.resolve(readReviewStateFn(slug, worktree));
+        const metadata = persisted && persisted.metadata && typeof persisted.metadata === 'object'
+          ? { ...persisted.metadata }
+          : {};
+        metadata.gateFailureReason = 'validation-failed';
+        metadata.gateFailureError = handoffObj.error;
+        await persistReviewStateOrThrow(
+          writeReviewStateFn,
+          slug,
+          { ...(persisted || {}), metadata } as any,
+          worktree,
+          missionStore
+        );
+        exit(1);
         return;
       }
-      const fallbackGuidance = (reason: string | null) => {
+      // Forgejo keeps the PR-specific guidance (a PR is required to review the
+      // provider); a provider-disabled start reports the generic handoff error.
+      if (forgejoEnabled) {
         error(fmt.status('FAIL', `No open review PR found for ${branch}. Create the PR before starting the review loop.`));
-        if (reason) { error(`       Handoff failure: ${reason}`); }
+        if (handoff && handoff.error) { error(`       Handoff failure: ${String(handoff.error)}`); }
         error(`       Run: px review ${slug} --push`);
-      };
-      if (dryRun) {
-        fallbackGuidance(null);
-        exit(1);
-        return;
+      } else {
+        error(fmt.status('FAIL', `Handoff failed for ${branch}: ${handoff && handoff.error ? String(handoff.error) : 'see above'}.`));
+        error(`       Run: px review ${slug} --start after resolving the error.`);
       }
-      log(fmt.status('INFO', `No open review PR for ${branch} (task in ${taskStatus}) — attempting automatic handoff (px review ${slug} --push)...`));
-      const handoff = await performHandoffFn(slug, { forgejoUser: implementer, worktree, recoverGateFailure: true });
-      if (handoff && handoff.gatekeeperPushedBack) {
-        error(fmt.status('FAIL', `Handoff blocked for ${branch}: mandatory mission artifacts are missing. Task stays in ${taskStatus}; supply the required artifacts and retry.`));
-        exit(1);
-        return;
-      }
-      if (!handoff || !handoff.ok) {
-        const handoffObj = handoff || {};
-        if (handoffObj.reason === 'validation-failed' && !handoffObj.recoveryAttempted) {
-          await transitionTaskFn(slug, 'active', { rootDir: worktree, log });
-          log(fmt.status('INFO', `Auto-bounced ${slug} to active: declared-gate validation failure. Fix the gate in MISSION.md and retry.`));
-          const persisted = await Promise.resolve(readReviewStateFn(slug, worktree));
-          const metadata = persisted && persisted.metadata && typeof persisted.metadata === 'object'
-            ? { ...persisted.metadata }
-            : {};
-          metadata.gateFailureReason = 'validation-failed';
-          metadata.gateFailureError = handoffObj.error;
-          await persistReviewStateOrThrow(
-            writeReviewStateFn,
-            slug,
-            { ...(persisted || {}), metadata } as any,
-            worktree,
-            missionStore
-          );
-          exit(1);
-          return;
-        }
-        fallbackGuidance(handoff && handoff.error ? String(handoff.error) : null);
-        exit(1);
-        return;
-      }
+      exit(1);
+      return;
+    }
+    if (forgejoEnabled) {
       const healedPr = getPrStatusFn(branch, worktree) as Record<string, unknown>;
       if (!healedPr.exists || healedPr.state !== 'open') {
-        fallbackGuidance(null);
+        error(fmt.status('FAIL', `No open review PR found for ${branch}. Create the PR before starting the review loop.`));
+        error(`       Run: px review ${slug} --push`);
         exit(1);
         return;
       }
       log(fmt.status('INFO', `Self-heal succeeded: review PR #${healedPr.number} confirmed open for ${branch}. Continuing review loop.`));
       prNumber = healedPr.number as number | null;
       confirmedPullRequest = pullRequestReference(healedPr.number, healedPr.url);
-    } else {
-      log(fmt.status('INFO', `Review PR #${pr.number} confirmed open for ${branch}.`));
-      prNumber = pr.number as number | null;
-      confirmedPullRequest = pullRequestReference(pr.number, pr.url);
     }
-  } else if (verbose && !dryRun && !forgejoEnabled) {
-    log(fmt.status('INFO', 'Forgejo validation skipped (review provider is not forgejo). Using workflow-owned review surfaces.'));
+  }
+  // SC1: a fresh --start handoff just created the authoritative Review with its
+  // reviewer and round. Reload it so reviewer resolution and state construction
+  // resume the handoff-created reviewer/round instead of selecting a new one.
+  // A --continue never enters this branch (persisted was already non-null), and
+  // a Forgejo start with an existing PR skips handoff entirely, so this reload
+  // only ever re-reads the handoff-created state.
+  if (!isContinue && handoffJustRan) {
+    persisted = await Promise.resolve(readReviewStateFn(slug, worktree));
   }
   const resolvedReviewer = resolveReviewerIdentity({
     reviewer, implementer: implementer!, isContinue, persisted, agents, selectReviewer,
@@ -1316,6 +1353,5 @@ export {
   markStageLaunchRecorded,
   recordStageStatsSafe,
   getStats,
-  getHandoff,
   maybeUpdateGraphifyBeforeReview,
 } from './review-agent-fallback.js';

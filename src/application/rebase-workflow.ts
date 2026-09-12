@@ -318,7 +318,12 @@ export async function runRebaseWorkflow(args: string[], port: RebaseWorkflowPort
     const resolution = port.resolveTaskFile(slug, executionRoot);
     const recorded = resolution.ok && resolution.taskFile ? port.getTaskImplementer(resolution.taskFile) : null;
     if (recorded) {return recorded;}
-    const selected = port.selectAgent?.({ role: 'implementer' }) ?? null;
+    // The production `selectAgent` contract is `selectAgent(step, options)`;
+    // `active` is the policy key that owns implementation work. The port
+    // previously declared a stale `selectAgent({ role })` shape, so this call
+    // was passing an object as the step — the mission's signature correction
+    // surfaced it as a type error. Select from the eligible implementer pool.
+    const selected = port.selectAgent?.('active', {}) ?? null;
     if (!selected) {return null;}
     const status = port.workflowLauncherStatus?.(selected) ?? { supported: false, agent: selected };
     return status.supported ? (status.agent ?? selected) : null;
@@ -730,6 +735,37 @@ export async function runRebaseWorkflow(args: string[], port: RebaseWorkflowPort
   }
 
   fmt.log.info(`Launching implementer (${fmt.agent(implementer)}) for conflict resolution...`);
+
+  /**
+   * Select an eligible replacement implementer family when mission policy
+   * permits substitution. Uses policy key `active` (config/agents.json key that
+   * owns implementation work) so configured eligibility is consulted rather
+   * than every workflow family (F1), excluding the pinned/blocked implementer.
+   * `selectAgent` throws on pool exhaustion/unavailability; that is treated as
+   * no replacement so the caller reaches the reset-time diagnostic (F2).
+   * `workflowLauncherStatus` confirms the replacement can actually run.
+   * Returns null when no eligible non-pinned family exists, so the caller falls
+   * back to the reset-time diagnostic rather than hard-refusing.
+   */
+  const selectReplacementFamily = async (): Promise<string | null> => {
+    // Real selector contract: `selectAgent(step, { exclude })`. Pass the actual
+    // workflow step so config/agents.json eligibility is consulted, and exclude
+    // the pinned/blocked implementer so it can never be re-selected (F1). The
+    // one-arg `{ role }` call previously bypassed the eligibility policy.
+    let selected: string | null;
+    try {
+      selected = port.selectAgent?.('active', { exclude: new Set([implementer]) }) ?? null;
+    } catch {
+      // Selector exhaustion/unavailability (all non-pinned families blocked,
+      // excluded, or lack a working launcher) throws; treat as no replacement
+      // so the caller reaches the reset-time diagnostic (F2, SC2).
+      selected = null;
+    }
+    if (!selected || selected === implementer) {return null;}
+    const status = port.workflowLauncherStatus?.(selected) ?? { supported: false, agent: selected };
+    return status.supported ? (status.agent ?? selected) : null;
+  };
+
   let agent: string;
   let agentResult: { status: number };
   try {
@@ -742,11 +778,39 @@ export async function runRebaseWorkflow(args: string[], port: RebaseWorkflowPort
       pinnedAgent: true,
     }));
   } catch (err: any) {
-    fmt.log.fail(`Implementer (${fmt.agent(implementer)}) cannot run conflict resolution: ${err.message || String(err)}`);
-    fmt.log.info('Parallix does not substitute another agent family for the mission implementer.');
-    fmt.log.info(`You may need to abort the rebase: ${fmt.command('git rebase --abort')}`);
-    port.exit(1);
-    return;
+    const message = err?.message || String(err);
+
+    // Agent usage-block: the pinned implementer hit a weekly/daily/quota limit.
+    // `startAgent` recorded the block via updateAgentBlock and refused a family
+    // fallback (pinned work has no fallback). Prefer an eligible replacement
+    // family when mission policy permits; otherwise name the block and its
+    // reset time. Never call it an infrastructure or Forgejo failure.
+    if (/usage\s+limit|blocked\s+until|usage\s+limit\s+hit/i.test(message)) {
+      const resetMatch = /blocked\s+until\s+(.+)$/i.exec(message);
+      const resetTime = resetMatch?.[1]?.trim() ?? null;
+      const replacement = await selectReplacementFamily();
+      if (replacement && replacement !== implementer) {
+        fmt.log.info(`Implementer ${fmt.agent(implementer)} hit an agent usage limit; substituting ${fmt.agent(replacement)} for conflict resolution.`);
+        ({ agent, result: agentResult } = await port.startAgent('conflict-resolution', {
+          prompt,
+          worktree: worktreePath,
+          agent: replacement,
+          slug,
+          role: 'implementer',
+        }));
+      } else {
+        fmt.log.fail(`Implementer ${fmt.agent(implementer)} hit an agent usage limit` + (resetTime ? ` (resets ${resetTime})` : '') + `.`);
+        fmt.log.info('No eligible replacement family is available under the current mission policy, so the rebase cannot continue automatically.');
+        fmt.log.info(`Recovery: ${fmt.command('git rebase --abort')}`);
+        port.exit(1);
+        return;
+      }
+    } else {
+      fmt.log.fail(`Implementer ${fmt.agent(implementer)} cannot run conflict resolution: ${message}`);
+      fmt.log.info(`You may need to abort the rebase: ${fmt.command('git rebase --abort')}`);
+      port.exit(1);
+      return;
+    }
   }
 
   if (agentResult.status !== 0) {

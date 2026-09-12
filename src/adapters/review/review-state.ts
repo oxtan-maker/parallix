@@ -804,7 +804,7 @@ export class ReviewState {
           return {
             outcome: 'write-failed',
             stage: 'write',
-            diagnostic: `Mission ${this.slug} has no review to update; px handoff starts the review, or px review ${this.slug} --backfill-review migrates a pre-cutover review-state.json`,
+            diagnostic: `Mission ${this.slug} has no review to update; px review ${this.slug} --start starts the review, or px review ${this.slug} --backfill-review migrates a pre-cutover review-state.json`,
           };
         }
 

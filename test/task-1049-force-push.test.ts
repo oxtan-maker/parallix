@@ -7,7 +7,6 @@ import path from 'path';
 import { ReviewCommandUseCase } from '../src/application/review-command-use-case.js';
 import { createReviewCommand } from '../src/interfaces/cli/review.js';
 import { mockModule, installModuleMocks } from './lib/module-mock.js';
-import { parseHandoffCliRequest } from '../src/interfaces/cli/handoff.js';
 const git = mockModule<typeof import('../src/adapters/git/git.js')>('../src/adapters/git/git.js', import.meta.url);
 // Sub-modules must be declared so they re-link with the facaded git binding
 // (forgejo.ts is a barrel that re-exports from these; without re-linking them,
@@ -181,11 +180,6 @@ serialTest('review --push --force passes force:true to pushRound', async (t) => 
 
   await review(['task-1049', '--push'], options);
   assert.strictEqual(pushRoundArgs.force, false);
-});
-
-serialTest('handoff --force translates force:true at the CLI boundary', async () => {
-  assert.strictEqual(parseHandoffCliRequest(['task-1049', '--force']).force, true);
-  assert.strictEqual(parseHandoffCliRequest(['task-1049']).force, false);
 });
 
 serialTest('rebase --push calls createPrFn with forceWithLease:true on success', async (t) => {

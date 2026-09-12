@@ -38,12 +38,16 @@ const expectedIntegrationFiles = [
   // durable lease; the spawn process boundary keeps it in the integration suite.
   'custom-capacity-multiprocess-repro.test.ts',
   'bootstrap-isolation.test.ts', 'documentation-verification.test.ts',
+  'task-2484-npm-metadata-urls-repro.test.ts',
+  // TASK-2494: the rebase-handoff usage-block repro (test/task-2494-repro.test.ts)
+  // is a hermetic in-memory-fake unit test, so it runs in the default suite and
+  // is deliberately absent from this integration inventory.
   'draft-command.test.ts', 'draft.test.ts',
   'draft_preflight_modern.test.ts', 'durable-state-policy.test.ts',
   'external-target-resolution.test.ts', 'forgejo-independence.test.ts',
   'forgejo-pr-round-sync.test.ts', 'forgejo.test.ts', 'handoff.test.ts', 'install.test.ts',
   'integrate-task-1410-stash-pop-corruption.test.ts', 'integrate-workflow-gate.test.ts',
-  'integrate.test.ts', 'integration-pipelines.test.ts', 'mission-start.test.ts',
+  'integrate.test.ts', 'integration-pipelines.test.ts', 'startup-preflight.test.ts',
   'mission-utils-worktree.test.ts', 'mistral.test.ts', 'nels.test.ts',
   'noise-reduction.test.ts', 'opencode-export.test.ts', 'package-persistent-data.test.ts',
   'product-config.test.ts',

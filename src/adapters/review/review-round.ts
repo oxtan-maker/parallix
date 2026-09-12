@@ -104,7 +104,7 @@ export async function recordRequestedChanges(
     if (loaded.kind !== 'found') { return { outcome: 'failed', diagnostic: `Mission ${slug} is not in the operator database` }; }
     const mission = loaded.mission;
     if (!('review' in mission) || !mission.review) {
-      return { outcome: 'failed', diagnostic: `Mission ${slug} has no review to decide; px handoff starts the review` };
+      return { outcome: 'failed', diagnostic: `Mission ${slug} has no review to decide; px review ${slug} --start starts the review` };
     }
     if (reviewStatus(mission.review) !== 'awaiting-review') {
       return { outcome: 'unchanged', reason: `review is ${reviewStatus(mission.review)}` };
@@ -157,7 +157,7 @@ export async function recordRequestedChanges(
  * condition.
  */
 function approvalBlockedDiagnostic(status: string): string {
-  return `Approve cannot move the round to approved while review is ${status}; resolve the outstanding findings with a resolution, open the next round with \`px handoff\`, and approve that awaiting-review round (see MISSION.md "Repair path for a round already stuck in the inconsistent state")`;
+  return `Approve cannot move the round to approved while review is ${status}; resolve the outstanding findings with a resolution, open the next round with \`px review <slug> --start\`, and approve that awaiting-review round (see MISSION.md "Repair path for a round already stuck in the inconsistent state")`;
 }
 
 /**
@@ -229,7 +229,7 @@ export async function recordApproval(
     if (loaded.kind !== 'found') { return { outcome: 'failed', diagnostic: `Mission ${slug} is not in the operator database` }; }
     const mission = loaded.mission;
     if (!('review' in mission) || !mission.review) {
-      return { outcome: 'failed', diagnostic: `Mission ${slug} has no review to approve; px handoff starts the review` };
+      return { outcome: 'failed', diagnostic: `Mission ${slug} has no review to approve; px review ${slug} --start starts the review` };
     }
     const status = reviewStatus(mission.review);
     if (status === 'approved') {

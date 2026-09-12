@@ -120,6 +120,11 @@ function standaloneOpts(root, overrides = {}) {
     toVirtualFn: (s) => s,
     workflowLauncherStatusFn: () => ({ supported: true }),
     eligibleAgentsForStepFn: () => ['codex', 'claude', 'gemini', 'custom'],
+    // Provider-disabled --start bakes the handoff transition inline (MISSION.md
+    // SC1/SC1b); the retired standalone `px handoff` no longer exists, so the
+    // loop calls the performHandoffFn seam. Standalone mode has no PR, so the
+    // handoff is a no-op transition here.
+    performHandoffFn: async () => ({ ok: true }),
     enforceTaskAssigneeFn: () => true,
     applyAgentFallbackFn: (a) => a.original,
     readReviewStateFn: () => null,

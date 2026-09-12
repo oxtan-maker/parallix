@@ -221,7 +221,7 @@ async function recordLocalReviewVerdict(
   // `px handoff` started, so fail closed rather than invent one.
   if (!existing) {
     throw new Error(
-      `Cannot record review verdict for ${slug}: no review state found. A review must be started with \`px handoff\` before recording a verdict; refusing to fabricate round 1`,
+      `Cannot record review verdict for ${slug}: no review state found. A review must be started with \`px review ${slug} --start\` before recording a verdict; refusing to fabricate round 1`,
     );
   }
   const state = existing instanceof ReviewState

@@ -40,7 +40,6 @@ const getLatestDispositionModule = mockModule<typeof import('../src/adapters/for
 const getLatestReviewModule = mockModule<typeof import('../src/adapters/forgejo/forgejo.js')>('../src/adapters/forgejo/forgejo.js', import.meta.url);
 const applyAgentFallbackModule = mockModule<typeof import('../src/adapters/review/review-loop.js')>('../src/adapters/review/review-loop.js', import.meta.url);
 const ReviewStateModule = mockModule<typeof import('../src/adapters/review/review-state.js')>('../src/adapters/review/review-state.js', import.meta.url);
-const unwrapHandoffModuleModule = mockModule<typeof import('../src/adapters/review/review-commands.js')>('../src/adapters/review/review-commands.js', import.meta.url);
 const buildMetadataFooterModule = mockModule<typeof import('../src/adapters/review/review-artifacts.js')>('../src/adapters/review/review-artifacts.js', import.meta.url);
 const commentRoundModule = mockModule<typeof import('../src/adapters/review/review-commands.js')>('../src/adapters/review/review-commands.js', import.meta.url);
 const submitReviewRoundModule = mockModule<typeof import('../src/adapters/review/review-commands.js')>('../src/adapters/review/review-commands.js', import.meta.url);
@@ -66,7 +65,6 @@ const { getLatestDisposition } = getLatestDispositionModule;
 const { getLatestReview } = getLatestReviewModule;
 const { applyAgentFallback } = applyAgentFallbackModule;
 const { ReviewState } = ReviewStateModule;
-const { unwrapHandoffModule } = unwrapHandoffModuleModule;
 const { buildMetadataFooter } = buildMetadataFooterModule;
 const { commentRound } = commentRoundModule;
 const { submitReviewRound } = submitReviewRoundModule;
@@ -655,6 +653,68 @@ test('startReviewLoop handles missing PR', async () => {
 
   assert.ok(errors.some(e => e.includes('No open review PR found')), 'Should error when PR missing');
   assert.equal(exitCode, 1);
+});
+
+test('startReviewLoop performs the handoff for a provider-disabled --start (SC1)', async () => {
+  let handoffCalled = false;
+  let handoffArgs = null;
+  const { exitCode, errors, logs } = await captureExit(() => {
+    return startReviewLoop(TEST_SLUG, {
+      eligibleAgentsForStepFn: () => ['codex', 'claude', 'gemini', 'custom'],
+      resolveTaskFileFn: () => ({ ok: true, taskFile: '/tmp/task.md' }),
+      getTaskStatusFn: () => 'active',
+      getTaskImplementerFn: () => 'codex',
+      // Provider disabled: the review provider is not Forgejo.
+      isReviewProviderEnabledFn: () => false,
+      performHandoffFn: async (slug, opts) => {
+        handoffCalled = true;
+        handoffArgs = { slug, opts };
+        return { ok: true };
+      },
+      maybeUpdateGraphifyBeforeReviewFn: () => {},
+      maxAttempts: 0,
+      writeReviewStateFn: persistenceCommitted,
+      implementer: 'codex',
+      reviewer: 'claude',
+      dryRun: false
+    });
+  });
+
+  // SC1: the handoff transition runs even with the review provider disabled, so
+  // starting a review no longer depends on a separate `px handoff` step.
+  assert.equal(handoffCalled, true, 'performHandoffFn must be called for a provider-disabled start');
+  assert.equal(handoffArgs.slug, TEST_SLUG);
+  assert.equal(handoffArgs.opts.forgejoUser, 'codex');
+  assert.ok('worktree' in handoffArgs.opts, 'worktree threaded into handoff');
+  assert.equal(exitCode, null);
+  assert.ok(errors.length === 0, `no errors for a provider-disabled start: ${errors.join(' | ')}`);
+});
+
+test('startReviewLoop reports a generic handoff error for a provider-disabled --start (F2)', async () => {
+  const errors = [];
+  const { exitCode } = await captureExit(() => {
+    return startReviewLoop(TEST_SLUG, {
+      eligibleAgentsForStepFn: () => ['codex', 'claude', 'gemini', 'custom'],
+      resolveTaskFileFn: () => ({ ok: true, taskFile: '/tmp/task.md' }),
+      getTaskStatusFn: () => 'active',
+      getTaskImplementerFn: () => 'codex',
+      isReviewProviderEnabledFn: () => false,
+      performHandoffFn: async () => ({ ok: false, error: 'checkpoint missing' }),
+      maybeUpdateGraphifyBeforeReviewFn: () => {},
+      maxAttempts: 0,
+      writeReviewStateFn: persistenceCommitted,
+      implementer: 'codex',
+      reviewer: 'claude',
+      dryRun: false,
+      error: (m) => errors.push(m),
+    });
+  });
+
+  assert.equal(exitCode, 1);
+  // The retired standalone command must not be suggested; the review-start
+  // transition is the supported recovery. (SC2 / F2)
+  assert.ok(!errors.some(e => /px handoff/i.test(e)), `no retired handoff command in recovery: ${errors.join(' | ')}`);
+  assert.ok(errors.some(e => /px review.*--start/i.test(e)), `recovery points at px review --start: ${errors.join(' | ')}`);
 });
 
 test('startReviewLoop full loop success and exit cases', async () => {
@@ -2429,13 +2489,6 @@ test('submitForReview exits when no forgejo user and no task implementer (task-1
   assert.equal(calls.length, 0);
 });
 
-test('unwrapHandoffModule supports the tsx default-export wrapper', () => {
-  const handoff = { performHandoff: async () => ({ ok: true }) };
-
-  assert.equal(unwrapHandoffModule({ default: handoff }), handoff);
-  assert.equal(unwrapHandoffModule(handoff), handoff);
-});
-
 test('submitForReview and closeMissionPr use injected handoff and close functions', async () => {
   const previous = process.env.FORGEJO_USER;
   delete process.env.FORGEJO_USER;
@@ -3932,7 +3985,9 @@ test('createEventHandler requires review-state or --actor for mirrored event typ
 
     // Verify the error names both ways to give the event an identity: start the
     // review (which creates the Review the identity comes from), or pass --actor.
-    assert.ok(errorMessages.some(msg => msg.includes('px handoff') && msg.includes('--actor')));
+    // SC2: the retired standalone `px handoff` command is gone; the review-start
+    // transition is the supported entry point.
+    assert.ok(errorMessages.some(msg => msg.includes('px review') && msg.includes('--start') && msg.includes('--actor')));
     assert.equal(exitCode, 1);
 
     // Verify that no event file was created
@@ -3956,9 +4011,11 @@ test('createEventHandler requires review-state or --actor for mirrored event typ
 // Pre-review phase detection tests for startReviewLoop (task-1223)
 // ============================================================================
 
-test('startReviewLoop returns early with guidance when task is active and no PR exists', async () => {
+test('startReviewLoop performs the handoff for an active task via --start (task-2490)', async () => {
 
   let handoffCalled = false;
+  let handoffArgs = null;
+  let prCalls = 0;
   const { exitCode, errors, logs } = await captureExit(() => {
     return startReviewLoop(TEST_SLUG, {
       eligibleAgentsForStepFn: () => ['codex', 'claude', 'gemini', 'custom'],
@@ -3967,37 +4024,60 @@ test('startReviewLoop returns early with guidance when task is active and no PR 
       getTaskImplementerFn: () => 'codex',
       isForgejoReviewEnabledFn: () => true,
       forgejoAvailableFn: async () => true,
-      getPrStatusFn: () => ({ exists: false, state: 'closed' }),
-      performHandoffFn: async () => { handoffCalled = true; return { ok: true }; },
+      // No PR before handoff; a successful handoff opens PR #77.
+      getPrStatusFn: () => {
+        prCalls += 1;
+        return prCalls === 1
+          ? { exists: false, state: 'closed' }
+          : { exists: true, state: 'open', number: 77 };
+      },
+      performHandoffFn: async (slug, opts) => { handoffCalled = true; handoffArgs = { slug, opts }; return { ok: true }; },
       maybeUpdateGraphifyBeforeReviewFn: () => {},
+      maxAttempts: 0,
+      readTokenFn: () => 'tok',
+      resolveReviewUserFn: () => 'reviewer-user',
+      writeReviewStateFn: persistenceCommitted,
       implementer: 'codex',
       reviewer: 'claude',
       dryRun: false
     });
   });
 
-  // Should NOT exit (returns early with INFO message for active task)
-  assert.equal(exitCode, null);
-  // Should have INFO message about PR not found with guidance
-  assert.ok(logs.some(l => l.includes('INFO') && l.includes('PR not found')));
-  assert.ok(logs.some(l => l.includes('create the PR first') && l.includes('--push')));
-  // task-1303 crit. 5: implementation-phase path must not invoke self-heal.
-  assert.equal(handoffCalled, false, 'performHandoffFn must not be called in implementation phase');
+  // TASK-2490: `px review <slug> --start` hands off an active task instead of
+  // bailing to `--push`. Bound the loop so it does not launch a reviewer.
+  assert.equal(handoffCalled, true, 'performHandoffFn must be called for an active task');
+  assert.equal(handoffArgs.slug, TEST_SLUG);
+  assert.equal(handoffArgs.opts.forgejoUser, 'codex');
+  assert.ok('worktree' in handoffArgs.opts, 'worktree threaded into handoff');
+  assert.ok(logs.some(l => l.includes('performing handoff') && l.includes('--start')));
+  assert.ok(!errors.some(e => e.includes('--push')), 'no --push guidance for an active start');
 });
 
-test('startReviewLoop returns early with guidance when task maps to virtual active and no PR exists', async () => {
+test('startReviewLoop performs the handoff for a virtual-active task via --start (task-2490)', async () => {
 
+  let handoffCalled = false;
+  let prCalls = 0;
   const { exitCode, logs } = await captureExit(() => {
     return startReviewLoop(TEST_SLUG, {
       eligibleAgentsForStepFn: () => ['codex', 'claude', 'gemini', 'custom'],
       resolveTaskFileFn: () => ({ ok: true, taskFile: '/tmp/task.md' }),
       getTaskStatusFn: () => 'in-progress',
-      toVirtualFn: (status) => status === 'in-progress' ? 'active' : status,
       getTaskImplementerFn: () => 'codex',
       isForgejoReviewEnabledFn: () => true,
       forgejoAvailableFn: async () => true,
-      getPrStatusFn: () => ({ exists: false, state: 'closed' }),
+      // No PR before handoff; a successful handoff opens PR #77.
+      getPrStatusFn: () => {
+        prCalls += 1;
+        return prCalls === 1
+          ? { exists: false, state: 'closed' }
+          : { exists: true, state: 'open', number: 77 };
+      },
+      performHandoffFn: async () => { handoffCalled = true; return { ok: true }; },
       maybeUpdateGraphifyBeforeReviewFn: () => {},
+      maxAttempts: 0,
+      readTokenFn: () => 'tok',
+      resolveReviewUserFn: () => 'reviewer-user',
+      writeReviewStateFn: persistenceCommitted,
       implementer: 'codex',
       reviewer: 'claude',
       dryRun: false
@@ -4005,8 +4085,51 @@ test('startReviewLoop returns early with guidance when task maps to virtual acti
   });
 
   assert.equal(exitCode, null);
-  assert.ok(logs.some(l => l.includes('INFO') && l.includes('Task is in in-progress')));
-  assert.ok(logs.some(l => l.includes('create the PR first') && l.includes('--push')));
+  assert.equal(handoffCalled, true, 'performHandoffFn must be called for a virtual-active task');
+  assert.ok(logs.some(l => l.includes('performing handoff') && l.includes('--start')));
+});
+
+// Round-3: a fresh --start handoff creates the authoritative Review with its
+// reviewer. The loop must resume that handoff-assigned reviewer rather than
+// selecting a new one, which would desynchronize the domain Review from the
+// launched reviewer.
+test('startReviewLoop resumes the handoff-assigned reviewer instead of re-selecting (task-2490 round-3)', async () => {
+  let readCalls = 0;
+  let selectedReviewer = null;
+  let capturedReviewer = null;
+  const { exitCode, errors } = await captureExit(() => {
+    return startReviewLoop(TEST_SLUG, {
+      eligibleAgentsForStepFn: () => ['codex', 'claude', 'gemini', 'custom'],
+      resolveTaskFileFn: () => ({ ok: true, taskFile: '/tmp/task.md' }),
+      getTaskStatusFn: () => 'active',
+      getTaskImplementerFn: () => 'codex',
+      // Provider disabled: the handoff transition runs without a PR concept.
+      isForgejoReviewEnabledFn: () => false,
+      // Handoff assigns 'gemini'. readReviewStateFn returns null before handoff,
+      // then the handoff-created state after, so the loop must resume 'gemini'.
+      readReviewStateFn: () => {
+        readCalls += 1;
+        if (readCalls === 1) { return null; }
+        return { slug: TEST_SLUG, reviewer: 'gemini', round: 1, phase: 'reviewing', implementer: 'codex', startedAt: new Date().toISOString(), metadata: {} };
+      },
+      // If the loop re-selected, it would choose 'claude' here.
+      selectAgentFn: () => { selectedReviewer = 'claude'; return 'claude'; },
+      performHandoffFn: async () => ({ ok: true }),
+      maybeUpdateGraphifyBeforeReviewFn: () => {},
+      maxAttempts: 0,
+      resolveReviewUserFn: () => 'reviewer-user',
+      writeReviewStateFn: (_slug, state) => { capturedReviewer = state.reviewer; return { outcome: 'committed' }; },
+      implementer: 'codex',
+      dryRun: false
+    });
+  });
+
+  assert.equal(exitCode, null, `no exit on fresh start: ${errors.join(' | ')}`);
+  // selectAgentFn must not have been used to pick the reviewer: the handoff
+  // assignment is authoritative and is resumed instead.
+  assert.equal(selectedReviewer, null, 'loop must not re-select the reviewer after handoff');
+  // The persisted reviewer is the handoff-assigned reviewer, not a new one.
+  assert.equal(capturedReviewer, 'gemini', `reviewer persisted must be the handoff-assigned reviewer, got ${capturedReviewer}`);
 });
 
 // task-1303 self-heal: when a post-implementation task has no open PR, the loop runs

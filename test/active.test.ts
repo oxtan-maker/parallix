@@ -9,8 +9,8 @@ import { createRequire } from 'node:module';
 const _require = createRequire(import.meta.url);
 const activeModule = mockModule<typeof import('../src/adapters/cli/commands/active.js')>('../src/adapters/cli/commands/active.js', import.meta.url);
 const resolveWorktreeModule = mockModule<typeof import('../src/adapters/filesystem/mission-utils.js')>('../src/adapters/filesystem/mission-utils.js', import.meta.url);
-const completePreflightOrExitModule = mockModule<typeof import('../src/adapters/cli/mission-start.js')>('../src/adapters/cli/mission-start.js', import.meta.url);
-const missionStartModule = mockModule<typeof import('../src/adapters/cli/mission-start.js')>('../src/adapters/cli/mission-start.js', import.meta.url);
+const completePreflightOrExitModule = mockModule<typeof import('../src/adapters/cli/startup-preflight.js')>('../src/adapters/cli/startup-preflight.js', import.meta.url);
+const missionStartModule = mockModule<typeof import('../src/adapters/cli/startup-preflight.js')>('../src/adapters/cli/startup-preflight.js', import.meta.url);
 const repairHandoffModule = mockModule<typeof import('../src/adapters/cli/commands/repair-handoff.js')>('../src/adapters/cli/commands/repair-handoff.js', import.meta.url);
 await installModuleMocks();
 test.afterEach(() => mock.restoreAll());
@@ -623,6 +623,12 @@ test('runHandoffAndReview passes worktree and implementer to startReviewLoop', a
   assert.equal(reviewLoopCalls[0].slug, 'task-test');
   assert.equal(reviewLoopCalls[0].opts.worktree, '/tmp/project-task-test');
   assert.equal(reviewLoopCalls[0].opts.implementer, 'codex');
+  // SC3: handoff already ran in this function, so the review loop must skip its
+  // own handoff. On a provider-disabled repository a start that runs
+  // performHandoff a second time would resubmit/mutate the Review the active
+  // path just created. This is a fresh review start (not a --continue), so it
+  // is signaled with skipHandoff rather than isContinue.
+  assert.equal(reviewLoopCalls[0].opts.skipHandoff, true, 'startReviewLoop must be told to skip handoff after an active handoff');
 });
 
 test('runHandoffAndReview does not hand off or start review when CP-2 is missing', async () => {

@@ -26,8 +26,9 @@ import { resolveReviewAdapter } from '../config/product-config.js';
 import { buildMetadataFooter, postWorkflowComment, postWorkflowReview, consumeReviewerArtifacts, resolveArtifactDir } from './review-artifacts.js';
 import { runPhaseGates } from '../config/repository-gates.js';
 import { commitSafeMissionArtifacts } from './review-loop.js';
-import { flagValue, getHandoff, repeatedFlagValues } from './review-cli-flags.js';
-export { REVIEW_FLAGS, REVIEW_VALUE_FLAGS, unknownReviewFlags, flagValue, getHandoff, readTextFlag, repeatedFlagValues, unwrapHandoffModule } from './review-cli-flags.js';
+import { flagValue, repeatedFlagValues } from './review-cli-flags.js';
+import { performHandoff } from '../cli/commands/handoff.js';
+export { REVIEW_FLAGS, REVIEW_VALUE_FLAGS, unknownReviewFlags, flagValue, readTextFlag, repeatedFlagValues } from './review-cli-flags.js';
 export { formatStaticReviewFindings, formatStaticReviewSuccess, performStaticReview } from './review-static-evidence.js';
 
 
@@ -127,7 +128,7 @@ export async function postStaticReviewComment(
     }
   }
   if (!resolvedUser) {
-    error('Cannot determine review identity. Set FORGEJO_USER, start the review with px handoff, or assign the task implementer.');
+    error(`Cannot determine review identity. Set FORGEJO_USER, start the review with px review ${slug} --start, or assign the task implementer.`);
     return { ok: false, error: 'missing-user' };
   }
   resolvedUser = resolveReviewUserFn(resolvedUser!);
@@ -595,7 +596,7 @@ export async function submitForReview(
   const resolveTaskFileFn = options.resolveTaskFileFn || resolveTaskFile;
   const getTaskImplementerFn = options.getTaskImplementerFn || getTaskImplementer;
   const resolveWorktreeFn = options.resolveWorktreeFn || resolveWorktree;
-  const performHandoffFn = options.performHandoffFn || (await getHandoff()).performHandoff;
+  const performHandoffFn = options.performHandoffFn || performHandoff;
   const readReviewStateFn = options.readReviewStateFn || readReviewState;
   const transitionTaskFn = options.transitionTaskFn || transitionTask;
   const isReviewProviderEnabledFn = options.isReviewProviderEnabledFn || options.isForgejoReviewEnabledFn || isProviderEnabled;
@@ -620,7 +621,7 @@ export async function submitForReview(
   // 3. Mode-specific final fallback: named identity (provider-backed) vs "autonomous" (provider=none) (SC 6)
   if (!reviewIdentity) {
     if (providerEnabled) {
-      log(fmt.status('FAIL', `No review identity resolved for ${slug}. Start the review with px handoff, or set the task implementer, before submitting for review.`));
+      log(fmt.status('FAIL', `No review identity resolved for ${slug}. Start the review with px review ${slug} --start, or set the task implementer, before submitting for review.`));
       exit(1);
       return;
     } else {
@@ -697,7 +698,7 @@ export async function readComments(
   })).identityUser;
 
   if (!reviewIdentity) {
-    error(fmt.status('FAIL', `Cannot determine review identity for ${slug}. Start the review with px handoff, or set FORGEJO_USER.`));
+    error(fmt.status('FAIL', `Cannot determine review identity for ${slug}. Start the review with px review ${slug} --start, or set FORGEJO_USER.`));
     exit(1);
     return;
   }
@@ -797,7 +798,7 @@ export async function pushRound(
   // 2. Mode-specific final fallback: named identity (provider-backed) vs "autonomous" (provider=none) (SC 6)
   if (!reviewIdentity) {
     if (providerEnabled) {
-      error(fmt.status('FAIL', `No review identity resolved for --push on ${slug}. Start the review with px handoff, or set the task implementer.`));
+      error(fmt.status('FAIL', `No review identity resolved for --push on ${slug}. Start the review with px review ${slug} --start, or set the task implementer.`));
       exit(1);
       return;
     } else {
@@ -929,7 +930,7 @@ export async function commentRound(
   })).identityUser;
 
   if (!reviewIdentity) {
-    error(fmt.status('FAIL', `Cannot determine review identity for ${slug}. Start the review with px handoff, or set FORGEJO_USER.`));
+    error(fmt.status('FAIL', `Cannot determine review identity for ${slug}. Start the review with px review ${slug} --start, or set FORGEJO_USER.`));
     exit(1);
     return;
   }
@@ -1278,7 +1279,7 @@ export async function submitReviewRound(
   })).identityUser;
 
   if (!reviewIdentity) {
-    error(fmt.status('FAIL', `Cannot determine review identity for ${slug}. Start the review with px handoff, or set FORGEJO_USER.`));
+    error(fmt.status('FAIL', `Cannot determine review identity for ${slug}. Start the review with px review ${slug} --start, or set FORGEJO_USER.`));
     exit(1);
     return;
   }
@@ -1434,7 +1435,7 @@ export async function closeMissionPr(
   })).identityUser;
 
   if (!reviewIdentity) {
-    error(fmt.status('FAIL', `Cannot determine review identity for ${slug}. Start the review with px handoff, or set FORGEJO_USER.`));
+    error(fmt.status('FAIL', `Cannot determine review identity for ${slug}. Start the review with px review ${slug} --start, or set FORGEJO_USER.`));
     exit(1);
     return;
   }
@@ -1533,7 +1534,7 @@ export async function createEventHandler(
 
   // SC 4: For mirrored event types, a provider identity is required before creating the event.
   if (shouldMirrorToProvider(eventType) && !reviewIdentity) {
-    error(fmt.status('FAIL', 'Cannot determine review identity for a mirrored event. Start the review with px handoff, or use --actor.'));
+    error(fmt.status('FAIL', `Cannot determine review identity for a mirrored event. Start the review with px review ${slug} --start, or use --actor.`));
     exit(1);
     return;
   }

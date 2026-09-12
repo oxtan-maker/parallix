@@ -164,7 +164,7 @@ test('missionPathForSlug and missionDirForSlug resolve from temp-dir root', () =
   }
 });
 
-test('node parallix mission-start verify-env resolves from a temp dir without reading parallix source tree', () => {
+test('node parallix verify-env resolves from a temp dir without reading parallix source tree', () => {
   // Create a temp dir with a minimal git repo + mission structure
   const tempDir = createTempTargetRepo();
 
@@ -193,8 +193,8 @@ test('node parallix mission-start verify-env resolves from a temp dir without re
       },
     }, null, 2));
 
-    // Run mission-start verify-env from a temp directory that does NOT contain parallix source tree
-    const result = spawnSync(process.execPath, [path.join(import.meta.dirname, '..', 'build', 'px.mjs'), 'mission-start', 'verify-env'], {
+    // Run verify-env from a temp directory that does NOT contain parallix source tree
+    const result = spawnSync(process.execPath, [path.join(import.meta.dirname, '..', 'build', 'px.mjs'), 'verify-env'], {
       cwd: tempDir,
       encoding: 'utf8',
       timeout: 15000,

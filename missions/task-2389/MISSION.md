@@ -1,6 +1,5 @@
 # Mission: Align operator UIs on truthful agent activity semantics (task-2389)
 
-Base-Branch: main
 
 ## Goal
 Define one interface-neutral mission-activity read model and use it in the operator TUI and `px status`, so each surface states only whether authoritative operation work or recovery-only coordinator-process evidence exists, including its certainty and lifecycle state.

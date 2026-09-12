@@ -142,7 +142,7 @@ hostTest('installed workflow prints usage via node', () => {
     assert.equal(wfResult.status, 0, `installed workflow exited ${wfResult.status}: ${wfResult.stderr.toString()}`);
     const output = wfResult.stdout.toString();
     assert.ok(output.includes('Usage: px'), 'usage mentions px');
-    assert.ok(output.includes('mission-start'), 'usage lists core commands');
+    assert.ok(output.includes('active'), 'usage lists core commands');
   } finally {
     cleanup(tmpDir);
   }

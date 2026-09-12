@@ -122,13 +122,13 @@ until the step that produces it has run.
 
 | Field | Source | Appears after |
 |---|---|---|
-| checkpoint, next step, Goal Check | the latest `CP-N.md` in the mission directory | `px checkpoint` |
-| gate | the verifier exit code recorded in `<mission>/.workflow/gate-result.json`, read from the mission's own worktree | `px checkpoint` |
+| checkpoint, next step, Goal Check | the latest `CP-N.md` in the mission directory | the executing agent commits checkpoint evidence |
+| gate | the verifier exit code recorded in `<mission>/.workflow/gate-result.json`, read from the mission's own worktree | a lifecycle transition runs the verifier |
 | pull request | the pull-request reference the review loop records on the round once it confirms an open PR | `px review` with a review provider configured |
 | agent availability | the `agent_blocklist` table | an agent hits a provider usage limit |
 | cycle time | the `board_lane_events` table | any lifecycle step: mission intake (entry into `backlog`), every lane transition, `integration → done`, and closure |
 | agent runtime | the `duration_minutes` column of the `usage_statistics` table, summed per mission over its recorded runs | an agent finishes a run and its measurement is written |
-| operations | the `operational_history` table | `px active`, `px checkpoint`, `px review`, or `px integrate` |
+| operations | the `operational_history` table | `px active`, `px review`, or `px integrate` |
 
 The gate cell reports an exit code and nothing else. An agent's own account of a
 gate run — including a `PASS` row in its Goal Check table — is never promoted to

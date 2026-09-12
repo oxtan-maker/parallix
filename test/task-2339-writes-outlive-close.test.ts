@@ -70,6 +70,9 @@ test('the review loop awaits its stage-stats write before moving on', async () =
       worktree: root,
       maxAttempts: 1,
       maybeUpdateGraphifyBeforeReviewFn: () => {},
+      // Provider-disabled --start runs the inline handoff seam before the loop;
+      // a no-op keeps the loop at the stats-write/consume ordering under test.
+      performHandoffFn: async () => ({ ok: true }),
       resolveTaskFileFn: () => ({ ok: true, taskFile: '/tmp/task-999.md' }),
       getTaskImplementerFn: () => null,
       readReviewStateFn: () => null,

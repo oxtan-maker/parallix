@@ -1,10 +1,10 @@
 # Parallix
 
-**Parallix is an agent-agnostic, local-first workflow for running multiple AI coding agents in parallel without giving up Git isolation, review, verification, or operator control.**
+**Parallix is an agent-agnostic, local-first workflow that puts a trust ladder around AI coding work: separate review that prefers a different agent family when one is available, repository-owned verification where you configure a gate, Linux Bubblewrap confinement when available (with an unsandboxed warning otherwise), and a human-owned squash merge.**
 
 Coding agents become much more useful when you can run several pieces of work at once. But simply starting more agents quickly creates a new bottleneck: they compete for the same working tree, lose context across long runs, hit provider limits, and produce more changes than one engineer can safely supervise and integrate.
 
-Parallix is the delivery layer around those agents. It gives every piece of work an isolated mission, lets multiple missions progress concurrently, preserves execution across sessions, separates implementation from review, runs repository-owned verification, and leaves the final integration decision with the human operator.
+Parallix is the delivery layer around those agents. It gives every piece of work an isolated mission, lets multiple missions progress concurrently, preserves execution across sessions, separates implementation from review, runs repository-owned verification, and leaves the final integration decision with the human operator. Parallel Git isolation is how that trust ladder can operate across concurrent missions instead of one shared checkout.
 
 Parallix is deliberately not tied to one agent vendor or model family. The same mission workflow can use different agent families for drafting, implementation, and review, including commercially hosted agents, locally hosted AI, and custom runtimes.
 
@@ -19,7 +19,7 @@ npm install -g @magnusekdahl/parallix && eval "$(px shell-init bash)"
 
 **The first concrete thing you can do** is run one complete mission:
 
-[![Terminal demonstration showing a new directory, mission drafting, mission inspection, autonomous review, diff inspection, and operator integration](docs/assets/first-value-demo.gif)](docs/assets/first-value-demo.gif)
+[![Terminal demonstration showing a new directory, mission drafting, mission inspection, autonomous review, diff inspection, and operator integration](https://raw.githubusercontent.com/oxtan-maker/parallix/main/docs/assets/first-value-demo.gif)](https://raw.githubusercontent.com/oxtan-maker/parallix/main/docs/assets/first-value-demo.gif)
 
 The operator inspects the drafted mission before execution, then inspects the reviewed diff and decides whether to run `px integrate`. Parallix does not merge autonomously.
 
@@ -60,7 +60,7 @@ backlog → draft → active → review → approved → done
                   checkpoints  gates   cleanup
 ```
 
-In practice: a human drafts a mission, Parallix creates the branch and worktree, an agent runs and writes checkpoints, a verification gate runs, a second (preferentially different) agent reviews the diff, and only then is the work integrated back to your primary branch by squash-merge. Blocking review findings loop back to `active` on the same branch and PR.
+In practice: a human drafts a mission, Parallix creates the branch and worktree, an agent runs and writes checkpoints, a configured verification gate runs, a second agent reviews the diff, and only then is the work integrated back to your primary branch by squash-merge. Review uses a different agent family when one is available; when none is runnable, it falls back to the same family as a second review attempt. Blocking review findings loop back to `active` on the same branch and PR.
 
 ## Defence in depth
 
@@ -105,7 +105,7 @@ px active task-042
 px integrate task-042
 ```
 
-Parallix runs on built-in defaults with no config file; `px setup` writes one when you want to declare your own verification gate, mission layout, or Forgejo review wiring. See the [configuration reference](docs/config.md) for the supported overrides and their defaults. The verification gate that runs at each phase is whatever you declare in `workflow.config.json`. In this repo that dispatcher is `./scripts/verify-local.sh {{area}}`: earlier phases use the fast general suite, while `px integrate` calls `verify-local.sh integrate`, which resolves repo-side integration gates from `config/integration-pipelines.json` and runs the stricter pre-merge checks there.
+Parallix runs on built-in defaults with no config file; `px setup` writes one when you want to declare your own verification gate or mission layout. See the [configuration reference](docs/config.md) for the supported overrides and their defaults. The verification gate that runs at each phase is whatever you declare in `workflow.config.json`. In this repo that dispatcher is `./scripts/verify-local.sh {{area}}`: earlier phases use the fast general suite, while `px integrate` calls `verify-local.sh integrate`, which resolves repo-side integration gates from `config/integration-pipelines.json` and runs the stricter pre-merge checks there.
 
 When a mission goes wrong and you want to start it over, `px cancel <slug> --yes`
 retires it: it deletes that one mission's lifecycle rows from the operator
@@ -116,19 +116,19 @@ The same action sits behind a confirmation on the TUI board (`Shift+X`) and on
 the web board (the `cancel ✕` button). See the [board guide](docs/tui-board.md)
 for the details.
 
-## Working with Backlog.md and Forgejo
+## Optional integrations
 
 Both are optional integrations, and each one is wired independently of the other.
 
 **Backlog.md.** Point `px draft` at a task key and Parallix adopts the existing record instead of creating one: it reads the ID, title, labels, and classification from `backlog/tasks/<slug> - <title>.md` and carries them through the mission. As the mission moves, Parallix writes the task's `status` frontmatter and, on completion, moves the file into `backlog/completed/`, so the board reflects mission state without a second bookkeeping step. Drafting from free text instead produces an equivalent synthetic record, so nothing downstream depends on you keeping task files.
 
-**Forgejo.** Review publication is off until you configure it. `px setup` bootstraps the pieces — the review repository, agent tokens, and the `review` git remote — and from then on each mission opens or updates its PR there automatically. Forgejo user accounts must already exist before setup runs; see [`docs/forgejo-setup.md`](docs/forgejo-setup.md) for account creation, token layout, and running a local instance.
+**Forgejo.** Review publication is off until you opt in. If you want its reviewer surface, `px setup` can bootstrap the review repository, agent tokens, and the `review` git remote; otherwise the branch/worktree workflow runs without Forgejo. Forgejo user accounts must already exist before that optional setup; see [`docs/forgejo-setup.md`](docs/forgejo-setup.md) for account creation, token layout, and running a local instance.
 
 ## Use cases
 
 The durable capability guide and confidence boundaries are in [`docs/use-cases.md`](docs/use-cases.md).
 
-The isolated worktree-per-mission model is the *specific* mechanic an internal retrospective measured as the only configuration to beat a human baseline. Depending on whether you frame output as direct user-value missions or total completed missions in an already-productized setup, the observed gain ranges from roughly **+57%** to about **an order of magnitude**.
+An **internal retrospective, not external evidence,** measured the isolated worktree-per-mission model as the only configuration to beat a human baseline. Depending on whether you frame output as direct user-value missions or total completed missions in an already-productized setup, the observed gain ranges from roughly **+57%** to about **an order of magnitude**.
 
 ## What Parallix is not
 

@@ -1,6 +1,6 @@
 import { readAgentConfigOrExit } from '../agents/agents.js';
 import { resolveWorktree } from '../filesystem/mission-utils.js';
-import missionStart from '../cli/mission-start.js';
+import startupPreflight from '../cli/startup-preflight.js';
 import { buildCheckpointContext, buildExecutePrompt, enforceExecuteCommitSafety, runHandoffAndReview, selectLaunchAndRecord } from '../cli/commands/active.js';
 import { getTaskStatus, resolveTaskFile } from '../backlog/backlog.js';
 import { resolveAgentModel } from '../config/product-config.js';
@@ -38,7 +38,7 @@ export type { OperatorBlocklistOverlay };
 
 /** The legacy command helpers these adapters stand in front of. */
 export interface ExecuteMissionRuntime {
-  readonly preflight: typeof missionStart;
+  readonly preflight: typeof startupPreflight;
   readonly resolveWorktree: typeof resolveWorktree;
   readonly resolveTaskFile: typeof resolveTaskFile;
   readonly buildCheckpointContext: typeof buildCheckpointContext;
@@ -232,7 +232,7 @@ export function createExecuteMissionPorts(
 
 export function createDefaultExecuteMissionRuntime(): ExecuteMissionRuntime {
   return {
-    preflight: missionStart,
+    preflight: startupPreflight,
     resolveWorktree,
     resolveTaskFile,
     buildCheckpointContext,

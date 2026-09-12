@@ -130,6 +130,16 @@ export const ADR0053_PERSISTENCE_INVENTORY: readonly ADR0053BoundaryEntry[] = [
     cutoverTask: null,
   },
   {
+    // TASK-2492: records a reproduced base-branch gate failure as a Backlog task.
+    id: 'mission-write-integrate-gate-rebound',
+    concept: 'Mission',
+    pathType: 'default',
+    fileLocation: 'src/adapters/cli/commands/integrate-gate-rebound.ts',
+    operation: 'write',
+    classification: 'database-owned-domain-state',
+    cutoverTask: null,
+  },
+  {
     // TASK-2369.06: extracted from integrate.ts — persistLandedIntegrationOrAbort
     // reads Mission via store.load and writes via decideIntegration/close
     id: 'mission-read-integrate-post',

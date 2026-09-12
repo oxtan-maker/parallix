@@ -45,6 +45,37 @@ configured local agent, integration must stop rather than merge silently.
 node --import tsx test/e2e-real-agent-smoke.test.ts
 ```
 
+## First-value rehearsal
+
+This is an operator-run recording, not this blocking smoke gate. It invokes
+real agents, so timing and availability vary; its non-zero exit is convenience
+feedback that the recorded mission did not reach integration or its configured
+verification gate was not observed.
+
+Use a globally installed executable without editing the script. Keep the cast
+and plain-text transcript together for each run:
+
+```
+PX_BIN="$(command -v px)" \
+  ELIGIBLE_AGENT_FAMILIES='["custom"]' \
+  DEMO_CAST=docs/assets/first-value-demo-single-family.cast \
+  DEMO_TRANSCRIPT=docs/assets/first-value-demo-single-family.transcript \
+  ./scripts/record-first-value-demo.sh
+
+PX_BIN="$(command -v px)" \
+  DEMO_CAST=docs/assets/first-value-demo-three-family.cast \
+  DEMO_TRANSCRIPT=docs/assets/first-value-demo-three-family.transcript \
+  ./scripts/record-first-value-demo.sh
+```
+
+The first run exercises only the configured `custom` family; retain its
+verbatim `Selected reviewer:` output as evidence of that configuration's
+selection mode. The second omits the eligibility input and therefore exercises
+the default `codex`, `claude`, and `custom` configuration. Neither recording
+proves first-run configuration detection, CI behavior, deterministic timing,
+or provider availability: the rehearsal writes an isolated configuration and
+is observational evidence only.
+
 Also runs as part of `px integrate` (or `./scripts/verify-local.sh integrate`)
 whenever the changed areas include `workflow` or `lib`, alongside the
 `workflow` gate.

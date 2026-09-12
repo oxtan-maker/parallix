@@ -216,10 +216,13 @@ test('rebase use case exits non-zero when the pinned implementer launcher is una
   await run(h);
 
   // SC5: names the implementer family and leaves a recoverable git state.
+  // Non-usage-block launcher failure: the rebase path reports the failure and
+  // points at the abort recovery. The old hard-refusal "does not substitute
+  // another agent family" phrase was removed by task-2494.
   assert.deepEqual(h.exitCodes, [1]);
   const output = h.lines.join('\n');
   assert.match(output, /vibe/);
-  assert.match(output, /does not substitute another agent family/i);
+  assert.match(output, /cannot run conflict resolution/);
   assert.match(output, /git rebase --abort/);
 });
 

@@ -780,22 +780,6 @@ test('performHandoff accepts file:line evidence with supporting shell context in
   }
 });
 
-test('handoff CLI normalizes uppercase explicit slugs', async (t) => {
-  const { mock } = t;
-
-  // The composition root binds the adapter ports to the CLI interface.
-  // Stub the workflow method rather than bypassing that boundary.
-  const inferSlugMock = mock.method(missionUtils, 'inferSlug', (s) => s.toLowerCase());
-  mock.method(HandoffCommandUseCase.prototype, 'performHandoff', async () => ({ ok: true }));
-
-  // Mock process.exit to avoid crashing the test runner
-  const exitMock = mock.method(process, 'exit', () => {});
-
-  await createHandoffCommand(new HandoffCommandUseCase(createHandoffPorts()))(['TASK-1022']);
-
-  assert.strictEqual(inferSlugMock.mock.calls[0].arguments[0], 'TASK-1022');
-  assert.strictEqual(exitMock.mock.calls.length, 0, 'Should not exit on success');
-});
 
 test('performHandoff calls rebaseBeforeReviewRound before Forgejo PR creation', async (t) => {
   const { mock } = t;
@@ -1851,7 +1835,7 @@ test('performHandoff attempts agent relaunch when gatekeeper posts pushback', as
     assert.ok(relaunchPrompt, 'the kernel fix prompt should have been built');
     assert.ok(relaunchPrompt.includes('MISSION.md'), 'prompt should mention MISSION.md');
     assert.ok(relaunchPrompt.includes('create'), 'prompt should contain creation instructions');
-    assert.ok(relaunchPrompt.includes(`px handoff ${slug}`), 'prompt should name the exact post-repair handoff command');
+    assert.ok(relaunchPrompt.includes(`px review ${slug} --start`), 'prompt should name the exact post-repair review-start command');
     assert.ok(!relaunchPrompt.includes('${slug}'), 'prompt must not leak an unsubstituted mission placeholder');
   } finally {
     fs.rmSync(worktree, { recursive: true, force: true });

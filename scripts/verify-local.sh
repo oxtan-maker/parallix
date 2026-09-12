@@ -75,7 +75,9 @@ select_supported_node
 # Apple Git 2.24 lacks `git init -b`, while the fixture suite uses that modern
 # spelling. Keep the compatibility shim scoped to verification so production
 # Git calls retain the operator's configured executable.
-export PARALLIX_REAL_GIT="$(command -v git)"
+PARALLIX_REAL_GIT="${PARALLIX_TEST_REAL_GIT:-$(command -v git)}"
+[[ "$PARALLIX_REAL_GIT" -ef "$SCRIPT_DIR/git" ]] && PARALLIX_REAL_GIT=/usr/bin/git
+export PARALLIX_REAL_GIT
 export PATH="${SCRIPT_DIR}:$PATH"
 
 gate_all() {

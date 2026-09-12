@@ -273,9 +273,11 @@ and toolchain neutral: the command may be `cmake --build` and `ctest` for a
 C++ repository, `npm run build` for a Node one, or any other shell command.
 
 `preHandoff` gates run before the handoff (`active` → `review`) transition.
-`preReview` gates run before the review phase. `preIntegration` gates run
-before the integration merge. Configuring one phase does not require
-configuring the others; unconfigured phases remain gated-off.
+`preReview` gates run when a review is submitted with the `approve` outcome —
+that is, before the `review` → integration transition, not before the review
+itself. `preIntegration` gates run before the integration merge. Configuring
+one phase does not require configuring the others; unconfigured phases remain
+gated-off.
 
 `requirePreIntegration` opts the repository into a fail-closed integration
 merge. It defaults to `false`, so an unconfigured repository completes the

@@ -495,14 +495,15 @@ classification.
 
 The CLI commands run the same path. A Git hook that rejects `px rebase`'s
 `rebase --continue` or `px integrate`'s squash commit, the final gate in
-`px handoff`, and both handoff bounces in `px active` — the pre-handoff
-checkpoint-validation repair and the handoff-failure repair — are the same
-verified-fix bounce with the same per-occurrence budget as the pre-review path,
-because they all call the one rebound kernel. There is no second bounce policy
-and no persisted retry counter left anywhere in the codebase.
-`px handoff` enables bounded gate repair by default; use `--no-recover` when an
-operator wants the command to stop at the failing gate without launching an
-implementer.
+`px review <slug> --start`, and both handoff bounces in `px active` — the
+pre-handoff checkpoint-validation repair and the handoff-failure repair — are
+the same verified-fix bounce with the same per-occurrence budget as the
+pre-review path, because they all call the one rebound kernel. There is no
+second bounce policy and no persisted retry counter left anywhere in the
+codebase.
+`px review <slug> --start` enables bounded gate repair by default: it relaunches
+the implementer to fix a failing gate rather than stopping, so starting a review
+no longer depends on a separate handoff step.
 
 Three guarantees govern that bounce:
 

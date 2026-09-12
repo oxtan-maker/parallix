@@ -20,8 +20,8 @@ import {
 
 test('KNOWN_COMMANDS includes all expected commands', () => {
   const expected = [
-    'mission-start', 'verify-env', 'verify', 'setup', 'setup-review', 'draft', 'active', 'status',
-    'checkpoint', 'review', 'integrate', 'resolve-conflict', 'rebase'
+    'verify-env', 'verify', 'setup', 'setup-review', 'draft', 'active', 'status',
+    'review', 'integrate', 'resolve-conflict', 'rebase'
   ];
   for (const cmd of expected) {
     assert.ok(KNOWN_COMMANDS.includes(cmd), `missing known command: ${cmd}`);
@@ -52,8 +52,9 @@ test('buildSuggestionSuffix returns <slug> for resolve-conflict', () => {
   assert.equal(buildSuggestionSuffix('resolve-conflict'), ' <slug>');
 });
 
-test('buildSuggestionSuffix returns <slug> <cp-name> for checkpoint', () => {
-  assert.equal(buildSuggestionSuffix('checkpoint'), ' <slug> <cp-name> "<next-action>"');
+test('checkpoint is neither a known command nor a suggested invocation', () => {
+  assert.equal(KNOWN_COMMANDS.includes('checkpoint'), false);
+  assert.equal(buildSuggestionSuffix('checkpoint'), '');
 });
 
 test('buildSuggestionSuffix returns empty string for other commands', () => {
@@ -232,7 +233,6 @@ test('printUsage prints the command help text', () => {
   const all = lines.join('\n');
   assert.ok(lines.length >= 1);
   assert.match(all, /Usage: px <command> \[args\]/);
-  assert.match(all, /mission-start/);
   assert.match(all, /No npm dependencies/);
   // Help must document every dispatchable command so px --help stays current.
   assert.match(all, /\bconfig\b/);
@@ -275,7 +275,104 @@ test('printUsage documents every KNOWN_COMMANDS entry', () => {
   }
 });
 
+const CORE_LIFECYCLE = [
+  'draft',
+  'active',
+  'review',
+  'integrate',
+];
+
+test('printUsage orders Core Commands before Advanced Commands before Utility Commands', () => {
+  const previousLog = console.log;
+  const lines = [];
+  console.log = (msg) => lines.push(msg);
+  try {
+    printUsage();
+  } finally {
+    console.log = previousLog;
+  }
+
+  const all = lines.join('\n');
+  const coreIdx = all.indexOf('Core Commands:');
+  const advancedIdx = all.indexOf('Advanced Commands:');
+  const utilityIdx = all.indexOf('Utility Commands:');
+  assert.ok(coreIdx >= 0, 'Core Commands heading must be present');
+  assert.ok(advancedIdx >= 0, 'Advanced Commands heading must be present');
+  assert.ok(utilityIdx >= 0, 'Utility Commands heading must be present');
+  assert.ok(coreIdx < advancedIdx, 'Core Commands must precede Advanced Commands');
+  assert.ok(advancedIdx < utilityIdx, 'Advanced Commands must precede Utility Commands');
+});
+
+test('printUsage Core Commands contains exactly the six lifecycle commands in order', () => {
+  const previousLog = console.log;
+  const lines = [];
+  console.log = (msg) => lines.push(msg);
+  try {
+    printUsage();
+  } finally {
+    console.log = previousLog;
+  }
+
+  const all = lines.join('\n');
+  const coreIdx = all.indexOf('Core Commands:');
+  const advancedIdx = all.indexOf('Advanced Commands:');
+  const coreSection = all.slice(coreIdx, advancedIdx);
+
+  // Exact membership: every core line names exactly one lifecycle command.
+  const coreLineCommands = coreSection
+    .split('\n')
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0 && !line.endsWith(':'))
+    .map((line) => line.split(/\s+/)[0]);
+  assert.deepEqual(coreLineCommands, CORE_LIFECYCLE);
+
+  // Exact order: each lifecycle command appears after the previous within the section.
+  let cursor = -1;
+  for (const command of CORE_LIFECYCLE) {
+    const idx = coreSection.indexOf(command, cursor + 1);
+    assert.notEqual(idx, -1, `Core Commands must contain '${command}'`);
+    cursor = idx;
+  }
+});
+
+test('printUsage documents every KNOWN_COMMANDS exactly once across all sections', () => {
+  const previousLog = console.log;
+  const lines = [];
+  console.log = (msg) => lines.push(msg);
+  try {
+    printUsage();
+  } finally {
+    console.log = previousLog;
+  }
+  const all = lines.join('\n');
+  const documentedLines = all.split('\n').filter((line) => line.trim().length > 0);
+  for (const command of KNOWN_COMMANDS) {
+    const escaped = command.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const matches = documentedLines.filter((line) => new RegExp(`^\\s*${escaped} `).test(line)).length;
+    assert.equal(matches, 1, `printUsage should document '${command}' exactly once`);
+  }
+});
+
 // ---------- alias system ----------
+
+// TASK-2490: the standalone `px handoff` command is retired; the sync/push and
+// active -> review transition now lives in `px review <slug> --start`.
+test('KNOWN_COMMANDS no longer registers the retired handoff command (task-2490)', () => {
+  assert.ok(!KNOWN_COMMANDS.includes('handoff'), 'handoff must not be a known command');
+});
+
+test('printUsage no longer advertises the retired handoff command (task-2490)', () => {
+  const previousLog = console.log;
+  const lines = [];
+  console.log = (msg) => lines.push(msg);
+  try {
+    printUsage();
+  } finally {
+    console.log = previousLog;
+  }
+  const all = lines.join('\n');
+  assert.ok(!/\bhandoff\b/.test(all), 'printUsage must not mention the retired handoff command');
+});
 
 test('KNOWN_COMMANDS includes aliases', () => {
   assert.ok(KNOWN_COMMANDS.includes('aliases'));

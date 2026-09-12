@@ -27,6 +27,7 @@ import { applyReviewerCommand, ConfiguredReviewerEligibility, reviewStatus } fro
 import { agentFamily } from '../../../domain/agents.js';
 import { detectChangedAreas, isIntendedPayloadAtHead, parseFilesToAreas, orderIntegrationGates, gateMatchesChangedAreas, loadIntegrationConfig, getIntegrationGatePlan, printIntegrationGatePlan, buildIntegrationGateEnv, captureFinalIntegrationTree, resolveIntegrationVerificationWorktree, buildIntegrationVerificationInvocation, executeIntegrationGates } from './integrate-gates.js';
 import { loadPhaseGates, loadRequirePreIntegration, runPhaseGates } from '../../config/repository-gates.js';
+import { routeIntegrationGateFailure } from './integrate-gate-rebound.js';
 
 const VARIANT_B_AUTOMATION_SUMMARY = 'Variant B automation: Backlog task closeout, worktree-path rewrite, squash commit with hook-enforced validation, Forgejo sync-merged, and mission worktree cleanup.';
 
@@ -209,6 +210,29 @@ export interface IntegrateFn extends Function {
   recoverMissionForIntegration: typeof recoverMissionForIntegration;
 }
 
+/**
+ * Name the implementer a bounce should launch.
+ *
+ * Both `px integrate` bounces — the squash-commit hook failure and the
+ * integration-gate failure — resolve the same way, so the chain lives once:
+ * the task's own assignee, then the role's configured agent, then a launcher
+ * probe. F3: only trust a launcher that reports itself supported; an absent
+ * launcher returns `{ agent: '', supported: false }`, so name an agent only
+ * when the probe confirms a healthy, supported family. An empty result means
+ * strand rather than launch with an empty agent identity.
+ */
+function resolveBounceImplementer(
+  taskAssignee: string | null,
+  rootDir: string,
+  fns: { selectAgentFn?: typeof selectAgent, workflowLauncherStatusFn?: typeof workflowLauncherStatus },
+): string {
+  const implementer = taskAssignee || (fns.selectAgentFn ? fns.selectAgentFn('act-on-review') : '');
+  if (implementer) { return implementer; }
+  if (!fns.workflowLauncherStatusFn) { return ''; }
+  const status = fns.workflowLauncherStatusFn(taskAssignee ?? '', rootDir);
+  return status?.supported ? (status.agent ?? '') : '';
+}
+
 /** @param {string[]} args */
 async function integrate(args: string[], options: {
   missionServicesFn?: Function;
@@ -222,6 +246,8 @@ async function integrate(args: string[], options: {
   applyAgentFallbackFn?: typeof applyAgentFallback;
   selectAgentFn?: typeof selectAgent;
   workflowLauncherStatusFn?: typeof workflowLauncherStatus;
+  /** TASK-2492: integration-gate failure routing, injected for tests. */
+  routeIntegrationGateFailureFn?: typeof routeIntegrationGateFailure;
 } = {}) {
   const exitFn = options.exitFn ?? process.exit;
   const missionServicesFn = options.missionServicesFn;
@@ -230,6 +256,7 @@ async function integrate(args: string[], options: {
   const applyAgentFallbackFn = options.applyAgentFallbackFn ?? applyAgentFallback;
   const selectAgentFn = options.selectAgentFn ?? selectAgent;
   const workflowLauncherStatusFn = options.workflowLauncherStatusFn ?? workflowLauncherStatus;
+  const routeIntegrationGateFailureFn = options.routeIntegrationGateFailureFn ?? routeIntegrationGateFailure;
   let exitCode = 0;
   /** @type{{created?: boolean, message?: string, rootDir?: string}|null} */
   let temporaryStash = null;
@@ -383,8 +410,32 @@ async function integrate(args: string[], options: {
           verificationEvidence = 'no pre-integration gate configured';
         } else if (!result.ok) {
           fmt.log.fail(`\nIntegration gates failed for ${slug} (root=${finalTree.rootDir}) — ${result.error}`);
-          fmt.log.fail('Aborting before merge.');
-          throw new IntegrationAbort();
+          // TASK-2492: an approved mission whose integration gate goes red is no
+          // longer a dead end. The failure is classified and routed; only the
+          // recoverable mission-regression route continues, and it continues
+          // only because the identical gate set re-ran green.
+          const route = await routeIntegrationGateFailureFn({
+            slug,
+            missionWorktree: checkout,
+            baseWorktree,
+            baseBranch: context.baseBranch,
+            verificationCommand: formatVerificationCommand(context.area, checkout),
+            failedGate: result.failedGate,
+            gateError: result.error,
+            gates,
+            implementer: resolveBounceImplementer(context.taskAssignee ?? null, checkout, { selectAgentFn, workflowLauncherStatusFn }),
+            repositoryId: missionLoad.kind === 'found' ? String(missionLoad.mission.repositoryId) : 'unknown',
+            realAgent,
+            realAgentModel,
+            startAgentFn: startAgentFn as unknown as ReboundContext['startAgent'],
+            transitionTaskFn: (bounceSlug: string) => transitionTaskFn(bounceSlug, 'active'),
+            applyAgentFallbackFn: applyAgentFallbackFn as unknown as ReboundContext['applyAgentFallback'],
+          });
+          if (route.route !== 'fixed') {
+            fmt.log.fail('Aborting before merge.');
+            throw new IntegrationAbort();
+          }
+          verificationEvidence = `${gates.length} integration gate(s) passed after ${route.rebounds} integration-gate rebound(s)`;
         } else {
           fmt.log.pass('All integration gates passed.');
           verificationEvidence = `${gates.length} integration gate(s) passed`;
@@ -658,17 +709,7 @@ async function integrate(args: string[], options: {
             throw new IntegrationAbort();
           }
 
-          let implementer = (context.taskAssignee as string)
-            || (selectAgentFn ? selectAgentFn('act-on-review') : '');
-          // F3: only trust a launcher that reports itself supported; an absent
-          // launcher returns { agent: '', supported: false }, so name an agent
-          // only when the probe confirms a healthy, supported family.
-          if (!implementer && workflowLauncherStatusFn) {
-            const status = workflowLauncherStatusFn(context.taskAssignee ?? '', baseWorktree);
-            if (status?.supported) {
-              implementer = status.agent ?? '';
-            }
-          }
+          const implementer = resolveBounceImplementer(context.taskAssignee ?? null, baseWorktree, { selectAgentFn, workflowLauncherStatusFn });
           if (!implementer) {
             // No resolver could name an implementer — strand, as the deleted
             // policy did, rather than launch with an empty agent identity.
@@ -1010,7 +1051,7 @@ function recoveryEstablishesApproval(context: any): {
 
   if (status === 'active') {
     if (!review && overrideAt === undefined) {
-      return { established: false, via: null, reason: 'active with no authoritative Review and no default-user override; run px handoff or px review first' };
+      return { established: false, via: null, reason: 'active with no authoritative Review and no default-user override; run px review <slug> --start before integration' };
     }
     if (review) {
       // The real run re-submits through the handoff operation: an undecided
@@ -1185,7 +1226,7 @@ async function recordHumanOverrideDecision(
 ): Promise<any | null> {
   const review = missionLoad.mission.review;
   if (reviewStatus(review) !== 'awaiting-review') {
-    fmt.log.fail(`Human override cannot be recorded for ${context.slug}: the Review is ${reviewStatus(review)}, not awaiting a decision. Resolve the current round (or start a new one with px handoff) before overriding.`);
+    fmt.log.fail(`Human override cannot be recorded for ${context.slug}: the Review is ${reviewStatus(review)}, not awaiting a decision. Resolve the current round (or start a new one with px review ${context.slug} --start) before overriding.`);
     return null;
   }
   const decidedReview = applyReviewerCommand(review, {
@@ -1240,7 +1281,7 @@ async function recoverMissionForIntegration(
 
   if (missionLoad.mission.status === 'active') {
     if (!missionLoad.mission.review && overrideApprovedAt === undefined) {
-      fmt.log.fail(`Mission ${missionId(context.slug)} is active with no authoritative Review. Run px handoff ${context.slug} (or record a human decision through px review) before integration.`);
+      fmt.log.fail(`Mission ${missionId(context.slug)} is active with no authoritative Review. Run px review ${context.slug} --start (or record a human decision through px review) before integration.`);
       throw new IntegrationAbort();
     }
     // Review round 1 (F1): recovery must not stamp the recovered
@@ -1269,7 +1310,7 @@ async function recoverMissionForIntegration(
       reviewEntryAt = context.pr.createdAt;
     }
     if (!reviewEntryAt) {
-      fmt.log.fail(`Cannot derive an authoritative review-entry timestamp for ${context.slug}: no Review round startedAt and no PR creation time. Re-run px handoff ${context.slug} to record the review entry, or record the decision through px review, before integration.`);
+      fmt.log.fail(`Cannot derive an authoritative review-entry timestamp for ${context.slug}: no Review round startedAt and no PR creation time. Re-run px review ${context.slug} --start to record the review entry, or record the decision through px review, before integration.`);
       throw new IntegrationAbort();
     }
     const approvalAt = (entryRound?.decision?.kind === 'approved' ? entryRound.decision.decidedAt : undefined) ?? overrideApprovedAt;

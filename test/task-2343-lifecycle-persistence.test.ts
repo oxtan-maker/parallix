@@ -149,7 +149,7 @@ test('ConcreteGateReadAdapter reads the recorded exit code in preference to pros
 });
 
 test('ConcreteGateReadAdapter reads the gate artifact from the mission worktree', async () => {
-  // `px checkpoint` runs in the mission worktree and writes the gitignored
+  // Verification runs in the mission worktree and writes the gitignored
   // artifact there; the board is composed from the primary checkout, which
   // never receives it.
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'px-gate-worktree-'));
