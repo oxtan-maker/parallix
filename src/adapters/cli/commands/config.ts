@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 import * as fmt from '../../../application/presentation/cli-format.js';
-import { loadEffectiveConfig, loadWorkflowConfig, validateWorkflowConfig, hasGitRepository } from '../../config/product-config.js';
+import { loadEffectiveConfig, loadWorkflowConfig, validateWorkflowConfig, hasGitRepository, resolveIntegrationMode } from '../../config/product-config.js';
 import { ensureFirstRunAgentConfig } from '../../agents/first-run-config.js';
 import { CONFIG_PATH } from '../../agents/agent-config.js';
 
@@ -47,6 +47,7 @@ async function config(_args: string[] = [], opts: ConfigOptions = {}) {
     } else {
       logFn(fmt.status('INFO', `Working-tree ${CONFIG_PATH} already exists — left unchanged (user edits win).`));
     }
+    logFn(`Integration mode: ${resolveIntegrationMode(rootDir)}`);
     logFn(JSON.stringify(loadEffectiveConfig(rootDir), null, 2));
     return;
   }
@@ -54,6 +55,7 @@ async function config(_args: string[] = [], opts: ConfigOptions = {}) {
   const loaded = loadWorkflowConfig(rootDir);
   if (!loaded.found) {
     logFn(fmt.status('INFO', 'No workflow.config.json found — showing built-in defaults.'));
+    logFn(`Integration mode: ${resolveIntegrationMode(rootDir)}`);
   } else if (loaded.parseError) {
     errorFn(fmt.status('FAIL', `workflow.config.json is invalid JSON (${/** @type{Error} */(loaded.parseError).message}); showing fallback built-in defaults.`));
     logFn(JSON.stringify(loadEffectiveConfig(rootDir), null, 2));
@@ -68,6 +70,7 @@ async function config(_args: string[] = [], opts: ConfigOptions = {}) {
       return;
     }
     logFn(fmt.status('INFO', `Effective config (built-in defaults + ${loaded.configPath}):`));
+    logFn(`Integration mode: ${resolveIntegrationMode(rootDir)}`);
   }
 
   logFn(JSON.stringify(loadEffectiveConfig(rootDir), null, 2));

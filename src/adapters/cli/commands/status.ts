@@ -8,6 +8,7 @@ import {
 } from '../../filesystem/mission-utils.js';
 import { WORKFLOW_AGENT_NAMES, eligibleAgentsForStep, readAgentConfigOrExit, workflowLauncherStatus } from '../../agents/agents.js';
 import { getPrStatus } from '../../forgejo/forgejo.js';
+import { resolveIntegrationMode } from '../../config/product-config.js';
 import * as fmt from '../../../application/presentation/cli-format.js';
 
 // architecture invariant / architecture invariant — projection wiring (dynamic imports for CJS rollback compat)
@@ -222,6 +223,14 @@ async function status(args: string[], opts: {exit?: Function, log?: Function, in
   log(fmt.bold('--- Mission Status ---'));
   log(`Branch: ${fmt.branch(getCurrentBranchFn())}`);
   log(`Worktree: ${fmt.path(process.cwd())}`);
+  // The active integration mode names who owns the merge into the primary
+  // branch. Surface it so the review-vs-merge authority is visible without
+  // opening the repository config.
+  try {
+    log(`Integration mode: ${resolveIntegrationMode(process.cwd())}`);
+  } catch {
+    log('Integration mode: unknown (see `px config` for the configuration error)');
+  }
 
   try {
     const rebaseState = detectRebaseStateFn(process.cwd());

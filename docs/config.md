@@ -202,6 +202,45 @@ override surface. The five shipped default-opinion files selected when no
 override is configured are `prompts/draft.md`, `prompts/execute.md`, `prompts/review.md`,
 `prompts/act-on-review.md`, and `prompts/portfolio.md`.
 
+## Integration
+
+`integration.mode` is a top-level key naming who owns the merge into the
+primary branch. It is separate from review approval: a mission can be reviewed
+and approved and still not be integrated, because approval decides whether the
+change is good enough to ship while the mode decides where and by whom it lands.
+
+`integration.mode` is one of `local`, `github-publish`, or `github-pr`. Absent
+configuration resolves to `local`, so an unconfigured repository is
+byte-identical to before. Any other value is a configuration error that fails
+closed with a message naming the invalid value and the allowed set — guessing
+the merge authority is treated as worse than refusing to run.
+
+- `local` (default): Parallix owns the merge into the configured primary
+  branch. It runs the local gates, performs the merge, and records completion
+  itself. No external system is asked and no network or credential is required.
+- `github-publish`: Parallix integrates locally and continues developing while
+  GitHub independently verifies the exact resulting commit, then publishes it to
+  the protected primary branch. Publication is GitHub's; it publishes only what
+  it has verified. Free of any human-approval requirement.
+- `github-pr`: Parallix pushes a reviewable mission branch and GitHub with the
+  repository's pull-request policy owns the final merge. Completion is decided
+  by GitHub merge evidence and the repository's human review policy, not by a
+  Parallix agent review or a local merge.
+
+In the GitHub modes the external evidence is observed — a verified commit or an
+observed external integration — never self-asserted by the agent running the
+mission. The active mode is visible without opening any config: `px config`
+prints it, and `px status` prints it alongside the mission's board state.
+
+```json
+{
+  "integration": { "mode": "github-publish" }
+}
+```
+
+The related branch-model and pre-integration-gate boundaries are described in
+[ADR 0045](adr/0045-parallax-branch-model.md) and [ADR 0041](adr/0041-integration-pipeline-gates.md).
+
 ## Integrate
 
 `adapters.integrate.postIntegrateCommand` is an optional string with no default.

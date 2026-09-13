@@ -3,6 +3,10 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { validateRepositoryGates } from './repository-gates.js';
+import {
+  DEFAULT_INTEGRATION_MODE, integrationModeIssue, isIntegrationMode, parseIntegrationMode,
+  type IntegrationMode,
+} from '../../domain/integration.js';
 
 const REQUIRED_ADAPTER_KEYS = ['tasks', 'missions', 'verification', 'review', 'agents'] as const;
 
@@ -16,6 +20,11 @@ export const SUPPORTED_TASK_PROVIDERS = ['backlog-md'] as const;
 const DEFAULT_CONFIG = Object.freeze({
   product: {
     name: 'Workflow',
+  },
+  // Repository integration authority. Omitting the section keeps the shipped
+  // `local` behaviour: Parallix owns the merge into the primary branch.
+  integration: {
+    mode: DEFAULT_INTEGRATION_MODE,
   },
   adapters: {
     tasks: { provider: 'backlog-md', storage: 'backlog', stateMap: 'state-map.json' },
@@ -153,6 +162,7 @@ export function validateWorkflowConfig(config: unknown): string[] {
   if ('product' in cfg && !isPlainObject(cfg.product)) {
     issues.push('product must be an object');
   }
+  validateIntegrationSection(cfg, issues);
   if ('adapters' in cfg) {
     const adapters = cfg.adapters as PlainObject | undefined;
     if (!isPlainObject(adapters)) {
@@ -168,6 +178,40 @@ export function validateWorkflowConfig(config: unknown): string[] {
     }
   }
   return issues;
+}
+
+/**
+ * `integration.mode` selects the merge authority, so an unrecognised value is a
+ * configuration error rather than something to default away. Absent section or
+ * absent mode stays valid and means `local`.
+ */
+function validateIntegrationSection(cfg: PlainObject, issues: string[]): void {
+  if (!('integration' in cfg)) { return; }
+  const integration = cfg.integration;
+  if (!isPlainObject(integration)) {
+    issues.push('integration must be an object');
+    return;
+  }
+  if ('mode' in integration && integration.mode !== null && !isIntegrationMode(integration.mode)) {
+    issues.push(integrationModeIssue(integration.mode));
+  }
+}
+
+/**
+ * Resolve the repository's integration mode. Absent configuration resolves to
+ * `local`; an unknown value throws the actionable configuration error instead of
+ * running an unintended merge authority.
+ */
+export function resolveIntegrationMode(rootDir: string = process.cwd()): IntegrationMode {
+  const loaded = loadWorkflowConfig(rootDir);
+  if (!loaded.found || loaded.parseError || !isPlainObject(loaded.config)) {
+    return DEFAULT_INTEGRATION_MODE;
+  }
+  const integration = (loaded.config as PlainObject).integration;
+  if (integration !== undefined && !isPlainObject(integration)) {
+    throw new Error('integration must be an object');
+  }
+  return parseIntegrationMode(isPlainObject(integration) ? integration.mode : undefined);
 }
 
 function validateAdapterSections(adapters: PlainObject, issues: string[]): void {

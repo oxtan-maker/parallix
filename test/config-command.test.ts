@@ -94,3 +94,20 @@ test('config leaves a non-git standalone directory unchanged', () => {
     assert.equal(result, undefined);
   });
 });
+
+// task-2500.01: `integration.mode` is the repository's merge authority, so an
+// unknown value must fail closed on the config surface rather than default away.
+test('config prints the active integration mode and rejects an unknown one with a non-zero exit', async () => {
+  await withTempDir(async root => {
+    fs.writeFileSync(path.join(root, 'workflow.config.json'), JSON.stringify({ integration: { mode: 'github-pr' } }));
+    const configured = await runConfig(root);
+    assert.equal(configured.exitCode, null);
+    assert.match(configured.logs.join('\n'), /"mode": "github-pr"/);
+
+    fs.writeFileSync(path.join(root, 'workflow.config.json'), JSON.stringify({ integration: { mode: 'gitlab-mr' } }));
+    const invalid = await runConfig(root);
+    assert.equal(invalid.exitCode, 1);
+    assert.match(invalid.errors.join('\n'), /integration\.mode "gitlab-mr" is not a supported integration mode/);
+    assert.match(invalid.errors.join('\n'), /\{ local, github-publish, github-pr \}/);
+  });
+});

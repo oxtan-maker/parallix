@@ -11,7 +11,7 @@ import { buildAutonomousReviewMatrix, formatMatrixSummary } from '../../agents/r
 import { findMissionDir, findMissionArea, missionTitle, parseConflictFilesFromMergeOutput, inferSlug, getPrimaryWorktree, getPrimaryBranch, conventionalWorktreePath, softResetTrailingBacklogNoise, findMissionDocInBranches, missionBranchName, missionDirForSlug, resolveMissionBaseBranch, resolveBaseWorktree, resolveWorktree } from '../../filesystem/mission-utils.js';
 import * as verification from '../../verification/verification.js';
 const { formatVerificationCommand } = verification;
-import { isForgejoReviewEnabled } from '../../config/product-config.js';
+import { isForgejoReviewEnabled, resolveIntegrationMode } from '../../config/product-config.js';
 import { readReviewState } from '../../review/review-state.js';
 import { submitForReview } from '../../review/review-commands.js';
 import { transitionTask } from '../../backlog/backlog.js';
@@ -21,6 +21,10 @@ import { applyAgentFallback } from '../../review/review-loop.js';
 // (TASK-2377.03). integrate builds its kernel context from injectable seams so
 // tests keep a mock launch/transition/fallback port instead of a real agent.
 import { rebound, type ReboundContext } from '../../../application/rebound-kernel.js';
+// SC4: the real merge/squash/closeout operations route through the integration
+// capability boundary (integration-dispatch) so the merge-authority decision is
+// made once, in the dispatcher, never as scattered `if (mode === ...)` here.
+import { createIntegrationStrategy } from '../../../application/services/integration-dispatch.js';
 
 import { missionId, isDbAdhocIdentity } from '../../../domain/mission.js';
 import { applyReviewerCommand, ConfiguredReviewerEligibility, reviewStatus } from '../../../domain/review.js';
@@ -258,8 +262,7 @@ async function integrate(args: string[], options: {
   const workflowLauncherStatusFn = options.workflowLauncherStatusFn ?? workflowLauncherStatus;
   const routeIntegrationGateFailureFn = options.routeIntegrationGateFailureFn ?? routeIntegrationGateFailure;
   let exitCode = 0;
-  /** @type{{created?: boolean, message?: string, rootDir?: string}|null} */
-  let temporaryStash = null;
+  let temporaryStash: { created?: boolean, message?: string, rootDir?: string } | null = null;
   let nextActionMessage = null;
   let parsedArgs;
   try {
@@ -272,8 +275,10 @@ async function integrate(args: string[], options: {
   const { explicitSlug, dryRun, noIntegrationGates, noGate, realAgent, realAgentModel } = parsedArgs;
   const slug = inferSlug(explicitSlug);
 
-  /** @type {{slug: string, branch: string, currentBranch: string, missionDir?: string, area: string, task: {ok: boolean, taskFile?: string, reason?: string, matches?: string[]}, taskStatus?: string, taskAssignee?: string|null, forgejoUser?: string|null, forgejoToken?: string|null, taskAssigneeWarning?: string|null, pr: {exists?: boolean, state?: string, number?: number, merged?: boolean, createdAt?: string | null, raw?: string}, siblingPrs: any[], approval: {ok?: boolean, error?: string, reviewState?: string, defaultUserApproved?: boolean, defaultUserApprovedAt?: string, source?: string}, baseBranch?: string, baseWorktree?: string, mainBranch: string, mainDirtyEntries: string[], mainDirty: boolean, missionStatus?: string, missionReview?: any, promoteBacklogOnCloseout?: boolean}} */
-  let context;
+  // context is loosely typed (assembled across store/legacy/Forgejo branches);
+  // the integration mode it feeds is resolved through the capability boundary,
+  // not from these fields.
+  let context: any;
 
   if (process.env.FORGEJO_USER === 'gemini' || process.env.WORKFLOW_AGENT === 'gemini') {
     fmt.log.fail('Gemini is not authorized to run integrate. Post a handoff comment on the PR and stop.');
@@ -352,95 +357,105 @@ async function integrate(args: string[], options: {
         throw new IntegrationAbort();
       }
 
+      // Resolve the repository's integration mode and build the capability
+      // boundary. An invalid mode throws the actionable configuration error
+      // here (fail closed) before any merge authority is exercised. From now on
+      // the real integration operations run through `strategy.run`, so a
+      // non-local mode refuses the local primary merge / unimplemented steps
+      // instead of silently performing them (SC4 / SC6).
+      const strategy = createIntegrationStrategy(resolveIntegrationMode(baseWorktree ?? process.cwd()));
+
       // The Verification row of the readiness view below reports exactly what
       // ran; it never claims "passed" without a gate result behind it.
       let verificationEvidence = 'no gate ran';
-      if (noIntegrationGates) {
-        fmt.log.info('Integration gates skipped via --no-integration-gates flag');
-        verificationEvidence = 'skipped via --no-integration-gates';
-      } else {
-        // The integration checkout is the mission's own worktree. Verify the
-        // exact resulting tree is finalized before any gate runs, then run the
-        // repository's configured pre-integration gates from that checkout.
-        // An unconfigured repository runs no gate; a gate that exits non-zero
-        // aborts before the merge. This replaces the previous hardcoded
-        // `./scripts/verify-local.sh integrate` invocation so the live integration
-        // gate carries no Node/npm/tsx/verify-local.sh/Parallix-layout assumption
-        // (TASK-2457).
-        const checkout = resolveIntegrationVerificationWorktree(slug, { baseWorktree });
-        const finalTree = captureFinalIntegrationTree(checkout);
-        if (!finalTree.ok) {
-          fmt.log.fail(`Integration gates cannot start for ${slug}: ${finalTree.error}`);
-          throw new IntegrationAbort();
-        }
-        const gates = loadPhaseGates(checkout, 'preIntegration');
-        // The mandatory-gate invariant is repository-configured, not hardcoded
-        // product policy (task-2457 F11): a repository that opts in via
-        // adapters.gates.requirePreIntegration: true fails closed on an empty gate
-        // list; an unconfigured repository completes the integration path with
-        // no lifecycle gate. --no-integration-gates is rejected outside the test
-        // bypass, so the message below never points at it (task-2457 F12).
-        const requirePreIntegration = loadRequirePreIntegration(checkout);
-        fmt.log.debug(`Integration gate target: slug=${slug} root=${finalTree.rootDir} commit=${finalTree.commit} tree=${finalTree.tree} requirePreIntegration=${requirePreIntegration}`);
-        const result = await runPhaseGates('integration', {
-          slug,
-          checkoutPath: checkout,
-          gates,
-          log: fmt.log.plain,
-          error: fmt.log.fail,
-          // Plan-only dry run executes nothing; self-development agent selection
-          // reaches the gate environment via buildGateEnv (F4 / TASK-2269).
-          dryRun,
-          realAgent,
-          realAgentModel,
-        });
-        if (dryRun) {
-          fmt.log.info(`Integration gate plan resolved for ${slug}: ${gates.length} gate(s) configured; nothing executed.`);
-        } else if (result.skipped) {
-          if (requirePreIntegration) {
-            // An unconfigured or self-edited branch that removes
-            // adapters.gates.preIntegration must fail closed here rather than
-            // merge with "All integration gates passed." (TASK-2300 / F1). The
-            // invariant is opt-in via adapters.gates.requirePreIntegration.
-            fmt.log.fail(`\nIntegration gates are mandatory for ${slug}: no preIntegration gates configured in workflow.config.json, but adapters.gates.requirePreIntegration is set. Configure adapters.gates.preIntegration to run gates.`);
-            fmt.log.fail('Aborting before merge.');
+      await strategy.run('run-required-local-gates', async () => {
+        if (noIntegrationGates) {
+          fmt.log.info('Integration gates skipped via --no-integration-gates flag');
+          verificationEvidence = 'skipped via --no-integration-gates';
+        } else {
+          // The integration checkout is the mission's own worktree. Verify the
+          // exact resulting tree is finalized before any gate runs, then run the
+          // repository's configured pre-integration gates from that checkout.
+          // An unconfigured repository runs no gate; a gate that exits non-zero
+          // aborts before the merge. This replaces the previous hardcoded
+          // `./scripts/verify-local.sh integrate` invocation so the live integration
+          // gate carries no Node/npm/tsx/verify-local.sh/Parallix-layout assumption
+          // (TASK-2457).
+          const checkout = resolveIntegrationVerificationWorktree(slug, { baseWorktree });
+          const finalTree = captureFinalIntegrationTree(checkout);
+          if (!finalTree.ok) {
+            fmt.log.fail(`Integration gates cannot start for ${slug}: ${finalTree.error}`);
             throw new IntegrationAbort();
           }
-          fmt.log.info(`Integration gates for ${slug}: none configured and adapters.gates.requirePreIntegration is not set — proceeding without a lifecycle gate.`);
-          verificationEvidence = 'no pre-integration gate configured';
-        } else if (!result.ok) {
-          fmt.log.fail(`\nIntegration gates failed for ${slug} (root=${finalTree.rootDir}) — ${result.error}`);
-          // TASK-2492: an approved mission whose integration gate goes red is no
-          // longer a dead end. The failure is classified and routed; only the
-          // recoverable mission-regression route continues, and it continues
-          // only because the identical gate set re-ran green.
-          const route = await routeIntegrationGateFailureFn({
+          const gates = loadPhaseGates(checkout, 'preIntegration');
+          // The mandatory-gate invariant is repository-configured, not hardcoded
+          // product policy (task-2457 F11): a repository that opts in via
+          // adapters.gates.requirePreIntegration: true fails closed on an empty gate
+          // list; an unconfigured repository completes the integration path with
+          // no lifecycle gate. --no-integration-gates is rejected outside the test
+          // bypass, so the message below never points at it (task-2457 F12).
+          const requirePreIntegration = loadRequirePreIntegration(checkout);
+          fmt.log.debug(`Integration gate target: slug=${slug} root=${finalTree.rootDir} commit=${finalTree.commit} tree=${finalTree.tree} requirePreIntegration=${requirePreIntegration}`);
+          const result = await runPhaseGates('integration', {
             slug,
-            missionWorktree: checkout,
-            baseWorktree,
-            baseBranch: context.baseBranch,
-            verificationCommand: formatVerificationCommand(context.area, checkout),
-            failedGate: result.failedGate,
-            gateError: result.error,
+            checkoutPath: checkout,
             gates,
-            implementer: resolveBounceImplementer(context.taskAssignee ?? null, checkout, { selectAgentFn, workflowLauncherStatusFn }),
-            repositoryId: missionLoad.kind === 'found' ? String(missionLoad.mission.repositoryId) : 'unknown',
+            log: fmt.log.plain,
+            error: fmt.log.fail,
+            // Plan-only dry run executes nothing; self-development agent selection
+            // reaches the gate environment via buildGateEnv (F4 / TASK-2269).
+            dryRun,
             realAgent,
             realAgentModel,
-            startAgentFn: startAgentFn as unknown as ReboundContext['startAgent'],
-            transitionTaskFn: (bounceSlug: string) => transitionTaskFn(bounceSlug, 'active'),
-            applyAgentFallbackFn: applyAgentFallbackFn as unknown as ReboundContext['applyAgentFallback'],
           });
-          if (route.route !== 'fixed') {
-            fmt.log.fail('Aborting before merge.');
-            throw new IntegrationAbort();
+          if (dryRun) {
+            fmt.log.info(`Integration gate plan resolved for ${slug}: ${gates.length} gate(s) configured; nothing executed.`);
+          } else if (result.skipped) {
+            if (requirePreIntegration) {
+              // An unconfigured or self-edited branch that removes
+              // adapters.gates.preIntegration must fail closed here rather than
+              // merge with "All integration gates passed." (TASK-2300 / F1). The
+              // invariant is opt-in via adapters.gates.requirePreIntegration.
+              fmt.log.fail(`\nIntegration gates are mandatory for ${slug}: no preIntegration gates configured in workflow.config.json, but adapters.gates.requirePreIntegration is set. Configure adapters.gates.preIntegration to run gates.`);
+              fmt.log.fail('Aborting before merge.');
+              throw new IntegrationAbort();
+            }
+            fmt.log.info(`Integration gates for ${slug}: none configured and adapters.gates.requirePreIntegration is not set — proceeding without a lifecycle gate.`);
+            verificationEvidence = 'no pre-integration gate configured';
+          } else if (!result.ok) {
+            fmt.log.fail(`\nIntegration gates failed for ${slug} (root=${finalTree.rootDir}) — ${result.error}`);
+            // TASK-2492: an approved mission whose integration gate goes red is no
+            // longer a dead end. The failure is classified and routed; only the
+            // recoverable mission-regression route continues, and it continues
+            // only because the identical gate set re-ran green.
+            const route = await routeIntegrationGateFailureFn({
+              slug,
+              missionWorktree: checkout,
+              baseWorktree,
+              baseBranch: context.baseBranch,
+              verificationCommand: formatVerificationCommand(context.area, checkout),
+              failedGate: result.failedGate,
+              gateError: result.error,
+              gates,
+              implementer: resolveBounceImplementer(context.taskAssignee ?? null, checkout, { selectAgentFn, workflowLauncherStatusFn }),
+              repositoryId: missionLoad.kind === 'found' ? String(missionLoad.mission.repositoryId) : 'unknown',
+              realAgent,
+              realAgentModel,
+              startAgentFn: startAgentFn as unknown as ReboundContext['startAgent'],
+              transitionTaskFn: (bounceSlug: string) => transitionTaskFn(bounceSlug, 'active'),
+              applyAgentFallbackFn: applyAgentFallbackFn as unknown as ReboundContext['applyAgentFallback'],
+            });
+            if (route.route !== 'fixed') {
+              fmt.log.fail('Aborting before merge.');
+              throw new IntegrationAbort();
+            }
+            verificationEvidence = `${gates.length} integration gate(s) passed after ${route.rebounds} integration-gate rebound(s)`;
+          } else {
+            fmt.log.pass('All integration gates passed.');
+            verificationEvidence = `${gates.length} integration gate(s) passed`;
           }
-          verificationEvidence = `${gates.length} integration gate(s) passed after ${route.rebounds} integration-gate rebound(s)`;
-        } else {
-          fmt.log.pass('All integration gates passed.');
-          verificationEvidence = `${gates.length} integration gate(s) passed`;
         }
-      }
+      });
 
       printIntegrationReadiness(buildIntegrationReadiness(context, { verification: verificationEvidence }));
 
@@ -450,364 +465,366 @@ async function integrate(args: string[], options: {
         return;
       }
 
-      temporaryStash = stashMainCheckoutIfNeeded({
-        slug,
-        dirtyEntries: context.mainDirtyEntries as string[],
-        rootDir: /** @type{string} */(baseWorktree) as string
-      });
+      await strategy.run('publish', async () => {
+        temporaryStash = stashMainCheckoutIfNeeded({
+          slug,
+          dirtyEntries: context.mainDirtyEntries as string[],
+          rootDir: /** @type{string} */(baseWorktree) as string
+        });
 
-    // End-context check: if we are in the worktree that is about to be deleted,
-    // move the Node process to the base worktree to avoid being left in a ghost directory.
-    const missionWorktree = conventionalWorktreePath(slug);
-    if (process.cwd() === missionWorktree || process.cwd().startsWith(missionWorktree + '/')) {
-      fmt.log.info(`Moving process directory to ${baseWorktree} before mission worktree deletion.`);
-      process.chdir(baseWorktree as string);
-    }
-
-    const branch = missionBranchName(slug, baseWorktree);
-    // TASK-2479: capture the pre-integration base-branch tip so the landing
-    // result can show the `<before> → <after>` SHA transition.
-    const landedFromSha = git(['-C', baseWorktree, 'rev-parse', baseBranch]).stdout.trim();
-    const mainTitle = missionTitle(slug) || slug;
-    const summary = mainTitle.replace(/\s+/g, ' ').trim();
-    // A DB-owned adhoc identity has no Backlog task file; the closeout below is
-    // best-effort and guards every task-file access. Keep mainTaskFile empty for
-    // adhoc so the fs.existsSync guards below no-op rather than crash.
-    const rawTaskFile = (context.task as any)?.taskFile as string | undefined;
-    const mainTaskFile = resolveIntegrationTaskPath(rawTaskFile, context.missionWorktree, baseWorktree);
-    if (mainTaskFile === null) {
-      fmt.log.fail(baseWorktree
-        ? 'Mission task file is outside the integration checkout; refusing to stage an unsafe closeout path.'
-        : 'Integration base worktree is unavailable; refusing to stage backlog closeout.');
-      throw new IntegrationAbort();
-    }
-    fmt.log.debug(`Selecting integration variant: Variant B (local squash-merge)`);
-    fmt.log.debug(`\nStep 1: Using base worktree ${baseWorktree} on ${baseBranch} as the squash-merge target...`);
-
-    fmt.log.debug(`Step 2: Checking merge conflicts against local ${baseBranch} in the base worktree...`);
-    const dryMerge = git(['-C', baseWorktree, 'merge', '--no-commit', '--no-ff', branch]);
-    const abortResult = git(['-C', baseWorktree, 'merge', '--abort']);
-
-    let proceedToSquash = false;
-
-    // Check abort failure for the success path (merge was clean but abort didn't).
-    // When dryMerge.status === 0, the abort restores the worktree after a clean
-    // probe — if it fails the base may be left in a dirty merge state.
-    let abortFailed = abortResult.status !== 0 && !isNoMergeToAbortResult(abortResult);
-
-    if (dryMerge.status === 0 && abortFailed) {
-      fmt.log.fail('Dry-run merge could not be aborted cleanly. Inspect the local integration checkout before retrying integrate.');
-      throw new IntegrationAbort();
-    }
-
-    if (dryMerge.status !== 0) {
-      // Classify conflicts BEFORE deciding on abort failure.
-      // This allows backlog-only classification to rescue unabortable merges.
-      // (architecture invariant / architecture migration)
-      const conflictOutput = [/** @type {any} */ (dryMerge).stdout, /** @type {any} */ (dryMerge).stderr].filter(Boolean).join('\n');
-      const conflictFiles = parseConflictFilesFromMergeOutput(conflictOutput);
-      const backlogOnly = areAllBacklogOnlyConflicts(conflictFiles) && conflictFiles.length > 0;
-
-      if (backlogOnly) {
-        fmt.log.info('Backlog-only conflicts detected — refreshing base branch and retrying probe merge...');
-
-        // Safe cleanup: if abort failed, use reset --hard to clear stale merge state.
-        // After successful reset, clear abortFailed so the fallback path after retry
-        // uses the normal conflict-resolution flow (not the generic abort-failure path).
-        if (abortFailed) {
-          const resetResult = git(['-C', baseWorktree, 'reset', '--hard', 'HEAD']);
-          if (resetResult.status !== 0) {
-            fmt.log.fail('[RETRY] Could not clean up after backlog-only conflict merge.');
-            throw new IntegrationAbort();
-          }
-          abortFailed = false;
-        }
-
-        // Fetch and advance local base branch to the latest remote ref.
-        // Either failure aborts the integration — retrying against an unrefreshed
-        // base would violate the mission's requirement to retry against updated base.
-        const fetchResult = git(['-C', baseWorktree, 'fetch', '--all', '--prune']);
-        if (fetchResult.status !== 0) {
-          fmt.log.fail('[RETRY] Could not fetch remote refs — aborting integration.');
-          throw new IntegrationAbort();
-        }
-        const pullResult = git(['-C', baseWorktree, 'pull', '--ff-only']);
-        if (pullResult.status !== 0) {
-          fmt.log.fail(`[RETRY] Could not fast-forward ${baseBranch} — aborting integration.`);
-          throw new IntegrationAbort();
-        }
-        fmt.log.info(`Base branch ${baseBranch} refreshed via fast-forward.`);
-
-        // Retry probe merge against the refreshed base.
-        const retryMerge = git(['-C', baseWorktree, 'merge', '--no-commit', '--no-ff', branch]);
-        const retryAbort = git(['-C', baseWorktree, 'merge', '--abort']);
-        if (retryAbort.status !== 0 && !isNoMergeToAbortResult(retryAbort)) {
-          abortFailed = true;
-          fmt.log.fail('[RETRY] Dry-run merge retry could not be aborted cleanly.');
-        } else if (retryMerge.status === 0) {
-          fmt.log.pass('Probe merge retry succeeded — proceeding to squash-merge.');
-          proceedToSquash = true;
-        }
+      // End-context check: if we are in the worktree that is about to be deleted,
+      // move the Node process to the base worktree to avoid being left in a ghost directory.
+      const missionWorktree = conventionalWorktreePath(slug);
+      if (process.cwd() === missionWorktree || process.cwd().startsWith(missionWorktree + '/')) {
+        fmt.log.info(`Moving process directory to ${baseWorktree} before mission worktree deletion.`);
+        process.chdir(baseWorktree as string);
       }
 
-      if (proceedToSquash) {
-        // Retry resolved drift — fall through to Step 3 (squash-merge) below.
-      } else if (!abortFailed) {
-        // Abort succeeded; check for existing squash or fail with conflict details.
-        const existingSquash = findExistingSquashCommit(baseWorktree, slug);
-        if (existingSquash) {
-          fmt.log.warn(`Squash commit already exists on local ${baseBranch} from a previous partial integration (${existingSquash.slice(0, 12)}). Resuming from sync-merged step.`);
-          const mergedCommit = existingSquash;
-          if (isForgejoReviewEnabled(baseWorktree)) {
-            fmt.log.debug('Step 6 (resume): Syncing merged state to Forgejo...');
-            const syncResult = syncMerged(branch, mergedCommit, {
-              rootDir: baseWorktree,
-              forgejoUser: context.forgejoUser,
-              token: context.forgejoToken,
-              baseBranch: context.baseBranch
-            });
-            if (!syncResult.ok) {
-              reportSyncMergedFailure(syncResult);
-              throw new IntegrationAbort();
-            }
-          } else {
-            fmt.log.debug('Step 6 (resume): Skipping Forgejo sync (review provider is not forgejo).');
-          }
-          if (fs.existsSync(baseWorktree)) {
-            nextActionMessage = `Next: cd ${baseWorktree}`;
-          }
-          await persistLandedIntegrationOrAbort(slug, mergedCommit, missionServices, { rootDir: baseWorktree as string });
-          await (recordPostIntegrationStatsOrAbort as any)(slug, { rootDir: baseWorktree, missionStore: missionServices.store });
-          if (!cleanupMissionWorktree(slug)) {
-            fmt.log.fail('Mission worktree cleanup failed.');
-            throw new IntegrationAbort();
-          }
-          fmt.log.pass('Mission worktree cleaned up.');
-          maybeUpdateGraphifyOnPrimary(baseWorktree, { log: fmt.log.debug });
-          runPostIntegrateHookOrAbort(slug, { baseWorktree: baseWorktree as string, baseBranch: baseBranch as string, variant: 'variant-b-resumed' });
-          fmt.log.plain('');
-          fmt.log.pass(`✓ integrated into ${baseBranch} (resumed from partial state)`);
-          fmt.log.plain(`  ${baseBranch}  ${landedFromSha} → ${mergedCommit}`);
-        } else {
-          fmt.log.fail('Merge conflicts detected. Rebase the mission branch before integrating.');
-          if (conflictFiles.length > 0) {
-            fmt.log.info(`Conflicting files (${conflictFiles.length}):`);
-            conflictFiles.forEach(f => fmt.log.info(`  - ${f}`));
-          }
-          fmt.log.info('Conflict helper path:');
-          for (const line of formatMatrixSummary(buildAutonomousReviewMatrix())) {
-            fmt.log.info(line);
-          }
-          for (const line of buildConflictResolutionPrompt(slug, context.area, { baseBranch: context.baseBranch || '' })) {
-            fmt.log.info(line);
-          }
-          throw new IntegrationAbort();
-        }
-      } else {
-        // Abort failed and not backlog-only (or retry failed): fail closed.
+      const branch = missionBranchName(slug, baseWorktree);
+      // TASK-2479: capture the pre-integration base-branch tip so the landing
+      // result can show the `<before> → <after>` SHA transition.
+      const landedFromSha = git(['-C', baseWorktree, 'rev-parse', baseBranch]).stdout.trim();
+      const mainTitle = missionTitle(slug) || slug;
+      const summary = mainTitle.replace(/\s+/g, ' ').trim();
+      // A DB-owned adhoc identity has no Backlog task file; the closeout below is
+      // best-effort and guards every task-file access. Keep mainTaskFile empty for
+      // adhoc so the fs.existsSync guards below no-op rather than crash.
+      const rawTaskFile = (context.task as any)?.taskFile as string | undefined;
+      const mainTaskFile = resolveIntegrationTaskPath(rawTaskFile, context.missionWorktree, baseWorktree);
+      if (mainTaskFile === null) {
+        fmt.log.fail(baseWorktree
+          ? 'Mission task file is outside the integration checkout; refusing to stage an unsafe closeout path.'
+          : 'Integration base worktree is unavailable; refusing to stage backlog closeout.');
+        throw new IntegrationAbort();
+      }
+      fmt.log.debug(`Selecting integration variant: Variant B (local squash-merge)`);
+      fmt.log.debug(`\nStep 1: Using base worktree ${baseWorktree} on ${baseBranch} as the squash-merge target...`);
+
+      fmt.log.debug(`Step 2: Checking merge conflicts against local ${baseBranch} in the base worktree...`);
+      const dryMerge = git(['-C', baseWorktree, 'merge', '--no-commit', '--no-ff', branch]);
+      const abortResult = git(['-C', baseWorktree, 'merge', '--abort']);
+
+      let proceedToSquash = false;
+
+      // Check abort failure for the success path (merge was clean but abort didn't).
+      // When dryMerge.status === 0, the abort restores the worktree after a clean
+      // probe — if it fails the base may be left in a dirty merge state.
+      let abortFailed = abortResult.status !== 0 && !isNoMergeToAbortResult(abortResult);
+
+      if (dryMerge.status === 0 && abortFailed) {
         fmt.log.fail('Dry-run merge could not be aborted cleanly. Inspect the local integration checkout before retrying integrate.');
         throw new IntegrationAbort();
       }
-    }
 
-    if (dryMerge.status === 0 || proceedToSquash) {
-      fmt.log.debug('Step 3: Squash-merging the mission branch...');
-      let noisePatchState = null;
-      if (softResetTrailingBacklogNoise(baseWorktree, git)) {
-        noisePatchState = prepareNoisePatchForSquash(baseWorktree, { gitRunner: git });
-        if (!noisePatchState.ok) {
-          fmt.log.fail('Could not preserve trailing backlog noise before squash merge.');
-          if (noisePatchState.error) {
-            fmt.log.fail(noisePatchState.error);
+      if (dryMerge.status !== 0) {
+        // Classify conflicts BEFORE deciding on abort failure.
+        // This allows backlog-only classification to rescue unabortable merges.
+        // (architecture invariant / architecture migration)
+        const conflictOutput = [/** @type {any} */ (dryMerge).stdout, /** @type {any} */ (dryMerge).stderr].filter(Boolean).join('\n');
+        const conflictFiles = parseConflictFilesFromMergeOutput(conflictOutput);
+        const backlogOnly = areAllBacklogOnlyConflicts(conflictFiles) && conflictFiles.length > 0;
+
+        if (backlogOnly) {
+          fmt.log.info('Backlog-only conflicts detected — refreshing base branch and retrying probe merge...');
+
+          // Safe cleanup: if abort failed, use reset --hard to clear stale merge state.
+          // After successful reset, clear abortFailed so the fallback path after retry
+          // uses the normal conflict-resolution flow (not the generic abort-failure path).
+          if (abortFailed) {
+            const resetResult = git(['-C', baseWorktree, 'reset', '--hard', 'HEAD']);
+            if (resetResult.status !== 0) {
+              fmt.log.fail('[RETRY] Could not clean up after backlog-only conflict merge.');
+              throw new IntegrationAbort();
+            }
+            abortFailed = false;
           }
-          throw new IntegrationAbort();
-        }
-      }
-      const squashResult = git(['-C', baseWorktree, 'merge', '--squash', branch]);
-      if (squashResult.status !== 0) {
-        noisePatchState?.cleanup?.();
-        fmt.log.fail('Squash merge failed.');
-        throw new IntegrationAbort();
-      }
-      if (noisePatchState?.patchPath) {
-        const restoreNoiseResult = restoreNoisePatchAfterSquash(/** @type {string} */ (baseWorktree), noisePatchState.patchPath, { gitRunner: git });
-        (noisePatchState.cleanup as Function)();
-        if (!restoreNoiseResult.ok) {
-          fmt.log.fail('Could not restore trailing backlog noise after squash merge.');
-          if (restoreNoiseResult.error) {
-            fmt.log.fail(restoreNoiseResult.error);
-          }
-          throw new IntegrationAbort();
-        }
-      }
 
-      // Capture the squash payload before closeout changes the checkout. The
-      // final commit names this set, so a concurrent bare board commit never
-      // inherits ambient index entries from an earlier `git add -A`.
-      const intendedPayloadPaths = new Set(
-        git(['-C', baseWorktree, 'diff', '--cached', '--name-only', '--']).stdout
-          .split('\n')
-          .map(file => file.trim())
-          .filter(Boolean)
-      );
-
-      fmt.log.debug('Step 4: Final closeout checks in the local integration checkout...');
-      // Do not dirty the primary checkout before the probe merge and squash have
-      // completed. The task file is commonly part of the mission branch, so an
-      // early promotion can make `merge --abort` fail and leave index conflicts.
-      await promoteTaskForIntegrationIfNeeded(context, { missionServicesFn });
-      if (fs.existsSync(mainTaskFile)) {
-        completeTask(slug, baseWorktree);
-        const originalTaskPath = path.relative(baseWorktree as string, mainTaskFile);
-        intendedPayloadPaths.add(originalTaskPath);
-        // Re-resolve because it moved
-        const updatedResolution = resolveTaskFile(slug, baseWorktree);
-        if (updatedResolution.ok) {
-          const completedTaskPath = path.relative(baseWorktree as string, updatedResolution.taskFile as string);
-          intendedPayloadPaths.add(completedTaskPath);
-          rewriteWorktreePaths(updatedResolution.taskFile as string, slug, { rootDir: baseWorktree });
-          const stageCloseout = git(['-C', baseWorktree, 'add', '-A', '--', originalTaskPath, completedTaskPath]);
-          if (stageCloseout.status !== 0) {
-            fmt.log.fail('Could not stage backlog closeout for the landed squash commit.');
+          // Fetch and advance local base branch to the latest remote ref.
+          // Either failure aborts the integration — retrying against an unrefreshed
+          // base would violate the mission's requirement to retry against updated base.
+          const fetchResult = git(['-C', baseWorktree, 'fetch', '--all', '--prune']);
+          if (fetchResult.status !== 0) {
+            fmt.log.fail('[RETRY] Could not fetch remote refs — aborting integration.');
             throw new IntegrationAbort();
           }
-        }
-      }
+          const pullResult = git(['-C', baseWorktree, 'pull', '--ff-only']);
+          if (pullResult.status !== 0) {
+            fmt.log.fail(`[RETRY] Could not fast-forward ${baseBranch} — aborting integration.`);
+            throw new IntegrationAbort();
+          }
+          fmt.log.info(`Base branch ${baseBranch} refreshed via fast-forward.`);
 
-      fmt.log.debug('Step 5: Creating the landed squash commit in the local integration checkout...');
-      let commitResult = git([
-        '-C',
-        /** @type {string} */ (baseWorktree),
-        'commit',
-        '--only',
-        '-m',
-        `${branch}: ${summary}`,
-        '--',
-        ...intendedPayloadPaths
-      ]);
-      let retriedCommit = false;
-      if (commitResult.status !== 0) {
-        const output = [commitResult.stdout, commitResult.stderr].filter(Boolean).join('\n').trim();
-        if (isIntendedPayloadAtHead(baseWorktree as string, intendedPayloadPaths, { gitRunner: git })) {
-          const carryingCommit = git(['-C', baseWorktree, 'rev-parse', 'HEAD']).stdout.trim();
-          fmt.log.pass(`Integration payload already landed in commit ${carryingCommit}.`);
+          // Retry probe merge against the refreshed base.
+          const retryMerge = git(['-C', baseWorktree, 'merge', '--no-commit', '--no-ff', branch]);
+          const retryAbort = git(['-C', baseWorktree, 'merge', '--abort']);
+          if (retryAbort.status !== 0 && !isNoMergeToAbortResult(retryAbort)) {
+            abortFailed = true;
+            fmt.log.fail('[RETRY] Dry-run merge retry could not be aborted cleanly.');
+          } else if (retryMerge.status === 0) {
+            fmt.log.pass('Probe merge retry succeeded — proceeding to squash-merge.');
+            proceedToSquash = true;
+          }
+        }
+
+        if (proceedToSquash) {
+          // Retry resolved drift — fall through to Step 3 (squash-merge) below.
+        } else if (!abortFailed) {
+          // Abort succeeded; check for existing squash or fail with conflict details.
+          const existingSquash = findExistingSquashCommit(baseWorktree, slug);
+          if (existingSquash) {
+            fmt.log.warn(`Squash commit already exists on local ${baseBranch} from a previous partial integration (${existingSquash.slice(0, 12)}). Resuming from sync-merged step.`);
+            const mergedCommit = existingSquash;
+            if (isForgejoReviewEnabled(baseWorktree)) {
+              fmt.log.debug('Step 6 (resume): Syncing merged state to Forgejo...');
+              const syncResult = syncMerged(branch, mergedCommit, {
+                rootDir: baseWorktree,
+                forgejoUser: context.forgejoUser,
+                token: context.forgejoToken,
+                baseBranch: context.baseBranch
+              });
+              if (!syncResult.ok) {
+                reportSyncMergedFailure(syncResult);
+                throw new IntegrationAbort();
+              }
+            } else {
+              fmt.log.debug('Step 6 (resume): Skipping Forgejo sync (review provider is not forgejo).');
+            }
+            if (fs.existsSync(baseWorktree)) {
+              nextActionMessage = `Next: cd ${baseWorktree}`;
+            }
+            await persistLandedIntegrationOrAbort(slug, mergedCommit, missionServices, { rootDir: baseWorktree as string });
+            await (recordPostIntegrationStatsOrAbort as any)(slug, { rootDir: baseWorktree, missionStore: missionServices.store });
+            if (!cleanupMissionWorktree(slug)) {
+              fmt.log.fail('Mission worktree cleanup failed.');
+              throw new IntegrationAbort();
+            }
+            fmt.log.pass('Mission worktree cleaned up.');
+            maybeUpdateGraphifyOnPrimary(baseWorktree, { log: fmt.log.debug });
+            runPostIntegrateHookOrAbort(slug, { baseWorktree: baseWorktree as string, baseBranch: baseBranch as string, variant: 'variant-b-resumed' });
+            fmt.log.plain('');
+            fmt.log.pass(`✓ integrated into ${baseBranch} (resumed from partial state)`);
+            fmt.log.plain(`  ${baseBranch}  ${landedFromSha} → ${mergedCommit}`);
+          } else {
+            fmt.log.fail('Merge conflicts detected. Rebase the mission branch before integrating.');
+            if (conflictFiles.length > 0) {
+              fmt.log.info(`Conflicting files (${conflictFiles.length}):`);
+              conflictFiles.forEach(f => fmt.log.info(`  - ${f}`));
+            }
+            fmt.log.info('Conflict helper path:');
+            for (const line of formatMatrixSummary(buildAutonomousReviewMatrix())) {
+              fmt.log.info(line);
+            }
+            for (const line of buildConflictResolutionPrompt(slug, context.area, { baseBranch: context.baseBranch || '' })) {
+              fmt.log.info(line);
+            }
+            throw new IntegrationAbort();
+          }
         } else {
-          fmt.log.fail('Could not create the squash commit in the local integration checkout.');
-          if (output) {
-            fmt.log.fail(output);
-          }
-
-          // SC2: Classify the squash-commit failure and bounce it through the
-          // one rebound kernel. The kernel's verify re-runs the identical
-          // `git commit --only` invocation, so `fixed` means the hook passes on
-          // re-run — never merely that an agent ran. The kernel owns the
-          // per-occurrence budget (2 attempts) in memory; nothing is persisted.
-          const hookClassification = classifyHookFailure(output);
-          if (!hookClassification.isHookFailure) {
-            fmt.log.info(`The squash commit runs the repo git hooks. Fix the reported hook failure in ${baseWorktree} and retry integrate.`);
-            fmt.log.info(`For this mission, the relevant verification command is ${formatVerificationCommand(context.area, baseWorktree)}`);
-            throw new IntegrationAbort();
-          }
-
-          const implementer = resolveBounceImplementer(context.taskAssignee ?? null, baseWorktree, { selectAgentFn, workflowLauncherStatusFn });
-          if (!implementer) {
-            // No resolver could name an implementer — strand, as the deleted
-            // policy did, rather than launch with an empty agent identity.
-            fmt.log.info(`The squash commit runs the repo git hooks. Fix the reported hook failure in ${baseWorktree} and retry integrate.`);
-            throw new IntegrationAbort();
-          }
-
-          const outcome = await rebound(
-            { kind: 'hook-failure', hook: hookClassification.hookType, operation: 'squash commit', output },
-            {
-              slug,
-              worktree: baseWorktree,
-              implementer,
-              // Casts: the injected production fns are more strongly typed than the
-              // kernel's port shape; the call sites below match the kernel contract.
-              startAgent: startAgentFn as unknown as ReboundContext['startAgent'],
-              transitionToImplementer: (bounceSlug: string) => transitionTaskFn(bounceSlug, 'active'),
-              applyAgentFallback: applyAgentFallbackFn as unknown as ReboundContext['applyAgentFallback'],
-              verify: () => {
-                retriedCommit = true;
-                const retryResult = git([
-                  '-C',
-                  /** @type {string} */ (baseWorktree),
-                  'commit',
-                  '--only',
-                  '-m',
-                  `${branch}: ${summary}`,
-                  '--',
-                  ...intendedPayloadPaths
-                ]);
-                return { ok: retryResult.status === 0, diagnostic: [retryResult.stdout, retryResult.stderr].filter(Boolean).join('\n').trim() };
-              },
-            },
-          );
-          if (outcome.outcome !== 'fixed') {
-            // exhausted / human-only — strand with the existing operator hint.
-            fmt.log.info(`The squash commit runs the repo git hooks. Fix the reported hook failure in ${baseWorktree} and retry integrate.`);
-            throw new IntegrationAbort();
-          }
-        }
-      }
-      if (retriedCommit) {
-        fmt.log.pass('Squash commit created after hook fix.');
-      }
-      const mergedCommit = git(['-C', baseWorktree, 'rev-parse', 'HEAD']).stdout.trim();
-
-      if (isForgejoReviewEnabled(baseWorktree)) {
-        fmt.log.debug('Step 6: Syncing merged state to Forgejo...');
-        const syncResult = syncMerged(branch, mergedCommit, {
-          rootDir: baseWorktree,
-          forgejoUser: context.forgejoUser,
-          token: context.forgejoToken,
-          baseBranch: context.baseBranch
-        });
-        if (!syncResult.ok) {
-          reportSyncMergedFailure(syncResult);
+          // Abort failed and not backlog-only (or retry failed): fail closed.
+          fmt.log.fail('Dry-run merge could not be aborted cleanly. Inspect the local integration checkout before retrying integrate.');
           throw new IntegrationAbort();
         }
-      } else {
-        fmt.log.debug('Step 6: Skipping Forgejo sync (review provider is not forgejo).');
       }
 
-      if (fs.existsSync(baseWorktree)) {
-        nextActionMessage = `Next: cd ${baseWorktree}`;
-      }
-      await persistLandedIntegrationOrAbort(slug, mergedCommit, missionServices, { rootDir: baseWorktree as string });
-      await (recordPostIntegrationStatsOrAbort as any)(slug, { rootDir: baseWorktree, missionStore: missionServices.store });
-      if (cleanupMissionWorktree(slug)) {
-        fmt.log.pass('Mission worktree cleaned up.');
-      } else {
-        fmt.log.fail('Mission worktree cleanup failed.');
-        throw new IntegrationAbort();
-      }
+      if (dryMerge.status === 0 || proceedToSquash) {
+        fmt.log.debug('Step 3: Squash-merging the mission branch...');
+        let noisePatchState = null;
+        if (softResetTrailingBacklogNoise(baseWorktree, git)) {
+          noisePatchState = prepareNoisePatchForSquash(baseWorktree, { gitRunner: git });
+          if (!noisePatchState.ok) {
+            fmt.log.fail('Could not preserve trailing backlog noise before squash merge.');
+            if (noisePatchState.error) {
+              fmt.log.fail(noisePatchState.error);
+            }
+            throw new IntegrationAbort();
+          }
+        }
+        const squashResult = git(['-C', baseWorktree, 'merge', '--squash', branch]);
+        if (squashResult.status !== 0) {
+          noisePatchState?.cleanup?.();
+          fmt.log.fail('Squash merge failed.');
+          throw new IntegrationAbort();
+        }
+        if (noisePatchState?.patchPath) {
+          const restoreNoiseResult = restoreNoisePatchAfterSquash(/** @type {string} */ (baseWorktree), noisePatchState.patchPath, { gitRunner: git });
+          (noisePatchState.cleanup as Function)();
+          if (!restoreNoiseResult.ok) {
+            fmt.log.fail('Could not restore trailing backlog noise after squash merge.');
+            if (restoreNoiseResult.error) {
+              fmt.log.fail(restoreNoiseResult.error);
+            }
+            throw new IntegrationAbort();
+          }
+        }
 
-      maybeUpdateGraphifyOnPrimary(baseWorktree, { log: fmt.log.debug });
-      runPostIntegrateHookOrAbort(slug, { baseWorktree: baseWorktree as string, baseBranch: baseBranch as string, variant: 'variant-b' });
+        // Capture the squash payload before closeout changes the checkout. The
+        // final commit names this set, so a concurrent bare board commit never
+        // inherits ambient index entries from an earlier `git add -A`.
+        const intendedPayloadPaths = new Set(
+          git(['-C', baseWorktree, 'diff', '--cached', '--name-only', '--']).stdout
+            .split('\n')
+            .map(file => file.trim())
+            .filter(Boolean)
+        );
 
-      // Proof capture after post-integrate hook so it represents the
-      // freshly rebuilt tree that will actually be published (architecture migration).
-      const proofResult = verification.captureVerifiedTreeProof(context.area, baseWorktree, {
-        gitRunner: git,
-        runFn: /** @type {Function} */ (child_process.spawnSync)
+        fmt.log.debug('Step 4: Final closeout checks in the local integration checkout...');
+        // Do not dirty the primary checkout before the probe merge and squash have
+        // completed. The task file is commonly part of the mission branch, so an
+        // early promotion can make `merge --abort` fail and leave index conflicts.
+        await promoteTaskForIntegrationIfNeeded(context, { missionServicesFn });
+        if (fs.existsSync(mainTaskFile)) {
+          completeTask(slug, baseWorktree);
+          const originalTaskPath = path.relative(baseWorktree as string, mainTaskFile);
+          intendedPayloadPaths.add(originalTaskPath);
+          // Re-resolve because it moved
+          const updatedResolution = resolveTaskFile(slug, baseWorktree);
+          if (updatedResolution.ok) {
+            const completedTaskPath = path.relative(baseWorktree as string, updatedResolution.taskFile as string);
+            intendedPayloadPaths.add(completedTaskPath);
+            rewriteWorktreePaths(updatedResolution.taskFile as string, slug, { rootDir: baseWorktree });
+            const stageCloseout = git(['-C', baseWorktree, 'add', '-A', '--', originalTaskPath, completedTaskPath]);
+            if (stageCloseout.status !== 0) {
+              fmt.log.fail('Could not stage backlog closeout for the landed squash commit.');
+              throw new IntegrationAbort();
+            }
+          }
+        }
+
+        fmt.log.debug('Step 5: Creating the landed squash commit in the local integration checkout...');
+        let commitResult = git([
+          '-C',
+          /** @type {string} */ (baseWorktree),
+          'commit',
+          '--only',
+          '-m',
+          `${branch}: ${summary}`,
+          '--',
+          ...intendedPayloadPaths
+        ]);
+        let retriedCommit = false;
+        if (commitResult.status !== 0) {
+          const output = [commitResult.stdout, commitResult.stderr].filter(Boolean).join('\n').trim();
+          if (isIntendedPayloadAtHead(baseWorktree as string, intendedPayloadPaths, { gitRunner: git })) {
+            const carryingCommit = git(['-C', baseWorktree, 'rev-parse', 'HEAD']).stdout.trim();
+            fmt.log.pass(`Integration payload already landed in commit ${carryingCommit}.`);
+          } else {
+            fmt.log.fail('Could not create the squash commit in the local integration checkout.');
+            if (output) {
+              fmt.log.fail(output);
+            }
+
+            // SC2: Classify the squash-commit failure and bounce it through the
+            // one rebound kernel. The kernel's verify re-runs the identical
+            // `git commit --only` invocation, so `fixed` means the hook passes on
+            // re-run — never merely that an agent ran. The kernel owns the
+            // per-occurrence budget (2 attempts) in memory; nothing is persisted.
+            const hookClassification = classifyHookFailure(output);
+            if (!hookClassification.isHookFailure) {
+              fmt.log.info(`The squash commit runs the repo git hooks. Fix the reported hook failure in ${baseWorktree} and retry integrate.`);
+              fmt.log.info(`For this mission, the relevant verification command is ${formatVerificationCommand(context.area, baseWorktree)}`);
+              throw new IntegrationAbort();
+            }
+
+            const implementer = resolveBounceImplementer(context.taskAssignee ?? null, baseWorktree, { selectAgentFn, workflowLauncherStatusFn });
+            if (!implementer) {
+              // No resolver could name an implementer — strand, as the deleted
+              // policy did, rather than launch with an empty agent identity.
+              fmt.log.info(`The squash commit runs the repo git hooks. Fix the reported hook failure in ${baseWorktree} and retry integrate.`);
+              throw new IntegrationAbort();
+            }
+
+            const outcome = await rebound(
+              { kind: 'hook-failure', hook: hookClassification.hookType, operation: 'squash commit', output },
+              {
+                slug,
+                worktree: baseWorktree,
+                implementer,
+                // Casts: the injected production fns are more strongly typed than the
+                // kernel's port shape; the call sites below match the kernel contract.
+                startAgent: startAgentFn as unknown as ReboundContext['startAgent'],
+                transitionToImplementer: (bounceSlug: string) => transitionTaskFn(bounceSlug, 'active'),
+                applyAgentFallback: applyAgentFallbackFn as unknown as ReboundContext['applyAgentFallback'],
+                verify: () => {
+                  retriedCommit = true;
+                  const retryResult = git([
+                    '-C',
+                    /** @type {string} */ (baseWorktree),
+                    'commit',
+                    '--only',
+                    '-m',
+                    `${branch}: ${summary}`,
+                    '--',
+                    ...intendedPayloadPaths
+                  ]);
+                  return { ok: retryResult.status === 0, diagnostic: [retryResult.stdout, retryResult.stderr].filter(Boolean).join('\n').trim() };
+                },
+              },
+            );
+            if (outcome.outcome !== 'fixed') {
+              // exhausted / human-only — strand with the existing operator hint.
+              fmt.log.info(`The squash commit runs the repo git hooks. Fix the reported hook failure in ${baseWorktree} and retry integrate.`);
+              throw new IntegrationAbort();
+            }
+          }
+        }
+        if (retriedCommit) {
+          fmt.log.pass('Squash commit created after hook fix.');
+        }
+        const mergedCommit = git(['-C', baseWorktree, 'rev-parse', 'HEAD']).stdout.trim();
+
+        if (isForgejoReviewEnabled(baseWorktree)) {
+          fmt.log.debug('Step 6: Syncing merged state to Forgejo...');
+          const syncResult = syncMerged(branch, mergedCommit, {
+            rootDir: baseWorktree,
+            forgejoUser: context.forgejoUser,
+            token: context.forgejoToken,
+            baseBranch: context.baseBranch
+          });
+          if (!syncResult.ok) {
+            reportSyncMergedFailure(syncResult);
+            throw new IntegrationAbort();
+          }
+        } else {
+          fmt.log.debug('Step 6: Skipping Forgejo sync (review provider is not forgejo).');
+        }
+
+        if (fs.existsSync(baseWorktree)) {
+          nextActionMessage = `Next: cd ${baseWorktree}`;
+        }
+        await persistLandedIntegrationOrAbort(slug, mergedCommit, missionServices, { rootDir: baseWorktree as string });
+        await (recordPostIntegrationStatsOrAbort as any)(slug, { rootDir: baseWorktree, missionStore: missionServices.store });
+        if (cleanupMissionWorktree(slug)) {
+          fmt.log.pass('Mission worktree cleaned up.');
+        } else {
+          fmt.log.fail('Mission worktree cleanup failed.');
+          throw new IntegrationAbort();
+        }
+
+        maybeUpdateGraphifyOnPrimary(baseWorktree, { log: fmt.log.debug });
+        runPostIntegrateHookOrAbort(slug, { baseWorktree: baseWorktree as string, baseBranch: baseBranch as string, variant: 'variant-b' });
+
+        // Proof capture after post-integrate hook so it represents the
+        // freshly rebuilt tree that will actually be published (architecture migration).
+        const proofResult = verification.captureVerifiedTreeProof(context.area, baseWorktree, {
+          gitRunner: git,
+          runFn: /** @type {Function} */ (child_process.spawnSync)
+        });
+        if (!/** @type {any} */ (proofResult).ok) {
+          fmt.log.fail(`Could not verify the exact tree being published: ${/** @type {any} */ (proofResult).error}`);
+          throw new IntegrationAbort();
+        }
+        const proof = /** @type {any} */ (proofResult).proof;
+        const proofCheck = verification.assertVerifiedTreeProof(proof!, baseWorktree, { gitRunner: git });
+        if (!proofCheck.ok) {
+          fmt.log.fail(`Verification proof is stale for the publish tree: ${/** @type {any} */ (proofCheck).error}`);
+          throw new IntegrationAbort();
+        }
+
+        fmt.log.plain('');
+        fmt.log.pass(`✓ integrated into ${baseBranch}`);
+        fmt.log.plain(`  ${baseBranch}  ${landedFromSha} → ${mergedCommit}`);
+      }
       });
-      if (!/** @type {any} */ (proofResult).ok) {
-        fmt.log.fail(`Could not verify the exact tree being published: ${/** @type {any} */ (proofResult).error}`);
-        throw new IntegrationAbort();
-      }
-      const proof = /** @type {any} */ (proofResult).proof;
-      const proofCheck = verification.assertVerifiedTreeProof(proof!, baseWorktree, { gitRunner: git });
-      if (!proofCheck.ok) {
-        fmt.log.fail(`Verification proof is stale for the publish tree: ${/** @type {any} */ (proofCheck).error}`);
-        throw new IntegrationAbort();
-      }
-
-      fmt.log.plain('');
-      fmt.log.pass(`✓ integrated into ${baseBranch}`);
-      fmt.log.plain(`  ${baseBranch}  ${landedFromSha} → ${mergedCommit}`);
-    }
   } catch (error) {
     if (error instanceof IntegrationAbort) {
       exitCode = 1;
@@ -822,7 +839,10 @@ async function integrate(args: string[], options: {
       exitCode = 1;
     }
   } finally {
-    if (temporaryStash?.created) {
+    // Cast: temporaryStash is assigned inside the publish closure, so flow
+    // analysis narrows it to never at this outer read; the stash shape is
+    // consumed via the `as any` below anyway.
+    if ((temporaryStash as any)?.created) {
         const restoreResult = restoreMainCheckoutStash(temporaryStash as any);
       if (restoreResult.status !== 0) {
         // A stash pop can fail on a pure file-collision when a stashed

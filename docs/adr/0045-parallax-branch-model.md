@@ -11,6 +11,11 @@ Two distinct integration modes coexist in the codebase:
 1. Trunk-based: the mission branch integrates back into the repository's primary branch (`main` or `master`).
 2. Feature-branch: the mission branch integrates back into a recorded feature branch, with the base branch detected and persisted at draft time.
 
+Both are the `local` integration mode — the merge authority stays inside
+Parallix. This mission made that authority a repository configuration key
+(`integration.mode`, see "Integration mode" below), so a repository selects its
+mode instead of hitting a hard-coded code path.
+
 Forgejo serves as a PR viewer and publication surface. The workflow does not require Forgejo to be configured as an upstream remote — all local branch operations (rebase, merge-base, integration) run against local branches. A dedicated `review` remote provides the push/fetch target for Forgejo synchronization.
 
 ## Decision
@@ -77,6 +82,30 @@ feature ─■────────────────■── feature 
          \              /
           ■── mission/<slug> ─■
 ```
+
+### Integration mode
+
+The two modes above are the `local` integration mode. This mission made the
+merge authority a repository configuration key, `integration.mode`, so a
+repository selects its mode instead of hitting a hard-coded code path:
+
+```json
+{ "integration": { "mode": "github-publish" } }
+```
+
+`integration.mode` is one of `local`, `github-publish`, or `github-pr`. Absent
+configuration resolves to `local`, so an unconfigured repository is unchanged;
+any other value fails closed with an error naming the invalid value and the
+allowed set. The mode vocabulary lives in the domain layer with no GitHub or
+Forgejo imports, so the state model carries no provider dependency.
+
+`local` is the trunk-based and feature-branch paths above. `github-publish`
+integrates locally and continues developing while GitHub verifies the exact
+resulting commit, then publishes it to the protected primary branch.
+`github-pr` pushes a reviewable mission branch and GitHub/PR policy owns the
+final merge. The GitHub modes observe external evidence rather than letting the
+running agent self-assert the merge; they are unimplemented in this release and
+fail closed on every unimplemented operation before any `git merge`.
 
 
 ### Forgejo role: PR viewer, not branch authority

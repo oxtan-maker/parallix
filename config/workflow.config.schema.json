@@ -13,6 +13,18 @@
         "name": { "type": "string" }
       }
     },
+    "integration": {
+      "type": "object",
+      "description": "Repository integration authority. Omit the section to keep the default local mode, in which Parallix owns the merge into the primary branch.",
+      "additionalProperties": true,
+      "properties": {
+        "mode": {
+          "type": "string",
+          "enum": ["local", "github-publish", "github-pr"],
+          "description": "local: Parallix integrates into the configured primary branch (default, GitHub-unaware). github-publish: Parallix integrates locally and GitHub independently verifies the exact resulting commit before it publishes to the protected primary branch. github-pr: Parallix pushes a reviewable mission branch and GitHub/PR policy owns the final merge. Any other value is a configuration error."
+        }
+      }
+    },
     "adapters": {
       "type": "object",
       "additionalProperties": true,
