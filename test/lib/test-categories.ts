@@ -180,6 +180,10 @@ export const INTEGRATION_CI_TESTS: readonly string[] = [
   'task-2466-mission-cancel.test.ts',
   'task-2468-adhoc-lifecycle-repro.test.ts',
   'task-2484-npm-metadata-urls-repro.test.ts',
+  // TASK-2492: fixture-git coverage of the squash-landing detection seam runs a
+  // real temporary Git repository, so it crosses the git boundary and runs only
+  // in the integration layer.
+  'task-2492-already-merged-detection.test.ts',
   'test-hygiene.test.ts',
   'tui-command-flow.test.ts',
   'tui-pty-smoke.test.ts',

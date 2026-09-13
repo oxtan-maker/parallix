@@ -115,7 +115,7 @@ test('execute mission use case reports a refused handoff as an execution failure
   const outcome = await new ExecuteMissionService(ports).execute(request());
   assert.equal(outcome.status, 'failed');
   assert.equal(outcome.error?.kind, 'execution');
-  assert.equal(outcome.error?.message, 'legacy handoff failed');
+  assert.equal(outcome.error?.message, 'handoff and review failed');
 });
 
 test('execute mission use case keeps telemetry failures non-fatal', async () => {

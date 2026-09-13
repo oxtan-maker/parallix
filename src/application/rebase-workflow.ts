@@ -211,6 +211,13 @@ export async function runRebaseWorkflow(args: string[], port: RebaseWorkflowPort
   const missionDir = port.findMissionDir(slug, executionRoot);
   const area = missionDir ? port.findMissionArea(missionDir) : 'docs';
   const branch = port.missionBranchName(slug, executionRoot);
+  // Rebase can rewind past the commit that recorded the implementer. Capture
+  // that identity before Git changes the task file, so a shared conflict can
+  // still be assigned to the mission owner.
+  const taskResolution = port.resolveTaskFile(slug, executionRoot);
+  const recordedImplementer = taskResolution.ok && taskResolution.taskFile
+    ? port.getTaskImplementer(taskResolution.taskFile)
+    : null;
 
   const existingRebase = port.detectRebaseState(executionRoot);
   if (existingRebase.inProgress) {
@@ -241,10 +248,7 @@ export async function runRebaseWorkflow(args: string[], port: RebaseWorkflowPort
     const reviewIdentity = port.resolveReviewIdentity(slug, executionRoot);
     let forgejoUser: string | null | undefined = reviewIdentity.forgejoUser;
     if (!forgejoUser) {
-      const taskResolution = port.resolveTaskFile(slug, executionRoot);
-      if (taskResolution.ok) {
-        forgejoUser = port.getTaskImplementer(taskResolution.taskFile);
-      }
+      forgejoUser = recordedImplementer;
     }
     forgejoUser = port.resolveForgejoUser(forgejoUser ?? null);
 
@@ -315,8 +319,7 @@ export async function runRebaseWorkflow(args: string[], port: RebaseWorkflowPort
    * dereferences its required `agent` argument, so probing with none throws.
    */
   const resolveBounceImplementer = (): string | null => {
-    const resolution = port.resolveTaskFile(slug, executionRoot);
-    const recorded = resolution.ok && resolution.taskFile ? port.getTaskImplementer(resolution.taskFile) : null;
+    const recorded = recordedImplementer;
     if (recorded) {return recorded;}
     // The production `selectAgent` contract is `selectAgent(step, options)`;
     // `active` is the policy key that owns implementation work. The port
@@ -722,10 +725,7 @@ export async function runRebaseWorkflow(args: string[], port: RebaseWorkflowPort
   // Conflict resolution is implementation work owned by the mission's recorded
   // implementer (TASK-2294.01). Pin that family; there is no separate
   // conflict-resolution pool to select a substitute resolver from.
-  const conflictTaskResolution = port.resolveTaskFile(slug, executionRoot);
-  const implementer = conflictTaskResolution.ok && conflictTaskResolution.taskFile
-    ? port.getTaskImplementer(conflictTaskResolution.taskFile)
-    : null;
+  const implementer = recordedImplementer;
   if (!implementer) {
     fmt.log.fail(`No recorded implementer for ${fmt.slug(slug)}; cannot launch conflict resolution.`);
     fmt.log.info('Conflict resolution runs as the mission implementer. Set the task assignee to a supported agent family, then re-run.');

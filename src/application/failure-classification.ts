@@ -207,7 +207,8 @@ export function classifyError(errorMsg: string): { failureClass: FailureClassTyp
 
   // 10. StateMachineViolation: task state machine violations
   if (/state\s+violation|invalid\s+state|transition\s+not\s+allowed|cannot\s+(move|transition)\s+(from|to)\s+\w+\s+(to|from)/i.test(errorMsg) ||
-      (/task\s+state/i.test(errorMsg) && /invalid|violation|incorrect/i.test(errorMsg))) {
+      (/task\s+state/i.test(errorMsg) && /invalid|violation|incorrect/i.test(errorMsg)) ||
+      /no\s+recorded\s+implementer.*cannot\s+launch\s+conflict\s+resolution/i.test(errorMsg)) {
     return { failureClass: FailureClass.StateMachineViolation, dispatchAction: DispatchAction.HumanOnly };
   }
 

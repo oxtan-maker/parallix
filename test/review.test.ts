@@ -528,7 +528,10 @@ test('verifyReview handles gate failures', async () => {
       formatMatrixSummaryFn: () => [],
       buildAutonomousReviewMatrixFn: () => ({}),
       readReviewStateFn: () => null,
-      cwdFn: () => '/home/magnus/code/visualBoard'
+      // Hermetic: point at the temp dir holding the workflow.config.json written
+      // above. A hardcoded developer-machine path here made the gate read no
+      // config and return status 0, so the injected runFn failure never surfaced.
+      cwdFn: () => tmp
     });
   } finally {
     process.chdir(origCwd);

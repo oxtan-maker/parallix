@@ -191,7 +191,7 @@ test('execute workflow: handoff-and-review failure surfaces as an execution fail
   const outcome = await buildExecuteWorkflow(runtime, transitionStore).execute(executeRequest());
   assert.equal(outcome.status, 'failed');
   assert.equal(outcome.error.kind, 'execution');
-  assert.equal(outcome.error.message, 'legacy handoff failed');
+  assert.equal(outcome.error.message, 'handoff and review failed');
   assert.ok(calls.includes('safety'));
   assert.ok(calls.includes('stats:codex'));
 });

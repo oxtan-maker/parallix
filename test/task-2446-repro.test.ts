@@ -5,6 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 
 import { recoverMissionLifecycle } from '../src/application/mission-lifecycle-recovery.js';
+import { recoverMissionCommand } from '../src/interfaces/cli/recover.js';
 import { missionId } from '../src/domain/mission.js';
 import { SqliteDatabaseAdapter } from '../src/adapters/sqlite/database-adapter.js';
 import { SqliteMigrationRunner, loadDefaultMigrations } from '../src/adapters/sqlite/migration-runner.js';
@@ -56,6 +57,68 @@ test('integrated mission recovery is refused without changing its aggregate or h
   });
   assert.equal(result.value?.action, 'refused-integrated');
   assert.equal(result.value?.recovered, null);
+});
+
+test('TASK-2492: an active mission already on main is refused, not re-reviewed', async () => {
+  const mission = {
+    id: missionId('task-2492'), repositoryId: 'repo' as never, title: 'Fixture', labels: [], assignee: null,
+    checkpoints: [], review: null, netEngineeringLines: null, status: 'active' as const, closedAt: null,
+  };
+  const result = await recoverMissionLifecycle({
+    missionId: mission.id, taskStatus: 'active', actor: 'codex', occurredAt: '2026-09-12T12:00:00.000Z',
+    alreadyMerged: async () => true,
+    store: {
+      async load() { return { kind: 'found' as const, mission, version: 18 as never }; },
+      async save() { throw new Error('must not reopen or hand off'); },
+      async saveWithTransition() { throw new Error('must not reopen or hand off'); },
+      async findTransitions() { return []; },
+    },
+  } as any);
+
+  assert.equal(result.value?.action, 'refused-integrated');
+  assert.equal(result.value?.recovered, null);
+});
+
+test('TASK-2492: recover command does not resume a landed active mission', async () => {
+  const mission = {
+    id: missionId('task-2492'), repositoryId: 'repo' as never, title: 'Fixture', labels: [], assignee: null,
+    checkpoints: [], review: null, netEngineeringLines: null, status: 'active' as const, closedAt: null,
+  };
+  const errors: string[] = [];
+  let cleanupCalls = 0;
+  const resumed = await recoverMissionCommand(['task-2492'], {
+    taskStatus: () => 'active', alreadyMerged: async () => true, cleanup: () => { cleanupCalls += 1; return true; }, error: (message) => errors.push(message),
+    store: {
+      async load() { return { kind: 'found' as const, mission, version: 18 as never }; },
+      async save() { throw new Error('must not reopen or hand off'); },
+      async saveWithTransition() { throw new Error('must not reopen or hand off'); },
+      async findTransitions() { return []; },
+    },
+  });
+
+  assert.equal(resumed, false);
+  assert.equal(cleanupCalls, 1);
+  assert.deepEqual(errors, ['Recovery refused: durable integration history keeps this mission closed.']);
+});
+
+test('TASK-2492: cleanup failure leaves recovery actionable', async () => {
+  const mission = {
+    id: missionId('task-2492'), repositoryId: 'repo' as never, title: 'Fixture', labels: [], assignee: null,
+    checkpoints: [], review: null, netEngineeringLines: null, status: 'active' as const, closedAt: null,
+  };
+  const errors: string[] = [];
+  const recovered = await recoverMissionCommand(['task-2492'], {
+    taskStatus: () => 'active', alreadyMerged: async () => true, cleanup: () => false, error: (message) => errors.push(message),
+    store: {
+      async load() { return { kind: 'found' as const, mission, version: 18 as never }; },
+      async save() { throw new Error('must not reopen or hand off'); },
+      async saveWithTransition() { throw new Error('must not reopen or hand off'); },
+      async findTransitions() { return []; },
+    },
+  });
+
+  assert.equal(recovered, false);
+  assert.deepEqual(errors, ['Recovery halted: landed mission cleanup failed; retry px recover task-2492 after resolving the worktree.']);
 });
 
 test('recovery reports a stale lifecycle write as a conflict', async () => {

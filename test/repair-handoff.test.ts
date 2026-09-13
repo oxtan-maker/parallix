@@ -558,6 +558,12 @@ test('classifyError classifies state-machine-violation error as StateMachineViol
   assert.equal(result.dispatchAction, DispatchAction.HumanOnly);
 });
 
+test('classifyError keeps a missing conflict implementer out of infrastructure failures', () => {
+  const result = classifyError('No recorded implementer for task-2497; cannot launch conflict resolution.');
+  assert.equal(result.failureClass, FailureClass.StateMachineViolation);
+  assert.equal(result.dispatchAction, DispatchAction.HumanOnly);
+});
+
 test('classifyError returns InfraBlocker(HumanOnly) for unknown error', () => {
   const result = classifyError('Some completely unknown error that does not match any pattern');
   assert.equal(result.failureClass, FailureClass.InfraBlocker);

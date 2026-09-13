@@ -202,6 +202,26 @@ test('rebase use case pins the recorded mission implementer for shared-file conf
   assert.equal(h.agentLaunches[0].options.pinnedAgent, true);
 });
 
+test('rebase use case keeps the implementer recorded before rebase rewrites task metadata', async () => {
+  const shared = 'src/adapters/git/git.ts';
+  let rebased = false;
+  const h = sharedConflictHarness(shared, {
+    git: (args: string[]) => {
+      const tail = subcommand(args);
+      if (tail[0] === 'rebase' && tail[1] === 'main') {
+        rebased = true;
+        return { status: 1, stdout: '', stderr: `CONFLICT (content): Merge conflict in ${shared}\n` };
+      }
+      return OK;
+    },
+    getTaskImplementer: () => rebased ? null : 'codex',
+  });
+  await run(h);
+
+  assert.equal(h.agentLaunches.length, 1);
+  assert.equal(h.agentLaunches[0].options.agent, 'codex');
+});
+
 test('rebase use case exits non-zero when the pinned implementer launcher is unavailable', async () => {
   const shared = 'src/adapters/git/git.ts';
   const h = sharedConflictHarness(shared, {

@@ -1,8 +1,8 @@
 ---
 id: TASK-2497
 title: Prevent merged missions from remaining active
-status: backlog
-assignee: []
+status: done
+assignee: [custom]
 created_date: '2026-09-12 09:25'
 labels:
   - ai_sdlc

@@ -467,7 +467,7 @@ test('active() exits 1 when handoff fails after successful execute launch', asyn
 
   await active(['task-1038'], {
     inferSlugFn: () => 'task-1038',
-    service: { execute: async () => ({ status: 'failed', error: { kind: 'execution', message: 'legacy handoff failed' }, durableEvidence: [] }) },
+    service: { execute: async () => ({ status: 'failed', error: { kind: 'execution', message: 'handoff and review failed' }, durableEvidence: [] }) },
     missionStartFn: () => ({ pass: true }),
     resolveWorktreeFn: () => '/tmp/project-task-1038',
     readAgentConfigOrExitFn: () => ({}),

@@ -120,7 +120,7 @@ export class ExecuteMissionService {
           operationId: request.operationId,
         }),
       });
-      if (!handedOff) {throw new Error('legacy handoff failed');}
+      if (!handedOff) {throw new Error('handoff and review failed');}
 
       await this.endWork(request);
       return { status: 'completed', value: { agent: launch.agent }, durableEvidence: evidence };

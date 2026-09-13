@@ -13,6 +13,8 @@ import { createActiveCommand } from '../interfaces/cli/active.js';
 import { recoverMissionCommand } from '../interfaces/cli/recover.js';
 import { ensureFirstRunAgentConfig } from '../adapters/agents/first-run-config.js';
 import { findTaskFile, getTaskStatus } from '../adapters/backlog/backlog.js';
+import { cleanupMissionWorktree } from '../adapters/cli/commands/integrate-post.js';
+import { findExistingSquashCommit } from '../adapters/cli/commands/integrate-conflict.js';
 import type { BoardProgressSink } from '../application/controller/board-command.js';
 import configWorkflow from '../adapters/cli/commands/config.js';
 import { createConfigCommand } from '../interfaces/cli/config.js';
@@ -156,6 +158,14 @@ function createCommandRegistry(rootDir: string): Record<string, Command> {
           const task = findTaskFile(slug, rootDir);
           return task ? getTaskStatus(task) : null;
         },
+        // Authoritative payload containment: `px integrate` lands with
+        // `git merge --squash`, so a landed mission branch tip is *not*
+        // reachable from `main`. Detect the squash commit by subject in the
+        // primary branch log instead of branch ancestry (TASK-2492). A branch
+        // with no committed payload produces no squash commit, so it is never
+        // misreported as landed and never deleted (F2). See integrate-conflict.findExistingSquashCommit.
+        alreadyMerged: async (slug) => findExistingSquashCommit(rootDir, slug) !== null,
+        cleanup: (slug) => cleanupMissionWorktree(slug, { rootDir }),
         store: services.mission.store,
       });
     }),

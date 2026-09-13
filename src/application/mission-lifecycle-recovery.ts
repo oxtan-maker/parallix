@@ -18,11 +18,16 @@ export async function recoverMissionLifecycle(input: {
   readonly actor: string;
   readonly occurredAt: string;
   readonly store: MissionTransitionStore;
+  /** Authoritative branch-to-primary containment supplied by the CLI adapter. */
+  readonly alreadyMerged?: () => Promise<boolean>;
 }): Promise<ApplicationOutcome<LifecycleRecoveryResult>> {
   const loaded = await input.store.load(input.missionId);
   if (loaded.kind !== 'found') { return failure('unavailable', `Mission ${input.missionId} is unavailable for lifecycle recovery`); }
   const taskStatus = input.taskStatus ?? 'unavailable';
   const aggregateStatus = loaded.mission.status;
+  if (taskStatus === 'active' && aggregateStatus === 'active' && input.alreadyMerged && await input.alreadyMerged()) {
+    return completed({ taskStatus, aggregateStatus, action: 'refused-integrated', recovered: null });
+  }
   if (taskStatus !== 'active' || aggregateStatus !== 'done') {
     return completed({ taskStatus, aggregateStatus, action: 'none', recovered: null });
   }

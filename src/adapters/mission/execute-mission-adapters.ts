@@ -36,7 +36,7 @@ export type { OperatorBlocklistOverlay };
  * (ADR 0051).
  */
 
-/** The legacy command helpers these adapters stand in front of. */
+/** The command helpers these adapters stand in front of. */
 export interface ExecuteMissionRuntime {
   readonly preflight: typeof startupPreflight;
   readonly resolveWorktree: typeof resolveWorktree;
