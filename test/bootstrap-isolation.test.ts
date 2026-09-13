@@ -9,6 +9,7 @@ import path from 'path';
 import { spawnSync } from 'child_process';
 test('bootstrap forces a temp PARALLIX_HOME with an isolated agents.local.json', () => {
   assert.match(process.env.PARALLIX_HOME || '', new RegExp(`^${os.tmpdir().replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`));
+  assert.match(process.env.NPM_CONFIG_CACHE || '', /parallix-test-npm-cache-/);
   assert.ok(fs.existsSync(path.join(process.env.PARALLIX_HOME, 'agents.local.json')));
 });
 

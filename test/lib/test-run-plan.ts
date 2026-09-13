@@ -14,6 +14,7 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
 import { UNIT_TEST_BUDGET_MS, UNIT_TEST_HEADROOM_MS } from './unit-test-budget-reporter.js';
+import { INTEGRATION_CI_TESTS, INTEGRATION_LOCAL_TESTS } from './test-categories.js';
 
 export interface TestRunPlanOptions {
   /** Checkout the suite runs against. */
@@ -267,12 +268,31 @@ export function buildTestRunPlan(options: TestRunPlanOptions): TestRunPlan {
       .map(file => path.join(testRoot, file)),
     ...subdirUnitFiles,
   ];
-  const runsIntegrationSuite = requestedArgs.includes('--integration');
+  // Verification-tier selectors (TASK-2500.04). `--integration` keeps running
+  // the whole integration layer so the existing local gate is unchanged, while
+  // `--integration-ci` and `--integration-local` select POSITIVELY from the
+  // registry in test/lib/test-categories.ts. A newly authored integration test
+  // that nobody classified therefore reaches neither tier command, instead of
+  // silently inheriting GitHub-CI membership.
+  const SUITE_FLAGS = new Set(['--integration', '--integration-ci', '--integration-local', '--unit-test-headroom']);
+  const runsIntegrationCiSuite = requestedArgs.includes('--integration-ci');
+  const runsIntegrationLocalSuite = requestedArgs.includes('--integration-local');
+  const runsIntegrationSuite = requestedArgs.includes('--integration')
+    || runsIntegrationCiSuite
+    || runsIntegrationLocalSuite;
   const enforcesUnitTestHeadroom = requestedArgs.includes('--unit-test-headroom');
-  const requestedTestFiles = requestedArgs.filter(arg => arg !== '--integration' && arg !== '--unit-test-headroom');
-  const testFiles = runsIntegrationSuite
-    ? [...integrationTestFiles, ...subdirIntegrationFiles]
-    : (requestedTestFiles.length > 0 ? requestedTestFiles : defaultTestFiles);
+  const requestedTestFiles = requestedArgs.filter(arg => !SUITE_FLAGS.has(arg));
+  const allIntegrationFiles = [...integrationTestFiles, ...subdirIntegrationFiles];
+  function declaredTier(declared: readonly string[]): string[] {
+    return allIntegrationFiles.filter(file => declared.includes(path.relative(testRoot, file)));
+  }
+  const testFiles = runsIntegrationCiSuite
+    ? declaredTier(INTEGRATION_CI_TESTS)
+    : runsIntegrationLocalSuite
+      ? declaredTier(INTEGRATION_LOCAL_TESTS)
+      : runsIntegrationSuite
+        ? allIntegrationFiles
+        : (requestedTestFiles.length > 0 ? requestedTestFiles : defaultTestFiles);
   // The real-agent smoke test deliberately reads the operator's configured Pi
   // model/auth files and then copies them into its own disposable state root.
   // The tui-spawn test, when explicitly requested as the sole file, also benefits

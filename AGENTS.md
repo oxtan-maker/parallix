@@ -41,3 +41,11 @@ This repo routes verification through `./scripts/verify-local.sh {{area}}`. Earl
 
 ## unit tests
 Unit tests must finish within 500 ms when run alone; use `npm test -- --unit-test-headroom` to enforce and diagnose that authoring target. Default `npm test` retains its 1,000 ms per-test hard cap. Unit tests must mock external boundaries and never access real Forgejo; avoid missing mocks that launch expensive CLI commands or agents.
+
+## Verification tiers
+
+Verification runs in four named tiers — `unit`, `integration-ci`, `integration-local`, and `agent-e2e`. ADR 0057 defines their permitted dependencies and states exactly what each tier proves; read it before changing test selection.
+
+Commands: `npm test` (unit), `npm run test:integration:ci` (GitHub-safe integration subset), `npm run test:integration:local` (workstation-dependent integration), `npm run test:integration` (the whole integration layer, unchanged, used by the local gates), `npm run test:agent-e2e` and `npm run test:lifecycle-e2e` (real-agent and lifecycle suites), and `npm run test:ci` (the GitHub-safe aggregate: typecheck, build, unit tests, CI integration subset, bundle smoke, package-content audit).
+
+**Adding an integration test requires an explicit classification decision.** Register the file in `test/lib/test-categories.ts` — either in the CI list, or in the local-only list together with a written reason naming the dependency a clean GitHub-hosted runner lacks. Membership in the GitHub-safe tier is positive: an unclassified boundary test fails `test/test-categories.test.ts` and never enters the CI lane by default.

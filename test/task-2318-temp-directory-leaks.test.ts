@@ -141,9 +141,6 @@ test('bootstrap temp directories are cleaned up after SIGTERM termination', asyn
 test('bootstrap temp directories are cleaned up after SIGKILL termination', async () => {
   const markerPath = path.join(os.tmpdir(), MARKER_PREFIX + Date.now() + '-' + process.pid + '-kill');
 
-  // Record directories that exist BEFORE the child spawns
-  const before = new Set(getExistingMarkers());
-
   // Spawn a child that loads the bootstrap and writes its directory list,
   // then waits briefly before the parent sends SIGKILL.
   const child = spawn(process.execPath, [
@@ -181,24 +178,17 @@ test('bootstrap temp directories are cleaned up after SIGKILL termination', asyn
   const data = JSON.parse(fs.readFileSync(markerPath, 'utf8'));
   fs.unlinkSync(markerPath);
 
-  // Collect directories that exist AFTER the child exits
-  const after = new Set(getExistingMarkers());
-
-  // Find new directories that didn't exist before
-  const leaked = [];
-  for (const dir of after) {
-    if (!before.has(dir)) {
-      leaked.push(dir);
-    }
-  }
-
-  // On the fixed bootstrap, SIGKILL should still leave directories because
-  // no JavaScript handler can catch SIGKILL. This test documents that
-  // limitation. After the fix, the SIGTERM path handles the common case
-  // (test runner sends SIGTERM before SIGKILL).
+  // On the fixed bootstrap, SIGKILL should still leave directories because no
+  // JavaScript handler can catch SIGKILL. This test documents that limitation.
+  // The SIGTERM path handles the common case (test runner sends SIGTERM before
+  // SIGKILL).
   //
-  // For now, this test asserts that SIGKILL leaves directories (documents
-  // the known limitation).
+  // Score the leak against the child's own reported roots via existsSync: a
+  // directory created alongside many same-prefix siblings can be absent from a
+  // readdirSync snapshot on the shared /tmp (task-2500), so existsSync stays
+  // correct where readdirSync does not.
+  const leaked = data.dirs.filter((dir) => fs.existsSync(dir));
+
   assert.ok(
     leaked.length >= data.dirs.length,
     `SIGKILL scenario: expected at least ${data.dirs.length} leaked directories, found ${leaked.length}`

@@ -21,6 +21,7 @@ function makeTempDir(prefix) {
 // caller already exported PARALLIX_HOME/HOME in their shell.
 process.env.PARALLIX_HOME = makeTempDir('parallix-test-home-');
 process.env.HOME = makeTempDir('parallix-test-user-home-');
+process.env.NPM_CONFIG_CACHE = makeTempDir('parallix-test-npm-cache-');
 // Unit tests must never discover an operator's live Forgejo installation or
 // endpoint. Tests that exercise Forgejo behavior must inject their API and
 // availability doubles explicitly; an omitted double must fail safely rather

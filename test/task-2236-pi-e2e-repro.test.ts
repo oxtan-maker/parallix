@@ -5,6 +5,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
+import { buildTestRunPlan } from './lib/test-run-plan.js';
 test('task-2236 repro: npm test forwards the requested pi e2e smoke file', () => {
   // TASK-2328 moved suite selection and argv assembly into
   // test/lib/test-run-plan.ts; the runner delegates to it.
@@ -21,9 +22,20 @@ test('task-2236 repro: npm test forwards the requested pi e2e smoke file', () =>
     /requestedArgs: process\.argv\.slice\(2\)/,
     'npm test positional arguments must be read by the default test runner'
   );
-  assert.match(
-    runnerSource,
-    /requestedTestFiles = requestedArgs\.filter\(arg => arg !== '--integration' && arg !== '--unit-test-headroom'\);/,
+  // TASK-2500.04 added the --integration-ci / --integration-local tier
+  // selectors, so assert the normalization behaviourally rather than pinning the
+  // filter's source text: every control flag must be stripped, and the requested
+  // file must still reach `node --test`.
+  const requestedFile = 'test/e2e-real-agent-smoke.test.ts';
+  const plan = buildTestRunPlan({
+    executionRoot: path.join(import.meta.dirname, '..'),
+    requestedArgs: [requestedFile, '--unit-test-headroom'],
+    probeNodeVersion: () => process.version,
+  });
+  const selected = plan.nodeArgs.slice(plan.nodeArgs.indexOf('--test') + 1);
+  assert.deepEqual(
+    selected,
+    [requestedFile],
     'the default test runner must normalize control flags out of positional arguments'
   );
   assert.match(
