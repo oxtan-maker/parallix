@@ -22,7 +22,6 @@ priority: medium
 
 ## Description
 
-<!-- SECTION:DESCRIPTION:BEGIN -->
 Two tests on `main` fail because task-2477 landed its assertions but not the corresponding gating for the review-start header lines.
 
 `src/adapters/review/review-loop.ts` emits the `Focus: ... | Max attempts: ...` and `Poll interval: ... | Poll timeout: ...` lines unconditionally in the review-start header, while `test/task-1209-review-loop.test.ts` and `test/task-2477-review-presentation.test.ts` assert those lines are absent at default verbosity.
