@@ -62,8 +62,14 @@ function cancelAction(actions: readonly WebMissionCard['actions'][number][]) {
 
 function FlightCard({ card, onAction, onSelect, onDragStart, selected, pendingAction }: { card: WebMissionCard; onAction: (card: WebMissionCard, action: WebMissionCard['actions'][number], control: HTMLButtonElement) => void; onSelect: (id: string) => void; onDragStart: (card: WebMissionCard, event: DragEvent<HTMLElement>) => void; selected: boolean; pendingAction: { missionId: string; kind: WebMissionCard['actions'][number]['kind'] } | null }) {
   const spinning = isSpinning(card);
-  const liveAgent = card.activity.work.kind === 'working' ? card.activity.work.agent : null;
-  const agent = liveAgent ?? card.agent;
+  // While a card is working, the live agent is authoritative — even when it is
+  // explicitly `null` (the `null`-agent code-run bracket of a running review).
+  // Falling back to `card.agent` here would show the assignee (who owns the
+  // mission) as the live agent. Idle cards have no live agent, so they fall
+  // back to the assignee as before.
+  const working = card.activity.work.kind === 'working';
+  const liveAgent = working ? card.activity.work.agent : null;
+  const agent = working ? liveAgent : card.agent;
   const accent = card.gate === 'failed' ? C.red : familyAccent(agent);
   const actor = actorLine(card);
   const primary = primaryAction(card.actions);

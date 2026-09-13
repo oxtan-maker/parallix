@@ -163,8 +163,12 @@ export class ConcreteAgentReadAdapter implements AgentReadAdapter {
    *     (`--agent`/`--implementer`/`--reviewer`), which is what a fresh
    *     `px draft <slug> --agent <family>` has before any marker exists.
    *
-   * The mission assignee is deliberately not used as a fallback: it says who
-   * owns the mission, not who is running.
+   * Exception: when the reconciled current-work fact names no agent (the
+   * intentional `null`-agent code-run bracket of a running review), the
+   * session is attributed to the mission assignee family so it counts instead
+   * of vanishing into the unattributed bucket. The assignee is used only in
+   * that null-agent bracket, never as a general fallback: it says who owns the
+   * mission, not who is running.
    *
    * Returns `null` when liveness cannot be determined, so the board renders
    * unknown rather than a fabricated zero.
@@ -183,20 +187,39 @@ export class ConcreteAgentReadAdapter implements AgentReadAdapter {
       : new Map();
     const markers = this.sessionMarkers ? await this.sessionMarkers.findAll() : [];
     const byMissionRole = new Map(markers.map((marker) => [`${marker.missionId}:${marker.role}`, marker]));
-    return running.map((session) => {
+    return Promise.all(running.map(async (session) => {
       const marker = session.role === null
         ? undefined
         : byMissionRole.get(`${session.missionId}:${session.role}`);
       const launchedInThisProcess = marker !== undefined
         && Date.parse(marker.lastLaunched) >= session.startedAtMs;
       const work = currentWork.get(session.missionId)?.currentWork;
+      const fromWork = isWorkInProgress(work) ? parseAgentFamily(work.agent) : null;
+      // The `null`-agent code-run bracket belongs to a running `px review`
+      // (`session.role === null`, the ambiguous review/implementer process).
+      // A `px draft`/`px active`/`px execute` session has a concrete role and
+      // must not fall back to the assignee — its null-agent fact stays
+      // unattributed through the general path below rather than fabricating
+      // an attribution outside the review-only exception.
+      if (fromWork === null && isWorkInProgress(work) && session.role === null) {
+        // The reconciled current-work fact exists but names no agent — the
+        // intentional `null`-agent code-run bracket of a running review.
+        // Attribute the running session to the mission assignee family so it
+        // counts instead of vanishing into the unattributed bucket. The
+        // assignee says who owns the mission, not who is running, so this
+        // fallback is deliberately scoped to the review null-agent bracket only.
+        const assignee = await this.loadAssignedAgent(session.missionId);
+        if (assignee !== null) {
+          return { missionId: session.missionId, family: assignee };
+        }
+      }
       return {
         missionId: session.missionId,
-        family: (isWorkInProgress(work) ? parseAgentFamily(work.agent) : null)
+        family: fromWork
           ?? (launchedInThisProcess ? marker.agent : null)
           ?? parseAgentFamily(session.pinnedAgent),
       };
-    });
+    }));
   }
 
   async loadAssignedAgent(_missionId: MissionId): Promise<AgentFamily | null> {
