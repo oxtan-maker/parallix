@@ -1,12 +1,12 @@
 ---
 id: TASK-2503
 title: Preserve mission identity during rebase
-status: backlog
-assignee: []
+status: done
+assignee: [claude]
 created_date: '2026-09-13 00:00'
 labels:
   - bug
-  - workflow
+  - ai_sdlc
 dependencies: []
 ---
 

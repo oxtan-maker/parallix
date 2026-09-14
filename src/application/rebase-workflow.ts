@@ -214,10 +214,29 @@ export async function runRebaseWorkflow(args: string[], port: RebaseWorkflowPort
   // Rebase can rewind past the commit that recorded the implementer. Capture
   // that identity before Git changes the task file, so a shared conflict can
   // still be assigned to the mission owner.
+  //
+  // The mission record (review state) is the pre-replay authority: it lives
+  // outside the history being replayed, so a stale mission branch cannot expose
+  // an older assignee through it (TASK-2503). The Backlog task file — which is
+  // replayed content — is only the fallback. Both are local mission metadata:
+  // when neither resolves, the condition is a local workflow one, never a
+  // Forgejo or network blocker.
+  let missionRecord: { implementer?: string | null } | null | undefined = null;
+  try {
+    missionRecord = await Promise.resolve(
+      port.readReviewState(slug, executionRoot),
+    ) as { implementer?: string | null } | null;
+  } catch (_) {
+    // An unreadable mission record is local metadata unavailability, not an
+    // infrastructure failure: fall back to the Backlog task file below.
+    missionRecord = null;
+  }
   const taskResolution = port.resolveTaskFile(slug, executionRoot);
-  const recordedImplementer = taskResolution.ok && taskResolution.taskFile
-    ? port.getTaskImplementer(taskResolution.taskFile)
-    : null;
+  const recordedImplementer = (missionRecord?.implementer || '').trim()
+    || (taskResolution.ok && taskResolution.taskFile
+      ? port.getTaskImplementer(taskResolution.taskFile)
+      : null)
+    || null;
 
   const existingRebase = port.detectRebaseState(executionRoot);
   if (existingRebase.inProgress) {
