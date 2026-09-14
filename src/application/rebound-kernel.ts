@@ -413,7 +413,7 @@ function promptSlotsFor(reason: ReboundReason): Pick<FixPromptSlots, 'area' | 'f
           ['Exit code', String(reason.exitCode)],
           ...(reason.coverageNote ? [['Coverage', reason.coverageNote] as [string, string]] : []),
         ],
-        remedy: `Start with the listed gate command in the listed worktree and the captured failure output. Repair the specific failing test or code path named there, including making a slow unit test hermetic when its budget is exceeded. Do not substitute a broader verification command or integration suite to rediscover the failure. Parallix reruns this exact gate after the repair.`,
+        remedy: `Start with the listed gate command in the listed worktree and the captured failure output. Repair the specific failing test or code path named there, including making a slow unit test hermetic when its budget is exceeded. Do not substitute a broader verification command or integration suite to rediscover the failure. Commit the repair before the automatic re-verification: Parallix reruns this exact gate against the finalized mission tree, so an uncommitted repair cannot be verified and is reported as still failing.`,
       };
     case 'hook-failure':
       return {

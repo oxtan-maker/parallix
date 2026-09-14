@@ -1,8 +1,8 @@
 ---
 id: TASK-2504
 title: Integration-gate bounce does not make the implementer commit its fix before re-verify
-status: backlog
-assignee: []
+status: done
+assignee: [claude]
 created_date: '2026-09-13 16:50'
 labels:
   - bug
@@ -40,9 +40,16 @@ Two coupled gaps:
    automatically after your fix" — it never says commit the repair first. For
    the `gate-failure` slot this is a real defect: the verify step needs a
    finalized tree, so "after your fix" must mean "after you commit your fix."
-2. The bounce itself does not autocommit the repair before re-running the gate,
-   so even an implementer that does commit is not protected if it forgets, and
-   an implementer that does not commit cannot pass regardless of prompt wording.
+2. The bounce itself does not capture a repair the implementer leaves
+   uncommitted before re-running the gate. A correct repair can therefore never
+   reach the re-verify step when the agent forgets the commit.
+
+The integration bounce must provide the same recovery guarantee as an execute
+agent's commit-safety harness, but it must not become a blanket "commit a dirty
+worktree" command. Its pre-launch tree is already required to be clean by the
+integration gate. Treat a post-launch dirty diff as repair-agent-owned only
+under that dedicated-worktree contract, and make the fallback visible in the
+operator output.
 
 The `hook-failure` remedy already says "so the Git hook passes when Parallix
 commits or rebases this mission"; the `gate-failure` remedy omits the commit
@@ -52,10 +59,22 @@ Scope (propose the smallest correct choice; do not build both):
 - Make the `gate-failure` remedy in `promptSlotsFor` require the implementer to
   commit the repair before the re-verify, and state that an uncommitted fix
   cannot be verified.
-- Consider whether the bounce should autocommit a clean repair before
-  re-running the gate (guarding against the dirty-tree verify failure), or
-  whether a clear prompt is sufficient. A commit the implementer did not make
-  should never be autocommitted; only a repair the implementer itself made.
+- Add a repair-agent commit-safety step immediately after a successful
+  `gate-failure` implementer exit and before the re-verify. If the repair tree
+  is dirty, stage and commit its changes with a deterministic message that
+  identifies this as an integration-gate repair fallback, then run the existing
+  clean-tree guard and the identical configured gates.
+- Preserve the ownership boundary: capture the pre-launch `HEAD` and require a
+  clean pre-launch tree; do not auto-commit unresolved conflicts, a dirty
+  baseline, or a tree whose `HEAD` changed while the agent ran. Those cases may
+  include a user's or another process's work and must remain dirty with a clear
+  diagnostic. A clean tree after an agent-authored commit is a no-op.
+- If staging or committing fails (including a hook failure), leave the repair
+  intact, report the exact failure, and do not re-run the gate. Never bypass a
+  hook, reset, stash, or discard files to make verification run.
+- Log every fallback commit and its paths. The normal fix prompt must still say
+  that the implementer should commit; the fallback is recovery for omission,
+  not the primary workflow.
 - Keep the bound: the dirty-tree guard in `routeIntegrationGateFailure`'s
   `verify` is correct and must stay. This task is about telling the
   implementer about it and closing the gap, not removing the guard.
@@ -63,19 +82,21 @@ Scope (propose the smallest correct choice; do not build both):
 
 ## Reproduction
 
-1. Introduce a failing integration test and fix it in the working tree **without
-   committing** (or fix it in a way the implementer leaves uncommitted).
+1. Introduce a failing integration test and let the bounced implementer fix it
+   in the dedicated mission worktree without committing.
 2. Run `npm run test:integration` from the mission worktree.
-3. The bounce relaunches the implementer, re-verify runs, and returns
-   `The repair is not committed, so the integration gates cannot re-run: ...
-   dirty tree` even though the fix is correct — because nothing told the
-   implementer to commit.
+3. The bounce relaunches the implementer, records the clean pre-launch
+   baseline, creates the repair fallback commit, and re-runs the identical gate
+   green.
+4. Separately prove that a dirty baseline, conflicted tree, or changed `HEAD`
+   is never auto-committed and prevents the re-verify with an actionable
+   diagnostic.
 
-Red-to-green reproduction test: a unit test for `routeIntegrationGateFailure`
-(or its `verify` seam) that leaves the mission tree dirty after the implementer
-"fix" and asserts the current diagnostic names the uncommitted repair, then
-asserts the fixed behaviour (prompt tells the implementer to commit, and/or the
-bounce reports the repair correctly once committed).
+Red-to-green reproduction test: a focused test around
+`routeIntegrationGateFailure` (or its repair-commit seam) that leaves the
+mission tree dirty after a successful implementer fix and proves the fallback
+commit precedes re-verification. Include rejection tests for every ownership
+guard above and for a rejected fallback commit.
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
@@ -85,4 +106,6 @@ bounce reports the repair correctly once committed).
 - [ ] #4 Final checkpoint Goal Check table cites real evidence using file:line references and test names
 - [ ] #5 Docs updated to reflect any workflow or user-facing behavior change
 - [ ] #6 Bug-labeled missions include a red-to-green reproduction test that fails before the fix and passes after
+- [ ] #7 A successful uncommitted integration-gate repair is committed exactly once before re-verification; a clean agent-authored commit remains a no-op
+- [ ] #8 Dirty baseline, conflicts, changed HEAD, staging failure, and commit-hook failure never auto-commit or run the gate
 <!-- DOD:END -->
