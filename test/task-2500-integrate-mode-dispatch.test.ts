@@ -24,6 +24,7 @@ const git = mockModule<typeof import('../src/adapters/git/git.js')>('../src/adap
 const missionUtils = mockModule<typeof import('../src/adapters/filesystem/mission-utils.js')>('../src/adapters/filesystem/mission-utils.js', import.meta.url);
 const backlog = mockModule<typeof import('../src/adapters/backlog/backlog.js')>('../src/adapters/backlog/backlog.js', import.meta.url);
 const forgejo = mockModule<typeof import('../src/adapters/forgejo/forgejo.js')>('../src/adapters/forgejo/forgejo.js', import.meta.url);
+const github = mockModule<typeof import('../src/adapters/github/github-pr.js')>('../src/adapters/github/github-pr.js', import.meta.url);
 const verification = mockModule<typeof import('../src/adapters/verification/verification.js')>('../src/adapters/verification/verification.js', import.meta.url);
 const integrate = mockModule<typeof import('../src/adapters/cli/commands/integrate.js')>('../src/adapters/cli/commands/integrate.js', import.meta.url);
 await installModuleMocks();
@@ -140,6 +141,7 @@ async function runIntegrate(mode: 'local' | 'github-pr'): Promise<RunResult> {
   mock.method(backlog, 'completeTask', () => true);
   mock.method(backlog, 'setTaskStatus', () => true);
   mock.method(forgejo, 'getPrStatus', () => ({ exists: true, state: 'open', merged: false, number: 1 }));
+  mock.method(github, 'submitOrObserveGithubPr', () => ({ kind: 'pending' as const, number: 1, base: 'main' }));
   mock.method(verification, 'captureVerifiedTreeProof', () => ({ ok: true, proof: { rootDir: root } }));
   mock.method(verification, 'assertVerifiedTreeProof', () => ({ ok: true }));
   mock.method(process, 'cwd', () => root);
@@ -169,9 +171,9 @@ test('local mode dispatches through the capability boundary and reaches the loca
   assert.ok(gitMerged(result.gitCalls), 'local mode issues the local merge through the dispatcher');
 });
 
-test('github-pr mode fails closed on publish and never reaches the local squash/merge path', async () => {
+test('github-pr mode waits for GitHub evidence and never reaches the local squash/merge path', async () => {
   const result = await runIntegrate('github-pr');
-  assert.equal(result.exitCode, 1, 'github-pr refuses the local primary merge');
-  assert.match(result.logs, /"github-pr" integration mode .*publish/, 'the publish refusal names the mode and operation');
-  assert.ok(!gitMerged(result.gitCalls), 'github-pr must not issue any merge once the capability boundary refuses publish');
+  assert.equal(result.exitCode, 1, 'github-pr remains incomplete while the external PR is pending');
+  assert.match(result.logs, /GitHub PR integration is pending/, 'the pending external state is explicit');
+  assert.ok(!gitMerged(result.gitCalls), 'github-pr must not issue a local merge while awaiting GitHub evidence');
 });

@@ -54,8 +54,8 @@ export const adapterPackageDependencies: Readonly<Record<string, readonly string
   assets: ['filesystem'],
   // mechanism: configuration, filesystem, Git, and SQLite task storage.
   backlog: ['config', 'filesystem', 'git', 'sqlite'],
-  // mechanism: assets, configuration, filesystem, Git, and process execution.
-  cli: ['assets', 'config', 'filesystem', 'git', 'process'],
+  // mechanism: assets, configuration, filesystem, Git, GitHub, and process execution.
+  cli: ['assets', 'config', 'filesystem', 'git', 'github', 'process'],
   // mechanism: state-map configuration reads packaged runtime assets.
   config: ['assets'],
   // mechanism: mission-path resolution needs configuration and Git repository facts.
@@ -64,6 +64,8 @@ export const adapterPackageDependencies: Readonly<Record<string, readonly string
   forgejo: ['backlog', 'config', 'filesystem', 'git', 'verification'],
   // mechanism: Git worktree and merge helpers use configuration and filesystem mechanisms.
   git: ['config', 'filesystem'],
+  // mechanism: GitHub CLI transport owns no sibling mechanism dependency.
+  github: [],
   // mechanism: configuration, filesystem, and SQLite mission persistence.
   mission: ['config', 'filesystem', 'sqlite'],
   // mechanism: post-integrate hook reads product configuration.

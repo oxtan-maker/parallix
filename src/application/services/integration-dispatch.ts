@@ -9,8 +9,8 @@
  *
  * The capability table below is deliberately small: `local` performs every
  * operation it owns itself; the GitHub modes own the local preparation and
- * candidate steps, hand the merge/publish/observe steps to a provider adapter
- * that this release ships as a fail-closed stub (`external-pending`), and never
+ * candidate steps; `github-pr` also observes its provider-owned merge locally,
+ * while `github-publish` remains a fail-closed external-provider stub; and never
  * perform a step the mode's authority model forbids (`unsupported`).
  */
 import {
@@ -60,7 +60,7 @@ const CAPABILITY_TABLE: Record<IntegrationMode, Record<IntegrationOperation, Int
     'produce-integration-candidate': 'local',
     'submit-for-external-verification': 'local',
     'publish': 'unsupported',
-    'observe-external-integration': 'external-pending',
+    'observe-external-integration': 'local',
     'close-mission': 'local',
   },
 };

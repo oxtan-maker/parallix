@@ -25,6 +25,7 @@ import { rebound, type ReboundContext } from '../../../application/rebound-kerne
 // capability boundary (integration-dispatch) so the merge-authority decision is
 // made once, in the dispatcher, never as scattered `if (mode === ...)` here.
 import { createIntegrationStrategy } from '../../../application/services/integration-dispatch.js';
+import { submitOrObserveGithubPr } from '../../github/github-pr.js';
 
 import { missionId, isDbAdhocIdentity } from '../../../domain/mission.js';
 import { applyReviewerCommand, ConfiguredReviewerEligibility, reviewStatus } from '../../../domain/review.js';
@@ -462,6 +463,39 @@ async function integrate(args: string[], options: {
       if (dryRun) {
         await promoteTaskForIntegrationIfNeeded(context, { dryRun: true, missionServicesFn });
         fmt.log.pass('Dry run complete. Integration preflight passed.');
+        return;
+      }
+
+      // GitHub owns the merge for this mode. A local ref is never evidence: the
+      // fresh PR read below is the sole route to lifecycle completion.
+      if (strategy.mode === 'github-pr') {
+        const branch = missionBranchName(slug, baseWorktree);
+        const candidateSha = git(['-C', baseWorktree, 'rev-parse', branch]).stdout.trim();
+        const observation = await strategy.run('observe-external-integration', () =>
+          submitOrObserveGithubPr({ head: branch, base: baseBranch as string, candidateSha }, baseWorktree as string));
+        if (observation.kind !== 'merged') {
+          fmt.log.warn(`GitHub PR integration is ${observation.kind}; mission remains incomplete.`);
+          if (observation.kind === 'unavailable') { fmt.log.fail(`GitHub observation unavailable: ${observation.error}`); }
+          exitCode = 1;
+          return;
+        }
+        const integrated = await missionServices.integration.decideIntegration({
+          operationId: `github-pr-integrate:${slug}:${observation.resultingSha}`,
+          missionId: missionId(slug), capabilities: new Set(['integration:decide']),
+          idempotencyKey: `github-pr-integrate:${slug}:${observation.resultingSha}`,
+          actor: context.taskAssignee ?? 'custom',
+          facts: { git: { source: 'github', status: 'fresh', value: { merged: true } }, verification: { source: 'integration-gates', status: 'fresh', value: { passed: true } } },
+        });
+        if (integrated.status !== 'completed') { throw new Error(`GitHub integration transition failed: ${integrated.error?.message || 'unknown error'}`); }
+        const closed = await missionServices.integration.close({
+          operationId: `github-pr-close:${slug}:${observation.resultingSha}`,
+          missionId: missionId(slug), capabilities: new Set(['closure:record']),
+          idempotencyKey: `github-pr-close:${slug}:${observation.resultingSha}`,
+          actor: context.taskAssignee ?? 'custom', closedAt: new Date().toISOString(),
+          integration: { source: 'github', status: 'fresh', value: { completed: true } },
+        });
+        if (closed.status !== 'completed') { throw new Error(`GitHub mission closure failed: ${closed.error?.message || 'unknown error'}`); }
+        fmt.log.pass(`GitHub PR #${observation.number} merged into ${observation.base}; mission completed.`);
         return;
       }
 
