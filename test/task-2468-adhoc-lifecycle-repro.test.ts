@@ -256,6 +256,10 @@ function setupRepository({ slug, title, postIntegrateHook = false }) {
   fs.symlinkSync(commandDir('git'), path.join(binDir, 'git'));
   fs.symlinkSync(commandDir('bash'), path.join(binDir, 'bash'));
   fs.symlinkSync(commandDir('id'), path.join(binDir, 'id'));
+  const bwrapPath = maybeCommandPath('bwrap');
+  if (bwrapPath) {
+    fs.symlinkSync(bwrapPath, path.join(binDir, 'bwrap'));
+  }
   const graphifyPath = maybeCommandPath('graphify');
   if (graphifyPath) {
     fs.symlinkSync(graphifyPath, path.join(binDir, 'graphify'));

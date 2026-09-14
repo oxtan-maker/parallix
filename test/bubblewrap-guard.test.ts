@@ -54,15 +54,17 @@ test('isBubblewrapAvailable caches the probe result after the first check', () =
   assert.equal(calls, 1);
 });
 
-test('isBubblewrapAvailable warns once that the agent runs unsandboxed', () => {
+test('isBubblewrapAvailable is silent about unsandboxed state', () => {
+  // The unsandboxed warning lives at the confinement gate's actual
+  // unsandboxed-consent path (agents.ts), not in the availability probe, so a
+  // native-sandbox or blocked launch does not emit a false alarm.
   setBubblewrapProbeForTest(() => false);
   const { lines } = captureLogs(() => {
     isBubblewrapAvailable();
     isBubblewrapAvailable();
   });
   const warnings = lines.filter(line => line.includes('UNSANDBOXED'));
-  assert.equal(warnings.length, 1);
-  assert.match(warnings[0], /bubblewrap \(bwrap\) not found or not executable/);
+  assert.equal(warnings.length, 0, 'the probe must not emit an UNSANDBOXED warning');
 });
 
 test('isBubblewrapDisabled honors PARALLIX_NO_BUBBLEWRAP', () => {

@@ -34,6 +34,7 @@ import {
 } from './launcher-selection.js';
 import { resolveCustomRunner } from '../config/product-config.js';
 import { resolveSandboxProfile, withSandboxProfile } from '../process/bubblewrap.js';
+import { selectConfinement, supportsNativeSandbox, ConfinementBlockedError, isBubblewrapDisabled, isBubblewrapAvailable, BUBBLEWRAP_COMMAND } from '../process/confinement.js';
 import { tryAcquireCustomCapacity } from './custom-capacity.js';
 import type { SessionMarkerPort } from '../../application/domain-ports.js';
 import type { AgentFamily } from '../../domain/agents.js';
@@ -83,6 +84,12 @@ interface StartAgentOptions {
    * silently rerouting through `selectAgent`.
    */
   pinnedAgent?: boolean;
+  /**
+   * Task-2513 explicit consent: allow a mutating launch to run unsandboxed when
+   * Bubblewrap is unavailable and the family exposes no native sandbox. Explicit
+   * by contract — defaults false, never implied by a fallback or default setting.
+   */
+  allowUnsandboxedMutation?: boolean;
 }
 
 /** Thrown when `pinnedAgent` is set and the pinned family cannot run the step. */
@@ -321,7 +328,8 @@ async function startAgent(step: string, opts: StartAgentOptions = { prompt: '' }
     launchAgentFn = null,
     assertAgentSupportedFn = assertAgentSupported,
     unrefChild = false,
-    pinnedAgent = false
+    pinnedAgent = false,
+    allowUnsandboxedMutation = false
   } = opts;
 
   // `exclude` seeds the tried-set so callers can reserve agents (e.g. exclude
@@ -506,13 +514,54 @@ async function startAgent(step: string, opts: StartAgentOptions = { prompt: '' }
       const sandboxProfile = worktree
         ? resolveSandboxProfile(step, worktree, step === 'review' ? resolveReviewArtifactDir(worktree) : null, chosen || null)
         : null;
-      const launchResult = withSandboxProfile(sandboxProfile, () => launcher({
+      // Task-2513: a mutating launch must never silently fall back to
+      // unsandboxed execution. Read-only (review) profiles skip the gate and
+      // keep their existing confinement path untouched. When Bubblewrap is
+      // missing (not merely disabled via the pre-existing PARALLIX_NO_BUBBLEWRAP
+      // opt-out), select the family's native sandbox where supported, require
+      // explicit operator consent to run unsandboxed, otherwise block.
+      let effectiveProfile = sandboxProfile;
+      // When native sandbox is selected, tell the launcher to enable the
+      // family's own sandbox (qwen `-s`, codex already defaults to it). Other
+      // families ignore the flag and rely on Bubblewrap, which is present here.
+      let nativeSandbox = false;
+      if (sandboxProfile?.worktreeWritable) {
+        const bubblewrapMissing = !isBubblewrapDisabled(env) && !isBubblewrapAvailable();
+        if (bubblewrapMissing) {
+          const confinement = selectConfinement({
+            mutating: true,
+            bubblewrapAvailable: false,
+            nativeSandboxSupported: supportsNativeSandbox(chosen || null),
+            operatorConsent: allowUnsandboxedMutation
+          });
+          if (confinement === 'blocked') {
+            throw new ConfinementBlockedError(
+              chosen || 'mutating agent',
+              'bubblewrap unavailable with no native-sandbox fallback and no consent'
+            );
+          }
+          nativeSandbox = confinement === 'native-sandbox';
+          // The only unsandboxed outcome is explicit operator consent. Warn here,
+          // not in the availability probe, so native-sandbox (confined) and
+          // blocked launches do not emit a false "unsandboxed" alarm.
+          if (confinement === 'unsandboxed-consented') {
+            fmt.log.warn(
+              `bubblewrap (${BUBBLEWRAP_COMMAND}) not found or not executable and ${chosen || 'the agent'} has no supported native sandbox; the agent is running UNSANDBOXED with full filesystem access (operator consented).`
+            );
+          }
+          // native-sandbox or consented: skip Bubblewrap so the launcher's own
+          // sandbox (where supported) is the fallback defense.
+          effectiveProfile = null;
+        }
+      }
+      const launchResult = withSandboxProfile(effectiveProfile, () => launcher({
         prompt: actualPrompt,
         worktree,
         env: agentEnv,
         resume,
         sessionId,
         model,
+        sandbox: nativeSandbox,
         slug,
         role: sessionRole,
         sessionMarkerPort: launchSessionMarkerPort,

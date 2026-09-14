@@ -51,6 +51,14 @@ test('buildQwenInvocation: model only passed when configured', () => {
   assert.ok(invWithModel.args.includes('qwen3.8-max'), 'model value present');
 });
 
+test('buildQwenInvocation: sandbox enables qwen native -s flag', () => {
+  const inv = buildQwenInvocation({ prompt: 'test', worktree: '/tmp/wt', sandbox: true });
+  assert.ok(inv.args.includes('-s'), '-s flag present when sandbox enabled');
+
+  const invNoSandbox = buildQwenInvocation({ prompt: 'test', worktree: '/tmp/wt', sandbox: false });
+  assert.ok(!invNoSandbox.args.includes('-s'), 'no -s flag when sandbox disabled (default)');
+});
+
 test('buildQwenInvocation: resume with session id uses -r flag', () => {
   const inv = buildQwenInvocation({ prompt: 'test', worktree: '/tmp/wt', resume: true, sessionId: 'abc-123' });
   assert.ok(inv.args.includes('-r'), '-r flag for resume');

@@ -1,10 +1,11 @@
 ---
 id: TASK-2513
 title: improved sandboxing
-status: backlog
-assignee: []
+status: done
+assignee: [custom]
 created_date: '2026-09-14 14:02'
-labels: []
+labels:
+  - ai_sdlc
 dependencies: []
 ordinal: 79007
 ---
@@ -16,6 +17,11 @@ don't silently run mutating agents without confinement; require explicit operato
 
 When bubblewrap is not availible, ensure we at least use the agents own sandboxing to do similar things
 <!-- SECTION:DESCRIPTION:END -->
+
+## Implementation (task-2513)
+- Confinement policy in `src/adapters/process/confinement.ts`: `selectConfinement` orders outcomes bubblewrap → native-sandbox → explicit-consent → blocked; `supportsNativeSandbox` gates codex; `ConfinementBlockedError` (code `CONFINEMENT_BLOCKED`).
+- `startAgent` (`src/adapters/agents/agents.ts`) gates only mutating (non-`review`) launches: when `bwrap` is missing it selects the family's native sandbox, requires the explicit `allowUnsandboxedMutation` consent option to run unsandboxed, otherwise blocks. `PARALLIX_NO_BUBBLEWRAP` opt-out preserved. Read-only review launches unchanged.
+- Tests: `test/confinement.test.ts` (pure policy, all four outcomes), `test/confinement-launch.test.ts` (startAgent block / consented / codex-native / review-unchanged).
 
 ## Definition of Done
 <!-- DOD:BEGIN -->

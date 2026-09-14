@@ -69,6 +69,9 @@ function buildCodexDraftInvocation({ prompt, worktree, interactive = hasLiveTty(
       args.push('--last');
     }
     if (model) {args.push('-m', model);}
+    args.push('--sandbox', 'workspace-write');
+    // Resume is still a mutating exec; confine it (workspace-write), not the
+    // unrestricted default. Matches the non-resume path below.
     args.push(prompt);
     return {
       command: resolveCodexCommand(),
@@ -84,7 +87,7 @@ function buildCodexDraftInvocation({ prompt, worktree, interactive = hasLiveTty(
   const modelArgs = model ? ['-m', model] : [];
   const args = interactive
     ? [...configArgs, '--full-auto', ...modelArgs, '--cd', worktree, prompt]
-    : [...configArgs, 'exec', '--sandbox', 'danger-full-access', ...modelArgs, '--cd', worktree, prompt];
+    : [...configArgs, 'exec', '--sandbox', 'workspace-write', ...modelArgs, '--cd', worktree, prompt];
 
   return {
     command: resolveCodexCommand(),

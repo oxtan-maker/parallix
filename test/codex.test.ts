@@ -59,7 +59,7 @@ test('buildCodexDraftInvocation uses exec path when interactive is false', () =>
   assert.equal(inv.command, 'codex');
   assert.ok(inv.args.includes('exec'));
   assert.ok(inv.args.includes('--sandbox'));
-  assert.ok(inv.args.includes('danger-full-access'));
+  assert.ok(inv.args.includes('workspace-write'), 'confined sandbox, not the unrestricted default');
 });
 
 test('buildCodexDraftInvocation uses full-auto path when interactive is true', () => {
@@ -206,6 +206,8 @@ test('startCodexDraftAgent healthy resume still uses exec resume', async () => {
     assert.ok(args.includes('exec'), 'must include exec for resume');
     assert.ok(args.includes('resume'), 'must include resume for resume');
     assert.ok(args.includes('ses_valid'), 'must include the session ID');
+    assert.ok(args.includes('--sandbox'), 'resume must be confined');
+    assert.ok(args.includes('workspace-write'), 'resume uses confined sandbox, not the unrestricted default');
     return Promise.resolve({ status: 0, signal: null, stdout: 'codex resume ses_valid\n', stderr: '', error: null });
   };
 

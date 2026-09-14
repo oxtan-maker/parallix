@@ -29,8 +29,14 @@ state directories of its configured runner (opencode or pi), which do not
 override `HOME`. This keeps a round-1 claude session resumable in a later round
 while the reviewed worktree itself stays read-only.
 
-If `bwrap` is unavailable, Parallix emits a warning and preserves the normal
-unsandboxed launch. Set `PARALLIX_NO_BUBBLEWRAP=1` to deliberately opt out for
+If `bwrap` is unavailable, confinement falls back in order for a **mutating**
+launch: a family with a supported agent-native sandbox (codex, via
+`--sandbox`) keeps its native sandbox; otherwise the launch is blocked until an
+operator explicitly consents to unsandboxed execution. Consent is an explicit
+launch option — it is never triggered by an implicit fallback, a default, or an
+environment-only setting — so the preferred host-level isolation is never
+silently dropped. Read-only review launches are unaffected and keep their
+read-only worktree. Set `PARALLIX_NO_BUBBLEWRAP=1` to deliberately opt out for
 one invocation. A present but misconfigured guard fails the launch rather than
 silently running the agent unsandboxed.
 

@@ -278,6 +278,14 @@ function setupRepository({ slug, title, postIntegrateHook = false }) {
   fs.symlinkSync(commandDir('git'), path.join(binDir, 'git'));
   fs.symlinkSync(commandDir('bash'), path.join(binDir, 'bash'));
   fs.symlinkSync(commandDir('id'), path.join(binDir, 'id'));
+  // Keep the real-bubblewrap confinement path available to the stub-agent
+  // launches: the restricted binDir PATH excludes bwrap, and the task-2513
+  // confinement gate blocks unconfined mutating launches, so symlink bwrap in
+  // to run confined rather than opt out of sandboxing.
+  const bwrapPath = maybeCommandPath('bwrap');
+  if (bwrapPath) {
+    fs.symlinkSync(bwrapPath, path.join(binDir, 'bwrap'));
+  }
   const graphifyPath = maybeCommandPath('graphify');
   if (graphifyPath) {
     fs.symlinkSync(graphifyPath, path.join(binDir, 'graphify'));
@@ -742,6 +750,14 @@ function setupAdhocRepository({ title }) {
   fs.symlinkSync(commandDir('git'), path.join(binDir, 'git'));
   fs.symlinkSync(commandDir('bash'), path.join(binDir, 'bash'));
   fs.symlinkSync(commandDir('id'), path.join(binDir, 'id'));
+  // Keep the real-bubblewrap confinement path available to the stub-agent
+  // launches: the restricted binDir PATH excludes bwrap, and the task-2513
+  // confinement gate blocks unconfined mutating launches, so symlink bwrap in
+  // to run confined rather than opt out of sandboxing.
+  const bwrapPath = maybeCommandPath('bwrap');
+  if (bwrapPath) {
+    fs.symlinkSync(bwrapPath, path.join(binDir, 'bwrap'));
+  }
   const graphifyPath = maybeCommandPath('graphify');
   if (graphifyPath) {
     fs.symlinkSync(graphifyPath, path.join(binDir, 'graphify'));

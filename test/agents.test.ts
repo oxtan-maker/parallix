@@ -1362,7 +1362,7 @@ test('startDraftAgent harness identity wins over caller-supplied FORGEJO_USER', 
 
 // ---------- Codex launcher ----------
 
-test('buildCodexDraftInvocation uses exec --sandbox danger-full-access in the worktree with CI env', () => {
+test('buildCodexDraftInvocation uses exec --sandbox workspace-write in the worktree with CI env', () => {
   const invocation = buildCodexDraftInvocation({
     prompt: 'Execute the mission.',
     worktree: '/tmp/mission-task-088',
@@ -1380,7 +1380,7 @@ test('buildCodexDraftInvocation uses exec --sandbox danger-full-access in the wo
     'projects."/tmp/mission-task-088".trust_level="trusted"',
     'exec',
     '--sandbox',
-    'danger-full-access',
+    'workspace-write',
     '--cd',
     '/tmp/mission-task-088',
     'Execute the mission.'

@@ -62,13 +62,11 @@ const GitMetadataCache = new Map<string, string[]>();
 
 let availabilityProbe: AvailabilityProbe | null = null;
 let cachedAvailability: boolean | null = null;
-let warnedUnavailable = false;
 
 /** Test seam: replace the `bwrap --version` probe and reset the cache. */
 export function setBubblewrapProbeForTest(probe: AvailabilityProbe | null): void {
   availabilityProbe = probe;
   cachedAvailability = null;
-  warnedUnavailable = false;
   GitMetadataCache.clear();
 }
 
@@ -89,12 +87,6 @@ function probeBubblewrap(): boolean {
 export function isBubblewrapAvailable(): boolean {
   if (cachedAvailability === null) {
     cachedAvailability = probeBubblewrap();
-    if (!cachedAvailability && !warnedUnavailable) {
-      warnedUnavailable = true;
-      fmt.log.warn(
-        `bubblewrap (${BUBBLEWRAP_COMMAND}) not found or not executable — the agent is running UNSANDBOXED with full filesystem access.`
-      );
-    }
   }
   return cachedAvailability;
 }

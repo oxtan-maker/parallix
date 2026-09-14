@@ -19,6 +19,13 @@ interface QwenInvocationOptions {
   resume?: boolean;
   sessionId?: string | null;
   model?: string | null;
+  /**
+   * Enable the qwen CLI's native sandbox (`-s/--sandbox`). Set by the launch
+   * layer only when Bubblewrap is unavailable and the confinement gate has
+   * selected the family's native sandbox as the fallback defense (task-2513).
+   * Read-only launches never pass this.
+   */
+  sandbox?: boolean;
 }
 
 interface StartQwenAgentOptions extends QwenInvocationOptions {
@@ -158,9 +165,13 @@ function resolveQwenCommand() {
   return 'qwen';
 }
 
-function buildQwenInvocation({ prompt, worktree, env, resume = false, sessionId = null, model = null }: QwenInvocationOptions) {
+function buildQwenInvocation({ prompt, worktree, env, resume = false, sessionId = null, model = null, sandbox = false }: QwenInvocationOptions) {
   const rootDir = resolveQwenWorktree(worktree);
   const args: string[] = ['-p', prompt, '--output-format', 'text'];
+  // Native sandbox fallback (task-2513): qwen ships a real `-s/--sandbox`
+  // flag. Enable it so a mutating launch stays confined when Bubblewrap is
+  // missing. No-op for read-only launches, which never set `sandbox`.
+  if (sandbox) {args.push('-s');}
 
   if (resume) {
     if (sessionId) {
@@ -231,17 +242,21 @@ function isStaleQwenSessionResult(result: any) {
   return /session not found|no session|invalid session/i.test(text);
 }
 
-function startQwenAgent({ prompt, worktree, env, resume = false, sessionId = null, model = null, teeOptions = {} }: StartQwenAgentOptions) {
+let _spawnAndTee: any = spawnAndTee;
+/** Test hook: replace the launcher's spawn seam to capture argv. */
+function __setSpawnAndTeeForTest(fn: any) { _spawnAndTee = fn || spawnAndTee; }
+
+function startQwenAgent({ prompt, worktree, env, resume = false, sessionId = null, model = null, sandbox = false, teeOptions = {} }: StartQwenAgentOptions) {
   const rootDir = resolveQwenWorktree(worktree);
   ensureQwenHome(rootDir);
-  const invocation = buildQwenInvocation({ prompt, worktree: rootDir, env, resume, sessionId, model });
+  const invocation = buildQwenInvocation({ prompt, worktree: rootDir, env, resume, sessionId, model, sandbox });
   const invocationStart = new Date().toISOString();
 
-  const spawn = (inv: any) => spawnAndTee(inv.command, inv.args, { ...inv.options, ...teeOptions } as any);
+  const spawn = (inv: any) => _spawnAndTee(inv.command, inv.args, { ...inv.options, ...teeOptions } as any);
 
   const resultPromise = spawn(invocation).then((result: any) => {
     if (resume && sessionId && isStaleQwenSessionResult(result)) {
-      const fresh = buildQwenInvocation({ prompt, worktree: rootDir, env, resume: false, sessionId: null, model });
+      const fresh = buildQwenInvocation({ prompt, worktree: rootDir, env, resume: false, sessionId: null, model, sandbox });
       return spawn(fresh).then((freshResult: any) => processResult(freshResult, rootDir, invocationStart));
     }
     return processResult(result, rootDir, invocationStart);
@@ -277,6 +292,7 @@ export {
   qwenUsageDir,
   resolveQwenCommand,
   startQwenAgent,
+  __setSpawnAndTeeForTest,
   userQwenDir,
   userQwenSettingsPath,
   MAX_SESSION_AGE_MINUTES
