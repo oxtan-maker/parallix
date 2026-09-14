@@ -4,44 +4,39 @@ import { git } from '../git/git.js';
 import * as fmt from '../../application/presentation/cli-format.js';
 import { resolveTaskStorage } from '../config/product-config.js';
 
-/**
- * Derive a stable repository id from a directory path.
- *
- * Prefers the repo name extracted from `remote.origin.url` so the same
- * repository produces the same id regardless of worktree path. Falls back
- * to the toplevel directory basename when no remote exists.
- */
 function resolveStableRepositoryId(rootDir: string): string {
-  // Try remote.origin.url first
+  // Prefer the git common dir: shared by the primary checkout and every linked
+  // worktree, so it is stable across worktrees and can never equal a worktree
+  // basename. Unique per repository on the machine, and present even when the
+  // remote.origin.url is missing (e.g. a moved/local scratch checkout).
+  // Resolve to an absolute path so a relative ".git" from a primary checkout
+  // collapses to the same absolute common dir a linked worktree reports.
+  const commonDirResult = git(['-C', rootDir, 'rev-parse', '--git-common-dir']);
+  if (commonDirResult.status === 0 && commonDirResult.stdout.trim()) {
+    const commonDir = commonDirResult.stdout.trim();
+    return path.isAbsolute(commonDir) ? commonDir : path.resolve(rootDir, commonDir);
+  }
+
+  // Fallback: full remote URL. Identical for the primary checkout and every
+  // linked worktree, and never a basename. Useful when the common dir path is
+  // not meaningful on its own.
   const urlResult = git(['-C', rootDir, 'config', '--get', 'remote.origin.url']);
   if (urlResult.status === 0 && urlResult.stdout.trim()) {
-    const url = urlResult.stdout.trim();
-    const name = extractRepoNameFromUrl(url);
-    if (name) { return name; }
+    return urlResult.stdout.trim();
   }
 
-  // Fallback: toplevel directory basename (works for worktrees too)
+  // Absolute last resort: toplevel directory path. Only reached when the git
+  // common dir is unavailable (e.g. a moved scratch checkout whose common dir
+  // no longer resolves). The absolute toplevel path is stable for a single
+  // checkout and never leaks a worktree basename.
   const toplevelResult = git(['-C', rootDir, 'rev-parse', '--show-toplevel']);
   if (toplevelResult.status === 0 && toplevelResult.stdout.trim()) {
-    return path.basename(toplevelResult.stdout.trim());
+    return toplevelResult.stdout.trim();
   }
 
-  // Last resort: rootDir basename
   return path.basename(rootDir);
 }
 
-/** Extract repo name from a git remote URL (e.g. "parallix" from "git@github.com:user/parallix.git"). */
-function extractRepoNameFromUrl(url: string): string | null {
-  // git@host:user/repo.git or git@host:user/repo
-  const sshMatch = url.match(/[^/:]+\/([^/]+?)(?:\.git)?$/);
-  if (sshMatch) { return sshMatch[1] || null; }
-
-  // https://host/user/repo.git or https://host/user/repo
-  const httpsMatch = url.match(/\/([^/]+?)(?:\.git)?$/);
-  if (httpsMatch) { return httpsMatch[1] || null; }
-
-  return null;
-}
 /** @param {string} [rootDir] @returns {{tasksDir: string, completedDir: string, archiveTasksDir: string}} */
 function getTaskStorage(rootDir = process.cwd()) {
   return resolveTaskStorage(rootDir);
@@ -377,7 +372,6 @@ function getTaskFrontmatterValue(taskFilePath: string, field: string) {
 export {
   checkBacklogIntegrity,
   commitTaskFileUpdate,
-  extractRepoNameFromUrl,
   findTaskFile,
   findTaskFiles,
   getAcceptanceCriteria,

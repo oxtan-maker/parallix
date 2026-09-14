@@ -35,11 +35,12 @@ export const KNOWN_COMMANDS: string[] = [
   'aliases',
   'config',
   'diff',
+  'github-publish-status',
   'ui',
   'web',
 ];
 
-const READ_ONLY_COMMANDS = new Set(['config', 'ui', 'web']);
+const READ_ONLY_COMMANDS = new Set(['config', 'ui', 'web', 'github-publish-status']);
 
 export type Command = (..._args: any[]) => unknown;
 
@@ -241,6 +242,7 @@ ${fmt.bold('Advanced Commands:')}
   setup-review          Legacy Forgejo-only bootstrap for tokens, repo creation, and git review remote.
   recover <slug>        Reconcile an interrupted active task with its closed durable aggregate.
   status [<slug>]       Unified mission and repository overview.
+  github-publish-status  Show github-publish publication engine status (local head, published head, awaiting/verified-blocked/failed). No-op when the mode is disabled.
   cancel <slug> --yes   Delete one mission's lifecycle rows from the operator database. Irreversible; usage statistics are kept and the branch and worktree stay for you to remove.
   resolve-conflict [<slug>]       Detect merge conflicts in the mission worktree and emit resolution guidance.
   rebase [<slug>] [--push]          Rebase mission branch onto the primary integration branch (main) with auto-resolution of mission-specific conflicts.

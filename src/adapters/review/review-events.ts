@@ -285,7 +285,7 @@ function buildEventFrontmatter(event: NormalizedEvent): string {
     lines.push(`item_dispositions: ${JSON.stringify(event.itemDispositions)}`);
   }
   if (event.blockedReason !== undefined) {
-    lines.push(`blocked_reason: "${event.blockedReason.replace(/"/g, '\\"')}"`);
+    lines.push(`blocked_reason: "${event.blockedReason.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`);
   }
   if (event.followUpReference !== undefined) {
     lines.push(`followup_reference: ${event.followUpReference}`);

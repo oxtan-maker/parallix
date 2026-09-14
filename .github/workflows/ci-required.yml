@@ -1,0 +1,86 @@
+# Mission 5 (task-2500.05): required GitHub Actions verification pipeline.
+#
+# Runs Mission 4's GitHub-safe, clean-runner tier (`npm run test:ci`) as the
+# stable `ci-required` check for pull requests targeting the protected primary
+# branch.
+#
+# The `ci-required` job name is a literal so branch protection can require it
+# stably; it is never computed from branch, event, or matrix data.
+#
+# Publication trigger is provisional, not a claimed github-publish ref: ADR 0045
+# marks github-publish unimplemented, so GitHub verifies the exact resulting
+# commit before it reaches the protected primary branch. The concrete verification
+# ref is deferred to the follow-up mission that verifies this pipeline live; the
+# `push` trigger below is a real trigger only and must not be cited as the
+# github-publish verification ref until that ref is established.
+name: ci-required
+
+on:
+  pull_request:
+    branches:
+      - main
+  push:
+    branches:
+      - main
+
+# Cancel only superseded runs for a single pull request. PR runs group by pull
+# request number (superseded by the next PR update via cancel-in-progress);
+# publication runs group by run_id, so a later publication does not cancel an
+# earlier one merely because a new commit is pushed (SC5). A person can still
+# cancel any run manually — this only governs automatic cancellation.
+concurrency:
+  group: ci-required-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+jobs:
+  ci-required:
+    name: ci-required
+    runs-on: ubuntu-latest
+    steps:
+      # checkout defaults to the triggered commit: the PR merge commit for
+      # pull_request events and the pushed SHA for push events.
+      - name: Check out the triggered commit
+        uses: actions/checkout@v4
+        with:
+          # Full history: tests compare mission branches against the primary
+          # branch, which needs the merge base.
+          fetch-depth: 0
+
+      # Parallix expects its standard repository layout: a local primary branch
+      # checked out in a primary worktree, with other work in sibling worktrees
+      # (getPrimaryBranch / resolveMainRepo), and the tests that exercise its git
+      # workflow run against that layout. A pull_request checkout is a detached
+      # merge commit with main only as origin/main, so add main as a worktree.
+      # Push runs already have main checked out.
+      - name: Provide the primary worktree
+        run: git show-ref --verify --quiet refs/heads/main || git worktree add --quiet -b main "$RUNNER_TEMP/parallix-main" origin/main
+
+      # node-version: '24' + check-latest: true installs the latest 24.x (24.21.0
+      # today), which is >= 24.15.0 — the floor the unit suite actually needs,
+      # because test/lib/module-mock.ts uses mock.module's exports option that
+      # Node < 24.15.0 ignores (46 unit tests fail on 22.x). cache: npm is the
+      # built-in setup-node npm cache (no external cache action, so this stays
+      # within the checkout + Node setup only allowance in Restricted Areas);
+      # the npm cache is keyed on package-lock.json by setup-node.
+      # NOTE: package.json engines.node stays >=22.23.1 (its floor is the runtime
+      # floor for shipped code, not the test floor); raising it is outside this
+      # mission's Restricted Areas (package.json).
+      - name: Set up Node (>= 24.15.0)
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          check-latest: true
+          cache: npm
+
+      - name: Install dependencies (lockfile-respecting, deterministic)
+        run: npm ci
+        env:
+          CI: 'true'
+
+      - name: Run GitHub-safe verification (npm run test:ci)
+        run: npm run test:ci
+        env:
+          CI: 'true'

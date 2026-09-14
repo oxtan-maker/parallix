@@ -337,8 +337,13 @@ describe('task-2347.01 — repository identity through lane events and board met
         `repository id must be stable across worktrees: worktree="${worktreeId}" vs primary="${primaryId}"`,
       );
 
-      // The id must NOT be the worktree directory basename (which would differ)
-      const { basename } = await import('node:path');
+      // The id must NOT be the linked worktree's directory basename. In the
+      // primary checkout the basename legitimately equals the repository name,
+      // so the leak check only means something from a linked worktree.
+      const { basename, resolve } = await import('node:path');
+      const gitDir = git(['-C', process.cwd(), 'rev-parse', '--absolute-git-dir']).stdout.trim();
+      const gitCommonDir = resolve(process.cwd(), git(['-C', process.cwd(), 'rev-parse', '--git-common-dir']).stdout.trim());
+      if (gitDir === gitCommonDir) { return; }
       const worktreeBasename = basename(process.cwd());
       assert.notEqual(
         worktreeId,

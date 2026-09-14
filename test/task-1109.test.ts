@@ -363,7 +363,7 @@ test('integrate rejects a Forgejo PR that is already merged', async () => {
   mock.method(process, 'exit', (code) => exitCodes.push(code));
 
   try {
-    await integrate([TEST_SLUG, '--no-integration-gates'], { missionServicesFn: composition.createMissionApplicationServices });
+    await integrate([TEST_SLUG, '--dry-run', '--no-integration-gates'], { missionServicesFn: composition.createMissionApplicationServices });
   } catch { /* expected */ }
   
   const output = [...logs, ...errors].join('\n');
@@ -437,7 +437,7 @@ test('integrate reports merged-PR recovery guidance before any closeout work', a
   mock.method(process, 'exit', (code) => exitCodes.push(code));
 
   try {
-    await integrate([TEST_SLUG, '--no-integration-gates'], { missionServicesFn: composition.createMissionApplicationServices });
+    await integrate([TEST_SLUG, '--dry-run', '--no-integration-gates'], { missionServicesFn: composition.createMissionApplicationServices });
   } catch { /* expected */ }
 
   const output = [...logs, ...errors].join('\n');
@@ -464,6 +464,9 @@ test('integrate Variant B stops when dry-run merge cannot be aborted cleanly', a
     if (args.includes('branch') && args.includes('--list')) return { status: 0, stdout: 'main\n', stderr: '' };
     if (args.includes('branch') && args.includes('--show-current')) return { status: 0, stdout: 'main', stderr: '' };
     if (args.includes('status')) return { status: 0, stdout: '', stderr: '' };
+    // F1 confirms the integration rebase by rev-parse-ing the primary and the
+    // mission HEAD, then checking `--is-ancestor`; the rebase step needs these.
+    if (args.includes('rev-parse')) return { status: 0, stdout: 'deadbeef', stderr: '' };
     if (args.includes('merge') && args.includes('--no-commit')) return { status: 0, stdout: '', stderr: '' };
     if (args.includes('merge') && args.includes('--abort')) return { status: 1, stdout: '', stderr: 'fatal: abort failed' };
     return { status: 0, stdout: '', stderr: '' };
@@ -494,6 +497,7 @@ test('integrate Variant B resumed partial state prints sync diagnostics on sync 
     if (args.includes('branch') && args.includes('--list')) return { status: 0, stdout: 'main\n', stderr: '' };
     if (args.includes('branch') && args.includes('--show-current')) return { status: 0, stdout: 'main', stderr: '' };
     if (args.includes('status')) return { status: 0, stdout: '', stderr: '' };
+    if (args.includes('rev-parse')) return { status: 0, stdout: 'deadbeef', stderr: '' };
     if (args.includes('merge') && args.includes('--no-commit')) return { status: 1, stdout: 'conflict', stderr: 'conflict' };
     if (args.includes('merge') && args.includes('--abort')) return { status: 1, stdout: '', stderr: 'There is no merge to abort' };
     if (args.includes('log') && args.includes('--format=%H %s')) return { status: 0, stdout: `deadbeef mission/${TEST_SLUG}: Test Mission\n`, stderr: '' };
@@ -531,6 +535,7 @@ test('integrate Variant B conflict path prints conflicting files and helper guid
     if (args.includes('branch') && args.includes('--list')) return { status: 0, stdout: 'main\n', stderr: '' };
     if (args.includes('branch') && args.includes('--show-current')) return { status: 0, stdout: 'main', stderr: '' };
     if (args.includes('status')) return { status: 0, stdout: '', stderr: '' };
+    if (args.includes('rev-parse')) return { status: 0, stdout: 'deadbeef', stderr: '' };
     if (args.includes('merge') && args.includes('--no-commit')) return { status: 1, stdout: 'conflict', stderr: 'conflict' };
     if (args.includes('merge') && args.includes('--abort')) return { status: 1, stdout: '', stderr: 'There is no merge to abort' };
     if (args.includes('log') && args.includes('--format=%H %s')) return { status: 0, stdout: 'deadbeef unrelated commit\n', stderr: '' };

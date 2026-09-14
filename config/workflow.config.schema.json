@@ -122,6 +122,19 @@
             }
           }
         },
+        "githubPublish": {
+          "type": "object",
+          "description": "Optional github-publish mode. Opt-in publication engine that publishes the exact locally-generated integration commit unchanged to a per-commit verification ref and advances origin/main only through the highest contiguous run of externally verified commits. Additive to the squash-merge integration path; unset keeps today's default behavior byte for byte.",
+          "additionalProperties": true,
+          "properties": {
+            "enabled": { "type": "boolean", "description": "Enable github-publish mode. When false or unset, the default squash-merge integration path runs unchanged and the publication engine is never invoked." },
+            "mainBranch": { "type": "string", "description": "Protected main branch the publication engine advances via fast-forward. Defaults to the repository's primary branch." },
+            "verificationRemote": { "type": "string", "description": "Git remote the exact integration commit is pushed to for external verification. Defaults to 'origin'." },
+            "verificationRefPrefix": { "type": "string", "description": "Ref path prefix under refs/ for the per-commit verification ref. Encodes the commit SHA, so each ref is unique. Defaults to 'github-publish'." },
+            "pollIntervalMs": { "type": "integer", "minimum": 1, "description": "Base interval between verification polls in milliseconds. Defaults to 30000." },
+            "maxPollAttempts": { "type": ["integer", "null"], "minimum": 1, "description": "Maximum verification polls before giving up. null means poll indefinitely while GitHub is pending. Defaults to null." }
+          }
+        },
         "integrate": {
           "type": "object",
           "description": "Optional post-integrate hook. When postIntegrateCommand is unset, `px integrate` behaves exactly as it does without this section.", 

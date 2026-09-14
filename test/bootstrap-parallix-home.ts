@@ -144,6 +144,14 @@ if (realCurl) {
 delete process.env.OPENCODE_BIN;
 delete process.env.PI_BIN;
 
+// Hosted CI runners export CI=true, which ink (via is-in-ci) treats as a
+// non-interactive terminal: it skips re-renders, so TUI tests that drive a fake
+// or real terminal see no frames and time out. Test behaviour must not depend on
+// the ambient CI flag; tests that exercise CI detection pass it explicitly
+// (see test/no-command-tty.test.ts).
+delete process.env.CI;
+delete process.env.CONTINUOUS_INTEGRATION;
+
 // Safety net: if a test forgets to stub launcher discovery, these harmless
 // binaries prevent real Codex/Claude/Vibe/OpenCode/Pi CLIs from consuming tokens
 // or mutating operator-local state on the workstation.

@@ -119,6 +119,9 @@ test('task-2285 SBOM and NOTICES describe the same bundled package set', () => {
   assert.equal(sbom.metadata.component.name, packageJson.name);
   assert.ok(sbom.components.length > 0, 'the Ink runtime is bundled, so the SBOM is non-empty');
   assert.match(notices, new RegExp(`Bundled third-party packages: ${sbom.components.length}\\b`));
+  // js/incomplete-sanitization: the .replace() calls escape RegExp metacharacters
+  // so the constructed pattern matches a literal package name; output feeds an
+  // assert.match, not a shell or a browser. No injection surface, test-only.
   for (const component of sbom.components) {
     assert.match(notices, new RegExp(`${component.name.replace(/[/@.]/g, '\\$&')}@${component.version.replace(/\./g, '\\.')}`));
   }

@@ -161,7 +161,12 @@ async function runIntegrate(mode: 'local' | 'github-pr'): Promise<RunResult> {
   return { error: undefined, exitCode, logs: logs.join('\n'), gitCalls };
 }
 
-const gitMerged = (calls: string[][]) => calls.some(c => c.join(' ').includes('merge'));
+// Detect the merge subcommand as a standalone token, not the `merge-base`
+// probe or the `merge.autoedit` rebase config that the integration-time rebase
+// path (task-2506) issues on every run. The previous `includes('merge')`
+// substring heuristic mistook those for a local merge; github-pr mode correctly
+// still issues no local merge while awaiting GitHub evidence.
+const gitMerged = (calls: string[][]) => calls.some(c => c.includes('merge'));
 
 test('local mode dispatches through the capability boundary and reaches the local squash/merge', async () => {
   const result = await runIntegrate('local');

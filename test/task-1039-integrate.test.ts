@@ -255,6 +255,9 @@ test('integrate fails closed when no pre-integration gates are configured', asyn
       const cmd = Array.isArray(args) ? args.join(' ') : String(args);
       if (cmd.includes('status')) return { status: 0, stdout: '', stderr: '' };
       if (cmd.includes('rev-parse')) return { status: 0, stdout: 'abc123', stderr: '' };
+      // F1 confirms the rebase completed by reading `rebase --show-current` (empty
+      // when no rebase is in progress) then rev-parse + `--is-ancestor`.
+      if (cmd.includes('rebase')) return { status: 0, stdout: '', stderr: '' };
       return { status: 0, stdout: 'main', stderr: '' };
     });
     mock.method(repositoryGatesModule, 'runPhaseGates', async (phase, opts) => {
@@ -302,6 +305,7 @@ test('integrate proceeds without a gate when the repository does not opt into re
       const cmd = Array.isArray(args) ? args.join(' ') : String(args);
       if (cmd.includes('status')) return { status: 0, stdout: '', stderr: '' };
       if (cmd.includes('rev-parse')) return { status: 0, stdout: 'abc123', stderr: '' };
+      if (cmd.includes('rebase')) return { status: 0, stdout: '', stderr: '' };
       return { status: 0, stdout: 'main', stderr: '' };
     });
     mock.method(repositoryGatesModule, 'runPhaseGates', async (phase, opts) => {
@@ -351,6 +355,7 @@ test('integrate aborts before merge when a pre-integration gate fails', async (t
       const cmd = Array.isArray(args) ? args.join(' ') : String(args);
       if (cmd.includes('status')) return { status: 0, stdout: '', stderr: '' };
       if (cmd.includes('rev-parse')) return { status: 0, stdout: 'abc123', stderr: '' };
+      if (cmd.includes('rebase')) return { status: 0, stdout: '', stderr: '' };
       return { status: 0, stdout: 'main', stderr: '' };
     });
     let seenPhase = null;

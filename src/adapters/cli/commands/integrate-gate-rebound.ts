@@ -10,8 +10,9 @@
 //  1. `limit-reached` — the mission has already spent its persisted
 //     integration-gate rebound budget. No transition, no implementer launch.
 //  2. `mainline`      — the same gate command fails on the base branch too, so
-//     the regression is not the mission's. A separately identifiable backlog
-//     task records the mainline problem; the implementer is not bounced.
+//     the regression is not the mission's. The gate evidence is reported and
+//     the integration attempt stops; the implementer is not bounced and no
+//     artefact is written to the base checkout (TASK-2507).
 //  3. `fixed` / `exhausted` — a mission regression inside budget. The kernel
 //     transitions the task back to `active`, launches the implementer with the
 //     gate evidence, and re-runs the identical gate set. Only a passing re-run
@@ -21,16 +22,11 @@
 //
 // The dependency direction matches `integrate-gates.ts`: `integrate.ts` imports
 // from here, never the other way round.
-import crypto from 'node:crypto';
-import fs from 'node:fs';
-import path from 'node:path';
 import * as fmt from '../../../application/presentation/cli-format.js';
-import { elideBounceOutput } from '../../../application/output-elision.js';
 import { rebound, type GateFailureReason, type ReboundContext } from '../../../application/rebound-kernel.js';
 import { runPhaseGates, type GateRunOutcome, type RepositoryGate } from '../../config/repository-gates.js';
 import { captureFinalIntegrationTree } from './integrate-gates.js';
 import { git } from '../../git/git.js';
-import { getTaskStorage } from '../../backlog/task-file-io.js';
 import { missionId } from '../../../domain/mission.js';
 
 /**
@@ -59,7 +55,7 @@ const REBOUND_ATTEMPTS_PER_INVOCATION = 1;
 export type IntegrationGateRoute =
   | { route: 'fixed'; rebounds: number }
   | { route: 'exhausted'; rebounds: number; diagnostic: string }
-  | { route: 'mainline'; taskId: string; taskFile: string | null; created: boolean; detail: string }
+  | { route: 'mainline'; detail: string; baseCommit: string | null }
   | { route: 'limit-reached'; rebounds: number }
   | { route: 'stranded'; detail: string };
 
@@ -242,104 +238,6 @@ export async function probeBaseBranchReproduction(opts: {
   };
 }
 
-// ── Mainline problem ticket ──────────────────────────────────────────────────
-
-/**
- * Deterministic identity for one mainline gate problem, derived from the gate
- * key and the base commit it reproduced on. Re-running `px integrate` for
- * another mission against the same broken base resolves to the same task
- * instead of minting a duplicate, and the hashed suffix cannot collide with the
- * numeric `TASK-NNNN` range a stale fork might also be handing out.
- */
-export function mainlineGateTaskId(gateKey: string, baseCommit: string): string {
-  const hash = crypto.createHash('sha1').update(`${gateKey}\n${baseCommit}`).digest('hex').slice(0, 8).toUpperCase();
-  return `TASK-MAINGATE-${hash}`;
-}
-
-/**
- * Record a gate failure that reproduces on the base branch as its own backlog
- * task. Per team-lead policy a main problem is not an implementer bounce, so
- * this replaces the bounce rather than preceding it.
- */
-export function createMainlineGateTask(opts: {
-  baseWorktree: string;
-  baseBranch: string;
-  baseCommit: string;
-  slug: string;
-  failedGate: GateRunOutcome;
-  gateError?: string | null;
-  gitFn?: typeof git;
-  log?: (_msg: string) => void;
-}): { taskId: string; taskFile: string | null; created: boolean } {
-  const { baseWorktree, baseBranch, baseCommit, slug, failedGate, gitFn = git, log = fmt.log.plain } = opts;
-  const taskId = mainlineGateTaskId(failedGate.key, baseCommit);
-  const { tasksDir } = getTaskStorage(baseWorktree);
-  const taskFile = path.join(tasksDir, `${taskId} - Integration gate ${failedGate.key} fails on ${baseBranch}.md`);
-
-  if (fs.existsSync(taskFile)) {
-    log(fmt.status('INFO', `Mainline gate problem already tracked as ${taskId}.`));
-    return { taskId, taskFile, created: false };
-  }
-
-  // Only the gate's own identity and a bounded, elided excerpt are recorded:
-  // a task file is a shared artifact and must never carry raw environment or
-  // unbounded command output.
-  const excerpt = elideBounceOutput([failedGate.stdout, failedGate.stderr, opts.gateError].filter(Boolean).join('\n').trim() || '(no captured output; the gate streamed to the terminal)');
-  const body = [
-    '---',
-    `id: ${taskId}`,
-    `title: Integration gate ${failedGate.key} fails on ${baseBranch}`,
-    'status: backlog',
-    'assignee: []',
-    `created_date: '${new Date().toISOString().slice(0, 16).replace('T', ' ')}'`,
-    'labels: [ai_sdlc]',
-    'dependencies: []',
-    '---',
-    '',
-    '## Description',
-    '',
-    '<!-- SECTION:DESCRIPTION:BEGIN -->',
-    `Integration gate \`${failedGate.key}\` failed while integrating ${slug}, and the`,
-    `same command reproduces on \`${baseBranch}\` at commit ${baseCommit}. The failure is`,
-    'therefore a mainline problem, not a regression introduced by that mission, so',
-    'no implementer was bounced for it.',
-    '',
-    `- Gate command: \`${failedGate.command}\``,
-    `- Exit code: ${failedGate.exitCode ?? 'unknown'}`,
-    `- Reproduced on: \`${baseBranch}\` @ ${baseCommit}`,
-    `- First observed integrating: ${slug}`,
-    '',
-    'Captured excerpt:',
-    '',
-    '```',
-    excerpt,
-    '```',
-    '<!-- SECTION:DESCRIPTION:END -->',
-    '',
-  ].join('\n');
-
-  try {
-    fs.mkdirSync(path.dirname(taskFile), { recursive: true });
-    fs.writeFileSync(taskFile, body, 'utf8');
-  } catch (error) {
-    log(fmt.status('WARN', `Could not write the mainline gate task ${taskId}: ${(error as Error).message}`));
-    return { taskId, taskFile: null, created: false };
-  }
-  log(fmt.status('PASS', `Recorded the mainline gate problem as ${taskId} (${fmt.path(path.relative(baseWorktree, taskFile))}).`));
-
-  // Committing it is best effort: the ticket has already been written, and a
-  // read-only `backlog/` or a rejecting hook must not turn a mainline report
-  // into a second failure.
-  try {
-    const relative = path.relative(baseWorktree, taskFile);
-    gitFn(['-C', baseWorktree, 'add', relative]);
-    gitFn(['-C', baseWorktree, 'commit', '-m', `backlog(${taskId}): record mainline integration gate failure`, '--', relative]);
-  } catch {
-    log(fmt.status('WARN', `Mainline gate task ${taskId} was written but not committed; commit it manually.`));
-  }
-  return { taskId, taskFile, created: true };
-}
-
 // ── Route ────────────────────────────────────────────────────────────────────
 
 export interface IntegrationGateRouteOptions {
@@ -366,7 +264,6 @@ export interface IntegrationGateRouteOptions {
   readReboundsFn?: typeof readIntegrationGateRebounds;
   recordReboundFn?: typeof recordIntegrationGateRebound;
   probeBaseBranchReproductionFn?: typeof probeBaseBranchReproduction;
-  createMainlineGateTaskFn?: typeof createMainlineGateTask;
   runPhaseGatesFn?: typeof runPhaseGates;
   captureFinalTreeFn?: typeof captureFinalIntegrationTree;
   reboundFn?: typeof rebound;
@@ -392,7 +289,6 @@ export async function routeIntegrationGateFailure(opts: IntegrationGateRouteOpti
     readReboundsFn = readIntegrationGateRebounds,
     recordReboundFn = recordIntegrationGateRebound,
     probeBaseBranchReproductionFn = probeBaseBranchReproduction,
-    createMainlineGateTaskFn = createMainlineGateTask,
     runPhaseGatesFn = runPhaseGates,
     captureFinalTreeFn = captureFinalIntegrationTree,
     reboundFn = rebound,
@@ -432,17 +328,15 @@ export async function routeIntegrationGateFailure(opts: IntegrationGateRouteOpti
     gateRunError,
   });
   if (probe.checked && probe.reproduced) {
-    const ticket = createMainlineGateTaskFn({
-      baseWorktree: opts.baseWorktree as string,
-      baseBranch: opts.baseBranch as string,
-      baseCommit: probe.baseCommit ?? 'unknown',
-      slug,
-      failedGate,
-      gateError: opts.gateError,
-      log,
-    });
-    error(fmt.status('FAIL', `${probe.detail}. Tracked as ${ticket.taskId}; ${slug} was not bounced to its implementer. Human action required on the mainline problem.`));
-    return { route: 'mainline', taskId: ticket.taskId, taskFile: ticket.taskFile, created: ticket.created, detail: probe.detail };
+    // The evidence is reported and nothing is written: a failed integration
+    // must not mutate the shared base checkout or mint a backlog identifier
+    // outside the numeric `Backlog.md` authority (TASK-2507). Filing the
+    // mainline problem is a human decision through the ordinary backlog
+    // workflow.
+    error(fmt.status('FAIL', `${probe.detail}. ${slug} was not bounced to its implementer; no backlog task was created. Human action required on the mainline problem.`));
+    error(fmt.status('FAIL', `Reproduce with: ${failedGate.command} (from ${opts.baseWorktree}, ${opts.baseBranch} @ ${probe.baseCommit ?? 'unknown'}); exit code ${failedGate.exitCode ?? 'unknown'}.`));
+    if (opts.gateError) { error(fmt.status('FAIL', opts.gateError)); }
+    return { route: 'mainline', detail: probe.detail, baseCommit: probe.baseCommit };
   }
   log(fmt.status('INFO', probe.checked ? probe.detail : `Base-branch reproduction not determined (${probe.detail}); treating the failure as a mission regression.`));
 

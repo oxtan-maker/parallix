@@ -3,11 +3,12 @@ id: TASK-2481
 title: >-
   Hide review-start poll/max-attempts plumbing at default verbosity (task-2477
   follow-up)
-status: backlog
-assignee: []
+status: done
+assignee: [claude]
 created_date: '2026-09-10 14:03'
 updated_date: '2026-09-10 14:09'
 labels:
+  - ai_sdlc
   - baseline-red
   - review-loop
   - follow-up
@@ -37,11 +38,11 @@ Discovered during the task-2480 review round after reverting an out-of-scope rep
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 `test/task-1209-review-loop.test.ts` test "startReviewLoop skips reviewer and implementer launches for autonomous fallback in provider=none mode" passes on main
-- [ ] #2 `test/task-2477-review-presentation.test.ts` test "verbose review start exposes poll/provider lines that default hides" passes on main
-- [ ] #3 At default verbosity, review-start output contains no line matching /Poll interval|Poll timeout|Max attempts/
-- [ ] #4 With verbose enabled, the Poll interval, Poll timeout, and Max attempts lines are still emitted
-- [ ] #5 `./scripts/verify-local.sh all` passes with no new failures
+- [x] #1 `test/task-1209-review-loop.test.ts` test "startReviewLoop skips reviewer and implementer launches for autonomous fallback in provider=none mode" passes on main
+- [x] #2 `test/task-2477-review-presentation.test.ts` test "verbose review start exposes poll/provider lines that default hides" passes on main
+- [x] #3 At default verbosity, review-start output contains no line matching /Poll interval|Poll timeout|Max attempts/
+- [x] #4 With verbose enabled, the Poll interval, Poll timeout, and Max attempts lines are still emitted
+- [x] #5 `./scripts/verify-local.sh all` passes with no new failures
 <!-- AC:END -->
 
 ## Implementation Notes
@@ -52,6 +53,8 @@ Resolved on `mission/task-2480` by commit `ac8cd78ce` ("fix(review): hide review
 The fix was not deferred by choice. It was pulled out of the mission branch in response to task-2480 review finding F1 (out-of-scope contamination), after which the pre-review verification gate failed closed on both tests listed above. The gate blocks the mission until they pass and reruns automatically, so the baseline repair had to land in the mission branch rather than in this follow-up.
 
 `./scripts/verify-local.sh all` now exits 0 with 2463 pass / 0 fail. Close this task when task-2480 merges; reopen only if the repair is stripped from that branch again.
+
+Verified on `mission/task-2481` (no production change needed). `git merge-base --is-ancestor 7126d1058 HEAD` confirms the task-2480 squash commit `7126d1058` — which carries the `if (verbose)` gate on both review-start header lines in `startReviewLoop` (`src/adapters/review/review-loop.ts`) — is an ancestor of this mission tree. `./scripts/verify-local.sh all` exits 0 with 2541 pass / 0 fail, listing both "startReviewLoop skips reviewer and implementer launches for autonomous fallback in provider=none mode" and "verbose review start exposes poll/provider lines that default hides" as passing. `git diff main -- test/task-1209-review-loop.test.ts test/task-2477-review-presentation.test.ts` is empty, so no assertion was weakened. Evidence table: `missions/task-2481/CP-1.md` Goal Check.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done

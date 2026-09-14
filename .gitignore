@@ -25,6 +25,8 @@ release-artifacts/
 tsconfig.tsbuildinfo
 .test-runtime/
 .test-runtime.staging-*/
+# CodeQL SAST gate (task-2502): databases/results live on $TMPDIR per worktree
+# (see scripts/codeql-sast.sh WORK_ROOT), so nothing is tracked.
 # StrykerJS scratch/report output (mutation-gate.ts)
 .stryker-tmp*/
 reports/mutation/
@@ -34,3 +36,4 @@ reports/mutation/
 build.retired.*
 /NOTICES
 parallix.db*
+tmp/

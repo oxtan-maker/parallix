@@ -438,10 +438,23 @@ function createDraftWorkflowAdapter(deps: Record<string, unknown> = {}) {
         return exitedContext({ ...ctx, missionFile });
       }
 
-      // Validate classification after task is bootstrapped in worktree
+      // Validate classification after task is bootstrapped in worktree.
+      // At draft start the classification is intentionally unset (the draft
+      // prompt instructs the agent to set it), so a missing classification must
+      // not surface a [FAIL] status line here. The hard gate runs later in
+      // postProcess via normalizeDraftClassification (ADR 0048). Suppress only
+      // the premature missing-classification status; any other errorFn output
+      // (e.g. an invalid-classification throw, which returns ok:false) still
+      // surfaces before the scaffold safeExits.
+      const suppressDraftStartClassificationFail = (message) => {
+        if (/Missing or invalid classification/i.test(message)) {
+          return;
+        }
+        errorFn(message);
+      };
       const validateDraftClassificationFn = merged.validateDraftClassificationFn || validateDraftClassification;
       const classificationCheck = validateDraftClassificationFn(ctx.slug, ctx.targetWorktree, {
-        errorFn
+        errorFn: suppressDraftStartClassificationFail
       });
       if (!classificationCheck.ok) {
         safeExit(1);

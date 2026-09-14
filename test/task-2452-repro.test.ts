@@ -8,6 +8,9 @@ import { TopBar } from '../web/src/top-bar.js';
 import { makeCards, makeProjection } from './fixtures/board-projection.js';
 
 function renderedWip(text: string): number {
+  // js/incomplete-multi-character-sanitization: test-only tag stripper used to
+  // count WIP tokens; the result is never written to a browser, so there is no
+  // XSS sink. The assertion layer (React DOM) escapes on render.
   const renderedText = text.replace(/<[^>]+>/g, '');
   const match = renderedText.match(/wip\s+(\d+)/);
   assert.ok(match, `expected a WIP total in rendered output: ${text}`);

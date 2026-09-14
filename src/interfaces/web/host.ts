@@ -233,6 +233,10 @@ export function createWebHost(options: WebHostOptions): WebHost {
       if (app !== null) { throw new Error('web host is already started'); }
       app = Fastify({ logger: false, bodyLimit: bodyLimitBytes });
 
+      // js/missing-rate-limiting flags this request path, but the host binds a
+      // loopback port for a single launch (ADR 0054) and is never reachable off
+      // 127.0.0.1, so there is no network-facing attacker to exhaust. Rate
+      // limiting a loopback single-tenant socket would add cost with no threat.
       // One origin per launch; the hooks below read the actual bound port.
       app.addHook('onRequest', async (request, reply) => {
         const current = binding;

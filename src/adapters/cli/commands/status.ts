@@ -263,7 +263,7 @@ async function status(args: string[], opts: {exit?: Function, log?: Function, in
         (c) => c.id.toLowerCase() === slug.toLowerCase(),
       );
       if (card) {
-        log(`Backlog status: ${card.rawStatus ?? card.status}`);
+        log(`Backlog status: ${card.status}`);
         if (card.checkpoint) {
           log(`Last checkpoint: ${card.checkpoint} - ${card.checkpointDescription || ''}`);
         } else {

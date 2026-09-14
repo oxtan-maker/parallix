@@ -29,6 +29,7 @@ import { ReviewCommandUseCase } from '../application/review-command-use-case.js'
 import { StatsCommandUseCase } from '../application/stats-command-use-case.js';
 import { HandoffCommandUseCase } from '../application/handoff-command-use-case.js';
 import { StatusCommandUseCase } from '../application/status-command-use-case.js';
+import { createGithubPublishStatusUseCase } from './github-publish-status.js';
 import { createDraftCommand } from '../interfaces/cli/draft.js';
 import type { HandoffMissionServicesPort } from '../application/ports/handoff-workflow.js';
 import { createIntegrateCommand } from '../interfaces/cli/integrate.js';
@@ -36,6 +37,7 @@ import { createCancelCommand } from '../interfaces/cli/cancel.js';
 import { createReviewCommand } from '../interfaces/cli/review.js';
 
 import { createStatusCommand } from '../interfaces/cli/status.js';
+import { createGithubPublishStatusCommand } from '../interfaces/cli/github-publish-status.js';
 import startupPreflight from '../adapters/cli/startup-preflight.js';
 import rebase from '../adapters/cli/commands/rebase.js';
 import { createRebaseCommand } from '../interfaces/cli/rebase.js';
@@ -234,6 +236,10 @@ function createCommandRegistry(rootDir: string): Record<string, Command> {
       if (!services.mission) { throw new Error('mission services are unavailable'); }
       return createStatsCommand(new StatsCommandUseCase(createStatsWorkflowAdapter(services.mission.store)))(args, options);
     }),
+    'github-publish-status': (args, options) => {
+      const useCase = createGithubPublishStatusUseCase();
+      return createGithubPublishStatusCommand(useCase)(args, options);
+    },
     status: (args, options) => withGraph(services => {
       const board = createStatusBoardAdapter({
         buildProjectionFn: async () => {

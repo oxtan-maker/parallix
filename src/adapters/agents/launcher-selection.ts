@@ -76,7 +76,10 @@ function commandInPath(name: string) {
   if (commandPathProbe) {
     return commandPathProbe(name) || false;
   }
-  const result = spawnSync('bash', ['-c', `command -v ${name}`], {
+  // Pass the allowlisted name as a positional argument ($1) rather than
+  // interpolating it into the shell string, so shell metacharacters in the
+  // name cannot be interpreted by bash (CodeQL js/shell-command-injection).
+  const result = spawnSync('bash', ['-c', 'command -v "$1"', '_', name], {
     encoding: 'utf8',
     stdio: ['ignore', 'pipe', 'ignore']
   });

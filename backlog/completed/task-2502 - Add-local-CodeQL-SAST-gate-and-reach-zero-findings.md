@@ -1,10 +1,10 @@
 ---
 id: TASK-2502
 title: Add local CodeQL SAST gate and reach zero findings
-status: backlog
-assignee: []
+status: done
+assignee: [custom]
 created_date: '2026-09-12 13:37'
-labels: []
+labels: [ai_sdlc]
 dependencies: []
 ordinal: 71006
 ---

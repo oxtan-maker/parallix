@@ -184,6 +184,14 @@ export const INTEGRATION_CI_TESTS: readonly string[] = [
   // real temporary Git repository, so it crosses the git boundary and runs only
   // in the integration layer.
   'task-2492-already-merged-detection.test.ts',
+  // TASK-2502: CodeQL gate tests. --dry-run resolves the plan without spawning
+  // the CLI, and the clean-cache test skips when no pinned codeql is on PATH, so
+  // both run on a clean GitHub-hosted runner with only bash.
+  'task-2502-codeql-clean-cache.test.ts',
+  'task-2502-codeql-suite-flag.test.ts',
+  // TASK-2507: runs failed-gate routing against a temporary Git repository to
+  // prove the base worktree stays clean, so it crosses the git boundary.
+  'task-2507-mainline-gate-mutation-repro.test.ts',
   'test-hygiene.test.ts',
   'tui-command-flow.test.ts',
   'tui-pty-smoke.test.ts',

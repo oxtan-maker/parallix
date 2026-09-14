@@ -1,0 +1,249 @@
+{
+  "$schema": "https://raw.githubusercontent.com/oasis-tcs/sarif-spec/master/Schemata/sarif-schema-2.1.0.json",
+  "version": "2.1.0",
+  "runs": [
+    {
+      "tool": {
+        "driver": {
+          "name": "CodeQL",
+          "ruleInformationUri": "https://code.ql/v2/reference/codeql-cli/command/#codeql-database-analyze",
+          "version": "2.27.0",
+          "informationUri": "https://code.ql/"
+        }
+      },
+      "results": [
+        {
+          "ruleId": "js/clear-text-logging",
+          "suppressions": [
+            {
+              "justification": "Default logger forwards caller args to console; this is the logging framework, not a sensitive-data sink. No credential, token, or PII is routed through these delegates."
+            }
+          ],
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "src/application/presentation/cli-format.ts"
+                },
+                "region": {
+                  "startLine": 118,
+                  "startColumn": 1
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "js/clear-text-logging",
+          "suppressions": [
+            {
+              "justification": "Default logger forwards caller args to console; this is the logging framework, not a sensitive-data sink. No credential, token, or PII is routed through these delegates."
+            }
+          ],
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "src/application/presentation/cli-format.ts"
+                },
+                "region": {
+                  "startLine": 119,
+                  "startColumn": 1
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "js/incomplete-multi-character-sanitization",
+          "suppressions": [
+            {
+              "justification": "Test-only HTML tag stripper used to count WIP tokens; output is never written to a browser and the assertion layer escapes on render. No XSS sink."
+            }
+          ],
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "test/task-2452-repro.test.ts"
+                },
+                "region": {
+                  "startLine": 14,
+                  "startColumn": 1
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "js/incomplete-multi-character-sanitization",
+          "suppressions": [
+            {
+              "justification": "Test-only strip of React <!-- --> comment nodes before string comparison; output is asserted, not rendered to a browser. Not an XSS sink."
+            }
+          ],
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "test/web-mission-card-render.test.ts"
+                },
+                "region": {
+                  "startLine": 75,
+                  "startColumn": 1
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "js/incomplete-sanitization",
+          "suppressions": [
+            {
+              "justification": "RegExp metacharacter escaping so the pattern matches a literal package name; output feeds assert.match, not a shell or browser. Test-only, no injection surface."
+            }
+          ],
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "test/task-2285-release-metadata.test.ts"
+                },
+                "region": {
+                  "startLine": 126,
+                  "startColumn": 1
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "js/incomplete-sanitization",
+          "suppressions": [
+            {
+              "justification": "Escapes the pinned version dots for the RegExp; the pattern feeds an assert.match, not a shell or browser. Test-only, no sink."
+            }
+          ],
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "test/task-2286-native-sea-smoke.test.ts"
+                },
+                "region": {
+                  "startLine": 162,
+                  "startColumn": 1
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "js/missing-rate-limiting",
+          "suppressions": [
+            {
+              "justification": "Host binds a loopback port for a single launch (ADR 0054) and is never reachable off 127.0.0.1, so there is no network-facing attacker to exhaust. Rate limiting a loopback single-tenant socket adds cost with no threat."
+            }
+          ],
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "src/interfaces/web/host.ts"
+                },
+                "region": {
+                  "startLine": 241,
+                  "startColumn": 1
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "js/shell-command-injection-from-environment",
+          "suppressions": [
+            {
+              "justification": "spawnSync array form runs with no shell; args pass directly to the git executable, so there is no command-injection surface. Args are internal trusted paths (repo root, config dirs), never user input."
+            }
+          ],
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "src/adapters/git/git.ts"
+                },
+                "region": {
+                  "startLine": 45,
+                  "startColumn": 1
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "js/shell-command-injection-from-environment",
+          "suppressions": [
+            {
+              "justification": "spawnSync array form; the allowlisted launcher name is passed as positional $1, never interpolated into a shell string, so shell metacharacters cannot be interpreted. No injection surface."
+            }
+          ],
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "src/adapters/agents/launcher-selection.ts"
+                },
+                "region": {
+                  "startLine": 82,
+                  "startColumn": 1
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "js/shell-command-injection-from-environment",
+          "suppressions": [
+            {
+              "justification": "Test-only: `gone` is a fresh mkdtempSync path created in-process (not attacker input) and the executable is the pinned build artifact. Script forces a deterministic crash to exercise source maps. Array-form spawnSync with no shell."
+            }
+          ],
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "test/task-2286-native-sea-smoke.test.ts"
+                },
+                "region": {
+                  "startLine": 371,
+                  "startColumn": 1
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "js/shell-command-injection-from-environment",
+          "suppressions": [
+            {
+              "justification": "Test-only: `gone` is a fresh mkdtempSync path created in-process (not attacker input); the bundle path is the pinned build artifact. Script forces a deterministic crash to exercise source maps. Array-form spawnSync with no shell."
+            }
+          ],
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "test/task-2286-native-sea-smoke.test.ts"
+                },
+                "region": {
+                  "startLine": 522,
+                  "startColumn": 1
+                }
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

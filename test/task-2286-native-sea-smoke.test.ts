@@ -157,6 +157,8 @@ test('native SEA smoke: the build pins and records an ESM-SEA-capable Node and r
   // The executable reports the runtime it actually embeds, and it is the pinned one.
   const version = run(nativeArgv('--version'));
   assert.equal(version.status, 0);
+  // js/incomplete-sanitization: escapes the version's dots for the RegExp; the
+  // pattern feeds an assert.match, not a shell or browser. Test-only, no sink.
   assert.match(version.stdout, new RegExp(`node: ${metadata.pinnedNode.version.replace(/\./g, '\\.')}`));
 
   // Refusal path: an unsupported runtime aborts with exit code 2 and leaves the
@@ -361,6 +363,10 @@ test('native SEA smoke: uncaught diagnostics map back to TypeScript sources (SC3
   // that removes its own working directory and then execs the executable makes
   // `process.cwd()` throw in px.ts before any handler is installed.
   const gone = fs.mkdtempSync(path.join(os.tmpdir(), 'px-sea-gone-'));
+  // js/shell-command-injection-from-environment: `gone` is a fresh mkdtempSync
+  // path created in-process (not attacker input) and EXECUTABLE is the pinned
+  // build artifact. The script forces a crash to exercise source maps; it is
+  // test-only and deterministic. Array-form spawnSync with no shell.
   const script = `cd ${JSON.stringify(gone)} && rm -rf ${JSON.stringify(gone)} && exec ${JSON.stringify(EXECUTABLE)} status`;
   const result = spawnSync('bash', ['-c', script], {
     encoding: 'utf8',

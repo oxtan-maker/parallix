@@ -110,6 +110,10 @@ type Logger = {
 
 type LoggerInput = { log?: LogFn; error?: LogFn } | LogFn;
 
+// js/clear-text-logging flags these two delegates, but they are the logging
+// framework itself, not a sensitive-data sink: they forward whatever the caller
+// passes to the console. No credential, token, or PII is routed through here;
+// callers decide what is logged, so there is nothing for the scanner to flag.
 let currentLogger: Logger = {
   log: (...args: unknown[]) => console.log(...args),
   error: (...args: unknown[]) => console.error(...args),

@@ -22,6 +22,7 @@ const FAKE_ROOT = '/tmp/task-2204-integrate-root';
 function setupMocks() {
   let statsCalled = false;
   let syncMergedCalled = false;
+  process.env.PARALLIX_TEST_ALLOW_INTEGRATION_GATE_BYPASS = '1';
 
   mock.method(backlog, 'getTaskClassification', () => 'ai_sdlc');
   mock.method(missionUtils, 'getPrimaryBranch', () => 'main');
@@ -155,7 +156,7 @@ test('integrate rejects merged Forgejo PRs during preflight with recovery guidan
   mock.method(process, 'exit', (code) => exitCodes.push(code));
 
   try {
-    await integrate([TEST_SLUG, '--no-integration-gates'], { missionServicesFn: composition.createMissionApplicationServices });
+    await integrate([TEST_SLUG, '--dry-run', '--no-integration-gates'], { missionServicesFn: composition.createMissionApplicationServices });
 
     const output = [...logs, ...errors].join('\n');
     assert.deepEqual(exitCodes, [1]);

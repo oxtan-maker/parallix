@@ -7,6 +7,7 @@ import {
   DEFAULT_INTEGRATION_MODE, integrationModeIssue, isIntegrationMode, parseIntegrationMode,
   type IntegrationMode,
 } from '../../domain/integration.js';
+import type { GithubPublishConfig } from '../../application/ports/github-publish.js';
 
 const REQUIRED_ADAPTER_KEYS = ['tasks', 'missions', 'verification', 'review', 'agents'] as const;
 
@@ -259,6 +260,22 @@ function validateAdapterSections(adapters: PlainObject, issues: string[]): void 
       if (key !== 'override') {
         issues.push('adapters.prompts may only contain "override"');
       }
+    }
+  }
+
+  const githubPublish = isPlainObject(adapters.githubPublish) ? adapters.githubPublish : null;
+  if (githubPublish) {
+    if ('enabled' in githubPublish && typeof githubPublish.enabled !== 'boolean') {
+      issues.push('adapters.githubPublish.enabled must be a boolean');
+    }
+    validateStringField(githubPublish, 'mainBranch', 'adapters.githubPublish.mainBranch', issues);
+    validateStringField(githubPublish, 'verificationRemote', 'adapters.githubPublish.verificationRemote', issues);
+    validateStringField(githubPublish, 'verificationRefPrefix', 'adapters.githubPublish.verificationRefPrefix', issues);
+    if ('pollIntervalMs' in githubPublish && (!Number.isInteger(githubPublish.pollIntervalMs) || (githubPublish.pollIntervalMs as number) < 1)) {
+      issues.push('adapters.githubPublish.pollIntervalMs must be a positive integer');
+    }
+    if ('maxPollAttempts' in githubPublish && githubPublish.maxPollAttempts !== null && (!Number.isInteger(githubPublish.maxPollAttempts) || (githubPublish.maxPollAttempts as number) < 1)) {
+      issues.push('adapters.githubPublish.maxPollAttempts must be a positive integer or null');
     }
   }
 
@@ -695,6 +712,21 @@ interface ReviewAdapterResult {
   remote: string | null;
   baseUrl: string | null;
   repo: string | null;
+}
+
+/** Resolve github-publish mode configuration. `enabled` is false when unset, so
+ * an unconfigured repository never publishes and its default behavior is
+ * byte-for-byte unchanged. */
+export function resolveGithubPublishConfig(rootDir: string = process.cwd()): GithubPublishConfig {
+  const cfg = loadAdapterConfig(rootDir).githubPublish as PlainObject | undefined || {};
+  return {
+    enabled: cfg.enabled === true,
+    mainBranch: typeof cfg.mainBranch === 'string' && cfg.mainBranch.trim() !== '' ? cfg.mainBranch : null,
+    verificationRemote: typeof cfg.verificationRemote === 'string' && cfg.verificationRemote.trim() !== '' ? cfg.verificationRemote : 'origin',
+    verificationRefPrefix: typeof cfg.verificationRefPrefix === 'string' && cfg.verificationRefPrefix.trim() !== '' ? cfg.verificationRefPrefix : 'github-publish',
+    pollIntervalMs: typeof cfg.pollIntervalMs === 'number' && Number.isInteger(cfg.pollIntervalMs) && cfg.pollIntervalMs > 0 ? cfg.pollIntervalMs : 30000,
+    maxPollAttempts: cfg.maxPollAttempts === null ? null : (typeof cfg.maxPollAttempts === 'number' && Number.isInteger(cfg.maxPollAttempts) && cfg.maxPollAttempts > 0 ? cfg.maxPollAttempts : null),
+  };
 }
 
 export function resolveReviewAdapter(rootDir: string = process.cwd()): ReviewAdapterResult {

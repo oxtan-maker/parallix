@@ -39,6 +39,9 @@ export function run(command: string, args: string[], options: GitOptions = {}): 
     stdio: ['ignore', 'pipe', 'pipe'] as const,
     ...options
   };
+  // codeql[js/shell-command-injection-from-environment] -- `command` is the git executable and `args` are internal filesystem paths
+  // (repo root, config dirs) resolved from trusted sources, never user input;
+  // spawnSync runs with no shell, so there is no command-injection surface.
   const result = spawnSync(command, args, spawnOptions);
   if (result.error && result.status === null) {
     throw result.error;

@@ -161,6 +161,7 @@ This is a tool for a local-first developer workflow on one machine, driven by an
 ```sh
 npm test
 npm run test:integration  # real process, Git/worktree, package, and local-network boundary coverage
+npm run test:codeql       # CodeQL SAST gate (javascript-typescript security/code-scanning), unconditional in the integration path
 ```
 
 The test suite is the verification gate this repo declares in `workflow.config.json`. Run it before integrating any change. Contributions follow the same mission lifecycle the tool itself runs: branch, worktree, checkpoints, a second review, and a passing gate before integration. To exercise the packaged artifact the way a user receives it: `npm pack && npm install -g ./magnusekdahl-parallix-*.tgz`.

@@ -1,6 +1,6 @@
 {
   "name": "@magnusekdahl/parallix",
-  "version": "1.5.116",
+  "version": "1.5.119",
   "description": "Trust ladder for AI coding work — separate review, configured verification, conditional Linux confinement, and human-owned merges",
   "license": "AGPL-3.0-or-later",
   "private": false,
@@ -54,6 +54,7 @@
     "test:lifecycle-e2e": "node --import tsx test/e2e-mission-lifecycle.test.ts",
     "test:ci": "npm run typecheck && npm run build && npm test && npm run test:integration:ci && npm run test:bundle && npm run test:package-content",
     "test:package-content": "tsx scripts/package-content-audit.ts",
+    "test:codeql": "bash scripts/codeql-sast.sh",
     "test:reproducible-output": "tsx scripts/verify-reproducible-build.ts",
     "test:coverage": "FORCE_COLOR=0 tsx src/adapters/verification/coverage-gate.ts --lcov",
     "typecheck": "tsc --noEmit && tsc --noEmit --project tsconfig.scripts.json",

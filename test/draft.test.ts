@@ -689,6 +689,72 @@ test('runDraftCommand records a non-primary launch branch over a previous base o
   }
 });
 
+// Draft start must not surface a classification [FAIL] status line when the task
+// has no classification label yet: the label is intentionally unset at start
+// (the draft prompt instructs the agent to set it) and the hard gate runs later
+// in postProcess via normalizeDraftClassification. Regression for task-2496.
+// The task file lives in the worktree: the scaffold step resolves the
+// classification against ctx.targetWorktree (the conventional worktree path), so
+// an unset label there yields the genuine "Missing or invalid classification"
+// error at the scaffold call site.
+test('runDraftCommand scaffold does not emit a classification FAIL for an unset label', async () => {
+  const root = tempGitRepoOnMain();
+  const missionFile = path.join(missionDirForSlug(root, 'task-noclass'), 'MISSION.md');
+  const worktree = path.join(root, 'task-noclass-worktree');
+  const taskFile = path.join(worktree, 'backlog', 'tasks', 'task-noclass - no class.md');
+  fs.mkdirSync(path.dirname(taskFile), { recursive: true });
+  fs.writeFileSync(taskFile, '---\nid: task-noclass\ntitle: no class\nlabels: []\n---\n');
+
+  const errors = [];
+  try {
+    await runDraftCommand(['task-noclass'], {
+      inferSlugFn: () => 'task-noclass',
+      resolveMainRepoFn: () => root,
+      conventionalWorktreePathFn: () => worktree,
+      ensureRepoExistsFn: () => true,
+      resolveTaskFileFn: () => ({ ok: true, taskFile, matches: [] }),
+      checkBacklogIntegrityFn: () => [],
+      detectLaunchBaseBranchFn: () => null,
+      ensureStandaloneMissionBaselineFn: () => ({ committed: false }),
+      ensureMissionBranchFn: () => {},
+      ensureWorktreeFn: () => {},
+      ensureGraphifyWorkspaceFn: () => {},
+      ensureGraphifyIgnoreFn: () => true,
+      ensureMissionFileFn: () => {
+        fs.mkdirSync(path.dirname(missionFile), { recursive: true });
+        fs.writeFileSync(missionFile, '# Mission: NoClass (task-noclass)\n\n## Goal\nDo the thing.\n');
+        return missionFile;
+      },
+      bootstrapBacklogTaskFn: () => true,
+      transitionTaskFn: () => true,
+      readAgentConfigOrExitFn: () => ({}),
+      selectAgentFn: () => 'codex',
+      startDraftAgentFn: async () => ({ agent: 'codex', result: { status: 0 } }),
+      missionServicesFn: async () => ({
+        repositoryId: 'main',
+        lifecycle: { transition: async () => ({ status: 'completed', value: { version: 1 }, durableEvidence: [] }) },
+        intake: { execute: async () => ({ status: 'completed', value: { version: 1 }, durableEvidence: [] }) },
+      }),
+      recordDraftImplementerFn: () => {},
+      enforceDraftCommitSafetyFn: () => false,
+      // Leave validateDraftClassificationFn unset so the real helper runs.
+      [normalizeKey]: () => ({ ok: true, [typeKey]: 'ai_sdlc' }),
+      exitFn: (code) => { throw new Error(`unexpected exit ${code}`); },
+      logFn: () => {},
+      errorFn: (msg) => { errors.push(String(msg)); },
+    });
+
+    // The scaffold step must not surface a classification FAIL at draft start.
+    assert.ok(
+      !errors.some((m) => /FAIL.*Missing or invalid classification/i.test(m)),
+      `scaffold must not emit a classification FAIL at draft start, captured: ${JSON.stringify(errors)}`,
+    );
+    // The draft is not blocked: the scaffold step returned without exiting.
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 // Re-drafting an existing mission worktree from the primary branch must reuse
 // the pre-existing mission branch (not rebuild it off the stale base) while still
 // correcting the recorded base to the primary branch.

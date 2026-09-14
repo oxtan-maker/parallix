@@ -139,6 +139,17 @@ const expectedIntegrationFiles = [
   // Loopback-only with injected dispatcher spy and projection builder.
   'task-2433-web-mutation.integration.test.ts',
       'test-hygiene.test.ts',
+  // TASK-2502: the CodeQL clean-cache bootstrap test shells out to the runner
+  // (bash) to prove a fresh cache directory bootstraps the pinned CLI, so it
+  // crosses the process boundary and runs only in the integration layer.
+  'task-2502-codeql-clean-cache.test.ts',
+  // TASK-2502: the --suite flag regression test shells out to the runner (bash)
+  // to prove the documented two-argument form parses, so it crosses the process
+  // boundary and runs only in the integration layer.
+  'task-2502-codeql-suite-flag.test.ts',
+  // TASK-2507: routes a failed integration gate against a temporary Git
+  // repository to prove the base worktree stays clean.
+  'task-2507-mainline-gate-mutation-repro.test.ts',
   'tui-pty-smoke.test.ts', 'task-2313-repro.test.ts', 'task-2370-repro.test.ts',
   'tui-command-flow.test.ts',
   'tui-spawn.test.ts',

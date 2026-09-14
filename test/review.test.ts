@@ -499,9 +499,10 @@ test('verifyReview handles gate failures', async () => {
   const logs = [];
   const exitCodes = [];
 
-  // The reviewer gate resolves its command from process.cwd(); the default is
-  // no validation, so configure a gate in a temp cwd to exercise the failure
-  // path (the injected runFn makes that gate command fail).
+  // The reviewer gate resolves its command from the review root (cwdFn when no
+  // worktree resolves); the default is no validation, so configure a gate in a
+  // temp root to exercise the failure path (the injected runFn makes that gate
+  // command fail).
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'review-gate-'));
   fs.writeFileSync(
     path.join(tmp, 'workflow.config.json'),

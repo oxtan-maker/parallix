@@ -13,17 +13,11 @@
 // ---------------------------------------------------------------------------
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import fs from 'node:fs';
-import os from 'node:os';
-import path from 'node:path';
-
 import {
   INTEGRATION_GATE_REBOUND_LIMIT,
   INTEGRATION_GATE_REBOUND_EVENT,
-  createMainlineGateTask,
   integrationGateFailureReason,
   integrationOnlyCoverageNote,
-  mainlineGateTaskId,
   probeBaseBranchReproduction,
   routeIntegrationGateFailure,
   type IntegrationGateRouteOptions,
@@ -166,55 +160,12 @@ test('TASK-2492: a gate that passes on the base branch is reported as a mission 
   assert.match(probe.detail, /mission regression/);
 });
 
-// ── Mainline problem ticket ─────────────────────────────────────────────────
-
-test('TASK-2492: the mainline task identity is derived from the gate key and the base commit', () => {
-  const a = mainlineGateTaskId('integration-suite', 'abc123');
-  assert.equal(a, mainlineGateTaskId('integration-suite', 'abc123'), 'deterministic for the same base commit');
-  assert.notEqual(a, mainlineGateTaskId('integration-suite', 'def456'), 'a different base commit is a different problem');
-  assert.notEqual(a, mainlineGateTaskId('workflow', 'abc123'), 'a different gate is a different problem');
-  assert.match(a, /^TASK-MAINGATE-[0-9A-F]{8}$/, 'outside the numeric TASK-NNNN range that backlog counters hand out');
-});
-
-test('TASK-2492: the mainline task is written once and re-resolves instead of duplicating', () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'parallix-2492-'));
-  try {
-    fs.mkdirSync(path.join(root, 'backlog', 'tasks'), { recursive: true });
-    const args = {
-      baseWorktree: root,
-      baseBranch: 'main',
-      baseCommit: 'abc123def456',
-      slug: SLUG,
-      failedGate: failedGate(),
-      gateError: 'Repository gate "integration-suite" exited with code 1 for integration.',
-      gitFn: (() => okRun) as never,
-      log: () => {},
-    };
-    const first = createMainlineGateTask(args);
-    assert.equal(first.created, true);
-    const body = fs.readFileSync(first.taskFile as string, 'utf8');
-    assert.match(body, new RegExp(`id: ${first.taskId}`));
-    assert.match(body, /status: backlog/);
-    assert.match(body, /Gate command: `npm run test:integration`/);
-    assert.match(body, /Reproduced on: `main` @ abc123def456/);
-    assert.match(body, new RegExp(SLUG));
-
-    const second = createMainlineGateTask(args);
-    assert.equal(second.created, false, 'the same mainline problem is not ticketed twice');
-    assert.equal(second.taskId, first.taskId);
-    assert.equal(fs.readdirSync(path.join(root, 'backlog', 'tasks')).length, 1);
-  } finally {
-    fs.rmSync(root, { recursive: true, force: true });
-  }
-});
-
 // ── Routing: the four operator-facing outcomes ──────────────────────────────
 
 interface Harness {
   launches: number;
   transitions: string[];
   recorded: Array<{ slug: string; gate: string }>;
-  mainlineTasks: string[];
   messages: string[];
 }
 
@@ -236,7 +187,6 @@ function routeArgs(over: Partial<IntegrationGateRouteOptions> & { spent?: number
     readReboundsFn: async () => spent,
     recordReboundFn: async (slug: string, facts: any) => { harness.recorded.push({ slug, gate: facts.gate }); return true; },
     probeBaseBranchReproductionFn: (async () => ({ checked: true, reproduced: false, detail: 'passes on main', baseCommit: 'abc123' })) as never,
-    createMainlineGateTaskFn: ((o: any) => { harness.mainlineTasks.push(o.baseCommit); return { taskId: mainlineGateTaskId(o.failedGate.key, o.baseCommit), taskFile: '/tmp/base/backlog/tasks/x.md', created: true }; }) as never,
     captureFinalTreeFn: (() => ({ ok: true, rootDir: '/tmp/mission', commit: 'c', tree: 't' })) as never,
     runPhaseGatesFn: (async (_p: string, o: any) => (rerunOk
       ? { ok: true, phase: 'integration', gates: o.gates, executed: 1, skipped: false, dryRun: false, failedGate: null, error: null }
@@ -250,7 +200,7 @@ function routeArgs(over: Partial<IntegrationGateRouteOptions> & { spent?: number
 }
 
 function harness(): Harness {
-  return { launches: 0, transitions: [], recorded: [], mainlineTasks: [], messages: [] };
+  return { launches: 0, transitions: [], recorded: [], messages: [] };
 }
 
 test('TASK-2492: a mission regression inside budget bounces once, re-runs the gates, and reports fixed', async () => {
@@ -269,7 +219,7 @@ test('TASK-2492: a bounce whose re-run stays red reports exhausted without a sec
   assert.equal(h.launches, 1, 'one relaunch per px integrate invocation');
 });
 
-test('TASK-2492: a gate failure reproducing on main creates one backlog task and never bounces', async () => {
+test('TASK-2492/TASK-2507: a gate failure reproducing on main reports the evidence and never bounces', async () => {
   const h = harness();
   const route = await routeIntegrationGateFailure(routeArgs({
     spent: 0,
@@ -279,7 +229,8 @@ test('TASK-2492: a gate failure reproducing on main creates one backlog task and
   assert.equal(h.launches, 0, 'a main problem never launches an implementer');
   assert.deepEqual(h.transitions, [], 'a main problem never transitions the mission to active');
   assert.deepEqual(h.recorded, [], 'a main problem spends no integration-gate rebound budget');
-  assert.deepEqual(h.mainlineTasks, ['abc123'], 'exactly one mainline problem task');
+  assert.match(h.messages.join('\n'), /also fails on main/, 'the gate evidence is reported');
+  assert.doesNotMatch(h.messages.join('\n'), /MAINGATE/, 'no backlog identifier is fabricated');
   assert.match(h.messages.join('\n'), /Human action required/);
 });
 
@@ -308,7 +259,7 @@ test('TASK-2492: an undeterminable base-branch reproduction is treated as a miss
   }, h));
   assert.equal(route.route, 'fixed');
   assert.equal(h.launches, 1, 'an undeterminable probe still takes the recoverable route');
-  assert.deepEqual(h.mainlineTasks, [], 'and never invents a mainline problem from an unclassified failure');
+  assert.notEqual(route.route, 'mainline', 'and never invents a mainline problem from an unclassified failure');
 });
 
 test('TASK-2492: a repair left uncommitted fails the re-run instead of being reported as fixed', async () => {

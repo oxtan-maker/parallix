@@ -67,6 +67,9 @@ test('web card renders received checkpoint, PR link, and review round from the w
 
   assert.ok(html.includes('Checkpoint CP-2 (gate passed)'), `expected the received checkpoint label with .md stripped and gate state, got: ${html}`);
   // renderToString inserts <!-- --> comment nodes between text segments; strip them before comparing.
+  // js/incomplete-multi-character-sanitization: test-only strip of React's
+  // <!-- --> comment nodes before string comparison; output is asserted, not
+  // rendered to a browser. Not an XSS sink.
   const anchor = html.match(/<a\b[^>]*>[\s\S]*?<\/a>/)?.[0] ?? '';
   assert.ok(anchor.includes('href="https://example.invalid/pr/42"'), `expected an anchor with the received pullRequest.url, got: ${html}`);
   assert.ok(anchor.replace(/<!--[\s\S]*?-->/g, '').includes('PR #42'), `expected the PR id as anchor text, got: ${anchor}`);

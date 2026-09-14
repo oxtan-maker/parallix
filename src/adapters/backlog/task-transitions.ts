@@ -3,7 +3,8 @@ import path from 'path';
 import { git } from '../git/git.js';
 import * as fmt from '../../application/presentation/cli-format.js';
 import { clearTaskAgentAssignee, enforceTaskAssignee, parseAssigneeFamilies } from './task-metadata.js';
-import { commitTaskFileUpdate, getTaskStorage, resolveStableRepositoryId, resolveTaskFile } from './task-file-io.js';
+import { commitTaskFileUpdate, getTaskStorage, resolveTaskFile } from './task-file-io.js';
+import { resolveCanonicalRepositoryId } from '../git/repository-identity.js';
 import { isMissionArtifact, missionPathForSlug, resolveBaseWorktree, resolveMissionBaseBranch, resolveWorktree } from '../filesystem/mission-utils.js';
 
 function parseTaskStatus(content: string) {
@@ -196,7 +197,7 @@ async function reconcileExternalMissionLifecycle(slug: string, newStatus: string
       const store = new SqliteMissionStore(db);
       const read = await store.load(missionId(slug));
       if (read.kind === 'found'
-        && read.mission.repositoryId === resolveStableRepositoryId(rootDir)
+        && read.mission.repositoryId === resolveCanonicalRepositoryId(rootDir)
         && read.mission.closedAt === null) {
         await store.save({ ...read.mission, status, closedAt: null }, read.version);
       }
