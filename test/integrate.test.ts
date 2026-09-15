@@ -137,6 +137,7 @@ const {
   captureFinalIntegrationTree,
   parseIntegrateArgs,
   runPostIntegrateHookOrAbort,
+  runPreCommitHookOrAbort,
   prepareNoisePatchForSquash
 } = maybeUpdateGraphifyOnPrimaryModule;
 const { conventionalWorktreePath, getPrimaryBranch } = missionUtils;
@@ -959,6 +960,81 @@ test('runPostIntegrateHookOrAbort logs a pass and the hook output on success', (
     assert.match(combined, /bumped to 1\.3\.5/);
   } finally {
     console.log = originalLog;
+  }
+});
+
+test('runPreCommitHookOrAbort commits only the tracked files the hook modified onto the mission branch (task-2510)', () => {
+  const gitCalls = [];
+  let hookParams;
+  let diffCalls = 0;
+  const gitRunner = (args) => {
+    gitCalls.push(args);
+    if (args.includes('diff')) {
+      return { status: 0, stdout: diffCalls++ === 0 ? 'unrelated-dirty.txt\n' : 'unrelated-dirty.txt\npackage.json\npackage-lock.json\n' };
+    }
+    return { status: 0, stdout: '' };
+  };
+  const originalLog = console.log;
+  console.log = () => {};
+  try {
+    runPreCommitHookOrAbort('task-2510', {
+      missionWorktree: '/mission',
+      baseWorktree: FAKE_ROOT,
+      baseBranch: 'main',
+      variant: 'variant-b',
+      gitRunner,
+      runPreCommitHookFn: (params) => {
+        hookParams = params;
+        return { ran: true, ok: true, command: './scripts/bump-version.sh', output: '', exitCode: 0 };
+      }
+    });
+  } finally {
+    console.log = originalLog;
+  }
+  assert.equal(hookParams.cwd, '/mission');
+  assert.equal(hookParams.baseBranch, 'main');
+  const commits = gitCalls.filter(args => args.includes('commit'));
+  assert.deepEqual(commits, [['-C', '/mission', 'commit', '--only', '-m', 'chore(task-2510): integrate pre-commit hook', '--', 'package.json', 'package-lock.json']]);
+});
+
+test('runPreCommitHookOrAbort creates no commit when the hook changes nothing (task-2510)', () => {
+  const gitCalls = [];
+  const originalLog = console.log;
+  console.log = () => {};
+  try {
+    runPreCommitHookOrAbort('task-2510', {
+      missionWorktree: '/mission',
+      baseWorktree: FAKE_ROOT,
+      baseBranch: 'main',
+      variant: 'variant-b',
+      gitRunner: (args) => { gitCalls.push(args); return { status: 0, stdout: '' }; },
+      runPreCommitHookFn: () => ({ ran: true, ok: true, command: './scripts/bump-version.sh', output: '', exitCode: 0 })
+    });
+  } finally {
+    console.log = originalLog;
+  }
+  assert.equal(gitCalls.filter(args => args.includes('commit')).length, 0);
+});
+
+test('runPreCommitHookOrAbort aborts before the integration gates when the hook fails (task-2510)', () => {
+  const errors = [];
+  const originalError = console.error;
+  console.error = message => errors.push(message);
+  try {
+    assert.throws(
+      () => runPreCommitHookOrAbort('task-2510', {
+        missionWorktree: '/mission',
+        baseWorktree: FAKE_ROOT,
+        baseBranch: 'main',
+        variant: 'variant-b',
+        gitRunner: () => ({ status: 0, stdout: '' }),
+        runPreCommitHookFn: () => ({ ran: true, ok: false, command: './scripts/bump-version.sh', output: 'not MAJOR.MINOR.PATCH', exitCode: 1 })
+      }),
+      error => error.constructor.name === 'IntegrationAbort'
+    );
+    assert.match(errors.join('\n'), /Pre-commit hook failed \(exit code 1\)/);
+  } finally {
+    console.error = originalError;
   }
 });
 

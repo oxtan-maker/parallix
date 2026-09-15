@@ -6,7 +6,7 @@ import assert from 'node:assert/strict';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
-import { resolvePostIntegrateCommand, buildPostIntegrateHookEnv, runPostIntegrateHook, } from '../src/adapters/process/post-integrate-hook.js';
+import { resolvePostIntegrateCommand, resolvePreCommitCommand, buildPostIntegrateHookEnv, runPostIntegrateHook, runPreCommitHook, } from '../src/adapters/process/post-integrate-hook.js';
 function withTempDir(fn) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'workflow-post-integrate-hook-'));
   try {
@@ -119,4 +119,24 @@ test('runPostIntegrateHook reports a non-zero exit as a failed hook, not thrown'
   assert.equal(result.ok, false);
   assert.equal(result.exitCode, 3);
   assert.equal(result.output, 'permission denied');
+});
+
+test('resolvePreCommitCommand reads preCommitCommand independently of postIntegrateCommand', () => {
+  withTempDir(root => {
+    fs.writeFileSync(path.join(root, 'workflow.config.json'), JSON.stringify({
+      adapters: { integrate: { preCommitCommand: ' ./scripts/bump-version.sh ', postIntegrateCommand: './scripts/refresh-px.sh' } },
+    }));
+    assert.equal(resolvePreCommitCommand(root), './scripts/bump-version.sh');
+    assert.equal(resolvePostIntegrateCommand(root), './scripts/refresh-px.sh');
+  });
+});
+
+test('runPreCommitHook resolves the pre-commit command from the base worktree', () => {
+  withTempDir(root => {
+    fs.writeFileSync(path.join(root, 'workflow.config.json'), JSON.stringify({
+      adapters: { integrate: { postIntegrateCommand: './scripts/refresh-px.sh' } },
+    }));
+    const runFn = () => { throw new Error('no pre-commit command is configured'); };
+    assert.deepEqual(runPreCommitHook({ slug: 'task-2510', baseWorktree: root, baseBranch: 'main', variant: 'variant-b', runFn }), { ran: false, ok: true });
+  });
 });

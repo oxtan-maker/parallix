@@ -1,10 +1,11 @@
 ---
 id: TASK-2509
 title: Implement GitHub-native CD while retaining local version allocation
-status: backlog
-assignee: []
+status: done
+assignee: [codex]
 created_date: '2026-09-14 11:54'
-labels: []
+labels:
+  - ai_sdlc
 dependencies: []
 ordinal: 75007
 ---

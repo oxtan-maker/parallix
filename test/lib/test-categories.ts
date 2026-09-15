@@ -192,6 +192,8 @@ export const INTEGRATION_CI_TESTS: readonly string[] = [
   // TASK-2507: runs failed-gate routing against a temporary Git repository to
   // prove the base worktree stays clean, so it crosses the git boundary.
   'task-2507-mainline-gate-mutation-repro.test.ts',
+  'task-2509-local-version-allocation.test.ts',
+  'task-2509-release-workflow.test.ts',
   'test-hygiene.test.ts',
   'tui-command-flow.test.ts',
   'tui-pty-smoke.test.ts',

@@ -150,6 +150,7 @@ const expectedIntegrationFiles = [
   // TASK-2507: routes a failed integration gate against a temporary Git
   // repository to prove the base worktree stays clean.
   'task-2507-mainline-gate-mutation-repro.test.ts',
+  'task-2509-local-version-allocation.test.ts', 'task-2509-release-workflow.test.ts',
   'tui-pty-smoke.test.ts', 'task-2313-repro.test.ts', 'task-2370-repro.test.ts',
   'tui-command-flow.test.ts',
   'tui-spawn.test.ts',

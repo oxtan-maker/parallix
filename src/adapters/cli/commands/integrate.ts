@@ -199,6 +199,7 @@ export {
   recordPostIntegrationStatsOrAbort,
   persistLandedIntegrationOrAbort,
   runPostIntegrateHookOrAbort,
+  runPreCommitHookOrAbort,
   cleanupMissionWorktree,
 } from './integrate-post.js';
 
@@ -215,6 +216,7 @@ import {
   recordPostIntegrationStatsOrAbort,
   persistLandedIntegrationOrAbort,
   runPostIntegrateHookOrAbort,
+  runPreCommitHookOrAbort,
   cleanupMissionWorktree,
 } from './integrate-post.js';
 
@@ -309,6 +311,7 @@ export interface IntegrateFn extends Function {
   recordPostIntegrationStats: typeof recordPostIntegrationStats;
   recordPostIntegrationStatsOrAbort: typeof recordPostIntegrationStatsOrAbort;
   runPostIntegrateHookOrAbort: typeof runPostIntegrateHookOrAbort;
+  runPreCommitHookOrAbort: typeof runPreCommitHookOrAbort;
   formatRecordedStatsRow: typeof formatRecordedStatsRow;
   detectChangedAreas: typeof detectChangedAreas;
   parseFilesToAreas: typeof parseFilesToAreas;
@@ -494,6 +497,17 @@ async function integrate(args: string[], options: {
         }
       } else {
         await runIntegrationRebase(slug, { baseWorktree, baseBranch, git, missionServicesFn });
+        // Repo-owned metadata such as a version bump is committed onto the
+        // rebased mission branch here, so it is computed from the current base,
+        // verified by the gates below, and squashed into the one mission commit.
+        // Amending after landing is not an option: Forgejo sync, closeout, and
+        // github-publish all bind to the landed commit SHA.
+        runPreCommitHookOrAbort(slug, {
+          missionWorktree: resolveIntegrationVerificationWorktree(slug, { baseWorktree }),
+          baseWorktree,
+          baseBranch,
+          variant: 'variant-b',
+        });
       }
 
       // Resolve the repository's integration mode and build the capability
@@ -2086,6 +2100,7 @@ function printIntegrationPreflight(
 (integrate as any).recordPostIntegrationStats = recordPostIntegrationStats;
 (integrate as any).recordPostIntegrationStatsOrAbort = recordPostIntegrationStatsOrAbort;
 (integrate as any).runPostIntegrateHookOrAbort = runPostIntegrateHookOrAbort;
+(integrate as any).runPreCommitHookOrAbort = runPreCommitHookOrAbort;
 (integrate as any).formatRecordedStatsRow = formatRecordedStatsRow;
 (integrate as any).detectChangedAreas = detectChangedAreas;
 (integrate as any).parseFilesToAreas = parseFilesToAreas;

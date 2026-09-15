@@ -243,16 +243,30 @@ The related branch-model and pre-integration-gate boundaries are described in
 
 ## Integrate
 
-`adapters.integrate.postIntegrateCommand` is an optional string with no default.
-After a successful non-dry-run integration, Parallix runs it once from the base
-checkout. The command receives `INTEGRATE_HOOK_SLUG`,
+Both integrate hooks are optional strings with no default. Each runs from the
+base checkout and receives `INTEGRATE_HOOK_SLUG`,
 `INTEGRATE_HOOK_BASE_WORKTREE`, `INTEGRATE_HOOK_BASE_BRANCH`, and
-`INTEGRATE_HOOK_VARIANT` in its environment.
+`INTEGRATE_HOOK_VARIANT` in its environment. A failing hook aborts the
+integration.
+
+- `adapters.integrate.preCommitCommand` runs in the mission worktree after the
+  mission is rebased onto its base branch and before the integration gates.
+  Tracked files it modifies are committed onto the mission branch, so the gates
+  verify them and they land inside the mission's squash commit. Use it for
+  repository metadata that must land with the mission, such as a version bump,
+  so each mission lands as exactly one commit. Make it idempotent: a retried
+  integration runs it again. A dry run does not run it.
+- `adapters.integrate.postIntegrateCommand` runs once after a successful
+  non-dry-run integration. The landed commit is already final at this point, so
+  the command must not commit.
 
 ```json
 {
   "adapters": {
-    "integrate": { "postIntegrateCommand": "./scripts/refresh-px.sh" }
+    "integrate": {
+      "preCommitCommand": "./scripts/bump-version.sh",
+      "postIntegrateCommand": "./scripts/refresh-px.sh"
+    }
   }
 }
 ```

@@ -43,11 +43,6 @@ const logPath = ${JSON.stringify(logPath)};
 const args = process.argv.slice(2);
 fs.appendFileSync(logPath, 'npm ' + args.join(' ') + '\\n');
 
-if (args[0] === 'version' && args[1] === 'patch') {
-  process.stdout.write('v1.0.1\\n');
-  process.exit(0);
-}
-
 if (args[0] === 'run' && args[1] === 'build') {
   process.exit(0);
 }
@@ -114,10 +109,6 @@ test('refresh-global-px.sh still fails closed when npm pack itself fails', () =>
   const fixture = setupFixture();
   writeExecutable(path.join(fixture.binDir, 'npm'), `#!/usr/bin/env node
 const args = process.argv.slice(2);
-if (args[0] === 'version' && args[1] === 'patch') {
-  process.stdout.write('v1.0.1\\n');
-  process.exit(0);
-}
 if (args[0] === 'run' && args[1] === 'build') {
   process.exit(0);
 }

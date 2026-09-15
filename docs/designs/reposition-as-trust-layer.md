@@ -161,8 +161,8 @@ Scope of A:
 
 Already published to npm as `@magnusekdahl/parallix`; Approach A changes the pitch,
 not the channel. The npm page and README *are* the distribution surface, which is
-exactly why A is the highest-leverage cheap change. No CI/release automation today —
-each repositioning edit requires a manual publish.
+exactly why A is the highest-leverage cheap change. The verified main release flow
+publishes the version committed with each integrated mission.
 
 ## The Assignment
 

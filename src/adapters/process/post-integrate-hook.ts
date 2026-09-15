@@ -12,6 +12,8 @@ export interface PostIntegrateHookParams {
   baseWorktree: string;
   baseBranch: string;
   variant: string;
+  /** Directory to resolve config from and run in; defaults to baseWorktree. */
+  cwd?: string;
   processEnv?: NodeJS.ProcessEnv;
   runFn?: (_cmd: string, _args: string[], _options: Record<string, unknown>) => { status: number | null; stdout: string; stderr: string };
   resolveCommandFn?: (_rootDir: string) => string | null;
@@ -25,13 +27,20 @@ export interface PostIntegrateHookResult {
   exitCode?: number | null;
 }
 
-export function resolvePostIntegrateCommand(rootDir: string = process.cwd()): string | null {
+function resolveIntegrateCommand(rootDir: string, key: 'preCommitCommand' | 'postIntegrateCommand'): string | null {
   const config = loadAdapterConfig(rootDir);
-  const integrateAdapter = (config.integrate as { postIntegrateCommand?: unknown }) || {};
-  const command = typeof integrateAdapter.postIntegrateCommand === 'string' && integrateAdapter.postIntegrateCommand.trim()
-    ? integrateAdapter.postIntegrateCommand.trim()
-    : null;
-  return command;
+  const value = ((config.integrate as Record<string, unknown>) || {})[key];
+  return typeof value === 'string' && value.trim() ? value.trim() : null;
+}
+
+export function resolvePostIntegrateCommand(rootDir: string = process.cwd()): string | null {
+  return resolveIntegrateCommand(rootDir, 'postIntegrateCommand');
+}
+
+// adapters.integrate.preCommitCommand runs before the landed squash commit is
+// created, so repo-owned metadata (e.g. a version bump) lands inside it.
+export function resolvePreCommitCommand(rootDir: string = process.cwd()): string | null {
+  return resolveIntegrateCommand(rootDir, 'preCommitCommand');
 }
 
 export function buildPostIntegrateHookEnv(params: PostIntegrateHookParams): NodeJS.ProcessEnv {
@@ -50,7 +59,8 @@ export function buildPostIntegrateHookEnv(params: PostIntegrateHookParams): Node
 // so no shared invocation counter is needed).
 export function runPostIntegrateHook(params: PostIntegrateHookParams): PostIntegrateHookResult {
   const resolveCommandFn = params.resolveCommandFn || resolvePostIntegrateCommand;
-  const command = resolveCommandFn(params.baseWorktree);
+  const cwd = params.cwd || params.baseWorktree;
+  const command = resolveCommandFn(cwd);
   if (!command) {
     return { ran: false, ok: true };
   }
@@ -58,7 +68,7 @@ export function runPostIntegrateHook(params: PostIntegrateHookParams): PostInteg
   const runFn = params.runFn || ((cmd: string, args: string[], options: Record<string, unknown>) => child_process.spawnSync(cmd, args, options as child_process.SpawnSyncOptions) as unknown as { status: number | null; stdout: string; stderr: string });
   const env = buildPostIntegrateHookEnv(params);
   const result = runFn('bash', ['-lc', command], {
-    cwd: params.baseWorktree,
+    cwd,
     env,
     encoding: 'utf8'
   });
@@ -66,4 +76,8 @@ export function runPostIntegrateHook(params: PostIntegrateHookParams): PostInteg
   const output = [result.stdout, result.stderr].filter(Boolean).join('\n').trim();
   const exitCode = result.status;
   return { ran: true, ok: exitCode === 0, command, output, exitCode };
+}
+
+export function runPreCommitHook(params: PostIntegrateHookParams): PostIntegrateHookResult {
+  return runPostIntegrateHook({ ...params, resolveCommandFn: params.resolveCommandFn || resolvePreCommitCommand });
 }

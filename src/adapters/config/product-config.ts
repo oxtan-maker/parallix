@@ -244,6 +244,7 @@ function validateAdapterSections(adapters: PlainObject, issues: string[]): void 
 
   const integrate = isPlainObject(adapters.integrate) ? adapters.integrate : null;
   if (integrate) {
+    validateStringField(integrate, 'preCommitCommand', 'adapters.integrate.preCommitCommand', issues);
     validateStringField(integrate, 'postIntegrateCommand', 'adapters.integrate.postIntegrateCommand', issues);
   }
 

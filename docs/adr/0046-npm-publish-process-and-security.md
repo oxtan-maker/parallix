@@ -10,10 +10,8 @@ Related: ADR 0044 (Workflow Distribution Model), task-1340 (make parallix publis
 ADR 0044 established the distribution stance as "local npm tarball, globally installed `px` CLI" and deferred concrete npm registry publication. parallix was pushed to public GitHub on 2026-06-22 (task-1322). The repo is now public and the operator wants a credible, secure, single-command install path before inviting external use.
 
 The package is distributed under AGPL-3.0-or-later and uses `access: public` in
-`publishConfig`. The operator publishes manually — no CI/release automation is
-in scope. This ADR documents the decision to adopt public npm registry
-publication, the authentication requirements, and the pre-publish verification
-process.
+`publishConfig`. A trusted GitHub Actions release publishes the version already
+committed on protected `main`; GitHub never allocates or edits that version.
 
 The original built-ins-only claim is superseded. The canonical bundle includes
 audited third-party code such as Ink and React, and ADR 0054 permits additional
@@ -27,18 +25,19 @@ The `@magnusekdahl` scope was verified on the npm registry (task-1340 CP-0) and 
 
 **Adopt public npm registry publication for parallix as `@magnusekdahl/parallix`, alongside the existing local tarball install path.**
 
-The operator performs `npm publish` manually from a verified local checkout. The decision is bounded: no CI/release automation, no dist-tag management beyond the `latest` tag. The publish process is manual, repeatable, and documented here. Packages published to the public npm registry are automatically signed with ECDSA registry signatures — no publisher action required.
+Parallix allocates the next patch version locally as part of the landed mission
+commit. After `ci-required` verifies a push to protected `main`, GitHub Actions
+checks out that exact SHA, validates its declared version, runs the package
+lifecycle, publishes through npm Trusted Publishing with provenance, then creates
+the matching tag and GitHub Release. No dist-tag management beyond `latest` is in
+scope.
 
 ### Authentication requirement
 
-Publishing scoped public packages to npm requires one of the following:
-
-- **Two-factor authentication (2FA)** enabled on the npm account, or
-- **A granular access token (GAT) with bypass 2FA enabled**
-
-Both options are documented in the npm docs for scoped public packages. The operator uses 2FA on their npm account for interactive publishing (`npm publish --access public`), which triggers an OTP prompt. This is the default and recommended approach for manual publishing.
-
-An alternative is staged publishing (`npm stage publish` followed by `npm stage approve`), which allows a CI workflow to submit a package to staging without 2FA, then requires 2FA only for the manual approval step. Since parallix has no CI automation, direct publishing is simpler and sufficient.
+Publishing uses npm Trusted Publishing through the GitHub Actions OIDC identity.
+The repository owner configures that trust relationship in npm; the repository
+contains no npm token, automation token, PAT, password, private signing key, or
+provenance-disable switch.
 
 ### Security posture enabling this decision
 
@@ -56,16 +55,16 @@ An alternative is staged publishing (`npm stage publish` followed by `npm stage 
 The following procedures are consequences of this decision, not decisions themselves:
 
 1. **Pre-publish verification:** `npm pack --dry-run` inspects the file listing before each publish. The operator verifies all exclusion patterns are absent.
-2. **Version drift between integrations:** the version on disk is not operator-controlled. `scripts/refresh-global-px.sh` is wired as the post-integrate hook (`adapters.integrate.postIntegrateCommand` in `workflow.config.json`) and runs from the base checkout after every successful non-dry-run `px integrate`. It bumps the patch version (`npm version patch --no-git-tag-version`), commits the bump, rebuilds the canonical bundle, packs a tarball, and installs it globally. It does **not** publish to the npm registry. Any mission that lands therefore moves the version, including between the moment the operator decides to publish and the moment they publish.
-3. **Quiescing before a publish sequence:** concurrent mission integrations are drained or parked before a publish sequence begins, so the hook cannot bump the version mid-sequence. "Parked" means no mission is permitted to reach `px integrate` until the sequence completes.
-4. **Manual publish sequence:** Clean working tree → drain or park concurrent integrations → read the on-disk version immediately before this publish → `npm pack --dry-run` → `npm publish --access public` → post-publish verification → git tag. The version is read fresh at each publish rather than carried over from an earlier step, because the post-integrate hook may have changed it.
-5. **Distinct version per publish in a multi-step sequence:** npm rejects a publish at a version that already exists on the registry. A sequence that publishes more than once therefore needs a distinct version for every publish by construction; step 4's version read is repeated for each one.
-6. **Post-publish verification against the live registry:** some properties are observable only on the published registry page and cannot be checked from a local checkout or from `npm pack --dry-run`. After each publish the operator opens the package page on npmjs.com and checks:
+2. **Local version allocation:** the version is not operator-controlled. Parallix's integrate pre-commit hook (`adapters.integrate.preCommitCommand`) allocates one local patch version on the mission branch after it is rebased onto the base branch and before the integration gates, so the gates verify matching package metadata and the mission lands as one commit. The base branch version is authoritative: allocation never moves the version backwards, and a retried integration keeps an already-allocated newer version. Allocation is repository configuration, not built-in `px integrate` behavior. The subsequent post-integrate self-update rebuilds and reinstalls the CLI without committing or publishing.
+3. **Collision handling:** independently prepared missions can propose the same patch version. The release path never repairs this in GitHub: a stale or foreign version/tag state fails closed and the losing mission is reintegrated and allocated locally.
+4. **Trusted publication sequence:** the release job accepts only a successful `ci-required` main push, checks out its triggering SHA, and rejects invalid, unequal, stale, already-foreign-published, or tag-colliding versions. It does not calculate a replacement version.
+5. **Package and provenance:** after deterministic installation, the trusted checkout completes `prepack` and `prepublishOnly` before npm publishes the declared version to npmjs.org with provenance. The workflow has release-only OIDC and repository-write authority.
+6. **Tag and release:** after publication, the matching `v<version>` tag and GitHub Release identify the same trusted SHA. A rerun may complete a partial release only when both existing npm and tag state identify that SHA; otherwise it fails closed for local reintegration and allocation.
+7. **Post-publish verification against the live registry:** some properties are observable only on the published registry page and cannot be checked from a local checkout or from `npm pack --dry-run`. After each publish the operator opens the package page on npmjs.com and checks:
    - **README demo-image rendering:** the tarball ships `README.md` but not `docs/assets/` (the `files` allowlist in `package.json` covers `NOTICES`, `build/`, `LICENSE`, and `README.md`), so a relative image path has no target inside the package. The README therefore references the demo image by absolute `https://raw.githubusercontent.com/.../main/docs/assets/first-value-demo.gif` URL. The operator confirms the image actually renders on the registry page: the URL is fetched from the public repository at publish time, so a repository rename, a branch rename, or a moved asset breaks it silently in the published README while the local checkout still looks correct.
    - **First-screen image loading:** the demo image is several megabytes and sits on the first screen of the README, so the operator checks how the top of the page behaves while it loads, on a throttled connection.
-7. **Download-count baseline before a repositioning publish:** the operator records the package's current npm download count before the first publish that carries the trust-layer repositioning pitch. The repositioning experiment's kill criterion in `docs/designs/reposition-as-trust-layer.md` is that people read the new pitch and none install; without a count captured before the publish, there is no baseline to compare installations against and the criterion cannot be evaluated.
-8. **Token security:** npm tokens are stored in `~/.npmrc` only, never committed. Fine-grained tokens with minimal permissions are used.
-9. **Content audit:** An automated grep script checks `npm pack --dry-run` output against known exclusion patterns.
+8. **Download-count baseline before a repositioning publish:** the operator records the package's current npm download count before the first publish that carries the trust-layer repositioning pitch. The repositioning experiment's kill criterion in `docs/designs/reposition-as-trust-layer.md` is that people read the new pitch and none install; without a count captured before the publish, there is no baseline to compare installations against and the criterion cannot be evaluated.
+9. **Content audit:** An automated package-content check remains part of the package lifecycle.
 
 These procedures are operational guidance. They are subject to change as the operator gains experience with the publish process. They are not architectural decisions.
 
@@ -76,7 +75,7 @@ These procedures are operational guidance. They are subject to change as the ope
 | A: Public npm registry | One command: `npm install -g @magnusekdahl/parallix` | Shortest install; matches public repo expectations | Operator token risk managed by 2FA; npm permanence | Matches ADR 0044's canonical audited bundle; public repo warrants public install path | **Accept** |
 | B: Private npm scope first, then public | Same install after switch | Initial publish is invisible; allows verification | Two publish cycles; potential version confusion | No concrete security concern justifies extra step | Defer — only if a concrete security concern emerges |
 | C: Continue tarball-only | Two commands: `npm pack && npm install -g ./magnus-parallix-*.tgz` | Maximum operator control; no registry involvement | Higher friction; does not meet credibility bar for public repo | Consistent with ADR 0044 but inferior UX for public tool | Reject as primary — tarball remains a valid secondary path |
-| D: CI/CD automated publish | Fully automated pipeline | Repeatable; can include automated checks | CI credential risk; infrastructure to maintain; out of scope | Operator explicitly requested manual publish | Reject for now — revisit when cadence justifies automation |
+| D: GitHub Trusted Publishing | Publish the committed main version after verification | Exact-SHA provenance; no stored npm credential | npm trust relationship must be configured by the owner | Keeps local version authority and binds verification, package, tag, and release | **Accept** |
 
 ## Consequences
 
@@ -88,15 +87,15 @@ These procedures are operational guidance. They are subject to change as the ope
   build manifest expose bundled third-party code for review. Registry audit
   alone is not sufficient because bundled code may not appear as an installed
   production dependency.
-- **Manual publish discipline:** The operator's hands-on publish process is a feature, not a bug — it forces a deliberate verification step before every release.
+- **Exact-SHA release discipline:** The verified source, package version, npm provenance, tag, and GitHub Release share one trusted SHA.
 - **Rollback awareness:** The ADR documents npm's unpublish constraints (72-hour window for unpublishing; deprecation for older versions) and provides mitigation strategies (conservative semver, version bumping).
 
 ### Negative consequences
 
 - **npm permanence:** Once published, a version cannot be unpublished if >72 hours old or if it has more than 3 dependents. Beyond that window, deprecation is the only option. Prevention (careful `npm pack --dry-run`) is the only reliable rollback.
-- **Operator token responsibility:** The operator manages npm tokens, 2FA, rotation, and scope. This is a single point of operational risk.
+- **Trusted-publishing setup:** The repository owner must maintain npm's external trust configuration for this repository and workflow.
 - **Namespace reservation:** The `@magnusekdahl` scope is now associated with a published package. If the operator abandons parallix, the scope becomes orphaned on npm.
-- **Scope creep risk:** Documenting the publish process here invites future requests to add CI automation, npm provenance (Sigstore), or dist-tag management. These are separate decisions that require their own ADRs.
+- **Dist-tag scope:** This decision does not add dist-tag policy, multi-registry publication, or rollback automation.
 - **No version pinning guarantee:** Users installing with `npm install -g @magnusekdahl/parallix` get `latest`. Without a lockfile or version specifier, they may receive unexpected updates.
 
 ## Alternatives considered
@@ -117,13 +116,15 @@ Negative: Does not meet the credibility bar for a public repo. Two-command insta
 
 Assessment: Tarball remains a valid secondary install path for operators who prefer it, but should not be the primary documented path for a public tool.
 
-### CI/CD automated publish (Option D in matrix)
+### Token-based CI publishing
 
-Positive: Eliminates manual steps. Consistent publish process. Can include automated checks (audit, pack verification) in the pipeline.
+Positive: A token can work with broad CI providers.
 
-Negative: Introduces CI credential management. Adds infrastructure to maintain. Out of scope for the operator's stated preference for manual publish.
+Negative: It introduces a durable publication credential and weakens the
+repository-to-registry identity binding.
 
-Assessment: Revisit when publication cadence justifies automation (e.g., frequent patch releases, multiple maintainers).
+Assessment: Reject. GitHub OIDC Trusted Publishing supplies the required identity
+without a stored npm credential.
 
 ### Staged publishing
 
@@ -149,7 +150,7 @@ Assessment: `@magnusekdahl/parallix` is the correct scope for a solo-maintainer 
 - task-1340 CP-0: npm scope availability verified
 - `package.json` — package metadata, `files` allowlist, `publishConfig.access`
 - `parallix/.npmignore` — secondary exclusion layer
-- `scripts/refresh-global-px.sh` — post-integrate hook that bumps the patch version, rebuilds, packs, and installs globally without publishing
+- GitHub Actions npm Trusted Publishing documentation — external setup and OIDC trust relationship
 - `docs/designs/reposition-as-trust-layer.md` — trust-layer repositioning experiment; source of the installation-based kill criterion the download baseline serves
 - npm docs: Creating and publishing scoped public packages — https://docs.npmjs.com/creating-and-publishing-scoped-public-packages
 - npm docs: Unpublishing packages from the registry — https://docs.npmjs.com/unpublishing-packages-from-the-registry

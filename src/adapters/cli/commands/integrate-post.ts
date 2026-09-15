@@ -247,6 +247,58 @@ export async function persistLandedIntegrationOrAbort(slug: string, landedCommit
 }
 
 /**
+ * Runs the repo-configured pre-commit hook (adapters.integrate.preCommitCommand)
+ * in the mission worktree after the integration rebase and before the
+ * integration gates. Tracked files the hook modifies are committed onto the
+ * mission branch, so the gates verify them and the squash lands them inside the
+ * mission's single commit. A repo with no hook configured is a silent no-op.
+ */
+export function runPreCommitHookOrAbort(slug: string, {
+  missionWorktree,
+  baseWorktree,
+  baseBranch,
+  variant,
+  runPreCommitHookFn = postIntegrateHook.runPreCommitHook,
+  gitRunner = git,
+}: {missionWorktree: string, baseWorktree: string, baseBranch: string, variant: string, runPreCommitHookFn?: Function, gitRunner?: Function}) {
+  // ponytail: only modified tracked files are committed; a hook that creates
+  // new files must `git add` them itself.
+  const modifiedPaths = () => new Set<string>(
+    String(gitRunner(['-C', missionWorktree, 'diff', '--name-only', '--']).stdout || '')
+      .split('\n').map((file: string) => file.trim()).filter(Boolean)
+  );
+  const before = modifiedPaths();
+  const result = runPreCommitHookFn({ slug, baseWorktree, baseBranch, variant, cwd: missionWorktree });
+  if (!result.ran) {
+    return result;
+  }
+  if (!result.ok) {
+    fmt.log.fail(`Pre-commit hook failed (exit code ${result.exitCode}): ${result.command}`);
+    if (result.output) {
+      fmt.log.fail(result.output);
+    }
+    throw new IntegrationAbort();
+  }
+  const changed = [...modifiedPaths()].filter(file => !before.has(file));
+  if (changed.length > 0) {
+    const commit = gitRunner(['-C', missionWorktree, 'commit', '--only', '-m', `chore(${slug}): integrate pre-commit hook`, '--', ...changed]);
+    if (commit.status !== 0) {
+      fmt.log.fail(`Could not commit pre-commit hook changes (${changed.join(', ')}) onto the mission branch.`);
+      const output = [commit.stdout, commit.stderr].filter(Boolean).join('\n').trim();
+      if (output) {
+        fmt.log.fail(output);
+      }
+      throw new IntegrationAbort();
+    }
+  }
+  fmt.log.pass(`Pre-commit hook completed: ${result.command}`);
+  if (result.output) {
+    fmt.log.plain(result.output);
+  }
+  return result;
+}
+
+/**
  * Runs the repo-configured post-integrate hook (adapters.integrate.postIntegrateCommand)
  * exactly once from the base checkout, after a successful non-dry-run integrate closeout.
  * A repo with no hook configured is a silent no-op, so integrate's behavior is unchanged.

@@ -137,9 +137,13 @@
         },
         "integrate": {
           "type": "object",
-          "description": "Optional post-integrate hook. When postIntegrateCommand is unset, `px integrate` behaves exactly as it does without this section.", 
+          "description": "Optional integrate hooks. When preCommitCommand and postIntegrateCommand are unset, `px integrate` behaves exactly as it does without this section.",
           "additionalProperties": true,
           "properties": {
+            "preCommitCommand": {
+              "type": "string",
+              "description": "Shell command run in the mission worktree after the integration rebase and before the integration gates. Tracked files it modifies are committed onto the mission branch and land in the mission's squash commit. Receives the same INTEGRATE_HOOK_* environment variables as postIntegrateCommand."
+            },
             "postIntegrateCommand": {
               "type": "string",
               "description": "Shell command run at most once, from the base checkout, after a successful non-dry-run `px integrate`. Receives INTEGRATE_HOOK_SLUG, INTEGRATE_HOOK_BASE_WORKTREE, INTEGRATE_HOOK_BASE_BRANCH, and INTEGRATE_HOOK_VARIANT as environment variables."

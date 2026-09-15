@@ -258,7 +258,7 @@ function writePostIntegrateHookScript(repoRoot) {
   return scriptPath;
 }
 
-function setupRepository({ slug, title, postIntegrateHook = false }) {
+function setupRepository({ slug, title, postIntegrateHook = false, preCommitHook = false }) {
   const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'parallix-e2e-'));
   const repoRoot = path.join(tmpRoot, 'repo');
   const binDir = path.join(repoRoot, 'bin');
@@ -303,6 +303,14 @@ function setupRepository({ slug, title, postIntegrateHook = false }) {
     const scriptPath = writePostIntegrateHookScript(repoRoot);
 // @ts-expect-error -- Legacy fixture intentionally accesses runtime-only `integrate` absent from its inferred mock shape.
     adapters.integrate = { postIntegrateCommand: `./${path.relative(repoRoot, scriptPath)}` };
+  }
+
+  if (preCommitHook) {
+    fs.writeFileSync(path.join(repoRoot, 'version.txt'), '1.0.0\n', 'utf8');
+    const scriptPath = path.join(repoRoot, 'scripts', 'e2e-pre-commit-hook.sh');
+    writeExecutable(scriptPath, ['#!/usr/bin/env bash', 'set -euo pipefail', 'echo 1.0.1 > version.txt', ''].join('\n'));
+// @ts-expect-error -- Legacy fixture intentionally accesses runtime-only `integrate` absent from its inferred mock shape.
+    adapters.integrate = { preCommitCommand: `./${path.relative(repoRoot, scriptPath)}` };
   }
 
   fs.writeFileSync(path.join(repoRoot, 'workflow.config.json'), JSON.stringify({
@@ -561,10 +569,10 @@ function assertCheckpointShape(rootDir, slug, expectedFiles) {
   }
 }
 
-function runScenario({ launchFromFeatureBranch = false, integrate = true, postIntegrateHook = false, failIntegrationGate = false }) {
+function runScenario({ launchFromFeatureBranch = false, integrate = true, postIntegrateHook = false, preCommitHook = false, failIntegrationGate = false }) {
   const slug = launchFromFeatureBranch ? 'task-2001' : 'task-2002';
   const title = launchFromFeatureBranch ? 'Feature Branch Lifecycle' : 'Primary Branch Lifecycle';
-  const repo = setupRepository({ slug, title, postIntegrateHook });
+  const repo = setupRepository({ slug, title, postIntegrateHook, preCommitHook });
   const env = workflowEnv(repo.binDir, repo.stateHome, repo.repoRoot);
   const worktree = worktreePathFor(repo.repoRoot, slug);
   /** @type {any} */
@@ -693,6 +701,12 @@ function runScenario({ launchFromFeatureBranch = false, integrate = true, postIn
       summary.integrate.postIntegrateHookLines = fs.existsSync(markerPath)
         ? fs.readFileSync(markerPath, 'utf8').trim().split('\n').filter(Boolean)
         : [];
+    }
+
+    if (preCommitHook) {
+      summary.integrate.landedSubject = runGit(repo.repoRoot, ['log', '-1', '--format=%s', 'main']);
+      summary.integrate.landedFiles = runGit(repo.repoRoot, ['show', '--name-only', '--format=', 'main']).split('\n').filter(Boolean);
+      summary.integrate.versionAtMain = runGit(repo.repoRoot, ['show', 'main:version.txt']);
     }
 
     return summary;
@@ -1064,6 +1078,14 @@ test('configured post-integrate hook runs exactly once with slug/base-worktree/b
     summary.integrate.postIntegrateHookLines[0],
     /^slug=task-2002 base_worktree=\S+ base_branch=main variant=variant-b$/
   );
+});
+
+test('pre-commit hook changes land inside the mission squash commit, not a follow-up commit (task-2510)', () => {
+  const summary = runScenarioInChild({ launchFromFeatureBranch: false, integrate: true, preCommitHook: true });
+  assert.equal(summary.integrate.rootTaskStatus, 'done');
+  assert.match(summary.integrate.landedSubject, /^mission\/task-2002: /, 'main tip must be the mission commit itself');
+  assert.ok(summary.integrate.landedFiles.includes('version.txt'), `landed commit must carry the hook change: ${summary.integrate.landedFiles.join(', ')}`);
+  assert.equal(summary.integrate.versionAtMain, '1.0.1');
 });
 
 test('a failed integration gate aborts before the post-integrate hook can run (SC4)', () => {
