@@ -38,6 +38,7 @@ permissions:
 
 jobs:
   ci-required:
+    if: github.event.deleted != true
     name: ci-required
     runs-on: ubuntu-latest
     steps:
