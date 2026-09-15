@@ -1,25 +1,39 @@
+name: cleanup-verification-ref
+
+# Run only after ci-required has completed for main.
+on:
+  workflow_run:
+    workflows:
+      - ci-required
+    types:
+      - completed
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+jobs:
   cleanup-verification-ref:
     name: cleanup-verification-ref
 
-    # Only after a successfully published main push.
-    needs: ci-required
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    # Never delete the verification ref unless main's CI succeeded.
+    if: github.event.workflow_run.conclusion == 'success'
 
     runs-on: ubuntu-latest
-
-    permissions:
-      contents: write
 
     steps:
       - name: Delete published verification ref
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
-          VERIFY_REF: heads/github-publish/${{ github.sha }}
+          SHA: ${{ github.event.workflow_run.head_sha }}
         run: |
-          if gh api "repos/$GH_REPO/git/ref/$VERIFY_REF" >/dev/null 2>&1; then
-            gh api --method DELETE "repos/$GH_REPO/git/refs/$VERIFY_REF"
-            echo "Deleted refs/$VERIFY_REF"
+          ref="heads/github-publish/$SHA"
+
+          if gh api "repos/$GH_REPO/git/ref/$ref" >/dev/null 2>&1; then
+            gh api --method DELETE "repos/$GH_REPO/git/refs/$ref"
+            echo "Deleted refs/$ref"
           else
-            echo "No verification ref exists for $GITHUB_SHA"
+            echo "No verification ref exists for $SHA"
           fi
