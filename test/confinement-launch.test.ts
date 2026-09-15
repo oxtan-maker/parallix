@@ -33,6 +33,11 @@ function startAgentForTest() {
   return import('../src/adapters/agents/agents.js').then(({ startAgent }) => startAgent);
 }
 
+// The CI job sets PARALLIX_NO_BUBBLEWRAP=1; these tests exercise the gate itself.
+test.beforeEach(() => {
+  delete process.env.PARALLIX_NO_BUBBLEWRAP;
+});
+
 test.afterEach(() => {
   setBubblewrapProbeForTest(null);
   delete process.env.PARALLIX_NO_BUBBLEWRAP;
@@ -240,6 +245,30 @@ test('startAgent does not emit an UNSANDBOXED warning on the native-sandbox path
   } finally {
     fmt.setLogger(previous);
     delete process.env.PARALLIX_NO_BUBBLEWRAP;
+    fs.rmSync(worktree, { recursive: true, force: true });
+  }
+});
+
+// The PARALLIX_NO_BUBBLEWRAP opt-out is read from process.env by both the gate
+// and the spawn seam; the gate must not only consult the caller-supplied child env.
+test('startAgent honors PARALLIX_NO_BUBBLEWRAP from process.env when Bubblewrap is missing', async () => {
+  const worktree = makeWorktree();
+  setBubblewrapProbeForTest(() => false);
+  process.env.PARALLIX_NO_BUBBLEWRAP = '1';
+  try {
+    const startAgent = await startAgentForTest();
+    const result = await startAgent('active', {
+      prompt: 'Execute',
+      worktree,
+      agent: 'claude',
+      selectAgentFn: () => 'claude',
+      isAgentBlockedFn: () => false,
+      detectLimitHitFn: () => null,
+      launchAgentFn: fakeLauncher(),
+      log: () => {}
+    });
+    assert.equal(result.agent, 'claude');
+  } finally {
     fs.rmSync(worktree, { recursive: true, force: true });
   }
 });

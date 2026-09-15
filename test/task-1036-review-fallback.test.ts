@@ -9,6 +9,7 @@ import path from 'path';
 // @ts-expect-error -- TASK-2328: partial test double after ESM seam migration
 import { fakeLauncher } from './lib/agent-mock';
 import { eligibleAgentsForStep, startAgent, selectAgent } from '../src/adapters/agents/agents.js';
+import { setBubblewrapProbeForTest } from '../src/adapters/process/bubblewrap.js';
 function withStubbedMathRandom(value, fn) {
   const previousRandom = Math.random;
   Math.random = () => value;
@@ -155,6 +156,10 @@ test('startAgent act-on-review fallback selects vibe when implementer hits limit
 
     const previousAgent = process.env.WORKFLOW_AGENT;
     delete process.env.WORKFLOW_AGENT;
+    // act-on-review is a mutating launch, so the task-2513 confinement gate
+    // blocks `custom`/`vibe` on hosts without bwrap (e.g. GitHub runners).
+    // Pin the probe so this fallback test does not depend on the host.
+    setBubblewrapProbeForTest(() => true);
 
     try {
       const configWithoutActOnReview = {
@@ -185,6 +190,7 @@ test('startAgent act-on-review fallback selects vibe when implementer hits limit
       assert.equal(result.agent, 'vibe', 'mistral should be selected as fallback in act-on-review when custom hits limit and step is missing');
       assert.equal(blocks.length, 1);
     } finally {
+      setBubblewrapProbeForTest(null);
       if (previousAgent !== undefined) process.env.WORKFLOW_AGENT = previousAgent;
       fs.rmSync(tmpRoot, { recursive: true, force: true });
     }

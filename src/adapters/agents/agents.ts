@@ -526,7 +526,7 @@ async function startAgent(step: string, opts: StartAgentOptions = { prompt: '' }
       // families ignore the flag and rely on Bubblewrap, which is present here.
       let nativeSandbox = false;
       if (sandboxProfile?.worktreeWritable) {
-        const bubblewrapMissing = !isBubblewrapDisabled(env) && !isBubblewrapAvailable();
+        const bubblewrapMissing = !isBubblewrapDisabled() && !isBubblewrapAvailable(); // opt-out lives in process.env, as at the spawn seam
         if (bubblewrapMissing) {
           const confinement = selectConfinement({
             mutating: true,

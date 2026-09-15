@@ -85,6 +85,10 @@ jobs:
         run: npm run test:ci
         env:
           CI: 'true'
+          # bubblewrap is not in the GitHub-hosted runner image. Without this
+          # explicit opt-out the task-2513 confinement gate blocks every
+          # mutating launch (even mocked ones). Confinement tests pin the probe.
+          PARALLIX_NO_BUBBLEWRAP: '1'
 
   release:
     needs: ci-required
