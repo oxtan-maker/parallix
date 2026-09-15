@@ -301,13 +301,14 @@ test('validateRepositoryGates rejects a malformed gates block', () => {
 // caught here (compounding F1), so the test reads the repo's own config from
 // disk rather than a synthetic fixture. The repo integrates itself with px,
 // so these gates must stay active while it develops.
-test('this repository selects its own build, verification, workflow, and agent-smoke gates', () => {
+// TASK-2519: CodeQL stays a manual scan (`npm run test:codeql`), not an
+// automatic integration gate, so the plan is pinned to exactly these keys.
+test('this repository selects build, verification, integration-suite, workflow, and agent-smoke gates without codeql', () => {
   const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
   const gates = loadPhaseGates(repoRoot, 'preIntegration');
   const keys = gates.map((g) => g.key);
-  for (const required of ['build', 'verification', 'workflow', 'agent-smoke']) {
-    assert.ok(keys.includes(required), `preIntegration must select the "${required}" gate; found: ${keys.join(', ')}`);
-  }
+  assert.deepEqual(keys, ['build', 'verification', 'integration-suite', 'workflow', 'agent-smoke']);
+  assert.ok(!gates.some((g) => g.command === 'npm run test:codeql'), 'preIntegration must not run CodeQL automatically');
   // The runner executes them from this checkout with the phase contract.
   const env = buildGateEnv('integration', 'task-2457', repoRoot);
   assert.equal(env.PARALLIX_PHASE, 'integration');

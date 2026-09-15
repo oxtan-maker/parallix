@@ -105,10 +105,21 @@ test('attention and WIP projections reflect blockers, gates, and lanes', () => {
   assert.equal(wipCounts([base, failed]).active, 2);
 });
 
-test('board command projection does not advertise an active self-transition', () => {
+test('board command projection offers active only as a resume, never as a self-transition with live work', () => {
   const active = { id, repositoryId: repo, title: 'x', labels: missionLabels(['user_value']), status: 'active' as const, rawStatus: 'active', closedAt: null, assignee: null, checkpoints: [], review: null, netEngineeringLines: null };
   const commands = availableBoardCommands(active, { reviewApproval: null });
-  assert.equal(commands.find(({ command }) => command === 'active')?.enabled, false);
+  // No observed work fact and no failed gate: the mission is stranded and
+  // `px active` is its defined resume (TASK-2518).
+  assert.equal(commands.find(({ command }) => command === 'active')?.enabled, true);
+  assert.equal(commands.find(({ command }) => command === 'active')?.label, 'restart ▸');
+  // A mission an agent is actively working stays ineligible: re-launching it
+  // would be the self-transition this rule forbids.
+  const working = availableBoardCommands(active, {
+    reviewApproval: null,
+    latestGate: 'passed',
+    currentWork: { operationId: 'op', phase: 'execute', summary: 'go', agent: agentFamily('codex'), updatedAt: new Date().toISOString(), freshness: 'live' },
+  });
+  assert.equal(working.find(({ command }) => command === 'active')?.enabled, false);
   assert.deepEqual(commands.find(({ command }) => command === 'handoff'), {
     command: 'handoff', enabled: false, reason: 'Handoff requires an active mission with checkpoint evidence', targetLane: 'review', label: 'review ▸',
   });

@@ -85,6 +85,7 @@ export type WebAttentionReasonKind =
   | 'review-lane'
   | 'integrate-lane'
   | 'stale-work'
+  | 'orphaned-active'
   | 'none';
 export type WebTerminalStatus = 'completed' | 'rejected' | 'failed' | 'cancelled';
 export type WebErrorKind = 'validation' | 'capability' | 'conflict' | 'unavailable' | 'execution' | 'cancelled';
@@ -402,7 +403,7 @@ export class WebTransportError extends Error {
 // Conversion — application read models → wire DTOs
 // ---------------------------------------------------------------------------
 
-const BOARD_COMMAND_KINDS: Readonly<Record<BoardCommand, WebBoardCommandKind>> = {
+export const BOARD_COMMAND_KINDS: Readonly<Record<BoardCommand, WebBoardCommandKind>> = {
   active: 'active:execute',
   handoff: 'handoff:record',
   review: 'review:submit',
@@ -735,7 +736,7 @@ const LANES: readonly string[] = ['backlog', 'refined', 'active', 'review', 'int
 const GATES: readonly string[] = ['passed', 'failed', 'running', 'unknown'];
 const ACTION_STATES: readonly string[] = ['enabled', 'ineligible', 'unavailable'];
 const CERTAINTIES: readonly string[] = ['live', 'unknown', 'stale'];
-const ATTENTION_REASONS: readonly string[] = ['blocking', 'gate-failed', 'review-lane', 'integrate-lane', 'stale-work', 'none'];
+const ATTENTION_REASONS: readonly string[] = ['blocking', 'gate-failed', 'review-lane', 'integrate-lane', 'stale-work', 'orphaned-active', 'none'];
 const TERMINAL_STATUSES: readonly string[] = ['completed', 'rejected', 'failed', 'cancelled'];
 const ERROR_KINDS: readonly string[] = ['validation', 'capability', 'conflict', 'unavailable', 'execution', 'cancelled'];
 const EVIDENCE_SOURCES: readonly string[] = ['task-markdown', 'git', 'stats', 'mission-store'];

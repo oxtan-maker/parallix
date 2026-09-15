@@ -1,8 +1,8 @@
 ---
 id: TASK-2515
 title: Lead attention queue ignores persisted integration lifecycle when backlog task is completed
-status: backlog
-assignee: []
+status: done
+assignee: [custom]
 created_date: '2026-09-14'
 labels:
   - bug

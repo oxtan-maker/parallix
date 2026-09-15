@@ -20,6 +20,7 @@ const REASON_ACCENT: Readonly<Record<WebAttentionReasonKind, string>> = {
   'review-lane': C.purple,
   'integrate-lane': C.cyan,
   'stale-work': C.amber,
+  'orphaned-active': C.amber,
   'none': C.dim,
 };
 

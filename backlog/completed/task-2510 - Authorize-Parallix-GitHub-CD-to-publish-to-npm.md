@@ -1,11 +1,11 @@
 ---
 id: TASK-2510
 title: Authorize Parallix GitHub CD to publish to npm
-status: backlog
-assignee: []
+status: done
+assignee: [custom]
 created_date: '2026-09-14 11:54'
-labels: []
-dependencies: []
+labels: [user_value]
+dependencies: [TASK-2509]
 ordinal: 76007
 ---
 

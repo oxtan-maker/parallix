@@ -56,6 +56,8 @@ export function attentionWhy(reason: { kind: string; detail?: string }): string 
       return reason.detail || 'awaiting review decision';
     case 'integrate-lane':
       return reason.detail || 'awaiting integration';
+    case 'orphaned-active':
+      return reason.detail || 'active mission has no live work';
     default:
       return reason.detail || '';
   }
@@ -481,6 +483,7 @@ function getReasonColor(kind: string): 'green' | 'yellow' | 'red' | 'blue' {
     case 'gate-failed': return 'yellow';
     case 'review-lane': return 'blue';
     case 'integrate-lane': return 'green';
+    case 'orphaned-active': return 'yellow';
     default: return 'yellow';
   }
 }

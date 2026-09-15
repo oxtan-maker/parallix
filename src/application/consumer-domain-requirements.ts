@@ -322,7 +322,7 @@ export const CONSUMER_DOMAIN_REQUIREMENTS: readonly ConsumerRequirement[] = [
     id: 'ui-board-card',
     family: 'ui-board',
     fileLocation: 'src/application/projections/mission-board.ts',
-    line: 316,
+    line: 328,
     anchor: 'function projectMissionCard',
     reads: ['Mission', 'CheckpointData', 'Review'],
     requirement:

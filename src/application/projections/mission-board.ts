@@ -264,7 +264,7 @@ function availability(
 
 export function availableBoardCommands(
   mission: Mission,
-  facts: Pick<MissionOperationalFacts, 'reviewApproval'> & Partial<Pick<MissionOperationalFacts, 'latestGate'>>,
+  facts: Pick<MissionOperationalFacts, 'reviewApproval'> & Partial<Pick<MissionOperationalFacts, 'currentWork' | 'latestGate'>>,
 ): CommandAvailability[] {
   const open = !isClosedMission(mission);
   const hasCheckpointEvidence = mission.checkpoints.some((checkpoint) => checkpoint.goalCheck.length > 0);
@@ -282,18 +282,30 @@ export function availableBoardCommands(
   const reviewPhase = mission.review === null ? null : currentReviewRound(mission.review).phase;
   const resumesFindings = mission.status === 'review' && reviewPhase === 'fixing';
   const resumesGate = mission.status === 'active' && facts.latestGate === 'failed';
-  const activeLabel = resumesFindings ? 'findings ↩' : resumesGate ? 'resume ▸' : 'power ▸';
   const activeReason = mission.status === 'review'
     ? 'Resuming a review mission requires reviewer findings to act on'
     : mission.status === 'active'
-      ? 'Resuming an active mission requires a failed gate'
+      ? 'Resuming an active mission requires a failed gate or no live work'
       : 'Mission must be refined before it can be activated';
   const canIntegrate = mission.status === 'integration'
     || (['active', 'review'].includes(mission.status) && hasApprovedReview);
+  // An active mission with no live work at all is stranded: no agent holds the
+  // turn and the aggregate never left `active`. Re-running `px active` is the
+  // defined lifecycle resume for it (the `activate` transition accepts
+  // `active`), so the stranded case joins the findings and gate-failed resumes
+  // rather than advertising a one-off recovery command. A stale published fact
+  // is reported as stale-work, so this is limited to a mission that is active,
+  // holds no work fact, and has no failing gate.
+  const strandedActive = mission.status === 'active'
+    && (facts.currentWork === null || facts.currentWork === undefined)
+    && facts.latestGate !== 'failed';
+  const activeLabel = resumesFindings ? 'findings ↩'
+    : resumesGate ? 'resume ▸'
+      : strandedActive ? 'restart ▸' : 'power ▸';
   return [
     availability(
       'active',
-      open && (mission.status === 'refined' || resumesFindings || resumesGate),
+      open && (mission.status === 'refined' || resumesFindings || resumesGate || strandedActive),
       activeReason,
       'active',
       activeLabel,
@@ -376,6 +388,12 @@ export function attentionRank(card: MissionCard): number {
   if (card.gate === 'failed') { return 1; }
   if (agentIsWorking(card)) { return 4; }
   if (card.lane === 'review') { return 2; }
+  // Stranded active mission: no live work at all (a stale fact is reported as
+  // stale-work above, rank 4), so it needs a human sooner than an in-review
+  // mission waiting on a decision. currentWork === null is the exact signal
+  // because a fresh fact already returned at the agentIsWorking check and a
+  // stale fact is stale-work, not stranded.
+  if (card.lane === 'active' && card.currentWork === null) { return 2; }
   if (card.lane === 'integration') { return 3; }
   return 4;
 }

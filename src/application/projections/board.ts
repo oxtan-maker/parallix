@@ -57,6 +57,8 @@ export type AttentionReason =
   | { readonly kind: 'integrate-lane'; readonly detail: string }
   /** Work was published as running, then stopped being verifiable. */
   | { readonly kind: 'stale-work'; readonly detail: string }
+  /** Active lane, no live work, no failed gate — a stranded mission. */
+  | { readonly kind: 'orphaned-active'; readonly detail: string }
   | { readonly kind: 'none' };
 
 export interface MetricSeries {
@@ -277,6 +279,10 @@ export function attentionReason(card: MissionCard): AttentionReason {
   }
   if (card.lane === 'review') { return { kind: 'review-lane', detail: 'Awaiting review decision' }; }
   if (card.lane === 'integration') { return { kind: 'integrate-lane', detail: 'Awaiting integration' }; }
+  // Active lane with no live work and no failed gate: no agent holds the turn
+  // yet the aggregate never left `active`. Surface it so the operator can
+  // re-run `px active` rather than let the mission dwell in the queue forever.
+  if (card.lane === 'active') { return { kind: 'orphaned-active', detail: 'Active mission has no live work' }; }
   return { kind: 'none' };
 }
 
@@ -314,6 +320,12 @@ export function attentionSources(reason: AttentionReason): readonly string[] {
     case 'review-lane':
     case 'integrate-lane':
       return ['task-markdown'];
+    // The stranded verdict rests on the DB-backed Mission lane (ADR 0053): if
+    // the mission-store authority were stale or unavailable the lane could not
+    // be trusted, so the item must flag exactly that source rather than the
+    // task file it must never reconstruct its lane from.
+    case 'orphaned-active':
+      return ['mission-store'];
     default:
       return [];
   }

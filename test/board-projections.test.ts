@@ -13,6 +13,7 @@ import {
   attentionRank,
   boardLane,
   type BoardLane,
+  type LiveMissionWork,
   type MissionCard,
 } from '../src/application/projections/mission-board.js';
 import { agentFamily } from '../src/domain/agents.js';
@@ -133,12 +134,18 @@ test('attentionRank returns 3 for integration lane', () => {
 test('attentionRank returns 4 for all others', () => {
   const backlog = makeCard(id1, 'backlog');
   const refined = makeCard(id1, 'refined');
-  const active = makeCard(id1, 'active');
   const done = makeCard(id1, 'done');
   assert.equal(attentionRank(backlog), 4);
   assert.equal(attentionRank(refined), 4);
-  assert.equal(attentionRank(active), 4);
   assert.equal(attentionRank(done), 4);
+  // A working active mission (a live agent holds the turn) also ranks last;
+  // only a *stranded* active mission — no live work at all — is promoted to
+  // rank 2 so a human can recover it (see the orphaned-active test).
+  const working = {
+    ...makeCard(id1, 'active'),
+    currentWork: { operationId: 'op', phase: 'execute', summary: 'go', agent: agentFamily('codex'), updatedAt: new Date().toISOString(), freshness: 'live' } as LiveMissionWork,
+  };
+  assert.equal(attentionRank(working), 4);
 });
 
 test('attentionQueue sorts by rank then missionId ascending', () => {
@@ -155,10 +162,10 @@ test('attentionQueue sorts by rank then missionId ascending', () => {
   // Expected order:
   // rank 0: task-0001 (blocking)
   // rank 1: task-0004 (gate failed)
-  // rank 2: task-0002 (review)
+  // rank 2: task-0002 (review), task-0003 (active — stranded, no live work) — tie broken by missionId
   // rank 3: task-0005 (integrate)
-  // rank 4: task-0003 (backlog), task-0003 (active) — tie broken by missionId (same id, stable)
-  assert.deepEqual(ids, [id1, id4, id2, id5, id3, id3]);
+  // rank 4: task-0003 (backlog)
+  assert.deepEqual(ids, [id1, id4, id2, id3, id5, id3]);
 });
 
 test('attentionQueue tie-breaker: same rank sorted by missionId ascending', () => {
@@ -199,8 +206,17 @@ test('attentionReason returns integrate-lane kind', () => {
   assert.deepEqual(reason, { kind: 'integrate-lane', detail: 'Awaiting integration' });
 });
 
-test('attentionReason returns none for unblocked active mission', () => {
+test('attentionReason returns orphaned-active for an unblocked active mission with no live work', () => {
   const card = makeCard(id1, 'active');
+  const reason = attentionReason(card);
+  assert.deepEqual(reason, { kind: 'orphaned-active', detail: 'Active mission has no live work' });
+});
+
+test('attentionReason returns none for a working active mission', () => {
+  const card = {
+    ...makeCard(id1, 'active'),
+    currentWork: { operationId: 'op', phase: 'execute', summary: 'go', agent: agentFamily('codex'), updatedAt: new Date().toISOString(), freshness: 'live' } as LiveMissionWork,
+  };
   const reason = attentionReason(card);
   assert.deepEqual(reason, { kind: 'none' });
 });
@@ -224,10 +240,14 @@ test('buildBoardProjection attentionQueue is sorted by priority then missionId w
     [],
   );
 
+  // id3 is an active card with no live work: stranded, so it is queued behind
+  // the blocked and review items with the `active:execute` resume.
   const queueIds = projection.attentionQueue.map((item) => item.missionId);
-  assert.deepEqual(queueIds, [id1, id2]);
+  assert.deepEqual(queueIds, [id1, id2, id3]);
   assert.equal(projection.attentionQueue[0].rank, 1);
   assert.equal(projection.attentionQueue[1].rank, 2);
+  assert.equal(projection.attentionQueue[2].rank, 3);
+  assert.equal(projection.attentionQueue[2].action.kind, 'active:execute');
 });
 
 test('buildBoardProjection wipCounts reflects all lanes', () => {

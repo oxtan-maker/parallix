@@ -11,7 +11,7 @@ import {
   type OperationLogReadAdapter,
   type ReviewReadAdapter,
 } from '../src/application/projections/board-readers.js';
-import { attentionQueue, attentionRank } from '../src/application/projections/mission-board.js';
+import { attentionQueue, attentionRank, type MissionCard } from '../src/application/projections/mission-board.js';
 import { agentFamily, type AgentFamily } from '../src/domain/agents.js';
 import { missionId, missionLabels, type Mission } from '../src/domain/mission.js';
 import { changeRevision, reviewFindingId, type Review, type ReviewRound } from '../src/domain/review.js';
@@ -233,8 +233,10 @@ test('BoardProjectionBuilder attentionQueue excludes reasonless cards', async ()
   );
   const projection = await builder.build();
 
+  // The review mission (rank 2) and the stranded active mission (rank 2, no
+  // live work) are queued; the reasonless backlog card is excluded.
   const queueIds = projection.attentionQueue.map((item) => item.missionId);
-  assert.deepEqual(queueIds, [id1]);
+  assert.deepEqual(queueIds, [id1, id3]);
 });
 
 test('BoardProjectionBuilder wipCounts reflects all missions', async () => {
@@ -319,15 +321,23 @@ test('BoardProjectionBuilder queues a gate-failed mission behind its runnable re
   assert.equal(attentionRank(failed!), 1);
   // A failed gate is the top attention reason, and `px active` resumes the
   // mission — so it is queued with that runnable action, never with an
-  // action the projection marked unavailable.
-  assert.deepEqual(projection.attentionQueue.map((item) => item.missionId), [id1]);
+  // action the projection marked unavailable. The second active mission has no
+  // live work, so it is queued as stranded at rank 2 behind the gate-failed one.
+  assert.deepEqual(projection.attentionQueue.map((item) => item.missionId), [id1, id2]);
   assert.equal(projection.attentionQueue[0]?.action.kind, 'active:execute');
+  const stranded = projection.attentionQueue.find((item) => item.missionId === id2);
+  assert.deepEqual(stranded?.reason, { kind: 'orphaned-active', detail: 'Active mission has no live work' });
+  assert.equal(stranded?.action.kind, 'active:execute');
   assert.equal(
     failed?.commands.find((command) => command.command === 'active')?.label,
     'resume ▸',
   );
+  // The stranded mission resumes through the same `active` command, labelled
+  // for the restart rather than the gate-failed resume.
   const passing = projection.stages.flatMap((stage) => stage.cards).find((card) => card.id === id2);
-  assert.equal(passing?.commands.find((command) => command.command === 'active')?.enabled, false);
+  const passingActive = passing?.commands.find((command) => command.command === 'active');
+  assert.equal(passingActive?.enabled, true);
+  assert.equal(passingActive?.label, 'restart ▸');
 });
 
 // ---------------------------------------------------------------------------
@@ -369,13 +379,20 @@ test('attention ranking tie-breaker: proximity to completion (lower rank = close
   const gateFailed = makeCard(id2, 'active', { gate: 'failed' });
   const review = makeCard(id3, 'review');
   const integrate = makeCard(id1, 'integration');
-  const active = makeCard(id2, 'active');
+  // A working active mission (a live agent holds the turn) stays rank 4.
+  const active = makeCard(id2, 'active', {
+    currentWork: { operationId: 'op', phase: 'execute', summary: 'working', agent: agentFamily('codex'), updatedAt: new Date().toISOString(), freshness: 'live' },
+  });
+  // A stranded active mission (no live work at all) is surfaced at rank 2 so a
+  // human recovers it instead of it dwelling in the queue forever.
+  const stranded = makeCard(id3, 'active');
 
   assert.equal(attentionRank(blocking), 0);
   assert.equal(attentionRank(gateFailed), 1);
   assert.equal(attentionRank(review), 2);
   assert.equal(attentionRank(integrate), 3);
   assert.equal(attentionRank(active), 4);
+  assert.equal(attentionRank(stranded), 2);
 });
 
 test('attention ranking tie-breaker: same rank, different missionId', () => {
@@ -411,7 +428,11 @@ function createCardHelpers() {
   function makeCard(
     id: typeof id1,
     lane: 'backlog' | 'refined' | 'active' | 'review' | 'integration' | 'done',
-    opts: { blockingReason?: string | null; gate?: 'passed' | 'failed' | 'running' | 'unknown' } = {},
+    opts: {
+      blockingReason?: string | null;
+      gate?: 'passed' | 'failed' | 'running' | 'unknown';
+      currentWork?: MissionCard['currentWork'];
+    } = {},
   ) {
     return {
       id,
@@ -427,7 +448,7 @@ function createCardHelpers() {
       gate: opts.gate ?? 'passed',
       pullRequest: null,
       reviewApproved: false,
-      currentWork: null,
+      currentWork: opts.currentWork ?? null,
       blockingReason: opts.blockingReason ?? null,
       flags: [],
       commands: [],
