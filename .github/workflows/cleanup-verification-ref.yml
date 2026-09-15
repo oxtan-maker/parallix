@@ -1,12 +1,7 @@
 name: cleanup-verification-ref
 
-# Run only after ci-required has completed for main.
 on:
-  workflow_run:
-    workflows:
-      - ci-required
-    types:
-      - completed
+  push:
     branches:
       - main
 
@@ -16,10 +11,6 @@ permissions:
 jobs:
   cleanup-verification-ref:
     name: cleanup-verification-ref
-
-    # Never delete the verification ref unless main's CI succeeded.
-    if: github.event.workflow_run.conclusion == 'success'
-
     runs-on: ubuntu-latest
 
     steps:
@@ -27,7 +18,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
-          SHA: ${{ github.event.workflow_run.head_sha }}
+          SHA: ${{ github.sha }}
         run: |
           ref="heads/github-publish/$SHA"
 

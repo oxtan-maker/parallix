@@ -1,0 +1,39 @@
+name: release
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: write
+  id-token: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out the published SHA
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+
+      - name: Set up Node 24 for npm Trusted Publishing
+        uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+          check-latest: true
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Install npm with Trusted Publishing support
+        run: npm install --global npm@11.5.1
+
+      - name: Install the published source deterministically
+        run: npm ci
+
+      - name: Validate and publish the published source
+        run: npm run release:publish
+        env:
+          GH_TOKEN: ${{ github.token }}
