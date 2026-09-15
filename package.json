@@ -1,6 +1,6 @@
 {
   "name": "@magnusekdahl/parallix",
-  "version": "1.5.125",
+  "version": "1.5.126",
   "description": "Trust ladder for AI coding work — separate review, configured verification, conditional Linux confinement, and human-owned merges",
   "license": "AGPL-3.0-or-later",
   "private": false,
