@@ -138,6 +138,10 @@ const expectedIntegrationFiles = [
   // advertised gate, stale guard wiring, security rejections, safe bodies).
   // Loopback-only with injected dispatcher spy and projection builder.
   'task-2433-web-mutation.integration.test.ts',
+  // TASK-2516: landed-mission recovery seeds a real temporary Git repository
+  // with a worktree, so it crosses the git boundary and runs only in the
+  // integration layer.
+  'task-2516-recover-landed-mission-repro.test.ts',
       'test-hygiene.test.ts',
   // TASK-2502: the CodeQL clean-cache bootstrap test shells out to the runner
   // (bash) to prove a fresh cache directory bootstraps the pinned CLI, so it
@@ -151,6 +155,8 @@ const expectedIntegrationFiles = [
   // repository to prove the base worktree stays clean.
   'task-2507-mainline-gate-mutation-repro.test.ts',
   'task-2509-local-version-allocation.test.ts', 'task-2509-release-workflow.test.ts',
+  'task-2517-cp3-landed-closeout.test.ts',
+  'task-2517-landed-squash-base-branch-detection.test.ts',
   'tui-pty-smoke.test.ts', 'task-2313-repro.test.ts', 'task-2370-repro.test.ts',
   'tui-command-flow.test.ts',
   'tui-spawn.test.ts',

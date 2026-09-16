@@ -52,6 +52,7 @@ import { spawnSync } from 'node:child_process';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
+import { compareCodeUnits } from '../../domain/comparators.js';
 import { fileURLToPath } from 'node:url';
 import * as fmt from '../../application/presentation/cli-format.js';
 import { packageRoot } from '../filesystem/package-root.js';
@@ -156,7 +157,7 @@ function discoverTestFiles() {
     .filter(file => file.endsWith('.test.ts'))
     .filter(file => file !== SELF_TEST_FILE)
     .map(file => path.join(testDir, file))
-    .sort();
+    .sort(compareCodeUnits);
 }
 
 function listTempEntries(tmpRoot: string = os.tmpdir()) {

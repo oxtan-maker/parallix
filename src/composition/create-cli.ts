@@ -14,7 +14,8 @@ import { recoverMissionCommand } from '../interfaces/cli/recover.js';
 import { ensureFirstRunAgentConfig } from '../adapters/agents/first-run-config.js';
 import { findTaskFile, getTaskStatus } from '../adapters/backlog/backlog.js';
 import { cleanupMissionWorktree } from '../adapters/cli/commands/integrate-post.js';
-import { findExistingSquashCommit } from '../adapters/cli/commands/integrate-conflict.js';
+import { findLandedSquashOnBaseBranch } from '../adapters/cli/commands/integrate-conflict.js';
+import { landedMissionIntake } from '../adapters/cli/commands/recover-landed-intake.js';
 import type { BoardProgressSink } from '../application/controller/board-command.js';
 import configWorkflow from '../adapters/cli/commands/config.js';
 import { createConfigCommand } from '../interfaces/cli/config.js';
@@ -140,6 +141,8 @@ function createCommandRegistry(rootDir: string): Record<string, Command> {
     try {
       return await active(args, {
         ...options,
+        // SC4: refuse to activate a mission whose payload already landed.
+        payloadLandedFn: (s: string) => findLandedSquashOnBaseBranch(rootDir, s) !== null,
         controllerFactory: async (requestedRoot: string, progress: BoardProgressSink) => {
           activeServices.value = await createProductionApplicationServices(requestedRoot, progress);
           const controller = activeServices.value.presentationCapabilities?.commandController;
@@ -165,8 +168,11 @@ function createCommandRegistry(rootDir: string): Record<string, Command> {
         // reachable from `main`. Detect the squash commit by subject in the
         // primary branch log instead of branch ancestry (TASK-2492). A branch
         // with no committed payload produces no squash commit, so it is never
-        // misreported as landed and never deleted (F2). See integrate-conflict.findExistingSquashCommit.
-        alreadyMerged: async (slug) => findExistingSquashCommit(rootDir, slug) !== null,
+        // misreported as landed and never deleted (F2). See integrate-conflict.findLandedSquashOnBaseBranch.
+        alreadyMerged: async (slug) => findLandedSquashOnBaseBranch(rootDir, slug) !== null,
+        // Absent-aggregate recovery only: local Git evidence that the payload
+        // was squash-landed on the mission's recorded base branch (TASK-2516).
+        landedIntake: async (slug) => landedMissionIntake(slug, rootDir),
         cleanup: (slug) => cleanupMissionWorktree(slug, { rootDir }),
         store: services.mission.store,
       });
@@ -202,6 +208,8 @@ function createCommandRegistry(rootDir: string): Record<string, Command> {
         const persistence = bindReviewPersistence(services.mission.store, services.mission.lifecycle);
         const adapter = createReviewWorkflowAdapter({
           ...options,
+          // SC4: refuse to review a mission whose payload already landed.
+          payloadLandedFn: (s: string) => findLandedSquashOnBaseBranch(rootDir, s) !== null,
           missionServicesFn,
           requireReviewAggregate: true,
           readReviewStateFn: persistence.readReviewState,

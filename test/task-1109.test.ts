@@ -102,23 +102,34 @@ function setupMocks() {
   mock.method(process, 'exit', () => {});
 
   // SC3: Mock createMissionApplicationServices for SQLite-first transitions.
+  // The store is a shared mutable object; the lifecycle transition persists the
+  // lane to `integration` (the real MissionLifecycleService.transition commits
+  // the lane change to the store via save/saveWithTransition), so the landing-
+  // boundary SC2 guard observes the post-restore `integration` lane, not the
+  // pre-restore `review` lane. A mock that never persisted would leave the
+  // store at `review` and contradict the production restore that precedes
+  // finishLanding.
+  let storedMission = {
+    status: 'review', assignee: 'claude', review: {
+      rounds: [{
+        number: 1,
+        subject: { change: { kind: 'local-branch', sourceBranch: `mission/${TEST_SLUG}`, targetBranch: 'main' }, revision: 'fixture' },
+        reviewer: 'codex', implementer: 'claude', startedAt: '2026-05-15T10:00:00Z',
+        decision: { kind: 'approved', decidedAt: '2026-05-15T10:30:00Z', comment: null, source: { kind: 'local' } },
+        response: null, phase: 'approved', disposition: 'APPROVED', reviewerRetryCount: 0, implementerRetryCount: 0,
+      }], intervention: null, stageLaunches: [], reviewEvents: [],
+    },
+  };
   mock.method(composition, 'createMissionApplicationServices', async () => ({
     store: {
       _repoId: 'default',
-      load: async () => ({ kind: 'found', mission: {
-        status: 'review', assignee: 'claude', review: {
-          rounds: [{
-            number: 1,
-            subject: { change: { kind: 'local-branch', sourceBranch: `mission/${TEST_SLUG}`, targetBranch: 'main' }, revision: 'fixture' },
-            reviewer: 'codex', implementer: 'claude', startedAt: '2026-05-15T10:00:00Z',
-            decision: { kind: 'approved', decidedAt: '2026-05-15T10:30:00Z', comment: null, source: { kind: 'local' } },
-            response: null, phase: 'approved', disposition: 'APPROVED', reviewerRetryCount: 0, implementerRetryCount: 0,
-          }], intervention: null, stageLaunches: [], reviewEvents: [],
-        },
-      }, version: 1 }),
+      load: async () => ({ kind: 'found', mission: storedMission, version: 1 }),
     },
    lifecycle: {
-     transition: async () => ({ status: 'completed', value: { to: 'review', version: 2 } }),
+     transition: async () => {
+       storedMission.status = 'integration';
+       return { status: 'completed', value: { to: 'integration', version: 2 } };
+     },
    },
     integration: {
       decideIntegration: async () => ({ status: 'completed' }),

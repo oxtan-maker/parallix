@@ -1,10 +1,11 @@
 ---
 id: TASK-2511
 title: clean up repo noice
-status: backlog
-assignee: []
+status: done
+assignee: [custom]
 created_date: '2026-09-14 13:56'
-labels: []
+labels:
+  - user_value
 dependencies: []
 ordinal: 77007
 ---

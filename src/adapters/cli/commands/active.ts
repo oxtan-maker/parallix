@@ -63,6 +63,17 @@ async function active(args, options = {}) {
 
   const normalizedSlug = slug.toLowerCase();
 
+  // TASK-2517 SC4: a mission whose payload already landed on the base branch has
+  // no active work left. Refuse before launching an implementer and point at the
+  // closeout command. The guard is opt-in via the injected seam so direct unit
+  // callers that do not set it keep their existing behaviour.
+  const payloadLandedFn = options.payloadLandedFn ?? (() => false);
+  if (await payloadLandedFn(normalizedSlug)) {
+    errorFn(fmt.status('FAIL', `Mission ${normalizedSlug} payload already landed on the base branch. Close it out with: px integrate ${normalizedSlug} --recover-landed`));
+    exitFn(1);
+    return;
+  }
+
   // Strip a trailing mission id from the title so the headline never repeats
   // the slug (SC4/Why Now: repeated identity is a defect). Works for any id
   // shape, not just `task-NNNN` (e.g. `parallix-adhoc-<NNNN>` adhoc slugs).

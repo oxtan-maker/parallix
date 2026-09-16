@@ -769,3 +769,33 @@ test('startPiAgent result.model is undefined when session.model is absent (task-
     pi.__setSdkForTest(null);
   }
 });
+
+test('startPiAgent fails when the session settles on a provider error instead of a response', async () => {
+  // The SDK resolves prompt() normally after exhausting its own retries, with
+  // an errored assistant message and zero tokens. Reporting status 0 there let
+  // a stage commit phantom work (an unfilled MISSION.md scaffold).
+  pi.__setCreateAgentSessionForTest(async () => {
+    const sdkEvents = [
+      { type: 'agent_start' },
+      { type: 'agent_end', messages: [{ role: 'assistant', stopReason: 'error', errorMessage: 'Connection error.' }], willRetry: false },
+      { type: 'auto_retry_end', success: false, attempt: 3, finalError: 'Connection error.' },
+      { type: 'agent_settled' },
+    ];
+    let listener: any = null;
+    const session = {
+      sessionId: 'test-session-err',
+      subscribe: (l: any) => { listener = l; return () => { listener = null; }; },
+      prompt: async () => { for (const event of sdkEvents) { if (listener) listener(event); } },
+      dispose: () => {},
+      getLastAssistantText: () => '',
+      getSessionStats: () => ({ toolCalls: 0, tokens: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } }),
+    };
+    return { session, extensionsResult: { extensions: [], diagnostics: [] } };
+  });
+
+  const { resultPromise } = pi.startPiAgent({ prompt: 'Say hello', worktree: '/tmp/test', maxTransientRetries: 0 });
+  const result = await resultPromise;
+
+  assert.notEqual(result.status, 0, 'an unanswered session must not report success');
+  assert.match(result.stderr, /Connection error/);
+});

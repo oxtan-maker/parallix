@@ -1,5 +1,6 @@
 import { DatabaseSync } from 'node:sqlite';
 import fs from 'node:fs';
+import { compareCodeUnits } from '../../domain/comparators.js';
 import path from 'node:path';
 
 /**
@@ -374,7 +375,7 @@ export class SqliteDatabaseAdapter {
     const backups = fs
       .readdirSync(dir)
       .filter((f) => f.startsWith(`${base}.bak.`))
-      .sort(); // fixed-width millisecond suffixes sort lexically == chronologically
+      .sort(compareCodeUnits); // fixed-width millisecond suffixes sort lexically == chronologically
     if (backups.length === 0) {
       return false;
     }

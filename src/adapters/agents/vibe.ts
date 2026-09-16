@@ -1,4 +1,5 @@
 import { spawnAndTee } from '../process/spawn-tee.js';
+import { compareCodeUnits } from '../../domain/comparators.js';
 import { parseVibeMeta, getVibeProviderModel, DEFAULT_VIBE_LOG_DIR } from './vibe-telemetry.js';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -178,7 +179,7 @@ function processResult(result: any, basePath?: string, invocationStart?: string)
 
   try {
     const entries = fs.readdirSync(scanDir);
-    const dirs = entries.filter((d: string) => d.startsWith('session_')).sort();
+    const dirs = entries.filter((d: string) => d.startsWith('session_')).sort(compareCodeUnits);
 
     for (const dir of dirs) {
       const metaPath = path.join(scanDir, dir, 'meta.json');

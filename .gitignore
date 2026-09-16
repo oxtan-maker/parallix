@@ -1,5 +1,6 @@
 node_modules
 coverage/
+.scannerwork/
 graphify-out/
 .forgejo-local/
 .session/
@@ -37,3 +38,5 @@ build.retired.*
 /NOTICES
 parallix.db*
 tmp/
+# Agent run logs (older npmtest.out landed here before tmp/ covered it)
+.tmp-run/

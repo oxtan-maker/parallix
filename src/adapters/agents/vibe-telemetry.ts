@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { compareCodeUnits } from '../../domain/comparators.js';
 
 /**
  * Vibe Telemetry Parser
@@ -118,7 +119,7 @@ export function extractVibeTelemetry(result: unknown, basePath?: string): Teleme
       const full = path.join(scanDir, d);
       try { return fs.statSync(full).isDirectory(); } catch (_) { return false; }
     })
-    .sort();
+    .sort(compareCodeUnits);
 
   if (dirs.length === 0) {return null;}
 

@@ -194,6 +194,17 @@ export const INTEGRATION_CI_TESTS: readonly string[] = [
   'task-2507-mainline-gate-mutation-repro.test.ts',
   'task-2509-local-version-allocation.test.ts',
   'task-2509-release-workflow.test.ts',
+  // TASK-2516: landed-mission recovery crosses the git boundary with a real
+  // temporary Git repository and worktrees, so it runs in the integration layer.
+  'task-2516-recover-landed-mission-repro.test.ts',
+  // TASK-2517 CP-3: seeds a temporary Git repository and a migrated SQLite
+  // database to drive the stranded-landed-mission closeout, so it crosses the
+  // git/SQLite process boundary and runs only in the integration layer.
+  'task-2517-cp3-landed-closeout.test.ts',
+  // TASK-2517 F1: drives the base-branch-scoped landed-payload detector against
+  // a real temporary Git repository with a retained mission worktree, so it
+  // crosses the git boundary and runs in the integration layer.
+  'task-2517-landed-squash-base-branch-detection.test.ts',
   'test-hygiene.test.ts',
   'tui-command-flow.test.ts',
   'tui-pty-smoke.test.ts',

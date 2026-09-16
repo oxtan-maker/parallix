@@ -79,6 +79,21 @@ The `cutoverTask` field on each entry names the specific task responsible for it
 migration. Entries with `cutoverTask: null` are permanent (SQLite adapters, external
 facts, configuration) and do not migrate.
 
+## Repository footprint boundary
+
+This executable inventory covers production persistence boundaries; it is not a
+retention policy for every file emitted by a workflow. ADR 0053 does not retain
+mission contracts or committed checkpoint/review Markdown as steady state:
+normal lifecycle execution must not create Git-tracked workflow metadata, so
+those files become explicit imports, on-demand exports, or nothing at all once
+their structured state is authoritative in SQLite. Legacy session-marker and
+review-state files are one-way import inputs; agent scratch files and
+gate-result observations remain local, ignored transport. The reusable
+verification proof is a Parallix-owned trust marker and is a migration target
+rather than permanent file state. The investigation record in
+`missions/task-2511/` defines the proposed sequencing and follow-up work without
+changing this fixture's classifications.
+
 ## Enforcement
 
 The inventory is enforced by architecture tests in `test/persistence-inventory-guardrail.test.ts`:

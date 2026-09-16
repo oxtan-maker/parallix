@@ -38,8 +38,12 @@ export function colorize(format: string, text: string): string {
   return styleText(format as import('node:util').InspectColor, String(text ?? ''));
 }
 
+// The SGR pattern is built from the ESC code point rather than written as a
+// control character in a regex literal; the matched text is unchanged.
+const ANSI_SGR_PATTERN = new RegExp(`${String.fromCharCode(0x1b)}\\[[0-9;]*m`, 'g');
+
 export function stripAnsi(text: string): string {
-  return String(text ?? '').replace(/\x1B\[[0-9;]*m/g, '');
+  return String(text ?? '').replace(ANSI_SGR_PATTERN, '');
 }
 
 export function visibleWidth(text: string): number {

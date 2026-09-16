@@ -74,7 +74,11 @@ function createFakeStore(status: MissionStatus) {
 }
 
 function servicesFor() {
-  const store = createFakeStore('review');
+  // The landing guard sees the lane AFTER the production flow restores an
+  // approved `review` lane to `integration` (integrate-workflow SC1), so the
+  // dispatcher dispatches on the restored `integration` lane. SC2 (task-2517)
+  // rejects the rebounded `active` lane, not this restored one.
+  const store = createFakeStore('integration');
   return {
     store,
     lifecycle: new MissionLifecycleService(store as never),

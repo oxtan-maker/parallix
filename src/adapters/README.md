@@ -120,14 +120,17 @@ process; run them with `npm test -- test/dependency-graph.test.ts`.
 ## Known outstanding debt
 
 **Multi-integration workflow sequencing under `src/adapters/` is unguarded.**
-`src/adapters/cli/commands/` still contains legacy command implementations that
-combine request handling, rendering, and workflow sequencing with concrete
-integrations — `src/adapters/cli/commands/integrate.ts` and
-`src/adapters/cli/commands/handoff.ts` each wire 9 sibling packages — and several
-mechanism packages (`git`, `forgejo`, `verification`, `agents`) wire three or
-more siblings too. Nothing in CI fails on any of this. The list of enforced rules
-above is exhaustive: it is what the tree is actually protected against, and this
-axis is not on it.
+The `handoff.ts` and `integrate.ts` command adapters no longer sequence: each
+binds concrete mechanisms to an application-owned port set and delegates to a
+use case under `src/application/`. Other command surfaces — notably
+`review/review-loop.ts`, `cli/commands/stats.ts` and `cli/commands/active.ts` —
+still combine request handling, rendering and workflow sequencing with concrete
+integrations, and several mechanism packages (`git`, `forgejo`, `verification`,
+`agents`) wire three or more siblings too. Nothing in CI fails on workflow
+ownership itself; the two thinned adapters are guarded only by the line ceiling
+and port-binding assertions in `test/dependency-graph.test.ts`. The list of
+enforced rules above is exhaustive: it is what the tree is actually protected
+against, and this axis is not on it.
 
 A rule did exist. It flagged any adapter module importing three or more distinct
 sibling packages, and it was retired rather than repaired, because **a fan-out

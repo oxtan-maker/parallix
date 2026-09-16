@@ -1,8 +1,8 @@
 ---
 id: TASK-2517
 title: Keep integration-gate rebound from stranding a landed mission
-status: backlog
-assignee: []
+status: done
+assignee: [custom]
 created_date: '2026-09-15 09:00'
 labels: [bug, ai_sdlc]
 dependencies: []

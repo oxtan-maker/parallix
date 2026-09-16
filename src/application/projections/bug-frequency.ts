@@ -1,5 +1,7 @@
 // ---------------------------------------------------------------------------
-// Completed-mission bug frequency (ADR 0051 §"Reliability measurement")
+// Completed-mission bug frequency
+import { compareCodeUnits } from '../../domain/comparators.js';
+// (ADR 0051 §"Reliability measurement")
 //
 // The primary outcome metric for the UI-neutral boundary is
 // `completed bug missions / all completed missions`, with the companion ratio
@@ -92,7 +94,7 @@ interface ParsedCopy {
 }
 
 function stripQuotes(value: string): string {
-  return value.replace(/^['"]|['"]$/g, '');
+  return value.replace(/(?:^['"])|(?:['"]$)/g, '');
 }
 
 function basenameOf(filePath: string): string {
@@ -236,7 +238,7 @@ export function measureBugFrequency(input: BugFrequencyInput): BugFrequencyMeasu
       id,
       copies: copies.length,
       copyPaths: copies.map((copy) => `${copy.path}:${copy.idLine}`),
-      labelUnion: [...union].sort(),
+      labelUnion: [...union].sort(compareCodeUnits),
       labelEvidence: evidence === null || evidence.labelLine === null
         ? null
         : `${evidence.path}:${evidence.labelLine}`,

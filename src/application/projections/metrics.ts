@@ -194,6 +194,7 @@ export function medianStateTimes(
   const values: number[] = [];
   let index = 0;
   return {
+    // instants is readonly string[] (ISO-8601); default order == chronological, left implicit per SC6.
     series: [...instants].sort().map((through) => {
       while (index < ordered.length && ordered[index]!.closedAt <= through) {
         const value = ordered[index++]!.cycleTimeMinutes;
@@ -273,6 +274,7 @@ export function cumulativeFlowSeries(
   let completed = [...state.values()].filter((status) => status === 'done').length;
   let index = 0;
   return {
+    // instants is readonly string[] (ISO-8601); default order == chronological, left implicit per SC6.
     series: [...instants].sort().map((at) => {
       while (index < ordered.length && ordered[index]!.occurredAt <= at) {
         const transition = ordered[index++]!;

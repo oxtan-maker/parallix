@@ -50,7 +50,7 @@ export function isReviewerPoolExhausted(error: unknown): boolean {
 import {
   collectGoalCheckEvidenceRows,
   findUnverifiableGoalCheckRow,
-} from '../adapters/review/review-static-evidence.js';
+} from './static-evidence.js';
 
 /**
  * Build the content for an auto-generated CP-1.md checkpoint.
@@ -377,7 +377,7 @@ export class HandoffCommandUseCase {
         }
         // Strip leading/trailing quote characters (', ", `) before checking
         // so that 'lib/agents/' becomes lib/agents/ and `path` becomes path
-        const cleaned = token.replace(/^['"`]|['"`]$/g, '');
+        const cleaned = token.replace(/(?:^['"`])|(?:['"`]$)/g, '');
         // Skip glob patterns (contain *, ?, [, ]) — not literal file paths
         if (/[?*[\]]/.test(cleaned)) {
           continue;

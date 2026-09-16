@@ -147,7 +147,7 @@ export const TECHNICAL_PERSISTENCE_METADATA: readonly TechnicalPersistenceMetada
     id: 'sqlite-migration-identity',
     kind: 'schema-or-migration-identity',
     fileLocation: 'src/adapters/sqlite/migration-runner.ts',
-    line: 25,
+    line: 26,
     anchor: 'export class SqliteMigrationRunner',
     whyNotDomain:
       'Ordered migration ids and their SHA-256 checksums describe the schema ledger. They have no mission, agent, or review meaning and no application command reads them as domain facts.',

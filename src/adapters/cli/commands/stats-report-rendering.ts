@@ -6,6 +6,7 @@
 import * as fmt from '../../../application/presentation/cli-format.js';
 import * as statsReport from './stats-report.js';
 import { resolveCanonicalRepositoryId } from '../../git/repository-identity.js';
+import { compareCodeUnits } from '../../../domain/comparators.js';
 import {
   summarizeCompletedMissionWindow,
   statisticsMissionKey,
@@ -77,7 +78,7 @@ function computePeriodStats(group) {
 // @ts-ignore -- retained reporting helper is dynamically typed
   const dates = group.map(row => formatDate(String(row.normalizedDate))).filter(Boolean);
   if (dates.length === 0) {return null;}
-  const sorted = dates.sort();
+  const sorted = dates.sort(compareCodeUnits);
   const first = sorted[0];
   const last = sorted[sorted.length - 1];
   const start = new Date(first);
@@ -172,7 +173,7 @@ function generateMarkdownReport(data, options = {}) {
     lines.push('## By Period (Month)\n');
     lines.push('| Period | Days | PRs | Merged | Open | Total Reviews | Avg Reviews/PR |');
     lines.push('|--------|------|-----|--------|------|---------------|----------------|');
-    for (const month of Object.keys(groups).sort()) {
+    for (const month of Object.keys(groups).sort(compareCodeUnits)) {
 // @ts-ignore -- retained reporting helper is dynamically typed
       const period = computePeriodStats(/** @type{StatsRow[]} */(/** @type {any} */ (groups)[month]));
       if (period) {

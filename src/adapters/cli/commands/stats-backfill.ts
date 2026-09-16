@@ -3,6 +3,7 @@ import * as path from 'node:path';
 
 import * as fmt from '../../../application/presentation/cli-format.js';
 import stats from './stats.js';
+import { compareCodeUnits } from '../../../domain/comparators.js';
 import { git } from '../../git/git.js';
 import {
   getTaskFrontmatterValue,
@@ -35,10 +36,10 @@ function listHistoricalMissionSlugs(rootDir = process.cwd()) {
   if (!fs.existsSync(missionsRoot)) {return [];}
 
   const slugs = [];
-  for (const year of fs.readdirSync(missionsRoot).sort()) {
+  for (const year of fs.readdirSync(missionsRoot).sort(compareCodeUnits)) {
     const yearDir = path.join(missionsRoot, year);
     if (!/^\d{4}$/.test(year) || !fs.statSync(yearDir).isDirectory()) {continue;}
-    for (const slug of fs.readdirSync(yearDir).sort()) {
+    for (const slug of fs.readdirSync(yearDir).sort(compareCodeUnits)) {
       if (!/^task-\d+/i.test(slug)) {continue;}
       const missionDir = path.join(yearDir, slug);
       if (!fs.statSync(missionDir).isDirectory()) {continue;}
@@ -86,8 +87,8 @@ function deriveImplementerFromGitHistory(slug: string, taskFile: string, rootDir
     .filter(Boolean) as string[];
 
   if (authors.length === 0) {return null;}
-  const uniqueAuthors = [...new Set(authors)];
-  return uniqueAuthors.length === 1 ? uniqueAuthors[0] : uniqueAuthors[0];
+  // new Set(authors)[0] == authors[0]: first author, dedupe irrelevant to element 0.
+  return authors[0];
 }
 
 function deriveDateFromGitHistory(slug: string, taskFile: string, rootDir = process.cwd()) {

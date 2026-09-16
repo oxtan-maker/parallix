@@ -1,10 +1,11 @@
 ---
 id: TASK-2500
 title: 'Wave: First-class integration modes and GitHub trust pipeline'
-status: backlog
+status: done
 assignee:
   - custom
 created_date: '2026-09-12'
+updated_date: '2026-09-16 09:38'
 labels:
   - integration
   - github

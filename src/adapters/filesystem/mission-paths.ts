@@ -283,7 +283,7 @@ export const SUPPORTED_VERIFY_AREAS = new Set(['docs', 'workflow', 'web', 'serve
 export function normalizeVerifyArea(area: string | undefined): string {
   if (!area) {return 'docs';}
   if (area === 'auth-server') {return 'auth';}
-  return SUPPORTED_VERIFY_AREAS.has(area) ? area : area;
+  return area;
 }
 
 /** @param {string} content */

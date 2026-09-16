@@ -1,6 +1,6 @@
 {
   "name": "@magnusekdahl/parallix",
-  "version": "1.5.127",
+  "version": "1.5.135",
   "description": "Trust ladder for AI coding work — separate review, configured verification, conditional Linux confinement, and human-owned merges",
   "license": "AGPL-3.0-or-later",
   "private": false,
@@ -57,6 +57,8 @@
     "test:codeql": "bash scripts/codeql-sast.sh",
     "test:reproducible-output": "tsx scripts/verify-reproducible-build.ts",
     "test:coverage": "FORCE_COLOR=0 tsx src/adapters/verification/coverage-gate.ts --lcov",
+    "sonar:up": "docker compose -f infra/sonarqube/compose.yml up -d",
+    "sonar": "sonar-scanner-npm",
     "typecheck": "tsc --noEmit && tsc --noEmit --project tsconfig.scripts.json",
     "test:bundle": "node --enable-source-maps build/px.mjs --version",
     "release:publish": "tsx scripts/release-publish.ts",

@@ -353,13 +353,56 @@ function getAcceptanceCriteria(taskFilePath: string) {
     .filter(line => /^- \[[ xX]\]/.test(line));
 }
 
+/** YAML block-scalar indicator: `>`, `|`, optionally with a chomping flag and an indentation indicator (`>-`, `|+2`, …). */
+const BLOCK_SCALAR_HEADER = /^[>|][-+]?\d*$/;
+
+/** Leading whitespace width of `line`. */
+function indentWidth(line: string): number {
+  return (/^\s*/.exec(line) ?? [''])[0].length;
+}
+
+/**
+ * Join the continuation lines of a YAML block scalar opened by `header`.
+ *
+ * Continuation lines sit indented past the mapping key; the first later
+ * non-blank line at the key's indent ends the scalar. Folded (`>`) scalars
+ * fold line breaks into spaces; literal (`|`) scalars keep them. This is the
+ * shape a single-line reader (`^key:\s*(.+)$`) used to drop, leaving only the
+ * `>-`/`|` marker behind.
+ */
+function blockScalarText(header: string, lines: readonly string[], from: number, keyIndent: number): string {
+  const taken: string[] = [];
+  let cursor = from;
+  while (cursor < lines.length) {
+    const line = lines[cursor];
+    if (line.trim() !== '' && indentWidth(line) <= keyIndent) {break;}
+    taken.push(line);
+    cursor += 1;
+  }
+  // Trailing blank lines are not part of the scalar.
+  while (taken.length > 0 && taken[taken.length - 1].trim() === '') {taken.pop();}
+  const text = taken.join('\n');
+  return /^>/.test(header) ? text.replace(/\s+/g, ' ').trim() : text.replace(/\s+$/, '');
+}
+
 /** @param {string} content @param {string} field @returns {string|null} */
 function parseTaskFrontmatterValue(content: string, field: string) {
-  const pattern = new RegExp(`^${field}:\\s*([^\\r\\n]+)`, 'mi');
-  const match = content.match(pattern);
-  if (!match) {return null;}
-  const value = match[1].trim().replace(/^['"]|['"]$/g, '');
-  return value || null;
+  const lines = content.split(/\r?\n/);
+  // Case-insensitive on the key so `title` and `Title` both resolve; the value
+  // capture is `.*` (not `[^\r\n]+`) so an empty scalar still returns null and
+  // a block-scalar header can be detected on the same line.
+  const keyRe = new RegExp(`^${field.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}:\\s*(.*)$`, 'i');
+  for (let i = 0; i < lines.length; i += 1) {
+    const match = keyRe.exec(lines[i]);
+    if (!match) {continue;}
+    const header = match[1].trim();
+    if (BLOCK_SCALAR_HEADER.test(header)) {
+      return blockScalarText(header, lines, i + 1, indentWidth(lines[i]));
+    }
+    const value = header.replace(/(?:^['"])|(?:['"]$)/g, '');
+    return value || null;
+  }
+  return null;
 }
 
 /** @param {string} taskFilePath @param {string} field @returns {string|null} */

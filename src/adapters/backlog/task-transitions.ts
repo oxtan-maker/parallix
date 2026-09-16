@@ -62,12 +62,18 @@ function setTaskStatus(taskFilePath: string, newStatus: string) {
  */
 function completeTask(slug: string, rootDir: string = process.cwd()): boolean {
   const resolution = resolveTaskFile(slug, rootDir);
-  if (!resolution.ok) {return false;}
+  const { tasksDir, completedDir } = getTaskStorage(rootDir);
+  const hasCompletedTwin = resolution.reason === 'ambiguous'
+    && resolution.matches.length === 2
+    && resolution.matches.some(file => file.startsWith(completedDir + path.sep));
+  const taskFilePath = resolution.ok
+    ? resolution.taskFile
+    : hasCompletedTwin
+      ? resolution.matches.find(file => file.startsWith(tasksDir + path.sep))
+      : undefined;
 
-  const taskFilePath = /** @type {string} */ (resolution.taskFile);
   if (!taskFilePath) {return false;}
   const fileName = path.basename(taskFilePath);
-  const { tasksDir, completedDir } = getTaskStorage(rootDir);
 
   if (!taskFilePath.includes(tasksDir)) {
     // Already in completed or somewhere else
@@ -83,6 +89,11 @@ function completeTask(slug: string, rootDir: string = process.cwd()): boolean {
 
   // Set status before moving
   setTaskStatus(taskFilePath, 'done');
+
+  if (hasCompletedTwin) {
+    fs.rmSync(taskFilePath);
+    return true;
+  }
 
   fs.renameSync(taskFilePath, targetPath);
   return true;

@@ -724,6 +724,14 @@ function runRealAgentSmoke(agent, runner) {
     // catches broken local launcher/model state without misattributing it
     // to Parallix's mission lifecycle.
     const healthcheckResult = runHealthcheck(agent, runner, repo.repoRoot, env);
+    // Exit status alone does not prove the model answered: every runner can
+    // settle a turn that only contains provider errors and still exit 0. The
+    // probe asks for the literal token `OK`, so require it in the transcript;
+    // otherwise the backend is unreachable and the lifecycle below would fail
+    // later as a misattributed "phantom draft".
+    if (healthcheckResult.status === 0 && !/OK/.test(`${healthcheckResult.stdout || ''}${healthcheckResult.stderr || ''}`)) {
+      healthcheckResult.status = 1;
+    }
     if (healthcheckResult.status !== 0) {
       const { bucket, detail } = classifyFailure(healthcheckResult);
       assert.fail(

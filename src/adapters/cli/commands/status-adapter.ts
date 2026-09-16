@@ -18,6 +18,7 @@ import type {
 } from '../../../application/ports/cli-workflows.js';
 import { detectRebaseState, getCurrentBranch, getUncommittedCount, getLastThreeCommits, run } from '../../git/git.js';
 import { findTaskFile, getTaskStatus } from '../../backlog/backlog.js';
+import { compareCodeUnits } from '../../../domain/comparators.js';
 import {
   getPrimaryWorktree,
   inferSlug,
@@ -116,9 +117,10 @@ function findStaleMissionWorktrees(opts: {
         path: entry.path,
         branch: branchRef,
         taskStatus: taskStatus || 'missing',
-        cleanupCommand: taskStatus === 'done'
-          ? `scripts/cleanup-mission-worktree.sh ${slug}`
-          : `git worktree remove ${entry.path} && git branch -D ${missionBranchName(slug, opts.primaryWorktree || process.cwd())}`,
+        // SC5: no `scripts/cleanup-mission-worktree.sh` exists on disk. The
+        // cleanup is the same local git one-liner for every stranded mission
+        // worktree, so the hint must name a real git command.
+        cleanupCommand: `git worktree remove ${entry.path} && git branch -D ${missionBranchName(slug, opts.primaryWorktree || process.cwd())}`,
       };
     })
     .filter(Boolean) as StatusStaleWorktree[];
@@ -237,7 +239,7 @@ export function createStatusWorkflowAdapter(options: StatusWorkflowAdapterOption
       const draftEligible = eligibleAgentsForStepFn('draft', { config: config as any });
       const activeEligible = eligibleAgentsForStepFn('active', { config: config as any });
       const baseAgents = allWorkflowAgentNamesFn();
-      const allAgents = [...new Set([...baseAgents, ...draftEligible, ...activeEligible])].sort();
+      const allAgents = [...new Set([...baseAgents, ...draftEligible, ...activeEligible])].sort(compareCodeUnits);
       const agentMatrix: StatusAgentEntry[] = allAgents.map(agent => ({
         agent,
         supported: workflowLauncherStatusFn(agent).supported,
@@ -396,7 +398,7 @@ export function createStatusAgentAdapter(options: {
       const draftEligible = eligibleAgentsForStepFn('draft', { config: config as any });
       const activeEligible = eligibleAgentsForStepFn('active', { config: config as any });
       const baseAgents = allWorkflowAgentNamesFn();
-      const allAgents = [...new Set([...baseAgents, ...draftEligible, ...activeEligible])].sort();
+      const allAgents = [...new Set([...baseAgents, ...draftEligible, ...activeEligible])].sort(compareCodeUnits);
       return allAgents.map(agent => ({
         agent,
         supported: workflowLauncherStatusFn(agent).supported,

@@ -296,6 +296,34 @@ export function findExistingSquashCommit(rootDir: string, slug: string) {
 }
 
 /**
+ * Detect a landed mission squash by scanning the *recorded base branch* rather
+ * than the current HEAD. `px integrate` lands with `git merge --squash` onto
+ * the base branch, so the squash commit lives on the base branch and is never
+ * reachable from a mission worktree's HEAD — the HEAD-scoped
+ * `findExistingSquashCommit` returns null there. This is the base-branch-scoped
+ * variant used by the SC4 landed-payload guards and the `--recover-landed`
+ * closeout, both of which run from the mission worktree the operator stands in.
+ *
+ * @param {string} rootDir @param {string} slug
+ * @returns {string | null} the landed squash commit hash, or null.
+ */
+export function findLandedSquashOnBaseBranch(rootDir: string, slug: string) {
+  const base = resolveMissionBaseBranch(slug, rootDir);
+  if (!base) {return null;}
+  const baseRef = git(['-C', rootDir, 'rev-parse', '--verify', `${base}^{commit}`]);
+  if (baseRef.status !== 0) {return null;}
+  const prefix = `${missionBranchName(slug, rootDir)}:`;
+  const log = git(['-C', rootDir, 'log', base, '--format=%H %s', '-200']);
+  if (log.status !== 0) {return null;}
+  for (const line of log.stdout.trim().split('\n')) {
+    const spaceIdx = line.indexOf(' ');
+    if (spaceIdx === -1) {continue;}
+    if (line.slice(spaceIdx + 1).startsWith(prefix)) {return line.slice(0, spaceIdx);}
+  }
+  return null;
+}
+
+/**
  * Detect merge conflicts in the mission worktree and emit a bounded resolution plan.
  *
  * Categories:

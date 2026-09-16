@@ -54,12 +54,17 @@ test('extractCodexSessionId returns null for no match', () => {
 
 // ---------- buildCodexDraftInvocation ----------
 
-test('buildCodexDraftInvocation uses exec path when interactive is false', () => {
+test('buildCodexDraftInvocation leaves native sandboxing to Bubblewrap by default', () => {
   const inv = buildCodexDraftInvocation({ prompt: 'test', worktree: '/tmp', interactive: false });
   assert.equal(inv.command, 'codex');
   assert.ok(inv.args.includes('exec'));
+  assert.equal(inv.args.includes('--sandbox'), false);
+});
+
+test('buildCodexDraftInvocation enables the native sandbox only as a fallback', () => {
+  const inv = buildCodexDraftInvocation({ prompt: 'test', worktree: '/tmp', interactive: false, sandbox: true });
   assert.ok(inv.args.includes('--sandbox'));
-  assert.ok(inv.args.includes('workspace-write'), 'confined sandbox, not the unrestricted default');
+  assert.ok(inv.args.includes('workspace-write'));
 });
 
 test('buildCodexDraftInvocation uses full-auto path when interactive is true', () => {
@@ -199,22 +204,19 @@ test('startCodexDraftAgent does NOT retry when resume is false', async () => {
   codex.__setSpawnAndTeeForTest(null);
 });
 
-test('startCodexDraftAgent healthy resume still uses exec resume', async () => {
+test('startCodexDraftAgent places the fallback sandbox on exec before resume', async () => {
   let spawnCount = 0;
   const mockSpawn = (cmd, args, opts) => {
     spawnCount++;
-    assert.ok(args.includes('exec'), 'must include exec for resume');
-    assert.ok(args.includes('resume'), 'must include resume for resume');
+    assert.deepEqual(args.slice(args.indexOf('exec'), args.indexOf('ses_valid') + 1), ['exec', '--sandbox', 'workspace-write', 'resume', 'ses_valid']);
     assert.ok(args.includes('ses_valid'), 'must include the session ID');
-    assert.ok(args.includes('--sandbox'), 'resume must be confined');
-    assert.ok(args.includes('workspace-write'), 'resume uses confined sandbox, not the unrestricted default');
     return Promise.resolve({ status: 0, signal: null, stdout: 'codex resume ses_valid\n', stderr: '', error: null });
   };
 
   codex.__setSpawnAndTeeForTest(mockSpawn);
 
   const { invocation, resultPromise } = codex.startCodexDraftAgent({
-    prompt: 'test', worktree: '/tmp/wt', env: {}, resume: true, sessionId: 'ses_valid'
+    prompt: 'test', worktree: '/tmp/wt', env: {}, resume: true, sessionId: 'ses_valid', sandbox: true
   });
   const result = await resultPromise;
 

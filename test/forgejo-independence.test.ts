@@ -139,7 +139,8 @@ test('performHandoff gates Forgejo PR creation behind isForgejoReviewEnabled', (
 // =============================================================================
 
 test('integrate gates syncMerged behind isForgejoReviewEnabled', () => {
-  const src = fs.readFileSync(path.join(ADAPTERS, 'cli', 'commands', 'integrate.ts'), 'utf8');
+  // TASK-2512 moved the integrate sequencing into the application layer.
+  const src = fs.readFileSync(path.join(ADAPTERS, '..', 'application', 'integrate', 'squash.ts'), 'utf8');
   assert.ok(src.includes('isForgejoReviewEnabled'),
     'integrate.ts should gate syncMerged behind isForgejoReviewEnabled');
 });
@@ -217,7 +218,7 @@ test('startReviewLoop gates Forgejo availability behind isForgejoReviewEnabled',
 // =============================================================================
 
 test('integrate printIntegrationPreflight gates Forgejo checks', () => {
-  const src = fs.readFileSync(path.join(ADAPTERS, 'cli', 'commands', 'integrate.ts'), 'utf8');
+  const src = fs.readFileSync(path.join(ADAPTERS, '..', 'application', 'integrate', 'preflight.ts'), 'utf8');
   const preflightSection = src.slice(src.indexOf('function printIntegrationPreflight'));
   assert.ok(preflightSection.includes('isForgejoReviewEnabled'),
     'printIntegrationPreflight should gate Forgejo PR/approval checks');

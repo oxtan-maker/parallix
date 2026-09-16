@@ -10,33 +10,23 @@ import * as path from 'path';
 import * as fmt from '../../application/presentation/cli-format.js';
 import { run } from '../git/git.js';
 import { findMissionDir, findCheckpoints, resolveWorktree, missionBaseDir, getPrimaryBranch } from '../filesystem/mission-utils.js';
+import {
+  collectGoalCheckEvidenceRows,
+  collectRepoTestNames,
+  canonicalSourceContainsFile,
+  evidenceCellHasVerifiableReference,
+  findUnverifiableGoalCheckRow,
+  type EvidenceFileSystemPort,
+  type EvidenceDirent,
+} from '../../application/static-evidence.js';
 
-// ============================================================================
-// Optional fileSystem helpers (handoff callers pass a port; review callers omit)
-// ============================================================================
-
-interface FileSystemPort {
-  existsSync(_target: string): boolean;
-  readText(_target: string): string;
-  listEntries(_target: string): fs.Dirent[];
-  listNames(_target: string): string[];
-}
-
-function _fsExistsSync(fileSystem: FileSystemPort | undefined, target: string) {
-  return fileSystem?.existsSync(target) ?? fs.existsSync(target);
-}
-
-function _fsReadText(fileSystem: FileSystemPort | undefined, target: string) {
-  return fileSystem?.readText(target) ?? fs.readFileSync(target, 'utf8');
-}
-
-function _fsListEntries(fileSystem: FileSystemPort | undefined, target: string) {
-  return fileSystem?.listEntries(target) ?? fs.readdirSync(target, { withFileTypes: true });
-}
-
-function _fsListNames(fileSystem: FileSystemPort | undefined, target: string) {
-  return fileSystem?.listNames(target) ?? fs.readdirSync(target);
-}
+export {
+  collectGoalCheckEvidenceRows,
+  collectRepoTestNames,
+  canonicalSourceContainsFile,
+  evidenceCellHasVerifiableReference,
+  findUnverifiableGoalCheckRow,
+};
 
 // ============================================================================
 // Formatting helpers
@@ -68,220 +58,6 @@ export function formatStaticReviewSuccess(slug: string): string {
 }
 
 // ============================================================================
-// Evidence row collection
-// ============================================================================
-
-export function collectGoalCheckEvidenceRows(afterHeader: string): string[] {
-  const separatorPattern = /^\|(?:\s*:?-+:?\s*\|)+$/;
-  const headerPattern = /^\| .+\| .+\| .+\|$/;
-  const evidenceLinePattern = /^\| .+\| .+\| .+\|$/;
-  const linesAfterHeader = afterHeader.split('\n');
-  const evidenceRows: string[] = [];
-  let pastHeader = false;
-
-  for (const line of linesAfterHeader) {
-    const trimmed = line.trim();
-    if (trimmed === '') { continue; }
-    if (!pastHeader && headerPattern.test(trimmed)) {
-      pastHeader = true;
-      continue;
-    }
-    if (separatorPattern.test(trimmed)) { continue; }
-    if (pastHeader && evidenceLinePattern.test(trimmed)) {
-      evidenceRows.push(trimmed);
-      continue;
-    }
-    break;
-  }
-
-  return evidenceRows;
-}
-
-// ============================================================================
-// Test name collection
-// ============================================================================
-
-export function collectRepoTestNames(fileSystem: FileSystemPort | undefined, rootDir: string): Set<string> {
-  const names = new Set<string>();
-  const testRoot = path.join(rootDir, 'test');
-  if (!_fsExistsSync(fileSystem, testRoot)) {
-    return names;
-  }
-
-  const queue: string[] = [testRoot];
-  while (queue.length > 0) {
-    const current = queue.pop()!;
-    let entries: fs.Dirent[] = [];
-    try {
-      entries = _fsListEntries(fileSystem, current) as fs.Dirent[];
-    } catch {
-      continue;
-    }
-    for (const entry of entries) {
-      const fullPath = path.join(current, entry.name);
-      if (entry.isDirectory()) {
-        queue.push(fullPath);
-        continue;
-      }
-      if (!entry.isFile() || !/\.(?:test|spec)\.[cm]?[jt]sx?$/i.test(entry.name)) {
-        continue;
-      }
-      const content = _fsReadText(fileSystem, fullPath) as string;
-      const testNamePattern = /\b(?:test|it)(?:\.\w+)?\s*\(\s*(['"`])([^'"`]+)\1/g;
-      let match: RegExpExecArray | null;
-      while ((match = testNamePattern.exec(content)) !== null) {
-        names.add(match[2]);
-      }
-    }
-  }
-
-  return names;
-}
-
-// ============================================================================
-// Canonical source file check
-// ============================================================================
-
-export function canonicalSourceContainsFile(fileSystem: FileSystemPort | undefined, rootDir: string, basename: string): boolean {
-  const sourceRoot = path.join(rootDir, 'src');
-  if (!_fsExistsSync(fileSystem, sourceRoot)) { return false; }
-  const queue = [sourceRoot];
-  while (queue.length > 0) {
-    const current = queue.pop()!;
-    for (const entry of _fsListEntries(fileSystem, current)) {
-      const fullPath = path.join(current, entry.name);
-      if (entry.isDirectory()) {
-        queue.push(fullPath);
-      } else if (entry.isFile() && entry.name === basename) {
-        return true;
-      }
-    }
-  }
-  return false;
-}
-
-// ============================================================================
-// Verifiable reference check
-// ============================================================================
-
-export function evidenceCellHasVerifiableReference(fileSystem: FileSystemPort | undefined, cell: string, rootDir: string, knownTestNames: Set<string>): boolean {
-  const normalized = cell.replace(/\[[^\]]+\]\(([^)]+)\)/g, '$1');
-  const fileLinePattern = /(?:^|[\s(`])((?:\/|\.\/)?[\w./-]+\.[\w-]+):(\d+)(?:-\d+)?/g;
-  let fileLineMatch: RegExpExecArray | null;
-  while ((fileLineMatch = fileLinePattern.exec(normalized)) !== null) {
-    const candidatePath = fileLineMatch[1];
-    const resolved = path.isAbsolute(candidatePath)
-      ? candidatePath
-      : path.join(rootDir, candidatePath.replace(/^\.\//, ''));
-    // Historical checkpoints may cite the former `lib/...` layout. Validate
-    // that the cited source file still exists somewhere in the canonical tree.
-    const canonicalSourceExists = !path.isAbsolute(candidatePath) && candidatePath.startsWith('lib/')
-      ? canonicalSourceContainsFile(fileSystem, rootDir, path.basename(candidatePath))
-      : false;
-    if (_fsExistsSync(fileSystem, resolved) || canonicalSourceExists) {
-      return true;
-    }
-  }
-
-  // Bare repo path (no :line, no command prefix, may contain spaces).
-  // Many follow-up task files are named like `backlog/tasks/task-2437.01 - design-fidelity-audit-vs-reference.md`,
-  // which the :line pattern above rejects (spaces) and which has no command
-  // prefix. A path-like token ending in a file extension that resolves to a
-  // real file on disk is a verifiable reference. Requires an extension so bare
-  // prose words ("TBD", "All tests pass") still fall through to false.
-  const barePathPattern = /(?:^|[\s(`])((?:\/|\.\/)?[\w ./-]+\.[\w-]+)/g;
-  let barePathMatch: RegExpExecArray | null;
-  while ((barePathMatch = barePathPattern.exec(normalized)) !== null) {
-    // The match is greedy over spaces so a filename may keep them, which also
-    // means it swallows the prose in front of it ("see the file package.json").
-    // Drop leading words until the rest resolves, so both shapes are checked.
-    const words = barePathMatch[1].trim().split(' ');
-    for (let start = 0; start < words.length; start += 1) {
-      const candidatePath = words.slice(start).join(' ');
-      const resolved = path.isAbsolute(candidatePath)
-        ? candidatePath
-        : path.join(rootDir, candidatePath.replace(/^\.\//, ''));
-      if (_fsExistsSync(fileSystem, resolved)) {
-        return true;
-      }
-    }
-  }
-
-  const adrPattern = /\bADR\s+(\d{4})\b/g;
-  let adrMatch: RegExpExecArray | null;
-  while ((adrMatch = adrPattern.exec(normalized)) !== null) {
-    const prefix = `${adrMatch[1]}-`;
-    const adrDir = path.join(rootDir, 'docs', 'adr');
-    if (_fsExistsSync(fileSystem, adrDir) && _fsListNames(fileSystem, adrDir).some((name: string) => name.startsWith(prefix) && name.endsWith('.md'))) {
-      return true;
-    }
-  }
-
-  const quotedPattern = /(['"`])([^'"`]+)\1/g;
-  let quotedMatch: RegExpExecArray | null;
-  while ((quotedMatch = quotedPattern.exec(normalized)) !== null) {
-    if (knownTestNames.has(quotedMatch[2])) {
-      return true;
-    }
-  }
-
-  const testFilePattern = /(?:^|[\s(`])((?:\/|\.\/)?[\w./-]+\.(?:test|spec)\.[cm]?[jt]sx?)(?=$|[\s),`])/g;
-  while (testFilePattern.exec(normalized) !== null) {
-    return true;
-  }
-
-  // Normalize escaped backticks (`` `` ``) so the inline-command regex does not
-  // span across them. A markdown cell like `` `git diff --name-only` `` would
-  // otherwise match from the first ` to the third, capturing a leading backtick
-  // that breaks the `git` prefix check.
-  const cellForCommands = cell.replace(/``/g, '  ');
-  const inlineCommandPattern = /`([^`]+)`/g;
-  let commandMatch: RegExpExecArray | null;
-  while ((commandMatch = inlineCommandPattern.exec(cellForCommands)) !== null) {
-    const command = commandMatch[1].trim();
-    if (/^(npm|npx|node|git|px)\s+/i.test(command)) {
-      return true;
-    }
-    // Shell commands are evidence only when they name a repository file.
-    // This keeps raw environment output out while allowing `bash hello.sh`.
-    if (/^(bash|sh|cat|head|tail|diff|grep|sed|awk|xxd|od|wc|sort|uniq|stat|ls)\s+/i.test(command)) {
-      const args = command.split(/\s+/).slice(1);
-      for (const arg of args) {
-        if (arg.startsWith('-')) { continue; }
-        const candidatePath = arg.replace(/^\.\//, '');
-        if (_fsExistsSync(fileSystem, path.join(rootDir, candidatePath))) {
-          return true;
-        }
-      }
-    }
-    if (command.startsWith('./')) {
-      const commandPath = command.split(/\s+/)[0];
-      if (_fsExistsSync(fileSystem, path.join(rootDir, commandPath.replace(/^\.\//, '')))) {
-        return true;
-      }
-    }
-  }
-
-  return false;
-}
-
-// ============================================================================
-// Unverifiable row detection
-// ============================================================================
-
-export function findUnverifiableGoalCheckRow(fileSystem: FileSystemPort | undefined, evidenceRows: string[], rootDir: string): string | null {
-  const knownTestNames = collectRepoTestNames(fileSystem, rootDir);
-  for (const row of evidenceRows) {
-    const columns = row.split('|').slice(1, -1).map(part => part.trim()).filter(Boolean);
-    if (columns.some(cell => evidenceCellHasVerifiableReference(fileSystem, cell, rootDir, knownTestNames))) {
-      continue;
-    }
-    return row;
-  }
-  return null;
-}
-
-// ============================================================================
 // Static Review Command
 // ============================================================================
 
@@ -304,6 +80,15 @@ export function performStaticReview(
   const findCheckpointsFn = options.findCheckpoints || findCheckpoints;
   const readFileSyncFn = options.readFileSync || fs.readFileSync;
   const runFn = options.run || run;
+  // static-evidence.ts lives in the application layer, which forbids node:fs;
+  // build an fs-backed port here so its helpers can read real files.
+  const evidenceFileSystem: EvidenceFileSystemPort = {
+    existsSync: (target) => fs.existsSync(target),
+    readText: (target) => (readFileSyncFn as typeof fs.readFileSync)(target, 'utf8'),
+    listEntries: (target) =>
+      fs.readdirSync(target, { withFileTypes: true }) as unknown as EvidenceDirent[],
+    listNames: (target) => fs.readdirSync(target),
+  };
   const resolveWorktreeFn = options.resolveWorktree || resolveWorktree;
   const getPrimaryBranchFn = options.getPrimaryBranch || getPrimaryBranch;
   const findings: string[] = [];
@@ -347,7 +132,7 @@ export function performStaticReview(
         findings.push(`Final checkpoint ${path.basename(finalCheckpoint)} has "## Goal Check" section but no evidence rows.`);
       } else {
         log(fmt.status('PASS', 'Goal Check table contains evidence rows.'));
-        const unverifiableRow = findUnverifiableGoalCheckRow(undefined, evidenceRows, rootDir);
+        const unverifiableRow = findUnverifiableGoalCheckRow(evidenceFileSystem, evidenceRows, rootDir);
         if (unverifiableRow) {
           findings.push(`Final checkpoint ${path.basename(finalCheckpoint)} has a "## Goal Check" section but no evidence rows that cite a verifiable reference such as a recognized repo command/path, exact test name, test-file path, or ADR reference (or, when necessary, file:line). A goal-check table with real evidence is required before handoff. Offending row: ${unverifiableRow}`);
         }

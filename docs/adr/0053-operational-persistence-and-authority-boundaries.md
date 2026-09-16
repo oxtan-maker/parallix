@@ -1,41 +1,89 @@
 # ADR 0053: Operational persistence and authority boundaries
 
-Status: Accepted; cutover requires explicit migration and recovery gates
+Status: Accepted
 Date: 2026-07-29
-Related: ADR 0043 (Git target resolution), ADR 0045 (branch model),
+Last updated: 2026-09-16
+Related: ADR 0037 (workflow coordination), ADR 0043 (Git target resolution),
+ADR 0045 (branch model), ADR 0048 (fail-closed harness),
 ADR 0051 (application and UI boundary)
 
 ## Context
 
-Parallix needs durable answers to questions that cannot be reconstructed
-reliably from task files, process presence, aggregate statistics, or a review
-provider:
+Parallix needs durable answers to operational questions that cannot reliably be
+reconstructed from task files, branch names, process presence, aggregate
+statistics, generated Markdown, or a review provider:
 
-- which repository owns a mission;
-- which lifecycle and closure state the mission is in;
-- which agent work measurements and provider session marker belong to a mission;
-- which review, checkpoint, and change-size facts belong to the mission; and
-- which operator settings and operational events must survive a restart.
+* which repository owns a mission;
+* which lifecycle and closure state the mission is in;
+* what execution context an agent requires to continue the mission;
+* which checkpoint and Goal Check evidence has been recorded;
+* which review rounds, findings, resolutions, and decisions belong to the mission;
+* which measurements and session markers belong to it; and
+* which operator choices and operational events must survive restart.
 
-These are Parallix-owned operational facts. Source history, integration
-ancestry, worktree presence, external task content, provider availability, and
-credentials are facts owned by other systems.
+These are Parallix-owned operational facts.
 
-The persistence decision must support atomic mission transitions, stale-write
-rejection, a cross-repository operator board, backup and recovery, and one
-authoritative writer per fact. It must not turn task frontmatter into the
-operational aggregate, invent domain entities through table design, or treat a
-database projection as proof of a Git or process fact.
+Other facts have existing external authorities:
 
-## Storage topology
+* Git owns commits, trees, branches, ancestry, and repository history;
+* the operating system owns current process liveness;
+* external task systems own their source task material;
+* providers own their external resources;
+* credential systems own secrets.
 
-| Option | Atomic mission updates | Cross-repository queries | Repository movement | Operational cost | Decision |
-|---|---|---|---|---|---|
-| Git/Markdown remains the operational store | Weak: related facts span files and commits | Requires scanning repositories | Strong when files are committed | Merge conflicts, parsing ambiguity, and no transaction across lifecycle, checkpoint, and review updates | Rejected |
-| One operator-local SQLite database | Strong: Mission and its recorded event can share a transaction | Direct | Requires explicit backup/export and repository rediscovery | One migration, locking, backup, and recovery boundary | **Accepted** |
-| Repository-local mission databases plus an operator database | No atomic transaction across mission and operator telemetry | Requires opening and reconciling many databases | An untracked database does not move with Git; a tracked SQLite file does not merge safely | Two authority classes, locators, migration paths, and backup plans | Rejected |
-| One database per worktree | Updates are isolated from sibling worktrees | Requires fan-out and reconciliation | Coupled to disposable runtime directories | Creates duplicate mission authorities | Rejected |
-| Append-only event log as the sole store | Atomic append is simple | Direct after projection | Same as its storage location | Current state depends on complete replay, event versioning, and repair tooling | Rejected as the primary store; events remain supporting history |
+ADR 0053 originally moved Parallix-owned operational authority from repository
+files into one SQLite database. That solved the authority and transaction problem,
+but the resulting implementation retained a large number of generated file
+projections.
+
+In particular, Mission and review state can be authoritative in SQLite while
+still causing `MISSION.md`, `CP-*.md`, review-event Markdown, task files, and
+other workflow material to accumulate in the target repository.
+
+That distinction is technically consistent — one copy can be authoritative and
+another a projection — but operationally it retains much of the cost of the
+file-backed architecture:
+
+* the repository becomes dominated by records of workflow execution rather than
+  the product;
+* humans and agents have to distinguish authoritative content from generated
+  views;
+* agents spend context discovering which workflow files matter;
+* every mission creates Git churn unrelated to the delivered product;
+* generated projections create synchronization and retention questions even
+  when production never reads them; and
+* a fresh reader cannot understand the current architecture or product without
+  filtering large amounts of historical workflow metadata.
+
+Agents still require this information. The requirement is therefore not to
+remove mission context or evidence, but to separate **persistence** from
+**presentation**.
+
+The persistence decision must support:
+
+1. one authority for each operational fact;
+2. atomic mission transitions;
+3. stale-write rejection;
+4. rich read/write context for agents and humans;
+5. compact target repositories;
+6. explicit backup and recovery;
+7. external authorities remaining authoritative for their own facts; and
+8. no speculative domain entities created only because a storage schema makes
+   them convenient.
+
+## Storage topology considered
+
+| Option                                                                                                                                              | Atomic operational updates                 | Agent/human readability                                 | Repository footprint                | Authority clarity                                                 | Operational cost                                           | Decision               |
+| --------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------ | ------------------------------------------------------- | ----------------------------------- | ----------------------------------------------------------------- | ---------------------------------------------------------- | ---------------------- |
+| Git/Markdown remains the operational store                                                                                                          | Weak: related facts span files and commits | High for individual files, poor for whole-state queries | High and grows with every mission   | Weak: file layout becomes domain protocol                         | Parsing, merge conflicts, scans and Git churn              | Reject                 |
+| SQLite authority plus routinely committed Markdown/JSON projections                                                                                 | Strong in SQLite                           | High                                                    | Still high and continuously growing | Better than Git authority, but two durable representations remain | Projection generation, retention and synchronization cost  | Reject as steady state |
+| Store all runtime facts, Git state, logs, artifacts and secrets in SQLite                                                                           | Strong locally                             | Requires application tooling                            | Low repository footprint            | Poor: database copies facts owned elsewhere                       | Unbounded DB, stale external truth, credential risk        | Reject                 |
+| Repository-local or worktree-local databases                                                                                                        | Strong inside one DB                       | Good                                                    | Low                                 | Weak across repos/worktrees                                       | Multiple authorities, reconciliation and backup complexity | Reject                 |
+| **One operator-local SQLite database for bounded Parallix-owned state, with application-owned projections and external references for other facts** | **Strong**                                 | **High through deterministic context/export surfaces**  | **Low**                             | **Explicit authority per fact**                                   | Backup/recovery plus context/query tooling                 | **Accept**             |
+
+The accepted option is the only one that simultaneously keeps mission context
+rich, avoids turning the product repository into an operational ledger, and
+preserves Git/OS/provider authority where those systems already own the truth.
 
 ## Decision
 
@@ -45,168 +93,280 @@ Use one SQLite database at:
 <PARALLIX_HOME>/parallix.db
 ```
 
-The database is the sole write authority for Parallix-owned operational state
-after each domain completes its explicit cutover. It is never created in a
-target repository, worktree, package, or executable directory.
+as the sole durable authority for **bounded Parallix-owned operational state**.
 
-Persisted names and relationships follow the checked domain model:
+The database is never stored inside a target repository or disposable worktree.
+
+Application/domain contracts define the concepts being persisted. SQL schema
+does not introduce a domain concept merely because a table would be useful.
+
+Application use cases decide transitions. Persistence records their result.
+Interfaces, adapters, and agents do not acquire lifecycle authority by directly
+mutating SQL.
+
+### Core persistence rule
+
+A fact does not remain repository-backed merely because a human or agent
+benefits from reading it as Markdown.
+
+**Presentation format and persistence format are separate concerns.**
+
+Likewise:
+
+**Rebuildable does not mean routinely materialized.**
+
+A projection of authoritative state is normally rendered when needed rather
+than committed to the target repository.
+
+## Authority boundaries
+
+| Concern                                                                          | Authority                                                                  | Repository/file role                                                                                    | Trade-off                                                                      |
+| -------------------------------------------------------------------------------- | -------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------ |
+| `RepositoryId` and `KnownRepository`, Mission identity, title, labels, assignee, lifecycle and closure | SQLite-backed Mission state                                                | None required for normal operation                                                                      | Mission history requires Parallix backup/export rather than plain Git clone    |
+| Mission execution context                                                        | SQLite-backed Mission state                                                | May be rendered as Markdown/JSON on demand                                                              | Requires a bounded representation rather than arbitrary mission documents      |
+| `CheckpointData` and `GoalCheckRow`                                              | SQLite-backed Mission state                                                | Legacy `CP-*.md` may be explicit import/export only                                                     | Agents cannot rely on `cat CP-1.md`; they use the application context surface  |
+| `Review`, rounds, findings, resolutions, disposition, phase and review events    | SQLite-backed Mission state                                                | Temporary agent artifacts may transport data; committed review-event exports are not normal persistence | Review history no longer appears automatically in Git                          |
+| `Mission.netEngineeringLines`, `MissionOutcome` and `AgentRunMeasurement`                 | SQLite                                                                     | Explicit analysis/export only                                                                           | Analytical tooling uses queries/exports instead of canonical CSV files         |
+| `SessionMarker`, `AgentBlock`, durable operator preferences                      | SQLite                                                                     | None required                                                                                           | Provider/runtime availability must still be observed separately                |
+| Reusable verification proof (the trust marker that lets a later command skip a gate) | SQLite                                                                 | None; today's per-identity proof file is a migration target                                             | Proof loss costs a gate re-run, so no export or backup beyond the database is required |
+| `LaneTransitionEvent` and operational history                                   | SQLite supporting history                                                  | None required                                                                                           | Event retention becomes a DB policy                                            |
+| Git commits, trees, refs, ancestry and worktrees                                 | Git/filesystem                                                             | Git remains authoritative                                                                               | Commands must observe Git before persisting resulting Mission facts            |
+| Process liveness and PIDs                                                        | OS/runtime                                                                 | None                                                                                                    | Restart recovery re-observes reality instead of trusting stale rows            |
+| External task source material                                                    | Owning task provider                                                       | Repository files are valid only when that provider intentionally uses files                             | Parallix cannot reconstruct arbitrary external task content from Mission state |
+| Parallix-local task catalog, if a local provider is selected                     | Task-provider persistence behind the task-source port; SQLite is permitted | No requirement for `backlog/tasks` or `backlog/completed`                                               | Task-source state remains separate from Mission lifecycle semantics            |
+| Workflow configuration, prompts, schemas, checked policy                         | Versioned repository/package content                                       | Git is appropriate authority                                                                            | Configuration changes travel with the product                                  |
+| Secrets and credentials                                                          | Environment/platform/provider tooling                                      | Never normal repository or operational-DB state                                                         | Separate credential setup remains necessary                                    |
+| Logs, patches, captures, transcripts and other unbounded artifacts               | Filesystem/artifact store/owning tool                                      | Reference from SQLite where needed                                                                      | Artifact retention must be managed separately                                  |
+| Board views, Markdown, JSON, CSV and other projections                           | Derived from authoritative state                                           | On demand or explicit export only                                                                       | Rebuilding views requires working application/query tooling                    |
+
+### Mission execution context
+
+Mission context is operational state, not merely documentation.
+
+Parallix persists the bounded information required for a new agent to understand
+and execute the mission, including where applicable:
+
+* goal;
+* relevant context / why the mission exists;
+* scope and constraints;
+* refinement and sizing signals;
+* declared mission-specific gates;
+* checkpoint evidence;
+* outstanding review findings and previous resolutions; and
+* other bounded execution facts with demonstrated workflow consumers.
+
+The model should represent these concepts directly.
+
+The accepted design is **not** to move the contents of `MISSION.md` into one
+opaque `mission_markdown` database column. That would preserve the file
+architecture while merely changing its storage medium.
+
+When an agent starts, the application assembles the relevant Mission data with
+other current authorities such as Git observations, repository policy,
+verification information, and external task context. It may render the result
+as Markdown for the agent without writing or committing a `MISSION.md`.
+
+### Checkpoint evidence
+
+`CheckpointData` and `GoalCheckRow` are durable Mission evidence.
+
+The existence or committedness of `CP-N.md` is not the authority for that
+evidence.
+
+A file may still be used:
+
+* as an explicit legacy import;
+* as a caller-requested export; or
+* as temporary subprocess transport.
+
+Normal checkpoint recording goes through the Mission application boundary and
+persists the checked structure.
+
+### Review evidence
+
+Review state and review events are durable Mission data.
+
+The current pattern:
 
 ```text
-Mission (repositoryId: RepositoryId)
-  ├── CheckpointData
-  └── Review
-
-MissionOutcome (missionId, repositoryId)
-  └── AgentRunMeasurement
-
-KnownRepository
-SessionMarker
-LaneTransitionEvent
-AgentBlock
+SQLite write
+    -> render review event Markdown
+    -> git add
+    -> git commit
 ```
 
-This ADR does not introduce `Attempt`, `RepositoryAlias`, `ImportRecord`,
-`Process`, or `Worktree` as domain entities. Persistence tables and repository
-ports may carry technical keys and metadata, but those do not create domain
-concepts by naming convention.
+is not part of the steady-state architecture.
 
-Every boundary in `ADR0053_PERSISTENCE_INVENTORY` classified
-`database-owned-domain-state` resolves, in checked code, to exactly one of a
-named domain type with its invariant or an item on the explicit
-technical-persistence-metadata list
-(`src/application/persistence-domain-map.ts`), enumerated by
-`test/persistence-domain-mapping.test.ts`. The consumers that justify each
-concept are traced by file-and-symbol anchors in
-`src/application/consumer-domain-requirements.ts`.
+Agents that need prior review discussion receive it from the application-owned
+context projection. Humans receive it through CLI/TUI/web/query/export surfaces.
 
-Application use cases decide domain transitions. SQLite persists their result;
-SQL does not decide lifecycle, approval, or closure. CLI, TUI, and web
-interfaces use application ports and never execute lifecycle SQL directly.
+Single-use agent artifacts may remain temporary transport where the agent runner
+requires files.
 
-## Domain decisions
+### Trust markers
 
-| Domain concern | Database role | Rejected alternative | Tradeoff |
-|---|---|---|---|
-| `RepositoryId` and `KnownRepository` | **Authoritative for the `RepositoryId` referenced by Mission; cache-only for repository-selector entries and observed paths.** | Invent a richer Repository aggregate or `RepositoryAlias` entity in the schema. | Uses the identity the domain already exposes without pretending that path discovery has domain rules it does not have. |
-| External tasks and planning documents | **Excluded as aggregates.** Store only an optional external reference and the mission metadata accepted into Parallix. | Import the complete task catalog and make task rows operational authority. | Keeps Backlog or another customer system independent, but Parallix cannot reconstruct external task content when that source is unavailable. |
-| `Mission` identity and descriptive fields | **Authoritative.** Persist `id`, `repositoryId`, `title`, and `labels`; an external task reference is adapter metadata, not a Task entity. | Re-read mutable task frontmatter on every operation. | Mission behavior is stable after intake, but later external edits require an explicit application command or import policy. |
-| `Mission.status`, `rawStatus`, `assignee`, and `closedAt` | **Authoritative.** Persist the existing lifecycle fields and explicit closure with optimistic concurrency metadata at the repository boundary. | Infer state from task placement, branch names, process absence, or statistics. | Enables atomic and stale-safe transitions without adding lifecycle concepts not present in `Mission`. |
-| `CheckpointData` and `GoalCheckRow` | **Authoritative as nested Mission data.** Persist the checked structure and replacement order. Large source documents may remain referenced artifacts. | Treat checkpoint filenames or Git history as the only current model. | Gives the application a queryable current checkpoint while preserving large evidence outside the database. |
-| `Review`, `ReviewRound`, findings, resolutions, interventions, reviewed revisions, loop workflow state, and review events | **Authoritative as nested Mission data, and the cut-over is done.** `<PARALLIX_HOME>/parallix.db` is the sole live authority, reached through `MissionRepositoryPort` and `SqliteMissionStore` (`src/adapters/sqlite/mission-store.ts`): rounds, phase, disposition, retry counters and stage-launch windows are round columns, and events are rows in `mission_review_events`. No review module reads or writes a file for any of it — `review-state.json` is neither written nor read, the Markdown under `missions/<slug>/review-events/` is a write-only export of stored events, and the `/tmp` artifacts the loop consumes are single-use transport from the agent process. The remaining external boundaries are that export, the agent artifacts, and the review provider (Forgejo), which is a projection. A mission handed off before the cut-over is migrated once by the operator with `px review <slug> --backfill-review`; an unavailable database fails the command rather than falling back to a file. | Let Forgejo, another provider, or mutable review JSON own the conversation. | Review works without a provider and approval stays tied to an exact revision; provider synchronization becomes projection work. |
-| `AgentRunMeasurement` and `MissionOutcome` | **Authoritative measurement data, and the cut-over is done.** `<PARALLIX_HOME>/parallix.db` is the sole live authority, reached through `MeasurementStorePort` (`src/application/measurement-ports.ts`) and `SqliteMeasurementStore` (`src/adapters/sqlite/measurement-store.ts`); a measurement is keyed by `(repo, mission, stage, actor)`. `Measurement.unavailable` is preserved as SQL NULL instead of an invented zero, and `CompletedMissionStatistics` stays derived. `stats.csv` survives only as an explicit, operator-invoked, read-only import/analysis input (`px stats import-legacy --csv-file <path>`); no default run resolves, reads, or writes it, and an unavailable database fails the command rather than falling back. | Store a CSV-shaped statistics authority, keep a file fallback, or infer a launch identity from measurements. | Retains the dimensions the domain models, but cannot answer per-launch identity questions the model does not represent. |
-| `SessionMarker` | **Authoritative for the last recorded resumability marker, not for provider availability.** | Keep the only session identity in a worktree file or invent an Attempt to own it. | Resume metadata survives worktree cleanup, while the provider still decides whether the session can resume. |
-| `Attempt` | **Excluded.** The decision is enforced rather than asserted: no checked production domain type defines its identity, lifecycle, or relationship to `AgentRunMeasurement` and `SessionMarker`, and no current launch, retry, failover, usage, review, or UI consumer requires durable per-launch identity. Retry/failover bookkeeping is process-local (`src/adapters/agents/agents.ts`), a launch leaves only a family-keyed `AgentBlock` and one replaceable `SessionMarker`, and measurements are grouped by `(repo, mission)` (`src/adapters/cli/commands/stats.ts`). `test/domain-attempt-guard.test.ts` fails if any Attempt-shaped type, table, or record is declared under `src/domain`, `src/application`, or `src/adapters`. | Create attempt tables from the desired persistence shape first. | Avoids another schema-led domain model; failover history remains limited until the domain introduces and tests this concept. |
-| Process liveness, PIDs, and worktrees | **Excluded as durable entities.** Observe them from the OS, Git, and filesystem. | Persist a Process or Worktree row and treat it as proof that the resource still exists. | Avoids stale infrastructure truth; restart recovery must re-observe external state. |
-| `Mission.netEngineeringLines` and `CompletedMissionStatistics` | **NEL is authoritative Mission data; completed statistics are derived from `Mission` and `MissionOutcome`.** | Duplicate closure, implementer, labels, and NEL into an independent statistics authority. | Prevents reporting data from competing with the Mission aggregate; analytical queries may require joins or maintained projections. |
-| Lane-transition events and operational history | **Authoritative for the event history itself, never for current Mission state.** Write events in the same transaction as the state change they describe. | Replay events as the lifecycle authority or write telemetry best-effort after the transition. | Produces reliable metrics without creating a second current-state model; event retention must be managed. |
-| `AgentBlock` and operator preferences | **Authoritative.** They describe operator-owned durable choices. `AgentAvailability` and `AgentSelectionSnapshot` remain materialized observations, not stored truth. | Persist the entire selection snapshot or keep mutable JSON beside repositories. | Durable choices survive restart without freezing launcher availability or configuration observations. |
-| Repository lists and board/read projections | **Cache only when materialized.** Rebuild them from authoritative rows and external observations. | Let a UI cache or denormalized board row accept lifecycle writes. | Fast reads remain possible without adding another mutation path. |
-| Schema and import history | **Authoritative internal metadata.** Record migration IDs/checksums and idempotent import identities. | Infer migration/import completion from files or partial row presence. | Recovery and duplicate prevention become testable, with additional metadata and backup requirements. |
-| Git commits, branches, ancestry, integration existence, and worktree presence | **Excluded.** Git and the filesystem remain authoritative; the database stores validated references such as an integration commit OID. | Copy Git topology into SQLite and trust the copy during transitions. | Preserves Git semantics and avoids stale topology, but transitions must observe Git before committing their resulting domain fact. |
-| Workflow configuration, prompts, schemas, gates, and agent-selection policy | **Excluded.** Keep user-authored policy in repository files and built-ins in executable assets. | Copy configuration into mutable database rows. | Configuration remains reviewable and distributable; application reads must materialize it before pure policy runs. |
-| Secrets and raw credentials | **Excluded.** Use environment, platform credential storage, or provider tooling. | Store credentials with operational records. | A database backup does not become a credential archive; credential setup remains a separate concern. |
-| Logs, patches, captures, and large artifacts | **Reference only.** Keep content in the filesystem or owning tool. | Store unbounded blobs in the operational database. | Database backup and locking remain bounded, while artifact retention must be coordinated separately. |
-| Permissions and operator-request workflows | **Excluded until they have real domain rules and consumers.** | Add tables because a future UI might need them. | Avoids speculative schema and policy; adding them later requires a deliberate domain decision. |
+A marker whose presence grants trust is operational state, not a by-product.
+
+The reusable verification proof is bounded Parallix-owned state: its identity is
+a digest of the gate command, the tracked-input fingerprint, the toolchain, and
+the verified commit and tree, and integration refuses to publish without a
+matching proof. It belongs in the database on the same terms as any other
+operational fact. Its fail-closed semantics do not change with the store: a
+missing, malformed, or mismatched proof blocks publication.
+
+Evidence that work happened is likewise a database fact. The presence of a
+mission or checkpoint file is not proof of work — an agent can create a file
+without doing the work it describes (ADR 0048, failure class 1). Recorded
+checkpoint evidence is the trust anchor, and a lifecycle command must not
+manufacture a workflow file in order to satisfy its own presence check.
+
+Provider trust configuration (per-project agent trust levels and equivalent
+runtime settings) stays with the provider. It is operator configuration, not
+Parallix operational state.
+
+### Agent transport
+
+A file produced because an external agent process communicates through files is
+not automatically durable state.
+
+The normal transport lifecycle is:
+
+1. create the temporary artifact outside the target repository;
+2. let the agent read or write it;
+3. consume it through an application boundary;
+4. validate it;
+5. persist the bounded resulting domain state; and
+6. remove the temporary artifact when no longer required.
+
+This preserves agent ergonomics without creating a second workflow database in
+Git.
+
+### Large artifacts
+
+SQLite is not an unbounded blob store.
+
+Large or naturally external material remains outside the database, including:
+
+* full command output retained for diagnosis;
+* patches;
+* captures;
+* long transcripts;
+* large verification proofs; and
+* build output.
+
+Parallix may persist a bounded locator, digest, exact Git identity, or other
+reference required to associate the artifact with Mission state.
+
+### Generated repository metadata
+
+Normal lifecycle execution must not create Git-tracked workflow metadata simply
+because a mission occurred.
+
+Derived documentation should not be committed merely because it can be useful
+to read. In particular, indexes, inventories, status summaries, workflow
+ledgers, and generated history views should exist only when a concrete consumer
+requires the materialized file rather than the canonical source.
+
+This applies to the ADR set itself: Git provides historical revisions. The ADRs
+describe the current accepted architecture; a generated ADR index is unnecessary.
 
 ## Transaction and authority rules
 
-1. One application transaction updates every database-owned fact affected by a
-   command. A Mission transition and its `LaneTransitionEvent` commit together.
-2. Mission writes require the expected version or lifecycle. A stale caller
-   receives an explicit conflict and changes nothing.
-3. Git, filesystem, OS, and provider prerequisites are observed before the
-   database transaction. Their references are recorded, but the database does
-   not replace those external facts.
-4. Current Mission state is read from Mission rows, not reconstructed from
-   events, usage, task files, UI caches, or provider projections. Integration
-   uses the Mission lifecycle for its gate and writes task status only as
-   closeout representation.
-5. Database unavailability or corruption fails closed for database-owned
-   mutations. Parallix does not silently write a compatibility file instead.
-6. Imports validate all records before committing, are atomic and idempotent,
-   record source identity and digest, preserve newer canonical state, and report
-   ambiguity rather than manufacturing domain entities or closure.
-7. Migrations are ordered and checksum-protected. Multi-statement changes are
-   transactional. Backup, restore, interruption, concurrency, and export/import
-   behavior are release gates.
+1. One application operation updates all database-owned facts that must change
+   atomically.
+2. Mission writes use optimistic concurrency or an equivalent expected-state
+   check so stale callers change nothing.
+3. Git, filesystem, OS, and provider prerequisites are observed from their own
+   authorities before dependent Mission state is committed.
+4. Current Mission state is not reconstructed from events, task-file placement,
+   generated artifacts, branch names, or UI caches.
+5. Database-owned mutations fail closed when the database is unavailable or
+   corrupt.
+6. There is no steady-state fallback writer to Markdown, JSON, or CSV.
+7. Imports are explicit, validated, atomic, idempotent and one-way into current
+   authority.
+8. Migrations are ordered and checksum-protected, with backup, restore and
+   interruption behavior tested.
+9. Agents and interfaces do not receive direct SQL authority.
+10. Persistence is not allowed to invent domain entities. In particular,
+    `Attempt` remains excluded until the domain has actual identity, lifecycle,
+    invariants, and consumers for it.
 
-## Cutover
+### Excluded concepts
 
-Each domain cuts over all reads and writes together. There is no steady-state
-dual-write or fallback writer.
+This ADR does not introduce `Attempt` or any other entity whose only
+justification is that a table would be convenient.
 
-`Mission` intake, activation, checkpoint evidence, and NEL recording run through
-the checked application services `MissionIntakeService`,
-`MissionLifecycleService`, `MissionCheckpointService`, and
-`MissionHandoffService`. Production composition supplies their single
-`SqliteMissionStore` implementation through `createMissionApplicationServices`
-in `src/composition/application-services.ts`. Accepted external material is
-carried as `ExternalTaskRef` in `src/domain/external-task.ts`, and generated
-evidence is carried as `ArtifactReference` locators in
-`src/domain/net-engineering-lines.ts`, which reject inlined content.
+| Concept | Decision | Rejected alternative | Consequence |
+| --- | --- | --- | --- |
+| `Attempt` | **Excluded.** No checked production domain type defines its identity, lifecycle, or relationship to `AgentRunMeasurement` and `SessionMarker`, and no launch, retry, failover, usage, review, or UI consumer requires durable per-launch identity. The exclusion is enforced, not asserted: `test/domain-attempt-guard.test.ts` fails if an Attempt-shaped type, table, or record appears under `src/domain`, `src/application`, or `src/adapters`. | Create attempt tables from the desired persistence shape first. | Avoids a schema-led domain model; failover history stays limited until the domain earns the concept. |
 
-`AgentBlock` has passed that gate: `agent_blocklist` is its runtime authority.
-Legacy `agents.local.json` block entries are accepted only by the explicit
-dry-run/import command path; static agent policy and launcher discovery remain
-file-backed inputs, and a checked-repository failure is surfaced to the caller.
+## Legacy and migration boundary
 
-After Mission cutover, external task material remains an intake source and
-reference, not a lifecycle mirror. Generated Markdown, JSON, CSV, provider, and
-board views are rebuildable projections.
+Legacy mission and backlog files may be read through explicit migration/import
+paths while their concepts are being cut over.
 
-Cutover may be staged by domain dependency:
+Once a concept is cut over, normal runtime behavior no longer reads or writes
+the retired file representation.
 
-1. `RepositoryId` references and `KnownRepository` cache migration;
-2. `Mission` with `CheckpointData`, `Review`, NEL, concurrency metadata, and
-   closure;
-3. `AgentRunMeasurement`, `MissionOutcome`, `SessionMarker`, and `AgentBlock`;
-4. transactional `LaneTransitionEvent` history and derived read projections.
+A fresh DB-native mission should be able to proceed through:
+
+```text
+intake -> refinement -> execution -> checkpoint -> handoff
+       -> review -> integration -> closure
+```
+
+without requiring a `missions/<slug>` directory or generated workflow files in
+the target repository.
+
+Historical files already committed do not need Git-history rewriting to satisfy
+this decision. Removing them from the current tree makes the current product
+compact while Git retains their historical revisions.
 
 ## Consequences
 
-Positive:
+### Positive
 
-- Mission closure and event recording can be atomic.
-- Cross-repository CLI and board queries use one database boundary.
-- External task systems, Git, providers, and Parallix each retain one explicit
-  authority.
-- Worktree cleanup and checkout movement do not erase operational history.
+* The target repository describes the product rather than the accumulated
+  execution history of Parallix.
+* Humans and agents query one current representation instead of scanning and
+  reconciling workflow files.
+* Mission, checkpoint and review updates stop producing unrelated Git churn.
+* Rich evidence remains available without turning every piece of evidence into
+  repository metadata.
+* Markdown remains available as a presentation format.
+* Operational state can be queried transactionally across repositories.
+* External systems retain explicit authority over their own facts.
 
-Costs:
+### Negative
 
-- The operator database is critical state and requires tested backup, export,
-  restore, corruption recovery, and concurrency behavior.
-- Mission history does not automatically travel to another machine; moving it
-  requires an explicit Parallix backup or export.
-- Per-launch failover history remains unavailable until a checked domain model
-  introduces it; persistence is not allowed to fill that gap by inventing an
-  `Attempt` table, and `test/domain-attempt-guard.test.ts` blocks that route.
-  The one durable per-launch value in the tree — the review-loop stage-launch
-  fingerprint — is recorded as an idempotency key on the
-  technical-persistence-metadata list, not as an entity.
-- A single local database is not a multi-user coordination service.
+* A plain Git clone no longer contains complete operational Mission history.
+* Humans and agents depend on Parallix query/context/export capabilities for
+  database-owned state.
+* `<PARALLIX_HOME>/parallix.db` is critical operator state and requires tested
+  backup, restore, migration and corruption-recovery behavior.
+* Moving active operational history to another machine requires an explicit
+  Parallix backup/export or a future shared coordination service.
+* Mission execution context requires a bounded model rather than arbitrary
+  Markdown.
+* Large referenced artifacts need a retention policy separate from DB backup.
+* One local SQLite database remains unsuitable as a multi-user coordination
+  service.
 
 ## Reconsideration triggers
 
-Revisit this decision if Parallix becomes multi-user or remotely coordinated,
-if one operator database cannot meet measured concurrency or recovery needs, or
-if mission state must travel through ordinary Git clone/pull without an
-explicit Parallix export. Introducing a checked `Attempt` domain model also
-requires revisiting the measurement and session-marker rows in this ADR.
+Revisit this decision if:
+
+* Parallix becomes multi-user or remotely coordinated;
+* one operator database cannsot meet measured concurrency or recovery needs;
+* active operational state must travel through ordinary Git clone/pull as a
+  product requirement;
+* a current external fact acquires first-class Parallix domain semantics; or
+* measured usage shows that an on-demand projection cannot satisfy a concrete
+  consumer without durable materialization.
 
 ## References
 
-- `src/domain/mission.ts`
-- `src/domain/external-task.ts`
-- `src/domain/net-engineering-lines.ts`
-- `src/domain/review.ts`
-- `src/domain/checkpoint.ts`
-- `src/domain/usage.ts`
-- `src/domain/session.ts`
-- `src/domain/board-event.ts`
-- `src/domain/agents.ts`
-- `src/application/domain-ports.ts`
-- `src/adapters/sqlite/mission-store.ts` (`SqliteMissionStore`)
-- `src/application/consumer-domain-requirements.ts`
-- `src/application/persistence-domain-map.ts`
-- `docs/adr/0051-ui-neutral-application-boundary.md`
+* ADR 0037: AI workflow coordination architecture
+* ADR 0048: Fail-closed harness defense against agent hallucinations
+* ADR 0051: UI-neutral application boundary and retained workflow authority

@@ -1,4 +1,5 @@
 import { detectRebaseState, getCurrentBranch, getUncommittedCount, getLastThreeCommits, run } from '../../git/git.js';
+import { compareCodeUnits } from '../../../domain/comparators.js';
 import { findTaskFile, getTaskStatus } from '../../backlog/backlog.js';
 import {
   getPrimaryWorktree,
@@ -94,9 +95,12 @@ function findStaleMissionWorktrees({
         path: entry.path,
         branch: branchRef,
         taskStatus: taskStatus || 'missing',
-        cleanupCommand: taskStatus === 'done'
-          ? `scripts/cleanup-mission-worktree.sh ${slug}`
-          : `git worktree remove ${entry.path} && git branch -D ${missionBranchName(slug, resolvedPrimary || process.cwd())}`
+        // A done task's worktree is retained only when its integrate closeout
+        // was interrupted; the cleanup is the same local git one-liner the
+        // non-done branch uses. There is no `scripts/cleanup-mission-worktree.sh`
+        // on disk (SC5), so the hint must name a real git command, never a
+        // phantom script.
+        cleanupCommand: `git worktree remove ${entry.path} && git branch -D ${missionBranchName(slug, resolvedPrimary || process.cwd())}`
       };
     })
     .filter(Boolean);
@@ -326,7 +330,7 @@ async function status(args: string[], opts: {exit?: Function, log?: Function, in
   const draftEligible = eligibleAgentsForStepFn('draft', { config });
   const activeEligible = eligibleAgentsForStepFn('active', { config });
   const baseAgents = allWorkflowAgentNamesFn();
-  const allAgents = [...new Set([...baseAgents, ...draftEligible, ...activeEligible])].sort();
+  const allAgents = [...new Set([...baseAgents, ...draftEligible, ...activeEligible])].sort(compareCodeUnits);
   const envOverride = process.env.WORKFLOW_AGENT;
   log('Agent launcher matrix:');
   for (const agent of allAgents) {

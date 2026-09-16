@@ -139,7 +139,7 @@ function sanitizeFilename(str: string): string {
     .replace(/[@.]/g, '')
     .replace(/[^a-z0-9_-]/g, '-')
     .replace(/-+/g, '-')
-    .replace(/^-|-$/g, '');
+    .replace(/(?:^-)|(?:-$)/g, '');
 }
 
 // -------- Event Validation --------

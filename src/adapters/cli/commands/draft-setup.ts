@@ -17,7 +17,7 @@ function slugifyDraftIntent(/** @type {string} */ value) {
     .toLowerCase()
     .replace(/^[./\\]+/, '')
     .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-+|-+$/g, '')
+    .replace(/(?:^-+)|(?:-+$)/g, '')
     .replace(/-{2,}/g, '-')
     .slice(0, 64);
 }

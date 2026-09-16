@@ -2,6 +2,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { compareCodeUnits } from '../../domain/comparators.js';
 import type { Migration, MigrationLedgerEntry } from './database-adapter.js';
 import { SqliteDatabaseAdapter } from './database-adapter.js';
 
@@ -166,7 +167,7 @@ export function loadDefaultMigrations(): readonly Migration[] {
   const files = fs
     .readdirSync(migrationsDir)
     .filter((f) => f.endsWith('.sql'))
-    .sort();
+    .sort(compareCodeUnits);
 
   const sessionMarkerBase = '0006-session-markers.sql';
   const repositoryScope = '0005-repository-scoped-session-markers.sql';

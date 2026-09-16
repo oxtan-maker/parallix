@@ -273,7 +273,7 @@ test('px integrate rejects the normal integration-gate bypass (task-2300)', () =
 test('px integrate parses the paired Codex real-agent override without placing values in a command string', () => {
   const parsed = parseIntegrateArgs(['task-2269', '--real-agent', 'codex', '--real-agent-model', 'gpt-5.6-luna']);
   assert.deepEqual(parsed, {
-    explicitSlug: 'task-2269', dryRun: false, noIntegrationGates: false, noGate: false,
+    explicitSlug: 'task-2269', dryRun: false, noIntegrationGates: false, noGate: false, recoverLanded: false,
     realAgent: 'codex', realAgentModel: 'gpt-5.6-luna'
   });
 });

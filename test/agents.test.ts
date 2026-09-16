@@ -1362,11 +1362,12 @@ test('startDraftAgent harness identity wins over caller-supplied FORGEJO_USER', 
 
 // ---------- Codex launcher ----------
 
-test('buildCodexDraftInvocation uses exec --sandbox workspace-write in the worktree with CI env', () => {
+test('buildCodexDraftInvocation uses the native sandbox only when requested', () => {
   const invocation = buildCodexDraftInvocation({
     prompt: 'Execute the mission.',
     worktree: '/tmp/mission-task-088',
-    interactive: false
+    interactive: false,
+    sandbox: true
   });
 
   assert.deepEqual(invocation.args, [

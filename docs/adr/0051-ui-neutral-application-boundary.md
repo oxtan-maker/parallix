@@ -5,6 +5,7 @@ Date: 2026-07-20
 Related: ADR 0037 (workflow coordination), ADR 0044 (workflow distribution
 model), ADR 0048 (fail-closed harness), ADR 0053 (persistence authority),
 TASK-2277, TASK-2278
+Last updated: 2026-09-15
 
 ## Context
 
@@ -21,16 +22,10 @@ effects without choosing lifecycle transitions. A TUI or web interface sends a
 use-case request instead of inheriting CLI parsing, terminal rendering, or
 process-exit behavior.
 
-Workflow state already has distinct compatibility authorities. Task records are
-currently individual Markdown files in `backlog/tasks/`, `backlog/completed/`,
-and `backlog/archive/`; the task catalog searches those stores and reads their
-front matter. Mission and review artifacts are Git-owned.
-ADR 0037 retained those surfaces rather than adding a new state store.
-`backlog.md` is an optional legacy aggregate, not the canonical task catalog;
-this ADR neither requires it nor makes preserving writes to it a goal. The
-operator board supplied to this mission is evidence of desired operator
-attention and interaction, not evidence for a browser-owned store, component
-model, database schema, or authority migration.
+Workflow state and external facts have distinct authorities. ADR 0053 defines
+those persistence and authority boundaries. This ADR assumes those boundaries
+and decides how interfaces and concrete mechanisms reach them without acquiring
+workflow authority themselves.
 
 The proposed boundary also has to retain the CLI's public behavior. The `px`
 entry delegates command dispatch while capturing the command exit code.
@@ -99,8 +94,7 @@ behavior. Delivery speed is secondary and cannot compensate for more bug work:
 2. **One authority and one transition path.** Before the ADR 0053 Mission
    cutover, a task lifecycle update continues to use the existing Markdown/Git
    path, including its integration-branch and rebase behavior. A UI cache or
-   event stream cannot become a competing writer. Cutover changes the adapter
-   as one unit rather than adding a second write path.
+   event stream cannot become a competing writer.
 3. **Preservation of fail-closed lifecycle semantics.** ADR 0048 classifies
    state-machine violations and infrastructure blockers as human-only. An
    interface must be able to show an operation failure without converting it
@@ -134,13 +128,15 @@ unproven behaviour or a separate decision; `✗` = contradicts the criterion.
 | Criterion | Type | What is being tested | Repository evidence |
 |---|---|---|---|
 | C0: Bug-frequency reduction | Hard constraint | Centralize policy and effects behind enforceable, regression-tested seams; continue measuring completed `bug` missions versus completed non-`bug` missions after the change. | Since label observation began, 39 of 129 unique completed missions carry `bug`; ADR 0048 and TASK-1268 identify recurring fail-open and lifecycle clusters. |
-| C1: Single authoritative writer | Hard constraint | No UI cache or event stream can independently change lifecycle state. | ADR 0053 defines the persistence authority and application ports are its only workflow access path. |
+| C1: **One transition path.** Interfaces and adapters cannot become competing lifecycle writers. Mission transitions remain application-owned regardless of the persistence mechanism selected by ADR 0053. | Hard constraint | No UI cache or event stream can independently change lifecycle state. | ADR 0053 defines the persistence authority and application ports are its only workflow access path. |
 | C2: Transition correctness | Hard constraint | Preserve launch → record → rollback ordering and do not represent an incomplete operation as complete. | The execute application service owns this ordering; rollback stays in the launcher. |
 | C3: Automation compatibility | Hard constraint | Preserve CLI text, existing JSON schemas, and exit codes. | The CLI retains command-specific output and exit-code contracts; the report command has JSON output while `active` does not. |
 | C4: Isolated effects | Hard constraint | Unit-test use-case behavior without real Git, Forgejo, filesystem, or agent processes. | The execute workflow uses in-memory mechanism ports, and command families retain injected collaborators. |
 | C5: Interface independence | Benefit | CLI, Ink, and web can invoke the same behavior without parsing terminal output or reproducing lifecycle policy. | This ADR requires one application core for these clients. |
 | C6: Operational truth and recovery | Benefit | Long-running work can report progress, reconnect by re-querying, and distinguish durable evidence from UI liveness. | `active` can launch agents and defer synchronization; ADR 0048 requires fail-closed handling. |
-| C7: Authority evolution and rollback | Benefit | ADR 0053 defines a single persistence authority without a dual-write steady state. | Application ports isolate the authority from interfaces and concrete mechanisms. |
+| C7: **Authority evolution and rollback.** Changes to persistence or external
+   authorities occur behind application-owned ports and are governed by the ADR
+   responsible for that authority rather than by interface code. | Benefit | ADR 0053 defines a single persistence authority without a dual-write steady state. | Application ports isolate the authority from interfaces and concrete mechanisms. |
 | C8: Structural cost and cognitive load | Cost | Abstractions are limited to behavior with multiple interface/effect boundaries; helpers do not need ceremonial layers. | Application ports and composition wiring exist only where a workflow crosses a concrete mechanism. |
 
 | Option | C0 | C1 | C2 | C3 | C4 | C5 | C6 | C7 | C8 | Result |
@@ -149,7 +145,7 @@ unproven behaviour or a separate decision; `✗` = contradicts the criterion.
 | 2. Board/TUI facade with direct reads and command processes | ✗ | ~ | ~ | ~ | ✗ | ~ | ✗ | ✗ | ~ | Rejected: adds bypass paths and no mechanism to reduce recurring lifecycle defects. |
 | 3. Narrow Hexagonal Architecture boundary; CLI remains an adapter | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ~ | **Accepted:** centralizes policy behind characterized ports, limits migration risk, and creates a seam where regression prevention and bug frequency can be measured. |
 | 4. Full Clean Architecture layering as the migration target | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ~ | ✓ | ✗ | Rejected for this mission: it can provide the same defect-isolation mechanism, but extra layer distinctions either collapse to option 3 at this scope or increase migration-regression risk without evidence of additional bug reduction. |
-| 5. Make this boundary mission perform the SQLite authority cutover | ✗ | ✗ | ~ | ~ | ~ | ✓ | ~ | ~ | ✗ | Rejected for this mission: ADR 0053 owns that separate cutover and its migration evidence. |
+| 5. Combine the application-boundary decision with a persistence-authority change | ✗ | ✗ | ~ | ~ | ~ | ✓ | ~ | ~ | ✗ | Rejected for this mission: ADR 0053 owns that separate cutover and its migration evidence. |
 | 6. Generalized command-framework rewrite first | ~ | ~ | ~ | ~ | ~ | ✓ | ~ | ~ | ✗ | Rejected: changes too many uncharacterized policies to establish C0–C4 credibly and creates a large regression surface. |
 
 ### Clean Architecture comparison
@@ -240,8 +236,7 @@ application use cases and contracts
       application-owned ports (interfaces)
                     ^
                     |
-task-Markdown, Git, agent/subprocess, Forgejo, filesystem,
-configuration, statistics, and future SQLite/HTTP adapters
+task providers, persistence, Git, agent/subprocess, review providers, filesystem, configuration, verification, and other external adapters
 ```
 
 The arrows express dependencies, not process order. Interfaces translate input
@@ -281,12 +276,12 @@ all external dependencies.
 |---|---|---|---|
 | Entry point | A controller accepts HTTP input. | CLI, Ink, and future web transport are inbound adapters; each translates its input into the same use-case request. | Controller/service/repository is direct for a single HTTP API. Hexagonal needs explicit adapters, but avoids making HTTP the centre of a multi-interface tool. |
 | Application behavior | A service coordinates business behavior, often called by a controller. | A use case coordinates the behavior and owns ports for dependencies. | These are often the same implementation in practice. Hexagonal adds naming and dependency discipline. |
-| Persistence | A repository abstracts database access. | A task-catalog port can be implemented by Markdown/Git today or another store later; agent launch, Git, and Forgejo are separate ports rather than repositories. | Repository is concise for CRUD over one database. Ports fit this repository's heterogeneous effects, but can be over-engineering for simple reads. |
+| Persistence | A repository abstracts database access. | Persistence and task-source ports are application-owned outbound ports; their concrete mechanisms are adapters. | Repository is concise for CRUD over one database. Ports fit this repository's heterogeneous effects, but can be over-engineering for simple reads. |
 | Dependency direction | Often controller → service → repository, with frameworks influencing the outer layers. | Use cases depend on application-owned interfaces; adapters depend on the use cases and port contracts they implement. | The latter makes it easier to test a lifecycle with fake Git/agent/task adapters, but introduces more interfaces and wiring. |
 | Testing | Services are commonly tested with mocked repositories; controllers with HTTP tests. | Use cases are tested with mocked ports; adapters are tested at their own boundary. | Both support fast unit tests. Hexagonal is useful here because the important dependencies are not only persistence. |
 
 For the selected slices, the familiar mapping is: CLI handler ≈ controller,
-application use case ≈ service, task-Markdown adapter ≈ repository adapter.
+application use case ≈ service, a persistence or task-source adapter ≈ repository adapter.
 The additional ports are needed because `active` also depends on agent launch,
 Git/worktree state, preflight, and handoff—dependencies that are not honest
 repositories. If a later web board is a conventional Spring-style backend,
@@ -346,21 +341,9 @@ general default policy nor legacy Claude/Codex defaults may be substituted when
 it is absent or empty. Forgejo may adapt its PR response into these contracts
 but is neither named nor required by the model.
 
-Persistence ports are owned by the application layer, not the domain. The
-domain model neither imports nor implements `MissionStore`; the compatibility
-Markdown/Git adapter and ADR 0053 SQLite adapter satisfy the same port without
-adding storage concepts to `Mission`. ADR 0053, not this boundary, decides
-store contents and authority.
+Persistence ports are owned by the application layer, not the domain. The domain model neither imports nor implements storage mechanisms. ADR 0053 decides persistence contents and authority; this ADR only requires concrete persistence to remain behind application-owned ports.
 
-A task adapter returns a typed unavailable/conflict result instead of a
-partially valid mission. For the current Git topology, the committed integration
-base owns lifecycle status and assignment, while an open mission worktree may
-provide newer mission content. A committed `done` task remains unclosed while
-that worktree exists. Only successful integration-base closeout plus worktree
-removal permits the adapter to return a closed mission. PR-provider state is
-absent from this materialization contract: Forgejo is an optional view surface,
-and Parallix operates without it. An uncommitted working-tree move is likewise
-not closure authority.
+A task-source adapter returns a typed unavailable/conflict result rather than a partially valid Mission. Application workflows consume task-source and Mission facts through their respective ports and do not infer a successful lifecycle transition from provider/UI state.
 
 **Progress.** A use case may publish ordered, best-effort progress records
 with an operation identifier, phase, timestamp, message, and terminal
@@ -405,12 +388,6 @@ the returned outcome and refresh on stale-state conflict; they cannot move a
 card by editing a local store or task file. A command/event log is diagnostic
 history, not the source of truth for lifecycle state.
 
-Until ADR 0053's Mission cutover, canonical task records remain the Markdown
-files in `backlog/tasks/`, `backlog/completed/`, and `backlog/archive/`, with
-Git-owned mission and review artifacts retaining their compatibility roles.
-Board availability does not trigger cutover, and dual-write is not an accepted
-steady state.
-
 ## Consequences
 
 ### Positive
@@ -423,9 +400,8 @@ steady state.
 - Explicit ports convert the repository's current ad hoc function injection
   into a stable unit-test seam and keep external operations mocked in unit
   tests.
-- The boundary supports an eventual local board while leaving security,
-  hosting, and ADR 0053 persistence cutover to separate gated implementation
-  missions.
+- The boundary supports multiple interfaces while leaving persistence authority,
+  hosting, and transport security to their respective architectural decisions.
 
 ### Negative and accepted costs
 
@@ -437,8 +413,7 @@ steady state.
 - Progress is deliberately weaker than durable state. Interfaces must handle
   reconnect, stale data, and incomplete operations rather than assuming a
   real-time event feed is exact.
-- Capability checks establish a policy seam but do not substitute for web
-  transport security or an authority migration decision.
+- Capability checks establish a policy seam but do not substitute for web transport security or persistence/authority decisions owned elsewhere.
 
 ### Reliability measurement
 
@@ -491,11 +466,7 @@ Implementation then proceeds in bounded steps:
    offset an increased completed-mission bug frequency.
 
 Rollback restores the previous CLI wiring and removes the new boundary modules
-as one revert. It must not rewrite task Markdown, mission/review Git
-artifacts, lifecycle policy, authorization behavior, text/JSON schemas, or
-exit codes. Any need to implement a UI server, change persistence authority, or
-broaden command families stops this plan for the corresponding implementation
-mission.
+as one revert. Rollback must preserve externally visible command behavior and Mission lifecycle semantics. Any implementation step that requires changing persistence authority is governed separately by ADR 0053.
 
 ## Reconsideration triggers
 
@@ -520,8 +491,4 @@ following becomes true:
 - `docs/adr/0037-ai-workflow-coordination-architecture.md`
 - `docs/adr/0044-workflow-distribution-model.md`
 - `docs/adr/0048-fail-closed-harness-defense-against-agent-hallucinations.md`
-- `backlog/completed/task-2277 - Prove-ADR-0044-local-runtime-bundle-Ink-and-SQLite-feasibility.md`
-- `backlog/tasks/task-2289 - Extract-UI-neutral-application-contracts-and-composition.md`
-- `backlog/tasks/task-2290 - Delegate-bounded-CLI-slices-through-application-boundary.md`
-- `backlog/tasks/task-2291 - Measure-post-boundary-bug-frequency-cohort.md`
 - [The Clean Architecture](https://blog.cleancoder.com/uncle-bob/2012/08/13/the-clean-architecture.html)

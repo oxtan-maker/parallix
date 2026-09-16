@@ -148,6 +148,14 @@ export type AssetResolution =
   | { result: 'ok'; relativePath: string; contentType: string; size: number }
   | { result: 'reject'; status: 400 | 404 };
 
+/** True when any code unit is a C0 control character (U+0000-U+001F), NUL included. */
+function hasControlCharacter(value: string): boolean {
+  for (let index = 0; index < value.length; index += 1) {
+    if (value.charCodeAt(index) <= 0x1f) { return true; }
+  }
+  return false;
+}
+
 /**
  * Map a request URL path to exactly one manifest entry. One percent-decode,
  * then structural rejection: backslash, NUL, control characters, and any
@@ -161,7 +169,7 @@ export function resolveAssetPath(rawUrlPath: string, manifest: AssetManifest): A
   if (typeof rawUrlPath !== 'string' || !rawUrlPath.startsWith('/')) { return { result: 'reject', status: 400 }; }
   let decoded: string;
   try { decoded = decodeURIComponent(rawUrlPath); } catch { return { result: 'reject', status: 400 }; }
-  if (decoded.includes('\\') || decoded.includes('\0') || /[\x00-\x1f]/.test(decoded)) { return { result: 'reject', status: 400 }; }
+  if (decoded.includes('\\') || hasControlCharacter(decoded)) { return { result: 'reject', status: 400 }; }
   const segments = decoded.split('/');
   if (segments[0] !== '') { return { result: 'reject', status: 400 }; }
   const parts = segments.slice(1);

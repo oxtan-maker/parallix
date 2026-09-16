@@ -2,6 +2,7 @@ import type { UsageRecord, UsageRepository } from '../ports/mission-measurements
 import type { BoardLaneEventEntry, BoardLaneEventRepository, OperationalHistoryRepository } from '../ports/operation-history.js';
 import type { MissionId, MissionLabel, MissionStatus } from '../../domain/mission.js';
 import { missionLabels } from '../../domain/mission.js';
+import { compareCodeUnits } from '../../domain/comparators.js';
 import type { MissionTransition } from '../../domain/mission-workflow.js';
 import type {
   AgentRunMeasurement,
@@ -384,7 +385,7 @@ export class ConcreteMetricsReadAdapter implements MetricsReadAdapter {
     return [...new Set([
       ...entries.map((entry) => entry.occurredAt).filter(Boolean),
       ...usageRecords.filter((record) => record.date).map((record) => `${record.date}T00:00:00Z`),
-    ])].sort();
+    ])].sort(compareCodeUnits);
   }
 
   // -----------------------------------------------------------------------

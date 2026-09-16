@@ -22,6 +22,7 @@ import {
   resolveStatsRepoName,
   statsRowActorKey,
 } from './stats.js';
+import { compareCodeUnits } from '../../../domain/comparators.js';
 
 /** The agent-telemetry table header, in render order. */
 function agentTelemetryHeader() {
@@ -272,7 +273,7 @@ function renderMissionPhaseReport(rows, slug, options = {}) {
   const orderedStages = MISSION_PHASE_ORDER.map(entry => entry.stage);
   const extraStages = [...byStage.keys()]
     .filter(stage => !orderedStages.includes(stage))
-    .sort();
+    .sort(compareCodeUnits);
   const phases = [
     ...MISSION_PHASE_ORDER,
     ...extraStages.map(stage => ({ stage, label: stage })),

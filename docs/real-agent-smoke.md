@@ -189,7 +189,11 @@ The smoke harness does two preflight checks before the full lifecycle run:
 That fast launcher probe is intentional: it catches broken local `opencode`
 runtime state (for example SQLite/WAL or missing-model failures) in seconds
 instead of letting the main draft phase burn the full timeout and misattribute
-the problem to Parallix lifecycle logic.
+the problem to Parallix lifecycle logic. The probe is judged on its answer, not
+only on its exit status: a runner can exhaust its own provider retries and still
+exit 0, so the probe must actually return `OK`. An unreachable backend therefore
+reports `[local-model-environment]` up front instead of surfacing later as a
+`[parallix-workflow-failure]` phantom draft.
 
 The harness also removes the inherited `PWD` variable from the child
 environment. `opencode` trusts `PWD` over the process's real working directory

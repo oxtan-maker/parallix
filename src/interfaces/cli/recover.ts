@@ -1,4 +1,4 @@
-import { missionId } from '../../domain/mission.js';
+import { missionId, type MissionIntake } from '../../domain/mission.js';
 import { recoverMissionLifecycle } from '../../application/mission-lifecycle-recovery.js';
 import * as fmt from '../../application/presentation/cli-format.js';
 import type { MissionTransitionStore } from '../../application/domain-ports.js';
@@ -7,6 +7,8 @@ export async function recoverMissionCommand(args: readonly string[], deps: {
   readonly taskStatus: (_slug: string) => string | null;
   readonly store: MissionTransitionStore;
   readonly alreadyMerged?: (_slug: string) => Promise<boolean>;
+  /** Landing proof used only when no Mission aggregate exists. */
+  readonly landedIntake?: (_slug: string) => Promise<MissionIntake | null>;
   readonly cleanup?: (_slug: string) => boolean;
   readonly log?: (_message: string) => void;
   readonly error?: (_message: string) => void;
@@ -17,10 +19,20 @@ export async function recoverMissionCommand(args: readonly string[], deps: {
     missionId: missionId(slug.toLowerCase()), taskStatus: deps.taskStatus(slug), actor: 'operator',
     occurredAt: new Date().toISOString(), store: deps.store,
     alreadyMerged: deps.alreadyMerged ? () => deps.alreadyMerged!(slug) : undefined,
+    landedIntake: deps.landedIntake ? () => deps.landedIntake!(slug) : undefined,
   });
   if (result.status !== 'completed' || !result.value) { (deps.error ?? fmt.log.fail)(result.error?.message ?? 'Lifecycle recovery failed.'); return false; }
   const { taskStatus, aggregateStatus, action } = result.value;
   (deps.log ?? fmt.log.info)(`Lifecycle states: task ${taskStatus}; aggregate ${aggregateStatus}.`);
+  if (action === 'recovered-landed') {
+    (deps.log ?? fmt.log.info)('Recovery action: restored the closed aggregate of a landed mission.');
+    // Cleanup is strictly downstream of the durable, read-back closeout.
+    if (deps.cleanup && !deps.cleanup(slug)) {
+      (deps.error ?? fmt.log.fail)(`Recovery halted: landed mission cleanup failed; retry px recover ${slug} after resolving the worktree.`);
+      return false;
+    }
+    return true;
+  }
   if (action === 'recover-to-active') { (deps.log ?? fmt.log.info)('Recovery action: resumed active mission lifecycle.'); return true; }
   if (action === 'refused-integrated') {
     if (deps.cleanup && !deps.cleanup(slug)) {

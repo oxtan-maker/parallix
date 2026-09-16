@@ -211,14 +211,7 @@ export function findDependencyViolations(repoRoot = process.cwd(), allowlist: re
  * an unattributed or stale entry is an exception nobody owns, which is how a
  * temporary allowlist becomes permanent architecture.
  */
-export const productionDependencyExceptions: readonly LegacyDependencyException[] = [
-  {
-    source: 'src/application/handoff-command-use-case.ts',
-    target: 'src/adapters/review/review-static-evidence.ts',
-    ownerTaskId: 'TASK-2369.13',
-    removalMission: 'missions/task-2369.13',
-  },
-];
+export const productionDependencyExceptions: readonly LegacyDependencyException[] = [];
 
 /** Production guard: the canonical graph has no exceptions outside the owned allowlist. */
 export function findProductionDependencyViolations(repoRoot = process.cwd()): DependencyViolation[] {

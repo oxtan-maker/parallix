@@ -16,6 +16,8 @@ interface CodexInvocationOptions {
   resume?: boolean;
   sessionId?: string | null;
   model?: string | null;
+  /** Enable Codex's native sandbox when Bubblewrap is unavailable. */
+  sandbox?: boolean;
 }
 
 interface StartCodexAgentOptions extends CodexInvocationOptions {
@@ -58,20 +60,19 @@ function hasLiveTty() {
   return Boolean(process.stdin.isTTY && process.stdout.isTTY);
 }
 
-function buildCodexDraftInvocation({ prompt, worktree, interactive = hasLiveTty(), env = {}, resume = false, sessionId = null, model = null }: CodexInvocationOptions) {
+function buildCodexDraftInvocation({ prompt, worktree, interactive = hasLiveTty(), env = {}, resume = false, sessionId = null, model = null, sandbox = false }: CodexInvocationOptions) {
   const configArgs = headlessCodexOverrides(worktree);
   const baseEnv = { ...process.env };
   if (resume) {
-    const args = [...configArgs, 'exec', 'resume'];
+    const args = [...configArgs, 'exec'];
+    if (sandbox) {args.push('--sandbox', 'workspace-write');}
+    args.push('resume');
     if (sessionId) {
       args.push(sessionId);
     } else {
       args.push('--last');
     }
     if (model) {args.push('-m', model);}
-    args.push('--sandbox', 'workspace-write');
-    // Resume is still a mutating exec; confine it (workspace-write), not the
-    // unrestricted default. Matches the non-resume path below.
     args.push(prompt);
     return {
       command: resolveCodexCommand(),
@@ -87,7 +88,7 @@ function buildCodexDraftInvocation({ prompt, worktree, interactive = hasLiveTty(
   const modelArgs = model ? ['-m', model] : [];
   const args = interactive
     ? [...configArgs, '--full-auto', ...modelArgs, '--cd', worktree, prompt]
-    : [...configArgs, 'exec', '--sandbox', 'workspace-write', ...modelArgs, '--cd', worktree, prompt];
+    : [...configArgs, 'exec', ...(sandbox ? ['--sandbox', 'workspace-write'] : []), ...modelArgs, '--cd', worktree, prompt];
 
   return {
     command: resolveCodexCommand(),
@@ -100,7 +101,7 @@ function buildCodexDraftInvocation({ prompt, worktree, interactive = hasLiveTty(
   };
 }
 
-function startCodexDraftAgent({ prompt, worktree, env = {}, resume = false, sessionId = null, model = null, teeOptions = {}, slug = null, role = null, sessionMarkerPort }: StartCodexAgentOptions) {
+function startCodexDraftAgent({ prompt, worktree, env = {}, resume = false, sessionId = null, model = null, sandbox = false, teeOptions = {}, slug = null, role = null, sessionMarkerPort }: StartCodexAgentOptions) {
   // The launcher always tees through spawnAndTee for limit-hit detection, which
   // forces child stdio to ['inherit', 'pipe', 'pipe']. Codex's `--full-auto`
   // interactive UI requires a TTY on stdout, so we always use the headless
@@ -148,7 +149,7 @@ function startCodexDraftAgent({ prompt, worktree, env = {}, resume = false, sess
             }
             await port.delete(slug, role);
           } catch (error) { throw error; }
-          const freshInv = buildCodexDraftInvocation({ prompt, worktree, interactive: false, env, resume: false, sessionId: null, model });
+          const freshInv = buildCodexDraftInvocation({ prompt, worktree, interactive: false, env, resume: false, sessionId: null, model, sandbox });
           return _spawnAndTee(freshInv.command, freshInv.args, { ...freshInv.options, ...teeOptions });
         }
         return result;
@@ -156,7 +157,7 @@ function startCodexDraftAgent({ prompt, worktree, env = {}, resume = false, sess
       .then(processResult);
   }
 
-  const invocation = buildCodexDraftInvocation({ prompt, worktree, interactive: false, env, resume, sessionId, model });
+  const invocation = buildCodexDraftInvocation({ prompt, worktree, interactive: false, env, resume, sessionId, model, sandbox });
   const resultPromise = staleSessionHandler(invocation);
 
   return { invocation, resultPromise };

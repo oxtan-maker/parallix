@@ -2,6 +2,7 @@
 
 Status: Accepted
 Date: 2026-06-29
+Last updated: 2026-09-15
 
 Related: ADR 0041 (integration pipeline gates), ADR 0047 (NEL budget), task-1268 (shift-left verification), task-1335 (harden publish path)
 
@@ -14,6 +15,8 @@ What it does not yet have is one explicit answer to a repository-level question:
 The current `repair-handoff.js` handles only two mechanical error classes (dirty mission artifacts, branch behind primary) and one relaunchable content error (empty goal-check table). All other failures — including genuine gate failures on code issues, the single largest consumer of human time — strand with a generic "not automatically repairable" message that requires manual re-invocation.
 
 This ADR consolidates the existing evidence, classifies the failure modes, and recommends a fully backlog-tracked implementation plan for fail-closed harness behavior. Nothing in the recommended control set is left as an untracked "defer later" idea: every control gets an explicit backlog task, even when the runtime outcome remains "human required".
+
+The harness requirement is about evidence, not about the file representation that happened to carry that evidence when the controls were first introduced. ADR 0053 owns persistence and authority. This ADR defines which evidence must be present and how failures are dispatched.
 
 ## Inputs
 
@@ -36,50 +39,62 @@ The following checks are currently implemented across the harness lifecycle. Eac
 | # | Check | Location | Failure Class |
 |---|-------|----------|---------------|
 | 1 | Verification gate at checkpoint | Checkpoint lifecycle | Unverifiable test claims (Class 1) |
-| 2 | Checkpoint existence validation | Active-mission lifecycle | Missing artifacts (Class 3) |
-| 3 | Checkpoint committed check | Active-mission lifecycle | Uncommitted state (Class 4) |
+| 2 | Required checkpoint evidence present | Active-mission lifecycle | Missing artifacts (Class 3) |
 
 ### During Handoff
 
 | # | Check | Location | Failure Class |
 |---|-------|----------|---------------|
 | 4 | Mission branch verification | Handoff lifecycle | Git blockers (Class 5) |
-| 5 | MISSION.md existence | Handoff lifecycle | Missing artifacts (Class 3) |
-| 6 | MISSION.md uncommitted check | Handoff lifecycle | Uncommitted state (Class 4) |
-| 7 | Auto-checkpoint generation | Handoff lifecycle | Missing artifacts — auto-repair (Class 3) |
-| 8 | Goal Check heading validation | Handoff lifecycle | Incomplete evidence (Class 4) |
-| 9 | Goal Check evidence rows | Handoff lifecycle | Incomplete evidence (Class 4) |
-| 10 | Verification gate execution | Handoff lifecycle | Gate failure (Class 1, 6) |
-| 11 | Rebase onto primary | Handoff lifecycle | Git blockers (Class 5) |
-| 12 | Gatekeeper mandatory artifacts | Handoff lifecycle | Missing artifacts (Class 3) |
-| 13 | Declared gates execution | Handoff lifecycle | Gate failure (Class 2, 6) |
+| 5 | Required Mission execution context present | Handoff lifecycle | Missing artifacts (Class 3) |
+| 6 | Auto-checkpoint generation | Handoff lifecycle | Missing artifacts — auto-repair (Class 3) |
+| 7 | Checkpoint evidence structure validation | Handoff lifecycle | Incomplete evidence (Class 4) |
+| 8 | Goal Check evidence rows | Handoff lifecycle | Incomplete evidence (Class 4) |
+| 9 | Verification gate execution | Handoff lifecycle | Gate failure (Class 1, 6) |
+| 10 | Rebase onto primary | Handoff lifecycle | Git blockers (Class 5) |
+| 11 | Required handoff state/evidence validation | Handoff lifecycle | Missing artifacts (Class 3) |
+| 12 | Declared gates execution | Handoff lifecycle | Gate failure (Class 2, 6) |
 
 ### Before Review
 
 | # | Check | Location | Failure Class |
 |---|-------|----------|---------------|
-| 14 | Mission dir + branch + status | Review lifecycle | State violations (Class 8) |
-| 15 | PR existence and state | Review lifecycle | Infra blockers (Class 7) |
-| 16 | Verification gate | Review lifecycle | Gate failure (Class 1, 6) |
+| 13 | Mission identity + branch + lifecycle state | Review lifecycle | State violations (Class 8) |
+| 14 | PR existence and state | Review lifecycle | Infra blockers (Class 7) |
+| 15 | Verification gate | Review lifecycle | Gate failure (Class 1, 6) |
 
 ### During Integration
 
 | # | Check | Location | Failure Class |
 |---|-------|----------|---------------|
-| 17 | Integration preflight | Integration lifecycle | Multiple classes |
-| 18 | Integration gates | Integration lifecycle | Gate failure (Class 6) |
-| 19 | Exact-tree proof capture | Integration lifecycle | Unverifiable claims (Class 1) |
-| 20 | Exact-tree proof assertion | Integration lifecycle | Stale proof (Class 1) |
+| 16 | Integration preflight | Integration lifecycle | Multiple classes |
+| 17 | Integration gates | Integration lifecycle | Gate failure (Class 6) |
+| 18 | Exact-tree proof capture | Integration lifecycle | Unverifiable claims (Class 1) |
+| 19 | Exact-tree proof assertion | Integration lifecycle | Stale proof (Class 1) |
 
 ### Repair Path
 
 | # | Mechanism | Location | Coverage |
 |---|-----------|----------|----------|
-| 21 | Auto-commit non-conflicted dirty files | Repair lifecycle | Isolated mission-worktree dirty files; unmerged files block (Class 5) |
-| 22 | Auto-rebase | Repair lifecycle | Simple rebase only (Class 5) |
-| 23 | Agent relaunch (empty goal-check) | Repair lifecycle | Single error sub-class only (Class 4) |
+| 20 | Auto-commit non-conflicted dirty files | Repair lifecycle | Isolated mission-worktree dirty files; unmerged files block (Class 5) |
+| 21 | Auto-rebase | Repair lifecycle | Simple rebase only (Class 5) |
+| 22 | Agent relaunch (empty goal-check) | Repair lifecycle | Single error sub-class only (Class 4) |
 
-**Total: 23 check points across 5 lifecycle phases.**
+**Total: 22 check points across 5 lifecycle phases.**
+
+## Options considered
+
+| Option | Benefit | Risk / Cost | Decision |
+|---|---|---|---|
+| Trust agent completion claims | Minimal harness complexity | Agent mistakes or hallucinations can advance workflow | Reject |
+| Treat committed workflow artifacts as sufficient evidence | Easy to inspect | Proves artifact existence rather than the underlying engineering claim and couples trust to persistence | Reject |
+| Send every failure to a human | Maximally conservative | High operator cost for deterministic and agent-correctable failures | Reject |
+| Automatically repair anything the harness can synthesize | High apparent completion rate | Harness can manufacture the evidence needed to satisfy its own gate | Reject |
+| Classify failures; auto-repair only mechanical state, send agent-correctable failures back, and stop on ambiguous/human-only failures | Preserves fail-closed behavior while reducing operator work | Requires classifier and bounded retry machinery | **Accept** |
+
+## Decision 
+
+Parallix fails closed when a lifecycle transition depends on evidence that has not been established. Where an independently observable fact exists, agent prose is not sufficient evidence. The harness may automatically repair deterministic mechanical conditions. It may send bounded, agent-correctable failures back to the responsible agent with captured evidence. Ambiguous lifecycle, conflicting Git, or infrastructure conditions stop for operator intervention. The harness must not manufacture semantic evidence merely to satisfy one of its own checks. Persistence and representation of Mission, checkpoint, review, and verification evidence are defined by ADR 0053 and ADR 0057. This ADR does not require those facts to be represented by committed workflow files.
 
 ## Failure Classification
 
@@ -89,7 +104,7 @@ Eight failure classes have been identified, each classified as auto-repair, auto
 |---|---------------|----------|-----------|
 | 1 | Unverifiable "tests passed" claims | **Auto-send-back** | Gate exit code is deterministic; agent prose is never sufficient |
 | 2 | Malformed or non-runnable declared gates | **Auto-repair** | Static validation (file existence, syntax) can catch before execution |
-| 3 | Missing mandatory mission artifacts | **Auto-send-back** | Unambiguously the implementer's responsibility; no human judgment needed |
+| 3 | Missing required Mission state/evidence | **Auto-send-back** | Unambiguously the implementer's responsibility; no human judgment needed |
 | 4 | Incomplete checkpoint evidence | **Auto-send-back** | Agent-fixable content errors; fix prompt already exists for one sub-class |
 | 5 | Mechanical git/handoff blockers | **Auto-repair** (non-conflicted dirty files); **Human-only** (unmerged conflicts) | Isolated-worktree dirty files can be committed together; unmerged conflicts require judgment |
 | 6 | Genuine gate failure (code issues) | **Auto-send-back** | Gate output sufficient for agent to diagnose; highest-ROI improvement |
@@ -177,8 +192,6 @@ The `AgentCapacity` class is an additive entry in the dispatch table; the eight 
 
 ## See Also
 
-- Task-1268: Shift-left verification concept (backlog)
-- Task-1335: Exact-tree verification proof (completed)
 - ADR 0041: Integration pipeline gates
 - ADR 0047: NEL budget (observational pattern)
 - The repair and active-mission lifecycles: current handoff-and-repair behavior

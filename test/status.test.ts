@@ -118,7 +118,7 @@ test('findStaleMissionWorktrees returns cleanup command for done task', () => {
   });
   assert.equal(stale.length, 1);
   assert.equal(stale[0].slug, 'task-done');
-  assert.equal(stale[0].cleanupCommand, 'scripts/cleanup-mission-worktree.sh task-done');
+  assert.equal(stale[0].cleanupCommand, 'git worktree remove /home/magnus/code/repo-task-done && git branch -D mission/task-done');
 });
 
 test('findStaleMissionWorktrees returns git remove command for missing task file', () => {

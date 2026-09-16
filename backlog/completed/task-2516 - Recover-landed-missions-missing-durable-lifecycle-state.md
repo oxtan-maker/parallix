@@ -1,10 +1,10 @@
 ---
 id: TASK-2516
 title: Recover landed missions missing durable lifecycle state
-status: backlog
-assignee: []
+status: done
+assignee: [codex]
 created_date: '2026-09-15'
-labels: [bug, integration, lifecycle]
+labels: [bug, integration, lifecycle, ai_sdlc]
 dependencies: []
 priority: high
 ordinal: 74015

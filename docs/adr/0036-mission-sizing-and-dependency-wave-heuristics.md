@@ -1,7 +1,8 @@
 # ADR 0036: Mission Sizing and Dependency-Wave Heuristics
 
-**Status:** Accepted
-**Date:** 2026-04-05
+**Status:** Accepted 
+**Date:** 2026-04-05 
+**Last updated:** 2026-09-15
 
 ## Context
 
@@ -10,7 +11,15 @@ As the number of concurrent missions and agents increases, the repository requir
 2. Enable safe parallel work by managing dependencies.
 3. Optimize the use of finite token budgets across the mission portfolio.
 
-Previously, all missions followed the same full `MISSION.md` + checkpoint sequence, regardless of size. This created unnecessary ceremony for small fixes and led to "over-budget" failures for large ones.
+Previously, all missions followed substantially the same coordination depth regardless of size. This created unnecessary ceremony for small fixes and made large missions more likely to exceed practical agent-context, verification, or review limits.
+
+## Options considered 
+| Option | Benefit | Cost / Risk | Decision | 
+|---|---|---|---| 
+| One workflow depth for every mission | Simple model | Over-processes small work and under-controls large work | Reject | 
+| Agent usage/token budget as the sizing unit | Directly reflects one agent session | Provider/model specific and not retrospectively measurable | Reject | 
+| File-count based sizing | Very cheap | File boundaries are a weak proxy for engineering size and dependency | Reject | 
+| NEL-based Quick / Full / Multi-Wave tracks with dependency-wave rules | Portable size signal and explicit decomposition | Requires refinement judgment | **Accept** |
 
 ## Decision
 
@@ -20,9 +29,9 @@ Introduce three sizing tracks and a dependency-wave planning heuristic.
 
 | Track | Scope | Process | NEL Budget |
 |-------|-------|---------|------------|
-| **Quick Flow** | < 3 files, < 2h estimated, or docs-only. | Minimal `MISSION.md` (Goal, Why Now, Refinement Signals, Gates). Skip detailed checkpoints if straightforward. | 0–80 NEL (Small) |
-| **Full Method** | > 3 files, complex logic, or > 2h. | Standard `MISSION.md` with all sections. Detailed checkpoints. Mandatory external review (C2 review remains required for sensitive scopes per AGENTS.md). | 81–235 NEL (Medium) |
-| **Multi-Wave** | Very large, high risk, or complex dependencies. | Split into multiple `Full Method` missions (waves). | 235+ NEL (Large) |
+| **Quick Flow** | Small, bounded, low-risk change | Minimal coordination and only the checkpoint/review depth required by the change | 0–80 NEL |
+| **Full Method** | Material logic, cross-surface change, or increased validation/review risk | Full execution context, checkpoint evidence, and required external review | 81–235 NEL |
+| **Multi-Wave** | Very large, high-risk, or strongly dependent work | Split into multiple independently executable missions | 235+ NEL |
 
 ### 2. "Too Large" Thresholds
 
@@ -43,23 +52,23 @@ When a mission is too large or has complex dependencies, it must be planned in "
 - **Wave 3: Polish & Verification**: Advanced UI, edge cases, and final E2E validation.
 
 **Wave Execution Rules:**
-1. **Upfront Sequence**: The full sequence of waves must be defined during the `draft` phase of Wave 1.
-2. **Sequential Integration**: Each wave MUST reach `done` status (merged into `master`) before the next dependent wave can transition from `ready` to `active`. Parallel execution of dependent waves is NOT permitted.
-3. **Production Readiness**: Per trunk-based development, each wave MUST be production-ready, functional, and safe for production use upon integration into `master`. No "broken" or "partially-functional" states are permitted in the main branch.
-4. **Integration Boundary**: Each wave is a separate mission. Upon completion, its branch is merged into `master` via a single squash/merge commit.
+1. **Upfront Sequence**: The intended sequence and dependency relationships must be identified during refinement of the first wave.
+2. **Sequential Integration**: Each prerequisite wave MUST reach `done` before a dependent wave becomes `active`.
+3. **Production Readiness**: Per trunk-based development, each wave MUST be production-ready, functional, and safe for production use upon integration into the configured primary branch. No "broken" or "partially-functional" states are permitted in the main branch.
+4. **Integration Boundary**: Each wave is a separate mission. Each wave is a separate Mission and is integrated through the repository's configured integration mode.
 5. **Mandatory Review**: Each wave MUST pass its own external review (and C2 review if the scope is sensitive per AGENTS.md) before integration into `master`.
 6. **Context Clearing**: Each subsequent wave MUST be executed in a fresh agent session/context. This prevents context bloat and ensures the previous wave's outcomes are documented well enough for a "new" agent to resume work.
-7. **Context Carryover**: Each subsequent wave's `MISSION.md` must explicitly reference the completed mission and outcomes of the previous wave in its `## Why Now` or `## Context` section.
+7. **Context Carryover**: Each subsequent wave must receive the relevant completed outcomes and decisions from its prerequisite waves as part of its execution context. It must not depend on conversational memory from the previous agent session.
 8. **Verification Boundary**: Each wave must pass its own validation gates. Wave 3 (or the final wave) must include a full E2E validation of the entire multi-wave feature set.
 
 **Parallelism Rules:**
 - Missions can run in parallel ONLY if they do not touch the same files or shared logic.
 - If a dependency exists, the dependent mission must wait until the parent mission is `done` (merged to `master`).
-- Use the `dependencies` field in `Backlog.md` tasks to track these relationships.
+- Dependencies must be represented explicitly enough for Mission selection and activation to enforce them. ADR 0053 defines persistence and authority for that state.
 
-### 4. Mandatory Task Assignment
+### 4. Mission assignment 
 
-Agents MUST assign themselves to a task in `Backlog.md` before beginning work in `active` mode. This provides immediate visibility into who is working on what across parallel worktrees.
+An active Mission has an explicit assignee. Assignment must be visible through the Mission/application model before execution begins so parallel work does not silently acquire multiple owners.
 
 ## Consequences
 

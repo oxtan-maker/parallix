@@ -131,6 +131,34 @@ test('dependency graph production scan has no violation outside the owned allowl
   assert.deepEqual(findProductionDependencyViolations(process.cwd()), []);
 });
 
+test('production dependency exceptions are retired', () => {
+  assert.equal(productionDependencyExceptions.length, 0);
+});
+
+test('integrate CLI adapter stays a port binding rather than a workflow sequencer', () => {
+  const adapter = path.join(process.cwd(), 'src/adapters/cli/commands/integrate.ts');
+  const source = fs.readFileSync(adapter, 'utf8');
+  assert.ok(source.split('\n').length <= 450, 'integrate.ts exceeds its 450-line adapter ceiling (TASK-2512)');
+  assert.doesNotMatch(source, /from 'node:child_process'/, 'integrate.ts must reach process execution through a port, not node:child_process');
+  // The sequencing lives in the application layer; the adapter only binds it.
+  assert.ok(fs.existsSync(path.join(process.cwd(), 'src/application/integrate-workflow.ts')));
+});
+
+test('integrate workflow stays split into step modules rather than one relocated monolith', () => {
+  const root = process.cwd();
+  const stepDir = path.join(root, 'src/application/integrate');
+  const modules = [
+    'src/application/integrate-workflow.ts',
+    'src/application/ports/integrate-workflow.ts',
+    ...fs.readdirSync(stepDir).filter(name => name.endsWith('.ts')).map(name => path.join('src/application/integrate', name)),
+  ];
+  for (const module of modules) {
+    const lines = fs.readFileSync(path.join(root, module), 'utf8').split('\n').length;
+    assert.ok(lines <= 500, `${module} has ${lines} lines; split the integrate step rather than regrowing a monolith (TASK-2512)`);
+    assert.doesNotMatch(fs.readFileSync(path.join(root, module), 'utf8'), /@ts-nocheck/, `${module} must stay type-checked`);
+  }
+});
+
 test('every owned dependency exception names a task ID and an existing removal mission', () => {
   for (const exception of productionDependencyExceptions) {
     assert.match(exception.ownerTaskId, /^TASK-\d+(?:\.\d+)?$/, `exception ${exception.source} -> ${exception.target} needs an owning task ID`);

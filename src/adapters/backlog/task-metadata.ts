@@ -28,7 +28,7 @@ function parseAssigneeFamilies(content: string) {
         : rest;
 
       families = rawValues.split(',')
-        .map((s: string) => s.trim().replace(/^['"]|['"]$/g, '').replace(/^@/, ''))
+        .map((s: string) => s.trim().replace(/(?:^['"])|(?:['"]$)/g, '').replace(/^@/, ''))
         .filter((s: string) => s.length > 0);
     }
   }
@@ -41,7 +41,7 @@ function parseAssigneeFamilies(content: string) {
       families = blockMatch[1].split(/[\r\n]+/)
         .map((line: string) => line.trim())
         .filter((line: string) => line.startsWith('-'))
-        .map((line: string) => line.substring(1).trim().replace(/^['"]|['"]$/g, '').replace(/^@/, ''))
+        .map((line: string) => line.substring(1).trim().replace(/(?:^['"])|(?:['"]$)/g, '').replace(/^@/, ''))
         .filter((s: string) => s.length > 0);
     }
   }
@@ -106,7 +106,7 @@ function clearTaskAgentAssignee(taskFilePath: string) {
       const keptLines = blockLines[1].split('\n').filter(line => {
         const m = line.match(/^\s+-\s+(.+)/);
         if (!m) {return line.trim() === '';}
-        const family = m[1].trim().replace(/^['"]|['"]$/g, '');
+        const family = m[1].trim().replace(/(?:^['"])|(?:['"]$)/g, '');
         return !supportedAgents.includes(family.toLowerCase());
       }).join('\n');
       newBlock = newBlock.replace(/^assignee:\n((?:\s+-\s+.+\n?)*)/m, 'assignee:\n' + keptLines);
@@ -156,7 +156,7 @@ function parseTaskLabels(content: string) {
     return blockMatch[1].split(/[\r\n]+/)
       .map(line => line.trim())
       .filter(line => line.startsWith('-'))
-      .map(line => line.substring(1).trim().replace(/^['"]|['"]$/g, ''))
+      .map(line => line.substring(1).trim().replace(/(?:^['"])|(?:['"]$)/g, ''))
       .map(s => s.toLowerCase())
       .filter(s => s.length > 0);
   }
@@ -164,7 +164,7 @@ function parseTaskLabels(content: string) {
   const inlineMatch = content.match(/^labels:[ \t]*\[(.*?)\]/m);
   if (inlineMatch) {
     return inlineMatch[1].split(',')
-      .map(s => s.trim().replace(/^['"]|['"]$/g, ''))
+      .map(s => s.trim().replace(/(?:^['"])|(?:['"]$)/g, ''))
       .map(s => s.toLowerCase())
       .filter(s => s.length > 0);
   }

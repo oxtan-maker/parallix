@@ -2,7 +2,7 @@
 
 **Status:** Accepted
 **Date:** 2026-06-27
-**Task:** task-1355 (research; depends on the task-1267 hypothesis)
+**Last updated:** 2026-09-15
 
 ## Context
 
@@ -73,7 +73,7 @@ usable correlation with review rework and **zero new tooling** — it is computa
 
 ### 2. The draft estimate — a NEL bucket, replacing "% usage"
 
-At draft, the `MISSION.md` size signal becomes a **predicted NEL bucket**, replacing
+At draft, the mixxsion size signal becomes a **predicted NEL bucket**, replacing
 "Estimated agent % usage limit". The buckets are the empirical risk terciles found in
 this repo's archived missions (see §4):
 
@@ -153,9 +153,5 @@ of guessed.
   against NEL on a larger sample.
 
 ## Links
-- [task-1267 hypothesis](../../backlog/tasks/task-1267%20-%20Hypothesis-reduce-mission-size-to-increase-quality-controls.md)
-- [Research findings (task-1355)](../../missions/task-1355/findings.md)
-- [Reproducible dataset](../../missions/task-1355/data/dataset.md)
 - [ADR 0032](0032-mission-refinement-state-and-usage-budget-signals.md) — amended: this ADR replaces the "% usage limit" draft signal with a NEL bucket.
 - [ADR 0036](0036-mission-sizing-and-dependency-wave-heuristics.md) — amended: "Too Large" sizing is restated in NEL rather than agent-usage %.
-- Implementation: [task-1379](../../backlog/tasks/task-1379%20-%20Replace-agent-usage-size-signal-with-Net-Engineering-Lines-NEL-bucket-capture-actual-at-handoff.md) (replace the % usage signal with a NEL bucket; capture actual NEL at handoff).

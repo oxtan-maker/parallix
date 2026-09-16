@@ -1332,8 +1332,9 @@ test('repo config preserves remaining gate orders (task-1419)', () => {
   assert.equal(config.gates.workflow.run_last, true, 'workflow gate remains run_last');
   assert.equal(config.gates['custom-agent-smoke'].order, 51, 'custom-agent-smoke gate remains order 51');
   assert.equal(config.gates['custom-agent-smoke'].run_last, true, 'custom-agent-smoke gate remains run_last');
-  // TASK-2519: CodeQL is a manual scan, not an automatic integration gate.
-  assert.equal(config.gates.codeql, undefined, 'codeql gate must not run automatically');
+  assert.deepEqual(config.gates.codeql, {
+    command: 'npm run test:codeql', order: 4, run_last: false, enabled: true, always: true
+  }, 'codeql gate remains the automatic order-4 scan');
 });
 
 test('every representative changed-area plan includes the unconditional integration-suite gate (task-2292)', () => {

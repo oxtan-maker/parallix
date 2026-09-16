@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { agentFamily, type AgentFamily } from '../../domain/agents.js';
+import { compareCodeUnits } from '../../domain/comparators.js';
 
 /**
  * Resolve known agent families from config/agents.json.
@@ -28,7 +29,7 @@ export function resolveKnownAgentFamilies(rootDir: string): readonly AgentFamily
   }
   const declared = declaredFamilies(config);
   if (declared !== null) { return validFamilies(declared); }
-  return validFamilies(eligibleUnion(config)).slice().sort();
+  return validFamilies(eligibleUnion(config)).slice().sort(compareCodeUnits);
 }
 
 /** The explicit top-level `families` array, or null when the config declares none. */

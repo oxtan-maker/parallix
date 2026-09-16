@@ -307,6 +307,8 @@ function startPiAgent({
     let assistantText = '';
     let _toolCalls = 0;
     let errorText = '';
+    /** Set when the session settled on a provider error instead of a response. */
+    let settleError: string | null = null;
 
     // Tee / watchdog — write text_delta to process.stdout in real time
     // and fire noOutputWatchdog.onNoOutput when no visible text arrives.
@@ -360,6 +362,7 @@ function startPiAgent({
           assistantText = '';
           _toolCalls = 0;
           errorText = '';
+          settleError = null;
 
           const { session: sdkSession } = await createSession(sdkOptions);
           session = sdkSession;
@@ -382,8 +385,24 @@ function startPiAgent({
               case 'tool_execution_end':
                 _toolCalls += 1;
                 break;
-              case 'agent_end':
-                // Agent completed.
+              case 'agent_end': {
+                // `session.prompt()` resolves normally even when the provider
+                // never answered (the SDK settles the turn with an errored
+                // assistant message instead of throwing). Without this the
+                // launcher reports status 0 with empty output and zero tokens,
+                // and the stage commits phantom work — e.g. a draft that leaves
+                // the unfilled MISSION.md scaffold on disk.
+                const lastMessage = event.messages?.[event.messages.length - 1];
+                settleError = !event.willRetry && lastMessage?.stopReason === 'error'
+                  ? (lastMessage.errorMessage || 'agent session ended in a provider error')
+                  : null;
+                break;
+              }
+              case 'auto_retry_end':
+                // The SDK exhausted its own retries; the turn produced nothing.
+                if (event.success === false) {
+                  settleError = event.finalError || 'agent retries exhausted without a model response';
+                }
                 break;
             }
           });
@@ -394,6 +413,11 @@ function startPiAgent({
           if (typeof unsubscribe === 'function') { unsubscribe(); }
           if (typeof session.dispose === 'function') { session.dispose(); }
           clearWatchdog();
+
+          // Throw so the transient-retry path below (and every caller's
+          // non-zero status handling) treats an unanswered turn as the
+          // failure it is.
+          if (settleError) { throw new Error(settleError); }
 
           // Build the result from SDK state.
           const stats = session.getSessionStats?.() || {};

@@ -16,6 +16,7 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
+import { compareCodeUnits } from '../../domain/comparators.js';
 
 /**
  * Maximum acceptable age (in minutes) for a qwen session's start time
@@ -106,7 +107,7 @@ function collectTokenUsageRecords(
   try {
     const files = fs.readdirSync(usageDir)
       .filter((f: string) => f.startsWith('token-usage-') && f.endsWith('.jsonl'))
-      .sort();
+      .sort(compareCodeUnits);
 
     for (const file of files) {
       const content = fs.readFileSync(path.join(usageDir, file), 'utf8');

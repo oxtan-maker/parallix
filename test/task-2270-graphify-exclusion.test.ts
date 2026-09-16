@@ -10,13 +10,22 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(__dirname, '..');
 const fixtureRoot = path.join(__dirname, 'fixtures', 'task-2270-graphify-exclusion');
 
+function graphifyPython(): string {
+  const executable = childProcess.spawnSync('which', ['graphify'], { encoding: 'utf8' });
+  assert.equal(executable.status, 0, executable.stderr);
+  const launcher = fs.readFileSync(executable.stdout.trim(), 'utf8');
+  const interpreter = /^#!(.+python)\r?$/m.exec(launcher)?.[1];
+  assert.ok(interpreter, 'graphify launcher must name its Python interpreter');
+  return interpreter;
+}
+
 test('Graphify excludes configured mission documents before extraction while retaining source relationships', () => {
   const worktree = fs.mkdtempSync(path.join(os.tmpdir(), 'task-2270-graphify-'));
   try {
     fs.cpSync(fixtureRoot, worktree, { recursive: true });
     fs.copyFileSync(path.join(repoRoot, '.graphifyignore'), path.join(worktree, '.graphifyignore'));
 
-    const result = childProcess.spawnSync('uv', ['run', '--offline', '--with', 'graphifyy', 'python', '-c', `
+    const result = childProcess.spawnSync(graphifyPython(), ['-c', `
 import json
 import sys
 from pathlib import Path
@@ -37,9 +46,7 @@ print(json.dumps({
 }))
 `, worktree], {
       encoding: 'utf8',
-      // The standard test bootstrap isolates HOME; restore Graphify's tool
-      // cache for this focused tool contract.
-      env: { ...process.env, HOME: os.userInfo().homedir }
+      env: process.env
     });
 
     assert.equal(result.status, 0, result.stderr);

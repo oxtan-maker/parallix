@@ -53,6 +53,8 @@ const ALLOWED: Record<string, string> = {
     + 'and the test below pins the launch inside that adapter',
   'src/adapters/cli/commands/handoff.ts::createHandoffPorts':
     'port wiring that hands `startAgent` to the use case for the kernel to drive',
+  'src/adapters/cli/commands/integrate.ts::createIntegratePorts':
+    'port wiring that hands `startAgent` to the integrate workflow for the kernel to drive (TASK-2512)',
 };
 
 /** Every `.ts` file under `src/`, excluding port interface declarations. */

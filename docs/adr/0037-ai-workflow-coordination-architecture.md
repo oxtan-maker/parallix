@@ -1,7 +1,8 @@
 # ADR 0037: AI workflow coordination architecture
 
-Status: Proposed
-Date: 2026-04-06
+Status: Accepted Date: 2026-04-06 
+Last updated: 2026-09-15 
+Related: ADR 0048 (fail-closed harness), ADR 0051 (UI-neutral application boundary), ADR 0053 (persistence and authority)
 
 ## Context
 
@@ -15,6 +16,19 @@ application workflows and ports, concrete adapters, interfaces, composition,
 and the process entry point. The UI-neutral boundary in ADR 0051 requires
 workflow ownership to remain with application use cases while interfaces
 translate requests and render outcomes.
+
+## Options considered
+
+### Agent-followed procedures
+
+Rejected for operations that mutate lifecycle or durable mission state. Prose
+can explain the policy, but it cannot provide the executable boundary needed to
+keep interfaces and concrete mechanisms from owning it.
+
+### Adapter-owned command workflows
+
+Rejected. Adapters may use named host mechanisms, but a multi-integration
+workflow belongs in application and crosses application-owned ports.
 
 ## Decision
 
@@ -32,12 +46,16 @@ An adapter that needs behaviour from another integration receives an
 application-owned port rather than taking workflow ownership through a direct
 cross-adapter dependency.
 
-Mission state has distinct authorities. Backlog material remains an external
-task source and Git remains authoritative for repository topology. Checked
-Mission, checkpoint, review, and operational state are reached through their
-application ports and persistence authority as defined by ADR 0053. A
-checkpoint document is durable evidence for a completed coordination step, not
-an independent workflow state machine.
+Persistence and authority for Mission state, external task material, Git facts,
+review state, and other operational data are defined by ADR 0053. Coordination
+code consumes those authorities through application-owned ports rather than
+deciding their storage inside the workflow.
+
+Checkpoint evidence represents a completed coordination step. Its persistence
+or presentation format is likewise governed by ADR 0053 rather than by this ADR.
+
+Agent-facing context and evidence exchange are application surfaces: workflow use cases decide what context a step requires and what evidence a step may record, while persistence remains outside this decision.
+
 
 ## Consequences
 
@@ -50,22 +68,8 @@ an independent workflow state machine.
 - Composition becomes the sole location that assembles the complete object
   graph.
 
-## Alternatives considered
-
-### Agent-followed procedures
-
-Rejected for operations that mutate lifecycle or durable mission state. Prose
-can explain the policy, but it cannot provide the executable boundary needed to
-keep interfaces and concrete mechanisms from owning it.
-
-### Adapter-owned command workflows
-
-Rejected. Adapters may use named host mechanisms, but a multi-integration
-workflow belongs in application and crosses application-owned ports.
 
 ## Links
 
 - `docs/adr/0051-ui-neutral-application-boundary.md`
 - `docs/adr/0053-operational-persistence-and-authority-boundaries.md`
-- `src/application/ports/cli-workflows.ts`
-- `src/composition/create-cli.ts`

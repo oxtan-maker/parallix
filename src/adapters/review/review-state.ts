@@ -24,6 +24,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { findMissionDir, getPrimaryBranch, resolveWorktree } from '../filesystem/mission-utils.js';
 import { missionId } from '../../domain/mission.js';
+import { compareCodeUnits } from '../../domain/comparators.js';
 import { agentFamily } from '../../domain/agents.js';
 import { changeRevision, ConfiguredReviewerEligibility, startReview } from '../../domain/review.js';
 import { applyReviewStateToReview, reviewStateDataFrom } from './review-state-mapping.js';
@@ -295,7 +296,7 @@ export function readExportedReviewEvents(slug: string, rootDir = process.cwd()):
   if (!fs.existsSync(eventsDir)) { return []; }
 
   const events: ReviewEventRecord[] = [];
-  for (const file of fs.readdirSync(eventsDir).filter((name) => name.endsWith('.md')).sort()) {
+  for (const file of fs.readdirSync(eventsDir).filter((name) => name.endsWith('.md')).sort(compareCodeUnits)) {
     let content: string;
     try { content = fs.readFileSync(path.join(eventsDir, file), 'utf8'); }
     catch { continue; }
