@@ -46,11 +46,11 @@ const expectedIntegrationFiles = [
   'draft_preflight_modern.test.ts', 'durable-state-policy.test.ts',
   'external-target-resolution.test.ts', 'forgejo-independence.test.ts',
   'forgejo-pr-round-sync.test.ts', 'forgejo.test.ts', 'handoff.test.ts', 'install.test.ts',
-  'integrate-task-1410-stash-pop-corruption.test.ts', 'integrate-workflow-gate.test.ts',
+  'integrate-conflict.test.ts', 'integrate-task-1410-stash-pop-corruption.test.ts', 'integrate-workflow-gate.test.ts',
   'integrate.test.ts', 'integration-pipelines.test.ts', 'startup-preflight.test.ts',
   'mission-utils-worktree.test.ts', 'mistral.test.ts', 'nels.test.ts',
   'noise-reduction.test.ts', 'opencode-export.test.ts', 'package-persistent-data.test.ts',
-  'product-config.test.ts',
+  'product-config-cp.test.ts', 'product-config-validation.test.ts', 'product-config.test.ts',
   'px-runner.test.ts', 'px-runtime-smoke.test.ts', 'px-shell-init.test.ts',
   'rebase-use-case.test.ts', 'rebase.test.ts', 'rebase_diagnostics.test.ts', 'rebase_hardening.test.ts',
   'refresh-global-px-script.test.ts', 'resolve-conflict.test.ts',
@@ -143,6 +143,13 @@ const expectedIntegrationFiles = [
   // integration layer.
   'task-2516-recover-landed-mission-repro.test.ts',
   'task-2527-local-sonar.test.ts',
+  'task-2533-squash-payload-pathspec-quotes.test.ts',
+  // TASK-2537: seeds throwaway Git repositories to land a draft-authored task
+  // file, so it crosses the git boundary and runs in the integration layer.
+  'task-2537-squash-closeout-unstaged-task-path.test.ts',
+  // TASK-2532: seeds temporary Git repositories to exercise the base-worktree
+  // repair, so it crosses the git boundary and runs in the integration layer.
+  'task-2532-stale-integration-state-repro.test.ts',
       'test-hygiene.test.ts',
   // TASK-2502: the CodeQL clean-cache bootstrap test shells out to the runner
   // (bash) to prove a fresh cache directory bootstraps the pinned CLI, so it
@@ -156,6 +163,10 @@ const expectedIntegrationFiles = [
   // repository to prove the base worktree stays clean.
   'task-2507-mainline-gate-mutation-repro.test.ts',
   'task-2509-local-version-allocation.test.ts', 'task-2509-release-workflow.test.ts',
+  // TASK-2534: drives the real squash landing against a throwaway repository
+  // to prove stale backlog/tasks copies never land, so it crosses the
+  // version-control boundary and runs only in the integration layer.
+  'task-2534-stale-backlog-copy-landing-repro.test.ts',
   'task-2517-cp3-landed-closeout.test.ts',
   'task-2517-landed-squash-base-branch-detection.test.ts',
   'tui-pty-smoke.test.ts', 'task-2313-repro.test.ts', 'task-2370-repro.test.ts',

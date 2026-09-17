@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { buildTestRunPlan } from './lib/test-run-plan.js';
 import { defaultManifestDir, ensureManifestDir, recoverRecordedTempRoots } from '../src/adapters/verification/temp-root-registry.js';
 import { cleanupRunnerTempRoots, signalExitCode } from './lib/test-runner-temp-roots.js';
+import { onGitHubActions } from './lib/unit-test-budget-reporter.js';
 
 // A verifier may be launched from an operator checkout while it is validating
 // a mission worktree. Capture that selected root once and use it for every
@@ -145,7 +146,11 @@ child.on('close', (code, signal) => {
   // Compare measured elapsed time against the configured budget.
   // If exceeded, the suite fails even if all individual tests passed.
   let suiteExceeded = false;
-  if (!runsIntegrationSuite) {
+  // On GitHub-hosted runners the suite-level budget is disabled: runner
+  // speed is uncontrollable, so the suite must not fail on the timing gate
+  // there. Local runs keep enforcing it. Gated independently of the reporter
+  // (task-2531).
+  if (!runsIntegrationSuite && !onGitHubActions()) {
     const actualBudget = UNIT_TEST_BUDGET_MS;
     console.error(`[unit-test-budget] timeout=${UNIT_TEST_TIMEOUT_MS}ms per test, suite budget=${actualBudget}ms, elapsed=${Math.round(suiteElapsedMs)}ms`);
     if (code === 0 && suiteElapsedMs > actualBudget) {

@@ -2,6 +2,8 @@
 
 import test, { mock } from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { mockModule, installModuleMocks } from './lib/module-mock.js';
 const repairHandoff = mockModule<typeof import('../src/adapters/cli/commands/repair-handoff.js')>('../src/adapters/cli/commands/repair-handoff.js', import.meta.url);
@@ -37,7 +39,9 @@ test('task-2215 repro: classifyError classifies auto-remediation checkpoint fail
 });
 
 test('task-2215 repro: buildAutoCheckpointContent evidence rows pass findUnverifiableGoalCheckRow validation', () => {
-  const rootDir = path.join(import.meta.dirname, '..');
+  const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), 'task-2215-evidence-'));
+  fs.mkdirSync(path.join(rootDir, 'src', 'application'), { recursive: true });
+  fs.writeFileSync(path.join(rootDir, 'src', 'application', 'handoff-command-use-case.ts'), '');
   const content = _buildAutoCheckpointContent('task-2215');
 
   const goalCheckMatch = content.match(/^## Goal Check(?: Table)?\s*$/m);
@@ -47,7 +51,11 @@ test('task-2215 repro: buildAutoCheckpointContent evidence rows pass findUnverif
   const evidenceRows = _collectGoalCheckEvidenceRows(afterHeader);
   assert.ok(evidenceRows.length > 0, 'auto-generated Goal Check table must contain evidence rows');
 
-  const offendingRow = findUnverifiableGoalCheckRow(evidenceRows, rootDir);
-  assert.equal(offendingRow, null,
-    `auto-generated evidence rows must cite verifiable references; offending row: ${offendingRow}`);
+  try {
+    const offendingRow = findUnverifiableGoalCheckRow(evidenceRows, rootDir);
+    assert.equal(offendingRow, null,
+      `auto-generated evidence rows must cite verifiable references; offending row: ${offendingRow}`);
+  } finally {
+    fs.rmSync(rootDir, { recursive: true, force: true });
+  }
 });

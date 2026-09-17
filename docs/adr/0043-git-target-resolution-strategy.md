@@ -74,6 +74,13 @@ Invariant 4: Tests for workflow branch operations MUST encode the local-primary-
 - Manual recovery instructions become consistent with the automated path.
 - Future regressions are easier to spot because the rule is explicit and testable.
 
+Integration now treats the base worktree as *possibly poisoned* rather than
+assuming it is clean at entry. An interrupted integrate can leave an
+integration-owned marker stash or a dead in-progress rebase behind; the next
+integrate for any mission heals that state at the entry chokepoint before
+preflight — dropping only marker-tagged stashes and aborting only a live
+rebase — so an interrupted run no longer blocks a later one.
+
 ### Negative
 
 - Existing tests that hardcode `review/master` or `review/main` as the rebase target must be updated.

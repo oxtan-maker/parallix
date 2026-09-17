@@ -68,6 +68,7 @@ export function createIntegrationContextBuilder(ports: IntegrateWorkflowPorts) {
 
     let forgejoIdentity: { forgejoUser: string | null, warning: string | null } = { forgejoUser: null, warning: null };
     let forgejoToken: string | null = null;
+    let configuredReviewer: string | null = null;
     let pr: any = { exists: false };
     let siblingPrs: any[] = [];
     let approval: any = { ok: false, error: 'forgejo-off', reviewState: null };
@@ -94,7 +95,7 @@ export function createIntegrationContextBuilder(ports: IntegrateWorkflowPorts) {
       // resolveForgejoUser(reviewer). Map it the same way so the recovery
       // authority matches the login the reviewer actually used, never a caller
       // value. No recorded reviewer yields null → falls back to the default user.
-      const configuredReviewer = reviewState?.reviewer ? ports.review.resolveForgejoUser(reviewState.reviewer) : null;
+      configuredReviewer = reviewState?.reviewer ? ports.review.resolveForgejoUser(reviewState.reviewer) : null;
       pr = getPrStatusFn(branch, process.cwd(), { forgejoUser: forgejoIdentity.forgejoUser, token: forgejoToken });
       if (pr.exists && pr.merged === true) {
         pr = { ...pr, state: 'merged' };
@@ -145,6 +146,9 @@ export function createIntegrationContextBuilder(ports: IntegrateWorkflowPorts) {
       taskAssignee,
       forgejoUser: forgejoIdentity.forgejoUser,
       forgejoToken,
+      // The login whose provider APPROVED counts as the reviewer's; carried so
+      // a stale approval can be retracted as that same login (TASK-2528).
+      configuredReviewer,
       taskAssigneeWarning: forgejoIdentity.warning,
       pr,
       siblingPrs,

@@ -23,6 +23,8 @@ import type {
 // Type-only import (erased at runtime): the plain overlay shape materialized at
 // the composition root. No SQLite driver binding reaches this module.
 import type { OperatorBlocklistOverlay } from '../sqlite/blocklist-snapshot.js';
+import type { MissionLaunchContext } from '../../domain/mission-execution-context.js';
+import { renderExecutionContextForLaunch } from '../../domain/mission-execution-context.js';
 
 export type { OperatorBlocklistOverlay };
 
@@ -42,6 +44,10 @@ export interface ExecuteMissionRuntime {
   readonly resolveWorktree: typeof resolveWorktree;
   readonly resolveTaskFile: typeof resolveTaskFile;
   readonly buildCheckpointContext: typeof buildCheckpointContext;
+  /** Read the persisted execution context plus latest checkpoint for a slug, or
+   * null when neither exists. The checkpoint keeps the file-backed resume signal
+   * alive even when the agent starts from persisted facts. */
+  readonly resolveExecutionContext: (_slug: string) => Promise<MissionLaunchContext | null>;
   readonly readAgentConfig: typeof readAgentConfigOrExit;
   readonly buildExecutePrompt: typeof buildExecutePrompt;
   readonly selectLaunchAndRecord: typeof selectLaunchAndRecord;
@@ -107,11 +113,19 @@ export class AgentExecutionAdapter implements AgentExecutionPort {
   ) {}
 
   async prepare(request: { readonly slug: string; readonly worktree: string }): Promise<AgentLaunchPlan> {
-    const checkpointContext = this._runtime.buildCheckpointContext(request.slug);
+    // Persisted execution context is the authoritative launch context; the
+    // file-backed checkpoint context is the legacy fallback. Resolve first and
+    // skip the checkpoint read entirely when context exists, so a resume can
+    // start without reading MISSION.md or any CP-N.md. A persisted read still
+    // carries the latest checkpoint so the resume signal is not lost.
+    const persisted = await this._runtime.resolveExecutionContext(request.slug);
+    const launchContext = persisted
+      ? renderExecutionContextForLaunch(persisted.context, persisted.latestCheckpoint)
+      : this._runtime.buildCheckpointContext(request.slug);
     const agentConfig = this.resolveAgentConfig();
     return {
       agentConfig,
-      prompt: this._runtime.buildExecutePrompt(request.slug, checkpointContext, { rootDir: request.worktree }),
+      prompt: this._runtime.buildExecutePrompt(request.slug, launchContext, { rootDir: request.worktree }),
     };
   }
 
@@ -245,5 +259,6 @@ export function createDefaultExecuteMissionRuntime(): ExecuteMissionRuntime {
     resolveAgentModel,
     resolveStageTelemetry,
     runHandoffAndReview,
+    resolveExecutionContext: async () => null,
   };
 }

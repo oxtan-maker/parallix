@@ -104,6 +104,13 @@ export function createIntegrationGateStep({ gates, landing, verification }: Inte
       gates: configured,
       implementer: resolveBounceImplementer(context.taskAssignee ?? null, checkout, seams),
       repositoryId: missionLoad.kind === 'found' ? String(missionLoad.mission.repositoryId) : 'unknown',
+      // TASK-2528: a repair that changes the approved diff must retract the
+      // standing approval instead of merging under it. The retraction is
+      // per-reviewer, so the route needs the pull-request branch, the approval
+      // as read at context-build time, and the configured reviewer's login.
+      branch: context.branch,
+      approval: context.approval,
+      reviewerUser: context.configuredReviewer ?? null,
       realAgent,
       realAgentModel,
       startAgentFn: seams.startAgentFn,

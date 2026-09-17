@@ -44,7 +44,7 @@ const PATTERN_SETS = Object.freeze({
 });
 
 function getPatternsForAgent(agent: string) {
-  return PATTERN_SETS[agent as keyof typeof PATTERN_SETS] || [];
+  return PATTERN_SETS[(agent === 'vibe' ? 'mistral' : agent) as keyof typeof PATTERN_SETS] || [];
 }
 
 function findLimitHitMatch(agent: string, text: string) {
@@ -193,6 +193,10 @@ function ceilToNextHour(date: Date) {
   return ceil;
 }
 
+function endOfCurrentUtcMonth(now: Date) {
+  return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1));
+}
+
 interface DetectLimitHitOptions {
   agent: string;
   stdout?: string;
@@ -250,9 +254,10 @@ function detectLimitHit({
       source = 'parsed';
       reason = `parsed: ${match.pattern.source}`;
     } else {
-      target = new Date(now.getTime() + DEFAULT_FALLBACK_HOURS * 60 * 60 * 1000);
-      source = 'fallback';
-      reason = 'fallback: usage limit reached';
+      const monthEnd = agent === 'vibe' || agent === 'mistral';
+      target = monthEnd ? endOfCurrentUtcMonth(now) : new Date(now.getTime() + DEFAULT_FALLBACK_HOURS * 60 * 60 * 1000);
+      source = monthEnd ? 'month-end' : 'fallback';
+      reason = monthEnd ? `month-end: ${match.pattern.source}` : 'fallback: usage limit reached';
     }
   } else if (signal !== null && signal !== undefined) {
     // Agent was killed by a signal (e.g. SIGINT/Ctrl-C) but no limit-hit
@@ -274,6 +279,7 @@ export {
   parseResetTime,
   formatBlockUntil,
   ceilToNextHour,
+  endOfCurrentUtcMonth,
   findLimitHitMatch,
   clipContext,
   parseIsoOffset,

@@ -11,7 +11,7 @@ import { MACHINE_WRITTEN_PATH_INVENTORY } from './fixtures/durable-state-invento
 const repositoryMission: Mission = {
   id: missionId('task-2294'), repositoryId: repositoryId('parallix'), title: 'authoritative',
   labels: missionLabels(['user_value', 'bug']), status: 'active', rawStatus: 'active', closedAt: null, assignee: agentFamily('codex'),
-  checkpoints: [], review: null, netEngineeringLines: 10,
+  checkpoints: [], executionContext: null, review: null, netEngineeringLines: 10,
   externalTaskRef: externalTaskRef('backlog', 'TASK-2294', 'backlog/tasks/task-2294.md'),
 };
 

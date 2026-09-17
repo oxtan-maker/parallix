@@ -3,6 +3,7 @@ import type { CheckpointData } from './checkpoint.js';
 import type { ExternalTaskRef } from './external-task.js';
 import type { RepositoryId } from './repository.js';
 import type { Review } from './review.js';
+import type { MissionExecutionContext } from './mission-execution-context.js';
 
 export type MissionId = string & { readonly __brand: 'MissionId' };
 export type MissionSlug = MissionId;
@@ -86,6 +87,8 @@ export interface MissionData {
   readonly labels: readonly MissionLabel[];
   readonly assignee: AgentFamily | null;
   readonly checkpoints: readonly CheckpointData[];
+  /** Bounded launch/refinement facts; absent only for legacy Missions not yet migrated. */
+  readonly executionContext?: MissionExecutionContext | null;
   readonly review: Review | null;
   /** Captured at handoff; null until the change-size measurement exists. */
   readonly netEngineeringLines: number | null;
@@ -156,6 +159,7 @@ export function intakeMission(intake: MissionIntake): OpenMission {
     labels: intake.labels === undefined ? [] : [...new Set(intake.labels)],
     assignee: intake.assignee ?? null,
     checkpoints: [],
+    executionContext: null,
     review: null,
     netEngineeringLines: null,
     status: 'backlog',

@@ -25,6 +25,7 @@ import type {
 import { MissionIntakeService } from '../src/application/mission-intake-service.js';
 import { MissionLifecycleService } from '../src/application/mission-lifecycle-service.js';
 import { MissionCheckpointService } from '../src/application/mission-checkpoint-service.js';
+import { MissionExecutionContextService } from '../src/application/mission-execution-context-service.js';
 import { MissionHandoffService } from '../src/application/mission-handoff-service.js';
 import { agentFamily } from '../src/domain/agents.js';
 import type { LaneTransitionEvent } from '../src/domain/board-event.js';
@@ -43,6 +44,8 @@ import {
   NelRuleViolation,
 } from '../src/domain/net-engineering-lines.js';
 import { repositoryId } from '../src/domain/repository.js';
+import type { MissionExecutionContext } from '../src/domain/mission-execution-context.js';
+import { missionExecutionContext } from '../src/domain/mission-execution-context.js';
 
 const MISSION = missionId('task-2322-05');
 const REPOSITORY = repositoryId('parallix');
@@ -129,6 +132,18 @@ const ALL_CAPABILITIES = new Set([
   'checkpoint:record',
   'handoff:record',
 ] as const);
+const CONTEXT_CAPABILITIES = new Set(['mission:context'] as const);
+
+function executionContext(overrides: Partial<MissionExecutionContext> = {}): MissionExecutionContext {
+  return {
+    goal: 'Persist execution context', why: 'Restart-safe mission launch needs it.',
+    scope: 'Mission aggregate only.', constraints: ['No document blob'],
+    predictedNelBucket: 'medium', confidence: 'high',
+    selectionNote: 'activate as-is: bounded state', mainDrivers: ['SQLite', 'restart'],
+    declaredGates: ['./scripts/verify-local.sh all'], dependencies: [{ reference: 'TASK-2521.01', outcome: 'available' }],
+    ...overrides,
+  };
+}
 
 // ---------------------------------------------------------------------------
 // SC1 — intake
@@ -455,6 +470,47 @@ test('SC3: the checkpoint request carries no persistence path or SQL input', () 
   for (const forbidden of ['node:fs', 'node:path', 'missionDir', 'filePath', 'SELECT ', 'INSERT ']) {
     assert.ok(!source.includes(forbidden), `checkpoint use case must not reference ${forbidden}`);
   }
+});
+
+// ---------------------------------------------------------------------------
+// Execution context
+// ---------------------------------------------------------------------------
+
+test('execution context writes then reads the same bounded facts through the application boundary', async () => {
+  const store = new FakeMissionStore(activeMission(), 1);
+  const service = new MissionExecutionContextService(store);
+  const context = executionContext();
+  const written = await service.write({ operationId: 'context-write', missionId: MISSION, capabilities: CONTEXT_CAPABILITIES, context });
+  assert.equal(written.status, 'completed');
+  assert.deepEqual(written.value!.context, context);
+  const read = await service.read({ operationId: 'context-read', missionId: MISSION, capabilities: CONTEXT_CAPABILITIES });
+  assert.equal(read.status, 'completed');
+  assert.deepEqual(read.value!.context, context);
+  assert.equal(read.value!.version, missionVersion(2));
+});
+
+test('execution context rejects missing capability, invalid facts, stale writes, and absent context', async () => {
+  const store = new FakeMissionStore(activeMission(), 2);
+  const service = new MissionExecutionContextService(store);
+  const missing = await service.write({ operationId: 'x', missionId: MISSION, capabilities: new Set(), context: executionContext() });
+  assert.equal(missing.error!.kind, 'capability');
+  const invalid = await service.write({ operationId: 'x', missionId: MISSION, capabilities: CONTEXT_CAPABILITIES, context: executionContext({ mainDrivers: ['one'] }) });
+  assert.equal(invalid.error!.kind, 'validation');
+  const stale = await service.write({ operationId: 'x', missionId: MISSION, capabilities: CONTEXT_CAPABILITIES, expectedVersion: missionVersion(1), context: executionContext() });
+  assert.equal(stale.error!.kind, 'conflict');
+  const absent = await service.read({ operationId: 'x', missionId: MISSION, capabilities: CONTEXT_CAPABILITIES });
+  assert.equal(absent.error!.kind, 'unavailable');
+});
+
+test('execution context bounds the dependency list (ADR 0053 bounded state)', () => {
+  // The other persisted item arrays already cap at 16; dependencies map without
+  // a limit, so a caller could otherwise store an unbounded predecessor list.
+  const bounded = executionContext({ dependencies: Array.from({ length: 256 }, () => ({ reference: 'TASK-1', outcome: null })) });
+  assert.equal(bounded.dependencies.length, 256);
+  assert.throws(
+    () => missionExecutionContext(executionContext({ dependencies: Array.from({ length: 257 }, () => ({ reference: 'TASK-1', outcome: null })) })),
+    /dependencies must contain at most 256 entries/,
+  );
 });
 
 // ---------------------------------------------------------------------------

@@ -1,0 +1,2 @@
+rule	component	line	severity	rule_description	disposition
+typescript:S3516	src/adapters/cli/commands/draft-setup.ts	259	CRITICAL	Function should not always return the same value (two early `return true` branches)	bounded follow-up slice: extract the two early-return guards into a helper that returns a discriminated result; cover both branches with a focused test

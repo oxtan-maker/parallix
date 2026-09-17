@@ -2280,7 +2280,11 @@ test('startAgent omits the model flag when resolveAgentModel returns null', asyn
   assert.ok(!result.invocation.args.includes('-m'));
 });
 
-test('non-limit launch failure with transient error retries and persists a block for non-custom agents', async () => {
+// task-2536: a transient non-limit launch failure (generic exit-1, no
+// quota/429/resource_exhausted signal) is no longer persisted as a family
+// block — only a positive availability/quota classification is. This reroutes
+// through the family and writes no blocklist entry.
+test('non-limit launch failure with transient error retries without persisting a block', async () => {
   const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-non-limit-'));
   try {
     let blockCalls = [];
@@ -2307,8 +2311,9 @@ test('non-limit launch failure with transient error retries and persists a block
 
     assert.ok(error instanceof Error);
     assert.ok(error.message.includes('All eligible agents exhausted'));
-    assert.equal(blockCalls.length, 1, `transient non-limit failures should persist one block for mistral; got ${JSON.stringify(blockCalls)}`);
-    assert.equal(blockCalls[0].agent, 'vibe');
+    // task-2536: a generic transient exit-1 without a positive availability/
+    // quota classification is not persisted as a family block.
+    assert.deepEqual(blockCalls, [], `transient non-limit failures must not persist a family block; got ${JSON.stringify(blockCalls)}`);
   } finally {
     fs.rmSync(tmpRoot, { recursive: true, force: true });
   }
@@ -2345,7 +2350,10 @@ test('invalid-model launch failure retries without persisting a blocklist entry'
   }
 });
 
-test('custom is excluded from non-limit block logic', async () => {
+// task-2536: transient non-limit failures (generic exit-1, no quota signal)
+// are not persisted as a family block for any agent, so custom (and every
+// other family) is excluded from transient block logic.
+test('transient non-limit failures do not blocklist any family', async () => {
   const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-custom-excluded-'));
   try {
     let blockCalls = [];
@@ -2372,8 +2380,9 @@ test('custom is excluded from non-limit block logic', async () => {
 
     assert.ok(error instanceof Error);
     assert.ok(error.message.includes('All eligible agents exhausted'));
-    assert.equal(blockCalls.length, 1, `only non-custom agents should be blocklisted on transient failures; got ${JSON.stringify(blockCalls)}`);
-    assert.equal(blockCalls[0].agent, 'vibe', 'mistral should be blocked, not custom');
+    // task-2536: a generic transient exit-1 without a positive availability/
+    // quota classification is not persisted as a family block for anyone.
+    assert.deepEqual(blockCalls, [], `transient non-limit failures must not persist a family block; got ${JSON.stringify(blockCalls)}`);
   } finally {
     fs.rmSync(tmpRoot, { recursive: true, force: true });
   }
@@ -2449,8 +2458,13 @@ test('non-auth launch failure does not emit a credential-refresh diagnostic', as
   } finally { fs.rmSync(worktree, { recursive: true, force: true }); }
 });
 
+// task-2536: an expired credential is an auth/config failure, not a positive
+// provider availability/quota classification, so it is diagnostic-only and is
+// not persisted as a family block (routes through detectLimitHit, which returns
+// no quota hit). This test is integration-only: it exercises the module-level
+// shouldPersistLaunchFailureBlock, which is excluded from the unit tier.
 test('expired credentials are diagnostic-only while API-key failures remain non-blocking', () => {
-  assert.equal(shouldPersistLaunchFailureBlock('claude', { stderr: 'OAuth access token has expired' }), true);
+  assert.equal(shouldPersistLaunchFailureBlock('claude', { stderr: 'OAuth access token has expired' }), false);
   assert.equal(shouldPersistLaunchFailureBlock('claude', { stderr: 'API key is invalid' }), false);
 });
 

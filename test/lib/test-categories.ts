@@ -56,6 +56,7 @@ export const INTEGRATION_CI_TESTS: readonly string[] = [
   'forgejo.test.ts',
   'handoff.test.ts',
   'install.test.ts',
+  'integrate-conflict.test.ts',
   'integrate-task-1410-stash-pop-corruption.test.ts',
   'integrate-workflow-gate.test.ts',
   'integrate.test.ts',
@@ -66,6 +67,8 @@ export const INTEGRATION_CI_TESTS: readonly string[] = [
   'noise-reduction.test.ts',
   'opencode-export.test.ts',
   'package-persistent-data.test.ts',
+  'product-config-cp.test.ts',
+  'product-config-validation.test.ts',
   'product-config.test.ts',
   'px-runner.test.ts',
   'px-runtime-smoke.test.ts',
@@ -205,8 +208,25 @@ export const INTEGRATION_CI_TESTS: readonly string[] = [
   // a real temporary Git repository with a retained mission worktree, so it
   // crosses the git boundary and runs in the integration layer.
   'task-2517-landed-squash-base-branch-detection.test.ts',
+  // TASK-2532: seeds temporary Git repositories to exercise the base-worktree
+  // repair (marker-stash sweep + dead-rebase abort), so it crosses the git
+  // boundary and runs only in the integration layer.
+  'task-2532-stale-integration-state-repro.test.ts',
   // TASK-2527: verifies shared-token discovery using temporary Git worktrees.
   'task-2527-local-sonar.test.ts',
+  // TASK-2533: stages a special-character (backslash) payload file in a
+  // throwaway Git repo and drives `git commit --only` pathspecs, so it crosses
+  // the git boundary and runs only in the integration layer.
+  'task-2533-squash-payload-pathspec-quotes.test.ts',
+  // TASK-2534: drives the real squash landing against a throwaway Git repo to
+  // prove stale backlog/tasks copies never enter the landed payload, so it
+  // crosses the git boundary and runs only in the integration layer.
+  'task-2534-stale-backlog-copy-landing-repro.test.ts',
+  // TASK-2537: drives the real squash landing against throwaway Git repos to
+  // prove closeout pathspecs stay valid when the base branch never tracked the
+  // task file, so it crosses the git boundary and runs only in the integration
+  // layer.
+  'task-2537-squash-closeout-unstaged-task-path.test.ts',
   'test-hygiene.test.ts',
   'tui-command-flow.test.ts',
   'tui-pty-smoke.test.ts',

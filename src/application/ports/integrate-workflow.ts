@@ -65,6 +65,7 @@ export interface IntegrateBacklogPort {
   resolveTaskFile(_slug: string, _rootDir: string): IntegrateTaskResolution;
   setTaskStatus(_taskFile: string, _status: string): boolean;
   completeTask(_slug: string, _rootDir: string): unknown;
+  checkBacklogIntegrity(_rootDir: string): readonly { file: string, type: string, taskId?: string, canonicalFile?: string }[];
   getTaskAssignee(_taskFile: string): string | null;
   getTaskClassification(_taskFile: string): string | null;
   classificationFromLabels(_labels: readonly string[]): string | null;

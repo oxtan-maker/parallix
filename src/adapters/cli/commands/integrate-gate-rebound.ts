@@ -19,6 +19,10 @@
 //     is reported `fixed`.
 //  4. `stranded`      — the failure could not be classified or no implementer
 //     could be named, which is the pre-TASK-2492 abort behaviour.
+//  5. `revision-changed` — the repair worked, but it changed the mission diff
+//     the reviewer approved. The standing approval is retracted on the pull
+//     request and the integration attempt stops, so the reviewer decides on
+//     the revision that actually lands (TASK-2528).
 //
 // The dependency direction matches `integrate-gates.ts`: `integrate.ts` imports
 // from here, never the other way round.
@@ -27,6 +31,7 @@ import { rebound, type GateFailureReason, type ReboundContext } from '../../../a
 import { runPhaseGates, type GateRunOutcome, type RepositoryGate } from '../../config/repository-gates.js';
 import { captureFinalIntegrationTree } from './integrate-gates.js';
 import { git } from '../../git/git.js';
+import { DEFAULT_FORGEJO_USER, postReview, readToken } from '../../forgejo/forgejo.js';
 import { missionId } from '../../../domain/mission.js';
 
 /**
@@ -54,6 +59,7 @@ const REBOUND_ATTEMPTS_PER_INVOCATION = 1;
 
 export type IntegrationGateRoute =
   | { route: 'fixed'; rebounds: number }
+  | { route: 'revision-changed'; rebounds: number; approvedRevision: string; repairedRevision: string; invalidation: ApprovalInvalidation }
   | { route: 'exhausted'; rebounds: number; diagnostic: string }
   | { route: 'mainline'; detail: string; baseCommit: string | null }
   | { route: 'limit-reached'; rebounds: number }
@@ -238,6 +244,80 @@ export async function probeBaseBranchReproduction(opts: {
   };
 }
 
+// ── Stale-approval retraction (TASK-2528) ────────────────────────────────────
+
+/** The Forgejo logins whose standing approval a changed revision invalidates. */
+export function standingApprovalHolders(approval: any, reviewerUser: string | null | undefined): string[] {
+  const holders: string[] = [];
+  if (approval?.ok !== true) { return holders; }
+  if (approval.defaultUserApproved === true) { holders.push(DEFAULT_FORGEJO_USER); }
+  if (approval.reviewerApproved === true && reviewerUser && !holders.includes(reviewerUser)) { holders.push(reviewerUser); }
+  return holders;
+}
+
+export interface ApprovalInvalidation {
+  /** False when at least one standing approval could not be retracted. */
+  ok: boolean;
+  /** Logins whose approval was retracted with a REQUEST_CHANGES review. */
+  retracted: string[];
+  errors: string[];
+}
+
+/**
+ * Retract the standing approval on the mission pull request by posting a
+ * `request-changes` review as each login that holds one.
+ *
+ * Retraction is per-reviewer because approval is: `getLatestReviewDecision`
+ * keeps a login's approval standing until that same login posts a later formal
+ * decision. Posting as a third party would leave the original approval intact
+ * and the stale-approval recovery would still fire.
+ *
+ * A login whose token is unavailable is reported as an error rather than
+ * silently skipped — an unretractable approval must fail closed, because the
+ * whole point is that the changed revision cannot land under it.
+ */
+export async function invalidateApprovedPrReview(opts: {
+  slug: string;
+  branch: string;
+  approval: any;
+  reviewerUser?: string | null;
+  summary: string;
+  readTokenFn?: typeof readToken;
+  postReviewFn?: typeof postReview;
+}): Promise<ApprovalInvalidation> {
+  const { readTokenFn = readToken, postReviewFn = postReview } = opts;
+  const holders = standingApprovalHolders(opts.approval, opts.reviewerUser);
+  const retracted: string[] = [];
+  const errors: string[] = [];
+  for (const holder of holders) {
+    const token = readTokenFn(holder);
+    if (!token) {
+      errors.push(`no Forgejo token for ${holder}; the standing approval on ${opts.branch} could not be retracted`);
+      continue;
+    }
+    const posted = postReviewFn(opts.branch, token, 'request-changes', opts.summary, { forgejoUser: holder });
+    if (posted?.ok) { retracted.push(holder); }
+    else { errors.push(`request-changes as ${holder} on ${opts.branch} failed: ${posted?.error || posted?.raw || 'unknown error'}`); }
+  }
+  return { ok: errors.length === 0, retracted, errors };
+}
+
+/**
+ * The review body posted when a gate repair changed the approved diff. It is a
+ * reviewer findings document so the reviewer reads what changed under them,
+ * and it names both revisions so the claim is checkable.
+ */
+export function staleApprovalSummary(slug: string, approvedRevision: string, repairedRevision: string, gateKey: string): string {
+  return [
+    `## F1 (blocking): the approved revision is not the revision that would land`,
+    '',
+    `Integration gate \`${gateKey}\` failed for ${slug} and the implementer repaired the mission in place.`,
+    `The repair changed the mission tree from \`${approvedRevision}\` (the revision this approval was given to) to \`${repairedRevision}\`.`,
+    '',
+    'This approval is retracted so the repaired revision is reviewed before it lands.',
+  ].join('\n');
+}
+
 // ── Route ────────────────────────────────────────────────────────────────────
 
 export interface IntegrationGateRouteOptions {
@@ -254,6 +334,12 @@ export interface IntegrationGateRouteOptions {
   gates: RepositoryGate[];
   implementer: string;
   repositoryId: string;
+  /** Mission pull-request branch, for retracting a stale approval (TASK-2528). */
+  branch?: string | null;
+  /** Provider approval as read at context-build time (TASK-2528). */
+  approval?: any;
+  /** Forgejo login of the configured reviewer whose approval may stand. */
+  reviewerUser?: string | null;
   realAgent?: string | null;
   realAgentModel?: string | null;
   startAgentFn: ReboundContext['startAgent'];
@@ -267,6 +353,7 @@ export interface IntegrationGateRouteOptions {
   runPhaseGatesFn?: typeof runPhaseGates;
   captureFinalTreeFn?: typeof captureFinalIntegrationTree;
   reboundFn?: typeof rebound;
+  invalidateApprovalFn?: typeof invalidateApprovedPrReview;
   /** Receive `fmt.status(...)` lines. */
   log?: (_msg: string) => void;
   error?: (_msg: string) => void;
@@ -292,6 +379,7 @@ export async function routeIntegrationGateFailure(opts: IntegrationGateRouteOpti
     runPhaseGatesFn = runPhaseGates,
     captureFinalTreeFn = captureFinalIntegrationTree,
     reboundFn = rebound,
+    invalidateApprovalFn = invalidateApprovedPrReview,
     log = fmt.log.plain,
     error = fmt.log.plainError,
     gateRunLog = fmt.log.plain,
@@ -349,6 +437,14 @@ export async function routeIntegrationGateFailure(opts: IntegrationGateRouteOpti
   //    still have paid for the attempt, or the bound is not a bound.
   await recordReboundFn(slug, { repositoryId: opts.repositoryId, gate: failedGate.key, implementer: opts.implementer });
 
+  // 4. The revision the reviewer's approval was given to, observed before the
+  //    implementer touches the worktree. Comparing it with the revision the
+  //    repair leaves behind is the only truthful way to tell a repaired diff
+  //    from an unchanged retry (TASK-2528); an unreadable tree is treated as
+  //    changed, because "unchanged" is the claim that must be proven.
+  const approvedTree = captureFinalTreeFn(missionWorktree);
+  const approvedRevision = approvedTree.ok ? (approvedTree.tree ?? approvedTree.commit ?? null) : null;
+
   const outcome = await reboundFn(
     integrationGateFailureReason(failedGate, { gateError: opts.gateError, verificationCommand: opts.verificationCommand }),
     {
@@ -393,7 +489,39 @@ export async function routeIntegrationGateFailure(opts: IntegrationGateRouteOpti
   const rebounds = spent + 1;
   if (outcome.outcome === 'fixed') {
     log(fmt.status('PASS', `Integration gate ${failedGate.key} repaired by ${outcome.implementer} and re-ran green (${rebounds}/${INTEGRATION_GATE_REBOUND_LIMIT} integration-gate rebounds spent).`));
-    return { route: 'fixed', rebounds };
+
+    // A green re-run is not enough to merge. If the repair changed the mission
+    // diff, the approval on the pull request was given to a revision that no
+    // longer exists, and merging here would land code in its final form without
+    // ever being reviewed (TASK-1281's trust gap, reached through TASK-2492's
+    // recovery path). Retract the approval and stop; the mission is already
+    // back with its implementer, so it re-enters review the ordinary way.
+    const repairedTree = captureFinalTreeFn(missionWorktree);
+    const repairedRevision = repairedTree.ok ? (repairedTree.tree ?? repairedTree.commit ?? null) : null;
+    const unchanged = approvedRevision !== null && repairedRevision !== null && approvedRevision === repairedRevision;
+    if (unchanged) {
+      log(fmt.status('INFO', `The repair left the mission tree at ${approvedRevision}, the revision the review approved; the existing approval still covers what would land.`));
+      return { route: 'fixed', rebounds };
+    }
+
+    const approvedLabel = approvedRevision ?? 'unknown';
+    const repairedLabel = repairedRevision ?? 'unknown';
+    const invalidation = await invalidateApprovalFn({
+      slug,
+      branch: opts.branch || `mission/${slug}`,
+      approval: opts.approval,
+      reviewerUser: opts.reviewerUser ?? null,
+      summary: staleApprovalSummary(slug, approvedLabel, repairedLabel, failedGate.key),
+    });
+    error(fmt.status('FAIL', `The integration-gate repair changed ${slug} from the approved revision ${approvedLabel} to ${repairedLabel}. The approval covers a revision that is no longer what would land, so the merge is not allowed on it.`));
+    for (const holder of invalidation.retracted) {
+      error(fmt.status('INFO', `Retracted ${holder}'s approval on ${opts.branch || `mission/${slug}`} with a request-changes review.`));
+    }
+    for (const problem of invalidation.errors) {
+      error(fmt.status('FAIL', `Stale approval left standing: ${problem}. Clear it by hand before the next px integrate.`));
+    }
+    error(fmt.status('FAIL', `${slug} must go back through review: run px review ${slug} --start and have the repaired revision ${repairedLabel} re-reviewed before integrating again.`));
+    return { route: 'revision-changed', rebounds, approvedRevision: approvedLabel, repairedRevision: repairedLabel, invalidation };
   }
   error(fmt.status('FAIL', `Integration gate ${failedGate.key} still fails for ${slug} after the bounce (${rebounds}/${INTEGRATION_GATE_REBOUND_LIMIT} integration-gate rebounds spent).`));
   return { route: 'exhausted', rebounds, diagnostic: outcome.diagnostic };

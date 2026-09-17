@@ -248,9 +248,19 @@ function sessionAgentFamily(agent: string): AgentFamily {
 }
 
 // Deterministic config/setup errors (invalid model IDs, auth failures,
-// unsupported CLI flags, home/bootstrap failures) must not poison the
-// persistent blocklist — only transient failures (runtime crashes, network
-// errors) deserve a block. Custom agents are never blocked.
+// unsupported CLI flags, home/bootstrap failures, missing-session resume) are
+// per-invocation and repeat on every retry, so they must never poison the
+// persistent blocklist. Custom agents are never blocked.
+//
+// Beyond those deterministic errors, a family-wide block is persisted ONLY when
+// the failure is positively classified as a genuine provider-wide availability
+// or quota condition. The decision routes through the same `detectLimitHit`
+// classifier the limit-hit branch uses (task-2536) so both block-persistence
+// sites agree on one bar: an ambiguous non-zero exit with no quota/429/
+// resource_exhausted signal (e.g. a bare `exit 1` / "generic crash") stays local
+// to the failing launch instead of becoming a three-hour family block while the
+// family is live. A process-kill signal is still caught by detectLimitHit's
+// short-block path and preserved.
 function shouldPersistLaunchFailureBlock(agent: string, result: LaunchResultLike | null | undefined) {
   if (!result || agent === 'custom') {return false;}
   const combined = [
@@ -259,8 +269,19 @@ function shouldPersistLaunchFailureBlock(agent: string, result: LaunchResultLike
     result.error?.message || '',
     result.error?.code || ''
   ].join('\n');
-  if (!combined.trim()) {return true;}
-  return !NON_BLOCKING_LAUNCH_ERROR_PATTERNS.some(pattern => pattern.test(combined));
+  if (NON_BLOCKING_LAUNCH_ERROR_PATTERNS.some(pattern => pattern.test(combined))) {return false;}
+  const hit = detectLimitHit({
+    agent,
+    stdout: result.stdout,
+    stderr: result.stderr,
+    // detectLimitHit's `status` is number|undefined; normalise the null that a
+    // spawned-but-closed child emits (spawn-tee close event) to undefined so the
+    // classifier's `typeof status === 'number'` gate behaves as intended.
+    status: result.status ?? undefined,
+    signal: result.signal,
+    error: result.error ?? null
+  });
+  return !!hit && !hit.reroute;
 }
 
 function needsCredentialRefresh(result: LaunchResultLike): boolean {
@@ -734,9 +755,19 @@ async function startAgent(step: string, opts: StartAgentOptions = { prompt: '' }
       });
       tried.add(chosen || '');
       launched.add(chosen || '');
-      // Block retry candidates only when the failure looks transient. Deterministic
-      // setup/config errors (invalid model id, auth failure, read-only HOME, etc.)
-      // should fall through to the next family without poisoning agents.local.json.
+      // Block retry candidates only on a positive availability/quota
+      // classification (task-2536). Deterministic setup/config errors and every
+      // ambiguous non-zero exit fall through to the next family without
+      // poisoning agents.local.json. This is the second of two block-persistence
+      // sites; both now agree on one bar via shouldPersistLaunchFailureBlock.
+      //
+      // NOTE (task-2536 round-1 F2): under default wiring this branch is
+      // unreachable — startAgent's site-1 limit-hit check (L653) uses the same
+      // detectLimitHit classifier this helper calls, so a positive availability/
+      // quota classification is caught and persisted at site 1 first, and this
+      // helper only runs after a falsy site-1 result. It is retained solely as
+      // defence-in-depth for callers that inject a non-default detectLimitHitFn;
+      // do not read it as a live production block path.
        if (shouldPersistLaunchFailureBlock(chosen || '', result)) {
          let blockReason = 'transient crash';
          if (result?.signal) { blockReason = `signal ${result.signal}`; }
@@ -754,7 +785,7 @@ async function startAgent(step: string, opts: StartAgentOptions = { prompt: '' }
           log(fmt.status('WARN', `Could not persist blocklist entry for ${fmt.agent(chosen || '')}: ${(err as any).message}`));
           }
        } else {
-        log(fmt.status('INFO', `Skipping blocklist write for ${fmt.agent(chosen || '')}; launch failure looks like a deterministic config/setup error.`));
+        log(fmt.status('INFO', `Skipping blocklist write for ${fmt.agent(chosen || '')}; failure not positively classified as a provider availability/quota block.`));
       }
       chosen = undefined;
       continue;

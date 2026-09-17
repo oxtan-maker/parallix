@@ -434,7 +434,7 @@ When a pattern matches, the parser also tries to extract a reset timestamp from 
 4. Relative (`in 3 hours`)
 5. `Retry-After: <n>` seconds/minutes
 
-If extraction fails, the harness falls back to a 1-hour block. The result is rounded **up** to the next full hour and written as `YYYY-MM-DD HH` (the format `agents.local.json` already understands).
+If extraction fails, Vibe/Mistral limit hits are blocked until the first instant of the next UTC month; other families use a 1-hour block. The result is rounded **up** to the next full hour and written as `YYYY-MM-DD HH` (the format `agents.local.json` already understands).
 
 ### Persistence
 

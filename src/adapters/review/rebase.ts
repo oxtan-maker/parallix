@@ -221,7 +221,6 @@ export async function rebaseBeforeReviewRound(slug: string, {
   let pushFailureOutput: string | null = null;
   let pushAttempted = false;
   let conflictClassification: MissionConflictClassification | null = null;
-  let conflictAgentLaunched = false;
 
   const port = createPort({ ...rebaseWorkflowOptions, gitFn });
 
@@ -258,11 +257,6 @@ export async function rebaseBeforeReviewRound(slug: string, {
     conflictClassification = innerResolveConflicts(conflictSlug, area, options);
     return conflictClassification;
   };
-  const innerStartAgent = port.startAgent;
-  port.startAgent = (step, options) => {
-    if (step === 'conflict-resolution') { conflictAgentLaunched = true; }
-    return innerStartAgent(step, options);
-  };
 
   log(`Rebasing ${fmt.branch(`mission/${slug}`)} onto the latest primary branch before reviewer launch...`);
 
@@ -281,7 +275,7 @@ export async function rebaseBeforeReviewRound(slug: string, {
   }
 
   const sharedFiles = finalConflicts?.sharedFiles || [];
-  const sharedFileConflicts = sharedFiles.length > 0 || conflictAgentLaunched;
+  const sharedFileConflicts = sharedFiles.length > 0;
 
   if (finalHook) {
     const hook = finalHook;

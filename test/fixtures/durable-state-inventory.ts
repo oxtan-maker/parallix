@@ -251,6 +251,24 @@ export const ADR0053_PERSISTENCE_INVENTORY: readonly ADR0053BoundaryEntry[] = [
     classification: 'database-owned-domain-state',
     cutoverTask: null,
   },
+  {
+    id: 'checkpoint-write-gate-result',
+    concept: 'CheckpointData',
+    pathType: 'default',
+    fileLocation: 'src/adapters/verification/verification.ts',
+    operation: 'write',
+    classification: 'generated-artifact',
+    cutoverTask: null,
+  },
+  {
+    id: 'checkpoint-read-gate-result-prompt',
+    concept: 'CheckpointData',
+    pathType: 'default',
+    fileLocation: 'src/adapters/review/review-prompts.ts',
+    operation: 'read',
+    classification: 'generated-artifact',
+    cutoverTask: null,
+  },
   // -----------------------------------------------------------------------
   // Review — nested Mission data (SQLite after TASK-2322.07 cutover)
   // -----------------------------------------------------------------------
@@ -889,6 +907,232 @@ export const ADR0053_PERSISTENCE_INVENTORY: readonly ADR0053BoundaryEntry[] = [
     operation: 'write',
     classification: 'database-owned-domain-state',
     cutoverTask: 'task-2468',
+  },
+] as const;
+
+// ---------------------------------------------------------------------------
+// ADR 0053 cutover guardrails (task-2521.01)
+//
+// Two allowlists back the executable anti-regression guards in
+// test/retired-workflow-path-write-guard.test.ts (guard 1) and
+// test/mission-persistence-authority-guard.test.ts (guard 2). Each entry names
+// a call site that legitimately touches a retired workflow path so the guards
+// consult this inventory instead of a hand-maintained pattern list. Any new
+// normal-runtime write to a retired workflow path, or any new application/
+// interface code that resolves or persists through missions/** or repo Backlog
+// task files as Mission persistence, must be registered here or the guard fails.
+// ---------------------------------------------------------------------------
+
+/** Classification for a legitimate writer of a retired workflow path. */
+export type RetiredWorkflowPathWriterClass =
+  | 'external-task-provider'
+  | 'mission-contract-document'
+  | 'explicit-one-way-export'
+  | 'product-configuration-file'
+  | 'mission-document-evidence'
+  | 'closeout-representation'
+  | 'operator-local-observation';
+
+/** One legitimate production writer of a retired workflow-metadata path. */
+export interface RetiredWorkflowPathWriterEntry {
+  /** Stable identifier for this writer. */
+  readonly id: string;
+  /** File location of the writer (relative to repo root). */
+  readonly fileLocation: string;
+  /** Retired workflow-path pattern(s) this writer targets. */
+  readonly pathPatterns: readonly string[];
+  /** Why this write is permitted under the landed ADRs. */
+  readonly classification: RetiredWorkflowPathWriterClass;
+  /** The ADR authority that permits this write. */
+  readonly authority: string;
+}
+
+/**
+ * Every production writer that still targets a retired workflow path after the
+ * ADR 0053 cutover. ADR 0053 permits operator-invoked legacy input, one-way
+ * generated exports, rebuildable projections, and mission-contract scaffolding;
+ * it forbids a normal-runtime writer of Mission lifecycle state to any of these
+ * paths. Each entry below is one of those permitted categories, so guard 1
+ * (retired-workflow-path-write-guard) never false-positives on them.
+ */
+export const RETIRED_WORKFLOW_PATH_WRITERS: readonly RetiredWorkflowPathWriterEntry[] = [
+  {
+    id: 'retired-writer-backlog-transitions',
+    fileLocation: 'src/adapters/backlog/task-transitions.ts',
+    pathPatterns: ['taskFilePath'],
+    classification: 'external-task-provider',
+    authority: 'ADR 0037 — Backlog material is an external task source; task-file writes are catalog maintenance, not Mission persistence.',
+  },
+  {
+    id: 'retired-writer-backlog-task-file-io',
+    fileLocation: 'src/adapters/backlog/task-file-io.ts',
+    pathPatterns: ['backlog/(?:tasks|completed|archive)/'],
+    classification: 'external-task-provider',
+    authority: 'ADR 0037 — removal of duplicate Backlog catalog entries maintains the external task source, not Mission persistence.',
+  },
+  {
+    id: 'retired-writer-backlog-task-metadata',
+    fileLocation: 'src/adapters/backlog/task-metadata.ts',
+    pathPatterns: ['taskFilePath'],
+    classification: 'external-task-provider',
+    authority: 'ADR 0037 — task assignment and labels are Backlog catalog metadata, not Mission persistence.',
+  },
+  {
+    id: 'retired-writer-draft-setup-mission',
+    fileLocation: 'src/adapters/cli/commands/draft-setup.ts',
+    // Scaffolds the operator-named MISSION.md contract: creates the mission
+    // directory (mkdirSync(missionDir)) then writes the contract. Both are
+    // mission-contract scaffolding, not operational persistence.
+    pathPatterns: ['MISSION.md', 'missionDir'],
+    classification: 'mission-contract-document',
+    authority: 'ADR 0053 — px draft scaffolds the operator-named MISSION.md contract; a user-facing artifact, not operational persistence.',
+  },
+  {
+    id: 'retired-writer-integrate-conflict',
+    fileLocation: 'src/adapters/cli/commands/integrate-conflict.ts',
+    pathPatterns: ['taskFilePath'],
+    classification: 'external-task-provider',
+    authority: 'ADR 0037 — integrate rewrites the external Backlog catalog under backlog/{tasks,completed}; intake/closeout, not Mission state.',
+  },
+  {
+    id: 'retired-writer-review-events',
+    fileLocation: 'src/adapters/review/review-events.ts',
+    pathPatterns: ['missions/<slug>/review-events/'],
+    classification: 'explicit-one-way-export',
+    authority: 'ADR 0053 transaction rule 4 — rendered review-event Markdown is a rebuildable one-way export of stored rows.',
+  },
+  {
+    id: 'retired-writer-setup-review-config',
+    fileLocation: 'src/adapters/review/setup-review-config.ts',
+    pathPatterns: ['workflow.config.json'],
+    classification: 'product-configuration-file',
+    authority: 'ADR 0051/configuration — workflow.config.json is operator configuration; the backlog/ layout string is documentation, not persistence.',
+  },
+  {
+    id: 'retired-writer-redgreen',
+    fileLocation: 'src/adapters/verification/redgreen.ts',
+    pathPatterns: ['MISSION.md'],
+    classification: 'mission-document-evidence',
+    authority: 'ADR 0053 — red-green reads MISSION.md as reproduction-test evidence, not as Mission state authority.',
+  },
+  {
+    id: 'retired-writer-handoff-checkpoint',
+    fileLocation: 'src/application/handoff-command-use-case.ts',
+    pathPatterns: ['CP-1.md', 'MISSION.md', 'backlog/tasks/'],
+    classification: 'closeout-representation',
+    authority: 'ADR 0053 transaction rule 4 + ADR 0037 — auto checkpoint and the backlog task fallback summary are closeout representation and external-task closeout.',
+  },
+  {
+    id: 'retired-writer-handoff-command-adapter',
+    fileLocation: 'src/adapters/cli/commands/handoff.ts',
+    pathPatterns: ['findMissionDir', 'writeText\\('],
+    classification: 'closeout-representation',
+    authority: 'ADR 0053 transaction rule 4 — this adapter binds the handoff closeout writer; it does not own Mission state.',
+  },
+  {
+    id: 'retired-writer-verification-gate-result',
+    fileLocation: 'src/adapters/verification/verification.ts',
+    pathPatterns: ['GATE_RESULT_RELATIVE_PATH', 'writeJson\\('],
+    classification: 'operator-local-observation',
+    authority: 'ADR 0048 — .workflow/gate-result.json is ignored operator-local verification observation, not committed Mission persistence.',
+  },
+] as const;
+
+/** Classification for a legitimate application/interface mission-document call site. */
+export type MissionDocumentCallSiteClass =
+  | 'port-declaration'
+  | 'external-task-intake'
+  | 'mission-document-evidence'
+  | 'git-topology-observation';
+
+/** One legitimate application/interface call site that resolves mission documents. */
+export interface MissionDocumentCallSiteEntry {
+  /** Stable identifier for this call site. */
+  readonly id: string;
+  /** File location of the call site (relative to repo root). */
+  readonly fileLocation: string;
+  /** What this call site does with the mission document / task file. */
+  readonly purpose: string;
+  /**
+   * Mission-document / Backlog-task path patterns that legitimately appear in
+   * this call site's own source. Guard 2 exempts a flagged line only when it
+   * matches one of this entry's patterns, so a new reference outside them is a
+   * regression. Enumerated from the call site's real lines; broad resolver
+   * helpers (findMissionDir, missionDirForSlug, missionPathForSlug) are included
+   * because they are used for legitimate reads here — a rogue write through one
+   * of them is a guard-1 concern and is caught by guard 1's call-site patterns.
+   */
+  readonly pathPatterns: readonly string[];
+  /** Why this reference is permitted and is not Mission persistence. */
+  readonly classification: MissionDocumentCallSiteClass;
+}
+
+/**
+ * Every application/interface call site that resolves or references missions/**,
+ * MISSION.md, or repo Backlog task files in real (non-comment) code. Each is one
+ * of: a port declaration, an external task intake, a mission-document evidence
+ * read, or a Git-topology observation. None treats these files as Mission
+ * persistence authority (that authority is the operator database, ADR 0053), so
+ * guard 2 (mission-persistence-authority-guard) never false-positives on them.
+ * A new application/interface file that resolves or persists through these paths
+ * as Mission persistence must be registered here or guard 2 fails.
+ */
+export const MISSION_DOCUMENT_CALL_SITES: readonly MissionDocumentCallSiteEntry[] = [
+  {
+    id: 'mission-doc-call-handoff',
+    fileLocation: 'src/application/handoff-command-use-case.ts',
+    purpose: 'verify MISSION.md exists and read Refinement Signals / Gates as the mission contract evidence before handoff',
+    pathPatterns: ['MISSION.md', 'findMissionDir', 'backlog/tasks'],
+    classification: 'mission-document-evidence',
+  },
+  {
+    id: 'mission-doc-call-integrate-preflight',
+    fileLocation: 'src/application/integrate/preflight.ts',
+    purpose: 'report the resolved mission document path during integrate preflight',
+    pathPatterns: ['MISSION.md', 'missionDirForSlug'],
+    classification: 'mission-document-evidence',
+  },
+  {
+    id: 'mission-doc-call-integrate-preflight-checkout',
+    fileLocation: 'src/application/integrate/preflight-checkout.ts',
+    purpose: 'compute Git overlap paths (missions/<slug>, backlog/completed) for worktree checkout',
+    pathPatterns: ['backlog/completed', 'missions/'],
+    classification: 'git-topology-observation',
+  },
+  {
+    id: 'mission-doc-call-integrate-context',
+    fileLocation: 'src/application/integrate/context.ts',
+    purpose: 'locate the mission document for area selection and read Backlog task metadata as external intake',
+    pathPatterns: ['findMissionDir'],
+    classification: 'external-task-intake',
+  },
+  {
+    id: 'mission-doc-call-handoff-port',
+    fileLocation: 'src/application/ports/handoff-workflow.ts',
+    purpose: 'declare the injected mission-directory resolver port',
+    pathPatterns: ['findMissionDir'],
+    classification: 'port-declaration',
+  },
+  {
+    id: 'mission-doc-call-integrate-port',
+    fileLocation: 'src/application/ports/integrate-workflow.ts',
+    purpose: 'declare injected mission path resolver ports',
+    pathPatterns: ['findMissionDir', 'missionDirForSlug'],
+    classification: 'port-declaration',
+  },
+  {
+    id: 'mission-doc-call-rebase-port',
+    fileLocation: 'src/application/ports/rebase-workflow.ts',
+    purpose: 'declare the injected mission-directory resolver port',
+    pathPatterns: ['findMissionDir'],
+    classification: 'port-declaration',
+  },
+  {
+    id: 'mission-doc-call-rebase-workflow',
+    fileLocation: 'src/application/rebase-workflow.ts',
+    purpose: 'locate the mission directory to derive the verification area and Git conflict scope',
+    pathPatterns: ['findMissionDir'],
+    classification: 'git-topology-observation',
   },
 ] as const;
 

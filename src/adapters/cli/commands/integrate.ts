@@ -60,6 +60,7 @@ export function createIntegratePorts(): IntegrateWorkflowPorts {
       resolveTaskFile: (slug, rootDir) => backlog.resolveTaskFile(slug, rootDir),
       setTaskStatus: (taskFile, status) => backlog.setTaskStatus(taskFile, status),
       completeTask: (slug, rootDir) => backlog.completeTask(slug, rootDir),
+      checkBacklogIntegrity: rootDir => backlog.checkBacklogIntegrity(rootDir),
       getTaskAssignee: taskFile => backlog.getTaskAssignee(taskFile) as string | null,
       getTaskClassification: taskFile => backlog.getTaskClassification(taskFile) as string | null,
       classificationFromLabels: labels => backlog.classificationFromLabels(labels as string[]) as string | null,

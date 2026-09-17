@@ -28,6 +28,7 @@ import {
   type StageLaunchWindow,
 } from '../../domain/review.js';
 import { missionVersion, type MissionVersion } from '../../application/domain-ports.js';
+import { missionExecutionContext, type MissionExecutionContext } from '../../domain/mission-execution-context.js';
 
 /** Typed records returned by the relational Mission schema. */
 export interface MissionRecord {
@@ -47,6 +48,8 @@ export interface MissionLabelRecord {
   readonly position: number;
   readonly label: string;
 }
+export interface MissionExecutionContextRecord { readonly mission_id: string; readonly goal: string; readonly why_text: string; readonly scope_text: string; readonly predicted_nel_bucket: string; readonly confidence: string; readonly selection_note: string; }
+export interface MissionExecutionContextItemRecord { readonly mission_id: string; readonly kind: string; readonly position: number; readonly value: string; readonly outcome: string | null; }
 
 export interface MissionCheckpointRecord {
   readonly mission_id: string;
@@ -157,6 +160,8 @@ export interface MissionAggregateRecords {
   readonly mission: MissionRecord;
   readonly externalTaskRef?: MissionExternalTaskRefRecord | null;
   readonly labels: readonly MissionLabelRecord[];
+  readonly executionContext: MissionExecutionContextRecord | null;
+  readonly executionContextItems: readonly MissionExecutionContextItemRecord[];
   readonly checkpoints: readonly MissionCheckpointRecord[];
   readonly goalChecks: readonly MissionGoalCheckRecord[];
   readonly review: MissionReviewRecord | null;
@@ -222,6 +227,18 @@ function checkpointsFrom(records: MissionAggregateRecords): readonly CheckpointD
       goalCheck,
       nextActionText: checkpoint.next_action_text,
     };
+  });
+}
+
+function executionContextFrom(records: MissionAggregateRecords): MissionExecutionContext | null {
+  const context = records.executionContext;
+  if (!context) {return null;}
+  const values = (kind: string) => records.executionContextItems.filter((item) => item.kind === kind).map((item) => item.value);
+  return missionExecutionContext({
+    goal: context.goal, why: context.why_text, scope: context.scope_text, constraints: values('constraint'),
+    predictedNelBucket: context.predicted_nel_bucket as MissionExecutionContext['predictedNelBucket'], confidence: context.confidence as MissionExecutionContext['confidence'],
+    selectionNote: context.selection_note, mainDrivers: values('driver'), declaredGates: values('gate'),
+    dependencies: records.executionContextItems.filter((item) => item.kind === 'dependency').map((item) => ({ reference: item.value, outcome: item.outcome })),
   });
 }
 
@@ -521,6 +538,7 @@ export function hydrateMission(records: MissionAggregateRecords): HydratedMissio
     labels: missionLabels(records.labels.map(({ label }) => label)),
     assignee: row.assignee === null ? null : agentFamily(row.assignee),
     checkpoints: checkpointsFrom(records),
+    executionContext: executionContextFrom(records),
     review: reviewFrom(records),
     netEngineeringLines: row.net_engineering_lines,
     rawStatus: row.raw_status ?? undefined,

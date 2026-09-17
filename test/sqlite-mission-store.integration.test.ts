@@ -155,6 +155,18 @@ function completeMission(overrides: Partial<Mission> = {}): Mission {
       ],
       nextActionText: 'Run the integration suite.',
     }],
+    executionContext: {
+      goal: 'Persist bounded launch context',
+      why: 'Agents must resume without a mission document.',
+      scope: 'Mission aggregate persistence only.',
+      constraints: ['No raw Markdown authority'],
+      predictedNelBucket: 'medium',
+      confidence: 'high',
+      selectionNote: 'activate as-is: bounded aggregate change',
+      mainDrivers: ['SQLite migration', 'restart semantics'],
+      declaredGates: ['./scripts/verify-local.sh all'],
+      dependencies: [{ reference: 'TASK-2521.01', outcome: 'persistence foundation available' }],
+    },
     review: completeReview(),
     netEngineeringLines: 321,
     closedAt: null,
@@ -260,6 +272,33 @@ describe('SQLite Mission aggregate integration', () => {
     } finally {
       await database.close();
     }
+  });
+
+  it('refuses invalid execution context before it can make a Mission unloadable', async () => {
+    const database = await migratedDatabase();
+    try {
+      const store = new SqliteMissionStore(database);
+      await assert.rejects(
+        store.save(completeMission({ executionContext: { ...completeMission().executionContext!, mainDrivers: ['only one'] } }), null),
+        /main drivers must contain 2-4 items/,
+      );
+      assert.deepEqual(await store.load(testMissionId), { kind: 'missing' });
+    } finally { await database.close(); }
+  });
+
+  it('reopens bounded execution context and checkpoint evidence without repository files', async () => {
+    const databasePath = tempDatabasePath();
+    const first = await migratedDatabase(databasePath);
+    const mission = completeMission({ review: null });
+    await new SqliteMissionStore(first).save(mission, null);
+    await first.close();
+    const second = await migratedDatabase(databasePath);
+    try {
+      const loaded = await new SqliteMissionStore(second).load(mission.id);
+      assert.equal(loaded.kind, 'found');
+      assert.deepEqual(loaded.mission.executionContext, mission.executionContext);
+      assert.deepEqual(loaded.mission.checkpoints, mission.checkpoints);
+    } finally { await second.close(); }
   });
 
   it('loads legacy requested-changes rounds that have no persisted findings', async () => {

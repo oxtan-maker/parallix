@@ -89,6 +89,15 @@ export function buildAutoCheckpointContent(slug: string): string {
 }
 
 /**
+ * Result of validating a declared gate command. The success variant carries
+ * optional `error`/`gate` markers (typed `undefined`) so callers can read
+ * `result.error`/`result.gate` across the union without narrowing.
+ */
+type GateValidationResult =
+  | { ok: false; reason: 'validation-failed'; error: string; gate: string }
+  | { ok: true; reason: 'all-gates-valid'; error?: undefined; gate?: undefined };
+
+/**
  * CLI-independent application entry point for the handoff workflow.
  *
  * Every collaborator arrives through the injected port bag; the composition
@@ -242,170 +251,191 @@ export class HandoffCommandUseCase {
     return true;
   }
 
-  /**
-   * Validate declared gate commands for file existence and basic syntax before execution.
-   */
-  validateDeclaredGates(commands: string[], rootDir: string) {
+/**
+ * Result of validating a declared gate command. The success variant carries
+ * optional `error`/`gate` markers (typed `undefined`) so callers can read
+ * `result.error`/`result.gate` across both variants.
+ */
+  validateDeclaredGates(commands: string[], rootDir: string): GateValidationResult {
     const { fileSystem } = this.ports;
     for (const cmd of commands) {
-      // A Markdown code span followed by words is documentation, not an exact
-      // command. Keep the original declaration intact so the operator can fix
-      // the offending MISSION.md line instead of seeing a downstream Bash error.
-      const markdownCommandWithSuffix = /^`[^`\r\n]+`\s+\S/.test(cmd);
-
-      // Ignore quoted arguments while looking for outcome-language suffixes.
-      // This preserves commands such as `echo "all checks pass"`, pipelines,
-      // redirects, and compound commands while rejecting declarations such as
-      // `./scripts/verify-local.sh all passes on the final tree`.
-      let unquoted = '';
-      let proseSingleQuote = false;
-      let proseDoubleQuote = false;
-      for (let ci = 0; ci < cmd.length; ci++) {
-        const ch = cmd[ci];
-        if (ch === '\\' && proseDoubleQuote) {
-          unquoted += '  ';
-          ci++;
-          continue;
-        }
-        if (ch === '\'' && !proseDoubleQuote) {
-          proseSingleQuote = !proseSingleQuote;
-          unquoted += ' ';
-          continue;
-        }
-        if (ch === '"' && !proseSingleQuote) {
-          proseDoubleQuote = !proseDoubleQuote;
-          unquoted += ' ';
-          continue;
-        }
-        unquoted += proseSingleQuote || proseDoubleQuote ? ' ' : ch;
+      // Each guard isolates one failure mode. Splitting the original inline
+      // scan into these helpers keeps per-function cognitive complexity bounded
+      // and makes each branch independently testable. Order, messages, and
+      // return shape are unchanged from the original implementation.
+      if (this.gateCommandHasProse(cmd)) {
+        return this.proseError(cmd);
       }
-      const hasDescriptionSeparator = /\s(?:—|–|-–)\s+\S/.test(unquoted);
-      const hasOutcomeSuffix = /\s(?:passes?|passed|succeeds?|succeeded|completes?|completed)(?:\s+(?:on|in|with|without|after|before|for|the|a|an|successfully|cleanly)\b[^;&|]*)?[.!]?\s*$/i.test(unquoted);
-      const hasParenthesizedDescription = /(?<![&|;])\s+\([^()]*\)\s*$/.test(unquoted);
-      if (markdownCommandWithSuffix || hasDescriptionSeparator || hasOutcomeSuffix || hasParenthesizedDescription) {
-        return {
-          ok: false,
-          reason: 'validation-failed',
-          error: `Gate declaration must contain an exact runnable command only. Replace "${cmd}" with the command and move trailing prose or outcome expectations to Success Criteria or checkpoint documentation.`,
-          gate: cmd
-        };
+      const quoteType = this.gateUnclosedQuoteType(cmd);
+      if (quoteType) {
+        return this.quoteError(cmd, quoteType);
       }
-
-      // Check for unclosed quotes — respect quote context so apostrophes
-      // inside double-quoted strings (and vice-versa) are not flagged.
-      // Only flag genuinely unmatched quotes (e.g. echo 'unclosed).
-      let inSingleQuote = false;
-      let inDoubleQuote = false;
-      for (let ci = 0; ci < cmd.length; ci++) {
-        const ch = cmd[ci];
-        if (ch === '\\' && inDoubleQuote) {
-          ci++; // skip escaped character inside double quotes
-          continue;
-        }
-        if (ch === '\'' && !inDoubleQuote) {
-          inSingleQuote = !inSingleQuote;
-          continue;
-        }
-        if (ch === '"' && !inSingleQuote) {
-          inDoubleQuote = !inDoubleQuote;
-          continue;
-        }
+      const imbalance = this.firstUnbalancedDelimiter(cmd);
+      if (imbalance) {
+        return this.delimiterError(cmd, imbalance);
       }
-      if (inSingleQuote || inDoubleQuote) {
-        const quoteType = inSingleQuote ? 'single' : 'double';
-        return {
-          ok: false,
-          reason: 'validation-failed',
-          error: `Gate command has unclosed ${quoteType} quotes: "${cmd}"`,
-          gate: cmd
-        };
-      }
-
-      // Check for unmatched parentheses
-      const openParens = (cmd.match(/\(/g) || []).length;
-      const closeParens = (cmd.match(/\)/g) || []).length;
-      if (openParens !== closeParens) {
-        return {
-          ok: false,
-          reason: 'validation-failed',
-          error: `Gate command has unmatched parentheses: "${cmd}"`,
-          gate: cmd
-        };
-      }
-
-      // Check for unmatched braces
-      const openBraces = (cmd.match(/\{/g) || []).length;
-      const closeBraces = (cmd.match(/\}/g) || []).length;
-      if (openBraces !== closeBraces) {
-        return {
-          ok: false,
-          reason: 'validation-failed',
-          error: `Gate command has unmatched braces: "${cmd}"`,
-          gate: cmd
-        };
-      }
-
-      // Check for unmatched brackets
-      const openBrackets = (cmd.match(/\[/g) || []).length;
-      const closeBrackets = (cmd.match(/\]/g) || []).length;
-      if (openBrackets !== closeBrackets) {
-        return {
-          ok: false,
-          reason: 'validation-failed',
-          error: `Gate command has unmatched brackets: "${cmd}"`,
-          gate: cmd
-        };
-      }
-
-      // Extract file paths from the command and check their existence.
-      // Split on whitespace first, then classify whole tokens — this avoids
-      // the regex matching mid-token (e.g. turning "lib/agents/" into "/agents/").
-      // Only check tokens that clearly look like file paths:
-      //   - start with ./ or ../  (relative paths)
-      //   - start with /           (absolute paths)
-      //   - contain /              (paths with intermediate segments)
-      // This avoids false positives on bare words, flags, URLs, and glob patterns.
-      const tokens = cmd.split(/\s+/);
-      for (const token of tokens) {
-        // Skip if it looks like a URL
-        if (/^https?:\/\//i.test(token) || token.includes('://')) {
-          continue;
-        }
-        // Skip flags
-        if (token.startsWith('-')) {
-          continue;
-        }
-        // Strip leading/trailing quote characters (', ", `) before checking
-        // so that 'lib/agents/' becomes lib/agents/ and `path` becomes path
-        const cleaned = token.replace(/(?:^['"`])|(?:['"`]$)/g, '');
-        // Skip glob patterns (contain *, ?, [, ]) — not literal file paths
-        if (/[?*[\]]/.test(cleaned)) {
-          continue;
-        }
-        // Check if token looks like a file path
-        const looksLikePath =
-          cleaned.startsWith('./') ||
-          cleaned.startsWith('../') ||
-          cleaned.startsWith('/') ||
-          cleaned.includes('/');
-        if (!looksLikePath) {
-          continue;
-        }
-        // Resolve the path relative to rootDir and check existence
-        const absolutePath = path.resolve(rootDir, cleaned);
-        if (!fileSystem.existsSync(absolutePath)) {
-          return {
-            ok: false,
-            reason: 'validation-failed',
-            error: `Gate command references non-existent file: "${token}" in command "${cmd}"`,
-            gate: cmd
-          };
-        }
+      const missingToken = this.gateCommandMissingFile(cmd, rootDir, fileSystem);
+      if (missingToken !== null) {
+        return this.missingFileError(cmd, missingToken);
       }
     }
 
     return { ok: true, reason: 'all-gates-valid' };
   }
+
+  /** Shared error payload for the "prose attached to a gate command" failure. */
+  private proseError(cmd: string) {
+    return {
+      ok: false,
+      reason: 'validation-failed',
+      error: `Gate declaration must contain an exact runnable command only. Replace "${cmd}" with the command and move trailing prose or outcome expectations to Success Criteria or checkpoint documentation.`,
+      gate: cmd
+    };
+  }
+
+  /**
+   * Collapse a gate command to its unquoted form for prose inspection: quoted
+   * runs become a single space, backslash escapes inside double quotes are
+   * preserved as space padding, and the rest passes through unchanged. The
+   * original inline scan did this before running the prose regexes.
+   */
+  private unquoteForProseScan(cmd: string): string {
+    let unquoted = '';
+    let inSingle = false;
+    let inDouble = false;
+    for (let ci = 0; ci < cmd.length; ci++) {
+      const ch = cmd[ci];
+      if (ch === '\\' && inDouble) {
+        unquoted += '  ';
+        ci++;
+        continue;
+      }
+      if (ch === '\'' && !inDouble) {
+        inSingle = !inSingle;
+        unquoted += ' ';
+        continue;
+      }
+      if (ch === '"' && !inSingle) {
+        inDouble = !inDouble;
+        unquoted += ' ';
+        continue;
+      }
+      unquoted += inSingle || inDouble ? ' ' : ch;
+    }
+    return unquoted;
+  }
+
+  /**
+   * A gate declaration carries prose when, after unquoting, it embeds an
+   * en/em-dash description separator, an outcome-language suffix, or a trailing
+   * parenthesised description. Markdown code spans are detected on the raw
+   * command before unquoting.
+   */
+  private gateCommandHasProse(cmd: string): boolean {
+    const unquoted = this.unquoteForProseScan(cmd);
+    return (
+      /^`[^`\r\n]+`\s+\S/.test(cmd) ||
+      /\s(?:—|–|-–)\s+\S/.test(unquoted) ||
+      /\s(?:passes?|passed|succeeds?|succeeded|completes?|completed)(?:\s+(?:on|in|with|without|after|before|for|the|a|an|successfully|cleanly)\b[^;&|]*)?[.!]?\s*$/i.test(unquoted) ||
+      /(?<![&|;])\s+\([^()]*\)\s*$/.test(unquoted)
+    );
+  }
+
+  /**
+   * Return the quote type left open by a command, or null when balanced.
+   * Respects quote context so apostrophes inside double quotes (and vice-versa)
+   * are not flagged; only genuinely unmatched quotes are reported.
+   */
+  private gateUnclosedQuoteType(cmd: string): 'single' | 'double' | null {
+    let inSingle = false;
+    let inDouble = false;
+    for (let ci = 0; ci < cmd.length; ci++) {
+      const ch = cmd[ci];
+      if (ch === '\\' && inDouble) {
+        ci++;
+        continue;
+      }
+      if (ch === '\'' && !inDouble) {
+        inSingle = !inSingle;
+        continue;
+      }
+      if (ch === '"' && !inSingle) {
+        inDouble = !inDouble;
+        continue;
+      }
+    }
+    return inSingle ? 'single' : inDouble ? 'double' : null;
+  }
+
+  /**
+   * Report the first delimiter type whose parentheses, braces, or brackets do
+   * not balance, or null when all three balance. Collapses the three original
+   * independent balance checks into a single shared counter helper.
+   */
+  private firstUnbalancedDelimiter(cmd: string): 'parentheses' | 'braces' | 'brackets' | null {
+    const balanced = (open: string, close: string) => cmd.split(open).length === cmd.split(close).length;
+    if (!balanced('(', ')')) {return 'parentheses';}
+    if (!balanced('{', '}')) {return 'braces';}
+    if (!balanced('[', ']')) {return 'brackets';}
+    return null;
+  }
+
+  /**
+   * Return the first literal file-path token that does not exist under rootDir,
+   * or null when every path token resolves. URLs, flags, globs, and quoted
+   * tokens are skipped exactly as in the original inline scan.
+   */
+  private gateCommandMissingFile(
+    cmd: string,
+    rootDir: string,
+    fileSystem: HandoffWorkflowPorts['fileSystem']
+  ): string | null {
+    for (const token of cmd.split(/\s+/)) {
+      if (/^https?:\/\//i.test(token) || token.includes('://')) {continue;}
+      if (token.startsWith('-')) {continue;}
+      const cleaned = token.replace(/^['"`]|['"`]$/g, '');
+      if (/[?*[\]]/.test(cleaned)) {continue;}
+      const looksLikePath =
+        cleaned.startsWith('./') ||
+        cleaned.startsWith('../') ||
+        cleaned.startsWith('/') ||
+        cleaned.includes('/');
+      if (!looksLikePath) {continue;}
+      if (!fileSystem.existsSync(path.resolve(rootDir, cleaned))) {return token;}
+    }
+    return null;
+  }
+
+  /** Shared error payload for an unclosed-quote failure. */
+  private quoteError(cmd: string, quoteType: 'single' | 'double') {
+    return {
+      ok: false,
+      reason: 'validation-failed',
+      error: `Gate command has unclosed ${quoteType} quotes: "${cmd}"`,
+      gate: cmd
+    };
+  }
+
+  /** Shared error payload for an unmatched-delimiter failure. */
+  private delimiterError(cmd: string, imbalance: 'parentheses' | 'braces' | 'brackets') {
+    return {
+      ok: false,
+      reason: 'validation-failed',
+      error: `Gate command has unmatched ${imbalance}: "${cmd}"`,
+      gate: cmd
+    };
+  }
+
+  /** Shared error payload for a missing file-reference failure. */
+  private missingFileError(cmd: string, missingToken: string) {
+    return {
+      ok: false,
+      reason: 'validation-failed',
+      error: `Gate command references non-existent file: "${missingToken}" in command "${cmd}"`,
+      gate: cmd
+    };
+  }
+
 
   /**
    * Parse and execute declared gates from a mission's MISSION.md `## Gates` section.

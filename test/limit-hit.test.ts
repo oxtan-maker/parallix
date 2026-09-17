@@ -252,6 +252,57 @@ test('detectLimitHit returns reason for fallback source', () => {
   assert.ok(result.reason.includes('usage limit reached'));
 });
 
+test('detectLimitHit blocks the Mistral family through the end of the UTC month when no reset time parses', () => {
+  const now = new Date('2026-09-18T14:00:00Z');
+  const result = detectLimitHit({
+    agent: 'mistral',
+    stdout: '',
+    stderr: 'Mistral AI rate limit reached. Please try again later.',
+    status: 1,
+    signal: null,
+    error: null,
+    now
+  });
+
+  assert.ok(result);
+  assert.equal(new Date(result.until.replace(' ', 'T') + ':00').getTime(), Date.UTC(2026, 9, 1));
+  assert.equal(result.source, 'month-end');
+  assert.ok(result.reason.startsWith('month-end:'));
+});
+
+test('detectLimitHit applies the Mistral month-end block to vibe at the UTC month boundary', () => {
+  const now = new Date('2026-09-30T23:59:00Z');
+  const result = detectLimitHit({
+    agent: 'vibe',
+    stdout: '',
+    stderr: 'Vibe rate limit exceeded.',
+    status: 1,
+    signal: null,
+    error: null,
+    now
+  });
+
+  assert.ok(result);
+  assert.equal(new Date(result.until.replace(' ', 'T') + ':00').getTime(), Date.UTC(2026, 9, 1));
+  assert.equal(result.source, 'month-end');
+});
+
+test('detectLimitHit honors a parsed Mistral reset before month-end', () => {
+  const result = detectLimitHit({
+    agent: 'mistral',
+    stdout: '',
+    stderr: 'Mistral AI rate limit reached. Retry at 2026-09-20T12:15:00Z.',
+    status: 1,
+    signal: null,
+    error: null,
+    now: new Date('2026-09-18T14:00:00Z')
+  });
+
+  assert.ok(result);
+  assert.equal(new Date(result.until.replace(' ', 'T') + ':00').getTime(), Date.UTC(2026, 8, 20, 13));
+  assert.equal(result.source, 'parsed');
+});
+
 test('detectLimitHit returns reason for sigint source', () => {
   const result = detectLimitHit({
     agent: 'mistral',

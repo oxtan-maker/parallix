@@ -70,7 +70,10 @@ test('intervening bare board commit cannot contain the prepared mission payload'
     if (args.includes('branch') || args.includes('status') || args.includes('merge')) return { status: 0, stdout: '', stderr: '' };
     if (args.includes('diff') && args.includes('--cached') && args.includes('--name-only')) {
       boardCommitPaths = [...stagedPaths]; // `git commit -m "Reorder tasks in review"` interleaves after payload preparation.
-      return { status: 0, stdout: `${MISSION_PAYLOAD}\n`, stderr: '' };
+      // TASK-2533: the payload capture uses `git diff --cached --name-only -z`,
+      // so the mock emits NUL-delimited output; splitting on NUL yields the
+      // bare payload path with no trailing newline.
+      return { status: 0, stdout: `${MISSION_PAYLOAD}\0`, stderr: '' };
     }
     if (args.includes('add') && args.includes('-A')) {
       stagedPaths = [MISSION_PAYLOAD];

@@ -1300,7 +1300,7 @@ function inProcessWorkflow(runs, { exitCode = 0, port = {}, onRun = null } = {})
     createRebaseWorkflowPortFn: () => ({ exit: () => {}, ...port }),
     runRebaseWorkflowFn: async (args, workflowPort) => {
       runs.push(args);
-      if (onRun) { onRun(workflowPort); }
+      if (onRun) { await onRun(workflowPort); }
       workflowPort.exit(exitCode);
     },
   };
@@ -1361,6 +1361,37 @@ test('rebaseBeforeReviewRound reports shared-file conflicts with recovery instru
     logs.some(message => message.includes('Resolve the conflicts in the worktree, then re-run: px review task-1087 --start')),
     `Expected recovery instructions, got logs: ${logs.join(' | ')}`
   );
+});
+
+test('rebaseBeforeReviewRound derives sharedFileConflicts from sharedFiles when the conflict-resolution agent launches', async () => {
+  const launches = [];
+  const startAgent = async (step) => { launches.push(step); return { agent: 'claude', result: { ok: false } }; };
+
+  const result = await rebaseBeforeReviewRound('task-1087', {
+    worktree: '/tmp/worktree',
+    isForgejoReviewEnabledFn: () => true,
+    ...inProcessWorkflow([], {
+      exitCode: 1,
+      port: {
+        startAgent,
+        resolveConflictsForMission: () => ({
+          ok: true, conflictFiles: ['src/shared.js'], missionSpecificFiles: [], sharedFiles: ['src/shared.js'],
+        }),
+      },
+      onRun: async (workflowPort) => {
+        // The workflow launches the resolver through the unwrapped port method.
+        assert.equal(workflowPort.startAgent, startAgent, 'startAgent must reach the workflow unwrapped');
+        workflowPort.resolveConflictsForMission('task-1087', 'lib', {});
+        await workflowPort.startAgent('conflict-resolution', {});
+      },
+    }),
+    log: () => {},
+    error: () => {},
+  });
+
+  assert.deepEqual(launches, ['conflict-resolution']);
+  assert.equal(result.sharedFileConflicts, true);
+  assert.deepEqual(result.failure, { kind: 'conflict', operation: 'rebase', sharedFiles: ['src/shared.js'] });
 });
 
 test('rebaseBeforeReviewRound reports non-conflict rebase failures', async () => {

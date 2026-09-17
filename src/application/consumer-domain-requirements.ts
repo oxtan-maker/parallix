@@ -148,7 +148,7 @@ export const CONSUMER_DOMAIN_REQUIREMENTS: readonly ConsumerRequirement[] = [
     id: 'launch-session-resume',
     family: 'launch',
     fileLocation: 'src/adapters/agents/agents.ts',
-    line: 467,
+    line: 488,
     anchor: 'await launchSessionMarkerPort.shouldResume(',
     reads: ['SessionMarker', 'Mission'],
     requirement:
@@ -159,7 +159,7 @@ export const CONSUMER_DOMAIN_REQUIREMENTS: readonly ConsumerRequirement[] = [
     id: 'launch-session-marker-write',
     family: 'launch',
     fileLocation: 'src/adapters/agents/agents.ts',
-    line: 772,
+    line: 803,
     anchor: 'await launchSessionMarkerPort.save({',
     reads: ['SessionMarker'],
     requirement:
@@ -174,7 +174,7 @@ export const CONSUMER_DOMAIN_REQUIREMENTS: readonly ConsumerRequirement[] = [
     id: 'retry-in-process-tried-set',
     family: 'retry',
     fileLocation: 'src/adapters/agents/agents.ts',
-    line: 338,
+    line: 359,
     anchor: 'const tried = new Set(',
     reads: ['AgentBlock'],
     requirement:
@@ -185,7 +185,7 @@ export const CONSUMER_DOMAIN_REQUIREMENTS: readonly ConsumerRequirement[] = [
     id: 'retry-launch-failure-reselect',
     family: 'retry',
     fileLocation: 'src/adapters/agents/agents.ts',
-    line: 727,
+    line: 748,
     anchor: 'retrying with next eligible agent',
     reads: ['AgentBlock'],
     requirement:
@@ -211,7 +211,7 @@ export const CONSUMER_DOMAIN_REQUIREMENTS: readonly ConsumerRequirement[] = [
     id: 'failover-limit-hit-block',
     family: 'failover',
     fileLocation: 'src/adapters/agents/agents.ts',
-    line: 657,
+    line: 678,
     anchor: 'await updateAgentBlockFn(chosen',
     reads: ['AgentBlock'],
     requirement:
@@ -222,11 +222,11 @@ export const CONSUMER_DOMAIN_REQUIREMENTS: readonly ConsumerRequirement[] = [
     id: 'failover-transient-failure-block',
     family: 'failover',
     fileLocation: 'src/adapters/agents/agents.ts',
-    line: 751,
+    line: 782,
     anchor: 'await updateAgentBlockFn(chosen',
     reads: ['AgentBlock'],
     requirement:
-      'That a launch failure looked transient rather than a deterministic config error, so a bounded block is written instead of poisoning the family permanently.',
+      'Defence-in-depth second block-persistence site (task-2536): a bounded block is written instead of poisoning the family permanently, gated on a positive availability/quota classification. Under default wiring this site is unreachable because the site-1 limit-hit branch (same detectLimitHit classifier) persists the positive classification first; retained only for callers that inject a non-default detectLimitHitFn.',
     perLaunchIdentity: 'none',
   },
   {

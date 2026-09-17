@@ -49,6 +49,7 @@ function executeFixture(overrides: Record<string, unknown> = {}) {
     preflight() { calls.push('preflight'); return { pass: true }; },
     resolveWorktree() { calls.push('worktree'); return '/worktree'; },
     resolveTaskFile() { calls.push('task'); return { ok: true, taskFile: '/worktree/backlog/tasks/task-1.md' }; },
+    async resolveExecutionContext() { return null; },
     buildCheckpointContext() { calls.push('checkpoint'); return 'CP-5'; },
     readAgentConfig() { calls.push('config'); return {}; },
     buildExecutePrompt() { calls.push('prompt'); return 'execute prompt'; },

@@ -102,7 +102,6 @@ test('performStaticReview accepts Goal Check with recognized repo command', () =
       run: () => ({ status: 0, stdout: '' }),
       resolveWorktree: () => tmpDir,
       rootDir: tmpDir,
-      getPrimaryBranch: () => 'main',
     });
     assert.equal(result.ok, true, `Expected pass but got findings: ${result.findings.join('; ')}`);
   } finally {
@@ -143,7 +142,6 @@ test('performStaticReview accepts Goal Check with recognized test name', () => {
       run: () => ({ status: 0, stdout: '' }),
       resolveWorktree: () => tmpDir,
       rootDir: tmpDir,
-      getPrimaryBranch: () => 'main',
     });
     assert.equal(result.ok, true, `Expected pass but got findings: ${result.findings.join('; ')}`);
   } finally {
@@ -154,10 +152,10 @@ test('performStaticReview accepts Goal Check with recognized test name', () => {
 test('performStaticReview accepts Goal Check with test file path', () => {
   const tmpDir = fs.mkdtempSync(path.join(REPO_ROOT, '.tmp-review-evidence-'));
   const missionDir = path.join(tmpDir, 'missions', 'task-testpath');
-  const reviewTestFile = path.join(tmpDir, 'test', 'review-static-evidence.test.ts');
+  const testDir = path.join(tmpDir, 'test');
   fs.mkdirSync(missionDir, { recursive: true });
-  fs.mkdirSync(path.dirname(reviewTestFile), { recursive: true });
-  fs.writeFileSync(reviewTestFile, '', 'utf8');
+  fs.mkdirSync(testDir, { recursive: true });
+  fs.writeFileSync(path.join(testDir, 'example.test.ts'), '');
 
   const checkpoint = path.join(missionDir, 'CP-1.md');
   fs.writeFileSync(checkpoint, `# Checkpoint 1
@@ -166,7 +164,7 @@ test('performStaticReview accepts Goal Check with test file path', () => {
 
 | Criterion | Evidence | Status |
 |---|---|---|
-| Test coverage | \`test/review-static-evidence.test.ts\` | PASS |
+| Test coverage | \`test/example.test.ts\` | PASS |
 `, 'utf8');
 
   try {
@@ -178,7 +176,6 @@ test('performStaticReview accepts Goal Check with test file path', () => {
       run: () => ({ status: 0, stdout: '' }),
       resolveWorktree: () => tmpDir,
       rootDir: tmpDir,
-      getPrimaryBranch: () => 'main',
     });
     assert.equal(result.ok, true, `Expected pass but got findings: ${result.findings.join('; ')}`);
   } finally {
@@ -233,7 +230,6 @@ test('performStaticReview accepts a bare repo path whose file exists (may contai
       // when the real backlog task moves from `tasks/` to `completed/`.
       resolveWorktree: () => tmpDir,
       rootDir: tmpDir,
-      getPrimaryBranch: () => 'main',
     });
     assert.equal(result.ok, true, `Expected pass but got findings: ${result.findings.join('; ')}`);
   } finally {
@@ -272,7 +268,6 @@ test('performStaticReview accepts a bare repo path without a :line suffix', () =
       run: () => ({ status: 0, stdout: '' }),
       resolveWorktree: () => tmpDir,
       rootDir: tmpDir,
-      getPrimaryBranch: () => 'main',
     });
     assert.equal(result.ok, true, `Expected pass but got findings: ${result.findings.join('; ')}`);
   } finally {
@@ -284,9 +279,7 @@ test('performStaticReview accepts a bare repo path named mid-sentence', () => {
   const tmpDir = fs.mkdtempSync(path.join(REPO_ROOT, '.tmp-review-evidence-'));
   const missionDir = path.join(tmpDir, 'missions', 'task-prosepath');
   fs.mkdirSync(missionDir, { recursive: true });
-  // Evidence cites `package.json` at the evidence root; provide it so the
-  // bare-path check resolves against the fixture, not the live checkout.
-  fs.writeFileSync(path.join(tmpDir, 'package.json'), '{}', 'utf8');
+  fs.writeFileSync(path.join(tmpDir, 'package.json'), '{}');
 
   const checkpoint = path.join(missionDir, 'CP-1.md');
   fs.writeFileSync(
@@ -311,7 +304,6 @@ test('performStaticReview accepts a bare repo path named mid-sentence', () => {
       run: () => ({ status: 0, stdout: '' }),
       resolveWorktree: () => tmpDir,
       rootDir: tmpDir,
-      getPrimaryBranch: () => 'main',
     });
     assert.equal(result.ok, true, `Expected pass but got findings: ${result.findings.join('; ')}`);
   } finally {
@@ -343,7 +335,6 @@ test('performStaticReview rejects placeholder-only evidence', () => {
       run: () => ({ status: 0, stdout: '' }),
       resolveWorktree: () => tmpDir,
       rootDir: tmpDir,
-      getPrimaryBranch: () => 'main',
     });
     assert.equal(result.ok, false, 'Expected failure for placeholder evidence');
     assert.ok(result.findings.some(f => f.includes('verifiable reference')));
@@ -374,7 +365,6 @@ test('performStaticReview rejects separator-only table', () => {
       run: () => ({ status: 0, stdout: '' }),
       resolveWorktree: () => tmpDir,
       rootDir: tmpDir,
-      getPrimaryBranch: () => 'main',
     });
     assert.equal(result.ok, false, 'Expected failure for separator-only table');
     assert.ok(result.findings.some(f => f.includes('no evidence rows')));
@@ -407,7 +397,6 @@ test('performStaticReview rejects prose-only evidence', () => {
       run: () => ({ status: 0, stdout: '' }),
       resolveWorktree: () => tmpDir,
       rootDir: tmpDir,
-      getPrimaryBranch: () => 'main',
     });
     assert.equal(result.ok, false, 'Expected failure for prose-only evidence');
     assert.ok(result.findings.some(f => f.includes('verifiable reference')));

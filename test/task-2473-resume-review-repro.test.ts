@@ -15,7 +15,7 @@
 // `--resume` branch, so the flag falls through to `status` and no supported
 // invocation clears the intervention. Green after the fix.
 
-import { describe, it } from 'node:test';
+import { after, describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
@@ -51,6 +51,12 @@ const REVIEWER = agentFamily('configured-reviewer');
 const IMPLEMENTER = agentFamily('configured-implementer');
 
 const tempDirs: string[] = [];
+
+after(() => {
+  for (const dir of tempDirs) {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
 
 function createTempRoot(): string {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), `parallix-task-2473-resume-`));

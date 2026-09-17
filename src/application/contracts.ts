@@ -48,6 +48,7 @@ export type Capability =
   | 'integration:decide'
   | 'closure:record'
   | 'checkpoint:record'
+  | 'mission:context'
   | 'handoff:record';
 
 export function completed<T>(

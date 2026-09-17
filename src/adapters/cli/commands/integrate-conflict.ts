@@ -6,6 +6,7 @@ import * as fmt from '../../../application/presentation/cli-format.js';
 import { resolveWorktree, getConflictFiles, updateGraphifyKnowledgeGraph, getPrimaryWorktree, getPrimaryBranch, conventionalWorktreePath, missionBranchName, isMissionArtifact, resolveMissionBaseBranch } from '../../filesystem/mission-utils.js';
 import * as verification from '../../verification/verification.js';
 import { IntegrationAbort, shellQuote } from './integrate-post.js';
+import { integrationStashMarker } from '../../../application/integrate/base-worktree-repair.js';
 
 const { formatVerificationCommand } = verification;
 
@@ -203,7 +204,10 @@ export function stashMainCheckoutIfNeeded({
     return { created: false };
   }
 
-  const message = `integrate:${slug}: temporary integration checkout stash`;
+  // Shared marker literal (see `integrationStashMarker`): the base-worktree
+  // sweep matches against this exact string, so the push and the sweep can't
+  // disagree on the identifier.
+  const message = integrationStashMarker(slug);
   fmt.log.info(`[STASH] Stashing unrelated local integration checkout changes before integration: ${message}`);
   const result = gitRunner([
     '-C',

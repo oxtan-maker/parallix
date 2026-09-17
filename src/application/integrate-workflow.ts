@@ -15,6 +15,7 @@ import { createIntegrationStrategy } from './services/integration-dispatch.js';
 import { missionId } from '../domain/mission.js';
 import { evaluateTaskStatusForIntegration, recoveryEstablishesApproval, resolveAuthoritativeApprovalAt } from './integrate/approval.js';
 import { createIntegrationContextBuilder } from './integrate/context.js';
+import { createBaseWorktreeRepair } from './integrate/base-worktree-repair.js';
 import { createIntegrationGateStep, type IntegrateSeams } from './integrate/gates.js';
 import { createGithubPrLanding } from './integrate/github-pr.js';
 import { createMissionLanding } from './integrate/landing.js';
@@ -46,6 +47,9 @@ export function createIntegrateWorkflow(ports: IntegrateWorkflowPorts) {
   const { buildIntegrationContext } = createIntegrationContextBuilder(ports);
   const { recoverMissionForIntegration, promoteTaskForIntegrationIfNeeded } = createMissionRecovery(ports);
   const { runIntegrationRebase, predictIntegrationRebase } = createIntegrationRebase(ports);
+  // TASK-2532: heal integration-owned poison left by an interrupted integrate in
+  // the resolved base worktree before preflight or the stash/rebase steps.
+  const { repairBaseWorktree } = createBaseWorktreeRepair(ports);
 
   // TASK-2517 CP-3: a mission whose squash already landed on the base branch but
   // whose aggregate is stranded in `active`/`review` has no remote effect left to
@@ -179,6 +183,27 @@ export function createIntegrateWorkflow(ports: IntegrateWorkflowPorts) {
       return 0;
     }
     const context: any = await buildIntegrationContext(slug, { missionStore: missionServices.store });
+
+    // TASK-2532 / F2 (task-2532 round 1): an interrupted prior integrate can
+    // leave an integration-owned marker stash or a dead rebase in the base
+    // worktree. Sweep it here, before preflight and the stash/rebase steps, so
+    // this run does not abort on that stale state. A dry run is non-mutating by
+    // contract — the pre-dry-run `rebaseForIntegration` never started a rebase
+    // under --dry-run — so the repair runs detect-only (logs what it would
+    // repair, mutates nothing) when `dryRun` is set; it is passed through to
+    // `repairBaseWorktree`, which owns the mutation boundary. F3 (task-2532
+    // round 2): no in-flight guard here — the stash sweep drops every marker
+    // stash unconditionally. A lifecycle-status proxy was rejected because the
+    // `integration` lane is not a liveness signal and would keep exactly the
+    // SC1 poison from being swept. Concurrent integrates on the same base
+    // worktree were never supported (`restoreMainCheckoutStash` pops
+    // `stash@{0}`), so the sweep is allowed to be unconditional.
+    await repairBaseWorktree({
+      baseWorktree: context.baseWorktree,
+      git: ports.git.git,
+      dryRun,
+    });
+
     const missionLoad = await loadMissionAuthority(slug, context, missionServices);
 
     // Reconcile the authoritative Mission before preflight or merge work.

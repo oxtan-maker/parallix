@@ -1,0 +1,17 @@
+# CP-4: Verify bounded context authority
+
+Ran the required repository gate after correcting the only stale invariant citation introduced by the new Mission field. The final contract audit found no Mission or checkpoint Markdown column, no serialized document payload, and no unbounded artifact payload: context is typed scalar/child-row state, while predecessor outcomes and checkpoint evidence remain bounded text and ADR 0053 leaves large artifacts as references.
+
+## Goal Check
+
+| Criterion | Evidence | Status |
+|---|---|---|
+| Execution context is available without document authority | `execution context writes then reads the same bounded facts through the application boundary` in `test/task-2322-05-mission-use-cases.test.ts`; the live launch consumer `agent execution adapter consumes the persisted execution context for launch` and `agent execution adapter launches without MISSION.md or checkpoint files when context is persisted` in `test/execute-mission-adapters.test.ts`, wired through `src/adapters/mission/execute-mission-adapters.ts` and `src/composition/application-services.ts`. | PASS |
+| Checkpoint Goal Check evidence round-trips through application behavior | `SC3: checkpoint data round-trips through the boundary with GoalCheckRow semantics` and `SC3: the checkpoint request carries no persistence path or SQL input` in `test/task-2322-05-mission-use-cases.test.ts`. | PASS |
+| SQLite holds typed state rather than raw Markdown authority | `src/adapters/sqlite/migrations/0020-mission-execution-context.sql`, `refuses invalid execution context before it can make a Mission unloadable` in `test/sqlite-mission-store.integration.test.ts`, and ADR 0053. | PASS |
+| Every new persisted field has a demonstrated consumer and meaning | `src/adapters/mission/execute-mission-adapters.ts`, `src/adapters/review/review-static-evidence.ts`, ADR 0032, and `src/domain/mission-execution-context.ts`; the bounded dependency list `execution context bounds the dependency list (ADR 0053 bounded state)` in `test/task-2322-05-mission-use-cases.test.ts` constrains predecessor references to 256 rows ahead of persistence. | PASS |
+| State survives database restart without repository metadata | `reopens bounded execution context and checkpoint evidence without repository files` in `test/sqlite-mission-store.integration.test.ts`. | PASS |
+| Existing lifecycle invariants and stale-write protection remain | `uses exact version compare-and-swap and rejects stale transitions without appending events` in `test/sqlite-mission-store.integration.test.ts`; `./scripts/verify-local.sh all`. | PASS |
+| Required repository verification completed | `./scripts/verify-local.sh all` exits 0 with 2691/2691 unit tests passing (static-analysis, build, bundle-size all pass). Concrete coverage: `execution context writes then reads the same bounded facts through the application boundary` and `execution context bounds the dependency list (ADR 0053 bounded state)` in `test/task-2322-05-mission-use-cases.test.ts`; `agent execution adapter launches without MISSION.md or checkpoint files when context is persisted` in `test/execute-mission-adapters.test.ts`; `reopens bounded execution context and checkpoint evidence without repository files` in `test/sqlite-mission-store.integration.test.ts`. | PASS |
+
+Next action: the review loop evaluates the final `./scripts/verify-local.sh all` result (exit 0, 2691/2691) and the concrete test/ADR evidence cited above in each Goal Check row.

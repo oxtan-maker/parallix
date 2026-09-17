@@ -109,6 +109,32 @@ export function createSquashLanding(ports: IntegrateWorkflowPorts, { promoteTask
     }
   }
 
+  /**
+   * Drop squash-staged `backlog/tasks/` copies whose task id already has a
+   * canonical `completed/`/`archive/` file at base `HEAD` (task-2534). The
+   * mission branch's unsquashed history carries other missions' pre-squash task
+   * files; the squash sees them as added and would resurrect closed work.
+   */
+  function dropStaleBacklogCopies({ baseWorktree }: LandingRun, stagedPaths: ReadonlySet<string>) {
+    for (const issue of backlog.checkBacklogIntegrity(baseWorktree)) {
+      if (issue.type !== 'duplicate-completed' || !issue.canonicalFile) { continue; }
+      // Only the squash payload is ours to trim: unstaged trailing backlog
+      // noise restored around the merge must stay untouched.
+      if (!stagedPaths.has(issue.file)) { continue; }
+      // Canonical only counts when it is already on the base branch. The
+      // landing mission's own task file becomes canonical later, in
+      // `stageCloseout`, and must not be dropped here.
+      if (git(['-C', baseWorktree, 'cat-file', '-e', `HEAD:${issue.canonicalFile}`]).status !== 0) { continue; }
+      git(['-C', baseWorktree, 'reset', '-q', 'HEAD', '--', issue.file]);
+      // Restore the base-branch content, or remove the file when the base
+      // branch does not carry it at all.
+      if (git(['-C', baseWorktree, 'checkout', '-q', 'HEAD', '--', issue.file]).status !== 0) {
+        git(['-C', baseWorktree, 'clean', '-q', '-f', '--', issue.file]);
+      }
+      fmt.log.info(`Dropped stale backlog copy ${issue.file}; ${issue.taskId} is already canonical at ${issue.canonicalFile}.`);
+    }
+  }
+
   /** Complete the Backlog task in the checkout and add its moved paths to the payload. */
   async function stageCloseout(run: LandingRun, mainTaskFile: string, intendedPayloadPaths: Set<string>) {
     const { slug, context, baseWorktree } = run;
@@ -130,6 +156,24 @@ export function createSquashLanding(ports: IntegrateWorkflowPorts, { promoteTask
     if (git(['-C', baseWorktree, 'add', '-A', '--', originalTaskPath, completedTaskPath]).status !== 0) {
       throw abortWith(landing, 'Could not stage backlog closeout for the landed squash commit.');
     }
+    // task-2537: the move above can leave the source path outside everything
+    // git knows. A task file authored on the mission branch has no base-branch
+    // entry, so once closeout moves it to `backlog/completed/` it is in neither
+    // the index nor `HEAD` — and `git commit --only` fails-closed on such a
+    // pathspec, aborting the whole landing over a path that carries no change.
+    // Drop it from the payload instead. A path still in `HEAD` but gone from
+    // the index is a staged deletion and stays: that is how a base-tracked task
+    // file lands its removal.
+    if (!isLivePathspec(baseWorktree, originalTaskPath)) {
+      intendedPayloadPaths.delete(originalTaskPath);
+      fmt.log.debug(`Closeout moved ${originalTaskPath} and the base branch never tracked it; it is in neither the index nor HEAD, so it carries no change to land.`);
+    }
+  }
+
+  /** Whether `git commit --only` can name `pathspec`: an index entry, or a `HEAD` entry staged for deletion. */
+  function isLivePathspec(baseWorktree: string, pathspec: string): boolean {
+    if (git(['-C', baseWorktree, 'ls-files', '--error-unmatch', '-z', '--', pathspec]).status === 0) { return true; }
+    return git(['-C', baseWorktree, 'cat-file', '-e', `HEAD:${pathspec}`]).status === 0;
   }
 
   /** Create the landed squash commit; a hook failure bounces through the rebound kernel. */
@@ -195,13 +239,35 @@ export function createSquashLanding(ports: IntegrateWorkflowPorts, { promoteTask
     // Capture the squash payload before closeout changes the checkout. The
     // final commit names this set, so a concurrent bare board commit never
     // inherits ambient index entries from an earlier `git add -A`.
-    const intendedPayloadPaths = new Set(
-      git(['-C', baseWorktree, 'diff', '--cached', '--name-only', '--']).stdout
-        .split('\n')
-        .map(file => file.trim())
+    const capturePayloadPaths = () => new Set(
+      // `-z` emits NUL-delimited RAW paths. Without it, git quotes and escapes
+      // special filenames (backslash, non-ASCII) as `"...\342\200\224..."`; that
+      // quoted form is not a valid `git commit --only` pathspec, so the landed
+      // squash aborts with "pathspec did not match any git-known files" (task-2533).
+      // Split on NUL so every captured path stays a literal pathspec. Do NOT
+      // trim: filenames may legally start or end with whitespace, and trimming
+      // would corrupt that pathspec (task-2533 codex review L206).
+      git(['-C', baseWorktree, 'diff', '--cached', '--name-only', '-z', '--']).stdout
+        .split('\0')
         .filter(Boolean),
     );
+    dropStaleBacklogCopies(run, capturePayloadPaths());
+    const intendedPayloadPaths = capturePayloadPaths();
     await stageCloseout(run, mainTaskFile, intendedPayloadPaths);
+    // Fail-closed backstop: nothing may land while the repository still holds a
+    // `backlog/tasks/` copy of a completed or archived task (task-2534).
+    const remainingDuplicates = backlog.checkBacklogIntegrity(baseWorktree)
+      .filter(issue => issue.type === 'duplicate-completed');
+    if (remainingDuplicates.length > 0) {
+      // Undo the staged squash and closeout so the checkout is clean for a
+      // retry; `--merge` keeps unrelated unstaged changes (trailing noise).
+      git(['-C', baseWorktree, 'reset', '-q', '--merge', 'HEAD']);
+      throw abortWith(
+        landing,
+        `Stale backlog copies remain after closeout: ${remainingDuplicates.map(issue => issue.file).join(', ')}`,
+        `Remove them on ${baseBranch} (git rm) and retry integrate.`,
+      );
+    }
     await commitLandedSquash(run, ['-C', baseWorktree, 'commit', '--only', '-m', `${branch}: ${summary}`, '--', ...intendedPayloadPaths], intendedPayloadPaths);
 
     const mergedCommit = git(['-C', baseWorktree, 'rev-parse', 'HEAD']).stdout.trim();

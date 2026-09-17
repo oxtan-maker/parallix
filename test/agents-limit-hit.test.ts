@@ -692,12 +692,21 @@ test('shouldPersistLaunchFailureBlock returns false for permission-denied on hom
   assert.equal(shouldPersistLaunchFailureBlock('codex', result), false);
 });
 
-test('shouldPersistLaunchFailureBlock returns true for transient crashes (ECONNRESET)', () => {
-  // Network-level transient failures are worth blocking briefly so the retry
-  // loop picks a different agent family rather than hammering the same broken
-  // backend.
+test('shouldPersistLaunchFailureBlock returns false for a bare ECONNRESET (task-2536)', () => {
+  // A single connection reset without a provider-wide availability/quota signal
+  // is an ambiguous per-invocation failure. Route it through detectLimitHit
+  // (task-2536): it is not a quota/429/resource_exhausted classification, so it
+  // must stay local to the failing launch rather than poison the blocklist — the
+  // same treatment the task-1404 connectivity cases beside it already receive.
   const result = { status: 1, stderr: 'ECONNRESET: connection reset by peer\n', stdout: '' };
-  assert.equal(shouldPersistLaunchFailureBlock('codex', result), true);
+  assert.equal(shouldPersistLaunchFailureBlock('codex', result), false);
+});
+
+// task-2536 cross-check: an ambiguous generic non-zero exit must not persist a
+// family block (cross-checked in the mission success criteria).
+test('shouldPersistLaunchFailureBlock returns false for an ambiguous generic crash (task-2536)', () => {
+  const result = { status: 1, stderr: 'generic crash\n', stdout: '' };
+  assert.equal(shouldPersistLaunchFailureBlock('codex', result), false);
 });
 
 test('shouldPersistLaunchFailureBlock returns true for signal kills (SIGKILL)', () => {

@@ -9,6 +9,7 @@ import { missionVersion } from '../../application/domain-ports.js';
 import type { LaneTransitionEvent } from '../../domain/board-event.js';
 import type { MissionNelRecord } from '../../domain/net-engineering-lines.js';
 import type { Mission, MissionId } from '../../domain/mission.js';
+import { missionExecutionContext } from '../../domain/mission-execution-context.js';
 import type { KnownRepository, RepositoryId } from '../../domain/repository.js';
 import type { SqliteDatabaseAdapter } from './database-adapter.js';
 import { SqliteBoardLaneEventRepository } from './board-lane-event-repository.js';
@@ -18,6 +19,8 @@ import {
   type MissionCheckpointRecord,
   type MissionGoalCheckRecord,
   type MissionLabelRecord,
+  type MissionExecutionContextRecord,
+  type MissionExecutionContextItemRecord,
   type MissionRecord,
   type MissionReviewEventRecord,
   type MissionReviewFindingRecord,
@@ -144,6 +147,8 @@ export class SqliteMissionStore implements MissionStore, MissionNelRecorder {
 
     const [
       labels,
+      executionContexts,
+      executionContextItems,
       checkpoints,
       goalChecks,
       reviews,
@@ -159,6 +164,8 @@ export class SqliteMissionStore implements MissionStore, MissionNelRecorder {
           'SELECT mission_id, position, label FROM mission_labels WHERE mission_id = ? ORDER BY position',
           [id],
         ),
+        this.db.query<MissionExecutionContextRecord>('SELECT mission_id, goal, why_text, scope_text, predicted_nel_bucket, confidence, selection_note FROM mission_execution_contexts WHERE mission_id = ?', [id]),
+        this.db.query<MissionExecutionContextItemRecord>('SELECT mission_id, kind, position, value, outcome FROM mission_execution_context_items WHERE mission_id = ? ORDER BY kind, position', [id]),
         this.db.query<MissionCheckpointRecord>(
           `SELECT mission_id, position, checkpoint_mission_id, name, raw_filename,
                   first_line, next_action_text
@@ -224,6 +231,8 @@ export class SqliteMissionStore implements MissionStore, MissionNelRecorder {
       mission: missionRows[0],
       externalTaskRef: externalRefs[0] ?? null,
       labels,
+      executionContext: executionContexts[0] ?? null,
+      executionContextItems,
       checkpoints,
       goalChecks,
       review: reviews[0] ?? null,
@@ -383,6 +392,12 @@ export class SqliteMissionStore implements MissionStore, MissionNelRecorder {
     mission: Mission,
     expectedVersion: MissionVersion | null,
   ): Promise<MissionVersion> {
+    // MissionStore is a public persistence port: callers other than the
+    // context service may save an aggregate, so reject invalid context before
+    // any relational row can make a Mission unloadable on restart.
+    if (mission.executionContext) {
+      mission = { ...mission, executionContext: missionExecutionContext(mission.executionContext) };
+    }
     const params = [
       mission.repositoryId,
       mission.title,
@@ -454,6 +469,7 @@ export class SqliteMissionStore implements MissionStore, MissionNelRecorder {
   private async clearAggregateValues(mission: Mission): Promise<void> {
     const id = mission.id;
     await this.db.execute('DELETE FROM mission_external_task_refs WHERE mission_id = ?', [id]);
+    await this.db.execute('DELETE FROM mission_execution_contexts WHERE mission_id = ?', [id]);
     await this.db.execute('DELETE FROM mission_checkpoints WHERE mission_id = ?', [id]);
     await this.db.execute('DELETE FROM mission_labels WHERE mission_id = ?', [id]);
     if (!mission.review) {
@@ -469,6 +485,12 @@ export class SqliteMissionStore implements MissionStore, MissionNelRecorder {
   }
 
   private async insertAggregateValues(mission: Mission): Promise<void> {
+    if (mission.executionContext) {
+      const c = mission.executionContext;
+      await this.db.execute('INSERT INTO mission_execution_contexts (mission_id, goal, why_text, scope_text, predicted_nel_bucket, confidence, selection_note) VALUES (?, ?, ?, ?, ?, ?, ?)', [mission.id, c.goal, c.why, c.scope, c.predictedNelBucket, c.confidence, c.selectionNote]);
+      for (const [kind, values] of [['constraint', c.constraints], ['driver', c.mainDrivers], ['gate', c.declaredGates]] as const) {for (const [position, value] of values.entries()) {await this.db.execute('INSERT INTO mission_execution_context_items (mission_id, kind, position, value, outcome) VALUES (?, ?, ?, ?, NULL)', [mission.id, kind, position, value]);}}
+      for (const [position, d] of c.dependencies.entries()) {await this.db.execute('INSERT INTO mission_execution_context_items (mission_id, kind, position, value, outcome) VALUES (?, ?, ?, ?, ?)', [mission.id, 'dependency', position, d.reference, d.outcome]);}
+    }
     if (mission.externalTaskRef) {
       await this.db.execute(
         `INSERT INTO mission_external_task_refs (mission_id, source, external_id, url)

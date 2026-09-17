@@ -44,6 +44,14 @@ export interface Migration {
 export type QueryRow = object;
 
 /**
+ * Maximum number of `<path>.bak.*` snapshot sidecars retained per database path.
+ * After a new snapshot is written, older snapshots beyond this cap are pruned.
+ * Named constant so the retention count can be tuned without touching the
+ * pruning algorithm (task-2530).
+ */
+export const MAX_RETAINED_BACKUPS = 3;
+
+/**
  * SQLite database adapter using `node:sqlite` (DatabaseSync).
  *
  * All application-facing methods return `Promise` values so the adapter
@@ -352,6 +360,15 @@ export class SqliteDatabaseAdapter {
     }
     const backupPath = `${dbPath}.bak.${Date.now()}`;
     fs.copyFileSync(dbPath, backupPath);
+
+    // Bound retention: keep only the newest MAX_RETAINED_BACKUPS snapshots for
+    // this database path. Every irreversible migration routes through here, so
+    // pruning at this chokepoint stops unbounded `.bak.*` growth per home
+    // directory (task-2530). The just-written snapshot is always the newest and
+    // is never pruned. Cleanup is best-effort: the newest backup is guaranteed
+    // retained, so a cleanup error cannot destroy the only usable snapshot.
+    pruneOlderBackups(dbPath);
+
     return backupPath;
   }
 
@@ -403,6 +420,34 @@ export class SqliteDatabaseAdapter {
   private assertOpen(): void {
     if (!this.db) {
       throw new Error('Database is not open. Call open() before using the adapter.');
+    }
+  }
+}
+
+/**
+ * Delete `<path>.bak.*` snapshots beyond the newest `MAX_RETAINED_BACKUPS`.
+ *
+ * Fixed-width millisecond suffixes sort lexically == chronologically, matching
+ * `recoverFromBackup()` selection, so the newest snapshots are kept
+ * deterministically. Files are sorted newest-first and everything past the cap
+ * is removed; the freshly written snapshot is always the newest and is
+ * therefore never deleted.
+ */
+function pruneOlderBackups(dbPath: string): void {
+  const base = path.basename(dbPath);
+  const dir = path.dirname(dbPath);
+  if (!fs.existsSync(dir)) {
+    return;
+  }
+  const backups = fs
+    .readdirSync(dir)
+    .filter((f) => f.startsWith(`${base}.bak.`))
+    .sort((a, b) => compareCodeUnits(b, a)); // newest first
+  for (const stale of backups.slice(MAX_RETAINED_BACKUPS)) {
+    try {
+      fs.rmSync(path.join(dir, stale), { force: true });
+    } catch {
+      // Best-effort cleanup; the newest backup is always retained above.
     }
   }
 }

@@ -221,10 +221,14 @@ test('mistral exit 1 with real session telemetry is misclassified as a launch fa
 });
 
 // SC 4 (codex): a genuine codex failure — exit 1 with no rollout telemetry at
-// all — must still reroute to the next eligible agent and persist a
-// blocklist entry exactly as before. Proves the new isSpuriousCodexExit gate
-// does not swallow real failures.
-test('codex exit 1 with no telemetry still reroutes and blocklists (real-failure path unchanged)', async (t) => {
+// all — must still reroute to the next eligible agent. Proves the new
+// isSpuriousCodexExit gate does not swallow real failures.
+//
+// Note (task-2536): a generic exit-1 with no quota/429/resource_exhausted
+// signal is no longer persisted as a family block — only a positive
+// availability/quota classification is (shouldPersistLaunchFailureBlock).
+// So this case reroutes and writes no blocklist entry.
+test('codex exit 1 with no telemetry still reroutes (real-failure path unchanged)', async (t) => {
   const worktree = fs.mkdtempSync(path.join(os.tmpdir(), 'task-1416-codex-real-fail-'));
   const originalCodexHome = process.env.CODEX_HOME;
   delete process.env.CODEX_HOME;
@@ -260,16 +264,22 @@ test('codex exit 1 with no telemetry still reroutes and blocklists (real-failure
   fs.rmSync(worktree, { recursive: true, force: true });
 
   assert.equal(result.agent, 'vibe', 'a real codex failure (no telemetry) must still reroute to the next agent');
-  assert.ok(blockCalls.some(c => c.agent === 'codex'), `expected a codex blocklist entry for a genuine failure; got ${JSON.stringify(blockCalls)}`);
+  // task-2536: a generic exit-1 without a positive availability/quota
+  // classification is not persisted as a family block.
+  assert.deepEqual(blockCalls, [], 'a genuine exit-1 without a quota signal must not persist a family block');
 });
 
 // SC 4 (mistral): a genuine mistral failure — exit 1 with only a *stale*
 // session meta.json on disk (written well before this invocation started,
 // simulating leftover telemetry from an earlier, unrelated run against the
-// same shared log directory) — must still reroute and blocklist. Proves the
-// telemetryFresh guard (lib/agents/mistral.ts) rejects old telemetry instead
-// of treating any nearby session as proof this run succeeded.
-test('mistral exit 1 with only stale telemetry still reroutes and blocklists (real-failure path unchanged)', async () => {
+// same shared log directory) — must still reroute. Proves the telemetryFresh
+// guard (lib/agents/mistral.ts) rejects old telemetry instead of treating any
+// nearby session as proof this run succeeded.
+//
+// Note (task-2536): a generic exit-1 with no quota/429/resource_exhausted
+// signal is no longer persisted as a family block — only a positive
+// availability/quota classification is (shouldPersistLaunchFailureBlock).
+test('mistral exit 1 with only stale telemetry still reroutes (real-failure path unchanged)', async () => {
   const worktree = fs.mkdtempSync(path.join(os.tmpdir(), 'task-1416-mistral-real-fail-'));
   let blockCalls = [];
   const fakeBlockFn = (agent, until) => {
@@ -317,5 +327,7 @@ test('mistral exit 1 with only stale telemetry still reroutes and blocklists (re
   fs.rmSync(worktree, { recursive: true, force: true });
 
   assert.equal(result.agent, 'codex', 'a real vibe failure with only stale telemetry must still reroute');
-  assert.ok(blockCalls.some(c => c.agent === 'vibe'), `expected a vibe blocklist entry for a genuine failure; got ${JSON.stringify(blockCalls)}`);
+  // task-2536: a generic exit-1 without a positive availability/quota
+  // classification is not persisted as a family block.
+  assert.deepEqual(blockCalls, [], 'a genuine exit-1 without a quota signal must not persist a family block');
 });
