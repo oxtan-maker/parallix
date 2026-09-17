@@ -1,10 +1,10 @@
 ---
 id: TASK-2527
 title: Make local SonarQube scanning work without auth footguns
-status: backlog
-assignee: []
+status: done
+assignee: [claude]
 created_date: '2026-09-16 20:25'
-labels: [developer_experience]
+labels: [developer_experience, user_value]
 dependencies: []
 parent_task_id: TASK-2525
 priority: high

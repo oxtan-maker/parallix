@@ -205,6 +205,8 @@ export const INTEGRATION_CI_TESTS: readonly string[] = [
   // a real temporary Git repository with a retained mission worktree, so it
   // crosses the git boundary and runs in the integration layer.
   'task-2517-landed-squash-base-branch-detection.test.ts',
+  // TASK-2527: verifies shared-token discovery using temporary Git worktrees.
+  'task-2527-local-sonar.test.ts',
   'test-hygiene.test.ts',
   'tui-command-flow.test.ts',
   'tui-pty-smoke.test.ts',

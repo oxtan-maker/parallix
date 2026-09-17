@@ -142,6 +142,7 @@ const expectedIntegrationFiles = [
   // with a worktree, so it crosses the git boundary and runs only in the
   // integration layer.
   'task-2516-recover-landed-mission-repro.test.ts',
+  'task-2527-local-sonar.test.ts',
       'test-hygiene.test.ts',
   // TASK-2502: the CodeQL clean-cache bootstrap test shells out to the runner
   // (bash) to prove a fresh cache directory bootstraps the pinned CLI, so it
