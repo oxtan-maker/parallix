@@ -164,7 +164,6 @@ export const INTEGRATION_CI_TESTS: readonly string[] = [
   'task-2373-shutdown.test.ts',
   'task-2375-active-invocation-overlap.test.ts',
   'task-2375-current-work-operation-repro.test.ts',
-  'task-2376-lifecycle-timing.test.ts',
   'task-2378-authoritative-stats.test.ts',
   'task-2379-approval-boundary-repro.test.ts',
   'task-2397-integrate-active-approved-recovery.test.ts',
@@ -245,6 +244,7 @@ export const INTEGRATION_LOCAL_TESTS: readonly string[] = [
   'bubblewrap-worktree-git.test.ts',
   'task-2270-graphify-exclusion.test.ts',
   'task-2286-native-sea-smoke.test.ts',
+  'task-2376-lifecycle-timing.test.ts',
 ];
 
 /** Why each local-only entry cannot run on a clean GitHub-hosted runner. */
@@ -255,6 +255,8 @@ export const INTEGRATION_LOCAL_REASONS: Readonly<Record<string, string>> = {
     'Spawns the uv-installed `graphify` CLI; neither uv nor graphify exists on a clean GitHub-hosted runner.',
   'task-2286-native-sea-smoke.test.ts':
     'Builds and runs the native single-executable artifact, which needs a Node >= MINIMUM_SEA_NODE_MAJOR SEA toolchain and per-OS packaging; the portable npm package and bundle checks cover packaging in the CI lane instead.',
+  'task-2376-lifecycle-timing.test.ts':
+    'Asserts lifecycle dwell and cycle-time values; retain that timing-dependent coverage in required local verification rather than GitHub CI\'s 1000ms test budget.',
 };
 
 /**

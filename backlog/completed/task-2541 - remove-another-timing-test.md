@@ -1,10 +1,10 @@
 ---
 id: TASK-2541
 title: remove another timing test
-status: backlog
-assignee: []
+status: done
+assignee: [codex]
 created_date: '2026-09-19 10:18'
-labels: []
+labels: [ai_sdlc]
 dependencies: []
 ordinal: 88007
 ---
