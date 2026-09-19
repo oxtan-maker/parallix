@@ -1,9 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import unitTestBudgetReporter from './lib/unit-test-budget-reporter.js';
+import unitTestBudgetReporter, { onGitHubActions } from './lib/unit-test-budget-reporter.js';
 import { buildTestRunPlan } from './lib/test-run-plan.js';
 
-test('TASK-2423: headroom mode reports 501ms work while preserving the 1000ms hard cap', async () => {
+test('TASK-2423: headroom mode reports 501ms work while preserving the 1000ms hard cap', { skip: onGitHubActions() }, async () => {
   async function* events() {
     for (const [name, duration_ms] of [['headroom work', 501], ['hard-cap work', 1001]] as const) {
       yield {

@@ -1,10 +1,10 @@
 ---
 id: TASK-2540
 title: fix tests not safe for github
-status: backlog
-assignee: []
+status: done
+assignee: [custom]
 created_date: '2026-09-19 06:06'
-labels: []
+labels: ["ai_sdlc"]
 dependencies: []
 ordinal: 88007
 ---

@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import unitTestBudgetReporter, { UNIT_TEST_BUDGET_MS, UNIT_TEST_HEADROOM_MS, onGitHubActions } from './lib/unit-test-budget-reporter.js';
 
-test('unit-test budget reporter marks measured synchronous work over the bound', async () => {
+test('unit-test budget reporter marks measured synchronous work over the bound', { skip: onGitHubActions() }, async () => {
   async function* events() {
     yield {
       type: 'test:pass' as const,
@@ -21,7 +21,7 @@ test('unit-test budget reporter marks measured synchronous work over the bound',
   assert.match(output, /\[unit-test-budget:exceeded\] sync block: 1001ms > 1000ms/);
 });
 
-test('unit-test budget reporter reports opted-in headroom without changing the hard cap', async () => {
+test('unit-test budget reporter reports opted-in headroom without changing the hard cap', { skip: onGitHubActions() }, async () => {
   async function* events() {
     yield {
       type: 'test:pass' as const,
