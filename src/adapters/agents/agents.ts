@@ -785,7 +785,7 @@ async function startAgent(step: string, opts: StartAgentOptions = { prompt: '' }
           log(fmt.status('WARN', `Could not persist blocklist entry for ${fmt.agent(chosen || '')}: ${(err as any).message}`));
           }
        } else {
-        log(fmt.status('INFO', `Skipping blocklist write for ${fmt.agent(chosen || '')}; failure not positively classified as a provider availability/quota block.`));
+        log(fmt.status('INFO', `Skipping blocklist write for ${fmt.agent(chosen ?? '')}; failure not positively classified as a provider availability/quota block.`));
       }
       chosen = undefined;
       continue;

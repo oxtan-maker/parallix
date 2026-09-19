@@ -10,6 +10,12 @@ test('local SonarQube setup stores one shared token and scanner reuses it', asyn
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'task-2527-sonar-'));
   const previous = process.env.FORGEJO_HOME;
   process.env.FORGEJO_HOME = home;
+  // Hermetic: clear any SONAR_TOKEN from the CI environment so this test asserts
+  // the local file-token path, not the CI env-token path (scripts/sonar-local.ts
+  // prefers process.env.SONAR_TOKEN). CI runs that export SONAR_TOKEN and also
+  // run npm run test:coverage must not fail here.
+  const previousToken = process.env.SONAR_TOKEN;
+  delete process.env.SONAR_TOKEN;
   try {
     const calls: Array<{ url: string, init?: RequestInit }> = [];
     const request: typeof fetch = async (url, init) => {
@@ -38,6 +44,7 @@ test('local SonarQube setup stores one shared token and scanner reuses it', asyn
     assert.equal(scan.env?.SONAR_TOKEN, 'local-scanner-token');
   } finally {
     if (previous === undefined) delete process.env.FORGEJO_HOME; else process.env.FORGEJO_HOME = previous;
+    if (previousToken === undefined) delete process.env.SONAR_TOKEN; else process.env.SONAR_TOKEN = previousToken;
     fs.rmSync(home, { recursive: true, force: true });
   }
 });

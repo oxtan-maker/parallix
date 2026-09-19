@@ -23,9 +23,10 @@ const {
   COVERAGE_INCLUDES,
   createPerRunScratchDirs,
   DEFAULT_TEST_TIMEOUT_MS,
+  coverageTestFiles,
   discoverTestFiles,
   listTempEntries,
-  registerExitHandlers,
+  normalizeLcov,
   resetPerRunScratchState,
   resolveTestTimeoutMs,
   runTests
@@ -54,10 +55,13 @@ test('coverage-gate dry-run exits 0 and lists files', () => {
   assert.match(result.stdout, /Found \d+ test file/);
 });
 
-test('coverage-gate excludes its own test file from authoritative discovery', () => {
+test('coverage-gate includes its own test file in authoritative discovery', () => {
   const testFiles = discoverTestFiles();
   const basenames = testFiles.map(file => path.basename(file));
-  assert.ok(!basenames.includes('coverage-gate.test.ts'));
+  assert.ok(basenames.includes('coverage-gate.test.ts'));
+  assert.ok(basenames.includes('e2e-real-agent-smoke.test.ts'));
+  assert.ok(!coverageTestFiles().some(file => /e2e-(?:real-agent-smoke|mission-lifecycle)\.test\.ts$/.test(file)));
+  assert.ok(coverageTestFiles().some(file => /task-1209-review-loop\.test\.ts$/.test(file)));
 });
 
 test('coverage-gate reports denominator and metric in output', () => {
@@ -142,6 +146,8 @@ test('runTests returns non-zero subprocess exit code on test failure', () => {
 test('buildCoverageArgs includes runtime globs and excludes test files', () => {
   const args = buildCoverageArgs(['/tmp/a.test.ts'], 90, true);
   assert.deepEqual(args.slice(0, 2), ['--import', 'tsx']);
+  assert.ok(args.some(arg => arg.includes('bootstrap-parallix-home.ts')));
+  assert.ok(args.includes('--experimental-test-module-mocks'));
   assert.ok(args.includes('--experimental-test-coverage'));
   assert.ok(args.includes('--test-coverage-lines=90'));
   for (const pattern of COVERAGE_INCLUDES) {
@@ -160,6 +166,12 @@ test('buildCoverageArgs includes runtime globs and excludes test files', () => {
 test('buildCoverageArgs does not load tsx for JavaScript-only test lists', () => {
   const args = buildCoverageArgs(['/tmp/a.test.js'], 90);
   assert.ok(!args.includes('tsx'));
+});
+
+test('normalizeLcov unions duplicate worker records by source line', () => {
+  const normalized = normalizeLcov('SF:src/example.ts\nDA:1,0\nDA:2,3\nend_of_record\nSF:src/example.ts\nDA:1,2\nDA:2,0\nend_of_record\n');
+  assert.equal(normalized, 'SF:src/example.ts\nDA:1,2\nDA:2,3\nLF:2\nLH:2\nend_of_record\n');
+  assert.equal(normalizeLcov(''), '');
 });
 
 test('resolveTestTimeoutMs uses default and valid env override', () => {

@@ -78,7 +78,7 @@ export function renderExecutionContextForLaunch(
   if (context.declaredGates.length > 0) {lines.push(`Declared gates: ${context.declaredGates.join('; ')}`);}
   if (context.dependencies.length > 0) {
     lines.push(`Dependencies: ${context.dependencies
-      .map((dependency) => `${dependency.reference}${dependency.outcome ? ` (${dependency.outcome})` : ''}`)
+      .map((dependency) => dependency.outcome ? `${dependency.reference} (${dependency.outcome})` : dependency.reference)
       .join('; ')}`);
   }
   // These four are persisted as execution/refinement facts and must survive the
@@ -90,8 +90,9 @@ export function renderExecutionContextForLaunch(
   if (latestCheckpoint) {
     const name = latestCheckpoint.rawFilename ?? `${latestCheckpoint.name}.md`;
     const firstLine = (latestCheckpoint.firstLine ?? '').trim();
+    const checkpoint = firstLine ? [name, firstLine].join(' — ') : name;
     lines.push(
-      `Most recent checkpoint: ${name}${firstLine ? ` — ${firstLine}` : ''}`,
+      `Most recent checkpoint: ${checkpoint}`,
       `Resume from there, or start the next checkpoint if that one is complete.`,
     );
   }

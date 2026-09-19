@@ -90,6 +90,56 @@ jobs:
           # mutating launch (even mocked ones). Confinement tests pin the probe.
           PARALLIX_NO_BUBBLEWRAP: '1'
 
+      # Shared coverage-plus-SonarQube command (the same command wired into
+      # workflow.config.json adapters.gates.preIntegration): it produces LCOV
+      # for the scanner without applying the legacy whole-tree threshold. The
+      # SonarQube quality gate owns the required 90% coverage of new code.
+      #
+      # Runs on trusted code only: push events and same-repo pull requests.
+      # GitHub Actions rejects the secrets context in a step-level if: conditional,
+      # so the guard branches on the event/repodata context rather than on the
+      # secret. Untrusted fork pull requests — which never receive repository
+      # secrets — are skipped and not blocked, and no secret is reachable from
+      # untrusted code. On trusted runs a missing token fails the job clearly
+      # (F2), so SonarQube stays mandatory where it can run.
+      - name: Ensure SONAR_TOKEN configured (trusted runs only)
+        if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+        run: |
+          if [ -z "${SONAR_TOKEN}" ]; then
+            echo '::error::SONAR_TOKEN environment secret is not configured'
+            exit 1
+          fi
+      - name: Run coverage plus mandatory SonarQube quality gate
+        if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository
+        run: npm run test:coverage -- --threshold 0 --lcov && npm run sonar > "$GITHUB_WORKSPACE/sonar-quality-gate.log" 2>&1
+        env:
+          CI: 'true'
+          PARALLIX_NO_BUBBLEWRAP: '1'
+          # Secrets arrive only through the GitHub secrets context, never a
+          # literal value. Scoped to the scan step (least privilege): the broad
+          # test:ci and npm ci steps do not inherit SONAR_TOKEN, so the local
+          # file-token test (task-2527) still sees the file token when it runs in
+          # a CI run that also has SONAR_TOKEN exported. Neither is committed,
+          # emitted to logs, nor made available to untrusted pull-request code.
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
+      - name: Publish SonarQube quality gate result
+        if: always()
+        run: |
+          if [ -f "$GITHUB_WORKSPACE/sonar-quality-gate.log" ]; then
+            {
+              printf '## SonarQube quality gate\n\n```\n'
+              tail -n 60 "$GITHUB_WORKSPACE/sonar-quality-gate.log"
+              printf '```\n'
+            } >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo '## SonarQube quality gate' >> "$GITHUB_STEP_SUMMARY"
+            echo '' >> "$GITHUB_STEP_SUMMARY"
+            echo '_Skipped: untrusted fork pull request (no repository secrets available)._' >> "$GITHUB_STEP_SUMMARY"
+          fi
+
   release:
     needs: ci-required
     if: github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.ci-required.result == 'success'

@@ -63,8 +63,13 @@ export async function setupSonar(options: { rootDir?: string, password?: string,
 }
 
 export function runSonar(options: { rootDir?: string, spawn?: typeof spawnSync } = {}) {
-  const token = readSonarToken(options.rootDir);
-  if (!token) { throw new Error('No local SonarQube token found. Run `npm run sonar:setup` first.'); }
+  // Trusted CI runs supply SONAR_TOKEN through an environment secret; local
+  // runs reuse the Forgejo-resolved token file. The scanner never prints the
+  // token, and the host URL is overridden through SONAR_HOST_URL for non-local
+  // servers (GitHub environment secret), so no loopback host or secret is
+  // committed. Local behavior is unchanged when SONAR_TOKEN is unset.
+  const token = process.env.SONAR_TOKEN || readSonarToken(options.rootDir);
+  if (!token) { throw new Error('No SonarQube token found. Set SONAR_TOKEN (CI) or run `npm run sonar:setup` (local).'); }
   const result = (options.spawn || spawnSync)('sonar-scanner-npm', [], { stdio: 'inherit', env: { ...process.env, SONAR_TOKEN: token } });
   if (result.error) { throw result.error; }
   if (result.status !== 0) { process.exitCode = result.status || 1; }

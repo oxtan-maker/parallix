@@ -24,6 +24,7 @@
         { "key": "build", "command": "npm run build", "order": 1 },
         { "key": "verification", "command": "./scripts/verify-local.sh static-analysis", "order": 2 },
         { "key": "integration-suite", "command": "npm run test:integration", "order": 3 },
+        { "key": "quality-gate", "command": "npm run test:coverage -- --threshold 0 --lcov && npm run sonar", "order": 4 },
         { "key": "workflow", "command": "node --import tsx test/e2e-mission-lifecycle.test.ts", "order": 5 },
         { "key": "agent-smoke", "command": "node --import tsx test/e2e-real-agent-smoke.test.ts", "order": 6 }
       ]

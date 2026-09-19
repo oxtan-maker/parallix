@@ -99,6 +99,29 @@ export interface MissionApplicationServices {
   readonly handoff: MissionHandoffService;
 }
 
+function resolveMissionExecutionContext(mission: MissionApplicationServices, slug: string) {
+  return Promise.all([
+    mission.executionContext.read({
+      operationId: 'execute-launch-context',
+      missionId: missionId(slug),
+      capabilities: new Set(['mission:context'] as const),
+    }),
+    mission.checkpoints.read({
+      operationId: 'execute-launch-checkpoints',
+      missionId: missionId(slug),
+      capabilities: new Set(['checkpoint:record'] as const),
+    }),
+  ]).then(([contextOutcome, checkpointsOutcome]) => {
+    const context = contextOutcome.status === 'completed' && contextOutcome.value?.context
+      ? contextOutcome.value.context
+      : null;
+    const latest = checkpointsOutcome.status === 'completed' && checkpointsOutcome.value
+      ? checkpointsOutcome.value.checkpoints[checkpointsOutcome.value.checkpoints.length - 1] ?? null
+      : null;
+    return context ? { context, latestCheckpoint: latest } : null;
+  });
+}
+
 export interface ProductionApplicationServices {
   readonly executeMission: ExecuteMissionService;
   /** Shared execute mechanism set; presentation composition uses these exact instances. */
@@ -236,27 +259,7 @@ export async function createProductionApplicationServices(
           // Route through the application-owned MissionExecutionContextService
           // (not a raw store read) and reuse Mission.checkpoints so the launch
           // read carries the latest checkpoint alongside the context.
-          resolveExecutionContext: (slug: string) =>
-            Promise.all([
-              mission.executionContext.read({
-                operationId: 'execute-launch-context',
-                missionId: missionId(slug),
-                capabilities: new Set(['mission:context'] as const),
-              }),
-              mission.checkpoints.read({
-                operationId: 'execute-launch-checkpoints',
-                missionId: missionId(slug),
-                capabilities: new Set(['checkpoint:record'] as const),
-              }),
-            ]).then(([contextOutcome, checkpointsOutcome]) => {
-              const context = contextOutcome.status === 'completed' && contextOutcome.value?.context
-                ? contextOutcome.value.context
-                : null;
-              const latest = checkpointsOutcome.status === 'completed' && checkpointsOutcome.value
-                ? checkpointsOutcome.value.checkpoints[checkpointsOutcome.value.checkpoints.length - 1] ?? null
-                : null;
-              return context ? { context, latestCheckpoint: latest } : null;
-            }),
+          resolveExecutionContext: (slug: string) => resolveMissionExecutionContext(mission, slug),
         } as any),
       }),
   } : defaultExecuteRuntime;

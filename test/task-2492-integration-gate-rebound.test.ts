@@ -18,7 +18,6 @@ import {
   INTEGRATION_GATE_REBOUND_EVENT,
   integrationGateFailureReason,
   integrationOnlyCoverageNote,
-  probeBaseBranchReproduction,
   routeIntegrationGateFailure,
   type IntegrationGateRouteOptions,
 } from '../src/adapters/cli/commands/integrate-gate-rebound.js';
@@ -85,81 +84,6 @@ test('TASK-2492: the bounced prompt names the failed gate command and the integr
   assert.match(prompt, /review-identity-placeholder/, 'the gate output survives into the handoff');
 });
 
-// ── Base-branch reproduction probe ──────────────────────────────────────────
-
-test('TASK-2492: the reproduction probe refuses to run when the base worktree is not on the base branch', async () => {
-  const probe = await probeBaseBranchReproduction({
-    slug: SLUG,
-    baseWorktree: '/tmp/base',
-    baseBranch: 'main',
-    failedGate: failedGate(),
-    gitFn: (() => ({ status: 0, stdout: 'mission/other\n', stderr: '' })) as never,
-    captureFinalTreeFn: (() => { throw new Error('must not capture'); }) as never,
-    runPhaseGatesFn: (() => { throw new Error('must not run a gate'); }) as never,
-    log: () => {},
-  });
-  assert.equal(probe.checked, false);
-  assert.match(probe.detail, /not main/);
-});
-
-test('TASK-2492: the reproduction probe refuses to run against a dirty base worktree', async () => {
-  const probe = await probeBaseBranchReproduction({
-    slug: SLUG,
-    baseWorktree: '/tmp/base',
-    baseBranch: 'main',
-    failedGate: failedGate(),
-    gitFn: (() => ({ status: 0, stdout: 'main\n', stderr: '' })) as never,
-    captureFinalTreeFn: (() => ({ ok: false, error: 'selected execution root is not finalized (dirty tree): /tmp/base' })) as never,
-    runPhaseGatesFn: (() => { throw new Error('must not run a gate'); }) as never,
-    log: () => {},
-  });
-  assert.equal(probe.checked, false);
-  assert.match(probe.detail, /dirty tree/);
-});
-
-test('TASK-2492: the reproduction probe runs only the failed gate command in the clean base worktree', async () => {
-  const ran: Array<{ checkoutPath: string; gates: unknown }> = [];
-  const probe = await probeBaseBranchReproduction({
-    slug: SLUG,
-    baseWorktree: '/tmp/base',
-    baseBranch: 'main',
-    failedGate: failedGate(),
-    gitFn: (() => ({ status: 0, stdout: 'main\n', stderr: '' })) as never,
-    captureFinalTreeFn: (() => ({ ok: true, rootDir: '/tmp/base', commit: 'abc123def456', tree: 't' })) as never,
-    runPhaseGatesFn: (async (_phase: string, opts: any) => {
-      ran.push({ checkoutPath: opts.checkoutPath, gates: opts.gates });
-      return { ok: false, phase: 'integration', gates: opts.gates, executed: 1, skipped: false, dryRun: false, failedGate: failedGate(), error: 'gate failed on main' };
-    }) as never,
-    log: () => {},
-    gateRunLog: () => {},
-    gateRunError: () => {},
-  });
-  assert.equal(ran.length, 1, 'exactly one probe execution');
-  assert.equal(ran[0]!.checkoutPath, '/tmp/base');
-  assert.deepEqual(ran[0]!.gates, [{ key: 'integration-suite', command: GATE_COMMAND, order: 0 }]);
-  assert.equal(probe.checked, true);
-  assert.equal(probe.reproduced, true);
-  assert.equal(probe.baseCommit, 'abc123def456');
-});
-
-test('TASK-2492: a gate that passes on the base branch is reported as a mission regression', async () => {
-  const probe = await probeBaseBranchReproduction({
-    slug: SLUG,
-    baseWorktree: '/tmp/base',
-    baseBranch: 'main',
-    failedGate: failedGate(),
-    gitFn: (() => ({ status: 0, stdout: 'main\n', stderr: '' })) as never,
-    captureFinalTreeFn: (() => ({ ok: true, rootDir: '/tmp/base', commit: 'abc123', tree: 't' })) as never,
-    runPhaseGatesFn: (async (_p: string, o: any) => ({ ok: true, phase: 'integration', gates: o.gates, executed: 1, skipped: false, dryRun: false, failedGate: null, error: null })) as never,
-    log: () => {},
-    gateRunLog: () => {},
-    gateRunError: () => {},
-  });
-  assert.equal(probe.checked, true);
-  assert.equal(probe.reproduced, false);
-  assert.match(probe.detail, /mission regression/);
-});
-
 // ── Routing: the four operator-facing outcomes ──────────────────────────────
 
 interface Harness {
@@ -186,7 +110,6 @@ function routeArgs(over: Partial<IntegrationGateRouteOptions> & { spent?: number
     transitionTaskFn: async (slug: string) => { harness.transitions.push(slug); return true; },
     readReboundsFn: async () => spent,
     recordReboundFn: async (slug: string, facts: any) => { harness.recorded.push({ slug, gate: facts.gate }); return true; },
-    probeBaseBranchReproductionFn: (async () => ({ checked: true, reproduced: false, detail: 'passes on main', baseCommit: 'abc123' })) as never,
     captureFinalTreeFn: (() => ({ ok: true, rootDir: '/tmp/mission', commit: 'c', tree: 't' })) as never,
     runPhaseGatesFn: (async (_p: string, o: any) => (rerunOk
       ? { ok: true, phase: 'integration', gates: o.gates, executed: 1, skipped: false, dryRun: false, failedGate: null, error: null }
@@ -219,21 +142,6 @@ test('TASK-2492: a bounce whose re-run stays red reports exhausted without a sec
   assert.equal(h.launches, 1, 'one relaunch per px integrate invocation');
 });
 
-test('TASK-2492/TASK-2507: a gate failure reproducing on main reports the evidence and never bounces', async () => {
-  const h = harness();
-  const route = await routeIntegrationGateFailure(routeArgs({
-    spent: 0,
-    probeBaseBranchReproductionFn: (async () => ({ checked: true, reproduced: true, detail: 'also fails on main', baseCommit: 'abc123' })) as never,
-  }, h));
-  assert.equal(route.route, 'mainline');
-  assert.equal(h.launches, 0, 'a main problem never launches an implementer');
-  assert.deepEqual(h.transitions, [], 'a main problem never transitions the mission to active');
-  assert.deepEqual(h.recorded, [], 'a main problem spends no integration-gate rebound budget');
-  assert.match(h.messages.join('\n'), /also fails on main/, 'the gate evidence is reported');
-  assert.doesNotMatch(h.messages.join('\n'), /MAINGATE/, 'no backlog identifier is fabricated');
-  assert.match(h.messages.join('\n'), /Human action required/);
-});
-
 test('TASK-2492: an exhausted rebound budget escalates to a human without a transition or a launch', async () => {
   const h = harness();
   const route = await routeIntegrationGateFailure(routeArgs({ spent: INTEGRATION_GATE_REBOUND_LIMIT }, h));
@@ -250,16 +158,6 @@ test('TASK-2492: an unreadable rebound budget strands rather than bouncing an un
   const route = await routeIntegrationGateFailure(routeArgs({ spent: null }, h));
   assert.equal(route.route, 'stranded');
   assert.equal(h.launches, 0);
-});
-
-test('TASK-2492: an undeterminable base-branch reproduction is treated as a mission regression', async () => {
-  const h = harness();
-  const route = await routeIntegrationGateFailure(routeArgs({
-    probeBaseBranchReproductionFn: (async () => ({ checked: false, reproduced: false, detail: 'base worktree is dirty', baseCommit: null })) as never,
-  }, h));
-  assert.equal(route.route, 'fixed');
-  assert.equal(h.launches, 1, 'an undeterminable probe still takes the recoverable route');
-  assert.notEqual(route.route, 'mainline', 'and never invents a mainline problem from an unclassified failure');
 });
 
 test('TASK-2492: a repair left uncommitted fails the re-run instead of being reported as fixed', async () => {

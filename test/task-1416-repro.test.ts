@@ -179,6 +179,8 @@ test('mistral exit 1 with real session telemetry is misclassified as a launch fa
   // Vibe run followed by a non-zero exit.
   const vibeScript = `
     if (process.argv.includes('--help')) { process.exit(0); }
+    const fs = require('fs');
+    const path = require('path');
     const sessionDir = path.join(process.cwd(), '.workflow', 'vibe-home', 'logs', 'session', 'session_20260704_000000_task1416');
     fs.mkdirSync(sessionDir, { recursive: true });
     fs.writeFileSync(path.join(sessionDir, 'meta.json'), JSON.stringify({

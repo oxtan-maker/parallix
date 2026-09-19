@@ -88,7 +88,6 @@ function routeArgs(h: Harness, repairChangesDiff: boolean): IntegrationGateRoute
     transitionTaskFn: async (slug: string) => { h.transitions.push(slug); return true; },
     readReboundsFn: async () => 0,
     recordReboundFn: async () => true,
-    probeBaseBranchReproductionFn: (async () => ({ checked: true, reproduced: false, detail: 'passes on main', baseCommit: 'base-commit' })) as never,
     captureFinalTreeFn: (() => ({ ok: true, rootDir: '/tmp/mission', commit: h.head.commit, tree: h.head.tree })) as never,
     // The identical gate set re-runs green once the repair is in place.
     runPhaseGatesFn: (async (_phase: string, o: any) => ({

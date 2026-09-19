@@ -96,8 +96,6 @@ export function createIntegrationGateStep({ gates, landing, verification }: Inte
     const route = await seams.routeIntegrationGateFailureFn({
       slug,
       missionWorktree: checkout,
-      baseWorktree: context.baseWorktree,
-      baseBranch: context.baseBranch,
       verificationCommand: verification.formatVerificationCommand(context.area, checkout),
       failedGate: result.failedGate,
       gateError: result.error,

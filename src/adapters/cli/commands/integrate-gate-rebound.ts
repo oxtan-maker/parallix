@@ -3,23 +3,19 @@
 // `runPhaseGates('integration', ...)` used to dead-end: a red gate logged and
 // threw `IntegrationAbort`, leaving an approved mission parked in
 // `ready-for-integration` until a human noticed. This module classifies that
-// failure into exactly one of four operator-facing routes and, for the one
+// failure into bounded operator-facing routes and, for the recoverable route,
 // recoverable route, hands the failure to the same rebound kernel the
 // squash-commit hook bounce already uses:
 //
 //  1. `limit-reached` — the mission has already spent its persisted
 //     integration-gate rebound budget. No transition, no implementer launch.
-//  2. `mainline`      — the same gate command fails on the base branch too, so
-//     the regression is not the mission's. The gate evidence is reported and
-//     the integration attempt stops; the implementer is not bounced and no
-//     artefact is written to the base checkout (TASK-2507).
-//  3. `fixed` / `exhausted` — a mission regression inside budget. The kernel
+//  2. `fixed` / `exhausted` — a mission regression inside budget. The kernel
 //     transitions the task back to `active`, launches the implementer with the
 //     gate evidence, and re-runs the identical gate set. Only a passing re-run
 //     is reported `fixed`.
-//  4. `stranded`      — the failure could not be classified or no implementer
+//  3. `stranded`      — the failure could not be classified or no implementer
 //     could be named, which is the pre-TASK-2492 abort behaviour.
-//  5. `revision-changed` — the repair worked, but it changed the mission diff
+//  4. `revision-changed` — the repair worked, but it changed the mission diff
 //     the reviewer approved. The standing approval is retracted on the pull
 //     request and the integration attempt stops, so the reviewer decides on
 //     the revision that actually lands (TASK-2528).
@@ -30,7 +26,6 @@ import * as fmt from '../../../application/presentation/cli-format.js';
 import { rebound, type GateFailureReason, type ReboundContext } from '../../../application/rebound-kernel.js';
 import { runPhaseGates, type GateRunOutcome, type RepositoryGate } from '../../config/repository-gates.js';
 import { captureFinalIntegrationTree } from './integrate-gates.js';
-import { git } from '../../git/git.js';
 import { DEFAULT_FORGEJO_USER, postReview, readToken } from '../../forgejo/forgejo.js';
 import { missionId } from '../../../domain/mission.js';
 
@@ -61,7 +56,6 @@ export type IntegrationGateRoute =
   | { route: 'fixed'; rebounds: number }
   | { route: 'revision-changed'; rebounds: number; approvedRevision: string; repairedRevision: string; invalidation: ApprovalInvalidation }
   | { route: 'exhausted'; rebounds: number; diagnostic: string }
-  | { route: 'mainline'; detail: string; baseCommit: string | null }
   | { route: 'limit-reached'; rebounds: number }
   | { route: 'stranded'; detail: string };
 
@@ -161,89 +155,6 @@ export async function recordIntegrationGateRebound(
   return appended === true;
 }
 
-// ── Base-branch reproduction ─────────────────────────────────────────────────
-
-export interface BaseReproductionProbe {
-  /** False when no safe, deterministic probe was possible. */
-  checked: boolean;
-  /** True only when the same gate command also failed on the base branch. */
-  reproduced: boolean;
-  detail: string;
-  baseCommit: string | null;
-}
-
-/**
- * Re-run the one failed gate command against the base branch checkout.
- *
- * The probe is read-only: it runs the repository's own configured gate command
- * in the existing base worktree through the same `runPhaseGates` runner, and
- * refuses to run at all unless that worktree is already on the base branch with
- * a clean tree. It never checks out, resets, fetches, or pushes anything, so no
- * shared branch is mutated to obtain the answer.
- */
-export async function probeBaseBranchReproduction(opts: {
-  slug: string;
-  baseWorktree?: string | null;
-  baseBranch?: string | null;
-  failedGate: GateRunOutcome;
-  realAgent?: string | null;
-  realAgentModel?: string | null;
-  runPhaseGatesFn?: typeof runPhaseGates;
-  gitFn?: typeof git;
-  captureFinalTreeFn?: typeof captureFinalIntegrationTree;
-  /** Receives `fmt.status(...)` lines. */
-  log?: (_msg: string) => void;
-  /** Receives the gate runner's raw text. */
-  gateRunLog?: (_msg: string) => void;
-  gateRunError?: (_msg: string) => void;
-}): Promise<BaseReproductionProbe> {
-  const {
-    slug,
-    baseWorktree,
-    baseBranch,
-    failedGate,
-    runPhaseGatesFn = runPhaseGates,
-    gitFn = git,
-    captureFinalTreeFn = captureFinalIntegrationTree,
-    log = fmt.log.plain,
-  } = opts;
-
-  const unchecked = (detail: string): BaseReproductionProbe => ({ checked: false, reproduced: false, detail, baseCommit: null });
-
-  if (!baseWorktree || !baseBranch) {
-    return unchecked('no base worktree/branch resolved for a base-branch reproduction probe');
-  }
-  const head = gitFn(['-C', baseWorktree, 'branch', '--show-current']);
-  const headBranch = String(head.stdout || '').trim();
-  if (head.status !== 0 || headBranch !== baseBranch) {
-    return unchecked(`base worktree ${baseWorktree} is on "${headBranch || 'unknown'}", not ${baseBranch}; skipping the reproduction probe rather than checking it out`);
-  }
-  const tree = captureFinalTreeFn(baseWorktree);
-  if (!tree.ok) {
-    return unchecked(`base worktree ${baseWorktree} is not in a probeable state: ${tree.error}`);
-  }
-
-  log(fmt.status('INFO', `Checking whether integration gate ${failedGate.key} also fails on ${baseBranch} (${tree.commit?.slice(0, 12)}) before bouncing the implementer.`));
-  const gate: RepositoryGate = { key: failedGate.key, command: failedGate.command, order: 0 };
-  const probe = await runPhaseGatesFn('integration', {
-    slug,
-    checkoutPath: baseWorktree,
-    gates: [gate],
-    log: opts.gateRunLog ?? fmt.log.plain,
-    error: opts.gateRunError ?? fmt.log.fail,
-    realAgent: opts.realAgent,
-    realAgentModel: opts.realAgentModel,
-  });
-  return {
-    checked: true,
-    reproduced: !probe.ok,
-    detail: probe.ok
-      ? `integration gate ${failedGate.key} passes on ${baseBranch}; the failure is a mission regression`
-      : `integration gate ${failedGate.key} also fails on ${baseBranch}: ${probe.error ?? 'non-zero exit'}`,
-    baseCommit: tree.commit ?? null,
-  };
-}
-
 // ── Stale-approval retraction (TASK-2528) ────────────────────────────────────
 
 /** The Forgejo logins whose standing approval a changed revision invalidates. */
@@ -297,7 +208,7 @@ export async function invalidateApprovedPrReview(opts: {
     }
     const posted = postReviewFn(opts.branch, token, 'request-changes', opts.summary, { forgejoUser: holder });
     if (posted?.ok) { retracted.push(holder); }
-    else { errors.push(`request-changes as ${holder} on ${opts.branch} failed: ${posted?.error || posted?.raw || 'unknown error'}`); }
+    else { errors.push(`request-changes as ${holder} on ${opts.branch} failed: ${posted?.error ?? posted?.raw ?? 'unknown error'}`); }
   }
   return { ok: errors.length === 0, retracted, errors };
 }
@@ -318,14 +229,54 @@ export function staleApprovalSummary(slug: string, approvedRevision: string, rep
   ].join('\n');
 }
 
+async function routeFixedIntegrationGateRebound({
+  opts, failedGate, outcome, rebounds, approvedRevision, captureFinalTreeFn, invalidateApprovalFn, log, error,
+}: {
+  opts: IntegrationGateRouteOptions;
+  failedGate: GateRunOutcome;
+  outcome: any;
+  rebounds: number;
+  approvedRevision: string | null;
+  captureFinalTreeFn: typeof captureFinalIntegrationTree;
+  invalidateApprovalFn: typeof invalidateApprovedPrReview;
+  log: (_msg: string) => void;
+  error: (_msg: string) => void;
+}): Promise<IntegrationGateRoute> {
+  log(fmt.status('PASS', `Integration gate ${failedGate.key} repaired by ${outcome.implementer} and re-ran green (${rebounds}/${INTEGRATION_GATE_REBOUND_LIMIT} integration-gate rebounds spent).`));
+  const repairedTree = captureFinalTreeFn(opts.missionWorktree);
+  const repairedRevision = repairedTree.ok ? (repairedTree.tree ?? repairedTree.commit ?? null) : null;
+  if (approvedRevision !== null && repairedRevision !== null && approvedRevision === repairedRevision) {
+    log(fmt.status('INFO', `The repair left the mission tree at ${approvedRevision}, the revision the review approved; the existing approval still covers what would land.`));
+    return { route: 'fixed', rebounds };
+  }
+
+  const approvedLabel = approvedRevision ?? 'unknown';
+  const repairedLabel = repairedRevision ?? 'unknown';
+  const branch = opts.branch ?? `mission/${opts.slug}`;
+  const invalidation = await invalidateApprovalFn({
+    slug: opts.slug,
+    branch,
+    approval: opts.approval,
+    reviewerUser: opts.reviewerUser ?? null,
+    summary: staleApprovalSummary(opts.slug, approvedLabel, repairedLabel, failedGate.key),
+  });
+  error(fmt.status('FAIL', `The integration-gate repair changed ${opts.slug} from the approved revision ${approvedLabel} to ${repairedLabel}. The approval covers a revision that is no longer what would land, so the merge is not allowed on it.`));
+  for (const holder of invalidation.retracted) {
+    error(fmt.status('INFO', `Retracted ${holder}'s approval on ${branch} with a request-changes review.`));
+  }
+  for (const problem of invalidation.errors) {
+    error(fmt.status('FAIL', `Stale approval left standing: ${problem}. Clear it by hand before the next px integrate.`));
+  }
+  error(fmt.status('FAIL', `${opts.slug} must go back through review: run px review ${opts.slug} --start and have the repaired revision ${repairedLabel} re-reviewed before integrating again.`));
+  return { route: 'revision-changed', rebounds, approvedRevision: approvedLabel, repairedRevision: repairedLabel, invalidation };
+}
+
 // ── Route ────────────────────────────────────────────────────────────────────
 
 export interface IntegrationGateRouteOptions {
   slug: string;
   /** Mission checkout the failed gates ran from. */
   missionWorktree: string;
-  baseWorktree?: string | null;
-  baseBranch?: string | null;
   /** The mission's ordinary verification command, for the coverage note. */
   verificationCommand?: string | null;
   failedGate: GateRunOutcome | null;
@@ -349,7 +300,6 @@ export interface IntegrationGateRouteOptions {
   // second gate execution.
   readReboundsFn?: typeof readIntegrationGateRebounds;
   recordReboundFn?: typeof recordIntegrationGateRebound;
-  probeBaseBranchReproductionFn?: typeof probeBaseBranchReproduction;
   runPhaseGatesFn?: typeof runPhaseGates;
   captureFinalTreeFn?: typeof captureFinalIntegrationTree;
   reboundFn?: typeof rebound;
@@ -375,7 +325,6 @@ export async function routeIntegrationGateFailure(opts: IntegrationGateRouteOpti
     gates,
     readReboundsFn = readIntegrationGateRebounds,
     recordReboundFn = recordIntegrationGateRebound,
-    probeBaseBranchReproductionFn = probeBaseBranchReproduction,
     runPhaseGatesFn = runPhaseGates,
     captureFinalTreeFn = captureFinalIntegrationTree,
     reboundFn = rebound,
@@ -402,31 +351,6 @@ export async function routeIntegrationGateFailure(opts: IntegrationGateRouteOpti
     error(fmt.status('FAIL', `Reproduce with: ${failedGate.command} (from ${missionWorktree}).`));
     return { route: 'limit-reached', rebounds: spent };
   }
-
-  // 2. A failure that also reproduces on the base branch is not this mission's.
-  const probe = await probeBaseBranchReproductionFn({
-    slug,
-    baseWorktree: opts.baseWorktree,
-    baseBranch: opts.baseBranch,
-    failedGate,
-    realAgent: opts.realAgent,
-    realAgentModel: opts.realAgentModel,
-    log,
-    gateRunLog,
-    gateRunError,
-  });
-  if (probe.checked && probe.reproduced) {
-    // The evidence is reported and nothing is written: a failed integration
-    // must not mutate the shared base checkout or mint a backlog identifier
-    // outside the numeric `Backlog.md` authority (TASK-2507). Filing the
-    // mainline problem is a human decision through the ordinary backlog
-    // workflow.
-    error(fmt.status('FAIL', `${probe.detail}. ${slug} was not bounced to its implementer; no backlog task was created. Human action required on the mainline problem.`));
-    error(fmt.status('FAIL', `Reproduce with: ${failedGate.command} (from ${opts.baseWorktree}, ${opts.baseBranch} @ ${probe.baseCommit ?? 'unknown'}); exit code ${failedGate.exitCode ?? 'unknown'}.`));
-    if (opts.gateError) { error(fmt.status('FAIL', opts.gateError)); }
-    return { route: 'mainline', detail: probe.detail, baseCommit: probe.baseCommit };
-  }
-  log(fmt.status('INFO', probe.checked ? probe.detail : `Base-branch reproduction not determined (${probe.detail}); treating the failure as a mission regression.`));
 
   if (!opts.implementer) {
     error(fmt.status('FAIL', `No implementer could be named for ${slug}; not bouncing the integration gate failure. Human action required.`));
@@ -488,40 +412,7 @@ export async function routeIntegrationGateFailure(opts: IntegrationGateRouteOpti
 
   const rebounds = spent + 1;
   if (outcome.outcome === 'fixed') {
-    log(fmt.status('PASS', `Integration gate ${failedGate.key} repaired by ${outcome.implementer} and re-ran green (${rebounds}/${INTEGRATION_GATE_REBOUND_LIMIT} integration-gate rebounds spent).`));
-
-    // A green re-run is not enough to merge. If the repair changed the mission
-    // diff, the approval on the pull request was given to a revision that no
-    // longer exists, and merging here would land code in its final form without
-    // ever being reviewed (TASK-1281's trust gap, reached through TASK-2492's
-    // recovery path). Retract the approval and stop; the mission is already
-    // back with its implementer, so it re-enters review the ordinary way.
-    const repairedTree = captureFinalTreeFn(missionWorktree);
-    const repairedRevision = repairedTree.ok ? (repairedTree.tree ?? repairedTree.commit ?? null) : null;
-    const unchanged = approvedRevision !== null && repairedRevision !== null && approvedRevision === repairedRevision;
-    if (unchanged) {
-      log(fmt.status('INFO', `The repair left the mission tree at ${approvedRevision}, the revision the review approved; the existing approval still covers what would land.`));
-      return { route: 'fixed', rebounds };
-    }
-
-    const approvedLabel = approvedRevision ?? 'unknown';
-    const repairedLabel = repairedRevision ?? 'unknown';
-    const invalidation = await invalidateApprovalFn({
-      slug,
-      branch: opts.branch || `mission/${slug}`,
-      approval: opts.approval,
-      reviewerUser: opts.reviewerUser ?? null,
-      summary: staleApprovalSummary(slug, approvedLabel, repairedLabel, failedGate.key),
-    });
-    error(fmt.status('FAIL', `The integration-gate repair changed ${slug} from the approved revision ${approvedLabel} to ${repairedLabel}. The approval covers a revision that is no longer what would land, so the merge is not allowed on it.`));
-    for (const holder of invalidation.retracted) {
-      error(fmt.status('INFO', `Retracted ${holder}'s approval on ${opts.branch || `mission/${slug}`} with a request-changes review.`));
-    }
-    for (const problem of invalidation.errors) {
-      error(fmt.status('FAIL', `Stale approval left standing: ${problem}. Clear it by hand before the next px integrate.`));
-    }
-    error(fmt.status('FAIL', `${slug} must go back through review: run px review ${slug} --start and have the repaired revision ${repairedLabel} re-reviewed before integrating again.`));
-    return { route: 'revision-changed', rebounds, approvedRevision: approvedLabel, repairedRevision: repairedLabel, invalidation };
+    return routeFixedIntegrationGateRebound({ opts, failedGate, outcome, rebounds, approvedRevision, captureFinalTreeFn, invalidateApprovalFn, log, error });
   }
   error(fmt.status('FAIL', `Integration gate ${failedGate.key} still fails for ${slug} after the bounce (${rebounds}/${INTEGRATION_GATE_REBOUND_LIMIT} integration-gate rebounds spent).`));
   return { route: 'exhausted', rebounds, diagnostic: outcome.diagnostic };

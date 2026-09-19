@@ -27,8 +27,6 @@ function routeArgs(prompts: string[], messages: string[], treeFinalized: boolean
   return {
     slug: 'task-2504-fixture',
     missionWorktree: '/tmp/mission',
-    baseWorktree: '/tmp/base',
-    baseBranch: 'main',
     verificationCommand: './scripts/verify-local.sh all',
     failedGate,
     gateError: 'Repository gate "integration-suite" exited with code 1 for integration.',
@@ -39,7 +37,6 @@ function routeArgs(prompts: string[], messages: string[], treeFinalized: boolean
     transitionTaskFn: async () => true,
     readReboundsFn: async () => 0,
     recordReboundFn: async () => true,
-    probeBaseBranchReproductionFn: (async () => ({ checked: true, reproduced: false, detail: 'passes on main', baseCommit: 'abc123' })) as never,
     captureFinalTreeFn: (() => (treeFinalized
       ? { ok: true, rootDir: '/tmp/mission', commit: 'c', tree: 't' }
       : { ok: false, error: 'selected execution root is not finalized (dirty tree): /tmp/mission' })) as never,

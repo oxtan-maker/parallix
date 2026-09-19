@@ -161,7 +161,6 @@ const expectedIntegrationFiles = [
   'task-2502-codeql-suite-flag.test.ts',
   // TASK-2507: routes a failed integration gate against a temporary Git
   // repository to prove the base worktree stays clean.
-  'task-2507-mainline-gate-mutation-repro.test.ts',
   'task-2509-local-version-allocation.test.ts', 'task-2509-release-workflow.test.ts',
   // TASK-2534: drives the real squash landing against a throwaway repository
   // to prove stale backlog/tasks copies never land, so it crosses the

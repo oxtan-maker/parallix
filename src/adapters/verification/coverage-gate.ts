@@ -53,14 +53,14 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { compareCodeUnits } from '../../domain/comparators.js';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import * as fmt from '../../application/presentation/cli-format.js';
 import { packageRoot } from '../filesystem/package-root.js';
 import { defaultManifestDir, ensureManifestDir, recoverRecordedTempRoots } from './temp-root-registry.js';
 
 const MODULE_DIR = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = packageRoot(MODULE_DIR);
-const SELF_TEST_FILE = 'coverage-gate.test.ts';
+const E2E_TEST_FILES = new Set(['e2e-real-agent-smoke.test.ts', 'e2e-mission-lifecycle.test.ts']);
 const TEMP_DIR_PREFIXES = [
   'agents-',
   'sessions-',
@@ -155,9 +155,34 @@ function discoverTestFiles() {
   if (!fs.existsSync(testDir)) {return [];}
   return fs.readdirSync(testDir)
     .filter(file => file.endsWith('.test.ts'))
-    .filter(file => file !== SELF_TEST_FILE)
     .map(file => path.join(testDir, file))
     .sort(compareCodeUnits);
+}
+
+function coverageTestFiles() {
+  return discoverTestFiles().filter(file => !E2E_TEST_FILES.has(path.basename(file)));
+}
+
+function normalizeLcov(lcovText: string) {
+  const files = new Map<string, Map<number, number>>();
+  let sourceFile = '';
+  for (const line of lcovText.split('\n')) {
+    if (line.startsWith('SF:')) {
+      sourceFile = line.slice(3);
+      if (!files.has(sourceFile)) {files.set(sourceFile, new Map());}
+    } else if (sourceFile && line.startsWith('DA:')) {
+      const [lineNumber, hits] = line.slice(3).split(',').map(Number);
+      const lines = files.get(sourceFile)!;
+      lines.set(lineNumber, Math.max(lines.get(lineNumber) ?? 0, hits));
+    }
+  }
+  return [...files].map(([file, lines]) => [
+    `SF:${file}`,
+    ...[...lines].sort(([a], [b]) => a - b).map(([line, hits]) => `DA:${line},${hits}`),
+    `LF:${lines.size}`,
+    `LH:${[...lines.values()].filter(hits => hits > 0).length}`,
+    'end_of_record',
+  ].join('\n')).join('\n') + (files.size ? '\n' : '');
 }
 
 function listTempEntries(tmpRoot: string = os.tmpdir()) {
@@ -257,9 +282,11 @@ function resetPerRunScratchState() {
 }
 
 function buildCoverageArgs(testFiles: string[], coverageThreshold = threshold, useLcov = lcov) {
+  const runsTypeScript = testFiles.some(file => file.endsWith('.ts'));
   const args = [
-    ...(testFiles.some(file => file.endsWith('.ts')) ? ['--import', 'tsx'] : []),
+    ...(runsTypeScript ? ['--import', 'tsx', '--import', pathToFileURL(path.join(REPO_ROOT, 'test', 'bootstrap-parallix-home.ts')).href] : []),
     '--test',
+    '--experimental-test-module-mocks',
     '--experimental-test-coverage',
     `--test-coverage-lines=${coverageThreshold}`,
     ...COVERAGE_INCLUDES.flatMap(pattern => ['--test-coverage-include', pattern]),
@@ -307,6 +334,11 @@ function runTests(testFiles: string[], coverageThreshold = threshold, _spawnSync
     timeout: resolveTestTimeoutMs(),
   });
 
+  if (lcov && result.status === 0) {
+    const lcovPath = path.join(REPO_ROOT, 'coverage', 'lcov.info');
+    fs.writeFileSync(lcovPath, normalizeLcov(fs.readFileSync(lcovPath, 'utf8')));
+  }
+
   cleanupNewTempDirs(tmpEntriesBefore, tmpRoot);
   cleanupPerRunScratch();
 
@@ -327,7 +359,7 @@ function main() {
   // Recover orphaned scratch directories from any previous SIGKILL'd run
   recoverOrphanedScratchDirs();
 
-  const testFiles = discoverTestFiles();
+  const testFiles = coverageTestFiles();
   if (testFiles.length === 0) {
     fmt.log.fail('no parallix test files found under test/');
     process.exit(1);
@@ -382,7 +414,7 @@ function run(args: string[], options: CoverageGateOptions = {}) {
   try {
     recoverOrphanedScratchDirs();
     if (dryRun_) {
-      const testFiles = discoverTestFiles();
+      const testFiles = coverageTestFiles();
       if (testFiles.length === 0) {
         if (typeof exitFn === 'function') {exitFn(1);}
       } else {
@@ -397,7 +429,7 @@ function run(args: string[], options: CoverageGateOptions = {}) {
       }
     } else {
       registerExitHandlers();
-      exitFn(runTests(discoverTestFiles(), threshold));
+      exitFn(runTests(coverageTestFiles(), threshold));
     }
   } finally {
     threshold = savedThreshold;
@@ -413,11 +445,13 @@ function run(args: string[], options: CoverageGateOptions = {}) {
 (run as any).createPerRunTmpRoot = createPerRunTmpRoot;
 (run as any).COVERAGE_EXCLUDES = COVERAGE_EXCLUDES;
 (run as any).COVERAGE_INCLUDES = COVERAGE_INCLUDES;
+(run as any).coverageTestFiles = coverageTestFiles;
 (run as any).DEFAULT_TEST_TIMEOUT_MS = DEFAULT_TEST_TIMEOUT_MS;
 (run as any).discoverTestFiles = discoverTestFiles;
 (run as any).COVERAGE_GATE_MANIFEST_DIR = COVERAGE_GATE_MANIFEST_DIR;
 (run as any).flushCoverageManifest = flushCoverageManifest;
 (run as any).listTempEntries = listTempEntries;
+(run as any).normalizeLcov = normalizeLcov;
 (run as any).recoverOrphanedScratchDirs = recoverOrphanedScratchDirs;
 (run as any).registerExitHandlers = registerExitHandlers;
 (run as any).resetPerRunScratchState = resetPerRunScratchState;
@@ -425,4 +459,4 @@ function run(args: string[], options: CoverageGateOptions = {}) {
 (run as any).runTests = runTests;
 (run as any).shouldCleanTempDir = shouldCleanTempDir;
 export default run;
-export { run, cleanupPerRunScratch, createMockGraphifyBin, createPerRunScratchDirs, createPerRunTmpRoot, COVERAGE_EXCLUDES, COVERAGE_GATE_MANIFEST_DIR, COVERAGE_INCLUDES, DEFAULT_TEST_TIMEOUT_MS, discoverTestFiles, flushCoverageManifest, listTempEntries, recoverOrphanedScratchDirs, registerExitHandlers, resetPerRunScratchState, resolveTestTimeoutMs, runTests, shouldCleanTempDir };
+export { run, cleanupPerRunScratch, createMockGraphifyBin, createPerRunScratchDirs, createPerRunTmpRoot, COVERAGE_EXCLUDES, COVERAGE_GATE_MANIFEST_DIR, COVERAGE_INCLUDES, DEFAULT_TEST_TIMEOUT_MS, coverageTestFiles, discoverTestFiles, flushCoverageManifest, listTempEntries, normalizeLcov, recoverOrphanedScratchDirs, registerExitHandlers, resetPerRunScratchState, resolveTestTimeoutMs, runTests, shouldCleanTempDir };

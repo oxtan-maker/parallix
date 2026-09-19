@@ -303,11 +303,17 @@ test('validateRepositoryGates rejects a malformed gates block', () => {
 // so these gates must stay active while it develops.
 // TASK-2519: CodeQL stays a manual scan (`npm run test:codeql`), not an
 // automatic integration gate, so the plan is pinned to exactly these keys.
-test('this repository selects build, verification, integration-suite, workflow, and agent-smoke gates without codeql', () => {
+// TASK-2525.03: the shared coverage-plus-SonarQube command is a mandatory
+// pre-integration quality gate.
+test('this repository selects build, verification, integration-suite, quality-gate, workflow, and agent-smoke gates without codeql', () => {
   const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
   const gates = loadPhaseGates(repoRoot, 'preIntegration');
   const keys = gates.map((g) => g.key);
-  assert.deepEqual(keys, ['build', 'verification', 'integration-suite', 'workflow', 'agent-smoke']);
+  assert.deepEqual(keys, ['build', 'verification', 'integration-suite', 'quality-gate', 'workflow', 'agent-smoke']);
+  assert.ok(
+    gates.some((g) => g.command === 'npm run test:coverage -- --threshold 0 --lcov && npm run sonar'),
+    'preIntegration must run the shared coverage-plus-SonarQube command',
+  );
   assert.ok(!gates.some((g) => g.command === 'npm run test:codeql'), 'preIntegration must not run CodeQL automatically');
   // The runner executes them from this checkout with the phase contract.
   const env = buildGateEnv('integration', 'task-2457', repoRoot);

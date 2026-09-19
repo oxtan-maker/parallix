@@ -43,7 +43,7 @@ test('resolveKnownAgentFamilies returns the eligible union in lexicographic orde
 test('discoverTestFiles preserves UTF-16 filename order', () => {
   const testDir = path.join(process.cwd(), 'test');
   const expected = fs.readdirSync(testDir)
-    .filter(file => file.endsWith('.test.ts') && file !== 'coverage-gate.test.ts')
+    .filter(file => file.endsWith('.test.ts'))
     .map(file => path.join(testDir, file))
     .sort();
   const files = discoverTestFiles();
