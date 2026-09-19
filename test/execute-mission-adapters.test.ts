@@ -63,6 +63,22 @@ test('workspace adapter runs the execute preflight quiet (routine PASS diagnosti
   assert.equal(capturedOpts.quiet, true, 'active preflight must be quiet so the operator story leads with mission/implementer');
 });
 
+test('workspace preflight delegates worktree resolution to the preflight mechanism', async () => {
+  let capturedOpts;
+  const ports = createExecuteMissionPorts('/lead-worktree', { missionTransitionStore: transitionStore }, runtimeStub({
+    preflight() { capturedOpts = arguments[1]; return { pass: true }; },
+  }));
+  await ports.workspace.preflight('task-1');
+  assert.equal(capturedOpts.returnResult, true);
+  assert.equal(capturedOpts.quiet, true, 'active preflight must be quiet so the operator story leads with mission/implementer');
+  // The mission worktree the preflight validates against is resolved inside
+  // the preflight mechanism (startupPreflight) from the slug, so the adapter
+  // stays a single quiet port call with no worktree-scoped callbacks.
+  assert.equal(typeof capturedOpts.cwdFn, 'undefined', 'worktree resolution lives in the preflight mechanism');
+  assert.equal(typeof capturedOpts.getCurrentBranchFn, 'undefined');
+  assert.equal(typeof capturedOpts.findMissionDirFn, 'undefined');
+});
+
 test('workspace adapter maps a failed preflight and an unresolved worktree to falsy verdicts', async () => {
   const ports = createExecuteMissionPorts('/repo', { missionTransitionStore: transitionStore }, runtimeStub({
     preflight() { return { pass: false }; },

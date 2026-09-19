@@ -25,11 +25,9 @@ test('local SonarQube setup stores one shared token and scanner reuses it', asyn
     };
     const first = await setupSonar({ password: 'admin-password', request });
     const second = await setupSonar({ password: 'unused', request });
-    let scan: { command?: string, env?: NodeJS.ProcessEnv } = {};
-    await runSonar({ request: async (url) => new Response(JSON.stringify(String(url).includes('get_by_project')
-      ? { qualityGate: { name: 'Parallix gate' } }
-      : { conditions: [{ metric: 'new_violations', op: 'GT', error: '0' }] })), spawn: ((command: string, _args: string[], options: { env: NodeJS.ProcessEnv }) => {
-      scan = { command, env: options.env };
+    let scan: { command?: string, args?: string[], env?: NodeJS.ProcessEnv } = {};
+    runSonar({ spawn: ((command: string, args: string[], options: { env: NodeJS.ProcessEnv }) => {
+      scan = { command, args, env: options.env };
       return { status: 0 } as ReturnType<typeof import('node:child_process').spawnSync>;
     }) as typeof import('node:child_process').spawnSync });
 
@@ -42,7 +40,8 @@ test('local SonarQube setup stores one shared token and scanner reuses it', asyn
     assert.match(String(calls[1].init?.body), /name=parallix-local-scanner/);
     assert.equal(sonarTokenPath(), path.join(home, 'tokens', 'sonarqube'));
     assert.equal(fs.statSync(sonarTokenPath()).mode & 0o777, 0o600);
-    assert.equal(scan.command, 'sonar-scanner-npm');
+    assert.equal(path.basename(scan.command ?? ''), 'sonar-scanner-npm');
+    assert.deepEqual(scan.args, ['-Dsonar.newCode.referenceBranch=main']);
     assert.equal(scan.env?.SONAR_TOKEN, 'local-scanner-token');
   } finally {
     if (previous === undefined) delete process.env.FORGEJO_HOME; else process.env.FORGEJO_HOME = previous;

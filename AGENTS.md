@@ -44,7 +44,7 @@ Unit tests must finish within 500 ms when run alone; use `npm test -- --unit-tes
 
 ## Verification tiers
 
-Verification runs in four named tiers — `unit`, `integration-ci`, `integration-local`, and `agent-e2e`. ADR 0057 defines their permitted dependencies and states exactly what each tier proves; read it before changing test selection.
+Verification runs in four named tiers — `unit`, `integration-ci`, `integration-local`, and `agent-e2e`. ADR 0059 defines their permitted dependencies and states exactly what each tier proves; read it before changing test selection.
 
 Commands: `npm test` (unit), `npm run test:integration:ci` (GitHub-safe integration subset), `npm run test:integration:local` (workstation-dependent integration), `npm run test:integration` (the whole integration layer, unchanged, used by the local gates), `npm run test:agent-e2e` and `npm run test:lifecycle-e2e` (real-agent and lifecycle suites), and `npm run test:ci` (the GitHub-safe aggregate: typecheck, build, unit tests, CI integration subset, bundle smoke, package-content audit).
 

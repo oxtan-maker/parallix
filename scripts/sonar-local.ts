@@ -86,14 +86,26 @@ export async function runSonar(options: { rootDir?: string, spawn?: typeof spawn
   // token, and the host URL is overridden through SONAR_HOST_URL for non-local
   // servers (GitHub environment secret), so no loopback host or secret is
   // committed. Local behavior is unchanged when SONAR_TOKEN is unset.
-  const token = process.env.SONAR_TOKEN || readSonarToken(options.rootDir);
+  const rootDir = options.rootDir || process.cwd();
+  const token = process.env.SONAR_TOKEN || readSonarToken(rootDir);
   if (!token) { throw new Error('No SonarQube token found. Set SONAR_TOKEN (CI) or run `npm run sonar:setup` (local).'); }
-  await assertNewIssuesFail({ token, request: options.request });
-  const result = (options.spawn || spawnSync)('sonar-scanner-npm', [], { stdio: 'inherit', env: { ...process.env, SONAR_TOKEN: token } });
+  // Resolve the local bin so the scanner launches without relying on a global install; fall back to a
+  // PATH lookup (CI supplies SONAR_TOKEN and a globally available scanner).
+  const localBin = path.join(rootDir, 'node_modules', '.bin', 'sonar-scanner-npm');
+  const scannerBin = fs.existsSync(localBin) ? localBin : 'sonar-scanner-npm';
+  const childEnv: NodeJS.ProcessEnv = { ...process.env, SONAR_TOKEN: token };
+  if (!fs.existsSync(localBin)) { childEnv.PATH = `${binDir(rootDir)}${path.delimiter}${childEnv.PATH || ''}`; }
+  // Pin the new-code base to the primary branch (forgejo-style fallback), not a
+  // stale version tag: every worktree shares project key `parallix`, so the
+  // `previousVersion` base drifts across missions and counts prior-mission lines
+  // as new. Against the primary branch, new code = this branch's changes vs main.
+  const result = (options.spawn || spawnSync)(scannerBin, ['-Dsonar.newCode.referenceBranch=main'], { cwd: rootDir, stdio: 'inherit', env: childEnv });
   if (result.error) { throw result.error; }
   if (result.status !== 0) { process.exitCode = result.status || 1; }
   return result;
 }
+
+function binDir(rootDir: string): string { return path.join(rootDir, 'node_modules', '.bin'); }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(import.meta.filename)) {
   const command = process.argv[2];

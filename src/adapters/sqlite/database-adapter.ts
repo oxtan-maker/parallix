@@ -65,10 +65,43 @@ export const MAX_RETAINED_BACKUPS = 3;
  * - Explicit transactions for multi-statement writes
  */
 export class SqliteDatabaseAdapter {
+  /** Serialize immediate writers from this Node process; SQLite handles other processes. */
+  private static readonly immediateWriterTurns = new Map<string, Promise<void>>();
   private db: DatabaseSync | null = null;
   private config: DatabaseConfig | null = null;
   private inTransaction = false;
   private transactionDepth = 0;
+  private releaseImmediateWriter: (() => void) | null = null;
+  private busyTimeoutMs = 5000;
+
+  private async acquireImmediateWriter(): Promise<() => void> {
+    const key = path.resolve(this.config!.path);
+    const predecessor = SqliteDatabaseAdapter.immediateWriterTurns.get(key) ?? Promise.resolve();
+    let release!: () => void;
+    const turn = new Promise<void>((resolve) => { release = resolve; });
+    const queued = predecessor.then(() => turn);
+    SqliteDatabaseAdapter.immediateWriterTurns.set(key, queued);
+    let timer: NodeJS.Timeout | null = null;
+    try {
+      await Promise.race([
+        predecessor,
+        new Promise<never>((_, reject) => {
+          timer = setTimeout(() => reject(new Error('SQLITE_BUSY: immediate writer queue timed out')), this.busyTimeoutMs);
+        }),
+      ]);
+    } catch (error) {
+      release();
+      throw error;
+    } finally {
+      if (timer) { clearTimeout(timer); }
+    }
+    return () => {
+      release();
+      if (SqliteDatabaseAdapter.immediateWriterTurns.get(key) === queued) {
+        queued.then(() => SqliteDatabaseAdapter.immediateWriterTurns.delete(key));
+      }
+    };
+  }
 
   /**
    * Open (or create) the database.
@@ -78,6 +111,7 @@ export class SqliteDatabaseAdapter {
     // Clamp the timeout so local command failure remains bounded (ADR 0053).
     const rawTimeout = typeof config.busyTimeoutMs === 'number' ? config.busyTimeoutMs : 5000;
     const busyTimeout = Math.min(5000, Math.max(0, Math.floor(rawTimeout)));
+    this.busyTimeoutMs = busyTimeout;
     const enableWal = config.enableWal !== false;
 
     // Ensure parent directory exists
@@ -125,6 +159,7 @@ export class SqliteDatabaseAdapter {
     this.config = config;
     const rawTimeout = typeof config.busyTimeoutMs === 'number' ? config.busyTimeoutMs : 5000;
     const busyTimeout = Math.min(5000, Math.max(0, Math.floor(rawTimeout)));
+    this.busyTimeoutMs = busyTimeout;
     const enableWal = config.enableWal !== false;
 
     const parentDir = path.dirname(config.path);
@@ -170,6 +205,8 @@ export class SqliteDatabaseAdapter {
 
   /** Synchronous counterpart of `close`. */
   closeSync(): void {
+    this.releaseImmediateWriter?.();
+    this.releaseImmediateWriter = null;
     if (this.db) {
       this.db.close();
       this.db = null;
@@ -190,6 +227,11 @@ export class SqliteDatabaseAdapter {
         // Transaction rollback on close is best-effort.
       }
     }
+    // A turn that survives the rollback attempt would block every other
+    // immediate writer in this process for the life of it, so closing always
+    // gives it back — the same guarantee `closeSync` makes.
+    this.releaseImmediateWriter?.();
+    this.releaseImmediateWriter = null;
     if (this.db) {
       this.db.close();
       this.db = null;
@@ -281,9 +323,16 @@ export class SqliteDatabaseAdapter {
   async beginImmediateTransaction(): Promise<void> {
     this.assertOpen();
     if (this.inTransaction) { throw new Error('BEGIN IMMEDIATE cannot nest'); }
-    this.db!.exec('BEGIN IMMEDIATE;');
-    this.inTransaction = true;
-    this.transactionDepth = 1;
+    const release = await this.acquireImmediateWriter();
+    try {
+      this.db!.exec('BEGIN IMMEDIATE;');
+      this.inTransaction = true;
+      this.transactionDepth = 1;
+      this.releaseImmediateWriter = release;
+    } catch (error) {
+      release();
+      throw error;
+    }
   }
 
   /**
@@ -299,9 +348,14 @@ export class SqliteDatabaseAdapter {
       this.transactionDepth--;
       return;
     }
-    this.db!.exec('COMMIT;');
-    this.inTransaction = false;
-    this.transactionDepth = 0;
+    try {
+      this.db!.exec('COMMIT;');
+    } finally {
+      this.inTransaction = false;
+      this.transactionDepth = 0;
+      this.releaseImmediateWriter?.();
+      this.releaseImmediateWriter = null;
+    }
   }
 
   /**
@@ -317,9 +371,14 @@ export class SqliteDatabaseAdapter {
       this.transactionDepth--;
       return;
     }
-    this.db!.exec('ROLLBACK;');
-    this.inTransaction = false;
-    this.transactionDepth = 0;
+    try {
+      this.db!.exec('ROLLBACK;');
+    } finally {
+      this.inTransaction = false;
+      this.transactionDepth = 0;
+      this.releaseImmediateWriter?.();
+      this.releaseImmediateWriter = null;
+    }
   }
 
   /**

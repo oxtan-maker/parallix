@@ -213,6 +213,37 @@ describe('TASK-2398 SC1: approve on an awaiting-review round is authoritative', 
   });
 });
 
+describe('TASK-2489: an approved round stranded in review finishes its transition', () => {
+  it('moves the mission to integration when the approve is replayed', async () => {
+    const { store, db, lifecycle } = await awaitingReview();
+    try {
+      // The decision was saved but the review → integration boundary never ran.
+      await recordApproval(
+        'task-2398',
+        { comment: 'LGTM', decidedAt: '2026-08-21T08:00:00.000Z', source: { kind: 'local' } },
+        { missionStore: store },
+      );
+      const stranded = await store.load(MISSION);
+      assert.equal(stranded.kind, 'found');
+      assert.equal(stranded.mission.status, 'review');
+
+      const replay = await recordApproval(
+        'task-2398',
+        { comment: null, decidedAt: '2026-08-21T09:00:00.000Z' },
+        { missionStore: store, lifecycleService: lifecycle },
+      );
+      assert.deepEqual(replay, { outcome: 'recorded' });
+
+      const loaded = await store.load(MISSION);
+      assert.equal(loaded.kind, 'found');
+      assert.equal(loaded.mission.status, 'integration');
+      assert.equal(currentReviewRound(loaded.mission.review!).decision?.decidedAt, '2026-08-21T08:00:00.000Z');
+    } finally {
+      await db.close();
+    }
+  });
+});
+
 describe('TASK-2398 SC2: approve on a fixing round fails loudly', () => {
   it('rejects approve after request-changes and leaves the changes-requested decision', async () => {
     const { store, db } = await awaitingReview();

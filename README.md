@@ -116,6 +116,34 @@ The same action sits behind a confirmation on the TUI board (`Shift+X`) and on
 the web board (the `cancel ✕` button). See the [board guide](docs/tui-board.md)
 for the details.
 
+`px lead` works down the board's "needs your attention" queue — the same list
+the board shows you. For each item it presses the action the board already
+advertises (`px active`, `px review`, …), the same command you would, and when
+that does not clear the item it starts a fresh agent in that mission's worktree
+with what the board reported, asking it to work out why progress stopped and
+restore a state the normal workflow can continue from. An item only counts as
+cleared when the board stops asking about it, never because an agent said so.
+
+Attempts are counted per failure, like every other retry budget here: the same
+attention reason surviving `--budget` agents (2 by default) is escalated with
+what was observed, while a genuinely different failure gets its own attempts. An
+item that clears and comes back is stuck again and is worked afresh. Liveness is
+rechecked before anything is dispatched, so a mission whose agent is running is
+left alone even when the board ranks its failed gate above that; the recovery
+agent starts a new session rather than resuming the stuck one, and its token
+usage is recorded against the mission like any other launch. One mission's
+running agent never stops the rest of the queue from being worked.
+
+One exception, always: an item asking for integration is left for you. The
+supervisor never integrates anything, and there is no path from it to
+`px integrate`; a recovery agent may not weaken a gate, manufacture a review, or
+absorb a defect that belongs to your primary branch either.
+
+Without `--once` it keeps going until the queue drains, polling every `--poll`
+seconds (60 by default), so it holds the terminal the way a watch command does;
+`--once` takes a single pass and exits. `--dry-run` prints the queue without
+acting, and naming missions narrows the run to those.
+
 ## Optional integrations
 
 Both are optional integrations, and each one is wired independently of the other.

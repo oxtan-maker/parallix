@@ -470,16 +470,18 @@ test('review rejects an unknown flag with a suggestion instead of ignoring it', 
 
 test('review passes an explicit --max-attempts through to the review loop', async () => {
   let received = null;
+  const exit = () => {};
 
   await review(['task-2322', '--continue', '--max-attempts', '7'], {
     inferSlugFn: (s) => s || 'task-2322',
     log: () => {},
     error: () => {},
-    exit: () => {},
+    exit,
     startReviewLoopFn: async (_slug, opts) => { received = opts; }
   });
 
   assert.equal(received && received.maxAttempts, 7);
+  assert.equal(received && received.exit, exit, 'nested review loops must not retain process.exit from the parent command');
 });
 
 test('a manual review continuation gets one round beyond the automatic five-round limit', async () => {

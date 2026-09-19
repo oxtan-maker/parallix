@@ -112,15 +112,13 @@ test('task-2525.04: shared scanner rejects a quality gate that permits new High-
 test('task-2525.03: scanner uses an environment SONAR_TOKEN for trusted CI runs', async () => {
   const { runSonar } = await import('../scripts/sonar-local.js');
   const previous = process.env.SONAR_TOKEN;
-  let captured: { command: string, token?: string } = { command: '' };
+  let captured: { command: string, args: string[], token?: string } = { command: '', args: [] };
 
   process.env.SONAR_TOKEN = 'ci-environment-token';
   try {
-    await runSonar({ request: async (url) => new Response(JSON.stringify(String(url).includes('get_by_project')
-      ? { qualityGate: { name: 'Parallix gate' } }
-      : { conditions: [{ metric: 'new_violations', op: 'GT', error: '0' }] })),
-      spawn: ((command: string, _args: string[], options: { env: NodeJS.ProcessEnv }) => {
-        captured = { command: String(command), token: options.env.SONAR_TOKEN };
+    runSonar({
+      spawn: ((command: string, args: string[], options: { env: NodeJS.ProcessEnv }) => {
+        captured = { command: String(command), args, token: options.env.SONAR_TOKEN };
         return { status: 0 } as ReturnType<typeof import('node:child_process').spawnSync>;
       }) as typeof import('node:child_process').spawnSync,
     });
@@ -129,6 +127,7 @@ test('task-2525.03: scanner uses an environment SONAR_TOKEN for trusted CI runs'
     else process.env.SONAR_TOKEN = previous;
   }
 
-  assert.equal(captured.command, 'sonar-scanner-npm');
+  assert.equal(path.basename(captured.command), 'sonar-scanner-npm');
+  assert.deepEqual(captured.args, ['-Dsonar.newCode.referenceBranch=main']);
   assert.equal(captured.token, 'ci-environment-token', 'trusted CI runs must pass the environment token to the scanner');
 });

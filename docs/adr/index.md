@@ -26,6 +26,7 @@ ADR 0023 remains in WrGroceries and is cross-referenced here instead of copied.
 - `docs/adr/0056-claude-stream-json-output-rendering.md` — Render the Claude CLI's `stream-json` stdout into a human-readable terminal view on the `spawnAndTee` `stdoutSink` seam, downstream of the telemetry tail; hand-rolled and dependency-free over the generalized-agent-library and `@anthropic-ai/claude-agent-sdk` options
 - `docs/adr/0057-verification-tiers-and-trust-model.md` — Four named verification tiers (`unit`, `integration-ci`, `integration-local`, `agent-e2e`) with explicit permitted dependencies, positively selected GitHub-safe membership enforced by automated coverage, and a statement of exactly what GitHub CI, local Parallix verification, and real-agent/local-AI verification each prove
 - `docs/adr/0058-github-publish-mode.md` — Configurable integration-mode tradeoffs and the exact-SHA, ordered-publication design used by `github-publish`
+- `docs/adr/0059-fleet-level-recovery-supervisor.md` — Fleet-level recovery supervisor: an operator-started loop that works down the board's needs-attention queue, pressing the action each item already advertises and, when that does not clear the item, running a fresh recovery agent in the mission worktree under a per-failure budget; items asking for integration are left for the human and no supervisor path reaches `px integrate`
 
 ## Cross-reference
 - `docs/adr/0023-ai-sdlc-configuration.md` remains in WrGroceries at `/home/magnus/code/visualBoard-task-1302/docs/adr/0023-ai-sdlc-configuration.md`.

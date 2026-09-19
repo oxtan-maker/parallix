@@ -41,7 +41,13 @@ export type CurrentWorkPhase =
   | 'handoff'
   | 'review'
   | 'review-response'
-  | 'integrate';
+  | 'integrate'
+  /**
+   * A fleet recovery supervisor is working this mission: the supervision
+   * itself, or the fresh recovery agent it started (ADR 0059). It is a phase an
+   * operator can see, never a lifecycle lane — recovery is not a mission state.
+   */
+  | 'recovery';
 
 /**
  * What the newest event says about the mission:
@@ -146,7 +152,7 @@ export function parseCurrentWorkEntry(entry: OperationalHistoryEntry): CurrentWo
 
 function isPhase(value: string | null): value is CurrentWorkPhase {
   return value === 'execute' || value === 'handoff' || value === 'review'
-    || value === 'review-response' || value === 'integrate';
+    || value === 'review-response' || value === 'integrate' || value === 'recovery';
 }
 
 function isState(value: string | null): value is CurrentWorkState {

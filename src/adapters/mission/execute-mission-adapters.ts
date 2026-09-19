@@ -83,8 +83,14 @@ export class MissionWorkspaceAdapter implements MissionWorkspacePort {
     // `active` owns the operator story (mission -> implementer -> live work),
     // so its preflight is quiet: routine PASS diagnostics are dropped while
     // FAIL/WARN and the USABLE verdict still surface. draft/review/verify-env
-    // keep their own full diagnostic preflight via the workflow port.
-    return Boolean(this._runtime.preflight([slug], { returnResult: true, quiet: true }).pass);
+    // keep their own full diagnostic preflight via the workflow port. The
+    // mission worktree the preflight validates against is resolved inside the
+    // preflight mechanism from the slug, so this stays a single port call and
+    // the use case owns worktree resolution after preflight.
+    return Boolean(this._runtime.preflight([slug], {
+      returnResult: true,
+      quiet: true,
+    }).pass);
   }
 
   async resolveWorktree(slug: string): Promise<string | null> {

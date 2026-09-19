@@ -39,6 +39,13 @@ const expectedIntegrationFiles = [
   'custom-capacity-multiprocess-repro.test.ts',
   'bootstrap-isolation.test.ts', 'documentation-verification.test.ts',
   'task-2484-npm-metadata-urls-repro.test.ts',
+  'task-2489-lead-from-worktree.test.ts',
+  // TASK-2489: the fleet recovery supervisor writes temp lock files and reads
+  // production source, so it runs in the integration layer. It is registered as
+  // INTEGRATION_CI_TESTS in test/lib/test-categories.ts; the runner routes it
+  // there and this inventory must name it or the default/integration split
+  // drifts out of agreement.
+  'task-2489-recovery-supervisor.test.ts',
   // TASK-2494: the rebase-handoff usage-block repro (test/task-2494-repro.test.ts)
   // is a hermetic in-memory-fake unit test, so it runs in the default suite and
   // is deliberately absent from this integration inventory.

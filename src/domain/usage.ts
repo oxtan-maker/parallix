@@ -36,7 +36,8 @@ export type TokenUsingAgentActivity =
   | 'review-response'
   | 'review-response-retry'
   | 'conflict-resolution'
-  | 'integration-verification';
+  | 'integration-verification'
+  | 'recovery';
 
 /**
  * Adapter contract derived from current token-consuming launch paths. No
@@ -55,6 +56,10 @@ export const AGENT_WORK_STAGE_BY_ACTIVITY = {
   'review-response-retry': 'review-response',
   'conflict-resolution': 'conflict-resolution',
   'integration-verification': 'integration-verification',
+  // A fleet recovery agent (ADR 0059) does implementation work on the mission
+  // branch, so its tokens belong to the mission's execute stage. Without this
+  // the launch would spend tokens nothing attributes.
+  recovery: 'execute',
 } as const satisfies Readonly<Record<TokenUsingAgentActivity, AttributedAgentWorkStage>>;
 
 export type AgentRole = 'implementer' | 'reviewer';

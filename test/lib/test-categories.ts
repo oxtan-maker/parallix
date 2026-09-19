@@ -182,6 +182,11 @@ export const INTEGRATION_CI_TESTS: readonly string[] = [
   'task-2466-mission-cancel.test.ts',
   'task-2468-adhoc-lifecycle-repro.test.ts',
   'task-2484-npm-metadata-urls-repro.test.ts',
+  'task-2489-lead-from-worktree.test.ts',
+  // TASK-2489: the recovery supervisor drives only injected doubles and temp
+  // directories; the `git worktree` token in a failure message trips the
+  // boundary heuristic, so classify it CI-safe (clean runner is enough).
+  'task-2489-recovery-supervisor.test.ts',
   // TASK-2492: fixture-git coverage of the squash-landing detection seam runs a
   // real temporary Git repository, so it crosses the git boundary and runs only
   // in the integration layer.

@@ -96,6 +96,21 @@ checkpoint.
 **Confidence:** Confirmed for declared gates. Coverage is bounded by what the
 repository chooses to verify.
 
+### UC-11 — Work down the attention queue without watching it yourself
+
+Command-local recovery repairs a failure inside the command that saw it. Missions
+that stop *between* commands have nothing running to bounce them, and they pile
+up on the board's needs-attention queue. A supervisor run works that queue: it
+presses the action each item already advertises, and gives an item that survives
+it a fresh agent in that mission's worktree to diagnose and repair. Whatever is
+still stuck comes back with the evidence behind it.
+
+**Confidence:** Confirmed. The queue is the board's own, so a mission with a live
+agent is never touched; attempts are bounded per failure; an item counts as
+cleared only when the board stops asking about it. Integration items are left for
+the operator, and defects that belong to the primary branch are escalated rather
+than repaired.
+
 ## Positioning boundaries
 
 Parallix is a local-first workflow harness, not a coding model, IDE, or

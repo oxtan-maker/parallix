@@ -44,7 +44,7 @@ describe('SQLite adapter — CP1: schema and migration runner', () => {
   // --- Connection rules ---
 
   it('enables foreign keys on connection', async () => {
-    const { db, dir, dbPath } = createTempDb();
+    const { db, dir } = createTempDb();
     try {
       const result = await db.query<Record<string, unknown>>('PRAGMA foreign_keys;');
       // foreign_keys pragma returns a single column with the key name
@@ -118,6 +118,53 @@ describe('SQLite adapter — CP1: schema and migration runner', () => {
       assert.equal(rows[1].val, 'second');
     } finally {
       await db.close();
+      cleanupTempDir(dir);
+    }
+  });
+
+  it('queues concurrent in-process immediate writers without blocking the owner', async () => {
+    const dir = createTempDir('immediate-writers');
+    const dbPath = path.join(dir, 'state.db');
+    const first = new SqliteDatabaseAdapter();
+    const second = new SqliteDatabaseAdapter();
+    await first.open({ path: dbPath });
+    await second.open({ path: dbPath });
+    try {
+      await first.beginImmediateTransaction();
+      let secondEntered = false;
+      const waiting = second.beginImmediateTransaction().then(() => { secondEntered = true; });
+      await Promise.resolve();
+      assert.equal(secondEntered, false);
+      await first.commitTransaction();
+      await waiting;
+      assert.equal(secondEntered, true);
+      await second.commitTransaction();
+    } finally {
+      await first.close();
+      await second.close();
+      cleanupTempDir(dir);
+    }
+  });
+
+  it('times out queued immediate writers and releases turns when the owner closes', async () => {
+    const dir = createTempDir('immediate-timeout');
+    const dbPath = path.join(dir, 'state.db');
+    const first = new SqliteDatabaseAdapter();
+    const second = new SqliteDatabaseAdapter();
+    const third = new SqliteDatabaseAdapter();
+    await first.open({ path: dbPath });
+    await second.open({ path: dbPath, busyTimeoutMs: 0 });
+    await third.open({ path: dbPath });
+    try {
+      await first.beginImmediateTransaction();
+      await assert.rejects(second.beginImmediateTransaction(), /SQLITE_BUSY/);
+      await first.close();
+      await third.beginImmediateTransaction();
+      await third.commitTransaction();
+    } finally {
+      await first.close();
+      await second.close();
+      await third.close();
       cleanupTempDir(dir);
     }
   });

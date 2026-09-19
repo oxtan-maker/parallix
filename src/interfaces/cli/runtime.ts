@@ -26,6 +26,7 @@ export const KNOWN_COMMANDS: string[] = [
   'active',
   'recover',
   'status',
+  'lead',
   'review',
   'integrate',
   'cancel',
@@ -243,6 +244,7 @@ ${fmt.bold('Advanced Commands:')}
   recover <slug>        Reconcile an interrupted active task with its closed durable aggregate.
   status [<slug>]       Unified mission and repository overview.
   github-publish-status  Show github-publish publication engine status (local head, published head, awaiting/verified-blocked/failed). No-op when the mode is disabled.
+  lead [<slug>...] [--once] [--poll <s>] [--budget <n>] [--dry-run]  Work active, review, and integration missions from the board's needs-attention queue; refined missions stay for operator activation. Press the action each item offers, then give a stuck mission a fresh agent in its worktree. Attempts are per failure; integration items are left for you. Keeps watching until stopped (default poll 60 seconds); --once takes a single pass and exits.
   cancel <slug> --yes   Delete one mission's lifecycle rows from the operator database. Irreversible; usage statistics are kept and the branch and worktree stay for you to remove.
   resolve-conflict [<slug>]       Detect merge conflicts in the mission worktree and emit resolution guidance.
   rebase [<slug>] [--push]          Rebase mission branch onto the primary integration branch (main) with auto-resolution of mission-specific conflicts.

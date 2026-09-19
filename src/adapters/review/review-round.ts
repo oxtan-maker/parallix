@@ -233,6 +233,29 @@ export async function recordApproval(
     }
     const status = reviewStatus(mission.review);
     if (status === 'approved') {
+      // The decision is already recorded, but the review → integration boundary
+      // may have failed after it was saved. Replaying the approve finishes that
+      // transition instead of leaving the mission parked in review forever.
+      if (ports.lifecycleService && mission.status === 'review') {
+        const round = currentReviewRound(mission.review);
+        const transition = await ports.lifecycleService.transition({
+          operationId: `review-approve:${slug}`,
+          missionId: missionId(slug),
+          expectedVersion: loaded.version,
+          capabilities: new Set(['mission:transition']),
+          command: { type: 'approve', review: mission.review },
+          actor: round.reviewer,
+          occurredAt: round.decision?.decidedAt ?? input.decidedAt,
+          idempotencyKey: `approve:${slug}:round-${round.number}`,
+        });
+        if (transition.status !== 'completed') {
+          return {
+            outcome: 'failed',
+            diagnostic: `review → integration transition failed for ${slug}: ${transition.error?.message ?? 'unknown failure'}`,
+          };
+        }
+        return { outcome: 'recorded' };
+      }
       return { outcome: 'unchanged', reason: `review is already ${status}` };
     }
     if (status !== 'awaiting-review') {

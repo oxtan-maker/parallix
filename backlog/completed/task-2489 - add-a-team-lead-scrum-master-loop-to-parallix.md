@@ -1,10 +1,10 @@
 ---
 id: TASK-2489
 title: add a team lead/scrum master/loop to parallix
-status: backlog
-assignee: []
+status: done
+assignee: [custom]
 created_date: '2026-09-11 09:21'
-labels: []
+labels: [ai_sdlc]
 dependencies: []
 ---
 
@@ -18,6 +18,7 @@ Add a team leader/ scrum master to parallix to help stucked missions to proceed,
 Do not try to get the agents to fix problems in a mission that is a problem in main, instead create new backlog.md ticket to solve it on main instead as a parallel mission, and then rebase the mission branch to main once the blocker is resolved and resume the mission.
 
 Do (web) research on how to implement loops/team leaders in blogs, articles, and existing repo implementations in similar projects to parallix, this mission needs to be credible as evaluated by a senior AI engineer.
+Scope clarification: the team leader is fleet-level, not per-mission. One tick observes every in-flight mission on the board and, per mission, either leaves a live agent alone, drives the forward command the board already offers (active -> review -> integration), relaunches a stalled implementer with corrective context, files a main-owned defect as its own backlog task, or escalates a genuine block. The lead never writes mission deliverables itself and runs as a single bounded tick, not a daemon.
 <!-- SECTION:DESCRIPTION:END -->
 
 ## Definition of Done

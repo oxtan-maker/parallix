@@ -6,7 +6,7 @@ import { resolveTaskFile, getTaskStatus, reportTaskResolution } from '../backlog
 import { adapterChecklist, evaluateRepositoryReadiness } from '../config/product-config.js';
 import { evaluateReviewSetup } from '../review/setup-review.js';
 import { toVirtual } from '../config/state-map.js';
-import { findMissionDir, findCheckpoints, getFirstLine, inferSlug, getMissionYear, conventionalWorktreePath, resolveMissionBaseBranch, getPrimaryBranch } from '../filesystem/mission-utils.js';
+import { findMissionDir, findCheckpoints, getFirstLine, inferSlug, getMissionYear, conventionalWorktreePath, resolveMissionBaseBranch, getPrimaryBranch, resolveWorktree } from '../filesystem/mission-utils.js';
 import { getPrStatus } from '../forgejo/forgejo.js';
 import { isForgejoReviewEnabled } from '../config/product-config.js';
 import stats from './commands/stats.js';
@@ -31,8 +31,24 @@ function startupPreflight(args: string[], opts: { log?: Function, error?: Functi
     })
     : baseLog;
   const error = opts.error || fmt.log.plainError;
-  const cwdFn = opts.cwdFn || (() => process.cwd());
-  const getCurrentBranchFn = opts.getCurrentBranchFn || getCurrentBranch;
+  const explicitBranchFn = opts.getCurrentBranchFn;
+  let branchRoot: string | null = null;
+  const resolveCwd = (): string => {
+    if (opts.cwdFn) {return opts.cwdFn();}
+    // Execute preflight validates the checked-out mission worktree, so resolve
+    // it from the slug here instead of the caller passing it: this keeps the
+    // injected resolveWorktree seam untriggered (the use case resolves the
+    // worktree itself after preflight) and drops the direct git import.
+    if (!isVerifyOnly && slug) {
+      const resolved = resolveWorktree(slug);
+      if (resolved) {
+        branchRoot = resolved;
+        return resolved;
+      }
+    }
+    return process.cwd();
+  };
+  const getCurrentBranchFn = explicitBranchFn ?? (() => getCurrentBranch(branchRoot ?? process.cwd()));
   const resolveTaskFileFn = opts.resolveTaskFileFn || resolveTaskFile;
   const getTaskStatusFn = opts.getTaskStatusFn || getTaskStatus;
   const toVirtualFn = opts.toVirtualFn || toVirtual;
@@ -70,7 +86,7 @@ function startupPreflight(args: string[], opts: { log?: Function, error?: Functi
   const remediationSteps: string[] = [];
 
   // Check 1: PWD
-  const cwd = cwdFn();
+  const cwd = resolveCwd();
   const reportReviewSetup = () => {
     const reviewSetup = evaluateReviewSetupFn(cwd);
     if (reviewSetup.required && reviewSetup.ok) {
@@ -186,7 +202,7 @@ function startupPreflight(args: string[], opts: { log?: Function, error?: Functi
 
     // Check 4: Mission docs + base branch
     if (!isVerifyOnly) {
-      const missionDir = findMissionDirFn(slug);
+      const missionDir = findMissionDirFn(slug, cwd);
       if (missionDir) {
         const missionFile = path.join(missionDir, 'MISSION.md');
         if (fsExistsSync(missionFile)) {

@@ -34,7 +34,24 @@ import { createGithubPublishStatusUseCase } from './github-publish-status.js';
 import { createDraftCommand } from '../interfaces/cli/draft.js';
 import type { HandoffMissionServicesPort } from '../application/ports/handoff-workflow.js';
 import { createIntegrateCommand } from '../interfaces/cli/integrate.js';
+import { createLeadCommand, leadInvocation } from '../interfaces/cli/lead.js';
+import { recordApproval } from '../adapters/review/review-round.js';
+import { currentWorkPublication, type CurrentWorkPort } from '../application/recording/current-work-recorder.js';
+import type { AttentionAction } from '../application/projections/board.js';
 import { createCancelCommand } from '../interfaces/cli/cancel.js';
+import { FRESH_SESSION_MARKER_PORT, observationFromAttention } from '../application/recovery-supervisor.js';
+import type { AttentionObservation, SupervisorPort } from '../application/recovery-supervisor.js';
+import { claimRecoveryLock } from '../adapters/filesystem/recovery-claim.js';
+import { pollingPause } from '../adapters/process/polling-pause.js';
+import { ConcreteCurrentWorkReadAdapter } from '../adapters/backlog/concrete-current-work-read-adapter.js';
+import { CURRENT_WORK_TTL_MS, reconcileCurrentWork } from '../application/projections/current-work.js';
+import { processLivenessProbe } from '../adapters/process/process-liveness.js';
+import { missionId } from '../domain/mission.js';
+import { conventionalWorktreePath, resolveWorktree } from '../adapters/git/worktree.js';
+import { git } from '../adapters/git/git.js';
+import * as agents from '../adapters/agents/agents.js';
+import { recordStageStatsSafe, stageLaunchSinceMs } from '../adapters/review/review-agent-fallback.js';
+import { resolveAgentModel } from '../adapters/config/product-config.js';
 import { createReviewCommand } from '../interfaces/cli/review.js';
 
 import { createStatusCommand } from '../interfaces/cli/status.js';
@@ -154,7 +171,7 @@ function createCommandRegistry(rootDir: string): Record<string, Command> {
       await activeServices.value?.operatorState.close();
     }
   };
-  return {
+  const registry: Record<string, Command> = {
     active: withActiveService,
     recover: (args) => withGraph(services => {
       if (!services.mission) { throw new Error('mission services are unavailable'); }
@@ -301,6 +318,196 @@ function createCommandRegistry(rootDir: string): Record<string, Command> {
       return runUiCommand(capabilities, ...args);
     },
   };
+  // One fleet recovery supervisor run (ADR 0059). Registered after the literal
+  // because it presses a board action by calling the very same registry entry a
+  // human would run: it acquires no authority of its own, and there is no second
+  // dispatch path to keep in step. `integrate` is not among the actions it can
+  // press — landing stays the human decision.
+  registry.lead = (args: string[]) => withGraph(services => createLeadCommand(buildLeadPort(services))(args));
+  return registry;
+
+  function buildLeadPort(
+    services: Awaited<ReturnType<typeof createProductionApplicationServices>>,
+  ): SupervisorPort {
+    const builder = services.presentationCapabilities?.boardProjection;
+    if (!builder) { throw new Error('board projection is unavailable for px lead'); }
+    const currentWork = services.currentWork;
+    const headSha = (mission: string): string | null => {
+      const worktree = resolveWorktree(mission, {});
+      if (!worktree) { return null; }
+      try { return git(['-C', worktree, 'rev-parse', 'HEAD'], { stdio: 'pipe' }).stdout.trim() || null; }
+      catch { return null; }
+    };
+    // The board's own "needs your attention" queue, rebuilt from the
+    // authorities every time it is asked for: the supervisor acts on what is
+    // true now, never on a snapshot it kept (ADR 0053).
+    const queue = async (headFor?: string): Promise<AttentionObservation[]> => (await builder.build()).attentionQueue
+      .map(item => {
+        const mission = String(item.missionId);
+        return observationFromAttention(item, !headFor || mission === headFor ? headSha(mission) : null);
+      });
+    // A pressed command runs inside this long-lived process. Its default exit
+    // is `process.exit`, which would end the whole supervisor on the first
+    // failure; turning it into a throw makes it a failed step instead.
+    const exitAsError = (code: number): never => { throw new Error(`command exited with status ${code}`); };
+    // `px active` and `px review --continue` own long agent loops. Start one
+    // and return to the fleet loop immediately; the current-work fact prevents
+    // the next poll from treating that mission as idle and starting it again.
+    const startForward = async (mission: string, action: AttentionAction, work: () => Promise<unknown>) => {
+      const publication = currentWorkPublication({
+        slug: mission,
+        operationId: `lead-${Date.now()}`,
+        phase: action.kind === 'active:execute' ? 'execute' : 'review',
+        summary: `lead running ${action.display}`,
+      });
+      if (publication) { await currentWork.running(publication); }
+      fmt.log.info(`[lead] Started ${action.display}; continuing to supervise the fleet.`);
+      void Promise.resolve().then(work)
+        .catch((error) => fmt.log.fail(`[lead] ${action.display} stopped: ${error instanceof Error ? error.message : String(error)}`))
+        .finally(() => finishPublication(publication, currentWork));
+    };
+    // Finishing a publication is fire-and-forget: the board update may reject
+    // after the process is gone, and that is not a step the fleet can act on.
+    const finishPublication = (
+      publication: ReturnType<typeof currentWorkPublication>,
+      currentWork: CurrentWorkPort,
+    ): void => { if (publication) { void currentWork.ended(publication).catch(() => {}); } }
+    const port: SupervisorPort = {
+      attention: queue,
+      // The operator database holds every sibling worktree's missions; this
+      // checkout's task files only hold what its branch has seen. Lead is
+      // started from any worktree, so the store answers first.
+      missionExists: async (mission) => (await services.mission?.store.load(missionId(mission)))?.kind === 'found'
+        || findTaskFile(mission, rootDir) !== null,
+      // Liveness comes straight from the current-work authority for the one
+      // mission being acted on. Rebuilding the whole board to answer it made a
+      // pass cost one projection per question (ADR 0053: the board is a read
+      // model, not the only way to read a fact).
+      liveness: async (mission) => {
+        const history = services.operatorState.repositories?.operationalHistory;
+        // Fail closed. An unreadable current-work authority is not evidence
+        // that nobody is working; refusing the step is the only safe answer,
+        // and the supervisor records it like any other failed step.
+        if (!history) { throw new Error(`Current work for ${mission} is unreadable: the operator database is unavailable`); }
+        const events = await new ConcreteCurrentWorkReadAdapter(history)
+          .loadMissionCurrentWork(missionId(mission));
+        const facts = reconcileCurrentWork(events, {
+          nowMs: Date.now(),
+          ttlMs: CURRENT_WORK_TTL_MS,
+          isProcessAlive: processLivenessProbe,
+        }).get(missionId(mission));
+        const work = facts?.currentWork ?? null;
+        return {
+          working: work !== null && work.freshness !== 'stale',
+          detail: work ? `${work.phase} — ${work.summary} (${work.freshness}, ${work.updatedAt})` : null,
+        };
+      },
+      runAction: async (mission, action, observation) => {
+        if (observation) {
+          const detail = observation.reason.kind === 'none' ? 'none' : observation.reason.detail;
+          fmt.log.info(`[lead] Found stuck mission ${fmt.slug(mission)} in state ${observation.lane}; fixing by ${action.display} (${observation.reason.kind}: ${detail})`);
+        }
+        // An approved round still parked in review lost its review → integration
+        // transition. Finishing it moves the lane only; merging stays human.
+        if (action.kind === 'review:submit' && services.mission) {
+          const finished = await recordApproval(mission, { comment: null, decidedAt: new Date().toISOString() }, {
+            missionStore: services.mission.store,
+            lifecycleService: services.mission.lifecycle,
+          });
+          if (finished.outcome === 'recorded') { return; }
+        }
+        const invocation = leadInvocation(action.kind, mission);
+        if (!invocation) { throw new Error(`px lead does not run ${action.kind}`); }
+        // `active` is the lead's recovery action. Reuse the controller already
+        // rooted in the target worktree. Do not close this borrowed graph: it
+        // shares the lead process's cached SQLite handle, which the outer graph
+        // owns until shutdown.
+        if (invocation.command === 'active') {
+          const missionWorktree = resolveWorktree(mission, {});
+          if (!missionWorktree) { throw new Error(`No worktree resolved for ${mission}`); }
+          const targetServices = await createProductionApplicationServices(missionWorktree);
+          const controller = targetServices.presentationCapabilities?.commandController;
+          if (!controller) { throw new Error(`No active controller available for ${mission}`); }
+          await startForward(mission, action, () => active(invocation.args, {
+            controller,
+            rootDir: missionWorktree,
+            exitFn: exitAsError,
+            exit: exitAsError,
+          }));
+          return;
+        }
+        const run = registry[invocation.command];
+        if (!run) { throw new Error(`No runnable px command for ${action.kind}`); }
+        await startForward(mission, action, () => Promise.resolve(run(invocation.args, { exitFn: exitAsError, exit: exitAsError })));
+      },
+      claimRecovery: async (mission) => claimRecoveryLock(mission),
+      wait: pollingPause,
+      // A fresh agent context in the existing mission worktree. It is not the
+      // failed session resumed, and it is not an ADR 0048 repair bounce: the
+      // supervisor supplies context, and the agent diagnoses. Recovery is
+      // published as current work so the mission shows as being recovered.
+      launchRecovery: async (request) => {
+        fmt.log.info(`[lead] Starting fresh recovery agent for ${fmt.slug(request.missionId)} with a general diagnostic prompt`);
+        let publication: ReturnType<typeof currentWorkPublication> = null;
+        try {
+          const missionWorktree = resolveWorktree(request.missionId, {});
+          const expectedWorktree = conventionalWorktreePath(request.missionId);
+          const worktree = missionWorktree ?? expectedWorktree;
+          if (!fs.existsSync(worktree)) { throw new Error(`No workspace exists for ${request.missionId}`); }
+          const prompt = missionWorktree ? request.instruction : `${request.instruction}\n\n`
+            + `The expected mission workspace ${expectedWorktree} does not currently resolve to the mission branch. `
+            + 'Diagnose and repair its git worktree state while preserving unrelated changes.';
+          if (!missionWorktree) {
+            fmt.log.warn(`[lead] Expected workspace ${fmt.path(worktree)} is not attached to mission/${request.missionId}; the recovery agent will diagnose it inside the existing sandbox`);
+          }
+          fmt.log.info(`[lead] Recovery prompt for ${fmt.slug(request.missionId)}:\n---\n${prompt}\n---`);
+          const assigned = await services.mission?.store.load(missionId(request.missionId));
+          const assignedAgent = assigned?.kind === 'found' ? assigned.mission.assignee ?? undefined : undefined;
+          publication = currentWorkPublication({
+            slug: request.missionId,
+            operationId: `recovery-${Date.now()}`,
+            phase: 'recovery',
+            summary: `recovery agent working ${request.missionId} after ${request.attemptedOperation}`,
+          });
+          if (publication) { await currentWork.running(publication); }
+          const launched = await agents.startAgent('execute', {
+            prompt,
+            worktree,
+            agent: assignedAgent,
+            slug: request.missionId,
+            role: 'implementer',
+            // Without this the launcher would resume the implementer session
+            // that got stuck. Recovery is a new context by definition.
+            sessionMarkerPort: FRESH_SESSION_MARKER_PORT,
+          }) as { agent?: string; result?: Record<string, any> } | null;
+          const agent = launched?.agent;
+          // A recovery agent spends tokens like any other launch. Recording it
+          // on the mission's execute stage is what keeps the mission's usage
+          // from under-reporting the work the supervisor caused.
+          if (agent) {
+            await recordStageStatsSafe('active', {
+              stage: 'recovery',
+              slug: request.missionId,
+              rootDir: worktree,
+              worktree,
+              implementer: agent,
+              result: launched?.result,
+              sinceMs: stageLaunchSinceMs(launched?.result),
+              model: resolveAgentModel(agent, worktree),
+            });
+          }
+          fmt.log.info(`[lead] Recovery agent ${agent ?? 'with no reported family'} finished for ${fmt.slug(request.missionId)}; rechecking the board`);
+          return `${agent ?? 'agent with no reported family'} ran in ${worktree}`;
+        } catch (error) {
+          fmt.log.fail(`[lead] Recovery agent for ${fmt.slug(request.missionId)} failed: ${error instanceof Error ? error.message : String(error)}`);
+          throw error;
+        } finally {
+          if (publication) { await currentWork.ended(publication); }
+        }
+      },
+    };
+    return port;
+  }
 }
 
 function createRuntimeOptions(rootDir: string): Pick<MainOptions, 'commandFns' | 'ensureStandaloneGitRepoFn' | 'loadAliasesFn' | 'product'> {

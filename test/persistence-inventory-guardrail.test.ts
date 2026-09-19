@@ -569,6 +569,10 @@ test('SC1 reverse: all durable-IO files under src/ are present in the inventory'
     // build/web output, integrity-checked against the build manifest. It owns
     // no ADR 0053 durable-state concept.
     'src/adapters/web/asset-store.ts',
+    // Recovery claims (ADR 0059) are a cross-process lock in the temporary
+    // directory: one supervisor run at a time per mission. They hold a pid, are
+    // deleted on release, and own no ADR 0053 durable-state concept.
+    'src/adapters/filesystem/recovery-claim.ts',
     // Packaged prompt loading (TASK-2465): reads only package-owned prompt
     // templates to assemble stage prompts. It owns no ADR 0053 durable-state
     // concept; the override path it resolves is configuration, not domain state.

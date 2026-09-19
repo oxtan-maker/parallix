@@ -12,6 +12,7 @@ import { mockModule, installModuleMocks } from './lib/module-mock.js';
 // via mockModule would re-link a second instance and split its capacity
 // count from the selectAgent path (task-2431 integration gate).
 import { activeCustomCapacityCount, resetCustomCapacity, tryAcquireCustomCapacity } from '../src/adapters/agents/custom-capacity.js';
+import { FRESH_SESSION_MARKER_PORT } from '../src/application/recovery-supervisor.js';
 const buildClaudeInvocationModule = mockModule<typeof import('../src/adapters/agents/claude.js')>('../src/adapters/agents/claude.js', import.meta.url);
 const buildCodexDraftInvocationModule = mockModule<typeof import('../src/adapters/agents/codex.js')>('../src/adapters/agents/codex.js', import.meta.url);
 const buildVibeInvocationModule = mockModule<typeof import('../src/adapters/agents/vibe.js')>('../src/adapters/agents/vibe.js', import.meta.url);
@@ -28,6 +29,21 @@ const { resolveNoOutputWatchdogConfig } = resolveNoOutputWatchdogConfigModule;
 process.env.NO_COLOR = '1';
 const originalPath = process.env.PATH;
 const originalPiBin = process.env.PI_BIN;
+
+test('a recovery launch uses the fresh-session marker port', async () => {
+  let launched;
+  await startAgent('execute', {
+    prompt: 'Recover this mission.', worktree: '/tmp/task-2489-recovery', agent: 'claude',
+    slug: 'task-2489-stuck', role: 'implementer', sessionMarkerPort: FRESH_SESSION_MARKER_PORT,
+    isAgentBlockedFn: () => false, resolveAgentModelFn: () => null, assertAgentSupportedFn: () => {}, log: () => {},
+    launchAgentFn: (options) => {
+      launched = options;
+      return { invocation: { command: 'claude', args: [], options: {} }, resultPromise: Promise.resolve({ status: 0, stdout: '', stderr: '' }) };
+    },
+  });
+  assert.equal(launched.resume, false);
+  assert.equal(launched.sessionId, null);
+});
 
 if (process.env.PARALLIX_HOME) {
   fs.mkdirSync(process.env.PARALLIX_HOME, { recursive: true });

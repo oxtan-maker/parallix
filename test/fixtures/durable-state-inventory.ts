@@ -1134,6 +1134,13 @@ export const MISSION_DOCUMENT_CALL_SITES: readonly MissionDocumentCallSiteEntry[
     pathPatterns: ['findMissionDir'],
     classification: 'git-topology-observation',
   },
+  {
+    id: 'mission-doc-call-recovery-supervisor',
+    fileLocation: 'src/application/recovery-supervisor.ts',
+    purpose: 'state the operator-constraint that the recovery agent may not change the scope of MISSION.md during autonomous repair',
+    pathPatterns: ['MISSION.md'],
+    classification: 'mission-document-evidence',
+  },
 ] as const;
 
 /**
