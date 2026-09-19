@@ -215,91 +215,102 @@ export function resolveIntegrationMode(rootDir: string = process.cwd()): Integra
   return parseIntegrationMode(isPlainObject(integration) ? integration.mode : undefined);
 }
 
+// ponytail: each adapter section validates one closed subset of the config.
+// The schema (workflow/config/workflow.config.schema.json) is authoritative;
+// keep these section checks in sync when it changes.
 function validateAdapterSections(adapters: PlainObject, issues: string[]): void {
-  const tasks = isPlainObject(adapters.tasks) ? adapters.tasks : null;
-  if (tasks) {
-    validateStringField(tasks, 'provider', 'adapters.tasks.provider', issues);
-    if ('provider' in tasks && typeof tasks.provider === 'string' && !isSupportedTaskProvider(tasks.provider)) {
-      issues.push(taskProviderIssue(tasks.provider));
-    }
-    validateStringField(tasks, 'stateMap', 'adapters.tasks.stateMap', issues);
-    if ('storage' in tasks && !isValidTaskStorage(tasks.storage)) {
-      issues.push('adapters.tasks.storage must be a string or an object of string values');
-    }
-  }
+  validateTasksSection(adapters.tasks, issues);
+  validateMissionsSection(adapters.missions, issues);
+  validateVerificationSection(adapters.verification, issues);
+  validateIntegrateSection(adapters.integrate, issues);
+  validatePromptsSection(adapters.prompts, issues);
+  validateGithubPublishSection(adapters.githubPublish, issues);
+  validateReviewSection(adapters.review, issues);
+  validateAgentsSection(adapters.agents, issues);
+}
 
-  const missions = isPlainObject(adapters.missions) ? adapters.missions : null;
-  if (missions) {
-    validateStringField(missions, 'baseDir', 'adapters.missions.baseDir', issues);
-    validateStringField(missions, 'branchPrefix', 'adapters.missions.branchPrefix', issues);
-    validateStringField(missions, 'worktreePattern', 'adapters.missions.worktreePattern', issues);
-    validateStringField(missions, 'primaryBranch', 'adapters.missions.primaryBranch', issues);
+function validateTasksSection(section: unknown, issues: string[]): void {
+  if (!isPlainObject(section)) { return; }
+  validateStringField(section, 'provider', 'adapters.tasks.provider', issues);
+  if ('provider' in section && typeof section.provider === 'string' && !isSupportedTaskProvider(section.provider)) {
+    issues.push(taskProviderIssue(section.provider));
   }
+  validateStringField(section, 'stateMap', 'adapters.tasks.stateMap', issues);
+  if ('storage' in section && !isValidTaskStorage(section.storage)) {
+    issues.push('adapters.tasks.storage must be a string or an object of string values');
+  }
+}
 
-  const verification = isPlainObject(adapters.verification) ? adapters.verification : null;
-  if (verification) {
-    validateStringField(verification, 'command', 'adapters.verification.command', issues);
-    validateStringField(verification, 'defaultArea', 'adapters.verification.defaultArea', issues);
-  }
+function validateMissionsSection(section: unknown, issues: string[]): void {
+  if (!isPlainObject(section)) { return; }
+  validateStringField(section, 'baseDir', 'adapters.missions.baseDir', issues);
+  validateStringField(section, 'branchPrefix', 'adapters.missions.branchPrefix', issues);
+  validateStringField(section, 'worktreePattern', 'adapters.missions.worktreePattern', issues);
+  validateStringField(section, 'primaryBranch', 'adapters.missions.primaryBranch', issues);
+}
 
-  const integrate = isPlainObject(adapters.integrate) ? adapters.integrate : null;
-  if (integrate) {
-    validateStringField(integrate, 'preCommitCommand', 'adapters.integrate.preCommitCommand', issues);
-    validateStringField(integrate, 'postIntegrateCommand', 'adapters.integrate.postIntegrateCommand', issues);
-  }
+function validateVerificationSection(section: unknown, issues: string[]): void {
+  if (!isPlainObject(section)) { return; }
+  validateStringField(section, 'command', 'adapters.verification.command', issues);
+  validateStringField(section, 'defaultArea', 'adapters.verification.defaultArea', issues);
+}
 
-  // One new configuration key: adapters.prompts. It is a closed object whose
-  // single allowed property is `override` (a repo-local default-opinion path).
-  // Unknown keys beneath it fail here, through the existing configuration-error
-  // path, so a repo cannot invent a second override surface.
-  const prompts = isPlainObject(adapters.prompts) ? adapters.prompts : null;
-  if (prompts) {
-    if ('override' in prompts && typeof prompts.override !== 'string') {
-      issues.push('adapters.prompts.override must be a string');
-    }
-    for (const key of Object.keys(prompts)) {
-      if (key !== 'override') {
-        issues.push('adapters.prompts may only contain "override"');
-      }
-    }
-  }
+function validateIntegrateSection(section: unknown, issues: string[]): void {
+  if (!isPlainObject(section)) { return; }
+  validateStringField(section, 'preCommitCommand', 'adapters.integrate.preCommitCommand', issues);
+  validateStringField(section, 'postIntegrateCommand', 'adapters.integrate.postIntegrateCommand', issues);
+}
 
-  const githubPublish = isPlainObject(adapters.githubPublish) ? adapters.githubPublish : null;
-  if (githubPublish) {
-    if ('enabled' in githubPublish && typeof githubPublish.enabled !== 'boolean') {
-      issues.push('adapters.githubPublish.enabled must be a boolean');
-    }
-    validateStringField(githubPublish, 'mainBranch', 'adapters.githubPublish.mainBranch', issues);
-    validateStringField(githubPublish, 'verificationRemote', 'adapters.githubPublish.verificationRemote', issues);
-    validateStringField(githubPublish, 'verificationRefPrefix', 'adapters.githubPublish.verificationRefPrefix', issues);
-    if ('pollIntervalMs' in githubPublish && (!Number.isInteger(githubPublish.pollIntervalMs) || (githubPublish.pollIntervalMs as number) < 1)) {
-      issues.push('adapters.githubPublish.pollIntervalMs must be a positive integer');
-    }
-    if ('maxPollAttempts' in githubPublish && githubPublish.maxPollAttempts !== null && (!Number.isInteger(githubPublish.maxPollAttempts) || (githubPublish.maxPollAttempts as number) < 1)) {
-      issues.push('adapters.githubPublish.maxPollAttempts must be a positive integer or null');
+// adapters.prompts is a closed object whose single allowed property is `override`
+// (a repo-local default-opinion path). Unknown keys fail here through the
+// existing configuration-error path, so a repo cannot invent a second surface.
+function validatePromptsSection(section: unknown, issues: string[]): void {
+  if (!isPlainObject(section)) { return; }
+  if ('override' in section && typeof section.override !== 'string') {
+    issues.push('adapters.prompts.override must be a string');
+  }
+  for (const key of Object.keys(section)) {
+    if (key !== 'override') {
+      issues.push('adapters.prompts may only contain "override"');
     }
   }
+}
 
-  const review = isPlainObject(adapters.review) ? adapters.review : null;
-  if (review) {
-    validateStringField(review, 'baseUrl', 'adapters.review.baseUrl', issues);
-    validateStringField(review, 'remote', 'adapters.review.remote', issues);
-    validateStringField(review, 'repo', 'adapters.review.repo', issues);
-    if ('provider' in review && !isValidReviewProvider(review.provider)) {
-      issues.push('adapters.review.provider must be one of "forgejo", "none", or null');
-    }
+function validateGithubPublishSection(section: unknown, issues: string[]): void {
+  if (!isPlainObject(section)) { return; }
+  if ('enabled' in section && typeof section.enabled !== 'boolean') {
+    issues.push('adapters.githubPublish.enabled must be a boolean');
   }
+  validateStringField(section, 'mainBranch', 'adapters.githubPublish.mainBranch', issues);
+  validateStringField(section, 'verificationRemote', 'adapters.githubPublish.verificationRemote', issues);
+  validateStringField(section, 'verificationRefPrefix', 'adapters.githubPublish.verificationRefPrefix', issues);
+  if ('pollIntervalMs' in section && (!Number.isInteger(section.pollIntervalMs) || (section.pollIntervalMs as number) < 1)) {
+    issues.push('adapters.githubPublish.pollIntervalMs must be a positive integer');
+  }
+  if ('maxPollAttempts' in section && section.maxPollAttempts !== null && (!Number.isInteger(section.maxPollAttempts) || (section.maxPollAttempts as number) < 1)) {
+    issues.push('adapters.githubPublish.maxPollAttempts must be a positive integer or null');
+  }
+}
 
-  const agents = isPlainObject(adapters.agents) ? adapters.agents : null;
-  if (agents) {
-    if ('maxConcurrentCustom' in agents &&
-      (!Number.isInteger(agents.maxConcurrentCustom) || (agents.maxConcurrentCustom as number) < 1)) {
-      issues.push('adapters.agents.maxConcurrentCustom must be a positive integer');
-    }
-    validateAgentModels(agents, issues);
-    validateRunnerSelection(agents, issues);
-    validateSubagents(agents, issues);
+function validateReviewSection(section: unknown, issues: string[]): void {
+  if (!isPlainObject(section)) { return; }
+  validateStringField(section, 'baseUrl', 'adapters.review.baseUrl', issues);
+  validateStringField(section, 'remote', 'adapters.review.remote', issues);
+  validateStringField(section, 'repo', 'adapters.review.repo', issues);
+  if ('provider' in section && !isValidReviewProvider(section.provider)) {
+    issues.push('adapters.review.provider must be one of "forgejo", "none", or null');
   }
+}
+
+function validateAgentsSection(section: unknown, issues: string[]): void {
+  if (!isPlainObject(section)) { return; }
+  if ('maxConcurrentCustom' in section &&
+    (!Number.isInteger(section.maxConcurrentCustom) || (section.maxConcurrentCustom as number) < 1)) {
+    issues.push('adapters.agents.maxConcurrentCustom must be a positive integer');
+  }
+  validateAgentModels(section, issues);
+  validateRunnerSelection(section, issues);
+  validateSubagents(section, issues);
 }
 
 function validateStringField(obj: PlainObject, key: string, label: string, issues: string[]): void {

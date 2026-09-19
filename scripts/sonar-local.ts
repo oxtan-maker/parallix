@@ -7,6 +7,11 @@ import { resolveForgejoHome } from '../src/adapters/forgejo/forgejo.js';
 
 const SONAR_URL = 'http://127.0.0.1:9000';
 const TOKEN_NAME = 'parallix-local-scanner';
+const PROJECT_KEY = 'parallix';
+
+function sonarUrl(): string {
+  return (process.env.SONAR_HOST_URL || SONAR_URL).replace(/\/$/, '');
+}
 
 export function sonarTokenPath(rootDir: string = process.cwd()): string {
   return path.join(resolveForgejoHome(rootDir), 'tokens', 'sonarqube');
@@ -62,7 +67,20 @@ export async function setupSonar(options: { rootDir?: string, password?: string,
   return { created: true, path: writeSonarToken(result.token, options.rootDir) };
 }
 
-export function runSonar(options: { rootDir?: string, spawn?: typeof spawnSync } = {}) {
+export async function assertNewIssuesFail(options: { token: string, request?: typeof fetch }) {
+  const request = options.request || fetch;
+  const headers = { Authorization: `Basic ${Buffer.from(`${options.token}:`).toString('base64')}` };
+  const project = await request(`${sonarUrl()}/api/qualitygates/get_by_project?project=${PROJECT_KEY}`, { headers });
+  const gate = await project.json() as { qualityGate?: { name?: string } };
+  if (!project.ok || !gate.qualityGate?.name) { throw new Error(`SonarQube quality gate lookup failed (HTTP ${project.status}).`); }
+  const response = await request(`${sonarUrl()}/api/qualitygates/show?name=${encodeURIComponent(gate.qualityGate.name)}`, { headers });
+  const result = await response.json() as { conditions?: Array<{ metric?: string, op?: string, error?: string }> };
+  if (!response.ok || !result.conditions?.some(({ metric, op, error }) => metric === 'new_violations' && op === 'GT' && Number(error) <= 0)) {
+    throw new Error('SonarQube quality gate must fail on every new issue (new_violations > 0), including High, Critical, and Blocker issues.');
+  }
+}
+
+export async function runSonar(options: { rootDir?: string, spawn?: typeof spawnSync, request?: typeof fetch } = {}) {
   // Trusted CI runs supply SONAR_TOKEN through an environment secret; local
   // runs reuse the Forgejo-resolved token file. The scanner never prints the
   // token, and the host URL is overridden through SONAR_HOST_URL for non-local
@@ -70,6 +88,7 @@ export function runSonar(options: { rootDir?: string, spawn?: typeof spawnSync }
   // committed. Local behavior is unchanged when SONAR_TOKEN is unset.
   const token = process.env.SONAR_TOKEN || readSonarToken(options.rootDir);
   if (!token) { throw new Error('No SonarQube token found. Set SONAR_TOKEN (CI) or run `npm run sonar:setup` (local).'); }
+  await assertNewIssuesFail({ token, request: options.request });
   const result = (options.spawn || spawnSync)('sonar-scanner-npm', [], { stdio: 'inherit', env: { ...process.env, SONAR_TOKEN: token } });
   if (result.error) { throw result.error; }
   if (result.status !== 0) { process.exitCode = result.status || 1; }
@@ -79,6 +98,6 @@ export function runSonar(options: { rootDir?: string, spawn?: typeof spawnSync }
 if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(import.meta.filename)) {
   const command = process.argv[2];
   if (command === 'setup') { setupSonar().then(({ created, path: tokenPath }) => console.log(`${created ? 'Created' : 'Reusing'} local SonarQube token at ${tokenPath}`)); }
-  else if (command === 'scan') { runSonar(); }
+  else if (command === 'scan') { runSonar().catch((error) => { console.error(error.message); process.exitCode = 1; }); }
   else { throw new Error('Usage: sonar-local.ts <setup|scan>'); }
 }

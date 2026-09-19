@@ -18,6 +18,12 @@ const SEPARATOR_ROW = /^\|(?:\s*:?-+:?\s*\|)+$/;
 const TABLE_ROW = /^\|(.+)\|$/;
 const NEXT_ACTION = /^Next action:\s*(.+)$/i;
 
+function goalCheckLineKind(line: string, inGoalCheck: boolean): 'start' | 'skip' | 'end' | 'row' {
+  if (GOAL_CHECK_HEADING.test(line)) { return 'start'; }
+  if (!inGoalCheck || line === '' || SEPARATOR_ROW.test(line)) { return 'skip'; }
+  return line.startsWith('##') ? 'end' : 'row';
+}
+
 /** Split a pipe table row into trimmed cells. */
 function cells(line: string): string[] {
   const match = TABLE_ROW.exec(line.trim());
@@ -46,43 +52,7 @@ export function parseCheckpointDocument(
   const lines = content.split('\n');
   const firstLine = (lines[0] ?? '').replace(/^#+\s*/, '').trim();
 
-  const goalCheck: GoalCheckRow[] = [];
-  let inGoalCheck = false;
-  let headerSeen = false;
-  for (const line of lines) {
-    const trimmed = line.trim();
-    if (GOAL_CHECK_HEADING.test(trimmed)) {
-      inGoalCheck = true;
-      headerSeen = false;
-      continue;
-    }
-    if (!inGoalCheck) {
-      continue;
-    }
-    if (trimmed === '') {
-      continue;
-    }
-    if (trimmed.startsWith('##')) {
-      inGoalCheck = false;
-      continue;
-    }
-    if (SEPARATOR_ROW.test(trimmed)) {
-      continue;
-    }
-    const row = cells(trimmed);
-    if (row.length < 2) {
-      inGoalCheck = false;
-      continue;
-    }
-    if (!headerSeen) {
-      // The first table row is the `| Criterion | Evidence | Status |` header.
-      headerSeen = true;
-      continue;
-    }
-    if (row[0].length > 0 && row[1].length > 0) {
-      goalCheck.push({ criterion: row[0], evidence: row[1] });
-    }
-  }
+  const goalCheck = parseGoalCheckTable(lines);
 
   let nextActionText = '';
   for (const line of lines) {
@@ -100,6 +70,45 @@ export function parseCheckpointDocument(
     goalCheck,
     nextActionText,
   };
+}
+
+/**
+ * Scan checkpoint lines for the `## Goal Check` table, returning the
+ * criterion/evidence rows. Presentation only: the `Status` column and the
+ * `| Criterion | Evidence | Status |` header are skipped.
+ */
+function parseGoalCheckTable(lines: string[]): GoalCheckRow[] {
+  const goalCheck: GoalCheckRow[] = [];
+  let inGoalCheck = false;
+  let headerSeen = false;
+  for (const line of lines) {
+    const trimmed = line.trim();
+    const kind = goalCheckLineKind(trimmed, inGoalCheck);
+    if (kind === 'start') {
+      inGoalCheck = true;
+      headerSeen = false;
+      continue;
+    }
+    if (kind === 'end') {
+      inGoalCheck = false;
+      continue;
+    }
+    if (kind === 'skip') { continue; }
+    const row = cells(trimmed);
+    if (row.length < 2) {
+      inGoalCheck = false;
+      continue;
+    }
+    if (!headerSeen) {
+      // The first table row is the `| Criterion | Evidence | Status |` header.
+      headerSeen = true;
+      continue;
+    }
+    if (row[0].length > 0 && row[1].length > 0) {
+      goalCheck.push({ criterion: row[0], evidence: row[1] });
+    }
+  }
+  return goalCheck;
 }
 
 /**

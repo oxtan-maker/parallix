@@ -138,10 +138,12 @@ export function evidenceCellHasVerifiableReference(fileSystem: EvidenceFileSyste
 }
 
 export function findUnverifiableGoalCheckRow(fileSystem: EvidenceFileSystemPort, evidenceRows: string[], rootDir: string): string | null {
-  const knownTestNames = collectRepoTestNames(fileSystem, rootDir);
+  let knownTestNames: Set<string> | undefined;
   for (const row of evidenceRows) {
     const columns = row.split('|').slice(1, -1).map(part => part.trim()).filter(Boolean);
-    if (!columns.some(cell => evidenceCellHasVerifiableReference(fileSystem, cell, rootDir, knownTestNames))) { return row; }
+    if (columns.some(cell => evidenceCellHasVerifiableReference(fileSystem, cell, rootDir, knownTestNames ?? new Set()))) { continue; }
+    const testNames = knownTestNames ??= collectRepoTestNames(fileSystem, rootDir);
+    if (!columns.some(cell => evidenceCellHasVerifiableReference(fileSystem, cell, rootDir, testNames))) { return row; }
   }
   return null;
 }

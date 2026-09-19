@@ -94,6 +94,21 @@ test('task-2525.03: scanner configuration preserves the recorded legacy baseline
   assert.doesNotMatch(props, /sonar\.comments|sonar\.issue\.effective|@sonar|@SuppressWarnings/);
 });
 
+test('task-2525.04: shared scanner rejects a quality gate that permits new High-or-worse issues', async () => {
+  const { assertNewIssuesFail } = await import('../scripts/sonar-local.js');
+  const request: typeof fetch = async (url) => new Response(JSON.stringify(String(url).includes('get_by_project')
+    ? { qualityGate: { name: 'Parallix 90% new code' } }
+    : { conditions: [{ metric: 'new_violations', op: 'GT', error: '0' }] }));
+  await assertNewIssuesFail({ token: 'test-token', request });
+
+  await assert.rejects(
+    assertNewIssuesFail({ token: 'test-token', request: async (url) => new Response(JSON.stringify(String(url).includes('get_by_project')
+      ? { qualityGate: { name: 'permissive' } }
+      : { conditions: [] })) }),
+    /must fail on every new issue/,
+  );
+});
+
 test('task-2525.03: scanner uses an environment SONAR_TOKEN for trusted CI runs', async () => {
   const { runSonar } = await import('../scripts/sonar-local.js');
   const previous = process.env.SONAR_TOKEN;
@@ -101,7 +116,9 @@ test('task-2525.03: scanner uses an environment SONAR_TOKEN for trusted CI runs'
 
   process.env.SONAR_TOKEN = 'ci-environment-token';
   try {
-    runSonar({
+    await runSonar({ request: async (url) => new Response(JSON.stringify(String(url).includes('get_by_project')
+      ? { qualityGate: { name: 'Parallix gate' } }
+      : { conditions: [{ metric: 'new_violations', op: 'GT', error: '0' }] })),
       spawn: ((command: string, _args: string[], options: { env: NodeJS.ProcessEnv }) => {
         captured = { command: String(command), token: options.env.SONAR_TOKEN };
         return { status: 0 } as ReturnType<typeof import('node:child_process').spawnSync>;

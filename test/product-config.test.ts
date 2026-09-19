@@ -639,3 +639,110 @@ test('resolveAgentModel returns null for custom when adapters.agents.models.cust
     }
   );
 });
+
+// ---------- validateAdapterSections section helpers (S3776 slice) ----------
+
+test('validateWorkflowConfig accepts a missions section and rejects non-string mission fields', () => {
+  assert.deepEqual(
+    validateWorkflowConfig({ adapters: { missions: { baseDir: 'docs/missions' } } }),
+    []
+  );
+  assert.deepEqual(
+    validateWorkflowConfig({ adapters: { missions: { worktreePattern: 9 } } }),
+    ['adapters.missions.worktreePattern must be a string']
+  );
+  assert.deepEqual(
+    validateWorkflowConfig({ adapters: { missions: { primaryBranch: 9 } } }),
+    ['adapters.missions.primaryBranch must be a string']
+  );
+});
+
+test('validateWorkflowConfig accepts a verification section and rejects non-string fields', () => {
+  assert.deepEqual(
+    validateWorkflowConfig({ adapters: { verification: { command: './gate.sh' } } }),
+    []
+  );
+  assert.deepEqual(
+    validateWorkflowConfig({ adapters: { verification: { defaultArea: 9 } } }),
+    ['adapters.verification.defaultArea must be a string']
+  );
+});
+
+test('validateWorkflowConfig accepts an integrate section and rejects non-string hook fields', () => {
+  assert.deepEqual(
+    validateWorkflowConfig({ adapters: { integrate: { preCommitCommand: './pre.sh' } } }),
+    []
+  );
+  assert.deepEqual(
+    validateWorkflowConfig({ adapters: { integrate: { postIntegrateCommand: 9 } } }),
+    ['adapters.integrate.postIntegrateCommand must be a string']
+  );
+});
+
+test('validateWorkflowConfig enforces the closed prompts section (override only)', () => {
+  assert.deepEqual(
+    validateWorkflowConfig({ adapters: { prompts: { override: './opinion.md' } } }),
+    []
+  );
+  assert.deepEqual(
+    validateWorkflowConfig({ adapters: { prompts: { override: 9 } } }),
+    ['adapters.prompts.override must be a string']
+  );
+  assert.deepEqual(
+    validateWorkflowConfig({ adapters: { prompts: { surface: 'x' } } }),
+    ['adapters.prompts may only contain "override"']
+  );
+});
+
+test('validateWorkflowConfig enforces the githubPublish section types and enums', () => {
+  assert.deepEqual(
+    validateWorkflowConfig({ adapters: { githubPublish: { enabled: true, mainBranch: 'main' } } }),
+    []
+  );
+  assert.deepEqual(
+    validateWorkflowConfig({ adapters: { githubPublish: { enabled: 'yes' } } }),
+    ['adapters.githubPublish.enabled must be a boolean']
+  );
+  assert.deepEqual(
+    validateWorkflowConfig({ adapters: { githubPublish: { pollIntervalMs: 0 } } }),
+    ['adapters.githubPublish.pollIntervalMs must be a positive integer']
+  );
+  assert.deepEqual(
+    validateWorkflowConfig({ adapters: { githubPublish: { pollIntervalMs: 1.5 } } }),
+    ['adapters.githubPublish.pollIntervalMs must be a positive integer']
+  );
+  assert.deepEqual(
+    validateWorkflowConfig({ adapters: { githubPublish: { maxPollAttempts: null } } }),
+    []
+  );
+  assert.deepEqual(
+    validateWorkflowConfig({ adapters: { githubPublish: { maxPollAttempts: -2 } } }),
+    ['adapters.githubPublish.maxPollAttempts must be a positive integer or null']
+  );
+});
+
+test('validateWorkflowConfig enforces the review section string fields and provider enum', () => {
+  assert.deepEqual(
+    validateWorkflowConfig({ adapters: { review: { remote: 'origin', repo: 'o/r' } } }),
+    []
+  );
+  assert.deepEqual(
+    validateWorkflowConfig({ adapters: { review: { baseUrl: 9 } } }),
+    ['adapters.review.baseUrl must be a string']
+  );
+  assert.deepEqual(
+    validateWorkflowConfig({ adapters: { review: { provider: 'github' } } }),
+    ['adapters.review.provider must be one of "forgejo", "none", or null']
+  );
+});
+
+test('validateWorkflowConfig rejects a non-object section body with the section-level error', () => {
+  assert.deepEqual(
+    validateWorkflowConfig({ adapters: { missions: [] } }),
+    ['adapters.missions must be an object']
+  );
+  assert.deepEqual(
+    validateWorkflowConfig({ adapters: { agents: 'nope' } }),
+    ['adapters.agents must be an object']
+  );
+});

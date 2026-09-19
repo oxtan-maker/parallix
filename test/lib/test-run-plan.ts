@@ -44,6 +44,8 @@ function defaultProbeNodeVersion(executable: string): string | null {
   return result.status === 0 ? String(result.stdout || '') : null;
 }
 
+const testConcurrencySupport = new Map<string, boolean>();
+
 export function buildTestRunPlan(options: TestRunPlanOptions): TestRunPlan {
   const { executionRoot, requestedArgs } = options;
   const probeNodeVersion = options.probeNodeVersion ?? defaultProbeNodeVersion;
@@ -89,8 +91,12 @@ export function buildTestRunPlan(options: TestRunPlanOptions): TestRunPlan {
   // `--test-concurrency` exists from Node 20.15 on; probe empirically so no
   // version table has to be maintained for older supported runtimes.
   function supportsTestConcurrency(executable: string): boolean {
+    const cached = testConcurrencySupport.get(executable);
+    if (cached !== undefined) { return cached; }
     const result = spawnSync(executable, ['--test', '--test-concurrency=1', '--help'], { stdio: 'ignore' });
-    return result.status === 0;
+    const supported = result.status === 0;
+    testConcurrencySupport.set(executable, supported);
+    return supported;
   }
 
   const allRootTestFiles = fs.readdirSync(testRoot)

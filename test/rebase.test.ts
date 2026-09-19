@@ -415,6 +415,25 @@ test('parseConflictFilesFromRebaseOutput handles Swedish KONFLIKT (ändra/radera
   assert.deepEqual(files, ['backlog/tasks/task 1018 extra.md']);
 });
 
+test('parseConflictFilesFromRebaseOutput takes the segment before the second colon with modify/delete strip', () => {
+  const output = 'CONFLICT (modify/delete): backlog/tasks/task-1018.md: deleted by main, modified by HEAD\n';
+  const files = rebase.parseConflictFilesFromRebaseOutput(output);
+  assert.deepEqual(files, ['backlog/tasks/task-1018.md']);
+});
+
+test('parseConflictFilesFromRebaseOutput takes everything after the first colon when there is no second colon', () => {
+  const output = 'CONFLICT (content): backlog/tasks/task-1018.md\n';
+  const files = rebase.parseConflictFilesFromRebaseOutput(output);
+  assert.deepEqual(files, ['backlog/tasks/task-1018.md']);
+});
+
+test('parseConflictFilesFromRebaseOutput skips advice/hint labels in the generic fallback', () => {
+  const output = ['tips: resolve the CONFLICT in x', 'note: the CONFLICT is here', 'backlog/tasks/task-1018.md: fix CONFLICT'].join('\n');
+  const files = rebase.parseConflictFilesFromRebaseOutput(output);
+  assert.deepEqual(files, ['backlog/tasks/task-1018.md']);
+});
+
+
 test('parseConflictFilesFromRebaseOutput handles Swedish KONFLIKT (ändra/radera) with long filename', () => {
   const output = 'KONFLIKT (ändra/radera): backlog/tasks/task-1015 - message-is-in-wrong-place-an-ugly-on-ios-client.md raderad i fa9599e6 (blaj) och ändrad i HEAD.\n';
   const files = rebase.parseConflictFilesFromRebaseOutput(output);

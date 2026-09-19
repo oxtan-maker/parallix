@@ -26,7 +26,9 @@ test('local SonarQube setup stores one shared token and scanner reuses it', asyn
     const first = await setupSonar({ password: 'admin-password', request });
     const second = await setupSonar({ password: 'unused', request });
     let scan: { command?: string, env?: NodeJS.ProcessEnv } = {};
-    runSonar({ spawn: ((command: string, _args: string[], options: { env: NodeJS.ProcessEnv }) => {
+    await runSonar({ request: async (url) => new Response(JSON.stringify(String(url).includes('get_by_project')
+      ? { qualityGate: { name: 'Parallix gate' } }
+      : { conditions: [{ metric: 'new_violations', op: 'GT', error: '0' }] })), spawn: ((command: string, _args: string[], options: { env: NodeJS.ProcessEnv }) => {
       scan = { command, env: options.env };
       return { status: 0 } as ReturnType<typeof import('node:child_process').spawnSync>;
     }) as typeof import('node:child_process').spawnSync });
