@@ -217,6 +217,10 @@ export const INTEGRATION_CI_TESTS: readonly string[] = [
   'task-2532-stale-integration-state-repro.test.ts',
   // TASK-2527: verifies shared-token discovery using temporary Git worktrees.
   'task-2527-local-sonar.test.ts',
+  // TASK-2544: seeds temporary Git worktrees on distinct branches to prove the
+  // per-branch SonarQube identity isolates analyses, so it crosses the git
+  // boundary and runs only in the integration layer.
+  'task-2544-sonar-worktree-isolation.test.ts',
   // TASK-2533: stages a special-character (backslash) payload file in a
   // throwaway Git repo and drives `git commit --only` pathspecs, so it crosses
   // the git boundary and runs only in the integration layer.
@@ -234,7 +238,6 @@ export const INTEGRATION_CI_TESTS: readonly string[] = [
   'tui-command-flow.test.ts',
   'tui-pty-smoke.test.ts',
   'tui-spawn.test.ts',
-  'unit-test-timeout-guard.test.ts',
   'verification.test.ts',
   'verify-local-integrate.test.ts',
   'web-host.integration.test.ts',
@@ -250,6 +253,7 @@ export const INTEGRATION_LOCAL_TESTS: readonly string[] = [
   'task-2270-graphify-exclusion.test.ts',
   'task-2286-native-sea-smoke.test.ts',
   'task-2376-lifecycle-timing.test.ts',
+  'unit-test-timeout-guard.test.ts',
 ];
 
 /** Why each local-only entry cannot run on a clean GitHub-hosted runner. */
@@ -262,6 +266,8 @@ export const INTEGRATION_LOCAL_REASONS: Readonly<Record<string, string>> = {
     'Builds and runs the native single-executable artifact, which needs a Node >= MINIMUM_SEA_NODE_MAJOR SEA toolchain and per-OS packaging; the portable npm package and bundle checks cover packaging in the CI lane instead.',
   'task-2376-lifecycle-timing.test.ts':
     'Asserts lifecycle dwell and cycle-time values; retain that timing-dependent coverage in required local verification rather than GitHub CI\'s 1000ms test budget.',
+  'unit-test-timeout-guard.test.ts':
+    'TASK-2542: proves the unit-test timing guard fires by spawning the runner against a slow fixture; the budget/reporter path is disabled on GitHub-hosted runners, so this timing proof is retained in required local verification rather than the GitHub CI lane.',
 };
 
 /**

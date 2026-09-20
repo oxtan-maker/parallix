@@ -312,7 +312,17 @@ export function findExistingSquashCommit(rootDir: string, slug: string) {
  * @returns {string | null} the landed squash commit hash, or null.
  */
 export function findLandedSquashOnBaseBranch(rootDir: string, slug: string) {
-  const base = resolveMissionBaseBranch(slug, rootDir);
+  // The recorded base branch is the authority for this scan, but resolving it
+  // can fail (no primary branch yet, unresolved worktree, mocked boundary in a
+  // unit test). An unresolvable base cannot hold a detectable landed squash, so
+  // any resolution failure falls through to null rather than aborting the
+  // caller — the caller re-resolves the base for the actual rebase/merge.
+  let base: string | null = null;
+  try {
+    base = resolveMissionBaseBranch(slug, rootDir);
+  } catch (_) {
+    base = null;
+  }
   if (!base) {return null;}
   const baseRef = git(['-C', rootDir, 'rev-parse', '--verify', `${base}^{commit}`]);
   if (baseRef.status !== 0) {return null;}

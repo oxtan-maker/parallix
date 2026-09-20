@@ -14,7 +14,7 @@ import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { UNIT_TEST_BUDGET_MS, UNIT_TEST_HEADROOM_MS } from './lib/unit-test-budget-reporter.js';
+import { UNIT_TEST_BUDGET_MS, UNIT_TEST_HEADROOM_MS, onGitHubActions } from './lib/unit-test-budget-reporter.js';
 import { buildTestRunPlan } from './lib/test-run-plan.js';
 
 const ROOT = process.cwd();
@@ -220,17 +220,37 @@ test('unit-test timeout guard: suite budget enforcement fails when exceeded', ()
     { encoding: 'utf8', timeout: 60_000, env: runnerEnv },
   );
 
-  // The runner should fail because elapsed time (2s) exceeds budget (500ms)
-  assert.notEqual(
-    result.status,
-    0,
-    `Expected non-zero exit when suite exceeds budget ${budgetMs}ms (got status=${result.status})`,
-  );
-
   // Output should mention the budget exceeded message
   const combinedOutput = (result.stdout || '') + (result.stderr || '');
-  assert.ok(
-    combinedOutput.includes('SUITE BUDGET EXCEEDED') || combinedOutput.includes('unit-test-budget'),
-    `Expected budget output in: ${combinedOutput.slice(-500)}`,
-  );
+
+  // Hermetic across environments: the suite-level budget is disabled on
+  // GitHub-hosted runners by design (task-2542), so the slow fixture is
+  // rejected by the per-test --test-timeout instead of the suite budget. On
+  // local runs the suite budget fires. Assert the behavior each environment
+  // guarantees rather than a single hardcoded expectation.
+  if (onGitHubActions()) {
+    assert.notEqual(
+      result.status,
+      0,
+      `slow fixture still rejected by per-test timeout on GitHub (got status=${result.status})`,
+    );
+    assert.ok(
+      !combinedOutput.includes('SUITE BUDGET EXCEEDED')
+        && !combinedOutput.includes('unit-test-budget'),
+      `GitHub disables the suite budget; no budget message expected in: ${combinedOutput.slice(-500)}`,
+    );
+  } else {
+    // The runner should fail because elapsed time (2s) exceeds budget (500ms)
+    assert.notEqual(
+      result.status,
+      0,
+      `Expected non-zero exit when suite exceeds budget ${budgetMs}ms (got status=${result.status})`,
+    );
+
+    // Output should mention the budget exceeded message
+    assert.ok(
+      combinedOutput.includes('SUITE BUDGET EXCEEDED') || combinedOutput.includes('unit-test-budget'),
+      `Expected budget output in: ${combinedOutput.slice(-500)}`,
+    );
+  }
 });

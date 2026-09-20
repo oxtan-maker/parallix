@@ -150,6 +150,10 @@ const expectedIntegrationFiles = [
   // integration layer.
   'task-2516-recover-landed-mission-repro.test.ts',
   'task-2527-local-sonar.test.ts',
+  // TASK-2544: seeds temporary Git worktrees on distinct branches to prove the
+  // per-branch SonarQube identity isolates analyses, so it crosses the git
+  // boundary and runs only in the integration layer.
+  'task-2544-sonar-worktree-isolation.test.ts',
   'task-2533-squash-payload-pathspec-quotes.test.ts',
   // TASK-2537: seeds throwaway Git repositories to land a draft-authored task
   // file, so it crosses the git boundary and runs in the integration layer.

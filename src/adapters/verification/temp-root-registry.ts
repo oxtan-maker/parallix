@@ -34,10 +34,21 @@ function isProcessAlive(pid: number) {
   }
 }
 
-function isTemporaryRoot(root: string) {
-  const tempRoot = path.resolve(os.tmpdir());
+// Recovery only removes directories under a trusted temp base, so it can never
+// be handed authority to delete unrelated user data. The default base is the
+// system temp dir; the coverage gate registers its repo-local coverage base
+// (on the worktree's backing disk, not the shared tmpfs) so its V8 coverage
+// payloads remain reclaimable after a SIGKILL.
+const TRUSTED_TEMP_ROOTS: string[] = [path.resolve(os.tmpdir())];
+
+function addTrustedTempRoot(root: string): void {
   const resolved = path.resolve(root);
-  return resolved.startsWith(`${tempRoot}${path.sep}`);
+  if (!TRUSTED_TEMP_ROOTS.includes(resolved)) {TRUSTED_TEMP_ROOTS.push(resolved);}
+}
+
+function isTemporaryRoot(root: string) {
+  const resolved = path.resolve(root);
+  return TRUSTED_TEMP_ROOTS.some(base => resolved.startsWith(`${base}${path.sep}`));
 }
 
 function removeRecordedRoots(roots: string[]) {
@@ -109,4 +120,4 @@ function createTempRootRegistry({ manifestDir = defaultManifestDir(), pid = proc
   return { cleanup, manifestDir, manifestPath, register, release };
 }
 
-export { createTempRootRegistry, defaultManifestDir, ensureManifestDir, recoverRecordedTempRoots };
+export { addTrustedTempRoot, createTempRootRegistry, defaultManifestDir, ensureManifestDir, recoverRecordedTempRoots };

@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import os from 'node:os';
 import path from 'node:path';
-import { runSonar, setupSonar, sonarTokenPath } from '../scripts/sonar-local.js';
+import { resolveSonarProjectKey, runSonar, setupSonar, sonarTokenPath } from '../scripts/sonar-local.js';
 
 test('local SonarQube setup stores one shared token and scanner reuses it', async () => {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'task-2527-sonar-'));
@@ -41,7 +41,7 @@ test('local SonarQube setup stores one shared token and scanner reuses it', asyn
     assert.equal(sonarTokenPath(), path.join(home, 'tokens', 'sonarqube'));
     assert.equal(fs.statSync(sonarTokenPath()).mode & 0o777, 0o600);
     assert.equal(path.basename(scan.command ?? ''), 'sonar-scanner-npm');
-    assert.deepEqual(scan.args, ['-Dsonar.newCode.referenceBranch=main']);
+    assert.deepEqual(scan.args, ['-Dsonar.newCode.referenceBranch=main', `-Dsonar.projectKey=${resolveSonarProjectKey()}`]);
     assert.equal(scan.env?.SONAR_TOKEN, 'local-scanner-token');
   } finally {
     if (previous === undefined) delete process.env.FORGEJO_HOME; else process.env.FORGEJO_HOME = previous;

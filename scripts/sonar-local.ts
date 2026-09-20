@@ -1,4 +1,5 @@
 import * as fs from 'node:fs';
+import { createHash } from 'node:crypto';
 import * as path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { createInterface } from 'node:readline/promises';
@@ -7,7 +8,12 @@ import { resolveForgejoHome } from '../src/adapters/forgejo/forgejo.js';
 
 const SONAR_URL = 'http://127.0.0.1:9000';
 const TOKEN_NAME = 'parallix-local-scanner';
-const PROJECT_KEY = 'parallix';
+// `main` keeps the dedicated, recorded identity. Every other branch/worktree
+// gets `parallix-<branch>` so analyses never overwrite each other. Works on
+// every SonarQube edition (community included); native `sonar.branch.name` is
+// rejected because it needs a paid edition. See ADR 0060.
+const MAIN_BRANCH = 'main';
+const MAIN_PROJECT_KEY = 'parallix';
 
 function sonarUrl(): string {
   return (process.env.SONAR_HOST_URL || SONAR_URL).replace(/\/$/, '');
@@ -67,10 +73,10 @@ export async function setupSonar(options: { rootDir?: string, password?: string,
   return { created: true, path: writeSonarToken(result.token, options.rootDir) };
 }
 
-export async function assertNewIssuesFail(options: { token: string, request?: typeof fetch }) {
+export async function assertNewIssuesFail(options: { token: string, request?: typeof fetch, rootDir?: string }) {
   const request = options.request || fetch;
   const headers = { Authorization: `Basic ${Buffer.from(`${options.token}:`).toString('base64')}` };
-  const project = await request(`${sonarUrl()}/api/qualitygates/get_by_project?project=${PROJECT_KEY}`, { headers });
+  const project = await request(`${sonarUrl()}/api/qualitygates/get_by_project?project=${resolveSonarProjectKey(options.rootDir)}`, { headers });
   const gate = await project.json() as { qualityGate?: { name?: string } };
   if (!project.ok || !gate.qualityGate?.name) { throw new Error(`SonarQube quality gate lookup failed (HTTP ${project.status}).`); }
   const response = await request(`${sonarUrl()}/api/qualitygates/show?name=${encodeURIComponent(gate.qualityGate.name)}`, { headers });
@@ -96,16 +102,78 @@ export async function runSonar(options: { rootDir?: string, spawn?: typeof spawn
   const childEnv: NodeJS.ProcessEnv = { ...process.env, SONAR_TOKEN: token };
   if (!fs.existsSync(localBin)) { childEnv.PATH = `${binDir(rootDir)}${path.delimiter}${childEnv.PATH || ''}`; }
   // Pin the new-code base to the primary branch (forgejo-style fallback), not a
-  // stale version tag: every worktree shares project key `parallix`, so the
-  // `previousVersion` base drifts across missions and counts prior-mission lines
-  // as new. Against the primary branch, new code = this branch's changes vs main.
-  const result = (options.spawn || spawnSync)(scannerBin, ['-Dsonar.newCode.referenceBranch=main'], { cwd: rootDir, stdio: 'inherit', env: childEnv });
+  // stale version tag: against the primary branch, new code = this branch's
+  // changes vs main. The new-code reference is independent of the analysis
+  // identity below, which is now isolated per branch so missions do not share
+  // one project. See ADR 0060.
+  const projectKey = resolveSonarProjectKey(rootDir);
+  const result = (options.spawn || spawnSync)(scannerBin, [
+    '-Dsonar.newCode.referenceBranch=main',
+    `-Dsonar.projectKey=${projectKey}`,
+  ], { cwd: rootDir, stdio: 'inherit', env: childEnv });
   if (result.error) { throw result.error; }
   if (result.status !== 0) { process.exitCode = result.status || 1; }
   return result;
 }
 
 function binDir(rootDir: string): string { return path.join(rootDir, 'node_modules', '.bin'); }
+
+// Resolve the branch that owns this analysis. CI pull_request checkouts are a
+// detached merge commit where git reports HEAD, so prefer the runner-supplied
+// branch, then a checked-out branch, then the worktree path basename.
+export function resolveSonarBranch(rootDir: string): string {
+  const envBranch = (process.env.PARALLIX_SONAR_BRANCH || process.env.GITHUB_REF_NAME || '').trim();
+  if (envBranch) return envBranch;
+  const git = spawnSync('git', ['rev-parse', '--abbrev-ref', 'HEAD'], { cwd: rootDir, encoding: 'utf8' });
+  if (!git.error && git.status === 0 && git.stdout.trim() && git.stdout.trim() !== 'HEAD') {
+    return git.stdout.trim();
+  }
+  return path.basename(rootDir);
+}
+
+// SonarQube caps `sonar.projectKey` at 400 characters. The full key is
+// `parallix-<sanitized branch>-<hash>`, so the readable sanitized prefix is
+// bounded so the total never exceeds the limit by construction. SC1 bound.
+const SONAR_MAX_PROJECT_KEY = 400;
+const MAIN_PREFIX = 'parallix-';
+const KEY_SEPARATOR = '-';
+const HASH_LEN = 64; // sha256 hex length
+const MAX_SANITIZED_LEN =
+  SONAR_MAX_PROJECT_KEY - MAIN_PREFIX.length - KEY_SEPARATOR.length - HASH_LEN;
+
+// Sanitize a branch name into a SonarQube project-key charset
+// ([a-z0-9_-], letter-start), bounded to MAX_SANITIZED_LEN. Purely cosmetic:
+// this collapses distinct branches (see resolveSonarProjectKey), so it never
+// stands alone as the identity. Truncating the readable prefix never causes a
+// collision because the suffix hashes the full raw name.
+function sanitizeProjectKey(branch: string): string {
+  return (branch.toLowerCase().replace(/[^a-z0-9_-]+/g, '-').replace(/^-+|-+$/g, '') || 'worktree').slice(0, MAX_SANITIZED_LEN);
+}
+
+// Short injective encoding of the raw branch identity into the SonarQube
+// project-key charset (hex). A fixed-length sha256 (256 bits) is a real
+// collision-resolution mechanism: two distinct branches never share a key even
+// when the sanitized prefix collapses them (feature/a vs feature-a, or the
+// /-heavy names that both sanitize to one prefix). Combined with the bounded
+// sanitized prefix the full key stays within SonarQube's 400-character limit.
+// See ADR 0060.
+function encodeBranchIdentity(branch: string): string {
+  return createHash('sha256').update(branch).digest('hex').slice(0, HASH_LEN);
+}
+
+// Per-worktree/per-branch analysis identity. main keeps the dedicated
+// `parallix` identity; every other branch gets a distinct key so two missions
+// never overwrite each other. Shared by runSonar (scan submission) and
+// assertNewIssuesFail (quality-gate query) so submit and query agree.
+// The readable (bounded) sanitized prefix aids debugging; the sha256 suffix of
+// the full raw name guarantees a collision-free mapping (SC1), and the bounded
+// prefix keeps the total key within SonarQube's 400-character projectKey limit.
+// See ADR 0060.
+export function resolveSonarProjectKey(rootDir: string = process.cwd()): string {
+  const branch = resolveSonarBranch(rootDir);
+  if (branch === MAIN_BRANCH) return MAIN_PROJECT_KEY;
+  return `${MAIN_PREFIX}${sanitizeProjectKey(branch)}-${encodeBranchIdentity(branch)}`;
+}
 
 if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(import.meta.filename)) {
   const command = process.argv[2];

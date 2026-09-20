@@ -111,6 +111,12 @@ jobs:
             echo '::error::SONAR_TOKEN environment secret is not configured'
             exit 1
           fi
+      # Identity per ADR 0060: `npm run sonar` derives the SonarQube analysis
+      # key from the active branch (main -> the dedicated `parallix` view; every
+      # other branch -> `parallix-<branch>`), so this CI analysis never shares the
+      # project with another mission worktree. A pull_request checkout is a
+      # detached merge commit, so the fallback branch is the runner-supplied
+      # GITHUB_REF_NAME. The mandatory gate rule (new_violations > 0) is unchanged.
       - name: Run coverage plus mandatory SonarQube quality gate
         if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository
         run: npm run test:coverage -- --threshold 0 --lcov && npm run sonar > "$GITHUB_WORKSPACE/sonar-quality-gate.log" 2>&1

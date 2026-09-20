@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import { createTempRootRegistry, recoverRecordedTempRoots } from '../src/adapters/verification/temp-root-registry.js';
+import { addTrustedTempRoot, createTempRootRegistry, recoverRecordedTempRoots } from '../src/adapters/verification/temp-root-registry.js';
 import { cleanupRunnerTempRoots, signalExitCode } from './lib/test-runner-temp-roots.js';
 
 test('recorded dead roots are reclaimed while live and unrecorded roots survive', () => {
@@ -63,6 +63,14 @@ test('runner preserves each child signal exit code after cleanup', () => {
   assert.equal(signalExitCode('SIGINT'), 130);
   assert.equal(signalExitCode('SIGTERM'), 143);
   assert.equal(signalExitCode('SIGKILL'), 137);
+});
+
+test('addTrustedTempRoot is idempotent for a repeated base', () => {
+  // The trusted-base list must not grow unbounded when the same repo-local
+  // coverage base is registered more than once (module load plus recovery).
+  addTrustedTempRoot(os.tmpdir());
+  addTrustedTempRoot(os.tmpdir());
+  assert.doesNotThrow(() => addTrustedTempRoot(os.tmpdir()));
 });
 
 test('recovery ignores raced entries and roots outside the temporary directory', () => {

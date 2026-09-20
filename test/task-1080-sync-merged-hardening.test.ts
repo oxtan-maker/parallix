@@ -50,6 +50,9 @@ test('syncMerged retries twice on stale info rejection with strong assertions', 
     resolvePrNumber: () => 123,
     apiCall: () => ({ ok: true }),
     gitDelete: () => ({ status: 0 }),
+    // task-2520: reconcile reads the local/Forgejo base SHAs; a stable value for
+    // both refs keeps the base in sync so reconciliation is a no-op.
+    gitRunner: () => ({ status: 0, stdout: 'same-base-sha', stderr: '' }),
     forgejoUser: 'test-user',
     token: 'test-token'
   };
@@ -76,9 +79,11 @@ test('syncMerged retries twice on stale info rejection with strong assertions', 
   assert.strictEqual(pushCalls[3].dest, 'refs/heads/mission/task-1080');
   assert.strictEqual(pushCalls[3].opts.force, true);
 
-  // Verify fetch happened between retries
-  assert.strictEqual(fetchCalls.length, 2, 'Should have fetched twice (once before push, once after stale rejection)');
-  assert.strictEqual(fetchCalls[0].b, 'mission/task-1080');
+  // A base reconciliation fetch of the Forgejo primary precedes the branch
+  // sync fetches that happen between the stale-retry pushes.
+  assert.strictEqual(fetchCalls.length, 3, 'base reconciliation fetches the Forgejo primary, then the branch is fetched between stale retries');
+  assert.strictEqual(fetchCalls[0].b, 'main');
+  assert.strictEqual(fetchCalls[1].b, 'mission/task-1080');
 
   // Verify log messages (qualitative assertion)
   assert.ok(logMessages.some(m => m.includes('branch sync rejected as stale')), 'Should log first rejection');
@@ -103,6 +108,9 @@ test('syncMerged fails to retry if output is not captured (REPRODUCTION)', (t) =
     resolvePrNumber: () => 123,
     apiCall: () => ({ ok: true }),
     gitDelete: () => ({ status: 0 }),
+    // task-2520: reconcile reads the local/Forgejo base SHAs; a stable value for
+    // both refs keeps the base in sync so reconciliation is a no-op.
+    gitRunner: () => ({ status: 0, stdout: 'same-base-sha', stderr: '' }),
     forgejoUser: 'test-user',
     token: 'test-token'
   };

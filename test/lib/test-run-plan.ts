@@ -13,7 +13,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
-import { UNIT_TEST_BUDGET_MS, UNIT_TEST_HEADROOM_MS } from './unit-test-budget-reporter.js';
+import { UNIT_TEST_BUDGET_MS, UNIT_TEST_HEADROOM_MS, onGitHubActions } from './unit-test-budget-reporter.js';
 import { INTEGRATION_CI_TESTS, INTEGRATION_LOCAL_TESTS } from './test-categories.js';
 
 export interface TestRunPlanOptions {
@@ -343,9 +343,17 @@ export function buildTestRunPlan(options: TestRunPlanOptions): TestRunPlan {
   // tests run via --integration and are exempt because they cross real boundaries.
   // Suite-level budget: 180 s for the full default suite on a typical developer
   // workstation. Adjust PARALLIX_UNIT_TEST_BUDGET_MS to override.
+  // TASK-2542: on GitHub-hosted runners the budget reporter is not executed at
+  // all. The per-test --test-timeout safety net stays (it is not a timing test
+  // nor a reporter); only the runtime timing reporter is dropped. The
+  // `--unit-test-headroom` authoring path is local-only and never carries the
+  // GitHub flag, so its reporter is unaffected.
+  const githubTimingSuspended = onGitHubActions();
   const testTimeoutArgs = runsIntegrationSuite ? [] : [
     '--test-timeout=' + UNIT_TEST_BUDGET_MS,
-    '--test-reporter=' + pathToFileURL(path.join(testRoot, 'lib', 'unit-test-budget-reporter.ts')).href,
+    ...(githubTimingSuspended ? [] : [
+      '--test-reporter=' + pathToFileURL(path.join(testRoot, 'lib', 'unit-test-budget-reporter.ts')).href,
+    ]),
   ];
 
   return {

@@ -73,7 +73,12 @@ export function createIntegrationRebase({ missionPaths, rebase, landing }: Integ
     if (rebaseExitCode !== 0) {
       throw abortWith(landing, `Integration-time rebase dead-ended with exit code ${rebaseExitCode}.`);
     }
-    const rebaseInProg = git(['-C', baseWorktree, 'rebase', '--show-current']).stdout.trim().length > 0;
+    // The rebase runs in the mission worktree, not the base worktree (the shared
+    // workflow resolves the mission worktree internally). Checking the base
+    // worktree here always reports clean mid-rebase; check the mission worktree
+    // so a paused rebase is caught instead of reported as complete (SC7 / AC8).
+    const missionWorktree = missionPaths.conventionalWorktreePath(slug);
+    const rebaseInProg = git(['-C', missionWorktree, 'rebase', '--show-current']).stdout.trim().length > 0;
     const missionSha = git(['-C', baseWorktree, 'rev-parse', missionPaths.missionBranchName(slug, baseWorktree)]).stdout.trim();
     const baseSha = git(['-C', baseWorktree, 'rev-parse', baseBranch]).stdout.trim();
     // Base ancestry: the resolved primary must be an ancestor of the mission HEAD

@@ -27,6 +27,9 @@ test('syncMerged retries push on stale info rejection with strong assertions', a
     log: () => {},
     resolvePrNumber: () => 1065,
     verifyCommit: () => ({ status: 0 }),
+    // task-2520: reconcile reads the local/Forgejo base SHAs; a stable value for
+    // both refs keeps the base in sync so reconciliation is a no-op.
+    gitRunner: () => ({ status: 0, stdout: 'same-base-sha', stderr: '' }),
     // Mocking the inner functions passed via options
     gitPush: (commit, ref, dir, opts = {}) => {
       pushCalls.push({ commit, ref, opts });
@@ -67,8 +70,10 @@ test('syncMerged retries push on stale info rejection with strong assertions', a
   // 4. Fetch branch (retry)
   // 5. Push to branch again
 
-  assert.strictEqual(pushCalls.length, 3, 'Should have called push 3 times (master, branch, branch-retry)');
-  assert.strictEqual(fetchCalls.length, 2, 'Should have called fetch 2 times (before push, and after stale rejection)');
+  assert.strictEqual(pushCalls.length, 3, 'Should have called push 3 times (landed primary, branch, branch-retry)');
+  // A base reconciliation fetch of the Forgejo primary precedes the branch fetches.
+  assert.strictEqual(fetchCalls.length, 3, 'base reconciliation fetches the Forgejo primary before the branch sync fetches');
+  assert.strictEqual(fetchCalls[0], 'main', 'reconcile fetches the Forgejo primary base first');
 
   assert.ok(pushCalls[0].ref === 'refs/heads/master' || pushCalls[0].ref === 'refs/heads/main', `Should push to primary branch, got ${pushCalls[0].ref}`);
   assert.strictEqual(pushCalls[1].ref, 'refs/heads/mission/task-1065');
@@ -94,6 +99,9 @@ test('syncMerged retries push and falls back to force push if still stale', asyn
     log: () => {},
     resolvePrNumber: () => 1065,
     verifyCommit: () => ({ status: 0 }),
+    // task-2520: reconcile reads the local/Forgejo base SHAs; a stable value for
+    // both refs keeps the base in sync so reconciliation is a no-op.
+    gitRunner: () => ({ status: 0, stdout: 'same-base-sha', stderr: '' }),
     gitPush: (commit, ref, dir, opts = {}) => {
       pushCalls.push({ commit, ref, opts });
       if (ref.includes('master') || ref.includes('main')) return { status: 0 };

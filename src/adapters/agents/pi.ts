@@ -394,14 +394,14 @@ function startPiAgent({
                 // the unfilled MISSION.md scaffold on disk.
                 const lastMessage = event.messages?.[event.messages.length - 1];
                 settleError = !event.willRetry && lastMessage?.stopReason === 'error'
-                  ? (lastMessage.errorMessage || 'agent session ended in a provider error')
+                  ? (lastMessage.errorMessage ?? 'agent session ended in a provider error')
                   : null;
                 break;
               }
               case 'auto_retry_end':
                 // The SDK exhausted its own retries; the turn produced nothing.
                 if (event.success === false) {
-                  settleError = event.finalError || 'agent retries exhausted without a model response';
+                  settleError = event.finalError ?? 'agent retries exhausted without a model response';
                 }
                 break;
             }

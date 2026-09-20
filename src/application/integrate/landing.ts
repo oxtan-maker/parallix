@@ -79,6 +79,16 @@ export function createMissionLanding(ports: IntegrateWorkflowPorts, collaborator
   async function probeMerge(run: LandingRun, branch: string, landedFromSha: string): Promise<boolean> {
     const { slug, baseWorktree } = run;
     fmt.log.debug(`Step 2: Checking merge conflicts against local ${run.baseBranch} in the base worktree...`);
+    // SC5 / AC6: a retry after a failed sync-merged has the mission squash already
+    // on the local base branch. Detect it before the probe merge and resume the
+    // landing closeout (finishLanding / sync-merged) instead of squashing again
+    // or replaying mission history.
+    const landedSquash = checkout.findLandedSquashOnBaseBranch(baseWorktree, slug);
+    if (landedSquash) {
+      const resumeSha = git(['-C', baseWorktree, 'rev-parse', run.baseBranch]).stdout.trim() || landedFromSha;
+      await resumeLandedSquash(run, branch, landedSquash, resumeSha);
+      return false;
+    }
     const dryMerge = git(['-C', baseWorktree, 'merge', '--no-commit', '--no-ff', branch]);
     const abortResult = git(['-C', baseWorktree, 'merge', '--abort']);
     // When the probe was clean, a failed abort may leave the base in a dirty merge state.

@@ -183,9 +183,23 @@ test('resolveTestTimeoutMs uses default and valid env override', () => {
 test('createPerRunScratchDirs creates a node-coverage-* dir and records it', () => {
   resetPerRunScratchState();
   const dir = createPerRunScratchDirs();
-  assert.ok(dir.startsWith(path.join(os.tmpdir(), 'node-coverage-')), `dir ${dir} should start with node-coverage- prefix`);
+  assert.ok(path.basename(dir).startsWith('node-coverage-'), `dir ${dir} should start with node-coverage- prefix`);
   assert.ok(fs.existsSync(dir), `dir ${dir} should exist`);
   assert.ok(dir.match(/node-coverage-[a-zA-Z0-9]{6}/), `dir ${dir} should have mkdtemp-style suffix`);
+});
+
+test('createPerRunScratchDirs honors PARALLIX_COVERAGE_TMP_DIR override', () => {
+  const override = path.join(os.tmpdir(), `coverage-override-${process.pid}-${Date.now()}`);
+  const previous = process.env.PARALLIX_COVERAGE_TMP_DIR;
+  process.env.PARALLIX_COVERAGE_TMP_DIR = override;
+  try {
+    resetPerRunScratchState();
+    const dir = createPerRunScratchDirs();
+    assert.ok(dir.startsWith(override), `dir ${dir} should live under the override base`);
+    assert.ok(fs.existsSync(dir), 'override base scratch dir should exist');
+  } finally {
+    if (previous === undefined) {delete process.env.PARALLIX_COVERAGE_TMP_DIR;} else {process.env.PARALLIX_COVERAGE_TMP_DIR = previous;}
+  }
 });
 
 test('cleanupPerRunScratch removes only tracked dirs', () => {
@@ -217,7 +231,8 @@ test('runTests sets NODE_V8_COVERAGE to the created dir', () => {
   assert.equal(exitCode, 0);
   assert.ok(capturedOptions, 'spawnSync should have been called with options');
   assert.ok(capturedOptions.env.NODE_V8_COVERAGE, 'NODE_V8_COVERAGE should be set in child env');
-  assert.ok(capturedOptions.env.NODE_V8_COVERAGE.startsWith(path.join(os.tmpdir(), 'node-coverage-')),
+  assert.ok(
+    path.basename(capturedOptions.env.NODE_V8_COVERAGE).startsWith('node-coverage-'),
     `NODE_V8_COVERAGE ${capturedOptions.env.NODE_V8_COVERAGE} should start with node-coverage- prefix`);
   assert.ok(capturedOptions.env.GRAPHIFY_BIN, 'GRAPHIFY_BIN should be set to a mock in child env');
   assert.ok(capturedOptions.env.GRAPHIFY_BIN.startsWith(path.join(os.tmpdir(), 'graphify-')),

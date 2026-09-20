@@ -8,6 +8,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { resolveSonarProjectKey } from '../scripts/sonar-local.js';
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const SHARED_COMMAND = 'npm run test:coverage -- --threshold 0 --lcov && npm run sonar';
@@ -128,6 +129,6 @@ test('task-2525.03: scanner uses an environment SONAR_TOKEN for trusted CI runs'
   }
 
   assert.equal(path.basename(captured.command), 'sonar-scanner-npm');
-  assert.deepEqual(captured.args, ['-Dsonar.newCode.referenceBranch=main']);
+  assert.deepEqual(captured.args, ['-Dsonar.newCode.referenceBranch=main', `-Dsonar.projectKey=${resolveSonarProjectKey()}`]);
   assert.equal(captured.token, 'ci-environment-token', 'trusted CI runs must pass the environment token to the scanner');
 });

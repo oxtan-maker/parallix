@@ -184,6 +184,14 @@ This is a tool for a local-first developer workflow on one machine, driven by an
 - [`AGENTS.md`](AGENTS.md) — hard rules, restricted actions, and verification entrypoints.
 - `docs/adr/` — architecture decision records, including ADR 0044 (distribution model) and ADR 0048 (the fail-closed harness defence inventory cited above).
 
+## Built with Parallix
+
+Parallix is developed using Parallix itself. Changes are broken into bounded missions, implemented in isolated worktrees, checked by repository-owned verification, reviewed in a separate agent pass — preferentially by a different agent family — and integrated only after human inspection. This repository is therefore both the product and a continuously exercised test case for the workflow it provides.
+
+The maintainer owns product direction, architecture, acceptance criteria, release/review decisions, and the final integration decision. Coding agents are implementation and review tools: they may investigate the codebase, draft plans, implement bounded changes, run checks, and review diffs, but they do not autonomously decide what the product should become or merge their own work.
+
+Because the workflow uses task-scoped execution identities, agent-created intermediate commits may carry mission-specific authorship. Responsibility for the architecture and for what ultimately lands in main remains with the maintainer. Architectural decisions are recorded in docs/adr/, while AGENTS.md and the repository verification configuration define the constraints and gates agents work within.
+
 ## Development
 
 ```sh

@@ -3,12 +3,14 @@ id: TASK-2520
 title: >-
   Integrate must sync Forgejo main to local main before landing, force-pushing
   when diverged
-status: backlog
-assignee: []
+status: done
+assignee: [custom]
 created_date: '2026-09-16 08:08'
 labels:
   - integrate
   - forgejo
+  - user_value
+  - bug
 dependencies: []
 references:
   - src/adapters/forgejo/forgejo-git.ts

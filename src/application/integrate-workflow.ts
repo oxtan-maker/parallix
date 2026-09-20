@@ -122,6 +122,17 @@ export function createIntegrateWorkflow(ports: IntegrateWorkflowPorts) {
     const { baseWorktree, baseBranch } = context;
     const git = ports.git.git;
     if (!dryRun) {
+      // SC5 / AC6: if a previous partial integration already landed the mission
+      // squash onto the local base, rebasing the full mission history onto that
+      // base conflicts and never reaches the resume path (the 2026-09-15
+      // dead-end). Detect the landed squash here, before the rebase, and skip it
+      // so the publish step resumes the landing closeout instead of replaying
+      // mission history.
+      const existingSquash = ports.checkout.findLandedSquashOnBaseBranch(baseWorktree, slug);
+      if (existingSquash) {
+        fmt.log.info(`Landed squash ${existingSquash.slice(0, 12)} already on ${baseBranch}; skipping rebase and resuming landing closeout.`);
+        return;
+      }
       await runIntegrationRebase(slug, { baseWorktree, baseBranch, git, missionServicesFn });
       // Repo-owned metadata such as a version bump is committed onto the
       // rebased mission branch here, so it is computed from the current base,

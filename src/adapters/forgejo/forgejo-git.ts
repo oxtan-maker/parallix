@@ -96,10 +96,11 @@ function ensureRemoteBaseBranch(baseBranch: string, user: string, token: string,
  * @param {{force?: boolean, forceWithLease?: boolean, user?: string, token?: string}} [opts]
  * @returns {*}
  */
-function pushReviewRef(sourceRef: string, destinationRef: string, rootDir: string = process.cwd(), options?: { force?: boolean, forceWithLease?: boolean, user?: string, token?: string }) {
+function pushReviewRef(sourceRef: string, destinationRef: string, rootDir: string = process.cwd(), options?: { force?: boolean, forceWithLease?: boolean, forceWithLeaseRef?: string, user?: string, token?: string }) {
   const {
     force = false,
     forceWithLease = false,
+    forceWithLeaseRef,
     user,
     token
   } = options || {};
@@ -108,7 +109,11 @@ function pushReviewRef(sourceRef: string, destinationRef: string, rootDir: strin
     : 'review';
   const pushArgs = /** @type {string[]} */ (['-C', rootDir, 'push', remote]);
   if (forceWithLease) {
-    pushArgs.push('--force-with-lease');
+    // A pinned lease (--force-with-lease=<ref>) rejects a remote SHA that changed
+    // between fetch and push instead of overwriting it. A bare --force-with-lease
+    // only guards against pushing when the ref is absent, so callers that know
+    // the expected remote SHA (base reconciliation) pass forceWithLeaseRef.
+    pushArgs.push(forceWithLeaseRef ? `--force-with-lease=${forceWithLeaseRef}` : '--force-with-lease');
   } else if (force) {
     pushArgs.push('--force');
   }
@@ -240,6 +245,92 @@ function deleteReviewRef(branch: string, rootDir: string = process.cwd(), option
   return result;
 }
 
+/**
+ * Reconcile Forgejo's recorded base branch with the authoritative local base
+ * before the landed commit is pushed (task-2520).
+ *
+ * Local base is the integration authority; Forgejo is a review mirror. Three
+ * outcomes:
+ *   - unchanged:  Forgejo base already equals the local base (no push).
+ *   - fast-forward: the Forgejo base is an ancestor of the local base, so a
+ *     normal push fast-forwards it (SC1).
+ *   - force-with-lease: the local base rewrote the Forgejo base (non-ancestor).
+ *     A forced update is allowed only when the rewritten tree still contains
+ *     every byte of the remote base — commit ancestry alone cannot prove the
+ *     discarded remote history had no unique content — and it is pinned to the
+ *     freshly fetched SHA with `--force-with-lease=<base>:<fetched-sha>` so a
+ *     remote SHA that changes between fetch and push is rejected (Risks).
+ *   - overwrite-refused: the diverged Forgejo base holds tree content absent
+ *     from the local base. Abort before any force push (SC3).
+ */
+function reconcileForgejoBase({
+  primaryBranch, rootDir, forgejoUser, token, gitFetch, gitRunner, gitPush, log
+}: {
+  primaryBranch: string;
+  rootDir: string;
+  forgejoUser: string | undefined;
+  token: string | undefined;
+  gitFetch: typeof fetchReviewBranch;
+  gitRunner: typeof git;
+  gitPush: typeof pushReviewRef;
+  log: typeof fmt.log.info;
+}): { ok: true, action: 'unchanged' | 'fast-forward' | 'force-with-lease', oldSha: string, newSha: string, diagnostic: string } | { ok: false, error: string, raw?: string, remoteSha?: string, localSha?: string, remoteTree?: string, localTree?: string, diagnostic: string } {
+  const remoteRef = `refs/remotes/review/${primaryBranch}`;
+  // Refresh our view of Forgejo's base before reading or leasing it. A stale
+  // lease would let a concurrent base rewrite slip through.
+  const fetchResult = gitFetch(primaryBranch, rootDir, { user: forgejoUser, token });
+  if (fetchResult.status !== 0) {
+    return { ok: false, error: 'forgejo-base-fetch-failed', raw: pushOutput(fetchResult), diagnostic: `Could not fetch Forgejo ${primaryBranch} to reconcile its base: ${pushOutput(fetchResult)}` };
+  }
+  const localSha = (gitRunner(['-C', rootDir, 'rev-parse', primaryBranch]).stdout || '').trim();
+  const fetchedSha = (gitRunner(['-C', rootDir, 'rev-parse', remoteRef]).stdout || '').trim();
+  if (!localSha || !fetchedSha) {
+    return { ok: false, error: 'forgejo-base-sha-unresolved', diagnostic: `Could not resolve the Forgejo ${primaryBranch} base SHA to reconcile it.` };
+  }
+  // Already in sync: nothing to reconcile, and the landed-commit push below is a
+  // fast-forward onto the current Forgejo base.
+  if (fetchedSha === localSha) {
+    return { ok: true, action: 'unchanged', oldSha: fetchedSha, newSha: localSha, diagnostic: 'Forgejo base already in sync' };
+  }
+  // Ancestor: Forgejo base fast-forwards to the local base — a normal push.
+  const ancestry = gitRunner(['-C', rootDir, 'merge-base', '--is-ancestor', fetchedSha, localSha]);
+  if (ancestry.status === 0) {
+    log(`Forgejo ${primaryBranch} ${fetchedSha.slice(0, 12)} is an ancestor of local ${localSha.slice(0, 12)}; fast-forward push.`);
+    const push = gitPush(fetchedSha, `refs/heads/${primaryBranch}`, rootDir, { user: forgejoUser, token });
+    return push.status === 0
+      ? { ok: true, action: 'fast-forward', oldSha: fetchedSha, newSha: localSha, diagnostic: `Fast-forwarded Forgejo ${primaryBranch} ${fetchedSha.slice(0, 12)} to local ${localSha.slice(0, 12)}` }
+      : { ok: false, error: 'forgejo-base-push-failed', raw: pushOutput(push), diagnostic: pushOutput(push) };
+  }
+  // Diverged: the local base rewrote Forgejo's base. Force is required, but only
+  // when the rewritten tree still contains every byte of the remote base.
+  const remoteTree = (gitRunner(['-C', rootDir, 'rev-parse', `${fetchedSha}^{tree}`]).stdout || '').trim();
+  const localTree = (gitRunner(['-C', rootDir, 'rev-parse', `${localSha}^{tree}`]).stdout || '').trim();
+  if (remoteTree !== localTree) {
+    return {
+      ok: false,
+      error: 'overwrite-refused',
+      remoteSha: fetchedSha,
+      localSha: localSha,
+      remoteTree,
+      localTree,
+      raw: `Forgejo ${primaryBranch} ${fetchedSha.slice(0, 12)} diverges from local ${localSha.slice(0, 12)} and holds tree content (${remoteTree}) absent from the local base (${localTree}); refusing force push.`,
+      diagnostic: `Refusing to overwrite Forgejo ${primaryBranch} ${fetchedSha.slice(0, 12)}: it holds tree content absent from local ${localSha.slice(0, 12)}. Abort before any force push.`
+    };
+  }
+  // ponytail: the diagnostic prints the full old/new SHAs so an operator can
+  // trace what the forced update replaced (SC2) without a separate lookup.
+  log(`Forgejo ${primaryBranch} ${fetchedSha.slice(0, 12)} rewritten; tree-equivalent to local ${localSha.slice(0, 12)}; force-with-lease.`);
+  const push = gitPush(fetchedSha, `refs/heads/${primaryBranch}`, rootDir, {
+    user: forgejoUser,
+    token,
+    forceWithLease: true,
+    forceWithLeaseRef: `${primaryBranch}:${fetchedSha}`
+  });
+  return push.status === 0
+    ? { ok: true, action: 'force-with-lease', oldSha: fetchedSha, newSha: localSha, diagnostic: `Force-pushed Forgejo ${primaryBranch} ${fetchedSha.slice(0, 12)} (force-with-lease) to local ${localSha.slice(0, 12)}` }
+    : { ok: false, error: 'forgejo-base-push-failed', raw: pushOutput(push), diagnostic: pushOutput(push) };
+}
+
 /** @param {string} commit @param {string} rootDir @returns {*} */
 function verifyCommitExists(commit: string, rootDir: string = process.cwd()) {
   return git(['-C', rootDir, 'rev-parse', '--verify', `${commit}^{commit}`], {
@@ -300,6 +391,7 @@ function syncMerged(branch: string, mergedCommit: string, options: any = {}) {
     gitContainsCommit = remoteRefContainsCommit,
     gitDelete = deleteReviewRef,
     verifyCommit = verifyCommitExists,
+    gitRunner = git,
     log = fmt.log.info
   } = options;
 
@@ -375,6 +467,31 @@ function syncMerged(branch: string, mergedCommit: string, options: any = {}) {
       primaryBranch = 'main';
     }
   }
+  // Reconcile Forgejo's recorded base with the authoritative local base before
+  // the landed commit is pushed (task-2520). Local base is the integration
+  // authority; Forgejo is a review mirror. A rewritten or diverged local base
+  // otherwise leaves Forgejo's base stale, so the landed-commit push below is a
+  // non-fast-forward and fails with `push-primary-failed`. Reconcile first so
+  // that push is always a fast-forward (SC1 / SC2). A content-different base is
+  // refused before any force push (SC3).
+  const reconcile = reconcileForgejoBase({
+    primaryBranch,
+    rootDir,
+    forgejoUser,
+    token,
+    gitFetch,
+    gitRunner,
+    gitPush,
+    log
+  });
+  if (!reconcile.ok) {
+    log(`PR #${prNumber} (${branch}): ${reconcile.diagnostic}`);
+    return reconcile;
+  }
+  if (reconcile.action === 'force-with-lease' || reconcile.action === 'fast-forward') {
+    log(`PR #${prNumber} (${branch}): Forgejo ${primaryBranch} reconciled ${reconcile.oldSha.slice(0, 12)} → ${reconcile.newSha.slice(0, 12)} before landing landed commit.`);
+  }
+
   log(`PR #${prNumber} (${branch}): pushing landed commit ${mergedCommit} to Forgejo ${primaryBranch}...`);
   const pushMasterResult = gitPush(mergedCommit, `refs/heads/${primaryBranch}`, rootDir, { user: forgejoUser, token });
   if (pushMasterResult.status !== 0) {

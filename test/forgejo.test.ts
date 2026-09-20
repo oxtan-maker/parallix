@@ -897,6 +897,10 @@ test('getPrStatus and syncMerged share the same FORGEJO_USER fallback contract',
         }
         return { ok: false, data: null, status: 1 };
       },
+      // task-2545: benign gitRunner so reconcileForgejoBase never touches the
+      // real checkout (clean runner has no review remote). Same contract as the
+      // other syncMerged fixtures above.
+      gitRunner: () => ({ stdout: 'shared-base-sha', status: 0 }),
       verifyCommit() {
         return { status: 0 };
       },
@@ -997,6 +1001,9 @@ test('syncMerged pushes landed commit, marks PR merged, and deletes the remote b
       calls.push({ type: 'fetch', branch, rootDir });
       return { status: 0 };
     },
+    // task-2520 reconcileForgejoBase pre-step: benign gitRunner makes the base
+    // reconciliation an 'unchanged' no-op, so only the landed-commit flow runs.
+    gitRunner: () => ({ stdout: 'shared-base-sha', status: 0 }),
     gitDelete(branch, rootDir) {
       calls.push({ type: 'delete', branch, rootDir });
       return { status: 0 };
@@ -1051,6 +1058,10 @@ test('syncMerged pushes the landed commit to the recorded base branch for featur
     gitFetch() {
       return { status: 0 };
     },
+    // task-2520 reconcileForgejoBase pre-step: benign gitRunner resolves the
+    // local and fetched base SHAs equal, so reconciliation is an 'unchanged'
+    // no-op and this test still exercises only the landed-commit push/fetch flow.
+    gitRunner: () => ({ stdout: 'shared-base-sha', status: 0 }),
     gitDelete() {
       return { status: 0 };
     },
@@ -1100,6 +1111,9 @@ test('syncMerged continues when main push fails but review main already contains
       calls.push({ type: 'fetch', branch, rootDir });
       return { status: 0 };
     },
+    // task-2520 reconcileForgejoBase pre-step: benign gitRunner makes the base
+    // reconciliation an 'unchanged' no-op, so only the landed-commit flow runs.
+    gitRunner: () => ({ stdout: 'shared-base-sha', status: 0 }),
     gitContainsCommit(commit, remoteRef, rootDir) {
       calls.push({ type: 'contains', commit, remoteRef, rootDir });
       return { status: 0 };
@@ -1117,7 +1131,7 @@ test('syncMerged continues when main push fails but review main already contains
   assert.equal(result.prNumber, 1062);
   assert.deepEqual(
     calls.filter(call => call.type === 'fetch').map(call => call.branch),
-    ['main', 'mission/task-1062']
+    ['main', 'main', 'mission/task-1062']
   );
   assert.deepEqual(
     calls.filter(call => call.type === 'contains').map(call => [call.commit, call.remoteRef]),
@@ -1171,6 +1185,9 @@ test('syncMerged recovers from stale-info branch push rejection by fetching and 
       calls.push({ type: 'fetch', branch, rootDir });
       return { status: 0 };
     },
+    // task-2520 reconcileForgejoBase pre-step: benign gitRunner makes the base
+    // reconciliation an 'unchanged' no-op, so only the landed-commit flow runs.
+    gitRunner: () => ({ stdout: 'shared-base-sha', status: 0 }),
     gitDelete(branch, rootDir) {
       calls.push({ type: 'delete', branch, rootDir });
       return { status: 0 };
@@ -1192,6 +1209,7 @@ test('syncMerged recovers from stale-info branch push rejection by fetching and 
   assert.deepEqual(
     calls.filter(call => call.type === 'fetch').map(call => [call.branch]),
     [
+      ['main'],
       ['mission/task-1062'],
       ['mission/task-1062']
     ]
@@ -1230,6 +1248,9 @@ test('syncMerged falls back to force push when stale-info persists after fetch r
       calls.push({ type: 'fetch', branch });
       return { status: 0 };
     },
+    // task-2520 reconcileForgejoBase pre-step: benign gitRunner makes the base
+    // reconciliation an 'unchanged' no-op, so only the landed-commit flow runs.
+    gitRunner: () => ({ stdout: 'shared-base-sha', status: 0 }),
     gitDelete() {
       return { status: 0 };
     },
@@ -1276,6 +1297,9 @@ test('syncMerged does not treat unrelated stale output as stale-info branch reje
       calls.push({ type: 'fetch', branch });
       return { status: 0 };
     },
+    // task-2520 reconcileForgejoBase pre-step: benign gitRunner makes the base
+    // reconciliation an 'unchanged' no-op, so only the landed-commit flow runs.
+    gitRunner: () => ({ stdout: 'shared-base-sha', status: 0 }),
     gitDelete() {
       throw new Error('gitDelete should not be called when branch push fails');
     },
@@ -1590,6 +1614,9 @@ test('syncMerged treats 409 Conflict as success if commits match (already merged
       }
       return { ok: false, data: null, status: 1 };
     },
+    // task-2545: benign gitRunner makes reconcileForgejoBase an 'unchanged'
+    // no-op so no real checkout is touched (clean runner has no review remote).
+    gitRunner: () => ({ stdout: 'shared-base-sha', status: 0 }),
     verifyCommit(commit, rootDir) {
       return { status: 0 };
     },
@@ -1629,6 +1656,9 @@ test('syncMerged treats 405 Method Not Allowed as success if commits match (alre
       }
       return { ok: false, data: null, status: 1 };
     },
+    // task-2545: benign gitRunner makes reconcileForgejoBase an 'unchanged'
+    // no-op so no real checkout is touched (clean runner has no review remote).
+    gitRunner: () => ({ stdout: 'shared-base-sha', status: 0 }),
     verifyCommit(commit, rootDir) {
       return { status: 0 };
     },
@@ -1666,6 +1696,9 @@ test('syncMerged fails on 409 Conflict if commits do NOT match', () => {
       }
       return { ok: false, data: null, status: 1 };
     },
+    // task-2545: benign gitRunner makes reconcileForgejoBase an 'unchanged'
+    // no-op so no real checkout is touched (clean runner has no review remote).
+    gitRunner: () => ({ stdout: 'shared-base-sha', status: 0 }),
     verifyCommit(commit, rootDir) {
       return { status: 0 };
     },

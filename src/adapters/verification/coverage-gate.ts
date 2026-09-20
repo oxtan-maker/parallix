@@ -56,10 +56,14 @@ import { compareCodeUnits } from '../../domain/comparators.js';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import * as fmt from '../../application/presentation/cli-format.js';
 import { packageRoot } from '../filesystem/package-root.js';
-import { defaultManifestDir, ensureManifestDir, recoverRecordedTempRoots } from './temp-root-registry.js';
+import { addTrustedTempRoot, defaultManifestDir, ensureManifestDir, recoverRecordedTempRoots } from './temp-root-registry.js';
 
 const MODULE_DIR = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = packageRoot(MODULE_DIR);
+const COVERAGE_SCRATCH_ROOT = path.join(REPO_ROOT, 'tmp');
+// The V8 coverage payload is written to the worktree's backing disk, not the
+// shared tmpfs, so orphan recovery must treat that repo-local base as trusted.
+addTrustedTempRoot(path.join(REPO_ROOT, 'tmp'));
 const E2E_TEST_FILES = new Set(['e2e-real-agent-smoke.test.ts', 'e2e-mission-lifecycle.test.ts']);
 const TEMP_DIR_PREFIXES = [
   'agents-',
@@ -93,6 +97,14 @@ const COVERAGE_EXCLUDES = [
 // under cold caches. Keep the gate generous so it can finish without a manual
 // override while still failing on real hangs.
 const DEFAULT_TEST_TIMEOUT_MS = 3_600_000;
+// Default `node --test` spawns one worker per logical CPU. On this repo that
+// means dozens of workers each seeding a git worktree, a PARALLIX_HOME, and a
+// V8 coverage snapshot under a single tmpfs-backed /tmp. The peak
+// simultaneously-live footprint then overflows /tmp (ENOSPC) and the shared
+// load breaks timing-sensitive watchdog tests. Bound the parallelism tightly
+// so the gate stays within the shared scratch filesystem; the default suite
+// (run-default-tests.ts) is unaffected.
+const COVERAGE_TEST_CONCURRENCY = 2;
 const PER_RUN_SCRATCH: string[] = [];
 
 // Per-run manifest for SIGKILL orphan recovery (task-2327).
@@ -212,8 +224,11 @@ function cleanupNewTempDirs(beforeEntries: Set<string>, tmpRoot: string = os.tmp
   }
 }
 
+// V8 coverage is huge and the shared /tmp tmpfs exhausts during the run, so write it repo-locally (PARALLIX_COVERAGE_TMP_DIR overrides the base).
 function createPerRunScratchDirs() {
-  const coverageDir = fs.mkdtempSync(path.join(os.tmpdir(), 'node-coverage-'));
+  const coverageScratchBase = path.join(process.env.PARALLIX_COVERAGE_TMP_DIR ?? COVERAGE_SCRATCH_ROOT, 'coverage-scratch');
+  fs.mkdirSync(coverageScratchBase, { recursive: true });
+  const coverageDir = fs.mkdtempSync(path.join(coverageScratchBase, 'node-coverage-'));
   PER_RUN_SCRATCH.push(coverageDir);
   flushCoverageManifest();
   return coverageDir;
@@ -291,6 +306,8 @@ function buildCoverageArgs(testFiles: string[], coverageThreshold = threshold, u
     `--test-coverage-lines=${coverageThreshold}`,
     ...COVERAGE_INCLUDES.flatMap(pattern => ['--test-coverage-include', pattern]),
     ...COVERAGE_EXCLUDES.flatMap(pattern => ['--test-coverage-exclude', pattern]),
+    '--test-concurrency',
+    String(COVERAGE_TEST_CONCURRENCY),
   ];
 
   if (useLcov) {
