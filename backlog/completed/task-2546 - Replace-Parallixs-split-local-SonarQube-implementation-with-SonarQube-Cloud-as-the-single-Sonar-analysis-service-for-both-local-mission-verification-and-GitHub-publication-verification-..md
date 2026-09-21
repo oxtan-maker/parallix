@@ -4,10 +4,10 @@ title: >-
   Replace Parallix's split/local SonarQube implementation with **SonarQube Cloud
   as the single Sonar analysis service for both local mission verification and
   GitHub publication verification**.
-status: backlog
-assignee: []
+status: done
+assignee: [custom]
 created_date: '2026-09-20 17:40'
-labels: []
+labels: [user_value]
 dependencies: []
 ordinal: 87008
 ---

@@ -66,6 +66,9 @@ const expectedIntegrationFiles = [
   'review-identity-placeholder.test.ts', 'review-identity.test.ts',
   'review-prompts.test.ts', 'review-state-class.test.ts', 'review-state.test.ts',
   'review.test.ts', 'runtime-matrix.test.ts', 'setup-review.test.ts',
+  // TASK-2546: reads the worktree's real Git branch and tracked-file list to
+  // prove the Cloud scan identity, so it crosses the git boundary.
+  'sonarqube-cloud-wiring.test.ts',
   'sqlite-mission-store.integration.test.ts', 'sqlite-recovery-cp5.test.ts',
   'stats-backfill.test.ts', 'status.test.ts',
   'task-1048-regression.test.ts',
@@ -149,11 +152,6 @@ const expectedIntegrationFiles = [
   // with a worktree, so it crosses the git boundary and runs only in the
   // integration layer.
   'task-2516-recover-landed-mission-repro.test.ts',
-  'task-2527-local-sonar.test.ts',
-  // TASK-2544: seeds temporary Git worktrees on distinct branches to prove the
-  // per-branch SonarQube identity isolates analyses, so it crosses the git
-  // boundary and runs only in the integration layer.
-  'task-2544-sonar-worktree-isolation.test.ts',
   'task-2533-squash-payload-pathspec-quotes.test.ts',
   // TASK-2537: seeds throwaway Git repositories to land a draft-authored task
   // file, so it crosses the git boundary and runs in the integration layer.

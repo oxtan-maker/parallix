@@ -94,6 +94,10 @@ export const INTEGRATION_CI_TESTS: readonly string[] = [
   'runtime-matrix.test.ts',
   'session-marker-repository.test.ts',
   'setup-review.test.ts',
+  // TASK-2546: runs `git rev-parse` and `git ls-files` against the checkout to
+  // prove the SonarQube Cloud branch identity and the absence of the retired
+  // local path. A plain Git checkout is enough, so it is CI-safe.
+  'sonarqube-cloud-wiring.test.ts',
   'sqlite-adapter-cp1.test.ts',
   'sqlite-async-cascade-cp3.test.ts',
   'sqlite-importer-cp4.test.ts',
@@ -215,12 +219,6 @@ export const INTEGRATION_CI_TESTS: readonly string[] = [
   // repair (marker-stash sweep + dead-rebase abort), so it crosses the git
   // boundary and runs only in the integration layer.
   'task-2532-stale-integration-state-repro.test.ts',
-  // TASK-2527: verifies shared-token discovery using temporary Git worktrees.
-  'task-2527-local-sonar.test.ts',
-  // TASK-2544: seeds temporary Git worktrees on distinct branches to prove the
-  // per-branch SonarQube identity isolates analyses, so it crosses the git
-  // boundary and runs only in the integration layer.
-  'task-2544-sonar-worktree-isolation.test.ts',
   // TASK-2533: stages a special-character (backslash) payload file in a
   // throwaway Git repo and drives `git commit --only` pathspecs, so it crosses
   // the git boundary and runs only in the integration layer.

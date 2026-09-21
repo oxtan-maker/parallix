@@ -111,12 +111,14 @@ jobs:
             echo '::error::SONAR_TOKEN environment secret is not configured'
             exit 1
           fi
-      # Identity per ADR 0060: `npm run sonar` derives the SonarQube analysis
-      # key from the active branch (main -> the dedicated `parallix` view; every
-      # other branch -> `parallix-<branch>`), so this CI analysis never shares the
-      # project with another mission worktree. A pull_request checkout is a
-      # detached merge commit, so the fallback branch is the runner-supplied
-      # GITHUB_REF_NAME. The mandatory gate rule (new_violations > 0) is unchanged.
+      # Identity per ADR 0060: `npm run sonar` is the single SonarQube Cloud
+      # entrypoint shared with local mission verification (organization
+      # oxtan-maker, project parallix). On GitHub the entrypoint does not send a
+      # branch: the scanner's CI integration derives branch/pull-request identity
+      # from the event, so a pull_request run is analysed as its pull request
+      # rather than as the detached merge commit. Only SONAR_TOKEN is required —
+      # the Cloud host lives in sonar-project.properties, not in a secret. The
+      # mandatory gate rule (new_violations > 0) is unchanged.
       - name: Run coverage plus mandatory SonarQube quality gate
         if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository
         run: npm run test:coverage -- --threshold 0 --lcov && npm run sonar > "$GITHUB_WORKSPACE/sonar-quality-gate.log" 2>&1
@@ -125,12 +127,10 @@ jobs:
           PARALLIX_NO_BUBBLEWRAP: '1'
           # Secrets arrive only through the GitHub secrets context, never a
           # literal value. Scoped to the scan step (least privilege): the broad
-          # test:ci and npm ci steps do not inherit SONAR_TOKEN, so the local
-          # file-token test (task-2527) still sees the file token when it runs in
-          # a CI run that also has SONAR_TOKEN exported. Neither is committed,
-          # emitted to logs, nor made available to untrusted pull-request code.
+          # test:ci and npm ci steps do not inherit SONAR_TOKEN. It is never
+          # committed, emitted to logs, nor made available to untrusted
+          # pull-request code.
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
-          SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
       - name: Publish SonarQube quality gate result
         if: always()
         run: |

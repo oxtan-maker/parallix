@@ -8,7 +8,6 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { resolveSonarProjectKey } from '../scripts/sonar-local.js';
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const SHARED_COMMAND = 'npm run test:coverage -- --threshold 0 --lcov && npm run sonar';
@@ -30,13 +29,16 @@ test('task-2525.03: GitHub workflow and pre-integration gate reference the same 
   );
 });
 
-test('task-2525.03: GitHub workflow sources SONAR_TOKEN and server URL only from environment secrets', () => {
+test('task-2525.03: GitHub workflow sources SONAR_TOKEN only from environment secrets', () => {
   const workflow = fs.readFileSync(path.join(repoRoot, '.github/workflows/ci-required.yml'), 'utf8');
 
   // Secrets arrive through the GitHub secrets context, never a literal value,
   // set at the job level so the trusted-run guard can read them.
   assert.match(workflow, /SONAR_TOKEN:\s*\$\{\{\s*secrets\.SONAR_TOKEN\s*\}\}/);
-  assert.match(workflow, /SONAR_HOST_URL:\s*\$\{\{\s*secrets\.SONAR_HOST_URL\s*\}\}/);
+
+  // The Cloud host is repository configuration (sonar-project.properties), not
+  // a secret: SONAR_TOKEN is the only credential the workflow requires.
+  assert.doesNotMatch(workflow, /SONAR_HOST_URL/);
 
   // The step guard branches on the event/repodata context, not the secrets
   // context: GitHub Actions rejects `secrets` in a step-level if: conditional,
@@ -78,10 +80,11 @@ test('task-2525.03: GitHub workflow waits for the quality gate and publishes it 
 test('task-2525.03: scanner configuration preserves the recorded legacy baseline and rejects new-code regressions', () => {
   const props = fs.readFileSync(path.join(repoRoot, 'sonar-project.properties'), 'utf8');
 
-  // Recorded legacy baseline preserved (project key + loopback host), and the
-  // gate rejects new-code regressions.
-  assert.match(props, /sonar.projectKey=parallix/);
-  assert.match(props, /sonar.host\.url=http:\/\/127\.0\.0\.1:9000/);
+  // One Cloud project for every branch (ADR 0060), and the gate rejects
+  // new-code regressions.
+  assert.match(props, /sonar\.projectKey=parallix/);
+  assert.match(props, /sonar\.host\.url=https:\/\/sonarcloud\.io/);
+  assert.match(props, /sonar\.organization=oxtan-maker/);
   assert.match(props, /sonar\.qualitygate\.wait=true/);
 
   // The shared command emits full LCOV without imposing the legacy aggregate
@@ -129,6 +132,10 @@ test('task-2525.03: scanner uses an environment SONAR_TOKEN for trusted CI runs'
   }
 
   assert.equal(path.basename(captured.command), 'sonar-scanner-npm');
-  assert.deepEqual(captured.args, ['-Dsonar.newCode.referenceBranch=main', `-Dsonar.projectKey=${resolveSonarProjectKey()}`]);
+  assert.deepEqual(captured.args.slice(0, 3), [
+    '-Dsonar.host.url=https://sonarcloud.io',
+    '-Dsonar.organization=oxtan-maker',
+    '-Dsonar.projectKey=parallix',
+  ]);
   assert.equal(captured.token, 'ci-environment-token', 'trusted CI runs must pass the environment token to the scanner');
 });
