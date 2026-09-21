@@ -180,6 +180,13 @@ export interface ProductionApplicationServiceOptions {
   readonly includeOperatorState?: boolean;
 }
 
+function performHandoffWithMissionServices(mission: MissionApplicationServices) {
+  return (slug: string, options: Record<string, unknown>) => performHandoff(slug, {
+    ...options,
+    missionServicesFn: async () => mission,
+  });
+}
+
 /**
  * Sole production construction point for the complete concrete graph.
  *
@@ -233,26 +240,22 @@ export async function createProductionApplicationServices(
   const mission = options.includeOperatorState === false
     ? null
     : await createMissionApplicationServices(rootDir);
+  // Shared Mission-authority injection used by both the handoff and the review
   const defaultExecuteRuntime = createDefaultExecuteMissionRuntime();
+  const handoffWithMissionServices = mission && performHandoffWithMissionServices(mission);
   const executeRuntime = mission ? {
     ...defaultExecuteRuntime,
     runHandoffAndReview: (slug: string, worktree: string, agent: string, runtimeOptions: Record<string, unknown> = {}) =>
       defaultExecuteRuntime.runHandoffAndReview(slug, worktree, agent, {
         ...runtimeOptions,
-        performHandoff: (handoffSlug: string, handoffOptions: Record<string, unknown>) => performHandoff(handoffSlug, {
-          ...handoffOptions,
-          missionServicesFn: async () => mission,
-        }),
+        performHandoff: handoffWithMissionServices!,
         startReviewLoop: (reviewSlug: string, loopOptions: Record<string, unknown>) => startReviewLoop(reviewSlug, {
           ...loopOptions,
-          performHandoffFn: (handoffSlug: string, handoffOptions: Record<string, unknown>) => performHandoff(handoffSlug, {
-            ...handoffOptions,
-            missionServicesFn: async () => mission,
-          }),
           // Every Mission-authority injection the loop needs, including the
           // artifact consumers that persist review events: an omitted binding
           // leaves the adapter default, which resolves no store and reports the
           // mission as having no Review.
+          performHandoffFn: handoffWithMissionServices!,
           ...reviewLoopBindings(mission.store, mission.lifecycle),
           // Persisted execution context is the authoritative launch context;
           // the default runtime's null resolver is the file-backed fallback.

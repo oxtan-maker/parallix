@@ -195,7 +195,7 @@ export function medianStateTimes(
   let index = 0;
   return {
     // instants is readonly string[] (ISO-8601); default order == chronological, left implicit per SC6.
-    series: [...instants].sort().map((through) => {
+    series: [...instants].sort((left, right) => left.localeCompare(right)).map((through) => {
       while (index < ordered.length && ordered[index]!.closedAt <= through) {
         const value = ordered[index++]!.cycleTimeMinutes;
         const insertion = values.findIndex((existing) => existing > value);
@@ -275,7 +275,7 @@ export function cumulativeFlowSeries(
   let index = 0;
   return {
     // instants is readonly string[] (ISO-8601); default order == chronological, left implicit per SC6.
-    series: [...instants].sort().map((at) => {
+    series: [...instants].sort((left, right) => left.localeCompare(right)).map((at) => {
       while (index < ordered.length && ordered[index]!.occurredAt <= at) {
         const transition = ordered[index++]!;
         const previous = state.get(transition.missionId);
@@ -538,6 +538,31 @@ function hasRecordedIntake(
   );
 }
 
+function latestTransitionsByMission(
+  transitions: readonly MissionTransition[],
+): ReadonlyMap<MissionId, MissionTransition> {
+  const latest = new Map<MissionId, MissionTransition>();
+  for (const transition of transitions) {
+    const previous = latest.get(transition.missionId);
+    if (!previous || previous.occurredAt < transition.occurredAt) {
+      latest.set(transition.missionId, transition);
+    }
+  }
+  return latest;
+}
+
+function addAge(
+  ages: Map<BoardLane, number[]>,
+  lane: BoardLane,
+  enteredAt: string,
+  asOf: string,
+): void {
+  const minutes = (Date.parse(asOf) - Date.parse(enteredAt)) / 60_000;
+  if (Number.isFinite(minutes) && minutes >= 0) {
+    ages.set(lane, [...(ages.get(lane) ?? []), minutes]);
+  }
+}
+
 /** Median age in each current lane, derived from transitions and lifecycle entries. */
 export function medianAgeByLaneSeries(
   transitions: readonly MissionTransition[],
@@ -545,17 +570,10 @@ export function medianAgeByLaneSeries(
   initialStates?: ReadonlyMap<MissionId, MissionStatus>,
   lifecycleEntries?: ReadonlyMap<MissionId, string>,
 ): LaneMetricSeries {
-  const latestByMission = new Map<MissionId, MissionTransition>();
-  for (const transition of transitions) {
-    const previous = latestByMission.get(transition.missionId);
-    if (!previous || previous.occurredAt < transition.occurredAt) { latestByMission.set(transition.missionId, transition); }
-  }
+  const latestByMission = latestTransitionsByMission(transitions);
   const ages = new Map<BoardLane, number[]>();
   for (const transition of latestByMission.values()) {
-    const minutes = (Date.parse(asOf) - Date.parse(transition.occurredAt)) / 60_000;
-    if (Number.isFinite(minutes) && minutes >= 0) {
-      ages.set(transition.to, [...(ages.get(transition.to) ?? []), minutes]);
-    }
+    addAge(ages, transition.to, transition.occurredAt, asOf);
   }
   // Missions with no transition: use lifecycle entry timestamp as enteredAt
   if (initialStates && lifecycleEntries) {
@@ -563,10 +581,7 @@ export function medianAgeByLaneSeries(
       if (!latestByMission.has(missionId)) {
         const enteredAt = lifecycleEntries.get(missionId);
         if (enteredAt) {
-          const minutes = (Date.parse(asOf) - Date.parse(enteredAt)) / 60_000;
-          if (Number.isFinite(minutes) && minutes >= 0) {
-            ages.set(status as BoardLane, [...(ages.get(status as BoardLane) ?? []), minutes]);
-          }
+          addAge(ages, status as BoardLane, enteredAt, asOf);
         }
       }
     }

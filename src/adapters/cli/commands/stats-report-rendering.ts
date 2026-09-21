@@ -94,6 +94,48 @@ function computePeriodStats(group) {
   return { period: `${first} → ${last}`, days, total, merged, open, totalReviews, avgReviews };
 }
 
+function appendMarkdownGrouping(lines: string[], rows: any[], groupByField: string) {
+  if (groupByField === 'implementer') {
+    const groups = groupBy(rows, 'implementer');
+    lines.push('## By Implementer\n', '| Agent | PRs | Merged | Open | Total Reviews | Avg Reviews/PR | Avg Review Rounds |', '|-------|-----|--------|------|---------------|----------------|-------------------|');
+    const implData = Object.entries(groups as Record<string, any[]>).map(([implementer, group]) => {
+      const stats = computeImplStats(group);
+      return { implementer, prs: stats.total, merged: stats.merged, open: group.filter(row => !row.isMerged).length, totalReviews: stats.totalReviews, avgReviews: stats.avgReviews, avgRounds: stats.avgRounds };
+    }).sort((a, b) => b.prs - a.prs);
+    for (const row of implData) { lines.push(`| ${row.implementer} | ${row.prs} | ${row.merged} | ${row.open} | ${row.totalReviews} | ${row.avgReviews} | ${row.avgRounds} |`); }
+    lines.push('');
+    return;
+  }
+  if (groupByField === 'period') {
+    const groups: Record<string, any[]> = {};
+    for (const row of rows) {
+      const date = formatDate(String(row.normalizedDate));
+      if (!date) { continue; }
+      (groups[date.substring(0, 7)] ||= []).push(row);
+    }
+    lines.push('## By Period (Month)\n', '| Period | Days | PRs | Merged | Open | Total Reviews | Avg Reviews/PR |', '|--------|------|-----|--------|------|---------------|----------------|');
+    for (const month of Object.keys(groups).sort(compareCodeUnits)) {
+      const period = computePeriodStats(groups[month]);
+      if (period) { lines.push(`| ${period.period} | ${period.days} | ${period.total} | ${period.merged} | ${period.open} | ${period.totalReviews} | ${period.avgReviews} |`); }
+    }
+    lines.push('');
+    return;
+  }
+  if (groupByField !== 'merged') { return; }
+  const renderRows = (title: string, rowsToRender: any[]) => {
+    lines.push(title);
+    if (rowsToRender.length === 0) { lines.push('None.', ''); return; }
+    lines.push('| Mission | Implementer | Reviews | Reviewer | Created |', '|---------|-------------|---------|----------|---------|');
+    for (const row of rowsToRender.sort((a, b) => String(a.normalizedDate || '').localeCompare(String(b.normalizedDate || '')))) {
+      lines.push(`| ${row.mission} | ${row.implementer} | ${row.review_count} | ${row.reviewer} | ${formatDate(String(row.normalizedDate))} |`);
+    }
+    lines.push('');
+  };
+  lines.push('## Merged vs Unmerged\n');
+  renderRows('### Merged PRs\n', rows.filter(row => row.isMerged));
+  renderRows('### Unmerged/Closed PRs\n', rows.filter(row => !row.isMerged));
+}
+
 /**
  * @param {{headers: string[], rows: StatsRow[]}} data
  * @param {StatsOptions} options
@@ -135,82 +177,7 @@ function generateMarkdownReport(data, options = {}) {
   }
   lines.push('');
 
-  if (groupByField === 'implementer') {
-    const groups = groupBy(rows, 'implementer');
-    lines.push('## By Implementer\n');
-    lines.push('| Agent | PRs | Merged | Open | Total Reviews | Avg Reviews/PR | Avg Review Rounds |');
-    lines.push('|-------|-----|--------|------|---------------|----------------|-------------------|');
-    const implData = Object.entries(groups)
-      .map(([implementer, group]) => {
-        const stats = computeImplStats(group);
-        return {
-          implementer,
-          prs: stats.total,
-          merged: stats.merged,
-// @ts-ignore -- retained reporting helper is dynamically typed
-          open: group.filter(row => !row.isMerged).length,
-          totalReviews: stats.totalReviews,
-          avgReviews: stats.avgReviews,
-          avgRounds: stats.avgRounds,
-        };
-      })
-      .sort((a, b) => b.prs - a.prs);
-    for (const row of implData) {
-      lines.push(`| ${row.implementer} | ${row.prs} | ${row.merged} | ${row.open} | ${row.totalReviews} | ${row.avgReviews} | ${row.avgRounds} |`);
-    }
-    lines.push('');
-  } else if (groupByField === 'period') {
-    const groups = {};
-    for (const row of rows) {
-      const date = formatDate(String(row.normalizedDate));
-      if (!date) {continue;}
-      const month = date.substring(0, 7);
-// @ts-ignore -- retained reporting helper is dynamically typed
-      if (!/** @type {any} */ (groups)[month]) {/** @type {any} */ (groups)[month] = [];}
-// @ts-ignore -- retained reporting helper is dynamically typed
-      /** @type {any} */ (groups)[month].push(row);
-    }
-    lines.push('## By Period (Month)\n');
-    lines.push('| Period | Days | PRs | Merged | Open | Total Reviews | Avg Reviews/PR |');
-    lines.push('|--------|------|-----|--------|------|---------------|----------------|');
-    for (const month of Object.keys(groups).sort(compareCodeUnits)) {
-// @ts-ignore -- retained reporting helper is dynamically typed
-      const period = computePeriodStats(/** @type{StatsRow[]} */(/** @type {any} */ (groups)[month]));
-      if (period) {
-        lines.push(`| ${period.period} | ${period.days} | ${period.total} | ${period.merged} | ${period.open} | ${period.totalReviews} | ${period.avgReviews} |`);
-      }
-    }
-    lines.push('');
-  } else if (groupByField === 'merged') {
-// @ts-ignore -- retained reporting helper is dynamically typed
-    const mergedRows = rows.filter(row => row.isMerged);
-// @ts-ignore -- retained reporting helper is dynamically typed
-    const unmergedRows = rows.filter(row => !row.isMerged);
-    lines.push('## Merged vs Unmerged\n');
-    lines.push('### Merged PRs\n');
-    if (mergedRows.length > 0) {
-      lines.push('| Mission | Implementer | Reviews | Reviewer | Created |');
-      lines.push('|---------|-------------|---------|----------|---------|');
-// @ts-ignore -- retained reporting helper is dynamically typed
-      for (const row of mergedRows.sort((a, b) => String(a.normalizedDate || '').localeCompare(String(b.normalizedDate || '')))) {
-        lines.push(`| ${/** @type {any} */ (row).mission} | ${/** @type {any} */ (row).implementer} | ${row.review_count} | ${/** @type {any} */ (row).reviewer} | ${formatDate(String(row.normalizedDate))} |`);
-      }
-    } else {
-      lines.push('None.');
-    }
-    lines.push('');
-    lines.push('### Unmerged/Closed PRs\n');
-    if (unmergedRows.length > 0) {
-      lines.push('|---------|-------------|---------|----------|---------|');
-// @ts-ignore -- retained reporting helper is dynamically typed
-      for (const row of unmergedRows.sort((a, b) => String(a.normalizedDate || '').localeCompare(String(b.normalizedDate || '')))) {
-        lines.push(`| ${/** @type {any} */ (row).mission} | ${/** @type {any} */ (row).implementer} | ${row.review_count} | ${/** @type {any} */ (row).reviewer} | ${formatDate(String(row.normalizedDate))} |`);
-      }
-    } else {
-      lines.push('None.');
-    }
-    lines.push('');
-  }
+  appendMarkdownGrouping(lines, rows, groupByField);
 
   lines.push('## Raw Data\n');
   lines.push('```csv');
@@ -264,135 +231,64 @@ function summarizeMissionWindow(rows, window, completedMissionKeys = new Set()) 
  * @param {{completedOnly?: boolean}} [options]
  */
 // @ts-ignore -- retained reporting helper is dynamically typed
-function computeAgentMissionGroups(rows, window, options = {}) {
-// @ts-ignore -- retained reporting helper is dynamically typed
-  const completedMissionKeys = options.completedMissionKeys || new Set();
-// @ts-ignore -- retained reporting helper is dynamically typed
-  let windowRows;
-  // @ts-expect-error dynamically typed reporting options
-  if (options.completedOnly) {
-    windowRows = rows.filter((row: any) => completedMissionKeys.has(statisticsMissionKey(row)));
-  } else {
-    windowRows = rows.filter((row: any) => statisticsRowInWindow(row, window));
-  }
-// @ts-ignore -- retained reporting helper is dynamically typed
-  const validWindowRows = windowRows.filter(row => normalizeClassification(row.classification) !== null);
-  // Completion is supplied by lifecycle readers, never inferred from telemetry.
-  let allValidWindowRows = validWindowRows;
-  // The non-completed path supports the live spend table, where no final owner
-  // exists yet. It picks a concrete model deterministically.
-  /** @type {Record<string, StatsRow>} */
-  const byMission = {};
-  /** @type {Record<string, StatsRow[]>} */
-  const rowsByMission = {};
-  for (const row of allValidWindowRows) {
+function shouldReplaceMissionRow(row: any, previous: any): boolean {
+  if (!previous) { return true; }
+  const model = String(row.model || '').trim();
+  const previousModel = String(previous.model || '').trim();
+  if (Boolean(model) !== Boolean(previousModel)) { return Boolean(model); }
+  if (!model) { return true; }
+  const familyMatch = row.implementer && modelBelongsToImplFamily(model, row.implementer);
+  const previousFamilyMatch = previous.implementer && modelBelongsToImplFamily(previousModel, previous.implementer);
+  if (Boolean(familyMatch) !== Boolean(previousFamilyMatch)) { return Boolean(familyMatch); }
+  return row.date >= previous.date;
+}
+
+function missionCandidates(rows: any[]) {
+  const byMission: Record<string, any> = {};
+  const rowsByMission: Record<string, any[]> = {};
+  for (const row of rows) {
     const key = statisticsMissionKey(row);
-// @ts-ignore -- retained reporting helper is dynamically typed
-    if (!rowsByMission[key]) {rowsByMission[key] = [];}
-// @ts-ignore -- retained reporting helper is dynamically typed
-    rowsByMission[key].push(row);
-// @ts-ignore -- retained reporting helper is dynamically typed
-    const prev = byMission[key];
-    const modelTrimmed = (row.model && String(row.model).trim()) || '';
-    const implTrimmed = (row.implementer && String(row.implementer).trim()) || '';
-    const rowHasModel = Boolean(modelTrimmed);
-    const isFamilyMatch = rowHasModel && implTrimmed && modelBelongsToImplFamily(modelTrimmed, implTrimmed);
-    let shouldReplace;
-    if (!prev) {
-      shouldReplace = true;
-    } else {
-      const prevModelTrimmed = (prev.model && String(prev.model).trim()) || '';
-      const prevImplTrimmed = (prev.implementer && String(prev.implementer).trim()) || '';
-      const prevHasModel = Boolean(prevModelTrimmed);
-      const prevFamilyMatch = prevHasModel && prevImplTrimmed && modelBelongsToImplFamily(prevModelTrimmed, prevImplTrimmed);
-      if (rowHasModel && !prevHasModel) {
-        shouldReplace = true;
-      } else if (!rowHasModel && prevHasModel) {
-        shouldReplace = false;
-      } else if (rowHasModel && prevHasModel) {
-        // Both have models — implementer-family match first, then date, then CSV order.
-        if (isFamilyMatch && !prevFamilyMatch) {
-          shouldReplace = true;
-        } else if (!isFamilyMatch && prevFamilyMatch) {
-          shouldReplace = false;
-        } else if (row.date > prev.date) {
-          shouldReplace = true;
-        } else if (row.date < prev.date) {
-          shouldReplace = false;
-        } else {
-          // Same date, same tier — last in CSV wins
-          shouldReplace = true;
-        }
-      } else {
-        // Both blank — last in CSV wins
-        shouldReplace = true;
-      }
-    }
-    if (shouldReplace) {
-// @ts-ignore -- retained reporting helper is dynamically typed
-      byMission[key] = row;
+    (rowsByMission[key] ||= []).push(row);
+    if (shouldReplaceMissionRow(row, byMission[key])) { byMission[key] = row; }
+  }
+  return { byMission, rowsByMission };
+}
+
+function assignCompletedMissionOwners(byMission: Record<string, any>, rowsByMission: Record<string, any[]>) {
+  for (const [key, rows] of Object.entries(rowsByMission)) {
+    const reversed = [...rows].reverse();
+    const rollup = reversed.find(row => row.stage === 'default');
+    const owner = rollup?.implementer ?? reversed.find(row => String(row.stage || 'default').trim().toLowerCase() !== 'review')?.implementer;
+    const ownerModel = reversed.find(row => row.implementer === owner && String(row.stage || 'default').trim().toLowerCase() !== 'review' && String(row.model || '').trim());
+    if (owner && byMission[key]) {
+      byMission[key] = { ...(ownerModel || rollup || byMission[key]), reportedImplementer: owner, pr_fix_rounds: rollup?.pr_fix_rounds ?? byMission[key].pr_fix_rounds };
     }
   }
+}
 
-// @ts-ignore -- retained reporting helper is dynamically typed
-  if (options.completedOnly) {
-    for (const [key, missionRows] of Object.entries(rowsByMission)) {
-// @ts-ignore -- retained reporting helper is dynamically typed
-      const rollup = [...missionRows].reverse().find(row => row.stage === 'default');
-// @ts-ignore -- retained reporting helper is dynamically typed
-      const owner = rollup?.implementer ?? [...missionRows].reverse().find(row =>
-        String(row.stage || 'default').trim().toLowerCase() !== 'review',
-      )?.implementer;
-// @ts-ignore -- retained reporting helper is dynamically typed
-      const ownerModel = [...missionRows].reverse().find(row =>
-        row.implementer === owner
-          && String(row.stage || 'default').trim().toLowerCase() !== 'review'
-          && String(row.model || '').trim(),
-      );
-// @ts-ignore -- retained reporting helper is dynamically typed
-      if (owner && byMission[key]) {
-// @ts-ignore -- retained reporting helper is dynamically typed
-        byMission[key] = {
-// @ts-ignore -- retained reporting helper is dynamically typed
-          ...(ownerModel || rollup || byMission[key]),
-          reportedImplementer: owner,
-// @ts-ignore -- retained reporting helper is dynamically typed
-          pr_fix_rounds: rollup?.pr_fix_rounds ?? byMission[key].pr_fix_rounds,
-        };
-      }
-    }
-  }
-
- const uniqueMissions = Object.values(byMission);
-
-  /** @type {Record<string, StatsRow[]>} */
-  const groups = {};
-  /** @type {Record<string, string>} */
-  const missionKeyToDisplayKey = {};
-  for (const row of uniqueMissions) {
-// @ts-ignore -- retained reporting helper is dynamically typed
-    const modelTrimmed = (row.model && String(row.model).trim()) || '';
-    let displayKey;
-// @ts-ignore -- retained reporting helper is dynamically typed
-    if (row.reportedImplementer) {
-// @ts-ignore -- retained reporting helper is dynamically typed
-      if (modelTrimmed && modelBelongsToImplFamily(modelTrimmed, row.reportedImplementer)) {
-        displayKey = modelTrimmed;
-      } else {
-// @ts-ignore -- retained reporting helper is dynamically typed
-        displayKey = row.reportedImplementer;
-      }
-    } else {
-// @ts-ignore -- retained reporting helper is dynamically typed
-      displayKey = modelTrimmed || (row.implementer || 'unknown');
-    }
-// @ts-ignore -- retained reporting helper is dynamically typed
+function groupMissionCandidates(rows: any[]) {
+  const groups: Record<string, any[]> = {};
+  const missionKeyToDisplayKey: Record<string, string> = {};
+  for (const row of rows) {
+    const model = String(row.model || '').trim();
+    const displayKey = row.reportedImplementer
+      ? (model && modelBelongsToImplFamily(model, row.reportedImplementer) ? model : row.reportedImplementer)
+      : (model || row.implementer || 'unknown');
     missionKeyToDisplayKey[statisticsMissionKey(row)] = displayKey;
-// @ts-ignore -- retained reporting helper is dynamically typed
-    if (!groups[displayKey]) {groups[displayKey] = [];}
-// @ts-ignore -- retained reporting helper is dynamically typed
-    groups[displayKey].push(row);
+    (groups[displayKey] ||= []).push(row);
   }
+  return { groups, missionKeyToDisplayKey };
+}
+
+function computeAgentMissionGroups(rows: any[], window: any, options: { completedOnly?: boolean; completedMissionKeys?: Set<string> } = {}) {
+  const completedMissionKeys = options.completedMissionKeys || new Set();
+  const windowRows = options.completedOnly
+    ? rows.filter((row: any) => completedMissionKeys.has(statisticsMissionKey(row)))
+    : rows.filter((row: any) => statisticsRowInWindow(row, window));
+  const allValidWindowRows = windowRows.filter((row: any) => normalizeClassification(row.classification) !== null);
+  const { byMission, rowsByMission } = missionCandidates(allValidWindowRows);
+  if (options.completedOnly) { assignCompletedMissionOwners(byMission, rowsByMission); }
+  const { groups, missionKeyToDisplayKey } = groupMissionCandidates(Object.values(byMission));
   return { allValidWindowRows, groups, missionKeyToDisplayKey };
 }
 
@@ -428,23 +324,7 @@ function summarizeAgentWindow(rows, window, options = {}) {
   //
   // Review-fix values are nullable telemetry observations, keyed by lifecycle
   // completion rather than a telemetry completion row.
-  /** @type {Record<string, number>} */
-  const storedRoundsByMission: Record<string, number> = {};
-  const roundsFromRollupByMission = new Set();
-  for (const row of allValidWindowRows) {
-    const key = statisticsMissionKey(row);
-    if (row.pr_fix_rounds !== undefined) {
-      // The default rollup is authoritative; without one, the final row is.
-      if (row.stage === 'default' || !roundsFromRollupByMission.has(key)) {
-// @ts-ignore -- retained reporting helper is dynamically typed
-        const rounds = Number.parseInt(String(row.pr_fix_rounds), 10);
-        if (Number.isInteger(rounds) && rounds >= 0) {
-          storedRoundsByMission[key] = rounds;
-          if (row.stage === 'default') { roundsFromRollupByMission.add(key); }
-        }
-      }
-    }
-  }
+  const storedRoundsByMission = collectStoredFixRounds(allValidWindowRows);
 // @ts-ignore -- retained reporting helper is dynamically typed
   const roundsFor = (/** @type {any} */ row) => {
     if (rootDir && deriveFixRoundsFn) {
@@ -472,6 +352,20 @@ function summarizeAgentWindow(rows, window, options = {}) {
       return summary;
     })
     .sort((a, b) => a.implementer.localeCompare(b.implementer));
+}
+
+function collectStoredFixRounds(rows: any[]): Record<string, number> {
+  const storedRoundsByMission: Record<string, number> = {};
+  const roundsFromRollupByMission = new Set<string>();
+  for (const row of rows) {
+    const key = statisticsMissionKey(row);
+    if (row.pr_fix_rounds === undefined || (row.stage !== 'default' && roundsFromRollupByMission.has(key))) { continue; }
+    const rounds = Number.parseInt(String(row.pr_fix_rounds), 10);
+    if (!Number.isInteger(rounds) || rounds < 0) { continue; }
+    storedRoundsByMission[key] = rounds;
+    if (row.stage === 'default') { roundsFromRollupByMission.add(key); }
+  }
+  return storedRoundsByMission;
 }
 
 // Canonical report stages for the per-agent spend-by-stage table (architecture migration).

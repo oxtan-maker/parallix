@@ -2316,7 +2316,7 @@ test('createPr fails without retrying push when stale-info refresh fetch fails',
 
 // ---------- Safety Hardening Regression Tests ----------
 
-test('resolveForgejoHome returns safe fallback in test context when FORGEJO_HOME is unset', () => {
+test('resolveForgejoHome returns a private missing fallback in test context when FORGEJO_HOME is unset', () => {
   const previousHome = process.env.FORGEJO_HOME;
   const previousTestContext = process.env.NODE_TEST_CONTEXT;
   delete process.env.FORGEJO_HOME;
@@ -2324,7 +2324,8 @@ test('resolveForgejoHome returns safe fallback in test context when FORGEJO_HOME
 
   try {
     const resolved = resolveForgejoHome();
-    assert.strictEqual(resolved, '/tmp/forgejo-test-home-missing', 'Should return safe test fallback');
+    assert.ok(resolved.startsWith(path.join(os.tmpdir(), 'forgejo-test-home-')), 'Should return a private test fallback');
+    assert.equal(fs.existsSync(resolved), false, 'Fallback remains missing so test discovery cannot find local credentials');
   } finally {
     if (previousHome !== undefined) process.env.FORGEJO_HOME = previousHome;
     else delete process.env.FORGEJO_HOME;

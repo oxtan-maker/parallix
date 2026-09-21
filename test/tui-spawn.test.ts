@@ -14,9 +14,11 @@ import * as os from 'node:os';
 
 const root = path.resolve(import.meta.dirname, '..');
 
-function runArtifact(args: string[], options: Parameters<typeof execFileSync>[2]): string | null {
+// The spawned CLI must never open the operator database: point PARALLIX_HOME
+// at the fixture so its migrations run against a throwaway ledger.
+function runArtifact(args: string[], options: Parameters<typeof execFileSync>[2] & { cwd: string }): string | null {
   try {
-    return String(execFileSync(process.execPath, args, options));
+    return String(execFileSync(process.execPath, args, { ...options, env: { ...process.env, PARALLIX_HOME: path.join(options.cwd, '.parallix-home') } }));
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'EPERM') {
       return null;
@@ -75,7 +77,7 @@ describe('px ui spawns and exits 0 from shipped artifacts', () => {
     if (result === null) {
       return;
     }
-    // No assertion needed — execFileSync throws on non-zero exit
+    assert.ok(result.length > 0, 'build/px.mjs status must produce headless output');
   });
 
   // The child CLI processes make curl calls to Forgejo that hit the test

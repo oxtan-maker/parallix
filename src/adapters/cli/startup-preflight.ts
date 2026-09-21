@@ -12,6 +12,159 @@ import { isForgejoReviewEnabled } from '../config/product-config.js';
 import stats from './commands/stats.js';
 
 /** @param {string[]} args @param {{log?: Function, error?: Function, cwdFn?: Function, getCurrentBranchFn?: Function, resolveTaskFileFn?: Function, getTaskStatusFn?: Function, toVirtualFn?: Function, findMissionDirFn?: Function, findCheckpointsFn?: Function, getFirstLineFn?: Function, inferSlugFn?: Function, getMissionYearFn?: Function, conventionalWorktreePathFn?: Function, getLastCommitFn?: Function, getPrStatusFn?: Function, evaluateRepositoryReadinessFn?: Function, evaluateReviewSetupFn?: Function, adapterChecklistFn?: Function, resolveMissionClassificationFn?: Function, isForgejoReviewEnabledFn?: Function, fsExistsSync?: Function, resolveMissionBaseBranchFn?: Function, getPrimaryBranchFn?: Function, gitFn?: Function, command?: string, returnResult?: boolean, quiet?: boolean}} opts */
+/** A failed check sets `fail`; only a check with an operator repair adds a step. */
+type PreflightVerdict = { fail: boolean; remediationSteps: string[] };
+
+/** Forgejo token files, auth and git remote. Never fatal: it only warns. */
+function reportReviewSetup(cwd: string, evaluateReviewSetupFn: Function, log: Function): void {
+  const reviewSetup = evaluateReviewSetupFn(cwd);
+  if (!reviewSetup.required) { return; }
+  if (reviewSetup.ok) {
+    log(fmt.status('PASS', 'Forgejo review setup: token files, auth, and git remote are ready.'));
+    return;
+  }
+  log(fmt.status('WARN', 'Forgejo review setup: review actions are not ready yet.'));
+  for (const issue of reviewSetup.issues) { log(fmt.status('INFO', issue)); }
+  for (const step of reviewSetup.steps) { log(fmt.status('INFO', step)); }
+}
+
+function reportRepositoryReadiness(cwd: string, deps: any, verdict: PreflightVerdict, log: Function): void {
+  const { evaluateRepositoryReadinessFn, evaluateReviewSetupFn, adapterChecklistFn } = deps;
+  const readiness = evaluateRepositoryReadinessFn(cwd);
+  if (readiness.mode === 'default') {
+    log(fmt.status('PASS', 'Workflow config: using built-in defaults (create workflow.config.json to override).'));
+    reportReviewSetup(cwd, evaluateReviewSetupFn, log);
+    return;
+  }
+  if (readiness.mode === 'configured') {
+    log(fmt.status('PASS', `Workflow config: ${readiness.configPath}`));
+    log(fmt.status('PASS', 'Repository adapters: override sections are valid.'));
+    reportReviewSetup(cwd, evaluateReviewSetupFn, log);
+    return;
+  }
+  // mode === 'invalid'
+  log(fmt.status('FAIL', `Workflow config: ${readiness.configPath || 'workflow.config.json'}`));
+  for (const issue of readiness.issues) { log(fmt.status('INFO', issue)); }
+  for (const step of adapterChecklistFn()) { log(fmt.status('INFO', step)); }
+  verdict.fail = true;
+  verdict.remediationSteps.push('Fix workflow.config.json: ensure it is valid JSON and adapters is an object with valid subsections.');
+}
+
+function checkWorktreePath(cwd: string, slug: string, isVerifyOnly: boolean, verdict: PreflightVerdict, conventionalWorktreePathFn: Function, log: Function): void {
+  if (isVerifyOnly) { log(fmt.status('PASS', `PWD: ${fmt.path(cwd)}`)); return; }
+  const expectedPath = conventionalWorktreePathFn(slug);
+  if (cwd === expectedPath || cwd.endsWith(slug)) {
+    log(fmt.status('PASS', `PWD: matches expected mission worktree path ${fmt.path(expectedPath)}`));
+    return;
+  }
+  log(fmt.status('FAIL', `PWD: ${fmt.path(cwd)} does not match expected mission worktree path ${fmt.path(expectedPath)}`));
+  verdict.fail = true;
+}
+
+function checkMissionBranch(currentBranch: string, slug: string, isVerifyOnly: boolean, verdict: PreflightVerdict, log: Function): void {
+  const expectedBranch = `mission/${slug}`;
+  if (isVerifyOnly || currentBranch === expectedBranch) {
+    log(fmt.status('PASS', `Branch: ${fmt.branch(currentBranch)}`));
+    return;
+  }
+  log(fmt.status('FAIL', `Branch: ${fmt.branch(currentBranch)} does not match expected mission branch ${fmt.branch(expectedBranch)}`));
+  verdict.fail = true;
+}
+
+/** A mission may only start from a status that has not already completed. */
+function reportBacklogTaskStatus(status: string, virtualStatus: string, isVerifyOnly: boolean, verdict: PreflightVerdict, log: Function): void {
+  if (isVerifyOnly || ['ready', 'active', 'review'].includes(virtualStatus)) {
+    log(fmt.status('PASS', `Backlog task status: ${status}`));
+    return;
+  }
+  if (virtualStatus === 'backlog' || virtualStatus === 'draft') {
+    log(fmt.status('WARN', `Backlog task status: ${status} (expected 'ready', 'active', or 'review')`));
+    return;
+  }
+  log(fmt.status('FAIL', `Backlog task status: ${status} (mission already complete)`));
+  verdict.fail = true;
+}
+
+function reportBacklogClassification(slug: string, cwd: string, resolveMissionClassificationFn: Function, verdict: PreflightVerdict, log: Function): void {
+  try {
+    const { classification, error: classificationError } = resolveMissionClassificationFn(slug, cwd);
+    if (classification) { log(fmt.status('PASS', `Backlog classification: ${classification}`)); return; }
+    log(fmt.status('FAIL', `Backlog classification: ${classificationError || 'missing'}`));
+  } catch (error) {
+    log(fmt.status('FAIL', `Backlog classification: ${(error as Error).message}`));
+  }
+  verdict.fail = true;
+}
+
+function checkBacklogTask(slug: string, cwd: string, isVerifyOnly: boolean, verdict: PreflightVerdict, deps: any, log: Function): void {
+  const { resolveTaskFileFn, getTaskStatusFn, toVirtualFn, resolveMissionClassificationFn } = deps;
+  const taskResolution = resolveTaskFileFn(slug, cwd);
+  if (taskResolution.ok) {
+    const status = getTaskStatusFn(taskResolution.taskFile);
+    reportBacklogTaskStatus(status, toVirtualFn(status), isVerifyOnly, verdict, log);
+    reportBacklogClassification(slug, cwd, resolveMissionClassificationFn, verdict, log);
+    return;
+  }
+  if (taskResolution.reason !== 'missing') {
+    reportTaskResolution(taskResolution, slug, log);
+    verdict.fail = true;
+    return;
+  }
+  // An adhoc mission has no Backlog backing; its classification still resolves.
+  const fallback = resolveMissionClassificationFn(slug, cwd);
+  log(fmt.status('WARN', `Backlog task: no task file found for ${fmt.slug(slug)}; continuing with classification ${fallback.classification}.`));
+  log(fmt.status('PASS', `Backlog classification: ${fallback.classification}`));
+}
+
+/**
+ * When a mission records a non-primary base, verify that base branch exists
+ * locally so `px integrate` does not fail silently at landing time.
+ */
+function checkRecordedBaseBranch(slug: string, cwd: string, verdict: PreflightVerdict, deps: any, log: Function): void {
+  const { resolveMissionBaseBranchFn, getPrimaryBranchFn, runFn } = deps;
+  const primaryBranch = getPrimaryBranchFn();
+  let recordedBase: string | null;
+  try { recordedBase = resolveMissionBaseBranchFn(slug, cwd); } catch (_) { recordedBase = null; }
+  if (!recordedBase || recordedBase === primaryBranch) { return; }
+  const checkResult = runFn(['-C', cwd, 'show-ref', '--verify', '--quiet', `refs/heads/${recordedBase}`], { cwd });
+  if (checkResult && checkResult.status === 0) {
+    log(fmt.status('PASS', `Preflight: base branch '${recordedBase}' exists locally.`));
+    return;
+  }
+  log(fmt.status('FAIL', `Preflight: base branch '${recordedBase}' recorded in MISSION.md does not exist locally. Create or fetch the '${recordedBase}' base branch before starting this mission.`));
+  verdict.fail = true;
+}
+
+function checkMissionDocs(slug: string, cwd: string, verdict: PreflightVerdict, deps: any, log: Function): void {
+  const { findMissionDirFn, findCheckpointsFn, getFirstLineFn, getMissionYearFn, fsExistsSync } = deps;
+  const missionDir = findMissionDirFn(slug, cwd);
+  if (!missionDir) {
+    log(fmt.status('FAIL', `Mission doc: directory not found in docs/missions/${getMissionYearFn(slug)}/ for slug ${fmt.slug(slug)}`));
+    verdict.fail = true;
+    return;
+  }
+  if (!fsExistsSync(path.join(missionDir, 'MISSION.md'))) {
+    log(fmt.status('FAIL', `Mission doc: found directory but MISSION.md is missing in ${fmt.path(missionDir)}`));
+    verdict.fail = true;
+    return;
+  }
+  const checkpoints = findCheckpointsFn(missionDir);
+  if (checkpoints.length > 0) {
+    const lastCP = checkpoints[checkpoints.length - 1];
+    log(fmt.status('PASS', `Mission doc: found MISSION.md. Most recent checkpoint: ${fmt.path(path.basename(lastCP))} (${getFirstLineFn(lastCP)})`));
+  } else {
+    log(fmt.status('WARN', `Mission doc: found MISSION.md but no checkpoints yet. Start from CP-1.`));
+  }
+  checkRecordedBaseBranch(slug, cwd, verdict, deps, log);
+}
+
+/** Informational only: any PR state is a usable startup state. */
+function reportForgejoPr(pr: any, log: Function): void {
+  if (!pr.exists) { log(fmt.status('PASS', `Forgejo PR: no PR found (ready for startup)`)); return; }
+  if (pr.state === 'open') { log(fmt.status('PASS', `Forgejo PR: found OPEN PR (#${pr.number})`)); return; }
+  log(fmt.status('PASS', `Forgejo PR: found ${pr.state ? pr.state.toUpperCase() : 'UNKNOWN'} PR (#${pr.number})`));
+}
+
 function startupPreflight(args: string[], opts: { log?: Function, error?: Function, cwdFn?: Function, getCurrentBranchFn?: Function, resolveTaskFileFn?: Function, getTaskStatusFn?: Function, toVirtualFn?: Function, findMissionDirFn?: Function, findCheckpointsFn?: Function, getFirstLineFn?: Function, inferSlugFn?: Function, getMissionYearFn?: Function, conventionalWorktreePathFn?: Function, getLastCommitFn?: Function, getPrStatusFn?: Function, evaluateRepositoryReadinessFn?: Function, evaluateReviewSetupFn?: Function, adapterChecklistFn?: Function, resolveMissionClassificationFn?: Function, isForgejoReviewEnabledFn?: Function, fsExistsSync?: Function, resolveMissionBaseBranchFn?: Function, getPrimaryBranchFn?: Function, gitFn?: Function, command?: string, returnResult?: boolean, quiet?: boolean } = {}) {
   const baseLog = opts.log || fmt.log.plain;
   // `quiet` suppresses routine PASS diagnostics and the preflight header while
@@ -81,167 +234,31 @@ function startupPreflight(args: string[], opts: { log?: Function, error?: Functi
     log(fmt.status('INFO', `Running mission startup preflight for: ${fmt.slug(slug)}`));
   }
 
-  let overallFail = false;
-  /** @type{string[]} */
-  const remediationSteps: string[] = [];
+  const verdict: PreflightVerdict = { fail: false, remediationSteps: [] };
 
   // Check 1: PWD
   const cwd = resolveCwd();
-  const reportReviewSetup = () => {
-    const reviewSetup = evaluateReviewSetupFn(cwd);
-    if (reviewSetup.required && reviewSetup.ok) {
-      log(fmt.status('PASS', 'Forgejo review setup: token files, auth, and git remote are ready.'));
-    } else if (reviewSetup.required && !reviewSetup.ok) {
-      log(fmt.status('WARN', 'Forgejo review setup: review actions are not ready yet.'));
-      for (const issue of reviewSetup.issues) {
-        log(fmt.status('INFO', issue));
-      }
-      for (const step of reviewSetup.steps) {
-        log(fmt.status('INFO', step));
-      }
-    }
-  };
-
-  const reportRepositoryReadiness = () => {
-    const readiness = evaluateRepositoryReadinessFn(cwd);
-    if (readiness.mode === 'default') {
-      log(fmt.status('PASS', 'Workflow config: using built-in defaults (create workflow.config.json to override).'));
-      reportReviewSetup();
-      return;
-    }
-    if (readiness.mode === 'configured') {
-      log(fmt.status('PASS', `Workflow config: ${readiness.configPath}`));
-      log(fmt.status('PASS', 'Repository adapters: override sections are valid.'));
-      reportReviewSetup();
-      return;
-    }
-
-    // mode === 'invalid'
-    log(fmt.status('FAIL', `Workflow config: ${readiness.configPath || 'workflow.config.json'}`));
-    for (const issue of readiness.issues) {
-      log(fmt.status('INFO', issue));
-    }
-    for (const step of adapterChecklistFn()) {
-      log(fmt.status('INFO', step));
-    }
-    overallFail = true;
-    remediationSteps.push('Fix workflow.config.json: ensure it is valid JSON and adapters is an object with valid subsections.');
-  };
-
-  if (isVerifyOnly) {
-    log(fmt.status('PASS', `PWD: ${fmt.path(cwd)}`));
-  } else {
-    const expectedPath = conventionalWorktreePathFn(slug);
-    if (cwd === expectedPath || cwd.endsWith(slug)) {
-      log(fmt.status('PASS', `PWD: matches expected mission worktree path ${fmt.path(expectedPath)}`));
-    } else {
-      log(fmt.status('FAIL', `PWD: ${fmt.path(cwd)} does not match expected mission worktree path ${fmt.path(expectedPath)}`));
-      overallFail = true;
-    }
-  }
+  checkWorktreePath(cwd, slug, isVerifyOnly, verdict, conventionalWorktreePathFn, log);
 
   // Check 2: Branch
-  const currentBranch = getCurrentBranchFn();
+  checkMissionBranch(getCurrentBranchFn(), slug, isVerifyOnly, verdict, log);
+
   if (isVerifyOnly) {
-    log(fmt.status('PASS', `Branch: ${fmt.branch(currentBranch)}`));
-  } else {
-    const expectedBranch = `mission/${slug}`;
-    if (currentBranch === expectedBranch) {
-      log(fmt.status('PASS', `Branch: ${fmt.branch(currentBranch)}`));
-    } else {
-      log(fmt.status('FAIL', `Branch: ${fmt.branch(currentBranch)} does not match expected mission branch ${fmt.branch(expectedBranch)}`));
-      overallFail = true;
-    }
+    reportRepositoryReadiness(cwd, { evaluateRepositoryReadinessFn, evaluateReviewSetupFn, adapterChecklistFn }, verdict, log);
   }
-  if (isVerifyOnly) {
-    reportRepositoryReadiness();
-  }
+
   // Check 3: Backlog task
   if (slug) {
-    const taskResolution = resolveTaskFileFn(slug, cwd);
-    if (taskResolution.ok) {
-      const status = getTaskStatusFn(taskResolution.taskFile);
-      const virtualStatus = toVirtualFn(status);
-      
-      if (!isVerifyOnly) {
-        if (virtualStatus === 'ready' || virtualStatus === 'active' || virtualStatus === 'review') {
-          log(fmt.status('PASS', `Backlog task status: ${status}`));
-        } else if (virtualStatus === 'backlog' || virtualStatus === 'draft') {
-          log(fmt.status('WARN', `Backlog task status: ${status} (expected 'ready', 'active', or 'review')`));
-        } else {
-          log(fmt.status('FAIL', `Backlog task status: ${status} (mission already complete)`));
-          overallFail = true;
-        }
-      } else {
-        log(fmt.status('PASS', `Backlog task status: ${status}`));
-      }
-
-      try {
-        const { classification, error: classificationError } = resolveMissionClassificationFn(slug, cwd);
-        if (!classification) {
-          log(fmt.status('FAIL', `Backlog classification: ${classificationError || 'missing'}`));
-          overallFail = true;
-        } else {
-          log(fmt.status('PASS', `Backlog classification: ${classification}`));
-        }
-      } catch (error) {
-        log(fmt.status('FAIL', `Backlog classification: ${(error as Error).message}`));
-        overallFail = true;
-      }
-    } else {
-      if (taskResolution.reason === 'missing') {
-        const fallbackClassification = resolveMissionClassificationFn(slug, cwd);
-        log(fmt.status('WARN', `Backlog task: no task file found for ${fmt.slug(slug)}; continuing with classification ${fallbackClassification.classification}.`));
-        log(fmt.status('PASS', `Backlog classification: ${fallbackClassification.classification}`));
-      } else {
-        reportTaskResolution(taskResolution, slug, log);
-        overallFail = true;
-      }
-    }
+    checkBacklogTask(slug, cwd, isVerifyOnly, verdict, { resolveTaskFileFn, getTaskStatusFn, toVirtualFn, resolveMissionClassificationFn }, log);
   }
 
-    // Check 4: Mission docs + base branch
-    if (!isVerifyOnly) {
-      const missionDir = findMissionDirFn(slug, cwd);
-      if (missionDir) {
-        const missionFile = path.join(missionDir, 'MISSION.md');
-        if (fsExistsSync(missionFile)) {
-          const checkpoints = findCheckpointsFn(missionDir);
-          if (checkpoints.length > 0) {
-            const lastCP = checkpoints[checkpoints.length - 1];
-            const firstLine = getFirstLineFn(lastCP);
-            log(fmt.status('PASS', `Mission doc: found MISSION.md. Most recent checkpoint: ${fmt.path(path.basename(lastCP))} (${firstLine})`));
-          } else {
-            log(fmt.status('WARN', `Mission doc: found MISSION.md but no checkpoints yet. Start from CP-1.`));
-          }
-
-          // Base branch validation: when a mission records a non-primary base,
-          // verify the base branch exists locally so integrate won't fail silently.
-          const primaryBranch = getPrimaryBranchFn();
-          let recordedBase: string | null;
-          try {
-            recordedBase = resolveMissionBaseBranchFn(slug, cwd);
-          } catch (_) {
-            recordedBase = null;
-          }
-          if (recordedBase && recordedBase !== primaryBranch) {
-            const checkResult = runFn(['-C', cwd, 'show-ref', '--verify', '--quiet', `refs/heads/${recordedBase}`], { cwd });
-            if (!checkResult || checkResult.status !== 0) {
-              log(fmt.status('FAIL', `Preflight: base branch '${recordedBase}' recorded in MISSION.md does not exist locally. Create or fetch the '${recordedBase}' base branch before starting this mission.`));
-              overallFail = true;
-            } else {
-              log(fmt.status('PASS', `Preflight: base branch '${recordedBase}' exists locally.`));
-            }
-          }
-        } else {
-          log(fmt.status('FAIL', `Mission doc: found directory but MISSION.md is missing in ${fmt.path(missionDir)}`));
-          overallFail = true;
-        }
-      } else {
-        log(fmt.status('FAIL', `Mission doc: directory not found in docs/missions/${getMissionYearFn(slug)}/ for slug ${fmt.slug(slug)}`));
-        overallFail = true;
-      }
-    }
+  // Check 4: Mission docs + base branch
+  if (!isVerifyOnly) {
+    checkMissionDocs(slug, cwd, verdict, {
+      findMissionDirFn, findCheckpointsFn, getFirstLineFn, getMissionYearFn, fsExistsSync,
+      resolveMissionBaseBranchFn, getPrimaryBranchFn, runFn,
+    }, log);
+  }
 
   // Check 5: Last commit
   const lastCommit = getLastCommitFn();
@@ -249,16 +266,11 @@ function startupPreflight(args: string[], opts: { log?: Function, error?: Functi
 
   // Check 6: Forgejo PR (skipped when review provider is not forgejo)
   if (!isVerifyOnly && isForgejoReviewEnabledFn(cwd)) {
-    const pr = getPrStatusFn(`mission/${slug}`);
-    if (!pr.exists) {
-      log(fmt.status('PASS', `Forgejo PR: no PR found (ready for startup)`));
-    } else if (pr.state === 'open') {
-      log(fmt.status('PASS', `Forgejo PR: found OPEN PR (#${pr.number})`));
-    } else {
-      log(fmt.status('PASS', `Forgejo PR: found ${pr.state ? pr.state.toUpperCase() : 'UNKNOWN'} PR (#${pr.number})`));
-    }
+    reportForgejoPr(getPrStatusFn(`mission/${slug}`), log);
   }
 
+  const overallFail = verdict.fail;
+  const remediationSteps = verdict.remediationSteps;
   return completePreflightOrExit(overallFail, returnResult, { log, error, remediationSteps });
 }
 

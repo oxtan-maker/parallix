@@ -23,41 +23,32 @@ function printMergedPrRecoveryGuidance(log: PreflightReport['log'], slug: string
   log(fmt.status('INFO', `  px integrate ${slug} --dry-run`));
 }
 
-function checkPullRequest(report: PreflightReport, context: any, { baseWorktree, baseBranch }: ReviewProviderTarget, localApprovalFallback: boolean) {
+function checkOpenPullRequest(report: PreflightReport, context: any, localApprovalFallback: boolean) {
   const { failures, log, detail } = report;
   const lifecycleAuthoritative = context.missionStatus === 'integration' || context.missionStatus === 'done';
+  const recoveryDecision = recoveryEstablishesApproval(context);
+  const recoveryWouldEstablishApproval = recoveryDecision.established && recoveryDecision.via !== 'lifecycle';
+  detail(`Forgejo PR: PR #${context.pr.number} open`);
+  if (lifecycleAuthoritative) {
+    detail(`Forgejo approval: Mission lifecycle is authoritative (${context.missionStatus}); provider state informational (${context.approval.reviewState || 'missing'})`);
+  } else if (localApprovalFallback) {
+    detail(`Forgejo approval: token unavailable, approval sourced from the local Review (phase=approved)`);
+  } else if (!context.approval.ok) {
+    failures.push('pr-approval');
+    log(fmt.status('FAIL', `Forgejo approval: could not verify an approved review (${context.approval.error})`));
+  } else if (context.approval.reviewState !== 'APPROVED' && !recoveryWouldEstablishApproval) {
+    failures.push('pr-approval');
+    log(fmt.status('FAIL', `Forgejo approval: latest formal review state is ${context.approval.reviewState || 'missing'}, expected APPROVED`));
+  } else if (context.approval.reviewState !== 'APPROVED') {
+    detail(`Forgejo approval: recovery would establish the authoritative approval (${recoveryDecision.via} at ${recoveryDecision.decidedAt || 'n/a'}); provider state informational (${context.approval.reviewState || 'missing'})`);
+  } else { detail(`Forgejo approval: latest formal review state is ${context.approval.reviewState}`); }
+}
 
-  if (context.pr.exists && context.pr.state === 'open') {
-    // Review round 1 (F3): predict the authority the real run would establish
-    // through recovery; consumed only when the provider state looks
-    // unapproved and the Mission lifecycle has not already left review (a
-    // dry run has not run recovery, so missionStatus is still stale).
-    const recoveryDecision = recoveryEstablishesApproval(context);
-    const recoveryWouldEstablishApproval = recoveryDecision.established && recoveryDecision.via !== 'lifecycle';
-    detail(`Forgejo PR: PR #${context.pr.number} open`);
-    if (lifecycleAuthoritative) {
-      // TASK-2379: recovery has established the authoritative approval in
-      // the Mission lifecycle; the provider state read at context build
-      // time is informational from here on.
-      detail(`Forgejo approval: Mission lifecycle is authoritative (${context.missionStatus}); provider state informational (${context.approval.reviewState || 'missing'})`);
-    } else if (localApprovalFallback) {
-      detail(`Forgejo approval: token unavailable, approval sourced from the local Review (phase=approved)`);
-    } else if (!context.approval.ok) {
-      failures.push('pr-approval');
-      log(fmt.status('FAIL', `Forgejo approval: could not verify an approved review (${context.approval.error})`));
-    } else if (context.approval.reviewState !== 'APPROVED' && !recoveryWouldEstablishApproval) {
-      failures.push('pr-approval');
-      log(fmt.status('FAIL', `Forgejo approval: latest formal review state is ${context.approval.reviewState || 'missing'}, expected APPROVED`));
-    } else if (context.approval.reviewState !== 'APPROVED') {
-      // A dry run has not run recovery, so the provider state read at
-      // context-build time looks unapproved. Report the authority the real
-      // run would establish instead of failing for exactly the case the
-      // real run accepts.
-      detail(`Forgejo approval: recovery would establish the authoritative approval (${recoveryDecision.via} at ${recoveryDecision.decidedAt || 'n/a'}); provider state informational (${context.approval.reviewState || 'missing'})`);
-    } else {
-      detail(`Forgejo approval: latest formal review state is ${context.approval.reviewState}`);
-    }
-  } else if (context.pr.exists && context.pr.state === 'merged') {
+function checkPullRequest(report: PreflightReport, context: any, { baseWorktree, baseBranch }: ReviewProviderTarget, localApprovalFallback: boolean) {
+  const { failures, log, detail } = report;
+  if (context.pr.exists && context.pr.state === 'open') { checkOpenPullRequest(report, context, localApprovalFallback); return; }
+  const lifecycleAuthoritative = context.missionStatus === 'integration' || context.missionStatus === 'done';
+  if (context.pr.exists && context.pr.state === 'merged') {
     if (lifecycleAuthoritative) {
       detail(`Forgejo PR: PR #${context.pr.number} is already marked merged; Mission lifecycle is authoritative (${context.missionStatus})`);
     } else {

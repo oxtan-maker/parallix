@@ -26,80 +26,50 @@ function codexSessionsDir(codexHome: string) {
 function parseCodexRollout(content: string) {
   if (!content) {return null;}
 
-  let sessionId = null;
-  let provider = null;
-  let model = null;
-  let effort = null;
-  let toolCalls = 0;
-  let lastUsage = null;
-  let contextWindow = 0;
-  let usagePercent = null;
+  const state: any = { sessionId: null, provider: null, model: null, effort: null, toolCalls: 0, lastUsage: null, contextWindow: 0, usagePercent: null };
 
   for (const line of String(content).split('\n')) {
-    const trimmed = line.trim();
-    if (!trimmed.startsWith('{')) {continue;}
-    let evt;
-    try {
-      evt = JSON.parse(trimmed);
-    } catch (_) {
-      continue;
-    }
-    const payload = evt && evt.payload;
-    if (!payload) {continue;}
-
-    switch (evt.type) {
-      case 'session_meta':
-        sessionId = payload.id || sessionId;
-        provider = payload.model_provider || provider;
-        if (payload.model) {model = payload.model;}
-        break;
-      case 'turn_context':
-        // The latest turn_context reflects the model/effort actually used.
-        if (payload.model) {model = payload.model;}
-        if (payload.effort) {effort = payload.effort;}
-        break;
-      case 'response_item':
-        // Codex uses function_call for OpenAI-function tools and
-        // custom_tool_call for host-provided tools (such as exec). Both are
-        // actual tool invocations and must count toward stage telemetry.
-        if (payload.type === 'function_call' || payload.type === 'custom_tool_call') {toolCalls += 1;}
-        break;
-      case 'event_msg':
-        if (payload.type === 'token_count') {
-          if (payload.info && payload.info.total_token_usage) {
-            lastUsage = payload.info.total_token_usage;
-            if (payload.info.model_context_window) {
-              contextWindow = payload.info.model_context_window;
-            }
-          }
-          const pct = payload.rate_limits
-            && payload.rate_limits.primary
-            && payload.rate_limits.primary.used_percent;
-          if (typeof pct === 'number') {usagePercent = pct;}
-        }
-        break;
-      default:
-        break;
-    }
+    applyCodexRolloutEvent(line, state);
   }
 
-  if (!lastUsage && !model && !sessionId) {return null;}
+  if (!state.lastUsage && !state.model && !state.sessionId) {return null;}
 
-  const usage = lastUsage || {};
+  const usage = state.lastUsage || {};
   return {
-    sessionId,
-    provider: provider || null,
-    model: model || null,
-    effort: effort || null,
+    sessionId: state.sessionId,
+    provider: state.provider || null,
+    model: state.model || null,
+    effort: state.effort || null,
     inputTokens: usage.input_tokens || 0,
     outputTokens: usage.output_tokens || 0,
     cachedTokens: usage.cached_input_tokens || 0,
     reasoningTokens: usage.reasoning_output_tokens || 0,
     totalTokens: usage.total_tokens || 0,
-    contextWindow: contextWindow || 0,
-    toolCalls,
-    usagePercent,
+    contextWindow: state.contextWindow || 0,
+    toolCalls: state.toolCalls,
+    usagePercent: state.usagePercent,
   };
+}
+
+function applyCodexRolloutEvent(line: string, state: any): void {
+  let event: any;
+  try { event = JSON.parse(line.trim()); } catch { return; }
+  const payload = event?.payload;
+  if (!payload) { return; }
+  if (event.type === 'session_meta') {
+    state.sessionId = payload.id || state.sessionId;
+    state.provider = payload.model_provider || state.provider;
+    state.model = payload.model || state.model;
+  } else if (event.type === 'turn_context') {
+    state.model = payload.model || state.model;
+    state.effort = payload.effort || state.effort;
+  } else if (event.type === 'response_item') {
+    state.toolCalls += Number(payload.type === 'function_call' || payload.type === 'custom_tool_call');
+  } else if (event.type === 'event_msg' && payload.type === 'token_count') {
+    state.lastUsage = payload.info?.total_token_usage || state.lastUsage;
+    state.contextWindow = payload.info?.model_context_window || state.contextWindow;
+    state.usagePercent = typeof payload.rate_limits?.primary?.used_percent === 'number' ? payload.rate_limits.primary.used_percent : state.usagePercent;
+  }
 }
 
 /**
@@ -116,33 +86,30 @@ function collectRolloutFiles(sessionsDir: string, { sinceMs = 0 }: { sinceMs?: n
   const stack = [sessionsDir];
   while (stack.length > 0) {
     const dir = stack.pop();
-    let entries;
-    try {
-      entries = (fs as any).readdirSync(dir, { withFileTypes: true });
-    } catch (_) {
-      continue;
-    }
-    for (const entry of entries as Array<{name: string, isDirectory: () => boolean, isFile: () => boolean}>) {
-      if (!entry.name) {continue;}
-      const name: string = entry.name ?? '';
-      const full = path.join(dir || '', name);
-      if (entry.isDirectory()) {
-        stack.push(full);
-      } else if (entry.isFile() && entry.name.startsWith('rollout-') && entry.name.endsWith('.jsonl')) {
-        let stat;
-        try {
-          stat = fs.statSync(full);
-        } catch (_) {
-          continue;
-        }
-        const mtime = stat.mtimeMs;
-        if (mtime + 1000 < sinceMs) {continue;} // 1s grace for clock skew
-        found.push({ full, mtime });
-      }
-    }
+    const entries = rolloutEntries(dir || '', sinceMs);
+    stack.push(...entries.directories);
+    found.push(...entries.files);
   }
   found.sort((a, b) => a.mtime - b.mtime);
   return found.map(f => f.full);
+}
+
+function rolloutEntries(dir: string, sinceMs: number) {
+  let entries: Array<{name: string, isDirectory: () => boolean, isFile: () => boolean}>;
+  try { entries = (fs as any).readdirSync(dir, { withFileTypes: true }); } catch { return { directories: [], files: [] as Array<{ full: string; mtime: number }> }; }
+  const directories: string[] = [];
+  const files: Array<{ full: string; mtime: number }> = [];
+  for (const entry of entries) {
+    const full = path.join(dir, entry.name || '');
+    if (entry.isDirectory()) { directories.push(full); }
+    else if (entry.isFile() && entry.name.startsWith('rollout-') && entry.name.endsWith('.jsonl')) {
+      try {
+        const mtime = fs.statSync(full).mtimeMs;
+        if (mtime + 1000 >= sinceMs) { files.push({ full, mtime }); }
+      } catch { /* concurrent cleanup removed the file */ }
+    }
+  }
+  return { directories, files };
 }
 
 /**
@@ -160,42 +127,40 @@ function extractCodexTelemetry(codexHome: string, { sinceMs = 0 }: { sinceMs?: n
   const files = collectRolloutFiles(codexSessionsDir(codexHome), { sinceMs });
   if (files.length === 0) {return null;}
 
-  const agg = {
-    inputTokens: 0, outputTokens: 0, cachedTokens: 0,
-    reasoningTokens: 0, totalTokens: 0, toolCalls: 0,
-  };
-  let newest = null;
-  let newestPath = null;
+  const aggregate = codexTelemetryAggregate();
   for (const file of files) {
-    let content;
-    try {
-      content = fs.readFileSync(file, 'utf8');
-    } catch (_) {
-      continue;
-    }
-    const t = parseCodexRollout(content);
+    const t = readCodexRollout(file);
     if (!t) {continue;}
-    agg.inputTokens += t.inputTokens;
-    agg.outputTokens += t.outputTokens;
-    agg.cachedTokens += t.cachedTokens;
-    agg.reasoningTokens += t.reasoningTokens;
-    agg.totalTokens += t.totalTokens;
-    agg.toolCalls += t.toolCalls;
-    newest = t; // files are oldest-first, so the last assignment is the newest
-    newestPath = file;
+    aggregate.add(t, file);
   }
-  if (!newest) {return null;}
+  if (!aggregate.newest) {return null;}
 
   return {
-    sessionId: newest.sessionId,
-    provider: newest.provider,
-    model: newest.model,
-    effort: newest.effort,
-    contextWindow: newest.contextWindow,
-    usagePercent: newest.usagePercent,
-    rolloutPath: newestPath,
+    sessionId: aggregate.newest.sessionId,
+    provider: aggregate.newest.provider,
+    model: aggregate.newest.model,
+    effort: aggregate.newest.effort,
+    contextWindow: aggregate.newest.contextWindow,
+    usagePercent: aggregate.newest.usagePercent,
+    rolloutPath: aggregate.newestPath,
     rolloutCount: files.length,
-    ...agg,
+    ...aggregate.totals,
+  };
+}
+
+function readCodexRollout(file: string) {
+  try { return parseCodexRollout(fs.readFileSync(file, 'utf8')); } catch { return null; }
+}
+
+function codexTelemetryAggregate() {
+  const totals = { inputTokens: 0, outputTokens: 0, cachedTokens: 0, reasoningTokens: 0, totalTokens: 0, toolCalls: 0 };
+  return {
+    totals, newest: null as any, newestPath: null as string | null,
+    add(telemetry: any, path: string) {
+      for (const field of Object.keys(totals) as Array<keyof typeof totals>) { totals[field] += telemetry[field]; }
+      this.newest = telemetry;
+      this.newestPath = path;
+    },
   };
 }
 

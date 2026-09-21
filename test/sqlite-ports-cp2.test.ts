@@ -82,10 +82,11 @@ describe('SQLite repository ports — CP2: domain mappings and authority', () =>
       const laneEvents: BoardLaneEventRepository = new SqliteBoardLaneEventRepository(db);
       const sessionMarkers: SessionMarkerRepository = new SqliteSessionMarkerRepository(db, repositoryId('repository-id'));
 
-      await Promise.all([
+      const results = await Promise.all([
         blocklist.findAll(), usage.findAll(), preferences.findAll(), catalog.findAll(),
         history.findAll(), laneEvents.findAll(), sessionMarkers.findAll(),
       ]);
+      assert.ok(results.every(Array.isArray), 'every capability contract returns its empty collection from a fresh database');
     } finally {
       await db.close();
       cleanupTempDir(dir);

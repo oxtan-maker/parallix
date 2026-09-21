@@ -98,45 +98,28 @@ async function active(args, options = {}) {
   if (args.includes('--implementer') && !preselectedImplementer) {return;}
 
   const renderProgress = event => renderActiveProgress(event, logFn);
-  // Route through BoardCommandController (canonical dispatcher) when injected;
-  // fall back to direct service.execute() for backward compat.
-  let outcome;
   const operationId = `active:${normalizedSlug}:${randomUUID()}`;
-  const dispatcher = controller || (typeof controllerFactory === 'function'
-    ? await controllerFactory(rootDir, renderProgress)
-    : null);
-  if (dispatcher) {
-    outcome = await dispatcher.dispatch({
-      kind: 'active:execute',
-      missionId: normalizedSlug,
-      operationId,
-      agent: preselectedImplementer,
-      capabilities: new Set(['active:execute']),
-      detached: false,
-    });
-  } else {
-    const executeService = service || (typeof serviceFactory === 'function' ? await serviceFactory(rootDir, renderProgress) : null);
-    if (!executeService) { throw new Error('active command requires an injected execute-mission service'); }
-    outcome = await executeService.execute({
-      operationId,
-      slug: normalizedSlug,
-      agent: preselectedImplementer,
-      capabilities: new Set(['active:execute']),
-    });
-  }
+  const outcome = await executeActiveCommand({ controller, controllerFactory, service, serviceFactory, rootDir, renderProgress, operationId, slug: normalizedSlug, agent: preselectedImplementer });
   if (outcome.status !== 'completed' || !outcome.value) {
-    const message = outcome.error?.message || 'Could not launch execute agent.';
-    const status = /exited with status (\d+)/.exec(message);
-    if (message === 'execute preflight failed') {
-      errorFn('Preflight failed. Fix blockers above before launching the execute agent.');
-    } else if (message === 'dedicated execute worktree is required') {
-      errorFn(`Could not locate dedicated worktree for mission/${fmt.slug(normalizedSlug)}. Run "px draft ${normalizedSlug}" first or create the worktree manually.`);
-    } else {
-      errorFn(message);
-    }
-    exitFn(status ? Number(status[1]) : 1);
+    reportActiveFailure(outcome, normalizedSlug, errorFn, exitFn);
     return;
   }
+}
+
+async function executeActiveCommand({ controller, controllerFactory, service, serviceFactory, rootDir, renderProgress, operationId, slug, agent }) {
+  const dispatcher = controller || (typeof controllerFactory === 'function' ? await controllerFactory(rootDir, renderProgress) : null);
+  if (dispatcher) { return dispatcher.dispatch({ kind: 'active:execute', missionId: slug, operationId, agent, capabilities: new Set(['active:execute']), detached: false }); }
+  const executeService = service || (typeof serviceFactory === 'function' ? await serviceFactory(rootDir, renderProgress) : null);
+  if (!executeService) { throw new Error('active command requires an injected execute-mission service'); }
+  return executeService.execute({ operationId, slug, agent, capabilities: new Set(['active:execute']) });
+}
+
+function reportActiveFailure(outcome, slug, errorFn, exitFn) {
+  const message = outcome.error?.message || 'Could not launch execute agent.';
+  const display = message === 'execute preflight failed' ? 'Preflight failed. Fix blockers above before launching the execute agent.'
+    : message === 'dedicated execute worktree is required' ? `Could not locate dedicated worktree for mission/${fmt.slug(slug)}. Run "px draft ${slug}" first or create the worktree manually.` : message;
+  errorFn(display);
+  exitFn(Number(/exited with status (\d+)/.exec(message)?.[1] || 1));
 }
 
 // Select an active-step agent, launch it, and record the actual implementer in
@@ -297,7 +280,7 @@ function applyExecuteFallback(opts) {
   const taskResolutionTyped2 = /** @type{{ok: boolean, taskFile?: string} | undefined} */(taskResolution);
   if (taskResolutionTyped2 && taskResolutionTyped2.ok) {
     log(fmt.status('INFO', `Execute agent fell back from ${fmt.agent(preselected)} to ${fmt.agent(actual)}; enforcing backlog assignee.`));
-    void transitionTaskFn(slug, 'active', { implementer: actual, rootDir: worktree, log }).catch(() => {});
+    transitionTaskFn(slug, 'active', { implementer: actual, rootDir: worktree, log }).catch(() => {});
   }
   return actual;
 }
@@ -445,6 +428,176 @@ function checkpointValidationNextAction(errorMsg, slug, worktree) {
  * @param {string} agent
   * @param {{taskFile?: string | null, onAgentLaunched?: (agent: string, phase: 'review' | 'review-response') => Promise<void>, onAutonomousStop?: (reason: string) => Promise<void>, validateCheckpointsBeforeHandoffFn?: Function, performHandoff?: Function, startReviewLoop?: Function, repairHandoffFn?: {isRelaunchableError: Function, buildRelaunchPrompt: Function}, startAgentFn?: Function, workflowLauncherStatusFn?: Function, log?: Function, error?: Function}} [options]
  */
+/**
+ * The kernel's launch port for every handoff bounce. The kernel owns
+ * classification, the fix prompt, the budget and the verify; this port owns only
+ * what is genuinely launcher-side — the launcher-availability check and the
+ * resume-aware `startAgent` call. Nothing here decides whether to bounce.
+ */
+function createReboundLaunchPort(context) {
+  const { agent, slug, worktree, startAgentFn, workflowLauncherStatusFn, log } = context;
+  return (async (_step: string, launchOptions: Record<string, unknown>) => {
+    const status = workflowLauncherStatusFn(agent);
+    if (!status.supported) {
+      // A throw is how the kernel learns a launch could not happen; it records
+      // the diagnostic and spends the attempt like any other failed try.
+      throw new Error(`Agent ${agent} is not available for relaunch: ${status.detail || status.reason || 'unknown'}`);
+    }
+    const promptSlot = launchOptions.prompt;
+    const prompt = typeof promptSlot === 'function' ? promptSlot(agent) : String(promptSlot ?? '');
+    return await startAgentFn('active', {
+      prompt,
+      worktree,
+      agent,
+      slug,
+      role: 'implementer',
+      // startAgent uses the RESUME_CAPABLE set and session markers to decide resume.
+      onLaunch: (/** @type{{agent: string}} */ { agent: launchedAgent }) => {
+        log(`Relaunched ${fmt.agent(launchedAgent)} for repair. Session persistence will be used if available.`);
+      }
+    });
+  }) as ReboundContext['startAgent'];
+}
+
+/**
+ * Bounce a checkpoint gap to the implementer and report whether handoff may
+ * proceed. Returns true to continue to performHandoff, false when the operator
+ * has been given a manual instruction instead.
+ */
+async function repairCheckpointsBeforeHandoff(validation, context): Promise<boolean> {
+  const { slug, worktree, agent, reboundLaunchPort, validateCheckpointsBeforeHandoffFn, log, error } = context;
+  // architecture migration: classify the checkpoint validation error and attempt a targeted
+  // agent relaunch (repair bounce) instead of only emitting stranded manual
+  // instructions. Missing checkpoints and malformed Goal Check tables are
+  // IncompleteEvidence — dispatchable to the implementer for repair.
+  const classification = validation.error ? repairHandoff.classifyError(validation.error) : null;
+  // architecture migration: restrict targeted relaunch to IncompleteEvidence only.
+  // Non-incomplete-evidence errors (e.g. GitBlockers/dirty checkpoints,
+  // InfraBlockers) retain their existing handling paths.
+  const relaunchable = validation.nextCheckpoint
+    || classification?.failureClass === repairHandoff.FailureClass.IncompleteEvidence;
+  if (!relaunchable) {
+    // Non-relaunchable checkpoint error — emit manual instruction
+    error(`       ${checkpointValidationNextAction(/** @type {string} */ (validation.error), slug, worktree)}`);
+    return false;
+  }
+
+  // SC3: the bounded `maxCheckpointRelaunches` loop is gone. The kernel owns
+  // the budget and the verified fix: `verify` re-runs the same
+  // `validateCheckpointsBeforeHandoffFn` check that just failed, so `fixed`
+  // means the checkpoints really are present — never merely that an agent ran.
+  log(`Checkpoint validation failed (${classification?.failureClass ?? 'DeclaredCheckpointGap'}). Bouncing to the implementer for a targeted checkpoint repair...`);
+  // A declared checkpoint gap can be reported by `nextCheckpoint` alone, so
+  // name the gap when the validator gave no message.
+  const gapError = /** @type{string} */(validation.error
+    || `Declared checkpoint documents are missing before handoff: ${validation.nextCheckpoint}. Create and commit ${validation.nextCheckpoint}.md before handoff.`);
+  // When the next missing checkpoint is known, carry the continuation contract
+  // into the kernel's diagnostic. Without it the agent repairs one checkpoint
+  // and exits again, which is the loop this bounce exists to end.
+  const nextCheckpoint = validation.nextCheckpoint || nextMissingCheckpointFromError(gapError);
+  const checkpointError = nextCheckpoint
+    ? `${gapError}\n\n${buildCheckpointContinuationPrompt(slug, worktree, nextCheckpoint)}`
+    : gapError;
+  const outcome = await rebound({ kind: 'handoff-verification', error: checkpointError }, {
+    slug, worktree, implementer: agent, startAgent: reboundLaunchPort,
+    verify: () => {
+      const retry = validateCheckpointsBeforeHandoffFn(slug, worktree, { log, error });
+      return { ok: Boolean(retry.ok), diagnostic: retry.error || '' };
+    },
+    log, error,
+  });
+  if (outcome.outcome === 'fixed') { return true; }
+  // exhausted / human-only — re-read the final state so the operator
+  // instruction names the checkpoint gap that actually remains.
+  const finalValidation = validateCheckpointsBeforeHandoffFn(slug, worktree, { log, error });
+  if (finalValidation.ok) { return true; }
+  error(`       ${checkpointValidationNextAction(/** @type {string} */ (finalValidation.error || checkpointError), slug, worktree)}`);
+  return false;
+}
+
+/**
+ * Bounce a relaunchable handoff failure through the kernel. `verify` re-runs
+ * `performHandoff` itself, so the refreshed result — carried on `holder` — flows
+ * into the gatekeeper-pushback and review-loop branches.
+ */
+async function reboundFailedHandoff(holder, classification, context): Promise<void> {
+  const { slug, worktree, agent, reboundLaunchPort, performHandoffFn, log, error } = context;
+  // SC4: the bounded `maxRelaunches` loop is gone.
+  log(`\nRelaunchable error detected (${classification.failureClass}). Bouncing to the implementer...`);
+  const gateFailure = holder.result.gateFailure;
+  const failureReason = gateFailure
+    ? { kind: 'gate-failure', ...gateFailure }
+    : { kind: 'handoff-verification', error: /** @type{string} */(holder.result.error), gateOutput: flattenGateOutput(holder.result.gateOutput) };
+  const outcome = await rebound(failureReason, {
+    slug, worktree, implementer: agent, startAgent: reboundLaunchPort,
+    verify: async () => {
+      holder.result = await performHandoffFn(slug, { forgejoUser: agent, worktree, force: true });
+      return {
+        ok: Boolean(holder.result.ok),
+        diagnostic: holder.result.error || '',
+        reason: holder.result.gateFailure ? { kind: 'gate-failure', ...holder.result.gateFailure } : undefined,
+      };
+    },
+    log, error,
+  });
+  if (outcome.outcome === 'exhausted' && !holder.result.ok) {
+    holder.result.error = `Gate failure persisting after ${DEFAULT_REBOUND_ATTEMPTS} relaunch attempts. Manual intervention required.`;
+  }
+}
+
+/** Single repair for routine hygiene issues (dirty artifacts, rebase needed). */
+async function repairHygieneHandoff(holder, context): Promise<void> {
+  const { slug, worktree, agent, taskFile, reboundLaunchPort, performHandoffFn, repairHandoffFn, log, error } = context;
+  log(`\nAutomated handoff failed: ${holder.result.error}`);
+  log(`Attempting post-execute repair...`);
+  const { repaired, blocker } = await /** @type{Function} */(repairHandoffFn)(slug, worktree, /** @type{string} */(holder.result.error), { taskFile, log, error });
+  if (repaired) {
+    log(`Repair successful. Retrying automated handoff...`);
+    holder.result = await performHandoffFn(slug, { forgejoUser: agent, worktree, force: true });
+    return;
+  }
+  if (blocker) {
+    // If repair failed but provided a specific blocker (e.g. rebase failure),
+    // report that blocker as the final error instead of the original handoff error.
+    holder.result.error = blocker;
+    return;
+  }
+  if (!repairHandoff.isRelaunchableError(holder.result.error)) { return; }
+  // Attempt agent relaunch for repairable content errors (missing goal-check
+  // table). SC4: it routes through the kernel too, with the same
+  // re-run-`performHandoff` verify — so a content repair is only believed once
+  // the handoff actually completes.
+  log(`Content error detected. Attempting agent relaunch to fix...`);
+  const contentError = /** @type{string} */(holder.result.error);
+  const outcome = await rebound({ kind: 'handoff-verification', error: contentError }, {
+    slug, worktree, implementer: agent, startAgent: reboundLaunchPort,
+    verify: async () => {
+      holder.result = await performHandoffFn(slug, { forgejoUser: agent, worktree, force: true });
+      return { ok: Boolean(holder.result.ok), diagnostic: holder.result.error || '' };
+    },
+    log, error,
+  });
+  if (outcome.outcome !== 'fixed' && !holder.result.ok) {
+    holder.result.error = `Post-relaunch handoff failed: ${holder.result.error || 'unknown'}`;
+  }
+}
+
+/**
+ * Repair a failed handoff. ADR 0048 C1: relaunchable classes
+ * (AutoSendBack/AutoRepair, excluding GitBlockers, which repairHandoff
+ * auto-repairs) bounce through the kernel; InfraBlocker and
+ * StateMachineViolation are HumanOnly and fall through to the manual-handoff
+ * message the caller emits.
+ */
+async function repairFailedHandoff(holder, context): Promise<void> {
+  const classification = holder.result.error ? repairHandoff.classifyError(holder.result.error) : null;
+  const relaunchable = classification
+    ? classification.dispatchAction !== 'HumanOnly' && classification.failureClass !== 'GitBlockers'
+    : false;
+  if (relaunchable) { await reboundFailedHandoff(holder, classification, context); return; }
+  await repairHygieneHandoff(holder, context);
+}
+
 async function runHandoffAndReview(slug, worktree, agent, options = {}) {
   const {
     taskFile = null,
@@ -459,193 +612,21 @@ async function runHandoffAndReview(slug, worktree, agent, options = {}) {
     log = fmt.log.plain,
     error = fmt.log.plainError
   } = options;
-  // SC7: the kernel's launch port for every handoff bounce. The kernel owns
-  // classification, the fix prompt, the budget, and the verify; this adapter
-  // owns only what is genuinely launcher-side — the launcher-availability check
-  // and the resume-aware `startAgent` call. `startAgentFn` is the mock seam the
-  // handoff tests inject; nothing here decides whether to bounce.
-  const reboundLaunchPort = (async (_step: string, launchOptions: Record<string, unknown>) => {
-      const status = workflowLauncherStatusFn(agent);
-      if (!status.supported) {
-        // A throw is how the kernel learns a launch could not happen; it records
-        // the diagnostic and spends the attempt like any other failed try.
-        throw new Error(`Agent ${agent} is not available for relaunch: ${status.detail || status.reason || 'unknown'}`);
-      }
-      const promptSlot = launchOptions.prompt;
-      const prompt = typeof promptSlot === 'function' ? promptSlot(agent) : String(promptSlot ?? '');
-      return await startAgentFn('active', {
-        prompt,
-        worktree,
-        agent,
-        slug,
-        role: 'implementer',
-        // startAgent uses the RESUME_CAPABLE set and session markers to decide resume.
-        onLaunch: (/** @type{{agent: string}} */ { agent: launchedAgent }) => {
-          log(`Relaunched ${fmt.agent(launchedAgent)} for repair. Session persistence will be used if available.`);
-        }
-      });
-  }) as ReboundContext['startAgent'];
+  const reboundLaunchPort = createReboundLaunchPort({ agent, slug, worktree, startAgentFn, workflowLauncherStatusFn, log });
+  const repairContext = {
+    slug, worktree, agent, taskFile, reboundLaunchPort,
+    performHandoffFn: _performHandoff, repairHandoffFn, validateCheckpointsBeforeHandoffFn, log, error,
+  };
 
-  // Pre-handoff checkpoint enforcement: validate checkpoints exist before calling performHandoff()
-  // This catches missing checkpoints immediately after the execute agent exits,
-  // before the repair flow runs, and provides an explicit instruction to create them.
+  // Pre-handoff checkpoint enforcement: validate checkpoints exist before calling
+  // performHandoff(). This catches missing checkpoints immediately after the
+  // execute agent exits, before the repair flow runs.
   const validation = validateCheckpointsBeforeHandoffFn(slug, worktree, { log, error });
-  if (!validation.ok) {
-    // architecture migration: classify the checkpoint validation error and attempt a targeted
-    // agent relaunch (repair bounce) instead of only emitting stranded manual
-    // instructions. Missing checkpoints and malformed Goal Check tables are
-    // IncompleteEvidence — dispatchable to the implementer for repair.
-    const checkpointClassification = validation.error
-      ? repairHandoff.classifyError(validation.error)
-      : null;
-    // architecture migration: restrict targeted relaunch to IncompleteEvidence only.
-    // Non-incomplete-evidence errors (e.g. GitBlockers/dirty checkpoints,
-    // InfraBlockers) retain their existing handling paths.
-    const isCheckpointRelaunchable = validation.nextCheckpoint || (checkpointClassification
-      ? checkpointClassification.failureClass === repairHandoff.FailureClass.IncompleteEvidence
-      : false);
+  if (!validation.ok && !await repairCheckpointsBeforeHandoff(validation, repairContext)) { return false; }
 
-    if (isCheckpointRelaunchable) {
-      // SC3: the bounded `maxCheckpointRelaunches` loop is gone. The kernel owns
-      // the budget and the verified fix: `verify` re-runs the same
-      // `validateCheckpointsBeforeHandoffFn` check that just failed, so `fixed`
-      // means the checkpoints really are present — never merely that an agent ran.
-      log(`Checkpoint validation failed (${checkpointClassification?.failureClass ?? 'DeclaredCheckpointGap'}). Bouncing to the implementer for a targeted checkpoint repair...`);
-      // A declared checkpoint gap can be reported by `nextCheckpoint` alone, so
-      // name the gap when the validator gave no message.
-      const gapError = /** @type{string} */(validation.error
-        || `Declared checkpoint documents are missing before handoff: ${validation.nextCheckpoint}. Create and commit ${validation.nextCheckpoint}.md before handoff.`);
-      // When the next missing checkpoint is known, carry the continuation
-      // contract into the kernel's diagnostic. Without it the agent repairs one
-      // checkpoint and exits again, which is the loop this bounce exists to end.
-      const nextCheckpoint = validation.nextCheckpoint || nextMissingCheckpointFromError(gapError);
-      const checkpointError = nextCheckpoint
-        ? `${gapError}\n\n${buildCheckpointContinuationPrompt(slug, worktree, nextCheckpoint)}`
-        : gapError;
-      const outcome = await rebound(
-        { kind: 'handoff-verification', error: checkpointError },
-        {
-          slug,
-          worktree,
-          implementer: agent,
-          startAgent: reboundLaunchPort,
-          verify: () => {
-            const retryValidation = validateCheckpointsBeforeHandoffFn(slug, worktree, { log, error });
-            return { ok: Boolean(retryValidation.ok), diagnostic: retryValidation.error || '' };
-          },
-          log,
-          error
-        }
-      );
-      if (outcome.outcome !== 'fixed') {
-        // exhausted / human-only — re-read the final state so the operator
-        // instruction names the checkpoint gap that actually remains.
-        const finalValidation = validateCheckpointsBeforeHandoffFn(slug, worktree, { log, error });
-        if (!finalValidation.ok) {
-          error(`       ${checkpointValidationNextAction(/** @type {string} */ (finalValidation.error || checkpointError), slug, worktree)}`);
-          return false;
-        }
-      }
-      // Fall through to performHandoff below
-    } else {
-      // Non-relaunchable checkpoint error — emit manual instruction
-      error(`       ${checkpointValidationNextAction(/** @type {string} */ (validation.error), slug, worktree)}`);
-      return false;
-    }
-  }
-
-  let handoffResult = await _performHandoff(slug, { forgejoUser: agent, worktree });
-
-  if (!handoffResult.ok) {
-    // Check for relaunchable failure (architecture migration, ADR 0048 C1): automatic relaunch
-    // with captured output. Delegates to repairHandoff.classifyError() for full
-    // 8-class dispatch; relaunchable classes (AutoSendBack/AutoRepair, excluding
-    // GitBlockers which are handled by repairHandoff auto-repair) trigger the
-    // relaunch path. InfraBlocker and StateMachineViolation are HumanOnly and
-    // fall through to the manual-handoff error message below.
-    const classification = handoffResult.error
-      ? repairHandoff.classifyError(handoffResult.error)
-      : null;
-    const isRelaunchableError = classification
-      ? classification.dispatchAction !== 'HumanOnly' && classification.failureClass !== 'GitBlockers'
-      : false;
-
-    if (isRelaunchableError) {
-      // SC4: the bounded `maxRelaunches` loop is gone. The kernel bounces with
-      // the captured gate output and `verify` re-runs `performHandoff` itself,
-      // so the refreshed result flows into the gatekeeper-pushback and
-      // review-loop branches below.
-      log(`\nRelaunchable error detected (${classification.failureClass}). Bouncing to the implementer...`);
-      const failedError = /** @type{string} */(handoffResult.error);
-      const gateFailure = handoffResult.gateFailure;
-      const failureReason = gateFailure
-        ? { kind: 'gate-failure', ...gateFailure }
-        : { kind: 'handoff-verification', error: failedError, gateOutput: flattenGateOutput(handoffResult.gateOutput) };
-      const outcome = await rebound(
-        failureReason,
-        {
-          slug,
-          worktree,
-          implementer: agent,
-          startAgent: reboundLaunchPort,
-          verify: async () => {
-            handoffResult = await _performHandoff(slug, { forgejoUser: agent, worktree, force: true });
-            return {
-              ok: Boolean(handoffResult.ok),
-              diagnostic: handoffResult.error || '',
-              reason: handoffResult.gateFailure
-                ? { kind: 'gate-failure', ...handoffResult.gateFailure }
-                : undefined,
-            };
-          },
-          log,
-          error
-        }
-      );
-      if (outcome.outcome === 'exhausted' && !handoffResult.ok) {
-        handoffResult.error = `Gate failure persisting after ${DEFAULT_REBOUND_ATTEMPTS} relaunch attempts. Manual intervention required.`;
-      }
-    } else {
-      // Original logic: attempt single repair for routine hygiene issues (dirty artifacts, rebase needed)
-      log(`\nAutomated handoff failed: ${handoffResult.error}`);
-      log(`Attempting post-execute repair...`);
-      const { repaired, blocker } = await /** @type{Function} */(repairHandoffFn)(slug, worktree, /** @type{string} */(handoffResult.error), { taskFile, log, error });
-      if (repaired) {
-        log(`Repair successful. Retrying automated handoff...`);
-        handoffResult = await _performHandoff(slug, { forgejoUser: agent, worktree, force: true });
-      } else if (blocker) {
-        // If repair failed but provided a specific blocker (e.g. rebase failure),
-        // report that blocker as the final error instead of the original handoff error.
-        handoffResult.error = blocker;
-      } else if (!repaired && repairHandoff.isRelaunchableError(handoffResult.error)) {
-        // Attempt agent relaunch for repairable content errors (missing goal-check table)
-        // SC4: the `isRelaunchableError` fallback relaunch routes through the
-        // kernel too, with the same re-run-`performHandoff` verify — so a
-        // content repair is only believed once the handoff actually completes.
-        log(`Content error detected. Attempting agent relaunch to fix...`);
-        const contentError = /** @type{string} */(handoffResult.error);
-        const outcome = await rebound(
-          { kind: 'handoff-verification', error: contentError },
-          {
-            slug,
-            worktree,
-            implementer: agent,
-            startAgent: reboundLaunchPort,
-            verify: async () => {
-              handoffResult = await _performHandoff(slug, { forgejoUser: agent, worktree, force: true });
-              return { ok: Boolean(handoffResult.ok), diagnostic: handoffResult.error || '' };
-            },
-            log,
-            error
-          }
-        );
-        if (outcome.outcome !== 'fixed' && !handoffResult.ok) {
-          handoffResult.error = `Post-relaunch handoff failed: ${handoffResult.error || 'unknown'}`;
-        }
-        // Fall through to gatekeeper pushback / review loop / failure handling below.
-      }
-    }
-  }
+  const holder = { result: await _performHandoff(slug, { forgejoUser: agent, worktree }) };
+  if (!holder.result.ok) { await repairFailedHandoff(holder, repairContext); }
+  const handoffResult = holder.result;
 
   if (!handoffResult.ok) {
     error(`Automated handoff failed: ${handoffResult.error}`);
@@ -776,37 +757,38 @@ function unquoteGitStatusPath(rawPath) {
       literal = '';
     }
   };
-  for (let i = 0; i < inner.length; i++) {
-    const ch = inner[i];
+  let offset = 0;
+  while (offset < inner.length) {
+    const ch = inner[offset];
     if (ch !== '\\') {
       literal += ch;
+      offset++;
       continue;
     }
-    const next = inner[i + 1];
+    const next = inner[offset + 1];
     if (next >= '0' && next <= '7') {
-      let octal = '';
-      let j = i + 1;
-      while (j < inner.length && octal.length < 3 && inner[j] >= '0' && inner[j] <= '7') {
-        octal += inner[j];
-        j++;
-      }
+      const { octal, end } = readOctalEscape(inner, offset + 1);
       flush();
       chunks.push(Buffer.from([parseInt(octal, 8) & 0xff]));
-      i = j - 1;
+      offset = end;
       continue;
     }
-    if (Object.prototype.hasOwnProperty.call(simple, next)) {
-      flush();
-      chunks.push(Buffer.from([/** @type{number} */(simple[/** @type{keyof typeof simple} */(next)])]));
-      i++;
-    } else {
-      // Unknown or trailing escape: keep the following character literally.
-      literal += next === undefined ? '\\' : next;
-      if (next !== undefined) {i++;}
-    }
+    const decoded = decodeSimpleEscape(simple, next);
+    if (decoded === null) { literal += next === undefined ? '\\' : next; offset += 1 + Number(next !== undefined); }
+    else { flush(); chunks.push(Buffer.from([decoded])); offset += 2; }
   }
   flush();
   return Buffer.concat(chunks).toString('utf8');
+}
+
+function readOctalEscape(text, start) {
+  let end = start;
+  while (end < text.length && end - start < 3 && text[end] >= '0' && text[end] <= '7') { end++; }
+  return { octal: text.slice(start, end), end };
+}
+
+function decodeSimpleEscape(simple, value) {
+  return Object.prototype.hasOwnProperty.call(simple, value) ? simple[value] : null;
 }
 
 /** @param {string} entry */

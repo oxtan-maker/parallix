@@ -42,7 +42,5 @@ export class IntegrateCommandUseCase {
 async function bestEffort(publish: () => Promise<void>): Promise<void> {
   try {
     await publish();
-  } catch (error) {
-    void error;
-  }
+  } catch {}
 }

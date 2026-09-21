@@ -186,22 +186,29 @@ export function findDependencyViolations(repoRoot = process.cwd(), allowlist: re
   for (const source of dependencyLayers.flatMap(layer => rootsFor(layer).flatMap(layerRoot => walk(path.join(root, layerRoot))))) {
     const sourceLayer = classifyDependencyLayer(source, root);
     if (!sourceLayer) {continue;}
-    for (const specifier of importsFrom(fs.readFileSync(source, 'utf8'))) {
-      const target = resolveLocal(source, specifier);
-      const targetLayer = target && classifyDependencyLayer(target, root);
-      if (!target || !targetLayer) {continue;}
-      const permitted = sourceLayer === 'adapters' && targetLayer === 'adapters'
-        ? crossAdapterEdgeIsNamed(source, target, root)
-        : allowedDependencyGraph[sourceLayer].includes(targetLayer);
-      if (permitted) {continue;}
-      const sourceName = path.relative(root, source);
-      const targetName = path.relative(root, target);
-      if (!exceptions.has(`${sourceName}\0${targetName}`)) {
-        violations.push({ source: sourceName, target: targetName, sourceLayer, targetLayer, specifier });
-      }
-    }
+    violations.push(...violationsFromSource(source, sourceLayer, root, exceptions));
   }
   return violations;
+}
+
+/** Collect dependency violations for one source file given its classified layer, skipping permitted edges and the owned allowlist. */
+function violationsFromSource(source: string, sourceLayer: DependencyLayer, root: string, exceptions: Set<string>): DependencyViolation[] {
+  const result: DependencyViolation[] = [];
+  for (const specifier of importsFrom(fs.readFileSync(source, 'utf8'))) {
+    const target = resolveLocal(source, specifier);
+    const targetLayer = target && classifyDependencyLayer(target, root);
+    if (!target || !targetLayer) {continue;}
+    const permitted = sourceLayer === 'adapters' && targetLayer === 'adapters'
+      ? crossAdapterEdgeIsNamed(source, target, root)
+      : allowedDependencyGraph[sourceLayer].includes(targetLayer);
+    if (permitted) {continue;}
+    const sourceName = path.relative(root, source);
+    const targetName = path.relative(root, target);
+    if (!exceptions.has(`${sourceName}\0${targetName}`)) {
+      result.push({ source: sourceName, target: targetName, sourceLayer, targetLayer, specifier });
+    }
+  }
+  return result;
 }
 
 /**

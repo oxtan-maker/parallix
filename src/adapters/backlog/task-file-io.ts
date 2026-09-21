@@ -70,66 +70,64 @@ function findTaskFiles(slug: string, rootDir: string = process.cwd()): string[] 
   return matches.sort((a, b) => sortByBacklogState(a) - sortByBacklogState(b) || a.localeCompare(b));
 }
 
+function preferSameTaskInHigherPriorityDir(candidateMatches: string[]): string | null {
+  if (candidateMatches.length < 2) { return null; }
+  const [preferred, ...rest] = candidateMatches;
+  return rest.every((match: string) => path.basename(match) === path.basename(preferred)) ? preferred : null;
+}
+
+function findTaskFilesById(candidateFiles: string[], targetId: string): string[] {
+  return candidateFiles.filter((file: string) => {
+    try {
+      const idMatch = fs.readFileSync(file, 'utf8').match(/^id:\s*([^\r\n]+)/m);
+      return idMatch && idMatch[1].trim().toUpperCase() === targetId;
+    } catch (_) {
+      return false;
+    }
+  });
+}
+
+function uniqueOrPreferredTask(matches: string[]) {
+  if (matches.length === 1) { return { ok: true, taskFile: matches[0], matches }; }
+  const preferred = preferSameTaskInHigherPriorityDir(matches);
+  return preferred
+    ? { ok: true, taskFile: preferred, matches }
+    : { ok: false, reason: 'ambiguous', matches };
+}
+
+function allTaskFiles(tasksDir: string, completedDir: string, archivedDir: string): string[] {
+  return [tasksDir, completedDir, archivedDir]
+    .flatMap((dir) => fs.existsSync(dir) ? fs.readdirSync(dir).map((file) => path.join(dir, file)) : [])
+    .filter((file) => file.endsWith('.md'));
+}
+
+function resolveMissingPrefixTask(slug: string, normalizedId: string, files: string[]) {
+  // Only a single exact-id hit resolves here. Several files claiming one id is
+  // not authority to pick one, so the base-task-id fallback still runs and the
+  // unresolved answer stays `missing` — the reason this seam reported before the
+  // id lookup was factored out.
+  const idMatches = findTaskFilesById(files, normalizedId);
+  if (idMatches.length === 1) { return { ok: true, taskFile: idMatches[0], matches: idMatches }; }
+  const baseId = slug.match(/^(task-\d+)/i)?.[1]?.toUpperCase();
+  if (!baseId) { return { ok: false, reason: 'missing', matches: idMatches }; }
+  const baseMatches = findTaskFilesById(files, baseId);
+  return baseMatches.length > 0
+    ? uniqueOrPreferredTask(baseMatches)
+    : { ok: false, reason: 'missing', matches: idMatches };
+}
+
 /**
  * @param {string} slug
  * @param {string} [rootDir]
  * @returns {{ok: boolean, taskFile?: string, matches: string[], reason?: string}}
  */
 function resolveTaskFile(slug: string, rootDir: string = process.cwd()) {
-  let matches = findTaskFiles(slug, rootDir);
+  const matches = findTaskFiles(slug, rootDir);
   const normalizedId = slug.toUpperCase();
   const { tasksDir, completedDir, archiveTasksDir: archivedDir } = getTaskStorage(rootDir);
-  /** @param {string[]} candidateMatches */
-  const preferSameTaskInHigherPriorityDir = (candidateMatches: string[]) => {
-    if (candidateMatches.length < 2) {return null;}
-    const [preferred, ...rest] = candidateMatches;
-    return rest.every((match: string) => path.basename(match) === path.basename(preferred)) ? preferred : null;
-  };
-
-  /** @param {string[]} candidateFiles @param {string} targetId */
-  const findById = (candidateFiles: string[], targetId: string) => {
-    return candidateFiles.filter((f: string) => {
-      try {
-        const content = fs.readFileSync(f, 'utf8');
-        const idMatch = content.match(/^id:\s*([^\r\n]+)/m);
-        return idMatch && idMatch[1].trim().toUpperCase() === targetId;
-      } catch (_) {
-        return false;
-      }
-    });
-  };
 
   if (matches.length === 0) {
-    // Hardening: If no prefix match, search ALL task files for an exact ID match
-    const allFiles = [
-      ...(fs.existsSync(tasksDir) ? fs.readdirSync(tasksDir).map(f => path.join(tasksDir, f)) : []),
-      ...(fs.existsSync(completedDir) ? fs.readdirSync(completedDir).map(f => path.join(completedDir, f)) : []),
-      ...(fs.existsSync(archivedDir) ? fs.readdirSync(archivedDir).map(f => path.join(archivedDir, f)) : []),
-    ].filter(f => f.endsWith('.md'));
-
-    const idMatches = findById(allFiles, normalizedId);
-    if (idMatches.length === 1) {
-      return { ok: true, taskFile: idMatches[0], matches: idMatches };
-    }
-
-    // Still no match? Try base task ID if slug has a suffix (e.g., architecture migration-modern -> architecture migration)
-    const baseTaskMatch = slug.match(/^(task-\d+)/i);
-    if (baseTaskMatch) {
-      const baseId = baseTaskMatch[1].toUpperCase();
-      const baseMatches = findById(allFiles, baseId);
-      if (baseMatches.length === 1) {
-        return { ok: true, taskFile: baseMatches[0], matches: baseMatches };
-      }
-      if (baseMatches.length > 1) {
-        const preferred = preferSameTaskInHigherPriorityDir(baseMatches);
-        if (preferred) {
-          return { ok: true, taskFile: preferred, matches: baseMatches };
-        }
-        return { ok: false, reason: 'ambiguous', matches: baseMatches };
-      }
-    }
-
-    return { ok: false, reason: 'missing', matches: idMatches };
+    return resolveMissingPrefixTask(slug, normalizedId, allTaskFiles(tasksDir, completedDir, archivedDir));
   }
 
   if (matches.length === 1) {
@@ -139,18 +137,8 @@ function resolveTaskFile(slug: string, rootDir: string = process.cwd()) {
   }
 
   // Preference 1: Exact frontmatter id: match (e.g., id: architecture migration)
-  const idMatches = findById(matches, normalizedId);
-
-  if (idMatches.length === 1) {
-    return { ok: true, taskFile: idMatches[0], matches: idMatches };
-  }
-  if (idMatches.length > 1) {
-    const preferred = preferSameTaskInHigherPriorityDir(idMatches);
-    if (preferred) {
-      return { ok: true, taskFile: preferred, matches: idMatches };
-    }
-    return { ok: false, reason: 'ambiguous', matches: idMatches };
-  }
+  const idMatches = findTaskFilesById(matches, normalizedId);
+  if (idMatches.length > 0) { return uniqueOrPreferredTask(idMatches); }
 
   // Fallback: If no ID matches but we have filename-prefix matches, 
   // we only allow it if it's unambiguous.
@@ -198,6 +186,41 @@ function taskIdFromFilename(file: string) {
   return filenameMatch ? filenameMatch[1].toUpperCase() : null;
 }
 
+function recordFrontmatterIdMismatch(filePath: string, relPath: string, filenameId: string, issues: any[]) {
+  try {
+    const idMatch = fs.readFileSync(filePath, 'utf8').match(/^id:\s*([^\r\n]+)/m);
+    const frontmatterId = idMatch?.[1]?.trim().toUpperCase();
+    if (frontmatterId !== undefined && frontmatterId !== filenameId) {
+      issues.push({ file: relPath, type: 'id-mismatch', filenameId, frontmatterId });
+    }
+  } catch (_) {
+    // ignore read errors
+  }
+}
+
+function scanBacklogDirectory(
+  dir: string,
+  rootDir: string,
+  normalizedSlug: string | null,
+  canonical: boolean,
+  tasksLocations: Map<string, string>,
+  canonicalLocations: Map<string, string>,
+  issues: any[],
+) {
+  if (!fs.existsSync(dir)) {return;}
+  const files = fs.readdirSync(dir).filter((file: string) => file.endsWith('.md'));
+  for (const file of files) {
+    if (normalizedSlug && !file.toLowerCase().startsWith(normalizedSlug)) {continue;}
+    const filePath = path.join(dir, file);
+    const filenameId = taskIdFromFilename(file);
+    if (!filenameId) {continue;}
+    const relPath = path.relative(rootDir, filePath);
+    const locations = canonical ? canonicalLocations : tasksLocations;
+    if (!locations.has(filenameId)) {locations.set(filenameId, relPath);}
+    recordFrontmatterIdMismatch(filePath, relPath, filenameId, issues);
+  }
+}
+
 /**
  * @param {string} [rootDir]
  * @param {string} [slug]
@@ -205,7 +228,7 @@ function taskIdFromFilename(file: string) {
  */
 function checkBacklogIntegrity(rootDir: string = process.cwd(), slug: string | null = null) {
   const { tasksDir, completedDir, archiveTasksDir: archivedDir } = getTaskStorage(rootDir);
-  const issues = [];
+  const issues: any[] = [];
   const normalizedSlug = slug ? slug.toLowerCase() : null;
 
   // Track where each task id lives so we can detect the same id appearing in
@@ -215,50 +238,9 @@ function checkBacklogIntegrity(rootDir: string = process.cwd(), slug: string | n
   const tasksLocations = new Map();      // id -> rel path in tasks/
   const canonicalLocations = new Map();  // id -> rel path in completed|archive
 
-  /** @param {string} dir @param {{canonical?: boolean}} [opts] */
-  const scan = (dir: string, { canonical = false }: { canonical?: boolean } = {}) => {
-    if (!fs.existsSync(dir)) {return;}
-    const files = fs.readdirSync(dir).filter((f: string) => f.endsWith('.md'));
-    for (const file of files) {
-      if (normalizedSlug && !file.toLowerCase().startsWith(normalizedSlug)) {
-        continue;
-      }
-      const filePath = path.join(dir, file);
-      const filenameId = taskIdFromFilename(file);
-      if (!filenameId) {continue;}
-      const relPath = path.relative(rootDir, filePath);
-
-      if (canonical) {
-        if (!canonicalLocations.has(filenameId)) {canonicalLocations.set(filenameId, relPath);}
-      } else if (!tasksLocations.has(filenameId)) {
-        tasksLocations.set(filenameId, relPath);
-      }
-
-      try {
-        const content = fs.readFileSync(filePath, 'utf8');
-
-        // Extract ID from frontmatter
-        const idMatch = content.match(/^id:\s*([^\r\n]+)/m);
-        if (idMatch) {
-          const frontmatterId = idMatch[1].trim().toUpperCase();
-          if (frontmatterId !== filenameId) {
-            issues.push({
-              file: relPath,
-              type: 'id-mismatch',
-              filenameId,
-              frontmatterId
-            });
-          }
-        }
-      } catch (_) {
-        // ignore read errors
-      }
-    }
-  };
-
-  scan(tasksDir);
-  scan(completedDir, { canonical: true });
-  scan(archivedDir, { canonical: true });
+  scanBacklogDirectory(tasksDir, rootDir, normalizedSlug, false, tasksLocations, canonicalLocations, issues);
+  scanBacklogDirectory(completedDir, rootDir, normalizedSlug, true, tasksLocations, canonicalLocations, issues);
+  scanBacklogDirectory(archivedDir, rootDir, normalizedSlug, true, tasksLocations, canonicalLocations, issues);
 
   for (const [id, taskPath] of tasksLocations) {
     const canonicalPath = canonicalLocations.get(id);

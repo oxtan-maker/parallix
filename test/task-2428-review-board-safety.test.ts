@@ -8,7 +8,11 @@ import { makeExecutePorts } from './fixtures/execute-mission-ports.js';
 test('task-2428: persisted-artifact consumer can synthesize review identity, so board dispatch remains unavailable', () => {
   const source = readFileSync(new URL('../src/adapters/review/review-commands.ts', import.meta.url), 'utf8');
 
-  assert.match(source, /reviewer = 'autonomous'/);
+  // The consumer still defaults the reviewer to 'autonomous' when neither the
+  // review state nor the task assignee names one. Matched on the default rather
+  // than one spelling of the assignment, so extracting the helper that holds it
+  // does not silently drop the guard.
+  assert.match(source, /reviewer\s*=\s*(?:[^;\n]*\|\|\s*)?'autonomous'/);
   assert.match(source, /new ReviewState\(slug/);
   assert.equal(isIntegratedCapability('review:act-on-findings'), false);
   assert.match(unavailableReason('review:act-on-findings') ?? '', /synthesize review state or reviewer identity/);

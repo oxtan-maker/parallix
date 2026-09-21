@@ -81,37 +81,41 @@ function readAgentConfig(configPath: string = CONFIG_PATH, options: ReadAgentCon
   }
 
   if (mergeLocal) {
-    config = config || {};
-    const projectRoot = configPath === CONFIG_PATH ? process.cwd() : path.resolve(path.dirname(configPath), '..', '..');
-    const mainWorktree = mainWorktreePath !== undefined
-      ? mainWorktreePath
-      : getMainWorktreePath({ cwd: projectRoot, warn });
-    const legacyPaths = [
-      path.join(path.dirname(configPath), 'agents.local.json'),
-      path.join(projectRoot, 'agents.local.json'),
-      mainWorktree ? path.join(mainWorktree, 'agents.local.json') : ''
-    ].filter(Boolean);
-    const targetPath = options.targetPath || storage.resolveAgentsLocalPath({ ensureDir: true });
-    if (!fs.existsSync(targetPath)) {
-      try {
-        migrateAgentBlocklists({
-          sourcePaths: legacyPaths,
-          destinationPath: targetPath,
-          warn: warn as any
-        });
-      } catch (error) {
-        throw buildInvalidAgentConfigError(targetPath, 'local', (error as any));
-      }
-    }
-    if (fs.existsSync(targetPath)) {
-      const localConfig = parseAgentConfigFile(targetPath, 'local');
-      if (localConfig && localConfig.blocklist) {
-        config.blocklist = Object.assign(config.blocklist || {}, localConfig.blocklist);
-      }
-    }
+    config = mergeLocalAgentConfig(config, configPath, mainWorktreePath, options.targetPath, warn);
   }
 
   return config;
+}
+
+function mergeLocalAgentConfig(
+  config: AgentConfig,
+  configPath: string,
+  mainWorktreePath: string | null | undefined,
+  targetPathOption: string | undefined,
+  warn: Function,
+): AgentConfig {
+  const projectRoot = configPath === CONFIG_PATH ? process.cwd() : path.resolve(path.dirname(configPath), '..', '..');
+  const mainWorktree = mainWorktreePath ?? getMainWorktreePath({ cwd: projectRoot, warn });
+  const sourcePaths = [
+    path.join(path.dirname(configPath), 'agents.local.json'),
+    path.join(projectRoot, 'agents.local.json'),
+    mainWorktree ? path.join(mainWorktree, 'agents.local.json') : '',
+  ].filter((candidate): candidate is string => Boolean(candidate));
+  const targetPath = targetPathOption || storage.resolveAgentsLocalPath({ ensureDir: true });
+  migrateLocalBlocklist(sourcePaths, targetPath, warn);
+  if (!fs.existsSync(targetPath)) { return config; }
+  const localConfig = parseAgentConfigFile(targetPath, 'local');
+  if (!localConfig?.blocklist) { return config; }
+  return { ...config, blocklist: Object.assign(config.blocklist || {}, localConfig.blocklist) };
+}
+
+function migrateLocalBlocklist(sourcePaths: string[], targetPath: string, warn: Function): void {
+  if (fs.existsSync(targetPath)) { return; }
+  try {
+    migrateAgentBlocklists({ sourcePaths, destinationPath: targetPath, warn: warn as any });
+  } catch (error) {
+    throw buildInvalidAgentConfigError(targetPath, 'local', error as any);
+  }
 }
 
 function parseBlockUntil(value: string | number) {

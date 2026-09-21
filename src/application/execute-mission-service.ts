@@ -221,9 +221,8 @@ export class ExecuteMissionService {
         agent: launch.agent,
         launch,
       });
-    } catch (error) {
+    } catch {
       // Execute statistics are explicitly best-effort and cannot alter lifecycle success.
-      void error;
     }
 
     return { id: `${slug}:active`, source: 'task-markdown', detail: 'task authority recorded active launch' };
@@ -293,7 +292,5 @@ export class ExecuteMissionService {
 async function bestEffort(publish: () => Promise<void>): Promise<void> {
   try {
     await publish();
-  } catch (error) {
-    void error;
-  }
+  } catch {}
 }

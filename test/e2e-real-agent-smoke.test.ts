@@ -18,6 +18,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import childProcess from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { SqliteMeasurementStore } from '../src/adapters/sqlite/measurement-store.js';
@@ -490,6 +491,31 @@ function setupRepository({ slug, title, agent = 'custom', runner = 'opencode' })
     ready: 'refined',
     approved: 'ready-for-integration'
   }, null, 2));
+
+  // config/agents.json is committed repo config in a real repo (working-tree
+  // copy is authoritative, ADR 0044). Seed it so first-run-config's idempotent
+  // hook leaves it un-dirtied during active: without a committed copy the hook
+  // writes it as a new untracked file and the rebase auto-commit guard rejects
+  // it as a non-mission path, failing the real-agent smoke gate mid-active.
+  const agentsConfigSource = path.join(
+    path.dirname(fileURLToPath(import.meta.url)),
+    '..',
+    'config',
+    'agents.json',
+  );
+  fs.writeFileSync(
+    path.join(repoRoot, 'config', 'agents.json'),
+    fs.existsSync(agentsConfigSource)
+      ? fs.readFileSync(agentsConfigSource, 'utf8')
+      : JSON.stringify({
+        steps: {
+          draft: { eligible: ['custom'], selection: 'random' },
+          active: { eligible: ['custom'], selection: 'random' },
+          review: { eligible: ['custom'], selection: 'random' }
+        }
+      }, null, 2) + '\n',
+    'utf8',
+  );
 
   fs.writeFileSync(path.join(repoRoot, 'README.md'), '# Real Agent Smoke Probe\n', 'utf8');
   fs.writeFileSync(path.join(repoRoot, '.gitignore'), [

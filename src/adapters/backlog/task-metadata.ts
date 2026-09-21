@@ -5,6 +5,24 @@ import { WORKFLOW_AGENT_NAMES } from '../agents/agents.js';
 function getSupportedAgents() {
   return WORKFLOW_AGENT_NAMES;
 }
+
+export function findFieldBlock(content: string, field: string) {
+  const lineEnding = content.includes('\r\n') ? '\r\n' : '\n';
+  const lines = content.split(lineEnding);
+  const prefix = `${field}:`;
+  const start = lines.findIndex(line => line.startsWith(prefix) && line.slice(prefix.length).trim() === '');
+  if (start === -1) { return null; }
+  let itemStart = start + 1;
+  while (lines[itemStart]?.trim() === '') { itemStart++; }
+  if (!/^[ \t]+-[ \t]+/.test(lines[itemStart] ?? '')) { return null; }
+  let end = itemStart;
+  while (/^[ \t]+-[ \t]+/.test(lines[end] ?? '')) { end++; }
+  return { lines, start, itemStart, end, lineEnding };
+}
+
+function findAssigneeBlock(content: string) {
+  return findFieldBlock(content, 'assignee');
+}
 /**
  * Internal helper to parse assignee families from YAML frontmatter content.
  * Supports inline array, simple inline, and block formats.
@@ -34,11 +52,10 @@ function parseAssigneeFamilies(content: string) {
   }
 
   if (!matched) {
-    // Try block form
-    const blockMatch = content.match(/^assignee:[ \t]*[\r\n]+((?:\s+-\s+.+[\r\n]*)+)/m);
-    if (blockMatch) {
+    const block = findAssigneeBlock(content);
+    if (block) {
       matched = true;
-      families = blockMatch[1].split(/[\r\n]+/)
+      families = block.lines.slice(block.itemStart, block.end)
         .map((line: string) => line.trim())
         .filter((line: string) => line.startsWith('-'))
         .map((line: string) => line.substring(1).trim().replace(/(?:^['"])|(?:['"]$)/g, '').replace(/^@/, ''))
@@ -63,60 +80,23 @@ function clearTaskAgentAssignee(taskFilePath: string) {
 
   // If there are no agent families to clear, nothing to do — preserve human assignees
   if (agentFamilies.length === 0) {
-    // Write back the human-only assignee list
-    if (humanFamilies.length > 0) {
-      const hasBlockForm = content.match(/^assignee:[ \t]*[\r\n]+/);
-      if (humanFamilies.length === families.length) {
-        // All families were human; no change needed
-        return false;
-      }
-      // Remove agent families and write back human-only
-      let newAssigneeLine;
-      if (hasBlockForm) {
-        newAssigneeLine = 'assignee:\n' + humanFamilies.map((f: string) => `  - ${f}`).join('\n') + '\n';
-      } else {
-        newAssigneeLine = `assignee: [${humanFamilies.join(', ')}]`;
-      }
-
-      if (content.match(/^assignee:\s*\[.*?\]/m)) {
-        content = content.replace(/^assignee:\s*\[.*?\]/m, newAssigneeLine);
-      } else if (content.match(/^assignee:[ \t]*[\r\n]+((?:[ \t]+-[ \t]+.+[\r\n]*)+)/m)) {
-        content = content.replace(/^assignee:[ \t]*[\r\n]+((?:[ \t]+-[ \t]+.+[\r\n]*)+)/m, newAssigneeLine);
-      } else {
-        content = content.replace(/^assignee:[ \t]*.*$/m, newAssigneeLine);
-      }
-
-      fs.writeFileSync(taskFilePath, content, 'utf8');
-      return true;
-    }
     return false;
   }
 
-  const hasBlockForm = content.match(/^assignee:\s*\n((?:\s+-\s+.+\r?\n?)+)/m);
+  const block = findAssigneeBlock(content);
 
-  if (!hasBlockForm) {
+  if (!block) {
     // Inline array form: replace with human-only agents
     const newAssignee = humanFamilies.length > 0 ? `[${humanFamilies.join(', ')}]` : '[]';
     content = content.replace(/^assignee:\s*\[.*?\]/m, `assignee: ${newAssignee}`);
   } else {
     // Block form: remove agent lines, keep human lines
-    let newBlock = content.replace(/^assignee:[ \t]*[\r\n]+/m, 'assignee:\n');
-    const blockLines = newBlock.match(/^assignee:\n((?:\s+-\s+.+\n?)*)/m);
-    if (blockLines) {
-      const keptLines = blockLines[1].split('\n').filter(line => {
-        const m = line.match(/^\s+-\s+(.+)/);
-        if (!m) {return line.trim() === '';}
-        const family = m[1].trim().replace(/(?:^['"])|(?:['"]$)/g, '');
-        return !supportedAgents.includes(family.toLowerCase());
-      }).join('\n');
-      newBlock = newBlock.replace(/^assignee:\n((?:\s+-\s+.+\n?)*)/m, 'assignee:\n' + keptLines);
-      if (newBlock.endsWith('assignee:\n') || newBlock.endsWith('assignee: \n') || newBlock.endsWith('assignee:\n\n')) {
-        newBlock = newBlock.replace(/assignee:\s*\n\s*$/, 'assignee: []\n');
-      }
-      content = newBlock;
-    } else {
-      content = content.replace(/^assignee:\s*\[.*?\]/m, `assignee: []`);
-    }
+    const keptLines = block.lines.slice(block.itemStart, block.end).filter(line => {
+      const value = line.trim().slice(1).trim().replace(/(?:^['"])|(?:['"]$)/g, '');
+      return !supportedAgents.includes(value.toLowerCase());
+    });
+    block.lines.splice(block.start, block.end - block.start, ...(keptLines.length ? ['assignee:', ...keptLines] : ['assignee: []']));
+    content = block.lines.join(block.lineEnding);
   }
 
   fs.writeFileSync(taskFilePath, content, 'utf8');
@@ -151,9 +131,9 @@ const CLASSIFICATION_LABELS = new Set(['ai_sdlc', 'user_value', 'unknown']);
  */
 /** @param {string} taskFilePath */
 function parseTaskLabels(content: string) {
-  const blockMatch = content.match(/^labels:[ \t]*[\r\n]+((?:\s+-\s+.+[\r\n]*)+)/m);
-  if (blockMatch) {
-    return blockMatch[1].split(/[\r\n]+/)
+  const block = findFieldBlock(content, 'labels');
+  if (block) {
+    return block.lines.slice(block.itemStart, block.end)
       .map(line => line.trim())
       .filter(line => line.startsWith('-'))
       .map(line => line.substring(1).trim().replace(/(?:^['"])|(?:['"]$)/g, ''))
@@ -219,16 +199,16 @@ function setTaskLabels(taskFilePath: string, labels: string[]) {
   let content = fs.readFileSync(taskFilePath, 'utf8');
 
   const inlinePattern = /^labels:[ \t]*\[.*\]$/m;
-  const blockPattern = /^labels:[ \t]*[\r\n]+((?:\s+-\s+.+[\r\n]*)+)/m;
+  const block = findFieldBlock(content, 'labels');
 
   if (inlinePattern.test(content)) {
     // Replace existing inline format
     const newInline = `labels: [${labels.join(', ')}]`;
     content = content.replace(inlinePattern, newInline);
-  } else if (blockPattern.test(content)) {
+  } else if (block) {
     // Replace existing block format, preserving block style
-    const newBlock = 'labels:\n' + labels.map((l: string) => `  - ${l}`).join('\n') + '\n';
-    content = content.replace(blockPattern, newBlock);
+    block.lines.splice(block.start, block.end - block.start, 'labels:', ...labels.map((label: string) => `  - ${label}`));
+    content = block.lines.join(block.lineEnding);
   } else {
     // No labels field — insert after created_date (inline format)
     const createdDateMatch = content.match(/^created_date:.*$/m);
@@ -256,19 +236,30 @@ function setTaskLabels(taskFilePath: string, labels: string[]) {
  * @param {{promote?: boolean}} [opts]
  * @returns {boolean}
  */
-function setTaskAssignee(taskFilePath: string, agentFamily: string, { promote = true }: { promote?: boolean } = {} as any) {
-  if (!taskFilePath || !fs.existsSync(taskFilePath)) {return false;}
-  let content = fs.readFileSync(taskFilePath, 'utf8');
+function replaceAssigneeField(content: string, families: string[]): string {
+  const newAssignees = `assignee: [${families.join(', ')}]`;
+  const block = findAssigneeBlock(content);
+  if (block) {
+    block.lines.splice(block.start, block.end - block.start, newAssignees);
+    return block.lines.join(block.lineEnding);
+  }
+  const lineEnding = content.includes('\r\n') ? '\r\n' : '\n';
+  const lines = content.split(lineEnding);
+  const assigneeLine = lines.findIndex(line => /^assignee:[ \t]*/.test(line));
+  if (assigneeLine === -1) { return content; }
+  lines[assigneeLine] = newAssignees;
+  return lines.join(lineEnding);
+}
 
+function rewriteTaskAssignee(content: string, agentFamily: string, promote: boolean): string | null | undefined {
   const { matched, families } = parseAssigneeFamilies(content);
-
   if (matched) {
     const lowerAgentFamily = agentFamily.toLowerCase();
     const existingIndex = families.findIndex((f: string) => f.toLowerCase() === lowerAgentFamily);
 
     if (existingIndex !== 0) {
       if (existingIndex !== -1) {
-        if (!promote) {return false;} // Already in the list, and we don't want to move it
+        if (!promote) {return null;} // Already in the list, and we don't want to move it
         // Remove existing to promote to first
         families.splice(existingIndex, 1);
       }
@@ -279,22 +270,21 @@ function setTaskAssignee(taskFilePath: string, agentFamily: string, { promote = 
         families.push(agentFamily);
       }
 
-      const newAssignees = `assignee: [${families.join(', ')}]`;
-
-      // Replace whatever form was there with a normalized inline array form
-      if (content.match(/^assignee:\s*\[.*?\]/m)) {
-        content = content.replace(/^assignee:\s*\[.*?\]/m, newAssignees);
-      } else if (content.match(/^assignee:\s*\n((?:\s+-\s+.+\r?\n?)+)/m)) {
-        content = content.replace(/^assignee:\s*\n((?:\s+-\s+.+\r?\n?)+)/m, newAssignees + '\n');
-      } else {
-        // Fallback for simple form
-        content = content.replace(/^assignee:\s*.*$/m, newAssignees);
-      }
-
-      fs.writeFileSync(taskFilePath, content, 'utf8');
-      return true;
+      return replaceAssigneeField(content, families);
     }
-    return false; // Already authoritative (at index 0)
+    return null; // Already authoritative (at index 0)
+  }
+  return undefined;
+}
+
+function setTaskAssignee(taskFilePath: string, agentFamily: string, { promote = true }: { promote?: boolean } = {} as any) {
+  if (!taskFilePath || !fs.existsSync(taskFilePath)) {return false;}
+  let content = fs.readFileSync(taskFilePath, 'utf8');
+  const rewritten = rewriteTaskAssignee(content, agentFamily, promote);
+  if (rewritten !== undefined) {
+    if (rewritten === null) {return false;}
+    fs.writeFileSync(taskFilePath, rewritten, 'utf8');
+    return true;
   }
 
   // No assignee line exists — insert one after the id frontmatter line
@@ -335,15 +325,7 @@ function setTaskImplementer(taskFilePath: string, agentFamily: string) {
       }
     }
 
-    const newAssignees = `assignee: [${nextFamilies.join(', ')}]`;
-
-    if (content.match(/^assignee:\s*\[.*?\]/m)) {
-      content = content.replace(/^assignee:\s*\[.*?\]/m, newAssignees);
-    } else if (content.match(/^assignee:\s*\n((?:\s+-\s+.+\r?\n?)+)/m)) {
-      content = content.replace(/^assignee:\s*\n((?:\s+-\s+.+\r?\n?)+)/m, newAssignees + '\n');
-    } else {
-      content = content.replace(/^assignee:\s*.*$/m, newAssignees);
-    }
+    content = replaceAssigneeField(content, nextFamilies);
 
     fs.writeFileSync(taskFilePath, content, 'utf8');
     return true;
@@ -371,8 +353,10 @@ function enforceTaskAssignee(taskFilePath: string, agentFamily: string) {
 
   const newAssignee = `assignee: [${agentFamily}]`;
 
-  if (content.match(/^assignee:[ \t]*[\r\n]+((?:[ \t]+-[ \t]+.+[\r\n]*)+)/m)) {
-    content = content.replace(/^assignee:[ \t]*[\r\n]+((?:[ \t]+-[ \t]+.+[\r\n]*)+)/m, newAssignee + '\n');
+  const block = findAssigneeBlock(content);
+  if (block) {
+    block.lines.splice(block.start, block.end - block.start, newAssignee);
+    content = block.lines.join(block.lineEnding);
   } else if (content.match(/^assignee:[ \t]*.*$/m)) {
     content = content.replace(/^assignee:[ \t]*.*$/m, newAssignee);
   } else {

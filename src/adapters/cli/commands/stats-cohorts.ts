@@ -73,43 +73,38 @@ interface ParsedCohortArgs {
 
 /** Parse the subcommand's flags, rejecting values the report cannot honour. */
 export function parseCohortArgs(args: readonly string[]): ParsedCohortArgs {
-  let dimension: CohortDimension = 'label';
-  let lowSampleThreshold = LOW_SAMPLE_THRESHOLD;
-  let repositoryId: string | null = null;
-  let help = false;
+  const parsed: { dimension: CohortDimension; lowSampleThreshold: number; repositoryId: string | null; help: boolean } = { dimension: 'label', lowSampleThreshold: LOW_SAMPLE_THRESHOLD, repositoryId: null, help: false };
 
   for (let index = 0; index < args.length; index += 1) {
     const arg = args[index];
-    if (arg === '--help' || arg === '-h') { help = true; continue; }
-    if (arg === '--by' && index + 1 < args.length) {
-      const value = String(args[index + 1]).trim().toLowerCase();
-      if (!DIMENSIONS.includes(value as CohortDimension)) {
-        throw new Error(`Unknown cohort dimension "${value}". Expected one of: ${DIMENSIONS.join(', ')}.`);
-      }
-      dimension = value as CohortDimension;
-      index += 1;
-      continue;
-    }
-    if (arg === '--min-sample' && index + 1 < args.length) {
-      const value = Number.parseInt(String(args[index + 1]), 10);
-      if (!Number.isFinite(value) || value < 1) {
-        throw new Error(`Invalid --min-sample ${args[index + 1]}: expected a positive whole number.`);
-      }
-      lowSampleThreshold = value;
-      index += 1;
-      continue;
-    }
-    if (arg === '--repo' && index + 1 < args.length) {
-      repositoryId = String(args[index + 1]);
-      index += 1;
-      continue;
-    }
+    if (arg === '--help' || arg === '-h') { parsed.help = true; continue; }
+    const option = parseCohortOption(arg, args[index + 1]);
+    if (option) { Object.assign(parsed, option); index += 1; continue; }
     if (arg?.startsWith('--')) {
       throw new Error(`Unknown option ${arg}. Run "px stats cohorts --help" for the accepted flags.`);
     }
   }
 
-  return { dimension, lowSampleThreshold, repositoryId, help };
+  return parsed;
+}
+
+function parseCohortOption(arg: string | undefined, next: string | undefined): Partial<ParsedCohortArgs> | null {
+  if (next === undefined) { return null; }
+  if (arg === '--by') {
+    const dimension = String(next).trim().toLowerCase();
+    if (!DIMENSIONS.includes(dimension as CohortDimension)) {
+      throw new Error(`Unknown cohort dimension "${dimension}". Expected one of: ${DIMENSIONS.join(', ')}.`);
+    }
+    return { dimension: dimension as CohortDimension };
+  }
+  if (arg === '--min-sample') {
+    const lowSampleThreshold = Number.parseInt(String(next), 10);
+    if (!Number.isFinite(lowSampleThreshold) || lowSampleThreshold < 1) {
+      throw new Error(`Invalid --min-sample ${next}: expected a positive whole number.`);
+    }
+    return { lowSampleThreshold };
+  }
+  return arg === '--repo' ? { repositoryId: String(next) } : null;
 }
 
 /**

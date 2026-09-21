@@ -88,9 +88,11 @@ test('SC10: status.ts routes mission output through BoardProjectionBuilder (sing
     'status.ts must obtain BoardProjectionBuilder through its injected dependency for SC8',
   );
 
-  // status.ts must use the projection for mission output (projection.stages or projection.cards)
-  assert.ok(
-    content.includes('projection.stages') || content.includes('projection.cards'),
+  // status.ts must use the projection for mission output (projection.stages or
+  // projection.cards), reached directly or through optional chaining.
+  assert.match(
+    content,
+    /projection\??\.(stages|cards)/,
     'status.ts must read mission data from the projection for SC9',
   );
 });

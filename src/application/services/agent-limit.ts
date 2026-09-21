@@ -207,6 +207,23 @@ interface DetectLimitHitOptions {
   now?: Date;
 }
 
+function matchedLimitHit(agent: string, combined: string, match: any, now: Date) {
+  const matchedText = combined.slice(match.index, match.index + match.length);
+  if (agent === 'qwen' && /Requests rate limit exceeded/i.test(matchedText)) {
+    return { reroute: true, reason: 'rate limit (transient, no block)' };
+  }
+  const parsed = parseResetTime(clipContext(combined, match.index, match.length), now);
+  if (parsed && !Number.isNaN(parsed.getTime()) && parsed.getTime() > now.getTime()) {
+    return { target: parsed, source: 'parsed', reason: `parsed: ${match.pattern.source}` };
+  }
+  const monthEnd = agent === 'vibe' || agent === 'mistral';
+  return {
+    target: monthEnd ? endOfCurrentUtcMonth(now) : new Date(now.getTime() + DEFAULT_FALLBACK_HOURS * 60 * 60 * 1000),
+    source: monthEnd ? 'month-end' : 'fallback',
+    reason: monthEnd ? `month-end: ${match.pattern.source}` : 'fallback: usage limit reached',
+  };
+}
+
 function detectLimitHit({
   agent,
   stdout = '',
@@ -215,7 +232,7 @@ function detectLimitHit({
   signal,
   error,
   now = new Date()
-}: DetectLimitHitOptions = {} as DetectLimitHitOptions) {
+}: DetectLimitHitOptions = {} as DetectLimitHitOptions): { reroute?: boolean; until?: string; source?: string; reason: string } | null {
   if (!agent) {return null;}
   // Gate detection on a failed launcher invocation. A successful child (exit 0,
   // no signal, no spawn error) means any limit-hit phrases in the transcript
@@ -238,27 +255,9 @@ function detectLimitHit({
   let reason;
 
   if (match) {
-    // Qwen rate-limit is transient (retry after ~1 minute) — do NOT write
-    // a long timed block. Return reroute signal so caller excludes agent
-    // from current retry cycle without persisting to blocklist.
-    const matchedText = combined.slice(match.index, match.index + match.length);
-    if (agent === 'qwen' && /Requests rate limit exceeded/i.test(matchedText)) {
-      return { reroute: true, reason: 'rate limit (transient, no block)' };
-    }
-
-    const context = clipContext(combined, match.index, match.length);
-    const parsed = parseResetTime(context, now);
-
-    if (parsed && !Number.isNaN(parsed.getTime()) && parsed.getTime() > now.getTime()) {
-      target = parsed;
-      source = 'parsed';
-      reason = `parsed: ${match.pattern.source}`;
-    } else {
-      const monthEnd = agent === 'vibe' || agent === 'mistral';
-      target = monthEnd ? endOfCurrentUtcMonth(now) : new Date(now.getTime() + DEFAULT_FALLBACK_HOURS * 60 * 60 * 1000);
-      source = monthEnd ? 'month-end' : 'fallback';
-      reason = monthEnd ? `month-end: ${match.pattern.source}` : 'fallback: usage limit reached';
-    }
+    const detected = matchedLimitHit(agent, combined, match, now);
+    if ('reroute' in detected) { return detected; }
+    ({ target, source, reason } = detected);
   } else if (signal !== null && signal !== undefined) {
     // Agent was killed by a signal (e.g. SIGINT/Ctrl-C) but no limit-hit
     // pattern matched. Apply a short-term block so the next invocation

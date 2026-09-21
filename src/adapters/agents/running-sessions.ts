@@ -186,10 +186,25 @@ export function detectRunningMissionSessions(
 
   const found = new Map<string, RunningMissionSession>();
   for (const process of processes) {
+    const entry = runningMissionSession(process, options.rootDir, worktrees, resolveCwd, nowMs);
+    if (entry === 'unknown') { return null; }
+    if (entry === null) { continue; }
+    found.set(entry.key, entry.session);
+  }
+  return [...found.values()];
+}
+
+function runningMissionSession(
+  process: ProcessEntry,
+  rootDir: string,
+  worktrees: ReadonlyMap<string, MissionId> | null,
+  resolveCwd: (_pid: number) => string | null,
+  nowMs: number,
+): { readonly key: string; readonly session: RunningMissionSession } | null | 'unknown' {
     const invocation = parsePxInvocation(process.args);
-    if (invocation === null) { continue; }
+    if (invocation === null) { return null; }
     const role = AGENT_COMMAND_ROLES[invocation.subcommand];
-    if (role === undefined) { continue; }
+    if (role === undefined) { return null; }
 
     // The command line names the mission for `px <cmd> <slug>`; the worktree
     // identifies it for slug-less forms such as `px review --continue`.
@@ -197,7 +212,7 @@ export function detectRunningMissionSessions(
       // A slug-less command (`px review --continue`) can only be identified by
       // its worktree, and the worktree listing failed: the count would be short
       // by at least this session, so report unknown instead.
-      return null;
+      return 'unknown';
     }
 
     // An explicit slug is only trustworthy when the process actually runs
@@ -206,29 +221,30 @@ export function detectRunningMissionSessions(
     // location — not the slug alone — is the evidence. A candidate we cannot
     // attribute is ignored, never fabricated (SC3).
     if (invocation.missionId !== null) {
-      const location = repoLocation(process, options.rootDir, worktrees, resolveCwd);
-      if (location === 'outside') { continue; }
+      const location = repoLocation(process, rootDir, worktrees, resolveCwd);
+      if (location === 'outside') { return null; }
       // No board-root/worktree path in argv and no working directory to inspect:
       // this explicit-slug process may be local, so omitting it would make the
       // count untrustworthy. Report unknown rather than a fabricated zero (SC3).
-      if (location === 'unknown') { return null; }
+      if (location === 'unknown') { return 'unknown'; }
     }
 
     const worktree = worktrees === null ? null : resolveWorktree(process, worktrees, resolveCwd);
     const missionId = invocation.missionId ?? (worktree === null ? null : worktrees?.get(worktree) ?? null);
-    if (missionId === null) { continue; }
+    if (missionId === null) { return null; }
 
     // The `px` entry runs as a shell, a parent, and a child node process; all
     // three match the same mission and subcommand and must count once.
-    found.set(`${missionId}:${invocation.subcommand}`, {
-      missionId,
-      role,
-      startedAtMs: nowMs - process.elapsedSeconds * 1000,
-      worktree,
-      pinnedAgent: invocation.pinnedAgent,
-    });
-  }
-  return [...found.values()];
+    return {
+      key: `${missionId}:${invocation.subcommand}`,
+      session: {
+        missionId,
+        role,
+        startedAtMs: nowMs - process.elapsedSeconds * 1000,
+        worktree,
+        pinnedAgent: invocation.pinnedAgent,
+      },
+    };
 }
 
 /**

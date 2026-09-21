@@ -57,6 +57,39 @@ function detectMainWorktreePath(lines: string[], cwd: string, commonDir: string 
   return null;
 }
 
+function fallbackMainWorktree(lines: string[], cwd: string): string | null {
+  for (let i = 0; i < lines.length; i += 1) {
+    if (lines[i].startsWith('worktree ') && lines[i + 1]?.startsWith('branch refs/heads/main')) {
+      return lines[i].slice('worktree '.length).trim();
+    }
+  }
+  for (const line of lines) {
+    if (line.startsWith('worktree ')) {
+      const worktree = line.slice('worktree '.length).trim();
+      if (worktree !== cwd) { return worktree; }
+    }
+  }
+  return null;
+}
+
+function worktreeLookupWarning(detail?: string) {
+  return detail
+    ? `Could not inspect git worktrees while looking for main-worktree agents.local.json; skipping that lookup (${detail}).`
+    : 'Could not inspect git worktrees while looking for main-worktree agents.local.json; skipping that lookup.';
+}
+
+function cacheMainWorktree(commonDir: string, value: string | null) {
+  if (value) { MainWorktreeDetector.byCommonDir.set(commonDir, value); }
+  return value;
+}
+
+function listWorktreeLines(cwd: string, warn: Function): string[] | null {
+  const result = spawnSync('git', ['-C', cwd, 'worktree', 'list', '--porcelain'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], timeout: 5000 });
+  if (result.status === 0) { return result.stdout.split('\n'); }
+  warn(worktreeLookupWarning(`git exited with status ${result.status}`));
+  return null;
+}
+
 function getMainWorktreePath(options: {cwd?: string, warn?: Function} = {}) {
   const { cwd = process.cwd(), warn = fmt.log.warn } = options;
   try {
@@ -69,63 +102,18 @@ function getMainWorktreePath(options: {cwd?: string, warn?: Function} = {}) {
       return null;
     }
 
-    const result = spawnSync('git', ['-C', cwd, 'worktree', 'list', '--porcelain'], {
-      encoding: 'utf8',
-      stdio: ['ignore', 'pipe', 'ignore'],
-      timeout: 5000
-    });
-    if (result.status !== 0) {
-      warn(
-        `Could not inspect git worktrees while looking for main-worktree agents.local.json; ` +
-        `skipping that lookup (git exited with status ${result.status}).`
-      );
-      return null;
-    }
-
-    const lines = result.stdout.split('\n');
+    const lines = listWorktreeLines(cwd, warn);
+    if (!lines) { return null; }
     const mainWorktreePath = detectMainWorktreePath(lines, cwd, commonDir);
-    if (mainWorktreePath) {
-      MainWorktreeDetector.byCommonDir.set(commonDir, mainWorktreePath);
-      return mainWorktreePath;
-    }
-
-    let i = 0;
-    while (i < lines.length) {
-      if (lines[i].startsWith('worktree ')) {
-        const wt = lines[i].slice('worktree '.length).trim();
-        const branchLineIdx = i + 1;
-        if (branchLineIdx < lines.length && lines[branchLineIdx].startsWith('branch refs/heads/main')) {
-          MainWorktreeDetector.byCommonDir.set(commonDir, wt);
-          return wt;
-        }
-      }
-      i++;
-    }
-
-    for (i = 0; i < lines.length; i++) {
-      if (lines[i].startsWith('worktree ')) {
-        const wt = lines[i].slice('worktree '.length).trim();
-        if (wt !== cwd) {
-          MainWorktreeDetector.byCommonDir.set(commonDir, wt);
-          return wt;
-        }
-      }
-    }
+    if (mainWorktreePath) { return cacheMainWorktree(commonDir, mainWorktreePath); }
+    return cacheMainWorktree(commonDir, fallbackMainWorktree(lines, cwd));
   } catch (err) {
     const e: Error & {code?: string} = (err as any);
     const detail = e && (e.code || e.message) ? (e.code || e.message) : 'unknown error';
-    warn(
-      `Could not inspect git worktrees while looking for main-worktree agents.local.json; ` +
-      `skipping that lookup (${detail}).`
-    );
+    warn(worktreeLookupWarning(detail));
     return null;
   }
 
-  warn(
-    'Could not determine the main worktree from `git worktree list --porcelain`; ' +
-    'skipping main-worktree agents.local.json lookup.'
-  );
-  return null;
 }
 
 export {

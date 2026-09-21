@@ -1,5 +1,6 @@
 import * as fmt from '../../application/presentation/cli-format.js';
 import type { StatusResult } from '../../application/status-command-use-case.js';
+import type { StatusMissionData, StatusPrInfo } from '../../application/ports/cli-workflows.js';
 import { describeCoordinatorEvidence, describeMissionWork } from '../../application/projections/mission-activity.js';
 
 /** Parse public CLI flags for the status command. */
@@ -21,88 +22,72 @@ export function parseStatusCliRequest(args: string[]): StatusCliRequest {
 }
 
 /** Render the complete status output from a StatusResult. */
-export function renderStatus(result: StatusResult, log: (_msg: string) => void): void {
-  log(fmt.bold('--- Mission Status ---'));
-  log(`Branch: ${fmt.branch(result.branch)}`);
-  log(`Worktree: ${fmt.path(result.worktree)}`);
+/** `n unmerged file(s)` plus one line per file, under a caller-supplied heading. */
+function logRebaseFiles(heading: string, rebaseInfo: { detached: boolean; unmergedFiles: readonly string[] }, log: (_msg: string) => void): void {
+  const detachedText = rebaseInfo.detached ? 'detached HEAD, ' : '';
+  log(`${heading}: ${detachedText}${rebaseInfo.unmergedFiles.length} unmerged file(s)`);
+  for (const file of rebaseInfo.unmergedFiles) { log(`  - ${file}`); }
+}
 
-  // Rebase diagnostics for current worktree
-  if (result.rebaseInfo && result.rebaseInfo.inProgress && result.rebaseInfo.detached) {
-    const detachedText = 'detached HEAD, ';
-    log(`Detached HEAD: rebase in progress: ${detachedText}${result.rebaseInfo.unmergedFiles.length} unmerged file(s)`);
-    for (const file of result.rebaseInfo.unmergedFiles) {
-      log(`  - ${file}`);
-    }
+/** Every settled round, so a verdict survives a reviewer reroute. */
+function logReviewRounds(missionData: StatusMissionData, log: (_msg: string) => void): void {
+  if (!missionData.reviewPhase) { log('Review: not started'); return; }
+  log(`Review: round ${missionData.reviewRound ?? 1}, phase ${missionData.reviewPhase}, disposition ${missionData.reviewDisposition ?? 'none'}`);
+  if (missionData.approvalOwed) {
+    log('Formal approval owed: external provider approval is still required after the local self-review.');
   }
-
-  if (result.slug) {
-    // Mission-specific output
-    if (result.missionData) {
-      const md = result.missionData;
-      log(`Backlog status: ${md.backlogStatus}`);
-      // The same two facts the TUI agent strip renders, from the same
-      // projection: authoritative work first, then the recovery-only evidence
-      // that a `px` coordinator process exists. Keeping them on separate lines
-      // is deliberate — a live coordinator is not a running agent.
-      if (md.activity) {
-        log(`Mission work: ${describeMissionWork(md.activity.work)}`);
-        log(`Coordinator evidence: ${describeCoordinatorEvidence(md.activity.coordinator)}`);
-      }
-      if (md.checkpoint) {
-        log(`Last checkpoint: ${md.checkpoint} - ${md.checkpointDescription || ''}`);
-      } else {
-        log('Last checkpoint: none');
-      }
-
-      if (md.reviewPhase) {
-        const disposition = md.reviewDisposition ?? 'none';
-        log(`Review: round ${md.reviewRound ?? 1}, phase ${md.reviewPhase}, disposition ${disposition}`);
-        if (md.approvalOwed) {
-          log('Formal approval owed: external provider approval is still required after the local self-review.');
-        }
-        for (const round of md.reviewHistory) {
-          log(`  Round ${round.number} [${round.reviewer} -> ${round.implementer}]: ${round.disposition ?? 'pending'}`);
-          if (round.comment) { log(`    comment: ${round.comment}`); }
-          for (const summary of round.findingSummaries) { log(`    finding: ${summary}`); }
-          for (const fix of round.fixes) { log(`    fixed: ${fix}`); }
-          for (const pushback of round.pushbacks) { log(`    pushback: ${pushback}`); }
-        }
-      } else {
-        log('Review: not started');
-      }
-    } else {
-      log('Backlog status: unknown (projection unavailable)');
-      log('Last checkpoint: none');
-    }
-
-    // Forgejo PR state
-    if (result.prInfo) {
-      if (result.prInfo.exists && result.prInfo.number !== undefined && result.prInfo.state) {
-        log(`Forgejo PR: #${result.prInfo.number} (${result.prInfo.state})`);
-      } else if (result.prInfo.raw) {
-        log(`Forgejo PR: unavailable (${result.prInfo.raw})`);
-      } else {
-        log('Forgejo PR: none');
-      }
-    }
+  for (const round of missionData.reviewHistory) {
+    log(`  Round ${round.number} [${round.reviewer} -> ${round.implementer}]: ${round.disposition ?? 'pending'}`);
+    if (round.comment) { log(`    comment: ${round.comment}`); }
+    for (const summary of round.findingSummaries) { log(`    finding: ${summary}`); }
+    for (const fix of round.fixes) { log(`    fixed: ${fix}`); }
+    for (const pushback of round.pushbacks) { log(`    pushback: ${pushback}`); }
   }
+}
 
-  // Stale worktrees
+function logMissionData(missionData: StatusMissionData | null, log: (_msg: string) => void): void {
+  if (!missionData) {
+    log('Backlog status: unknown (projection unavailable)');
+    log('Last checkpoint: none');
+    return;
+  }
+  log(`Backlog status: ${missionData.backlogStatus}`);
+  // The same two facts the TUI agent strip renders, from the same projection:
+  // authoritative work first, then the recovery-only evidence that a `px`
+  // coordinator process exists. Keeping them on separate lines is deliberate —
+  // a live coordinator is not a running agent.
+  if (missionData.activity) {
+    log(`Mission work: ${describeMissionWork(missionData.activity.work)}`);
+    log(`Coordinator evidence: ${describeCoordinatorEvidence(missionData.activity.coordinator)}`);
+  }
+  log(missionData.checkpoint
+    ? `Last checkpoint: ${missionData.checkpoint} - ${missionData.checkpointDescription || ''}`
+    : 'Last checkpoint: none');
+  logReviewRounds(missionData, log);
+}
+
+function logPrInfo(prInfo: StatusPrInfo | null, log: (_msg: string) => void): void {
+  if (!prInfo) { return; }
+  if (prInfo.exists && prInfo.number !== undefined && prInfo.state) {
+    log(`Forgejo PR: #${prInfo.number} (${prInfo.state})`);
+    return;
+  }
+  log(prInfo.raw ? `Forgejo PR: unavailable (${prInfo.raw})` : 'Forgejo PR: none');
+}
+
+function logStaleWorktrees(result: StatusResult, log: (_msg: string) => void): void {
   for (const entry of result.staleWorktrees) {
     log(`Stale worktree: ${fmt.path(entry.path)} (task: ${entry.taskStatus})`);
     const rebaseInfo = result.staleWorktreeRebase[entry.path];
-    if (rebaseInfo && rebaseInfo.inProgress) {
+    if (rebaseInfo?.inProgress) {
       const branchName = entry.branch ? entry.branch.replace(/^refs\/heads\//, '') : '(detached HEAD)';
-      const detachedText = rebaseInfo.detached ? 'detached HEAD, ' : '';
-      log(`Rebase in progress on ${branchName}: ${detachedText}${rebaseInfo.unmergedFiles.length} unmerged file(s)`);
-      for (const file of rebaseInfo.unmergedFiles) {
-        log(`  - ${file}`);
-      }
+      logRebaseFiles(`Rebase in progress on ${branchName}`, rebaseInfo, log);
     }
     log(`  Cleanup: ${fmt.command(entry.cleanupCommand)}`);
   }
+}
 
-  // Agent launcher matrix
+function logAgentMatrix(result: StatusResult, log: (_msg: string) => void): void {
   log('Agent launcher matrix:');
   for (const entry of result.agentMatrix) {
     const support = entry.supported ? 'supported' : 'blocked';
@@ -110,15 +95,30 @@ export function renderStatus(result: StatusResult, log: (_msg: string) => void):
     const activeMark = entry.activeEligible ? 'active' : '-';
     log(`  ${fmt.agent(entry.agent)}: ${support} | eligible: ${draftMark},${activeMark}`);
   }
-  if (result.agentOverride) {
-    log(`  (WORKFLOW_AGENT override: ${fmt.agent(result.agentOverride)})`);
+  if (result.agentOverride) { log(`  (WORKFLOW_AGENT override: ${fmt.agent(result.agentOverride)})`); }
+}
+
+export function renderStatus(result: StatusResult, log: (_msg: string) => void): void {
+  log(fmt.bold('--- Mission Status ---'));
+  log(`Branch: ${fmt.branch(result.branch)}`);
+  log(`Worktree: ${fmt.path(result.worktree)}`);
+
+  // Rebase diagnostics for current worktree. This heading always says "detached
+  // HEAD" because the branch only renders when the rebase is detached.
+  if (result.rebaseInfo?.inProgress && result.rebaseInfo.detached) {
+    logRebaseFiles('Detached HEAD: rebase in progress', result.rebaseInfo, log);
   }
 
-  // Commits and uncommitted
-  log('Last 3 commits:');
-  for (const c of result.lastThreeCommits) {
-    log(`  - ${c}`);
+  if (result.slug) {
+    logMissionData(result.missionData, log);
+    logPrInfo(result.prInfo, log);
   }
+
+  logStaleWorktrees(result, log);
+  logAgentMatrix(result, log);
+
+  log('Last 3 commits:');
+  for (const c of result.lastThreeCommits) { log(`  - ${c}`); }
 
   log(`Uncommitted files: ${result.uncommittedCount}`);
   log(fmt.bold('----------------------'));

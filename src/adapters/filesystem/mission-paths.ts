@@ -80,43 +80,19 @@ export function getMissionYear(slug: string | undefined = undefined, rootDir: st
     return process.env.MISSION_YEAR_OVERRIDE;
   }
 
+  return findMissionYear(slug, rootDir) || new Date().getFullYear().toString();
+}
+
+function findMissionYear(slug: string | undefined, rootDir: string): string | null {
   const hasExplicitConfig = fs.existsSync(path.join(rootDir, 'workflow.config.json'));
-  if (slug && (missionUsesYearTier(rootDir) || (!hasExplicitConfig && fs.existsSync(path.join(rootDir, 'docs', 'missions'))))) {
-    const baseDir = missionUsesYearTier(rootDir)
-      ? missionBaseDir(rootDir)
-      : path.join(rootDir, 'docs', 'missions');
-    if (fs.existsSync(baseDir)) {
-      try {
-        const stat = fs.statSync(baseDir);
-        if (!stat.isDirectory()) {
-          return new Date().getFullYear().toString();
-        }
-      } catch (_) {
-        return new Date().getFullYear().toString();
-      }
-      const years = fs.readdirSync(baseDir)
-        .filter(d => /^\d{4}$/.test(d))
-        .sort((a: string, b: string) => b.localeCompare(a));
-
-      const slugStr = slug;
-      const candidateSlugs = [slugStr.toLowerCase()];
-      const baseTaskMatch = slugStr.match(/^(task-\d+)/i);
-      if (baseTaskMatch) {
-        candidateSlugs.push(baseTaskMatch[1].toLowerCase());
-      }
-
-      for (const year of years) {
-        for (const s of candidateSlugs) {
-          const missionDir = path.join(baseDir, year, s);
-          if (fs.existsSync(missionDir)) {
-            return year;
-          }
-        }
-      }
-    }
-  }
-
-  return new Date().getFullYear().toString();
+  if (!slug || (!missionUsesYearTier(rootDir) && (hasExplicitConfig || !fs.existsSync(path.join(rootDir, 'docs', 'missions'))))) { return null; }
+  const baseDir = missionUsesYearTier(rootDir) ? missionBaseDir(rootDir) : path.join(rootDir, 'docs', 'missions');
+  try {
+    if (!fs.statSync(baseDir).isDirectory()) { return null; }
+    const slugs = [slug.toLowerCase(), slug.match(/^(task-\d+)/i)?.[1]?.toLowerCase()].filter(Boolean);
+    return fs.readdirSync(baseDir).filter((year) => /^\d{4}$/.test(year)).sort((a, b) => b.localeCompare(a))
+      .find((year) => slugs.some((candidate) => fs.existsSync(path.join(baseDir, year, candidate!))) ) || null;
+  } catch (_) { return null; }
 }
 
 /** @param {string} rootDir @param {string} slug */
@@ -136,33 +112,30 @@ export function missionPathForSlug(rootDir: string, slug: string): string {
 
 /** @param {string} slug @param {string} [rootDir] @param {{missionPath?: string}} options */
 export function findMissionDir(slug: string, rootDir: string = process.cwd(), options: { missionPath?: string } = {}): string | null {
-  const opts = options;
-  if (opts.missionPath && fs.existsSync(opts.missionPath)) {
-    return fs.statSync(opts.missionPath).isDirectory() ? opts.missionPath : path.dirname(opts.missionPath);
-  }
+  const override = existingMissionPath(options.missionPath);
+  if (override) { return override; }
   if (!slug) {return null;}
   const missionDir = missionDirForSlug(rootDir, slug);
   if (fs.existsSync(missionDir)) {return missionDir;}
 
-  const baseTaskMatch = slug.match(/^(task-\d+)/i);
-  if (baseTaskMatch) {
-    const baseSlug = baseTaskMatch[1].toLowerCase();
-    const baseMissionDir = missionDirForSlug(rootDir, baseSlug);
-    if (fs.existsSync(baseMissionDir)) {return baseMissionDir;}
-  }
+  const baseSlug = slug.match(/^(task-\d+)/i)?.[1]?.toLowerCase();
+  const baseMissionDir = baseSlug && missionDirForSlug(rootDir, baseSlug);
+  if (baseMissionDir && fs.existsSync(baseMissionDir)) {return baseMissionDir;}
 
+  return findLegacyMissionDir(slug, rootDir, baseSlug);
+}
+
+function existingMissionPath(missionPath?: string): string | null {
+  if (!missionPath || !fs.existsSync(missionPath)) { return null; }
+  return fs.statSync(missionPath).isDirectory() ? missionPath : path.dirname(missionPath);
+}
+
+function findLegacyMissionDir(slug: string, rootDir: string, baseSlug?: string): string | null {
   const legacyBaseDir = path.join(rootDir, 'docs', 'missions');
-  if (!missionUsesYearTier(rootDir) && !fs.existsSync(path.join(rootDir, 'workflow.config.json')) && fs.existsSync(legacyBaseDir)) {
-    const year = getMissionYear(slug, rootDir);
-    const legacyMissionDir = path.join(legacyBaseDir, year, slug);
-    if (fs.existsSync(legacyMissionDir)) {return legacyMissionDir;}
-    if (baseTaskMatch) {
-      const legacyBaseMissionDir = path.join(legacyBaseDir, year, baseTaskMatch[1].toLowerCase());
-      if (fs.existsSync(legacyBaseMissionDir)) {return legacyBaseMissionDir;}
-    }
-  }
-
-  return null;
+  if (missionUsesYearTier(rootDir) || fs.existsSync(path.join(rootDir, 'workflow.config.json')) || !fs.existsSync(legacyBaseDir)) { return null; }
+  const year = getMissionYear(slug, rootDir);
+  const candidates = [slug, baseSlug].filter((candidate): candidate is string => Boolean(candidate));
+  return candidates.map((candidate) => path.join(legacyBaseDir, year, candidate)).find((candidate) => fs.existsSync(candidate)) ?? null;
 }
 
 /**

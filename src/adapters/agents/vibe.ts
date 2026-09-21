@@ -55,44 +55,37 @@ function overrideSessionLogging(configText: string, worktree: string) {
   const source = String(configText || '');
   const lines = source.split('\n');
   const out: string[] = [];
-  let inSessionLogging = false;
-  let wroteSaveDir = false;
+  const state = { inSessionLogging: false, wroteSaveDir: false };
 
   for (const line of lines) {
-    const trimmed = line.trim();
-    const isTable = /^\s*\[[^\]]+\]\s*$/.test(line);
-    if (isTable) {
-      if (inSessionLogging && !wroteSaveDir) {
-        out.push(saveDirLine);
-        wroteSaveDir = true;
-      }
-      inSessionLogging = trimmed === '[session_logging]';
-      out.push(line);
-      continue;
-    }
-    if (inSessionLogging && /^\s*save_dir\s*=/.test(line)) {
-      if (!wroteSaveDir) {
-        out.push(saveDirLine);
-        wroteSaveDir = true;
-      }
-      continue;
-    }
-    out.push(line);
+    const replacement = sessionLoggingLine(line, saveDirLine, state);
+    if (replacement !== null) { out.push(replacement); }
   }
 
-  if (inSessionLogging && !wroteSaveDir) {
+  if (state.inSessionLogging && !state.wroteSaveDir) {
     out.push(saveDirLine);
-    wroteSaveDir = true;
   }
 
-  if (!source.includes('[session_logging]')) {
-    if (out.length > 0 && out[out.length - 1] !== '') {out.push('');}
-    out.push('[session_logging]');
-    out.push(saveDirLine);
-    out.push('enabled = true');
-  }
+  if (!source.includes('[session_logging]')) { appendSessionLogging(out, saveDirLine); }
 
   return out.join('\n');
+}
+
+function sessionLoggingLine(line: string, saveDirLine: string, state: { inSessionLogging: boolean; wroteSaveDir: boolean }): string | null {
+  if (/^\s*\[[^\]]+\]\s*$/.test(line)) {
+    if (state.inSessionLogging && !state.wroteSaveDir) { state.wroteSaveDir = true; return `${saveDirLine}\n${line}`; }
+    state.inSessionLogging = line.trim() === '[session_logging]';
+    return line;
+  }
+  if (!state.inSessionLogging || !/^\s*save_dir\s*=/.test(line)) { return line; }
+  if (state.wroteSaveDir) { return null; }
+  state.wroteSaveDir = true;
+  return saveDirLine;
+}
+
+function appendSessionLogging(out: string[], saveDirLine: string): void {
+  if (out.length > 0 && out[out.length - 1] !== '') {out.push('');}
+  out.push('[session_logging]', saveDirLine, 'enabled = true');
 }
 
 function ensureVibeHome(worktree: string) {
@@ -145,6 +138,36 @@ interface ProcessedResult {
   [key: string]: unknown;
 }
 
+function readVibeSession(scanDir: string, dir: string) {
+  try {
+    const metaPath = path.join(scanDir, dir, 'meta.json');
+    const mtimeMs = fs.statSync(metaPath).mtimeMs;
+    const meta = JSON.parse(fs.readFileSync(metaPath, 'utf8')) as Record<string, unknown>;
+    const startTime = meta.start_time;
+    const sessionTime = typeof startTime === 'string' ? Date.parse(startTime) : Number.NaN;
+    const telemetry = Number.isNaN(sessionTime) ? null : parseVibeMeta(meta);
+    return telemetry ? { telemetry, sessionTime, mtimeMs } : null;
+  } catch (_) {
+    return null;
+  }
+}
+
+function closestVibeSession(scanDir: string, invokeTime: number, invokeWindow: { start: number; end: number } | null) {
+  try {
+    const dirs = fs.readdirSync(scanDir).filter((dir: string) => dir.startsWith('session_')).sort(compareCodeUnits);
+    let best: ReturnType<typeof readVibeSession> = null;
+    for (const dir of dirs) {
+      const candidate = readVibeSession(scanDir, dir);
+      if (!candidate || (invokeWindow && (candidate.sessionTime < invokeWindow.start || candidate.sessionTime > invokeWindow.end))) { continue; }
+      if (Number.isNaN(invokeTime)) { return candidate; }
+      if (best === null || Math.abs(candidate.sessionTime - invokeTime) < Math.abs(best.sessionTime - invokeTime)) { best = candidate; }
+    }
+    return best;
+  } catch (_) {
+    return null;
+  }
+}
+
 function processResult(result: any, basePath?: string, invocationStart?: string): ProcessedResult {
   if (!result || typeof result !== 'object') {
     return { sessionId: null, telemetry: null };
@@ -167,61 +190,9 @@ function processResult(result: any, basePath?: string, invocationStart?: string)
     }
   }
 
-  // Scan session directories chronologically (sorted by basename).
-  // For each session, check if its start_time falls within the invocation
-  // window, then pick the session closest to the invocation start time.
-  // This replaces the previous approach of calling extractVibeTelemetry
-  // which always returned the globally newest session regardless of which
-  // invocation it belonged to.
-  let bestTelemetry: ReturnType<typeof parseVibeMeta> | null = null;
-  let bestDistance = Infinity;
-  let bestMtimeMs: number | null = null;
-
-  try {
-    const entries = fs.readdirSync(scanDir);
-    const dirs = entries.filter((d: string) => d.startsWith('session_')).sort(compareCodeUnits);
-
-    for (const dir of dirs) {
-      const metaPath = path.join(scanDir, dir, 'meta.json');
-      let metaStat: fs.Stats;
-      try { metaStat = fs.statSync(metaPath); } catch (_) { continue; }
-
-      let content: string;
-      try { content = fs.readFileSync(metaPath, 'utf8'); } catch (_) { continue; }
-
-      let meta: Record<string, unknown>;
-      try { meta = JSON.parse(content); } catch (_) { continue; }
-
-      const startTime = meta.start_time;
-      if (typeof startTime !== 'string') { continue; }
-      const sessionTime = Date.parse(startTime);
-      if (Number.isNaN(sessionTime)) { continue; }
-
-      // Check invocation window if applicable
-      if (invokeWindow && (sessionTime < invokeWindow.start || sessionTime > invokeWindow.end)) {
-        continue;
-      }
-
-      const telemetry = parseVibeMeta(meta);
-      if (!telemetry) { continue; }
-
-      // When no invocationStart is provided, pick the first valid session.
-      // When invocationStart is provided, pick the session closest in time.
-      if (Number.isNaN(invokeTime)) {
-        bestTelemetry = telemetry;
-        bestMtimeMs = metaStat.mtimeMs;
-        break;
-      }
-      const distance = Math.abs(sessionTime - invokeTime);
-      if (distance < bestDistance) {
-        bestTelemetry = telemetry;
-        bestDistance = distance;
-        bestMtimeMs = metaStat.mtimeMs;
-      }
-    }
-  } catch (_) {
-    // Directory unreadable — fall through to null telemetry
-  }
+  const bestSession = closestVibeSession(scanDir, invokeTime, invokeWindow);
+  const bestTelemetry = bestSession?.telemetry ?? null;
+  const bestMtimeMs = bestSession?.mtimeMs ?? null;
 
   if (!bestTelemetry) {
     return { ...result, sessionId: result.sessionId || null, telemetry: null } as ProcessedResult;
@@ -268,8 +239,7 @@ function processResult(result: any, basePath?: string, invocationStart?: string)
   return { ...result, sessionId: result.sessionId || null } as ProcessedResult;
 }
 
-function extractVibeSessionId(stdout: string) {
-  void stdout;
+function extractVibeSessionId(_stdout: string) {
   // Vibe does not currently emit a resume hint in programmatic mode.
   // Return null to indicate no resume capability via stdout parsing.
   return null;
@@ -279,9 +249,7 @@ function resolveVibeCommand() {
   return 'vibe';
 }
 
-function buildVibeInvocation({ prompt, worktree, env, resume, sessionId, model = null }: VibeInvocationOptions) {
-  void resume;
-  void sessionId;
+function buildVibeInvocation({ prompt, worktree, env, resume: _resume, sessionId: _sessionId, model = null }: VibeInvocationOptions) {
   const rootDir = resolveVibeWorktree(worktree);
   // --trust only bypasses the working-directory trust prompt; tool-call
   // approval is a separate gate that vibe --help documents as controlled by

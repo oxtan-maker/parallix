@@ -117,21 +117,7 @@ export function materializeBacklogMission(
   }
 
   if (base.status === 'done') {
-    const integrated = openMission(base, 'done');
-    if (snapshot.missionWorktree.kind !== 'absent') {
-      if (snapshot.closedAt !== null) {
-        return { kind: 'unavailable', reason: 'closure-before-worktree-removal' };
-      }
-      return { kind: 'found', mission: integrated, contentSource: 'integration-base' };
-    }
-    if (!snapshot.closedAt?.trim()) {
-      return { kind: 'unavailable', reason: 'closure-time-missing' };
-    }
-    return {
-      kind: 'found',
-      mission: closeMission(integrated, snapshot.closedAt),
-      contentSource: 'integration-base',
-    };
+    return materializeDoneMission(base, snapshot);
   }
 
   if (snapshot.closedAt !== null) {
@@ -153,5 +139,24 @@ export function materializeBacklogMission(
     contentSource: snapshot.missionWorktree.kind === 'found'
       ? 'mission-worktree'
       : 'integration-base',
+  };
+}
+
+/** Materialize a mission whose integration base is already done, honouring the closed-at/worktree-removal contract. */
+function materializeDoneMission(base: BacklogMissionRecord, snapshot: BacklogMissionSnapshot): BacklogMissionMaterializationResult {
+  const integrated = openMission(base, 'done');
+  if (snapshot.missionWorktree.kind !== 'absent') {
+    if (snapshot.closedAt !== null) {
+      return { kind: 'unavailable', reason: 'closure-before-worktree-removal' };
+    }
+    return { kind: 'found', mission: integrated, contentSource: 'integration-base' };
+  }
+  if (!snapshot.closedAt?.trim()) {
+    return { kind: 'unavailable', reason: 'closure-time-missing' };
+  }
+  return {
+    kind: 'found',
+    mission: closeMission(integrated, snapshot.closedAt),
+    contentSource: 'integration-base',
   };
 }

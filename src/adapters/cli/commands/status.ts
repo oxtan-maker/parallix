@@ -201,6 +201,75 @@ async function buildProjectionBuilder(rootDir: string): Promise<BoardProjectionB
 }
 
 /** @param {string[]} args @param {{exit?: Function, log?: Function, inferSlugFn?: Function, getCurrentBranchFn?: Function, findTaskFileFn?: Function, getTaskStatusFn?: Function, findMissionDirFn?: Function, findCheckpointsFn?: Function, getFirstLineFn?: Function, getPrStatusFn?: Function, findStaleMissionWorktreesFn?: Function, readAgentConfigOrExitFn?: Function, eligibleAgentsForStepFn?: Function, allWorkflowAgentNamesFn?: Function, workflowLauncherStatusFn?: Function, getLastThreeCommitsFn?: Function, getUncommittedCountFn?: Function, detectRebaseStateFn?: Function, buildProjectionFn?: Function}} opts */
+/**
+ * architecture invariant: Mission domain state comes from the projection only.
+ * There is no fallback to legacy file reads (task frontmatter, CP-N.md) — the
+ * SQLite store is the sole authority, so an unavailable projection is reported
+ * as unknown rather than reconstructed.
+ */
+function logMissionCardStatus(projection: any, slug: string, log: Function): void {
+  const card = projection?.stages.flatMap((stage: any) => stage.cards)
+    .find((candidate: any) => candidate.id.toLowerCase() === slug.toLowerCase());
+  if (!card) {
+    log(`Backlog status: unknown (projection unavailable)`);
+    log('Last checkpoint: none');
+    return;
+  }
+  log(`Backlog status: ${card.status}`);
+  log(card.checkpoint ? `Last checkpoint: ${card.checkpoint} - ${card.checkpointDescription || ''}` : 'Last checkpoint: none');
+  // The review loop's own state, so an agent never has to open a
+  // mission-directory file to learn which round or phase it is in.
+  if (!card.reviewPhase) { log('Review: not started'); return; }
+  log(`Review: round ${card.reviewRound ?? 1}, phase ${card.reviewPhase}, disposition ${card.reviewDisposition ?? 'none'}`);
+  // Prior rounds, so a reviewer that did not review the last round — after a
+  // usage block reroutes the launch to another agent family — still sees the
+  // settled verdicts and the implementer's pushbacks.
+  for (const round of card.reviewHistory) {
+    log(`  Round ${round.number} [${round.reviewer} -> ${round.implementer}]: ${round.disposition ?? 'pending'}`);
+    if (round.comment) { log(`    comment: ${round.comment}`); }
+    for (const summary of round.findingSummaries) { log(`    finding: ${summary}`); }
+    for (const fix of round.fixes) { log(`    fixed: ${fix}`); }
+    for (const pushback of round.pushbacks) { log(`    pushback: ${pushback}`); }
+  }
+}
+
+function logPullRequestStatus(pr: any, log: Function): void {
+  if (pr.exists) { log(`Forgejo PR: #${pr.number} (${pr.state})`); return; }
+  log(pr.raw ? `Forgejo PR: unavailable (${pr.raw})` : 'Forgejo PR: none');
+}
+
+function logStaleWorktrees(staleWorktrees: any[], detectRebaseStateFn: Function, log: Function): void {
+  for (const entry of staleWorktrees as Array<{ path: string; branch: string | null; taskStatus: string | null; cleanupCommand?: string }>) {
+    log(`Stale worktree: ${fmt.path(entry.path)} (task: ${entry.taskStatus})`);
+    try {
+      const rebaseState = detectRebaseStateFn(entry.path);
+      if (rebaseState.inProgress) {
+        logRebaseDiagnostics(log, `Rebase in progress on ${formatWorktreeBranch(entry.branch || '')}`, rebaseState);
+      }
+    } catch (_) {
+      // Ignore stale worktrees that disappear during inspection.
+    }
+    log(`  Cleanup: ${fmt.command(entry.cleanupCommand || '')}`);
+  }
+}
+
+function logAgentMatrix(deps: any, log: Function): void {
+  const { readAgentConfigOrExitFn, eligibleAgentsForStepFn, allWorkflowAgentNamesFn, workflowLauncherStatusFn } = deps;
+  const config = readAgentConfigOrExitFn();
+  const draftEligible = eligibleAgentsForStepFn('draft', { config });
+  const activeEligible = eligibleAgentsForStepFn('active', { config });
+  const allAgents = [...new Set([...allWorkflowAgentNamesFn(), ...draftEligible, ...activeEligible])].sort(compareCodeUnits);
+  log('Agent launcher matrix:');
+  for (const agent of allAgents) {
+    const support = workflowLauncherStatusFn(agent).supported ? 'supported' : 'blocked';
+    const draftMark = draftEligible.includes(agent) ? 'draft' : '-';
+    const activeMark = activeEligible.includes(agent) ? 'active' : '-';
+    log(`  ${fmt.agent(agent)}: ${support} | eligible: ${draftMark},${activeMark}`);
+  }
+  const envOverride = process.env.WORKFLOW_AGENT;
+  if (envOverride) { log(`  (WORKFLOW_AGENT override: ${fmt.agent(envOverride)})`); }
+}
+
 async function status(args: string[], opts: {exit?: Function, log?: Function, inferSlugFn?: Function, getCurrentBranchFn?: Function, findTaskFileFn?: Function, getTaskStatusFn?: Function, findMissionDirFn?: Function, findCheckpointsFn?: Function, getFirstLineFn?: Function, getPrStatusFn?: Function, findStaleMissionWorktreesFn?: Function, readAgentConfigOrExitFn?: Function, eligibleAgentsForStepFn?: Function, allWorkflowAgentNamesFn?: Function, workflowLauncherStatusFn?: Function, getLastThreeCommitsFn?: Function, getUncommittedCountFn?: Function, detectRebaseStateFn?: Function, buildProjectionFn?: Function}) {
   const exit = opts.exit || process.exit;
   const log = opts.log || fmt.log.plain;
@@ -253,96 +322,15 @@ async function status(args: string[], opts: {exit?: Function, log?: Function, in
       await buildProjectionFn(process.cwd()).then(
         (builder: BoardProjectionBuilder) => builder.build(),
       ).catch(() => null);
-
-    // architecture invariant: do not fall back to legacy file reads (task frontmatter,
-    // CP-N.md) for Mission domain state — the SQLite store is the sole
-    // authority. When the projection is unavailable, report that directly.
-    function logSqliteFallback() {
-      log(`Backlog status: unknown (projection unavailable)`);
-      log('Last checkpoint: none');
-    }
-
-    if (projection) {
-      const card = projection.stages.flatMap((s) => s.cards).find(
-        (c) => c.id.toLowerCase() === slug.toLowerCase(),
-      );
-      if (card) {
-        log(`Backlog status: ${card.status}`);
-        if (card.checkpoint) {
-          log(`Last checkpoint: ${card.checkpoint} - ${card.checkpointDescription || ''}`);
-        } else {
-          log('Last checkpoint: none');
-        }
-        // The review loop's own state, so an agent never has to open a
-        // mission-directory file to learn which round or phase it is in.
-        if (card.reviewPhase) {
-          const disposition = card.reviewDisposition ?? 'none';
-          log(`Review: round ${card.reviewRound ?? 1}, phase ${card.reviewPhase}, disposition ${disposition}`);
-          // Prior rounds, so a reviewer that did not review the last round —
-          // after a usage block reroutes the launch to another agent family —
-          // still sees the settled verdicts and the implementer's pushbacks.
-          for (const round of card.reviewHistory) {
-            log(`  Round ${round.number} [${round.reviewer} -> ${round.implementer}]: ${round.disposition ?? 'pending'}`);
-            if (round.comment) { log(`    comment: ${round.comment}`); }
-            for (const summary of round.findingSummaries) { log(`    finding: ${summary}`); }
-            for (const fix of round.fixes) { log(`    fixed: ${fix}`); }
-            for (const pushback of round.pushbacks) { log(`    pushback: ${pushback}`); }
-          }
-        } else {
-          log('Review: not started');
-        }
-      } else {
-        logSqliteFallback();
-      }
-    } else {
-      logSqliteFallback();
-    }
-
-    // Forgejo PR state
-    const pr = getPrStatusFn(missionBranchName(slug));
-    if (pr.exists) {
-      log(`Forgejo PR: #${pr.number} (${pr.state})`);
-    } else if (pr.raw) {
-      log(`Forgejo PR: unavailable (${pr.raw})`);
-    } else {
-      log('Forgejo PR: none');
-    }
+    logMissionCardStatus(projection, slug, log);
+    logPullRequestStatus(getPrStatusFn(missionBranchName(slug)), log);
   }
 
   if (!explicitSlug) {
-    const staleWorktrees = findStaleMissionWorktreesFn();
-    staleWorktrees.forEach((entry: { path: string; branch: string | null; taskStatus: string | null; cleanupCommand?: string }) => {
-      log(`Stale worktree: ${fmt.path(entry.path)} (task: ${entry.taskStatus})`);
-      try {
-        const rebaseState = detectRebaseStateFn(entry.path);
-        if (rebaseState.inProgress) {
-          logRebaseDiagnostics(log, `Rebase in progress on ${formatWorktreeBranch(entry.branch || '')}`, rebaseState);
-        }
-      } catch (_) {
-        // Ignore stale worktrees that disappear during inspection.
-      }
-      log(`  Cleanup: ${fmt.command(entry.cleanupCommand || '')}`);
-    });
+    logStaleWorktrees(findStaleMissionWorktreesFn(), detectRebaseStateFn, log);
   }
 
-  // Agent eligibility matrix
-  const config = readAgentConfigOrExitFn();
-  const draftEligible = eligibleAgentsForStepFn('draft', { config });
-  const activeEligible = eligibleAgentsForStepFn('active', { config });
-  const baseAgents = allWorkflowAgentNamesFn();
-  const allAgents = [...new Set([...baseAgents, ...draftEligible, ...activeEligible])].sort(compareCodeUnits);
-  const envOverride = process.env.WORKFLOW_AGENT;
-  log('Agent launcher matrix:');
-  for (const agent of allAgents) {
-    const launcher = workflowLauncherStatusFn(agent);
-    const support = launcher.supported ? 'supported' : 'blocked';
-    const draftMark = draftEligible.includes(agent) ? 'draft' : '-';
-    const activeMark = activeEligible.includes(agent) ? 'active' : '-';
-    log(`  ${fmt.agent(agent)}: ${support} | eligible: ${draftMark},${activeMark}`);
-  }
-  if (envOverride) {
-    log(`  (WORKFLOW_AGENT override: ${fmt.agent(envOverride)})`);
-  }
+  logAgentMatrix({ readAgentConfigOrExitFn, eligibleAgentsForStepFn, allWorkflowAgentNamesFn, workflowLauncherStatusFn }, log);
 
   const lastThree = getLastThreeCommitsFn();
   log('Last 3 commits:');

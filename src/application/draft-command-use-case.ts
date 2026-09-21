@@ -106,9 +106,7 @@ export class DraftCommandUseCase {
 async function bestEffort(publish: () => Promise<void>): Promise<void> {
   try {
     await publish();
-  } catch (error) {
-    void error;
-  }
+  } catch {}
 }
 
 // Re-export context type so callers can reference it

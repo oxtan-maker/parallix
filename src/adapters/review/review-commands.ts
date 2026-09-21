@@ -18,7 +18,7 @@ import type { MissionStore } from '../../application/domain-ports.js';
 import type { MissionLifecycleService } from '../../application/mission-lifecycle-service.js';
 import { parseReviewFindings, recordRequestedChanges, recordApproval, approvalLegalDiagnostic } from './review-round.js';
 import { missionId } from '../../domain/mission.js';
-import { currentReviewRound, reviewFindingId, reviewStatus, resumeReview, type Review, type ReviewStatus } from '../../domain/review.js';
+import { currentReviewRound, reviewFindingId, reviewStatus, resumeReview, type Review, type ReviewStatus, type ReviewItemDisposition, type ReviewFindingId } from '../../domain/review.js';
 import { createEvent, ALL_EVENT_TYPES, isValidEventType, shouldMirrorToProvider, readAllEvents } from './review-events.js';
 import { formatVerificationCommand, runVerificationGate } from '../verification/verification.js';
 import { bootstrapReviewSurface } from './setup-review.js';
@@ -385,6 +385,110 @@ export async function continueReviewClearsIntervention(
 // Command: verifyReview
 // ============================================================================
 
+/** Failures block the review; warnings only annotate it. */
+type ReviewVerdict = { failures: string[]; warnings: string[] };
+
+/** Check the Backlog task exists and sits in a status a review can start from. */
+function verifyBacklogTask(taskResolution: any, slug: string, verdict: ReviewVerdict, deps: {
+  getTaskStatusFn: typeof getTaskStatus; toVirtualFn: typeof toVirtual; log: (_msg: string) => void;
+}): { taskStatus: string | null; virtualStatus: string | null } {
+  const { getTaskStatusFn, toVirtualFn, log } = deps;
+  if (!taskResolution.ok) {
+    verdict.failures.push('task');
+    reportTaskResolution(taskResolution, slug, log);
+    return { taskStatus: null, virtualStatus: null };
+  }
+  const taskStatus = getTaskStatusFn(taskResolution.taskFile!);
+  const virtualStatus = toVirtualFn(taskStatus || '');
+  const name = path.basename(taskResolution.taskFile!);
+  if (taskStatus === 'review' || virtualStatus === 'approved') {
+    log(fmt.status('PASS', `Backlog task: ${name} (${taskStatus})`));
+  } else if (taskStatus === 'done') {
+    verdict.failures.push('task-status');
+    log(fmt.status('FAIL', 'Backlog task: task is already done/integrated'));
+  } else if (taskStatus === 'active' || virtualStatus === 'active') {
+    verdict.warnings.push('task-still-active');
+    log(fmt.status('WARN', `Backlog task: ${name} is still ${taskStatus}`));
+  } else {
+    verdict.failures.push('task-status');
+    log(fmt.status('FAIL', `Backlog task: unexpected status ${taskStatus}`));
+  }
+  return { taskStatus, virtualStatus };
+}
+
+/**
+ * Check the review pull request. A missing PR is only a warning while the task
+ * is still being implemented; in any post-implementation or unknown state it is
+ * a hard failure (fail closed).
+ */
+function verifyReviewPullRequest(pr: unknown, context: {
+  providerEnabled: boolean; taskResolution: any; taskStatus: string | null;
+  virtualStatus: string | null; branch: string; slug: string;
+}, verdict: ReviewVerdict, log: (_msg: string) => void): void {
+  const { providerEnabled, taskResolution, taskStatus, virtualStatus, branch, slug } = context;
+  if (!providerEnabled) {
+    log(fmt.status('INFO', 'Forgejo PR: skipped (review provider is not forgejo).'));
+    return;
+  }
+  const prAny = pr as Record<string, unknown>;
+  if (prAny.exists && prAny.state === 'open' && !prAny.merged) {
+    log(fmt.status('PASS', `Review PR: PR #${prAny.number} is open`));
+    return;
+  }
+  if (prAny.exists) {
+    verdict.failures.push('pr-state');
+    log(fmt.status('FAIL', `Review PR: expected an open PR, got state=${prAny.state} merged=${prAny.merged}`));
+    return;
+  }
+  if (taskResolution.ok && (taskStatus === 'active' || virtualStatus === 'active')) {
+    verdict.warnings.push('no-pr-yet');
+    log(fmt.status('WARN', `Review PR: no PR found for ${branch}. Task is still ${taskStatus} — complete implementation and submit first: px review ${slug} --push`));
+    return;
+  }
+  verdict.failures.push('pr-missing');
+  log(fmt.status('FAIL', `Review PR: ${prAny.raw || 'no PR found'}`));
+}
+
+/** The mission directory and the branch it must be reviewed from. */
+function verifyMissionLocation(missionDir: string | null, slug: string, current: string, branch: string, verdict: ReviewVerdict, log: (_msg: string) => void): void {
+  if (missionDir) {
+    log(fmt.status('PASS', `Mission doc: ${fmt.path(path.join(missionDir, 'MISSION.md'))}`));
+  } else {
+    verdict.failures.push('mission-dir');
+    log(fmt.status('FAIL', `Mission directory not found for slug: ${fmt.slug(slug)}`));
+  }
+  if (current === branch) {
+    log(fmt.status('PASS', `Branch: ${fmt.branch(current)}`));
+    return;
+  }
+  verdict.failures.push('branch');
+  log(fmt.status('FAIL', `Branch: current branch is ${fmt.branch(current)}, expected ${fmt.branch(branch)}`));
+}
+
+function runReviewerGate(area: string, rootDir: string, skipped: boolean, verdict: ReviewVerdict, deps: { runVerificationGateFn: Function; runFn: unknown; log: (_msg: string) => void }): void {
+  const { runVerificationGateFn, runFn, log } = deps;
+  if (skipped) {
+    log(fmt.status('WARN', `Verification gate skipped (--no-gate) for area ${area}`));
+    return;
+  }
+  log(`Running reviewer gate: ${fmt.command(formatVerificationCommand(area, rootDir))}`);
+  if (runVerificationGateFn(area, { rootDir, stdio: 'inherit', runFn }).status === 0) {
+    log(fmt.status('PASS', 'Reviewer gate passed.'));
+    return;
+  }
+  verdict.failures.push('gate');
+  log(fmt.status('FAIL', 'Reviewer gate failed.'));
+}
+
+function logAcceptanceChecklist(acceptanceCriteria: string[], log: (_msg: string) => void): void {
+  log(fmt.status('INFO', 'Acceptance evidence checklist:'));
+  if (acceptanceCriteria.length === 0) {
+    log('  - No Acceptance Criteria found on the Backlog task.');
+    return;
+  }
+  acceptanceCriteria.forEach((line: string) => log(`  ${line}`));
+}
+
 export async function verifyReview(
   slug: string,
   skipGate: boolean | string,
@@ -445,104 +549,19 @@ export async function verifyReview(
   const failures: string[] = [];
   const warnings: string[] = [];
 
+  const verdict = { failures, warnings };
   log(`Reviewer verification for mission: ${fmt.slug(slug)}`);
-  if (worktree) {
-    log(`Found dedicated worktree: ${fmt.path(worktree)}`);
-  } else {
-    log('Using current directory as mission root.');
-  }
+  log(worktree ? `Found dedicated worktree: ${fmt.path(worktree)}` : 'Using current directory as mission root.');
+  verifyMissionLocation(missionDir, slug, current, branch, verdict, log);
 
-  if (!missionDir) {
-    failures.push('mission-dir');
-    log(fmt.status('FAIL', `Mission directory not found for slug: ${fmt.slug(slug)}`));
-  } else {
-    log(fmt.status('PASS', `Mission doc: ${fmt.path(path.join(missionDir, 'MISSION.md'))}`));
-  }
-
-  if (current !== branch) {
-    failures.push('branch');
-    log(fmt.status('FAIL', `Branch: current branch is ${fmt.branch(current)}, expected ${fmt.branch(branch)}`));
-  } else {
-    log(fmt.status('PASS', `Branch: ${fmt.branch(current)}`));
-  }
-
-  let taskStatus: string | null = null;
-  let virtualStatus: string | null = null;
-  if (!taskResolution.ok) {
-    failures.push('task');
-    reportTaskResolution(taskResolution, slug, log);
-  } else {
-    taskStatus = getTaskStatusFn(taskResolution.taskFile!);
-    virtualStatus = toVirtualFn(taskStatus || '');
-    if (taskStatus === 'review' || virtualStatus === 'approved') {
-      log(fmt.status('PASS', `Backlog task: ${path.basename(taskResolution.taskFile!)} (${taskStatus})`));
-    } else if (taskStatus === 'done') {
-      failures.push('task-status');
-      log(fmt.status('FAIL', 'Backlog task: task is already done/integrated'));
-    } else if (taskStatus === 'active' || virtualStatus === 'active') {
-      warnings.push('task-still-active');
-      log(fmt.status('WARN', `Backlog task: ${path.basename(taskResolution.taskFile!)} is still ${taskStatus}`));
-    } else {
-      failures.push('task-status');
-      log(fmt.status('FAIL', `Backlog task: unexpected status ${taskStatus}`));
-    }
-  }
-
-  const prAny = pr as Record<string, unknown>;
-  if (providerEnabled) {
-    if (prAny.exists && prAny.state === 'open' && !prAny.merged) {
-      log(fmt.status('PASS', `Review PR: PR #${prAny.number} is open`));
-    } else if (prAny.exists) {
-      failures.push('pr-state');
-      log(fmt.status('FAIL', `Review PR: expected an open PR, got state=${prAny.state} merged=${prAny.merged}`));
-    } else {
-      // No PR exists - check if task is in implementation phase
-      if (taskResolution.ok) {
-        const isImplementationPhase = taskStatus === 'active' || virtualStatus === 'active';
-        if (isImplementationPhase) {
-          // Task is still in implementation - emit warning instead of failure
-          warnings.push('no-pr-yet');
-          log(fmt.status('WARN', `Review PR: no PR found for ${branch}. Task is still ${taskStatus} — complete implementation and submit first: px review ${slug} --push`));
-        } else {
-          // Task is in post-implementation state or ambiguous - hard fail
-          failures.push('pr-missing');
-          log(fmt.status('FAIL', `Review PR: ${prAny.raw || 'no PR found'}`));
-        }
-      } else {
-        // Cannot determine task status - safe default to hard fail
-        failures.push('pr-missing');
-        log(fmt.status('FAIL', `Review PR: ${prAny.raw || 'no PR found'}`));
-      }
-    }
-  } else {
-    log(fmt.status('INFO', 'Forgejo PR: skipped (review provider is not forgejo).'));
-  }
+  const { taskStatus, virtualStatus } = verifyBacklogTask(taskResolution, slug, verdict, { getTaskStatusFn, toVirtualFn, log });
+  verifyReviewPullRequest(pr, { providerEnabled, taskResolution, taskStatus, virtualStatus, branch, slug }, verdict, log);
 
   if (missionDir) {
-    const area = findMissionAreaFn(missionDir);
-    const skipGateFlag = Boolean(skipGate || options.skipGate);
-    if (skipGateFlag) {
-      log(fmt.status('WARN', `Verification gate skipped (--no-gate) for area ${area}`));
-    } else {
-      log(`Running reviewer gate: ${fmt.command(formatVerificationCommand(area, rootDir))}`);
-      const verifyResult = runVerificationGateFn(area, { rootDir, stdio: 'inherit', runFn });
-      if (verifyResult.status !== 0) {
-        failures.push('gate');
-        log(fmt.status('FAIL', 'Reviewer gate failed.'));
-      } else {
-        log(fmt.status('PASS', 'Reviewer gate passed.'));
-      }
-    }
+    runReviewerGate(findMissionAreaFn(missionDir), rootDir, Boolean(skipGate || options.skipGate), verdict, { runVerificationGateFn, runFn, log });
   }
-
   if (taskResolution.ok) {
-    const acceptanceCriteria = getAcceptanceCriteriaFn(taskResolution.taskFile!);
-    log(fmt.status('INFO', 'Acceptance evidence checklist:'));
-    if (acceptanceCriteria.length === 0) {
-      log('  - No Acceptance Criteria found on the Backlog task.');
-    } else {
-      acceptanceCriteria.forEach((line: string) => log(`  ${line}`));
-    }
+    logAcceptanceChecklist(getAcceptanceCriteriaFn(taskResolution.taskFile!), log);
   }
 
   log(fmt.status('INFO', 'Autonomous review runtime matrix:'));
@@ -553,17 +572,14 @@ export async function verifyReview(
   if (persisted) {
     log(`Persisted reviewer state: reviewer=${fmt.agent(persisted.reviewer ?? '')} implementer=${fmt.agent(persisted.implementer ?? '')} round=${persisted.round} startedAt=${persisted.startedAt}`);
   }
-
   if (warnings.length > 0) {
     log(fmt.status('WARN', `Review verification warnings: ${warnings.join(', ')}`));
   }
-
   if (failures.length > 0) {
     error('\n' + fmt.status('INFO', 'Review verification failed. Resolve the blockers above before starting review.'));
     exit(1);
     return;
   }
-
   log('\n' + fmt.status('PASS', 'Review verification complete.'));
 }
 
@@ -782,41 +798,12 @@ export async function pushRound(
   const branch = missionBranchName(slug, rootDir);
   const providerEnabled = isReviewProviderEnabledFn(rootDir);
 
-  const { identityUser: reviewStateUser } = await resolveReviewIdentity(slug, rootDir, {
-    readReviewStateFn,
-  });
-  let reviewIdentity = reviewStateUser;
-
-  if (!reviewIdentity) {
-    // 1. Check backlog task assignee
-    const taskResolution = resolveTaskFileFn(slug, rootDir);
-    if (taskResolution.ok) {
-      reviewIdentity = getTaskImplementerFn(taskResolution.taskFile!);
-    }
-  }
-
-  // 2. Mode-specific final fallback: named identity (provider-backed) vs "autonomous" (provider=none) (SC 6)
-  if (!reviewIdentity) {
-    if (providerEnabled) {
-      error(fmt.status('FAIL', `No review identity resolved for --push on ${slug}. Start the review with px review ${slug} --start, or set the task implementer.`));
-      exit(1);
-      return;
-    } else {
-      reviewIdentity = 'autonomous';
-      log(fmt.status('WARN', `No reviewer/implementer identity resolved for --push; defaulting to "autonomous"`));
-    }
-  }
-
-  if (!reviewIdentity || (providerEnabled && reviewIdentity === 'autonomous')) {
-    error(fmt.status('FAIL', 'No review identity resolved for push.'));
-    exit(1);
-    return;
-  }
-
-  reviewIdentity = resolveReviewUserFn(reviewIdentity);
-  const token = readTokenFn(reviewIdentity!, { rootDir: worktree || undefined });
+  const reviewIdentity = await resolvePushReviewIdentity(slug, rootDir, providerEnabled, readReviewStateFn, resolveTaskFileFn, getTaskImplementerFn, log, error, exit);
+  if (!reviewIdentity) { return; }
+  const resolvedIdentity = resolveReviewUserFn(reviewIdentity) || reviewIdentity;
+  const token = readTokenFn(resolvedIdentity, { rootDir: worktree || undefined });
   if (!token) {
-    error(fmt.status('FAIL', `No Forgejo token found for user "${reviewIdentity}".`));
+    error(fmt.status('FAIL', `No Forgejo token found for user "${resolvedIdentity}".`));
     exit(1);
     return;
   }
@@ -824,12 +811,12 @@ export async function pushRound(
   // Transition to review before pushing so the state change is included in the PR update
   await transitionTaskFn(slug, 'review', { rootDir, log });
 
-  log(fmt.status('INFO', `Pushing ${branch} to the review provider as ${reviewIdentity}...${force ? ' (force-with-lease)' : ''}`));
+  log(fmt.status('INFO', `Pushing ${branch} to the review provider as ${resolvedIdentity}...${force ? ' (force-with-lease)' : ''}`));
   if (worktree) {
     log(fmt.status('INFO', `Found dedicated worktree: ${worktree}`));
   }
 
-  let result = createPrFn(branch, reviewIdentity!, token, { rootDir, forceWithLease: true }) as Record<string, unknown>;
+  let result = createPrFn(branch, resolvedIdentity, token, { rootDir, forceWithLease: true }) as Record<string, unknown>;
   if (!result.ok && /Repository not found/i.test((result.error as string) || '')) {
     const reviewAdapter = resolveReviewAdapterFn(rootDir) as Record<string, any>;
     const ownerLogin = (reviewAdapter.repo && reviewAdapter.repo.split('/')[0]) || 'human';
@@ -845,7 +832,7 @@ export async function pushRound(
       error,
     });
     if ((bootstrap as Record<string, unknown>).ok) {
-      result = createPrFn(branch, reviewIdentity!, token, { rootDir, forceWithLease: true }) as Record<string, unknown>;
+      result = createPrFn(branch, resolvedIdentity, token, { rootDir, forceWithLease: true }) as Record<string, unknown>;
     }
   }
 
@@ -856,6 +843,21 @@ export async function pushRound(
   }
 
   log(fmt.status('PASS', `Branch pushed and PR updated for ${branch}.`));
+}
+
+async function resolvePushReviewIdentity(slug: string, rootDir: string, providerEnabled: boolean, readState: typeof readReviewState, resolveTask: typeof resolveTaskFile, getImplementer: typeof getTaskImplementer, log: Function, error: Function, exit: Function): Promise<string | null> {
+  const { identityUser } = await resolveReviewIdentity(slug, rootDir, { readReviewStateFn: readState });
+  const task = identityUser ? null : resolveTask(slug, rootDir);
+  const taskImplementer = task?.ok ? getImplementer(task.taskFile!) : null;
+  const fallback = providerEnabled ? null : 'autonomous';
+  const identity = identityUser || taskImplementer || fallback;
+  if (!identity || (providerEnabled && identity === 'autonomous')) {
+    error(fmt.status('FAIL', providerEnabled ? `No review identity resolved for --push on ${slug}. Start the review with px review ${slug} --start, or set the task implementer.` : 'No review identity resolved for push.'));
+    exit(1);
+    return null;
+  }
+  if (!identityUser && !taskImplementer && fallback) { log(fmt.status('WARN', 'No reviewer/implementer identity resolved for --push; defaulting to "autonomous"')); }
+  return identity;
 }
 
 // ============================================================================
@@ -988,9 +990,9 @@ export async function consumeArtifacts(
   const resolveTaskFileFn = options.resolveTaskFileFn || resolveTaskFile;
   const getTaskAssigneeFn = options.getTaskAssigneeFn || getTaskAssignee;
   const getTaskStatusFn = options.getTaskStatusFn || getTaskStatus;
+  const writeReviewStateFn = options.writeReviewStateFn || writeReviewState;
   const resolveArtifactDirFn = options.resolveArtifactDirFn || resolveArtifactDir;
   const readReviewStateFn = options.readReviewStateFn || readReviewState;
-  const writeReviewStateFn = options.writeReviewStateFn || writeReviewState;
 
   const worktree = resolveWorktreeFn(slug) || process.cwd();
   const rootDir = worktree;
@@ -1001,29 +1003,7 @@ export async function consumeArtifacts(
   log(fmt.status('INFO', `Consuming reviewer artifacts for ${slug} from ${artifactDir}`));
 
   // Determine reviewer identity from review-state first, then task assignee.
-  const { identityUser: stateReviewer } = await resolveReviewIdentity(slug, worktree, {
-    readReviewStateFn,
-  });
-  let reviewer = stateReviewer;
-  if (!reviewer && taskResolution.ok) {
-    reviewer = getTaskAssigneeFn(taskResolution.taskFile!);
-  }
-  if (!reviewer) {
-    reviewer = 'autonomous';
-    log(fmt.status('WARN', `No reviewer identity resolved; defaulting to "${reviewer}"`));
-  }
-
-  // Read current state so consumeHumanNotes can merge dedup metadata in-place.
-  // Create initial state BEFORE consuming so dedup keys are recorded even on
-  // the very first invocation (N1: dedup durable from first run).
-  let currentState = await readReviewStateFn(slug, worktree);
-  if (!currentState) {
-    currentState = new ReviewState(slug, {
-      reviewer,
-      round: 1,
-      phase: 'reviewing',
-    });
-  }
+  const { reviewer, currentState } = await artifactReviewContext(slug, worktree, taskResolution, readReviewStateFn, getTaskAssigneeFn, log);
 
   // Consume artifacts - this will create reviewer_findings and reviewer_outcome events
   const result = await consumeReviewerArtifactsFn(slug, reviewer, {
@@ -1080,45 +1060,247 @@ export async function consumeArtifacts(
   return { ok: true, consumed: true, reviewState: result.reviewState };
 }
 
+async function artifactReviewContext(slug: string, worktree: string, taskResolution: any, readState: typeof readReviewState, getAssignee: typeof getTaskAssignee, log: (_message: string) => void) {
+  const { identityUser } = await resolveReviewIdentity(slug, worktree, { readReviewStateFn: readState });
+  const assignedReviewer = taskResolution.ok ? getAssignee(taskResolution.taskFile!) : null;
+  const reviewer = identityUser || assignedReviewer || 'autonomous';
+  if (!identityUser && !assignedReviewer) { log(fmt.status('WARN', `No reviewer identity resolved; defaulting to "${reviewer}"`)); }
+  const currentState = await readState(slug, worktree) || new ReviewState(slug, { reviewer, round: 1, phase: 'reviewing' });
+  return { reviewer, currentState };
+}
+
 // ============================================================================
 // Command: submitReviewRound
 // ============================================================================
+
+type SubmitReviewOptions = {
+  log?: (_msg: string) => void;
+  error?: (_msg: string) => void;
+  exit?: (_code: number) => never;
+  transitionTaskFn?: typeof transitionTask;
+  readReviewStateFn?: typeof readReviewState;
+  writeReviewStateFn?: typeof writeReviewState;
+  isReviewProviderEnabledFn?: typeof isProviderEnabled;
+  isForgejoReviewEnabledFn?: typeof isProviderEnabled;
+  resolveReviewUserFn?: typeof resolveReviewUser;
+  resolveForgejoUserFn?: typeof resolveReviewUser;
+  resolveTaskFileFn?: typeof resolveTaskFile;
+  getTaskStatusFn?: typeof getTaskStatus;
+  worktree?: string;
+  readTokenFn?: typeof readToken;
+  postReviewFn?: typeof postReview;
+  getPrAuthorFn?: unknown;
+  createEventFn?: typeof createEvent;
+  buildMetadataFooterFn?: typeof buildMetadataFooter;
+  missionStore?: MissionStore | null;
+  lifecycleService?: MissionLifecycleService | null;
+  recordRequestedChangesFn?: typeof recordRequestedChanges;
+  recordApprovalFn?: typeof recordApproval;
+};
+
+/** Repository-configured pre-review gates block an approve (TASK-2457). Returns true when the outcome must stop. */
+async function runPreReviewApproveGates(slug: string, worktree: string, log: (_msg: string) => void, error: (_msg: string) => void): Promise<boolean> {
+  const preReviewResult = await runPhaseGates('review', {
+    slug,
+    checkoutPath: worktree,
+    log: (/** @type {string} */ msg: string) => log(msg),
+    error: (/** @type {string} */ msg: string) => error(msg),
+  });
+  if (!preReviewResult.ok && !preReviewResult.skipped) {
+    error(fmt.status('FAIL', `Pre-review gate "${preReviewResult.failedGate?.key}" failed for ${slug}: ${preReviewResult.error}`));
+    error(fmt.status('FAIL', `Mission stays in review. Resolve the gate and retry px review ${slug} --submit-review approve.`));
+    return true;
+  }
+  return false;
+}
+
+/** Record the request-changes decision on the Review aggregate. Returns true when the outcome must stop. */
+async function recordRequestChangesDecision(slug: string, outcome: string, message: string, options: SubmitReviewOptions, log: (_msg: string) => void, error: (_msg: string) => void): Promise<boolean> {
+  if (!options.missionStore) {
+    log(fmt.status('WARN', `No Mission authority bound for ${slug}; the request-changes decision was not recorded on the Review aggregate.`));
+    return false;
+  }
+  const recordRequestedChangesFn = options.recordRequestedChangesFn || recordRequestedChanges;
+  const parsed = parseReviewFindings(message);
+  const decision = await recordRequestedChangesFn(slug, {
+    // A hand-written message need not use finding headings; the message
+    // itself is then the single finding.
+    findings: parsed.length > 0 ? parsed : [{
+      id: reviewFindingId('F1'),
+      summary: (message.split('\n').find((line) => line.trim()) || `Changes requested for ${slug}`).trim(),
+      location: null,
+    }],
+    comment: message || null,
+    decidedAt: new Date().toISOString(),
+  }, { missionStore: options.missionStore, lifecycleService: options.lifecycleService });
+  if (decision.outcome === 'failed') {
+    error(fmt.status('FAIL', `Review outcome "${outcome}" could not be recorded for ${slug}: ${decision.diagnostic}`));
+    return true;
+  }
+  if (decision.outcome === 'unchanged') {
+    log(fmt.status('INFO', `Review outcome "${outcome}" for ${slug} already recorded (${decision.reason}).`));
+  }
+  return false;
+}
+
+/** Record the authoritative approve on the Review aggregate. Returns true when the outcome must stop. */
+async function recordApprovalDecision(slug: string, outcome: string, message: string, options: SubmitReviewOptions, log: (_msg: string) => void, error: (_msg: string) => void): Promise<boolean> {
+  if (!options.missionStore) {
+    log(fmt.status('WARN', `No Mission authority bound for ${slug}; the approve decision was not recorded on the Review aggregate.`));
+    return false;
+  }
+  const recordApprovalFn = options.recordApprovalFn || recordApproval;
+  const decision = await recordApprovalFn(slug, {
+    comment: message || null,
+    decidedAt: new Date().toISOString(),
+    source: { kind: 'local' },
+  }, { missionStore: options.missionStore, lifecycleService: options.lifecycleService });
+  if (decision.outcome === 'failed') {
+    error(fmt.status('FAIL', `Review outcome "${outcome}" could not be recorded for ${slug}: ${decision.diagnostic}`));
+    return true;
+  }
+  if (decision.outcome === 'unchanged') {
+    log(fmt.status('INFO', `Review outcome "${outcome}" for ${slug} already recorded (${decision.reason}).`));
+  }
+  return false;
+}
+
+/**
+ * provider=none finalization: build or mutate the review state, persist it,
+ * transition the Backlog task, and announce the local recording.
+ * Returns true when the outcome must stop.
+ */
+async function applyLocalReviewState(slug: string, outcome: string, message: string, worktree: string, options: SubmitReviewOptions, log: (_msg: string) => void, error: (_msg: string) => void): Promise<boolean> {
+  const readReviewStateFn = options.readReviewStateFn || readReviewState;
+  const writeReviewStateFn = options.writeReviewStateFn || writeReviewState;
+  const transitionTaskFn = options.transitionTaskFn || transitionTask;
+  const currentState = await Promise.resolve(readReviewStateFn(slug, worktree));
+
+  let stateToWrite: ReviewState;
+  if (currentState) {
+    stateToWrite = currentState;
+    if (outcome === 'approve') {
+      stateToWrite.disposition = 'APPROVED';
+      try { stateToWrite.transitionTo('approved'); } catch (_) { /* ignore */ }
+    } else if (outcome === 'request-changes') {
+      stateToWrite.disposition = 'REQUEST_CHANGES';
+      try { stateToWrite.transitionTo('fixing'); } catch (_) { /* ignore */ }
+    }
+  } else {
+    // No existing state, create minimal state for tracking
+    const phaseForOutcome = outcome === 'approve' ? 'approved' : 'fixing';
+    stateToWrite = new ReviewState(slug, {
+      disposition: outcome === 'approve' ? 'APPROVED' : outcome === 'request-changes' ? 'REQUEST_CHANGES' : undefined,
+      reviewer: 'autonomous',
+      implementer: process.env.WORKFLOW_AGENT || 'autonomous',
+      round: 1,
+      phase: phaseForOutcome,
+    });
+  }
+  try {
+    await persistReviewStateOrThrow(writeReviewStateFn, slug, stateToWrite, worktree, options.missionStore);
+  } catch (err) {
+    // The state write or the review → integration boundary failed. The
+    // Mission may still be in review, so the Backlog task must not move —
+    // in particular it must not be promoted to approved. px integrate is
+    // the repair path.
+    error(fmt.status('FAIL', `Review outcome "${outcome}" could not be finalized for ${slug}: ${err instanceof Error ? err.message : String(err)}`));
+    error(fmt.status('FAIL', `Recovery: px integrate ${slug}`));
+    return true;
+  }
+
+  // Also transition the backlog task for provider=none so integrate preflight passes
+  const backlogStatusMap: Record<string, string> = {
+    'approve': 'approved',
+    'request-changes': 'review',
+    'comment': 'review'
+  };
+  const backlogStatus = backlogStatusMap[outcome];
+  if (backlogStatus) {
+    void Promise.resolve(transitionTaskFn(slug, backlogStatus, { rootDir: worktree, log })).catch(() => {
+      log(fmt.status('WARN', `Could not transition backlog task ${slug} to ${backlogStatus}.`));
+    });
+  }
+
+  log(fmt.status('PASS', `Review outcome "${outcome}" recorded locally for ${slug}.`));
+  return false;
+}
+
+/** Check that an approve can legally reach `approved` before the external POST. Returns true when the outcome must stop. */
+async function checkProviderApproveLegality(slug: string, options: SubmitReviewOptions, log: (_msg: string) => void, error: (_msg: string) => void): Promise<boolean> {
+  if (!options.missionStore) {
+    log(fmt.status('WARN', `No Mission authority bound for ${slug}; the approve decision was not recorded on the Review aggregate.`));
+    return false;
+  }
+  const legalDiagnostic = await approvalLegalDiagnostic(slug, { missionStore: options.missionStore });
+  if (legalDiagnostic) {
+    error(fmt.status('FAIL', `Review outcome "approve" could not be recorded for ${slug}: ${legalDiagnostic}`));
+    return true;
+  }
+  return false;
+}
+
+/**
+ * provider-backed finalization after a successful POST: mutate and persist the
+ * review state, then transition the Backlog task.
+ * Returns true when the outcome must stop.
+ */
+async function finalizeProviderReviewState(slug: string, outcome: string, worktree: string, options: SubmitReviewOptions, log: (_msg: string) => void, error: (_msg: string) => void): Promise<boolean> {
+  const readReviewStateFn = options.readReviewStateFn || readReviewState;
+  const writeReviewStateFn = options.writeReviewStateFn || writeReviewState;
+  const transitionTaskFn = options.transitionTaskFn || transitionTask;
+  const resolveTaskFileFn = options.resolveTaskFileFn || resolveTaskFile;
+  const getTaskStatusFn = options.getTaskStatusFn || getTaskStatus;
+
+  const currentState = await Promise.resolve(readReviewStateFn(slug, worktree));
+  if (currentState) {
+    if (outcome === 'approve') {
+      currentState.disposition = 'APPROVED';
+      try { currentState.transitionTo('approved'); } catch (_) { /* ignore */ }
+    } else if (outcome === 'request-changes') {
+      currentState.disposition = 'REQUEST_CHANGES';
+      try { currentState.transitionTo('fixing'); } catch (_) { /* ignore */ }
+    }
+    try {
+      await persistReviewStateOrThrow(writeReviewStateFn, slug, currentState, worktree, options.missionStore);
+    } catch (err) {
+      // The state write or the review → integration boundary failed. The
+      // Mission may still be in review, so the Backlog task must not be
+      // promoted to approved; px integrate is the repair path.
+      error(fmt.status('FAIL', `Review outcome "${outcome}" could not be finalized for ${slug}: ${err instanceof Error ? err.message : String(err)}`));
+      error(fmt.status('FAIL', `Recovery: px integrate ${slug}`));
+      return true;
+    }
+  }
+
+  const taskResolution = resolveTaskFileFn(slug, worktree);
+  const currentStatus = taskResolution.ok ? getTaskStatusFn(taskResolution.taskFile!) : null;
+  let backlogStatus: string | null = null;
+  if (outcome === 'approve') {
+    backlogStatus = currentStatus === 'active' ? 'review' : 'approved';
+  } else if (outcome === 'request-changes' || outcome === 'comment') {
+    backlogStatus = 'review';
+  }
+
+  if (backlogStatus) {
+    void Promise.resolve(transitionTaskFn(slug, backlogStatus, { rootDir: worktree, log })).catch(() => {
+      log(fmt.status('WARN', `Could not transition backlog task ${slug} to ${backlogStatus}.`));
+    });
+  }
+  return false;
+}
 
 export async function submitReviewRound(
   slug: string,
   outcome: string,
   message: string,
-  options: {
-    log?: (_msg: string) => void;
-    error?: (_msg: string) => void;
-    exit?: (_code: number) => never;
-    transitionTaskFn?: typeof transitionTask;
-    readReviewStateFn?: typeof readReviewState;
-    writeReviewStateFn?: typeof writeReviewState;
-    isReviewProviderEnabledFn?: typeof isProviderEnabled;
-    isForgejoReviewEnabledFn?: typeof isProviderEnabled;
-    resolveReviewUserFn?: typeof resolveReviewUser;
-    resolveForgejoUserFn?: typeof resolveReviewUser;
-    resolveTaskFileFn?: typeof resolveTaskFile;
-    getTaskStatusFn?: typeof getTaskStatus;
-    worktree?: string;
-    readTokenFn?: typeof readToken;
-    postReviewFn?: typeof postReview;
-    getPrAuthorFn?: unknown;
-    createEventFn?: typeof createEvent;
-    buildMetadataFooterFn?: typeof buildMetadataFooter;
-    missionStore?: MissionStore | null;
-    lifecycleService?: MissionLifecycleService | null;
-    recordRequestedChangesFn?: typeof recordRequestedChanges;
-    recordApprovalFn?: typeof recordApproval;
-  } = {}
+  options: SubmitReviewOptions = {}
 ): Promise<void> {
   const log = options.log || fmt.log.plain;
   const error = options.error || fmt.log.plainError;
   const exit = options.exit || process.exit;
   const transitionTaskFn = options.transitionTaskFn || transitionTask;
   const readReviewStateFn = options.readReviewStateFn || readReviewState;
-  const writeReviewStateFn = options.writeReviewStateFn || writeReviewState;
   const isReviewProviderEnabledFn = options.isReviewProviderEnabledFn || options.isForgejoReviewEnabledFn || isProviderEnabled;
   const resolveReviewUserFn = options.resolveReviewUserFn || options.resolveForgejoUserFn || resolveReviewUser;
   const resolveTaskFileFn = options.resolveTaskFileFn || resolveTaskFile;
@@ -1137,51 +1319,18 @@ export async function submitReviewRound(
   // review -> integration transition; a configured gate that exits non-zero
   // blocks it and leaves the mission in review. Runs from the review checkout
   // with the mission slug, checkout path, and exact phase in its environment.
-  if (outcome === 'approve') {
-    const preReviewResult = await runPhaseGates('review', {
-      slug,
-      checkoutPath: worktree,
-      log: (/** @type {string} */ msg: string) => log(msg),
-      error: (/** @type {string} */ msg: string) => error(msg),
-    });
-    if (!preReviewResult.ok && !preReviewResult.skipped) {
-      error(fmt.status('FAIL', `Pre-review gate "${preReviewResult.failedGate?.key}" failed for ${slug}: ${preReviewResult.error}`));
-      error(fmt.status('FAIL', `Mission stays in review. Resolve the gate and retry px review ${slug} --submit-review approve.`));
-      exit(1);
-      return;
-    }
+  if (outcome === 'approve' && await runPreReviewApproveGates(slug, worktree, log, error)) {
+    exit(1);
+    return;
   }
 
   // A verdict is a domain decision, not only a provider comment. Recording it
   // is what returns the mission to the implementer and leaves the round able to
   // be resolved and advanced; the flat review-state write below cannot express
   // it, because it carries no findings.
-  if (outcome === 'request-changes') {
-    if (!options.missionStore) {
-      log(fmt.status('WARN', `No Mission authority bound for ${slug}; the request-changes decision was not recorded on the Review aggregate.`));
-    } else {
-      const recordRequestedChangesFn = options.recordRequestedChangesFn || recordRequestedChanges;
-      const parsed = parseReviewFindings(message);
-      const decision = await recordRequestedChangesFn(slug, {
-        // A hand-written message need not use finding headings; the message
-        // itself is then the single finding.
-        findings: parsed.length > 0 ? parsed : [{
-          id: reviewFindingId('F1'),
-          summary: (message.split('\n').find((line) => line.trim()) || `Changes requested for ${slug}`).trim(),
-          location: null,
-        }],
-        comment: message || null,
-        decidedAt: new Date().toISOString(),
-      }, { missionStore: options.missionStore, lifecycleService: options.lifecycleService });
-      if (decision.outcome === 'failed') {
-        error(fmt.status('FAIL', `Review outcome "${outcome}" could not be recorded for ${slug}: ${decision.diagnostic}`));
-        exit(1);
-        return;
-      }
-      if (decision.outcome === 'unchanged') {
-        log(fmt.status('INFO', `Review outcome "${outcome}" for ${slug} already recorded (${decision.reason}).`));
-      }
-    }
+  if (outcome === 'request-changes' && await recordRequestChangesDecision(slug, outcome, message, options, log, error)) {
+    exit(1);
+    return;
   }
 
   // An approve is the integration gate itself. It is recorded on the aggregate
@@ -1199,77 +1348,14 @@ export async function submitReviewRound(
     // No external POST can fail here, so record the authoritative approve
     // immediately — before the flat review-state write — mirroring the
     // provider-backed post-success recording.
-    if (outcome === 'approve') {
-      if (!options.missionStore) {
-        log(fmt.status('WARN', `No Mission authority bound for ${slug}; the approve decision was not recorded on the Review aggregate.`));
-      } else {
-        const recordApprovalFn = options.recordApprovalFn || recordApproval;
-        const decision = await recordApprovalFn(slug, {
-          comment: message || null,
-          decidedAt: new Date().toISOString(),
-          source: { kind: 'local' },
-        }, { missionStore: options.missionStore, lifecycleService: options.lifecycleService });
-        if (decision.outcome === 'failed') {
-          error(fmt.status('FAIL', `Review outcome "${outcome}" could not be recorded for ${slug}: ${decision.diagnostic}`));
-          exit(1);
-          return;
-        }
-        if (decision.outcome === 'unchanged') {
-          log(fmt.status('INFO', `Review outcome "${outcome}" for ${slug} already recorded (${decision.reason}).`));
-        }
-      }
-    }
-
-    const currentState = await Promise.resolve(readReviewStateFn(slug, worktree));
-
-    let stateToWrite: ReviewState;
-    if (currentState) {
-      stateToWrite = currentState;
-      if (outcome === 'approve') {
-        stateToWrite.disposition = 'APPROVED';
-        try { stateToWrite.transitionTo('approved'); } catch (_) { /* ignore */ }
-      } else if (outcome === 'request-changes') {
-        stateToWrite.disposition = 'REQUEST_CHANGES';
-        try { stateToWrite.transitionTo('fixing'); } catch (_) { /* ignore */ }
-      }
-    } else {
-      // No existing state, create minimal state for tracking
-      const phaseForOutcome = outcome === 'approve' ? 'approved' : 'fixing';
-      stateToWrite = new ReviewState(slug, {
-        disposition: outcome === 'approve' ? 'APPROVED' : outcome === 'request-changes' ? 'REQUEST_CHANGES' : undefined,
-        reviewer: 'autonomous',
-        implementer: process.env.WORKFLOW_AGENT || 'autonomous',
-        round: 1,
-        phase: phaseForOutcome,
-      });
-    }
-    try {
-      await persistReviewStateOrThrow(writeReviewStateFn, slug, stateToWrite, worktree, options.missionStore);
-    } catch (err) {
-      // The state write or the review → integration boundary failed. The
-      // Mission may still be in review, so the Backlog task must not move —
-      // in particular it must not be promoted to approved. px integrate is
-      // the repair path.
-      error(fmt.status('FAIL', `Review outcome "${outcome}" could not be finalized for ${slug}: ${err instanceof Error ? err.message : String(err)}`));
-      error(fmt.status('FAIL', `Recovery: px integrate ${slug}`));
+    if (outcome === 'approve' && await recordApprovalDecision(slug, outcome, message, options, log, error)) {
       exit(1);
       return;
     }
-
-    // Also transition the backlog task for provider=none so integrate preflight passes
-    const backlogStatusMap: Record<string, string> = {
-      'approve': 'approved',
-      'request-changes': 'review',
-      'comment': 'review'
-    };
-    const backlogStatus = backlogStatusMap[outcome];
-    if (backlogStatus) {
-      void Promise.resolve(transitionTaskFn(slug, backlogStatus, { rootDir: worktree, log })).catch(() => {
-        log(fmt.status('WARN', `Could not transition backlog task ${slug} to ${backlogStatus}.`));
-      });
+    if (await applyLocalReviewState(slug, outcome, message, worktree, options, log, error)) {
+      exit(1);
+      return;
     }
-
-    log(fmt.status('PASS', `Review outcome "${outcome}" recorded locally for ${slug}.`));
     return;
   }
 
@@ -1291,17 +1377,9 @@ export async function submitReviewRound(
   // never leave an approval on the aggregate that `px integrate` would merge
   // with no approval on the pull request. The recording itself happens below,
   // after the `!result.ok` guard.
-  if (outcome === 'approve') {
-    if (!options.missionStore) {
-      log(fmt.status('WARN', `No Mission authority bound for ${slug}; the approve decision was not recorded on the Review aggregate.`));
-    } else {
-      const legalDiagnostic = await approvalLegalDiagnostic(slug, { missionStore: options.missionStore });
-      if (legalDiagnostic) {
-        error(fmt.status('FAIL', `Review outcome "approve" could not be recorded for ${slug}: ${legalDiagnostic}`));
-        exit(1);
-        return;
-      }
-    }
+  if (outcome === 'approve' && await checkProviderApproveLegality(slug, options, log, error)) {
+    exit(1);
+    return;
   }
   const result = await postWorkflowReview(slug, outcome, message, {
     worktree,
@@ -1346,59 +1424,14 @@ export async function submitReviewRound(
   // went out. Without a bound Mission authority there is nothing to record on
   // the aggregate (the flat review-state write below still mirrors the
   // disposition), matching the no-store WARN taken before the POST.
-  if (outcome === 'approve' && options.missionStore) {
-    const recordApprovalFn = options.recordApprovalFn || recordApproval;
-    const decision = await recordApprovalFn(slug, {
-      comment: message || null,
-      decidedAt: new Date().toISOString(),
-      source: { kind: 'local' },
-    }, { missionStore: options.missionStore, lifecycleService: options.lifecycleService });
-    if (decision.outcome === 'failed') {
-      error(fmt.status('FAIL', `Review outcome "${outcome}" could not be recorded for ${slug}: ${decision.diagnostic}`));
-      exit(1);
-      return;
-    }
-    if (decision.outcome === 'unchanged') {
-      log(fmt.status('INFO', `Review outcome "${outcome}" for ${slug} already recorded (${decision.reason}).`));
-    }
+  if (outcome === 'approve' && options.missionStore && await recordApprovalDecision(slug, outcome, message, options, log, error)) {
+    exit(1);
+    return;
   }
 
-  const currentState = await Promise.resolve(readReviewStateFn(slug, worktree));
-  if (currentState) {
-    if (outcome === 'approve') {
-      currentState.disposition = 'APPROVED';
-      try { currentState.transitionTo('approved'); } catch (_) { /* ignore */ }
-    } else if (outcome === 'request-changes') {
-      currentState.disposition = 'REQUEST_CHANGES';
-      try { currentState.transitionTo('fixing'); } catch (_) { /* ignore */ }
-    }
-    try {
-      await persistReviewStateOrThrow(writeReviewStateFn, slug, currentState, worktree, options.missionStore);
-    } catch (err) {
-      // The state write or the review → integration boundary failed. The
-      // Mission may still be in review, so the Backlog task must not be
-      // promoted to approved; px integrate is the repair path.
-      error(fmt.status('FAIL', `Review outcome "${outcome}" could not be finalized for ${slug}: ${err instanceof Error ? err.message : String(err)}`));
-      error(fmt.status('FAIL', `Recovery: px integrate ${slug}`));
-      exit(1);
-      return;
-    }
-  }
-
-  const taskResolution = resolveTaskFileFn(slug, worktree);
-  const currentStatus = taskResolution.ok ? getTaskStatusFn(taskResolution.taskFile!) : null;
-  let backlogStatus: string | null = null;
-
-  if (outcome === 'approve') {
-    backlogStatus = currentStatus === 'active' ? 'review' : 'approved';
-  } else if (outcome === 'request-changes' || outcome === 'comment') {
-    backlogStatus = 'review';
-  }
-
-  if (backlogStatus) {
-    void Promise.resolve(transitionTaskFn(slug, backlogStatus, { rootDir: worktree, log })).catch(() => {
-      log(fmt.status('WARN', `Could not transition backlog task ${slug} to ${backlogStatus}.`));
-    });
+  if (await finalizeProviderReviewState(slug, outcome, worktree, options, log, error)) {
+    exit(1);
+    return;
   }
 }
 
@@ -1460,6 +1493,77 @@ export async function closeMissionPr(
 // Event CLI Handlers
 // ============================================================================
 
+/** One `<key>: [ids]` frontmatter list and the disposition kind it records. */
+const EVENT_ITEM_LISTS: ReadonlyArray<readonly [RegExp, ReviewItemDisposition['kind']]> = [
+  [/fixed_items:\s*(\[[^\]]*\])/i, 'fixed'],
+  [/pushed_back_items:\s*(\[[^\]]*\])/i, 'pushed_back'],
+  [/parked_items:\s*(\[[^\]]*\])/i, 'parked'],
+];
+
+/**
+ * Lift the structured item dispositions and blocked reason out of an event body
+ * onto `params`. A malformed list is skipped, never fatal: the event body is
+ * agent-authored, and a half-parsed list must not lose the event itself.
+ */
+function applyStructuredEventFields(content: string, params: Record<string, unknown>): void {
+  if (!content.includes('fixed_items:') && !content.includes('fixedItems:')) { return; }
+  const itemDispositions: ReviewItemDisposition[] = [];
+  for (const [pattern, kind] of EVENT_ITEM_LISTS) {
+    try {
+      const match = content.match(pattern);
+      if (!match) { continue; }
+      for (const id of JSON.parse(match[1]) as string[]) {
+        itemDispositions.push({ kind, findingId: id as ReviewFindingId });
+      }
+    } catch (_) { /* a malformed list is skipped, not fatal */ }
+  }
+  const blocked = content.match(/blocked_reason:\s*"([^"]*)"/i);
+  if (blocked) { params.blockedReason = blocked[1]; }
+  if (itemDispositions.length > 0) { params.itemDispositions = itemDispositions; }
+}
+
+/**
+ * Parse and validate the `--create-event` flags. Returns null once a diagnostic
+ * has been reported and the exit code set, so the caller only has to return.
+ */
+function parseCreateEventArgs(
+  args: string[],
+  log: (_msg: string) => void,
+  error: (_msg: string) => void,
+  exit: (_code: number) => void,
+): { eventType: string; actor: string | null; content: string; params: Record<string, unknown> } | null {
+  const fail = (message: string) => { error(fmt.status('FAIL', message)); exit(1); return null; };
+  const eventType = flagValue(args, '--type');
+  if (!eventType) { return fail('--create-event requires --type <classification>'); }
+  if (!isValidEventType(eventType)) {
+    return fail(`Invalid event type "${eventType}". Valid: ${(ALL_EVENT_TYPES as unknown as string[]).join(', ')}`);
+  }
+
+  const inputFile = flagValue(args, '--input-file');
+  let content = '';
+  if (inputFile) {
+    try {
+      content = fs.readFileSync(inputFile, 'utf8');
+      log(fmt.status('INFO', `Read event content from: ${inputFile}`));
+    } catch (err) {
+      return fail(`Failed to read input file: ${(err as Error).message}`);
+    }
+  }
+
+  const roundRaw = flagValue(args, '--round');
+  const round = roundRaw ? parseInt(roundRaw, 10) : undefined;
+  if (roundRaw && Number.isNaN(round!)) { return fail(`--round must be a number, got "${roundRaw}"`); }
+
+  const actor = flagValue(args, '--actor');
+  const params: Record<string, unknown> = { content };
+  if (round !== undefined) { params.round = round; }
+  for (const [flag, key] of [['--phase', 'phase'], ['--actor', 'actor'], ['--disposition', 'disposition'], ['--verdict', 'verdict']] as const) {
+    const value = flagValue(args, flag);
+    if (value) { params[key] = value; }
+  }
+  return { eventType, actor, content, params };
+}
+
 export async function createEventHandler(
   slug: string,
   args: string[],
@@ -1476,55 +1580,11 @@ export async function createEventHandler(
   const exit = options.exit || process.exit;
   const resolveWorktreeFn = options.resolveWorktreeFn || resolveWorktree;
 
-  const eventType = flagValue(args, '--type');
-  const inputFile = flagValue(args, '--input-file');
-  const actor = flagValue(args, '--actor');
-  const roundRaw = flagValue(args, '--round');
-  const phase = flagValue(args, '--phase');
-  const disposition = flagValue(args, '--disposition');
-  const verdict = flagValue(args, '--verdict');
-
-  if (!eventType) {
-    error(fmt.status('FAIL', '--create-event requires --type <classification>'));
-    exit(1);
-    return;
-  }
-
-  // Validate event type first
-  if (!isValidEventType(eventType)) {
-    error(fmt.status('FAIL', `Invalid event type "${eventType}". Valid: ${(ALL_EVENT_TYPES as unknown as string[]).join(', ')}`));
-    exit(1);
-    return;
-  }
-
-  // Read content from input file or stdin
-  let content = '';
-  if (inputFile) {
-    try {
-      content = fs.readFileSync(inputFile, 'utf8');
-      log(fmt.status('INFO', `Read event content from: ${inputFile}`));
-    } catch (err) {
-      error(fmt.status('FAIL', `Failed to read input file: ${(err as Error).message}`));
-      exit(1);
-      return;
-    }
-  }
-
-  const round = roundRaw ? parseInt(roundRaw, 10) : undefined;
-  if (roundRaw && isNaN(round!)) {
-    error(fmt.status('FAIL', `--round must be a number, got "${roundRaw}"`));
-    exit(1);
-    return;
-  }
+  const parsed = parseCreateEventArgs(args, log, error, exit);
+  if (!parsed) { return; }
+  const { eventType, actor, content, params } = parsed;
 
   const worktree = resolveWorktreeFn(slug) || process.cwd();
-
-  const params: Record<string, unknown> = { content };
-  if (round !== undefined) { params.round = round; }
-  if (phase) { params.phase = phase; }
-  if (actor) { params.actor = actor; }
-  if (disposition) { params.disposition = disposition; }
-  if (verdict) { params.verdict = verdict; }
 
   const readReviewStateFn = options.readReviewStateFn || readReviewState;
   const { identityUser: stateReviewIdentity } = await resolveReviewIdentity(slug, worktree, {
@@ -1539,38 +1599,7 @@ export async function createEventHandler(
     return;
   }
 
-  // Extract fields from content if structured
-  const itemDispositions: import('../../domain/review.js').ReviewItemDisposition[] = [];
-  if (content.includes('fixed_items:') || content.includes('fixedItems:')) {
-    try {
-      const frontmatterMatch = content.match(/fixed_items:\s*(\[[^\]]*\])/i);
-      if (frontmatterMatch) {
-        const ids = JSON.parse(frontmatterMatch[1]) as string[];
-        itemDispositions.push(...ids.map((id) => ({ kind: 'fixed' as const, findingId: id as import('../../domain/review.js').ReviewFindingId })));
-      }
-    } catch (_) { /* ignore */ }
-    try {
-      const frontmatterMatch = content.match(/pushed_back_items:\s*(\[[^\]]*\])/i);
-      if (frontmatterMatch) {
-        const ids = JSON.parse(frontmatterMatch[1]) as string[];
-        itemDispositions.push(...ids.map((id) => ({ kind: 'pushed_back' as const, findingId: id as import('../../domain/review.js').ReviewFindingId })));
-      }
-    } catch (_) { /* ignore */ }
-    try {
-      const frontmatterMatch = content.match(/parked_items:\s*(\[[^\]]*\])/i);
-      if (frontmatterMatch) {
-        const ids = JSON.parse(frontmatterMatch[1]) as string[];
-        itemDispositions.push(...ids.map((id) => ({ kind: 'parked' as const, findingId: id as import('../../domain/review.js').ReviewFindingId })));
-      }
-    } catch (_) { /* ignore */ }
-    try {
-      const frontmatterMatch = content.match(/blocked_reason:\s*"([^"]*)"/i);
-      if (frontmatterMatch) { params.blockedReason = frontmatterMatch[1]; }
-    } catch (_) { /* ignore */ }
-  }
-  if (itemDispositions.length > 0) {
-    (params as Record<string, unknown>).itemDispositions = itemDispositions;
-  }
+  applyStructuredEventFields(content, params);
 
   // Create the event
   const createEventFn = (options as any).createEventFn || createEvent;

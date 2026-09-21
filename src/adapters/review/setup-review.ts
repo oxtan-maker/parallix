@@ -63,13 +63,96 @@ export function buildNonInteractiveAnswers(rootDir: string, options: any = {}) {
   return answers;
 }
 
+/**
+ * One agent's Forgejo user + token. A failure is collected as a warning rather
+ * than aborting: a single agent without a token must not stop the operator from
+ * finishing the review surface for every other agent.
+ */
+async function bootstrapAgentToken(setup: any, baseUrl: string, agent: any, forgejoHome: string, options: any): Promise<{ warning?: any; createdToken?: any }> {
+  const { log, promptFn, requestFn, maxPasswordAttempts } = options;
+  if (agent.password) {
+    const user = ensureForgejoUser(baseUrl, agent.user, setup.ownerLogin, setup.ownerPassword, agent.password, requestFn);
+    if (!user.ok) { return { warning: { user: agent.user, error: user.error, response: user.response } }; }
+    if (user.created) { log(fmt.status('PASS', `Created Forgejo user ${agent.user}.`)); }
+  }
+  const token = await createTokenWithRetries({ ...setup, baseUrl }, agent.user, agent.password, { allowBlank: true, log, promptFn, maxAttempts: maxPasswordAttempts, requestFn });
+  if (!token.ok) { return { warning: { user: agent.user, error: (token as any).error, response: (token as any).response } }; }
+  if ((token as any).skipped) { return {}; }
+  return { createdToken: { user: agent.user, path: writeToken(agent.user, (token as any).token, forgejoHome) } };
+}
+
+/** Mint the owner token, then one token per configured agent, prompting as needed. */
+async function bootstrapInteractiveTokens(setup: any, baseUrl: string, forgejoHome: string, options: any) {
+  const { log, promptFn, requestFn, maxPasswordAttempts } = options;
+  const owner = await createTokenWithRetries({ ...setup, baseUrl }, setup.ownerLogin, setup.ownerPassword, { allowBlank: false, log, promptFn, maxAttempts: maxPasswordAttempts, requestFn });
+  if (!owner.ok) { return owner; }
+  const ownerToken = (owner as any).token as string;
+  const createdTokens: any[] = [{ user: setup.ownerLogin, path: writeToken(setup.ownerLogin, ownerToken, forgejoHome) }];
+  const warnings: any[] = [];
+  for (const agent of setup.agentPasswords) {
+    const result = await bootstrapAgentToken(setup, baseUrl, agent, forgejoHome, options);
+    if (result.warning) { warnings.push(result.warning); }
+    if (result.createdToken) { createdTokens.push(result.createdToken); }
+  }
+  return { ok: true, ownerToken, createdTokens, warnings };
+}
+
+/** Read the owner token a non-interactive run bootstraps every agent token from. */
+function readBootstrapOwnerToken(setup: any, forgejoHome: string) {
+  const file = path.join(forgejoHome, 'tokens', setup.ownerLogin);
+  const ownerToken = fs.existsSync(file) ? fs.readFileSync(file, 'utf8').trim() : null;
+  return ownerToken
+    ? { ok: true as const, ownerToken }
+    : { ok: false as const, error: `No owner token found for ${setup.ownerLogin} at ${file}. A token file for an existing user (typically human) is required to bootstrap new agent tokens.` };
+}
+
+/** Report what the bootstrap created, granted, wrote and skipped. */
+function logBootstrapOutcome(setup: any, log: Function, facts: { repoCreated: boolean | undefined; grantedCollaborators: string[]; createdTokens: any[]; warnings: any[]; remoteName: string; remoteUrl: string }): void {
+  if (facts.grantedCollaborators.length) { log(fmt.status('PASS', `Granted write access on ${setup.repo} to ${facts.grantedCollaborators.join(', ')}`)); }
+  log(fmt.status('PASS', `Forgejo repo ${setup.repo} ${facts.repoCreated ? 'created' : 'already exists'}.`));
+  for (const token of facts.createdTokens) { log(fmt.status('PASS', `Wrote Forgejo token for ${token.user} to ${token.path}`)); }
+  for (const warning of facts.warnings) {
+    log(fmt.status('WARN', `Skipping Forgejo token for ${warning.user}: ${warning.error}`));
+    if (warning.response) { log(fmt.status('INFO', `Forgejo response for ${warning.user}: ${JSON.stringify(warning.response)}`)); }
+  }
+  log(fmt.status('PASS', `Review remote "${facts.remoteName}" now points at ${facts.remoteUrl}`));
+}
+
 export async function bootstrapReviewSurface(rootDir: string, setup: any, options: any = {}) {
-  const { log = fmt.log.info, promptFn, requestFn = apiRequest, maxPasswordAttempts = 3, interactive = true, reviewRemoteUrlFn = reviewRemoteUrl } = options; const forgejoHome = resolveBootstrapForgejoHome(rootDir, options.forgejoHome); const repoInfo = parseRepoSlug(setup.repo); const baseUrl = normalizeBaseUrl(setup.baseUrl); if (!baseUrl || !repoInfo) {return { ok: false, error: 'workflow.config.json must define adapters.review.baseUrl and adapters.review.repo before setup can run.' };}
-  const collaborators = unique([...(setup.agentUsers || []), ...(setup.agentPasswords || []).map((agent: any) => agent.user)].filter(Boolean)); let ownerToken: string | null = null; const warnings: any[] = []; const createdTokens: any[] = [];
-  if (interactive) {const owner = await createTokenWithRetries({ ...setup, baseUrl }, setup.ownerLogin, setup.ownerPassword, { allowBlank: false, log, promptFn, maxAttempts: maxPasswordAttempts, requestFn }); if (!owner.ok) {return owner;} ownerToken = (owner as any).token; createdTokens.push({ user: setup.ownerLogin, path: writeToken(setup.ownerLogin, ownerToken as string, forgejoHome) }); for (const agent of setup.agentPasswords) {if (agent.password) {const user = ensureForgejoUser(baseUrl, agent.user, setup.ownerLogin, setup.ownerPassword, agent.password, requestFn); if (!user.ok) {warnings.push({ user: agent.user, error: user.error, response: user.response }); continue;} if (user.created) {log(fmt.status('PASS', `Created Forgejo user ${agent.user}.`));}} const token = await createTokenWithRetries({ ...setup, baseUrl }, agent.user, agent.password, { allowBlank: true, log, promptFn, maxAttempts: maxPasswordAttempts, requestFn }); if (!token.ok) {warnings.push({ user: agent.user, error: (token as any).error, response: (token as any).response });} else if (!(token as any).skipped) {createdTokens.push({ user: agent.user, path: writeToken(agent.user, (token as any).token, forgejoHome) });}}} else {const file = path.join(forgejoHome, 'tokens', setup.ownerLogin); ownerToken = fs.existsSync(file) ? fs.readFileSync(file, 'utf8').trim() : null; if (!ownerToken) {return { ok: false, error: `No owner token found for ${setup.ownerLogin} at ${file}. A token file for an existing user (typically human) is required to bootstrap new agent tokens.` };}}
-  const repo = ensureRepo(baseUrl, setup.repo, setup.ownerLogin, ownerToken as string, requestFn); if (!repo.ok) {return repo;} const collaboratorResult = ensureRepoCollaborators(baseUrl, setup.repo, ownerToken as string, collaborators, 'write', requestFn); if (!collaboratorResult.ok) {return collaboratorResult;}
-  if (!interactive) {const tokens = tokenCreateViaOwnerToken(baseUrl, setup.repo, ownerToken as string, setup.agentPasswords, repoInfo, { requestFn, writeTokenFn: writeToken, forgejoHome }); if (!tokens.ok) {return tokens;} createdTokens.push(...tokens.createdTokens); warnings.push(...tokens.warnings);}
-  const remoteUrl = reviewRemoteUrlFn(rootDir); const remoteName = resolveReviewAdapter(rootDir).remote || 'review'; const remote = remoteUrl ? ensureReviewRemote(rootDir, remoteName, remoteUrl) : { ok: true }; if (!remote.ok) {return remote;} if (collaboratorResult.created.length) {log(fmt.status('PASS', `Granted write access on ${setup.repo} to ${collaboratorResult.created.join(', ')}`));} log(fmt.status('PASS', `Forgejo repo ${setup.repo} ${repo.created ? 'created' : 'already exists'}.`)); for (const token of createdTokens) {log(fmt.status('PASS', `Wrote Forgejo token for ${token.user} to ${token.path}`));} for (const warning of warnings) {log(fmt.status('WARN', `Skipping Forgejo token for ${warning.user}: ${warning.error}`)); if (warning.response) {log(fmt.status('INFO', `Forgejo response for ${warning.user}: ${JSON.stringify(warning.response)}`));}} log(fmt.status('PASS', `Review remote "${remoteName}" now points at ${remoteUrl}`)); return interactive ? { ok: true, warnings } : { ok: true, warnings, createdTokens };
+  const { log = fmt.log.info, promptFn, requestFn = apiRequest, maxPasswordAttempts = 3, interactive = true, reviewRemoteUrlFn = reviewRemoteUrl } = options;
+  const forgejoHome = resolveBootstrapForgejoHome(rootDir, options.forgejoHome);
+  const repoInfo = parseRepoSlug(setup.repo);
+  const baseUrl = normalizeBaseUrl(setup.baseUrl);
+  if (!baseUrl || !repoInfo) { return { ok: false, error: 'workflow.config.json must define adapters.review.baseUrl and adapters.review.repo before setup can run.' }; }
+
+  const collaborators = unique([...(setup.agentUsers || []), ...(setup.agentPasswords || []).map((agent: any) => agent.user)].filter(Boolean));
+  const tokenOptions = { log, promptFn, requestFn, maxPasswordAttempts };
+  const bootstrapped: any = interactive
+    ? await bootstrapInteractiveTokens(setup, baseUrl, forgejoHome, tokenOptions)
+    : readBootstrapOwnerToken(setup, forgejoHome);
+  if (!bootstrapped.ok) { return bootstrapped; }
+  const ownerToken = bootstrapped.ownerToken as string;
+  const createdTokens: any[] = bootstrapped.createdTokens || [];
+  const warnings: any[] = bootstrapped.warnings || [];
+
+  const repo = ensureRepo(baseUrl, setup.repo, setup.ownerLogin, ownerToken, requestFn);
+  if (!repo.ok) { return repo; }
+  const collaboratorResult = ensureRepoCollaborators(baseUrl, setup.repo, ownerToken, collaborators, 'write', requestFn);
+  if (!collaboratorResult.ok) { return collaboratorResult; }
+
+  if (!interactive) {
+    const tokens = tokenCreateViaOwnerToken(baseUrl, setup.repo, ownerToken, setup.agentPasswords, repoInfo, { requestFn, writeTokenFn: writeToken, forgejoHome });
+    if (!tokens.ok) { return tokens; }
+    createdTokens.push(...tokens.createdTokens);
+    warnings.push(...tokens.warnings);
+  }
+
+  const remoteUrl = reviewRemoteUrlFn(rootDir);
+  const remoteName = resolveReviewAdapter(rootDir).remote || 'review';
+  const remote = remoteUrl ? ensureReviewRemote(rootDir, remoteName, remoteUrl) : { ok: true };
+  if (!remote.ok) { return remote; }
+  logBootstrapOutcome(setup, log, { repoCreated: repo.created, grantedCollaborators: collaboratorResult.created, createdTokens, warnings, remoteName, remoteUrl });
+  return interactive ? { ok: true, warnings } : { ok: true, warnings, createdTokens };
 }
 
 export async function setupReview(_args: any[], options: any = {}) { const rootDir = options.rootDir || process.cwd(); const log = options.log || fmt.log.plain; const error = options.error || fmt.log.plainError; const exit = options.exit || process.exit; const result = await bootstrapReviewSurface(rootDir, await collectSetupAnswers(rootDir, { promptFn: options.promptFn || promptLine, log }), { ...options, forgejoHome: resolveBootstrapForgejoHome(rootDir, options.forgejoHome) }); if (!result.ok) {error(fmt.status('FAIL', (result as any).error || '')); if ((result as any).response) {error(fmt.status('INFO', `Forgejo response: ${JSON.stringify((result as any).response)}`));} exit(1);} }

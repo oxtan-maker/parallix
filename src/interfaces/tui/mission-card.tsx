@@ -162,6 +162,24 @@ function blockingFindingsFromFlags(flags: readonly string[]): number | null {
  * from "we do not know".
  */
 export function MissionCard({ card, width = DEFAULT_CARD_WIDTH, selected = false }: MissionCardProps): React.ReactElement {
+  const { agent, title, checkpoint, nextAction, label, slugBudget, enabledCommands, prLine, isInFlight, headerRight, marker } = missionCardDetails(card, width, selected);
+  return (
+    <Box flexDirection="column" width={width} marginBottom={1}>
+      <Box flexDirection="row">
+        <Text bold={selected} color={selected ? 'cyan' : gutterColor(card)}>{marker}</Text>
+        <Box flexGrow={1}><Text wrap="truncate-end" bold color="blue">{truncate(card.id, slugBudget)}</Text></Box>
+        {label && <Text color="gray" wrap="truncate-end">{` [${truncate(label, Math.max(1, width - 1 - slugBudget - 4))}]`}</Text>}
+        {headerRight && <Text color={isInFlight ? agentColor(agent) : 'green'}>{truncate(headerRight, 12)}</Text>}
+      </Box>
+      <Text wrap="truncate-end" dimColor={title === UNAVAILABLE}>{truncate(title, width)}</Text>
+      {isInFlight && <><Box flexDirection="row"><Text wrap="truncate-end" color="gray">{truncate(checkpoint, Math.max(6, width - 14))}</Text><Text wrap="truncate-end" color={gateColor(card.gate)} bold={card.gate === 'failed'}>{' '}{gateText(card.gate)}</Text></Box><Text wrap="truncate-end" dimColor>{truncate(`next: ${nextAction}`, width)}</Text><Text wrap="truncate-end" color={card.reviewApproved ? 'green' : 'gray'}>{truncate(prLine, width)}</Text></>}
+      {enabledCommands.length > 0 && <Box flexDirection="row">{enabledCommands.map(cmd => <Box key={cmd.command} marginRight={1}><Text bold color="cyan">{actionLabel(card.lane as BoardLane, cmd.command, card.flags)}</Text></Box>)}</Box>}
+      {card.blockingReason !== null && card.blockingReason !== '' && <Text wrap="truncate-end" bold color="red">{truncate(`\u25b2 ${card.blockingReason}`, width)}</Text>}
+    </Box>
+  );
+}
+
+function missionCardDetails(card: MissionCardFacts, width: number, selected: boolean) {
   const inner = Math.max(1, width - 1);
   const agent = card.agent ?? UNAVAILABLE;
   const title = isPlaceholderTitle(card.title) ? UNAVAILABLE : card.title;
@@ -190,10 +208,10 @@ export function MissionCard({ card, width = DEFAULT_CARD_WIDTH, selected = false
     : (enabledCommands.length > 0 ? actionLabel(card.lane as BoardLane, enabledCommands[0].command, card.flags) : null);
 
   /* Build PR/review line per design: "PR #47 · R2 · 2 blocking" or "PR unavailable · review pending". */
-  const prLineParts = [
+  const prLine = [
     pullRequestId !== null ? `PR #${pullRequestId}` : `PR ${UNAVAILABLE}`,
     reviewDetail ? reviewDetail : `review ${review}`,
-  ];
+  ].join(' · ');
 
   // Every active/running card receives the blink, selected or not. The glyph
   // is the focused (▶) marker when selected, the plain (┃) marker otherwise;
@@ -205,62 +223,5 @@ export function MissionCard({ card, width = DEFAULT_CARD_WIDTH, selected = false
     ? `${ACTIVITY_BLINK}${glyph}${ACTIVITY_BLINK_STOP}`
     : glyph;
 
-  return (
-    <Box flexDirection="column" width={width} marginBottom={1}>
-      <Box flexDirection="row">
-        <Text bold={selected} color={selected ? 'cyan' : gutterColor(card)}>{marker}</Text>
-        <Box flexGrow={1}>
-          <Text wrap="truncate-end" bold color="blue">
-            {truncate(card.id, slugBudget)}
-          </Text>
-        </Box>
-        {label && (
-          <Text color="gray" wrap="truncate-end">{` [${truncate(label, Math.max(1, inner - slugBudget - 4))}]`}</Text>
-        )}
-        {headerRight && (
-          <Text color={isInFlight ? agentColor(agent as string) : 'green'}>
-            {truncate(headerRight, 12)}
-          </Text>
-        )}
-      </Box>
-
-      <Text wrap="truncate-end" dimColor={title === UNAVAILABLE}>{truncate(title, width)}</Text>
-
-      {isInFlight && (
-        <>
-          <Box flexDirection="row">
-            <Text wrap="truncate-end" color="gray">{truncate(checkpoint, Math.max(6, width - 14))}</Text>
-            <Text wrap="truncate-end" color={gateColor(card.gate)} bold={card.gate === 'failed'}>
-              {' '}{gateText(card.gate)}
-            </Text>
-          </Box>
-
-          <Text wrap="truncate-end" dimColor>{truncate(`next: ${nextAction}`, width)}</Text>
-
-          <Text wrap="truncate-end" color={card.reviewApproved ? 'green' : 'gray'}>
-            {truncate(prLineParts.join(' · '), width)}
-          </Text>
-        </>
-      )}
-
-      {enabledCommands.length > 0 && (
-        <Box flexDirection="row">
-          {enabledCommands.map((cmd) => {
-            const lbl = actionLabel(card.lane as BoardLane, cmd.command, card.flags);
-            return (
-              <Box key={cmd.command} marginRight={1}>
-                <Text bold color="cyan">{lbl}</Text>
-              </Box>
-            );
-          })}
-        </Box>
-      )}
-
-      {card.blockingReason !== null && card.blockingReason !== '' && (
-        <Text wrap="truncate-end" bold color="red">
-          {truncate(`\u25b2 ${card.blockingReason}`, width)}
-        </Text>
-      )}
-    </Box>
-  );
+  return { agent, title, checkpoint, nextAction, label, slugBudget, enabledCommands, prLine, isInFlight, headerRight, marker };
 }

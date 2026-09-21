@@ -225,40 +225,8 @@ export class ClaudeStreamNormalizer {
     // `system` records for `status`, `hook_started` and `hook_response`, which
     // carry no model and no new session id — rendering those repeated the same
     // header line several times per turn.
-    if (outer.type === 'system') {
-      if (outer.subtype === 'thinking_tokens') {
-        this.thinkingTokens = finiteOrNull(outer.estimated_tokens) ?? this.thinkingTokens;
-        // Progress only: it feeds the live indicator, it prints no line.
-        events.push({ kind: 'thinking_progress', tokens: this.thinkingTokens });
-        return;
-      }
-      if (outer.subtype === 'task_progress') {
-        this.consumeTaskProgress(outer, events);
-        return;
-      }
-      if (typeof outer.subtype === 'string' && outer.subtype !== 'init') {return;}
-      events.push({
-        kind: 'system',
-        model: typeof outer.model === 'string' ? outer.model : null,
-        sessionId: typeof outer.session_id === 'string' ? outer.session_id : null,
-        tools: Array.isArray(outer.tools) ? outer.tools.length : null,
-      });
-      return;
-    }
-
-    if (outer.type === 'result') {
-      const usage = asRecord(outer.usage) || {};
-      events.push({
-        kind: 'result',
-        isError: outer.is_error === true || (typeof outer.subtype === 'string' && outer.subtype !== 'success'),
-        durationMs: finiteOrNull(outer.duration_ms),
-        costUsd: finiteOrNull(outer.total_cost_usd),
-        inputTokens: finiteOrNull(usage.input_tokens),
-        outputTokens: finiteOrNull(usage.output_tokens),
-        numTurns: finiteOrNull(outer.num_turns),
-      });
-      return;
-    }
+    if (outer.type === 'system') {this.consumeSystemEvent(outer, events); return;}
+    if (outer.type === 'result') {this.consumeResultEvent(outer, events); return;}
 
     // Tool results only ever arrive on the top-level `user` envelope.
     if (outer.type === 'user') {
@@ -284,6 +252,28 @@ export class ClaudeStreamNormalizer {
     this.consumeSseEvent(inner, agent, events);
   }
 
+  private consumeSystemEvent(outer: Record<string, any>, events: NormalizedEvent[]): void {
+    if (outer.subtype === 'thinking_tokens') {
+      this.thinkingTokens = finiteOrNull(outer.estimated_tokens) ?? this.thinkingTokens;
+      events.push({ kind: 'thinking_progress', tokens: this.thinkingTokens });
+      return;
+    }
+    if (outer.subtype === 'task_progress') {this.consumeTaskProgress(outer, events); return;}
+    if (typeof outer.subtype === 'string' && outer.subtype !== 'init') {return;}
+    events.push({ kind: 'system', model: typeof outer.model === 'string' ? outer.model : null,
+      sessionId: typeof outer.session_id === 'string' ? outer.session_id : null,
+      tools: Array.isArray(outer.tools) ? outer.tools.length : null });
+  }
+
+  private consumeResultEvent(outer: Record<string, any>, events: NormalizedEvent[]): void {
+    const usage = asRecord(outer.usage) || {};
+    events.push({ kind: 'result',
+      isError: outer.is_error === true || (typeof outer.subtype === 'string' && outer.subtype !== 'success'),
+      durationMs: finiteOrNull(outer.duration_ms), costUsd: finiteOrNull(outer.total_cost_usd),
+      inputTokens: finiteOrNull(usage.input_tokens), outputTokens: finiteOrNull(usage.output_tokens),
+      numTurns: finiteOrNull(outer.num_turns) });
+  }
+
   /**
    * Sub-agent status the CLI reports out-of-band. A sub-agent whose own events
    * are relayed inline needs no second narration, so this only speaks for the
@@ -307,67 +297,64 @@ export class ClaudeStreamNormalizer {
     const blockKey = `${agent ?? 'main'}:${evt.index}`;
     switch (evt.type) {
       case 'message_start': {
-        const startedId = asRecord(evt.message)?.id;
-        if (typeof startedId === 'string' && startedId) {this.streamedMessageIds.add(startedId);}
-        this.thinkingTokens = null;
-        // Drop only this agent's stale blocks; a sub-agent starting a message
-        // must not discard the main agent's open tool call.
-        const prefix = `${agent ?? 'main'}:`;
-        for (const key of this.blocks.keys()) {
-          if (key.startsWith(prefix)) {this.blocks.delete(key);}
-        }
+        this.startSseMessage(evt, agent);
         return;
       }
       case 'content_block_start': {
-        const block = asRecord(evt.content_block) || {};
-        if (block.type === 'thinking') {events.push({ kind: 'thinking_progress', tokens: this.thinkingTokens });}
-        this.blocks.set(blockKey, {
-          type: String(block.type ?? 'text'),
-          name: typeof block.name === 'string' ? block.name : '',
-          id: typeof block.id === 'string' ? block.id : null,
-          partialJson: '',
-          agent,
-          sawText: false,
-        });
+        this.startContentBlock(evt, blockKey, agent, events);
         return;
       }
       case 'content_block_delta': {
-        const delta = asRecord(evt.delta) || {};
-        const open = this.blocks.get(blockKey);
-        if (delta.type === 'text_delta' && typeof delta.text === 'string') {
-          events.push({ kind: 'text', text: delta.text, agent });
-        } else if (delta.type === 'thinking_delta' && typeof delta.thinking === 'string') {
-          if (delta.thinking && open) {open.sawText = true;}
-          events.push({ kind: 'thinking', text: delta.thinking, agent });
-        } else if (delta.type === 'input_json_delta' && open && typeof delta.partial_json === 'string') {
-          open.partialJson += delta.partial_json;
-        }
+        this.consumeBlockDelta(evt, blockKey, agent, events);
         return;
       }
       case 'content_block_stop': {
-        const open = this.blocks.get(blockKey);
-        this.blocks.delete(blockKey);
-        if (open && open.type === 'thinking' && !open.sawText) {
-          // Encrypted thinking: report that the model reasoned, and for how
-          // much, rather than leaving a silent gap in the view.
-          events.push({ kind: 'thinking_summary', tokens: this.thinkingTokens, agent: open.agent });
-          return;
-        }
-        if (open && open.type === 'tool_use') {
-          let input: unknown;
-          try {
-            input = open.partialJson ? JSON.parse(open.partialJson) : {};
-          } catch {
-            input = open.partialJson;
-          }
-          events.push(this.toolStart(open.name, open.id, input, open.agent));
-        }
+        this.consumeBlockStop(blockKey, events);
         return;
       }
       default:
         if (typeof evt.type === 'string' && !IGNORED_TYPES.has(evt.type)) {
           events.push({ kind: 'unknown', type: evt.type });
         }
+    }
+  }
+
+  private startSseMessage(evt: Record<string, any>, agent: string | null): void {
+    const startedId = asRecord(evt.message)?.id;
+    if (typeof startedId === 'string' && startedId) {this.streamedMessageIds.add(startedId);}
+    this.thinkingTokens = null;
+    const prefix = `${agent ?? 'main'}:`;
+    for (const key of this.blocks.keys()) {if (key.startsWith(prefix)) {this.blocks.delete(key);}}
+  }
+
+  private startContentBlock(evt: Record<string, any>, blockKey: string, agent: string | null, events: NormalizedEvent[]): void {
+    const block = asRecord(evt.content_block) || {};
+    if (block.type === 'thinking') {events.push({ kind: 'thinking_progress', tokens: this.thinkingTokens });}
+    this.blocks.set(blockKey, { type: String(block.type ?? 'text'), name: typeof block.name === 'string' ? block.name : '',
+      id: typeof block.id === 'string' ? block.id : null, partialJson: '', agent, sawText: false });
+  }
+
+  private consumeBlockDelta(evt: Record<string, any>, blockKey: string, agent: string | null, events: NormalizedEvent[]): void {
+    const delta = asRecord(evt.delta) || {};
+    const open = this.blocks.get(blockKey);
+    if (delta.type === 'text_delta' && typeof delta.text === 'string') {events.push({ kind: 'text', text: delta.text, agent }); return;}
+    if (delta.type === 'thinking_delta' && typeof delta.thinking === 'string') {
+      if (delta.thinking && open) {open.sawText = true;}
+      events.push({ kind: 'thinking', text: delta.thinking, agent }); return;
+    }
+    if (delta.type === 'input_json_delta' && open && typeof delta.partial_json === 'string') {open.partialJson += delta.partial_json;}
+  }
+
+  private consumeBlockStop(blockKey: string, events: NormalizedEvent[]): void {
+    const open = this.blocks.get(blockKey);
+    this.blocks.delete(blockKey);
+    if (open && open.type === 'thinking' && !open.sawText) {
+      events.push({ kind: 'thinking_summary', tokens: this.thinkingTokens, agent: open.agent }); return;
+    }
+    if (open && open.type === 'tool_use') {
+      let input: unknown;
+      try {input = open.partialJson ? JSON.parse(open.partialJson) : {};} catch {input = open.partialJson;}
+      events.push(this.toolStart(open.name, open.id, input, open.agent));
     }
   }
 

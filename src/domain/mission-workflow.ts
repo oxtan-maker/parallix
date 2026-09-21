@@ -74,6 +74,66 @@ function requireSameReviewedRevision(mission: OpenMission, review: Review): void
   }
 }
 
+type SubmitForReviewCommand = Extract<MissionCommand, { readonly type: 'submit-for-review' }>;
+
+function hasApprovedRecordedRound(mission: OpenMission): boolean {
+  return mission.status === 'active'
+    && Boolean(mission.review?.rounds?.length)
+    && currentReviewRound(mission.review!)?.decision?.kind === 'approved';
+}
+
+function validateReviewRound(
+  recordedReview: Review | null,
+  review: Review,
+  reviewerEligibility: ConfiguredReviewerEligibility,
+): void {
+  const submittedRound = currentReviewRound(review);
+  if (!reviewerEligibility.includes(submittedRound.reviewer)) {
+    throw new Error(`Reviewer ${submittedRound.reviewer} is not eligible under the configured review policy`);
+  }
+  assertReviewedChange(submittedRound.subject.change);
+  if (!recordedReview) {
+    return;
+  }
+  const recordedRound = currentReviewRound(recordedReview);
+  const resubmission = submittedRound.number === recordedRound.number && !recordedRound.decision;
+  if (
+    !sameReviewedChange(recordedRound.subject.change, submittedRound.subject.change)
+    || (!resubmission && submittedRound.number <= recordedRound.number)
+  ) {
+    throw new Error('A new review round must advance the same pull request or local branch');
+  }
+}
+
+function validateSubmission(mission: OpenMission, command: SubmitForReviewCommand): void {
+  if (!command.gatesPassed) {
+    throw new MissionRuleViolation('Cannot submit for review before declared gates pass');
+  }
+  if (!mission.checkpoints.some((checkpoint) => checkpoint.goalCheck.length > 0)) {
+    throw new MissionRuleViolation('Cannot submit for review without checkpoint evidence');
+  }
+  if (reviewStatus(command.review) !== 'awaiting-review') {
+    throw new MissionRuleViolation('A submitted review must be awaiting a reviewer decision');
+  }
+  try {
+    validateReviewRound(mission.review, command.review, command.reviewerEligibility);
+  } catch (error) {
+    throw new MissionRuleViolation((error as Error).message);
+  }
+}
+
+function submitForReview(mission: Mission, command: SubmitForReviewCommand): Mission {
+  requireStatus(mission, ['active', 'review'], command);
+  if (mission.status === 'review') {
+    return mission;
+  }
+  if (hasApprovedRecordedRound(mission)) {
+    return { ...mission, status: 'review' };
+  }
+  validateSubmission(mission, command);
+  return { ...mission, status: 'review', review: command.review };
+}
+
 export function decideMission(mission: Mission, command: MissionCommand): Mission {
   switch (command.type) {
   case 'refine':
@@ -89,15 +149,11 @@ export function decideMission(mission: Mission, command: MissionCommand): Missio
     requireStatus(mission, ['refined', 'active'], command);
     return { ...mission, status: 'active', assignee: command.agent };
   case 'submit-for-review':
-    requireStatus(mission, ['active', 'review'], command);
     // A handoff that relaunches (gatekeeper pushback, crashed agent, retried
     // CLI invocation) replays this transition against a mission that already
     // reached review. Submission is therefore idempotent: the mission is
     // returned untouched, so the recorded review round cannot be rewritten and
     // no lane event is emitted for a lane that did not move.
-    if (mission.status === 'review') {
-      return mission;
-    }
     // An active Mission whose recorded round was already APPROVED is not
     // re-submittable (the approval landed on the provider before the local
     // status advanced to review) and must not be rewritten. Replaying
@@ -113,47 +169,7 @@ export function decideMission(mission: Mission, command: MissionCommand): Missio
     // approval. The integrate recovery path gates this on an active Mission that
     // also carries a provider approval, so an unrelated submit-for-review caller
     // cannot forge the lane move.
-    if (mission.status === 'active' && mission.review?.rounds?.length) {
-      const recordedRound = currentReviewRound(mission.review);
-      if (recordedRound?.decision?.kind === 'approved') {
-        return { ...mission, status: 'review' };
-      }
-    }
-    if (!command.gatesPassed) {
-      throw new MissionRuleViolation('Cannot submit for review before declared gates pass');
-    }
-    if (!mission.checkpoints.some((checkpoint) => checkpoint.goalCheck.length > 0)) {
-      throw new MissionRuleViolation('Cannot submit for review without checkpoint evidence');
-    }
-    if (reviewStatus(command.review) !== 'awaiting-review') {
-      throw new MissionRuleViolation('A submitted review must be awaiting a reviewer decision');
-    }
-    try {
-      const submittedRound = currentReviewRound(command.review);
-      if (!command.reviewerEligibility.includes(submittedRound.reviewer)) {
-        throw new Error(
-          `Reviewer ${submittedRound.reviewer} is not eligible under the configured review policy`,
-        );
-      }
-      assertReviewedChange(submittedRound.subject.change);
-      if (mission.review) {
-        const recordedRound = currentReviewRound(mission.review);
-        // Resubmitting the recorded round while it is still undecided is a
-        // relaunch of the same handoff, not a new round: the reviewer has not
-        // acted, so nothing is being rewritten. Only a genuinely new round has
-        // to carry a higher number.
-        const resubmission = submittedRound.number === recordedRound.number && !recordedRound.decision;
-        if (
-          !sameReviewedChange(recordedRound.subject.change, submittedRound.subject.change)
-          || (!resubmission && submittedRound.number <= recordedRound.number)
-        ) {
-          throw new Error('A new review round must advance the same pull request or local branch');
-        }
-      }
-    } catch (error) {
-      throw new MissionRuleViolation((error as Error).message);
-    }
-    return { ...mission, status: 'review', review: command.review };
+    return submitForReview(mission, command);
   case 'request-changes':
     requireStatus(mission, ['review'], command);
     requireSameReviewedRevision(mission, command.review);

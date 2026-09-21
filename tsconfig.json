@@ -17,7 +17,9 @@
     "src/**/*.tsx",
     "web/**/*.ts",
     "web/**/*.tsx",
-    "web/**/*.d.ts"
+    "web/**/*.d.ts",
+    "test/lib/test-tier-selection.ts",
+    "test/lib/test-categories.ts"
   ],
   "exclude": [
     "test/",

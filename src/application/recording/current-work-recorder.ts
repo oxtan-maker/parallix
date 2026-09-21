@@ -272,9 +272,7 @@ export function reviewLoopPublisher(
     if (!publication) { return; }
     try {
       await write(publication);
-    } catch (error) {
-      void error;
-    }
+    } catch {}
   };
   return {
     onAgentLaunched: (agent, phase) => publish(

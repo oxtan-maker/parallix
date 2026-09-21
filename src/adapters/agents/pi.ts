@@ -252,6 +252,79 @@ async function createSdkSessionOptions(
   return sdkOptions;
 }
 
+async function runPiSession(
+  createSession: Function,
+  sdkOptions: any,
+  prompt: string,
+  watchdog: ReturnType<typeof createPiWatchdog>,
+  state: { assistantText: string; settleError: string | null },
+) {
+  state.assistantText = '';
+  state.settleError = null;
+  let session: any = null;
+  try {
+    ({ session } = await createSession(sdkOptions));
+    const unsubscribe = subscribePiEvents(session, watchdog, {
+      text: delta => { state.assistantText += delta; },
+      tool: () => {},
+      settled: error => { state.settleError = error; },
+    });
+    await session.prompt(prompt);
+    if (typeof unsubscribe === 'function') { unsubscribe(); }
+    if (typeof session.dispose === 'function') { session.dispose(); }
+    watchdog.clear();
+    if (state.settleError) { throw new Error(state.settleError); }
+    return session;
+  } catch (error: any) {
+    error.piSession = session;
+    throw error;
+  }
+}
+
+function piSuccessResult(session: any, assistantText: string, attempts: number) {
+  const stats = session.getSessionStats?.() || {};
+  return {
+    status: 0, stdout: session.getLastAssistantText?.() || assistantText, stderr: '', error: null, signal: null,
+    sessionId: session.sessionId || null, telemetry: extractTelemetryFromStats(stats, session.model?.id),
+    model: session.model?.id || undefined, provider: 'pi', transientRetries: attempts,
+    startedAt: new Date().toISOString(), endedAt: new Date().toISOString(),
+  };
+}
+
+function piFailureResult(session: any, assistantText: string, error: any, attempts: number) {
+  const stats = session?.getSessionStats?.() || {};
+  return {
+    status: error.exitCode || 1, stdout: assistantText, stderr: error.message || String(error), error, signal: null,
+    sessionId: session?.sessionId || null, telemetry: extractTelemetryFromStats(stats, session?.model?.id),
+    model: session?.model?.id || undefined, provider: 'pi', transientRetries: attempts,
+    startedAt: new Date().toISOString(), endedAt: new Date().toISOString(),
+  };
+}
+
+async function runPiAttempts(
+  createSession: Function, sdkOptions: any, prompt: string, watchdog: ReturnType<typeof createPiWatchdog>,
+  state: { assistantText: string; settleError: string | null }, maxTransientRetries: number,
+) {
+  let attempts = 0;
+  let session: any = null;
+  while (attempts <= maxTransientRetries) {
+    try {
+      session = await runPiSession(createSession, sdkOptions, prompt, watchdog, state);
+      return piSuccessResult(session, state.assistantText, attempts);
+    } catch (error: any) {
+      session = error.piSession ?? session;
+      const result = piFailureResult(session, state.assistantText, error, attempts);
+      if (attempts >= maxTransientRetries || !isTransientPiFailure(result)) { return result; }
+      attempts += 1;
+    }
+  }
+  return {
+    status: 1, stdout: state.assistantText, stderr: 'Max retries exceeded', error: new Error('Max retries exceeded'),
+    signal: null, sessionId: null, telemetry: null, model: undefined, provider: 'pi',
+    transientRetries: maxTransientRetries, startedAt: new Date().toISOString(), endedAt: new Date().toISOString(),
+  };
+}
+
 function startPiAgent({
   prompt,
   worktree,
@@ -304,196 +377,17 @@ function startPiAgent({
     }
 
     // Collect output during SDK execution.
-    let assistantText = '';
-    let _toolCalls = 0;
-    let errorText = '';
-    /** Set when the session settled on a provider error instead of a response. */
-    let settleError: string | null = null;
+    const state = { assistantText: '', settleError: null as string | null };
 
     // Tee / watchdog — write text_delta to process.stdout in real time
     // and fire noOutputWatchdog.onNoOutput when no visible text arrives.
-    const watchdog = teeOptions.noOutputWatchdog;
-    let sawOutput = false;
-    let lastOutputAt: number | null = null;
-    let watchdogTimer: ReturnType<typeof setTimeout> | null = null;
-    const outputStartTime = Date.now();
-
-    const clearWatchdog = () => {
-      if (watchdogTimer) {
-        clearTimeout(watchdogTimer);
-        watchdogTimer = null;
-      }
-    };
-
-    const scheduleWatchdog = (delayMs: number) => {
-      if (!watchdog || typeof watchdog.onNoOutput !== 'function') { return; }
-      const delay = Number.isFinite(delayMs) && delayMs >= 0 ? delayMs : 0;
-      watchdogTimer = setTimeout(() => {
-        watchdogTimer = null;
-        // Observational for the session's full lifetime: only clearWatchdog()
-        // at a settle point stops it. Stopping at the first assistant text
-        // left later stalls (announce-then-hang) with no liveness signal.
-        if (typeof watchdog.onNoOutput !== 'function') { return; }
-        watchdog.onNoOutput({
-          command: invocation.command,
-          args: invocation.args,
-          pid: undefined,
-          elapsedMs: Date.now() - outputStartTime,
-          sawOutput,
-          msSinceLastOutput: lastOutputAt === null ? null : Date.now() - lastOutputAt,
-        });
-        scheduleWatchdog(watchdog.intervalMs ?? 0);
-      }, delay);
-      if (typeof watchdogTimer.unref === 'function') { watchdogTimer.unref(); }
-    };
-
-    // Schedule initial watchdog before session starts.
-    if (watchdog) {
-      scheduleWatchdog(watchdog.initialDelayMs ?? 0);
-    }
-
-    let attempts = 0;
-    let session: any = null;
+    const watchdog = createPiWatchdog(teeOptions.noOutputWatchdog, invocation);
 
     try {
-      while (attempts <= maxTransientRetries) {
-        try {
-          // Reset per-attempt state.
-          assistantText = '';
-          _toolCalls = 0;
-          errorText = '';
-          settleError = null;
-
-          const { session: sdkSession } = await createSession(sdkOptions);
-          session = sdkSession;
-
-          // Subscribe to events for output filtering and telemetry.
-          const unsubscribe = session.subscribe((event: any) => {
-            switch (event.type) {
-              case 'message_update':
-                if (event.assistantMessageEvent && event.assistantMessageEvent.type === 'text_delta') {
-                  const delta = event.assistantMessageEvent.delta;
-                  assistantText += delta;
-                  // Tee text_delta to stdout for real-time console visibility.
-                  process.stdout.write(delta);
-                  // Note visible text but keep the watchdog running: it stays
-                  // observational until the session settles.
-                  sawOutput = true;
-                  lastOutputAt = Date.now();
-                }
-                break;
-              case 'tool_execution_end':
-                _toolCalls += 1;
-                break;
-              case 'agent_end': {
-                // `session.prompt()` resolves normally even when the provider
-                // never answered (the SDK settles the turn with an errored
-                // assistant message instead of throwing). Without this the
-                // launcher reports status 0 with empty output and zero tokens,
-                // and the stage commits phantom work — e.g. a draft that leaves
-                // the unfilled MISSION.md scaffold on disk.
-                const lastMessage = event.messages?.[event.messages.length - 1];
-                settleError = !event.willRetry && lastMessage?.stopReason === 'error'
-                  ? (lastMessage.errorMessage ?? 'agent session ended in a provider error')
-                  : null;
-                break;
-              }
-              case 'auto_retry_end':
-                // The SDK exhausted its own retries; the turn produced nothing.
-                if (event.success === false) {
-                  settleError = event.finalError ?? 'agent retries exhausted without a model response';
-                }
-                break;
-            }
-          });
-
-          // Send the prompt and wait for the agent to complete.
-          await session.prompt(injectedPrompt);
-
-          if (typeof unsubscribe === 'function') { unsubscribe(); }
-          if (typeof session.dispose === 'function') { session.dispose(); }
-          clearWatchdog();
-
-          // Throw so the transient-retry path below (and every caller's
-          // non-zero status handling) treats an unanswered turn as the
-          // failure it is.
-          if (settleError) { throw new Error(settleError); }
-
-          // Build the result from SDK state.
-          const stats = session.getSessionStats?.() || {};
-          const lastText = session.getLastAssistantText?.() || assistantText;
-          const sdkSessionId = session.sessionId || null;
-
-          const telemetry = extractTelemetryFromStats(stats, session.model?.id);
-
-          return {
-            status: 0,
-            stdout: lastText,
-            stderr: errorText,
-            error: null,
-            signal: null,
-            sessionId: sdkSessionId,
-            telemetry,
-            model: session.model?.id || undefined,
-            provider: 'pi',
-            transientRetries: attempts,
-            startedAt: new Date().toISOString(),
-            endedAt: new Date().toISOString(),
-          };
-        } catch (err: any) {
-          const errorResult = {
-            status: err.exitCode || 1,
-            stdout: assistantText,
-            stderr: err.message || String(err),
-            error: err,
-            signal: null,
-          };
-
-          if (attempts < maxTransientRetries && isTransientPiFailure(errorResult)) {
-            attempts += 1;
-            continue;
-          }
-
-          // Build result from error state.
-          const stats = session?.getSessionStats?.() || {};
-          const sdkSessionId = session?.sessionId || null;
-          const telemetry = extractTelemetryFromStats(stats, session?.model?.id);
-
-          return {
-            status: errorResult.status,
-            stdout: assistantText,
-            stderr: errorResult.stderr,
-            error: err,
-            signal: errorResult.signal,
-            sessionId: sdkSessionId,
-            telemetry,
-            model: session?.model?.id || undefined,
-            provider: 'pi',
-            transientRetries: attempts,
-            startedAt: new Date().toISOString(),
-            endedAt: new Date().toISOString(),
-          };
-        }
-      }
-
-      // Should not reach here, but safety fallback.
-      return {
-        status: 1,
-        stdout: assistantText,
-        stderr: 'Max retries exceeded',
-        error: new Error('Max retries exceeded'),
-        signal: null,
-        sessionId: null,
-        telemetry: null,
-        model: undefined,
-        provider: 'pi',
-        transientRetries: maxTransientRetries,
-        startedAt: new Date().toISOString(),
-        endedAt: new Date().toISOString(),
-      };
+      return await runPiAttempts(createSession, sdkOptions, injectedPrompt, watchdog, state, maxTransientRetries);
     } finally {
       // Clean up watchdog timer.
-      clearWatchdog();
+      watchdog.clear();
       // Restore original process.env.
       for (const [key, prevValue] of prevEnvEntries) {
         if (prevValue === undefined) {
@@ -506,6 +400,34 @@ function startPiAgent({
   })();
 
   return { invocation, resultPromise };
+}
+
+function createPiWatchdog(watchdog: PiNoOutputWatchdog | null | undefined, invocation: { command: string; args: string[] }) {
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  let sawOutput = false;
+  let lastOutputAt: number | null = null;
+  const startedAt = Date.now();
+  const clear = () => { if (timer) { clearTimeout(timer); timer = null; } };
+  const schedule = (delayMs: number) => {
+    if (!watchdog?.onNoOutput) { return; }
+    timer = setTimeout(() => {
+      timer = null;
+      watchdog.onNoOutput?.({ command: invocation.command, args: invocation.args, pid: undefined, elapsedMs: Date.now() - startedAt, sawOutput, msSinceLastOutput: lastOutputAt === null ? null : Date.now() - lastOutputAt });
+      schedule(watchdog.intervalMs ?? 0);
+    }, Number.isFinite(delayMs) && delayMs >= 0 ? delayMs : 0);
+    timer.unref?.();
+  };
+  schedule(watchdog?.initialDelayMs ?? 0);
+  return { clear, noteOutput: () => { sawOutput = true; lastOutputAt = Date.now(); } };
+}
+
+function subscribePiEvents(session: any, watchdog: { noteOutput: () => void }, callbacks: { text: (_delta: string) => void; tool: () => void; settled: (_error: string | null) => void }) {
+  return session.subscribe((event: any) => {
+    if (event.type === 'message_update' && event.assistantMessageEvent?.type === 'text_delta') { const delta = event.assistantMessageEvent.delta; callbacks.text(delta); process.stdout.write(delta); watchdog.noteOutput(); }
+    else if (event.type === 'tool_execution_end') { callbacks.tool(); }
+    else if (event.type === 'agent_end') { const last = event.messages?.[event.messages.length - 1]; callbacks.settled(!event.willRetry && last?.stopReason === 'error' ? last.errorMessage || 'agent session ended in a provider error' : null); }
+    else if (event.type === 'auto_retry_end' && event.success === false) { callbacks.settled(event.finalError || 'agent retries exhausted without a model response'); }
+  });
 }
 
 export {

@@ -24,6 +24,35 @@ export async function assertNewIssuesFail(options: { token: string, request?: ty
   }
 }
 
+type IssueScope = { branch?: string, pullRequest?: string };
+
+export async function assertNoOpenHighOrBlockerIssues(options: { token: string, scope?: IssueScope, request?: typeof fetch }) {
+  if (!options.scope) { throw new Error('SonarQube Cloud issue scope is unavailable.'); }
+  // Pull-request analyses are diff-only in SonarQube Cloud; the required
+  // total-code proof is made by the LONG mission branch before review.
+  if (options.scope.pullRequest) { return; }
+  if (!options.scope.branch) { throw new Error('SonarQube Cloud branch scope is unavailable.'); }
+  const request = options.request || fetch;
+  const headers = { Authorization: `Basic ${Buffer.from(`${options.token}:`).toString('base64')}` };
+  const branches = await request(`${SONAR_URL}/api/project_branches/list?project=${SONAR_PROJECT_KEY}`, { headers });
+  const branchList = await branches.json() as { branches?: Array<{ name?: string, type?: string }> };
+  const branch = branchList.branches?.find(({ name }) => name === options.scope?.branch);
+  if (!branches.ok || !branch) { throw new Error(`SonarQube Cloud branch lookup failed (HTTP ${branches.status}).`); }
+  if (branch.type !== 'LONG') { throw new Error(`SonarQube Cloud mission branch ${options.scope.branch} must be analysed as LONG before checking total-code HIGH/BLOCKER impacts.`); }
+  const params = new URLSearchParams({ component: SONAR_PROJECT_KEY, metricKeys: 'reliability_issues,security_issues,maintainability_issues' });
+  params.set('branch', options.scope.branch);
+  const response = await request(`${SONAR_URL}/api/measures/component?${params}`, { headers });
+  const result = await response.json() as { component?: { measures?: Array<{ value?: string }> } };
+  if (!response.ok || !result.component?.measures) { throw new Error(`SonarQube Cloud metrics lookup failed (HTTP ${response.status}).`); }
+  const total = result.component.measures.reduce((count, measure) => {
+    const impacts = JSON.parse(measure.value || '{}') as Record<string, number>;
+    return count + (impacts.HIGH || 0) + (impacts.BLOCKER || 0);
+  }, 0);
+  if (total !== 0) {
+    throw new Error('SonarQube Cloud mission analysis has unresolved HIGH/BLOCKER impacts.');
+  }
+}
+
 // The Sonar branch identity is the Git branch the worktree already owns; no
 // derived project key, no sanitisation. GitHub runs let the scanner's own CI
 // integration derive branch/pull-request metadata from the event, so the local
@@ -38,6 +67,16 @@ function resolveSonarBranch(rootDir: string = process.cwd()): string | null {
   const branch = git.error || git.status !== 0 ? '' : git.stdout.trim();
   if (!branch || branch === 'HEAD') { throw new Error('Cannot resolve the Git branch for the Sonar analysis; check out a branch before scanning.'); }
   return branch;
+}
+
+export function resolveIssueScope(rootDir: string): IssueScope | undefined {
+  if (process.env.GITHUB_ACTIONS !== 'true') {
+    const branch = resolveSonarBranch(rootDir);
+    return branch ? { branch } : undefined;
+  }
+  const pullRequest = process.env.GITHUB_REF?.match(/^refs\/pull\/(\d+)\//)?.[1];
+  if (pullRequest) { return { pullRequest }; }
+  return process.env.GITHUB_REF_NAME ? { branch: process.env.GITHUB_REF_NAME } : undefined;
 }
 
 export function runSonar(options: { rootDir?: string, spawn?: typeof spawnSync } = {}) {
@@ -66,5 +105,8 @@ export function runSonar(options: { rootDir?: string, spawn?: typeof spawnSync }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(import.meta.filename)) {
   if (process.argv[2] !== 'scan') { throw new Error('Usage: sonar-local.ts scan'); }
-  try { runSonar(); } catch (error) { console.error((error as Error).message); process.exitCode = 1; }
+  try {
+    runSonar();
+    await assertNoOpenHighOrBlockerIssues({ token: process.env.SONAR_TOKEN!, scope: resolveIssueScope(process.cwd()) });
+  } catch (error) { console.error((error as Error).message); process.exitCode = 1; }
 }

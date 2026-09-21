@@ -57,32 +57,8 @@ export function resolveMainRepo(): string {
   const primaryBranch = getPrimaryBranch(process.cwd(), gitModule.git);
   try {
     const lines = gitModule.git(['worktree', 'list', '--porcelain']).stdout.split('\n');
-    const worktrees: Array<{path: string; branch: string|null; bare: boolean}> = [];
-    let current: {path: string; branch: string|null; bare: boolean} | null = null;
-
-    for (const line of lines) {
-      if (line.startsWith('worktree ')) {
-        if (current) {worktrees.push(current);}
-        current = { path: line.slice('worktree '.length).trim(), branch: null, bare: false };
-        continue;
-      }
-
-      if (!current) {continue;}
-
-      if (line.startsWith('branch ')) {
-        current.branch = line.slice('branch '.length).trim();
-      } else if (line === 'bare') {
-        current.bare = true;
-      } else if (line === '') {
-        worktrees.push(current);
-        current = null;
-      }
-    }
-
-    if (current) {worktrees.push(current);}
-
-    const primaryWorktree = worktrees.find(wt => !wt.bare && wt.branch === `refs/heads/${primaryBranch}`);
-    if (primaryWorktree) {return primaryWorktree.path;}
+    const primaryWorktree = primaryWorktreeFromPorcelain(lines, primaryBranch);
+    if (primaryWorktree) {return primaryWorktree;}
   } catch (_) {
     // ignore git errors, fall through to error
   }
@@ -112,6 +88,35 @@ export function resolveMainRepo(): string {
     `Could not resolve primary repository. No worktree on '${primaryBranch}' branch found and PRIMARY_WORKTREE is not set. ` +
     "Verify your worktree setup or set the PRIMARY_WORKTREE environment variable."
   );
+}
+
+function primaryWorktreeFromPorcelain(lines: string[], primaryBranch: string): string | null {
+    const worktrees: Array<{path: string; branch: string|null; bare: boolean}> = [];
+    let current: {path: string; branch: string|null; bare: boolean} | null = null;
+
+    for (const line of lines) {
+      if (line.startsWith('worktree ')) {
+        if (current) {worktrees.push(current);}
+        current = { path: line.slice('worktree '.length).trim(), branch: null, bare: false };
+        continue;
+      }
+
+      if (!current) {continue;}
+
+      if (line.startsWith('branch ')) {
+        current.branch = line.slice('branch '.length).trim();
+      } else if (line === 'bare') {
+        current.bare = true;
+      } else if (line === '') {
+        worktrees.push(current);
+        current = null;
+      }
+    }
+
+    if (current) {worktrees.push(current);}
+
+    const primaryWorktree = worktrees.find(wt => !wt.bare && wt.branch === `refs/heads/${primaryBranch}`);
+    return primaryWorktree?.path ?? null;
 }
 
 export function getPrimaryWorktree(): string {
@@ -400,29 +405,7 @@ export function resolveWorktree(slug: string, options: { cwd?: string; gitFn?: F
   const branchRef = missionBranchRef(slug, cwd);
 
   try {
-    const lines = runGit(['worktree', 'list', '--porcelain']).stdout.split('\n');
-    const matches: Array<{ path: string; branch: string | null; prunable: boolean }> = [];
-    let current: { path: string; branch: string | null; prunable: boolean } | null = null;
-
-    for (const line of lines) {
-      if (line.startsWith('worktree ')) {
-        current = { path: line.slice('worktree '.length).trim(), branch: null, prunable: false };
-        continue;
-      }
-      if (!current) {continue;}
-      if (line.startsWith('branch ')) {
-        current.branch = line.slice('branch '.length).trim();
-      } else if (line.startsWith('prunable ')) {
-        current.prunable = true;
-      } else if (line === '') {
-        if (current.branch === branchRef) {matches.push(current);}
-        current = null;
-      }
-    }
-
-    if (current && current.branch === branchRef) {matches.push(current);}
-
-    const liveMatches = matches.filter(m => !m.prunable).map(m => ({ ...m, path: workTreeRootFor(m.path, runGit) }));
+    const liveMatches = matchingWorktrees(runGit(['worktree', 'list', '--porcelain']).stdout, branchRef, runGit);
     if (liveMatches.length > 0) {
       const cwdMatch = liveMatches.find(m => cwd === m.path || cwd.startsWith(m.path + '/'));
       if (cwdMatch) {return cwdMatch.path;}
@@ -441,4 +424,20 @@ export function resolveWorktree(slug: string, options: { cwd?: string; gitFn?: F
   }
 
   return null;
+}
+
+type WorktreeEntry = { path: string; branch: string | null; prunable: boolean };
+
+function matchingWorktrees(output: string, branchRef: string, runGit: Function): WorktreeEntry[] {
+  const matches: WorktreeEntry[] = [];
+  let current: WorktreeEntry | null = null;
+  for (const line of output.split('\n')) {
+    if (line.startsWith('worktree ')) { current = { path: line.slice('worktree '.length).trim(), branch: null, prunable: false }; continue; }
+    if (!current) { continue; }
+    if (line.startsWith('branch ')) { current.branch = line.slice('branch '.length).trim(); }
+    else if (line.startsWith('prunable ')) { current.prunable = true; }
+    else if (line === '') { if (current.branch === branchRef) { matches.push(current); } current = null; }
+  }
+  if (current?.branch === branchRef) { matches.push(current); }
+  return matches.filter((entry) => !entry.prunable).map((entry) => ({ ...entry, path: workTreeRootFor(entry.path, runGit) }));
 }

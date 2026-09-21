@@ -40,7 +40,7 @@ test('task-2236 repro: npm test forwards the requested pi e2e smoke file', () =>
   );
   assert.match(
     runnerSource,
-    /requestedTestFiles\.length > 0 \? requestedTestFiles : defaultTestFiles/,
+    /requestedTestFiles\.length > 0 \? requestedTestFiles : tierFiles\.unit/,
     'an explicit e2e test path must replace the default suite rather than be ignored'
   );
   assert.match(

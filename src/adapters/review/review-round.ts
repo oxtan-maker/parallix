@@ -16,9 +16,9 @@
  * domain type and no second state machine.
  */
 
-import type { MissionStore } from '../../application/domain-ports.js';
+import type { MissionStore, MissionVersion } from '../../application/domain-ports.js';
 import type { MissionLifecycleService } from '../../application/mission-lifecycle-service.js';
-import { missionId } from '../../domain/mission.js';
+import { missionId, type Mission } from '../../domain/mission.js';
 import {
   applyImplementerCommand,
   applyReviewerCommand,
@@ -31,6 +31,7 @@ import {
   type ReviewDisposition,
   type ReviewFinding,
   type ReviewItemDisposition,
+  type Review,
 } from '../../domain/review.js';
 
 export type ReviewRoundResult =
@@ -236,27 +237,8 @@ export async function recordApproval(
       // The decision is already recorded, but the review → integration boundary
       // may have failed after it was saved. Replaying the approve finishes that
       // transition instead of leaving the mission parked in review forever.
-      if (ports.lifecycleService && mission.status === 'review') {
-        const round = currentReviewRound(mission.review);
-        const transition = await ports.lifecycleService.transition({
-          operationId: `review-approve:${slug}`,
-          missionId: missionId(slug),
-          expectedVersion: loaded.version,
-          capabilities: new Set(['mission:transition']),
-          command: { type: 'approve', review: mission.review },
-          actor: round.reviewer,
-          occurredAt: round.decision?.decidedAt ?? input.decidedAt,
-          idempotencyKey: `approve:${slug}:round-${round.number}`,
-        });
-        if (transition.status !== 'completed') {
-          return {
-            outcome: 'failed',
-            diagnostic: `review → integration transition failed for ${slug}: ${transition.error?.message ?? 'unknown failure'}`,
-          };
-        }
-        return { outcome: 'recorded' };
-      }
-      return { outcome: 'unchanged', reason: `review is already ${status}` };
+      return await replayApprovalTransition(slug, input.decidedAt, mission, loaded.version, ports)
+        ?? { outcome: 'unchanged', reason: `review is already ${status}` };
     }
     if (status !== 'awaiting-review') {
       // The round cannot legally reach `approved` from here (REVIEW_PHASE_TRANSITIONS
@@ -277,32 +259,56 @@ export async function recordApproval(
       source,
     });
     const version = await store.save({ ...mission, review }, loaded.version);
-
-    // The mirror of the request-changes boundary: the authoritative decision is
-    // what moves the lane, so the Mission returns to `integration` at the
-    // reviewer's decision time.
-    if (ports.lifecycleService && mission.status === 'review') {
-      const transition = await ports.lifecycleService.transition({
-        operationId: `review-approve:${slug}`,
-        missionId: missionId(slug),
-        expectedVersion: version,
-        capabilities: new Set(['mission:transition']),
-        command: { type: 'approve', review },
-        actor: currentReviewRound(review).reviewer,
-        occurredAt: input.decidedAt,
-        idempotencyKey: `approve:${slug}:round-${currentReviewRound(review).number}`,
-      });
-      if (transition.status !== 'completed') {
-        return {
-          outcome: 'failed',
-          diagnostic: `review → integration transition failed for ${slug}: ${transition.error?.message ?? 'unknown failure'}`,
-        };
-      }
-    }
-    return { outcome: 'recorded' };
+    return await transitionApprovedReview(slug, input.decidedAt, mission, version, review, ports) ?? { outcome: 'recorded' };
   } catch (error) {
     return { outcome: 'failed', diagnostic: diagnosticFrom(error, 'Approval write failed') };
   }
+}
+
+async function transitionApprovedReview(
+  slug: string,
+  decidedAt: string,
+  mission: Mission,
+  version: MissionVersion,
+  review: Review,
+  ports: ReviewRoundPorts,
+): Promise<ReviewRoundResult | null> {
+  if (!ports.lifecycleService || mission.status !== 'review') { return null; }
+  const round = currentReviewRound(review);
+  const transition = await ports.lifecycleService.transition({
+    operationId: `review-approve:${slug}`,
+    missionId: missionId(slug), expectedVersion: version, capabilities: new Set(['mission:transition']),
+    command: { type: 'approve', review }, actor: round.reviewer, occurredAt: decidedAt,
+    idempotencyKey: `approve:${slug}:round-${round.number}`,
+  });
+  if (transition.status === 'completed') { return null; }
+  return { outcome: 'failed', diagnostic: `review → integration transition failed for ${slug}: ${transition.error?.message ?? 'unknown failure'}` };
+}
+
+async function replayApprovalTransition(
+  slug: string,
+  decidedAt: string,
+  mission: Mission,
+  version: MissionVersion,
+  ports: ReviewRoundPorts,
+): Promise<ReviewRoundResult | null> {
+  if (!ports.lifecycleService || mission.status !== 'review' || !('review' in mission) || !mission.review) { return null; }
+  const round = currentReviewRound(mission.review);
+  const transition = await ports.lifecycleService.transition({
+    operationId: `review-approve:${slug}`,
+    missionId: missionId(slug),
+    expectedVersion: version,
+    capabilities: new Set(['mission:transition']),
+    command: { type: 'approve', review: mission.review },
+    actor: round.reviewer,
+    occurredAt: round.decision?.decidedAt ?? decidedAt,
+    idempotencyKey: `approve:${slug}:round-${round.number}`,
+  });
+  if (transition.status === 'completed') { return { outcome: 'recorded' }; }
+  return {
+    outcome: 'failed',
+    diagnostic: `review → integration transition failed for ${slug}: ${transition.error?.message ?? 'unknown failure'}`,
+  };
 }
 
 /**

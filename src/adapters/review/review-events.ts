@@ -401,54 +401,7 @@ async function consumeHumanNotes(slug: string, actor: string, options: ConsumeHu
   const existingProcessed = existingMetadata?.processedCommentBodies;
   const processedKeys = new Set<string>(Array.isArray(existingProcessed) ? existingProcessed : []);
 
-  for (const comment of comments) {
-    const commentUser = (comment as { user?: string }).user;
-    const commentCreated = (comment as { created?: string }).created;
-    const commentBody = (comment as { body?: string }).body || '';
-
-    // Dedup key: author + sha256(body) — includes author to avoid collisions
-    // when different users post identical text (N4), and hashes body to keep
-    // metadata bounded (N3).
-    const bodyHash = crypto.createHash('sha256').update(commentBody).digest('hex').slice(0, 16);
-    const dedupKey = `${commentUser}\t${bodyHash}`;
-
-    if (processedKeys.has(dedupKey)) {
-      skipped.push({ user: commentUser, created: commentCreated, reason: 'already-processed' });
-      continue;
-    }
-
-    if (hasWorkflowFooter(commentBody)) {
-      skipped.push({ user: commentUser, created: commentCreated, reason: 'workflow-generated' });
-      processedKeys.add(dedupKey);
-      continue;
-    }
-
-    const classification = classifyComment(comment as { body?: string });
-    if (!classification) {
-      skipped.push({ user: commentUser, created: commentCreated, reason: 'already-classified' });
-      processedKeys.add(dedupKey);
-      continue;
-    }
-
-    const result = await createEventFn(slug, classification, {
-      content: commentBody,
-      round,
-      phase,
-      actor: actor || commentUser || 'human'
-    }, {
-      worktree: rootDir,
-      skipGit: true,
-      log: logger,
-      error
-    });
-
-    if (result.ok) {
-      created.push({ path: result.path, user: commentUser, created: commentCreated });
-      processedKeys.add(dedupKey);
-    } else {
-      error(fmt.status('WARN', `Failed to create human_note event for comment by ${commentUser}: ${(result as { error?: string }).error}`));
-    }
-  }
+  await consumeComments(comments, { slug, actor, round, phase, rootDir, createEventFn, logger, error, processedKeys, created, skipped });
 
   // Merge dedup keys into state metadata in-place.
   // No cap — each key is a compact "author\thex16" string (~22 bytes).
@@ -469,6 +422,22 @@ async function consumeHumanNotes(slug: string, actor: string, options: ConsumeHu
 
   logger(fmt.status('INFO', `consumeHumanNotes: created ${created.length} human_note events, skipped ${skipped.length} workflow comments`));
   return { ok: true, created, skipped };
+}
+
+async function consumeComments(comments: unknown[], context: any): Promise<void> {
+  for (const comment of comments) {
+    const user = (comment as { user?: string }).user;
+    const created = (comment as { created?: string }).created;
+    const body = (comment as { body?: string }).body || '';
+    const key = `${user}\t${crypto.createHash('sha256').update(body).digest('hex').slice(0, 16)}`;
+    if (context.processedKeys.has(key)) { context.skipped.push({ user, created, reason: 'already-processed' }); continue; }
+    if (hasWorkflowFooter(body)) { context.skipped.push({ user, created, reason: 'workflow-generated' }); context.processedKeys.add(key); continue; }
+    const classification = classifyComment(comment as { body?: string });
+    if (!classification) { context.skipped.push({ user, created, reason: 'already-classified' }); context.processedKeys.add(key); continue; }
+    const result = await context.createEventFn(context.slug, classification, { content: body, round: context.round, phase: context.phase, actor: context.actor || user || 'human' }, { worktree: context.rootDir, skipGit: true, log: context.logger, error: context.error });
+    if (result.ok) { context.created.push({ path: result.path, user, created }); context.processedKeys.add(key); }
+    else { context.error(fmt.status('WARN', `Failed to create human_note event for comment by ${user}: ${result.error}`)); }
+  }
 }
 
 /**
@@ -495,6 +464,43 @@ function renderEventFile(event: NormalizedEvent): string {
 
 /** @typedef {{content: string, round?: number, phase?: string, actor?: string, disposition?: string, verdict?: string, fixedItems?: unknown[], pushedBackItems?: unknown[], parkedItems?: unknown[], blockedReason?: string, followUpReference?: string, timestamp?: string}} CreateEventParams */
 
+function invalidEventParams(eventType: string, params: CreateEventParams, allowMissingRequiredFields: boolean, error: (_message: string) => void): CreateEventResult | null {
+  if (!isValidEventType(eventType)) {
+    error(fmt.status('FAIL', `Invalid event type "${eventType}". Valid types: ${ALL_EVENT_TYPES.join(', ')}`));
+    return { ok: false, path: null, error: `Invalid event type: ${eventType}` };
+  }
+  if (params.disposition !== undefined && !isValidDisposition(params.disposition as string)) {
+    error(fmt.status('FAIL', `Invalid disposition "${params.disposition}". Valid: ${VALID_DISPOSITIONS.join(', ')}`));
+    return { ok: false, path: null, error: `Invalid disposition: ${params.disposition}` };
+  }
+  if (params.verdict !== undefined && !isValidVerdict(params.verdict as string)) {
+    error(fmt.status('FAIL', `Invalid verdict "${params.verdict}". Valid: ${VALID_VERDICTS.join(', ')}`));
+    return { ok: false, path: null, error: `Invalid verdict: ${params.verdict}` };
+  }
+  if (!allowMissingRequiredFields && eventType === VALID_EVENT_TYPES.REVIEWER_OUTCOME && !params.verdict) {
+    error(fmt.status('FAIL', 'reviewer_outcome event requires --verdict'));
+    return { ok: false, path: null, error: 'reviewer_outcome event requires verdict' };
+  }
+  if (!allowMissingRequiredFields && eventType === VALID_EVENT_TYPES.IMPLEMENTER_DISPOSITION && !params.disposition) {
+    error(fmt.status('FAIL', 'implementer_disposition event requires --disposition'));
+    return { ok: false, path: null, error: 'implementer_disposition event requires disposition' };
+  }
+  return null;
+}
+
+function storedEventFailure(slug: string, reason: string, error: (_message: string) => void): CreateEventResult {
+  if (reason === 'no-store') {
+    error(fmt.status('FAIL', `Cannot store review event for "${slug}": no Mission store was supplied to this call. The composition root must bind the review-event writer to the operator database.`));
+    return { ok: false, path: null, error: `No Mission store supplied for ${slug}` };
+  }
+  if (reason === 'write-failed') {
+    error(fmt.status('FAIL', `Cannot store review event for "${slug}": the operator database rejected the write.`));
+    return { ok: false, path: null, error: `Review event write failed for ${slug}` };
+  }
+  error(fmt.status('FAIL', `Cannot store review event for "${slug}": no Review in the operator database. px review ${slug} --start starts a review; px review ${slug} --backfill-review migrates a pre-cutover mission.`));
+  return { ok: false, path: null, error: `No Review in the operator database for ${slug}` };
+}
+
 /**
  * Create and persist a classified review event.
  *
@@ -517,31 +523,8 @@ async function createEvent(slug: string, eventType: string, params: CreateEventP
 
   const rootDir = worktree || resolveWorktree(slug) || process.cwd();
 
-  if (!isValidEventType(eventType)) {
-    error(fmt.status('FAIL', `Invalid event type "${eventType}". Valid types: ${ALL_EVENT_TYPES.join(', ')}`));
-    return { ok: false, path: null, error: `Invalid event type: ${eventType}` };
-  }
-
-  if (params.disposition !== undefined && !isValidDisposition(params.disposition as string)) {
-    error(fmt.status('FAIL', `Invalid disposition "${params.disposition}". Valid: ${VALID_DISPOSITIONS.join(', ')}`));
-    return { ok: false, path: null, error: `Invalid disposition: ${params.disposition}` };
-  }
-
-  if (params.verdict !== undefined && !isValidVerdict(params.verdict as string)) {
-    error(fmt.status('FAIL', `Invalid verdict "${params.verdict}". Valid: ${VALID_VERDICTS.join(', ')}`));
-    return { ok: false, path: null, error: `Invalid verdict: ${params.verdict}` };
-  }
-
-  if (!allowMissingRequiredFields) {
-    if (eventType === VALID_EVENT_TYPES.REVIEWER_OUTCOME && !params.verdict) {
-      error(fmt.status('FAIL', 'reviewer_outcome event requires --verdict'));
-      return { ok: false, path: null, error: 'reviewer_outcome event requires verdict' };
-    }
-    if (eventType === VALID_EVENT_TYPES.IMPLEMENTER_DISPOSITION && !params.disposition) {
-      error(fmt.status('FAIL', 'implementer_disposition event requires --disposition'));
-      return { ok: false, path: null, error: 'implementer_disposition event requires disposition' };
-    }
-  }
+  const invalid = invalidEventParams(eventType, params, allowMissingRequiredFields, error);
+  if (invalid) { return invalid; }
 
   let state: ReviewState | null;
   if (params.round === undefined || params.phase === undefined) {
@@ -578,27 +561,7 @@ async function createEvent(slug: string, eventType: string, params: CreateEventP
     missionStore: options.missionStore,
   });
   if (!stored.ok) {
-    // A caller that was never handed the Mission store has a wiring defect. Say
-    // so: reporting it as a missing Review sends the operator to --backfill-review,
-    // which cannot repair a Review that is already there.
-    if (stored.reason === 'no-store') {
-      error(fmt.status(
-        'FAIL',
-        `Cannot store review event for "${slug}": no Mission store was supplied to this call. ` +
-        'The composition root must bind the review-event writer to the operator database.',
-      ));
-      return { ok: false, path: null, error: `No Mission store supplied for ${slug}` };
-    }
-    if (stored.reason === 'write-failed') {
-      error(fmt.status('FAIL', `Cannot store review event for "${slug}": the operator database rejected the write.`));
-      return { ok: false, path: null, error: `Review event write failed for ${slug}` };
-    }
-    error(fmt.status(
-      'FAIL',
-      `Cannot store review event for "${slug}": no Review in the operator database. ` +
-      `px review ${slug} --start starts a review; px review ${slug} --backfill-review migrates a pre-cutover mission.`,
-    ));
-    return { ok: false, path: null, error: `No Review in the operator database for ${slug}` };
+    return storedEventFailure(slug, stored.reason ?? '', error);
   }
 
   const exportedPath = exportEventFile(slug, event, rootDir, {

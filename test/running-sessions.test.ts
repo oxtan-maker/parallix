@@ -117,6 +117,22 @@ test('detectRunningMissionSessions counts one session per mission and role', () 
   }]);
 });
 
+test('detectRunningMissionSessions keeps distinct subcommands with the same role', () => {
+  const sessions = detectRunningMissionSessions({
+    rootDir: '/home/dev/parallix',
+    now: () => NOW_MS,
+    listWorktrees: () => WORKTREES,
+    listProcesses: () => [
+      { pid: 100, elapsedSeconds: 60, args: 'node /home/dev/parallix/node_modules/.bin/tsx px.ts active task-2328' },
+      { pid: 101, elapsedSeconds: 30, args: 'node /home/dev/parallix/node_modules/.bin/tsx px.ts execute task-2328' },
+    ],
+    resolveCwd: () => '/home/dev/parallix-task-2328',
+  });
+
+  assert.equal(sessions?.length, 2);
+  assert.deepEqual(sessions?.map((session) => session.role), ['execute', 'execute']);
+});
+
 test('detectRunningMissionSessions ignores px commands that launch no agent', () => {
   const sessions = detectRunningMissionSessions({
     rootDir: '/home/dev/parallix',

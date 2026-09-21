@@ -350,25 +350,22 @@ function startOpencodeAgent({
   }
 
   async function processResult(result: any) {
-    if (result && result.stdout) {
-      result.sessionId = extractOpencodeSessionId(result.stdout) || undefined;
-    }
-    if (result && result.sessionId) {
-      try {
-        const exportJson = await _captureExport(result.sessionId, { worktree, env });
-        if (exportJson) {
-          const telemetry = extractOpencodeTelemetryFromExport(exportJson, model || undefined);
-          if (telemetry) {
-            result.telemetry = telemetry;
-            if ((telemetry as any).model) {result.model = (telemetry as any).model;}
-            if ((telemetry as any).provider) {result.provider = (telemetry as any).provider;}
-          }
-        }
-      } catch (_) {
-        return result;
-      }
-    }
+    if (!result) { return result; }
+    result.sessionId = result.stdout ? extractOpencodeSessionId(result.stdout) || undefined : result.sessionId;
+    await addOpencodeTelemetry(result);
     return result;
+  }
+
+  async function addOpencodeTelemetry(result: any): Promise<void> {
+    if (!result.sessionId) { return; }
+    try {
+      const exportJson = await _captureExport(result.sessionId, { worktree, env });
+      const telemetry = exportJson && extractOpencodeTelemetryFromExport(exportJson, model || undefined);
+      if (!telemetry) { return; }
+      result.telemetry = telemetry;
+      result.model = (telemetry as any).model || result.model;
+      result.provider = (telemetry as any).provider || result.provider;
+    } catch { /* telemetry is best-effort */ }
   }
 
   async function runWithJsonFallback(invocation: any) {

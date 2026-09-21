@@ -24,6 +24,47 @@ export interface IntegrationContextOptions {
 export function createIntegrationContextBuilder(ports: IntegrateWorkflowPorts) {
   const { missionPaths, backlog, forgejo, landing } = ports;
 
+  function resolveIntegrationBase(slug: string, baseBranch: string | null, baseWorktree: string | null) {
+    let branch = baseBranch;
+    if (!branch) {
+      try { branch = missionPaths.resolveMissionBaseBranch(slug, process.cwd()); } catch { branch = missionPaths.getPrimaryBranch(); }
+    }
+    let worktree = baseWorktree;
+    if (!worktree) {
+      try { worktree = missionPaths.resolveBaseWorktree(slug, { rootDir: process.cwd() }); } catch { worktree = missionPaths.getPrimaryWorktree(); }
+    }
+    return { branch, worktree };
+  }
+
+  async function forgejoContext(enabled: boolean, taskAssignee: string | null, slug: string, branch: string, integrationRoot: string, missionStore: MissionStore | null, readTokenFn: Function, getPrStatusFn: Function, getLatestReviewDecisionFn: Function, readReviewStateFn: Function) {
+    const absent = { forgejoIdentity: { forgejoUser: null, warning: null }, forgejoToken: null, configuredReviewer: null, pr: { exists: false }, siblingPrs: [] as any[], approval: { ok: false, error: 'forgejo-off', reviewState: null } };
+    if (!enabled) { return absent; }
+    const forgejoIdentity = landing.resolveForgejoUserForIntegration(taskAssignee);
+    const forgejoToken = readTokenFn(forgejoIdentity.forgejoUser || 'default');
+    // Recovery authority is the reviewer from the persisted current round, not
+    // the task assignee. Pass the Mission store because the production reader
+    // otherwise cannot resolve that authoritative review state.
+    const reviewState = await Promise.resolve(readReviewStateFn(slug, integrationRoot, missionStore));
+    const configuredReviewer = reviewState?.reviewer ? ports.review.resolveForgejoUser(reviewState.reviewer) : null;
+    let pr = getPrStatusFn(branch, process.cwd(), { forgejoUser: forgejoIdentity.forgejoUser, token: forgejoToken });
+    if (pr.exists && pr.merged === true) { pr = { ...pr, state: 'merged' }; }
+    const siblingPrs = pr.exists && slug && forgejoToken
+      ? forgejo.listOpenPrsForSlug(baseTaskSlug(slug), forgejoToken).filter((candidate: any) => candidate.head !== branch)
+      : [];
+    const approval = pr.exists
+      ? getLatestReviewDecisionFn(branch, { forgejoUser: forgejoIdentity.forgejoUser, token: forgejoToken, reviewerUser: configuredReviewer })
+      : { ok: false, error: 'pr-missing', reviewState: undefined };
+    return { forgejoIdentity, forgejoToken, configuredReviewer, pr, siblingPrs, approval };
+  }
+
+  async function localApprovalFallback(enabled: boolean, approval: any, slug: string, integrationRoot: string, readReviewStateFn: Function) {
+    if (!enabled || approval.ok) { return approval; }
+    const localState = await Promise.resolve(readReviewStateFn(slug, integrationRoot));
+    return localState?.phase === 'approved' && localState.disposition === 'APPROVED'
+      ? { ok: true, reviewState: 'APPROVED', source: 'local-review-state' }
+      : approval;
+  }
+
   async function buildIntegrationContext(slug: string, {
     baseBranch = null,
     baseWorktree = null,
@@ -44,17 +85,7 @@ export function createIntegrationContextBuilder(ports: IntegrateWorkflowPorts) {
     const missionDir = missionPaths.findMissionDir(slug);
     const area = missionDir ? missionPaths.findMissionArea(missionDir) : 'docs';
 
-    // The mission integrates back into its recorded base branch/worktree. When no
-    // base was recorded (every legacy mission) these resolve to the primary
-    // branch/worktree, so the rest of integration is byte-identical to today.
-    let resolvedBaseBranch: string | null = baseBranch;
-    if (!resolvedBaseBranch) {
-      try { resolvedBaseBranch = missionPaths.resolveMissionBaseBranch(slug, process.cwd()); } catch { resolvedBaseBranch = missionPaths.getPrimaryBranch(); }
-    }
-    let resolvedBaseWorktree: string | null = baseWorktree;
-    if (!resolvedBaseWorktree) {
-      try { resolvedBaseWorktree = missionPaths.resolveBaseWorktree(slug, { rootDir: process.cwd() }); } catch { resolvedBaseWorktree = missionPaths.getPrimaryWorktree(); }
-    }
+    const { branch: resolvedBaseBranch, worktree: resolvedBaseWorktree } = resolveIntegrationBase(slug, baseBranch, baseWorktree);
     const integrationRoot = resolvedBaseWorktree as string;
     // The mission branch owns the task payload that is about to be integrated.
     // Read task metadata there so integration remains independent of uncommitted
@@ -66,69 +97,8 @@ export function createIntegrationContextBuilder(ports: IntegrateWorkflowPorts) {
     const taskAssignee = task.ok ? backlog.getTaskAssignee(task.taskFile as string) : null;
     const forgejoEnabled = isForgejoReviewEnabledFn(integrationRoot);
 
-    let forgejoIdentity: { forgejoUser: string | null, warning: string | null } = { forgejoUser: null, warning: null };
-    let forgejoToken: string | null = null;
-    let configuredReviewer: string | null = null;
-    let pr: any = { exists: false };
-    let siblingPrs: any[] = [];
-    let approval: any = { ok: false, error: 'forgejo-off', reviewState: null };
-
-    if (forgejoEnabled) {
-      forgejoIdentity = landing.resolveForgejoUserForIntegration(taskAssignee);
-      forgejoToken = readTokenFn(forgejoIdentity.forgejoUser || 'default');
-      // TASK-2420 (review round 1, F1): the reviewer login queried for recovery
-      // authority must come from the Mission's recorded current review round, not
-      // from the task assignee (the implementer). An implementation by `codex`
-      // reviewed by `qwen` would otherwise query `codex` as the reviewer and
-      // reject qwen's legitimate approval. Derive it from the persisted round
-      // (fail-closed, ADR 0048): a mission with no recorded round yields no
-      // reviewer, so reviewerUser stays null and recovery falls back to the
-      // default user only — it cannot be forged from caller context.
-      // TASK-2420 (review round 2, F1): the production `readReviewState` returns
-      // null unless its third `missionStore` argument is supplied, so the
-      // authoritative store must be passed here or the reviewer lookup always
-      // falls back to the default user. The store is the operator Mission
-      // authority, never task metadata.
-      const reviewState = await Promise.resolve(readReviewStateFn(slug, integrationRoot, missionStore));
-      // TASK-2420 (review round 2, F1): the round stores the reviewer as an
-      // AgentFamily; the login it posts a provider APPROVED as is
-      // resolveForgejoUser(reviewer). Map it the same way so the recovery
-      // authority matches the login the reviewer actually used, never a caller
-      // value. No recorded reviewer yields null → falls back to the default user.
-      configuredReviewer = reviewState?.reviewer ? ports.review.resolveForgejoUser(reviewState.reviewer) : null;
-      pr = getPrStatusFn(branch, process.cwd(), { forgejoUser: forgejoIdentity.forgejoUser, token: forgejoToken });
-      if (pr.exists && pr.merged === true) {
-        pr = { ...pr, state: 'merged' };
-      }
-
-      if (pr.exists && slug && forgejoToken) {
-        const allOpen = forgejo.listOpenPrsForSlug(baseTaskSlug(slug), forgejoToken);
-        siblingPrs = allOpen.filter(p => p.head !== branch);
-      }
-
-      approval = pr.exists
-        ? getLatestReviewDecisionFn(branch, {
-          forgejoUser: forgejoIdentity.forgejoUser,
-          token: forgejoToken,
-          // TASK-2420 (review round 1, F1): pass the configured reviewer's resolved
-          // Forgejo login — derived from the recorded current review round above,
-          // never the task assignee/implementer (fail-closed, ADR 0048) — so the
-          // recovery authority recognizes an APPROVED by that reviewer too.
-          reviewerUser: configuredReviewer,
-        })
-        : { ok: false, error: 'pr-missing', reviewState: undefined };
-    }
-
-    // Local review-state fallback: when forgejo token/API is unavailable but the
-    // mission's Review shows approved, populate approval from local state
-    // so that integrate can proceed without a live Forgejo connection.
-    // Only applies when Forgejo was enabled but approval could not be obtained.
-    if (forgejoEnabled && !approval.ok) {
-      const localStateFallback = await Promise.resolve(readReviewStateFn(slug, integrationRoot));
-      if (localStateFallback && localStateFallback.phase === 'approved' && localStateFallback.disposition === 'APPROVED') {
-        approval = { ok: true, reviewState: 'APPROVED', source: 'local-review-state' };
-      }
-    }
+    const forgejoState = await forgejoContext(forgejoEnabled, taskAssignee, slug, branch, integrationRoot, missionStore, readTokenFn, getPrStatusFn, getLatestReviewDecisionFn, readReviewStateFn);
+    const approval = await localApprovalFallback(forgejoEnabled, forgejoState.approval, slug, integrationRoot, readReviewStateFn);
 
     const mainBranch = gitFn(['-C', integrationRoot, 'branch', '--show-current']).stdout.trim();
     const mainStatus = gitFn(['-C', integrationRoot, 'status', '--short']).stdout.trim();
@@ -144,14 +114,14 @@ export function createIntegrationContextBuilder(ports: IntegrateWorkflowPorts) {
       missionStatus: undefined as string | undefined,
       promoteBacklogOnCloseout: false,
       taskAssignee,
-      forgejoUser: forgejoIdentity.forgejoUser,
-      forgejoToken,
+      forgejoUser: forgejoState.forgejoIdentity.forgejoUser,
+      forgejoToken: forgejoState.forgejoToken,
       // The login whose provider APPROVED counts as the reviewer's; carried so
       // a stale approval can be retracted as that same login (TASK-2528).
-      configuredReviewer,
-      taskAssigneeWarning: forgejoIdentity.warning,
-      pr,
-      siblingPrs,
+      configuredReviewer: forgejoState.configuredReviewer,
+      taskAssigneeWarning: forgejoState.forgejoIdentity.warning,
+      pr: forgejoState.pr,
+      siblingPrs: forgejoState.siblingPrs,
       approval,
       baseBranch: resolvedBaseBranch,
       baseWorktree: resolvedBaseWorktree,

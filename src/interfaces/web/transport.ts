@@ -1040,32 +1040,50 @@ function checkSourceFact(object: unknown, path: string, problems: string[]): voi
   checkOptString(object, 'value', path, problems);
 }
 
+type MetricSeriesKey = 'cumulativeFlowByState' | 'weeklyCumulativeFlow' | 'medianCycleTimeByState';
+
+function checkMetricWindow(window: unknown, path: string, problems: string[]): void {
+  if (!isPlainObject(window)) { problems.push(`${path} must be an object`); return; }
+  checkKeys(window, ['startDate', 'endDate', 'label'], ['startDate', 'endDate', 'label'], path, problems);
+  checkString(window, 'startDate', path, problems);
+  checkString(window, 'endDate', path, problems);
+  checkString(window, 'label', path, problems);
+}
+
+function checkMetricPoint(key: MetricSeriesKey, point: unknown, path: string, problems: string[]): void {
+  if (!isPlainObject(point)) { problems.push(`${path} must be an object`); return; }
+  if (key === 'cumulativeFlowByState' || key === 'weeklyCumulativeFlow') {
+    checkKeys(point, ['at', 'counts', 'observationCount'], ['at', 'counts'], path, problems);
+    checkString(point, 'at', path, problems);
+    if (!isPlainObject(point.counts)) { problems.push(`${path}.counts must be an object`); }
+  } else {
+    checkKeys(point, ['lane', 'value', 'observationCount'], ['lane', 'value'], path, problems);
+    checkString(point, 'lane', path, problems);
+    checkNullableFiniteNumber(point, 'value', path, problems);
+  }
+  checkOptionalNullableNumber(point, 'observationCount', path, problems);
+}
+
+function checkMetricSeries(key: MetricSeriesKey, series: unknown, path: string, problems: string[]): void {
+  if (!isPlainObject(series)) { problems.push(`${path} must be an object`); return; }
+  const keys = key === 'weeklyCumulativeFlow' ? ['series', 'missingHistoryFallback', 'window'] : ['series', 'missingHistoryFallback'];
+  checkKeys(series, keys, keys, path, problems);
+  if (key === 'weeklyCumulativeFlow') { checkMetricWindow(series.window, `${path}.window`, problems); }
+  checkString(series, 'missingHistoryFallback', path, problems);
+  if (!Array.isArray(series.series)) { problems.push(`${path}.series must be an array`); return; }
+  series.series.forEach((point, index) => checkMetricPoint(key, point, `${path}.series[${index}]`, problems));
+}
+
 function checkMetrics(object: unknown, path: string, problems: string[]): void {
   if (!isPlainObject(object)) { problems.push(`${path} must be an object`); return; }
   checkKeys(object, ['health', 'provenance', 'flowWindow', 'cumulativeFlowByState', 'weeklyCumulativeFlow', 'medianCycleTimeByState', 'bottleneck'], ['health', 'provenance', 'cumulativeFlowByState', 'medianCycleTimeByState', 'bottleneck'], path, problems);
   if (!isPlainObject(object.health)) { problems.push(`${path}.health must be an object`); } else { checkKeys(object.health, ['state'], ['state'], `${path}.health`, problems); checkString(object.health, 'state', `${path}.health`, problems); }
   if (!isPlainObject(object.provenance)) { problems.push(`${path}.provenance must be an object`); } else { checkKeys(object.provenance, ['sampleSize', 'newestEventTimestamp'], ['sampleSize', 'newestEventTimestamp'], `${path}.provenance`, problems); checkFiniteNumber(object.provenance, 'sampleSize', `${path}.provenance`, problems); checkNullableString(object.provenance, 'newestEventTimestamp', `${path}.provenance`, problems); }
-  if (object.flowWindow !== undefined) { if (!isPlainObject(object.flowWindow)) { problems.push(`${path}.flowWindow must be an object`); } else { checkKeys(object.flowWindow, ['startDate', 'endDate', 'label'], ['startDate', 'endDate', 'label'], `${path}.flowWindow`, problems); checkString(object.flowWindow, 'startDate', `${path}.flowWindow`, problems); checkString(object.flowWindow, 'endDate', `${path}.flowWindow`, problems); checkString(object.flowWindow, 'label', `${path}.flowWindow`, problems); } }
-  for (const key of ['cumulativeFlowByState', 'weeklyCumulativeFlow', 'medianCycleTimeByState'] as const) {
+  if (object.flowWindow !== undefined) { checkMetricWindow(object.flowWindow, `${path}.flowWindow`, problems); }
+  for (const key of ['cumulativeFlowByState', 'weeklyCumulativeFlow', 'medianCycleTimeByState'] as MetricSeriesKey[]) {
     const series = object[key]; const seriesPath = `${path}.${key}`;
     if (key === 'weeklyCumulativeFlow' && series === undefined) { continue; }
-    if (!isPlainObject(series)) { problems.push(`${seriesPath} must be an object`); continue; }
-    const seriesKeys = key === 'weeklyCumulativeFlow' ? ['series', 'missingHistoryFallback', 'window'] : ['series', 'missingHistoryFallback'];
-    checkKeys(series, seriesKeys, seriesKeys, seriesPath, problems);
-    if (key === 'weeklyCumulativeFlow') {
-      if (!isPlainObject(series.window)) { problems.push(`${seriesPath}.window must be an object`); }
-      else { checkKeys(series.window, ['startDate', 'endDate', 'label'], ['startDate', 'endDate', 'label'], `${seriesPath}.window`, problems); checkString(series.window, 'startDate', `${seriesPath}.window`, problems); checkString(series.window, 'endDate', `${seriesPath}.window`, problems); checkString(series.window, 'label', `${seriesPath}.window`, problems); }
-    }
-    checkString(series, 'missingHistoryFallback', seriesPath, problems);
-    if (!Array.isArray(series.series)) { problems.push(`${seriesPath}.series must be an array`); continue; }
-    series.series.forEach((point, index) => {
-      const pointPath = `${seriesPath}.series[${index}]`;
-      if (!isPlainObject(point)) { problems.push(`${pointPath} must be an object`); return; }
-      if (key === 'cumulativeFlowByState' || key === 'weeklyCumulativeFlow') { checkKeys(point, ['at', 'counts', 'observationCount'], ['at', 'counts'], pointPath, problems); checkString(point, 'at', pointPath, problems); if (!isPlainObject(point.counts)) { problems.push(`${pointPath}.counts must be an object`); } }
-      else if (key === 'medianCycleTimeByState') { checkKeys(point, ['lane', 'value', 'observationCount'], ['lane', 'value'], pointPath, problems); checkString(point, 'lane', pointPath, problems); checkNullableFiniteNumber(point, 'value', pointPath, problems); }
-      else { checkKeys(point, ['at', 'value', 'observationCount'], ['at', 'value'], pointPath, problems); checkString(point, 'at', pointPath, problems); checkNullableFiniteNumber(point, 'value', pointPath, problems); }
-      checkOptionalNullableNumber(point, 'observationCount', pointPath, problems);
-    });
+    checkMetricSeries(key, series, seriesPath, problems);
   }
   if (!isPlainObject(object.bottleneck)) { problems.push(`${path}.bottleneck must be an object`); } else { checkKeys(object.bottleneck, ['sentence'], ['sentence'], `${path}.bottleneck`, problems); checkString(object.bottleneck, 'sentence', `${path}.bottleneck`, problems); }
 }

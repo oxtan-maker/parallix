@@ -14,8 +14,6 @@ import { subscribeToBoardProjection } from '../../application/projections/board-
  * repository root (set by the px.ts entry before dispatch).
  */
 export async function runUiCommand(capabilities: TuiCapabilities, _args: string[] = []): Promise<number> {
-  void _args; // intentionally unused — part of public API signature
-
   // Ink's `exitOnCtrlC` only recognises the 0x03 *byte* on stdin, which it can
   // only see once its own raw-mode effect has run — one frame after the first
   // render, and long after this command starts building the projection. Until

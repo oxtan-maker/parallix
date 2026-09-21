@@ -13,7 +13,7 @@ test('task-2332.09: every composed review loop injects mission services into aut
 
   for (const relative of compositionFiles) {
     const source = fs.readFileSync(path.join(root, relative), 'utf8');
-    assert.match(source, /performHandoffFn:\s*\(/, `${relative} must inject the review-loop handoff function`);
+    assert.match(source, /performHandoffFn:\s*(?:handoffWithMissionServices!?|performHandoffWithMissionServices\()/, `${relative} must inject the review-loop handoff function`);
     assert.match(source, /missionServicesFn(?:\s*:|\s*[,}])|missionServices:\s*missionServicesFn/,
       `${relative} must bind Mission services for automatic handoff`);
   }

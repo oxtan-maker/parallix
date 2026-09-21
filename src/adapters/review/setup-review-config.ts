@@ -23,13 +23,22 @@ export function evaluateReviewSetup(rootDir?: string, options: any = {}) {
   if (missingUsers.length) {issues.push(`missing Forgejo tokens for: ${missingUsers.join(', ')}`); steps.push('Run `px setup` and enter Forgejo passwords for the agent users you plan to run.');}
   const expectedRemote = remoteUrlFn(rootDir); const configuredRemoteName = remoteName || reviewAdapter.remote || 'review'; const currentRemote = getRemoteUrlFn(rootDir, configuredRemoteName);
   if (!currentRemote) {issues.push(`git remote "${configuredRemoteName}" is missing`); steps.push('Run `px setup` to create the review remote.');} else if (expectedRemote && currentRemote !== expectedRemote) {issues.push(`git remote "${configuredRemoteName}" points at ${currentRemote} instead of ${expectedRemote}`); steps.push('Run `px setup` to update the review remote URL.');}
-  if (!missingUsers.length) { for (const user of users) {
-    const token = fs.readFileSync(tokenPathFn(user), 'utf8').trim();
-    if (!token) {issues.push(`Forgejo token for ${user} is empty`); steps.push('Run `px setup-review` to rotate the empty token file.'); continue;}
-    const probe = requestFn('GET', `${normalizeBaseUrl(review.url)}/api/v1/repos/${review.repo}`, { token });
-    if (isAuthFailure(probe)) {issues.push(`Forgejo token for ${user} is invalid or expired (HTTP ${probe.statusCode})`); steps.push('Run `px setup-review` and re-enter the Forgejo passwords to rotate local PATs.');}
-    else if (!probe.ok && probe.statusCode === 404) {issues.push(`Forgejo review repo ${review.repo} is missing or inaccessible for ${user}`); steps.push('Run `px setup` to recreate the review repo and refresh token/remote wiring.');}
-    else if (!probe.ok && probe.statusCode === null) {issues.push(`Forgejo at ${normalizeBaseUrl(review.url)} is unreachable while validating ${user}`); steps.push('Start Forgejo and rerun `px verify-env` or `px setup-review`.');}
-  } }
+  if (!missingUsers.length) { assessReviewTokens(users, review, tokenPathFn, requestFn, issues, steps); }
   return issues.length ? { required: true, ok: false, issues, steps } : { required: true, ok: true, issues: [], steps: [] };
+}
+
+function assessReviewTokens(users: string[], review: { url: string; repo: string }, tokenPathFn: (_user: string) => string, requestFn: Function, issues: string[], steps: string[]): void {
+  for (const user of users) {
+    const token = fs.readFileSync(tokenPathFn(user), 'utf8').trim();
+    const issue = token ? reviewTokenIssue(user, token, review, requestFn) : { issue: `Forgejo token for ${user} is empty`, step: 'Run `px setup-review` to rotate the empty token file.' };
+    if (issue) { issues.push(issue.issue); steps.push(issue.step); }
+  }
+}
+
+function reviewTokenIssue(user: string, token: string, review: { url: string; repo: string }, requestFn: Function) {
+  const probe = requestFn('GET', `${normalizeBaseUrl(review.url)}/api/v1/repos/${review.repo}`, { token });
+  if (isAuthFailure(probe)) { return { issue: `Forgejo token for ${user} is invalid or expired (HTTP ${probe.statusCode})`, step: 'Run `px setup-review` and re-enter the Forgejo passwords to rotate local PATs.' }; }
+  if (!probe.ok && probe.statusCode === 404) { return { issue: `Forgejo review repo ${review.repo} is missing or inaccessible for ${user}`, step: 'Run `px setup` to recreate the review repo and refresh token/remote wiring.' }; }
+  if (!probe.ok && probe.statusCode === null) { return { issue: `Forgejo at ${normalizeBaseUrl(review.url)} is unreachable while validating ${user}`, step: 'Start Forgejo and rerun `px verify-env` or `px setup-review`.' }; }
+  return null;
 }

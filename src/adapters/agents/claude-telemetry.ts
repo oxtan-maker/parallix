@@ -52,6 +52,49 @@ function unwrapEvent(evt: any) {
   return evt;
 }
 
+function resultEventUsage(outer: any) {
+  if (outer.type !== 'result') { return null; }
+  const usage = outer.usage && typeof outer.usage === 'object' ? outer.usage : null;
+  return {
+    usage: usage ? { inputTokens: num(usage.input_tokens), outputTokens: num(usage.output_tokens), cacheReadTokens: num(usage.cache_read_input_tokens), cacheCreationTokens: num(usage.cache_creation_input_tokens) } : null,
+    cost: typeof outer.total_cost_usd === 'number' && Number.isFinite(outer.total_cost_usd) ? outer.total_cost_usd : null,
+  };
+}
+
+function addClaudeStreamUsage(evt: any, messageStarts: any[], messageDeltas: any[]) {
+  if (evt.type === 'message_start') {
+    const message = evt.message || {}; const usage = message.usage || {};
+    messageStarts.push({ inputTokens: num(usage.input_tokens), outputTokens: num(usage.output_tokens), cacheReadTokens: num(usage.cache_read_input_tokens), cacheCreationTokens: num(usage.cache_creation_input_tokens), model: message.model || null });
+    return message.model || null;
+  }
+  if (evt.type === 'message_delta') { messageDeltas.push({ outputTokens: num((evt.usage || {}).output_tokens) }); }
+  return null;
+}
+
+function parseStreamLine(line: string) {
+  const trimmed = line.trim();
+  if (!trimmed.startsWith('{')) { return null; }
+  try { return JSON.parse(trimmed); } catch (_) { return null; }
+}
+
+function consumeClaudeStreamEvent(outer: any, state: any) {
+  if (!outer || typeof outer !== 'object') { return; }
+  if (outer.session_id) { state.sessionId = outer.session_id; }
+  if (outer.type === 'system' && outer.model) { state.model = outer.model; }
+
+  // Each field is carried over independently: a later `result` line that omits
+  // usage or cost must not blank a value an earlier one already reported.
+  const result = resultEventUsage(outer);
+  if (result?.usage) { state.resultUsage = result.usage; }
+  if (result?.cost !== null && result?.cost !== undefined) { state.resultCostUsd = result.cost; }
+
+  const evt = unwrapEvent(outer);
+  if (!evt || typeof evt !== 'object') { return; }
+  const eventModel = addClaudeStreamUsage(evt, state.messageStarts, state.messageDeltas);
+  if (eventModel) { state.model = eventModel; }
+  if (evt.type === 'content_block_start' && (evt.content_block || {}).type === 'tool_use') { state.toolCalls += 1; }
+}
+
 /**
  * Parse a Claude `stream-json` stdout string into a normalized structure of the
  * usage-bearing events. Returns null when the content yields no usable signal
@@ -69,78 +112,18 @@ function unwrapEvent(evt: any) {
 function parseClaudeStreamJson(content: string) {
   if (!content) {return null;}
 
-  let sessionId = null;
-  let model = null;
-  let toolCalls = 0;
-  let resultUsage = null;
-  let resultCostUsd = null;
-  const messageStarts = [];
-  const messageDeltas = [];
+  const state = {
+    sessionId: null as string | null, model: null as string | null, toolCalls: 0,
+    resultUsage: null as any, resultCostUsd: null as number | null,
+    messageStarts: [] as any[], messageDeltas: [] as any[],
+  };
 
   for (const line of String(content).split('\n')) {
-    const trimmed = line.trim();
-    if (!trimmed.startsWith('{')) {continue;}
-    let outer;
-    try {
-      outer = JSON.parse(trimmed);
-    } catch (_) {
-      continue;
-    }
-    if (!outer || typeof outer !== 'object') {continue;}
-
-    // Top-level CLI envelope fields (present on system/result and sometimes the
-    // wrapper) carry session/model metadata.
-    if (outer.session_id) {sessionId = outer.session_id;}
-    if (outer.type === 'system' && outer.model) {model = outer.model;}
-
-    // The final `result` event carries `total_cost_usd` (direct from the CLI)
-    // and an aggregate usage object (fallback when partial events were evicted).
-    if (outer.type === 'result') {
-      if (outer.usage && typeof outer.usage === 'object') {
-        resultUsage = {
-          inputTokens: num(outer.usage.input_tokens),
-          outputTokens: num(outer.usage.output_tokens),
-          cacheReadTokens: num(outer.usage.cache_read_input_tokens),
-          cacheCreationTokens: num(outer.usage.cache_creation_input_tokens),
-        };
-      }
-      if (typeof outer.total_cost_usd === 'number' && Number.isFinite(outer.total_cost_usd)) {
-        resultCostUsd = outer.total_cost_usd;
-      }
-    }
-
-    const evt = unwrapEvent(outer);
-    if (!evt || typeof evt !== 'object') {continue;}
-
-    switch (evt.type) {
-      case 'message_start': {
-        const message = evt.message || {};
-        const usage = message.usage || {};
-        if (message.model) {model = message.model;}
-        messageStarts.push({
-          inputTokens: num(usage.input_tokens),
-          outputTokens: num(usage.output_tokens),
-          cacheReadTokens: num(usage.cache_read_input_tokens),
-          cacheCreationTokens: num(usage.cache_creation_input_tokens),
-          model: message.model || null,
-        });
-        break;
-      }
-      case 'message_delta': {
-        const usage = evt.usage || {};
-        messageDeltas.push({ outputTokens: num(usage.output_tokens) });
-        break;
-      }
-      case 'content_block_start': {
-        const block = evt.content_block || {};
-        if (block.type === 'tool_use') {toolCalls += 1;}
-        break;
-      }
-      default:
-        break;
-    }
+    const outer = parseStreamLine(line);
+    if (outer) { consumeClaudeStreamEvent(outer, state); }
   }
 
+  const { sessionId, model, toolCalls, resultUsage, resultCostUsd, messageStarts, messageDeltas } = state;
   const hasSignal = messageStarts.length > 0 || messageDeltas.length > 0 || resultUsage || model || sessionId;
   if (!hasSignal) {return null;}
 
@@ -153,6 +136,26 @@ function parseClaudeStreamJson(content: string) {
     toolCalls,
     resultUsage,
     resultCostUsd,
+  };
+}
+
+function telemetryTotals(parsed: any) {
+  const inputTokens = parsed.messageStarts.length > 0 ? parsed.messageStarts[0].inputTokens : 0;
+  return {
+    inputTokens,
+    outputTokens: parsed.messageDeltas.reduce((sum: number, delta: any) => sum + delta.outputTokens, 0),
+    cachedTokens: parsed.messageStarts.reduce((sum: number, start: any) => sum + start.cacheReadTokens, 0),
+    cacheCreationTokens: parsed.messageStarts.reduce((sum: number, start: any) => sum + start.cacheCreationTokens, 0),
+  };
+}
+
+function fallbackTelemetryTotals(totals: any, resultUsage: any) {
+  if (totals.inputTokens || totals.outputTokens || !resultUsage) { return totals; }
+  return {
+    inputTokens: resultUsage.inputTokens,
+    outputTokens: resultUsage.outputTokens,
+    cachedTokens: resultUsage.cacheReadTokens,
+    cacheCreationTokens: resultUsage.cacheCreationTokens,
   };
 }
 
@@ -180,20 +183,11 @@ function extractClaudeTelemetryFromStdout(stdout: string) {
 
   const { messageStarts, messageDeltas, resultUsage, resultCostUsd } = parsed;
 
-  let inputTokens = messageStarts.length > 0 ? messageStarts[0].inputTokens : 0;
-  let outputTokens = messageDeltas.reduce((sum, d) => sum + d.outputTokens, 0);
-  let cachedTokens = messageStarts.reduce((sum, s) => sum + s.cacheReadTokens, 0);
-  let cacheCreationTokens = messageStarts.reduce((sum, s) => sum + s.cacheCreationTokens, 0);
+  const totals = fallbackTelemetryTotals(telemetryTotals({ messageStarts, messageDeltas }), resultUsage);
+  const { inputTokens, outputTokens, cachedTokens, cacheCreationTokens } = totals;
 
   // If partial events were truncated out of the captured tail, fall back to the
   // final `result` event's aggregate usage so we still record real numbers.
-  if (inputTokens === 0 && outputTokens === 0 && resultUsage) {
-    inputTokens = resultUsage.inputTokens;
-    outputTokens = resultUsage.outputTokens;
-    cachedTokens = resultUsage.cacheReadTokens;
-    cacheCreationTokens = resultUsage.cacheCreationTokens;
-  }
-
   // NOTE: a small `inputTokens` (even 1) alongside a large `cachedTokens` is NOT
   // an artifact — it is normal prompt caching. Anthropic streaming reports only
   // the *uncached* prompt delta as `message_start.usage.input_tokens`; the bulk

@@ -220,6 +220,7 @@ test('native SEA smoke: Ink TUI launches on a real PTY and exits cleanly (SC3, A
     assertSurface('ink', /^\/dev\/(?:pts\/\d+|tty[a-z0-9]*)$/.test(session.ttyPath),
       `the executable was not given a PTY device (got ${session.ttyPath})`);
     await session.waitForOutput(/px board/, 30_000);
+    assert.match(session.output(), /px board/, 'the native Ink UI must render the board after startup');
     assertSurface('ink', /task-sea|SEA/i.test(session.output()),
       `Ink rendered no board rows on the native executable: ${session.output().slice(0, 400)}`);
 
@@ -242,6 +243,7 @@ test('native SEA smoke: SIGTERM shuts the running executable down gracefully (SC
   });
   try {
     await session.waitForOutput(/px board/, 30_000);
+    assert.match(session.output(), /px board/, 'the native Ink UI must render before SIGTERM');
     session.signal('SIGTERM');
     const { exitCode, shutdownMs } = await session.waitExit(30_000);
     // A graceful SIGTERM shutdown terminates promptly and does not abort: an
@@ -349,6 +351,7 @@ test('native SEA smoke: temporary Git operation and subprocess spawn succeed fro
     // `px status` shells out to git for the branch, the log, and the worktree
     // state: the rendered values are the subprocess results.
     const status = run(nativeArgv('status'), { cwd: scratch });
+    assert.equal(status.status, 0, status.stderr);
     assertSurface('git', status.status === 0, `px status failed in a temporary repository: ${status.stderr}`);
     assertSurface('git', /^Branch: main$/m.test(status.stdout), `git branch was not read via subprocess: ${status.stdout}`);
     assertSurface('git', /- scratch commit/.test(status.stdout), `git log was not read via subprocess: ${status.stdout}`);
@@ -373,6 +376,7 @@ test('native SEA smoke: uncaught diagnostics map back to TypeScript sources (SC3
     env: { PATH: process.env.PATH, HOME: workspace, PARALLIX_HOME: home, NODE_OPTIONS: '--enable-source-maps', NO_COLOR: '1' },
     timeout: 60_000,
   });
+  assert.notEqual(result.status, 0, 'the source-map fixture must trigger its intended uncaught failure');
   const diagnostics = `${result.stdout}${result.stderr}`;
   assertSurface('sourcemaps', /at run \(.*src\/composition\/create-cli\.ts:\d+:\d+\)/.test(diagnostics),
     `the native stack trace did not map to src/composition/create-cli.ts: ${diagnostics.slice(0, 600)}`);

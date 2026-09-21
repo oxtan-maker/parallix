@@ -282,11 +282,7 @@ export function availableBoardCommands(
   const reviewPhase = mission.review === null ? null : currentReviewRound(mission.review).phase;
   const resumesFindings = mission.status === 'review' && reviewPhase === 'fixing';
   const resumesGate = mission.status === 'active' && facts.latestGate === 'failed';
-  const activeReason = mission.status === 'review'
-    ? 'Resuming a review mission requires reviewer findings to act on'
-    : mission.status === 'active'
-      ? 'Resuming an active mission requires a failed gate or no live work'
-      : 'Mission must be refined before it can be activated';
+  const activeReason = activeCommandReason(mission.status);
   const canIntegrate = mission.status === 'integration'
     || (['active', 'review'].includes(mission.status) && hasApprovedReview);
   // An active mission with no live work at all is stranded: no agent holds the
@@ -299,9 +295,7 @@ export function availableBoardCommands(
   const strandedActive = mission.status === 'active'
     && (facts.currentWork === null || facts.currentWork === undefined)
     && facts.latestGate !== 'failed';
-  const activeLabel = resumesFindings ? 'findings ↩'
-    : resumesGate ? 'resume ▸'
-      : strandedActive ? 'restart ▸' : 'power ▸';
+  const activeLabel = activeCommandLabel(resumesFindings, resumesGate, strandedActive);
   return [
     availability(
       'active',
@@ -323,6 +317,18 @@ export function availableBoardCommands(
     // destructive one, and it targets no lane — cancel is not a lane move.
     availability('cancel', true, 'Cancellation is always available for a persisted mission', null, 'cancel ✕'),
   ];
+}
+
+function activeCommandReason(status: Mission['status']): string {
+  if (status === 'review') { return 'Resuming a review mission requires reviewer findings to act on'; }
+  if (status === 'active') { return 'Resuming an active mission requires a failed gate or no live work'; }
+  return 'Mission must be refined before it can be activated';
+}
+
+function activeCommandLabel(resumesFindings: boolean, resumesGate: boolean, strandedActive: boolean): string {
+  if (resumesFindings) { return 'findings ↩'; }
+  if (resumesGate) { return 'resume ▸'; }
+  return strandedActive ? 'restart ▸' : 'power ▸';
 }
 
 export function projectMissionCard(mission: Mission, facts: MissionOperationalFacts): MissionCard {

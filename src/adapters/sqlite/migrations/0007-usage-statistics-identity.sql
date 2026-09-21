@@ -42,11 +42,14 @@ SET actor_key = lower(
         ELSE COALESCE(NULLIF(trim(implementer_agent), ''), NULLIF(trim(implementer), ''), '')
       END
   END
-);
+)
+WHERE length(actor_key) = 0;
 
 -- Normalize `stage` so the identity key cannot split on '' vs 'default'.
 UPDATE usage_statistics
-SET stage = lower(trim(COALESCE(NULLIF(trim(stage), ''), 'default')));
+SET stage = lower(trim(COALESCE(NULLIF(trim(stage), ''), 'default')))
+WHERE stage <> lower(trim(COALESCE(NULLIF(trim(stage), ''), 'default')))
+   OR stage IS NULL;
 
 -- Collapse duplicates the file authority permitted, keeping the newest row
 -- (highest rowid) for each identity.

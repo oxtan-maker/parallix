@@ -13,6 +13,7 @@ const REAL_AGENT_OPTION = '--real-agent';
 const REAL_AGENT_MODEL_OPTION = '--real-agent-model';
 const INTEGRATE_VALUE_OPTIONS = new Set([REAL_AGENT_OPTION, REAL_AGENT_MODEL_OPTION]);
 const CODEX_REAL_AGENT_MODEL = 'gpt-5.6-luna';
+const INTEGRATE_BOOLEAN_OPTIONS: ReadonlyMap<string, 'dryRun' | 'noIntegrationGates' | 'noGate' | 'recoverLanded'> = new Map([['--dry-run', 'dryRun'], ['--no-integration-gates', 'noIntegrationGates'], ['--no-gate', 'noGate'], ['--recover-landed', 'recoverLanded']]);
 
 export interface IntegrateRequest {
   readonly explicitSlug?: string;
@@ -24,54 +25,49 @@ export interface IntegrateRequest {
   readonly realAgentModel: string | null;
 }
 
+function parseIntegrateValueOption(arg: string, value: string | undefined, state: { realAgent: string | null; realAgentModel: string | null }): boolean {
+  if (!INTEGRATE_VALUE_OPTIONS.has(arg)) { return false; }
+  if (!value || value.startsWith('--')) { throw new Error(`${arg} requires a value.`); }
+  if (arg === REAL_AGENT_OPTION) {
+    if (state.realAgent !== null) { throw new Error('--real-agent may be supplied only once.'); }
+    state.realAgent = value;
+  } else {
+    if (state.realAgentModel !== null) { throw new Error('--real-agent-model may be supplied only once.'); }
+    state.realAgentModel = value;
+  }
+  return true;
+}
+
 /** Parse only the public integrate flags before any preflight or gate work. */
 export function parseIntegrateArgs(args: string[], environment: Record<string, string | undefined> = process.env): IntegrateRequest {
   const params: string[] = [];
-  let dryRun = false;
-  let noIntegrationGates = false;
-  let noGate = false;
-  let recoverLanded = false;
-  let realAgent: string | null = null;
-  let realAgentModel: string | null = null;
+  const state = { dryRun: false, noIntegrationGates: false, noGate: false, recoverLanded: false, realAgent: null as string | null, realAgentModel: null as string | null };
 
   for (let index = 0; index < args.length; index += 1) {
     const arg = args[index];
-    if (INTEGRATE_VALUE_OPTIONS.has(arg)) {
-      const value = args[index + 1];
-      if (!value || value.startsWith('--')) {
-        throw new Error(`${arg} requires a value.`);
-      }
-      if (arg === REAL_AGENT_OPTION) {
-        if (realAgent !== null) {throw new Error('--real-agent may be supplied only once.');}
-        realAgent = value;
-      } else {
-        if (realAgentModel !== null) {throw new Error('--real-agent-model may be supplied only once.');}
-        realAgentModel = value;
-      }
+    if (parseIntegrateValueOption(arg, args[index + 1], state)) {
       index += 1;
       continue;
     }
-    if (arg === '--dry-run') { dryRun = true; continue; }
-    if (arg === '--no-integration-gates') { noIntegrationGates = true; continue; }
-    if (arg === '--no-gate') { noGate = true; continue; }
-    if (arg === '--recover-landed') { recoverLanded = true; continue; }
+    const booleanOption = INTEGRATE_BOOLEAN_OPTIONS.get(arg);
+    if (booleanOption) { state[booleanOption] = true; continue; }
     if (arg.startsWith('--')) {throw new Error(`Unknown integrate option: ${arg}`);}
     params.push(arg);
   }
 
-  if ((realAgent === null) !== (realAgentModel === null)) {
+  if ((state.realAgent === null) !== (state.realAgentModel === null)) {
     throw new Error('--real-agent and --real-agent-model must be supplied together.');
   }
-  if (realAgent !== null && realAgent !== 'codex') {
-    throw new Error(`Unsupported real agent "${realAgent}". Supported value: codex.`);
+  if (state.realAgent !== null && state.realAgent !== 'codex') {
+    throw new Error(`Unsupported real agent "${state.realAgent}". Supported value: codex.`);
   }
-  if (realAgent === 'codex' && realAgentModel !== CODEX_REAL_AGENT_MODEL) {
-    throw new Error(`Unsupported Codex real-agent model "${realAgentModel}". Supported value: ${CODEX_REAL_AGENT_MODEL}.`);
+  if (state.realAgent === 'codex' && state.realAgentModel !== CODEX_REAL_AGENT_MODEL) {
+    throw new Error(`Unsupported Codex real-agent model "${state.realAgentModel}". Supported value: ${CODEX_REAL_AGENT_MODEL}.`);
   }
-  if (noIntegrationGates && environment.PARALLIX_TEST_ALLOW_INTEGRATION_GATE_BYPASS !== '1') {
+  if (state.noIntegrationGates && environment.PARALLIX_TEST_ALLOW_INTEGRATION_GATE_BYPASS !== '1') {
     throw new Error('--no-integration-gates is rejected: final integration gates are mandatory.');
   }
-  return { explicitSlug: params[0], dryRun, noIntegrationGates, noGate, recoverLanded, realAgent, realAgentModel };
+  return { explicitSlug: params[0], ...state };
 }
 
 /** Resolve a task file into the integration checkout without escaping either worktree. */

@@ -18,9 +18,34 @@ if (!fs.existsSync(path.join(executionRoot, 'package.json')) || !fs.existsSync(t
 }
 
 const plan = buildTestRunPlan({ executionRoot, requestedArgs: process.argv.slice(2) });
-const { testNode, nodeArgs, runsIntegrationSuite, unitTestHeadroomMs } = plan;
+const { testNode, nodeArgs, runsIntegrationSuite, runsIntegrationCiSuite, unitTestHeadroomMs } = plan;
 const UNIT_TEST_BUDGET_MS = plan.unitTestBudgetMs; // PARALLIX_UNIT_TEST_BUDGET_MS
 const UNIT_TEST_TIMEOUT_MS = plan.unitTestTimeoutMs;
+
+// TASK-2547: coverage is a reporting mode of the CI-safe execution, not a
+// second test pass. When PARALLIX_TEST_COVERAGE is set (GitHub ci-required),
+// enable Node's built-in coverage and emit one lcov per tier so `npm run
+// coverage:merge` can union them. Unit and integration-ci stay separate Node
+// invocations (their execution semantics require it) but each selected test
+// still runs at most once; the two fragments are merged with LCOV semantics.
+const coverageEnabled = process.env.PARALLIX_TEST_COVERAGE === '1'
+  || process.env.PARALLIX_TEST_COVERAGE === 'true';
+const coverageDestination = runsIntegrationCiSuite
+  ? path.join(executionRoot, 'coverage', '.lcov-integration-ci.info')
+  : path.join(executionRoot, 'coverage', '.lcov-unit.info');
+const nodeArgsWithCoverage = coverageEnabled
+  ? [
+    ...nodeArgs.slice(0, nodeArgs.indexOf('--test')),
+    '--experimental-test-coverage',
+    '--test-coverage-lines=0',
+    '--test-reporter=lcov',
+    `--test-reporter-destination=${coverageDestination}`,
+    ...nodeArgs.slice(nodeArgs.indexOf('--test')),
+  ]
+  : nodeArgs;
+if (coverageEnabled) {
+  fs.mkdirSync(path.dirname(coverageDestination), { recursive: true });
+}
 
 // Build the canonical bundle before every suite so a direct runner invocation
 // also catches bundle regressions in the current checkout.
@@ -57,7 +82,7 @@ fs.mkdirSync(testManifestDir, { recursive: true });
 // acceptable because healthy workers self-clean their temp roots on exit and
 // finish their file, and a worker that would hang is exactly the case the
 // watchdog turns into a loud failure.
-const child = spawn(testNode, nodeArgs, {
+const child = spawn(testNode, nodeArgsWithCoverage, {
   stdio: ['inherit', 'pipe', 'pipe'],
   cwd: executionRoot,
   env: {
@@ -65,6 +90,9 @@ const child = spawn(testNode, nodeArgs, {
     ...(unitTestHeadroomMs === null ? {} : { PARALLIX_UNIT_TEST_HEADROOM: '1' }),
     PARALLIX_EXECUTION_ROOT: executionRoot,
     PARALLIX_TEST_MANIFEST_DIR: testManifestDir,
+    // V8 coverage payload lives repo-locally (not the shared tmpfs) so the
+    // per-tier fragments survive into the coverage:merge step.
+    ...(coverageEnabled ? { NODE_V8_COVERAGE: path.join(executionRoot, 'tmp', 'coverage-v8') } : {}),
   },
   detached: process.platform !== 'win32'
 });

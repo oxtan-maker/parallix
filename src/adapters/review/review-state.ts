@@ -796,23 +796,41 @@ export class ReviewState {
 
     for (let attempt = 0; attempt < 2; attempt += 1) {
       try {
-        const result = await store.load(missionId(this.slug));
-        if (result.kind !== 'found') {
-          return { outcome: 'write-failed', stage: 'write', diagnostic: `Mission ${this.slug} is not in the operator database` };
-        }
-        const mission = result.mission;
-        if (!mission.review) {
-          return {
-            outcome: 'write-failed',
-            stage: 'write',
-            diagnostic: `Mission ${this.slug} has no review to update; px review ${this.slug} --start starts the review, or px review ${this.slug} --backfill-review migrates a pre-cutover review-state.json`,
-          };
-        }
+        return await this.saveToStore(store, lifecycleService);
+      } catch (error) {
+        // A stale write means someone else committed between our load and save.
+        // Reload and reapply once; the review-state fields are last-writer-wins
+        // per field, so a replay onto the newer version is well defined.
+        const stale = error instanceof Error && error.name === 'MissionStaleWriteError';
+        if (stale && attempt === 0) { continue; }
+        return { outcome: 'write-failed', stage: 'write', diagnostic: diagnosticFrom(error, 'Review-state write failed') };
+      }
+    }
 
-        const review = applyReviewStateToReview(mission.review, this.toJSON());
-        const nextVersion = await store.save({ ...mission, review }, result.version);
+    return { outcome: 'write-failed', stage: 'write', diagnostic: `Review state for ${this.slug} lost a version race twice; another process is writing this mission` };
+  }
 
-        // TASK-2376: fire review → integration at the approval boundary.
+  private async saveToStore(store: NonNullable<Awaited<ReturnType<typeof resolveMissionStore>>>, lifecycleService: MissionLifecycleService | null): Promise<ReviewStatePersistenceResult> {
+    const result = await store.load(missionId(this.slug));
+    if (result.kind !== 'found') {
+      return { outcome: 'write-failed', stage: 'write', diagnostic: `Mission ${this.slug} is not in the operator database` };
+    }
+    const mission = result.mission;
+    if (!mission.review) {
+      return {
+        outcome: 'write-failed',
+        stage: 'write',
+        diagnostic: `Mission ${this.slug} has no review to update; px review ${this.slug} --start starts the review, or px review ${this.slug} --backfill-review migrates a pre-cutover review-state.json`,
+      };
+    }
+
+    const review = applyReviewStateToReview(mission.review, this.toJSON());
+    const nextVersion = await store.save({ ...mission, review }, result.version);
+    return await this.approveLifecycle(review, mission, nextVersion, lifecycleService) || { outcome: 'committed' };
+  }
+
+  private async approveLifecycle(review: any, mission: any, nextVersion: any, lifecycleService: MissionLifecycleService | null): Promise<ReviewStatePersistenceResult | null> {
+    // TASK-2376: fire review → integration at the approval boundary.
         // TASK-2378: a boundary transition that fails while the Mission is
         // still in the `review` lane is reported in the persistence result
         // instead of swallowed — the review is committed, the Mission stays
@@ -845,23 +863,7 @@ export class ReviewState {
             };
           }
         }
-
-        return { outcome: 'committed' };
-      } catch (error) {
-        // A stale write means someone else committed between our load and save.
-        // Reload and reapply once; the review-state fields are last-writer-wins
-        // per field, so a replay onto the newer version is well defined.
-        const stale = error instanceof Error && error.name === 'MissionStaleWriteError';
-        if (stale && attempt === 0) { continue; }
-        return { outcome: 'write-failed', stage: 'write', diagnostic: diagnosticFrom(error, 'Review-state write failed') };
-      }
-    }
-
-    return {
-      outcome: 'write-failed',
-      stage: 'write',
-      diagnostic: `Review state for ${this.slug} lost a version race twice; another process is writing this mission`,
-    };
+    return null;
   }
 
 }

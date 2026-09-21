@@ -150,6 +150,22 @@ test('extractClaudeTelemetryFromStdout falls back to resultUsage when partial ev
   assert.equal(tel.cachedTokens, 5000);
 });
 
+test('extractClaudeTelemetryFromStdout keeps result usage and cost when a later result event omits them (task-2525.05)', () => {
+  // A relayed sub-agent `result` carries neither usage nor cost. It must not
+  // blank the numbers the terminal result already reported, or the whole run
+  // records as zero-cost.
+  const jsonl = [
+    '{"type":"result","session_id":"sess-main","total_cost_usd":0.42,"usage":{"input_tokens":6000,"output_tokens":1200,"cache_read_input_tokens":5000}}',
+    '{"type":"result","session_id":"sess-subagent","subtype":"success"}',
+  ].join('\n');
+  const tel = extractClaudeTelemetryFromStdout(jsonl);
+  assert.ok(tel);
+  assert.equal(tel.inputTokens, 6000);
+  assert.equal(tel.outputTokens, 1200);
+  assert.equal(tel.cachedTokens, 5000);
+  assert.equal(tel.cost_usd, 0.42);
+});
+
 test('extractClaudeTelemetryFromStdout preserves a tiny input alongside a large cache read (prompt caching, not an artifact) (task-1318)', () => {
   // Reproduces the real "1 input token" row: input_tokens=1 is the UNCACHED
   // prompt delta; the bulk of the re-sent context (462739) is billed under

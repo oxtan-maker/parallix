@@ -43,16 +43,7 @@ export function ActionBar({ mission, selectedKind = null, onSelect, commandContr
         // this board build still supplies no request payload for them, so the
         // capability registry alone must not light a row up.
         const enabled = canDispatchAction(kind, mission, commandController);
-        const reason = enabled
-          ? null
-          : unavailableReason(kind)
-            ?? (kind === 'active:execute'
-              ? 'Mission cannot be activated from its current state'
-              : kind === 'draft:create'
-                ? 'Draft is available only while the mission is in the pre-draft (backlog) state'
-                : kind === 'mission:cancel'
-                  ? 'No cancellation authority is configured for this interface'
-                  : 'This board dispatches active:execute, draft:create and mission:cancel only');
+        const reason = enabled ? null : actionUnavailableReason(kind);
         const selected = selectedKind === kind;
         return (
           <Box key={kind}>
@@ -70,10 +61,18 @@ export function ActionBar({ mission, selectedKind = null, onSelect, commandContr
   );
 }
 
-function ActionSelection({ onSelect }: { readonly onSelect: (_kind: BoardCommandKind) => void }): null {
+function actionUnavailableReason(kind: BoardCommandKind): string {
+  const defaults: Partial<Record<BoardCommandKind, string>> = {
+    'active:execute': 'Mission cannot be activated from its current state',
+    'draft:create': 'Draft is available only while the mission is in the pre-draft (backlog) state',
+    'mission:cancel': 'No cancellation authority is configured for this interface',
+  };
+  return unavailableReason(kind) ?? defaults[kind] ?? 'This board dispatches active:execute, draft:create and mission:cancel only';
+}
+
+function ActionSelection({ onSelect: _onSelect }: { readonly onSelect: (_kind: BoardCommandKind) => void }): null {
   // The shell owns keyboard input. This marker preserves a narrow component
   // API for non-keyboard embeddings without making disabled rows actionable.
-  void onSelect;
   return null;
 }
 

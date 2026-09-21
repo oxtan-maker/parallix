@@ -35,7 +35,9 @@ test('SC 3: active.js runHandoffAndReview bounces through the kernel when repair
   const activeSource = fs.readFileSync(path.join(import.meta.dirname, '../src/adapters/cli/commands/active.ts'), 'utf8');
   assert.ok(activeSource.includes('startAgentFn'), 'runHandoffAndReview should have a startAgentFn launch seam');
   assert.ok(activeSource.includes('rebound('), 'Should bounce through the rebound kernel');
-  assert.ok(activeSource.includes('repairHandoff.isRelaunchableError(handoffResult.error)'), 'Should check isRelaunchableError before bouncing');
+  // Matched on the classifier call rather than one spelling of its argument, so
+  // extracting the repair helpers does not silently drop the guard.
+  assert.match(activeSource, /repairHandoff\.isRelaunchableError\([^)]*\.error\)/, 'Should check isRelaunchableError before bouncing');
 });
 
 test('SC 4: reviewer fallback uses the review eligibility selector', () => {

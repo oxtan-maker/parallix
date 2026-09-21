@@ -381,3 +381,29 @@ test('task-2377.03: the pre-review gate and hook paths build no prompt of their 
     assert.ok(!source.includes('Retry attempt:'), `${file} must not render its own retry counter`);
   }
 });
+
+// ── Transient rerun keeps the original diagnostic in the fix prompt ──────────
+
+test('task-2525.05: a transient gate rerun preserves the original diagnostic in the fix prompt', async () => {
+  const transientReason: ReboundReason = { ...gateReason, transient: true, stdout: 'ORIGINAL_GATE_OUTPUT' };
+  let capturedPrompt = '';
+  let verifyCalls = 0;
+
+  await rebound(transientReason, contextFor({
+    maxAttempts: 1,
+    verify: () => {
+      verifyCalls += 1;
+      return { ok: false, diagnostic: 'REFRESHED_GATE_OUTPUT' };
+    },
+    startAgent: async (_step, options: any) => {
+      capturedPrompt = options.prompt('codex');
+      return { agent: 'codex', result: { status: 0 } };
+    },
+  }));
+
+  // The transient rerun refreshed the diagnostic, so the prompt must show both:
+  // what the check reports now, and what the mission originally bounced on.
+  assert.ok(verifyCalls > 1, 'the transient reason should be rerun before an implementer is launched');
+  assert.match(capturedPrompt, /REFRESHED_GATE_OUTPUT/);
+  assert.match(capturedPrompt, /ORIGINAL_GATE_OUTPUT/);
+});

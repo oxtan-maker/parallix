@@ -327,17 +327,558 @@ function formatElapsed(elapsedMs: number) {
   return remainder === 0 ? `${minutes}m` : `${minutes}m ${remainder}s`;
 }
 
+/** One line per family that actually launched, naming how it ended. */
+function agentPoolExhaustedError(step: string, launched: Set<unknown>, agentErrors: Map<any, any>): Error {
+  const errorDetails = [...agentErrors.entries()].map(([agent, details]) => {
+    const status = details.exitInfo === 'stalled'
+      ? 'stalled (no output)'
+      : (details.status !== undefined && details.status !== null
+        ? `exit ${details.status}`
+        : (details.signal ? `signal ${details.signal}` : 'unknown'));
+    const stderrSnippet = details.stderr ? ` (${details.stderr.trim().split('\n')[0]})` : '';
+    return `${agent}: ${status}${stderrSnippet}`;
+  }).join('; ');
+  return new Error(
+    `All eligible agents exhausted for step "${step}". ` +
+    `Tried: ${[...launched].join(', ')}. Errors: ${errorDetails}.`
+  );
+}
+
+/** How a launch failure reads in the blocklist entry. */
+function launchFailureBlockReason(result: any): string {
+  if (result?.signal) { return `signal ${result.signal}`; }
+  if (result?.error?.code) { return result.error.code; }
+  if (result?.status !== null && result?.status !== 0) {
+    return result?.stderr ? `exit ${result.status}: ${result.stderr.trim().split('\n')[0]}` : `exit ${result.status}`;
+  }
+  return 'transient crash';
+}
+
+/**
+ * Block retry candidates only on a positive availability/quota classification
+ * (task-2536). Deterministic setup/config errors and every ambiguous non-zero
+ * exit fall through to the next family without poisoning agents.local.json.
+ * This is the second of two block-persistence sites; both agree on one bar via
+ * shouldPersistLaunchFailureBlock.
+ *
+ * NOTE (task-2536 round-1 F2): under default wiring this is unreachable —
+ * startAgent's limit-hit check uses the same detectLimitHit classifier, so a
+ * positive classification is caught and persisted there first. It is retained
+ * as defence-in-depth for callers that inject a non-default detectLimitHitFn;
+ * do not read it as a live production block path.
+ */
+async function persistLaunchFailureBlock(agent: string, result: any, updateAgentBlockFn: Function, log: Function): Promise<void> {
+  if (!shouldPersistLaunchFailureBlock(agent, result)) {
+    log(fmt.status('INFO', `Skipping blocklist write for ${fmt.agent(agent)}; failure not positively classified as a provider availability/quota block.`));
+    return;
+  }
+  const blockReason = launchFailureBlockReason(result);
+  const blockUntil = formatBlockUntil(new Date(Date.now() + DEFAULT_FALLBACK_HOURS * 60 * 60 * 1000));
+  try {
+    const blockResult = await updateAgentBlockFn(agent, blockUntil, { reason: blockReason });
+    log(fmt.status('INFO', `Wrote checked AgentBlock for ${fmt.agent(agent)} (${DEFAULT_FALLBACK_HOURS}h block, ${blockResult.reason || blockReason})`));
+  } catch (err) {
+    log(fmt.status('WARN', `Could not persist blocklist entry for ${fmt.agent(agent)}: ${(err as any).message}`));
+  }
+}
+
+
+/** Recognized agent-pool exhaustion signals (real selectAgent and test mocks). */
+function isAgentPoolExhaustionError(err: unknown): boolean {
+  const message = (err as any)?.message || '';
+  return message.includes('exhausted') || message.includes('No agents available');
+}
+
+type StartAgentLoopDeps = {
+  step: string;
+  opts: StartAgentOptions;
+  exclude: string[] | Set<string>;
+  pinnedAgent: boolean;
+  agentOverride: string | undefined;
+  log: Function;
+  selectAgentFn: Function;
+  isAgentBlockedFn: Function;
+  assertAgentSupportedFn: Function;
+  resolveAgentModelFn: Function;
+  detectLimitHitFn: Function;
+  updateAgentBlockFn: Function;
+  launchAgentFn: Function | null;
+  onLaunch: Function | undefined;
+  onLimitHit: Function | undefined;
+  sessionMarkerPort: SessionMarkerPort | undefined;
+  worktree: string | undefined;
+  slug: string | null;
+  role: string | null;
+  env: Record<string, string>;
+  noOutputWatchdog: { initialDelayMs?: number; intervalMs?: number } | boolean;
+  unrefChild: boolean;
+  allowUnsandboxedMutation: boolean;
+  refuseFallbackWhenPinned: (_detail: string) => void;
+};
+
+/** Mutable state walked by the one launch loop: selection, tried/launched sets, per-agent failures. */
+type StartAgentLoopState = {
+  chosen: string | undefined;
+  tried: Set<string>;
+  launched: Set<string>;
+  agentErrors: Map<any, any>;
+  iteration: number;
+};
+
+type PreparedLaunch = {
+  launcher: Function;
+  agentEnv: Record<string, string>;
+  resume: boolean;
+  sessionId: string | null;
+  launchSessionMarkerPort: SessionMarkerPort | undefined;
+  sessionRole: SessionRole | null;
+  actualPrompt: string;
+  model: string | null;
+  watchdogConfig: ReturnType<typeof resolveNoOutputWatchdogConfig>;
+  customReservation: { release: () => void; bindChild: (_pid?: number) => void } | null;
+  effectiveProfile: ReturnType<typeof resolveSandboxProfile> | null;
+  nativeSandbox: boolean;
+};
+
+/**
+ * Pick the agent for the next attempt and gate it: selection with the
+ * single-family escape hatch, the pre-launch blocklist reroute, and the
+ * launcher-availability reroute. Returns true when the loop continues with a
+ * fresh selection.
+ */
+async function selectAndGateAgent(state: StartAgentLoopState, deps: StartAgentLoopDeps): Promise<boolean> {
+  if (!state.chosen) {
+    try {
+      state.chosen = deps.selectAgentFn(deps.step, { exclude: state.tried, worktree: deps.worktree });
+    } catch (err) {
+      // Only catch pool exhaustion errors from selectAgent.
+      // Configuration errors (no eligible agents, no working launcher) must
+      // propagate unchanged to preserve diagnostics (SC 3).
+      if (!isAgentPoolExhaustionError(err)) {
+        throw err;
+      }
+      // Pool exhausted — try excluded agents as last resort before throwing.
+      // This restores the single-family escape hatch: when no different-family
+      // reviewer is available, the implementer reviews its own work.
+      const excludeList = deps.exclude instanceof Set ? [...deps.exclude] : deps.exclude;
+      const fallbackAgent = excludeList.find((a: string) => !state.launched.has(a));
+      if (fallbackAgent !== undefined) {
+        state.chosen = fallbackAgent;
+        return true;
+      }
+      // No excluded agent available either; build clear exhaustion diagnostics (SC 3)
+      throw agentPoolExhaustedError(deps.step, state.launched, state.agentErrors);
+    }
+  } else if (await deps.isAgentBlockedFn(state.chosen)) {
+    deps.refuseFallbackWhenPinned('currently blocked by the block authority');
+    // Pre-launch blocklist gate. An explicit `agent:` override (e.g. a pinned
+    // reviewer/implementer carried over from the mission's Review) bypasses
+    // selectAgent's blocklist filter. Without this check, a known-blocked
+    // family is relaunched immediately and the harness wastes a retry hitting
+    // the same limit. Reroute through normal selection on the next iteration.
+    deps.log(fmt.status('WARN', `Pinned agent "${fmt.agent(state.chosen)}" is currently blocked; rerouting via selectAgent for step "${deps.step}".`));
+    state.tried.add(state.chosen);
+    state.chosen = undefined;
+    return true;
+  }
+  try {
+    deps.assertAgentSupportedFn(state.chosen || '', deps.worktree);
+  } catch (err) {
+    /** @type {Error & {code?: string}} */
+    const e = (err as any);
+    if (e.code !== 'LAUNCHER_UNAVAILABLE') {
+      throw err;
+    }
+    deps.refuseFallbackWhenPinned(e.message || 'launcher unavailable');
+    deps.log(fmt.status('WARN', (err as any).message));
+    // Only reroute for launcher-availability failures (missing or probe-failed).
+    // A pinned agent already threw above, so every remaining caller reroutes
+    // through normal selection on the next iteration.
+    state.tried.add(state.chosen || '');
+    state.chosen = undefined;
+    return true;
+  }
+  return false;
+}
+
+/**
+ * Resolve everything the launch needs: launcher (custom runners included),
+ * session resume, prompt and model, and the custom-capacity reservation.
+ * Returns null when the loop must continue with a fresh selection
+ * (custom capacity saturated).
+ */
+async function prepareLaunch(state: StartAgentLoopState, deps: StartAgentLoopDeps): Promise<PreparedLaunch | null> {
+  const { step, log, opts, worktree, slug, role } = deps;
+  const chosen = state.chosen || '';
+  state.tried.add(chosen);
+  state.launched.add(chosen);
+
+  // For custom agent, resolve the actual launcher based on configuration.
+  // resolveCustomRunner/resolveCustomLauncher default to process.cwd()
+  // when worktree is undefined, so this must not be gated behind worktree
+  // truthiness (LAUNCHERS has no "custom" key, so skipping this branch
+  // silently drops the launcher to undefined and later crashes the launch).
+  let launcher = LAUNCHERS[state.chosen || ''];
+  let customRunner: string | undefined;
+  if (state.chosen === 'custom') {
+    launcher = resolveCustomLauncher(worktree as string);
+    customRunner = resolveCustomRunner(worktree as string);
+  }
+  if (deps.launchAgentFn) {
+    launcher = deps.launchAgentFn;
+  }
+  log(fmt.status('INFO', `Selected agent for step "${step}": ${fmt.agent(chosen, chosen, customRunner)}${state.iteration > 1 ? ` (attempt ${state.iteration})` : ''}`));
+
+  // Enforce the agent family as the Forgejo identity (ADR 0029 / architecture migration).
+  // FORGEJO_USER is set last so the harness-selected identity always wins;
+  // a caller-supplied env.FORGEJO_USER cannot override it.
+  const agentEnv = { ...deps.env, FORGEJO_USER: chosen };
+
+  // Decide whether to resume the agent's prior session for this (slug, role).
+  // Only honored when the caller passed slug+role+worktree AND the previous
+  // marker matches the chosen agent family (a fallback to a different family
+  // invalidates the prior session).
+  let resume = false;
+  let sessionId: string | null = null;
+  let launchSessionMarkerPort: SessionMarkerPort | undefined;
+  let sessionRole: SessionRole | null = null;
+  if (worktree && slug && role) {
+    sessionRole = normalizeSessionRole(role);
+    launchSessionMarkerPort = deps.sessionMarkerPort || await defaultSessionMarkerPort(worktree);
+    resume = RESUME_CAPABLE.has(chosen) &&
+      await launchSessionMarkerPort.shouldResume(
+        sessionMissionId(slug),
+        sessionRole,
+        sessionAgentFamily(chosen),
+      );
+    const marker = await launchSessionMarkerPort.find(sessionMissionId(slug), sessionRole);
+    sessionId = marker?.sessionId ?? null;
+  }
+  if (slug && role) {
+    if (resume) {
+      log(fmt.status('INFO', `Resuming ${fmt.agent(chosen)} session for ${fmt.slug(slug)} (${role}).${sessionId ? ` Session: ${sessionId}` : ''}`));
+    } else if (RESUME_CAPABLE.has(chosen)) {
+      log(fmt.status('INFO', `No prior ${fmt.agent(chosen)} session for ${fmt.slug(slug)} (${role}); launching fresh.`));
+    }
+  }
+
+  // Resolve the prompt string. If a function was provided, call it with the
+  // currently chosen agent name (architecture migration). This ensures that if startAgent
+  // falls back to a different family after a limit hit, the fallback agent
+  // receives a prompt tailored to its own identity.
+  const actualPrompt = typeof opts.prompt === 'function' ? opts.prompt(chosen) : opts.prompt;
+
+  // Resolve the per-family model override (adapters.agents.models[chosen]).
+  // null when the family is not configured, in which case the launcher omits
+  // the model flag entirely and the agent uses its own default.
+  const model = deps.resolveAgentModelFn(chosen, worktree || process.cwd());
+  if (model) {
+    log(fmt.status('INFO', `Using configured model for ${fmt.agent(chosen)}: ${model}`));
+  }
+
+  const watchdogConfig = resolveNoOutputWatchdogConfig(deps.noOutputWatchdog, step);
+  const customReservation = state.chosen === 'custom'
+    ? await tryAcquireCustomCapacity(worktree)
+    : null;
+  if (state.chosen === 'custom' && !customReservation) {
+    deps.refuseFallbackWhenPinned('custom-agent capacity is saturated');
+    log(fmt.status('WARN', 'Custom-agent capacity is saturated; selecting another eligible agent.'));
+    state.tried.add(chosen);
+    state.chosen = undefined;
+    return null;
+  }
+
+  // This is the sole production policy decision. The AsyncLocalStorage
+  // context reaches the shared process seam through every family launcher.
+  const sandboxProfile = worktree
+    ? resolveSandboxProfile(step, worktree, step === 'review' ? resolveReviewArtifactDir(worktree) : null, state.chosen || null)
+    : null;
+  // Task-2513: a mutating launch must never silently fall back to
+  // unsandboxed execution. Read-only (review) profiles skip the gate and
+  // keep their existing confinement path untouched. When Bubblewrap is
+  // missing (not merely disabled via the pre-existing PARALLIX_NO_BUBBLEWRAP
+  // opt-out), select the family's native sandbox where supported, require
+  // explicit operator consent to run unsandboxed, otherwise block.
+  let effectiveProfile = sandboxProfile;
+  // When native sandbox is selected, tell the launcher to enable the
+  // family's own sandbox (qwen `-s`, codex already defaults to it). Other
+  // families ignore the flag and rely on Bubblewrap, which is present here.
+  let nativeSandbox = false;
+  if (sandboxProfile?.worktreeWritable) {
+    const bubblewrapMissing = !isBubblewrapDisabled() && !isBubblewrapAvailable(); // opt-out lives in process.env, as at the spawn seam
+    if (bubblewrapMissing) {
+      const confinement = selectConfinement({
+        mutating: true,
+        bubblewrapAvailable: false,
+        nativeSandboxSupported: supportsNativeSandbox(state.chosen || null),
+        operatorConsent: deps.allowUnsandboxedMutation
+      });
+      if (confinement === 'blocked') {
+        throw new ConfinementBlockedError(
+          state.chosen || 'mutating agent',
+          'bubblewrap unavailable with no native-sandbox fallback and no consent'
+        );
+      }
+      nativeSandbox = confinement === 'native-sandbox';
+      // The only unsandboxed outcome is explicit operator consent. Warn here,
+      // not in the availability probe, so native-sandbox (confined) and
+      // blocked launches do not emit a false "unsandboxed" alarm.
+      if (confinement === 'unsandboxed-consented') {
+        fmt.log.warn(
+          `bubblewrap (${BUBBLEWRAP_COMMAND}) not found or not executable and ${state.chosen || 'the agent'} has no supported native sandbox; the agent is running UNSANDBOXED with full filesystem access (operator consented).`
+        );
+      }
+      // native-sandbox or consented: skip Bubblewrap so the launcher's own
+      // sandbox (where supported) is the fallback defense.
+      effectiveProfile = null;
+    }
+  }
+
+  return { launcher, agentEnv, resume, sessionId, launchSessionMarkerPort, sessionRole, actualPrompt, model, watchdogConfig, customReservation, effectiveProfile, nativeSandbox };
+}
+
+/** Run the launcher, announce the invocation, and await the result. */
+async function launchPrepared(prepared: PreparedLaunch, deps: StartAgentLoopDeps, chosen: string): Promise<{ invocation: any; result: any }> {
+  const { step, log, slug, unrefChild } = deps;
+  const { launcher, agentEnv, resume, sessionId, model, watchdogConfig, customReservation, effectiveProfile, nativeSandbox, launchSessionMarkerPort, sessionRole, actualPrompt } = prepared;
+  let invocation;
+  let result;
+  try {
+    const launchResult = withSandboxProfile(effectiveProfile, () => launcher({
+      prompt: actualPrompt,
+      worktree: deps.worktree,
+      env: agentEnv,
+      resume,
+      sessionId,
+      model,
+      sandbox: nativeSandbox,
+      slug,
+      role: sessionRole,
+      sessionMarkerPort: launchSessionMarkerPort,
+      teeOptions: {
+        ...(customReservation ? { onSpawn: (child: {pid?: number}) => customReservation.bindChild(child.pid) } : {}),
+        ...(unrefChild ? { unrefChild: true } : {}),
+        ...(watchdogConfig
+          ? {
+              noOutputWatchdog: {
+                ...watchdogConfig,
+                onNoOutput: (evt: {pid: number, elapsedMs: number, sawOutput?: boolean, msSinceLastOutput?: number | null}) => {
+                  // The watchdog keeps ticking after the agent's first output,
+                  // so on a healthy run it announced "Still waiting ... last
+                  // visible output 0s ago" while the agent was visibly
+                  // streaming. Only speak up when the stream has actually
+                  // gone quiet; a live agent is its own progress report.
+                  if (evt.sawOutput && (evt.msSinceLastOutput ?? 0) < QUIET_STREAM_REPORT_MS) { return; }
+                  const stage = evt.elapsedMs < (step === 'draft' ? DRAFT_NO_OUTPUT_INITIAL_DELAY_MS : DEFAULT_NO_OUTPUT_INITIAL_DELAY_MS)
+                    ? 'starting up'
+                    : 'running';
+                  // The watchdog is observational and keeps reporting after
+                  // the agent's first output, so the wording has to stay
+                  // truthful once output has already been seen.
+                  const detail = evt.sawOutput
+                    ? `last visible output ${formatElapsed(evt.msSinceLastOutput ?? 0)} ago`
+                    : 'stdout/stderr have not produced visible output';
+                  log(fmt.status(
+                    'INFO',
+                    `${evt.sawOutput ? 'Still waiting on' : 'No output yet from'} ${fmt.agent(chosen)} for step "${step}" after ${formatElapsed(evt.elapsedMs)} ` +
+                    `(pid ${evt.pid || 'unknown'}, agent ${stage}). ` +
+                    `Launcher is still running; ${detail}.`
+                  ));
+                }
+              }
+            }
+          : {})
+      }
+    }));
+    const { invocation: launchedInvocation, resultPromise } = launchResult;
+    invocation = launchedInvocation;
+    if (invocation) {
+      // The prompt is one of the args and runs to hundreds of lines. Echoing it
+      // buries the launch line (and the rest of the run) in harness text nobody
+      // reads, so summarize it by default and keep the verbatim command on DEBUG.
+      const echoedArgs = invocation.args
+        .map((arg: string) => (!process.env.DEBUG && String(arg).includes('\n') ? `<prompt: ${String(arg).length} chars>` : arg))
+        .join(' ');
+      log(fmt.status('INFO', `Launching: ${fmt.command(`${invocation.command} ${echoedArgs}`)}`));
+      if (invocation.options && invocation.options.cwd) {
+        log(fmt.status('INFO', `Working directory: ${fmt.path(invocation.options.cwd)}`));
+      }
+    }
+
+    if (deps.onLaunch) {
+      await deps.onLaunch({ agent: chosen, invocation });
+    }
+
+    result = resultPromise ? await resultPromise : launchResult.result;
+  } finally {
+    customReservation?.release();
+  }
+  return { invocation, result };
+}
+
+type LaunchVerdict = { kind: 'continue' } | { kind: 'return'; invocation: any; result: any };
+
+/**
+ * Classify the launch outcome: limit hits (reroute or block), launcher
+ * spawn failures, and launch failures (reroute, or return for the caller to
+ * report when pinned). Returns kind 'return' when the loop ends.
+ */
+async function classifyLaunchOutcome(state: StartAgentLoopState, deps: StartAgentLoopDeps, chosen: string, invocation: any, result: any): Promise<LaunchVerdict> {
+  const { log } = deps;
+  // Pass exit metadata so detectLimitHit only treats matching transcript text
+  // as a real limit hit when the launcher actually failed. A successful run
+  // (status === 0) that happens to contain limit-hit phrases — for example,
+  // an agent reviewing code or logs that quote those phrases — must not block
+  // the healthy agent.
+  const limitHit = deps.detectLimitHitFn({
+    agent: chosen,
+    stdout: result && result.stdout,
+    stderr: result && result.stderr,
+    status: result && result.status,
+    signal: result && result.signal,
+    error: result && result.error
+  });
+
+  if (limitHit) {
+    // Reroute signal: transient limit (e.g. qwen rate-limit) — exclude from
+    // current retry cycle without persisting a long block to blocklist.
+    if (limitHit.reroute) {
+      log(fmt.status('WARN', `Transient limit for ${fmt.agent(chosen)}; ${limitHit.reason}. Rerouting without block.`));
+      state.tried.add(chosen);
+      state.chosen = undefined;
+      return { kind: 'continue' };
+    }
+
+    log(fmt.status('WARN', `Limit hit detected for ${fmt.agent(chosen)}; reset estimate "${limitHit.until}" (${limitHit.source}). Blocking and retrying.`));
+    try {
+      const blockResult = await deps.updateAgentBlockFn(chosen, limitHit.until, { reason: limitHit.reason });
+      log(fmt.status('INFO', `Wrote checked AgentBlock for ${fmt.agent(chosen)} (${blockResult.reason || 'limit'})`));
+    } catch (err) {
+      log(fmt.status('WARN', `Could not persist blocklist entry for ${fmt.agent(chosen)}: ${(err as any).message}`));
+    }
+    if (typeof deps.onLimitHit === 'function') {
+      deps.onLimitHit({ agent: chosen, until: limitHit.until, source: limitHit.source });
+    }
+    deps.refuseFallbackWhenPinned(`usage limit hit; blocked until ${limitHit.until}`);
+    // A pinned agent fails loudly above; everything else reselects next round.
+    state.chosen = undefined;
+    return { kind: 'continue' };
+  }
+
+  // Reroute if the launcher binary could not be started (ENOENT = not found, EACCES = not executable).
+  if (result && result.error && (result.error.code === 'ENOENT' || result.error.code === 'EACCES')) {
+    deps.refuseFallbackWhenPinned(`launcher could not be started (${result.error.code})`);
+    log(fmt.status('WARN', `Launcher for "${chosen}" could not be started (${result.error.code}); rerouting.`));
+    state.tried.add(chosen);
+    state.chosen = undefined;
+    return { kind: 'continue' };
+  }
+
+  // Detect launch failure: agent started but exited with non-zero status and
+  // no limit-hit was detected. This catches errors like "Model not found" in
+  // opencode that cause the launcher to exit immediately with an error code.
+  // Retry with the next eligible agent instead of returning the failure.
+  // Only treat `status !== null && status !== 0` or `signal` (with no spawn
+  // error) as a launch failure; `status: null` without signal is ambiguous
+  // (spawn-tee close event can emit null code) and should not trigger a retry.
+  // Spurious opencode v2.0.0 JSON-mode exits (exit 1 after a valid
+  // "reason":"stop" completion) are excluded — the agent completed, the
+  // non-zero code is a post-run cleanup race. Codex and Vibe get the
+  // same treatment via their own family-specific telemetry evidence
+  // (result.telemetry carrying real, non-zero token usage) rather than an
+  // opencode-specific stdout pattern — see isSpuriousCodexExit (codex.ts)
+  // and isSpuriousVibeExit (vibe.ts).
+  const launchFailed = result &&
+    ((result.status !== null && result.status !== 0) || (result.signal && !result.error)) &&
+    !limitHit &&
+    !isSpuriousOpencodeExit(result) &&
+    !(chosen === 'codex' && isSpuriousCodexExit(result)) &&
+    !(chosen === 'vibe' && isSpuriousVibeExit(result)) &&
+    !(chosen === 'qwen' && isSpuriousQwenExit(result));
+  if (launchFailed) {
+    const exitInfo = result.signal
+      ? `signal ${result.signal}`
+      : `exit ${result.status}`;
+    const stderrSnippet = result && result.stderr
+      ? ` (${result.stderr.trim().split('\n')[0]})`
+      : '';
+    if (needsCredentialRefresh(result)) {
+      log(fmt.status('WARN', `Agent ${fmt.agent(chosen)} credentials need refreshing; re-authenticate the ${chosen} launcher before retrying.`));
+    }
+    // Pinned work has no next eligible agent: hand the failed result back so
+    // the caller reports the owner's own exit status (TASK-2294.01).
+    if (deps.pinnedAgent && deps.agentOverride) {
+      log(fmt.status('WARN', `Pinned agent ${fmt.agent(chosen)} failed to complete (${exitInfo}${stderrSnippet}); no fallback is permitted for this step.`));
+      return { kind: 'return', invocation, result };
+    }
+    log(fmt.status('WARN', `Agent ${fmt.agent(chosen)} failed to complete (${exitInfo}${stderrSnippet}); retrying with next eligible agent.`));
+    state.agentErrors.set(chosen, {
+      exitInfo,
+      stderr: result.stderr,
+      stdout: result.stdout,
+      signal: result.signal,
+      status: result.status,
+    });
+    state.tried.add(chosen);
+    state.launched.add(chosen);
+    // Block retry candidates only on a positive availability/quota
+    // classification (task-2536). Deterministic setup/config errors and every
+    // ambiguous non-zero exit fall through to the next family without
+    // poisoning agents.local.json. This is the second of two block-persistence
+    // sites; both now agree on one bar via shouldPersistLaunchFailureBlock.
+    //
+    // NOTE (task-2536 round-1 F2): under default wiring this branch is
+    // unreachable — startAgent's site-1 limit-hit check (L653) uses the same
+    // detectLimitHit classifier this helper calls, so a positive availability/
+    // quota classification is caught and persisted at site 1 first, and this
+    // helper only runs after a falsy site-1 result. It is retained solely as
+    // defence-in-depth for callers that inject a non-default detectLimitHitFn;
+    // do not read it as a live production block path.
+    await persistLaunchFailureBlock(chosen, result, deps.updateAgentBlockFn, log);
+    state.chosen = undefined;
+    return { kind: 'continue' };
+  }
+  return { kind: 'return', invocation, result };
+}
+
+/**
+ * Record the session marker so a subsequent same-(slug, role) launch knows
+ * which family last ran here. Only persisted when the run exited cleanly
+ * (status 0 and no spawn error); a failed launch must not overwrite the
+ * canonical session marker with a stale transcript.
+ */
+async function recordSessionMarker(deps: StartAgentLoopDeps, prepared: PreparedLaunch, chosen: string, result: any): Promise<void> {
+  const { worktree, slug, role } = deps;
+  if (!(worktree && slug && role && result && result.status === 0 && !result.error)) { return; }
+  const launchSessionId = result && result.sessionId ? result.sessionId : null;
+  if (!prepared.launchSessionMarkerPort || !prepared.sessionRole) {
+    throw new Error('SessionMarkerPort and canonical role are required');
+  }
+  try {
+    await prepared.launchSessionMarkerPort.save({
+      missionId: sessionMissionId(slug),
+      role: prepared.sessionRole,
+      agent: sessionAgentFamily(chosen),
+      lastLaunched: new Date().toISOString(),
+      sessionId: launchSessionId,
+    });
+  } catch (err) {
+    // Diagnostic: log full error details and database state
+    if (process.env.PARALLIX_DEBUG_SQL) {
+      const { getOperatorStateCacheSize } = await import('../sqlite/adapter-factory.js');
+      const e = err as Error & { code?: string };
+      process.stderr.write(`[sql-error] save failed: code=${e.code ?? 'n/a'} message="${e.message}\n`);
+      process.stderr.write(`[sql-error] cacheSize=${getOperatorStateCacheSize()} pid=${process.pid}\n`);
+      process.stderr.write(`[sql-error] stack:\n${e.stack ?? 'n/a'}\n`);
+    }
+    throw new Error(`Could not persist session marker for ${slug} (${role}): ${(err as Error).message}`);
+  }
+}
+
 async function startAgent(step: string, opts: StartAgentOptions = { prompt: '' }) {
   const {
-    prompt,
-    worktree,
     agent: agentOverride,
-    env = {},
     exclude = [],
-    onLimitHit,
-    onLaunch,
-    slug = null,
-    role = null,
     detectLimitHitFn = detectLimitHit,
     updateAgentBlockFn = updateAgentBlockChecked,
     selectAgentFn = selectAgent,
@@ -345,24 +886,22 @@ async function startAgent(step: string, opts: StartAgentOptions = { prompt: '' }
     isAgentBlockedFn = defaultIsAgentBlockedNow,
     sessionMarkerPort,
     log = fmt.log.plain,
-    noOutputWatchdog = {},
-    launchAgentFn = null,
-    assertAgentSupportedFn = assertAgentSupported,
-    unrefChild = false,
     pinnedAgent = false,
-    allowUnsandboxedMutation = false
   } = opts;
 
   // `exclude` seeds the tried-set so callers can reserve agents (e.g. exclude
   // the current implementer from reviewer fallback to preserve family separation).
   const excludeIterable = exclude instanceof Set ? exclude : exclude;
-  const tried = new Set(excludeIterable);
   // Track per-agent failure details for accurate exhaustion diagnostics (SC 3)
   const agentErrors = new Map();
   // Track agents actually launched (not just pre-excluded) for accurate reporting
-  const launched = new Set();
-  let iteration = 0;
-  let chosen = agentOverride;
+  const state: StartAgentLoopState = {
+    tried: new Set(excludeIterable),
+    launched: new Set(),
+    agentErrors,
+    chosen: agentOverride,
+    iteration: 0,
+  };
 
   // Single explicit-fail branch for pinned work (TASK-2294.01). Every reroute
   // point below calls it before clearing `chosen`, so a pinned agent never
@@ -373,454 +912,44 @@ async function startAgent(step: string, opts: StartAgentOptions = { prompt: '' }
     }
   };
 
+  const deps: StartAgentLoopDeps = {
+    step,
+    opts,
+    exclude: excludeIterable,
+    pinnedAgent,
+    agentOverride,
+    log,
+    selectAgentFn,
+    isAgentBlockedFn,
+    assertAgentSupportedFn: opts.assertAgentSupportedFn ?? assertAgentSupported,
+    resolveAgentModelFn,
+    detectLimitHitFn,
+    updateAgentBlockFn,
+    launchAgentFn: opts.launchAgentFn ?? null,
+    onLaunch: opts.onLaunch,
+    onLimitHit: opts.onLimitHit,
+    sessionMarkerPort,
+    worktree: opts.worktree,
+    slug: opts.slug ?? null,
+    role: opts.role ?? null,
+    env: opts.env ?? {},
+    noOutputWatchdog: opts.noOutputWatchdog ?? {},
+    unrefChild: opts.unrefChild ?? false,
+    allowUnsandboxedMutation: opts.allowUnsandboxedMutation ?? false,
+    refuseFallbackWhenPinned,
+  };
+
   while (true) {
-    iteration += 1;
-    if (!chosen) {
-      try {
-        chosen = selectAgentFn(step, { exclude: tried, worktree });
-      } catch (err) {
-        // Only catch pool exhaustion errors from selectAgent.
-        // Configuration errors (no eligible agents, no working launcher) must
-        // propagate unchanged to preserve diagnostics (SC 3).
-        // Exhaustion is indicated by:
-        // - "exhausted" from real selectAgent pool exhaustion ("are exhausted")
-        // - "No agents available" from test mocks simulating exhaustion
-        if (!((err as any).message || '').includes('exhausted') &&
-          !((err as any).message || '').includes('No agents available')
-        ) {
-          throw err;
-        }
-        // Pool exhausted — try excluded agents as last resort before throwing.
-        // This restores the single-family escape hatch: when no different-family
-        // reviewer is available, the implementer reviews its own work.
-        const excludeIterableOrig = exclude instanceof Set ? [...exclude] : exclude;
-        const fallbackAgent = excludeIterableOrig.find((a: string) => !launched.has(a));
-        if (fallbackAgent !== undefined) {
-          chosen = fallbackAgent;
-          continue;
-        }
-        // No excluded agent available either; build clear exhaustion diagnostics (SC 3)
-        const errorDetails = [...agentErrors.entries()].map(([agent, details]) => {
-          const status = details.exitInfo === 'stalled'
-            ? 'stalled (no output)'
-            : (details.status !== undefined && details.status !== null
-              ? `exit ${details.status}`
-              : (details.signal ? `signal ${details.signal}` : 'unknown'));
-          const stderrSnippet = details.stderr ? ` (${details.stderr.trim().split('\n')[0]})` : '';
-          return `${agent}: ${status}${stderrSnippet}`;
-        }).join('; ');
-        const launchedList = [...launched].join(', ');
-        throw new Error(
-          `All eligible agents exhausted for step "${step}". ` +
-          `Tried: ${launchedList}. Errors: ${errorDetails}.`
-        );
-      }
-    } else if (await isAgentBlockedFn(chosen)) {
-      refuseFallbackWhenPinned('currently blocked by the block authority');
-      // Pre-launch blocklist gate. An explicit `agent:` override (e.g. a pinned
-      // reviewer/implementer carried over from the mission's Review) bypasses
-      // selectAgent's blocklist filter. Without this check, a known-blocked
-      // family is relaunched immediately and the harness wastes a retry hitting
-      // the same limit. Reroute through normal selection on the next iteration.
-      log(fmt.status('WARN', `Pinned agent "${fmt.agent(chosen)}" is currently blocked; rerouting via selectAgent for step "${step}".`));
-      tried.add(chosen);
-      chosen = undefined;
-      continue;
-    }
-
-    try {
-      assertAgentSupportedFn(chosen || '', worktree);
-    } catch (err) {
-      /** @type {Error & {code?: string}} */
-      const e = (err as any);
-      if (e.code !== 'LAUNCHER_UNAVAILABLE') {
-        throw err;
-      }
-      refuseFallbackWhenPinned(e.message || 'launcher unavailable');
-      log(fmt.status('WARN', (err as any).message));
-      // Only reroute for launcher-availability failures (missing or probe-failed).
-      tried.add(chosen || '');
-      // If the caller pinned a specific agent, allow one retry that ignores
-      // the override and falls back to normal selection (matches limit-hit logic).
-      if (agentOverride && agentOverride === chosen && iteration === 1) {
-        chosen = undefined;
-        continue;
-      }
-      chosen = undefined;
-      continue;
-    }
-    tried.add(chosen || '');
-    launched.add(chosen || '');
-
-    // For custom agent, resolve the actual launcher based on configuration.
-    // resolveCustomRunner/resolveCustomLauncher default to process.cwd()
-    // when worktree is undefined, so this must not be gated behind worktree
-    // truthiness (LAUNCHERS has no "custom" key, so skipping this branch
-    // silently drops the launcher to undefined and later crashes the launch).
-    let launcher = LAUNCHERS[chosen || ''];
-    let customRunner: string | undefined;
-    if (chosen === 'custom') {
-      launcher = resolveCustomLauncher(worktree as string);
-      customRunner = resolveCustomRunner(worktree as string);
-    }
-    if (launchAgentFn) {
-      launcher = launchAgentFn;
-    }
-    log(fmt.status('INFO', `Selected agent for step "${step}": ${fmt.agent(chosen || '', chosen || '', customRunner)}${iteration > 1 ? ` (attempt ${iteration})` : ''}`));
-
-    // Enforce the agent family as the Forgejo identity (ADR 0029 / architecture migration).
-    // FORGEJO_USER is set last so the harness-selected identity always wins;
-    // a caller-supplied env.FORGEJO_USER cannot override it.
-    const agentEnv = { ...env, FORGEJO_USER: chosen };
-
-    // Decide whether to resume the agent's prior session for this (slug, role).
-    // Only honored when the caller passed slug+role+worktree AND the previous
-    // marker matches the chosen agent family (a fallback to a different family
-    // invalidates the prior session).
-    let resume = false;
-    let sessionId: string | null = null;
-    let launchSessionMarkerPort: SessionMarkerPort | undefined;
-    let sessionRole: SessionRole | null = null;
-    if (worktree && slug && role) {
-      sessionRole = normalizeSessionRole(role);
-      launchSessionMarkerPort = sessionMarkerPort || await defaultSessionMarkerPort(worktree);
-      resume = RESUME_CAPABLE.has(chosen || '') &&
-        await launchSessionMarkerPort.shouldResume(
-          sessionMissionId(slug),
-          sessionRole,
-          sessionAgentFamily(chosen || ''),
-        );
-      const marker = await launchSessionMarkerPort.find(sessionMissionId(slug), sessionRole);
-      sessionId = marker?.sessionId ?? null;
-    }
-    if (slug && role) {
-      if (resume) {
-        log(fmt.status('INFO', `Resuming ${fmt.agent(chosen || '')} session for ${fmt.slug(slug)} (${role}).${sessionId ? ` Session: ${sessionId}` : ''}`));
-      } else if (RESUME_CAPABLE.has(chosen || '')) {
-        log(fmt.status('INFO', `No prior ${fmt.agent(chosen || '')} session for ${fmt.slug(slug)} (${role}); launching fresh.`));
-      }
-    }
-
-    // Resolve the prompt string. If a function was provided, call it with the
-    // currently chosen agent name (architecture migration). This ensures that if startAgent
-    // falls back to a different family after a limit hit, the fallback agent
-    // receives a prompt tailored to its own identity.
-    const actualPrompt = typeof prompt === 'function' ? prompt(chosen) : prompt;
-
-    // Resolve the per-family model override (adapters.agents.models[chosen]).
-    // null when the family is not configured, in which case the launcher omits
-    // the model flag entirely and the agent uses its own default.
-    const model = resolveAgentModelFn(chosen || '', worktree || process.cwd());
-    if (model) {
-      log(fmt.status('INFO', `Using configured model for ${fmt.agent(chosen || '')}: ${model}`));
-    }
-
-    const watchdogConfig = resolveNoOutputWatchdogConfig(noOutputWatchdog, step);
-    const customReservation = chosen === 'custom'
-      ? await tryAcquireCustomCapacity(worktree)
-      : null;
-    if (chosen === 'custom' && !customReservation) {
-      refuseFallbackWhenPinned('custom-agent capacity is saturated');
-      log(fmt.status('WARN', 'Custom-agent capacity is saturated; selecting another eligible agent.'));
-      tried.add(chosen);
-      chosen = undefined;
-      continue;
-    }
-
-    let invocation;
-    let result;
-    try {
-      // This is the sole production policy decision. The AsyncLocalStorage
-      // context reaches the shared process seam through every family launcher.
-      const sandboxProfile = worktree
-        ? resolveSandboxProfile(step, worktree, step === 'review' ? resolveReviewArtifactDir(worktree) : null, chosen || null)
-        : null;
-      // Task-2513: a mutating launch must never silently fall back to
-      // unsandboxed execution. Read-only (review) profiles skip the gate and
-      // keep their existing confinement path untouched. When Bubblewrap is
-      // missing (not merely disabled via the pre-existing PARALLIX_NO_BUBBLEWRAP
-      // opt-out), select the family's native sandbox where supported, require
-      // explicit operator consent to run unsandboxed, otherwise block.
-      let effectiveProfile = sandboxProfile;
-      // When native sandbox is selected, tell the launcher to enable the
-      // family's own sandbox (qwen `-s`, codex already defaults to it). Other
-      // families ignore the flag and rely on Bubblewrap, which is present here.
-      let nativeSandbox = false;
-      if (sandboxProfile?.worktreeWritable) {
-        const bubblewrapMissing = !isBubblewrapDisabled() && !isBubblewrapAvailable(); // opt-out lives in process.env, as at the spawn seam
-        if (bubblewrapMissing) {
-          const confinement = selectConfinement({
-            mutating: true,
-            bubblewrapAvailable: false,
-            nativeSandboxSupported: supportsNativeSandbox(chosen || null),
-            operatorConsent: allowUnsandboxedMutation
-          });
-          if (confinement === 'blocked') {
-            throw new ConfinementBlockedError(
-              chosen || 'mutating agent',
-              'bubblewrap unavailable with no native-sandbox fallback and no consent'
-            );
-          }
-          nativeSandbox = confinement === 'native-sandbox';
-          // The only unsandboxed outcome is explicit operator consent. Warn here,
-          // not in the availability probe, so native-sandbox (confined) and
-          // blocked launches do not emit a false "unsandboxed" alarm.
-          if (confinement === 'unsandboxed-consented') {
-            fmt.log.warn(
-              `bubblewrap (${BUBBLEWRAP_COMMAND}) not found or not executable and ${chosen || 'the agent'} has no supported native sandbox; the agent is running UNSANDBOXED with full filesystem access (operator consented).`
-            );
-          }
-          // native-sandbox or consented: skip Bubblewrap so the launcher's own
-          // sandbox (where supported) is the fallback defense.
-          effectiveProfile = null;
-        }
-      }
-      const launchResult = withSandboxProfile(effectiveProfile, () => launcher({
-        prompt: actualPrompt,
-        worktree,
-        env: agentEnv,
-        resume,
-        sessionId,
-        model,
-        sandbox: nativeSandbox,
-        slug,
-        role: sessionRole,
-        sessionMarkerPort: launchSessionMarkerPort,
-        teeOptions: {
-          ...(customReservation ? { onSpawn: (child: {pid?: number}) => customReservation.bindChild(child.pid) } : {}),
-          ...(unrefChild ? { unrefChild: true } : {}),
-          ...(watchdogConfig
-            ? {
-                noOutputWatchdog: {
-                  ...watchdogConfig,
-                  onNoOutput: (evt: {pid: number, elapsedMs: number, sawOutput?: boolean, msSinceLastOutput?: number | null}) => {
-                    // The watchdog keeps ticking after the agent's first output,
-                    // so on a healthy run it announced "Still waiting ... last
-                    // visible output 0s ago" while the agent was visibly
-                    // streaming. Only speak up when the stream has actually
-                    // gone quiet; a live agent is its own progress report.
-                    if (evt.sawOutput && (evt.msSinceLastOutput ?? 0) < QUIET_STREAM_REPORT_MS) { return; }
-                    const stage = evt.elapsedMs < (step === 'draft' ? DRAFT_NO_OUTPUT_INITIAL_DELAY_MS : DEFAULT_NO_OUTPUT_INITIAL_DELAY_MS)
-                      ? 'starting up'
-                      : 'running';
-                    // The watchdog is observational and keeps reporting after
-                    // the agent's first output, so the wording has to stay
-                    // truthful once output has already been seen.
-                    const detail = evt.sawOutput
-                      ? `last visible output ${formatElapsed(evt.msSinceLastOutput ?? 0)} ago`
-                      : 'stdout/stderr have not produced visible output';
-                    log(fmt.status(
-                      'INFO',
-                      `${evt.sawOutput ? 'Still waiting on' : 'No output yet from'} ${fmt.agent(chosen || '')} for step "${step}" after ${formatElapsed(evt.elapsedMs)} ` +
-                      `(pid ${evt.pid || 'unknown'}, agent ${stage}). ` +
-                      `Launcher is still running; ${detail}.`
-                    ));
-                  }
-                }
-              }
-            : {})
-        }
-      }));
-      const { invocation: launchedInvocation, resultPromise } = launchResult;
-      invocation = launchedInvocation;
-      if (invocation) {
-        // The prompt is one of the args and runs to hundreds of lines. Echoing it
-        // buries the launch line (and the rest of the run) in harness text nobody
-        // reads, so summarize it by default and keep the verbatim command on DEBUG.
-        const echoedArgs = invocation.args
-          .map((arg: string) => (!process.env.DEBUG && String(arg).includes('\n') ? `<prompt: ${String(arg).length} chars>` : arg))
-          .join(' ');
-        log(fmt.status('INFO', `Launching: ${fmt.command(`${invocation.command} ${echoedArgs}`)}`));
-        if (invocation.options && invocation.options.cwd) {
-          log(fmt.status('INFO', `Working directory: ${fmt.path(invocation.options.cwd)}`));
-        }
-      }
-
-      if (onLaunch) {
-        await onLaunch({ agent: chosen, invocation });
-      }
-
-      result = resultPromise ? await resultPromise : launchResult.result;
-    } finally {
-      customReservation?.release();
-    }
-
-    // Pass exit metadata so detectLimitHit only treats matching transcript text
-    // as a real limit hit when the launcher actually failed. A successful run
-    // (status === 0) that happens to contain limit-hit phrases — for example,
-    // an agent reviewing code or logs that quote those phrases — must not block
-    // the healthy agent.
-    const limitHit = detectLimitHitFn({
-      agent: chosen,
-      stdout: result && result.stdout,
-      stderr: result && result.stderr,
-      status: result && result.status,
-      signal: result && result.signal,
-      error: result && result.error
-    });
-
-    if (limitHit) {
-      // Reroute signal: transient limit (e.g. qwen rate-limit) — exclude from
-      // current retry cycle without persisting a long block to blocklist.
-      if (limitHit.reroute) {
-        log(fmt.status('WARN', `Transient limit for ${fmt.agent(chosen || '')}; ${limitHit.reason}. Rerouting without block.`));
-        tried.add(chosen || '');
-        if (agentOverride && agentOverride === chosen && iteration === 1) {
-          chosen = undefined;
-          continue;
-        }
-        chosen = undefined;
-        continue;
-      }
-
-      log(fmt.status('WARN', `Limit hit detected for ${fmt.agent(chosen || '')}; reset estimate "${limitHit.until}" (${limitHit.source}). Blocking and retrying.`));
-      try {
-        const blockResult = await updateAgentBlockFn(chosen || '', limitHit.until, { reason: limitHit.reason });
-        log(fmt.status('INFO', `Wrote checked AgentBlock for ${fmt.agent(chosen || '')} (${blockResult.reason || 'limit'})`));
-      } catch (err) {
-        log(fmt.status('WARN', `Could not persist blocklist entry for ${fmt.agent(chosen || '')}: ${(err as any).message}`));
-      }
-      if (typeof onLimitHit === 'function') {
-        onLimitHit({ agent: chosen, until: limitHit.until, source: limitHit.source });
-      }
-      refuseFallbackWhenPinned(`usage limit hit; blocked until ${limitHit.until}`);
-      // Reset chosen so next iteration reselects, but only when no explicit override.
-      // If the caller pinned a specific agent, fail loudly — there is no fallback.
-      if (agentOverride && agentOverride === chosen && iteration === 1) {
-        // Allow one retry that ignores the override.
-        chosen = undefined;
-        continue;
-      }
-      chosen = undefined;
-      continue;
-    }
-
-    // Reroute if the launcher binary could not be started (ENOENT = not found, EACCES = not executable).
-    if (result && result.error && (result.error.code === 'ENOENT' || result.error.code === 'EACCES')) {
-      refuseFallbackWhenPinned(`launcher could not be started (${result.error.code})`);
-      log(fmt.status('WARN', `Launcher for "${chosen || ''}" could not be started (${result.error.code}); rerouting.`));
-      tried.add(chosen || '');
-      if (agentOverride && agentOverride === chosen && iteration === 1) {
-        chosen = undefined;
-        continue;
-      }
-      chosen = undefined;
-      continue;
-    }
-
-    // Detect launch failure: agent started but exited with non-zero status and
-    // no limit-hit was detected. This catches errors like "Model not found" in
-    // opencode that cause the launcher to exit immediately with an error code.
-    // Retry with the next eligible agent instead of returning the failure.
-    // Only treat `status !== null && status !== 0` or `signal` (with no spawn
-    // error) as a launch failure; `status: null` without signal is ambiguous
-    // (spawn-tee close event can emit null code) and should not trigger a retry.
-    // Spurious opencode v2.0.0 JSON-mode exits (exit 1 after a valid
-    // "reason":"stop" completion) are excluded — the agent completed, the
-    // non-zero code is a post-run cleanup race. Codex and Vibe get the
-    // same treatment via their own family-specific telemetry evidence
-    // (result.telemetry carrying real, non-zero token usage) rather than an
-    // opencode-specific stdout pattern — see isSpuriousCodexExit (codex.ts)
-    // and isSpuriousVibeExit (vibe.ts).
-    const launchFailed = result &&
-      ((result.status !== null && result.status !== 0) || (result.signal && !result.error)) &&
-      !limitHit &&
-      !isSpuriousOpencodeExit(result) &&
-      !(chosen === 'codex' && isSpuriousCodexExit(result)) &&
-      !(chosen === 'vibe' && isSpuriousVibeExit(result)) &&
-      !(chosen === 'qwen' && isSpuriousQwenExit(result));
-    if (launchFailed) {
-      const exitInfo = result.signal
-        ? `signal ${result.signal}`
-        : `exit ${result.status}`;
-      const stderrSnippet = result && result.stderr
-        ? ` (${result.stderr.trim().split('\n')[0]})`
-        : '';
-      if (needsCredentialRefresh(result)) {
-        log(fmt.status('WARN', `Agent ${fmt.agent(chosen || '')} credentials need refreshing; re-authenticate the ${chosen || ''} launcher before retrying.`));
-      }
-      // Pinned work has no next eligible agent: hand the failed result back so
-      // the caller reports the owner's own exit status (TASK-2294.01).
-      if (pinnedAgent && agentOverride) {
-        log(fmt.status('WARN', `Pinned agent ${fmt.agent(chosen || '')} failed to complete (${exitInfo}${stderrSnippet}); no fallback is permitted for this step.`));
-        return { agent: chosen, invocation, result };
-      }
-      log(fmt.status('WARN', `Agent ${fmt.agent(chosen || '')} failed to complete (${exitInfo}${stderrSnippet}); retrying with next eligible agent.`));
-      agentErrors.set(chosen || '', {
-        exitInfo,
-        stderr: result.stderr,
-        stdout: result.stdout,
-        signal: result.signal,
-        status: result.status,
-      });
-      tried.add(chosen || '');
-      launched.add(chosen || '');
-      // Block retry candidates only on a positive availability/quota
-      // classification (task-2536). Deterministic setup/config errors and every
-      // ambiguous non-zero exit fall through to the next family without
-      // poisoning agents.local.json. This is the second of two block-persistence
-      // sites; both now agree on one bar via shouldPersistLaunchFailureBlock.
-      //
-      // NOTE (task-2536 round-1 F2): under default wiring this branch is
-      // unreachable — startAgent's site-1 limit-hit check (L653) uses the same
-      // detectLimitHit classifier this helper calls, so a positive availability/
-      // quota classification is caught and persisted at site 1 first, and this
-      // helper only runs after a falsy site-1 result. It is retained solely as
-      // defence-in-depth for callers that inject a non-default detectLimitHitFn;
-      // do not read it as a live production block path.
-       if (shouldPersistLaunchFailureBlock(chosen || '', result)) {
-         let blockReason = 'transient crash';
-         if (result?.signal) { blockReason = `signal ${result.signal}`; }
-         else if (result?.error?.code) { blockReason = result.error.code; }
-          else if (result?.status !== null && result?.status !== 0) {
-            blockReason = result?.stderr
-              ? `exit ${result.status}: ${result.stderr.trim().split('\n')[0]}`
-              : `exit ${result.status}`;
-          }
-         const blockUntil = formatBlockUntil(new Date(Date.now() + DEFAULT_FALLBACK_HOURS * 60 * 60 * 1000));
-         try {
-           const blockResult = await updateAgentBlockFn(chosen || '', blockUntil, { reason: blockReason });
-           log(fmt.status('INFO', `Wrote checked AgentBlock for ${fmt.agent(chosen || '')} (${DEFAULT_FALLBACK_HOURS}h block, ${blockResult.reason || blockReason})`));
-         } catch (err) {
-          log(fmt.status('WARN', `Could not persist blocklist entry for ${fmt.agent(chosen || '')}: ${(err as any).message}`));
-          }
-       } else {
-        log(fmt.status('INFO', `Skipping blocklist write for ${fmt.agent(chosen ?? '')}; failure not positively classified as a provider availability/quota block.`));
-      }
-      chosen = undefined;
-      continue;
-    }
-    // Record the marker so a subsequent same-(slug, role) launch knows which
-    // family last ran here. We only persist when the run exited cleanly
-    // (status 0 and no spawn error); a failed launch should not overwrite
-    // the canonical session marker with a stale transcript.
-    if (worktree && slug && role && result && result.status === 0 && !result.error) {
-      const launchSessionId = result && result.sessionId ? result.sessionId : null;
-      if (!launchSessionMarkerPort || !sessionRole) {
-        throw new Error('SessionMarkerPort and canonical role are required');
-      }
-      try {
-        await launchSessionMarkerPort.save({
-          missionId: sessionMissionId(slug),
-          role: sessionRole,
-          agent: sessionAgentFamily(chosen || ''),
-          lastLaunched: new Date().toISOString(),
-          sessionId: launchSessionId,
-        });
-      } catch (err) {
-        // Diagnostic: log full error details and database state
-        if (process.env.PARALLIX_DEBUG_SQL) {
-          const { getOperatorStateCacheSize } = await import('../sqlite/adapter-factory.js');
-          const e = err as Error & { code?: string };
-          process.stderr.write(`[sql-error] save failed: code=${e.code ?? 'n/a'} message="${e.message}"\n`);
-          process.stderr.write(`[sql-error] cacheSize=${getOperatorStateCacheSize()} pid=${process.pid}\n`);
-          process.stderr.write(`[sql-error] stack:\n${e.stack ?? 'n/a'}\n`);
-        }
-        throw new Error(`Could not persist session marker for ${slug} (${role}): ${(err as Error).message}`);
-      }
-    }
-
-    return { agent: chosen, invocation, result };
+    state.iteration += 1;
+    if (await selectAndGateAgent(state, deps)) { continue; }
+    const prepared = await prepareLaunch(state, deps);
+    if (!prepared) { continue; }
+    const chosen = state.chosen || '';
+    const { invocation, result } = await launchPrepared(prepared, deps, chosen);
+    const verdict = await classifyLaunchOutcome(state, deps, chosen, invocation, result);
+    if (verdict.kind === 'continue') { continue; }
+    await recordSessionMarker(deps, prepared, chosen, verdict.result);
+    return { agent: chosen, invocation: verdict.invocation, result: verdict.result };
   }
 }
 

@@ -55,10 +55,9 @@ export async function createTokenWithRetries(setup: any, user: string, initialPa
   if (!repoInfo) {return { ok: false, error: `invalid review repo slug: ${setup.repo}` };}
   let password = typeof initialPassword === 'string' ? initialPassword : '';
   for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
-    if (!password) {
-      if (typeof promptFn !== 'function') {return allowBlank ? { ok: true, skipped: true } : { ok: false, error: `Password is required for ${user}.` };}
-      password = await promptFn(passwordPrompt(user, { allowBlank }), PASSWORD_PROMPT_OPTIONS);
-    }
+    const passwordResult = await resolveTokenPassword(password, user, allowBlank, promptFn);
+    if (passwordResult.result) { return passwordResult.result; }
+    password = passwordResult.password;
     if (!password) {
       if (allowBlank) {return { ok: true, skipped: true };}
       if (attempt === maxAttempts) {return { ok: false, error: `Password is required for ${user}.` };}
@@ -66,11 +65,21 @@ export async function createTokenWithRetries(setup: any, user: string, initialPa
       continue;
     }
     const tokenResult = createToken(setup.baseUrl, user, password, buildTokenName(repoInfo.repo, user), requestFn, scopes);
-    if (tokenResult.ok || !isAuthFailure(tokenResult) || attempt === maxAttempts || typeof promptFn !== 'function') {return tokenResult;}
+    if (endsTokenRetry(tokenResult, attempt, maxAttempts, promptFn)) {return tokenResult;}
     log(fmt.status('WARN', `Forgejo authentication failed for ${user}. Attempt ${attempt} of ${maxAttempts}; please try again.`));
     password = '';
   }
   return { ok: false, error: `token creation failed for ${user}` };
+}
+
+async function resolveTokenPassword(password: string, user: string, allowBlank: boolean, promptFn: unknown): Promise<{ password: string; result?: any }> {
+  if (password) { return { password }; }
+  if (typeof promptFn !== 'function') { return { password, result: allowBlank ? { ok: true, skipped: true } : { ok: false, error: `Password is required for ${user}.` } }; }
+  return { password: await promptFn(passwordPrompt(user, { allowBlank }), PASSWORD_PROMPT_OPTIONS) };
+}
+
+function endsTokenRetry(result: any, attempt: number, maxAttempts: number, promptFn: unknown): boolean {
+  return result.ok || !isAuthFailure(result) || attempt === maxAttempts || typeof promptFn !== 'function';
 }
 
 export function tokenCreateViaOwnerToken(baseUrl: string, _repoSlug: string, ownerToken: string, agentPasswords: Array<{ user: string; password: string }>, repoInfo: { owner: string; repo: string }, options: any = {}) {

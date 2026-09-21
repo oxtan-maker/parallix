@@ -113,4 +113,5 @@ test('integration rebase completes cleanly when no rebase is active in the missi
   // A clean-start round exits 0 with no active rebase and an ancestor base, so
   // the integration rebase resolves without throwing.
   await createIntegrationRebase(ports).runIntegrationRebase(SLUG, { baseWorktree: BASE_WORKTREE, baseBranch: 'main', git: ports.git.git });
+  assert.ok(ports.git.git.mock.callCount() > 0, 'the clean rebase still probes the mission worktree state');
 });

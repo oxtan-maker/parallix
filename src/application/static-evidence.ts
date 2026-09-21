@@ -92,6 +92,14 @@ export function canonicalSourceContainsFile(fileSystem: EvidenceFileSystemPort, 
 
 export function evidenceCellHasVerifiableReference(fileSystem: EvidenceFileSystemPort, cell: string, rootDir: string, knownTestNames: Set<string>): boolean {
   const normalized = cell.replace(/\[[^\]]+\]\(([^)]+)\)/g, '$1');
+  return hasFileLineReference(fileSystem, normalized, rootDir)
+    || hasBarePathReference(fileSystem, normalized, rootDir)
+    || hasAdrReference(fileSystem, normalized, rootDir)
+    || hasQuotedTestReference(normalized, knownTestNames)
+    || hasCommandReference(fileSystem, cell, rootDir);
+}
+
+function hasFileLineReference(fileSystem: EvidenceFileSystemPort, normalized: string, rootDir: string): boolean {
   const fileLinePattern = /(?:^|[\s(`])((?:\/|\.\/)?[\w./-]+\.[\w-]+):(\d+)(?:-\d+)?/g;
   let fileLineMatch: RegExpExecArray | null;
   while ((fileLineMatch = fileLinePattern.exec(normalized)) !== null) {
@@ -101,6 +109,10 @@ export function evidenceCellHasVerifiableReference(fileSystem: EvidenceFileSyste
       ? canonicalSourceContainsFile(fileSystem, rootDir, path.basename(candidatePath)) : false;
     if (fsExistsSync(fileSystem, resolved) || canonicalSourceExists) { return true; }
   }
+  return false;
+}
+
+function hasBarePathReference(fileSystem: EvidenceFileSystemPort, normalized: string, rootDir: string): boolean {
   const barePathPattern = /(?:^|[\s(`])((?:\/|\.\/)?[\w ./-]+\.[\w-]+)/g;
   let barePathMatch: RegExpExecArray | null;
   while ((barePathMatch = barePathPattern.exec(normalized)) !== null) {
@@ -111,30 +123,45 @@ export function evidenceCellHasVerifiableReference(fileSystem: EvidenceFileSyste
       if (fsExistsSync(fileSystem, resolved)) { return true; }
     }
   }
+  return false;
+}
+
+function hasAdrReference(fileSystem: EvidenceFileSystemPort, normalized: string, rootDir: string): boolean {
   const adrPattern = /\bADR\s+(\d{4})\b/g;
   let adrMatch: RegExpExecArray | null;
   while ((adrMatch = adrPattern.exec(normalized)) !== null) {
     const adrDir = path.join(rootDir, 'docs', 'adr');
     if (fsExistsSync(fileSystem, adrDir) && fsListNames(fileSystem, adrDir).some(name => name.startsWith(`${adrMatch![1]}-`) && name.endsWith('.md'))) { return true; }
   }
+  return false;
+}
+
+function hasQuotedTestReference(normalized: string, knownTestNames: Set<string>): boolean {
   const quotedPattern = /(['"`])([^'"`]+)\1/g;
   let quotedMatch: RegExpExecArray | null;
   while ((quotedMatch = quotedPattern.exec(normalized)) !== null) { if (knownTestNames.has(quotedMatch[2])) { return true; } }
   if (/(?:^|[\s(`])((?:\/|\.\/)?[\w./-]+\.(?:test|spec)\.[cm]?[jt]sx?)(?=$|[\s),`])/.test(normalized)) { return true; }
-  const cellForCommands = cell.replace(/``/g, '  ');
+  return false;
+}
+
+function hasCommandReference(fileSystem: EvidenceFileSystemPort, cell: string, rootDir: string): boolean {
   const inlineCommandPattern = /`([^`]+)`/g;
   let commandMatch: RegExpExecArray | null;
-  while ((commandMatch = inlineCommandPattern.exec(cellForCommands)) !== null) {
-    const command = commandMatch[1].trim();
-    if (/^(npm|npx|node|git|px)\s+/i.test(command)) { return true; }
-    if (/^(bash|sh|cat|head|tail|diff|grep|sed|awk|xxd|od|wc|sort|uniq|stat|ls)\s+/i.test(command)) {
-      for (const arg of command.split(/\s+/).slice(1)) {
-        if (!arg.startsWith('-') && fsExistsSync(fileSystem, path.join(rootDir, arg.replace(/^\.\//, '')))) { return true; }
-      }
-    }
-    if (command.startsWith('./') && fsExistsSync(fileSystem, path.join(rootDir, command.split(/\s+/)[0].replace(/^\.\//, '')))) { return true; }
+  while ((commandMatch = inlineCommandPattern.exec(cell.replace(/``/g, '  '))) !== null) {
+    if (isVerifiableCommand(fileSystem, commandMatch[1].trim(), rootDir)) { return true; }
   }
   return false;
+}
+
+function isVerifiableCommand(fileSystem: EvidenceFileSystemPort, command: string, rootDir: string): boolean {
+  if (/^(npm|npx|node|git|px)\s+/i.test(command)) { return true; }
+  if (command.startsWith('./')) { return commandReferencesFile(fileSystem, command.split(/\s+/)[0], rootDir); }
+  return /^(bash|sh|cat|head|tail|diff|grep|sed|awk|xxd|od|wc|sort|uniq|stat|ls)\s+/i.test(command)
+    && command.split(/\s+/).slice(1).some(arg => !arg.startsWith('-') && commandReferencesFile(fileSystem, arg, rootDir));
+}
+
+function commandReferencesFile(fileSystem: EvidenceFileSystemPort, value: string, rootDir: string): boolean {
+  return fsExistsSync(fileSystem, path.join(rootDir, value.replace(/^\.\//, '')));
 }
 
 export function findUnverifiableGoalCheckRow(fileSystem: EvidenceFileSystemPort, evidenceRows: string[], rootDir: string): string | null {

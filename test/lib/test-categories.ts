@@ -215,6 +215,10 @@ export const INTEGRATION_CI_TESTS: readonly string[] = [
   // a real temporary Git repository with a retained mission worktree, so it
   // crosses the git boundary and runs in the integration layer.
   'task-2517-landed-squash-base-branch-detection.test.ts',
+  // TASK-2525.03: reads repository configuration and creates a temporary Git
+  // repository to prove local branch discovery. A clean GitHub runner provides
+  // every dependency, so it is CI-safe.
+  'task-2525.03-sonar-enforcement.test.ts',
   // TASK-2532: seeds temporary Git repositories to exercise the base-worktree
   // repair (marker-stash sweep + dead-rebase abort), so it crosses the git
   // boundary and runs only in the integration layer.

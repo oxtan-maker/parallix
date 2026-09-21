@@ -99,7 +99,12 @@ test('local verification and GitHub invoke the same pinned sonar entrypoint', ()
       .some((gate) => gate.key === 'quality-gate' && gate.command === SHARED_COMMAND),
     'the required pre-integration quality gate runs the shared command',
   );
-  assert.ok(workflow.includes(SHARED_COMMAND), 'ci-required runs the same shared command');
+  // GitHub and local share the single pinned sonar entrypoint (ADR 0060). The
+  // hosted path no longer runs the combined coverage-plus-scan command (TASK-2547:
+  // coverage is a reporting mode of the CI-safe execution); it unions the
+  // per-tier LCOV fragments first, then reaches the same npm run sonar.
+  assert.ok(workflow.includes('npm run sonar'), 'ci-required reaches the shared npm run sonar entrypoint');
+  assert.ok(workflow.includes('npm run coverage:merge'), 'ci-required unions per-tier LCOV before the scan');
 
   // The scanner is lockfile-pinned, never fetched at gate time.
   assert.ok(manifest.devDependencies['sonarqube-scanner'], 'the scanner is a declared dependency');
@@ -113,8 +118,10 @@ test('sonar analysis configuration consumes LCOV and baselines new code on main'
   assert.match(props, /sonar\.javascript\.lcov\.reportPaths=coverage\/lcov\.info/);
   assert.match(props, /sonar\.sources=src/);
   assert.match(props, /sonar\.newCode\.referenceBranch=main/);
-  // The shared command generates that LCOV before the scan runs.
-  assert.ok(SHARED_COMMAND.includes('--lcov'));
+  // The local pre-integration gate emits LCOV through npm run test:coverage
+  // (--lcov), and GitHub unions the per-tier fragments into the same
+  // coverage/lcov.info via npm run coverage:merge before the scan.
+  assert.ok(SHARED_COMMAND.includes('--lcov'), 'the local pre-integration gate emits LCOV');
 });
 
 test('no local SonarQube path survives anywhere in the tracked tree', () => {

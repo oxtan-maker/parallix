@@ -187,6 +187,64 @@ function resolveHistoricalClassification(slug: string, taskFile: string, rootDir
   return { value: null, source: null };
 }
 
+type HistoricalMissionOutcome =
+  | { kind: 'row'; row: any }
+  | { kind: 'unresolved'; unresolved: any }
+  | { kind: 'skipped'; skipped: any };
+
+async function collectHistoricalMission(slug: string, rootDir: string, repoName: string, missionStore: unknown, stats: ReturnType<typeof getStats>): Promise<HistoricalMissionOutcome> {
+  const taskResolution = resolveTaskFile(slug, rootDir);
+  if (!taskResolution.ok) {
+    return { kind: 'unresolved', unresolved: { slug, reason: 'task-resolution', detail: taskResolution.reason } };
+  }
+  const taskFile = taskResolution.taskFile!;
+  const status = getTaskStatus(taskFile);
+  if (status !== 'done') {
+    return { kind: 'skipped', skipped: { slug, reason: `status=${status || 'unknown'}` } };
+  }
+  const date = extractDateOnly(getTaskFrontmatterValue(taskFile, 'updated_date') ?? '') || deriveDateFromGitHistory(slug, taskFile, rootDir);
+  const classification = resolveHistoricalClassification(slug, taskFile, rootDir);
+  let implementerInfo: { implementer: string; prFixRounds: number | null; source: string } | null = null;
+  let implementerError: string | null = null;
+  try {
+    implementerInfo = await Promise.resolve(stats.deriveImplementerAndFixRounds(slug, rootDir, missionStore));
+  } catch (error) {
+    implementerError = error instanceof Error ? error.message : String(error);
+  }
+  if (!implementerInfo?.implementer || implementerInfo.implementer === 'unknown') {
+    const gitHistoryImplementer = deriveImplementerFromGitHistory(slug, taskFile, rootDir);
+    if (gitHistoryImplementer) {
+      implementerInfo = { implementer: gitHistoryImplementer, prFixRounds: 0, source: 'git-history-author' };
+    }
+  }
+  if (!date || !classification.value || !implementerInfo?.implementer) {
+    return {
+      kind: 'unresolved', unresolved: {
+        slug,
+        reason: 'missing-fields',
+        date: date || null,
+        classification: classification.value || null,
+        implementer: implementerInfo?.implementer || null,
+        prFixRounds: implementerInfo?.prFixRounds ?? null,
+        sources: { classification: classification.source, implementer: implementerInfo?.source || null },
+        missing: [...(!date ? ['date'] : []), ...(!classification.value ? ['classification'] : []), ...(!implementerInfo?.implementer ? ['implementer'] : [])],
+        detail: implementerError,
+      },
+    };
+  }
+  return {
+    kind: 'row', row: {
+      date,
+      repo: repoName,
+      mission: slug,
+      classification: classification.value,
+      implementer: implementerInfo.implementer,
+      pr_fix_rounds: String(implementerInfo.prFixRounds),
+      sources: { date: 'backlog-updated_date', classification: classification.source, implementer: implementerInfo.source },
+    },
+  };
+}
+
 /**
  * @param rootDir Repository root the historical missions are read from.
  * @param options Measurement-store selection. `dbPath`/`store` let fast
@@ -216,81 +274,10 @@ async function collectHistoricalStatsBackfill(
 
   for (const slug of listHistoricalMissionSlugs(rootDir)) {
     if (existingMissions.has(slug)) {continue;}
-
-    const taskResolution = resolveTaskFile(slug, rootDir);
-    if (!taskResolution.ok) {
-      unresolved.push({
-        slug,
-        reason: 'task-resolution',
-        detail: taskResolution.reason,
-      });
-      continue;
-    }
-
-    const taskFile = taskResolution.taskFile!;
-    const status = getTaskStatus(taskFile);
-    if (status !== 'done') {
-      skipped.push({ slug, reason: `status=${status || 'unknown'}` });
-      continue;
-    }
-
-    const date = extractDateOnly(getTaskFrontmatterValue(taskFile, 'updated_date') ?? '') || deriveDateFromGitHistory(slug, taskFile, rootDir);
-    const classification = resolveHistoricalClassification(slug, taskFile, rootDir);
-
-    let implementerInfo: { implementer: string; prFixRounds: number | null; source: string } | null = null;
-    let implementerError: string | null = null;
-    try {
-      implementerInfo = await s.deriveImplementerAndFixRounds(slug, rootDir, missionStore);
-    } catch (error) {
-      implementerError = error instanceof Error ? error.message : String(error);
-    }
-
-    if (!implementerInfo?.implementer || implementerInfo.implementer === 'unknown') {
-      const gitHistoryImplementer = deriveImplementerFromGitHistory(slug, taskFile, rootDir);
-      if (gitHistoryImplementer) {
-        implementerInfo = {
-          implementer: gitHistoryImplementer,
-          prFixRounds: 0,
-          source: 'git-history-author',
-        };
-      }
-    }
-
-    if (!date || !classification.value || !implementerInfo?.implementer) {
-      unresolved.push({
-        slug,
-        reason: 'missing-fields',
-        date: date || null,
-        classification: classification.value || null,
-        implementer: implementerInfo?.implementer || null,
-        prFixRounds: implementerInfo?.prFixRounds ?? null,
-        sources: {
-          classification: classification.source,
-          implementer: implementerInfo?.source || null,
-        },
-        missing: [
-          ...(!date ? ['date'] : []),
-          ...(!classification.value ? ['classification'] : []),
-          ...(!implementerInfo?.implementer ? ['implementer'] : []),
-        ],
-        detail: implementerError,
-      });
-      continue;
-    }
-
-    rows.push({
-      date,
-      repo: repoName,
-      mission: slug,
-      classification: classification.value,
-      implementer: implementerInfo.implementer,
-      pr_fix_rounds: String(implementerInfo.prFixRounds),
-      sources: {
-        date: 'backlog-updated_date',
-        classification: classification.source,
-        implementer: implementerInfo.source,
-      },
-    });
+    const outcome = await collectHistoricalMission(slug, rootDir, repoName, missionStore, s);
+    if (outcome.kind === 'row') { rows.push(outcome.row); }
+    if (outcome.kind === 'unresolved') { unresolved.push(outcome.unresolved); }
+    if (outcome.kind === 'skipped') { skipped.push(outcome.skipped); }
   }
 
   rows.sort((a, b) => a.date.localeCompare(b.date) || a.mission.localeCompare(b.mission));
@@ -307,32 +294,25 @@ function renderBackfillSummary(report: { rows: readonly any[]; unresolved: reado
   lines.push(`Skipped missions: ${report.skipped.length}`);
   lines.push('');
 
-  if (report.rows.length > 0) {
-    lines.push('Resolved:');
-    for (const row of report.rows) {
-      lines.push(`- ${row.date} ${row.mission} ${row.classification} ${row.implementer} ${row.pr_fix_rounds} [${row.sources.classification}/${row.sources.implementer}]`);
-    }
-    lines.push('');
-  }
-
-  if (report.unresolved.length > 0) {
-    lines.push('Unresolved:');
-    for (const item of report.unresolved) {
-      const missing = Array.isArray(item.missing) && item.missing.length > 0 ? ` missing=${item.missing.join(',')}` : '';
-      const detail = item.detail ? ` detail=${item.detail}` : '';
-      lines.push(`- ${item.slug} reason=${item.reason}${missing}${detail}`);
-    }
-    lines.push('');
-  }
-
-  if (report.skipped.length > 0) {
-    lines.push('Skipped:');
-    for (const item of report.skipped) {
-      lines.push(`- ${item.slug} ${item.reason}`);
-    }
-  }
+  pushSummarySection(lines, 'Resolved:', row => `- ${row.date} ${row.mission} ${row.classification} ${row.implementer} ${row.pr_fix_rounds} [${row.sources.classification}/${row.sources.implementer}]`, report.rows);
+  pushSummarySection(lines, 'Unresolved:', item => {
+    const missing = Array.isArray(item.missing) && item.missing.length > 0 ? ` missing=${item.missing.join(',')}` : '';
+    const detail = item.detail ? ` detail=${item.detail}` : '';
+    return `- ${item.slug} reason=${item.reason}${missing}${detail}`;
+  }, report.unresolved);
+  pushSummarySection(lines, 'Skipped:', item => `- ${item.slug} ${item.reason}`, report.skipped);
 
   return lines.join('\n');
+}
+
+/** Append a labeled section to `lines`: a header, one `- ` prefixed row per item, and a trailing blank line. Skips empty sections. */
+function pushSummarySection(lines: string[], header: string, renderRow: (_item: any) => string, items: readonly any[]): void {
+  if (items.length === 0) { return; }
+  lines.push(header);
+  for (const item of items) {
+    lines.push(renderRow(item));
+  }
+  lines.push('');
 }
 
 function printUsage(log = fmt.log.plain) {

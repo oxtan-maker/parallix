@@ -281,6 +281,30 @@ describe('SQLite adapter — CP1: schema and migration runner', () => {
     }
   });
 
+  it('accepts the recorded pre-Sonar checksum for migration 0007 without rewriting it', async () => {
+    const { db, dir } = createTempDb();
+    try {
+      const runner = new SqliteMigrationRunner(db);
+      const migrations = loadDefaultMigrations();
+      const migration = migrations.find((entry) => entry.id === '0007-usage-statistics-identity');
+      assert.ok(migration, '0007 migration must be present');
+      await runner.applyPending(migrations);
+      await db.execute(
+        'UPDATE schema_migrations SET checksum = ? WHERE id = ?',
+        ['0bba52d7101501a2a2bc95d20abed97f52bae10670bdf15e55c5d09c391315b3', migration.id],
+      );
+
+      await runner.applyPending(migrations);
+      const [entry] = await db.query<{ checksum: string }>(
+        'SELECT checksum FROM schema_migrations WHERE id = ?', [migration.id],
+      );
+      assert.equal(entry.checksum, '0bba52d7101501a2a2bc95d20abed97f52bae10670bdf15e55c5d09c391315b3', 'the legacy ledger entry remains compatible with older px builds');
+    } finally {
+      await db.close();
+      cleanupTempDir(dir);
+    }
+  });
+
   it('previous-schema upgrade applies pending migrations only', async () => {
     const { db, dir } = createTempDb();
     try {

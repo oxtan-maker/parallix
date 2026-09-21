@@ -99,8 +99,8 @@ export function parseVibeMeta(meta: ParseableMeta | null | undefined): Telemetry
  * @param result - Legacy launcher result object (ignored; kept for API compat)
  * @param basePath - Override the default session log directory. Used by tests.
  */
-export function extractVibeTelemetry(result: unknown, basePath?: string): TelemetryResult | null {
-  void result; // legacy param, ignored — telemetry comes from on-disk meta.json
+export function extractVibeTelemetry(_result: unknown, basePath?: string): TelemetryResult | null {
+  // Legacy param, ignored — telemetry comes from on-disk meta.json
 
   const scanDir = basePath || DEFAULT_VIBE_LOG_DIR;
 

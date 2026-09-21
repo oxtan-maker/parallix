@@ -338,8 +338,7 @@ const { formatStatsTable, renderWeeklyStatsReport, renderRangeStatsReport } = st
  * @returns {Promise<import('../../../domain/review.js').Review|null>}  Null when the mission has no Review.
  */
 // @ts-ignore -- retained reporting helper is dynamically typed
-async function loadMissionReview(slug, rootDir = process.cwd(), missionStore: MissionStore) {
-  void rootDir;
+async function loadMissionReview(slug, _rootDir = process.cwd(), missionStore: MissionStore) {
   if (!missionStore) {
     throw new Error(
       `loadMissionReview requires a MissionStore: the stats caller must supply the operator store so ${slug} is read from the authoritative Review aggregate. Store omission is an invariant error; there is no heuristic fallback.`,
@@ -845,53 +844,7 @@ export function createStatsCommand(useCase: StatsCommandUseCase<StatsRow>) {
     return;
   }
 
-  const positionalArgs = [];
-  let outputFile = null;
-  let today = new Date();
-  let from = null;
-  let to = null;
-  let mission = null;
-
-  for (let i = 0; i < args.length; i += 1) {
-    const arg = args[i];
-    if (arg === '--mission' && i + 1 < args.length) {
-      mission = args[i + 1];
-      i += 1;
-      continue;
-    }
-    if (arg === '--output' && i + 1 < args.length) {
-      outputFile = args[i + 1];
-      i += 1;
-      continue;
-    }
-    if (arg === '--today' && i + 1 < args.length) {
-      // @ts-expect-error today is parsed as string but typed as Date
-      today = args[i + 1];
-      i += 1;
-      continue;
-    }
-    if (arg === '--from') {
-      from = i + 1 < args.length ? args[i + 1] : '';
-      i += 1;
-      continue;
-    }
-    if (arg === '--to') {
-      to = i + 1 < args.length ? args[i + 1] : '';
-      i += 1;
-      continue;
-    }
-    if (!arg.startsWith('--')) {
-      positionalArgs.push(arg);
-    }
-  }
-
-  // A positional mission slug selects a per-mission report.
-  const MISSION_SLUG_RE = /^[a-z][a-z0-9]*-\d+$/i;
-  if (!mission && positionalArgs.length > 0
-      && MISSION_SLUG_RE.test(positionalArgs[0])) {
-    mission = positionalArgs[0];
-    positionalArgs.length = 0;
-  }
+  const { outputFile, today, from, to, mission } = parseStatsArgs(args);
 
   // Mission-phase breakdown from the measurement database.
   if (mission) {
@@ -907,13 +860,7 @@ export function createStatsCommand(useCase: StatsCommandUseCase<StatsRow>) {
       exit(1);
       return;
     }
-    const report = renderMissionPhaseReport(rows, mission, { rootDir });
-    if (outputFile) {
-      fs.writeFileSync(outputFile, `${report}\n`, 'utf8');
-      log(fmt.status('PASS', `Report written to ${outputFile}`));
-    } else {
-      log(report);
-    }
+    emitStatsReport(renderMissionPhaseReport(rows, mission, { rootDir }), outputFile, log);
     return;
   }
 
@@ -956,13 +903,44 @@ export function createStatsCommand(useCase: StatsCommandUseCase<StatsRow>) {
     return;
   }
 
-  if (outputFile) {
-    fs.writeFileSync(outputFile, `${report}\n`, 'utf8');
-    log(fmt.status('PASS', `Report written to ${outputFile}`));
-  } else {
-    log(report);
-  }
+  emitStatsReport(report, outputFile, log);
   };
+}
+
+/** A report goes to `--output` when one was given, otherwise to the log. */
+function emitStatsReport(report: string, outputFile: string | null, log: Function): void {
+  if (!outputFile) { log(report); return; }
+  fs.writeFileSync(outputFile, `${report}\n`, 'utf8');
+  log(fmt.status('PASS', `Report written to ${outputFile}`));
+}
+
+/** `--<flag> <value>` options and the field each one fills. */
+const STATS_VALUE_FLAGS: Readonly<Record<string, 'mission' | 'outputFile' | 'today' | 'from' | 'to'>> = {
+  '--mission': 'mission', '--output': 'outputFile', '--today': 'today', '--from': 'from', '--to': 'to',
+};
+// A positional mission slug selects a per-mission report.
+const MISSION_SLUG_RE = /^[a-z][a-z0-9]*-\d+$/i;
+
+function parseStatsArgs(args: string[]) {
+  const parsed: any = { outputFile: null, today: new Date(), from: null, to: null, mission: null };
+  const positionalArgs: string[] = [];
+  for (let i = 0; i < args.length; i += 1) {
+    const arg = args[i];
+    const field = STATS_VALUE_FLAGS[arg];
+    if (field) {
+      // `--from`/`--to` accept an empty value so the range validator, not the
+      // parser, reports what is wrong with it.
+      const trailing = field === 'from' || field === 'to';
+      if (i + 1 < args.length) { parsed[field] = args[i + 1]; i += 1; }
+      else if (trailing) { parsed[field] = ''; i += 1; }
+      continue;
+    }
+    if (!arg.startsWith('--')) { positionalArgs.push(arg); }
+  }
+  if (!parsed.mission && positionalArgs.length > 0 && MISSION_SLUG_RE.test(positionalArgs[0])) {
+    parsed.mission = positionalArgs[0];
+  }
+  return parsed as { outputFile: string | null; today: Date; from: string | null; to: string | null; mission: string | null };
 }
 
 // Module-level helper namespace (not a command): consumers use it for helpers

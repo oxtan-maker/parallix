@@ -108,6 +108,107 @@ function getPrStatus(branch: string, rootDir?: string, options: any = {}) {
  * @param {{rootDir?: string, apiCall?: Function, log?: Function, force?: boolean, forceWithLease?: boolean, verificationArea?: string, captureVerifiedTreeProofFn?: Function, assertVerifiedTreeProofFn?: Function}} [options]
  * @returns {{ok: boolean, url?: string|null, error?: string|null, prNumber?: number}}
  */
+type CreatePrResult = { ok: boolean, url?: string | null, error?: string | null, prNumber?: number, gateFailure?: { area: string; command: string; cwd: string; exitCode: number | null; stdout: string; stderr: string; transient?: boolean } };
+
+/**
+ * Refuse the publish when the verified-tree proof failed, or when it belongs to
+ * a different branch than the one being published. A gate failure carries the
+ * command and output so the rebound kernel can classify it.
+ */
+function publishProofFailure(proofResult: any, area: string, branch: string): CreatePrResult | null {
+  if (!proofResult.ok) {
+    return {
+      ok: false,
+      error: proofResult.error || 'failed to verify publish tree',
+      ...(proofResult.command && proofResult.cwd ? {
+        gateFailure: {
+          area,
+          command: proofResult.command,
+          cwd: proofResult.cwd,
+          exitCode: proofResult.exitCode ?? null,
+          stdout: proofResult.stdout || '',
+          stderr: proofResult.stderr || '',
+          ...(verification.isTransientVerificationFailure(proofResult) ? { transient: true } : {}),
+        },
+      } : {}),
+    };
+  }
+  if (proofResult.proof && proofResult.proof.branch && proofResult.proof.branch !== branch) {
+    return { ok: false, error: `verification proof branch ${proofResult.proof.branch} does not match branch being published ${branch}` };
+  }
+  return null;
+}
+
+/** Run one push attempt, mirroring its output to this process's streams. */
+function runPrPush(branch: string, remoteUrl: string, rootDir: string, options: any) {
+  const argsResult = buildCreatePrPushArgs(branch, remoteUrl, rootDir, options) as { ok: boolean, pushArgs?: string[], error?: string };
+  if (!argsResult.ok) { return { failure: { ok: false, error: argsResult.error } as CreatePrResult }; }
+  const result = git(argsResult.pushArgs || [], { stdio: ['ignore', 'pipe', 'pipe'], env: cLocaleEnv() });
+  if (result.stdout) { process.stdout.write(result.stdout); }
+  if (result.stderr) { process.stderr.write(result.stderr); }
+  return { result };
+}
+
+/**
+ * Push the mission branch to the review remote. A force-with-lease rejected as
+ * stale is retried once against a refreshed tracking ref. Returns the failure
+ * result, or null once the branch is published.
+ */
+function pushBranchForPr(branch: string, remoteUrl: string, rootDir: string, context: any): CreatePrResult | null {
+  const { force, forceWithLease, gitFetch, log } = context;
+  const pushOptions = { force, forceWithLease, gitFetch };
+  let attempt = runPrPush(branch, remoteUrl, rootDir, pushOptions);
+  if (attempt.failure) { return attempt.failure; }
+
+  if (attempt.result!.status !== 0 && forceWithLease && isStaleInfoPushRejection(attempt.result)) {
+    log(`Stale push rejection for ${branch}; fetching and retrying...`);
+    attempt = runPrPush(branch, remoteUrl, rootDir, { ...pushOptions, refreshTrackingRef: true });
+    if (attempt.failure) { return attempt.failure; }
+  }
+
+  const pushResult = attempt.result!;
+  if (pushResult.status === 0) { return null; }
+  const pushError = (pushResult.stderr || pushResult.stdout || '').trim();
+  return { ok: false, error: `git push failed with status ${pushResult.status}${pushError ? `: ${pushError}` : ''}` };
+}
+
+/**
+ * The open PR already on this branch, an API-failure result, or null when there
+ * is none and one must be created.
+ */
+function existingPrForBranch(branch: string, context: any): CreatePrResult | null {
+  const { apiCall, apiToken, apiUser, slug, rootDir, log } = context;
+  const lookup = resolvePrAccess(branch, apiToken, { apiCall, slug, onlyOpen: true, forgejoUser: apiUser, rootDir });
+  if (lookup && isApiErrorResult(lookup)) {
+    const apiErr = (lookup as any)._apiError || {};
+    return { ok: false, error: `failed to check existing PR: ${(apiErr.error || 'API error')}${apiErr.status === 7 ? ` (${codexSandboxHint()})` : ''}` };
+  }
+  if (!lookup?.prNumber) { return null; }
+  const details = apiCall('GET', `/pulls/${lookup.prNumber}`, lookup.token || apiToken, undefined, { rootDir });
+  if (!details.ok) { return null; }
+  log(`PR already exists: ${details.data.html_url}`);
+  return { ok: true, url: details.data.html_url, prNumber: lookup.prNumber };
+}
+
+function resolvePrimaryBranchOrMain(rootDir: string): string {
+  try { return getPrimaryBranch(rootDir); } catch (_) { return 'main'; }
+}
+
+/**
+ * Where the PR lands: a feature-branch mission targets the base branch it
+ * recorded, everything else the primary branch. A mission whose MISSION.md is
+ * not on disk yet has no recorded base, so it falls back to primary — which is
+ * the byte-identical pre-feature-branch path.
+ */
+function resolvePrBase(slug: string | null, primaryBranch: string, rootDir: string): string {
+  if (!slug) { return primaryBranch; }
+  try {
+    return resolveMissionBaseBranch(slug, rootDir) || primaryBranch;
+  } catch (_) {
+    return primaryBranch;
+  }
+}
+
 function createPr(branch: string, user: string, token: string, options: any = {}): { ok: boolean, url?: string | null, error?: string | null, prNumber?: number, gateFailure?: { area: string; command: string; cwd: string; exitCode: number | null; stdout: string; stderr: string; transient?: boolean } } {
   const {
     rootDir = process.cwd(),
@@ -120,30 +221,11 @@ function createPr(branch: string, user: string, token: string, options: any = {}
     assertVerifiedTreeProofFn = verification.assertVerifiedTreeProof
   } = options;
 
-  let primaryBranch = 'main';
-  try {
-    primaryBranch = getPrimaryBranch(rootDir);
-  } catch (_) {
-    primaryBranch = 'main';
-  }
+  const primaryBranch = resolvePrimaryBranchOrMain(rootDir);
   if (branch === primaryBranch) {return { ok: false, error: `cannot create a PR from ${primaryBranch}` };}
 
-  // Resolve the PR base: for feature-branch missions the PR targets the recorded
-  // base branch; for legacy missions it falls back to the primary branch so
-  // the byte-identical regression path is preserved.
-  let prBase = primaryBranch;
-  const slugMatch = branch.match(/^mission\/(task-\d+)/);
-  const slug = slugMatch ? slugMatch[1] : null;
-  if (slug) {
-    try {
-      const resolvedBase = resolveMissionBaseBranch(slug, rootDir);
-      if (resolvedBase !== primaryBranch) {
-        prBase = resolvedBase;
-      }
-    } catch (_) {
-      // resolveMissionBaseBranch may fail if MISSION.md is not yet on disk; fall through to primary.
-    }
-  }
+  const slug = branch.match(/^mission\/(task-\d+)/)?.[1] ?? null;
+  const prBase = resolvePrBase(slug, primaryBranch, rootDir);
 
   const repoOwner = resolveForgejoSettings(rootDir).repo.split('/')[0] || null;
   const ownerToken = repoOwner ? readToken(repoOwner, rootDir) : null;
@@ -159,26 +241,8 @@ function createPr(branch: string, user: string, token: string, options: any = {}
   });
 
   const proofResult = captureVerifiedTreeProofFn(resolvedVerificationArea, rootDir);
-  if (!proofResult.ok) {
-    return {
-      ok: false,
-      error: proofResult.error || 'failed to verify publish tree',
-      ...(proofResult.command && proofResult.cwd ? {
-        gateFailure: {
-          area: resolvedVerificationArea,
-          command: proofResult.command,
-          cwd: proofResult.cwd,
-          exitCode: proofResult.exitCode ?? null,
-          stdout: proofResult.stdout || '',
-          stderr: proofResult.stderr || '',
-          ...(verification.isTransientVerificationFailure(proofResult) ? { transient: true } : {}),
-        },
-      } : {}),
-    };
-  }
-  if (proofResult.proof && proofResult.proof.branch && proofResult.proof.branch !== branch) {
-    return { ok: false, error: `verification proof branch ${proofResult.proof.branch} does not match branch being published ${branch}` };
-  }
+  const proofFailure = publishProofFailure(proofResult, resolvedVerificationArea, branch);
+  if (proofFailure) { return proofFailure; }
 
   // 1. Sync primary branch baseline
   const syncResult = syncPrimaryBaseline(gitUser, gitToken, rootDir, {
@@ -204,59 +268,12 @@ function createPr(branch: string, user: string, token: string, options: any = {}
   // 2. Push the branch using authenticated URL
   const remoteUrl = authenticatedReviewUrl(gitUser, gitToken, rootDir);
   log(`Pushing ${branch} as Forgejo user ${gitUser}${force || forceWithLease ? ' (force-with-lease)' : ''}...`);
-  let pushArgsResult = buildCreatePrPushArgs(branch, remoteUrl, rootDir, {
-    force,
-    forceWithLease,
-    gitFetch: authenticatedGitFetch
-  });
-  if (!pushArgsResult.ok) {
-    return { ok: false, error: (pushArgsResult as {ok: boolean, pushArgs: string[], error?: string}).error };
-  }
-  let pushArgs = (pushArgsResult as {ok: boolean, pushArgs: string[], error?: string}).pushArgs || [];
-  let pushResult = git(pushArgs, { stdio: ['ignore', 'pipe', 'pipe'], env: cLocaleEnv() });
-  if (pushResult.stdout) {process.stdout.write(pushResult.stdout);}
-  if (pushResult.stderr) {process.stderr.write(pushResult.stderr);}
+  const pushFailure = pushBranchForPr(branch, remoteUrl, rootDir, { force, forceWithLease, gitFetch: authenticatedGitFetch, log });
+  if (pushFailure) { return pushFailure; }
 
-  if (pushResult.status !== 0) {
-    if (forceWithLease && isStaleInfoPushRejection(pushResult)) {
-      log(`Stale push rejection for ${branch}; fetching and retrying...`);
-      pushArgsResult = buildCreatePrPushArgs(branch, remoteUrl, rootDir, {
-        force,
-        forceWithLease,
-        gitFetch: authenticatedGitFetch,
-        refreshTrackingRef: true
-      });
-      if (!pushArgsResult.ok) {
-        return { ok: false, error: (pushArgsResult as {ok: boolean, pushArgs: string[], error?: string}).error };
-      }
-      pushArgs = (pushArgsResult as {ok: boolean, pushArgs: string[], error?: string}).pushArgs || [];
-      pushResult = git(pushArgs, { stdio: ['ignore', 'pipe', 'pipe'], env: cLocaleEnv() });
-      if (pushResult.stdout) {process.stdout.write(pushResult.stdout);}
-      if (pushResult.stderr) {process.stderr.write(pushResult.stderr);}
-    }
-    if (pushResult.status !== 0) {
-      const pushError = (pushResult.stderr || pushResult.stdout || '').trim();
-      return { ok: false, error: `git push failed with status ${pushResult.status}${pushError ? `: ${pushError}` : ''}` };
-    }
-  }
-
-  // 3. Check if an OPEN PR already exists for this branch
-  const existingPrLookup = resolvePrAccess(branch, apiToken, { apiCall, slug, onlyOpen: true, forgejoUser: apiUser, rootDir });
-
-  if (existingPrLookup && isApiErrorResult(existingPrLookup)) {
-    const apiErr = (existingPrLookup as any)._apiError || {};
-    return { ok: false, error: `failed to check existing PR: ${(apiErr.error || 'API error')}${apiErr.status === 7 ? ` (${codexSandboxHint()})` : ''}` };
-  }
-
-  // 4. Return existing PR if already present
-  if (existingPrLookup && existingPrLookup.prNumber) {
-      const prDetailsToken = existingPrLookup.token || apiToken;
-      const prDetails = apiCall('GET', `/pulls/${existingPrLookup.prNumber}`, prDetailsToken, undefined, { rootDir });
-    if (prDetails.ok) {
-      log(`PR already exists: ${prDetails.data.html_url}`);
-      return { ok: true, url: prDetails.data.html_url, prNumber: existingPrLookup.prNumber };
-    }
-  }
+  // 3/4. Reuse the open PR for this branch when there already is one.
+  const existing = existingPrForBranch(branch, { apiCall, apiToken, apiUser, slug, rootDir, log });
+  if (existing) { return existing; }
 
   // 5. Create the PR
   const title = branch.replace(/^mission\//, '').replace(/-/g, ' ');
@@ -335,6 +352,67 @@ function getPrAuthor(branch: string, token: string, options: any = {}): string |
  * @param {{apiCall?: Function, pageSize?: number, maxPages?: number, slug?: string|null, onlyOpen?: boolean, forgejoUser?: string, rootDir?: string, reportNotFound?: boolean}} [options]
  * @returns {{prNumber?: number, token?: string, _apiError?: object, _notFound?: boolean}|null}
  */
+function findPrInState(branch: string, token: string, state: string, options: any) {
+  const { apiCall, pageSize, maxPages, rootDir } = options;
+  let lastApiError: { status?: number, statusCode?: number, error?: string, stderr?: string|null } | null = null;
+  let sawSuccessfulLookup = false;
+  let consecutiveErrors = 0;
+  for (let page = 1; page <= maxPages; page += 1) {
+    const result = apiCall('GET', `/pulls?state=${state}&page=${page}&limit=${pageSize}&sort=recentupdate&direction=desc`, token, undefined, { rootDir });
+    if (!result.ok) {
+      consecutiveErrors++;
+      lastApiError = { error: result.error, status: result.status, statusCode: result.statusCode, stderr: result.stderr };
+      if (consecutiveErrors >= 3) { break; }
+      continue;
+    }
+    consecutiveErrors = 0;
+    sawSuccessfulLookup = true;
+    if (!Array.isArray(result.data) || result.data.length === 0) { break; }
+    const prNumber = findPrForBranch(result.data, branch);
+    if (prNumber || result.data.length < pageSize) { return { prNumber, lastApiError, sawSuccessfulLookup }; }
+  }
+  return { prNumber: null, lastApiError, sawSuccessfulLookup };
+}
+
+function findPrWithToken(branch: string, token: string, onlyOpen: boolean, options: any) {
+  const open = findPrInState(branch, token, 'open', options);
+  if (open.prNumber || onlyOpen) { return open; }
+  const all = findPrInState(branch, token, 'all', options);
+  return {
+    ...all,
+    lastApiError: all.lastApiError ?? open.lastApiError,
+    sawSuccessfulLookup: all.sawSuccessfulLookup || open.sawSuccessfulLookup,
+  };
+}
+
+function findPrWithFallbackTokens(branch: string, slug: string | null, currentUser: string, rootDir: string, doLookup: Function, triedUsers: string[]) {
+  if (!slug) { return null; }
+  const taskFile = findTaskFile(slug, rootDir);
+  const implementer = taskFile ? getTaskImplementer(taskFile) : null;
+  const repoOwner = resolveForgejoSettings(rootDir).repo.split('/')[0] || null;
+  const candidates = [implementer, repoOwner, DEFAULT_FORGEJO_USER].filter((user): user is string => Boolean(user) && user !== currentUser);
+  for (const user of candidates) {
+    triedUsers.push(user);
+    const fallbackToken = readToken(user, rootDir);
+    const prNumber = fallbackToken ? doLookup(fallbackToken) : null;
+    if (prNumber) { return { prNumber, token: fallbackToken! }; }
+  }
+  return null;
+}
+
+function reportMissingPr(branch: string, rootDir: string, triedUsers: readonly string[], lastApiError: any) {
+  const curlCheck = spawnSync('curl', ['--version'], { encoding: 'utf8' });
+  fmt.log.fail(`PR not found for branch '${branch}' after checking tokens for: ${triedUsers.join(', ')}`);
+  const settings = resolveForgejoSettings(rootDir);
+  fmt.log.info(`Current environment: FORGEJO_URL=${settings.url}, FORGEJO_REPO=${settings.repo}, FORGEJO_HOME=${resolveForgejoHome(rootDir)}`);
+  if (lastApiError) {
+    const err = lastApiError as { status?: number, error?: string, stderr?: string };
+    fmt.log.warn(`API error encountered during lookup: status=${err.status || 0}, error=${err.error || 'unknown'}`);
+    if (err.stderr) { fmt.log.info(`API stderr: ${err.stderr}`); }
+  }
+  fmt.log.info(`curl --version: ${curlCheck.status === 0 ? curlCheck.stdout.split('\n')[0] : 'failed to run curl'}`);
+}
+
 function resolvePrAccess(branch: string, token: string | null, options: any = {}): { prNumber?: number, token?: string, _apiError?: object, _notFound?: boolean } | null {
   const {
     apiCall = forgejoApi,
@@ -349,50 +427,11 @@ function resolvePrAccess(branch: string, token: string | null, options: any = {}
   let lastApiError: { status?: number, statusCode?: number, error?: string, stderr?: string|null } | null = null;
   let sawSuccessfulLookup = false;
 
-  /** @param {string} state @param {string} t */
-  const searchInState = (state: string, t: string) => {
-    let consecutiveErrors = 0;
-    for (let page = 1; page <= maxPages; page += 1) {
-      const result = apiCall('GET', `/pulls?state=${state}&page=${page}&limit=${pageSize}&sort=recentupdate&direction=desc`, t, undefined, { rootDir });
-      if (!result.ok) {
-        consecutiveErrors++;
-        lastApiError = {
-          error: result.error,
-          status: result.status,
-          statusCode: result.statusCode,
-          stderr: result.stderr,
-        };
-        if (consecutiveErrors >= 3) {
-          break;
-        }
-        continue;
-      }
-      consecutiveErrors = 0;
-      sawSuccessfulLookup = true;
-      if (!Array.isArray(result.data) || result.data.length === 0) {
-        break;
-      }
-
-      for (const pr of result.data) {
-        const head = pr.head || {};
-        if (head.ref === branch || head.label === branch || (head.label && head.label.endsWith(':' + branch))) {
-          return pr.number;
-        }
-      }
-
-      if (result.data.length < pageSize) {
-        break;
-      }
-    }
-    return null;
-  };
-
-  /** @param {string} t */
-  const doLookup = (t: string) => {
-    const openResult = searchInState('open', t);
-    if (openResult) {return openResult;}
-    if (!onlyOpen) {return searchInState('all', t);}
-    return null;
+  const doLookup = (candidateToken: string) => {
+    const lookup = findPrWithToken(branch, candidateToken, onlyOpen, { apiCall, pageSize, maxPages, rootDir });
+    lastApiError = lookup.lastApiError ?? lastApiError;
+    sawSuccessfulLookup ||= lookup.sawSuccessfulLookup;
+    return lookup.prNumber;
   };
 
   // 1. Try with the provided token
@@ -402,36 +441,11 @@ function resolvePrAccess(branch: string, token: string | null, options: any = {}
   const currentUser = resolveForgejoUser(forgejoUser);
   const triedUsers = [currentUser];
 
-  // 2. Fallback for slugs
-  if (slug) {
-    const taskFile = findTaskFile(slug, rootDir);
-    const implementer = taskFile ? getTaskImplementer(taskFile) : null;
-    const repoOwner = resolveForgejoSettings(rootDir).repo.split('/')[0] || null;
-    const candidates = [implementer, repoOwner, DEFAULT_FORGEJO_USER].filter((u): u is string => Boolean(u) && u !== currentUser);
-
-    for (const user of candidates) {
-      triedUsers.push(user);
-      const fallbackToken = readToken(user, rootDir);
-      if (fallbackToken) {
-        prNumber = doLookup(fallbackToken);
-        if (prNumber) {return { prNumber, token: fallbackToken };}
-      }
-    }
-  }
+  const fallback = findPrWithFallbackTokens(branch, slug, currentUser, rootDir, doLookup, triedUsers);
+  if (fallback) { return fallback; }
 
   if (options.reportNotFound) {
-    const curlCheck = spawnSync('curl', ['--version'], { encoding: 'utf8' });
-    fmt.log.fail(`PR not found for branch '${branch}' after checking tokens for: ${triedUsers.join(', ')}`);
-    const settings = resolveForgejoSettings(rootDir);
-    fmt.log.info(`Current environment: FORGEJO_URL=${settings.url}, FORGEJO_REPO=${settings.repo}, FORGEJO_HOME=${resolveForgejoHome(rootDir)}`);
-    if (lastApiError) {
-      const err = lastApiError as { status?: number, error?: string, stderr?: string };
-      fmt.log.warn(`API error encountered during lookup: status=${err.status || 0}, error=${err.error || 'unknown'}`);
-      if (err.stderr) {
-        fmt.log.info(`API stderr: ${err.stderr}`);
-      }
-    }
-    fmt.log.info(`curl --version: ${curlCheck.status === 0 ? curlCheck.stdout.split('\n')[0] : 'failed to run curl'}`);
+    reportMissingPr(branch, rootDir, triedUsers, lastApiError);
   }
 
   if (sawSuccessfulLookup) {
@@ -441,6 +455,14 @@ function resolvePrAccess(branch: string, token: string | null, options: any = {}
     return { _apiError: lastApiError, _notFound: true };
   }
   return null;
+}
+
+function findPrForBranch(prs: any[], branch: string): number | null {
+  const pr = prs.find(candidate => {
+    const head = candidate.head || {};
+    return head.ref === branch || head.label === branch || head.label?.endsWith(`:${branch}`);
+  });
+  return pr?.number ?? null;
 }
 
 /**
@@ -470,26 +492,21 @@ function listOpenPrsForSlug(baseSlug: string, token: string, options: any = {}):
     consecutiveErrors = 0;
     if (!Array.isArray(result.data) || result.data.length === 0) {break;}
 
-    for (const pr of result.data) {
-      const head = pr.head || {};
-      // Some refs come back directly in head.ref, others might be in head.label
-      const ref = head.ref || (head.label && head.label.split(':').pop()) || '';
-      
-      // Match exactly mission/<baseSlug> or mission/<baseSlug>-<suffix>
-      if (ref === `mission/${baseSlug}` || ref.startsWith(`mission/${baseSlug}-`)) {
-        prs.push({
-          number: pr.number,
-          title: pr.title,
-          html_url: pr.html_url,
-          head: ref
-        });
-      }
-    }
+    prs.push(...matchingMissionPrs(result.data, baseSlug));
 
     if (result.data.length < pageSize) {break;}
   }
 
   return prs;
+}
+
+function matchingMissionPrs(prs: any[], baseSlug: string) {
+  const prefix = `mission/${baseSlug}`;
+  return prs.flatMap((pr) => {
+    const head = pr.head || {};
+    const ref = head.ref || head.label?.split(':').pop() || '';
+    return ref === prefix || ref.startsWith(`${prefix}-`) ? [{ number: pr.number, title: pr.title, html_url: pr.html_url, head: ref }] : [];
+  });
 }
 
 
@@ -570,6 +587,26 @@ function getLatestReview(branch: string, reviewerUser: string, sinceIso: string,
   return eligible.length > 0 ? eligible[eligible.length - 1] : null;
 }
 
+function reviewDecisionFromReviews(data: any[], prNumber: number, reviewerUser?: string) {
+  const reviews = data
+    .map((review: any) => ({ user: (review.user || {}).login || '?', state: review.state || '', submittedAt: review.submitted_at || review.created_at || '', dismissed: !!review.dismissed }))
+    .filter((review: any) => review.state && review.submittedAt && !review.dismissed)
+    .sort((a: any, b: any) => new Date(a.submittedAt).getTime() - new Date(b.submittedAt).getTime());
+  if (reviews.length === 0) { return { ok: true, prNumber, reviewState: null, defaultUserApproved: false }; }
+  const formalReviews = reviews.filter((review: any) => review.state === 'APPROVED' || review.state === 'REQUEST_CHANGES');
+  const finalState = (formalReviews.length ? formalReviews : reviews).at(-1)!.state;
+  const latestDefaultUserFormal = formalReviews.filter((review: any) => review.user === DEFAULT_FORGEJO_USER).at(-1);
+  const defaultUserApproved = latestDefaultUserFormal?.state === 'APPROVED';
+  const decision: any = { ok: true, prNumber, reviewState: finalState, defaultUserApproved };
+  if (defaultUserApproved) { decision.defaultUserApprovedAt = latestDefaultUserFormal.submittedAt; }
+  if (reviewerUser) {
+    const latestReviewerFormal = formalReviews.filter((review: any) => review.user === reviewerUser).at(-1);
+    decision.reviewerApproved = latestReviewerFormal?.state === 'APPROVED';
+    if (decision.reviewerApproved && latestReviewerFormal) { decision.reviewerApprovedAt = latestReviewerFormal.submittedAt; }
+  }
+  return decision;
+}
+
 /**
  * @param {string} branch
  * @param {{forgejoUser?: string, token?: string, apiCall?: Function, rootDir?: string, reviewerUser?: string}} [options]
@@ -606,89 +643,14 @@ function getLatestReviewDecision(branch: string, options: any = {}): { ok: boole
   if (!prAccess) {
     return { ok: false, error: 'pr-not-found', reviewState: null };
   }
-  const prNumber = prAccess.prNumber;
+  const prNumber = prAccess.prNumber as number;
 
   const result = apiCall('GET', `/pulls/${prNumber}/reviews`, prAccess.token);
   if (!result.ok || !Array.isArray(result.data)) {
     return { ok: false, error: 'reviews-unavailable', reviewState: null, prNumber };
   }
 
-  // defaultUserApproved tracks whether the repo owner (always DEFAULT_FORGEJO_USER)
-  // has approved, not the current CLI session user.
-  const defaultUserLogin = DEFAULT_FORGEJO_USER;
-  const reviews = result.data
-    .map(/** @param {{user?: {login?: string}, state?: string, submitted_at?: string, created_at?: string, dismissed?: boolean}} review */ (review: any) => ({
-      user: (review.user || {}).login || '?',
-      state: review.state || '',
-      submittedAt: review.submitted_at || review.created_at || '',
-      dismissed: !!review.dismissed
-    }))
-    .filter(/** @param {{state: string, submittedAt: string, dismissed: boolean}} review */ (review: any) => review.state && review.submittedAt && !review.dismissed)
-    .sort(/** @param {{submittedAt: string}} a @param {{submittedAt: string}} b */ (a: any, b: any) => new Date(a.submittedAt).getTime() - new Date(b.submittedAt).getTime());
-
-  if (reviews.length === 0) {
-    return { ok: true, prNumber, reviewState: null, defaultUserApproved: false };
-  }
-
-  // Find the latest formal decision overall
-  const formalReviews = reviews.filter(/** @param {{state: string}} r */ (r: any) => r.state === 'APPROVED' || r.state === 'REQUEST_CHANGES');
-
-  const finalState = formalReviews.length > 0
-    ? formalReviews[formalReviews.length - 1].state
-    : reviews[reviews.length - 1].state;
-
-  // TASK-2379: the override is a real provider decision; carry its own
-  // authoritative timestamp so recovery can persist it as a ReviewerDecision
-  // at that time. Review round 1 (F2): the approval stays valid only while
-  // the default user's own latest non-dismissed formal review is APPROVED —
-  // a later REQUEST_CHANGES by the same user supersedes it, and recovery
-  // must not persist a retracted approval as an authoritative decision.
-  const defaultUserFormal = formalReviews
-    .filter(/** @param {{user: string, state: string}} r */ (r: any) => r.user === defaultUserLogin);
-  const latestDefaultUserFormal = defaultUserFormal.length > 0
-    ? defaultUserFormal[defaultUserFormal.length - 1]
-    : null;
-  const defaultUserApproved = latestDefaultUserFormal !== null && latestDefaultUserFormal.state === 'APPROVED';
-  const defaultUserApprovedAt = defaultUserApproved && latestDefaultUserFormal
-    ? latestDefaultUserFormal.submittedAt
-    : undefined;
-
-  // TASK-2420: recovery must also recognize an APPROVED posted by the
-  // assigned/configured reviewer (e.g. qwen), not only the repo default user
-  // ('human'). The assigned reviewer's login is resolved deterministically from
-  // the recorded Review round identity (see resolveForgejoUserForIntegration),
-  // never from caller-supplied context, so it cannot be forged (fail-closed,
-  // ADR 0048). The reviewer approval rides alongside defaultUserApproved as a
-  // separate field, attached only when the caller asks for the assigned
-  // reviewer (reviewerUser), so the whole-object shape callers that compare it
-  // whole stays byte-identical to the pre-TASK-2420 result. The same
-  // supersedes rule applies: a later REQUEST_CHANGES by the same assigned
-  // reviewer retracts the approval, exactly as for the default user.
-  const decision: { ok: boolean, prNumber?: number, reviewState: string, defaultUserApproved: boolean, defaultUserApprovedAt?: string, reviewerApproved?: boolean, reviewerApprovedAt?: string } = {
-    ok: true,
-    prNumber,
-    reviewState: finalState,
-    defaultUserApproved,
-  };
-  // The override carries its own authoritative timestamp; the property stays
-  // absent (not `undefined`) when there is no default-user approval, keeping
-  // the pre-TASK-2379 result shape for callers that compare it whole.
-  if (defaultUserApprovedAt) {
-    decision.defaultUserApprovedAt = defaultUserApprovedAt;
-  }
-  if (reviewerUser) {
-    const reviewerFormal = formalReviews.filter((r: any) => r.user === reviewerUser);
-    const latestReviewerFormal = reviewerFormal.length > 0 ? reviewerFormal[reviewerFormal.length - 1] : null;
-    const reviewerApproved = latestReviewerFormal !== null && latestReviewerFormal.state === 'APPROVED';
-    decision.reviewerApproved = reviewerApproved;
-    if (reviewerApproved && latestReviewerFormal) {
-      // Present only when the assigned reviewer actually holds a standing
-      // approval; absent otherwise so callers can distinguish "not asked"
-      // (undefined) from "asked, no approval" (false).
-      decision.reviewerApprovedAt = latestReviewerFormal.submittedAt;
-    }
-  }
-  return decision;
+  return reviewDecisionFromReviews(result.data, prNumber, reviewerUser);
 }
 
 /**
@@ -979,7 +941,26 @@ async function getComments(branch: string, token: string, options: any = {}) {
  * @param {string} token   - Forgejo PAT
  * @returns {Promise<Object>} - { ok: boolean, error: string }
  */
-async function closePr(branch: string, token: string): Promise<Object> {
+function closeResolvedPr(branch: string, token: string, prNumber: number, rootDir: string): { ok: boolean; error?: string } {
+  const details = forgejoApi('GET', `/pulls/${prNumber}`, token, undefined, { rootDir });
+  if (!details.ok) { return { ok: true }; }
+  if (details.data.state === 'closed' || details.data.merged) {
+    fmt.log.info(`PR #${prNumber} is already ${details.data.state}${details.data.merged ? ' and merged' : ''}.`);
+    return { ok: true };
+  }
+  const result = forgejoApi('PATCH', `/pulls/${prNumber}`, token, { state: 'closed' }, { rootDir });
+  if (!result.ok) { return { ok: false, error: `failed to close PR #${prNumber}: ${JSON.stringify(result.data)}` }; }
+  fmt.log.pass(`PR #${prNumber} closed.`);
+  return { ok: true };
+}
+
+function deleteClosedPrBranch(branch: string, rootDir: string) {
+  fmt.log.info(`Deleting remote branch ${fmt.branch(branch)}...`);
+  const deleted = deleteReviewRef(branch, rootDir).status === 0;
+  fmt.log[deleted ? 'pass' : 'info'](`Remote branch ${fmt.branch(branch)} ${deleted ? 'deleted.' : 'already gone or could not be deleted.'}`);
+}
+
+async function closePrImpl(branch: string, token: string): Promise<Object> {
   const slugMatch = branch.match(/^mission\/(task-\d+)/);
   const slug = slugMatch ? slugMatch[1] : null;
   const rootDir = process.cwd();
@@ -992,34 +973,17 @@ async function closePr(branch: string, token: string): Promise<Object> {
   }
 
   if (prNumber && typeof prNumber === 'number') {
-    // Check current state
-    const prDetails = forgejoApi('GET', `/pulls/${prNumber}`, token, undefined, { rootDir });
-    if (prDetails.ok) {
-      const pr = prDetails.data;
-      if (pr.state !== 'closed' && !pr.merged) {
-        const closeResult = forgejoApi('PATCH', `/pulls/${prNumber}`, token, { state: 'closed' }, { rootDir });
-        if (!closeResult.ok) {
-          return { ok: false, error: `failed to close PR #${prNumber}: ${JSON.stringify(closeResult.data)}` };
-        }
-        fmt.log.pass(`PR #${prNumber} closed.`);
-      } else {
-        fmt.log.info(`PR #${prNumber} is already ${pr.state}${pr.merged ? ' and merged' : ''}.`);
-      }
-    }
+    const result = closeResolvedPr(branch, token, prNumber, rootDir);
+    if (!result.ok) { return result; }
   } else {
     fmt.log.info(`No open PR found for ${fmt.branch(branch)}.`);
   }
-
-  // Delete remote branch
-  fmt.log.info(`Deleting remote branch ${fmt.branch(branch)}...`);
-  const deleteResult = deleteReviewRef(branch, rootDir);
-  if (deleteResult.status === 0) {
-    fmt.log.pass(`Remote branch ${fmt.branch(branch)} deleted.`);
-  } else {
-    fmt.log.info(`Remote branch ${fmt.branch(branch)} already gone or could not be deleted.`);
-  }
-
+  deleteClosedPrBranch(branch, rootDir);
   return { ok: true };
+}
+
+async function closePr(branch: string, token: string): Promise<Object> {
+  return await closePrImpl(branch, token);
 }
 
 export { formatPrLookupFailure };

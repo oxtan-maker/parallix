@@ -59,6 +59,26 @@ function removeRecordedRoots(roots: string[]) {
   }
 }
 
+function recoverManifestEntry(manifestDir: string, entry: string, alive: (_pid: number) => boolean) {
+  const nestedMatch = /^test-run-(\d+)$/.exec(entry);
+  const entryPath = path.join(manifestDir, entry);
+  if (nestedMatch) {
+    if (alive(Number(nestedMatch[1])) || !ownedDirectory(entryPath)) { return; }
+    for (const workerEntry of fs.readdirSync(entryPath)) {
+      if (!workerEntry.endsWith('.json')) { continue; }
+      try { removeRecordedRoots(manifestRoots(JSON.parse(fs.readFileSync(path.join(entryPath, workerEntry), 'utf8')))); } catch (_) {}
+    }
+    fs.rmSync(entryPath, { recursive: true, force: true });
+    return;
+  }
+  const pid = Number(path.basename(entry, '.json'));
+  const stat = fs.lstatSync(entryPath);
+  if (!entry.endsWith('.json') || !Number.isInteger(pid) || pid <= 0 || alive(pid)
+    || !stat.isFile() || stat.isSymbolicLink() || (process.getuid?.() !== undefined && stat.uid !== process.getuid?.())) { return; }
+  removeRecordedRoots(manifestRoots(JSON.parse(fs.readFileSync(entryPath, 'utf8'))));
+  fs.rmSync(entryPath, { force: true });
+}
+
 function recoverRecordedTempRoots({
   manifestDir = defaultManifestDir(),
   isProcessAlive: alive = isProcessAlive,
@@ -70,23 +90,7 @@ function recoverRecordedTempRoots({
     if (!fs.existsSync(manifestDir) || !ownedDirectory(manifestDir)) { return; }
     for (const entry of fs.readdirSync(manifestDir)) {
       try {
-        const nestedMatch = /^test-run-(\d+)$/.exec(entry);
-        const entryPath = path.join(manifestDir, entry);
-        if (nestedMatch) {
-          if (alive(Number(nestedMatch[1])) || !ownedDirectory(entryPath)) { continue; }
-          for (const workerEntry of fs.readdirSync(entryPath)) {
-            if (!workerEntry.endsWith('.json')) { continue; }
-            try { removeRecordedRoots(manifestRoots(JSON.parse(fs.readFileSync(path.join(entryPath, workerEntry), 'utf8')))); } catch (_) {}
-          }
-          fs.rmSync(entryPath, { recursive: true, force: true });
-          continue;
-        }
-        const pid = Number(path.basename(entry, '.json'));
-        const stat = fs.lstatSync(entryPath);
-        if (!entry.endsWith('.json') || !Number.isInteger(pid) || pid <= 0 || alive(pid)
-          || !stat.isFile() || stat.isSymbolicLink() || (process.getuid?.() !== undefined && stat.uid !== process.getuid?.())) { continue; }
-        removeRecordedRoots(manifestRoots(JSON.parse(fs.readFileSync(entryPath, 'utf8'))));
-        fs.rmSync(entryPath, { force: true });
+        recoverManifestEntry(manifestDir, entry, alive);
       } catch (_) {
         // One raced, malformed, or inaccessible record grants no authority and cannot abort recovery.
       }

@@ -93,37 +93,8 @@ export class SqliteImporter {
     sourcePath: string,
     options: { readonly dryRun?: boolean } = {},
   ): Promise<LegacyBlockImportReport> {
-    const absPath = path.resolve(sourcePath);
-    if (!fs.existsSync(absPath)) {
-      throw new Error(`Blocklist source not found: ${absPath}`);
-    }
-
-    const source = fs.readFileSync(absPath, 'utf8');
-    const digest = crypto.createHash('sha256').update(source).digest('hex');
-    let raw: unknown;
-    try {
-      raw = JSON.parse(source);
-    } catch (error) {
-      throw new Error(`Malformed blocklist JSON at ${absPath}: ${(error as Error).message}`);
-    }
-    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
-      throw new Error(`Blocklist JSON at ${absPath} must be a JSON object`);
-    }
-
-    const blocklist = (raw as { blocklist?: unknown }).blocklist;
-    if (blocklist !== undefined && (typeof blocklist !== 'object' || blocklist === null || Array.isArray(blocklist))) {
-      throw new Error(`Blocklist JSON at ${absPath} has a non-object blocklist`);
-    }
-
-    const parsed: AgentBlockEntry[] = [];
-    const invalid: Array<{ agent: string; error: string }> = [];
-    for (const [agent, entry] of Object.entries((blocklist ?? {}) as Record<string, unknown>)) {
-      try {
-        parsed.push(this.parseBlocklistEntry(agent, entry));
-      } catch (error) {
-        invalid.push({ agent, error: (error as Error).message });
-      }
-    }
+    const { absPath, digest, blocklist } = this.readLegacyBlocklist(sourcePath);
+    const { parsed, invalid } = this.parseLegacyBlocklist(blocklist);
 
     const canonical = await this.db.query<{
       agent: unknown; blocked: unknown; until: unknown; reason: unknown;
@@ -184,6 +155,27 @@ export class SqliteImporter {
       throw new Error(`Blocklist import from ${absPath} failed and was rolled back: ${(error as Error).message}`);
     }
     return report;
+  }
+
+  private readLegacyBlocklist(sourcePath: string): { absPath: string; digest: string; blocklist: Record<string, unknown> } {
+    const absPath = path.resolve(sourcePath);
+    if (!fs.existsSync(absPath)) { throw new Error(`Blocklist source not found: ${absPath}`); }
+    const source = fs.readFileSync(absPath, 'utf8');
+    let raw: unknown;
+    try { raw = JSON.parse(source); } catch (error) { throw new Error(`Malformed blocklist JSON at ${absPath}: ${(error as Error).message}`); }
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) { throw new Error(`Blocklist JSON at ${absPath} must be a JSON object`); }
+    const blocklist = (raw as { blocklist?: unknown }).blocklist;
+    if (blocklist !== undefined && (typeof blocklist !== 'object' || blocklist === null || Array.isArray(blocklist))) { throw new Error(`Blocklist JSON at ${absPath} has a non-object blocklist`); }
+    return { absPath, digest: crypto.createHash('sha256').update(source).digest('hex'), blocklist: (blocklist ?? {}) as Record<string, unknown> };
+  }
+
+  private parseLegacyBlocklist(blocklist: Record<string, unknown>): { parsed: AgentBlockEntry[]; invalid: Array<{ agent: string; error: string }> } {
+    const parsed: AgentBlockEntry[] = [];
+    const invalid: Array<{ agent: string; error: string }> = [];
+    for (const [agent, entry] of Object.entries(blocklist)) {
+      try { parsed.push(this.parseBlocklistEntry(agent, entry)); } catch (error) { invalid.push({ agent, error: (error as Error).message }); }
+    }
+    return { parsed, invalid };
   }
 
   /**

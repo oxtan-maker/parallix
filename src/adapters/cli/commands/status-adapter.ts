@@ -126,6 +126,71 @@ function findStaleMissionWorktrees(opts: {
     .filter(Boolean) as StatusStaleWorktree[];
 }
 
+function currentRebaseInfo(rootDir: string, detectRebaseStateFn: NonNullable<StatusWorkflowAdapterOptions['detectRebaseStateFn']>): StatusRebaseInfo | null {
+  try {
+    const state = detectRebaseStateFn(rootDir);
+    return state.inProgress && state.detached
+      ? { inProgress: state.inProgress, detached: state.detached, unmergedFiles: state.unmergedFiles }
+      : null;
+  } catch { return null; }
+}
+
+async function missionStatus(
+  slug: string | null,
+  rootDir: string,
+  buildProjectionFn: StatusWorkflowAdapterOptions['buildProjectionFn'],
+  getPrStatusFn: NonNullable<StatusWorkflowAdapterOptions['getPrStatusFn']>,
+): Promise<{ missionData: StatusMissionData | null; prInfo: StatusPrInfo | null }> {
+  if (!slug) { return { missionData: null, prInfo: null }; }
+  let missionData: StatusMissionData | null = null;
+  let prInfo: StatusPrInfo | null = null;
+  try {
+    const projection = await buildProjectionFn(rootDir).then(builder => builder.build()).catch(() => null);
+    const card = projection?.stages.flatMap(stage => stage.cards).find(card => (card as any).id.toLowerCase() === slug.toLowerCase());
+    if (card) {
+      missionData = {
+        activity: projectMissionActivity(card as MissionActivitySource),
+        backlogStatus: (card as any).rawStatus ?? (card as any).status,
+        checkpoint: (card as any).checkpoint,
+        checkpointDescription: (card as any).checkpointDescription,
+        reviewPhase: (card as any).reviewPhase,
+        reviewRound: (card as any).reviewRound,
+        reviewDisposition: (card as any).reviewDisposition,
+        approvalOwed: (card as any).approvalOwed,
+        reviewHistory: ((card as any).reviewHistory || []).map((review: any) => ({
+          number: review.number, reviewer: review.reviewer, implementer: review.implementer,
+          disposition: review.disposition ?? 'pending', comment: review.comment,
+          findingSummaries: review.findingSummaries || [], fixes: review.fixes || [], pushbacks: review.pushbacks || [],
+        })),
+      };
+    }
+  } catch { /* projection unavailable */ }
+  try { prInfo = getPrStatusFn(missionBranchName(slug)); } catch { prInfo = { exists: false }; }
+  return { missionData, prInfo };
+}
+
+function staleWorktreeStatus(
+  explicitSlug: string | null,
+  options: StatusWorkflowAdapterOptions,
+  gitRun: typeof run,
+  findTaskFileFn: typeof findTaskFile,
+  getTaskStatusFn: typeof getTaskStatus,
+  detectRebaseStateFn: NonNullable<StatusWorkflowAdapterOptions['detectRebaseStateFn']>,
+): { staleWorktrees: StatusStaleWorktree[]; staleWorktreeRebase: Record<string, StatusRebaseInfo | null> } {
+  if (explicitSlug) { return { staleWorktrees: [], staleWorktreeRebase: {} }; }
+  let primaryWorktree = options.primaryWorktree ?? null;
+  if (!primaryWorktree) { try { primaryWorktree = getPrimaryWorktree(); } catch { primaryWorktree = null; } }
+  const staleWorktrees = findStaleMissionWorktrees({ gitRun, findTaskFileFn, getTaskStatusFn, primaryWorktree });
+  const staleWorktreeRebase: Record<string, StatusRebaseInfo | null> = {};
+  for (const worktree of staleWorktrees) {
+    try {
+      const state = detectRebaseStateFn(worktree.path);
+      if (state.inProgress) { staleWorktreeRebase[worktree.path] = { inProgress: state.inProgress, detached: state.detached, unmergedFiles: state.unmergedFiles }; }
+    } catch { /* ignore disappearing worktrees */ }
+  }
+  return { staleWorktrees, staleWorktreeRebase };
+}
+
 /** Create a concrete StatusWorkflowPort implementation. */
 export function createStatusWorkflowAdapter(options: StatusWorkflowAdapterOptions): StatusWorkflowPort {
   const inferSlugFn = options.inferSlugFn || inferSlug;
@@ -146,93 +211,12 @@ export function createStatusWorkflowAdapter(options: StatusWorkflowAdapterOption
     async getStatus(slug: string | null, rootDir: string): Promise<StatusResult> {
       const explicitSlug = slug;
       const resolvedSlug = inferSlugFn(slug || undefined);
-
-      // Current worktree branch
       const branch = getCurrentBranchFn();
-
-      // Rebase state for current worktree
-      let rebaseInfo: StatusRebaseInfo | null = null;
-      try {
-        const rs = detectRebaseStateFn(rootDir);
-        if (rs.inProgress && rs.detached) {
-          rebaseInfo = { inProgress: rs.inProgress, detached: rs.detached, unmergedFiles: rs.unmergedFiles };
-        }
-      } catch { /* ignore transient failures */ }
-
-      // Mission-specific data
-      let missionData: StatusMissionData | null = null;
-      let prInfo: StatusPrInfo | null = null;
-
-      if (resolvedSlug) {
-        // Board projection
-        try {
-          const projection = await options.buildProjectionFn(rootDir)
-            .then(builder => builder.build())
-            .catch(() => null);
-
-          if (projection) {
-            const card = projection.stages.flatMap((s) => s.cards).find(
-              (c) => (c as any).id.toLowerCase() === resolvedSlug.toLowerCase(),
-            );
-            if (card) {
-              missionData = {
-                activity: projectMissionActivity(card as MissionActivitySource),
-                backlogStatus: (card as any).rawStatus ?? (card as any).status,
-                checkpoint: (card as any).checkpoint,
-                checkpointDescription: (card as any).checkpointDescription,
-                reviewPhase: (card as any).reviewPhase,
-                reviewRound: (card as any).reviewRound,
-                reviewDisposition: (card as any).reviewDisposition,
-                approvalOwed: (card as any).approvalOwed,
-                reviewHistory: ((card as any).reviewHistory || []).map((r: any) => ({
-                  number: r.number,
-                  reviewer: r.reviewer,
-                  implementer: r.implementer,
-                  disposition: r.disposition ?? 'pending',
-                  comment: r.comment,
-                  findingSummaries: r.findingSummaries || [],
-                  fixes: r.fixes || [],
-                  pushbacks: r.pushbacks || [],
-                })),
-              };
-            }
-          }
-        } catch { /* projection unavailable */ }
-
-        // PR status
-        try {
-          const pr = getPrStatusFn(missionBranchName(resolvedSlug));
-          prInfo = pr;
-        } catch {
-          prInfo = { exists: false };
-        }
-      }
-
-      // Stale worktrees (only when no explicit slug)
-      let staleWorktrees: StatusStaleWorktree[] = [];
-      const staleWorktreeRebase: Record<string, StatusRebaseInfo | null> = {};
-      if (!explicitSlug) {
-        let resolvedPrimary: string | null = options.primaryWorktree ?? null;
-        if (!resolvedPrimary) {
-          try { resolvedPrimary = getPrimaryWorktree(); } catch { resolvedPrimary = null; }
-        }
-        staleWorktrees = findStaleMissionWorktrees({
-          gitRun,
-          findTaskFileFn,
-          getTaskStatusFn,
-          primaryWorktree: resolvedPrimary,
-        });
-
-        // Rebase info for each stale worktree
-        for (const wt of staleWorktrees) {
-          try {
-            const rs = detectRebaseStateFn(wt.path);
-            if (rs.inProgress) {
-              staleWorktreeRebase[wt.path] = { inProgress: rs.inProgress, detached: rs.detached, unmergedFiles: rs.unmergedFiles };
-            }
-          } catch { /* ignore disappearing worktrees */ }
-        }
-      }
+      const rebaseInfo = currentRebaseInfo(rootDir, detectRebaseStateFn);
+      const { missionData, prInfo } = await missionStatus(resolvedSlug, rootDir, options.buildProjectionFn, getPrStatusFn);
+      const { staleWorktrees, staleWorktreeRebase } = staleWorktreeStatus(
+        explicitSlug, options, gitRun, findTaskFileFn, getTaskStatusFn, detectRebaseStateFn,
+      );
 
       // Agent launcher matrix
       const config = readAgentConfigOrExitFn();

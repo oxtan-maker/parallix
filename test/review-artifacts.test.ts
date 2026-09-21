@@ -125,8 +125,9 @@ test('deleteArtifactFile deletes existing file', () => {
 });
 
 test('deleteArtifactFile does not throw for non-existent file', () => {
-  // Should not throw
-  deleteArtifactFile('/nonexistent/file.txt');
+  const filePath = '/nonexistent/file.txt';
+  deleteArtifactFile(filePath);
+  assert.equal(fs.existsSync(filePath), false);
 });
 
 test('deleteArtifactFile uses injected unlinkSync function', () => {

@@ -218,41 +218,37 @@ function ensureWorktree(mainRepo, targetWorktree, branchName, {
 function ensureGraphifyWorkspace(targetWorktree, mainRepo, { logFn = fmt.log.plain } = {}) {
   const targetPath = path.join(targetWorktree, 'graphify-out');
 
-  if (fs.existsSync(targetPath)) {
-    try {
-      if (fs.lstatSync(targetPath).isDirectory()) {
-        logFn(fmt.status('PASS', `graphify-out directory already exists in the mission worktree at ${fmt.path(targetPath)}.`));
-      } else {
-        logFn(fmt.status('WARN', `${fmt.path(targetPath)} already exists and is not a directory. Leaving it unchanged.`));
-        return false;
-      }
-    } catch (_) {
-      logFn(fmt.status('WARN', `${fmt.path(targetPath)} already exists and is not a directory. Leaving it unchanged.`));
-      return false;
-    }
-  } else {
+  if (!fs.existsSync(targetPath)) {
     fs.mkdirSync(targetPath, { recursive: true });
     logFn(fmt.status('PASS', `Created independent graphify-out directory in the mission worktree at ${fmt.path(targetPath)}.`));
-
-    // Copy graphify-out contents (graph.json, wiki/, etc.) from the primary worktree
-    // so the draft agent has graph context from the start. Scoped to newly-created
-    // directories so a re-run of px draft does not clobber a mission worktree's
-    // fresher graph with the primary's staler one.
-    if (mainRepo) {
-      const sourcePath = path.join(mainRepo, 'graphify-out');
-      try {
-        if (fs.existsSync(sourcePath) && fs.lstatSync(sourcePath).isDirectory()) {
-          fs.cpSync(sourcePath, targetPath, { recursive: true, force: true });
-          logFn(fmt.status('PASS', `Copied graphify-out contents from primary worktree ${fmt.path(sourcePath)}.`));
-        }
-      } catch (_) {
-        // Graceful degradation: graphify not installed, source unavailable, or copy failed.
-        // The empty directory is still created and draft proceeds.
-      }
-    }
+    copyGraphifyWorkspace(mainRepo, targetPath, logFn);
+    return true;
   }
 
-  return true;
+  return reportGraphifyWorkspace(targetPath, logFn);
+}
+
+function reportGraphifyWorkspace(targetPath, logFn) {
+  try {
+    if (fs.lstatSync(targetPath).isDirectory()) {
+      logFn(fmt.status('PASS', `graphify-out directory already exists in the mission worktree at ${fmt.path(targetPath)}.`));
+      return true;
+    }
+  } catch (_) { /* reported below */ }
+  logFn(fmt.status('WARN', `${fmt.path(targetPath)} already exists and is not a directory. Leaving it unchanged.`));
+  return false;
+}
+
+function copyGraphifyWorkspace(mainRepo, targetPath, logFn) {
+  if (!mainRepo) { return; }
+  const sourcePath = path.join(mainRepo, 'graphify-out');
+  try {
+    if (!fs.existsSync(sourcePath) || !fs.lstatSync(sourcePath).isDirectory()) { return; }
+    fs.cpSync(sourcePath, targetPath, { recursive: true, force: true });
+    logFn(fmt.status('PASS', `Copied graphify-out contents from primary worktree ${fmt.path(sourcePath)}.`));
+  } catch (_) {
+    // Graceful degradation: graphify not installed, source unavailable, or copy failed.
+  }
 }
 
 // @ts-expect-error implicit any on targetWorktree
@@ -286,7 +282,6 @@ function ensureGraphifyIgnore(targetWorktree, { gitFn = git, logFn = fmt.log.pla
     logFn(fmt.status('WARN', `Created .graphifyignore but could not commit: ${/** @type {any} */ (error).message}. It will be picked up by the draft safety harness.`));
   }
 
-  return true;
 }
 
 // @ts-expect-error implicit any on targetWorktree/slug

@@ -89,11 +89,18 @@ jobs:
           # explicit opt-out the task-2513 confinement gate blocks every
           # mutating launch (even mocked ones). Confinement tests pin the probe.
           PARALLIX_NO_BUBBLEWRAP: '1'
+          # TASK-2547: coverage is a reporting mode of this CI-safe execution, not
+          # a second pass. Unit and integration-ci each run once with Node's built
+          # in coverage, emitting one lcov per tier that `npm run coverage:merge`
+          # unions. The per-test --test-timeout safety net stays; the local budget
+          # reporter is dropped on hosted runners (TASK-2542).
+          PARALLIX_TEST_COVERAGE: '1'
 
-      # Shared coverage-plus-SonarQube command (the same command wired into
-      # workflow.config.json adapters.gates.preIntegration): it produces LCOV
-      # for the scanner without applying the legacy whole-tree threshold. The
-      # SonarQube quality gate owns the required 90% coverage of new code.
+      # Coverage for the scan comes from the CI-safe execution above (each CI-safe
+      # test runs once with Node built in coverage); this step only sources the
+      # token. `npm run coverage:merge` unions the per-tier LCOV fragments into
+      # coverage/lcov.info, and the SonarQube quality gate owns the required 90%
+      # coverage condition for new code (no legacy whole-tree threshold, SC7).
       #
       # Runs on trusted code only: push events and same-repo pull requests.
       # GitHub Actions rejects the secrets context in a step-level if: conditional,
@@ -119,9 +126,15 @@ jobs:
       # rather than as the detached merge commit. Only SONAR_TOKEN is required —
       # the Cloud host lives in sonar-project.properties, not in a secret. The
       # mandatory gate rule (new_violations > 0) is unchanged.
-      - name: Run coverage plus mandatory SonarQube quality gate
+      # TASK-2547: union the per-tier LCOV fragments (coverage/.lcov-unit.info,
+      # coverage/.lcov-integration-ci.info) written by the coverage-aware CI-safe
+      # execution into one Sonar-consumable coverage/lcov.info. No second test
+      # pass runs here.
+      - name: Merge CI-safe coverage into one LCOV report
+        run: npm run coverage:merge
+      - name: Run mandatory SonarQube quality gate
         if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository
-        run: npm run test:coverage -- --threshold 0 --lcov && npm run sonar > "$GITHUB_WORKSPACE/sonar-quality-gate.log" 2>&1
+        run: npm run sonar > "$GITHUB_WORKSPACE/sonar-quality-gate.log" 2>&1
         env:
           CI: 'true'
           PARALLIX_NO_BUBBLEWRAP: '1'

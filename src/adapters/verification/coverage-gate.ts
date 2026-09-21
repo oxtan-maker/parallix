@@ -57,6 +57,10 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import * as fmt from '../../application/presentation/cli-format.js';
 import { packageRoot } from '../filesystem/package-root.js';
 import { addTrustedTempRoot, defaultManifestDir, ensureManifestDir, recoverRecordedTempRoots } from './temp-root-registry.js';
+// Coverage consumes the single verification-tier authority (test/lib/
+// test-tier-selection.ts, extracted from test/lib/test-run-plan.ts). It never
+// derives membership from a glob: see test/task-2547-repro.test.ts.
+import { selectTierFiles } from '../../../test/lib/test-tier-selection.js';
 
 const MODULE_DIR = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = packageRoot(MODULE_DIR);
@@ -64,7 +68,6 @@ const COVERAGE_SCRATCH_ROOT = path.join(REPO_ROOT, 'tmp');
 // The V8 coverage payload is written to the worktree's backing disk, not the
 // shared tmpfs, so orphan recovery must treat that repo-local base as trusted.
 addTrustedTempRoot(path.join(REPO_ROOT, 'tmp'));
-const E2E_TEST_FILES = new Set(['e2e-real-agent-smoke.test.ts', 'e2e-mission-lifecycle.test.ts']);
 const TEMP_DIR_PREFIXES = [
   'agents-',
   'sessions-',
@@ -172,7 +175,21 @@ function discoverTestFiles() {
 }
 
 function coverageTestFiles() {
-  return discoverTestFiles().filter(file => !E2E_TEST_FILES.has(path.basename(file)));
+  // Authoritative tier selection, not a filesystem glob: the hosted GitHub
+  // population is unit ∪ integration-ci, selected through the planner (never a
+  // glob) so integration-local can never leak into coverage.
+  const tiers = selectTierFiles(REPO_ROOT);
+  return [...tiers.unit, ...tiers.integrationCi];
+}
+
+/**
+ * Merge multiple LCOV fragments into one report. Reuses normalizeLcov(), which
+ * unions every source/line across fragments with max-hits semantics (one DA:
+ * per line, recomputed LF/LH), so no duplicate DA records survive. join('\n')
+ * keeps each record on its own line.
+ */
+function mergeLcov(fragments: readonly string[]): string {
+  return normalizeLcov(fragments.join('\n'));
 }
 
 function normalizeLcov(lcovText: string) {
@@ -431,19 +448,7 @@ function run(args: string[], options: CoverageGateOptions = {}) {
   try {
     recoverOrphanedScratchDirs();
     if (dryRun_) {
-      const testFiles = coverageTestFiles();
-      if (testFiles.length === 0) {
-        if (typeof exitFn === 'function') {exitFn(1);}
-      } else {
-        fmt.log.info(`Found ${testFiles.length} test file(s)`);
-        fmt.log.info(`DRY-RUN mode — threshold=${threshold}%`);
-        fmt.log.info('Denominator: src/**/*.ts');
-        fmt.log.info(`Include globs: ${COVERAGE_INCLUDES.join(', ')}`);
-        fmt.log.info(`Exclude globs: ${COVERAGE_EXCLUDES.join(', ')}`);
-        fmt.log.info(`Would run: ${fmt.command(`${process.execPath} ${buildCoverageArgs(testFiles, threshold).join(' ')}`)}`);
-        if (typeof exitFn === 'function') {exitFn(0);}
-        else {process.exit(0);}
-      }
+      runDryCoverage(exitFn);
     } else {
       registerExitHandlers();
       exitFn(runTests(coverageTestFiles(), threshold));
@@ -452,6 +457,18 @@ function run(args: string[], options: CoverageGateOptions = {}) {
     threshold = savedThreshold;
     dryRun = savedDryRun;
   }
+}
+
+function runDryCoverage(exitFn: (_code: number) => void): void {
+  const testFiles = coverageTestFiles();
+  if (testFiles.length === 0) { exitFn(1); return; }
+  fmt.log.info(`Found ${testFiles.length} test file(s)`);
+  fmt.log.info(`DRY-RUN mode — threshold=${threshold}%`);
+  fmt.log.info('Denominator: src/**/*.ts');
+  fmt.log.info(`Include globs: ${COVERAGE_INCLUDES.join(', ')}`);
+  fmt.log.info(`Exclude globs: ${COVERAGE_EXCLUDES.join(', ')}`);
+  fmt.log.info(`Would run: ${fmt.command(`${process.execPath} ${buildCoverageArgs(testFiles, threshold).join(' ')}`)}`);
+  exitFn(0);
 }
 
 (run as any).buildCoverageArgs = buildCoverageArgs;
@@ -463,6 +480,7 @@ function run(args: string[], options: CoverageGateOptions = {}) {
 (run as any).COVERAGE_EXCLUDES = COVERAGE_EXCLUDES;
 (run as any).COVERAGE_INCLUDES = COVERAGE_INCLUDES;
 (run as any).coverageTestFiles = coverageTestFiles;
+(run as any).mergeLcov = mergeLcov;
 (run as any).DEFAULT_TEST_TIMEOUT_MS = DEFAULT_TEST_TIMEOUT_MS;
 (run as any).discoverTestFiles = discoverTestFiles;
 (run as any).COVERAGE_GATE_MANIFEST_DIR = COVERAGE_GATE_MANIFEST_DIR;
@@ -476,4 +494,4 @@ function run(args: string[], options: CoverageGateOptions = {}) {
 (run as any).runTests = runTests;
 (run as any).shouldCleanTempDir = shouldCleanTempDir;
 export default run;
-export { run, cleanupPerRunScratch, createMockGraphifyBin, createPerRunScratchDirs, createPerRunTmpRoot, COVERAGE_EXCLUDES, COVERAGE_GATE_MANIFEST_DIR, COVERAGE_INCLUDES, DEFAULT_TEST_TIMEOUT_MS, coverageTestFiles, discoverTestFiles, flushCoverageManifest, listTempEntries, normalizeLcov, recoverOrphanedScratchDirs, registerExitHandlers, resetPerRunScratchState, resolveTestTimeoutMs, runTests, shouldCleanTempDir };
+export { run, cleanupPerRunScratch, createMockGraphifyBin, createPerRunScratchDirs, createPerRunTmpRoot, COVERAGE_EXCLUDES, COVERAGE_GATE_MANIFEST_DIR, COVERAGE_INCLUDES, DEFAULT_TEST_TIMEOUT_MS, coverageTestFiles, discoverTestFiles, flushCoverageManifest, listTempEntries, normalizeLcov, mergeLcov, recoverOrphanedScratchDirs, registerExitHandlers, resetPerRunScratchState, resolveTestTimeoutMs, runTests, shouldCleanTempDir };

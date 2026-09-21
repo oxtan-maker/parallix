@@ -69,6 +69,9 @@ const expectedIntegrationFiles = [
   // TASK-2546: reads the worktree's real Git branch and tracked-file list to
   // prove the Cloud scan identity, so it crosses the git boundary.
   'sonarqube-cloud-wiring.test.ts',
+  // TASK-2525.03: creates a temporary Git repository to prove local branch
+  // discovery, so it crosses the Git process boundary.
+  'task-2525.03-sonar-enforcement.test.ts',
   'sqlite-mission-store.integration.test.ts', 'sqlite-recovery-cp5.test.ts',
   'stats-backfill.test.ts', 'status.test.ts',
   'task-1048-regression.test.ts',
@@ -208,7 +211,8 @@ function selectedFiles(args, version = process.version) {
 
 test('default test runner routes every moved group to integration and excludes it from default', () => {
   const runner = fs.readFileSync(path.join(import.meta.dirname, 'run-default-tests.ts'), 'utf8')
-    + fs.readFileSync(path.join(import.meta.dirname, 'lib', 'test-run-plan.ts'), 'utf8');
+    + fs.readFileSync(path.join(import.meta.dirname, 'lib', 'test-run-plan.ts'), 'utf8')
+    + fs.readFileSync(path.join(import.meta.dirname, 'lib', 'test-tier-selection.ts'), 'utf8');
   const pkg = JSON.parse(fs.readFileSync(path.join(import.meta.dirname, '..', 'package.json'), 'utf8'));
 
   const defaultRun = selectedFiles([]);

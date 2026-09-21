@@ -34,6 +34,29 @@ export function resolveAuthoritativeApprovalAt(approval: any): string | undefine
   return undefined;
 }
 
+function rejectedRecovery(reason: string): RecoveryDecision {
+  return { established: false, via: null, reason };
+}
+
+function activeRecovery(review: any, overrideAt: string | undefined): RecoveryDecision {
+  if (!review && overrideAt === undefined) {
+    return rejectedRecovery('active with no authoritative Review and no default-user override; run px review <slug> --start before integration');
+  }
+  if (!review) { return { established: true, via: 'human-override', decidedAt: overrideAt, reason: '' }; }
+  const roundStatus = reviewStatus(review);
+  if (overrideAt !== undefined && (roundStatus === 'awaiting-review' || roundStatus === 'ready-for-next-round')) {
+    return { established: true, via: 'human-override', decidedAt: overrideAt, reason: '' };
+  }
+  return rejectedRecovery(`existing Review is ${roundStatus}; resolve the round before overriding`);
+}
+
+function reviewRecovery(review: any, overrideAt: string | undefined): RecoveryDecision {
+  if (review && overrideAt !== undefined && reviewStatus(review) === 'awaiting-review') {
+    return { established: true, via: 'human-override', decidedAt: overrideAt, reason: '' };
+  }
+  return rejectedRecovery('review without an authoritative approval; record a ReviewerDecision through px review');
+}
+
 /**
  * Review round 1 (F3): pure prediction of the authority the real
  * `px integrate` run would establish through recovery. The real run persists
@@ -55,31 +78,9 @@ export function recoveryEstablishesApproval(context: any): RecoveryDecision {
     return { established: true, via: 'mission-review', decidedAt: lastRound.decision.decidedAt, reason: '' };
   }
 
-  if (status === 'active') {
-    if (!review && overrideAt === undefined) {
-      return { established: false, via: null, reason: 'active with no authoritative Review and no default-user override; run px review <slug> --start before integration' };
-    }
-    if (review) {
-      // The real run re-submits through the handoff operation: an undecided
-      // round resubmits unchanged, a ready round advances to a fresh one.
-      // The override applies only when the resulting round awaits a decision.
-      const roundStatus = reviewStatus(review);
-      if (overrideAt !== undefined && (roundStatus === 'awaiting-review' || roundStatus === 'ready-for-next-round')) {
-        return { established: true, via: 'human-override', decidedAt: overrideAt, reason: '' };
-      }
-      return { established: false, via: null, reason: `existing Review is ${roundStatus}; resolve the round before overriding` };
-    }
-    return { established: true, via: 'human-override', decidedAt: overrideAt, reason: '' };
-  }
-
-  if (status === 'review') {
-    if (review && overrideAt !== undefined && reviewStatus(review) === 'awaiting-review') {
-      return { established: true, via: 'human-override', decidedAt: overrideAt, reason: '' };
-    }
-    return { established: false, via: null, reason: 'review without an authoritative approval; record a ReviewerDecision through px review' };
-  }
-
-  return { established: false, via: null, reason: `status ${status} is not recoverable to integration` };
+  if (status === 'active') { return activeRecovery(review, overrideAt); }
+  if (status === 'review') { return reviewRecovery(review, overrideAt); }
+  return rejectedRecovery(`status ${status} is not recoverable to integration`);
 }
 
 /** Whether the Mission (or a pre-store task) status lets integration proceed. */

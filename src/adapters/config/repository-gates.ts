@@ -276,23 +276,8 @@ export async function runPhaseGates(
   const error = opts.error || fmt.log.plainError;
   const dryRun = opts.dryRun === true;
 
-  // Plan-only dry run: resolve and print the gate list, execute nothing.
-  // `px integrate --dry-run` previously short-circuited here; this restores
-  // that boundary now that the generic runner owns the live path (F3).
-  if (dryRun) {
-    if (gates.length === 0) {
-      log(`Repository gates (${phase}): none configured — dry run, nothing to plan.`);
-    } else {
-      log(`Repository gates (${phase}): dry run — resolved plan (nothing executes):`);
-      for (const gate of gates) { log(`  [${gate.order}] ${gate.key}: ${gate.command}`); }
-    }
-    return { ok: true, phase, gates, executed: 0, skipped: true, dryRun: true, failedGate: null, error: null };
-  }
-
-  if (gates.length === 0) {
-    log(`Repository gates (${phase}): none configured — skipping.`);
-    return { ok: true, phase, gates: [], executed: 0, skipped: true, dryRun: false, failedGate: null, error: null };
-  }
+  const skipped = skippedPhaseGateResult(phase, gates, dryRun, log);
+  if (skipped) { return skipped; }
 
   // Execute through `bash -c`, the same shell mechanism the handoff declared
   // gate runner and the integration gate use, so configured commands may be
@@ -348,6 +333,19 @@ export async function runPhaseGates(
     failedGate,
     error: errorText,
   };
+}
+
+function skippedPhaseGateResult(phase: GatePhase, gates: RepositoryGate[], dryRun: boolean, log: Function): PhaseGateRunResult | null {
+  if (dryRun) {
+    log(gates.length === 0 ? `Repository gates (${phase}): none configured — dry run, nothing to plan.` : `Repository gates (${phase}): dry run — resolved plan (nothing executes):`);
+    for (const gate of gates) { log(`  [${gate.order}] ${gate.key}: ${gate.command}`); }
+    return { ok: true, phase, gates, executed: 0, skipped: true, dryRun: true, failedGate: null, error: null };
+  }
+  if (gates.length === 0) {
+    log(`Repository gates (${phase}): none configured — skipping.`);
+    return { ok: true, phase, gates: [], executed: 0, skipped: true, dryRun: false, failedGate: null, error: null };
+  }
+  return null;
 }
 
 /** @param {GatePhase} phase */

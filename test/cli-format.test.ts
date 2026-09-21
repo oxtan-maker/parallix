@@ -208,15 +208,21 @@ test('setLogger swaps the active logger and returns the previous one', () => {
 });
 
 test('setLogger tolerates a bare function logger', () => {
-  const prev = fmt.setLogger(() => {});
-  fmt.log.plain('via function logger');
-  fmt.setLogger(prev);
+  const lines: string[] = [];
+  const prev = fmt.setLogger((line: string) => { lines.push(line); });
+  try {
+    assert.equal(fmt.log.plain('via function logger'), 'via function logger');
+    assert.deepEqual(lines, [], 'a bare function is tolerated but not treated as a Logger object');
+  } finally { fmt.setLogger(prev); }
 });
 
 test('setLogger falls back when only log is provided', () => {
-  const prev = fmt.setLogger({ log: () => {} });
-  fmt.log.plain('error fallback path');
-  fmt.setLogger(prev);
+  const lines: string[] = [];
+  const prev = fmt.setLogger({ log: (line: string) => { lines.push(line); } });
+  try {
+    fmt.log.plainError('error fallback path');
+    assert.deepEqual(lines, ['error fallback path']);
+  } finally { fmt.setLogger(prev); }
 });
 
 test('colors export exposes the palette token map', () => {

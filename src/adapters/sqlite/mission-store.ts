@@ -564,6 +564,36 @@ export class SqliteMissionStore implements MissionStore, MissionNelRecorder {
     );
 
     for (const [roundPosition, round] of review.rounds.entries()) {
+      await this.insertReviewRound(mission.id, roundPosition, round);
+    }
+
+    for (const window of review.stageLaunches) {
+      for (const [position, fingerprint] of window.fingerprints.entries()) {
+        await this.db.execute(
+          `INSERT INTO mission_review_stage_launches
+             (mission_id, stage_key, position, fingerprint)
+           VALUES (?, ?, ?, ?)`,
+          [mission.id, window.stageKey, position, fingerprint],
+        );
+      }
+    }
+
+    // Insert review events (audit trail, replaces .md files)
+    for (const [position, event] of review.reviewEvents.entries()) {
+      await this.db.execute(
+        `INSERT INTO mission_review_events
+           (mission_id, position, event_type, round_number, phase, actor,
+            content, disposition, verdict, item_dispositions, blocked_reason, followup_reference, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [mission.id, position, event.eventType, event.roundNumber, event.phase, event.actor,
+          event.content, event.disposition, event.verdict,
+          event.itemDispositions ? JSON.stringify(event.itemDispositions) : null,
+          event.blockedReason, event.followUpReference, event.createdAt],
+      );
+    }
+  }
+
+  private async insertReviewRound(missionId: string, roundPosition: number, round: any): Promise<void> {
       const change = round.subject.change;
       const decision = round.decision;
       const approval = decision?.kind === 'approved' ? decision.source : null;
@@ -578,7 +608,7 @@ export class SqliteMissionStore implements MissionStore, MissionNelRecorder {
             implementer_response_content, item_dispositions, blocked_reason)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
-          mission.id,
+          missionId,
           roundPosition,
           round.number,
           change.kind,
@@ -615,7 +645,7 @@ export class SqliteMissionStore implements MissionStore, MissionNelRecorder {
                (mission_id, round_position, position, finding_id, summary, location)
              VALUES (?, ?, ?, ?, ?, ?)`,
             [
-              mission.id,
+              missionId,
               roundPosition,
               position,
               finding.id,
@@ -632,7 +662,7 @@ export class SqliteMissionStore implements MissionStore, MissionNelRecorder {
                (mission_id, round_position, position, finding_id, kind, explanation)
              VALUES (?, ?, ?, ?, ?, ?)`,
             [
-              mission.id,
+              missionId,
               roundPosition,
               position,
               resolution.findingId,
@@ -642,42 +672,5 @@ export class SqliteMissionStore implements MissionStore, MissionNelRecorder {
           );
         }
       }
-    }
-
-    for (const window of review.stageLaunches) {
-      for (const [position, fingerprint] of window.fingerprints.entries()) {
-        await this.db.execute(
-          `INSERT INTO mission_review_stage_launches
-             (mission_id, stage_key, position, fingerprint)
-           VALUES (?, ?, ?, ?)`,
-          [mission.id, window.stageKey, position, fingerprint],
-        );
-      }
-    }
-
-    // Insert review events (audit trail, replaces .md files)
-    for (const [position, event] of review.reviewEvents.entries()) {
-      await this.db.execute(
-        `INSERT INTO mission_review_events
-           (mission_id, position, event_type, round_number, phase, actor,
-            content, disposition, verdict, item_dispositions, blocked_reason, followup_reference, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        [
-          mission.id,
-          position,
-          event.eventType,
-          event.roundNumber,
-          event.phase,
-          event.actor,
-          event.content,
-          event.disposition,
-          event.verdict,
-          event.itemDispositions ? JSON.stringify(event.itemDispositions) : null,
-          event.blockedReason,
-          event.followUpReference,
-          event.createdAt,
-        ],
-      );
-    }
   }
 }

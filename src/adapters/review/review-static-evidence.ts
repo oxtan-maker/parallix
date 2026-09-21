@@ -115,8 +115,37 @@ export function performStaticReview(
   }
   log(fmt.status('PASS', `Found ${checkpoints.length} checkpoint document(s).`));
 
-  // Check the final checkpoint for a Goal Check table
   const finalCheckpoint = checkpoints[checkpoints.length - 1];
+  validateFinalCheckpoint(finalCheckpoint, readFileSyncFn, evidenceFileSystem, rootDir, findings, log);
+
+  // Inspect git diff for changed files
+  const baseBranch = getPrimaryBranchFn(rootDir);
+  const diffResult = runFn('git', ['diff', `${baseBranch}..HEAD`, '--name-only'], { cwd: rootDir });
+  if (diffResult.status === 0 && diffResult.stdout) {
+    const changedFiles = (diffResult.stdout as string).trim().split('\n').filter((f: string) => f.trim());
+    const missionDirPrefix = path.relative(rootDir, missionBaseDir(rootDir)).split(path.sep).join('/') + '/';
+    log(`Changed files in branch: ${changedFiles.join(', ')}`);
+    const knownAreas = ['parallix/', 'docs/', 'scripts/', 'config/', 'backlog/', 'forgejo/', '.agents/', '.github/', '.vscode/', '.graphifyignore'];
+    const knownExtensions = ['.sh', '.csv', '.json', '.yaml', '.yml', '.toml', '.lock', '.cfg', '.ini', '.env', '.txt', '.properties', '.sql', '.css', '.html', '.xml', '.png', '.jpg', '.jpeg', '.gif', '.svg', '.ico', '.pdf', '.tar', '.gz', '.zip'];
+    const unexpectedFiles = changedFiles.filter((f: string) => !knownAreas.some(area => f.startsWith(area)) && !f.startsWith(missionDirPrefix) && !f.endsWith('.md') && !knownExtensions.some(ext => f.toLowerCase().endsWith(ext)));
+    log(unexpectedFiles.length > 0
+      ? fmt.status('WARN', `Changed files outside known areas (may be intentional): ${unexpectedFiles.join(', ')}`)
+      : fmt.status('PASS', 'All changed files are within expected areas.'));
+  } else {
+    log(fmt.status('WARN', `git diff ${baseBranch}..HEAD returned no output or failed — branch may be up to date with ${baseBranch}.`));
+  }
+
+  return { ok: findings.length === 0, findings };
+}
+
+function validateFinalCheckpoint(
+  finalCheckpoint: string,
+  readFileSyncFn: typeof fs.readFileSync,
+  evidenceFileSystem: EvidenceFileSystemPort,
+  rootDir: string,
+  findings: string[],
+  log: (_msg: string) => void,
+): void {
   try {
     const checkpointContent = readFileSyncFn(finalCheckpoint, 'utf8') as string;
     const goalCheckMatch = checkpointContent.match(/^## Goal Check(?: Table)?\s*$/m);
@@ -141,36 +170,4 @@ export function performStaticReview(
   } catch (err) {
     findings.push(`Could not read final checkpoint ${path.basename(finalCheckpoint)}: ${(err as Error).message}`);
   }
-
-  // Inspect git diff for changed files
-  const baseBranch = getPrimaryBranchFn(rootDir);
-  const diffResult = runFn('git', ['diff', `${baseBranch}..HEAD`, '--name-only'], { cwd: rootDir });
-  if (diffResult.status === 0 && diffResult.stdout) {
-    const changedFiles = (diffResult.stdout as string).trim().split('\n').filter((f: string) => f.trim());
-    const missionDirPrefix = path.relative(rootDir, missionBaseDir(rootDir)).split(path.sep).join('/') + '/';
-    log(`Changed files in branch: ${changedFiles.join(', ')}`);
-    // Check for unexpected areas — missions may legitimately touch many surfaces.
-    // Derive allowed set from known workflow areas plus common repo structures,
-    // plus any file with a recognized extension or inside the mission directory.
-    const knownAreas = [
-      'parallix/', 'docs/', 'scripts/', 'config/', 'backlog/', 'forgejo/',
-      '.agents/', '.github/', '.vscode/', '.graphifyignore',
-    ];
-    const knownExtensions = ['.sh', '.csv', '.json', '.yaml', '.yml', '.toml', '.lock', '.cfg', '.ini', '.env', '.txt', '.properties', '.sql', '.css', '.html', '.xml', '.png', '.jpg', '.jpeg', '.gif', '.svg', '.ico', '.pdf', '.tar', '.gz', '.zip'];
-    const unexpectedFiles = changedFiles.filter((f: string) =>
-      !knownAreas.some((area: string) => f.startsWith(area)) &&
-      !f.startsWith(missionDirPrefix) &&
-      !f.endsWith('.md') &&
-      !knownExtensions.some((ext: string) => f.toLowerCase().endsWith(ext))
-    );
-    if (unexpectedFiles.length > 0) {
-      log(fmt.status('WARN', `Changed files outside known areas (may be intentional): ${unexpectedFiles.join(', ')}`));
-    } else {
-      log(fmt.status('PASS', 'All changed files are within expected areas.'));
-    }
-  } else {
-    log(fmt.status('WARN', `git diff ${baseBranch}..HEAD returned no output or failed — branch may be up to date with ${baseBranch}.`));
-  }
-
-  return { ok: findings.length === 0, findings };
 }

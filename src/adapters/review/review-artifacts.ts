@@ -18,7 +18,7 @@ import {
   type VerifyResult,
 } from '../../application/rebound-kernel.js';
 import type { MissionStore } from '../../application/domain-ports.js';
-import { parseResolutionDispositions } from '../../domain/review.js';
+import { parseResolutionDispositions, type ReviewItemDisposition } from '../../domain/review.js';
 import { readToken, postComment, postReview, getPrAuthor, isEnabled, resolveArtifactDir as resolveConfiguredArtifactDir } from './review-adapter.js';
 import { createEvent, consumeHumanNotes, VALID_EVENT_TYPES, CreateEventParams, CreateEventOptions, CreateEventResult } from './review-events.js';
 import { parseReviewFindings, recordImplementerResolution, recordRequestedChanges, recordApproval } from './review-round.js';
@@ -352,34 +352,236 @@ async function postWorkflowReview(
 // ============================================================================
 
 
-async function consumeReviewerArtifacts(
+type ReviewerArtifactOptions = {
+  log?: (_msg: string) => void;
+  error?: (_msg: string) => void;
+  readArtifactFn?: typeof readArtifactFile;
+  deleteArtifactFn?: typeof deleteArtifactFile;
+  tmpDir?: string | null;
+  worktree?: string;
+  providerEnabled?: boolean | null;
+  forgejoEnabled?: boolean | null;
+  readTokenFn?: (_user: string, _opts?: Record<string, unknown>) => string | null;
+  getCommentsFn?: (_branch: string, _token: string) => Promise<unknown[]>;
+  postCommentFn?: (_branch: string, _token: string, _body: string, _opts?: Record<string, unknown>) => unknown;
+  postReviewFn?: (_branch: string, _token: string, _outcome: string, _body: string, _opts?: Record<string, unknown>) => unknown;
+  getPrAuthorFn?: (_branch: string, _token: string, _opts?: Record<string, unknown>) => unknown;
+  buildMetadataFooterFn?: (_s: string, _r?: string, _store?: MissionStore | null) => string | Promise<string>;
+  createEventFn?: (_s: string, _t: string, _p: CreateEventParams, _o: CreateEventOptions) => CreateEventResult | Promise<CreateEventResult>;
+  readReviewStateFn?: ReviewStateReader;
+  writeReviewStateFn?: typeof writeReviewState;
+  currentState?: { metadata?: Record<string, unknown> } | null;
+  missionStore?: MissionStore | null;
+  lifecycleService?: MissionLifecycleService | null;
+  recordRequestedChangesFn?: typeof recordRequestedChanges;
+  recordApprovalFn?: typeof recordApproval;
+  verbose?: boolean;
+};
+
+type ImplementerArtifactOptions = {
+  log?: (_msg: string) => void;
+  error?: (_msg: string) => void;
+  readArtifactFn?: typeof readArtifactFile;
+  deleteArtifactFn?: typeof deleteArtifactFile;
+  tmpDir?: string | null;
+  worktree?: string;
+  providerEnabled?: boolean | null;
+  forgejoEnabled?: boolean | null;
+  readTokenFn?: (_user: string, _opts?: Record<string, unknown>) => string | null;
+  getCommentsFn?: (_branch: string, _token: string) => Promise<unknown[]>;
+  postCommentFn?: (_branch: string, _token: string, _body: string, _opts?: Record<string, unknown>) => unknown;
+  buildMetadataFooterFn?: (_s: string, _r?: string) => string | Promise<string>;
+  createEventFn?: (_s: string, _t: string, _p: CreateEventParams, _o: CreateEventOptions) => CreateEventResult | Promise<CreateEventResult>;
+  readReviewStateFn?: (_s: string, _r?: string) => any;
+  writeReviewStateFn?: typeof writeReviewState;
+  currentState?: { metadata?: Record<string, unknown> } | null;
+  missionStore?: MissionStore | null;
+  recordImplementerResolutionFn?: typeof recordImplementerResolution;
+  headRevisionFn?: (_worktree: string) => string;
+};
+
+type RepoEventFn = (_s: string, _t: string, _p: CreateEventParams, _o: CreateEventOptions) => CreateEventResult | Promise<CreateEventResult>;
+
+type ResolvedArtifactSet = {
+  findings: string | null;
+  outcomeMessage: string | null;
+  verdictRaw: string | null;
+  findingsPath: string;
+  outcomePath: string;
+  verdictPath: string;
+};
+
+type ResolvedImplementerArtifactSet = {
+  resolution: string | null;
+  dispositionRaw: string | null;
+  resolutionPath: string;
+  dispositionPath: string;
+};
+
+/** Provider flag precedence: explicit > forgejo alias > worktree config. */
+function resolveProviderEnabled(options: { providerEnabled?: boolean | null; forgejoEnabled?: boolean | null }, worktree: string): boolean {
+  return options.providerEnabled !== null && options.providerEnabled !== undefined
+    ? options.providerEnabled
+    : (options.forgejoEnabled !== null && options.forgejoEnabled !== undefined ? options.forgejoEnabled : isEnabled(worktree));
+}
+
+function resolveReviewerArtifactSet(slug: string, options: { tmpDir: string; readArtifactFn: typeof readArtifactFile }): ResolvedArtifactSet {
+  const findingsResolved = resolveArtifactRead(slug, 'review-findings.md', { tmpDir: options.tmpDir, readArtifactFn: options.readArtifactFn });
+  const outcomeResolved = resolveArtifactRead(slug, 'review-outcome.md', { tmpDir: options.tmpDir, readArtifactFn: options.readArtifactFn });
+  const verdictResolved = resolveArtifactRead(slug, 'review-verdict.txt', { tmpDir: options.tmpDir, readArtifactFn: options.readArtifactFn });
+  return {
+    findings: findingsResolved.value,
+    outcomeMessage: outcomeResolved.value,
+    verdictRaw: verdictResolved.value,
+    findingsPath: findingsResolved.path,
+    outcomePath: outcomeResolved.path,
+    verdictPath: verdictResolved.path,
+  };
+}
+
+function resolveImplementerArtifactSet(slug: string, options: { tmpDir: string; readArtifactFn: typeof readArtifactFile }): ResolvedImplementerArtifactSet {
+  const resolutionResolved = resolveArtifactRead(slug, 'round-resolution.md', { tmpDir: options.tmpDir, readArtifactFn: options.readArtifactFn });
+  const dispositionResolved = resolveArtifactRead(slug, 'review-disposition.txt', { tmpDir: options.tmpDir, readArtifactFn: options.readArtifactFn });
+  return {
+    resolution: resolutionResolved.value,
+    dispositionRaw: dispositionResolved.value,
+    resolutionPath: resolutionResolved.path,
+    dispositionPath: dispositionResolved.path,
+  };
+}
+
+/** Persist the reviewer findings and outcome events to the repo store. */
+async function persistReviewerEvents(params: {
+  slug: string;
+  reviewer: string;
+  round: number | undefined;
+  phase: string | undefined;
+  reviewFindings: string;
+  reviewOutcome: string;
+  reviewVerdict: string;
+  createEventFn: RepoEventFn;
+  worktree: string;
+  log: (_msg: string) => void;
+  error: (_msg: string) => void;
+  verbose: boolean;
+}): Promise<{ ok: true } | { ok: false; diagnostic: string }> {
+  const { slug, reviewer, round, phase, reviewFindings, reviewOutcome, reviewVerdict, createEventFn, worktree, log, error, verbose } = params;
+  const findingsEventResult = await createEventFn(slug, VALID_EVENT_TYPES.REVIEWER_FINDINGS, {
+    content: reviewFindings, round, phase, actor: reviewer
+  }, { worktree, skipGit: true, log: log, error });
+
+  if (!findingsEventResult.ok) {
+    const findingsErr = (findingsEventResult as { error?: string }).error;
+    error(fmt.status('FAIL', `Failed to persist reviewer findings to repo store: ${findingsErr}`));
+    return { ok: false, diagnostic: `Reviewer artifact persist failed (findings): ${findingsErr}` };
+  }
+
+  const outcomeEventResult = await createEventFn(slug, VALID_EVENT_TYPES.REVIEWER_OUTCOME, {
+    content: reviewOutcome, round, phase, actor: reviewer, verdict: reviewVerdict
+  }, { worktree, skipGit: true, log: log, error });
+
+  if (!outcomeEventResult.ok) {
+    const outcomeErr = (outcomeEventResult as { error?: string }).error;
+    error(fmt.status('FAIL', `Failed to persist reviewer outcome to repo store: ${outcomeErr}`));
+    return { ok: false, diagnostic: `Reviewer artifact persist failed (outcome): ${outcomeErr}` };
+  }
+
+  if (verbose) {
+    log(fmt.status('INFO', `Persisted reviewer artifacts to repo store: ${(findingsEventResult as { path?: string }).path}, ${(outcomeEventResult as { path?: string }).path}`));
+  }
+  return { ok: true };
+}
+
+/**
+ * Post the findings as a PR comment, then the verdict as the formal review.
+ * Human PR notes are consumed first when the token and comment seams exist.
+ * Returns a diagnostic string on the first failed post, else null.
+ */
+async function postReviewerToProvider(
   slug: string,
   reviewer: string,
-  options: {
-    log?: (_msg: string) => void;
-    error?: (_msg: string) => void;
-    readArtifactFn?: typeof readArtifactFile;
-    deleteArtifactFn?: typeof deleteArtifactFile;
-    tmpDir?: string | null;
-    worktree?: string;
-    providerEnabled?: boolean | null;
-    forgejoEnabled?: boolean | null;
+  reviewVerdict: string,
+  reviewFindings: string,
+  reviewOutcome: string,
+  context: {
+    worktree: string;
+    log: (_msg: string) => void;
+    error: (_msg: string) => void;
+    readReviewStateFn: ReviewStateReader;
     readTokenFn?: (_user: string, _opts?: Record<string, unknown>) => string | null;
     getCommentsFn?: (_branch: string, _token: string) => Promise<unknown[]>;
     postCommentFn?: (_branch: string, _token: string, _body: string, _opts?: Record<string, unknown>) => unknown;
     postReviewFn?: (_branch: string, _token: string, _outcome: string, _body: string, _opts?: Record<string, unknown>) => unknown;
     getPrAuthorFn?: (_branch: string, _token: string, _opts?: Record<string, unknown>) => unknown;
     buildMetadataFooterFn?: (_s: string, _r?: string, _store?: MissionStore | null) => string | Promise<string>;
-    createEventFn?: (_s: string, _t: string, _p: CreateEventParams, _o: CreateEventOptions) => CreateEventResult | Promise<CreateEventResult>;
-    readReviewStateFn?: ReviewStateReader;
+    createEventFn?: RepoEventFn;
     writeReviewStateFn?: typeof writeReviewState;
     currentState?: { metadata?: Record<string, unknown> } | null;
     missionStore?: MissionStore | null;
     lifecycleService?: MissionLifecycleService | null;
-    recordRequestedChangesFn?: typeof recordRequestedChanges;
     recordApprovalFn?: typeof recordApproval;
-    verbose?: boolean;
-  } = {}
+  },
+): Promise<string | null> {
+  const { worktree, log, error, readReviewStateFn } = context;
+  if (context.readTokenFn && context.getCommentsFn) {
+    await consumeHumanNotes(slug, reviewer, {
+      getCommentsFn: context.getCommentsFn,
+      createEventFn: (context.createEventFn || createEvent) as any,
+      readTokenFn: context.readTokenFn,
+      reviewIdentity: reviewer,
+      worktree,
+      writeReviewStateFn: context.writeReviewStateFn,
+      readReviewStateFn: readReviewStateFn as typeof readReviewState,
+      currentState: context.currentState,
+      log: log,
+      error
+    });
+  }
+
+  const commentResult = await postWorkflowComment(slug, reviewFindings, {
+    rootDir: worktree,
+    reviewIdentity: reviewer,
+    readTokenFn: context.readTokenFn,
+    postCommentFn: context.postCommentFn,
+    buildMetadataFooterFn: context.buildMetadataFooterFn,
+    readReviewStateFn,
+    missionStore: context.missionStore,
+    log: log,
+    error
+  });
+  if (!commentResult.ok) {
+    return `Reviewer comment post failed: ${(commentResult as { error?: string }).error}`;
+  }
+
+  const reviewResult = await postWorkflowReview(slug, reviewVerdict, reviewOutcome, {
+    worktree,
+    reviewIdentity: reviewer,
+    readTokenFn: context.readTokenFn,
+    postReviewFn: context.postReviewFn,
+    getPrAuthorFn: context.getPrAuthorFn,
+    buildMetadataFooterFn: context.buildMetadataFooterFn,
+    createEventFn: context.createEventFn,
+    readReviewStateFn,
+    log: log,
+    error,
+    missionStore: context.missionStore,
+    // Forward the (composition-bound) write function so the self-author
+    // local verdict path persists through the same approval boundary as
+    // every other approval-producing site (TASK-2378 CP-2 audit site 3).
+    writeReviewStateFn: context.writeReviewStateFn,
+    lifecycleService: context.lifecycleService ?? null,
+    recordApprovalFn: context.recordApprovalFn,
+  });
+  if (!reviewResult.ok) {
+    return `Reviewer review post failed: ${(reviewResult as { error?: string }).error}`;
+  }
+  return null;
+}
+
+async function consumeReviewerArtifacts(
+  slug: string,
+  reviewer: string,
+  options: ReviewerArtifactOptions = {}
 ): Promise<{ consumed: boolean; ok?: boolean; reviewState?: string | null; diagnostic?: string | null; findingSummaries?: string[] }> {
   const log = options.log || fmt.log.plain;
   const error = options.error || fmt.log.plainError;
@@ -387,58 +589,26 @@ async function consumeReviewerArtifacts(
   const deleteArtifactFn = options.deleteArtifactFn || deleteArtifactFile;
   const worktree = options.worktree || resolveWorktree(slug) || process.cwd();
   const tmpDir = options.tmpDir || resolveArtifactDir(worktree);
-  const providerEnabled = options.providerEnabled !== null && options.providerEnabled !== undefined
-    ? options.providerEnabled
-    : (options.forgejoEnabled !== null && options.forgejoEnabled !== undefined ? options.forgejoEnabled : isEnabled(worktree));
+  const providerEnabled = resolveProviderEnabled(options, worktree);
   const reviewStatePath = reviewStateFile(slug, worktree);
 
-  const findingsResolved = resolveArtifactRead(slug, 'review-findings.md', { tmpDir, readArtifactFn });
-  const outcomeResolved = resolveArtifactRead(slug, 'review-outcome.md', { tmpDir, readArtifactFn });
-  const verdictResolved = resolveArtifactRead(slug, 'review-verdict.txt', { tmpDir, readArtifactFn });
-  const findingsPath = findingsResolved.path;
-  const outcomePath = outcomeResolved.path;
-  const verdictPath = verdictResolved.path;
+  const artifacts = resolveReviewerArtifactSet(slug, { tmpDir, readArtifactFn });
+  const verdict = reviewerVerdictFrom(artifacts.verdictRaw, artifacts.outcomeMessage);
 
-  const findings = findingsResolved.value;
-  const outcomeMessage = outcomeResolved.value;
-  const verdictRaw = verdictResolved.value;
-
-  let verdict = normalizeReviewVerdict(verdictRaw || '');
-  if (!verdict && outcomeMessage) {
-    const outcomeVerdictMatch = outcomeMessage.match(/^verdict:\s*(approve|request-changes|comment)/im) ||
-                               outcomeMessage.match(/Verdict:\s*(approve|request-changes|comment)/i);
-    if (outcomeVerdictMatch) {
-      verdict = normalizeReviewVerdict(outcomeVerdictMatch[1]);
-    }
-  }
-
-  const hasAny = findings !== null || outcomeMessage !== null || verdictRaw !== null;
-
-  if (!hasAny) {
+  if (artifacts.findings === null && artifacts.outcomeMessage === null && artifacts.verdictRaw === null) {
     return { consumed: false };
   }
-  if (!findings || !outcomeMessage) {
-    const missingParts: string[] = [];
-    if (!findings) { missingParts.push('findings'); }
-    if (!outcomeMessage) { missingParts.push('outcome'); }
-    if (!providerEnabled) {
-      const statePathStr = reviewStatePath ? ` local review state at ${reviewStatePath}; ` : ' ';
-      error(fmt.status('FAIL', `Incomplete reviewer artifacts for ${slug}. Expected ${findingsPath} and ${outcomePath}.${statePathStr}No provider review posted (provider=none); add a review-outcome.md with a Verdict line or use \`node parallix review <slug> --submit-review approve\`.`));
-    } else {
-      error(fmt.status('FAIL', `Incomplete reviewer artifacts for ${slug}. Expected ${findingsPath} and ${outcomePath}.`));
-    }
-    return { consumed: true, ok: false, diagnostic: `Reviewer artifacts incomplete: missing ${missingParts.join(', ')}` };
-  }
-  if (!verdict) {
-    if (!providerEnabled) {
-      const statePathStr = reviewStatePath ? ` local review state at ${reviewStatePath}; ` : ' ';
-      error(fmt.status('FAIL', `Reviewer artifacts for ${slug} missing verdict. Expected in ${verdictPath} or in ${outcomePath} content.${statePathStr}No provider review posted (provider=none); add a review-outcome.md with a Verdict line or use \`node parallix review <slug> --submit-review approve\`.`));
-    } else {
-      error(fmt.status('FAIL', `Reviewer artifacts for ${slug} missing verdict. Expected in ${verdictPath} or in ${outcomePath} content.`));
-    }
-    return { consumed: true, ok: false, diagnostic: `Reviewer artifacts incomplete: missing verdict` };
-  }
-  if (verdict === 'request-changes' && parseReviewFindings(findings).length === 0) {
+  const incomplete = reportIncompleteReviewerArtifacts({
+    slug, findings: artifacts.findings, outcomeMessage: artifacts.outcomeMessage, verdict,
+    findingsPath: artifacts.findingsPath, outcomePath: artifacts.outcomePath, verdictPath: artifacts.verdictPath,
+    reviewStatePath, providerEnabled: Boolean(providerEnabled), error,
+  });
+  if (incomplete) { return incomplete; }
+  // Past the completeness guard all three artifacts are present.
+  const reviewFindings: string = artifacts.findings!;
+  const reviewOutcome: string = artifacts.outcomeMessage!;
+  const reviewVerdict: string = verdict!;
+  if (reviewVerdict === 'request-changes' && parseReviewFindings(reviewFindings).length === 0) {
     return {
       consumed: true,
       ok: false,
@@ -451,117 +621,119 @@ async function consumeReviewerArtifacts(
   const round = currentState ? currentState.round : 1;
   const phase = currentState ? currentState.phase : 'reviewing';
 
-  const createEventFn = options.createEventFn || createEvent;
-  const findingsEventResult = await createEventFn(slug, VALID_EVENT_TYPES.REVIEWER_FINDINGS, {
-    content: findings, round, phase, actor: reviewer
-  }, { worktree, skipGit: true, log: log, error });
-
-  if (!findingsEventResult.ok) {
-    const findingsErr = (findingsEventResult as { error?: string }).error;
-    error(fmt.status('FAIL', `Failed to persist reviewer findings to repo store: ${findingsErr}`));
-    return { consumed: true, ok: false, diagnostic: `Reviewer artifact persist failed (findings): ${findingsErr}` };
-  }
-
-  const outcomeEventResult = await createEventFn(slug, VALID_EVENT_TYPES.REVIEWER_OUTCOME, {
-    content: outcomeMessage, round, phase, actor: reviewer, verdict
-  }, { worktree, skipGit: true, log: log, error });
-
-  if (!outcomeEventResult.ok) {
-    const outcomeErr = (outcomeEventResult as { error?: string }).error;
-    error(fmt.status('FAIL', `Failed to persist reviewer outcome to repo store: ${outcomeErr}`));
-    return { consumed: true, ok: false, diagnostic: `Reviewer artifact persist failed (outcome): ${outcomeErr}` };
-  }
-
-  if (options.verbose) {
-    log(fmt.status('INFO', `Persisted reviewer artifacts to repo store: ${(findingsEventResult as { path?: string }).path}, ${(outcomeEventResult as { path?: string }).path}`));
-  }
+  const persisted = await persistReviewerEvents({
+    slug, reviewer, round, phase, reviewFindings, reviewOutcome, reviewVerdict,
+    createEventFn: options.createEventFn || createEvent, worktree, log, error, verbose: Boolean(options.verbose),
+  });
+  if (!persisted.ok) { return { consumed: true, ok: false, diagnostic: 'diagnostic' in persisted ? persisted.diagnostic : 'reviewer event persistence failed' }; }
 
   // The decision itself, not just its prose. Without it the round keeps
   // `decision: null`, the Mission never leaves `review` through
   // `request-changes`, and the next handoff cannot open round N+1.
-  if (verdict === 'request-changes') {
-    const recordRequestedChangesFn = options.recordRequestedChangesFn || recordRequestedChanges;
-    const decision = await recordRequestedChangesFn(slug, {
-      findings: parseReviewFindings(findings),
-      comment: outcomeMessage,
-      decidedAt: new Date().toISOString(),
-    }, { missionStore: options.missionStore, lifecycleService: options.lifecycleService });
-    if (decision.outcome === 'failed') {
-      error(fmt.status('FAIL', `Could not record the reviewer decision for ${slug}: ${decision.diagnostic}`));
-      return { consumed: true, ok: false, diagnostic: `Reviewer decision persist failed: ${decision.diagnostic}` };
-    }
-    if (decision.outcome === 'unchanged') {
-      log(fmt.status('INFO', `Reviewer decision for ${slug} already recorded (${decision.reason}).`));
-    }
-  }
-
-  if (providerEnabled && options.readTokenFn && options.getCommentsFn) {
-    await consumeHumanNotes(slug, reviewer, {
-      getCommentsFn: options.getCommentsFn,
-      createEventFn: createEventFn as any,
-      readTokenFn: options.readTokenFn,
-      reviewIdentity: reviewer,
-      worktree,
-      writeReviewStateFn: options.writeReviewStateFn,
-      readReviewStateFn: readReviewStateFn as typeof readReviewState,
-      currentState: options.currentState,
-      log: log,
-      error
-    });
+  if (reviewVerdict === 'request-changes') {
+    const recorded = await recordReviewerChangeRequest(slug, reviewFindings, reviewOutcome, options, log, error);
+    if (recorded) { return recorded; }
   }
 
   if (providerEnabled) {
-    const commentResult = await postWorkflowComment(slug, findings, {
-      rootDir: worktree,
-      reviewIdentity: reviewer,
+    const diagnostic = await postReviewerToProvider(slug, reviewer, reviewVerdict, reviewFindings, reviewOutcome, {
+      worktree, log, error, readReviewStateFn,
       readTokenFn: options.readTokenFn,
+      getCommentsFn: options.getCommentsFn,
       postCommentFn: options.postCommentFn,
-      buildMetadataFooterFn: options.buildMetadataFooterFn,
-      readReviewStateFn,
-      missionStore: options.missionStore,
-      log: log,
-      error
-    });
-    if (!commentResult.ok) {
-      return { consumed: true, ok: false, diagnostic: `Reviewer comment post failed: ${(commentResult as { error?: string }).error}` };
-    }
-
-    const reviewResult = await postWorkflowReview(slug, verdict, outcomeMessage, {
-      worktree,
-      reviewIdentity: reviewer,
-      readTokenFn: options.readTokenFn,
       postReviewFn: options.postReviewFn,
       getPrAuthorFn: options.getPrAuthorFn,
       buildMetadataFooterFn: options.buildMetadataFooterFn,
       createEventFn: options.createEventFn,
-      readReviewStateFn,
-      log: log,
-      error,
-      missionStore: options.missionStore,
-      // Forward the (composition-bound) write function so the self-author
-      // local verdict path persists through the same approval boundary as
-      // every other approval-producing site (TASK-2378 CP-2 audit site 3).
       writeReviewStateFn: options.writeReviewStateFn,
-      lifecycleService: options.lifecycleService ?? null,
+      currentState: options.currentState,
+      missionStore: options.missionStore,
+      lifecycleService: options.lifecycleService,
       recordApprovalFn: options.recordApprovalFn,
     });
-    if (!reviewResult.ok) {
-      return { consumed: true, ok: false, diagnostic: `Reviewer review post failed: ${(reviewResult as { error?: string }).error}` };
-    }
+    if (diagnostic) { return { consumed: true, ok: false, diagnostic }; }
   } else if (options.verbose) {
     log(fmt.status('INFO', `Review provider disabled; skipping PR mirroring for ${slug}`));
   }
 
-  deleteArtifactFn(findingsPath);
-  deleteArtifactFn(outcomePath);
-  deleteArtifactFn(verdictPath);
+  deleteArtifactFn(artifacts.findingsPath);
+  deleteArtifactFn(artifacts.outcomePath);
+  deleteArtifactFn(artifacts.verdictPath);
 
+  return reviewerConsumeOutcome(reviewVerdict, reviewFindings, reviewer, Boolean(providerEnabled), Boolean(options.verbose), log);
+}
+
+/**
+ * The verdict a reviewer recorded: the dedicated verdict artifact when present,
+ * otherwise the `Verdict:` line the outcome prose carries.
+ */
+function reviewerVerdictFrom(verdictRaw: string | null, outcomeMessage: string | null): string | null {
+  const verdict = normalizeReviewVerdict(verdictRaw || '');
+  if (verdict || !outcomeMessage) { return verdict; }
+  const match = outcomeMessage.match(/^verdict:\s*(approve|request-changes|comment)/im)
+    || outcomeMessage.match(/Verdict:\s*(approve|request-changes|comment)/i);
+  return match ? normalizeReviewVerdict(match[1]) : verdict;
+}
+
+/**
+ * Report whichever required reviewer artifact is missing, or null when all
+ * three are present. With provider=none there is no PR review to fall back on,
+ * so the local state path is named: it is the only place the operator can
+ * repair this.
+ */
+function reportIncompleteReviewerArtifacts(context: {
+  slug: string; findings: string | null; outcomeMessage: string | null; verdict: string | null;
+  findingsPath: string; outcomePath: string; verdictPath: string;
+  reviewStatePath: string | null; providerEnabled: boolean; error: (_msg: string) => void;
+}): { consumed: true; ok: false; diagnostic: string } | null {
+  const { slug, findings, outcomeMessage, verdict, findingsPath, outcomePath, verdictPath, reviewStatePath, providerEnabled, error } = context;
+  const localRepair = providerEnabled
+    ? ''
+    : `${reviewStatePath ? ` local review state at ${reviewStatePath}; ` : ' '}No provider review posted (provider=none); add a review-outcome.md with a Verdict line or use \`node parallix review <slug> --submit-review approve\`.`;
+  if (!findings || !outcomeMessage) {
+    const missing: string[] = [];
+    if (!findings) { missing.push('findings'); }
+    if (!outcomeMessage) { missing.push('outcome'); }
+    error(fmt.status('FAIL', `Incomplete reviewer artifacts for ${slug}. Expected ${findingsPath} and ${outcomePath}.${localRepair}`));
+    return { consumed: true, ok: false, diagnostic: `Reviewer artifacts incomplete: missing ${missing.join(', ')}` };
+  }
+  if (!verdict) {
+    error(fmt.status('FAIL', `Reviewer artifacts for ${slug} missing verdict. Expected in ${verdictPath} or in ${outcomePath} content.${localRepair}`));
+    return { consumed: true, ok: false, diagnostic: `Reviewer artifacts incomplete: missing verdict` };
+  }
+  return null;
+}
+
+/**
+ * Record the decision itself, not just its prose. Without it the round keeps
+ * `decision: null`, the Mission never leaves `review` through `request-changes`,
+ * and the next handoff cannot open round N+1.
+ */
+async function recordReviewerChangeRequest(slug: string, findings: string, outcomeMessage: string, options: any, log: (_msg: string) => void, error: (_msg: string) => void) {
+  const recordRequestedChangesFn = options.recordRequestedChangesFn || recordRequestedChanges;
+  const decision = await recordRequestedChangesFn(slug, {
+    findings: parseReviewFindings(findings),
+    comment: outcomeMessage,
+    decidedAt: new Date().toISOString(),
+  }, { missionStore: options.missionStore, lifecycleService: options.lifecycleService });
+  if (decision.outcome === 'failed') {
+    error(fmt.status('FAIL', `Could not record the reviewer decision for ${slug}: ${decision.diagnostic}`));
+    return { consumed: true as const, ok: false as const, diagnostic: `Reviewer decision persist failed: ${decision.diagnostic}` };
+  }
+  if (decision.outcome === 'unchanged') {
+    log(fmt.status('INFO', `Reviewer decision for ${slug} already recorded (${decision.reason}).`));
+  }
+  return null;
+}
+
+/** The loop-control review state a consumed verdict maps to. */
+function reviewerConsumeOutcome(verdict: string, findings: string, reviewer: string, providerEnabled: boolean, verbose: boolean, log: (_msg: string) => void) {
   const findingSummaries = parseReviewFindings(findings).map((finding) => finding.summary);
   if (verdict === 'approve') { return { consumed: true, ok: true, reviewState: 'APPROVED', findingSummaries }; }
   if (verdict === 'request-changes') { return { consumed: true, ok: true, reviewState: 'REQUEST_CHANGES', findingSummaries }; }
   if (!providerEnabled) {
     const reviewState = verdict.toUpperCase().replace(/-/g, '_');
-    if (options.verbose) {
+    if (verbose) {
       log(fmt.status('INFO', `Reviewer ${reviewer} produced verdict "${verdict}" with the provider disabled; normalizing to ${reviewState} for loop control.`));
     }
     return { consumed: true, ok: true, reviewState, findingSummaries };
@@ -570,91 +742,123 @@ async function consumeReviewerArtifacts(
   return { consumed: true, ok: true, reviewState: null };
 }
 
-async function consumeImplementerArtifacts(
-  slug: string,
-  implementer: string,
-  options: {
-    log?: (_msg: string) => void;
-    error?: (_msg: string) => void;
-    readArtifactFn?: typeof readArtifactFile;
-    deleteArtifactFn?: typeof deleteArtifactFile;
-    tmpDir?: string | null;
-    worktree?: string;
-    providerEnabled?: boolean | null;
-    forgejoEnabled?: boolean | null;
-    readTokenFn?: (_user: string, _opts?: Record<string, unknown>) => string | null;
-    getCommentsFn?: (_branch: string, _token: string) => Promise<unknown[]>;
-    postCommentFn?: (_branch: string, _token: string, _body: string, _opts?: Record<string, unknown>) => unknown;
-    buildMetadataFooterFn?: (_s: string, _r?: string) => string | Promise<string>;
-    createEventFn?: (_s: string, _t: string, _p: CreateEventParams, _o: CreateEventOptions) => CreateEventResult | Promise<CreateEventResult>;
-    readReviewStateFn?: (_s: string, _r?: string) => any;
-    writeReviewStateFn?: typeof writeReviewState;
-    currentState?: { metadata?: Record<string, unknown> } | null;
-    missionStore?: MissionStore | null;
-    recordImplementerResolutionFn?: typeof recordImplementerResolution;
-    headRevisionFn?: (_worktree: string) => string;
-  } = {}
-): Promise<{ consumed: boolean; ok?: boolean; disposition?: string | null; diagnostic?: string | null }> {
-  const log = options.log || fmt.log.plain;
-  const error = options.error || fmt.log.plainError;
-  const readArtifactFn = options.readArtifactFn || readArtifactFile;
-  const deleteArtifactFn = options.deleteArtifactFn || deleteArtifactFile;
-  const worktree = options.worktree || resolveWorktree(slug) || process.cwd();
-  const tmpDir = options.tmpDir || resolveArtifactDir(worktree);
-  const providerEnabled = options.providerEnabled !== null && options.providerEnabled !== undefined
-    ? options.providerEnabled
-    : (options.forgejoEnabled !== null && options.forgejoEnabled !== undefined ? options.forgejoEnabled : isEnabled(worktree));
-  const reviewStatePath = reviewStateFile(slug, worktree);
+type ImplementerArtifactFailure = { consumed: true; ok: false; diagnostic: string };
 
-  const resolutionResolved = resolveArtifactRead(slug, 'round-resolution.md', { tmpDir, readArtifactFn });
-  const dispositionResolved = resolveArtifactRead(slug, 'review-disposition.txt', { tmpDir, readArtifactFn });
-  const resolutionPath = resolutionResolved.path;
-  const dispositionPath = dispositionResolved.path;
-
-  const resolution = resolutionResolved.value;
-  const dispositionRaw = dispositionResolved.value;
-  const disposition = normalizeDisposition(dispositionRaw || '');
-  const hasAny = resolution !== null || dispositionRaw !== null;
-
-  if (!hasAny) {
-    return { consumed: false };
+/** Name which of the two required implementer artifacts is missing, and why that is fatal. */
+function reportIncompleteImplementerArtifacts(context: {
+  slug: string; resolution: string | null; disposition: string | null;
+  resolutionPath: string; dispositionPath: string; reviewStatePath: string | null;
+  providerEnabled: boolean; error: (_msg: string) => void;
+}): ImplementerArtifactFailure {
+  const { slug, resolutionPath, dispositionPath, reviewStatePath, providerEnabled, error } = context;
+  const missing: string[] = [];
+  if (!context.resolution) { missing.push('round-resolution'); }
+  if (!context.disposition) { missing.push('disposition'); }
+  const expected = `Incomplete implementer artifacts for ${slug}. Expected ${resolutionPath} and ${dispositionPath}.`;
+  if (providerEnabled) {
+    error(fmt.status('FAIL', expected));
+  } else {
+    // With provider=none there is no PR review to fall back on, so the local
+    // state path is named: it is the only place the operator can repair this.
+    const statePathStr = reviewStatePath ? ` local review state at ${reviewStatePath}; ` : ' ';
+    error(fmt.status('FAIL', `${expected}${statePathStr}No provider review posted (provider=none); add review-disposition.txt and a round resolution, or use \`node parallix review <slug> --submit-review approve\`.`));
   }
-  if (!resolution || !disposition) {
-    const missingImplParts: string[] = [];
-    if (!resolution) { missingImplParts.push('round-resolution'); }
-    if (!disposition) { missingImplParts.push('disposition'); }
-    if (!providerEnabled) {
-      const statePathStr = reviewStatePath ? ` local review state at ${reviewStatePath}; ` : ' ';
-      error(fmt.status('FAIL', `Incomplete implementer artifacts for ${slug}. Expected ${resolutionPath} and ${dispositionPath}.${statePathStr}No provider review posted (provider=none); add review-disposition.txt and a round resolution, or use \`node parallix review <slug> --submit-review approve\`.`));
-    } else {
-      error(fmt.status('FAIL', `Incomplete implementer artifacts for ${slug}. Expected ${resolutionPath} and ${dispositionPath}.`));
-    }
-    return { consumed: true, ok: false, diagnostic: `Implementer artifacts incomplete: missing ${missingImplParts.join(', ')}` };
-  }
+  return { consumed: true, ok: false, diagnostic: `Implementer artifacts incomplete: missing ${missing.join(', ')}` };
+}
 
-  const currentState = await Promise.resolve((options.readReviewStateFn || readReviewState)(slug, worktree));
-  const round = currentState ? currentState.round : 1;
-  const phase = currentState ? currentState.phase : 'fixing';
-
-  const createEventFn = options.createEventFn || createEvent;
-
-  let itemDispositions: import('../../domain/review.js').ReviewItemDisposition[] = [];
+/**
+ * Item dispositions and the blocked reason carried by a round resolution. A
+ * malformed disposition list yields none rather than failing the round; a
+ * BLOCKED disposition falls back to prose when no structured reason was given.
+ */
+function parseImplementerResolution(resolution: string, disposition: string): { itemDispositions: ReviewItemDisposition[]; blockedReason: string | null } {
+  let itemDispositions: ReviewItemDisposition[] = [];
   let blockedReason: string | null = null;
-
   try {
-    itemDispositions.push(...parseResolutionDispositions(resolution));
-
+    itemDispositions = [...parseResolutionDispositions(resolution)];
     const blockedMatch = resolution.match(/blocked_reason:\s*"([^"]*)"/i);
     if (blockedMatch) { blockedReason = blockedMatch[1]; }
   } catch {
     itemDispositions = [];
   }
-
   if (disposition === 'BLOCKED' && !blockedReason) {
     const match = resolution.match(/blocked.*?:\s*(.+)/i);
     if (match) { blockedReason = match[1].trim(); }
   }
+  return { itemDispositions, blockedReason };
+}
 
+/**
+ * Close the round on the aggregate so the next handoff can open round N+1 on
+ * the same pull request. Returns a failure result, or null when the round
+ * closed (or was already closed).
+ */
+async function closeImplementerRound(slug: string, context: {
+  disposition: string; itemDispositions: ReviewItemDisposition[]; worktree: string;
+  options: any; log: (_msg: string) => void; error: (_msg: string) => void;
+}): Promise<ImplementerArtifactFailure | null> {
+  const { disposition, itemDispositions, worktree, options, log, error } = context;
+  const recordImplementerResolutionFn = options.recordImplementerResolutionFn || recordImplementerResolution;
+  const headRevisionFn = options.headRevisionFn || headRevision;
+  let resultingRevision: string;
+  try {
+    resultingRevision = headRevisionFn(worktree);
+  } catch (revisionError) {
+    const revErr = (revisionError as Error).message;
+    error(fmt.status('FAIL', `Could not record the implementer resolution for ${slug}: ${revErr}`));
+    return { consumed: true, ok: false, diagnostic: `Implementer resolution persist failed: ${revErr}` };
+  }
+  const recorded = await recordImplementerResolutionFn(slug, {
+    itemDispositions,
+    evidence: `${disposition} — implementer round summary for ${slug}`,
+    resultingRevision,
+    respondedAt: new Date().toISOString(),
+  }, { missionStore: options.missionStore });
+  if (recorded.outcome === 'failed') {
+    error(fmt.status('FAIL', `Could not record the implementer resolution for ${slug}: ${recorded.diagnostic}`));
+    return { consumed: true, ok: false, diagnostic: `Implementer resolution persist failed: ${recorded.diagnostic}` };
+  }
+  if (recorded.outcome === 'unchanged') {
+    log(fmt.status('INFO', `Implementer resolution for ${slug} already recorded (${recorded.reason}).`));
+  }
+  return null;
+}
+
+/** Mirror the round resolution and its disposition onto the pull request. */
+async function mirrorImplementerArtifacts(slug: string, context: {
+  resolution: string; disposition: string; implementer: string; worktree: string;
+  options: any; log: (_msg: string) => void; error: (_msg: string) => void;
+}): Promise<ImplementerArtifactFailure | null> {
+  const { resolution, disposition, implementer, worktree, options, log, error } = context;
+  const postOptions = {
+    rootDir: worktree, reviewIdentity: implementer, readTokenFn: options.readTokenFn,
+    postCommentFn: options.postCommentFn, buildMetadataFooterFn: options.buildMetadataFooterFn, log, error,
+  };
+  for (const [body, label] of [[resolution, 'resolution'], [`Autonomous review disposition: ${disposition}`, 'disposition']] as const) {
+    const result = await postWorkflowComment(slug, body, postOptions);
+    if (!result.ok) {
+      return { consumed: true, ok: false, diagnostic: `Implementer ${label} post failed: ${(result as { error?: string }).error}` };
+    }
+  }
+  return null;
+}
+
+/** Persist the implementer round-summary and disposition events to the repo store. */
+async function persistImplementerEvents(params: {
+  slug: string;
+  implementer: string;
+  round: number | undefined;
+  phase: string | undefined;
+  resolution: string;
+  disposition: string;
+  itemDispositions: ReviewItemDisposition[];
+  blockedReason: string | null;
+  createEventFn: RepoEventFn;
+  worktree: string;
+  log: (_msg: string) => void;
+  error: (_msg: string) => void;
+}): Promise<{ ok: true } | { ok: false; diagnostic: string }> {
+  const { slug, implementer, round, phase, resolution, disposition, itemDispositions, blockedReason, createEventFn, worktree, log, error } = params;
   const summaryEventResult = await createEventFn(slug, VALID_EVENT_TYPES.IMPLEMENTER_ROUND_SUMMARY, {
     content: resolution, round, phase, actor: implementer,
     itemDispositions,
@@ -664,7 +868,7 @@ async function consumeImplementerArtifacts(
   if (!summaryEventResult.ok) {
     const summaryErr = (summaryEventResult as { error?: string }).error;
     error(fmt.status('FAIL', `Failed to persist implementer round summary to repo store: ${summaryErr}`));
-    return { consumed: true, ok: false, diagnostic: `Implementer artifact persist failed (round-summary): ${summaryErr}` };
+    return { ok: false, diagnostic: `Implementer artifact persist failed (round-summary): ${summaryErr}` };
   }
 
   const dispositionEventResult = await createEventFn(slug, VALID_EVENT_TYPES.IMPLEMENTER_DISPOSITION, {
@@ -674,43 +878,61 @@ async function consumeImplementerArtifacts(
   if (!dispositionEventResult.ok) {
     const dispErr = (dispositionEventResult as { error?: string }).error;
     error(fmt.status('FAIL', `Failed to persist implementer disposition to repo store: ${dispErr}`));
-    return { consumed: true, ok: false, diagnostic: `Implementer artifact persist failed (disposition): ${dispErr}` };
+    return { ok: false, diagnostic: `Implementer artifact persist failed (disposition): ${dispErr}` };
   }
 
   log(fmt.status('INFO', `Persisted implementer artifacts to repo store: ${(summaryEventResult as { path?: string }).path}, ${(dispositionEventResult as { path?: string }).path}`));
+  return { ok: true };
+}
+
+async function consumeImplementerArtifacts(
+  slug: string,
+  implementer: string,
+  options: ImplementerArtifactOptions = {}
+): Promise<{ consumed: boolean; ok?: boolean; disposition?: string | null; diagnostic?: string | null }> {
+  const log = options.log || fmt.log.plain;
+  const error = options.error || fmt.log.plainError;
+  const readArtifactFn = options.readArtifactFn || readArtifactFile;
+  const deleteArtifactFn = options.deleteArtifactFn || deleteArtifactFile;
+  const worktree = options.worktree || resolveWorktree(slug) || process.cwd();
+  const tmpDir = options.tmpDir || resolveArtifactDir(worktree);
+  const providerEnabled = resolveProviderEnabled(options, worktree);
+  const reviewStatePath = reviewStateFile(slug, worktree);
+
+  const artifacts = resolveImplementerArtifactSet(slug, { tmpDir, readArtifactFn });
+  const disposition = normalizeDisposition(artifacts.dispositionRaw || '');
+  const hasAny = artifacts.resolution !== null || artifacts.dispositionRaw !== null;
+
+  if (!hasAny) {
+    return { consumed: false };
+  }
+  if (!artifacts.resolution || !disposition) {
+    return reportIncompleteImplementerArtifacts({ slug, resolution: artifacts.resolution, disposition, resolutionPath: artifacts.resolutionPath, dispositionPath: artifacts.dispositionPath, reviewStatePath, providerEnabled: Boolean(providerEnabled), error });
+  }
+
+  const currentState = await Promise.resolve((options.readReviewStateFn || readReviewState)(slug, worktree));
+  const round = currentState ? currentState.round : 1;
+  const phase = currentState ? currentState.phase : 'fixing';
+
+  const { itemDispositions, blockedReason } = parseImplementerResolution(artifacts.resolution, disposition);
+
+  const persisted = await persistImplementerEvents({
+    slug, implementer, round, phase, resolution: artifacts.resolution, disposition, itemDispositions, blockedReason,
+    createEventFn: options.createEventFn || createEvent, worktree, log, error,
+  });
+  if (!persisted.ok) { return { consumed: true, ok: false, diagnostic: 'diagnostic' in persisted ? persisted.diagnostic : 'implementer event persistence failed' }; }
 
   // Close the round on the aggregate. `ready-for-next-round` is the state the
   // next handoff needs to open round N+1 on the same pull request.
   if (disposition !== 'BLOCKED') {
-    const recordImplementerResolutionFn = options.recordImplementerResolutionFn || recordImplementerResolution;
-    const headRevisionFn = options.headRevisionFn || headRevision;
-    let resultingRevision: string;
-    try {
-      resultingRevision = headRevisionFn(worktree);
-    } catch (revisionError) {
-      const revErr = (revisionError as Error).message;
-      error(fmt.status('FAIL', `Could not record the implementer resolution for ${slug}: ${revErr}`));
-      return { consumed: true, ok: false, diagnostic: `Implementer resolution persist failed: ${revErr}` };
-    }
-    const resolution2 = await recordImplementerResolutionFn(slug, {
-      itemDispositions,
-      evidence: `${disposition} — implementer round summary for ${slug}`,
-      resultingRevision,
-      respondedAt: new Date().toISOString(),
-    }, { missionStore: options.missionStore });
-    if (resolution2.outcome === 'failed') {
-      error(fmt.status('FAIL', `Could not record the implementer resolution for ${slug}: ${resolution2.diagnostic}`));
-      return { consumed: true, ok: false, diagnostic: `Implementer resolution persist failed: ${resolution2.diagnostic}` };
-    }
-    if (resolution2.outcome === 'unchanged') {
-      log(fmt.status('INFO', `Implementer resolution for ${slug} already recorded (${resolution2.reason}).`));
-    }
+    const closed = await closeImplementerRound(slug, { disposition, itemDispositions, worktree, options, log, error });
+    if (closed) { return closed; }
   }
 
   if (providerEnabled && options.readTokenFn && options.getCommentsFn) {
     await consumeHumanNotes(slug, implementer, {
       getCommentsFn: options.getCommentsFn,
-      createEventFn: createEventFn as any,
+      createEventFn: (options.createEventFn || createEvent) as any,
       readTokenFn: options.readTokenFn,
       reviewIdentity: implementer,
       worktree,
@@ -722,37 +944,14 @@ async function consumeImplementerArtifacts(
   }
 
   if (providerEnabled) {
-    const resolutionResult = await postWorkflowComment(slug, resolution, {
-      rootDir: worktree,
-      reviewIdentity: implementer,
-      readTokenFn: options.readTokenFn,
-      postCommentFn: options.postCommentFn,
-      buildMetadataFooterFn: options.buildMetadataFooterFn,
-      log: log,
-      error
-    });
-    if (!resolutionResult.ok) {
-      return { consumed: true, ok: false, diagnostic: `Implementer resolution post failed: ${(resolutionResult as { error?: string }).error}` };
-    }
-
-    const dispositionResult = await postWorkflowComment(slug, `Autonomous review disposition: ${disposition}`, {
-      rootDir: worktree,
-      reviewIdentity: implementer,
-      readTokenFn: options.readTokenFn,
-      postCommentFn: options.postCommentFn,
-      buildMetadataFooterFn: options.buildMetadataFooterFn,
-      log: log,
-      error
-    });
-    if (!dispositionResult.ok) {
-      return { consumed: true, ok: false, diagnostic: `Implementer disposition post failed: ${(dispositionResult as { error?: string }).error}` };
-    }
+    const mirrored = await mirrorImplementerArtifacts(slug, { resolution: artifacts.resolution, disposition, implementer, worktree, options, log, error });
+    if (mirrored) { return mirrored; }
   } else {
     log(fmt.status('INFO', `Review provider disabled; skipping PR mirroring for ${slug}`));
   }
 
-  deleteArtifactFn(resolutionPath);
-  deleteArtifactFn(dispositionPath);
+  deleteArtifactFn(artifacts.resolutionPath);
+  deleteArtifactFn(artifacts.dispositionPath);
 
   return { consumed: true, ok: true, disposition };
 }

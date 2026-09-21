@@ -84,6 +84,49 @@ function readMissionDigest(missionFile) {
   }
 }
 
+function digestCount(value, singular, plural) {
+  return value ? `${value} ${value === 1 ? singular : plural}` : '';
+}
+
+function logDraftDigest(digest, logFn) {
+  if (digest.goal) {
+    logFn('');
+    logFn(fmt.bold('Goal'));
+    const width = Math.max(40, Math.min((process.stdout.columns || 80) - 4, 96));
+    for (const line of wrapIndented(digest.goal, width).slice(0, 6)) { logFn(line); }
+    const counts = [
+      digestCount(digest.criteria, 'success criterion', 'success criteria'),
+      digestCount(digest.checkpoints, 'checkpoint', 'checkpoints'),
+      digestCount(digest.gates, 'gate', 'gates'),
+      digest.nel ? `NEL ${digest.nel}` : '',
+    ].filter(Boolean);
+    if (counts.length > 0) {
+      logFn('');
+      logFn(`  ${fmt.dim(counts.join(' · '))}`);
+    }
+  }
+}
+
+function logDraftCompletion(ctx, startedAtMs, logFn) {
+  const missionTitle = readMissionTitle(ctx.missionFile, ctx.slug);
+  logFn('');
+  logFn(fmt.status('PASS', `Drafted ${fmt.slug(ctx.slug)} in ${formatElapsed(Date.now() - startedAtMs)}: ${fmt.bold(missionTitle)}`));
+  logFn(detailRows([
+    ['contract', fmt.path(ctx.missionFile)],
+    ['branch', fmt.branch(ctx.branchName || missionBranchName(ctx.slug, ctx.mainRepo))],
+    ['agent', fmt.agent(/** @type {any} */ (ctx.actualAgent || ctx.agent || 'unknown'))],
+  ]));
+  logDraftDigest(readMissionDigest(ctx.missionFile), logFn);
+  logFn('');
+  // The worktree is emitted as `Working directory:` rather than a detail row on
+  // purpose: the `px` shell function from `px shell-init`
+  // (`src/composition/create-cli.ts`) greps `[INFO] Next: cd ` and, failing that,
+  // `[INFO] Working directory: ` to cd the operator into the mission worktree.
+  // Changing this string silently breaks that shell integration for `px draft`.
+  logFn(fmt.status('INFO', `Working directory: ${ctx.targetWorktree}`));
+  logFn(fmt.status('INFO', `Next: ${fmt.command('px active')}`));
+}
+
 /** Wrap plain text to `width` columns, indented by two spaces. */
 // @ts-expect-error implicit any on text/width
 function wrapIndented(text, width) {
@@ -95,6 +138,59 @@ function wrapIndented(text, width) {
   }
   if (line) { lines.push(`  ${line}`); }
   return lines;
+}
+
+function flagValue(arr, flag, name, errorFn, exitFn) {
+  const i = arr.indexOf(flag);
+  if (i === -1) { return null; }
+  const value = arr[i + 1];
+  if (!value || value.startsWith('--')) {
+    errorFn(fmt.status('FAIL', `Missing value for --${name}. Usage: px draft <slug> --${name} <family>`));
+    try { exitFn(1); } catch { /* exit may throw in tests */ }
+    return null;
+  }
+  return value;
+}
+
+function allocateAdhocDraftTarget(draftTarget, syntheticTask, slug, mainRepo, allocateAdhocIdentityFn, errorFn, exitFn) {
+  if (!syntheticTask || draftTarget.existingAdhocIdentity) { return { slug, syntheticTask }; }
+  try {
+    const allocated = allocateAdhocIdentityFn(resolveCanonicalRepositoryId(mainRepo));
+    return {
+      slug: allocated.slug,
+      syntheticTask: { ...syntheticTask, id: allocated.taskId, source: 'adhoc-db-identity' },
+    };
+  } catch (allocError) {
+    errorFn(fmt.status('FAIL', `Could not allocate adhoc mission identity: ${/** @type {any} */ (allocError).message}`));
+    try { exitFn(1); } catch { /* exit may throw in tests */ }
+    return null;
+  }
+}
+
+function reportBacklogIntegrityIssues(issues, normalizedSlug, errorFn, logFn) {
+  errorFn(fmt.status('FAIL', `Backlog integrity issues detected for ${normalizedSlug}:`));
+  for (const issue of issues) {
+    if (issue.type === 'duplicate-completed') {
+      logFn(`  - ${fmt.path(issue.file)}: task ${fmt.bold(issue.taskId)} already has a canonical copy in ${fmt.path(issue.canonicalFile)}; this backlog/tasks copy is stale.`);
+    } else {
+      logFn(`  - ${fmt.path(issue.file)}: filename ID (${fmt.bold(issue.filenameId)}) does not match frontmatter ID (${fmt.bold(issue.frontmatterId)})`);
+    }
+  }
+  logFn('Repair: Fix filename/id mismatch, or remove the stale backlog/tasks copy of a completed/archived task, before drafting.');
+}
+
+function validateDraftTask(taskLookupRoot, normalizedSlug, syntheticTask, resolveTaskFileFn, reportTaskResolutionFn, checkBacklogIntegrityFn, errorFn, logFn) {
+  const resolution = resolveTaskFileFn(normalizedSlug, taskLookupRoot);
+  if (!resolution.ok && !syntheticTask) {
+    reportTaskResolutionFn(resolution, normalizedSlug, errorFn);
+    return false;
+  }
+  const issues = syntheticTask ? [] : checkBacklogIntegrityFn(taskLookupRoot, normalizedSlug);
+  if (issues.length > 0) {
+    reportBacklogIntegrityIssues(issues, normalizedSlug, errorFn, logFn);
+    return false;
+  }
+  return true;
 }
 
 async function recordDraftImplementer({
@@ -132,6 +228,17 @@ async function recordDraftImplementer({
     log(fmt.status('WARN', `Could not enforce draft agent ${fmt.agent(actual)} in backlog task.`));
   }
   return actual;
+}
+
+async function recordDraftRefinement(ctx: DraftWorkflowContext) {
+  if (typeof ctx.missionServicesFn !== 'function') { throw new Error('draft command requires injected mission services'); }
+  const services = await ctx.missionServicesFn(ctx.targetWorktree);
+  const result = await services.lifecycle.transition({
+    operationId: `draft-refine-${ctx.slug}`,
+    missionId: missionId(ctx.slug), capabilities: new Set(['mission:transition']),
+    command: { type: 'refine' }, actor: 'draft', occurredAt: new Date().toISOString(), idempotencyKey: `${ctx.slug}:refine`,
+  });
+  if (result.status !== 'completed') { throw new Error(result.error?.message || 'unknown error'); }
 }
 
 /**
@@ -252,19 +359,7 @@ function createDraftWorkflowAdapter(deps: Record<string, unknown> = {}) {
       let normalizedSlug = slug.toLowerCase();
       let syntheticTask = draftTarget.syntheticTask;
 
-      // Allow operators to pin the agent family via CLI flag
-      function flagValue(arr: string[], flag: string, name: string) {
-        const i = arr.indexOf(flag);
-        if (i === -1) { return null; }
-        const v = arr[i + 1];
-        if (!v || v.startsWith('--')) {
-          errorFn(fmt.status('FAIL', `Missing value for --${name}. Usage: px draft <slug> --${name} <family>`));
-          safeExit(1);
-          return null;
-        }
-        return v;
-      }
-      const preselectedAgent = flagValue(args, '--agent', 'agent');
+      const preselectedAgent = flagValue(args, '--agent', 'agent', errorFn, exitFn);
       startedAtMs = Date.now();
 
       const mainRepo = resolveMainRepoFn();
@@ -279,18 +374,11 @@ function createDraftWorkflowAdapter(deps: Record<string, unknown> = {}) {
       // Re-entering an existing DB-owned identity (F6) skips allocation: the
       // counter is monotonic and repository-scoped, so a re-run reuses the
       // minted identity instead of minting a second mission/branch/worktree.
-      if (syntheticTask && !draftTarget.existingAdhocIdentity) {
-        try {
-          const allocated = allocateAdhocIdentityFn(resolveCanonicalRepositoryId(mainRepo));
-          slug = allocated.slug;
-          normalizedSlug = slug.toLowerCase();
-          syntheticTask = { ...syntheticTask, id: allocated.taskId, source: 'adhoc-db-identity' };
-        } catch (allocError) {
-          errorFn(fmt.status('FAIL', `Could not allocate adhoc mission identity: ${/** @type {any} */ (allocError).message}`));
-          safeExit(1);
-          return exitedContext({ slug, mainRepo, options });
-        }
-      }
+      const allocatedTarget = allocateAdhocDraftTarget(draftTarget, syntheticTask, slug, mainRepo, allocateAdhocIdentityFn, errorFn, exitFn);
+      if (!allocatedTarget) { return exitedContext({ slug, mainRepo, options }); }
+      slug = allocatedTarget.slug;
+      normalizedSlug = slug.toLowerCase();
+      syntheticTask = allocatedTarget.syntheticTask;
 
       // Announced only after adhoc allocation: free text drafts under a
       // placeholder slug and is then minted a repository-scoped identity, so
@@ -335,24 +423,7 @@ function createDraftWorkflowAdapter(deps: Record<string, unknown> = {}) {
       }
 
       const taskLookupRoot = recordedBase ? launchDir : mainRepo;
-      const mainResolution = resolveTaskFileFn(normalizedSlug, taskLookupRoot);
-      if (!mainResolution.ok && !syntheticTask) {
-        reportTaskResolutionFn(mainResolution, normalizedSlug, errorFn);
-        safeExit(1);
-        return exitedContext({ slug: normalizedSlug, mainRepo, options });
-      }
-
-      const relevantIssues = syntheticTask ? [] : checkBacklogIntegrityFn(taskLookupRoot, normalizedSlug);
-      if (relevantIssues.length > 0) {
-        errorFn(fmt.status('FAIL', `Backlog integrity issues detected for ${normalizedSlug}:`));
-        relevantIssues.forEach((issue: any) => {
-          if (issue.type === 'duplicate-completed') {
-            logFn(`  - ${fmt.path(issue.file)}: task ${fmt.bold(issue.taskId)} already has a canonical copy in ${fmt.path(issue.canonicalFile)}; this backlog/tasks copy is stale.`);
-          } else {
-            logFn(`  - ${fmt.path(issue.file)}: filename ID (${fmt.bold(issue.filenameId)}) does not match frontmatter ID (${fmt.bold(issue.frontmatterId)})`);
-          }
-        });
-        logFn('Repair: Fix filename/id mismatch, or remove the stale backlog/tasks copy of a completed/archived task, before drafting.');
+      if (!validateDraftTask(taskLookupRoot, normalizedSlug, syntheticTask, resolveTaskFileFn, reportTaskResolutionFn, checkBacklogIntegrityFn, errorFn, logFn)) {
         safeExit(1);
         return exitedContext({ slug: normalizedSlug, mainRepo, options });
       }
@@ -674,20 +745,7 @@ function createDraftWorkflowAdapter(deps: Record<string, unknown> = {}) {
       // it first keeps the failure story the same as intake's: a database
       // failure leaves the Backlog task where it was.
       try {
-        if (typeof ctx.missionServicesFn !== 'function') { throw new Error('draft command requires injected mission services'); }
-        const missionServices = await ctx.missionServicesFn(ctx.targetWorktree);
-        const refined = await missionServices.lifecycle.transition({
-          operationId: `draft-refine-${ctx.slug}`,
-          missionId: missionId(ctx.slug),
-          capabilities: new Set(['mission:transition']),
-          command: { type: 'refine' },
-          actor: 'draft',
-          occurredAt: new Date().toISOString(),
-          idempotencyKey: `${ctx.slug}:refine`,
-        });
-        if (refined.status !== 'completed') {
-          throw new Error(refined.error?.message || 'unknown error');
-        }
+        await recordDraftRefinement(ctx);
       } catch (refineError) {
         errorFn(fmt.status('FAIL', `Recording refinement for ${ctx.slug} failed: ${/** @type {any} */ (refineError).message}`));
         logFn('Repair: ensure the operator-local database is reachable, then re-run the draft. The Backlog task was not transitioned to ready.');
@@ -708,47 +766,7 @@ function createDraftWorkflowAdapter(deps: Record<string, unknown> = {}) {
         logFn(fmt.status('WARN', `No Backlog task file transition for ${ctx.slug}; lifecycle is DB-authoritative.`));
       }
 
-      // Mission-oriented close-out: what was drafted, how long it took, where
-      // to read it, and the one next command. The title is re-read here because
-      // the draft agent rewrites MISSION.md after intake captured it.
-      const missionTitle = readMissionTitle(ctx.missionFile, ctx.slug);
-      logFn('');
-      logFn(fmt.status('PASS', `Drafted ${fmt.slug(ctx.slug)} in ${formatElapsed(Date.now() - startedAtMs)}: ${fmt.bold(missionTitle)}`));
-      logFn(detailRows([
-        ['contract', fmt.path(ctx.missionFile)],
-        ['branch', fmt.branch(ctx.branchName || missionBranchName(ctx.slug, ctx.mainRepo))],
-        ['agent', fmt.agent(/** @type {any} */ (ctx.actualAgent || ctx.agent || 'unknown'))],
-      ]));
-      // The contract itself, so the operator does not need a pager to learn what
-      // the implementer will be held to. The Goal's first paragraph plus the
-      // counts answer that; the full document is one path away, printed above.
-      const digest = readMissionDigest(ctx.missionFile);
-      if (digest.goal) {
-        logFn('');
-        logFn(fmt.bold('Goal'));
-        const width = Math.max(40, Math.min((process.stdout.columns || 80) - 4, 96));
-        for (const line of wrapIndented(digest.goal, width).slice(0, 6)) { logFn(line); }
-        const counts = [
-          digest.criteria ? `${digest.criteria} success ${digest.criteria === 1 ? 'criterion' : 'criteria'}` : '',
-          digest.checkpoints ? `${digest.checkpoints} checkpoint${digest.checkpoints === 1 ? '' : 's'}` : '',
-          digest.gates ? `${digest.gates} gate${digest.gates === 1 ? '' : 's'}` : '',
-          digest.nel ? `NEL ${digest.nel}` : '',
-        ].filter(Boolean);
-        if (counts.length > 0) {
-          logFn('');
-          logFn(`  ${fmt.dim(counts.join(' · '))}`);
-        }
-      }
-
-      logFn('');
-      // The worktree is emitted as `Working directory:` rather than a detail row
-      // on purpose: the `px` shell function from `px shell-init`
-      // (`src/composition/create-cli.ts`) greps `[INFO] Next: cd ` and, failing
-      // that, `[INFO] Working directory: ` to cd the operator into the mission
-      // worktree. Dropping the old `Next: cd <worktree>` line without this would
-      // silently break that shell integration for `px draft`.
-      logFn(fmt.status('INFO', `Working directory: ${ctx.targetWorktree}`));
-      logFn(fmt.status('INFO', `Next: ${fmt.command('px active')}`));
+      logDraftCompletion(ctx, startedAtMs, logFn);
     },
   } as DraftWorkflowPort;
 }

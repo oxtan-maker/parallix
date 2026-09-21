@@ -114,7 +114,11 @@ test('task-2317: reviewer and implementer recovery relaunches compact before wor
 
 test('task-2317: reviewer compaction follows successful rebase and baseline recapture before launch', () => {
   const rebaseIndex = reviewLoopSource.indexOf('const rebaseResult = await rebaseBeforeReviewRoundFn');
-  const recaptureIndex = reviewLoopSource.indexOf('reviewBaseline = captureReviewBaseline();', rebaseIndex);
+  // The baseline and its capture now live on the round's scratch record, so the
+  // order is asserted on the assignment rather than on one spelling of it.
+  const recaptureIndex = reviewLoopSource.search(
+    new RegExp('(?:round\\.)?reviewBaseline = (?:round\\.)?captureReviewBaseline\\(\\);'),
+  );
   const launchIndex = reviewLoopSource.indexOf("reviewerLaunchResult = await startAgentFn('review'", recaptureIndex);
 
   assert.ok(rebaseIndex >= 0, 'review loop must rebase before reviewer launch');

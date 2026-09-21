@@ -103,6 +103,26 @@ type GateValidationResult =
  * Every collaborator arrives through the injected port bag; the composition
  * root is the only place that knows which concrete adapters implement them.
  */
+/**
+ * Gatekeeper pre-review validation. Missing artifacts with a posted pushback
+ * keep the task active for repair; missing artifacts it could not post block the
+ * handoff outright, because nothing would tell the implementer what to fix.
+ */
+function gatekeeperOutcome(gatekeeperResult: any, slug: string, log: (_msg: string) => void, error: (_msg: string) => void): { pushedBack: boolean; blocked?: HandoffResult } {
+  if (gatekeeperResult.ok) { return { pushedBack: false }; }
+  if (gatekeeperResult.posted) {
+    fmt.log.warn(`Gatekeeper posted pushback for ${fmt.slug(slug)}: missing ${gatekeeperResult.missing.join(', ')}.`);
+    log(`Keeping task ${fmt.slug(slug)} active while required artifacts are missing.`);
+    return { pushedBack: true };
+  }
+  fmt.log.fail(`Gatekeeper detected missing artifacts for ${fmt.slug(slug)} but could not post pushback: skipped=${gatekeeperResult.skipped}, posted=${gatekeeperResult.posted}. Blocking handoff — task remains in active until artifacts are present.`);
+  error(`Missing mandatory artifacts: ${gatekeeperResult.missing.join(', ')}.`);
+  return {
+    pushedBack: false,
+    blocked: { ok: false, error: `Gatekeeper detected missing artifacts but could not post pushback (skipped=${gatekeeperResult.skipped}, posted=${gatekeeperResult.posted}). Fix missing artifacts before handoff: ${gatekeeperResult.missing.join(', ')}.` },
+  };
+}
+
 export class HandoffCommandUseCase {
   private readonly ports: HandoffWorkflowPorts;
 
@@ -662,6 +682,143 @@ export class HandoffCommandUseCase {
     return null;
   }
 
+  /**
+   * Pre-handoff content integrity: the mission contract and its final checkpoint
+   * must be committed, and that checkpoint must carry a Goal Check table whose
+   * evidence rows cite something Parallix can actually verify. Returns the
+   * verified checkpoint, or the failure the caller returns unchanged.
+   */
+  private verifyHandoffEvidence(slug: string, context: {
+    rootDir: string; missionDirPath: string; log: (_msg: string) => void; error: (_msg: string) => void;
+  }): HandoffResult | { finalCheckpoint: string; checkpointContent: string; evidenceRows: string[] } {
+    const ports = this.ports;
+    const { rootDir, missionDirPath, log, error } = context;
+    const fail = (msg: string): HandoffResult => { error(msg); return { ok: false, error: msg }; };
+
+    const relativeMissionPath = path.relative(rootDir, path.join(missionDirPath, 'MISSION.md'));
+    const dirtyFiles = ports.git.getWorktreeStatus(rootDir);
+    if (dirtyFiles.some(line => line.endsWith(relativeMissionPath))) {
+      return fail(`${fmt.path('MISSION.md')} is modified but uncommitted at ${fmt.path(relativeMissionPath)}. Commit the mission contract before handoff.`);
+    }
+
+    let checkpoints = ports.missionUtils.findCheckpoints(missionDirPath);
+    if (checkpoints.length === 0) {
+      const remediated = this.autoGenerateCheckpoint(slug, missionDirPath, rootDir, log);
+      if (remediated.length === 0) {
+        return fail(`No checkpoint documents found in ${fmt.path(missionDirPath)} even after auto-remediation. Implementation evidence is mandatory for review.`);
+      }
+      checkpoints = remediated;
+    }
+
+    const finalCheckpoint = checkpoints[checkpoints.length - 1];
+    const relativeCheckpointPath = path.relative(rootDir, finalCheckpoint);
+    if (dirtyFiles.some(line => line.endsWith(relativeCheckpointPath))) {
+      return fail(`The latest checkpoint document is modified but uncommitted at ${fmt.path(relativeCheckpointPath)}. Commit the implementation evidence before handoff.`);
+    }
+
+    // Per review.md step 5, a missing or empty goal-check table means the
+    // checkpoint has not satisfied the mission's evidence requirement. Both the
+    // `## Goal Check` and `## Goal Check Table` headings are accepted.
+    const checkpointContent = ports.fileSystem.readText(finalCheckpoint);
+    const goalCheckMatch = checkpointContent.match(/^## Goal Check(?: Table)?\s*$/m);
+    if (!goalCheckMatch) {
+      return fail(`The final checkpoint at ${fmt.path(relativeCheckpointPath)} is missing a "## Goal Check" section. Review requires a goal-check table with real evidence before handoff.`);
+    }
+
+    // Only real evidence rows count: separator rows (|---|---|) and the header
+    // row itself are excluded by collectGoalCheckEvidenceRows.
+    const afterHeader = checkpointContent.slice((goalCheckMatch.index ?? 0) + goalCheckMatch[0].length);
+    const evidenceRows = collectGoalCheckEvidenceRows(afterHeader);
+    if (evidenceRows.length === 0) {
+      return fail(`The final checkpoint at ${fmt.path(relativeCheckpointPath)} has a "## Goal Check" section but no evidence rows. A goal-check table with real evidence is required before handoff.`);
+    }
+    const unverifiableRow = findUnverifiableGoalCheckRow(ports.fileSystem, evidenceRows, rootDir);
+    if (unverifiableRow) {
+      return fail(`The final checkpoint at ${fmt.path(relativeCheckpointPath)} has a "## Goal Check" section but no evidence rows that cite a verifiable reference such as a recognized repo command/path, exact test name, test-file path, or ADR reference (or, when necessary, file:line). A goal-check table with real evidence is required before handoff. Offending row: ${unverifiableRow}`);
+    }
+    return { finalCheckpoint, checkpointContent, evidenceRows };
+  }
+
+  /**
+   * Rather than hard-failing when no checkpoint document exists, write a minimal
+   * CP-1.md with a valid Goal Check table so the handoff can proceed. The file is
+   * marked auto-generated for reviewer awareness and committed so it rides the
+   * handoff push instead of tripping the uncommitted-checkpoint check.
+   */
+  private autoGenerateCheckpoint(slug: string, missionDirPath: string, rootDir: string, log: (_msg: string) => void): string[] {
+    const ports = this.ports;
+    const autoCheckpointPath = path.join(missionDirPath, 'CP-1.md');
+    ports.fileSystem.writeText(autoCheckpointPath, buildAutoCheckpointContent(slug));
+    log(fmt.status('WARN', `No checkpoint documents found — auto-generated ${fmt.path('CP-1.md')} in ${fmt.path(missionDirPath)}.`));
+
+    // An empty result means the generated file is not discoverable; the caller
+    // reports that as the fatal condition it is, so nothing is committed here.
+    const checkpoints = ports.missionUtils.findCheckpoints(missionDirPath);
+    if (checkpoints.length > 0) {
+      ports.git.git(['-C', rootDir, 'add', autoCheckpointPath]);
+      const commitRes = ports.git.git(['-C', rootDir, 'commit', '-m', `docs(${slug}): auto-generate CP-1.md checkpoint (handoff remediation)`]);
+      if (commitRes.status !== 0) {
+        log(fmt.status('WARN', `Could not commit auto-generated CP-1.md for ${fmt.slug(slug)}; continuing handoff.`));
+      }
+    }
+    return checkpoints;
+  }
+
+  /**
+   * The token the PR is pushed with. A missing agent token is bootstrapped
+   * non-interactively, then falls back to the repo owner; only when the owner
+   * has no token either does handoff stop for manual action.
+   */
+  private async resolveHandoffForgejoToken(slug: string, forgejoUser: string, context: {
+    rootDir: string; log: (_msg: string) => void; error: (_msg: string) => void; internalLog: (_msg: string) => void;
+  }): Promise<HandoffResult | { token: string; fallbackUser: string | null }> {
+    const ports = this.ports;
+    const { rootDir, log, error, internalLog } = context;
+    const existing = ports.forgejo.readToken(forgejoUser);
+    if (existing) { return { token: existing, fallbackUser: null }; }
+
+    error(`Token not found for ${fmt.agent(forgejoUser)}. Attempting non-interactive bootstrap...`);
+    const reviewSettings = ports.forgejo.resolveForgejoSettings(rootDir);
+    const bootstrapResult = await ports.setupReview.bootstrapReviewSurface(rootDir, {
+      baseUrl: reviewSettings.url,
+      repo: reviewSettings.repo,
+      ownerLogin: 'human',
+      ownerPassword: '',
+      agentPasswords: [{ user: forgejoUser, password: '' }],
+    }, { interactive: false, requestFn: ports.setupReview.apiRequest, log: internalLog });
+
+    let bootstrapFailureReason: string | null = null;
+    let token: string | null = null;
+    if (bootstrapResult.ok) {
+      log(fmt.status('PASS', `Bootstrap succeeded for ${fmt.agent(forgejoUser)}.`));
+      token = ports.forgejo.readToken(forgejoUser);
+      if (!token) {
+        bootstrapFailureReason = 'bootstrap completed but token file for the agent user was not found';
+        error('Bootstrap completed but token file for the agent user was not found. Falling back to default user.');
+      }
+    } else {
+      bootstrapFailureReason = bootstrapResult.error || 'unknown';
+      error(`Bootstrap for ${fmt.agent(forgejoUser)} failed: ${bootstrapFailureReason}. Falling back to default user.`);
+    }
+    if (token) { return { token, fallbackUser: null }; }
+
+    token = ports.forgejo.readToken('human');
+    if (!token) {
+      const msg = `No Forgejo token found for user "${fmt.agent(forgejoUser)}", bootstrap failed (${bootstrapResult.error || 'unknown'}), and no fallback token available for "${fmt.agent('human')}". Manual action required: create a token manually or run \`node parallix setup-review\` first.`;
+      error(msg);
+      return { ok: false, error: msg };
+    }
+    log(`Review submission fell back from ${fmt.agent(forgejoUser)} to ${fmt.agent('human')}.`);
+    // Durable record of why the PR carries the owner's identity rather than the
+    // implementer's, so a reviewer is not left guessing.
+    const reason = bootstrapFailureReason || 'agent token was missing and bootstrap did not provide a replacement token';
+    const fallbackSummary = `## Fallback: PR submitted as ${fmt.agent('human')}\n\nOriginal user: ${fmt.agent(forgejoUser)}\nBootstrap failure reason: ${reason}`;
+    if (!this.writeFallbackSummary(slug, fallbackSummary, { rootDir, log: internalLog })) {
+      log(fmt.status('WARN', `Could not persist fallback summary for ${fmt.slug(slug)}`));
+    }
+    return { token, fallbackUser: 'human' };
+  }
+
   async performHandoff(slug: string, options = {}): Promise<HandoffResult> {
     const ports = this.ports;
     const opts = options;
@@ -754,79 +911,9 @@ export class HandoffCommandUseCase {
     }
 
     // Pre-handoff Content Integrity Check
-    const relativeMissionPath = path.relative(rootDir, path.join(missionDirPath, 'MISSION.md'));
-    const dirtyFiles = ports.git.getWorktreeStatus(rootDir);
-    let checkpoints = ports.missionUtils.findCheckpoints(missionDirPath);
-
-    if (dirtyFiles.some(line => line.endsWith(relativeMissionPath))) {
-      const msg = `${fmt.path('MISSION.md')} is modified but uncommitted at ${fmt.path(relativeMissionPath)}. Commit the mission contract before handoff.`;
-      error(msg);
-      return { ok: false, error: msg };
-    }
-
-    if (checkpoints.length === 0) {
-      // Auto-remediation: rather than hard-failing when no checkpoint document
-      // exists, generate a minimal default CP-1.md with a valid Goal Check
-      // table so the handoff can proceed without manual intervention. The generated
-      // file is clearly marked as auto-generated for reviewer awareness, then we
-      // re-scan to confirm it is discoverable via findCheckpoints().
-      const autoCheckpointPath = path.join(missionDirPath, 'CP-1.md');
-      ports.fileSystem.writeText(autoCheckpointPath, buildAutoCheckpointContent(slug));
-      log(fmt.status('WARN', `No checkpoint documents found — auto-generated ${fmt.path('CP-1.md')} in ${fmt.path(missionDirPath)}.`));
-
-      checkpoints = ports.missionUtils.findCheckpoints(missionDirPath);
-      if (checkpoints.length === 0) {
-        const msg = `No checkpoint documents found in ${fmt.path(missionDirPath)} even after auto-remediation. Implementation evidence is mandatory for review.`;
-        error(msg);
-        return { ok: false, error: msg };
-      }
-
-      // Commit the auto-generated checkpoint so it is included in the handoff push
-      // and does not trip the uncommitted-checkpoint check below.
-      ports.git.git(['-C', rootDir, 'add', autoCheckpointPath]);
-      const commitRes = ports.git.git(['-C', rootDir, 'commit', '-m', `docs(${slug}): auto-generate CP-1.md checkpoint (handoff remediation)`]);
-      if (commitRes.status !== 0) {
-        log(fmt.status('WARN', `Could not commit auto-generated CP-1.md for ${fmt.slug(slug)}; continuing handoff.`));
-      }
-    }
-
-    const finalCheckpoint = checkpoints[checkpoints.length - 1];
-    const relativeCheckpointPath = path.relative(rootDir, finalCheckpoint);
-    if (dirtyFiles.some(line => line.endsWith(relativeCheckpointPath))) {
-      const msg = `The latest checkpoint document is modified but uncommitted at ${fmt.path(relativeCheckpointPath)}. Commit the implementation evidence before handoff.`;
-      error(msg);
-      return { ok: false, error: msg };
-    }
-
-    // Pre-handoff Content Integrity Check: final checkpoint must contain a Goal Check table
-    // with real evidence. Per review.md step 5, a missing or empty goal-check table
-    // means the checkpoint has not satisfied the mission's evidence requirement.
-    // Accept both `## Goal Check` and `## Goal Check Table` heading variants used across repo artifacts.
-    const checkpointContent = ports.fileSystem.readText(finalCheckpoint);
-    const goalCheckMatch = checkpointContent.match(/^## Goal Check(?: Table)?\s*$/m);
-    if (!goalCheckMatch) {
-      const msg = `The final checkpoint at ${fmt.path(relativeCheckpointPath)} is missing a "## Goal Check" section. Review requires a goal-check table with real evidence before handoff.`;
-      error(msg);
-      return { ok: false, error: msg };
-    }
-
-    // Verify the goal-check table has at least one row of evidence (table row after header).
-    // Must exclude table separator rows (|---|---|---|) and the header row itself —
-    // only real evidence rows (with pipe-separated content that is not all dashes) count.
-    const goalCheckMatchIndex = goalCheckMatch.index ?? 0;
-    const afterHeader = checkpointContent.slice(goalCheckMatchIndex + goalCheckMatch[0].length);
-    const evidenceRows = collectGoalCheckEvidenceRows(afterHeader);
-    if (evidenceRows.length === 0) {
-      const msg = `The final checkpoint at ${fmt.path(relativeCheckpointPath)} has a "## Goal Check" section but no evidence rows. A goal-check table with real evidence is required before handoff.`;
-      error(msg);
-      return { ok: false, error: msg };
-    }
-    const unverifiableRow = findUnverifiableGoalCheckRow(ports.fileSystem, evidenceRows, rootDir);
-    if (unverifiableRow) {
-      const msg = `The final checkpoint at ${fmt.path(relativeCheckpointPath)} has a "## Goal Check" section but no evidence rows that cite a verifiable reference such as a recognized repo command/path, exact test name, test-file path, or ADR reference (or, when necessary, file:line). A goal-check table with real evidence is required before handoff. Offending row: ${unverifiableRow}`;
-      error(msg);
-      return { ok: false, error: msg };
-    }
+    const evidence = this.verifyHandoffEvidence(slug, { rootDir, missionDirPath, log, error });
+    if ('error' in evidence) { return evidence; }
+    const { finalCheckpoint, checkpointContent, evidenceRows } = evidence;
 
     const isForgejoReviewEnabledFn = opts.isForgejoReviewEnabledFn || ports.productConfig.isForgejoReviewEnabled;
     const forgejoEnabled = isForgejoReviewEnabledFn(rootDir);
@@ -950,67 +1037,14 @@ export class HandoffCommandUseCase {
     // Step 2: Forgejo PR Update/Create (optional mirror when Forgejo is enabled)
     let token = null;
     let fallbackUser = null;
-    let bootstrapFailureReason = null;
     /** The pull request this handoff hands to the reviewer, when there is one. */
     let submittedPr: { id: string; url: string | null } | null = null;
     if (forgejoEnabled) {
       internalLog(`Updating/Creating Forgejo PR as user ${fmt.agent(forgejoUser)}...`);
-      token = ports.forgejo.readToken(forgejoUser);
-      if (!token) {
-        // Token missing for the agent user — attempt non-interactive bootstrap
-        error(`Token not found for ${fmt.agent(forgejoUser)}. Attempting non-interactive bootstrap...`);
-
-        const reviewSettings = ports.forgejo.resolveForgejoSettings(rootDir);
-        const bootstrapSetup = {
-          baseUrl: reviewSettings.url,
-          repo: reviewSettings.repo,
-          ownerLogin: 'human',
-          ownerPassword: '',
-          agentPasswords: [{ user: forgejoUser, password: '' }],
-        };
-        const bootstrapResult = await ports.setupReview.bootstrapReviewSurface(rootDir, bootstrapSetup, {
-          interactive: false,
-          requestFn: ports.setupReview.apiRequest,
-          log: internalLog,
-        });
-
-        if (bootstrapResult.ok) {
-          log(fmt.status('PASS', `Bootstrap succeeded for ${fmt.agent(forgejoUser)}.`));
-          token = ports.forgejo.readToken(forgejoUser);
-          if (!token) {
-            bootstrapFailureReason = 'bootstrap completed but token file for the agent user was not found';
-            error('Bootstrap completed but token file for the agent user was not found. Falling back to default user.');
-          }
-        } else {
-          bootstrapFailureReason = bootstrapResult.error || 'unknown';
-          error(`Bootstrap for ${fmt.agent(forgejoUser)} failed: ${bootstrapFailureReason}. Falling back to default user.`);
-        }
-
-        // Handle bootstrap result that may not have error property
-        const br = bootstrapResult;
-
-        // Owner fallback if bootstrap didn't produce a token
-        if (!token) {
-          token = ports.forgejo.readToken('human');
-          if (token) {
-            fallbackUser = 'human';
-          log(`Review submission fell back from ${fmt.agent(forgejoUser)} to ${fmt.agent(fallbackUser)}.`);
-          } else {
-            const msg = `No Forgejo token found for user "${fmt.agent(forgejoUser)}", bootstrap failed (${br.error || 'unknown'}), and no fallback token available for "${fmt.agent('human')}". Manual action required: create a token manually or run \`node parallix setup-review\` first.`;
-            error(msg);
-            return { ok: false, error: msg };
-          }
-        }
-      }
-
-      // Persist durable fallback summary when we fell back to the default user
-      if (fallbackUser === 'human') {
-        const reason = bootstrapFailureReason || 'agent token was missing and bootstrap did not provide a replacement token';
-        const fallbackSummary = `## Fallback: PR submitted as ${fmt.agent(fallbackUser)}\n\nOriginal user: ${fmt.agent(forgejoUser)}\nBootstrap failure reason: ${reason}`;
-        if (!this.writeFallbackSummary(slug, fallbackSummary, { rootDir, log: internalLog })) {
-          log(fmt.status('WARN', `Could not persist fallback summary for ${fmt.slug(slug)}`));
-        }
-      }
+      const credentials = await this.resolveHandoffForgejoToken(slug, forgejoUser, { rootDir, log, error, internalLog });
+      if ('error' in credentials) { return credentials; }
+      token = credentials.token;
+      fallbackUser = credentials.fallbackUser;
 
       const prResult = ports.forgejo.createPr(branch || '', String(fallbackUser || forgejoUser || 'default'), String(token || ''), {
         rootDir,
@@ -1031,18 +1065,14 @@ export class HandoffCommandUseCase {
     // Run before transitioning Backlog to 'review' so missing artifacts are
     // flagged as a request-changes review instead of consuming a reviewer cycle.
     const gatekeeperResult = runGatekeeperFn(slug, { rootDir, log: internalLog });
-    let gatekeeperPushedBack = false;
-    if (!gatekeeperResult.ok && gatekeeperResult.posted) {
-      fmt.log.warn(`Gatekeeper posted pushback for ${fmt.slug(slug)}: missing ${gatekeeperResult.missing.join(', ')}.`);
-      gatekeeperPushedBack = true;
-      log(`Keeping task ${fmt.slug(slug)} active while required artifacts are missing.`);
-    } else if (!gatekeeperResult.ok && (gatekeeperResult.skipped || !gatekeeperResult.posted)) {
-      fmt.log.fail(`Gatekeeper detected missing artifacts for ${fmt.slug(slug)} but could not post pushback: skipped=${gatekeeperResult.skipped}, posted=${gatekeeperResult.posted}. Blocking handoff — task remains in active until artifacts are present.`);
-      error(`Missing mandatory artifacts: ${gatekeeperResult.missing.join(', ')}.`);
-      return { ok: false, error: `Gatekeeper detected missing artifacts but could not post pushback (skipped=${gatekeeperResult.skipped}, posted=${gatekeeperResult.posted}). Fix missing artifacts before handoff: ${gatekeeperResult.missing.join(', ')}.` };
-    }
+    const gatekeeperVerdict = gatekeeperOutcome(gatekeeperResult, slug, log, error);
+    if (gatekeeperVerdict.blocked) { return gatekeeperVerdict.blocked; }
 
-    if (gatekeeperPushedBack) {
+    // Past this branch the gatekeeper never pushed back: the pushback path
+    // returns through remediateGatekeeperPushback below. The flag is still
+    // carried into the result so callers read one shape either way.
+    const gatekeeperPushedBack = false;
+    if (gatekeeperVerdict.pushedBack) {
       return await this.remediateGatekeeperPushback(slug, {
         gatekeeperResult,
         rootDir,
@@ -1280,54 +1310,49 @@ export class HandoffCommandUseCase {
     const pushUser = ownerToken && repoOwner ? repoOwner : (fallbackUser || forgejoUser);
     const pushToken = ownerToken || token;
     const remoteUrl = ports.forgejo.authenticatedReviewUrl(pushUser, pushToken, rootDir);
-    // transitionTask commits the Backlog state in this mission worktree. Step 2
-    // has already published the pre-transition tip to create/update the PR, so
-    // this push may be non-fast-forward. Use a lease to update that known PR
-    // tip without overwriting a concurrent push.
-    let pushLeaseArg = null;
-    {
-      const fetchArgs = ['-C', rootDir, 'fetch', remoteUrl, `+refs/heads/${branch}:refs/remotes/review/${branch}`];
-      const fetchResult = ports.git.git(fetchArgs, { stdio: ['ignore', 'pipe', 'pipe'] });
-      if (fetchResult.status !== 0) {
-        const fetchError = (fetchResult.stderr || fetchResult.stdout || '').trim();
-        const msg = `Failed to refresh Backlog transition lease for ${fmt.slug(slug)} before Forgejo push.`;
-        error(`${msg}${fetchError ? ` ${fetchError}` : ''}`);
-        return { ok: false, error: msg };
-      }
-      const tracking = ports.forgejo.resolveTrackingBranchSha(branch || '', rootDir);
-      if (!tracking.ok) {
-        const msg = `Failed to resolve Backlog transition lease for ${fmt.slug(slug)} before Forgejo push.`;
-        error(msg);
-        return { ok: false, error: `${msg} ${tracking.error || ''}`.trim() };
-      }
-      pushLeaseArg = `--force-with-lease=refs/heads/${branch}:${String(tracking.sha || '')}`;
+    const pushLease = this.backlogPushLease(slug, rootDir, branch, remoteUrl, error);
+    if (typeof pushLease !== 'string') { return pushLease; }
+    const pushResult = ports.git.git(['-C', rootDir, 'push', pushLease, String(remoteUrl || ''), branch || '']);
+    return this.handleBacklogPushResult(slug, pushResult, { rootDir, branch, remoteUrl, force, error, gatekeeperPushedBack });
+  }
+
+  private backlogPushLease(slug: string, rootDir: string, branch: string, remoteUrl: string, error: (_: string) => void): string | HandoffResult {
+    const fetchArgs = ['-C', rootDir, 'fetch', remoteUrl, `+refs/heads/${branch}:refs/remotes/review/${branch}`];
+    const fetchResult = this.ports.git.git(fetchArgs, { stdio: ['ignore', 'pipe', 'pipe'] });
+    if (fetchResult.status !== 0) {
+      const fetchError = (fetchResult.stderr || fetchResult.stdout || '').trim();
+      const msg = `Failed to refresh Backlog transition lease for ${fmt.slug(slug)} before Forgejo push.`;
+      error(`${msg}${fetchError ? ` ${fetchError}` : ''}`);
+      return { ok: false, error: msg };
     }
-    const pushArgs = ['-C', rootDir, 'push'];
-    if (pushLeaseArg) {
-      pushArgs.push(pushLeaseArg);
-    }
-    pushArgs.push(String(remoteUrl || ''), branch || '');
-    const pushBacklogForgejo = ports.git.git(pushArgs);
-    if (pushBacklogForgejo.status !== 0) {
-      const pushError = [pushBacklogForgejo.stderr, pushBacklogForgejo.stdout].filter(Boolean).join('\n');
-      if (force && /non-fast-forward|stale info|fetch first/i.test(pushError || '')) {
-        const forceArgs = ['-C', rootDir, 'push', '--force', String(remoteUrl || ''), branch || ''];
-        const forceResult = ports.git.git(forceArgs);
-        if (forceResult.status === 0) {
-          fmt.log.info(`Backlog transition for ${fmt.slug(slug)} required plain force after stale lease.`);
-        } else {
-          const forceError = (forceResult.stderr || forceResult.stdout || '').trim();
-          const msg = `Failed to push Backlog transition for ${fmt.slug(slug)} to Forgejo.`;
-          error(msg);
-          return { ok: false, error: forceError ? `${msg} ${forceError}` : msg };
-        }
-        return { ok: true, gatekeeperPushedBack };
-      }
-      const msg = `Failed to push Backlog transition for ${fmt.slug(slug)} to Forgejo.`;
+    const tracking = this.ports.forgejo.resolveTrackingBranchSha(branch || '', rootDir);
+    if (!tracking.ok) {
+      const msg = `Failed to resolve Backlog transition lease for ${fmt.slug(slug)} before Forgejo push.`;
       error(msg);
-      return { ok: false, error: pushError.trim() ? `${msg} ${pushError.trim()}` : msg };
+      return { ok: false, error: `${msg} ${tracking.error || ''}`.trim() };
     }
-    return null;
+    return `--force-with-lease=refs/heads/${branch}:${String(tracking.sha || '')}`;
+  }
+
+  private handleBacklogPushResult(slug: string, result: any, context): HandoffResult | null {
+    if (result.status === 0) { return null; }
+    const pushError = [result.stderr, result.stdout].filter(Boolean).join('\n');
+    if (context.force && /non-fast-forward|stale info|fetch first/i.test(pushError)) {
+      const forced = this.ports.git.git(['-C', context.rootDir, 'push', '--force', String(context.remoteUrl || ''), context.branch || '']);
+      if (forced.status === 0) {
+        fmt.log.info(`Backlog transition for ${fmt.slug(slug)} required plain force after stale lease.`);
+        return { ok: true, gatekeeperPushedBack: context.gatekeeperPushedBack };
+      }
+      const forceError = (forced.stderr || forced.stdout || '').trim();
+      return this.backlogPushFailure(slug, forceError, context.error);
+    }
+    return this.backlogPushFailure(slug, pushError.trim(), context.error);
+  }
+
+  private backlogPushFailure(slug: string, detail: string, error: (_: string) => void): HandoffResult {
+    const msg = `Failed to push Backlog transition for ${fmt.slug(slug)} to Forgejo.`;
+    error(msg);
+    return { ok: false, error: detail ? `${msg} ${detail}` : msg };
   }
 
   /**

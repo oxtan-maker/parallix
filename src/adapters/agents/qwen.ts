@@ -115,50 +115,43 @@ function ensureQwenHome(
  */
 function extractQwenSessionId(basePath: string, invocationStart?: string): string | null {
   const projectsDir = basePath || qwenProjectsDir(process.cwd());
-
-  let invokeTime = NaN;
-  if (invocationStart) {
-    invokeTime = Date.parse(invocationStart);
-  }
+  const invokeTime = invocationStart ? Date.parse(invocationStart) : Number.NaN;
 
   try {
-    const projectDirs = fs.readdirSync(projectsDir).filter((d: string) => {
-      try { return fs.statSync(path.join(projectsDir, d)).isDirectory(); } catch { return false; }
-    });
-
-    let bestSessionId: string | null = null;
-    let bestMtime = 0;
-
-    for (const projectDir of projectDirs) {
-      const chatsDir = path.join(projectsDir, projectDir, 'chats');
-            if (!fs.existsSync(chatsDir)) { continue; }
-
-      const chatFiles = fs.readdirSync(chatsDir).filter((f: string) => f.endsWith('.jsonl'));
-      for (const file of chatFiles) {
-        const filePath = path.join(chatsDir, file);
-        let stat: fs.Stats;
-        try { stat = fs.statSync(filePath); } catch { continue; }
-
-        // Invocation window guard — skip files older than MAX_SESSION_AGE_MINUTES
-        // before the invocation start (prevents stale session misattribution).
-        if (!Number.isNaN(invokeTime)) {
-          const cutoff = invokeTime - (MAX_SESSION_AGE_MINUTES * 60000);
-          if (stat.mtimeMs < cutoff) {
-            continue;
-          }
-        }
-
-        if (stat.mtimeMs > bestMtime) {
-          bestMtime = stat.mtimeMs;
-          bestSessionId = file.replace(/\.jsonl$/, '');
-        }
-      }
-    }
-
-    return bestSessionId;
+    return newestQwenSession(projectDirectories(projectsDir), invokeTime)?.id ?? null;
   } catch {
     return null;
   }
+}
+
+function projectDirectories(projectsDir: string): string[] {
+  return fs.readdirSync(projectsDir).map((directory) => path.join(projectsDir, directory)).filter((directory) => {
+    try { return fs.statSync(directory).isDirectory(); } catch { return false; }
+  });
+}
+
+function newestQwenSession(projectDirs: string[], invocationTime: number): { id: string; mtime: number } | null {
+  let newest: { id: string; mtime: number } | null = null;
+  for (const projectDir of projectDirs) {
+    const candidate = newestSessionInChatDir(path.join(projectDir, 'chats'), invocationTime);
+    if (candidate && (!newest || candidate.mtime > newest.mtime)) { newest = candidate; }
+  }
+  return newest;
+}
+
+function newestSessionInChatDir(chatsDir: string, invocationTime: number): { id: string; mtime: number } | null {
+  if (!fs.existsSync(chatsDir)) { return null; }
+  const cutoff = Number.isNaN(invocationTime) ? null : invocationTime - (MAX_SESSION_AGE_MINUTES * 60000);
+  let newest: { id: string; mtime: number } | null = null;
+  for (const file of fs.readdirSync(chatsDir).filter((entry) => entry.endsWith('.jsonl'))) {
+    try {
+      const mtime = fs.statSync(path.join(chatsDir, file)).mtimeMs;
+      if ((cutoff === null || mtime >= cutoff) && (!newest || mtime > newest.mtime)) {
+        newest = { id: file.replace(/\.jsonl$/, ''), mtime };
+      }
+    } catch { /* a concurrent cleanup can remove a chat file */ }
+  }
+  return newest;
 }
 
 function resolveQwenCommand() {

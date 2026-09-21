@@ -112,6 +112,53 @@ export function shouldLaunchDefaultUi({
   return terminalIsInteractive && !environment.CI && environment.PARALLIX_NO_TUI !== '1';
 }
 
+async function launchDefaultUi(commandFns: MainOptions['commandFns']) {
+  const command = commandFns && Object.prototype.hasOwnProperty.call(commandFns, 'ui')
+    ? commandFns.ui
+    : undefined;
+  if (typeof command !== 'function') {
+    throw new Error('CLI command registry is not configured');
+  }
+  await command([], { command: 'ui' });
+}
+
+async function runKnownCommand(command: string, commandFn: Command | undefined, args: string[], options: {
+  cwdFn: () => string;
+  ensureStandaloneGitRepoFn: NonNullable<MainOptions['ensureStandaloneGitRepoFn']>;
+  errorFn: NonNullable<MainOptions['errorFn']>;
+  logFn: NonNullable<MainOptions['logFn']>;
+  exitFn: NonNullable<MainOptions['exitFn']>;
+}) {
+  const { cwdFn, ensureStandaloneGitRepoFn, errorFn, logFn, exitFn } = options;
+  if (!READ_ONLY_COMMANDS.has(command)) {
+    const initResult = ensureStandaloneGitRepoFn(cwdFn());
+    if (initResult && initResult.failed) {
+      errorFn(fmt.status('FAIL', `Git init: ${initResult.message}`));
+      exitFn(1);
+      return;
+    }
+    if (initResult && initResult.initialized) {
+      logFn(fmt.status('INFO', `Initialized git repository for standalone parallix in ${cwdFn()} (branch ${initResult.branch || 'main'}).`));
+    }
+  }
+  if (typeof commandFn === 'function') {
+    await commandFn(args.slice(1), { command });
+    return;
+  }
+  errorFn(fmt.status('FAIL', `Command module '${command}' does not export a function.`));
+  exitFn(1);
+}
+
+function reportUnknownCommand(command: string, printUsageFn: NonNullable<MainOptions['printUsageFn']>, errorFn: NonNullable<MainOptions['errorFn']>, exitFn: NonNullable<MainOptions['exitFn']>) {
+  errorFn(fmt.status('FAIL', `Unknown command: ${command}`));
+  const suggestion = suggestCommand(command);
+  if (suggestion) {
+    errorFn(fmt.status('INFO', `Did you mean: px ${suggestion}${buildSuggestionSuffix(suggestion)}`));
+  }
+  printUsageFn();
+  exitFn(1);
+}
+
 async function main(args = process.argv.slice(2), options: MainOptions = {}) {
   const {
     cwdFn = () => process.cwd(),
@@ -135,13 +182,7 @@ async function main(args = process.argv.slice(2), options: MainOptions = {}) {
   }
 
   if (!command && shouldLaunchDefaultUi({ isInteractiveTTY: isInteractiveTTYFn(), environment })) {
-    const injectedUiCommand = options.commandFns && Object.prototype.hasOwnProperty.call(options.commandFns, 'ui')
-      ? options.commandFns.ui
-      : undefined;
-    if (typeof injectedUiCommand !== 'function') {
-      throw new Error('CLI command registry is not configured');
-    }
-    await injectedUiCommand([], { command: 'ui' });
+    await launchDefaultUi(options.commandFns);
     return;
   }
 
@@ -164,24 +205,7 @@ async function main(args = process.argv.slice(2), options: MainOptions = {}) {
     : undefined;
 
   if (commandFn) {
-    if (!READ_ONLY_COMMANDS.has(command)) {
-      const initResult = ensureStandaloneGitRepoFn(cwdFn());
-      if (initResult && initResult.failed) {
-        errorFn(fmt.status('FAIL', `Git init: ${initResult.message}`));
-        exitFn(1);
-        return;
-      }
-      if (initResult && initResult.initialized) {
-        logFn(fmt.status('INFO', `Initialized git repository for standalone parallix in ${cwdFn()} (branch ${initResult.branch || 'main'}).`));
-      }
-    }
-
-    if (typeof commandFn === 'function') {
-      await commandFn(args.slice(1), { command });
-    } else {
-      errorFn(fmt.status('FAIL', `Command module '${command}' does not export a function.`));
-      exitFn(1);
-    }
+    await runKnownCommand(command, commandFn, args, { cwdFn, ensureStandaloneGitRepoFn, errorFn, logFn, exitFn });
   } else {
     const aliases = loadAliasesFn({ rootDir: cwdFn() });
     const canonical = resolveAlias(command, aliases);
@@ -191,13 +215,7 @@ async function main(args = process.argv.slice(2), options: MainOptions = {}) {
       return;
     }
 
-    errorFn(fmt.status('FAIL', `Unknown command: ${command}`));
-    const suggestion = suggestCommand(command);
-    if (suggestion) {
-      errorFn(fmt.status('INFO', `Did you mean: px ${suggestion}${buildSuggestionSuffix(suggestion)}`));
-    }
-    printUsageFn();
-    exitFn(1);
+    reportUnknownCommand(command, printUsageFn, errorFn, exitFn);
   }
 }
 

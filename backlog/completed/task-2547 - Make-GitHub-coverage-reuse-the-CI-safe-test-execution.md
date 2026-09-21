@@ -1,10 +1,10 @@
 ---
 id: TASK-2547
 title: Make GitHub coverage reuse the CI-safe test execution
-status: backlog
-assignee: []
+status: done
+assignee: [custom]
 created_date: '2026-09-21 06:14'
-labels: []
+labels: [ai_sdlc]
 dependencies: []
 ordinal: 87008
 ---

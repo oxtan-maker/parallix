@@ -1,5 +1,6 @@
 import * as fs from 'fs';
 import * as http from 'http';
+import * as os from 'os';
 import * as path from 'path';
 import { spawnSync } from 'child_process';
 import { getPrimaryWorktree } from '../filesystem/mission-utils.js';
@@ -9,6 +10,7 @@ const DISPOSITION_PATTERN = /Autonomous review disposition:\s*(CHANGES_MADE|PUSH
 const DEFAULT_FORGEJO_USER = 'human';
 const HTTP_REQUEST_TIMEOUT = 5000;
 const derivedRepoCache = new Map();
+let testForgejoHome: string | undefined;
 
 /** @param {string} rootDir @param {string} remoteName @returns {string} */
 function cacheKey(rootDir: string, remoteName: string): string { return `${rootDir}::${remoteName}`; }
@@ -41,7 +43,10 @@ function listGitWorktrees(rootDir: string = process.cwd()): string[] {
 function resolveForgejoHome(rootDir: string = process.cwd()) {
   if (process.env.FORGEJO_HOME) { return process.env.FORGEJO_HOME; }
   const directLocal = path.join(rootDir, '.forgejo-local');
-  if (process.env.NODE_TEST_CONTEXT) { return '/tmp/forgejo-test-home-missing'; }
+  if (process.env.NODE_TEST_CONTEXT) {
+    testForgejoHome ||= path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'forgejo-test-home-')), 'missing');
+    return testForgejoHome;
+  }
   if (fs.existsSync(directLocal)) { return directLocal; }
   const candidates: string[] = [directLocal];
   const seen = new Set<string>([directLocal]);

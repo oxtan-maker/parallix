@@ -282,6 +282,10 @@ export class ConcreteMetricsReadAdapter implements MetricsReadAdapter {
       }
     }
 
+    return { outcomes: this.outcomesFromLifecycle(outcomeMap, lifecycles, repositoryId), rejected };
+  }
+
+  private outcomesFromLifecycle(outcomeMap: Map<string, any>, lifecycles: any, repositoryId: RepositoryId): MissionOutcome[] {
     const outcomes: MissionOutcome[] = [];
     // Lifecycle is the delivery authority. A mission that reaches `done`
     // counts even when no agent emitted telemetry; telemetry cannot complete a
@@ -337,7 +341,7 @@ export class ConcreteMetricsReadAdapter implements MetricsReadAdapter {
           runs,
         });
     }
-    return { outcomes, rejected };
+    return outcomes;
   }
 
   // -----------------------------------------------------------------------

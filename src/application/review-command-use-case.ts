@@ -24,6 +24,9 @@ const PUBLISHED_PHASES: Readonly<Record<string, CurrentWorkPhase>> = {
   // review loop, different phase — which is why the board needs it named.
   consumeArtifacts: 'review-response',
 };
+const REVIEW_FLAG_OPERATIONS: ReadonlyArray<readonly [string, keyof Omit<ReviewWorkflowPort, 'preflight'>]> = [
+  ['--status', 'status'], ['--verify', 'verify'], ['--submit', 'submit'], ['--consume-artifacts', 'consumeArtifacts'], ['--push', 'push'], ['--comments', 'readComments'], ['--comment', 'comment'], ['--comment-file', 'comment'], ['--submit-review', 'submitReview'], ['--close', 'close'], ['--create-event', 'createEvent'], ['--import-legacy', 'importLegacy'], ['--backfill-review', 'backfillReview'], ['--reconcile-review', 'reconcileReview'], ['--start', 'start'], ['--continue', 'continue'], ['--resume', 'resume'],
+];
 
 /** CLI-independent policy for choosing a review lifecycle operation. */
 export class ReviewCommandUseCase {
@@ -40,23 +43,8 @@ export class ReviewCommandUseCase {
 
   private async dispatch(context: ReviewWorkflowContext): Promise<void> {
     const flags = new Set(context.args.filter(arg => arg.startsWith('--')).map(arg => arg.split('=', 1)[0]));
-    if (flags.has('--status')) { return this.run(context, 'status'); }
-    if (flags.has('--verify')) { return this.run(context, 'verify'); }
-    if (flags.has('--submit')) { return this.run(context, 'submit'); }
-    if (flags.has('--consume-artifacts')) { return this.run(context, 'consumeArtifacts'); }
-    if (flags.has('--push')) { return this.run(context, 'push'); }
-    if (flags.has('--comments')) { return this.run(context, 'readComments'); }
-    if (flags.has('--comment') || flags.has('--comment-file')) { return this.run(context, 'comment'); }
-    if (flags.has('--submit-review')) { return this.run(context, 'submitReview'); }
-    if (flags.has('--close')) { return this.run(context, 'close'); }
-    if (flags.has('--create-event')) { return this.run(context, 'createEvent'); }
-    if (flags.has('--import-legacy')) { return this.run(context, 'importLegacy'); }
-    if (flags.has('--backfill-review')) { return this.run(context, 'backfillReview'); }
-    if (flags.has('--reconcile-review')) { return this.run(context, 'reconcileReview'); }
-    if (flags.has('--start')) { return this.run(context, 'start'); }
-    if (flags.has('--continue')) { return this.run(context, 'continue'); }
-    if (flags.has('--resume')) { return this.run(context, 'resume'); }
-    return this.run(context, 'status');
+    const operation = REVIEW_FLAG_OPERATIONS.find(([flag]) => flags.has(flag))?.[1] || 'status';
+    return this.run(context, operation);
   }
 
   /**
@@ -78,7 +66,7 @@ export class ReviewCommandUseCase {
     operation: keyof Omit<ReviewWorkflowPort, 'preflight'>,
   ): Promise<void> {
     const phase = PUBLISHED_PHASES[operation];
-    if (!phase) { return void await this._workflow[operation](context); }
+    if (!phase) { await this._workflow[operation](context); return; }
 
     const publication = {
       missionId: missionId(context.slug),
@@ -109,7 +97,5 @@ export class ReviewCommandUseCase {
 async function bestEffort(publish: () => Promise<void>): Promise<void> {
   try {
     await publish();
-  } catch (error) {
-    void error;
-  }
+  } catch {}
 }

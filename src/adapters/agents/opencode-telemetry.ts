@@ -29,95 +29,36 @@ function num(value: any) {
  */
 function findTokenUsage(obj: {[key: string]: any}): {input_tokens?: number, output_tokens?: number, cached_input_tokens?: number, total_tokens?: number} | null {
   if (!obj || typeof obj !== 'object') {return null;}
+  return directTokenUsage(obj) || directTokenUsage(obj.total_token_usage) || directTokenUsage(obj.token_usage)
+    || directTokenUsage(obj.usage) || metadataTokenUsage(obj) || infoTokenUsage(obj) || arrayTokenUsage(obj);
+}
 
-  // Direct token usage fields at top level
-  if ('input_tokens' in obj || 'output_tokens' in obj) {
-    return {
-      input_tokens: /** @type {number} */(obj.input_tokens),
-      output_tokens: /** @type {number} */(obj.output_tokens),
-      cached_input_tokens: /** @type {number} */(obj.cached_input_tokens || obj.cached_tokens || 0),
-      total_tokens: /** @type {number} */(obj.total_tokens || 0),
-    };
-  }
+function directTokenUsage(value: any) {
+  if (!value || typeof value !== 'object' || (!('input_tokens' in value) && !('output_tokens' in value))) { return null; }
+  return { input_tokens: value.input_tokens || 0, output_tokens: value.output_tokens || 0, cached_input_tokens: value.cached_input_tokens || value.cached_tokens || 0, total_tokens: value.total_tokens || 0 };
+}
 
-  // Nested under total_token_usage (Codex-compatible shape)
-  if (obj.total_token_usage && typeof obj.total_token_usage === 'object') {
-    return {
-      input_tokens: /** @type {number} */(obj.total_token_usage.input_tokens || 0),
-      output_tokens: /** @type {number} */(obj.total_token_usage.output_tokens || 0),
-      cached_input_tokens: /** @type {number} */(obj.total_token_usage.cached_input_tokens || obj.total_token_usage.cached_tokens || 0),
-      total_tokens: /** @type {number} */(obj.total_token_usage.total_tokens || 0),
-    };
-  }
+function metadataTokenUsage(obj: {[key: string]: any}) {
+  const metadata = obj.meta || obj.metadata;
+  return directTokenUsage(metadata) || directTokenUsage(metadata?.total_token_usage);
+}
 
-  // Nested under token_usage
-  if (obj.token_usage && typeof obj.token_usage === 'object') {
-    return {
-      input_tokens: /** @type {number} */(obj.token_usage.input_tokens || 0),
-      output_tokens: /** @type {number} */(obj.token_usage.output_tokens || 0),
-      cached_input_tokens: /** @type {number} */(obj.token_usage.cached_input_tokens || obj.token_usage.cached_tokens || 0),
-      total_tokens: /** @type {number} */(obj.token_usage.total_tokens || 0),
-    };
-  }
+function infoTokenUsage(obj: {[key: string]: any}) {
+  const tokens = obj.info?.tokens;
+  if (!tokens || typeof tokens !== 'object' || (!('input' in tokens) && !('output' in tokens))) { return null; }
+  return { input_tokens: tokens.input || 0, output_tokens: tokens.output || 0, cached_input_tokens: tokens.cache?.read || 0, total_tokens: tokens.input + tokens.output || 0 };
+}
 
-  // Nested under usage
-  if (obj.usage && typeof obj.usage === 'object') {
-    return {
-      input_tokens: /** @type {number} */(obj.usage.input_tokens || 0),
-      output_tokens: /** @type {number} */(obj.usage.output_tokens || 0),
-      cached_input_tokens: /** @type {number} */(obj.usage.cached_input_tokens || obj.usage.cached_tokens || 0),
-      total_tokens: /** @type {number} */(obj.usage.total_tokens || 0),
-    };
-  }
-
-  // Nested under meta or metadata
-  const metaOrMeta = obj.meta || obj.metadata;
-  if (metaOrMeta && typeof metaOrMeta === 'object') {
-    if ('input_tokens' in metaOrMeta || 'output_tokens' in metaOrMeta) {
-      return {
-        input_tokens: /** @type {number} */(metaOrMeta.input_tokens || 0),
-        output_tokens: /** @type {number} */(metaOrMeta.output_tokens || 0),
-        cached_input_tokens: /** @type {number} */(metaOrMeta.cached_input_tokens || metaOrMeta.cached_tokens || 0),
-        total_tokens: /** @type {number} */(metaOrMeta.total_tokens || 0),
-      };
-    }
-    if (metaOrMeta.total_token_usage && typeof metaOrMeta.total_token_usage === 'object') {
-      return {
-        input_tokens: /** @type {number} */(metaOrMeta.total_token_usage.input_tokens || 0),
-        output_tokens: /** @type {number} */(metaOrMeta.total_token_usage.output_tokens || 0),
-        cached_input_tokens: /** @type {number} */(metaOrMeta.total_token_usage.cached_input_tokens || metaOrMeta.total_token_usage.cached_tokens || 0),
-        total_tokens: /** @type {number} */(metaOrMeta.total_token_usage.total_tokens || 0),
-      };
-    }
-  }
-
-  // Nested under info (opencode v2.x export format)
-  // Shape: { info: { tokens: { input, output, cache: { read, write }, reasoning } } }
-  if (obj.info && typeof obj.info === 'object' && obj.info.tokens && typeof obj.info.tokens === 'object') {
-    const t = obj.info.tokens;
-    if ('input' in t || 'output' in t) {
-      return {
-        input_tokens: /** @type {number} */(t.input || 0),
-        output_tokens: /** @type {number} */(t.output || 0),
-        cached_input_tokens: (t.cache && typeof t.cache === 'object') ? /** @type {number} */(t.cache.read || 0) : 0,
-        total_tokens: /** @type {number} */(t.input + t.output || 0),
-      };
-    }
-  }
-
-  // Search recursively through array elements (e.g., events array)
-  for (const key of Object.keys(obj)) {
-    const val = obj[key];
-    if (Array.isArray(val)) {
-      for (const item of val) {
-        if (item && typeof item === 'object') {
-          const found = findTokenUsage(/** @type {{[key: string]: any}} */(item));
-          if (found) {return found;}
-        }
+function arrayTokenUsage(obj: {[key: string]: any}) {
+  for (const value of Object.values(obj)) {
+    if (!Array.isArray(value)) { continue; }
+    for (const item of value) {
+      if (item && typeof item === 'object') {
+        const found = findTokenUsage(item);
+        if (found) { return found; }
       }
     }
   }
-
   return null;
 }
 
@@ -127,31 +68,7 @@ function findTokenUsage(obj: {[key: string]: any}): {input_tokens?: number, outp
  */
 function extractSessionId(parsed: {[key: string]: any}) {
   if (!parsed || typeof parsed !== 'object') {return null;}
-
-  // Direct session_id
-  if (parsed.session_id) {return String(parsed.session_id);}
-  if (parsed.sessionId) {return String(parsed.sessionId);}
-
-  // Nested under info (opencode v2.x export format)
-  if (parsed.info && typeof parsed.info === 'object') {
-    if (parsed.info.id) {return String(parsed.info.id);}
-  }
-
-  // Nested in metadata/meta/session
-  if (parsed.metadata && typeof parsed.metadata === 'object') {
-    if (parsed.metadata.session_id) {return String(parsed.metadata.session_id);}
-    if (parsed.metadata.sessionId) {return String(parsed.metadata.sessionId);}
-  }
-  if (parsed.meta && typeof parsed.meta === 'object') {
-    if (parsed.meta.session_id) {return String(parsed.meta.session_id);}
-    if (parsed.meta.sessionId) {return String(parsed.meta.sessionId);}
-  }
-  if (parsed.session && typeof parsed.session === 'object') {
-    if (parsed.session.id) {return String(parsed.session.id);}
-    if (parsed.session.session_id) {return String(parsed.session.session_id);}
-  }
-
-  return null;
+  return firstString(parsed.session_id, parsed.sessionId, parsed.info?.id, parsed.metadata?.session_id, parsed.metadata?.sessionId, parsed.meta?.session_id, parsed.meta?.sessionId, parsed.session?.id, parsed.session?.session_id);
 }
 
 /**
@@ -160,30 +77,12 @@ function extractSessionId(parsed: {[key: string]: any}) {
  */
 function extractModelName(parsed: {[key: string]: any}) {
   if (!parsed || typeof parsed !== 'object') {return null;}
+  return firstString(parsed.model, parsed.model_name, parsed.info?.model?.id, parsed.info?.model?.name, parsed.metadata?.model, parsed.metadata?.model_name, parsed.meta?.model, parsed.session?.model);
+}
 
-  // Direct model fields
-  if (parsed.model) {return String(parsed.model);}
-  if (parsed.model_name) {return String(parsed.model_name);}
-
-  // Nested under info.model (opencode v2.x format)
-  if (parsed.info && typeof parsed.info === 'object' && parsed.info.model && typeof parsed.info.model === 'object') {
-    if (parsed.info.model.id) {return String(parsed.info.model.id);}
-    if (parsed.info.model.name) {return String(parsed.info.model.name);}
-  }
-
-  // Nested in metadata/meta/session
-  if (parsed.metadata && typeof parsed.metadata === 'object') {
-    if (parsed.metadata.model) {return String(parsed.metadata.model);}
-    if (parsed.metadata.model_name) {return String(parsed.metadata.model_name);}
-  }
-  if (parsed.meta && typeof parsed.meta === 'object') {
-    if (parsed.meta.model) {return String(parsed.meta.model);}
-  }
-  if (parsed.session && typeof parsed.session === 'object') {
-    if (parsed.session.model) {return String(parsed.session.model);}
-  }
-
-  return null;
+function firstString(...values: any[]): string | null {
+  const value = values.find(Boolean);
+  return value ? String(value) : null;
 }
 
 /**
@@ -192,48 +91,20 @@ function extractModelName(parsed: {[key: string]: any}) {
  */
 function countToolCalls(parsed: {[key: string]: any}) {
   if (!parsed || typeof parsed !== 'object') {return 0;}
+  return numeric(parsed.tool_calls) + numeric(parsed.toolCalls) + numeric(parsed.usage?.tool_calls)
+    + messageToolCalls(parsed.messages) + eventToolCalls(parsed.events) + (Array.isArray(parsed.tool_use_events) ? parsed.tool_use_events.length : 0);
+}
 
-  let count = 0;
+function numeric(value: any): number { return typeof value === 'number' ? value : 0; }
 
-  // Direct tool_calls field
-  if (typeof parsed.tool_calls === 'number') {count += parsed.tool_calls;}
-  if (typeof parsed.toolCalls === 'number') {count += parsed.toolCalls;}
-  if (typeof parsed.usage?.tool_calls === 'number') {count += parsed.usage.tool_calls;}
+function messageToolCalls(messages: any): number {
+  if (!Array.isArray(messages)) { return 0; }
+  return messages.reduce((count, message) => count + (Array.isArray(message?.parts) ? message.parts.filter((part: any) => part?.type === 'tool').length : 0), 0);
+}
 
-  // Real opencode v2.x export schema: tool calls live in
-  // messages[].parts[] where part.type === 'tool'.
-  if (Array.isArray(parsed.messages)) {
-    for (const msg of parsed.messages) {
-      if (msg && typeof msg === 'object' && Array.isArray(msg.parts)) {
-        for (const part of msg.parts) {
-          if (part && typeof part === 'object' && part.type === 'tool') {count += 1;}
-        }
-      }
-    }
-  }
-
-  // Nested arrays of tool calls
-  if (Array.isArray(parsed.events)) {
-    for (const evt of parsed.events) {
-      if (evt && typeof evt === 'object') {
-        if (evt.type === 'tool_use') {count += 1;}
-        if (evt.type === 'tool_call') {count += 1;}
-        if (evt.type === 'function_call') {count += 1;}
-        if (Array.isArray(evt.tool_calls)) {count += evt.tool_calls.length;}
-        if (Array.isArray(evt.content_block_start)) {
-          for (const cb of evt.content_block_start) {
-            if (cb && cb.type === 'tool_use') {count += 1;}
-          }
-        }
-      }
-    }
-  }
-
-  if (Array.isArray(parsed.tool_use_events)) {
-    count += parsed.tool_use_events.length;
-  }
-
-  return count;
+function eventToolCalls(events: any): number {
+  if (!Array.isArray(events)) { return 0; }
+  return events.reduce((count, event) => count + Number(['tool_use', 'tool_call', 'function_call'].includes(event?.type)) + (Array.isArray(event?.tool_calls) ? event.tool_calls.length : 0) + (Array.isArray(event?.content_block_start) ? event.content_block_start.filter((block: any) => block?.type === 'tool_use').length : 0), 0);
 }
 
 /**

@@ -67,6 +67,13 @@ export function getConflictFiles(rootDir: string, branch: string, options: { git
   return conflictFiles;
 }
 
+function isNoiseCommit(files: string[], message: string): boolean {
+  if (files.length === 0) { return false; }
+  const noiseFiles = files.every(file => file.startsWith('backlog/') || file.endsWith('agents.local.json'));
+  const noiseMessage = /^(Create task|Update task|backlog|assign|fixes|backlig|housekeeping|Archive task|fixing tasks|new mission|added new backlog task|docs: move|mission changes|random changes|new\/updated mission|task updates)/i.test(message);
+  return noiseFiles && noiseMessage;
+}
+
 /** @param {string} rootDir @param {Function} [gitRunner] */
 export function findLastNonNoiseCommit(rootDir: string, gitRunner?: Function): string | null {
   const runner = gitRunner || gitModule.git;
@@ -98,23 +105,7 @@ export function findLastNonNoiseCommit(rootDir: string, gitRunner?: Function): s
     if (diffResult.status !== 0) {return null;}
 
     const files = diffResult.stdout.trim().split('\n').filter(Boolean);
-    if (files.length > 0) {
-      let isNoiseFiles = true;
-      for (const file of files) {
-        if (!file.startsWith('backlog/') && !file.endsWith('agents.local.json')) {
-          isNoiseFiles = false;
-          break;
-        }
-      }
-
-      const isNoiseMsg = /^(Create task|Update task|backlog|assign|fixes|backlig|housekeeping|Archive task|fixing tasks|new mission|added new backlog task|docs: move|mission changes|random changes|new\/updated mission|task updates)/i.test(msg);
-
-      if (!isNoiseFiles || !isNoiseMsg) {
-        return commit;
-      }
-    } else {
-      return commit;
-    }
+    if (!isNoiseCommit(files, msg)) { return commit; }
     commit = `${commit}^`;
   }
   return null;

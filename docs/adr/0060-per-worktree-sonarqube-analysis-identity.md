@@ -107,6 +107,13 @@ Two concurrent mission scans therefore remain isolated without inventing separat
 
 The analysis identity is the Git branch already owned by the repository. Parallix must not create another derived identity layer merely for Sonar.
 
+Mission branches are long-lived Cloud branches. This is required for the
+repository gate to inspect the candidate's total code, rather than only its
+new-code diff. The gate fails closed when a mission analysis is not long-lived,
+when the Cloud quality gate permits a new issue, or when the candidate retains
+a High or Blocker impact. It does not use the current state of `main` as a
+substitute for the candidate's result.
+
 The previous mechanisms for:
 
 * sanitizing branch names into project keys;

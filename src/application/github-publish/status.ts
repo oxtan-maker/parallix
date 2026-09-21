@@ -40,42 +40,33 @@ export function computeGithubPublishStatus(
 
   let blocked = false;
   for (const commit of ahead) {
-    if (commit.state === 'external verification failed') {
-      failed.push(commit);
-      blocked = true;
-      continue;
-    }
-    if (blocked) {
-      // Everything after a failure is blocked regardless of its own state.
-      if (commit.state === 'externally verified') {
-        verifiedBlocked.push(commit);
-      } else {
-        awaitingVerification.push(commit);
-      }
-      continue;
-    }
-    if (commit.published) {continue;}
-    if (commit.state === 'externally verified') {
-      verifiedBlocked.push(commit);
-    } else {
-      awaitingVerification.push(commit);
-    }
+    blocked = collectCommitStatus(commit, blocked, awaitingVerification, verifiedBlocked, failed);
   }
 
-  // The contiguous publishable run: verified commits from the first unpublished
-  // one, stopping at the first non-verified.
-  const publishableRun: string[] = [];
-  let seenUnpublished = false;
-  for (const commit of ahead) {
-    if (commit.published) {continue;}
-    seenUnpublished = true;
-    if (commit.state === 'externally verified') {
-      publishableRun.push(commit.sha);
-    } else {
-      break;
-    }
-  }
-  if (!seenUnpublished) {publishableRun.length = 0;}
+  return { localHead, publishedHead, awaitingVerification, verifiedBlocked, failed, publishableRun: collectPublishableRun(ahead) };
+}
 
-  return { localHead, publishedHead, awaitingVerification, verifiedBlocked, failed, publishableRun };
+function collectCommitStatus(
+  commit: CommitTracking,
+  blocked: boolean,
+  awaitingVerification: CommitTracking[],
+  verifiedBlocked: CommitTracking[],
+  failed: CommitTracking[],
+): boolean {
+  if (commit.state === 'external verification failed') { failed.push(commit); return true; }
+  if (blocked) {
+    if (commit.state === 'externally verified') { verifiedBlocked.push(commit); }
+    else { awaitingVerification.push(commit); }
+    return true;
+  }
+  if (commit.published) { return false; }
+  if (commit.state === 'externally verified') { verifiedBlocked.push(commit); return false; }
+  awaitingVerification.push(commit);
+  return false;
+}
+
+function collectPublishableRun(ahead: CommitTracking[]): string[] {
+  const unpublished = ahead.filter((commit) => !commit.published);
+  const firstUnverified = unpublished.findIndex((commit) => commit.state !== 'externally verified');
+  return unpublished.slice(0, firstUnverified < 0 ? undefined : firstUnverified).map((commit) => commit.sha);
 }

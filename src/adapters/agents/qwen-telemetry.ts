@@ -102,42 +102,31 @@ function collectTokenUsageRecords(
   const usageDir = path.join(qwenHome, 'usage');
   if (!fs.existsSync(usageDir)) {return [];}
 
-  const records: Array<{ record: ReturnType<typeof parseTokenUsageLine>; timestamp: string }> = [];
-
   try {
     const files = fs.readdirSync(usageDir)
       .filter((f: string) => f.startsWith('token-usage-') && f.endsWith('.jsonl'))
       .sort(compareCodeUnits);
-
-    for (const file of files) {
-      const content = fs.readFileSync(path.join(usageDir, file), 'utf8');
-      for (const line of content.split('\n')) {
-        const parsed = parseTokenUsageLine(line);
-        if (!parsed || !parsed.timestamp) {continue;}
-
-        // Session ID guard — when the invocation's session is known, only
-        // accept records from that session. This prevents a preceding stage
-        // in the same worktree from leaking its artifacts into the next stage.
-        if (sessionId && parsed.sessionId !== sessionId) {continue;}
-
-        // Telemetry window guard — reject records from a previous invocation
-        // in the same QWEN_HOME. Records predating this invocation belong to
-        // an earlier run. The buffer covers only post-start async writes.
-        const recordTime = Date.parse(parsed.timestamp);
-        if (!Number.isNaN(sinceMs) && !Number.isNaN(recordTime)) {
-          const cutoff = sinceMs - (TELEMETRY_WINDOW_SECONDS * 1000);
-          if (recordTime < cutoff) {continue;}
-        }
-
-        records.push({ record: parsed, timestamp: parsed.timestamp });
-      }
-    }
+    const records = files.flatMap((file) => tokenRecordsFromFile(path.join(usageDir, file), sinceMs, sessionId));
+    records.sort((a, b) => a.timestamp.localeCompare(b.timestamp));
+    return records.map(({ record }) => record);
   } catch {
     // Usage dir unreadable — return empty
+    return [];
   }
+}
 
-  records.sort((a, b) => a.timestamp.localeCompare(b.timestamp));
-  return records.map(r => r.record).filter((r): r is NonNullable<typeof r> => r !== null);
+function tokenRecordsFromFile(filePath: string, sinceMs: number, sessionId: string | null) {
+  const content = fs.readFileSync(filePath, 'utf8');
+  return content.split('\n')
+    .map(parseTokenUsageLine)
+    .filter((record): record is NonNullable<typeof record> => Boolean(record?.timestamp))
+    .filter((record) => (!sessionId || record.sessionId === sessionId) && timestampIsCurrent(record.timestamp, sinceMs))
+    .map((record) => ({ record, timestamp: record.timestamp }));
+}
+
+function timestampIsCurrent(timestamp: string, sinceMs: number): boolean {
+  const recordTime = Date.parse(timestamp);
+  return Number.isNaN(sinceMs) || Number.isNaN(recordTime) || recordTime >= sinceMs - TELEMETRY_WINDOW_SECONDS * 1000;
 }
 
 /**

@@ -135,6 +135,32 @@ export function missionCleanupCommand(slug: string, rootDir: string, gitFn?: Fun
   return `git worktree remove ${worktree} && git branch -D ${missionBranchName(slug, rootDir)}`;
 }
 
+async function resumeActiveBoardHandoff(existing: any, store: MissionStore & MissionTransitionStore & MissionNelRecorder, lifecycle: MissionLifecycleService, slug: string): Promise<void> {
+  if (existing.mission.status !== 'active') { return; }
+  const previous = existing.mission.review;
+  const decision = currentReviewRound(previous).decision;
+  const findings = decision !== null && decision.kind === 'changes-requested' ? decision.findings : [];
+  const resolved = reviewStatus(previous) === 'awaiting-implementation'
+    ? applyImplementerCommand(previous, { type: 'submit-resolution', respondedAt: new Date().toISOString(), resultingRevision: changeRevision(`handoff-${Date.now()}`), resolutions: findings.map((finding) => ({ findingId: finding.id, kind: 'fixed', evidence: 'Resolved in the handed-off revision.' })) })
+    : previous;
+  const reviewerEligibility = ConfiguredReviewerEligibility.fromReviewStep({ eligible: [currentReviewRound(resolved).reviewer], strategy: 'random' });
+  const review = reviewStatus(resolved) === 'ready-for-next-round'
+    ? beginNextReviewRound(resolved, currentReviewRound(resolved).reviewer, existing.mission.assignee ?? agentFamily('codex'), new Date().toISOString(), reviewerEligibility)
+    : resolved;
+  if (review === previous) { throw new Error('Review is not ready to resume.'); }
+  await store.save({ ...existing.mission, review }, existing.version);
+  const transition = await lifecycle.transition({
+    operationId: `handoff-resume-${slug}`,
+    missionId: slug as never,
+    capabilities: new Set(['mission:transition']),
+    command: { type: 'submit-for-review', gatesPassed: true, review, reviewerEligibility },
+    actor: currentReviewRound(review).reviewer,
+    occurredAt: new Date().toISOString(),
+    idempotencyKey: `handoff-resume-${slug}-${review.rounds.length}`,
+  });
+  if (transition.status !== 'completed') { throw new Error(transition.error?.message ?? 'Review resume transition failed.'); }
+}
+
 /** The browser hands off exactly as the CLI does: it supplies identity only. */
 function createBoardHandoffWorkflow(
   store: MissionStore & MissionTransitionStore & MissionNelRecorder,
@@ -158,30 +184,7 @@ function createBoardHandoffWorkflow(
         // Handoff already established the review identity. A later board handoff
         // is a resume signal, not a second submission (which would replay the
         // lane-event key and violate the lifecycle idempotency contract).
-        if (existing.mission.status === 'active') {
-          const previous = existing.mission.review;
-          const decision = currentReviewRound(previous).decision;
-          const findings = decision !== null && decision.kind === 'changes-requested' ? decision.findings : [];
-          const resolved = reviewStatus(previous) === 'awaiting-implementation'
-            ? applyImplementerCommand(previous, { type: 'submit-resolution', respondedAt: new Date().toISOString(), resultingRevision: changeRevision(`handoff-${Date.now()}`), resolutions: findings.map((finding) => ({ findingId: finding.id, kind: 'fixed', evidence: 'Resolved in the handed-off revision.' })) })
-            : previous;
-          const reviewerEligibility = ConfiguredReviewerEligibility.fromReviewStep({ eligible: [currentReviewRound(resolved).reviewer], strategy: 'random' });
-          const review = reviewStatus(resolved) === 'ready-for-next-round'
-            ? beginNextReviewRound(resolved, currentReviewRound(resolved).reviewer, existing.mission.assignee ?? agentFamily('codex'), new Date().toISOString(), reviewerEligibility)
-            : resolved;
-          if (review === previous) { throw new Error('Review is not ready to resume.'); }
-          await store.save({ ...existing.mission, review }, existing.version);
-          const transition = await lifecycle.transition({
-            operationId: `handoff-resume-${slug}`,
-            missionId: slug as never,
-            capabilities: new Set(['mission:transition']),
-            command: { type: 'submit-for-review', gatesPassed: true, review, reviewerEligibility },
-            actor: currentReviewRound(review).reviewer,
-            occurredAt: new Date().toISOString(),
-            idempotencyKey: `handoff-resume-${slug}-${review.rounds.length}`,
-          });
-          if (transition.status !== 'completed') { throw new Error(transition.error?.message ?? 'Review resume transition failed.'); }
-        }
+        await resumeActiveBoardHandoff(existing, store, lifecycle, slug);
         await reviewLoop(slug, {
           isContinue: true,
           maxAttempts: existing.mission.review.rounds.length + 1,

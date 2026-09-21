@@ -136,45 +136,8 @@ function parseTaskFile(file: BugFrequencyTaskFile): ParseOutcome {
     return { abort: `${path}:${idLine + 2} filename id TASK-${fnMatch[1]} != frontmatter id ${idRaw}` };
   }
 
-  const labels: string[] = [];
-  let labelLine: number | null = null;
-  const li = fm.findIndex((line) => /^labels:/.test(line));
-  if (li >= 0) {
-    labelLine = li + 2;
-    const inline = fm[li]!.replace(/^labels:\s*/, '').trim();
-    if (inline.startsWith('[')) {
-      // Inline YAML flow sequence. Require a closing `]` so a bare `labels:
-      // [bug` aborts (fail closed) instead of yielding a truncated label. If a
-      // `]` is present, take the content up to the first one and ignore any
-      // trailing characters: `labels: [ai_sdlc]y` classifies as `ai_sdlc`.
-      const close = inline.indexOf(']');
-      if (close < 0) {
-        return { abort: `${path}:${li + 2} unterminated inline label list "${inline}"` };
-      }
-      for (const part of inline.slice(1, close).split(',')) {
-        const value = stripQuotes(part.trim());
-        if (value) { labels.push(value); }
-      }
-    } else if (inline) {
-      return { abort: `${path}:${li + 2} unparseable labels scalar "${inline}"` };
-    } else {
-      for (let i = li + 1; i < fm.length; i += 1) {
-        const line = fm[i]!;
-        if (LABEL_ITEM_PATTERN.test(line)) {
-          labels.push(stripQuotes(line.replace(LABEL_ITEM_PATTERN, '').trim()));
-        } else if (/^\S/.test(line)) {
-          break;
-        } else if (line.trim() === '') {
-          continue;
-        } else {
-          // Ambiguous label data aborts the record instead of classifying it
-          // (fail closed): return without `copy`, exactly as the scalar-label
-          // branch does, so the partially parsed copy is never indexed.
-          return { abort: `${path}:${i + 2} unparseable label line "${line}"` };
-        }
-      }
-    }
-  }
+  const labelParse = parseLabels(fm, path);
+  if (labelParse.abort) { return labelParse; }
 
   const statusIndex = fm.findIndex((line) => /^status:/.test(line));
   const status = statusIndex >= 0 ? fm[statusIndex]!.replace(/^status:\s*/, '').trim() : null;
@@ -183,13 +146,39 @@ function parseTaskFile(file: BugFrequencyTaskFile): ParseOutcome {
     id: idRaw,
     path,
     idLine: idLine + 2,
-    labels,
-    labelLine,
+    labels: labelParse.labels,
+    labelLine: labelParse.labelLine,
     status,
     statusLine: statusIndex + 2,
     store: file.store,
   };
   return { copy };
+}
+
+function parseLabels(frontmatter: string[], path: string): { labels: string[]; labelLine: number | null; abort?: string } {
+  const index = frontmatter.findIndex((line) => /^labels:/.test(line));
+  if (index < 0) { return { labels: [], labelLine: null }; }
+  const inline = frontmatter[index]!.replace(/^labels:\s*/, '').trim();
+  if (inline.startsWith('[')) { return parseInlineLabels(inline, path, index); }
+  if (inline) { return { labels: [], labelLine: index + 2, abort: `${path}:${index + 2} unparseable labels scalar "${inline}"` }; }
+  return parseBlockLabels(frontmatter, path, index);
+}
+
+function parseInlineLabels(inline: string, path: string, index: number) {
+  const close = inline.indexOf(']');
+  if (close < 0) { return { labels: [], labelLine: index + 2, abort: `${path}:${index + 2} unterminated inline label list "${inline}"` }; }
+  return { labels: inline.slice(1, close).split(',').map((part) => stripQuotes(part.trim())).filter(Boolean), labelLine: index + 2 };
+}
+
+function parseBlockLabels(frontmatter: string[], path: string, index: number) {
+  const labels: string[] = [];
+  for (let i = index + 1; i < frontmatter.length; i += 1) {
+    const line = frontmatter[i]!;
+    if (LABEL_ITEM_PATTERN.test(line)) { labels.push(stripQuotes(line.replace(LABEL_ITEM_PATTERN, '').trim())); }
+    else if (/^\S/.test(line)) { break; }
+    else if (line.trim() !== '') { return { labels, labelLine: index + 2, abort: `${path}:${i + 2} unparseable label line "${line}"` }; }
+  }
+  return { labels, labelLine: index + 2 };
 }
 
 /**
@@ -204,49 +193,8 @@ function parseTaskFile(file: BugFrequencyTaskFile): ParseOutcome {
 export function measureBugFrequency(input: BugFrequencyInput): BugFrequencyMeasurement {
   const warnings: string[] = [];
   const aborts: string[] = [];
-  const byId = new Map<string, ParsedCopy[]>();
-
-  for (const file of input.files) {
-    const outcome = parseTaskFile(file);
-    if (outcome.warning !== undefined) { warnings.push(outcome.warning); }
-    if (outcome.abort !== undefined) { aborts.push(outcome.abort); }
-    if (outcome.copy === undefined) { continue; }
-    // A label-line abort now returns without `copy` (fail closed), so only
-    // id-level ambiguity excludes a record here.
-    const copies = byId.get(outcome.copy.id) ?? [];
-    copies.push(outcome.copy);
-    byId.set(outcome.copy.id, copies);
-  }
-
-  const rows: BugFrequencyRow[] = [];
-  for (const id of input.cohortIds) {
-    const copies = byId.get(id) ?? [];
-    if (copies.length === 0) {
-      aborts.push(`${id}: no task record found in any store`);
-      continue;
-    }
-    const union = new Set<string>();
-    for (const copy of copies) {
-      for (const label of copy.labels) { union.add(label); }
-    }
-    const completedCopies = copies.filter((copy) => copy.store === 'completed');
-    if (completedCopies.length === 0) {
-      aborts.push(`${id}: no completed-store copy at report time`);
-    }
-    const evidence = completedCopies[0] ?? null;
-    rows.push({
-      id,
-      copies: copies.length,
-      copyPaths: copies.map((copy) => `${copy.path}:${copy.idLine}`),
-      labelUnion: [...union].sort(compareCodeUnits),
-      labelEvidence: evidence === null || evidence.labelLine === null
-        ? null
-        : `${evidence.path}:${evidence.labelLine}`,
-      statusEvidence: evidence === null ? null : `${evidence.path}:${evidence.statusLine}`,
-      status: evidence?.status ?? null,
-      bug: union.has('bug'),
-    });
-  }
+  const byId = indexTaskCopies(input.files, warnings, aborts);
+  const rows = input.cohortIds.flatMap((id) => makeBugFrequencyRow(id, byId, aborts));
 
   const bugRows = rows.filter((row) => row.bug);
   const nonBugRows = rows.filter((row) => !row.bug);
@@ -262,4 +210,24 @@ export function measureBugFrequency(input: BugFrequencyInput): BugFrequencyMeasu
     aborts,
     rows,
   };
+}
+
+function indexTaskCopies(files: readonly BugFrequencyTaskFile[], warnings: string[], aborts: string[]): Map<string, ParsedCopy[]> {
+  const byId = new Map<string, ParsedCopy[]>();
+  for (const file of files) {
+    const outcome = parseTaskFile(file);
+    if (outcome.warning !== undefined) { warnings.push(outcome.warning); }
+    if (outcome.abort !== undefined) { aborts.push(outcome.abort); }
+    if (outcome.copy !== undefined) { byId.set(outcome.copy.id, [...(byId.get(outcome.copy.id) ?? []), outcome.copy]); }
+  }
+  return byId;
+}
+
+function makeBugFrequencyRow(id: string, byId: Map<string, ParsedCopy[]>, aborts: string[]): BugFrequencyRow[] {
+  const copies = byId.get(id) ?? [];
+  if (copies.length === 0) { aborts.push(`${id}: no task record found in any store`); return []; }
+  const labels = new Set(copies.flatMap((copy) => copy.labels));
+  const evidence = copies.find((copy) => copy.store === 'completed') ?? null;
+  if (!evidence) { aborts.push(`${id}: no completed-store copy at report time`); }
+  return [{ id, copies: copies.length, copyPaths: copies.map((copy) => `${copy.path}:${copy.idLine}`), labelUnion: [...labels].sort(compareCodeUnits), labelEvidence: evidence?.labelLine === null || !evidence ? null : `${evidence.path}:${evidence.labelLine}`, statusEvidence: evidence ? `${evidence.path}:${evidence.statusLine}` : null, status: evidence?.status ?? null, bug: labels.has('bug') }];
 }

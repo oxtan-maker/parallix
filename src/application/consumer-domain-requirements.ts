@@ -148,7 +148,7 @@ export const CONSUMER_DOMAIN_REQUIREMENTS: readonly ConsumerRequirement[] = [
     id: 'launch-session-resume',
     family: 'launch',
     fileLocation: 'src/adapters/agents/agents.ts',
-    line: 488,
+    line: 549,
     anchor: 'await launchSessionMarkerPort.shouldResume(',
     reads: ['SessionMarker', 'Mission'],
     requirement:
@@ -159,8 +159,8 @@ export const CONSUMER_DOMAIN_REQUIREMENTS: readonly ConsumerRequirement[] = [
     id: 'launch-session-marker-write',
     family: 'launch',
     fileLocation: 'src/adapters/agents/agents.ts',
-    line: 803,
-    anchor: 'await launchSessionMarkerPort.save({',
+    line: 858,
+    anchor: 'launchSessionMarkerPort.save({',
     reads: ['SessionMarker'],
     requirement:
       'One current marker per (mission, role) recording the family that last ran and its provider session id; a new launch replaces it rather than appending history.',
@@ -174,8 +174,8 @@ export const CONSUMER_DOMAIN_REQUIREMENTS: readonly ConsumerRequirement[] = [
     id: 'retry-in-process-tried-set',
     family: 'retry',
     fileLocation: 'src/adapters/agents/agents.ts',
-    line: 359,
-    anchor: 'const tried = new Set(',
+    line: 899,
+    anchor: 'tried: new Set(excludeIterable),',
     reads: ['AgentBlock'],
     requirement:
       'Which families this call has already exhausted. The tried set, per-agent errors, and iteration counter are local variables of one startAgent call; nothing persists or re-reads them.',
@@ -185,7 +185,7 @@ export const CONSUMER_DOMAIN_REQUIREMENTS: readonly ConsumerRequirement[] = [
     id: 'retry-launch-failure-reselect',
     family: 'retry',
     fileLocation: 'src/adapters/agents/agents.ts',
-    line: 748,
+    line: 814,
     anchor: 'retrying with next eligible agent',
     reads: ['AgentBlock'],
     requirement:
@@ -211,8 +211,8 @@ export const CONSUMER_DOMAIN_REQUIREMENTS: readonly ConsumerRequirement[] = [
     id: 'failover-limit-hit-block',
     family: 'failover',
     fileLocation: 'src/adapters/agents/agents.ts',
-    line: 678,
-    anchor: 'await updateAgentBlockFn(chosen',
+    line: 754,
+    anchor: 'deps.updateAgentBlockFn(chosen, limitHit.until',
     reads: ['AgentBlock'],
     requirement:
       'The reset estimate and reason for a provider usage limit, written as a time-bounded block so later selections skip the family until it expires.',
@@ -222,8 +222,8 @@ export const CONSUMER_DOMAIN_REQUIREMENTS: readonly ConsumerRequirement[] = [
     id: 'failover-transient-failure-block',
     family: 'failover',
     fileLocation: 'src/adapters/agents/agents.ts',
-    line: 782,
-    anchor: 'await updateAgentBlockFn(chosen',
+    line: 378,
+    anchor: 'await updateAgentBlockFn(agent, blockUntil',
     reads: ['AgentBlock'],
     requirement:
       'Defence-in-depth second block-persistence site (task-2536): a bounded block is written instead of poisoning the family permanently, gated on a positive availability/quota classification. Under default wiring this site is unreachable because the site-1 limit-hit branch (same detectLimitHit classifier) persists the positive classification first; retained only for callers that inject a non-default detectLimitHitFn.',
@@ -233,7 +233,7 @@ export const CONSUMER_DOMAIN_REQUIREMENTS: readonly ConsumerRequirement[] = [
     id: 'failover-block-write',
     family: 'failover',
     fileLocation: 'src/adapters/agents/agent-config.ts',
-    line: 171,
+    line: 175,
     anchor: 'function updateAgentBlock',
     reads: ['AgentBlock'],
     requirement:
@@ -296,7 +296,7 @@ export const CONSUMER_DOMAIN_REQUIREMENTS: readonly ConsumerRequirement[] = [
     id: 'review-loop-round-progression',
     family: 'review',
     fileLocation: 'src/adapters/review/review-loop.ts',
-    line: 88,
+    line: 1529,
     anchor: 'function startReviewLoop',
     reads: ['Review', 'Mission'],
     requirement:
@@ -322,7 +322,7 @@ export const CONSUMER_DOMAIN_REQUIREMENTS: readonly ConsumerRequirement[] = [
     id: 'ui-board-card',
     family: 'ui-board',
     fileLocation: 'src/application/projections/mission-board.ts',
-    line: 328,
+    line: 334,
     anchor: 'function projectMissionCard',
     reads: ['Mission', 'CheckpointData', 'Review'],
     requirement:

@@ -80,6 +80,12 @@ test('setTaskLabels replaces an existing block labels field preserving style', (
   assert.doesNotMatch(out, /user_value/);
 });
 
+test('setTaskLabels replaces a CRLF block labels field', () => {
+  const f = writeTask('id: task-1\r\nlabels:\r\n\r\n  - old\r\nstatus: active\r\n');
+  assert.equal(tm.setTaskLabels(f, ['new']), true);
+  assert.equal(fs.readFileSync(f, 'utf8'), 'id: task-1\r\nlabels:\r\n  - new\r\nstatus: active\r\n');
+});
+
 test('setTaskLabels inserts after created_date when no labels field exists', () => {
   const f = writeTask('id: task-1\ncreated_date: 2024-01-01\n');
   assert.equal(tm.setTaskLabels(f, ['ai_sdlc']), true);
@@ -103,6 +109,18 @@ test('setTaskAssignee promotes an existing agent to the front of an inline list'
   assert.match(fs.readFileSync(f, 'utf8'), /assignee: \[codex, claude\]/);
 });
 
+test('setTaskAssignee preserves CRLF and the next frontmatter field', () => {
+  const f = writeTask('id: task-1\r\nassignee: [claude, codex]\r\nstatus: active\r\n');
+  assert.equal(tm.setTaskAssignee(f, 'codex'), true);
+  assert.equal(fs.readFileSync(f, 'utf8'), 'id: task-1\r\nassignee: [codex, claude]\r\nstatus: active\r\n');
+});
+
+test('setTaskAssignee replaces a simple assignee without consuming the next field', () => {
+  const f = writeTask('id: task-1\nassignee: claude\nstatus: active\n');
+  assert.equal(tm.setTaskAssignee(f, 'codex'), true);
+  assert.equal(fs.readFileSync(f, 'utf8'), 'id: task-1\nassignee: [codex, claude]\nstatus: active\n');
+});
+
 test('setTaskAssignee returns false when the agent is already authoritative (index 0)', () => {
   const f = writeTask('id: task-1\nassignee: [codex, claude]\n');
   assert.equal(tm.setTaskAssignee(f, 'codex'), false);
@@ -124,6 +142,12 @@ test('setTaskAssignee converts a block assignee to a normalized inline array', (
   const f = writeTask('id: task-1\nassignee:\n  - claude\n');
   assert.equal(tm.setTaskAssignee(f, 'codex'), true);
   assert.match(fs.readFileSync(f, 'utf8'), /assignee: \[codex, claude\]/);
+});
+
+test('setTaskAssignee accepts blank lines before CRLF block items', () => {
+  const f = writeTask('id: task-1\r\nassignee:\r\n\r\n  - claude\r\nstatus: active\r\n');
+  assert.equal(tm.setTaskAssignee(f, 'codex'), true);
+  assert.equal(fs.readFileSync(f, 'utf8'), 'id: task-1\r\nassignee: [codex, claude]\r\nstatus: active\r\n');
 });
 
 test('setTaskImplementer makes the new implementer authoritative and preserves humans', () => {
@@ -162,6 +186,12 @@ test('clearTaskAgentAssignee handles block form by dropping agent lines and keep
   const out = fs.readFileSync(f, 'utf8');
   assert.doesNotMatch(out, /codex/);
   assert.match(out, /- human/);
+});
+
+test('clearTaskAgentAssignee handles CRLF block form', () => {
+  const f = writeTask('id: task-1\r\nassignee:\r\n\r\n  - codex\r\n  - human\r\nstatus: active\r\n');
+  assert.equal(tm.clearTaskAgentAssignee(f), true);
+  assert.equal(fs.readFileSync(f, 'utf8'), 'id: task-1\r\nassignee:\r\n  - human\r\nstatus: active\r\n');
 });
 
 test('clearTaskAgentAssignee collapses to an empty assignee when all families are agents', () => {

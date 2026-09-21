@@ -2,7 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import { git } from '../git/git.js';
 import * as fmt from '../../application/presentation/cli-format.js';
-import { clearTaskAgentAssignee, enforceTaskAssignee, parseAssigneeFamilies } from './task-metadata.js';
+import { clearTaskAgentAssignee, enforceTaskAssignee, findFieldBlock, parseAssigneeFamilies } from './task-metadata.js';
 import { commitTaskFileUpdate, getTaskStorage, resolveTaskFile } from './task-file-io.js';
 import { resolveCanonicalRepositoryId } from '../git/repository-identity.js';
 import { isMissionArtifact, missionPathForSlug, resolveBaseWorktree, resolveMissionBaseBranch, resolveWorktree } from '../filesystem/mission-utils.js';
@@ -126,6 +126,20 @@ function archiveTask(slug: string, rootDir: string = process.cwd()): boolean {
  * restoring a prior assignee, or clearing agent assignees,
  * and commit the change to the mission branch.
  */
+function applyTaskStateChange(taskFile: string, newStatus: string, implementer: string | null, clearAssignee: boolean): { changed: boolean; currentStatus: string | null } {
+  let changed = false;
+  if (implementer) {
+    changed = enforceTaskAssignee(taskFile, implementer);
+  } else if (clearAssignee) {
+    changed = clearTaskAgentAssignee(taskFile);
+  }
+  const currentStatus = getTaskStatus(taskFile);
+  if (currentStatus !== newStatus && setTaskStatus(taskFile, newStatus)) {
+    changed = true;
+  }
+  return { changed, currentStatus };
+}
+
 /**
  * @param {string} slug
  * @param {string} newStatus
@@ -153,24 +167,7 @@ async function transitionTaskLocal(slug: string, newStatus: string, { implemente
     return false;
   }
 
-  let changed = false;
-
-  if (implementer) {
-    if (enforceTaskAssignee(taskFile, implementer)) {
-      changed = true;
-    }
-  } else if (clearAssignee) {
-    if (clearTaskAgentAssignee(taskFile)) {
-      changed = true;
-    }
-  }
-
-  const currentStatus = getTaskStatus(taskFile);
-  if (currentStatus !== newStatus) {
-    if (setTaskStatus(taskFile, newStatus)) {
-      changed = true;
-    }
-  }
+  const { changed, currentStatus } = applyTaskStateChange(taskFile, newStatus, implementer, clearAssignee);
 
   if (changed) {
     let msg = `backlog(${slug}): transition to ${newStatus}`;
@@ -237,9 +234,10 @@ function replaceTaskAssignees(taskFilePath: string, families: string[]): boolean
   if (!taskFilePath || !fs.existsSync(taskFilePath)) {return false;}
   let content = fs.readFileSync(taskFilePath, 'utf8');
   const replacement = `assignee: [${families.join(', ')}]`;
-  const blockPattern = /^assignee:[ \t]*[\r\n]+((?:[ \t]+-[ \t]+.+[\r\n]*)+)/m;
-  if (blockPattern.test(content)) {
-    content = content.replace(blockPattern, replacement + '\n');
+  const block = findFieldBlock(content, 'assignee');
+  if (block) {
+    block.lines.splice(block.start, block.end - block.start, replacement);
+    content = block.lines.join(block.lineEnding);
   } else if (/^assignee:[ \t]*.*$/m.test(content)) {
     content = content.replace(/^assignee:[ \t]*.*$/m, replacement);
   } else {
@@ -275,6 +273,15 @@ function unresolvedRebaseFiles(worktree: string): string[] {
   return result.stdout.split('\n').map(file => file.trim()).filter(Boolean);
 }
 
+function resolveMissionConflictFiles(files: string[], missionWorktree: string, authoritativeTaskFile: string, taskRelativePath: string): boolean {
+  for (const file of files) {
+    if (git(['-C', missionWorktree, 'checkout', '--theirs', '--', file]).status !== 0) { return false; }
+    if (file === taskRelativePath && !restoreAuthoritativeTaskLifecycle(path.join(missionWorktree, file), authoritativeTaskFile)) { return false; }
+    if (git(['-C', missionWorktree, 'add', '--', file]).status !== 0) { return false; }
+  }
+  return true;
+}
+
 /**
  * Resolve only mission-owned artifacts. Shared source conflicts still require a
  * human decision. Task files receive a field-aware merge: descriptive metadata
@@ -294,15 +301,7 @@ function reconcileMissionRebase({ slug, missionWorktree, authoritativeTaskFile, 
       return false;
     }
 
-    for (const file of conflicts) {
-      const checkout = git(['-C', missionWorktree, 'checkout', '--theirs', '--', file]);
-      if (checkout.status !== 0) {return false;}
-      if (file === taskRelativePath) {
-        const missionTaskFile = path.join(missionWorktree, file);
-        if (!restoreAuthoritativeTaskLifecycle(missionTaskFile, authoritativeTaskFile)) {return false;}
-      }
-      if (git(['-C', missionWorktree, 'add', '--', file]).status !== 0) {return false;}
-    }
+    if (!resolveMissionConflictFiles(conflicts, missionWorktree, authoritativeTaskFile, taskRelativePath)) { return false; }
 
     log(fmt.status('INFO', `Automatically reconciled mission-owned rebase conflict(s): ${conflicts.join(', ')}`));
     const staged = git(['-C', missionWorktree, 'diff', '--cached', '--quiet']);
@@ -379,6 +378,81 @@ export async function recordLifecycleOperation(
   }
 }
 
+async function recordIntegrationTransition(slug: string, oldStatus: string | null, newStatus: string, implementer: string | null): Promise<void> {
+  try {
+    const { SqliteDatabaseAdapter } = await import('../sqlite/database-adapter.js');
+    const { SqliteMigrationRunner, loadDefaultMigrations } = await import('../sqlite/migration-runner.js');
+    const { resolveDatabasePath } = await import('../sqlite/database-path-resolver.js');
+    const { SqliteMissionStore } = await import('../sqlite/mission-store.js');
+    const { lifecycleLaneEvent } = await import('../../application/lifecycle-lane-event.js');
+    const { SqliteOperationalHistoryRepository } = await import('../sqlite/operational-history-repository.js');
+    const { OperationEventRecorder } = await import('../../application/recording/operation-event-recorder.js');
+    const { missionId } = await import('../../domain/mission.js');
+    const { triggerFromTransition, parseMissionStatus } = await import('../../domain/board-event.js');
+    const toStatus = parseMissionStatus(newStatus);
+    const fromStatus = parseMissionStatus(oldStatus ?? '');
+    const trigger = toStatus && triggerFromTransition(fromStatus, toStatus);
+    if (!toStatus || !trigger) { return; }
+    const db = new SqliteDatabaseAdapter();
+    await db.open({ path: resolveDatabasePath() });
+    try {
+      await new SqliteMigrationRunner(db).applyPending(loadDefaultMigrations());
+      const store = new SqliteMissionStore(db);
+      const read = await store.load(missionId(slug));
+      if (read.kind !== 'found' || read.mission.closedAt !== null) { return; }
+      const agent = implementer ?? 'unknown';
+      const occurredAt = new Date().toISOString();
+      const moved = { ...read.mission, status: toStatus, closedAt: null };
+      await db.beginTransaction();
+      try {
+        await store.saveWithTransition(moved, read.version, lifecycleLaneEvent({ mission: moved, from: fromStatus, trigger, agent, occurredAt }));
+        await new OperationEventRecorder(new SqliteOperationalHistoryRepository(db)).append({ missionId: missionId(slug), repositoryId: read.mission.repositoryId, trigger, toStatus, agent, occurredAt });
+        await db.commitTransaction();
+      } catch (error) {
+        await db.rollbackTransaction();
+        throw error;
+      }
+    } finally { await db.close(); }
+  } catch { /* recording failure never blocks the authoritative transition */ }
+}
+
+function synchronizeMissionWorktree(slug: string, stateRoot: string, rootDir: string, deferMissionRebase: boolean, log: Function): boolean {
+  const missionWorktree = resolveWorktree(slug, { cwd: rootDir });
+  if (!missionWorktree || missionWorktree === stateRoot) { return true; }
+  const authoritativeResolution = resolveTaskFile(slug, stateRoot);
+  if (!authoritativeResolution.ok || !authoritativeResolution.taskFile) {
+    log(fmt.status('WARN', `Could not resolve authoritative task metadata for ${fmt.slug(slug)} after transition.`));
+    return false;
+  }
+  const taskRelativePath = path.relative(stateRoot, authoritativeResolution.taskFile).split(path.sep).join('/');
+  const dirty = git(['-C', missionWorktree, 'status', '--porcelain']);
+  const reviewEventPrefix = `${path.relative(missionWorktree, path.join(path.dirname(missionPathForSlug(missionWorktree, slug)), 'review-events')).split(path.sep).join('/')}/`;
+  const blockingDirtyEntries = dirty.status === 0 ? dirty.stdout.split('\n').map(entry => entry.trimEnd()).filter(Boolean).filter(entry => {
+    const status = entry.slice(0, 2);
+    const file = entry.slice(3).trim().split(path.sep).join('/');
+    return status !== '??' || !file.startsWith(reviewEventPrefix);
+  }) : [];
+  if (deferMissionRebase || blockingDirtyEntries.length > 0) {
+    log(fmt.status('INFO', `Deferring mission rebase for ${fmt.slug(slug)} until the worktree is clean.`));
+    return true;
+  }
+  const baseBranch = resolveMissionBaseBranch(slug, missionWorktree);
+  const result = git(['-C', missionWorktree, 'rebase', baseBranch]);
+  if (result.status === 0) {
+    log(fmt.status('PASS', `Rebased mission/${slug} onto ${baseBranch} after Backlog state update.`));
+    return true;
+  }
+  if (reconcileMissionRebase({ slug, missionWorktree, authoritativeTaskFile: authoritativeResolution.taskFile, taskRelativePath, log })) {
+    log(fmt.status('PASS', `Rebased mission/${slug} onto ${baseBranch} after automatic mission-state reconciliation.`));
+    return true;
+  }
+  const detail = [result.stdout, result.stderr].filter(Boolean).join('\n').trim();
+  const abort = git(['-C', missionWorktree, 'rebase', '--abort']);
+  const abortDetail = abort.status === 0 ? ' Rebase aborted; the mission worktree was restored to its pre-rebase state.' : ` Rebase abort also failed${[abort.stdout, abort.stderr].filter(Boolean).join('\n').trim() ? ': ' + [abort.stdout, abort.stderr].filter(Boolean).join('\n').trim() : '.'}`;
+  log(fmt.status('WARN', `Backlog state updated on integration branch, but mission/${slug} could not rebase onto ${baseBranch}${detail ? ': ' + detail : '.'}${abortDetail}`));
+  return false;
+}
+
 async function transitionTaskOnIntegrationBranch(
   slug: string,
   newStatus: string,
@@ -410,144 +484,10 @@ async function transitionTaskOnIntegrationBranch(
   // authoritative transition (ADR 0051).
   // The old status read above is captured before transitionTaskLocal overwrites it.
   if (oldStatus !== newStatus) {
-    await (async () => {
-      try {
-        const { SqliteDatabaseAdapter } = await import('../sqlite/database-adapter.js');
-        const { SqliteMigrationRunner, loadDefaultMigrations } = await import('../sqlite/migration-runner.js');
-        const { resolveDatabasePath } = await import('../sqlite/database-path-resolver.js');
-        const { SqliteMissionStore } = await import('../sqlite/mission-store.js');
-        const { lifecycleLaneEvent } = await import('../../application/lifecycle-lane-event.js');
-        const { SqliteOperationalHistoryRepository } = await import('../sqlite/operational-history-repository.js');
-        const { OperationEventRecorder } = await import('../../application/recording/operation-event-recorder.js');
-        const { missionId } = await import('../../domain/mission.js');
-        const { triggerFromTransition, parseMissionStatus } = await import('../../domain/board-event.js');
-        const toStatus = parseMissionStatus(newStatus);
-        // Skip if the target status is not a valid MissionStatus
-        if (!toStatus) {
-          return;
-        }
-        const fromStatus = parseMissionStatus(oldStatus ?? '');
-        const trigger = triggerFromTransition(fromStatus, toStatus);
-        // Skip recording if the transition is not recognised by the state machine
-        if (!trigger) {
-          return;
-        }
-        const db = new SqliteDatabaseAdapter();
-        await db.open({ path: resolveDatabasePath() });
-        try {
-          const runner = new SqliteMigrationRunner(db);
-          await runner.applyPending(loadDefaultMigrations());
-          const store = new SqliteMissionStore(db);
-          const read = await store.load(missionId(slug));
-          // The lane event belongs to the Mission aggregate. A slug the
-          // operator database does not know has no aggregate to move, so there
-          // is nothing to record — inventing a bare event here is exactly the
-          // second write path this seam no longer owns.
-          if (read.kind !== 'found' || read.mission.closedAt !== null) {
-            return;
-          }
-          const agent = implementer ?? 'unknown';
-          const occurredAt = new Date().toISOString();
-          const moved = { ...read.mission, status: toStatus, closedAt: null };
-          // The aggregate write, its lane event and the operation-log entry
-          // describe the same transition, so they commit as one unit (ADR 0053
-          // transaction rule 1). The lane event is appended by
-          // `SqliteMissionStore.saveWithTransition` — the single writer — and a
-          // failure rolls the whole unit back rather than leaving the board
-          // with an operation that has no lane history, or the reverse.
-          await db.beginTransaction();
-          try {
-            await store.saveWithTransition(
-              moved,
-              read.version,
-              lifecycleLaneEvent({
-                mission: moved,
-                from: fromStatus,
-                trigger,
-                agent,
-                occurredAt,
-              }),
-            );
-            const operations = new OperationEventRecorder(new SqliteOperationalHistoryRepository(db));
-            await operations.append({
-              missionId: missionId(slug),
-              repositoryId: read.mission.repositoryId,
-              trigger,
-              toStatus,
-              agent,
-              occurredAt,
-            });
-            await db.commitTransaction();
-          } catch (error) {
-            await db.rollbackTransaction();
-            throw error;
-          }
-        } finally {
-          await db.close();
-        }
-      } catch {
-        // Recording failure is silently swallowed — never blocks the transition
-      }
-    })();
+    await recordIntegrationTransition(slug, oldStatus, newStatus, implementer);
   }
 
-  const missionWorktree = resolveWorktree(slug, { cwd: rootDir });
-  if (!missionWorktree || missionWorktree === stateRoot) {
-    return true;
-  }
-  const authoritativeResolution = resolveTaskFile(slug, stateRoot);
-  if (!authoritativeResolution.ok || !authoritativeResolution.taskFile) {
-    log(fmt.status('WARN', `Could not resolve authoritative task metadata for ${fmt.slug(slug)} after transition.`));
-    return false;
-  }
-  const taskRelativePath = path.relative(stateRoot, authoritativeResolution.taskFile).split(path.sep).join('/');
-
-  // Launch callbacks run concurrently with the newly spawned agent, and draft
-  // bookkeeping can run while agent output is still uncommitted. Rebasing in
-  // either state races or rejects those edits. The authoritative transition is
-  // already durable on the integration branch, so leave synchronization to the
-  // next clean lifecycle boundary.
-  const dirty = git(['-C', missionWorktree, 'status', '--porcelain']);
-  const reviewEventPrefix = `${path.relative(missionWorktree, path.join(path.dirname(missionPathForSlug(missionWorktree, slug)), 'review-events')).split(path.sep).join('/')}/`;
-  const blockingDirtyEntries = dirty.status === 0
-    ? dirty.stdout.split('\n').map(entry => entry.trimEnd()).filter(Boolean).filter(entry => {
-      const status = entry.slice(0, 2);
-      const file = entry.slice(3).trim().split(path.sep).join('/');
-      // Reviewer artifacts are complete workflow output by the time approval is
-      // recorded. They are committed at the next review boundary, but must not
-      // look like in-flight agent edits and strand the mission task at `review`.
-      return status !== '??'
-        || !file.startsWith(reviewEventPrefix);
-    })
-    : [];
-  if (deferMissionRebase || blockingDirtyEntries.length > 0) {
-    log(fmt.status('INFO', `Deferring mission rebase for ${fmt.slug(slug)} until the worktree is clean.`));
-    return true;
-  }
-
-  const baseBranch = resolveMissionBaseBranch(slug, missionWorktree);
-  const result = git(['-C', missionWorktree, 'rebase', baseBranch]);
-  if (result.status !== 0) {
-    if (reconcileMissionRebase({
-      slug,
-      missionWorktree,
-      authoritativeTaskFile: authoritativeResolution.taskFile,
-      taskRelativePath,
-      log,
-    })) {
-      log(fmt.status('PASS', `Rebased mission/${slug} onto ${baseBranch} after automatic mission-state reconciliation.`));
-      return true;
-    }
-    const detail = [result.stdout, result.stderr].filter(Boolean).join('\n').trim();
-    const abort = git(['-C', missionWorktree, 'rebase', '--abort']);
-    const abortDetail = abort.status === 0
-      ? ' Rebase aborted; the mission worktree was restored to its pre-rebase state.'
-      : ` Rebase abort also failed${[abort.stdout, abort.stderr].filter(Boolean).join('\n').trim() ? ': ' + [abort.stdout, abort.stderr].filter(Boolean).join('\n').trim() : '.'}`;
-    log(fmt.status('WARN', `Backlog state updated on integration branch, but mission/${slug} could not rebase onto ${baseBranch}${detail ? ': ' + detail : '.'}${abortDetail}`));
-    return false;
-  }
-  log(fmt.status('PASS', `Rebased mission/${slug} onto ${baseBranch} after Backlog state update.`));
-  return true;
+  return synchronizeMissionWorktree(slug, stateRoot, rootDir, deferMissionRebase, log);
 }
 
 // Public lifecycle seam: transitions belong to the worktree that invokes them.

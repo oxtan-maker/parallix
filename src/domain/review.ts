@@ -590,16 +590,7 @@ export function applyReviewerCommand(review: Review, command: ReviewerCommand): 
     if (command.findings.length === 0) {
       throw new Error('Requested changes require at least one finding');
     }
-    const ids = new Set<string>();
-    for (const finding of command.findings) {
-      if (!finding.id.trim() || !finding.summary.trim()) {
-        throw new Error('Review finding requires an id and summary');
-      }
-      if (ids.has(finding.id)) {
-        throw new Error(`Review finding ${finding.id} is duplicated`);
-      }
-      ids.add(finding.id);
-    }
+    validateRequestChanges(command.findings);
   }
   const current = currentReviewRound(review);
   const decision: ReviewerDecision = command.type === 'approve'
@@ -627,6 +618,20 @@ export function applyReviewerCommand(review: Review, command: ReviewerCommand): 
       phase: command.type === 'approve' ? 'approved' : 'fixing',
     }),
   };
+}
+
+/** Validate that every requested-change finding carries an id and summary and is not duplicated. */
+function validateRequestChanges(findings: readonly ReviewFinding[]): void {
+  const ids = new Set<string>();
+  for (const finding of findings) {
+    if (!finding.id.trim() || !finding.summary.trim()) {
+      throw new Error('Review finding requires an id and summary');
+    }
+    if (ids.has(finding.id)) {
+      throw new Error(`Review finding ${finding.id} is duplicated`);
+    }
+    ids.add(finding.id);
+  }
 }
 
 /**

@@ -109,38 +109,8 @@ export class BoardCommandController implements BoardCommandDispatcher {
     // Emit dispatch event
     this.emit(operationId, 0, 'dispatch', `dispatching ${kind} for ${missionId}`);
 
-    // Guard 1: capability check
-    if (!isIntegratedCapability(kind)) {
-      const reason = unavailableReason(kind) ?? 'not yet integrated';
-      this.emit(operationId, 1, 'unavailable', reason);
-      return unavailableCapability(kind, reason);
-    }
-    if (!this.canExecute(kind) && request.payload?.kind === kind) {
-      const reason = 'no Mission authority is configured for this interface';
-      this.emit(operationId, 1, 'unavailable', reason);
-      return unavailableCapability(kind, reason);
-    }
-    // `draft:create` carries no payload, so the payload guard above cannot see
-    // an unwired draft service. Report the typed unavailable result here,
-    // before mission authority is touched: a read-only graph stays read-only.
-    if (kind === 'draft:create' && !this.canExecute(kind)) {
-      const reason = 'no Mission authority is configured for this interface';
-      this.emit(operationId, 1, 'unavailable', reason);
-      return unavailableCapability(kind, reason);
-    }
-    if (kind === 'integrate:merge' && !this.canExecute(kind)) {
-      const reason = 'no integration workflow is configured for this interface';
-      this.emit(operationId, 1, 'unavailable', reason);
-      return unavailableCapability(kind, reason);
-    }
-    if (kind === 'mission:cancel' && !this.canExecute(kind)) {
-      const reason = 'no cancellation authority is configured for this interface';
-      this.emit(operationId, 1, 'unavailable', reason);
-      return unavailableCapability(kind, reason);
-    }
-    if (kind === 'handoff:record' && !this.canExecute(kind)) {
-      return unavailableCapability(kind, 'no handoff workflow is configured for this interface');
-    }
+    const unavailable = this.unavailableDispatch(request);
+    if (unavailable) { return unavailable as BoardCommandResult<T>; }
 
     // Guard 2: stale command check
     const staleResult = await this.checkStaleCommand(request);
@@ -175,6 +145,27 @@ export class BoardCommandController implements BoardCommandDispatcher {
     }
     // Unreachable: isIntegratedCapability guard above catches all non-integrated kinds
     return unavailableCapability(kind, 'unexpected integrated capability') as BoardCommandResult<T>;
+  }
+
+  private unavailableDispatch(request: BoardCommandRequest): BoardCommandResult | null {
+    const { operationId, kind } = request;
+    if (!isIntegratedCapability(kind)) {
+      const reason = unavailableReason(kind) ?? 'not yet integrated';
+      this.emit(operationId, 1, 'unavailable', reason);
+      return unavailableCapability(kind, reason);
+    }
+    if (request.payload?.kind === kind && !this.canExecute(kind)) {
+      const reason = 'no Mission authority is configured for this interface';
+      this.emit(operationId, 1, 'unavailable', reason);
+      return unavailableCapability(kind, reason);
+    }
+    if (this.canExecute(kind) || (request.payload?.kind !== kind && !['draft:create', 'integrate:merge', 'mission:cancel', 'handoff:record'].includes(kind))) { return null; }
+    const reason = kind === 'integrate:merge' ? 'no integration workflow is configured for this interface'
+      : kind === 'mission:cancel' ? 'no cancellation authority is configured for this interface'
+      : kind === 'handoff:record' ? 'no handoff workflow is configured for this interface'
+      : 'no Mission authority is configured for this interface';
+    this.emit(operationId, 1, 'unavailable', reason);
+    return unavailableCapability(kind, reason);
   }
 
   private async dispatchIntake(request: BoardCommandRequest): Promise<BoardCommandResult<unknown>> {
@@ -391,7 +382,5 @@ export class BoardCommandController implements BoardCommandDispatcher {
 async function bestEffort(publish: () => Promise<void>): Promise<void> {
   try {
     await publish();
-  } catch (error) {
-    void error;
-  }
+  } catch {}
 }

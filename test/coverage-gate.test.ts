@@ -27,6 +27,7 @@ const {
   discoverTestFiles,
   listTempEntries,
   normalizeLcov,
+  mergeLcov,
   resetPerRunScratchState,
   resolveTestTimeoutMs,
   runTests
@@ -172,6 +173,39 @@ test('normalizeLcov unions duplicate worker records by source line', () => {
   const normalized = normalizeLcov('SF:src/example.ts\nDA:1,0\nDA:2,3\nend_of_record\nSF:src/example.ts\nDA:1,2\nDA:2,0\nend_of_record\n');
   assert.equal(normalized, 'SF:src/example.ts\nDA:1,2\nDA:2,3\nLF:2\nLH:2\nend_of_record\n');
   assert.equal(normalizeLcov(''), '');
+});
+
+// TASK-2547: the hosted ci-required job unions the per-tier LCOV fragments via
+// scripts/coverage-merge.ts -> mergeLcov(). This pins the multi-fragment union
+// correctness SC4 forbids raw concatenation for: overlapping source/line records
+// keep the larger hit count with no duplicated DA: record, LF/LH are recomputed
+// from the union, distinct SF: files stay separate, and empty input yields "".
+test('mergeLcov unions duplicate records across fragments with no DA: duplication', () => {
+  const fragmentA = 'SF:src/a.ts\nDA:1,0\nDA:2,3\nend_of_record\n';
+  const fragmentB = 'SF:src/a.ts\nDA:1,2\nDA:2,0\nend_of_record\n';
+  const merged = mergeLcov([fragmentA, fragmentB]);
+  // DA:1 keeps the larger hit (2), DA:2 keeps the larger hit (3); one DA: per
+  // line, no concatenated duplicate records.
+  assert.equal(merged, 'SF:src/a.ts\nDA:1,2\nDA:2,3\nLF:2\nLH:2\nend_of_record\n');
+});
+
+test('mergeLcov recomputes LF/LH from the union and keeps distinct files separate', () => {
+  const fragmentA = 'SF:src/a.ts\nDA:1,5\nend_of_record\n';
+  const fragmentB = 'SF:src/b.ts\nDA:1,7\nend_of_record\n';
+  const merged = mergeLcov([fragmentA, fragmentB]);
+  assert.equal(
+    merged,
+    'SF:src/a.ts\nDA:1,5\nLF:1\nLH:1\nend_of_record\n' +
+    'SF:src/b.ts\nDA:1,7\nLF:1\nLH:1\nend_of_record\n',
+  );
+});
+
+test('mergeLcov handles a line zero-hit in both fragments and empty input', () => {
+  const fragmentA = 'SF:src/a.ts\nDA:1,0\nDA:2,0\nend_of_record\n';
+  const merged = mergeLcov([fragmentA]);
+  // Both lines are zero-hit: LF counts them, LH counts only covered lines.
+  assert.equal(merged, 'SF:src/a.ts\nDA:1,0\nDA:2,0\nLF:2\nLH:0\nend_of_record\n');
+  assert.equal(mergeLcov([]), '');
 });
 
 test('resolveTestTimeoutMs uses default and valid env override', () => {

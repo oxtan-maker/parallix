@@ -1,9 +1,13 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { stripAnsi } from '../src/application/presentation/cli-format.js';
 import { resolveAssetPath, type AssetManifest } from '../src/interfaces/web/security.js';
 import { slugifyDraftIntent } from '../src/adapters/cli/commands/draft-setup.js';
 import { parseAssigneeFamilies } from '../src/adapters/backlog/task-metadata.js';
+import { replaceTaskAssignees } from '../src/adapters/backlog/task-transitions.js';
 import { normalizeVerifyArea } from '../src/adapters/filesystem/mission-paths.js';
 
 // Regression guards for the non-sort half of the 2026-09-16 SonarQube
@@ -52,6 +56,15 @@ test('parseAssigneeFamilies strips leading and trailing quotes only', () => {
   assert.deepEqual(parseAssigneeFamilies('assignee: [cla"ude]\n'), {
     matched: true, families: ['cla"ude'],
   });
+});
+
+test('replaceTaskAssignees rewrites a block field without consuming the next frontmatter field', () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'parallix-sonar-'));
+  const task = path.join(directory, 'task.md');
+  fs.writeFileSync(task, 'id: task-1\r\nassignee:\r\n\r\n  - claude\r\nstatus: active\r\n');
+  assert.equal(replaceTaskAssignees(task, ['codex', 'claude']), true);
+  assert.equal(fs.readFileSync(task, 'utf8'), 'id: task-1\r\nassignee: [codex, claude]\r\nstatus: active\r\n');
+  fs.rmSync(directory, { recursive: true });
 });
 
 test('normalizeVerifyArea returns an unsupported area unchanged', () => {

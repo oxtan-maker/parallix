@@ -35,20 +35,23 @@ const ALLOWED: Record<string, string> = {
     'px active initial execute launch (phase start)',
   'src/adapters/cli/commands/active.ts::applyExecuteFallback':
     'px active execute launch retried with a fallback agent family (agent eligibility, not failure repair)',
-  'src/adapters/review/review-loop.ts::startReviewLoop':
-    'review-round reviewer and implementer launches, plus the timeout re-poll relaunches that '
+  'src/adapters/review/review-loop.ts::launchReviewer':
+    'review-round reviewer launch, plus the timeout re-poll relaunches that '
+    + 'TASK-2377.04 deliberately left outside the kernel and docs/agents.md documents as the exception',
+  'src/adapters/review/review-loop.ts::launchImplementerActOnReview':
+    'review-round implementer launch, plus the timeout re-poll relaunches that '
     + 'TASK-2377.04 deliberately left outside the kernel and docs/agents.md documents as the exception',
 
   // Conflict resolution: a conflict workflow, not a failure bounce.
   'src/adapters/cli/commands/resolve-conflict.ts::resolveConflict':
     'rebase conflict-resolution agent (conflict workflow)',
-  'src/application/rebase-workflow.ts::runRebaseWorkflow':
+  'src/application/rebase-workflow.ts::launchConflictResolver':
     'rebase conflict-resolution agent (conflict workflow)',
 
   // The kernel's own launch port, and the two adapters that supply it.
   'src/application/rebound-kernel.ts::launchFixAttempt':
     'the rebound kernel launch port — the one permitted failure-repair launch',
-  'src/adapters/cli/commands/active.ts::runHandoffAndReview':
+  'src/adapters/cli/commands/active.ts::createReboundLaunchPort':
     'the `reboundLaunchPort` adapter the kernel drives for the handoff bounces; it decides nothing, '
     + 'and the test below pins the launch inside that adapter',
   'src/adapters/cli/commands/handoff.ts::createHandoffPorts':
@@ -129,20 +132,21 @@ test('SC7: the kernel launch port is present and is the only failure-repair laun
 });
 
 test('SC7: the handoff launch lives inside the kernel launch-port adapter, not in the bounce logic', () => {
-  // `runHandoffAndReview` is allow-listed because it declares the kernel's
-  // launch port. Pin the launch to that adapter so a future direct launch in the
-  // surrounding bounce logic cannot ride in on the same allow-list entry.
+  // `createReboundLaunchPort` is allow-listed because it *is* the kernel's launch
+  // port. Pin the launch inside it so a future direct launch in the surrounding
+  // bounce logic cannot ride in on the same allow-list entry.
   const source = fs.readFileSync('src/adapters/cli/commands/active.ts', 'utf8');
-  const portStart = source.indexOf('const reboundLaunchPort');
+  const portStart = source.indexOf('function createReboundLaunchPort');
   const portEnd = source.indexOf("as ReboundContext['startAgent'];", portStart);
   assert.ok(portStart > 0 && portEnd > portStart, 'the kernel launch-port adapter is present');
 
-  const adapter = source.slice(portStart, portEnd);
   const call = /\bstartAgentFn\s*\(/g;
-  const insideAdapter = (adapter.match(call) || []).length;
-  const inWholeFunction = (source.slice(source.indexOf('async function runHandoffAndReview')).match(call) || []).length;
+  const insideAdapter = (source.slice(portStart, portEnd).match(call) || []).length;
   assert.equal(insideAdapter, 1, 'the adapter launches exactly once');
-  assert.equal(inWholeFunction, insideAdapter, 'runHandoffAndReview launches only through the adapter');
+
+  // The bounce logic itself launches nothing: it only hands the port to the kernel.
+  const bounceStart = source.indexOf('async function runHandoffAndReview');
+  assert.equal((source.slice(bounceStart).match(call) || []).length, 0, 'runHandoffAndReview launches only through the adapter');
 });
 
 test('SC5/SC6: the deleted standalone bounce policy leaves no trace in src/', () => {

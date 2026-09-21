@@ -163,6 +163,32 @@ function resolveTrackingBranchSha(branch: string, rootDir: string = process.cwd(
   };
 }
 
+function fetchTrackingBranchSha(branch: string, rootDir: string, gitFetch: Function) {
+  const result = gitFetch(branch, rootDir);
+  if (result.status === 0) { return resolveTrackingBranchSha(branch, rootDir); }
+  if (isMissingRemoteRef(result)) { return { ok: true, firstPush: true }; }
+  return { ok: false, error: `failed to fetch tracking ref for ${branch}: ${pushOutput(result) || 'git fetch failed'}` };
+}
+
+function forceWithLeaseArgument(branch: string, rootDir: string, remoteUrl: string, gitFetch: Function, refreshTrackingRef: boolean): { ok: boolean; pushArgs?: string[]; lease?: string; error?: string } {
+  if (refreshTrackingRef) {
+    const refreshed = gitFetch(branch, rootDir);
+    if (refreshed.status !== 0) {
+      if (isMissingRemoteRef(refreshed)) { return { ok: true, pushArgs: ['-C', rootDir, 'push', remoteUrl, branch] }; }
+      return { ok: false, error: `failed to refresh tracking ref for ${branch}: ${pushOutput(refreshed) || 'git fetch failed'}` };
+    }
+  }
+  let tracked = resolveTrackingBranchSha(branch, rootDir);
+  if (!tracked.ok && !refreshTrackingRef) {
+    const fetched: any = fetchTrackingBranchSha(branch, rootDir, gitFetch);
+    if (fetched.firstPush) { return { ok: true, pushArgs: ['-C', rootDir, 'push', remoteUrl, branch] }; }
+    if (!fetched.ok) { return fetched; }
+    tracked = fetched;
+  }
+  if (!tracked.ok) { return tracked; }
+  return { ok: true, lease: `--force-with-lease=refs/heads/${branch}:${tracked.sha}` };
+}
+
 /**
  * @param {string} branch
  * @param {string} remoteUrl
@@ -181,44 +207,9 @@ function buildCreatePrPushArgs(branch: string, remoteUrl: string, rootDir: strin
 
   const pushArgs = ['-C', rootDir, 'push'];
   if (forceWithLease) {
-    if (refreshTrackingRef) {
-      const refreshResult = gitFetch(branch, rootDir);
-      if (refreshResult.status !== 0) {
-        if (isMissingRemoteRef(refreshResult)) {
-          // First push: the remote branch does not exist yet, so there is
-          // nothing to clobber. Fall back to a plain push (no force-with-lease).
-          pushArgs.push(remoteUrl, branch);
-          return { ok: true, pushArgs };
-        }
-        return {
-          ok: false,
-          error: `failed to refresh tracking ref for ${branch}: ${pushOutput(refreshResult) || 'git fetch failed'}`
-        };
-      }
-    }
-
-    let trackingRefResult = resolveTrackingBranchSha(branch, rootDir);
-    if (!trackingRefResult.ok && !refreshTrackingRef) {
-      const fetchResult = gitFetch(branch, rootDir);
-      if (fetchResult.status !== 0) {
-        if (isMissingRemoteRef(fetchResult)) {
-          // First push: the remote branch does not exist yet, so there is
-          // nothing to clobber. Fall back to a plain push (no force-with-lease).
-          pushArgs.push(remoteUrl, branch);
-          return { ok: true, pushArgs };
-        }
-        return {
-          ok: false,
-          error: `failed to fetch tracking ref for ${branch}: ${pushOutput(fetchResult) || 'git fetch failed'}`
-        };
-      }
-      trackingRefResult = resolveTrackingBranchSha(branch, rootDir);
-    }
-    if (!trackingRefResult.ok) {
-      return trackingRefResult;
-    }
-
-    pushArgs.push(`--force-with-lease=refs/heads/${branch}:${trackingRefResult.sha}`);
+    const lease = forceWithLeaseArgument(branch, rootDir, remoteUrl, gitFetch, refreshTrackingRef);
+    if (lease.pushArgs || !lease.ok) { return lease; }
+    pushArgs.push(lease.lease!);
   } else if (force) {
     pushArgs.push('--force-with-lease');
   }

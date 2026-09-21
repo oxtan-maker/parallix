@@ -86,6 +86,44 @@ function buildRelaunchPrompt(errorMsg: string, slug: string, worktree: string, g
   });
 }
 
+function parsePorcelainPath(line: string) {
+  const xy = line.slice(0, 2);
+  const rawPath = line.slice(3).trim();
+  const pathPart = rawPath.includes('->') ? (rawPath.split('->').pop() || '').trim() : rawPath;
+  return { xy, file: (pathPart.startsWith('"') && pathPart.endsWith('"')) ? pathPart.slice(1, -1) : pathPart };
+}
+
+function conflictedFiles(status: string) {
+  return status.split('\n').filter((line: string) => line.trim()).map(parsePorcelainPath)
+    .filter(({ xy }) => ['DD', 'AU', 'UD', 'UA', 'DU', 'AA', 'UU'].includes(xy));
+}
+
+function commitDirtyFiles(rootDir: string, slug: string, gitFn: Function, log: Function, error: Function) {
+  const status = gitFn(['-C', rootDir, 'status', '--porcelain']);
+  if (status.status !== 0 || !status.stdout) { return { repaired: false, blocker: null }; }
+  const conflicts = conflictedFiles(status.stdout);
+  if (conflicts.length) {
+    const blocker = `Conflicted files detected:\n${conflicts.map(({ file }: { file: string }) => `       - ${file}`).join('\n')}`;
+    log(`Cannot auto-commit: ${blocker}`);
+    return { repaired: false, blocker };
+  }
+  const files = status.stdout.split('\n').filter((line: string) => line.trim()).map(parsePorcelainPath).map(({ file }: { file: string }) => file);
+  if (!files.length) { return { repaired: false, blocker: null }; }
+  log('Auto-committing dirty files:'); files.forEach((file: string) => log(`       - ${file}`));
+  const added = gitFn(['-C', rootDir, 'add', '--', ...files]);
+  if (added.status !== 0) {
+    const failure = [added.stderr, added.stdout].filter(Boolean).join('\n').trim();
+    const blocker = `failed to stage dirty files${failure ? `: ${failure}` : ''}`;
+    error(fmt.status('FAIL', blocker));
+    return { repaired: false, blocker };
+  }
+  const committed = gitFn(['-C', rootDir, 'commit', '-m', `workflow(${slug}): auto-commit mission artifacts before handoff`]);
+  if (committed.status === 0) { log(fmt.status('PASS', 'Mission artifacts committed.')); return { repaired: true, blocker: null }; }
+  const blocker = `failed to commit mission artifacts: ${committed.stderr}`;
+  error(fmt.status('WARN', `Failed to commit mission artifacts: ${committed.stderr}`));
+  return { repaired: false, blocker };
+}
+
 /**
  * Attempt to repair a failed automated handoff by auto-committing dirty files
  * or rebasing.
@@ -110,15 +148,6 @@ async function repairHandoff(slug: string, worktree: string, errorMsg: string, o
   let repaired = false;
   let blocker: string | null = null;
 
-  /** @param {string} line */
-  function parsePorcelainPath(line: string) {
-    const xy = line.slice(0, 2);
-    const rawPath = line.slice(3).trim();
-    const pathPart = rawPath.includes('->') ? (rawPath.split('->').pop() || '').trim() : rawPath;
-    const cleanPath = (pathPart.startsWith('"') && pathPart.endsWith('"')) ? pathPart.slice(1, -1) : pathPart;
-    return { xy, file: cleanPath };
-  }
-
   // 0. Check if error is repairable via classifyError
   const classification = classifyError(errorMsg);
   const isGitBlocker = classification.failureClass === FailureClass.GitBlockers;
@@ -137,46 +166,9 @@ async function repairHandoff(slug: string, worktree: string, errorMsg: string, o
 
   // 1. Auto-commit non-conflicted dirty files if uncommitted
   if (isGitBlocker) {
-    const statusResult = gitFn(['-C', rootDir, 'status', '--porcelain']);
-    if (statusResult.status === 0 && statusResult.stdout) {
-      const dirtyLines = statusResult.stdout.split('\n')
-        .filter((line: string) => line.trim().length > 0);
-
-      const dirtyFilesWithStatus = dirtyLines.map(parsePorcelainPath);
-
-      const unmerged = dirtyFilesWithStatus.filter((f: { xy: string; file: string }) =>
-        ['DD', 'AU', 'UD', 'UA', 'DU', 'AA', 'UU'].includes(f.xy)
-      );
-
-      if (unmerged.length > 0) {
-        blocker = `Conflicted files detected:\n${unmerged.map((f: { xy: string; file: string }) => `       - ${f.file}`).join('\n')}`;
-        log(`Cannot auto-commit: ${blocker}`);
-        return { repaired: false, blocker };
-      }
-
-      const dirtyFiles = dirtyFilesWithStatus.map((f: { xy: string; file: string }) => f.file);
-
-      if (dirtyFiles.length > 0) {
-        log(`Auto-committing dirty files:`);
-        dirtyFiles.forEach((file: string) => log(`       - ${file}`));
-        const addResult = gitFn(['-C', rootDir, 'add', '--', ...dirtyFiles]);
-        if (addResult.status !== 0) {
-          const failureText = [addResult.stderr, addResult.stdout].filter(Boolean).join('\n').trim();
-          blocker = `failed to stage dirty files${failureText ? `: ${failureText}` : ''}`;
-          error(fmt.status('FAIL', blocker));
-          return { repaired: false, blocker };
-        }
-        const commitRes = gitFn(['-C', rootDir, 'commit', '-m', `workflow(${slug}): auto-commit mission artifacts before handoff`]);
-        if (commitRes.status === 0) {
-          log(fmt.status('PASS', 'Mission artifacts committed.'));
-          repaired = true;
-        } else {
-          error(fmt.status('WARN', `Failed to commit mission artifacts: ${commitRes.stderr}`));
-          blocker = `failed to commit mission artifacts: ${commitRes.stderr}`;
-          return { repaired: false, blocker };
-        }
-      }
-    }
+    const commit = commitDirtyFiles(rootDir, slug, gitFn, log, error);
+    if (commit.blocker) { return commit; }
+    repaired = commit.repaired;
   }
 
   // 2. Auto-rebase if branch is behind

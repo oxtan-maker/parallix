@@ -9,6 +9,7 @@ import { MeasurementStoreUnavailableError } from '../../application/measurement-
 import type { Migration } from './database-adapter.js';
 import { SqliteDatabaseAdapter } from './database-adapter.js';
 import { SqliteMigrationRunner, loadDefaultMigrations } from './migration-runner.js';
+import { acceptsMigrationChecksum } from './migration-checksums.js';
 import { resolveDatabasePath } from './database-path-resolver.js';
 
 /**
@@ -259,6 +260,22 @@ function normalizeForCompare(value: unknown): string {
   return String(value);
 }
 
+function backupIrreversibleMigration(db: SqliteDatabaseAdapter, dbPath: string, migration: Migration): void {
+  if (migration.down || !fs.existsSync(dbPath)) { return; }
+  try { db.executeSync('PRAGMA wal_checkpoint(TRUNCATE);'); } catch { /* plain copy remains self-contained */ }
+  fs.copyFileSync(dbPath, `${dbPath}.bak.${Date.now()}`);
+}
+
+function appliedMigrationChecksums(db: SqliteDatabaseAdapter): Map<string, string> {
+  const applied = new Map<string, string>();
+  try {
+    for (const row of db.querySync<Record<string, unknown>>('SELECT id, checksum FROM schema_migrations ORDER BY id ASC')) {
+      applied.set(String(row.id), String(row.checksum));
+    }
+  } catch { /* fresh database has no ledger table */ }
+  return applied;
+}
+
 /**
  * Apply pending migrations synchronously against the same `schema_migrations`
  * ledger the async `SqliteMigrationRunner` uses, with the same immutable
@@ -269,21 +286,11 @@ function applyPendingMigrationsSync(
   dbPath: string,
   migrations: readonly Migration[],
 ): void {
-  const applied = new Map<string, string>();
-  try {
-    const rows = db.querySync<Record<string, unknown>>(
-      'SELECT id, checksum FROM schema_migrations ORDER BY id ASC',
-    );
-    for (const row of rows) {
-      applied.set(String(row.id), String(row.checksum));
-    }
-  } catch {
-    // Ledger table does not exist yet (fresh database before migration 0001).
-  }
+  const applied = appliedMigrationChecksums(db);
 
   for (const migration of migrations) {
     const existing = applied.get(migration.id);
-    if (existing !== undefined && existing !== migration.checksum) {
+    if (existing !== undefined && !acceptsMigrationChecksum(migration.id, existing, migration.checksum)) {
       throw new Error(
         `Checksum mismatch for migration ${migration.id}: ` +
           `expected ${migration.checksum}, found ${existing}. ` +
@@ -298,14 +305,7 @@ function applyPendingMigrationsSync(
   }
 
   for (const migration of pending) {
-    if (!migration.down && fs.existsSync(dbPath)) {
-      try {
-        db.executeSync('PRAGMA wal_checkpoint(TRUNCATE);');
-      } catch {
-        // Not in WAL mode; the plain copy is still self-contained.
-      }
-      fs.copyFileSync(dbPath, `${dbPath}.bak.${Date.now()}`);
-    }
+    backupIrreversibleMigration(db, dbPath, migration);
     // IMMEDIATE, not deferred: a deferred BEGIN takes the write lock lazily on
     // the first DDL statement and fails outright ("database is locked") when a
     // concurrent connection holds it, instead of waiting out `busy_timeout`.

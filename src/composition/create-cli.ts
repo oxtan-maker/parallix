@@ -87,6 +87,12 @@ function resolveRuntimePath(): string {
   return fileURLToPath(import.meta.url);
 }
 
+function performHandoffWithMissionServices(missionServicesFn: HandoffMissionServicesPort) {
+  return (slug: string, options: Record<string, unknown>) => new HandoffCommandUseCase({
+    ...createHandoffPorts(), missionServices: missionServicesFn,
+  }).performHandoff(slug, { ...options, missionServicesFn });
+}
+
 const runtimePath = resolveRuntimePath();
 const runtimeDir = path.dirname(runtimePath);
 const packageDir = packageRoot(runtimeDir);
@@ -148,6 +154,17 @@ function createCommandRegistry(rootDir: string): Record<string, Command> {
       await Promise.all(opened.map(services => services.operatorState.close()));
     }
   };
+  // Collapses the common `withMissionFactories(msf => withGraph(services => ...))`
+  // two-arrow nesting into one level so command handlers stay under the
+  // cognitive/nesting complexity limits without duplicating the wiring.
+  const withMissionAndGraph = (
+    run: (_missionServicesFn: Function, _services: Awaited<ReturnType<typeof createProductionApplicationServices>>) => unknown,
+  ) => withMissionFactories(missionServicesFn => withGraph(services => run(missionServicesFn, services)));
+  // Collapses the `execute` override's `withGraph`→`withMissionAndGraph` two-arrow
+  // nesting into a single named helper so the integrate handler stays under the
+  // nesting complexity limit.
+  const runIntegrated = (innerArgs: string[], innerOptions: Record<string, unknown>) =>
+    withMissionAndGraph((missionServicesFn) => integrate(innerArgs, { ...innerOptions, missionServicesFn }));
   // `active` needs to create its ExecuteMissionService only after it has
   // installed its progress renderer. Supplying a pre-built service loses the
   // lifecycle progress events (including the actual execute-agent family).
@@ -196,18 +213,16 @@ function createCommandRegistry(rootDir: string): Record<string, Command> {
     }),
     config,
     diff,
-    draft: (args, options) => {
+    draft: (args, options) => withMissionAndGraph((missionServicesFn, services) => {
       // Create adapter with missionServicesFn injected via withMissionFactories
-      return withMissionFactories(missionServicesFn => withGraph(services => {
         const adapter = createDraftWorkflowAdapter({ missionServicesFn });
         const useCase = new DraftCommandUseCase(adapter, services.currentWork);
         const cmd = createDraftCommand(useCase);
         return cmd(args, { ...options, missionServicesFn });
-      }));
-    },
+    }),
     integrate: (args, options) => withGraph(services =>
       createIntegrateCommand(new IntegrateCommandUseCase({
-        execute: (innerArgs, innerOptions) => withMissionFactories(missionServicesFn => integrate(innerArgs, { ...innerOptions, missionServicesFn })),
+        execute: runIntegrated,
       }, services.currentWork, () => inferSlug(undefined)))(args, options)),
     // The destructive command runs through the same guarded controller the TUI
     // and the web board dispatch: one database path, three surfaces.
@@ -219,8 +234,7 @@ function createCommandRegistry(rootDir: string): Record<string, Command> {
     'verify-env': startupPreflight,
     rebase: createRebaseCommand((args, options) => withMissionFactories(missionServicesFn => rebase(args, { ...options, missionServicesFn }))),
     'resolve-conflict': resolveConflict,
-    review: (args, options) => withMissionFactories(missionServicesFn =>
-      withGraph(async services => {
+    review: (args, options) => withMissionAndGraph((missionServicesFn, services) => {
         if (!services.mission) { throw new Error('mission services are unavailable'); }
         const persistence = bindReviewPersistence(services.mission.store, services.mission.lifecycle);
         const adapter = createReviewWorkflowAdapter({
@@ -244,17 +258,12 @@ function createCommandRegistry(rootDir: string): Record<string, Command> {
           lifecycleService: services.mission.lifecycle,
           startReviewLoopFn: (slug: string, loopOptions: Record<string, unknown>) => startReviewLoop(slug, {
             ...loopOptions,
-            performHandoffFn: (handoffSlug: string, handoffOptions: Record<string, unknown>) =>
-              new HandoffCommandUseCase({
-                ...createHandoffPorts(),
-                missionServices: missionServicesFn as HandoffMissionServicesPort,
-              }).performHandoff(handoffSlug, { ...handoffOptions, missionServicesFn }),
+            performHandoffFn: performHandoffWithMissionServices(missionServicesFn as HandoffMissionServicesPort),
             ...reviewLoopBindings(services.mission!.store, services.mission!.lifecycle),
           } as any),
         } as any);
         return createReviewCommand(new ReviewCommandUseCase(adapter, services.currentWork))(args, options);
-      })
-    ),
+    }),
     setup,
     'setup-review': setupReview,
     stats: (args, options) => withGraph(services => {
@@ -646,6 +655,72 @@ export function parseReviewEventArgs(args: string[]): ReviewEventParsed {
   return parsed;
 }
 
+async function runBareCommand(parsed: ParsedArgs, log: typeof fmt.log.plain, error: typeof fmt.log.plainError): Promise<number> {
+  const { main } = await import('../interfaces/cli/runtime.js');
+  let exitCode = 0;
+  await main([], {
+    ...createRuntimeOptions(parsed.target),
+    cwdFn: () => parsed.target,
+    exitFn: ((code?: number) => { exitCode = typeof code === 'number' ? code : 0; }) as (_code?: number) => never,
+    logFn: log,
+    errorFn: error,
+  });
+  return exitCode;
+}
+
+async function runReviewEventCommand(parsed: ParsedArgs, log: typeof fmt.log.plain, error: typeof fmt.log.plainError): Promise<number> {
+  const eventArgs = parseReviewEventArgs(parsed.args);
+  const services = await createProductionApplicationServices(parsed.target);
+  try {
+    if (!services.mission) { throw new Error('mission services are unavailable'); }
+    const result = await bindReviewPersistence(services.mission.store, services.mission.lifecycle).createEvent(
+      eventArgs.slug,
+      eventArgs.type || '',
+      { actor: eventArgs.actor || '', content: eventArgs.content, timestamp: eventArgs.timestamp || undefined },
+      { worktree: parsed.target, skipGit: eventArgs.skipGit, log, error },
+    );
+    if (result.ok && result.path) { log(fmt.status('PASS', `Review event path: ${path.relative(parsed.target, result.path)}`)); }
+    return result.ok ? 0 : 1;
+  } finally {
+    await services.operatorState.close();
+  }
+}
+
+function ensureWorkflowAgentConfig(command: string, target: string) {
+  if (!['draft', 'active', 'review'].includes(command) || !hasGitRepository(target)) { return; }
+  try { ensureFirstRunAgentConfig({ rootDir: target, worktree: target }); } catch { /* Best-effort first-run detection. */ }
+}
+
+async function runTargetCommand(parsed: ParsedArgs, log: typeof fmt.log.plain, error: typeof fmt.log.plainError): Promise<number> {
+  const previousCwd = process.cwd();
+  try {
+    const [startupPreflightModule, workflow] = await Promise.all([
+      import('../adapters/cli/startup-preflight.js'),
+      import('../interfaces/cli/runtime.js'),
+    ]);
+    process.chdir(parsed.target);
+    if (parsed.command === 'review-event') { return await runReviewEventCommand(parsed, log, error); }
+    if (parsed.command === 'verify-env') {
+      return startupPreflightModule.default([], { command: 'verify-env', returnResult: true, log, error })?.pass ? 0 : 1;
+    }
+    ensureWorkflowAgentConfig(parsed.command || '', parsed.target);
+    let exitCode = 0;
+    await workflow.main([parsed.command, ...parsed.args], {
+      ...createRuntimeOptions(parsed.target),
+      cwdFn: () => parsed.target,
+      exitFn: ((code?: number) => { exitCode = typeof code === 'number' ? code : 0; }) as (_code?: number) => never,
+      logFn: log,
+      errorFn: error,
+    });
+    return exitCode;
+  } catch (err) {
+    error(fmt.status('FAIL', (err as Error).message));
+    return 1;
+  } finally {
+    process.chdir(previousCwd);
+  }
+}
+
 export async function run(argv = process.argv.slice(2), options: RunOptions = {}): Promise<number> {
   const log = options.log || fmt.log.plain;
   const error = options.error || fmt.log.plainError;
@@ -675,16 +750,7 @@ export async function run(argv = process.argv.slice(2), options: RunOptions = {}
   // output for non-TTY/CI/opt-out paths and selects the same lazy `ui` entry
   // point as explicit `px ui` for an interactive terminal.
   if (!parsed.command) {
-    const { main } = await import('../interfaces/cli/runtime.js');
-    let exitCode = 0;
-    await main([], {
-      ...createRuntimeOptions(parsed.target),
-      cwdFn: () => parsed.target,
-      exitFn: ((code?: number) => { exitCode = typeof code === 'number' ? code : 0; }) as (_code?: number) => never,
-      logFn: log,
-      errorFn: error,
-    });
-    return exitCode;
+    return await runBareCommand(parsed, log, error);
   }
 
   if (!fs.existsSync(parsed.target) || !fs.statSync(parsed.target).isDirectory()) {
@@ -697,82 +763,7 @@ export async function run(argv = process.argv.slice(2), options: RunOptions = {}
     return 0;
   }
 
-  const previousCwd = process.cwd();
-  try {
-    const [startupPreflightModule, workflow] = await Promise.all([
-      import('../adapters/cli/startup-preflight.js'),
-      import('../interfaces/cli/runtime.js'),
-    ]);
-    const startupPreflight = startupPreflightModule.default;
-    process.chdir(parsed.target);
-
-    if (parsed.command === 'review-event') {
-      const eventArgs = parseReviewEventArgs(parsed.args);
-      const services = await createProductionApplicationServices(parsed.target);
-      try {
-        if (!services.mission) { throw new Error('mission services are unavailable'); }
-        const result = await bindReviewPersistence(services.mission.store, services.mission.lifecycle).createEvent(
-          eventArgs.slug,
-          eventArgs.type || '',
-          {
-            actor: eventArgs.actor || '',
-            content: eventArgs.content,
-            timestamp: eventArgs.timestamp || undefined,
-          },
-          {
-            worktree: parsed.target,
-            skipGit: eventArgs.skipGit,
-            log,
-            error,
-          },
-        );
-        if (result.ok && result.path) {
-          log(fmt.status('PASS', `Review event path: ${path.relative(parsed.target, result.path)}`));
-        }
-        return result.ok ? 0 : 1;
-      } finally {
-        await services.operatorState.close();
-      }
-    }
-
-    if (parsed.command === 'verify-env') {
-      const result = startupPreflight([], { command: 'verify-env', returnResult: true, log, error });
-      return result && (result as { pass?: boolean }).pass ? 0 : 1;
-    }
-
-    // First-run agent-config autodetection runs once at workflow-command entry,
-    // never per-selection or per-render. It is strictly gated on "no working-tree
-    // config/agents.json exists" (idempotent) and degrades to the shipped default
-    // on any probe failure, so a flaky launcher can never break the command.
-    if (parsed.command === 'draft' || parsed.command === 'active' || parsed.command === 'review') {
-      // Best-effort first-run detection. Skip (do not abort the command) when the
-      // target is not a repository root: a supported non-git standalone layout
-      // must still run, and a best-effort probe should never hard-fail a command.
-      // ponytail: skip check is O(1); the write itself only happens on first run.
-      if (hasGitRepository(parsed.target)) {
-        try {
-          ensureFirstRunAgentConfig({ rootDir: parsed.target, worktree: parsed.target });
-        } catch {
-          // Detection is best-effort: fall back to the shipped default list.
-        }
-      }
-    }
-
-    let exitCode = 0;
-    await workflow.main([parsed.command, ...parsed.args], {
-      ...createRuntimeOptions(parsed.target),
-      cwdFn: () => parsed.target,
-      exitFn: ((code?: number) => { exitCode = typeof code === 'number' ? code : 0; }) as (_code?: number) => never,
-      logFn: log,
-      errorFn: error,
-    });
-    return exitCode;
-  } catch (err) {
-    error(fmt.status('FAIL', (err as Error).message));
-    return 1;
-  } finally {
-    process.chdir(previousCwd);
-  }
+  return await runTargetCommand(parsed, log, error);
 }
 
 const _arg1 = typeof process.argv[1] === 'string' && process.argv[1] ? process.argv[1] : undefined;

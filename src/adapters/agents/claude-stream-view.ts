@@ -149,36 +149,15 @@ export class ClaudeStreamView {
         return;
       }
       case 'tool_start': {
-        this.setActivity(event.isSubagent ? `sub-agent ${event.input || event.name}` : event.name);
-        const label = event.isSubagent
-          ? `${this.style(['magenta'], '▶ sub-agent')} ${this.style(['bold'], event.input || event.name)}`
-          : `${this.style(['cyan'], '⚒')}${event.name === 'Bash' ? '' : ` ${this.style(['bold'], event.name)}`}${event.input ? ` ${event.input}` : ''}`;
-        this.line(this.withAgent(label, event.agent));
+        this.renderToolStart(event);
         return;
       }
       case 'tool_result': {
-        this.setActivity(null);
-        const mark = event.isError ? this.style(['red'], '✗') : this.style(['green'], '✓');
-        const name = event.name && event.name !== 'Bash' ? `${event.name} ` : '';
-        const body = event.summary ? this.style(['gray'], event.summary) : '';
-        const prefix = event.isSubagent ? `${this.style(['magenta'], '◀')} ` : '  ';
-        this.line(this.withAgent(`${prefix}${mark} ${name}${body}`.trimEnd(), event.agent));
+        this.renderToolResult(event);
         return;
       }
       case 'result': {
-        this.setActivity(null);
-        const parts = [
-          event.durationMs === null ? null : formatDuration(event.durationMs),
-          event.numTurns === null ? null : `${event.numTurns} turns`,
-          event.inputTokens === null && event.outputTokens === null
-            ? null
-            : `${event.inputTokens ?? 0} in / ${event.outputTokens ?? 0} out`,
-          event.costUsd === null ? null : `$${event.costUsd.toFixed(4)}`,
-        ].filter(Boolean).join(' · ');
-        const head = event.isError
-          ? this.style(['red'], '● failed')
-          : this.style(['green'], '● done');
-        this.line(`${head}${parts ? ` ${parts}` : ''}`);
+        this.renderResult(event);
         return;
       }
       case 'passthrough':
@@ -187,6 +166,31 @@ export class ClaudeStreamView {
       case 'unknown':
         this.line(this.style(['gray'], `· ${event.type}`));
     }
+  }
+
+  private renderToolStart(event: Extract<NormalizedEvent, { kind: 'tool_start' }>): void {
+    this.setActivity(event.isSubagent ? `sub-agent ${event.input || event.name}` : event.name);
+    const label = event.isSubagent
+      ? `${this.style(['magenta'], '▶ sub-agent')} ${this.style(['bold'], event.input || event.name)}`
+      : `${this.style(['cyan'], '⚒')}${event.name === 'Bash' ? '' : ` ${this.style(['bold'], event.name)}`}${event.input ? ` ${event.input}` : ''}`;
+    this.line(this.withAgent(label, event.agent));
+  }
+
+  private renderToolResult(event: Extract<NormalizedEvent, { kind: 'tool_result' }>): void {
+    this.setActivity(null);
+    const mark = event.isError ? this.style(['red'], '✗') : this.style(['green'], '✓');
+    const name = event.name && event.name !== 'Bash' ? `${event.name} ` : '';
+    const body = event.summary ? this.style(['gray'], event.summary) : '';
+    const prefix = event.isSubagent ? `${this.style(['magenta'], '◀')} ` : '  ';
+    this.line(this.withAgent(`${prefix}${mark} ${name}${body}`.trimEnd(), event.agent));
+  }
+
+  private renderResult(event: Extract<NormalizedEvent, { kind: 'result' }>): void {
+    this.setActivity(null);
+    const parts = [event.durationMs === null ? null : formatDuration(event.durationMs), event.numTurns === null ? null : `${event.numTurns} turns`,
+      event.inputTokens === null && event.outputTokens === null ? null : `${event.inputTokens ?? 0} in / ${event.outputTokens ?? 0} out`,
+      event.costUsd === null ? null : `$${event.costUsd.toFixed(4)}`].filter(Boolean).join(' · ');
+    this.line(`${event.isError ? this.style(['red'], '● failed') : this.style(['green'], '● done')}${parts ? ` ${parts}` : ''}`);
   }
 
   /**

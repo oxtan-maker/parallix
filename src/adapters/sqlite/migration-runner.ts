@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { compareCodeUnits } from '../../domain/comparators.js';
 import type { Migration, MigrationLedgerEntry } from './database-adapter.js';
 import { SqliteDatabaseAdapter } from './database-adapter.js';
+import { acceptsMigrationChecksum } from './migration-checksums.js';
 
 /**
  * Ordered, forward-only migration runner with immutable checksums.
@@ -73,11 +74,11 @@ export class SqliteMigrationRunner {
     for (const migration of migrations) {
       const existing = appliedMap.get(migration.id);
       if (existing) {
-        if (existing.checksum !== migration.checksum) {
+        if (!acceptsMigrationChecksum(migration.id, existing.checksum, migration.checksum)) {
           throw new Error(
             `Checksum mismatch for migration ${migration.id}: ` +
-              `expected ${migration.checksum}, found ${existing.checksum}. ` +
-              'Migration file may have been modified after application.',
+            `expected ${migration.checksum}, found ${existing.checksum}. ` +
+            'Migration file may have been modified after application.',
           );
         }
       }
