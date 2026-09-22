@@ -1015,6 +1015,55 @@ test('runDeclaredGates returns skipped when no ## Gates section exists', () => {
   }
 });
 
+// TASK-2521.03: gates recorded through `px gate add` are Mission state and are
+// the authority; the mission document is only the legacy fallback.
+test('runDeclaredGates runs recorded gates and never reads the mission document', () => {
+  const missionDir = fs.mkdtempSync(path.join(os.tmpdir(), 'gates-test-'));
+  // A document whose ## Gates section would fail if it were consulted.
+  fs.writeFileSync(path.join(missionDir, 'MISSION.md'), '# Mission\n\n## Gates\n- [ ] exit 1\n');
+  try {
+    const result = runDeclaredGates(missionDir, missionDir, {
+      log: () => {}, error: () => {},
+      recordedGates: ['true'],
+    });
+    assert.strictEqual(result.ok, true, 'the recorded gate runs, not the document gate');
+    assert.strictEqual(result.skipped, false);
+    assert.strictEqual(result.count, 1);
+  } finally {
+    fs.rmSync(missionDir, { recursive: true, force: true });
+  }
+});
+
+test('runDeclaredGates falls back to the mission document when nothing is recorded', () => {
+  const missionDir = fs.mkdtempSync(path.join(os.tmpdir(), 'gates-test-'));
+  fs.writeFileSync(path.join(missionDir, 'MISSION.md'), '# Mission\n\n## Gates\n- [ ] true\n');
+  try {
+    const result = runDeclaredGates(missionDir, missionDir, {
+      log: () => {}, error: () => {},
+      recordedGates: [],
+    });
+    assert.strictEqual(result.ok, true);
+    assert.strictEqual(result.count, 1, 'the document gate still runs for a legacy mission');
+  } finally {
+    fs.rmSync(missionDir, { recursive: true, force: true });
+  }
+});
+
+test('a failing recorded gate blocks handoff exactly as a failing document gate does', () => {
+  const missionDir = fs.mkdtempSync(path.join(os.tmpdir(), 'gates-test-'));
+  try {
+    const result = runDeclaredGates(missionDir, missionDir, {
+      log: () => {}, error: () => {},
+      recordedGates: ['exit 3'],
+    });
+    assert.strictEqual(result.ok, false);
+    assert.strictEqual(result.gate, 'exit 3');
+    assert.strictEqual(result.reason, 'gate-failed');
+  } finally {
+    fs.rmSync(missionDir, { recursive: true, force: true });
+  }
+});
+
 test('runDeclaredGates returns skipped when ## Gates section is empty', () => {
   const missionDir = fs.mkdtempSync(path.join(os.tmpdir(), 'gates-test-'));
   fs.writeFileSync(path.join(missionDir, 'MISSION.md'), '# Mission\n\n## Gates\n\n');

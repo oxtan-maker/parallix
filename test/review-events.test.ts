@@ -17,12 +17,9 @@ import {
   isValidVerdict,
   shouldMirrorToForgejo,
   createEvent,
-  eventFilePath,
-  reviewEventsDir,
   readAllEvents,
   buildEventFrontmatter,
   buildEventFooter,
-  renderEventFile,
   generateEventTimestamp,
   sanitizeFilename,
   consumeHumanNotes,
@@ -130,26 +127,8 @@ test('shouldMirrorToForgejo identifies mirrored event types', () => {
   assert.ok(!shouldMirrorToForgejo('invalid_type'));
 });
 
-test('reviewEventsDir returns null for nonexistent mission', () => {
-  const result = reviewEventsDir(NONEXISTENT_SLUG);
-  assert.equal(result, null);
-});
 
-test('reviewEventsDir returns path for existing mission', () => {
-  const result = reviewEventsDir(TEST_SLUG, tempDir);
-  assert.ok(result);
-  assert.equal(result, path.join(testMissionDir, 'review-events'));
-});
 
-test('eventFilePath generates correct path', () => {
-  const result = eventFilePath(TEST_SLUG, 'reviewer_findings', 1, 'codex', null, tempDir);
-  assert.ok(result);
-  assert.ok(result.includes('review-events'));
-  assert.ok(result.includes('reviewer_findings'));
-  assert.ok(result.includes('1'));
-  assert.ok(result.includes('codex'));
-  assert.ok(result.endsWith('.md'));
-});
 
 test('createEvent fails for invalid event type', async () => {
   const result = await createEvent(TEST_SLUG, 'invalid_type', { content: '# test' }, {
@@ -198,19 +177,15 @@ test('createEvent succeeds for valid event', async () => {
   });
   
   assert.ok(result.ok);
-  assert.ok(result.path);
-  assert.ok(fs.existsSync(result.path));
-  
-  const fileContent = fs.readFileSync(result.path, 'utf8');
-  assert.ok(fileContent.includes('---'));
-  assert.ok(fileContent.includes('event_type: reviewer_findings'));
-  assert.ok(fileContent.includes('round: 1'));
-  assert.ok(fileContent.includes('phase: reviewing'));
-  assert.ok(fileContent.includes('actor: claude'));
-  assert.ok(fileContent.includes('# Review Findings'));
-  
-  // Cleanup
-  fs.unlinkSync(result.path);
+  // TASK-2521.03: the event is a database row. Normal lifecycle execution must
+  // not create Git-tracked workflow metadata (ADR 0053).
+  assert.equal(result.event?.eventType, VALID_EVENT_TYPES.REVIEWER_FINDINGS);
+  assert.equal(result.event?.round, 1);
+  assert.equal(result.event?.phase, 'reviewing');
+  assert.equal(result.event?.actor, 'claude');
+  assert.ok(result.event?.content.includes('# Review Findings'));
+  assert.ok(!fs.existsSync(path.join(tempDir, 'missions', TEST_SLUG, 'review-events')),
+    'no review-event directory may be created in the repository');
   });
 });
 
@@ -228,11 +203,7 @@ test('createEvent adds workflow metadata footer', async () => {
   });
   
   assert.ok(result.ok);
-  const fileContent = fs.readFileSync(result.path, 'utf8');
-  assert.ok(fileContent.includes('[workflow-round:2, workflow-phase:fixing]'));
-  
-  // Cleanup
-  fs.unlinkSync(result.path);
+  assert.ok(result.event?.content.includes('[workflow-round:2, workflow-phase:fixing]'));
   });
 });
 
@@ -281,12 +252,7 @@ test('createEvent succeeds with required fields for reviewer_outcome', async () 
   });
   
   assert.ok(result.ok);
-  assert.ok(result.path);
-  const fileContent = fs.readFileSync(result.path, 'utf8');
-  assert.ok(fileContent.includes('verdict: approve'));
-  
-  // Cleanup
-  fs.unlinkSync(result.path);
+  assert.equal(result.event?.verdict, 'approve');
   });
 });
 
@@ -306,11 +272,7 @@ test('createEvent succeeds with required fields for implementer_disposition', as
   
   assert.ok(result.ok);
   assert.ok(result.path);
-  const fileContent = fs.readFileSync(result.path, 'utf8');
-  assert.ok(fileContent.includes('disposition: CHANGES_MADE'));
-  
-  // Cleanup
-  fs.unlinkSync(result.path);
+  assert.equal(result.event?.disposition, 'CHANGES_MADE');
   });
 });
 
@@ -344,40 +306,17 @@ test('buildEventFooter matches existing metadata footer pattern', () => {
   assert.equal(footer, '\n\n---\n`[workflow-round:3, workflow-phase:fixing]`');
 });
 
-test('renderEventFile combines frontmatter and content', () => {
-  const event = {
-    eventType: 'reviewer_findings',
-    timestamp: '2026-05-25T14:30:22.000Z',
-    round: 1,
-    phase: 'reviewing',
-    actor: 'codex',
-    slug: 'task-test',
-    content: '# Findings'
-  };
-  
-  const rendered = renderEventFile(event);
-  assert.ok(rendered.startsWith('---'));
-  assert.ok(rendered.includes('event_type: reviewer_findings'));
-  assert.ok(rendered.includes('# Findings'));
-  assert.ok(rendered.includes('[workflow-round:1, workflow-phase:reviewing]'));
-});
 
-test('renderEventFile does not duplicate an existing workflow metadata footer', () => {
-  const footer = buildEventFooter('task-test', 1, 'reviewing');
-  const event = {
-    eventType: 'reviewer_findings',
-    timestamp: '2026-05-25T14:30:22.000Z',
-    round: 1,
-    phase: 'reviewing',
-    actor: 'codex',
-    slug: 'task-test',
-    content: `# Findings${footer}`
-  };
-
-  const rendered = renderEventFile(event);
-  const footerMatches = rendered.match(/\`\[workflow-round:1, workflow-phase:reviewing\]\`/g) || [];
-
-  assert.equal(footerMatches.length, 1);
+test('createEvent does not duplicate an existing workflow metadata footer', async () => {
+  await withSeededReview(async (missionStore) => {
+    const footer = buildEventFooter(TEST_SLUG, 1, 'reviewing');
+    const result = await createEvent(TEST_SLUG, VALID_EVENT_TYPES.REVIEWER_FINDINGS, {
+      content: `# Findings${footer}`, round: 1, phase: 'reviewing', actor: 'codex',
+    }, { worktree: tempDir, skipGit: true, missionStore });
+    assert.ok(result.ok);
+    const matches = (result.event?.content ?? '').match(/`\[workflow-round:1, workflow-phase:reviewing\]`/g) || [];
+    assert.equal(matches.length, 1);
+  });
 });
 
 test('createEvent fails loudly when no Mission store was supplied', async () => {

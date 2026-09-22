@@ -28,7 +28,8 @@ function readMissionTitle(missionFile, fallback) {
   try {
     const firstLine = fs.readFileSync(missionFile, 'utf8').split('\n')[0] || '';
     const match = /^#\s*Mission:\s*(.*)$/i.exec(firstLine.trim());
-    return (match && match[1].trim()) || fallback;
+    // A Mission drafted through the typed verbs leaves the scaffold heading unfilled.
+    return (match && !match[1].includes('<Title>') && match[1].trim()) || fallback;
   } catch {
     return fallback;
   }
@@ -45,39 +46,24 @@ function detailRows(rows: string[][]): string {
 }
 
 /**
- * Digest of the drafted contract for the closing summary: the Goal section, and
- * how many criteria, checkpoints and gates the operator is about to hold an
- * implementer to. Presentation only — a malformed or missing mission file
+ * Digest of the drafted contract for the closing summary: the goal, and how
+ * many success criteria, planned checkpoints and gates the operator is about to hold an implementer
+ * to, read from the recorded Mission. Presentation only — an unreadable Mission
  * yields an empty digest rather than a new failure mode (mission stop rule).
  */
-// @ts-expect-error implicit any on missionFile
-function readMissionDigest(missionFile) {
+// @ts-expect-error implicit any on ctx
+async function readMissionDigest(ctx) {
   try {
-    const body = fs.readFileSync(missionFile, 'utf8');
-    // Split on top-level headings rather than matching a lookahead: the last
-    // section of the file has no following heading to anchor against.
-    const sections = new Map();
-    let current = '';
-    for (const line of body.split('\n')) {
-      const heading = /^##\s+(.+?)\s*$/.exec(line);
-      if (heading) { current = heading[1].toLowerCase(); sections.set(current, []); continue; }
-      if (current) { sections.get(current).push(line); }
-    }
-    // @ts-expect-error implicit any on heading
-    const section = (heading) => (sections.get(heading.toLowerCase()) || []).join('\n').trim();
-    // @ts-expect-error implicit any on text/pattern
-    const count = (text, pattern) => text.split('\n').filter((line) => pattern.test(line.trim())).length;
-    const checkpoints = section('Checkpoints').split(/^###\s/m)[0];
-    const nel = /Predicted NEL bucket:\s*(Small|Medium|Large)[^\n)]*\)?/i.exec(body);
+    const services = await ctx.missionServicesFn(ctx.targetWorktree);
+    const loaded = await services.store.load(missionId(ctx.slug));
+    if (loaded.kind !== 'found') { return { goal: '', criteria: 0, checkpoints: 0, gates: 0, nel: '' }; }
+    const { mission } = loaded;
     return {
-      goal: section('Goal').split(/\n\s*\n/)[0].replace(/\s+/g, ' ').trim(),
-      // Contracts number their criteria or bullet them; both are one criterion
-      // per line. The section's leading blockquote (the falsifiability rule the
-      // scaffold carries) starts with `>` and is not counted.
-      criteria: count(section('Success Criteria'), /^(?:\d+\.|[-*])\s/),
-      checkpoints: count(checkpoints, /^[-*]\s/),
-      gates: count(section('Gates'), /^-\s\[/),
-      nel: nel ? nel[0].replace(/^Predicted NEL bucket:\s*/i, '') : '',
+      goal: mission.brief?.goal ?? '',
+      criteria: (mission.successCriteria ?? []).length,
+      checkpoints: mission.checkpoints.length,
+      gates: (mission.declaredGates ?? []).length,
+      nel: mission.predictedNelBucket ?? '',
     };
   } catch {
     return { goal: '', criteria: 0, checkpoints: 0, gates: 0, nel: '' };
@@ -107,16 +93,16 @@ function logDraftDigest(digest, logFn) {
   }
 }
 
-function logDraftCompletion(ctx, startedAtMs, logFn) {
+async function logDraftCompletion(ctx, startedAtMs, logFn) {
   const missionTitle = readMissionTitle(ctx.missionFile, ctx.slug);
   logFn('');
   logFn(fmt.status('PASS', `Drafted ${fmt.slug(ctx.slug)} in ${formatElapsed(Date.now() - startedAtMs)}: ${fmt.bold(missionTitle)}`));
   logFn(detailRows([
-    ['contract', fmt.path(ctx.missionFile)],
+    ['contract', fmt.command(`px status ${ctx.slug}`)],
     ['branch', fmt.branch(ctx.branchName || missionBranchName(ctx.slug, ctx.mainRepo))],
     ['agent', fmt.agent(/** @type {any} */ (ctx.actualAgent || ctx.agent || 'unknown'))],
   ]));
-  logDraftDigest(readMissionDigest(ctx.missionFile), logFn);
+  logDraftDigest(await readMissionDigest(ctx), logFn);
   logFn('');
   // The worktree is emitted as `Working directory:` rather than a detail row on
   // purpose: the `px` shell function from `px shell-init`
@@ -766,7 +752,7 @@ function createDraftWorkflowAdapter(deps: Record<string, unknown> = {}) {
         logFn(fmt.status('WARN', `No Backlog task file transition for ${ctx.slug}; lifecycle is DB-authoritative.`));
       }
 
-      logDraftCompletion(ctx, startedAtMs, logFn);
+      await logDraftCompletion(ctx, startedAtMs, logFn);
     },
   } as DraftWorkflowPort;
 }

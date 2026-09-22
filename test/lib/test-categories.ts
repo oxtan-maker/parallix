@@ -112,7 +112,6 @@ export const INTEGRATION_CI_TESTS: readonly string[] = [
   'task-1049-force-push.test.ts',
   'task-1080-sync-merged-hardening.test.ts',
   'task-1104-rebase-cleanup.test.ts',
-  'task-1209-consume-artifacts.test.ts',
   'task-1272-standalone-cycle.test.ts',
   'task-1272-standalone-rebase.test.ts',
   'task-1390-shell-init-shebang.test.ts',
@@ -219,6 +218,9 @@ export const INTEGRATION_CI_TESTS: readonly string[] = [
   // repository to prove local branch discovery. A clean GitHub runner provides
   // every dependency, so it is CI-safe.
   'task-2525.03-sonar-enforcement.test.ts',
+  // TASK-2521.03: seeds an isolated SQLite operator database and drives the
+  // production `px status --json` composition path.
+  'task-2521-03-context-cli.integration.test.ts',
   // TASK-2532: seeds temporary Git repositories to exercise the base-worktree
   // repair (marker-stash sweep + dead-rebase abort), so it crosses the git
   // boundary and runs only in the integration layer.

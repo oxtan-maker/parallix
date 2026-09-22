@@ -30,6 +30,7 @@ import { getPrStatus } from '../../forgejo/forgejo.js';
 import type { BoardProjectionBuilder } from '../../../application/projections/board-readers.js';
 import type { MissionId } from '../../../domain/mission.js';
 import { projectMissionActivity, type MissionActivitySource } from '../../../application/projections/mission-activity.js';
+import { latestEvidencedCheckpoint } from '../../../domain/checkpoint.js';
 
 /** Factory options for creating the status workflow adapter. */
 export interface StatusWorkflowAdapterOptions {
@@ -262,6 +263,16 @@ export function createStatusWorkflowAdapter(options: StatusWorkflowAdapterOption
 export function createStatusBoardAdapter(options: {
   readonly buildProjectionFn: (_rootDir: string) => Promise<BoardProjectionBuilder>;
   readonly inferSlugFn?: (_explicit?: string) => string | null;
+  /**
+   * Loads the recorded Mission and its version. Optional so the many test and
+   * legacy constructions of this adapter keep working; when absent, `px status`
+   * reports the board facts and states that no execution context is recorded
+   * rather than inventing one.
+   */
+  readonly loadMissionFn?: (_slug: string) => Promise<{
+    readonly mission: import('../../../domain/mission.js').Mission;
+    readonly version: number;
+  } | null>;
 }): StatusBoardPort {
   const inferSlugFn = options.inferSlugFn || inferSlug;
   return {
@@ -280,10 +291,48 @@ export function createStatusBoardAdapter(options: {
 
         if (!card) { return null; }
 
+        // The brief, the declared gates and the write version come from the
+        // Mission store, not the board card: the card is a board view, while
+        // these are Mission state.
+        const recorded = options.loadMissionFn ? await options.loadMissionFn(slug.toLowerCase()) : null;
+        const latest = latestEvidencedCheckpoint(recorded?.mission.checkpoints ?? []);
+        const brief = recorded?.mission.brief ?? null;
+
         return {
           activity: projectMissionActivity(card as MissionActivitySource),
+          brief: brief
+            ? { goal: brief.goal, why: brief.why, scope: brief.scope, outOfScope: [...brief.outOfScope] }
+            : null,
+          declaredGates: [...(recorded?.mission.declaredGates ?? [])],
+          successCriteria: [...(recorded?.mission.successCriteria ?? [])],
+          checkpoints: (recorded?.mission.checkpoints ?? []).map((checkpoint) => ({
+            name: checkpoint.name,
+            description: checkpoint.firstLine ?? '',
+            recorded: checkpoint.goalCheck.length > 0,
+          })),
+          predictedNelBucket: recorded?.mission.predictedNelBucket ?? null,
+          reproductionTest: recorded?.mission.reproductionTest ?? null,
+          goalCheck: latest ? latest.goalCheck.map((r) => ({ criterion: r.criterion, evidence: r.evidence })) : [],
+          nextAction: latest?.nextActionText ?? null,
+          version: recorded?.version ?? null,
+          // `title` is target-repository authority (MISSION_FIELD_AUTHORITY), so
+          // it comes from the card. The stored title is written at `px draft`
+          // intake while MISSION.md is still the scaffold, so reading it from
+          // the aggregate reports the literal `<Title> (slug)` placeholder.
+          title: card.title ?? null,
+          assignee: recorded?.mission.assignee ?? null,
+          externalTaskRef: recorded?.mission.externalTaskRef
+            ? {
+              source: recorded.mission.externalTaskRef.source,
+              id: recorded.mission.externalTaskRef.id,
+              url: recorded.mission.externalTaskRef.url,
+            }
+            : null,
           backlogStatus: (card as any).rawStatus ?? (card as any).status,
-          checkpoint: (card as any).checkpoint,
+          // A recorded checkpoint names itself. Only fall back to the board
+          // card when nothing is recorded, so the reported name can never
+          // belong to a different checkpoint than the Goal Check rows below it.
+          checkpoint: latest?.name ?? (card as any).checkpoint,
           checkpointDescription: (card as any).checkpointDescription,
           reviewPhase: (card as any).reviewPhase,
           reviewRound: (card as any).reviewRound,
@@ -349,14 +398,22 @@ export function createStatusGitAdapter(options: {
 
 /** Create a concrete StatusPrPort implementation. */
 export function createStatusPrAdapter(options: {
-  readonly getPrStatusFn?: (_branch: string) => { exists: boolean; number?: number; state?: string; raw?: string };
+  readonly getPrStatusFn?: (_branch: string, _rootDir?: string) => { exists: boolean; number?: number; state?: string; raw?: string };
+  /**
+   * The repository being reported on. Without it the provider lookup falls back
+   * to `process.cwd()`, so `px status` would consult whichever repo the process
+   * happens to sit in rather than the one it is reporting — reaching a review
+   * provider that the target repository has disabled.
+   */
+  readonly rootDir?: string;
 } = {}): StatusPrPort {
   const getPrStatusFn = options.getPrStatusFn || getPrStatus;
+  const rootDir = options.rootDir;
 
   return {
     getPrInfo(branch: string): StatusPrInfo | null {
       try {
-        return getPrStatusFn(branch);
+        return rootDir === undefined ? getPrStatusFn(branch) : getPrStatusFn(branch, rootDir);
       } catch {
         return { exists: false };
       }

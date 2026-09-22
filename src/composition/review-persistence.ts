@@ -13,6 +13,7 @@ import {
   consumeImplementerArtifacts,
   consumeReviewerArtifacts,
 } from '../adapters/review/review-artifacts.js';
+import { parseReviewFindings } from '../adapters/review/review-round.js';
 
 /**
  * Bind every review-state operation to the Mission authority.
@@ -105,12 +106,51 @@ export function bindReviewPersistence(store: MissionStore, lifecycleService?: Mi
  */
 export function reviewLoopBindings(store: MissionStore, lifecycleService?: MissionLifecycleService | null) {
   const persistence = bindReviewPersistence(store, lifecycleService);
+  // The loop's completion signal is the same persisted conversation written by
+  // `px verdict`/`px resolve`; artifact files are not a production input here.
+  const reviewerOutput = async (
+    slug: string,
+    reviewer: string,
+    options: Parameters<typeof consumeReviewerArtifacts>[2] = {},
+  ) => {
+    const state = await persistence.readReviewState(slug, options.worktree);
+    if (!state) { return { consumed: false }; }
+    const events = await persistence.readAllEvents(slug, { rootDir: options.worktree });
+    const outcome = [...events].reverse().find((event: any) =>
+      event.event_type === 'reviewer_outcome' && event.round === state.round && event.actor === reviewer,
+    ) as { verdict?: string; content?: string } | undefined;
+    if (!outcome?.verdict) { return { consumed: false }; }
+    const findings = [...events].reverse().find((event: any) =>
+      event.event_type === 'reviewer_findings' && event.round === state.round && event.actor === reviewer,
+    ) as { content?: string } | undefined;
+    return {
+      consumed: true,
+      ok: true,
+      reviewState: outcome.verdict.toUpperCase().replace('-', '_'),
+      findingSummaries: parseReviewFindings(findings?.content ?? '').map((finding) => finding.summary),
+    };
+  };
+  const implementerOutput = async (
+    slug: string,
+    implementer: string,
+    options: Parameters<typeof consumeImplementerArtifacts>[2] = {},
+  ) => {
+    const state = await persistence.readReviewState(slug, options.worktree);
+    if (!state) { return { consumed: false }; }
+    const events = await persistence.readAllEvents(slug, { rootDir: options.worktree });
+    const disposition = [...events].reverse().find((event: any) =>
+      event.event_type === 'implementer_disposition' && event.round === state.round && event.actor === implementer,
+    ) as { disposition?: string } | undefined;
+    return disposition?.disposition
+      ? { consumed: true, ok: true, disposition: disposition.disposition }
+      : { consumed: false };
+  };
   return {
     readReviewStateFn: persistence.readReviewState,
     writeReviewStateFn: persistence.writeReviewState,
     resetReviewStateFn: persistence.resetReviewState,
-    consumeReviewerArtifactsFn: persistence.consumeReviewerArtifacts,
-    consumeImplementerArtifactsFn: persistence.consumeImplementerArtifacts,
+    consumeReviewerArtifactsFn: reviewerOutput,
+    consumeImplementerArtifactsFn: implementerOutput,
     missionStore: store,
   };
 }

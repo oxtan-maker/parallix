@@ -212,7 +212,7 @@ test('guard 1 fixture: rejects a single-line write to a retired path in a new fi
 
   const hitLines = rogueWritesIn(rogue);
   assert.deepEqual(hitLines, [2], 'the single-line rogue write is detected');
-  assert.ok(allowedWriters().has('src/adapters/review/review-events.ts'));
+  assert.ok(allowedWriters().has('src/adapters/verification/redgreen.ts'));
 });
 
 test('guard 1 fixture: rejects a variable-path write to a retired path in a new file', () => {
@@ -229,19 +229,19 @@ test('guard 1 fixture: rejects a variable-path write to a retired path in a new 
 
   const hitLines = fileScopedRogueWrites(rogue);
   assert.deepEqual(hitLines, [3], 'variable-path rogue write in an unregistered file is detected');
-  assert.ok(allowedWriters().has('src/adapters/review/review-events.ts'));
+  assert.ok(allowedWriters().has('src/adapters/verification/redgreen.ts'));
 });
 
 test('guard 1 fixture: permits a registered writer even on a same-line write', () => {
-  const registered = 'src/adapters/review/review-events.ts';
+  const registered = 'src/adapters/verification/redgreen.ts';
   assert.ok(allowedWriters().has(registered), 'registered writer must be in the allowlist');
 
   const entry = RETIRED_WORKFLOW_PATH_WRITERS.find((e) => e.fileLocation === registered);
   assert.ok(entry, `registered writer must have an inventory entry: ${registered}`);
   assert.equal(
     entry.classification,
-    'explicit-one-way-export',
-    'review-events is a one-way generated export',
+    'mission-document-evidence',
+    'redgreen reads the mission document for its reproduction-test declaration',
   );
 });
 

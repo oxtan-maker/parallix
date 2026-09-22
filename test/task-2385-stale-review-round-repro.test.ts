@@ -22,7 +22,7 @@ import {
 } from '../src/adapters/review/review-state-mapping.js';
 import { postWorkflowReview } from '../src/adapters/review/review-artifacts.js';
 import { ReviewState } from '../src/adapters/review/review-state.js';
-import { reviewLoopBindings } from '../src/composition/review-persistence.js';
+import { bindReviewPersistence, reviewLoopBindings } from '../src/composition/review-persistence.js';
 import { agentFamily } from '../src/domain/agents.js';
 import {
   ConfiguredReviewerEligibility,
@@ -105,11 +105,12 @@ describe('TASK-2385 stale review round', () => {
   });
 });
 
-describe('TASK-2385 verdict persistence through the consumeReviewerArtifacts seam', () => {
+describe('TASK-2385 verdict persistence through the bound reviewer output seam', () => {
   /**
    * A 2-round mission in the operator store. Round 2 is current. This test
-   * drives the FULL production artifact-consumption path via `reviewLoopBindings`
-   * with a real bound store: it does NOT inject `readReviewStateFn` into
+   * drives the production verdict writer through `bindReviewPersistence`, then
+   * reads its typed output through `reviewLoopBindings`, with a real bound
+   * store. It does NOT inject `readReviewStateFn` into
    * `postWorkflowReview`, so the verdict can only persist if the production path
    * forwards the bound reader (and `missionStore`) to `recordLocalReviewVerdict`.
    * A regression that drops that forward (TASK-2385 F1) makes the verdict read
@@ -147,7 +148,7 @@ describe('TASK-2385 verdict persistence through the consumeReviewerArtifacts sea
     return dir;
   }
 
-  it('records an approve verdict onto the stored round 2 through the bound consumption path', async () => {
+  it('records an approve verdict onto the stored round 2 through the bound output path', async () => {
     const store = twoRoundStore();
     const tmpDir = artifactDir({
       'task-2385-review-findings.md': 'No blocking findings.',
@@ -156,7 +157,7 @@ describe('TASK-2385 verdict persistence through the consumeReviewerArtifacts sea
     });
     let providerReviewCalled = false;
 
-    const result = await reviewLoopBindings(store as never).consumeReviewerArtifactsFn('task-2385', 'claude', {
+    const result = await bindReviewPersistence(store as never).consumeReviewerArtifacts('task-2385', 'claude', {
       worktree: tmpDir,
       tmpDir,
       providerEnabled: true,
@@ -168,8 +169,10 @@ describe('TASK-2385 verdict persistence through the consumeReviewerArtifacts sea
       postReviewFn: () => { providerReviewCalled = true; return { ok: true }; },
     });
 
-    assert.equal(result.ok, true, 'the bound consumption path consumes the artifacts');
+    assert.equal(result.ok, true, 'the bound verdict writer consumes the artifacts');
     assert.equal(providerReviewCalled, false, 'a self-author verdict skips the provider review POST');
+    const output = await reviewLoopBindings(store as never).consumeReviewerArtifactsFn('task-2385', 'claude', { worktree: tmpDir });
+    assert.equal(output.consumed, true, 'the review loop reads the persisted verdict output');
     // The persisted verdict survives on round 2, not a fabricated round 1, and
     // round 1 keeps its number: the stale-round invariant holds end to end.
     assert.equal(store.state.mission.review.rounds[1].disposition, 'APPROVED', 'the approve verdict persists on the current round 2');

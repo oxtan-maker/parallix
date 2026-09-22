@@ -4,6 +4,7 @@ import {
   MissionRuleViolation,
   type Mission,
   type MissionId,
+  type MissionLabel,
   type OpenMission,
   type MissionStatus,
 } from './mission.js';
@@ -45,6 +46,61 @@ export interface MissionTransition {
   readonly trigger: MissionCommand['type'];
   readonly actor: string;
   readonly occurredAt: string;
+}
+
+/**
+ * A mission cannot start work on a contract nobody finished writing.
+ *
+ * Draft settles the goal, the reason it exists, what it covers and what
+ * verifies it, and every later stage is judged against those: execution records
+ * evidence for them, review reads them, handoff runs exactly the declared
+ * gates. Leaving completeness to the drafting agent's own reading of its prompt
+ * is how a mission reaches execution with a placeholder goal and nothing to
+ * verify it — the instruction is followed exactly as often as it is not.
+ *
+ * Checked at the transition rather than inside `missionBrief()` so the parts can
+ * be recorded in any order, and only the move out of draft demands all of them.
+ * `refine` is where every draft ends, so a new mission cannot become refined
+ * without its contract.
+ *
+ * `activate` checks it only for a mission with a recorded brief. A refined or
+ * active mission with no brief was drafted before the contract was Mission
+ * state: its mission document, checkpoint plan and `CP-N.md` evidence remain
+ * its contract, and relaunching it (usage block, restart) must keep working.
+ *
+ * `outOfScope` is deliberately not required: it is new, so no existing mission
+ * has one, and demanding it would fail missions whose contract is otherwise
+ * complete.
+ */
+function requireDraftedContract(mission: OpenMission, command: MissionCommand): void {
+  const brief = mission.brief ?? null;
+  const missing: string[] = [];
+  if (!brief) {
+    missing.push('a goal and why (`px goal set`)', 'a scope (`px scope set`)');
+  } else if (!brief.scope) {
+    missing.push('a scope (`px scope set`)');
+  }
+  if ((mission.successCriteria ?? []).length === 0) {
+    missing.push('at least one success criterion (`px criterion add`)');
+  }
+  if (mission.checkpoints.length === 0) {
+    missing.push('a checkpoint plan (`px checkpoint plan`)');
+  }
+  if ((mission.declaredGates ?? []).length === 0) {
+    missing.push('at least one verification gate (`px gate add`)');
+  }
+  if (!mission.predictedNelBucket) {
+    missing.push('a predicted NEL bucket (`px nel set`)');
+  }
+  if (mission.labels.includes('bug' as MissionLabel) && !mission.reproductionTest) {
+    missing.push('a reproduction test for this bug mission (`px repro set`)');
+  }
+  if (missing.length > 0) {
+    throw new MissionRuleViolation(
+      `Cannot ${command.type} ${mission.id}: its mission contract is incomplete. `
+      + `Missing ${missing.join('; ')}. Record what is missing, then read it back with \`px status ${mission.id}\`.`,
+    );
+  }
 }
 
 function requireStatus(
@@ -144,9 +200,11 @@ export function decideMission(mission: Mission, command: MissionCommand): Missio
     // spelled as the backlog jump this rule exists to forbid. Re-refining an
     // already refined mission is idempotent so a re-run of `px draft` is safe.
     requireStatus(mission, ['backlog', 'refined'], command);
+    requireDraftedContract(mission, command);
     return { ...mission, status: 'refined' };
   case 'activate':
     requireStatus(mission, ['refined', 'active'], command);
+    if (mission.brief) { requireDraftedContract(mission, command); }
     return { ...mission, status: 'active', assignee: command.agent };
   case 'submit-for-review':
     // A handoff that relaunches (gatekeeper pushback, crashed agent, retried

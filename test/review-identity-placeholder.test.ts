@@ -17,8 +17,10 @@ test('buildCompactReviewPrompt uses actualReviewer when provided', () => {
     actualReviewer: 'vibe'
   });
 
-  assert.match(prompt, /Do not invoke `px` yourself, with one exception/);
-  assert.match(prompt, /\$review all/);
+  // TASK-2521.03 replaced the artifact protocol: the reviewer's one write is
+  // `px verdict`, and the context read is `px status`.
+  assert.match(prompt, /Submit your final decision with `px verdict`/);
+  assert.match(prompt, /px status/);
   assert.doesNotMatch(prompt, /Reviewer: claude/);
   assert.doesNotMatch(prompt, /Reviewer: vibe/);
 });
@@ -32,6 +34,6 @@ test('buildCompactActOnReviewPrompt uses actualImplementer when provided', () =>
   });
 
   assert.match(prompt, /You are the implementer agent family: `codex`/);
-  assert.match(prompt, /task-1051-round-resolution\.md/);
+  assert.match(prompt, /px resolve --slug task-1051 --actor codex/);
   assert.ok(!prompt.includes('agent family: `custom`'), 'Should not contain the original implementer in identity spot');
 });

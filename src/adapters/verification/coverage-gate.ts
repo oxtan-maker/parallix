@@ -313,33 +313,31 @@ function resetPerRunScratchState() {
   cleanupDone = false;
 }
 
-function buildCoverageArgs(testFiles: string[], coverageThreshold = threshold, useLcov = lcov) {
+function buildCoverageArgs(testFiles: string[]) {
   const runsTypeScript = testFiles.some(file => file.endsWith('.ts'));
   const args = [
     ...(runsTypeScript ? ['--import', 'tsx', '--import', pathToFileURL(path.join(REPO_ROOT, 'test', 'bootstrap-parallix-home.ts')).href] : []),
     '--test',
     '--experimental-test-module-mocks',
-    '--experimental-test-coverage',
-    `--test-coverage-lines=${coverageThreshold}`,
-    ...COVERAGE_INCLUDES.flatMap(pattern => ['--test-coverage-include', pattern]),
-    ...COVERAGE_EXCLUDES.flatMap(pattern => ['--test-coverage-exclude', pattern]),
     '--test-concurrency',
     String(COVERAGE_TEST_CONCURRENCY),
   ];
 
-  if (useLcov) {
-    const coverageDir = path.join(REPO_ROOT, 'coverage');
-    if (!fs.existsSync(coverageDir)) {
-      fs.mkdirSync(coverageDir, { recursive: true });
-    }
-    args.push('--test-reporter=lcov');
-    args.push(`--test-reporter-destination=${path.join(coverageDir, 'lcov.info')}`);
-    args.push('--test-reporter=spec');
-    args.push('--test-reporter-destination=stdout');
-  }
-
   args.push(...testFiles);
   return args;
+}
+
+function buildC8Args(coverageThreshold = threshold, useLcov = lcov) {
+  const coverageDir = path.join(REPO_ROOT, 'coverage');
+  if (useLcov) { fs.mkdirSync(coverageDir, { recursive: true }); }
+  return [
+    '--all', '--extension', '.ts', '--exclude-after-remap',
+    ...COVERAGE_INCLUDES.flatMap(pattern => ['--include', pattern]),
+    ...COVERAGE_EXCLUDES.flatMap(pattern => ['--exclude', pattern]),
+    '--check-coverage', `--lines=${coverageThreshold}`,
+    '--reporter=text',
+    ...(useLcov ? ['--reporter=lcov', `--reports-dir=${coverageDir}`] : []),
+  ];
 }
 
 function resolveTestTimeoutMs(env = process.env) {
@@ -360,7 +358,8 @@ function runTests(testFiles: string[], coverageThreshold = threshold, _spawnSync
   childEnv.NODE_V8_COVERAGE = nodeCoverageDir;
   childEnv.GRAPHIFY_BIN = createMockGraphifyBin();
 
-  const result = _spawnSync(process.execPath, buildCoverageArgs(testFiles, coverageThreshold), {
+  const c8 = path.join(REPO_ROOT, 'node_modules', '.bin', 'c8');
+  const result = _spawnSync(c8, [...buildC8Args(coverageThreshold), process.execPath, ...buildCoverageArgs(testFiles)], {
     encoding: 'utf8',
     cwd: REPO_ROOT,
     env: childEnv,
@@ -406,7 +405,7 @@ function main() {
     fmt.log.info('Denominator: src/**/*.ts');
     fmt.log.info(`Include globs: ${COVERAGE_INCLUDES.join(', ')}`);
     fmt.log.info(`Exclude globs: ${COVERAGE_EXCLUDES.join(', ')}`);
-    fmt.log.info(`Would run: ${fmt.command(`${process.execPath} ${buildCoverageArgs(testFiles, threshold).join(' ')}`)}`);
+    fmt.log.info(`Would run: ${fmt.command(`c8 ${buildC8Args(threshold).join(' ')} ${process.execPath} ${buildCoverageArgs(testFiles).join(' ')}`)}`);
     process.exit(0);
   }
 
@@ -467,11 +466,12 @@ function runDryCoverage(exitFn: (_code: number) => void): void {
   fmt.log.info('Denominator: src/**/*.ts');
   fmt.log.info(`Include globs: ${COVERAGE_INCLUDES.join(', ')}`);
   fmt.log.info(`Exclude globs: ${COVERAGE_EXCLUDES.join(', ')}`);
-  fmt.log.info(`Would run: ${fmt.command(`${process.execPath} ${buildCoverageArgs(testFiles, threshold).join(' ')}`)}`);
+  fmt.log.info(`Would run: ${fmt.command(`c8 ${buildC8Args(threshold).join(' ')} ${process.execPath} ${buildCoverageArgs(testFiles).join(' ')}`)}`);
   exitFn(0);
 }
 
 (run as any).buildCoverageArgs = buildCoverageArgs;
+(run as any).buildC8Args = buildC8Args;
 (run as any).cleanupNewTempDirs = cleanupNewTempDirs;
 (run as any).cleanupPerRunScratch = cleanupPerRunScratch;
 (run as any).createMockGraphifyBin = createMockGraphifyBin;
@@ -494,4 +494,4 @@ function runDryCoverage(exitFn: (_code: number) => void): void {
 (run as any).runTests = runTests;
 (run as any).shouldCleanTempDir = shouldCleanTempDir;
 export default run;
-export { run, cleanupPerRunScratch, createMockGraphifyBin, createPerRunScratchDirs, createPerRunTmpRoot, COVERAGE_EXCLUDES, COVERAGE_GATE_MANIFEST_DIR, COVERAGE_INCLUDES, DEFAULT_TEST_TIMEOUT_MS, coverageTestFiles, discoverTestFiles, flushCoverageManifest, listTempEntries, normalizeLcov, mergeLcov, recoverOrphanedScratchDirs, registerExitHandlers, resetPerRunScratchState, resolveTestTimeoutMs, runTests, shouldCleanTempDir };
+export { run, buildC8Args, cleanupPerRunScratch, createMockGraphifyBin, createPerRunScratchDirs, createPerRunTmpRoot, COVERAGE_EXCLUDES, COVERAGE_GATE_MANIFEST_DIR, COVERAGE_INCLUDES, DEFAULT_TEST_TIMEOUT_MS, coverageTestFiles, discoverTestFiles, flushCoverageManifest, listTempEntries, normalizeLcov, mergeLcov, recoverOrphanedScratchDirs, registerExitHandlers, resetPerRunScratchState, resolveTestTimeoutMs, runTests, shouldCleanTempDir };

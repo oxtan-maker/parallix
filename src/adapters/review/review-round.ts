@@ -34,10 +34,24 @@ import {
   type Review,
 } from '../../domain/review.js';
 
+/**
+ * Reject a write whose caller read an older Mission than the one on disk.
+ *
+ * The review recorders load-modify-save, so without this an agent that read
+ * version N could land a decision after another mutation reached N+1 and never
+ * be told. Callers that supply no expected version keep the previous behaviour;
+ * the agent-facing verbs always supply one.
+ */
+function staleWrite(slug: string, expected: number | undefined, actual: number): string | null {
+  if (expected === undefined) { return null; }
+  if (expected === actual) { return null; }
+  return `stale write for ${slug}: expected version ${expected}, found ${actual}. Re-read \`px status ${slug}\` and retry.`;
+}
+
 export type ReviewRoundResult =
   | { outcome: 'recorded' }
   /** Already recorded, or nothing to record. Replaying a round is not an error. */
-  | { outcome: 'unchanged'; reason: string }
+  | { outcome: 'unchanged'; reason: string; noRevisionChange?: boolean }
   | { outcome: 'failed'; diagnostic: string };
 
 /** Reviewer verdicts that carry the `changes-requested` decision kind. */
@@ -92,6 +106,8 @@ export async function recordRequestedChanges(
     comment: string | null;
     decidedAt: string;
     disposition?: ReviewDisposition;
+    /** Mission version the caller read; a mismatch fails closed. */
+    expectedVersion?: number;
   },
   ports: ReviewRoundPorts = {},
 ): Promise<ReviewRoundResult> {
@@ -104,6 +120,8 @@ export async function recordRequestedChanges(
     const loaded = await store.load(missionId(slug));
     if (loaded.kind !== 'found') { return { outcome: 'failed', diagnostic: `Mission ${slug} is not in the operator database` }; }
     const mission = loaded.mission;
+    const stale = staleWrite(slug, input.expectedVersion, loaded.version);
+    if (stale) { return { outcome: 'failed', diagnostic: stale }; }
     if (!('review' in mission) || !mission.review) {
       return { outcome: 'failed', diagnostic: `Mission ${slug} has no review to decide; px review ${slug} --start starts the review` };
     }
@@ -219,6 +237,8 @@ export async function recordApproval(
     comment: string | null;
     decidedAt: string;
     source?: ReviewApprovalSource;
+    /** Mission version the caller read; a mismatch fails closed. */
+    expectedVersion?: number;
   },
   ports: ReviewRoundPorts = {},
 ): Promise<ReviewRoundResult> {
@@ -229,6 +249,8 @@ export async function recordApproval(
     const loaded = await store.load(missionId(slug));
     if (loaded.kind !== 'found') { return { outcome: 'failed', diagnostic: `Mission ${slug} is not in the operator database` }; }
     const mission = loaded.mission;
+    const stale = staleWrite(slug, input.expectedVersion, loaded.version);
+    if (stale) { return { outcome: 'failed', diagnostic: stale }; }
     if (!('review' in mission) || !mission.review) {
       return { outcome: 'failed', diagnostic: `Mission ${slug} has no review to approve; px review ${slug} --start starts the review` };
     }
@@ -347,6 +369,8 @@ export async function recordImplementerResolution(
     evidence: string;
     resultingRevision: string;
     respondedAt: string;
+    /** Mission version the caller read; a mismatch fails closed. */
+    expectedVersion?: number;
   },
   ports: ReviewRoundPorts = {},
 ): Promise<ReviewRoundResult> {
@@ -356,14 +380,25 @@ export async function recordImplementerResolution(
     const loaded = await store.load(missionId(slug));
     if (loaded.kind !== 'found') { return { outcome: 'failed', diagnostic: `Mission ${slug} is not in the operator database` }; }
     const mission = loaded.mission;
+    const stale = staleWrite(slug, input.expectedVersion, loaded.version);
+    if (stale) { return { outcome: 'failed', diagnostic: stale }; }
     if (!('review' in mission) || !mission.review) {
       return { outcome: 'failed', diagnostic: `Mission ${slug} has no review to resolve` };
     }
     if (reviewStatus(mission.review) !== 'awaiting-implementation') {
       return { outcome: 'unchanged', reason: `review is ${reviewStatus(mission.review)}` };
     }
-    const decision = currentReviewRound(mission.review).decision;
+    const currentRound = currentReviewRound(mission.review);
+    const decision = currentRound.decision;
     const findings = decision?.kind === 'changes-requested' ? decision.findings : [];
+    // TASK-2478/criterion 8: an implementer resolution whose resulting revision
+    // equals the round's subject revision means the finding was NOT addressed.
+    // Reject it here, before recording, so the round never becomes
+    // ready-for-next-round on the unchanged tree (a later resume could otherwise
+    // open round 2 on the original revision and approve the finding).
+    if (input.resultingRevision && input.resultingRevision === currentRound.subject.revision) {
+      return { outcome: 'unchanged', reason: 'resulting revision did not change from the round subject revision', noRevisionChange: true };
+    }
     const evidence = input.evidence.trim() || `Round resolution for ${slug}`;
     const review = applyImplementerCommand(mission.review, {
       type: 'submit-resolution',

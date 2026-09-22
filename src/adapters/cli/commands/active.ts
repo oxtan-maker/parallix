@@ -307,8 +307,8 @@ function nextMissingCheckpointFromError(errorMsg) {
 /** @param {string} slug @param {string} worktree @param {string} nextCheckpoint */
 function buildCheckpointContinuationPrompt(slug, worktree, nextCheckpoint) {
   return `Mission ${slug} is incomplete: ${nextCheckpoint}. Continue the existing execute mission in ${worktree} from ${nextCheckpoint}. ` +
-    `Complete and commit ${nextCheckpoint}.md, then immediately continue to every remaining declared checkpoint and mission gate. ` +
-    `Do not exit or send a final response until every declared checkpoint is committed and every mission-declared gate passes, unless a mission stop rule applies or a genuine external dependency blocks progress.`;
+    `Complete ${nextCheckpoint} and record its evidence, then immediately continue to every remaining declared checkpoint and mission gate. ` +
+    `Do not exit or send a final response until every declared checkpoint has its evidence and every mission-declared gate passes, unless a mission stop rule applies or a genuine external dependency blocks progress.`;
 }
 
 /** @param {string} missionText */
@@ -338,9 +338,22 @@ function parseDeclaredCheckpointNames(missionText) {
   return { names: [...new Set(names)] };
 }
 
-/** @param {string} slug @param {string} worktree @param {{findMissionDirFn?: Function, findCheckpointsFn?: Function, readMissionFileFn?: Function, runFn?: Function, log?: Function, error?: Function}} [options] */
-function validateCheckpointsBeforeHandoff(slug, worktree, options = {}) {
+/**
+ * Every declared checkpoint must have its evidence before handoff.
+ *
+ * A mission drafted through the typed verbs declares its checkpoints as a
+ * recorded plan and records their evidence as Mission state, supplied by
+ * `loadRecordedCheckpointsFn`. A mission drafted before that (the loader returns
+ * null) declares them in its mission document and evidences them as committed
+ * `CP-N.md` files. Either way a gap names the next checkpoint, which is what the
+ * continuation relaunch resumes from.
+ *
+ * @param {string} slug @param {string} worktree
+ * @param {{findMissionDirFn?: Function, findCheckpointsFn?: Function, readMissionFileFn?: Function, runFn?: Function, loadRecordedCheckpointsFn?: (slug: string) => Promise<{planned: string[], recorded: string[]} | null>, log?: Function, error?: Function}} [options]
+ */
+async function validateCheckpointsBeforeHandoff(slug, worktree, options = {}) {
   const {
+    loadRecordedCheckpointsFn = async () => null,
     findMissionDirFn = findMissionDir,
     findCheckpointsFn = findCheckpoints,
     readMissionFileFn = readMissionFile,
@@ -348,6 +361,17 @@ function validateCheckpointsBeforeHandoff(slug, worktree, options = {}) {
     log = fmt.log.plain,
     error = fmt.log.plainError
   } = options;
+  const recordedCheckpoints = await loadRecordedCheckpointsFn(slug);
+  if (recordedCheckpoints) {
+    const missing = recordedCheckpoints.planned.filter((name) => !recordedCheckpoints.recorded.includes(name));
+    if (missing.length > 0) {
+      const msg = `Planned checkpoint evidence is missing before handoff: ${missing.join(', ')}. Record each with \`px checkpoint record --name <CP-N>\` before handoff.`;
+      error(msg);
+      return { ok: false, error: msg, missingCheckpoints: missing, nextCheckpoint: missing[0] };
+    }
+    log(fmt.status('PASS', `All ${recordedCheckpoints.planned.length} planned checkpoint(s) have recorded evidence.`));
+    return { ok: true, declaredCheckpoints: recordedCheckpoints.planned };
+  }
   const rootDir = worktree || process.cwd();
   const missionDir = findMissionDirFn(slug, rootDir);
   if (!missionDir) {
@@ -500,8 +524,8 @@ async function repairCheckpointsBeforeHandoff(validation, context): Promise<bool
     : gapError;
   const outcome = await rebound({ kind: 'handoff-verification', error: checkpointError }, {
     slug, worktree, implementer: agent, startAgent: reboundLaunchPort,
-    verify: () => {
-      const retry = validateCheckpointsBeforeHandoffFn(slug, worktree, { log, error });
+    verify: async () => {
+      const retry = await validateCheckpointsBeforeHandoffFn(slug, worktree, { log, error });
       return { ok: Boolean(retry.ok), diagnostic: retry.error || '' };
     },
     log, error,
@@ -509,7 +533,7 @@ async function repairCheckpointsBeforeHandoff(validation, context): Promise<bool
   if (outcome.outcome === 'fixed') { return true; }
   // exhausted / human-only — re-read the final state so the operator
   // instruction names the checkpoint gap that actually remains.
-  const finalValidation = validateCheckpointsBeforeHandoffFn(slug, worktree, { log, error });
+  const finalValidation = await validateCheckpointsBeforeHandoffFn(slug, worktree, { log, error });
   if (finalValidation.ok) { return true; }
   error(`       ${checkpointValidationNextAction(/** @type {string} */ (finalValidation.error || checkpointError), slug, worktree)}`);
   return false;
@@ -603,7 +627,8 @@ async function runHandoffAndReview(slug, worktree, agent, options = {}) {
     taskFile = null,
     onAgentLaunched = undefined,
     onAutonomousStop = undefined,
-    validateCheckpointsBeforeHandoffFn = validateCheckpointsBeforeHandoff,
+    loadRecordedCheckpointsFn = undefined,
+    validateCheckpointsBeforeHandoffFn = (/** @type{string} */ s, /** @type{string} */ w, /** @type{object} */ o) => validateCheckpointsBeforeHandoff(s, w, { ...o, loadRecordedCheckpointsFn }),
     performHandoff: _performHandoff = (/** @type{string} */ s, /** @type{object} */ o) => handoff.performHandoff(s, o),
     startReviewLoop: _startReviewLoop = (/** @type{string} */ s, /** @type{object} */ o) => startReviewLoop(s, o),
     repairHandoffFn = /** @type{(s: string, w: string, e: string, o: object) => Promise<{repaired: boolean, blocker?: string}>} */(repairHandoff.default),
@@ -621,7 +646,7 @@ async function runHandoffAndReview(slug, worktree, agent, options = {}) {
   // Pre-handoff checkpoint enforcement: validate checkpoints exist before calling
   // performHandoff(). This catches missing checkpoints immediately after the
   // execute agent exits, before the repair flow runs.
-  const validation = validateCheckpointsBeforeHandoffFn(slug, worktree, { log, error });
+  const validation = await validateCheckpointsBeforeHandoffFn(slug, worktree, { log, error });
   if (!validation.ok && !await repairCheckpointsBeforeHandoff(validation, repairContext)) { return false; }
 
   const holder = { result: await _performHandoff(slug, { forgejoUser: agent, worktree }) };

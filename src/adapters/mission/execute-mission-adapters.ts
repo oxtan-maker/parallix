@@ -23,8 +23,8 @@ import type {
 // Type-only import (erased at runtime): the plain overlay shape materialized at
 // the composition root. No SQLite driver binding reaches this module.
 import type { OperatorBlocklistOverlay } from '../sqlite/blocklist-snapshot.js';
-import type { MissionLaunchContext } from '../../domain/mission-execution-context.js';
-import { renderExecutionContextForLaunch } from '../../domain/mission-execution-context.js';
+import type { MissionLaunchContext } from '../../application/mission-brief-service.js';
+import { renderLaunchContext } from '../../application/mission-brief-service.js';
 
 export type { OperatorBlocklistOverlay };
 
@@ -119,14 +119,15 @@ export class AgentExecutionAdapter implements AgentExecutionPort {
   ) {}
 
   async prepare(request: { readonly slug: string; readonly worktree: string }): Promise<AgentLaunchPlan> {
-    // Persisted execution context is the authoritative launch context; the
-    // file-backed checkpoint context is the legacy fallback. Resolve first and
-    // skip the checkpoint read entirely when context exists, so a resume can
-    // start without reading MISSION.md or any CP-N.md. A persisted read still
-    // carries the latest checkpoint so the resume signal is not lost.
+    // The recorded brief is the authoritative launch context; the file-backed
+    // checkpoint context is the legacy fallback for a Mission drafted before
+    // one was recorded. Resolving first skips the checkpoint read entirely, so
+    // a resume starts without reading MISSION.md or any CP-N.md, and the
+    // resolved context still carries the latest checkpoint as the resume
+    // signal.
     const persisted = await this._runtime.resolveExecutionContext(request.slug);
     const launchContext = persisted
-      ? renderExecutionContextForLaunch(persisted.context, persisted.latestCheckpoint)
+      ? renderLaunchContext(persisted)
       : this._runtime.buildCheckpointContext(request.slug);
     const agentConfig = this.resolveAgentConfig();
     return {

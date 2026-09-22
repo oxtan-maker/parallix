@@ -3,7 +3,8 @@ import type { CheckpointData } from './checkpoint.js';
 import type { ExternalTaskRef } from './external-task.js';
 import type { RepositoryId } from './repository.js';
 import type { Review } from './review.js';
-import type { MissionExecutionContext } from './mission-execution-context.js';
+import type { MissionBrief } from './mission-brief.js';
+import type { NelBucketLabel } from './net-engineering-lines.js';
 
 export type MissionId = string & { readonly __brand: 'MissionId' };
 export type MissionSlug = MissionId;
@@ -87,8 +88,26 @@ export interface MissionData {
   readonly labels: readonly MissionLabel[];
   readonly assignee: AgentFamily | null;
   readonly checkpoints: readonly CheckpointData[];
-  /** Bounded launch/refinement facts; absent only for legacy Missions not yet migrated. */
-  readonly executionContext?: MissionExecutionContext | null;
+  /** What the mission is for (ADR 0053). Null until a drafting agent records it. */
+  readonly brief?: MissionBrief | null;
+  /** The exact commands handoff runs for this mission. Empty until declared. */
+  readonly declaredGates?: readonly string[];
+  /** What must be true for the mission to be done. Empty until the draft records them. */
+  readonly successCriteria?: readonly string[];
+  /**
+   * The draft's size prediction, compared at handoff with the measured NEL
+   * bucket for the calibration ADR 0047 describes. Null until predicted.
+   */
+  readonly predictedNelBucket?: NelBucketLabel | null;
+  /**
+   * Path to the red-to-green reproduction test a bug mission declares.
+   *
+   * Mission state rather than a `Reproduction-Test:` line in MISSION.md: the
+   * red-to-green gate is a live consumer, and a repository file was the only
+   * way to reach it, which is what kept the draft prompt telling agents to
+   * write one. Null for a mission with no reproduction test.
+   */
+  readonly reproductionTest?: string | null;
   readonly review: Review | null;
   /** Captured at handoff; null until the change-size measurement exists. */
   readonly netEngineeringLines: number | null;
@@ -159,7 +178,11 @@ export function intakeMission(intake: MissionIntake): OpenMission {
     labels: intake.labels === undefined ? [] : [...new Set(intake.labels)],
     assignee: intake.assignee ?? null,
     checkpoints: [],
-    executionContext: null,
+    brief: null,
+    declaredGates: [],
+    successCriteria: [],
+    predictedNelBucket: null,
+    reproductionTest: null,
     review: null,
     netEngineeringLines: null,
     status: 'backlog',

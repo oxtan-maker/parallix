@@ -21,6 +21,7 @@ import {
 } from './mission-command-support.js';
 import {
   isHandoffReadyCheckpoint,
+  planCheckpoint,
   recordCheckpoint,
   type CheckpointData,
   type GoalCheckRow,
@@ -41,6 +42,17 @@ export interface RecordCheckpointResult {
   readonly replaced: boolean;
 }
 
+export interface PlanCheckpointRequest extends MissionCommandRequest {
+  readonly name: string;
+  /** What the checkpoint delivers. Omitted on `unplan`. */
+  readonly description?: string;
+}
+
+export interface PlanCheckpointResult {
+  readonly checkpoints: readonly CheckpointData[];
+  readonly version: MissionVersion;
+}
+
 export interface ReadCheckpointsRequest extends MissionCommandRequest {
   /** Return one named checkpoint (e.g. `CP-2`) instead of all of them. */
   readonly name?: string;
@@ -54,6 +66,43 @@ export interface ReadCheckpointsResult {
 
 export class MissionCheckpointService {
   constructor(private readonly _store: MissionStore) {}
+
+  /** Plan a checkpoint: a name and what it delivers, with no evidence yet. */
+  async plan(request: PlanCheckpointRequest): Promise<ApplicationOutcome<PlanCheckpointResult>> {
+    return this.replan(request, (checkpoints, missionId) => planCheckpoint(checkpoints, {
+      missionId, name: request.name, description: request.description ?? '',
+    }));
+  }
+
+  /** Drop a planned checkpoint. Evidence already recorded is never dropped this way. */
+  async unplan(request: PlanCheckpointRequest): Promise<ApplicationOutcome<PlanCheckpointResult>> {
+    return this.replan(request, (checkpoints) => {
+      const target = checkpoints.find((checkpoint) => checkpoint.name === request.name);
+      if (!target) { throw new Error(`Checkpoint ${request.name} is not planned`); }
+      if (target.goalCheck.length > 0) { throw new Error(`Checkpoint ${request.name} already has recorded evidence`); }
+      return checkpoints.filter((checkpoint) => checkpoint !== target);
+    });
+  }
+
+  private async replan(
+    request: PlanCheckpointRequest,
+    change: (_checkpoints: readonly CheckpointData[], _missionId: Mission['id']) => CheckpointData[],
+  ): Promise<ApplicationOutcome<PlanCheckpointResult>> {
+    const guard = missingCapability<PlanCheckpointResult>(request, 'mission:context');
+    if (guard) { return guard; }
+    const loaded = await loadForCommand<PlanCheckpointResult>(this._store, request);
+    if (!isLoaded(loaded)) { return loaded; }
+    let checkpoints: CheckpointData[];
+    try { checkpoints = change(loaded.mission.checkpoints, loaded.mission.id); } catch (error) {
+      return failure('validation', error instanceof Error ? error.message : 'checkpoint plan rejected');
+    }
+    try {
+      const version = await this._store.save({ ...loaded.mission, checkpoints } as Mission, loaded.version);
+      return completed({ checkpoints, version }, [storeEvidence(loaded.mission.id, `checkpoint-plan:${request.name}`, `${checkpoints.length} checkpoint(s) planned`)]);
+    } catch (error) {
+      return writeFailure<PlanCheckpointResult>(error);
+    }
+  }
 
   async record(
     request: RecordCheckpointRequest,

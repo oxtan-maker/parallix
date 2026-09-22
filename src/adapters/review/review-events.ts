@@ -2,19 +2,15 @@
  * Review event persistence for autonomous review rounds.
  *
  * Review events live in the operator database (mission_review_events, part of
- * the Review aggregate) and only there. The Markdown files under
- * missions/<slug>/review-events/ are exports of those rows — written so humans
- * and agents can read a mission's review conversation from its directory, and
- * never read back by production. Losing them loses nothing; losing the database
- * row loses the event.
+ * the Review aggregate) and only there. TASK-2521.03 removed the Markdown
+ * export under missions/<slug>/review-events/: a mission's review conversation
+ * is read back through `px status`, not from its directory.
  *
  * Owned by the Node workflow harness (architecture migration).
  */
 
-import * as fs from 'fs';
-import * as path from 'path';
 import { git } from '../git/git.js';
-import { findMissionDir, missionBranchName, resolveWorktree } from '../filesystem/mission-utils.js';
+import { missionBranchName, resolveWorktree } from '../filesystem/mission-utils.js';
 import { missionId } from '../../domain/mission.js';
 import type { Review, ReviewEventType, ReviewItemDisposition } from '../../domain/review.js';
 import * as crypto from 'node:crypto';
@@ -89,33 +85,6 @@ const VALID_VERDICTS = Object.freeze([
 ]);
 
 // -------- Path Resolution --------
-
-/**
- * Returns the absolute path to the mission-local review-events directory.
- * Creates the directory if it does not exist.
- */
-function reviewEventsDir(slug: string, rootDir = process.cwd()): string | null {
-  const missionDir = findMissionDir(slug, rootDir);
-  if (!missionDir) {return null;}
-  const dir = path.join(missionDir, 'review-events');
-  if (!fs.existsSync(dir)) {
-    fs.mkdirSync(dir, { recursive: true });
-  }
-  return dir;
-}
-
-/**
- * Returns the path for a specific event file in the mission-local store.
- */
-function eventFilePath(slug: string, eventType: string, round: number, actor: string, timestamp: string | null = null, rootDir = process.cwd()): string | null {
-  const eventsDir = reviewEventsDir(slug, rootDir);
-  if (!eventsDir) {return null;}
-
-  const ts = timestamp || generateEventTimestamp();
-  const sanitizedActor = sanitizeFilename(actor);
-  const filename = `${ts}-${eventType}-${round}-${sanitizedActor}.md`;
-  return path.join(eventsDir, filename);
-}
 
 // -------- Timestamp & Sanitization --------
 
@@ -440,26 +409,6 @@ async function consumeComments(comments: unknown[], context: any): Promise<void>
   }
 }
 
-/**
- * Render a complete event file content.
- */
-function renderEventFile(event: NormalizedEvent): string {
-  const frontmatter = buildEventFrontmatter(event);
-  const content = event.content || '';
-
-  const hasFooter = /\n\n---\n`\[workflow-round:\d+, workflow-phase:[^\]]+\]`/.test(content);
-
-  if (hasFooter) {
-    return `${frontmatter}\n\n${content}`;
-  }
-
-  const footer = event.round !== undefined && event.phase !== undefined
-    ? buildEventFooter(event.slug || '', event.round, event.phase)
-    : '';
-
-  return `${frontmatter}\n\n${content}${footer}`;
-}
-
 // -------- Event Creation --------
 
 /** @typedef {{content: string, round?: number, phase?: string, actor?: string, disposition?: string, verdict?: string, fixedItems?: unknown[], pushedBackItems?: unknown[], parkedItems?: unknown[], blockedReason?: string, followUpReference?: string, timestamp?: string}} CreateEventParams */
@@ -507,14 +456,11 @@ function storedEventFailure(slug: string, reason: string, error: (_message: stri
  * Storage is the operator database (`mission_review_events`, part of the Review
  * aggregate) and nothing else: a mission whose Review is not in the database
  * fails here rather than acquiring a second, file-backed copy of its review
- * conversation. The Markdown file under `missions/<slug>/review-events/` is an
- * export of the stored event — written for humans and for the agents that read
- * the mission directory, never read back by production.
+ * conversation. Nothing is written to the repository; agents read the stored
+ * events back through `px status`.
  */
 async function createEvent(slug: string, eventType: string, params: CreateEventParams, options: CreateEventOptions = {}): Promise<CreateEventResult> {
   const {
-    skipGit = false,
-    gitFn = git,
     log: logger = fmt.log.plain,
     error = fmt.log.plainError,
     worktree,
@@ -555,6 +501,13 @@ async function createEvent(slug: string, eventType: string, params: CreateEventP
     }
   );
 
+  // The workflow footer used to be applied when rendering the exported file.
+  // With the export gone the stored row is the only copy, so the footer that
+  // downstream provider comments match on is applied to the stored content.
+  if (event.round !== undefined && event.phase !== undefined && !hasWorkflowFooter(event.content || '')) {
+    event.content = `${event.content || ''}${buildEventFooter(slug, event.round, event.phase)}`;
+  }
+
   const stored = await persistEventInStore(slug, event, rootDir, {
     log: logger,
     error,
@@ -564,72 +517,12 @@ async function createEvent(slug: string, eventType: string, params: CreateEventP
     return storedEventFailure(slug, stored.reason ?? '', error);
   }
 
-  const exportedPath = exportEventFile(slug, event, rootDir, {
-    timestamp: (params.timestamp as string | undefined) ?? null,
-    skipGit,
-    gitFn,
-    log: logger,
-    error,
-  });
-
-  return { ok: true, path: exportedPath ?? stored.path, event };
-}
-
-/**
- * Render a stored review event as Markdown under `missions/<slug>/review-events/`.
- *
- * This is an export of state the operator database already holds, so a failure
- * here is reported and otherwise ignored: the event is stored either way, and
- * no production reader depends on the file. Returns the written path, or null
- * when the mission directory could not be resolved.
- */
-function exportEventFile(
-  slug: string,
-  event: NormalizedEvent,
-  rootDir: string,
-  options: {
-    timestamp: string | null;
-    skipGit: boolean;
-    gitFn: typeof git;
-    log: (_msg: string) => void;
-    error: (_msg: string) => void;
-  }
-): string | null {
-  const { timestamp, skipGit, gitFn, log: logger, error } = options;
-  const round = event.round ?? 1;
-  const phase = event.phase ?? 'reviewing';
-
-  const filePath = eventFilePath(slug, event.eventType, round, event.actor ?? 'unknown', timestamp, rootDir);
-  if (!filePath) {
-    error(fmt.status('WARN', `Stored review event for "${slug}", but its mission directory could not be resolved for export`));
-    return null;
-  }
-
-  const dir = path.dirname(filePath);
-  if (!fs.existsSync(dir)) {
-    fs.mkdirSync(dir, { recursive: true });
-  }
-
-  fs.writeFileSync(filePath, renderEventFile(event), 'utf8');
-  logger(fmt.status('PASS', `Created review event: ${path.basename(filePath)}`));
-
-  if (!skipGit) {
-    const relPath = path.relative(rootDir, filePath);
-    const result = gitFn(['-C', rootDir, 'add', relPath]);
-    if (result.status !== 0) {
-      error(fmt.status('WARN', `Failed to git add event file: ${result.stderr}`));
-    } else {
-      const commitMsg = `review-event(${slug}): ${event.eventType} round ${round} (${phase}) [${event.actor ?? 'unknown'}]`;
-      const commitResult = gitFn(['-C', rootDir, 'commit', '-m', commitMsg, '--allow-empty']);
-      if (commitResult.status !== 0) {
-        error(fmt.status('WARN', `Failed to commit event file: ${commitResult.stderr}`));
-      } else {
-        logger(fmt.status('PASS', 'Committed review event to git'));
-      }
-    }
-  }
-
-  return filePath;
+  // ADR 0053 (Generated repository metadata): normal lifecycle execution must
+  // not create Git-tracked workflow metadata. The stored row is the event;
+  // `readExportedReviewEvents` remains for one-shot import of legacy missions
+  // whose conversation exists only as files.
+  logger(fmt.status('PASS', `Recorded review event: ${event.eventType} round ${event.round ?? 1} [${event.actor ?? 'unknown'}]`));
+  return { ok: true, path: stored.path, event };
 }
 
 interface PersistEventResult {
@@ -813,8 +706,6 @@ export {
 
 // Path resolution
 export {
-  reviewEventsDir,
-  eventFilePath
 };
 
 // Event creation
@@ -832,7 +723,7 @@ export {
 export {
   buildEventFrontmatter,
   buildEventFooter,
-  renderEventFile
+
 };
 
 // Classification

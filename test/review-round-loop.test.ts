@@ -14,6 +14,7 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 
+import { MissionBriefService } from '../src/application/mission-brief-service.js';
 import { MissionCheckpointService } from '../src/application/mission-checkpoint-service.js';
 import { MissionIntakeService } from '../src/application/mission-intake-service.js';
 import { MissionLifecycleService } from '../src/application/mission-lifecycle-service.js';
@@ -74,6 +75,38 @@ async function reviewInProgress() {
     assignee: implementer,
     rawStatus: 'refined',
     capabilities: CAPABILITIES,
+  } as never);
+  // Draft settles the contract activation demands (requireDraftedContract).
+  await new MissionBriefService(store).update({
+    operationId: 'op-brief',
+    missionId: MISSION,
+    capabilities: new Set(['mission:context']),
+    patch: { goal: 'Advance a review round', why: 'Fixture', scope: 'Fixture scope' },
+  } as never);
+  await new MissionBriefService(store).setGates({
+    operationId: 'op-gates',
+    missionId: MISSION,
+    capabilities: new Set(['mission:context']),
+    gates: ['npm test'],
+  } as never);
+  await new MissionBriefService(store).setSuccessCriteria({
+    operationId: 'op-criteria',
+    missionId: MISSION,
+    capabilities: new Set(['mission:context']),
+    criteria: ['The fixture mission is done'],
+  } as never);
+  await new MissionBriefService(store).setPredictedNelBucket({
+    operationId: 'op-nel',
+    missionId: MISSION,
+    capabilities: new Set(['mission:context']),
+    bucket: 'Small',
+  } as never);
+  await new MissionCheckpointService(store).plan({
+    operationId: 'op-plan',
+    missionId: MISSION,
+    capabilities: new Set(['mission:context']),
+    name: 'CP-1',
+    description: 'Do the fixture work',
   } as never);
   // Intake materializes every mission as `backlog`; refinement is what
   // `px draft` records before a launch, and activation demands it.
@@ -264,6 +297,37 @@ describe('review round advancement', () => {
       assert.equal(afterSubmit.mission.status, 'review');
       assert.equal(currentReviewRound(afterSubmit.mission.review!).number, 2);
       assert.deepEqual(currentReviewRound(afterSubmit.mission.review!).subject.change, change);
+    } finally {
+      await db.close();
+    }
+  });
+
+  it('rejects an implementer resolution whose resulting revision is unchanged (TASK-2478 criterion 8)', async () => {
+    const { store, db } = await reviewInProgress();
+    try {
+      await recordRequestedChanges(MISSION, {
+        findings: parseReviewFindings('## F1 (blocking): the import gate mutates the operator db'),
+        comment: null,
+        decidedAt: '2026-08-16T13:51:30.650Z',
+      }, { missionStore: store, lifecycleService: new MissionLifecycleService(store) });
+
+      // The implementer reports CHANGES_MADE but the branch never moved: the
+      // resulting revision is the round's own subject revision (rev-1), not a
+      // new one. Recording it would flip the round to ready-for-next-round on
+      // the unchanged tree, letting a later resume approve the finding.
+      const unchanged = await recordImplementerResolution(MISSION, {
+        itemDispositions: [{ kind: 'fixed', findingId: 'F1' as never }],
+        evidence: 'CHANGES_MADE — round summary (no code change)',
+        resultingRevision: 'rev-1',
+        respondedAt: '2026-08-16T16:00:00.000Z',
+      }, { missionStore: store });
+      assert.equal(unchanged.outcome, 'unchanged');
+      assert.equal(unchanged.noRevisionChange, true);
+
+      const after = await store.load(MISSION);
+      assert.equal(after.kind, 'found');
+      assert.equal(reviewStatus(after.mission.review!), 'awaiting-implementation', 'the round stays awaiting-implementation, never advancing to a stale round 2');
+      assert.equal(currentReviewRound(after.mission.review!).response, null, 'no resolution was recorded');
     } finally {
       await db.close();
     }

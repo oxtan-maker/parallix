@@ -26,6 +26,7 @@ import * as path from 'node:path';
 
 import { MissionLifecycleService } from '../src/application/mission-lifecycle-service.js';
 import { MissionIntakeService } from '../src/application/mission-intake-service.js';
+import { MissionBriefService } from '../src/application/mission-brief-service.js';
 import { MissionCheckpointService } from '../src/application/mission-checkpoint-service.js';
 import { SqliteDatabaseAdapter } from '../src/adapters/sqlite/database-adapter.js';
 import { loadDefaultMigrations, SqliteMigrationRunner } from '../src/adapters/sqlite/migration-runner.js';
@@ -89,6 +90,39 @@ async function awaitingReview() {
     assignee: implementer,
     rawStatus: 'refined',
     capabilities: CAPABILITIES,
+  } as never);
+  // Draft settles the contract activation demands: a goal, a why, a scope and
+  // at least one gate (mission-workflow.ts requireDraftedContract).
+  await new MissionBriefService(store).update({
+    operationId: 'op-brief',
+    missionId: MISSION,
+    capabilities: new Set(['mission:context']),
+    patch: { goal: 'Approve on a fixing round', why: 'Fixture', scope: 'Fixture scope' },
+  } as never);
+  await new MissionBriefService(store).setGates({
+    operationId: 'op-gates',
+    missionId: MISSION,
+    capabilities: new Set(['mission:context']),
+    gates: ['npm test'],
+  } as never);
+  await new MissionBriefService(store).setSuccessCriteria({
+    operationId: 'op-criteria',
+    missionId: MISSION,
+    capabilities: new Set(['mission:context']),
+    criteria: ['The fixture mission is done'],
+  } as never);
+  await new MissionBriefService(store).setPredictedNelBucket({
+    operationId: 'op-nel',
+    missionId: MISSION,
+    capabilities: new Set(['mission:context']),
+    bucket: 'Small',
+  } as never);
+  await new MissionCheckpointService(store).plan({
+    operationId: 'op-plan',
+    missionId: MISSION,
+    capabilities: new Set(['mission:context']),
+    name: 'CP-1',
+    description: 'Do the fixture work',
   } as never);
   // Intake materializes every mission as `backlog`; refinement is what
   // `px draft` records before a launch, and activation demands it.

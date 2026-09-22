@@ -173,13 +173,15 @@ test('px review-event writes only inside the caller cwd repo mission artifacts',
     const output = `${result.stdout}${result.stderr}`;
 
     assert.equal(result.status, 0, output);
-    const eventPath = path.join(
-      target.missionDir,
-      'review-events',
-      '2026-01-02T030405-human_note-1-px-proof.md',
+    // TASK-2521.03: the event is a database row. Normal lifecycle execution
+    // must not create Git-tracked workflow metadata (ADR 0053), so the old
+    // `review-events/` export is gone and the guarantee is now stronger — the
+    // command writes no mission artifacts in either tree.
+    assert.equal(
+      fs.existsSync(path.join(target.missionDir, 'review-events')),
+      false,
+      'must not export review events into the caller repo',
     );
-    assert.equal(fs.existsSync(eventPath), true);
-    assert.match(fs.readFileSync(eventPath, 'utf8'), /px proof content/);
 
     const sourceTreeMissionDir = path.join(repoRoot, 'docs', 'missions', target.year, target.slug);
     assert.equal(fs.existsSync(sourceTreeMissionDir), false, 'must not write mission artifacts in parallix source tree');
@@ -203,13 +205,10 @@ test('px works from a different caller cwd without copying workflow source', asy
     const output = `${result.stdout}${result.stderr}`;
 
     assert.equal(result.status, 0, output);
-    const eventPath = path.join(
-      target.missionDir,
-      'review-events',
-      '2026-01-02T030406-human_note-1-px-proof.md',
-    );
-    assert.equal(fs.existsSync(eventPath), true);
-    assert.match(fs.readFileSync(eventPath, 'utf8'), /relative target proof/);
+    // TASK-2521.03: the event is recorded in the operator database, not exported
+    // as a file. The seeded review is only resolvable from the caller cwd, so a
+    // zero exit is the cwd proof this test needs, and nothing is written out.
+    assert.equal(fs.existsSync(path.join(target.missionDir, 'review-events')), false);
     assert.equal(fs.existsSync(path.join(target.root, 'parallix')), false);
   } finally {
     fs.rmSync(target.root, { recursive: true, force: true });
@@ -231,13 +230,10 @@ test('px defaults to the caller cwd when no target option is provided', async ()
     const output = `${result.stdout}${result.stderr}`;
 
     assert.equal(result.status, 0, output);
-    const eventPath = path.join(
-      target.missionDir,
-      'review-events',
-      '2026-01-02T030407-human_note-1-px-proof.md',
-    );
-    assert.equal(fs.existsSync(eventPath), true);
-    assert.match(fs.readFileSync(eventPath, 'utf8'), /cwd target proof/);
+    // TASK-2521.03: the event is recorded in the operator database, not exported
+    // as a file. The seeded review is only resolvable from the caller cwd, so a
+    // zero exit is the cwd proof this test needs, and nothing is written out.
+    assert.equal(fs.existsSync(path.join(target.missionDir, 'review-events')), false);
   } finally {
     fs.rmSync(target.root, { recursive: true, force: true });
   }

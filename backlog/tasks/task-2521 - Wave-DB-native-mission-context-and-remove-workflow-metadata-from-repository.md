@@ -59,7 +59,7 @@ The wave is split into eight Missions, tracked as subtasks of this task (Mission
 11. **Unknown means STOP.** An unrecognized legacy file, parser ambiguity, duplicate disagreement, missing consumer mapping, or unexplained runtime file dependency blocks cleanup. It is not permission for an agent to guess.
 12. **Do not weaken trust gates to make the migration pass.** File-presence gates may be replaced by structured-evidence gates; verification, exact-tree, review, lifecycle, and fail-closed semantics remain.
 13. **Do not rewrite Git history.** Cleanup removes obsolete files from the current tree. Historical commits remain the archive.
-14. **Keep task-source and Mission semantics separate.** A SQLite-backed local task provider may use the same physical DB as Mission state, but a task catalog must not silently become part of the Mission aggregate merely to make migration convenient.
+14. **The Mission aggregate is the only task record.** Parallix self-hosts its task catalog through the existing Mission intake and lifecycle; there is no second task domain, task-source port, provider, table or CLI. Only fields Mission already owns are represented; anything else is reported, not copied into Mission to make migration convenient. (Re-scoped 2026-09-22 with TASK-2521.04.)
 15. **Do not refactor unrelated architecture.** If a clean cutover is blocked by unrelated structural debt, create/identify the blocker and stop rather than broadening this wave into a general rewrite.
 
 ### Mandatory agent-slop checks for every Mission in this wave
@@ -111,7 +111,7 @@ Mission 7 MUST NOT start until Mission 6 reports zero unresolved legacy material
 - [ ] #4 Checkpoint/Goal Check evidence is recordable/queryable without `CP-*.md`.
 - [ ] #5 Agent prompts and `px --help` make the supported context/evidence workflow discoverable to a fresh agent with only a Mission slug.
 - [ ] #6 Agents do not receive direct SQL authority and are not expected to know DB schema.
-- [ ] #7 Parallix self-hosting uses a non-repository local task provider; task-source semantics remain separate from Mission semantics.
+- [ ] #7 Parallix self-hosting keeps its task catalog in the Mission aggregate, not in repository files; no second task domain is introduced.
 - [ ] #8 Legacy Backlog/Mission metadata migration is explicit, dry-runnable, idempotent, conflict-detecting and produces a machine-testable zero-unresolved result before deletion.
 - [ ] #9 No opaque Markdown/document blobs are introduced as the new authority for old workflow files.
 - [ ] #10 No steady-state dual-write or silent file fallback remains for concepts cut over to SQLite.

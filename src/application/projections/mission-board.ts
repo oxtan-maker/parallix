@@ -1,4 +1,5 @@
 import type { AgentFamily } from '../../domain/agents.js';
+import { latestEvidencedCheckpoint } from '../../domain/checkpoint.js';
 import { isClosedMission, type Mission, type MissionId, type MissionLabel, type MissionStatus } from '../../domain/mission.js';
 import type { RepositoryId } from '../../domain/repository.js';
 import type { RunningAgentSession } from './agent-status.js';
@@ -179,8 +180,17 @@ function findingSummaries(content: string): readonly string[] {
   return content.split('\n').flatMap((line) => {
     const trimmed = line.trim();
     if (!trimmed) { return []; }
-    const heading = trimmed.match(/^#{1,3}\s+Finding(?:\s+\d+)?[^—]*—\s*(.+)$/i);
-    if (heading?.[1]) { return [heading[1]]; }
+    // `\b` after the keyword is load-bearing: without it `Finding` matches the
+    // prefix of `Findings`, `[^—]*` eats the rest, and a findings document's own
+    // title ("# Findings — <slug> (round 1)") is reported as a finding.
+    //
+    // Linear by construction: `[^—]*` cannot cross the em dash, so there is one
+    // split point, and it already covers an optional finding number. Leading
+    // whitespace is trimmed here rather than matched with a `\s*` that would
+    // overlap the capture.
+    const heading = trimmed.match(/^#{1,3}\s+Finding\b[^—]*—(.*)$/i);
+    const headingSummary = heading?.[1]?.trim();
+    if (headingSummary) { return [headingSummary]; }
     const numbered = trimmed.match(/^\d+\.\s+\*\*(?:\[[^\]]+\]\s*)?(.+?)\*\*/);
     if (numbered?.[1]) { return [numbered[1]]; }
     // Raw finding line: "path:line:", "path:Lline:" or a line range
@@ -332,7 +342,8 @@ function activeCommandLabel(resumesFindings: boolean, resumesGate: boolean, stra
 }
 
 export function projectMissionCard(mission: Mission, facts: MissionOperationalFacts): MissionCard {
-  const checkpoint = mission.checkpoints[mission.checkpoints.length - 1] ?? null;
+  // A planned checkpoint without evidence is not progress.
+  const checkpoint = latestEvidencedCheckpoint(mission.checkpoints);
   const reviewedSubject = mission.review
     ? currentReviewRound(mission.review).subject
     : null;

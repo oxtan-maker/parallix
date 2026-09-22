@@ -158,7 +158,13 @@ test('task-2483: every mission `## Gates` command line appears in the block (SC4
   }
 });
 
-test('task-2483: the reproduction-gate line appears only when MISSION.md declares Reproduction-Test (SC7)', () => {
+test('task-2483: a declared reproduction test is never reported as an executed gate (SC7)', () => {
+  // TASK-2521.03: the block used to tell the reviewer "the red-to-green
+  // reproduction gate ... already ran" whenever a `Reproduction-Test:` line was
+  // present in the mission document. Nothing ran it — `verifyRedGreenProof` has
+  // no production caller — so this block, which is explicitly the set of
+  // controls the workflow executed, was asserting a control that never ran on
+  // the strength of a string an agent wrote into a file.
   const withRepro = makeFixture({
     missionBody: `${MISSION_WITH_GATES}\nReproduction-Test: test/task-2483-repro.test.ts\n`,
   });
@@ -166,8 +172,8 @@ test('task-2483: the reproduction-gate line appears only when MISSION.md declare
   try {
     const present = buildCompletedControlsBlock(withRepro.missionPath, withRepro.repoRoot);
     const absent = buildCompletedControlsBlock(withoutRepro.missionPath, withoutRepro.repoRoot);
-    assert.match(present, /red-to-green reproduction gate/);
-    assert.doesNotMatch(absent, /red-to-green reproduction gate/);
+    assert.doesNotMatch(present, /reproduction gate/i, 'a declared test is not an executed gate');
+    assert.doesNotMatch(absent, /reproduction gate/i);
     assertWithinBudget(present);
     assertWithinBudget(absent);
   } finally {
@@ -224,7 +230,7 @@ test('task-2483: the fully-populated block stays within 12 non-blank lines and 9
     const block = buildCompletedControlsBlock(missionPath, repoRoot);
     assertWithinBudget(block);
     // Fully populated means every control family is actually present.
-    for (const marker of [/Verification gate/, /Mission `## Gates`/, /preHandoff gates executed by handoff/, /preReview gates NOT yet run/, /Goal Check/, /reproduction gate/]) {
+    for (const marker of [/Verification gate/, /Mission `## Gates`/, /preHandoff gates executed by handoff/, /preReview gates NOT yet run/, /Goal Check/]) {
       assert.match(block, marker);
     }
   } finally {

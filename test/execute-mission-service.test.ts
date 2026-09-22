@@ -33,7 +33,13 @@ function strictPorts(overrides: Record<string, unknown> = {}) {
           kind: 'found', version: 3,
           mission: {
             id: 'task-1', repositoryId: 'repo', title: 'Fixture', labels: [],
-            assignee: null, checkpoints: [], review: null, netEngineeringLines: null,
+            assignee: null, checkpoints: [{ missionId: 'task-1', name: 'CP-1', firstLine: 'Do the work', goalCheck: [], nextActionText: '' }], review: null, netEngineeringLines: null,
+            // Activation refuses an incomplete contract, so a refined fixture
+            // carries the goal, scope and gate draft settles.
+            brief: { goal: 'Fixture goal', why: 'Fixture why', scope: 'Fixture scope', outOfScope: [] },
+            declaredGates: ['npm test'],
+            successCriteria: ['The mission is done'],
+            predictedNelBucket: 'Small',
             status: 'refined', closedAt: null,
           },
         };
@@ -173,7 +179,7 @@ test('execute mission use case fails closed when the checked Mission authority r
   });
   const outcome = await new ExecuteMissionService(ports).execute(request());
   assert.equal(outcome.status, 'failed');
-  assert.equal(outcome.error?.message, 'legacy task lifecycle synchronization failed');
+  assert.match(outcome.error?.message ?? '', /^legacy task lifecycle synchronization failed: /);
   assert.equal(calls.includes('synchronize'), false);
   assert.equal(calls.some((call) => call.startsWith('handoff:')), false);
 });

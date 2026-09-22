@@ -65,15 +65,15 @@ export function reviewIndependence(implementer: string, reviewer: string): strin
 }
 
 /** Render only a persisted, authoritative review state as the operator verdict. */
-export function renderReviewVerdict(reviewState: string | null, findings: readonly string[], log: (_msg: string) => void, verbose = false): void {
+export function renderReviewVerdict(reviewState: string | null, findings: readonly { id: string; summary: string }[], log: (_msg: string) => void, verbose = false, round?: number): void {
   if (reviewState === 'APPROVED') {
-    log(fmt.status('PASS', '========== APPROVED =========='));
+    log(fmt.status('PASS', `========== APPROVED${round && round > 1 ? ` · round ${round}` : ''} ==========`));
     return;
   }
   if (reviewState === 'REQUEST_CHANGES') {
     log(fmt.status('WARN', '====== CHANGES REQUESTED ======'));
     for (const finding of findings) {
-      log(fmt.status('WARN', `Blocking finding: ${finding}`));
+      log(fmt.status('WARN', `Blocking finding: ${finding.id} — ${finding.summary}`));
     }
     return;
   }
@@ -236,7 +236,7 @@ interface RoundScratch {
   reviewBaseline: string | undefined;
   preReviewSetupVerified: boolean;
   reviewerTimeoutRetries: number;
-  blockingFindings: string[];
+  blockingFindings: { id: string; summary: string }[];
 }
 
 /**
@@ -513,7 +513,7 @@ async function launchReviewer(deps: ReviewerPhaseDeps): Promise<'stop' | null> {
  * Returns 'stop' when the round must end.
  */
 async function consumeAndRecoverReviewerArtifacts(deps: ReviewerPhaseDeps): Promise<'stop' | null> {
-  const { ctx, round, attempt, scratch } = deps;
+  const { ctx, state, round, attempt, scratch } = deps;
   const {
     artifactDir, branch, buildCompactReviewPromptFn, consumeReviewerArtifactsFn,
     effectiveMissionPath, forgejoEnabled, getCommentsFn, onAgentLaunched, postCommentFn,
@@ -522,6 +522,15 @@ async function consumeAndRecoverReviewerArtifacts(deps: ReviewerPhaseDeps): Prom
     sleepFn, pollIntervalMs, pollTimeoutMs, worktree, slug,
     log, error,
   } = ctx;
+  const persisted = await Promise.resolve(ctx.readReviewStateFn(slug, worktree, ctx.missionStore));
+  if (state.phase === 'reviewing' && persisted?.phase === 'approved' && persisted.disposition === 'APPROVED') {
+    scratch.reviewState = 'APPROVED';
+    return null;
+  }
+  if (state.phase === 'reviewing' && persisted?.phase === 'fixing' && persisted.disposition === 'REQUEST_CHANGES') {
+    scratch.reviewState = 'REQUEST_CHANGES';
+    return null;
+  }
   const reviewerArtifacts = await consumeReviewerArtifactsFn(slug, scratch.reviewer!, {
     worktree,
     tmpDir: artifactDir,
@@ -620,10 +629,10 @@ async function consumeAndRecoverReviewerArtifacts(deps: ReviewerPhaseDeps): Prom
       scratch.reviewState = recoveredReviewerArtifacts.reviewState;
       // TASK-2477/F1: recovery carries findingSummaries too; restore them
       // so the CHANGES REQUESTED summary is not empty on the recovery path.
-      round.blockingFindings = recoveredReviewerArtifacts.findingSummaries || [];
+      round.blockingFindings = recoveredReviewerArtifacts.reviewFindings || [];
     } else {
       scratch.reviewState = reviewerArtifacts.reviewState;
-      round.blockingFindings = reviewerArtifacts.findingSummaries || [];
+      round.blockingFindings = reviewerArtifacts.reviewFindings || [];
     }
   }
   if (!scratch.reviewState && forgejoEnabled) {
@@ -652,14 +661,14 @@ async function recoverReviewerTimeout(deps: ReviewerPhaseDeps): Promise<'stop' |
   if (!scratch.reviewState) {
     const handoff = forgejoEnabled
       ? 'did not submit a formal review outcome'
-      : `did not leave a complete local review handoff in ${artifactDir} (${slug}-review-findings.md, ${slug}-review-outcome.md, ${slug}-review-verdict.txt)`;
+      : 'did not record a review verdict through px';
     log(fmt.status('WARN', `Reviewer ${scratch.reviewer} ${handoff} for ${branch}; retrying the reviewer.`));
     scratch.reviewState = POLL_TIMEOUT;
   }
   const timeoutRecovery = await rebound({
     kind: 'agent-timeout', role: 'reviewer',
     diagnostic: `No usable review outcome for ${branch} after ${formatElapsed(Date.now() - Date.parse(deps.state.startedAt))}.`,
-    expectedOutput: forgejoEnabled ? 'a formal review outcome' : `complete local review artifacts in ${artifactDir}`,
+    expectedOutput: forgejoEnabled ? 'a formal review outcome' : 'a review verdict through px',
   }, {
     slug, worktree, implementer: scratch.reviewer!, step: 'review', role: 'reviewer',
     exclude: [scratch.implementer!],
@@ -737,7 +746,7 @@ async function applyReviewerOutcome(deps: ReviewerPhaseDeps): Promise<'stop' | n
       error(fmt.status('FAIL', `Recovery: px integrate ${slug}`));
       return 'stop';
     }
-    renderReviewVerdict(state.disposition, [], log, verbose);
+    renderReviewVerdict(state.disposition, [], log, verbose, state.round);
     log(fmt.status('PASS', 'Autonomous review stopped: reviewer approved the PR. Hand off to human review/integration.'));
     await transitionVirtualFn(transitionTaskFn, slug, 'approved', { log });
     return 'stop';
@@ -792,6 +801,14 @@ async function runReviewerPhase(
           if (await runPreReviewRebase(deps)) { return { outcome: 'stop' }; }
           if (await runDeclaredPreReviewGate(deps)) { return { outcome: 'stop' }; }
           round.preReviewSetupVerified = false;
+          // TASK-2478/criterion 7: the round-2 pre-review gate reruns the
+          // verification command against the revised tree. A failure already bounces
+          // back to the implementer above (never advancing to the re-review), so a
+          // passing re-round gate is the post-fix verification the operator needs to
+          // see before the second review runs.
+          if (attempt > 1) {
+            ctx.log(fmt.status('PASS', `✓ verification passed against the revised tree (round ${attempt})`));
+          }
           if (!scratch.reviewState) {
             if (await launchReviewer(deps)) { return { outcome: 'stop' }; }
             if (await consumeAndRecoverReviewerArtifacts(deps)) { return { outcome: 'stop' }; }
@@ -883,6 +900,12 @@ async function launchImplementerActOnReview(deps: RoundPhaseDeps): Promise<'stop
   }
   await persistReviewStateOrThrow(writeReviewStateFn, slug, state, worktree, missionStore);
   renderReviewVerdict(state.disposition, round.blockingFindings, log, verbose);
+  if (round.blockingFindings.length > 0) {
+    log(fmt.status('INFO', 'ACTING ON REVIEW'));
+    for (const finding of round.blockingFindings) {
+      log(fmt.status('INFO', `Finding ${finding.id}: ${finding.summary}`));
+    }
+  }
   await transitionTaskFn(slug, 'active', { implementer: scratch.implementer, rootDir: worktree, log });
   if (scratch.implementer === 'autonomous' && !forgejoEnabled) {
     log(fmt.status('INFO', `Round ${attempt}: implementer identity is autonomous; skipping implementer launch and using local review artifacts only.`));
@@ -942,6 +965,10 @@ async function consumeAndRecoverImplementerArtifacts(deps: RoundPhaseDeps): Prom
     error
   });
   if (!implementerArtifacts.consumed) { return null; }
+  if (implementerArtifacts.changedRevision === false) {
+    await escalateToHumanReview('IMPLEMENTER_NO_CHANGE');
+    return 'stop';
+  }
   if (implementerArtifacts.ok) {
     scratch.disposition = implementerArtifacts.disposition;
     return null;
@@ -1164,6 +1191,14 @@ async function applyImplementerDisposition(deps: {
         if (preFixHeadSha === null || postFixHeadSha === null) { return true; }
         return postFixHeadSha !== preFixHeadSha;
       })();
+  if (!hasCommittedChange) {
+    state.disposition = 'IMPLEMENTER_NO_CHANGE';
+    state.metadata = { ...state.metadata, humanEscalationReason: 'IMPLEMENTER_NO_CHANGE', humanEscalatedAt: new Date().toISOString() };
+    await persistReviewStateOrThrow(writeReviewStateFn, slug, state, worktree, missionStore);
+    await onAutonomousStop?.('implementer reported CHANGES_MADE with no new revision');
+    log(fmt.status('FAIL', `Round ${attempt}: implementer reported CHANGES_MADE but the branch HEAD is unchanged. No new revision to review; handing off to human review.`));
+    return 'stop';
+  }
   if (forgejoEnabled && token && hasCommittedChange) {
     let pushResult = pushReviewRefFn(branch, branch, worktree, {
       forceWithLease: true,
@@ -1191,6 +1226,14 @@ async function applyImplementerDisposition(deps: {
     }
   }
   await persistReviewStateOrThrow(writeReviewStateFn, slug, state, worktree, missionStore);
+  // TASK-2478/criterion 6: surface that the revision actually changed so the
+  // operator can see the corrected tree is what the second review evaluates,
+  // not the pre-fix tree. beginNextReviewRound records the new revision on the
+  // aggregate (src/domain/review.ts) from this branch head.
+  const revisedHead = readBranchHeadSha();
+  if (revisedHead && preFixHeadSha && revisedHead !== preFixHeadSha) {
+    log(fmt.status('INFO', `Round ${attempt}: new revision ${revisedHead.slice(0, 12)} recorded after act-on-review.`));
+  }
   log(fmt.status('INFO', `Round ${attempt}: implementer made changes. Continuing to round ${attempt + 1}.`));
   return 'next-round';
 }

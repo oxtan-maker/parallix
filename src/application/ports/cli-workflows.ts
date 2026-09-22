@@ -89,6 +89,52 @@ export interface StatusMissionData {
    * `px status` and the agent strip from drifting into contradicting each other.
    */
   readonly activity?: MissionActivity | null;
+  /**
+   * The recorded brief. `px status` is the one reporting surface for a Mission,
+   * so it lives here rather than in a second projection command: an agent reads
+   * the goal from the same place it reads lane and review state.
+   *
+   * Absent when the Mission has no recorded brief, which is a fact the caller
+   * must see rather than an error.
+   */
+  readonly brief?: StatusBrief | null;
+  /** The exact commands handoff runs for this Mission. */
+  readonly declaredGates?: readonly string[];
+  /** What must be true for the Mission to be done. */
+  readonly successCriteria?: readonly string[];
+  /** Every checkpoint in order, planned or evidenced, marked with whether its evidence is recorded. */
+  readonly checkpoints?: readonly { readonly name: string; readonly description: string; readonly recorded: boolean }[];
+  /** The draft's predicted NEL bucket, when recorded. */
+  readonly predictedNelBucket?: string | null;
+  /** The bug mission's declared red-to-green reproduction test, when one is recorded. */
+  readonly reproductionTest?: string | null;
+  /** Goal Check rows of the latest recorded checkpoint. */
+  readonly goalCheck?: readonly StatusGoalCheckRow[];
+  /** Next action recorded with the latest checkpoint. */
+  readonly nextAction?: string | null;
+  /** Optimistic-concurrency version, supplied to `--expected-version` on writes. */
+  readonly version?: number | null;
+  /** Mission title as recorded, so an agent identifies the mission without a file. */
+  readonly title?: string | null;
+  /** Recorded assignee family, or null when the Mission is unassigned. */
+  readonly assignee?: string | null;
+  /** Reference to the external material this Mission was accepted from. */
+  readonly externalTaskRef?: { readonly source: string; readonly id: string; readonly url: string | null } | null;
+}
+
+/** One Goal Check evidence row as `px status` reports it. */
+export interface StatusGoalCheckRow {
+  readonly criterion: string;
+  readonly evidence: string;
+}
+
+
+/** The recorded mission brief: what this mission is for. */
+export interface StatusBrief {
+  readonly goal: string;
+  readonly why: string;
+  readonly scope: string | null;
+  readonly outOfScope: readonly string[];
 }
 
 /** Forgejo PR state for a mission branch. */

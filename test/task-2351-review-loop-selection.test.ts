@@ -36,11 +36,13 @@ test('review presentation classifies different-family and same-family fallback f
 
 test('review verdict presentation is authoritative and renders blocking findings before follow-up work', () => {
   const logs: string[] = [];
-  renderReviewVerdict('REQUEST_CHANGES', ['missing validation', 'unhandled retry'], (line) => logs.push(line));
+  // Structured findings carry the id so the verdict names the finding
+  // (TASK-2478/criterion 5): the operator must tell WHICH finding blocks.
+  renderReviewVerdict('REQUEST_CHANGES', [{ id: 'F1', summary: 'missing validation' }, { id: 'F2', summary: 'unhandled retry' }], (line) => logs.push(line));
   assert.match(logs[0], /CHANGES REQUESTED/);
-  assert.match(logs[1], /Blocking finding: missing validation/);
-  assert.match(logs[2], /Blocking finding: unhandled retry/);
+  assert.match(logs[1], /Blocking finding: F1 — missing validation/);
+  assert.match(logs[2], /Blocking finding: F2 — unhandled retry/);
 
-  renderReviewVerdict('COMMENT', ['must not appear'], (line) => logs.push(line));
+  renderReviewVerdict('COMMENT', [], (line) => logs.push(line));
   assert.equal(logs.length, 3, 'non-authoritative states cannot produce an approval or changes verdict');
 });

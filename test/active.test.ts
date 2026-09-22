@@ -6,6 +6,7 @@ import os from 'os';
 import path from 'path';
 import { mockModule, installModuleMocks } from './lib/module-mock.js';
 import { createRequire } from 'node:module';
+import { classifyError } from '../src/application/failure-classification.js';
 const _require = createRequire(import.meta.url);
 const activeModule = mockModule<typeof import('../src/adapters/cli/commands/active.js')>('../src/adapters/cli/commands/active.js', import.meta.url);
 const resolveWorktreeModule = mockModule<typeof import('../src/adapters/filesystem/mission-utils.js')>('../src/adapters/filesystem/mission-utils.js', import.meta.url);
@@ -88,7 +89,9 @@ test('buildExecutePrompt injects slug, current year, and checkpoint context into
 
     const prompt = buildExecutePrompt('task-088', context, { rootDir: tempRoot });
 
-    assert.match(prompt, new RegExp(`/docs/missions/${new Date().getFullYear()}/task-088/MISSION\\.md`));
+    // TASK-2521.03: the execute prompt names the mission dir, not the mission
+    // document — the document is no longer an authority the agent is sent to.
+    assert.match(prompt, new RegExp(`Mission dir: .*/docs/missions/${new Date().getFullYear()}/task-088`));
     assert.match(prompt, /Slug: task-088/);
     assert.match(prompt, /execute-after-lock|execute after lock|execute checkpoint/i);
     assert.match(prompt, /CP-3\.md/);
@@ -107,7 +110,11 @@ test('buildExecutePrompt uses absolute worktree paths and emits no docs/agent-pr
   const rootDir = '/tmp/testproj-task-8';
   const prompt = buildExecutePrompt('task-8', 'No checkpoint documents found. Start from CP-1.', { rootDir });
 
-  assert.match(prompt, /Mission: \/tmp\/testproj-task-8\/missions\/task-8\/MISSION\.md/);
+  // TASK-2521.03: Mission state is read with `px status`, and the execute
+  // prompt no longer sends the agent to a mission document at all.
+  assert.match(prompt, /Slug: task-8/);
+  assert.match(prompt, /px status task-8/);
+  assert.doesNotMatch(prompt, /MISSION\.md/, 'the execute prompt must not name the mission document');
   assert.match(prompt, /Mission dir: \/tmp\/testproj-task-8\/missions\/task-8/);
   assert.match(prompt, /Backlog task: .*task-8/);
   assert.doesNotMatch(prompt, /Load the workflow lifecycle/);
@@ -119,7 +126,10 @@ test('buildExecutePrompt reserves Backlog lifecycle transitions for Parallix', (
   const prompt = buildExecutePrompt('task-8', 'No checkpoint documents found. Start from CP-1.', { rootDir: '/tmp/testproj-task-8' });
 
   assert.match(prompt, /do not change the Backlog task's status/i);
-  assert.match(prompt, /Parallix performs lifecycle transitions itself/i);
+  assert.match(prompt, /Parallix performs lifecycle transitions and review decisions itself/i);
+  // TASK-2521.03: the implementer's typed writes must not reach lifecycle,
+  // assignment or review operations, which stay with the workflow.
+  assert.match(prompt, /do not run .*`px active`.*`px review`.*`px integrate`/);
 });
 
 test('buildCheckpointContext returns fallback text when no checkpoints exist', () => {
@@ -1348,8 +1358,31 @@ test('selectLaunchAndRecord skips Backlog write when taskResolution is not ok', 
 
 // ---------- validateCheckpointsBeforeHandoff ----------
 
-test('validateCheckpointsBeforeHandoff returns { ok: false } when mission dir is missing', () => {
-  const result = active.validateCheckpointsBeforeHandoff('task-missing', '/tmp/nonexistent', {
+test('validateCheckpointsBeforeHandoff reads a typed-verb mission\'s recorded plan and names the next checkpoint', async () => {
+  const result = await active.validateCheckpointsBeforeHandoff('task-db', '/tmp/project-task-db', {
+    loadRecordedCheckpointsFn: async () => ({ planned: ['CP-1', 'CP-2', 'CP-3'], recorded: ['CP-1'] }),
+    // A recorded plan is authoritative: the mission document is never read.
+    findMissionDirFn: () => { throw new Error('the mission document must not be read'); },
+    log: () => {},
+    error: () => {},
+  });
+  assert.equal(result.ok, false);
+  assert.deepEqual(result.missingCheckpoints, ['CP-2', 'CP-3']);
+  assert.equal(result.nextCheckpoint, 'CP-2');
+  assert.match(result.error, /missing before handoff: CP-2, CP-3/);
+  assert.equal(classifyError(result.error).failureClass, 'IncompleteEvidence', 'the gap must auto-send back like a missing CP document');
+
+  const complete = await active.validateCheckpointsBeforeHandoff('task-db', '/tmp/project-task-db', {
+    loadRecordedCheckpointsFn: async () => ({ planned: ['CP-1'], recorded: ['CP-1'] }),
+    log: () => {},
+    error: () => {},
+  });
+  assert.equal(complete.ok, true);
+});
+
+
+test('validateCheckpointsBeforeHandoff returns { ok: false } when mission dir is missing', async () => {
+  const result = await active.validateCheckpointsBeforeHandoff('task-missing', '/tmp/nonexistent', {
     findMissionDirFn: () => null,
     log: () => {},
     error: () => {}
@@ -1358,8 +1391,8 @@ test('validateCheckpointsBeforeHandoff returns { ok: false } when mission dir is
   assert.ok(result.error.includes('Mission directory not found'));
 });
 
-test('validateCheckpointsBeforeHandoff rejects a declared checkpoint when its document is missing', () => {
-  const result = active.validateCheckpointsBeforeHandoff('task-empty', '/tmp/project-task-empty', {
+test('validateCheckpointsBeforeHandoff rejects a declared checkpoint when its document is missing', async () => {
+  const result = await active.validateCheckpointsBeforeHandoff('task-empty', '/tmp/project-task-empty', {
     findMissionDirFn: () => '/tmp/project-task-empty/docs/missions/2026/task-empty',
     findCheckpointsFn: () => [],
     readMissionFileFn: () => '## Checkpoints\n- CP 1: first checkpoint\n',
@@ -1371,9 +1404,9 @@ test('validateCheckpointsBeforeHandoff rejects a declared checkpoint when its do
   assert.ok(result.error.includes('CP-1'));
 });
 
-test('validateCheckpointsBeforeHandoff accepts a single declared checkpoint when it is committed', () => {
+test('validateCheckpointsBeforeHandoff accepts a single declared checkpoint when it is committed', async () => {
   const logs = [];
-  const result = active.validateCheckpointsBeforeHandoff('task-ok', '/tmp/project-task-ok', {
+  const result = await active.validateCheckpointsBeforeHandoff('task-ok', '/tmp/project-task-ok', {
     findMissionDirFn: () => '/tmp/project-task-ok/docs/missions/2026/task-ok',
     findCheckpointsFn: () => ['/tmp/project-task-ok/docs/missions/2026/task-ok/CP-1.md'],
     readMissionFileFn: () => '## Checkpoints\n- CP 1: first checkpoint\n',
@@ -1385,8 +1418,8 @@ test('validateCheckpointsBeforeHandoff accepts a single declared checkpoint when
   assert.ok(logs.some(l => l.includes('Found all 1 declared checkpoint')));
 });
 
-test('validateCheckpointsBeforeHandoff rejects a multi-checkpoint mission with only CP-1', () => {
-  const result = active.validateCheckpointsBeforeHandoff('task-incomplete', '/tmp/project-task-incomplete', {
+test('validateCheckpointsBeforeHandoff rejects a multi-checkpoint mission with only CP-1', async () => {
+  const result = await active.validateCheckpointsBeforeHandoff('task-incomplete', '/tmp/project-task-incomplete', {
     findMissionDirFn: () => '/tmp/project-task-incomplete/missions/task-incomplete',
     findCheckpointsFn: () => ['/tmp/project-task-incomplete/missions/task-incomplete/CP-1.md'],
     readMissionFileFn: () => '## Checkpoints\n- CP 1: first checkpoint\n- CP-2: second checkpoint\n',
@@ -1399,8 +1432,8 @@ test('validateCheckpointsBeforeHandoff rejects a multi-checkpoint mission with o
   assert.match(result.error, /CP-2/);
 });
 
-test('validateCheckpointsBeforeHandoff accepts complete declared checkpoint coverage', () => {
-  const result = active.validateCheckpointsBeforeHandoff('task-complete', '/tmp/project-task-complete', {
+test('validateCheckpointsBeforeHandoff accepts complete declared checkpoint coverage', async () => {
+  const result = await active.validateCheckpointsBeforeHandoff('task-complete', '/tmp/project-task-complete', {
     findMissionDirFn: () => '/tmp/project-task-complete/missions/task-complete',
     findCheckpointsFn: () => [
       '/tmp/project-task-complete/missions/task-complete/CP-1.md',
@@ -1415,8 +1448,8 @@ test('validateCheckpointsBeforeHandoff accepts complete declared checkpoint cove
   assert.deepEqual(result.declaredCheckpoints, ['CP-1', 'CP-2']);
 });
 
-test('validateCheckpointsBeforeHandoff rejects a section with no parsable checkpoint declarations', () => {
-  const result = active.validateCheckpointsBeforeHandoff('task-malformed', '/tmp/project-task-malformed', {
+test('validateCheckpointsBeforeHandoff rejects a section with no parsable checkpoint declarations', async () => {
+  const result = await active.validateCheckpointsBeforeHandoff('task-malformed', '/tmp/project-task-malformed', {
     findMissionDirFn: () => '/tmp/project-task-malformed/missions/task-malformed',
     findCheckpointsFn: () => [],
     readMissionFileFn: () => '## Checkpoints\n- CP two: invalid declaration\n',
@@ -1427,8 +1460,8 @@ test('validateCheckpointsBeforeHandoff rejects a section with no parsable checkp
   assert.match(result.error, /contains no checkpoint declarations/);
 });
 
-test('validateCheckpointsBeforeHandoff rejects malformed declarations missing a separator', () => {
-  const result = active.validateCheckpointsBeforeHandoff('task-malformed', '/tmp/project-task-malformed', {
+test('validateCheckpointsBeforeHandoff rejects malformed declarations missing a separator', async () => {
+  const result = await active.validateCheckpointsBeforeHandoff('task-malformed', '/tmp/project-task-malformed', {
     findMissionDirFn: () => '/tmp/project-task-malformed/missions/task-malformed',
     findCheckpointsFn: () => [],
     readMissionFileFn: () => '## Checkpoints\n- CP 1 must cite an ADR\n',
@@ -1439,8 +1472,8 @@ test('validateCheckpointsBeforeHandoff rejects malformed declarations missing a 
   assert.match(result.error, /Malformed checkpoint declaration/);
 });
 
-test('validateCheckpointsBeforeHandoff accepts compatible declaration and filename variants before its documentation sub-block', () => {
-  const result = active.validateCheckpointsBeforeHandoff('task-compatible', '/tmp/project-task-compatible', {
+test('validateCheckpointsBeforeHandoff accepts compatible declaration and filename variants before its documentation sub-block', async () => {
+  const result = await active.validateCheckpointsBeforeHandoff('task-compatible', '/tmp/project-task-compatible', {
     findMissionDirFn: () => '/tmp/project-task-compatible/missions/task-compatible',
     findCheckpointsFn: () => [
       '/tmp/project-task-compatible/missions/task-compatible/CP-1-parser.md',
@@ -1469,8 +1502,8 @@ test('validateCheckpointsBeforeHandoff accepts compatible declaration and filena
   assert.deepEqual(result.declaredCheckpoints, ['CP-1', 'CP-2', 'CP-3', 'CP-4', 'CP-5']);
 });
 
-test('validateCheckpointsBeforeHandoff returns { ok: false } when checkpoint files are uncommitted', () => {
-  const result = active.validateCheckpointsBeforeHandoff('task-dirty', '/tmp/project-task-dirty', {
+test('validateCheckpointsBeforeHandoff returns { ok: false } when checkpoint files are uncommitted', async () => {
+  const result = await active.validateCheckpointsBeforeHandoff('task-dirty', '/tmp/project-task-dirty', {
     findMissionDirFn: () => '/tmp/project-task-dirty/docs/missions/2026/task-dirty',
     findCheckpointsFn: () => ['/tmp/project-task-dirty/docs/missions/2026/task-dirty/CP-1.md'],
     readMissionFileFn: () => '## Checkpoints\n- CP 1: first checkpoint\n',

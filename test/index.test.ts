@@ -52,8 +52,13 @@ test('buildSuggestionSuffix returns <slug> for resolve-conflict', () => {
   assert.equal(buildSuggestionSuffix('resolve-conflict'), ' <slug>');
 });
 
-test('checkpoint is neither a known command nor a suggested invocation', () => {
-  assert.equal(KNOWN_COMMANDS.includes('checkpoint'), false);
+// TASK-2482 removed an earlier `px checkpoint` because nothing used it and it
+// read as a verification step. TASK-2521.03 reintroduces it with a different
+// meaning: it records Goal Check evidence as durable Mission state and is the
+// agent's only evidence path once the workflow files are retired. It still runs
+// no gate and asserts no verification, which is what TASK-2482 objected to.
+test('checkpoint records evidence and is a known command, but never a verification step', () => {
+  assert.equal(KNOWN_COMMANDS.includes('checkpoint'), true);
   assert.equal(buildSuggestionSuffix('checkpoint'), '');
 });
 

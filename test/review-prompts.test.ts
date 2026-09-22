@@ -3,15 +3,10 @@
 
 import test, { mock } from 'node:test';
 import assert from 'node:assert/strict';
-import fs from 'node:fs';
-import os from 'node:os';
-import path from 'node:path';
 import { mockModule, installModuleMocks } from './lib/module-mock.js';
-const resolveArtifactDirModule = mockModule<typeof import('../src/adapters/review/review-artifacts.js')>('../src/adapters/review/review-artifacts.js', import.meta.url);
 const __mm1 = mockModule<typeof import('../src/adapters/review/review-prompts.js')>('../src/adapters/review/review-prompts.js', import.meta.url);
 await installModuleMocks();
 test.afterEach(() => mock.restoreAll());
-const { resolveArtifactDir } = resolveArtifactDirModule;
 const { WORKFLOW_AGENT_NAMES } = await import('../src/adapters/agents/agents.js');
 const {
   PROMPT_ENTRYPOINTS,
@@ -62,13 +57,9 @@ test('buildReviewPrompt renders the runtime review prompt for dry-run output', (
   });
 
   assert.match(prompt, /Attempt: 2\. Focus: security\./);
-  assert.match(prompt, /missions\/task-089\/MISSION\.md/);
+  assert.doesNotMatch(prompt, /MISSION\.md/);
   assert.match(prompt, /\$review all/); // codex entrypoint
-  // Artifact paths resolve to the same dir the consumer reads (task-1264).
-  const artifactDir = resolveArtifactDir(process.cwd());
-  assert.ok(prompt.includes(`${artifactDir}/task-089-review-findings.md`));
-  assert.ok(prompt.includes(`${artifactDir}/task-089-review-outcome.md`));
-  assert.ok(prompt.includes(`${artifactDir}/task-089-review-verdict.txt`));
+  assert.match(prompt, /px verdict/);
 });
 
 test('buildReviewPrompt includes claude entrypoint for claude reviewer', () => {
@@ -104,7 +95,7 @@ test('buildActOnReviewPrompt inlines disposition instructions without docs/agent
   });
   assert.doesNotMatch(prompt, /docs\/agent-prompts/);
   assert.doesNotMatch(prompt, /Canonical authority/);
-  assert.match(prompt, /CHANGES_MADE\|PUSHBACK_ALL\|PARKED\|BLOCKED/);
+  assert.match(prompt, /px resolve --slug task-001/);
 });
 
 test('buildReviewPrompt default focus is all', () => {
@@ -128,12 +119,12 @@ test('buildCompactReviewPrompt reads from template and substitutes all variables
     attempt: 2,
     repoRoot: '/tmp/project-task-089'
   });
-  assert.ok(prompt.includes(`${resolveArtifactDir('/tmp/project-task-089')}/task-089-review-findings.md`));
+  assert.match(prompt, /px verdict/);
   assert.match(prompt, /2/);            // attempt substituted
   assert.match(prompt, /security/);     // focus substituted
   assert.match(prompt, /\$review all/); // codex entrypoint substituted
   assert.match(prompt, /task-089/);     // slug substituted
-  assert.match(prompt, /missions\/task-089/); // missionPath substituted
+  assert.doesNotMatch(prompt, /missions\/task-089/); // no mission document path reaches the reviewer
   assert.doesNotMatch(prompt, /\{\{/);  // no unresolved placeholders
   assert.doesNotMatch(prompt, /YYYY/);
   assert.doesNotMatch(prompt, /docs\/agent-prompts/);
@@ -154,17 +145,10 @@ test('buildCompactReviewPrompt inlines the contract instead of redirecting to do
   // already-executed controls block and its explicit do-not-re-run rule.
   assert.match(prompt, /which controls the workflow has already executed for this mission and which it has not/i);
   assert.match(prompt, /Do not re-run a listed command whose recorded status is `passed`/);
-  assert.match(prompt, /Do not invoke `px` yourself/);
-  const artifactDir = resolveArtifactDir(process.cwd());
-  assert.ok(prompt.includes(`${artifactDir}/task-089-review-findings.md`));
-  assert.ok(prompt.includes(`${artifactDir}/task-089-review-outcome.md`));
-  assert.match(prompt, /Do not post to Forgejo directly/);
+  assert.match(prompt, /Submit your final decision with `px verdict`/);
+  assert.match(prompt, /do not post to Forgejo directly/i);
   assert.match(prompt, /final chat response does \*\*not\*\* submit a review/);
-  assert.match(prompt, /create all three files/);
-  assert.match(prompt, /No findings\.` when approving/);
-  assert.match(prompt, /## F1: summary/);
-  assert.match(prompt, /round-prefixed headings.*invalid/i);
-  assert.match(prompt, /run `ls -l/);
+  assert.match(prompt, /Every request-change finding needs a distinct stable `F<number>` id/);
   assert.doesNotMatch(prompt, /FORGEJO_USER=/);
   assert.doesNotMatch(prompt, /docs\/agent-prompts/);
 });
@@ -184,9 +168,8 @@ test('buildCompactReviewPrompt enumerates separation-of-duties constraints keepi
   assert.match(prompt, /no rebase, squash, amend/i);
   assert.match(prompt, /no merge, push/i);
   assert.match(prompt, /Mutate workflow state/i);
-  // The only permitted writes: artifact dir and /tmp.
-  const artifactDir = resolveArtifactDir(process.cwd());
-  assert.ok(prompt.includes(`Write to the artifact directory \`${artifactDir}\``));
+  // The only permitted writes are through the decision command and /tmp.
+  assert.match(prompt, /submit the verdict with `px verdict`/);
   assert.match(prompt, /temporary diagnostic files under `\/tmp`/);
 });
 
@@ -204,12 +187,11 @@ test('dry-run review builder preserves runtime separation-of-duties constraints'
   assert.match(prompt, /no rebase, squash, amend/i);
   assert.match(prompt, /no merge, push/i);
   assert.match(prompt, /mutate workflow state/i);
-  const artifactDir = resolveArtifactDir(process.cwd());
-  assert.ok(prompt.includes(`Write to the artifact directory \`${artifactDir}\``));
+  assert.match(prompt, /submit the verdict with `px verdict`/);
   assert.match(prompt, /temporary diagnostic files under `\/tmp`/);
 });
 
-test('buildCompactReviewPrompt substitutes missionPath and primaryBranch (no <primary-branch>)', () => {
+test('buildCompactReviewPrompt names the slug and primaryBranch, never a mission document', () => {
   const prompt = buildCompactReviewPrompt({
     reviewer: 'codex',
     branch: 'mission/task-089',
@@ -218,7 +200,11 @@ test('buildCompactReviewPrompt substitutes missionPath and primaryBranch (no <pr
     attempt: 1,
     repoRoot: '/tmp/project-task-089'
   });
-  assert.match(prompt, /Mission: \/tmp\/project-task-089\/missions\/task-089\/MISSION\.md/);
+  // TASK-2521.03: the mission is identified by its slug. The prompt names no
+  // mission document at all — not even to deny it authority — so a reviewer is
+  // never pointed at a file as a place Mission state might live.
+  assert.match(prompt, /Mission: task-089/);
+  assert.doesNotMatch(prompt, /MISSION\.md/);
   assert.doesNotMatch(prompt, /<primary-branch>/);
   assert.match(prompt, /git diff \w+\.\.HEAD/);
 });
@@ -320,16 +306,15 @@ test('buildCompactActOnReviewPrompt reads from template and substitutes all vari
   assert.match(prompt, /Latest reviewer outcome was: REQUEST_CHANGES/);
   assert.match(prompt, /task-089/);      // slug substituted
   assert.match(prompt, /\/act-on-review/); // claude entrypoint substituted
-  assert.match(prompt, /Read the review outcome and findings from `missions\/task-089\/review-events\//);
+  assert.match(prompt, /Read the review outcome and findings from `px status task-089`/);
   assert.doesNotMatch(prompt, /px review [^\n]*--comments/); // standalone: no Forgejo CLI
-  assert.ok(prompt.includes(`${resolveArtifactDir('/tmp/project-task-089')}/task-089-round-resolution.md`));
-  assert.match(prompt, /CHANGES_MADE\|PUSHBACK_ALL\|PARKED\|BLOCKED/);
+  assert.match(prompt, /px resolve --slug task-089/);
   assert.doesNotMatch(prompt, /\{\{/);   // no unresolved placeholders
   assert.doesNotMatch(prompt, /YYYY/);
   assert.doesNotMatch(prompt, /docs\/agent-prompts/);
 });
 
-test('buildCompactActOnReviewPrompt warns against no-op pushback when review is not approved and comments are empty', () => {
+test('buildCompactActOnReviewPrompt treats missing review context as repair work', () => {
   const prompt = buildCompactActOnReviewPrompt({
     implementer: 'codex',
     branch: 'mission/task-121',
@@ -337,9 +322,8 @@ test('buildCompactActOnReviewPrompt warns against no-op pushback when review is 
     reviewOutcome: 'REQUEST_CHANGES'
   });
   assert.match(prompt, /REQUEST_CHANGES/);
-  assert.match(prompt, /DO NOT post PUSHBACK_ALL/);
-  assert.match(prompt, /cannot read the review outcome/);
-  assert.match(prompt, /BLOCKED/);
+  assert.match(prompt, /Review feedback, missing context, and conflicting stale records are repair work, not a block/);
+  assert.match(prompt, /re-query `px status task-121` and the current PR decisions/);
 });
 
 test('buildCompactActOnReviewPrompt does not inline FORGEJO_USER and does not redirect to docs/agent-prompts', () => {
@@ -352,28 +336,25 @@ test('buildCompactActOnReviewPrompt does not inline FORGEJO_USER and does not re
   assert.doesNotMatch(prompt, /docs\/agent-prompts/);
 });
 
-test('buildCompactActOnReviewPrompt delegates artifact paths and consumes artifacts standalone', () => {
+test('buildCompactActOnReviewPrompt delegates resolutions through px', () => {
   const prompt = buildCompactActOnReviewPrompt({
     implementer: 'claude',
     branch: 'mission/task-089',
     attempt: 1
   });
   assert.match(prompt, /Entrypoint: \/act-on-review/);
-  // Standalone mode: no Forgejo-specific CLI invocations (Success Criterion 5).
-  assert.doesNotMatch(prompt, /px review [^\n]*--push/);
-  assert.doesNotMatch(prompt, /px review [^\n]*--status/);
-  assert.match(prompt, /standalone mode/);
-  assert.match(prompt, /Do not post to Forgejo directly/);
+  assert.match(prompt, /px resolve --slug task-089/);
+  assert.match(prompt, /do not post to Forgejo directly/i);
 });
 
-test('buildCompactActOnReviewPrompt keeps the blocked safety warning inline', () => {
+test('buildCompactActOnReviewPrompt restricts blocked resolutions to external dependencies', () => {
   const prompt = buildCompactActOnReviewPrompt({
     implementer: 'claude',
     branch: 'mission/task-089',
     attempt: 1
   });
-  assert.match(prompt, /DO NOT post PUSHBACK_ALL/);
-  assert.match(prompt, /Post BLOCKED instead/);
+  assert.match(prompt, /only for a genuine external dependency/);
+  assert.match(prompt, /Never use it to avoid investigating or delivering requested changes/);
 });
 
 test('act-on-review prompts provide pushback text for rebasing artifacts (task-1430)', () => {
@@ -410,32 +391,7 @@ test('all four builders substitute {{artifactDir}} (no literal placeholder leaks
   }
 });
 
-// task-1264 SC2: when adapters.review.tmpDir is configured, the prompt instructs
-// the agent to write to that exact dir — the same dir the consumer reads from.
-test('builders honor adapters.review.tmpDir so prompt path == consumer read path', () => {
-  const repoRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'task-1264-cfg-'));
-  const customDir = path.join(repoRoot, 'review-artifacts');
-  fs.writeFileSync(
-    path.join(repoRoot, 'workflow.config.json'),
-    JSON.stringify({ adapters: { review: { tmpDir: customDir } } })
-  );
-  try {
-    // The consumer resolves its read dir from the same function.
-    assert.equal(resolveArtifactDir(repoRoot), customDir);
-
-    const reviewPrompt = buildCompactReviewPrompt({ reviewer: 'claude', branch: 'mission/task-089', implementer: 'codex', attempt: 1, repoRoot });
-    assert.ok(reviewPrompt.includes(`${customDir}/task-089-review-findings.md`), 'review prompt should point findings at the configured dir');
-    assert.ok(reviewPrompt.includes(`${customDir}/task-089-review-verdict.txt`));
-
-    const actPrompt = buildCompactActOnReviewPrompt({ implementer: 'codex', branch: 'mission/task-089', attempt: 1, repoRoot });
-    assert.ok(actPrompt.includes(`${customDir}/task-089-round-resolution.md`), 'act-on-review prompt should point resolution at the configured dir');
-    assert.ok(actPrompt.includes(`${customDir}/task-089-review-disposition.txt`));
-  } finally {
-    fs.rmSync(repoRoot, { recursive: true, force: true });
-  }
-});
-
-test('task-2337: review prompt exempts read-only px status from its px ban', () => {
+test('task-2337: review prompt uses px status for history and px verdict for the decision', () => {
   const prompt = buildCompactReviewPrompt({
     reviewer: 'codex',
     branch: 'mission/task-2337',
@@ -443,11 +399,6 @@ test('task-2337: review prompt exempts read-only px status from its px ban', () 
     attempt: 5
   });
 
-  assert.match(prompt, /`px status task-2337` is read-only and is the required way to load review history/);
-  assert.match(prompt, /Do not call px directly[^\n]*except for the read-only `px status task-2337`/);
-  for (const line of prompt.split('\n')) {
-    if (!/\bpx\b/.test(line)) continue;
-    if (!/(Do not|MUST NOT|never|Never)/.test(line)) continue;
-    assert.match(line, /px status task-2337|px review task-2337|Forgejo/, `px prohibition without a px status carve-out: ${line}`);
-  }
+  assert.match(prompt, /review history: `px status task-2337`/);
+  assert.match(prompt, /px verdict request-changes --slug task-2337/);
 });

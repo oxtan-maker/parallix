@@ -77,7 +77,6 @@ const expectedIntegrationFiles = [
   'task-1048-regression.test.ts',
   'task-1049-force-push.test.ts', 'task-1080-sync-merged-hardening.test.ts',
   'task-1104-rebase-cleanup.test.ts',
-  'task-1209-consume-artifacts.test.ts',
   'task-1272-standalone-cycle.test.ts', 'task-1272-standalone-rebase.test.ts',
   'task-1390-shell-init-shebang.test.ts',
   'task-1415-closed-mission-counts.test.ts', 'task-1416-repro.test.ts',
@@ -155,6 +154,7 @@ const expectedIntegrationFiles = [
   // with a worktree, so it crosses the git boundary and runs only in the
   // integration layer.
   'task-2516-recover-landed-mission-repro.test.ts',
+  'task-2521-03-context-cli.integration.test.ts',
   'task-2533-squash-payload-pathspec-quotes.test.ts',
   // TASK-2537: seeds throwaway Git repositories to land a draft-authored task
   // file, so it crosses the git boundary and runs in the integration layer.

@@ -52,8 +52,46 @@ export function recordCheckpoint(
   if (checkpoints.some((checkpoint) => checkpoint.missionId !== replacement.missionId)) {
     throw new Error('Cannot record checkpoint evidence from another mission');
   }
-  const retained = checkpoints.filter((checkpoint) => checkpoint.name !== replacement.name);
-  return [...retained, replacement].sort(
-    (left, right) => Number(left.name.slice(3)) - Number(right.name.slice(3)),
-  );
+  // Recording evidence for a planned checkpoint keeps what it was planned to
+  // deliver unless the evidence supplies its own description.
+  const planned = checkpoints.find((checkpoint) => checkpoint.name === replacement.name);
+  const recorded = replacement.firstLine || !planned?.firstLine ? replacement : { ...replacement, firstLine: planned.firstLine };
+  return byNumber([...checkpoints.filter((checkpoint) => checkpoint.name !== replacement.name), recorded]);
+}
+
+function byNumber(checkpoints: CheckpointData[]): CheckpointData[] {
+  return checkpoints.sort((left, right) => Number(left.name.slice(3)) - Number(right.name.slice(3)));
+}
+
+/**
+ * Plan a checkpoint: its name and what it delivers, with no evidence yet.
+ *
+ * A checkpoint is planned at draft and evidenced during execution, and both
+ * are the same `CheckpointData`: evidence recorded under the planned name
+ * replaces it in place. The planned checkpoints without Goal Check rows are
+ * where a relaunched agent resumes.
+ */
+export function planCheckpoint(
+  checkpoints: readonly CheckpointData[],
+  planned: { readonly missionId: CheckpointData['missionId']; readonly name: string; readonly description: string },
+): CheckpointData[] {
+  if (!isCheckpointName(planned.name)) { throw new Error(`Checkpoint name must look like CP-1: ${planned.name}`); }
+  const description = planned.description.trim();
+  if (!description || description.length > 512) { throw new Error('Checkpoint description must be non-empty and at most 512 characters'); }
+  if (checkpoints.some((checkpoint) => checkpoint.name === planned.name)) { throw new Error(`Checkpoint ${planned.name} is already planned`); }
+  return byNumber([...checkpoints, { missionId: planned.missionId, name: planned.name, firstLine: description, goalCheck: [], nextActionText: '' }]);
+}
+
+/**
+ * Planned and not yet evidenced: no Goal Check rows and no checkpoint document.
+ * A document read from a mission drafted before recorded checkpoints is real
+ * progress even when its table did not parse, so it is never "only planned".
+ */
+export function isPlannedCheckpoint(checkpoint: CheckpointData): boolean {
+  return checkpoint.goalCheck.length === 0 && !checkpoint.rawFilename;
+}
+
+/** The most recent checkpoint that is progress rather than only a plan. */
+export function latestEvidencedCheckpoint(checkpoints: readonly CheckpointData[]): CheckpointData | null {
+  return [...checkpoints].reverse().find((checkpoint) => !isPlannedCheckpoint(checkpoint)) ?? null;
 }

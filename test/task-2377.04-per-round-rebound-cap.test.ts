@@ -80,7 +80,11 @@ function runLoop(options: Record<string, unknown>) {
     consumeImplementerArtifactsFn: async () => ({ consumed: false }),
     pollForReviewFn: async () => POLL_TIMEOUT,
     pollForDispositionFn: async () => 'CHANGES_MADE',
-    hasNewCommittedChangeFn: () => false,
+    // The rebound-cap tests drive the re-review path, so the implementer must
+    // have made a change. (A CHANGES_MADE with an unchanged HEAD now stops the
+    // loop per TASK-2478/criterion 8; these tests are about the cap, not that
+    // stop, so a real revision is required to reach round 2.)
+    hasNewCommittedChangeFn: () => true,
     pushReviewRefFn: () => ({ status: 0 }),
     onAutonomousStop: async (reason: string) => { stops.push(reason); },
   };

@@ -7,18 +7,60 @@ import { describeCoordinatorEvidence, describeMissionWork } from '../../applicat
 export interface StatusCliRequest {
   /** Explicit slug argument, or undefined for inferred slug. */
   readonly explicitSlug?: string;
+  /** Emit the mission's recorded state as JSON instead of the human render. */
+  readonly json: boolean;
 }
 
 /** Parse status CLI args without consulting filesystem or adapter state. */
 export function parseStatusCliRequest(args: string[]): StatusCliRequest {
   const positional: string[] = [];
+  let json = false;
   for (const arg of args) {
+    if (arg === '--json') { json = true; continue; }
     if (arg.startsWith('--')) {
       throw new Error(`Unknown status option: ${arg}`);
     }
     positional.push(arg);
   }
-  return { explicitSlug: positional[0] };
+  return { explicitSlug: positional[0], json };
+}
+
+/**
+ * The machine-readable projection agents consume. Only recorded Mission state
+ * appears here: the operator/environment sections of the human render (agent
+ * matrix, stale worktrees, commit list) are deliberately excluded, so an agent
+ * parsing this never depends on the machine it runs on.
+ */
+export function statusJson(result: StatusResult): string {
+  const md = result.missionData;
+  return JSON.stringify({
+    slug: result.slug,
+    title: md?.title ?? null,
+    branch: result.branch,
+    backlogStatus: md?.backlogStatus ?? null,
+    assignee: md?.assignee ?? null,
+    externalTaskRef: md?.externalTaskRef ?? null,
+    version: md?.version ?? null,
+    brief: md?.brief ?? null,
+    declaredGates: md?.declaredGates ?? [],
+    successCriteria: md?.successCriteria ?? [],
+    checkpoints: md?.checkpoints ?? [],
+    predictedNelBucket: md?.predictedNelBucket ?? null,
+    reproductionTest: md?.reproductionTest ?? null,
+    latestCheckpoint: md?.checkpoint
+      ? { name: md.checkpoint, description: md.checkpointDescription ?? null, goalCheck: md.goalCheck ?? [], nextAction: md.nextAction ?? null }
+      : null,
+    review: md?.reviewPhase
+      ? {
+        round: md.reviewRound ?? 1,
+        phase: md.reviewPhase,
+        disposition: md.reviewDisposition ?? null,
+        approvalOwed: md.approvalOwed ?? false,
+        history: md.reviewHistory,
+      }
+      : null,
+    pullRequest: result.prInfo ?? null,
+  }, null, 2);
 }
 
 /** Render the complete status output from a StatusResult. */
@@ -45,13 +87,51 @@ function logReviewRounds(missionData: StatusMissionData, log: (_msg: string) => 
   }
 }
 
+/**
+ * The recorded brief and declared gates, so an agent never opens a mission
+ * document to learn what the mission is for or what verifies it.
+ */
+function logBriefAndGates(missionData: StatusMissionData, log: (_msg: string) => void): void {
+  const brief = missionData.brief;
+  if (brief) {
+    log(`Goal: ${brief.goal}`);
+    log(`Why: ${brief.why}`);
+    if (brief.scope) { log(`Scope: ${brief.scope}`); }
+    if (brief.outOfScope.length > 0) { log(`Out of scope: ${brief.outOfScope.join('; ')}`); }
+  } else {
+    log('Brief: none recorded');
+  }
+  const criteria = missionData.successCriteria ?? [];
+  if (criteria.length > 0) {
+    log('Success criteria:');
+    for (const [index, criterion] of criteria.entries()) { log(`  ${index + 1}. ${criterion}`); }
+  } else {
+    log('Success criteria: none');
+  }
+  const checkpoints = missionData.checkpoints ?? [];
+  if (checkpoints.length > 0) {
+    log('Checkpoints:');
+    for (const checkpoint of checkpoints) { log(`  ${checkpoint.recorded ? '[x]' : '[ ]'} ${checkpoint.name}: ${checkpoint.description}`.trimEnd()); }
+  }
+  const gates = missionData.declaredGates ?? [];
+  log(gates.length > 0 ? `Declared gates: ${gates.join('; ')}` : 'Declared gates: none');
+  if (missionData.predictedNelBucket) { log(`Predicted NEL bucket: ${missionData.predictedNelBucket}`); }
+  if (missionData.reproductionTest) { log(`Reproduction test: ${missionData.reproductionTest}`); }
+}
+
 function logMissionData(missionData: StatusMissionData | null, log: (_msg: string) => void): void {
   if (!missionData) {
     log('Backlog status: unknown (projection unavailable)');
     log('Last checkpoint: none');
     return;
   }
+  if (missionData.title) { log(`Title: ${missionData.title}`); }
   log(`Backlog status: ${missionData.backlogStatus}`);
+  log(`Assignee: ${missionData.assignee ?? 'none'}`);
+  if (missionData.externalTaskRef) {
+    const ref = missionData.externalTaskRef;
+    log(`External task: ${ref.source}:${ref.id}${ref.url ? ` (${ref.url})` : ''}`);
+  }
   // The same two facts the TUI agent strip renders, from the same projection:
   // authoritative work first, then the recovery-only evidence that a `px`
   // coordinator process exists. Keeping them on separate lines is deliberate —
@@ -60,9 +140,17 @@ function logMissionData(missionData: StatusMissionData | null, log: (_msg: strin
     log(`Mission work: ${describeMissionWork(missionData.activity.work)}`);
     log(`Coordinator evidence: ${describeCoordinatorEvidence(missionData.activity.coordinator)}`);
   }
-  log(missionData.checkpoint
-    ? `Last checkpoint: ${missionData.checkpoint} - ${missionData.checkpointDescription || ''}`
-    : 'Last checkpoint: none');
+  logBriefAndGates(missionData, log);
+  if (missionData.version !== null && missionData.version !== undefined) {
+    log(`Version: ${missionData.version} (pass to --expected-version when writing)`);
+  }
+  if (missionData.checkpoint) {
+    log(`Last checkpoint: ${missionData.checkpoint}${missionData.checkpointDescription ? ` - ${missionData.checkpointDescription}` : ''}`);
+    for (const row of missionData.goalCheck ?? []) { log(`  ${row.criterion}: ${row.evidence}`); }
+    if (missionData.nextAction) { log(`  Next action: ${missionData.nextAction}`); }
+  } else {
+    log('Last checkpoint: none');
+  }
   logReviewRounds(missionData, log);
 }
 
@@ -143,9 +231,11 @@ export function createStatusCommand(useCase: { execute: (_rootDir: string, _slug
     const logFn = options.logFn || fmt.log.plain;
 
     let explicitSlug: string | undefined;
+    let json = false;
     try {
       const request = parseStatusCliRequest(args);
       explicitSlug = request.explicitSlug;
+      json = request.json;
     } catch (error) {
       errorFn(formatParseError(error as Error));
       exitFn(1);
@@ -153,7 +243,7 @@ export function createStatusCommand(useCase: { execute: (_rootDir: string, _slug
     }
 
     const result = await useCase.execute(process.cwd(), explicitSlug ?? null);
-    renderStatus(result, logFn);
+    if (json) { logFn(statusJson(result)); } else { renderStatus(result, logFn); }
     exitFn(0);
   };
 }

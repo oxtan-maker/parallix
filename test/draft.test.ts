@@ -82,7 +82,10 @@ test('buildDraftPrompt reads template and substitutes slug and YYYY', () => {
 
     const prompt = buildDraftPrompt('task-test', { rootDir: tempRoot });
     assert.ok(prompt.includes('task-test'));
-    assert.match(prompt, new RegExp(`docs/missions/${new Date().getFullYear()}/task-test/MISSION\\.md`));
+    // TASK-2521.03: the draft prompt names no mission document. There is
+    // nothing for a drafting agent to write to, so handing it a path only
+    // invites one being created.
+    assert.doesNotMatch(prompt, /MISSION\.md/);
     assert.match(prompt, /ai_sdlc/);
     assert.doesNotMatch(prompt, /\{\{slug\}\}/);
     assert.doesNotMatch(prompt, /YYYY/);
@@ -94,9 +97,23 @@ test('buildDraftPrompt reads template and substitutes slug and YYYY', () => {
 test('buildDraftPrompt requires command-only Gates and relocates outcome prose', () => {
   const prompt = buildDraftPrompt('task-test', { rootDir: process.cwd() });
 
-  assert.match(prompt, /Every `## Gates` checklist item must contain only the exact runnable repository command/);
+  // TASK-2521.03: gates are recorded as Mission state through `px gate add`
+  // rather than written into a `## Gates` checklist. The command-only rule and
+  // the prose relocation it enforces are unchanged.
+  assert.match(prompt, /Record each verification gate with `px gate add --command <command>`/);
+  assert.match(prompt, /the exact runnable repository command and nothing else/);
   assert.match(prompt, /Never append outcome or explanatory prose to a gate command/);
-  assert.match(prompt, /Put outcome expectations in Success Criteria or checkpoint documentation instead/);
+  assert.match(prompt, /Put outcome expectations in a success criterion \(`px criterion add`\) instead/);
+});
+
+test('buildDraftPrompt records the mission contract through typed commands, not a file', () => {
+  const prompt = buildDraftPrompt('task-test', { rootDir: process.cwd() });
+
+  for (const verb of [/px goal set --goal/, /px scope set --scope/, /px gate add --command/]) {
+    assert.match(prompt, verb);
+  }
+  assert.match(prompt, /--expected-version/);
+  assert.doesNotMatch(prompt, /px context|px spec|px refine|px depends/, 'no retired command may be named');
 });
 
 test('draft setup accepts valid labels and tolerates missing labels before launch', () => {
@@ -129,7 +146,7 @@ test('buildDraftPrompt uses absolute worktree paths and emits no docs/agent-prom
   const worktree = '/tmp/testproj-task-8';
   const prompt = buildDraftPrompt('task-8', { rootDir: worktree, worktree });
 
-  assert.match(prompt, /Mission path: \/tmp\/testproj-task-8\/missions\/task-8\/MISSION\.md/);
+  assert.doesNotMatch(prompt, /Mission path:|MISSION\.md/);
   assert.match(prompt, /Backlog task: .*task-8/);
   assert.match(prompt, /verify the draft with `.*` before stopping/);
   assert.doesNotMatch(prompt, /Load the workflow lifecycle/);
@@ -1889,34 +1906,6 @@ function writeMissionFile(heading, body = '\n## Goal\nSomething.\n') {
   return missionFile;
 }
 
-// A contract shaped like the real thing: a two-paragraph Goal, numbered
-// criteria, checkpoints with their documentation subsection, and gates.
-const TASK_2471_CONTRACT = `
-## Goal
-Correct the greeting string emitted by hello.sh so that running the script
-prints exactly \`Hello, World!\` and nothing else.
-
-A second paragraph that the digest must not print.
-
-## Refinement Signals
-- Predicted NEL bucket: Small (0-80)
-
-## Success Criteria
-1. First criterion.
-2. Second criterion.
-3. Third criterion.
-
-## Checkpoints
-- CP 1: fix the greeting.
-- CP 2: lock it with a test.
-
-### Checkpoint Documentation Requirements
-- Not a checkpoint.
-
-## Gates
-- [ ] ./scripts/verify-local.sh docs
-`;
-
 test('px draft default output omits every internal-plumbing line', async () => {
   const missionFile = writeMissionFile('# Mission: Improve px draft default terminal output');
   const { text } = await runDraftCapturingOutput({
@@ -1941,7 +1930,7 @@ test('px draft default output ends with a mission summary naming px active', asy
   assert.match(text, /\[PASS\] Drafted task-tst in \d+s: Improve px draft default terminal output/);
   assert.match(text, /agent\s+codex/, 'the summary must name the drafting agent family');
   assert.match(text, /branch\s+mission\/task-tst/, 'the summary must name the mission branch');
-  assert.ok(text.includes(missionFile), 'the summary must give the mission file path to inspect');
+  assert.match(text, /contract\s+px status task-tst/, 'the summary must say where the recorded contract is read');
   assert.ok(text.includes('/wt-tst'), 'the summary must give the mission worktree');
   assert.match(text, /Next: px active/, 'px active must be the stated next action');
 
@@ -2136,31 +2125,33 @@ test('px draft keeps an agent fallback visible while demoting assignee bookkeepi
   assert.ok(!text.includes('Enforcing draft agent codex as assignee'), 'the assignee write is plumbing');
 });
 
-test('px draft prints the contract goal and its shape so no pager is needed', async () => {
-  const missionFile = writeMissionFile('# Mission: Fix the hello.sh greeting output', TASK_2471_CONTRACT);
+test('px draft prints the recorded contract goal and its shape so no pager is needed', async () => {
+  const missionFile = writeMissionFile('# Mission: Fix the hello.sh greeting output');
+  const recorded = {
+    brief: { goal: 'Correct the greeting string emitted by hello.sh', why: 'w', scope: 's', outOfScope: [] },
+    successCriteria: ['First criterion.', 'Second criterion.', 'Third criterion.'],
+    declaredGates: ['./scripts/verify-local.sh all'],
+    predictedNelBucket: 'Small',
+    checkpoints: [
+      { missionId: 'task-tst', name: 'CP-1', firstLine: 'Fix the greeting', goalCheck: [], nextActionText: '' },
+      { missionId: 'task-tst', name: 'CP-2', firstLine: 'Prove it', goalCheck: [], nextActionText: '' },
+    ],
+  };
   const { text } = await runDraftCapturingOutput({
-    overrides: { ensureMissionFileFn: missionFileStub(missionFile) },
+    overrides: {
+      ensureMissionFileFn: missionFileStub(missionFile),
+      missionServicesFn: async () => ({
+        repositoryId: 'main',
+        lifecycle: { transition: async () => ({ status: 'completed', value: { version: 2 }, durableEvidence: [] }) },
+        intake: { execute: async () => ({ status: 'completed', value: { version: 1 }, durableEvidence: [] }) },
+        store: { load: async () => ({ kind: 'found', mission: recorded, version: 9 }) },
+      }),
+    },
   });
 
   assert.match(text, /^Goal$/m);
   assert.match(text, /Correct the greeting string emitted by hello\.sh/);
-  assert.ok(!text.includes('A second paragraph'), 'only the first Goal paragraph is printed');
-  // The documentation subsection under ## Checkpoints is not a checkpoint.
-  assert.match(text, /3 success criteria · 2 checkpoints · 1 gate · NEL Small \(0-80\)/);
-});
-
-test('px draft counts bullet-style success criteria too', async () => {
-  // Drafted contracts bullet their criteria as often as they number them.
-  const contract = TASK_2471_CONTRACT.replace(
-    '1. First criterion.\n2. Second criterion.\n3. Third criterion.',
-    '> Falsifiability rule: each criterion is falsifiable.\n\n- First criterion.\n- Second criterion.',
-  );
-  const missionFile = writeMissionFile('# Mission: Fix the hello.sh greeting output', contract);
-  const { text } = await runDraftCapturingOutput({
-    overrides: { ensureMissionFileFn: missionFileStub(missionFile) },
-  });
-
-  assert.match(text, /2 success criteria · 2 checkpoints · 1 gate/);
+  assert.match(text, /3 success criteria · 2 checkpoints · 1 gate · NEL Small/);
 });
 
 test('px draft summary survives a contract with no Goal section', async () => {

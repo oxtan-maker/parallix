@@ -462,3 +462,36 @@ test('parseResolutionDispositions reads per-finding **Disposition:** lines', () 
     { kind: 'fixed', findingId: 'Merged-PR preflight contract conflict (🔴)' },
   ]);
 });
+
+test('a findings document title is not projected as a finding', () => {
+  // Regression: the finding-heading pattern matched `Finding` as a prefix of
+  // `Findings`, so `# Findings — <slug> (round 1)` — the title every findings
+  // document opens with — was reported as that round's only finding. `px status`
+  // then showed an invented finding on rounds that recorded none, and an agent
+  // reading it could not tell a real finding from a heading.
+  const review = startReview(
+    subject, reviewer, implementer, '2026-08-02T08:00:00Z', reviewerEligibility,
+  );
+  const withEvents = {
+    ...review,
+    reviewEvents: [{
+      roundNumber: 1,
+      eventType: 'reviewer_findings' as const,
+      actor: reviewer,
+      content: [
+        '# Findings — task-2521.03 (round 1)',
+        '',
+        'No findings.',
+        '',
+        '## Finding 2 — a real one, which must still be reported',
+      ].join('\n'),
+    }] as unknown as typeof review.reviewEvents,
+  };
+
+  const [round] = projectReviewHistory(withEvents);
+  assert.deepEqual(
+    round.findingSummaries,
+    ['a real one, which must still be reported'],
+    'the document title must not become a finding, and a real finding must survive',
+  );
+});

@@ -1,8 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import fs from 'fs';
-import os from 'os';
-import path from 'path';
+import os from 'node:os';
 
 import {
   bindReviewPersistence,
@@ -66,17 +64,7 @@ function fakeStore() {
   };
 }
 
-function artifactDir(files: Record<string, string>) {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'task-2339-'));
-  for (const [name, content] of Object.entries(files)) {
-    fs.writeFileSync(path.join(dir, name), content, 'utf8');
-  }
-  return dir;
-}
-
-const silent = { log: () => {}, error: () => {} };
-
-test('reviewLoopBindings supplies the artifact consumers, not only the review-state projections', () => {
+test('reviewLoopBindings supplies persisted-output readers, not only review-state projections', () => {
   const bindings = reviewLoopBindings(fakeStore() as never);
   assert.deepEqual(Object.keys(bindings).sort(), [
     'consumeImplementerArtifactsFn',
@@ -88,89 +76,50 @@ test('reviewLoopBindings supplies the artifact consumers, not only the review-st
   ]);
 });
 
-test('bound reviewer-artifact consumer persists its events to the operator database', async () => {
+test('loop reviewer reader uses persisted SQLite events rather than artifacts', async () => {
   const store = fakeStore();
-  const tmpDir = artifactDir({
-    'task-9001-review-findings.md': 'No blocking findings.',
-    'task-9001-review-outcome.md': 'Verdict: approve',
-    'task-9001-review-verdict.txt': 'approve',
-  });
+  store.state.mission.review.reviewEvents = [
+    { eventType: 'reviewer_findings', roundNumber: 3, actor: 'claude', content: '## F1: persisted finding', createdAt: '2026-08-04T10:00:00.000Z' },
+    { eventType: 'reviewer_outcome', roundNumber: 3, actor: 'claude', verdict: 'request-changes', content: 'Outcome: request-changes', createdAt: '2026-08-04T10:00:01.000Z' },
+  ];
 
   const result = await reviewLoopBindings(store as never).consumeReviewerArtifactsFn('task-9001', 'claude', {
-    worktree: tmpDir,
-    tmpDir,
-    providerEnabled: false,
-    ...silent,
+    worktree: '/tmp/worktree',
   });
 
   assert.equal(result.consumed, true);
   assert.equal(result.ok, true);
-  const events = store.state.mission.review.reviewEvents;
-  assert.deepEqual(events.map((event: any) => event.eventType), ['reviewer_findings', 'reviewer_outcome']);
-  // The round comes from the stored Review, so an unbound state reader (which
-  // resolves no store and defaults to round 1) fails this assertion.
-  assert.deepEqual(events.map((event: any) => event.roundNumber), [3, 3]);
+  assert.equal(result.reviewState, 'REQUEST_CHANGES');
+  assert.deepEqual(result.findingSummaries, ['persisted finding']);
 });
 
-test('bound reviewer-artifact consumer records a self-author verdict on its stored round', async () => {
+test('loop reviewer reader ignores events from another round or reviewer', async () => {
   const store = fakeStore();
-  const tmpDir = artifactDir({
-    'task-9001-review-findings.md': 'No blocking findings.',
-    'task-9001-review-outcome.md': 'Verdict: approve',
-    'task-9001-review-verdict.txt': 'approve',
-  });
-  let comment = '';
-  let providerReviewCalled = false;
+  store.state.mission.review.reviewEvents = [
+    { eventType: 'reviewer_outcome', roundNumber: 2, actor: 'claude', verdict: 'approve', content: 'old', createdAt: '2026-08-04T10:00:00.000Z' },
+    { eventType: 'reviewer_outcome', roundNumber: 3, actor: 'codex', verdict: 'approve', content: 'other', createdAt: '2026-08-04T10:00:01.000Z' },
+  ];
 
   const result = await reviewLoopBindings(store as never).consumeReviewerArtifactsFn('task-9001', 'claude', {
-    worktree: tmpDir,
-    tmpDir,
-    providerEnabled: true,
-    readTokenFn: () => 'mock-token',
-    postCommentFn: (_branch, _token, body) => {
-      comment = body;
-      return { ok: true };
-    },
-    getPrAuthorFn: () => 'claude',
-    postReviewFn: () => {
-      providerReviewCalled = true;
-      return { ok: true };
-    },
-    ...silent,
+    worktree: '/tmp/worktree',
   });
 
-  assert.equal(result.ok, true);
-  assert.equal(providerReviewCalled, false, 'self-author verdicts stay local');
-  assert.equal(store.state.mission.review.rounds[2].disposition, 'APPROVED');
-  assert.equal(store.state.mission.review.rounds[2].phase, 'approved');
-  assert.match(comment, /workflow-round:3, workflow-phase:reviewing/);
+  assert.equal(result.consumed, false);
 });
 
-test('bound implementer-artifact consumer persists its events to the operator database', async () => {
+test('loop implementer reader uses the persisted disposition event', async () => {
   const store = fakeStore();
-  const tmpDir = artifactDir({
-    'task-9001-round-resolution.md': 'fixed_items: ["F1"]',
-    'task-9001-review-disposition.txt': 'CHANGES_MADE',
-  });
+  store.state.mission.review.reviewEvents = [
+    { eventType: 'implementer_disposition', roundNumber: 3, actor: 'codex', disposition: 'PUSHBACK_ALL', content: 'Autonomous review disposition: PUSHBACK_ALL', createdAt: '2026-08-04T10:00:00.000Z' },
+  ];
 
   const result = await reviewLoopBindings(store as never).consumeImplementerArtifactsFn('task-9001', 'codex', {
-    worktree: tmpDir,
-    tmpDir,
-    providerEnabled: false,
-    // The artifact dir is a bare temp directory with no checkout behind it,
-    // and this test is about event persistence, not revision resolution.
-    // `headRevision` fails loud rather than synthesizing a non-SHA revision,
-    // so supply the branch tip here.
-    headRevisionFn: () => 'rev-4',
-    ...silent,
+    worktree: '/tmp/worktree',
   });
 
   assert.equal(result.consumed, true);
   assert.equal(result.ok, true);
-  assert.deepEqual(
-    store.state.mission.review.reviewEvents.map((event: any) => event.eventType),
-    ['implementer_round_summary', 'implementer_disposition'],
-  );
+  assert.equal(result.disposition, 'PUSHBACK_ALL');
 });
 
 test('bindReviewPersistence exposes the same bound consumers', async () => {

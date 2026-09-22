@@ -995,13 +995,6 @@ export const RETIRED_WORKFLOW_PATH_WRITERS: readonly RetiredWorkflowPathWriterEn
     authority: 'ADR 0037 — integrate rewrites the external Backlog catalog under backlog/{tasks,completed}; intake/closeout, not Mission state.',
   },
   {
-    id: 'retired-writer-review-events',
-    fileLocation: 'src/adapters/review/review-events.ts',
-    pathPatterns: ['missions/<slug>/review-events/'],
-    classification: 'explicit-one-way-export',
-    authority: 'ADR 0053 transaction rule 4 — rendered review-event Markdown is a rebuildable one-way export of stored rows.',
-  },
-  {
     id: 'retired-writer-setup-review-config',
     fileLocation: 'src/adapters/review/setup-review-config.ts',
     pathPatterns: ['workflow.config.json'],

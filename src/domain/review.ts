@@ -380,7 +380,7 @@ export interface Review {
    */
   readonly stageLaunches: readonly StageLaunchWindow[];
   /**
-   * Full audit trail for review events (replaces .md files under
+   * Full audit trail for review events (replaced the retired .md files under
    * missions/<slug>/review-events/). Stores reviewer findings/outcomes,
    * implementer summaries/dispositions, human notes, and blocked/parked
    * publication records.
@@ -826,4 +826,30 @@ export function resumeReview(review: Review): Review {
     throw new Error('Review is not waiting for human intervention');
   }
   return { ...review, intervention: null };
+}
+
+/**
+ * Invalidate a BLOCKED/PARKED implementer stop for the `px review --continue`
+ * path, then return so the caller relaunches the loop.
+ *
+ * An implementer BLOCKED/PARKED disposition pins the current round in the
+ * fixing phase; the review loop relaunches the implementer on every
+ * `--continue` because it treats any existing disposition as "resolve the
+ * blocker". When the operator runs `--continue` they are declaring the blocker
+ * resolved by hand, so clear the disposition and reset the round to
+ * `reviewing`. The loop then re-polls the reviewer on the current tree instead
+ * of relaunching the stuck implementer.
+ */
+export function invalidateBlocker(review: Review): Review {
+  const round = currentReviewRound(review);
+  if (round.disposition !== 'BLOCKED' && round.disposition !== 'PARKED') {
+    throw new Error('Review is not blocked; nothing to invalidate');
+  }
+  const invalidated: ReviewRound = {
+    ...round,
+    disposition: null,
+    phase: 'reviewing',
+    blockedReason: undefined,
+  };
+  return { ...review, rounds: replaceCurrentRound(review, invalidated) };
 }

@@ -1432,11 +1432,15 @@ test('consumeImplementerArtifacts with invalid JSON in resolution', async () => 
 // ============================================================================
 
 // Reproduces the original bug scenario: os.tmpdir() != /tmp (TMPDIR set, as in
-// CI/sandboxes/enterprise px) and the Forgejo provider OFF. A reviewer writes
-// the three artifact files to the dir the prompt advertises and stops. The loop
-// must consume them and reach a recorded APPROVED verdict — not FAIL/exit(1).
-// The alignment is by construction: the prompt's {{artifactDir}} and the
-// consumer's tmpDir both come from resolveArtifactDir(worktree).
+// CI/sandboxes/enterprise px) and the Forgejo provider OFF. Three artifact
+// files land in the resolved artifact dir and the loop must consume them and
+// reach a recorded APPROVED verdict — not FAIL/exit(1).
+//
+// TASK-2521.03 retired the prompt half of this scenario: agents now record a
+// verdict with `px verdict`, so no prompt advertises an artifact path. The tmp
+// transport itself stays supported for an operator replaying a round by hand,
+// and that is what this regression still pins — including the TMPDIR
+// divergence that caused the original bug.
 test('REGRESSION task-1264: os.tmpdir() != /tmp + Forgejo off -> reviewer artifacts drive a recorded verdict', { concurrency: false }, async () => {
   const scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'task-1264-e2e-'));
   const origTmp = process.env.TMPDIR;
@@ -1447,23 +1451,18 @@ test('REGRESSION task-1264: os.tmpdir() != /tmp + Forgejo off -> reviewer artifa
     const slug = 'task-9001';
     const branch = `mission/${slug}`;
 
-    // Build the prompt exactly as the loop does (no configured tmpDir).
+    // The prompt must no longer send an agent to a file for this.
     const prompt = buildCompactReviewPrompt({ reviewer: 'claude', branch, implementer: 'codex', attempt: 1, repoRoot: scratch });
+    assert.doesNotMatch(prompt, /review-findings\.md/, 'the retired artifact protocol must not reappear in the prompt');
+    assert.match(prompt, /px verdict/);
 
-    // Extract the directory the prompt instructs the agent to write to.
-    const m = prompt.match(/Write findings to `([^`]+)\/task-9001-review-findings\.md`/);
-    assert.ok(m, 'prompt must advertise a concrete findings path');
-    const advertisedDir = m[1];
-    assert.doesNotMatch(advertisedDir, /\{\{/);
-
-    // The consumer reads from the same dir, by construction.
+    // The operator transport still resolves under a diverged TMPDIR.
     const consumerDir = resolveArtifactDir(scratch);
-    assert.equal(consumerDir, advertisedDir, 'prompt write dir must equal consumer read dir');
+    assert.ok(consumerDir.startsWith(scratch), 'the artifact dir must follow the resolved tmp root');
 
-    // Simulate the reviewer: write the three real files to the advertised dir and stop.
-    fs.writeFileSync(path.join(advertisedDir, `${slug}-review-findings.md`), '# findings');
-    fs.writeFileSync(path.join(advertisedDir, `${slug}-review-outcome.md`), '# outcome');
-    fs.writeFileSync(path.join(advertisedDir, `${slug}-review-verdict.txt`), 'approve\n');
+    fs.writeFileSync(path.join(consumerDir, `${slug}-review-findings.md`), '# findings');
+    fs.writeFileSync(path.join(consumerDir, `${slug}-review-outcome.md`), '# outcome');
+    fs.writeFileSync(path.join(consumerDir, `${slug}-review-verdict.txt`), 'approve\n');
 
     // Consume with the real file reader (no readArtifactFn override).
     const result = await consumeReviewerArtifacts(slug, 'claude', {
@@ -1477,9 +1476,161 @@ test('REGRESSION task-1264: os.tmpdir() != /tmp + Forgejo off -> reviewer artifa
       error: () => {}
     });
 
-    assert.deepEqual(result, { consumed: true, ok: true, reviewState: 'APPROVED', findingSummaries: [] });
+    assert.deepEqual(result, { consumed: true, ok: true, reviewState: 'APPROVED', reviewFindings: [] });
   } finally {
     if (origTmp === undefined) delete process.env.TMPDIR; else process.env.TMPDIR = origTmp;
     fs.rmSync(scratch, { recursive: true, force: true });
   }
+});
+
+test('an approve is persisted on the aggregate even with the review provider disabled', async () => {
+  // Regression: `recordApproval` was reached only inside the self-authored-PR
+  // branch of the provider mirroring. With `provider: none` that path never
+  // ran, and with an ordinary provider review it posted externally and returned
+  // without persisting. Either way the consumer answered APPROVED while the
+  // Mission stayed unapproved, so `px integrate` had nothing to gate on.
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'test-approve-persist-'));
+  const approvals = [];
+
+  const result = await consumeReviewerArtifacts('test-slug', 'test-reviewer', {
+    output: { findings: [], comment: 'looks good', verdict: 'approve' },
+    expectedVersion: 7,
+    tmpDir,
+    worktree: tmpDir,
+    // AC #10: the consumer compares the caller's version at entry, before it
+    // writes any review event of its own.
+    missionStore: { async load() { return { kind: 'found', mission: {}, version: 7 }; } },
+    readReviewStateFn: () => null,
+    createEventFn: () => ({ ok: true, path: '/mock/path' }),
+    deleteArtifactFn: () => {},
+    forgejoEnabled: false,
+    recordApprovalFn: async (slug, input) => {
+      approvals.push({ slug, input });
+      return { outcome: 'recorded' };
+    },
+    log: () => {},
+    error: () => {}
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.reviewState, 'APPROVED');
+  assert.equal(approvals.length, 1, 'the approve must reach the aggregate');
+  assert.equal(approvals[0].slug, 'test-slug');
+  assert.equal(approvals[0].input.comment, 'looks good');
+
+  fs.rmSync(tmpDir, { recursive: true, force: true });
+});
+
+test('a failed approval persist fails the consumer instead of reporting APPROVED', async () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'test-approve-fail-'));
+  const result = await consumeReviewerArtifacts('test-slug', 'test-reviewer', {
+    output: { findings: [], comment: null, verdict: 'approve' },
+    tmpDir,
+    worktree: tmpDir,
+    missionStore: {},
+    readReviewStateFn: () => null,
+    createEventFn: () => ({ ok: true, path: '/mock/path' }),
+    deleteArtifactFn: () => {},
+    forgejoEnabled: false,
+    recordApprovalFn: async () => ({ outcome: 'failed', diagnostic: 'expected version 7, found 9' }),
+    log: () => {},
+    error: () => {}
+  });
+
+  assert.equal(result.ok, false);
+  assert.match(result.diagnostic, /expected version 7, found 9/);
+
+  fs.rmSync(tmpDir, { recursive: true, force: true });
+});
+
+test('a review decision against a stale Mission is refused before anything is written', async () => {
+  // AC #10. Checked once at entry: the consumer writes review events on the way
+  // to the recorder, so a version compared further down would only ever see the
+  // consumer's own writes rather than the other agent's.
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'test-stale-verdict-'));
+  const approvals = [];
+  const events = [];
+
+  const result = await consumeReviewerArtifacts('test-slug', 'test-reviewer', {
+    output: { findings: [], comment: null, verdict: 'approve' },
+    expectedVersion: 7,
+    tmpDir,
+    worktree: tmpDir,
+    missionStore: { async load() { return { kind: 'found', mission: {}, version: 9 }; } },
+    readReviewStateFn: () => null,
+    createEventFn: () => { events.push('event'); return { ok: true, path: '/mock/path' }; },
+    deleteArtifactFn: () => {},
+    forgejoEnabled: false,
+    recordApprovalFn: async () => { approvals.push('approved'); return { outcome: 'recorded' }; },
+    log: () => {},
+    error: () => {}
+  });
+
+  assert.equal(result.ok, false);
+  assert.match(result.diagnostic, /expected version 7, found 9/);
+  assert.equal(approvals.length, 0, 'no decision may be recorded');
+  assert.equal(events.length, 0, 'no review event may be written either');
+
+  fs.rmSync(tmpDir, { recursive: true, force: true });
+});
+
+test('the decision is committed with the caller version before any review event', async () => {
+  // A pre-check alone is a time-of-check/time-of-use window: the consumer's own
+  // event writes advance the Mission, so a decision recorded afterwards could
+  // neither compare the caller's version nor notice a concurrent write that
+  // landed in between. The decision goes first, carrying that version, and the
+  // recorder's compare-and-swap closes the window.
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'test-decision-order-'));
+  const order = [];
+
+  const result = await consumeReviewerArtifacts('test-slug', 'test-reviewer', {
+    output: { findings: [], comment: null, verdict: 'approve' },
+    expectedVersion: 7,
+    tmpDir,
+    worktree: tmpDir,
+    missionStore: { async load() { return { kind: 'found', mission: {}, version: 7 }; } },
+    readReviewStateFn: () => null,
+    createEventFn: () => { order.push('event'); return { ok: true, path: '/mock/path' }; },
+    deleteArtifactFn: () => {},
+    forgejoEnabled: false,
+    recordApprovalFn: async (_slug, input) => {
+      order.push(`decision:${input.expectedVersion}`);
+      return { outcome: 'recorded' };
+    },
+    log: () => {},
+    error: () => {}
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(order[0], 'decision:7', 'the decision commits first, pinned to the caller version');
+  assert.ok(order.slice(1).every((step) => step === 'event'), 'every event follows the decision');
+
+  fs.rmSync(tmpDir, { recursive: true, force: true });
+});
+
+test('a refused decision writes no review event at all', async () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'test-decision-refused-'));
+  const order = [];
+
+  const result = await consumeReviewerArtifacts('test-slug', 'test-reviewer', {
+    output: { findings: [], comment: null, verdict: 'approve' },
+    expectedVersion: 7,
+    tmpDir,
+    worktree: tmpDir,
+    missionStore: { async load() { return { kind: 'found', mission: {}, version: 7 }; } },
+    readReviewStateFn: () => null,
+    createEventFn: () => { order.push('event'); return { ok: true, path: '/mock/path' }; },
+    deleteArtifactFn: () => {},
+    forgejoEnabled: false,
+    // What a concurrent write looks like from the recorder's compare-and-swap.
+    recordApprovalFn: async () => ({ outcome: 'failed', diagnostic: 'expected version 7, found 8' }),
+    log: () => {},
+    error: () => {}
+  });
+
+  assert.equal(result.ok, false);
+  assert.match(result.diagnostic, /expected version 7, found 8/);
+  assert.deepEqual(order, [], 'a refused decision leaves no event behind');
+
+  fs.rmSync(tmpDir, { recursive: true, force: true });
 });

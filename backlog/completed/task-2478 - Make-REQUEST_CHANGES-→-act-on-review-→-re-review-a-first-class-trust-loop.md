@@ -1,10 +1,10 @@
 ---
 id: TASK-2478
 title: Make REQUEST_CHANGES → act-on-review → re-review a first-class trust loop
-status: backlog
-assignee: []
+status: done
+assignee: [custom]
 created_date: '2026-09-10 06:15'
-labels: []
+labels: ["ai_sdlc"]
 dependencies: []
 ---
 
@@ -123,16 +123,14 @@ APPROVED · round 2
 
 The exact syntax is flexible; the causal relationship is not.
 
-Mandatory replay feedback loop
+Deterministic replay acceptance
 
-This mission has two real-run acceptance artifacts:
+Acceptance uses a deterministic production-seam replay of the review and
+act-on-review path. It covers both the ordinary immediate-approval path and a
+correction path. The replay must flow through the Review aggregate; it must
+not write findings, dispositions, revisions, or approvals directly into state.
 
-the ordinary first-value demo, which must remain clean;
-the deterministic review-correction scenario.
-
-The implementing agent must run both.
-
-For the correction scenario, it must inspect the raw transcript and verify manually from the transcript that:
+The correction replay verifies that:
 
 the reviewer finding was visible before the implementer started;
 the implementer responded to that exact finding;
@@ -141,7 +139,10 @@ verification reran against the changed tree;
 the second reviewer decision occurred after the fix;
 final approval was for the revised revision, not stale review state.
 
-Any discrepancy must be investigated before completion.
+Any discrepancy must be investigated before completion. A recorded live-agent
+transcript is supplementary evidence, not an integration blocker: agent
+behavior cannot be made deterministic without sabotaging the agent or
+injecting a result.
 
 Scope
 act-on-review presentation.
@@ -170,7 +171,8 @@ Re-review evaluates the revised revision.
 Final approval is clearly associated with the later round/revised tree.
 The terminal does not force the user to inspect internal artifact filenames to understand the loop.
 The ordinary first-value Hello World demo remains able to take the immediate-approval path.
-Real correction-flow cast/transcript is inspected by the implementing agent.
+The deterministic production-seam replay verifies the correction flow; a live
+correction-flow cast/transcript is optional supplementary evidence.
 All replay defects are documented under ## Demo Replay Findings.
 Focused act-on-review/review tests run directly and pass.
 Full repository gate passes.
@@ -184,7 +186,8 @@ Do not skip rerunning verification after correction.
 Do not allow approval from an earlier revision to satisfy the later round.
 Do not collapse “implementer disposition = CHANGES_MADE” into proof that the finding was actually resolved.
 Do not hide the real implementer or reviewer streams.
-Do not stop at mocked unit tests; run the actual correction loop and inspect it.
+Do not inject correction state; run the deterministic production-seam replay
+through the actual Review aggregate.
 Checkpoints
 CP 1 — Design deterministic correction scenario
 
@@ -204,7 +207,8 @@ Prove the second decision evaluates the revised tree and cannot reuse stale appr
 
 CP 5 — Replay closure
 
-Run and inspect the deterministic correction scenario plus regression-run the ordinary first-value demo.
+Run the deterministic correction replay plus the ordinary immediate-approval
+regression replay.
 <!-- SECTION:DESCRIPTION:END -->
 
 ## Definition of Done

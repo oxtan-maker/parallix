@@ -276,7 +276,6 @@ function makeReviewWorkflow(ran: string[]) {
     comment: operation('comment'),
     readComments: operation('readComments'),
     submitReview: operation('submitReview'),
-    consumeArtifacts: operation('consumeArtifacts'),
     close: operation('close'),
     status: operation('status'),
     createEvent: operation('createEvent'),
@@ -315,16 +314,6 @@ test('px review republishes current work with the family that actually launched'
     ['review', 'custom', 'running'],
     ['review', null, 'ended'],
   ]);
-});
-
-test('px review --consume-artifacts publishes the review-response phase', async () => {
-  const { repo, appended } = makeHistoryRepo();
-  const ran: string[] = [];
-  await new ReviewCommandUseCase(makeReviewWorkflow(ran), new CurrentWorkRecorder(repo, { processId: 9 }))
-    .execute(['task-2370', '--consume-artifacts']);
-
-  assert.deepEqual(ran, ['consumeArtifacts']);
-  assert.deepEqual(published(appended).map((fact) => fact.phase), ['review-response', 'review-response']);
 });
 
 test('a short review read publishes no current work', async () => {

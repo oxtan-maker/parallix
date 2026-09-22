@@ -57,7 +57,13 @@ function mission(status: Mission['status'] = 'refined'): Mission {
     rawStatus: status,
     closedAt: null,
     assignee: null,
-    checkpoints: [],
+    checkpoints: [{ missionId: id, name: 'CP-1', firstLine: 'Do the work', goalCheck: [], nextActionText: '' }],
+    // Draft settles this before activation; a refined mission without it cannot
+    // activate (requireDraftedContract).
+    brief: { goal: 'Model the domain', why: 'The model is the contract', scope: 'The domain layer', outOfScope: [] },
+    declaredGates: ['npm test'],
+    successCriteria: ['The mission is done'],
+    predictedNelBucket: 'Small',
     review: null,
     netEngineeringLines: null,
   };
@@ -408,4 +414,53 @@ test('resume marker is scoped to mission, role, and extensible agent family', ()
   assert.equal(shouldResume(marker, id, 'execute', agentFamily('new-runner')), true);
   assert.equal(shouldResume(marker, id, 'review', agentFamily('new-runner')), false);
   assert.equal(shouldResume(marker, id, 'execute', implementer), false);
+});
+
+test('a draft cannot become refined on a contract never finished', () => {
+  // Prompt text asking the drafting agent to check its own work is followed
+  // exactly as often as it is not. Refine is where every draft ends, so that is
+  // where the contract has to be complete.
+  const bare = { ...mission('backlog'), brief: null, declaredGates: [], successCriteria: [], checkpoints: [] } as Mission;
+  assert.throws(
+    () => decideMission(bare, { type: 'refine' }),
+    (error: unknown) => error instanceof MissionRuleViolation
+      && /mission contract is incomplete/.test((error as Error).message)
+      && /px goal set/.test((error as Error).message)
+      && /px criterion add/.test((error as Error).message)
+      && /px checkpoint plan/.test((error as Error).message)
+      && /px gate add/.test((error as Error).message),
+  );
+  assert.equal(decideMission(mission('backlog'), { type: 'refine' }).status, 'refined');
+
+  for (const [part, missing] of [
+    [{ brief: { goal: 'g', why: 'w', scope: null, outOfScope: [] } }, /Missing a scope \(`px scope set`\)/],
+    [{ successCriteria: [] }, /at least one success criterion \(`px criterion add`\)/],
+    [{ checkpoints: [] }, /a checkpoint plan \(`px checkpoint plan`\)/],
+    [{ declaredGates: [] }, /at least one verification gate/],
+    [{ predictedNelBucket: null }, /a predicted NEL bucket \(`px nel set`\)/],
+    [{ labels: missionLabels(['user_value', 'bug']), reproductionTest: null }, /a reproduction test for this bug mission \(`px repro set`\)/],
+  ] as const) {
+    const incomplete = { ...mission('backlog'), ...part } as Mission;
+    assert.throws(() => decideMission(incomplete, { type: 'refine' }), missing);
+    // A partly recorded contract is not a legacy mission: activation refuses it too.
+    assert.throws(() => decideMission({ ...incomplete, status: 'refined' } as Mission, { type: 'activate', agent: implementer }), missing);
+  }
+
+  // out-of-scope is new, so no existing mission has one; demanding it would
+  // fail missions whose contract is otherwise complete.
+  const noOutOfScope = {
+    ...mission('refined'),
+    brief: { goal: 'g', why: 'w', scope: 's', outOfScope: [] },
+  } as Mission;
+  assert.equal(decideMission(noOutOfScope, { type: 'activate', agent: implementer }).status, 'active');
+});
+
+test('a mission drafted before the contract was Mission state still activates and relaunches', () => {
+  // Its mission document, checkpoint plan and CP-N.md evidence are its
+  // contract. Refusing it would strand every open legacy mission the first time
+  // its agent is relaunched after a usage block or restart.
+  const legacy = { ...mission('refined'), brief: null, declaredGates: [], successCriteria: [], checkpoints: [] } as Mission;
+  const active = decideMission(legacy, { type: 'activate', agent: implementer });
+  assert.equal(active.status, 'active');
+  assert.equal(decideMission(active, { type: 'activate', agent: implementer }).status, 'active');
 });

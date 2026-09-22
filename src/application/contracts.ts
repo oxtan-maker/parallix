@@ -49,7 +49,8 @@ export type Capability =
   | 'closure:record'
   | 'checkpoint:record'
   | 'mission:context'
-  | 'handoff:record';
+  | 'handoff:record'
+  | 'review:submit';
 
 export function completed<T>(
   value: T,

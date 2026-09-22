@@ -55,6 +55,19 @@ import { resolveAgentModel } from '../adapters/config/product-config.js';
 import { createReviewCommand } from '../interfaces/cli/review.js';
 
 import { createStatusCommand } from '../interfaces/cli/status.js';
+import { createResolveCommand, createVerdictCommand, type ReviewVerbPorts } from '../interfaces/cli/review-verbs.js';
+import { readReviewState } from '../adapters/review/review-state.js';
+import {
+  createAssignCommand,
+  createCheckpointCommand,
+  createGateCommand,
+  createCriterionCommand,
+  createNelCommand,
+  createGoalCommand,
+  createReproCommand,
+  createScopeCommand,
+  type MissionWriteServices,
+} from '../interfaces/cli/mission-writes.js';
 import { createGithubPublishStatusCommand } from '../interfaces/cli/github-publish-status.js';
 import startupPreflight from '../adapters/cli/startup-preflight.js';
 import rebase from '../adapters/cli/commands/rebase.js';
@@ -212,6 +225,18 @@ function createCommandRegistry(rootDir: string): Record<string, Command> {
       });
     }),
     config,
+    // Typed Mission write verbs: one command per domain part, no JSON blob.
+    goal: (args) => withGraph(services => createGoalCommand(missionWrites(services))(args)),
+    repro: (args) => withGraph(services => createReproCommand(missionWrites(services))(args)),
+    scope: (args) => withGraph(services => createScopeCommand(missionWrites(services))(args)),
+    gate: (args) => withGraph(services => createGateCommand(missionWrites(services))(args)),
+    criterion: (args) => withGraph(services => createCriterionCommand(missionWrites(services))(args)),
+    nel: (args) => withGraph(services => createNelCommand(missionWrites(services))(args)),
+    checkpoint: (args) => withGraph(services => createCheckpointCommand(missionWrites(services).checkpoints, (explicit) => inferSlug(explicit))(args)),
+    assign: (args) => withGraph(services => createAssignCommand(missionWrites(services), false)(args)),
+    verdict: (args) => withGraph(services => createVerdictCommand(reviewVerbPorts(services))(args)),
+    resolve: (args) => withGraph(services => createResolveCommand(reviewVerbPorts(services))(args)),
+    unassign: (args) => withGraph(services => createAssignCommand(missionWrites(services), true)(args)),
     diff,
     draft: (args, options) => withMissionAndGraph((missionServicesFn, services) => {
       // Create adapter with missionServicesFn injected via withMissionFactories
@@ -250,8 +275,6 @@ function createCommandRegistry(rootDir: string): Record<string, Command> {
           readAllEventsFn: persistence.readAllEvents,
           backfillReviewFn: persistence.backfillReview,
           reconcileInterruptedHandoffFn: persistence.reconcileInterruptedHandoff,
-          consumeReviewerArtifactsFn: persistence.consumeReviewerArtifacts,
-          consumeImplementerArtifactsFn: persistence.consumeImplementerArtifacts,
           // `px review --submit-review request-changes` records a reviewer
           // decision, so it needs the same authority the loop paths use.
           missionStore: services.mission.store,
@@ -281,9 +304,17 @@ function createCommandRegistry(rootDir: string): Record<string, Command> {
           if (!builder) { throw new Error('board projection is unavailable'); }
           return builder;
         },
+        // `px status` is the single Mission reporting surface, so it reads the
+        // recorded execution context and write version from the store itself.
+        loadMissionFn: services.mission
+          ? async (slug) => {
+            const loaded = await services.mission!.store.load(missionId(slug));
+            return loaded.kind === 'found' ? { mission: loaded.mission, version: loaded.version } : null;
+          }
+          : undefined,
       });
       const gitPort = createStatusGitAdapter();
-      const prPort = createStatusPrAdapter();
+      const prPort = createStatusPrAdapter({ rootDir });
       const agentPort = createStatusAgentAdapter();
       const staleWorktrees = createStatusStaleWorktreesAdapter();
       const useCase = new StatusCommandUseCase(board, gitPort, prPort, agentPort, staleWorktrees);
@@ -517,6 +548,35 @@ function createCommandRegistry(rootDir: string): Record<string, Command> {
     };
     return port;
   }
+}
+
+/**
+ * Bind the review verbs to the existing recorders. Composition owns the adapter
+ * imports so the interface module stays free of them.
+ */
+function reviewVerbPorts(services: { mission?: { store: unknown; lifecycle: unknown } | null }): ReviewVerbPorts {
+  const missionStore = (services.mission?.store ?? null) as never;
+  const lifecycleService = (services.mission?.lifecycle ?? null) as never;
+  const persistence = bindReviewPersistence(missionStore, lifecycleService);
+  return {
+    resolveSlug: (explicit) => inferSlug(explicit),
+    resolveWorktree: (slug) => resolveWorktree(slug),
+    readReviewState: async (slug, worktree) => {
+      const state = await Promise.resolve(readReviewState(slug, worktree, missionStore));
+      return state ? { round: state.round, phase: state.phase } : null;
+    },
+    consumeReviewerOutput: (slug, reviewer, output, worktree, expectedVersion) =>
+      persistence.consumeReviewerArtifacts(slug, reviewer, { worktree, output, expectedVersion } as never),
+    consumeImplementerOutput: (slug, implementer, output, worktree, expectedVersion) =>
+      persistence.consumeImplementerArtifacts(slug, implementer, { worktree, output, expectedVersion } as never),
+  };
+}
+
+/** Mission write services, or a clear error when the operator DB is unavailable. */
+function missionWrites(services: { mission?: Omit<MissionWriteServices, 'resolveSlug'> | null }): MissionWriteServices {
+  if (!services.mission) { throw new Error('mission services are unavailable'); }
+  // Composition owns the adapter dependency; the interface module stays clean.
+  return { ...services.mission, resolveSlug: (explicit) => inferSlug(explicit) };
 }
 
 function createRuntimeOptions(rootDir: string): Pick<MainOptions, 'commandFns' | 'ensureStandaloneGitRepoFn' | 'loadAliasesFn' | 'product'> {

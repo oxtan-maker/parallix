@@ -16,6 +16,7 @@ import * as path from 'node:path';
 import { missionVersion } from '../src/application/domain-ports.js';
 import { MissionCheckpointService } from '../src/application/mission-checkpoint-service.js';
 import { MissionHandoffService } from '../src/application/mission-handoff-service.js';
+import { MissionBriefService } from '../src/application/mission-brief-service.js';
 import { MissionIntakeService } from '../src/application/mission-intake-service.js';
 import { MissionLifecycleService } from '../src/application/mission-lifecycle-service.js';
 import { SqliteDatabaseAdapter } from '../src/adapters/sqlite/database-adapter.js';
@@ -28,6 +29,39 @@ import { externalTaskRef } from '../src/domain/external-task.js';
 import { missionId, missionLabels } from '../src/domain/mission.js';
 import { artifactReference } from '../src/domain/net-engineering-lines.js';
 import { repositoryId } from '../src/domain/repository.js';
+
+/**
+ * Draft settles the contract activation demands: a goal, a why, a scope and at
+ * least one verification gate (`requireDraftedContract` in mission-workflow.ts).
+ * A fixture that activates without it is not a mission the workflow can produce.
+ */
+async function seedDraftedContract(store: never, mission: never): Promise<number> {
+  const briefService = new MissionBriefService(store as never);
+  await briefService.update({
+    operationId: 'op-brief', missionId: mission,
+    capabilities: new Set(['mission:context']),
+    patch: { goal: 'Fixture goal', why: 'Fixture why', scope: 'Fixture scope' },
+  } as never);
+  await briefService.setGates({
+    operationId: 'op-gates', missionId: mission,
+    capabilities: new Set(['mission:context']), gates: ['npm test'],
+  } as never);
+  await briefService.setSuccessCriteria({
+    operationId: 'op-criteria', missionId: mission,
+    capabilities: new Set(['mission:context']), criteria: ['The fixture mission is done'],
+  } as never);
+  await briefService.setPredictedNelBucket({
+    operationId: 'op-nel', missionId: mission,
+    capabilities: new Set(['mission:context']), bucket: 'Small',
+  } as never);
+  const plan = await new MissionCheckpointService(store as never).plan({
+    operationId: 'op-plan', missionId: mission,
+    capabilities: new Set(['mission:context']), name: 'CP-1', description: 'Do the fixture work',
+  } as never);
+  // Recording the contract advances the Mission, so the caller activates
+  // against the version the seeding produced rather than the one before it.
+  return (plan as { value: { version: number } }).value.version;
+}
 
 const MISSION = missionId('task-2322-05-fixture');
 const REPOSITORY = repositoryId('parallix');
@@ -149,23 +183,25 @@ describe('Mission application boundary over isolated SQLite adapters', () => {
     const { store, db } = await isolatedStore();
     try {
       await intake(store);
-      await refine(store);
+      const contractVersion = await seedDraftedContract(store as never, MISSION as never);
+      const refinedVersion = ((await refine(store, missionVersion(contractVersion))) as { value: { version: number } }).value.version;
       const activated = await new MissionLifecycleService(store).activate({
         operationId: 'op-activate',
         missionId: MISSION,
         capabilities: CAPABILITIES,
-        expectedVersion: missionVersion(2),
+        expectedVersion: missionVersion(refinedVersion),
         agent: agentFamily('codex'),
         occurredAt: '2026-07-29T12:00:00Z',
       });
       assert.equal(activated.status, 'completed');
-      assert.equal(activated.value!.version, missionVersion(3));
+      // intake, refine, the two contract writes draft records, then activate.
+      assert.equal(activated.value!.version, missionVersion(refinedVersion + 1));
 
       const rows = await db.query<{ status: string; assignee: string; version: number }>(
         'SELECT status, assignee, version FROM missions WHERE id = ?',
         [MISSION],
       );
-      assert.deepEqual({ ...rows[0] }, { status: 'active', assignee: 'codex', version: 3 });
+      assert.deepEqual({ ...rows[0] }, { status: 'active', assignee: 'codex', version: refinedVersion + 1 });
       const events = await db.query<{ from_status: string; to_status: string; trigger: string }>(
         'SELECT from_status, to_status, trigger FROM board_lane_events WHERE mission_id = ?',
         [MISSION],
@@ -184,13 +220,14 @@ describe('Mission application boundary over isolated SQLite adapters', () => {
     const { store, db } = await isolatedStore();
     try {
       await intake(store);
-      await refine(store);
+      const contractVersion = await seedDraftedContract(store as never, MISSION as never);
+      const refinedVersion = ((await refine(store, missionVersion(contractVersion))) as { value: { version: number } }).value.version;
       const service = new MissionLifecycleService(store);
       const first = await service.activate({
         operationId: 'op-first',
         missionId: MISSION,
         capabilities: CAPABILITIES,
-        expectedVersion: missionVersion(2),
+        expectedVersion: missionVersion(refinedVersion),
         agent: agentFamily('codex'),
         occurredAt: '2026-07-29T12:00:00Z',
       });
@@ -200,7 +237,7 @@ describe('Mission application boundary over isolated SQLite adapters', () => {
         operationId: 'op-stale',
         missionId: MISSION,
         capabilities: CAPABILITIES,
-        expectedVersion: missionVersion(2),
+        expectedVersion: missionVersion(refinedVersion),
         agent: agentFamily('claude'),
         occurredAt: '2026-07-29T12:00:05Z',
       });
@@ -211,7 +248,7 @@ describe('Mission application boundary over isolated SQLite adapters', () => {
         'SELECT assignee, version FROM missions WHERE id = ?',
         [MISSION],
       );
-      assert.deepEqual({ ...rows[0] }, { assignee: 'codex', version: 3 });
+      assert.deepEqual({ ...rows[0] }, { assignee: 'codex', version: refinedVersion + 1 });
       const events = await db.query<{ total: number }>(
         'SELECT COUNT(*) AS total FROM board_lane_events WHERE mission_id = ?',
         [MISSION],

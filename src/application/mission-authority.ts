@@ -26,7 +26,11 @@ export const MISSION_FIELD_AUTHORITY = {
   // Parallix is authoritative for the reference it accepted, not the task.
   externalTaskRef: targetSource,
   checkpoints: targetSource,
-  executionContext: localSource,
+  brief: localSource,
+  declaredGates: localSource,
+  successCriteria: localSource,
+  predictedNelBucket: localSource,
+  reproductionTest: localSource,
   review: targetSource,
   netEngineeringLines: targetSource,
 } as const satisfies Readonly<Record<keyof Mission, Authority>>;

@@ -20,12 +20,9 @@ const PUBLISHED_PHASES: Readonly<Record<string, CurrentWorkPhase>> = {
   continue: 'review',
   submit: 'review',
   submitReview: 'review',
-  // The implementer answering the reviewer's findings. Same mission, same
-  // review loop, different phase — which is why the board needs it named.
-  consumeArtifacts: 'review-response',
 };
 const REVIEW_FLAG_OPERATIONS: ReadonlyArray<readonly [string, keyof Omit<ReviewWorkflowPort, 'preflight'>]> = [
-  ['--status', 'status'], ['--verify', 'verify'], ['--submit', 'submit'], ['--consume-artifacts', 'consumeArtifacts'], ['--push', 'push'], ['--comments', 'readComments'], ['--comment', 'comment'], ['--comment-file', 'comment'], ['--submit-review', 'submitReview'], ['--close', 'close'], ['--create-event', 'createEvent'], ['--import-legacy', 'importLegacy'], ['--backfill-review', 'backfillReview'], ['--reconcile-review', 'reconcileReview'], ['--start', 'start'], ['--continue', 'continue'], ['--resume', 'resume'],
+  ['--status', 'status'], ['--verify', 'verify'], ['--submit', 'submit'], ['--push', 'push'], ['--comments', 'readComments'], ['--comment', 'comment'], ['--comment-file', 'comment'], ['--submit-review', 'submitReview'], ['--close', 'close'], ['--create-event', 'createEvent'], ['--import-legacy', 'importLegacy'], ['--backfill-review', 'backfillReview'], ['--reconcile-review', 'reconcileReview'], ['--start', 'start'], ['--continue', 'continue'], ['--resume', 'resume'],
 ];
 
 /** CLI-independent policy for choosing a review lifecycle operation. */
@@ -72,7 +69,7 @@ export class ReviewCommandUseCase {
       missionId: missionId(context.slug),
       operationId: `review:${context.slug}:${randomUUID()}`,
       phase,
-      summary: `px review --${operation === 'consumeArtifacts' ? 'consume-artifacts' : operation} ${context.slug}`,
+      summary: `px review --${operation} ${context.slug}`,
       agent: null,
     };
     await bestEffort(() => this._currentWork.running(publication));

@@ -17,20 +17,19 @@ import * as path from 'node:path';
 import * as fmt from './presentation/cli-format.js';
 import { AGENT_COMMAND_COMPLETION_CONTRACT } from './agent-completion-contract.js';
 import {
-  applyImplementerCommand,
   beginNextReviewRound,
   startReview,
   ConfiguredReviewerEligibility,
   changeRevision,
-  currentReviewRound,
   reviewStatus,
 } from '../domain/review.js';
 import { agentFamily } from '../domain/agents.js';
 import type { AgentFamily } from '../domain/agents.js';
 import { artifactReference } from '../domain/net-engineering-lines.js';
-import { isDbAdhocIdentity } from '../domain/mission.js';
+import { isDbAdhocIdentity, missionId } from '../domain/mission.js';
 import type { HandoffWorkflowPorts, HandoffResult } from './ports/handoff-workflow.js';
 import type { MissionStore } from './domain-ports.js';
+import type { CheckpointData } from '../domain/checkpoint.js';
 import { rebound } from './rebound-kernel.js';
 
 /**
@@ -67,6 +66,46 @@ import {
  * existence-checked against the repository root by
  * `evidenceCellHasVerifiableReference`, so the row stays verifiable evidence.
  */
+/**
+ * Read the recorded Mission contract handoff verifies: checkpoint evidence and
+ * declared gates.
+ *
+ * Fails closed. An unreachable operator database or a Mission it does not hold
+ * is a handoff failure, never an empty list: an empty list would send handoff
+ * down the legacy document path, which generates checkpoint evidence and skips
+ * gates. `draftedInDb` marks a Mission whose contract was recorded with
+ * `px goal set`; only a Mission without one may still use its documents.
+ */
+async function loadRecordedContract(
+  missionServicesFn: (_rootDir: string, _opts: { missionDir: string }) => Promise<{ store: MissionStore }>,
+  rootDir: string,
+  missionDirPath: string,
+  slug: string,
+): Promise<
+  | { ok: true; draftedInDb: boolean; checkpoints: readonly CheckpointData[]; successCriteria: readonly string[]; gates: readonly string[] }
+  | { ok: false; error: string }
+> {
+  try {
+    const { store } = await missionServicesFn(rootDir, { missionDir: missionDirPath });
+    const loaded = await store.load(missionId(slug));
+    if (loaded.kind !== 'found') {
+      return { ok: false, error: `The operator database holds no Mission ${slug}; handoff cannot verify its recorded contract.` };
+    }
+    const { mission } = loaded;
+    // Only evidenced checkpoints are evidence; planned ones are checked by the
+    // pre-handoff checkpoint validation, which names the next one to resume.
+    return {
+      ok: true,
+      draftedInDb: Boolean(mission.brief),
+      checkpoints: mission.checkpoints.filter(({ goalCheck }) => goalCheck.length > 0),
+      successCriteria: mission.successCriteria ?? [],
+      gates: mission.declaredGates ?? [],
+    };
+  } catch (cause) {
+    return { ok: false, error: `Could not read Mission ${slug} from the operator database: ${(cause as Error).message}. Handoff fails closed.` };
+  }
+}
+
 export function buildAutoCheckpointContent(slug: string): string {
   return [
     `# CP-1: Auto-generated checkpoint (handoff remediation for ${slug})`,
@@ -461,9 +500,22 @@ export class HandoffCommandUseCase {
    * Parse and execute declared gates from a mission's MISSION.md `## Gates` section.
    * Each gate line is treated as a shell command executed through the process port.
    */
-  runDeclaredGates(missionDir: string, rootDir: string, options: { log?: Function; error?: Function } = {}) {
-    const { fileSystem, verification, process: processPort } = this.ports;
+  runDeclaredGates(
+    missionDir: string,
+    rootDir: string,
+    options: { log?: Function; error?: Function; recordedGates?: readonly string[] } = {},
+  ) {
+    const { fileSystem } = this.ports;
     const { log = fmt.log.plain } = options;
+
+    // Gates recorded through `px gate add` are Mission state and are the
+    // authority. Parsing the mission document's `## Gates` section is the
+    // fallback for missions drafted before the gates were recorded.
+    const recorded = options.recordedGates ?? [];
+    if (recorded.length > 0) {
+      return this.executeGateCommands([...recorded], rootDir, { log, source: 'recorded' });
+    }
+
     const missionPath = path.join(missionDir, 'MISSION.md');
     if (!fileSystem.existsSync(missionPath)) {
       return { ok: true, skipped: true, reason: 'no-mission-file' };
@@ -509,7 +561,23 @@ export class HandoffCommandUseCase {
       };
     }
 
-    const cleanCommands = commands.map(cmd => cmd.cmd || cmd);
+    return this.executeGateCommands(commands.map(cmd => cmd.cmd || cmd), rootDir, { log, source: 'document' });
+  }
+
+  /**
+   * Validate and run a list of gate commands.
+   *
+   * Shared by both gate sources so a gate recorded through `px gate add` is
+   * validated, proof-reused and executed exactly like one parsed from a
+   * mission document.
+   */
+  executeGateCommands(
+    cleanCommands: string[],
+    rootDir: string,
+    options: { log?: Function; source?: string } = {},
+  ) {
+    const { verification, process: processPort } = this.ports;
+    const { log = fmt.log.plain } = options;
 
     if (cleanCommands.length === 0) {
       return { ok: true, skipped: true, reason: 'no-gates-declared' };
@@ -596,17 +664,6 @@ export class HandoffCommandUseCase {
     const actualNel = nelRecord.nel;
     const actualBucket = nelRecord.bucket.label;
 
-    // 3. Read predicted bucket from MISSION.md Refinement Signals
-    const missionMdPath = path.join(missionDir, 'MISSION.md');
-    let predictedBucket = 'Unknown';
-    if (fileSystem.existsSync(missionMdPath)) {
-      const content = fileSystem.readText(missionMdPath);
-      const predictedMatch = content.match(/Predicted NEL bucket:\s*(Small|Medium|Large)/i);
-      if (predictedMatch) {
-        predictedBucket = predictedMatch[1];
-      }
-    }
-
     // 5. Record through the checked Mission boundary. The use case decides and the
     //    selected SQLite authority writes; this workflow supplies only
     //    domain values and the artifact *references* it observed.
@@ -623,6 +680,16 @@ export class HandoffCommandUseCase {
     const missionLoad = await missionServices.store.load(slug);
     if (missionLoad.kind === 'found' && missionLoad.mission.review) {
       reviewRounds = missionLoad.mission.review.rounds.length;
+    }
+
+    // 3. The predicted bucket is recorded with `px nel set`. A Mission drafted
+    //    before it was Mission state still carries it in its document's
+    //    Refinement Signals, which is the only place it exists for that Mission.
+    let predictedBucket: string = (missionLoad.kind === 'found' ? missionLoad.mission.predictedNelBucket : null) ?? 'Unknown';
+    const missionMdPath = path.join(missionDir, 'MISSION.md');
+    if (predictedBucket === 'Unknown' && !(missionLoad.kind === 'found' && missionLoad.mission.brief) && fileSystem.existsSync(missionMdPath)) {
+      const predictedMatch = fileSystem.readText(missionMdPath).match(/Predicted NEL bucket:\s*(Small|Medium|Large)/i);
+      if (predictedMatch) { predictedBucket = predictedMatch[1] as string; }
     }
     const artifacts = [
       artifactReference('git-range', `${primaryBranch}..HEAD`),
@@ -911,9 +978,57 @@ export class HandoffCommandUseCase {
     }
 
     // Pre-handoff Content Integrity Check
-    const evidence = this.verifyHandoffEvidence(slug, { rootDir, missionDirPath, log, error });
-    if ('error' in evidence) { return evidence; }
-    const { finalCheckpoint, checkpointContent, evidenceRows } = evidence;
+    // Checkpoint evidence recorded through `px checkpoint record` is the
+    // authority. When the Mission already carries recorded evidence, handoff
+    // verifies that and never looks for a checkpoint document: the document
+    // path is the legacy fallback for missions whose evidence still only exists
+    // as a committed `CP-N.md`.
+    const contract = await loadRecordedContract(missionServicesFn, rootDir, missionDirPath, slug);
+    if (!contract.ok) {
+      error(contract.error);
+      return { ok: false, error: contract.error };
+    }
+    const recorded = contract.checkpoints;
+    let finalCheckpoint: string | null = null;
+    let checkpointContent = '';
+    let evidenceRows: string[] = [];
+    if (recorded.length > 0) {
+      const relativeMissionPath = path.relative(rootDir, path.join(missionDirPath, 'MISSION.md'));
+      if (ports.git.getWorktreeStatus(rootDir).some(line => line.endsWith(relativeMissionPath))) {
+        const msg = `${fmt.path('MISSION.md')} is modified but uncommitted at ${fmt.path(relativeMissionPath)}. Commit the mission contract before handoff.`;
+        error(msg);
+        return { ok: false, error: msg };
+      }
+      const latest = recorded[recorded.length - 1];
+      const rows = latest.goalCheck.map((row) => `| ${row.criterion} | ${row.evidence} |`);
+      const unverifiable = findUnverifiableGoalCheckRow(ports.fileSystem, rows, rootDir);
+      if (unverifiable) {
+        const msg = `The recorded evidence for ${latest.name} has a Goal Check row that cites no verifiable reference such as a recognized repo command/path, exact test name, test-file path, or ADR reference. Re-record it with \`px checkpoint record\`. Offending row: ${unverifiable}`;
+        error(msg);
+        return { ok: false, error: msg };
+      }
+      // The final checkpoint evidences every success criterion, one row named
+      // after each; without this the criteria would only be advice.
+      const named = (text: string) => text.trim().replace(/\s+/g, ' ').toLowerCase();
+      const evidenced = new Set(latest.goalCheck.map((row) => named(row.criterion)));
+      const unevidenced = contract.successCriteria.filter((criterion) => !evidenced.has(named(criterion)));
+      if (unevidenced.length > 0) {
+        const msg = `Success-criterion evidence is missing before handoff in ${latest.name}: ${unevidenced.map((criterion) => `"${criterion}"`).join(', ')}. Re-record ${latest.name} with \`px checkpoint record\`, one --criterion per success criterion, named exactly as \`px status\` reports it.`;
+        error(msg);
+        return { ok: false, error: msg };
+      }
+      log(fmt.status('PASS', `Recorded checkpoint evidence verified: ${latest.name} (${latest.goalCheck.length} Goal Check row(s)).`));
+    } else if (contract.draftedInDb) {
+      // A Mission drafted through the typed verbs records its evidence the same
+      // way. Handoff never writes evidence on the implementer's behalf.
+      const msg = `${fmt.slug(slug)} has no recorded checkpoint evidence. Record it with \`px checkpoint record\` before handoff; handoff never generates evidence.`;
+      error(msg);
+      return { ok: false, error: msg };
+    } else {
+      const evidence = this.verifyHandoffEvidence(slug, { rootDir, missionDirPath, log, error });
+      if ('error' in evidence) { return evidence; }
+      ({ finalCheckpoint, checkpointContent, evidenceRows } = evidence);
+    }
 
     const isForgejoReviewEnabledFn = opts.isForgejoReviewEnabledFn || ports.productConfig.isForgejoReviewEnabled;
     const forgejoEnabled = isForgejoReviewEnabledFn(rootDir);
@@ -1095,7 +1210,15 @@ export class HandoffCommandUseCase {
     }
 
     // Step 2.6: Generic ## Gates runner — execute any gates declared in MISSION.md
-    const gatesResult = this.runDeclaredGates(verification.missionDir || '', rootDir, { log: internalLog, error });
+    const recordedGates = contract.gates;
+    if (contract.draftedInDb && recordedGates.length === 0) {
+      // Activation requires a declared gate, so none here means the recorded
+      // contract lost it. Running nothing would pass handoff unverified.
+      const msg = `${fmt.slug(slug)} has no recorded verification gate. Declare one with \`px gate add\` before handoff.`;
+      error(msg);
+      return { ok: false, error: msg };
+    }
+    const gatesResult = this.runDeclaredGates(verification.missionDir || '', rootDir, { log: internalLog, error, recordedGates });
     if (!gatesResult.ok) {
       const msg = `Declared gate "${gatesResult.gate}" failed for ${fmt.slug(slug)}: ${gatesResult.error || gatesResult.reason}. Blocking handoff — task remains in active.`;
       error(msg);
@@ -1148,6 +1271,9 @@ export class HandoffCommandUseCase {
     // architecture invariant: the checkpoint this handoff verified becomes durable Mission evidence
     // in SQLite. CP-N.md stays an operator-authored input; it is never the
     // authority the review transition reads.
+    // Evidence recorded through `px checkpoint record` is already durable, so
+    // handoff re-records only when it verified a legacy checkpoint document.
+    if (finalCheckpoint) {
     const checkpointName = path.basename(finalCheckpoint).replace(/\.md$/, '');
     const nextActionMatch = checkpointContent.match(/^\s*(?:\*\*)?Next action(?:\*\*)?:\s*(.+)$/mi);
     const checkpointOutcome = await missionServices.checkpoints.record({
@@ -1170,6 +1296,7 @@ export class HandoffCommandUseCase {
       const msg = `Recording checkpoint ${checkpointName} failed: ${checkpointOutcome.error?.message || 'unknown'}.`;
       error(msg);
       return { ok: false, error: msg };
+    }
     }
 
     // The review subject records where the branch is headed. A repository without
@@ -1199,22 +1326,12 @@ export class HandoffCommandUseCase {
     // A review with no round carries no change identity to advance, so it is
     // treated as no review at all rather than read for a current round.
     const priorReview = loadedReview && loadedReview.rounds?.length > 0 ? loadedReview : null;
-    // Handoff is the identity-only CLI/web acknowledgement that repairs are
-    // ready. If the previous autonomous round stopped after requesting changes,
-    // record that acknowledgement as the resolution before opening the next
-    // round; callers provide no separate findings payload by design.
     const startedAt = occurredAt;
     let reviewForHandoff = priorReview;
     if (reviewForHandoff && reviewStatus(reviewForHandoff) === 'awaiting-implementation') {
-      const findings = currentReviewRound(reviewForHandoff).decision?.kind === 'changes-requested'
-        ? currentReviewRound(reviewForHandoff).decision.findings : [];
-      reviewForHandoff = applyImplementerCommand(reviewForHandoff, {
-        type: 'submit-resolution',
-        respondedAt: startedAt,
-        resultingRevision: changeRevision(`handoff-${Date.now()}`),
-        resolutions: findings.map((finding) => ({ findingId: finding.id, kind: 'fixed' as const, evidence: 'Resolved in the handed-off revision.' })),
-      });
-      await missionServices.store.save({ ...existing.mission, review: reviewForHandoff }, existing.version);
+      const msg = `Review findings for ${slug} are awaiting an implementer resolution; record the actual finding dispositions before starting the next round.`;
+      error(msg);
+      return { ok: false, error: msg };
     }
     const review = reviewForHandoff
       ? (reviewStatus(reviewForHandoff) === 'ready-for-next-round'

@@ -1,15 +1,16 @@
 # Review core
 Mode: review. No code changes, commits, repo-state edits, or implementer behavior.
-Mission: {{missionPath}}
+Mission: {{slug}}
 Attempt: {{attempt}}. Focus: {{focus}}.
 Entrypoint: {{review_entrypoint}}
 
 Load before reviewing:
 - `AGENTS.md`
-- locked mission at `{{missionPath}}`
-- final checkpoint document, if present
+- Mission context: `px status {{slug}}` (add `--json` for structured fields). It reports the recorded brief (goal, why, scope, out-of-scope), the success criteria, declared gates, the latest recorded checkpoint evidence with its Goal Check rows and next action, the reviewed revision, outstanding findings, and prior implementer resolutions.
 - diff: `git diff {{reviewBaseline}}..HEAD`
 - review history: `px status {{slug}}`, whose `Review:` block reports the current round, phase, and disposition, then each recorded round with its reviewer and implementer families, verdict, comment, findings, fixes, and pushbacks. This is projected from the operator database, not from your own context.
+
+`px status` is the authority for Mission state. Nothing in the repository records it.
 
 Review history is not optional context:
 - You may not be the agent family that reviewed the previous round. When a family is usage-blocked the workflow reroutes the launch, so the round-1 reviewer's context is simply gone. `px status {{slug}}` is how that continuity is preserved.
@@ -17,18 +18,18 @@ Review history is not optional context:
 - Treat a `PUSHBACK_ALL` in the history as a response awaiting your decision, not as an approval and not as a fresh set of findings.
 
 Minimum loop contract:
-- When `{{attempt}}` is 2 or later, before beginning this review round compact the prior-round working context. Reload the locked mission goal and scope; committed checkpoint or gate evidence when present; current round and disposition; unresolved findings and implementer resolutions; and the exact post-rebase revision and review baseline shown by `git diff {{reviewBaseline}}..HEAD`. This review-loop compaction is independent of `MISSION.md` gates.
-- Load the locked mission at `{{missionPath}}` and `AGENTS.md` before reviewing.
+- When `{{attempt}}` is 2 or later, before beginning this review round compact the prior-round working context. Reload the locked mission goal and scope; committed checkpoint or gate evidence when present; current round and disposition; unresolved findings and implementer resolutions; and the exact post-rebase revision and review baseline shown by `git diff {{reviewBaseline}}..HEAD`. This compaction is independent of the mission's declared gates.
+- Load the Mission context with `px status {{slug}}` and read `AGENTS.md` before reviewing.
 - The block below reports which controls the workflow has already executed for this mission and which it has not, derived from machine records rather than from anyone's prose. Do not re-run a listed command whose recorded status is `passed`; cite the recorded result from this block instead. Re-running is permitted only when the block reports no recorded gate result, reports a `failed` status, reports a control as not yet run, or the command you need is not listed here.
 {{completedControls}}
-- Do not invoke `px` yourself, with one exception: `px status {{slug}}` is read-only and is the required way to load review history. Never run any other `px` subcommand.
+- Use `px status {{slug}}` to load review history and Mission context. Submit your final decision with `px verdict`; do not use other write commands.
 - Review as an independent senior engineer. Approve only if the mission is satisfied, verification is credible for the risk level, and the diff is safe to integrate.
 - Request changes for actionable issues introduced or materially worsened by this mission.
-- Findings must be grounded in `git diff {{reviewBaseline}}..HEAD`, mission/checkpoint evidence, or inability to identify the reviewed revision.
+- Findings must be grounded in `git diff {{reviewBaseline}}..HEAD`, the Mission context and checkpoint evidence reported by `px status {{slug}}`, or inability to identify the reviewed revision.
 - PR metadata, commit ancestry, and historical commits outside `git diff {{reviewBaseline}}..HEAD` are context only. They must not produce a mission finding, request-changes verdict, or workflow block unless the mission introduced or materially worsened the inconsistency, or the review surface cannot identify the exact reviewed revision.
-- Confirm the final checkpoint document in the mission directory contains a Goal Check table citing real, durable evidence such as backticked commands, test names, ADR references, or test file paths.
+- Confirm the latest checkpoint evidence reported by `px status {{slug}}` cites real, durable evidence for every Goal Check row: backticked commands, test names, ADR references, or test file paths.
+- Prior findings and implementer resolutions are supplied to you through `px status {{slug}}`; do not reconstruct them from repository files.
 - Treat checkpoint evidence as a record of the work at the time it was performed. A command such as `git diff HEAD` is expected to be empty after a checkpoint is committed; that alone is not a finding. Flag evidence only when it is materially false, unverifiable from the committed tree, or conceals a mission change. Prefer the mission diff against `{{reviewBaseline}}` and stable file/test evidence when checking claims.
-- Write findings to `{{artifactDir}}/{{slug}}-review-findings.md`, outcome to `{{artifactDir}}/{{slug}}-review-outcome.md`, and verdict to `{{artifactDir}}/{{slug}}-review-verdict.txt`.
 
 Rebasing Artifacts:
 - Ignore diff entries that are only present because the branch is behind `{{primaryBranch}}` and will be resolved by parallix rebase before integration.
@@ -37,20 +38,18 @@ Rebasing Artifacts:
 - Still flag real scope or correctness problems when this mission actually changes the file; only ignore branch stale-ness that is not a mission change.
 
 Check:
-- mission scope and acceptance criteria
-- final checkpoint claims vs actual diff
+- mission scope and success criteria as reported by `px status {{slug}}`: every planned checkpoint must have recorded evidence, and the latest must evidence every success criterion
+- recorded checkpoint claims vs actual diff
 - correctness and regressions
 - tests / gates / verification evidence
 - security and unsafe operations
 - integration with existing code, config, APIs, schemas, docs, or workflows
 - maintainability issues that materially affect future work
 
-  - Artifact handoff is mandatory: your final chat response does **not** submit a review. Before stopping, create all three files: `{{artifactDir}}/{{slug}}-review-findings.md`, `{{artifactDir}}/{{slug}}-review-outcome.md`, and `{{artifactDir}}/{{slug}}-review-verdict.txt`.
-- Write findings to `{{artifactDir}}/{{slug}}-review-findings.md`, then write the outcome and verdict files alongside it.
-- The findings file must contain findings (write `No findings.` when approving). For request-changes, give every finding a parser-stable heading such as `## F1: summary`, `## F2: summary`; round-prefixed headings such as `## R3-1` are invalid. The outcome file must state `Outcome: approve` or `Outcome: request-changes`. The verdict file must contain exactly `approve` or `request-changes` and a newline. `comment` is not valid.
-- After writing them, run `ls -l {{artifactDir}}/{{slug}}-review-findings.md {{artifactDir}}/{{slug}}-review-outcome.md {{artifactDir}}/{{slug}}-review-verdict.txt` and read back the verdict file. If any file is absent or the verdict is not exact, fix the files before stopping.
-- Do not call px directly, the workflow will do that for you — except for the read-only `px status {{slug}}` above, which you must run to load review history
-- Do not post to Forgejo directly; `px review {{slug}} --start` or `--submit` publishes the artifacts.
+- Decision submission is mandatory: your final chat response does **not** submit a review. Before stopping, run exactly one of:
+  - `px verdict approve --slug {{slug}} --actor {{reviewer}} --expected-version <n> --comment "<review summary>"`
+  - `px verdict request-changes --slug {{slug}} --actor {{reviewer}} --expected-version <n> --finding <finding-id> --summary "<issue>" [--location "<path>"] ... --comment "<review summary>"`
+- Every request-change finding needs a distinct stable `F<number>` id and non-empty summary. `px verdict` persists the decision and publishes through the established workflow; do not post to Forgejo directly.
 - Do not edit repo files; do not switch into implementer behavior.
 - Graphify-first: before reviewing, check if `graphify-out/graph.json` exists. If it does, run `graphify query "review {{slug}} for correctness and completeness"` to get a graph-based view of the mission scope before examining the diff.
 
@@ -64,8 +63,7 @@ You MUST NOT:
 - Mutate workflow state: do not write or edit checkpoint documents, mission artifacts, act-on-review files, or any review-loop/review-state files
 
 You MUST:
-- Review the full mission diff, confirm the final checkpoint's goal-check evidence, and write the findings, outcome, and verdict artifacts
+- Review the full mission diff, confirm the recorded checkpoint's Goal Check evidence as reported by `px status {{slug}}`, and submit the verdict with `px verdict`
 
-You MAY (these writes are the sole exceptions to "no repo edits"):
-- Write to the artifact directory `{{artifactDir}}` (findings, outcome, verdict)
+You MAY:
 - Create temporary diagnostic files under `/tmp`.

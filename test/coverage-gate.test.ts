@@ -16,6 +16,7 @@ await installModuleMocks();
 test.afterEach(() => mock.restoreAll());
 const REPO_ROOT = path.join(import.meta.dirname, '..');
 const {
+  buildC8Args,
   buildCoverageArgs,
   cleanupNewTempDirs,
   cleanupPerRunScratch,
@@ -73,8 +74,8 @@ test('coverage-gate reports denominator and metric in output', () => {
 
 test('coverage-gate shows per-file breakdown', () => {
   const result = runGate(['--dry-run']);
-  assert.match(result.stdout, /--test-coverage-lines=90/);
-  assert.match(result.stdout, /--test-coverage-exclude test\/\*\*/);
+  assert.match(result.stdout, /--lines=90/);
+  assert.match(result.stdout, /--exclude test\/\*\*/);
 });
 
 test('cleanupNewTempDirs removes only newly created matching directories', () => {
@@ -144,28 +145,30 @@ test('runTests returns non-zero subprocess exit code on test failure', () => {
   assert.equal(exitCode, 1);
 });
 
-test('buildCoverageArgs includes runtime globs and excludes test files', () => {
-  const args = buildCoverageArgs(['/tmp/a.test.ts'], 90, true);
+test('coverage command keeps node:test execution separate from c8 reporting', () => {
+  const args = buildCoverageArgs(['/tmp/a.test.ts']);
+  const c8Args = buildC8Args(90, true);
   assert.deepEqual(args.slice(0, 2), ['--import', 'tsx']);
   assert.ok(args.some(arg => arg.includes('bootstrap-parallix-home.ts')));
   assert.ok(args.includes('--experimental-test-module-mocks'));
-  assert.ok(args.includes('--experimental-test-coverage'));
-  assert.ok(args.includes('--test-coverage-lines=90'));
+  assert.ok(!args.includes('--experimental-test-coverage'));
+  assert.ok(c8Args.includes('--check-coverage'));
+  assert.ok(c8Args.includes('--lines=90'));
   for (const pattern of COVERAGE_INCLUDES) {
-    assert.ok(args.includes(pattern));
+    assert.ok(c8Args.includes(pattern));
   }
   for (const pattern of COVERAGE_EXCLUDES) {
-    assert.ok(args.includes(pattern));
+    assert.ok(c8Args.includes(pattern));
   }
   assert.ok(args.includes('/tmp/a.test.ts'));
   assert.ok(
-    args.includes(`--test-reporter-destination=${path.join(REPO_ROOT, 'coverage', 'lcov.info')}`),
+    c8Args.includes(`--reports-dir=${path.join(REPO_ROOT, 'coverage')}`),
     'lcov output should be rooted under parallix/coverage'
   );
 });
 
 test('buildCoverageArgs does not load tsx for JavaScript-only test lists', () => {
-  const args = buildCoverageArgs(['/tmp/a.test.js'], 90);
+  const args = buildCoverageArgs(['/tmp/a.test.js']);
   assert.ok(!args.includes('tsx'));
 });
 

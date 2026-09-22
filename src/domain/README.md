@@ -14,8 +14,8 @@ note and ADR 0053 differ, the ADR governs and this note must be corrected.
 ## The model
 
 `Mission` is the aggregate root. It owns labels, workflow status, closure time,
-assignee, replaceable checkpoint evidence, the review conversation, and NEL
-(`mission.ts`). `decideMission()` applies workflow-owned
+assignee, replaceable checkpoint evidence, the review conversation, NEL, the
+mission brief, and the declared gates (`mission.ts`). `decideMission()` applies workflow-owned
 commands and rejects invalid state or missing evidence (`mission-workflow.ts`).
 Agent-launch callbacks, operation progress, and restoration after an execution
 failure are application orchestration; they are not mission lifecycle commands.
@@ -57,6 +57,8 @@ The other requested state surfaces have these roles:
 | Agents and eligibility | Value objects plus pure selection policy | Eligibility is evaluated from configuration, explicit blocks, and launcher availability | `src/adapters/agents/launcher-selection.ts:127` |
 | Usage/statistics | Agent work measurements plus a completed-mission projection | Statistics need closure, final implementer, model attribution, cost, time, tokens, fix rounds, and change size; the measurement database is the authority | `src/adapters/cli/commands/stats.ts:102`, `:862`, `:1918` |
 | Known repositories | Repository identity plus an application selector projection | No repository registry or last-used signal is authoritative today | `src/domain/repository.ts`, `src/application/projections/repository-selector.ts` |
+| Mission brief | Value object on `Mission`: goal, why, optional scope, out-of-scope | ADR 0053 requires Parallix to persist what the mission is for, so a fresh agent understands the work without reaching the external task provider | `mission-brief.ts`, `prompts/draft-core.md` |
+| Declared gates | Replaceable ordered command list on `Mission`, recorded at draft | Handoff executes exactly these commands; nothing else decides what verifies the mission | `mission-gates.ts`, `src/application/handoff-command-use-case.ts` |
 | NEL | Replaceable numeric attribute on `Mission` | It describes the mission's change size and is captured at handoff; it has no independent identity | `src/adapters/cli/commands/handoff.ts:1098`, `src/domain/net-engineering-lines.ts:184`, `src/domain/net-engineering-lines.ts:36` |
 | Session/resume | Value object scoped to mission, role, and agent family | Resume is allowed only when all three match | `src/domain/session.ts`, `src/adapters/agents/agents.ts:327`, `src/adapters/sqlite/session-marker-repository.ts` |
 
@@ -64,10 +66,10 @@ Checkpoint content is not immutable. `recordCheckpoint()` replaces an existing
 checkpoint with the same name and rejects cross-mission evidence
 (`checkpoint.ts:45`). Review is not a mutable phase enum, and it is not a file:
 `<PARALLIX_HOME>/parallix.db` is the sole live authority for every review value
-above (ADR 0053). What remains outside it is a write-only Markdown export of
-each stored event under `missions/<slug>/review-events/`, the single-use `/tmp`
-artifacts an agent process hands to the loop, and the review provider, which is
-a projection. `Review` records an
+above (ADR 0053). TASK-2521.03 removed the Markdown export that used to be
+written under `missions/<slug>/review-events/`; what remains outside the
+database is the single-use `/tmp` artifacts an agent process hands to the loop,
+and the review provider, which is a projection. `Review` records an
 ordered sequence of rounds; each round names the exact revision, reviewer
 decision, findings, and implementer response (`review.ts`). Agent family names
 are open values, but reviewer assignment succeeds only when the family appears
@@ -265,6 +267,12 @@ agent-family label or inventing a zero.
 | Provider-neutral reviewed revision on each round | Forgejo PR fields in `MissionOperationalFacts` or approval tied only to a branch | Review can run with provider disabled, while approval must identify both the stable PR/local change and the exact reviewed commit |
 | Valid open/closed `Mission` union with an explicit `done` closeout-pending case | Nested closure object or inferring closure from `status: done` | Integration commits `done`/completed before worktree cleanup; cleanup can fail independently (`integrate.ts:829-891`) |
 | Backlog/Git integration-base/worktree materialization policy in its adapter | Making Git topology part of `MissionStore` or letting the last queried checkout win | Current integration takes lifecycle status from the base checkout and mission metadata from the worktree (`integrate.ts:978-1001`) |
+| Mission brief as a four-field value object | `MissionExecutionContext`: one ten-field type holding brief, sizing signals, gates and predecessor references, persisted as `mission_execution_context_items(kind, position, value, outcome)` | ADR 0053 asks the model to represent these concepts directly and rejects preserving the file architecture by changing its storage medium; a `kind`-discriminated item table is that rejection one level down. Of the ten fields only `declaredGates` had a consumer beyond being printed, and the table held one row across 538 missions |
+| Declared gates as a separate mission attribute | A field inside the brief | A gate is an executable command the harness runs and records a result for; the brief is the statement of intent it is run against. Handoff reads `declaredGates` and executes exactly those, which is a different kind of fact from goal or scope |
+| Predicted NEL bucket as a mission attribute, reusing `NelBucketLabel` | A new bucket enum, or deriving the prediction from `classifyNelBucket()` | The classifier buckets the *measured* NEL and cannot express a prediction; handoff compares the recorded prediction with the measured bucket for the calibration ADR 0047 describes |
+| Success criteria as a separate mission list attribute; a planned checkpoint as `CheckpointData` without Goal Check rows | Criteria inside the brief; a second checkpoint-plan structure beside `checkpoints` | Execution records one Goal Check row per criterion, and evidence recorded under a planned checkpoint's name replaces it in place (`recordCheckpoint`). One list says both what is planned and what is done, so the first checkpoint without evidence is where a relaunched agent resumes; draft plans checkpoints but never records evidence |
+| No refinement confidence, selection note or main drivers | Persisted refinement rationale | No rule, no identity, and no consumer beyond `px status` printing them; the model is deliberately smaller than the persisted data |
+| Predecessor references not modelled yet | `dependencies` on the Mission aggregate | The Mission aggregate is the only task record; Mission-to-Mission references are TASK-2521.04's to model, not a field copied from Backlog frontmatter |
 | NEL as a mission attribute | Standalone NEL entity or duplicated outcome field | Handoff captures one replaceable change-size observation for the mission (`handoff.ts:1098`) |
 | Agent work and completed-mission statistics | Copy of `StatsRow`/CSV columns or an outcome detached from its mission | Reports group completed missions by final implementer/model and attribute review rows to reviewers (`stats.ts:667`, `:866`, `:1940`) |
 | Explicit token-using work stages with `default` as an unmapped-debt sentinel | Copying `active`/`follow-up` CSV aliases or allowing known launches into `default` | Execute, review preparation, review response, conflict resolution, and integration verification all launch agents today; the runtime does not yet record every path |

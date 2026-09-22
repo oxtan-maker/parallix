@@ -16,6 +16,7 @@ import * as path from 'node:path';
 
 import type { MissionVersion } from '../src/application/domain-ports.js';
 import { MissionCheckpointService } from '../src/application/mission-checkpoint-service.js';
+import { MissionBriefService } from '../src/application/mission-brief-service.js';
 import { MissionIntakeService } from '../src/application/mission-intake-service.js';
 import { MissionIntegrationService } from '../src/application/mission-integration-service.js';
 import { MissionLifecycleService } from '../src/application/mission-lifecycle-service.js';
@@ -32,6 +33,39 @@ import {
   ConfiguredReviewerEligibility,
   startReview,
 } from '../src/domain/review.js';
+
+/**
+ * Draft settles the contract activation demands: a goal, a why, a scope and at
+ * least one verification gate (`requireDraftedContract` in mission-workflow.ts).
+ * A fixture that activates without it is not a mission the workflow can produce.
+ */
+async function seedDraftedContract(store: never, mission: never): Promise<number> {
+  const briefService = new MissionBriefService(store as never);
+  await briefService.update({
+    operationId: 'op-brief', missionId: mission,
+    capabilities: new Set(['mission:context']),
+    patch: { goal: 'Fixture goal', why: 'Fixture why', scope: 'Fixture scope' },
+  } as never);
+  await briefService.setGates({
+    operationId: 'op-gates', missionId: mission,
+    capabilities: new Set(['mission:context']), gates: ['npm test'],
+  } as never);
+  await briefService.setSuccessCriteria({
+    operationId: 'op-criteria', missionId: mission,
+    capabilities: new Set(['mission:context']), criteria: ['The fixture mission is done'],
+  } as never);
+  await briefService.setPredictedNelBucket({
+    operationId: 'op-nel', missionId: mission,
+    capabilities: new Set(['mission:context']), bucket: 'Small',
+  } as never);
+  const plan = await new MissionCheckpointService(store as never).plan({
+    operationId: 'op-plan', missionId: mission,
+    capabilities: new Set(['mission:context']), name: 'CP-1', description: 'Do the fixture work',
+  } as never);
+  // Recording the contract advances the Mission, so the caller activates
+  // against the version the seeding produced rather than the one before it.
+  return (plan as { value: { version: number } }).value.version;
+}
 
 const MISSION = missionId('task-2347.02-lifecycle');
 const REPOSITORY = repositoryId('parallix');
@@ -95,12 +129,13 @@ describe('TASK-2347.02 full lifecycle lane history', () => {
       });
       assert.equal(intake.status, 'completed', JSON.stringify(intake));
 
-      // backlog -> refined: what `px draft` records before a launch.
+      // backlog -> refined: what `px draft` records once the contract is recorded.
       const lifecycle = new MissionLifecycleService(store);
+      const contractVersion = await seedDraftedContract(store as never, MISSION as never);
       const refined = await lifecycle.transition({
         operationId: 'op-refine',
         missionId: MISSION,
-        expectedVersion: version(intake),
+        expectedVersion: contractVersion as never,
         capabilities: CAPABILITIES,
         command: { type: 'refine' },
         actor: IMPLEMENTER,

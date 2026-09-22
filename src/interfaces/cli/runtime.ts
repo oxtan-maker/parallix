@@ -27,6 +27,17 @@ export const KNOWN_COMMANDS: string[] = [
   'recover',
   'status',
   'lead',
+  'goal',
+  'repro',
+  'scope',
+  'gate',
+  'criterion',
+  'nel',
+  'checkpoint',
+  'assign',
+  'unassign',
+  'verdict',
+  'resolve',
   'review',
   'integrate',
   'cancel',
@@ -260,7 +271,20 @@ ${fmt.bold('Advanced Commands:')}
   setup                 Interactive setup wizard: writes config, optionally bootstraps Forgejo, and verifies the install.
   setup-review          Legacy Forgejo-only bootstrap for tokens, repo creation, and git review remote.
   recover <slug>        Reconcile an interrupted active task with its closed durable aggregate.
-  status [<slug>]       Unified mission and repository overview.
+  status [<slug>] [--json]  Complete recorded Mission state — lane, brief, declared gates, latest checkpoint evidence, review round and the write version — plus the repository overview. --json emits the recorded Mission fields for agents.
+  goal set --goal <t> --why <t>       Record the Mission's goal and why; the first brief write.
+  scope set --scope <t> [--out-of-scope <t> ...]  Bound a Mission that already has a goal.
+  gate add|remove --command <cmd>     Declare or drop one verification gate.
+  criterion add|remove --text <t>     Record or drop one success criterion.
+  nel set --predicted <bucket>        Record the draft's predicted NEL bucket (Small|Medium|Large).
+  repro set --test <path> | repro clear  Record the bug mission's red-to-green reproduction test.
+  checkpoint plan|unplan|record --name <CP-N> ...  Plan a checkpoint, drop one with no evidence, or record its Goal Check evidence.
+  assign --agent <family>             Set the Mission's assignee.
+  unassign                            Clear the Mission's assignee.
+  verdict approve|request-changes --actor <f> [--finding <id> --summary <t> ...]  Record this round's review decision.
+  resolve --actor <f> --finding <id> --fixed <e>|--disputed <r>  Record the implementer's answer to each finding.
+        The slug is inferred from the branch or worktree; pass --slug <slug> outside it.
+        Every write takes --expected-version <n>, read from \`px status --json\`.
   github-publish-status  Show github-publish publication engine status (local head, published head, awaiting/verified-blocked/failed). No-op when the mode is disabled.
   lead [<slug>...] [--once] [--poll <s>] [--budget <n>] [--dry-run]  Work active, review, and integration missions from the board's needs-attention queue; refined missions stay for operator activation. Press the action each item offers, then give a stuck mission a fresh agent in its worktree. Attempts are per failure; integration items are left for you. Keeps watching until stopped (default poll 60 seconds); --once takes a single pass and exits.
   cancel <slug> --yes   Delete one mission's lifecycle rows from the operator database. Irreversible; usage statistics are kept and the branch and worktree stay for you to remove.

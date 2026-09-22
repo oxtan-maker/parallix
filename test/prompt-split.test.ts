@@ -21,9 +21,12 @@ function realRepoRoot(): string {
   return dir;
 }
 
-// Parent-commit (pre-split) prompt content, snapshotted at TASK-2465 into a
-// committed fixture so the preservation check is hermetic (no git boundary) and
-// runs in the default unit suite. The fixture locks the parent baseline.
+// Shipped prompt content, snapshotted at TASK-2465 into a committed fixture so
+// the preservation check is hermetic (no git boundary) and runs in the default
+// unit suite. The fixture locks the assembled baseline: a stage whose prompt is
+// deliberately rewritten (TASK-2521.03 rewrote draft/execute/review/
+// act-on-review) regenerates its entry from `assembleStagePrompt`, so the check
+// keeps proving that core+opinion assembly reconstructs exactly what ships.
 const PARENT_FIXTURE = JSON.parse(
   fs.readFileSync(path.join(realRepoRoot(), 'test', 'fixtures', 'prompt-split-parent.json'), 'utf8'),
 ) as Record<string, string>;
@@ -175,7 +178,7 @@ test('task-2465: configured override replaces opinion content but retains a name
   }
 });
 
-test('task-2465: override cannot drop core even when the repo opinion omits it', () => {
+test('task-2465: override cannot drop core resolution instructions when the repo opinion omits them', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'task-2465-core-drop-'));
   try {
     fs.writeFileSync(path.join(root, 'workflow.config.json'), JSON.stringify({
@@ -185,7 +188,7 @@ test('task-2465: override cannot drop core even when the repo opinion omits it',
     fs.writeFileSync(path.join(root, 'minimal.md'), 'just my taste\n');
     const assembled = assembleStagePrompt('act-on-review', { overridePath: resolvePromptOverride(root) });
     assert.ok(assembled.includes('just my taste'));
-    assert.ok(assembled.includes('CHANGES_MADE|PUSHBACK_ALL|PARKED|BLOCKED'), 'parser-visible disposition token (core) must survive');
+    assert.ok(assembled.includes('px resolve --slug {{slug}}'), 'the core resolution command must survive');
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }

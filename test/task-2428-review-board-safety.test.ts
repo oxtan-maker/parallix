@@ -11,8 +11,10 @@ test('task-2428: persisted-artifact consumer can synthesize review identity, so 
   // The consumer still defaults the reviewer to 'autonomous' when neither the
   // review state nor the task assignee names one. Matched on the default rather
   // than one spelling of the assignment, so extracting the helper that holds it
-  // does not silently drop the guard.
-  assert.match(source, /reviewer\s*=\s*(?:[^;\n]*\|\|\s*)?'autonomous'/);
+  // does not silently drop the guard. `[:=]` because TASK-2521.03 removed the
+  // `--consume-artifacts` helper that held the assignment form; the surviving
+  // site sets it in an object literal.
+  assert.match(source, /reviewer\s*[:=]\s*(?:[^;\n]*\|\|\s*)?'autonomous'/);
   assert.match(source, /new ReviewState\(slug/);
   assert.equal(isIntegratedCapability('review:act-on-findings'), false);
   assert.match(unavailableReason('review:act-on-findings') ?? '', /synthesize review state or reviewer identity/);

@@ -9,7 +9,7 @@ import * as os from 'os';
 import * as fmt from '../../application/presentation/cli-format.js';
 import { run, getCurrentBranch } from '../git/git.js';
 import { findMissionDir, findMissionArea, resolveWorktree, missionBranchName } from '../filesystem/mission-utils.js';
-import { resolveTaskFile, getTaskStatus, getAcceptanceCriteria, getTaskAssignee, getTaskImplementer, reportTaskResolution, transitionTask } from '../backlog/backlog.js';
+import { resolveTaskFile, getTaskStatus, getAcceptanceCriteria, getTaskImplementer, reportTaskResolution, transitionTask } from '../backlog/backlog.js';
 import { toVirtual } from '../config/state-map.js';
 import { getPrStatus, readToken, postComment, postReview, createPr, getComments, closePr, resolveReviewUser, isProviderEnabled } from './review-adapter.js';
 import { buildAutonomousReviewMatrix, formatMatrixSummary } from '../agents/runtime-matrix.js';
@@ -18,14 +18,13 @@ import type { MissionStore } from '../../application/domain-ports.js';
 import type { MissionLifecycleService } from '../../application/mission-lifecycle-service.js';
 import { parseReviewFindings, recordRequestedChanges, recordApproval, approvalLegalDiagnostic } from './review-round.js';
 import { missionId } from '../../domain/mission.js';
-import { currentReviewRound, reviewFindingId, reviewStatus, resumeReview, type Review, type ReviewStatus, type ReviewItemDisposition, type ReviewFindingId } from '../../domain/review.js';
+import { currentReviewRound, reviewFindingId, reviewStatus, resumeReview, invalidateBlocker, type Review, type ReviewStatus, type ReviewItemDisposition, type ReviewFindingId } from '../../domain/review.js';
 import { createEvent, ALL_EVENT_TYPES, isValidEventType, shouldMirrorToProvider, readAllEvents } from './review-events.js';
 import { formatVerificationCommand, runVerificationGate } from '../verification/verification.js';
 import { bootstrapReviewSurface } from './setup-review.js';
 import { resolveReviewAdapter } from '../config/product-config.js';
-import { buildMetadataFooter, postWorkflowComment, postWorkflowReview, consumeReviewerArtifacts, resolveArtifactDir } from './review-artifacts.js';
+import { buildMetadataFooter, postWorkflowComment, postWorkflowReview } from './review-artifacts.js';
 import { runPhaseGates } from '../config/repository-gates.js';
-import { commitSafeMissionArtifacts } from './review-loop.js';
 import { flagValue, repeatedFlagValues } from './review-cli-flags.js';
 import { performHandoff } from '../cli/commands/handoff.js';
 export { REVIEW_FLAGS, REVIEW_VALUE_FLAGS, unknownReviewFlags, flagValue, readTextFlag, repeatedFlagValues } from './review-cli-flags.js';
@@ -67,17 +66,6 @@ async function repairStaleActiveTaskAfterReview(
   }
 
   return { repaired: true, currentStatus: currentStatus ?? undefined };
-}
-
-async function commitPersistedReviewOutputs(
-  slug: string,
-  options: { worktree?: string; taskFile?: string | null; log?: (_msg: string) => void; error?: (_msg: string) => void } = {}
-): Promise<{ ok: boolean; dirty?: boolean; unsafe?: boolean }> {
-  return commitSafeMissionArtifacts(slug, options.worktree || process.cwd(), {
-    taskFile: options.taskFile || null,
-    log: options.log || fmt.log.plain,
-    error: options.error || fmt.log.plainError,
-  });
 }
 
 export async function postStaticReviewComment(
@@ -379,6 +367,115 @@ export async function continueReviewClearsIntervention(
     );
   }
   return result.cleared;
+}
+
+/**
+ * Invalidate a persisted mission review's BLOCKED/PARKED stop for the
+ * `px review --continue` path, then return so the caller relaunches the loop.
+ *
+ * The review loop relaunches the implementer on every `--continue` whenever it
+ * finds an existing BLOCKED/PARKED disposition, so a blocker that the operator
+ * has resolved by hand (for example the terminal `external-formal-approval-
+ * owed` stop on an already-approved mission) spins forever. `--continue` is the
+ * operator's declaration that the blocker is resolved, so clear the
+ * disposition and reset the round to `reviewing`: the loop re-polls the
+ * reviewer on the current tree instead of relaunching the stuck implementer.
+ * Attribution is to the operator (the current git user) with zero ceremony,
+ * mirroring `continueReviewClearsIntervention`. Returns whether a stop was
+ * invalidated.
+ */
+export async function continueReviewInvalidatesBlocker(
+  slug: string,
+  args: string[],
+  options: {
+    log?: (_msg: string) => void;
+    error?: (_msg: string) => void;
+    exit?: (_code: number) => never;
+    resolveWorktreeFn?: typeof resolveWorktree;
+    missionStore?: MissionStore | null;
+    createEventFn?: typeof createEvent;
+    runFn?: typeof run;
+  } = {}
+): Promise<{ invalidated: boolean; operator: string; status: ReviewStatus }> {
+  const error = options.error || fmt.log.plainError;
+  const exit = options.exit || process.exit;
+  const store = options.missionStore ?? null;
+
+  if (!store) {
+    error(fmt.status('FAIL', `No Mission authority bound for ${slug}; cannot invalidate the BLOCKED state.`));
+    exit(1);
+    return { invalidated: false, operator: '', status: 'awaiting-review' };
+  }
+
+  let result;
+  try {
+    result = await store.load(missionId(slug));
+  } catch (loadError) {
+    const diagnostic = loadError instanceof Error ? loadError.message : String(loadError);
+    error(fmt.status('FAIL', `Could not load review for ${slug}: ${diagnostic}`));
+    exit(1);
+    return { invalidated: false, operator: '', status: 'awaiting-review' };
+  }
+
+  if (result.kind !== 'found' || !result.mission.review) {
+    error(fmt.status('FAIL', `Mission ${slug} has no review; px review ${slug} --start begins a review.`));
+    exit(1);
+    return { invalidated: false, operator: '', status: 'awaiting-review' };
+  }
+
+  const review = result.mission.review;
+  const round = currentReviewRound(review);
+  if (round.disposition !== 'BLOCKED' && round.disposition !== 'PARKED') {
+    // No implementer stop to clear: a `--continue` on an otherwise-normal
+    // review is a no-op here, not an error. The loop handles it normally.
+    return { invalidated: false, operator: '', status: reviewStatus(review) };
+  }
+
+  // Attribution is to the operator, never to the stuck implementer. Prefer the
+  // explicit --actor, then the current git user, then a bare `operator` label.
+  const explicitActor = (() => {
+    const actor = flagValue(args, '--actor');
+    return actor && actor.trim() ? actor.trim() : null;
+  })();
+  const operator = explicitActor || (() => {
+    const worktree = options.resolveWorktreeFn ? (options.resolveWorktreeFn(slug) ?? process.cwd()) : process.cwd();
+    try {
+      const gitUser = (options.runFn ?? run)('git', ['-C', worktree, 'config', 'user.name']);
+      return (gitUser.stdout || '').trim() || 'operator';
+    } catch {
+      return 'operator';
+    }
+  })();
+
+  const invalidated = invalidateBlocker(review);
+  // The Review aggregate is the sole write authority (ADR 0053): persisting it
+  // clears the round's BLOCKED disposition and resets its phase to `reviewing`,
+  // so the relaunched loop re-polls the reviewer instead of relaunching the
+  // stuck implementer.
+  await store.save({ ...result.mission, review: invalidated }, result.version);
+
+  const createEventFn = options.createEventFn ?? createEvent;
+  await createEventFn(
+    slug,
+    'human_note',
+    {
+      actor: operator,
+      content: `invalidated a ${round.disposition} stop; reviewStatus now ${reviewStatus(invalidated)}. Operator cleared the blocker via --continue.`,
+      round: currentReviewRound(invalidated).number,
+      phase: 'reviewing',
+    },
+    {
+      worktree: options.resolveWorktreeFn ? (options.resolveWorktreeFn(slug) ?? undefined) : undefined,
+      skipGit: false,
+      log: options.log,
+      error,
+      missionStore: options.missionStore,
+    },
+  ).catch((writeError) => {
+    error(fmt.status('WARN', `Invalidated the BLOCKED state for ${slug}, but could not record the override event: ${writeError instanceof Error ? writeError.message : String(writeError)}`));
+  });
+
+  return { invalidated: true, operator, status: reviewStatus(invalidated) };
 }
 
 // ===============================================================================
@@ -956,117 +1053,6 @@ export async function commentRound(
   if (currentState) {
     await persistReviewStateOrThrow(writeReviewStateFn, slug, currentState, rootDir, missionStore);
   }
-}
-
-// ============================================================================
-// Command: consumeArtifacts
-// ============================================================================
-
-export async function consumeArtifacts(
-  slug: string,
-  options: {
-    log?: (_msg: string) => void;
-    error?: (_msg: string) => void;
-    resolveWorktreeFn?: typeof resolveWorktree;
-    transitionTaskFn?: typeof transitionTask;
-    consumeReviewerArtifactsFn?: typeof consumeReviewerArtifacts;
-    resolveTaskFileFn?: typeof resolveTaskFile;
-    getTaskAssigneeFn?: typeof getTaskAssignee;
-    getTaskStatusFn?: typeof getTaskStatus;
-    resolveArtifactDirFn?: typeof resolveArtifactDir;
-    readReviewStateFn?: typeof readReviewState;
-    writeReviewStateFn?: typeof writeReviewState;
-    createEventFn?: typeof createEvent;
-    readArtifactFn?: unknown;
-    deleteArtifactFn?: unknown;
-    missionStore?: MissionStore | null;
-  } = {}
-): Promise<{ ok: boolean; consumed: boolean; reviewState?: string | null }> {
-  const log = options.log || fmt.log.plain;
-  const error = options.error || fmt.log.plainError;
-  const resolveWorktreeFn = options.resolveWorktreeFn || resolveWorktree;
-  const transitionTaskFn = options.transitionTaskFn || transitionTask;
-  const consumeReviewerArtifactsFn = options.consumeReviewerArtifactsFn || consumeReviewerArtifacts;
-  const resolveTaskFileFn = options.resolveTaskFileFn || resolveTaskFile;
-  const getTaskAssigneeFn = options.getTaskAssigneeFn || getTaskAssignee;
-  const getTaskStatusFn = options.getTaskStatusFn || getTaskStatus;
-  const writeReviewStateFn = options.writeReviewStateFn || writeReviewState;
-  const resolveArtifactDirFn = options.resolveArtifactDirFn || resolveArtifactDir;
-  const readReviewStateFn = options.readReviewStateFn || readReviewState;
-
-  const worktree = resolveWorktreeFn(slug) || process.cwd();
-  const rootDir = worktree;
-  const taskResolution = resolveTaskFileFn(slug, rootDir);
-
-  // Resolve artifact directory
-  const artifactDir = resolveArtifactDirFn(rootDir);
-  log(fmt.status('INFO', `Consuming reviewer artifacts for ${slug} from ${artifactDir}`));
-
-  // Determine reviewer identity from review-state first, then task assignee.
-  const { reviewer, currentState } = await artifactReviewContext(slug, worktree, taskResolution, readReviewStateFn, getTaskAssigneeFn, log);
-
-  // Consume artifacts - this will create reviewer_findings and reviewer_outcome events
-  const result = await consumeReviewerArtifactsFn(slug, reviewer, {
-    worktree,
-    tmpDir: artifactDir,
-    log,
-    error,
-    providerEnabled: false,
-    createEventFn: options.createEventFn as any,
-    readArtifactFn: options.readArtifactFn as any,
-    deleteArtifactFn: options.deleteArtifactFn as any,
-    currentState,
-  });
-
-  if (!result.consumed) {
-    log(fmt.status('WARN', `No reviewer artifact files found at ${artifactDir} for ${slug}.`));
-    return { ok: false, consumed: false };
-  }
-
-  if (!result.ok) {
-    error(fmt.status('FAIL', `Failed to consume reviewer artifacts for ${slug}: ${result.ok === false ? 'missing required fields (findings, outcome, verdict)' : 'unknown failure'}`));
-    return { ok: false, consumed: true };
-  }
-
-  // Persist state (includes dedup metadata merged by consumeHumanNotes).
-  // If this was the first invocation, the initial state is now populated with
-  // dedup keys and review data from artifact consumption.
-  await persistReviewStateOrThrow(writeReviewStateFn, slug, currentState as any, worktree, options.missionStore);
-
-  // Transition backlog task to review status
-  if (taskResolution.ok) {
-    const currentStatus = getTaskStatusFn ? getTaskStatusFn(taskResolution.taskFile!) : null;
-    if (!currentStatus || currentStatus !== 'review') {
-      // The transition is fire-and-forget, and the injected function may be
-      // sync or async — normalize before attaching the handler.
-      void Promise.resolve(transitionTaskFn(slug, 'review', { rootDir, log })).catch(() => {});
-    } else {
-      log(fmt.status('INFO', `Backlog task for ${slug} already at review status.`));
-    }
-  }
-
-  const cleanup = await commitPersistedReviewOutputs(slug, {
-    worktree,
-    taskFile: taskResolution.ok ? taskResolution.taskFile : null,
-    log,
-    error
-  });
-  if (!cleanup.ok) {
-    error(fmt.status('FAIL', `Consumed reviewer artifacts for ${slug}, but could not commit the persisted mission artifacts.`));
-    return { ok: false, consumed: true };
-  }
-
-  log(fmt.status('PASS', `Reviewer artifacts consumed for ${slug}. Backlog task set to review.`));
-  return { ok: true, consumed: true, reviewState: result.reviewState };
-}
-
-async function artifactReviewContext(slug: string, worktree: string, taskResolution: any, readState: typeof readReviewState, getAssignee: typeof getTaskAssignee, log: (_message: string) => void) {
-  const { identityUser } = await resolveReviewIdentity(slug, worktree, { readReviewStateFn: readState });
-  const assignedReviewer = taskResolution.ok ? getAssignee(taskResolution.taskFile!) : null;
-  const reviewer = identityUser || assignedReviewer || 'autonomous';
-  if (!identityUser && !assignedReviewer) { log(fmt.status('WARN', `No reviewer identity resolved; defaulting to "${reviewer}"`)); }
-  const currentState = await readState(slug, worktree) || new ReviewState(slug, { reviewer, round: 1, phase: 'reviewing' });
-  return { reviewer, currentState };
 }
 
 // ============================================================================

@@ -65,6 +65,12 @@ test('startReviewLoop runs the pre-review gate before every reviewer round', asy
     log: () => {}, error: () => {}, exit: () => {},
     consumeReviewerArtifactsFn: async () => ({ consumed: false }),
     consumeImplementerArtifactsFn: async () => ({ consumed: false }),
+    // The implementer addressed the finding, so round 2 evaluates the revised
+    // revision. A CHANGES_MADE with an unchanged HEAD now stops the loop per
+    // TASK-2478/criterion 8, so a real revision (and the push it triggers) is
+    // required for the gate-per-round path to reach round 2.
+    hasNewCommittedChangeFn: () => true,
+    pushReviewRefFn: () => ({ status: 0 }),
   });
 
   const reviewerLaunches = events.filter((event) => event === 'review:reviewer').length;

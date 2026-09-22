@@ -647,6 +647,31 @@ describe('SQLite adapter — CP1: schema and migration runner', () => {
     }
   });
 
+  it('upgrades the original 0021 brief-boundary schema without changing its ledger checksum', async () => {
+    const { db, dir } = createTempDb();
+    try {
+      const runner = new SqliteMigrationRunner(db);
+      const migrations = loadDefaultMigrations();
+      const rename = migrations.find((migration) => migration.id === '0023-rename-mission-brief-constraints');
+      assert.ok(rename, 'the forward rename migration must be loaded');
+
+      await db.execute('CREATE TABLE schema_migrations (id TEXT PRIMARY KEY, checksum TEXT NOT NULL, applied_at TEXT NOT NULL);');
+      await db.execute('CREATE TABLE mission_brief_constraints (mission_id TEXT, position INTEGER, constraint_text TEXT, PRIMARY KEY (mission_id, position));');
+      await db.execute("INSERT INTO mission_brief_constraints VALUES ('task-2521', 0, 'No scope creep');");
+      const original = migrations.find((migration) => migration.id === '0021-mission-brief-and-declared-gates');
+      assert.ok(original, 'the original 0021 migration must be loaded');
+      assert.equal(original.checksum, '6e8112f6674086f47403172e3a5f3506d1e1ed6defb0e05b2bd00dea66f84858');
+      await db.execute('INSERT INTO schema_migrations VALUES (?, ?, ?);', [original.id, original.checksum, new Date().toISOString()]);
+
+      await runner.applyPending([rename]);
+      const rows = await db.query<{ entry: string }>('SELECT entry FROM mission_brief_out_of_scope WHERE mission_id = ?', ['task-2521']);
+      assert.equal(rows[0]?.entry, 'No scope creep');
+    } finally {
+      await db.close();
+      cleanupTempDir(dir);
+    }
+  });
+
   // --- Only node:sqlite in adapter layer ---
 
   it('node:sqlite import is confined to src/adapters/sqlite/', () => {

@@ -194,7 +194,10 @@ function classifyIncompleteEvidence(errorMsg: string): { failureClass: FailureCl
     || errorMsg.includes('missing a') && errorMsg.includes('"## Goal Check" section')
     || errorMsg.includes('No checkpoint documents found') && errorMsg.includes('Goal Check table')
     || /declared\s+checkpoint\s+documents?\s+(are|is)\s+missing/i.test(errorMsg)
-    || /\bCP-\d+/.test(errorMsg) && /missing\s+before\s+handoff|create\s+and\s+commit/i.test(errorMsg);
+    || /\bCP-\d+/.test(errorMsg) && /missing\s+before\s+handoff|create\s+and\s+commit/i.test(errorMsg)
+    // Recorded (typed-verb) evidence: any failure whose repair is re-recording
+    // checkpoint evidence is the implementer's to fix, like a missing CP-N.md.
+    || errorMsg.includes('`px checkpoint record');
   return matches ? { failureClass: FailureClass.IncompleteEvidence, dispatchAction: DispatchAction.AutoSendBack } : null;
 }
 

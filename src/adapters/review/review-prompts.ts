@@ -179,9 +179,12 @@ export function buildCompletedControlsBlock(missionPath: string, repoRoot?: stri
     lines.push(`  - Configured preReview gates NOT yet run (they run on approve, after this review): ${renderGates(configured.preReview)}.`);
   }
   lines.push('  - Handoff already validated every checkpoint Goal Check table for structure and for a verifiable evidence reference per row.');
-  if (/^\s*(?:[-*]\s*)?Reproduction-Test:/m.test(missionContent)) {
-    lines.push('  - The red-to-green reproduction gate declared by this mission\u2019s `Reproduction-Test:` line already ran.');
-  }
+  // TASK-2521.03: this block reports controls the workflow actually executed.
+  // It used to claim the red-to-green reproduction gate "already ran" whenever a
+  // `Reproduction-Test:` line existed in the mission document — a claim derived
+  // from a string an agent wrote, for a gate with no production caller. A
+  // declared reproduction test is something the reviewer checks, not a control
+  // this block may report as executed.
   return lines.join('\n');
 }
 

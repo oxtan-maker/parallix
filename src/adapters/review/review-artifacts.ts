@@ -18,7 +18,7 @@ import {
   type VerifyResult,
 } from '../../application/rebound-kernel.js';
 import type { MissionStore } from '../../application/domain-ports.js';
-import { parseResolutionDispositions, type ReviewItemDisposition } from '../../domain/review.js';
+import { parseResolutionDispositions, type ReviewFinding, type ReviewItemDisposition } from '../../domain/review.js';
 import { readToken, postComment, postReview, getPrAuthor, isEnabled, resolveArtifactDir as resolveConfiguredArtifactDir } from './review-adapter.js';
 import { createEvent, consumeHumanNotes, VALID_EVENT_TYPES, CreateEventParams, CreateEventOptions, CreateEventResult } from './review-events.js';
 import { parseReviewFindings, recordImplementerResolution, recordRequestedChanges, recordApproval } from './review-round.js';
@@ -44,6 +44,64 @@ async function buildMetadataFooter(slug: string, rootDir = process.cwd(), missio
 
 function reviewArtifactPath(slug: string, artifactName: string, tmpDir = os.tmpdir()): string {
   return path.join(tmpDir, `${slug}-${artifactName}`);
+}
+
+// ============================================================================
+// Typed-transport rendering (one-way export)
+// ============================================================================
+
+/**
+ * Render typed findings as the Markdown the review event and the provider
+ * comment carry. One direction only: the domain already has the findings, so
+ * nothing reads this back.
+ */
+/**
+ * Fast pre-check that refuses a review write whose caller read an older Mission.
+ *
+ * Not the authority: the recorders commit with a compare-and-swap on the
+ * version they check, and that is what makes a submission atomic. This runs
+ * first so an obviously stale caller is turned away before any work, and it is
+ * the only guard on the paths that record no decision at all — a `BLOCKED`
+ * resolution writes events without reaching a recorder.
+ */
+async function staleReviewWrite(
+  slug: string,
+  expectedVersion: number | undefined,
+  missionStore: MissionStore | null | undefined,
+): Promise<string | null> {
+  if (expectedVersion === undefined || !missionStore) { return null; }
+  if (typeof (missionStore as { load?: unknown }).load !== 'function') { return null; }
+  const loaded = await missionStore.load(slug as never);
+  if (loaded.kind !== 'found') { return null; }
+  const actual = (loaded as { version: number }).version;
+  if (actual === expectedVersion) { return null; }
+  return `stale write for ${slug}: expected version ${expectedVersion}, found ${actual}. `
+    + `Re-read \`px status ${slug}\` and retry.`;
+}
+
+function renderFindings(findings: readonly ReviewFinding[]): string {
+  if (findings.length === 0) { return 'No findings.'; }
+  return findings
+    .map((finding) => `## ${finding.id}: ${finding.summary}${finding.location ? `\n\nLocation: ${finding.location}` : ''}`)
+    .join('\n\n');
+}
+
+/** The same one-way render for an implementer's round resolution. */
+function renderResolution(output: {
+  items: readonly ReviewItemDisposition[];
+  evidence: readonly string[];
+  blockedReason?: string | null;
+}): string {
+  const ids = (kind: ReviewItemDisposition['kind']) =>
+    output.items.filter((item) => item.kind === kind).map((item) => item.findingId);
+  return [
+    `fixed_items: ${JSON.stringify(ids('fixed'))}`,
+    `pushed_back_items: ${JSON.stringify(ids('pushed_back'))}`,
+    `parked_items: ${JSON.stringify(ids('parked'))}`,
+    ...(output.blockedReason ? [`blocked_reason: ${JSON.stringify(output.blockedReason)}`] : []),
+    '',
+    output.evidence.join('\n'),
+  ].join('\n');
 }
 
 /**
@@ -376,6 +434,15 @@ type ReviewerArtifactOptions = {
   recordRequestedChangesFn?: typeof recordRequestedChanges;
   recordApprovalFn?: typeof recordApproval;
   verbose?: boolean;
+  /**
+   * Typed inbound transport (`px verdict`). When present no artifact file is
+   * read or deleted, and the findings reach the domain as `ReviewFinding`
+   * values. Markdown is rendered here, at the export boundary, for the review
+   * event and the provider comment only — it is never parsed back.
+   */
+  output?: { findings: readonly ReviewFinding[]; comment: string | null; verdict: string };
+  /** Mission version the caller read; threaded to the recorders so a stale decision fails closed. */
+  expectedVersion?: number;
 };
 
 type ImplementerArtifactOptions = {
@@ -398,6 +465,20 @@ type ImplementerArtifactOptions = {
   missionStore?: MissionStore | null;
   recordImplementerResolutionFn?: typeof recordImplementerResolution;
   headRevisionFn?: (_worktree: string) => string;
+  /**
+   * Typed inbound transport (`px resolve`). Same rule as the reviewer side: the
+   * dispositions reach the domain typed, and the round-summary Markdown is
+   * rendered here for the event body rather than parsed back out of it.
+   */
+  output?: {
+    items: readonly ReviewItemDisposition[];
+    evidence: readonly string[];
+    blockedReason?: string | null;
+    disposition: string;
+    resultingRevision?: string;
+  };
+  /** Mission version the caller read; threaded to the recorder so a stale resolution fails closed. */
+  expectedVersion?: number;
 };
 
 type RepoEventFn = (_s: string, _t: string, _p: CreateEventParams, _o: CreateEventOptions) => CreateEventResult | Promise<CreateEventResult>;
@@ -425,6 +506,18 @@ function resolveProviderEnabled(options: { providerEnabled?: boolean | null; for
     : (options.forgejoEnabled !== null && options.forgejoEnabled !== undefined ? options.forgejoEnabled : isEnabled(worktree));
 }
 
+/** The same artifact set, supplied by `px verdict` in memory instead of read from files. */
+function typedReviewerArtifactSet(slug: string, tmpDir: string, output: { findings: readonly ReviewFinding[]; comment: string | null; verdict: string }): ResolvedArtifactSet {
+  return {
+    findings: renderFindings(output.findings),
+    outcomeMessage: output.comment ?? `Outcome: ${output.verdict}\nVerdict: ${output.verdict}`,
+    verdictRaw: output.verdict,
+    findingsPath: reviewArtifactPath(slug, 'review-findings.md', tmpDir),
+    outcomePath: reviewArtifactPath(slug, 'review-outcome.md', tmpDir),
+    verdictPath: reviewArtifactPath(slug, 'review-verdict.txt', tmpDir),
+  };
+}
+
 function resolveReviewerArtifactSet(slug: string, options: { tmpDir: string; readArtifactFn: typeof readArtifactFile }): ResolvedArtifactSet {
   const findingsResolved = resolveArtifactRead(slug, 'review-findings.md', { tmpDir: options.tmpDir, readArtifactFn: options.readArtifactFn });
   const outcomeResolved = resolveArtifactRead(slug, 'review-outcome.md', { tmpDir: options.tmpDir, readArtifactFn: options.readArtifactFn });
@@ -436,6 +529,16 @@ function resolveReviewerArtifactSet(slug: string, options: { tmpDir: string; rea
     findingsPath: findingsResolved.path,
     outcomePath: outcomeResolved.path,
     verdictPath: verdictResolved.path,
+  };
+}
+
+/** The same implementer artifact set, supplied by `px resolve` in memory. */
+function typedImplementerArtifactSet(slug: string, tmpDir: string, output: { items: readonly ReviewItemDisposition[]; evidence: readonly string[]; blockedReason?: string | null; disposition: string }): ResolvedImplementerArtifactSet {
+  return {
+    resolution: renderResolution(output),
+    dispositionRaw: output.disposition,
+    resolutionPath: reviewArtifactPath(slug, 'round-resolution.md', tmpDir),
+    dispositionPath: reviewArtifactPath(slug, 'review-disposition.txt', tmpDir),
   };
 }
 
@@ -582,7 +685,7 @@ async function consumeReviewerArtifacts(
   slug: string,
   reviewer: string,
   options: ReviewerArtifactOptions = {}
-): Promise<{ consumed: boolean; ok?: boolean; reviewState?: string | null; diagnostic?: string | null; findingSummaries?: string[] }> {
+): Promise<{ consumed: boolean; ok?: boolean; reviewState?: string | null; diagnostic?: string | null; reviewFindings?: { id: string; summary: string }[] }> {
   const log = options.log || fmt.log.plain;
   const error = options.error || fmt.log.plainError;
   const readArtifactFn = options.readArtifactFn || readArtifactFile;
@@ -592,7 +695,9 @@ async function consumeReviewerArtifacts(
   const providerEnabled = resolveProviderEnabled(options, worktree);
   const reviewStatePath = reviewStateFile(slug, worktree);
 
-  const artifacts = resolveReviewerArtifactSet(slug, { tmpDir, readArtifactFn });
+  const artifacts = options.output
+    ? typedReviewerArtifactSet(slug, tmpDir, options.output)
+    : resolveReviewerArtifactSet(slug, { tmpDir, readArtifactFn });
   const verdict = reviewerVerdictFrom(artifacts.verdictRaw, artifacts.outcomeMessage);
 
   if (artifacts.findings === null && artifacts.outcomeMessage === null && artifacts.verdictRaw === null) {
@@ -608,7 +713,11 @@ async function consumeReviewerArtifacts(
   const reviewFindings: string = artifacts.findings!;
   const reviewOutcome: string = artifacts.outcomeMessage!;
   const reviewVerdict: string = verdict!;
-  if (reviewVerdict === 'request-changes' && parseReviewFindings(reviewFindings).length === 0) {
+  // `px verdict` already names each finding; only a file transport needs parsing.
+  const typedFindings: readonly ReviewFinding[] = options.output
+    ? options.output.findings
+    : parseReviewFindings(reviewFindings);
+  if (reviewVerdict === 'request-changes' && typedFindings.length === 0) {
     return {
       consumed: true,
       ok: false,
@@ -616,24 +725,53 @@ async function consumeReviewerArtifacts(
     };
   }
 
+  const stale = await staleReviewWrite(slug, options.expectedVersion, options.missionStore);
+  if (stale) {
+    error(fmt.status('FAIL', stale));
+    return { consumed: true, ok: false, diagnostic: stale };
+  }
+
   const readReviewStateFn = options.readReviewStateFn || readReviewState;
   const currentState = await Promise.resolve(readReviewStateFn(slug, worktree, options.missionStore ?? null));
   const round = currentState ? currentState.round : 1;
   const phase = currentState ? currentState.phase : 'reviewing';
+
+  // The decision itself, not just its prose. Without it the round keeps
+  // `decision: null`, the Mission never leaves `review` through
+  // `request-changes`, and the next handoff cannot open round N+1.
+  //
+  // Committed first, pinned to the version the caller read. It cannot go after
+  // the review events: those advance the Mission, so the caller's version would
+  // be stale by the time the decision compared it, and a concurrent write
+  // landing between the events and the decision would be overwritten silently.
+  // The recorders save with a compare-and-swap on the same version they check,
+  // so pinning it here is what makes the submission atomic rather than merely
+  // pre-checked. It also fails in the safer direction: a decision without its
+  // event export is a missing log entry, while an event export without the
+  // decision leaves the Mission unapproved and unintegratable.
+  if (reviewVerdict === 'request-changes') {
+    const recorded = await recordReviewerChangeRequest(slug, typedFindings, reviewOutcome, options, log, error);
+    if (recorded) { return recorded; }
+  } else if (reviewVerdict === 'approve' && options.missionStore) {
+    // An approve is a domain decision, recorded here for the same reason
+    // request-changes is: the aggregate is what `px integrate` gates on, and
+    // what the next agent reads back. It used to be persisted only inside the
+    // self-authored-PR branch of the provider mirroring below, so a review with
+    // the provider disabled, or any ordinary provider review, returned APPROVED
+    // while the mission stayed unapproved and unintegratable.
+    //
+    // Recorded before mirroring, so a round that cannot legally reach
+    // `approved` fails here instead of after a provider POST that cannot be
+    // taken back.
+    const recorded = await recordReviewerApproval(slug, reviewOutcome, options, log, error);
+    if (recorded) { return recorded; }
+  }
 
   const persisted = await persistReviewerEvents({
     slug, reviewer, round, phase, reviewFindings, reviewOutcome, reviewVerdict,
     createEventFn: options.createEventFn || createEvent, worktree, log, error, verbose: Boolean(options.verbose),
   });
   if (!persisted.ok) { return { consumed: true, ok: false, diagnostic: 'diagnostic' in persisted ? persisted.diagnostic : 'reviewer event persistence failed' }; }
-
-  // The decision itself, not just its prose. Without it the round keeps
-  // `decision: null`, the Mission never leaves `review` through
-  // `request-changes`, and the next handoff cannot open round N+1.
-  if (reviewVerdict === 'request-changes') {
-    const recorded = await recordReviewerChangeRequest(slug, reviewFindings, reviewOutcome, options, log, error);
-    if (recorded) { return recorded; }
-  }
 
   if (providerEnabled) {
     const diagnostic = await postReviewerToProvider(slug, reviewer, reviewVerdict, reviewFindings, reviewOutcome, {
@@ -656,11 +794,13 @@ async function consumeReviewerArtifacts(
     log(fmt.status('INFO', `Review provider disabled; skipping PR mirroring for ${slug}`));
   }
 
-  deleteArtifactFn(artifacts.findingsPath);
-  deleteArtifactFn(artifacts.outcomePath);
-  deleteArtifactFn(artifacts.verdictPath);
+  if (!options.output) {
+    deleteArtifactFn(artifacts.findingsPath);
+    deleteArtifactFn(artifacts.outcomePath);
+    deleteArtifactFn(artifacts.verdictPath);
+  }
 
-  return reviewerConsumeOutcome(reviewVerdict, reviewFindings, reviewer, Boolean(providerEnabled), Boolean(options.verbose), log);
+  return reviewerConsumeOutcome(reviewVerdict, typedFindings, reviewer, Boolean(providerEnabled), Boolean(options.verbose), log);
 }
 
 /**
@@ -709,12 +849,13 @@ function reportIncompleteReviewerArtifacts(context: {
  * `decision: null`, the Mission never leaves `review` through `request-changes`,
  * and the next handoff cannot open round N+1.
  */
-async function recordReviewerChangeRequest(slug: string, findings: string, outcomeMessage: string, options: any, log: (_msg: string) => void, error: (_msg: string) => void) {
+async function recordReviewerChangeRequest(slug: string, findings: readonly ReviewFinding[], outcomeMessage: string, options: any, log: (_msg: string) => void, error: (_msg: string) => void) {
   const recordRequestedChangesFn = options.recordRequestedChangesFn || recordRequestedChanges;
   const decision = await recordRequestedChangesFn(slug, {
-    findings: parseReviewFindings(findings),
+    findings,
     comment: outcomeMessage,
     decidedAt: new Date().toISOString(),
+    ...(options.expectedVersion === undefined ? {} : { expectedVersion: options.expectedVersion }),
   }, { missionStore: options.missionStore, lifecycleService: options.lifecycleService });
   if (decision.outcome === 'failed') {
     error(fmt.status('FAIL', `Could not record the reviewer decision for ${slug}: ${decision.diagnostic}`));
@@ -726,17 +867,35 @@ async function recordReviewerChangeRequest(slug: string, findings: string, outco
   return null;
 }
 
+async function recordReviewerApproval(slug: string, outcomeMessage: string, options: any, log: (_msg: string) => void, error: (_msg: string) => void) {
+  const recordApprovalFn = options.recordApprovalFn || recordApproval;
+  const decision = await recordApprovalFn(slug, {
+    comment: outcomeMessage,
+    decidedAt: new Date().toISOString(),
+    source: { kind: 'local' },
+    ...(options.expectedVersion === undefined ? {} : { expectedVersion: options.expectedVersion }),
+  }, { missionStore: options.missionStore, lifecycleService: options.lifecycleService });
+  if (decision.outcome === 'failed') {
+    error(fmt.status('FAIL', `Could not record the approve decision for ${slug}: ${decision.diagnostic}`));
+    return { consumed: true as const, ok: false as const, diagnostic: `Reviewer decision persist failed: ${decision.diagnostic}` };
+  }
+  if (decision.outcome === 'unchanged') {
+    log(fmt.status('INFO', `Reviewer decision for ${slug} already recorded (${decision.reason}).`));
+  }
+  return null;
+}
+
 /** The loop-control review state a consumed verdict maps to. */
-function reviewerConsumeOutcome(verdict: string, findings: string, reviewer: string, providerEnabled: boolean, verbose: boolean, log: (_msg: string) => void) {
-  const findingSummaries = parseReviewFindings(findings).map((finding) => finding.summary);
-  if (verdict === 'approve') { return { consumed: true, ok: true, reviewState: 'APPROVED', findingSummaries }; }
-  if (verdict === 'request-changes') { return { consumed: true, ok: true, reviewState: 'REQUEST_CHANGES', findingSummaries }; }
+function reviewerConsumeOutcome(verdict: string, findings: readonly ReviewFinding[], reviewer: string, providerEnabled: boolean, verbose: boolean, log: (_msg: string) => void) {
+  const reviewFindings = findings.map(({ id, summary }) => ({ id, summary }));
+  if (verdict === 'approve') { return { consumed: true, ok: true, reviewState: 'APPROVED', reviewFindings }; }
+  if (verdict === 'request-changes') { return { consumed: true, ok: true, reviewState: 'REQUEST_CHANGES', reviewFindings }; }
   if (!providerEnabled) {
     const reviewState = verdict.toUpperCase().replace(/-/g, '_');
     if (verbose) {
       log(fmt.status('INFO', `Reviewer ${reviewer} produced verdict "${verdict}" with the provider disabled; normalizing to ${reviewState} for loop control.`));
     }
-    return { consumed: true, ok: true, reviewState, findingSummaries };
+    return { consumed: true, ok: true, reviewState, reviewFindings };
   }
   log(fmt.status('WARN', `Reviewer ${reviewer} produced verdict "${verdict}". Falling back to provider polling for loop control.`));
   return { consumed: true, ok: true, reviewState: null };
@@ -802,7 +961,7 @@ async function closeImplementerRound(slug: string, context: {
   const headRevisionFn = options.headRevisionFn || headRevision;
   let resultingRevision: string;
   try {
-    resultingRevision = headRevisionFn(worktree);
+    resultingRevision = options.output?.resultingRevision ?? headRevisionFn(worktree);
   } catch (revisionError) {
     const revErr = (revisionError as Error).message;
     error(fmt.status('FAIL', `Could not record the implementer resolution for ${slug}: ${revErr}`));
@@ -813,6 +972,7 @@ async function closeImplementerRound(slug: string, context: {
     evidence: `${disposition} — implementer round summary for ${slug}`,
     resultingRevision,
     respondedAt: new Date().toISOString(),
+    ...(options.expectedVersion === undefined ? {} : { expectedVersion: options.expectedVersion }),
   }, { missionStore: options.missionStore });
   if (recorded.outcome === 'failed') {
     error(fmt.status('FAIL', `Could not record the implementer resolution for ${slug}: ${recorded.diagnostic}`));
@@ -899,7 +1059,9 @@ async function consumeImplementerArtifacts(
   const providerEnabled = resolveProviderEnabled(options, worktree);
   const reviewStatePath = reviewStateFile(slug, worktree);
 
-  const artifacts = resolveImplementerArtifactSet(slug, { tmpDir, readArtifactFn });
+  const artifacts = options.output
+    ? typedImplementerArtifactSet(slug, tmpDir, options.output)
+    : resolveImplementerArtifactSet(slug, { tmpDir, readArtifactFn });
   const disposition = normalizeDisposition(artifacts.dispositionRaw || '');
   const hasAny = artifacts.resolution !== null || artifacts.dispositionRaw !== null;
 
@@ -910,24 +1072,38 @@ async function consumeImplementerArtifacts(
     return reportIncompleteImplementerArtifacts({ slug, resolution: artifacts.resolution, disposition, resolutionPath: artifacts.resolutionPath, dispositionPath: artifacts.dispositionPath, reviewStatePath, providerEnabled: Boolean(providerEnabled), error });
   }
 
+  const staleResolution = await staleReviewWrite(slug, options.expectedVersion, options.missionStore);
+  if (staleResolution) {
+    error(fmt.status('FAIL', staleResolution));
+    return { consumed: true, ok: false, diagnostic: staleResolution };
+  }
+
   const currentState = await Promise.resolve((options.readReviewStateFn || readReviewState)(slug, worktree));
   const round = currentState ? currentState.round : 1;
   const phase = currentState ? currentState.phase : 'fixing';
 
-  const { itemDispositions, blockedReason } = parseImplementerResolution(artifacts.resolution, disposition);
+  const { itemDispositions, blockedReason } = options.output
+    ? { itemDispositions: [...options.output.items], blockedReason: options.output.blockedReason ?? null }
+    : parseImplementerResolution(artifacts.resolution, disposition);
+
+  // Close the round on the aggregate. `ready-for-next-round` is the state the
+  // next handoff needs to open round N+1 on the same pull request.
+  //
+  // Committed before the round-summary events, and pinned to the version the
+  // caller read: the events advance the Mission, so a resolution recorded after
+  // them could neither check the caller's version nor notice a concurrent write
+  // that landed in between. The recorder saves with a compare-and-swap on the
+  // version it checks, which is what makes this atomic rather than pre-checked.
+  if (disposition !== 'BLOCKED') {
+    const closed = await closeImplementerRound(slug, { disposition, itemDispositions, worktree, options, log, error });
+    if (closed) { return closed; }
+  }
 
   const persisted = await persistImplementerEvents({
     slug, implementer, round, phase, resolution: artifacts.resolution, disposition, itemDispositions, blockedReason,
     createEventFn: options.createEventFn || createEvent, worktree, log, error,
   });
   if (!persisted.ok) { return { consumed: true, ok: false, diagnostic: 'diagnostic' in persisted ? persisted.diagnostic : 'implementer event persistence failed' }; }
-
-  // Close the round on the aggregate. `ready-for-next-round` is the state the
-  // next handoff needs to open round N+1 on the same pull request.
-  if (disposition !== 'BLOCKED') {
-    const closed = await closeImplementerRound(slug, { disposition, itemDispositions, worktree, options, log, error });
-    if (closed) { return closed; }
-  }
 
   if (providerEnabled && options.readTokenFn && options.getCommentsFn) {
     await consumeHumanNotes(slug, implementer, {
@@ -950,8 +1126,10 @@ async function consumeImplementerArtifacts(
     log(fmt.status('INFO', `Review provider disabled; skipping PR mirroring for ${slug}`));
   }
 
-  deleteArtifactFn(artifacts.resolutionPath);
-  deleteArtifactFn(artifacts.dispositionPath);
+  if (!options.output) {
+    deleteArtifactFn(artifacts.resolutionPath);
+    deleteArtifactFn(artifacts.dispositionPath);
+  }
 
   return { consumed: true, ok: true, disposition };
 }

@@ -158,7 +158,10 @@ test('startReviewLoop threads --mission override into the launched reviewer prom
     const customDir = path.join(root, 'review-pack');
     fs.mkdirSync(customDir, { recursive: true });
     const customMission = path.join(customDir, 'MISSION.md');
-    fs.writeFileSync(customMission, '# Mission: custom standalone contract\n');
+    // TASK-2521.03: the prompt no longer echoes the mission path, so the
+    // override is observed through what the harness reads from it — the
+    // declared-gate list in the completed-controls block.
+    fs.writeFileSync(customMission, '# Mission: custom standalone contract\n\n## Gates\n- `npm run override-gate`\n');
 
     let capturedPrompt = null;
     const { opts } = standaloneOpts(root, {
@@ -182,23 +185,26 @@ test('startReviewLoop threads --mission override into the launched reviewer prom
 
     assert.ok(capturedPrompt, 'reviewer prompt should have been built');
     assert.ok(
-      capturedPrompt.includes(customMission),
-      `launched reviewer prompt must reference the --mission override path; got missionPath context absent`
+      capturedPrompt.includes('npm run override-gate'),
+      'the --mission override must decide which mission the harness reads gates from'
     );
-    // Must NOT fall back to the slug-derived standard location.
+    // The path itself is harness plumbing and is never handed to the reviewer.
     assert.ok(
-      !capturedPrompt.includes(missionPathForSlug(root, 'task-1272')),
-      'override prompt must not also reference the slug-derived standard mission path'
+      !capturedPrompt.includes(customMission) && !capturedPrompt.includes(missionPathForSlug(root, 'task-1272')),
+      'no mission document path may appear in the reviewer prompt'
     );
   });
 });
 
-// Negative control: absent --mission, the prompt uses the slug-derived path.
+// Negative control: absent --mission, the harness resolves the slug-derived path.
 test('startReviewLoop uses the slug-derived mission path when --mission is absent', async () => {
   await withTempGitRepo(async (root) => {
+    const derived = missionPathForSlug(root, 'task-1272');
+    fs.mkdirSync(path.dirname(derived), { recursive: true });
+    fs.writeFileSync(derived, '# Mission: derived\n\n## Gates\n- `npm run derived-gate`\n');
     let capturedPrompt = null;
     const { opts } = standaloneOpts(root, {
-      // no missionPath; use the REAL prompt builder for true substitution.
+      // no missionPath; use the REAL prompt builder.
       buildCompactReviewPromptFn: undefined,
       startAgentFn: async (step, agentOpts) => {
         if (step === 'review' && typeof agentOpts.prompt === 'function') {
@@ -214,9 +220,10 @@ test('startReviewLoop uses the slug-derived mission path when --mission is absen
 
     assert.ok(capturedPrompt, 'reviewer prompt should have been built');
     assert.ok(
-      capturedPrompt.includes(missionPathForSlug(root, 'task-1272')),
+      capturedPrompt.includes('npm run derived-gate'),
       'absent --mission must resolve the slug-derived standard mission path'
     );
+    assert.ok(!capturedPrompt.includes(derived), 'the resolved path stays out of the prompt');
   });
 });
 
@@ -255,7 +262,10 @@ test('standalone loop survives REQUEST_CHANGES -> CHANGES_MADE -> APPROVED acros
       }),
       consumeImplementerArtifactsFn: async () => ({
         consumed: true, ok: true, disposition: 'CHANGES_MADE'
-      })
+      }),
+      // The implementer actually commits a revised tree between rounds, so the
+      // criterion-8 no-new-revision guard does not stop the round-trip.
+      hasNewCommittedChangeFn: () => true
     });
 
 // @ts-expect-error -- TASK-2328: partial test double after ESM seam migration

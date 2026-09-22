@@ -4,7 +4,8 @@ import { ExecuteMissionService } from '../application/execute-mission-service.js
 import { IntegrateCommandUseCase } from '../application/integrate-command-use-case.js';
 import { StatsBackfillService } from '../application/stats-backfill-service.js';
 import { MissionCheckpointService } from '../application/mission-checkpoint-service.js';
-import { MissionExecutionContextService } from '../application/mission-execution-context-service.js';
+import { MissionBriefService } from '../application/mission-brief-service.js';
+import { MissionAssignmentService } from '../application/mission-assignment-service.js';
 import { MissionHandoffService } from '../application/mission-handoff-service.js';
 import { MissionIntakeService } from '../application/mission-intake-service.js';
 import { MissionLifecycleService } from '../application/mission-lifecycle-service.js';
@@ -19,6 +20,7 @@ import { SqliteSessionMarkerAdapter } from '../adapters/sqlite/session-marker-ad
 import { SqliteSessionMarkerRepository } from '../adapters/sqlite/session-marker-repository.js';
 import type { SessionMarkerRepository } from '../application/ports/mission-store.js';
 import { repositoryId, type RepositoryId } from '../domain/repository.js';
+import { latestEvidencedCheckpoint } from '../domain/checkpoint.js';
 import { missionId } from '../domain/mission.js';
 import { resolveCanonicalRepositoryId } from '../adapters/git/repository-identity.js';
 import { createDefaultExecuteMissionRuntime, createExecuteMissionPorts } from '../adapters/mission/execute-mission-adapters.js';
@@ -95,30 +97,34 @@ export interface MissionApplicationServices {
   readonly lifecycle: MissionLifecycleService;
   readonly integration: MissionIntegrationService;
   readonly checkpoints: MissionCheckpointService;
-  readonly executionContext: MissionExecutionContextService;
+  readonly brief: MissionBriefService;
+  readonly assignment: MissionAssignmentService;
   readonly handoff: MissionHandoffService;
 }
 
-function resolveMissionExecutionContext(mission: MissionApplicationServices, slug: string) {
+function resolveMissionLaunchContext(mission: MissionApplicationServices, slug: string) {
+  const request = (operationId: string, capability: 'mission:context' | 'checkpoint:record') => ({
+    operationId, missionId: missionId(slug), capabilities: new Set([capability] as const),
+  });
   return Promise.all([
-    mission.executionContext.read({
-      operationId: 'execute-launch-context',
-      missionId: missionId(slug),
-      capabilities: new Set(['mission:context'] as const),
-    }),
-    mission.checkpoints.read({
-      operationId: 'execute-launch-checkpoints',
-      missionId: missionId(slug),
-      capabilities: new Set(['checkpoint:record'] as const),
-    }),
-  ]).then(([contextOutcome, checkpointsOutcome]) => {
-    const context = contextOutcome.status === 'completed' && contextOutcome.value?.context
-      ? contextOutcome.value.context
-      : null;
-    const latest = checkpointsOutcome.status === 'completed' && checkpointsOutcome.value
-      ? checkpointsOutcome.value.checkpoints[checkpointsOutcome.value.checkpoints.length - 1] ?? null
-      : null;
-    return context ? { context, latestCheckpoint: latest } : null;
+    mission.brief.read(request('execute-launch-brief', 'mission:context')),
+    mission.brief.readGates(request('execute-launch-gates', 'mission:context')),
+    mission.checkpoints.read(request('execute-launch-checkpoints', 'checkpoint:record')),
+    mission.brief.readSuccessCriteria(request('execute-launch-criteria', 'mission:context')),
+  ]).then(([briefOutcome, gatesOutcome, checkpointsOutcome, criteriaOutcome]) => {
+    // No recorded brief means no recorded launch context: the caller falls back
+    // to the file-backed checkpoint context rather than launching on a partial
+    // one assembled from whichever reads happened to succeed.
+    const brief = briefOutcome.status === 'completed' ? briefOutcome.value?.brief ?? null : null;
+    if (!brief) { return null; }
+    const checkpoints = checkpointsOutcome.status === 'completed' ? checkpointsOutcome.value?.checkpoints ?? [] : [];
+    return {
+      brief,
+      successCriteria: criteriaOutcome.status === 'completed' ? criteriaOutcome.value?.successCriteria ?? [] : [],
+      checkpoints,
+      declaredGates: gatesOutcome.status === 'completed' ? gatesOutcome.value?.declaredGates ?? [] : [],
+      latestCheckpoint: latestEvidencedCheckpoint(checkpoints),
+    };
   });
 }
 
@@ -249,6 +255,17 @@ export async function createProductionApplicationServices(
       defaultExecuteRuntime.runHandoffAndReview(slug, worktree, agent, {
         ...runtimeOptions,
         performHandoff: handoffWithMissionServices!,
+        // A mission drafted through the typed verbs declares its checkpoint plan
+        // and evidence as Mission state; one without a recorded brief keeps its
+        // mission document and CP-N.md files (null here selects that path).
+        loadRecordedCheckpointsFn: async (checkpointSlug: string) => {
+          const loaded = await mission.store.load(missionId(checkpointSlug));
+          if (loaded.kind !== 'found' || !loaded.mission.brief) { return null; }
+          return {
+            planned: loaded.mission.checkpoints.map(({ name }) => name),
+            recorded: loaded.mission.checkpoints.filter(({ goalCheck }) => goalCheck.length > 0).map(({ name }) => name),
+          };
+        },
         startReviewLoop: (reviewSlug: string, loopOptions: Record<string, unknown>) => startReviewLoop(reviewSlug, {
           ...loopOptions,
           // Every Mission-authority injection the loop needs, including the
@@ -257,12 +274,12 @@ export async function createProductionApplicationServices(
           // mission as having no Review.
           performHandoffFn: handoffWithMissionServices!,
           ...reviewLoopBindings(mission.store, mission.lifecycle),
-          // Persisted execution context is the authoritative launch context;
-          // the default runtime's null resolver is the file-backed fallback.
-          // Route through the application-owned MissionExecutionContextService
-          // (not a raw store read) and reuse Mission.checkpoints so the launch
-          // read carries the latest checkpoint alongside the context.
-          resolveExecutionContext: (slug: string) => resolveMissionExecutionContext(mission, slug),
+          // The recorded brief is the authoritative launch context; the default
+          // runtime's null resolver is the file-backed fallback. Route through
+          // the application-owned MissionBriefService (not a raw store read)
+          // and reuse Mission.checkpoints so the launch read carries the latest
+          // checkpoint alongside the brief.
+          resolveExecutionContext: (slug: string) => resolveMissionLaunchContext(mission, slug),
         } as any),
       }),
   } : defaultExecuteRuntime;
@@ -375,14 +392,16 @@ export async function createMissionApplicationServices(
   });
 
   const store = new SqliteMissionStore(db);
+  const lifecycle = new MissionLifecycleService(store);
   return {
     store,
     repositoryId: repoId,
     intake: new MissionIntakeService(store),
-    lifecycle: new MissionLifecycleService(store),
+    lifecycle,
     integration: new MissionIntegrationService(store),
     checkpoints: new MissionCheckpointService(store),
-    executionContext: new MissionExecutionContextService(store),
+    brief: new MissionBriefService(store),
+    assignment: new MissionAssignmentService(store),
     handoff: new MissionHandoffService(store, store),
   };
 }

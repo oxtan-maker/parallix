@@ -231,8 +231,8 @@ export class ExecuteMissionService {
   /**
    * Route activation through the checked Mission boundary.
    *
-   * The failure message is unchanged so the command layer's fail-closed
-   * behavior and its existing operator text are preserved.
+   * The failure keeps its existing operator prefix and carries the Mission
+   * authority's reason (for example, which contract parts are missing).
    */
   private async synchronizeLifecycle(slug: string, agent: string): Promise<void> {
     const outcome = await new MissionLifecycleService(this._ports.missionTransitions).activate({
@@ -243,7 +243,7 @@ export class ExecuteMissionService {
       occurredAt: new Date().toISOString(),
     });
     if (outcome.status !== 'completed') {
-      throw new Error('legacy task lifecycle synchronization failed');
+      throw new Error(`legacy task lifecycle synchronization failed: ${outcome.error?.message ?? outcome.status}`);
     }
   }
 

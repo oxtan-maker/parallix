@@ -28,7 +28,10 @@ import {
   type StageLaunchWindow,
 } from '../../domain/review.js';
 import { missionVersion, type MissionVersion } from '../../application/domain-ports.js';
-import { missionExecutionContext, type MissionExecutionContext } from '../../domain/mission-execution-context.js';
+import { missionBrief, type MissionBrief } from '../../domain/mission-brief.js';
+import { declaredGates } from '../../domain/mission-gates.js';
+import { successCriteria } from '../../domain/mission-success-criteria.js';
+import type { NelBucketLabel } from '../../domain/net-engineering-lines.js';
 
 /** Typed records returned by the relational Mission schema. */
 export interface MissionRecord {
@@ -37,6 +40,8 @@ export interface MissionRecord {
   readonly title: string;
   readonly status: string;
   readonly raw_status: string | null;
+  readonly reproduction_test?: string | null;
+  readonly predicted_nel_bucket?: string | null;
   readonly assignee: string | null;
   readonly net_engineering_lines: number | null;
   readonly closed_at: string | null;
@@ -48,8 +53,10 @@ export interface MissionLabelRecord {
   readonly position: number;
   readonly label: string;
 }
-export interface MissionExecutionContextRecord { readonly mission_id: string; readonly goal: string; readonly why_text: string; readonly scope_text: string; readonly predicted_nel_bucket: string; readonly confidence: string; readonly selection_note: string; }
-export interface MissionExecutionContextItemRecord { readonly mission_id: string; readonly kind: string; readonly position: number; readonly value: string; readonly outcome: string | null; }
+export interface MissionBriefRecord { readonly mission_id: string; readonly goal: string; readonly why_text: string; readonly scope_text: string | null; }
+export interface MissionBriefOutOfScopeRecord { readonly mission_id: string; readonly position: number; readonly entry: string; }
+export interface MissionDeclaredGateRecord { readonly mission_id: string; readonly position: number; readonly command: string; }
+export interface MissionSuccessCriterionRecord { readonly mission_id: string; readonly position: number; readonly criterion: string; }
 
 export interface MissionCheckpointRecord {
   readonly mission_id: string;
@@ -160,8 +167,10 @@ export interface MissionAggregateRecords {
   readonly mission: MissionRecord;
   readonly externalTaskRef?: MissionExternalTaskRefRecord | null;
   readonly labels: readonly MissionLabelRecord[];
-  readonly executionContext: MissionExecutionContextRecord | null;
-  readonly executionContextItems: readonly MissionExecutionContextItemRecord[];
+  readonly brief: MissionBriefRecord | null;
+  readonly briefOutOfScope: readonly MissionBriefOutOfScopeRecord[];
+  readonly declaredGates: readonly MissionDeclaredGateRecord[];
+  readonly successCriteria?: readonly MissionSuccessCriterionRecord[];
   readonly checkpoints: readonly MissionCheckpointRecord[];
   readonly goalChecks: readonly MissionGoalCheckRecord[];
   readonly review: MissionReviewRecord | null;
@@ -230,16 +239,27 @@ function checkpointsFrom(records: MissionAggregateRecords): readonly CheckpointD
   });
 }
 
-function executionContextFrom(records: MissionAggregateRecords): MissionExecutionContext | null {
-  const context = records.executionContext;
-  if (!context) {return null;}
-  const values = (kind: string) => records.executionContextItems.filter((item) => item.kind === kind).map((item) => item.value);
-  return missionExecutionContext({
-    goal: context.goal, why: context.why_text, scope: context.scope_text, constraints: values('constraint'),
-    predictedNelBucket: context.predicted_nel_bucket as MissionExecutionContext['predictedNelBucket'], confidence: context.confidence as MissionExecutionContext['confidence'],
-    selectionNote: context.selection_note, mainDrivers: values('driver'), declaredGates: values('gate'),
-    dependencies: records.executionContextItems.filter((item) => item.kind === 'dependency').map((item) => ({ reference: item.value, outcome: item.outcome })),
+function briefFrom(records: MissionAggregateRecords): MissionBrief | null {
+  const brief = records.brief;
+  if (!brief) {return null;}
+  return missionBrief({
+    goal: brief.goal,
+    why: brief.why_text,
+    scope: brief.scope_text,
+    outOfScope: records.briefOutOfScope.map(({ entry }) => entry),
   });
+}
+
+function declaredGatesFrom(records: MissionAggregateRecords): readonly string[] {
+  return declaredGates(records.declaredGates.map(({ command }) => command));
+}
+
+function predictedNelBucketFrom(value: string | null | undefined): NelBucketLabel | null {
+  if (value === null || value === undefined) { return null; }
+  if (value !== 'Small' && value !== 'Medium' && value !== 'Large') {
+    throw new Error(`Persisted predicted NEL bucket is invalid: ${value}`);
+  }
+  return value;
 }
 
 function findingsFor(
@@ -538,7 +558,11 @@ export function hydrateMission(records: MissionAggregateRecords): HydratedMissio
     labels: missionLabels(records.labels.map(({ label }) => label)),
     assignee: row.assignee === null ? null : agentFamily(row.assignee),
     checkpoints: checkpointsFrom(records),
-    executionContext: executionContextFrom(records),
+    brief: briefFrom(records),
+    declaredGates: declaredGatesFrom(records),
+    successCriteria: successCriteria((records.successCriteria ?? []).map(({ criterion }) => criterion)),
+    predictedNelBucket: predictedNelBucketFrom(row.predicted_nel_bucket),
+    reproductionTest: row.reproduction_test ?? null,
     review: reviewFrom(records),
     netEngineeringLines: row.net_engineering_lines,
     rawStatus: row.raw_status ?? undefined,

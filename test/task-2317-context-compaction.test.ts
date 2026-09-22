@@ -33,7 +33,7 @@ test('task-2317: no-declared-gates implementation-to-act-on-review prompt compac
   });
 
   assert.match(prompt, /Before acting on findings, compact the implementation context/i);
-  assert.match(prompt, /applies even when `MISSION\.md` declares no gates/i);
+  assert.match(prompt, /applies even when the mission declares no gates/i);
   assert.match(prompt, /current review round and disposition; unresolved findings and implementer resolutions; and the exact revision under review/i);
 });
 
@@ -49,7 +49,7 @@ test('task-2317: reviewer round-2 prompt compacts after rebase and reloads the r
 
   assert.match(prompt, /When `2` is 2 or later, before beginning this review round compact/i);
   assert.match(prompt, /exact post-rebase revision and review baseline shown by `git diff post-rebase-baseline-sha\.\.HEAD`/i);
-  assert.match(prompt, /independent of `MISSION\.md` gates/i);
+  assert.match(prompt, /independent of the mission.s declared gates/i);
 });
 
 test('task-2317: repairable gate-error bounce compacts before repair and retains diagnostic plus retry state', async () => {

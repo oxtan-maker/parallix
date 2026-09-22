@@ -761,6 +761,12 @@ test('startReviewLoop full loop success and exit cases', async () => {
     buildCompactActOnReviewPromptFn: () => 'act-on-review prompt',
     consumeReviewerArtifactsFn: async () => ({ consumed: false }),
     consumeImplementerArtifactsFn: async () => ({ consumed: false }),
+    // CHANGES_MADE drives the re-review path; the implementer addressed the
+    // finding, so a new revision exists. Provide it explicitly (the hermetic
+    // gitFn returns a constant HEAD, which would otherwise read as no change)
+    // and mock the remote push the real loop performs once a revision exists.
+    hasNewCommittedChangeFn: () => true,
+    pushReviewRefFn: () => Promise.resolve({ status: 0 }),
     // The loop test exercises state transitions, not telemetry collection.
     // Keep it independent of git/process inspection performed by the real
     // stage-statistics collector.
@@ -809,6 +815,55 @@ test('startReviewLoop full loop success and exit cases', async () => {
   });
   assert.ok(logs.some(l => l.includes('implementer reported BLOCKED')), 'Should stop on blocked');
   assert.equal(preReviewGateCalls, 12, 'Should run the injected pre-review gate once for each review round, including re-review rounds');
+});
+
+test('startReviewLoop stops on CHANGES_MADE with an unchanged HEAD instead of re-reviewing the original revision', async () => {
+  const logs = [];
+  const stops = [];
+
+  await startReviewLoop(TEST_SLUG, {
+    ...hermeticLoopCollaborators,
+    eligibleAgentsForStepFn: () => ['codex', 'claude', 'gemini', 'custom'],
+    resolveTaskFileFn: () => ({ ok: true, taskFile: '/tmp/task.md' }),
+    implementer: 'claude',
+    reviewer: 'codex',
+    maxAttempts: 5,
+    dryRun: false,
+    log: (m) => logs.push(m),
+    error: () => {},
+    exit: () => {},
+    workflowLauncherStatusFn: () => ({ supported: true }),
+    isForgejoReviewEnabledFn: () => true,
+    forgejoAvailableFn: async () => true,
+    getPrStatusFn: () => ({ exists: true, state: 'open', number: 41 }),
+    maybeUpdateGraphifyBeforeReviewFn: () => {},
+    enforceTaskAssigneeFn: () => true,
+    resolveForgejoUserFn: () => 'gemini',
+    readTokenFn: () => 'token',
+    readReviewStateFn: () => null,
+    writeReviewStateFn: () => {},
+    transitionTaskFn: async () => true,
+    startAgentFn: async () => ({ agent: null }),
+    rebaseBeforeReviewRoundFn: async () => ({ ok: true, sharedFileConflicts: false }),
+    pollForReviewFn: async () => 'REQUEST_CHANGES',
+    pollForDispositionFn: async () => 'CHANGES_MADE',
+    applyAgentFallbackFn: (args) => args.original,
+    buildCompactReviewPromptFn: () => 'review prompt',
+    buildCompactActOnReviewPromptFn: () => 'act-on-review prompt',
+    consumeReviewerArtifactsFn: async () => ({ consumed: false }),
+    consumeImplementerArtifactsFn: async () => ({ consumed: false }),
+    runPreReviewGateFn: passingPreReviewGate,
+    onAutonomousStop: async (reason) => stops.push(reason),
+    // The implementer reported CHANGES_MADE but the branch head never moved:
+    // the finding was not actually addressed.
+    hasNewCommittedChangeFn: () => false,
+  });
+
+  assert.ok(logs.some(l => l.includes('branch HEAD is unchanged')), 'logs the no-new-revision stop');
+  assert.ok(logs.some(l => l.includes('handing off to human review')), 'hands off to human review');
+  assert.ok(!logs.some(l => l.includes('Continuing to reviewer re-review')), 'does not re-review the unchanged revision');
+  assert.ok(!logs.some(l => l.includes('reached 5 attempts')), 'stops at round 1 rather than bouncing');
+  assert.deepEqual(stops, ['implementer reported CHANGES_MADE with no new revision']);
 });
 
 test('review helper functions and error paths', async () => {
@@ -1038,6 +1093,11 @@ test('startReviewLoop rebases immediately before each reviewer round', async () 
     exit: () => {},
     consumeReviewerArtifactsFn: async () => ({ consumed: false }),
     consumeImplementerArtifactsFn: async () => ({ consumed: false }),
+    // The implementer addressed the finding, so round 2 evaluates the revised
+    // revision (not the unchanged original). Mock the remote push the real
+    // loop would perform once a new revision exists.
+    hasNewCommittedChangeFn: () => true,
+    pushReviewRefFn: () => Promise.resolve({ status: 0 }),
     runPreReviewGateFn: passingPreReviewGate
   });
 
@@ -3754,6 +3814,11 @@ test('startReviewLoop persists CHANGES_MADE disposition before continuing', asyn
     buildCompactReviewPromptFn: () => 'review prompt',
     buildCompactActOnReviewPromptFn: () => 'act-on-review prompt',
     eligibleAgentsForStepFn: () => ['codex', 'claude', 'gemini', 'custom'],
+    // The implementer addressed the finding, so the loop persists the
+    // CHANGES_MADE disposition and continues to round 2. Mock the remote push
+    // the real loop performs once a new revision exists.
+    hasNewCommittedChangeFn: () => true,
+    pushReviewRefFn: () => Promise.resolve({ status: 0 }),
     runPreReviewGateFn: passingPreReviewGate,
   });
 
@@ -3866,7 +3931,7 @@ test('consumeReviewerArtifacts deletes artifacts only after successful comment a
     createEventFn: () => ({ ok: true, path: '/tmp/fake-event.md' }),
   });
 
-  assert.deepEqual(result, { consumed: true, ok: true, reviewState: 'APPROVED', findingSummaries: [] });
+  assert.deepEqual(result, { consumed: true, ok: true, reviewState: 'APPROVED', reviewFindings: [] });
   assert.deepEqual(deleted, [
     '/tmp/task-089-review-findings.md',
     '/tmp/task-089-review-outcome.md',
@@ -3928,7 +3993,7 @@ test('consumeReviewerArtifacts proves persist-before-mirror ordering', async () 
     createEventFn: (slug, eventType, params, options) => { calls.push('createEvent'); return { ok: true, path: `/tmp/fake-${eventType}.md` }; },
   });
 
-  assert.deepEqual(result, { consumed: true, ok: true, reviewState: 'APPROVED', findingSummaries: [] });
+  assert.deepEqual(result, { consumed: true, ok: true, reviewState: 'APPROVED', reviewFindings: [] });
   // Verify createEvent was called before any Forgejo posting
   const createEventIndices = calls.map((call, idx) => call === 'createEvent' ? idx : -1).filter(i => i !== -1);
   const forgejoIndices = calls.map((call, idx) => (call === 'postComment' || call === 'postReview') ? idx : -1).filter(i => i !== -1);

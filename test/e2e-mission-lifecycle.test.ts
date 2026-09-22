@@ -71,6 +71,60 @@ function lifecycleStubSource() {
 const fs = require('node:fs');
 const path = require('node:path');
 
+// TASK-2521.03: activation refuses a mission whose contract draft never
+// finished, so a drafting agent records it through \`px\` — the same commands the
+// draft prompt names. The harness passes the CLI entry in the environment
+// because this stub runs as a bare executable on the fixture PATH.
+function px(args) {
+  const entry = process.env.PARALLIX_E2E_PX_ENTRY;
+  const loader = process.env.PARALLIX_E2E_PX_LOADER;
+  if (!entry || !loader) { return null; }
+  const run = require('node:child_process').spawnSync(
+    process.execPath, ['--import', loader, entry].concat(args),
+    { cwd: process.cwd(), encoding: 'utf8' }
+  );
+  return run.status === 0 ? (run.stdout || '') : null;
+}
+
+function missionVersion(missionSlug) {
+  const out = px(['status', missionSlug, '--json']);
+  if (!out) { return null; }
+  try { return String(JSON.parse(out).version); } catch (_) { return null; }
+}
+
+function recordMissionContract(missionSlug) {
+  let v = missionVersion(missionSlug);
+  if (v === null) { return; }
+  px(['goal', 'set', '--slug', missionSlug,
+    '--goal', 'Exercise the real lifecycle with a deterministic stub agent',
+    '--why', 'Protect the workflow surface from regression drift',
+    '--expected-version', v]);
+  v = missionVersion(missionSlug);
+  if (v !== null) {
+    px(['scope', 'set', '--slug', missionSlug,
+      '--scope', 'Run draft, active, review and integrate through the real CLI',
+      '--out-of-scope', 'Real model execution',
+      '--expected-version', v]);
+  }
+  v = missionVersion(missionSlug);
+  if (v !== null) {
+    px(['gate', 'add', '--slug', missionSlug, '--command', 'node -e ""',
+      '--expected-version', v]);
+  }
+  v = missionVersion(missionSlug);
+  if (v !== null) {
+    px(['criterion', 'add', '--slug', missionSlug, '--text', 'The lifecycle reaches integration through the real CLI',
+      '--expected-version', v]);
+  }
+  for (const [name, text] of [['CP-1', 'Execute the stub deliverable'], ['CP-2', 'Ready the mission for review']]) {
+    v = missionVersion(missionSlug);
+    if (v !== null) { px(['checkpoint', 'plan', '--slug', missionSlug, '--name', name, '--text', text, '--expected-version', v]); }
+  }
+  v = missionVersion(missionSlug);
+  if (v !== null) {
+    px(['nel', 'set', '--slug', missionSlug, '--predicted', 'Small', '--expected-version', v]);
+  }
+}
 function writeFile(filePath, content) {
   fs.mkdirSync(path.dirname(filePath), { recursive: true });
   fs.writeFileSync(filePath, content, 'utf8');
@@ -98,18 +152,28 @@ function missionTitleFromTask(taskPath, slug) {
 }
 
 const prompt = process.argv[process.argv.length - 1] || '';
-const slug = match(prompt, /^Slug:\\s*((?:task-[a-z0-9-]+|parallix-adhoc-\\d+))/im)
+const slug = match(prompt, /^(?:Mission s|S)lug:\\s*((?:task-[a-z0-9-]+|parallix-adhoc-\\d+))/im)
+  || match(prompt, /^Mission:\\s*((?:task-[a-z0-9-]+|parallix-adhoc-\\d+))/im)
   || match(prompt, /^Mode: act-on-review\\. Branch:\\s*mission\\/((?:task-[a-z0-9-]+|parallix-adhoc-\\d+))/im)
   || match(prompt, /^Mode: review\\. .*?Mission:\\s+.*?((?:task-[a-z0-9-]+|parallix-adhoc-\\d+))/im)
   || 'task-unknown';
-const missionPath = match(prompt, /^Mission path:\\s*(.+)$/m) || match(prompt, /^Mission:\\s*(.+)$/m);
-const missionDir = match(prompt, /^Mission dir:\\s*(.+)$/m) || (missionPath ? path.dirname(missionPath) : null);
+// TASK-2521.03: the draft prompt no longer hands the agent a mission-document
+// path, because a drafting agent records the mission with \`px\` rather than
+// writing a file. This stub still writes the legacy scaffold — the harness keeps
+// reading \`## Gates\` from it until the wave retires that fallback — so it now
+// derives the location from the repository's configured mission baseDir, the
+// same way the real workflow does. Missions 5-7 remove the file, and this stub
+// with it.
+const missionBaseDir = (() => {
+  try {
+    const cfg = JSON.parse(read(path.join(process.cwd(), 'workflow.config.json')) || '{}');
+    return (cfg.adapters && cfg.adapters.missions && cfg.adapters.missions.baseDir) || 'missions';
+  } catch (_) { return 'missions'; }
+})();
+const missionDir = match(prompt, /^Mission dir:\\s*(.+)$/m)
+  || path.join(process.cwd(), missionBaseDir, slug);
+const missionPath = path.join(missionDir, 'MISSION.md');
 const taskPath = match(prompt, /^Backlog task:\\s*(.+)$/m);
-const reviewFindingsPath = match(prompt, /\\\`([^\\\`\\n]+-review-findings\\.md)\\\`/);
-const reviewOutcomePath = match(prompt, /\\\`([^\\\`\\n]+-review-outcome\\.md)\\\`/);
-const reviewVerdictPath = match(prompt, /\\\`([^\\\`\\n]+-review-verdict\\.txt)\\\`/);
-const resolutionPath = match(prompt, /\\\`([^\\\`\\n]+-round-resolution\\.md)\\\`/);
-const dispositionPath = match(prompt, /\\\`([^\\\`\\n]+-review-disposition\\.txt)\\\`/);
 
 if (process.argv.includes('--help')) {
   process.stdout.write('stub opencode help\\n');
@@ -167,6 +231,7 @@ if (/^Mode: draft\\./m.test(prompt)) {
     ''
   ].join('\\n');
   writeFile(missionPath, missionBody);
+  recordMissionContract(slug);
   writeFile(path.join(missionDir, 'milestone-1.md'), '# Milestone 1\\n\\nDraft scaffold complete.\\n');
 }
 
@@ -195,24 +260,34 @@ if (/^Mode: execute after lock\\./m.test(prompt)) {
     '|-----------|----------|--------|',
     '| Execute artifacts committed | missions/' + slug + '/CP-1.md:1 | PASS |',
     '| Final checkpoint present | missions/' + slug + '/CP-2.md:1 | PASS |',
+    '| The lifecycle reaches integration through the real CLI | missions/' + slug + '/CP-2.md:1 | PASS |',
     '',
     'Next action: Approve the mission in review.',
     ''
   ].join('\\n');
   writeFile(path.join(missionDir, 'CP-1.md'), cp1);
   writeFile(path.join(missionDir, 'CP-2.md'), cp2);
+  // The contract was recorded through the typed verbs, so handoff verifies
+  // recorded evidence; the documents above only back its file references.
+  for (const [name, text, next] of [['CP-1', cp1, 'Run review.'], ['CP-2', cp2, 'Approve the mission in review.']]) {
+    const rows = text.split('\\n').filter((line) => line.startsWith('| ') && !line.startsWith('| Criterion '));
+    const args = ['checkpoint', 'record', '--slug', slug, '--name', name, '--next', next];
+    for (const row of rows) {
+      const [criterion, evidence] = row.split('|').slice(1, 3).map((cell) => cell.trim());
+      args.push('--criterion', criterion, '--evidence', evidence);
+    }
+    const version = px(['status', slug, '--json']);
+    if (version) { px(args.concat(['--expected-version', String(JSON.parse(version).version)])); }
+  }
   writeFile(path.join(process.cwd(), 'deliverable.txt'), 'stub execute output\\n');
 }
 
 if (/^Mode: review\\./m.test(prompt)) {
-  writeFile(reviewFindingsPath, '# Findings\\n\\nNo blocking findings. The lifecycle artifacts are present and consistent.\\n');
-  writeFile(reviewOutcomePath, 'Verdict: approve\\n\\nLifecycle approved for integration.\\n');
-  writeFile(reviewVerdictPath, 'approve\\n');
-}
-
-if (/^Mode: act-on-review\\./m.test(prompt)) {
-  writeFile(resolutionPath, 'fixed_items: []\\npushed_back_items: []\\nparked_items: []\\nblocked_reason: ""\\n');
-  writeFile(dispositionPath, 'CHANGES_MADE\\n');
+  const v = missionVersion(slug);
+  if (v !== null) {
+    px(['verdict', 'approve', '--slug', slug, '--actor', 'custom', '--expected-version', v,
+      '--comment', 'No blocking findings. The lifecycle artifacts are present and consistent.']);
+  }
 }
 
 process.stdout.write('{"sessionID":"ses_stubbed_opencode"}\\n');
@@ -354,6 +429,12 @@ function workflowEnv(binDir, stateHome, repoRoot) {
     FORGEJO_USER: 'custom',
     PRIMARY_WORKTREE: repoRoot,
     PARALLIX_HOME: stateHome,
+    // The agent stub records the mission contract with `px`, the same commands
+    // the draft prompt names, because activation now refuses an incomplete one.
+    // It runs as a bare executable on the fixture PATH, so it cannot resolve
+    // the CLI entry itself.
+    PARALLIX_E2E_PX_ENTRY: CLI_ENTRY,
+    PARALLIX_E2E_PX_LOADER: TSX_LOADER,
     PATH: binDir
   };
 }
@@ -522,13 +603,6 @@ function reviewState(rootDir, slug, env) {
   };
 }
 
-function reviewEventFiles(rootDir, slug) {
-  const eventDir = path.join(missionDir(rootDir, slug), 'review-events');
-  return fs.existsSync(eventDir)
-    ? fs.readdirSync(eventDir).sort()
-    : [];
-}
-
 function checkpointFiles(rootDir, slug) {
   return fs.readdirSync(missionDir(rootDir, slug))
     .filter(name => /^CP-\d+\.md$/.test(name))
@@ -632,19 +706,12 @@ function runScenario({ launchFromFeatureBranch = false, integrate = true, postIn
         phase: state.phase,
         disposition: state.disposition
       },
-      reviewEvents: reviewEventFiles(worktree, slug),
       taskIdCount: countTaskIds(worktree, summary.draft.missionId)
     };
 
     if (!integrate) {
       return summary;
     }
-
-    // The review loop deliberately leaves its event-store files for the next
-    // checkpoint boundary. Final integration gates require the exact tree they
-    // verify to be committed, so model that boundary before invoking integrate.
-    runGit(worktree, ['add', '--', path.relative(worktree, path.join(missionDir(worktree, slug), 'review-events'))]);
-    runGit(worktree, ['commit', '-m', `test(${slug}): finalize review events`]);
 
     if (failIntegrationGate) {
       // px integrate reads repository gates from the mission worktree, so adding
@@ -900,11 +967,12 @@ function runAdhocScenario() {
 
     // F1 (task-2468 round 2): `px integrate` must complete for a DB-owned adhoc
     // identity whose mirror was deleted before active. This drives the full
-    // lifecycle end to end with no Backlog task file. The execute agent's fallback
-    // commit and review artifacts leave the worktree dirty; commit them so the
-    // integration checkout is finalized, exactly as the Backlog scenarios do.
-    runGit(worktree, ['add', '-A']);
-    runGit(worktree, ['commit', '-m', 'adhoc: capture execute artifacts before integrate']);
+    // lifecycle end to end with no Backlog task file. The execute harness normally
+    // commits its output; preserve the boundary if a fixture leaves work behind.
+    if (runGit(worktree, ['status', '--porcelain'])) {
+      runGit(worktree, ['add', '-A']);
+      runGit(worktree, ['commit', '-m', 'adhoc: capture execute artifacts before integrate']);
+    }
     runWorkflow(worktree, env, ['integrate', slug]);
 
     return { slug, worktree, reviewPhase: state.phase };
@@ -947,8 +1015,10 @@ function runMixedScenario() {
     assert.equal(backlogState.phase, 'approved', 'Backlog task should reach an approved review');
 
     // Integrate the Backlog task: squash into main, mark done, delete worktree.
-    runGit(backlogWorktree, ['add', '-A']);
-    runGit(backlogWorktree, ['commit', '-m', 'task-2002: capture execute artifacts']);
+    if (runGit(backlogWorktree, ['status', '--porcelain'])) {
+      runGit(backlogWorktree, ['add', '-A']);
+      runGit(backlogWorktree, ['commit', '-m', 'task-2002: capture execute artifacts']);
+    }
     runWorkflow(backlogWorktree, env, ['integrate', 'task-2002']);
     const rootTask = taskFileIn(repo.repoRoot, 'task-2002');
     assert.ok(rootTask, 'integrate should leave the Backlog task in the base repo');
@@ -976,12 +1046,11 @@ function runMixedScenario() {
 
     // Complete the adhoc half of the mixed scenario: integrate the DB-owned
     // adhoc identity through the real CLI, proving it completes the full
-    // lifecycle end to end without a Backlog task file. The execute agent's
-    // fallback commit and review artifacts leave the worktree dirty; commit
-    // them so the integration checkout is finalized, exactly as the Backlog
-    // scenarios do. Integrate squashes into main and cleans up the worktree.
-    runGit(adhocWorktree, ['add', '-A']);
-    runGit(adhocWorktree, ['commit', '-m', 'adhoc: capture execute artifacts before integrate']);
+    // lifecycle end to end without a Backlog task file.
+    if (runGit(adhocWorktree, ['status', '--porcelain'])) {
+      runGit(adhocWorktree, ['add', '-A']);
+      runGit(adhocWorktree, ['commit', '-m', 'adhoc: capture execute artifacts before integrate']);
+    }
     runWorkflow(adhocWorktree, env, ['integrate', adhocSlug]);
     assert.ok(!fs.existsSync(adhocWorktree), 'integrate should clean up the adhoc worktree');
 
@@ -1107,8 +1176,6 @@ test('artifact-focused run produces mission, checkpoint, milestone, and review a
   assert.equal(summary.active.taskIdCount, 1, 'mission id should map to exactly one backlog task in the test repo');
   assert.deepEqual(summary.active.milestoneFiles, ['milestone-1.md']);
   assert.deepEqual(summary.active.checkpointFiles, ['CP-1.md', 'CP-2.md']);
-  assert.ok(summary.active.reviewEvents.some(name => name.includes('reviewer_findings')));
-  assert.ok(summary.active.reviewEvents.some(name => name.includes('reviewer_outcome')));
 });
 
 test('adhoc-only intake: a free-text draft reaches an approved review with a DB-owned adhoc identity', () => {

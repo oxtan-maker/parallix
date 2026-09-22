@@ -10,7 +10,7 @@
 import * as fmt from '../../application/presentation/cli-format.js';
 import { run } from '../git/git.js';
 import { enforceTaskAssignee } from '../backlog/backlog.js';
-import { ReviewState, writeReviewState, VALID_PHASES, persistReviewStateOrThrow } from './review-state.js';
+import { ReviewState, readReviewState, writeReviewState, VALID_PHASES, persistReviewStateOrThrow } from './review-state.js';
 import type { MissionStore } from '../../application/domain-ports.js';
 import { PreparedAgentSelection } from '../../application/services/agent-selection.js';
 import { recordAgentSelectionOutcome } from '../../application/services/agent-selection-telemetry.js';
@@ -102,7 +102,8 @@ export async function recordStageStatsSafe(
   const telemetry = resolveStageTelemetry({ worktree: worktree || '', result: result || {}, sinceMs: sinceMs || 0 });
   try {
     const actorFamily = kind === 'review' ? reviewer : implementer;
-    if (state && actorFamily && !(await markStageLaunchRecorded(state, {
+    const currentState = state && await readReviewState(slug, worktree || process.cwd(), missionStore);
+    if (state && actorFamily && !(await markStageLaunchRecorded(currentState || state, {
       stage,
       agentFamily: actorFamily,
       result,

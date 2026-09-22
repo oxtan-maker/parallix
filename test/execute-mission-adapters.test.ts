@@ -104,24 +104,25 @@ test('agent execution adapter overlays the operator blocklist onto the file agen
   assert.equal(plan.prompt, 'execute prompt');
 });
 
-test('agent execution adapter consumes the persisted execution context for launch', async () => {
-  const context = {
-    goal: 'Persist execution context', why: 'Restart-safe launch needs it.', scope: 'Mission aggregate only.',
-    constraints: ['No document blob'], predictedNelBucket: 'medium', confidence: 'high',
-    selectionNote: 'bounded state', mainDrivers: ['SQLite', 'restart'],
-    declaredGates: ['./scripts/verify-local.sh all'], dependencies: [{ reference: 'TASK-2521.01', outcome: 'available' }],
+test('agent execution adapter consumes the recorded brief and gates for launch', async () => {
+  const brief = {
+    goal: 'Persist the mission brief', why: 'Restart-safe launch needs it.',
+    scope: 'Mission aggregate only.', outOfScope: ['A document blob'],
   };
   const ports = createExecuteMissionPorts('/repo', { missionTransitionStore: transitionStore }, runtimeStub({
-    async resolveExecutionContext() { return { context, latestCheckpoint: null }; },
+    async resolveExecutionContext() {
+      return { brief, declaredGates: ['./scripts/verify-local.sh all'], latestCheckpoint: null };
+    },
     buildExecutePrompt(_slug: string, launchContext: string) { return `prompt:${launchContext}`; },
   }));
   const plan = await ports.agentExecution.prepare({ slug: 'task-1', worktree: '/worktree' });
-  assert.match(plan.prompt, /Persisted execution context/);
-  assert.match(plan.prompt, /Mission goal: Persist execution context/);
-  assert.match(plan.prompt, /Dependencies: TASK-2521.01 \(available\)/);
+  assert.match(plan.prompt, /Recorded mission state/);
+  assert.match(plan.prompt, /Mission goal: Persist the mission brief/);
+  assert.match(plan.prompt, /Out of scope: A document blob/);
+  assert.match(plan.prompt, /Declared gates: \.\/scripts\/verify-local\.sh all/);
 });
 
-test('agent execution adapter falls back to the checkpoint context when no persisted context exists', async () => {
+test('agent execution adapter falls back to the checkpoint context when no brief is recorded', async () => {
   const ports = createExecuteMissionPorts('/repo', { missionTransitionStore: transitionStore }, runtimeStub({
     async resolveExecutionContext() { return null; },
     buildExecutePrompt(_slug: string, launchContext: string) { return `prompt:${launchContext}`; },
@@ -130,17 +131,16 @@ test('agent execution adapter falls back to the checkpoint context when no persi
   assert.match(plan.prompt, /prompt:CP-5/);
 });
 
-test('agent execution adapter launches without MISSION.md or checkpoint files when context is persisted', async () => {
-  // buildCheckpointContext would normally read checkpoint files; the persisted
+test('agent execution adapter launches without MISSION.md or checkpoint files when a brief is recorded', async () => {
+  // buildCheckpointContext would normally read checkpoint files; the recorded
   // path must make launch succeed with no file round trip. resolveExecutionContext
   // resolves from the store, so no mission dir is required.
-  const context = {
-    goal: 'Resume without files', why: 'Persisted facts are authoritative.', scope: 'Aggregate only.',
-    constraints: [], predictedNelBucket: 'small', confidence: 'low',
-    selectionNote: 'no files', mainDrivers: ['store'], declaredGates: [], dependencies: [],
+  const brief = {
+    goal: 'Resume without files', why: 'Recorded facts are authoritative.',
+    scope: 'Aggregate only.', outOfScope: [],
   };
   const ports = createExecuteMissionPorts('/repo', { missionTransitionStore: transitionStore }, runtimeStub({
-    async resolveExecutionContext() { return { context, latestCheckpoint: null }; },
+    async resolveExecutionContext() { return { brief, declaredGates: [], latestCheckpoint: null }; },
     buildCheckpointContext() { throw new Error('must not read checkpoint files when context is persisted'); },
     buildExecutePrompt(_slug: string, launchContext: string) { return `prompt:${launchContext}`; },
   }));

@@ -293,7 +293,17 @@ async function seedInflightMission(fixtureRoot: string, stateRoot: string): Prom
   });
   assert.equal(intake.status, 'completed', 'the fixture mission must be materialized for the authoritative board guard');
   // Intake materializes every mission as `backlog`; refinement is what
-  // `px draft` records before a launch, and activation demands it.
+  // `px draft` records once the contract is recorded, and activation demands it.
+  const context = { missionId: id, capabilities: new Set(['mission:context'] as const) };
+  for (const write of [
+    () => services.brief.update({ ...context, operationId: `${SC3_SLUG}-brief`, patch: { goal: 'Shut down cleanly', why: 'Fixture', scope: 'Fixture scope' } }),
+    () => services.brief.setSuccessCriteria({ ...context, operationId: `${SC3_SLUG}-criteria`, criteria: ['The fixture shuts down'] }),
+    () => services.brief.setGates({ ...context, operationId: `${SC3_SLUG}-gates`, gates: ['npm test'] }),
+    () => services.brief.setPredictedNelBucket({ ...context, operationId: `${SC3_SLUG}-nel`, bucket: 'Small' }),
+    () => services.checkpoints.plan({ ...context, operationId: `${SC3_SLUG}-plan`, name: 'CP-1', description: 'Shut down' }),
+  ]) {
+    assert.equal((await write() as { status: string }).status, 'completed', 'the fixture contract must be recorded before refine');
+  }
   const refined = await services.lifecycle.transition({
     operationId: `${SC3_SLUG}-refine`,
     missionId: id,

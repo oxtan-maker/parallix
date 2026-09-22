@@ -71,6 +71,59 @@ function lifecycleStubSource() {
 const fs = require('node:fs');
 const path = require('node:path');
 
+// TASK-2521.03: activation refuses a mission whose contract draft never
+// finished, so a drafting agent records it through \`px\` — the same commands the
+// draft prompt names. The harness passes the CLI entry in the environment
+// because this stub runs as a bare executable on the fixture PATH.
+function px(args) {
+  const entry = process.env.PARALLIX_E2E_PX_ENTRY;
+  const loader = process.env.PARALLIX_E2E_PX_LOADER;
+  if (!entry || !loader) { return null; }
+  const run = require('node:child_process').spawnSync(
+    process.execPath, ['--import', loader, entry].concat(args),
+    { cwd: process.cwd(), encoding: 'utf8' }
+  );
+  return run.status === 0 ? (run.stdout || '') : null;
+}
+
+function recordMissionContract(missionSlug) {
+  const version = () => {
+    const out = px(['status', missionSlug, '--json']);
+    if (!out) { return null; }
+    try { return String(JSON.parse(out).version); } catch (_) { return null; }
+  };
+  let v = version();
+  if (v === null) { return; }
+  px(['goal', 'set', '--slug', missionSlug,
+    '--goal', 'Exercise the real lifecycle with a deterministic stub agent',
+    '--why', 'Protect the workflow surface from regression drift',
+    '--expected-version', v]);
+  v = version();
+  if (v !== null) {
+    px(['scope', 'set', '--slug', missionSlug,
+      '--scope', 'Run draft, active, review and integrate through the real CLI',
+      '--out-of-scope', 'Real model execution',
+      '--expected-version', v]);
+  }
+  v = version();
+  if (v !== null) {
+    px(['gate', 'add', '--slug', missionSlug, '--command', 'node -e ""',
+      '--expected-version', v]);
+  }
+  v = version();
+  if (v !== null) {
+    px(['criterion', 'add', '--slug', missionSlug, '--text', 'The lifecycle reaches integration through the real CLI',
+      '--expected-version', v]);
+  }
+  for (const [name, text] of [['CP-1', 'Execute the stub deliverable'], ['CP-2', 'Ready the mission for review']]) {
+    v = version();
+    if (v !== null) { px(['checkpoint', 'plan', '--slug', missionSlug, '--name', name, '--text', text, '--expected-version', v]); }
+  }
+  v = version();
+  if (v !== null) {
+    px(['nel', 'set', '--slug', missionSlug, '--predicted', 'Small', '--expected-version', v]);
+  }
+}
 function writeFile(filePath, content) {
   fs.mkdirSync(path.dirname(filePath), { recursive: true });
   fs.writeFileSync(filePath, content, 'utf8');
@@ -102,8 +155,22 @@ const slug = match(prompt, /(parallix-adhoc-[0-9]+|task-[a-z0-9-]+)/im)
   || match(prompt, /^Mode: act-on-review\\. Branch:\\s*mission\\/(task-[a-z0-9-]+)/im)
   || match(prompt, /^Mode: review\\. .*?Mission:\\s+.*?(task-[a-z0-9-]+)/im)
   || 'task-unknown';
-const missionPath = match(prompt, /^Mission path:\\s*(.+)$/m) || match(prompt, /^Mission:\\s*(.+)$/m);
-const missionDir = match(prompt, /^Mission dir:\\s*(.+)$/m) || (missionPath ? path.dirname(missionPath) : null);
+// TASK-2521.03: the draft prompt no longer hands the agent a mission-document
+// path, because a drafting agent records the mission with \`px\` rather than
+// writing a file. This stub still writes the legacy scaffold — the harness keeps
+// reading \`## Gates\` from it until the wave retires that fallback — so it now
+// derives the location from the repository's configured mission baseDir, the
+// same way the real workflow does. Missions 5-7 remove the file, and this stub
+// with it.
+const missionBaseDir = (() => {
+  try {
+    const cfg = JSON.parse(read(path.join(process.cwd(), 'workflow.config.json')) || '{}');
+    return (cfg.adapters && cfg.adapters.missions && cfg.adapters.missions.baseDir) || 'missions';
+  } catch (_) { return 'missions'; }
+})();
+const missionDir = match(prompt, /^Mission dir:\\s*(.+)$/m)
+  || path.join(process.cwd(), missionBaseDir, slug);
+const missionPath = path.join(missionDir, 'MISSION.md');
 const taskPath = match(prompt, /^Backlog task:\\s*(.+)$/m);
 const reviewFindingsPath = match(prompt, /\\\`([^\\\`\\n]+-review-findings\\.md)\\\`/);
 const reviewOutcomePath = match(prompt, /\\\`([^\\\`\\n]+-review-outcome\\.md)\\\`/);
@@ -167,6 +234,7 @@ if (/^Mode: draft\\./m.test(prompt)) {
     ''
   ].join('\\n');
   writeFile(missionPath, missionBody);
+  recordMissionContract(slug);
   writeFile(path.join(missionDir, 'milestone-1.md'), '# Milestone 1\\n\\nDraft scaffold complete.\\n');
 }
 
@@ -195,12 +263,25 @@ if (/^Mode: execute after lock\\./m.test(prompt)) {
     '|-----------|----------|--------|',
     '| Execute artifacts committed | missions/' + slug + '/CP-1.md:1 | PASS |',
     '| Final checkpoint present | missions/' + slug + '/CP-2.md:1 | PASS |',
+    '| The lifecycle reaches integration through the real CLI | missions/' + slug + '/CP-2.md:1 | PASS |',
     '',
     'Next action: Approve the mission in review.',
     ''
   ].join('\\n');
   writeFile(path.join(missionDir, 'CP-1.md'), cp1);
   writeFile(path.join(missionDir, 'CP-2.md'), cp2);
+  // The contract was recorded through the typed verbs, so handoff verifies
+  // recorded evidence; the documents above only back its file references.
+  for (const [name, text, next] of [['CP-1', cp1, 'Run review.'], ['CP-2', cp2, 'Approve the mission in review.']]) {
+    const rows = text.split('\\n').filter((line) => line.startsWith('| ') && !line.startsWith('| Criterion '));
+    const args = ['checkpoint', 'record', '--slug', slug, '--name', name, '--next', next];
+    for (const row of rows) {
+      const [criterion, evidence] = row.split('|').slice(1, 3).map((cell) => cell.trim());
+      args.push('--criterion', criterion, '--evidence', evidence);
+    }
+    const version = px(['status', slug, '--json']);
+    if (version) { px(args.concat(['--expected-version', String(JSON.parse(version).version)])); }
+  }
   writeFile(path.join(process.cwd(), 'deliverable.txt'), 'stub execute output\\n');
 }
 
@@ -319,6 +400,12 @@ function workflowEnv(binDir, stateHome, repoRoot) {
     FORGEJO_USER: 'custom',
     PRIMARY_WORKTREE: repoRoot,
     PARALLIX_HOME: stateHome,
+    // The agent stub records the mission contract with `px`, the same commands
+    // the draft prompt names, because activation now refuses an incomplete one.
+    // It runs as a bare executable on the fixture PATH, so it cannot resolve
+    // the CLI entry itself.
+    PARALLIX_E2E_PX_ENTRY: CLI_ENTRY,
+    PARALLIX_E2E_PX_LOADER: TSX_LOADER,
     PATH: binDir
   };
 }

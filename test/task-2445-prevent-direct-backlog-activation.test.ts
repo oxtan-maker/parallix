@@ -22,7 +22,11 @@ function mission(status: MissionStatus): Mission {
     rawStatus: status,
     closedAt: null,
     assignee: null,
-    checkpoints: [],
+    checkpoints: [{ missionId: id, name: 'CP-1', firstLine: 'Do the work', goalCheck: [], nextActionText: '' }],
+    brief: { goal: 'g', why: 'w', scope: 's', outOfScope: [] },
+    declaredGates: ['npm test'],
+    successCriteria: ['The mission is done'],
+    predictedNelBucket: 'Small',
     review: null,
     netEngineeringLines: null,
   };

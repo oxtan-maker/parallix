@@ -111,6 +111,78 @@ cleared only when the board stops asking about it. Integration items are left fo
 the operator, and defects that belong to the primary branch are escalated rather
 than repaired.
 
+## Agent-facing capabilities
+
+The use cases above are written for the operator. These are for the other user
+of Parallix: an agent picking up a mission with no memory of the stage before it.
+
+### UC-12 — Find the mission surface from nothing
+
+As an agent given only a mission slug, I want to discover how to read the
+mission and how to record my work from `px --help` alone, so that I never have
+to go looking through the repository to find out what I am allowed to do.
+
+**Confidence:** Confirmed. Every read and write is named in `px --help` and
+prints its own flags under `--help`.
+
+### UC-13 — Know what the mission is before acting
+
+As an agent starting a stage, I want one command to tell me the mission's brief,
+its declared gates, the last checkpoint and where the review stands, so that I
+begin from recorded fact rather than reconstructing intent from a workspace.
+
+**Confidence:** Confirmed for recorded state. A mission with nothing recorded
+says so rather than inventing it.
+
+### UC-14 — Record what the mission is for
+
+As a drafting agent, I want to record the goal, the reason, the scope, what is
+out of scope and the gates as mission state, so that the contract I agree to is
+the same one the reviewer later judges, and neither of us is reading a document
+that has drifted.
+
+**Confidence:** Confirmed. Every write is versioned and rejects a stale one, and
+a mission whose goal, scope or verification gate is missing cannot be activated.
+
+### UC-15 — Leave evidence the next agent can resume from
+
+As an executing agent, I want to record each checkpoint's Goal Check evidence
+and a concrete next action, so that whoever continues this mission — including a
+different agent family — starts from committed facts instead of guessing.
+
+**Confidence:** Confirmed. Re-recording a checkpoint replaces its evidence and
+leaves the others untouched.
+
+### UC-16 — Answer a review without losing the thread
+
+As a reviewer I want to record a verdict with named findings, and as an
+implementer I want to answer each one, so that a later agent of either role can
+read the whole exchange back rather than starting the argument again.
+
+**Confidence:** Partial. Findings and resolutions recorded through `px` are read
+back in full. Reviews submitted directly on the pull request by a human do not
+yet reach the mission; TASK-2543 covers that.
+
+### UC-17 — Fail instead of overwriting someone else's work
+
+As an agent holding a mission another agent is also touching, I want my write to
+be refused when the mission has moved on, so that I re-read and decide again
+rather than silently discarding a change I never saw.
+
+**Confidence:** Confirmed for the versioned mission writes. The review verbs
+record against the open round rather than a caller-supplied version.
+
+### UC-18 — Work on tasks without owning them
+
+As an agent doing task-level work — creating, finding and editing tasks,
+assignment, dependencies, archival, follow-up work — I want one contract for
+whichever task source is configured, so that Parallix never becomes a second
+place where a task's state lives.
+
+**Confidence:** Contract only. TASK-2521.04 supplies the local provider behind
+it; until then the configured external catalog remains the authority.
+
+
 ## Positioning boundaries
 
 Parallix is a local-first workflow harness, not a coding model, IDE, or

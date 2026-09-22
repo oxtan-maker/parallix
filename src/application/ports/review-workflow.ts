@@ -16,7 +16,6 @@ export interface ReviewWorkflowPort {
   comment(_context: ReviewWorkflowContext): Promise<void> | void;
   readComments(_context: ReviewWorkflowContext): Promise<void> | void;
   submitReview(_context: ReviewWorkflowContext): Promise<void> | void;
-  consumeArtifacts(_context: ReviewWorkflowContext): Promise<void> | void;
   close(_context: ReviewWorkflowContext): Promise<void> | void;
   status(_context: ReviewWorkflowContext): Promise<void> | void;
   createEvent(_context: ReviewWorkflowContext): Promise<void> | void;

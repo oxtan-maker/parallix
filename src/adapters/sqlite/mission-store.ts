@@ -9,7 +9,9 @@ import { missionVersion } from '../../application/domain-ports.js';
 import type { LaneTransitionEvent } from '../../domain/board-event.js';
 import type { MissionNelRecord } from '../../domain/net-engineering-lines.js';
 import type { Mission, MissionId } from '../../domain/mission.js';
-import { missionExecutionContext } from '../../domain/mission-execution-context.js';
+import { missionBrief } from '../../domain/mission-brief.js';
+import { declaredGates } from '../../domain/mission-gates.js';
+import { successCriteria } from '../../domain/mission-success-criteria.js';
 import type { KnownRepository, RepositoryId } from '../../domain/repository.js';
 import type { SqliteDatabaseAdapter } from './database-adapter.js';
 import { SqliteBoardLaneEventRepository } from './board-lane-event-repository.js';
@@ -19,8 +21,10 @@ import {
   type MissionCheckpointRecord,
   type MissionGoalCheckRecord,
   type MissionLabelRecord,
-  type MissionExecutionContextRecord,
-  type MissionExecutionContextItemRecord,
+  type MissionBriefRecord,
+  type MissionBriefOutOfScopeRecord,
+  type MissionDeclaredGateRecord,
+  type MissionSuccessCriterionRecord,
   type MissionRecord,
   type MissionReviewEventRecord,
   type MissionReviewFindingRecord,
@@ -137,7 +141,7 @@ export class SqliteMissionStore implements MissionStore, MissionNelRecorder {
   private async loadAggregate(id: MissionId): Promise<MissionLoadResult> {
     const missionRows = await this.db.query<MissionRecord>(
       `SELECT id, repository_id, title, status, raw_status, assignee,
-              net_engineering_lines, closed_at, version
+              net_engineering_lines, reproduction_test, predicted_nel_bucket, closed_at, version
        FROM missions WHERE id = ?`,
       [id],
     );
@@ -147,8 +151,10 @@ export class SqliteMissionStore implements MissionStore, MissionNelRecorder {
 
     const [
       labels,
-      executionContexts,
-      executionContextItems,
+      briefs,
+      briefOutOfScope,
+      gateRows,
+      criterionRows,
       checkpoints,
       goalChecks,
       reviews,
@@ -164,8 +170,10 @@ export class SqliteMissionStore implements MissionStore, MissionNelRecorder {
           'SELECT mission_id, position, label FROM mission_labels WHERE mission_id = ? ORDER BY position',
           [id],
         ),
-        this.db.query<MissionExecutionContextRecord>('SELECT mission_id, goal, why_text, scope_text, predicted_nel_bucket, confidence, selection_note FROM mission_execution_contexts WHERE mission_id = ?', [id]),
-        this.db.query<MissionExecutionContextItemRecord>('SELECT mission_id, kind, position, value, outcome FROM mission_execution_context_items WHERE mission_id = ? ORDER BY kind, position', [id]),
+        this.db.query<MissionBriefRecord>('SELECT mission_id, goal, why_text, scope_text FROM mission_briefs WHERE mission_id = ?', [id]),
+        this.db.query<MissionBriefOutOfScopeRecord>('SELECT mission_id, position, entry FROM mission_brief_out_of_scope WHERE mission_id = ? ORDER BY position', [id]),
+        this.db.query<MissionDeclaredGateRecord>('SELECT mission_id, position, command FROM mission_declared_gates WHERE mission_id = ? ORDER BY position', [id]),
+        this.db.query<MissionSuccessCriterionRecord>('SELECT mission_id, position, criterion FROM mission_success_criteria WHERE mission_id = ? ORDER BY position', [id]),
         this.db.query<MissionCheckpointRecord>(
           `SELECT mission_id, position, checkpoint_mission_id, name, raw_filename,
                   first_line, next_action_text
@@ -231,8 +239,10 @@ export class SqliteMissionStore implements MissionStore, MissionNelRecorder {
       mission: missionRows[0],
       externalTaskRef: externalRefs[0] ?? null,
       labels,
-      executionContext: executionContexts[0] ?? null,
-      executionContextItems,
+      brief: briefs[0] ?? null,
+      briefOutOfScope,
+      declaredGates: gateRows,
+      successCriteria: criterionRows,
       checkpoints,
       goalChecks,
       review: reviews[0] ?? null,
@@ -392,11 +402,17 @@ export class SqliteMissionStore implements MissionStore, MissionNelRecorder {
     mission: Mission,
     expectedVersion: MissionVersion | null,
   ): Promise<MissionVersion> {
-    // MissionStore is a public persistence port: callers other than the
-    // context service may save an aggregate, so reject invalid context before
-    // any relational row can make a Mission unloadable on restart.
-    if (mission.executionContext) {
-      mission = { ...mission, executionContext: missionExecutionContext(mission.executionContext) };
+    // MissionStore is a public persistence port: callers other than the brief
+    // service may save an aggregate, so reject an invalid brief or gate list
+    // before any relational row can make a Mission unloadable on restart.
+    if (mission.brief) {
+      mission = { ...mission, brief: missionBrief(mission.brief) };
+    }
+    if (mission.declaredGates && mission.declaredGates.length > 0) {
+      mission = { ...mission, declaredGates: declaredGates(mission.declaredGates) };
+    }
+    if (mission.successCriteria && mission.successCriteria.length > 0) {
+      mission = { ...mission, successCriteria: successCriteria(mission.successCriteria) };
     }
     const params = [
       mission.repositoryId,
@@ -405,6 +421,8 @@ export class SqliteMissionStore implements MissionStore, MissionNelRecorder {
       mission.rawStatus ?? null,
       mission.assignee,
       mission.netEngineeringLines,
+      mission.reproductionTest ?? null,
+      mission.predictedNelBucket ?? null,
       mission.closedAt,
     ] as const;
 
@@ -414,8 +432,8 @@ export class SqliteMissionStore implements MissionStore, MissionNelRecorder {
         await this.db.execute(
           `INSERT INTO missions
              (id, repository_id, title, status, raw_status, assignee,
-              net_engineering_lines, closed_at, version)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1)`,
+              net_engineering_lines, reproduction_test, predicted_nel_bucket, closed_at, version)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)`,
           [mission.id, ...params],
         );
       } catch (error) {
@@ -430,7 +448,7 @@ export class SqliteMissionStore implements MissionStore, MissionNelRecorder {
       const changed = await this.db.execute(
         `UPDATE missions SET
            repository_id = ?, title = ?, status = ?, raw_status = ?, assignee = ?,
-           net_engineering_lines = ?, closed_at = ?, version = version + 1
+           net_engineering_lines = ?, reproduction_test = ?, predicted_nel_bucket = ?, closed_at = ?, version = version + 1
          WHERE id = ? AND version = ?`,
         [...params, mission.id, expectedVersion],
       );
@@ -469,7 +487,9 @@ export class SqliteMissionStore implements MissionStore, MissionNelRecorder {
   private async clearAggregateValues(mission: Mission): Promise<void> {
     const id = mission.id;
     await this.db.execute('DELETE FROM mission_external_task_refs WHERE mission_id = ?', [id]);
-    await this.db.execute('DELETE FROM mission_execution_contexts WHERE mission_id = ?', [id]);
+    await this.db.execute('DELETE FROM mission_briefs WHERE mission_id = ?', [id]);
+    await this.db.execute('DELETE FROM mission_declared_gates WHERE mission_id = ?', [id]);
+    await this.db.execute('DELETE FROM mission_success_criteria WHERE mission_id = ?', [id]);
     await this.db.execute('DELETE FROM mission_checkpoints WHERE mission_id = ?', [id]);
     await this.db.execute('DELETE FROM mission_labels WHERE mission_id = ?', [id]);
     if (!mission.review) {
@@ -485,11 +505,30 @@ export class SqliteMissionStore implements MissionStore, MissionNelRecorder {
   }
 
   private async insertAggregateValues(mission: Mission): Promise<void> {
-    if (mission.executionContext) {
-      const c = mission.executionContext;
-      await this.db.execute('INSERT INTO mission_execution_contexts (mission_id, goal, why_text, scope_text, predicted_nel_bucket, confidence, selection_note) VALUES (?, ?, ?, ?, ?, ?, ?)', [mission.id, c.goal, c.why, c.scope, c.predictedNelBucket, c.confidence, c.selectionNote]);
-      for (const [kind, values] of [['constraint', c.constraints], ['driver', c.mainDrivers], ['gate', c.declaredGates]] as const) {for (const [position, value] of values.entries()) {await this.db.execute('INSERT INTO mission_execution_context_items (mission_id, kind, position, value, outcome) VALUES (?, ?, ?, ?, NULL)', [mission.id, kind, position, value]);}}
-      for (const [position, d] of c.dependencies.entries()) {await this.db.execute('INSERT INTO mission_execution_context_items (mission_id, kind, position, value, outcome) VALUES (?, ?, ?, ?, ?)', [mission.id, 'dependency', position, d.reference, d.outcome]);}
+    if (mission.brief) {
+      const brief = mission.brief;
+      await this.db.execute(
+        'INSERT INTO mission_briefs (mission_id, goal, why_text, scope_text) VALUES (?, ?, ?, ?)',
+        [mission.id, brief.goal, brief.why, brief.scope],
+      );
+      for (const [position, entry] of brief.outOfScope.entries()) {
+        await this.db.execute(
+          'INSERT INTO mission_brief_out_of_scope (mission_id, position, entry) VALUES (?, ?, ?)',
+          [mission.id, position, entry],
+        );
+      }
+    }
+    for (const [position, command] of (mission.declaredGates ?? []).entries()) {
+      await this.db.execute(
+        'INSERT INTO mission_declared_gates (mission_id, position, command) VALUES (?, ?, ?)',
+        [mission.id, position, command],
+      );
+    }
+    for (const [position, criterion] of (mission.successCriteria ?? []).entries()) {
+      await this.db.execute(
+        'INSERT INTO mission_success_criteria (mission_id, position, criterion) VALUES (?, ?, ?)',
+        [mission.id, position, criterion],
+      );
     }
     if (mission.externalTaskRef) {
       await this.db.execute(

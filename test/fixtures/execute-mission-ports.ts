@@ -34,7 +34,24 @@ export function makeExecutePorts(overrides: Record<string, unknown> = {}) {
       },
     },
     missionTransitions: {
-      async load() { return { kind: 'found', mission: { status: 'refined' }, version: 1 }; },
+      // A refined mission carries the contract draft settled: activation
+      // refuses an incomplete one (mission-workflow.ts requireDraftedContract),
+      // so a fixture without it is not a mission that could reach this port.
+      async load() {
+        return {
+          kind: 'found',
+          mission: {
+            status: 'refined',
+            brief: { goal: 'Fixture goal', why: 'Fixture why', scope: 'Fixture scope', outOfScope: [] },
+            declaredGates: ['npm test'],
+            successCriteria: ['The mission is done'],
+            predictedNelBucket: 'Small',
+            // A planned checkpoint with no evidence yet: draft plans, execution records.
+    checkpoints: [{ missionId: 'task-1', name: 'CP-1', firstLine: 'Do the work', goalCheck: [], nextActionText: '' }],
+          },
+          version: 1,
+        };
+      },
       async save() { calls.push('synchronize'); return 1; },
       async saveWithTransition() { calls.push('synchronize'); return 1; },
     },

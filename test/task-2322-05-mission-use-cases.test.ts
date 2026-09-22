@@ -25,7 +25,7 @@ import type {
 import { MissionIntakeService } from '../src/application/mission-intake-service.js';
 import { MissionLifecycleService } from '../src/application/mission-lifecycle-service.js';
 import { MissionCheckpointService } from '../src/application/mission-checkpoint-service.js';
-import { MissionExecutionContextService } from '../src/application/mission-execution-context-service.js';
+import { MissionBriefService } from '../src/application/mission-brief-service.js';
 import { MissionHandoffService } from '../src/application/mission-handoff-service.js';
 import { agentFamily } from '../src/domain/agents.js';
 import type { LaneTransitionEvent } from '../src/domain/board-event.js';
@@ -44,8 +44,7 @@ import {
   NelRuleViolation,
 } from '../src/domain/net-engineering-lines.js';
 import { repositoryId } from '../src/domain/repository.js';
-import type { MissionExecutionContext } from '../src/domain/mission-execution-context.js';
-import { missionExecutionContext } from '../src/domain/mission-execution-context.js';
+import type { MissionBrief } from '../src/domain/mission-brief.js';
 
 const MISSION = missionId('task-2322-05');
 const REPOSITORY = repositoryId('parallix');
@@ -108,6 +107,14 @@ function activeMission(overrides: Partial<Mission> = {}): Mission {
       assignee: agentFamily('codex'),
     }),
     status: 'active',
+    // Activation refuses an incomplete contract, so any mission this fixture
+    // activates carries what draft settles (requireDraftedContract).
+    brief: { goal: 'Route mission intake through application use cases', why: 'Fixture', scope: 'Fixture scope', outOfScope: [] },
+    declaredGates: ['npm test'],
+    successCriteria: ['The mission is done'],
+    predictedNelBucket: 'Small',
+    // A planned checkpoint with no evidence yet: draft plans, execution records.
+    checkpoints: [{ missionId: MISSION, name: 'CP-1', firstLine: 'Do the work', goalCheck: [], nextActionText: '' }],
     ...overrides,
   } as Mission;
 }
@@ -134,13 +141,10 @@ const ALL_CAPABILITIES = new Set([
 ] as const);
 const CONTEXT_CAPABILITIES = new Set(['mission:context'] as const);
 
-function executionContext(overrides: Partial<MissionExecutionContext> = {}): MissionExecutionContext {
+function brief(overrides: Partial<MissionBrief> = {}): MissionBrief {
   return {
-    goal: 'Persist execution context', why: 'Restart-safe mission launch needs it.',
-    scope: 'Mission aggregate only.', constraints: ['No document blob'],
-    predictedNelBucket: 'medium', confidence: 'high',
-    selectionNote: 'activate as-is: bounded state', mainDrivers: ['SQLite', 'restart'],
-    declaredGates: ['./scripts/verify-local.sh all'], dependencies: [{ reference: 'TASK-2521.01', outcome: 'available' }],
+    goal: 'Persist the mission brief', why: 'Restart-safe mission launch needs it.',
+    scope: 'Mission aggregate only.', outOfScope: ['A second Mission model'],
     ...overrides,
   };
 }
@@ -473,44 +477,63 @@ test('SC3: the checkpoint request carries no persistence path or SQL input', () 
 });
 
 // ---------------------------------------------------------------------------
-// Execution context
+// Mission brief and declared gates
 // ---------------------------------------------------------------------------
 
-test('execution context writes then reads the same bounded facts through the application boundary', async () => {
-  const store = new FakeMissionStore(activeMission(), 1);
-  const service = new MissionExecutionContextService(store);
-  const context = executionContext();
-  const written = await service.write({ operationId: 'context-write', missionId: MISSION, capabilities: CONTEXT_CAPABILITIES, context });
+test('the brief writes then reads the same facts through the application boundary', async () => {
+  const store = new FakeMissionStore(activeMission({ brief: null, declaredGates: [] }), 1);
+  const service = new MissionBriefService(store);
+  const written = await service.update({ operationId: 'brief-write', missionId: MISSION, capabilities: CONTEXT_CAPABILITIES, patch: brief() });
   assert.equal(written.status, 'completed');
-  assert.deepEqual(written.value!.context, context);
-  const read = await service.read({ operationId: 'context-read', missionId: MISSION, capabilities: CONTEXT_CAPABILITIES });
+  assert.deepEqual(written.value!.brief, brief());
+  const read = await service.read({ operationId: 'brief-read', missionId: MISSION, capabilities: CONTEXT_CAPABILITIES });
   assert.equal(read.status, 'completed');
-  assert.deepEqual(read.value!.context, context);
+  assert.deepEqual(read.value!.brief, brief());
   assert.equal(read.value!.version, missionVersion(2));
 });
 
-test('execution context rejects missing capability, invalid facts, stale writes, and absent context', async () => {
-  const store = new FakeMissionStore(activeMission(), 2);
-  const service = new MissionExecutionContextService(store);
-  const missing = await service.write({ operationId: 'x', missionId: MISSION, capabilities: new Set(), context: executionContext() });
+test('a partial brief update preserves the fields it omits', async () => {
+  const store = new FakeMissionStore(activeMission({ brief: null, declaredGates: [] }), 1);
+  const service = new MissionBriefService(store);
+  await service.update({ operationId: 'a', missionId: MISSION, capabilities: CONTEXT_CAPABILITIES, patch: brief() });
+  const scoped = await service.update({ operationId: 'b', missionId: MISSION, capabilities: CONTEXT_CAPABILITIES, patch: { scope: 'Narrowed.' } });
+  assert.equal(scoped.status, 'completed');
+  assert.equal(scoped.value!.brief.scope, 'Narrowed.');
+  assert.equal(scoped.value!.brief.goal, brief().goal, 'the goal survives a scope-only write');
+});
+
+test('the first brief write must supply both goal and why', async () => {
+  const store = new FakeMissionStore(activeMission({ brief: null, declaredGates: [] }), 1);
+  const service = new MissionBriefService(store);
+  const partial = await service.update({ operationId: 'x', missionId: MISSION, capabilities: CONTEXT_CAPABILITIES, patch: { goal: 'Only a goal' } });
+  assert.equal(partial.error!.kind, 'validation');
+  assert.match(partial.error!.message, /must set both --goal and --why/);
+});
+
+test('the brief rejects missing capability, invalid facts, stale writes, and an absent brief', async () => {
+  const store = new FakeMissionStore(activeMission({ brief: null, declaredGates: [] }), 2);
+  const service = new MissionBriefService(store);
+  const missing = await service.update({ operationId: 'x', missionId: MISSION, capabilities: new Set(), patch: brief() });
   assert.equal(missing.error!.kind, 'capability');
-  const invalid = await service.write({ operationId: 'x', missionId: MISSION, capabilities: CONTEXT_CAPABILITIES, context: executionContext({ mainDrivers: ['one'] }) });
+  const invalid = await service.update({ operationId: 'x', missionId: MISSION, capabilities: CONTEXT_CAPABILITIES, patch: brief({ goal: '  ' }) });
   assert.equal(invalid.error!.kind, 'validation');
-  const stale = await service.write({ operationId: 'x', missionId: MISSION, capabilities: CONTEXT_CAPABILITIES, expectedVersion: missionVersion(1), context: executionContext() });
+  const stale = await service.update({ operationId: 'x', missionId: MISSION, capabilities: CONTEXT_CAPABILITIES, expectedVersion: missionVersion(1), patch: brief() });
   assert.equal(stale.error!.kind, 'conflict');
   const absent = await service.read({ operationId: 'x', missionId: MISSION, capabilities: CONTEXT_CAPABILITIES });
   assert.equal(absent.error!.kind, 'unavailable');
 });
 
-test('execution context bounds the dependency list (ADR 0053 bounded state)', () => {
-  // The other persisted item arrays already cap at 16; dependencies map without
-  // a limit, so a caller could otherwise store an unbounded predecessor list.
-  const bounded = executionContext({ dependencies: Array.from({ length: 256 }, () => ({ reference: 'TASK-1', outcome: null })) });
-  assert.equal(bounded.dependencies.length, 256);
-  assert.throws(
-    () => missionExecutionContext(executionContext({ dependencies: Array.from({ length: 257 }, () => ({ reference: 'TASK-1', outcome: null })) })),
-    /dependencies must contain at most 256 entries/,
-  );
+test('declared gates round-trip and reject a duplicate command', async () => {
+  const store = new FakeMissionStore(activeMission({ brief: null, declaredGates: [] }), 1);
+  const service = new MissionBriefService(store);
+  const empty = await service.readGates({ operationId: 'g0', missionId: MISSION, capabilities: CONTEXT_CAPABILITIES });
+  assert.deepEqual(empty.value!.declaredGates, [], 'a mission with no declared gates reports none');
+  const set = await service.setGates({ operationId: 'g1', missionId: MISSION, capabilities: CONTEXT_CAPABILITIES, gates: ['npm test', './scripts/verify-local.sh all'] });
+  assert.deepEqual(set.value!.declaredGates, ['npm test', './scripts/verify-local.sh all'], 'order is preserved');
+  const duplicate = await service.setGates({ operationId: 'g2', missionId: MISSION, capabilities: CONTEXT_CAPABILITIES, gates: ['npm test', 'npm test'] });
+  assert.equal(duplicate.error!.kind, 'validation');
+  const unchanged = await service.readGates({ operationId: 'g3', missionId: MISSION, capabilities: CONTEXT_CAPABILITIES });
+  assert.deepEqual(unchanged.value!.declaredGates, ['npm test', './scripts/verify-local.sh all'], 'the rejected write changed nothing');
 });
 
 // ---------------------------------------------------------------------------

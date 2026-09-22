@@ -155,18 +155,16 @@ function completeMission(overrides: Partial<Mission> = {}): Mission {
       ],
       nextActionText: 'Run the integration suite.',
     }],
-    executionContext: {
-      goal: 'Persist bounded launch context',
+    brief: {
+      goal: 'Persist the mission brief',
       why: 'Agents must resume without a mission document.',
       scope: 'Mission aggregate persistence only.',
-      constraints: ['No raw Markdown authority'],
-      predictedNelBucket: 'medium',
-      confidence: 'high',
-      selectionNote: 'activate as-is: bounded aggregate change',
-      mainDrivers: ['SQLite migration', 'restart semantics'],
-      declaredGates: ['./scripts/verify-local.sh all'],
-      dependencies: [{ reference: 'TASK-2521.01', outcome: 'persistence foundation available' }],
+      outOfScope: ['Raw Markdown authority'],
     },
+    declaredGates: ['./scripts/verify-local.sh all', 'npm test'],
+    successCriteria: ['The aggregate survives a restart', 'Stale writes are rejected'],
+    predictedNelBucket: 'Medium',
+    reproductionTest: 'test/task-2294-repro.test.ts',
     review: completeReview(),
     netEngineeringLines: 321,
     closedAt: null,
@@ -219,6 +217,8 @@ describe('SQLite Mission aggregate integration', () => {
           'net_engineering_lines',
           'closed_at',
           'version',
+          'reproduction_test',
+          'predicted_nel_bucket',
         ],
       );
       assert.ok(!columns.some(({ name }) => ['labels', 'checkpoints', 'review'].includes(name)));
@@ -274,19 +274,31 @@ describe('SQLite Mission aggregate integration', () => {
     }
   });
 
-  it('refuses invalid execution context before it can make a Mission unloadable', async () => {
+  it('refuses an invalid brief before it can make a Mission unloadable', async () => {
     const database = await migratedDatabase();
     try {
       const store = new SqliteMissionStore(database);
       await assert.rejects(
-        store.save(completeMission({ executionContext: { ...completeMission().executionContext!, mainDrivers: ['only one'] } }), null),
-        /main drivers must contain 2-4 items/,
+        store.save(completeMission({ brief: { ...completeMission().brief!, goal: '  ' } }), null),
+        /goal must be trimmed/,
       );
       assert.deepEqual(await store.load(testMissionId), { kind: 'missing' });
     } finally { await database.close(); }
   });
 
-  it('reopens bounded execution context and checkpoint evidence without repository files', async () => {
+  it('refuses a duplicate declared gate before it can make a Mission unloadable', async () => {
+    const database = await migratedDatabase();
+    try {
+      const store = new SqliteMissionStore(database);
+      await assert.rejects(
+        store.save(completeMission({ declaredGates: ['npm test', 'npm test'] }), null),
+        /gate is already declared: npm test/,
+      );
+      assert.deepEqual(await store.load(testMissionId), { kind: 'missing' });
+    } finally { await database.close(); }
+  });
+
+  it('reopens the brief, the declared gates and checkpoint evidence without repository files', async () => {
     const databasePath = tempDatabasePath();
     const first = await migratedDatabase(databasePath);
     const mission = completeMission({ review: null });
@@ -296,7 +308,8 @@ describe('SQLite Mission aggregate integration', () => {
     try {
       const loaded = await new SqliteMissionStore(second).load(mission.id);
       assert.equal(loaded.kind, 'found');
-      assert.deepEqual(loaded.mission.executionContext, mission.executionContext);
+      assert.deepEqual(loaded.mission.brief, mission.brief);
+      assert.deepEqual(loaded.mission.declaredGates, mission.declaredGates);
       assert.deepEqual(loaded.mission.checkpoints, mission.checkpoints);
     } finally { await second.close(); }
   });

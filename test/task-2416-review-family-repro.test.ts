@@ -17,7 +17,7 @@ import type { CurrentWorkEvent } from '../src/application/recording/current-work
 //
 // This is a genuine red-then-green regression test for a real defect (see
 // missions/task-2416/CP-1.md): the review loop's own agents run `px review
-// --start` / `--submit` / `--consume-artifacts`, each a separate process under
+// --start` / `--submit`, each a separate process under
 // its own operationId (all in `PUBLISHED_PHASES`). Their nested `running`
 // fact shadowed the outer `px review --continue` loop's family-carrying fact,
 // attributing the live continuation as `family unknown`, and their `ended`

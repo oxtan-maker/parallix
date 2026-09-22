@@ -10,12 +10,19 @@ import assert from 'node:assert/strict';
 import { HandoffCommandUseCase } from '../src/application/handoff-command-use-case.js';
 import { isTransientVerificationFailure } from '../src/adapters/verification/verification.js';
 import type { HandoffWorkflowPorts } from '../src/application/ports/handoff-workflow.js';
+import { classifyError } from '../src/application/failure-classification.js';
 
 const SLUG = 'task-2332.09';
 const ROOT = '/root';
 const MISSION_DIR = '/root/missions/task-2332.09';
 const CHECKPOINT = '/root/missions/task-2332.09/CP-1.md';
 const BRANCH = 'mission/task-2332.09';
+/**
+ * A Mission drafted before the typed contract verbs: no recorded brief, gates
+ * or checkpoints, so handoff takes its document path. A Mission the store does
+ * not hold fails handoff closed instead.
+ */
+const LEGACY_MISSION_LOAD = { kind: 'found', mission: { checkpoints: [], brief: null, declaredGates: [] }, version: 1 } as const;
 
 const CHECKPOINT_CONTENT = [
   '# CP-1: Example',
@@ -143,7 +150,7 @@ function makePorts(recorder: Recorder, overrides: Record<string, unknown> = {}):
     missionServices: async () => ({
       checkpoints: { record: async () => ({ status: 'completed' }) },
       lifecycle: { transition: async () => ({ status: 'completed', value: { version: 3 } }) },
-      store: { load: async () => ({ kind: 'not-found' }) },
+      store: { load: async () => LEGACY_MISSION_LOAD },
       handoff: { recordNel: async () => ({ status: 'completed' }) },
     }),
   };
@@ -334,7 +341,7 @@ test('handoff use case forwards the authoritative occurredAt through a recovery 
           return { status: 'completed', value: { version: 3 } };
         },
       },
-      store: { load: async () => ({ kind: 'not-found' }) },
+      store: { load: async () => LEGACY_MISSION_LOAD },
       handoff: { recordNel: async () => ({ status: 'completed' }) },
     }),
   });
@@ -362,7 +369,7 @@ test('handoff use case keeps the wall clock when no occurredAt is supplied', asy
           return { status: 'completed', value: { version: 3 } };
         },
       },
-      store: { load: async () => ({ kind: 'not-found' }) },
+      store: { load: async () => LEGACY_MISSION_LOAD },
       handoff: { recordNel: async () => ({ status: 'completed' }) },
     }),
   });
@@ -416,7 +423,7 @@ test('handoff use case stops before review state advances when NEL persistence f
     missionServices: async () => ({
       checkpoints: { record: async () => ({ status: 'completed' }) },
       lifecycle: { transition: async () => ({ status: 'completed', value: { version: 1 } }) },
-      store: { load: async () => ({ kind: 'not-found' }) },
+      store: { load: async () => LEGACY_MISSION_LOAD },
       handoff: { recordNel: async () => ({ status: 'failed', error: { message: 'database is locked' } }) },
     }),
   });
@@ -447,7 +454,7 @@ test('handoff use case fails when checkpoint recording is not completed', async 
     missionServices: async () => ({
       checkpoints: { record: async () => ({ status: 'rejected', error: { message: 'evidence missing' } }) },
       lifecycle: { transition: async () => ({ status: 'completed', value: { version: 1 } }) },
-      store: { load: async () => ({ kind: 'not-found' }) },
+      store: { load: async () => LEGACY_MISSION_LOAD },
       handoff: { recordNel: async () => ({ status: 'completed' }) },
     }),
   });
@@ -464,7 +471,7 @@ test('handoff use case fails when the mission lifecycle transition is rejected',
     missionServices: async () => ({
       checkpoints: { record: async () => ({ status: 'completed' }) },
       lifecycle: { transition: async () => ({ status: 'rejected', error: { message: 'not in active' } }) },
-      store: { load: async () => ({ kind: 'not-found' }) },
+      store: { load: async () => LEGACY_MISSION_LOAD },
       handoff: { recordNel: async () => ({ status: 'completed' }) },
     }),
   });
@@ -623,4 +630,118 @@ test('handoff states that independent review is next', async () => {
 
   const output = stripStatusColor(recorder.log.join('\n'));
   assert.match(output, /ready for independent review/);
+});
+
+/** TASK-2521.03 review F1/F2: handoff reads the recorded contract fail-closed. */
+function contractServices(load: () => Promise<unknown>) {
+  return {
+    missionServices: async () => ({
+      checkpoints: { record: async () => ({ status: 'completed' }) },
+      lifecycle: { transition: async () => ({ status: 'completed', value: { version: 3 } }) },
+      store: { load },
+      handoff: { recordNel: async () => ({ status: 'completed' }) },
+    }),
+  };
+}
+
+const DRAFTED_BRIEF = { goal: 'g', why: 'w', scope: 's', outOfScope: [] };
+
+test('handoff fails closed when the operator database cannot be read', async () => {
+  const recorder = makeRecorder();
+  const ports = makePorts(recorder, contractServices(async () => { throw new Error('database is locked'); }));
+  const result = await new HandoffCommandUseCase(ports).performHandoff(SLUG, runOptions(recorder));
+  assert.equal(result.ok, false);
+  assert.match(result.error ?? '', /database is locked.*fails closed/);
+  assert.deepEqual(recorder.transitions, []);
+});
+
+test('handoff fails when the operator database holds no such Mission', async () => {
+  const recorder = makeRecorder();
+  const ports = makePorts(recorder, contractServices(async () => ({ kind: 'missing' })));
+  const result = await new HandoffCommandUseCase(ports).performHandoff(SLUG, runOptions(recorder));
+  assert.equal(result.ok, false);
+  assert.match(result.error ?? '', /holds no Mission/);
+  assert.deepEqual(recorder.transitions, []);
+});
+
+test('a Mission drafted through the typed verbs never falls back to checkpoint documents', async () => {
+  // The default ports report a CP-1.md on disk; a DB-drafted Mission must not
+  // be allowed to hand off on it, nor have one generated for it.
+  const recorder = makeRecorder();
+  const ports = makePorts(recorder, contractServices(async () => ({
+    kind: 'found', mission: { checkpoints: [], brief: DRAFTED_BRIEF, declaredGates: ['npm test'] }, version: 4,
+  })));
+  const result = await new HandoffCommandUseCase(ports).performHandoff(SLUG, runOptions(recorder));
+  assert.equal(result.ok, false);
+  assert.match(result.error ?? '', /no recorded checkpoint evidence.*px checkpoint record/);
+  assert.equal(classifyError(result.error ?? '').dispatchAction, 'AutoSendBack', 'missing evidence is the implementer\'s to record');
+  assert.deepEqual(recorder.transitions, []);
+});
+
+test('a Mission drafted through the typed verbs with no recorded gate fails handoff instead of skipping gates', async () => {
+  const recorder = makeRecorder();
+  const ports = makePorts(recorder, contractServices(async () => ({
+    kind: 'found',
+    mission: {
+      checkpoints: [{ name: 'CP-1', goalCheck: [{ criterion: 'works', evidence: '`test/handoff-use-case.test.ts`' }], nextAction: 'review' }],
+      brief: DRAFTED_BRIEF,
+      declaredGates: [],
+    },
+    version: 4,
+  })));
+  const result = await new HandoffCommandUseCase(ports).performHandoff(SLUG, runOptions(recorder));
+  assert.equal(result.ok, false);
+  assert.match(result.error ?? '', /no recorded verification gate.*px gate add/);
+  // Not sent back: execution may not change the contract, so a lost gate is a
+  // human's call rather than the implementer's.
+  assert.equal(classifyError(result.error ?? '').dispatchAction, 'HumanOnly');
+  assert.deepEqual(recorder.transitions, []);
+});
+
+
+test('a typed-verb Mission cannot hand off while a success criterion has no row in the final checkpoint', async () => {
+  const load = (criteria: readonly string[]) => async () => ({
+    kind: 'found',
+    mission: {
+      checkpoints: [{ name: 'CP-1', goalCheck: [{ criterion: 'The  greeting is  fixed', evidence: '`test/handoff-use-case.test.ts`' }], nextAction: 'review' }],
+      brief: DRAFTED_BRIEF,
+      successCriteria: criteria,
+      // No gate recorded: a run that gets past the criteria check stops there,
+      // which proves the criteria check passed without running the full handoff.
+      declaredGates: [],
+    },
+    version: 4,
+  });
+
+  const recorder = makeRecorder();
+  const missing = await new HandoffCommandUseCase(makePorts(recorder, contractServices(load(['The greeting is fixed', 'Nothing else changes']))))
+    .performHandoff(SLUG, runOptions(recorder));
+  assert.equal(missing.ok, false);
+  assert.match(missing.error ?? '', /Success-criterion evidence is missing before handoff in CP-1: "Nothing else changes"/);
+  assert.equal(classifyError(missing.error ?? '').dispatchAction, 'AutoSendBack', 'the gap is sent back to the implementer');
+
+  // Matching ignores case and runs of whitespace, never wording.
+  const coveredRecorder = makeRecorder();
+  const covered = await new HandoffCommandUseCase(makePorts(coveredRecorder, contractServices(load(['the greeting is fixed']))))
+    .performHandoff(SLUG, runOptions(coveredRecorder));
+  assert.match(covered.error ?? '', /no recorded verification gate/, 'every criterion was evidenced, so handoff moved on to the gates');
+});
+
+test('a typed-verb Mission whose recorded evidence cites nothing verifiable is sent back to the implementer', async () => {
+  const recorder = makeRecorder();
+  const ports = makePorts(recorder, contractServices(async () => ({
+    kind: 'found',
+    mission: {
+      checkpoints: [{ name: 'CP-1', goalCheck: [{ criterion: 'works', evidence: 'it works, trust me' }], nextAction: 'review' }],
+      brief: DRAFTED_BRIEF,
+      successCriteria: ['works'],
+      declaredGates: ['npm test'],
+    },
+    version: 4,
+  })));
+  const result = await new HandoffCommandUseCase(ports).performHandoff(SLUG, runOptions(recorder));
+  assert.equal(result.ok, false);
+  assert.match(result.error ?? '', /cites no verifiable reference/);
+  assert.equal(classifyError(result.error ?? '').dispatchAction, 'AutoSendBack', 'weak evidence is repaired by the implementer, as for a CP-N.md table');
+  assert.deepEqual(recorder.transitions, []);
 });

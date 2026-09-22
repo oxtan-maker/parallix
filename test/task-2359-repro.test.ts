@@ -27,7 +27,9 @@ test('task-2359: rendered review prompts treat unrelated PR history as context o
 
 test('task-2359: rendered review prompts ground findings in the mission diff, checkpoint evidence, or unidentified reviewed revision', () => {
   for (const [builder, prompt] of renderedReviewPrompts()) {
-    assert.match(prompt, /findings.*grounded in `git diff review-baseline-sha\.\.HEAD`, mission\/checkpoint evidence, or inability to identify the reviewed revision/i, builder);
+    // TASK-2521.03 made `px status` the single Mission reporting surface; the
+    // grounding rule itself is unchanged.
+    assert.match(prompt, /findings.*grounded in `git diff review-baseline-sha\.\.HEAD`, the Mission context and checkpoint evidence reported by `px status [^`]+`, or inability to identify the reviewed revision/i, builder);
   }
 });
 
