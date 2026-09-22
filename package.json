@@ -63,7 +63,7 @@
     "benchmark:runtime": "tsx scripts/benchmark-runtime.ts"
   },
   "peerDependencies": {
-    "@earendil-works/pi-coding-agent": "^0.80.6"
+    "@earendil-works/pi-coding-agent": "^0.87.0"
   },
   "peerDependenciesMeta": {
     "@earendil-works/pi-coding-agent": {
@@ -71,7 +71,7 @@
     }
   },
   "devDependencies": {
-    "@earendil-works/pi-coding-agent": "^0.80.6",
+    "@earendil-works/pi-coding-agent": "^0.87.0",
     "@types/node": "^26.0.1",
     "@types/react": "^19.2.14",
     "@typescript-eslint/eslint-plugin": "^8.62.1",
