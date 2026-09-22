@@ -7,12 +7,16 @@
 # The `ci-required` job name is a literal so branch protection can require it
 # stably; it is never computed from branch, event, or matrix data.
 #
-# Publication trigger is provisional, not a claimed github-publish ref: ADR 0045
-# marks github-publish unimplemented, so GitHub verifies the exact resulting
-# commit before it reaches the protected primary branch. The concrete verification
-# ref is deferred to the follow-up mission that verifies this pipeline live; the
-# `push` trigger below is a real trigger only and must not be cited as the
-# github-publish verification ref until that ref is established.
+# The `push` trigger is the ADR 0058 github-publish verification ref:
+# `refs/heads/github-publish/<sha>` carries the exact locally generated
+# integration commit. TASK-2549 (ADR 0061) verifies it differentially:
+# publication candidates compare the full current `origin/main` SHA against the
+# exact `github.sha` candidate in the dependency review step, while normal pull
+# requests use GitHub's native PR comparison.
+#
+# All Actions in this workflow are pinned to immutable release SHAs with a
+# release-version comment (TASK-2549); Dependabot (github-actions ecosystem)
+# proposes updates to the pins.
 name: ci-required
 
 on:
@@ -44,7 +48,7 @@ jobs:
       # checkout defaults to the triggered commit: the PR merge commit for
       # pull_request events and the pushed SHA for push events.
       - name: Check out the triggered commit
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           # Full history: tests compare mission branches against the primary
           # branch, which needs the merge base.
@@ -59,6 +63,49 @@ jobs:
       - name: Provide the primary worktree
         run: git show-ref --verify --quiet refs/heads/main || git worktree add --quiet -b main "$RUNNER_TEMP/parallix-main" origin/main
 
+      # Differential dependency review (TASK-2549, ADR 0061): fail this step
+      # when the candidate newly introduces a dependency with a High or
+      # Critical GHSA. Runs early — after repo/ref state is available and
+      # before the expensive Node/test/Sonar work — so a vulnerable dependency
+      # fails fast. Existing dependency debt on the base is reported but never
+      # blocking; only added vulnerable dependencies fail the run.
+      #
+      # Comparison refs:
+      #   - pull_request: both refs empty -> the action's native PR comparison
+      #     (PR base SHA -> merge-commit head SHA).
+      #   - push (github-publish/<sha>): base = full current origin/main SHA
+      #     resolved below after the fetch-depth-0 checkout; head = the exact
+      #     github.sha candidate. Missing/unresolvable refs or a review error
+      #     fail the step (fail-closed, never "no changes").
+      #
+      # Policy: fail-on-severity high (High/Critical block, moderate/low are
+      # reported only); fail-on-scopes explicitly covers unknown,runtime,
+      # development (the action's default scope is narrower: runtime only);
+      # license-check is disabled so license policy cannot become a blocking
+      # criterion (license governance is out of scope for this gate).
+      # retry-on-snapshot-warnings absorbs GitHub dependency-graph ingestion
+      # lag for a just-pushed publication SHA before the comparison is taken.
+      - name: Resolve the trusted publication base (full origin/main SHA)
+        id: trusted-base
+        if: github.event_name == 'push'
+        run: |
+          base_sha=$(git rev-parse origin/main)
+          # Fail closed unless origin/main resolved to an exact 40-char SHA.
+          [ "${#base_sha}" -eq 40 ] || { echo "origin/main did not resolve to a full SHA: $base_sha" >&2; exit 1; }
+          echo "sha=$base_sha" >> "$GITHUB_OUTPUT"
+
+      - name: Differential dependency review (blocks newly introduced High/Critical)
+        uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294  # v5.0.0
+        with:
+          fail-on-severity: high
+          fail-on-scopes: unknown,runtime,development
+          license-check: false
+          vulnerability-check: true
+          base-ref: ${{ github.event_name == 'push' && steps.trusted-base.outputs.sha || '' }}
+          head-ref: ${{ github.event_name == 'push' && github.sha || '' }}
+          retry-on-snapshot-warnings: true
+          retry-on-snapshot-warnings-timeout: 300
+
       # node-version: '24' + check-latest: true installs the latest 24.x (24.21.0
       # today), which is >= 24.15.0 — the floor the unit suite actually needs,
       # because test/lib/module-mock.ts uses mock.module's exports option that
@@ -70,7 +117,7 @@ jobs:
       # floor for shipped code, not the test floor); raising it is outside this
       # mission's Restricted Areas (package.json).
       - name: Set up Node (>= 24.15.0)
-        uses: actions/setup-node@v7
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020  # v7.0.0
         with:
           node-version: '24'
           check-latest: true
@@ -89,6 +136,75 @@ jobs:
           # explicit opt-out the task-2513 confinement gate blocks every
           # mutating launch (even mocked ones). Confinement tests pin the probe.
           PARALLIX_NO_BUBBLEWRAP: '1'
+          # TASK-2547: coverage is a reporting mode of this CI-safe execution, not
+          # a second pass. Unit and integration-ci each run once with Node's built
+          # in coverage, emitting one lcov per tier that `npm run coverage:merge`
+          # unions. The per-test --test-timeout safety net stays; the local budget
+          # reporter is dropped on hosted runners (TASK-2542).
+          PARALLIX_TEST_COVERAGE: '1'
+
+      # Coverage for the scan comes from the CI-safe execution above (each CI-safe
+      # test runs once with Node built in coverage); this step only sources the
+      # token. `npm run coverage:merge` unions the per-tier LCOV fragments into
+      # coverage/lcov.info, and the SonarQube quality gate owns the required 90%
+      # coverage condition for new code (no legacy whole-tree threshold, SC7).
+      #
+      # Runs on trusted code only: push events and same-repo pull requests.
+      # GitHub Actions rejects the secrets context in a step-level if: conditional,
+      # so the guard branches on the event/repodata context rather than on the
+      # secret. Untrusted fork pull requests — which never receive repository
+      # secrets — are skipped and not blocked, and no secret is reachable from
+      # untrusted code. On trusted runs a missing token fails the job clearly
+      # (F2), so SonarQube stays mandatory where it can run.
+      - name: Ensure SONAR_TOKEN configured (trusted runs only)
+        if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+        run: |
+          if [ -z "${SONAR_TOKEN}" ]; then
+            echo '::error::SONAR_TOKEN environment secret is not configured'
+            exit 1
+          fi
+      # Identity per ADR 0060: `npm run sonar` is the single SonarQube Cloud
+      # entrypoint shared with local mission verification (organization
+      # oxtan-maker, project parallix). On GitHub the entrypoint does not send a
+      # branch: the scanner's CI integration derives branch/pull-request identity
+      # from the event, so a pull_request run is analysed as its pull request
+      # rather than as the detached merge commit. Only SONAR_TOKEN is required —
+      # the Cloud host lives in sonar-project.properties, not in a secret. The
+      # mandatory gate rule (new_violations > 0) is unchanged.
+      # TASK-2547: union the per-tier LCOV fragments (coverage/.lcov-unit.info,
+      # coverage/.lcov-integration-ci.info) written by the coverage-aware CI-safe
+      # execution into one Sonar-consumable coverage/lcov.info. No second test
+      # pass runs here.
+      - name: Merge CI-safe coverage into one LCOV report
+        run: npm run coverage:merge
+      - name: Run mandatory SonarQube quality gate
+        if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository
+        run: npm run sonar > "$GITHUB_WORKSPACE/sonar-quality-gate.log" 2>&1
+        env:
+          CI: 'true'
+          PARALLIX_NO_BUBBLEWRAP: '1'
+          # Secrets arrive only through the GitHub secrets context, never a
+          # literal value. Scoped to the scan step (least privilege): the broad
+          # test:ci and npm ci steps do not inherit SONAR_TOKEN. It is never
+          # committed, emitted to logs, nor made available to untrusted
+          # pull-request code.
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+      - name: Publish SonarQube quality gate result
+        if: always()
+        run: |
+          if [ -f "$GITHUB_WORKSPACE/sonar-quality-gate.log" ]; then
+            {
+              printf '## SonarQube quality gate\n\n```\n'
+              tail -n 60 "$GITHUB_WORKSPACE/sonar-quality-gate.log"
+              printf '```\n'
+            } >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo '## SonarQube quality gate' >> "$GITHUB_STEP_SUMMARY"
+            echo '' >> "$GITHUB_STEP_SUMMARY"
+            echo '_Skipped: untrusted fork pull request (no repository secrets available)._' >> "$GITHUB_STEP_SUMMARY"
+          fi
 
   release:
     needs: ci-required
@@ -99,13 +215,13 @@ jobs:
       id-token: write
     steps:
       - name: Check out the verified triggering SHA
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           ref: ${{ github.sha }}
           fetch-depth: 0
 
       - name: Set up Node 24 for npm Trusted Publishing
-        uses: actions/setup-node@v7
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020  # v7.0.0
         with:
           node-version: '24'
           check-latest: true

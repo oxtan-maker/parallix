@@ -88,6 +88,7 @@
     "sonarqube-scanner": "^5.0.0",
     "tsx": "4.20.6",
     "typescript": "^5.9.3",
-    "vite": "^7.3.6"
+    "vite": "^7.3.6",
+    "yayson": "^4.2.0"
   }
 }
