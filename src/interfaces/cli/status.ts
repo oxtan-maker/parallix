@@ -178,13 +178,20 @@ function logStaleWorktrees(result: StatusResult, log: (_msg: string) => void): v
   }
 }
 
-function logAgentMatrix(result: StatusResult, log: (_msg: string) => void): void {
-  log('Agent launcher matrix:');
-  for (const entry of result.agentMatrix) {
-    const support = entry.supported ? 'supported' : 'blocked';
-    const draftMark = entry.draftEligible ? 'draft' : '-';
-    const activeMark = entry.activeEligible ? 'active' : '-';
-    log(`  ${fmt.agent(entry.agent)}: ${support} | eligible: ${draftMark},${activeMark}`);
+function describeBlock(block: NonNullable<StatusResult['agents']>[number]['block']): string {
+  if (block.kind === 'none') { return 'available'; }
+  const reason = block.reason ? ` (${block.reason})` : '';
+  return block.kind === 'until' ? `blocked until ${new Date(block.untilMs).toISOString()}${reason}` : `blocked${reason}`;
+}
+
+function logAgents(result: StatusResult, log: (_msg: string) => void): void {
+  if (result.agents === null) {
+    log('Agents: unknown (operator database unavailable)');
+    return;
+  }
+  log('Agents:');
+  for (const entry of result.agents) {
+    log(`  ${fmt.agent(entry.agent)}: ${describeBlock(entry.block)}`);
   }
   if (result.agentOverride) { log(`  (WORKFLOW_AGENT override: ${fmt.agent(result.agentOverride)})`); }
 }
@@ -206,7 +213,7 @@ export function renderStatus(result: StatusResult, log: (_msg: string) => void):
   }
 
   logStaleWorktrees(result, log);
-  logAgentMatrix(result, log);
+  logAgents(result, log);
 
   log('Last 3 commits:');
   for (const c of result.lastThreeCommits) { log(`  - ${c}`); }

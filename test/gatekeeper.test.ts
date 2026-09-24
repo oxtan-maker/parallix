@@ -59,6 +59,20 @@ test('checkMandatoryFiles flags missing MISSION.md', () => {
   });
 });
 
+test('checkMandatoryFiles does not require checkpoint documents when the checkpoints are recorded in Mission state', () => {
+  withTempRoot(rootDir => {
+    const missionDir = path.join(rootDir, 'missions', 'task-gk-typed');
+    fs.mkdirSync(missionDir, { recursive: true });
+    fs.writeFileSync(path.join(missionDir, 'MISSION.md'), '# Mission');
+    const tasksDir = path.join(rootDir, 'backlog', 'tasks');
+    fs.mkdirSync(tasksDir, { recursive: true });
+    fs.writeFileSync(path.join(tasksDir, 'task-gk-typed - test task.md'), 'status: active');
+
+    assert.ok(!gatekeeper.checkMandatoryFiles('task-gk-typed', { rootDir }).ok, 'a legacy mission still needs CP-*.md');
+    assert.deepStrictEqual(gatekeeper.checkMandatoryFiles('task-gk-typed', { rootDir, checkpointsRecorded: true }), { ok: true, missing: [] });
+  });
+});
+
 test('checkMandatoryFiles flags missing checkpoint documents', () => {
   withTempRoot(rootDir => {
     const missionDir = path.join(rootDir, 'docs', 'missions', '2026', 'task-gk-003');

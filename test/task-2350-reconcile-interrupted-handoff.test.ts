@@ -82,9 +82,9 @@ test('px review reconciles canonical inputs then reaches the reviewer-launch bou
       startReviewLoopFn: async () => { launched = true; },
     };
     await review([slug, '--start'], options);
-    assert.equal(launched, false, 'the missing aggregate stops launch');
-    assert.match(logs.join('\n'), /--reconcile-review/);
+    assert.equal(launched, true, 'a fresh start may rerun handoff to complete the Review');
 
+    launched = false;
     logs.length = 0;
     await review([slug, '--reconcile-review', '--branch', 'mission/task-2350-command', '--target', 'main', '--reviewer', 'codex', '--implementer', 'claude', '--revision', 'def456', '--eligible-reviewer', 'codex'], options);
     assert.match(logs.join('\n'), /Reconciled round-one review/);

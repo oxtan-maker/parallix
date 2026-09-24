@@ -259,7 +259,7 @@ function reportRebaseAlreadyInProgress(existingRebase: any, branch: string, port
 }
 
 async function performPush(ctx: RebaseContext): Promise<void> {
-  const { port, slug, branch, executionRoot, isPush, recordedImplementer } = ctx;
+  const { port, slug, branch, area, executionRoot, isPush, recordedImplementer } = ctx;
   if (!isPush) { return; }
   if (!port.isForgejoReviewEnabled(executionRoot)) {
     fmt.log.info(`Skipping Forgejo push (review provider is not forgejo).`);
@@ -274,7 +274,10 @@ async function performPush(ctx: RebaseContext): Promise<void> {
     port.exit(1);
     return;
   }
-  const result = port.createPr(branch, forgejoUser || 'default', token, { rootDir: executionRoot, forceWithLease: true });
+  // The push-time gate verifies the mission's area, the same one handoff
+  // verification ran and the gate evidence reports — never the configured
+  // defaultArea createPr falls back to when no area is given.
+  const result = port.createPr(branch, forgejoUser || 'default', token, { rootDir: executionRoot, forceWithLease: true, verificationArea: area });
   if (!result.ok) {
     fmt.log.fail(`Push to Forgejo failed: ${result.error}`);
     port.exit(1);

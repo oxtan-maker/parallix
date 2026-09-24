@@ -149,6 +149,10 @@ export interface IntegrationGateRunResult {
 export interface IntegrationGateRoute {
   readonly route: string;
   readonly rebounds?: number;
+  /** Set on `revision-changed`: the revision the repair left behind. */
+  readonly repairedRevision?: string;
+  /** Set on `revision-changed`: whether every standing approval was retracted. */
+  readonly invalidation?: { readonly ok: boolean };
 }
 
 export interface IntegrateGatesPort {

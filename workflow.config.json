@@ -17,6 +17,7 @@
     },
     "verification": { "command": "./scripts/verify-local.sh {{area}}", "defaultArea": "all" },
     "review": { "provider": "forgejo", "baseUrl": "http://localhost:3300", "remote": "review", "repo": "magnus/parallix" },
+    "draft": { "preDraftCommand": "npm ci --no-audit --no-fund --prefer-offline" },
     "integrate": { "preCommitCommand": "./scripts/bump-version.sh", "postIntegrateCommand": "./scripts/refresh-global-px.sh" },
     "gates": {
       "requirePreIntegration": true,

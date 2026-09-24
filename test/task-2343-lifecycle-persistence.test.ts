@@ -225,6 +225,22 @@ test('a state carrying no PR reference leaves the aggregate change untouched', (
   assert.equal(reviewStateDataFrom(applied).pullRequest, null);
 });
 
+test('a stale loop write preserves a verdict recorded during reviewer launch', () => {
+  const review = reviewWithLocalBranch();
+  const decided = {
+    ...review,
+    rounds: [{ ...review.rounds[0], reviewer: agentFamily('codex'), phase: 'approved' as const,
+      disposition: 'APPROVED' as const,
+      decision: { kind: 'approved' as const, decidedAt: '2026-08-01T11:00:00.000Z', comment: 'passed', source: { kind: 'local' as const } },
+    }],
+  } as Review;
+  const saved = applyReviewStateToReview(decided, { round: 1, phase: 'reviewing', reviewer: 'codex' });
+
+  assert.deepEqual(saved.rounds[0].decision, decided.rounds[0].decision);
+  assert.equal(saved.rounds[0].phase, 'approved');
+  assert.equal(saved.rounds[0].disposition, 'APPROVED');
+});
+
 test('an invalid PR reference is refused rather than written onto the round', () => {
   const applied = applyReviewStateToReview(reviewWithLocalBranch(), {
     pullRequest: {

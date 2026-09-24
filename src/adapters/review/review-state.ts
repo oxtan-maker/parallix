@@ -29,7 +29,7 @@ import { agentFamily } from '../../domain/agents.js';
 import { changeRevision, ConfiguredReviewerEligibility, startReview } from '../../domain/review.js';
 import { applyReviewStateToReview, reviewStateDataFrom } from './review-state-mapping.js';
 import type { MissionLifecycleService } from '../../application/mission-lifecycle-service.js';
-import type { MissionStore } from '../../application/domain-ports.js';
+import type { MissionStore, SessionMarkerPort } from '../../application/domain-ports.js';
 import type {
   PullRequestReference,
   ReviewEventRecord,
@@ -917,6 +917,7 @@ export async function resetReviewState(
   slug: string,
   worktree = resolveWorktree(slug) || process.cwd(),
   missionStore?: MissionStore | null,
+  sessionMarkerPort?: SessionMarkerPort | null,
 ): Promise<ReviewStatePersistenceResult> {
   try {
     const store = await resolveMissionStore(worktree, missionStore);
@@ -930,6 +931,9 @@ export async function resetReviewState(
     const rounds = [...review.rounds];
     rounds[rounds.length - 1] = {
       ...rounds[rounds.length - 1],
+      // A reset retries an undecided round. Start a new observation window so
+      // its earlier provider verdict cannot be mistaken for the retry's verdict.
+      ...(!rounds[rounds.length - 1].decision ? { startedAt: new Date().toISOString() } : {}),
       phase: 'reviewing',
       disposition: null,
     };
@@ -943,6 +947,7 @@ export async function resetReviewState(
         stageLaunches: [],
       },
     }, result.version);
+    await sessionMarkerPort?.delete(missionId(slug), 'review');
     return { outcome: 'committed' };
   } catch (error) {
     return { outcome: 'write-failed', stage: 'write', diagnostic: diagnosticFrom(error, 'Review-state reset failed') };

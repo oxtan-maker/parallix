@@ -44,7 +44,7 @@ test('renderStatus: renders branch, worktree, and separator', () => {
     prInfo: null,
     staleWorktrees: [],
     staleWorktreeRebase: {},
-    agentMatrix: [],
+    agents: [],
     lastThreeCommits: [],
     uncommittedCount: 0,
   };
@@ -83,7 +83,7 @@ test('renderStatus: renders mission data with backlog, checkpoint, and review', 
     prInfo: { exists: true, number: 42, state: 'open' },
     staleWorktrees: [],
     staleWorktreeRebase: {},
-    agentMatrix: [],
+    agents: [],
     lastThreeCommits: [],
     uncommittedCount: 0,
   };
@@ -107,7 +107,7 @@ test('renderStatus: renders fallback when projection unavailable', () => {
     prInfo: { exists: false },
     staleWorktrees: [],
     staleWorktreeRebase: {},
-    agentMatrix: [],
+    agents: [],
     lastThreeCommits: [],
     uncommittedCount: 0,
   };
@@ -136,7 +136,7 @@ test('renderStatus: renders stale worktrees with rebase and cleanup', () => {
     staleWorktreeRebase: {
       '/tmp/task-stale': { inProgress: true, detached: true, unmergedFiles: ['file1.ts'] },
     },
-    agentMatrix: [],
+    agents: [],
     lastThreeCommits: [],
     uncommittedCount: 0,
   };
@@ -147,7 +147,7 @@ test('renderStatus: renders stale worktrees with rebase and cleanup', () => {
   assert.ok(lines.some(l => l.includes('Cleanup:')), 'should render cleanup command');
 });
 
-test('renderStatus: renders agent launcher matrix', () => {
+test('renderStatus: renders configured agents with their operator-database blocks', () => {
   const lines: string[] = [];
   const result: StatusResult = {
     branch: 'main',
@@ -158,19 +158,30 @@ test('renderStatus: renders agent launcher matrix', () => {
     prInfo: null,
     staleWorktrees: [],
     staleWorktreeRebase: {},
-    agentMatrix: [
-      { agent: 'codex', supported: true, draftEligible: true, activeEligible: true },
-      { agent: 'gemini', supported: false, draftEligible: false, activeEligible: true },
+    agents: [
+      { agent: 'codex', block: { kind: 'none' } },
+      { agent: 'qwen', block: { kind: 'indefinite', reason: 'quota' } },
+      { agent: 'vibe', block: { kind: 'until', untilMs: Date.parse('2026-09-24T00:00:00.000Z'), reason: null } },
     ],
     agentOverride: 'codex',
     lastThreeCommits: [],
     uncommittedCount: 0,
   };
   renderStatus(result, (msg) => lines.push(msg));
-  assert.ok(lines.some(l => l.includes('Agent launcher matrix:')), 'should render matrix header');
-  assert.ok(lines.some(l => l.includes('codex: supported | eligible: draft,active')), 'should render supported agent');
-  assert.ok(lines.some(l => l.includes('gemini: blocked | eligible: -,active')), 'should render blocked agent');
+  assert.ok(lines.includes('Agents:'), 'should render the agents header');
+  assert.ok(lines.some(l => l.includes('codex: available')), 'should render an unblocked agent');
+  assert.ok(lines.some(l => l.includes('qwen: blocked (quota)')), 'should render an indefinite block with its reason');
+  assert.ok(lines.some(l => l.includes('vibe: blocked until 2026-09-24T00:00:00.000Z')), 'should render a timed block');
   assert.ok(lines.some(l => l.includes('WORKFLOW_AGENT override:')), 'should render env override');
+});
+
+test('renderStatus: says agent blocks are unknown when the operator database is unavailable', () => {
+  const lines: string[] = [];
+  renderStatus({
+    branch: 'main', worktree: '/tmp/repo', rebaseInfo: null, slug: null, missionData: null, prInfo: null,
+    staleWorktrees: [], staleWorktreeRebase: {}, agents: null, lastThreeCommits: [], uncommittedCount: 0,
+  }, (msg) => lines.push(msg));
+  assert.ok(lines.includes('Agents: unknown (operator database unavailable)'));
 });
 
 test('renderStatus: renders detached HEAD rebase diagnostics', () => {
@@ -184,7 +195,7 @@ test('renderStatus: renders detached HEAD rebase diagnostics', () => {
     prInfo: null,
     staleWorktrees: [],
     staleWorktreeRebase: {},
-    agentMatrix: [],
+    agents: [],
     lastThreeCommits: [],
     uncommittedCount: 0,
   };
@@ -205,7 +216,7 @@ test('renderStatus: renders commits and uncommitted count', () => {
     prInfo: null,
     staleWorktrees: [],
     staleWorktreeRebase: {},
-    agentMatrix: [],
+    agents: [],
     lastThreeCommits: ['commit-a', 'commit-b', 'commit-c'],
     uncommittedCount: 3,
   };
@@ -242,7 +253,7 @@ test('StatusCommandUseCase: returns board projection from mocked ports', async (
     getPrInfo() { return { exists: true, number: 10, state: 'open' }; },
   };
   const mockAgent: StatusAgentPort = {
-    getAgentMatrix() { return [{ agent: 'codex', supported: true, draftEligible: true, activeEligible: true }]; },
+    async getAgents() { return [{ agent: 'codex', block: { kind: 'none' as const } }]; },
     getAgentOverride() { return undefined; },
   };
   const mockStale: StatusStaleWorktreesPort = {
@@ -261,8 +272,8 @@ test('StatusCommandUseCase: returns board projection from mocked ports', async (
   assert.equal(result.missionData!.checkpoint, 'CP-1.md');
   assert.ok(result.prInfo!.exists, 'should have PR');
   assert.equal(result.prInfo!.number, 10);
-  assert.equal(result.agentMatrix.length, 1);
-  assert.equal(result.agentMatrix[0].agent, 'codex');
+  assert.equal(result.agents!.length, 1);
+  assert.equal(result.agents![0].agent, 'codex');
 });
 
 test('StatusCommandUseCase: passes null slug for inferred status', async () => {
@@ -275,7 +286,7 @@ test('StatusCommandUseCase: passes null slug for inferred status', async () => {
     getUncommittedCount() { return 0; },
   };
   const mockPr: StatusPrPort = { getPrInfo() { return null; } };
-  const mockAgent: StatusAgentPort = { getAgentMatrix() { return []; }, getAgentOverride() { return undefined; } };
+  const mockAgent: StatusAgentPort = { async getAgents() { return []; }, getAgentOverride() { return undefined; } };
   const mockStale: StatusStaleWorktreesPort = { findStaleWorktrees() { return []; }, getStaleWorktreeRebase() { return {}; } };
 
   const useCase = new StatusCommandUseCase(mockBoard, mockGit, mockPr, mockAgent, mockStale);
@@ -306,7 +317,7 @@ test('StatusCommandUseCase: infers slug when null and resolves mission data', as
     getUncommittedCount() { return 0; },
   };
   const mockPr: StatusPrPort = { getPrInfo() { return { exists: true, number: 1, state: 'open' }; } };
-  const mockAgent: StatusAgentPort = { getAgentMatrix() { return []; }, getAgentOverride() { return undefined; } };
+  const mockAgent: StatusAgentPort = { async getAgents() { return []; }, getAgentOverride() { return undefined; } };
   const mockStale: StatusStaleWorktreesPort = { findStaleWorktrees() { return []; }, getStaleWorktreeRebase() { return {}; } };
 
   const useCase = new StatusCommandUseCase(mockBoard, mockGit, mockPr, mockAgent, mockStale);
@@ -345,7 +356,7 @@ test('createStatusCommand: renders status and exits 0', async () => {
     getUncommittedCount() { return 0; },
   };
   const mockPr: StatusPrPort = { getPrInfo() { return { exists: false }; } };
-  const mockAgent: StatusAgentPort = { getAgentMatrix() { return []; }, getAgentOverride() { return undefined; } };
+  const mockAgent: StatusAgentPort = { async getAgents() { return []; }, getAgentOverride() { return undefined; } };
   const mockStale: StatusStaleWorktreesPort = { findStaleWorktrees() { return []; }, getStaleWorktreeRebase() { return {}; } };
 
   const useCase = new StatusCommandUseCase(mockBoard, mockGit, mockPr, mockAgent, mockStale);
@@ -391,7 +402,7 @@ test('createStatusCommand: no-argument invocation renders inferred mission outpu
     getUncommittedCount() { return 0; },
   };
   const mockPr: StatusPrPort = { getPrInfo() { return { exists: true, number: 247, state: 'open' }; } };
-  const mockAgent: StatusAgentPort = { getAgentMatrix() { return []; }, getAgentOverride() { return undefined; } };
+  const mockAgent: StatusAgentPort = { async getAgents() { return []; }, getAgentOverride() { return undefined; } };
   const mockStale: StatusStaleWorktreesPort = { findStaleWorktrees() { return []; }, getStaleWorktreeRebase() { return {}; } };
 
   const useCase = new StatusCommandUseCase(mockBoard, mockGit, mockPr, mockAgent, mockStale);
@@ -429,7 +440,7 @@ test('createStatusCommand: exits 1 on parse error', async () => {
   const mockBoard: StatusBoardPort = { inferSlug() { return null; }, async getMissionData() { return null; } };
   const mockGit: StatusGitPort = { getCurrentBranch() { return ''; }, missionBranchName(slug: string) { return 'mission/' + slug; }, getRebaseInfo() { return null; }, getLastThreeCommits() { return []; }, getUncommittedCount() { return 0; } };
   const mockPr: StatusPrPort = { getPrInfo() { return null; } };
-  const mockAgent: StatusAgentPort = { getAgentMatrix() { return []; }, getAgentOverride() { return undefined; } };
+  const mockAgent: StatusAgentPort = { async getAgents() { return []; }, getAgentOverride() { return undefined; } };
   const mockStale: StatusStaleWorktreesPort = { findStaleWorktrees() { return []; }, getStaleWorktreeRebase() { return {}; } };
 
   const cmd = createStatusCommand(new StatusCommandUseCase(mockBoard, mockGit, mockPr, mockAgent, mockStale));

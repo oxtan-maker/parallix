@@ -105,6 +105,7 @@ function roundFromState(state: ReviewStateData, previous: ReviewRound): ReviewRo
   const startedAt = typeof state.startedAt === 'string' && state.startedAt.trim()
     ? state.startedAt
     : previous.startedAt;
+  const staleUndecided = Boolean(previous.decision && phase === 'reviewing' && !disposition);
   return {
     ...previous,
     number: typeof state.round === 'number' && state.round > 0 ? Math.floor(state.round) : previous.number,
@@ -112,10 +113,12 @@ function roundFromState(state: ReviewStateData, previous: ReviewRound): ReviewRo
     implementer: familyFrom(state.implementer, previous.implementer),
     subject: subjectFromState(state, previous),
     startedAt,
-    decision: decisionFromState(phase, state.disposition ?? null, startedAt, previous.decision),
-    response: null,
-    phase,
-    disposition,
+    // Typed verdicts and resolutions may commit while an agent is running.
+    // Its older flat loop state can update identity, but never erase a decision.
+    decision: decisionFromState(phase, state.disposition ?? null, startedAt, previous.decision) ?? previous.decision,
+    response: previous.response,
+    phase: staleUndecided ? previous.phase : phase,
+    disposition: staleUndecided ? previous.disposition : disposition,
     // TASK-2377.04: the flat loop state no longer carries the round retry
     // counters (the persisted review-state fields were deleted), so a state
     // update never rewrites them: historical round values round-trip

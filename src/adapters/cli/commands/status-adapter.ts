@@ -8,8 +8,6 @@ import type {
   StatusPrPort,
   StatusAgentPort,
   StatusStaleWorktreesPort,
-  StatusWorkflowPort,
-  StatusResult,
   StatusMissionData,
   StatusPrInfo,
   StatusStaleWorktree,
@@ -18,53 +16,22 @@ import type {
 } from '../../../application/ports/cli-workflows.js';
 import { detectRebaseState, getCurrentBranch, getUncommittedCount, getLastThreeCommits, run } from '../../git/git.js';
 import { findTaskFile, getTaskStatus } from '../../backlog/backlog.js';
-import { compareCodeUnits } from '../../../domain/comparators.js';
 import {
   getPrimaryWorktree,
   inferSlug,
   missionBranchName,
   missionBranchPrefix,
 } from '../../filesystem/mission-utils.js';
-import { WORKFLOW_AGENT_NAMES, eligibleAgentsForStep, readAgentConfigOrExit, workflowLauncherStatus } from '../../agents/agents.js';
+import { ConcreteAgentReadAdapter } from '../../backlog/concrete-agent-read-adapter.js';
+import { knownAgentFamiliesFromConfig } from '../../agents/known-agent-families.js';
+import { readAgentConfig } from '../../agents/agent-config.js';
+import type { AgentBlocklistRepository } from '../../../application/ports/agent-blocklist.js';
+import type { AgentFamily } from '../../../domain/agents.js';
 import { getPrStatus } from '../../forgejo/forgejo.js';
 import type { BoardProjectionBuilder } from '../../../application/projections/board-readers.js';
 import type { MissionId } from '../../../domain/mission.js';
 import { projectMissionActivity, type MissionActivitySource } from '../../../application/projections/mission-activity.js';
 import { latestEvidencedCheckpoint } from '../../../domain/checkpoint.js';
-
-/** Factory options for creating the status workflow adapter. */
-export interface StatusWorkflowAdapterOptions {
-  /** Build BoardProjectionBuilder for the given root directory. */
-  readonly buildProjectionFn: (_rootDir: string) => Promise<BoardProjectionBuilder>;
-  /** Infer mission slug from explicit input. */
-  readonly inferSlugFn?: (_explicit?: string) => string | null;
-  /** Get current git branch. */
-  readonly getCurrentBranchFn?: () => string;
-  /** Get PR status for a branch. */
-  readonly getPrStatusFn?: (_branch: string) => { exists: boolean; number?: number; state?: string; raw?: string };
-  /** Read agent configuration. */
-  readonly readAgentConfigOrExitFn?: () => unknown;
-  /** Get eligible agents for a workflow step. */
-  readonly eligibleAgentsForStepFn?: (_step: string, _opts?: unknown) => string[];
-  /** Get all workflow agent names. */
-  readonly allWorkflowAgentNamesFn?: () => string[];
-  /** Get workflow launcher status for an agent. */
-  readonly workflowLauncherStatusFn?: (_agent: string) => { supported: boolean };
-  /** Get last three commit messages. */
-  readonly getLastThreeCommitsFn?: () => string[];
-  /** Get count of uncommitted files. */
-  readonly getUncommittedCountFn?: () => number;
-  /** Detect rebase state for a worktree path. */
-  readonly detectRebaseStateFn?: (_path: string) => { inProgress: boolean; detached: boolean; unmergedFiles: string[] };
-  /** Git run function. */
-  readonly gitRun?: typeof run;
-  /** Find task file for a slug. */
-  readonly findTaskFileFn?: typeof findTaskFile;
-  /** Get task status from a task file. */
-  readonly getTaskStatusFn?: typeof getTaskStatus;
-  /** Primary worktree path (for stale detection). */
-  readonly primaryWorktree?: string | null;
-}
 
 function parseWorktreeList(porcelain: string) {
   const entries: { path: string; branch: string | null }[] = [];
@@ -125,134 +92,6 @@ function findStaleMissionWorktrees(opts: {
       };
     })
     .filter(Boolean) as StatusStaleWorktree[];
-}
-
-function currentRebaseInfo(rootDir: string, detectRebaseStateFn: NonNullable<StatusWorkflowAdapterOptions['detectRebaseStateFn']>): StatusRebaseInfo | null {
-  try {
-    const state = detectRebaseStateFn(rootDir);
-    return state.inProgress && state.detached
-      ? { inProgress: state.inProgress, detached: state.detached, unmergedFiles: state.unmergedFiles }
-      : null;
-  } catch { return null; }
-}
-
-async function missionStatus(
-  slug: string | null,
-  rootDir: string,
-  buildProjectionFn: StatusWorkflowAdapterOptions['buildProjectionFn'],
-  getPrStatusFn: NonNullable<StatusWorkflowAdapterOptions['getPrStatusFn']>,
-): Promise<{ missionData: StatusMissionData | null; prInfo: StatusPrInfo | null }> {
-  if (!slug) { return { missionData: null, prInfo: null }; }
-  let missionData: StatusMissionData | null = null;
-  let prInfo: StatusPrInfo | null = null;
-  try {
-    const projection = await buildProjectionFn(rootDir).then(builder => builder.build()).catch(() => null);
-    const card = projection?.stages.flatMap(stage => stage.cards).find(card => (card as any).id.toLowerCase() === slug.toLowerCase());
-    if (card) {
-      missionData = {
-        activity: projectMissionActivity(card as MissionActivitySource),
-        backlogStatus: (card as any).rawStatus ?? (card as any).status,
-        checkpoint: (card as any).checkpoint,
-        checkpointDescription: (card as any).checkpointDescription,
-        reviewPhase: (card as any).reviewPhase,
-        reviewRound: (card as any).reviewRound,
-        reviewDisposition: (card as any).reviewDisposition,
-        approvalOwed: (card as any).approvalOwed,
-        reviewHistory: ((card as any).reviewHistory || []).map((review: any) => ({
-          number: review.number, reviewer: review.reviewer, implementer: review.implementer,
-          disposition: review.disposition ?? 'pending', comment: review.comment,
-          findingSummaries: review.findingSummaries || [], fixes: review.fixes || [], pushbacks: review.pushbacks || [],
-        })),
-      };
-    }
-  } catch { /* projection unavailable */ }
-  try { prInfo = getPrStatusFn(missionBranchName(slug)); } catch { prInfo = { exists: false }; }
-  return { missionData, prInfo };
-}
-
-function staleWorktreeStatus(
-  explicitSlug: string | null,
-  options: StatusWorkflowAdapterOptions,
-  gitRun: typeof run,
-  findTaskFileFn: typeof findTaskFile,
-  getTaskStatusFn: typeof getTaskStatus,
-  detectRebaseStateFn: NonNullable<StatusWorkflowAdapterOptions['detectRebaseStateFn']>,
-): { staleWorktrees: StatusStaleWorktree[]; staleWorktreeRebase: Record<string, StatusRebaseInfo | null> } {
-  if (explicitSlug) { return { staleWorktrees: [], staleWorktreeRebase: {} }; }
-  let primaryWorktree = options.primaryWorktree ?? null;
-  if (!primaryWorktree) { try { primaryWorktree = getPrimaryWorktree(); } catch { primaryWorktree = null; } }
-  const staleWorktrees = findStaleMissionWorktrees({ gitRun, findTaskFileFn, getTaskStatusFn, primaryWorktree });
-  const staleWorktreeRebase: Record<string, StatusRebaseInfo | null> = {};
-  for (const worktree of staleWorktrees) {
-    try {
-      const state = detectRebaseStateFn(worktree.path);
-      if (state.inProgress) { staleWorktreeRebase[worktree.path] = { inProgress: state.inProgress, detached: state.detached, unmergedFiles: state.unmergedFiles }; }
-    } catch { /* ignore disappearing worktrees */ }
-  }
-  return { staleWorktrees, staleWorktreeRebase };
-}
-
-/** Create a concrete StatusWorkflowPort implementation. */
-export function createStatusWorkflowAdapter(options: StatusWorkflowAdapterOptions): StatusWorkflowPort {
-  const inferSlugFn = options.inferSlugFn || inferSlug;
-  const getCurrentBranchFn = options.getCurrentBranchFn || getCurrentBranch;
-  const getPrStatusFn = options.getPrStatusFn || getPrStatus;
-  const readAgentConfigOrExitFn = options.readAgentConfigOrExitFn || readAgentConfigOrExit;
-  const eligibleAgentsForStepFn = options.eligibleAgentsForStepFn || eligibleAgentsForStep;
-  const allWorkflowAgentNamesFn = options.allWorkflowAgentNamesFn || (() => WORKFLOW_AGENT_NAMES);
-  const workflowLauncherStatusFn = options.workflowLauncherStatusFn || workflowLauncherStatus;
-  const getLastThreeCommitsFn = options.getLastThreeCommitsFn || getLastThreeCommits;
-  const getUncommittedCountFn = options.getUncommittedCountFn || getUncommittedCount;
-  const detectRebaseStateFn = options.detectRebaseStateFn || detectRebaseState;
-  const gitRun = options.gitRun || run;
-  const findTaskFileFn = options.findTaskFileFn || findTaskFile;
-  const getTaskStatusFn = options.getTaskStatusFn || getTaskStatus;
-
-  return {
-    async getStatus(slug: string | null, rootDir: string): Promise<StatusResult> {
-      const explicitSlug = slug;
-      const resolvedSlug = inferSlugFn(slug || undefined);
-      const branch = getCurrentBranchFn();
-      const rebaseInfo = currentRebaseInfo(rootDir, detectRebaseStateFn);
-      const { missionData, prInfo } = await missionStatus(resolvedSlug, rootDir, options.buildProjectionFn, getPrStatusFn);
-      const { staleWorktrees, staleWorktreeRebase } = staleWorktreeStatus(
-        explicitSlug, options, gitRun, findTaskFileFn, getTaskStatusFn, detectRebaseStateFn,
-      );
-
-      // Agent launcher matrix
-      const config = readAgentConfigOrExitFn();
-      const draftEligible = eligibleAgentsForStepFn('draft', { config: config as any });
-      const activeEligible = eligibleAgentsForStepFn('active', { config: config as any });
-      const baseAgents = allWorkflowAgentNamesFn();
-      const allAgents = [...new Set([...baseAgents, ...draftEligible, ...activeEligible])].sort(compareCodeUnits);
-      const agentMatrix: StatusAgentEntry[] = allAgents.map(agent => ({
-        agent,
-        supported: workflowLauncherStatusFn(agent).supported,
-        draftEligible: draftEligible.includes(agent),
-        activeEligible: activeEligible.includes(agent),
-      }));
-      const agentOverride = process.env.WORKFLOW_AGENT;
-
-      // Commits and uncommitted
-      const lastThreeCommits = getLastThreeCommitsFn();
-      const uncommittedCount = getUncommittedCountFn();
-
-      return {
-        branch,
-        worktree: rootDir,
-        rebaseInfo,
-        slug: resolvedSlug,
-        missionData,
-        prInfo,
-        staleWorktrees,
-        staleWorktreeRebase,
-        agentMatrix,
-        agentOverride,
-        lastThreeCommits,
-        uncommittedCount,
-      };
-    },
-  };
 }
 
 // ---------------------------------------------------------------------------
@@ -422,31 +261,31 @@ export function createStatusPrAdapter(options: {
   };
 }
 
-/** Create a concrete StatusAgentPort implementation. */
+/**
+ * Create a concrete StatusAgentPort implementation.
+ *
+ * Reads availability exactly as the web board does — the configured agent
+ * families and their blocks in the operator database — without spawning any
+ * launcher. Whether a family's CLI answers is decided when it is launched.
+ */
 export function createStatusAgentAdapter(options: {
-  readonly readAgentConfigOrExitFn?: () => unknown;
-  readonly eligibleAgentsForStepFn?: (_step: string, _opts?: unknown) => string[];
-  readonly allWorkflowAgentNamesFn?: () => string[];
-  readonly workflowLauncherStatusFn?: (_agent: string) => { supported: boolean };
-} = {}): StatusAgentPort {
-  const readAgentConfigOrExitFn = options.readAgentConfigOrExitFn || readAgentConfigOrExit;
-  const eligibleAgentsForStepFn = options.eligibleAgentsForStepFn || eligibleAgentsForStep;
-  const allWorkflowAgentNamesFn = options.allWorkflowAgentNamesFn || (() => WORKFLOW_AGENT_NAMES);
-  const workflowLauncherStatusFn = options.workflowLauncherStatusFn || workflowLauncherStatus;
-
+  readonly rootDir: string;
+  /** Null when the operator database is unavailable; status then says so. */
+  readonly blocklistRepo: AgentBlocklistRepository | null;
+  readonly knownAgentFamilies?: readonly AgentFamily[];
+}): StatusAgentPort {
+  const agents = options.blocklistRepo && new ConcreteAgentReadAdapter({
+    rootDir: options.rootDir,
+    blocklistRepo: options.blocklistRepo,
+    // The effective agent config (the working-tree copy, else the bundled
+    // one), so a repository without its own config still reports families.
+    knownAgentFamilies: options.knownAgentFamilies ?? knownAgentFamiliesFromConfig(readAgentConfig()),
+  });
   return {
-    getAgentMatrix(): readonly StatusAgentEntry[] {
-      const config = readAgentConfigOrExitFn();
-      const draftEligible = eligibleAgentsForStepFn('draft', { config: config as any });
-      const activeEligible = eligibleAgentsForStepFn('active', { config: config as any });
-      const baseAgents = allWorkflowAgentNamesFn();
-      const allAgents = [...new Set([...baseAgents, ...draftEligible, ...activeEligible])].sort(compareCodeUnits);
-      return allAgents.map(agent => ({
-        agent,
-        supported: workflowLauncherStatusFn(agent).supported,
-        draftEligible: draftEligible.includes(agent),
-        activeEligible: activeEligible.includes(agent),
-      }));
+    async getAgents(): Promise<readonly StatusAgentEntry[] | null> {
+      if (!agents) { return null; }
+      const availability = await agents.loadAgentAvailability();
+      return availability.map(({ family, block }) => ({ agent: family, block }));
     },
 
     getAgentOverride(): string | undefined {

@@ -135,6 +135,17 @@
             "maxPollAttempts": { "type": ["integer", "null"], "minimum": 1, "description": "Maximum verification polls before giving up. null means poll indefinitely while GitHub is pending. Defaults to null." }
           }
         },
+        "draft": {
+          "type": "object",
+          "description": "Optional draft hooks. When preDraftCommand is unset, `px draft` behaves exactly as it does without this section.",
+          "additionalProperties": true,
+          "properties": {
+            "preDraftCommand": {
+              "type": "string",
+              "description": "Shell command run in a new mission worktree after `px draft` creates it and before any agent or gate runs there, for example to install dependencies. A non-zero exit stops the draft as an environment failure. Receives PRE_DRAFT_HOOK_SLUG and PRE_DRAFT_HOOK_WORKTREE as environment variables. An empty string is the same as unset."
+            }
+          }
+        },
         "integrate": {
           "type": "object",
           "description": "Optional integrate hooks. When preCommitCommand and postIntegrateCommand are unset, `px integrate` behaves exactly as it does without this section.",

@@ -100,10 +100,13 @@ test('buildDraftPrompt requires command-only Gates and relocates outcome prose',
   // TASK-2521.03: gates are recorded as Mission state through `px gate add`
   // rather than written into a `## Gates` checklist. The command-only rule and
   // the prose relocation it enforces are unchanged.
-  assert.match(prompt, /Record each verification gate with `px gate add --command <command>`/);
-  assert.match(prompt, /the exact runnable repository command and nothing else/);
-  assert.match(prompt, /Never append outcome or explanatory prose to a gate command/);
-  assert.match(prompt, /Put outcome expectations in a success criterion \(`px criterion add`\) instead/);
+  // TASK-2561: the rule lives in the contract table's gates row, which also
+  // says why — handoff runs each gate with `bash -c` — and that `px gate add`
+  // refuses a gate that breaks it.
+  assert.match(prompt, /Handoff runs every gate with `bash -c`/);
+  assert.match(prompt, /one exact runnable repository command and nothing else/);
+  assert.match(prompt, /no prose, no `#` comment, no expected outcome/);
+  assert.match(prompt, /an expected outcome belongs in a success criterion/);
 });
 
 test('buildDraftPrompt records the mission contract through typed commands, not a file', () => {

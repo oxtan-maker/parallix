@@ -343,7 +343,7 @@ observation: `live px command[ (<family>)] — recovery evidence only`,
 merged, because a live coordinator is not a running agent.
 
 The known-family list comes from `config/agents.json`
-(`resolveKnownAgentFamilies`, `src/interfaces/tui/agent-config-resolver.ts`):
+(`resolveKnownAgentFamilies`, `src/adapters/agents/known-agent-families.ts`):
 
 - an explicit top-level `families` array is used when the config declares one;
 - otherwise the list is the de-duplicated, sorted union of every
@@ -510,6 +510,24 @@ codebase.
 `px review <slug> --start` enables bounded gate repair by default: it relaunches
 the implementer to fix a failing gate rather than stopping, so starting a review
 no longer depends on a separate handoff step.
+
+A push-time verification gate that fails during handoff is reported as a gate
+failure, with its command, exit code and output, and bounces through the same
+kernel as any other gate failure. It verifies the mission's area, the same one
+handoff verification ran, never the configured default area.
+
+The draft has the same shape at its own boundary. When the drafting agent ends
+without recording every part of the mission contract, `px draft` sends the
+refusal — which names each missing part and the command that records it — back
+to the same agent family, up to twice, keeping everything already recorded. The
+draft fails only when the contract is still incomplete after that.
+
+An integration-gate repair that changes the revision the reviewer approved
+retracts that approval, as before, and then sends the repaired revision back
+through the same review `px review <slug> --start` runs. Nothing is approved on
+the reviewer's behalf and the superseded approval stays in the review history.
+When the new round is approved, `px integrate` starts over once on the approved
+revision; otherwise it stops before the merge with the review outcome.
 
 Three guarantees govern that bounce:
 

@@ -241,6 +241,25 @@ prints it, and `px status` prints it alongside the mission's board state.
 The related branch-model and pre-integration-gate boundaries are described in
 [ADR 0045](adr/0045-parallax-branch-model.md) and [ADR 0041](adr/0041-integration-pipeline-gates.md).
 
+## Draft
+
+A mission worktree is a fresh checkout: nothing the repository installs or
+generates is there yet, so any agent or gate that depends on it fails in the
+worktree. `adapters.draft.preDraftCommand` is an optional string that prepares
+it. `px draft` runs it in the new worktree before any agent or gate runs there,
+with `PRE_DRAFT_HOOK_SLUG` and `PRE_DRAFT_HOOK_WORKTREE` in its environment. A
+failing command stops the draft as an environment failure, before an agent is
+launched; it is not treated as the implementer's failure. Make it idempotent: a
+re-run of the draft runs it again. An empty string is the same as unset.
+
+```json
+{
+  "adapters": {
+    "draft": { "preDraftCommand": "npm ci" }
+  }
+}
+```
+
 ## Integrate
 
 Both integrate hooks are optional strings with no default. Each runs from the

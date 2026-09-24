@@ -15,7 +15,7 @@ import { createIntegrationStrategy } from './services/integration-dispatch.js';
 import { missionId } from '../domain/mission.js';
 import { evaluateTaskStatusForIntegration, recoveryEstablishesApproval, resolveAuthoritativeApprovalAt } from './integrate/approval.js';
 import { createIntegrationContextBuilder } from './integrate/context.js';
-import { createIntegrationGateStep, type IntegrateSeams } from './integrate/gates.js';
+import { createIntegrationGateStep, IntegrationRestartRequired, type IntegrateSeams } from './integrate/gates.js';
 import { createGithubPrLanding } from './integrate/github-pr.js';
 import { createMissionLanding } from './integrate/landing.js';
 import { createIntegrationPreflight } from './integrate/preflight.js';
@@ -277,11 +277,20 @@ export function createIntegrateWorkflow(ports: IntegrateWorkflowPorts) {
       selectAgentFn: options.selectAgentFn ?? ports.agents.selectAgent,
       workflowLauncherStatusFn: options.workflowLauncherStatusFn ?? ports.agents.workflowLauncherStatus,
       routeIntegrationGateFailureFn: options.routeIntegrationGateFailureFn ?? ports.gates.routeIntegrationGateFailure,
+      ...(options.reReviewFn ? { reReviewFn: options.reReviewFn } : {}),
     };
     const state: IntegrateRunState = { temporaryStash: null, nextActionMessage: null };
     let exitCode = 0;
     try {
-      exitCode = await runIntegration(slug, request, options, seams, state);
+      try {
+        exitCode = await runIntegration(slug, request, options, seams, state);
+      } catch (error) {
+        if (!(error instanceof IntegrationRestartRequired)) { throw error; }
+        // One restart only: its own gate repair cannot re-review again, so a
+        // second changed revision stops for the operator instead of looping.
+        fmt.log.info(`Restarting integration of ${slug} on the re-reviewed revision.`);
+        exitCode = await runIntegration(slug, request, options, { ...seams, reReviewFn: undefined }, state);
+      }
     } catch (error) {
       // Report and fail. Rethrowing here is swallowed by the terminal exit
       // port call below, which would end the run with a success code and no

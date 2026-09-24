@@ -57,7 +57,7 @@ test('StatusCommandUseCase: PR lookup uses the requested mission branch, not the
   };
 
   const mockAgent: StatusAgentPort = {
-    getAgentMatrix() { return []; },
+    async getAgents() { return []; },
     getAgentOverride() { return undefined; },
   };
 

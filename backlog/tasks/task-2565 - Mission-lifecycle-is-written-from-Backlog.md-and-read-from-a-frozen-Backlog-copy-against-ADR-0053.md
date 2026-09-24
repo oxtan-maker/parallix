@@ -27,6 +27,8 @@ ADR 0053 makes SQLite-backed Mission state the sole authority for lifecycle (Aut
 
 Observed on task-2547 (operator DB, 2026-09-21): the lane events go review→integration (approve) three times, with no event leaving integration in between. The integration-gate rebound calls `transitionTask(slug, 'active')` (src/application/integrate/gates.ts) to hand the repair to the implementer, and that moved the Mission from integration to active through this write-back. Integrate then found an active Mission holding an approved round and refused with 'stored approval without the required provider approval'.
 
+The real-agent smoke exposed the same gap on a completed typed mission: the Mission reached `done`, but its lane history skipped `refined→active` and included `done→done`. Restore a lane-history assertion in that end-to-end test when this lifecycle write path is fixed, so the bug cannot recur unnoticed.
+
 ## 2. px status reports a frozen intake copy as 'Backlog status'
 
 `missions.raw_status` is the Backlog status string captured at intake and never updated; nothing writes it after intake. `px status` prints it as 'Backlog status' (src/adapters/cli/commands/status-adapter.ts, `backlogStatus: card.rawStatus ?? card.status`). Every refined or active mission in the operator DB shows raw_status 'backlog' (task-2561 is active at status='active', raw_status='backlog'). For an adhoc mission, draft intake hard-codes rawStatus 'backlog' (src/adapters/cli/commands/draft-stats.ts intake), so status reports a Backlog state for a task that does not exist. The web board reads `card.lane` from missions.status and is correct, so the two surfaces disagree.
@@ -47,6 +49,7 @@ Lifecycle changes go only through the Mission lifecycle service (domain decision
 - [ ] #3 px status reports the Mission lifecycle status from missions.status, and never shows a Backlog state for an adhoc mission that has no Backlog task
 - [ ] #4 A running px draft publishes a draft current-work phase, not execute, and the board and status show it as drafting
 - [ ] #5 A reproduction test covers the task-2547 shape: an integration-gate rebound leaves no Mission status change without a matching lane event
+- [ ] #6 The real-agent smoke asserts the completed Mission's lane history includes each transition from backlog through done, with no same-status `done→done` event
 <!-- AC:END -->
 
 ## Definition of Done

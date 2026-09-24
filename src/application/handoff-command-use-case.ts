@@ -315,7 +315,7 @@ export class HandoffCommandUseCase {
  * optional `error`/`gate` markers (typed `undefined`) so callers can read
  * `result.error`/`result.gate` across both variants.
  */
-  validateDeclaredGates(commands: string[], rootDir: string): GateValidationResult {
+  validateDeclaredGates(commands: string[], rootDir: string, options: { checkFiles?: boolean } = {}): GateValidationResult {
     const { fileSystem } = this.ports;
     for (const cmd of commands) {
       // Each guard isolates one failure mode. Splitting the original inline
@@ -333,7 +333,9 @@ export class HandoffCommandUseCase {
       if (imbalance) {
         return this.delimiterError(cmd, imbalance);
       }
-      const missingToken = this.gateCommandMissingFile(cmd, rootDir, fileSystem);
+      // A gate recorded at draft may run a script the mission itself adds, so
+      // only handoff, on the finished tree, requires its files to exist.
+      const missingToken = options.checkFiles === false ? null : this.gateCommandMissingFile(cmd, rootDir, fileSystem);
       if (missingToken !== null) {
         return this.missingFileError(cmd, missingToken);
       }
@@ -396,7 +398,10 @@ export class HandoffCommandUseCase {
       /^`[^`\r\n]+`\s+\S/.test(cmd) ||
       /\s(?:—|–|-–)\s+\S/.test(unquoted) ||
       /\s(?:passes?|passed|succeeds?|succeeded|completes?|completed)(?:\s+(?:on|in|with|without|after|before|for|the|a|an|successfully|cleanly)\b[^;&|]*)?[.!]?\s*$/i.test(unquoted) ||
-      /(?<![&|;])\s+\([^()]*\)\s*$/.test(unquoted)
+      /(?<![&|;])\s+\([^()]*\)\s*$/.test(unquoted) ||
+      // An unquoted shell comment is prose too: bash ignores it, so it states
+      // an expectation that nothing checks.
+      /(?:^|\s)#/.test(unquoted)
     );
   }
 
@@ -1130,6 +1135,24 @@ export class HandoffCommandUseCase {
         const msg = `Rebase encountered shared-file conflicts. ${AGENT_COMMAND_COMPLETION_CONTRACT} Resolve the conflicts in the worktree, then re-run handoff.`;
         error(msg);
         return { ok: false, error: msg };
+      } else if (rebaseResult.failure?.kind === 'gate') {
+        // The rebase succeeded; the push-time verification gate did not. Keep
+        // its process evidence so the rebound kernel classifies it as a gate
+        // failure and the implementer sees the command and output, instead of
+        // being told to fix a rebase that already works.
+        const { gate } = rebaseResult.failure;
+        const msg = `Pre-review push gate failed for area "${gate.area}": ${gate.command} exited with code ${gate.exitCode}.`;
+        error(msg);
+        return {
+          ok: false,
+          error: msg,
+          gateOutput: { stdout: gate.stdout, stderr: gate.stderr },
+          gateFailure: {
+            area: gate.area, command: gate.command, cwd: rootDir, exitCode: gate.exitCode,
+            stdout: gate.stdout, stderr: gate.stderr,
+            ...(ports.verification.isTransientVerificationFailure({ stdout: gate.stdout, stderr: gate.stderr }) ? { transient: true } : {}),
+          },
+        };
       } else {
         const msg = 'Rebase failed before handoff. Ensure the mission branch can be rebased onto the latest primary branch.';
         error(msg);
@@ -1164,7 +1187,8 @@ export class HandoffCommandUseCase {
       const prResult = ports.forgejo.createPr(branch || '', String(fallbackUser || forgejoUser || 'default'), String(token || ''), {
         rootDir,
         log: internalLog,
-        forceWithLease
+        forceWithLease,
+        verificationArea: area || 'docs',
       });
       if (!prResult.ok) {
         const msg = `Forgejo PR creation/update failed: ${prResult.error}`;
@@ -1179,7 +1203,7 @@ export class HandoffCommandUseCase {
     // Step 2.5: Gatekeeper pre-review validation
     // Run before transitioning Backlog to 'review' so missing artifacts are
     // flagged as a request-changes review instead of consuming a reviewer cycle.
-    const gatekeeperResult = runGatekeeperFn(slug, { rootDir, log: internalLog });
+    const gatekeeperResult = runGatekeeperFn(slug, { rootDir, log: internalLog, checkpointsRecorded: contract.draftedInDb });
     const gatekeeperVerdict = gatekeeperOutcome(gatekeeperResult, slug, log, error);
     if (gatekeeperVerdict.blocked) { return gatekeeperVerdict.blocked; }
 

@@ -54,8 +54,7 @@ export class StatusCommandUseCase {
     const staleWorktrees = this._staleWorktrees.findStaleWorktrees(explicitSlug, rootDir);
     const staleWorktreeRebase = this._staleWorktrees.getStaleWorktreeRebase(staleWorktrees);
 
-    // Agent matrix
-    const agentMatrix = this._agent.getAgentMatrix();
+    const agents = await this._agent.getAgents();
     const agentOverride = this._agent.getAgentOverride();
 
     return {
@@ -67,7 +66,7 @@ export class StatusCommandUseCase {
       prInfo,
       staleWorktrees,
       staleWorktreeRebase,
-      agentMatrix,
+      agents,
       agentOverride,
       lastThreeCommits,
       uncommittedCount,
@@ -117,7 +116,7 @@ export class StatusWorkflowAdapter implements StatusBoardPort, StatusGitPort, St
     return null;
   }
 
-  getAgentMatrix(): readonly StatusAgentEntry[] {
+  async getAgents(): Promise<readonly StatusAgentEntry[] | null> {
     return [];
   }
 

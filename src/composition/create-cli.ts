@@ -22,7 +22,7 @@ import { createConfigCommand } from '../interfaces/cli/config.js';
 import diffWorkflow from '../adapters/cli/commands/diff.js';
 import { createDiffCommand } from '../interfaces/cli/diff.js';
 import { createDraftWorkflowAdapter } from '../adapters/cli/commands/draft.js';
-import { createHandoffPorts } from '../adapters/cli/commands/handoff.js';
+import { createHandoffPorts, validateDeclaredGates } from '../adapters/cli/commands/handoff.js';
 import integrate from '../adapters/cli/commands/integrate.js';
 import { DraftCommandUseCase } from '../application/draft-command-use-case.js';
 import { IntegrateCommandUseCase } from '../application/integrate-command-use-case.js';
@@ -96,6 +96,8 @@ import { loadWebAssets, resolveWebAssetRoot } from '../adapters/web/asset-store.
 import { deriveAliases, type Command, type MainOptions } from '../interfaces/cli/runtime.js';
 import { createProductionApplicationServices } from './application-services.js';
 import { bindReviewPersistence, reviewLoopBindings } from './review-persistence.js';
+import { SqliteSessionMarkerAdapter } from '../adapters/sqlite/session-marker-adapter.js';
+import type { SqliteDatabaseAdapter } from '../adapters/sqlite/database-adapter.js';
 import { startReviewLoop } from '../adapters/review/review-loop.js';
 import { inferSlug } from '../adapters/filesystem/mission-paths.js';
 
@@ -180,7 +182,27 @@ function createCommandRegistry(rootDir: string): Record<string, Command> {
   // nesting into a single named helper so the integrate handler stays under the
   // nesting complexity limit.
   const runIntegrated = (innerArgs: string[], innerOptions: Record<string, unknown>) =>
-    withMissionAndGraph((missionServicesFn) => integrate(innerArgs, { ...innerOptions, missionServicesFn }));
+    withMissionAndGraph((missionServicesFn, services) => integrate(innerArgs, {
+      ...innerOptions,
+      missionServicesFn,
+      reReviewFn: (slug: string) => reReviewRepairedRevision(slug, services),
+    }));
+  // An integration-gate repair that changed the approved revision is reviewed
+  // again through exactly what `px review <slug> --start` runs. Approved means
+  // the review came back with a new approved round and moved the mission to
+  // integration; the superseded round stays in the history.
+  const reReviewRepairedRevision = async (slug: string, services: Awaited<ReturnType<typeof createProductionApplicationServices>>) => {
+    if (!services.mission) { throw new Error('mission services are unavailable'); }
+    const before = await services.mission.store.load(missionId(slug));
+    const roundsBefore = before.kind === 'found' ? (before.mission.review?.rounds.length ?? 0) : 0;
+    await registry.review([slug, '--start'], {
+      exit: (code?: number) => { if (code) { throw new Error(`px review ${slug} --start exited with status ${code}`); } },
+    });
+    const after = await services.mission.store.load(missionId(slug));
+    if (after.kind !== 'found' || after.mission.status !== 'integration' || !after.mission.review) { return false; }
+    const rounds = after.mission.review.rounds;
+    return rounds.length > roundsBefore && rounds[rounds.length - 1]?.decision?.kind === 'approved';
+  };
   // `active` needs to create its ExecuteMissionService only after it has
   // installed its progress renderer. Supplying a pre-built service loses the
   // lifecycle progress events (including the actual execute-agent family).
@@ -232,7 +254,10 @@ function createCommandRegistry(rootDir: string): Record<string, Command> {
     goal: (args) => withGraph(services => createGoalCommand(missionWrites(services))(args)),
     repro: (args) => withGraph(services => createReproCommand(missionWrites(services))(args)),
     scope: (args) => withGraph(services => createScopeCommand(missionWrites(services))(args)),
-    gate: (args) => withGraph(services => createGateCommand(missionWrites(services))(args)),
+    gate: (args) => withGraph(services => createGateCommand(missionWrites(services), (command) => {
+      const result = validateDeclaredGates([command], rootDir, { checkFiles: false });
+      return result.ok ? null : result.error;
+    })(args)),
     criterion: (args) => withGraph(services => createCriterionCommand(missionWrites(services))(args)),
     depends: (args) => withGraph(services => createDependsCommand(missionWrites(services))(args)),
     nel: (args) => withGraph(services => createNelCommand(missionWrites(services))(args)),
@@ -284,7 +309,14 @@ function createCommandRegistry(rootDir: string): Record<string, Command> {
     'resolve-conflict': resolveConflict,
     review: (args, options) => withMissionAndGraph((missionServicesFn, services) => {
         if (!services.mission) { throw new Error('mission services are unavailable'); }
-        const persistence = bindReviewPersistence(services.mission.store, services.mission.lifecycle);
+        const reviewerSessionPort = services.operatorState.db
+          ? new SqliteSessionMarkerAdapter(services.operatorState.db as SqliteDatabaseAdapter, services.mission.repositoryId)
+          : null;
+        const persistence = bindReviewPersistence(
+          services.mission.store,
+          services.mission.lifecycle,
+          reviewerSessionPort,
+        );
         const adapter = createReviewWorkflowAdapter({
           ...options,
           // SC4: refuse to review a mission whose payload already landed.
@@ -305,7 +337,7 @@ function createCommandRegistry(rootDir: string): Record<string, Command> {
           startReviewLoopFn: (slug: string, loopOptions: Record<string, unknown>) => startReviewLoop(slug, {
             ...loopOptions,
             performHandoffFn: performHandoffWithMissionServices(missionServicesFn as HandoffMissionServicesPort),
-            ...reviewLoopBindings(services.mission!.store, services.mission!.lifecycle),
+            ...reviewLoopBindings(services.mission!.store, services.mission!.lifecycle, reviewerSessionPort),
           } as any),
         } as any);
         return createReviewCommand(new ReviewCommandUseCase(adapter, services.currentWork))(args, options);
@@ -338,7 +370,10 @@ function createCommandRegistry(rootDir: string): Record<string, Command> {
       });
       const gitPort = createStatusGitAdapter();
       const prPort = createStatusPrAdapter({ rootDir });
-      const agentPort = createStatusAgentAdapter();
+      const agentPort = createStatusAgentAdapter({
+        rootDir,
+        blocklistRepo: services.operatorState.repositories?.agentBlocklist ?? null,
+      });
       const staleWorktrees = createStatusStaleWorktreesAdapter();
       const useCase = new StatusCommandUseCase(board, gitPort, prPort, agentPort, staleWorktrees);
       const cmd = createStatusCommand(useCase);

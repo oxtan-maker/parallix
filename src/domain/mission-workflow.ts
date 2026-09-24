@@ -180,7 +180,9 @@ function validateSubmission(mission: OpenMission, command: SubmitForReviewComman
 
 function submitForReview(mission: Mission, command: SubmitForReviewCommand): Mission {
   requireStatus(mission, ['active', 'review'], command);
-  if (mission.status === 'review') {
+  // A previous attempt may have reached review before its Review was stored.
+  // A retry supplies the verified handoff record and completes that write.
+  if (mission.status === 'review' && mission.review) {
     return mission;
   }
   if (hasApprovedRecordedRound(mission)) {

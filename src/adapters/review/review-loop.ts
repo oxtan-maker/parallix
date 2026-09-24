@@ -123,7 +123,7 @@ async function ensureProviderReachable(deps: {
   return false;
 }
 
-/** An already-open PR means a prior handoff owns the transition, so skip it. */
+/** Remember an open PR; the Review aggregate separately proves handoff. */
 function confirmOpenReviewPr(state: ProviderPrelude, deps: {
   branch: string;
   worktree: string;
@@ -158,7 +158,7 @@ async function performStartHandoff(slug: string, state: ProviderPrelude, deps: a
   }
   const taskStatus = taskResolution.ok ? getTaskStatusFn(taskResolution.taskFile!) : null;
   // An active task is the normal --start condition, not a reason to bail.
-  log(fmt.status('INFO', `No open review PR for ${branch} (task in ${taskStatus}) — performing handoff (attempting automatic handoff) via px review ${slug} --start...`));
+  log(fmt.status('INFO', `No completed handoff for ${branch} (task in ${taskStatus}) — performing handoff (attempting automatic handoff) via px review ${slug} --start...`));
   const handoff = await performHandoffFn(slug, { forgejoUser: implementer, worktree, recoverGateFailure: true });
 
   if (handoff?.gatekeeperPushedBack) {
@@ -1521,6 +1521,12 @@ async function prepareStartTransition(params: {
   } else if (verbose && !dryRun && !forgejoEnabled) {
     log(fmt.status('INFO', 'Forgejo validation skipped (review provider is not forgejo). Using workflow-owned review surfaces.'));
   }
+  // Production has Mission authority: only its Review proves handoff finished.
+  if (missionStore && providerState.skipHandoff && !isContinue && !dryRun) {
+    const recordedReview = await Promise.resolve(readReviewStateFn(slug, worktree));
+    const taskStatus = taskResolution.ok ? getTaskStatusFn(taskResolution.taskFile!) : null;
+    if (!recordedReview || (taskStatus && taskStatus !== 'review')) { providerState.skipHandoff = false; }
+  }
   let handoffJustRan = false;
   if (!dryRun && !providerState.skipHandoff && !isContinue) {
     const handedOff = await performStartHandoff(slug, providerState, {
@@ -1773,16 +1779,8 @@ export async function startReviewLoop(slug: string, opts: {
     || isProviderEnabled;
   const forgejoEnabled = forgejoEnabledFn(worktree);
   // SC1: `px review <slug> --start` performs the sync/push and active -> review
-  // transition that `px handoff` used to own. The transition runs for every
-  // non-dry start that has no open review PR yet: a provider-disabled start
-  // always (it has no PR concept), and a Forgejo start only when no PR exists,
-  // which heals a missing PR. A Forgejo start with an already-open PR means a
-  // prior handoff already owns the transition, so it is skipped. PR-specific
-  // validation below applies only to the Forgejo path. Initialise from the
-  // caller-supplied opt so one flag covers both an already-open PR and an
-  // explicit skip request; the Forgejo branch below may raise it on an open PR.
-  // Initialise from the caller-supplied opt so one flag covers both an already-open PR and an
-  // explicit skip request; the Forgejo branch below may raise it on an open PR.
+  // transition that `px handoff` used to own. An open PR does not prove that
+  // handoff finished writing the Review aggregate.
   let skipHandoff = skipHandoffOpt;
   const providerState: ProviderPrelude = { prNumber, confirmedPullRequest, skipHandoff };
   const transitionPrep = await prepareStartTransition({

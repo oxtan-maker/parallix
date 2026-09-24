@@ -35,7 +35,11 @@ test('getPrNumber pagination and sorting', (t) => {
 
   getPrNumber('any', 'token', { apiCall });
 
-  assert.ok(calls[0].includes('state=open'), 'Should check open PRs first');
-  assert.ok(calls[0].includes('sort=recentupdate'), 'Should use sorting');
-  assert.ok(calls[1].includes('state=all'), 'Should check all PRs if open check fails');
+  // TASK-2561: the direct base/head lookup comes first; this one answers with
+  // no PR number, so the page scans still run in their original order.
+  const scans = calls.filter(call => call.startsWith('/pulls?'));
+  assert.ok(!calls[0].startsWith('/pulls?'), 'Should ask for the branch by base and head first');
+  assert.ok(scans[0].includes('state=open'), 'Should check open PRs first');
+  assert.ok(scans[0].includes('sort=recentupdate'), 'Should use sorting');
+  assert.ok(scans[1].includes('state=all'), 'Should check all PRs if open check fails');
 });

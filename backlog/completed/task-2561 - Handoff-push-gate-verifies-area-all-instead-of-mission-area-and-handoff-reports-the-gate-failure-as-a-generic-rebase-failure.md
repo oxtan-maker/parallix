@@ -4,8 +4,8 @@ title: >-
   Unblock the mission lifecycle after TASK-2521.03: draft bounce-back, worktree
   provisioning, push-gate area and diagnostic, integration-gate re-review,
   px status speed, and a real-agent smoke that no longer masks them
-status: backlog
-assignee: []
+status: done
+assignee: [claude]
 created_date: '2026-09-23 08:54'
 labels:
   - workflow

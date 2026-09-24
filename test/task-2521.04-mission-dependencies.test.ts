@@ -31,7 +31,7 @@ function status(dependencies: readonly string[] | undefined): StatusResult {
     branch: 'mission/task-2521.04',
     missionData,
     staleWorktrees: [],
-    agentMatrix: [],
+    agents: [],
     lastThreeCommits: [],
     uncommittedCount: 0,
   } as unknown as StatusResult;

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { resolveKnownAgentFamilies } from '../src/interfaces/tui/agent-config-resolver.js';
+import { resolveKnownAgentFamilies } from '../src/adapters/agents/known-agent-families.js';
 import { discoverTestFiles } from '../src/adapters/verification/coverage-gate.js';
 
 // Regression guard for SonarQube S2871 (implicit string sort). The mission

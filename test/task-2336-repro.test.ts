@@ -7,7 +7,7 @@ import { renderToString } from 'ink';
 import React from 'react';
 import { agentFamily } from '../src/domain/agents.js';
 import { AgentStrip } from '../src/interfaces/tui/agent-strip.js';
-import { resolveKnownAgentFamilies } from '../src/interfaces/tui/agent-config-resolver.js';
+import { resolveKnownAgentFamilies } from '../src/adapters/agents/known-agent-families.js';
 import { fileURLToPath } from 'node:url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));

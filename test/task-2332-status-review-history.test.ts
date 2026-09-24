@@ -177,7 +177,7 @@ function renderedStatusLines(history: ReturnType<typeof projectReviewHistory>): 
     },
     prInfo: null,
     staleWorktrees: [],
-    agentMatrix: [],
+    agents: [],
     lastThreeCommits: [],
   } as unknown as StatusResult;
   renderStatus(result, (message) => lines.push(message));

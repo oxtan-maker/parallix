@@ -14,8 +14,9 @@ import { missionId } from '../../../domain/mission.js';
 import { allocateAdhocIdentity } from '../../sqlite/adhoc-counter.js';
 import { resolveCanonicalRepositoryId } from '../../git/repository-identity.js';
 import { resolveDraftTarget, ensureMissionBranch, ensureMissionBaseBranchRecorded, ensureWorktree, ensureGraphifyWorkspace, ensureGraphifyIgnore, ensureMissionFile, ensureDraftRepoConfigCommitted, ensureRepoExists, bootstrapBacklogTask } from './draft-setup.js';
-import { buildDraftPrompt, buildRestartPrompt, validateDraftClassification, normalizeDraftClassification } from './draft-prompts.js';
+import { buildDraftPrompt, buildRestartPrompt, buildContractRepairPrompt, validateDraftClassification, normalizeDraftClassification } from './draft-prompts.js';
 import { enforceDraftCommitSafety } from './draft-conflicts.js';
+import { runPreDraftHook } from '../../process/pre-draft-hook.js';
 
 /**
  * Read the human mission title from the `# Mission: <title>` heading the draft
@@ -216,15 +217,59 @@ async function recordDraftImplementer({
   return actual;
 }
 
-async function recordDraftRefinement(ctx: DraftWorkflowContext) {
-  if (typeof ctx.missionServicesFn !== 'function') { throw new Error('draft command requires injected mission services'); }
-  const services = await ctx.missionServicesFn(ctx.targetWorktree);
-  const result = await services.lifecycle.transition({
-    operationId: `draft-refine-${ctx.slug}`,
-    missionId: missionId(ctx.slug), capabilities: new Set(['mission:transition']),
-    command: { type: 'refine' }, actor: 'draft', occurredAt: new Date().toISOString(), idempotencyKey: `${ctx.slug}:refine`,
-  });
-  if (result.status !== 'completed') { throw new Error(result.error?.message || 'unknown error'); }
+/**
+ * How many times an incomplete mission contract is sent back to the drafting
+ * agent before the draft fails. Each attempt relaunches the agent with the
+ * exact missing parts; the parts it already recorded stay in Mission state.
+ */
+const DRAFT_CONTRACT_REPAIR_ATTEMPTS = 2;
+
+/**
+ * Record refinement on the Mission aggregate. `contractIncomplete` is a domain
+ * rule rejection (the agent did not record every required part), which the
+ * agent can repair; anything else is an infrastructure failure it cannot.
+ */
+async function recordDraftRefinement(ctx: DraftWorkflowContext): Promise<{ ok: true } | { ok: false; contractIncomplete: boolean; message: string }> {
+  try {
+    if (typeof ctx.missionServicesFn !== 'function') { throw new Error('draft command requires injected mission services'); }
+    const services = await ctx.missionServicesFn(ctx.targetWorktree);
+    const result = await services.lifecycle.transition({
+      operationId: `draft-refine-${ctx.slug}`,
+      missionId: missionId(ctx.slug), capabilities: new Set(['mission:transition']),
+      command: { type: 'refine' }, actor: 'draft', occurredAt: new Date().toISOString(), idempotencyKey: `${ctx.slug}:refine`,
+    });
+    if (result.status === 'completed') { return { ok: true }; }
+    const message = result.error?.message || 'unknown error';
+    return { ok: false, contractIncomplete: result.error?.kind === 'validation' && /mission contract is incomplete/.test(message), message };
+  } catch (error) {
+    return { ok: false, contractIncomplete: false, message: /** @type {any} */ (error).message };
+  }
+}
+
+/**
+ * Send an incomplete contract back to the agent that drafted it. The same
+ * family is relaunched with the refusal verbatim, so it records only what is
+ * missing instead of starting the contract over.
+ */
+// @ts-expect-error implicit any on slug/worktree/agent/refusal
+async function repairDraftContract(slug, worktree, agent, refusal, {
+  startDraftAgentFn = startDraftAgent,
+  logFn = fmt.log.plain,
+  errorFn = fmt.log.plainError,
+} = {}) {
+  const prompt = buildContractRepairPrompt(slug, { rootDir: worktree, worktree, refusal });
+  // @ts-expect-error startDraftAgentFn accepts extra properties
+  const { agent: actualAgent, result } = await startDraftAgentFn({ prompt, worktree, agent });
+  if (result.error) {
+    errorFn(fmt.status('FAIL', `Could not relaunch draft agent (${fmt.agent(/** @type {any} */ (actualAgent))}): ${/** @type {any} */ (result.error).message}`));
+    return false;
+  }
+  if (typeof /** @type {any} */ (result).status === 'number' && /** @type {any} */ (result).status !== 0) {
+    errorFn(fmt.status('FAIL', `Relaunched draft agent (${fmt.agent(/** @type {any} */ (actualAgent))}) exited with status ${/** @type {any} */ (result).status}.`));
+    return false;
+  }
+  logFn(fmt.status('INFO', `Draft agent ${fmt.agent(/** @type {any} */ (actualAgent))} finished the contract repair.`));
+  return true;
 }
 
 /**
@@ -457,6 +502,18 @@ function createDraftWorkflowAdapter(deps: Record<string, unknown> = {}) {
       ]));
       debugFn(fmt.bold(`Step 2: Ensuring dedicated worktree at ${fmt.path(targetWorktree)}...`));
       ensureWorktreeFn(ctx.mainRepo, targetWorktree, branchName, { logFn: plumbingLogFn, errorFn });
+      // Prepare the worktree before any agent or gate runs in it. A failure is
+      // the environment's, not the implementer's: stop here instead of letting
+      // every later gate fail on what the checkout never had.
+      const hook = (merged.runPreDraftHookFn || runPreDraftHook)({ slug: ctx.slug, worktree: targetWorktree });
+      if (hook.ran && !hook.ok) {
+        if (hook.output) { errorFn(hook.output); }
+        errorFn(fmt.status('FAIL', `Environment failure: the pre-draft hook \`${hook.command}\` exited with status ${hook.exitCode} in ${fmt.path(targetWorktree)}.`));
+        logFn('Repair: fix the worktree environment or adapters.draft.preDraftCommand in workflow.config.json, then re-run the draft. No agent was launched.');
+        safeExit(1);
+        return exitedContext({ ...ctx, targetWorktree, branchName });
+      }
+      if (hook.ran) { debugFn(fmt.status('PASS', `Pre-draft hook \`${hook.command}\` prepared ${fmt.path(targetWorktree)}.`)); }
       ensureGraphifyWorkspaceFn(targetWorktree, ctx.mainRepo, { logFn: plumbingLogFn });
       ensureGraphifyIgnoreFn(targetWorktree, { logFn: plumbingLogFn });
 
@@ -730,11 +787,28 @@ function createDraftWorkflowAdapter(deps: Record<string, unknown> = {}) {
       // would never leave the backlog and `px active` could not run. Ordering
       // it first keeps the failure story the same as intake's: a database
       // failure leaves the Backlog task where it was.
-      try {
-        await recordDraftRefinement(ctx);
-      } catch (refineError) {
-        errorFn(fmt.status('FAIL', `Recording refinement for ${ctx.slug} failed: ${/** @type {any} */ (refineError).message}`));
-        logFn('Repair: ensure the operator-local database is reachable, then re-run the draft. The Backlog task was not transitioned to ready.');
+      const merged = ctx.options as Record<string, unknown>;
+      const repairDraftContractFn = merged.repairDraftContractFn || repairDraftContract;
+      const enforceDraftCommitSafetyFn = merged.enforceDraftCommitSafetyFn || enforceDraftCommitSafety;
+      let refined = await recordDraftRefinement(ctx);
+      for (let attempt = 1; !refined.ok && refined.contractIncomplete && attempt <= DRAFT_CONTRACT_REPAIR_ATTEMPTS; attempt += 1) {
+        logFn(fmt.status('WARN', `${refined.message} Sending it back to the draft agent (attempt ${attempt}/${DRAFT_CONTRACT_REPAIR_ATTEMPTS}).`));
+        const repaired = await repairDraftContractFn(ctx.slug, ctx.targetWorktree, ctx.actualAgent || ctx.agent, refined.message, { logFn, errorFn });
+        if (!repaired) { break; }
+        try {
+          enforceDraftCommitSafetyFn({ slug: ctx.slug, worktree: ctx.targetWorktree, logFn, plumbingLogFn, errorFn });
+        } catch (error) {
+          errorFn(fmt.status('FAIL', /** @type {any} */ (error).message));
+          safeExit(1);
+          return;
+        }
+        refined = await recordDraftRefinement(ctx);
+      }
+      if (!refined.ok) {
+        errorFn(fmt.status('FAIL', `Recording refinement for ${ctx.slug} failed: ${refined.message}`));
+        logFn(refined.contractIncomplete
+          ? `Repair: the draft agent did not record the missing parts. Record them from ${ctx.targetWorktree} with the commands named above, read them back with \`px status ${ctx.slug}\`, then re-run \`px draft ${ctx.slug}\`. The Backlog task was not transitioned to ready.`
+          : 'Repair: ensure the operator-local database is reachable, then re-run the draft. The Backlog task was not transitioned to ready.');
         safeExit(1);
         return;
       }
@@ -791,4 +865,4 @@ async function restartDraftAgent(slug, worktree, {
 
 
 
-export { recordDraftStats, recordDraftImplementer, restartDraftAgent, createDraftWorkflowAdapter };
+export { recordDraftStats, recordDraftImplementer, restartDraftAgent, repairDraftContract, DRAFT_CONTRACT_REPAIR_ATTEMPTS, createDraftWorkflowAdapter };

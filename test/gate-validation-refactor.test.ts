@@ -32,6 +32,20 @@ test('refactor proseError branch rejects outcome-language suffix', () => {
   assert.strictEqual(result.reason, 'validation-failed');
 });
 
+test('proseError rejects an unquoted shell comment but not a quoted #', () => {
+  const uc = useCaseWithExisting([verifyPath]);
+  assert.strictEqual(uc.validateDeclaredGates(['./scripts/verify-local.sh all # the full gate'], rootDir).ok, false);
+  assert.strictEqual(uc.validateDeclaredGates(['# ./scripts/verify-local.sh all'], rootDir).ok, false);
+  assert.strictEqual(uc.validateDeclaredGates(['git log --grep "#1234"'], rootDir).ok, true);
+});
+
+test('checkFiles: false accepts a gate whose script the mission has not added yet, and still rejects prose', () => {
+  const uc = useCaseWithExisting([]);
+  assert.strictEqual(uc.validateDeclaredGates(['./scripts/new-check.sh'], rootDir).ok, false);
+  assert.strictEqual(uc.validateDeclaredGates(['./scripts/new-check.sh'], rootDir, { checkFiles: false }).ok, true);
+  assert.strictEqual(uc.validateDeclaredGates(['./scripts/new-check.sh # new'], rootDir, { checkFiles: false }).ok, false);
+});
+
 test('refactor quoteError branch rejects unclosed single quote', () => {
   const uc = useCaseWithExisting([]);
   const result = uc.validateDeclaredGates(["echo 'unclosed"], rootDir);

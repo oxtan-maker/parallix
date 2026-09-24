@@ -106,3 +106,12 @@ test('submit-for-review retry does not advance the recorded review conversation'
   });
   assert.deepEqual(retried.review, inReview.review);
 });
+
+test('retry completes a review lane left without its Review aggregate', () => {
+  const review = submittedReview();
+  const interrupted = { ...activeMission(), status: 'review', closedAt: null } as Mission;
+  const command = { type: 'submit-for-review' as const, gatesPassed: true, review, reviewerEligibility };
+
+  assert.deepEqual(decideMission(interrupted, command).review, review);
+  assert.throws(() => decideMission(interrupted, { ...command, gatesPassed: false }), /gates pass/);
+});

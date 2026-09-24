@@ -75,7 +75,7 @@ test('exhausted reviewer pool launches the PR author, retains its verdict, and m
       reviewHistory: [],
     } as any,
     prInfo: { exists: true, number: 2384, state: 'open' }, staleWorktrees: [], staleWorktreeRebase: {},
-    agentMatrix: [], lastThreeCommits: [], uncommittedCount: 0,
+    agents: [], lastThreeCommits: [], uncommittedCount: 0,
   }, (message) => statusLines.push(message));
   assert.ok(
     statusLines.some((message) => /approval owed|external formal approval/i.test(message)),

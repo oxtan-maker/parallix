@@ -319,8 +319,8 @@ test('native SEA smoke: every asset-manifest key resolves from the executable pa
     assertSurface('assets', sha256(staged) === asset.sha256, `runtime asset ${asset.key} does not match its manifest digest`);
   }
 
-  // Behavioral check: the agent matrix in `px status` is derived from the
-  // package-root config/agents.json, so it can only render from the payload.
+  // Behavioral check: the agent families in `px status` are derived from the
+  // package-root config/agents.json, so they can only render from the payload.
   const steps = JSON.parse(fs.readFileSync(path.join(SEA_DIR, 'config', 'agents.json'), 'utf8')).steps as
     Record<string, { eligible: string[] }>;
   const families = [...new Set(Object.values(steps).flatMap(step => step.eligible))].sort();
@@ -329,12 +329,10 @@ test('native SEA smoke: every asset-manifest key resolves from the executable pa
     assertSurface('assets', new RegExp(`^\\s+${family}: `, 'm').test(status.stdout),
       `agent family ${family} from the payload config was not rendered: ${status.stdout}`);
   }
-  const renderedDraftEligible = families
-    .filter(family => new RegExp(`^\\s+${family}: .*eligible:[^\\n]*\\bdraft\\b`, 'm').test(status.stdout))
-    .sort();
-  assertSurface('assets', renderedDraftEligible.join(',') === [...steps.draft.eligible].sort().join(','),
-    `rendered draft eligibility [${renderedDraftEligible.join(', ')}] does not match the payload config ` +
-    `[${[...steps.draft.eligible].sort().join(', ')}]`);
+  const agentsSection = /^Agents:\n((?:\s+\S+: .*\n)*)/m.exec(status.stdout)?.[1] ?? '';
+  const rendered = [...agentsSection.matchAll(/^\s+(\S+): /gm)].map(match => match[1]).sort();
+  assertSurface('assets', rendered.join(',') === families.join(','),
+    `rendered agent families [${rendered.join(', ')}] do not match the payload config [${families.join(', ')}]`);
 });
 
 test('native SEA smoke: temporary Git operation and subprocess spawn succeed from the executable (SC3, ADR 0044 git surface)', () => {

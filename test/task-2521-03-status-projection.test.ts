@@ -46,7 +46,7 @@ function result(md: StatusMissionData | null): StatusResult {
     prInfo: null,
     staleWorktrees: [],
     staleWorktreeRebase: {},
-    agentMatrix: [],
+    agents: [],
     agentOverride: undefined,
     lastThreeCommits: [],
     uncommittedCount: 0,
@@ -89,7 +89,7 @@ test('AC #11: px status --json exposes the recorded fields as structured data', 
 
 test('the JSON form carries no machine-local operator facts an agent could depend on', () => {
   const parsed = JSON.parse(statusJson(result(missionData())));
-  for (const key of ['agentMatrix', 'staleWorktrees', 'lastThreeCommits', 'worktree', 'uncommittedCount']) {
+  for (const key of ['agents', 'staleWorktrees', 'lastThreeCommits', 'worktree', 'uncommittedCount']) {
     assert.ok(!Object.hasOwn(parsed, key), `--json must not expose the operator-local ${key}`);
   }
 });

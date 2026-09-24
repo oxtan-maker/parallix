@@ -160,8 +160,8 @@ function runDeclaredGates(missionDir, rootDir, options = {}) {
 }
 
 /** @see HandoffCommandUseCase.validateDeclaredGates */
-function validateDeclaredGates(commands, rootDir) {
-  return useCase.validateDeclaredGates(commands, rootDir);
+function validateDeclaredGates(commands, rootDir, options) {
+  return useCase.validateDeclaredGates(commands, rootDir, options);
 }
 
 /** @see HandoffCommandUseCase.captureNelAtHandoff */

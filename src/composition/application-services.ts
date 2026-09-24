@@ -273,7 +273,7 @@ export async function createProductionApplicationServices(
           // leaves the adapter default, which resolves no store and reports the
           // mission as having no Review.
           performHandoffFn: handoffWithMissionServices!,
-          ...reviewLoopBindings(mission.store, mission.lifecycle),
+          ...reviewLoopBindings(mission.store, mission.lifecycle, sessionMarkerPort),
           // The recorded brief is the authoritative launch context; the default
           // runtime's null resolver is the file-backed fallback. Route through
           // the application-owned MissionBriefService (not a raw store read)

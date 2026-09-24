@@ -209,8 +209,13 @@ export function createScopeCommand(services: MissionWriteServices) {
   };
 }
 
-/** `px gate add|remove` — one gate per call, so no list is ever silently replaced. */
-export function createGateCommand(services: MissionWriteServices) {
+/**
+ * `px gate add|remove` — one gate per call, so no list is ever silently replaced.
+ * `validateGate` returns why a command cannot run as a gate, or null. Handoff
+ * runs each recorded gate with `bash -c`, so a gate is refused here, while the
+ * drafting agent can still fix it, rather than only when handoff runs it.
+ */
+export function createGateCommand(services: MissionWriteServices, validateGate: (_command: string) => string | null = () => null) {
   return async (args: string[] = []): Promise<void> => {
     if (helped(args, GATE_HELP)) { return; }
     const action = args[0];
@@ -219,6 +224,8 @@ export function createGateCommand(services: MissionWriteServices) {
     const req = request(args, `gate-${action}`, services.resolveSlug);
     const current = unwrap(await services.brief.readGates(req), 'gate read').declaredGates;
     if (action === 'remove' && !current.includes(command)) { fail(`gate is not declared: ${command}`); }
+    const invalid = action === 'add' ? validateGate(command) : null;
+    if (invalid) { fail(invalid); }
     // `add` of an already-declared gate is rejected by the domain, so the
     // duplicate rule lives in one place rather than being restated here.
     const gates = action === 'add' ? [...current, command] : current.filter((gate) => gate !== command);

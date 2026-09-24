@@ -2,6 +2,7 @@
  * are supplied only by the composition root. */
 
 import type { MissionActivity } from '../projections/mission-activity.js';
+import type { AgentBlock } from '../../domain/agents.js';
 
 // ---------------------------------------------------------------------------
 // Status workflow port
@@ -33,14 +34,10 @@ export interface StatusStaleWorktree {
 
 /** Agent launcher entry in the status matrix. */
 export interface StatusAgentEntry {
-  /** Agent family name. */
+  /** Agent family name, as configured. */
   readonly agent: string;
-  /** Whether the launcher is supported. */
-  readonly supported: boolean;
-  /** Eligibility for draft step. */
-  readonly draftEligible: boolean;
-  /** Eligibility for active step. */
-  readonly activeEligible: boolean;
+  /** The family's block in the operator database; `none` when it may run. */
+  readonly block: AgentBlock;
 }
 
 /** Review round from mission card history. */
@@ -170,7 +167,8 @@ export interface StatusResult {
   /** Stale worktree rebase info keyed by worktree path. */
   readonly staleWorktreeRebase: Record<string, StatusRebaseInfo | null>;
   /** Agent launcher matrix. */
-  readonly agentMatrix: readonly StatusAgentEntry[];
+  /** Null when the operator database holding agent blocks cannot be read. */
+  readonly agents: readonly StatusAgentEntry[] | null;
   /** WORKFLOW_AGENT env override (if set). */
   readonly agentOverride?: string;
   /** Last three commit messages. */
@@ -209,8 +207,8 @@ export interface StatusPrPort {
 
 /** Port that supplies agent launcher matrix for status. */
 export interface StatusAgentPort {
-  /** Get agent launcher matrix entries. */
-  getAgentMatrix(): readonly StatusAgentEntry[];
+  /** Configured agent families and their operator-database blocks. */
+  getAgents(): Promise<readonly StatusAgentEntry[] | null>;
   /** Get WORKFLOW_AGENT env override (if set). */
   getAgentOverride(): string | undefined;
 }

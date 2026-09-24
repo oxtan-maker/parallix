@@ -38,6 +38,7 @@ const DEFAULT_CONFIG = Object.freeze({
     review: {},
     agents: {},
     integrate: {},
+    draft: {},
   },
 });
 
@@ -223,6 +224,7 @@ function validateAdapterSections(adapters: PlainObject, issues: string[]): void 
   validateMissionsSection(adapters.missions, issues);
   validateVerificationSection(adapters.verification, issues);
   validateIntegrateSection(adapters.integrate, issues);
+  validateDraftSection(adapters.draft, issues);
   validatePromptsSection(adapters.prompts, issues);
   validateGithubPublishSection(adapters.githubPublish, issues);
   validateReviewSection(adapters.review, issues);
@@ -253,6 +255,11 @@ function validateVerificationSection(section: unknown, issues: string[]): void {
   if (!isPlainObject(section)) { return; }
   validateStringField(section, 'command', 'adapters.verification.command', issues);
   validateStringField(section, 'defaultArea', 'adapters.verification.defaultArea', issues);
+}
+
+function validateDraftSection(section: unknown, issues: string[]): void {
+  if (!isPlainObject(section)) { return; }
+  validateStringField(section, 'preDraftCommand', 'adapters.draft.preDraftCommand', issues);
 }
 
 function validateIntegrateSection(section: unknown, issues: string[]): void {

@@ -5,7 +5,7 @@ import { BoardCommandController } from '../application/controller/board-controll
 import type { BoardProjectionBuilder } from '../application/projections/board-readers.js';
 import type { MissionProjectionQuery } from '../application/projections/mission-query.js';
 import type { RepositoryId } from '../domain/repository.js';
-import { resolveKnownAgentFamilies } from '../interfaces/tui/agent-config-resolver.js';
+import { resolveKnownAgentFamilies } from '../adapters/agents/known-agent-families.js';
 import type {
   AgentBlocklistRepository,
 } from '../application/ports/agent-blocklist.js';

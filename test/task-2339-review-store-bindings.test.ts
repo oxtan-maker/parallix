@@ -107,6 +107,17 @@ test('loop reviewer reader ignores events from another round or reviewer', async
   assert.equal(result.consumed, false);
 });
 
+test('loop reviewer reader ignores an outcome from before a reset', async () => {
+  const store = fakeStore();
+  store.state.mission.review.rounds[2].startedAt = '2026-08-04T11:00:00.000Z';
+  store.state.mission.review.reviewEvents = [
+    { eventType: 'reviewer_outcome', roundNumber: 3, actor: 'claude', verdict: 'approve', content: 'old approval', createdAt: '2026-08-04T10:00:00.000Z' },
+  ];
+
+  const result = await reviewLoopBindings(store as never).consumeReviewerArtifactsFn('task-9001', 'claude', { worktree: '/tmp/worktree' });
+  assert.equal(result.consumed, false);
+});
+
 test('loop implementer reader uses the persisted disposition event', async () => {
   const store = fakeStore();
   store.state.mission.review.reviewEvents = [
@@ -120,6 +131,17 @@ test('loop implementer reader uses the persisted disposition event', async () =>
   assert.equal(result.consumed, true);
   assert.equal(result.ok, true);
   assert.equal(result.disposition, 'PUSHBACK_ALL');
+});
+
+test('loop implementer reader ignores a disposition from before a reset', async () => {
+  const store = fakeStore();
+  store.state.mission.review.rounds[2].startedAt = '2026-08-04T11:00:00.000Z';
+  store.state.mission.review.reviewEvents = [
+    { eventType: 'implementer_disposition', roundNumber: 3, actor: 'codex', disposition: 'CHANGES_MADE', content: 'old', createdAt: '2026-08-04T10:00:00.000Z' },
+  ];
+
+  const result = await reviewLoopBindings(store as never).consumeImplementerArtifactsFn('task-9001', 'codex', { worktree: '/tmp/worktree' });
+  assert.equal(result.consumed, false);
 });
 
 test('bindReviewPersistence exposes the same bound consumers', async () => {

@@ -19,9 +19,10 @@ const DEFAULT_GATEKEEPER_USER = 'forgejo-gatekeeper';
  * @param {{rootDir?: string, findMissionDirFn?: Function, findCheckpointsFn?: Function, resolveTaskFileFn?: Function}} [options]
  * @returns {{ok: boolean, missing: string[]}}
  */
-function checkMandatoryFiles(slug: string, options: { rootDir?: string, findMissionDirFn?: Function, findCheckpointsFn?: Function, resolveTaskFileFn?: Function } = {} as any) {
+function checkMandatoryFiles(slug: string, options: { rootDir?: string, checkpointsRecorded?: boolean, findMissionDirFn?: Function, findCheckpointsFn?: Function, resolveTaskFileFn?: Function } = {} as any) {
   const {
     rootDir = process.cwd(),
+    checkpointsRecorded = false,
     findMissionDirFn = findMissionDir,
     findCheckpointsFn = findCheckpoints,
     resolveTaskFileFn = resolveTaskFile
@@ -37,17 +38,15 @@ function checkMandatoryFiles(slug: string, options: { rootDir?: string, findMiss
     missing.push(`${expectedMissionRel}/MISSION.md`);
   }
 
-  if (missionDir) {
-    const checkpoints = findCheckpointsFn(missionDir);
-    if (!checkpoints || checkpoints.length === 0) {
-      missing.push(`${expectedMissionRel}/CP-*.md (at least one checkpoint document)`);
-    }
-  } else {
+  // A Mission drafted through the typed verbs keeps its checkpoint evidence in
+  // Mission state, which handoff has already verified; it has no CP-*.md to find.
+  const checkpoints = !checkpointsRecorded && missionDir ? findCheckpointsFn(missionDir) : null;
+  if (!checkpointsRecorded && (!checkpoints || checkpoints.length === 0)) {
     missing.push(`${expectedMissionRel}/CP-*.md (at least one checkpoint document)`);
   }
 
   const taskResolution = resolveTaskFileFn(slug, rootDir);
-  const missionArtifactsPresent = Boolean(missionPath && fs.existsSync(missionPath) && missionDir && findCheckpointsFn(missionDir).length > 0);
+  const missionArtifactsPresent = Boolean(missionPath && fs.existsSync(missionPath) && missionDir && (checkpointsRecorded || findCheckpointsFn(missionDir).length > 0));
   if ((!taskResolution || !taskResolution.ok) && !missionArtifactsPresent) {
     const { tasksDir } = getTaskStorage(rootDir);
     const taskDirRel = path.relative(rootDir, tasksDir).split(path.sep).join('/');
@@ -101,9 +100,10 @@ function buildPushbackBody(slug: string, missing: string[]): string {
  * @param {{rootDir?: string, branch?: string, user?: string, log?: Function, readTokenFn?: Function, postReviewFn?: Function, checkFn?: Function}} [options]
  * @returns {{ok: boolean, missing: string[], skipped: boolean, posted: boolean}}
  */
-function runGatekeeper(slug: string, options: { rootDir?: string, branch?: string, user?: string, log?: Function, readTokenFn?: Function, postReviewFn?: Function, checkFn?: Function } = {} as any) {
+function runGatekeeper(slug: string, options: { rootDir?: string, checkpointsRecorded?: boolean, branch?: string, user?: string, log?: Function, readTokenFn?: Function, postReviewFn?: Function, checkFn?: Function } = {} as any) {
   const {
     rootDir = process.cwd(),
+    checkpointsRecorded = false,
     user = process.env.FORGEJO_GATEKEEPER_USER || DEFAULT_GATEKEEPER_USER,
     log = fmt.log.plain,
     readTokenFn = readToken,
@@ -112,7 +112,7 @@ function runGatekeeper(slug: string, options: { rootDir?: string, branch?: strin
   } = options;
   const branch = options.branch || missionBranchName(slug, rootDir);
 
-  const check = checkFn(slug, { rootDir });
+  const check = checkFn(slug, { rootDir, checkpointsRecorded });
   if (check.ok) {
     log(fmt.status('INFO', `Gatekeeper: all mandatory artifacts present for ${fmt.slug(slug)}.`));
     return { ok: true, missing: [], skipped: false, posted: false };

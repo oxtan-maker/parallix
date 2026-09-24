@@ -784,7 +784,7 @@ export const ADR0053_PERSISTENCE_INVENTORY: readonly ADR0053BoundaryEntry[] = [
     id: 'config-read-agent-config-resolver',
     concept: 'Configuration',
     pathType: 'default',
-    fileLocation: 'src/interfaces/tui/agent-config-resolver.ts',
+    fileLocation: 'src/adapters/agents/known-agent-families.ts',
     operation: 'read',
     classification: 'configuration-or-secret',
     cutoverTask: null,

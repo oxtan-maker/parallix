@@ -374,9 +374,35 @@ function findPrInState(branch: string, token: string, state: string, options: an
   return { prNumber: null, lastApiError, sawSuccessfulLookup };
 }
 
+/**
+ * Ask Forgejo for the branch's pull request by base and head, open or closed.
+ * One request answers what paging through every pull request in every state
+ * used to, which was most of the time `px status` spent (TASK-2561).
+ * Returns `found` with the number, `absent` on a 404, and `unknown` for any
+ * other answer, which leaves the full page scan to decide.
+ */
+function findPrByBaseHead(branch: string, token: string, options: any): { kind: 'found'; prNumber: number; open: boolean } | { kind: 'absent' | 'unknown' } {
+  const { apiCall, rootDir, base } = options;
+  if (!base) { return { kind: 'unknown' }; }
+  const result = apiCall('GET', `/pulls/${encodeURIComponent(base)}/${branch.split('/').map(encodeURIComponent).join('/')}`, token, undefined, { rootDir });
+  if (result.ok && result.data?.number) { return { kind: 'found', prNumber: result.data.number, open: result.data.state === 'open' }; }
+  return !result.ok && result.statusCode === 404 ? { kind: 'absent' } : { kind: 'unknown' };
+}
+
 function findPrWithToken(branch: string, token: string, onlyOpen: boolean, options: any) {
+  const direct = findPrByBaseHead(branch, token, options);
+  if (direct.kind === 'found' && direct.open) {
+    return { prNumber: direct.prNumber, lastApiError: null, sawSuccessfulLookup: true };
+  }
+  // Anything short of an open match still scans the open pull requests, which
+  // are few: an open one wins over the closed one the direct lookup returned,
+  // and a 404 is not proof on its own — an older Forgejo without the endpoint,
+  // or a token that cannot see the repository, answers the same way. Only the
+  // scan of every closed pull request, which the direct lookup covered, is skipped.
   const open = findPrInState(branch, token, 'open', options);
   if (open.prNumber || onlyOpen) { return open; }
+  if (direct.kind === 'found') { return { ...open, prNumber: direct.prNumber, sawSuccessfulLookup: true }; }
+  if (direct.kind === 'absent') { return open; }
   const all = findPrInState(branch, token, 'all', options);
   return {
     ...all,
@@ -427,8 +453,9 @@ function resolvePrAccess(branch: string, token: string | null, options: any = {}
   let lastApiError: { status?: number, statusCode?: number, error?: string, stderr?: string|null } | null = null;
   let sawSuccessfulLookup = false;
 
+  const base = resolvePrBase(slug, resolvePrimaryBranchOrMain(rootDir), rootDir);
   const doLookup = (candidateToken: string) => {
-    const lookup = findPrWithToken(branch, candidateToken, onlyOpen, { apiCall, pageSize, maxPages, rootDir });
+    const lookup = findPrWithToken(branch, candidateToken, onlyOpen, { apiCall, pageSize, maxPages, rootDir, base });
     lastApiError = lookup.lastApiError ?? lastApiError;
     sawSuccessfulLookup ||= lookup.sawSuccessfulLookup;
     return lookup.prNumber;

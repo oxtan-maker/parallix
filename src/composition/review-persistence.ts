@@ -1,4 +1,4 @@
-import type { MissionStore } from '../application/domain-ports.js';
+import type { MissionStore, SessionMarkerPort } from '../application/domain-ports.js';
 import type { MissionLifecycleService } from '../application/mission-lifecycle-service.js';
 import {
   backfillReviewFromLegacyState,
@@ -25,7 +25,7 @@ import { parseReviewFindings } from '../adapters/review/review-round.js';
  * Every production approval path persists through the bound write function,
  * so one injection here covers all of them.
  */
-export function bindReviewPersistence(store: MissionStore, lifecycleService?: MissionLifecycleService | null) {
+export function bindReviewPersistence(store: MissionStore, lifecycleService?: MissionLifecycleService | null, sessionMarkerPort?: SessionMarkerPort | null) {
   const boundReadReviewState = (slug: string, rootDir?: string) => readReviewState(slug, rootDir, store);
   const boundCreateEvent = (
     slug: string,
@@ -51,7 +51,7 @@ export function bindReviewPersistence(store: MissionStore, lifecycleService?: Mi
     readReviewState: boundReadReviewState,
     readReviewRounds: (slug: string, rootDir?: string) => readReviewRounds(slug, rootDir, store),
     writeReviewState: boundWriteReviewState,
-    resetReviewState: (slug: string, rootDir?: string) => resetReviewState(slug, rootDir, store),
+    resetReviewState: (slug: string, rootDir?: string) => resetReviewState(slug, rootDir, store, sessionMarkerPort),
     backfillReview: (slug: string, rootDir?: string, options: { apply?: boolean } = {}) =>
       backfillReviewFromLegacyState(slug, rootDir, { ...options, missionStore: store }),
     reconcileInterruptedHandoff: (
@@ -104,8 +104,8 @@ export function bindReviewPersistence(store: MissionStore, lifecycleService?: Mi
  * Mission store, so the loop reports the mission as having no Review and the
  * reviewer's findings are never persisted.
  */
-export function reviewLoopBindings(store: MissionStore, lifecycleService?: MissionLifecycleService | null) {
-  const persistence = bindReviewPersistence(store, lifecycleService);
+export function reviewLoopBindings(store: MissionStore, lifecycleService?: MissionLifecycleService | null, sessionMarkerPort?: SessionMarkerPort | null) {
+  const persistence = bindReviewPersistence(store, lifecycleService, sessionMarkerPort);
   // The loop's completion signal is the same persisted conversation written by
   // `px verdict`/`px resolve`; artifact files are not a production input here.
   const reviewerOutput = async (
@@ -117,11 +117,13 @@ export function reviewLoopBindings(store: MissionStore, lifecycleService?: Missi
     if (!state) { return { consumed: false }; }
     const events = await persistence.readAllEvents(slug, { rootDir: options.worktree });
     const outcome = [...events].reverse().find((event: any) =>
-      event.event_type === 'reviewer_outcome' && event.round === state.round && event.actor === reviewer,
+      event.event_type === 'reviewer_outcome' && event.round === state.round && event.actor === reviewer
+      && Date.parse(event.timestamp) >= Date.parse(state.startedAt),
     ) as { verdict?: string; content?: string } | undefined;
     if (!outcome?.verdict) { return { consumed: false }; }
     const findings = [...events].reverse().find((event: any) =>
-      event.event_type === 'reviewer_findings' && event.round === state.round && event.actor === reviewer,
+      event.event_type === 'reviewer_findings' && event.round === state.round && event.actor === reviewer
+      && Date.parse(event.timestamp) >= Date.parse(state.startedAt),
     ) as { content?: string } | undefined;
     return {
       consumed: true,
@@ -139,7 +141,8 @@ export function reviewLoopBindings(store: MissionStore, lifecycleService?: Missi
     if (!state) { return { consumed: false }; }
     const events = await persistence.readAllEvents(slug, { rootDir: options.worktree });
     const disposition = [...events].reverse().find((event: any) =>
-      event.event_type === 'implementer_disposition' && event.round === state.round && event.actor === implementer,
+      event.event_type === 'implementer_disposition' && event.round === state.round && event.actor === implementer
+      && Date.parse(event.timestamp) >= Date.parse(state.startedAt),
     ) as { disposition?: string } | undefined;
     return disposition?.disposition
       ? { consumed: true, ok: true, disposition: disposition.disposition }

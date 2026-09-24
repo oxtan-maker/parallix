@@ -18,6 +18,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import childProcess from 'node:child_process';
+import { DatabaseSync } from 'node:sqlite';
 import { fileURLToPath } from 'node:url';
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -69,6 +70,9 @@ const HEALTHCHECK_TIMEOUT_MS = Math.min(
 // incomplete-evidence checkpoint was killed at 600s mid-recovery.
 const ACTIVE_TIMEOUT_MS = RUN_TIMEOUT_MS * 2;
 const MIN_TMP_FREE_BYTES = Number(process.env.PARALLIX_REAL_AGENT_MIN_TMP_BYTES || 512 * 1024 * 1024);
+// The fixture seeds this in its base checkout; the pre-draft hook writes a
+// separate copy into each mission worktree. Verification requires it in both.
+const PROVISIONED_MARKER = '.pre-draft-provisioned';
 
 function runCommand(command, args, options = {}) {
   const result = childProcess.spawnSync(command, args, { encoding: 'utf8', ...options });
@@ -430,14 +434,20 @@ function setupRepository({ slug, title, agent = 'custom', runner = 'opencode' })
   delete blocklist[agent];
   fs.writeFileSync(path.join(stateHome, 'agents.local.json'), JSON.stringify({ blocklist }, null, 2), 'utf8');
 
-  // Minimal repo verification gate: drafted missions declare gates like
-  // `./scripts/verify-local.sh docs` (the scaffold default), and the workflow
-  // executes mission-declared gates literally at handoff. A real px-managed
-  // repo ships this script, so the throwaway repo must too — otherwise every
-  // draft fails its own declared gates on a missing file.
+  // The repository verification gate. It fails in a checkout that was not
+  // provisioned, which is where task-2553 stalled: its gates ran in a worktree
+  // with no dependencies installed. Which area a gate runs is not
+  // checked here — the pre-review gate legitimately falls back to the
+  // configured defaultArea when the changed files name no area, and the
+  // push-gate area is covered by test/task-2561-repro.test.ts (b).
   fs.mkdirSync(path.join(repoRoot, 'scripts'), { recursive: true });
   const verifyStub = path.join(repoRoot, 'scripts', 'verify-local.sh');
-  fs.writeFileSync(verifyStub, '#!/usr/bin/env bash\n# Smoke-repo verification gate: nothing to verify in the throwaway repo.\nexit 0\n', 'utf8');
+  fs.writeFileSync(verifyStub, [
+    '#!/usr/bin/env bash',
+    `[ -f ${PROVISIONED_MARKER} ] || { echo "verify-local.sh: this worktree was not provisioned by the pre-draft hook" >&2; exit 1; }`,
+    'exit 0',
+    '',
+  ].join('\n'), 'utf8');
   fs.chmodSync(verifyStub, 0o755);
 
   fs.writeFileSync(path.join(repoRoot, 'backlog', 'config.yml'), [
@@ -486,7 +496,8 @@ function setupRepository({ slug, title, agent = 'custom', runner = 'opencode' })
       tasks: { provider: 'backlog-md', storage: 'backlog', stateMap: 'config/state-map.json' },
       agents: { models: SMOKE_MODEL ? { [agent]: SMOKE_MODEL } : {}, runners: agent === 'custom' ? { custom: runner } : {} },
       missions: { baseDir: 'missions', branchPrefix: 'mission/', worktreePattern: '../<repo>-<slug>' },
-      verification: { command: ':', defaultArea: 'all' },
+      verification: { command: './scripts/verify-local.sh {{area}}', defaultArea: 'all' },
+      draft: { preDraftCommand: `touch ${PROVISIONED_MARKER}` },
       review: { provider: 'none', tmpDir: '.workflow/review-artifacts' }
     }
   }, null, 2));
@@ -526,12 +537,16 @@ function setupRepository({ slug, title, agent = 'custom', runner = 'opencode' })
     '.workflow/',
     '.sessions/',
     '.forgejo-local/',
+    PROVISIONED_MARKER,
     'workflow/.cache/',
     'workflow/.sessions/',
     'workflow/config/agents.local.json',
     'agents.local.json',
     ''
   ].join('\n'), 'utf8');
+  // The exact-tree publication proof verifies this base checkout after the
+  // squash; only mission worktrees are provisioned by the pre-draft hook.
+  fs.writeFileSync(path.join(repoRoot, PROVISIONED_MARKER), '', 'utf8');
   fs.writeFileSync(path.join(repoRoot, '.graphifyignore'), '.workflow/\n', 'utf8');
   const helloScript = path.join(repoRoot, 'hello.sh');
   fs.writeFileSync(helloScript, '#!/usr/bin/env bash\necho "Helo, Wrld!"\n', 'utf8');
@@ -781,14 +796,15 @@ function runRealAgentSmoke(agent, runner) {
     let draftResult = runWorkflowAllowFail(repo.repoRoot, env, ['draft', slug, '--agent', agent], RUN_TIMEOUT_MS);
     const draftDurationMs = Date.now() - draftStartedAt;
 
-    // Refine refuses a draft whose contract is incomplete. That is the phantom
-    // draft the bounded retry below absorbs, not a launcher failure.
-    const contractRefused = (result) => result.status !== 0
-      && /mission contract is incomplete/.test(`${result.stdout || ''}${result.stderr || ''}`);
-    if (draftResult.status !== 0 && !contractRefused(draftResult)) {
-      const { bucket, detail } = classifyFailure(draftResult);
+    // The product sends an incomplete contract back to the drafting agent
+    // (TASK-2561). The harness must not do that for it: a draft that still
+    // ends without its contract is a Parallix failure, never retried here.
+    if (draftResult.status !== 0) {
+      const { bucket, detail } = /mission contract is incomplete/.test(`${draftResult.stdout || ''}${draftResult.stderr || ''}`)
+        ? { bucket: 'parallix-workflow-failure', detail: 'the draft ended with an incomplete mission contract after its bounce-back budget' }
+        : classifyFailure(draftResult);
       assert.fail(
-        `[${bucket}] px draft --agent custom failed (status=${draftResult.status}, signal=${draftResult.signal}): ${detail}\n` +
+        `[${bucket}] px draft --agent ${agent} failed (status=${draftResult.status}, signal=${draftResult.signal}): ${detail}\n` +
         `stdout:\n${draftResult.stdout}\nstderr:\n${draftResult.stderr}`
       );
     }
@@ -810,30 +826,15 @@ function runRealAgentSmoke(agent, runner) {
     // the drafting model may render it as "Hello World", "Hello, World!",
     // "hello-world", or "hello_world".
     const helloWorld = /hello[\s,_-]*world/i;
-    const missingContract = () => {
-      const { brief, declaredGates } = readMissionStatus(worktree, env, slug);
-      const missing = ['goal', 'why', 'scope'].filter((field) => !brief?.[field]);
-      if ((declaredGates ?? []).length === 0) { missing.push('gates'); }
-      if (contractRefused(draftResult)) { missing.push('refined'); }
-      if (!helloWorld.test(`${brief?.goal ?? ''} ${brief?.scope ?? ''}`)) { missing.push('hello-world'); }
-      return missing;
-    };
-    // A cold, weak, or contended local backend (this repo's quantized custom
-    // model streams a degenerate draft on some requests — an unrecorded
-    // contract, or one about the task *title* alone, ignoring the description
-    // it was given). The gate validates the launcher boundary, not model
-    // quality, so retry a bounded number of times; the final attempt must
-    // still record a complete contract.
-    let missing = missingContract();
-    let draftAttempts = 0;
-    const MAX_DRAFT_ATTEMPTS = 3;
-    while (missing.length > 0) {
-      draftAttempts += 1;
-      if (draftAttempts >= MAX_DRAFT_ATTEMPTS) { break; }
-      console.log(`[benchmark] draft attempt ${draftAttempts} left ${missing.join(',')} unrecorded; retrying`);
-      draftResult = runWorkflowAllowFail(repo.repoRoot, env, ['draft', slug, '--agent', agent], RUN_TIMEOUT_MS);
-      missing = missingContract();
-    }
+    // Every part refine requires (requireDraftedContract), read back from the
+    // same authority `px active` checks.
+    const recorded = readMissionStatus(worktree, env, slug);
+    const missing = ['goal', 'why', 'scope'].filter((field) => !recorded.brief?.[field]);
+    if ((recorded.successCriteria ?? []).length === 0) { missing.push('success criteria'); }
+    if ((recorded.checkpoints ?? []).length === 0) { missing.push('checkpoint plan'); }
+    if ((recorded.declaredGates ?? []).length === 0) { missing.push('gates'); }
+    if (!recorded.predictedNelBucket) { missing.push('predicted NEL bucket'); }
+    if (!helloWorld.test(`${recorded.brief?.goal ?? ''} ${recorded.brief?.scope ?? ''}`)) { missing.push('hello-world'); }
     assert.deepEqual(
       missing,
       [],
@@ -949,23 +950,6 @@ function runRealAgentSmoke(agent, runner) {
       );
     }
 
-    // Operator refinement step: in the real workflow a human reviews the
-    // drafted mission before activation. Small local models routinely record
-    // prose instead of runnable commands as gates (e.g. "`bash hello.sh`
-    // outputs exactly `Hello, World!`"), and handoff executes declared gates
-    // literally. All launcher and contract assertions above ran against the
-    // RAW draft; here the harness performs the minimal refinement an operator
-    // would: pin the declared gates to the repo's runnable verification gate.
-    const PINNED_GATE = './scripts/verify-local.sh all';
-    const setGate = (verb, command) => {
-      const { version } = readMissionStatus(worktree, env, slug);
-      const result = runWorkflowAllowFail(worktree, env, ['gate', verb, '--slug', slug, '--command', command, '--expected-version', String(version)], RUN_TIMEOUT_MS);
-      assert.equal(result.status, 0, `[parallix-workflow-failure] px gate ${verb} failed: ${result.stderr || result.stdout}`);
-    };
-    const draftedGates = readMissionStatus(worktree, env, slug).declaredGates;
-    if (!draftedGates.includes(PINNED_GATE)) { setGate('add', PINNED_GATE); }
-    for (const gate of draftedGates.filter((gate) => gate !== PINNED_GATE)) { setGate('remove', gate); }
-
     // Phase 2: Active - this autostarts the autonomous review loop.
     // px active's preflight requires running from the mission worktree (PWD
     // and branch checks), matching how a real implementer session operates.
@@ -1021,12 +1005,15 @@ function runRealAgentSmoke(agent, runner) {
     const reviewHistory = readMissionStatus(worktree, env, slug).review?.history ?? [];
     assert.ok(reviewHistory.length > 0, `[parallix-workflow-failure] expected at least one recorded review round for ${slug} after active phase`);
 
-    // Verify active phase artifacts
-    const cp1File = path.join(worktree, 'missions', slug, 'CP-1.md');
-    assert.ok(fs.existsSync(cp1File), `[parallix-workflow-failure] expected CP-1.md after active phase at ${cp1File}`);
-    const cp1Content = fs.readFileSync(cp1File, 'utf8');
-    assert.ok(cp1Content.includes('## Goal Check') || cp1Content.includes('## Goal Check Table'),
-      '[parallix-workflow-failure] expected CP-1.md to contain Goal Check heading');
+    // Verify the active phase's checkpoint evidence. A typed-verb mission
+    // records it in Mission state through `px checkpoint record`; there is no
+    // CP-N.md to find, and handoff and the gatekeeper read this same evidence.
+    const executed = readMissionStatus(worktree, env, slug);
+    const unrecorded = (executed.checkpoints ?? []).filter((checkpoint) => !checkpoint.recorded).map((checkpoint) => checkpoint.name);
+    assert.deepEqual(unrecorded, [], `[parallix-workflow-failure] planned checkpoints without recorded evidence after the active phase: ${unrecorded.join(', ')}`);
+    const evidencedCriteria = new Set((executed.latestCheckpoint?.goalCheck ?? []).map((row) => row.criterion));
+    const unevidenced = (executed.successCriteria ?? []).filter((criterion) => !evidencedCriteria.has(criterion));
+    assert.deepEqual(unevidenced, [], `[parallix-workflow-failure] success criteria without a Goal Check row in the final checkpoint: ${unevidenced.join(' | ')}`);
 
     // Phase 3: Integrate through the real CLI rail. Agent work is complete at
     // this point, so no further model session is needed; this proves the
@@ -1062,6 +1049,20 @@ function runRealAgentSmoke(agent, runner) {
     );
     assert.match(completedTaskContent, /^status:\s*done$/m,
       '[parallix-workflow-failure] integrated task should have status done');
+
+    // The Backlog file above is only the mirror. The typed Mission must also
+    // be closed in the operator database, and the landed program must work.
+    const authority = new DatabaseSync(path.join(repo.stateHome, 'parallix.db'), { readOnly: true });
+    try {
+      const mission = authority.prepare('SELECT status, closed_at FROM missions WHERE id = ?').get(slug);
+      assert.equal(mission?.status, 'done', `[parallix-workflow-failure] the Mission in the operator database is ${mission?.status ?? 'missing'}, not done`);
+      assert.ok(mission?.closed_at, '[parallix-workflow-failure] the integrated Mission has no closure time');
+    } finally {
+      authority.close();
+    }
+    const published = runCommand(path.join(repo.repoRoot, 'hello.sh'), [], { cwd: repo.repoRoot });
+    assert.equal(published.status, 0, `[parallix-workflow-failure] integrated hello.sh failed: ${published.stderr}`);
+    assert.equal(published.stdout.trim(), 'Hello, World!');
 
   } finally {
     if (!shouldKeepTmp()) {

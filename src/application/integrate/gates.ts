@@ -9,6 +9,24 @@ import type { IntegrateGatesPort, IntegrateWorkflowPorts } from '../ports/integr
 
 export interface IntegrateSeams extends BounceSeams {
   routeIntegrationGateFailureFn: IntegrateGatesPort['routeIntegrationGateFailure'];
+  /**
+   * Send a repaired revision back through review — the same review
+   * `px review <slug> --start` runs — and report whether it came back approved.
+   * Absent, a changed revision stops integration for the operator to re-review.
+   */
+  reReviewFn?: (_slug: string, _worktree: string) => Promise<boolean>;
+}
+
+/**
+ * The repaired revision was re-reviewed and approved during this integration.
+ * Everything integrate read before the repair (approval, pull request, lane)
+ * is stale, so the run starts over from a fresh context instead of landing on it.
+ */
+export class IntegrationRestartRequired extends Error {
+  constructor(readonly slug: string) {
+    super(`${slug} was re-reviewed and approved after an integration-gate repair; integration restarts on the approved revision`);
+    this.name = 'IntegrationRestartRequired';
+  }
 }
 
 export interface GateStepRequest {
@@ -114,11 +132,36 @@ export function createIntegrationGateStep({ gates, landing, verification }: Inte
       startAgentFn: seams.startAgentFn,
       transitionTaskFn: (bounceSlug: string) => seams.transitionTaskFn(bounceSlug, 'active'),
       applyAgentFallbackFn: seams.applyAgentFallbackFn,
+      reReviewFollows: Boolean(seams.reReviewFn),
     });
+    if (route.route === 'revision-changed' && route.invalidation?.ok && seams.reReviewFn) {
+      await reReviewRepairedRevision(slug, checkout, route.repairedRevision ?? 'unknown', seams.reReviewFn);
+    }
     if (route.route !== 'fixed') {
       throw abortWith(landing, 'Aborting before merge.');
     }
     return `${configured.length} integration gate(s) passed after ${route.rebounds} integration-gate rebound(s)`;
+  }
+
+  /**
+   * The repair changed what the reviewer approved, and its approval is
+   * retracted. Review the repaired revision now instead of stranding the
+   * mission for an operator: nothing is approved on the reviewer's behalf,
+   * and the superseded approval stays in the review history.
+   */
+  async function reReviewRepairedRevision(slug: string, checkout: string, repairedRevision: string, reReviewFn: NonNullable<IntegrateSeams['reReviewFn']>): Promise<void> {
+    fmt.log.info(`Sending ${slug} back through review for the repaired revision ${repairedRevision}.`);
+    let approved = false;
+    try {
+      approved = await reReviewFn(slug, checkout);
+    } catch (error) {
+      throw abortWith(landing, `Re-review of ${slug} could not run: ${(error as Error).message}`, `Run px review ${slug} --start, then px integrate ${slug}.`, 'Aborting before merge.');
+    }
+    if (!approved) {
+      throw abortWith(landing, `The repaired revision of ${slug} was not approved in re-review. Follow the review outcome above, then run px integrate ${slug} again.`, 'Aborting before merge.');
+    }
+    fmt.log.pass(`The repaired revision of ${slug} was re-reviewed and approved.`);
+    throw new IntegrationRestartRequired(slug);
   }
 
   return { runRequiredLocalGates };

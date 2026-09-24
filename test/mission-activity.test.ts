@@ -285,7 +285,7 @@ function renderStatusLines(activity: MissionActivity | null): string[] {
     prInfo: null,
     staleWorktrees: [],
     staleWorktreeRebase: {},
-    agentMatrix: [],
+    agents: [],
     lastThreeCommits: [],
     uncommittedCount: 0,
   } as unknown as StatusResult;

@@ -4169,6 +4169,54 @@ test('startReviewLoop performs the handoff for an active task via --start (task-
   assert.ok(!errors.some(e => e.includes('--push')), 'no --push guidance for an active start');
 });
 
+test('an open PR does not skip handoff when the Review aggregate is missing', async () => {
+  let handoffs = 0;
+  const { exitCode } = await captureExit(() => startReviewLoop(TEST_SLUG, {
+    eligibleAgentsForStepFn: () => ['codex', 'claude'],
+    resolveTaskFileFn: () => ({ ok: true, taskFile: '/tmp/task.md' }),
+    getTaskStatusFn: () => 'review',
+    getTaskImplementerFn: () => 'codex',
+    isForgejoReviewEnabledFn: () => true,
+    forgejoAvailableFn: async () => true,
+    getPrStatusFn: () => ({ exists: true, state: 'open', number: 77 }),
+    readReviewStateFn: () => handoffs ? { slug: TEST_SLUG, reviewer: 'claude', implementer: 'codex', round: 1, phase: 'reviewing' } : null,
+    missionStore: {} as any,
+    performHandoffFn: async () => { handoffs += 1; return { ok: true }; },
+    maybeUpdateGraphifyBeforeReviewFn: () => {},
+    maxAttempts: 0,
+    writeReviewStateFn: persistenceCommitted,
+    implementer: 'codex',
+    reviewer: 'claude',
+  }));
+
+  assert.equal(exitCode, null);
+  assert.equal(handoffs, 1);
+});
+
+test('an active mission with an old Review starts its next handoff despite an open PR', async () => {
+  let handoffs = 0;
+  const { exitCode } = await captureExit(() => startReviewLoop(TEST_SLUG, {
+    eligibleAgentsForStepFn: () => ['codex', 'claude'],
+    resolveTaskFileFn: () => ({ ok: true, taskFile: '/tmp/task.md' }),
+    getTaskStatusFn: () => 'active',
+    getTaskImplementerFn: () => 'codex',
+    isForgejoReviewEnabledFn: () => true,
+    forgejoAvailableFn: async () => true,
+    getPrStatusFn: () => ({ exists: true, state: 'open', number: 77 }),
+    readReviewStateFn: () => ({ slug: TEST_SLUG, reviewer: 'claude', implementer: 'codex', round: 1, phase: 'fixing' }),
+    missionStore: {} as any,
+    performHandoffFn: async () => { handoffs += 1; return { ok: true }; },
+    maybeUpdateGraphifyBeforeReviewFn: () => {},
+    maxAttempts: 0,
+    writeReviewStateFn: persistenceCommitted,
+    implementer: 'codex',
+    reviewer: 'claude',
+  }));
+
+  assert.equal(exitCode, null);
+  assert.equal(handoffs, 1);
+});
+
 test('startReviewLoop performs the handoff for a virtual-active task via --start (task-2490)', async () => {
 
   let handoffCalled = false;

@@ -40,7 +40,7 @@ import { triggerFromTransition, parseMissionStatus } from '../src/domain/board-e
 import { completedMissionStatistics, type MissionOutcome } from '../src/domain/usage.js';
 import { missionOutcome } from './fixtures/mission-outcome.js';
 import statsBackfill from '../src/adapters/cli/commands/stats-backfill.js';
-import { resolveKnownAgentFamilies } from '../src/interfaces/tui/agent-config-resolver.js';
+import { resolveKnownAgentFamilies } from '../src/adapters/agents/known-agent-families.js';
 
 const ROOT = process.cwd();
 const repo = repositoryId('parallix');

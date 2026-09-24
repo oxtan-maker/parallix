@@ -268,7 +268,9 @@ async function routeFixedIntegrationGateRebound({
   for (const problem of invalidation.errors) {
     error(fmt.status('FAIL', `Stale approval left standing: ${problem}. Clear it by hand before the next px integrate.`));
   }
-  error(fmt.status('FAIL', `${opts.slug} must go back through review: run px review ${opts.slug} --start and have the repaired revision ${repairedLabel} re-reviewed before integrating again.`));
+  if (!(opts.reReviewFollows && invalidation.ok)) {
+    error(fmt.status('FAIL', `${opts.slug} must go back through review: run px review ${opts.slug} --start and have the repaired revision ${repairedLabel} re-reviewed before integrating again.`));
+  }
   return { route: 'revision-changed', rebounds, approvedRevision: approvedLabel, repairedRevision: repairedLabel, invalidation };
 }
 
@@ -292,6 +294,8 @@ export interface IntegrationGateRouteOptions {
   approval?: any;
   /** Forgejo login of the configured reviewer whose approval may stand. */
   reviewerUser?: string | null;
+  /** The caller re-reviews a changed revision itself, so no manual instruction is printed. */
+  reReviewFollows?: boolean;
   realAgent?: string | null;
   realAgentModel?: string | null;
   startAgentFn: ReboundContext['startAgent'];

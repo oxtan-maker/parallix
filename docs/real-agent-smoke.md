@@ -138,8 +138,8 @@ funnel through the same launcher code path), the corrected smoke test exercises
 the complete `draft -> refine -> active -> review` flow to:
 
 - Prove the launcher boundary for `draft` (catches `TASK-1351` launcher-argument regressions)
-- Prove parseability of `MISSION.md` output (catches `TASK-1273` parseability regressions)
-- Verify `active` phase execution and artifact generation (CP-1.md)
+- Prove the draft records a complete mission contract in Mission state, without a harness retry (catches `TASK-1273` phantom drafts)
+- Verify `active` phase execution: every planned checkpoint has recorded evidence in Mission state, with a Goal Check row for each success criterion
 - Verify `review` phase execution and reviewer selection behavior
 - Strengthen telemetry isolation assertions with actual file-content validation
 
@@ -148,14 +148,13 @@ program task ("Create a .sh hello world program") rather than the fabricated
 greeting-helper placeholder, ensuring the smoke validates against how Parallix
 actually asks agents to do things.
 
-Between `draft` and `active` the harness performs the same minimal refinement
-step a human operator does before activating a drafted mission: it pins the
-mission's `## Gates` checklist to the repo's runnable verification gate and
-commits. All launcher-boundary and parseability assertions run against the RAW
-draft output before this step. The refinement exists because small local models
-routinely write prose instead of runnable commands in the Gates checklist, and
-the workflow executes declared gates literally at handoff — activating a raw
-drafted mission unrefined is not the real operating flow.
+The harness does not repair the product on its behalf. It runs `px draft` once
+and never retries it: when the drafting agent leaves the contract incomplete,
+Parallix itself sends the missing parts back to the agent, and a draft that
+still ends incomplete fails the gate. The contract is asserted in full — goal,
+why, scope, success criteria, checkpoint plan, gates and predicted NEL bucket —
+and the mission is activated with the gates the agent recorded, not gates the
+harness substituted.
 
 Note: The test stops at `review` and does not include `integrate`, as the integrate
 phase is not required to catch the target bug classes (TASK-1351, TASK-1273) and
@@ -175,10 +174,10 @@ A failing run prefixes its assertion message with one of three buckets:
   is the `TASK-1351` class of bug: a launcher-argument regression in
   `src/adapters/agents/opencode.ts` or `src/adapters/agents/agents.ts`.
 - `[parallix-workflow-failure]` — `opencode` launched and produced output,
-  but Parallix could not parse it into the required mission artifact
-  contract (missing `## Goal` / `## Scope` / `## Success Criteria`
-  headings, missing `MISSION.md`, or a missing/malformed draft-stats line).
-  This is the `TASK-1273` class of bug.
+  but the mission did not get through the lifecycle: the draft ended with an
+  incomplete mission contract after Parallix's own bounce-back, the draft-stats
+  line was missing or malformed, or a later phase failed. This is the
+  `TASK-1273` class of bug.
 
 The smoke harness does two preflight checks before the full lifecycle run:
 
@@ -240,11 +239,12 @@ test (TASK-2201) adds explicit validation of:
   (claude/codex). Note that `FORGEJO_USER` does not force the reviewer — it is
   overwritten by `startAgent` with the chosen agent family.
 
-- **Declared-gate runnability**: The throwaway repo ships a no-op
-  `scripts/verify-local.sh`, because drafted missions declare gates such as
-  `./scripts/verify-local.sh docs` (the scaffold default) and the workflow
-  executes mission-declared gates literally at handoff. A real px-managed repo
-  has this script; without it every draft would fail its own declared gates.
+- **Verification gate that fails where missions stalled**: The throwaway repo
+  ships a `scripts/verify-local.sh` that is also its configured verification
+  command. It fails when the mission worktree was not prepared by the
+  repository's pre-draft hook — the condition that stalled a real mission when
+  its gates ran in a worktree with no dependencies installed. A green smoke
+  therefore shows that worktree preparation works end to end.
 
 - **Representative task content**: The throwaway repo's backlog task uses "Create a
   .sh hello world program" instead of the fabricated greeting-helper placeholder,

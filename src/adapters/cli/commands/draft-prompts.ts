@@ -125,5 +125,22 @@ Focused repair:
 }
 
 
+/**
+ * Prompt for an agent whose contract refine refused. The refusal names every
+ * missing part and the command that records it; everything already recorded
+ * stays, so the agent only adds what is missing.
+ */
+// @ts-expect-error implicit any on slug/rootDir/worktree/refusal
+function buildContractRepairPrompt(slug, { rootDir = process.cwd(), worktree = null, refusal = '' } = {}) {
+  return `${buildDraftPrompt(slug, { rootDir, worktree })}
 
-export { buildDraftPrompt, buildRestartPrompt, fallbackDraftCommitMessage, resolveMissionClassificationResolver, validateDraftClassification, normalizeDraftClassification, resolveVerifyCmd, resolveTaskPath, resolveClassificationInstructions };
+Contract repair:
+The harness tried to finish this draft and the mission contract was refused:
+
+${refusal}
+
+What is already recorded stays recorded. Read it back with \`px status ${slug}\`, record only the missing parts listed above, one foreground command per write, then read it back again and confirm every required part is reported before you finish.
+`;
+}
+
+export { buildDraftPrompt, buildRestartPrompt, buildContractRepairPrompt, fallbackDraftCommitMessage, resolveMissionClassificationResolver, validateDraftClassification, normalizeDraftClassification, resolveVerifyCmd, resolveTaskPath, resolveClassificationInstructions };

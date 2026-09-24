@@ -79,7 +79,7 @@ export function createMissionRecovery(ports: IntegrateWorkflowPorts) {
     // repository permanently unintegratable.
     const providerlessStoredApproval = context.approval?.ok === true && context.approval.providerDisabled === true;
     if (entryRound?.decision?.kind === 'approved' && overrideApprovedAt === undefined && !providerlessStoredApproval) {
-      throw abortWith(landing, `Mission ${slugId} has a stored approval without the required provider approval. Refresh provider review state before integration.`);
+      throw abortWith(landing, `Mission ${slugId} has a stored approval without the required provider approval. Refresh provider review state before integration; if an integration-gate repair retracted the approval, run px review ${context.slug} --start to review the repaired revision.`);
     }
     let reviewEntryAt = entryRound?.startedAt;
     if (!reviewEntryAt && typeof context.pr?.createdAt === 'string' && context.pr.createdAt) {
