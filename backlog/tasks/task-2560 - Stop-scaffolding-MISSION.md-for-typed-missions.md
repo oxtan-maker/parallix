@@ -23,6 +23,8 @@ ordinal: 97008
 
 <!-- SECTION:DESCRIPTION:BEGIN -->
 TASK-2521.03 moved agents to px status and typed writes, but runtime code still scaffolds/commits MISSION.md, writes Backlog task files, and retains handoff CP-1.md compatibility generation and file reads. TASK-2521.06 cannot truthfully report zero normal-runtime readers/writers while these paths remain. Remove or isolate them behind explicit one-shot legacy import/export, using recorded Mission state for normal operations. Preserve fail-closed semantic evidence checks. The old TASK-2521.05 was retired after TASK-2521.03 absorbed this scope.
+
+TASK-2521.06 also found 111 completed-mission CP files whose Goal Check or action differs from checkpoint data already in Mission state before the migration began. Thirty-five stored versions match a Git revision on some ref; 76 match no committed revision examined. The old handoff path records parsed CP text into SQLite while CP files can later change. Trace this divergence in the cutover and make typed checkpoint evidence the single current authority; keep historical file content discoverable for migration audit.
 <!-- SECTION:DESCRIPTION:END -->
 
 ## Acceptance Criteria
