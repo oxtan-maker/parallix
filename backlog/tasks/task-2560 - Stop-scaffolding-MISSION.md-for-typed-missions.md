@@ -1,9 +1,10 @@
 ---
 id: TASK-2560
-title: Stop scaffolding MISSION.md for typed missions
+title: Finish file-free runtime cutover for typed missions
 status: backlog
 assignee: []
 created_date: '2026-09-23 08:46'
+updated_date: '2026-09-24 17:36'
 labels:
   - ai_sdlc
   - bug
@@ -11,7 +12,9 @@ labels:
 dependencies: []
 references:
   - src/adapters/cli/commands/draft-setup.ts
-  - prompts/execute-core.md
+  - src/application/handoff-command-use-case.ts
+  - src/adapters/backlog/task-transitions.ts
+  - test/fixtures/durable-state-inventory.ts
 priority: high
 ordinal: 97008
 ---
@@ -19,7 +22,7 @@ ordinal: 97008
 ## Description
 
 <!-- SECTION:DESCRIPTION:BEGIN -->
-The TASK-2521.03 draft and execute prompts use px status and typed writes, but px draft still creates and commits templates/mission-scaffold.md as missions/<slug>/MISSION.md through ensureMissionFile in src/adapters/cli/commands/draft-setup.ts. TASK-2521.06 has a literal placeholder MISSION.md even though its complete contract is stored in Mission state (px status). Finish the file-protocol cleanup without weakening handoff trust; preserve explicit legacy import/export only. This is a TASK-2521.03 cleanup gap and should be coordinated with TASK-2521.05.
+TASK-2521.03 moved agents to px status and typed writes, but runtime code still scaffolds/commits MISSION.md, writes Backlog task files, and retains handoff CP-1.md compatibility generation and file reads. TASK-2521.06 cannot truthfully report zero normal-runtime readers/writers while these paths remain. Remove or isolate them behind explicit one-shot legacy import/export, using recorded Mission state for normal operations. Preserve fail-closed semantic evidence checks. The old TASK-2521.05 was retired after TASK-2521.03 absorbed this scope.
 <!-- SECTION:DESCRIPTION:END -->
 
 ## Acceptance Criteria
@@ -28,7 +31,11 @@ The TASK-2521.03 draft and execute prompts use px status and typed writes, but p
 - [ ] #2 Draft setup and commit safety do not create or commit placeholder mission documents; the typed Mission contract remains discoverable through px status.
 - [ ] #3 Handoff and recovery validate recorded Mission/checkpoint evidence without consulting generated MISSION.md or CP-N.md for typed missions.
 - [ ] #4 A regression test proves draft of a typed mission leaves no placeholder MISSION.md and succeeds through handoff.
+- [ ] #5 Normal draft, assignment, handoff, review, integration, and closeout create no MISSION.md, CP-N.md, review-event, or Backlog task metadata file and do not read retired files for current state.
+- [ ] #6 The retired workflow-path guard inventory no longer grants normal-runtime exemptions for those file reads and writes; explicit historical import/export remains isolated.
 <!-- AC:END -->
+
+
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
