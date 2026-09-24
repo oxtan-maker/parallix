@@ -33,6 +33,8 @@ It has not been checked whether these tests still leak today or whether the rows
 
 TASK-2521.06 found a concrete collision: fixture repository `handoff-relaunch-success-2bYtvu` owns global Mission ID `task-1388` in the operator DB, while the Parallix repository has a retained TASK-1388 task file. The migration correctly refuses to attach the real task body to the fixture Mission, leaving one required task record missing. Include this row in the backed-up fixture cleanup, then rerun the migration audit.
 
+The single `task-1388` fixture row was removed on 2026-09-24 after an integrity-checked backup. TASK-2521.06 then imported the real TASK-1388 and its three checkpoints; the audit reports zero missing task records. The general test-isolation fix and cleanup of other leaked fixtures remain open.
+
 ## Fix direction
 
 A test process must never resolve the operator's default `PARALLIX_HOME`. Isolation should be the runner's default (for example, the test entry point sets a per-run temporary `PARALLIX_HOME` before any test loads), not something each test has to remember. A guard should fail the run if the default operator DB gained rows during it. `test/e2e-real-agent-smoke.test.ts` already has a delta-based check of this kind.
