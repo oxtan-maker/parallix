@@ -221,6 +221,8 @@ export const INTEGRATION_CI_TESTS: readonly string[] = [
   // TASK-2521.03: seeds an isolated SQLite operator database and drives the
   // production `px status --json` composition path.
   'task-2521-03-context-cli.integration.test.ts',
+  'task-2521.04-legacy-trace-commit.integration.test.ts',
+  'task-2521.04-mission-dependencies.integration.test.ts',
   // TASK-2532: seeds temporary Git repositories to exercise the base-worktree
   // repair (marker-stash sweep + dead-rebase abort), so it crosses the git
   // boundary and runs only in the integration layer.
@@ -257,6 +259,7 @@ export const INTEGRATION_LOCAL_TESTS: readonly string[] = [
   'task-2270-graphify-exclusion.test.ts',
   'task-2286-native-sea-smoke.test.ts',
   'task-2376-lifecycle-timing.test.ts',
+  'task-2557-sandbox-px-write.test.ts',
   'unit-test-timeout-guard.test.ts',
 ];
 
@@ -270,6 +273,8 @@ export const INTEGRATION_LOCAL_REASONS: Readonly<Record<string, string>> = {
     'Builds and runs the native single-executable artifact, which needs a Node >= MINIMUM_SEA_NODE_MAJOR SEA toolchain and per-OS packaging; the portable npm package and bundle checks cover packaging in the CI lane instead.',
   'task-2376-lifecycle-timing.test.ts':
     'Asserts lifecycle dwell and cycle-time values; retain that timing-dependent coverage in required local verification rather than GitHub CI\'s 1000ms test budget.',
+  'task-2557-sandbox-px-write.test.ts':
+    'Spawns the real `bwrap` binary to run `px` inside the codex sandbox profile; bubblewrap is not part of the GitHub-hosted runner image.',
   'unit-test-timeout-guard.test.ts':
     'TASK-2542: proves the unit-test timing guard fires by spawning the runner against a slow fixture; the budget/reporter path is disabled on GitHub-hosted runners, so this timing proof is retained in required local verification rather than the GitHub CI lane.',
 };

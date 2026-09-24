@@ -305,6 +305,7 @@ export function createStatusBoardAdapter(options: {
             : null,
           declaredGates: [...(recorded?.mission.declaredGates ?? [])],
           successCriteria: [...(recorded?.mission.successCriteria ?? [])],
+          dependencies: [...(recorded?.mission.dependencies ?? [])],
           checkpoints: (recorded?.mission.checkpoints ?? []).map((checkpoint) => ({
             name: checkpoint.name,
             description: checkpoint.firstLine ?? '',

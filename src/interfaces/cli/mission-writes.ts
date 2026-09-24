@@ -129,6 +129,18 @@ Mission to be done, specific enough to check. Checkpoint Goal Check rows and
 review verify against these; read them back with \`px status\`.
 `.trimStart();
 
+export const DEPENDS_HELP = `
+Usage:
+  px depends add    [--slug <slug>] --on <slug> --expected-version <n>
+  px depends remove [--slug <slug>] --on <slug> --expected-version <n>
+
+Record or drop one Mission-to-Mission dependency: \`--on\` is the Mission this
+one depends on, and it must already be a Mission. A self-reference and a
+duplicate are refused. Nothing enforces a dependency — no lifecycle,
+activation or scheduling rule reads it — so it is recorded for whoever reads
+\`px status\` next.
+`.trimStart();
+
 export const NEL_HELP = `
 Usage: px nel set [--slug <slug>] --predicted <Small|Medium|Large> --expected-version <n>
 
@@ -231,6 +243,23 @@ export function createCriterionCommand(services: MissionWriteServices) {
 }
 
 /** `px nel set --predicted <bucket>` */
+export function createDependsCommand(services: MissionWriteServices) {
+  return async (args: string[] = []): Promise<void> => {
+    if (helped(args, DEPENDS_HELP)) { return; }
+    const action = args[0];
+    if (action !== 'add' && action !== 'remove') { fail(DEPENDS_HELP); }
+    const on = required(args, '--on');
+    const req = request(args, `depends-${action}`, services.resolveSlug);
+    const current = unwrap(await services.brief.readDependencies(req), 'dependencies read').dependencies;
+    if (action === 'remove' && !current.includes(missionId(on))) { fail(`mission dependency is not recorded: ${on}`); }
+    // A duplicate `add`, a self-reference and an id that is not a Mission are
+    // all refused below the CLI: by the domain value and by the service's
+    // existence check.
+    const dependencies = action === 'add' ? [...current, on] : current.filter((entry) => entry !== on);
+    output(unwrap(await services.brief.setDependencies({ ...req, dependencies }), `depends ${action}`));
+  };
+}
+
 export function createNelCommand(services: MissionWriteServices) {
   return async (args: string[] = []): Promise<void> => {
     if (helped(args, NEL_HELP)) { return; }

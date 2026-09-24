@@ -2194,6 +2194,22 @@ test('applyAgentFallback handles a missing launchResult gracefully (catastrophic
   assert.equal(next, 'codex');
 });
 
+test('applyAgentFallback handles a missing state during an implementer fallback', async () => {
+  const writes = [];
+  const next = await applyAgentFallback({
+    role: 'implementer',
+    original: 'claude',
+    launchResult: { agent: 'codex' },
+    slug: 'task-test-fallback',
+    worktree: '/tmp/x',
+    log: () => {},
+    writeReviewStateFn: (_slug, state) => writes.push(state),
+  });
+
+  assert.equal(next, 'codex');
+  assert.equal(writes[0].implementer, 'codex');
+});
+
 test('applyAgentFallback preserves the original roundStartedAt when rewriting state', async () => {
   // Regression: a crash after the fallback rewrite but before pollFor* completes
   // must leave review-state.json pinned to the original round start so the resumed

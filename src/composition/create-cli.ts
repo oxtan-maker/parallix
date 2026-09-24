@@ -52,6 +52,8 @@ import { git } from '../adapters/git/git.js';
 import * as agents from '../adapters/agents/agents.js';
 import { recordStageStatsSafe, stageLaunchSinceMs } from '../adapters/review/review-agent-fallback.js';
 import { resolveAgentModel } from '../adapters/config/product-config.js';
+import { createImportLegacyCommand } from '../interfaces/cli/import-legacy.js';
+import { importLegacyMissions } from '../adapters/backlog/legacy-mission-import.js';
 import { createReviewCommand } from '../interfaces/cli/review.js';
 
 import { createStatusCommand } from '../interfaces/cli/status.js';
@@ -62,6 +64,7 @@ import {
   createCheckpointCommand,
   createGateCommand,
   createCriterionCommand,
+  createDependsCommand,
   createNelCommand,
   createGoalCommand,
   createReproCommand,
@@ -231,6 +234,7 @@ function createCommandRegistry(rootDir: string): Record<string, Command> {
     scope: (args) => withGraph(services => createScopeCommand(missionWrites(services))(args)),
     gate: (args) => withGraph(services => createGateCommand(missionWrites(services))(args)),
     criterion: (args) => withGraph(services => createCriterionCommand(missionWrites(services))(args)),
+    depends: (args) => withGraph(services => createDependsCommand(missionWrites(services))(args)),
     nel: (args) => withGraph(services => createNelCommand(missionWrites(services))(args)),
     checkpoint: (args) => withGraph(services => createCheckpointCommand(missionWrites(services).checkpoints, (explicit) => inferSlug(explicit))(args)),
     assign: (args) => withGraph(services => createAssignCommand(missionWrites(services), false)(args)),
@@ -255,6 +259,25 @@ function createCommandRegistry(rootDir: string): Record<string, Command> {
       const controller = services.presentationCapabilities?.commandController;
       if (!controller) { throw new Error('cancel requires BoardCommandController from presentation capabilities'); }
       return createCancelCommand(controller)(args);
+    }),
+    // `px import-legacy` is the explicit, operator-triggered one-way migration
+    // from the legacy Backlog Markdown tree into the existing Mission
+    // aggregate. It is the only caller of the importer: no normal command
+    // reaches it, and it is never a runtime fallback reader.
+    'import-legacy': (args) => withGraph(services => {
+      if (!services.mission) { throw new Error('mission services are unavailable'); }
+      const mission = services.mission;
+      return createImportLegacyCommand(
+        ({ dryRun }) => importLegacyMissions(
+          {
+            repositoryId: mission.repositoryId,
+            store: mission.store,
+            intake: mission.intake,
+            dependencies: mission.brief,
+          },
+          { rootDir, dryRun },
+        ),
+      )(args);
     }),
     'verify-env': startupPreflight,
     rebase: createRebaseCommand((args, options) => withMissionFactories(missionServicesFn => rebase(args, { ...options, missionServicesFn }))),

@@ -198,6 +198,12 @@ export const MISSION_LABELS_AUTHORITY = {
   label: MISSION_VALUE_AUTHORITY,
 } as const satisfies Readonly<Record<string, FieldAuthority>>;
 
+export const MISSION_DEPENDENCIES_AUTHORITY = {
+  mission_id: MISSION_VALUE_AUTHORITY,
+  position: MISSION_VALUE_AUTHORITY,
+  depends_on_mission_id: MISSION_VALUE_AUTHORITY,
+} as const satisfies Readonly<Record<string, FieldAuthority>>;
+
 export const MISSION_CHECKPOINTS_AUTHORITY = {
   mission_id: MISSION_VALUE_AUTHORITY,
   position: MISSION_VALUE_AUTHORITY,
@@ -286,6 +292,7 @@ export const SQLITE_ENTITY_AUTHORITY = {
   mission_labels: MISSION_LABELS_AUTHORITY,
   mission_external_task_refs: MISSION_EXTERNAL_TASK_REFS_AUTHORITY,
   mission_checkpoints: MISSION_CHECKPOINTS_AUTHORITY,
+  mission_dependencies: MISSION_DEPENDENCIES_AUTHORITY,
   mission_checkpoint_goal_checks: MISSION_CHECKPOINT_GOAL_CHECKS_AUTHORITY,
   mission_reviews: MISSION_REVIEWS_AUTHORITY,
   mission_review_rounds: MISSION_REVIEW_ROUNDS_AUTHORITY,

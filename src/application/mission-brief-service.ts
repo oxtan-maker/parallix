@@ -18,8 +18,10 @@ import { isLoaded, loadForCommand, missingCapability, storeEvidence, writeFailur
 import { missionBrief, type MissionBrief } from '../domain/mission-brief.js';
 import { declaredGates } from '../domain/mission-gates.js';
 import { successCriteria } from '../domain/mission-success-criteria.js';
+import { missionDependencies } from '../domain/mission-dependencies.js';
 import type { NelBucketLabel } from '../domain/net-engineering-lines.js';
 import type { CheckpointData } from '../domain/checkpoint.js';
+import { type MissionId } from '../domain/mission.js';
 
 /** Named partial brief update: omitted fields keep their recorded value. */
 export interface UpdateMissionBriefRequest extends MissionCommandRequest {
@@ -33,6 +35,14 @@ export interface SetSuccessCriteriaRequest extends MissionCommandRequest {
 }
 export interface MissionSuccessCriteriaResult {
   readonly successCriteria: readonly string[];
+  readonly version: MissionVersion;
+}
+export interface SetMissionDependenciesRequest extends MissionCommandRequest {
+  /** The complete recorded list; the CLI reads, edits and writes it back. */
+  readonly dependencies: readonly string[];
+}
+export interface MissionDependenciesResult {
+  readonly dependencies: readonly MissionId[];
   readonly version: MissionVersion;
 }
 export interface SetPredictedNelBucketRequest extends MissionCommandRequest {
@@ -115,6 +125,36 @@ export class MissionBriefService {
       const version = await this._store.save({ ...loaded.mission, successCriteria: criteria }, loaded.version);
       return completed({ successCriteria: criteria, version }, [storeEvidence(request.missionId, 'success-criteria', `${criteria.length} success criteria recorded`)]);
     } catch (error) { return writeFailure(error); }
+  }
+
+  /**
+   * Record which Missions this Mission depends on.
+   *
+   * Every entry must resolve to a Mission, so a reference to something that is
+   * not a Mission is refused here rather than recorded as a dangling id. The
+   * domain refuses a self-reference and a duplicate. Nothing consumes the
+   * result: it is recorded for the operator and the agent to read.
+   */
+  async setDependencies(request: SetMissionDependenciesRequest): Promise<ApplicationOutcome<MissionDependenciesResult>> {
+    const guard = missingCapability<MissionDependenciesResult>(request, 'mission:context'); if (guard) { return guard; }
+    const loaded = await loadForCommand<MissionDependenciesResult>(this._store, request); if (!isLoaded(loaded)) { return loaded; }
+    let dependencies: readonly MissionId[];
+    try { dependencies = missionDependencies(request.dependencies, request.missionId); } catch (error) { return failure('validation', error instanceof Error ? error.message : 'invalid mission dependencies'); }
+    for (const dependency of dependencies) {
+      const read = await this._store.load(dependency);
+      if (read.kind === 'unavailable') { return failure('unavailable', `mission store unavailable: ${read.reason}`); }
+      if (read.kind !== 'found') { return failure('validation', `dependency is not a mission: ${dependency}`); }
+    }
+    try {
+      const version = await this._store.save({ ...loaded.mission, dependencies }, loaded.version);
+      return completed({ dependencies, version }, [storeEvidence(request.missionId, 'mission-dependencies', `${dependencies.length} mission dependencies recorded`)]);
+    } catch (error) { return writeFailure(error); }
+  }
+
+  async readDependencies(request: MissionCommandRequest): Promise<ApplicationOutcome<MissionDependenciesResult>> {
+    const guard = missingCapability<MissionDependenciesResult>(request, 'mission:context'); if (guard) { return guard; }
+    const loaded = await loadForCommand<MissionDependenciesResult>(this._store, request); if (!isLoaded(loaded)) { return loaded; }
+    return completed({ dependencies: loaded.mission.dependencies ?? [], version: loaded.version });
   }
 
   /** Record the draft's predicted NEL bucket, which handoff calibrates against the measured one. */

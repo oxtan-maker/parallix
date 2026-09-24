@@ -1,10 +1,12 @@
 ---
 id: TASK-2557
 title: fix sandbox
-status: backlog
-assignee: []
+status: done
+assignee: [custom]
 created_date: '2026-09-23 04:59'
-labels: []
+labels:
+  - ai_sdlc
+  - bug
 dependencies: []
 ordinal: 94008
 ---

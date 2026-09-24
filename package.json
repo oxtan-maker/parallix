@@ -1,6 +1,6 @@
 {
   "name": "@magnusekdahl/parallix",
-  "version": "1.5.165",
+  "version": "1.5.167",
   "description": "Trust ladder for AI coding work — separate review, configured verification, conditional Linux confinement, and human-owned merges",
   "license": "AGPL-3.0-or-later",
   "private": false,
@@ -73,7 +73,7 @@
     }
   },
   "devDependencies": {
-    "@earendil-works/pi-coding-agent": "^0.80.6",
+    "@earendil-works/pi-coding-agent": "^0.87.1",
     "@types/node": "^26.0.1",
     "@types/react": "^19.2.14",
     "@typescript-eslint/eslint-plugin": "^8.62.1",

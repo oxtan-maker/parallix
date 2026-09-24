@@ -26,6 +26,7 @@ Record the mission contract with typed commands. The slug is inferred from this 
 - `px checkpoint plan --name <CP-N> --text <what it delivers>` — one call per checkpoint, in execution order (`CP-1`, `CP-2`, ...). Execution works through this plan and records each checkpoint's evidence under its name.
 - `px gate add --command <command>` — one call per gate. Recorded gates are what handoff executes.
 - `px nel set --predicted <Small|Medium|Large>` — the predicted net-engineering-lines bucket.
+- `px depends add --on <slug>` — one call per Mission this one depends on. Optional: record it when the mission genuinely follows another, and nothing enforces it.
 
 A write against a stale version is rejected with an explicit conflict and changes nothing; re-read and retry. Run any command with `--help` for its exact flags.
 

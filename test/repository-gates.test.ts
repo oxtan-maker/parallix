@@ -305,11 +305,11 @@ test('validateRepositoryGates rejects a malformed gates block', () => {
 // automatic integration gate, so the plan is pinned to exactly these keys.
 // TASK-2525.03: the shared coverage-plus-SonarQube command is a mandatory
 // pre-integration quality gate.
-test('this repository selects build, verification, integration-suite, quality-gate, workflow, and agent-smoke gates without codeql', () => {
+test('this repository selects build, dependency-audit, verification, integration-suite, quality-gate, workflow, and agent-smoke gates without codeql', () => {
   const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
   const gates = loadPhaseGates(repoRoot, 'preIntegration');
   const keys = gates.map((g) => g.key);
-  assert.deepEqual(keys, ['build', 'verification', 'integration-suite', 'quality-gate', 'workflow', 'agent-smoke']);
+  assert.deepEqual(keys, ['build', 'dependency-audit', 'verification', 'integration-suite', 'quality-gate', 'workflow', 'agent-smoke']);
   assert.ok(
     gates.some((g) => g.command === 'npm run test:coverage -- --threshold 0 --lcov && npm run sonar'),
     'preIntegration must run the shared coverage-plus-SonarQube command',

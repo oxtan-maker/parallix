@@ -14,7 +14,7 @@ ordinal: 88008
 ## Description
 
 <!-- SECTION:DESCRIPTION:BEGIN -->
-After a mission is confirmed integrated, remove its SonarQube Cloud branch analysis so long-lived mission analyses do not accumulate. Do not delete analysis for a failed, closed, or merely reviewed mission.
+After a mission is confirmed integrated, remove its SonarQube Cloud branch analysis so long-lived mission analyses do not accumulate. Do not delete analysis for a failed, closed, or merely reviewed mission. Also manually delete SonarQube Cloud branch analysis for missions already integrated.
 <!-- SECTION:DESCRIPTION:END -->
 
 ## Acceptance Criteria

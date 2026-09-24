@@ -155,10 +155,18 @@ const expectedIntegrationFiles = [
   // integration layer.
   'task-2516-recover-landed-mission-repro.test.ts',
   'task-2521-03-context-cli.integration.test.ts',
+  // TASK-2521.04: the imported trace's commit pin is read from a real Git
+  // checkout, so it crosses the git boundary and runs only in integration.
+  'task-2521.04-legacy-trace-commit.integration.test.ts',
+  'task-2521.04-mission-dependencies.integration.test.ts',
   'task-2533-squash-payload-pathspec-quotes.test.ts',
   // TASK-2537: seeds throwaway Git repositories to land a draft-authored task
   // file, so it crosses the git boundary and runs in the integration layer.
   'task-2537-squash-closeout-unstaged-task-path.test.ts',
+  // TASK-2557: spawns the real `bwrap` binary to run `px` inside the codex
+  // sandbox profile, so it crosses the bubblewrap boundary and runs only in
+  // the local integration layer.
+  'task-2557-sandbox-px-write.test.ts',
   // TASK-2532: seeds temporary Git repositories to exercise the base-worktree
   // repair, so it crosses the git boundary and runs in the integration layer.
   'task-2532-stale-integration-state-repro.test.ts',

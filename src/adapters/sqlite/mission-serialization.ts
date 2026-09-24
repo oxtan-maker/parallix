@@ -31,6 +31,7 @@ import { missionVersion, type MissionVersion } from '../../application/domain-po
 import { missionBrief, type MissionBrief } from '../../domain/mission-brief.js';
 import { declaredGates } from '../../domain/mission-gates.js';
 import { successCriteria } from '../../domain/mission-success-criteria.js';
+import { missionDependencies } from '../../domain/mission-dependencies.js';
 import type { NelBucketLabel } from '../../domain/net-engineering-lines.js';
 
 /** Typed records returned by the relational Mission schema. */
@@ -57,6 +58,7 @@ export interface MissionBriefRecord { readonly mission_id: string; readonly goal
 export interface MissionBriefOutOfScopeRecord { readonly mission_id: string; readonly position: number; readonly entry: string; }
 export interface MissionDeclaredGateRecord { readonly mission_id: string; readonly position: number; readonly command: string; }
 export interface MissionSuccessCriterionRecord { readonly mission_id: string; readonly position: number; readonly criterion: string; }
+export interface MissionDependencyRecord { readonly mission_id: string; readonly position: number; readonly depends_on_mission_id: string; }
 
 export interface MissionCheckpointRecord {
   readonly mission_id: string;
@@ -171,6 +173,7 @@ export interface MissionAggregateRecords {
   readonly briefOutOfScope: readonly MissionBriefOutOfScopeRecord[];
   readonly declaredGates: readonly MissionDeclaredGateRecord[];
   readonly successCriteria?: readonly MissionSuccessCriterionRecord[];
+  readonly dependencies?: readonly MissionDependencyRecord[];
   readonly checkpoints: readonly MissionCheckpointRecord[];
   readonly goalChecks: readonly MissionGoalCheckRecord[];
   readonly review: MissionReviewRecord | null;
@@ -561,6 +564,10 @@ export function hydrateMission(records: MissionAggregateRecords): HydratedMissio
     brief: briefFrom(records),
     declaredGates: declaredGatesFrom(records),
     successCriteria: successCriteria((records.successCriteria ?? []).map(({ criterion }) => criterion)),
+    dependencies: missionDependencies(
+      (records.dependencies ?? []).map(({ depends_on_mission_id }) => depends_on_mission_id),
+      missionId(records.mission.id),
+    ),
     predictedNelBucket: predictedNelBucketFrom(row.predicted_nel_bucket),
     reproductionTest: row.reproduction_test ?? null,
     review: reviewFrom(records),

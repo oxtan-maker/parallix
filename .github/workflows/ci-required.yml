@@ -7,12 +7,16 @@
 # The `ci-required` job name is a literal so branch protection can require it
 # stably; it is never computed from branch, event, or matrix data.
 #
-# Publication trigger is provisional, not a claimed github-publish ref: ADR 0045
-# marks github-publish unimplemented, so GitHub verifies the exact resulting
-# commit before it reaches the protected primary branch. The concrete verification
-# ref is deferred to the follow-up mission that verifies this pipeline live; the
-# `push` trigger below is a real trigger only and must not be cited as the
-# github-publish verification ref until that ref is established.
+# The `push` trigger is the ADR 0058 github-publish verification ref:
+# `refs/heads/github-publish/<sha>` carries the exact locally generated
+# integration commit. TASK-2549 (ADR 0061) verifies it differentially:
+# publication candidates compare the full current `origin/main` SHA against the
+# exact `github.sha` candidate in the dependency review step, while normal pull
+# requests use GitHub's native PR comparison.
+#
+# All Actions in this workflow are pinned to immutable release SHAs with a
+# release-version comment (TASK-2549); Dependabot (github-actions ecosystem)
+# proposes updates to the pins.
 name: ci-required
 
 on:
@@ -44,7 +48,7 @@ jobs:
       # checkout defaults to the triggered commit: the PR merge commit for
       # pull_request events and the pushed SHA for push events.
       - name: Check out the triggered commit
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           # Full history: tests compare mission branches against the primary
           # branch, which needs the merge base.
@@ -59,6 +63,49 @@ jobs:
       - name: Provide the primary worktree
         run: git show-ref --verify --quiet refs/heads/main || git worktree add --quiet -b main "$RUNNER_TEMP/parallix-main" origin/main
 
+      # Differential dependency review (TASK-2549, ADR 0061): fail this step
+      # when the candidate newly introduces a dependency with a High or
+      # Critical GHSA. Runs early — after repo/ref state is available and
+      # before the expensive Node/test/Sonar work — so a vulnerable dependency
+      # fails fast. Existing dependency debt on the base is reported but never
+      # blocking; only added vulnerable dependencies fail the run.
+      #
+      # Comparison refs:
+      #   - pull_request: both refs empty -> the action's native PR comparison
+      #     (PR base SHA -> merge-commit head SHA).
+      #   - push (github-publish/<sha>): base = full current origin/main SHA
+      #     resolved below after the fetch-depth-0 checkout; head = the exact
+      #     github.sha candidate. Missing/unresolvable refs or a review error
+      #     fail the step (fail-closed, never "no changes").
+      #
+      # Policy: fail-on-severity high (High/Critical block, moderate/low are
+      # reported only); fail-on-scopes explicitly covers unknown,runtime,
+      # development (the action's default scope is narrower: runtime only);
+      # license-check is disabled so license policy cannot become a blocking
+      # criterion (license governance is out of scope for this gate).
+      # retry-on-snapshot-warnings absorbs GitHub dependency-graph ingestion
+      # lag for a just-pushed publication SHA before the comparison is taken.
+      - name: Resolve the trusted publication base (full origin/main SHA)
+        id: trusted-base
+        if: github.event_name == 'push'
+        run: |
+          base_sha=$(git rev-parse origin/main)
+          # Fail closed unless origin/main resolved to an exact 40-char SHA.
+          [ "${#base_sha}" -eq 40 ] || { echo "origin/main did not resolve to a full SHA: $base_sha" >&2; exit 1; }
+          echo "sha=$base_sha" >> "$GITHUB_OUTPUT"
+
+      - name: Differential dependency review (blocks newly introduced High/Critical)
+        uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294  # v5.0.0
+        with:
+          fail-on-severity: high
+          fail-on-scopes: unknown,runtime,development
+          license-check: false
+          vulnerability-check: true
+          base-ref: ${{ github.event_name == 'push' && steps.trusted-base.outputs.sha || '' }}
+          head-ref: ${{ github.event_name == 'push' && github.sha || '' }}
+          retry-on-snapshot-warnings: true
+          retry-on-snapshot-warnings-timeout: 300
+
       # node-version: '24' + check-latest: true installs the latest 24.x (24.21.0
       # today), which is >= 24.15.0 — the floor the unit suite actually needs,
       # because test/lib/module-mock.ts uses mock.module's exports option that
@@ -70,7 +117,7 @@ jobs:
       # floor for shipped code, not the test floor); raising it is outside this
       # mission's Restricted Areas (package.json).
       - name: Set up Node (>= 24.15.0)
-        uses: actions/setup-node@v7
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020  # v7.0.0
         with:
           node-version: '24'
           check-latest: true
@@ -168,13 +215,13 @@ jobs:
       id-token: write
     steps:
       - name: Check out the verified triggering SHA
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           ref: ${{ github.sha }}
           fetch-depth: 0
 
       - name: Set up Node 24 for npm Trusted Publishing
-        uses: actions/setup-node@v7
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020  # v7.0.0
         with:
           node-version: '24'
           check-latest: true

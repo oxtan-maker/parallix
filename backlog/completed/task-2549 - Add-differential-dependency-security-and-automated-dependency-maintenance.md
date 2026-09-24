@@ -1,10 +1,10 @@
 ---
 id: TASK-2549
 title: Add differential dependency security and automated dependency maintenance
-status: backlog
-assignee: []
+status: done
+assignee: [claude]
 created_date: '2026-09-21 13:11'
-labels: []
+labels: [ai_sdlc]
 dependencies: []
 ordinal: 89008
 ---

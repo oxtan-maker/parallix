@@ -29,6 +29,7 @@ export const MISSION_FIELD_AUTHORITY = {
   brief: localSource,
   declaredGates: localSource,
   successCriteria: localSource,
+  dependencies: localSource,
   predictedNelBucket: localSource,
   reproductionTest: localSource,
   review: targetSource,

@@ -10,6 +10,7 @@ import {
   claudeSessionEnvDir,
   codexAuthPath,
   opencodeStateHomes,
+  parallixStateHome,
   piStateHomes,
 } from '../src/adapters/config/state-homes.js';
 import { buildBubblewrapArgs, resolveSandboxProfile } from '../src/adapters/process/bubblewrap.js';
@@ -25,11 +26,12 @@ function makeGitWorktree(): string {
 }
 
 function withPinnedHomes<T>(fn: (worktree: string, home: string) => T): T {
-  const previous = { HOME: process.env.HOME, CODEX_HOME: process.env.CODEX_HOME };
+  const previous = { HOME: process.env.HOME, CODEX_HOME: process.env.CODEX_HOME, PARALLIX_HOME: process.env.PARALLIX_HOME };
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'task-2443-home-'));
   const worktree = makeGitWorktree();
   process.env.HOME = home;
   process.env.CODEX_HOME = path.join(home, 'codex-state');
+  process.env.PARALLIX_HOME = path.join(home, 'parallix-state');
   fs.mkdirSync(path.dirname(claudeCredentialsPath()), { recursive: true });
   fs.writeFileSync(claudeCredentialsPath(), '{}');
   fs.mkdirSync(path.dirname(codexAuthPath()), { recursive: true });
@@ -38,6 +40,7 @@ function withPinnedHomes<T>(fn: (worktree: string, home: string) => T): T {
   finally {
     if (previous.HOME === undefined) { delete process.env.HOME; } else { process.env.HOME = previous.HOME; }
     if (previous.CODEX_HOME === undefined) { delete process.env.CODEX_HOME; } else { process.env.CODEX_HOME = previous.CODEX_HOME; }
+    if (previous.PARALLIX_HOME === undefined) { delete process.env.PARALLIX_HOME; } else { process.env.PARALLIX_HOME = previous.PARALLIX_HOME; }
     fs.rmSync(home, { recursive: true, force: true });
     fs.rmSync(worktree, { recursive: true, force: true });
   }
@@ -60,8 +63,8 @@ test('task-2443: active claude argv binds credentials, session env, and project 
   ]));
 });
 
-test('task-2443: active codex argv binds the configured host auth file', () => {
-  withPinnedHomes((worktree) => assertFamilyBinds('codex', worktree, [codexAuthPath()]));
+test('task-2557: active codex argv binds Parallix state for px mission writes', () => {
+  withPinnedHomes((worktree) => assertFamilyBinds('codex', worktree, [parallixStateHome(), codexAuthPath()]));
 });
 
 test('task-2443: active opencode argv binds only opencode state homes', () => {
@@ -73,7 +76,7 @@ test('task-2443: active pi argv binds only pi state homes', () => {
 });
 
 test('task-2443: active profiles do not cross-bind families or grant qwen/vibe host homes', () => {
-  withPinnedHomes((worktree) => {
+  withPinnedHomes((worktree, home) => {
     const homes = (family: string) => {
       const profile = resolveSandboxProfile('active', worktree, null, family);
       return [...(profile.optionalWritableDirectories || []), ...(profile.optionalWritableFiles || [])];
@@ -83,7 +86,7 @@ test('task-2443: active profiles do not cross-bind families or grant qwen/vibe h
     assert.ok(!claude.includes(codexAuthPath()));
     assert.ok(!codex.includes(claudeSessionEnvDir()));
     for (const family of [homes('qwen'), homes('vibe')]) {
-      assert.ok(!family.some(home => home.startsWith(os.homedir() + path.sep)));
+      assert.ok(!family.some(stateHome => stateHome.startsWith(home + path.sep) && stateHome !== parallixStateHome()));
     }
   });
 });

@@ -102,6 +102,8 @@ export interface StatusMissionData {
   readonly declaredGates?: readonly string[];
   /** What must be true for the Mission to be done. */
   readonly successCriteria?: readonly string[];
+  /** Missions this one depends on; recorded for readers, enforced by nothing. */
+  readonly dependencies?: readonly string[];
   /** Every checkpoint in order, planned or evidenced, marked with whether its evidence is recorded. */
   readonly checkpoints?: readonly { readonly name: string; readonly description: string; readonly recorded: boolean }[];
   /** The draft's predicted NEL bucket, when recorded. */

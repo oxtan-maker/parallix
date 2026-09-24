@@ -44,6 +44,7 @@ export function statusJson(result: StatusResult): string {
     brief: md?.brief ?? null,
     declaredGates: md?.declaredGates ?? [],
     successCriteria: md?.successCriteria ?? [],
+    dependencies: md?.dependencies ?? [],
     checkpoints: md?.checkpoints ?? [],
     predictedNelBucket: md?.predictedNelBucket ?? null,
     reproductionTest: md?.reproductionTest ?? null,
@@ -108,6 +109,8 @@ function logBriefAndGates(missionData: StatusMissionData, log: (_msg: string) =>
   } else {
     log('Success criteria: none');
   }
+  const dependencies = missionData.dependencies ?? [];
+  log(dependencies.length > 0 ? `Depends on: ${dependencies.join(', ')}` : 'Depends on: nothing recorded');
   const checkpoints = missionData.checkpoints ?? [];
   if (checkpoints.length > 0) {
     log('Checkpoints:');

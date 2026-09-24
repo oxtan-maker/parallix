@@ -12,6 +12,7 @@ import type { Mission, MissionId } from '../../domain/mission.js';
 import { missionBrief } from '../../domain/mission-brief.js';
 import { declaredGates } from '../../domain/mission-gates.js';
 import { successCriteria } from '../../domain/mission-success-criteria.js';
+import { missionDependencies } from '../../domain/mission-dependencies.js';
 import type { KnownRepository, RepositoryId } from '../../domain/repository.js';
 import type { SqliteDatabaseAdapter } from './database-adapter.js';
 import { SqliteBoardLaneEventRepository } from './board-lane-event-repository.js';
@@ -25,6 +26,7 @@ import {
   type MissionBriefOutOfScopeRecord,
   type MissionDeclaredGateRecord,
   type MissionSuccessCriterionRecord,
+  type MissionDependencyRecord,
   type MissionRecord,
   type MissionReviewEventRecord,
   type MissionReviewFindingRecord,
@@ -155,6 +157,7 @@ export class SqliteMissionStore implements MissionStore, MissionNelRecorder {
       briefOutOfScope,
       gateRows,
       criterionRows,
+      dependencyRows,
       checkpoints,
       goalChecks,
       reviews,
@@ -174,6 +177,7 @@ export class SqliteMissionStore implements MissionStore, MissionNelRecorder {
         this.db.query<MissionBriefOutOfScopeRecord>('SELECT mission_id, position, entry FROM mission_brief_out_of_scope WHERE mission_id = ? ORDER BY position', [id]),
         this.db.query<MissionDeclaredGateRecord>('SELECT mission_id, position, command FROM mission_declared_gates WHERE mission_id = ? ORDER BY position', [id]),
         this.db.query<MissionSuccessCriterionRecord>('SELECT mission_id, position, criterion FROM mission_success_criteria WHERE mission_id = ? ORDER BY position', [id]),
+        this.db.query<MissionDependencyRecord>('SELECT mission_id, position, depends_on_mission_id FROM mission_dependencies WHERE mission_id = ? ORDER BY position', [id]),
         this.db.query<MissionCheckpointRecord>(
           `SELECT mission_id, position, checkpoint_mission_id, name, raw_filename,
                   first_line, next_action_text
@@ -243,6 +247,7 @@ export class SqliteMissionStore implements MissionStore, MissionNelRecorder {
       briefOutOfScope,
       declaredGates: gateRows,
       successCriteria: criterionRows,
+      dependencies: dependencyRows,
       checkpoints,
       goalChecks,
       review: reviews[0] ?? null,
@@ -414,6 +419,9 @@ export class SqliteMissionStore implements MissionStore, MissionNelRecorder {
     if (mission.successCriteria && mission.successCriteria.length > 0) {
       mission = { ...mission, successCriteria: successCriteria(mission.successCriteria) };
     }
+    if (mission.dependencies && mission.dependencies.length > 0) {
+      mission = { ...mission, dependencies: missionDependencies(mission.dependencies, mission.id) };
+    }
     const params = [
       mission.repositoryId,
       mission.title,
@@ -490,6 +498,7 @@ export class SqliteMissionStore implements MissionStore, MissionNelRecorder {
     await this.db.execute('DELETE FROM mission_briefs WHERE mission_id = ?', [id]);
     await this.db.execute('DELETE FROM mission_declared_gates WHERE mission_id = ?', [id]);
     await this.db.execute('DELETE FROM mission_success_criteria WHERE mission_id = ?', [id]);
+    await this.db.execute('DELETE FROM mission_dependencies WHERE mission_id = ?', [id]);
     await this.db.execute('DELETE FROM mission_checkpoints WHERE mission_id = ?', [id]);
     await this.db.execute('DELETE FROM mission_labels WHERE mission_id = ?', [id]);
     if (!mission.review) {
@@ -522,6 +531,12 @@ export class SqliteMissionStore implements MissionStore, MissionNelRecorder {
       await this.db.execute(
         'INSERT INTO mission_declared_gates (mission_id, position, command) VALUES (?, ?, ?)',
         [mission.id, position, command],
+      );
+    }
+    for (const [position, dependency] of (mission.dependencies ?? []).entries()) {
+      await this.db.execute(
+        'INSERT INTO mission_dependencies (mission_id, position, depends_on_mission_id) VALUES (?, ?, ?)',
+        [mission.id, position, dependency],
       );
     }
     for (const [position, criterion] of (mission.successCriteria ?? []).entries()) {

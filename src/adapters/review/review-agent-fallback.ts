@@ -151,7 +151,7 @@ export async function applyAgentFallback(opts: {
   role: string;
   original: string;
   launchResult?: Record<string, any>;
-  state: Record<string, any>;
+  state?: Record<string, any>;
   slug: string;
   worktree?: string;
   taskResolution?: Record<string, any>;
@@ -160,7 +160,7 @@ export async function applyAgentFallback(opts: {
   enforceTaskAssigneeFn?: typeof enforceTaskAssignee;
   missionStore?: MissionStore | null;
 }): Promise<string> {
-  const { role, original, launchResult, state, slug, worktree, taskResolution, log = fmt.log.plain, writeReviewStateFn = writeReviewState, enforceTaskAssigneeFn, missionStore = null } = opts;
+  const { role, original, launchResult, state = {}, slug, worktree, taskResolution, log = fmt.log.plain, writeReviewStateFn = writeReviewState, enforceTaskAssigneeFn, missionStore = null } = opts;
   if (!launchResult || !launchResult.agent || launchResult.agent === original) {
     return original;
   }

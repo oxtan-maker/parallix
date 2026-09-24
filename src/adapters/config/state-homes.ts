@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { resolveParallixHome } from '../storage/storage.js';
 
 /**
  * Where each launcher family keeps its own state.
@@ -13,6 +14,11 @@ import path from 'node:path';
 
 export function codexHomeRoot(worktree: string): string {
   return path.join(worktree, '.workflow', 'codex-home');
+}
+
+/** Parallix's operator state, needed by agents invoking `px` from a sandbox. */
+export function parallixStateHome(): string {
+  return resolveParallixHome({ ensureDir: true });
 }
 
 export function qwenHomeRoot(worktree: string): string {

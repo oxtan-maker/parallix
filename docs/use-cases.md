@@ -175,12 +175,23 @@ record against the open round rather than a caller-supplied version.
 ### UC-18 — Work on tasks without owning them
 
 As an agent doing task-level work — creating, finding and editing tasks,
-assignment, dependencies, archival, follow-up work — I want one contract for
-whichever task source is configured, so that Parallix never becomes a second
-place where a task's state lives.
+assignment, dependencies, follow-up work — I want one place a task's state
+lives, so that Parallix never becomes a second one.
 
-**Confidence:** Contract only. TASK-2521.04 supplies the local provider behind
-it; until then the configured external catalog remains the authority.
+**Confidence:** Confirmed, with one record rather than a provider contract. The
+Mission aggregate is the only self-hosted task record: there is no task source,
+task table or task command beside it. A predecessor is a Mission-to-Mission
+dependency recorded with `px depends` and reported by `px status`; nothing
+enforces it, so it informs whoever reads the mission next rather than gating
+anything.
+
+Legacy Backlog records enter through the explicit one-way `px import-legacy`,
+which is never part of a normal command. It imports a legacy `backlog` record as
+a backlog Mission and reports every later lane instead, because a Mission past
+`backlog` needs a recorded contract — and, later still, checkpoint and review
+evidence — that a legacy file cannot supply. Each imported Mission's trace names
+the source path and the commit it was read at, so the original text stays
+recoverable from Git history once the files are removed.
 
 
 ## Positioning boundaries

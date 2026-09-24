@@ -563,6 +563,29 @@ export const ADR0053_PERSISTENCE_INVENTORY: readonly ADR0053BoundaryEntry[] = [
   // Task Intake — external fact / one-way legacy input
   // -----------------------------------------------------------------------
   {
+    // TASK-2521.04: the explicit one-way legacy Backlog importer. It reads the
+    // configured backlog/tasks, backlog/completed, and backlog/archive
+    // locations (and reports backlog.md) once, on operator request
+    // (`px import-legacy`), and writes only Mission aggregates through the
+    // existing MissionIntakeService and MissionLifecycleService. Nothing in the
+    // normal task, board, or lifecycle path calls it, and it never writes back
+    // to the legacy files.
+    id: 'task-intake-import-legacy-missions',
+    concept: 'TaskIntake',
+    // `default`, not `compatibility`: ADR 0053 keeps operator-invoked,
+    // read-only legacy import as a standing capability, so this boundary has
+    // no cutover task to name.
+    pathType: 'default',
+    fileLocation: 'src/adapters/backlog/legacy-mission-import.ts',
+    operation: 'read',
+    // The Backlog Markdown catalog is another system's material and this
+    // importer only reads it. What it writes is the existing Mission
+    // aggregate through the Mission store port, never a repository file and
+    // never a second task catalog.
+    classification: 'external-fact-or-intake',
+    cutoverTask: null,
+  },
+  {
     id: 'task-intake-read-file-io',
     concept: 'TaskIntake',
     pathType: 'default',

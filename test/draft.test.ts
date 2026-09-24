@@ -113,7 +113,10 @@ test('buildDraftPrompt records the mission contract through typed commands, not 
     assert.match(prompt, verb);
   }
   assert.match(prompt, /--expected-version/);
-  assert.doesNotMatch(prompt, /px context|px spec|px refine|px depends/, 'no retired command may be named');
+  // TASK-2521.04 gave Mission dependencies a home, so `px depends` is a live
+  // command again and the draft prompt offers it.
+  assert.match(prompt, /px depends add --on/);
+  assert.doesNotMatch(prompt, /px context|px spec|px refine/, 'no retired command may be named');
 });
 
 test('draft setup accepts valid labels and tolerates missing labels before launch', () => {

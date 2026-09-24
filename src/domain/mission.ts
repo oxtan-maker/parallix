@@ -95,6 +95,11 @@ export interface MissionData {
   /** What must be true for the mission to be done. Empty until the draft records them. */
   readonly successCriteria?: readonly string[];
   /**
+   * Missions this one is recorded as depending on. Read by operators and agents
+   * only: no lifecycle, activation or scheduling rule consumes them.
+   */
+  readonly dependencies?: readonly MissionId[];
+  /**
    * The draft's size prediction, compared at handoff with the measured NEL
    * bucket for the calibration ADR 0047 describes. Null until predicted.
    */
@@ -181,6 +186,7 @@ export function intakeMission(intake: MissionIntake): OpenMission {
     brief: null,
     declaredGates: [],
     successCriteria: [],
+    dependencies: [],
     predictedNelBucket: null,
     reproductionTest: null,
     review: null,

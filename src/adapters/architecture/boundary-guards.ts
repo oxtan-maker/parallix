@@ -56,8 +56,9 @@ export const adapterPackageDependencies: Readonly<Record<string, readonly string
   backlog: ['config', 'filesystem', 'git', 'sqlite'],
   // mechanism: assets, configuration, filesystem, Git, GitHub, and process execution.
   cli: ['assets', 'config', 'filesystem', 'git', 'github', 'process'],
-  // mechanism: state-map configuration reads packaged runtime assets.
-  config: ['assets'],
+  // mechanism: state-map configuration reads packaged runtime assets; the
+  // sandbox state-home catalog resolves Parallix state via durable storage paths.
+  config: ['assets', 'storage'],
   // mechanism: mission-path resolution needs configuration and Git repository facts.
   filesystem: ['config', 'git'],
   // mechanism: Forgejo transport resolves task, configuration, filesystem, Git, and verification facts.

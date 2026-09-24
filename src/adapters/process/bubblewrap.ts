@@ -11,6 +11,7 @@ import {
   codexAuthPath,
   codexHomeRoot,
   opencodeStateHomes,
+  parallixStateHome,
   piStateHomes,
   qwenHomeRoot,
   vibeHomeRoot
@@ -238,13 +239,14 @@ export function buildBubblewrapArgs(profile: SandboxProfile, cwd: string): strin
  * artifact-dir-only profile.
  */
 function resolveLauncherStateHomes(family: string | null | undefined, worktree: string): { directories: string[], files: string[] } {
+  const directories = (...homes: string[]) => [parallixStateHome(), ...homes];
   switch (family) {
-    case 'codex': return { directories: [codexHomeRoot(worktree)], files: [codexAuthPath()] };
-    case 'qwen': return { directories: [qwenHomeRoot(worktree)], files: [] };
-    case 'vibe': return { directories: [vibeHomeRoot(worktree)], files: [] };
-    case 'claude': return { directories: [claudeSessionEnvDir(), claudeProjectDir(worktree)], files: [claudeCredentialsPath()] };
-    case 'opencode': return { directories: opencodeStateHomes(), files: [] };
-    case 'pi': return { directories: piStateHomes(), files: [] };
+    case 'codex': return { directories: directories(codexHomeRoot(worktree)), files: [codexAuthPath()] };
+    case 'qwen': return { directories: directories(qwenHomeRoot(worktree)), files: [] };
+    case 'vibe': return { directories: directories(vibeHomeRoot(worktree)), files: [] };
+    case 'claude': return { directories: directories(claudeSessionEnvDir(), claudeProjectDir(worktree)), files: [claudeCredentialsPath()] };
+    case 'opencode': return { directories: directories(...opencodeStateHomes()), files: [] };
+    case 'pi': return { directories: directories(...piStateHomes()), files: [] };
     case 'custom': return resolveLauncherStateHomes(resolveCustomRunner(worktree), worktree);
     default: return { directories: [], files: [] };
   }

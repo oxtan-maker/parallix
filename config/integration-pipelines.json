@@ -1,5 +1,11 @@
 {
   "gates": {
+    "dependency-audit": {
+      "command": "npm audit --audit-level=high",
+      "order": 1,
+      "run_last": false,
+      "always": true
+    },
     "build": {
       "command": "npm run build",
       "order": 2,

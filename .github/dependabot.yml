@@ -1,0 +1,22 @@
+# TASK-2549 (ADR 0061): minimal weekly dependency maintenance for the two
+# ecosystems this repository uses. No automerge, ignores, groups, cooldowns,
+# or registry configuration.
+#
+# Division of responsibility:
+#   - this file schedules version updates for direct npm packages and the
+#     SHA-pinned GitHub Actions in .github/workflows;
+#   - Dependabot alerts and security updates (repository settings) expose and
+#     remediate vulnerabilities already present on the default branch;
+#   - the differential dependency review step in ci-required.yml blocks newly
+#     introduced High/Critical vulnerable dependencies;
+#   - CodeQL (scripts/codeql-sast.sh) remains the source-code SAST gate.
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly

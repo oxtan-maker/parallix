@@ -32,6 +32,7 @@ export const KNOWN_COMMANDS: string[] = [
   'scope',
   'gate',
   'criterion',
+  'depends',
   'nel',
   'checkpoint',
   'assign',
@@ -42,6 +43,7 @@ export const KNOWN_COMMANDS: string[] = [
   'integrate',
   'cancel',
   'resolve-conflict',
+  'import-legacy',
   'rebase',
   'stats',
   'aliases',
@@ -276,6 +278,7 @@ ${fmt.bold('Advanced Commands:')}
   scope set --scope <t> [--out-of-scope <t> ...]  Bound a Mission that already has a goal.
   gate add|remove --command <cmd>     Declare or drop one verification gate.
   criterion add|remove --text <t>     Record or drop one success criterion.
+  depends add|remove --on <slug>       Record or drop one Mission-to-Mission dependency; nothing enforces it.
   nel set --predicted <bucket>        Record the draft's predicted NEL bucket (Small|Medium|Large).
   repro set --test <path> | repro clear  Record the bug mission's red-to-green reproduction test.
   checkpoint plan|unplan|record --name <CP-N> ...  Plan a checkpoint, drop one with no evidence, or record its Goal Check evidence.
@@ -287,6 +290,7 @@ ${fmt.bold('Advanced Commands:')}
         Every write takes --expected-version <n>, read from \`px status --json\`.
   github-publish-status  Show github-publish publication engine status (local head, published head, awaiting/verified-blocked/failed). No-op when the mode is disabled.
   lead [<slug>...] [--once] [--poll <s>] [--budget <n>] [--dry-run]  Work active, review, and integration missions from the board's needs-attention queue; refined missions stay for operator activation. Press the action each item offers, then give a stuck mission a fresh agent in its worktree. Attempts are per failure; integration items are left for you. Keeps watching until stopped (default poll 60 seconds); --once takes a single pass and exits.
+  import-legacy [--dry-run]  Explicit one-way import of the legacy Backlog Markdown tree into the existing Mission aggregate. Reports discovered/importable/already-materialized/conflicting/unrepresented counts, materializes each legacy id at most once, never overwrites an existing Mission, and never runs as part of a normal command.
   cancel <slug> --yes   Delete one mission's lifecycle rows from the operator database. Irreversible; usage statistics are kept and the branch and worktree stay for you to remove.
   resolve-conflict [<slug>]       Detect merge conflicts in the mission worktree and emit resolution guidance.
   rebase [<slug>] [--push]          Rebase mission branch onto the primary integration branch (main) with auto-resolution of mission-specific conflicts.
