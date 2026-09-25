@@ -76,7 +76,7 @@ test('status output contract: includes all required sections (with slug)', async
   assert.ok(fullOutput.includes('--- Mission Status ---'), 'Must include header');
   assert.ok(fullOutput.includes('Branch:'), 'Must include branch');
   assert.ok(fullOutput.includes('Worktree:'), 'Must include worktree');
-  assert.ok(fullOutput.includes('Backlog status:'), 'Must include backlog status');
+  assert.ok(fullOutput.includes('Mission status:'), 'Must include Mission status');
   assert.ok(fullOutput.includes('Last checkpoint:'), 'Must include checkpoint');
   assert.ok(fullOutput.includes('Forgejo PR:'), 'Must include PR status');
   assert.ok(fullOutput.includes('Agent launcher matrix:'), 'Must include agent matrix');
@@ -103,10 +103,10 @@ test('status output contract: includes all required sections (no slug)', async (
 });
 
 // ---------------------------------------------------------------------------
-// Projection output contract: raw values preserved (SC9)
+// Projection output contract: authoritative lifecycle values (SC9)
 //
-// The projection path preserves the legacy output contract:
-//   - Backlog status uses raw backlog value (rawStatus field)
+// The projection path presents the authoritative Mission lifecycle:
+//   - Mission status uses the recorded Mission status
 //   - Checkpoint filename includes .md extension (rawFilename field)
 //   - Checkpoint description is the first line of the checkpoint file (firstLine field)
 //
@@ -121,22 +121,19 @@ test('status output: routes mission output through projection (SC9)', async () =
   const fullOutput = output.join('\n');
 
   // When slug is provided, status must include mission-specific output
-  assert.ok(fullOutput.includes('Backlog status:'), 'Must include backlog status');
+  assert.ok(fullOutput.includes('Mission status:'), 'Must include Mission status');
   assert.ok(fullOutput.includes('Last checkpoint:'), 'Must include checkpoint');
   assert.ok(fullOutput.includes('Forgejo PR:'), 'Must include PR status');
 });
 
-test('status output: raw backlog status preserved via rawStatus (SC9)', async () => {
-  // The projection card carries rawStatus from the backlog file.
-  // status.ts:207 prints card.rawStatus || card.status, preserving the raw value.
+test('status output: authoritative Mission status is shown (SC9)', async () => {
   const opts = buildCommonOpts();
   const output = await captureOutput(['task-1031'], opts);
   const fullOutput = output.join('\n');
 
-  // The output must contain a Backlog status line with a non-empty value
-  const statusLine = output.find((line) => line.startsWith('Backlog status:'));
-  assert.ok(statusLine, 'Must have Backlog status line');
-  assert.ok(statusLine.length > 'Backlog status: '.length, 'Backlog status must have a value');
+  const statusLine = output.find((line) => line.startsWith('Mission status:'));
+  assert.ok(statusLine, 'Must have Mission status line');
+  assert.ok(statusLine.length > 'Mission status: '.length, 'Mission status must have a value');
 });
 
 test('status output: checkpoint format preserved (rawFilename + firstLine) (SC9)', async () => {
@@ -173,10 +170,10 @@ test('status output: fallback path reports projection unavailable (SC9, post-SQL
     getFirstLineFn: () => 'Fix the output contract',
   });
   const output = await captureOutput(['task-fallback-only'], opts);
-  const statusLine = output.find((line) => line.startsWith('Backlog status:'));
+  const statusLine = output.find((line) => line.startsWith('Mission status:'));
   assert.equal(
     statusLine,
-    'Backlog status: unknown (projection unavailable)',
+    'Mission status: unknown (projection unavailable)',
     'Fallback must report projection unavailable, not read legacy files',
   );
   const cpLine = output.find((line) => line.startsWith('Last checkpoint:'));
@@ -225,7 +222,7 @@ test('status output: falls back to parse primitives when projection unavailable 
   const output = await captureOutput(['task-nonexistent'], opts);
   const fullOutput = output.join('\n');
 
-  assert.ok(fullOutput.includes('Backlog status:'), 'Must include backlog status even on fallback');
+  assert.ok(fullOutput.includes('Mission status:'), 'Must include Mission status even on fallback');
   assert.ok(fullOutput.includes('Last checkpoint:'), 'Must include checkpoint even on fallback');
 });
 

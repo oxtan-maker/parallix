@@ -82,6 +82,22 @@ test('handoff use case skips the final verification gate under --no-gate', async
   assert.equal(gateRuns, 0);
 });
 
+test('handoff use case reuses an exact verification proof without executing the gate', async () => {
+  const recorder = makeRecorder();
+  const basePorts = makePorts(recorder);
+  const ports = makePorts(recorder, {
+    verification: { ...basePorts.verification, readReusableVerificationProof: () => ({ ok: true, identity: 'proof-1' }) },
+  });
+  let gateRuns = 0;
+  const result = await new HandoffCommandUseCase(ports).performHandoff(SLUG, runOptions(recorder, {
+    runVerificationGateFn: () => { gateRuns++; return { status: 0 }; },
+  }));
+
+  assert.equal(result.ok, true, recorder.errors.join('\n'));
+  assert.equal(gateRuns, 0, 'an exact proof skips final verification execution');
+  assert.ok(recorder.log.some(line => line.includes('passed by reuse')), 'handoff reports proof reuse');
+});
+
 // --- SC5b: gate failure ---
 
 test('handoff use case fails closed when the final verification gate fails', async () => {

@@ -106,13 +106,16 @@ for (const status of ['active', 'review']) test(`TASK-2517 CP-3: stranded ${stat
   await store.save(mission, null);
 
   const cleaned = [];
+  const hookRan: string[] = [];
   const missionServices = { store, lifecycle, integration: new MissionIntegrationService(store) };
   await recoverLandedIntegration(slug, missionServices, root, {
     findSquashCommit: (dir, s) => findExistingSquashCommit(dir, s),
     recoverMissionForIntegration,
     persistLandedIntegrationOrAbort,
     cleanupMissionWorktree: (s) => { cleaned.push(s); return true; },
+    runPostIntegrateHookOrAbort: () => { hookRan.push(slug); },
     createAbort: () => new Error('IntegrationAbort'),
+    baseBranch: 'main',
   });
 
   const reloaded = await store.load(missionId(slug));
@@ -120,17 +123,22 @@ for (const status of ['active', 'review']) test(`TASK-2517 CP-3: stranded ${stat
   assert.equal(reloaded.mission.status, 'done', 'the stranded review mission closes to done');
   assert.notEqual(reloaded.mission.closedAt, null, 'closedAt is non-null');
   assert.deepEqual(cleaned, [slug], 'the worktree and local branch are cleaned up');
+  assert.deepEqual(hookRan, [slug], 'the post-integrate hook runs on the recovered closeout');
 });
 
 test('TASK-2517 CP-3: closeout fails when worktree cleanup fails', async () => {
+  const hookCalls: string[] = [];
   await assert.rejects(
     recoverLandedIntegration('task-2517-cleanup', { store: { load: async () => ({ kind: 'found', mission: {} }) } }, '.', {
       findSquashCommit: () => 'abc123',
       recoverMissionForIntegration: async () => ({ status: 'integration' }),
       persistLandedIntegrationOrAbort: async () => {},
       cleanupMissionWorktree: () => false,
+      runPostIntegrateHookOrAbort: (s: string) => { hookCalls.push(s); },
       createAbort: () => new Error('IntegrationAbort'),
+      baseBranch: 'main',
     }),
     /IntegrationAbort/,
   );
+  assert.deepEqual(hookCalls, [], 'no post-integrate hook runs when worktree cleanup fails');
 });

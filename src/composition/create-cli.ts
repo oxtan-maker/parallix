@@ -136,6 +136,7 @@ interface ReviewEventParsed {
   type: string | null;
   actor: string | null;
   content: string;
+  disposition: string | null;
   timestamp: string | null;
   skipGit: boolean;
 }
@@ -731,7 +732,7 @@ export function formatVersionInfo(info: VersionInfo = versionInfo()): string {
 export function parseReviewEventArgs(args: string[]): ReviewEventParsed {
   const slug = args[0];
   if (!slug) {
-    throw new Error('Usage: review-event <slug> --type <event-type> --actor <actor> --content <text> [--timestamp <stamp>] [--skip-git]');
+    throw new Error('Usage: review-event <slug> --type <event-type> --actor <actor> --content <text> [--disposition <disposition>] [--timestamp <stamp>] [--skip-git]');
   }
 
   const parsed: ReviewEventParsed = {
@@ -739,6 +740,7 @@ export function parseReviewEventArgs(args: string[]): ReviewEventParsed {
     type: null,
     actor: null,
     content: '',
+    disposition: null,
     timestamp: null,
     skipGit: false,
   };
@@ -762,6 +764,7 @@ export function parseReviewEventArgs(args: string[]): ReviewEventParsed {
     if (key === 'type') {parsed.type = value;}
     else if (key === 'actor') {parsed.actor = value;}
     else if (key === 'content') {parsed.content = value;}
+    else if (key === 'disposition') {parsed.disposition = value;}
     else if (key === 'timestamp') {parsed.timestamp = value;}
     else {throw new Error(`Unknown review-event option: ${arg}`);}
   }
@@ -794,7 +797,7 @@ async function runReviewEventCommand(parsed: ParsedArgs, log: typeof fmt.log.pla
     const result = await bindReviewPersistence(services.mission.store, services.mission.lifecycle).createEvent(
       eventArgs.slug,
       eventArgs.type || '',
-      { actor: eventArgs.actor || '', content: eventArgs.content, timestamp: eventArgs.timestamp || undefined },
+      { actor: eventArgs.actor || '', content: eventArgs.content, disposition: eventArgs.disposition || undefined, timestamp: eventArgs.timestamp || undefined },
       { worktree: parsed.target, skipGit: eventArgs.skipGit, log, error },
     );
     if (result.ok && result.path) { log(fmt.status('PASS', `Review event path: ${path.relative(parsed.target, result.path)}`)); }

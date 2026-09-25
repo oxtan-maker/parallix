@@ -630,7 +630,7 @@ test('repo integration config keeps workflow gate on the targeted mission-lifecy
     'node --import tsx test/e2e-mission-lifecycle.test.ts'
   );
   assert.equal(config?.gates?.coverage?.command,
-    'rm -f coverage/lcov.info && npm run test:coverage -- --threshold 0 --lcov && test -s coverage/lcov.info');
+    'rm -f coverage/lcov.info && PARALLIX_PREBUILT_PACK=1 npm run test:coverage -- --threshold 0 --lcov && test -s coverage/lcov.info');
   assert.equal(config?.gates?.['quality-gate']?.command, 'npm run sonar');
   assert.ok(config.gates.coverage.order < config.gates['quality-gate'].order);
   assert.equal(config.gates.codeql, undefined, 'CodeQL remains manual');
@@ -1368,7 +1368,7 @@ test('every representative changed-area plan includes the unconditional integrat
     });
     const suiteGate = plan.gates.find(gate => gate.key === 'integration-suite');
     assert.ok(suiteGate, `${label} plan must include the integration-suite gate`);
-    assert.equal(suiteGate.command, 'npm run test:integration');
+    assert.equal(suiteGate.command, 'npm run test:integration:prebuilt');
     const workflowGate = plan.gates.find(gate => gate.key === 'workflow');
     const smokeGate = plan.gates.find(gate => gate.key === 'custom-agent-smoke');
     assert.equal(Boolean(workflowGate), expectsE2E, `${label} workflow gate selection must remain area-scoped`);

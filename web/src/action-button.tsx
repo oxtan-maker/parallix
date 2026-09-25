@@ -29,6 +29,7 @@ export function ActionButton({ action, style, label, pending = false, working = 
     <button
       type="button"
       aria-disabled={!enabled}
+      onMouseDown={(event) => event.preventDefault()}
       onClick={(event) => { if (enabled) { onInvoke?.(action, event.currentTarget); } }}
       style={{
         ...look(action.state),

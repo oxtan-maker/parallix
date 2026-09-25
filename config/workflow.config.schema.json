@@ -101,7 +101,8 @@
                     "key": { "type": "string", "description": "Stable identifier for the gate, used in logs and failure reports." },
                     "command": { "type": "string", "description": "Exact runnable shell command. No trailing prose or outcome language." },
                     "order": { "type": "number", "description": "Sort key; gates run in ascending order. Defaults to 0." },
-                    "after": { "type": "array", "items": { "type": "string", "minLength": 1 }, "description": "Same-phase gate keys that must complete before this gate starts." }
+                    "after": { "type": "array", "items": { "type": "string", "minLength": 1 }, "description": "Same-phase gate keys that must complete before this gate starts." },
+                    "reuse": { "type": "string", "enum": ["never", "clean-tree"], "description": "never (default) always executes. clean-tree may reuse only an exact passing clean committed-tree proof; use only for deterministic side-effect-free verification." }
                   }
                 }
               },
@@ -115,7 +116,8 @@
                   "key": { "type": "string" },
                   "command": { "type": "string" },
                   "order": { "type": "number" },
-                  "after": { "type": "array", "items": { "type": "string", "minLength": 1 } }
+                    "after": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+                    "reuse": { "type": "string", "enum": ["never", "clean-tree"] }
                 }
               }
             },
@@ -129,7 +131,8 @@
                   "key": { "type": "string" },
                   "command": { "type": "string" },
                   "order": { "type": "number" },
-                  "after": { "type": "array", "items": { "type": "string", "minLength": 1 } }
+                    "after": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+                    "reuse": { "type": "string", "enum": ["never", "clean-tree"] }
                 }
               }
             }

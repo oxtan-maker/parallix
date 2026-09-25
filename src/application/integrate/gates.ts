@@ -4,6 +4,7 @@
  * gate through the integration-gate rebound (TASK-2492).
  */
 import * as fmt from '../presentation/cli-format.js';
+import { missionId } from '../../domain/mission.js';
 import { abortWith, resolveBounceImplementer, type BounceSeams } from './support.js';
 import type { IntegrateGatesPort, IntegrateWorkflowPorts } from '../ports/integrate-workflow.js';
 
@@ -33,6 +34,7 @@ export interface GateStepRequest {
   slug: string;
   context: any;
   missionLoad: any;
+  missionServices: any;
   dryRun: boolean;
   noIntegrationGates: boolean;
   realAgent: string | null;
@@ -45,7 +47,7 @@ export function createIntegrationGateStep({ gates, landing, verification }: Inte
    * Returns the Verification evidence the readiness view reports: exactly what
    * ran, never "passed" without a gate result behind it.
    */
-  async function runRequiredLocalGates({ slug, context, missionLoad, dryRun, noIntegrationGates, realAgent, realAgentModel, seams }: GateStepRequest): Promise<string> {
+  async function runRequiredLocalGates({ slug, context, missionLoad, missionServices, dryRun, noIntegrationGates, realAgent, realAgentModel, seams }: GateStepRequest): Promise<string> {
     if (noIntegrationGates) {
       fmt.log.info('Integration gates skipped via --no-integration-gates flag');
       return 'skipped via --no-integration-gates';
@@ -114,6 +116,7 @@ export function createIntegrationGateStep({ gates, landing, verification }: Inte
     // longer a dead end. The failure is classified and routed; only the
     // recoverable mission-regression route continues, and it continues
     // only because the identical gate set re-ran green.
+    const implementer = resolveBounceImplementer(context.taskAssignee ?? null, checkout, seams);
     const route = await seams.routeIntegrationGateFailureFn({
       slug,
       missionWorktree: checkout,
@@ -121,7 +124,7 @@ export function createIntegrationGateStep({ gates, landing, verification }: Inte
       failedGate: result.failedGate,
       gateError: result.error,
       gates: configured,
-      implementer: resolveBounceImplementer(context.taskAssignee ?? null, checkout, seams),
+      implementer,
       repositoryId: missionLoad.kind === 'found' ? String(missionLoad.mission.repositoryId) : 'unknown',
       // TASK-2528: a repair that changes the approved diff must retract the
       // standing approval instead of merging under it. The retraction is
@@ -134,6 +137,22 @@ export function createIntegrationGateStep({ gates, landing, verification }: Inte
       realAgentModel,
       startAgentFn: seams.startAgentFn,
       transitionTaskFn: (bounceSlug: string) => seams.transitionTaskFn(bounceSlug, 'active'),
+      reactivateMissionFn: async (bounceSlug: string) => {
+        const current = await missionServices.store.load(missionId(bounceSlug));
+        if (current.kind !== 'found') { throw new Error(`Mission ${bounceSlug} is unavailable for integration-gate rebound.`); }
+        const transition = await missionServices.lifecycle.transition({
+          operationId: `integration-gate-rebound:${bounceSlug}`,
+          missionId: missionId(bounceSlug),
+          expectedVersion: current.version,
+          capabilities: new Set(['mission:transition']),
+          command: { type: 'rebound-to-active', agent: implementer },
+          actor: implementer,
+          occurredAt: new Date().toISOString(),
+          idempotencyKey: `integration-gate-rebound:${bounceSlug}:${current.version}`,
+        });
+        if (transition.status !== 'completed') { throw new Error(transition.error?.message ?? `Mission ${bounceSlug} could not rebound to active.`); }
+        return seams.transitionTaskFn(bounceSlug, 'active');
+      },
       applyAgentFallbackFn: seams.applyAgentFallbackFn,
       reReviewFollows: Boolean(seams.reReviewFn),
     });

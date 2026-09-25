@@ -57,7 +57,7 @@ export class DraftCommandUseCase {
     const publication = currentWorkPublication({
       slug: ctx.slug,
       operationId: `draft:${ctx.slug}:${randomUUID()}`,
-      phase: 'execute',
+      phase: 'draft',
       summary: `px draft ${args.join(' ')}`.trim(),
       agent: ctx.agent,
     });

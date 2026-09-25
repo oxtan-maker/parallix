@@ -3,11 +3,12 @@ id: TASK-2569
 title: >-
   Backup retention deletes freshly returned snapshot when legacy suffix sorts
   later
-status: backlog
-assignee: []
+status: done
+assignee: [codex]
 created_date: '2026-09-24 18:20'
 labels:
   - bug
+  - user_value
   - persistence
   - backup
 dependencies: []

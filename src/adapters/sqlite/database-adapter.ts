@@ -484,13 +484,11 @@ export class SqliteDatabaseAdapter {
 }
 
 /**
- * Delete `<path>.bak.*` snapshots beyond the newest `MAX_RETAINED_BACKUPS`.
+ * Delete timestamped `<path>.bak.<millisecond>` snapshots beyond the newest
+ * `MAX_RETAINED_BACKUPS`; non-timestamped legacy sidecars are unmanaged.
  *
- * Fixed-width millisecond suffixes sort lexically == chronologically, matching
- * `recoverFromBackup()` selection, so the newest snapshots are kept
- * deterministically. Files are sorted newest-first and everything past the cap
- * is removed; the freshly written snapshot is always the newest and is
- * therefore never deleted.
+ * Fixed-width millisecond suffixes sort lexically == chronologically. Files
+ * are sorted newest-first and everything past the cap is removed.
  */
 function pruneOlderBackups(dbPath: string): void {
   const base = path.basename(dbPath);
@@ -498,9 +496,10 @@ function pruneOlderBackups(dbPath: string): void {
   if (!fs.existsSync(dir)) {
     return;
   }
+  const prefix = `${base}.bak.`;
   const backups = fs
     .readdirSync(dir)
-    .filter((f) => f.startsWith(`${base}.bak.`))
+    .filter((f) => f.startsWith(prefix) && /^\d{13}$/.test(f.slice(prefix.length)))
     .sort((a, b) => compareCodeUnits(b, a)); // newest first
   for (const stale of backups.slice(MAX_RETAINED_BACKUPS)) {
     try {

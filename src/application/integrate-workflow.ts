@@ -55,6 +55,11 @@ export function createIntegrateWorkflow(ports: IntegrateWorkflowPorts) {
   // port, so the closeout performs zero new remote side effects.
   /** @param {string} slug @param {any} missionServices @param {string} rootDir */
   async function recoverLandedCloseout(slug: string, missionServices: any, rootDir: string): Promise<0> {
+    // The hook runs from the base checkout; resolve the landed base branch the
+    // same way the integration context does (legacy missions fall back to the
+    // primary branch).
+    let baseBranch: string;
+    try { baseBranch = missionPaths.resolveMissionBaseBranch(slug, rootDir); } catch { baseBranch = missionPaths.getPrimaryBranch(); }
     await recoverLandedIntegration(
       slug,
       missionServices,
@@ -64,7 +69,9 @@ export function createIntegrateWorkflow(ports: IntegrateWorkflowPorts) {
         recoverMissionForIntegration,
         persistLandedIntegrationOrAbort: ports.landing.persistLandedIntegrationOrAbort,
         cleanupMissionWorktree: ports.landing.cleanupMissionWorktree,
+        runPostIntegrateHookOrAbort: ports.landing.runPostIntegrateHookOrAbort,
         createAbort: landing.createAbort,
+        baseBranch,
       },
     );
     return 0;
@@ -214,7 +221,7 @@ export function createIntegrateWorkflow(ports: IntegrateWorkflowPorts) {
     // silently performing them (SC4 / SC6).
     const strategy = createIntegrationStrategy(ports.productConfig.resolveIntegrationMode(context.baseWorktree ?? process.cwd()));
     const verificationEvidence = await strategy.run('run-required-local-gates', () =>
-      runRequiredLocalGates({ slug, context, missionLoad, ...request, seams }));
+      runRequiredLocalGates({ slug, context, missionLoad, missionServices, ...request, seams }));
     printIntegrationReadiness(buildIntegrationReadiness(context, { verification: verificationEvidence }, missionPaths.getPrimaryBranch));
 
     if (dryRun) {

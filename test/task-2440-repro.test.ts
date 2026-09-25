@@ -33,7 +33,7 @@ async function openStore(databasePath: string): Promise<{ database: SqliteDataba
   return { database, store: new SqliteMissionStore(database) };
 }
 
-test('external lifecycle update moves only its persisted board card', async () => {
+test('external task update leaves persisted board lifecycle authoritative', async () => {
   const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'task-2440-repository-')));
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'task-2440-home-'));
   const oldHome = process.env.PARALLIX_HOME;
@@ -56,6 +56,7 @@ test('external lifecycle update moves only its persisted board card', async () =
     await seeded.database.close();
 
     assert.equal(await transitionTask('task-2440', 'active', { rootDir: root, log: () => {} }), true);
+    assert.match(fs.readFileSync(path.join(root, 'backlog', 'tasks', 'task-2440.md'), 'utf8'), /^status: active$/m);
 
     const opened = await openStore(databasePath);
     try {
@@ -73,7 +74,7 @@ test('external lifecycle update moves only its persisted board card', async () =
         stage.cards.map((card) => [card.id, card.lane]),
       ));
 
-      assert.equal(lanes.get(missionId('task-2440')), 'active');
+      assert.equal(lanes.get(missionId('task-2440')), 'backlog');
       assert.equal(lanes.get(missionId('task-2441')), 'review');
     } finally {
       await opened.database.close();

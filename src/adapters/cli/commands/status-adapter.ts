@@ -121,6 +121,9 @@ export function createStatusBoardAdapter(options: {
 
     async getMissionData(slug: string, rootDir: string): Promise<StatusMissionData | null> {
       try {
+        // Mission state remains reportable when this is an ad-hoc Mission
+        // without a Backlog card.
+        const recorded = options.loadMissionFn ? await options.loadMissionFn(slug.toLowerCase()) : null;
         // An explicit slug is a single-mission question, so it takes the
         // builder's focused route: the board projection is never assembled and
         // unrelated missions are never materialised merely to locate this card.
@@ -128,17 +131,16 @@ export function createStatusBoardAdapter(options: {
           .then(builder => builder.buildMissionCard(slug.toLowerCase() as MissionId))
           .catch(() => null);
 
-        if (!card) { return null; }
+        if (!card && !recorded) { return null; }
 
         // The brief, the declared gates and the write version come from the
         // Mission store, not the board card: the card is a board view, while
         // these are Mission state.
-        const recorded = options.loadMissionFn ? await options.loadMissionFn(slug.toLowerCase()) : null;
         const latest = latestEvidencedCheckpoint(recorded?.mission.checkpoints ?? []);
         const brief = recorded?.mission.brief ?? null;
 
         return {
-          activity: projectMissionActivity(card as MissionActivitySource),
+          activity: card ? projectMissionActivity(card as MissionActivitySource) : null,
           brief: brief
             ? { goal: brief.goal, why: brief.why, scope: brief.scope, outOfScope: [...brief.outOfScope] }
             : null,
@@ -159,7 +161,7 @@ export function createStatusBoardAdapter(options: {
           // it comes from the card. The stored title is written at `px draft`
           // intake while MISSION.md is still the scaffold, so reading it from
           // the aggregate reports the literal `<Title> (slug)` placeholder.
-          title: card.title ?? null,
+          title: card?.title ?? recorded?.mission.title ?? null,
           assignee: recorded?.mission.assignee ?? null,
           externalTaskRef: recorded?.mission.externalTaskRef
             ? {
@@ -168,17 +170,20 @@ export function createStatusBoardAdapter(options: {
               url: recorded.mission.externalTaskRef.url,
             }
             : null,
-          backlogStatus: (card as any).rawStatus ?? (card as any).status,
+          missionStatus: recorded?.mission.status ?? (card as any)?.status,
+          // Retained for the JSON compatibility surface; lifecycle presentation
+          // reads missionStatus above, never this frozen intake field.
+          backlogStatus: (card as any)?.rawStatus ?? (card as any)?.status ?? recorded?.mission.status ?? 'unknown',
           // A recorded checkpoint names itself. Only fall back to the board
           // card when nothing is recorded, so the reported name can never
           // belong to a different checkpoint than the Goal Check rows below it.
-          checkpoint: latest?.name ?? (card as any).checkpoint,
-          checkpointDescription: (card as any).checkpointDescription,
-          reviewPhase: (card as any).reviewPhase,
-          reviewRound: (card as any).reviewRound,
-          reviewDisposition: (card as any).reviewDisposition,
-          approvalOwed: (card as any).approvalOwed,
-          reviewHistory: ((card as any).reviewHistory || []).map((r: any) => ({
+          checkpoint: latest?.name ?? (card as any)?.checkpoint,
+          checkpointDescription: (card as any)?.checkpointDescription,
+          reviewPhase: (card as any)?.reviewPhase,
+          reviewRound: (card as any)?.reviewRound,
+          reviewDisposition: (card as any)?.reviewDisposition,
+          approvalOwed: (card as any)?.approvalOwed,
+          reviewHistory: ((card as any)?.reviewHistory || []).map((r: any) => ({
             number: r.number,
             reviewer: r.reviewer,
             implementer: r.implementer,

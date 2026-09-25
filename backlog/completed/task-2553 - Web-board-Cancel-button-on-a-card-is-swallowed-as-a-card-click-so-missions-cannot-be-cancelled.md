@@ -3,11 +3,12 @@ id: TASK-2553
 title: >-
   Web board: Cancel button on a card is swallowed as a card click, so missions
   cannot be cancelled
-status: backlog
-assignee: []
+status: done
+assignee: [codex]
 created_date: '2026-09-22 10:36'
 labels:
   - bug
+  - user_value
   - web
   - board
 dependencies: []

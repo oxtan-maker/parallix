@@ -3,8 +3,8 @@ id: TASK-2565
 title: >-
   Mission lifecycle is written from Backlog.md and read from a frozen Backlog
   copy, against ADR 0053
-status: backlog
-assignee: []
+status: done
+assignee: [codex]
 created_date: '2026-09-23 13:16'
 labels:
   - workflow

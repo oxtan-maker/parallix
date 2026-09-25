@@ -10,6 +10,7 @@ import { makeCard, makeProjection } from './fixtures/board-projection.js';
 import { missionId } from '../src/domain/mission.js';
 
 const action = { command: 'handoff', enabled: true, reason: null, targetLane: 'review' } as const;
+const cancel = { command: 'cancel', enabled: true, reason: null, targetLane: null, label: 'cancel ✕' } as const;
 const request = { missionId: 'task-2436-interaction', kind: 'handoff:record', missionStatusAtRequest: 'active' };
 const commandResult = (status = 'completed', error: { readonly kind: string; readonly message: string } | null = null) => ({ kind: 'command-result', transportVersion: 2, status, value: null, error, durableEvidence: [] });
 
@@ -78,6 +79,21 @@ test('board keyboard activation sends the same projected typed request', async (
     assert.equal(page.calls.length, 1);
     assert.deepEqual(payload(page.calls), request);
   } finally { await page.close(); }
+});
+
+test('cancel pointer activation opens its confirmation from intake and flight cards', async () => {
+  for (const lane of ['refined', 'active'] as const) {
+    const card = makeCard({ id: missionId(`task-2553-${lane}`), status: lane, lane, commands: [cancel] });
+    const page = await renderBoard({ board: toWebBoardSnapshot(makeProjection({ [lane]: [card] })) });
+    try {
+      const button = page.mount.querySelector<DomButton>('button[aria-label^="px cancel"]')!;
+      const pointerDown = new page.window.MouseEvent('mousedown', { bubbles: true, cancelable: true });
+      await act(async () => { button.dispatchEvent(pointerDown); button.click(); });
+      assert.equal(pointerDown.defaultPrevented, true, `${lane} cancel must not focus and rerender its draggable card first`);
+      assert.ok(page.mount.querySelector(`[aria-label="Confirm cancelling task-2553-${lane}"]`));
+      assert.equal(page.calls.length, 0);
+    } finally { await page.close(); }
+  }
 });
 
 test('board unavailable action ignores pointer and keyboard activation', async () => {

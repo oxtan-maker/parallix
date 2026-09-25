@@ -304,7 +304,7 @@ ${fmt.bold('Advanced Commands:')}
 ${fmt.bold('Utility Commands:')}
   version, --version, -v  Print the package version, px path, package root, and Node version.
   shell-init [bash|zsh]   Print the shell integration snippet that cds your terminal into the next mission worktree on transitions.
-  review-event <slug> --type <type> --actor <actor> --content <text> [--timestamp <stamp>] [--skip-git]  Append a review-thread event for a mission.
+  review-event <slug> --type <type> --actor <actor> --content <text> [--disposition <disposition>] [--timestamp <stamp>] [--skip-git]  Append a review-thread event for a mission.
 
 ${fmt.bold('Notes:')}
   - <slug> is optional if it can be inferred from the current branch, directory name, or git worktree.

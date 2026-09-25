@@ -54,6 +54,7 @@ export interface LaneTransitionEvent {
  *   - active → review         : 'submit-for-review'
  *   - review → active         : 'request-changes'
  *   - review → integration    : 'approve'
+ *   - integration → active    : 'rebound-to-active'
  *   - integration → done      : 'integrate'
  *
  * Returns `null` when the transition is not recognised by the state machine
@@ -77,6 +78,9 @@ export function triggerFromTransition(
   }
   if (from === 'review' && to === 'integration') {
     return 'approve';
+  }
+  if (from === 'integration' && to === 'active') {
+    return 'rebound-to-active';
   }
   if (from === 'integration' && to === 'done') {
     return 'integrate';

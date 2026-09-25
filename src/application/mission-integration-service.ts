@@ -91,22 +91,13 @@ export class MissionIntegrationService {
     try {
       mission = closeMission(loaded.mission, request.closedAt);
     } catch (error) { return decisionFailure(error); }
-    // Closure keeps the mission in `done` but ends its last lane dwell, so it is
-    // a distinct event from `integrate`: without it the final dwell of every
-    // mission is open-ended.
-    const event = lifecycleLaneEvent({
-      mission,
-      from: loaded.mission.status,
-      trigger: 'close',
-      agent: request.actor ?? mission.assignee ?? 'unknown',
-      occurredAt: request.closedAt,
-      idempotencyKey: request.idempotencyKey,
-    });
     try {
-      const version = await this._store.saveWithTransition(mission, loaded.version, event);
+      // Closing records the completion time but does not move the Mission to a
+      // new lane, so it must not manufacture a done -> done lane event.
+      const version = await this._store.save(mission, loaded.version);
       return completed({ mission, version }, [storeEvidence(mission.id, 'close', 'fresh completed integration fact accepted')]);
     } catch (error) {
-      return this.duplicateOutcome(error, mission, loaded.version, event, 'close', 'fresh completed integration fact accepted');
+      return writeFailure(error);
     }
   }
 

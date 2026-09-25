@@ -32,13 +32,17 @@ export async function recoverLandedIntegration(
     recoverMissionForIntegration,
     persistLandedIntegrationOrAbort,
     cleanupMissionWorktree,
+    runPostIntegrateHookOrAbort,
     createAbort,
+    baseBranch,
   }: {
     findSquashCommit: IntegrateCheckoutPort['findExistingSquashCommit'];
     recoverMissionForIntegration: (_context: any, _opts: { missionServices: any; missionLoad: any }) => Promise<{ status: string }>;
     persistLandedIntegrationOrAbort: IntegrateLandingPort['persistLandedIntegrationOrAbort'];
     cleanupMissionWorktree: IntegrateLandingPort['cleanupMissionWorktree'];
+    runPostIntegrateHookOrAbort: IntegrateLandingPort['runPostIntegrateHookOrAbort'];
     createAbort: () => Error;
+    baseBranch: string;
   },
 ): Promise<void> {
   const landedCommit = findSquashCommit(rootDir, slug);
@@ -65,4 +69,9 @@ export async function recoverLandedIntegration(
   if (!cleanupMissionWorktree(slug)) {
     fail(createAbort, `Mission worktree cleanup failed for ${slug}.`);
   }
+  // The remote effect is already delivered, but the repo-owned post-integrate
+  // hook (e.g. the ADR 0060 SonarQube branch cleanup) is a closeout side effect
+  // the normal landing path also performs — run the same seam so a recovered
+  // confirmation does not leave the mission branch analysis behind.
+  runPostIntegrateHookOrAbort(slug, { baseWorktree: rootDir, baseBranch, variant: 'variant-b-resumed' });
 }

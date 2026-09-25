@@ -113,6 +113,10 @@ new-code diff. The gate fails closed when a mission analysis is not long-lived
 or when the candidate retains a High or Blocker impact. It does not use the
 current state of `main` as a substitute for the candidate's result.
 
+After confirmed integration, the repository deletes that mission's SonarQube
+Cloud branch analysis. Cleanup failures are reported without reversing the
+integration.
+
 Parallix currently uses a progressive quality policy: HIGH and BLOCKER
 impacts are blocking; MEDIUM, LOW, and INFO findings remain visible in the
 provider but are non-blocking. The provider quality gate owns that new-code
@@ -285,7 +289,7 @@ The second analysis does not exist because the first is distrusted as a Sonar re
 * No branch sanitization or SHA-256 project-key scheme is required.
 * Concurrent missions can be represented using their existing Git branch identities.
 * GitHub uses the same analysis model rather than a second infrastructure topology.
-* Analysis history is externally visible and retained in one place.
+* Analysis history is externally visible in one place while branches remain.
 * The repository contains substantially less Sonar-specific infrastructure code.
 
 ### Negative

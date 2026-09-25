@@ -88,7 +88,7 @@ test('renderStatus: renders mission data with backlog, checkpoint, and review', 
     uncommittedCount: 0,
   };
   renderStatus(result, (msg) => lines.push(msg));
-  assert.ok(lines.some(l => l.includes('Backlog status: active')), 'should render backlog status');
+  assert.ok(lines.some(l => l.includes('Mission status: active')), 'should render Mission status');
   assert.ok(lines.some(l => l.includes('Last checkpoint: CP-2.md - Wire status use case')), 'should render checkpoint');
   assert.ok(lines.some(l => l.includes('Forgejo PR: #42 (open)')), 'should render PR');
   assert.ok(lines.some(l => l.includes('Review: round 1, phase review, disposition approved')), 'should render review');
@@ -112,7 +112,7 @@ test('renderStatus: renders fallback when projection unavailable', () => {
     uncommittedCount: 0,
   };
   renderStatus(result, (msg) => lines.push(msg));
-  assert.ok(lines.some(l => l.includes('Backlog status: unknown (projection unavailable)')), 'should render projection fallback');
+  assert.ok(lines.some(l => l.includes('Mission status: unknown (projection unavailable)')), 'should render projection fallback');
   assert.ok(lines.some(l => l.includes('Last checkpoint: none')), 'should render no checkpoint');
   assert.ok(lines.some(l => l.includes('Forgejo PR: none')), 'should render no PR');
 });
@@ -368,7 +368,7 @@ test('createStatusCommand: renders status and exits 0', async () => {
   });
 
   assert.equal(exitCode, 0, 'should exit 0');
-  assert.ok(lines.some(l => l.includes('Backlog status: active')), 'should render backlog status');
+  assert.ok(lines.some(l => l.includes('Mission status: active')), 'should render Mission status');
   assert.ok(lines.some(l => l.includes('Last checkpoint: CP-1.md - Initial')), 'should render checkpoint');
 });
 
@@ -415,7 +415,7 @@ test('createStatusCommand: no-argument invocation renders inferred mission outpu
 
   assert.equal(exitCode, 0, 'should exit 0');
   assert.deepEqual(boardCalls, ['task-2332.13'], 'board is queried with the inferred slug');
-  assert.ok(lines.some(l => l.includes('Backlog status: in-review')), 'renders inferred mission backlog status');
+  assert.ok(lines.some(l => l.includes('Mission status: in-review')), 'renders inferred mission status');
   assert.ok(lines.some(l => l.includes('Last checkpoint: CP-3.md - Verify checkpoint integration')), 'renders inferred mission checkpoint');
   assert.ok(lines.some(l => l.includes('Review: round 7, phase reviewing')), 'renders inferred mission review state');
   assert.ok(lines.some(l => l.includes('Forgejo PR: #247 (open)')), 'renders inferred mission PR state');

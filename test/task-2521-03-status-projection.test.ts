@@ -121,7 +121,7 @@ test('restart recovery still reports lane and checkpoint when no brief is record
   const output = render(missionData({ brief: null, declaredGates: [] }));
   assert.match(output, /Brief: none recorded/);
   assert.match(output, /Declared gates: none/);
-  assert.match(output, /Backlog status: active/);
+  assert.match(output, /Mission status: active/);
   assert.match(output, /Last checkpoint: CP-1/);
   // Absence is reported as absence, never invented.
   assert.ok(!/Goal: /.test(output), 'no goal may be rendered when none is recorded');

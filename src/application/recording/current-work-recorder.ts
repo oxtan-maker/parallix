@@ -37,6 +37,7 @@ export const CURRENT_WORK_EVENT_TYPE = 'mission.current-work';
  * operator can see on the board, not a lifecycle lane.
  */
 export type CurrentWorkPhase =
+  | 'draft'
   | 'execute'
   | 'handoff'
   | 'review'
@@ -151,7 +152,7 @@ export function parseCurrentWorkEntry(entry: OperationalHistoryEntry): CurrentWo
 }
 
 function isPhase(value: string | null): value is CurrentWorkPhase {
-  return value === 'execute' || value === 'handoff' || value === 'review'
+  return value === 'draft' || value === 'execute' || value === 'handoff' || value === 'review'
     || value === 'review-response' || value === 'integrate' || value === 'recovery';
 }
 

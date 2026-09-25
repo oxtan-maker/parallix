@@ -49,13 +49,14 @@ export interface VerificationProof {
 }
 
 export interface ReusableVerificationProof {
-  version: 2;
+  version: 3;
   identity: string;
   command: string;
   inputFingerprint: string;
   toolchain: string;
   commit: string;
   tree: string;
+  context: string;
   verifiedAt: string;
   status: 'passed';
 }
@@ -253,7 +254,7 @@ function digest(value: string): string {
  * an incomplete manifest must execute, never reuse. Any dirty worktree fails
  * closed before the index fingerprint can be trusted.
  */
-export function createVerificationProofIdentity(command: string, rootDir: string = process.cwd(), options: { gitRunner?: GitFn } = {}): { ok: boolean; identity?: string; inputFingerprint?: string; toolchain?: string; commit?: string; tree?: string; error?: string } {
+export function createVerificationProofIdentity(command: string, rootDir: string = process.cwd(), options: { gitRunner?: GitFn; context?: string } = {}): { ok: boolean; identity?: string; inputFingerprint?: string; toolchain?: string; commit?: string; tree?: string; context?: string; error?: string } {
   if (typeof command !== 'string' || !command.trim()) {
     return { ok: false, error: 'verification proof requires a non-empty command' };
   }
@@ -274,13 +275,15 @@ export function createVerificationProofIdentity(command: string, rootDir: string
   if (!state.ok) { return state; }
   const toolchain = JSON.stringify({ node: process.version, modules: process.versions.modules, platform: process.platform, arch: process.arch });
   const inputFingerprint = digest(trackedOutput);
+  const context = options.context || '';
   return {
     ok: true,
     inputFingerprint,
     toolchain,
     commit: state.commit,
     tree: state.tree,
-    identity: digest(JSON.stringify({ version: 2, command: command.trim(), inputFingerprint, toolchain, commit: state.commit, tree: state.tree })),
+    context,
+    identity: digest(JSON.stringify({ version: 3, command: command.trim(), inputFingerprint, toolchain, commit: state.commit, tree: state.tree, context })),
   };
 }
 
@@ -288,35 +291,36 @@ export function verificationProofPath(identity: string, homeDir: string = resolv
   return pathMod.join(homeDir, 'verification-proofs', `${identity}.json`);
 }
 
-export function readReusableVerificationProof(command: string, rootDir: string = process.cwd(), options: { gitRunner?: GitFn; proofPath?: string } = {}): { ok: boolean; proof?: ReusableVerificationProof; identity?: string; error?: string } {
+export function readReusableVerificationProof(command: string, rootDir: string = process.cwd(), options: { gitRunner?: GitFn; proofPath?: string; context?: string } = {}): { ok: boolean; proof?: ReusableVerificationProof; identity?: string; error?: string } {
   const identityResult = createVerificationProofIdentity(command, rootDir, options);
   if (!identityResult.ok) { return identityResult; }
   const filePath = options.proofPath || verificationProofPath(identityResult.identity!);
   const result = readJson<ReusableVerificationProof>(filePath);
   const proof = result.data;
-  if (!result.ok || !proof || proof.version !== 2 || proof.status !== 'passed'
+  if (!result.ok || !proof || proof.version !== 3 || proof.status !== 'passed'
     || proof.identity !== identityResult.identity || proof.command !== command.trim()
     || proof.inputFingerprint !== identityResult.inputFingerprint || proof.toolchain !== identityResult.toolchain
-    || proof.commit !== identityResult.commit || proof.tree !== identityResult.tree) {
+    || proof.commit !== identityResult.commit || proof.tree !== identityResult.tree || proof.context !== identityResult.context) {
     return { ok: false, identity: identityResult.identity, error: 'verification proof is missing, malformed, or does not match current inputs' };
   }
   return { ok: true, proof, identity: identityResult.identity };
 }
 
-export function writeReusableVerificationProof(command: string, rootDir: string = process.cwd(), options: { gitRunner?: GitFn; proofPath?: string; expectedIdentity?: string } = {}): { ok: boolean; proof?: ReusableVerificationProof; identity?: string; error?: string } {
+export function writeReusableVerificationProof(command: string, rootDir: string = process.cwd(), options: { gitRunner?: GitFn; proofPath?: string; expectedIdentity?: string; context?: string } = {}): { ok: boolean; proof?: ReusableVerificationProof; identity?: string; error?: string } {
   const identityResult = createVerificationProofIdentity(command, rootDir, options);
   if (!identityResult.ok) { return identityResult; }
   if (options.expectedIdentity && identityResult.identity !== options.expectedIdentity) {
     return { ok: false, identity: identityResult.identity, error: 'verification inputs changed while the gate was running' };
   }
   const proof: ReusableVerificationProof = {
-    version: 2,
+    version: 3,
     identity: identityResult.identity!,
     command: command.trim(),
     inputFingerprint: identityResult.inputFingerprint!,
     toolchain: identityResult.toolchain!,
     commit: identityResult.commit!,
     tree: identityResult.tree!,
+    context: identityResult.context!,
     verifiedAt: new Date().toISOString(),
     status: 'passed',
   };

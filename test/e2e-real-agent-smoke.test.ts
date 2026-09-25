@@ -279,6 +279,9 @@ function classifyFailure({ stdout, stderr, status, signal }) {
   if (signal) {
     return { bucket: 'local-model-environment', detail: `run was killed by signal ${signal} (likely a timeout waiting on the local model backend)` };
   }
+  if (status === 143) {
+    return { bucket: 'local-model-environment', detail: 'run terminated with SIGTERM while waiting for the configured model or runner' };
+  }
   if (MODEL_UNAVAILABLE_PATTERNS.some((re) => re.test(text))) {
     return { bucket: 'local-model-environment', detail: 'local model backend appears unreachable (connection error)' };
   }
@@ -396,6 +399,15 @@ function setupRepository({ slug, title, agent = 'custom', runner = 'opencode' })
         }
       }
       fs.writeFileSync(piModelsPath, `${JSON.stringify(piModels, null, 2)}\n`, 'utf8');
+    }
+    const piSettingsPath = path.join(piAgentHome, 'settings.json');
+    if (fs.existsSync(piSettingsPath)) {
+      const settings = JSON.parse(fs.readFileSync(piSettingsPath, 'utf8').replace(/,\s*([\]}])/g, '$1'));
+      // The smoke owns model credentials, not the operator's optional packages
+      // or skills. Those can bootstrap during shutdown and outlive the probe.
+      settings.packages = [];
+      settings.skills = [];
+      fs.writeFileSync(piSettingsPath, `${JSON.stringify(settings, null, 2)}\n`, 'utf8');
     }
   }
 
@@ -1057,6 +1069,12 @@ function runRealAgentSmoke(agent, runner) {
       const mission = authority.prepare('SELECT status, closed_at FROM missions WHERE id = ?').get(slug);
       assert.equal(mission?.status, 'done', `[parallix-workflow-failure] the Mission in the operator database is ${mission?.status ?? 'missing'}, not done`);
       assert.ok(mission?.closed_at, '[parallix-workflow-failure] the integrated Mission has no closure time');
+      const transitions = authority.prepare('SELECT from_status, to_status FROM board_lane_events WHERE mission_id = ? ORDER BY occurred_at, id').all(slug);
+      const lanes = transitions.map((event) => `${event.from_status ?? 'none'}→${event.to_status}`);
+      for (const transition of ['none→backlog', 'backlog→refined', 'refined→active', 'active→review', 'review→integration', 'integration→done']) {
+        assert.ok(lanes.includes(transition), `[parallix-workflow-failure] completed Mission lane history is missing ${transition}`);
+      }
+      assert.ok(!lanes.includes('done→done'), '[parallix-workflow-failure] completion must not emit a done→done lane event');
     } finally {
       authority.close();
     }

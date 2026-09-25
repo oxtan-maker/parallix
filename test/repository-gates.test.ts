@@ -12,6 +12,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import {
   buildGateEnv,
@@ -29,6 +30,46 @@ function makeCheckout(): string {
   fs.writeFileSync(path.join(dir, 'README.md'), '# fixture repo\n');
   return dir;
 }
+
+function makeCommittedCheckout(): string {
+  const checkout = makeCheckout();
+  const git = (args: string[]) => {
+    const result = spawnSync('git', ['-C', checkout, ...args], { encoding: 'utf8' });
+    assert.equal(result.status, 0, result.stderr || result.stdout);
+  };
+  git(['init']); git(['checkout', '-b', 'main']);
+  git(['config', 'user.name', 'Test User']); git(['config', 'user.email', 'test@example.com']);
+  git(['add', 'README.md']); git(['commit', '-m', 'init']);
+  return checkout;
+}
+
+test('clean-tree gates reuse only an exact successful proof and never cache failures', { concurrency: false }, async () => {
+  const checkout = makeCommittedCheckout();
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'px-proof-home-'));
+  const previousHome = process.env.PARALLIX_HOME;
+  process.env.PARALLIX_HOME = home;
+  try {
+    let runs = 0;
+    const gate = [{ key: 'verify', command: 'true', order: 0, reuse: 'clean-tree' as const }];
+    const runner = () => ({ status: ++runs === 2 ? 1 : 0, stdout: '', stderr: '' });
+    assert.equal((await runPhaseGates('integration', { slug: 'task-1', checkoutPath: checkout, gates: gate, commandRunner: runner, log: () => {}, error: () => {} })).ok, true);
+    assert.equal((await runPhaseGates('integration', { slug: 'task-1', checkoutPath: checkout, gates: gate, commandRunner: runner, log: () => {}, error: () => {} })).executed, 1, 'an exact proof skips the runner but remains a completed gate');
+    assert.equal(runs, 1, 'the second exact invocation reuses the pass');
+    fs.writeFileSync(path.join(checkout, 'next.txt'), 'next\n');
+    assert.equal(spawnSync('git', ['-C', checkout, 'add', 'next.txt']).status, 0);
+    assert.equal(spawnSync('git', ['-C', checkout, 'commit', '-m', 'next']).status, 0);
+    assert.equal((await runPhaseGates('integration', { slug: 'task-1', checkoutPath: checkout, gates: gate, commandRunner: runner, log: () => {}, error: () => {} })).ok, false, 'a failed clean-tree gate must not create a reusable proof');
+    assert.equal((await runPhaseGates('integration', { slug: 'task-1', checkoutPath: checkout, gates: gate, commandRunner: runner, log: () => {}, error: () => {} })).ok, true);
+    assert.equal(runs, 3, 'the failed run was not cached and the next invocation executes');
+    fs.writeFileSync(path.join(checkout, 'README.md'), 'dirty\n');
+    assert.equal((await runPhaseGates('integration', { slug: 'task-1', checkoutPath: checkout, gates: gate, commandRunner: runner, log: () => {}, error: () => {} })).ok, true);
+    assert.equal(runs, 4, 'dirty input executes and cannot reuse');
+  } finally {
+    if (previousHome === undefined) { delete process.env.PARALLIX_HOME; } else { process.env.PARALLIX_HOME = previousHome; }
+    fs.rmSync(home, { recursive: true, force: true });
+    fs.rmSync(checkout, { recursive: true, force: true });
+  }
+});
 
 test('unconfigured repository runs no gate for the handoff phase', async () => {
   const checkout = makeCheckout();
@@ -297,6 +338,11 @@ test('validateRepositoryGates rejects a malformed gates block', () => {
   assert.deepEqual(clean, []);
 });
 
+test('validateRepositoryGates rejects an unknown gate reuse policy', () => {
+  const issues = validateRepositoryGates({ gates: { preIntegration: [{ key: 'verify', command: 'true', reuse: 'sometimes' }] } });
+  assert.match(issues.join('; '), /reuse must be "never" or "clean-tree"/);
+});
+
 test('gate dependencies reject missing keys and cycles', () => {
   for (const gates of [
     [{ key: 'consumer', command: 'true', order: 1, after: ['missing'] }],
@@ -334,13 +380,15 @@ test('this repository exposes the full independent gate width and orders Sonar a
     { key: 'build', command: 'npm run build', order: 1 },
     { key: 'dependency-audit', command: 'npm audit --audit-level=high', order: 2 },
     { key: 'verification', command: './scripts/verify-local.sh static-analysis', order: 3 },
-    { key: 'integration-suite', command: 'npm run test:integration', order: 4 },
-    { key: 'coverage', command: 'rm -f coverage/lcov.info && npm run test:coverage -- --threshold 0 --lcov && test -s coverage/lcov.info', order: 5 },
+    { key: 'integration-suite', command: 'npm run test:integration:prebuilt', order: 4 },
+    { key: 'coverage', command: 'rm -f coverage/lcov.info && PARALLIX_PREBUILT_PACK=1 npm run test:coverage -- --threshold 0 --lcov && test -s coverage/lcov.info', order: 5 },
     { key: 'workflow', command: 'node --import tsx test/e2e-mission-lifecycle.test.ts', order: 6 },
     { key: 'agent-smoke', command: 'node --import tsx test/e2e-real-agent-smoke.test.ts', order: 7 },
     { key: 'quality-gate', command: 'npm run sonar', order: 8 },
   ]);
   assert.deepEqual(gates.find(g => g.key === 'quality-gate')?.after, ['coverage']);
+  assert.equal(gates.find(g => g.key === 'verification')?.reuse, 'clean-tree');
+  assert.ok(gates.filter(g => g.key !== 'verification').every(g => g.reuse === 'never'));
   assert.deepEqual(gates.filter(g => ['integration-suite', 'coverage', 'workflow', 'agent-smoke'].includes(g.key)).map(g => g.after),
     [['build'], ['build'], ['build'], ['build']]);
   assert.ok(!gates.some((g) => g.command === 'npm run test:codeql'), 'preIntegration must not run CodeQL automatically');

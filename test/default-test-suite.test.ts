@@ -60,7 +60,7 @@ const expectedIntegrationFiles = [
   'product-config-cp.test.ts', 'product-config-validation.test.ts', 'product-config.test.ts',
   'px-runner.test.ts', 'px-runtime-smoke.test.ts', 'px-shell-init.test.ts',
   'rebase-use-case.test.ts', 'rebase.test.ts', 'rebase_diagnostics.test.ts', 'rebase_hardening.test.ts',
-  'refresh-global-px-script.test.ts', 'repository-gates.integration.test.ts', 'resolve-conflict.test.ts',
+  'refresh-global-px-script.test.ts', 'repository-gates.integration.test.ts', 'repository-gates.test.ts', 'resolve-conflict.test.ts',
   'review-artifacts.test.ts', 'review-autoderive.test.ts',
   'review-commands-additional.test.ts', 'review-commands-supplemental.test.ts',
   'review-identity-placeholder.test.ts', 'review-identity.test.ts',
@@ -142,7 +142,7 @@ const expectedIntegrationFiles = [
   // and the worktree/Git topology boundary.
   'task-2438-worktree-board-repro.test.ts',
   // TASK-2440: drives a temporary Git repository and migrated SQLite database
-  // through an external lifecycle update before reading the board.
+  // through an external task update before reading the persisted board lane.
   'task-2440-repro.test.ts',
   // TASK-2441: board title repro. Seeds a temporary Git repository and a
   // migrated SQLite database, then renders the composed board, so it crosses
@@ -170,6 +170,10 @@ const expectedIntegrationFiles = [
   // sandbox profile, so it crosses the bubblewrap boundary and runs only in
   // the local integration layer.
   'task-2557-sandbox-px-write.test.ts',
+  // TASK-2551: one real subprocess (node --import tsx, missing SONAR_TOKEN) to
+  // prove the delete-branch subcommand's exit-0 failure semantics; the rest is
+  // request-injected, so it crosses only the process boundary.
+  'task-2551-sonar-branch-cleanup.test.ts',
   // TASK-2532: seeds temporary Git repositories to exercise the base-worktree
   // repair, so it crosses the git boundary and runs in the integration layer.
   'task-2532-stale-integration-state-repro.test.ts',
@@ -238,8 +242,8 @@ test('default test runner routes every moved group to integration and excludes i
   assert.ok(!integrationFiles.includes('e2e-mission-lifecycle.test.ts'));
   assert.ok(!integrationFiles.includes('e2e-real-agent-smoke.test.ts'));
   assert.match(runner, /runsIntegrationSuite/);
-  assert.match(runner, /spawnSync\('npm', \['run', 'build'\]/,
-    'the runner must build this checkout before tests load the canonical bundle');
+  assert.doesNotMatch(runner, /npm', \['run', 'build'/,
+    'the runner selects tests and never owns canonical bundle orchestration');
   assert.equal(pkg.scripts.pretest, undefined,
     'building belongs to the runner so direct and npm-invoked suites have the same protection');
   // --test-force-exit makes file workers exit before their result stream is
@@ -252,7 +256,7 @@ test('default test runner routes every moved group to integration and excludes i
   assert.ok(integrationRun.args.some(a => a.startsWith('--test-concurrency=')));
   assert.ok(defaultRun.args.some(a => a === '--test-concurrency=4'),
     'unit concurrency is bounded so measured durations are not host-oversubscription artifacts');
-  assert.equal(pkg.scripts['test:integration'], 'FORCE_COLOR=0 tsx test/run-default-tests.ts --integration');
+  assert.equal(pkg.scripts['test:integration:prebuilt'], 'PARALLIX_PREBUILT_PACK=1 FORCE_COLOR=0 tsx test/run-default-tests.ts --integration');
   assert.match(runner, /file\.endsWith\('\.integration\.test\.ts'\)/,
     'integration suffix must provide an explicit category independent of dependency heuristics');
 });

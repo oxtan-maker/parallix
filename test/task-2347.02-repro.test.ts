@@ -1,14 +1,11 @@
 /**
  * TASK-2347.02 — reproduction: the lifecycle event stream has holes.
  *
- * Mission intake, `integration -> done` and closure all persist the aggregate
- * with `save()`, so no `board_lane_events` row is written for them. Backlog age
- * is therefore unknowable, throughput cannot be derived from events, and the
- * final lane dwell of every mission is truncated.
+ * Mission intake and `integration -> done` need lane events so backlog age
+ * and throughput can be derived from the event stream. Closure records its
+ * timestamp on the aggregate without changing lanes.
  *
- * Every test below asserts the intended behaviour: each of the three lifecycle
- * steps leaves exactly one lane event behind. They are red on the parent commit
- * and green once the three services take the transition-aware path.
+ * Every lane transition below leaves exactly one event behind.
  */
 
 import { afterEach, describe, it } from 'node:test';
@@ -259,7 +256,7 @@ describe('TASK-2347.02 lifecycle event stream gaps', () => {
     await fixture.db.close();
   });
 
-  it('close produces a closure lane event', async () => {
+  it('close records its timestamp without a same-lane event', async () => {
     const fixture = await isolatedStore();
     const version = await intake(fixture, '2026-08-08T00:00:00.000Z');
     const integrationVersion = await toIntegration(fixture, version);
@@ -290,8 +287,10 @@ describe('TASK-2347.02 lifecycle event stream gaps', () => {
 
     const rows = await fixture.events.findByMissionId(MISSION);
     const closure = rows.filter((row) => row.trigger === 'close');
-    assert.equal(closure.length, 1, 'closure must record exactly one lane event');
-    assert.equal(closure[0].occurredAt, '2026-08-08T03:00:00.000Z');
+    assert.equal(closure.length, 0, 'closure must not record a done -> done lane event');
+    const reloaded = await fixture.store.load(MISSION);
+    assert.equal(reloaded.kind, 'found');
+    assert.equal((reloaded as { mission: { closedAt: string | null } }).mission.closedAt, '2026-08-08T03:00:00.000Z');
     await fixture.db.close();
   });
 });

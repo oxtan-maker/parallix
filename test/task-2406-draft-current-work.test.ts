@@ -28,7 +28,7 @@ function workflow(calls: string[], overrides: Record<string, unknown> = {}) {
   };
 }
 
-test('draft publishes running with phase execute before workflow and ended after finalTransition', async () => {
+test('draft publishes running with phase draft before workflow and ended after finalTransition', async () => {
   const calls: string[] = [];
   const currentWork = {
     running: async (publication: any) => { calls.push(`running:${publication.phase}`); },
@@ -39,7 +39,7 @@ test('draft publishes running with phase execute before workflow and ended after
   await new DraftCommandUseCase(workflow(calls), currentWork).execute(['task-2406']);
 
   assert.deepEqual(calls, [
-    'preflight', 'running:execute', 'setup', 'scaffold', 'intake', 'transition',
+    'preflight', 'running:draft', 'setup', 'scaffold', 'intake', 'transition',
     'launchAgent', 'postProcess', 'commitSafety', 'finalTransition', 'ended',
   ]);
 });

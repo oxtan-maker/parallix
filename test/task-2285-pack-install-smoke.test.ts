@@ -51,7 +51,9 @@ test.before(() => {
   fs.mkdirSync(parallixHome, { recursive: true });
 
   // `npm pack` runs prepack, so this packs a freshly built bundle.
-  execFileSync('npm', ['pack', '--pack-destination', work], { cwd: ROOT, encoding: 'utf8' });
+  const packArgs = ['pack', '--pack-destination', work];
+  if (process.env.PARALLIX_PREBUILT_PACK === '1') { packArgs.push('--ignore-scripts'); }
+  execFileSync('npm', packArgs, { cwd: ROOT, encoding: 'utf8' });
   const packed = fs.readdirSync(work).filter(file => file.endsWith('.tgz'));
   assert.equal(packed.length, 1, `expected exactly one tarball, got ${packed.join(', ')}`);
   tarball = path.join(work, packed[0]);

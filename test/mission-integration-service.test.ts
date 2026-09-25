@@ -112,9 +112,6 @@ describe('MissionIntegrationService', () => {
     });
     assert.equal(outcome.status, 'completed');
     assert.equal(outcome.value!.mission.closedAt, '2026-07-30T07:00:00Z');
-    // Closure ends the final lane dwell, so it is its own event at `closedAt`.
-    assert.deepEqual(events.map((event) => ({ to: event.to, trigger: event.trigger, occurredAt: event.occurredAt })), [
-      { to: 'done', trigger: 'close', occurredAt: '2026-07-30T07:00:00Z' },
-    ]);
+    assert.deepEqual(events, [], 'closing a done Mission must not emit a done-to-done lane event');
   });
 });

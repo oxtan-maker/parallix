@@ -211,11 +211,11 @@ function logMissionCardStatus(projection: any, slug: string, log: Function): voi
   const card = projection?.stages.flatMap((stage: any) => stage.cards)
     .find((candidate: any) => candidate.id.toLowerCase() === slug.toLowerCase());
   if (!card) {
-    log(`Backlog status: unknown (projection unavailable)`);
+    log(`Mission status: unknown (projection unavailable)`);
     log('Last checkpoint: none');
     return;
   }
-  log(`Backlog status: ${card.status}`);
+  log(`Mission status: ${card.status}`);
   log(card.checkpoint ? `Last checkpoint: ${card.checkpoint} - ${card.checkpointDescription || ''}` : 'Last checkpoint: none');
   // The review loop's own state, so an agent never has to open a
   // mission-directory file to learn which round or phase it is in.

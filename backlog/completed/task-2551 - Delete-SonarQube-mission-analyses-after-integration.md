@@ -1,8 +1,8 @@
 ---
 id: TASK-2551
 title: Delete SonarQube mission analyses after integration
-status: backlog
-assignee: []
+status: done
+assignee: [codex]
 created_date: '2026-09-21 14:50'
 labels:
   - ai_sdlc

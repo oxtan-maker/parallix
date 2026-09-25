@@ -140,3 +140,9 @@ test('real-agent smoke classifies ENOSPC and Git index/lock failures as environm
   }
   delete process.env.PARALLIX_E2E_SMOKE_TEST_HELPERS;
 });
+
+test('real-agent smoke classifies a trapped SIGTERM as a runner or model failure', () => {
+  const { classifyFailure } = loadSmokeHelpers();
+  assert.equal(classifyFailure({ stdout: '', stderr: '', status: 143, signal: null }).bucket, 'local-model-environment');
+  delete process.env.PARALLIX_E2E_SMOKE_TEST_HELPERS;
+});

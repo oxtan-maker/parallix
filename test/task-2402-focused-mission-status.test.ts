@@ -357,6 +357,24 @@ test('focused mission status returns null for a mission that does not exist', as
   assert.equal(ledger.loadAllMissionsCalls, 0);
 });
 
+test('focused mission status reports a recorded ad-hoc Mission without a Backlog card', async () => {
+  const adHocId = missionId('parallix-adhoc-1');
+  const board = createStatusBoardAdapter({
+    buildProjectionFn: async () => ({
+      async buildMissionCard() { return null; },
+    } as any),
+    loadMissionFn: async (slug) => slug === adHocId
+      ? { mission: missionRecord(adHocId, { status: 'active', rawStatus: 'active' }), version: 3 }
+      : null,
+  });
+
+  const data = await board.getMissionData(adHocId, '/repo');
+
+  assert.equal(data?.missionStatus, 'active');
+  assert.equal(data?.backlogStatus, 'active');
+  assert.equal(data?.title, `Mission ${adHocId}`);
+});
+
 test('focused mission status matches the board projection card for the same mission', async () => {
   const focusedLedger = newLedger();
   const board = statusBoardFor(focusedLedger);

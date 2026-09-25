@@ -105,7 +105,7 @@ test('TASK-2516: completed landed mission without an aggregate recovers once, pr
       detectRebaseStateFn: () => ({ inProgress: false, detached: false, unmergedFiles: [] }),
       log: line => statusLines.push(line), exit: () => {},
     } as never);
-    assert.ok(statusLines.includes('Backlog status: done'), 'px status projects the recovered aggregate as done');
+    assert.ok(statusLines.includes('Mission status: done'), 'px status projects the recovered aggregate as done');
 
     const repeated = await recoverMissionCommand([slug], {
       taskStatus: () => 'done', rootDir: root,

@@ -11,7 +11,7 @@ import { fileURLToPath } from 'node:url';
 import { runSonar } from '../scripts/sonar-local.js';
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const COVERAGE_COMMAND = 'rm -f coverage/lcov.info && npm run test:coverage -- --threshold 0 --lcov && test -s coverage/lcov.info';
+const COVERAGE_COMMAND = 'rm -f coverage/lcov.info && PARALLIX_PREBUILT_PACK=1 npm run test:coverage -- --threshold 0 --lcov && test -s coverage/lcov.info';
 
 // Capture the scanner invocation instead of running it. SONAR_TOKEN and
 // GITHUB_ACTIONS are set only for the duration of the call, so ordering between
@@ -23,7 +23,7 @@ function captureScan(env: Record<string, string | undefined>, status = 0) {
     return { status } as ReturnType<typeof spawnSync>;
   }) as typeof spawnSync;
   const run = () => {
-    const previous = { SONAR_TOKEN: process.env.SONAR_TOKEN, GITHUB_ACTIONS: process.env.GITHUB_ACTIONS };
+    const previous = { SONAR_TOKEN: process.env.SONAR_TOKEN, GITHUB_ACTIONS: process.env.GITHUB_ACTIONS, SONAR_USER_HOME: process.env.SONAR_USER_HOME };
     for (const [key, value] of Object.entries(env)) {
       if (value === undefined) delete process.env[key];
       else process.env[key] = value;

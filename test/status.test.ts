@@ -180,7 +180,7 @@ test('status prints mission details and agent matrix for inferred slug', async (
   });
 
   assert.equal(exitCode, 0);
-  assert.ok(lines.includes('Backlog status: active'));
+  assert.ok(lines.includes('Mission status: active'));
   assert.ok(lines.includes('Last checkpoint: CP-2.md - Checkpoint 2'));
   assert.ok(lines.includes('Forgejo PR: #83 (open)'));
   assert.ok(lines.includes('Agent launcher matrix:'));
@@ -242,7 +242,7 @@ test('status prints stale worktrees only when no explicit slug is provided', asy
   assert.equal(lines.some(line => line.includes('Stale worktree')), false);
   // TASK-2322.07: an unknown Mission reports the SQLite projection gap directly
   // instead of falling back to CP-N.md.
-  assert.ok(lines.includes('Backlog status: unknown (projection unavailable)'));
+  assert.ok(lines.includes('Mission status: unknown (projection unavailable)'));
   assert.ok(lines.includes('Last checkpoint: none'));
   assert.ok(lines.includes('Forgejo PR: none'));
 });

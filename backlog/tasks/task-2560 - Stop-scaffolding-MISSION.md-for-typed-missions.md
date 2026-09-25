@@ -26,7 +26,7 @@ TASK-2521.03 moved agents to px status and typed writes, but runtime code still 
 
 TASK-2521.06 also found 111 completed-mission CP files whose Goal Check or action differs from checkpoint data already in Mission state before the migration began. Thirty-five stored versions match a Git revision on some ref; 76 match no committed revision examined. The old handoff path records parsed CP text into SQLite while CP files can later change. Trace this divergence in the cutover and make typed checkpoint evidence the single current authority; keep historical file content discoverable for migration audit.
 
-The current `task-2550` Mission is in review with no recorded brief, success criteria, or checkpoint plan. Its worktree's MISSION.md is still the literal `<Goal>` template, so the missing contract cannot be recovered from that file. Repair this pre-cutover mission from an operator-approved contract or an actual source-backed handoff record before treating the migration audit's required-context counter as zero; do not infer criteria from the template or task description.
+The operator declared `task-2550` a no-go on 2026-09-25: no recoverable contract trace and no repair required. TASK-2521.06 records the narrow stopped-Mission audit decision. This task only owns the normal-runtime file cutover; do not invent a contract for `task-2550`.
 <!-- SECTION:DESCRIPTION:END -->
 
 ## Acceptance Criteria
@@ -37,7 +37,7 @@ The current `task-2550` Mission is in review with no recorded brief, success cri
 - [ ] #4 A regression test proves draft of a typed mission leaves no placeholder MISSION.md and succeeds through handoff.
 - [ ] #5 Normal draft, assignment, handoff, review, integration, and closeout create no MISSION.md, CP-N.md, review-event, or Backlog task metadata file and do not read retired files for current state.
 - [ ] #6 The retired workflow-path guard inventory no longer grants normal-runtime exemptions for those file reads and writes; explicit historical import/export remains isolated.
-- [ ] #7 The pre-cutover `task-2550` review Mission has an operator-approved typed contract and evidence plan, or is explicitly stopped; no placeholder document is treated as a contract.
+- [ ] #7 The normal runtime does not treat placeholder documents as a Mission contract.
 <!-- AC:END -->
 
 

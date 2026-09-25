@@ -38,7 +38,7 @@ Execution requirements:
   4. **Test paths** — e.g., `tests/integration/` (must be an existing test path)
   5. **File:line references** — accepted when needed, but line numbers eventually rot; prefer the forms above
 - **Not sufficient by themselves:** raw `stat`/`ls` output or generic prose claims. You may include them as supporting context, but the same `--evidence` value must also cite at least one accepted reference from the list above.
-- verify all mission-declared Gates pass before handoff
+- run targeted checks needed to develop and validate the change; handoff owns the authoritative execution of mission-declared Gates, so do not rerun a complete declared gate solely as lifecycle ritual (run one when diagnosing a concrete issue)
 - Immediately after **each successful mission-declared Gate**, compact your working context before starting the next gate, checkpoint work, or handoff work. Reload only the locked mission goal and scope plus committed checkpoint or successful-gate evidence that is present, re-reading them with `px status {{slug}}` rather than from repository files. Do not compact for a failed gate: retain its failure diagnostic while repairing it.
 - preserve `{{taskPath}}`: update mission-relevant content as needed but do not delete, rename, or move the file
 - do not change the Backlog task's status, assignee, labels, or lifecycle metadata, and do not run `px active`, `px review`, `px integrate`, `px assign` or `px unassign`; Parallix performs lifecycle transitions and review decisions itself. `px status {{slug}}` is the supported read in this phase, and `px checkpoint record` is the only supported write.

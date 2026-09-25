@@ -187,7 +187,7 @@ test('TASK-2416 guard: a live non-agent operation that publishes a null current-
   await recorder.running({
     missionId,
     operationId: 'draft:task-2416:guard',
-    phase: 'execute',
+    phase: 'draft',
     summary: 'px draft task-2416',
     agent: null,
   });

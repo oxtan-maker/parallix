@@ -19,7 +19,10 @@ const page: React.CSSProperties = {
   color: C.text,
   fontFamily: MONO,
   fontSize: 12,
-  overflow: 'hidden',
+  // The page is viewport-height; a board taller than the viewport scrolls
+  // vertically inside it instead of being clipped (TASK-2574). Horizontal
+  // lane scrolling stays on the inner lane row.
+  overflowY: 'auto',
 };
 
 const notice: React.CSSProperties = {

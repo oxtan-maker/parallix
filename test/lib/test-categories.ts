@@ -78,6 +78,9 @@ export const INTEGRATION_CI_TESTS: readonly string[] = [
   'rebase_diagnostics.test.ts',
   'rebase_hardening.test.ts',
   'repository-gates.integration.test.ts',
+  // TASK-2573: exercises reusable gate proofs against a temporary Git checkout;
+  // a clean hosted runner provides Git and the injected command runner.
+  'repository-gates.test.ts',
   'refresh-global-px-script.test.ts',
   'resolve-conflict.test.ts',
   'review-artifacts.test.ts',
@@ -246,6 +249,10 @@ export const INTEGRATION_CI_TESTS: readonly string[] = [
   // task file, so it crosses the git boundary and runs only in the integration
   // layer.
   'task-2537-squash-closeout-unstaged-task-path.test.ts',
+  // TASK-2551: one real subprocess (node --import tsx, missing SONAR_TOKEN) to
+  // prove the delete-branch subcommand's exit-0 failure semantics; the rest is
+  // request-injected, so it crosses only the process boundary.
+  'task-2551-sonar-branch-cleanup.test.ts',
   'test-hygiene.test.ts',
   'tui-command-flow.test.ts',
   'tui-pty-smoke.test.ts',

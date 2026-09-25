@@ -300,6 +300,8 @@ export interface IntegrationGateRouteOptions {
   realAgentModel?: string | null;
   startAgentFn: ReboundContext['startAgent'];
   transitionTaskFn: (_slug: string) => Promise<unknown> | unknown;
+  /** Authoritative lifecycle transition followed by an optional Backlog mirror. */
+  reactivateMissionFn?: (_slug: string) => Promise<unknown> | unknown;
   applyAgentFallbackFn?: ReboundContext['applyAgentFallback'];
   // Injected so tests exercise the routing without a database, an agent, or a
   // second gate execution.
@@ -382,7 +384,7 @@ export async function routeIntegrationGateFailure(opts: IntegrationGateRouteOpti
       implementer: opts.implementer,
       maxAttempts: REBOUND_ATTEMPTS_PER_INVOCATION,
       startAgent: opts.startAgentFn,
-      transitionToImplementer: opts.transitionTaskFn,
+      transitionToImplementer: opts.reactivateMissionFn ?? opts.transitionTaskFn,
       ...(opts.applyAgentFallbackFn ? { applyAgentFallback: opts.applyAgentFallbackFn } : {}),
       verify: async () => {
         // The repair has to be committed: the integration gates are only ever

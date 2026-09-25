@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { spawn, spawnSync } from 'node:child_process';
+import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { buildTestRunPlan } from './lib/test-run-plan.js';
 import { defaultManifestDir, ensureManifestDir, recoverRecordedTempRoots } from '../src/adapters/verification/temp-root-registry.js';
@@ -45,16 +45,6 @@ const nodeArgsWithCoverage = coverageEnabled
   : nodeArgs;
 if (coverageEnabled) {
   fs.mkdirSync(path.dirname(coverageDestination), { recursive: true });
-}
-
-// Build the canonical bundle before every suite so a direct runner invocation
-// also catches bundle regressions in the current checkout.
-const buildResult = spawnSync('npm', ['run', 'build'], { cwd: executionRoot, stdio: 'inherit' });
-if (buildResult.error) {
-  throw buildResult.error;
-}
-if (buildResult.status !== 0) {
-  process.exit(buildResult.status ?? 1);
 }
 
 // Unit tests import production modules directly from `src/` and replace

@@ -21,7 +21,37 @@ const SCRIPT_PATH = path.join(REPO_ROOT, 'scripts', 'refresh-global-px.sh');
 
 test('workflow.config.json wires the generic post-integrate hook to the checked-in script', () => {
   const command = resolvePostIntegrateCommand(REPO_ROOT);
-  assert.equal(command, './scripts/refresh-global-px.sh');
+  assert.equal(command, './scripts/refresh-global-px.sh && npm run sonar:delete-branch');
+});
+
+test('the post-integrate hook chain runs the global px refresh before the SonarQube mission branch deletion', () => {
+  const command = resolvePostIntegrateCommand(REPO_ROOT) || '';
+  const refreshIndex = command.indexOf('./scripts/refresh-global-px.sh');
+  const deleteIndex = command.indexOf('npm run sonar:delete-branch');
+  assert.ok(refreshIndex !== -1, `refresh step missing from: ${command}`);
+  assert.ok(deleteIndex !== -1, `deletion step missing from: ${command}`);
+  assert.ok(refreshIndex < deleteIndex, 'refresh-global-px.sh must complete before the deletion step starts');
+  // The `&&` chain means a refresh failure aborts the hook before any
+  // SonarQube call; the deletion step itself never fails the hook because the
+  // delete-branch subcommand always exits 0 (ADR 0060).
+  assert.match(command, /&&/);
+});
+
+test('no product code path invokes the SonarQube mission branch deletion', () => {
+  // The deletion is reachable only through the post-integrate hook, which runs
+  // solely from the confirmed-integration landing path after the landed
+  // integration is persisted. Failed, closed, and review-only missions never
+  // run postIntegrateCommand, and no code under src/ may invoke the deletion
+  // directly (ADR 0060 product boundary).
+  const walk = (dir: string): string[] => fs.readdirSync(dir, { withFileTypes: true }).flatMap(entry => {
+    const full = path.join(dir, entry.name);
+    return entry.isDirectory() ? walk(full) : entry.name.endsWith('.ts') ? [full] : [];
+  });
+  const offenders = walk(path.join(REPO_ROOT, 'src')).filter(file => {
+    const content = fs.readFileSync(file, 'utf8');
+    return content.includes('sonar:delete-branch') || content.includes('deleteMissionBranch') || content.includes('deleteSonarBranch');
+  });
+  assert.deepEqual(offenders, [], 'the SonarQube branch deletion must be wired only through workflow.config.json postIntegrateCommand');
 });
 
 test('scripts/refresh-global-px.sh exists and is executable', () => {

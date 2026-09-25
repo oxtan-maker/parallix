@@ -158,6 +158,23 @@ test('task-2413: changing the verification command invalidates proof reuse', { c
   });
 });
 
+test('task-2573: proof context is exact and cannot cross phase, mission, or checkout', { concurrency: false }, () => {
+  withTempDir(root => {
+    initCommittedGitRepo(root);
+    const command = 'true';
+    const context = JSON.stringify({ phase: 'integration', slug: 'task-1', checkoutPath: root, gate: 'verify' });
+    assert.equal(writeReusableVerificationProof(command, root, { proofPath: proofPath(root), context }).ok, true);
+    assert.equal(readReusableVerificationProof(command, root, { proofPath: proofPath(root), context }).ok, true);
+    for (const changed of [
+      JSON.stringify({ phase: 'review', slug: 'task-1', checkoutPath: root, gate: 'verify' }),
+      JSON.stringify({ phase: 'integration', slug: 'task-2', checkoutPath: root, gate: 'verify' }),
+      JSON.stringify({ phase: 'integration', slug: 'task-1', checkoutPath: '/other', gate: 'verify' }),
+    ]) {
+      assert.equal(readReusableVerificationProof(command, root, { proofPath: proofPath(root), context: changed }).ok, false);
+    }
+  });
+});
+
 test('task-2413: a stale/mismatched proof cannot authorize publication', { concurrency: false }, () => {
   withTempDir(root => {
     initCommittedGitRepo(root);

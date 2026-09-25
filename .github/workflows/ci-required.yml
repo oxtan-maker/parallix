@@ -182,6 +182,8 @@ jobs:
       # pass runs here.
       - name: Merge CI-safe coverage into one LCOV report
         run: npm run coverage:merge
+      - name: Publish whole-report CI-safe LCOV coverage
+        run: npm run coverage:summary -- "$GITHUB_SHA" >> "$GITHUB_STEP_SUMMARY"
       - name: Run mandatory SonarQube quality gate
         if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository
         # pipefail is set inline because the step's default bash -e does not

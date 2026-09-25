@@ -9,6 +9,7 @@ import os from 'os';
 import path from 'path';
 import { mockModule, installModuleMocks } from './lib/module-mock.js';
 const git = mockModule<typeof import('../src/adapters/git/git.js')>('../src/adapters/git/git.js', import.meta.url);
+mockModule<typeof import('../src/adapters/filesystem/mission-paths.js')>('../src/adapters/filesystem/mission-paths.js', import.meta.url);
 const __mm1 = mockModule<typeof import('../src/adapters/filesystem/mission-utils.js')>('../src/adapters/filesystem/mission-utils.js', import.meta.url);
 await installModuleMocks();
 test.afterEach(() => mock.restoreAll());
@@ -74,33 +75,33 @@ test('inferSlug identifies slug from explicit arg, current branch, directory nam
     assert.equal(inferSlug('adhoc-hello-world'), 'adhoc-hello-world');
 
     // 2. Inference from mission branch
-    git.getCurrentBranch = () => 'mission/task-118';
+    mock.method(git, 'getCurrentBranch', () => 'mission/task-118');
     assert.equal(inferSlug(), 'task-118');
 
     // 3. Inference from non-mission branch falls back to directory
-    git.getCurrentBranch = () => 'main';
+    mock.method(git, 'getCurrentBranch', () => 'main');
     process.cwd = () => `/tmp/anyProject-task-119`;
     assert.equal(inferSlug(), 'task-119');
 
-    git.getCurrentBranch = () => 'main';
+    mock.method(git, 'getCurrentBranch', () => 'main');
     process.cwd = () => `/tmp/anyProject-adhoc-hello-world`;
     assert.equal(inferSlug(), 'adhoc-hello-world');
 
     // 4. Inference from worktree registry
-    git.getCurrentBranch = () => 'detached';
+    mock.method(git, 'getCurrentBranch', () => 'detached');
     process.cwd = () => '/tmp/random-dir';
-    git.git = (args) => {
+    mock.method(git, 'git', (args) => {
       if (args.includes('worktree') && args.includes('list')) {
         return {
           stdout: `worktree ${FAKE_ROOT}\nbranch refs/heads/master\n\nworktree /tmp/random-dir\nbranch refs/heads/mission/task-120\n\n`
         };
       }
       return { stdout: '' };
-    };
+    });
     assert.equal(inferSlug(), 'task-120');
 
     // 5. Mixed case branch
-    git.getCurrentBranch = () => 'mission/TASK-099';
+    mock.method(git, 'getCurrentBranch', () => 'mission/TASK-099');
     process.cwd = () => FAKE_ROOT;
     assert.equal(inferSlug(), 'task-099');
   } finally {

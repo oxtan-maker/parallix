@@ -62,6 +62,8 @@ export interface StatusReviewRound {
 
 /** Mission-specific data returned by status projection. */
 export interface StatusMissionData {
+  /** Authoritative Mission lifecycle status. */
+  readonly missionStatus?: string;
   /** Backlog status string. */
   readonly backlogStatus: string;
   /** Last checkpoint name (e.g. CP-2.md). */

@@ -33,6 +33,7 @@ export interface RepositoryGate {
   command: string;
   order: number;
   after?: string[];
+  reuse?: 'never' | 'clean-tree';
 }
 
 /** The complete declared gate surface for a repository. */
@@ -116,7 +117,8 @@ function normalizeGates(raw: unknown): RepositoryGate[] {
     const after = Array.isArray((entry as any).after) && (entry as any).after.every((dependency: unknown) => typeof dependency === 'string' && dependency)
       ? (entry as any).after
       : undefined;
-    gates.push({ key, command, order, ...(after ? { after } : {}) });
+    const reuse: RepositoryGate['reuse'] = (entry as any).reuse === 'clean-tree' ? 'clean-tree' : 'never';
+    gates.push({ key, command, order, ...(after ? { after } : {}), reuse });
   }
   return gates.sort((a, b) => a.order - b.order);
 }
@@ -193,6 +195,9 @@ export function validateRepositoryGates(adapters: unknown): string[] {
       }
       if (entry.after !== undefined && (!Array.isArray(entry.after) || entry.after.some((dependency: unknown) => typeof dependency !== 'string' || !dependency))) {
         issues.push(`adapters.gates.${phase}[${index}].after must be an array of non-empty gate keys`);
+      }
+      if (entry.reuse !== undefined && entry.reuse !== 'never' && entry.reuse !== 'clean-tree') {
+        issues.push(`adapters.gates.${phase}[${index}].reuse must be "never" or "clean-tree"`);
       }
     });
     const seen = new Set<string>();
@@ -362,10 +367,33 @@ export async function runPhaseGates(
       if (dashboard) { dashboard.startGate(gate.key); }
       else if (!compact) { log(`Repository gate (${phase}): ${gate.key} started (${running.size + 1}/${maxParallel} active).`); }
       const started = Date.now();
+      // Delay proof loading until a clean-tree gate actually runs. This keeps
+      // bootstrap-only gate planning independent of Git verification modules.
+      const verification = gate.reuse === 'clean-tree'
+        ? await import('../verification/' + 'verification.js') : null;
+      const proofContext = JSON.stringify({ phase, slug, checkoutPath: path.resolve(checkoutPath), gate: gate.key });
+      const reusable = gate.reuse === 'clean-tree'
+        ? verification!.readReusableVerificationProof(gate.command, checkoutPath, { context: proofContext }) : { ok: false };
+      if (reusable.ok) {
+        const outcome = Promise.resolve({ key: gate.key, command: gate.command, exitCode: 0, stdout: 'reused exact clean-tree proof', stderr: '', durationMs: 0 });
+        running.add(outcome);
+        continue;
+      }
+      const beforeProof = gate.reuse === 'clean-tree'
+        ? verification!.createVerificationProofIdentity(gate.command, checkoutPath, { context: proofContext }) : { ok: false };
       const run = Promise.resolve().then(() => runner(gate.command, [], { cwd: path.resolve(checkoutPath), env, stdio: 'pipe', signal: controller.signal,
         forwardOutput: liveSerial,
         onOutput: chunk => dashboard?.append(gate.key, chunk) }))
-        .then(result => ({ key: gate.key, command: gate.command, exitCode: typeof result.status === 'number' ? result.status : null, stdout: String(result.stdout || ''), stderr: String(result.stderr || ''), durationMs: Date.now() - started }))
+        .then(result => {
+          const exitCode = typeof result.status === 'number' ? result.status : null;
+          if (exitCode === 0 && gate.reuse === 'clean-tree') {
+            const persisted = beforeProof.ok
+              ? verification!.writeReusableVerificationProof(gate.command, checkoutPath, { context: proofContext, expectedIdentity: beforeProof.identity })
+              : beforeProof;
+            return { key: gate.key, command: gate.command, exitCode, stdout: String(result.stdout || ''), stderr: persisted.ok ? String(result.stderr || '') : `${String(result.stderr || '')}\nproof unavailable: ${persisted.error}`, durationMs: Date.now() - started };
+          }
+          return { key: gate.key, command: gate.command, exitCode, stdout: String(result.stdout || ''), stderr: String(result.stderr || ''), durationMs: Date.now() - started };
+        })
         .catch(cause => ({ key: gate.key, command: gate.command, exitCode: null, stdout: '', stderr: String(cause), durationMs: Date.now() - started }));
       running.add(run);
     }

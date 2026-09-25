@@ -190,6 +190,25 @@ test('px review-event writes only inside the caller cwd repo mission artifacts',
   }
 });
 
+test('px review-event accepts an implementer disposition', async () => {
+  const target = makeTargetRepo({ slug: 'task-px-disposition' });
+  try {
+    const home = await seedTargetReview(target);
+    const result = runPx([
+      'review-event', target.slug,
+      '--type', 'implementer_disposition',
+      '--disposition', 'CHANGES_MADE',
+      '--actor', 'codex',
+      '--content', 'completed',
+      '--skip-git',
+    ], { cwd: target.root, env: { PARALLIX_HOME: home } });
+
+    assert.equal(result.status, 0, `${result.stdout}${result.stderr}`);
+  } finally {
+    fs.rmSync(target.root, { recursive: true, force: true });
+  }
+});
+
 test('px works from a different caller cwd without copying workflow source', async () => {
   const target = makeTargetRepo({ slug: 'task-px-003' });
   try {

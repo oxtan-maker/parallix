@@ -112,6 +112,39 @@ export async function assertMissionTotalCode(options: { token: string, rootDir?:
   await assertNoOpenHighOrBlockerIssues({ token: options.token, branch: context.branch, request: options.request, backoffMs: options.backoffMs });
 }
 
+export async function deleteSonarBranch(options: { token: string, branch: string, request?: typeof fetch }) {
+  const request = options.request || fetch;
+  const headers = { Authorization: `Basic ${Buffer.from(`${options.token}:`).toString('base64')}` };
+  const url = `${SONAR_URL}/api/project_branches/delete?project=${SONAR_PROJECT_KEY}&branch=${encodeURIComponent(options.branch)}`;
+  const response = await request(url, { method: 'POST', headers });
+  if (response.status === 404) return;
+  if (!response.ok) throw new Error(`SonarQube Cloud branch deletion failed (HTTP ${response.status}).`);
+}
+
+export async function deleteMissionBranch(options: { slug?: string; branchPrefix?: string; token?: string; request?: typeof fetch; emit?: (_message: string) => void }): Promise<{ ok: boolean; error?: string }> {
+  const emit = options.emit || ((message: string) => console.error(message));
+  const slug = options.slug?.trim();
+  const branchPrefix = options.branchPrefix?.trim();
+  if (!slug || !branchPrefix) {
+    const error = 'SonarQube Cloud mission branch deletion skipped: the post-integrate hook slug and the configured mission branch prefix are required.';
+    emit(error);
+    return { ok: false, error };
+  }
+  if (!options.token) {
+    const error = 'SonarQube Cloud mission branch deletion failed: SONAR_TOKEN is not set.';
+    emit(error);
+    return { ok: false, error };
+  }
+  try {
+    await deleteSonarBranch({ token: options.token, branch: `${branchPrefix}${slug}`, request: options.request });
+    return { ok: true };
+  } catch (error) {
+    const message = (error as Error).message;
+    emit(message);
+    return { ok: false, error: message };
+  }
+}
+
 export function runSonar(options: { rootDir?: string, spawn?: typeof spawnSync } = {}) {
   const rootDir = options.rootDir || process.cwd();
   // The token is environment-owned in both environments: an operator export
@@ -139,11 +172,14 @@ export function runSonar(options: { rootDir?: string, spawn?: typeof spawnSync }
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(import.meta.filename)) {
-  if (process.argv[2] !== 'scan') { throw new Error('Usage: sonar-local.ts scan'); }
-  try {
+  if (process.argv[2] === 'scan') try {
     // The provider gate controls the scanner result in every trusted context;
     // the mission-only total-code proof runs after it, for local missions only.
     runSonar();
     await assertMissionTotalCode({ token: process.env.SONAR_TOKEN!, rootDir: process.cwd() });
   } catch (error) { console.error((error as Error).message); process.exitCode = 1; }
+  else if (process.argv[2] === 'delete-branch') {
+    const config = JSON.parse(fs.readFileSync(path.join(process.cwd(), 'workflow.config.json'), 'utf8')) as { adapters?: { missions?: { branchPrefix?: string } } };
+    await deleteMissionBranch({ slug: process.env.INTEGRATE_HOOK_SLUG, branchPrefix: config.adapters?.missions?.branchPrefix, token: process.env.SONAR_TOKEN });
+  } else throw new Error('Usage: sonar-local.ts scan | delete-branch');
 }

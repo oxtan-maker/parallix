@@ -1055,6 +1055,10 @@ export class HandoffCommandUseCase {
       log(fmt.status('WARN', 'Repository verification skipped (--no-gate).'));
     } else {
       const verificationCommand = ports.verification.formatVerificationCommand(area || 'docs', rootDir);
+      const reusableProof = ports.verification.readReusableVerificationProof(verificationCommand, rootDir);
+      if (reusableProof.ok) {
+        log(fmt.status('PASS', 'Repository verification passed by reuse of an exact clean-tree proof.'));
+      } else {
       // Bind a reusable proof to the inputs that existed before execution. A
       // successful process exit alone must not certify a tree changed mid-gate.
       const beforeGateProof = ports.verification.createVerificationProofIdentity(verificationCommand, rootDir);
@@ -1121,6 +1125,7 @@ export class HandoffCommandUseCase {
         log(fmt.status('PASS', 'Repository verification passed.'));
       } else {
         log(fmt.status('WARN', `Repository verification passed, but its reusable proof is unavailable (${proofResult.error}).`));
+      }
       }
     }
 

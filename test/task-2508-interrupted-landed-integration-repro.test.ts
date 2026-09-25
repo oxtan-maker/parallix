@@ -112,5 +112,5 @@ test('px status reports the authoritative done lifecycle', async () => {
     }] }] }) }),
   });
 
-  assert.ok(lines.includes('Backlog status: done'));
+  assert.ok(lines.includes('Mission status: done'));
 });

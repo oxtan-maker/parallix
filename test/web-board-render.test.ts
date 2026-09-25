@@ -26,7 +26,7 @@ import type { BoardProjection } from '../src/application/projections/board.js';
 import type { AgentAvailabilityMetric } from '../src/application/projections/board.js';
 import type { MissionCard } from '../src/application/projections/mission-board.js';
 import { agentFamily } from '../src/domain/agents.js';
-import { emptyMetrics, makeAttentionItem, makeCard, makeProjection } from './fixtures/board-projection.js';
+import { emptyMetrics, makeAttentionItem, makeCard, makeCards, makeProjection } from './fixtures/board-projection.js';
 
 const webSrc = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'web', 'src');
 const browserSources = fs.readdirSync(webSrc)
@@ -420,6 +420,23 @@ test('narrow viewports scroll the board horizontally instead of dropping lanes',
   assert.match(html, /overflow-x:auto/, 'the lane row scrolls horizontally like the reference');
   assert.match(html, /min-width:318px/, 'in-flight lanes keep the reference minimum width');
   assert.ok(!html.includes('display:none'), 'no lane or action is hidden at any width');
+});
+
+test('a board taller than the viewport exposes vertical scrolling without removing horizontal lane scrolling', () => {
+  // One lane with 40 cards: content far taller than any viewport height.
+  const tall = makeCards(40, 'active');
+  const html = render(snapshotOf({ stages: makeProjection({ active: tall }).stages }));
+  for (const card of tall) {
+    assert.ok(html.includes(card.id), `${card.id} renders — no ticket is dropped from the markup`);
+  }
+  // renderToStaticMarkup runs no effects, but the shell's page container is
+  // present in the pre-fetch markup carrying its full layout style.
+  const shell = renderToStaticMarkup(React.createElement(Shell));
+  const page = shell.match(/<main style="([^"]*)"/)?.[1] ?? '';
+  assert.match(page, /height:100vh/, 'the page container is viewport-height');
+  assert.match(page, /overflow-y:auto/, 'content past the viewport is vertically reachable');
+  assert.doesNotMatch(page, /overflow(-x|-y)?:hidden/, 'the page container never clips overflow');
+  assert.match(html, /overflow-x:auto/, 'the lane row keeps its horizontal lane scrolling');
 });
 
 // ---------------------------------------------------------------------------

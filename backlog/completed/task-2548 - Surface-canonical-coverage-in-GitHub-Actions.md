@@ -1,10 +1,11 @@
 ---
 id: TASK-2548
 title: Surface canonical coverage in GitHub Actions
-status: backlog
-assignee: []
+status: done
+assignee: [codex]
 created_date: '2026-09-21 13:11'
-labels: []
+labels:
+  - ai_sdlc
 dependencies: []
 ordinal: 88008
 ---

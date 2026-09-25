@@ -121,7 +121,9 @@ function parsePackReport(stdout: string): Array<{ files?: Array<{ path: string }
 }
 
 function packageFiles(rootDir: string): string[] {
-  const result = spawnSync('npm', ['pack', '--dry-run', '--json'], {
+  const args = ['pack', '--dry-run', '--json'];
+  if (process.env.PARALLIX_PREBUILT_PACK === '1') { args.push('--ignore-scripts'); }
+  const result = spawnSync('npm', args, {
     cwd: rootDir,
     encoding: 'utf8',
     stdio: ['ignore', 'pipe', 'pipe'],

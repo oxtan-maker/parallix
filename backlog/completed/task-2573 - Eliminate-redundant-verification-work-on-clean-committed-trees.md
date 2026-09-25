@@ -1,10 +1,10 @@
 ---
 id: TASK-2573
 title: Eliminate redundant verification work on clean committed trees
-status: backlog
-assignee: []
+status: done
+assignee: [codex]
 created_date: '2026-09-25 05:21'
-labels: []
+labels: [ai_sdlc]
 dependencies: []
 ordinal: 106008
 ---
@@ -14,7 +14,9 @@ ordinal: 106008
 <!-- SECTION:DESCRIPTION:BEGIN -->
 ## Goal
 
-Reduce CPU consumed by redundant verification throughout the Parallix lifecycle without weakening verification guarantees, without allowing dirty-worktree evidence reuse, and without leaking Parallix's own Node/npm development conventions into the generic Parallix product.
+Stop repeating verification of the same clean committed inputs. If an exact verification command has already passed for the same commit, tree, tracked inputs, toolchain, and relevant gate context, reuse that passing proof. If any of those inputs differ, or the proof cannot be trusted, execute the command again. A dirty worktree never qualifies.
+
+Separately, build the canonical bundle once per Parallix test or pre-integration pipeline, while keeping required checks and artifact-producing builds. These two optimisations reduce repeated CPU work without putting Parallix's Node/npm development conventions into the generic product.
 
 The change has two deliberately separate layers:
 
@@ -39,7 +41,9 @@ Current behaviour contains several avoidable multipliers:
 
 * `test/run-default-tests.ts` performs `npm run build` before every suite, including a targeted invocation such as `npm test -- test/foo.test.ts`.
 * `npm run test:ci` explicitly builds and then invokes test commands whose runner builds again, resulting in repeated canonical bundle builds.
+* `test:ci` also reaches `npm pack` through the package-content audit and CI-safe package integration tests; `prepack` can trigger further canonical builds even after the test runner is fixed.
 * Parallix's own pre-integration configuration explicitly runs `npm run build` and then `npm run test:integration`, whose runner currently builds again.
+* the standalone `verify-local.sh integrate` path has its own build and integration commands in `config/integration-pipelines.json` and must consume the same explicit build;
 * the execute-agent prompt requires all mission-declared gates to pass even though handoff authoritatively executes those gates again;
 * handoff repository verification creates a clean-tree proof identity, executes the verification regardless of whether an identical proof already exists, then stores the proof;
 * mission-declared handoff gates already check an identical proof before executing, demonstrating the desired fail-closed behaviour;
@@ -67,6 +71,7 @@ A reusable passing proof MUST remain bound to all identity dimensions already re
 * exact Git tree;
 * tracked-input fingerprint;
 * relevant toolchain identity;
+* relevant gate execution context, including the phase and mission values supplied to repository gates;
 * successful exit status.
 
 A proof MUST NOT be created or reused when `git status --porcelain` indicates a dirty checkout.
@@ -78,6 +83,8 @@ A changed tree invalidates reuse.
 A changed verification command invalidates reuse.
 
 A changed relevant toolchain invalidates reuse.
+
+The same shell command can behave differently under different phase, mission, checkout, or other material environment inputs. Repository phase-gate proofs MUST distinguish those contexts; when the required external or untracked inputs cannot be represented reliably, leave that gate non-reusable.
 
 Missing, unreadable, malformed, stale, mismatched, or otherwise unverifiable proof data MUST cause actual execution, never a synthetic pass.
 
@@ -121,6 +128,8 @@ The aggregate must continue to provide its current intended coverage:
 
 Unit and integration test runners invoked after that build must consume the already-built state rather than triggering additional canonical builds.
 
+Count builds across the whole `test:ci` process tree, including `npm pack` and its `prepack` lifecycle hook in the package-content audit and CI-safe package tests. The aggregate needs a prebuilt packaging path; standalone packaging and release validation must still exercise the required build and `prepack` behaviour through an explicit path.
+
 Do not remove `test:bundle` or equivalent verification merely because the build count is reduced.
 
 Do not weaken release/package validation.
@@ -132,6 +141,8 @@ The Parallix repository's own `workflow.config.json` currently has an explicit p
 Keep an explicit pre-integration build gate.
 
 Change the self-development integration-suite command/path so it consumes that already-completed build rather than performing another canonical build.
+
+Apply the same single-build ownership to the standalone `verify-local.sh integrate` path driven by `config/integration-pipelines.json`.
 
 The intended self-development sequence remains conceptually:
 
@@ -183,6 +194,8 @@ Change the generic execute-stage instructions so ownership is explicit:
 
 Preserve the rule that a mission cannot successfully hand off until its authoritative gates actually pass.
 
+When a mission-declared gate executes, capture its proof identity before the command and persist a reusable pass only if that identity still matches afterward. An exit code of zero must not certify a clean tree that appeared while the gate was running.
+
 Do not make agent memory, checkpoint prose, or "I already ran this" statements an authorization mechanism for lifecycle gate reuse.
 
 ### G. Add opt-in clean-tree proof reuse to generic repository phase gates
@@ -225,7 +238,7 @@ Document that `clean-tree` is suitable only for deterministic verification comma
 
 ### H. Apply repository-gate reuse conservatively to Parallix self-development
 
-After the generic opt-in exists, review Parallix's own configured lifecycle gates individually.
+Parallix is a general development tool. Its lifecycle must use each repository's gate configuration without assuming npm, Parallix's test tiers, or which commands are safe to skip. After the generic opt-in exists, review this repository's configured gates individually.
 
 Opt in only commands that are demonstrably deterministic, side-effect-free verification where an exact clean-tree pass is meaningful.
 
@@ -268,11 +281,15 @@ The product capability and the self-hosting policy are separate decisions.
 
 4. A successful `npm run test:ci` performs the canonical build exactly once while retaining typecheck, unit, CI-safe integration, bundle-smoke, and package-content coverage.
 
+   The count includes nested `npm pack` / `prepack` calls from the package-content audit and CI-safe integration tests, not just top-level package scripts.
+
 5. A standalone Parallix integration-test command that requires the canonical build remains usable and performs no more than one explicit build.
 
 6. Parallix's configured pre-integration sequence performs one canonical build, and the following integration test step does not silently perform a second build.
 
-7. Generic Parallix product code gains no knowledge of npm, `package.json`, `test/run-default-tests.ts`, Parallix-specific test tiers, or this repository's build command as a consequence of Criteria 1–6.
+   The standalone `verify-local.sh integrate` path also consumes its explicit build without a second canonical build.
+
+7. Parallix's generic lifecycle does not hard-code this repository's npm scripts, test tiers, or gate-reuse choices. Those choices live in this repository's configuration and scripts.
 
 8. Handoff repository verification does not invoke its configured verification process when an exact valid passing proof already exists for the current clean HEAD/tree, exact command, tracked inputs, and toolchain.
 
@@ -288,6 +305,8 @@ The product capability and the self-hosting policy are separate decisions.
 
 14. Mission-declared gates retain their existing clean-tree proof reuse behaviour and are not weakened.
 
+    A gate that executes must not persist proof for inputs that changed during its run.
+
 15. Execute-stage instructions no longer require an agent to run every final mission-declared gate before handing control back to Parallix; they explicitly state that handoff owns authoritative mission-gate execution.
 
 16. Execute-stage instructions still require the agent to perform targeted testing/checking appropriate to the code it changes.
@@ -295,6 +314,8 @@ The product capability and the self-hosting policy are separate decisions.
 17. Repository lifecycle gates retain today's execute-every-time behaviour when no reuse policy is configured.
 
 18. Repository lifecycle gates explicitly configured for clean-tree reuse skip their shell process only when an exact valid passing proof exists.
+
+    A proof from another phase, mission, or material execution context is not an exact match even when the command and HEAD match.
 
 19. Invalid repository-gate reuse policy values are rejected by configuration validation rather than ignored.
 
@@ -365,24 +386,9 @@ The product capability and the self-hosting policy are separate decisions.
   * Run targeted regression tests followed by the repository's normal final verification.
   * Verify via instrumentation/test assertions that `test:ci` and Parallix pre-integration do not regress to redundant canonical builds.
 
-### Checkpoint Documentation Requirements
+### Checkpoint evidence
 
-Every checkpoint document (CP-N.md) MUST include:
-
-* A summary of work done.
-* A `## Goal Check` section.
-* A 3-column pipe-delimited markdown table with columns: Criterion | Evidence | Status.
-* At least one evidence row per applicable criterion using durable references such as:
-
-  1. exact test names;
-  2. test file paths;
-  3. recognized repository commands;
-  4. ADR references where architectural behaviour is relevant.
-* For proof-reuse criteria, evidence MUST identify tests that demonstrate both the reuse path and the fail-closed execution path.
-* For build-count criteria, evidence MUST demonstrate the number of canonical build invocations mechanically; do not use "the output looked like one build" as the sole evidence.
-* For generic-product-boundary criteria, identify tests/source boundaries proving no npm/Parallix-self-development assumption entered generic lifecycle behaviour.
-* Raw `stat`, `ls`, timestamps, or generic statements such as "tests pass" are insufficient by themselves.
-* A non-generic `Next action:` line at the bottom.
+Record checkpoint evidence through `px checkpoint record` as required by the execute-stage contract. For proof reuse, cite checks of both reuse and fail-closed execution. For build counts, mechanically count canonical build invocations across child processes. The final recorded checkpoint must cover every success criterion with durable test or command references.
 
 ## Gates
 
@@ -420,7 +426,7 @@ Stop and surface the issue rather than guessing if:
 - [ ] #1 Verification gate ran and passed on the final tree with captured proof rather than an unverified claim
 - [ ] #2 Lint and static analysis report clean on every changed file
 - [ ] #3 No focused or unannotated skipped tests were introduced (no .only and no bare .skip)
-- [ ] #4 Final checkpoint Goal Check table cites real evidence using file:line references and test names
+- [ ] #4 Final recorded checkpoint covers every success criterion with durable test or command evidence
 - [ ] #5 Docs updated to reflect any workflow or user-facing behavior change
 - [ ] #6 Bug-labeled missions include a red-to-green reproduction test that fails before the fix and passes after
 <!-- DOD:END -->

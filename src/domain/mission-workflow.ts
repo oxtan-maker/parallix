@@ -22,6 +22,7 @@ import {
 export type MissionCommand =
   | { readonly type: 'refine' }
   | { readonly type: 'activate'; readonly agent: AgentFamily }
+  | { readonly type: 'rebound-to-active'; readonly agent: AgentFamily }
   | {
     readonly type: 'submit-for-review';
     readonly gatesPassed: boolean;
@@ -207,6 +208,9 @@ export function decideMission(mission: Mission, command: MissionCommand): Missio
   case 'activate':
     requireStatus(mission, ['refined', 'active'], command);
     if (mission.brief) { requireDraftedContract(mission, command); }
+    return { ...mission, status: 'active', assignee: command.agent };
+  case 'rebound-to-active':
+    requireStatus(mission, ['integration'], command);
     return { ...mission, status: 'active', assignee: command.agent };
   case 'submit-for-review':
     // A handoff that relaunches (gatekeeper pushback, crashed agent, retried

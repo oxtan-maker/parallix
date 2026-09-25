@@ -246,7 +246,6 @@ describe('TASK-2347.02 full lifecycle lane history', () => {
           { from: 'active', to: 'review', trigger: 'submit-for-review', at: '2026-08-08T02:00:00.000Z' },
           { from: 'review', to: 'integration', trigger: 'approve', at: '2026-08-08T03:00:00.000Z' },
           { from: 'integration', to: 'done', trigger: 'integrate', at: '2026-08-08T04:00:00.000Z' },
-          { from: 'done', to: 'done', trigger: 'close', at: '2026-08-08T05:00:00.000Z' },
         ],
       );
 
@@ -262,8 +261,8 @@ describe('TASK-2347.02 full lifecycle lane history', () => {
       }
       assert.equal(lane, 'done');
 
-      // Closure is durable on the aggregate too, so the truncated final dwell
-      // the mission set out to fix is now bounded by a recorded event.
+      // Closure records the completion time on the aggregate without inventing
+      // a done -> done lane move.
       const reloaded = await store.load(MISSION);
       assert.equal(reloaded.kind, 'found');
       assert.equal((reloaded as { mission: { closedAt: string | null } }).mission.closedAt, '2026-08-08T05:00:00.000Z');

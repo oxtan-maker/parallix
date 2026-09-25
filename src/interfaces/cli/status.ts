@@ -37,6 +37,7 @@ export function statusJson(result: StatusResult): string {
     slug: result.slug,
     title: md?.title ?? null,
     branch: result.branch,
+    missionStatus: md?.missionStatus ?? md?.backlogStatus ?? null,
     backlogStatus: md?.backlogStatus ?? null,
     assignee: md?.assignee ?? null,
     externalTaskRef: md?.externalTaskRef ?? null,
@@ -124,12 +125,12 @@ function logBriefAndGates(missionData: StatusMissionData, log: (_msg: string) =>
 
 function logMissionData(missionData: StatusMissionData | null, log: (_msg: string) => void): void {
   if (!missionData) {
-    log('Backlog status: unknown (projection unavailable)');
+    log('Mission status: unknown (projection unavailable)');
     log('Last checkpoint: none');
     return;
   }
   if (missionData.title) { log(`Title: ${missionData.title}`); }
-  log(`Backlog status: ${missionData.backlogStatus}`);
+  log(`Mission status: ${missionData.missionStatus ?? missionData.backlogStatus}`);
   log(`Assignee: ${missionData.assignee ?? 'none'}`);
   if (missionData.externalTaskRef) {
     const ref = missionData.externalTaskRef;

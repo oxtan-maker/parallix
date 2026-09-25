@@ -111,16 +111,18 @@ test('the real-agent and lifecycle suites stay out of the unit and integration l
 
 test('the verification tiers have stable npm commands', () => {
   const pkg = JSON.parse(fs.readFileSync(path.join(executionRoot, 'package.json'), 'utf8'));
-  assert.equal(pkg.scripts['test:integration:ci'], 'FORCE_COLOR=0 tsx test/run-default-tests.ts --integration-ci');
+  assert.equal(pkg.scripts['test:integration:ci'], 'npm run build && npm run test:integration:ci:prebuilt');
+  assert.equal(pkg.scripts['test:integration:ci:prebuilt'], 'PARALLIX_PREBUILT_PACK=1 FORCE_COLOR=0 tsx test/run-default-tests.ts --integration-ci');
   assert.equal(pkg.scripts['test:integration:local'], 'FORCE_COLOR=0 tsx test/run-default-tests.ts --integration-local');
   assert.equal(pkg.scripts['test:agent-e2e'], 'node --import tsx test/e2e-real-agent-smoke.test.ts');
   assert.equal(pkg.scripts['test:lifecycle-e2e'], 'node --import tsx test/e2e-mission-lifecycle.test.ts');
   // The GitHub-safe aggregate covers build, typecheck, hermetic unit tests, the
   // deterministic integration subset, and portable package/bundle validation.
   const ciAggregate = String(pkg.scripts['test:ci']);
-  for (const step of ['npm run typecheck', 'npm run build', 'npm test', 'npm run test:integration:ci', 'npm run test:bundle', 'npm run test:package-content']) {
+  for (const step of ['npm run typecheck', 'npm run build', 'npm test', 'npm run test:integration:ci:prebuilt', 'npm run test:bundle', 'npm run test:package-content:prebuilt']) {
     assert.ok(ciAggregate.includes(step), `test:ci must run ${step}`);
   }
   // The local integration gate keeps running the whole integration layer.
-  assert.equal(pkg.scripts['test:integration'], 'FORCE_COLOR=0 tsx test/run-default-tests.ts --integration');
+  assert.equal(pkg.scripts['test:integration'], 'npm run build && npm run test:integration:prebuilt');
+  assert.equal(pkg.scripts['test:integration:prebuilt'], 'PARALLIX_PREBUILT_PACK=1 FORCE_COLOR=0 tsx test/run-default-tests.ts --integration');
 });
