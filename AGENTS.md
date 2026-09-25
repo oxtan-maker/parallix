@@ -1,51 +1,21 @@
+# Repository instructions
+
 ## graphify
 
-This project has a knowledge graph at `$(pwd)/graphify-out/` with god nodes, community structure, and cross-file relationships. All graphify commands below use `$(pwd)/graphify-out/graph.json` to anchor to the active worktree and avoid resolving to a sibling worktree's graph.
-
-When the user types `/graphify`, invoke the `skill` tool with `skill: "graphify"` before doing anything else.
-
-Rules:
-- For codebase questions, first run `graphify query "<question>" --graph "$(pwd)/graphify-out/graph.json"` when `$(pwd)/graphify-out/graph.json` exists. Use `graphify path "<A>" "<B>" --graph "$(pwd)/graphify-out/graph.json"` for relationships and `graphify explain "<concept>" --graph "$(pwd)/graphify-out/graph.json"` for focused concepts. These return a scoped subgraph, usually much smaller than GRAPH_REPORT.md or raw grep output.
-- When `$(pwd)/graphify-out/graph.json` is absent, do not run graphify query/path/explain. Instead signal that the graph has not been built yet (e.g. "graphify-out/graph.json not found in this worktree — run `/graphify .` to build it first") and fall back to reading source files directly.
-- Dirty graphify-out/ files are expected after hooks or incremental updates; dirty graph files are not a reason to skip graphify. Only skip graphify if the task is about stale or incorrect graph output, or the user explicitly says not to use it.
-- If `$(pwd)/graphify-out/wiki/index.md` exists, use it for broad navigation instead of raw source browsing.
-- Read `$(pwd)/graphify-out/GRAPH_REPORT.md` only for broad architecture review or when query/path/explain do not surface enough context.
-- After modifying code, run `graphify update .` to keep the graph current (AST-only, no API cost).
-
-Before editing any `.md` file in the repo root or `docs/` directory, consult `docs/doc-standards.md` for the full standard.
+If `graphify-out/graph.json` exists, start codebase questions with `graphify query "<question>" --graph "$(pwd)/graphify-out/graph.json"`. Use `graphify path` for relationships and `graphify explain` for a focused concept, with the same `--graph` argument. Use `graphify-out/wiki/index.md` for broad navigation when present. Read `GRAPH_REPORT.md` only for architecture review or when a query is insufficient. If the graph is absent, say to run `/graphify .` to build it, then read source directly. Dirty graph output is usable. After code edits, run `graphify update .`.
 
 ## Documentation
 
-Authored documentation has one job: explain durable user-facing concepts,
-architectural invariants, supported behavior, limitations, and rationale. Do
-not reproduce volatile implementation facts such as source paths, line-number
-evidence, test inventories, or copied command/configuration inventories.
-Executable facts remain owned by commands, schemas, configuration, source, and
-tests. Checkpoint documents may cite exact evidence for a completed mission;
-that evidence must not become live documentation.
+Read `docs/doc-standards.md` before editing root or `docs/` Markdown. Update live documentation for changed user-facing behavior, constraints, or rationale; internal refactors usually need no doc change. Keep implementation inventories and test evidence out of live docs. After editing live docs, run `./scripts/verify-local.sh docs`.
 
-An internal refactor with unchanged behavior and invariants normally has no
-documentation impact. Update authored documentation when user-visible meaning,
-supported behavior, constraints, or rationale changes. Run
-`./scripts/verify-local.sh docs` after editing live authored documentation.
+## Git
 
-## Local-only development
+Push mission branches only to `review` (Forgejo), never to `origin` (GitHub). Only `main` may be pushed to `origin`.
 
-Mission branches must never be pushed to the `origin` (GitHub) remote. Only the `main` branch may be pushed to `origin`. The `review` (Forgejo) remote is the sole push target for code review on mission branches. A `pre-push` hook (`.git/hooks/pre-push`) provides local enforcement — any attempt to `git push origin <non-main-branch>` will be rejected on machines where the hook is installed. The hook is local-only metadata (not tracked in git), so instruction-based enforcement via this AGENTS.md section is the team-wide mechanism for all clones.
+## Verification
 
-## Integration Gates
-
-Static-analysis (`./scripts/verify-local.sh static-analysis`: ESLint + tsc --checkJs + test-hygiene) is a required integration gate for any mission that modifies code files.
-
-This repo routes verification through `./scripts/verify-local.sh {{area}}`. Earlier phases use the fast general verifier (`all`), while `px integrate` resolves the stricter pre-merge gate plan from the repository-configured `adapters.gates.preIntegration` array in `workflow.config.json` (build, verification, workflow, agent-smoke, integration-suite, mutation). That array is the merge-gate authority: a configured gate that exits non-zero aborts before the squash-merge, and an empty list fails closed because final integration gates are mandatory. `config/integration-pipelines.json` documents the intended pre-merge sequence consumed by the standalone `./scripts/verify-local.sh integrate` script (the `workflow` E2E suite is part of that layer via its `workflow` gate); it is not read by `px integrate`, which owns its gate selection through the workflow schema instead.
-
-## unit tests
-Unit tests must finish within 500 ms when run alone; use `npm test -- --unit-test-headroom` to enforce and diagnose that authoring target. Default `npm test` retains its 1,000 ms per-test hard cap. Unit tests must mock external boundaries and never access real Forgejo; avoid missing mocks that launch expensive CLI commands or agents.
-
-## Verification tiers
-
-Verification runs in four named tiers — `unit`, `integration-ci`, `integration-local`, and `agent-e2e`. ADR 0059 defines their permitted dependencies and states exactly what each tier proves; read it before changing test selection.
-
-Commands: `npm test` (unit), `npm run test:integration:ci` (GitHub-safe integration subset), `npm run test:integration:local` (workstation-dependent integration), `npm run test:integration` (the whole integration layer, unchanged, used by the local gates), `npm run test:agent-e2e` and `npm run test:lifecycle-e2e` (real-agent and lifecycle suites), and `npm run test:ci` (the GitHub-safe aggregate: typecheck, build, unit tests, CI integration subset, bundle smoke, package-content audit).
-
-**Adding an integration test requires an explicit classification decision.** Register the file in `test/lib/test-categories.ts` — either in the CI list, or in the local-only list together with a written reason naming the dependency a clean GitHub-hosted runner lacks. Membership in the GitHub-safe tier is positive: an unclassified boundary test fails `test/test-categories.test.ts` and never enters the CI lane by default.
+- Code changes require `./scripts/verify-local.sh static-analysis`.
+- `px integrate` uses `adapters.gates.preIntegration` in `workflow.config.json` as its mandatory gate plan. `config/integration-pipelines.json` is for the standalone `./scripts/verify-local.sh integrate` script.
+- Unit tests must finish within 500 ms alone; check with `npm test -- --unit-test-headroom`. Mock external boundaries and do not contact real Forgejo. Default `npm test` has a 1,000 ms per-test cap.
+- Read ADR 0059 before changing test selection. Tiers: `unit`, `integration-ci`, `integration-local`, `agent-e2e`.
+- Classify every new integration test in `test/lib/test-categories.ts`. Put it in the CI list, or in the local-only list with the missing GitHub-runner dependency named.

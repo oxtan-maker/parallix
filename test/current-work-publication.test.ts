@@ -204,7 +204,7 @@ test('an automatic family handoff updates the same mission current work and crea
 
   assert.equal(outcome.status, 'completed');
   const running = published(appended).filter((fact) => fact.state === 'running');
-  assert.deepEqual(running.map((fact) => fact.agent), ['claude', 'claude', 'qwen', 'qwen']);
+  assert.deepEqual(running.map((fact) => fact.agent), [null, 'claude', 'qwen', null]);
   assert.equal(new Set(published(appended).map((fact) => fact.missionId)).size, 1);
   assert.ok(
     published(appended).every((fact) => fact.state !== 'blocked'),

@@ -1,13 +1,12 @@
 ---
 id: TASK-2576
 title: Show agent activity only when an agent is actually running
-status: backlog
-assignee: []
+status: done
+assignee: [codex]
 created_date: '2026-09-25 12:07'
 labels:
   - bug
-  - web
-  - workflow
+  - user_value
 dependencies: []
 priority: high
 ordinal: 108008

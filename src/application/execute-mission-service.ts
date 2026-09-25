@@ -85,7 +85,7 @@ export class ExecuteMissionService {
     if (typeof prepared === 'string') {return rejected('validation', prepared);}
 
     this.emit(request, 1, 'launch', 'launching execute agent');
-    await this.publishWork(request, 'execute', 'launching execute agent', request.agent ?? null);
+    await this.publishWork(request, 'execute', 'launching execute agent', null);
     try {
       const plan = await this._ports.agentExecution.prepare({
         slug: request.slug,
@@ -105,7 +105,7 @@ export class ExecuteMissionService {
       }
 
       this.emit(request, 3, 'handoff', 'starting handoff', launch.agent);
-      await this.publishWork(request, 'handoff', 'handing off and reviewing', launch.agent);
+      await this.publishWork(request, 'handoff', 'handing off and reviewing', null);
       const handedOff = await this._ports.handoffReview.runHandoffAndReview({
         slug: request.slug,
         worktree: prepared.worktree,

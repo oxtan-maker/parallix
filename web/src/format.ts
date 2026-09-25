@@ -75,9 +75,11 @@ export function coordinatorText(card: WebMissionCard): string {
   return `recovery evidence: coordinator ${evidence.state}`;
 }
 
-/** A card's fan follows the shared current-work in-progress definition. */
+/** A live coordinator alone can be running gates or handoff work. */
 export function isSpinning(card: WebMissionCard): boolean {
-  return card.activity.work.kind === 'working' && card.activity.work.certainty !== 'stale';
+  const work = card.activity.work;
+  return card.activity.coordinator.state === 'live'
+    && work.kind === 'working' && work.certainty !== 'stale' && work.agent !== null;
 }
 
 /**

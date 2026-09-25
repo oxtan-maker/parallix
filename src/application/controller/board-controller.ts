@@ -218,7 +218,7 @@ export class BoardCommandController implements BoardCommandDispatcher {
       operationId: request.operationId,
       phase: 'handoff',
       summary: `px review ${request.missionId} --start`,
-      agent: request.agent,
+      agent: null,
     });
     if (publication) { await bestEffort(() => this.currentWork.running(publication)); }
     try {

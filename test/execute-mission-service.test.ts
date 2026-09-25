@@ -71,7 +71,13 @@ function request(overrides: Record<string, unknown> = {}) {
 test('execute mission use case sequences workspace, agent, lifecycle, telemetry, then handoff', async () => {
   const { ports, calls } = strictPorts();
   const events: Array<{ sequence: number; phase: string }> = [];
-  const outcome = await new ExecuteMissionService(ports, (event) => events.push(event))
+  const work: Array<{ phase: string; agent: string | null }> = [];
+  const currentWork = {
+    async running(publication: { phase: string; agent?: string | null }) { work.push({ phase: publication.phase, agent: publication.agent ?? null }); },
+    async ended() {},
+    async blocked() {},
+  };
+  const outcome = await new ExecuteMissionService(ports, (event) => events.push(event), currentWork)
     .execute(request());
   assert.equal(outcome.status, 'completed');
   assert.deepEqual(calls, [
@@ -79,6 +85,9 @@ test('execute mission use case sequences workspace, agent, lifecycle, telemetry,
     'safety', 'status', 'load', 'synchronize', 'telemetry:codex', 'handoff:codex',
   ]);
   assert.deepEqual(events.map((event) => event.sequence), [1, 2, 3]);
+  assert.deepEqual(work.filter((entry) => entry.phase === 'handoff'), [
+    { phase: 'handoff', agent: null },
+  ]);
   assert.equal(outcome.durableEvidence.length, 2);
 });
 

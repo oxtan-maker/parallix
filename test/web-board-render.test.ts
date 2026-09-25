@@ -351,7 +351,7 @@ test('the audited reference treatment omits non-reference source and attribution
 });
 
 test('activity, coordinator recovery evidence, and reduced motion stay truthful', () => {
-  const live = makeCard({ id: 'task-1111' as MissionCard['id'], currentWork: { operationId: 'op', phase: 'implement', summary: 'live work', agent: agentFamily('codex'), updatedAt: '2026-08-30T00:00:00.000Z', freshness: 'live' } });
+  const live = makeCard({ id: 'task-1111' as MissionCard['id'], currentWork: { operationId: 'op', phase: 'implement', summary: 'live work', agent: agentFamily('codex'), updatedAt: '2026-08-30T00:00:00.000Z', freshness: 'live' }, liveSession: { missionId: 'task-1111' as MissionCard['id'], family: agentFamily('codex') } });
   const uncertain = makeCard({ id: 'task-1112' as MissionCard['id'], currentWork: { ...live.currentWork!, freshness: 'unverified' } });
   const stale = makeCard({ id: 'task-1113' as MissionCard['id'], currentWork: { ...live.currentWork!, freshness: 'stale' }, liveSession: { missionId: 'task-1113' as MissionCard['id'], family: agentFamily('codex') } });
   const blocked = makeCard({ id: 'task-1114' as MissionCard['id'], blockingReason: 'waiting' });
@@ -366,7 +366,7 @@ test('activity, coordinator recovery evidence, and reduced motion stay truthful'
   assert.match(html, /active worker family: codex/, 'the live worker is the header agent, not a stale assignee');
   assert.ok(!html.includes('undefined'), 'a missing assignee never leaks as header text');
   assert.match(html, /class="live-indicator"/, 'live work has the reference-style blinking indicator');
-  assert.equal((html.match(/fan spin/g) ?? []).length, 4, 'authoritative live and unverified work spin their two fans');
+  assert.equal((html.match(/fan spin/g) ?? []).length, 2, 'only fresh agent work with a live session spins its fans');
   const css = browserSources.find((file) => file.name === 'style.css')?.text ?? '';
   assert.match(css, /@media \(prefers-reduced-motion: reduce\)[\s\S]*\.fan\.spin[\s\S]*animation: none/);
   assert.match(css, /\.live-indicator[\s\S]*animation: blink/);

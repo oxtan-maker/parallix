@@ -286,6 +286,10 @@ lapsed countdown, no past block reason.
 
 `N px cmd live` counts missions with a live agent-launching `px` process
 (`detectRunningMissionSessions`, `src/adapters/agents/running-sessions.ts`).
+On the web board, a card blinks and names an active worker only when current
+work names an agent and a live `px` session is observed. Deterministic work,
+including integration gates, remains visible as progress without implying an
+agent is running.
 Live processes come from `ps`, and each one is placed like this:
 
 - the mission is the slug on the command line (`px draft task-2217`) — that
