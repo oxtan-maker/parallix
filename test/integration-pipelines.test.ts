@@ -622,11 +622,21 @@ px.ts`;
 test('repo integration config keeps workflow gate on the targeted mission-lifecycle suite', () => {
   const configPath = path.join(import.meta.dirname, '..', 'config', 'integration-pipelines.json');
   const config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+  const workflow = JSON.parse(fs.readFileSync(path.join(import.meta.dirname, '..', 'workflow.config.json'), 'utf8'));
+  const preIntegration = workflow.adapters.gates.preIntegration;
 
   assert.equal(
     config?.gates?.workflow?.command,
     'node --import tsx test/e2e-mission-lifecycle.test.ts'
   );
+  assert.equal(config?.gates?.coverage?.command,
+    'rm -f coverage/lcov.info && npm run test:coverage -- --threshold 0 --lcov && test -s coverage/lcov.info');
+  assert.equal(config?.gates?.['quality-gate']?.command, 'npm run sonar');
+  assert.ok(config.gates.coverage.order < config.gates['quality-gate'].order);
+  assert.equal(config.gates.codeql, undefined, 'CodeQL remains manual');
+  for (const key of ['build', 'dependency-audit', 'integration-suite', 'coverage', 'quality-gate', 'workflow']) {
+    assert.equal(config.gates[key].command, preIntegration.find(gate => gate.key === key)?.command, `${key} must match the px integrate gate`);
+  }
 });
 
 test('getIntegrationGatePlan excludes lib gate for docs-only mission (task-1362)', () => {
@@ -1320,8 +1330,7 @@ test('repo config declares build gate with correct metadata (task-1419)', () => 
   assert.equal(buildGate.command, 'npm run build', 'build gate command should refresh dist without sibling artifacts');
   assert.equal(buildGate.order, 2, 'build gate order should be 2');
   assert.equal(buildGate.run_last, false, 'build gate run_last should be false');
-  assert.equal(buildGate.enabled, true, 'build gate enabled should be true');
-  assert.deepEqual(buildGate.areas, ['lib', 'workflow'], 'build gate areas should be lib and workflow');
+  assert.equal(buildGate.always, true, 'build runs for every candidate as it does under px integrate');
 });
 
 test('repo config preserves remaining gate orders (task-1419)', () => {
@@ -1332,9 +1341,9 @@ test('repo config preserves remaining gate orders (task-1419)', () => {
   assert.equal(config.gates.workflow.run_last, true, 'workflow gate remains run_last');
   assert.equal(config.gates['custom-agent-smoke'].order, 51, 'custom-agent-smoke gate remains order 51');
   assert.equal(config.gates['custom-agent-smoke'].run_last, true, 'custom-agent-smoke gate remains run_last');
-  assert.deepEqual(config.gates.codeql, {
-    command: 'npm run test:codeql', order: 4, run_last: false, enabled: true, always: true
-  }, 'codeql gate remains the automatic order-4 scan');
+  assert.equal(config.gates.codeql, undefined, 'CodeQL remains a manual scan');
+  assert.equal(config.gates.coverage.order, 4);
+  assert.equal(config.gates['quality-gate'].order, 5);
 });
 
 test('every representative changed-area plan includes the unconditional integration-suite gate (task-2292)', () => {
@@ -1395,7 +1404,7 @@ test('getIntegrationGatePlan with repo config selects build for lib changes (tas
   assert.ok(wfIdx < casIdx, 'workflow (order 50) should come before custom-agent-smoke (order 51)');
 });
 
-test('getIntegrationGatePlan with repo config excludes build for docs-only changes (task-1419)', () => {
+test('getIntegrationGatePlan with repo config runs build and quality gates for docs-only changes', () => {
   const configPath = path.join(import.meta.dirname, '..', 'config', 'integration-pipelines.json');
 
   const plan = getIntegrationGatePlan('task-1419', {
@@ -1406,6 +1415,8 @@ test('getIntegrationGatePlan with repo config excludes build for docs-only chang
   });
 
   const keys = plan.gates.map(g => g.key);
-  assert.ok(!keys.includes('build'), 'build gate should NOT be selected for docs-only changes');
+  assert.ok(keys.includes('build'), 'build is mandatory for every candidate');
+  assert.ok(keys.includes('coverage'), 'coverage is mandatory for every candidate');
+  assert.ok(keys.includes('quality-gate'), 'Sonar is mandatory for every candidate');
   assert.ok(!keys.includes('lib'), 'lib gate should NOT be selected for docs-only changes');
 });

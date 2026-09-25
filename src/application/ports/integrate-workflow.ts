@@ -142,6 +142,7 @@ export interface IntegrateRebasePort {
 export interface IntegrationGateRunResult {
   readonly ok: boolean;
   readonly skipped?: boolean;
+  readonly cancelled?: boolean;
   readonly error?: string | null;
   readonly failedGate?: any;
 }

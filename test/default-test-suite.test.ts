@@ -60,7 +60,7 @@ const expectedIntegrationFiles = [
   'product-config-cp.test.ts', 'product-config-validation.test.ts', 'product-config.test.ts',
   'px-runner.test.ts', 'px-runtime-smoke.test.ts', 'px-shell-init.test.ts',
   'rebase-use-case.test.ts', 'rebase.test.ts', 'rebase_diagnostics.test.ts', 'rebase_hardening.test.ts',
-  'refresh-global-px-script.test.ts', 'resolve-conflict.test.ts',
+  'refresh-global-px-script.test.ts', 'repository-gates.integration.test.ts', 'resolve-conflict.test.ts',
   'review-artifacts.test.ts', 'review-autoderive.test.ts',
   'review-commands-additional.test.ts', 'review-commands-supplemental.test.ts',
   'review-identity-placeholder.test.ts', 'review-identity.test.ts',

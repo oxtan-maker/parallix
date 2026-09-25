@@ -216,20 +216,27 @@ test('a non-gate rebase failure before handoff keeps the rebase message', async 
 
 // --- integration re-review routes --------------------------------------------------------
 
-function gateStep(route: Record<string, unknown>) {
+function gateStep(route: Record<string, unknown>, gateResult: { ok: boolean; error: string; failedGate: { key: string }; cancelled?: boolean } = { ok: false, error: 'failed', failedGate: { key: 'quality-gate' } }) {
   return createIntegrationGateStep({
     gates: {
       resolveIntegrationVerificationWorktree: () => '/wt',
       captureFinalIntegrationTree: () => ({ ok: true, rootDir: '/wt', commit: 'c', tree: 't' }),
       loadPhaseGates: () => [{ key: 'quality-gate', command: 'npm run quality', order: 1 }],
       loadRequirePreIntegration: () => true,
-      runPhaseGates: async () => ({ ok: false, error: 'failed', failedGate: { key: 'quality-gate' } }),
+      runPhaseGates: async () => gateResult,
       routeIntegrationGateFailure: async () => route,
     },
     landing: { createAbort: () => Object.assign(new Error('aborted'), { name: 'IntegrationAbort' }), isAbort: () => true },
     verification: { formatVerificationCommand: () => './scripts/verify-local.sh all' },
   } as unknown as IntegrateWorkflowPorts);
 }
+
+test('operator cancellation aborts integration without sending a gate failure to repair', async () => {
+  const request = gateRequest({}) as unknown as { seams: { routeIntegrationGateFailureFn: () => Promise<never> } };
+  request.seams.routeIntegrationGateFailureFn = async () => { throw new Error('must not route cancellation'); };
+  await assert.rejects(quietly(() => gateStep({}, { ok: false, cancelled: true, error: 'cancelled', failedGate: { key: 'quality-gate' } }).runRequiredLocalGates(request as never)),
+    { name: 'IntegrationAbort' });
+});
 
 function gateRequest(route: Record<string, unknown>, reReviewFn?: () => Promise<boolean>) {
   return {

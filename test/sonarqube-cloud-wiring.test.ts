@@ -11,7 +11,7 @@ import { fileURLToPath } from 'node:url';
 import { runSonar } from '../scripts/sonar-local.js';
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const SHARED_COMMAND = 'npm run test:coverage -- --threshold 0 --lcov && npm run sonar';
+const COVERAGE_COMMAND = 'rm -f coverage/lcov.info && npm run test:coverage -- --threshold 0 --lcov && test -s coverage/lcov.info';
 
 // Capture the scanner invocation instead of running it. SONAR_TOKEN and
 // GITHUB_ACTIONS are set only for the duration of the call, so ordering between
@@ -94,11 +94,11 @@ test('local verification and GitHub invoke the same pinned sonar entrypoint', ()
   const lockfile = JSON.parse(fs.readFileSync(path.join(repoRoot, 'package-lock.json'), 'utf8'));
 
   assert.equal(manifest.scripts.sonar, 'tsx scripts/sonar-local.ts scan');
-  assert.ok(
-    (config.adapters.gates.preIntegration as Array<{ key: string, command: string }>)
-      .some((gate) => gate.key === 'quality-gate' && gate.command === SHARED_COMMAND),
-    'the required pre-integration quality gate runs the shared command',
-  );
+  const gates = config.adapters.gates.preIntegration as Array<{ key: string, command: string, after?: string[] }>;
+  assert.equal(gates.find(gate => gate.key === 'coverage')?.command, COVERAGE_COMMAND);
+  assert.deepEqual(gates.find(gate => gate.key === 'quality-gate'),
+    { key: 'quality-gate', command: 'npm run sonar', order: 8, after: ['coverage'] },
+    'the quality gate waits for fresh coverage and uses the shared scanner entrypoint');
   // GitHub and local share the single pinned sonar entrypoint (ADR 0060). The
   // hosted path no longer runs the combined coverage-plus-scan command (TASK-2547:
   // coverage is a reporting mode of the CI-safe execution); it unions the
@@ -121,7 +121,7 @@ test('sonar analysis configuration consumes LCOV and baselines new code on main'
   // The local pre-integration gate emits LCOV through npm run test:coverage
   // (--lcov), and GitHub unions the per-tier fragments into the same
   // coverage/lcov.info via npm run coverage:merge before the scan.
-  assert.ok(SHARED_COMMAND.includes('--lcov'), 'the local pre-integration gate emits LCOV');
+  assert.ok(COVERAGE_COMMAND.includes('--lcov'), 'the local pre-integration gate emits LCOV');
 });
 
 test('no local SonarQube path survives anywhere in the tracked tree', () => {

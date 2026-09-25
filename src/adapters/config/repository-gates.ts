@@ -11,9 +11,10 @@
 // contract. The selection policy ("which gates run") is owned by the
 // repository configuration, never inferred from the repository layout.
 import path from 'node:path';
-import { spawnSync } from 'node:child_process';
+import { spawn } from 'node:child_process';
+import { GateDashboard, retainGateOutput } from './gate-dashboard.js';
 import * as fmt from '../../application/presentation/cli-format.js';
-import { loadEffectiveConfig } from './product-config.js';
+import { loadEffectiveConfig, loadWorkflowConfig } from './product-config.js';
 
 /** Ordered lifecycle phases that may carry configured gates. */
 export const GATE_PHASES = ['handoff', 'review', 'integration'] as const;
@@ -31,6 +32,7 @@ export interface RepositoryGate {
   key: string;
   command: string;
   order: number;
+  after?: string[];
 }
 
 /** The complete declared gate surface for a repository. */
@@ -53,6 +55,9 @@ const EMPTY_GATES: RepositoryGates = {
  */
 /** @param {'preHandoff'|'preReview'|'preIntegration'} phase */
 export function loadPhaseGates(rootDir: string, phase: 'preHandoff' | 'preReview' | 'preIntegration'): RepositoryGate[] {
+  const declared = loadWorkflowConfig(rootDir || process.cwd());
+  const gateIssues = validateRepositoryGates((declared.config as any)?.adapters);
+  if (gateIssues.length > 0) { throw new Error(gateIssues.join('; ')); }
   const config = loadEffectiveConfig(rootDir || process.cwd());
   const gates = (config.adapters as any)?.gates;
   if (!gates || typeof gates !== 'object' || !Array.isArray(gates[phase])) {
@@ -108,7 +113,10 @@ function normalizeGates(raw: unknown): RepositoryGate[] {
       continue;
     }
     const order = typeof (entry as any).order === 'number' ? (entry as any).order : 0;
-    gates.push({ key, command, order });
+    const after = Array.isArray((entry as any).after) && (entry as any).after.every((dependency: unknown) => typeof dependency === 'string' && dependency)
+      ? (entry as any).after
+      : undefined;
+    gates.push({ key, command, order, ...(after ? { after } : {}) });
   }
   return gates.sort((a, b) => a.order - b.order);
 }
@@ -133,7 +141,7 @@ export function validateRepositoryGates(adapters: unknown): string[] {
   // adapters.gates declares additionalProperties:false in the workflow schema;
   // reject any key it does not recognise so a typo (e.g. requireIntegration)
   // fails validation instead of silently disappearing.
-  const KNOWN_GATE_KEYS = new Set(['requirePreIntegration', 'preHandoff', 'preReview', 'preIntegration']);
+  const KNOWN_GATE_KEYS = new Set(['requirePreIntegration', 'parallel', 'preHandoff', 'preReview', 'preIntegration']);
   for (const key of Object.keys(gates)) {
     if (!KNOWN_GATE_KEYS.has(key)) {
       issues.push(`adapters.gates.${key} is not a recognised key (allowed: ${[...KNOWN_GATE_KEYS].join(', ')})`);
@@ -141,6 +149,19 @@ export function validateRepositoryGates(adapters: unknown): string[] {
   }
   if (gates.requirePreIntegration !== undefined && typeof gates.requirePreIntegration !== 'boolean') {
     issues.push('adapters.gates.requirePreIntegration must be a boolean');
+  }
+  if (gates.parallel !== undefined) {
+    if (!gates.parallel || typeof gates.parallel !== 'object' || Array.isArray(gates.parallel)) {
+      issues.push('adapters.gates.parallel must be an object');
+    } else {
+      for (const [phase, limit] of Object.entries(gates.parallel)) {
+        if (!['preHandoff', 'preReview', 'preIntegration'].includes(phase)) {
+          issues.push(`adapters.gates.parallel.${phase} is not a recognised phase`);
+        } else if (!Number.isInteger(limit) || (limit as number) < 2) {
+          issues.push(`adapters.gates.parallel.${phase} must be an integer of at least 2`);
+        }
+      }
+    }
   }
   const PHASE_LABELS = {
     preHandoff: 'pre-handoff',
@@ -170,7 +191,23 @@ export function validateRepositoryGates(adapters: unknown): string[] {
       if (entry.order !== undefined && typeof entry.order !== 'number') {
         issues.push(`adapters.gates.${phase}[${index}].order must be a number`);
       }
+      if (entry.after !== undefined && (!Array.isArray(entry.after) || entry.after.some((dependency: unknown) => typeof dependency !== 'string' || !dependency))) {
+        issues.push(`adapters.gates.${phase}[${index}].after must be an array of non-empty gate keys`);
+      }
     });
+    const seen = new Set<string>();
+    for (const entry of [...value].sort((a, b) => (a?.order ?? 0) - (b?.order ?? 0))) {
+      if (typeof entry?.key !== 'string') { continue; }
+      if (seen.has(entry.key)) { issues.push(`adapters.gates.${phase} has duplicate gate key "${entry.key}"`); }
+      if (Array.isArray(entry.after)) {
+        for (const dependency of entry.after) {
+          if (typeof dependency === 'string' && !seen.has(dependency)) {
+            issues.push(`adapters.gates.${phase} gate "${entry.key}" must depend on an earlier gate, not "${dependency}"`);
+          }
+        }
+      }
+      seen.add(entry.key);
+    }
   }
   return issues;
 }
@@ -182,6 +219,7 @@ export interface GateRunOutcome {
   exitCode: number | null;
   stdout: string;
   stderr: string;
+  durationMs?: number;
 }
 
 /** Result of running a phase's gates. */
@@ -197,8 +235,12 @@ export interface PhaseGateRunResult {
   skipped: boolean;
   /** True when the run was a plan-only dry run that executed nothing. */
   dryRun: boolean;
+  /** Operator cancelled the active gate process groups. */
+  cancelled?: boolean;
   /** The first failing gate, if any. */
   failedGate: GateRunOutcome | null;
+  /** Complete captured output for every gate that ran. */
+  outcomes?: GateRunOutcome[];
   error: string | null;
 }
 
@@ -206,8 +248,14 @@ export interface PhaseGateRunResult {
 export type GateCommandRunner = (
   _command: string,
   _args: string[],
-  _options: { cwd: string, env: NodeJS.ProcessEnv, stdio: string },
-) => { status: number | null, stdout: string, stderr: string };
+  _options: { cwd: string, env: NodeJS.ProcessEnv, stdio: string, signal?: globalThis.AbortSignal, onOutput?: (_chunk: string, _stream: 'stdout' | 'stderr') => void, forwardOutput?: boolean },
+) => { status: number | null, stdout: string, stderr: string } | Promise<{ status: number | null, stdout: string, stderr: string }>;
+
+/** Read a phase's opt-in concurrency limit; serial is the default. */
+export function loadPhaseGateParallelism(rootDir: string, phase: 'preHandoff' | 'preReview' | 'preIntegration'): number {
+  const parallel = (loadEffectiveConfig(rootDir || process.cwd()).adapters as any)?.gates?.parallel?.[phase];
+  return Number.isInteger(parallel) && parallel >= 2 ? parallel : 1;
+}
 
 /**
  * Build the fixed environment every configured gate receives. The three
@@ -268,6 +316,8 @@ export async function runPhaseGates(
     /** Optional self-development integration agent selection (F4 / TASK-2269). */
     realAgent?: string | null;
     realAgentModel?: string | null;
+    /** Override the configured parallelism (mainly for focused tests). */
+    maxParallel?: number;
   },
 ): Promise<PhaseGateRunResult> {
   const { slug, checkoutPath } = opts;
@@ -283,56 +333,144 @@ export async function runPhaseGates(
   // gate runner and the integration gate use, so configured commands may be
   // arbitrary shell (pipelines, redirects, `./scripts/...`), not just bare
   // executables. No new runner or shell language is introduced. The default
-  // runner streams live output (stdio inherit) so long gates (builds, test
-  // suites) show progress; a large maxBuffer guards any captured path from
-  // spawnSync's 1 MiB default, which otherwise kills the child with ENOBUFS
-  // and reports an unexplained `unknown` exit code (F2).
-  const runner = opts.commandRunner || ((command: string, _args: string[], runOpts: { cwd: string, env: NodeJS.ProcessEnv, stdio: string }) =>
-    spawnSync('bash', ['-c', command], { cwd: runOpts.cwd, env: runOpts.env, stdio: 'inherit', maxBuffer: 256 * 1024 * 1024 }));
+  // runner captures each gate's streams so concurrent output can later be
+  // rendered as distinct sections instead of interleaving byte-by-byte.
+  const runner = opts.commandRunner || runGateCommand;
   const env = buildGateEnv(phase, slug, checkoutPath, process.env, { realAgent: opts.realAgent, realAgentModel: opts.realAgentModel });
+  const maxParallel = opts.maxParallel ?? loadPhaseGateParallelism(checkoutPath, toConfigPhase(phase));
+  const phaseStarted = Date.now();
+  const controller = new globalThis.AbortController();
+  const dashboard = (!opts.log || opts.log === fmt.log.plain) && (!opts.error || opts.error === fmt.log.fail)
+    && process.stdin.isTTY && process.stdout.isTTY && !process.stdin.isRaw
+    ? new GateDashboard(phase, gates.map(gate => gate.key), () => controller.abort()) : null;
+  const compact = maxParallel > 1 && (!opts.log || opts.log === fmt.log.plain);
+  const liveSerial = maxParallel === 1 && !dashboard && !opts.commandRunner && (!opts.log || opts.log === fmt.log.plain);
 
   let failedGate: GateRunOutcome | null = null;
   let errorText: string | null = null;
   let executed = 0;
+  const outcomes: GateRunOutcome[] = [];
 
-  for (const gate of gates) {
-    log(`Repository gate (${phase}): running ${gate.key}...`);
-    log(`  Command: ${gate.command}`);
-    log(`  Checkout: ${path.resolve(checkoutPath)}`);
-    const result = runner(gate.command, [], {
-      cwd: path.resolve(checkoutPath),
-      env,
-      stdio: 'inherit',
-    });
-    executed++;
-    const exitCode = typeof result.status === 'number' ? result.status : null;
-    const stdout = String(result.stdout || '');
-    const stderr = String(result.stderr || '');
-
-    if (exitCode !== 0) {
-      failedGate = { key: gate.key, command: gate.command, exitCode, stdout, stderr };
-      errorText = `Repository gate "${gate.key}" exited with code ${exitCode ?? 'unknown'} for ${phase}.`;
-      error(errorText);
-      // Echo both streams on failure: a test runner that reports failures on
-      // stdout would otherwise produce a gate failure with no diagnostic.
-      if (stderr) { error(stderr); }
-      if (stdout) { error(stdout); }
+  const pending = [...gates];
+  const completed = new Set<string>();
+  const running = new Set<Promise<GateRunOutcome>>();
+  while (pending.length > 0 || running.size > 0) {
+    while (failedGate === null && !controller.signal.aborted && running.size < maxParallel) {
+      const index = pending.findIndex(gate => (gate.after || []).every(dependency => completed.has(dependency)));
+      if (index < 0) { break; }
+      const gate = pending.splice(index, 1)[0];
+      if (dashboard) { dashboard.startGate(gate.key); }
+      else if (!compact) { log(`Repository gate (${phase}): ${gate.key} started (${running.size + 1}/${maxParallel} active).`); }
+      const started = Date.now();
+      const run = Promise.resolve().then(() => runner(gate.command, [], { cwd: path.resolve(checkoutPath), env, stdio: 'pipe', signal: controller.signal,
+        forwardOutput: liveSerial,
+        onOutput: chunk => dashboard?.append(gate.key, chunk) }))
+        .then(result => ({ key: gate.key, command: gate.command, exitCode: typeof result.status === 'number' ? result.status : null, stdout: String(result.stdout || ''), stderr: String(result.stderr || ''), durationMs: Date.now() - started }))
+        .catch(cause => ({ key: gate.key, command: gate.command, exitCode: null, stdout: '', stderr: String(cause), durationMs: Date.now() - started }));
+      running.add(run);
+    }
+    if (running.size === 0 && failedGate === null && !controller.signal.aborted) {
+      const gate = pending[0];
+      errorText = `Repository gate "${gate.key}" has unresolved dependencies for ${phase}.`;
+      failedGate = { key: gate.key, command: gate.command, exitCode: null, stdout: '', stderr: errorText };
+      if (!dashboard && !compact) { error(errorText); }
       break;
     }
-
-    log(`Repository gate (${phase}): ${gate.key} passed.`);
+    if (running.size === 0) { break; }
+    const { run, outcome } = await Promise.race([...running].map(run => run.then(outcome => ({ run, outcome }))));
+    running.delete(run);
+    executed++;
+    outcomes.push(outcome);
+    dashboard?.finishGate(outcome.key, outcome.exitCode, [outcome.stdout, outcome.stderr].filter(Boolean).join('\n'), outcome.durationMs ?? 0, controller.signal.aborted);
+    if (!dashboard && !compact && !liveSerial && (maxParallel === 1 || outcome.exitCode !== 0)) { renderGateOutput(phase, outcome, log); }
+    if (outcome.exitCode !== 0 && failedGate === null) {
+      failedGate = outcome;
+      errorText = `Repository gate "${outcome.key}" exited with code ${outcome.exitCode ?? 'unknown'} for ${phase}.`;
+      if (!dashboard && !compact) { error(errorText); }
+    } else if (outcome.exitCode === 0) {
+      completed.add(outcome.key);
+      if (!dashboard && !compact) { log(`Repository gate (${phase}): ${outcome.key} passed.`); }
+    }
   }
 
+  dashboard?.close();
+  if (dashboard || compact) {
+    log(`Repository gates (${phase}): ${controller.signal.aborted ? 'cancelled' : failedGate ? 'failed' : 'passed'}; ${executed}/${gates.length} completed in ${((Date.now() - phaseStarted) / 1000).toFixed(1)}s.`);
+    for (const gate of gates) {
+      const outcome = outcomes.find(item => item.key === gate.key);
+      log(`  ${outcome ? controller.signal.aborted && outcome.exitCode !== 0 ? '×' : outcome.exitCode === 0 ? '✓' : '✗' : '·'} ${gate.key}${outcome ? ` ${((outcome.durationMs ?? 0) / 1000).toFixed(1)}s` : ' not run'}`);
+    }
+    if (failedGate && !controller.signal.aborted) { renderGateOutput(phase, failedGate, error); }
+  }
+  if (controller.signal.aborted) { errorText = `Repository gates (${phase}) cancelled.`; }
   return {
-    ok: failedGate === null,
+    ok: failedGate === null && !controller.signal.aborted,
     phase,
     gates,
     executed,
     skipped: false,
     dryRun: false,
+    cancelled: controller.signal.aborted,
     failedGate,
+    outcomes,
     error: errorText,
   };
+}
+
+function renderGateOutput(phase: GatePhase, outcome: GateRunOutcome, log: Function): void {
+  log(`\n--- Repository gate (${phase}): ${outcome.key} output (exit ${outcome.exitCode ?? 'unknown'}) ---`);
+  log(`Command: ${outcome.command}`);
+  if (outcome.stdout) { log(outcome.stdout.trimEnd()); }
+  if (outcome.stderr) { log(outcome.stderr.trimEnd()); }
+  log(`--- End repository gate (${phase}): ${outcome.key} ---`);
+}
+
+export function runGateCommand(command: string, _args: string[], options: { cwd: string, env: NodeJS.ProcessEnv, stdio: string, signal?: globalThis.AbortSignal, onOutput?: (_chunk: string, _stream: 'stdout' | 'stderr') => void, forwardOutput?: boolean, terminationGraceMs?: number }): Promise<{ status: number | null, stdout: string, stderr: string }> {
+  return new Promise(resolve => {
+    const child = spawn('bash', ['-c', command], { cwd: options.cwd, env: options.env, stdio: ['ignore', 'pipe', 'pipe'], detached: process.platform !== 'win32' });
+    let stdout = '';
+    let stderr = '';
+    let settled = false;
+    let watchdog: NodeJS.Timeout | undefined;
+    const signalGroup = (signal: NodeJS.Signals) => {
+      try {
+        if (process.platform === 'win32') { child.kill(signal); }
+        else if (child.pid) { process.kill(-child.pid, signal); }
+      } catch { /* The child already exited. */ }
+    };
+    const finish = (status: number | null) => {
+      if (settled) { return; }
+      settled = true;
+      if (watchdog) { clearTimeout(watchdog); }
+      options.signal?.removeEventListener('abort', stop);
+      resolve({ status, stdout, stderr });
+    };
+    const stop = () => {
+      if (settled || watchdog) { return; }
+      signalGroup('SIGTERM');
+      watchdog = setTimeout(() => {
+        signalGroup('SIGKILL');
+        child.stdout?.destroy();
+        child.stderr?.destroy();
+        stderr = retainGateOutput(stderr, '\nGate cancelled after termination grace period.');
+        finish(null);
+      }, options.terminationGraceMs ?? 5000);
+    };
+    options.signal?.addEventListener('abort', stop, { once: true });
+    if (options.signal?.aborted) { stop(); }
+    child.stdout?.on('data', chunk => {
+      stdout = retainGateOutput(stdout, String(chunk));
+      options.onOutput?.(String(chunk), 'stdout');
+      if (options.forwardOutput && !process.stdout.write(chunk)) { child.stdout?.pause(); process.stdout.once('drain', () => child.stdout?.resume()); }
+    });
+    child.stderr?.on('data', chunk => {
+      stderr = retainGateOutput(stderr, String(chunk));
+      options.onOutput?.(String(chunk), 'stderr');
+      if (options.forwardOutput && !process.stderr.write(chunk)) { child.stderr?.pause(); process.stderr.once('drain', () => child.stderr?.resume()); }
+    });
+    child.once('error', cause => { stderr = retainGateOutput(stderr, String(cause)); finish(null); });
+    child.once('close', finish);
+  });
 }
 
 function skippedPhaseGateResult(phase: GatePhase, gates: RepositoryGate[], dryRun: boolean, log: Function): PhaseGateRunResult | null {

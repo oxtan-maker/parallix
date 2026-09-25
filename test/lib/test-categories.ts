@@ -77,6 +77,7 @@ export const INTEGRATION_CI_TESTS: readonly string[] = [
   'rebase.test.ts',
   'rebase_diagnostics.test.ts',
   'rebase_hardening.test.ts',
+  'repository-gates.integration.test.ts',
   'refresh-global-px-script.test.ts',
   'resolve-conflict.test.ts',
   'review-artifacts.test.ts',

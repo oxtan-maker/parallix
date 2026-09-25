@@ -301,11 +301,17 @@ layout requirement — a repository that does not configure gates selects none.
 Each phase is an ordered array of gate objects. A gate object has a required
 non-empty string `key` (used in logs and failure reports), a required
 non-empty string `command` (an exact runnable shell command with no trailing
-prose), and an optional numeric `order` (default `0`; gates run in ascending
-order).
+prose), an optional numeric `order` (default `0`; gates run in ascending
+order), and optional `after` keys for gates that must finish first.
 
-`adapters.gates` is a closed section: `requirePreIntegration`, `preHandoff`,
-`preReview`, and `preIntegration` are its only permitted keys, so a typo such
+Gates run serially unless the repository opts a phase into bounded parallelism
+with `parallel`. Independent gates fill that phase's configured limit; a gate
+with `after` waits for each named producer. Output is emitted as a complete,
+labeled section per gate after it finishes, so concurrent command streams stay
+readable. A failure stops queued gates and blocks the phase.
+
+`adapters.gates` is a closed section: `requirePreIntegration`, `parallel`,
+`preHandoff`, `preReview`, and `preIntegration` are its only permitted keys, so a typo such
 as `requireIntegration` is a configuration error rather than a silently
 ignored setting. `requirePreIntegration` must be a boolean and each phase must
 be an array. The gate object is not closed by the same check: a key beyond
@@ -318,12 +324,13 @@ keys to carry data.
 {
   "adapters": {
     "gates": {
+      "parallel": { "preIntegration": 2 },
       "preHandoff": [
         { "key": "docs-verification", "command": "./scripts/verify-local.sh docs", "order": 0 }
       ],
       "preIntegration": [
         { "key": "build", "command": "npm run build", "order": 1 },
-        { "key": "integration-suite", "command": "npm run test:integration", "order": 2 }
+        { "key": "integration-suite", "command": "npm run test:integration", "order": 2, "after": ["build"] }
       ]
     }
   }

@@ -16,6 +16,7 @@ import { fileURLToPath } from 'node:url';
 import {
   buildGateEnv,
   loadPhaseGates,
+  loadPhaseGateParallelism,
   loadRequirePreIntegration,
   runPhaseGates,
   validateRepositoryGates,
@@ -296,6 +297,25 @@ test('validateRepositoryGates rejects a malformed gates block', () => {
   assert.deepEqual(clean, []);
 });
 
+test('gate dependencies reject missing keys and cycles', () => {
+  for (const gates of [
+    [{ key: 'consumer', command: 'true', order: 1, after: ['missing'] }],
+    [{ key: 'a', command: 'true', order: 1, after: ['b'] }, { key: 'b', command: 'true', order: 2, after: ['a'] }],
+  ]) {
+    assert.match(validateRepositoryGates({ gates: { preIntegration: gates } }).join('; '), /must depend on an earlier gate/);
+  }
+});
+
+test('gate loading rejects an invalid dependency instead of selecting no gates', () => {
+  const checkout = makeCheckout();
+  try {
+    fs.writeFileSync(path.join(checkout, 'workflow.config.json'), JSON.stringify({ adapters: { gates: {
+      preIntegration: [{ key: 'consumer', command: 'true', after: ['missing'] }],
+    } } }));
+    assert.throws(() => loadPhaseGates(checkout, 'preIntegration'), /must depend on an earlier gate/);
+  } finally { fs.rmSync(checkout, { recursive: true, force: true }); }
+});
+
 // F6 / TASK-2457: prove THIS repository explicitly selects its own gates.
 // A later edit that deletes adapters.gates from workflow.config.json must be
 // caught here (compounding F1), so the test reads the repo's own config from
@@ -303,17 +323,26 @@ test('validateRepositoryGates rejects a malformed gates block', () => {
 // so these gates must stay active while it develops.
 // TASK-2519: CodeQL stays a manual scan (`npm run test:codeql`), not an
 // automatic integration gate, so the plan is pinned to exactly these keys.
-// TASK-2525.03: the shared coverage-plus-SonarQube command is a mandatory
-// pre-integration quality gate.
-test('this repository selects build, dependency-audit, verification, integration-suite, quality-gate, workflow, and agent-smoke gates without codeql', () => {
+// Coverage produces the report consumed by the mandatory SonarQube gate.
+test('this repository exposes the full independent gate width and orders Sonar after fresh coverage', () => {
   const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
   const gates = loadPhaseGates(repoRoot, 'preIntegration');
   const keys = gates.map((g) => g.key);
-  assert.deepEqual(keys, ['build', 'dependency-audit', 'verification', 'integration-suite', 'quality-gate', 'workflow', 'agent-smoke']);
-  assert.ok(
-    gates.some((g) => g.command === 'npm run test:coverage -- --threshold 0 --lcov && npm run sonar'),
-    'preIntegration must run the shared coverage-plus-SonarQube command',
-  );
+  assert.deepEqual(keys, ['build', 'dependency-audit', 'verification', 'integration-suite', 'coverage', 'workflow', 'agent-smoke', 'quality-gate']);
+  assert.equal(loadPhaseGateParallelism(repoRoot, 'preIntegration'), 6);
+  assert.deepEqual(gates.map(({ key, command, order }) => ({ key, command, order })), [
+    { key: 'build', command: 'npm run build', order: 1 },
+    { key: 'dependency-audit', command: 'npm audit --audit-level=high', order: 2 },
+    { key: 'verification', command: './scripts/verify-local.sh static-analysis', order: 3 },
+    { key: 'integration-suite', command: 'npm run test:integration', order: 4 },
+    { key: 'coverage', command: 'rm -f coverage/lcov.info && npm run test:coverage -- --threshold 0 --lcov && test -s coverage/lcov.info', order: 5 },
+    { key: 'workflow', command: 'node --import tsx test/e2e-mission-lifecycle.test.ts', order: 6 },
+    { key: 'agent-smoke', command: 'node --import tsx test/e2e-real-agent-smoke.test.ts', order: 7 },
+    { key: 'quality-gate', command: 'npm run sonar', order: 8 },
+  ]);
+  assert.deepEqual(gates.find(g => g.key === 'quality-gate')?.after, ['coverage']);
+  assert.deepEqual(gates.filter(g => ['integration-suite', 'coverage', 'workflow', 'agent-smoke'].includes(g.key)).map(g => g.after),
+    [['build'], ['build'], ['build'], ['build']]);
   assert.ok(!gates.some((g) => g.command === 'npm run test:codeql'), 'preIntegration must not run CodeQL automatically');
   // The runner executes them from this checkout with the phase contract.
   const env = buildGateEnv('integration', 'task-2457', repoRoot);
@@ -323,6 +352,30 @@ test('this repository selects build, dependency-audit, verification, integration
   // BASH_ENV is scrubbed so an inherited startup hook cannot alter a gate.
   const withBash = buildGateEnv('integration', 'task-2457', repoRoot, { BASH_ENV: '/etc/profile.d/hook.sh' } as NodeJS.ProcessEnv);
   assert.equal('BASH_ENV' in withBash ? withBash.BASH_ENV : undefined, undefined);
+});
+
+test('this repository starts every independent check while Sonar waits for coverage', async () => {
+  const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+  const gates = loadPhaseGates(repoRoot, 'preIntegration');
+  const active = new Set<string>();
+  const launched: string[] = [];
+  let peak = 0;
+  const result = await runPhaseGates('integration', {
+    slug: 'task-2558', checkoutPath: repoRoot, gates,
+    maxParallel: loadPhaseGateParallelism(repoRoot, 'preIntegration'),
+    log: () => {}, error: () => {},
+    commandRunner: command => new Promise(resolve => {
+      const key = gates.find(gate => gate.command === command)!.key;
+      launched.push(key);
+      active.add(key);
+      peak = Math.max(peak, active.size);
+      assert.ok(key !== 'quality-gate' || !active.has('coverage'), 'Sonar starts after coverage completes');
+      setTimeout(() => { active.delete(key); resolve({ status: 0, stdout: '', stderr: '' }); }, key === 'build' ? 2 : key === 'coverage' ? 5 : 30);
+    }),
+  });
+  assert.equal(result.ok, true);
+  assert.equal(peak, 6);
+  assert.equal(launched.length, gates.length);
 });
 
 test('buildGateEnv scrubs BASH_ENV and threads real-agent selection', () => {
@@ -354,4 +407,88 @@ test('dry run resolves the integration plan without executing any gate', async (
   } finally {
     fs.rmSync(checkout, { recursive: true, force: true });
   }
+});
+
+test('parallel gates overlap within the configured bound', async () => {
+  const checkout = makeCheckout();
+  try {
+    const windows: Record<string, number[]> = {};
+    const runner = (command: string) => new Promise(resolve => {
+      windows[command] = [Date.now()];
+      setTimeout(() => { windows[command][1] = Date.now(); resolve({ status: 0, stdout: command, stderr: '' }); }, 40);
+    });
+    const started = Date.now();
+    const result = await runPhaseGates('integration', {
+      slug: 'task-2558', checkoutPath: checkout, maxParallel: 2, commandRunner: runner,
+      gates: [{ key: 'a', command: 'a', order: 1 }, { key: 'b', command: 'b', order: 2 }, { key: 'c', command: 'c', order: 3 }],
+    });
+    assert.equal(result.ok, true);
+    assert.ok(windows.a[1] > windows.b[0] && windows.b[1] > windows.a[0], 'the first two gates overlap');
+    assert.ok(Date.now() - started < 105, 'bounded parallelism finishes below the 120ms serial sum');
+  } finally { fs.rmSync(checkout, { recursive: true, force: true }); }
+});
+
+test('a parallel failure reports its key and does not launch queued gates', async () => {
+  const checkout = makeCheckout();
+  try {
+    const launched: string[] = [];
+    const runner = (command: string) => new Promise(resolve => {
+      launched.push(command);
+      setTimeout(() => resolve({ status: command === 'red' ? 7 : 0, stdout: '', stderr: '' }), command === 'red' ? 5 : 20);
+    });
+    const result = await runPhaseGates('integration', {
+      slug: 'task-2558', checkoutPath: checkout, maxParallel: 2, commandRunner: runner,
+      gates: [{ key: 'red', command: 'red', order: 1 }, { key: 'slow', command: 'slow', order: 2 }, { key: 'queued', command: 'queued', order: 3 }],
+    });
+    assert.equal(result.ok, false);
+    assert.equal(result.failedGate?.key, 'red');
+    assert.deepEqual(launched.sort(), ['red', 'slow'], 'a failed gate prevents queued work from starting');
+  } finally { fs.rmSync(checkout, { recursive: true, force: true }); }
+});
+
+test('a parallel gate waits for its declared artifact producer', async () => {
+  const checkout = makeCheckout();
+  try {
+    const events: string[] = [];
+    const runner = (command: string) => new Promise(resolve => {
+      events.push(`start:${command}`);
+      setTimeout(() => { events.push(`end:${command}`); resolve({ status: 0, stdout: '', stderr: '' }); }, command === 'build' ? 15 : 1);
+    });
+    const result = await runPhaseGates('integration', {
+      slug: 'task-2558', checkoutPath: checkout, maxParallel: 2, commandRunner: runner,
+      gates: [{ key: 'build', command: 'build', order: 1 }, { key: 'tests', command: 'tests', order: 2, after: ['build'] }, { key: 'audit', command: 'audit', order: 3 }],
+    });
+    assert.equal(result.ok, true);
+    assert.ok(events.indexOf('end:build') < events.indexOf('start:tests'), 'consumer starts only after its producer completes');
+  } finally { fs.rmSync(checkout, { recursive: true, force: true }); }
+});
+
+test('unresolved dependencies fail closed even for injected gates', async () => {
+  const checkout = makeCheckout();
+  try {
+    const gates = [{ key: 'consumer', command: 'true', order: 1, after: ['missing'] }];
+    const result = await runPhaseGates('integration', { slug: 'task-2558', checkoutPath: checkout, gates, maxParallel: 2, commandRunner: () => { throw new Error('must not run'); } });
+    assert.equal(result.ok, false);
+    assert.equal(result.failedGate?.key, 'consumer');
+    assert.equal(result.executed, 0);
+  } finally { fs.rmSync(checkout, { recursive: true, force: true }); }
+});
+
+test('parallel success output stays isolated while results retain each complete log', async () => {
+  const checkout = makeCheckout();
+  try {
+    const output: string[] = [];
+    const runner = (command: string) => Promise.resolve({ status: 0, stdout: `${command} stdout`, stderr: `${command} stderr` });
+    const result = await runPhaseGates('integration', {
+      slug: 'task-2558', checkoutPath: checkout, maxParallel: 2, commandRunner: runner, log: (line: string) => output.push(line),
+      gates: [{ key: 'alpha', command: 'alpha', order: 1 }, { key: 'beta', command: 'beta', order: 2 }],
+    });
+    const rendered = output.join('\n');
+    for (const key of ['alpha', 'beta']) {
+      assert.match(rendered, new RegExp(`Repository gate \\(integration\\): ${key} started \\([12]\\/2 active\\)`));
+      assert.doesNotMatch(rendered, new RegExp(`${key} stdout`));
+      assert.equal(result.outcomes?.find(outcome => outcome.key === key)?.stdout, `${key} stdout`);
+      assert.equal(result.outcomes?.find(outcome => outcome.key === key)?.stderr, `${key} stderr`);
+    }
+  } finally { fs.rmSync(checkout, { recursive: true, force: true }); }
 });

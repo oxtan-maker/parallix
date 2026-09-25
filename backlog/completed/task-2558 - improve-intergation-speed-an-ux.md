@@ -1,10 +1,10 @@
 ---
 id: TASK-2558
 title: improve intergation speed an ux
-status: backlog
-assignee: []
+status: done
+assignee: [codex]
 created_date: '2026-09-23 06:45'
-labels: []
+labels: [ai_sdlc]
 dependencies: []
 ordinal: 95008
 ---

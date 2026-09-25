@@ -105,6 +105,9 @@ export function createIntegrationGateStep({ gates, landing, verification }: Inte
       fmt.log.pass('All integration gates passed.');
       return `${configured.length} integration gate(s) passed`;
     }
+    if (result.cancelled) {
+      throw abortWith(landing, `Integration gates cancelled for ${slug}. Aborting before merge.`);
+    }
 
     fmt.log.fail(`\nIntegration gates failed for ${slug} (root=${finalTree.rootDir}) — ${result.error}`);
     // TASK-2492: an approved mission whose integration gate goes red is no
