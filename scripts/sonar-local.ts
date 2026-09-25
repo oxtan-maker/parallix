@@ -8,42 +8,86 @@ const SONAR_URL = 'https://sonarcloud.io';
 const SONAR_ORGANIZATION = 'oxtan-maker';
 const SONAR_PROJECT_KEY = 'parallix';
 
-// Query the configured Cloud quality gate for the project and require that it
-// fails on every new issue. Repository policy (TASK-2525) lives in the Cloud
-// project; this asserts the real configuration rather than a local mirror.
-export async function assertNewIssuesFail(options: { token: string, request?: typeof fetch }) {
-  const request = options.request || fetch;
-  const headers = { Authorization: `Basic ${Buffer.from(`${options.token}:`).toString('base64')}` };
-  const project = await request(`${SONAR_URL}/api/qualitygates/get_by_project?organization=${SONAR_ORGANIZATION}&project=${SONAR_PROJECT_KEY}`, { headers });
-  const gate = await project.json() as { qualityGate?: { name?: string } };
-  if (!project.ok || !gate.qualityGate?.name) { throw new Error(`SonarQube Cloud quality gate lookup failed (HTTP ${project.status}).`); }
-  const response = await request(`${SONAR_URL}/api/qualitygates/show?organization=${SONAR_ORGANIZATION}&name=${encodeURIComponent(gate.qualityGate.name)}`, { headers });
-  const result = await response.json() as { conditions?: Array<{ metric?: string, op?: string, error?: string }> };
-  if (!response.ok || !result.conditions?.some(({ metric, op, error }) => metric === 'new_violations' && op === 'GT' && Number(error) <= 0)) {
-    throw new Error('SonarQube quality gate must fail on every new issue (new_violations > 0), including High, Critical, and Blocker issues.');
-  }
+export type SonarContext =
+  | { kind: 'local-branch', branch: string }
+  | { kind: 'github-branch', branch: string }
+  | { kind: 'github-pull-request', pullRequest: string };
+
+// The Sonar branch identity is the Git branch the worktree already owns; no
+// derived project key, no sanitisation. GitHub runs let the scanner's own CI
+// integration derive branch/pull-request metadata from the event, so the local
+// branch resolution is skipped there (a pull_request checkout is a detached
+// merge commit and would otherwise analyse as `HEAD`).
+function resolveSonarBranch(rootDir: string = process.cwd()): string | null {
+  if (process.env.GITHUB_ACTIONS === 'true') return null;
+  const git = spawnSync('git', ['rev-parse', '--abbrev-ref', 'HEAD'], { cwd: rootDir, encoding: 'utf8' });
+  const branch = git.error || git.status !== 0 ? '' : git.stdout.trim();
+  if (!branch || branch === 'HEAD') { throw new Error('Cannot resolve the Git branch for the Sonar analysis; check out a branch before scanning.'); }
+  return branch;
 }
 
-type IssueScope = { branch?: string, pullRequest?: string };
+export function resolveSonarContext(rootDir: string = process.cwd()): SonarContext {
+  if (process.env.GITHUB_ACTIONS !== 'true') {
+    return { kind: 'local-branch', branch: resolveSonarBranch(rootDir)! };
+  }
+  const pullRequest = process.env.GITHUB_REF?.match(/^refs\/pull\/(\d+)\//)?.[1];
+  if (pullRequest) { return { kind: 'github-pull-request', pullRequest }; }
+  if (process.env.GITHUB_REF_NAME) { return { kind: 'github-branch', branch: process.env.GITHUB_REF_NAME }; }
+  throw new Error('SonarQube Cloud analysis context is unavailable on GitHub.');
+}
 
-export async function assertNoOpenHighOrBlockerIssues(options: { token: string, scope?: IssueScope, request?: typeof fetch }) {
-  if (!options.scope) { throw new Error('SonarQube Cloud issue scope is unavailable.'); }
-  // Pull-request analyses are diff-only in SonarQube Cloud; the required
-  // total-code proof is made by the LONG mission branch before review.
-  if (options.scope.pullRequest) { return; }
-  if (!options.scope.branch) { throw new Error('SonarQube Cloud branch scope is unavailable.'); }
+// The repository's configured mission branch namespace (workflow.config.json
+// adapters.missions.branchPrefix). Mission identity is positive: only this
+// prefix is a Parallix mission. "Not GitHub" is not a mission — local main and
+// arbitrary local branches are not missions either.
+export function isMissionBranch(rootDir: string, branch: string): boolean {
+  const config = JSON.parse(fs.readFileSync(path.join(rootDir, 'workflow.config.json'), 'utf8')) as { adapters?: { missions?: { branchPrefix?: string } } };
+  const prefix = config.adapters?.missions?.branchPrefix;
+  if (typeof prefix !== 'string' || prefix.length === 0) { throw new Error('workflow.config.json adapters.missions.branchPrefix is required for the mission Sonar boundary.'); }
+  return branch.startsWith(prefix);
+}
+
+// Repository-owned total-code proof for a mission candidate: the branch must
+// exist on the provider as LONG (total-code metrics require it) and the
+// complete candidate must carry no unresolved HIGH or BLOCKER software-quality
+// impacts. Fail-closed at every step.
+// The provider read is a hosted API: a single transient 5xx or network blip
+// must not fail the gate. Retry with a bounded backoff; once attempts are
+// exhausted, fail closed with the last response or error. 4xx is a final
+// provider answer and is never retried.
+const SONAR_READ_ATTEMPTS = 3;
+const SONAR_READ_BACKOFF_MS = 5000;
+
+async function sonarGet(request: typeof fetch, url: string, headers: Record<string, string>, backoffMs: number): Promise<Response> {
+  let lastError: unknown;
+  for (let attempt = 1; attempt <= SONAR_READ_ATTEMPTS; attempt += 1) {
+    try {
+      const response = await request(url, { headers });
+      if (response.ok || response.status < 500 || attempt === SONAR_READ_ATTEMPTS) { return response; }
+    } catch (error) {
+      lastError = error; // network-level failure: retry while attempts remain
+    }
+    if (attempt < SONAR_READ_ATTEMPTS) { await new Promise((resolve) => { setTimeout(resolve, backoffMs * attempt); }); }
+  }
+  throw lastError;
+}
+
+export async function assertNoOpenHighOrBlockerIssues(options: { token: string, branch: string, request?: typeof fetch, backoffMs?: number }) {
   const request = options.request || fetch;
+  const backoffMs = options.backoffMs ?? SONAR_READ_BACKOFF_MS;
   const headers = { Authorization: `Basic ${Buffer.from(`${options.token}:`).toString('base64')}` };
-  const branches = await request(`${SONAR_URL}/api/project_branches/list?project=${SONAR_PROJECT_KEY}`, { headers });
+  const branches = await sonarGet(request, `${SONAR_URL}/api/project_branches/list?project=${SONAR_PROJECT_KEY}`, headers, backoffMs);
+  if (!branches.ok) { throw new Error(`SonarQube Cloud branch lookup failed (HTTP ${branches.status}).`); }
   const branchList = await branches.json() as { branches?: Array<{ name?: string, type?: string }> };
-  const branch = branchList.branches?.find(({ name }) => name === options.scope?.branch);
-  if (!branches.ok || !branch) { throw new Error(`SonarQube Cloud branch lookup failed (HTTP ${branches.status}).`); }
-  if (branch.type !== 'LONG') { throw new Error(`SonarQube Cloud mission branch ${options.scope.branch} must be analysed as LONG before checking total-code HIGH/BLOCKER impacts.`); }
+  const branch = branchList.branches?.find(({ name }) => name === options.branch);
+  if (!branch) { throw new Error(`SonarQube Cloud branch lookup failed (HTTP ${branches.status}).`); }
+  if (branch.type !== 'LONG') { throw new Error(`SonarQube Cloud mission branch ${options.branch} must be analysed as LONG before checking total-code HIGH/BLOCKER impacts.`); }
   const params = new URLSearchParams({ component: SONAR_PROJECT_KEY, metricKeys: 'reliability_issues,security_issues,maintainability_issues' });
-  params.set('branch', options.scope.branch);
-  const response = await request(`${SONAR_URL}/api/measures/component?${params}`, { headers });
+  params.set('branch', options.branch);
+  const response = await sonarGet(request, `${SONAR_URL}/api/measures/component?${params}`, headers, backoffMs);
+  if (!response.ok) { throw new Error(`SonarQube Cloud metrics lookup failed (HTTP ${response.status}).`); }
   const result = await response.json() as { component?: { measures?: Array<{ value?: string }> } };
-  if (!response.ok || !result.component?.measures) { throw new Error(`SonarQube Cloud metrics lookup failed (HTTP ${response.status}).`); }
+  if (!result.component?.measures) { throw new Error(`SonarQube Cloud metrics lookup failed (HTTP ${response.status}).`); }
   const total = result.component.measures.reduce((count, measure) => {
     const impacts = JSON.parse(measure.value || '{}') as Record<string, number>;
     return count + (impacts.HIGH || 0) + (impacts.BLOCKER || 0);
@@ -53,30 +97,19 @@ export async function assertNoOpenHighOrBlockerIssues(options: { token: string, 
   }
 }
 
-// The Sonar branch identity is the Git branch the worktree already owns; no
-// derived project key, no sanitisation. GitHub runs let the scanner's own CI
-// integration derive branch/pull-request metadata from the event, so the local
-// branch resolution is skipped there (a pull_request checkout is a detached
-// merge commit and would otherwise analyse as `HEAD`).
-// Retired from the public API (SC2): the branch lookup stays private and is
-// exercised only through runSonar, so no per-branch project-key resolver is
-// reachable from outside the entrypoint.
-function resolveSonarBranch(rootDir: string = process.cwd()): string | null {
-  if (process.env.GITHUB_ACTIONS === 'true') return null;
-  const git = spawnSync('git', ['rev-parse', '--abbrev-ref', 'HEAD'], { cwd: rootDir, encoding: 'utf8' });
-  const branch = git.error || git.status !== 0 ? '' : git.stdout.trim();
-  if (!branch || branch === 'HEAD') { throw new Error('Cannot resolve the Git branch for the Sonar analysis; check out a branch before scanning.'); }
-  return branch;
-}
-
-export function resolveIssueScope(rootDir: string): IssueScope | undefined {
-  if (process.env.GITHUB_ACTIONS !== 'true') {
-    const branch = resolveSonarBranch(rootDir);
-    return branch ? { branch } : undefined;
-  }
-  const pullRequest = process.env.GITHUB_REF?.match(/^refs\/pull\/(\d+)\//)?.[1];
-  if (pullRequest) { return { pullRequest }; }
-  return process.env.GITHUB_REF_NAME ? { branch: process.env.GITHUB_REF_NAME } : undefined;
+// Post-scan mission assertion, run by the `scan` entrypoint after the shared
+// scanner. The provider new-code gate (sonar.qualitygate.wait=true) is the
+// result authority in every trusted context; this adds the repository-owned
+// total-code HIGH/BLOCKER proof only where it belongs — a local mission
+// candidate, before integration. GitHub publication branches
+// (github-publish/<sha>), pull requests, local main, and other local branches
+// are not missions: they get no branch-type lookup and no total-code metrics
+// call.
+export async function assertMissionTotalCode(options: { token: string, rootDir?: string, request?: typeof fetch, backoffMs?: number }): Promise<void> {
+  const rootDir = options.rootDir || process.cwd();
+  const context = resolveSonarContext(rootDir);
+  if (context.kind !== 'local-branch' || !isMissionBranch(rootDir, context.branch)) return;
+  await assertNoOpenHighOrBlockerIssues({ token: options.token, branch: context.branch, request: options.request, backoffMs: options.backoffMs });
 }
 
 export function runSonar(options: { rootDir?: string, spawn?: typeof spawnSync } = {}) {
@@ -106,7 +139,9 @@ export function runSonar(options: { rootDir?: string, spawn?: typeof spawnSync }
 if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(import.meta.filename)) {
   if (process.argv[2] !== 'scan') { throw new Error('Usage: sonar-local.ts scan'); }
   try {
+    // The provider gate controls the scanner result in every trusted context;
+    // the mission-only total-code proof runs after it, for local missions only.
     runSonar();
-    await assertNoOpenHighOrBlockerIssues({ token: process.env.SONAR_TOKEN!, scope: resolveIssueScope(process.cwd()) });
+    await assertMissionTotalCode({ token: process.env.SONAR_TOKEN!, rootDir: process.cwd() });
   } catch (error) { console.error((error as Error).message); process.exitCode = 1; }
 }

@@ -172,7 +172,9 @@ jobs:
       # from the event, so a pull_request run is analysed as its pull request
       # rather than as the detached merge commit. Only SONAR_TOKEN is required —
       # the Cloud host lives in sonar-project.properties, not in a secret. The
-      # mandatory gate rule (new_violations > 0) is unchanged.
+      # mandatory provider new-code quality gate is unchanged: progressive
+      # HIGH/BLOCKER severity policy plus provider-owned coverage, duplication,
+      # and security-hotspot conditions (ADR 0060).
       # TASK-2547: union the per-tier LCOV fragments (coverage/.lcov-unit.info,
       # coverage/.lcov-integration-ci.info) written by the coverage-aware CI-safe
       # execution into one Sonar-consumable coverage/lcov.info. No second test
@@ -181,7 +183,14 @@ jobs:
         run: npm run coverage:merge
       - name: Run mandatory SonarQube quality gate
         if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository
-        run: npm run sonar > "$GITHUB_WORKSPACE/sonar-quality-gate.log" 2>&1
+        # pipefail is set inline because the step's default bash -e does not
+        # set it: without it, tee would mask a non-zero scanner exit and the
+        # step could pass a failed analysis. The tee keeps the full output in
+        # sonar-quality-gate.log for the job summary step below while the
+        # live output streams to the Actions log for diagnosis (TASK-2566).
+        run: |
+          set -o pipefail
+          npm run sonar 2>&1 | tee "$GITHUB_WORKSPACE/sonar-quality-gate.log"
         env:
           CI: 'true'
           PARALLIX_NO_BUBBLEWRAP: '1'

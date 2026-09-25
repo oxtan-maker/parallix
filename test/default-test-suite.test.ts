@@ -72,6 +72,9 @@ const expectedIntegrationFiles = [
   // TASK-2525.03: creates a temporary Git repository to prove local branch
   // discovery, so it crosses the Git process boundary.
   'task-2525.03-sonar-enforcement.test.ts',
+  // TASK-2566: creates temporary Git repositories for the mission-boundary
+  // repro, so it crosses the git process boundary.
+  'task-2566-sonar-boundary-repro.test.ts',
   'sqlite-mission-store.integration.test.ts', 'sqlite-recovery-cp5.test.ts',
   'stats-backfill.test.ts', 'status.test.ts',
   'task-1048-regression.test.ts',

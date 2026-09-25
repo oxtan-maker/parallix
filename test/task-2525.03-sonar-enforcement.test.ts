@@ -8,7 +8,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -89,7 +89,56 @@ test('task-2525.03: GitHub workflow waits for the quality gate and publishes it 
   // pass and fail outcomes.
   assert.match(workflow, /Publish SonarQube quality gate result/);
   assert.match(workflow, /GITHUB_STEP_SUMMARY/);
-  assert.match(workflow, escaped('npm run sonar > "$GITHUB_WORKSPACE/sonar-quality-gate.log" 2>&1'));
+  // TASK-2566: the scan streams to the Actions log while still writing the
+  // summary log; pipefail keeps a failed scanner exit fail-closed through the
+  // tee pipeline (the old '> log 2>&1' redirect hid the failure from the log).
+  assert.doesNotMatch(workflow, escaped('npm run sonar > "$GITHUB_WORKSPACE/sonar-quality-gate.log" 2>&1'));
+  assert.match(workflow, /set -o pipefail/);
+  assert.match(workflow, escaped('npm run sonar 2>&1 | tee "$GITHUB_WORKSPACE/sonar-quality-gate.log"'));
+});
+
+// Extracts the run: | body of a workflow step for execution.
+function workflowStepRunBody(workflow: string, stepName: string): string {
+  const lines = workflow.split('\n');
+  const start = lines.findIndex((line) => line.includes(`- name: ${stepName}`));
+  assert.ok(start >= 0, `step '${stepName}' is present`);
+  const runStart = lines.findIndex((line, i) => i > start && line.trim() === 'run: |');
+  assert.ok(runStart > start, 'the step uses a run: | block');
+  const body: string[] = [];
+  for (let i = runStart + 1; i < lines.length; i++) {
+    const line = lines[i];
+    if (line.trim() === '' || line.startsWith('          ')) { body.push(line.replace(/^          /, '')); }
+    else { break; }
+  }
+  return body.join('\n');
+}
+
+test('task-2566: the Sonar step pipe preserves a non-zero exit and writes the summary log', () => {
+  const workflow = fs.readFileSync(path.join(repoRoot, '.github/workflows/ci-required.yml'), 'utf8');
+  const run = workflowStepRunBody(workflow, 'Run mandatory SonarQube quality gate');
+
+  assert.match(run, /set -o pipefail/, 'the pipeline must set pipefail');
+  assert.match(run, /npm run sonar 2>&1 \| tee "\$GITHUB_WORKSPACE\/sonar-quality-gate\.log"/, 'the scanner streams through tee into the summary log');
+  assert.doesNotMatch(run, /SONAR_TOKEN/, 'the step body must never echo the token');
+
+  // Execute the exact step body against a stubbed npm: a failing scanner must
+  // fail the step and still write the summary log; a passing one must pass.
+  for (const [status, marker] of [[1, 'QUALITY GATE STATUS: FAILED'], [0, 'QUALITY GATE STATUS: PASSED']] as const) {
+    const workdir = fs.mkdtempSync(path.join(os.tmpdir(), 'task-2566-sonar-step-'));
+    try {
+      fs.mkdirSync(path.join(workdir, 'bin'));
+      fs.writeFileSync(path.join(workdir, 'bin', 'npm'), `#!/bin/sh\necho "${marker}"\nexit ${status}\n`, { mode: 0o755 });
+      const result = spawnSync('bash', ['-c', run], {
+        cwd: workdir,
+        encoding: 'utf8',
+        env: { ...process.env, GITHUB_WORKSPACE: workdir, PATH: `${path.join(workdir, 'bin')}${path.delimiter}${process.env.PATH}` },
+      });
+      assert.equal(result.status, status, `scanner exit ${status} must surface as the step exit through the tee pipeline`);
+      assert.match(fs.readFileSync(path.join(workdir, 'sonar-quality-gate.log'), 'utf8'), new RegExp(marker), 'the streamed output is saved for the job summary');
+    } finally {
+      fs.rmSync(workdir, { recursive: true, force: true });
+    }
+  }
 });
 
 test('task-2525.03: scanner configuration preserves the recorded legacy baseline and rejects new-code regressions', () => {
@@ -115,45 +164,29 @@ test('task-2525.03: scanner configuration preserves the recorded legacy baseline
   assert.doesNotMatch(props, /sonar\.comments|sonar\.issue\.effective|@sonar|@SuppressWarnings/);
 });
 
-test('task-2525.04: shared scanner rejects a quality gate that permits new High-or-worse issues', async () => {
-  const { assertNewIssuesFail } = await import('../scripts/sonar-local.js');
-  const request: typeof fetch = async (url) => new Response(JSON.stringify(String(url).includes('get_by_project')
-    ? { qualityGate: { name: 'Parallix 90% new code' } }
-    : { conditions: [{ metric: 'new_violations', op: 'GT', error: '0' }] }));
-  await assertNewIssuesFail({ token: 'test-token', request });
-
-  await assert.rejects(
-    assertNewIssuesFail({ token: 'test-token', request: async (url) => new Response(JSON.stringify(String(url).includes('get_by_project')
-      ? { qualityGate: { name: 'permissive' } }
-      : { conditions: [] })) }),
-    /must fail on every new issue/,
-  );
-});
-
 test('task-2525.05: shared scanner rejects High-or-Blocker issues in the candidate analysis', async () => {
   const { assertNoOpenHighOrBlockerIssues } = await import('../scripts/sonar-local.js');
   const request: typeof fetch = async (url) => new Response(JSON.stringify(String(url).includes('project_branches/list')
     ? { branches: [{ name: 'mission/task-2525.05', type: 'LONG' }] }
     : { component: { measures: [{ value: '{"HIGH":0,"BLOCKER":0}' }] } }));
-  await assertNoOpenHighOrBlockerIssues({ token: 'test-token', scope: { branch: 'mission/task-2525.05' }, request });
+  await assertNoOpenHighOrBlockerIssues({ token: 'test-token', branch: 'mission/task-2525.05', request });
 
   await assert.rejects(
-    assertNoOpenHighOrBlockerIssues({ token: 'test-token', scope: { branch: 'mission/task-2525.05' }, request: async (url) => new Response(JSON.stringify(String(url).includes('project_branches/list') ? { branches: [{ name: 'mission/task-2525.05', type: 'LONG' }] } : { component: { measures: [{ value: '{"HIGH":1}' }] } })) }),
+    assertNoOpenHighOrBlockerIssues({ token: 'test-token', branch: 'mission/task-2525.05', request: async (url) => new Response(JSON.stringify(String(url).includes('project_branches/list') ? { branches: [{ name: 'mission/task-2525.05', type: 'LONG' }] } : { component: { measures: [{ value: '{"HIGH":1}' }] } })) }),
     /mission analysis has unresolved HIGH\/BLOCKER impacts/,
   );
 });
 
-test('task-2525.05: total-code check rejects a short mission branch and skips pull-request analysis', async () => {
+test('task-2525.05: total-code check rejects a short mission branch', async () => {
   const { assertNoOpenHighOrBlockerIssues } = await import('../scripts/sonar-local.js');
   await assert.rejects(
-    assertNoOpenHighOrBlockerIssues({ token: 'test-token', scope: { branch: 'mission/task-2525.05' }, request: async () => new Response(JSON.stringify({ branches: [{ name: 'mission/task-2525.05', type: 'SHORT' }] })) }),
+    assertNoOpenHighOrBlockerIssues({ token: 'test-token', branch: 'mission/task-2525.05', request: async () => new Response(JSON.stringify({ branches: [{ name: 'mission/task-2525.05', type: 'SHORT' }] })) }),
     /must be analysed as LONG/,
   );
-  await assertNoOpenHighOrBlockerIssues({ token: 'test-token', scope: { pullRequest: '123' }, request: async () => { throw new Error('PR scans must not use total-code branch metrics'); } });
 });
 
-test('task-2525.05: candidate scope identifies local branches and GitHub pull requests', async () => {
-  const { resolveIssueScope } = await import('../scripts/sonar-local.js');
+test('task-2525.05: analysis context identifies local branches, GitHub branches, and pull requests', async () => {
+  const { resolveSonarContext, isMissionBranch } = await import('../scripts/sonar-local.js');
   const saved = Object.fromEntries(['GITHUB_ACTIONS', 'GITHUB_REF', 'GITHUB_REF_NAME'].map((key) => [key, process.env[key]]));
   try {
     delete process.env.GITHUB_ACTIONS;
@@ -165,24 +198,31 @@ test('task-2525.05: candidate scope identifies local branches and GitHub pull re
       execFileSync('git', ['config', 'user.email', 'test@example.com'], { cwd: localRepo });
       execFileSync('git', ['config', 'user.name', 'Test'], { cwd: localRepo });
       execFileSync('git', ['commit', '--allow-empty', '-m', 'initial'], { cwd: localRepo });
-      assert.deepEqual(resolveIssueScope(localRepo), { branch: 'candidate' });
+      assert.deepEqual(resolveSonarContext(localRepo), { kind: 'local-branch', branch: 'candidate' });
     } finally {
       fs.rmSync(localRepo, { recursive: true, force: true });
     }
 
     process.env.GITHUB_ACTIONS = 'true';
     process.env.GITHUB_REF = 'refs/pull/123/merge';
-    assert.deepEqual(resolveIssueScope(repoRoot), { pullRequest: '123' });
+    assert.deepEqual(resolveSonarContext(repoRoot), { kind: 'github-pull-request', pullRequest: '123' });
 
     process.env.GITHUB_REF = 'refs/heads/main';
     process.env.GITHUB_REF_NAME = 'candidate';
-    assert.deepEqual(resolveIssueScope(repoRoot), { branch: 'candidate' });
+    assert.deepEqual(resolveSonarContext(repoRoot), { kind: 'github-branch', branch: 'candidate' });
   } finally {
     for (const [key, value] of Object.entries(saved)) {
       if (value === undefined) delete process.env[key];
       else process.env[key] = value;
     }
   }
+
+  // Mission identity is positive and driven by the configured prefix:
+  // mission/* is a mission; publication refs and other branches are not.
+  assert.equal(isMissionBranch(repoRoot, 'mission/task-2550'), true);
+  assert.equal(isMissionBranch(repoRoot, 'github-publish/4be2630651c7c26e02c1c0f07192926f855b54a0'), false);
+  assert.equal(isMissionBranch(repoRoot, 'main'), false);
+  assert.equal(isMissionBranch(repoRoot, 'experiment/foo'), false);
 });
 
 test('task-2525.03: scanner uses an environment SONAR_TOKEN for trusted CI runs', async () => {

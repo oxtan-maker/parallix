@@ -3,10 +3,10 @@ id: TASK-2566
 title: >-
   Correct SonarQube verification boundaries for local missions and GitHub
   publication
-status: backlog
-assignee: []
+status: done
+assignee: [custom]
 created_date: '2026-09-24 16:56'
-labels: []
+labels: [ai_sdlc, bug]
 dependencies: []
 ordinal: 101008
 ---

@@ -109,10 +109,19 @@ The analysis identity is the Git branch already owned by the repository. Paralli
 
 Mission branches are long-lived Cloud branches. This is required for the
 repository gate to inspect the candidate's total code, rather than only its
-new-code diff. The gate fails closed when a mission analysis is not long-lived,
-when the Cloud quality gate permits a new issue, or when the candidate retains
-a High or Blocker impact. It does not use the current state of `main` as a
-substitute for the candidate's result.
+new-code diff. The gate fails closed when a mission analysis is not long-lived
+or when the candidate retains a High or Blocker impact. It does not use the
+current state of `main` as a substitute for the candidate's result.
+
+Parallix currently uses a progressive quality policy: HIGH and BLOCKER
+impacts are blocking; MEDIUM, LOW, and INFO findings remain visible in the
+provider but are non-blocking. The provider quality gate owns that new-code
+severity policy (maintainability, reliability, and security severity greater
+than or equal to High) together with the provider-owned coverage, duplication,
+and security-hotspot conditions. The repository does not re-implement the
+gate: `sonar.qualitygate.wait=true` makes the provider's gate result the
+scanner result in every trusted context, and the repository-owned total-code
+HIGH/BLOCKER check adds the mission's whole-candidate proof on top of it.
 
 The previous mechanisms for:
 
@@ -156,6 +165,17 @@ ADR 0058's `github-publish/<sha>` workflow analyzes the exact candidate checked 
 
 GitHub does not run Parallix missions and therefore requires no special mission-isolation implementation. It submits the checked-out Git ref using SonarQube Cloud's normal branch/SCM analysis.
 
+The publication ref is not a Parallix mission and must not acquire mission
+lifecycle requirements merely because both flows share the scanner: it is not
+required to be a long-lived Cloud branch, it does not receive the repository's
+total-code HIGH/BLOCKER check, and it does not persist as durable Sonar
+mission state. Its verification is the exact-candidate checkout, the provider
+new-code quality gate, and `sonar.qualitygate.wait=true` — nothing more. That
+keeps the two boundaries distinct: local mission verification is the provider
+gate plus the repository total-code proof against the LONG `mission/*`
+candidate; GitHub publication verification is the provider gate against the
+exact `github-publish/<sha>` candidate.
+
 The GitHub workflow:
 
 1. checks out the exact triggered commit with sufficient history;
@@ -181,7 +201,7 @@ Repository configuration owns analysis scope such as:
 
 The SonarQube Cloud project owns its configured quality profile and quality gate.
 
-Where Parallix relies on a specific gate property — for example a new-code coverage threshold or failure on new issues — that requirement must be documented and verified against the real configured Cloud project.
+Where Parallix relies on a specific gate property — for example the new-code coverage threshold or the progressive HIGH/BLOCKER severity policy — that requirement must be documented and verified against the real configured Cloud project.
 
 Tests that grep YAML, inspect source strings, or mock Sonar APIs may protect wiring but cannot establish that the external quality policy is actually configured.
 

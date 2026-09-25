@@ -127,39 +127,57 @@ test('custom capacity saturation reports at launch while selection remains eligi
 });
 
 test('custom capacity releases after clean completion, launch failure, signal cancellation, and rejected runtime result', async () => {
-  const invocation = { command: 'opencode', args: [], options: {} };
-  const base = {
-    prompt: 'test',
-    agent: 'custom',
-    isAgentBlockedFn: () => false,
-    detectLimitHitFn: () => null,
-    selectAgentFn: () => { throw new Error('No agents available'); },
-    // Stub the launcher availability gate: the real seam runs a synchronous
-    // spawnSync health probe, which times out under heavy integration-suite
-    // load. A probe timeout reroutes before the result promise is awaited,
-    // leaving the rejected promise unhandled (unhandledRejection crash).
-    // Capacity accounting does not depend on launcher availability.
-    assertAgentSupportedFn: () => {}
-  };
-  const run = async resultPromise => {
-    try {
-      await startAgent('draft', {
-        ...base,
-        launchAgentFn: () => ({ invocation, resultPromise })
-      });
-    } catch (_err) {
-      // Failed terminal paths reroute through the deliberately exhausted mock.
-    }
-    assert.equal(await activeCustomCapacityCount(), 0, 'terminal paths must not retain custom capacity');
-    const next = await tryAcquireCustomCapacity();
-    assert.ok(next, 'a released permit must allow exactly one subsequent launch');
-    next.release();
-  };
+  // Hermetic root: a non-repo temp dir makes canonical-root resolution fall
+  // back to the dir itself, so this test never reads the main checkout's
+  // workflow.config.json (keys added on a newer branch must not fail it).
+  const worktree = fs.mkdtempSync(path.join(os.tmpdir(), 'custom-capacity-release-'));
+  fs.writeFileSync(path.join(worktree, 'workflow.config.json'), JSON.stringify({
+    adapters: { agents: { maxConcurrentCustom: 1 } }
+  }), 'utf8');
+  // A configured worktree arms the sandbox gate in prepareLaunch; the stub
+  // launcher never spawns, so opt out to keep hosts without bwrap unblocked.
+  const previousNoBubblewrap = process.env.PARALLIX_NO_BUBBLEWRAP;
+  process.env.PARALLIX_NO_BUBBLEWRAP = '1';
+  try {
+    const invocation = { command: 'opencode', args: [], options: {} };
+    const base = {
+      prompt: 'test',
+      agent: 'custom',
+      worktree,
+      isAgentBlockedFn: () => false,
+      detectLimitHitFn: () => null,
+      selectAgentFn: () => { throw new Error('No agents available'); },
+      // Stub the launcher availability gate: the real seam runs a synchronous
+      // spawnSync health probe, which times out under heavy integration-suite
+      // load. A probe timeout reroutes before the result promise is awaited,
+      // leaving the rejected promise unhandled (unhandledRejection crash).
+      // Capacity accounting does not depend on launcher availability.
+      assertAgentSupportedFn: () => {}
+    };
+    const run = async resultPromise => {
+      try {
+        await startAgent('draft', {
+          ...base,
+          launchAgentFn: () => ({ invocation, resultPromise })
+        });
+      } catch (_err) {
+        // Failed terminal paths reroute through the deliberately exhausted mock.
+      }
+      assert.equal(await activeCustomCapacityCount(), 0, 'terminal paths must not retain custom capacity');
+      const next = await tryAcquireCustomCapacity(worktree);
+      assert.ok(next, 'a released permit must allow exactly one subsequent launch');
+      next.release();
+    };
 
-  await run(Promise.resolve({ status: 0, stdout: '', stderr: '' }));
-  await run(Promise.resolve({ status: 1, stdout: '', stderr: 'launch failed' }));
-  await run(Promise.resolve({ status: null, signal: 'SIGTERM', stdout: '', stderr: '' }));
-  await run(Promise.reject(new Error('launcher runtime error')));
+    await run(Promise.resolve({ status: 0, stdout: '', stderr: '' }));
+    await run(Promise.resolve({ status: 1, stdout: '', stderr: 'launch failed' }));
+    await run(Promise.resolve({ status: null, signal: 'SIGTERM', stdout: '', stderr: '' }));
+    await run(Promise.reject(new Error('launcher runtime error')));
+  } finally {
+    if (previousNoBubblewrap === undefined) delete process.env.PARALLIX_NO_BUBBLEWRAP;
+    else process.env.PARALLIX_NO_BUBBLEWRAP = previousNoBubblewrap;
+    fs.rmSync(worktree, { recursive: true, force: true });
+  }
 });
 
 function withPathLaunchers(entries, run) {
