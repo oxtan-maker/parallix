@@ -24,7 +24,7 @@ test('interrupted feature lifecycle leaves no e2e branch or worktree behind (SC1
   const cleanupMarker = path.join(signalRoot, 'complete');
   const readyMarker = path.join(signalRoot, 'worktree-ready.json');
   const child = childProcess.spawn(process.execPath, [
-    '--test', '--test-name-pattern=feature-branch lifecycle drafts', 'test/e2e-mission-lifecycle.test.ts'
+    '--import', 'tsx', '--test', '--test-name-pattern=feature-branch lifecycle drafts', 'test/e2e-mission-lifecycle.test.ts'
   ], {
     cwd: repoRoot,
     env: {

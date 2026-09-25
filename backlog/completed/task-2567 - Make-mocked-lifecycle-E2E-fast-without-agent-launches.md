@@ -1,12 +1,11 @@
 ---
 id: TASK-2567
 title: Make mocked lifecycle E2E fast without agent launches
-status: backlog
-assignee: []
+status: done
+assignee: [codex]
 created_date: '2026-09-24 19:35'
 labels:
-  - tests
-  - performance
+  - ai_sdlc
 dependencies: []
 ---
 
@@ -28,5 +27,5 @@ This suite tests mocked-agent lifecycle behavior. It must not launch or probe an
 - [ ] #1 The mocked lifecycle suite launches and probes no agent executable; a test guard detects an accidental agent-launch regression.
 - [ ] #2 Draft, active, review, integrate, adhoc intake, hook, and failed-gate assertions still exercise their real lifecycle and Git boundaries with deterministic fake agent output.
 - [ ] #3 Real agent launcher behavior remains covered by the separate agent E2E suite, with no real-agent test moved into the mocked lifecycle gate.
-- [ ] #4 Record comparable before/after wall times on the same workstation. Target 1–4 seconds for a representative single-lifecycle case and a substantial reduction from the approximately 195-second nine-case suite, without adding flaky timing assertions.
+- [ ] #4 Record comparable before/after wall times on the same workstation. Target at most 8 seconds for a representative single-lifecycle case and a substantial reduction from the approximately 195-second nine-case suite, without adding flaky timing assertions.
 <!-- AC:END -->

@@ -92,6 +92,14 @@ interface StartAgentOptions {
   allowUnsandboxedMutation?: boolean;
 }
 
+// Process-wide composition seam for hosts which supply an in-process agent
+// port. Production leaves this unset and keeps the concrete launcher default.
+let workflowLaunchPort: Function | null = null;
+
+function setWorkflowLaunchPort(port: Function | null): void {
+  workflowLaunchPort = port;
+}
+
 /** Thrown when `pinnedAgent` is set and the pinned family cannot run the step. */
 class PinnedAgentUnavailableError extends Error {
   code = 'PINNED_AGENT_UNAVAILABLE';
@@ -925,7 +933,7 @@ async function startAgent(step: string, opts: StartAgentOptions = { prompt: '' }
     resolveAgentModelFn,
     detectLimitHitFn,
     updateAgentBlockFn,
-    launchAgentFn: opts.launchAgentFn ?? null,
+    launchAgentFn: opts.launchAgentFn ?? workflowLaunchPort,
     onLaunch: opts.onLaunch,
     onLimitHit: opts.onLimitHit,
     sessionMarkerPort,
@@ -973,6 +981,7 @@ export {
   assertAgentSupported,
   workflowLauncherStatus,
   setCommandPathProbe,
+  setWorkflowLaunchPort,
   setLauncherHealthProbe,
   isAgentBlocked,
   parseBlockUntil,

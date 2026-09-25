@@ -1,8 +1,8 @@
 
 
-// This is a source-level lifecycle suite. Run the canonical TypeScript
-// entrypoint so concurrent package/publish tests rebuilding build/ cannot
-// remove the CLI while a fixture is being created.
+// This source-level lifecycle suite invokes the canonical CLI composition
+// directly, so every case retains real workflow transitions without repeatedly
+// starting a TypeScript CLI process.
 
 import fs from 'node:fs';
 import os from 'node:os';
@@ -10,13 +10,12 @@ import path from 'node:path';
 import childProcess from 'node:child_process';
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createRequire } from 'node:module';
-const CLI_ENTRY = path.resolve(import.meta.dirname, '..', 'src', 'entry', 'px.ts');
-// This file is ESM, so `require` is not in scope. Resolve the tsx loader the
-// ESM way; the child processes below pass the result to `node --import`.
-const TSX_LOADER = createRequire(import.meta.url).resolve('tsx');
+import { run } from '../src/composition/create-cli.js';
+import './fixtures/e2e-lifecycle-fake-agent-preload.js';
 
 function runCommand(command, args, options = {}) {
+  assert.notEqual(command, 'codex', 'mocked lifecycle E2E must not launch an agent executable');
+  assert.notEqual(command, 'opencode', 'mocked lifecycle E2E must not launch an agent executable');
   const result = childProcess.spawnSync(command, args, {
     encoding: 'utf8',
     ...options
@@ -344,23 +343,13 @@ function setupRepository({ slug, title, postIntegrateHook = false, preCommitHook
   fs.mkdirSync(path.join(repoRoot, 'backlog', 'completed'), { recursive: true });
   fs.mkdirSync(path.join(repoRoot, 'backlog', 'archive'), { recursive: true });
   fs.mkdirSync(path.join(repoRoot, 'config'), { recursive: true });
+  fs.mkdirSync(binDir, { recursive: true });
   fs.mkdirSync(reviewTmpDir, { recursive: true });
 
-  const agentStub = lifecycleStubSource();
-  writeExecutable(path.join(binDir, 'opencode'), agentStub);
-  writeExecutable(path.join(binDir, 'codex'), agentStub);
-  fs.symlinkSync(process.execPath, path.join(binDir, 'node'));
+  fs.symlinkSync('/usr/bin/node', path.join(binDir, 'node'));
   fs.symlinkSync(commandDir('git'), path.join(binDir, 'git'));
   fs.symlinkSync(commandDir('bash'), path.join(binDir, 'bash'));
   fs.symlinkSync(commandDir('id'), path.join(binDir, 'id'));
-  // Keep the real-bubblewrap confinement path available to the stub-agent
-  // launches: the restricted binDir PATH excludes bwrap, and the task-2513
-  // confinement gate blocks unconfined mutating launches, so symlink bwrap in
-  // to run confined rather than opt out of sandboxing.
-  const bwrapPath = maybeCommandPath('bwrap');
-  if (bwrapPath) {
-    fs.symlinkSync(bwrapPath, path.join(binDir, 'bwrap'));
-  }
   const graphifyPath = maybeCommandPath('graphify');
   if (graphifyPath) {
     fs.symlinkSync(graphifyPath, path.join(binDir, 'graphify'));
@@ -429,47 +418,41 @@ function workflowEnv(binDir, stateHome, repoRoot) {
     FORGEJO_USER: 'custom',
     PRIMARY_WORKTREE: repoRoot,
     PARALLIX_HOME: stateHome,
-    // The agent stub records the mission contract with `px`, the same commands
-    // the draft prompt names, because activation now refuses an incomplete one.
-    // It runs as a bare executable on the fixture PATH, so it cannot resolve
-    // the CLI entry itself.
-    PARALLIX_E2E_PX_ENTRY: CLI_ENTRY,
-    PARALLIX_E2E_PX_LOADER: TSX_LOADER,
+    PARALLIX_NO_BUBBLEWRAP: '1',
     PATH: binDir
   };
 }
 
-function runWorkflow(repoRoot, env, args, timeout = 60000, { allowFailure = false } = {}) {
-  const stdoutPath = path.join(os.tmpdir(), `parallix-e2e-stdout-${process.pid}-${Date.now()}.log`);
-  const stderrPath = path.join(os.tmpdir(), `parallix-e2e-stderr-${process.pid}-${Date.now()}.log`);
-  const stdoutFd = fs.openSync(stdoutPath, 'w');
-  const stderrFd = fs.openSync(stderrPath, 'w');
-  let result;
+async function runWorkflow(repoRoot, env, args, _timeout = 60000, { allowFailure = false } = {}) {
+  const previous = new Map(Object.entries(process.env));
+  const previousStdoutWrite = process.stdout.write;
+  const previousStderrWrite = process.stderr.write;
+  let stdout = '';
+  let stderr = '';
   try {
-    result = childProcess.spawnSync(process.execPath, ['--import', TSX_LOADER, CLI_ENTRY, ...args], {
-      cwd: repoRoot,
-      env,
-      timeout,
-      stdio: ['ignore', stdoutFd, stderrFd]
+    for (const key of Object.keys(process.env)) {
+      if (!(key in env)) { delete process.env[key]; }
+    }
+    Object.assign(process.env, env);
+    process.stdout.write = ((chunk) => { stdout += chunk; return true; }) as typeof process.stdout.write;
+    process.stderr.write = ((chunk) => { stderr += chunk; return true; }) as typeof process.stderr.write;
+    const status = await run(args, {
+      baseCwd: repoRoot,
+      log: line => { stdout += `${line}\n`; return ''; },
+      error: line => { stderr += `${line}\n`; return ''; },
     });
+    if (!allowFailure && status !== 0) {
+      throw new Error(`px ${args.join(' ')} failed (status=${status})\nstdout:\n${stdout}\nstderr:\n${stderr}`);
+    }
+    return { status, stdout, stderr };
   } finally {
-    fs.closeSync(stdoutFd);
-    fs.closeSync(stderrFd);
+    process.stdout.write = previousStdoutWrite;
+    process.stderr.write = previousStderrWrite;
+    for (const key of Object.keys(process.env)) {
+      if (!previous.has(key)) { delete process.env[key]; }
+    }
+    Object.assign(process.env, Object.fromEntries(previous));
   }
-  result.stdout = fs.existsSync(stdoutPath) ? fs.readFileSync(stdoutPath, 'utf8') : '';
-  result.stderr = fs.existsSync(stderrPath) ? fs.readFileSync(stderrPath, 'utf8') : '';
-  fs.rmSync(stdoutPath, { force: true });
-  fs.rmSync(stderrPath, { force: true });
-  if (result.error && result.status === null) {
-    throw result.error;
-  }
-  if (!allowFailure && result.status !== 0) {
-    throw new Error(
-      `px ${args.join(' ')} failed (status=${result.status}, signal=${result.signal}, error=${result.error ? result.error.message : 'none'})\n` +
-      `stdout:\n${result.stdout}\nstderr:\n${result.stderr}`
-    );
-  }
-  return result;
 }
 
 function worktreePathFor(repoRoot, slug) {
@@ -578,8 +561,8 @@ function missionDir(rootDir, slug) {
 // `px review <slug> --status`, which reads the same authority the loop writes.
 // A mission whose loop never persisted its state therefore still fails here,
 // exactly as the missing-file read used to.
-function reviewState(rootDir, slug, env) {
-  const result = runWorkflow(rootDir, env, ['review', slug, '--status']);
+async function reviewState(rootDir, slug, env) {
+  const result = await runWorkflow(rootDir, env, ['review', slug, '--status']);
   const output = `${result.stdout}${result.stderr}`.replace(/\x1B\[[0-9;]*m/g, '');
   if (/No persisted review state found/.test(output)) {
     throw new Error(`px review ${slug} --status found no persisted review state\n${output}`);
@@ -643,7 +626,7 @@ function assertCheckpointShape(rootDir, slug, expectedFiles) {
   }
 }
 
-function runScenario({ launchFromFeatureBranch = false, integrate = true, postIntegrateHook = false, preCommitHook = false, failIntegrationGate = false }) {
+async function runScenario({ launchFromFeatureBranch = false, integrate = true, postIntegrateHook = false, preCommitHook = false, failIntegrationGate = false }) {
   const slug = launchFromFeatureBranch ? 'task-2001' : 'task-2002';
   const title = launchFromFeatureBranch ? 'Feature Branch Lifecycle' : 'Primary Branch Lifecycle';
   const repo = setupRepository({ slug, title, postIntegrateHook, preCommitHook });
@@ -670,7 +653,7 @@ function runScenario({ launchFromFeatureBranch = false, integrate = true, postIn
       runGit(repo.repoRoot, ['checkout', '-b', 'feature/e2e-base']);
     }
 
-    runWorkflow(repo.repoRoot, env, ['draft', slug, '--agent', 'custom']);
+    await runWorkflow(repo.repoRoot, env, ['draft', slug, '--agent', 'custom']);
 
     assert.ok(fs.existsSync(worktree), `expected mission worktree at ${worktree}`);
     pauseAfterWorktreeFixture(repo, worktree);
@@ -693,9 +676,9 @@ function runScenario({ launchFromFeatureBranch = false, integrate = true, postIn
       missionHasBaseBranch: /^Base-Branch:/m.test(draftedMission)
     };
 
-    runWorkflow(worktree, env, ['active', slug, '--implementer', 'custom']);
+    await runWorkflow(worktree, env, ['active', slug, '--implementer', 'custom']);
 
-    const state = reviewState(worktree, slug, env);
+    const state = await reviewState(worktree, slug, env);
     summary.active = {
       taskStatus: taskStatus(worktreeTask),
       checkpointFiles: checkpointFiles(worktree, slug),
@@ -725,7 +708,7 @@ function runScenario({ launchFromFeatureBranch = false, integrate = true, postIn
       runGit(worktree, ['add', '--', 'workflow.config.json']);
       runGit(worktree, ['commit', '-m', `test(${slug}): install failing integration gate`]);
 
-      const gateResult = runWorkflow(worktree, env, ['integrate', slug], 60000, { allowFailure: true });
+      const gateResult = await runWorkflow(worktree, env, ['integrate', slug], 60000, { allowFailure: true });
       summary.integrate = {
         gateFailed: true,
         exitCode: gateResult.status,
@@ -737,7 +720,7 @@ function runScenario({ launchFromFeatureBranch = false, integrate = true, postIn
       return summary;
     }
 
-    runWorkflow(worktree, env, ['integrate', slug]);
+    await runWorkflow(worktree, env, ['integrate', slug]);
 
     const rootTask = taskFileIn(repo.repoRoot, slug);
     assert.ok(rootTask, 'integrate should leave the task in the base checkout');
@@ -822,23 +805,13 @@ function setupAdhocRepository({ title }) {
 
   // No backlog/ directory: the defining trait of the adhoc-only intake.
   fs.mkdirSync(path.join(repoRoot, 'config'), { recursive: true });
+  fs.mkdirSync(binDir, { recursive: true });
   fs.mkdirSync(reviewTmpDir, { recursive: true });
 
-  const agentStub = lifecycleStubSource();
-  writeExecutable(path.join(binDir, 'opencode'), agentStub);
-  writeExecutable(path.join(binDir, 'codex'), agentStub);
-  fs.symlinkSync(process.execPath, path.join(binDir, 'node'));
+  fs.symlinkSync('/usr/bin/node', path.join(binDir, 'node'));
   fs.symlinkSync(commandDir('git'), path.join(binDir, 'git'));
   fs.symlinkSync(commandDir('bash'), path.join(binDir, 'bash'));
   fs.symlinkSync(commandDir('id'), path.join(binDir, 'id'));
-  // Keep the real-bubblewrap confinement path available to the stub-agent
-  // launches: the restricted binDir PATH excludes bwrap, and the task-2513
-  // confinement gate blocks unconfined mutating launches, so symlink bwrap in
-  // to run confined rather than opt out of sandboxing.
-  const bwrapPath = maybeCommandPath('bwrap');
-  if (bwrapPath) {
-    fs.symlinkSync(bwrapPath, path.join(binDir, 'bwrap'));
-  }
   const graphifyPath = maybeCommandPath('graphify');
   if (graphifyPath) {
     fs.symlinkSync(graphifyPath, path.join(binDir, 'graphify'));
@@ -885,8 +858,8 @@ function setupAdhocRepository({ title }) {
  * Read-only: the authority for review-loop state is the operator database, so
  * status must resolve the DB-owned adhoc identity without a Backlog task file.
  */
-function statusOutputFor(slug, rootDir, env) {
-  const result = runWorkflow(rootDir, env, ['status', slug]);
+async function statusOutputFor(slug, rootDir, env) {
+  const result = await runWorkflow(rootDir, env, ['status', slug]);
   return `${result.stdout}${result.stderr}`.replace(/\x1B\[[0-9;]*m/g, '');
 }
 
@@ -902,7 +875,7 @@ function findMirroredTaskFile(worktree, slug) {
   return entries.length > 0 ? path.join(tasksDir, entries[0]) : null;
 }
 
-function runAdhocScenario() {
+async function runAdhocScenario() {
   const title = 'fix hello world greeting';
   const repo = setupAdhocRepository({ title });
   const env = workflowEnv(repo.binDir, repo.stateHome, repo.repoRoot);
@@ -913,7 +886,7 @@ function runAdhocScenario() {
   }
 
   try {
-    runWorkflow(repo.repoRoot, env, ['draft', 'fix hello world greeting', '--agent', 'custom']);
+    await runWorkflow(repo.repoRoot, env, ['draft', 'fix hello world greeting', '--agent', 'custom']);
 
     const slug = discoverAdhocSlug(repo.repoRoot);
     assert.ok(slug, 'draft must materialize an adhoc mission under missions/');
@@ -937,12 +910,12 @@ function runAdhocScenario() {
     // The red line on the parent commit: the `task-` prefix guard refuses this
     // with "slug must begin with task-". Green once the DB-owned adhoc identity
     // and shared-validator guard land.
-    runWorkflow(worktree, env, ['active', slug, '--implementer', 'custom']);
+    await runWorkflow(worktree, env, ['active', slug, '--implementer', 'custom']);
 
     // F3 (task-2468): `px status` must resolve the DB-owned adhoc identity from
     // the operator database, not a Backlog task file. A `task-`-shaped
     // assumption would fail to recognize the namespace here.
-    const statusOutput = statusOutputFor(slug, worktree, env);
+    const statusOutput = await statusOutputFor(slug, worktree, env);
     assert.match(statusOutput, /parallix-adhoc-\d+/i, 'px status must resolve the DB-owned adhoc identity');
 
     // F4 (task-2468): the Backlog task file is a best-effort one-way mirror for
@@ -956,13 +929,13 @@ function runAdhocScenario() {
       fs.rmSync(mirror, { force: true });
       assert.ok(!fs.existsSync(mirror), 'the mirrored task file was removed before status');
     }
-    const statusAfterDeletion = statusOutputFor(slug, worktree, env);
+    const statusAfterDeletion = await statusOutputFor(slug, worktree, env);
     assert.match(statusAfterDeletion, /parallix-adhoc-\d+/i, 'px status must still resolve the DB-owned adhoc identity after the mirror is deleted');
 
     // `px review --status` reads lifecycle state from DB authority, not the
     // (best-effort) Backlog mirror. A missing review state fails here exactly as
     // the old missing-file read did.
-    const state = reviewState(worktree, slug, env);
+    const state = await reviewState(worktree, slug, env);
     assert.equal(state.phase, 'approved', 'adhoc mission should reach an approved review phase after a deleted mirror');
 
     // F1 (task-2468 round 2): `px integrate` must complete for a DB-owned adhoc
@@ -973,7 +946,7 @@ function runAdhocScenario() {
       runGit(worktree, ['add', '-A']);
       runGit(worktree, ['commit', '-m', 'adhoc: capture execute artifacts before integrate']);
     }
-    runWorkflow(worktree, env, ['integrate', slug]);
+    await runWorkflow(worktree, env, ['integrate', slug]);
 
     return { slug, worktree, reviewPhase: state.phase };
   } finally {
@@ -997,21 +970,21 @@ function runAdhocScenario() {
  * never clobbers the base repo's Backlog task, and that the Backlog task still
  * resolves after the adhoc draft.
  */
-function runMixedScenario() {
+async function runMixedScenario() {
   const title = 'Primary Branch Lifecycle';
   const repo = setupRepository({ slug: 'task-2002', title });
   const env = workflowEnv(repo.binDir, repo.stateHome, repo.repoRoot);
 
   try {
     // --- Backlog intake: full lifecycle to done ---
-    runWorkflow(repo.repoRoot, env, ['draft', 'task-2002', '--agent', 'custom']);
+    await runWorkflow(repo.repoRoot, env, ['draft', 'task-2002', '--agent', 'custom']);
     assert.ok(taskFileIn(repo.repoRoot, 'task-2002'), 'draft should create the Backlog task in the base repo');
 
     const backlogWorktree = worktreePathFor(repo.repoRoot, 'task-2002');
     assert.ok(fs.existsSync(backlogWorktree), `expected Backlog mission worktree at ${backlogWorktree}`);
 
-    runWorkflow(backlogWorktree, env, ['active', 'task-2002', '--implementer', 'custom']);
-    const backlogState = reviewState(repo.repoRoot, 'task-2002', env);
+    await runWorkflow(backlogWorktree, env, ['active', 'task-2002', '--implementer', 'custom']);
+    const backlogState = await reviewState(repo.repoRoot, 'task-2002', env);
     assert.equal(backlogState.phase, 'approved', 'Backlog task should reach an approved review');
 
     // Integrate the Backlog task: squash into main, mark done, delete worktree.
@@ -1019,14 +992,14 @@ function runMixedScenario() {
       runGit(backlogWorktree, ['add', '-A']);
       runGit(backlogWorktree, ['commit', '-m', 'task-2002: capture execute artifacts']);
     }
-    runWorkflow(backlogWorktree, env, ['integrate', 'task-2002']);
+    await runWorkflow(backlogWorktree, env, ['integrate', 'task-2002']);
     const rootTask = taskFileIn(repo.repoRoot, 'task-2002');
     assert.ok(rootTask, 'integrate should leave the Backlog task in the base repo');
     assert.equal(taskStatus(rootTask), 'done', 'Backlog task should be done after integrate');
     assert.ok(!fs.existsSync(backlogWorktree), 'integrate should clean up the Backlog worktree');
 
     // --- Adhoc intake: draft in the SAME repo, prove it works alongside ---
-    runWorkflow(repo.repoRoot, env, ['draft', 'fix hello world greeting', '--agent', 'custom']);
+    await runWorkflow(repo.repoRoot, env, ['draft', 'fix hello world greeting', '--agent', 'custom']);
     const adhocSlug = discoverAdhocSlug(repo.repoRoot);
     assert.ok(adhocSlug, 'adhoc draft must materialize under missions/');
     assert.match(adhocSlug, /^parallix-adhoc-\d+$/i, 'adhoc identity must be DB-owned');
@@ -1040,8 +1013,8 @@ function runMixedScenario() {
     // The base repo's Backlog task must survive the adhoc draft untouched.
     assert.ok(taskFileIn(repo.repoRoot, 'task-2002'), 'base repo Backlog task must survive the adhoc draft');
 
-    runWorkflow(adhocWorktree, env, ['active', adhocSlug, '--implementer', 'custom']);
-    const adhocState = reviewState(repo.repoRoot, adhocSlug, env);
+    await runWorkflow(adhocWorktree, env, ['active', adhocSlug, '--implementer', 'custom']);
+    const adhocState = await reviewState(repo.repoRoot, adhocSlug, env);
     assert.equal(adhocState.phase, 'approved', 'adhoc mission should reach an approved review');
 
     // Complete the adhoc half of the mixed scenario: integrate the DB-owned
@@ -1051,7 +1024,7 @@ function runMixedScenario() {
       runGit(adhocWorktree, ['add', '-A']);
       runGit(adhocWorktree, ['commit', '-m', 'adhoc: capture execute artifacts before integrate']);
     }
-    runWorkflow(adhocWorktree, env, ['integrate', adhocSlug]);
+    await runWorkflow(adhocWorktree, env, ['integrate', adhocSlug]);
     assert.ok(!fs.existsSync(adhocWorktree), 'integrate should clean up the adhoc worktree');
 
     // The Backlog task must still resolve after the adhoc draft (no mirror
@@ -1073,49 +1046,15 @@ function runMixedScenario() {
   }
 }
 
-function runScenarioInChild(options) {
-  const encoded = Buffer.from(JSON.stringify(options), 'utf8').toString('base64');
-  const stdoutPath = path.join(os.tmpdir(), `parallix-e2e-child-stdout-${process.pid}-${Date.now()}.log`);
-  const stderrPath = path.join(os.tmpdir(), `parallix-e2e-child-stderr-${process.pid}-${Date.now()}.log`);
-  const stdoutFd = fs.openSync(stdoutPath, 'w');
-  const stderrFd = fs.openSync(stderrPath, 'w');
-  let result;
-  try {
-    result = childProcess.spawnSync(process.execPath, [import.meta.filename, '--scenario', encoded], {
-      cwd: path.resolve(import.meta.dirname, '..'),
-      encoding: 'utf8',
-      timeout: 120000,
-      env: { ...process.env, FORCE_COLOR: '0' },
-      stdio: ['ignore', stdoutFd, stderrFd]
-    });
-  } finally {
-    fs.closeSync(stdoutFd);
-    fs.closeSync(stderrFd);
-  }
-  result.stdout = fs.existsSync(stdoutPath) ? fs.readFileSync(stdoutPath, 'utf8') : '';
-  result.stderr = fs.existsSync(stderrPath) ? fs.readFileSync(stderrPath, 'utf8') : '';
-  fs.rmSync(stdoutPath, { force: true });
-  fs.rmSync(stderrPath, { force: true });
-  if (result.error && result.status === null) {
-    throw result.error;
-  }
-  if (result.status !== 0) {
-    throw new Error(
-      `scenario child failed (status=${result.status}, signal=${result.signal})\nstdout:\n${result.stdout}\nstderr:\n${result.stderr}`
-    );
-  }
-  return JSON.parse((result.stdout || '').trim());
-}
-
 if (process.argv[2] === '--scenario') {
   const payload = JSON.parse(Buffer.from(process.argv[3], 'base64').toString('utf8'));
-  const summary = runScenario(payload);
+  const summary = await runScenario(payload);
   process.stdout.write(JSON.stringify(summary));
   process.exit(0);
 }
 
-test('feature-branch lifecycle drafts from the recorded base and integrates back into that feature branch', () => {
-  const summary = runScenarioInChild({ launchFromFeatureBranch: true, integrate: true });
+test('feature-branch lifecycle drafts from the recorded base and integrates back into that feature branch', async () => {
+  const summary = await runScenario({ launchFromFeatureBranch: true, integrate: true });
   assert.equal(summary.draft.taskStatus, 'refined');
   assert.equal(summary.draft.missionHasBaseBranch, true);
   assert.equal(summary.active.taskStatus, 'ready-for-integration');
@@ -1128,8 +1067,8 @@ test('feature-branch lifecycle drafts from the recorded base and integrates back
   assert.notEqual(summary.integrate.featureHeadAfter, summary.integrate.mainHeadBefore);
 });
 
-test('primary-branch lifecycle integrates cleanly to main and marks the task done', () => {
-  const summary = runScenarioInChild({ launchFromFeatureBranch: false, integrate: true });
+test('primary-branch lifecycle integrates cleanly to main and marks the task done', async () => {
+  const summary = await runScenario({ launchFromFeatureBranch: false, integrate: true });
   assert.equal(summary.draft.taskStatus, 'refined');
   assert.equal(summary.draft.missionHasBaseBranch, false);
   assert.equal(summary.active.taskStatus, 'ready-for-integration');
@@ -1139,8 +1078,8 @@ test('primary-branch lifecycle integrates cleanly to main and marks the task don
   assert.notEqual(summary.integrate.mainHeadAfter, summary.integrate.mainHeadBefore);
 });
 
-test('configured post-integrate hook runs exactly once with slug/base-worktree/base-branch/variant env vars (SC2/SC3)', () => {
-  const summary = runScenarioInChild({ launchFromFeatureBranch: false, integrate: true, postIntegrateHook: true });
+test('configured post-integrate hook runs exactly once with slug/base-worktree/base-branch/variant env vars (SC2/SC3)', async () => {
+  const summary = await runScenario({ launchFromFeatureBranch: false, integrate: true, postIntegrateHook: true });
   assert.equal(summary.integrate.rootTaskStatus, 'done');
   assert.equal(summary.integrate.postIntegrateHookLines.length, 1, 'hook must run exactly once for a successful integrate');
   assert.match(
@@ -1149,43 +1088,43 @@ test('configured post-integrate hook runs exactly once with slug/base-worktree/b
   );
 });
 
-test('pre-commit hook changes land inside the mission squash commit, not a follow-up commit (task-2510)', () => {
-  const summary = runScenarioInChild({ launchFromFeatureBranch: false, integrate: true, preCommitHook: true });
+test('pre-commit hook changes land inside the mission squash commit, not a follow-up commit (task-2510)', async () => {
+  const summary = await runScenario({ launchFromFeatureBranch: false, integrate: true, preCommitHook: true });
   assert.equal(summary.integrate.rootTaskStatus, 'done');
   assert.match(summary.integrate.landedSubject, /^mission\/task-2002: /, 'main tip must be the mission commit itself');
   assert.ok(summary.integrate.landedFiles.includes('version.txt'), `landed commit must carry the hook change: ${summary.integrate.landedFiles.join(', ')}`);
   assert.equal(summary.integrate.versionAtMain, '1.0.1');
 });
 
-test('a failed integration gate aborts before the post-integrate hook can run (SC4)', () => {
-  const summary = runScenarioInChild({ launchFromFeatureBranch: false, integrate: true, postIntegrateHook: true, failIntegrationGate: true });
+test('a failed integration gate aborts before the post-integrate hook can run (SC4)', async () => {
+  const summary = await runScenario({ launchFromFeatureBranch: false, integrate: true, postIntegrateHook: true, failIntegrationGate: true });
   assert.equal(summary.integrate.gateFailed, true);
   assert.notEqual(summary.integrate.exitCode, 0);
   assert.deepEqual(summary.integrate.postIntegrateHookLines, []);
 });
 
-test('a repo with no post-integrate hook configured runs px integrate with unchanged behavior (SC1)', () => {
-  const summary = runScenarioInChild({ launchFromFeatureBranch: false, integrate: true, postIntegrateHook: false });
+test('a repo with no post-integrate hook configured runs px integrate with unchanged behavior (SC1)', async () => {
+  const summary = await runScenario({ launchFromFeatureBranch: false, integrate: true, postIntegrateHook: false });
   assert.equal(summary.integrate.rootTaskStatus, 'done');
   assert.equal(summary.integrate.postIntegrateHookLines, undefined);
 });
 
-test('artifact-focused run produces mission, checkpoint, milestone, and review artifacts with the expected structure', () => {
-  const summary = runScenarioInChild({ launchFromFeatureBranch: true, integrate: false });
+test('artifact-focused run produces mission, checkpoint, milestone, and review artifacts with the expected structure', async () => {
+  const summary = await runScenario({ launchFromFeatureBranch: true, integrate: false });
   assert.ok(summary.draft.missionId, 'MISSION.md should contain a frontmatter id');
   assert.equal(summary.active.taskIdCount, 1, 'mission id should map to exactly one backlog task in the test repo');
   assert.deepEqual(summary.active.milestoneFiles, ['milestone-1.md']);
   assert.deepEqual(summary.active.checkpointFiles, ['CP-1.md', 'CP-2.md']);
 });
 
-test('adhoc-only intake: a free-text draft reaches an approved review with a DB-owned adhoc identity', () => {
-  const summary = runAdhocScenario();
+test('adhoc-only intake: a free-text draft reaches an approved review with a DB-owned adhoc identity', async () => {
+  const summary = await runAdhocScenario();
   assert.match(summary.slug, /^parallix-adhoc-\d+$/i, 'the materialized identity must be the DB-owned adhoc form');
   assert.equal(summary.reviewPhase, 'approved', 'DB-authoritative review read must resolve the adhoc mission');
 });
 
-test('mixed intake: a Backlog task and a DB-owned adhoc mission both complete in one repository', () => {
-  const summary = runMixedScenario();
+test('mixed intake: a Backlog task and a DB-owned adhoc mission both complete in one repository', async () => {
+  const summary = await runMixedScenario();
   assert.equal(summary.backlogSlug, 'task-2002', 'the Backlog intake must run a task-<slug> mission');
   assert.equal(summary.backlogStatus, 'done', 'the Backlog intake must integrate to done');
   assert.match(summary.adhocSlug, /^parallix-adhoc-\d+$/i, 'the adhoc intake must materialize a DB-owned identity');
