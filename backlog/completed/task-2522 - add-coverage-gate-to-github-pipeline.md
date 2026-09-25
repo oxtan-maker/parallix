@@ -1,10 +1,10 @@
 ---
 id: TASK-2522
 title: add coverage gate to github pipeline
-status: backlog
-assignee: []
+status: done
+assignee: [codex]
 created_date: '2026-09-16 10:13'
-labels: []
+labels: [ai_sdlc]
 dependencies: []
 ordinal: 83007
 ---

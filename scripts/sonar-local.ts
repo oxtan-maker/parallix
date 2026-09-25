@@ -123,12 +123,14 @@ export function runSonar(options: { rootDir?: string, spawn?: typeof spawnSync }
   // Lockfile-pinned scanner (devDependency `sonarqube-scanner`), never `npx --yes`.
   const scannerBin = path.join(rootDir, 'node_modules', '.bin', 'sonar-scanner-npm');
   if (!fs.existsSync(scannerBin)) { throw new Error('sonar-scanner-npm is not installed. Run `npm ci` before running `npm run sonar`.'); }
+  const scannerHome = path.join(rootDir, 'tmp', 'sonar');
+  fs.mkdirSync(scannerHome, { recursive: true });
   const result = (options.spawn || spawnSync)(scannerBin, [
     `-Dsonar.host.url=${SONAR_URL}`,
     `-Dsonar.organization=${SONAR_ORGANIZATION}`,
     `-Dsonar.projectKey=${SONAR_PROJECT_KEY}`,
     ...(branch ? [`-Dsonar.branch.name=${branch}`] : []),
-  ], { cwd: rootDir, stdio: 'inherit', env: { ...process.env, SONAR_TOKEN: token } });
+  ], { cwd: rootDir, stdio: 'inherit', env: { ...process.env, SONAR_TOKEN: token, SONAR_USER_HOME: scannerHome } });
   if (result.error) { throw result.error; }
   // Fail closed: a non-zero scanner status covers analysis failure and, because
   // sonar.qualitygate.wait=true, a failed quality gate as well.

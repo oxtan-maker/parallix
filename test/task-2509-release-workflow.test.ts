@@ -16,3 +16,12 @@ test('task-2509: release trusts only the successful main-push SHA with release-o
   assert.match(workflow, /GH_TOKEN: \$\{\{ github\.token \}\}/);
   assert.doesNotMatch(workflow, /npm version/);
 });
+
+test('task-2522: ci-required runs and summarizes the existing coverage gate on PRs and main pushes', () => {
+  assert.match(workflow, /pull_request:\n\s+branches:\n\s+- main/);
+  assert.match(workflow, /push:\n\s+branches:\n\s+- main/);
+  assert.match(workflow, /PARALLIX_TEST_COVERAGE/);
+  assert.match(workflow, /npm run coverage:merge/);
+  assert.match(workflow, /Publish SonarQube quality gate result[\s\S]*?GITHUB_STEP_SUMMARY/);
+  assert.doesNotMatch(workflow, /npm run test:coverage/);
+});

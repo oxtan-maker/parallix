@@ -17,9 +17,9 @@ const COVERAGE_COMMAND = 'rm -f coverage/lcov.info && npm run test:coverage -- -
 // GITHUB_ACTIONS are set only for the duration of the call, so ordering between
 // tests cannot leak either value.
 function captureScan(env: Record<string, string | undefined>, status = 0) {
-  let captured: { command: string, args: string[], token?: string } | null = null;
+  let captured: { command: string, args: string[], token?: string, scannerHome?: string } | null = null;
   const spawn = ((command: string, args: string[], options: { env: NodeJS.ProcessEnv }) => {
-    captured = { command: String(command), args, token: options.env.SONAR_TOKEN };
+    captured = { command: String(command), args, token: options.env.SONAR_TOKEN, scannerHome: options.env.SONAR_USER_HOME };
     return { status } as ReturnType<typeof spawnSync>;
   }) as typeof spawnSync;
   const run = () => {
@@ -55,6 +55,7 @@ test('local sonar scan submits the worktree branch to the one Cloud project', ()
   // per-mission project key. The retired resolveSonarBranch export is gone
   // (SC2); branch selection is asserted through the runSonar args above.
   assert.equal(captured.token, 'operator-token', 'the scanner receives the environment token');
+  assert.equal(captured.scannerHome, path.join(repoRoot, 'tmp', 'sonar'), 'the scanner keeps temporary data in the worktree');
   assert.doesNotMatch(captured.args.join(' '), /operator-token/, 'the token is never passed as a scanner argument');
 });
 

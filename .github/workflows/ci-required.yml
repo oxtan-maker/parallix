@@ -25,6 +25,7 @@ on:
       - main
   push:
     branches:
+      - main
       - 'github-publish/**'
 
 # Cancel only superseded runs for a single pull request. PR runs group by pull

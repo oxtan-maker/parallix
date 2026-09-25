@@ -180,9 +180,10 @@ The GitHub workflow:
 
 1. checks out the exact triggered commit with sufficient history;
 2. runs the GitHub-safe verification tier defined by ADR 0057;
-3. produces LCOV;
+3. produces and merges LCOV from that test run;
 4. performs SonarQube Cloud analysis;
-5. waits for the quality-gate result; and
+5. writes the quality-gate result, including the configured coverage condition,
+   to the workflow summary; and
 6. fails `ci-required` if the quality gate does not pass.
 
 ADR 0058 remains authoritative for whether that verified commit may advance remote `main`.
