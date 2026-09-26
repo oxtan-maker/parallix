@@ -1,13 +1,12 @@
 ---
 id: TASK-2554
 title: Tests leak fixture missions into the operator's real parallix.db
-status: backlog
-assignee: []
+status: done
+assignee: [custom]
 created_date: '2026-09-22 10:37'
 labels:
   - bug
-  - tests
-  - persistence
+  - ai_sdlc
 dependencies: []
 priority: high
 ordinal: 92008

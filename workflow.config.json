@@ -28,8 +28,8 @@
         { "key": "verification", "command": "./scripts/verify-local.sh static-analysis", "order": 3, "reuse": "clean-tree" },
         { "key": "integration-suite", "command": "npm run test:integration:prebuilt", "order": 4, "after": ["build"] },
         { "key": "coverage", "command": "rm -f coverage/lcov.info && PARALLIX_PREBUILT_PACK=1 npm run test:coverage -- --threshold 0 --lcov && test -s coverage/lcov.info", "order": 5, "after": ["build"] },
-        { "key": "workflow", "command": "node --import tsx test/e2e-mission-lifecycle.test.ts", "order": 6, "after": ["build"] },
-        { "key": "agent-smoke", "command": "node --import tsx test/e2e-real-agent-smoke.test.ts", "order": 7, "after": ["build"] },
+        { "key": "workflow", "command": "node --import tsx --import ./test/bootstrap-e2e-parallix-home.ts test/e2e-mission-lifecycle.test.ts", "order": 6, "after": ["build"] },
+        { "key": "agent-smoke", "command": "node --import tsx --import ./test/bootstrap-e2e-parallix-home.ts test/e2e-real-agent-smoke.test.ts", "order": 7, "after": ["build"] },
         { "key": "quality-gate", "command": "npm run sonar", "order": 8, "after": ["coverage"] }
       ]
     }

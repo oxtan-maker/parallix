@@ -114,8 +114,8 @@ test('the verification tiers have stable npm commands', () => {
   assert.equal(pkg.scripts['test:integration:ci'], 'npm run build && npm run test:integration:ci:prebuilt');
   assert.equal(pkg.scripts['test:integration:ci:prebuilt'], 'PARALLIX_PREBUILT_PACK=1 FORCE_COLOR=0 tsx test/run-default-tests.ts --integration-ci');
   assert.equal(pkg.scripts['test:integration:local'], 'FORCE_COLOR=0 tsx test/run-default-tests.ts --integration-local');
-  assert.equal(pkg.scripts['test:agent-e2e'], 'node --import tsx test/e2e-real-agent-smoke.test.ts');
-  assert.equal(pkg.scripts['test:lifecycle-e2e'], 'node --import tsx test/e2e-mission-lifecycle.test.ts');
+  assert.equal(pkg.scripts['test:agent-e2e'], 'node --import tsx --import ./test/bootstrap-e2e-parallix-home.ts test/e2e-real-agent-smoke.test.ts');
+  assert.equal(pkg.scripts['test:lifecycle-e2e'], 'node --import tsx --import ./test/bootstrap-e2e-parallix-home.ts test/e2e-mission-lifecycle.test.ts');
   // The GitHub-safe aggregate covers build, typecheck, hermetic unit tests, the
   // deterministic integration subset, and portable package/bundle validation.
   const ciAggregate = String(pkg.scripts['test:ci']);

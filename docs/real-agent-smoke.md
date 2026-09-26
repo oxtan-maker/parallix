@@ -42,7 +42,7 @@ configured local agent, integration must stop rather than merge silently.
 ## Invocation
 
 ```
-node --import tsx test/e2e-real-agent-smoke.test.ts
+node --import tsx --import ./test/bootstrap-e2e-parallix-home.ts test/e2e-real-agent-smoke.test.ts
 ```
 
 ## First-value rehearsal
@@ -95,7 +95,7 @@ values, unsupported families, and unknown options before gate execution. The
 values are forwarded as dedicated environment values only to
 `custom-agent-smoke`; they are never concatenated into its shell command.
 Without both flags, the configured `custom-agent-smoke` command remains
-`node --import tsx test/e2e-real-agent-smoke.test.ts`, and smoke selection retains the
+`node --import tsx --import ./test/bootstrap-e2e-parallix-home.ts test/e2e-real-agent-smoke.test.ts`, and smoke selection retains the
 configured custom runner (`opencode` or `pi`) and its existing model behavior.
 
 The gate runs **one** full lifecycle per invocation, with whichever custom
@@ -106,7 +106,7 @@ is exercised on demand instead — the harness itself is runner-parameterized
 (`opencode` and `pi`), and switching costs only an env var:
 
 ```
-PARALLIX_REAL_AGENT_RUNNER=pi node --import tsx test/e2e-real-agent-smoke.test.ts
+PARALLIX_REAL_AGENT_RUNNER=pi node --import tsx --import ./test/bootstrap-e2e-parallix-home.ts test/e2e-real-agent-smoke.test.ts
 ```
 
 ## Expected runtime and determinism

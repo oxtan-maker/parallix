@@ -566,7 +566,7 @@ test('getIntegrationGatePlan includes workflow e2e gate for lib-touching mission
   const config = {
     gates: {
       lib: { command: './scripts/verify-local.sh static-analysis', order: 1, run_last: false },
-      workflow: { command: 'node --import tsx test/e2e-mission-lifecycle.test.ts', order: 50, run_last: true }
+      workflow: { command: 'node --import tsx --import ./test/bootstrap-e2e-parallix-home.ts test/e2e-mission-lifecycle.test.ts', order: 50, run_last: true }
     }
   };
 
@@ -593,7 +593,7 @@ lib/core/nels.js`;
 test('getIntegrationGatePlan includes workflow e2e gate for workflow-owned repo surfaces', () => {
   const config = {
     gates: {
-      workflow: { command: 'node --import tsx test/e2e-mission-lifecycle.test.ts', order: 50, run_last: true }
+      workflow: { command: 'node --import tsx --import ./test/bootstrap-e2e-parallix-home.ts test/e2e-mission-lifecycle.test.ts', order: 50, run_last: true }
     }
   };
 
@@ -627,7 +627,7 @@ test('repo integration config keeps workflow gate on the targeted mission-lifecy
 
   assert.equal(
     config?.gates?.workflow?.command,
-    'node --import tsx test/e2e-mission-lifecycle.test.ts'
+    'node --import tsx --import ./test/bootstrap-e2e-parallix-home.ts test/e2e-mission-lifecycle.test.ts'
   );
   assert.equal(config?.gates?.coverage?.command,
     'rm -f coverage/lcov.info && PARALLIX_PREBUILT_PACK=1 npm run test:coverage -- --threshold 0 --lcov && test -s coverage/lcov.info');
@@ -1050,7 +1050,7 @@ test('orderIntegrationGates skips gates with enabled:false (task-1419)', () => {
     gates: {
       lib: { command: './scripts/verify-local.sh static-analysis', order: 1, run_last: false, enabled: true },
       build: { command: 'npm run build:cjs', order: 2, run_last: false, enabled: false },
-      workflow: { command: 'node --import tsx test/e2e-mission-lifecycle.test.ts', order: 50, run_last: true }
+      workflow: { command: 'node --import tsx --import ./test/bootstrap-e2e-parallix-home.ts test/e2e-mission-lifecycle.test.ts', order: 50, run_last: true }
     }
   };
 
@@ -1195,7 +1195,7 @@ test('getIntegrationGatePlan selects build gate for workflow changes (task-1419)
     gates: {
       lib: { command: './scripts/verify-local.sh static-analysis', order: 1, run_last: false },
       build: { command: 'npm run build:cjs', order: 2, run_last: false, areas: ['lib', 'workflow'] },
-      workflow: { command: 'node --import tsx test/e2e-mission-lifecycle.test.ts', order: 50, run_last: true }
+      workflow: { command: 'node --import tsx --import ./test/bootstrap-e2e-parallix-home.ts test/e2e-mission-lifecycle.test.ts', order: 50, run_last: true }
     }
   };
 
@@ -1221,8 +1221,8 @@ test('getIntegrationGatePlan preserves run_last ordering with build gate inserte
     gates: {
       lib: { command: './scripts/verify-local.sh static-analysis', order: 1, run_last: false },
       build: { command: 'npm run build:cjs', order: 2, run_last: false, areas: ['lib', 'workflow'] },
-      workflow: { command: 'node --import tsx test/e2e-mission-lifecycle.test.ts', order: 50, run_last: true },
-      'custom-agent-smoke': { command: 'node --import tsx test/e2e-real-agent-smoke.test.ts', order: 51, run_last: true }
+      workflow: { command: 'node --import tsx --import ./test/bootstrap-e2e-parallix-home.ts test/e2e-mission-lifecycle.test.ts', order: 50, run_last: true },
+      'custom-agent-smoke': { command: 'node --import tsx --import ./test/bootstrap-e2e-parallix-home.ts test/e2e-real-agent-smoke.test.ts', order: 51, run_last: true }
     }
   };
 
@@ -1374,8 +1374,8 @@ test('every representative changed-area plan includes the unconditional integrat
     assert.equal(Boolean(workflowGate), expectsE2E, `${label} workflow gate selection must remain area-scoped`);
     assert.equal(Boolean(smokeGate), expectsE2E, `${label} custom-agent-smoke selection must remain area-scoped`);
     if (expectsE2E) {
-      assert.equal(workflowGate.command, 'node --import tsx test/e2e-mission-lifecycle.test.ts');
-      assert.equal(smokeGate.command, 'node --import tsx test/e2e-real-agent-smoke.test.ts');
+      assert.equal(workflowGate.command, 'node --import tsx --import ./test/bootstrap-e2e-parallix-home.ts test/e2e-mission-lifecycle.test.ts');
+      assert.equal(smokeGate.command, 'node --import tsx --import ./test/bootstrap-e2e-parallix-home.ts test/e2e-real-agent-smoke.test.ts');
       assert.ok(plan.gates.indexOf(suiteGate) < plan.gates.indexOf(workflowGate), `${label} suite gate runs before workflow E2E`);
       assert.ok(plan.gates.indexOf(workflowGate) < plan.gates.indexOf(smokeGate), `${label} workflow E2E remains before smoke E2E`);
     }

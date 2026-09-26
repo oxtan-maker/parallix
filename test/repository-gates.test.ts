@@ -382,8 +382,8 @@ test('this repository exposes the full independent gate width and orders Sonar a
     { key: 'verification', command: './scripts/verify-local.sh static-analysis', order: 3 },
     { key: 'integration-suite', command: 'npm run test:integration:prebuilt', order: 4 },
     { key: 'coverage', command: 'rm -f coverage/lcov.info && PARALLIX_PREBUILT_PACK=1 npm run test:coverage -- --threshold 0 --lcov && test -s coverage/lcov.info', order: 5 },
-    { key: 'workflow', command: 'node --import tsx test/e2e-mission-lifecycle.test.ts', order: 6 },
-    { key: 'agent-smoke', command: 'node --import tsx test/e2e-real-agent-smoke.test.ts', order: 7 },
+    { key: 'workflow', command: 'node --import tsx --import ./test/bootstrap-e2e-parallix-home.ts test/e2e-mission-lifecycle.test.ts', order: 6 },
+    { key: 'agent-smoke', command: 'node --import tsx --import ./test/bootstrap-e2e-parallix-home.ts test/e2e-real-agent-smoke.test.ts', order: 7 },
     { key: 'quality-gate', command: 'npm run sonar', order: 8 },
   ]);
   assert.deepEqual(gates.find(g => g.key === 'quality-gate')?.after, ['coverage']);

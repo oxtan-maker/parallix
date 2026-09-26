@@ -253,6 +253,8 @@ export const INTEGRATION_CI_TESTS: readonly string[] = [
   // prove the delete-branch subcommand's exit-0 failure semantics; the rest is
   // request-injected, so it crosses only the process boundary.
   'task-2551-sonar-branch-cleanup.test.ts',
+  'task-2554-guard.test.ts',
+  'task-2554-repro.test.ts',
   'test-hygiene.test.ts',
   'tui-command-flow.test.ts',
   'tui-pty-smoke.test.ts',

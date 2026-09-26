@@ -112,7 +112,7 @@ test('verify-local integrate prints the resolved dry-run plan for workflow gates
     fs.writeFileSync(configPath, JSON.stringify({
       gates: {
         lib: { command: './scripts/verify-local.sh static-analysis', order: 1, run_last: false },
-        workflow: { command: 'node --import tsx test/e2e-mission-lifecycle.test.ts', order: 50, run_last: true }
+        workflow: { command: 'node --import tsx --import ./test/bootstrap-e2e-parallix-home.ts test/e2e-mission-lifecycle.test.ts', order: 50, run_last: true }
       }
     }, null, 2));
 
@@ -126,7 +126,7 @@ test('verify-local integrate prints the resolved dry-run plan for workflow gates
     assert.equal(result.status, 0, output);
     assert.match(output, /integration-gates: resolved gate plan:/);
     assert.match(output, /lib: \.\/scripts\/verify-local\.sh static-analysis/);
-    assert.match(output, /workflow: node --import tsx test\/e2e-mission-lifecycle.test.ts/);
+    assert.match(output, /workflow: node --import tsx --import \.\/test\/bootstrap-e2e-parallix-home\.ts test\/e2e-mission-lifecycle\.test\.ts/);
   } finally {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }
@@ -139,7 +139,7 @@ test('verify-local integrate fails closed when no mandatory gate applies (task-2
     fs.writeFileSync(configPath, JSON.stringify({
       gates: {
         lib: { command: './scripts/verify-local.sh static-analysis', order: 1, run_last: false },
-        workflow: { command: 'node --import tsx test/e2e-mission-lifecycle.test.ts', order: 50, run_last: true }
+        workflow: { command: 'node --import tsx --import ./test/bootstrap-e2e-parallix-home.ts test/e2e-mission-lifecycle.test.ts', order: 50, run_last: true }
       }
     }, null, 2));
 
@@ -164,8 +164,8 @@ test('verify-local integrate resolves the unconditional integration suite for ev
     fs.writeFileSync(configPath, JSON.stringify({
       gates: {
         'integration-suite': { command: 'npm run test:integration', order: 3, run_last: false, always: true },
-        workflow: { command: 'node --import tsx test/e2e-mission-lifecycle.test.ts', order: 50, run_last: true },
-        'custom-agent-smoke': { command: 'node --import tsx test/e2e-real-agent-smoke.test.ts', order: 51, run_last: true }
+        workflow: { command: 'node --import tsx --import ./test/bootstrap-e2e-parallix-home.ts test/e2e-mission-lifecycle.test.ts', order: 50, run_last: true },
+        'custom-agent-smoke': { command: 'node --import tsx --import ./test/bootstrap-e2e-parallix-home.ts test/e2e-real-agent-smoke.test.ts', order: 51, run_last: true }
       }
     }, null, 2));
 
@@ -186,12 +186,12 @@ test('verify-local integrate resolves the unconditional integration suite for ev
       const output = `${result.stdout}${result.stderr}`;
       assert.equal(result.status, 0, `${label}: ${output}`);
       assert.match(output, /integration-suite: npm run test:integration/, `${label} must include the suite gate`);
-      assert.equal(output.includes('workflow: node --import tsx test/e2e-mission-lifecycle.test.ts'), expectsE2E, `${label} workflow selection`);
-      assert.equal(output.includes('custom-agent-smoke: node --import tsx test/e2e-real-agent-smoke.test.ts'), expectsE2E, `${label} smoke selection`);
+      assert.equal(output.includes('workflow: node --import tsx --import ./test/bootstrap-e2e-parallix-home.ts test/e2e-mission-lifecycle.test.ts'), expectsE2E, `${label} workflow selection`);
+      assert.equal(output.includes('custom-agent-smoke: node --import tsx --import ./test/bootstrap-e2e-parallix-home.ts test/e2e-real-agent-smoke.test.ts'), expectsE2E, `${label} smoke selection`);
       if (expectsE2E) {
         const suiteIndex = output.indexOf('integration-suite: npm run test:integration');
-        const workflowIndex = output.indexOf('workflow: node --import tsx test/e2e-mission-lifecycle.test.ts');
-        const smokeIndex = output.indexOf('custom-agent-smoke: node --import tsx test/e2e-real-agent-smoke.test.ts');
+        const workflowIndex = output.indexOf('workflow: node --import tsx --import ./test/bootstrap-e2e-parallix-home.ts test/e2e-mission-lifecycle.test.ts');
+        const smokeIndex = output.indexOf('custom-agent-smoke: node --import tsx --import ./test/bootstrap-e2e-parallix-home.ts test/e2e-real-agent-smoke.test.ts');
         assert.ok(suiteIndex < workflowIndex, `${label} suite must run before workflow E2E`);
         assert.ok(workflowIndex < smokeIndex, `${label} workflow E2E must run before smoke`);
       }

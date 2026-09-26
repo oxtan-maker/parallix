@@ -174,6 +174,10 @@ const expectedIntegrationFiles = [
   // prove the delete-branch subcommand's exit-0 failure semantics; the rest is
   // request-injected, so it crosses only the process boundary.
   'task-2551-sonar-branch-cleanup.test.ts',
+  // TASK-2554: proves the e2e entries' import chains isolate PARALLIX_HOME by
+  // spawning the entry's own node process; crosses the process boundary only.
+  'task-2554-guard.test.ts',
+  'task-2554-repro.test.ts',
   // TASK-2532: seeds temporary Git repositories to exercise the base-worktree
   // repair, so it crosses the git boundary and runs in the integration layer.
   'task-2532-stale-integration-state-repro.test.ts',

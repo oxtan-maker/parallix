@@ -6,8 +6,13 @@ import path from 'node:path';
 import childProcess from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { setCommandPathProbe, setLauncherHealthProbe } from '../src/adapters/agents/launcher-selection.js';
+import { startDefaultDbGuard } from './lib/default-db-guard.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+
+// TASK-2554: arm the operator-database guard BEFORE overriding PARALLIX_HOME,
+// so it protects the database this process would otherwise have resolved.
+startDefaultDbGuard('unit-test');
 
 const tempRoots = [];
 
