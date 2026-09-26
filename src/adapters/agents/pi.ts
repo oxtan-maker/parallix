@@ -266,7 +266,6 @@ async function runPiSession(
     ({ session } = await createSession(sdkOptions));
     const unsubscribe = subscribePiEvents(session, watchdog, {
       text: delta => { state.assistantText += delta; },
-      tool: () => {},
       settled: error => { state.settleError = error; },
     });
     await session.prompt(prompt);
@@ -421,10 +420,17 @@ function createPiWatchdog(watchdog: PiNoOutputWatchdog | null | undefined, invoc
   return { clear, noteOutput: () => { sawOutput = true; lastOutputAt = Date.now(); } };
 }
 
-function subscribePiEvents(session: any, watchdog: { noteOutput: () => void }, callbacks: { text: (_delta: string) => void; tool: () => void; settled: (_error: string | null) => void }) {
+function summarizePiToolResult(result: any) {
+  const text = result?.content?.find((block: any) => block?.type === 'text')?.text;
+  return typeof text === 'string' ? ` ${text.replace(/\s+/g, ' ').slice(0, 200)}` : '';
+}
+
+function subscribePiEvents(session: any, watchdog: { noteOutput: () => void }, callbacks: { text: (_delta: string) => void; settled: (_error: string | null) => void }) {
   return session.subscribe((event: any) => {
     if (event.type === 'message_update' && event.assistantMessageEvent?.type === 'text_delta') { const delta = event.assistantMessageEvent.delta; callbacks.text(delta); process.stdout.write(delta); watchdog.noteOutput(); }
-    else if (event.type === 'tool_execution_end') { callbacks.tool(); }
+    else if (event.type === 'message_update' && event.assistantMessageEvent?.type === 'thinking_delta') { process.stdout.write(`✳ ${event.assistantMessageEvent.delta}\n`); watchdog.noteOutput(); }
+    else if (event.type === 'tool_execution_start') { process.stdout.write(`⚒ ${event.toolName || 'tool'}\n`); watchdog.noteOutput(); }
+    else if (event.type === 'tool_execution_end') { process.stdout.write(`${event.isError ? '✗' : '✓'} ${event.toolName || 'tool'}${summarizePiToolResult(event.result)}\n`); watchdog.noteOutput(); }
     else if (event.type === 'agent_end') { const last = event.messages?.[event.messages.length - 1]; callbacks.settled(!event.willRetry && last?.stopReason === 'error' ? last.errorMessage || 'agent session ended in a provider error' : null); }
     else if (event.type === 'auto_retry_end' && event.success === false) { callbacks.settled(event.finalError || 'agent retries exhausted without a model response'); }
   });

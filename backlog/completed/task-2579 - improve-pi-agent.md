@@ -1,10 +1,10 @@
 ---
 id: TASK-2579
 title: improve pi agent
-status: backlog
-assignee: []
+status: done
+assignee: [codex]
 created_date: '2026-09-26 06:01'
-labels: []
+labels: [ai_sdlc]
 dependencies: []
 ordinal: 110008
 ---

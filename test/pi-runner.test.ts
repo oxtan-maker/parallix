@@ -172,15 +172,9 @@ test('WORKFLOW_AGENT_NAMES includes custom as public agent family', () => {
   assert(WORKFLOW_AGENT_NAMES.includes('custom'));
 });
 
-// ---------- SDK output filtering (CP-3: chatter suppression) ----------
-//
-// The Pi SDK emits many event types (session header, token deltas, tool
-// execution events, agent lifecycle events). Only text_delta events from
-// message_update should appear as user-facing stdout. All other events
-// (tool_execution_start/end, agent_start/end, compaction, etc.) are
-// internal chatter that must not leak into the result.
+// ---------- SDK live progress and clean result ----------
 
-test('startPiAgent SDK output contains only assistant text, not SDK event chatter', async () => {
+test('startPiAgent renders thinking and tool progress without polluting the final result', async () => {
   // Mock createAgentSession with a session that emits events to the registered
   // listener during prompt(). The production subscribe handler must receive these
   // events and only text_delta contributes to visible output.
@@ -194,7 +188,9 @@ test('startPiAgent SDK output contains only assistant text, not SDK event chatte
       { type: 'message_update', assistantMessageEvent: { type: 'text_delta', delta: ' world' } },
       { type: 'message_update', assistantMessageEvent: { type: 'thinking_delta', delta: '<thinking>...' } },
       { type: 'tool_execution_start', toolName: 'bash', toolCallId: 't1' },
-      { type: 'tool_execution_end', toolName: 'bash', toolCallId: 't1', result: 'OK', isError: false },
+      { type: 'tool_execution_end', toolName: 'bash', toolCallId: 't1', result: { content: [{ type: 'text', text: 'OK' }], details: {} }, isError: false },
+      { type: 'tool_execution_start', toolName: 'read', toolCallId: 't2' },
+      { type: 'tool_execution_end', toolName: 'read', toolCallId: 't2', result: { content: [{ type: 'text', text: 'Permission denied' }], details: {} }, isError: true },
       { type: 'message_end', message: { role: 'assistant' } },
       { type: 'turn_end', message: { role: 'assistant' } },
       { type: 'agent_end', messages: [{ role: 'assistant' }] },
@@ -234,18 +230,24 @@ test('startPiAgent SDK output contains only assistant text, not SDK event chatte
     return { session, extensionsResult: { extensions: [], diagnostics: [] } };
   });
 
-  const { resultPromise } = pi.startPiAgent({ prompt: 'Say hello', worktree: '/tmp/test' });
-  const result = await resultPromise;
+  const writes: string[] = [];
+  const originalWrite = process.stdout.write.bind(process.stdout);
+  process.stdout.write = ((chunk: string | Uint8Array) => {
+    writes.push(typeof chunk === 'string' ? chunk : chunk.toString());
+    return true;
+  }) as typeof process.stdout.write;
 
-  // stdout should contain only the assistant text collected from text_delta events,
-  // not any SDK event chatter. Because getLastAssistantText returns '', the result
-  // must come from the subscribe handler's assistantText accumulator.
-  assert.equal(result.stdout, 'Hello world',
-    `stdout should contain only assistant text from text_delta events, got: ${result.stdout}`);
+  try {
+    const { resultPromise } = pi.startPiAgent({ prompt: 'Say hello', worktree: '/tmp/test' });
+    const result = await resultPromise;
 
-  // Status should be success.
-  assert.equal(result.status, 0);
-  assert.equal(result.provider, 'pi');
+    assert.equal(result.stdout, 'Hello world', 'final result contains assistant text only');
+    assert.deepEqual(writes, ['Hello', ' world', '✳ <thinking>...\n', '⚒ bash\n', '✓ bash OK\n', '⚒ read\n', '✗ read Permission denied\n']);
+    assert.equal(result.status, 0);
+    assert.equal(result.provider, 'pi');
+  } finally {
+    process.stdout.write = originalWrite;
+  }
 });
 
 test('startPiAgent SDK execution returns session ID and telemetry from session state', async () => {
