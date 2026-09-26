@@ -15,7 +15,7 @@ ordinal: 112008
 ## Description
 
 <!-- SECTION:DESCRIPTION:BEGIN -->
-Typed mission recovery still tells implementers to create CP-N.md documents although checkpoint evidence is owned by Mission state and px checkpoint record. TASK-2521.06 exhausted handoff retries with missing CP evidence and contradictory document creation advice. The stale guidance is emitted by active.ts recovery advice and repair-handoff.ts. Update recovery advice to follow the recorded contract and named checkpoint commands. Slow px status is tracked separately; do not treat normal latency as an external dependency. Keep explicit historical import guidance without fabricating checkpoint evidence.
+Typed mission recovery still tells implementers to create CP-N.md documents although checkpoint evidence is owned by Mission state and px checkpoint record. TASK-2521.06 exhausted handoff retries with missing CP evidence and contradictory document creation advice. The stale guidance is emitted by active.ts recovery advice and repair-handoff.ts. Update recovery advice to follow the recorded contract and named checkpoint commands. Slow px status is tracked separately; do not treat normal latency as an external dependency. Keep explicit historical import guidance without fabricating checkpoint evidence. But ensure px status shows all completed checkpoints.
 <!-- SECTION:DESCRIPTION:END -->
 
 ## Acceptance Criteria
