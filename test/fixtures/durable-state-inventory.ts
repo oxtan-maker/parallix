@@ -949,7 +949,7 @@ export const ADR0053_PERSISTENCE_INVENTORY: readonly ADR0053BoundaryEntry[] = [
 /** Classification for a legitimate writer of a retired workflow path. */
 export type RetiredWorkflowPathWriterClass =
   | 'external-task-provider'
-  | 'mission-contract-document'
+  | 'mission-directory'
   | 'explicit-one-way-export'
   | 'product-configuration-file'
   | 'mission-document-evidence'
@@ -1003,12 +1003,11 @@ export const RETIRED_WORKFLOW_PATH_WRITERS: readonly RetiredWorkflowPathWriterEn
   {
     id: 'retired-writer-draft-setup-mission',
     fileLocation: 'src/adapters/cli/commands/draft-setup.ts',
-    // Scaffolds the operator-named MISSION.md contract: creates the mission
-    // directory (mkdirSync(missionDir)) then writes the contract. Both are
-    // mission-contract scaffolding, not operational persistence.
-    pathPatterns: ['MISSION.md', 'missionDir'],
-    classification: 'mission-contract-document',
-    authority: 'ADR 0053 — px draft scaffolds the operator-named MISSION.md contract; a user-facing artifact, not operational persistence.',
+    // Draft only prepares a directory for mission-local artifacts. Generated
+    // contract files have no normal-runtime writer exemption.
+    pathPatterns: ['mkdirSync\\(missionDir'],
+    classification: 'mission-directory',
+    authority: 'Draft prepares a mission directory without writing a contract document.',
   },
   {
     id: 'retired-writer-integrate-conflict',
@@ -1023,13 +1022,6 @@ export const RETIRED_WORKFLOW_PATH_WRITERS: readonly RetiredWorkflowPathWriterEn
     pathPatterns: ['workflow.config.json'],
     classification: 'product-configuration-file',
     authority: 'ADR 0051/configuration — workflow.config.json is operator configuration; the backlog/ layout string is documentation, not persistence.',
-  },
-  {
-    id: 'retired-writer-redgreen',
-    fileLocation: 'src/adapters/verification/redgreen.ts',
-    pathPatterns: ['MISSION.md'],
-    classification: 'mission-document-evidence',
-    authority: 'ADR 0053 — red-green reads MISSION.md as reproduction-test evidence, not as Mission state authority.',
   },
   {
     id: 'retired-writer-handoff-checkpoint',

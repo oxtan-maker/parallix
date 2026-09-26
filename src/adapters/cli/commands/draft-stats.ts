@@ -13,27 +13,21 @@ import { ensureWorkflowGitignore } from '../../filesystem/gitignore.js';
 import { missionId } from '../../../domain/mission.js';
 import { allocateAdhocIdentity } from '../../sqlite/adhoc-counter.js';
 import { resolveCanonicalRepositoryId } from '../../git/repository-identity.js';
-import { resolveDraftTarget, ensureMissionBranch, ensureMissionBaseBranchRecorded, ensureWorktree, ensureGraphifyWorkspace, ensureGraphifyIgnore, ensureMissionFile, ensureDraftRepoConfigCommitted, ensureRepoExists, bootstrapBacklogTask } from './draft-setup.js';
+import { resolveDraftTarget, ensureMissionBranch, ensureWorktree, ensureGraphifyWorkspace, ensureGraphifyIgnore, ensureMissionFile, ensureDraftRepoConfigCommitted, ensureRepoExists, bootstrapBacklogTask } from './draft-setup.js';
 import { buildDraftPrompt, buildRestartPrompt, buildContractRepairPrompt, validateDraftClassification, normalizeDraftClassification } from './draft-prompts.js';
 import { enforceDraftCommitSafety } from './draft-conflicts.js';
 import { runPreDraftHook } from '../../process/pre-draft-hook.js';
 
 /**
- * Read the human mission title from the `# Mission: <title>` heading the draft
- * agent writes at the top of MISSION.md. Falls back to the slug when the file is
- * absent or the heading is missing, so presentation never introduces a new
- * failure mode (mission stop rule).
+ * Read the display title from the Backlog task mirror during draft setup.
+ * Completed drafts use the recorded Mission title.
  */
-// @ts-expect-error implicit any on missionFile/fallback
-function readMissionTitle(missionFile, fallback) {
+// @ts-expect-error implicit any on taskFile/fallback
+function readTaskTitle(taskFile, fallback) {
   try {
-    const firstLine = fs.readFileSync(missionFile, 'utf8').split('\n')[0] || '';
-    const match = /^#\s*Mission:\s*(.*)$/i.exec(firstLine.trim());
-    // A Mission drafted through the typed verbs leaves the scaffold heading unfilled.
-    return (match && !match[1].includes('<Title>') && match[1].trim()) || fallback;
-  } catch {
-    return fallback;
-  }
+    const match = /^title:\s*(.+)$/mi.exec(fs.readFileSync(taskFile, 'utf8'));
+    return match?.[1]?.trim().replace(/^['"]|['"]$/g, '') || fallback;
+  } catch { return fallback; }
 }
 
 /**
@@ -57,9 +51,10 @@ async function readMissionDigest(ctx) {
   try {
     const services = await ctx.missionServicesFn(ctx.targetWorktree);
     const loaded = await services.store.load(missionId(ctx.slug));
-    if (loaded.kind !== 'found') { return { goal: '', criteria: 0, checkpoints: 0, gates: 0, nel: '' }; }
+    if (loaded.kind !== 'found') { return { title: ctx.slug, goal: '', criteria: 0, checkpoints: 0, gates: 0, nel: '' }; }
     const { mission } = loaded;
     return {
+      title: mission.title || ctx.slug,
       goal: mission.brief?.goal ?? '',
       criteria: (mission.successCriteria ?? []).length,
       checkpoints: mission.checkpoints.length,
@@ -67,7 +62,7 @@ async function readMissionDigest(ctx) {
       nel: mission.predictedNelBucket ?? '',
     };
   } catch {
-    return { goal: '', criteria: 0, checkpoints: 0, gates: 0, nel: '' };
+    return { title: ctx.slug, goal: '', criteria: 0, checkpoints: 0, gates: 0, nel: '' };
   }
 }
 
@@ -95,7 +90,8 @@ function logDraftDigest(digest, logFn) {
 }
 
 async function logDraftCompletion(ctx, startedAtMs, logFn) {
-  const missionTitle = readMissionTitle(ctx.missionFile, ctx.slug);
+  const digest = await readMissionDigest(ctx);
+  const missionTitle = digest.title;
   logFn('');
   logFn(fmt.status('PASS', `Drafted ${fmt.slug(ctx.slug)} in ${formatElapsed(Date.now() - startedAtMs)}: ${fmt.bold(missionTitle)}`));
   logFn(detailRows([
@@ -103,7 +99,7 @@ async function logDraftCompletion(ctx, startedAtMs, logFn) {
     ['branch', fmt.branch(ctx.branchName || missionBranchName(ctx.slug, ctx.mainRepo))],
     ['agent', fmt.agent(/** @type {any} */ (ctx.actualAgent || ctx.agent || 'unknown'))],
   ]));
-  logDraftDigest(await readMissionDigest(ctx), logFn);
+  logDraftDigest(digest, logFn);
   logFn('');
   // The worktree is emitted as `Working directory:` rather than a detail row on
   // purpose: the `px` shell function from `px shell-init`
@@ -302,7 +298,7 @@ function recordDraftStats({ slug, rootDir, agentFamily, result, log = fmt.log.pl
   }
 }
 
-/** @type {typeof draft & {draft: typeof draft, runDraftCommand: typeof runDraftCommand, recordDraftStats: typeof recordDraftStats, buildDraftPrompt: typeof buildDraftPrompt, recordDraftImplementer: typeof recordDraftImplementer, enforceDraftCommitSafety: typeof enforceDraftCommitSafety, fallbackDraftCommitMessage: typeof fallbackDraftCommitMessage, bootstrapBacklogTask: typeof bootstrapBacklogTask, ensureGraphifyWorkspace: typeof ensureGraphifyWorkspace, ensureGraphifyIgnore: typeof ensureGraphifyIgnore, ensureMissionBranch: typeof ensureMissionBranch, ensureMissionBaseBranchRecorded: typeof ensureMissionBaseBranchRecorded, ensureWorktree: typeof ensureWorktree, ensureMissionFile: typeof ensureMissionFile, ensureDraftRepoConfigCommitted: typeof ensureDraftRepoConfigCommitted, ensureRepoExists: typeof ensureRepoExists, classifyDraftEntries: typeof classifyDraftEntries, isUnmergedStatus: typeof isUnmergedStatus, isDeletedStatus: typeof isDeletedStatus, isMissionTaskPath: typeof isMissionTaskPath, isExpectedDraftPath: typeof isExpectedDraftPath, validateDraftClassification: typeof validateDraftClassification, normalizeDraftClassification: typeof normalizeDraftClassification, buildRestartPrompt: typeof buildRestartPrompt, restartDraftAgent: typeof restartDraftAgent}} */
+/** @type {typeof draft & {draft: typeof draft, runDraftCommand: typeof runDraftCommand, recordDraftStats: typeof recordDraftStats, buildDraftPrompt: typeof buildDraftPrompt, recordDraftImplementer: typeof recordDraftImplementer, enforceDraftCommitSafety: typeof enforceDraftCommitSafety, fallbackDraftCommitMessage: typeof fallbackDraftCommitMessage, bootstrapBacklogTask: typeof bootstrapBacklogTask, ensureGraphifyWorkspace: typeof ensureGraphifyWorkspace, ensureGraphifyIgnore: typeof ensureGraphifyIgnore, ensureMissionBranch: typeof ensureMissionBranch, ensureWorktree: typeof ensureWorktree, ensureMissionFile: typeof ensureMissionFile, ensureDraftRepoConfigCommitted: typeof ensureDraftRepoConfigCommitted, ensureRepoExists: typeof ensureRepoExists, classifyDraftEntries: typeof classifyDraftEntries, isUnmergedStatus: typeof isUnmergedStatus, isDeletedStatus: typeof isDeletedStatus, isMissionTaskPath: typeof isMissionTaskPath, isExpectedDraftPath: typeof isExpectedDraftPath, validateDraftClassification: typeof validateDraftClassification, normalizeDraftClassification: typeof normalizeDraftClassification, buildRestartPrompt: typeof buildRestartPrompt, restartDraftAgent: typeof restartDraftAgent}} */
 /**
  * Create a DraftWorkflowPort implementation backed by the adapter's functions.
  * Each port method performs its actual workflow step using the adapter's helper
@@ -531,16 +527,14 @@ function createDraftWorkflowAdapter(deps: Record<string, unknown> = {}) {
       return { ...ctx, targetWorktree, branchName, missionFile: ctx.missionFile };
     },
 
-    // Scaffold: MISSION.md, base branch record, backlog bootstrap
+    // Prepare the mission directory and Backlog mirror.
     scaffold: (ctx: DraftWorkflowContext): DraftWorkflowContext => {
       const merged = ctx.options as Record<string, unknown>;
       const ensureMissionFileFn = merged.ensureMissionFileFn || ensureMissionFile;
-      const ensureMissionBaseBranchRecordedFn = merged.ensureMissionBaseBranchRecordedFn || ensureMissionBaseBranchRecorded;
       const bootstrapBacklogTaskFn = merged.bootstrapBacklogTaskFn || bootstrapBacklogTask;
 
-      debugFn(fmt.bold('Step 3: Scaffolding MISSION.md...'));
+      debugFn(fmt.bold('Step 3: Preparing mission directory...'));
       const missionFile = ensureMissionFileFn(ctx.targetWorktree, ctx.slug, { logFn: plumbingLogFn });
-      ensureMissionBaseBranchRecordedFn(missionFile, ctx.recordedBase, { logFn: plumbingLogFn });
 
       debugFn(fmt.bold('Step 4: Ensuring Backlog task exists in worktree...'));
       if (!bootstrapBacklogTaskFn(ctx.targetWorktree, ctx.mainRepo, ctx.slug, { logFn: plumbingLogFn, errorFn, syntheticTask: ctx.syntheticTask })) {
@@ -577,7 +571,7 @@ function createDraftWorkflowAdapter(deps: Record<string, unknown> = {}) {
 
       debugFn('\n' + fmt.status('PASS', 'Draft setup complete.'));
       debugFn(`Worktree: ${fmt.path(ctx.targetWorktree)}`);
-      debugFn(`Mission doc: ${fmt.path(missionFile)}`);
+      debugFn(`Contract: ${fmt.command(`px status ${ctx.slug}`)}`);
 
       return { ...ctx, missionFile };
     },
@@ -587,13 +581,16 @@ function createDraftWorkflowAdapter(deps: Record<string, unknown> = {}) {
       const resolveTaskFileFn = (ctx.options as any).resolveTaskFileFn || resolveTaskFile;
       const getTaskLabelsFn = getTaskLabels;
 
-      const missionTitle = readMissionTitle(ctx.missionFile, ctx.slug);
+      let missionTitle = ctx.syntheticTask?.title || ctx.slug;
       let taskLabels: string[] = [];
       try {
         const taskResolution = resolveTaskFileFn(ctx.slug, ctx.targetWorktree);
         taskLabels = taskResolution?.ok && taskResolution?.taskFile
           ? getTaskLabelsFn(taskResolution.taskFile)
           : [];
+        if (taskResolution?.ok && taskResolution?.taskFile) {
+          missionTitle = readTaskTitle(taskResolution.taskFile, missionTitle);
+        }
       } catch {
         taskLabels = [];
       }
@@ -723,7 +720,6 @@ function createDraftWorkflowAdapter(deps: Record<string, unknown> = {}) {
       const normalizeDraftClassificationFn = merged.normalizeDraftClassificationFn || normalizeDraftClassification;
       const restartDraftAgentFn = merged.restartDraftAgentFn || restartDraftAgent;
       const readAgentConfigOrExitFn = merged.readAgentConfigOrExitFn || readAgentConfigOrExit;
-      const ensureMissionBaseBranchRecordedFn = merged.ensureMissionBaseBranchRecordedFn || ensureMissionBaseBranchRecorded;
 
       const normalizationResult = normalizeDraftClassificationFn(ctx.slug, ctx.targetWorktree, {
         errorFn
@@ -754,9 +750,6 @@ function createDraftWorkflowAdapter(deps: Record<string, unknown> = {}) {
       } else {
         debugFn(fmt.status('PASS', `Post-draft mission type labels validated: ${normalizationResult.classification}`));
       }
-
-      // Re-assert base branch
-      ensureMissionBaseBranchRecordedFn(ctx.missionFile, ctx.recordedBase, { logFn: plumbingLogFn });
 
       return ctx;
     },

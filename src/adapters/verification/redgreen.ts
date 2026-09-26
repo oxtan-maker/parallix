@@ -2,37 +2,14 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import * as fmt from '../../application/presentation/cli-format.js';
-import { findMissionDir, findCheckpoints, missionBranchName, resolveMissionBaseBranch } from '../filesystem/mission-utils.js';
+import { missionBranchName, resolveMissionBaseBranch } from '../filesystem/mission-utils.js';
 import { git, run } from '../git/git.js';
 
-const REPRO_TEST_MARKER = /^Reproduction-Test:\s*(.+?)\s*$/m;
-
 /**
- * Locate the reproduction test path from a `Reproduction-Test: <path>` line in
- * MISSION.md or any checkpoint document. Returns null when none is declared.
+ * Locate the reproduction test path recorded in Mission state.
  */
-function findReproTestPath(slug: string, rootDir: string, options: { findMissionDirFn?: Function, findCheckpointsFn?: Function } = {} as any) {
-  const {
-    findMissionDirFn = findMissionDir,
-    findCheckpointsFn = findCheckpoints
-  } = options;
-
-  const missionDir = findMissionDirFn(slug, rootDir);
-  if (!missionDir) {return null;}
-
-  const candidates = [path.join(missionDir, 'MISSION.md')];
-  try {
-    candidates.push(...findCheckpointsFn(missionDir));
-  } catch (_) {
-    // missionDir may not be readable; MISSION.md alone is enough to try
-  }
-
-  for (const file of candidates) {
-    if (!file || !fs.existsSync(file)) {continue;}
-    const match = fs.readFileSync(file, 'utf8').match(REPRO_TEST_MARKER);
-    if (match) {return match[1].trim();}
-  }
-  return null;
+function findReproTestPath(_slug: string, _rootDir: string, options: { testPath?: string | null } = {}): string | null {
+  return options.testPath ?? null;
 }
 
 /**
@@ -121,10 +98,10 @@ function verifyRedGreenProof(slug: string, options: { rootDir?: string, log?: Fu
   delete childOpts.runReproAtRefFn;
   delete childOpts.branch;
 
-  // 1. Locate the reproduction test declared by the mission.
+  // 1. Use the reproduction test recorded in Mission state.
   const testPath = findReproTestPathFn(slug, rootDir, childOpts);
   if (!testPath) {
-    const errMsg = `Mission ${slug} declares no \`Reproduction-Test:\` line in MISSION.md or any checkpoint document.`;
+    const errMsg = `Mission ${slug} has no recorded reproduction test. Record one with \`px repro set --test <path>\`.`;
     log(fmt.status('FAIL', errMsg));
     return { ok: false, skipped: false, reason: 'repro-not-declared', error: errMsg };
   }

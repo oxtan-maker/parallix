@@ -173,7 +173,7 @@ export class HandoffCommandUseCase {
    * Verifies that the current environment is ready for handoff.
    */
   verifyHandoff(slug: string, options: { worktree?: string } = {}) {
-    const { fileSystem, git, missionUtils } = this.ports;
+    const { git, missionUtils } = this.ports;
     const launchRoot = process.cwd();
     const rootDir = options.worktree || missionUtils.resolveWorktree(slug, { cwd: launchRoot }) || launchRoot;
     const missionDir = missionUtils.findMissionDir(slug, rootDir);
@@ -187,11 +187,6 @@ export class HandoffCommandUseCase {
 
     if (current !== branch) {
       return { ok: false, error: `Not on mission branch. Current: ${current}, Expected: ${branch}` };
-    }
-
-    const missionMdPath = path.join(missionDir, 'MISSION.md');
-    if (!fileSystem.existsSync(missionMdPath)) {
-      return { ok: false, error: `MISSION.md not found at ${missionMdPath}. The mission contract must exist before handoff.` };
     }
 
     return { ok: true, missionDir, area, branch, rootDir };
@@ -993,17 +988,19 @@ export class HandoffCommandUseCase {
       error(contract.error);
       return { ok: false, error: contract.error };
     }
+    if (!contract.draftedInDb) {
+      const missionMdPath = path.join(missionDirPath, 'MISSION.md');
+      if (!ports.fileSystem.existsSync(missionMdPath)) {
+        const msg = `MISSION.md not found at ${missionMdPath}. Import the historical contract before handoff.`;
+        error(msg);
+        return { ok: false, error: msg };
+      }
+    }
     const recorded = contract.checkpoints;
     let finalCheckpoint: string | null = null;
     let checkpointContent = '';
     let evidenceRows: string[] = [];
     if (recorded.length > 0) {
-      const relativeMissionPath = path.relative(rootDir, path.join(missionDirPath, 'MISSION.md'));
-      if (ports.git.getWorktreeStatus(rootDir).some(line => line.endsWith(relativeMissionPath))) {
-        const msg = `${fmt.path('MISSION.md')} is modified but uncommitted at ${fmt.path(relativeMissionPath)}. Commit the mission contract before handoff.`;
-        error(msg);
-        return { ok: false, error: msg };
-      }
       const latest = recorded[recorded.length - 1];
       const rows = latest.goalCheck.map((row) => `| ${row.criterion} | ${row.evidence} |`);
       const unverifiable = findUnverifiableGoalCheckRow(ports.fileSystem, rows, rootDir);

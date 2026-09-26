@@ -524,7 +524,10 @@ The draft has the same shape at its own boundary. When the drafting agent ends
 without recording every part of the mission contract, `px draft` sends the
 refusal — which names each missing part and the command that records it — back
 to the same agent family, up to twice, keeping everything already recorded. The
-draft fails only when the contract is still incomplete after that.
+draft fails only when the contract is still incomplete after that. New typed
+drafts keep the contract in recorded Mission state, available through
+`px status`; they do not generate a `MISSION.md`. The Backlog task remains a
+user-facing mirror of lifecycle status.
 
 An integration-gate repair that changes the revision the reviewer approved
 retracts that approval, as before, and then sends the repaired revision back

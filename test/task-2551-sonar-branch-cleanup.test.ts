@@ -52,6 +52,7 @@ test('deleteMissionBranch resolves the branch from the hook slug and the configu
   assert.deepEqual(result, { ok: true });
   assert.equal(emitted.length, 0);
   assert.equal(calls[0].url, 'https://sonarcloud.io/api/project_branches/delete?project=parallix&branch=mission%2Ftask-2551');
+  assert.equal(calls[1].url, 'https://sonarcloud.io/api/project_branches/delete?project=parallix&branch=candidate%2Fmission%2Ftask-2551');
 });
 
 test('deleteMissionBranch with a missing token surfaces a clear error and never invokes the request', async () => {

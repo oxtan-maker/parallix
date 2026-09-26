@@ -6,7 +6,6 @@ import * as fmt from '../../../application/presentation/cli-format.js';
 import { git, getWorktreeStatus } from '../../git/git.js';
 import { resolveTaskFile, reportTaskResolution, getTaskStorage } from '../../backlog/backlog.js';
 import { getPrimaryBranch, missionDirForSlug, squashTrailingBacklogNoiseIntoPreviousMission } from '../../filesystem/mission-utils.js';
-import { runtimeAssetStore } from '../../assets/runtime-assets.js';
 import { parseDirtyEntry } from './draft-conflicts.js';
 
 const SYNTHETIC_SLUG_PREFIX = 'adhoc-';
@@ -113,79 +112,19 @@ function ensureMissionBranch(mainRepo, branchName, {
   baseBranch = null
 } = {}) {
   const branches = gitFn(['-C', mainRepo, 'branch', '--list', branchName]).stdout.trim();
+  const startPoint = baseBranch || getPrimaryBranch();
   if (branches) {
     logFn(fmt.status('PASS', `Branch ${fmt.branch(branchName)} already exists.`));
-    return;
-  }
-
-  squashTrailingBacklogNoiseIntoPreviousMissionFn(mainRepo, gitFn);
-
-  // The base is whatever HEAD pointed at when draft ran (a feature branch); when
-  // none was recorded it falls back to the primary branch — byte-identical to
-  // the legacy single-branch behaviour.
-  const startPoint = baseBranch || getPrimaryBranch();
-  gitFn(['-C', mainRepo, 'branch', branchName, startPoint]);
-  logFn(fmt.status('PASS', `Created branch ${fmt.branch(branchName)} from ${fmt.branch(startPoint)}.`));
-}
-
-/**
- * Persist the resolved mission base as a single machine-readable `Base-Branch:`
- * line in MISSION.md. Idempotent: a no-op when the correct line is already
- * present, when `baseBranch` is falsy and no base line exists, or when the
- * mission file is missing. Replaces a stale line in place, otherwise inserts the
- * line just under the title.
- *
- * A primary/detached-HEAD launch records no feature base, so `baseBranch` is
- * falsy. Previously that was an unconditional no-op, which let a stale
- * `Base-Branch` left by a prior feature-branch re-draft survive: the next
- * `resolveMissionBaseBranch` would then resolve a branch that no longer exists
- * (task-2389, `friday-08-21`). Clear the stale line here so the resolver falls
- * back to the primary branch before any downstream lifecycle work consumes it.
- */
-// @ts-expect-error implicit any on missionFile/baseBranch
-function ensureMissionBaseBranchRecorded(missionFile, baseBranch, { logFn = fmt.log.plain } = {}) {
-  if (!missionFile || !fs.existsSync(missionFile)) {
-    return false;
-  }
-
-  const content = fs.readFileSync(missionFile, 'utf8');
-
-  // Primary/detached launch: no feature base to record. Drop any stale
-  // Base-Branch line so resolveMissionBaseBranch resolves the primary branch.
-  if (!baseBranch) {
-    if (!/^Base-Branch:\s*\S+\s*$/m.test(content)) {
-      return false;
-    }
-    const updated = content.replace(/^Base-Branch:\s*\S+\s*$/m, '');
-    fs.writeFileSync(missionFile, updated);
-    logFn(fmt.status('PASS', 'Cleared stale Base-Branch for primary/detached launch'));
-    return true;
-  }
-
-  const line = `Base-Branch: ${baseBranch}`;
-  const existing = content.match(/^Base-Branch:\s*(\S+)\s*$/m);
-  if (existing && existing[1] === baseBranch) {
-    return false;
-  }
-
-  let updated;
-  if (existing) {
-    updated = content.replace(/^Base-Branch:\s*\S+\s*$/m, line);
   } else {
-    const lines = content.split('\n');
-    const insertAt = lines.length > 0 ? 1 : 0;
-    lines.splice(insertAt, 0, '', line);
-    updated = lines.join('\n');
+    squashTrailingBacklogNoiseIntoPreviousMissionFn(mainRepo, gitFn);
+    gitFn(['-C', mainRepo, 'branch', branchName, startPoint]);
+    logFn(fmt.status('PASS', `Created branch ${fmt.branch(branchName)} from ${fmt.branch(startPoint)}.`));
   }
-
-  fs.writeFileSync(missionFile, updated);
-  logFn(fmt.status('PASS', `Recorded ${line} in ${fmt.path(missionFile)}`));
-  return true;
+  // Git owns branch topology. Record the target there so a typed mission does
+  // not need a Base-Branch line in a generated MISSION.md.
+  const recorded = gitFn(['-C', mainRepo, 'config', '--local', '--replace-all', `branch.${branchName}.parallixBase`, startPoint]);
+  if (recorded.status !== 0) { throw new Error(`Could not record base branch for ${branchName}.`); }
 }
-
-// ponytail: single choke point — every draft-startup caller routes the launch
-// base through this writer, so clearing a stale base here (not in each caller)
-// fixes primary re-drafts and leaves non-primary replace behavior untouched.
 
 // @ts-expect-error implicit any on mainRepo/targetWorktree/branchName
 function ensureWorktree(mainRepo, targetWorktree, branchName, {
@@ -292,15 +231,7 @@ function ensureMissionFile(targetWorktree, slug, { logFn = fmt.log.plain } = {})
   }
 
   const missionFile = path.join(missionDir, 'MISSION.md');
-  if (fs.existsSync(missionFile)) {
-    logFn(fmt.status('PASS', `MISSION.md already exists at ${fmt.path(missionFile)}`));
-    return missionFile;
-  }
-
-  const template = runtimeAssetStore.readText('templates/mission-scaffold.md').replaceAll('{{slug}}', slug);
-  fs.writeFileSync(missionFile, template);
-  logFn(fmt.status('PASS', `Scaffolded MISSION.md at ${fmt.path(missionFile)}`));
-  logFn(fmt.status('INFO', 'Note: Draft mode involves AI refinement. Use the draft prompt to complete the contract.'));
+  logFn(fmt.status('PASS', `Prepared typed mission directory at ${fmt.path(missionDir)}`));
   return missionFile;
 }
 
@@ -442,4 +373,4 @@ function ensureRepoExists(mainRepo, exitFn = process.exit, errorFn = fmt.log.fai
 
 
 
-export { SYNTHETIC_SLUG_PREFIX, slugifyDraftIntent, syntheticTaskId, resolveDraftTarget, ensureMissionBranch, ensureMissionBaseBranchRecorded, ensureWorktree, ensureGraphifyWorkspace, ensureGraphifyIgnore, ensureMissionFile, ensureDraftRepoConfigCommitted, ensureRepoExists, bootstrapBacklogTask };
+export { SYNTHETIC_SLUG_PREFIX, slugifyDraftIntent, syntheticTaskId, resolveDraftTarget, ensureMissionBranch, ensureWorktree, ensureGraphifyWorkspace, ensureGraphifyIgnore, ensureMissionFile, ensureDraftRepoConfigCommitted, ensureRepoExists, bootstrapBacklogTask };

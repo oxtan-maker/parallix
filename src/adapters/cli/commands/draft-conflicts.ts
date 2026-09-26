@@ -1,6 +1,7 @@
 // @ts-nocheck
-import * as path from 'node:path';
 import * as fmt from '../../../application/presentation/cli-format.js';
+import * as fs from 'node:fs';
+import * as path from 'node:path';
 import { git, getWorktreeStatus } from '../../git/git.js';
 import { findMissionArea, findMissionDir, missionDirForSlug } from '../../filesystem/mission-utils.js';
 import { formatVerificationCommand } from '../../verification/verification.js';
@@ -48,9 +49,6 @@ function isExpectedDraftPath(filePath, slug, worktree) {
   const missionPrefix = missionDir
     ? `${path.relative(worktree, missionDir)}/`
     : path.relative(worktree, missionDirForSlug(worktree, slug)).split(path.sep).join('/') + '/';
-  // git collapses a wholly untracked tree to its top directory (`?? missions/`),
-  // so the mission's own artifacts can arrive as an ancestor of the mission dir
-  // rather than as the files themselves.
   const isAncestorOfMissionDir = filePath.endsWith('/') && missionPrefix.startsWith(filePath);
   // The harness appends its own workflow entries to `.gitignore` during setup;
   // warning the operator about the harness's own edit is noise on every draft.
@@ -103,9 +101,24 @@ function enforceDraftCommitSafety({ slug, worktree, dirtyEntries = getWorktreeSt
     return false;
   }
 
-  // Every successful draft ends here: the agent writes MISSION.md and the task
-  // file and leaves them uncommitted for the harness. That is the designed hand-
-  // off, not a warning, so it travels on the plumbing channel. Genuine trouble
+  const entries = dirtyEntries.map(parseDirtyEntry);
+  const retiredDocument = entries.find(entry =>
+    /(?:^|\/)(?:MISSION|CP-\d+)\.md$/i.test(entry.filePath)
+  );
+  if (retiredDocument) {
+    throw new Error(`Draft safety harness refuses to commit ${retiredDocument.filePath}; record the contract with typed px commands and inspect it with px status.`);
+  }
+  const missionDir = findMissionDir(slug, worktree) || missionDirForSlug(worktree, slug);
+  const missionPath = path.relative(worktree, missionDir).split(path.sep).join('/');
+  if (entries.some(entry => entry.status === '??' && entry.filePath.endsWith('/') && `${missionPath}/`.startsWith(entry.filePath)) && fs.existsSync(missionDir)) {
+    const retiredName = fs.readdirSync(missionDir).find(name => /^(?:MISSION|CP-\d+)\.md$/i.test(name));
+    if (retiredName) {
+      throw new Error(`Draft safety harness refuses to commit ${path.join(missionPath, retiredName)}; record the contract with typed px commands and inspect it with px status.`);
+    }
+  }
+
+  // A draft agent may leave Backlog task metadata uncommitted for the harness.
+  // That is the designed handoff, so it travels on the plumbing channel. Genuine trouble
   // (shared-file conflicts, unexpected dirty files) keeps its own WARN below.
   plumbingLogFn(fmt.status('INFO', 'Draft safety harness: committing the changes the draft agent left behind.'));
   for (const entry of dirtyEntries) {

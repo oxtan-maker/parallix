@@ -131,7 +131,7 @@ function checkRecordedBaseBranch(slug: string, cwd: string, verdict: PreflightVe
     log(fmt.status('PASS', `Preflight: base branch '${recordedBase}' exists locally.`));
     return;
   }
-  log(fmt.status('FAIL', `Preflight: base branch '${recordedBase}' recorded in MISSION.md does not exist locally. Create or fetch the '${recordedBase}' base branch before starting this mission.`));
+  log(fmt.status('FAIL', `Preflight: base branch '${recordedBase}' recorded for this mission does not exist locally. Create or fetch the '${recordedBase}' base branch before starting this mission.`));
   verdict.fail = true;
 }
 
@@ -144,8 +144,8 @@ function checkMissionDocs(slug: string, cwd: string, verdict: PreflightVerdict, 
     return;
   }
   if (!fsExistsSync(path.join(missionDir, 'MISSION.md'))) {
-    log(fmt.status('FAIL', `Mission doc: found directory but MISSION.md is missing in ${fmt.path(missionDir)}`));
-    verdict.fail = true;
+    log(fmt.status('PASS', 'Typed mission directory is ready; contract is available through px status.'));
+    checkRecordedBaseBranch(slug, cwd, verdict, deps, log);
     return;
   }
   const checkpoints = findCheckpointsFn(missionDir);

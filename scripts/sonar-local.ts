@@ -87,7 +87,7 @@ export async function assertNoOpenHighOrBlockerIssues(options: { token: string, 
   const response = await sonarGet(request, `${SONAR_URL}/api/measures/component?${params}`, headers, backoffMs);
   if (!response.ok) { throw new Error(`SonarQube Cloud metrics lookup failed (HTTP ${response.status}).`); }
   const result = await response.json() as { component?: { measures?: Array<{ value?: string }> } };
-  if (!result.component?.measures) { throw new Error(`SonarQube Cloud metrics lookup failed (HTTP ${response.status}).`); }
+  if (result.component?.measures?.length !== 3) { throw new Error(`SonarQube Cloud metrics lookup failed (HTTP ${response.status}).`); }
   const total = result.component.measures.reduce((count, measure) => {
     const impacts = JSON.parse(measure.value || '{}') as Record<string, number>;
     return count + (impacts.HIGH || 0) + (impacts.BLOCKER || 0);
@@ -97,11 +97,10 @@ export async function assertNoOpenHighOrBlockerIssues(options: { token: string, 
   }
 }
 
-// Post-scan mission assertion, run by the `scan` entrypoint after the shared
-// scanner. The provider new-code gate (sonar.qualitygate.wait=true) is the
-// result authority in every trusted context; this adds the repository-owned
-// total-code HIGH/BLOCKER proof only where it belongs — a local mission
-// candidate, before integration. GitHub publication branches
+// Post-scan mission assertion, run after the long-lived analysis completes.
+// The short comparison scan has already passed the provider new-code gate;
+// this adds the repository-owned total-code HIGH/BLOCKER proof for a local
+// mission candidate before integration. GitHub publication branches
 // (github-publish/<sha>), pull requests, local main, and other local branches
 // are not missions: they get no branch-type lookup and no total-code metrics
 // call.
@@ -137,6 +136,7 @@ export async function deleteMissionBranch(options: { slug?: string; branchPrefix
   }
   try {
     await deleteSonarBranch({ token: options.token, branch: `${branchPrefix}${slug}`, request: options.request });
+    await deleteSonarBranch({ token: options.token, branch: `candidate/${branchPrefix}${slug}`, request: options.request });
     return { ok: true };
   } catch (error) {
     const message = (error as Error).message;
@@ -145,14 +145,14 @@ export async function deleteMissionBranch(options: { slug?: string; branchPrefix
   }
 }
 
-export function runSonar(options: { rootDir?: string, spawn?: typeof spawnSync } = {}) {
+export function runSonar(options: { rootDir?: string, spawn?: typeof spawnSync, branch?: string, waitForGate?: boolean } = {}) {
   const rootDir = options.rootDir || process.cwd();
   // The token is environment-owned in both environments: an operator export
   // locally, a GitHub Actions secret on CI. It is never read from, or written
   // to, the repository, and never printed.
   const token = process.env.SONAR_TOKEN;
   if (!token) { throw new Error('SONAR_TOKEN is not set. Export a SonarQube Cloud token before running `npm run sonar`.'); }
-  const branch = resolveSonarBranch(rootDir);
+  const branch = options.branch ?? resolveSonarBranch(rootDir);
   // Lockfile-pinned scanner (devDependency `sonarqube-scanner`), never `npx --yes`.
   const scannerBin = path.join(rootDir, 'node_modules', '.bin', 'sonar-scanner-npm');
   if (!fs.existsSync(scannerBin)) { throw new Error('sonar-scanner-npm is not installed. Run `npm ci` before running `npm run sonar`.'); }
@@ -163,20 +163,56 @@ export function runSonar(options: { rootDir?: string, spawn?: typeof spawnSync }
     `-Dsonar.organization=${SONAR_ORGANIZATION}`,
     `-Dsonar.projectKey=${SONAR_PROJECT_KEY}`,
     ...(branch ? [`-Dsonar.branch.name=${branch}`] : []),
+    ...(options.branch ? ['-Dsonar.branch.target=main'] : []),
+    ...(options.waitForGate === false ? ['-Dsonar.qualitygate.wait=false'] : []),
   ], { cwd: rootDir, stdio: 'inherit', env: { ...process.env, SONAR_TOKEN: token, SONAR_USER_HOME: scannerHome } });
   if (result.error) { throw result.error; }
-  // Fail closed: a non-zero scanner status covers analysis failure and, because
-  // sonar.qualitygate.wait=true, a failed quality gate as well.
+  // A non-zero scanner status covers analysis failure and, when waiting for
+  // the provider gate, a failed quality gate as well.
   if (result.status !== 0) { throw new Error(`SonarQube Cloud analysis or quality gate failed (exit ${result.status ?? 'signal'}).`); }
   return result;
 }
 
+async function awaitAnalysis(token: string, rootDir: string, request: typeof fetch = fetch): Promise<void> {
+  const report = fs.readFileSync(path.join(rootDir, '.scannerwork', 'report-task.txt'), 'utf8');
+  const taskId = report.match(/^ceTaskId=(.+)$/m)?.[1];
+  if (!taskId) throw new Error('SonarQube Cloud did not provide an analysis task ID.');
+  const headers = { Authorization: `Basic ${Buffer.from(`${token}:`).toString('base64')}` };
+  for (let attempt = 0; attempt < 60; attempt += 1) {
+    const response = await sonarGet(request, `${SONAR_URL}/api/ce/task?id=${encodeURIComponent(taskId)}`, headers, SONAR_READ_BACKOFF_MS);
+    if (!response.ok) throw new Error(`SonarQube Cloud analysis task lookup failed (HTTP ${response.status}).`);
+    const result = await response.json() as { task?: { status?: string } };
+    if (result.task?.status === 'SUCCESS') return;
+    if (result.task?.status === 'FAILED' || result.task?.status === 'CANCELED') throw new Error(`SonarQube Cloud analysis task ${result.task.status}.`);
+    await new Promise((resolve) => { setTimeout(resolve, SONAR_READ_BACKOFF_MS); });
+  }
+  throw new Error('SonarQube Cloud analysis task did not finish within five minutes.');
+}
+
+async function assertShortBranch(token: string, branch: string, request: typeof fetch = fetch): Promise<void> {
+  const headers = { Authorization: `Basic ${Buffer.from(`${token}:`).toString('base64')}` };
+  const response = await sonarGet(request, `${SONAR_URL}/api/project_branches/list?project=${SONAR_PROJECT_KEY}`, headers, SONAR_READ_BACKOFF_MS);
+  if (!response.ok) throw new Error(`SonarQube Cloud branch lookup failed (HTTP ${response.status}).`);
+  const result = await response.json() as { branches?: Array<{ name: string, type: string }> };
+  if (result.branches?.find((item) => item.name === branch)?.type !== 'SHORT') {
+    throw new Error(`SonarQube Cloud comparison branch ${branch} must be SHORT to evaluate changes against main.`);
+  }
+}
+
 if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(import.meta.filename)) {
   if (process.argv[2] === 'scan') try {
-    // The provider gate controls the scanner result in every trusted context;
-    // the mission-only total-code proof runs after it, for local missions only.
-    runSonar();
-    await assertMissionTotalCode({ token: process.env.SONAR_TOKEN!, rootDir: process.cwd() });
+    const rootDir = process.cwd();
+    const context = resolveSonarContext(rootDir);
+    if (context.kind === 'local-branch' && isMissionBranch(rootDir, context.branch)) {
+      const comparison = `candidate/${context.branch}`;
+      runSonar({ rootDir, branch: comparison });
+      await assertShortBranch(process.env.SONAR_TOKEN!, comparison);
+      runSonar({ rootDir, waitForGate: false });
+      await awaitAnalysis(process.env.SONAR_TOKEN!, rootDir);
+      await assertMissionTotalCode({ token: process.env.SONAR_TOKEN!, rootDir });
+    } else {
+      runSonar({ rootDir });
+    }
   } catch (error) { console.error((error as Error).message); process.exitCode = 1; }
   else if (process.argv[2] === 'delete-branch') {
     const config = JSON.parse(fs.readFileSync(path.join(process.cwd(), 'workflow.config.json'), 'utf8')) as { adapters?: { missions?: { branchPrefix?: string } } };

@@ -199,6 +199,11 @@ export function readRecordedBaseBranch(slug: string, rootDir: string = process.c
   const gitFn = options.gitFn ?? null;
   if (!slug) {return null;}
 
+  const runner = gitFn || gitModule.git;
+  const branch = missionBranchName(slug, rootDir);
+  const localBase = runner(['-C', rootDir, 'config', '--get', `branch.${branch}.parallixBase`]);
+  if (localBase?.status === 0 && localBase.stdout?.trim()) { return localBase.stdout.trim(); }
+
   const missionDir = findMissionDir(slug, rootDir);
   if (missionDir) {
     const missionPath = path.join(missionDir, 'MISSION.md');
@@ -207,8 +212,6 @@ export function readRecordedBaseBranch(slug: string, rootDir: string = process.c
     }
   }
 
-  const runner = gitFn || gitModule.git;
-  const branch = missionBranchName(slug, rootDir);
   const baseSlugMatch = slug.match(/^(task-\d+)/i);
   const baseSlug = baseSlugMatch ? baseSlugMatch[1].toLowerCase() : slug;
   const year = getMissionYear(slug, rootDir);

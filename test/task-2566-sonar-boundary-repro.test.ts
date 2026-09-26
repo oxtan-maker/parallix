@@ -135,7 +135,7 @@ test('task-2566 B: a local mission candidate keeps the fail-closed total-code HI
       // A LONG mission branch with any HIGH or BLOCKER impact fails.
       const dirty = fetchSpy((url) => (url.includes('project_branches/list')
         ? { branches: [{ name: 'mission/task-2550', type: 'LONG' }] }
-        : { component: { measures: [{ value: '{"HIGH":1,"BLOCKER":0}' }] } }));
+        : { component: { measures: [{ value: '{"HIGH":1,"BLOCKER":0}' }, { value: '{}' }, { value: '{}' }] } }));
       await assert.rejects(postScanAssertion('t', repo, dirty.request), /unresolved HIGH\/BLOCKER impacts/);
     });
   } finally {

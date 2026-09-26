@@ -330,7 +330,7 @@ test('performHandoff fails hard when git commit fails in Step 4', async (t) => {
     fs.rmSync(missionMdPath, { force: true });
 });
 
-test('verifyHandoff fails when MISSION.md is missing from mission directory', () => {
+test('verifyHandoff accepts a typed mission without MISSION.md', () => {
   const slug = 'task-098';
   const worktree = '/tmp/fake-worktree-missing-mm';
   const missionDir = '/tmp/fake-worktree-missing-mm/docs/missions/2026/task-098';
@@ -340,8 +340,7 @@ test('verifyHandoff fails when MISSION.md is missing from mission directory', ()
   mock.method(git, 'getCurrentBranch', () => 'mission/task-098');
 
   const result = verifyHandoff(slug, { worktree });
-  assert.strictEqual(result.ok, false);
-  assert.match(result.error, /MISSION\.md not found/);
+  assert.strictEqual(result.ok, true);
 });
 
 test('performHandoff fails when MISSION.md is missing from mission directory', async () => {

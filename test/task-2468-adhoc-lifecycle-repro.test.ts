@@ -138,30 +138,13 @@ function match(prompt, regex) {
   return found ? found[1].trim() : null;
 }
 
-function taskIdFromTask(taskPath) {
-  const content = read(taskPath);
-  const idMatch = content.match(/^id:\\s*([^\\r\\n]+)/m);
-  return idMatch ? idMatch[1].trim() : 'TASK-UNKNOWN';
-}
-
-function missionTitleFromTask(taskPath, slug) {
-  const content = read(taskPath);
-  const titleMatch = content.match(/^title:\\s*([^\\r\\n]+)/m);
-  return titleMatch ? titleMatch[1].trim() : slug;
-}
-
 const prompt = process.argv[process.argv.length - 1] || '';
 const slug = match(prompt, /(parallix-adhoc-[0-9]+|task-[a-z0-9-]+)/im)
   || match(prompt, /^Mode: act-on-review\\. Branch:\\s*mission\\/(task-[a-z0-9-]+)/im)
   || match(prompt, /^Mode: review\\. .*?Mission:\\s+.*?(task-[a-z0-9-]+)/im)
   || 'task-unknown';
-// TASK-2521.03: the draft prompt no longer hands the agent a mission-document
-// path, because a drafting agent records the mission with \`px\` rather than
-// writing a file. This stub still writes the legacy scaffold — the harness keeps
-// reading \`## Gates\` from it until the wave retires that fallback — so it now
-// derives the location from the repository's configured mission baseDir, the
-// same way the real workflow does. Missions 5-7 remove the file, and this stub
-// with it.
+// Typed missions record the contract through px; the directory holds only
+// optional mission-local artifacts.
 const missionBaseDir = (() => {
   try {
     const cfg = JSON.parse(read(path.join(process.cwd(), 'workflow.config.json')) || '{}');
@@ -170,8 +153,6 @@ const missionBaseDir = (() => {
 })();
 const missionDir = match(prompt, /^Mission dir:\\s*(.+)$/m)
   || path.join(process.cwd(), missionBaseDir, slug);
-const missionPath = path.join(missionDir, 'MISSION.md');
-const taskPath = match(prompt, /^Backlog task:\\s*(.+)$/m);
 const reviewFindingsPath = match(prompt, /\\\`([^\\\`\\n]+-review-findings\\.md)\\\`/);
 const reviewOutcomePath = match(prompt, /\\\`([^\\\`\\n]+-review-outcome\\.md)\\\`/);
 const reviewVerdictPath = match(prompt, /\\\`([^\\\`\\n]+-review-verdict\\.txt)\\\`/);
@@ -184,105 +165,23 @@ if (process.argv.includes('--help')) {
 }
 
 if (/^Mode: draft\\./m.test(prompt)) {
-  const taskId = taskIdFromTask(taskPath);
-  const title = missionTitleFromTask(taskPath, slug);
-  const missionBody = [
-    '---',
-    'id: ' + taskId,
-    'title: ' + title,
-    'status: drafted',
-    '---',
-    '',
-    '# Mission: ' + title + ' (' + slug + ')',
-    '',
-    '## Goal',
-    'Exercise the real lifecycle with a deterministic stub agent.',
-    '',
-    '## Why Now',
-    'Protect the TypeScript workflow surface from regression drift.',
-    '',
-    '## Refinement Signals',
-    '- Predicted NEL bucket: Small (0-80)',
-    '- Confidence: High',
-    '- Selection note: activate as-is',
-    '- Main drivers: e2e coverage',
-    '',
-    '## Scope',
-    '- Run draft, active, review, and integrate through the real CLI.',
-    '',
-    '## Out of Scope',
-    '- Real model execution',
-    '',
-    '## Success Criteria',
-    '- Lifecycle completes with deterministic artifacts.',
-    '',
-    '## Risks and Assumptions',
-    '- Stubbed codex replaces all agent output.',
-    '',
-    '## Checkpoints',
-    '- CP 1: Draft and execute',
-    '- CP 2: Review and integrate',
-    '',
-    '## Gates',
-    '- [ ] node -e ""',
-    '',
-    '## Restricted Areas',
-    '- None in the temp repo.',
-    '',
-    '## Stop Rules',
-    '- Stop if the stub cannot satisfy the real workflow contract.',
-    ''
-  ].join('\\n');
-  writeFile(missionPath, missionBody);
   recordMissionContract(slug);
-  writeFile(path.join(missionDir, 'milestone-1.md'), '# Milestone 1\\n\\nDraft scaffold complete.\\n');
+  writeFile(path.join(missionDir, 'milestone-1.md'), '# Milestone 1\\n\\nTyped contract recorded.\\n');
 }
 
 if (/^Mode: execute after lock\\./m.test(prompt)) {
-  const cp1 = [
-    '# CP-1: Execute stub',
-    '',
-    '## Goal Check',
-    '',
-    '| Criterion | Evidence | Status |',
-    '|-----------|----------|--------|',
-    '| Mission scaffold exists | missions/' + slug + '/MISSION.md:1 | PASS |',
-    ...(taskPath
-      ? ['| Backlog task preserved | backlog/tasks/' + path.basename(taskPath) + ':1 | PASS |']
-      : ['| Adhoc identity authoritative | DB-owned parallix-adhoc counter | PASS |']),
-    '',
-    'Next action: Run review.',
-    ''
-  ].join('\\n');
-  const cp2 = [
-    '# CP-2: Ready for review',
-    '',
-    '## Goal Check',
-    '',
-    '| Criterion | Evidence | Status |',
-    '|-----------|----------|--------|',
-    '| Execute artifacts committed | missions/' + slug + '/CP-1.md:1 | PASS |',
-    '| Final checkpoint present | missions/' + slug + '/CP-2.md:1 | PASS |',
-    '| The lifecycle reaches integration through the real CLI | missions/' + slug + '/CP-2.md:1 | PASS |',
-    '',
-    'Next action: Approve the mission in review.',
-    ''
-  ].join('\\n');
-  writeFile(path.join(missionDir, 'CP-1.md'), cp1);
-  writeFile(path.join(missionDir, 'CP-2.md'), cp2);
-  // The contract was recorded through the typed verbs, so handoff verifies
-  // recorded evidence; the documents above only back its file references.
-  for (const [name, text, next] of [['CP-1', cp1, 'Run review.'], ['CP-2', cp2, 'Approve the mission in review.']]) {
-    const rows = text.split('\\n').filter((line) => line.startsWith('| ') && !line.startsWith('| Criterion '));
-    const args = ['checkpoint', 'record', '--slug', slug, '--name', name, '--next', next];
-    for (const row of rows) {
-      const [criterion, evidence] = row.split('|').slice(1, 3).map((cell) => cell.trim());
-      args.push('--criterion', criterion, '--evidence', evidence);
-    }
-    const version = px(['status', slug, '--json']);
-    if (version) { px(args.concat(['--expected-version', String(JSON.parse(version).version)])); }
-  }
   writeFile(path.join(process.cwd(), 'deliverable.txt'), 'stub execute output\\n');
+  for (const [name, criterion, next] of [
+    ['CP-1', 'Execute artifacts committed', 'Run review.'],
+    ['CP-2', 'The lifecycle reaches integration through the real CLI', 'Approve the mission in review.'],
+  ]) {
+    const out = px(['status', slug, '--json']);
+    if (out) {
+      px(['checkpoint', 'record', '--slug', slug, '--name', name,
+        '--criterion', criterion, '--evidence', 'deliverable.txt:1',
+        '--next', next, '--expected-version', String(JSON.parse(out).version)]);
+    }
+  }
 }
 
 if (/^Mode: review\\./m.test(prompt)) {

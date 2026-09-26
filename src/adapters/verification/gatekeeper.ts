@@ -20,9 +20,9 @@ const DEFAULT_GATEKEEPER_USER = 'forgejo-gatekeeper';
  * @returns {{ok: boolean, missing: string[]}}
  */
 function checkMandatoryFiles(slug: string, options: { rootDir?: string, checkpointsRecorded?: boolean, findMissionDirFn?: Function, findCheckpointsFn?: Function, resolveTaskFileFn?: Function } = {} as any) {
+  if (options.checkpointsRecorded) { return { ok: true, missing: [] }; }
   const {
     rootDir = process.cwd(),
-    checkpointsRecorded = false,
     findMissionDirFn = findMissionDir,
     findCheckpointsFn = findCheckpoints,
     resolveTaskFileFn = resolveTaskFile
@@ -38,15 +38,13 @@ function checkMandatoryFiles(slug: string, options: { rootDir?: string, checkpoi
     missing.push(`${expectedMissionRel}/MISSION.md`);
   }
 
-  // A Mission drafted through the typed verbs keeps its checkpoint evidence in
-  // Mission state, which handoff has already verified; it has no CP-*.md to find.
-  const checkpoints = !checkpointsRecorded && missionDir ? findCheckpointsFn(missionDir) : null;
-  if (!checkpointsRecorded && (!checkpoints || checkpoints.length === 0)) {
+  const checkpoints = missionDir ? findCheckpointsFn(missionDir) : null;
+  if (!checkpoints || checkpoints.length === 0) {
     missing.push(`${expectedMissionRel}/CP-*.md (at least one checkpoint document)`);
   }
 
   const taskResolution = resolveTaskFileFn(slug, rootDir);
-  const missionArtifactsPresent = Boolean(missionPath && fs.existsSync(missionPath) && missionDir && (checkpointsRecorded || findCheckpointsFn(missionDir).length > 0));
+  const missionArtifactsPresent = Boolean(missionPath && fs.existsSync(missionPath) && checkpoints && checkpoints.length > 0);
   if ((!taskResolution || !taskResolution.ok) && !missionArtifactsPresent) {
     const { tasksDir } = getTaskStorage(rootDir);
     const taskDirRel = path.relative(rootDir, tasksDir).split(path.sep).join('/');

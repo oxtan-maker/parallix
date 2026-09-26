@@ -9,7 +9,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { HandoffCommandUseCase } from '../src/application/handoff-command-use-case.js';
 import {
-  SLUG, ROOT, CHECKPOINT, BRANCH, LEGACY_MISSION_LOAD, MISSION_CONTENT,
+  SLUG, ROOT, BRANCH, MISSION_DIR, RECORDED_MISSION_LOAD, LEGACY_MISSION_LOAD,
   makeRecorder, makePorts, runOptions,
 } from './helpers/handoff-ports.js';
 import { classifyError } from '../src/application/failure-classification.js';
@@ -205,7 +205,7 @@ test('handoff use case forwards the authoritative occurredAt through a recovery 
           return { status: 'completed', value: { version: 3 } };
         },
       },
-      store: { load: async () => LEGACY_MISSION_LOAD },
+      store: { load: async () => RECORDED_MISSION_LOAD },
       handoff: { recordNel: async () => ({ status: 'completed' }) },
     }),
   });
@@ -233,7 +233,7 @@ test('handoff use case keeps the wall clock when no occurredAt is supplied', asy
           return { status: 'completed', value: { version: 3 } };
         },
       },
-      store: { load: async () => LEGACY_MISSION_LOAD },
+      store: { load: async () => RECORDED_MISSION_LOAD },
       handoff: { recordNel: async () => ({ status: 'completed' }) },
     }),
   });
@@ -281,13 +281,39 @@ test('handoff use case blocks handoff when the gatekeeper cannot post its pushba
 
 // --- SC5d: NEL persistence failure ---
 
+test('NEL capture reads the predicted bucket from a legacy mission document', async () => {
+  const recorder = makeRecorder();
+  let predictedBucket: string | undefined;
+  const base = makePorts(recorder);
+  const ports = makePorts(recorder, {
+    fileSystem: {
+      ...base.fileSystem,
+      readText: () => 'Predicted NEL bucket: Large',
+    },
+    missionServices: async () => ({
+      store: { load: async () => LEGACY_MISSION_LOAD },
+      handoff: { recordNel: async (request: { predictedBucket: string }) => {
+        predictedBucket = request.predictedBucket;
+        return { status: 'completed' };
+      } },
+    }),
+  });
+
+  const result = await new HandoffCommandUseCase(ports).captureNelAtHandoff(SLUG, {
+    rootDir: ROOT, missionDir: MISSION_DIR, error: (message: string) => recorder.errors.push(message),
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(predictedBucket, 'Large');
+});
+
 test('handoff use case stops before review state advances when NEL persistence fails', async () => {
   const recorder = makeRecorder();
   const ports = makePorts(recorder, {
     missionServices: async () => ({
       checkpoints: { record: async () => ({ status: 'completed' }) },
       lifecycle: { transition: async () => ({ status: 'completed', value: { version: 1 } }) },
-      store: { load: async () => LEGACY_MISSION_LOAD },
+      store: { load: async () => RECORDED_MISSION_LOAD },
       handoff: { recordNel: async () => ({ status: 'failed', error: { message: 'database is locked' } }) },
     }),
   });
@@ -312,21 +338,20 @@ test('handoff use case continues when NEL is merely uncomputable', async () => {
 
 // --- SC5e: checkpoint recording failure ---
 
-test('handoff use case fails when checkpoint recording is not completed', async () => {
+test('handoff use case does not record checkpoint evidence again', async () => {
   const recorder = makeRecorder();
   const ports = makePorts(recorder, {
     missionServices: async () => ({
       checkpoints: { record: async () => ({ status: 'rejected', error: { message: 'evidence missing' } }) },
       lifecycle: { transition: async () => ({ status: 'completed', value: { version: 1 } }) },
-      store: { load: async () => LEGACY_MISSION_LOAD },
+      store: { load: async () => RECORDED_MISSION_LOAD },
       handoff: { recordNel: async () => ({ status: 'completed' }) },
     }),
   });
   const result = await new HandoffCommandUseCase(ports).performHandoff(SLUG, runOptions(recorder));
 
-  assert.equal(result.ok, false);
-  assert.match(result.error ?? '', /Recording checkpoint CP-1 failed: evidence missing/);
-  assert.deepEqual(recorder.transitions, [], 'backlog is untouched when checkpoint evidence is not durable');
+  assert.equal(result.ok, true, recorder.errors.join('\n'));
+  assert.deepEqual(recorder.transitions, ['review']);
 });
 
 test('handoff use case fails when the mission lifecycle transition is rejected', async () => {
@@ -335,7 +360,7 @@ test('handoff use case fails when the mission lifecycle transition is rejected',
     missionServices: async () => ({
       checkpoints: { record: async () => ({ status: 'completed' }) },
       lifecycle: { transition: async () => ({ status: 'rejected', error: { message: 'not in active' } }) },
-      store: { load: async () => LEGACY_MISSION_LOAD },
+      store: { load: async () => RECORDED_MISSION_LOAD },
       handoff: { recordNel: async () => ({ status: 'completed' }) },
     }),
   });
@@ -361,40 +386,25 @@ test('handoff use case refuses to hand off from the wrong branch', async () => {
 
 test('handoff use case rejects a checkpoint whose Goal Check rows cite nothing verifiable', async () => {
   const recorder = makeRecorder();
-  const bare = [
-    '# CP-1',
-    '',
-    '## Goal Check',
-    '',
-    '| Criterion | Evidence | Status |',
-    '|---|---|---|',
-    '| It works | trust me | PASS |',
-    '',
-  ].join('\n');
   const ports = makePorts(recorder, {
-    fileSystem: {
-      existsSync: (target: string) => target.endsWith('MISSION.md'),
-      readText: (target: string) => (target === CHECKPOINT ? bare : MISSION_CONTENT),
-      writeText: () => undefined,
-      listNames: () => [],
-      listEntries: () => [],
-    },
+    missionServices: async () => ({
+      store: { load: async () => ({ ...RECORDED_MISSION_LOAD, mission: { ...RECORDED_MISSION_LOAD.mission, checkpoints: [{ name: 'CP-1', goalCheck: [{ criterion: 'Workflow re-homed', evidence: 'trust me' }] }] } }) },
+    }),
   });
   const result = await new HandoffCommandUseCase(ports).performHandoff(SLUG, runOptions(recorder));
 
   assert.equal(result.ok, false);
-  assert.match(result.error ?? '', /no evidence rows that cite a verifiable reference/);
+  assert.match(result.error ?? '', /recorded evidence.*no verifiable reference/);
 });
 
-test('handoff use case refuses when MISSION.md is modified but uncommitted', async () => {
+test('handoff use case ignores a modified legacy MISSION.md for a typed mission', async () => {
   const recorder = makeRecorder();
   const ports = makePorts(recorder, {
     git: { ...makePorts(recorder).git, getWorktreeStatus: () => [' M missions/task-2332.09/MISSION.md'] },
   });
   const result = await new HandoffCommandUseCase(ports).performHandoff(SLUG, runOptions(recorder));
 
-  assert.equal(result.ok, false);
-  assert.match(result.error ?? '', /is modified but uncommitted/);
+  assert.equal(result.ok, true, recorder.errors.join('\n'));
 });
 
 // --- SC2: the use case reaches the outside world only through ports ---

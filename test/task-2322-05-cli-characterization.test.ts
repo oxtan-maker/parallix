@@ -63,6 +63,7 @@ test('SC5 characterization: NEL capture observes the primary branch first, then 
           return {
             kind: 'found' as const,
             mission: {
+              predictedNelBucket: 'Large',
               review: {
                 rounds: [{ decision: 'APPROVE' }, { decision: 'REQUEST_CHANGES' }, { decision: 'APPROVE' }, { decision: 'APPROVE' }],
               },

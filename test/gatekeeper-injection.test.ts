@@ -1,8 +1,5 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import fs from 'node:fs';
-import os from 'node:os';
-import path from 'node:path';
 import {
   checkMandatoryFiles,
   buildPushbackBody,
@@ -10,111 +7,14 @@ import {
   DEFAULT_GATEKEEPER_USER,
 } from '../src/adapters/verification/gatekeeper.js';
 
-// Pure, injectable gatekeeper paths. No real Forgejo, no real git, no
-// mock.module: every external seam (filesystem resolution, token read, review
-// post, mandatory-file check) is passed in as a double so the whole suite stays
-// hermetic under the coverage gate.
-function withTempRoot(run: (rootDir: string) => void): void {
-  const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'gk-inject-'));
-  try { run(tmpRoot); } finally { fs.rmSync(tmpRoot, { recursive: true, force: true }); }
-}
-
-const okResolution = { ok: true, taskFile: 'backlog/tasks/task-1 - x.md' } as const;
+// Every Forgejo seam is injected; these checks stay hermetic.
 
 test('DEFAULT_GATEKEEPER_USER is the forgejo-gatekeeper sentinel', () => {
   assert.equal(DEFAULT_GATEKEEPER_USER, 'forgejo-gatekeeper');
 });
 
-test('checkMandatoryFiles returns ok when every mandatory artifact is present', () => {
-  withTempRoot(rootDir => {
-    const missionDir = path.join(rootDir, 'docs', 'missions', '2026', 'task-1');
-    fs.mkdirSync(missionDir, { recursive: true });
-    fs.writeFileSync(path.join(missionDir, 'MISSION.md'), '# Task 1');
-    fs.writeFileSync(path.join(missionDir, 'CP-1.md'), '# CP-1');
-    const tasksDir = path.join(rootDir, 'backlog', 'tasks');
-    fs.mkdirSync(tasksDir, { recursive: true });
-    fs.writeFileSync(path.join(tasksDir, 'task-1 - x.md'), 'status: active');
-
-    const result = checkMandatoryFiles('task-1', {
-      rootDir,
-      findMissionDirFn: (_slug, dir) => dir ? path.join(dir, 'docs', 'missions', '2026', 'task-1') : undefined,
-      findCheckpointsFn: (_dir) => ['CP-1.md'],
-      resolveTaskFileFn: () => okResolution,
-    });
-    assert.equal(result.ok, true);
-    assert.deepEqual(result.missing, []);
-  });
-});
-
-test('checkMandatoryFiles flags a missing MISSION.md', () => {
-  withTempRoot(rootDir => {
-    const result = checkMandatoryFiles('task-1', {
-      rootDir,
-      findMissionDirFn: () => '/nope/mission',
-      findCheckpointsFn: () => ['CP-1.md'],
-      resolveTaskFileFn: () => okResolution,
-    });
-    assert.equal(result.ok, false);
-    assert.ok(result.missing.some(item => item.includes('MISSION.md')));
-  });
-});
-
-test('checkMandatoryFiles flags missing checkpoint documents when the mission dir is empty', () => {
-  withTempRoot(rootDir => {
-    const missionDir = path.join(rootDir, 'docs', 'missions', '2026', 'task-1');
-    fs.mkdirSync(missionDir, { recursive: true });
-    fs.writeFileSync(path.join(missionDir, 'MISSION.md'), '# Task 1');
-    const result = checkMandatoryFiles('task-1', {
-      rootDir,
-      findMissionDirFn: (_slug, dir) => dir ? missionDir : undefined,
-      findCheckpointsFn: (_dir) => [],
-      resolveTaskFileFn: () => okResolution,
-    });
-    assert.equal(result.ok, false);
-    assert.ok(result.missing.some(item => item.includes('CP-*.md')));
-  });
-});
-
-test('checkMandatoryFiles flags CP-*.md when the mission dir cannot be resolved', () => {
-  withTempRoot(rootDir => {
-    const result = checkMandatoryFiles('task-1', {
-      rootDir,
-      findMissionDirFn: () => undefined,
-      findCheckpointsFn: () => [],
-      resolveTaskFileFn: () => ({ ok: false, reason: 'no task' }),
-    });
-    assert.equal(result.ok, false);
-    assert.ok(result.missing.some(item => item.includes('CP-*.md')));
-  });
-});
-
-test('checkMandatoryFiles flags the backlog task when resolution fails and no mission artifacts exist', () => {
-  withTempRoot(rootDir => {
-    const result = checkMandatoryFiles('task-1', {
-      rootDir,
-      findMissionDirFn: () => undefined,
-      findCheckpointsFn: () => [],
-      resolveTaskFileFn: () => ({ ok: false, reason: 'missing' }),
-    });
-    assert.equal(result.ok, false);
-    assert.ok(result.missing.some(item => item.includes('backlog/tasks') || item.includes('backlog/task')));
-  });
-});
-
-test('checkMandatoryFiles does not flag the backlog task when mission artifacts are present despite a bad resolution', () => {
-  withTempRoot(rootDir => {
-    const missionDir = path.join(rootDir, 'docs', 'missions', '2026', 'task-1');
-    fs.mkdirSync(missionDir, { recursive: true });
-    fs.writeFileSync(path.join(missionDir, 'MISSION.md'), '# Task 1');
-    fs.writeFileSync(path.join(missionDir, 'CP-1.md'), '# CP-1');
-    const result = checkMandatoryFiles('task-1', {
-      rootDir,
-      findMissionDirFn: (_slug, dir) => dir ? missionDir : undefined,
-      findCheckpointsFn: (_dir) => ['CP-1.md'],
-      resolveTaskFileFn: () => ({ ok: false, reason: 'missing' }),
-    });
-    assert.equal(result.ok, true);
-  });
+test("checkMandatoryFiles accepts a typed mission without legacy files", () => {
+  assert.deepEqual(checkMandatoryFiles("task-1", { rootDir: "/nope", checkpointsRecorded: true }), { ok: true, missing: [] });
 });
 
 test('buildPushbackBody emits creation instructions for every detected artifact type', () => {

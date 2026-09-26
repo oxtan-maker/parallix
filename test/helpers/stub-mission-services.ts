@@ -34,3 +34,22 @@ export function stubMissionServices(overrides: Record<string, unknown> = {}) {
     ...overrides,
   });
 }
+
+export function stubRecordedMissionServices() {
+  return stubMissionServices({
+    store: {
+      async load() {
+        return {
+          kind: 'found' as const,
+          mission: {
+            status: 'review', review: { rounds: [] },
+            checkpoints: [{ name: 'CP-1', goalCheck: [{ criterion: 'handoff coverage', evidence: '`npm run typecheck`' }], nextActionText: 'review' }],
+            brief: { goal: 'g', why: 'w', scope: 's', outOfScope: [] },
+            successCriteria: ['handoff coverage'], declaredGates: ['true'],
+          },
+          version: 1,
+        };
+      },
+    },
+  });
+}

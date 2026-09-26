@@ -18,6 +18,16 @@ export const BRANCH = 'mission/task-2332.09';
  * not hold fails handoff closed instead.
  */
 export const LEGACY_MISSION_LOAD = { kind: 'found', mission: { checkpoints: [], brief: null, declaredGates: [] }, version: 1 } as const;
+export const RECORDED_MISSION_LOAD = {
+  kind: 'found',
+  mission: {
+    checkpoints: [{ name: 'CP-1', goalCheck: [{ criterion: 'Workflow re-homed', evidence: 'src/application/handoff-command-use-case.ts' }], nextActionText: 'review' }],
+    brief: { goal: 'g', why: 'w', scope: 's', outOfScope: [] },
+    successCriteria: ['Workflow re-homed'],
+    declaredGates: ['npm run typecheck'],
+  },
+  version: 1,
+} as const;
 
 export const CHECKPOINT_CONTENT = [
   '# CP-1: Example',
@@ -145,7 +155,7 @@ export function makePorts(recorder: Recorder, overrides: Record<string, unknown>
     missionServices: async () => ({
       checkpoints: { record: async () => ({ status: 'completed' }) },
       lifecycle: { transition: async () => ({ status: 'completed', value: { version: 3 } }) },
-      store: { load: async () => LEGACY_MISSION_LOAD },
+      store: { load: async () => RECORDED_MISSION_LOAD },
       handoff: { recordNel: async () => ({ status: 'completed' }) },
     }),
   };

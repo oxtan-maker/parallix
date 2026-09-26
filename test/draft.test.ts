@@ -29,7 +29,6 @@ const {
   bootstrapBacklogTask,
   ensureGraphifyWorkspace,
   ensureMissionBranch,
-  ensureMissionBaseBranchRecorded,
   ensureWorktree,
   ensureMissionFile,
   ensureRepoExists,
@@ -475,8 +474,9 @@ test('ensureMissionBranch skips creation when branch already exists', () => {
     }
   });
 
-  assert.equal(gitCalls.length, 1);
+  assert.equal(gitCalls.length, 2);
   assert.deepEqual(gitCalls[0], ['-C', '/repo', 'branch', '--list', 'mission/task-test']);
+  assert.deepEqual(gitCalls[1], ['-C', '/repo', 'config', '--local', '--replace-all', 'branch.mission/task-test.parallixBase', PRIMARY]);
 });
 
 test('ensureMissionBranch creates the mission branch from the recorded feature base', () => {
@@ -500,81 +500,7 @@ test('ensureMissionBranch creates the mission branch from the recorded feature b
     !gitCalls.some(args => args.join(' ') === `-C /repo branch mission/task-test ${PRIMARY}`),
     'must not fall back to the primary branch when a base is recorded'
   );
-});
-
-// ---------- ensureMissionBaseBranchRecorded ----------
-
-test('ensureMissionBaseBranchRecorded inserts a machine-readable Base-Branch line under the title', () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'base-branch-record-'));
-  try {
-    const missionFile = path.join(root, 'MISSION.md');
-    fs.writeFileSync(missionFile, '# Mission: Example (task-test)\n\n## Goal\nDo the thing.\n');
-
-    const changed = ensureMissionBaseBranchRecorded(missionFile, 'feat/x', { logFn: () => {} });
-    assert.equal(changed, true);
-
-    const content = fs.readFileSync(missionFile, 'utf8');
-    const matches = content.split('\n').filter(line => line === 'Base-Branch: feat/x');
-    assert.equal(matches.length, 1, 'exactly one Base-Branch: feat/x line');
-    assert.ok(/^# Mission:.*\n\nBase-Branch: feat\/x$/m.test(content), 'line sits just under the title');
-  } finally {
-    fs.rmSync(root, { recursive: true, force: true });
-  }
-});
-
-test('ensureMissionBaseBranchRecorded clears a stale Base-Branch line on a primary/detached launch', () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'base-branch-clear-2396-'));
-  try {
-    const missionFile = path.join(root, 'MISSION.md');
-    fs.writeFileSync(missionFile, '# Mission: Example\n\nBase-Branch: friday-08-21\n\n## Goal\n');
-
-    // null base (primary or detached HEAD) drops the stale line.
-    assert.equal(ensureMissionBaseBranchRecorded(missionFile, null, { logFn: () => {} }), true);
-    const content = fs.readFileSync(missionFile, 'utf8');
-    assert.ok(!content.includes('Base-Branch: friday-08-21'), 'stale base line removed');
-    assert.equal(content.split('\n').filter(l => l.startsWith('Base-Branch:')).length, 0, 'no base line remains');
-
-    // A second primary launch over a now-clean file is a no-op.
-    assert.equal(ensureMissionBaseBranchRecorded(missionFile, null, { logFn: () => {} }), false);
-  } finally {
-    fs.rmSync(root, { recursive: true, force: true });
-  }
-});
-
-test('ensureMissionBaseBranchRecorded is a no-op for a primary/detached launch and idempotent on repeat', () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'base-branch-noop-'));
-  try {
-    const missionFile = path.join(root, 'MISSION.md');
-    fs.writeFileSync(missionFile, '# Mission: Example (task-test)\n\n## Goal\n');
-
-    // null base (primary or detached HEAD) writes nothing.
-    assert.equal(ensureMissionBaseBranchRecorded(missionFile, null, { logFn: () => {} }), false);
-    assert.ok(!fs.readFileSync(missionFile, 'utf8').includes('Base-Branch:'));
-
-    // First record changes the file; second identical record is a no-op.
-    assert.equal(ensureMissionBaseBranchRecorded(missionFile, 'develop', { logFn: () => {} }), true);
-    assert.equal(ensureMissionBaseBranchRecorded(missionFile, 'develop', { logFn: () => {} }), false);
-    const count = fs.readFileSync(missionFile, 'utf8').split('\n').filter(l => l === 'Base-Branch: develop').length;
-    assert.equal(count, 1);
-  } finally {
-    fs.rmSync(root, { recursive: true, force: true });
-  }
-});
-
-test('ensureMissionBaseBranchRecorded replaces a stale Base-Branch line in place', () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'base-branch-replace-'));
-  try {
-    const missionFile = path.join(root, 'MISSION.md');
-    fs.writeFileSync(missionFile, '# Mission: Example\n\nBase-Branch: old-branch\n\n## Goal\n');
-
-    assert.equal(ensureMissionBaseBranchRecorded(missionFile, 'feat/new', { logFn: () => {} }), true);
-    const content = fs.readFileSync(missionFile, 'utf8');
-    assert.ok(!content.includes('Base-Branch: old-branch'));
-    assert.equal(content.split('\n').filter(l => l.startsWith('Base-Branch:')).length, 1);
-    assert.ok(content.includes('Base-Branch: feat/new'));
-  } finally {
-    fs.rmSync(root, { recursive: true, force: true });
-  }
+  assert.ok(gitCalls.some(args => args.join(' ') === '-C /repo config --local --replace-all branch.mission/task-test.parallixBase feat/x'));
 });
 
 // ---------- stale base-branch correction on primary re-draft (task-2396) ----------
@@ -582,8 +508,7 @@ test('ensureMissionBaseBranchRecorded replaces a stale Base-Branch line in place
 // Build a real temp git checkout on a `main` branch so the production
 // getPrimaryBranch / resolveMissionBaseBranch git paths resolve `main` exactly
 // as they do in a live operator repo. Only the heavy external draft steps are
-// stubbed; the draft-startup base writer (ensureMissionBaseBranchRecorded) and
-// the base resolver run for real.
+// stubbed; the recorded base resolver runs for real.
 function tempGitRepoOnMain() {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'draft-2396-repo-'));
   const run = (args) => spawnSync('git', args, { cwd: root, encoding: 'utf8', env: process.env });
@@ -616,7 +541,10 @@ test('runDraftCommand clears a stale feature Base-Branch when re-drafted from th
       checkBacklogIntegrityFn: () => [],
       detectLaunchBaseBranchFn: () => null, // launch from the primary branch (main)
       ensureStandaloneMissionBaselineFn: () => ({ committed: false }),
-      ensureMissionBranchFn: () => {},
+      ensureMissionBranchFn: (_repo, branch, { baseBranch }) => {
+        const result = spawnSync('git', ['config', '--local', '--replace-all', `branch.${branch}.parallixBase`, baseBranch || 'main'], { cwd: root });
+        assert.equal(result.status, 0);
+      },
       ensureWorktreeFn: () => {},
       ensureGraphifyWorkspaceFn: () => {},
       ensureGraphifyIgnoreFn: () => true,
@@ -646,11 +574,10 @@ test('runDraftCommand clears a stale feature Base-Branch when re-drafted from th
       errorFn: (msg) => { throw new Error(`unexpected error: ${msg}`); }
     });
 
-    // The stale friday-08-21 base must be gone; the resolved base is the primary branch.
-    // Assertions run inside the try so the finally cleanup below still removes the temp repo.
+    // The typed base takes precedence without modifying a historical document.
     const content = fs.readFileSync(missionFile, 'utf8');
-    assert.ok(!content.includes('Base-Branch: friday-08-21'), 'stale Base-Branch line must be removed on primary re-draft');
-    assert.equal(resolveMissionBaseBranch('task-stale', root), 'main', 'resolved base must fall back to the primary branch after clearing the stale value');
+    assert.ok(content.includes('Base-Branch: friday-08-21'));
+    assert.equal(resolveMissionBaseBranch('task-stale', root), 'main');
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
@@ -672,7 +599,10 @@ test('runDraftCommand records a non-primary launch branch over a previous base o
       checkBacklogIntegrityFn: () => [],
       detectLaunchBaseBranchFn: () => 'feature/two', // re-drafting from a feature branch
       ensureStandaloneMissionBaselineFn: () => ({ committed: false }),
-      ensureMissionBranchFn: () => {},
+      ensureMissionBranchFn: (_repo, branch, { baseBranch }) => {
+        const result = spawnSync('git', ['config', '--local', '--replace-all', `branch.${branch}.parallixBase`, baseBranch], { cwd: root });
+        assert.equal(result.status, 0);
+      },
       ensureWorktreeFn: () => {},
       ensureGraphifyWorkspaceFn: () => {},
       ensureGraphifyIgnoreFn: () => true,
@@ -702,10 +632,9 @@ test('runDraftCommand records a non-primary launch branch over a previous base o
       errorFn: (msg) => { throw new Error(`unexpected error: ${msg}`); }
     });
 
-    // The previous base value must be replaced by the new launch branch.
+    // A historical document stays untouched; Git records the current base.
     const content = fs.readFileSync(missionFile, 'utf8');
-    assert.ok(!content.includes('Base-Branch: friday-08-21'), 'previous base value must be replaced');
-    assert.ok(content.includes('Base-Branch: feature/two'), 'new launch branch must be recorded');
+    assert.ok(content.includes('Base-Branch: friday-08-21'));
     assert.equal(resolveMissionBaseBranch('task-relaunch', root), 'feature/two');
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
@@ -796,7 +725,11 @@ test('runDraftCommand reuses the existing mission branch and clears the stale ba
       checkBacklogIntegrityFn: () => [],
       detectLaunchBaseBranchFn: () => null, // re-draft from the primary branch over an existing mission
       ensureStandaloneMissionBaselineFn: () => ({ committed: false }),
-      ensureMissionBranchFn: (_repo, branch) => { ensured.push(branch); },
+      ensureMissionBranchFn: (_repo, branch) => {
+        ensured.push(branch);
+        const result = spawnSync('git', ['config', '--local', '--replace-all', `branch.${branch}.parallixBase`, 'main'], { cwd: root });
+        assert.equal(result.status, 0);
+      },
       ensureWorktreeFn: () => {},
       ensureGraphifyWorkspaceFn: () => {},
       ensureGraphifyIgnoreFn: () => true,
@@ -828,7 +761,7 @@ test('runDraftCommand reuses the existing mission branch and clears the stale ba
     assert.equal(ensured.length, 1, 'mission branch ensured exactly once');
     assert.equal(ensured[0], 'mission/task-reuse', 'reuse the existing mission branch');
     const content = fs.readFileSync(missionFile, 'utf8');
-    assert.ok(!content.includes('Base-Branch: friday-08-21'), 'stale base must be cleared on reuse from primary');
+    assert.ok(content.includes('Base-Branch: friday-08-21'));
     assert.equal(resolveMissionBaseBranch('task-reuse', root), 'main');
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
@@ -887,14 +820,12 @@ test('ensureWorktree exits 1 when creating a missing worktree fails', () => {
 
 // ---------- ensureMissionFile / ensureRepoExists ----------
 
-test('ensureMissionFile scaffolds a new mission file', () => {
+test('ensureMissionFile prepares a mission directory without a generated file', () => {
   const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'mission-file-test-'));
   try {
     const missionFile = ensureMissionFile(tmpRoot, 'task-test');
-    const content = fs.readFileSync(missionFile, 'utf8');
-    assert.ok(fs.existsSync(missionFile));
-    assert.match(content, /# Mission: <Title> \(task-test\)/);
-    assert.match(content, /## Goal/);
+    assert.ok(fs.existsSync(path.dirname(missionFile)));
+    assert.equal(fs.existsSync(missionFile), false);
   } finally {
     fs.rmSync(tmpRoot, { recursive: true, force: true });
   }
@@ -1106,7 +1037,7 @@ test('enforceDraftCommitSafety creates fallback commit with dirty entries', () =
   const result = enforceDraftCommitSafety({
     slug: 'task-test',
     worktree: '/tmp/wt',
-    dirtyEntries: [' M missions/task-test/MISSION.md', '?? notes.txt'],
+    dirtyEntries: [' M backlog/tasks/task-test.md', '?? notes.txt'],
     gitImpl(args) {
       gitCalls.push(args);
       return { status: 0, stdout: '', stderr: '' };
@@ -1114,23 +1045,36 @@ test('enforceDraftCommitSafety creates fallback commit with dirty entries', () =
   });
 
   assert.equal(result, true);
-  assert.ok(gitCalls.some(args => args.includes('add') && args.includes('missions/task-test/MISSION.md') && args.includes('notes.txt')));
+  assert.ok(gitCalls.some(args => args.includes('add') && args.includes('backlog/tasks/task-test.md') && args.includes('notes.txt')));
   assert.ok(gitCalls.some(args => args.includes('commit') && args.includes('draft(task-test): capture agent output')));
 });
 
-test('enforceDraftCommitSafety auto-resolves mission-specific conflicts with --theirs', () => {
+test('enforceDraftCommitSafety refuses generated mission documents before staging', () => {
   const gitCalls = [];
-  const result = enforceDraftCommitSafety({
-    slug: 'task-test',
-    worktree: '/tmp/wt',
-    dirtyEntries: ['UU missions/task-test/MISSION.md'],
-    gitImpl(args) {
-      gitCalls.push(args);
-      return { status: 0, stdout: '', stderr: '' };
-    }
-  });
-  assert.equal(result, true);
-  assert.ok(gitCalls.some(args => args.includes('--theirs') && args.includes('missions/task-test/MISSION.md')));
+  for (const file of ['MISSION.md', 'CP-1.md']) {
+    assert.throws(() => enforceDraftCommitSafety({
+      slug: 'task-test',
+      worktree: '/tmp/wt',
+      dirtyEntries: [` M missions/task-test/${file}`],
+      gitImpl(args) { gitCalls.push(args); return { status: 0, stdout: '', stderr: '' }; },
+    }), /refuses to commit/);
+  }
+  assert.deepEqual(gitCalls, []);
+});
+
+test('enforceDraftCommitSafety catches a generated document in a collapsed untracked tree', () => {
+  const worktree = fs.mkdtempSync(path.join(os.tmpdir(), 'draft-retired-tree-'));
+  try {
+    const missionDir = missionDirForSlug(worktree, 'task-test');
+    fs.mkdirSync(missionDir, { recursive: true });
+    fs.writeFileSync(path.join(missionDir, 'MISSION.md'), '# placeholder');
+    assert.throws(() => enforceDraftCommitSafety({
+      slug: 'task-test', worktree, dirtyEntries: ['?? missions/'],
+      gitImpl: () => { throw new Error('must not stage'); },
+    }), /refuses to commit.*MISSION\.md/);
+  } finally {
+    fs.rmSync(worktree, { recursive: true, force: true });
+  }
 });
 
 test('enforceDraftCommitSafety throws on shared-file conflicts', () => {
@@ -1150,7 +1094,7 @@ test('enforceDraftCommitSafety throws when fallback commit fails', () => {
     () => enforceDraftCommitSafety({
       slug: 'task-test',
       worktree: '/tmp/wt',
-      dirtyEntries: [' M docs/missions/2026/task-test/MISSION.md'],
+      dirtyEntries: [' M backlog/tasks/task-test.md'],
       gitImpl(args) {
         if (args.includes('commit')) return { status: 1, stdout: '', stderr: 'no changes' };
         return { status: 0, stdout: '', stderr: '' };
@@ -1828,16 +1772,15 @@ test('runDraftCommand leaves the Backlog task alone when refinement cannot be re
 const TASK_2471_PLUMBING_LINES = [
   'Step 1: Setting up branch',
   'Step 2: Ensuring dedicated worktree',
-  'Step 3: Scaffolding MISSION.md',
+  'Step 3: Preparing mission directory',
   'Step 4: Ensuring Backlog task exists',
   'Draft agent family',
   'Mission materialized in SQLite',
-  'Recorded Base-Branch:',
   'graphify-out directory',
   'Post-draft mission type labels validated',
   'Created branch',
   'Created worktree',
-  'Scaffolded MISSION.md',
+  'Prepared typed mission directory',
   'Draft setup complete',
 ];
 
@@ -1858,13 +1801,15 @@ function task2471DraftDeps(overrides = {}) {
     ensureGraphifyIgnoreFn: () => {},
     ensureMissionFileFn: (worktree, slug, { logFn }) => {
       const missionFile = `${worktree}/missions/${slug}/MISSION.md`;
-      logFn(cliFormat.status('PASS', `Scaffolded MISSION.md at ${missionFile}`));
+      logFn(cliFormat.status('PASS', `Prepared typed mission directory at ${worktree}/missions/${slug}`));
       return missionFile;
     },
-    ensureMissionBaseBranchRecordedFn: (missionFile, _base, { logFn }) => {
-      logFn(cliFormat.status('PASS', `Recorded Base-Branch: feat/x in ${missionFile}`));
-      return true;
-    },
+    missionServicesFn: async () => ({
+      repositoryId: 'main',
+      lifecycle: { transition: async () => ({ status: 'completed', value: { version: 2 }, durableEvidence: [] }) },
+      intake: { execute: async () => ({ status: 'completed', value: { version: 1 }, durableEvidence: [] }) },
+      store: { load: async () => ({ kind: 'found', mission: { title: 'Improve px draft default terminal output', checkpoints: [] }, version: 2 }) },
+    }),
     recordDraftStatsFn: () => {},
     transitionTaskFn: () => true,
     transitionVirtualFn: async () => true,
@@ -1894,17 +1839,15 @@ async function runDraftCapturingOutput({ debug = false, overrides = {} } = {}) {
   };
 }
 
-// Points the scaffold step at a specific mission file while still emitting the
-// real `Scaffolded MISSION.md` plumbing line the demotion contract covers.
+// Points the scaffold step at a specific mission path without creating it.
 function missionFileStub(missionFile) {
   return (_worktree, _slug, { logFn }) => {
-    logFn(cliFormat.status('PASS', `Scaffolded MISSION.md at ${missionFile}`));
+    logFn(cliFormat.status('PASS', `Prepared typed mission directory at ${path.dirname(missionFile)}`));
     return missionFile;
   };
 }
 
-// Writes a real MISSION.md so the summary exercises the actual heading parse
-// rather than the slug fallback.
+// Historical document fixture: the typed summary must ignore its heading.
 function writeMissionFile(heading, body = '\n## Goal\nSomething.\n') {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'px-2471-'));
   const missionFile = path.join(dir, 'MISSION.md');
@@ -2012,21 +1955,29 @@ test('px draft failure path keeps the FAIL line, the repair hint and a non-zero 
   assert.ok(!logText.includes('Drafted task-tst in'), 'a failed draft must not print the success summary');
 });
 
-test('px draft summary falls back to the slug when the mission file has no title heading', async () => {
+test('px draft summary falls back to the slug when recorded mission has no title', async () => {
   const missionFile = writeMissionFile('Not a mission heading at all');
   const { text } = await runDraftCapturingOutput({
-    overrides: { ensureMissionFileFn: missionFileStub(missionFile) },
+    overrides: {
+      ensureMissionFileFn: missionFileStub(missionFile),
+      missionServicesFn: async () => ({
+        repositoryId: 'main',
+        lifecycle: { transition: async () => ({ status: 'completed', value: { version: 2 }, durableEvidence: [] }) },
+        intake: { execute: async () => ({ status: 'completed', value: { version: 1 }, durableEvidence: [] }) },
+        store: { load: async () => ({ kind: 'found', mission: { checkpoints: [] }, version: 2 }) },
+      }),
+    },
   });
 
   assert.match(text, /\[PASS\] Drafted task-tst in \d+s: task-tst/);
 });
 
-test('px draft summary falls back to the slug when the mission file is missing', async () => {
+test('px draft summary uses recorded title when the mission file is missing', async () => {
   const { text } = await runDraftCapturingOutput({
     overrides: { ensureMissionFileFn: missionFileStub('/nonexistent/px-2471/MISSION.md') },
   });
 
-  assert.match(text, /\[PASS\] Drafted task-tst in \d+s: task-tst/);
+  assert.match(text, /\[PASS\] Drafted task-tst in \d+s: Improve px draft default terminal output/);
 });
 
 test('px draft demotes the .gitignore plumbing line and DEBUG restores it', async () => {
@@ -2163,7 +2114,15 @@ test('px draft prints the recorded contract goal and its shape so no pager is ne
 test('px draft summary survives a contract with no Goal section', async () => {
   const missionFile = writeMissionFile('# Mission: Untitled', '\n## Scope\nNothing.\n');
   const { text } = await runDraftCapturingOutput({
-    overrides: { ensureMissionFileFn: missionFileStub(missionFile) },
+    overrides: {
+      ensureMissionFileFn: missionFileStub(missionFile),
+      missionServicesFn: async () => ({
+        repositoryId: 'main',
+        lifecycle: { transition: async () => ({ status: 'completed', value: { version: 2 }, durableEvidence: [] }) },
+        intake: { execute: async () => ({ status: 'completed', value: { version: 1 }, durableEvidence: [] }) },
+        store: { load: async () => ({ kind: 'found', mission: { title: 'Untitled', checkpoints: [] }, version: 2 }) },
+      }),
+    },
   });
 
   assert.match(text, /\[PASS\] Drafted task-tst in \d+s: Untitled/);

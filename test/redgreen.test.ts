@@ -1,59 +1,28 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import fs from 'node:fs';
-import os from 'node:os';
-import path from 'node:path';
 import * as rg from '../src/adapters/verification/redgreen.js';
-
-function tempDir(prefix = 'redgreen-') {
-  return fs.mkdtempSync(path.join(os.tmpdir(), prefix));
-}
-function cleanup(dir) { fs.rmSync(dir, { recursive: true, force: true }); }
 
 const noopLog = () => {};
 
 // ---------- findReproTestPath ----------
 
-test('findReproTestPath reads the marker from MISSION.md', () => {
-  const dir = tempDir();
-  try {
-    fs.writeFileSync(path.join(dir, 'MISSION.md'), '# Mission\n\nReproduction-Test: test/task-123.repro.test.ts\n');
-    const found = rg.findReproTestPath('task-123', dir, {
-      findMissionDirFn: () => dir,
-      findCheckpointsFn: () => [],
-    });
-    assert.equal(found, 'test/task-123.repro.test.ts');
-  } finally { cleanup(dir); }
+test('findReproTestPath uses the recorded Mission test path', () => {
+  assert.equal(rg.findReproTestPath('task-123', '/repo', { testPath: 'test/task-123.repro.test.ts' }), 'test/task-123.repro.test.ts');
 });
 
-test('findReproTestPath reads the marker from a checkpoint document', () => {
-  const dir = tempDir();
-  try {
-    fs.writeFileSync(path.join(dir, 'CP-2.md'), '# Checkpoint 2\nReproduction-Test: test/cp.repro.ts\n');
-    const found = rg.findReproTestPath('task-9', dir, {
-      findMissionDirFn: () => dir,
-      findCheckpointsFn: () => [path.join(dir, 'CP-2.md')],
-    });
-    assert.equal(found, 'test/cp.repro.ts');
-  } finally { cleanup(dir); }
+test('findReproTestPath ignores legacy document lookup hooks', () => {
+  assert.equal(rg.findReproTestPath('task-9', '/repo', {
+    testPath: 'test/recorded.repro.ts',
+    findMissionDirFn: () => { throw new Error('legacy lookup'); },
+  } as any), 'test/recorded.repro.ts');
 });
 
-test('findReproTestPath returns null when no marker exists', () => {
-  const dir = tempDir();
-  try {
-    fs.writeFileSync(path.join(dir, 'MISSION.md'), '# Mission\nNo marker here.\n');
-    assert.equal(rg.findReproTestPath('task-1', dir, {
-      findMissionDirFn: () => dir,
-      findCheckpointsFn: () => [],
-    }), null);
-  } finally { cleanup(dir); }
+test('findReproTestPath returns null when no path is recorded', () => {
+  assert.equal(rg.findReproTestPath('task-1', '/repo'), null);
 });
 
-test('findReproTestPath returns null when the mission dir is missing', () => {
-  assert.equal(rg.findReproTestPath('task-nope', '/nope', {
-    findMissionDirFn: () => null,
-    findCheckpointsFn: () => [],
-  }), null);
+test('findReproTestPath does not require a mission directory', () => {
+  assert.equal(rg.findReproTestPath('task-nope', '/nope', { testPath: 'test/repro.ts' }), 'test/repro.ts');
 });
 
 // ---------- resolveMissionParentCommit ----------

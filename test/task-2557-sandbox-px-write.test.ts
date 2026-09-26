@@ -42,8 +42,8 @@ function writeExecutable(filePath: string, content: string): void {
 }
 
 /**
- * Deterministic stub agent (draft mode only). It writes the legacy MISSION.md
- * scaffold and records the mission contract through `px` — the same commands
+ * Deterministic stub agent (draft mode only). It records the mission contract
+ * through `px` — the same commands
  * the draft prompt names — then answers the session-ID line. `px` is resolved
  * through the harness environment because the stub runs as a bare executable
  * on the restricted fixture PATH.
@@ -53,7 +53,6 @@ function stubSource(): string {
 const fs = require('node:fs');
 const path = require('node:path');
 const childProcess = require('node:child_process');
-function read(f) { return fs.existsSync(f) ? fs.readFileSync(f, 'utf8') : ''; }
 function write(f, c) { fs.mkdirSync(path.dirname(f), { recursive: true }); fs.writeFileSync(f, c, 'utf8'); }
 function px(args) {
   const entry = process.env.PARALLIX_E2E_PX_ENTRY;
@@ -103,30 +102,11 @@ const match = (re) => { const m = prompt.match(re); return m && m[1] ? m[1].trim
 const slug = match(/^(?:Mission s|S)lug:\\s*((?:task-[a-z0-9-]+|parallix-adhoc-\\d+))/im)
   || match(/^Mission:\\s*((?:task-[a-z0-9-]+|parallix-adhoc-\\d+))/im)
   || 'task-unknown';
-const taskPath = match(/^Backlog task:\\s*(.+)$/m);
 const missionDir = match(/^Mission dir:\\s*(.+)$/m)
   || path.join(process.cwd(), 'missions', slug);
 if (/^Mode: draft\\./m.test(prompt)) {
-  const task = taskPath ? read(taskPath) : '';
-  const id = (task.match(/^id:\\s*([^\\r\\n]+)/m) || [])[1]?.trim() || slug.toUpperCase();
-  const title = (task.match(/^title:\\s*([^\\r\\n]+)/m) || [])[1]?.trim() || slug;
-  write(path.join(missionDir, 'MISSION.md'), [
-    '---', 'id: ' + id, 'title: ' + title, 'status: drafted', '---', '',
-    '# Mission: ' + title + ' (' + slug + ')', '',
-    '## Goal', 'Exercise the sandbox px-write path with a deterministic stub agent.', '',
-    '## Why Now', 'Protect the sandbox Parallix state-home bind from regression.', '',
-    '## Refinement Signals', '- Predicted NEL bucket: Small (0-80)', '- Confidence: High', '- Selection note: activate as-is', '- Main drivers: sandbox coverage', '',
-    '## Scope', '- Run draft through the real CLI inside bubblewrap.', '',
-    '## Out of Scope', '- Real model execution', '',
-    '## Success Criteria', '- Sandboxed px writes Parallix mission state.', '',
-    '## Risks and Assumptions', '- Stubbed agent replaces all model output.', '',
-    '## Checkpoints', '- CP 1: Draft and execute', '- CP 2: Review and integrate', '',
-    '## Gates', '- [ ] node -e ""', '',
-    '## Restricted Areas', '- None in the temp repo.', '',
-    '## Stop Rules', '- Stop if the stub cannot satisfy the real workflow contract.', ''
-  ].join('\\n'));
   recordContract(slug);
-  write(path.join(missionDir, 'milestone-1.md'), '# Milestone 1\\n\\nDraft scaffold complete.\\n');
+  write(path.join(missionDir, 'milestone-1.md'), '# Milestone 1\\n\\nTyped contract recorded.\\n');
 }
 process.stdout.write('{"sessionID":"ses_stubbed_sandbox"}\\n');
 `;
@@ -268,6 +248,7 @@ test('sandboxed codex profile writes Parallix mission state through px under bwr
     const recorded = JSON.parse(status.stdout ?? '{}') as { slug?: string; version?: number };
     assert.equal(recorded.slug, SLUG);
     assert.ok(recorded.version !== undefined, 'sandboxed px write must persist a versioned mission row');
+    assert.equal(fs.existsSync(path.join(fixture.repo, 'worktrees', SLUG, 'missions', SLUG, 'MISSION.md')), false);
   } finally {
     if (previousParallixHome === undefined) { delete process.env.PARALLIX_HOME; } else { process.env.PARALLIX_HOME = previousParallixHome; }
     fs.rmSync(fixture.tmpRoot, { recursive: true, force: true });

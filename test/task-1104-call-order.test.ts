@@ -165,7 +165,7 @@ test('pushRound follows the transition contract: review before createPr', async 
   assert.ok(reviewTransitionIdx < createPrIdx, "Transition to 'review' must occur BEFORE createPr");
 });
 
-import { stubMissionServices } from './helpers/stub-mission-services.js';
+import { stubRecordedMissionServices } from './helpers/stub-mission-services.js';
 
 test('performHandoff follows the sequence: createPr -> gatekeeper -> transitionTask -> push', async () => {
   const events = [];
@@ -213,7 +213,7 @@ test('performHandoff follows the sequence: createPr -> gatekeeper -> transitionT
       skipGate: true,
       isForgejoReviewEnabledFn: () => true,
       rebaseFn: mockRebase,
-      missionServicesFn: stubMissionServices(),
+      missionServicesFn: stubRecordedMissionServices(),
       // The blanket readFileSync mock above supplies checkpoint content. Keep
       // agent selection independent of filesystem-backed configuration.
       eligibleAgentsForStepFn: () => ['codex', 'claude'],

@@ -168,11 +168,11 @@ test('task-2525.05: shared scanner rejects High-or-Blocker issues in the candida
   const { assertNoOpenHighOrBlockerIssues } = await import('../scripts/sonar-local.js');
   const request: typeof fetch = async (url) => new Response(JSON.stringify(String(url).includes('project_branches/list')
     ? { branches: [{ name: 'mission/task-2525.05', type: 'LONG' }] }
-    : { component: { measures: [{ value: '{"HIGH":0,"BLOCKER":0}' }] } }));
+    : { component: { measures: Array.from({ length: 3 }, () => ({ value: '{"HIGH":0,"BLOCKER":0}' })) } }));
   await assertNoOpenHighOrBlockerIssues({ token: 'test-token', branch: 'mission/task-2525.05', request });
 
   await assert.rejects(
-    assertNoOpenHighOrBlockerIssues({ token: 'test-token', branch: 'mission/task-2525.05', request: async (url) => new Response(JSON.stringify(String(url).includes('project_branches/list') ? { branches: [{ name: 'mission/task-2525.05', type: 'LONG' }] } : { component: { measures: [{ value: '{"HIGH":1}' }] } })) }),
+    assertNoOpenHighOrBlockerIssues({ token: 'test-token', branch: 'mission/task-2525.05', request: async (url) => new Response(JSON.stringify(String(url).includes('project_branches/list') ? { branches: [{ name: 'mission/task-2525.05', type: 'LONG' }] } : { component: { measures: [{ value: '{"HIGH":1}' }, { value: '{}' }, { value: '{}' }] } })) }),
     /mission analysis has unresolved HIGH\/BLOCKER impacts/,
   );
 });

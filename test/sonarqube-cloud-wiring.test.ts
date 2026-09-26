@@ -16,7 +16,7 @@ const COVERAGE_COMMAND = 'rm -f coverage/lcov.info && PARALLIX_PREBUILT_PACK=1 n
 // Capture the scanner invocation instead of running it. SONAR_TOKEN and
 // GITHUB_ACTIONS are set only for the duration of the call, so ordering between
 // tests cannot leak either value.
-function captureScan(env: Record<string, string | undefined>, status = 0) {
+function captureScan(env: Record<string, string | undefined>, status = 0, scanOptions: { branch?: string, waitForGate?: boolean } = {}) {
   let captured: { command: string, args: string[], token?: string, scannerHome?: string } | null = null;
   const spawn = ((command: string, args: string[], options: { env: NodeJS.ProcessEnv }) => {
     captured = { command: String(command), args, token: options.env.SONAR_TOKEN, scannerHome: options.env.SONAR_USER_HOME };
@@ -28,7 +28,7 @@ function captureScan(env: Record<string, string | undefined>, status = 0) {
       if (value === undefined) delete process.env[key];
       else process.env[key] = value;
     }
-    try { return runSonar({ rootDir: repoRoot, spawn }); } finally {
+    try { return runSonar({ rootDir: repoRoot, spawn, ...scanOptions }); } finally {
       for (const [key, value] of Object.entries(previous)) {
         if (value === undefined) delete process.env[key];
         else process.env[key] = value;
@@ -57,6 +57,19 @@ test('local sonar scan submits the worktree branch to the one Cloud project', ()
   assert.equal(captured.token, 'operator-token', 'the scanner receives the environment token');
   assert.equal(captured.scannerHome, path.join(repoRoot, 'tmp', 'sonar'), 'the scanner keeps temporary data in the worktree');
   assert.doesNotMatch(captured.args.join(' '), /operator-token/, 'the token is never passed as a scanner argument');
+});
+
+test('mission comparison uses a short branch against main and keeps the long scan separate', () => {
+  const short = captureScan({ SONAR_TOKEN: 'operator-token', GITHUB_ACTIONS: undefined }, 0, { branch: 'candidate/mission/task-2560' });
+  short.run();
+  assert.ok(short.read()!.args.includes('-Dsonar.branch.target=main'));
+  assert.ok(short.read()!.args.includes('-Dsonar.branch.name=candidate/mission/task-2560'));
+  assert.ok(!short.read()!.args.includes('-Dsonar.qualitygate.wait=false'));
+
+  const long = captureScan({ SONAR_TOKEN: 'operator-token', GITHUB_ACTIONS: undefined }, 0, { waitForGate: false });
+  long.run();
+  assert.ok(long.read()!.args.includes('-Dsonar.qualitygate.wait=false'));
+  assert.ok(!long.read()!.args.includes('-Dsonar.branch.target=main'));
 });
 
 test('github sonar scan lets the CI integration derive the branch identity', () => {
@@ -113,12 +126,12 @@ test('local verification and GitHub invoke the same pinned sonar entrypoint', ()
   assert.doesNotMatch(workflow, /npx\s+--yes/);
 });
 
-test('sonar analysis configuration consumes LCOV and baselines new code on main', () => {
+test('sonar analysis configuration consumes LCOV without a Cloud-unsupported new-code override', () => {
   const props = fs.readFileSync(path.join(repoRoot, 'sonar-project.properties'), 'utf8');
 
   assert.match(props, /sonar\.javascript\.lcov\.reportPaths=coverage\/lcov\.info/);
   assert.match(props, /sonar\.sources=src/);
-  assert.match(props, /sonar\.newCode\.referenceBranch=main/);
+  assert.doesNotMatch(props, /sonar\.newCode\.referenceBranch|sonar\.projectVersion=/);
   // The local pre-integration gate emits LCOV through npm run test:coverage
   // (--lcov), and GitHub unions the per-tier fragments into the same
   // coverage/lcov.info via npm run coverage:merge before the scan.

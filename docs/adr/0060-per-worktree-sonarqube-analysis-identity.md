@@ -107,15 +107,16 @@ Two concurrent mission scans therefore remain isolated without inventing separat
 
 The analysis identity is the Git branch already owned by the repository. Parallix must not create another derived identity layer merely for Sonar.
 
-Mission branches are long-lived Cloud branches. This is required for the
-repository gate to inspect the candidate's total code, rather than only its
-new-code diff. The gate fails closed when a mission analysis is not long-lived
-or when the candidate retains a High or Blocker impact. It does not use the
-current state of `main` as a substitute for the candidate's result.
+Local mission verification uses two Cloud branch analyses of the same candidate.
+A short-lived comparison branch measures changes against `main` under the
+provider quality gate. The mission's long-lived branch supplies total-code
+metrics for the repository's High and Blocker check. The gate fails closed if
+either analysis fails, either branch has the wrong type, or the total-code
+metrics are unavailable. It does not use the current state of `main` as a
+substitute for the candidate's result.
 
-After confirmed integration, the repository deletes that mission's SonarQube
-Cloud branch analysis. Cleanup failures are reported without reversing the
-integration.
+After confirmed integration, the repository deletes both analyses. Cleanup
+failures are reported without reversing the integration.
 
 Parallix currently uses a progressive quality policy: HIGH and BLOCKER
 impacts are blocking; MEDIUM, LOW, and INFO findings remain visible in the
@@ -123,9 +124,9 @@ provider but are non-blocking. The provider quality gate owns that new-code
 severity policy (maintainability, reliability, and security severity greater
 than or equal to High) together with the provider-owned coverage, duplication,
 and security-hotspot conditions. The repository does not re-implement the
-gate: `sonar.qualitygate.wait=true` makes the provider's gate result the
-scanner result in every trusted context, and the repository-owned total-code
-HIGH/BLOCKER check adds the mission's whole-candidate proof on top of it.
+gate: the scanner waits for the provider's gate on the comparison analysis.
+The repository waits for the long-lived analysis to finish before checking
+its total-code HIGH/BLOCKER impacts.
 
 The previous mechanisms for:
 
@@ -141,7 +142,9 @@ are removed rather than retained as dormant compatibility machinery.
 
 `main` is the canonical long-lived branch for the Sonar project.
 
-Mission quality is evaluated as new code relative to `main`.
+Mission new-code quality is evaluated by a short-lived comparison branch
+relative to `main`. SonarQube Cloud's long-lived branch new-code setting is
+date or version based, so it cannot establish this comparison on its own.
 
 The scanner checkout must therefore contain sufficient Git history and the `main` reference needed for SCM/new-code calculation.
 
@@ -152,10 +155,11 @@ The repository must prove this against real SonarQube Cloud behaviour. Configura
 The repository's configured pre-integration quality gate remains responsible for:
 
 1. generating the required LCOV coverage report;
-2. submitting the exact mission worktree to SonarQube Cloud;
-3. waiting for analysis processing;
-4. waiting for the quality-gate result; and
-5. failing integration when that gate does not pass.
+2. submitting the exact mission worktree for comparison against `main` and
+   waiting for the provider quality gate;
+3. submitting the same candidate as a long-lived mission branch and waiting
+   for its analysis and total-code check; and
+4. failing integration when either check does not pass.
 
 A successful scanner process that has only uploaded analysis is not sufficient evidence.
 

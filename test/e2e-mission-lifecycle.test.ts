@@ -138,31 +138,14 @@ function match(prompt, regex) {
   return found ? found[1].trim() : null;
 }
 
-function taskIdFromTask(taskPath) {
-  const content = read(taskPath);
-  const idMatch = content.match(/^id:\\s*([^\\r\\n]+)/m);
-  return idMatch ? idMatch[1].trim() : 'TASK-UNKNOWN';
-}
-
-function missionTitleFromTask(taskPath, slug) {
-  const content = read(taskPath);
-  const titleMatch = content.match(/^title:\\s*([^\\r\\n]+)/m);
-  return titleMatch ? titleMatch[1].trim() : slug;
-}
-
 const prompt = process.argv[process.argv.length - 1] || '';
 const slug = match(prompt, /^(?:Mission s|S)lug:\\s*((?:task-[a-z0-9-]+|parallix-adhoc-\\d+))/im)
   || match(prompt, /^Mission:\\s*((?:task-[a-z0-9-]+|parallix-adhoc-\\d+))/im)
   || match(prompt, /^Mode: act-on-review\\. Branch:\\s*mission\\/((?:task-[a-z0-9-]+|parallix-adhoc-\\d+))/im)
   || match(prompt, /^Mode: review\\. .*?Mission:\\s+.*?((?:task-[a-z0-9-]+|parallix-adhoc-\\d+))/im)
   || 'task-unknown';
-// TASK-2521.03: the draft prompt no longer hands the agent a mission-document
-// path, because a drafting agent records the mission with \`px\` rather than
-// writing a file. This stub still writes the legacy scaffold — the harness keeps
-// reading \`## Gates\` from it until the wave retires that fallback — so it now
-// derives the location from the repository's configured mission baseDir, the
-// same way the real workflow does. Missions 5-7 remove the file, and this stub
-// with it.
+// Typed missions record the contract through px; the directory holds only
+// optional mission-local artifacts.
 const missionBaseDir = (() => {
   try {
     const cfg = JSON.parse(read(path.join(process.cwd(), 'workflow.config.json')) || '{}');
@@ -171,8 +154,6 @@ const missionBaseDir = (() => {
 })();
 const missionDir = match(prompt, /^Mission dir:\\s*(.+)$/m)
   || path.join(process.cwd(), missionBaseDir, slug);
-const missionPath = path.join(missionDir, 'MISSION.md');
-const taskPath = match(prompt, /^Backlog task:\\s*(.+)$/m);
 
 if (process.argv.includes('--help')) {
   process.stdout.write('stub opencode help\\n');
@@ -180,105 +161,23 @@ if (process.argv.includes('--help')) {
 }
 
 if (/^Mode: draft\\./m.test(prompt)) {
-  const taskId = taskIdFromTask(taskPath);
-  const title = missionTitleFromTask(taskPath, slug);
-  const missionBody = [
-    '---',
-    'id: ' + taskId,
-    'title: ' + title,
-    'status: drafted',
-    '---',
-    '',
-    '# Mission: ' + title + ' (' + slug + ')',
-    '',
-    '## Goal',
-    'Exercise the real lifecycle with a deterministic stub agent.',
-    '',
-    '## Why Now',
-    'Protect the TypeScript workflow surface from regression drift.',
-    '',
-    '## Refinement Signals',
-    '- Predicted NEL bucket: Small (0-80)',
-    '- Confidence: High',
-    '- Selection note: activate as-is',
-    '- Main drivers: e2e coverage',
-    '',
-    '## Scope',
-    '- Run draft, active, review, and integrate through the real CLI.',
-    '',
-    '## Out of Scope',
-    '- Real model execution',
-    '',
-    '## Success Criteria',
-    '- Lifecycle completes with deterministic artifacts.',
-    '',
-    '## Risks and Assumptions',
-    '- Stubbed codex replaces all agent output.',
-    '',
-    '## Checkpoints',
-    '- CP 1: Draft and execute',
-    '- CP 2: Review and integrate',
-    '',
-    '## Gates',
-    '- [ ] node -e ""',
-    '',
-    '## Restricted Areas',
-    '- None in the temp repo.',
-    '',
-    '## Stop Rules',
-    '- Stop if the stub cannot satisfy the real workflow contract.',
-    ''
-  ].join('\\n');
-  writeFile(missionPath, missionBody);
   recordMissionContract(slug);
-  writeFile(path.join(missionDir, 'milestone-1.md'), '# Milestone 1\\n\\nDraft scaffold complete.\\n');
+  writeFile(path.join(missionDir, 'milestone-1.md'), '# Milestone 1\\n\\nTyped contract recorded.\\n');
 }
 
 if (/^Mode: execute after lock\\./m.test(prompt)) {
-  const cp1 = [
-    '# CP-1: Execute stub',
-    '',
-    '## Goal Check',
-    '',
-    '| Criterion | Evidence | Status |',
-    '|-----------|----------|--------|',
-    '| Mission scaffold exists | missions/' + slug + '/MISSION.md:1 | PASS |',
-    ...(taskPath
-      ? ['| Backlog task preserved | backlog/tasks/' + path.basename(taskPath) + ':1 | PASS |']
-      : ['| Adhoc identity authoritative | test/task-2468-adhoc-lifecycle-repro.test.ts | PASS |']),
-    '',
-    'Next action: Run review.',
-    ''
-  ].join('\\n');
-  const cp2 = [
-    '# CP-2: Ready for review',
-    '',
-    '## Goal Check',
-    '',
-    '| Criterion | Evidence | Status |',
-    '|-----------|----------|--------|',
-    '| Execute artifacts committed | missions/' + slug + '/CP-1.md:1 | PASS |',
-    '| Final checkpoint present | missions/' + slug + '/CP-2.md:1 | PASS |',
-    '| The lifecycle reaches integration through the real CLI | missions/' + slug + '/CP-2.md:1 | PASS |',
-    '',
-    'Next action: Approve the mission in review.',
-    ''
-  ].join('\\n');
-  writeFile(path.join(missionDir, 'CP-1.md'), cp1);
-  writeFile(path.join(missionDir, 'CP-2.md'), cp2);
-  // The contract was recorded through the typed verbs, so handoff verifies
-  // recorded evidence; the documents above only back its file references.
-  for (const [name, text, next] of [['CP-1', cp1, 'Run review.'], ['CP-2', cp2, 'Approve the mission in review.']]) {
-    const rows = text.split('\\n').filter((line) => line.startsWith('| ') && !line.startsWith('| Criterion '));
-    const args = ['checkpoint', 'record', '--slug', slug, '--name', name, '--next', next];
-    for (const row of rows) {
-      const [criterion, evidence] = row.split('|').slice(1, 3).map((cell) => cell.trim());
-      args.push('--criterion', criterion, '--evidence', evidence);
-    }
-    const version = px(['status', slug, '--json']);
-    if (version) { px(args.concat(['--expected-version', String(JSON.parse(version).version)])); }
-  }
   writeFile(path.join(process.cwd(), 'deliverable.txt'), 'stub execute output\\n');
+  for (const [name, criterion, next] of [
+    ['CP-1', 'Execute artifacts committed', 'Run review.'],
+    ['CP-2', 'The lifecycle reaches integration through the real CLI', 'Approve the mission in review.'],
+  ]) {
+    const version = missionVersion(slug);
+    if (version !== null) {
+      px(['checkpoint', 'record', '--slug', slug, '--name', name,
+        '--criterion', criterion, '--evidence', 'deliverable.txt:1',
+        '--next', next, '--expected-version', version]);
+    }
+  }
 }
 
 if (/^Mode: review\\./m.test(prompt)) {
@@ -592,12 +491,6 @@ function checkpointFiles(rootDir, slug) {
     .sort();
 }
 
-function readMissionId(missionFile) {
-  const content = fs.readFileSync(missionFile, 'utf8');
-  const match = content.match(/^id:\s*([^\r\n]+)/m);
-  return match ? match[1].trim() : null;
-}
-
 function countTaskIds(rootDir, id) {
   let count = 0;
   for (const dir of ['tasks', 'completed', 'archive']) {
@@ -613,17 +506,6 @@ function countTaskIds(rootDir, id) {
     }
   }
   return count;
-}
-
-function assertCheckpointShape(rootDir, slug, expectedFiles) {
-  const files = checkpointFiles(rootDir, slug);
-  assert.deepEqual(files, expectedFiles);
-  for (const file of files) {
-    const content = fs.readFileSync(path.join(missionDir(rootDir, slug), file), 'utf8');
-    assert.match(content, /^# CP-\d+:/m, `${file} should have a checkpoint heading`);
-    assert.match(content, /^## Goal Check$/m, `${file} should have an exact Goal Check heading`);
-    assert.match(content, /^Next action:\s+\S/m, `${file} should have a non-generic Next action line`);
-  }
 }
 
 async function runScenario({ launchFromFeatureBranch = false, integrate = true, postIntegrateHook = false, preCommitHook = false, failIntegrationGate = false }) {
@@ -661,19 +543,15 @@ async function runScenario({ launchFromFeatureBranch = false, integrate = true, 
     assert.ok(worktreeTask, 'draft should bootstrap the backlog task into the worktree');
     assert.equal(taskStatus(worktreeTask), 'refined');
 
-    const draftedMission = fs.readFileSync(missionPath(worktree, slug), 'utf8');
-    assert.match(draftedMission, /^---[\s\S]*^---$/m);
-    assert.match(draftedMission, /^## Goal$/m);
-    if (launchFromFeatureBranch) {
-      assert.match(draftedMission, /^Base-Branch:\s*feature\/e2e-base$/m);
-    } else {
-      assert.doesNotMatch(draftedMission, /^Base-Branch:/m);
-    }
+    assert.equal(fs.existsSync(missionPath(worktree, slug)), false, 'typed draft must not generate MISSION.md');
+    const recordedBase = runGit(repo.repoRoot, ['config', '--get', `branch.mission/${slug}.parallixBase`]);
+    assert.equal(recordedBase, launchFromFeatureBranch ? 'feature/e2e-base' : 'main');
+    const missionId = /^id:\s*([^\r\n]+)/m.exec(fs.readFileSync(worktreeTask, 'utf8'))?.[1]?.trim();
 
     summary.draft = {
       taskStatus: taskStatus(worktreeTask),
-      missionId: readMissionId(missionPath(worktree, slug)),
-      missionHasBaseBranch: /^Base-Branch:/m.test(draftedMission)
+      missionId,
+      missionHasBaseBranch: recordedBase !== 'main'
     };
 
     await runWorkflow(worktree, env, ['active', slug, '--implementer', 'custom']);
@@ -1060,7 +938,7 @@ test('feature-branch lifecycle drafts from the recorded base and integrates back
   assert.equal(summary.active.taskStatus, 'ready-for-integration');
   assert.equal(summary.active.reviewState.phase, 'approved');
   assert.equal(summary.active.reviewState.disposition, 'APPROVED');
-  assert.deepEqual(summary.active.checkpointFiles, ['CP-1.md', 'CP-2.md']);
+  assert.deepEqual(summary.active.checkpointFiles, []);
   assert.equal(summary.integrate.rootTaskStatus, 'done');
   assert.equal(summary.integrate.worktreeExistsAfter, false);
   assert.equal(summary.integrate.mainHeadAfter, summary.integrate.mainHeadBefore);
@@ -1072,7 +950,7 @@ test('primary-branch lifecycle integrates cleanly to main and marks the task don
   assert.equal(summary.draft.taskStatus, 'refined');
   assert.equal(summary.draft.missionHasBaseBranch, false);
   assert.equal(summary.active.taskStatus, 'ready-for-integration');
-  assert.deepEqual(summary.active.checkpointFiles, ['CP-1.md', 'CP-2.md']);
+  assert.deepEqual(summary.active.checkpointFiles, []);
   assert.equal(summary.integrate.rootTaskStatus, 'done');
   assert.equal(summary.integrate.worktreeExistsAfter, false);
   assert.notEqual(summary.integrate.mainHeadAfter, summary.integrate.mainHeadBefore);
@@ -1109,12 +987,12 @@ test('a repo with no post-integrate hook configured runs px integrate with uncha
   assert.equal(summary.integrate.postIntegrateHookLines, undefined);
 });
 
-test('artifact-focused run produces mission, checkpoint, milestone, and review artifacts with the expected structure', async () => {
+test('artifact-focused run keeps the typed contract file-free while preserving the Backlog mirror', async () => {
   const summary = await runScenario({ launchFromFeatureBranch: true, integrate: false });
-  assert.ok(summary.draft.missionId, 'MISSION.md should contain a frontmatter id');
+  assert.ok(summary.draft.missionId, 'Backlog task should retain its id');
   assert.equal(summary.active.taskIdCount, 1, 'mission id should map to exactly one backlog task in the test repo');
   assert.deepEqual(summary.active.milestoneFiles, ['milestone-1.md']);
-  assert.deepEqual(summary.active.checkpointFiles, ['CP-1.md', 'CP-2.md']);
+  assert.deepEqual(summary.active.checkpointFiles, []);
 });
 
 test('adhoc-only intake: a free-text draft reaches an approved review with a DB-owned adhoc identity', async () => {

@@ -356,7 +356,7 @@ test('missionStart verify-env with slug checks classification', () => {
   assert.ok(output.includes('[FAIL] Backlog classification: missing classification'));
 });
 
-test('missionStart fails if MISSION.md is missing', () => {
+test('missionStart accepts a typed mission without MISSION.md', () => {
   const lines = [];
   const result = missionStart(['task-test'], {
     returnResult: true,
@@ -376,9 +376,9 @@ test('missionStart fails if MISSION.md is missing', () => {
     log: line => lines.push(line)
   });
 
-  assert.deepEqual(result, { pass: false });
+  assert.deepEqual(result, { pass: true });
   const output = lines.join('\n').replace(/\x1B\[\d+m/g, '');
-  assert.ok(output.includes('[FAIL] Mission doc: found directory but MISSION.md is missing'));
+  assert.ok(output.includes('[PASS] Typed mission directory is ready'));
 });
 
 test('missionStart fails when recorded base branch does not exist locally', () => {

@@ -5,13 +5,11 @@ import { rebound } from '../src/application/rebound-kernel.js';
 import { submitForReview } from '../src/adapters/review/review-commands.js';
 
 test('task-2439 repro: review-submit declared-gate prose is a reboundable validation failure, never a Bash command', () => {
-  const missionDir = '/worktree/missions/task-2439';
   const command = './scripts/verify-local.sh all (CP-4: exit 0, 0 test failures)';
   let shellRuns = 0;
   const useCase = new HandoffCommandUseCase({
     fileSystem: {
       existsSync: () => true,
-      readText: () => `# Mission\n\n## Gates\n\n- [ ] ${command}\n\n## Stop Rules\n`,
     },
     verification: {
       readReusableVerificationProof: () => ({ ok: false }),
@@ -22,7 +20,7 @@ test('task-2439 repro: review-submit declared-gate prose is a reboundable valida
     },
   } as any);
 
-  const result = useCase.runDeclaredGates(missionDir, '/worktree');
+  const result = useCase.executeGateCommands([command], '/worktree');
 
   assert.equal(result.ok, false);
   assert.equal(result.reason, 'validation-failed');
