@@ -14,9 +14,27 @@ import { MeasurementStoreUnavailableError } from '../src/application/measurement
  * PARALLIX_HOME, Forgejo, an agent, or a child process.
  */
 
-function tempDbPath(label: string): string {
+interface MeasureFixture {
+  readonly dir: string;
+  readonly dbPath: string;
+}
+
+function createMeasureFixture(label: string): MeasureFixture {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), `px-measure-${label}-`));
-  return path.join(dir, 'parallix.db');
+  return { dir, dbPath: path.join(dir, 'parallix.db') };
+}
+
+/**
+ * TASK-2577: fixture teardown. Close the store first — that releases the
+ * SQLite handle and removes the WAL and SHM sidecar files — then delete the
+ * whole fixture root so a focused run leaves no px-measure-* directory in
+ * os.tmpdir(). `close()` is idempotent, so already-closed stores are safe.
+ */
+function disposeMeasureFixture(dir: string, ...stores: Array<SqliteMeasurementStore | undefined>) {
+  for (const store of stores) {
+    store?.close();
+  }
+  fs.rmSync(dir, { recursive: true, force: true });
 }
 
 function measurement(overrides: Record<string, unknown> = {}) {
@@ -48,9 +66,10 @@ function measurement(overrides: Record<string, unknown> = {}) {
 }
 
 test('measurement store persists an AgentRunMeasurement and reads it back with no CSV', () => {
-  const dbPath = tempDbPath('roundtrip');
-  const store = new SqliteMeasurementStore(dbPath);
+  const fixture = createMeasureFixture('roundtrip');
+  let store: SqliteMeasurementStore | undefined;
   try {
+    store = new SqliteMeasurementStore(fixture.dbPath);
     const result = store.upsertMeasurement(measurement());
     assert.equal(result.changed, true);
 
@@ -60,17 +79,18 @@ test('measurement store persists an AgentRunMeasurement and reads it back with n
     assert.equal(rows[0].input_tokens, 100);
     assert.equal(rows[0].cost_usd, 0.5);
 
-    const dir = path.dirname(dbPath);
+    const dir = path.dirname(fixture.dbPath);
     assert.deepEqual(fs.readdirSync(dir).filter(f => f.endsWith('.csv')), []);
   } finally {
-    store.close();
+    disposeMeasureFixture(fixture.dir, store);
   }
 });
 
 test('measurement store keys rows by (repo, mission, stage, actorKey) and never invents a per-run identity', () => {
-  const dbPath = tempDbPath('identity');
-  const store = new SqliteMeasurementStore(dbPath);
+  const fixture = createMeasureFixture('identity');
+  let store: SqliteMeasurementStore | undefined;
   try {
+    store = new SqliteMeasurementStore(fixture.dbPath);
     store.upsertMeasurement(measurement());
     store.upsertMeasurement(measurement({ stage: 'review', actorKey: 'claude', reviewer_agent: 'claude' }));
     store.upsertMeasurement(measurement({ actorKey: 'claude', implementer_agent: 'claude' }));
@@ -84,46 +104,53 @@ test('measurement store keys rows by (repo, mission, stage, actorKey) and never 
     assert.equal(active.length, 1);
     assert.equal(active[0].input_tokens, 999);
   } finally {
-    store.close();
+    disposeMeasureFixture(fixture.dir, store);
   }
 });
 
 test('measurement store reports changed=false when an identical record is re-applied', () => {
-  const dbPath = tempDbPath('idempotent');
-  const store = new SqliteMeasurementStore(dbPath);
+  const fixture = createMeasureFixture('idempotent');
+  let store: SqliteMeasurementStore | undefined;
   try {
+    store = new SqliteMeasurementStore(fixture.dbPath);
     assert.equal(store.upsertMeasurement(measurement()).changed, true);
     assert.equal(store.upsertMeasurement(measurement()).changed, false);
     assert.equal(store.upsertMeasurement(measurement({ tool_calls: 8 })).changed, true);
     assert.equal(store.listMeasurements().length, 1);
   } finally {
-    store.close();
+    disposeMeasureFixture(fixture.dir, store);
   }
 });
 
 test('a measurement remains available after the store is closed and reopened (restart)', () => {
-  const dbPath = tempDbPath('restart');
-  const first = new SqliteMeasurementStore(dbPath);
-  first.upsertMeasurement(measurement({ mission: 'task-restart' }));
-  first.close();
-
-  const second = new SqliteMeasurementStore(dbPath);
+  const fixture = createMeasureFixture('restart');
+  let first: SqliteMeasurementStore | undefined;
+  let second: SqliteMeasurementStore | undefined;
   try {
+    first = new SqliteMeasurementStore(fixture.dbPath);
+    first.upsertMeasurement(measurement({ mission: 'task-restart' }));
+    first.close();
+    first = undefined;
+
+    second = new SqliteMeasurementStore(fixture.dbPath);
     const rows = second.listMeasurements();
     assert.equal(rows.length, 1);
     assert.equal(rows[0].mission, 'task-restart');
     assert.equal(rows[0].input_tokens, 100);
   } finally {
-    second.close();
+    disposeMeasureFixture(fixture.dir, first, second);
   }
 });
 
 test('concurrent measurement updates from two open connections retain every required record', () => {
-  const dbPath = tempDbPath('concurrent');
-  const writerA = new SqliteMeasurementStore(dbPath);
-  const writerB = new SqliteMeasurementStore(dbPath);
-  const reader = new SqliteMeasurementStore(dbPath);
+  const fixture = createMeasureFixture('concurrent');
+  let writerA: SqliteMeasurementStore | undefined;
+  let writerB: SqliteMeasurementStore | undefined;
+  let reader: SqliteMeasurementStore | undefined;
   try {
+    writerA = new SqliteMeasurementStore(fixture.dbPath);
+    writerB = new SqliteMeasurementStore(fixture.dbPath);
+    reader = new SqliteMeasurementStore(fixture.dbPath);
     // Interleave the two writers so neither observes an empty table first.
     writerA.upsertMeasurement(measurement({ mission: 'task-a', actorKey: 'codex' }));
     writerB.upsertMeasurement(measurement({ mission: 'task-b', actorKey: 'claude', implementer_agent: 'claude' }));
@@ -138,16 +165,15 @@ test('concurrent measurement updates from two open connections retain every requ
       'task-b:review:codex',
     ]);
   } finally {
-    writerA.close();
-    writerB.close();
-    reader.close();
+    disposeMeasureFixture(fixture.dir, writerA, writerB, reader);
   }
 });
 
 test('upsertAll commits the whole batch or nothing, never a partial import', () => {
-  const dbPath = tempDbPath('atomic');
-  const store = new SqliteMeasurementStore(dbPath);
+  const fixture = createMeasureFixture('atomic');
+  let store: SqliteMeasurementStore | undefined;
   try {
+    store = new SqliteMeasurementStore(fixture.dbPath);
     assert.throws(
       () => store.upsertAll([
         measurement({ mission: 'task-good' }),
@@ -158,27 +184,32 @@ test('upsertAll commits the whole batch or nothing, never a partial import', () 
     );
     assert.equal(store.listMeasurements().length, 0);
   } finally {
-    store.close();
+    disposeMeasureFixture(fixture.dir, store);
   }
 });
 
 test('database failure raises MeasurementStoreUnavailableError and accesses no CSV', () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'px-measure-fail-'));
-  const dbPath = path.join(dir, 'parallix.db');
-  // A directory where the database file is expected cannot be opened.
-  fs.mkdirSync(dbPath);
-  // A CSV sitting right next to it must never be consulted as a fallback.
-  fs.writeFileSync(path.join(dir, 'stats.csv'), 'date,mission,classification,implementer,pr_fix_rounds\n');
+  const fixture = createMeasureFixture('fail');
+  const dbPath = fixture.dbPath;
+  try {
+    // A directory where the database file is expected cannot be opened.
+    fs.mkdirSync(dbPath);
+    // A CSV sitting right next to it must never be consulted as a fallback.
+    fs.writeFileSync(path.join(fixture.dir, 'stats.csv'), 'date,mission,classification,implementer,pr_fix_rounds\n');
 
-  const readsBefore = fs.readFileSync(path.join(dir, 'stats.csv'), 'utf8');
-  assert.throws(() => new SqliteMeasurementStore(dbPath), MeasurementStoreUnavailableError);
-  assert.equal(fs.readFileSync(path.join(dir, 'stats.csv'), 'utf8'), readsBefore);
+    const readsBefore = fs.readFileSync(path.join(fixture.dir, 'stats.csv'), 'utf8');
+    assert.throws(() => new SqliteMeasurementStore(dbPath), MeasurementStoreUnavailableError);
+    assert.equal(fs.readFileSync(path.join(fixture.dir, 'stats.csv'), 'utf8'), readsBefore);
+  } finally {
+    disposeMeasureFixture(fixture.dir);
+  }
 });
 
 test('measurement store preserves unavailable numeric measurements as undefined, not zero', () => {
-  const dbPath = tempDbPath('unavailable');
-  const store = new SqliteMeasurementStore(dbPath);
+  const fixture = createMeasureFixture('unavailable');
+  let store: SqliteMeasurementStore | undefined;
   try {
+    store = new SqliteMeasurementStore(fixture.dbPath);
     store.upsertMeasurement({
       repo: 'parallix',
       mission: 'task-sparse',
@@ -191,6 +222,6 @@ test('measurement store preserves unavailable numeric measurements as undefined,
     assert.equal(row.input_tokens, undefined);
     assert.equal(row.cost_usd, undefined);
   } finally {
-    store.close();
+    disposeMeasureFixture(fixture.dir, store);
   }
 });

@@ -255,6 +255,10 @@ export const INTEGRATION_CI_TESTS: readonly string[] = [
   'task-2551-sonar-branch-cleanup.test.ts',
   'task-2554-guard.test.ts',
   'task-2554-repro.test.ts',
+  // TASK-2577: runs fixture scenarios in `node --import tsx --test` child
+  // processes and reclaims their leftovers; a clean GitHub runner provides
+  // every dependency (node, tsx from devDependencies, temp directories).
+  'task-2577-tmp-fixture-leaks-repro.test.ts',
   'test-hygiene.test.ts',
   'tui-command-flow.test.ts',
   'tui-pty-smoke.test.ts',

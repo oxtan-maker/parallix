@@ -9,8 +9,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
+import { mkdtemp } from './helpers/temp-dir.js';
 
 import { missionId, type Mission } from '../src/domain/mission.js';
 import { changeRevision, type Review } from '../src/domain/review.js';
@@ -64,7 +64,7 @@ function missionWith(review: Review, title = 'aggregate read during write'): Mis
 }
 
 async function openStore() {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'task-2339-aggregate-'));
+  const dir = mkdtemp('task-2339-aggregate-');
   const db = new SqliteDatabaseAdapter();
   await db.open({ path: path.join(dir, 'parallix.db') });
   await new SqliteMigrationRunner(db).applyPending(loadDefaultMigrations());

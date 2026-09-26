@@ -10,6 +10,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
+import { mkdtemp } from './helpers/temp-dir.js';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { seedMissionDatabase } from './fixtures/review-state-db.js';
@@ -95,7 +96,7 @@ function runPx(args, options = {}) {
  * PARALLIX_HOME and hand that home to the spawned process.
  */
 async function seedTargetReview(target) {
-  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'px-target-home-'));
+  const home = mkdtemp('px-target-home-');
   const restore = await seedMissionDatabase(home, target.slug, target.root);
   // The seed points this process at the temp home; the spawned px reads it from
   // the environment we pass explicitly, so restore ours immediately.

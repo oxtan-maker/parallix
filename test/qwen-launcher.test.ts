@@ -1,9 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 'use strict';
+
+import { mkdtemp } from './helpers/temp-dir.js';
 
 import {
   buildQwenInvocation,
@@ -72,7 +73,7 @@ test('buildQwenInvocation: resume without session id uses -c flag', () => {
 });
 
 test('qwen approval bypass: settings.json has tools.approvalMode yolo after ensureQwenHome', () => {
-  const tmpWorktree = fs.mkdtempSync(path.join(os.tmpdir(), 'qwen-home-test-'));
+  const tmpWorktree = mkdtemp('qwen-home-test-');
   ensureQwenHome(tmpWorktree);
 
   const settingsPath = qwenSettingsPath(tmpWorktree);
@@ -83,9 +84,9 @@ test('qwen approval bypass: settings.json has tools.approvalMode yolo after ensu
 });
 
 test('qwen approval bypass: yolo persists even when user settings exist', () => {
-  const tmpWorktree = fs.mkdtempSync(path.join(os.tmpdir(), 'qwen-home-test-'));
+  const tmpWorktree = mkdtemp('qwen-home-test-');
   // Simulate a user settings file with existing config
-  const tmpUserDir = fs.mkdtempSync(path.join(os.tmpdir(), 'qwen-user-'));
+  const tmpUserDir = mkdtemp('qwen-user-');
   const userSettingsPath = path.join(tmpUserDir, 'settings.json');
   fs.writeFileSync(userSettingsPath, JSON.stringify({
     ui: { autoModeAcknowledged: true },
@@ -103,8 +104,8 @@ test('qwen approval bypass: yolo persists even when user settings exist', () => 
 });
 
 test('qwen home copies operator OAuth credentials when present', () => {
-  const worktree = fs.mkdtempSync(path.join(os.tmpdir(), 'qwen-home-test-'));
-  const source = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'qwen-user-')), 'oauth_creds.json');
+  const worktree = mkdtemp('qwen-home-test-');
+  const source = path.join(mkdtemp('qwen-user-'), 'oauth_creds.json');
   const credentials = '{"access_token":"test-token"}\n';
   fs.writeFileSync(source, credentials, 'utf8');
 
@@ -114,9 +115,9 @@ test('qwen home copies operator OAuth credentials when present', () => {
 });
 
 test('qwen home leaves minimal settings byte-identical when OAuth credentials are absent', () => {
-  const before = fs.mkdtempSync(path.join(os.tmpdir(), 'qwen-home-test-'));
-  const after = fs.mkdtempSync(path.join(os.tmpdir(), 'qwen-home-test-'));
-  const sourceDir = fs.mkdtempSync(path.join(os.tmpdir(), 'qwen-user-'));
+  const before = mkdtemp('qwen-home-test-');
+  const after = mkdtemp('qwen-home-test-');
+  const sourceDir = mkdtemp('qwen-user-');
   const sourceSettings = path.join(sourceDir, 'settings.json');
   const absent = path.join(sourceDir, 'oauth_creds.json');
 
@@ -138,7 +139,7 @@ test('qwen approval bypass: tool-call prompt completes without approval block (r
   //
   // Green state (after fix): settings.json carries tools.approvalMode:"yolo",
   // ensuring all tool calls are auto-approved.
-  const tmpWorktree = fs.mkdtempSync(path.join(os.tmpdir(), 'qwen-approval-test-'));
+  const tmpWorktree = mkdtemp('qwen-approval-test-');
   ensureQwenHome(tmpWorktree);
 
   const inv = buildQwenInvocation({
@@ -198,13 +199,13 @@ test('isSpuriousQwenExit: returns false for signal kill', () => {
 });
 
 test('extractQwenSessionId: returns null when no projects dir exists', () => {
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'qwen-session-test-'));
+  const tmp = mkdtemp('qwen-session-test-');
   const result = extractQwenSessionId(path.join(tmp, 'projects'));
   assert.equal(result, null);
 });
 
 test('extractQwenSessionId: extracts session id from chat file', () => {
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'qwen-session-test-'));
+  const tmp = mkdtemp('qwen-session-test-');
   const projectsDir = path.join(tmp, 'projects');
   const chatsDir = path.join(projectsDir, 'proj-123', 'chats');
   fs.mkdirSync(chatsDir, { recursive: true });
@@ -216,7 +217,7 @@ test('extractQwenSessionId: extracts session id from chat file', () => {
 });
 
 test('extractQwenSessionId: respects invocation window', () => {
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'qwen-session-test-'));
+  const tmp = mkdtemp('qwen-session-test-');
   const projectsDir = path.join(tmp, 'projects');
   const chatsDir = path.join(projectsDir, 'proj-123', 'chats');
   fs.mkdirSync(chatsDir, { recursive: true });
@@ -236,7 +237,7 @@ test('extractQwenSessionId: respects invocation window', () => {
 });
 
 test('qwen telemetry: processResult attaches result.telemetry from QWEN_HOME artifacts', () => {
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'qwen-launch-tel-'));
+  const tmp = mkdtemp('qwen-launch-tel-');
   const home = qwenHomeRoot(tmp);
   fs.mkdirSync(path.join(home, 'usage'), { recursive: true });
 
@@ -260,7 +261,7 @@ test('qwen telemetry: processResult attaches result.telemetry from QWEN_HOME art
 });
 
 test('qwen telemetry: processResult leaves telemetry unset when no artifacts exist', () => {
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'qwen-launch-notel-'));
+  const tmp = mkdtemp('qwen-launch-notel-');
   const result: any = processResult({ status: 0, stdout: '', stderr: '' }, tmp, new Date().toISOString());
   assert.equal(result.telemetry, undefined);
 });

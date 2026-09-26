@@ -1,8 +1,9 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
+
+import { mkdtemp } from './helpers/temp-dir.js';
 
 import {
   importLegacyMissions,
@@ -77,7 +78,7 @@ interface LegacyFile {
 }
 
 function workspace(files: readonly LegacyFile[]): string {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'task-2521.04-'));
+  const root = mkdtemp('task-2521.04-');
   for (const file of files) {
     const dir = path.join(root, 'backlog', file.dir ?? 'tasks');
     fs.mkdirSync(dir, { recursive: true });

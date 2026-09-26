@@ -11,8 +11,9 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
+
+import { mkdtemp } from './helpers/temp-dir.js';
 
 import {
   importLegacyMissions,
@@ -67,7 +68,7 @@ function services(store: MissionTransitionStore): MissionImportServices {
 
 describe('the imported trace pins the commit it was read at', () => {
   it('pins the trace to the checkout HEAD when no commit is passed', async () => {
-    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'task-2521.04-commit-'));
+    const root = mkdtemp('task-2521.04-commit-');
     const file = path.join('backlog', 'tasks', 'task-9001 - Open.md');
     fs.mkdirSync(path.dirname(path.join(root, file)), { recursive: true });
     fs.writeFileSync(

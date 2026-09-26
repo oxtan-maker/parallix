@@ -178,6 +178,9 @@ const expectedIntegrationFiles = [
   // spawning the entry's own node process; crosses the process boundary only.
   'task-2554-guard.test.ts',
   'task-2554-repro.test.ts',
+  // TASK-2577: runs fixture scenarios in `node --import tsx --test` child
+  // processes and reclaims their leftovers; crosses the process boundary only.
+  'task-2577-tmp-fixture-leaks-repro.test.ts',
   // TASK-2532: seeds temporary Git repositories to exercise the base-worktree
   // repair, so it crosses the git boundary and runs in the integration layer.
   'task-2532-stale-integration-state-repro.test.ts',

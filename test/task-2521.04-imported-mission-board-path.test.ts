@@ -1,8 +1,9 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
+
+import { mkdtemp } from './helpers/temp-dir.js';
 
 import {
   importLegacyMissions,
@@ -81,7 +82,7 @@ function frontmatter(fields: Readonly<Record<string, string>>): string {
 }
 
 function workspace(files: readonly { name: string; body: string }[]): string {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'task-2521.04-board-'));
+    const root = mkdtemp('task-2521.04-board-');
   const dir = path.join(root, 'backlog', 'tasks');
   fs.mkdirSync(dir, { recursive: true });
   for (const file of files) { fs.writeFileSync(path.join(dir, file.name), file.body); }

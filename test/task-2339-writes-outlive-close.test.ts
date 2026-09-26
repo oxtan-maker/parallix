@@ -10,6 +10,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { mkdtemp } from './helpers/temp-dir.js';
 
 import { missionId, type Mission } from '../src/domain/mission.js';
 import { agentFamily } from '../src/domain/agents.js';
@@ -36,7 +37,7 @@ function minimalMission(): Mission {
 }
 
 test('drain resolves only after an in-flight aggregate write has settled', async () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'task-2339-drain-'));
+  const dir = mkdtemp('task-2339-drain-');
   const db = new SqliteDatabaseAdapter();
   await db.open({ path: path.join(dir, 'parallix.db') });
   await new SqliteMigrationRunner(db).applyPending(loadDefaultMigrations());

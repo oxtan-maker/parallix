@@ -1,9 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 'use strict';
+
+import { mkdtemp } from './helpers/temp-dir.js';
 
 import {
   parseTokenUsageLine,
@@ -121,13 +122,13 @@ test('parseUsageRecordLine returns null for empty/garbage', () => {
 // --- Collection from disk ---
 
 test('collectTokenUsageRecords returns empty array when no usage dir', () => {
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'qwen-tel-test-'));
+  const tmp = mkdtemp('qwen-tel-test-');
   const records = collectTokenUsageRecords(tmp);
   assert.deepEqual(records, []);
 });
 
 test('collectTokenUsageRecords reads and parses token usage files', () => {
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'qwen-tel-test-'));
+  const tmp = mkdtemp('qwen-tel-test-');
   const usageDir = path.join(tmp, 'usage');
   fs.mkdirSync(usageDir, { recursive: true });
 
@@ -155,7 +156,7 @@ test('collectTokenUsageRecords reads and parses token usage files', () => {
 });
 
 test('collectTokenUsageRecords respects invocation window', () => {
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'qwen-tel-test-'));
+  const tmp = mkdtemp('qwen-tel-test-');
   const usageDir = path.join(tmp, 'usage');
   fs.mkdirSync(usageDir, { recursive: true });
 
@@ -188,7 +189,7 @@ test('collectTokenUsageRecords respects invocation window', () => {
 test('collectTokenUsageRecords: sequential launches do not aggregate across invocations', () => {
   // Regression: draft invocation writes token records, then review invocation
   // in same QWEN_HOME picks up draft's records as its own stats.
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'qwen-tel-seq-'));
+  const tmp = mkdtemp('qwen-tel-seq-');
   const usageDir = path.join(tmp, 'usage');
   fs.mkdirSync(usageDir, { recursive: true });
 
@@ -230,7 +231,7 @@ test('collectTokenUsageRecords: sequential launches do not aggregate across invo
 test('collectTokenUsageRecords: prior record inside 60s buffer excluded by sessionId', () => {
   // Regression: draft writes artifact 30s before review starts — falls inside
   // the 60s buffer and would be charged to review without session-id filter.
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'qwen-tel-buffer-'));
+  const tmp = mkdtemp('qwen-tel-buffer-');
   const usageDir = path.join(tmp, 'usage');
   fs.mkdirSync(usageDir, { recursive: true });
 
@@ -268,7 +269,7 @@ test('collectTokenUsageRecords: prior record inside 60s buffer excluded by sessi
 });
 
 test('collectUsageRecord returns most recent session in window', () => {
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'qwen-tel-test-'));
+  const tmp = mkdtemp('qwen-tel-test-');
   const now = Date.now();
 
   const lines = [
@@ -296,7 +297,7 @@ test('collectUsageRecord returns most recent session in window', () => {
 // --- Full extraction ---
 
 test('extractQwenTelemetry sums tokens across multiple API calls', () => {
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'qwen-tel-test-'));
+  const tmp = mkdtemp('qwen-tel-test-');
   const usageDir = path.join(tmp, 'usage');
   fs.mkdirSync(usageDir, { recursive: true });
 
@@ -345,7 +346,7 @@ test('extractQwenTelemetry sums tokens across multiple API calls', () => {
 });
 
 test('extractQwenTelemetry preserves per-model breakdown', () => {
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'qwen-tel-test-'));
+  const tmp = mkdtemp('qwen-tel-test-');
   const usageDir = path.join(tmp, 'usage');
   fs.mkdirSync(usageDir, { recursive: true });
 
@@ -375,7 +376,7 @@ test('extractQwenTelemetry preserves per-model breakdown', () => {
 });
 
 test('extractQwenTelemetry returns honest zeros when endpoint reports no usage', () => {
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'qwen-tel-test-'));
+  const tmp = mkdtemp('qwen-tel-test-');
   const usageDir = path.join(tmp, 'usage');
   fs.mkdirSync(usageDir, { recursive: true });
 
@@ -401,13 +402,13 @@ test('extractQwenTelemetry returns honest zeros when endpoint reports no usage',
 });
 
 test('extractQwenTelemetry returns null when no artifacts exist', () => {
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'qwen-tel-empty-'));
+  const tmp = mkdtemp('qwen-tel-empty-');
   const t = extractQwenTelemetry(tmp, { sinceMs: 0 });
   assert.equal(t, null);
 });
 
 test('extractQwenTelemetry: thoughtsTokens separately tracked (not folded into output)', () => {
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'qwen-tel-thoughts-'));
+  const tmp = mkdtemp('qwen-tel-thoughts-');
   const usageDir = path.join(tmp, 'usage');
   fs.mkdirSync(usageDir, { recursive: true });
 
@@ -434,7 +435,7 @@ test('extractQwenTelemetry: parses captured real CLI artifacts (format pin, R1)'
   // schema change in a future CLI version fails here instead of silently
   // producing zeros.
   const fixtures = path.join(import.meta.dirname, 'fixtures', 'qwen');
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'qwen-tel-real-'));
+  const tmp = mkdtemp('qwen-tel-real-');
   fs.mkdirSync(path.join(tmp, 'usage'), { recursive: true });
   fs.copyFileSync(
     path.join(fixtures, 'token-usage-2026-08.sample.jsonl'),

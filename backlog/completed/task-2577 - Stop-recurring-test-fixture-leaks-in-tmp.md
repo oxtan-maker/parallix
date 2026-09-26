@@ -1,13 +1,12 @@
 ---
 id: TASK-2577
 title: Stop recurring test fixture leaks in /tmp
-status: backlog
-assignee: []
+status: done
+assignee: [custom]
 created_date: '2026-09-25 12:24'
 labels:
   - bug
-  - tests
-  - resource_usage
+  - user_value
 dependencies: []
 priority: high
 ordinal: 108008
