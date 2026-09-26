@@ -2,21 +2,11 @@
 
 import test, { mock } from 'node:test';
 import assert from 'node:assert/strict';
-import fs from 'node:fs';
-import os from 'node:os';
-import path from 'node:path';
 import { mockModule, installModuleMocks } from './lib/module-mock.js';
 const repairHandoff = mockModule<typeof import('../src/adapters/cli/commands/repair-handoff.js')>('../src/adapters/cli/commands/repair-handoff.js', import.meta.url);
-const handoff = mockModule<typeof import('../src/adapters/cli/commands/handoff.js')>('../src/adapters/cli/commands/handoff.js', import.meta.url);
 await installModuleMocks();
 test.afterEach(() => mock.restoreAll());
 const { classifyError, FailureClass, DispatchAction } = repairHandoff;
-const {
-  _buildAutoCheckpointContent,
-  _collectGoalCheckEvidenceRows,
-  findUnverifiableGoalCheckRow,
-} = handoff;
-
 // Reproduction tests for task-2215 (missing error bounce).
 //
 // When automated handoff cannot find checkpoint documents even after
@@ -38,24 +28,8 @@ test('task-2215 repro: classifyError classifies auto-remediation checkpoint fail
     'auto-remediation failure must auto-send-back to the implementer, not require a human');
 });
 
-test('task-2215 repro: buildAutoCheckpointContent evidence rows pass findUnverifiableGoalCheckRow validation', () => {
-  const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), 'task-2215-evidence-'));
-  fs.mkdirSync(path.join(rootDir, 'src', 'application'), { recursive: true });
-  fs.writeFileSync(path.join(rootDir, 'src', 'application', 'handoff-command-use-case.ts'), '');
-  const content = _buildAutoCheckpointContent('task-2215');
-
-  const goalCheckMatch = content.match(/^## Goal Check(?: Table)?\s*$/m);
-  assert.ok(goalCheckMatch, 'auto-generated checkpoint must contain a "## Goal Check" section');
-
-  const afterHeader = content.slice((goalCheckMatch.index ?? 0) + goalCheckMatch[0].length);
-  const evidenceRows = _collectGoalCheckEvidenceRows(afterHeader);
-  assert.ok(evidenceRows.length > 0, 'auto-generated Goal Check table must contain evidence rows');
-
-  try {
-    const offendingRow = findUnverifiableGoalCheckRow(evidenceRows, rootDir);
-    assert.equal(offendingRow, null,
-      `auto-generated evidence rows must cite verifiable references; offending row: ${offendingRow}`);
-  } finally {
-    fs.rmSync(rootDir, { recursive: true, force: true });
-  }
+test('missing checkpoint evidence is sent back without generating placeholders', () => {
+  const result = classifyError('No checkpoint documents found in missions/task-2521.06. Import historical evidence or record it with px checkpoint record; handoff never generates evidence.');
+  assert.equal(result.failureClass, FailureClass.MissingArtifacts);
+  assert.equal(result.dispatchAction, DispatchAction.AutoSendBack);
 });

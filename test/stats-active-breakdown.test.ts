@@ -14,7 +14,7 @@ test.afterEach(() => mock.restoreAll());
 
 function missionFlow(rows) {
   return rows.filter(row => row.completedForTest === 'yes')
-    .map(row => ({ repo: String(row.repo || ''), mission: row.mission, closedAt: `${row.date}T00:00:00Z`, labels: [] }));
+    .map(row => ({ repo: String(row.repo || ''), mission: row.mission, closedAt: `${row.date}T00:00:00Z`, labels: [], implementer: row.implementer }));
 }
 
 function renderWeeklyStatsReport(rows, options = {}) {
@@ -139,7 +139,7 @@ test('task-2213: weekly agent performance table excludes active-stage agents', (
   );
 
   // Agent performance: only closed missions appear
-  assert.ok(performance.includes('gpt-5'),
+  assert.ok(performance.includes('codex'),
     'closed mission model gpt-5 should appear in weekly report');
   assert.ok(!performance.includes('cyankiwi/Qwen3.6-35B-A3B-AWQ-4bit'),
     'active-stage agent must NOT appear in agent performance table');
@@ -203,7 +203,7 @@ test('task-2213: range agent performance table excludes active-stage agents', ()
   if (previousDebug === undefined) { delete process.env.DEBUG; } else { process.env.DEBUG = previousDebug; }
 });
 
-test('task-2213: completed missions keep per-model rows with per-model averages', () => {
+test('task-2213: completed missions use recorded-family credit and averages', () => {
   const rows = [
     {
       date: '2026-06-20',
@@ -237,9 +237,9 @@ test('task-2213: completed missions keep per-model rows with per-model averages'
   const report = renderWeeklyStatsReport(rows, { today: '2026-06-24' });
   const plain = __mm1.stripAnsi(report);
 
-  assert.match(plain, /qwen3\.5\s+2\s+1\.50/,
+  assert.match(plain, /custom\s+2\s+1\.50/,
     'the qwen3.5 model row must average only its own completed missions');
-  assert.match(plain, /gpt-5\s+1\s+1\.00/,
+  assert.match(plain, /codex\s+1\s+1\.00/,
     'the gpt-5 model row must average only its own completed mission');
 });
 
@@ -290,12 +290,12 @@ test('task-1409: active and closed rows coexist without double-counting', () => 
 
   // Agent performance: gpt-5 shows 1 mission (only the closed row)
   // Active rows must NOT inflate agent performance counts
-  assert.match(plain, /gpt-5\s+1\s+2\.00/);
+  assert.match(plain, /codex\s+1\s+2\.00/);
 
   if (previousDebug === undefined) { delete process.env.DEBUG; } else { process.env.DEBUG = previousDebug; }
 });
 
-test('task-2213: a blank-model rollup row buckets under the mission\'s model row', () => {
+test('task-2213: a blank-model rollup supplies the recorded family', () => {
   const rows = [
     {
       date: '2026-06-20',
@@ -322,6 +322,6 @@ test('task-2213: a blank-model rollup row buckets under the mission\'s model row
   const report = renderWeeklyStatsReport(rows, { today: '2026-06-24' });
   const plain = __mm1.stripAnsi(report);
 
-  assert.match(plain, /cyankiwi\/Qwen3\.6-35B-A3B-AWQ-4bit\s+1\s+1\.00/,
+  assert.match(plain, /custom\s+1\s+1\.00/,
     'mission must keep its model-row label while averaging the fix rounds recorded on its rollup row');
 });

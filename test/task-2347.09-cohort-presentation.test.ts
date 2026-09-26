@@ -27,6 +27,23 @@ import { repositoryId } from '../src/domain/repository.js';
 import { agentFamily } from '../src/domain/agents.js';
 import { missionOutcome } from './fixtures/mission-outcome.js';
 import { FakeLaneEventRepository, FakeUsageRepository, laneEvent, metricsAdapter } from './fixtures/metrics-adapter.js';
+import { missionCohortMetadata } from '../src/application/projections/metrics-read-adapter.js';
+import type { Mission } from '../src/domain/mission.js';
+
+test('delivery credit belongs only to the recorded final implementer after a family switch', async () => {
+  const canonical = missionCohortMetadata(SEEDS.map(seed => ({
+    id: missionId(seed.slug), labels: missionLabels(['canonical']), assignee: agentFamily('codex'),
+    review: { rounds: [{ implementer: 'codex' }, { implementer: 'custom' }] },
+  } as unknown as Mission)));
+  const lines: string[] = [];
+  await statsCohorts(['--by', 'implementer', '--min-sample', '1'], {
+    log: message => { lines.push(message); }, error: message => { throw new Error(message); }, exit: () => null,
+    laneEventRepo: new FakeLaneEventRepository(LANE_EVENTS), usageRepo: new FakeUsageRepository(USAGE_RECORDS),
+    repositoryId: REPO, cohortMetadata: async () => canonical,
+  });
+  assert.match(lines.join('\n'), /^custom\s+6\s/m);
+  assert.doesNotMatch(lines.join('\n'), /^codex\s|^mixed\s/m);
+});
 
 // ---------------------------------------------------------------------------
 // task-2347.09 SC5/SC6 — no cohort figure is shown without its sample size
@@ -95,11 +112,9 @@ async function runCohortsCommand(args: readonly string[]): Promise<{ output: str
     laneEventRepo: new FakeLaneEventRepository(LANE_EVENTS),
     usageRepo: new FakeUsageRepository(USAGE_RECORDS),
     repositoryId: REPO,
-    // Without this injection the command falls back to ConcreteMissionReadAdapter
-    // over process.cwd() and reads the real checkout the test runs in — the
-    // seeded fake slugs have no canonical metadata either way, so an empty map
-    // keeps the assertions identical while the test stays hermetic and fast.
-    cohortMetadata: async () => new Map(),
+    cohortMetadata: async () => new Map(SEEDS.map(seed => [
+      missionId(seed.slug), { labels: missionLabels([seed.label]), assignee: agentFamily('codex') },
+    ])),
   });
   return { output: lines.join('\n'), exits };
 }

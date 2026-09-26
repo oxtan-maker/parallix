@@ -21,6 +21,8 @@ import { launchPtySmoke, type PtySmokeSession } from './helpers/pty-smoke-harnes
 import { createMissionApplicationServices } from '../src/composition/application-services.js';
 import { missionId } from '../src/domain/mission.js';
 
+import { seedBoardMissions } from './helpers/seed-board-missions.js';
+
 const execFileP = promisify(execFile);
 
 const root = process.cwd();
@@ -54,6 +56,7 @@ async function launchBoard(): Promise<BoardFixture> {
     '---', 'id: TASK-SHUTDOWN', 'title: Shutdown fixture mission', 'status: refined',
     'assignee: []', 'labels: []', '---', '',
   ].join('\n'));
+  await seedBoardMissions(fixtureRoot, stateRoot, [{ id: 'task-shutdown', title: 'Shutdown fixture mission' }]);
   const session = await launchPtySmoke([process.execPath, path.join(root, 'build/px.mjs'), 'ui'], {
     cwd: fixtureRoot,
     timeoutMs: LAUNCH_TIMEOUT_MS,

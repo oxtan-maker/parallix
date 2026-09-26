@@ -618,11 +618,11 @@ test('R5/R6: Agent Performance follows completed Missions, not telemetry dates',
   const current = { start: new Date('2026-08-06T00:00:00Z'), end: new Date('2026-08-12T00:00:00Z') };
   const previous = { start: new Date('2026-07-30T00:00:00Z'), end: new Date('2026-08-05T00:00:00Z') };
 
-  const currentPerformance = stats.summarizeAgentWindow(rows, current, { completedMissionKeys: new Set(['parallix::task-2371-a']) });
-  const previousPerformance = stats.summarizeAgentWindow(rows, previous, { completedMissionKeys: new Set(['parallix::task-2371-b']) });
+  const currentPerformance = stats.summarizeAgentWindow(rows, current, { completedMissionKeys: new Set(['parallix::task-2371-a']), completedMissionOwners: new Map([['parallix::task-2371-a', 'codex']]) });
+  const previousPerformance = stats.summarizeAgentWindow(rows, previous, { completedMissionKeys: new Set(['parallix::task-2371-b']), completedMissionOwners: new Map([['parallix::task-2371-b', 'codex']]) });
 
-  assert.deepEqual(currentPerformance.map(row => [row.implementer, row.missions]), [['terra', 1]], 'A completed Aug 10 belongs to current despite Aug 4/5 telemetry');
-  assert.deepEqual(previousPerformance.map(row => [row.implementer, row.missions]), [['terra', 1]], 'B completed Aug 4 belongs to previous despite Aug 8 closeout telemetry');
+  assert.deepEqual(currentPerformance.map(row => [row.implementer, row.missions]), [['codex', 1]], 'A completed Aug 10 belongs to current despite Aug 4/5 telemetry');
+  assert.deepEqual(previousPerformance.map(row => [row.implementer, row.missions]), [['codex', 1]], 'B completed Aug 4 belongs to previous despite Aug 8 closeout telemetry');
   assert.deepEqual(stats.summarizeAgentStageSpend(rows, current).map(row => row.implementer), ['terra'], 'spend remains intentionally telemetry-date windowed');
 });
 

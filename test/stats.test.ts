@@ -42,7 +42,7 @@ function completedMissionKeys(rows) {
 
 function missionFlow(rows) {
   return rows.filter(row => row.completedForTest === 'yes')
-    .map(row => ({ repo: String(row.repo || ''), mission: row.mission, closedAt: `${row.date}T00:00:00Z`, labels: [] }));
+    .map(row => ({ repo: String(row.repo || ''), mission: row.mission, closedAt: `${row.date}T00:00:00Z`, labels: [], implementer: row.implementer }));
 }
 
 function renderWeeklyStatsReport(rows, options = {}) {
@@ -271,7 +271,7 @@ test('upsertMeasurementRow accepts unknown classification rows and weekly report
     const rows = stats.loadMeasurementRows({ dbPath: dbFile }).rows;
     const report = renderWeeklyStatsReport(rows, {
       today: '2026-06-23',
-      missionFlow: [{ repo: 'parallix', mission: 'task-unknown', closedAt: '2026-06-23T00:00:00Z', labels: ['unknown'] }],
+      missionFlow: [{ repo: 'parallix', mission: 'task-unknown', closedAt: '2026-06-23T00:00:00Z', labels: ['unknown'], implementer: null }],
     });
     assert.match(report, /# unknown missions/);
     assert.match(report, /\b1\b/);
@@ -444,7 +444,7 @@ test('renderRangeStatsReport keeps end-day lifecycle completions and independent
   ], {
     from: '2026-05-01',
     to: '2026-05-31',
-    missionFlow: [{ repo: 'r', mission: 'task-completed', closedAt: '2026-05-31T14:00:00Z', labels: ['user_value'] }],
+    missionFlow: [{ repo: 'r', mission: 'task-completed', closedAt: '2026-05-31T14:00:00Z', labels: ['user_value'], implementer: 'codex' }],
   }));
 
   assert.match(report, /# completed missions\s+# user value missions\s+# AI SDLC missions[\s\S]*\n1\s+1\s+0/);
@@ -1252,7 +1252,7 @@ test('task-1342: review row with OpenAI reviewer shows Usage % even when claude 
   assert.equal(usageCol, '37', 'Usage % should be 37 for review row with OpenAI reviewer');
 });
 
-test('task-2213: summarizeAgentWindow keeps separate model rows for local AI missions', () => {
+test('completed-mission credit groups by the recorded family, not telemetry models', () => {
   const window = { start: new Date('2026-06-10T00:00:00Z'), end: new Date('2026-06-20T00:00:00Z') };
   const rows = [
     { date: '2026-06-12', mission: 'task-1001', implementer: 'custom', model: 'qwen3.5', classification: 'ai_sdlc', pr_fix_rounds: '1', completedForTest: 'yes' },
@@ -1263,8 +1263,7 @@ test('task-2213: summarizeAgentWindow keeps separate model rows for local AI mis
   const result = summarizeAgentWindow(rows, window);
 
   assert.deepEqual(result, [
-    { implementer: 'llama3', missions: 1, averageFixRounds: '0.00' },
-    { implementer: 'qwen3.5', missions: 2, averageFixRounds: '1.50' },
+    { implementer: 'custom', missions: 3, averageFixRounds: '1.00' },
   ]);
 });
 
@@ -1284,7 +1283,7 @@ test('task-2213: summarizeAgentWindow falls back to the recorded implementer whe
   assert.equal(claudeEntry.averageFixRounds, '2.00', 'claude avg fix rounds should be 2.00');
 });
 
-test('task-2213: summarizeAgentWindow keeps mixed telemetry models in their own rows', () => {
+test('completed-mission credit does not invent mixed model owners', () => {
   const window = { start: new Date('2026-06-10T00:00:00Z'), end: new Date('2026-06-20T00:00:00Z') };
   const rows = [
     { date: '2026-06-12', mission: 'task-3001', implementer: 'codex', model: 'gpt-5', classification: 'ai_sdlc', pr_fix_rounds: '1', completedForTest: 'yes' },
@@ -1298,33 +1297,50 @@ test('task-2213: summarizeAgentWindow keeps mixed telemetry models in their own 
 
   assert.deepEqual(result, [
     { implementer: 'claude', missions: 1, averageFixRounds: '3.00' },
-    { implementer: 'gemini-2.5-pro', missions: 1, averageFixRounds: '0.00' },
-    { implementer: 'gpt-5', missions: 1, averageFixRounds: '1.00' },
-    { implementer: 'llama3', missions: 1, averageFixRounds: '1.00' },
-    { implementer: 'qwen3.5', missions: 1, averageFixRounds: '2.00' },
+    { implementer: 'codex', missions: 1, averageFixRounds: '1.00' },
+    { implementer: 'custom', missions: 2, averageFixRounds: '1.50' },
+    { implementer: 'gemini', missions: 1, averageFixRounds: '0.00' },
   ]);
 });
 
-test('task-2213: renderWeeklyStatsReport displays model rows in the Agent family column', () => {
+test('weekly delivery credit displays recorded agent families', () => {
   const report = renderWeeklyStatsReport([
     { date: '2026-05-18', mission: 'task-a', classification: 'ai_sdlc', implementer: 'custom', model: 'qwen3.5', pr_fix_rounds: '2', completedForTest: 'yes' },
     { date: '2026-05-17', mission: 'task-b', classification: 'user_value', implementer: 'codex', model: 'gpt-5', pr_fix_rounds: '1', completedForTest: 'yes' },
   ], { today: '2026-05-18' });
 
   const plain = __mm2.stripAnsi(report);
-  assert.match(plain, /qwen3\.5\s+1\s+2\.00/);
-  assert.match(plain, /gpt-5\s+1\s+1\.00/);
+  assert.match(plain, /custom\s+1\s+2\.00/);
+  assert.match(plain, /codex\s+1\s+1\.00/);
 });
 
-test('task-2213: renderRangeStatsReport displays model rows in the Agent family column', () => {
+test('range delivery credit displays recorded agent families', () => {
   const report = renderRangeStatsReport([
     { date: '2026-05-10', mission: 'task-a', classification: 'ai_sdlc', implementer: 'custom', model: 'qwen3.5', pr_fix_rounds: '2', completedForTest: 'yes' },
     { date: '2026-05-15', mission: 'task-b', classification: 'user_value', implementer: 'custom', model: 'llama3', pr_fix_rounds: '0', completedForTest: 'yes' },
   ], { from: '2026-05-01', to: '2026-05-31' });
 
   const plain = __mm2.stripAnsi(report);
-  assert.match(plain, /qwen3\.5\s+1\s+2\.00/);
-  assert.match(plain, /llama3\s+1\s+0\.00/);
+  assert.match(plain, /custom\s+2\s+1\.00/);
+});
+
+test('weekly and range delivery credit ignores failed families and mixed attempt models', () => {
+  const rows = [
+    { repo: 'r', date: '2026-05-18', mission: 'task-switched', stage: 'active', classification: 'ai_sdlc', implementer: 'codex', model: 'mixed', pr_fix_rounds: '4' },
+    { repo: 'r', date: '2026-05-18', mission: 'task-switched', stage: 'active', classification: 'ai_sdlc', implementer: 'custom', model: 'mixed', pr_fix_rounds: '2' },
+    { repo: 'r', date: '2026-05-18', mission: 'task-switched', stage: 'review', classification: 'ai_sdlc', implementer: 'claude', model: 'opus', pr_fix_rounds: '2' },
+  ];
+  const completion = [{ repo: 'r', mission: 'task-switched', closedAt: '2026-05-18T12:00:00Z', labels: ['ai_sdlc'], implementer: 'custom' }];
+  for (const report of [
+    stats.renderWeeklyStatsReport(rows, { today: '2026-05-18', missionFlow: completion }),
+    stats.renderRangeStatsReport(rows, { from: '2026-05-01', to: '2026-05-31', missionFlow: completion }),
+  ]) {
+    const performance = __mm2.stripAnsi(report).split('Agent performance')[1].split('Agent spend')[0];
+    assert.match(performance, /custom\s+1\s/);
+    assert.doesNotMatch(performance, /codex|claude|mixed|opus/);
+  }
+  const unknown = stats.renderRangeStatsReport(rows, { from: '2026-05-01', to: '2026-05-31', missionFlow: [{ ...completion[0], implementer: null }] });
+  assert.doesNotMatch(__mm2.stripAnsi(unknown).split('Agent performance')[1], /custom|codex|claude|mixed/);
 });
 
 test('task-2362: thoughts_tokens survives telemetryToStatsFields and the measurement store round-trip', () => {

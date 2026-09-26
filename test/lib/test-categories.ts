@@ -232,6 +232,9 @@ export const INTEGRATION_CI_TESTS: readonly string[] = [
   'task-2521-03-context-cli.integration.test.ts',
   'task-2521.04-legacy-trace-commit.integration.test.ts',
   'task-2521.04-mission-dependencies.integration.test.ts',
+  'task-2521.06-audit.integration.test.ts',
+  // Reads and commits artifacts in temporary Git repositories; standard Git is enough for CI.
+  'task-2521.06-legacy-task-content.test.ts',
   // TASK-2532: seeds temporary Git repositories to exercise the base-worktree
   // repair (marker-stash sweep + dead-rebase abort), so it crosses the git
   // boundary and runs only in the integration layer.

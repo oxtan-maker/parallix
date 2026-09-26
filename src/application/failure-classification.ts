@@ -147,9 +147,8 @@ export function classifyError(errorMsg: string): { failureClass: FailureClassTyp
   // 7. UnverifiableClaims: test claims that cannot be verified
   // 8. MalformedGates: malformed or non-runnable declared gates
   // 9. MissingArtifacts: mandatory mission artifacts missing.
-  // The "even after auto-remediation" substring is the stable marker of the
-  // handoff checkpoint failure (handoff.ts emits "No checkpoint documents
-  // found in ... even after auto-remediation."): checkpoint evidence is a
+  // Missing legacy checkpoints and older auto-remediation diagnostics are
+  // repairable handoff failures: checkpoint evidence is a
   // mandatory artifact, so the implementer is auto-sent-back per ADR 0048.
   const operational = classifyOperationalFailure(errorMsg);
   if (operational) { return operational; }
@@ -219,6 +218,6 @@ function classifyGateOrArtifactFailure(errorMsg: string): { failureClass: Failur
   if (/verification gate failed|rebase failed before handoff/i.test(errorMsg) || /\bdeclared gate\b/i.test(errorMsg) && /\bfailed\b/i.test(errorMsg)) {return { failureClass: FailureClass.GateFailure, dispatchAction: DispatchAction.AutoSendBack };}
   if (/test(s?\s+)?passed/i.test(errorMsg) && /cannot\s+verify|unverifiable|proof\s+(not\s+)?found|stale\s+proof/i.test(errorMsg)) {return { failureClass: FailureClass.UnverifiableClaims, dispatchAction: DispatchAction.AutoSendBack };}
   if (/malformed\s+gate|invalid\s+gate\s+config|gate\s+command\s+(not\s+found|syntax\s+error|not\s+runnable)/i.test(errorMsg) || /gate/i.test(errorMsg) && /syntax\s+error|not\s+found|missing\s+(file|command)/i.test(errorMsg)) {return { failureClass: FailureClass.MalformedGates, dispatchAction: DispatchAction.AutoRepair };}
-  if (errorMsg.includes('even after auto-remediation') || /mandatory\s+(artifact|file|document)|missing\s+(mission\s+)?(artifact|file|document)|required\s+(artifact|file|document)\s+(not\s+)?found/i.test(errorMsg) || /gatekeeper/i.test(errorMsg) && /missing\s+(artifact|file|document)/i.test(errorMsg)) {return { failureClass: FailureClass.MissingArtifacts, dispatchAction: DispatchAction.AutoSendBack };}
+  if (errorMsg.includes('even after auto-remediation') || errorMsg.includes('No checkpoint documents found in ') || /mandatory\s+(artifact|file|document)|missing\s+(mission\s+)?(artifact|file|document)|required\s+(artifact|file|document)\s+(not\s+)?found/i.test(errorMsg) || /gatekeeper/i.test(errorMsg) && /missing\s+(artifact|file|document)/i.test(errorMsg)) {return { failureClass: FailureClass.MissingArtifacts, dispatchAction: DispatchAction.AutoSendBack };}
   return null;
 }

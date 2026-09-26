@@ -44,6 +44,7 @@ export const KNOWN_COMMANDS: string[] = [
   'cancel',
   'resolve-conflict',
   'import-legacy',
+  'audit-legacy',
   'rebase',
   'stats',
   'aliases',
@@ -54,7 +55,7 @@ export const KNOWN_COMMANDS: string[] = [
   'web',
 ];
 
-const READ_ONLY_COMMANDS = new Set(['config', 'ui', 'web', 'github-publish-status']);
+const READ_ONLY_COMMANDS = new Set(['config', 'ui', 'web', 'github-publish-status', 'audit-legacy']);
 
 export type Command = (..._args: any[]) => unknown;
 
@@ -290,7 +291,8 @@ ${fmt.bold('Advanced Commands:')}
         Every write takes --expected-version <n>, read from \`px status --json\`.
   github-publish-status  Show github-publish publication engine status (local head, published head, awaiting/verified-blocked/failed). No-op when the mode is disabled.
   lead [<slug>...] [--once] [--poll <s>] [--budget <n>] [--dry-run]  Work active, review, and integration missions from the board's needs-attention queue; refined missions stay for operator activation. Press the action each item offers, then give a stuck mission a fresh agent in its worktree. Attempts are per failure; integration items are left for you. Keeps watching until stopped (default poll 60 seconds); --once takes a single pass and exits.
-  import-legacy [--dry-run]  Explicit one-way import of the legacy Backlog Markdown tree into the existing Mission aggregate. Reports discovered/importable/already-materialized/conflicting/unrepresented counts, materializes each legacy id at most once, never overwrites an existing Mission, and never runs as part of a normal command.
+  import-legacy [--dry-run] [--existing-only] [--reconcile-checkpoints]  Explicit one-way import of the legacy Backlog Markdown tree into the existing Mission aggregate. Use --existing-only to refresh imported missions without ingesting native missions or future backlog inputs. Commit any refreshed task-body archive before status or audit. The reconciliation flag uses committed provenance to replace disputed historical checkpoint rows; normal imports never overwrite them.
+  audit-legacy [--json]   Classify retired workflow files and report a fail-closed GO/NO-GO migration audit with eight counters.
   cancel <slug> --yes   Delete one mission's lifecycle rows from the operator database. Irreversible; usage statistics are kept and the branch and worktree stay for you to remove.
   resolve-conflict [<slug>]       Detect merge conflicts in the mission worktree and emit resolution guidance.
   rebase [<slug>] [--push]          Rebase mission branch onto the primary integration branch (main) with auto-resolution of mission-specific conflicts.

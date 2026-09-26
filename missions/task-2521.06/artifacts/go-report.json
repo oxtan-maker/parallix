@@ -1,0 +1,74 @@
+{
+  "sourceRevision": "7e9f056f3431749756aca903273c1f7107b34e41",
+  "auditSha256": "7f20f926b914053b875704282d62c63fa9b6e0e1e4f438ee15ebff0d73216e15",
+  "verdict": "GO",
+  "counters": {
+    "unresolvedLegacyFiles": 0,
+    "unparsedDataBearingFiles": 0,
+    "conflictingDuplicateRecords": 0,
+    "normalRuntimeReadersOfRetiredPaths": 0,
+    "normalRuntimeWritersOfRetiredPaths": 0,
+    "requiredMissionContextMissing": 0,
+    "requiredTaskRecordsMissing": 0,
+    "migrationVerificationFailures": 0
+  },
+  "historicalContracts": {
+    "archivedDocuments": 490,
+    "obsoletePlaceholderDocuments": 10,
+    "documentsWithSupersededCurrentFields": 3,
+    "missionBriefRowsBeforeAfter": [
+      11,
+      390
+    ],
+    "successCriterionRowsBeforeAfter": [
+      63,
+      2229
+    ],
+    "declaredGateRowsBeforeAfter": [
+      13,
+      801
+    ],
+    "checkpointRowsBeforeAfter": [
+      1885,
+      1977
+    ],
+    "secondImportDryRunAdditionalWrites": 0
+  },
+  "blockers": [],
+  "postRebaseUnresolved": [],
+  "retainedBacklogInputs": [
+    "backlog/tasks/task-2235 - Human-review-submissions-are-not-first-class-in-the-parallix-workflow.md",
+    "backlog/tasks/task-2500.06 - Mission-6-dogfood-protected-main.md",
+    "backlog/tasks/task-2514 - Allow-human-review-approval-after-active-state-repair.md",
+    "backlog/tasks/task-2521.06 - Mission-6-—-Migrate-legacy-repository-metadata-and-prove-zero-unresolved-data-before-deletion.md",
+    "backlog/tasks/task-2521.07 - Mission-7-—-Remove-retired-Mission-and-Backlog-metadata-from-the-current-repository-tree.md",
+    "backlog/tasks/task-2521.08 - Mission-8-—-Dogfood-the-file-free-workflow-and-prove-agent-recovery-context-quality.md",
+    "backlog/tasks/task-2543 - Revoke-an-unfounded-review-approval-and-return-the-mission-to-its-correct-lifecycle-state.md",
+    "backlog/tasks/task-2547.01 - Capture-live-github-publish-sha-Sonar-quality-gate-proof-for-SC5.md",
+    "backlog/tasks/task-2552 - Remove-retired-file-based-review-protocol.md",
+    "backlog/tasks/task-2555 - Stand-down-a-review-approval-that-no-longer-covers-the-branch.md",
+    "backlog/tasks/task-2559 - minor-ux-issues-post-2521.03-migration.md",
+    "backlog/tasks/task-2564 - Bring-px-status-under-200ms-remove-remaining-subprocess-and-PR-lookup-cost.md",
+    "backlog/tasks/task-2570 - Remove-unsupported-project-approval-settings-from-Codex-launch-config.md",
+    "backlog/tasks/task-2571 - px-status-shows-all-completed-checkpoints.md",
+    "backlog/tasks/task-2572 - Keep-imported-task-source-reachable-after-squash-integration.md",
+    "backlog/tasks/task-2575 - Give-self-development-gate-rebounds-authority-to-repair-the-failing-defence.md",
+    "backlog/tasks/task-2577 - Stop-recurring-test-fixture-leaks-in-tmp.md",
+    "backlog/tasks/task-2578 - Restore-live-pre-integration-gate-TUI-and-identify-the-regression.md",
+    "backlog/tasks/task-2579 - improve-pi-agent.md"
+  ],
+  "approvedCheckpointException": "missions/task-2521.06/artifacts/task-2576-checkpoint-comparison.json",
+  "backupRestoreProof": "missions/task-2521.06/artifacts/backup-restore-proof.json",
+  "verification": {
+    "all": {
+      "passed": 3022,
+      "exitCode": 0
+    },
+    "staticAnalysis": {
+      "exitCode": 0
+    },
+    "docs": {
+      "exitCode": 0
+    }
+  }
+}

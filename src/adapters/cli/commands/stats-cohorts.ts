@@ -6,8 +6,7 @@ import {
   type CohortComparison,
   type CohortDimension,
 } from '../../../application/projections/cohorts.js';
-import { ConcreteMetricsReadAdapter } from '../../../application/projections/metrics-read-adapter.js';
-import { ConcreteMissionReadAdapter } from '../../backlog/concrete-mission-read-adapter.js';
+import { ConcreteMetricsReadAdapter, missionCohortMetadata } from '../../../application/projections/metrics-read-adapter.js';
 import type { MissionId } from '../../../domain/mission.js';
 import type { MissionLabel } from '../../../domain/mission.js';
 import type { AgentFamily } from '../../../domain/agents.js';
@@ -207,11 +206,12 @@ export async function statsCohorts(
       ?? (parsed.repositoryId === null
         ? resolveCanonicalRepositoryId(rootDir)
         : toRepositoryId(parsed.repositoryId));
-    const cohortMetadata = options.cohortMetadata ?? (() => {
-      const missions = new ConcreteMissionReadAdapter({ rootDir, repositoryId });
-      return missions.loadAllMissions().then((loaded) => new Map(
-        loaded.map((mission) => [mission.id, { labels: mission.labels, assignee: mission.assignee }]),
-      ));
+    const cohortMetadata = options.cohortMetadata ?? (async () => {
+      const { initOperatorState } = await import('../../sqlite/adapter-factory.js');
+      const { SqliteMissionStore } = await import('../../sqlite/mission-store.js');
+      const { db } = await initOperatorState();
+      const loaded = await new SqliteMissionStore(db).loadByRepository(repositoryId);
+      return missionCohortMetadata(loaded);
     });
     const comparison = await buildCohortComparison({
       ...repositories,

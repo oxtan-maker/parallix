@@ -14,6 +14,7 @@
 // Scope note (DOD #3): the proof covers exactly one platform — the one it runs
 // on, recorded in build/sea/sea-metadata.json. No cross-platform claim follows.
 
+import { seedBoardMissions } from './helpers/seed-board-missions.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as crypto from 'node:crypto';
@@ -107,7 +108,7 @@ function parseConfigJson(stdout: string): Record<string, unknown> {
   return JSON.parse(stdout.slice(start));
 }
 
-test.before(() => {
+test.before(async () => {
   // Stop rule: without an ESM-SEA-capable runtime the mission defers CP2/CP3.
   // Fail loudly rather than silently skipping, so a missing toolchain is never
   // mistaken for a passing native proof.
@@ -132,6 +133,8 @@ test.before(() => {
   execFileSync('git', ['config', 'user.name', 'SEA Smoke'], { cwd: repo });
   execFileSync('git', ['add', '-A'], { cwd: repo });
   execFileSync('git', ['commit', '-qm', 'sea smoke fixture'], { cwd: repo });
+
+  await seedBoardMissions(repo, home, [{ id: 'task-sea', title: 'native SEA smoke fixture' }]);
 
   bundleDigestBeforeBuild = sha256(BUNDLE);
   execFileSync(process.execPath, [BUILD_SEA], { cwd: ROOT, stdio: 'inherit' });

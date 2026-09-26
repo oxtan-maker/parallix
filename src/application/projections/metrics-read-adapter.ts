@@ -1,6 +1,6 @@
 import type { UsageRecord, UsageRepository } from '../ports/mission-measurements.js';
 import type { BoardLaneEventEntry, BoardLaneEventRepository, OperationalHistoryRepository } from '../ports/operation-history.js';
-import type { MissionId, MissionLabel, MissionStatus } from '../../domain/mission.js';
+import type { Mission, MissionId, MissionLabel, MissionStatus } from '../../domain/mission.js';
 import { missionLabels } from '../../domain/mission.js';
 import { compareCodeUnits } from '../../domain/comparators.js';
 import type { MissionTransition } from '../../domain/mission-workflow.js';
@@ -26,6 +26,15 @@ import { buildMetrics } from './metrics.js';
 import { compareCohorts, type CohortDimension } from './cohorts.js';
 import { statisticsMissionKey, utcHourBucket } from '../services/statistics-service.js';
 import { weeklyDecisionWindows } from '../services/decision-window.js';
+
+/** Delivery belongs to the recorded final review implementer, never an attempt. */
+export function missionCohortMetadata(missions: readonly Mission[]) {
+  return new Map(missions.map(mission => {
+    const finalImplementer = mission.review?.rounds.at(-1)?.implementer;
+    return [mission.id, { labels: mission.labels,
+      assignee: finalImplementer ? agentFamily(finalImplementer) : mission.assignee }] as const;
+  }));
+}
 
 // ---------------------------------------------------------------------------
 // MetricsReadAdapter — derives BoardMetrics from event history
@@ -333,7 +342,7 @@ export class ConcreteMetricsReadAdapter implements MetricsReadAdapter {
           closedAt,
           cycleTimeMinutes: elapsedMinutes(createdAt, closedAt),
           labels: outcomeLabels(outcome.labelValues),
-          implementer: outcomeImplementer(runs),
+          implementer: null,
           modelsInvolved: modelInvolvement(runs),
           totalInputAndOutputTokens: totalInputAndOutputTokens(runs),
           totalCostUsd: sumMeasured(runs.map((run) => run.costUsd)),
@@ -500,19 +509,6 @@ function recordLabelValues(record: UsageRecord): readonly string[] {
 /** Distinct, normalised labels; an unlabelled mission gets an empty list. */
 function outcomeLabels(values: readonly string[]): readonly MissionLabel[] {
   return missionLabels(values.filter((value) => value.trim().length > 0));
-}
-
-/**
- * The agent family that did the implementation work. Reviewer runs are excluded
- * so a cohort keyed on implementer is not split by who reviewed it, and an
- * unparseable name stays `null` instead of becoming the `unknown` family.
- */
-function outcomeImplementer(runs: readonly AgentRunMeasurement[]): AgentFamily | null {
-  const named = runs
-    .filter((run) => run.role === 'implementer')
-    .map((run) => run.agent)
-    .filter((agent) => agent !== agentFamily('unknown'));
-  return named[0] ?? null;
 }
 
 /** Whole minutes between two ISO instants, never negative. */

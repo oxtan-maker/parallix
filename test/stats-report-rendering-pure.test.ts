@@ -73,9 +73,9 @@ test('computeAgentMissionGroups deduplicates by mission key and builds display g
 });
 
 test('summarizeAgentWindow returns per-agent fix-round summaries', () => {
-  const out = sr.summarizeAgentWindow([row()], WIN, { completedMissionKeys: new Set(['acme/app::task-1']) });
+  const out = sr.summarizeAgentWindow([row()], WIN, { completedMissionKeys: new Set(['acme/app::task-1']), completedMissionOwners: new Map([['acme/app::task-1', 'codex']]) });
   assert.equal(out.length, 1);
-  assert.equal(out[0].implementer, 'gpt-4');
+  assert.equal(out[0].implementer, 'codex');
   assert.equal(out[0].averageFixRounds, '2.00');
 });
 

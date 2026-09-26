@@ -15,7 +15,7 @@ import fs from 'fs';
 import path from 'path';
 
 import { withMissionDatabase } from './fixtures/review-state-db.js';
-import { backfillReviewFromLegacyState, readReviewState, writeReviewState, } from '../src/adapters/review/review-state.js';
+import { backfillReviewFromLegacyState, readExportedReviewEvents, readReviewState, writeReviewState, } from '../src/adapters/review/review-state.js';
 import { ReviewCommandUseCase } from '../src/application/review-command-use-case.js';
 import { createReviewCommand } from '../src/interfaces/cli/review.js';
 import { createReviewWorkflowAdapter } from '../src/adapters/review/review-commands.js';
@@ -127,6 +127,30 @@ test('backfill is idempotent: a second run does not duplicate rounds', async () 
     assert.equal(second.outcome, 'already-present');
     assert.equal((await readReviewState(slug, root, store)).round, 3);
   }, { seedReview: false });
+});
+
+test('backfill repairs a partial export import only when recorded events are an ordered subset', async () => {
+  await withMissionDatabase('task-bf-partial', async ({ root, slug, missionDir, store }: any) => {
+    const dir = path.join(missionDir, 'review-events');
+    fs.mkdirSync(dir);
+    for (const [time, body] of [['120000', 'First'], ['120100', 'Second']]) {
+      fs.writeFileSync(path.join(dir, `2026-01-01T${time}-human_note-1-codex.md`),
+        `---\nevent_type: human_note\ntimestamp: 2026-01-01T${time}Z\nround: 1\nactor: codex\n---\n\n${body}\n`);
+    }
+    const events = readExportedReviewEvents(slug, root);
+    const read = await store.load(slug);
+    await store.save({ ...read.mission, review: { ...read.mission.review, reviewEvents: [events[0]] } }, read.version);
+    assert.equal((await backfillReviewFromLegacyState(slug, root, { apply: false, missionStore: store })).outcome, 'would-backfill-events');
+    assert.equal((await backfillReviewFromLegacyState(slug, root, { missionStore: store })).outcome, 'events-backfilled');
+    const after = await store.load(slug);
+    assert.deepEqual(after.mission.review.reviewEvents, events);
+    await store.save({ ...after.mission, review: { ...after.mission.review,
+      reviewEvents: [{ ...events[0], createdAt: '2026-01-01T120000Z' }, events[1]],
+    } }, after.version);
+    assert.equal((await backfillReviewFromLegacyState(slug, root, { missionStore: store })).outcome, 'events-backfilled');
+    assert.deepEqual((await store.load(slug)).mission.review.reviewEvents, events);
+    assert.equal((await backfillReviewFromLegacyState(slug, root, { missionStore: store })).outcome, 'no-legacy-state');
+  });
 });
 
 test('backfill reports a mission with no legacy state instead of inventing a Review', async () => {

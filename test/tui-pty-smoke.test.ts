@@ -6,6 +6,8 @@ import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { launchPtySmoke, type PtySmokeSession } from './helpers/pty-smoke-harness.js';
 
+import { seedBoardMissions } from './helpers/seed-board-missions.js';
+
 const root = process.cwd();
 const TIMEOUT_MS = 12_000;
 // The integration suite runs test files on concurrent workers, so booting the
@@ -44,6 +46,7 @@ test('real PTY smoke: launch, keyboard navigation, resize, clean exit, timeout b
     await writeFile(path.join(fixtureRoot, 'backlog', 'tasks', 'task-pty-2.md'), [
       '---', 'id: TASK-PTY-2', 'title: PTY second mission', 'status: refined', 'assignee: []', 'labels: []', '---', '',
     ].join('\n'));
+    await seedBoardMissions(fixtureRoot, stateRoot, [{ id: 'task-pty', title: 'PTY smoke mission' }, { id: 'task-pty-2', title: 'PTY second mission' }]);
     session = await launchPtySmoke([process.execPath, path.join(root, 'build/px.mjs'), 'ui'], {
       cwd: fixtureRoot,
       timeoutMs: TIMEOUT_MS,

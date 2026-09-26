@@ -16,6 +16,8 @@ import type {
 } from '../../../application/ports/cli-workflows.js';
 import { detectRebaseState, getCurrentBranch, getUncommittedCount, getLastThreeCommits, run } from '../../git/git.js';
 import { findTaskFile, getTaskStatus } from '../../backlog/backlog.js';
+import { readLegacyTaskContent } from '../../backlog/legacy-task-content.js';
+import { readLegacyMissionContent, readLegacyReviewSnapshot } from '../../backlog/legacy-mission-content.js';
 import {
   getPrimaryWorktree,
   inferSlug,
@@ -138,6 +140,10 @@ export function createStatusBoardAdapter(options: {
         // these are Mission state.
         const latest = latestEvidencedCheckpoint(recorded?.mission.checkpoints ?? []);
         const brief = recorded?.mission.brief ?? null;
+        const taskRef = recorded?.mission.externalTaskRef ?? null;
+        const legacyTask = taskRef ? readLegacyTaskContent(taskRef, rootDir) : null;
+        const legacyMission = readLegacyMissionContent(slug, rootDir);
+        const legacyReview = readLegacyReviewSnapshot(slug, rootDir);
 
         return {
           activity: card ? projectMissionActivity(card as MissionActivitySource) : null,
@@ -174,6 +180,13 @@ export function createStatusBoardAdapter(options: {
           // Retained for the JSON compatibility surface; lifecycle presentation
           // reads missionStatus above, never this frozen intake field.
           backlogStatus: (card as any)?.rawStatus ?? (card as any)?.status ?? recorded?.mission.status ?? 'unknown',
+          legacyTaskContent: legacyTask?.content ?? null,
+          legacyTaskError: legacyTask?.error ?? null,
+          legacyMissionContent: legacyMission.content,
+          legacyMissionError: legacyMission.error,
+          legacyReviewStateContent: legacyReview.content,
+          legacyReviewStateError: legacyReview.error,
+          closedAt: recorded?.mission.closedAt ?? null,
           // A recorded checkpoint names itself. Only fall back to the board
           // card when nothing is recorded, so the reported name can never
           // belong to a different checkpoint than the Goal Check rows below it.

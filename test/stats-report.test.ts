@@ -8,7 +8,7 @@ import stats from '../src/adapters/cli/commands/stats.js';
 
 function missionFlow(rows) {
   return rows.filter(row => row.completedForTest === 'yes')
-    .map(row => ({ repo: row.repo, mission: row.mission, closedAt: `${row.date}T00:00:00Z`, labels: [] }));
+    .map(row => ({ repo: row.repo, mission: row.mission, closedAt: `${row.date}T00:00:00Z`, labels: [], implementer: row.implementer }));
 }
 
 function completedMissionKeys(rows) {
@@ -46,8 +46,8 @@ test('renderWeeklyStatsReport assigns performance cohorts by lifecycle completio
   const report = statsReport.renderWeeklyStatsReport(rows, {
     today: '2026-08-12',
     missionFlow: [
-      { repo: 'r', mission: 'a', closedAt: '2026-08-10T00:00:00Z', labels: [] },
-      { repo: 'r', mission: 'b', closedAt: '2026-08-04T00:00:00Z', labels: [] },
+      { repo: 'r', mission: 'a', closedAt: '2026-08-10T00:00:00Z', labels: [], implementer: 'alpha' },
+      { repo: 'r', mission: 'b', closedAt: '2026-08-04T00:00:00Z', labels: [], implementer: 'beta' },
     ],
   });
   const [current, previous] = report.split('Agent performance previous week');

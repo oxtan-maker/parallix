@@ -156,7 +156,7 @@ test('SC1: a constructed mission outcome carries every cohort dimension and tota
   assert.equal(constructed.totalToolCalls, 4);
 });
 
-test('SC2: usageRecordsToOutcomes populates the cohort dimensions from usage and lane rows', async () => {
+test('usage and lane rows preserve spend without guessing the final implementer', async () => {
   const repo = repositoryId('parallix');
   const task = 'task-2347.09-dimensions';
   const outcomes = await metricsAdapter(
@@ -204,7 +204,7 @@ test('SC2: usageRecordsToOutcomes populates the cohort dimensions from usage and
   assert.equal(outcomes.length, 1);
   const projected = outcomes[0]!;
   assert.deepEqual(projected.labels, missionLabels(['user_value']));
-  assert.equal(projected.implementer, agentFamily('codex'));
+  assert.equal(projected.implementer, null, 'Attempt telemetry is not delivery attribution');
   assert.deepEqual(
     projected.modelsInvolved.map((involvement) => [involvement.role, involvement.provider, involvement.model]),
     [['implementer', 'openai', 'gpt-5'], ['reviewer', 'anthropic', 'claude-opus-5']],

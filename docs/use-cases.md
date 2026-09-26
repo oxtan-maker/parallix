@@ -185,13 +185,32 @@ dependency recorded with `px depends` and reported by `px status`; nothing
 enforces it, so it informs whoever reads the mission next rather than gating
 anything.
 
-Legacy Backlog records enter through the explicit one-way `px import-legacy`,
-which is never part of a normal command. It imports a legacy `backlog` record as
-a backlog Mission and reports every later lane instead, because a Mission past
-`backlog` needs a recorded contract — and, later still, checkpoint and review
-evidence — that a legacy file cannot supply. Each imported Mission's trace names
-the source path and the commit it was read at, so the original text stays
-recoverable from Git history once the files are removed.
+Legacy Backlog records enter through the explicit one-way `px import-legacy`.
+Historical refined and completed lanes retain their recorded status without
+inventing a current contract or review. Each imported Mission traces a pinned
+source artifact, and `px status <slug>` includes its full task body after the
+repository file is removed. The Mission aggregate remains the authority for
+current scope, criteria, evidence, labels, and lifecycle state. The explicit
+migration also copies checkpoint Goal Check rows when the repository document
+adds evidence without contradicting a recorded checkpoint.
+
+The migration audit inventories retired workflow files and refuses cleanup
+while any file lacks a verified destination, required Mission context is
+missing, or normal commands still depend on retired paths.
+Unstarted Backlog inputs remain in place until the operator chooses to draft
+them; they need no Mission record and are outside migration deletion scope.
+Backlog remains a supported external task view: descriptive titles may be read
+from it, and lifecycle status and assignment are mirrored for its users.
+These retained provider reads and writes do not block retirement of Mission
+and checkpoint documents. Started Missions and their checkpoint evidence come
+from Mission state; completed catalogs are not reconstructed from task files.
+Delivery statistics credit the final implementer recorded in the Mission's
+Review. Historical completed Missions without Review history use their recorded
+assignee. Attempt telemetry preserves resource consumption without granting
+completed-mission credit to earlier implementers or inferred model owners.
+Refreshing imported Missions can preserve newer committed task bodies without
+ingesting those future inputs. Refreshed preservation artifacts must be committed
+before they authorize cleanup.
 
 
 ## Positioning boundaries

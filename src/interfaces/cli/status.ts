@@ -39,8 +39,15 @@ export function statusJson(result: StatusResult): string {
     branch: result.branch,
     missionStatus: md?.missionStatus ?? md?.backlogStatus ?? null,
     backlogStatus: md?.backlogStatus ?? null,
+    closedAt: md?.closedAt ?? null,
     assignee: md?.assignee ?? null,
     externalTaskRef: md?.externalTaskRef ?? null,
+    legacyTaskContent: md?.legacyTaskContent ?? null,
+    legacyTaskError: md?.legacyTaskError ?? null,
+    legacyMissionContent: md?.legacyMissionContent ?? null,
+    legacyMissionError: md?.legacyMissionError ?? null,
+    legacyReviewStateContent: md?.legacyReviewStateContent ?? null,
+    legacyReviewStateError: md?.legacyReviewStateError ?? null,
     version: md?.version ?? null,
     brief: md?.brief ?? null,
     declaredGates: md?.declaredGates ?? [],
@@ -131,11 +138,18 @@ function logMissionData(missionData: StatusMissionData | null, log: (_msg: strin
   }
   if (missionData.title) { log(`Title: ${missionData.title}`); }
   log(`Mission status: ${missionData.missionStatus ?? missionData.backlogStatus}`);
+  if (missionData.closedAt) { log(`Closed at: ${missionData.closedAt}`); }
   log(`Assignee: ${missionData.assignee ?? 'none'}`);
   if (missionData.externalTaskRef) {
     const ref = missionData.externalTaskRef;
     log(`External task: ${ref.source}:${ref.id}${ref.url ? ` (${ref.url})` : ''}`);
   }
+  if (missionData.legacyTaskContent) { log(`Legacy task content (pinned Git artifact):\n${missionData.legacyTaskContent}`); }
+  if (missionData.legacyTaskError) { log(`Legacy task content unavailable: ${missionData.legacyTaskError}`); }
+  if (missionData.legacyMissionContent) { log(`Historical mission document (committed archive):\n${missionData.legacyMissionContent}`); }
+  if (missionData.legacyMissionError) { log(`Historical mission document unavailable: ${missionData.legacyMissionError}`); }
+  if (missionData.legacyReviewStateContent) { log(`Historical review snapshot (committed archive):\n${missionData.legacyReviewStateContent}`); }
+  if (missionData.legacyReviewStateError) { log(`Historical review snapshot unavailable: ${missionData.legacyReviewStateError}`); }
   // The same two facts the TUI agent strip renders, from the same projection:
   // authoritative work first, then the recovery-only evidence that a `px`
   // coordinator process exists. Keeping them on separate lines is deliberate —

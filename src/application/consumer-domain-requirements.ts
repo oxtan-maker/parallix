@@ -285,7 +285,7 @@ export const CONSUMER_DOMAIN_REQUIREMENTS: readonly ConsumerRequirement[] = [
     id: 'review-round-state',
     family: 'review',
     fileLocation: 'src/adapters/review/review-state.ts',
-    line: 652,
+    line: 673,
     anchor: 'export class ReviewState',
     reads: ['Review', 'Mission'],
     requirement:

@@ -9,12 +9,9 @@
  * only durable record an import writes is the Mission aggregate the rest of
  * Parallix already owns (ADR 0053).
  *
- * Intake is the only lane an import reaches. TASK-2521.03 made the Mission
- * contract durable state, so `refine` now requires a recorded brief, scope,
- * success criteria, checkpoint plan, gate and predicted NEL bucket. A legacy
- * file carries none of that, and inventing one would forge the contract the
- * lifecycle exists to check, so every legacy lane past `backlog` is reported
- * instead of imported.
+ * Historical refined and completed lanes can be preserved without inventing
+ * a current contract, checkpoint, or review. A completed lane requires a
+ * source-backed closure date. Other post-intake lanes remain deferred.
  *
  * This module is an explicit migration path, never a runtime fallback reader.
  * Nothing in the normal `draft`, `active`, board, review, or integration path
@@ -28,15 +25,13 @@
  *   2. A record without a usable Mission identity, title, single assignee, or
  *      mappable lifecycle status is reported as conflicting — never guessed
  *      into the aggregate.
- *   3. A mapped status that the current lifecycle cannot reach from intake
- *      without fabricating review evidence is reported as conflicting, per the
- *      mission risk "a legacy status may not be reachable through the current
- *      lifecycle".
+ *   3. A mapped status requiring live execution or review evidence is deferred;
+ *      historical refined and done states are imported without forged evidence.
  *   4. An existing Mission whose `ExternalTaskRef` already traces this legacy
  *      id, and whose Mission-owned source material still agrees, counts as
  *      already materialized, so repeated runs import each id at most once.
- *   5. An existing Mission that disagrees, or that owns the identity with no
- *      trace to this material, is reported as conflicting and left untouched.
+ *   5. An existing Mission with a different title is reported as conflicting;
+ *      current Mission labels supersede old task labels retained in the body.
  *   6. Frontmatter fields `Mission` has no representation for are reported by
  *      name; the record's identity and Mission-owned fields still import.
  *   7. A legacy `dependencies` entry is recorded as a Mission dependency once
@@ -49,13 +44,23 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
+import { createHash } from 'node:crypto';
+import { compareCodeUnits } from '../../domain/comparators.js';
 import { missionStatusFromBacklog } from './mission-materialization.js';
 import { git } from '../git/git.js';
 import { parseTaskFrontmatterValue } from './task-file-io.js';
+import { parseCheckpointDocument, reconcileLegacyCheckpoint } from './checkpoint-document.js';
+import { parseLegacyMissionDocument } from './legacy-mission-document.js';
+import { readLegacyTaskContent } from './legacy-task-content.js';
+import { hasApprovedCheckpointException } from './legacy-mission-content.js';
+import type { CheckpointData } from '../../domain/checkpoint.js';
+import { classifyNelBucket, type NelBucketLabel } from '../../domain/net-engineering-lines.js';
+import { backfillReviewFromLegacyState } from '../review/review-state.js';
+import { stageLaunchWindowsFrom } from '../../domain/review.js';
 import { findFieldBlock, parseAssigneeFamilies, parseTaskLabels } from './task-metadata.js';
 import { resolveTaskStorage } from '../config/product-config.js';
 import type { Capability } from '../../application/contracts.js';
-import type { MissionStore } from '../../application/domain-ports.js';
+import type { MissionStore, MissionTransitionHistoryEntry } from '../../application/domain-ports.js';
 import type {
   MissionIntakeRequest,
   MissionIntakeResult,
@@ -87,12 +92,14 @@ export const LEGACY_TASK_SOURCE = 'backlog-md';
 const REPRESENTED_KEYS: readonly string[] = [
   'id', 'title', 'status', 'assignee', 'labels', 'dependencies',
 ];
+/** Explicitly retired by the operator; canonical body remains in the archive. */
+const RETIRED_KEYS: readonly string[] = [
+  'priority', 'references', 'ordinal', 'parent_task_id', 'documentation',
+  'modified_files', 'created_date', 'updated_date', 'milestone',
+  'completed_date', 'operator_note', 'mission_contract',
+];
 
-/**
- * Why each legacy lane past intake is reported rather than imported. `refined`
- * and `active` need the recorded contract `refine` checks; the later lanes also
- * need checkpoint evidence and a decided review round.
- */
+/** Lanes whose live evidence cannot be inferred from historical task files. */
 const UNIMPORTABLE_LANES: Readonly<Record<Exclude<MissionStatus, 'backlog'>, string>> = {
   refined: 'needs a recorded contract',
   active: 'needs a recorded contract',
@@ -103,11 +110,14 @@ const UNIMPORTABLE_LANES: Readonly<Record<Exclude<MissionStatus, 'backlog'>, str
 
 const INTAKE_CAPABILITY: ReadonlySet<Capability> = new Set<Capability>(['mission:intake']);
 const CONTEXT_CAPABILITY: ReadonlySet<Capability> = new Set<Capability>(['mission:context']);
+const OBSOLETE_LEGACY_DEPENDENCIES = new Set(['TASK-1233', 'TASK-1265', 'TASK-1285', 'TASK-2500']);
 
 /** The existing Mission use cases the importer writes through; no new port. */
 export interface MissionImportServices {
   readonly repositoryId: RepositoryId;
-  readonly store: MissionStore;
+  readonly store: MissionStore & {
+    findTransitions?(_missionId: MissionId): Promise<readonly MissionTransitionHistoryEntry[]>;
+  };
   readonly intake: {
     execute(_request: MissionIntakeRequest): Promise<ApplicationOutcome<MissionIntakeResult>>;
   };
@@ -124,6 +134,8 @@ export interface LegacyImportOptions {
   readonly rootDir: string;
   /** Report only; no Mission row is written. */
   readonly dryRun?: boolean;
+  /** Refresh imported Missions without ingesting native Missions or future backlog items. */
+  readonly existingOnly?: boolean;
   /** Occurrence time recorded on intake and lane events; defaults to now. */
   readonly now?: string;
   /**
@@ -131,6 +143,48 @@ export interface LegacyImportOptions {
    * Defaults to the checkout's `HEAD`.
    */
   readonly commit?: string | null;
+  /** One-shot, artifact-verified replacement of disputed historical CP rows. */
+  readonly reconcileCheckpoints?: boolean;
+}
+
+interface CheckpointReconciliationEntry {
+  readonly file: string;
+  readonly sha256: string;
+  readonly recorded: CheckpointData;
+  readonly sourceCommit?: string;
+}
+
+interface CheckpointReconciliationArtifact {
+  readonly sourceCommit: string;
+  readonly entries: readonly CheckpointReconciliationEntry[];
+}
+
+const CHECKPOINT_RECONCILIATION_ARTIFACT =
+  'missions/task-2521.06/artifacts/legacy-checkpoint-reconciliation.json';
+
+function loadCheckpointReconciliation(rootDir: string, commit: string | null): Map<string, CheckpointReconciliationEntry> {
+  const file = path.join(rootDir, CHECKPOINT_RECONCILIATION_ARTIFACT);
+  if (!sourceMatchesCommit(rootDir, file, commit)) {
+    throw new Error('Checkpoint reconciliation artifact must match the current committed revision');
+  }
+  const artifact = JSON.parse(fs.readFileSync(file, 'utf8')) as CheckpointReconciliationArtifact;
+  if (!/^[a-f0-9]{40,64}$/.test(artifact.sourceCommit) || !Array.isArray(artifact.entries)) {
+    throw new Error('Checkpoint reconciliation artifact has invalid source commit or entries');
+  }
+  const entries = new Map<string, CheckpointReconciliationEntry>();
+  for (const entry of artifact.entries) {
+    if (!/^missions\/task-[^/]+\/CP-\d+\.md$/.test(entry.file)
+      || !/^[a-f0-9]{64}$/.test(entry.sha256)
+      || entry.recorded?.missionId !== entry.file.split('/')[1]
+      || entry.recorded.name !== path.basename(entry.file, '.md')
+      || entries.has(entry.file)
+      || (entry.sourceCommit !== undefined && !/^[a-f0-9]{40,64}$/.test(entry.sourceCommit))
+      || !sourceMatchesCommit(rootDir, path.join(rootDir, entry.file), entry.sourceCommit ?? artifact.sourceCommit)) {
+      throw new Error(`Checkpoint reconciliation artifact has invalid entry: ${entry.file}`);
+    }
+    entries.set(entry.file, entry);
+  }
+  return entries;
 }
 
 export interface LegacyImportReport {
@@ -138,6 +192,8 @@ export interface LegacyImportReport {
   readonly discovered: number;
   /** Missions created, or in a dry run that would be created. */
   readonly importable: number;
+  /** Legacy checkpoint files whose parsed data would be attached to a Mission. */
+  readonly checkpointFilesImportable: number;
   /** Legacy ids an existing Mission already traces with agreeing material. */
   readonly alreadyMaterialized: number;
   /** Records refused because a human decision is required. */
@@ -153,6 +209,8 @@ export interface LegacyImportReport {
   readonly deferredRecords: readonly string[];
   /** One line per legacy dependency that resolves to no Mission. */
   readonly unresolvedDependencies: readonly string[];
+  /** Proven stale links retained in the pinned source body, not current graph edges. */
+  readonly obsoleteDependencies: readonly string[];
   /** One line per unrepresented field, naming the legacy id and the field. */
   readonly unrepresentedFields: readonly string[];
   /** Mission ids this run materialized, in import order. */
@@ -235,7 +293,7 @@ function parseLegacyRecord(filePath: string): LegacyRecord | null {
     rawStatus: parseTaskFrontmatterValue(content, 'status'),
     assignees: parseAssigneeFamilies(content).families,
     labels: parseTaskLabels(content),
-    unrepresentedKeys: frontmatterKeys(content).filter(key => !REPRESENTED_KEYS.includes(key)),
+    unrepresentedKeys: frontmatterKeys(content).filter(key => !REPRESENTED_KEYS.includes(key) && !RETIRED_KEYS.includes(key)),
     dependencies: parseListField(content, 'dependencies'),
   };
   // Only Mission-owned material decides whether two historical copies of one id
@@ -277,11 +335,69 @@ function sourceLocator(sourcePath: string, commit: string | null): string {
   return commit === null ? sourcePath : `${sourcePath}@${commit}`;
 }
 
+function sourceMatchesCommit(rootDir: string, filePath: string, commit: string | null): boolean {
+  if (commit === null) { return false; }
+  try {
+    const pinned = git(['show', `${commit}:${relative(rootDir, filePath)}`], { cwd: rootDir, maxBuffer: 8 * 1024 * 1024 });
+    if (pinned.status !== 0) { return false; }
+    const digest = (content: string) => createHash('sha256').update(content).digest('hex');
+    return digest(pinned.stdout) === digest(fs.readFileSync(filePath, 'utf8'));
+  } catch { return false; }
+}
+
+function latestSourceCommit(rootDir: string, filePath: string): string | null {
+  const result = git(['log', '-1', '--format=%H', '--', relative(rootDir, filePath)], { cwd: rootDir });
+  const commit = result.stdout.trim();
+  return result.status === 0 && /^[a-f0-9]{40,64}$/.test(commit)
+    && sourceMatchesCommit(rootDir, filePath, commit) ? commit : null;
+}
+
+/** A commit that recorded this completed artifact. */
+function historicalClosedAt(rootDir: string, filePath: string): string | null {
+  const sourcePath = relative(rootDir, filePath);
+  if (sourcePath.startsWith('backlog/tasks/')) {
+    // Some completed wave tasks never moved out of `tasks/`. The commit that
+    // first records each done transition supplies their closure date.
+    const history = git(['log', '--reverse', '--format=%H', '--', sourcePath], { cwd: rootDir });
+    if (history.status !== 0) { return null; }
+    let previous: string | null = null;
+    let closedAt: string | null = null;
+    for (const commit of history.stdout.trim().split('\n').filter(Boolean)) {
+      const snapshot = git(['show', `${commit}:${sourcePath}`], { cwd: rootDir });
+      if (snapshot.status !== 0) { continue; }
+      const status = parseTaskFrontmatterValue(snapshot.stdout, 'status')?.trim().toLowerCase() ?? null;
+      if (status === 'done' && previous !== 'done') {
+        const event = git(['show', '-s', '--format=%cI', commit], { cwd: rootDir });
+        if (event.status === 0 && !Number.isNaN(Date.parse(event.stdout.trim()))) {
+          closedAt = new Date(event.stdout.trim()).toISOString();
+        }
+      }
+      previous = status;
+    }
+    return closedAt;
+  }
+  if (!sourcePath.startsWith('backlog/completed/') && !sourcePath.startsWith('backlog/archive/')) { return null; }
+  const result = git(['log', '-1', '--format=%cI', '--', sourcePath], { cwd: rootDir });
+  const value = result.stdout.trim();
+  return result.status === 0 && !Number.isNaN(Date.parse(value)) ? new Date(value).toISOString() : null;
+}
+
 /** Mission-owned labels compared as a set; import order carries no meaning. */
 function sameLabels(left: readonly MissionLabel[], right: readonly MissionLabel[]): boolean {
   if (left.length !== right.length) { return false; }
   const seen = new Set<string>(left);
   return right.every(label => seen.has(label));
+}
+
+/** Older intake stored an entire frontmatter list as one label string. */
+function normalizedLegacyLabels(labels: readonly MissionLabel[]): readonly MissionLabel[] {
+  if (labels.length !== 1) { return labels; }
+  const value = String(labels[0]);
+  if (!value.startsWith('[') || !value.endsWith(']')) { return labels; }
+  const contents = value.slice(1, -1).trim();
+  try {
+    return missionLabels(contents ? contents.split(',').map(label => label.trim().replace(/^['"]|['"]$/g, '')) : []);
+  } catch { return labels; }
 }
 
 /**
@@ -299,8 +415,28 @@ export async function importLegacyMissions(
   const conflicts: string[] = [];
   const deferredRecords: string[] = [];
   const unresolvedDependencies: string[] = [];
+  const obsoleteDependencies: string[] = [];
   const unrepresentedFields: string[] = [];
   const imported: MissionId[] = [];
+  const commit = options.commit === undefined ? headCommit(options.rootDir) : options.commit;
+  const archiveName = 'missions/task-2521.06/artifacts/task-bodies.json';
+  const archiveFile = path.join(options.rootDir, archiveName);
+  const archiveRaw = fs.existsSync(archiveFile) ? fs.readFileSync(archiveFile, 'utf8') : null;
+  type BodyEntry = { id: string; url: string; sha256: string; content: string };
+  const archive = archiveRaw === null ? null : JSON.parse(archiveRaw) as { entries: BodyEntry[] };
+  if (archive && (git(['show', `HEAD:${archiveName}`], { cwd: options.rootDir, maxBuffer: 8 * 1024 * 1024 }).stdout !== archiveRaw
+    || !Array.isArray(archive.entries) || new Set(archive.entries.map(entry => entry.id)).size !== archive.entries.length
+    || archive.entries.some(entry => typeof entry.content !== 'string'
+      || createHash('sha256').update(entry.content).digest('hex') !== entry.sha256
+      || parseTaskFrontmatterValue(entry.content, 'id')?.trim().toUpperCase() !== entry.id))) {
+    throw new Error('Legacy task archive must be committed and verified before import');
+  }
+  const bodyUpdates = new Map<string, BodyEntry>();
+  const preserveBody = (id: string, url: string | null, sourcePath: string) => {
+    if (!archive || !url) { return; }
+    const content = fs.readFileSync(sourcePath, 'utf8');
+    bodyUpdates.set(id, { id, url, content, sha256: createHash('sha256').update(content).digest('hex') });
+  };
 
   // --- Discovery, grouped by legacy task id -------------------------------
   const bySourceId = new Map<string, LegacyRecord[]>();
@@ -313,6 +449,10 @@ export async function importLegacyMissions(
       if (scanned.has(filePath)) { continue; }
       scanned.add(filePath);
       discovered += 1;
+      if (options.commit === undefined && !sourceMatchesCommit(options.rootDir, filePath, commit)) {
+        conflicts.push(`${relative(options.rootDir, filePath)}: source differs from pinned Git commit`);
+        continue;
+      }
       const parsed = parseLegacyRecord(filePath);
       if (parsed === null) {
         conflicts.push(`${relative(options.rootDir, filePath)}: no task id in frontmatter`);
@@ -323,35 +463,33 @@ export async function importLegacyMissions(
     }
   }
 
-  const commit = options.commit === undefined ? headCommit(options.rootDir) : options.commit;
   /** Records this run leaves with a Mission, for the dependency pass below. */
   const withMission: DependencyCandidate[] = [];
   let importable = 0;
   let alreadyMaterialized = 0;
   let unrepresented = 0;
 
-  // `backlog.md` is an aggregate index, not a structured unique record, so it
-  // is reported as unrepresented migration input rather than mapped (mission
-  // scope: "treat backlog.md as migration input only when a structured, unique
-  // record can be mapped safely").
+  // `backlog.md` is an aggregate index without a unique task mapping. The
+  // audit verifies its committed external preservation artifact.
   const aggregate = path.join(options.rootDir, 'backlog.md');
   if (fs.existsSync(aggregate)) {
     discovered += 1;
-    unrepresented += 1;
-    unrepresentedFields.push(
-      'backlog.md: aggregate task material carries no structured unique record to map onto a Mission',
-    );
   }
 
   for (const [sourceId, copies] of [...bySourceId.entries()].sort(([a], [b]) => (a < b ? -1 : 1))) {
-    if (new Set(copies.map(copy => copy.representedMaterial)).size > 1) {
+    const currentCopies = copies.filter(copy => relative(options.rootDir, copy.sourcePath).startsWith('backlog/completed/'));
+    const selected = currentCopies.length === 1
+      && copies.every(copy => copy.title === currentCopies[0].title)
+      ? currentCopies[0]
+      : null;
+    if (new Set(copies.map(copy => copy.representedMaterial)).size > 1 && selected === null) {
       conflicts.push(
         `${sourceId}: ${copies.length} historical copies disagree on Mission-owned fields (`
         + `${copies.map(copy => relative(options.rootDir, copy.sourcePath)).join(', ')})`,
       );
       continue;
     }
-    const legacy = copies[0];
+    const legacy = selected ?? copies[0];
 
     let id: MissionId;
     try {
@@ -410,13 +548,19 @@ export async function importLegacyMissions(
       conflicts.push(`${sourceId}: mission store unavailable (${read.reason})`);
       continue;
     }
+    if (options.existingOnly && (read.kind === 'missing'
+      || (read.kind === 'found' && (read.mission.status === 'backlog'
+        || read.mission.externalTaskRef?.source !== LEGACY_TASK_SOURCE)))) { continue; }
     if (read.kind === 'found') {
       const existing = read.mission;
+      if (existing.repositoryId !== services.repositoryId) {
+        conflicts.push(`${sourceId}: Mission identity belongs to repository ${existing.repositoryId}, expected ${services.repositoryId}`);
+        continue;
+      }
       const existingTrace = existing.externalTaskRef ?? null;
-      if (existingTrace === null
-        || existingTrace.source !== trace.source
-        || existingTrace.id !== trace.id) {
-        conflicts.push(`${sourceId}: an existing Mission owns this identity with no trace to this material`);
+      if (existingTrace !== null
+        && (existingTrace.source !== trace.source || existingTrace.id !== trace.id)) {
+        conflicts.push(`${sourceId}: an existing Mission traces a different task source`);
         continue;
       }
       // Only fields the import itself sets are compared. `assignee` and
@@ -425,8 +569,72 @@ export async function importLegacyMissions(
       // source disagreement, and must never read as a conflict. `url` is a
       // locator: a record that merely moved from `tasks/` to `completed/` is
       // still the same accepted material.
-      if (existing.title !== legacy.title.trim() || !sameLabels(existing.labels, labels)) {
-        conflicts.push(`${sourceId}: existing Mission disagrees with the legacy source material`);
+      const recordedLabels = normalizedLegacyLabels(existing.labels);
+      const titleBelongsToAnotherTask = existingTrace === null && [...bySourceId.entries()]
+        .some(([otherId, records]) => otherId !== sourceId
+          && records.some(record => record.title?.trim() === existing.title));
+      const titleIsPlaceholder = existingTrace === null
+        && (existing.title.toLowerCase() === id
+          || existing.title.toLowerCase().startsWith(`${id}-`)
+          || existing.title.startsWith('<Title>')
+          || existing.title === '>-'
+          || existing.title === '|-'
+          || titleBelongsToAnotherTask
+          || (/^(['"]).*\1$/.test(existing.title)
+            && existing.title.slice(1, -1) === legacy.title.trim()));
+      const changed = [
+        ...(existing.title !== legacy.title.trim() && !titleIsPlaceholder ? ['title'] : []),
+      ];
+      if (changed.length > 0) {
+        conflicts.push(`${sourceId}: existing Mission disagrees with the legacy source material (${changed.join(', ')}; recorded title=${JSON.stringify(existing.title)}, legacy title=${JSON.stringify(legacy.title.trim())}, recorded labels=${JSON.stringify(existing.labels)}, legacy labels=${JSON.stringify(labels)})`);
+        continue;
+      }
+      // A task body may have changed on main since the first import. Keep the
+      // current canonical body pinned without replacing Mission-owned fields.
+      const pinned = existingTrace && options.commit === undefined
+        ? readLegacyTaskContent(existingTrace, options.rootDir) : null;
+      if (pinned?.error) {
+        conflicts.push(`${sourceId}: prior task body unavailable (${pinned.error})`);
+        continue;
+      }
+      const bodyChanged = pinned?.content !== undefined && pinned?.content !== null
+        && pinned.content !== fs.readFileSync(legacy.sourcePath, 'utf8');
+      const refreshedCommit = bodyChanged ? latestSourceCommit(options.rootDir, legacy.sourcePath) : null;
+      if (bodyChanged && !refreshedCommit) {
+        conflicts.push(`${sourceId}: changed task body has no matching committed source`);
+        continue;
+      }
+      const refreshedTrace = refreshedCommit
+        ? externalTaskRef(LEGACY_TASK_SOURCE, sourceId,
+          sourceLocator(relative(options.rootDir, legacy.sourcePath), refreshedCommit))
+        : null;
+      const repairedClosedAt = existing.status === 'done' && existing.closedAt === null
+        ? historicalClosedAt(options.rootDir, legacy.sourcePath)
+        : null;
+      if (existing.status === 'done' && existing.closedAt === null && repairedClosedAt === null) {
+        conflicts.push(`${sourceId}: completed Mission has no source-backed closure date`);
+        continue;
+      }
+      if (existingTrace === null || titleIsPlaceholder || !sameLabels(existing.labels, recordedLabels)
+        || repairedClosedAt || refreshedTrace) {
+        importable += 1;
+        if (dryRun) { continue; }
+        try {
+          await services.store.save({
+            ...existing,
+            title: titleIsPlaceholder ? legacy.title.trim() : existing.title,
+            labels: titleBelongsToAnotherTask ? labels : recordedLabels,
+            closedAt: repairedClosedAt ?? existing.closedAt,
+            externalTaskRef: refreshedTrace ?? existingTrace ?? trace,
+          } as import('../../domain/mission.js').Mission, read.version);
+        } catch (error) {
+          importable -= 1;
+          conflicts.push(`${sourceId}: source trace write refused (${error instanceof Error ? error.message : String(error)})`);
+          continue;
+        }
+        imported.push(id);
+        preserveBody(sourceId, (refreshedTrace ?? existingTrace ?? trace).url, legacy.sourcePath);
+        withMission.push({ sourceId, id, entries: legacy.dependencies, imported: true });
         continue;
       }
       alreadyMaterialized += 1;
@@ -434,12 +642,16 @@ export async function importLegacyMissions(
       continue;
     }
 
-    // Past `backlog`, the lane itself is the blocker: `refine` requires the
-    // recorded contract a legacy file cannot supply, and the later lanes also
-    // need checkpoint and review evidence. Report the record for TASK-2521.06
-    // instead of inventing what the lifecycle checks.
-    if (status !== 'backlog') {
+    // Historical records predate the current lifecycle. Preserve their lane
+    // without inventing a contract, checkpoint, or review. A completed record
+    // needs an actual source-backed closure time.
+    const closedAt = status === 'done' ? historicalClosedAt(options.rootDir, legacy.sourcePath) : null;
+    if (status !== 'backlog' && status !== 'refined' && status !== 'done') {
       deferredRecords.push(`${sourceId}: legacy lane "${status}" ${UNIMPORTABLE_LANES[status]}`);
+      continue;
+    }
+    if (status === 'done' && closedAt === null) {
+      deferredRecords.push(`${sourceId}: completed lane has no source-backed closure date`);
       continue;
     }
 
@@ -465,15 +677,77 @@ export async function importLegacyMissions(
       continue;
     }
 
+    if (status !== 'backlog') {
+      const loaded = await services.store.load(id);
+      if (loaded.kind !== 'found') {
+        conflicts.push(`${sourceId}: imported Mission unavailable for historical lane`);
+        continue;
+      }
+      try {
+        await services.store.save({
+          ...loaded.mission,
+          status,
+          closedAt,
+        } as import('../../domain/mission.js').Mission, loaded.version);
+      } catch (error) {
+        conflicts.push(`${sourceId}: historical lane write refused (${error instanceof Error ? error.message : String(error)})`);
+        continue;
+      }
+    }
+
     imported.push(id);
+    preserveBody(sourceId, trace.url, legacy.sourcePath);
     withMission.push({ sourceId, id, entries: legacy.dependencies, imported: true });
   }
 
-  await recordDependencies(services, withMission, dryRun, unresolvedDependencies, conflicts);
+  await recordDependencies(services, withMission, dryRun, unresolvedDependencies, obsoleteDependencies, conflicts);
+  const checkpointFilesImportable = await importLegacyCheckpoints(services, options, commit, conflicts);
+  importable += await importLegacyNel(services, options, commit, conflicts);
+  importable += await importLegacyReviews(services, options, commit, conflicts);
+  importable += await importLegacyReviewLaunches(services, options, commit, conflicts);
+  importable += await importLegacyMissionDocuments(services, options, commit, conflicts);
+
+  // Older Mission rows can be complete while missing the closure timestamp.
+  // Their durable transition event supplies the date; no task-file guess is
+  // needed and no new review/checkpoint evidence is invented.
+  if (services.store.loadByRepository && services.store.findTransitions) {
+    const missions = await services.store.loadByRepository(services.repositoryId);
+    for (const mission of missions) {
+      if (mission.status !== 'done' || mission.closedAt !== null || bySourceId.has(mission.id.toUpperCase())) { continue; }
+      const transitions = await services.store.findTransitions(mission.id);
+      const doneAt = [...transitions].reverse().find(event => event.toStatus === 'done' && event.occurredAt)?.occurredAt;
+      if (!doneAt || Number.isNaN(Date.parse(doneAt))) {
+        conflicts.push(`${mission.id}: completed Mission has no recorded closure event`);
+        continue;
+      }
+      importable += 1;
+      if (dryRun) { continue; }
+      const loaded = await services.store.load(mission.id);
+      if (loaded.kind !== 'found') {
+        importable -= 1;
+        conflicts.push(`${mission.id}: completed Mission unavailable for closure repair`);
+        continue;
+      }
+      try {
+        await services.store.save({ ...loaded.mission, status: 'done', closedAt: new Date(doneAt).toISOString() }, loaded.version);
+        imported.push(mission.id);
+      } catch (error) {
+        importable -= 1;
+        conflicts.push(`${mission.id}: closure repair refused (${error instanceof Error ? error.message : String(error)})`);
+      }
+    }
+  }
+
+  if (!dryRun && archive && bodyUpdates.size) {
+    const entries = new Map(archive.entries.map(entry => [entry.id, entry]));
+    for (const [id, entry] of bodyUpdates) { entries.set(id, entry); }
+    fs.writeFileSync(archiveFile, JSON.stringify({ ...archive, entries: [...entries.values()] }, null, 2) + '\n');
+  }
 
   return {
     discovered,
     importable,
+    checkpointFilesImportable,
     alreadyMaterialized,
     conflicting: conflicts.length,
     deferred: deferredRecords.length,
@@ -482,9 +756,280 @@ export async function importLegacyMissions(
     conflicts,
     deferredRecords,
     unresolvedDependencies,
+    obsoleteDependencies,
     unrepresentedFields,
     imported,
   };
+}
+
+/** Fill empty typed contract fields from committed historical documents. */
+async function importLegacyMissionDocuments(
+  services: MissionImportServices,
+  options: LegacyImportOptions,
+  commit: string | null,
+  conflicts: string[],
+): Promise<number> {
+  const directory = path.join(options.rootDir, 'missions');
+  if (!fs.existsSync(directory)) { return 0; }
+  let changed = 0;
+  for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
+    if (!entry.isDirectory()) { continue; }
+    const file = path.join(directory, entry.name, 'MISSION.md');
+    if (!fs.existsSync(file)) { continue; }
+    if (options.commit === undefined && !sourceMatchesCommit(options.rootDir, file, commit)) {
+      conflicts.push(`${relative(options.rootDir, file)}: source differs from pinned Git commit`);
+      continue;
+    }
+    let id: MissionId;
+    try { id = missionId(entry.name); } catch { continue; }
+    const read = await services.store.load(id);
+    if (read.kind !== 'found' || read.mission.repositoryId !== services.repositoryId) { continue; }
+    const parsed = parseLegacyMissionDocument(fs.readFileSync(file, 'utf8'));
+    const mission = read.mission;
+    const brief = mission.brief ?? parsed.brief ?? null;
+    const success = mission.successCriteria?.length ? mission.successCriteria : (parsed.successCriteria ?? mission.successCriteria ?? []);
+    const gates = mission.declaredGates?.length ? mission.declaredGates : (parsed.declaredGates ?? mission.declaredGates ?? []);
+    const predicted = mission.predictedNelBucket ?? parsed.predictedNelBucket ?? null;
+    const reproduction = mission.reproductionTest ?? parsed.reproductionTest ?? null;
+    const checkpoints = [...mission.checkpoints];
+    for (const planned of parsed.checkpoints) {
+      if (checkpoints.some(cp => cp.name === planned.name)) { continue; }
+      checkpoints.push({ missionId: id, name: planned.name, firstLine: planned.description,
+        goalCheck: [], nextActionText: '' });
+    }
+    checkpoints.sort((a, b) => Number(a.name.slice(3)) - Number(b.name.slice(3)));
+    if (brief === (mission.brief ?? null) && success === mission.successCriteria
+      && gates === mission.declaredGates && predicted === (mission.predictedNelBucket ?? null)
+      && reproduction === (mission.reproductionTest ?? null)
+      && checkpoints.length === mission.checkpoints.length) { continue; }
+    changed += 1;
+    if (options.dryRun) { continue; }
+    try {
+      await services.store.save({ ...mission, brief, successCriteria: success,
+        declaredGates: gates, predictedNelBucket: predicted, reproductionTest: reproduction,
+        checkpoints }, read.version);
+    } catch (error) {
+      changed -= 1;
+      conflicts.push(`${id}: historical Mission contract write refused (${error instanceof Error ? error.message : String(error)})`);
+    }
+  }
+  return changed;
+}
+
+/** Retain launch fingerprints omitted by older Review imports. */
+async function importLegacyReviewLaunches(
+  services: MissionImportServices,
+  options: LegacyImportOptions,
+  commit: string | null,
+  conflicts: string[],
+): Promise<number> {
+  const root = path.join(options.rootDir, 'missions');
+  if (!fs.existsSync(root)) { return 0; }
+  let count = 0;
+  for (const entry of fs.readdirSync(root, { withFileTypes: true }).filter(item => item.isDirectory())) {
+    const file = path.join(root, entry.name, 'review-state.json');
+    if (!fs.existsSync(file)) { continue; }
+    if (options.commit === undefined && !sourceMatchesCommit(options.rootDir, file, commit)) {
+      conflicts.push(`${relative(options.rootDir, file)}: review state differs from pinned Git commit`); continue;
+    }
+    let state: { metadata?: { recordedStageLaunches?: unknown } };
+    try { state = JSON.parse(fs.readFileSync(file, 'utf8')); }
+    catch { conflicts.push(`${relative(options.rootDir, file)}: review state is invalid JSON`); continue; }
+    const launches = stageLaunchWindowsFrom(state.metadata?.recordedStageLaunches);
+    if (launches.length === 0) { continue; }
+    const read = await services.store.load(missionId(entry.name));
+    if (read.kind !== 'found' || !read.mission.review || read.mission.repositoryId !== services.repositoryId) {
+      conflicts.push(`${relative(options.rootDir, file)}: owning Review is missing`); continue;
+    }
+    if (read.mission.review.stageLaunches.length > 0) { continue; }
+    count += 1;
+    if (options.dryRun) { continue; }
+    try {
+      await services.store.save({ ...read.mission,
+        review: { ...read.mission.review, stageLaunches: launches },
+      }, read.version);
+    } catch (error) {
+      count -= 1;
+      conflicts.push(`${relative(options.rootDir, file)}: launch history import refused (${error instanceof Error ? error.message : String(error)})`);
+    }
+  }
+  return count;
+}
+
+/** Reuse the existing explicit review backfill, with source pinning for this one-shot import. */
+async function importLegacyReviews(
+  services: MissionImportServices,
+  options: LegacyImportOptions,
+  commit: string | null,
+  conflicts: string[],
+): Promise<number> {
+  const root = path.join(options.rootDir, 'missions');
+  if (!fs.existsSync(root)) { return 0; }
+  let count = 0;
+  for (const entry of fs.readdirSync(root, { withFileTypes: true }).filter(item => item.isDirectory())) {
+    const dir = path.join(root, entry.name);
+    const state = path.join(dir, 'review-state.json');
+    const events = path.join(dir, 'review-events');
+    const sources = [
+      ...(fs.existsSync(state) ? [state] : []),
+      ...(fs.existsSync(events) ? fs.readdirSync(events).map(file => path.join(events, file)) : []),
+    ];
+    if (sources.length === 0) { continue; }
+    const changed = options.commit === undefined && sources.find(file => !sourceMatchesCommit(options.rootDir, file, commit));
+    if (changed) { conflicts.push(`${relative(options.rootDir, changed)}: review source differs from pinned Git commit`); continue; }
+    const result = await backfillReviewFromLegacyState(entry.name, options.rootDir, {
+      apply: !options.dryRun,
+      missionStore: services.store,
+    });
+    if (result.outcome === 'failed') { conflicts.push(`${entry.name}: review backfill refused (${result.diagnostic})`); }
+    else if (['backfilled', 'events-backfilled', 'would-backfill', 'would-backfill-events'].includes(result.outcome)) {
+      count += 1;
+    }
+  }
+  return count;
+}
+
+/** Restore measured NEL from the historical handoff export without changing current measurements. */
+async function importLegacyNel(
+  services: MissionImportServices,
+  options: LegacyImportOptions,
+  commit: string | null,
+  conflicts: string[],
+): Promise<number> {
+  const root = path.join(options.rootDir, 'missions');
+  if (!fs.existsSync(root)) { return 0; }
+  let count = 0;
+  for (const entry of fs.readdirSync(root, { withFileTypes: true }).filter(item => item.isDirectory())) {
+    const file = path.join(root, entry.name, 'nel-record.json');
+    if (!fs.existsSync(file)) { continue; }
+    const name = relative(options.rootDir, file);
+    if (options.commit === undefined && !sourceMatchesCommit(options.rootDir, file, commit)) {
+      conflicts.push(`${name}: NEL source differs from pinned Git commit`);
+      continue;
+    }
+    let record: { slug?: unknown; actualNel?: unknown; predictedBucket?: unknown; actualBucket?: unknown };
+    try { record = JSON.parse(fs.readFileSync(file, 'utf8')); }
+    catch { conflicts.push(`${name}: NEL record is invalid JSON`); continue; }
+    if (record.slug !== entry.name || !Number.isInteger(record.actualNel)
+      || Number(record.actualNel) < 0
+      || classifyNelBucket(Number(record.actualNel)).label !== record.actualBucket) {
+      conflicts.push(`${name}: NEL record has invalid identity or measurement`);
+      continue;
+    }
+    const predicted = record.predictedBucket === 'Unknown' ? null : record.predictedBucket;
+    if (predicted !== null && !['Small', 'Medium', 'Large'].includes(String(predicted))) {
+      conflicts.push(`${name}: NEL prediction is invalid`);
+      continue;
+    }
+    let id: MissionId;
+    try { id = missionId(entry.name); }
+    catch { conflicts.push(`${name}: invalid Mission identity`); continue; }
+    const read = await services.store.load(id);
+    if (read.kind !== 'found' || read.mission.repositoryId !== services.repositoryId) {
+      conflicts.push(`${name}: owning Mission is missing`);
+      continue;
+    }
+    const mission = read.mission;
+    if ((mission.netEngineeringLines !== null && mission.netEngineeringLines !== record.actualNel)
+      || (predicted !== null && mission.predictedNelBucket !== null && mission.predictedNelBucket !== predicted)) {
+      conflicts.push(`${name}: Mission measurement disagrees with legacy NEL record`);
+      continue;
+    }
+    if (mission.netEngineeringLines !== null && (predicted === null || mission.predictedNelBucket !== null)) { continue; }
+    count += 1;
+    if (options.dryRun) { continue; }
+    try {
+      await services.store.save({ ...mission,
+        netEngineeringLines: record.actualNel as number,
+        predictedNelBucket: (predicted as NelBucketLabel | null) ?? mission.predictedNelBucket,
+      }, read.version);
+    } catch (error) {
+      count -= 1;
+      conflicts.push(`${name}: NEL import refused (${error instanceof Error ? error.message : String(error)})`);
+    }
+  }
+  return count;
+}
+
+async function importLegacyCheckpoints(
+  services: MissionImportServices,
+  options: LegacyImportOptions,
+  commit: string | null,
+  conflicts: string[],
+): Promise<number> {
+  const reconciliation = options.reconcileCheckpoints
+    ? loadCheckpointReconciliation(options.rootDir, commit) : null;
+  const visited = new Set<string>();
+  const root = path.join(options.rootDir, 'missions');
+  if (!fs.existsSync(root)) { return 0; }
+  let count = 0;
+  for (const entry of fs.readdirSync(root, { withFileTypes: true }).filter(item => item.isDirectory())) {
+    let id: MissionId;
+    try { id = missionId(entry.name); } catch { continue; }
+    const dir = path.join(root, entry.name);
+    const files = fs.readdirSync(dir).filter(name => /^CP-\d+\.md$/.test(name)).sort(compareCodeUnits);
+    if (files.length === 0) { continue; }
+    const read = await services.store.load(id);
+    if (read.kind !== 'found' || read.mission.repositoryId !== services.repositoryId) {
+      conflicts.push(`${id}: checkpoint files have no Mission in repository ${services.repositoryId}`);
+      continue;
+    }
+    const checkpoints = [...read.mission.checkpoints];
+    let changed = false;
+    for (const file of files) {
+      const source = path.join(dir, file);
+      const sourcePath = relative(options.rootDir, source).split(path.sep).join('/');
+      const approved = reconciliation?.get(sourcePath);
+      if (approved) { visited.add(sourcePath); }
+      if (options.commit === undefined && !sourceMatchesCommit(options.rootDir, source, commit)) {
+        conflicts.push(`${relative(options.rootDir, source)}: checkpoint source differs from pinned Git commit`);
+        continue;
+      }
+      let parsed;
+      let content: string;
+      try {
+        content = fs.readFileSync(source, 'utf8');
+        parsed = parseCheckpointDocument(id, file, content);
+      }
+      catch (error) {
+        conflicts.push(`${relative(options.rootDir, source)}: checkpoint parse refused (${error instanceof Error ? error.message : String(error)})`);
+        continue;
+      }
+      const index = checkpoints.findIndex(checkpoint => checkpoint.name === parsed.name);
+      const existing = index < 0 ? null : checkpoints[index];
+      if (hasApprovedCheckpointException(options.rootDir, read.mission, sourcePath, content)) { continue; }
+      let merged = existing ? reconcileLegacyCheckpoint(existing, parsed) : parsed;
+      if (approved) {
+        const digest = createHash('sha256').update(content).digest('hex');
+        if (digest !== approved.sha256 || !existing) {
+          conflicts.push(`${sourcePath}: reconciliation artifact source or recorded checkpoint is missing`);
+          continue;
+        }
+        if (JSON.stringify(existing) === JSON.stringify(parsed)) { continue; }
+        if (JSON.stringify(existing) !== JSON.stringify(approved.recorded)) {
+          conflicts.push(`${sourcePath}: recorded checkpoint differs from committed reconciliation artifact`);
+          continue;
+        }
+        merged = parsed;
+      }
+      if (!merged) {
+        conflicts.push(`${relative(options.rootDir, source)}: recorded checkpoint disagrees with source`);
+        continue;
+      }
+      if (existing && JSON.stringify(existing) === JSON.stringify(merged)) { continue; }
+      if (index < 0) { checkpoints.push(merged); }
+      else { checkpoints[index] = merged; }
+      changed = true;
+      count += 1;
+    }
+    if (!changed || options.dryRun) { continue; }
+    try { await services.store.save({ ...read.mission, checkpoints }, read.version); }
+    catch (error) { conflicts.push(`${id}: checkpoint import refused (${error instanceof Error ? error.message : String(error)})`); }
+  }
+  for (const file of reconciliation?.keys() ?? []) {
+    if (!visited.has(file)) { conflicts.push(`${file}: reconciliation artifact entry was not discovered`); }
+  }
+  return count;
 }
 
 /** One record the dependency pass may write, and how it got its Mission. */
@@ -522,6 +1067,7 @@ async function recordDependencies(
   records: readonly DependencyCandidate[],
   dryRun: boolean,
   unresolved: string[],
+  obsolete: string[],
   conflicts: string[],
 ): Promise<void> {
   const importedNow = new Set(records.filter((record) => record.imported).map((record) => record.id));
@@ -532,7 +1078,11 @@ async function recordDependencies(
     for (const entry of record.entries) {
       const candidate = await resolveDependency(services, entry, record.id);
       if (candidate === null) {
-        unresolved.push(`${record.sourceId}: dependency ${entry} resolves to no Mission`);
+        if (OBSOLETE_LEGACY_DEPENDENCIES.has(entry.toUpperCase())) {
+          obsolete.push(`${record.sourceId}: dependency ${entry} is obsolete; retained in pinned task body`);
+        } else {
+          unresolved.push(`${record.sourceId}: dependency ${entry} resolves to no Mission`);
+        }
         continue;
       }
       resolved.add(candidate);

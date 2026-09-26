@@ -7,6 +7,7 @@ import os from 'node:os';
 import path from 'node:path';
 import childProcess from 'node:child_process';
 import { HandoffCommandUseCase } from '../src/application/handoff-command-use-case.js';
+import { findUnverifiableGoalCheckRow } from '../src/application/static-evidence.js';
 import { createHandoffCommand } from '../src/interfaces/cli/handoff.js';
 import { mockModule, installModuleMocks } from './lib/module-mock.js';
 import { stubMissionServices } from './helpers/stub-mission-services.js';
@@ -27,12 +28,20 @@ const { mock } = test;
 test.afterEach(() => mock.restoreAll());
 
 test('evidence shell commands require an existing file argument', () => {
-  const rootDir = path.join(import.meta.dirname, '..');
+  const rootDir = '/repo';
+  const fileSystem = {
+    existsSync: target => target === '/repo/package.json',
+    readText: () => { throw new Error('Evidence command validation must not read repository files'); },
+    listEntries: () => [],
+    listNames: () => [],
+  };
   const bareCommandRow = '| Criterion | `cat` | PASS |';
   const fileCommandRow = '| Criterion | `cat package.json` | PASS |';
 
-  assert.equal(_findUnverifiableGoalCheckRow([bareCommandRow], rootDir), bareCommandRow);
-  assert.equal(_findUnverifiableGoalCheckRow([fileCommandRow], rootDir), null);
+  assert.equal(findUnverifiableGoalCheckRow(fileSystem, [bareCommandRow], rootDir), bareCommandRow);
+  assert.equal(findUnverifiableGoalCheckRow(fileSystem, [fileCommandRow], rootDir), null);
+  const missingFileRow = '| Criterion | `cat missing.json` | PASS |';
+  assert.equal(findUnverifiableGoalCheckRow(fileSystem, [missingFileRow], rootDir), missingFileRow);
 });
 
 test('evidence accepts git commands inside escaped-backtick markdown cells', () => {
@@ -448,7 +457,7 @@ test('performHandoff fails when no checkpoint documents exist', async () => {
   fs.rmSync(missionMdPath, { force: true });
 });
 
-test('performHandoff auto-remediates missing checkpoints by writing CP-1.md but still fails the stronger evidence check', async () => {
+test('legacy handoff fails closed without synthesizing or committing checkpoint evidence', async () => {
   const slug = 'task-1228-autoremediate';
   const worktree = fs.mkdtempSync(path.join('/tmp', 'handoff-autoremediate-'));
   const missionDir = path.join(worktree, 'docs/missions/2026', slug);
@@ -487,17 +496,11 @@ test('performHandoff auto-remediates missing checkpoints by writing CP-1.md but 
     const result = await performHandoff(slug, { worktree, skipGate: true, missionServicesFn: stubMissionServices() });
 
     assert.strictEqual(result.ok, false);
-    assert.match(result.error, /no evidence rows that cite a verifiable reference/);
+    assert.match(result.error, /No checkpoint documents found/);
 
-    // CP-1.md was actually written with the required structure.
-    assert.ok(fs.existsSync(autoCpPath), 'CP-1.md should be written to the mission directory');
-    const content = fs.readFileSync(autoCpPath, 'utf8');
-    assert.match(content, /^# CP-1:/m);
-    assert.match(content, /^## Goal Check\s*$/m);
-    assert.match(content, /\| .+ \| .+ \| .+ \|/);
-
-    // The generated checkpoint was committed during remediation.
-    assert.ok(gitCalls.some(args => args.includes('commit') && args.some(a => a.includes('auto-generate CP-1.md'))));
+    assert.equal(fs.existsSync(autoCpPath), false, 'Handoff must not write checkpoint evidence');
+    assert.equal(gitCalls.some(args => args.includes('commit')), false, 'Missing evidence must not trigger a commit');
+    assert.equal(findCheckpointsCalls, 1);
   } finally {
     fs.rmSync(worktree, { recursive: true, force: true });
   }
@@ -2149,28 +2152,4 @@ test('performHandoff relaunch prompt lists all missing artifact types', async (t
   } finally {
     fs.rmSync(worktree, { recursive: true, force: true });
   }
-});
-
-// ── task-2215: auto-generated checkpoint must pass evidence validation ────────
-
-test('buildAutoCheckpointContent produces verifiable evidence rows', () => {
-  const rootDir = path.join(import.meta.dirname, '..');
-
-  const content = handoffModule._buildAutoCheckpointContent('task-2215');
-  assert.match(content, /^## Goal Check$/m, 'template must contain the ## Goal Check heading');
-  assert.ok(content.includes('buildAutoCheckpointContent'),
-    'evidence must cite the auto-remediation symbol, not the removed handoff.js');
-  assert.ok(!content.includes('handoff.js auto-remediation'),
-    'template must not cite the non-existent handoff.js');
-  assert.doesNotMatch(content, /\.ts:\d+/,
-    'evidence must not pin a line number: it goes stale on any unrelated edit to the cited file');
-
-  const goalCheckMatch = content.match(/^## Goal Check(?: Table)?\s*$/m);
-  const afterHeader = content.slice((goalCheckMatch.index ?? 0) + goalCheckMatch[0].length);
-  const evidenceRows = handoffModule._collectGoalCheckEvidenceRows(afterHeader);
-  assert.ok(evidenceRows.length >= 2, 'template must produce at least two evidence rows');
-
-  const offendingRow = handoffModule._findUnverifiableGoalCheckRow(evidenceRows, rootDir);
-  assert.equal(offendingRow, null,
-    `every evidence row must cite a verifiable reference; offending row: ${offendingRow}`);
 });

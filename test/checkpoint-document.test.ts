@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { parseCheckpointDocument, renderCheckpointDocument } from '../src/adapters/backlog/checkpoint-document.js';
+import { parseCheckpointDocument, reconcileLegacyCheckpoint, renderCheckpointDocument } from '../src/adapters/backlog/checkpoint-document.js';
 import type { MissionId } from '../src/domain/mission.js';
 const missionId = 'task-2525.04' as unknown as MissionId;
 
@@ -86,6 +86,11 @@ test('parseCheckpointDocument throws for a non-CP-named document', () => {
   assert.throws(() => parseCheckpointDocument(missionId, 'notes.md', DOC), /not named CP-<n>\.md/);
 });
 
+test('parseCheckpointDocument reads a multiline Next action section', () => {
+  const parsed = parseCheckpointDocument(missionId, 'CP-1.md', '# CP-1: Check\n\n## Next action\n\nReview the change.\nThen hand off.\n');
+  assert.equal(parsed.nextActionText, 'Review the change.\nThen hand off.');
+});
+
 test('parseCheckpointDocument collects the last Next action line when several are present', () => {
   const content = [
     '# CP-6',
@@ -110,4 +115,29 @@ test('renderCheckpointDocument round-trips parsed data through the same shape', 
 
   assert.deepEqual(reparsed.goalCheck, parsed.goalCheck);
   assert.equal(reparsed.nextActionText, parsed.nextActionText);
+});
+
+test('legacy checkpoint reconciliation fills missing evidence and rejects changed evidence', () => {
+  const source = parseCheckpointDocument(missionId, 'CP-2.md', DOC);
+  const empty = { ...source, goalCheck: [], nextActionText: '' };
+  assert.deepEqual(reconcileLegacyCheckpoint(empty, source)?.goalCheck, source.goalCheck);
+  assert.deepEqual(reconcileLegacyCheckpoint(source, empty), source);
+  assert.equal(reconcileLegacyCheckpoint(source, {
+    ...source, goalCheck: [{ criterion: source.goalCheck[0].criterion, evidence: 'different' }],
+  }), null);
+});
+
+test('legacy checkpoint reconciliation completes an earlier truncated next action', () => {
+  const source = parseCheckpointDocument(missionId, 'CP-1.md', '# CP-1: Check\n\n## Next action\n\nReview.\nThen hand off.\n');
+  const truncated = { ...source, nextActionText: 'Review.' };
+  assert.equal(reconcileLegacyCheckpoint(truncated, source)?.nextActionText, 'Review.\nThen hand off.');
+  assert.equal(reconcileLegacyCheckpoint({ ...source, nextActionText: 'Different.' }, source), null);
+});
+
+test('legacy checkpoint reconciliation replaces only a synthetic handoff action', () => {
+  const source = parseCheckpointDocument(missionId, 'CP-2.md', DOC);
+  const synthetic = { ...source, nextActionText: 'Review the handed-off change.' };
+  assert.equal(reconcileLegacyCheckpoint(synthetic, source)?.nextActionText, source.nextActionText);
+  assert.equal(reconcileLegacyCheckpoint({ ...synthetic, goalCheck: [] }, source), null);
+  assert.equal(reconcileLegacyCheckpoint({ ...synthetic, goalCheck: [{ criterion: 'Other', evidence: 'Other' }] }, source), null);
 });

@@ -162,6 +162,8 @@ const expectedIntegrationFiles = [
   // checkout, so it crosses the git boundary and runs only in integration.
   'task-2521.04-legacy-trace-commit.integration.test.ts',
   'task-2521.04-mission-dependencies.integration.test.ts',
+  'task-2521.06-audit.integration.test.ts',
+  'task-2521.06-legacy-task-content.test.ts',
   'task-2533-squash-payload-pathspec-quotes.test.ts',
   // TASK-2537: seeds throwaway Git repositories to land a draft-authored task
   // file, so it crosses the git boundary and runs in the integration layer.

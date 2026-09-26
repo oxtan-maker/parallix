@@ -20,6 +20,7 @@ const DIRECT_JSON_EXCEPTIONS = new Map([
   ['src/adapters/verification/temp-root-registry.ts:manifestPath', 'coverage-manifest'],
   ['src/adapters/review/setup-review-config.ts:configPath', 'workflow-config'],
   ['src/adapters/agents/qwen.ts:targetSettings', 'qwen-settings'],
+  ['src/adapters/backlog/legacy-mission-import.ts:archiveFile', 'legacy-task-body-archive'],
 ]);
 
 function directJsonWrites(file, source) {

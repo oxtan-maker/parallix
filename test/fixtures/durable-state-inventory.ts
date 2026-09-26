@@ -82,13 +82,13 @@ export type ADR0053ConceptName =
  */
 export const ADR0053_PERSISTENCE_INVENTORY: readonly ADR0053BoundaryEntry[] = [
   // -----------------------------------------------------------------------
-  // Mission — authoritative domain state (target-repository, file-backed)
+  // Mission — authoritative domain state, plus explicit legacy readers
   // -----------------------------------------------------------------------
   {
     id: 'mission-read-backlog',
     concept: 'Mission',
     pathType: 'default',
-    fileLocation: 'src/adapters/backlog/concrete-mission-read-adapter.ts',
+    fileLocation: 'src/composition/board-projection.ts',
     operation: 'read',
     classification: 'database-owned-domain-state',
     cutoverTask: null,
@@ -586,6 +586,33 @@ export const ADR0053_PERSISTENCE_INVENTORY: readonly ADR0053BoundaryEntry[] = [
     cutoverTask: null,
   },
   {
+    id: 'task-intake-audit-legacy-missions',
+    concept: 'TaskIntake',
+    pathType: 'default',
+    fileLocation: 'src/adapters/backlog/legacy-mission-audit.ts',
+    operation: 'read',
+    classification: 'external-fact-or-intake',
+    cutoverTask: null,
+  },
+  {
+    id: 'task-intake-read-retained-body',
+    concept: 'TaskIntake',
+    pathType: 'default',
+    fileLocation: 'src/adapters/backlog/legacy-task-content.ts',
+    operation: 'read',
+    classification: 'external-fact-or-intake',
+    cutoverTask: null,
+  },
+  {
+    id: 'mission-read-retained-history',
+    concept: 'LargeArtifacts',
+    pathType: 'default',
+    fileLocation: 'src/adapters/backlog/legacy-mission-content.ts',
+    operation: 'read',
+    classification: 'generated-artifact',
+    cutoverTask: null,
+  },
+  {
     id: 'task-intake-read-file-io',
     concept: 'TaskIntake',
     pathType: 'default',
@@ -618,6 +645,15 @@ export const ADR0053_PERSISTENCE_INVENTORY: readonly ADR0053BoundaryEntry[] = [
     pathType: 'default',
     fileLocation: 'src/adapters/backlog/task-metadata.ts',
     operation: 'write',
+    classification: 'external-fact-or-intake',
+    cutoverTask: null,
+  },
+  {
+    id: 'task-intake-read-uningested-inputs',
+    concept: 'TaskIntake',
+    pathType: 'default',
+    fileLocation: 'src/adapters/backlog/backlog-input-reader.ts',
+    operation: 'read',
     classification: 'external-fact-or-intake',
     cutoverTask: null,
   },
@@ -980,6 +1016,13 @@ export interface RetiredWorkflowPathWriterEntry {
  */
 export const RETIRED_WORKFLOW_PATH_WRITERS: readonly RetiredWorkflowPathWriterEntry[] = [
   {
+    id: 'legacy-import-task-body-preservation',
+    fileLocation: 'src/adapters/backlog/legacy-mission-import.ts',
+    pathPatterns: ['writeFileSync\\(archiveFile,'],
+    classification: 'explicit-one-way-export',
+    authority: 'ADR 0053 — explicit migration preserves commit-pinned legacy input outside retired workflow paths; no normal command invokes this writer.',
+  },
+  {
     id: 'retired-writer-backlog-transitions',
     fileLocation: 'src/adapters/backlog/task-transitions.ts',
     pathPatterns: ['taskFilePath'],
@@ -1024,11 +1067,11 @@ export const RETIRED_WORKFLOW_PATH_WRITERS: readonly RetiredWorkflowPathWriterEn
     authority: 'ADR 0051/configuration — workflow.config.json is operator configuration; the backlog/ layout string is documentation, not persistence.',
   },
   {
-    id: 'retired-writer-handoff-checkpoint',
+    id: 'retained-writer-handoff-backlog-summary',
     fileLocation: 'src/application/handoff-command-use-case.ts',
-    pathPatterns: ['CP-1.md', 'MISSION.md', 'backlog/tasks/'],
+    pathPatterns: ['writeText\\(taskFile,'],
     classification: 'closeout-representation',
-    authority: 'ADR 0053 transaction rule 4 + ADR 0037 — auto checkpoint and the backlog task fallback summary are closeout representation and external-task closeout.',
+    authority: 'ADR 0037 — fallback summaries update the retained external Backlog view; handoff never generates checkpoint evidence.',
   },
   {
     id: 'retired-writer-handoff-command-adapter',
@@ -1230,5 +1273,12 @@ export const MACHINE_WRITTEN_PATH_INVENTORY: readonly MachineWrittenPathInventor
     writer: 'src/adapters/agents/qwen.ts#qwenSettingsPath',
     classification: 'cache-scratch-data',
     persistencePolicy: 'Agent-local settings file; documented direct-write exception.',
+  },
+  {
+    id: 'legacy-task-body-archive',
+    pathPattern: 'missions/task-2521.06/artifacts/task-bodies.json',
+    writer: 'src/adapters/backlog/legacy-mission-import.ts#importLegacyMissions',
+    classification: 'durable-state',
+    persistencePolicy: 'Commit-pinned legacy task-body archive; documented direct-write exception.',
   },
 ] as const;

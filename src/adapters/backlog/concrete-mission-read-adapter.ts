@@ -115,8 +115,8 @@ export interface ConcreteMissionReadAdapterOptions {
  * files and mission worktrees, then materialises domain `Mission` objects
  * through `materializeBacklogMission()`.
  *
- * This is the single materialization path: every domain `Mission` on the board
- * comes from this adapter (or a test double implementing the same port).
+ * Legacy compatibility materializer. Production board and status composition
+ * use Mission state and the separate uningested Backlog input reader.
  */
 export class ConcreteMissionReadAdapter implements MissionReadAdapter {
   private readonly rootDir: string;

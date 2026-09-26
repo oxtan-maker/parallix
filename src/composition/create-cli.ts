@@ -54,6 +54,7 @@ import { recordStageStatsSafe, stageLaunchSinceMs } from '../adapters/review/rev
 import { resolveAgentModel } from '../adapters/config/product-config.js';
 import { createImportLegacyCommand } from '../interfaces/cli/import-legacy.js';
 import { importLegacyMissions } from '../adapters/backlog/legacy-mission-import.js';
+import { auditLegacyFiles } from '../adapters/backlog/legacy-mission-audit.js';
 import { createReviewCommand } from '../interfaces/cli/review.js';
 
 import { createStatusCommand } from '../interfaces/cli/status.js';
@@ -294,16 +295,25 @@ function createCommandRegistry(rootDir: string): Record<string, Command> {
       if (!services.mission) { throw new Error('mission services are unavailable'); }
       const mission = services.mission;
       return createImportLegacyCommand(
-        ({ dryRun }) => importLegacyMissions(
+        ({ dryRun, reconcileCheckpoints, existingOnly }) => importLegacyMissions(
           {
             repositoryId: mission.repositoryId,
             store: mission.store,
             intake: mission.intake,
             dependencies: mission.brief,
           },
-          { rootDir, dryRun },
+          { rootDir, dryRun, reconcileCheckpoints, existingOnly },
         ),
       )(args);
+    }),
+    'audit-legacy': (args) => withGraph(async services => {
+      if (args.length > 1 || (args.length === 1 && args[0] !== '--json')) {
+        throw new Error('Usage: px audit-legacy [--json]');
+      }
+      if (!services.mission) { throw new Error('mission services are unavailable'); }
+      const report = await auditLegacyFiles(rootDir, services.mission.repositoryId, services.mission.store);
+      console.log(args.includes('--json') ? JSON.stringify(report, null, 2) : JSON.stringify({ verdict: report.verdict, counters: report.counters }, null, 2));
+      if (report.verdict !== 'GO') { throw new Error('Legacy audit NO-GO'); }
     }),
     'verify-env': startupPreflight,
     rebase: createRebaseCommand((args, options) => withMissionFactories(missionServicesFn => rebase(args, { ...options, missionServicesFn }))),

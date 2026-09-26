@@ -98,7 +98,7 @@ describe('imported Missions use the existing board and lifecycle path', () => {
       { name: 'b.md', body: frontmatter({ id: 'TASK-9102', title: 'Second record', status: 'backlog' }) },
     ]);
     const store = new RecordingStore();
-    await importLegacyMissions(services(store), { rootDir: root });
+    await importLegacyMissions(services(store), { rootDir: root, commit: '0123456789abcdef0123456789abcdef01234567' });
 
     const cards = [...store.missions.values()]
       .map(held => projectMissionCard(held.mission, NO_FACTS));
@@ -123,7 +123,7 @@ describe('imported Missions use the existing board and lifecycle path', () => {
       { name: 'a.md', body: frontmatter({ id: 'TASK-9104', title: 'Open record', status: 'backlog' }) },
     ]);
     const store = new RecordingStore();
-    await importLegacyMissions(services(store), { rootDir: root });
+    await importLegacyMissions(services(store), { rootDir: root, commit: '0123456789abcdef0123456789abcdef01234567' });
 
     const card = projectMissionCard(store.missions.get('task-9104')!.mission, NO_FACTS);
     assert.equal(card.lane, 'backlog');
@@ -135,7 +135,7 @@ describe('imported Missions use the existing board and lifecycle path', () => {
       { name: 'a.md', body: frontmatter({ id: 'TASK-9105', title: 'Open record', status: 'open' }) },
     ]);
     const store = new RecordingStore();
-    await importLegacyMissions(services(store), { rootDir: root });
+    await importLegacyMissions(services(store), { rootDir: root, commit: '0123456789abcdef0123456789abcdef01234567' });
 
     // The imported Mission is ordinary backlog material: the same lifecycle
     // service the normal path uses refines it, with no importer involvement.

@@ -66,6 +66,8 @@ export interface StatusMissionData {
   readonly missionStatus?: string;
   /** Backlog status string. */
   readonly backlogStatus: string;
+  /** The Mission aggregate's closure timestamp, including historical imports. */
+  readonly closedAt?: string | null;
   /** Last checkpoint name (e.g. CP-2.md). */
   readonly checkpoint?: string;
   /** Last checkpoint description. */
@@ -121,6 +123,15 @@ export interface StatusMissionData {
   readonly assignee?: string | null;
   /** Reference to the external material this Mission was accepted from. */
   readonly externalTaskRef?: { readonly source: string; readonly id: string; readonly url: string | null } | null;
+  /** Full legacy task material recovered from the pinned Git artifact, when present. */
+  readonly legacyTaskContent?: string | null;
+  readonly legacyTaskError?: string | null;
+  /** Full historical mission document; current typed fields above remain authoritative. */
+  readonly legacyMissionContent?: string | null;
+  readonly legacyMissionError?: string | null;
+  /** Closed-mission review snapshot that differs from the current Review aggregate. */
+  readonly legacyReviewStateContent?: string | null;
+  readonly legacyReviewStateError?: string | null;
 }
 
 /** One Goal Check evidence row as `px status` reports it. */

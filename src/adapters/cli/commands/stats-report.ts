@@ -126,6 +126,10 @@ function renderWeeklyStatsReport(rows, options = {}) {
   const rootDir = options.rootDir || null;
   const windows = buildWeeklyWindows(/** @type{Date} */(typeof today === 'string' ? new Date(`${today}T00:00:00Z`) : today));
   const missionFlow = options.missionFlow ?? null;
+  const completedMissionOwners = new Map((missionFlow || []).map(outcome => [
+    `${String(outcome.repo).trim()}::${String(outcome.mission).trim().toLowerCase()}`,
+    outcome.implementer ?? null,
+  ]));
   const completedMissionKeys = window => new Set((missionFlow || [])
     .filter(outcome => String(outcome.closedAt).slice(0, 10) >= window.start.toISOString().slice(0, 10)
       && String(outcome.closedAt).slice(0, 10) <= window.end.toISOString().slice(0, 10))
@@ -135,8 +139,8 @@ function renderWeeklyStatsReport(rows, options = {}) {
   ));
   const currentMissionStats = summarizeMissionWindow(rows, windows.current, telemetryMissionKeys);
   const previousMissionStats = summarizeMissionWindow(rows, windows.previous, telemetryMissionKeys);
-  const currentAgentStats = missionFlow === null ? [] : summarizeAgentWindow(rows, windows.current, { rootDir, completedMissionKeys: completedMissionKeys(windows.current) });
-  const previousAgentStats = missionFlow === null ? [] : summarizeAgentWindow(rows, windows.previous, { rootDir, completedMissionKeys: completedMissionKeys(windows.previous) });
+  const currentAgentStats = missionFlow === null ? [] : summarizeAgentWindow(rows, windows.current, { rootDir, completedMissionKeys: completedMissionKeys(windows.current), completedMissionOwners });
+  const previousAgentStats = missionFlow === null ? [] : summarizeAgentWindow(rows, windows.previous, { rootDir, completedMissionKeys: completedMissionKeys(windows.previous), completedMissionOwners });
   const currentMissionColors = colorMissionCounts(currentAgentStats);
   const currentAgentColors = colorAverageFixRounds(currentAgentStats);
   const previousMissionColors = colorMissionCounts(previousAgentStats);
@@ -200,6 +204,10 @@ function renderRangeStatsReport(rows, options = {}) {
   const rootDir = options.rootDir || null;
   const window = createRangeWindow({ from, to });
   const missionFlow = options.missionFlow ?? null;
+  const completedMissionOwners = new Map((missionFlow || []).map(outcome => [
+    `${String(outcome.repo).trim()}::${String(outcome.mission).trim().toLowerCase()}`,
+    outcome.implementer ?? null,
+  ]));
   const completedMissionKeys = new Set((missionFlow || [])
     .filter(outcome => String(outcome.closedAt).slice(0, 10) >= window.start.toISOString().slice(0, 10)
       && String(outcome.closedAt).slice(0, 10) <= window.end.toISOString().slice(0, 10))
@@ -208,7 +216,7 @@ function renderRangeStatsReport(rows, options = {}) {
     `${String(row.repo ?? '').trim()}::${String(row.mission ?? '').trim().toLowerCase()}`,
   ));
   const missionStats = summarizeMissionWindow(rows, window, telemetryMissionKeys);
-  const agentStats = missionFlow === null ? [] : summarizeAgentWindow(rows, window, { rootDir, completedMissionKeys });
+  const agentStats = missionFlow === null ? [] : summarizeAgentWindow(rows, window, { rootDir, completedMissionKeys, completedMissionOwners });
   const missionColors = colorMissionCounts(agentStats);
   const agentColors = colorAverageFixRounds(agentStats);
 

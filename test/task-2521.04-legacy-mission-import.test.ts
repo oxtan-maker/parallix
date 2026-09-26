@@ -10,6 +10,7 @@ import {
   LEGACY_TASK_SOURCE,
   type MissionImportServices,
 } from '../src/adapters/backlog/legacy-mission-import.js';
+import { parseLegacyMissionDocument } from '../src/adapters/backlog/legacy-mission-document.js';
 import { MissionIntakeService } from '../src/application/mission-intake-service.js';
 import { MissionBriefService } from '../src/application/mission-brief-service.js';
 import { failure } from '../src/application/contracts.js';
@@ -21,7 +22,7 @@ import {
 } from '../src/application/domain-ports.js';
 import type { LaneTransitionEvent } from '../src/domain/board-event.js';
 import { agentFamily } from '../src/domain/agents.js';
-import type { Mission, MissionId } from '../src/domain/mission.js';
+import { missionLabel, type Mission, type MissionId } from '../src/domain/mission.js';
 import { repositoryId } from '../src/domain/repository.js';
 
 const REPOSITORY = repositoryId('parallix');
@@ -104,6 +105,45 @@ const OPEN_TASK = frontmatter({
   labels: '[ai_sdlc]',
 });
 
+it('parses bounded historical contract fields without treating templates as current data', () => {
+  const parsed = parseLegacyMissionDocument(`## Goal\nShip the fix.\n## Why Now\nThe old path fails.\n## Scope\n- Fix import.\n## Out of Scope\n- Rewrite review.\n## Success Criteria\n> Falsifiability rule\n- Import preserves old text.\n## Checkpoints\n- CP 1: Verify import.\n## Gates\n- [ ] npm test\n`);
+  assert.equal(parsed.brief?.goal, 'Ship the fix.');
+  assert.deepEqual(parsed.successCriteria, ['Import preserves old text.']);
+  assert.deepEqual(parsed.declaredGates, ['npm test']);
+  assert.deepEqual(parsed.checkpoints, [{ name: 'CP-1', description: 'Verify import.' }]);
+  assert.equal(parseLegacyMissionDocument('## Goal\n<Goal>\n## Why Now\n<Why Now>').brief, undefined);
+  assert.equal(parseLegacyMissionDocument('## Goal\n<Goal>\n## Why Now\n<Why Now>\n## Gates\n- [ ] ./scripts/verify-local.sh docs').declaredGates, undefined);
+  assert.equal(parseLegacyMissionDocument('## Success Criteria\n- Good.\nUnowned prose.').successCriteria, undefined);
+});
+
+it('recognizes nonempty placeholders while accepting unmatched angle brackets', () => {
+  for (const value of ['<pending>', '<<>', '<line\nbreak>', '<> <pending>']) {
+    assert.equal(parseLegacyMissionDocument(`## Success Criteria\n- ${value}`).successCriteria, undefined);
+  }
+  for (const value of ['<>', '<>text>', 'text > before <']) {
+    assert.deepEqual(parseLegacyMissionDocument(`## Gates\n- [ ] ${value}`).declaredGates, [value]);
+  }
+  const large = parseLegacyMissionDocument(`## Success Criteria\n- ${'<'.repeat(100_000)}\n## Gates\n- [ ] npm test`);
+  assert.equal(large.successCriteria, undefined);
+  assert.deepEqual(large.declaredGates, ['npm test']);
+});
+
+it('imports missing typed fields from a historical mission document once', async () => {
+  const root = workspace([{ name: 'task-9001 - Open.md', body: OPEN_TASK }]);
+  const directory = path.join(root, 'missions', 'task-9001');
+  fs.mkdirSync(directory, { recursive: true });
+  fs.writeFileSync(path.join(directory, 'MISSION.md'), `## Goal\nShip the fix.\n## Why Now\nOld path fails.\n## Scope\n- Fix import.\n## Out of Scope\n- Rewrite review.\n## Success Criteria\n- Old text remains queryable.\n## Checkpoints\n- CP 1: Verify import.\n## Gates\n- [ ] npm test\n`);
+  const store = new RecordingStore();
+  const first = await importLegacyMissions(services(store), { rootDir: root, commit: COMMIT });
+  assert.equal(first.conflicting, 0);
+  const mission = store.missions.get('task-9001')?.mission;
+  assert.equal(mission?.brief?.goal, 'Ship the fix.');
+  assert.deepEqual(mission?.successCriteria, ['Old text remains queryable.']);
+  assert.deepEqual(mission?.declaredGates, ['npm test']);
+  assert.equal(mission?.checkpoints[0]?.name, 'CP-1');
+  assert.equal((await importLegacyMissions(services(store), { rootDir: root, commit: COMMIT })).importable, 0);
+});
+
 describe('legacy Backlog import into the existing Mission aggregate', () => {
   it('a dry run reads the legacy locations and writes no Mission rows', async () => {
     const root = workspace([{ name: 'task-9001 - Open.md', body: OPEN_TASK }]);
@@ -178,7 +218,7 @@ describe('legacy Backlog import into the existing Mission aggregate', () => {
     assert.equal(store.missions.get('task-9001')?.mission.status, 'active');
   });
 
-  it('reports a refined legacy record as needing a recorded contract', async () => {
+  it('imports a historical refined record without inventing a contract', async () => {
     const root = workspace([{
       name: 'task-9002 - Ready.md',
       body: frontmatter({ id: 'TASK-9002', title: 'Ready record', status: 'ready' }),
@@ -187,11 +227,11 @@ describe('legacy Backlog import into the existing Mission aggregate', () => {
 
     const report = await importLegacyMissions(services(store), { rootDir: root, commit: COMMIT });
 
-    assert.equal(report.importable, 0);
-    assert.equal(report.deferred, 1);
+    assert.equal(report.importable, 1);
+    assert.equal(report.deferred, 0);
     assert.equal(report.conflicting, 0);
-    assert.match(report.deferredRecords[0], /TASK-9002: legacy lane "refined" needs a recorded contract/);
-    assert.equal(store.missions.size, 0, 'no Mission was written for a lane past backlog');
+    assert.equal(store.missions.get('task-9002')?.mission.status, 'refined');
+    assert.equal(store.missions.get('task-9002')?.mission.brief, null);
   });
 
   it('reports an active legacy record as needing a recorded contract', async () => {
@@ -231,8 +271,8 @@ describe('legacy Backlog import into the existing Mission aggregate', () => {
     );
 
     assert.equal(report.discovered, 3);
-    assert.equal(report.importable, 1);
-    assert.equal(report.deferred, 2);
+    assert.equal(report.importable, 2);
+    assert.equal(report.deferred, 1);
     assert.equal(report.conflicting, 0);
     assert.equal(store.missions.size, 0);
   });
@@ -262,7 +302,7 @@ describe('legacy Backlog import into the existing Mission aggregate', () => {
     assert.equal(store.missions.size, 1);
   });
 
-  it('reports a done legacy record as needing evidence instead of forging it', async () => {
+  it('requires a source-backed date for a historical done record', async () => {
     const root = workspace([{
       dir: 'completed',
       name: 'task-9004 - Done.md',
@@ -277,7 +317,7 @@ describe('legacy Backlog import into the existing Mission aggregate', () => {
     assert.equal(report.conflicting, 0);
     assert.match(
       report.deferredRecords[0],
-      /TASK-9004: legacy lane "done" needs checkpoint and review evidence/,
+      /TASK-9004: completed lane has no source-backed closure date/,
     );
     assert.equal(store.missions.size, 0);
   });
@@ -321,6 +361,19 @@ describe('legacy Backlog import into the existing Mission aggregate', () => {
     assert.equal(report.importable, 1);
   });
 
+  it('uses the completed copy when an archived copy has the same identity and title', async () => {
+    const root = workspace([
+      { dir: 'archive', name: 'task-9009 - Same.md',
+        body: frontmatter({ id: 'TASK-9009', title: 'Same', status: 'backlog' }) },
+      { dir: 'completed', name: 'task-9009 - Same.md',
+        body: frontmatter({ id: 'TASK-9009', title: 'Same', status: 'done' }) },
+    ]);
+    const store = new RecordingStore();
+    const report = await importLegacyMissions(services(store), { rootDir: root, dryRun: true, commit: COMMIT });
+    assert.equal(report.conflicting, 0);
+    assert.match(report.deferredRecords[0], /source-backed closure date/);
+  });
+
   it('reports malformed identity and unmappable status without writing a Mission', async () => {
     const root = workspace([
       { name: 'no-id.md', body: '---\ntitle: Missing id\n---\n' },
@@ -360,7 +413,103 @@ describe('legacy Backlog import into the existing Mission aggregate', () => {
     assert.equal(store.missions.get('task-9001')?.mission.title, 'Open legacy record');
   });
 
-  it('reports a pre-existing Mission that owns the identity with no trace to this material', async () => {
+  it('pins matching native Missions to their legacy body without replacing current state', async () => {
+    const root = workspace([{ name: 'task-9001 - Open.md', body: OPEN_TASK }]);
+    const store = new RecordingStore();
+    store.missions.set('task-9001', {
+      mission: {
+        id: 'task-9001' as MissionId, repositoryId: REPOSITORY, title: 'Open legacy record',
+        labels: [missionLabel('ai_sdlc')], assignee: null, checkpoints: [], review: null, netEngineeringLines: null,
+        status: 'backlog', closedAt: null,
+      },
+      version: missionVersion(1),
+    });
+
+    const dryRun = await importLegacyMissions(services(store), { rootDir: root, dryRun: true, commit: COMMIT });
+    assert.equal(dryRun.importable, 1);
+    assert.equal(store.missions.get('task-9001')?.mission.externalTaskRef, undefined);
+
+    const report = await importLegacyMissions(services(store), { rootDir: root, commit: COMMIT });
+
+    assert.equal(report.importable, 1);
+    assert.equal(report.conflicting, 0);
+    assert.equal(store.missions.get('task-9001')?.mission.externalTaskRef?.url,
+      `backlog/tasks/task-9001 - Open.md@${COMMIT}`);
+    const second = await importLegacyMissions(services(store), { rootDir: root, dryRun: true, commit: COMMIT });
+    assert.equal(second.importable, 0);
+    assert.equal(second.alreadyMaterialized, 1);
+  });
+
+  it('keeps current Mission labels when old task labels differ', async () => {
+    const root = workspace([{ name: 'task-9001 - Open.md', body: OPEN_TASK }]);
+    const store = new RecordingStore();
+    store.missions.set('task-9001', {
+      mission: {
+        id: 'task-9001' as MissionId, repositoryId: REPOSITORY, title: 'Open legacy record',
+        labels: [missionLabel('current')], assignee: null, checkpoints: [], review: null,
+        netEngineeringLines: null, status: 'backlog', closedAt: null,
+      }, version: missionVersion(1),
+    });
+    const report = await importLegacyMissions(services(store), { rootDir: root, commit: COMMIT });
+    assert.equal(report.conflicting, 0);
+    assert.deepEqual(store.missions.get('task-9001')?.mission.labels, [missionLabel('current')]);
+    assert.equal(store.missions.get('task-9001')?.mission.externalTaskRef?.id, 'TASK-9001');
+  });
+
+  it('never attaches a task body to a Mission owned by another repository', async () => {
+    const root = workspace([{ name: 'task-9001 - Open.md', body: OPEN_TASK }]);
+    const store = new RecordingStore();
+    store.missions.set('task-9001', {
+      mission: {
+        id: 'task-9001' as MissionId, repositoryId: repositoryId('fixture'), title: 'Fixture',
+        labels: [], assignee: null, checkpoints: [], review: null, netEngineeringLines: null,
+        status: 'active', closedAt: null,
+      }, version: missionVersion(1),
+    });
+    const report = await importLegacyMissions(services(store), { rootDir: root, commit: COMMIT });
+    assert.match(report.conflicts[0], /belongs to repository fixture/);
+    assert.equal(store.missions.get('task-9001')?.mission.externalTaskRef, undefined);
+  });
+
+  it('repairs legacy placeholder title and encoded labels while pinning the source', async () => {
+    const root = workspace([{ name: 'task-9001 - Open.md', body: OPEN_TASK }]);
+    const store = new RecordingStore();
+    store.missions.set('task-9001', {
+      mission: {
+        id: 'task-9001' as MissionId, repositoryId: REPOSITORY, title: 'task-9001',
+        labels: [missionLabel('[ai_sdlc]')], assignee: null, checkpoints: [], review: null,
+        netEngineeringLines: null, status: 'backlog', closedAt: null,
+      },
+      version: missionVersion(1),
+    });
+
+    const dryRun = await importLegacyMissions(services(store), { rootDir: root, dryRun: true, commit: COMMIT });
+    assert.equal(dryRun.importable, 1);
+    await importLegacyMissions(services(store), { rootDir: root, commit: COMMIT });
+    assert.equal(store.missions.get('task-9001')?.mission.title, 'Open legacy record');
+    assert.deepEqual(store.missions.get('task-9001')?.mission.labels, [missionLabel('ai_sdlc')]);
+    assert.equal(store.missions.get('task-9001')?.mission.externalTaskRef?.id, 'TASK-9001');
+  });
+
+  it('repairs folded and quoted YAML titles recorded literally by old intake', async () => {
+    for (const storedTitle of ['>-', "'Open legacy record'"]) {
+      const root = workspace([{ name: 'task-9001 - Open.md', body: OPEN_TASK }]);
+      const store = new RecordingStore();
+      store.missions.set('task-9001', {
+        mission: {
+          id: 'task-9001' as MissionId, repositoryId: REPOSITORY, title: storedTitle,
+          labels: [missionLabel('ai_sdlc')], assignee: null, checkpoints: [], review: null,
+          netEngineeringLines: null, status: 'backlog', closedAt: null,
+        },
+        version: missionVersion(1),
+      });
+      const report = await importLegacyMissions(services(store), { rootDir: root, commit: COMMIT });
+      assert.equal(report.conflicting, 0);
+      assert.equal(store.missions.get('task-9001')?.mission.title, 'Open legacy record');
+    }
+  });
+
+  it('reports a pre-existing Mission that disagrees without a source trace', async () => {
     const root = workspace([{ name: 'task-9001 - Open.md', body: OPEN_TASK }]);
     const store = new RecordingStore();
     store.missions.set('task-9001', {
@@ -375,7 +524,7 @@ describe('legacy Backlog import into the existing Mission aggregate', () => {
     const report = await importLegacyMissions(services(store), { rootDir: root, commit: COMMIT });
 
     assert.equal(report.conflicting, 1);
-    assert.match(report.conflicts[0], /owns this identity with no trace to this material/);
+    assert.match(report.conflicts[0], /existing Mission disagrees with the legacy source material/);
     assert.equal(store.missions.get('task-9001')?.mission.title, 'Locally created');
   });
 
@@ -583,6 +732,18 @@ describe('legacy Backlog import into the existing Mission aggregate', () => {
     assert.deepEqual(store.missions.get('task-9011')?.mission.dependencies, []);
   });
 
+  it('classifies approved stale links as obsolete while retaining their source body', async () => {
+    const root = workspace([{
+      name: 'task-9013 - Stale.md',
+      body: `---\nid: TASK-9013\ntitle: Stale link\nstatus: open\n${listField('dependencies', ['TASK-2500'])}\n---\n\nDepends on TASK-2500.\n`,
+    }]);
+    const report = await importLegacyMissions(services(new RecordingStore()), { rootDir: root, commit: COMMIT });
+    assert.deepEqual(report.unresolvedDependencies, []);
+    assert.deepEqual(report.obsoleteDependencies, [
+      'TASK-9013: dependency TASK-2500 is obsolete; retained in pinned task body',
+    ]);
+  });
+
   it('no longer names dependencies as a field Mission cannot represent', async () => {
     const root = workspace([{
       name: 'task-9012 - Represented.md',
@@ -596,12 +757,13 @@ describe('legacy Backlog import into the existing Mission aggregate', () => {
     assert.deepEqual(report.unrepresentedFields, []);
   });
 
-  it('names fields Mission cannot represent instead of inventing Mission fields', async () => {
+  it('ignores explicitly retired metadata while flagging unknown fields', async () => {
     const root = workspace([{
       name: 'task-9009.md',
       body: frontmatter({
         id: 'TASK-9009', title: 'Extra fields', status: 'open',
         priority: 'high', ordinal: '4', created_date: '2026-01-01', milestone: 'M4',
+        unexpected_key: 'unknown',
       }),
     }]);
     const store = new RecordingStore();
@@ -610,15 +772,10 @@ describe('legacy Backlog import into the existing Mission aggregate', () => {
 
     assert.equal(report.unrepresented, 1);
     assert.equal(report.importable, 1);
-    for (const field of ['priority', 'ordinal', 'created_date', 'milestone']) {
-      assert.ok(
-        report.unrepresentedFields.includes(`TASK-9009: ${field}`),
-        `${field} is named in the unrepresented report`,
-      );
-    }
+    assert.deepEqual(report.unrepresentedFields, ['TASK-9009: unexpected_key']);
   });
 
-  it('reports backlog.md as unrepresented aggregate migration input', async () => {
+  it('counts backlog.md for audit without treating it as a unique task record', async () => {
     const root = workspace([{ name: 'task-9001 - Open.md', body: OPEN_TASK }]);
     fs.writeFileSync(path.join(root, 'backlog.md'), '# Backlog\n\n- TASK-9001\n');
     const store = new RecordingStore();
@@ -626,7 +783,7 @@ describe('legacy Backlog import into the existing Mission aggregate', () => {
     const report = await importLegacyMissions(services(store), { rootDir: root, commit: COMMIT });
 
     assert.equal(report.discovered, 2);
-    assert.ok(report.unrepresentedFields.some(line => line.startsWith('backlog.md:')));
+    assert.equal(report.unrepresented, 0);
   });
 
   it('never writes, renames, or deletes the legacy files it read', async () => {

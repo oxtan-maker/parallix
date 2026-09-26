@@ -254,15 +254,15 @@ function missionCandidates(rows: any[]) {
   return { byMission, rowsByMission };
 }
 
-function assignCompletedMissionOwners(byMission: Record<string, any>, rowsByMission: Record<string, any[]>) {
+function assignCompletedMissionOwners(byMission: Record<string, any>, rowsByMission: Record<string, any[]>, owners?: ReadonlyMap<string, string | null>) {
   for (const [key, rows] of Object.entries(rowsByMission)) {
-    const reversed = [...rows].reverse();
-    const rollup = reversed.find(row => row.stage === 'default');
-    const owner = rollup?.implementer ?? reversed.find(row => String(row.stage || 'default').trim().toLowerCase() !== 'review')?.implementer;
-    const ownerModel = reversed.find(row => row.implementer === owner && String(row.stage || 'default').trim().toLowerCase() !== 'review' && String(row.model || '').trim());
-    if (owner && byMission[key]) {
-      byMission[key] = { ...(ownerModel || rollup || byMission[key]), reportedImplementer: owner, pr_fix_rounds: rollup?.pr_fix_rounds ?? byMission[key].pr_fix_rounds };
-    }
+    const rollup = [...rows].reverse().find(row => (row.stage || 'default') === 'default');
+    // An integration rollup records the Review's final implementer explicitly.
+    // Production reports supply the current DB owner, including null for unknown.
+    const owner = owners ? owners.get(key) : rollup?.implementer;
+    if (!owner) { delete byMission[key]; continue; }
+    byMission[key] = { ...(rollup || byMission[key]), reportedImplementer: owner,
+      model: '', pr_fix_rounds: rollup?.pr_fix_rounds ?? byMission[key].pr_fix_rounds };
   }
 }
 
@@ -280,14 +280,14 @@ function groupMissionCandidates(rows: any[]) {
   return { groups, missionKeyToDisplayKey };
 }
 
-function computeAgentMissionGroups(rows: any[], window: any, options: { completedOnly?: boolean; completedMissionKeys?: Set<string> } = {}) {
+function computeAgentMissionGroups(rows: any[], window: any, options: { completedOnly?: boolean; completedMissionKeys?: Set<string>; completedMissionOwners?: ReadonlyMap<string, string | null> } = {}) {
   const completedMissionKeys = options.completedMissionKeys || new Set();
   const windowRows = options.completedOnly
     ? rows.filter((row: any) => completedMissionKeys.has(statisticsMissionKey(row)))
     : rows.filter((row: any) => statisticsRowInWindow(row, window));
   const allValidWindowRows = windowRows.filter((row: any) => normalizeClassification(row.classification) !== null);
   const { byMission, rowsByMission } = missionCandidates(allValidWindowRows);
-  if (options.completedOnly) { assignCompletedMissionOwners(byMission, rowsByMission); }
+  if (options.completedOnly) { assignCompletedMissionOwners(byMission, rowsByMission, options.completedMissionOwners); }
   const { groups, missionKeyToDisplayKey } = groupMissionCandidates(Object.values(byMission));
   return { allValidWindowRows, groups, missionKeyToDisplayKey };
 }
@@ -308,7 +308,7 @@ function summarizeAgentWindow(rows, window, options = {}) {
   // their live stage telemetry remains unchanged.
   const { allValidWindowRows, groups } = computeAgentMissionGroups(rows, window, {
 // @ts-ignore -- retained reporting helper is dynamically typed
-    completedOnly: true, completedMissionKeys: options.completedMissionKeys,
+    completedOnly: true, completedMissionKeys: options.completedMissionKeys, completedMissionOwners: options.completedMissionOwners,
   });
   // Build agent groups from the globally deduplicated missions.
   //

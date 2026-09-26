@@ -61,7 +61,7 @@ import * as fs from 'node:fs';
 
 import * as fmt from '../../../application/presentation/cli-format.js';
 import { statsCohorts, resolveOperatorRepositories } from './stats-cohorts.js';
-import { ConcreteMetricsReadAdapter } from '../../../application/projections/metrics-read-adapter.js';
+import { ConcreteMetricsReadAdapter, missionCohortMetadata } from '../../../application/projections/metrics-read-adapter.js';
 import { resolveTaskFile, getTaskClassification } from '../../backlog/backlog.js';
 import { resolveCanonicalRepositoryId } from '../../git/repository-identity.js';
 import * as forgejo from '../../forgejo/forgejo.js';
@@ -227,6 +227,7 @@ export interface MissionFlowCompletion {
   readonly mission: string;
   readonly closedAt: string;
   readonly labels: readonly string[];
+  readonly implementer?: string | null;
 }
 
 /**
@@ -257,8 +258,14 @@ async function readMissionFlowPopulation(options: {
       laneEventRepo: repositories.laneEventRepo,
       usageRepo: repositories.usageRepo,
       repositoryId,
+      cohortMetadata: async () => {
+        const { initOperatorState } = await import('../../sqlite/adapter-factory.js');
+        const { SqliteMissionStore } = await import('../../sqlite/mission-store.js');
+        const { db } = await initOperatorState();
+        return missionCohortMetadata(await new SqliteMissionStore(db).loadByRepository(repositoryId));
+      },
     }).readOutcomes();
-    return outcomes.map((outcome) => ({ repo: String(repositoryId), mission: String(outcome.missionId), closedAt: outcome.closedAt, labels: outcome.labels }));
+    return outcomes.map((outcome) => ({ repo: String(repositoryId), mission: String(outcome.missionId), closedAt: outcome.closedAt, labels: outcome.labels, implementer: outcome.implementer }));
   } catch {
     return null;
   }

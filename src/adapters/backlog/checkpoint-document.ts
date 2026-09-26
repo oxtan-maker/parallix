@@ -55,10 +55,22 @@ export function parseCheckpointDocument(
   const goalCheck = parseGoalCheckTable(lines);
 
   let nextActionText = '';
+  let nextHeading = false;
+  const nextLines: string[] = [];
   for (const line of lines) {
-    const match = NEXT_ACTION.exec(line.trim());
+    const trimmed = line.trim();
+    const match = NEXT_ACTION.exec(trimmed);
     if (match) {
       nextActionText = match[1].trim();
+      nextHeading = false;
+    } else if (/^##\s+Next action\s*$/i.test(trimmed)) {
+      nextHeading = true;
+      nextLines.length = 0;
+    } else if (nextHeading && trimmed && !trimmed.startsWith('#')) {
+      nextLines.push(trimmed);
+      nextActionText = nextLines.join('\n');
+    } else if (nextHeading && nextLines.length > 0) {
+      nextHeading = false;
     }
   }
 
@@ -70,6 +82,34 @@ export function parseCheckpointDocument(
     goalCheck,
     nextActionText,
   };
+}
+
+/** Keep whichever side has strictly more matching evidence; reject disagreement. */
+export function reconcileLegacyCheckpoint(
+  recorded: CheckpointData,
+  source: CheckpointData,
+): CheckpointData | null {
+  if (recorded.name !== source.name) { return null; }
+  const text = (left: string, right: string) => left && right && left !== right ? null : left || right;
+  const firstLine = text(recorded.firstLine ?? '', source.firstLine ?? '');
+  if (firstLine === null) { return null; }
+  const contains = (outer: readonly GoalCheckRow[], inner: readonly GoalCheckRow[]) =>
+    inner.every(row => outer.some(candidate => candidate.criterion === row.criterion && candidate.evidence === row.evidence));
+  const goalCheck = contains(recorded.goalCheck, source.goalCheck)
+    ? recorded.goalCheck
+    : contains(source.goalCheck, recorded.goalCheck) ? source.goalCheck : null;
+  if (goalCheck === null) { return null; }
+  const sameEvidence = recorded.firstLine === source.firstLine
+    && contains(recorded.goalCheck, source.goalCheck)
+    && contains(source.goalCheck, recorded.goalCheck);
+  // Old handoff used this synthetic action when it failed to parse the file.
+  const syntheticAction = recorded.nextActionText === 'Review the handed-off change.'
+    && sameEvidence && source.nextActionText.length > 0;
+  // Earlier imports captured only the first line after a Next action heading.
+  const nextActionText = syntheticAction || source.nextActionText.startsWith(`${recorded.nextActionText}\n`)
+    ? source.nextActionText : text(recorded.nextActionText, source.nextActionText);
+  if (nextActionText === null) { return null; }
+  return { ...recorded, firstLine, nextActionText, goalCheck };
 }
 
 /**

@@ -21,6 +21,8 @@ export type MissionLoadResult =
 
 export interface MissionTransitionHistoryEntry {
   readonly trigger: string;
+  /** Recorded lifecycle time, available from durable lane events. */
+  readonly occurredAt?: string;
   /**
    * The identity of the recorded transition, when the store keeps it. Only the
    * lane the mission left, the lane it entered, and the key the writer supplied

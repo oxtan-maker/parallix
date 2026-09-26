@@ -102,8 +102,9 @@ test('BoardProjectionBuilder is wired in composition root over all six concrete 
   }
 });
 
-test('BoardProjectionBuilder.build() returns BoardProjection with missions from concrete adapter', async () => {
+test('board without Mission authority shows only uningested inputs', async () => {
   const tmp = createTempBacklog({
+    'backlog/tasks/task-2000 - input.md': taskMd({ id: 'TASK-2000', title: 'Input', status: 'backlog' }),
     'backlog/tasks/task-2001 - active mission.md': taskMd({
       id: 'TASK-2001',
       status: 'active',
@@ -132,9 +133,10 @@ test('BoardProjectionBuilder.build() returns BoardProjection with missions from 
 
     const projection = await builder.build();
 
-    // Should have missions from both stores
+    // Active/completed Markdown cannot reconstruct Mission lifecycle or evidence.
     const totalCards = projection.stages.reduce((sum, stage) => sum + stage.count, 0);
-    assert.equal(totalCards, 2);
+    assert.equal(totalCards, 1);
+    assert.equal(projection.stages.flatMap(stage => stage.cards)[0].id, missionId('task-2000'));
 
     // Source facts should be populated
     assert.ok(projection.sourceFacts.length > 0);

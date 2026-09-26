@@ -26,7 +26,7 @@ const persisted = [
   mission('task-2438-review', 'review'),
   mission('task-2438-integration', 'integration'),
   mission('task-2438-archived', 'active'),
-  mission('task-2438-sibling', 'active', repository, '<Title> (task-2438-sibling)'),
+  mission('task-2438-sibling', 'active', repository, 'Recorded sibling title'),
   mission('task-2438-done', 'done'),
   mission('task-2438-foreign', 'active', foreignRepository),
 ];
@@ -86,6 +86,10 @@ test('task-2438 board reads persisted repository missions from every worktree', 
     writeCatalog(root, ['refined', 'review', 'ready-for-integration']);
     writeCatalog(secondRoot, ['backlog', 'refined', 'active']);
     writeTask(secondRoot, 'tasks', 'task-2438-sibling', 'active', 'Sibling Markdown title');
+    // Legacy checkpoint files must never replace or supply recorded evidence.
+    const checkpoint = path.join(root, 'missions/task-2438-active/CP-1.md');
+    fs.mkdirSync(path.dirname(checkpoint), { recursive: true });
+    fs.writeFileSync(checkpoint, '# CP-1: stale file evidence\n');
     const firstBoard = board(root);
     const projection = await firstBoard.builder.build();
     const secondProjection = await board(secondRoot).builder.build();
@@ -102,15 +106,19 @@ test('task-2438 board reads persisted repository missions from every worktree', 
       ['task-2438-review', 'review'],
       ['task-2438-integration', 'integration'],
       ['task-2438-sibling', 'active'],
+      ['task-2438-archived', 'active'],
+      ['task-2438-done', 'done'],
     ]));
     assert.deepEqual(secondLanes, lanes);
-    assert.equal(lanes.has(missionId('task-2438-done')), false);
+    assert.equal(lanes.has(missionId('task-2438-done')), true);
     const titles = new Map(projection.stages.flatMap((stage) => stage.cards.map((card) => [card.id, card.title])));
     const secondTitles = new Map(secondProjection.stages.flatMap((stage) => stage.cards.map((card) => [card.id, card.title])));
     assert.equal(titles.get(missionId('task-2438-active')), 'Active Markdown title');
-    assert.equal(titles.get(missionId('task-2438-sibling')), 'task-2438-sibling');
+    assert.equal(titles.get(missionId('task-2438-sibling')), 'Recorded sibling title');
     assert.equal(secondTitles.get(missionId('task-2438-sibling')), 'Sibling Markdown title');
     assert.equal((await firstBoard.missionQuery.detail(missionId('task-2438-backlog')))?.id, missionId('task-2438-backlog'));
+    const active = await firstBoard.missionQuery.detail(missionId('task-2438-active'));
+    assert.deepEqual(active?.checkpoints, []);
     assert.equal(requestedRepository, repository);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });

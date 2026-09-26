@@ -35,7 +35,7 @@ function completedMissionKeys(rows, window) {
 
 function missionFlow(rows) {
   return rows.filter(row => row.completedForTest === 'yes')
-    .map(row => ({ repo: row.repo, mission: row.mission, closedAt: `${row.date}T00:00:00Z`, labels: [] }));
+    .map(row => ({ repo: row.repo, mission: row.mission, closedAt: `${row.date}T00:00:00Z`, labels: [], implementer: row.implementer }));
 }
 
 function renderWeeklyStatsReport(rows, options = {}) {
@@ -46,7 +46,7 @@ function summarizeAgentWindow(rows, window, options = {}) {
   return stats._internals.summarizeAgentWindow(rows, window, { ...options, completedMissionKeys: completedMissionKeys(rows, window) });
 }
 
-test('task-2213: agent performance counts and fix-round averages use only each model row\'s completed missions', () => {
+test('task-2213: agent performance counts and fix-round averages use only each recorded family\'s completed missions', () => {
   const summary = summarizeAgentWindow([
     row({ mission: 'task-qwen-fixes', pr_fix_rounds: '4' }),
     row({ mission: 'task-qwen-zero', pr_fix_rounds: '0' }),
@@ -58,12 +58,12 @@ test('task-2213: agent performance counts and fix-round averages use only each m
   ], WINDOW);
 
   assert.deepEqual(summary, [
-    { implementer: 'gpt-5.4', missions: 1, averageFixRounds: '1.00' },
-    { implementer: 'qwen3.5', missions: 2, averageFixRounds: '2.00' },
+    { implementer: 'codex', missions: 1, averageFixRounds: '1.00' },
+    { implementer: 'custom', missions: 2, averageFixRounds: '2.00' },
   ]);
 });
 
-test('task-2213: models sharing an implementer family keep separate rows and averages', () => {
+test('task-2213: models do not split recorded delivery-family credit', () => {
   const summary = summarizeAgentWindow([
     row({ mission: 'task-sonnet-a', implementer: 'claude', model: 'claude-sonnet-5', pr_fix_rounds: '3' }),
     row({ mission: 'task-sonnet-b', implementer: 'claude', model: 'claude-sonnet-5', pr_fix_rounds: '1' }),
@@ -71,26 +71,24 @@ test('task-2213: models sharing an implementer family keep separate rows and ave
   ], WINDOW);
 
   assert.deepEqual(summary, [
-    { implementer: 'claude-opus-4', missions: 1, averageFixRounds: '0.00' },
-    { implementer: 'claude-sonnet-5', missions: 2, averageFixRounds: '2.00' },
+    { implementer: 'claude', missions: 3, averageFixRounds: '1.33' },
   ]);
 });
 
 test('task-2213: completed rows with missing attribution or review-round metadata are explicit, not silent skew', () => {
   const summary = summarizeAgentWindow([
-    // No model and no implementer: must surface as a visible `unknown` row.
+    // No recorded implementer: do not award delivery credit.
     row({ mission: 'task-no-attribution', model: '', implementer: '', pr_fix_rounds: '' }),
     // Missing review-round value is unknown and cannot leak into another row's average.
     row({ mission: 'task-no-rounds', pr_fix_rounds: undefined }),
   ], WINDOW);
 
   assert.deepEqual(summary, [
-    { implementer: 'qwen3.5', missions: 1, averageFixRounds: null },
-    { implementer: 'unknown', missions: 1, averageFixRounds: null },
+    { implementer: 'custom', missions: 1, averageFixRounds: null },
   ]);
 });
 
-test('task-2213: completion on the blank-model rollup row keeps the mission in its model row with the rollup fix rounds', () => {
+test('blank-model integration rollup supplies owner and fix rounds without a model guess', () => {
   // Real CSV shape: the model is recorded on non-closed stage rows, while
   // completion and the final pr_fix_rounds live on a blank-model rollup row.
   const summary = summarizeAgentWindow([
@@ -101,7 +99,7 @@ test('task-2213: completion on the blank-model rollup row keeps the mission in i
   ], WINDOW);
 
   assert.deepEqual(summary, [
-    { implementer: 'claude-fable-5', missions: 1, averageFixRounds: '3.00' },
+    { implementer: 'claude', missions: 1, averageFixRounds: '3.00' },
   ]);
 });
 
@@ -117,7 +115,7 @@ test('task-2213: weekly report retains live active-stage spend while excluding t
   );
   const spend = report.slice(report.indexOf('Agent spend by stage this week'));
 
-  assert.match(performance, /qwen3\.5\s+1\s+2\.00/);
+  assert.match(performance, /custom\s+1\s+2\.00/);
   assert.match(spend, /qwen3\.5\s+0m \(0%\)\s+15m \(75%\)/);
 });
 
@@ -151,9 +149,9 @@ test('task-2213: completing implementer model beats reviewer model in attributio
     row({ mission: 'task-impl-vs-reviewer', implementer: 'claude', model: '', stage: 'default', pr_fix_rounds: '3', completedForTest: 'yes' }),
   ], WINDOW);
 
-  // Must attribute to claude-sonnet-5, NOT the reviewer's gpt-5.4.
+  // The recorded family wins; telemetry does not supply delivery ownership.
   assert.deepEqual(summary, [
-    { implementer: 'claude-sonnet-5', missions: 1, averageFixRounds: '3.00' },
+    { implementer: 'claude', missions: 1, averageFixRounds: '3.00' },
   ]);
 });
 
@@ -170,9 +168,9 @@ test('task-2213: completing implementer model beats reviewer model even when rev
     row({ mission: 'task-date-priority', date: '2026-07-09', implementer: 'claude', model: '', stage: 'default', pr_fix_rounds: '3', completedForTest: 'yes' }),
   ], WINDOW);
 
-  // Must attribute to claude-sonnet-5, NOT the reviewer's gpt-5.4.
+  // The recorded family wins; telemetry does not supply delivery ownership.
   assert.deepEqual(summary, [
-    { implementer: 'claude-sonnet-5', missions: 1, averageFixRounds: '3.00' },
+    { implementer: 'claude', missions: 1, averageFixRounds: '3.00' },
   ]);
 });
 
@@ -188,7 +186,7 @@ test('task-2213: the completing implementer owns the model row, not a later revi
   ], WINDOW);
 
   assert.deepEqual(summary, [
-    { implementer: 'qwen3.6-27b-q8', missions: 1, averageFixRounds: '3.00' },
+    { implementer: 'custom', missions: 1, averageFixRounds: '3.00' },
   ]);
 });
 
@@ -199,9 +197,9 @@ test('task-2213: a closed reviewer row does not replace the final implementer af
    row({ mission: 'task-handoff-owner', date: '2026-07-07', implementer: 'claude', model: 'claude-sonnet-5', stage: 'follow-up', completedForTest: '' }),
    row({ mission: 'task-handoff-owner', date: '2026-07-08', implementer: 'custom', model: 'qwen3.6-27b-q8', stage: 'follow-up', completedForTest: '' }),
    row({ mission: 'task-handoff-owner', date: '2026-07-09', implementer: 'custom', reviewer_agent: 'vibe', model: 'mistral', stage: 'review', pr_fix_rounds: '3', completedForTest: 'yes' }),
-  ], WINDOW);
+  ], WINDOW, { completedMissionOwners: new Map([['parallix::task-handoff-owner', 'custom']]) });
 
   assert.deepEqual(summary, [
-    { implementer: 'qwen3.6-27b-q8', missions: 1, averageFixRounds: '3.00' },
+    { implementer: 'custom', missions: 1, averageFixRounds: '3.00' },
   ]);
 });

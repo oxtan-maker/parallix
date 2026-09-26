@@ -31,7 +31,6 @@ import { writeJson } from '../../storage/storage.js';
 import { eligibleAgentsForStep, selectAgent, startAgent } from '../../agents/agents.js';
 import {
   HandoffCommandUseCase,
-  buildAutoCheckpointContent,
 } from '../../../application/handoff-command-use-case.js';
 import {
   collectGoalCheckEvidenceRows,
@@ -184,7 +183,6 @@ export { evidenceCellHasVerifiableReference as _evidenceCellHasVerifiableReferen
 // The composition root binds this adapter's ports to `createHandoffCommand`.
 // Keep this module limited to its concrete adapter bindings and workflow seams.
 export {
-  buildAutoCheckpointContent as _buildAutoCheckpointContent,
   collectGoalCheckEvidenceRows as _collectGoalCheckEvidenceRows,
   findUnverifiableGoalCheckRow,
   findUnverifiableGoalCheckRow as _findUnverifiableGoalCheckRow,

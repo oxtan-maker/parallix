@@ -22,6 +22,7 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
+import { isDeepStrictEqual } from 'node:util';
 import { findMissionDir, getPrimaryBranch, resolveWorktree } from '../filesystem/mission-utils.js';
 import { missionId } from '../../domain/mission.js';
 import { compareCodeUnits } from '../../domain/comparators.js';
@@ -243,7 +244,7 @@ export type ReviewBackfillResult =
  * as the event content. Returns null for a file without frontmatter, which is
  * not an event export.
  */
-function parseExportedEvent(content: string): Omit<ReviewEventRecord, 'position'> | null {
+function parseExportedEvent(content: string, filename: string): Omit<ReviewEventRecord, 'position'> | null {
   const frontmatter = content.match(/^---\n([\s\S]*?)\n---/);
   if (!frontmatter) { return null; }
 
@@ -256,6 +257,15 @@ function parseExportedEvent(content: string): Omit<ReviewEventRecord, 'position'
   }
 
   const round = Number(fields.get('round'));
+  const eventType = fields.get('event_type') ?? fields.get('event');
+  const filenameTime = filename.match(/^(\d{4}-\d{2}-\d{2})T(\d{2})(\d{2})(\d{2})-/);
+  const rawTime = fields.get('timestamp')
+    ?? (filenameTime ? `${filenameTime[1]}T${filenameTime[2]}:${filenameTime[3]}:${filenameTime[4]}.000Z` : null);
+  const compactTime = rawTime?.match(/^(\d{4}-\d{2}-\d{2})T(\d{2})(\d{2})(\d{2})Z$/);
+  const createdAt = compactTime
+    ? `${compactTime[1]}T${compactTime[2]}:${compactTime[3]}:${compactTime[4]}.000Z` : rawTime;
+  if (!eventType || !/^(reviewer_findings|reviewer_outcome|implementer_round_summary|implementer_disposition|neutral_discussion|human_note|blocked_publication|parked_followup)$/.test(eventType)
+    || !createdAt || Number.isNaN(Date.parse(createdAt))) { return null; }
   const dispositions = fields.get('item_dispositions');
   let itemDispositions: readonly ReviewItemDisposition[] | null = null;
   if (dispositions) {
@@ -264,17 +274,17 @@ function parseExportedEvent(content: string): Omit<ReviewEventRecord, 'position'
   }
 
   return {
-    eventType: (fields.get('event_type') || 'unknown') as ReviewEventType,
+    eventType: eventType as ReviewEventType,
     roundNumber: Number.isInteger(round) ? round : null,
     phase: fields.get('phase') ?? null,
-    actor: fields.get('actor') ?? null,
+    actor: fields.get('actor') ?? fields.get('agent') ?? null,
     content: content.slice(frontmatter[0].length).trim(),
     disposition: fields.get('disposition') ?? null,
     verdict: fields.get('verdict') ?? null,
     itemDispositions,
     blockedReason: fields.get('blocked_reason') ?? null,
     followUpReference: fields.get('followup_reference') ?? null,
-    createdAt: fields.get('timestamp') || new Date().toISOString(),
+    createdAt,
   };
 }
 
@@ -300,7 +310,7 @@ export function readExportedReviewEvents(slug: string, rootDir = process.cwd()):
     let content: string;
     try { content = fs.readFileSync(path.join(eventsDir, file), 'utf8'); }
     catch { continue; }
-    const parsed = parseExportedEvent(content);
+    const parsed = parseExportedEvent(content, file);
     if (parsed) { events.push({ ...parsed, position: events.length }); }
   }
   return events;
@@ -434,10 +444,9 @@ export async function reconcileInterruptedHandoff(
  * is the one place production reads it — the read adapters stay
  * database-only.
  *
- * Returns null when there is nothing to restore: no Review, no exported events,
- * or a Review that already has events (re-reading the export would duplicate
- * the rows it was written from). The caller decides what "nothing to do" means
- * for the path it is on.
+ * Returns null when there is nothing safe to restore: no Review, no exported
+ * events, a complete import, or recorded events that are not an unchanged
+ * ordered subset of the export.
  */
 async function backfillExportedEvents(
   slug: string,
@@ -455,10 +464,22 @@ async function backfillExportedEvents(
 
   const result = await store.load(missionId(slug));
   if (result.kind !== 'found' || !result.mission.review) { return null; }
-  if (result.mission.review.reviewEvents.length > 0) { return null; }
 
   const exported = readExportedReviewEvents(slug, rootDir);
   if (exported.length === 0) { return null; }
+  const existing = result.mission.review.reviewEvents;
+  // A prior import retained compact source timestamps verbatim. Normalize
+  // those values only when every other stored event field still matches.
+  const normalized = existing.map(event => {
+    const compact = event.createdAt.match(/^(\d{4}-\d{2}-\d{2})T(\d{2})(\d{2})(\d{2})Z$/);
+    return compact ? { ...event, createdAt: `${compact[1]}T${compact[2]}:${compact[3]}:${compact[4]}.000Z` } : event;
+  });
+  let cursor = 0;
+  for (const event of exported) {
+    if (cursor < normalized.length
+      && isDeepStrictEqual({ ...normalized[cursor], position: event.position }, event)) { cursor += 1; }
+  }
+  if (cursor !== existing.length || isDeepStrictEqual(existing, exported)) { return null; }
   if (!apply) { return { outcome: 'would-backfill-events', events: exported.length }; }
 
   await store.save(

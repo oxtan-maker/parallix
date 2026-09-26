@@ -10,15 +10,16 @@ import { createLauncherProbe, type LauncherProbeResult } from '../adapters/agent
 import { ConcreteAgentReadAdapter } from '../adapters/backlog/concrete-agent-read-adapter.js';
 import { ConcreteGateReadAdapter } from '../adapters/backlog/concrete-gate-read-adapter.js';
 import { ConcreteGitReadAdapter } from '../adapters/backlog/concrete-git-read-adapter.js';
-import { ConcreteMissionReadAdapter } from '../adapters/backlog/concrete-mission-read-adapter.js';
+import { readBacklogInputs } from '../adapters/backlog/backlog-input-reader.js';
+import { resolveTaskFile, getTaskFrontmatterValue } from '../adapters/backlog/task-file-io.js';
 import { ConcreteOperationLogReadAdapter } from '../adapters/backlog/concrete-operation-log-read-adapter.js';
 import { ConcreteReviewReadAdapter } from '../adapters/backlog/concrete-review-read-adapter.js';
 import { ConcreteCurrentWorkReadAdapter } from '../adapters/backlog/concrete-current-work-read-adapter.js';
 import { processLivenessProbe } from '../adapters/process/process-liveness.js';
-import { resolveBaseWorktree, snapshotWorktreeTopology } from '../adapters/git/worktree.js';
+import { snapshotWorktreeTopology } from '../adapters/git/worktree.js';
 import { BoardProjectionBuilder } from '../application/projections/board-readers.js';
 import type { MissionReadAdapter } from '../application/projections/board-readers.js';
-import { ConcreteMetricsReadAdapter } from '../application/projections/metrics-read-adapter.js';
+import { ConcreteMetricsReadAdapter, missionCohortMetadata } from '../application/projections/metrics-read-adapter.js';
 import { MissionProjectionQuery } from '../application/projections/mission-query.js';
 import type { SourceFact } from '../application/contracts.js';
 import { BoardCommandController, type BoardMissionServices } from '../application/controller/board-controller.js';
@@ -58,92 +59,41 @@ export interface BoardProjectionCompositionDeps {
 
 /** The sole production constructor for board reads and mission details. */
 export function composeBoardProjection(deps: BoardProjectionCompositionDeps) {
-  // Only used when a gitFn double is injected; the branch-name fallback must
-  // not reach the real CLI either.
-  const topologyFor = (cwd: string) => snapshotWorktreeTopology({
-    cwd,
-    gitFn: deps.gitFn,
-    currentBranch: () => '',
-  });
-  const repositoryMissions = new ConcreteMissionReadAdapter({
-    rootDir: deps.rootDir,
-    repositoryId: deps.repositoryId,
-    resolveWorktree: deps.gitFn
-      ? (slug, options) => topologyFor(options?.cwd ?? deps.rootDir).resolveWorktree(slug, options)
-      : undefined,
-    resolveBaseWorktree: deps.gitFn
-      ? (slug) => resolveBaseWorktree(slug, { rootDir: deps.rootDir, gitFn: deps.gitFn })
-      : undefined,
-  });
   let cachedMissions: Promise<readonly import('../domain/mission.js').Mission[]> | null = null;
-  const persistedMissions = deps.missionStore?.loadByRepository;
   const missions: MissionReadAdapter = {
     async loadAllMissions() {
       cachedMissions ??= loadBoardMissions();
       return cachedMissions;
     },
     async loadMission(id) {
-      if (persistedMissions && deps.missionStore) {
+      if (deps.missionStore) {
         const stored = await deps.missionStore.load(id);
-        return stored.kind === 'found' && stored.mission.repositoryId === deps.repositoryId
-          ? withRepositoryTitle(stored.mission, await repositoryMissions.loadMission(id))
-          : loadMarkdownMission(id);
+        if (stored.kind === 'found') {
+          return stored.mission.repositoryId === deps.repositoryId ? withRepositoryTitle(stored.mission) : null;
+        }
       }
-      return loadMarkdownMission(id);
+      return (await missions.loadAllMissions()).find(mission => mission.id === id) ?? null;
     },
-    getSourceFacts: (): readonly SourceFact<string>[] => persistedMissions
-      ? [...repositoryMissions.getSourceFacts(), { source: 'mission-store', status: 'fresh', value: deps.repositoryId }]
-      : repositoryMissions.getSourceFacts(),
+    getSourceFacts: (): readonly SourceFact<string>[] => [
+      { source: 'task-markdown', status: 'fresh', value: 'Uningested Backlog inputs' },
+      { source: 'mission-store', status: deps.missionStore ? 'fresh' : 'unavailable', value: deps.repositoryId },
+    ],
   };
 
-  /**
-   * `title` is `target-repository` authority (`MISSION_FIELD_AUTHORITY`), so the
-   * Backlog task keeps it even when the persisted aggregate supplies lifecycle.
-   * The stored title is written at `px draft` intake, when MISSION.md is still
-   * the scaffold, so it is the literal `<Title> (slug)` placeholder; taking the
-   * whole aggregate published that placeholder to every persisted board card.
-   */
-  function withRepositoryTitle(
-    stored: import('../domain/mission.js').Mission,
-    markdown: import('../domain/mission.js').Mission | null,
-  ): import('../domain/mission.js').Mission {
-    return { ...stored, title: markdown?.title ?? stored.id };
-  }
-
   async function loadBoardMissions(): Promise<readonly import('../domain/mission.js').Mission[]> {
-    const markdown = await repositoryMissions.loadAllMissions();
-    if (!persistedMissions || !deps.missionStore) {
-      return Promise.all(markdown.map((mission) => withPersistedCheckpoints(mission)));
+    if (deps.missionStore && !deps.missionStore.loadByRepository) {
+      throw new Error('Mission store cannot enumerate repository records');
     }
-    const persisted = await deps.missionStore.loadByRepository!(deps.repositoryId);
-    const byId = new Map(persisted.map((mission) => [mission.id, mission]));
-    const catalog = new Map(markdown.flatMap((mission) => {
-      const stored = byId.get(mission.id);
-      return stored ? [withRepositoryTitle(stored, mission)] : mission.status === 'done' ? [] : [mission];
-    }).map((mission) => [mission.id, mission]));
-    // SQLite supplies current sibling-worktree missions; a local archive record
-    // remains authoritative for exclusion.
-    for (const stored of persisted) {
-      if (stored.status !== 'done' && !repositoryMissions.isArchivedMission(stored.id)) {
-        catalog.set(stored.id, withRepositoryTitle(stored, catalog.get(stored.id) ?? null));
-      }
-    }
-    return [...catalog.values()];
+    const recorded = await deps.missionStore?.loadByRepository?.(deps.repositoryId) ?? [];
+    const inputs = readBacklogInputs(deps.rootDir, deps.repositoryId, new Set(recorded.map(mission => mission.id)));
+    return [...recorded.map(withRepositoryTitle), ...inputs];
   }
 
-  async function loadMarkdownMission(id: import('../domain/mission.js').MissionId) {
-    const mission = await repositoryMissions.loadMission(id);
-    return mission ? withPersistedCheckpoints(mission) : null;
-  }
-
-  async function withPersistedCheckpoints(mission: import('../domain/mission.js').Mission) {
-    if (!deps.missionStore) { return mission; }
-    try {
-      const stored = await deps.missionStore.load(mission.id);
-      return stored.kind === 'found' ? { ...mission, checkpoints: stored.mission.checkpoints } : mission;
-    } catch {
-      return mission;
-    }
+  // Backlog owns its descriptive title; the aggregate owns all operational fields.
+  function withRepositoryTitle(mission: import('../domain/mission.js').Mission) {
+    const task = resolveTaskFile(mission.id, deps.rootDir);
+    const title = task.ok && task.taskFile ? getTaskFrontmatterValue(task.taskFile, 'title') : null;
+    return title ? { ...mission, title } : mission;
   }
   const currentWork = new ConcreteCurrentWorkReadAdapter(deps.historyRepo);
   const gates = new ConcreteGateReadAdapter({ rootDir: deps.rootDir });
@@ -179,7 +129,6 @@ export function composeBoardProjection(deps: BoardProjectionCompositionDeps) {
           gitFn: deps.gitFn ?? null,
           currentBranch: deps.gitFn ? () => '' : undefined,
         });
-        repositoryMissions.useWorktreeTopology(topology);
         cachedMissions = null;
         gates.useWorktreeTopology(topology);
       },
@@ -198,9 +147,7 @@ export function composeBoardProjection(deps: BoardProjectionCompositionDeps) {
         netEngineeringLines: async () => new Map(
           (await missions.loadAllMissions()).map((mission) => [mission.id, mission.netEngineeringLines]),
         ),
-        cohortMetadata: async () => new Map(
-          (await missions.loadAllMissions()).map((mission) => [mission.id, { labels: mission.labels, assignee: mission.assignee }]),
-        ),
+        cohortMetadata: async () => missionCohortMetadata(await missions.loadAllMissions()),
       }),
     },
   );
