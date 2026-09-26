@@ -1,10 +1,10 @@
 ---
 id: TASK-2583
 title: make the ux for pi better
-status: backlog
-assignee: []
+status: done
+assignee: [codex]
 created_date: '2026-09-26 10:48'
-labels: []
+labels: [ai_sdlc, bug]
 dependencies: []
 ordinal: 114008
 ---

@@ -250,7 +250,7 @@ test('the progress indicator names the current activity', () => {
   view.render([{ kind: 'tool_start', id: 't1', name: 'Bash', input: 'npm test', agent: null, isSubagent: false }]);
   clock = 2000;
   view.tick();
-  assert.match(sink.text, /Bash… 1\.0s/, 'the elapsed time is the running tool\'s own, not the whole run\'s');
+  assert.match(sink.text, /running command… 1\.0s/, 'the elapsed time is the running tool\'s own, not the whole run\'s');
 
   view.render([{ kind: 'tool_result', id: 't1', name: 'Bash', isError: false, summary: 'ok', agent: null, isSubagent: false }]);
   clock = 3000;

@@ -139,7 +139,7 @@ function startClaudeAgent({ prompt, worktree, env, resume = false, sessionId = n
   // and `extractClaudeSessionId` still see the byte-identical raw JSONL.
   // `PARALLIX_CLAUDE_RAW_STREAM=1` restores the verbatim passthrough.
   function launch(invocation: any) {
-    const sink = createClaudeRenderSink();
+    const sink = createClaudeRenderSink(process.stdout, {}, invocation.options.env);
     const teeWithTail = {
       maxTailBytes: CLAUDE_TELEMETRY_TAIL_BYTES,
       stdoutSink: sink,

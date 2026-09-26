@@ -16,26 +16,8 @@
 
 import { StringDecoder } from 'node:string_decoder';
 
-/** Salient input field per tool, used to condense a tool call to one line. */
-const TOOL_INPUT_FIELDS: Record<string, string[]> = {
-  Bash: ['command'],
-  Read: ['file_path'],
-  Write: ['file_path'],
-  Edit: ['file_path'],
-  NotebookEdit: ['notebook_path'],
-  Glob: ['pattern'],
-  Grep: ['pattern'],
-  WebFetch: ['url'],
-  WebSearch: ['query'],
-  Task: ['subagent_type', 'description'],
-  Agent: ['subagent_type', 'description'],
-  Skill: ['skill'],
-};
-
-/** Tools that launch a sub-agent. The CLI has shipped both names; either one
- *  must be labelled as a sub-agent rather than dumped as a raw tool input,
- *  whose `prompt` field is long enough to bury the rest of the view. */
-const SUBAGENT_TOOLS = new Set(['Task', 'Agent']);
+import { asRecord, finiteOrNull, condense, ToolCallTracker, type NormalizedEvent } from './agent-stream-events.js';
+export { MAX_INPUT_SUMMARY, condense, summarizeToolInput, type NormalizedEvent } from './agent-stream-events.js';
 
 /** Inner SSE / envelope types that carry no renderable surface of their own. */
 const IGNORED_TYPES = new Set([
@@ -51,79 +33,6 @@ const IGNORED_TYPES = new Set([
   'rate_limit_event',
   'tool_progress',
 ]);
-
-export const MAX_INPUT_SUMMARY = 120;
-
-export type NormalizedEvent =
-  | { kind: 'system'; model: string | null; sessionId: string | null; tools: number | null }
-  | { kind: 'text'; text: string; agent: string | null }
-  | { kind: 'thinking'; text: string; agent: string | null }
-  | { kind: 'thinking_summary'; tokens: number | null; agent: string | null }
-  | { kind: 'thinking_progress'; tokens: number | null }
-  | { kind: 'agent_progress'; agent: string; description: string; toolUses: number | null }
-  | { kind: 'tool_start'; id: string | null; name: string; input: string; agent: string | null; isSubagent: boolean }
-  | { kind: 'tool_result'; id: string | null; name: string | null; isError: boolean; summary: string; agent: string | null; isSubagent: boolean }
-  | { kind: 'result'; isError: boolean; durationMs: number | null; costUsd: number | null; inputTokens: number | null; outputTokens: number | null; numTurns: number | null }
-  | { kind: 'passthrough'; text: string }
-  | { kind: 'unknown'; type: string };
-
-function asRecord(value: unknown): Record<string, any> | null {
-  return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, any> : null;
-}
-
-function finiteOrNull(value: unknown): number | null {
-  return typeof value === 'number' && Number.isFinite(value) ? value : null;
-}
-
-/** Collapse to one line and cap the length so a tool call stays scannable. */
-export function condense(text: string, max: number = MAX_INPUT_SUMMARY): string {
-  const flat = String(text).replace(/\s+/g, ' ').trim();
-  return flat.length > max ? `${flat.slice(0, max - 1)}…` : flat;
-}
-
-/** Pick the salient field(s) of a tool input, falling back to compact JSON. */
-export function summarizeToolInput(name: string, input: unknown): string {
-  const record = asRecord(input);
-  if (!record) {return input === undefined ? '' : condense(String(input));}
-  const fields = TOOL_INPUT_FIELDS[name];
-  if (fields) {
-    const picked = fields
-      .map(field => record[field])
-      .filter(value => value !== undefined && value !== null && value !== '')
-      .map(value => (typeof value === 'string' ? value : JSON.stringify(value)));
-    if (picked.length > 0) {return condense(picked.join(' · '));}
-  }
-  const keys = Object.keys(record);
-  if (keys.length === 0) {return '';}
-  try {
-    return condense(JSON.stringify(record));
-  } catch {
-    return condense(keys.join(', '));
-  }
-}
-
-/** Flatten a tool_result `content` payload (string, or array of blocks). */
-function summarizeToolResult(content: unknown): string {
-  if (typeof content === 'string') {return condense(content);}
-  if (Array.isArray(content)) {
-    const text = content
-      .map(block => {
-        const record = asRecord(block);
-        if (!record) {return typeof block === 'string' ? block : '';}
-        if (typeof record.text === 'string') {return record.text;}
-        return record.type ? `[${record.type}]` : '';
-      })
-      .filter(Boolean)
-      .join(' ');
-    return condense(text);
-  }
-  if (content === undefined || content === null) {return '';}
-  try {
-    return condense(JSON.stringify(content));
-  } catch {
-    return '';
-  }
-}
 
 interface OpenBlock {
   type: string;
@@ -148,11 +57,7 @@ export class ClaudeStreamNormalizer {
   /** Open content blocks keyed by `<agent>:<block index>`. Concurrent
    *  sub-agents reuse the same block indices, so the index alone collides. */
   private blocks = new Map<string, OpenBlock>();
-  /** Task tool_use id → human label, so sub-agent events can be attributed. */
-  private subagents = new Map<string, string>();
-  /** Non-Task tool_use id → tool name, so tool results can name their tool. */
-  private toolNames = new Map<string, string>();
-  private subagentCount = 0;
+  private tools = new ToolCallTracker();
   /** Message ids already streamed as partial events. The CLI repeats each
    *  streamed turn as a complete top-level `assistant` record, so that record
    *  is a duplicate only when its own message id was streamed. A later turn
@@ -218,7 +123,7 @@ export class ClaudeStreamNormalizer {
   }
 
   private consumeEvent(outer: Record<string, any>, events: NormalizedEvent[]): void {
-    const agent = this.agentLabel(outer.parent_tool_use_id);
+    const agent = this.tools.agentLabel(outer.parent_tool_use_id);
     if (agent && typeof outer.parent_tool_use_id === 'string') {this.relayedAgents.add(outer.parent_tool_use_id);}
 
     // Only the init record describes the session. The CLI also emits
@@ -287,7 +192,7 @@ export class ClaudeStreamNormalizer {
     const usage = asRecord(outer.usage) || {};
     events.push({
       kind: 'agent_progress',
-      agent: this.subagents.get(id) ?? `sub-agent ${id.slice(-6)}`,
+      agent: this.tools.agentLabel(id)!,
       description: condense(description, 60),
       toolUses: finiteOrNull(usage.tool_uses),
     });
@@ -354,7 +259,7 @@ export class ClaudeStreamNormalizer {
     if (open && open.type === 'tool_use') {
       let input: unknown;
       try {input = open.partialJson ? JSON.parse(open.partialJson) : {};} catch {input = open.partialJson;}
-      events.push(this.toolStart(open.name, open.id, input, open.agent));
+      events.push(this.tools.start(open.name, open.id, input, open.agent));
     }
   }
 
@@ -370,7 +275,7 @@ export class ClaudeStreamNormalizer {
       } else if (block.type === 'thinking' && typeof block.thinking === 'string') {
         events.push({ kind: 'thinking', text: block.thinking, agent });
       } else if (block.type === 'tool_use') {
-        events.push(this.toolStart(String(block.name ?? ''), typeof block.id === 'string' ? block.id : null, block.input, agent));
+        events.push(this.tools.start(String(block.name ?? ''), typeof block.id === 'string' ? block.id : null, block.input, agent));
       }
     }
   }
@@ -382,38 +287,8 @@ export class ClaudeStreamNormalizer {
       const block = asRecord(raw);
       if (!block || block.type !== 'tool_result') {continue;}
       const id = typeof block.tool_use_id === 'string' ? block.tool_use_id : null;
-      const subagentLabel = id ? this.subagents.get(id) : undefined;
-      events.push({
-        kind: 'tool_result',
-        id,
-        name: subagentLabel ?? (id ? this.toolNames.get(id) ?? null : null),
-        isError: block.is_error === true,
-        summary: summarizeToolResult(block.content),
-        agent,
-        isSubagent: Boolean(subagentLabel),
-      });
+      events.push(this.tools.result(id, block.content, block.is_error === true, agent));
     }
   }
 
-  private toolStart(name: string, id: string | null, input: unknown, agent: string | null): NormalizedEvent {
-    const summary = summarizeToolInput(name, input);
-    const isSubagent = SUBAGENT_TOOLS.has(name);
-    if (id) {
-      if (isSubagent) {
-        this.subagentCount += 1;
-        const record = asRecord(input) || {};
-        const descriptor = [record.subagent_type, record.description].find(v => typeof v === 'string' && v);
-        this.subagents.set(id, `${name}#${this.subagentCount}${descriptor ? ` ${condense(String(descriptor), 40)}` : ''}`);
-      } else {
-        this.toolNames.set(id, name);
-      }
-    }
-    return { kind: 'tool_start', id, name, input: summary, agent, isSubagent };
-  }
-
-  /** Resolve `parent_tool_use_id` to the label of the Task that owns it. */
-  private agentLabel(parentToolUseId: unknown): string | null {
-    if (typeof parentToolUseId !== 'string' || !parentToolUseId) {return null;}
-    return this.subagents.get(parentToolUseId) ?? `sub-agent ${parentToolUseId.slice(-6)}`;
-  }
 }

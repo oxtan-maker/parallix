@@ -1,8 +1,14 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import type { MissionId } from '../../domain/mission.js';
+import type { SessionRole } from '../../domain/session.js';
 import type { SessionMarkerPort } from '../../application/domain-ports.js';
 import { buildSubagentLimitPrefix } from './subagent-limit.js';
+import { createAgentStreamRenderer, type AgentStreamRenderer, type RenderSink } from './agent-stream-view.js';
+import { createOutputWatchdog, type NoOutputWatchdog } from '../process/output-watchdog.js';
+import { PiStreamNormalizer } from './pi-stream-render.js';
+import { finiteOrNull } from './agent-stream-events.js';
 
 interface BuildPiInvocationOptions {
   prompt: string;
@@ -13,19 +19,9 @@ interface BuildPiInvocationOptions {
   model?: string | null;
 }
 
-interface PiNoOutputWatchdog {
-  /**
-   * Observational liveness report: it never cancels the session, and keeps
-   * firing on `intervalMs` until the agent result settles, including after
-   * the first visible assistant text (`sawOutput`).
-   */
-  onNoOutput?: (_event: { command: string; args: string[]; pid: number | undefined; elapsedMs: number; sawOutput: boolean; msSinceLastOutput: number | null }) => void;
-  initialDelayMs?: number;
-  intervalMs?: number;
-}
-
 interface PiTeeOptions {
-  noOutputWatchdog?: PiNoOutputWatchdog | null;
+  stdoutSink?: RenderSink;
+  noOutputWatchdog?: NoOutputWatchdog | null;
 }
 
 interface StartPiAgentOptions {
@@ -36,8 +32,8 @@ interface StartPiAgentOptions {
   sessionId?: string | null;
   model?: string | null;
   teeOptions?: PiTeeOptions;
-  slug?: string | null;
-  role?: string | null;
+  slug?: MissionId | null;
+  role?: SessionRole | null;
   maxTransientRetries?: number;
   /** Checked application port for session markers (architecture migration cutover). */
   sessionMarkerPort?: SessionMarkerPort;
@@ -181,6 +177,7 @@ function extractTelemetryFromStats(stats: any, model?: string) {
     cachedTokens: stats.tokens.cacheRead || 0,
     totalTokens: stats.tokens.total || 0,
     toolCalls: stats.toolCalls || 0,
+    cost_usd: stats.cost ?? 0,
     usagePercent: null,
   };
 }
@@ -191,6 +188,7 @@ async function createSessionManager(
   worktree: string,
   resume: boolean,
   sessionId: string | null,
+  clearStaleMarker: () => Promise<void>,
 ) {
   if (resume && sessionId) {
     // Find the session file matching the stored sessionId and open it so the
@@ -200,16 +198,16 @@ async function createSessionManager(
     if (match) {
       return sdk.SessionManager.open(match.path, undefined, worktree);
     }
-    // Session ID not found — fall back to continuing the most recent session
-    // (may be the same session under a different directory).
-    return sdk.SessionManager.continueRecent(worktree);
+    // Never substitute an unrelated conversation for an explicit session ID.
+    await clearStaleMarker();
+    return sdk.SessionManager.create(worktree);
   }
   if (resume) {
     // Resume without a stored sessionId — continue the most recent session.
     return sdk.SessionManager.continueRecent(worktree);
   }
-  // Fresh run — in-memory to avoid leaving stale session files.
-  return sdk.SessionManager.inMemory();
+  // Persist the conversation so the returned marker can actually be resumed.
+  return sdk.SessionManager.create(worktree);
 }
 
 /**
@@ -241,87 +239,101 @@ async function createSdkSessionOptions(
     sdkOptions.modelRuntime = modelRuntime;
   }
 
-  if (!modelRegistry) { return sdkOptions; }
+  if (!modelRegistry) { throw new Error(`Pi SDK cannot resolve the requested model: ${model}`); }
   const slashIndex = model.indexOf('/');
   if (slashIndex > 0) {
     sdkOptions.model = modelRegistry.find(model.substring(0, slashIndex), model.substring(slashIndex + 1));
   } else {
     sdkOptions.model = modelRegistry.getAll().find((candidate: any) => candidate.id === model);
   }
-  if (sdkOptions.model === undefined) { delete sdkOptions.model; }
+  if (!sdkOptions.model) { throw new Error(`Pi model not found: ${model}`); }
   return sdkOptions;
 }
 
-async function runPiSession(
-  createSession: Function,
-  sdkOptions: any,
-  prompt: string,
-  watchdog: ReturnType<typeof createPiWatchdog>,
-  state: { assistantText: string; settleError: string | null },
-) {
-  state.assistantText = '';
-  state.settleError = null;
-  let session: any = null;
-  try {
-    ({ session } = await createSession(sdkOptions));
-    const unsubscribe = subscribePiEvents(session, watchdog, {
-      text: delta => { state.assistantText += delta; },
-      settled: error => { state.settleError = error; },
-    });
-    await session.prompt(prompt);
-    if (typeof unsubscribe === 'function') { unsubscribe(); }
-    if (typeof session.dispose === 'function') { session.dispose(); }
-    watchdog.clear();
-    if (state.settleError) { throw new Error(state.settleError); }
-    return session;
-  } catch (error: any) {
-    error.piSession = session;
-    throw error;
+interface PiRunState {
+  assistantText: string;
+  settleError: string | null;
+}
+
+function sessionValue(read: () => any, fallback: any) {
+  try { return read() ?? fallback; } catch { return fallback; }
+}
+
+/** SDK stats are lifetime totals; a resumed launch must not bill old work again. */
+function invocationStats(current: any, baseline: any) {
+  const difference = (value: any, before: any) => typeof value === 'number' ? Math.max(0, value - (typeof before === 'number' ? before : 0)) : value;
+  const stats = { ...current };
+  for (const key of ['assistantMessages', 'userMessages', 'toolCalls', 'toolResults', 'totalMessages', 'cost']) {
+    stats[key] = difference(current[key], baseline[key]);
   }
+  if (current.tokens) {
+    stats.tokens = Object.fromEntries(Object.entries(current.tokens).map(([key, value]) => [key, difference(value, baseline.tokens?.[key])]));
+  }
+  return stats;
 }
 
-function piSuccessResult(session: any, assistantText: string, attempts: number) {
-  const stats = session.getSessionStats?.() || {};
+function piResult(session: any, state: PiRunState, error: any, attempts: number, startedAt: string, baseline: any = {}) {
+  // Snapshot before disposal: SDK getters need not remain usable afterwards.
+  const stats = invocationStats(sessionValue(() => session?.getSessionStats?.(), {}), baseline);
   return {
-    status: 0, stdout: session.getLastAssistantText?.() || assistantText, stderr: '', error: null, signal: null,
-    sessionId: session.sessionId || null, telemetry: extractTelemetryFromStats(stats, session.model?.id),
-    model: session.model?.id || undefined, provider: 'pi', transientRetries: attempts,
-    startedAt: new Date().toISOString(), endedAt: new Date().toISOString(),
-  };
-}
-
-function piFailureResult(session: any, assistantText: string, error: any, attempts: number) {
-  const stats = session?.getSessionStats?.() || {};
-  return {
-    status: error.exitCode || 1, stdout: assistantText, stderr: error.message || String(error), error, signal: null,
+    status: error ? error.exitCode || 1 : 0,
+    stdout: error ? state.assistantText : sessionValue(() => session?.getLastAssistantText?.(), '') || state.assistantText,
+    stderr: error ? error.message || String(error) : '', error: error || null, signal: null,
     sessionId: session?.sessionId || null, telemetry: extractTelemetryFromStats(stats, session?.model?.id),
     model: session?.model?.id || undefined, provider: 'pi', transientRetries: attempts,
-    startedAt: new Date().toISOString(), endedAt: new Date().toISOString(),
+    startedAt, endedAt: new Date().toISOString(),
+    stats,
   };
+}
+
+async function runPiSession(
+  createSession: Function, sdkOptions: any, prompt: string,
+  watchdog: ReturnType<typeof createOutputWatchdog>, renderer: AgentStreamRenderer,
+  attempts: number, startedAt: string, usage: { baseline: any | null },
+) {
+  const state: PiRunState = { assistantText: '', settleError: null };
+  let session: any = null;
+  let unsubscribe: (() => void) | undefined;
+  try {
+    const created = await createSession(sdkOptions);
+    session = created.session;
+    usage.baseline ??= sessionValue(() => session.getSessionStats?.(), {});
+    renderer.render([{ kind: 'system', model: session.model?.id || null, sessionId: session.sessionId || null,
+      tools: sessionValue(() => session.getActiveToolNames?.().length, null) }]);
+    if (created.modelFallbackMessage) {
+      renderer.render([{ kind: 'diagnostic', text: created.modelFallbackMessage, isError: false }]);
+    }
+    unsubscribe = subscribePiEvents(session, watchdog, renderer, state);
+    await session.prompt(prompt);
+    if (state.settleError) { throw new Error(state.settleError); }
+    const result = piResult(session, state, null, attempts, startedAt, usage.baseline);
+    if (!state.assistantText && result.stdout) { renderer.render([{ kind: 'text', text: result.stdout, agent: null }]); }
+    return result;
+  } catch (error: any) {
+    return piResult(session, state, error, attempts, startedAt, usage.baseline || {});
+  } finally {
+    try { unsubscribe?.(); } finally { session?.dispose?.(); }
+  }
 }
 
 async function runPiAttempts(
-  createSession: Function, sdkOptions: any, prompt: string, watchdog: ReturnType<typeof createPiWatchdog>,
-  state: { assistantText: string; settleError: string | null }, maxTransientRetries: number,
+  createSession: Function, sdkOptions: any, prompt: string, watchdog: ReturnType<typeof createOutputWatchdog>,
+  renderer: AgentStreamRenderer, maxTransientRetries: number, startedAt: string, resume: boolean,
 ) {
-  let attempts = 0;
-  let session: any = null;
-  while (attempts <= maxTransientRetries) {
-    try {
-      session = await runPiSession(createSession, sdkOptions, prompt, watchdog, state);
-      return piSuccessResult(session, state.assistantText, attempts);
-    } catch (error: any) {
-      session = error.piSession ?? session;
-      const result = piFailureResult(session, state.assistantText, error, attempts);
-      if (attempts >= maxTransientRetries || !isTransientPiFailure(result)) { return result; }
-      attempts += 1;
-    }
+  const usage = { baseline: resume ? null : {} };
+  for (let attempts = 0; ; attempts += 1) {
+    const result = await runPiSession(createSession, sdkOptions, prompt, watchdog, renderer, attempts, startedAt, usage);
+    if (attempts >= maxTransientRetries || !isTransientPiFailure(result) || result.status === 0) { return result; }
+    renderer.render([{ kind: 'activity', label: 'retrying', message: `↻ retry ${attempts + 1}/${maxTransientRetries} · ${result.stderr}` }]);
   }
-  return {
-    status: 1, stdout: state.assistantText, stderr: 'Max retries exceeded', error: new Error('Max retries exceeded'),
-    signal: null, sessionId: null, telemetry: null, model: undefined, provider: 'pi',
-    transientRetries: maxTransientRetries, startedAt: new Date().toISOString(), endedAt: new Date().toISOString(),
-  };
+}
+
+function renderPiResult(renderer: AgentStreamRenderer, result: ReturnType<typeof piResult>) {
+  if (result.stderr) { renderer.render([{ kind: 'diagnostic', text: result.stderr, isError: true }]); }
+  renderer.render([{ kind: 'result', isError: result.status !== 0,
+    durationMs: Date.parse(result.endedAt) - Date.parse(result.startedAt), costUsd: finiteOrNull(result.stats.cost),
+    inputTokens: finiteOrNull(result.stats.tokens?.input), outputTokens: finiteOrNull(result.stats.tokens?.output),
+    numTurns: finiteOrNull(result.stats.assistantMessages) }]);
 }
 
 function startPiAgent({
@@ -332,8 +344,9 @@ function startPiAgent({
   sessionId = null,
   model = null,
   teeOptions = {},
-  slug: _slug = null,
-  role: _role = null,
+  slug = null,
+  role = null,
+  sessionMarkerPort,
   maxTransientRetries = 1,
 }: StartPiAgentOptions) {
   // Prepend the subagent-limit advisory prefix to the prompt.
@@ -353,13 +366,9 @@ function startPiAgent({
   // All async work deferred to resultPromise so callers get
   // { invocation, resultPromise } synchronously (agents.ts contract).
   const resultPromise = (async () => {
-    // Resolve the SDK (or test override).
-    const sdk = await loadSdk();
-    const createSession = _createAgentSession || sdk.createAgentSession;
-
-    const sessionManager = await createSessionManager(sdk, worktree, resume, sessionId);
-    const sdkOptions = await createSdkSessionOptions(sdk, worktree, sessionManager, model);
-
+    const startedAt = new Date().toISOString();
+    const renderer = createAgentStreamRenderer(teeOptions.stdoutSink, {}, invocation.options.env);
+    const watchdog = createOutputWatchdog(teeOptions.noOutputWatchdog, invocation);
     // Merge caller-supplied environment into process.env so the SDK's
     // subprocess spawning (bash tool, etc.) inherits the caller's scoped
     // environment (e.g., FORGEJO_USER). Restore after the session completes.
@@ -375,18 +384,30 @@ function startPiAgent({
       }
     }
 
-    // Collect output during SDK execution.
-    const state = { assistantText: '', settleError: null as string | null };
-
-    // Tee / watchdog — write text_delta to process.stdout in real time
-    // and fire noOutputWatchdog.onNoOutput when no visible text arrives.
-    const watchdog = createPiWatchdog(teeOptions.noOutputWatchdog, invocation);
-
     try {
-      return await runPiAttempts(createSession, sdkOptions, injectedPrompt, watchdog, state, maxTransientRetries);
+      const sdk = await loadSdk();
+      const createSession = _createAgentSession || sdk.createAgentSession;
+      const clearStaleMarker = async () => {
+        const port = sessionMarkerPort || _sessionPort;
+        if (!port || !slug || !role) { throw new Error('Could not clear stale session marker: SessionMarkerPort is required'); }
+        await port.delete(slug, role);
+        renderer.render([{ kind: 'diagnostic', text: '· stored Pi session is unavailable; starting a fresh session', isError: false }]);
+      };
+      const sessionManager = await createSessionManager(sdk, worktree, resume, sessionId, clearStaleMarker);
+      const sdkOptions = await createSdkSessionOptions(sdk, worktree, sessionManager, model);
+      const result = await runPiAttempts(createSession, sdkOptions, injectedPrompt, watchdog, renderer, maxTransientRetries, startedAt, resume);
+      renderPiResult(renderer, result);
+      const { stats: _stats, ...launchResult } = result;
+      return launchResult;
+    } catch (error: any) {
+      const result = piResult(null, { assistantText: '', settleError: null }, error, 0, startedAt);
+      renderPiResult(renderer, result);
+      const { stats: _stats, ...launchResult } = result;
+      return launchResult;
     } finally {
       // Clean up watchdog timer.
       watchdog.clear();
+      renderer.close();
       // Restore original process.env.
       for (const [key, prevValue] of prevEnvEntries) {
         if (prevValue === undefined) {
@@ -401,38 +422,24 @@ function startPiAgent({
   return { invocation, resultPromise };
 }
 
-function createPiWatchdog(watchdog: PiNoOutputWatchdog | null | undefined, invocation: { command: string; args: string[] }) {
-  let timer: ReturnType<typeof setTimeout> | null = null;
-  let sawOutput = false;
-  let lastOutputAt: number | null = null;
-  const startedAt = Date.now();
-  const clear = () => { if (timer) { clearTimeout(timer); timer = null; } };
-  const schedule = (delayMs: number) => {
-    if (!watchdog?.onNoOutput) { return; }
-    timer = setTimeout(() => {
-      timer = null;
-      watchdog.onNoOutput?.({ command: invocation.command, args: invocation.args, pid: undefined, elapsedMs: Date.now() - startedAt, sawOutput, msSinceLastOutput: lastOutputAt === null ? null : Date.now() - lastOutputAt });
-      schedule(watchdog.intervalMs ?? 0);
-    }, Number.isFinite(delayMs) && delayMs >= 0 ? delayMs : 0);
-    timer.unref?.();
-  };
-  schedule(watchdog?.initialDelayMs ?? 0);
-  return { clear, noteOutput: () => { sawOutput = true; lastOutputAt = Date.now(); } };
-}
-
-function summarizePiToolResult(result: any) {
-  const text = result?.content?.find((block: any) => block?.type === 'text')?.text;
-  return typeof text === 'string' ? ` ${text.replace(/\s+/g, ' ').slice(0, 200)}` : '';
-}
-
-function subscribePiEvents(session: any, watchdog: { noteOutput: () => void }, callbacks: { text: (_delta: string) => void; settled: (_error: string | null) => void }) {
+function subscribePiEvents(session: any, watchdog: { noteOutput: () => void }, renderer: AgentStreamRenderer, state: PiRunState) {
+  const normalizer = new PiStreamNormalizer();
   return session.subscribe((event: any) => {
-    if (event.type === 'message_update' && event.assistantMessageEvent?.type === 'text_delta') { const delta = event.assistantMessageEvent.delta; callbacks.text(delta); process.stdout.write(delta); watchdog.noteOutput(); }
-    else if (event.type === 'message_update' && event.assistantMessageEvent?.type === 'thinking_delta') { process.stdout.write(`✳ ${event.assistantMessageEvent.delta}\n`); watchdog.noteOutput(); }
-    else if (event.type === 'tool_execution_start') { process.stdout.write(`⚒ ${event.toolName || 'tool'}\n`); watchdog.noteOutput(); }
-    else if (event.type === 'tool_execution_end') { process.stdout.write(`${event.isError ? '✗' : '✓'} ${event.toolName || 'tool'}${summarizePiToolResult(event.result)}\n`); watchdog.noteOutput(); }
-    else if (event.type === 'agent_end') { const last = event.messages?.[event.messages.length - 1]; callbacks.settled(!event.willRetry && last?.stopReason === 'error' ? last.errorMessage || 'agent session ended in a provider error' : null); }
-    else if (event.type === 'auto_retry_end' && event.success === false) { callbacks.settled(event.finalError || 'agent retries exhausted without a model response'); }
+    let events;
+    try { events = normalizer.push(event); } catch { events = [{ kind: 'unknown' as const, type: String(event.type ?? 'unknown') }]; }
+    for (const normalized of events) {
+      if (normalized.kind === 'text') { state.assistantText += normalized.text; }
+    }
+    renderer.render(events);
+    if (events.length || event.type === 'tool_execution_update') { watchdog.noteOutput(); }
+    if (event.type === 'message_start' && event.message?.role === 'assistant') { state.settleError = null; }
+    if (event.type === 'agent_end' && !event.willRetry) {
+      const last = event.messages?.findLast((message: any) => message.role === 'assistant') ?? event.messages?.at(-1);
+      state.settleError = last?.stopReason === 'error' ? last.errorMessage || 'agent session ended in a provider error'
+        : last?.stopReason === 'aborted' ? 'agent session aborted' : null;
+    } else if (event.type === 'auto_retry_end') {
+      state.settleError = event.success === false ? event.finalError || 'agent retries exhausted without a model response' : null;
+    }
   });
 }
 

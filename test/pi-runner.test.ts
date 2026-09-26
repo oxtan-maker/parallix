@@ -12,7 +12,7 @@ const productConfig = mockModule<typeof import('../src/adapters/config/product-c
 const launcherSelection = mockModule<typeof import('../src/adapters/agents/launcher-selection.js')>('../src/adapters/agents/launcher-selection.js', import.meta.url);
 await installModuleMocks();
 test.afterEach(() => mock.restoreAll());
-test.beforeEach(() => pi.__setSdkForTest({ SessionManager: { inMemory: () => ({}) } }));
+test.beforeEach(() => pi.__setSdkForTest({ SessionManager: { create: () => ({}) } }));
 test.afterEach(() => {
   // Reset Pi module test hooks
   pi.__setSdkForTest(null);
@@ -242,7 +242,7 @@ test('startPiAgent renders thinking and tool progress without polluting the fina
     const result = await resultPromise;
 
     assert.equal(result.stdout, 'Hello world', 'final result contains assistant text only');
-    assert.deepEqual(writes, ['Hello', ' world', '✳ <thinking>...\n', '⚒ bash\n', '✓ bash OK\n', '⚒ read\n', '✗ read Permission denied\n']);
+    assert.match(writes.join(''), /Hello world\n✳ <thinking>\.\.\.\n  ✓ OK\n⚒ read\n  ✗ read Permission denied\n/);
     assert.equal(result.status, 0);
     assert.equal(result.provider, 'pi');
   } finally {
@@ -333,7 +333,7 @@ test('startPiAgent supports legacy and current Pi SDK model APIs', async () => {
       assert.equal(authStorage, legacyAuthStorage);
       return legacyRegistry;
     } },
-    SessionManager: { inMemory: () => ({}) },
+    SessionManager: { create: () => ({}) },
   });
   pi.__setCreateAgentSessionForTest(async options => {
     legacyOptions = options;
@@ -356,7 +356,7 @@ test('startPiAgent supports legacy and current Pi SDK model APIs', async () => {
   pi.__setSdkForTest({
     ModelRuntime: { create: async () => { runtimeCreated++; return currentRuntime; } },
     ModelRegistry: CurrentModelRegistry,
-    SessionManager: { inMemory: () => ({}) },
+    SessionManager: { create: () => ({}) },
   });
   pi.__setCreateAgentSessionForTest(async options => {
     currentOptions = options;
@@ -496,7 +496,7 @@ test('startPiAgent resume without sessionId uses SessionManager.continueRecent',
 test('startPiAgent propagates caller model to SDK createAgentSession', async () => {
   const resolvedModel = { id: 'claude-sonnet-4-20250514' };
   const sdk = {
-    SessionManager: { inMemory: () => ({}) },
+    SessionManager: { create: () => ({}) },
     AuthStorage: { create: () => ({}) },
     ModelRegistry: { create: () => ({ find: () => resolvedModel, getAll: () => [resolvedModel] }) },
   };
@@ -537,7 +537,7 @@ test('startPiAgent propagates caller model to SDK createAgentSession', async () 
 });
 
 test('startPiAgent propagates caller environment to subprocess context', async () => {
-  const sdk = { SessionManager: { inMemory: () => ({}) } };
+  const sdk = { SessionManager: { create: () => ({}) } };
   let envWasSet = false;
   // Ensure the test key doesn't already exist.
   const origTestVar = process.env.TASK_2238_TEST_VAR;
@@ -680,7 +680,7 @@ test('startPiAgent invokes teeOptions.noOutputWatchdog.onNoOutput when no text a
 // ---------- Pi launcher model propagation (task-2337) ----------
 
 test('startPiAgent result includes session.model.id in result.model and result.telemetry.model (task-2337)', async () => {
-  const sdk = { SessionManager: { inMemory: () => ({}) } };
+  const sdk = { SessionManager: { create: () => ({}) } };
   const expectedModelId = 'qwen3.6-27b-q8';
 
   pi.__setCreateAgentSessionForTest(async () => {
@@ -731,7 +731,7 @@ test('startPiAgent result includes session.model.id in result.model and result.t
 });
 
 test('startPiAgent result.model is undefined when session.model is absent (task-2337)', async () => {
-  const sdk = { SessionManager: { inMemory: () => ({}) } };
+  const sdk = { SessionManager: { create: () => ({}) } };
 
   pi.__setCreateAgentSessionForTest(async () => {
     const session = {

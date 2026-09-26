@@ -101,7 +101,7 @@ The `qwen` family runs against the Alibaba Cloud Model Studio (Bailian) Token Pl
 - **Night discount**: qwen3.8-max calls between 22:00 and 08:00 consume credits at 50% discount (cost observation, no scheduler logic).
 - **Telemetry**: Client-side token counts are a lower bound on credit consumption (system prompt, tool schemas, and history also consume credits). Bailian console usage analytics is the authoritative credit source. `thoughts_tokens` column in stats tracks thinking/reasoning tokens separately.
 
-## Claude live output view
+## Claude and Pi live output view
 
 The Claude CLI leaves no transcript on disk, so the only record of a run's
 model, session id, token usage, and cost is the machine-readable event stream
@@ -110,15 +110,15 @@ streaming mode. That kept telemetry working but made the terminal unreadable,
 so Parallix renders the stream as human activity instead of printing the raw
 events.
 
-What you see while a claude stage runs:
+Claude and Pi show the same activity view, using the information each agent supplies:
 
 ```
 ● claude-opus-5 · session 6f1c… · 24 tools
 ✳ thinking is dimmed and marked
 ✳ thinking · 148 tokens
 assistant text streams as it arrives
-⚒ Bash npm test -- test/claude.test.ts
-  ✓ Bash 28 pass, 0 fail
+⚒ npm test
+  ✓ 28 pass, 0 fail
   ✗ Read ENOENT: no such file
 ▶ sub-agent Explore · map the renderers
   ↳ Task#1 Explore scanning src/adapters
@@ -126,6 +126,19 @@ assistant text streams as it arrives
 ◀ ✓ Task#1 Explore found 3 renderers
 ● done 4m12s · 9 turns · 12400 in / 8100 out · $0.9021
 ```
+
+Thinking streams immediately and stays on the same line across event chunks.
+Shell activity shows the command and its result without a `Bash` or `bash`
+label, including in the idle indicator. Pi also reports retries and context
+compaction as they happen. Both views end with a done or failed summary and
+available timing, usage, and cost. Pi reports usage for the current launch,
+including its retries, rather than counting earlier launches again on resume.
+
+Pi conversations are saved so a later launch can resume the recorded session.
+If that exact session is missing, Parallix clears its stale marker and starts
+fresh rather than resuming another conversation. An explicitly requested model
+that cannot be resolved fails with a diagnostic instead of silently selecting
+a default.
 
 Concurrent sub-agents (the `Agent`/`Task` tool) each get their own `#N` label,
 so parallel activity stays readable in a single flat stream. Bookkeeping the CLI
@@ -148,11 +161,12 @@ cursor control at all.
 
 Two guarantees hold regardless of what is rendered:
 
-* **Rendering is display-only.** The telemetry Parallix records is read from the
-  unmodified event stream, so the recorded model, session id, token usage, and
-  cost are the same whether rendering is on or off.
+* **Rendering is display-only.** Claude telemetry comes from the unmodified
+  event stream; Pi telemetry comes from its session statistics. In both cases,
+  the recorded model, session id, token usage, and cost are the same whether
+  rendering is on or off.
 * **Unrecognized activity degrades, it does not fail.** An event kind the view
-  does not know is shown as a single dim line, and an unparseable record is
+  does not know is shown as a single dim line, and an unparseable Claude record is
   skipped. An upstream change to Claude's event vocabulary costs you a line of
   output, not the run.
 

@@ -1,6 +1,7 @@
 import childProcess from 'node:child_process';
 import type { SpawnOptions, ChildProcess } from 'node:child_process';
 import path from 'node:path';
+import { createOutputWatchdog, type NoOutputWatchdog } from './output-watchdog.js';
 import { wrapWithBubblewrap } from './bubblewrap.js';
 
 export const DEFAULT_MAX_TAIL_BYTES = 64 * 1024;
@@ -15,17 +16,6 @@ interface SpawnTeeResult {
   error: unknown | null;
   startedAt: string;
   endedAt: string;
-}
-
-interface NoOutputWatchdog {
-  /**
-   * Observational liveness report. It never kills, times out, or cancels the
-   * child: it keeps firing on `intervalMs` until the child settles, including
-   * after the first visible output (`sawOutput`).
-   */
-  onNoOutput?: (_event: { command: string; args: string[]; pid: number | undefined; elapsedMs: number; sawOutput: boolean; msSinceLastOutput: number | null }) => void;
-  initialDelayMs?: number;
-  intervalMs?: number;
 }
 
 /**
@@ -117,9 +107,6 @@ export function spawnAndTee(command: string, args: string[], options: SpawnTeeOp
     const stdoutTail = new TailBuffer(maxTailBytes);
     const stderrTail = new TailBuffer(maxTailBytes);
     let settled = false;
-    let sawOutput = false;
-    let lastOutputAt: number | null = null;
-    let watchdogTimer: ReturnType<typeof setTimeout> | null = null;
     const startTime = Date.now();
     const resolvedCwd = path.resolve((spawnOptions.cwd as string) || process.cwd());
     const env: Record<string, string> = {
@@ -154,66 +141,26 @@ export function spawnAndTee(command: string, args: string[], options: SpawnTeeOp
       return;
     }
 
-    const clearWatchdog = (): void => {
-      if (watchdogTimer) {
-        clearTimeout(watchdogTimer);
-        watchdogTimer = null;
-      }
-    };
+    const watchdog = createOutputWatchdog(noOutputWatchdog, { command, args, pid: child.pid }, startTime);
 
     const finish = (payload: FinishPayload): void => {
       if (settled) {return;}
       settled = true;
-      clearWatchdog();
+      watchdog.clear();
       payload.startedAt = new Date(startTime).toISOString();
       payload.endedAt = new Date().toISOString();
       resolve(payload as SpawnTeeResult);
     };
 
-    const scheduleWatchdog = (delayMs: number): void => {
-      if (!noOutputWatchdog || typeof noOutputWatchdog.onNoOutput !== 'function') {return;}
-      const delay = Number.isFinite(delayMs) && delayMs >= 0 ? delayMs : 0;
-      watchdogTimer = setTimeout(() => {
-        watchdogTimer = null;
-        // Liveness reporting is observational for the child's full lifetime:
-        // only settling stops it. Suppressing after the first output hid later
-        // stalls, which is exactly the hang this watchdog exists to surface.
-        if (settled) {return;}
-        if (typeof noOutputWatchdog.onNoOutput === 'function') {
-          noOutputWatchdog.onNoOutput({
-            command,
-            args,
-            pid: child.pid,
-            elapsedMs: Date.now() - startTime,
-            sawOutput,
-            msSinceLastOutput: lastOutputAt === null ? null : Date.now() - lastOutputAt
-          });
-        }
-        scheduleWatchdog(noOutputWatchdog.intervalMs ?? 0);
-      }, delay);
-      if (typeof watchdogTimer.unref === 'function') {
-        watchdogTimer.unref();
-      }
-    };
-
-    const noteOutput = (): void => {
-      sawOutput = true;
-      lastOutputAt = Date.now();
-    };
-
-    if (noOutputWatchdog) {
-      scheduleWatchdog(noOutputWatchdog.initialDelayMs ?? 0);
-    }
-
     child.stdout?.on('data', (chunk: Buffer) => {
-      noteOutput();
+      watchdog.noteOutput();
       stdoutTail.push(chunk);
       if (stdoutSink && typeof stdoutSink.write === 'function') {
         stdoutSink.write(chunk);
       }
     });
     child.stderr?.on('data', (chunk: Buffer) => {
-      noteOutput();
+      watchdog.noteOutput();
       stderrTail.push(chunk);
       if (stderrSink && typeof stderrSink.write === 'function') {
         stderrSink.write(chunk);
