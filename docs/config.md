@@ -308,7 +308,9 @@ Gates run serially unless the repository opts a phase into bounded parallelism
 with `parallel`. Independent gates fill that phase's configured limit; a gate
 with `after` waits for each named producer. Output is emitted as a complete,
 labeled section per gate after it finishes, so concurrent command streams stay
-readable. A failure stops queued gates and blocks the phase.
+readable. When the interactive dashboard is unavailable, each gate instead
+prints a readable start and completion line as it runs. A failure stops queued
+gates and blocks the phase.
 
 `adapters.gates` is a closed section: `requirePreIntegration`, `parallel`,
 `preHandoff`, `preReview`, and `preIntegration` are its only permitted keys, so a typo such

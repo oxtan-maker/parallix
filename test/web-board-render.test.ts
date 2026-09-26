@@ -19,7 +19,7 @@ import { Board } from '../web/src/board.js';
 import { FlowPanel } from '../web/src/flow-panel.js';
 import { appendProgress, OPERATION_LOG_LIMIT } from '../web/src/operation-log.js';
 import { Shell } from '../web/src/shell.js';
-import { durationText } from '../web/src/format.js';
+import { durationText, isSpinning } from '../web/src/format.js';
 import { toWebBoardSnapshot, validateWebBoardSnapshot } from '../src/interfaces/web/transport.js';
 import type { WebBoardSnapshot } from '../src/interfaces/web/transport.js';
 import type { BoardProjection } from '../src/application/projections/board.js';
@@ -319,11 +319,11 @@ test('an unknown gate renders as unknown, never as a pass', () => {
   assert.ok(!html.includes('gate ✓'), 'unknown never renders as passed');
 });
 
-test('an absent implementer renders as absent, never as an idle or named agent', () => {
+test('an unidentified agent omits the implementer label and its activity dot', () => {
   const html = render(snapshotOf({
     stages: makeProjection({ active: [makeCard({ agent: null })] }).stages,
   }));
-  assert.match(html, /no implementer/);
+  assert.doesNotMatch(html, /no implementer|class="live-indicator"/);
 });
 
 test('running-agent summaries retain observed counts without command-session wording', () => {
@@ -366,10 +366,27 @@ test('activity, coordinator recovery evidence, and reduced motion stay truthful'
   assert.match(html, /active worker family: codex/, 'the live worker is the header agent, not a stale assignee');
   assert.ok(!html.includes('undefined'), 'a missing assignee never leaks as header text');
   assert.match(html, /class="live-indicator"/, 'live work has the reference-style blinking indicator');
-  assert.equal((html.match(/fan spin/g) ?? []).length, 2, 'only fresh agent work with a live session spins its fans');
+  assert.equal((html.match(/fan spin/g) ?? []).length, 4, 'live and unverified current work spin; stale, blocked and idle work do not');
   const css = browserSources.find((file) => file.name === 'style.css')?.text ?? '';
   assert.match(css, /@media \(prefers-reduced-motion: reduce\)[\s\S]*\.fan\.spin[\s\S]*animation: none/);
   assert.match(css, /\.live-indicator[\s\S]*animation: blink/);
+});
+
+test('fans retain the pre-TASK-2576 work behavior independently of agent identity and coordinator scans', () => {
+  for (const freshness of ['live', 'unverified', 'stale'] as const) {
+    for (const agent of [null, agentFamily('codex')]) {
+      for (const liveSession of [undefined, null, { missionId: 'task-9999' as MissionCard['id'], family: agentFamily('codex') }]) {
+        const card = makeCard({ currentWork: { operationId: 'op', phase: 'integrate', summary: 'work in progress', agent, updatedAt: '2026-08-30T00:00:00.000Z', freshness }, liveSession });
+        const snapshot = snapshotOf({ stages: makeProjection({ active: [card] }).stages });
+        const webCard = snapshot.stages.flatMap(stage => stage.cards)[0];
+        const html = render(snapshot);
+        assert.equal(isSpinning(webCard), freshness !== 'stale');
+        assert.equal((html.match(/fan spin/g) ?? []).length, freshness === 'stale' ? 0 : 2);
+        assert.doesNotMatch(html, /no implementer/);
+        if (agent === null) { assert.doesNotMatch(html, /class="live-indicator"/); }
+      }
+    }
+  }
 });
 
 test('an indefinite agent block never renders as a numeric duration', () => {

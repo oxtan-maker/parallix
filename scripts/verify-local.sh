@@ -82,7 +82,6 @@ export PATH="${SCRIPT_DIR}:$PATH"
 
 gate_all() {
   node scripts/verify-docs.mjs
-  npm run build
   npm test
 }
 

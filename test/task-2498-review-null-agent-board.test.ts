@@ -34,7 +34,7 @@ const missionId = 'task-2498' as MissionId;
 const render = (snapshot: ReturnType<typeof toWebBoardSnapshot>): string =>
   renderToStaticMarkup(React.createElement(Board, { snapshot, onRefresh: async () => {} }));
 
-test('a working card with a null live agent renders "no implementer", never the assignee family', () => {
+test('a working card with an unidentified agent omits its label and dot, never the assignee family', () => {
   const workingNull = makeCard({
     id: 'task-2498' as MissionCard['id'],
     lane: 'review',
@@ -50,7 +50,8 @@ test('a working card with a null live agent renders "no implementer", never the 
     },
   });
   const html = render(toWebBoardSnapshot(makeProjection({ review: [workingNull] })));
-  assert.match(html, /no implementer/, 'the null live agent renders as absent implementer');
+  assert.doesNotMatch(html, /no implementer|class="live-indicator"/, 'an unidentified agent has no label or blinking dot');
+  assert.equal((html.match(/fan spin/g) ?? []).length, 2, 'work still spins the fans');
   assert.doesNotMatch(html, /custom/, 'the assignee family must never appear in the pill');
 });
 

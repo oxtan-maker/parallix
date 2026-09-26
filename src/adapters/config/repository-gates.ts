@@ -348,7 +348,6 @@ export async function runPhaseGates(
   const dashboard = (!opts.log || opts.log === fmt.log.plain) && (!opts.error || opts.error === fmt.log.fail)
     && process.stdin.isTTY && process.stdout.isTTY && !process.stdin.isRaw
     ? new GateDashboard(phase, gates.map(gate => gate.key), () => controller.abort()) : null;
-  const compact = maxParallel > 1 && (!opts.log || opts.log === fmt.log.plain);
   const liveSerial = maxParallel === 1 && !dashboard && !opts.commandRunner && (!opts.log || opts.log === fmt.log.plain);
 
   let failedGate: GateRunOutcome | null = null;
@@ -365,7 +364,7 @@ export async function runPhaseGates(
       if (index < 0) { break; }
       const gate = pending.splice(index, 1)[0];
       if (dashboard) { dashboard.startGate(gate.key); }
-      else if (!compact) { log(`Repository gate (${phase}): ${gate.key} started (${running.size + 1}/${maxParallel} active).`); }
+      else { log(`Repository gate (${phase}): ${gate.key} started (${running.size + 1}/${maxParallel} active).`); }
       const started = Date.now();
       // Delay proof loading until a clean-tree gate actually runs. This keeps
       // bootstrap-only gate planning independent of Git verification modules.
@@ -401,7 +400,7 @@ export async function runPhaseGates(
       const gate = pending[0];
       errorText = `Repository gate "${gate.key}" has unresolved dependencies for ${phase}.`;
       failedGate = { key: gate.key, command: gate.command, exitCode: null, stdout: '', stderr: errorText };
-      if (!dashboard && !compact) { error(errorText); }
+      if (!dashboard) { error(errorText); }
       break;
     }
     if (running.size === 0) { break; }
@@ -410,19 +409,19 @@ export async function runPhaseGates(
     executed++;
     outcomes.push(outcome);
     dashboard?.finishGate(outcome.key, outcome.exitCode, [outcome.stdout, outcome.stderr].filter(Boolean).join('\n'), outcome.durationMs ?? 0, controller.signal.aborted);
-    if (!dashboard && !compact && !liveSerial && (maxParallel === 1 || outcome.exitCode !== 0)) { renderGateOutput(phase, outcome, log); }
+    if (!dashboard && !liveSerial && outcome.exitCode !== 0) { renderGateOutput(phase, outcome, log); }
     if (outcome.exitCode !== 0 && failedGate === null) {
       failedGate = outcome;
       errorText = `Repository gate "${outcome.key}" exited with code ${outcome.exitCode ?? 'unknown'} for ${phase}.`;
-      if (!dashboard && !compact) { error(errorText); }
+      if (!dashboard) { log(`Repository gate (${phase}): ${outcome.key} failed.`); error(errorText); }
     } else if (outcome.exitCode === 0) {
       completed.add(outcome.key);
-      if (!dashboard && !compact) { log(`Repository gate (${phase}): ${outcome.key} passed.`); }
+      if (!dashboard) { log(`Repository gate (${phase}): ${outcome.key} passed.`); }
     }
   }
 
   dashboard?.close();
-  if (dashboard || compact) {
+  if (dashboard) {
     log(`Repository gates (${phase}): ${controller.signal.aborted ? 'cancelled' : failedGate ? 'failed' : 'passed'}; ${executed}/${gates.length} completed in ${((Date.now() - phaseStarted) / 1000).toFixed(1)}s.`);
     for (const gate of gates) {
       const outcome = outcomes.find(item => item.key === gate.key);

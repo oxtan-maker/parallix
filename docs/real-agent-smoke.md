@@ -113,7 +113,10 @@ PARALLIX_REAL_AGENT_RUNNER=pi node --import tsx --import ./test/bootstrap-e2e-pa
 
 Unlike the stubbed lifecycle harness, this test drives real local-model
 inference calls for the draft, execute, and review agents and is expected to be
-**slower and less deterministic**. A green full-lifecycle run measured ~4
+**slower and less deterministic**. Runs using the configured custom local model
+take an exclusive host-level lock so concurrent worktrees do not overload that
+shared model; a queued run may therefore wait for an earlier smoke lifecycle.
+A green full-lifecycle run measured ~4
 minutes (242s) on the reference workstation; failing runs usually fail faster
 (the launcher health probe fails in seconds, a draft-phase failure within
 ~40s). The health probe allows up to 120s by default so a cold or queued local

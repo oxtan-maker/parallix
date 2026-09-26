@@ -70,6 +70,12 @@ const HEALTHCHECK_TIMEOUT_MS = Math.min(
 // incomplete-evidence checkpoint was killed at 600s mid-recovery.
 const ACTIVE_TIMEOUT_MS = RUN_TIMEOUT_MS * 2;
 const MIN_TMP_FREE_BYTES = Number(process.env.PARALLIX_REAL_AGENT_MIN_TMP_BYTES || 512 * 1024 * 1024);
+// The configured custom runner shares one local vLLM server across every
+// worktree. Concurrent full-lifecycle smoke runs can leave it returning empty
+// assistant turns until their probes time out, so serialize only that shared
+// external boundary (not the ordinary hermetic test suite).
+const CUSTOM_MODEL_LOCK_DIR = path.join(os.tmpdir(), 'parallix-real-agent-custom-model.lock');
+const CUSTOM_MODEL_LOCK_WAIT_MS = Number(process.env.PARALLIX_REAL_AGENT_LOCK_WAIT_MS || 30 * 60 * 1000);
 // The fixture seeds this in its base checkout; the pre-draft hook writes a
 // separate copy into each mission worktree. Verification requires it in both.
 const PROVISIONED_MARKER = '.pre-draft-provisioned';
@@ -80,6 +86,57 @@ function runCommand(command, args, options = {}) {
     throw result.error;
   }
   return result;
+}
+
+function sleepSync(milliseconds) {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, milliseconds);
+}
+
+function ownerIsRunning(owner) {
+  if (!Number.isInteger(owner?.pid) || owner.pid <= 0) { return false; }
+  try {
+    process.kill(owner.pid, 0);
+    return true;
+  } catch (error) {
+    return error?.code === 'EPERM';
+  }
+}
+
+function acquireCustomModelLock() {
+  const token = `${process.pid}-${Date.now()}-${Math.random()}`;
+  const deadline = Date.now() + CUSTOM_MODEL_LOCK_WAIT_MS;
+  while (true) {
+    try {
+      fs.mkdirSync(CUSTOM_MODEL_LOCK_DIR);
+      fs.writeFileSync(path.join(CUSTOM_MODEL_LOCK_DIR, 'owner.json'), JSON.stringify({ pid: process.pid, token }), 'utf8');
+      return () => {
+        try {
+          const owner = JSON.parse(fs.readFileSync(path.join(CUSTOM_MODEL_LOCK_DIR, 'owner.json'), 'utf8'));
+          if (owner.token === token) { fs.rmSync(CUSTOM_MODEL_LOCK_DIR, { recursive: true, force: true }); }
+        } catch (_) { /* A stale or already-released lock is safe to leave alone. */ }
+      };
+    } catch (error) {
+      if (error?.code !== 'EEXIST') { throw error; }
+      let owner = null;
+      try { owner = JSON.parse(fs.readFileSync(path.join(CUSTOM_MODEL_LOCK_DIR, 'owner.json'), 'utf8')); } catch (_) { /* retry below */ }
+      if (!ownerIsRunning(owner)) {
+        // Rename is atomic: competing waiters cannot remove a newly acquired
+        // lock after one of them has reclaimed this stale directory.
+        const staleDir = `${CUSTOM_MODEL_LOCK_DIR}.stale-${token}`;
+        try {
+          fs.renameSync(CUSTOM_MODEL_LOCK_DIR, staleDir);
+          fs.rmSync(staleDir, { recursive: true, force: true });
+        } catch (reclaimError) {
+          if (reclaimError?.code !== 'ENOENT' && reclaimError?.code !== 'EEXIST') { throw reclaimError; }
+        }
+        continue;
+      }
+      if (Date.now() >= deadline) {
+        throw new Error(`Timed out waiting for the shared custom-model smoke lock held by pid ${owner.pid}.`);
+      }
+      sleepSync(1000);
+    }
+  }
 }
 
 // Resolve against this process's own PATH first — this is the PATH the real
@@ -1129,7 +1186,12 @@ if (process.env.PARALLIX_E2E_SMOKE_TEST_HELPERS !== '1') {
     skip: SMOKE_AGENT !== 'custom'
   }, () => {
     assertSmokeSelection('custom');
-    runRealAgentSmoke('custom', CONFIGURED_RUNNER);
+    const release = acquireCustomModelLock();
+    try {
+      runRealAgentSmoke('custom', CONFIGURED_RUNNER);
+    } finally {
+      release();
+    }
   });
 
   test('real Codex gpt-5.6-luna launcher smoke: full lifecycle with hello-world task (SC3/SC4/SC5/SC6/SC7)', {

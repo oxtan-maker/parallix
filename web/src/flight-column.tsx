@@ -121,6 +121,7 @@ function FlightCard({ card, onAction, onSelect, onDragStart, selected, pendingAc
               {workText(card)}
             </span>
             <div style={{ flex: 1, minWidth: 4 }} />
+            {agent !== null && <>
             <span aria-hidden="true" className={spinning ? 'live-indicator' : undefined} style={{ color: spinning ? C.green : C.faint, fontSize: 8, flexShrink: 0 }}>●</span>
             <span
               title={agent === null ? undefined : `${liveAgent === null ? 'implementer' : 'active worker'} family: ${agent}`}
@@ -130,8 +131,9 @@ function FlightCard({ card, onAction, onSelect, onDragStart, selected, pendingAc
                 overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
               }}
             >
-              {agent ?? 'no implementer'}
+              {agent}
             </span>
+            </>}
           </div>
           <p style={{ margin: '5px 0 0', lineHeight: 1.35, color: C.text, fontSize: 13 }}>{card.title}</p>
         </div>

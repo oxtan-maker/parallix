@@ -118,6 +118,10 @@ substitute for the candidate's result.
 After confirmed integration, the repository deletes both analyses. Cleanup
 failures are reported without reversing the integration.
 
+After confirmed integration, the repository deletes that mission's SonarQube
+Cloud branch analysis. Cleanup failures are reported without reversing the
+integration.
+
 Parallix currently uses a progressive quality policy: HIGH and BLOCKER
 impacts are blocking; MEDIUM, LOW, and INFO findings remain visible in the
 provider but are non-blocking. The provider quality gate owns that new-code
