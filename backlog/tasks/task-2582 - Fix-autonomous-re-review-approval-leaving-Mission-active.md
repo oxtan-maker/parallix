@@ -41,6 +41,8 @@ Expanded scope requested by the operator: audit and fix ALL Mission lifecycle tr
 Timing contract: when Parallix accepts a valid transition and begins work belonging to the destination state, persist the authoritative destination state and its lane event directly at that boundary, preferably before launching an agent or starting slow setup, Git operations, verification gates, provider calls or background work. Where direct persistence is not possible, it must complete within the first 200 ms of beginning destination-state work. Measure elapsed time with a monotonic clock from that boundary to successful persistence; do not satisfy the budget by backdating event timestamps or measuring only the database call. Preconditions and authorization must still pass before transition; completed states require actual successful completion. If persistence fails or exceeds the deadline, surface the failure and stop dependent work rather than claiming success. Board/projections must receive the committed change promptly instead of waiting for the agent or command to finish.
 
 Use the existing lifecycle service and domain rules as the authority. Remove or correct file-only status changes, skipped boundary transitions, swallowed errors and delayed state writes wherever this audit finds them. Preserve version checks, idempotency, decision/revision guards and recovery semantics. Record the audited entry points and reproduction evidence in this task/checkpoint, not as a new live documentation inventory.
+
+Operator clarification: the done transition is exempt from the 200 ms destination-work-start deadline because no work starts or runs in done. All integration work, including required verification, finalization and cleanup, remains in integration until it has finished successfully; only then may the Mission transition to done. Keep done in the lifecycle correctness audit, but do not apply a work-start timing requirement to it. The immediate/200 ms rule applies to states in which Parallix begins new work.
 <!-- SECTION:DESCRIPTION:END -->
 
 ## Acceptance Criteria
@@ -55,6 +57,7 @@ Use the existing lifecycle service and domain rules as the authority. Remove or 
 - [ ] #8 Lifecycle persistence failures or missed transition deadlines are visible and stop dependent work; no success output, Backlog promotion or projected destination state is emitted for an uncommitted transition.
 - [ ] #9 Add runnable regression coverage for transition ordering and the 200 ms contract with external boundaries mocked, including multi-round review, retries, resume/recovery and slow downstream work; replay emits no duplicate lane events and stale versions do not overwrite state.
 - [ ] #10 Board and other projections receive committed lifecycle changes promptly without waiting for long-running command or agent completion; tests distinguish queue/lane transitions from current work and terminal completion.
+- [ ] #11 Done is exempt from the 200 ms work-start deadline: no work runs in done; all integration work, required verification, finalization and cleanup finish successfully in integration before the done transition. Cover this ordering in regression tests.
 <!-- AC:END -->
 
 
