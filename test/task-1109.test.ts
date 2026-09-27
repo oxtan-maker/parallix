@@ -6,6 +6,7 @@ import os from 'node:os';
 import path from 'path';
 import { mockModule, installModuleMocks } from './lib/module-mock.js';
 import { createRequire } from 'node:module';
+import { reportMergeConflicts } from '../src/application/integrate/landing.js';
 const _require = createRequire(import.meta.url);
 const gitModule = mockModule<typeof import('../src/adapters/git/git.js')>('../src/adapters/git/git.js', import.meta.url);
 const missionUtilsModule = mockModule<typeof import('../src/adapters/filesystem/mission-utils.js')>('../src/adapters/filesystem/mission-utils.js', import.meta.url);
@@ -540,45 +541,33 @@ test('integrate Variant B resumed partial state prints sync diagnostics on sync 
   cleanup();
 });
 
-test('integrate Variant B conflict path prints conflicting files and helper guidance', async () => {
-  setupMocks();
-  mock.method(git, 'git', (args) => {
-    if (args.includes('branch') && args.includes('--list')) return { status: 0, stdout: 'main\n', stderr: '' };
-    if (args.includes('branch') && args.includes('--show-current')) return { status: 0, stdout: 'main', stderr: '' };
-    if (args.includes('status')) return { status: 0, stdout: '', stderr: '' };
-    if (args.includes('rev-parse')) return { status: 0, stdout: 'deadbeef', stderr: '' };
-    if (args.includes('merge') && args.includes('--no-commit')) return { status: 1, stdout: 'conflict', stderr: 'conflict' };
-    if (args.includes('merge') && args.includes('--abort')) return { status: 1, stdout: '', stderr: 'There is no merge to abort' };
-    if (args.includes('log') && args.includes('--format=%H %s')) return { status: 0, stdout: 'deadbeef unrelated commit\n', stderr: '' };
-    return { status: 0, stdout: '', stderr: '' };
-  });
-  mock.method(missionUtils, 'parseConflictFilesFromMergeOutput', () => ['workflow/lib/commands/integrate.js', 'docs/index.md']);
-  mock.method(runtimeMatrix, 'buildAutonomousReviewMatrix', () => ({}));
-  mock.method(runtimeMatrix, 'formatMatrixSummary', () => ['matrix-line']);
-  const integrate = loadIntegrate();
+test('integrate Variant B conflict path prints conflicting files and helper guidance', () => {
   const logs = [];
   const errors = [];
-  const exitCodes = [];
   const originalLog = console.log;
   const originalError = console.error;
   console.log = (msg) => logs.push(msg);
   console.error = (msg) => errors.push(msg);
-  mock.method(process, 'exit', (code) => exitCodes.push(code));
 
   try {
-    await integrate([TEST_SLUG, '--no-integration-gates'], { missionServicesFn: composition.createMissionApplicationServices });
+    reportMergeConflicts(
+      { slug: TEST_SLUG, area: 'docs', baseBranch: 'main' },
+      ['workflow/lib/commands/integrate.js', 'docs/index.md'],
+      {
+        describeReviewMatrix: () => ['matrix-line'],
+        buildConflictResolutionPrompt: () => ['Conflict resolution options:'],
+        createAbort: () => new Error('expected conflict abort'),
+      },
+    );
   } catch { /* expected */ }
 
   assert.ok(errors.some(l => l.includes('Merge conflicts detected. Rebase the mission branch before integrating.')));
   assert.ok(logs.some(l => l.includes('Conflicting files (2):')));
   assert.ok(logs.some(l => l.includes('matrix-line')));
   assert.ok(logs.some(l => l.includes('Conflict resolution options:')));
-  assert.equal(statsCalls.length, 0);
-  assert.equal(exitCodes.at(-1), 1);
 
   console.log = originalLog;
   console.error = originalError;
-  cleanup();
 });
 
 test('evaluateTaskStatusForIntegration edge cases', (t) => {

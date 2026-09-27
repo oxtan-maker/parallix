@@ -43,6 +43,8 @@ export const INTEGRATION_CI_TESTS: readonly string[] = [
   'board-event-recorder.test.ts',
   'board-lane-events-migration.test.ts',
   'bootstrap-isolation.test.ts',
+  // Opens a migrated SQLite operator database to verify cross-repository leases.
+  'custom-capacity-cross-repo.integration.test.ts',
   'custom-capacity-multiprocess-repro.test.ts',
   'documentation-verification.test.ts',
   'draft-command.test.ts',
@@ -106,6 +108,7 @@ export const INTEGRATION_CI_TESTS: readonly string[] = [
   'sqlite-async-cascade-cp3.test.ts',
   'sqlite-importer-cp4.test.ts',
   'sqlite-mission-store.integration.test.ts',
+  'operator-state-scope.integration.test.ts',
   'sqlite-ports-cp2.test.ts',
   'sqlite-recovery-cp5.test.ts',
   'startup-preflight.test.ts',
@@ -222,11 +225,6 @@ export const INTEGRATION_CI_TESTS: readonly string[] = [
   // repository to prove local branch discovery. A clean GitHub runner provides
   // every dependency, so it is CI-safe.
   'task-2525.03-sonar-enforcement.test.ts',
-  // TASK-2566: creates temporary Git repositories (mission/non-mission
-  // branches) and injects a fetch spy for the Sonar API, so it crosses the
-  // git/process boundary; every dependency is what a clean GitHub runner
-  // provides, so it is CI-safe.
-  'task-2566-sonar-boundary-repro.test.ts',
   // TASK-2521.03: seeds an isolated SQLite operator database and drives the
   // production `px status --json` composition path.
   'task-2521-03-context-cli.integration.test.ts',

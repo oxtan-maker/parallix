@@ -164,27 +164,6 @@ test('task-2525.03: scanner configuration preserves the recorded legacy baseline
   assert.doesNotMatch(props, /sonar\.comments|sonar\.issue\.effective|@sonar|@SuppressWarnings/);
 });
 
-test('task-2525.05: shared scanner rejects High-or-Blocker issues in the candidate analysis', async () => {
-  const { assertNoOpenHighOrBlockerIssues } = await import('../scripts/sonar-local.js');
-  const request: typeof fetch = async (url) => new Response(JSON.stringify(String(url).includes('project_branches/list')
-    ? { branches: [{ name: 'mission/task-2525.05', type: 'LONG' }] }
-    : { component: { measures: Array.from({ length: 3 }, () => ({ value: '{"HIGH":0,"BLOCKER":0}' })) } }));
-  await assertNoOpenHighOrBlockerIssues({ token: 'test-token', branch: 'mission/task-2525.05', request });
-
-  await assert.rejects(
-    assertNoOpenHighOrBlockerIssues({ token: 'test-token', branch: 'mission/task-2525.05', request: async (url) => new Response(JSON.stringify(String(url).includes('project_branches/list') ? { branches: [{ name: 'mission/task-2525.05', type: 'LONG' }] } : { component: { measures: [{ value: '{"HIGH":1}' }, { value: '{}' }, { value: '{}' }] } })) }),
-    /mission analysis has unresolved HIGH\/BLOCKER impacts/,
-  );
-});
-
-test('task-2525.05: total-code check rejects a short mission branch', async () => {
-  const { assertNoOpenHighOrBlockerIssues } = await import('../scripts/sonar-local.js');
-  await assert.rejects(
-    assertNoOpenHighOrBlockerIssues({ token: 'test-token', branch: 'mission/task-2525.05', request: async () => new Response(JSON.stringify({ branches: [{ name: 'mission/task-2525.05', type: 'SHORT' }] })) }),
-    /must be analysed as LONG/,
-  );
-});
-
 test('task-2525.05: analysis context identifies local branches, GitHub branches, and pull requests', async () => {
   const { resolveSonarContext, isMissionBranch } = await import('../scripts/sonar-local.js');
   const saved = Object.fromEntries(['GITHUB_ACTIONS', 'GITHUB_REF', 'GITHUB_REF_NAME'].map((key) => [key, process.env[key]]));

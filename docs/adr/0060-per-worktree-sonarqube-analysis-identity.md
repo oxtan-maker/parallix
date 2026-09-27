@@ -107,20 +107,13 @@ Two concurrent mission scans therefore remain isolated without inventing separat
 
 The analysis identity is the Git branch already owned by the repository. Parallix must not create another derived identity layer merely for Sonar.
 
-Local mission verification uses two Cloud branch analyses of the same candidate.
-A short-lived comparison branch measures changes against `main` under the
-provider quality gate. The mission's long-lived branch supplies total-code
-metrics for the repository's High and Blocker check. The gate fails closed if
-either analysis fails, either branch has the wrong type, or the total-code
-metrics are unavailable. It does not use the current state of `main` as a
-substitute for the candidate's result.
-
-After confirmed integration, the repository deletes both analyses. Cleanup
-failures are reported without reversing the integration.
-
-After confirmed integration, the repository deletes that mission's SonarQube
-Cloud branch analysis. Cleanup failures are reported without reversing the
-integration.
+Local mission verification uses one SHORT comparison branch,
+`candidate/mission/<slug>`, explicitly targeted at `main`. The scanner waits
+for the provider quality gate and then confirms fail-closed that the comparison
+branch is SHORT. The provider owns new-code severity, coverage, duplication,
+and hotspot policy; Parallix does not add a total-code assertion for unrelated
+legacy code. After confirmed integration, the repository deletes the
+comparison branch; cleanup failures do not reverse integration.
 
 Parallix currently uses a progressive quality policy: HIGH and BLOCKER
 impacts are blocking; MEDIUM, LOW, and INFO findings remain visible in the
@@ -129,8 +122,6 @@ severity policy (maintainability, reliability, and security severity greater
 than or equal to High) together with the provider-owned coverage, duplication,
 and security-hotspot conditions. The repository does not re-implement the
 gate: the scanner waits for the provider's gate on the comparison analysis.
-The repository waits for the long-lived analysis to finish before checking
-its total-code HIGH/BLOCKER impacts.
 
 The previous mechanisms for:
 
@@ -161,9 +152,8 @@ The repository's configured pre-integration quality gate remains responsible for
 1. generating the required LCOV coverage report;
 2. submitting the exact mission worktree for comparison against `main` and
    waiting for the provider quality gate;
-3. submitting the same candidate as a long-lived mission branch and waiting
-   for its analysis and total-code check; and
-4. failing integration when either check does not pass.
+3. confirming that the resulting comparison branch is SHORT; and
+4. failing integration when the provider gate or SHORT confirmation does not pass.
 
 A successful scanner process that has only uploaded analysis is not sufficient evidence.
 
@@ -177,15 +167,10 @@ ADR 0058's `github-publish/<sha>` workflow analyzes the exact candidate checked 
 
 GitHub does not run Parallix missions and therefore requires no special mission-isolation implementation. It submits the checked-out Git ref using SonarQube Cloud's normal branch/SCM analysis.
 
-The publication ref is not a Parallix mission and must not acquire mission
-lifecycle requirements merely because both flows share the scanner: it is not
-required to be a long-lived Cloud branch, it does not receive the repository's
-total-code HIGH/BLOCKER check, and it does not persist as durable Sonar
-mission state. Its verification is the exact-candidate checkout, the provider
-new-code quality gate, and `sonar.qualitygate.wait=true` — nothing more. That
-keeps the two boundaries distinct: local mission verification is the provider
-gate plus the repository total-code proof against the LONG `mission/*`
-candidate; GitHub publication verification is the provider gate against the
+The publication ref is not a Parallix mission and does not acquire mission
+lifecycle requirements merely because both flows share the scanner. Its
+verification is the exact-candidate checkout, the provider new-code quality
+gate, and `sonar.qualitygate.wait=true`. GitHub independently verifies its
 exact `github-publish/<sha>` candidate.
 
 The GitHub workflow:

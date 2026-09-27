@@ -7,6 +7,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { buildTestRunPlan } from './lib/test-run-plan.js';
 const expectedIntegrationFiles = [
+  'operator-state-scope.integration.test.ts',
+  'custom-capacity-cross-repo.integration.test.ts',
   'active.test.ts', 'agents-limit-hit.test.ts', 'agents.test.ts', 'backlog.test.ts',
   // Real SQL databases (even temp files) and process boundaries do not run in
   // the hermetic unit suite; see knownIntegrationTestFiles in test-run-plan.ts.
@@ -72,9 +74,6 @@ const expectedIntegrationFiles = [
   // TASK-2525.03: creates a temporary Git repository to prove local branch
   // discovery, so it crosses the Git process boundary.
   'task-2525.03-sonar-enforcement.test.ts',
-  // TASK-2566: creates temporary Git repositories for the mission-boundary
-  // repro, so it crosses the git process boundary.
-  'task-2566-sonar-boundary-repro.test.ts',
   'sqlite-mission-store.integration.test.ts', 'sqlite-recovery-cp5.test.ts',
   'stats-backfill.test.ts', 'status.test.ts',
   'task-1048-regression.test.ts',
@@ -290,16 +289,8 @@ test('default test runner preserves an explicitly selected execution root for ev
 });
 
 test('default test runner classifies tui-spawn as default (not integration) and pins bootstrap bypass', () => {
-  const defaultRun = selectedFiles([]);
-  const integrationRun = selectedFiles(['--integration']);
-  const defaultFiles = defaultRun.files;
-  const integrationFiles = integrationRun.files;
-
-  // tui-spawn is in the integration suite (execFileSync process boundary)
-  assert.ok(!defaultFiles.includes('tui-spawn.test.ts'),
-    'tui-spawn.test.ts must NOT be in the default (unit) suite');
-  assert.ok(integrationFiles.includes('tui-spawn.test.ts'),
-    'tui-spawn.test.ts must be in the integration suite');
+  // The complete default/integration partition (including tui-spawn) is
+  // asserted above. This focused test only verifies its bootstrap exception.
 
   // Bootstrap bypass: solo run skips preload so child CLI gets real environment
   const soloRun = selectedFiles(['test/tui-spawn.test.ts']);

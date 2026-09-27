@@ -155,9 +155,10 @@ test('spawnAndTee exposes a sane DEFAULT_MAX_TAIL_BYTES', () => {
   assert.ok(DEFAULT_MAX_TAIL_BYTES <= 1024 * 1024);
 });
 
-test('spawnAndTee reports no-output intervals until the child writes output', async () => {
+test('spawnAndTee reports no-output intervals until the child writes output', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'], now: 1000 });
   const diagnostics = [];
-  const result = await withMockSpawn({
+  const pending = withMockSpawn({
     stdoutChunks: ['ready'],
     stdoutDelayMs: 75,
     status: 0,
@@ -171,6 +172,9 @@ test('spawnAndTee reports no-output intervals until the child writes output', as
       onNoOutput: event => diagnostics.push(event)
     }
   }));
+  // Advance in steps so recursively scheduled watchdog intervals run before close.
+  for (let elapsed = 0; elapsed < 100; elapsed += 5) { t.mock.timers.tick(5); }
+  const result = await pending;
 
   assert.equal(result.status, 0);
   assert.equal(result.stdout, 'ready');
@@ -179,9 +183,10 @@ test('spawnAndTee reports no-output intervals until the child writes output', as
   assert.ok(diagnostics[0].elapsedMs >= 0);
 });
 
-test('spawnAndTee continues liveness reports after visible output until the child settles', async () => {
+test('spawnAndTee continues liveness reports after visible output until the child settles', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'], now: 1000 });
   const diagnostics = [];
-  const result = await withMockSpawn({
+  const pending = withMockSpawn({
     stdoutChunks: ['ready'],
     stdoutDelayMs: 5,
     status: 0,
@@ -195,16 +200,22 @@ test('spawnAndTee continues liveness reports after visible output until the chil
       onNoOutput: event => diagnostics.push(event)
     }
   }));
+  // Advance in steps so recursively scheduled watchdog intervals run before close.
+  for (let elapsed = 0; elapsed < 100; elapsed += 5) { t.mock.timers.tick(5); }
+  const result = await pending;
 
   assert.equal(result.status, 0);
   assert.equal(result.stdout, 'ready');
-  assert.ok(diagnostics.length >= 2, 'expected periodic liveness reports after visible output while the child remains open');
+  assert.deepEqual(diagnostics.map(event => [event.elapsedMs, event.sawOutput]), [
+    [20, true], [40, true], [60, true]
+  ], 'reports continue after output and stop when the child closes');
 });
 
-test('spawnAndTee liveness watchdog never kills, signals, or cancels the child', async () => {
+test('spawnAndTee liveness watchdog never kills, signals, or cancels the child', async (t) => {
   // task-2386 AC #3: the watchdog is purely observational. Even across many
   // liveness reports it must not touch the child's lifecycle — the result may
   // only come from the child's own close event.
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'], now: 1000 });
   const diagnostics = [];
   const lifecycleCalls = [];
   const mocked = mock.method(childProcess, 'spawn', () => {
@@ -215,7 +226,7 @@ test('spawnAndTee liveness watchdog never kills, signals, or cancels the child',
   });
   let result;
   try {
-    result = await spawnAndTee('mock-node', [], {
+    const pending = spawnAndTee('mock-node', [], {
       stdoutSink: noopSink(),
       stderrSink: noopSink(),
       noOutputWatchdog: {
@@ -224,6 +235,8 @@ test('spawnAndTee liveness watchdog never kills, signals, or cancels the child',
         onNoOutput: event => diagnostics.push(event)
       }
     });
+    for (let elapsed = 0; elapsed < 100; elapsed += 5) { t.mock.timers.tick(5); }
+    result = await pending;
   } finally {
     mocked.mock.restore();
   }
@@ -234,11 +247,12 @@ test('spawnAndTee liveness watchdog never kills, signals, or cancels the child',
   assert.equal(result.signal, null);
 });
 
-test('spawnAndTee liveness reports carry sawOutput and the age of the last output', async () => {
+test('spawnAndTee liveness reports carry sawOutput and the age of the last output', async (t) => {
   // task-2386 AC #4 payload contract: callers must be able to word the report
   // truthfully once the agent has already produced visible output.
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'], now: 1000 });
   const diagnostics = [];
-  const result = await withMockSpawn({
+  const pending = withMockSpawn({
     stdoutChunks: ['ready'],
     stdoutDelayMs: 5,
     status: 0,
@@ -252,6 +266,9 @@ test('spawnAndTee liveness reports carry sawOutput and the age of the last outpu
       onNoOutput: event => diagnostics.push(event)
     }
   }));
+  // Advance in steps so recursively scheduled watchdog intervals run before close.
+  for (let elapsed = 0; elapsed < 100; elapsed += 5) { t.mock.timers.tick(5); }
+  const result = await pending;
 
   assert.equal(result.status, 0);
   const afterOutput = diagnostics.filter(event => event.sawOutput);

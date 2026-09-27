@@ -1,10 +1,11 @@
 ---
 id: TASK-2586
 title: Collapse redundant pre-integration coverage and Sonar passes
-status: backlog
-assignee: []
+status: done
+assignee: [codex]
 created_date: '2026-09-26 15:28'
-labels: []
+labels:
+  - ai_sdlc
 dependencies: []
 ordinal: 117008
 ---

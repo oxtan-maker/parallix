@@ -60,7 +60,7 @@ export interface OperatorStateServices {
    * independently. `null` when the adapter is unavailable.
    */
   readonly repositories: OperatorStateRepositories | null;
-  /** Idempotent, composition-owned close operation for process shutdown. */
+  /** Finish this service scope by draining its accepted Mission operations. */
   readonly close: () => Promise<void>;
 }
 
@@ -322,16 +322,14 @@ export async function createProductionApplicationServices(
     // available; pre-cutover missions without a Review keep the historical
     // git-history fallback.
     statsBackfill: new StatsBackfillService(new LegacyStatsBackfillAdapter(rootDir, {}, mission?.store ?? null)),
-    // Closing the shared handle is the last thing a command does, but a Mission
-    // write can still be settling when it happens — that is how a review-loop
-    // stats write ended up reporting "Database is not open. Call open() before
-    // using the adapter." Drain the store first so every accepted write reaches
-    // the database it was accepted by.
+    // A nested review command can finish while integration still uses another
+    // service graph backed by the same process-lifetime handle. Drain this
+    // scope's accepted operations without invoking the process shutdown closer;
+    // registerOperatorStateShutdown owns closing the shared connection.
     operatorState: {
       ...operatorState,
       close: async () => {
         await mission?.store.drain?.();
-        await operatorState.close();
       },
     },
     mission,

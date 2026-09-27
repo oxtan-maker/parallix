@@ -8,6 +8,33 @@ import { abortWith, resolveIntegrationTaskPath } from './support.js';
 import { createSquashLanding, type LandingRun } from './squash.js';
 import type { IntegrateWorkflowPorts } from '../ports/integrate-workflow.js';
 
+/**
+ * Emit the actionable diagnostic for a non-recoverable probe-merge conflict.
+ *
+ * Kept outside the landing factory so the user-facing recovery guidance is
+ * directly unit-testable without constructing the complete integration CLI
+ * workflow.
+ */
+export function reportMergeConflicts(
+  conflict: { slug: string; area: string; baseBranch: string },
+  conflictFiles: string[],
+  helpers: {
+    describeReviewMatrix: () => string[];
+    buildConflictResolutionPrompt: (_slug: string, _area: string, _options: { baseBranch: string }) => string[];
+    createAbort: () => Error;
+  },
+): never {
+  fmt.log.fail('Merge conflicts detected. Rebase the mission branch before integrating.');
+  if (conflictFiles.length > 0) {
+    fmt.log.info(`Conflicting files (${conflictFiles.length}):`);
+    conflictFiles.forEach(file => fmt.log.info(`  - ${file}`));
+  }
+  fmt.log.info('Conflict helper path:');
+  helpers.describeReviewMatrix().forEach(line => fmt.log.info(line));
+  helpers.buildConflictResolutionPrompt(conflict.slug, conflict.area, { baseBranch: conflict.baseBranch }).forEach(line => fmt.log.info(line));
+  throw helpers.createAbort();
+}
+
 export function createMissionLanding(ports: IntegrateWorkflowPorts, collaborators: Parameters<typeof createSquashLanding>[1]) {
   const { checkout, landing, missionPaths } = ports;
   const git = ports.git.git;
@@ -49,17 +76,16 @@ export function createMissionLanding(ports: IntegrateWorkflowPorts, collaborator
     return { abortFailed: false, clean: false };
   }
 
-  function reportMergeConflicts(run: LandingRun, conflictFiles: string[]): never {
-    const { slug, context } = run;
-    fmt.log.fail('Merge conflicts detected. Rebase the mission branch before integrating.');
-    if (conflictFiles.length > 0) {
-      fmt.log.info(`Conflicting files (${conflictFiles.length}):`);
-      conflictFiles.forEach(file => fmt.log.info(`  - ${file}`));
-    }
-    fmt.log.info('Conflict helper path:');
-    ports.agents.describeReviewMatrix().forEach(line => fmt.log.info(line));
-    checkout.buildConflictResolutionPrompt(slug, context.area, { baseBranch: context.baseBranch || '' }).forEach(line => fmt.log.info(line));
-    throw landing.createAbort();
+  function reportRunMergeConflicts(run: LandingRun, conflictFiles: string[]): never {
+    return reportMergeConflicts(
+      { slug: run.slug, area: run.context.area, baseBranch: run.context.baseBranch || '' },
+      conflictFiles,
+      {
+        describeReviewMatrix: () => ports.agents.describeReviewMatrix(),
+        buildConflictResolutionPrompt: (slug, area, options) => checkout.buildConflictResolutionPrompt(slug, area, options),
+        createAbort: () => landing.createAbort(),
+      },
+    );
   }
 
   /** Resume from the sync-merged step when an earlier run already landed the squash commit. */
@@ -114,7 +140,7 @@ export function createMissionLanding(ports: IntegrateWorkflowPorts, collaborator
       throw abortWith(landing, 'Dry-run merge could not be aborted cleanly. Inspect the local integration checkout before retrying integrate.');
     }
     const existingSquash = checkout.findExistingSquashCommit(baseWorktree, slug);
-    if (!existingSquash) { reportMergeConflicts(run, conflictFiles); }
+    if (!existingSquash) { reportRunMergeConflicts(run, conflictFiles); }
     await resumeLandedSquash(run, branch, existingSquash, landedFromSha);
     return false;
   }

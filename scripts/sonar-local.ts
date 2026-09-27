@@ -7,6 +7,8 @@ import { spawnSync } from 'node:child_process';
 const SONAR_URL = 'https://sonarcloud.io';
 const SONAR_ORGANIZATION = 'oxtan-maker';
 const SONAR_PROJECT_KEY = 'parallix';
+const SONAR_READ_ATTEMPTS = 3;
+const SONAR_READ_BACKOFF_MS = 5000;
 
 export type SonarContext =
   | { kind: 'local-branch', branch: string }
@@ -47,70 +49,6 @@ export function isMissionBranch(rootDir: string, branch: string): boolean {
   return branch.startsWith(prefix);
 }
 
-// Repository-owned total-code proof for a mission candidate: the branch must
-// exist on the provider as LONG (total-code metrics require it) and the
-// complete candidate must carry no unresolved HIGH or BLOCKER software-quality
-// impacts. Fail-closed at every step.
-// The provider read is a hosted API: a single transient 5xx or network blip
-// must not fail the gate. Retry with a bounded backoff; once attempts are
-// exhausted, fail closed with the last response or error. 4xx is a final
-// provider answer and is never retried.
-const SONAR_READ_ATTEMPTS = 3;
-const SONAR_READ_BACKOFF_MS = 5000;
-
-async function sonarGet(request: typeof fetch, url: string, headers: Record<string, string>, backoffMs: number): Promise<Response> {
-  let lastError: unknown;
-  for (let attempt = 1; attempt <= SONAR_READ_ATTEMPTS; attempt += 1) {
-    try {
-      const response = await request(url, { headers });
-      if (response.ok || response.status < 500 || attempt === SONAR_READ_ATTEMPTS) { return response; }
-    } catch (error) {
-      lastError = error; // network-level failure: retry while attempts remain
-    }
-    if (attempt < SONAR_READ_ATTEMPTS) { await new Promise((resolve) => { setTimeout(resolve, backoffMs * attempt); }); }
-  }
-  throw lastError;
-}
-
-export async function assertNoOpenHighOrBlockerIssues(options: { token: string, branch: string, request?: typeof fetch, backoffMs?: number }) {
-  const request = options.request || fetch;
-  const backoffMs = options.backoffMs ?? SONAR_READ_BACKOFF_MS;
-  const headers = { Authorization: `Basic ${Buffer.from(`${options.token}:`).toString('base64')}` };
-  const branches = await sonarGet(request, `${SONAR_URL}/api/project_branches/list?project=${SONAR_PROJECT_KEY}`, headers, backoffMs);
-  if (!branches.ok) { throw new Error(`SonarQube Cloud branch lookup failed (HTTP ${branches.status}).`); }
-  const branchList = await branches.json() as { branches?: Array<{ name?: string, type?: string }> };
-  const branch = branchList.branches?.find(({ name }) => name === options.branch);
-  if (!branch) { throw new Error(`SonarQube Cloud branch lookup failed (HTTP ${branches.status}).`); }
-  if (branch.type !== 'LONG') { throw new Error(`SonarQube Cloud mission branch ${options.branch} must be analysed as LONG before checking total-code HIGH/BLOCKER impacts.`); }
-  const params = new URLSearchParams({ component: SONAR_PROJECT_KEY, metricKeys: 'reliability_issues,security_issues,maintainability_issues' });
-  params.set('branch', options.branch);
-  const response = await sonarGet(request, `${SONAR_URL}/api/measures/component?${params}`, headers, backoffMs);
-  if (!response.ok) { throw new Error(`SonarQube Cloud metrics lookup failed (HTTP ${response.status}).`); }
-  const result = await response.json() as { component?: { measures?: Array<{ value?: string }> } };
-  if (result.component?.measures?.length !== 3) { throw new Error(`SonarQube Cloud metrics lookup failed (HTTP ${response.status}).`); }
-  const total = result.component.measures.reduce((count, measure) => {
-    const impacts = JSON.parse(measure.value || '{}') as Record<string, number>;
-    return count + (impacts.HIGH || 0) + (impacts.BLOCKER || 0);
-  }, 0);
-  if (total !== 0) {
-    throw new Error('SonarQube Cloud mission analysis has unresolved HIGH/BLOCKER impacts.');
-  }
-}
-
-// Post-scan mission assertion, run after the long-lived analysis completes.
-// The short comparison scan has already passed the provider new-code gate;
-// this adds the repository-owned total-code HIGH/BLOCKER proof for a local
-// mission candidate before integration. GitHub publication branches
-// (github-publish/<sha>), pull requests, local main, and other local branches
-// are not missions: they get no branch-type lookup and no total-code metrics
-// call.
-export async function assertMissionTotalCode(options: { token: string, rootDir?: string, request?: typeof fetch, backoffMs?: number }): Promise<void> {
-  const rootDir = options.rootDir || process.cwd();
-  const context = resolveSonarContext(rootDir);
-  if (context.kind !== 'local-branch' || !isMissionBranch(rootDir, context.branch)) return;
-  await assertNoOpenHighOrBlockerIssues({ token: options.token, branch: context.branch, request: options.request, backoffMs: options.backoffMs });
-}
-
 export async function deleteSonarBranch(options: { token: string, branch: string, request?: typeof fetch }) {
   const request = options.request || fetch;
   const headers = { Authorization: `Basic ${Buffer.from(`${options.token}:`).toString('base64')}` };
@@ -135,7 +73,6 @@ export async function deleteMissionBranch(options: { slug?: string; branchPrefix
     return { ok: false, error };
   }
   try {
-    await deleteSonarBranch({ token: options.token, branch: `${branchPrefix}${slug}`, request: options.request });
     await deleteSonarBranch({ token: options.token, branch: `candidate/${branchPrefix}${slug}`, request: options.request });
     return { ok: true };
   } catch (error) {
@@ -173,25 +110,21 @@ export function runSonar(options: { rootDir?: string, spawn?: typeof spawnSync, 
   return result;
 }
 
-async function awaitAnalysis(token: string, rootDir: string, request: typeof fetch = fetch): Promise<void> {
-  const report = fs.readFileSync(path.join(rootDir, '.scannerwork', 'report-task.txt'), 'utf8');
-  const taskId = report.match(/^ceTaskId=(.+)$/m)?.[1];
-  if (!taskId) throw new Error('SonarQube Cloud did not provide an analysis task ID.');
-  const headers = { Authorization: `Basic ${Buffer.from(`${token}:`).toString('base64')}` };
-  for (let attempt = 0; attempt < 60; attempt += 1) {
-    const response = await sonarGet(request, `${SONAR_URL}/api/ce/task?id=${encodeURIComponent(taskId)}`, headers, SONAR_READ_BACKOFF_MS);
-    if (!response.ok) throw new Error(`SonarQube Cloud analysis task lookup failed (HTTP ${response.status}).`);
-    const result = await response.json() as { task?: { status?: string } };
-    if (result.task?.status === 'SUCCESS') return;
-    if (result.task?.status === 'FAILED' || result.task?.status === 'CANCELED') throw new Error(`SonarQube Cloud analysis task ${result.task.status}.`);
-    await new Promise((resolve) => { setTimeout(resolve, SONAR_READ_BACKOFF_MS); });
+async function sonarGet(request: typeof fetch, url: string, headers: Record<string, string>, backoffMs: number): Promise<Response> {
+  let lastError: unknown;
+  for (let attempt = 1; attempt <= SONAR_READ_ATTEMPTS; attempt += 1) {
+    try {
+      const response = await request(url, { headers });
+      if (response.ok || response.status < 500 || attempt === SONAR_READ_ATTEMPTS) return response;
+    } catch (error) { lastError = error; }
+    if (attempt < SONAR_READ_ATTEMPTS) await new Promise(resolve => setTimeout(resolve, backoffMs * attempt));
   }
-  throw new Error('SonarQube Cloud analysis task did not finish within five minutes.');
+  throw lastError;
 }
 
-async function assertShortBranch(token: string, branch: string, request: typeof fetch = fetch): Promise<void> {
+export async function assertShortBranch(token: string, branch: string, request: typeof fetch = fetch, backoffMs = SONAR_READ_BACKOFF_MS): Promise<void> {
   const headers = { Authorization: `Basic ${Buffer.from(`${token}:`).toString('base64')}` };
-  const response = await sonarGet(request, `${SONAR_URL}/api/project_branches/list?project=${SONAR_PROJECT_KEY}`, headers, SONAR_READ_BACKOFF_MS);
+  const response = await sonarGet(request, `${SONAR_URL}/api/project_branches/list?project=${SONAR_PROJECT_KEY}`, headers, backoffMs);
   if (!response.ok) throw new Error(`SonarQube Cloud branch lookup failed (HTTP ${response.status}).`);
   const result = await response.json() as { branches?: Array<{ name: string, type: string }> };
   if (result.branches?.find((item) => item.name === branch)?.type !== 'SHORT') {
@@ -207,9 +140,6 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(import.met
       const comparison = `candidate/${context.branch}`;
       runSonar({ rootDir, branch: comparison });
       await assertShortBranch(process.env.SONAR_TOKEN!, comparison);
-      runSonar({ rootDir, waitForGate: false });
-      await awaitAnalysis(process.env.SONAR_TOKEN!, rootDir);
-      await assertMissionTotalCode({ token: process.env.SONAR_TOKEN!, rootDir });
     } else {
       runSonar({ rootDir });
     }

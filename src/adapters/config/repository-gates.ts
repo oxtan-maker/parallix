@@ -345,9 +345,11 @@ export async function runPhaseGates(
   const maxParallel = opts.maxParallel ?? loadPhaseGateParallelism(checkoutPath, toConfigPhase(phase));
   const phaseStarted = Date.now();
   const controller = new globalThis.AbortController();
+  let operatorCancelled = false;
+  const cancelByOperator = () => { operatorCancelled = true; controller.abort(); };
   const dashboard = (!opts.log || opts.log === fmt.log.plain) && (!opts.error || opts.error === fmt.log.fail)
     && process.stdin.isTTY && process.stdout.isTTY && !process.stdin.isRaw
-    ? new GateDashboard(phase, gates.map(gate => gate.key), () => controller.abort()) : null;
+    ? new GateDashboard(phase, gates.map(gate => gate.key), cancelByOperator) : null;
   const liveSerial = maxParallel === 1 && !dashboard && !opts.commandRunner && (!opts.log || opts.log === fmt.log.plain);
 
   let failedGate: GateRunOutcome | null = null;
@@ -414,6 +416,7 @@ export async function runPhaseGates(
       failedGate = outcome;
       errorText = `Repository gate "${outcome.key}" exited with code ${outcome.exitCode ?? 'unknown'} for ${phase}.`;
       if (!dashboard) { log(`Repository gate (${phase}): ${outcome.key} failed.`); error(errorText); }
+      controller.abort();
     } else if (outcome.exitCode === 0) {
       completed.add(outcome.key);
       if (!dashboard) { log(`Repository gate (${phase}): ${outcome.key} passed.`); }
@@ -422,14 +425,14 @@ export async function runPhaseGates(
 
   dashboard?.close();
   if (dashboard) {
-    log(`Repository gates (${phase}): ${controller.signal.aborted ? 'cancelled' : failedGate ? 'failed' : 'passed'}; ${executed}/${gates.length} completed in ${((Date.now() - phaseStarted) / 1000).toFixed(1)}s.`);
+    log(`Repository gates (${phase}): ${operatorCancelled ? 'cancelled' : failedGate ? 'failed' : 'passed'}; ${executed}/${gates.length} completed in ${((Date.now() - phaseStarted) / 1000).toFixed(1)}s.`);
     for (const gate of gates) {
       const outcome = outcomes.find(item => item.key === gate.key);
-      log(`  ${outcome ? controller.signal.aborted && outcome.exitCode !== 0 ? '×' : outcome.exitCode === 0 ? '✓' : '✗' : '·'} ${gate.key}${outcome ? ` ${((outcome.durationMs ?? 0) / 1000).toFixed(1)}s` : ' not run'}`);
+      log(`  ${outcome ? controller.signal.aborted && outcome !== failedGate && outcome.exitCode !== 0 ? '×' : outcome.exitCode === 0 ? '✓' : '✗' : '·'} ${gate.key}${outcome ? ` ${((outcome.durationMs ?? 0) / 1000).toFixed(1)}s` : ' not run'}`);
     }
-    if (failedGate && !controller.signal.aborted) { renderGateOutput(phase, failedGate, error); }
+    if (failedGate && !operatorCancelled) { renderGateOutput(phase, failedGate, error); }
   }
-  if (controller.signal.aborted) { errorText = `Repository gates (${phase}) cancelled.`; }
+  if (operatorCancelled) { errorText = `Repository gates (${phase}) cancelled.`; }
   return {
     ok: failedGate === null && !controller.signal.aborted,
     phase,
@@ -437,7 +440,7 @@ export async function runPhaseGates(
     executed,
     skipped: false,
     dryRun: false,
-    cancelled: controller.signal.aborted,
+    cancelled: operatorCancelled,
     failedGate,
     outcomes,
     error: errorText,

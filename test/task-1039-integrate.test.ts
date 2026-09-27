@@ -368,15 +368,26 @@ test('integrate aborts before merge when a pre-integration gate fails', async (t
 
     const integrate = loadIntegrate();
     let result = null;
+    let routed = false;
+    const mergeCalls: string[] = [];
+    const gitRunner = git.git;
+    mock.method(git, 'git', (args) => {
+      if (args[0] === 'merge') mergeCalls.push(args.join(' '));
+      return gitRunner(args);
+    });
     try {
       result = await integrate([TEST_SLUG], {
         missionServicesFn: composition.createMissionApplicationServices,
         exitFn: () => {},
-        // This characterization covers the integration abort, not the
-        // recovery router. Keep the red-gate route terminal and in-memory:
-        // the production router can open the operator database and launch an
-        // implementer, which makes this unit test non-hermetic.
-        routeIntegrationGateFailureFn: async () => ({ route: 'stranded', detail: 'test gate failure' }),
+        // Rebound persistence and agent launch are external boundaries. Their
+        // routing has its own tests; this test verifies the merge guard wiring.
+        routeIntegrationGateFailureFn: async (options) => {
+          routed = true;
+          assert.equal(options.slug, TEST_SLUG);
+          assert.equal(options.missionWorktree, checkout);
+          assert.equal(options.failedGate?.key, 'smoke');
+          return { route: 'exhausted', rebounds: 1, diagnostic: 'pre-integration gate failed' };
+        },
       });
     } catch {
       // integrate() converts a gate abort into a non-zero exit code, not a throw.
@@ -384,6 +395,8 @@ test('integrate aborts before merge when a pre-integration gate fails', async (t
     assert.ok(result && result.exitCode === 1, 'integration aborts when the pre-integration gate fails');
     assert.equal(seenPhase, 'integration');
     assert.equal(seenCheckout, checkout);
+    assert.ok(routed, 'the failed gate must reach the rebound handler');
+    assert.deepEqual(mergeCalls, [], 'a failed rebound must stop before any merge');
   } finally {
     fs.rmSync(checkout, { recursive: true, force: true });
     cleanup();

@@ -28,6 +28,30 @@ test('configured parallel integration gates run real commands through the phase 
   } finally { fs.rmSync(checkout, { recursive: true, force: true }); }
 });
 
+test('parallel failure terminates an active process group and preserves rebound evidence', async () => {
+  const checkout = fs.mkdtempSync(path.join(os.tmpdir(), 'px-gates-fail-fast-'));
+  try {
+    const started = Date.now();
+    const result = await runPhaseGates('integration', {
+      slug: 'task-2586', checkoutPath: checkout, maxParallel: 2, log: () => {}, error: () => {},
+      gates: [
+        { key: 'red', command: 'while [ ! -f ready ]; do sleep 0.01; done; printf defect >&2; exit 7', order: 1 },
+        { key: 'peer', command: 'touch ready; sleep 30; touch leaked', order: 2 },
+        { key: 'queued', command: 'touch queued', order: 3 },
+      ],
+    });
+    assert.equal(result.ok, false);
+    assert.equal(result.cancelled, false);
+    assert.equal(result.failedGate?.key, 'red');
+    assert.equal(result.failedGate?.exitCode, 7);
+    assert.equal(result.failedGate?.stderr, 'defect');
+    assert.equal(result.executed, 2);
+    assert.ok(Date.now() - started < 5000, 'peer termination avoids its 30-second wait');
+    assert.equal(fs.existsSync(path.join(checkout, 'leaked')), false);
+    assert.equal(fs.existsSync(path.join(checkout, 'queued')), false);
+  } finally { fs.rmSync(checkout, { recursive: true, force: true }); }
+});
+
 test('a stale coverage report cannot release the dependent Sonar gate', async () => {
   const checkout = fs.mkdtempSync(path.join(os.tmpdir(), 'px-coverage-gate-'));
   try {
@@ -36,11 +60,11 @@ test('a stale coverage report cannot release the dependent Sonar gate', async ()
     const result = await runPhaseGates('integration', {
       slug: 'task-2558', checkoutPath: checkout, maxParallel: 2,
       gates: [
-        { key: 'coverage', command: 'rm -f coverage/lcov.info && false && test -s coverage/lcov.info', order: 1 },
-        { key: 'quality-gate', command: 'printf scanned > scan.txt', order: 2, after: ['coverage'] },
+        { key: 'coverage-merge', command: 'rm -f coverage/lcov.info && false && test -s coverage/lcov.info', order: 1 },
+        { key: 'quality-gate', command: 'printf scanned > scan.txt', order: 2, after: ['coverage-merge'] },
       ],
     });
-    assert.equal(result.failedGate?.key, 'coverage');
+    assert.equal(result.failedGate?.key, 'coverage-merge');
     assert.equal(fs.existsSync(path.join(checkout, 'coverage/lcov.info')), false);
     assert.equal(fs.existsSync(path.join(checkout, 'scan.txt')), false);
   } finally { fs.rmSync(checkout, { recursive: true, force: true }); }

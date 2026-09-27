@@ -15,6 +15,7 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import {
+  type GateCommandRunner,
   buildGateEnv,
   loadPhaseGates,
   loadPhaseGateParallelism,
@@ -374,23 +375,31 @@ test('this repository exposes the full independent gate width and orders Sonar a
   const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
   const gates = loadPhaseGates(repoRoot, 'preIntegration');
   const keys = gates.map((g) => g.key);
-  assert.deepEqual(keys, ['build', 'dependency-audit', 'verification', 'integration-suite', 'coverage', 'workflow', 'agent-smoke', 'quality-gate']);
+  assert.deepEqual(keys, ['build', 'dependency-audit', 'verification', 'unit', 'integration-ci', 'integration-local', 'coverage-merge', 'workflow', 'agent-smoke', 'quality-gate']);
   assert.equal(loadPhaseGateParallelism(repoRoot, 'preIntegration'), 6);
   assert.deepEqual(gates.map(({ key, command, order }) => ({ key, command, order })), [
     { key: 'build', command: 'npm run build', order: 1 },
     { key: 'dependency-audit', command: 'npm audit --audit-level=high', order: 2 },
     { key: 'verification', command: './scripts/verify-local.sh static-analysis', order: 3 },
-    { key: 'integration-suite', command: 'npm run test:integration:prebuilt', order: 4 },
-    { key: 'coverage', command: 'rm -f coverage/lcov.info && PARALLIX_PREBUILT_PACK=1 npm run test:coverage -- --threshold 0 --lcov && test -s coverage/lcov.info', order: 5 },
-    { key: 'workflow', command: 'node --import tsx --import ./test/bootstrap-e2e-parallix-home.ts test/e2e-mission-lifecycle.test.ts', order: 6 },
-    { key: 'agent-smoke', command: 'node --import tsx --import ./test/bootstrap-e2e-parallix-home.ts test/e2e-real-agent-smoke.test.ts', order: 7 },
-    { key: 'quality-gate', command: 'npm run sonar', order: 8 },
+    { key: 'unit', command: 'PARALLIX_TEST_COVERAGE=1 npm test -- --unit-test-headroom', order: 4 },
+    { key: 'integration-ci', command: 'PARALLIX_TEST_COVERAGE=1 npm run test:integration:ci:prebuilt', order: 5 },
+    { key: 'integration-local', command: 'npm run test:integration:local', order: 6 },
+    { key: 'coverage-merge', command: 'rm -f coverage/lcov.info && npm run coverage:merge && test -s coverage/lcov.info', order: 7 },
+    { key: 'workflow', command: 'node --import tsx --import ./test/bootstrap-e2e-parallix-home.ts test/e2e-mission-lifecycle.test.ts', order: 8 },
+    { key: 'agent-smoke', command: 'node --import tsx --import ./test/bootstrap-e2e-parallix-home.ts test/e2e-real-agent-smoke.test.ts', order: 9 },
+    { key: 'quality-gate', command: 'npm run sonar', order: 10 },
   ]);
-  assert.deepEqual(gates.find(g => g.key === 'quality-gate')?.after, ['coverage']);
+  assert.deepEqual(gates.find(g => g.key === 'coverage-merge')?.after, ['unit', 'integration-ci']);
+  assert.deepEqual(gates.find(g => g.key === 'quality-gate')?.after, ['coverage-merge']);
   assert.equal(gates.find(g => g.key === 'verification')?.reuse, 'clean-tree');
   assert.ok(gates.filter(g => g.key !== 'verification').every(g => g.reuse === 'never'));
-  assert.deepEqual(gates.filter(g => ['integration-suite', 'coverage', 'workflow', 'agent-smoke'].includes(g.key)).map(g => g.after),
-    [['build'], ['build'], ['build'], ['build']]);
+  assert.deepEqual(gates.filter(g => ['unit', 'integration-ci', 'integration-local', 'workflow', 'agent-smoke'].includes(g.key)).map(g => g.after),
+    [['build'], ['build'], ['build'], ['build'], ['build']]);
+  const runner = fs.readFileSync(path.join(repoRoot, 'test', 'run-default-tests.ts'), 'utf8');
+  assert.match(runner, /mkdtempSync\(path\.join\(executionRoot, 'tmp', `coverage-v8-\$\{coverageTier\}-`\)\)/,
+    'concurrent coverage producers own distinct tier- and process-specific V8 scratch directories');
+  assert.doesNotMatch(runner, /path\.join\(executionRoot, 'tmp', 'coverage-v8'\)/,
+    'coverage producers must not share one fixed V8 scratch directory');
   assert.ok(!gates.some((g) => g.command === 'npm run test:codeql'), 'preIntegration must not run CodeQL automatically');
   // The runner executes them from this checkout with the phase contract.
   const env = buildGateEnv('integration', 'task-2457', repoRoot);
@@ -417,8 +426,8 @@ test('this repository starts every independent check while Sonar waits for cover
       launched.push(key);
       active.add(key);
       peak = Math.max(peak, active.size);
-      assert.ok(key !== 'quality-gate' || !active.has('coverage'), 'Sonar starts after coverage completes');
-      setTimeout(() => { active.delete(key); resolve({ status: 0, stdout: '', stderr: '' }); }, key === 'build' ? 2 : key === 'coverage' ? 5 : 30);
+      assert.ok(key !== 'quality-gate' || !active.has('coverage-merge'), 'Sonar starts after coverage merge completes');
+      setTimeout(() => { active.delete(key); resolve({ status: 0, stdout: '', stderr: '' }); }, key === 'build' ? 2 : key === 'coverage-merge' ? 5 : 30);
     }),
   });
   assert.equal(result.ok, true);
@@ -480,9 +489,19 @@ test('a parallel failure reports its key and does not launch queued gates', asyn
   const checkout = makeCheckout();
   try {
     const launched: string[] = [];
-    const runner = (command: string) => new Promise(resolve => {
+    let peerStopped = false;
+    const runner: GateCommandRunner = (command, _args, options) => new Promise(resolve => {
       launched.push(command);
-      setTimeout(() => resolve({ status: command === 'red' ? 7 : 0, stdout: '', stderr: '' }), command === 'red' ? 5 : 20);
+      if (command === 'red') {
+        setTimeout(() => resolve({ status: 7, stdout: '', stderr: 'original failure' }), 5);
+      } else {
+        const fallback = setTimeout(() => resolve({ status: 0, stdout: '', stderr: '' }), 100);
+        options.signal?.addEventListener('abort', () => {
+          clearTimeout(fallback);
+          peerStopped = true;
+          resolve({ status: null, stdout: '', stderr: 'stopped' });
+        }, { once: true });
+      }
     });
     const result = await runPhaseGates('integration', {
       slug: 'task-2558', checkoutPath: checkout, maxParallel: 2, commandRunner: runner,
@@ -490,6 +509,9 @@ test('a parallel failure reports its key and does not launch queued gates', asyn
     });
     assert.equal(result.ok, false);
     assert.equal(result.failedGate?.key, 'red');
+    assert.equal(peerStopped, true, 'active peers stop on the first failure');
+    assert.equal(result.cancelled, false, 'failure remains eligible for rebound');
+    assert.match(result.error!, /red.*code 7/);
     assert.deepEqual(launched.sort(), ['red', 'slow'], 'a failed gate prevents queued work from starting');
   } finally { fs.rmSync(checkout, { recursive: true, force: true }); }
 });

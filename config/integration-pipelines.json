@@ -12,21 +12,33 @@
       "run_last": false,
       "always": true
     },
-    "integration-suite": {
-      "command": "npm run test:integration:prebuilt",
+    "unit": {
+      "command": "PARALLIX_TEST_COVERAGE=1 npm test -- --unit-test-headroom",
       "order": 3,
       "run_last": false,
       "always": true
     },
-    "coverage": {
-      "command": "rm -f coverage/lcov.info && PARALLIX_PREBUILT_PACK=1 npm run test:coverage -- --threshold 0 --lcov && test -s coverage/lcov.info",
+    "integration-ci": {
+      "command": "PARALLIX_TEST_COVERAGE=1 npm run test:integration:ci:prebuilt",
       "order": 4,
+      "run_last": false,
+      "always": true
+    },
+    "integration-local": {
+      "command": "npm run test:integration:local",
+      "order": 5,
+      "run_last": false,
+      "always": true
+    },
+    "coverage-merge": {
+      "command": "rm -f coverage/lcov.info && npm run coverage:merge && test -s coverage/lcov.info",
+      "order": 6,
       "run_last": false,
       "always": true
     },
     "quality-gate": {
       "command": "npm run sonar",
-      "order": 5,
+      "order": 7,
       "run_last": false,
       "always": true
     },

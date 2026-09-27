@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { buildTestRunPlan } from './lib/test-run-plan.js';
+import { buildTestRunPlan, withCoverageReporters } from './lib/test-run-plan.js';
 import { defaultManifestDir, ensureManifestDir, recoverRecordedTempRoots } from '../src/adapters/verification/temp-root-registry.js';
 import { cleanupRunnerTempRoots, signalExitCode } from './lib/test-runner-temp-roots.js';
 import { onGitHubActions } from './lib/unit-test-budget-reporter.js';
@@ -21,9 +21,14 @@ const plan = buildTestRunPlan({ executionRoot, requestedArgs: process.argv.slice
 const { testNode, nodeArgs, runsIntegrationSuite, runsIntegrationCiSuite, unitTestHeadroomMs } = plan;
 const UNIT_TEST_BUDGET_MS = plan.unitTestBudgetMs; // PARALLIX_UNIT_TEST_BUDGET_MS
 const UNIT_TEST_TIMEOUT_MS = plan.unitTestTimeoutMs;
+// V8 instrumentation is intentionally enabled for the one unit execution in
+// pre-integration. It makes the complete suite materially slower without
+// relaxing the per-test timeout or headroom contracts below.
+const COVERAGE_UNIT_TEST_SUITE_BUDGET_MS = 300_000;
 
 // TASK-2547: coverage is a reporting mode of the CI-safe execution, not a
-// second test pass. When PARALLIX_TEST_COVERAGE is set (GitHub ci-required),
+// second test pass. When PARALLIX_TEST_COVERAGE is set (GitHub ci-required or
+// the local pre-integration gates),
 // enable Node's built-in coverage and emit one lcov per tier so `npm run
 // coverage:merge` can union them. Unit and integration-ci stay separate Node
 // invocations (their execution semantics require it) but each selected test
@@ -33,15 +38,17 @@ const coverageEnabled = process.env.PARALLIX_TEST_COVERAGE === '1'
 const coverageDestination = runsIntegrationCiSuite
   ? path.join(executionRoot, 'coverage', '.lcov-integration-ci.info')
   : path.join(executionRoot, 'coverage', '.lcov-unit.info');
+const coverageTier = runsIntegrationCiSuite ? 'integration-ci' : 'unit';
+// The unit and integration-ci gates may run concurrently. Give each invocation
+// a unique repo-local V8 payload directory; the LCOV destinations above remain
+// the deliberate per-tier hand-off consumed by coverage:merge.
+let coverageScratchDir: string | null = null;
+if (coverageEnabled) {
+  fs.mkdirSync(path.join(executionRoot, 'tmp'), { recursive: true });
+  coverageScratchDir = fs.mkdtempSync(path.join(executionRoot, 'tmp', `coverage-v8-${coverageTier}-`));
+}
 const nodeArgsWithCoverage = coverageEnabled
-  ? [
-    ...nodeArgs.slice(0, nodeArgs.indexOf('--test')),
-    '--experimental-test-coverage',
-    '--test-coverage-lines=0',
-    '--test-reporter=lcov',
-    `--test-reporter-destination=${coverageDestination}`,
-    ...nodeArgs.slice(nodeArgs.indexOf('--test')),
-  ]
+  ? withCoverageReporters(nodeArgs, coverageDestination)
   : nodeArgs;
 if (coverageEnabled) {
   fs.mkdirSync(path.dirname(coverageDestination), { recursive: true });
@@ -77,12 +84,15 @@ const child = spawn(testNode, nodeArgsWithCoverage, {
   cwd: executionRoot,
   env: {
     ...process.env,
-    ...(unitTestHeadroomMs === null ? {} : { PARALLIX_UNIT_TEST_HEADROOM: '1' }),
+    // Coverage is a reporting profile for the pre-integration population.
+    // Its instrumentation timing is not a hermetic per-test performance
+    // measurement; ordinary unit runs retain the explicit 500 ms headroom.
+    ...(unitTestHeadroomMs === null || coverageEnabled ? {} : { PARALLIX_UNIT_TEST_HEADROOM: '1' }),
     PARALLIX_EXECUTION_ROOT: executionRoot,
     PARALLIX_TEST_MANIFEST_DIR: testManifestDir,
     // V8 coverage payload lives repo-locally (not the shared tmpfs) so the
     // per-tier fragments survive into the coverage:merge step.
-    ...(coverageEnabled ? { NODE_V8_COVERAGE: path.join(executionRoot, 'tmp', 'coverage-v8') } : {}),
+    ...(coverageScratchDir ? { NODE_V8_COVERAGE: coverageScratchDir } : {}),
   },
   detached: process.platform !== 'win32'
 });
@@ -145,6 +155,7 @@ child.on('error', (error) => {
   suiteSettled = true;
   clearTimeout(watchdog);
   cleanupRunnerTempRoots(testManifestDir);
+  if (coverageScratchDir) { fs.rmSync(coverageScratchDir, { recursive: true, force: true }); }
   throw error;
 });
 child.on('close', (code, signal) => {
@@ -169,7 +180,7 @@ child.on('close', (code, signal) => {
   // there. Local runs keep enforcing it. Gated independently of the reporter
   // (task-2531).
   if (!runsIntegrationSuite && !onGitHubActions()) {
-    const actualBudget = UNIT_TEST_BUDGET_MS;
+    const actualBudget = coverageEnabled ? COVERAGE_UNIT_TEST_SUITE_BUDGET_MS : UNIT_TEST_BUDGET_MS;
     console.error(`[unit-test-budget] timeout=${UNIT_TEST_TIMEOUT_MS}ms per test, suite budget=${actualBudget}ms, elapsed=${Math.round(suiteElapsedMs)}ms`);
     if (code === 0 && suiteElapsedMs > actualBudget) {
       console.error(`[unit-test-budget] SUITE BUDGET EXCEEDED: ${Math.round(suiteElapsedMs)}ms > ${actualBudget}ms`);
@@ -179,6 +190,7 @@ child.on('close', (code, signal) => {
 
   // Clean up roots before propagating failure status.
   cleanupRunnerTempRoots(testManifestDir);
+  if (coverageScratchDir) { fs.rmSync(coverageScratchDir, { recursive: true, force: true }); }
 
   process.exit((code ?? 0) || (suiteExceeded || unitTestExceeded ? 1 : 0));
 });

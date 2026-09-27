@@ -82,6 +82,10 @@ export PATH="${SCRIPT_DIR}:$PATH"
 
 gate_all() {
   node scripts/verify-docs.mjs
+  # Release-metadata tests verify the published bundle payload, including every
+  # SQLite migration. Build it here so this declared gate never validates a
+  # stale ignored build/ tree after a rebase or fresh checkout.
+  npm run build
   npm test
 }
 

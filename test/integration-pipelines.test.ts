@@ -629,12 +629,12 @@ test('repo integration config keeps workflow gate on the targeted mission-lifecy
     config?.gates?.workflow?.command,
     'node --import tsx --import ./test/bootstrap-e2e-parallix-home.ts test/e2e-mission-lifecycle.test.ts'
   );
-  assert.equal(config?.gates?.coverage?.command,
-    'rm -f coverage/lcov.info && PARALLIX_PREBUILT_PACK=1 npm run test:coverage -- --threshold 0 --lcov && test -s coverage/lcov.info');
+  assert.equal(config?.gates?.['coverage-merge']?.command,
+    'rm -f coverage/lcov.info && npm run coverage:merge && test -s coverage/lcov.info');
   assert.equal(config?.gates?.['quality-gate']?.command, 'npm run sonar');
-  assert.ok(config.gates.coverage.order < config.gates['quality-gate'].order);
+  assert.ok(config.gates['coverage-merge'].order < config.gates['quality-gate'].order);
   assert.equal(config.gates.codeql, undefined, 'CodeQL remains manual');
-  for (const key of ['build', 'dependency-audit', 'integration-suite', 'coverage', 'quality-gate', 'workflow']) {
+  for (const key of ['build', 'dependency-audit', 'unit', 'integration-ci', 'integration-local', 'coverage-merge', 'quality-gate', 'workflow']) {
     assert.equal(config.gates[key].command, preIntegration.find(gate => gate.key === key)?.command, `${key} must match the px integrate gate`);
   }
 });
@@ -1342,11 +1342,11 @@ test('repo config preserves remaining gate orders (task-1419)', () => {
   assert.equal(config.gates['custom-agent-smoke'].order, 51, 'custom-agent-smoke gate remains order 51');
   assert.equal(config.gates['custom-agent-smoke'].run_last, true, 'custom-agent-smoke gate remains run_last');
   assert.equal(config.gates.codeql, undefined, 'CodeQL remains a manual scan');
-  assert.equal(config.gates.coverage.order, 4);
-  assert.equal(config.gates['quality-gate'].order, 5);
+  assert.equal(config.gates['coverage-merge'].order, 6);
+  assert.equal(config.gates['quality-gate'].order, 7);
 });
 
-test('every representative changed-area plan includes the unconditional integration-suite gate (task-2292)', () => {
+test('every representative changed-area plan includes the unconditional tier gates (task-2292)', () => {
   const configPath = path.join(import.meta.dirname, '..', 'config', 'integration-pipelines.json');
   const cases = [
     ['lib', 'lib/commands/integrate.ts', true],
@@ -1366,9 +1366,13 @@ test('every representative changed-area plan includes the unconditional integrat
       dryRun: false,
       configPath
     });
-    const suiteGate = plan.gates.find(gate => gate.key === 'integration-suite');
-    assert.ok(suiteGate, `${label} plan must include the integration-suite gate`);
-    assert.equal(suiteGate.command, 'npm run test:integration:prebuilt');
+    const tierGates = ['unit', 'integration-ci', 'integration-local'].map(key => plan.gates.find(gate => gate.key === key));
+    assert.ok(tierGates.every(Boolean), `${label} plan must include every required test tier`);
+    assert.deepEqual(tierGates.map(gate => gate?.command), [
+      'PARALLIX_TEST_COVERAGE=1 npm test -- --unit-test-headroom',
+      'PARALLIX_TEST_COVERAGE=1 npm run test:integration:ci:prebuilt',
+      'npm run test:integration:local',
+    ]);
     const workflowGate = plan.gates.find(gate => gate.key === 'workflow');
     const smokeGate = plan.gates.find(gate => gate.key === 'custom-agent-smoke');
     assert.equal(Boolean(workflowGate), expectsE2E, `${label} workflow gate selection must remain area-scoped`);
@@ -1376,7 +1380,7 @@ test('every representative changed-area plan includes the unconditional integrat
     if (expectsE2E) {
       assert.equal(workflowGate.command, 'node --import tsx --import ./test/bootstrap-e2e-parallix-home.ts test/e2e-mission-lifecycle.test.ts');
       assert.equal(smokeGate.command, 'node --import tsx --import ./test/bootstrap-e2e-parallix-home.ts test/e2e-real-agent-smoke.test.ts');
-      assert.ok(plan.gates.indexOf(suiteGate) < plan.gates.indexOf(workflowGate), `${label} suite gate runs before workflow E2E`);
+      assert.ok(plan.gates.indexOf(tierGates[2]!) < plan.gates.indexOf(workflowGate), `${label} integration-local runs before workflow E2E`);
       assert.ok(plan.gates.indexOf(workflowGate) < plan.gates.indexOf(smokeGate), `${label} workflow E2E remains before smoke E2E`);
     }
   }
@@ -1416,7 +1420,7 @@ test('getIntegrationGatePlan with repo config runs build and quality gates for d
 
   const keys = plan.gates.map(g => g.key);
   assert.ok(keys.includes('build'), 'build is mandatory for every candidate');
-  assert.ok(keys.includes('coverage'), 'coverage is mandatory for every candidate');
+  assert.ok(keys.includes('coverage-merge'), 'coverage merge is mandatory for every candidate');
   assert.ok(keys.includes('quality-gate'), 'Sonar is mandatory for every candidate');
   assert.ok(!keys.includes('lib'), 'lib gate should NOT be selected for docs-only changes');
 });

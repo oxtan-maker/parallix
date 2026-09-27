@@ -11,7 +11,7 @@ import { fileURLToPath } from 'node:url';
 import { runSonar } from '../scripts/sonar-local.js';
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const COVERAGE_COMMAND = 'rm -f coverage/lcov.info && PARALLIX_PREBUILT_PACK=1 npm run test:coverage -- --threshold 0 --lcov && test -s coverage/lcov.info';
+const COVERAGE_COMMAND = 'rm -f coverage/lcov.info && npm run coverage:merge && test -s coverage/lcov.info';
 
 // Capture the scanner invocation instead of running it. SONAR_TOKEN and
 // GITHUB_ACTIONS are set only for the duration of the call, so ordering between
@@ -59,17 +59,16 @@ test('local sonar scan submits the worktree branch to the one Cloud project', ()
   assert.doesNotMatch(captured.args.join(' '), /operator-token/, 'the token is never passed as a scanner argument');
 });
 
-test('mission comparison uses a short branch against main and keeps the long scan separate', () => {
+test('mission comparison uses one waited short branch against main', () => {
   const short = captureScan({ SONAR_TOKEN: 'operator-token', GITHUB_ACTIONS: undefined }, 0, { branch: 'candidate/mission/task-2560' });
   short.run();
   assert.ok(short.read()!.args.includes('-Dsonar.branch.target=main'));
   assert.ok(short.read()!.args.includes('-Dsonar.branch.name=candidate/mission/task-2560'));
   assert.ok(!short.read()!.args.includes('-Dsonar.qualitygate.wait=false'));
-
-  const long = captureScan({ SONAR_TOKEN: 'operator-token', GITHUB_ACTIONS: undefined }, 0, { waitForGate: false });
-  long.run();
-  assert.ok(long.read()!.args.includes('-Dsonar.qualitygate.wait=false'));
-  assert.ok(!long.read()!.args.includes('-Dsonar.branch.target=main'));
+  const source = fs.readFileSync(path.join(repoRoot, 'scripts', 'sonar-local.ts'), 'utf8');
+  assert.match(source, /runSonar\(\{ rootDir, branch: comparison \}\);\s+await assertShortBranch/);
+  assert.doesNotMatch(source, /waitForGate: false|assertMissionTotalCode|assertNoOpenHighOrBlockerIssues|awaitAnalysis/,
+    'local mission verification must not run a LONG scan, total-code query, or polling path');
 });
 
 test('github sonar scan lets the CI integration derive the branch identity', () => {
@@ -109,9 +108,9 @@ test('local verification and GitHub invoke the same pinned sonar entrypoint', ()
 
   assert.equal(manifest.scripts.sonar, 'tsx scripts/sonar-local.ts scan');
   const gates = config.adapters.gates.preIntegration as Array<{ key: string, command: string, after?: string[] }>;
-  assert.equal(gates.find(gate => gate.key === 'coverage')?.command, COVERAGE_COMMAND);
+  assert.equal(gates.find(gate => gate.key === 'coverage-merge')?.command, COVERAGE_COMMAND);
   assert.deepEqual(gates.find(gate => gate.key === 'quality-gate'),
-    { key: 'quality-gate', command: 'npm run sonar', order: 8, after: ['coverage'] },
+    { key: 'quality-gate', command: 'npm run sonar', order: 10, after: ['coverage-merge'] },
     'the quality gate waits for fresh coverage and uses the shared scanner entrypoint');
   // GitHub and local share the single pinned sonar entrypoint (ADR 0060). The
   // hosted path no longer runs the combined coverage-plus-scan command (TASK-2547:
@@ -132,10 +131,9 @@ test('sonar analysis configuration consumes LCOV without a Cloud-unsupported new
   assert.match(props, /sonar\.javascript\.lcov\.reportPaths=coverage\/lcov\.info/);
   assert.match(props, /sonar\.sources=src/);
   assert.doesNotMatch(props, /sonar\.newCode\.referenceBranch|sonar\.projectVersion=/);
-  // The local pre-integration gate emits LCOV through npm run test:coverage
-  // (--lcov), and GitHub unions the per-tier fragments into the same
-  // coverage/lcov.info via npm run coverage:merge before the scan.
-  assert.ok(COVERAGE_COMMAND.includes('--lcov'), 'the local pre-integration gate emits LCOV');
+  // Local and GitHub merge the same per-tier fragments into coverage/lcov.info
+  // before the shared scanner runs; no dedicated c8 test pass is involved.
+  assert.ok(COVERAGE_COMMAND.includes('coverage:merge'), 'the local pre-integration gate merges the LCOV fragments');
 });
 
 test('no local SonarQube path survives anywhere in the tracked tree', () => {

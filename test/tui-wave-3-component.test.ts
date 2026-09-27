@@ -60,9 +60,9 @@ test('component: keyboard help is visible on demand and ordinary keys have no wo
       patchConsole: false,
       exitOnCtrlC: false,
     });
-    await new Promise((resolve) => setTimeout(resolve, 35));
+    await new Promise((resolve) => setTimeout(resolve, 10));
     stdin.send(key);
-    await new Promise((resolve) => setTimeout(resolve, 35));
+    await new Promise((resolve) => setTimeout(resolve, 10));
     instance.unmount();
     const output = stdout.writes.join('');
     if (key === '?') {

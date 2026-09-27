@@ -1,6 +1,6 @@
 {
   "name": "@magnusekdahl/parallix",
-  "version": "1.5.184",
+  "version": "1.5.185",
   "description": "Trust ladder for AI coding work — separate review, configured verification, conditional Linux confinement, and human-owned merges",
   "license": "AGPL-3.0-or-later",
   "private": false,
@@ -59,7 +59,6 @@
     "test:package-content:prebuilt": "PARALLIX_PREBUILT_PACK=1 tsx scripts/package-content-audit.ts",
     "test:codeql": "bash scripts/codeql-sast.sh",
     "test:reproducible-output": "tsx scripts/verify-reproducible-build.ts",
-    "test:coverage": "FORCE_COLOR=0 tsx src/adapters/verification/coverage-gate.ts",
     "sonar": "tsx scripts/sonar-local.ts scan",
     "sonar:delete-branch": "tsx scripts/sonar-local.ts delete-branch",
     "typecheck": "tsc --noEmit && tsc --noEmit --project tsconfig.scripts.json",
@@ -83,7 +82,6 @@
     "@types/react": "^19.2.14",
     "@typescript-eslint/eslint-plugin": "^8.62.1",
     "@typescript-eslint/parser": "^8.62.1",
-    "c8": "^10.1.3",
     "esbuild": "^0.25.12",
     "eslint": "^9.39.4",
     "fast-uri": "^3.1.6",
