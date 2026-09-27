@@ -53,13 +53,19 @@ always derived.
 When that relative file is absent, Parallix uses its shipped state map. Point it
 at a repository map to translate lifecycle states for another board.
 
+`adapters.tasks.selfHostedCloseout` is a boolean, defaulting to `false`.
+Set it to `true` only when the repository's Mission aggregate is the durable
+history and it intentionally does not retain completed Backlog task files.
+Other Backlog.md repositories keep the default completion move.
+
 ```json
 {
   "adapters": {
     "tasks": {
       "provider": "backlog-md",
       "storage": { "tasksDir": "work/items", "completedDir": "work/done" },
-      "stateMap": "config/state-map.json"
+      "stateMap": "config/state-map.json",
+      "selfHostedCloseout": false
     }
   }
 }

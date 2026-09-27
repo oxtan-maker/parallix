@@ -892,6 +892,8 @@ test('rebase agent-assisted rebase rechecks ancestry after conflict resolution',
   let ancestryChecked = false;
   let agentLaunched = false;
   await rebase(['task-2323'], {
+    resolveTaskFileFn: () => ({ ok: true, taskFile: '/tmp/task-2323.md' }),
+    getTaskImplementerFn: () => 'codex',
     inferSlugFn: () => 'task-2323',
     findMissionDirFn: () => '/tmp/missions/task-2323',
     findMissionAreaFn: () => 'docs',
@@ -941,6 +943,8 @@ test('rebase agent-assisted rebase exits 1 when ancestry fails after conflict re
   let exitCode = null;
   try {
     await rebase(['task-2323'], {
+      resolveTaskFileFn: () => ({ ok: true, taskFile: '/tmp/task-2323.md' }),
+      getTaskImplementerFn: () => 'codex',
       inferSlugFn: () => 'task-2323',
       findMissionDirFn: () => '/tmp/missions/task-2323',
       findMissionAreaFn: () => 'docs',

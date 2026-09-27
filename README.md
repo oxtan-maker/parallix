@@ -148,7 +148,7 @@ acting, and naming missions narrows the run to those.
 
 Both are optional integrations, and each one is wired independently of the other.
 
-**Backlog.md.** Point `px draft` at a task key and Parallix adopts the existing record instead of creating one: it reads the ID, title, labels, and classification from `backlog/tasks/<slug> - <title>.md` and carries them through the mission. As the mission moves, Parallix writes the task's `status` frontmatter and, on completion, moves the file into `backlog/completed/`, so the board reflects mission state without a second bookkeeping step. Drafting from free text instead produces an equivalent synthetic record, so nothing downstream depends on you keeping task files.
+**Backlog.md.** Point `px draft` at a task key and Parallix adopts the existing record instead of creating one: it reads the ID, title, labels, and classification from `backlog/tasks/<slug> - <title>.md` and carries them through the mission. As the mission moves, Parallix writes the task's `status` frontmatter and, by default, moves the file into `backlog/completed/`, so the board reflects mission state without a second bookkeeping step. A self-hosting repository can explicitly opt out of retaining that completed-task mirror. Drafting from free text instead produces an equivalent synthetic record, so nothing downstream depends on you keeping task files.
 
 **Forgejo.** Review publication is off until you opt in. If you want its reviewer surface, `px setup` can bootstrap the review repository, agent tokens, and the `review` git remote; otherwise the branch/worktree workflow runs without Forgejo. Forgejo user accounts must already exist before that optional setup; see [`docs/forgejo-setup.md`](docs/forgejo-setup.md) for account creation, token layout, and running a local instance.
 
@@ -199,6 +199,9 @@ npm test
 npm run test:integration  # real process, Git/worktree, package, and local-network boundary coverage
 npm run test:codeql       # CodeQL SAST scan (javascript-typescript security/code-scanning), run manually; not part of local integration
 ```
+
+LCOV reports omit TypeScript modules that compile to no runtime code. Modules
+with runtime declarations or imports remain subject to coverage requirements.
 
 The test suite is the verification gate this repo declares in `workflow.config.json`. Run it before integrating any change. Contributions follow the same mission lifecycle the tool itself runs: branch, worktree, checkpoints, a second review, and a passing gate before integration. To exercise the packaged artifact the way a user receives it: `npm pack && npm install -g ./magnusekdahl-parallix-*.tgz`.
 

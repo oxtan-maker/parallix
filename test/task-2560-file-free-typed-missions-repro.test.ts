@@ -4,15 +4,85 @@ import os from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
 import { ensureMissionFile } from '../src/adapters/cli/commands/draft-setup.js';
+import { runDraftCommand } from '../src/adapters/cli/commands/draft.js';
 import { HandoffCommandUseCase } from '../src/application/handoff-command-use-case.js';
 import { SLUG, LEGACY_MISSION_LOAD, makePorts, makeRecorder, runOptions } from './helpers/handoff-ports.js';
 
-test('a new typed draft prepares its mission directory without a Markdown contract', () => {
+function containsFile(directory: string): boolean {
+  for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
+    const target = path.join(directory, entry.name);
+    if (entry.isFile() || (entry.isDirectory() && containsFile(target))) { return true; }
+  }
+  return false;
+}
+
+test('a new typed draft does not prepare a retired mission directory', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'parallix-typed-draft-'));
   try {
-    const missionPath = ensureMissionFile(root, 'task-2560-repro', { logFn: (message) => message });
-    assert.equal(fs.existsSync(path.dirname(missionPath)), true);
-    assert.equal(fs.existsSync(missionPath), false);
+    assert.equal(ensureMissionFile(root, 'task-2560-repro', { logFn: (message) => message }), '');
+    assert.equal(fs.existsSync(path.join(root, 'missions')), false);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('the self-hosted tree contains no retired workflow ledger roots', () => {
+  const retiredDirectories = [
+    'missions',
+    'backlog/completed',
+    'backlog/archive',
+  ];
+  for (const retiredRoot of retiredDirectories) {
+    const directory = path.join(process.cwd(), retiredRoot);
+    assert.equal(
+      fs.existsSync(directory) && containsFile(directory),
+      false,
+      `retired workflow metadata must not remain under ${retiredRoot}`,
+    );
+  }
+  assert.equal(fs.existsSync(path.join(process.cwd(), 'backlog.md')), false,
+    'retired workflow metadata must not be tracked at backlog.md');
+});
+
+test('a normal typed draft workflow does not recreate the retired mission tree', async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'parallix-file-free-draft-'));
+  const slug = 'task-2560-repro';
+  try {
+    const missionServices = async () => ({
+      repositoryId: 'test-repository',
+      intake: { execute: async () => ({ status: 'completed', value: { version: 1 } }) },
+      lifecycle: { transition: async () => ({ status: 'completed', value: { version: 2 } }) },
+      store: { load: async () => ({ kind: 'found', mission: { title: 'File-free draft' } }) },
+    });
+    await runDraftCommand([slug], {
+      inferSlugFn: () => slug,
+      resolveMainRepoFn: () => root,
+      conventionalWorktreePathFn: () => root,
+      ensureRepoExistsFn: () => true,
+      resolveTaskFileFn: () => ({ ok: true, taskFile: null, matches: [] }),
+      checkBacklogIntegrityFn: () => [],
+      detectLaunchBaseBranchFn: () => null,
+      ensureMissionBranchFn: () => {},
+      ensureWorktreeFn: () => {},
+      ensureGraphifyWorkspaceFn: () => {},
+      ensureGraphifyIgnoreFn: () => {},
+      bootstrapBacklogTaskFn: () => true,
+      validateDraftClassificationFn: () => ({ ok: true }),
+      normalizeDraftClassificationFn: () => ({ ok: true, classification: 'ai_sdlc' }),
+      readAgentConfigOrExitFn: () => ({}),
+      selectAgentFn: () => 'codex',
+      startDraftAgentFn: async () => ({ agent: 'codex', result: { status: 0 } }),
+      recordDraftImplementerFn: () => {},
+      recordDraftStatsFn: () => {},
+      enforceDraftCommitSafetyFn: () => false,
+      transitionTaskFn: () => true,
+      transitionVirtualFn: async (transition, target, status, options) => transition(target, status, options),
+      missionServicesFn: missionServices,
+      exitFn: (code) => { throw new Error(`unexpected exit ${code}`); },
+      logFn: () => {},
+      errorFn: (message) => { throw new Error(`unexpected error: ${message}`); },
+    });
+    assert.equal(fs.existsSync(path.join(root, 'missions')), false);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }

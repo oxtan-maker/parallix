@@ -274,7 +274,7 @@ export interface DraftWorkflowContext {
   readonly targetWorktree: string;
   /** Mission branch name (set once setup resolves it). */
   readonly branchName?: string;
-  /** Path to MISSION.md. */
+  /** Retired compatibility field; file-free drafts leave it empty. */
   readonly missionFile: string;
   /** Recorded base branch (null if primary/detached HEAD). */
   readonly recordedBase: string | null;
@@ -303,7 +303,7 @@ export interface DraftWorkflowPort {
   preflight(_args: string[], _options?: Record<string, unknown>): DraftWorkflowContext;
   /** Create branch, worktree, graphify workspace, gitignore. */
   setup(_context: DraftWorkflowContext): DraftWorkflowContext;
-  /** Scaffold MISSION.md, record base branch, bootstrap backlog task. */
+  /** Prepare the typed contract, record base branch, bootstrap backlog task. */
   scaffold(_context: DraftWorkflowContext): DraftWorkflowContext;
   /** Materialize mission in the operator store via intake service. */
   intake(_context: DraftWorkflowContext): Promise<DraftWorkflowContext> | DraftWorkflowContext;

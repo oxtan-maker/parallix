@@ -265,25 +265,6 @@ test('performStaticReview accepts Goal Check evidence that cites a real test nam
   }
 });
 
-test('performStaticReview accepts an existing repository checkpoint sample', (t) => {
-  const repoRoot = path.resolve(import.meta.dirname, '..');
-  const sampleMissionDir = path.join(repoRoot, 'missions', 'task-1398');
-  const sampleCheckpoint = path.join(sampleMissionDir, 'CP-4.md');
-
-  const result = performStaticReview('task-1398', {
-    resolveWorktree: () => repoRoot,
-    findMissionDir: () => sampleMissionDir,
-    findCheckpoints: () => [sampleCheckpoint],
-    readFileSync: fs.readFileSync,
-    run: () => ({ status: 0, stdout: '' }),
-    getPrimaryBranch: () => 'main',
-    log: () => {}
-  });
-
-  assert.deepEqual(result.findings, []);
-  assert.equal(result.ok, true);
-});
-
 // ============================================================================
 // Regression test: no-PR + clean static review must NOT auto-transition to approved
 // ============================================================================
@@ -513,7 +494,7 @@ test('review automation retains its five-round limit', async () => {
 // SC1: a fresh `px review <slug> --start` must reach the handoff transition that
 // creates the Review aggregate. A fresh active mission has no persisted Review
 // yet, so the aggregate guard must be relaxed for `--start`.
-test('a fresh --start reaches the review loop even with no persisted Review aggregate', async () => {
+test('a fresh --start requires the DB-native Review aggregate', async () => {
   let startReviewLoopCalled = 0;
 
   await review(['task-2490', '--start'], {
@@ -526,7 +507,7 @@ test('a fresh --start reaches the review loop even with no persisted Review aggr
     startReviewLoopFn: async () => { startReviewLoopCalled += 1; },
   });
 
-  assert.equal(startReviewLoopCalled, 1, `--start must reach the review loop with no persisted Review; guard should be relaxed. errors were never expected`);
+  assert.equal(startReviewLoopCalled, 0, '--start must not reintroduce retired file-backed review state when the DB-native aggregate is absent');
 });
 
 // The aggregate guard is retained for every non-start operation: a `--continue`

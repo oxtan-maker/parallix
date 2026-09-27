@@ -268,6 +268,8 @@ export const INTEGRATION_CI_TESTS: readonly string[] = [
   'tui-command-flow.test.ts',
   'tui-pty-smoke.test.ts',
   'tui-spawn.test.ts',
+  // Real filesystem and TypeScript emit contract; only npm dependencies required.
+  'type-only-coverage.integration.test.ts',
   'verification.test.ts',
   'verify-local-integrate.test.ts',
   'web-host.integration.test.ts',

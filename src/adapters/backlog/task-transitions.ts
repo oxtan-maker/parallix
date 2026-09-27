@@ -54,12 +54,21 @@ function setTaskStatus(taskFilePath: string, newStatus: string) {
   return true;
 }
 
+interface CompleteTaskOptions {
+  /** Keep the older Backlog completion record for explicit compatibility flows. */
+  retainLegacyRecord?: boolean;
+}
+
 /**
  * @param {string} slug
  * @param {string} [rootDir]
  * @returns {boolean}
  */
-function completeTask(slug: string, rootDir: string = process.cwd()): boolean {
+function completeTask(
+  slug: string,
+  rootDir: string = process.cwd(),
+  { retainLegacyRecord = true }: CompleteTaskOptions = {},
+): boolean {
   const resolution = resolveTaskFile(slug, rootDir);
   const { tasksDir, completedDir } = getTaskStorage(rootDir);
   const hasCompletedTwin = resolution.reason === 'ambiguous'
@@ -73,6 +82,11 @@ function completeTask(slug: string, rootDir: string = process.cwd()): boolean {
 
   if (!taskFilePath) {return false;}
   const fileName = path.basename(taskFilePath);
+
+  if (!retainLegacyRecord) {
+    fs.rmSync(taskFilePath);
+    return true;
+  }
 
   if (!taskFilePath.includes(tasksDir)) {
     // Already in completed or somewhere else

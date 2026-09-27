@@ -61,6 +61,7 @@ import { addTrustedTempRoot, defaultManifestDir, ensureManifestDir, recoverRecor
 // test-tier-selection.ts, extracted from test/lib/test-run-plan.ts). It never
 // derives membership from a glob: see test/task-2547-repro.test.ts.
 import { selectTierFiles } from '../../../test/lib/test-tier-selection.js';
+import { removeTypeOnlyCoverage } from './type-only-coverage.js';
 
 const MODULE_DIR = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = packageRoot(MODULE_DIR);
@@ -369,7 +370,7 @@ function runTests(testFiles: string[], coverageThreshold = threshold, _spawnSync
 
   if (lcov && result.status === 0) {
     const lcovPath = path.join(REPO_ROOT, 'coverage', 'lcov.info');
-    fs.writeFileSync(lcovPath, normalizeLcov(fs.readFileSync(lcovPath, 'utf8')));
+    fs.writeFileSync(lcovPath, removeTypeOnlyCoverage(normalizeLcov(fs.readFileSync(lcovPath, 'utf8')), REPO_ROOT));
   }
 
   cleanupNewTempDirs(tmpEntriesBefore, tmpRoot);

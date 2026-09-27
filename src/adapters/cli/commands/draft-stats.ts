@@ -527,13 +527,13 @@ function createDraftWorkflowAdapter(deps: Record<string, unknown> = {}) {
       return { ...ctx, targetWorktree, branchName, missionFile: ctx.missionFile };
     },
 
-    // Prepare the mission directory and Backlog mirror.
+    // Prepare typed mission state and the Backlog mirror.
     scaffold: (ctx: DraftWorkflowContext): DraftWorkflowContext => {
       const merged = ctx.options as Record<string, unknown>;
       const ensureMissionFileFn = merged.ensureMissionFileFn || ensureMissionFile;
       const bootstrapBacklogTaskFn = merged.bootstrapBacklogTaskFn || bootstrapBacklogTask;
 
-      debugFn(fmt.bold('Step 3: Preparing mission directory...'));
+      debugFn(fmt.bold('Step 3: Preparing typed mission contract...'));
       const missionFile = ensureMissionFileFn(ctx.targetWorktree, ctx.slug, { logFn: plumbingLogFn });
 
       debugFn(fmt.bold('Step 4: Ensuring Backlog task exists in worktree...'));

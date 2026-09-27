@@ -225,7 +225,7 @@ test('mission-start verify mode reports diagnostics and open-ended success witho
   assert.equal(errors.length, 0);
 });
 
-test('mission-start mission mode reports failures for wrong branch, ambiguous task, and missing mission dir', () => {
+test('mission-start reports wrong branch and ambiguous task without requiring metadata directories', () => {
   const lines = [];
   const errors = [];
 
@@ -251,7 +251,8 @@ test('mission-start mission mode reports failures for wrong branch, ambiguous ta
   assert.ok(lines.some(l => l.includes('[FAIL] Backlog task resolution is ambiguous for slug: task-1031')));
   assert.ok(lines.includes('  - a.md'));
   assert.ok(lines.includes('  - b.md'));
-  assert.ok(lines.some(line => line.includes('[FAIL] Mission doc: directory not found in docs/missions/2026/ for slug task-1031')));
+  assert.ok(lines.some(line => line.includes('[PASS] Typed mission contract')));
+  assert.ok(!lines.some(line => line.includes('[FAIL] Mission doc')));
   assert.ok(lines.some(line => line.includes('[PASS] Forgejo PR: no PR found (ready for startup)')));
   assert.ok(errors.some(line => line.includes('[FAIL] Environment verdict: NOT USABLE')));
 });

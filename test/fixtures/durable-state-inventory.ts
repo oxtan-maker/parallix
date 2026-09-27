@@ -1044,15 +1044,6 @@ export const RETIRED_WORKFLOW_PATH_WRITERS: readonly RetiredWorkflowPathWriterEn
     authority: 'ADR 0037 — task assignment and labels are Backlog catalog metadata, not Mission persistence.',
   },
   {
-    id: 'retired-writer-draft-setup-mission',
-    fileLocation: 'src/adapters/cli/commands/draft-setup.ts',
-    // Draft only prepares a directory for mission-local artifacts. Generated
-    // contract files have no normal-runtime writer exemption.
-    pathPatterns: ['mkdirSync\\(missionDir'],
-    classification: 'mission-directory',
-    authority: 'Draft prepares a mission directory without writing a contract document.',
-  },
-  {
     id: 'retired-writer-integrate-conflict',
     fileLocation: 'src/adapters/cli/commands/integrate-conflict.ts',
     pathPatterns: ['taskFilePath'],

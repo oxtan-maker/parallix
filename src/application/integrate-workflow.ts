@@ -98,6 +98,7 @@ export function createIntegrateWorkflow(ports: IntegrateWorkflowPorts) {
       context.missionStatus = missionLoad.mission.status;
       context.missionBrief = missionLoad.mission.brief ?? null;
       context.missionLabels = missionLoad.mission.labels;
+      context.recordedContract = Boolean(missionLoad.mission.brief);
       context.missionReview = missionLoad.mission.review;
       context.missionVersion = missionLoad.version;
       // Use the Mission store review as approval source when Forgejo is unavailable.

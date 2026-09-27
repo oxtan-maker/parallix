@@ -182,6 +182,11 @@ A failing run prefixes its assertion message with one of three buckets:
   line was missing or malformed, or a later phase failed. This is the
   `TASK-1273` class of bug.
 
+Mission activation and integration read the recorded contract in SQLite, and
+handoff checks its recorded checkpoint evidence. These steps do not require a
+`MISSION.md` file or a mission metadata directory; a recorded base branch must
+still exist locally.
+
 The smoke harness does two preflight checks before the full lifecycle run:
 
 - It verifies that the real `opencode` binary is present on `PATH`.

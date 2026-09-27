@@ -2438,7 +2438,8 @@ test('isNoMergeToAbortResult only ignores the known no-merge case', () => {
   );
 });
 
-test('printIntegrationPreflight prints base-slug path when mission doc is missing and slug has a suffix', () => {
+for (const recordedContract of [false, true]) {
+test(`printIntegrationPreflight ${recordedContract ? 'accepts a recorded contract without metadata' : 'prints the missing legacy contract path'}`, () => {
   const lines = [];
   const originalLog = console.log;
   console.log = line => lines.push(line);
@@ -2449,6 +2450,8 @@ test('printIntegrationPreflight prints base-slug path when mission doc is missin
       branch: 'mission/task-1054-modern',
       currentBranch: 'mission/task-1054-modern',
       missionDir: null,
+      missionBrief: recordedContract ? { goal: 'Recorded mission contract' } : null,
+      recordedContract,
       task: { ok: true, taskFile: '/tmp/task-1054-modern.md' },
       taskStatus: 'ready-for-integration',
       taskAssignee: 'codex',
@@ -2467,14 +2470,19 @@ test('printIntegrationPreflight prints base-slug path when mission doc is missin
       getUnresolvedIndexConflictsFn: () => ({ ok: true, files: [] })
     });
 
-    assert.ok(result.failures.includes('mission-doc'));
+    assert.equal(result.failures.includes('mission-doc'), !recordedContract);
     const output = lines.join('\n');
-    assert.match(output, /Mission doc: missions\/task-1054\/MISSION\.md not found/);
+    if (recordedContract) {
+      assert.doesNotMatch(output, /Mission doc:.*not found/);
+    } else {
+      assert.match(output, /Mission doc: missions\/task-1054\/MISSION\.md not found/);
+    }
     assert.doesNotMatch(output, /Mission doc: [^\n]*task-1054-modern[^\n]*MISSION\.md/);
   } finally {
     console.log = originalLog;
   }
 });
+}
 
 test('printIntegrationPreflight warns when multiple PRs exist for the same task', () => {
   const lines = [];

@@ -541,6 +541,9 @@ test('SC1 reverse: all durable-IO files under src/ are present in the inventory'
     'src/adapters/verification/verification.ts',
     // Temporary-root cleanup manifests are verification infrastructure, not domain state.
     'src/adapters/verification/temp-root-registry.ts',
+    // Coverage normalization reads production source to detect erased types;
+    // it owns no durable-state concept and writes no files.
+    'src/adapters/verification/type-only-coverage.ts',
     // Process liveness reads one named /proc entry as bounded recovery
     // evidence. It stores nothing and owns no ADR 0053 concept (TASK-2373).
     'src/adapters/process/process-liveness.ts',

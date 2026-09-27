@@ -11,9 +11,6 @@ import {
 } from './helpers/task-2284-catalog-round-trip.js';
 
 const root = process.cwd();
-// TASK-2284 is the real completed-store exemplar for this catalog migration.
-// It is no longer an active backlog task after its lifecycle transition.
-const MISSION_TASK = 'backlog/completed/task-2284 - Decide-future-task-catalog-authority-and-board-authorship-migration.md';
 
 // A synthetic record that carries every frontmatter key named by the mission
 // plus two extension keys no reader in src/adapters/backlog/backlog.ts
@@ -168,28 +165,10 @@ test('round trip preserves the SECTION:DESCRIPTION body and every AC and DOD ite
   ]);
 });
 
-test('round trip reports zero field differences for real task records copied from all three stores', () => {
-  const sources = [
-    MISSION_TASK,
-    firstTaskFile('backlog/tasks'),
-    firstTaskFile('backlog/completed'),
-  ];
-  const before = sources.map(relative => fs.readFileSync(path.join(root, relative)));
-
-  withTempCopies(sources, copies => {
-    for (const copy of copies) {
-      const source = fs.readFileSync(copy, 'utf8');
-      const result = roundTrip(source);
-      assert.deepEqual(result.differences, [], `${path.basename(copy)} must round trip with zero field differences`);
-      assert.equal(result.serialized, source, `${path.basename(copy)} must re-serialize byte for byte`);
-      assert.equal(fs.readFileSync(copy, 'utf8'), source, 'the harness must not write to the task file it reads');
-    }
-  });
-
-  const after = sources.map(relative => fs.readFileSync(path.join(root, relative)));
-  sources.forEach((relative, index) => {
-    assert.ok(before[index].equals(after[index]), `${relative} must be byte-identical after the round trip`);
-  });
+test('round trip is lossless without depending on retired repository task stores', () => {
+  const result = roundTrip(FIXTURE);
+  assert.deepEqual(result.differences, []);
+  assert.equal(result.serialized, FIXTURE);
 });
 
 // Two stored records are not valid YAML frontmatter and cannot round trip.
@@ -219,7 +198,7 @@ const KNOWN_LEGACY_SERIALIZATION_EXCEPTIONS: ReadonlyMap<string, string> = new M
   ],
 ]);
 
-test('round trip is lossless across every task record in backlog/tasks, backlog/completed, and backlog/archive/tasks', () => {
+test('round trip is lossless across supported current task input', () => {
   const stores = ['backlog/tasks', 'backlog/completed', 'backlog/archive/tasks'];
   const failures: string[] = [];
   let examined = 0;
@@ -244,29 +223,11 @@ test('round trip is lossless across every task record in backlog/tasks, backlog/
     }
   }
 
-  assert.ok(examined > 100, `expected the real catalog to supply records, examined ${examined}`);
+  assert.ok(examined > 0, `expected the current task input to supply records, examined ${examined}`);
   assert.deepEqual(failures, [], 'every stored task record must survive the round trip');
 });
 
-test('the harness detects the stored task records whose frontmatter is corrupt', () => {
-  const detected: string[] = [];
-  for (const [relative, reason] of KNOWN_CORRUPT) {
-    const source = fs.readFileSync(path.join(root, relative), 'utf8');
-    const result = roundTrip(source);
-    assert.equal(
-      result.byteIdentical,
-      false,
-      `${relative} is expected to fail re-serialization (${reason}); if it now round trips, the record was repaired and this pin should be removed`,
-    );
-    detected.push(relative);
-  }
-  assert.deepEqual(detected, [...KNOWN_CORRUPT.keys()]);
-
-  // The first record reads as two different missions depending on which regex
-  // match a reader takes — the concrete failure mode of unvalidated text
-  // authority that the original task-catalog investigation identified.
-  const conflicted = fs.readFileSync(path.join(root, [...KNOWN_CORRUPT.keys()][0]), 'utf8');
-  assert.match(conflicted, /^<<<<<<< /m);
-  assert.match(conflicted, /^status: done$/m);
-  assert.match(conflicted, /^status: backlog$/m);
+test('the parser detects corrupt frontmatter without relying on retired catalog files', () => {
+  const corrupt = '---\nid: TASK-1\n<<<<<<< HEAD\nstatus: done\n=======\nstatus: backlog\n>>>>>>> branch\n---\n';
+  assert.equal(roundTrip(corrupt).byteIdentical, false);
 });

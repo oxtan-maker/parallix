@@ -136,11 +136,14 @@ function checkRecordedBaseBranch(slug: string, cwd: string, verdict: PreflightVe
 }
 
 function checkMissionDocs(slug: string, cwd: string, verdict: PreflightVerdict, deps: any, log: Function): void {
-  const { findMissionDirFn, findCheckpointsFn, getFirstLineFn, getMissionYearFn, fsExistsSync } = deps;
+  const { findMissionDirFn, findCheckpointsFn, getFirstLineFn, fsExistsSync } = deps;
   const missionDir = findMissionDirFn(slug, cwd);
   if (!missionDir) {
-    log(fmt.status('FAIL', `Mission doc: directory not found in docs/missions/${getMissionYearFn(slug)}/ for slug ${fmt.slug(slug)}`));
-    verdict.fail = true;
+    // Current contracts and checkpoints belong to the Mission authority.
+    // An environment check must not require recreating retired metadata;
+    // activation validates the recorded contract through the lifecycle port.
+    log(fmt.status('PASS', 'Typed mission contract is available through px status; no metadata directory is required.'));
+    checkRecordedBaseBranch(slug, cwd, verdict, deps, log);
     return;
   }
   if (!fsExistsSync(path.join(missionDir, 'MISSION.md'))) {

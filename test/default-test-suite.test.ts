@@ -206,6 +206,7 @@ const expectedIntegrationFiles = [
   'tui-pty-smoke.test.ts', 'task-2313-repro.test.ts', 'task-2370-repro.test.ts',
   'tui-command-flow.test.ts',
   'tui-spawn.test.ts',
+  'type-only-coverage.integration.test.ts',
   'unit-test-timeout-guard.test.ts',
   'verification.test.ts', 'verify-local-integrate.test.ts',
   // TASK-2431: real-socket loopback web host proof (bind, Host, Origin,

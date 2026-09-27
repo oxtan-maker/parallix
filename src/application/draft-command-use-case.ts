@@ -68,7 +68,7 @@ export class DraftCommandUseCase {
       ctx = this._workflow.setup(ctx);
       if (ctx.exited) { abort(ctx); return; }
 
-      // Step 3: Scaffold — MISSION.md, base branch record, backlog bootstrap
+      // Step 3: Scaffold — typed contract preparation, base branch record, backlog bootstrap
       ctx = this._workflow.scaffold(ctx);
       if (ctx.exited) { abort(ctx); return; }
 

@@ -59,7 +59,7 @@ export function createIntegratePorts(): IntegrateWorkflowPorts {
     backlog: {
       resolveTaskFile: (slug, rootDir) => backlog.resolveTaskFile(slug, rootDir),
       setTaskStatus: (taskFile, status) => backlog.setTaskStatus(taskFile, status),
-      completeTask: (slug, rootDir) => backlog.completeTask(slug, rootDir),
+      completeTask: (slug, rootDir, options) => backlog.completeTask(slug, rootDir, options),
       checkBacklogIntegrity: rootDir => backlog.checkBacklogIntegrity(rootDir),
       getTaskAssignee: taskFile => backlog.getTaskAssignee(taskFile) as string | null,
       getTaskClassification: taskFile => backlog.getTaskClassification(taskFile) as string | null,
@@ -113,6 +113,7 @@ export function createIntegratePorts(): IntegrateWorkflowPorts {
     },
     productConfig: {
       isForgejoReviewEnabled: rootDir => productConfig.isForgejoReviewEnabled(rootDir),
+      isSelfHostedTaskCloseout: rootDir => productConfig.isSelfHostedTaskCloseout(rootDir),
       resolveIntegrationMode: rootDir => productConfig.resolveIntegrationMode(rootDir),
     },
     review: {

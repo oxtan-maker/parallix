@@ -28,8 +28,31 @@ test('handoff use case completes the full workflow over mocked ports', async () 
   assert.ok(recorder.log.some(line => line.includes('Repository verification passed')), 'verification outcome is reported');
 });
 
-// TASK-2457 wiring: the pre-handoff gate is invoked from the handoff checkout
-// and a non-zero exit blocks the active -> review transition.
+test('recorded contract and evidence complete handoff without a metadata directory', async () => {
+  const recorder = makeRecorder();
+  const ports = makePorts(recorder);
+  ports.missionUtils.findMissionDir = () => null;
+  ports.missionUtils.findCheckpoints = () => { throw new Error('must read recorded evidence'); };
+  const result = await new HandoffCommandUseCase(ports).performHandoff(SLUG, runOptions(recorder));
+  assert.equal(result.ok, true, recorder.errors.join('\n'));
+  assert.deepEqual(recorder.transitions, ['review']);
+  assert.deepEqual(recorder.spawned, ['npm run typecheck']);
+});
+
+test('file-free handoff fails closed without a recorded Mission', async () => {
+  const recorder = makeRecorder();
+  const ports = makePorts(recorder);
+  ports.missionUtils.findMissionDir = () => null;
+  const result = await new HandoffCommandUseCase(ports).performHandoff(SLUG, runOptions(recorder, {
+    missionServicesFn: async () => ({ store: { load: async () => ({ kind: 'missing' }) } }),
+  }));
+  assert.equal(result.ok, false);
+  assert.match(result.error ?? '', /holds no Mission/);
+  assert.deepEqual(recorder.transitions, []);
+  assert.deepEqual(recorder.spawned, []);
+});
+
+// A non-zero pre-handoff gate blocks the active -> review transition.
 test('handoff use case blocks the transition when a pre-handoff gate fails', async () => {
   const recorder = makeRecorder();
   let ran = 0;

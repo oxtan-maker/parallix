@@ -1028,7 +1028,7 @@ function runRealAgentSmoke(agent, runner) {
     assert.equal(
       activeResult.status,
       0,
-      `[parallix-workflow-failure] px active --implementer ${agent} failed (status=${activeResult.status}): ${activeResult.stderr || activeResult.stdout}`
+      `[parallix-workflow-failure] px active --implementer ${agent} failed (status=${activeResult.status}):\nstdout:\n${activeResult.stdout}\nstderr:\n${activeResult.stderr}`
     );
 
     assert.match(
@@ -1103,7 +1103,7 @@ function runRealAgentSmoke(agent, runner) {
     assert.equal(
       integrateResult.status,
       0,
-      `[parallix-workflow-failure] px integrate ${slug} failed (status=${integrateResult.status}): ${integrateResult.stderr || integrateResult.stdout}`
+      `[parallix-workflow-failure] px integrate ${slug} failed (status=${integrateResult.status}):\nstdout:\n${integrateResult.stdout}\nstderr:\n${integrateResult.stderr}`
     );
     assert.equal(fs.existsSync(worktree), false,
       '[parallix-workflow-failure] integrate should remove the completed mission worktree');

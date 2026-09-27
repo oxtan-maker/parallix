@@ -820,18 +820,17 @@ test('ensureWorktree exits 1 when creating a missing worktree fails', () => {
 
 // ---------- ensureMissionFile / ensureRepoExists ----------
 
-test('ensureMissionFile prepares a mission directory without a generated file', () => {
+test('ensureMissionFile leaves the retired mission tree absent', () => {
   const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'mission-file-test-'));
   try {
-    const missionFile = ensureMissionFile(tmpRoot, 'task-test');
-    assert.ok(fs.existsSync(path.dirname(missionFile)));
-    assert.equal(fs.existsSync(missionFile), false);
+    assert.equal(ensureMissionFile(tmpRoot, 'task-test'), '');
+    assert.equal(fs.existsSync(path.join(tmpRoot, 'missions')), false);
   } finally {
     fs.rmSync(tmpRoot, { recursive: true, force: true });
   }
 });
 
-test('ensureMissionFile returns existing mission file without overwriting it', () => {
+test('ensureMissionFile does not inspect an existing retired mission file', () => {
   const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'mission-file-existing-'));
   try {
     const missionDir = path.join(tmpRoot, 'missions', 'task-test');
@@ -841,7 +840,7 @@ test('ensureMissionFile returns existing mission file without overwriting it', (
 
     const result = ensureMissionFile(tmpRoot, 'task-test');
 
-    assert.equal(result, missionFile);
+    assert.equal(result, '');
     assert.equal(fs.readFileSync(missionFile, 'utf8'), 'custom mission');
   } finally {
     fs.rmSync(tmpRoot, { recursive: true, force: true });
@@ -1772,7 +1771,7 @@ test('runDraftCommand leaves the Backlog task alone when refinement cannot be re
 const TASK_2471_PLUMBING_LINES = [
   'Step 1: Setting up branch',
   'Step 2: Ensuring dedicated worktree',
-  'Step 3: Preparing mission directory',
+  'Step 3: Preparing typed mission contract',
   'Step 4: Ensuring Backlog task exists',
   'Draft agent family',
   'Mission materialized in SQLite',

@@ -469,19 +469,26 @@ test('dry run resolves the integration plan without executing any gate', async (
 test('parallel gates overlap within the configured bound', async () => {
   const checkout = makeCheckout();
   try {
-    const windows: Record<string, number[]> = {};
-    const runner = (command: string) => new Promise(resolve => {
-      windows[command] = [Date.now()];
-      setTimeout(() => { windows[command][1] = Date.now(); resolve({ status: 0, stdout: command, stderr: '' }); }, 40);
-    });
-    const started = Date.now();
+    const events: string[] = [];
+    let active = 0;
+    let peak = 0;
+    const runner = async (command: string) => {
+      events.push(`start:${command}`);
+      peak = Math.max(peak, ++active);
+      await Promise.resolve();
+      events.push(`end:${command}`);
+      active--;
+      return { status: 0, stdout: command, stderr: '' };
+    };
     const result = await runPhaseGates('integration', {
       slug: 'task-2558', checkoutPath: checkout, maxParallel: 2, commandRunner: runner,
       gates: [{ key: 'a', command: 'a', order: 1 }, { key: 'b', command: 'b', order: 2 }, { key: 'c', command: 'c', order: 3 }],
     });
     assert.equal(result.ok, true);
-    assert.ok(windows.a[1] > windows.b[0] && windows.b[1] > windows.a[0], 'the first two gates overlap');
-    assert.ok(Date.now() - started < 105, 'bounded parallelism finishes below the 120ms serial sum');
+    assert.equal(peak, 2, 'the scheduler fills, but never exceeds, the parallel bound');
+    assert.ok(events.indexOf('start:b') < events.indexOf('end:a'), 'the first two gates overlap');
+    assert.ok(events.indexOf('start:c') > events.indexOf('end:a'), 'the third gate waits for capacity');
+    assert.equal(active, 0, 'all launched gates finish');
   } finally { fs.rmSync(checkout, { recursive: true, force: true }); }
 });
 

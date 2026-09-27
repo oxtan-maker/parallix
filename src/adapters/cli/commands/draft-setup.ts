@@ -5,7 +5,7 @@ import * as crypto from 'node:crypto';
 import * as fmt from '../../../application/presentation/cli-format.js';
 import { git, getWorktreeStatus } from '../../git/git.js';
 import { resolveTaskFile, reportTaskResolution, getTaskStorage } from '../../backlog/backlog.js';
-import { getPrimaryBranch, missionDirForSlug, squashTrailingBacklogNoiseIntoPreviousMission } from '../../filesystem/mission-utils.js';
+import { getPrimaryBranch, squashTrailingBacklogNoiseIntoPreviousMission } from '../../filesystem/mission-utils.js';
 import { parseDirtyEntry } from './draft-conflicts.js';
 
 const SYNTHETIC_SLUG_PREFIX = 'adhoc-';
@@ -225,14 +225,13 @@ function ensureGraphifyIgnore(targetWorktree, { gitFn = git, logFn = fmt.log.pla
 
 // @ts-expect-error implicit any on targetWorktree/slug
 function ensureMissionFile(targetWorktree, slug, { logFn = fmt.log.plain } = {}) {
-  const missionDir = missionDirForSlug(targetWorktree, slug);
-  if (!fs.existsSync(missionDir)) {
-    fs.mkdirSync(missionDir, { recursive: true });
-  }
-
-  const missionFile = path.join(missionDir, 'MISSION.md');
-  logFn(fmt.status('PASS', `Prepared typed mission directory at ${fmt.path(missionDir)}`));
-  return missionFile;
+  // Mission contracts are recorded through the SQLite-backed typed commands.
+  // Keep this compatibility seam for callers that sequence scaffold steps, but
+  // never materialize the retired repository-backed mission tree.
+  void targetWorktree;
+  void slug;
+  logFn(fmt.status('PASS', 'Prepared typed mission contract without repository files.'));
+  return '';
 }
 
 // @ts-expect-error implicit any on mainRepo

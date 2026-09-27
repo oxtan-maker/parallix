@@ -3,7 +3,7 @@
     "name": "parallix"
   },
   "adapters": {
-    "tasks": { "provider": "backlog-md", "storage": "backlog", "stateMap": "config/state-map.json" },
+    "tasks": { "provider": "backlog-md", "storage": "backlog", "stateMap": "config/state-map.json", "selfHostedCloseout": true },
     "agents": {
       "maxConcurrentCustom": 2,
       "models": { "codex": "gpt-5.6-terra" },

@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as fs from 'node:fs';
+import * as os from 'node:os';
 import * as path from 'node:path';
 
 import { findForbiddenApplicationDependencies, findCompositionViolations } from '../src/adapters/architecture/boundary-guards.js';
@@ -10,9 +11,9 @@ const fixture = (name: string) => path.join(root, 'test', 'fixtures', 'applicati
 const APPLICATION_DIR = path.join(root, 'src', 'application');
 
 /** Walk src/application/ and return every .ts file (mirrors domain-import-boundary pattern). */
-function applicationFiles(): string[] {
-  return fs.readdirSync(APPLICATION_DIR, { withFileTypes: true }).flatMap(entry => {
-    const filePath = path.join(APPLICATION_DIR, entry.name);
+function applicationFiles(applicationDir = APPLICATION_DIR): string[] {
+  return fs.readdirSync(applicationDir, { withFileTypes: true }).flatMap(entry => {
+    const filePath = path.join(applicationDir, entry.name);
     if (entry.isDirectory()) {
       return collectTsFiles(filePath);
     }
@@ -62,16 +63,18 @@ test('application import guard rejects transitive prohibited dependency fixture'
 });
 
 test('application import guard detects a newly added violating file without modifying the test', () => {
-  // Place a temporary file in src/application/ that imports a forbidden module.
-  // Directory discovery must find it without any path list edit.
-  const tempFile = path.join(APPLICATION_DIR, '__temp-violating-file.ts');
+  // Keep the discovery fixture outside src/ so a concurrent typecheck cannot
+  // include a file that this test removes. Directory discovery still receives
+  // an application-shaped root, without a hand-maintained file list.
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'application-boundary-'));
+  const tempFile = path.join(tempDir, '__temp-violating-file.ts');
   fs.writeFileSync(tempFile, "import 'ink';\nexport const x = 1;\n");
   try {
-    const violations = findForbiddenApplicationDependencies(applicationFiles());
+    const violations = findForbiddenApplicationDependencies(applicationFiles(tempDir), tempDir);
     assert.ok(violations.some(v => v.includes('__temp-violating-file.ts') && v.includes('ink')),
       `should detect new violating file; got: ${violations.join('\n')}`);
   } finally {
-    fs.unlinkSync(tempFile);
+    fs.rmSync(tempDir, { recursive: true, force: true });
   }
 });
 

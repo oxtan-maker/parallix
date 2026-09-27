@@ -356,7 +356,8 @@ test('missionStart verify-env with slug checks classification', () => {
   assert.ok(output.includes('[FAIL] Backlog classification: missing classification'));
 });
 
-test('missionStart accepts a typed mission without MISSION.md', () => {
+for (const missionDir of ['/tmp/docs/missions/2026/task-test', null]) {
+test(`missionStart accepts a typed mission without ${missionDir ? 'MISSION.md' : 'a metadata directory'}`, () => {
   const lines = [];
   const result = missionStart(['task-test'], {
     returnResult: true,
@@ -366,7 +367,7 @@ test('missionStart accepts a typed mission without MISSION.md', () => {
     resolveMissionClassificationFn: () => ({ classification: 'ai_sdlc' }),
     getTaskStatusFn: () => 'ready',
     toVirtualFn: (s) => s,
-    findMissionDirFn: () => '/tmp/docs/missions/2026/task-test',
+    findMissionDirFn: () => missionDir,
     fsExistsSync: (p) => !p.endsWith('MISSION.md'), // MISSION.md doesn't exist
     findCheckpointsFn: () => [],
     getMissionYearFn: () => '2026',
@@ -378,10 +379,12 @@ test('missionStart accepts a typed mission without MISSION.md', () => {
 
   assert.deepEqual(result, { pass: true });
   const output = lines.join('\n').replace(/\x1B\[\d+m/g, '');
-  assert.ok(output.includes('[PASS] Typed mission directory is ready'));
+  assert.ok(output.includes('[PASS] Typed mission'));
 });
+}
 
-test('missionStart fails when recorded base branch does not exist locally', () => {
+for (const missionDir of ['/tmp/docs/missions/2026/task-broken-base', null]) {
+test(`missionStart rejects a missing recorded base branch ${missionDir ? 'with' : 'without'} a metadata directory`, () => {
   const lines = [];
   const errors = [];
 
@@ -393,7 +396,7 @@ test('missionStart fails when recorded base branch does not exist locally', () =
     resolveMissionClassificationFn: () => ({ classification: 'ai_sdlc' }),
     getTaskStatusFn: () => 'ready',
     toVirtualFn: (s) => s,
-    findMissionDirFn: () => '/tmp/docs/missions/2026/task-broken-base',
+    findMissionDirFn: () => missionDir,
     fsExistsSync: () => true,
     findCheckpointsFn: () => [],
     getMissionYearFn: () => '2026',
@@ -415,6 +418,7 @@ test('missionStart fails when recorded base branch does not exist locally', () =
     `Expected failure message containing 'base branch', got: ${output}`);
   assert.ok(output.includes('preflight'), `Expected preflight in message, got: ${output}`);
 });
+}
 
 test('missionStart passes when recorded base branch exists locally', () => {
   const lines = [];
