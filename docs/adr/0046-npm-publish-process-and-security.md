@@ -26,11 +26,15 @@ The `@magnusekdahl` scope was verified on the npm registry (task-1340 CP-0) and 
 **Adopt public npm registry publication for parallix as `@magnusekdahl/parallix`, alongside the existing local tarball install path.**
 
 Parallix allocates the next patch version locally as part of the landed mission
-commit. After `ci-required` verifies a push to protected `main`, GitHub Actions
-checks out that exact SHA, validates its declared version, runs the package
-lifecycle, publishes through npm Trusted Publishing with provenance, then creates
-the matching tag and GitHub Release. No dist-tag management beyond `latest` is in
-scope.
+commit. Regular GitHub PR merges run full `ci-required` verification on the
+resulting main SHA before release, including merge, squash, and rebase commits.
+For `github-publish`, the exact cumulative publication tip first receives full `ci-required`
+verification under `github-publish/<sha>` and is then fast-forwarded unchanged
+to protected `main`. The main-triggered workflow reads that durable prior proof
+instead of rerunning source verification, then checks out the same SHA,
+validates its declared version, runs the package lifecycle, publishes through
+npm Trusted Publishing with provenance, and creates the matching tag and GitHub
+Release. No dist-tag management beyond `latest` is in scope.
 
 ### Authentication requirement
 
@@ -57,7 +61,7 @@ The following procedures are consequences of this decision, not decisions themse
 1. **Pre-publish verification:** `npm pack --dry-run` inspects the file listing before each publish. The operator verifies all exclusion patterns are absent.
 2. **Local version allocation:** the version is not operator-controlled. Parallix's integrate pre-commit hook (`adapters.integrate.preCommitCommand`) allocates one local patch version on the mission branch after it is rebased onto the base branch and before the integration gates, so the gates verify matching package metadata and the mission lands as one commit. The base branch version is authoritative: allocation never moves the version backwards, and a retried integration keeps an already-allocated newer version. Allocation is repository configuration, not built-in `px integrate` behavior. The subsequent post-integrate self-update rebuilds and reinstalls the CLI without committing or publishing.
 3. **Collision handling:** independently prepared missions can propose the same patch version. The release path never repairs this in GitHub: a stale or foreign version/tag state fails closed and the losing mission is reintegrated and allocated locally.
-4. **Trusted publication sequence:** the release job accepts only a successful `ci-required` main push, checks out its triggering SHA, and rejects invalid, unequal, stale, already-foreign-published, or tag-colliding versions. It does not calculate a replacement version.
+4. **Trusted publication sequence:** the release job accepts a main push after either successful full verification of its triggering SHA or reuse of a successful, earlier exact-SHA `ci-required` proof from `github-publish/<sha>`. It checks out its triggering SHA and rejects invalid, unequal, stale, already-foreign-published, or tag-colliding versions. It does not calculate a replacement version. The hosted source-verification payload is skipped only when valid prior publication proof is available.
 5. **Package and provenance:** after deterministic installation, the trusted checkout completes `prepack` and `prepublishOnly` before npm publishes the declared version to npmjs.org with provenance. The workflow has release-only OIDC and repository-write authority.
 6. **Tag and release:** after publication, the matching `v<version>` tag and GitHub Release identify the same trusted SHA. A rerun may complete a partial release only when both existing npm and tag state identify that SHA; otherwise it fails closed for local reintegration and allocation.
 7. **Post-publish verification against the live registry:** some properties are observable only on the published registry page and cannot be checked from a local checkout or from `npm pack --dry-run`. After each publish the operator opens the package page on npmjs.com and checks:

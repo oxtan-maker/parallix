@@ -12,12 +12,13 @@ verifies a candidate that is replaced by the locally generated integration
 commit. The verified SHA therefore never reaches `main`, and waiting for GitHub
 also serializes development behind CI latency.
 
-We want the exact, locally-generated integration commit to become the commit
-GitHub independently verifies **before** that commit is allowed to advance
-remote `main`. Local development keeps integrating at full speed; GitHub
-verifies each resulting commit asynchronously. This requires choosing where to
-publish an unverified commit, who owns the final merge, and whether later local
-integrations may proceed while an earlier commit is still being verified.
+We want the exact, locally-generated **cumulative publication tip** to become
+the commit GitHub independently verifies **before** it is allowed to advance
+remote `main`. Local development keeps integrating at full speed; one hosted
+run verifies the resulting tree, including every earlier local integration it
+contains. This requires choosing where to publish that unverified tip and who
+owns the final fast-forward; it does not require a hosted run for every
+intermediate local commit.
 
 ## Place in the configurable integration model
 
@@ -44,7 +45,7 @@ publication.
 
 | Option | Exact integration SHA reaches `main` | Later local integrations continue during CI | Unverified commit reaches `main` | Merge authority | Cost / limitation |
 |---|---|---|---|---|---|
-| Per-commit verification refs, then ordered fast-forward | Yes | Yes | No | Parallix | Requires durable per-commit state and blocks publication behind the first pending or failed commit |
+| Verify the cumulative publication tip, then fast-forward | Yes | Yes | No | Parallix | A failed or pending chosen tip delays publication until a later exact tip is verified |
 | Run required local gates, then push directly to `main` | Yes | Yes | No, under the local gate policy | Parallix | Keeps the existing locally enforced trust boundary, but outsiders cannot inspect independent verification evidence before the commit lands |
 | Verify one candidate branch before integrating it locally | Yes, if the candidate is later fast-forwarded | **No** | No | Parallix | Preserves trust but puts GitHub latency back on the development critical path |
 | Submit each mission through a GitHub pull request | Not necessarily; GitHub may squash or rebase | Only until later work needs the unmerged result on its target branch | No | GitHub | GitHub checks and merge latency serialize single-developer integration; collaboration and conventional branch protection justify that cost in `github-pr` |
@@ -54,56 +55,65 @@ locally generated commit, makes independent verification publicly inspectable
 before publication, and lets local development continue while GitHub is slow.
 The direct-push option still enforces repository-owned local gates; it lacks the
 additional external evidence this mode exists to provide. The chosen option's
-cost is ordered publication: a later successful commit cannot pass an earlier
-pending or failed commit even when its own verification has completed.
+cost is that the selected publication tip must finish before it can advance.
 
 ## Decision
 
 Adopt a **`github-publish`** publication mode that is additive to (not a
 replacement for) the existing trunk-based squash-merge integration path. On
-each poll the mode:
+each publication attempt the mode:
 
-1. Publishes the exact locally-generated integration commit unchanged to a
-   per-commit **verification ref** (`refs/github-publish/<sha>`), preserving the
-   SHA. No GitHub-side squash/rebase/recreation, no local squash onto `main`
-   for commits published under this mode.
-2. Transitions the mission/commit through a durable state machine:
-   `locally integrated` → `external verification pending` → `externally
-   verified` or `external verification failed`.
-3. Advances `origin/main` **only** through the highest contiguous run of
-   `externally verified` commits that are also the direct next unpublished
-   descendants of `origin/main`, using a fast-forward. Any divergence from the
-   expected ancestor fails closed (no force-push).
+1. Selects the current exact locally-generated cumulative tip `D` and publishes
+   it unchanged to `refs/github-publish/<D>`, preserving its SHA. No
+   GitHub-side squash/rebase/recreation and no local squash onto `main` occur
+   for this publication.
+2. Transitions that publication attempt through a durable state machine:
+   `publication pending` → `externally verified` or `external verification
+   failed`.
+3. After the hosted `ci-required` run succeeds for exact `D`, re-reads
+   `origin/main` and fast-forwards it from the previously observed published
+   ancestor `P` to `D`. Any divergence, non-descendancy, or changed tip fails
+   closed (no force-push).
+4. On the unchanged `main` push, reuses the durable successful Actions history
+   for `github-publish/D` as release authorization. It does not repeat the
+   source verification payload; it checks the prior workflow path, push event,
+   exact SHA and branch, successful `ci-required` job, and completion before
+   the main workflow began.
 
 The verification ref encodes the commit SHA. An existing ref at the same SHA is
 an idempotent retry; one at a different SHA is a collision and fails closed.
 
 ### State model
 
-Durable states (mission/commit level; no board lanes added):
+Durable states (publication-attempt level; no board lanes added):
 
-- `locally integrated` — the integration commit exists locally, unpublished.
-- `external verification pending` — published to the verification ref, awaiting
-  operator CI result. Slow/unavailable GitHub stays here (retry), never fails.
-- `externally verified` — operator CI reported success for this exact SHA.
-- `published` — advanced onto `origin/main` via fast-forward.
-- `external verification failed` — operator CI reported failure; blocks the
-  contiguous run.
+- `publication pending` — the exact cumulative tip is published to its
+  verification ref, awaiting hosted CI. Slow/unavailable GitHub stays here
+  (retry), never becomes authorization.
+- `externally verified` — `ci-required` reported success for this exact tip.
+- `published` — that same SHA was advanced onto `origin/main` via fast-forward.
+- `external verification failed` — the selected tip did not receive the
+  required proof; another tip must be selected and verified before publication.
 
-The publication invariant: `origin/main` advances only through the highest
-contiguous sequence of `externally verified` local integration commits.
-`P -> A -> B -> C -> D` with `A ✅ B ✅ C ❌ D ✅` may advance through B but must
-NOT skip C and publish D.
+The publication invariant is an exact-tip invariant: with `origin/main = P`
+and local history `P -> A -> B -> C -> D`, the single hosted verification of
+`github-publish/D` proves the complete tree at `D`, including `A`, `B`, and
+`C`. `main` may fast-forward directly from `P` to verified `D`; intermediate
+commits do not need individual hosted verification records.
 
 ### Fail-closed invariant
 
-Advancing `origin/main` uses a fast-forward to the contiguous verified commit.
-Before each push the engine re-reads `origin/main`, confirms the verified commit
-is a descendant and the direct next unpublished descendant, and confirms no
-unexpected remote movement (upstream fetch). Any mismatch fails closed: no
-advance, explicit failure, never a non-fast-forward push. This preserves the
-fail-closed invariant that protected `main` only advances through verified,
-contiguous history (ADR 0048).
+Advancing `origin/main` uses a fast-forward from `P` to the exact verified tip
+`D`. Before each push the engine re-reads `origin/main`, confirms that `P` is
+unchanged and an ancestor of `D`, and confirms no unexpected remote movement.
+Any mismatch fails closed: no advance, explicit failure, never a
+non-fast-forward push. The subsequent main-triggered release must independently
+read the durable prior Actions proof for `D`; it cannot authorize itself or a
+same-named check from another workflow. If no reusable publication proof exists,
+the shared release workflow runs full verification on the exact main SHA before
+release. This preserves regular `github-pr` merge, squash, and rebase publication;
+a PR check alone never authorizes release of a newly created main SHA. API errors
+or malformed evidence block release rather than being treated as absent proof.
 
 ### History mutation boundary
 
@@ -120,8 +130,8 @@ closed.
 
 - **Additive.** The default squash-merge integration path is untouched unless
   `github-publish` is enabled; its prior tests keep passing unchanged.
-- **Contiguous advancement** bounds how far `origin/main` moves per poll and
-  keeps history linear and fast-forwardable.
+- **Cumulative-tip advancement** keeps history linear and fast-forwardable
+  while allowing one externally verified tree to include many local commits.
 - **Verification oracle is injected.** Verification completion comes from
   operator-provided CI; the engine treats slow/unavailable GitHub as `pending`
   with retry, not failure.
@@ -130,20 +140,20 @@ closed.
 - **Scope limit.** No multi-developer coordination, sharded verification, or
   distributed scheduling. Single-developer assumed; still fail-closed on remote
   divergence.
-- **Head-of-line blocking.** One failed or delayed commit prevents every later
-  commit from reaching remote `main`, even when those later commits are green.
-  This is the accepted cost of keeping remote history contiguous and identical
-  to local integration history.
-- **Ref lifecycle.** Per-commit verification refs accumulate until a later
-  cleanup policy removes them. Automatic cleanup is deferred because it is not
-  required for safe publication.
+- **Publication delay.** A failed or delayed selected tip delays its release,
+  but later local work may be accumulated into a new exact tip and verified as
+  one tree.
+- **Ref lifecycle.** The temporary `github-publish/<D>` ref may be removed
+  after publication. Release authorization remains valid because it reads the
+  durable GitHub Actions/check history, not the ref's continued existence.
 
 ## Reconsideration triggers
 
 - Repositories need multiple developers to publish concurrently; use
   `github-pr` rather than weakening ordered publication.
-- Sustained head-of-line blocking costs more than preserving identical local
-  and remote history; choose a different integration mode explicitly.
+- Repeated publication-tip verification delays cost more than preserving
+  identical local and remote history; choose a different integration mode
+  explicitly.
 - The verification provider can attest to an otherwise unreachable commit
   without a remote ref; the temporary publication mechanism can then be
   simplified without changing the ordering invariant.

@@ -6,8 +6,8 @@ import path from 'node:path';
 const workflow = fs.readFileSync(path.join(import.meta.dirname, '..', '.github/workflows/ci-required.yml'), 'utf8');
 
 test('task-2509: release trusts only the successful main-push SHA with release-only OIDC permissions', () => {
-  assert.match(workflow, /permissions:\n\s+contents: read/);
-  assert.match(workflow, /release:\n\s+needs: ci-required\n\s+if: github\.event_name == 'push' && github\.ref == 'refs\/heads\/main' && needs\.ci-required\.result == 'success'/);
+  assert.match(workflow, /permissions:\n\s+actions: read\n\s+contents: read/);
+  assert.match(workflow, /release:\n\s+needs: \[publication-proof, ci-required\][\s\S]*?github\.event_name == 'push' && github\.ref == 'refs\/heads\/main' && needs\.publication-proof\.result == 'success'/);
   assert.match(workflow, /ref: \$\{\{ github\.sha \}\}/);
   assert.match(workflow, /release:[\s\S]*?permissions:\n\s+contents: write\n\s+id-token: write/);
   assert.match(workflow, /node-version: '24'/);

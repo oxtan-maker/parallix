@@ -210,6 +210,10 @@ export const INTEGRATION_CI_TESTS: readonly string[] = [
   // prove the base worktree stays clean, so it crosses the git boundary.
   'task-2509-local-version-allocation.test.ts',
   'task-2509-release-workflow.test.ts',
+  // TASK-2585: injects GitHub Actions API responses to prove the durable
+  // publication-proof reader; it makes no live provider call.
+  'task-2585-github-publication-proof.test.ts',
+  'task-2585-workflow-proof-reuse.test.ts',
   // TASK-2516: landed-mission recovery crosses the git boundary with a real
   // temporary Git repository and worktrees, so it runs in the integration layer.
   'task-2516-recover-landed-mission-repro.test.ts',

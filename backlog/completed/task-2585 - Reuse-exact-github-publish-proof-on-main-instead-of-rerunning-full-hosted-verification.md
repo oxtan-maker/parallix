@@ -3,10 +3,11 @@ id: TASK-2585
 title: >-
   Reuse exact github-publish proof on main instead of rerunning full hosted
   verification
-status: backlog
-assignee: []
+status: done
+assignee: [codex]
 created_date: '2026-09-26 11:52'
-labels: []
+labels:
+  - ai_sdlc
 dependencies: []
 ordinal: 116008
 ---
@@ -344,28 +345,13 @@ The key property is:
 
     exact SHA obtains required ci-required proof BEFORE main advances.
 
-### 10. Fail closed for an unverified main SHA
+### 10. Preserve regular GitHub PR publication
 
-A main SHA that did NOT previously pass:
-
-    github-publish/<that exact SHA>
-
-must not release.
-
-This is important because alternate GitHub integration paths can create new
-SHAs, such as a squash merge.
-
-Example:
-
-    PR head       = X
-    GitHub squash = Y
-
-Even if X passed a PR `ci-required`, Y does not have a publication proof.
-
-A main workflow for Y must therefore refuse release.
-
-This mission does not solve how such an unauthorized SHA reached `main`; it
-must nevertheless prevent release.
+Both original ADR integration paths must work. A main SHA with valid earlier
+exact `github-publish/<sha>` proof reuses it without repeating verification.
+A regular GitHub merge, squash, or rebase SHA without reusable proof must run
+full hosted verification on that exact main SHA before release. PR proof alone
+cannot authorize release. Lookup errors and malformed evidence fail closed.
 
 ### 11. ADR 0058 correction — verified cumulative publication tips
 
@@ -516,9 +502,9 @@ The final Goal Check must cite both workflow runs and their exact SHA.
 ## Acceptance Criteria
 
 <!-- AC:BEGIN -->
-- [ ] #1 Full hosted source verification runs for PRs and `github-publish/*`, but not again for a push of the already-verified exact SHA to `main`.
+- [ ] #1 Full hosted source verification runs for PRs and `github-publish/*`, and on regular PR merge SHAs on main, but not again for a push of an already-verified exact publication SHA.
 - [ ] #2 `main` remains a trigger of `ci-required.yml` so npm Trusted Publishing continues using the already-authorized workflow filename.
-- [ ] #3 Main release is gated by durable evidence of a successful earlier `github-publish/<exact-sha>` run from the expected workflow/event/job context.
+- [ ] #3 Main release is gated by successful full verification of its exact SHA or durable evidence of a successful earlier `github-publish/<exact-sha>` run from the expected workflow/event/job context.
 - [ ] #4 A PR check, main check, wrong-SHA check, pending/failed run, or same-name check from an incorrect context cannot satisfy publication proof.
 - [ ] #5 Publication-proof lookup remains valid after `cleanup-verification-ref` deletes the temporary Git ref.
 - [ ] #6 GitHub API/provider failure fails release closed.
