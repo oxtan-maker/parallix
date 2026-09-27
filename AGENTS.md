@@ -15,7 +15,9 @@ Push mission branches only to `review` (Forgejo), never to `origin` (GitHub). On
 ## Verification
 
 - Code changes require `./scripts/verify-local.sh static-analysis`.
+- Other than that, do not run full test gates when a focused test run is enough, parallix will run the complete test gates automatically at appropriate times.
 - `px integrate` uses `adapters.gates.preIntegration` in `workflow.config.json` as its mandatory gate plan. `config/integration-pipelines.json` is for the standalone `./scripts/verify-local.sh integrate` script.
 - Unit tests must finish within 500 ms alone; check with `npm test -- --unit-test-headroom`. Mock external boundaries and do not contact real Forgejo. Default `npm test` has a 1,000 ms per-test cap.
 - Read ADR 0059 before changing test selection. Tiers: `unit`, `integration-ci`, `integration-local`, `agent-e2e`.
 - Classify every new integration test in `test/lib/test-categories.ts`. Put it in the CI list, or in the local-only list with the missing GitHub-runner dependency named.
+
