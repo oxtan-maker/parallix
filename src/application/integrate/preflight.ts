@@ -57,6 +57,12 @@ export function createIntegrationPreflight(ports: IntegrateWorkflowPorts) {
   }
 
   function checkMissionDoc(report: PreflightReport, context: any, baseWorktree: string, findMissionDocInBranchesFn: NonNullable<PreflightOptions['findMissionDocInBranchesFn']>) {
+    // Match handoff: a recorded brief owns the contract for native missions.
+    // Repository documents are only required for the historical fallback.
+    if (context.missionBrief) {
+      report.detail('Mission contract: recorded in the operator database');
+      return;
+    }
     if (context.missionDir) {
       report.detail(`Mission doc: ${path.join(context.missionDir, 'MISSION.md')}`);
       return;
@@ -69,6 +75,7 @@ export function createIntegrationPreflight(ports: IntegrateWorkflowPorts) {
       path.join(missionPaths.missionDirForSlug(baseWorktree, baseTaskSlug(context.slug)), 'MISSION.md'),
     ).split(path.sep).join('/');
     report.log(fmt.status('FAIL', `Mission doc: ${canonicalPath} not found`));
+    report.log(fmt.status('INFO', `Mission ${context.slug} has no recorded brief in the operator database and no historical MISSION.md. Run px status ${context.slug} --json to inspect its contract. Restore the historical document and run px import-legacy --existing-only, or record the brief with px goal set --goal <text> --why <text> --expected-version <version> in the mission worktree.`));
 
     const candidates = findMissionDocInBranchesFn(context.slug, baseWorktree);
     if (candidates && candidates.length > 0) {

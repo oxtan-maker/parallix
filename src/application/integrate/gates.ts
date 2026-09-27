@@ -5,6 +5,7 @@
  */
 import * as fmt from '../presentation/cli-format.js';
 import { missionId } from '../../domain/mission.js';
+import { integrationRepairNeedsReview } from '../integration-repair-review.js';
 import { abortWith, resolveBounceImplementer, type BounceSeams } from './support.js';
 import type { IntegrateGatesPort, IntegrateWorkflowPorts } from '../ports/integrate-workflow.js';
 
@@ -117,6 +118,30 @@ export function createIntegrationGateStep({ gates, landing, verification }: Inte
     // recoverable mission-regression route continues, and it continues
     // only because the identical gate set re-ran green.
     const implementer = resolveBounceImplementer(context.taskAssignee ?? null, checkout, seams);
+    const reactivateMission = async (bounceSlug: string) => {
+      const current = await missionServices.store.load(missionId(bounceSlug));
+      if (current.kind !== 'found') { throw new Error(`Mission ${bounceSlug} is unavailable for integration-gate rebound.`); }
+      if (current.mission.status === 'active' && integrationRepairNeedsReview(current.mission)) { return true; }
+      const occurredAt = new Date().toISOString();
+      const transition = await missionServices.lifecycle.transition({
+        operationId: `integration-gate-rebound:${bounceSlug}`,
+        missionId: missionId(bounceSlug),
+        expectedVersion: current.version,
+        capabilities: new Set(['mission:transition']),
+        command: { type: 'rebound-to-active', agent: implementer, occurredAt },
+        actor: implementer,
+        occurredAt,
+        idempotencyKey: `integration-gate-rebound:${bounceSlug}:${current.version}`,
+      });
+      if (transition.status !== 'completed') { throw new Error(transition.error?.message ?? `Mission ${bounceSlug} could not rebound to active.`); }
+      return seams.transitionTaskFn(bounceSlug, 'active');
+    };
+    // Withdraw approval for every red gate, including an exhausted repair
+    // budget. An operator continuation must never inherit that approval.
+    const failedMission = await missionServices?.store?.load(missionId(slug));
+    if (failedMission?.kind === 'found' && failedMission.mission.status === 'integration') {
+      await reactivateMission(slug);
+    }
     const route = await seams.routeIntegrationGateFailureFn({
       slug,
       missionWorktree: checkout,
@@ -137,30 +162,20 @@ export function createIntegrationGateStep({ gates, landing, verification }: Inte
       realAgentModel,
       startAgentFn: seams.startAgentFn,
       transitionTaskFn: (bounceSlug: string) => seams.transitionTaskFn(bounceSlug, 'active'),
-      reactivateMissionFn: async (bounceSlug: string) => {
-        const current = await missionServices.store.load(missionId(bounceSlug));
-        if (current.kind !== 'found') { throw new Error(`Mission ${bounceSlug} is unavailable for integration-gate rebound.`); }
-        const transition = await missionServices.lifecycle.transition({
-          operationId: `integration-gate-rebound:${bounceSlug}`,
-          missionId: missionId(bounceSlug),
-          expectedVersion: current.version,
-          capabilities: new Set(['mission:transition']),
-          command: { type: 'rebound-to-active', agent: implementer },
-          actor: implementer,
-          occurredAt: new Date().toISOString(),
-          idempotencyKey: `integration-gate-rebound:${bounceSlug}:${current.version}`,
-        });
-        if (transition.status !== 'completed') { throw new Error(transition.error?.message ?? `Mission ${bounceSlug} could not rebound to active.`); }
-        return seams.transitionTaskFn(bounceSlug, 'active');
-      },
+      reactivateMissionFn: reactivateMission,
       applyAgentFallbackFn: seams.applyAgentFallbackFn,
       reReviewFollows: Boolean(seams.reReviewFn),
     });
-    if (route.route === 'revision-changed' && route.invalidation?.ok && seams.reReviewFn) {
-      await reReviewRepairedRevision(slug, checkout, route.repairedRevision ?? 'unknown', seams.reReviewFn);
+    if (route.route === 'revision-changed' && seams.reReviewFn) {
+      // A failed provider projection cannot restore the withdrawn local
+      // decision. The fresh round's polling window excludes that old approval.
+      const current = route.invalidation?.ok ? null : await missionServices?.store?.load(missionId(slug));
+      if (route.invalidation?.ok || (current?.kind === 'found' && integrationRepairNeedsReview(current.mission))) {
+        await reReviewRepairedRevision(slug, checkout, route.repairedRevision ?? 'unknown', seams.reReviewFn);
+      }
     }
     if (route.route !== 'fixed') {
-      throw abortWith(landing, 'Aborting before merge.');
+      throw abortWith(landing, `Aborting before merge. Resume the repair review with px review ${slug} --continue; approval restarts integration.`);
     }
     return `${configured.length} integration gate(s) passed after ${route.rebounds} integration-gate rebound(s)`;
   }
@@ -177,10 +192,10 @@ export function createIntegrationGateStep({ gates, landing, verification }: Inte
     try {
       approved = await reReviewFn(slug, checkout);
     } catch (error) {
-      throw abortWith(landing, `Re-review of ${slug} could not run: ${(error as Error).message}`, `Run px review ${slug} --start, then px integrate ${slug}.`, 'Aborting before merge.');
+      throw abortWith(landing, `Re-review of ${slug} could not run: ${(error as Error).message}`, `Run px review ${slug} --continue to resume review and integration.`, 'Aborting before merge.');
     }
     if (!approved) {
-      throw abortWith(landing, `The repaired revision of ${slug} was not approved in re-review. Follow the review outcome above, then run px integrate ${slug} again.`, 'Aborting before merge.');
+      throw abortWith(landing, `The repaired revision of ${slug} was not approved in re-review. Run px review ${slug} --continue to resume review and integration.`, 'Aborting before merge.');
     }
     fmt.log.pass(`The repaired revision of ${slug} was re-reviewed and approved.`);
     throw new IntegrationRestartRequired(slug);

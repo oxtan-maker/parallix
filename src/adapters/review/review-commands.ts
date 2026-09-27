@@ -447,7 +447,7 @@ export async function continueReviewInvalidatesBlocker(
     }
   })();
 
-  const invalidated = invalidateBlocker(review);
+  const invalidated = invalidateBlocker(review, new Date().toISOString());
   // The Review aggregate is the sole write authority (ADR 0053): persisting it
   // clears the round's BLOCKED disposition and resets its phase to `reviewing`,
   // so the relaunched loop re-polls the reviewer instead of relaunching the

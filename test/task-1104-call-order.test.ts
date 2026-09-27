@@ -211,9 +211,14 @@ test('performHandoff follows the sequence: createPr -> gatekeeper -> transitionT
     const mockRebase = async () => ({ ok: true, sharedFileConflicts: false });
     await performHandoff(slug, {
       skipGate: true,
+      worktree: _tmpHome,
       isForgejoReviewEnabledFn: () => true,
       rebaseFn: mockRebase,
       missionServicesFn: stubRecordedMissionServices(),
+      // The call-order contract neither computes NEL nor needs its durable
+      // record.  Bypass that adapter boundary so this test cannot inspect the
+      // checkout or operator state while asserting its four handoff effects.
+      captureNelFn: async () => ({ ok: true }),
       // The blanket readFileSync mock above supplies checkpoint content. Keep
       // agent selection independent of filesystem-backed configuration.
       eligibleAgentsForStepFn: () => ['codex', 'claude'],

@@ -201,7 +201,7 @@ export class SqliteMissionStore implements MissionStore, MissionNelRecorder {
                   provider_change_id, provider_url, source_branch, target_branch,
                   revision, reviewer, implementer, started_at, decision_kind,
                   decided_at, decision_comment, approval_source_kind,
-                  approval_source_provider, responded_at, resulting_revision,
+                  approval_source_provider, revoked_at, revoked_by, revoked_reason, responded_at, resulting_revision,
                   phase, disposition, reviewer_retry_count, implementer_retry_count,
                   implementer_response_content, item_dispositions, blocked_reason
            FROM mission_review_rounds WHERE mission_id = ? ORDER BY position`,
@@ -657,10 +657,10 @@ export class SqliteMissionStore implements MissionStore, MissionNelRecorder {
             provider_change_id, provider_url, source_branch, target_branch,
             revision, reviewer, implementer, started_at, decision_kind,
             decided_at, decision_comment, approval_source_kind,
-            approval_source_provider, responded_at, resulting_revision,
+            approval_source_provider, revoked_at, revoked_by, revoked_reason, responded_at, resulting_revision,
             phase, disposition, reviewer_retry_count, implementer_retry_count,
             implementer_response_content, item_dispositions, blocked_reason)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           missionId,
           roundPosition,
@@ -680,6 +680,9 @@ export class SqliteMissionStore implements MissionStore, MissionNelRecorder {
           decision?.comment ?? null,
           approval?.kind ?? null,
           approval?.kind === 'provider' ? approval.provider : null,
+          decision?.kind === 'approved' ? decision.revocation?.revokedAt ?? null : null,
+          decision?.kind === 'approved' ? decision.revocation?.revokedBy ?? null : null,
+          decision?.kind === 'approved' ? decision.revocation?.reason ?? null : null,
           round.response?.respondedAt ?? null,
           round.response?.resultingRevision ?? null,
           round.phase,

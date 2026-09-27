@@ -13,6 +13,7 @@
 import * as fmt from './presentation/cli-format.js';
 import { createIntegrationStrategy } from './services/integration-dispatch.js';
 import { missionId } from '../domain/mission.js';
+import { recoverLegacyIntegrationRepairReview, integrationRepairNeedsReview } from './integration-repair-review.js';
 import { evaluateTaskStatusForIntegration, recoveryEstablishesApproval, resolveAuthoritativeApprovalAt } from './integrate/approval.js';
 import { createIntegrationContextBuilder } from './integrate/context.js';
 import { createIntegrationGateStep, IntegrationRestartRequired, type IntegrateSeams } from './integrate/gates.js';
@@ -95,6 +96,7 @@ export function createIntegrateWorkflow(ports: IntegrateWorkflowPorts) {
     }
     if (missionLoad.kind === 'found') {
       context.missionStatus = missionLoad.mission.status;
+      context.missionBrief = missionLoad.mission.brief ?? null;
       context.missionLabels = missionLoad.mission.labels;
       context.missionReview = missionLoad.mission.review;
       context.missionVersion = missionLoad.version;
@@ -196,6 +198,19 @@ export function createIntegrateWorkflow(ports: IntegrateWorkflowPorts) {
       await recoverLandedCloseout(slug, missionServices, process.cwd());
       return 0;
     }
+    if (!dryRun) {
+      await recoverLegacyIntegrationRepairReview(missionServices.store, slug);
+      const repair = await missionServices.store.load(missionId(slug));
+      if (repair.kind === 'found' && integrationRepairNeedsReview(repair.mission)) {
+        if (!seams.reReviewFn) {
+          throw abortWith(ports.landing, `The repaired mission ${slug} requires review. Run px review ${slug} --continue.`);
+        }
+        if (!await seams.reReviewFn(slug, process.cwd())) {
+          throw abortWith(ports.landing, `Review of the repaired mission ${slug} stopped. Run px review ${slug} --continue to resume.`);
+        }
+        throw new IntegrationRestartRequired(slug);
+      }
+    }
     const context: any = await buildIntegrationContext(slug, { missionStore: missionServices.store });
     const missionLoad = await loadMissionAuthority(slug, context, missionServices);
 
@@ -289,14 +304,16 @@ export function createIntegrateWorkflow(ports: IntegrateWorkflowPorts) {
     const state: IntegrateRunState = { temporaryStash: null, nextActionMessage: null };
     let exitCode = 0;
     try {
-      try {
-        exitCode = await runIntegration(slug, request, options, seams, state);
-      } catch (error) {
-        if (!(error instanceof IntegrationRestartRequired)) { throw error; }
-        // One restart only: its own gate repair cannot re-review again, so a
-        // second changed revision stops for the operator instead of looping.
-        fmt.log.info(`Restarting integration of ${slug} on the re-reviewed revision.`);
-        exitCode = await runIntegration(slug, request, options, { ...seams, reReviewFn: undefined }, state);
+      for (;;) {
+        try {
+          exitCode = await runIntegration(slug, request, options, seams, state);
+          break;
+        } catch (error) {
+          if (!(error instanceof IntegrationRestartRequired)) { throw error; }
+          // The persisted integration-gate rebound budget bounds repairs. A
+          // restart retains review orchestration and refreshes every fact.
+          fmt.log.info(`Restarting integration of ${slug} on the re-reviewed revision.`);
+        }
       }
     } catch (error) {
       // Report and fail. Rethrowing here is swallowed by the terminal exit

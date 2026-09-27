@@ -90,6 +90,7 @@ function logReviewRounds(missionData: StatusMissionData, log: (_msg: string) => 
   for (const round of missionData.reviewHistory) {
     log(`  Round ${round.number} [${round.reviewer} -> ${round.implementer}]: ${round.disposition ?? 'pending'}`);
     if (round.comment) { log(`    comment: ${round.comment}`); }
+    if (round.revocation) { log(`    revoked by ${round.revocation.by}: ${round.revocation.reason} (${round.revocation.at})`); }
     for (const summary of round.findingSummaries) { log(`    finding: ${summary}`); }
     for (const fix of round.fixes) { log(`    fixed: ${fix}`); }
     for (const pushback of round.pushbacks) { log(`    pushback: ${pushback}`); }

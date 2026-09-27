@@ -3,8 +3,8 @@ id: TASK-2543
 title: >-
   Revoke an unfounded review approval and return the mission to its correct
   lifecycle state
-status: backlog
-assignee: []
+status: done
+assignee: [codex]
 created_date: '2026-09-20 09:05'
 labels:
   - workflow

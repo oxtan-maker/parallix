@@ -159,6 +159,8 @@ export interface ReviewRoundSummary {
   readonly pushbacks: readonly string[];
   /** Findings the implementer fixed, with the evidence they cited. */
   readonly fixes: readonly string[];
+  /** Operator withdrawal of this round's approval, if any. */
+  readonly revocation?: { readonly by: string; readonly reason: string; readonly at: string };
 }
 
 function outcomeComment(content: string): string | null {
@@ -254,6 +256,9 @@ export function projectReviewHistory(review: Review | null): readonly ReviewRoun
             .map((r) => `${r.findingId}: ${r.evidence}`)
         : items.filter((d) => d.kind === 'fixed')
             .map((d) => String(d.findingId)),
+      ...(round.decision?.kind === 'approved' && round.decision.revocation
+        ? { revocation: { by: round.decision.revocation.revokedBy, reason: round.decision.revocation.reason, at: round.decision.revocation.revokedAt } }
+        : {}),
     };
   });
 }

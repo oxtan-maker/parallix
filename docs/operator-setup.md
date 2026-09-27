@@ -179,6 +179,39 @@ content and not a Codex configuration or credential file.
 
 Graphify ships no `mistral` or `vibe` platform. The `graphify install --platform mistral` command does not exist and will fail. The parallix harness skips mistral without error during any Graphify-related operations.
 
+## Correcting an unfounded review approval
+
+An operator may withdraw the current approval when they determine that it was
+not earned — for example, when a reviewer claimed a gate result it did not
+obtain. Use `px revoke-review --help` for the current invocation. This is a
+human judgement call, not a retry mechanism and not an implementer escape
+hatch.
+
+Revocation preserves the original decision, its reviewed revision, the named
+operator, and the stated reason in the review history. It returns the mission
+to review and opens a new round. When the review provider is available,
+Parallix also dismisses the matching pull-request approval; if it is unavailable,
+the local correction remains durable and the command reports that the provider
+was not updated.
+
+Integration accepts a mission contract recorded in the operator database;
+it does not require a `MISSION.md` file for those missions. Use `px status
+<slug> --json` to inspect the recorded brief. Historical missions without a
+recorded brief still require their mission document.
+
+An integration-gate failure follows a separate, automatic repair path. Before
+launching the implementer, Parallix withdraws the old approval and preserves it
+in review history. Once the repair passes its gates, a fresh round reviews the
+repaired commit. Change requests return to implementation until review approves
+the new revision; integration then restarts with fresh review and gate state.
+An older mission stranded by a gate rebound is recovered through the same path.
+
+If the review loop escalates to a human, run `px review <slug> --continue` to
+resume it. This clears the recorded stop and grants another review attempt,
+including when the previous round limit was exhausted. A continued integration
+repair resumes integration automatically after approval. Repair budgets and
+mandatory gates still apply; a failed gate never counts as approval.
+
 ## Summary Checklist
 
 After setup, an operator should be able to:

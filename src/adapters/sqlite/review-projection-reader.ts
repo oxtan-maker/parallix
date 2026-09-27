@@ -39,7 +39,7 @@ export class SqliteReviewProjectionReader {
                 provider_change_id, provider_url, source_branch, target_branch,
                 revision, reviewer, implementer, started_at, decision_kind,
                 decided_at, decision_comment, approval_source_kind,
-                approval_source_provider, responded_at, resulting_revision,
+                approval_source_provider, revoked_at, revoked_by, revoked_reason, responded_at, resulting_revision,
                 phase, disposition, reviewer_retry_count, implementer_retry_count,
                 implementer_response_content, item_dispositions, blocked_reason
          FROM mission_review_rounds WHERE mission_id IN (${placeholders})

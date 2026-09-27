@@ -5,6 +5,8 @@ import os from 'node:os';
 import path from 'node:path';
 
 import { missionVersion } from '../src/application/domain-ports.js';
+import { RevokeReviewDecisionUseCase } from '../src/application/revoke-review-decision-use-case.js';
+import { MissionLifecycleService } from '../src/application/mission-lifecycle-service.js';
 import { agentFamily } from '../src/domain/agents.js';
 import { missionId, missionLabels, type Mission } from '../src/domain/mission.js';
 import { repositoryId } from '../src/domain/repository.js';
@@ -271,6 +273,32 @@ describe('SQLite Mission aggregate integration', () => {
         { change_kind: 'pull-request', decision_kind: 'changes-requested' },
         { change_kind: 'local-branch', decision_kind: 'approved' },
       ]);
+    } finally {
+      await database.close();
+    }
+  });
+
+  it('use case persists a revoked approval and opens a reviewable round', async () => {
+    const database = await migratedDatabase();
+    try {
+      const store = new SqliteMissionStore(database);
+      const recorded = completeMission({ status: 'integration', rawStatus: 'integration' });
+      const version = await store.save(recorded, null);
+      const useCase = new RevokeReviewDecisionUseCase(store, new MissionLifecycleService(store));
+      const result = await useCase.execute({
+        slug: recorded.id, round: 2, reason: 'The approval was unfounded', operator: 'operator',
+        occurredAt: '2026-09-25T00:00:00Z', expectedVersion: version,
+      });
+      assert.equal(result.status, 'completed');
+      const loaded = await store.load(recorded.id);
+      assert.equal(loaded.kind, 'found');
+      assert.equal(loaded.mission.status, 'review');
+      assert.equal(loaded.mission.review?.rounds.length, 3);
+      const decision = loaded.mission.review?.rounds[1]?.decision;
+      assert.equal(decision?.kind, 'approved');
+      assert.deepEqual(decision.revocation, {
+        revokedAt: '2026-09-25T00:00:00Z', revokedBy: 'operator', reason: 'The approval was unfounded',
+      });
     } finally {
       await database.close();
     }

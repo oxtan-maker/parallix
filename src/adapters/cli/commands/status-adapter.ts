@@ -205,6 +205,7 @@ export function createStatusBoardAdapter(options: {
             findingSummaries: r.findingSummaries || [],
             fixes: r.fixes || [],
             pushbacks: r.pushbacks || [],
+            revocation: r.revocation ?? null,
           })),
         };
       } catch { /* projection unavailable */ }

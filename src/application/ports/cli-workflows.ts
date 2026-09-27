@@ -58,6 +58,8 @@ export interface StatusReviewRound {
   readonly fixes: readonly string[];
   /** Pushbacks raised. */
   readonly pushbacks: readonly string[];
+  /** Operator withdrawal of this round's approval, if any. */
+  readonly revocation?: { readonly by: string; readonly reason: string; readonly at: string } | null;
 }
 
 /** Mission-specific data returned by status projection. */

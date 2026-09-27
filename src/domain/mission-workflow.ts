@@ -12,6 +12,7 @@ import {
   assertReviewedChange,
   currentReviewRound,
   reviewStatus,
+  revokeApprovedDecision,
   sameReviewedChange,
   sameReviewedRevision,
   type ConfiguredReviewerEligibility,
@@ -22,7 +23,7 @@ import {
 export type MissionCommand =
   | { readonly type: 'refine' }
   | { readonly type: 'activate'; readonly agent: AgentFamily }
-  | { readonly type: 'rebound-to-active'; readonly agent: AgentFamily }
+  | { readonly type: 'rebound-to-active'; readonly agent: AgentFamily; readonly occurredAt?: string }
   | {
     readonly type: 'submit-for-review';
     readonly gatesPassed: boolean;
@@ -31,6 +32,7 @@ export type MissionCommand =
   }
   | { readonly type: 'request-changes'; readonly review: Review }
   | { readonly type: 'approve'; readonly review: Review }
+  | { readonly type: 'revoke-approval'; readonly review: Review }
   | { readonly type: 'integrate' };
 
 export interface MissionTransition {
@@ -136,7 +138,7 @@ type SubmitForReviewCommand = Extract<MissionCommand, { readonly type: 'submit-f
 function hasApprovedRecordedRound(mission: OpenMission): boolean {
   return mission.status === 'active'
     && Boolean(mission.review?.rounds?.length)
-    && currentReviewRound(mission.review!)?.decision?.kind === 'approved';
+    && reviewStatus(mission.review!) === 'approved';
 }
 
 function validateReviewRound(
@@ -211,7 +213,16 @@ export function decideMission(mission: Mission, command: MissionCommand): Missio
     return { ...mission, status: 'active', assignee: command.agent };
   case 'rebound-to-active':
     requireStatus(mission, ['integration'], command);
-    return { ...mission, status: 'active', assignee: command.agent };
+    return {
+      ...mission, status: 'active', assignee: command.agent,
+      review: mission.review && reviewStatus(mission.review) === 'approved'
+        ? revokeApprovedDecision(mission.review, currentReviewRound(mission.review).number, {
+          revokedAt: command.occurredAt ?? '',
+          revokedBy: 'workflow',
+          reason: 'Integration gates failed; the mission returned to implementation for repair.',
+        })
+        : mission.review,
+    };
   case 'submit-for-review':
     // A handoff that relaunches (gatekeeper pushback, crashed agent, retried
     // CLI invocation) replays this transition against a mission that already
@@ -248,6 +259,13 @@ export function decideMission(mission: Mission, command: MissionCommand): Missio
       throw new MissionRuleViolation('Approval requires an approved review');
     }
     return { ...mission, status: 'integration', review: command.review };
+  case 'revoke-approval':
+    requireStatus(mission, ['integration'], command);
+    requireSameReviewedRevision(mission, command.review);
+    if (reviewStatus(command.review) !== 'awaiting-review') {
+      throw new MissionRuleViolation('Revocation must open an awaiting-review round');
+    }
+    return { ...mission, status: 'review', review: command.review };
   case 'integrate':
     requireStatus(mission, ['integration'], command);
     return { ...mission, status: 'done', closedAt: null };

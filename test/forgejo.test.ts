@@ -839,6 +839,7 @@ assignee: [custom]
     });
 
     assert.deepEqual(decision, {
+      approvalHolders: ['custom'],
       ok: true,
       prNumber: 205,
       reviewState: 'APPROVED',
@@ -1449,6 +1450,7 @@ test('getLatestReviewDecision returns the latest formal review state for the bra
     });
 
     assert.deepEqual(decision, {
+      approvalHolders: ['human'],
       ok: true,
       prNumber: 97,
       reviewState: 'APPROVED',
@@ -1460,7 +1462,7 @@ test('getLatestReviewDecision returns the latest formal review state for the bra
   }
 });
 
-test('getLatestReviewDecision detects defaultUserApproved when default user approved but latest review is REQUEST_CHANGES', () => {
+test('getLatestReviewDecision rejects an older default-user approval after a later change request', () => {
   const previousUser = process.env.FORGEJO_USER;
   process.env.FORGEJO_USER = 'human';
   try {
@@ -1494,11 +1496,11 @@ test('getLatestReviewDecision detects defaultUserApproved when default user appr
     });
 
     assert.deepEqual(decision, {
+      approvalHolders: ['human'],
       ok: true,
       prNumber: 97,
       reviewState: 'REQUEST_CHANGES',
-      defaultUserApproved: true,
-      defaultUserApprovedAt: '2026-04-12T10:00:00Z'
+      defaultUserApproved: false
     });
   } finally {
     process.env.FORGEJO_USER = previousUser;
@@ -1539,6 +1541,7 @@ test('getLatestReviewDecision returns defaultUserApproved false when default use
     });
 
     assert.deepEqual(decision, {
+      approvalHolders: ['codex'],
       ok: true,
       prNumber: 97,
       reviewState: 'REQUEST_CHANGES',
@@ -1587,6 +1590,7 @@ test('getLatestReviewDecision ignores a default-user approval superseded by the 
     });
 
     assert.deepEqual(decision, {
+      approvalHolders: [],
       ok: true,
       prNumber: 97,
       reviewState: 'REQUEST_CHANGES',

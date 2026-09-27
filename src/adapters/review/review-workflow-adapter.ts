@@ -6,12 +6,13 @@ import { resolveTaskFile, getTaskStatus, getTaskImplementer } from '../backlog/b
 import { getPrStatus } from './review-adapter.js';
 import { readReviewState, reconcileInterruptedHandoff } from './review-state.js';
 import type { MissionStore } from '../../application/domain-ports.js';
+import { recoverLegacyIntegrationRepairReview } from '../../application/integration-repair-review.js';
 import { startAgent } from '../agents/agents.js';
 import { startReviewLoop, recordStageStatsSafe } from './review-loop.js';
 import type { ReviewWorkflowContext, ReviewWorkflowPort } from '../../application/ports/review-workflow.js';
 import { flagValue, readTextFlag } from './review-cli-flags.js';
 import { createEvent } from './review-events.js';
-import { backfillReviewHandler, continueReviewClearsIntervention, closeMissionPr, commentRound, createEventHandler, formatStaticReviewSuccess, importLegacyHandler, performStaticReview, postStaticReviewComment, pushRound, readComments, reconcileInterruptedHandoffHandler, resumeIntervenedReview, showReviewStatus, submitForReview, submitReviewRound, verifyReview } from './review-commands.js';
+import { backfillReviewHandler, continueReviewClearsIntervention, continueReviewInvalidatesBlocker, closeMissionPr, commentRound, createEventHandler, formatStaticReviewSuccess, importLegacyHandler, performStaticReview, postStaticReviewComment, pushRound, readComments, reconcileInterruptedHandoffHandler, resumeIntervenedReview, showReviewStatus, submitForReview, submitReviewRound, verifyReview } from './review-commands.js';
 
 const DEFAULT_MAX_ATTEMPTS = 5;
 
@@ -34,6 +35,9 @@ export class ReviewWorkflowAdapter implements ReviewWorkflowPort {
   async start(context: ReviewWorkflowContext): Promise<void> { await this.runLoop(context, false); }
   async continue(context: ReviewWorkflowContext): Promise<void> {
     const o = context.options as typeof this._defaults;
+    if (o.missionStore && !context.args.includes('--dry-run')) {
+      await recoverLegacyIntegrationRepairReview(o.missionStore, context.slug);
+    }
     // A review stopped in `human-intervention` cannot resume by relaunching the
     // loop (the loop drives off the persisted ReviewState phase, not the
     // domain intervention flag); clearing the stop is a review-state mutation
@@ -47,17 +51,20 @@ export class ReviewWorkflowAdapter implements ReviewWorkflowPort {
       createEventFn: o.createEventFn,
       runFn: o.run,
     });
+    if (o.missionStore && !context.args.includes('--dry-run')) {
+      await continueReviewInvalidatesBlocker(context.slug, context.args, { ...o, runFn: o.run });
+    }
     await this.runLoop(context, true);
   }
   async resume(context: ReviewWorkflowContext): Promise<void> { await resumeIntervenedReview(context.slug, context.args, context.options); }
-  private async runLoop(context: ReviewWorkflowContext, isContinue: boolean): Promise<void> { const o = context.options as typeof this._defaults; const raw = flagValue(context.args, '--max-attempts'); const error = o.error || fmt.log.plainError; const exit = o.exit || process.exit; const worktree = o.resolveWorktreeFn || resolveWorktree; const persisted = await Promise.resolve((o.readReviewStateFn || readReviewState)(context.slug, worktree(context.slug) || process.cwd(), o.missionStore)); const resumedLimit = (persisted?.round || 0) + 1; const maxAttempts = raw === null ? isContinue && resumedLimit > DEFAULT_MAX_ATTEMPTS ? resumedLimit : DEFAULT_MAX_ATTEMPTS : parseInt(raw, 10); if (!Number.isInteger(maxAttempts) || maxAttempts < 1) { error(fmt.status('FAIL', `--max-attempts requires a positive integer (got "${raw}").`)); exit(1); return; } const isFreshStart = context.args.includes('--start') && !isContinue;
+  private async runLoop(context: ReviewWorkflowContext, isContinue: boolean): Promise<void> { const o = context.options as typeof this._defaults; const raw = flagValue(context.args, '--max-attempts'); const error = o.error || fmt.log.plainError; const exit = o.exit || process.exit; const worktree = o.resolveWorktreeFn || resolveWorktree; const persisted = await Promise.resolve((o.readReviewStateFn || readReviewState)(context.slug, worktree(context.slug) || process.cwd(), o.missionStore)); const resumedLimit = (persisted?.round || 1) + DEFAULT_MAX_ATTEMPTS - 1; const maxAttempts = raw === null ? (isContinue ? Math.max(resumedLimit, DEFAULT_MAX_ATTEMPTS) : DEFAULT_MAX_ATTEMPTS) : parseInt(raw, 10); if (!Number.isInteger(maxAttempts) || maxAttempts < 1) { error(fmt.status('FAIL', `--max-attempts requires a positive integer (got "${raw}").`)); exit(1); return; } const isFreshStart = context.args.includes('--start') && !isContinue;
     // SC1: a fresh `--start` reaches the handoff transition that creates the
     // Review aggregate only for a known mission (its directory exists). A
     // fresh start, including a retry after interrupted handoff, creates it.
     // Continue still requires an existing Review.
     const resolveDir = worktree(context.slug) || process.cwd();
     const knownMission = fs.existsSync(missionDirForSlug(resolveDir, context.slug));
-    if (o.requireReviewAggregate && !persisted && (!isFreshStart || !knownMission)) { error(fmt.status('FAIL', `Mission ${context.slug} has no valid Review aggregate. Stop before reviewer launch and run px review ${context.slug} --reconcile-review --branch <branch> --target <branch> --reviewer <agent> --implementer <agent> --revision <revision> --eligible-reviewer <agent>.`)); exit(1); return; } const poll = flagValue(context.args, '--poll-timeout-seconds'); await (o.startReviewLoopFn ?? startReviewLoop)(context.slug, { implementer: flagValue(context.args, '--implementer') ?? undefined, reviewer: flagValue(context.args, '--reviewer') ?? undefined, focus: flagValue(context.args, '--focus') ?? 'all', maxAttempts, dryRun: context.args.includes('--dry-run'), reset: context.args.includes('--reset'), isContinue, verbose: context.args.includes('--verbose'), pollTimeoutSeconds: poll ? parseInt(poll, 10) : null, missionPath: flagValue(context.args, '--mission') ?? undefined, recordStageStatsSafeFn: o.recordStageStatsSafeFn ?? recordStageStatsSafe, onAgentLaunched: o.onAgentLaunched, onAutonomousStop: o.onAutonomousStop, exit }); }
+    if (o.requireReviewAggregate && !persisted && (!isFreshStart || !knownMission)) { error(fmt.status('FAIL', `Mission ${context.slug} has no valid Review aggregate. Stop before reviewer launch and run px review ${context.slug} --reconcile-review --branch <branch> --target <branch> --reviewer <agent> --implementer <agent> --revision <revision> --eligible-reviewer <agent>.`)); exit(1); return; } const poll = flagValue(context.args, '--poll-timeout-seconds'); await (o.startReviewLoopFn ?? startReviewLoop)(context.slug, { implementer: flagValue(context.args, '--implementer') ?? undefined, reviewer: flagValue(context.args, '--reviewer') ?? undefined, focus: flagValue(context.args, '--focus') ?? 'all', maxAttempts: isContinue ? Math.max(maxAttempts, persisted?.round || 1) : maxAttempts, dryRun: context.args.includes('--dry-run'), reset: context.args.includes('--reset'), isContinue, verbose: context.args.includes('--verbose'), pollTimeoutSeconds: poll ? parseInt(poll, 10) : null, missionPath: flagValue(context.args, '--mission') ?? undefined, recordStageStatsSafeFn: o.recordStageStatsSafeFn ?? recordStageStatsSafe, onAgentLaunched: o.onAgentLaunched, onAutonomousStop: o.onAutonomousStop, exit }); }
   async comment(context: ReviewWorkflowContext): Promise<void> { const o = context.options as typeof this._defaults; const message = readTextFlag(context.args, '--comment', '--comment-file', 'comment', o); if (!message) { (o.error || fmt.log.plainError)(fmt.status('FAIL', '--comment requires text via --comment "<text>" or --comment-file <path>.')); (o.exit || process.exit)(1); return; } await (o.commentRoundFn || commentRound)(context.slug, message, o); }
   async readComments(context: ReviewWorkflowContext): Promise<void> { const o = context.options as typeof this._defaults; await (o.readCommentsFn || readComments)(context.slug, o); }
   async submitReview(context: ReviewWorkflowContext): Promise<void> { const o = context.options as typeof this._defaults; const outcome = flagValue(context.args, '--submit-review'); if (!outcome) { (o.error || fmt.log.plainError)(fmt.status('FAIL', '--submit-review requires an outcome: px review <slug> --submit-review <approve|request-changes|comment> [--message "<summary>"|--message-file <path>]')); (o.exit || process.exit)(1); return; } await (o.submitReviewRoundFn || submitReviewRound)(context.slug, outcome, readTextFlag(context.args, '--message', '--message-file', 'review message', o) || '', o); }

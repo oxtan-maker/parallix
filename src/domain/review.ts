@@ -61,12 +61,21 @@ export type ReviewApprovalSource =
   | { readonly kind: 'provider'; readonly provider: string }
   | { readonly kind: 'local' };
 
+/** An operator correction of an approval that must remain auditable. */
+export interface ReviewDecisionRevocation {
+  readonly revokedAt: string;
+  readonly revokedBy: string;
+  readonly reason: string;
+}
+
 export type ReviewerDecision =
   | {
     readonly kind: 'approved';
     readonly decidedAt: string;
     readonly comment: string | null;
     readonly source: ReviewApprovalSource;
+    /** Present only when this formerly-effective approval was withdrawn. */
+    readonly revocation?: ReviewDecisionRevocation;
   }
   | {
     readonly kind: 'changes-requested';
@@ -508,11 +517,61 @@ export function reviewStatus(review: Review): ReviewStatus {
   // that stale flag block a legitimately approved review (approve transitions,
   // integration). Approved wins over a stale intervention; a genuinely pending
   // intervention only matters while the current round is still open.
-  if (round.decision?.kind === 'approved') { return 'approved'; }
+  if (round.decision?.kind === 'approved' && !round.decision.revocation) { return 'approved'; }
   if (review.intervention) { return 'human-intervention'; }
   if (round.response) { return 'ready-for-next-round'; }
   if (round.decision?.kind === 'changes-requested') { return 'awaiting-implementation'; }
   return 'awaiting-review';
+}
+
+/**
+ * Revoke the current approved decision without erasing its round, then open a
+ * fresh awaiting-review round over the same reviewed revision.  This is a
+ * deliberately narrow recovery operation: it is not a general way to edit
+ * review history or choose a lifecycle lane.
+ */
+export function revokeApprovedDecision(
+  review: Review,
+  roundNumber: number,
+  revocation: ReviewDecisionRevocation,
+): Review {
+  if (!Number.isSafeInteger(roundNumber) || roundNumber < 1) {
+    throw new Error('Revocation requires a valid review round number');
+  }
+  if (!revocation.reason.trim()) { throw new Error('Revocation requires an operator reason'); }
+  if (!revocation.revokedBy.trim()) { throw new Error('Revocation requires the operator identity'); }
+  if (!revocation.revokedAt.trim()) { throw new Error('Revocation requires a time'); }
+  const current = currentReviewRound(review);
+  if (current.number !== roundNumber) {
+    throw new Error(`Review decision ${roundNumber} is not the current effective decision`);
+  }
+  if (current.decision?.kind !== 'approved') {
+    throw new Error(`Review decision ${roundNumber} is not an approval that can be revoked`);
+  }
+  if (current.decision.revocation) {
+    throw new Error(`Review decision ${roundNumber} is already revoked`);
+  }
+  if (reviewStatus(review) !== 'approved') {
+    throw new Error(`Review decision ${roundNumber} is not the current effective decision`);
+  }
+  const revokedRound: ReviewRound = {
+    ...current,
+    decision: { ...current.decision, revocation },
+  };
+  const nextRound: ReviewRound = {
+    number: current.number + 1,
+    subject: current.subject,
+    reviewer: current.reviewer,
+    implementer: current.implementer,
+    startedAt: revocation.revokedAt,
+    decision: null,
+    response: null,
+    phase: 'reviewing',
+    disposition: null,
+    reviewerRetryCount: 0,
+    implementerRetryCount: 0,
+  };
+  return { ...review, rounds: [...replaceCurrentRound(review, revokedRound), nextRound], intervention: null };
 }
 
 function requireEligibleReviewer(
@@ -825,7 +884,7 @@ export function resumeReview(review: Review): Review {
   if (!review.intervention) {
     throw new Error('Review is not waiting for human intervention');
   }
-  return { ...review, intervention: null };
+  return { ...review, intervention: null, stageLaunches: [] };
 }
 
 /**
@@ -836,20 +895,29 @@ export function resumeReview(review: Review): Review {
  * fixing phase; the review loop relaunches the implementer on every
  * `--continue` because it treats any existing disposition as "resolve the
  * blocker". When the operator runs `--continue` they are declaring the blocker
- * resolved by hand, so clear the disposition and reset the round to
+ * resolved by hand, so preserve that round and open a fresh round in
  * `reviewing`. The loop then re-polls the reviewer on the current tree instead
  * of relaunching the stuck implementer.
  */
-export function invalidateBlocker(review: Review): Review {
+export function invalidateBlocker(review: Review, startedAt: string): Review {
   const round = currentReviewRound(review);
   if (round.disposition !== 'BLOCKED' && round.disposition !== 'PARKED') {
     throw new Error('Review is not blocked; nothing to invalidate');
   }
+  if (!startedAt.trim()) { throw new Error('Continuing a blocked review requires a start time'); }
   const invalidated: ReviewRound = {
     ...round,
+    number: round.number + 1,
+    startedAt,
+    decision: null,
+    response: null,
     disposition: null,
     phase: 'reviewing',
+    reviewerRetryCount: 0,
+    implementerRetryCount: 0,
+    implementerResponseContent: undefined,
+    itemDispositions: undefined,
     blockedReason: undefined,
   };
-  return { ...review, rounds: replaceCurrentRound(review, invalidated) };
+  return { ...review, rounds: [...review.rounds, invalidated], intervention: null, stageLaunches: [] };
 }

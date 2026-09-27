@@ -149,7 +149,8 @@ test('TASK-2492: an exhausted rebound budget escalates to a human without a tran
   assert.equal(h.launches, 0);
   assert.deepEqual(h.transitions, []);
   assert.deepEqual(h.recorded, []);
-  assert.match(h.messages.join('\n'), /human action required/i);
+  assert.match(h.messages.join('\n'), /automatic repair budget is exhausted/i);
+  assert.match(h.messages.join('\n'), /px review .* --continue/, 'the escalation names its continuation');
   assert.match(h.messages.join('\n'), /npm run test:integration/, 'the escalation names the reproduction command');
 });
 

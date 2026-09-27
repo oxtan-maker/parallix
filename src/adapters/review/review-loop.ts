@@ -8,7 +8,9 @@ import { fileURLToPath } from 'node:url';
 import * as fmt from '../../application/presentation/cli-format.js';
 import { git, run } from '../git/git.js';
 import { findMissionDir, resolveWorktree, missionBranchName, getPrimaryBranch } from '../filesystem/mission-utils.js';
-import { isDbAdhocIdentity } from '../../domain/mission.js';
+import { isDbAdhocIdentity, missionId } from '../../domain/mission.js';
+import { reviewStatus } from '../../domain/review.js';
+import { recoverLegacyIntegrationRepairReview } from '../../application/integration-repair-review.js';
 import type { PullRequestReference } from '../../domain/review.js';
 import { resolveTaskFile, getTaskImplementer, getTaskStatus, enforceTaskAssignee, transitionTask, reportTaskResolution } from '../backlog/backlog.js';
 import { toVirtual, transitionVirtual } from '../config/state-map.js';
@@ -167,7 +169,7 @@ async function performStartHandoff(slug: string, state: ProviderPrelude, deps: a
     return { ok: false, ran: true };
   }
   if (!handoff?.ok) {
-    await reportFailedStartHandoff(slug, handoff || {}, { forgejoEnabled, branch, worktree, transitionTaskFn, readReviewStateFn, writeReviewStateFn, missionStore, log, error });
+    await reportFailedStartHandoff(slug, handoff || {}, { forgejoEnabled, branch, worktree, transitionTaskFn, readReviewStateFn, writeReviewStateFn, missionStore, getPrStatusFn, log, error });
     exit(1);
     return { ok: false, ran: true };
   }
@@ -193,7 +195,7 @@ async function performStartHandoff(slug: string, state: ProviderPrelude, deps: a
  * review the provider), a provider-disabled start reports the handoff error.
  */
 async function reportFailedStartHandoff(slug: string, handoff: any, deps: any): Promise<void> {
-  const { forgejoEnabled, branch, worktree, transitionTaskFn, readReviewStateFn, writeReviewStateFn, missionStore, log, error } = deps;
+  const { forgejoEnabled, branch, worktree, transitionTaskFn, readReviewStateFn, writeReviewStateFn, missionStore, getPrStatusFn, log, error } = deps;
   if (handoff.reason === 'validation-failed' && !handoff.recoveryAttempted) {
     await transitionTaskFn(slug, 'active', { rootDir: worktree, log });
     log(fmt.status('INFO', `Auto-bounced ${slug} to active: declared-gate validation failure. Fix the gate in MISSION.md and retry.`));
@@ -204,7 +206,8 @@ async function reportFailedStartHandoff(slug: string, handoff: any, deps: any): 
     await persistReviewStateOrThrow(writeReviewStateFn, slug, { ...(persisted || {}), metadata } as any, worktree, missionStore);
     return;
   }
-  if (forgejoEnabled) {
+  const pr = forgejoEnabled ? getPrStatusFn(branch, worktree) : null;
+  if (forgejoEnabled && (!pr?.exists || pr.state !== 'open')) {
     error(fmt.status('FAIL', `No open review PR found for ${branch}. Create the PR before starting the review loop.`));
     if (handoff.error) { error(`       Handoff failure: ${String(handoff.error)}`); }
     error(`       Run: px review ${slug} --push`);
@@ -1527,8 +1530,15 @@ async function prepareStartTransition(params: {
     const taskStatus = taskResolution.ok ? getTaskStatusFn(taskResolution.taskFile!) : null;
     if (!recordedReview || (taskStatus && taskStatus !== 'review')) { providerState.skipHandoff = false; }
   }
+  let continueHandoff = false;
+  if (missionStore && isContinue && !dryRun) {
+    const loaded = await missionStore.load(missionId(slug));
+    continueHandoff = loaded.kind === 'found' && loaded.mission.status === 'active'
+      && Boolean(loaded.mission.review && ['awaiting-review', 'ready-for-next-round'].includes(reviewStatus(loaded.mission.review)));
+    if (continueHandoff) { providerState.skipHandoff = false; }
+  }
   let handoffJustRan = false;
-  if (!dryRun && !providerState.skipHandoff && !isContinue) {
+  if (!dryRun && !providerState.skipHandoff && (!isContinue || continueHandoff)) {
     const handedOff = await performStartHandoff(slug, providerState, {
       performHandoffFn, implementer, worktree, branch, forgejoEnabled, taskResolution,
       getTaskStatusFn, getPrStatusFn, transitionTaskFn, readReviewStateFn, writeReviewStateFn,
@@ -1763,6 +1773,7 @@ export async function startReviewLoop(slug: string, opts: {
     await maybeUpdateGraphifyBeforeReviewFn(worktree, { commandRunner: runFn, log });
   }
   await applyStartReset(reset, slug, worktree, { resetReviewStateFn, log });
+  if (missionStore && !dryRun) { await recoverLegacyIntegrationRepairReview(missionStore, slug); }
   const preparedSelection = agentSelectionSnapshotPort
     ? await PreparedAgentSelection.prepare(agentSelectionSnapshotPort)
     : null;
@@ -1801,7 +1812,7 @@ export async function startReviewLoop(slug: string, opts: {
   // A --continue never enters this branch (persisted was already non-null), and
   // a Forgejo start with an existing PR skips handoff entirely, so this reload
   // only ever re-reads the handoff-created state.
-  if (!isContinue && handoffJustRan) {
+  if (handoffJustRan) {
     persisted = await Promise.resolve(readReviewStateFn(slug, worktree));
   }
   const resolvedReviewer = resolveReviewerIdentity({

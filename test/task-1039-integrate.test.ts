@@ -369,7 +369,15 @@ test('integrate aborts before merge when a pre-integration gate fails', async (t
     const integrate = loadIntegrate();
     let result = null;
     try {
-      result = await integrate([TEST_SLUG], { missionServicesFn: composition.createMissionApplicationServices, exitFn: () => {} });
+      result = await integrate([TEST_SLUG], {
+        missionServicesFn: composition.createMissionApplicationServices,
+        exitFn: () => {},
+        // This characterization covers the integration abort, not the
+        // recovery router. Keep the red-gate route terminal and in-memory:
+        // the production router can open the operator database and launch an
+        // implementer, which makes this unit test non-hermetic.
+        routeIntegrationGateFailureFn: async () => ({ route: 'stranded', detail: 'test gate failure' }),
+      });
     } catch {
       // integrate() converts a gate abort into a non-zero exit code, not a throw.
     }

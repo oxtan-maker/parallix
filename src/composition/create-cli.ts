@@ -47,6 +47,7 @@ import { ConcreteCurrentWorkReadAdapter } from '../adapters/backlog/concrete-cur
 import { CURRENT_WORK_TTL_MS, reconcileCurrentWork } from '../application/projections/current-work.js';
 import { processLivenessProbe } from '../adapters/process/process-liveness.js';
 import { missionId } from '../domain/mission.js';
+import { hasIntegrationRepairHistory } from '../application/integration-repair-review.js';
 import { conventionalWorktreePath, resolveWorktree } from '../adapters/git/worktree.js';
 import { git } from '../adapters/git/git.js';
 import * as agents from '../adapters/agents/agents.js';
@@ -59,6 +60,9 @@ import { createReviewCommand } from '../interfaces/cli/review.js';
 
 import { createStatusCommand } from '../interfaces/cli/status.js';
 import { createResolveCommand, createVerdictCommand, type ReviewVerbPorts } from '../interfaces/cli/review-verbs.js';
+import { createRevokeReviewCommand } from '../interfaces/cli/revoke-review.js';
+import { RevokeReviewDecisionUseCase } from '../application/revoke-review-decision-use-case.js';
+import { dismissProviderApproval } from '../adapters/review/review-adapter.js';
 import { readReviewState } from '../adapters/review/review-state.js';
 import {
   createAssignCommand,
@@ -196,14 +200,17 @@ function createCommandRegistry(rootDir: string): Record<string, Command> {
   const reReviewRepairedRevision = async (slug: string, services: Awaited<ReturnType<typeof createProductionApplicationServices>>) => {
     if (!services.mission) { throw new Error('mission services are unavailable'); }
     const before = await services.mission.store.load(missionId(slug));
-    const roundsBefore = before.kind === 'found' ? (before.mission.review?.rounds.length ?? 0) : 0;
-    await registry.review([slug, '--start'], {
-      exit: (code?: number) => { if (code) { throw new Error(`px review ${slug} --start exited with status ${code}`); } },
+    const roundBefore = before.kind === 'found' ? before.mission.review?.rounds.at(-1) : null;
+    await registry.review([slug, '--continue'], {
+      integrationOwnsReview: true,
+      exit: (code?: number) => { if (code) { throw new Error(`px review ${slug} --continue exited with status ${code}`); } },
     });
     const after = await services.mission.store.load(missionId(slug));
     if (after.kind !== 'found' || after.mission.status !== 'integration' || !after.mission.review) { return false; }
     const rounds = after.mission.review.rounds;
-    return rounds.length > roundsBefore && rounds[rounds.length - 1]?.decision?.kind === 'approved';
+    const current = rounds[rounds.length - 1];
+    return current.decision?.kind === 'approved' && !current.decision.revocation
+      && (!roundBefore?.decision || current.number > roundBefore.number);
   };
   // `active` needs to create its ExecuteMissionService only after it has
   // installed its progress renderer. Supplying a pre-built service loses the
@@ -267,6 +274,34 @@ function createCommandRegistry(rootDir: string): Record<string, Command> {
     assign: (args) => withGraph(services => createAssignCommand(missionWrites(services), false)(args)),
     verdict: (args) => withGraph(services => createVerdictCommand(reviewVerbPorts(services))(args)),
     resolve: (args) => withGraph(services => createResolveCommand(reviewVerbPorts(services))(args)),
+    // Deliberately outside `px review`: the review loop and its agent prompts
+    // cannot dispatch this human-only corrective command.
+    'revoke-review': (args) => withGraph(services => {
+      if (!services.mission) { throw new Error('mission services are unavailable'); }
+      return createRevokeReviewCommand(
+        new RevokeReviewDecisionUseCase(services.mission.store, services.mission.lifecycle, {
+          async dismissApproval(mission, round, reason) {
+            const decision = mission.review?.rounds.find((entry) => entry.number === round)?.decision;
+            if (decision?.kind !== 'approved') { throw new Error('matching approval is not recorded'); }
+            dismissProviderApproval(`mission/${mission.id}`, decision.decidedAt, reason, { rootDir });
+          },
+        }),
+        (explicit) => inferSlug(explicit),
+      )(args);
+    }),
+    revoke: (args) => withGraph(services => {
+      if (!services.mission) { throw new Error('mission services are unavailable'); }
+      return createRevokeReviewCommand(
+        new RevokeReviewDecisionUseCase(services.mission.store, services.mission.lifecycle, {
+          async dismissApproval(mission, round, reason) {
+            const decision = mission.review?.rounds.find((entry) => entry.number === round)?.decision;
+            if (decision?.kind !== 'approved') { throw new Error('matching approval is not recorded'); }
+            dismissProviderApproval(`mission/${mission.id}`, decision.decidedAt, reason, { rootDir });
+          },
+        }),
+        (explicit) => inferSlug(explicit),
+      )(args);
+    }),
     unassign: (args) => withGraph(services => createAssignCommand(missionWrites(services), true)(args)),
     diff,
     draft: (args, options) => withMissionAndGraph((missionServicesFn, services) => {
@@ -318,7 +353,7 @@ function createCommandRegistry(rootDir: string): Record<string, Command> {
     'verify-env': startupPreflight,
     rebase: createRebaseCommand((args, options) => withMissionFactories(missionServicesFn => rebase(args, { ...options, missionServicesFn }))),
     'resolve-conflict': resolveConflict,
-    review: (args, options) => withMissionAndGraph((missionServicesFn, services) => {
+    review: (args, options) => withMissionAndGraph(async (missionServicesFn, services) => {
         if (!services.mission) { throw new Error('mission services are unavailable'); }
         const reviewerSessionPort = services.operatorState.db
           ? new SqliteSessionMarkerAdapter(services.operatorState.db as SqliteDatabaseAdapter, services.mission.repositoryId)
@@ -351,7 +386,15 @@ function createCommandRegistry(rootDir: string): Record<string, Command> {
             ...reviewLoopBindings(services.mission!.store, services.mission!.lifecycle, reviewerSessionPort),
           } as any),
         } as any);
-        return createReviewCommand(new ReviewCommandUseCase(adapter, services.currentWork))(args, options);
+        const result = await createReviewCommand(new ReviewCommandUseCase(adapter, services.currentWork))(args, options);
+        if (args.includes('--continue') && !args.includes('--dry-run') && !options?.integrationOwnsReview) {
+          const slug = inferSlug(args.find((arg: string) => !arg.startsWith('--')));
+          const resumed = slug ? await services.mission.store.load(missionId(slug)) : null;
+          if (resumed?.kind === 'found' && resumed.mission.status === 'integration' && hasIntegrationRepairHistory(resumed.mission)) {
+            return runIntegrated([slug!], options ?? {});
+          }
+        }
+        return result;
     }),
     setup,
     'setup-review': setupReview,

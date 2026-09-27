@@ -1895,6 +1895,16 @@ test('getLatestReviewForPr correctly handles mixed-precision ISO timestamps', as
   assert.strictEqual(review.state, 'CHANGES_REQUESTED');
 });
 
+test('getLatestReviewForPr accepts a human request after round start but excludes stale approval', async () => {
+  const review = await getLatestReviewForPr(41, 'codex', '2026-04-26T10:00:00Z', 'fake-token', {
+    apiCall: async () => ({ ok: true, data: [
+      { user: { login: 'codex' }, submitted_at: '2026-04-26T09:59:59Z', state: 'APPROVED' },
+      { user: { login: 'human' }, submitted_at: '2026-04-26T10:00:01Z', state: 'REQUEST_CHANGES' },
+    ] }),
+  });
+  assert.deepEqual(review, { state: 'REQUEST_CHANGES', submittedAt: '2026-04-26T10:00:01Z' });
+});
+
 test('getLatestReviewForPr correctly sorts mixed-precision ISO timestamps', async () => {
 
   const sinceIso = '2026-04-26T10:00:00Z';
@@ -4341,6 +4351,30 @@ test('startReviewLoop self-heals via handoff and recovers when task is review an
   assert.notEqual(exitCode, 1);
   assert.ok(logs.some(l => l.includes('Self-heal succeeded') && l.includes('#77')));
   assert.ok(!errors.some(e => e.includes('No open review PR found')));
+});
+
+test('startReviewLoop reports handoff failure without claiming its confirmed PR is missing', async () => {
+  const { exitCode, errors, logs } = await captureExit(() => startReviewLoop(TEST_SLUG, {
+    eligibleAgentsForStepFn: () => ['codex', 'claude'],
+    resolveTaskFileFn: () => ({ ok: true, taskFile: '/tmp/task.md' }),
+    getTaskStatusFn: () => 'active',
+    getTaskImplementerFn: () => 'codex',
+    isForgejoReviewEnabledFn: () => true,
+    forgejoAvailableFn: async () => true,
+    getPrStatusFn: () => ({ exists: true, state: 'open', number: 494 }),
+    missionStore: {} as any,
+    readReviewStateFn: () => null,
+    performHandoffFn: async () => ({ ok: false, error: 'Recorded evidence is missing' }),
+    maybeUpdateGraphifyBeforeReviewFn: () => {},
+    implementer: 'codex',
+    reviewer: 'claude',
+    dryRun: false,
+  }));
+  assert.equal(exitCode, 1);
+  assert.ok(logs.some(line => line.includes('PR #494 confirmed open')));
+  assert.ok(errors.some(line => line.includes('Recorded evidence is missing')));
+  assert.ok(errors.some(line => line.includes('--start')));
+  assert.ok(!errors.some(line => line.includes('No open review PR found') || line.includes('--push')));
 });
 
 test('startReviewLoop emits --push fallback (not --submit) when handoff fails for a review task (crit. 2)', async () => {

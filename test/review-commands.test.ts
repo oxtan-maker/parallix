@@ -484,7 +484,7 @@ test('review passes an explicit --max-attempts through to the review loop', asyn
   assert.equal(received && received.exit, exit, 'nested review loops must not retain process.exit from the parent command');
 });
 
-test('a manual review continuation gets one round beyond the automatic five-round limit', async () => {
+test('a manual review continuation renews the five-round budget at the current round', async () => {
   let received = null;
 
   await review(['task-2436', '--continue'], {
@@ -494,7 +494,7 @@ test('a manual review continuation gets one round beyond the automatic five-roun
     startReviewLoopFn: async (_slug, opts) => { received = opts; },
   });
 
-  assert.equal(received && received.maxAttempts, 6);
+  assert.equal(received && received.maxAttempts, 9);
 });
 
 test('review automation retains its five-round limit', async () => {

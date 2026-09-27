@@ -82,6 +82,15 @@ export async function getLatestReviewForPr(prNumber: number, reviewerUser: strin
   return withForgejo(options.rootDir || process.cwd(), () => forgejo.getLatestReviewForPr(prNumber, reviewerUser, sinceIso, token, options), null);
 }
 
+export function dismissProviderApproval(branch: string, decidedAt: string, reason: string, options: { rootDir?: string; [key: string]: any } = {}) {
+  const rootDir = options.rootDir || process.cwd();
+  if (!isProviderEnabled(rootDir)) { throw new Error('review provider is disabled'); }
+  const token = readToken(rootDir);
+  if (!token) { throw new Error('review provider token is unavailable'); }
+  const result = forgejo.dismissApproval(branch, token, decidedAt, reason, { ...options, rootDir });
+  if (!result?.ok) { throw new Error(result?.error || 'review provider is unreachable'); }
+}
+
 /**
  * @param {number} prNumber
  * @param {string} implementerUser

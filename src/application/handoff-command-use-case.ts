@@ -22,6 +22,7 @@ import {
   ConfiguredReviewerEligibility,
   changeRevision,
   reviewStatus,
+  currentReviewRound,
 } from '../domain/review.js';
 import { agentFamily } from '../domain/agents.js';
 import type { AgentFamily } from '../domain/agents.js';
@@ -135,16 +136,16 @@ export class HandoffCommandUseCase {
   /**
    * Verifies that the current environment is ready for handoff.
    */
-  verifyHandoff(slug: string, options: { worktree?: string } = {}) {
+  verifyHandoff(slug: string, options: { worktree?: string; recordedContract?: boolean } = {}) {
     const { git, missionUtils } = this.ports;
     const launchRoot = process.cwd();
     const rootDir = options.worktree || missionUtils.resolveWorktree(slug, { cwd: launchRoot }) || launchRoot;
     const missionDir = missionUtils.findMissionDir(slug, rootDir);
-    if (!missionDir) {
+    if (!missionDir && !options.recordedContract) {
       return { ok: false, error: `Mission directory not found for slug: ${slug}` };
     }
 
-    const area = missionUtils.findMissionArea(missionDir);
+    const area = missionDir ? missionUtils.findMissionArea(missionDir) : null;
     const branch = missionUtils.missionBranchName(slug, rootDir);
     const current = git.getCurrentBranch(rootDir);
 
@@ -152,7 +153,7 @@ export class HandoffCommandUseCase {
       return { ok: false, error: `Not on mission branch. Current: ${current}, Expected: ${branch}` };
     }
 
-    return { ok: true, missionDir, area, branch, rootDir };
+    return { ok: true, missionDir: missionDir || rootDir, area, branch, rootDir };
   }
 
   resolveHandoffReviewAssignment(
@@ -865,7 +866,17 @@ export class HandoffCommandUseCase {
     // Default is 2 (one initial + one retry). Decremented with each relaunch.
     const retriesLeft = remainingRetries !== undefined ? remainingRetries : 2;
 
-    const verification = this.verifyHandoff(slug, { worktree: worktree || undefined });
+    // A recorded contract does not need a directory of legacy Markdown inputs.
+    // Load it before location verification, and fail closed on missing DB state.
+    const launchRoot = process.cwd();
+    const contractRoot = worktree || ports.missionUtils.resolveWorktree(slug, { cwd: launchRoot }) || launchRoot;
+    const contractDir = ports.missionUtils.findMissionDir(slug, contractRoot) || contractRoot;
+    const contract = await loadRecordedContract(missionServicesFn, contractRoot, contractDir, slug);
+    if (!contract.ok) {
+      error(contract.error);
+      return { ok: false, error: contract.error };
+    }
+    const verification = this.verifyHandoff(slug, { worktree: contractRoot, recordedContract: contract.draftedInDb });
     if (!verification.ok) {
       error(verification.error);
       return { ok: false, error: verification.error };
@@ -917,11 +928,6 @@ export class HandoffCommandUseCase {
     // verifies that and never looks for a checkpoint document: the document
     // path is the legacy fallback for missions whose evidence still only exists
     // as a committed `CP-N.md`.
-    const contract = await loadRecordedContract(missionServicesFn, rootDir, missionDirPath, slug);
-    if (!contract.ok) {
-      error(contract.error);
-      return { ok: false, error: contract.error };
-    }
     if (!contract.draftedInDb) {
       const missionMdPath = path.join(missionDirPath, 'MISSION.md');
       if (!ports.fileSystem.existsSync(missionMdPath)) {
@@ -1293,7 +1299,7 @@ export class HandoffCommandUseCase {
       error(msg);
       return { ok: false, error: msg };
     }
-    const review = reviewForHandoff
+    let review = reviewForHandoff
       ? (reviewStatus(reviewForHandoff) === 'ready-for-next-round'
         ? beginNextReviewRound(reviewForHandoff, reviewer, implementer, startedAt, reviewerEligibility)
         // Undecided round: this handoff is a resubmission of the round already
@@ -1317,6 +1323,22 @@ export class HandoffCommandUseCase {
           },
         revision: changeRevision(`handoff-${Date.now()}`),
       }, reviewer, implementer, startedAt, reviewerEligibility);
+    // Repair invalidation has already opened an undecided round. Bind it to
+    // the committed repair only when handoff's gates have passed, retaining
+    // the revoked decision and its original subject in the preceding round.
+    if (priorReview && existing.mission.status === 'active'
+      && reviewStatus(priorReview) === 'awaiting-review'
+      && priorReview.rounds.length > 1) {
+      const head = ports.git.git(['-C', rootDir, 'rev-parse', 'HEAD']);
+      if (head.status !== 0 || !head.stdout.trim()) {
+        return { ok: false, error: `Cannot read the committed repair revision for ${slug}.` };
+      }
+      const current = currentReviewRound(review);
+      review = { ...review, rounds: [...review.rounds.slice(0, -1), {
+        ...current, subject: { ...current.subject, revision: changeRevision(head.stdout.trim()) },
+        reviewer, implementer, startedAt,
+      }] };
+    }
     const transitionResult = await missionServices.lifecycle.transition({
       operationId: `handoff-transition-${slug}`,
       missionId: slug,
@@ -1331,7 +1353,7 @@ export class HandoffCommandUseCase {
       occurredAt,
       // Stable across relaunches so the lane-event UNIQUE constraint deduplicates
       // a retried handoff instead of recording a second entry per attempt.
-      idempotencyKey: `handoff-${slug}`,
+      idempotencyKey: priorReview ? `handoff-${slug}:round-${currentReviewRound(review).number}` : `handoff-${slug}`,
     });
     if (transitionResult.status !== 'completed') {
       const msg = `Mission state transition failed: ${transitionResult.error?.message || 'unknown'}.`;

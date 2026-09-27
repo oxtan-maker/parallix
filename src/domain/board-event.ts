@@ -79,8 +79,11 @@ export function triggerFromTransition(
   if (from === 'review' && to === 'integration') {
     return 'approve';
   }
-  if (from === 'integration' && to === 'active') {
+ if (from === 'integration' && to === 'active') {
     return 'rebound-to-active';
+  }
+  if (from === 'integration' && to === 'review') {
+    return 'revoke-approval';
   }
   if (from === 'integration' && to === 'done') {
     return 'integrate';

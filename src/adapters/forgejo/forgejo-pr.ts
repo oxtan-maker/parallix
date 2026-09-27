@@ -600,13 +600,11 @@ function getLatestReview(branch: string, reviewerUser: string, sinceIso: string,
   if (!result.ok || !Array.isArray(result.data)) {return null;}
 
   const since = new Date(sinceIso).getTime();
-
   const eligible = result.data
     .filter(/** @param {{user?: {login?: string}, submitted_at?: string, created_at?: string, state?: string}} r */ (r: any) => {
-      const user = (r.user || {}).login;
       const submittedAt = r.submitted_at || r.created_at || '';
-      const submitted = submittedAt ? new Date(submittedAt).getTime() : 0;
-      return user === reviewerUser && submitted >= since;
+      return (r.state === 'REQUEST_CHANGES' || r.user?.login === reviewerUser) && !!submittedAt
+        && new Date(submittedAt).getTime() >= since && !r.dismissed;
     })
     .map(/** @param {{state?: string, submitted_at?: string, created_at?: string}} r */ (r: any) => ({ state: r.state, submittedAt: r.submitted_at || r.created_at || '' }))
     .sort(/** @param {{submittedAt: string}} a @param {{submittedAt: string}} b */ (a: any, b: any) => new Date(a.submittedAt).getTime() - new Date(b.submittedAt).getTime());
@@ -614,21 +612,24 @@ function getLatestReview(branch: string, reviewerUser: string, sinceIso: string,
   return eligible.length > 0 ? eligible[eligible.length - 1] : null;
 }
 
-function reviewDecisionFromReviews(data: any[], prNumber: number, reviewerUser?: string) {
+function reviewDecisionFromReviews(data: any[], prNumber: number, reviewerUser?: string, sinceIso?: string) {
   const reviews = data
     .map((review: any) => ({ user: (review.user || {}).login || '?', state: review.state || '', submittedAt: review.submitted_at || review.created_at || '', dismissed: !!review.dismissed }))
     .filter((review: any) => review.state && review.submittedAt && !review.dismissed)
     .sort((a: any, b: any) => new Date(a.submittedAt).getTime() - new Date(b.submittedAt).getTime());
   if (reviews.length === 0) { return { ok: true, prNumber, reviewState: null, defaultUserApproved: false }; }
-  const formalReviews = reviews.filter((review: any) => review.state === 'APPROVED' || review.state === 'REQUEST_CHANGES');
-  const finalState = (formalReviews.length ? formalReviews : reviews).at(-1)!.state;
+  const allFormalReviews = reviews.filter((review: any) => review.state === 'APPROVED' || review.state === 'REQUEST_CHANGES');
+  const formalReviews = allFormalReviews.filter((review: any) => !sinceIso || Date.parse(review.submittedAt) >= Date.parse(sinceIso));
+  const finalState = formalReviews.at(-1)?.state ?? (sinceIso ? null : reviews.at(-1)!.state);
   const latestDefaultUserFormal = formalReviews.filter((review: any) => review.user === DEFAULT_FORGEJO_USER).at(-1);
-  const defaultUserApproved = latestDefaultUserFormal?.state === 'APPROVED';
-  const decision: any = { ok: true, prNumber, reviewState: finalState, defaultUserApproved };
+  const defaultUserApproved = finalState === 'APPROVED' && latestDefaultUserFormal?.state === 'APPROVED';
+  const latestByUser = new Map(allFormalReviews.map((review: any) => [review.user, review]));
+  const approvalHolders = [...latestByUser.values()].filter((review: any) => review.state === 'APPROVED').map((review: any) => review.user);
+  const decision: any = { ok: true, prNumber, reviewState: finalState, defaultUserApproved, approvalHolders };
   if (defaultUserApproved) { decision.defaultUserApprovedAt = latestDefaultUserFormal.submittedAt; }
   if (reviewerUser) {
     const latestReviewerFormal = formalReviews.filter((review: any) => review.user === reviewerUser).at(-1);
-    decision.reviewerApproved = latestReviewerFormal?.state === 'APPROVED';
+    decision.reviewerApproved = finalState === 'APPROVED' && latestReviewerFormal?.state === 'APPROVED';
     if (decision.reviewerApproved && latestReviewerFormal) { decision.reviewerApprovedAt = latestReviewerFormal.submittedAt; }
   }
   return decision;
@@ -646,7 +647,8 @@ function getLatestReviewDecision(branch: string, options: any = {}): { ok: boole
     token: providedToken,
     apiCall = forgejoApi,
     rootDir = process.cwd(),
-    reviewerUser
+    reviewerUser,
+    sinceIso,
   } = options;
 
   const slugMatch = branch.match(/^mission\/(task-\d+)/);
@@ -677,7 +679,7 @@ function getLatestReviewDecision(branch: string, options: any = {}): { ok: boole
     return { ok: false, error: 'reviews-unavailable', reviewState: null, prNumber };
   }
 
-  return reviewDecisionFromReviews(result.data, prNumber, reviewerUser);
+  return reviewDecisionFromReviews(result.data, prNumber, reviewerUser, sinceIso);
 }
 
 /**
@@ -710,7 +712,6 @@ function getLatestDisposition(branch: string, implementerUser: string, sinceIso:
   if (!result.ok || !Array.isArray(result.data)) {return null;}
 
   const since = new Date(sinceIso).getTime();
-
   const eligible = result.data
     .filter(/** @param {{user?: {login?: string}, created_at?: string, body?: string}} c */ (c: any) => {
       const user = (c.user || {}).login;
@@ -743,10 +744,9 @@ async function getLatestReviewForPr(prNumber: number, reviewerUser: string, sinc
 
   const eligible = result.data
     .filter(/** @param {{user?: {login?: string}, submitted_at?: string, created_at?: string, state?: string}} r */ (r: any) => {
-      const user = (r.user || {}).login;
       const submittedAt = r.submitted_at || r.created_at || '';
-      const submitted = submittedAt ? new Date(submittedAt).getTime() : 0;
-      return user === reviewerUser && submitted >= since;
+      return (r.state === 'REQUEST_CHANGES' || r.user?.login === reviewerUser) && !!submittedAt
+        && new Date(submittedAt).getTime() >= since && !r.dismissed;
     })
     .map(/** @param {{state?: string, submitted_at?: string, created_at?: string}} r */ (r: any) => ({ state: r.state, submittedAt: r.submitted_at || r.created_at || '' }))
     .sort(/** @param {{submittedAt: string}} a @param {{submittedAt: string}} b */ (a: any, b: any) => new Date(a.submittedAt).getTime() - new Date(b.submittedAt).getTime());
@@ -859,6 +859,21 @@ function postReview(branch: string, token: string, outcome: string, summary: str
     fmt.log.info(`curl stderr: ${result.stderr}`);
   }
   return result;
+}
+
+/** Dismiss the approval recorded at (or nearest to) a round's decision time. */
+function dismissApproval(branch: string, token: string, decidedAt: string, reason: string, options: any = {}) {
+  const { apiCall = forgejoApi, forgejoUser, rootDir = process.cwd() } = options;
+  const slugMatch = branch.match(/^mission\/(task-\d+)/);
+  const access = resolvePrAccess(branch, token, { apiCall, slug: slugMatch?.[1] ?? null, forgejoUser, rootDir });
+  if (!access || isApiErrorResult(access)) { return { ok: false, error: 'pr-not-found' }; }
+  const reviews = apiCall('GET', `/pulls/${access.prNumber}/reviews`, access.token);
+  if (!reviews.ok || !Array.isArray(reviews.data)) { return { ok: false, error: 'reviews-unavailable' }; }
+  const approval = reviews.data
+    .filter((review: any) => review.state === 'APPROVED' && !review.dismissed && review.id)
+    .sort((left: any, right: any) => Math.abs(new Date(left.submitted_at || left.created_at || 0).getTime() - new Date(decidedAt).getTime()) - Math.abs(new Date(right.submitted_at || right.created_at || 0).getTime() - new Date(decidedAt).getTime()))[0];
+  if (!approval) { return { ok: false, error: 'matching-approval-not-found' }; }
+  return apiCall('POST', `/pulls/${access.prNumber}/reviews/${approval.id}/dismissals`, access.token, { message: reason });
 }
 
 /**
@@ -1025,6 +1040,7 @@ export { authenticatedReviewUrl };
 export { reviewRemoteUrl };
 export { getLatestReview };
 export { getLatestReviewForPr };
+export { dismissApproval };
 export { getLatestReviewDecision };
 export { getLatestDisposition };
 export { getLatestDispositionForPr };

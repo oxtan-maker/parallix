@@ -287,6 +287,7 @@ ${fmt.bold('Advanced Commands:')}
   unassign                            Clear the Mission's assignee.
   verdict approve|request-changes --actor <f> [--finding <id> --summary <t> ...]  Record this round's review decision.
   resolve --actor <f> --finding <id> --fixed <e>|--disputed <r>  Record the implementer's answer to each finding.
+  revoke-review --decision <round> --reason <text> --operator <name> --expected-version <n>  Operator-only withdrawal of the current approval.
         The slug is inferred from the branch or worktree; pass --slug <slug> outside it.
         Every write takes --expected-version <n>, read from \`px status --json\`.
   github-publish-status  Show github-publish publication engine status (local head, published head, awaiting/verified-blocked/failed). No-op when the mode is disabled.

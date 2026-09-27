@@ -52,7 +52,7 @@ export function createIntegrationContextBuilder(ports: IntegrateWorkflowPorts) {
       ? forgejo.listOpenPrsForSlug(baseTaskSlug(slug), forgejoToken).filter((candidate: any) => candidate.head !== branch)
       : [];
     const approval = pr.exists
-      ? getLatestReviewDecisionFn(branch, { forgejoUser: forgejoIdentity.forgejoUser, token: forgejoToken, reviewerUser: configuredReviewer })
+      ? getLatestReviewDecisionFn(branch, { forgejoUser: forgejoIdentity.forgejoUser, token: forgejoToken, reviewerUser: configuredReviewer, sinceIso: reviewState?.startedAt })
       : { ok: false, error: 'pr-missing', reviewState: undefined };
     return { forgejoIdentity, forgejoToken, configuredReviewer, pr, siblingPrs, approval };
   }
@@ -83,7 +83,7 @@ export function createIntegrationContextBuilder(ports: IntegrateWorkflowPorts) {
     const branch = `mission/${slug}`;
     const currentBranch = getCurrentBranchFn();
     const missionDir = missionPaths.findMissionDir(slug);
-    const area = missionDir ? missionPaths.findMissionArea(missionDir) : 'docs';
+    const area = missionDir ? missionPaths.findMissionArea(missionDir) : 'all';
 
     const { branch: resolvedBaseBranch, worktree: resolvedBaseWorktree } = resolveIntegrationBase(slug, baseBranch, baseWorktree);
     const integrationRoot = resolvedBaseWorktree as string;

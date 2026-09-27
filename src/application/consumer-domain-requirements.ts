@@ -296,7 +296,7 @@ export const CONSUMER_DOMAIN_REQUIREMENTS: readonly ConsumerRequirement[] = [
     id: 'review-loop-round-progression',
     family: 'review',
     fileLocation: 'src/adapters/review/review-loop.ts',
-    line: 1578,
+    line: 1588,
     anchor: 'function startReviewLoop',
     reads: ['Review', 'Mission'],
     requirement:
@@ -322,7 +322,7 @@ export const CONSUMER_DOMAIN_REQUIREMENTS: readonly ConsumerRequirement[] = [
     id: 'ui-board-card',
     family: 'ui-board',
     fileLocation: 'src/application/projections/mission-board.ts',
-    line: 344,
+    line: 349,
     anchor: 'function projectMissionCard',
     reads: ['Mission', 'CheckpointData', 'Review'],
     requirement:

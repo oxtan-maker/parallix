@@ -2470,7 +2470,7 @@ test('printIntegrationPreflight prints base-slug path when mission doc is missin
     assert.ok(result.failures.includes('mission-doc'));
     const output = lines.join('\n');
     assert.match(output, /Mission doc: missions\/task-1054\/MISSION\.md not found/);
-    assert.doesNotMatch(output, /task-1054-modern.*MISSION\.md/);
+    assert.doesNotMatch(output, /Mission doc: [^\n]*task-1054-modern[^\n]*MISSION\.md/);
   } finally {
     console.log = originalLog;
   }

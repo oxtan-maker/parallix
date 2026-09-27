@@ -162,7 +162,10 @@ export async function recordIntegrationGateRebound(
 export function standingApprovalHolders(approval: any, reviewerUser: string | null | undefined): string[] {
   const holders: string[] = [];
   if (approval?.ok !== true) { return holders; }
-  if (approval.defaultUserApproved === true) { holders.push(DEFAULT_FORGEJO_USER); }
+  if (Array.isArray(approval.approvalHolders)) {
+    holders.push(...approval.approvalHolders.filter((user: unknown): user is string => typeof user === 'string' && Boolean(user.trim())));
+  }
+  if (approval.defaultUserApproved === true && !holders.includes(DEFAULT_FORGEJO_USER)) { holders.push(DEFAULT_FORGEJO_USER); }
   if (approval.reviewerApproved === true && reviewerUser && !holders.includes(reviewerUser)) { holders.push(reviewerUser); }
   return holders;
 }
@@ -231,7 +234,7 @@ export function staleApprovalSummary(slug: string, approvedRevision: string, rep
 }
 
 async function routeFixedIntegrationGateRebound({
-  opts, failedGate, outcome, rebounds, approvedRevision, captureFinalTreeFn, invalidateApprovalFn, log, error,
+  opts, failedGate, outcome, rebounds, approvedRevision, captureFinalTreeFn, invalidateApprovalFn, initialInvalidation, log, error,
 }: {
   opts: IntegrationGateRouteOptions;
   failedGate: GateRunOutcome;
@@ -240,13 +243,14 @@ async function routeFixedIntegrationGateRebound({
   approvedRevision: string | null;
   captureFinalTreeFn: typeof captureFinalIntegrationTree;
   invalidateApprovalFn: typeof invalidateApprovedPrReview;
+  initialInvalidation: ApprovalInvalidation | null;
   log: (_msg: string) => void;
   error: (_msg: string) => void;
 }): Promise<IntegrationGateRoute> {
   log(fmt.status('PASS', `Integration gate ${failedGate.key} repaired by ${outcome.implementer} and re-ran green (${rebounds}/${INTEGRATION_GATE_REBOUND_LIMIT} integration-gate rebounds spent).`));
   const repairedTree = captureFinalTreeFn(opts.missionWorktree);
   const repairedRevision = repairedTree.ok ? (repairedTree.tree ?? repairedTree.commit ?? null) : null;
-  if (approvedRevision !== null && repairedRevision !== null && approvedRevision === repairedRevision) {
+  if (!initialInvalidation && approvedRevision !== null && repairedRevision !== null && approvedRevision === repairedRevision) {
     log(fmt.status('INFO', `The repair left the mission tree at ${approvedRevision}, the revision the review approved; the existing approval still covers what would land.`));
     return { route: 'fixed', rebounds };
   }
@@ -254,22 +258,22 @@ async function routeFixedIntegrationGateRebound({
   const approvedLabel = approvedRevision ?? 'unknown';
   const repairedLabel = repairedRevision ?? 'unknown';
   const branch = opts.branch ?? `mission/${opts.slug}`;
-  const invalidation = await invalidateApprovalFn({
+  const invalidation = initialInvalidation ?? await invalidateApprovalFn({
     slug: opts.slug,
     branch,
     approval: opts.approval,
     reviewerUser: opts.reviewerUser ?? null,
     summary: staleApprovalSummary(opts.slug, approvedLabel, repairedLabel, failedGate.key),
   });
-  error(fmt.status('FAIL', `The integration-gate repair changed ${opts.slug} from the approved revision ${approvedLabel} to ${repairedLabel}. The approval covers a revision that is no longer what would land, so the merge is not allowed on it.`));
+  error(fmt.status('INFO', `The integration-gate repair of ${opts.slug} requires a fresh review: prior approved revision ${approvedLabel}, repaired revision ${repairedLabel}. The withdrawn approval cannot authorize the merge.`));
   for (const holder of invalidation.retracted) {
     error(fmt.status('INFO', `Retracted ${holder}'s approval on ${branch} with a request-changes review.`));
   }
   for (const problem of invalidation.errors) {
-    error(fmt.status('FAIL', `Stale approval left standing: ${problem}. Clear it by hand before the next px integrate.`));
+    error(fmt.status('WARN', `Provider approval was not updated: ${problem}. The old local decision remains invalid; the fresh review excludes it.`));
   }
   if (!(opts.reReviewFollows && invalidation.ok)) {
-    error(fmt.status('FAIL', `${opts.slug} must go back through review: run px review ${opts.slug} --start and have the repaired revision ${repairedLabel} re-reviewed before integrating again.`));
+    error(fmt.status('INFO', `${opts.slug} must go back through review: run px review ${opts.slug} --continue to review the repaired revision ${repairedLabel} and resume integration.`));
   }
   return { route: 'revision-changed', rebounds, approvedRevision: approvedLabel, repairedRevision: repairedLabel, invalidation };
 }
@@ -354,7 +358,7 @@ export async function routeIntegrationGateFailure(opts: IntegrationGateRouteOpti
     return { route: 'stranded', detail: 'rebound budget unreadable' };
   }
   if (spent >= INTEGRATION_GATE_REBOUND_LIMIT) {
-    error(fmt.status('FAIL', `Integration gate ${failedGate.key} failed again for ${slug} after ${spent}/${INTEGRATION_GATE_REBOUND_LIMIT} integration-gate rebounds. Not transitioning to active and not launching an implementer — human action required.`));
+    error(fmt.status('FAIL', `Integration gate ${failedGate.key} failed again for ${slug} after ${spent}/${INTEGRATION_GATE_REBOUND_LIMIT} integration-gate rebounds. The automatic repair budget is exhausted; no implementer will be launched. After addressing the failed gate, run px review ${slug} --continue to resume review and integration.`));
     error(fmt.status('FAIL', `Reproduce with: ${failedGate.command} (from ${missionWorktree}).`));
     return { route: 'limit-reached', rebounds: spent };
   }
@@ -375,6 +379,7 @@ export async function routeIntegrationGateFailure(opts: IntegrationGateRouteOpti
   //    changed, because "unchanged" is the claim that must be proven.
   const approvedTree = captureFinalTreeFn(missionWorktree);
   const approvedRevision = approvedTree.ok ? (approvedTree.tree ?? approvedTree.commit ?? null) : null;
+  let initialInvalidation: ApprovalInvalidation | null = null;
 
   const outcome = await reboundFn(
     integrationGateFailureReason(failedGate, { gateError: opts.gateError, verificationCommand: opts.verificationCommand }),
@@ -384,7 +389,19 @@ export async function routeIntegrationGateFailure(opts: IntegrationGateRouteOpti
       implementer: opts.implementer,
       maxAttempts: REBOUND_ATTEMPTS_PER_INVOCATION,
       startAgent: opts.startAgentFn,
-      transitionToImplementer: opts.reactivateMissionFn ?? opts.transitionTaskFn,
+      transitionToImplementer: opts.reactivateMissionFn ? async (bounceSlug: string) => {
+        // The durable lane move withdraws the local approval atomically. Its
+        // provider projection is corrected before the repair agent starts,
+        // including when the process later stops before completing repair.
+        const transitioned = await opts.reactivateMissionFn!(bounceSlug);
+        initialInvalidation = await invalidateApprovalFn({
+          slug, branch: opts.branch ?? `mission/${slug}`, approval: opts.approval,
+          reviewerUser: opts.reviewerUser ?? null,
+          summary: staleApprovalSummary(slug, approvedRevision ?? 'unknown', 'pending repair', failedGate.key),
+        });
+        for (const problem of initialInvalidation.errors) { error(fmt.status('WARN', problem)); }
+        return transitioned;
+      } : opts.transitionTaskFn,
       ...(opts.applyAgentFallbackFn ? { applyAgentFallback: opts.applyAgentFallbackFn } : {}),
       verify: async () => {
         // The repair has to be committed: the integration gates are only ever
@@ -419,7 +436,7 @@ export async function routeIntegrationGateFailure(opts: IntegrationGateRouteOpti
 
   const rebounds = spent + 1;
   if (outcome.outcome === 'fixed') {
-    return routeFixedIntegrationGateRebound({ opts, failedGate, outcome, rebounds, approvedRevision, captureFinalTreeFn, invalidateApprovalFn, log, error });
+    return routeFixedIntegrationGateRebound({ opts, failedGate, outcome, rebounds, approvedRevision, captureFinalTreeFn, invalidateApprovalFn, initialInvalidation, log, error });
   }
   error(fmt.status('FAIL', `Integration gate ${failedGate.key} still fails for ${slug} after the bounce (${rebounds}/${INTEGRATION_GATE_REBOUND_LIMIT} integration-gate rebounds spent).`));
   return { route: 'exhausted', rebounds, diagnostic: outcome.diagnostic };

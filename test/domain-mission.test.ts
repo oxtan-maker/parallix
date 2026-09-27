@@ -15,6 +15,7 @@ import {
   currentReviewRound,
   requestReviewIntervention,
   reviewFindingId,
+  revokeApprovedDecision,
   reviewStatus,
   resumeReview,
   startReview,
@@ -399,6 +400,24 @@ test('integration queue remains a required durable lifecycle transition', () => 
   assert.equal(approved.status, 'integration');
   assert.equal(integrated.status, 'done');
   assert.equal(integrated.closedAt, null);
+});
+
+test('revoking the current approval preserves it and opens a fresh review round', () => {
+  const approved = approve();
+  const revoked = revokeApprovedDecision(approved, 1, {
+    revokedAt: '2026-07-22T09:00:00Z', revokedBy: 'operator', reason: 'The gate result was not obtained',
+  });
+  assert.equal(revoked.rounds.length, 2);
+  assert.deepEqual(revoked.rounds[0].decision?.kind, 'approved');
+  assert.equal(revoked.rounds[0].decision?.revocation?.reason, 'The gate result was not obtained');
+  assert.equal(reviewStatus(revoked), 'awaiting-review');
+  assert.equal(decideMission({ ...mission('integration'), review: approved }, { type: 'revoke-approval', review: revoked }).status, 'review');
+  assert.throws(() => revokeApprovedDecision(approved, 2, {
+    revokedAt: 'now', revokedBy: 'operator', reason: 'wrong round',
+  }), /not the current effective decision/);
+  assert.throws(() => revokeApprovedDecision(approved, 1, {
+    revokedAt: 'now', revokedBy: 'operator', reason: '',
+  }), /operator reason/);
 });
 
 test('recording the same checkpoint replaces stale evidence after a redo', () => {

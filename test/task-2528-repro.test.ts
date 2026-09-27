@@ -202,5 +202,5 @@ test('TASK-2528: an approval that cannot be retracted is reported and still refu
     invalidateApprovalFn: (async () => ({ ok: false, retracted: [], errors: ['provider rejected the retraction'] })) as never,
   } as never);
   assert.equal(route.route, 'revision-changed', 'a failed retraction still refuses to land the changed revision');
-  assert.match(h.messages.join('\n'), /Stale approval left standing/);
+  assert.match(h.messages.join('\n'), /Provider approval was not updated/);
 });

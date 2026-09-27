@@ -527,7 +527,10 @@ second bounce policy and no persisted retry counter left anywhere in the
 codebase.
 `px review <slug> --start` enables bounded gate repair by default: it relaunches
 the implementer to fix a failing gate rather than stopping, so starting a review
-no longer depends on a separate handoff step.
+no longer depends on a separate handoff step. Missions with a contract recorded
+in the operator database can hand off without a mission directory or Markdown
+artifacts. Their recorded checkpoint evidence and verification gates are still
+required.
 
 A push-time verification gate that fails during handoff is reported as a gate
 failure, with its command, exit code and output, and bounces through the same

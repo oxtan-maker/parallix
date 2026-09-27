@@ -104,6 +104,9 @@ export interface MissionReviewRoundRecord {
   readonly decision_comment: string | null;
   readonly approval_source_kind: string | null;
   readonly approval_source_provider: string | null;
+  readonly revoked_at: string | null;
+  readonly revoked_by: string | null;
+  readonly revoked_reason: string | null;
   readonly responded_at: string | null;
   readonly resulting_revision: string | null;
   readonly phase: string;
@@ -310,6 +313,11 @@ function decisionFor(
       decidedAt,
       comment: row.decision_comment,
       source: { kind: 'local' },
+      ...(!row.revoked_at ? {} : { revocation: {
+        revokedAt: requiredText(row.revoked_at, 'revocation time'),
+        revokedBy: requiredText(row.revoked_by ?? '', 'revoker'),
+        reason: requiredText(row.revoked_reason ?? '', 'revocation reason'),
+      } }),
     };
   }
   if (row.approval_source_kind === 'provider') {
@@ -321,6 +329,11 @@ function decisionFor(
         kind: 'provider',
         provider: requiredText(row.approval_source_provider ?? '', 'approval provider'),
       },
+      ...(!row.revoked_at ? {} : { revocation: {
+        revokedAt: requiredText(row.revoked_at, 'revocation time'),
+        revokedBy: requiredText(row.revoked_by ?? '', 'revoker'),
+        reason: requiredText(row.revoked_reason ?? '', 'revocation reason'),
+      } }),
     };
   }
   throw new Error(`Persisted approval source is invalid: ${row.approval_source_kind}`);
