@@ -259,6 +259,10 @@ test('default test runner routes every moved group to integration and excludes i
   for (const file of expectedIntegrationFiles) {
     assert.ok(!defaultFiles.includes(file), `${file} must be excluded from npm test`);
   }
+  // TASK-2596: the 500-line production source cap must run in the default
+  // (unit) suite so the guardrail is enforced on every `npm test`.
+  assert.ok(defaultFiles.includes('file-size-cap.test.ts'),
+    'the file-size-cap guardrail must stay in the default unit suite');
   assert.ok(!integrationFiles.includes('e2e-mission-lifecycle.test.ts'));
   assert.ok(!integrationFiles.includes('e2e-real-agent-smoke.test.ts'));
   assert.match(runner, /runsIntegrationSuite/);
