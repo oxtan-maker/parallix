@@ -190,6 +190,11 @@ function createCommandRegistry(rootDir: string): Record<string, Command> {
   const runIntegrated = (innerArgs: string[], innerOptions: Record<string, unknown>) =>
     withMissionAndGraph((missionServicesFn, services) => integrate(innerArgs, {
       ...innerOptions,
+      // In-process CLI and board workflows must return through their owners:
+      // process.exit skips current-work cleanup and caller verification.
+      exitFn: typeof innerOptions.exitFn === 'function' ? innerOptions.exitFn as (_code: number) => void : ((code: number) => {
+        if (code !== 0) { throw new Error(`Integration exited with status ${code}`); }
+      }),
       missionServicesFn,
       reReviewFn: (slug: string) => reReviewRepairedRevision(slug, services),
     }));
@@ -891,7 +896,9 @@ async function runTargetCommand(parsed: ParsedArgs, log: typeof fmt.log.plain, e
     error(fmt.status('FAIL', (err as Error).message));
     return 1;
   } finally {
-    process.chdir(previousCwd);
+    // Integration can remove the worktree from which this CLI was invoked.
+    // Its landing workflow already selects the surviving base checkout.
+    if (fs.existsSync(previousCwd)) { process.chdir(previousCwd); }
   }
 }
 

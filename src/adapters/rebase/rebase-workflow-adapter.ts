@@ -26,6 +26,8 @@ import { isForgejoReviewEnabled } from '../config/product-config.js';
 import { formatVerificationCommand } from '../verification/verification.js';
 import { buildRebasePrompt as buildRebasePromptPolicy } from '../../application/rebase-workflow.js';
 import type { GitRunner, RebaseWorkflowPort } from '../../application/ports/rebase-workflow.js';
+import { transitionReviewRepair } from '../../application/review-repair-lifecycle.js';
+import { missionId } from '../../domain/mission.js';
 
 /** Legacy `*Fn` seam accepted by `px rebase` and by its tests. */
 export interface RebaseCommandOptions {
@@ -149,7 +151,32 @@ export function createRebaseWorkflowPort(options: RebaseCommandOptions = {}): Re
 
     resolveTaskFile: resolveTaskFileFn as unknown as RebaseWorkflowPort['resolveTaskFile'],
     getTaskImplementer: getTaskImplementerFn as unknown as RebaseWorkflowPort['getTaskImplementer'],
-    transitionTask: transitionTask as unknown as RebaseWorkflowPort['transitionTask'],
+    transitionTask: async (slug, status, transitionOptions) => {
+      if (missionServicesFn && status === 'active') {
+        const root = (transitionOptions?.rootDir as string) || process.cwd();
+        const services = await missionServicesFn(root);
+        const loaded = await services.store.load(missionId(slug));
+        if (loaded.kind !== 'found') { throw new Error(`Mission ${slug} is unavailable for rebase repair`); }
+        // Integration rebase repair is part of integration completion.
+        if (loaded.mission.status === 'integration') {
+          return transitionTask(slug, 'ready-for-integration', transitionOptions as any);
+        }
+        const implementer = loaded.mission.assignee ?? loaded.mission.review?.rounds.at(-1)?.implementer;
+        if (!implementer) { throw new Error(`Mission ${slug} has no implementer for rebase repair`); }
+        await transitionReviewRepair(slug, 'active', implementer, services.store, services.lifecycle);
+      }
+      return transitionTask(slug, status, transitionOptions as any);
+    },
+    resumeReviewAfterRepair: async (slug, root, implementer) => {
+      if (!missionServicesFn) { return; }
+      const services = await missionServicesFn(root);
+      const loaded = await services.store.load(missionId(slug));
+      if (loaded.kind !== 'found') { throw new Error(`Mission ${slug} is unavailable after rebase repair`); }
+      if (loaded.mission.status === 'active' && loaded.mission.review && !loaded.mission.review.rounds.at(-1)?.decision) {
+        await transitionReviewRepair(slug, 'review', implementer, services.store, services.lifecycle);
+        await transitionTask(slug, 'review', { rootDir: root });
+      }
+    },
 
     resolveReviewIdentity: resolveReviewIdentityFn as unknown as RebaseWorkflowPort['resolveReviewIdentity'],
     readReviewState,

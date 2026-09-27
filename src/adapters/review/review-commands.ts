@@ -16,6 +16,7 @@ import { buildAutonomousReviewMatrix, formatMatrixSummary } from '../agents/runt
 import { readReviewState, writeReviewState, resolveReviewIdentity, ReviewState, persistReviewStateOrThrow, backfillReviewFromLegacyState, reconcileInterruptedHandoff } from './review-state.js';
 import type { MissionStore } from '../../application/domain-ports.js';
 import type { MissionLifecycleService } from '../../application/mission-lifecycle-service.js';
+import { transitionReviewRepair } from '../../application/review-repair-lifecycle.js';
 import { parseReviewFindings, recordRequestedChanges, recordApproval, approvalLegalDiagnostic } from './review-round.js';
 import { missionId } from '../../domain/mission.js';
 import { currentReviewRound, reviewFindingId, reviewStatus, resumeReview, invalidateBlocker, type Review, type ReviewStatus, type ReviewItemDisposition, type ReviewFindingId } from '../../domain/review.js';
@@ -702,6 +703,8 @@ export async function submitForReview(
     // for lifecycle recovery; a genuine submit-for-review passes nothing and
     // the handoff keeps the wall clock.
     occurredAt?: string;
+    missionStore?: MissionStore | null;
+    lifecycleService?: MissionLifecycleService | null;
     log?: (_msg: string) => void;
   } = {}
 ): Promise<void> {
@@ -747,6 +750,7 @@ export async function submitForReview(
   if (!result.ok) {
     // Auto-bounce for declared-gate validation failures
     if (result.reason === 'validation-failed' && !result.recoveryAttempted) {
+      if (options.missionStore) { await transitionReviewRepair(slug, 'active', reviewIdentity, options.missionStore, options.lifecycleService ?? null); }
       await transitionTaskFn(slug, 'active', { rootDir: worktree, log });
       log(fmt.status('INFO', `Auto-bounced ${slug} to active: declared-gate validation failure. Fix the gate in MISSION.md and retry.`));
     }

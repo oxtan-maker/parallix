@@ -216,7 +216,9 @@ export function createSquashLanding(ports: IntegrateWorkflowPorts, { promoteTask
         worktree: baseWorktree,
         implementer,
         startAgent: seams.startAgentFn,
-        transitionToImplementer: (bounceSlug: string) => seams.transitionTaskFn(bounceSlug, 'active'),
+        // This repair completes the pending integration commit; it does not
+        // return the reviewed mission to implementation.
+        transitionToImplementer: (bounceSlug: string) => seams.transitionTaskFn(bounceSlug, 'ready-for-integration'),
         applyAgentFallback: seams.applyAgentFallbackFn,
         verify: () => {
           const retryResult = git(commitArgs);

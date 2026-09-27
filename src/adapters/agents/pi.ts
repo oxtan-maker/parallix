@@ -40,12 +40,30 @@ interface StartPiAgentOptions {
 }
 
 // Lazily-loaded SDK, using native dynamic import to avoid startup cost.
+// The import evaluates the SDK module graph on the calling tick (synchronous
+// event-loop block, ~1 s on a cold host), so deadline-sensitive paths must
+// warm the cache before their clock starts (warmPiSdk from launch prepare).
 let _sdk: any = null;
+let _sdkImport: Promise<any> | null = null;
+function sdkImport(): Promise<any> {
+  if (_sdkImport) { return _sdkImport; }
+  const pending: Promise<any> = new Function('p', 'return import(p)')('@earendil-works/pi-coding-agent')
+    .then((mod: any) => { _sdk = mod; return mod; })
+    .catch((err: unknown) => { _sdkImport = null; throw err; });
+  _sdkImport = pending;
+  return pending;
+}
 async function loadSdk() {
-  if (!_sdk) {
-    _sdk = await new Function('p', 'return import(p)')('@earendil-works/pi-coding-agent');
-  }
+  if (!_sdk) { _sdk = await sdkImport(); }
   return _sdk;
+}
+/**
+ * Warm the lazy SDK cache (idempotent; one in-flight import per process).
+ * Swallows failures: a failed warm leaves the cache cold, and the launcher's
+ * own load surfaces the real error as a launch failure.
+ */
+export function warmPiSdk(): Promise<void> {
+  return sdkImport().then(() => undefined, () => undefined);
 }
 
 // Injectable SDK for tests. Production uses the real createAgentSession.

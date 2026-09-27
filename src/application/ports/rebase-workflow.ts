@@ -86,6 +86,7 @@ export type PreReviewRebaseOutcome = { ok: boolean } & Partial<PreReviewRebaseRe
 
 /** Complete external surface of the rebase workflow. */
 export interface RebaseWorkflowPort {
+  resumeReviewAfterRepair?: (_slug: string, _root: string, _implementer: string) => Promise<void>;
   // --- git adapter -------------------------------------------------------
   git: GitRunner;
   detectRebaseState(_root: string): RebaseStateSnapshot;

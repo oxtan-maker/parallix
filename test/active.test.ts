@@ -976,6 +976,41 @@ test('selectLaunchAndRecord writes Backlog when startAgent returns successful re
   assert.equal(transitions[0].status, 'active');
 });
 
+test('selectLaunchAndRecord fails at the activation boundary without waiting for the agent to exit', async () => {
+  const transitions = [];
+  const logs = [];
+  // The agent's final result never settles: if the boundary rejection were
+  // swallowed until the agent exited (the TASK-2582 review F1 shape), this
+  // call would hang instead of rejecting.
+  const pendingAgentResult = new Promise(() => {});
+
+  await assert.rejects(
+    selectLaunchAndRecord({
+      slug: 'task-test',
+      worktree: '/tmp/project-task-test',
+      agentConfig: {},
+      taskResolution: { ok: true, taskFile: '/tmp/task.md' },
+      prompt: 'Execute.',
+      selectAgentFn: () => 'codex',
+      startAgentFn: async (_step, opts) => {
+        // Mirrors startAgent: a rejection from onLaunch propagates without
+        // awaiting the agent result.
+        if (opts.onLaunch) {
+          await opts.onLaunch({ agent: 'codex' });
+        }
+        return { agent: 'codex', result: await pendingAgentResult };
+      },
+      transitionTaskFn: (slug, status, opts) => { transitions.push({ slug, status, opts }); return true; },
+      log: (message) => { logs.push(String(message)); },
+      onActivated: async () => { throw new Error('store refused the active transition'); }
+    }),
+    /Failed to persist the active lifecycle boundary for task task-test: store refused the active transition/,
+  );
+
+  assert.equal(transitions.length, 0, 'no Backlog transition may follow a refused activation boundary');
+  assert.ok(logs.some((line) => line.includes('store refused the active transition')), 'the boundary failure is surfaced at the boundary');
+});
+
 test('selectLaunchAndRecord writes Backlog before the launcher resolves its final result', async () => {
   const transitions = [];
   let resolveResult;
@@ -2214,4 +2249,33 @@ test('selectLaunchAndRecord keeps the implementer announcement but drops the Bac
   const joined = logs.join('\n').replace(/\x1B\[\d+m/g, '');
   assert.ok(joined.includes('[INFO] Implementer: claude'), joined);
   assert.ok(!joined.includes('transitioned to active'), `task-sync PASS must be suppressed: ${joined}`);
+});
+
+
+test('failed execute runs preserve the Backlog lane after authoritative activation', async () => {
+  for (const failure of ['exit', 'exhausted', 'limit'] as const) {
+    let authoritativeLane = 'refined';
+    let mirrorLane = 'refined';
+    await assert.rejects(async () => {
+      const launch = await selectLaunchAndRecord({
+        slug: 'task-test', worktree: '/tmp/project-task-test', agentConfig: {},
+        taskResolution: { ok: true, taskFile: '/tmp/task.md' },
+        getTaskStatusFn: () => mirrorLane, getTaskImplementerFn: () => 'claude',
+        prompt: 'Execute.', selectAgentFn: () => 'claude',
+        onActivated: async () => { authoritativeLane = 'active'; },
+        startAgentFn: async (_step, opts) => {
+          await opts.onLaunch({ agent: 'claude', startedAtMs: 123 });
+          assert.equal(mirrorLane, authoritativeLane);
+          if (failure === 'limit') { opts.onLimitHit(); }
+          if (failure !== 'exit') { throw new Error('agents exhausted'); }
+          return { agent: 'claude', result: { status: 1 } };
+        },
+        transitionTaskFn: (_slug, status) => { mirrorLane = status; return true; },
+        log: () => {},
+      });
+      if (launch.result.status !== 0) { throw new Error('agent failed'); }
+    });
+    assert.equal(authoritativeLane, 'active');
+    assert.equal(mirrorLane, authoritativeLane, failure);
+  }
 });

@@ -29,7 +29,7 @@ import { knownAgentFamiliesFromConfig } from '../../agents/known-agent-families.
 import { readAgentConfig } from '../../agents/agent-config.js';
 import type { AgentBlocklistRepository } from '../../../application/ports/agent-blocklist.js';
 import type { AgentFamily } from '../../../domain/agents.js';
-import { getPrStatus } from '../../forgejo/forgejo.js';
+import { getPrStatus } from '../../review/review-adapter.js';
 import type { BoardProjectionBuilder } from '../../../application/projections/board-readers.js';
 import type { MissionId } from '../../../domain/mission.js';
 import { projectMissionActivity, type MissionActivitySource } from '../../../application/projections/mission-activity.js';

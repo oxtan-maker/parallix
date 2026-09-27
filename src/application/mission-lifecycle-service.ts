@@ -160,7 +160,7 @@ export class MissionLifecycleService {
       repositoryId: decided.repositoryId,
       from,
       to: decided.status,
-      trigger,
+      trigger: request.command.type,
       agent: request.actor,
       occurredAt: request.occurredAt,
       idempotencyKey: request.idempotencyKey

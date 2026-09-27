@@ -11,7 +11,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import path from 'node:path';
 import { buildTestRunPlan } from './lib/test-run-plan.js';
-import { UNIT_TEST_HEADROOM_MS } from './lib/unit-test-budget-reporter.js';
+import { UNIT_TEST_HEADROOM_MS } from './lib/unit-test-budget-reporter.mjs';
 
 const ROOT = process.cwd();
 
@@ -34,6 +34,7 @@ function planFor(args: string[], github: boolean) {
     executionRoot: ROOT,
     requestedArgs: args,
     probeNodeVersion: () => 'v24.15.0',
+    probeTestConcurrency: () => true,
   });
 }
 
@@ -69,6 +70,14 @@ test('task-2542: local headroom path retains the timing reporter and budget', ()
   assert.ok(
     hasReporter,
     'local headroom plan must select the unit-test budget reporter',
+  );
+  const reporterArg = plan.nodeArgs.find(
+    arg => arg.startsWith(BUDGET_REPORTER_ARG) && arg.includes(BUDGET_REPORTER_PATH),
+  );
+  assert.match(
+    reporterArg ?? '',
+    /unit-test-budget-reporter\.mjs$/,
+    'custom reporters must be native ESM because Node 22 does not apply the TypeScript preload to them',
   );
   assert.equal(
     plan.unitTestHeadroomMs,

@@ -177,6 +177,17 @@ export function createIntegrationGateStep({ gates, landing, verification }: Inte
     if (route.route !== 'fixed') {
       throw abortWith(landing, `Aborting before merge. Resume the repair review with px review ${slug} --continue; approval restarts integration.`);
     }
+    // A red gate withdrew the approval, even when the repaired tree is
+    // unchanged. Complete a fresh review before any integration work resumes.
+    const repaired = await missionServices.store.load(missionId(slug));
+    if (repaired.kind !== 'found') { throw abortWith(landing, `Mission ${slug} is unavailable after integration repair.`); }
+    if (integrationRepairNeedsReview(repaired.mission) && seams.reReviewFn) {
+      await reReviewRepairedRevision(slug, checkout, route.repairedRevision ?? 'unchanged repaired tree', seams.reReviewFn);
+    }
+    if (repaired.mission.status !== 'integration') {
+      throw abortWith(landing, `Mission ${slug} cannot resume integration from ${repaired.mission.status}.`);
+    }
+    await seams.transitionTaskFn(slug, 'ready-for-integration');
     return `${configured.length} integration gate(s) passed after ${route.rebounds} integration-gate rebound(s)`;
   }
 

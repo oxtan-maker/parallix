@@ -102,7 +102,7 @@ test('main() invokes the selected command through an injected test command map',
   const calls = [];
 
   await main(['draft', 'task-1038'], {
-    commandFns: { draft: async (args, options) => calls.push(['invoke', args, options]) },
+    commandFns: { draft: async (args, options) => calls.push(['invoke', args, { command: options.command }]) },
     printUsageFn: () => calls.push('usage'),
     // @ts-expect-error TS2322 Type 'number' is not assignable to type 'never'.
     exitFn: (code) => calls.push(['exit', code]),
@@ -114,11 +114,27 @@ test('main() invokes the selected command through an injected test command map',
   assert.equal(calls.some(entry => Array.isArray(entry) && entry[0] === 'exit'), false);
 });
 
+test('main() lets an in-process command report exit status and finish owner cleanup', async () => {
+  const calls: string[] = [];
+  const exit = (code?: number) => { calls.push(`exit:${code}`); };
+  await main(['status', 'task-2582'], {
+    exitFn: exit as never,
+    commandFns: { status: async (_args, options) => {
+      assert.equal(options.exitFn, exit);
+      assert.equal(options.exit, exit);
+      (options.exitFn as typeof exit)(0);
+      calls.push('command-cleanup');
+    } },
+  });
+  calls.push('owner-cleanup');
+  assert.deepEqual(calls, ['exit:0', 'command-cleanup', 'owner-cleanup']);
+});
+
 test('main() dispatches an injected command without filesystem module lookup', async () => {
   const calls = [];
 
   await main(['integrate', '--dry-run'], {
-    commandFns: { integrate: async (args, options) => calls.push(['invoke', args, options]) },
+    commandFns: { integrate: async (args, options) => calls.push(['invoke', args, { command: options.command }]) },
   });
 
   assert.deepEqual(calls, [['invoke', ['--dry-run'], { command: 'integrate' }]]);
@@ -140,7 +156,7 @@ test('main() maps verify-env through its injected command', async () => {
   const calls = [];
 
   await main(['verify-env', 'task-1038'], {
-    commandFns: { 'verify-env': async (args, options) => calls.push(['invoke', args, options]) },
+    commandFns: { 'verify-env': async (args, options) => calls.push(['invoke', args, { command: options.command }]) },
     printUsageFn: () => calls.push('usage'),
     // @ts-expect-error TS2322 Type 'number' is not assignable to type 'never'.
     exitFn: (code) => calls.push(['exit', code]),
@@ -155,7 +171,7 @@ test('main() dispatches verify command with requested area', async () => {
   const calls = [];
 
   await main(['verify', 'docs'], {
-    commandFns: { verify: async (args, options) => calls.push(['invoke', args, options]) },
+    commandFns: { verify: async (args, options) => calls.push(['invoke', args, { command: options.command }]) },
     printUsageFn: () => calls.push('usage'),
     // @ts-expect-error TS2322 Type 'number' is not assignable to type 'never'.
     exitFn: (code) => calls.push(['exit', code]),

@@ -385,7 +385,7 @@ test('this repository exposes the full independent gate width and orders Sonar a
     { key: 'integration-ci', command: 'PARALLIX_TEST_COVERAGE=1 npm run test:integration:ci:prebuilt', order: 5 },
     { key: 'integration-local', command: 'npm run test:integration:local', order: 6 },
     { key: 'coverage-merge', command: 'rm -f coverage/lcov.info && npm run coverage:merge && test -s coverage/lcov.info', order: 7 },
-    { key: 'workflow', command: 'node --import tsx --import ./test/bootstrap-e2e-parallix-home.ts test/e2e-mission-lifecycle.test.ts', order: 8 },
+    { key: 'workflow', command: 'node --test --import tsx --import ./test/bootstrap-e2e-parallix-home.ts test/e2e-mission-lifecycle.test.ts', order: 8 },
     { key: 'agent-smoke', command: 'node --import tsx --import ./test/bootstrap-e2e-parallix-home.ts test/e2e-real-agent-smoke.test.ts', order: 9 },
     { key: 'quality-gate', command: 'npm run sonar', order: 10 },
   ]);

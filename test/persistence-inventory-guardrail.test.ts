@@ -521,6 +521,8 @@ test('SC1 reverse: all durable-IO files under src/ are present in the inventory'
     'test/fixtures/durable-state-inventory.ts',
     // Core storage abstraction (defines the API, not a concept reader/writer)
     'src/adapters/storage/storage.ts',
+    // CLI launch wrappers are reproducible process infrastructure, not domain state.
+    'src/adapters/storage/child-cli.ts',
     // Package root detection (reads package.json for name, not a durable-state concept)
     'src/adapters/filesystem/package-root.ts',
     // Database adapter (SQLite infrastructure)

@@ -876,11 +876,24 @@ export class ReviewState {
             occurredAt: decidedAt,
             idempotencyKey: `approve:${this.slug}:round-${currentRound.number}`,
           });
-          if (approveResult.status !== 'completed' && mission.status === 'review') {
+          // TASK-2378: a boundary transition that fails while the Mission is
+          // still in the `review` lane is reported in the persistence result
+          // instead of swallowed — the review is committed, the Mission stays
+          // in review, the approval command surfaces the failure (and withholds
+          // Backlog promotion), and px integrate recovery is the repair path.
+          // TASK-2582: the same report applies when the Mission is in no lane
+          // the approve boundary can leave (for example `active`, the
+          // TASK-2579 shape) — reporting `committed` there is what promoted a
+          // Backlog task over an active Mission. Once the Mission has already
+          // moved to `integration`, an approve transition can never legitimately
+          // complete, so a bookkeeping re-persist of the approved round
+          // (comment, artifact consumption) keeps the historical non-fatal
+          // behavior.
+          if (approveResult.status !== 'completed' && mission.status !== 'integration') {
             return {
               outcome: 'boundary-failed',
               stage: 'boundary',
-              diagnostic: `review → integration transition failed for ${this.slug}: ${approveResult.error?.message ?? 'unknown failure'}`,
+              diagnostic: `review → integration transition failed for ${this.slug} (Mission status: ${mission.status}): ${approveResult.error?.message ?? 'unknown failure'}`,
             };
           }
         }

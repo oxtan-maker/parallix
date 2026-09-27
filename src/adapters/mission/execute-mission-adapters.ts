@@ -146,6 +146,7 @@ export class AgentExecutionAdapter implements AgentExecutionPort {
       prompt: request.plan.prompt,
       sessionMarkerPort: this._sessionMarkerPort,
       onAgentLaunched: request.onAgentChanged,
+      onActivated: request.onActivated,
       unrefChild: request.detached === true,
     });
     const result = launch.result;

@@ -30,10 +30,10 @@ test('refused revocation does not read or mutate its store', async () => {
   assert.equal(reads, 0);
 });
 
-test('post-load refusal leaves the stored mission, lifecycle, and provider untouched', async () => {
+test('an active mission without approval leaves its store, lifecycle, and provider untouched', async () => {
   let transitions = 0;
   let providerCalls = 0;
-  const activeMission = { ...mission, status: 'active' as const };
+  const activeMission = { ...mission, status: 'active' as const, review: null };
   const store = { async load() { return { kind: 'found' as const, mission: activeMission, version: 1 as never }; } };
   const lifecycle = { async transition() { transitions++; throw new Error('must not transition'); } };
   const useCase = new RevokeReviewDecisionUseCase(store as never, lifecycle as never, {
@@ -44,7 +44,7 @@ test('post-load refusal leaves the stored mission, lifecycle, and provider untou
   assert.equal(transitions, 0);
   assert.equal(providerCalls, 0);
   assert.equal(activeMission.status, 'active');
-  assert.equal(activeMission.review, review);
+  assert.equal(activeMission.review, null);
 });
 
 test('provider failure leaves local revocation durable', async () => {

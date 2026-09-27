@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import unitTestBudgetReporter, { onGitHubActions } from './lib/unit-test-budget-reporter.js';
+import unitTestBudgetReporter, { onGitHubActions } from './lib/unit-test-budget-reporter.mjs';
 import { buildTestRunPlan } from './lib/test-run-plan.js';
 
 test('TASK-2423: headroom mode reports 501ms work while preserving the 1000ms hard cap', { skip: onGitHubActions() }, async () => {
@@ -30,7 +30,7 @@ test('TASK-2423: headroom mode reports 501ms work while preserving the 1000ms ha
   }
 });
 
-test('TASK-2423: headroom mode requests a 500ms timeout without changing the default plan', () => {
+test('TASK-2423: headroom mode keeps the per-test reporter without changing the default plan', () => {
   const options = {
     executionRoot: process.cwd(),
     probeNodeVersion: () => 'v24.15.0',
@@ -38,6 +38,6 @@ test('TASK-2423: headroom mode requests a 500ms timeout without changing the def
   const defaultPlan = buildTestRunPlan({ ...options, requestedArgs: [] });
   const headroomPlan = buildTestRunPlan({ ...options, requestedArgs: ['--unit-test-headroom'] });
 
-  assert.ok(defaultPlan.nodeArgs.includes('--test-timeout=1000'));
+  assert.ok(defaultPlan.nodeArgs.some(arg => arg.includes('unit-test-budget-reporter.mjs')));
   assert.equal(headroomPlan.unitTestHeadroomMs, 500);
 });

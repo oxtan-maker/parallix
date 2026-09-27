@@ -1,3 +1,4 @@
+import { monotonicNowMs } from '../../application/lifecycle-timing.js';
 import * as fmt from '../../application/presentation/cli-format.js';
 import { isSpuriousCodexExit } from './codex.js';
 import { isSpuriousVibeExit } from './vibe.js';
@@ -33,6 +34,7 @@ import {
   resolveCustomLauncher
 } from './launcher-selection.js';
 import { resolveCustomRunner } from '../config/product-config.js';
+import { warmPiSdk } from './pi.js';
 import { resolveSandboxProfile, withSandboxProfile } from '../process/bubblewrap.js';
 import { selectConfinement, supportsNativeSandbox, ConfinementBlockedError, isBubblewrapDisabled, isBubblewrapAvailable, BUBBLEWRAP_COMMAND } from '../process/confinement.js';
 import { tryAcquireCustomCapacity } from './custom-capacity.js';
@@ -535,6 +537,15 @@ async function prepareLaunch(state: StartAgentLoopState, deps: StartAgentLoopDep
   if (deps.launchAgentFn) {
     launcher = deps.launchAgentFn;
   }
+  // The pi runner loads its SDK lazily inside the launcher, and that dynamic
+  // import blocks the event loop synchronously for ~1 s on a cold host.
+  // Warm the cache here, in the non-deadline prepare phase, so the
+  // launch-confirmed boundary and its lifecycle persistence deadline never
+  // inherit that cost (TASK-2582 agent-smoke). Skipped for injected
+  // launchers (test doubles) to keep them hermetic.
+  if (customRunner === 'pi' && !deps.launchAgentFn) {
+    await warmPiSdk();
+  }
   log(fmt.status('INFO', `Selected agent for step "${step}": ${fmt.agent(chosen, chosen, customRunner)}${state.iteration > 1 ? ` (attempt ${state.iteration})` : ''}`));
 
   // Enforce the agent family as the Forgejo identity (ADR 0029 / architecture migration).
@@ -574,7 +585,11 @@ async function prepareLaunch(state: StartAgentLoopState, deps: StartAgentLoopDep
   // currently chosen agent name (architecture migration). This ensures that if startAgent
   // falls back to a different family after a limit hit, the fallback agent
   // receives a prompt tailored to its own identity.
-  const actualPrompt = typeof opts.prompt === 'function' ? opts.prompt(chosen) : opts.prompt;
+  let actualPrompt = typeof opts.prompt === 'function' ? opts.prompt(chosen) : opts.prompt;
+  if (process.env.PARALLIX_CLI_COMMAND) {
+    const cli = "'" + process.env.PARALLIX_CLI_COMMAND.replaceAll("'", "'\\''") + "'";
+    actualPrompt = actualPrompt.replace(/\bpx (?=[a-z-])/g, `${cli} `);
+  }
 
   // Resolve the per-family model override (adapters.agents.models[chosen]).
   // null when the family is not configured, in which case the launcher omits
@@ -645,12 +660,47 @@ async function prepareLaunch(state: StartAgentLoopState, deps: StartAgentLoopDep
   return { launcher, agentEnv, resume, sessionId, launchSessionMarkerPort, sessionRole, actualPrompt, model, watchdogConfig, customReservation, effectiveProfile, nativeSandbox };
 }
 
+/**
+ * Stop an already-spawned agent child after a launch callback rejects.
+ * SIGTERM first, then SIGKILL escalation once the grace poll runs out. A
+ * Bubblewrap-wrapped agent dies with its wrapper (--die-with-parent), so
+ * signalling the direct child covers both wrapped and unwrapped launches.
+ */
+async function stopLaunchedChild(child: { pid?: number } | null): Promise<void> {
+  const pid = child?.pid;
+  if (typeof pid !== 'number') { return; }
+  const isAlive = (): boolean => {
+    try { process.kill(pid, 0); return true; }
+    catch (err) { return (err as NodeJS.ErrnoException).code === 'EPERM'; }
+  };
+  if (!isAlive()) { return; }
+  try { process.kill(pid, 'SIGTERM'); } catch { return; }
+  for (let attempt = 0; attempt < 40 && isAlive(); attempt += 1) {
+    await new Promise((resolve) => { setTimeout(resolve, 50); });
+  }
+  if (isAlive()) {
+    try { process.kill(pid, 'SIGKILL'); } catch { /* already gone */ }
+  }
+}
+
 /** Run the launcher, announce the invocation, and await the result. */
 async function launchPrepared(prepared: PreparedLaunch, deps: StartAgentLoopDeps, chosen: string): Promise<{ invocation: any; result: any }> {
   const { step, log, slug, unrefChild } = deps;
   const { launcher, agentEnv, resume, sessionId, model, watchdogConfig, customReservation, effectiveProfile, nativeSandbox, launchSessionMarkerPort, sessionRole, actualPrompt } = prepared;
   let invocation;
   let result;
+  let launchedChild: { pid?: number } | null = null;
+  // The lifecycle persistence deadline (TASK-2582 SC8) is measured from
+  // destination-work start to successful persistence. Destination work starts
+  // when the agent's child process actually spawns, so the clock begins at the
+  // real spawn (onSpawn), not before the launcher: pre-spawn launch prep is
+  // environment-dependent and must not count against the persistence budget
+  // (e.g. the custom family's synchronous CLI feature-detect, which shells out
+  // to the agent's own binary and can take hundreds of ms on a loaded host).
+  // The pre-launcher instant is the fallback for launchers that never report a
+  // spawn, keeping the deadline conservative there rather than resetting it at
+  // onLaunch.
+  let startedAtMs = monotonicNowMs();
   try {
     const launchResult = withSandboxProfile(effectiveProfile, () => launcher({
       prompt: actualPrompt,
@@ -664,7 +714,13 @@ async function launchPrepared(prepared: PreparedLaunch, deps: StartAgentLoopDeps
       role: sessionRole,
       sessionMarkerPort: launchSessionMarkerPort,
       teeOptions: {
-        ...(customReservation ? { onSpawn: (child: {pid?: number}) => customReservation.bindChild(child.pid) } : {}),
+        onSpawn: (child: {pid?: number}) => {
+          // The child is spawned now: destination work has started, so the
+          // lifecycle persistence deadline starts here (not pre-spawn).
+          startedAtMs = monotonicNowMs();
+          launchedChild = child;
+          customReservation?.bindChild(child.pid);
+        },
         ...(unrefChild ? { unrefChild: true } : {}),
         ...(watchdogConfig
           ? {
@@ -700,6 +756,14 @@ async function launchPrepared(prepared: PreparedLaunch, deps: StartAgentLoopDeps
     }));
     const { invocation: launchedInvocation, resultPromise } = launchResult;
     invocation = launchedInvocation;
+    // The spawned child's pid rides on the invocation so a launch callback
+    // (and its diagnostics) can name the process it confirmed.
+    // TypeScript's synchronous control-flow analysis cannot see the callback
+    // assignment above, even though spawnAndTee invokes it before returning.
+    const launchedPid = (launchedChild as { pid?: number } | null)?.pid;
+    if (invocation && typeof launchedPid === 'number') {
+      invocation.childPid = launchedPid;
+    }
     if (invocation) {
       // The prompt is one of the args and runs to hundreds of lines. Echoing it
       // buries the launch line (and the rest of the run) in harness text nobody
@@ -714,7 +778,15 @@ async function launchPrepared(prepared: PreparedLaunch, deps: StartAgentLoopDeps
     }
 
     if (deps.onLaunch) {
-      await deps.onLaunch({ agent: chosen, invocation });
+      try {
+        await deps.onLaunch({ agent: chosen, invocation, startedAtMs });
+      } catch (err) {
+        // A rejecting launch callback (a refused authoritative boundary, a
+        // failed current-work publication) must not leave the already-spawned
+        // agent running: stop it, then propagate the failure (TASK-2582 F4).
+        await stopLaunchedChild(launchedChild);
+        throw err;
+      }
     }
 
     result = resultPromise ? await resultPromise : launchResult.result;

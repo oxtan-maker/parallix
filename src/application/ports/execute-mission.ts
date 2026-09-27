@@ -81,6 +81,16 @@ export interface AgentLaunchRequest {
    * current work instead of becoming a lifecycle event or a new run entity.
    */
   readonly onAgentChanged?: (_agent: string) => Promise<void>;
+  /**
+   * Called once per family the launcher confirms has spawned. The use case
+   * persists the mission's `active` boundary here: the destination state and
+   * its lane event commit as destination-state work begins, never after the
+   * run completes (TASK-2582). A rejection stops the run before any success
+   * output or Backlog promotion. The monotonic start timestamp includes spawn
+   * and launch bookkeeping; injected launchers may omit it when they call
+   * the boundary immediately at work start.
+   */
+  readonly onActivated?: (_agent: string, _startedAtMs?: number) => Promise<void>;
 }
 
 /**

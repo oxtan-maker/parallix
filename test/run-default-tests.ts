@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { buildTestRunPlan, withCoverageReporters } from './lib/test-run-plan.js';
 import { defaultManifestDir, ensureManifestDir, recoverRecordedTempRoots } from '../src/adapters/verification/temp-root-registry.js';
 import { cleanupRunnerTempRoots, signalExitCode } from './lib/test-runner-temp-roots.js';
-import { onGitHubActions } from './lib/unit-test-budget-reporter.js';
+import { onGitHubActions } from './lib/unit-test-budget-reporter.mjs';
 
 // A verifier may be launched from an operator checkout while it is validating
 // a mission worktree. Capture that selected root once and use it for every

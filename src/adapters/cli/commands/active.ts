@@ -154,6 +154,10 @@ async function selectLaunchAndRecord(opts) {
     // automatic failover after a usage block. The application layer turns that
     // into the mission's current work; this adapter draws no conclusion.
     onAgentLaunched = null,
+    // TASK-2582: the authoritative active boundary. The application layer
+    // persists the Mission's active transition (state + lane event) when the
+    // launcher confirms the spawn; a rejection fails the run.
+    onActivated = null,
     // Board fire-and-forget dispatch: unref the child so the board process can
     // exit on q/Ctrl+C while the action runs on (CP-4 ownership rule).
     unrefChild = false,
@@ -166,11 +170,14 @@ async function selectLaunchAndRecord(opts) {
   const priorStatus = taskFile ? getTaskStatusFn(taskFile) : null;
   const priorImplementer = taskFile ? getTaskImplementerFn(taskFile) : null;
   let launchRecorded = false;
+  let authoritativeActivationCommitted = false;
   let launchTransitionFailed = false;
   let rebaseDeferred = false;
   let launchedAgent = null;
   const rollbackIfNeeded = async ({ throwOnFailure = true } = {}) => {
-    if (!launchRecorded || !priorStatus) {
+    // A failed run does not undo a committed lifecycle transition. Keep the
+    // mirror active so retry/resume sees the same lane as the Mission store.
+    if (authoritativeActivationCommitted || !launchRecorded || !priorStatus) {
       return;
     }
 
@@ -204,8 +211,31 @@ async function selectLaunchAndRecord(opts) {
       role: 'implementer',
       unrefChild,
       sessionMarkerPort: sessionMarkerPort ?? undefined,
-      onLaunch: async (/** @type{{agent: string}} */ { agent }) => {
+      onLaunch: async (/** @type{{agent: string, startedAtMs?: number}} */ { agent, startedAtMs }) => {
         launchedAgent = agent;
+        // The authoritative active boundary lands here, as destination-state
+        // work begins: the Mission state and its lane event persist before the
+        // Backlog mirror moves and before any current-work publication
+        // (TASK-2582). A failure stops the run: the Backlog task is not
+        // written and no success output follows the agent's completion.
+        if (onActivated) {
+          try {
+            await onActivated(agent, startedAtMs);
+            authoritativeActivationCommitted = true;
+          } catch (err) {
+            // The authoritative active boundary refused to commit. Fail the
+            // launch here, at the boundary — not after the agent exits: no
+            // dependent work may run under an uncommitted transition, and the
+            // operator sees the failure immediately (TASK-2582 review F1).
+            // Throwing also stops the Backlog transition and current-work
+            // publication below; startAgent stops the already-spawned agent
+            // child and propagates the rejection without awaiting the agent
+            // result (TASK-2582 review F4).
+            const message = `Failed to persist the active lifecycle boundary for task ${fmt.slug(slug)}: ${err instanceof Error ? err.message : String(err)}`;
+            log(fmt.status('FAIL', message));
+            throw new Error(message);
+          }
+        }
         // Awaited: the caller publishes the mission's current work here, and
         // that write must land before the run reports its next state.
         await onAgentLaunched?.(agent);
@@ -228,8 +258,8 @@ async function selectLaunchAndRecord(opts) {
         rebaseDeferred = true;
       },
       onLimitHit: () => {
-        // Roll back the intermediate active write so the retry's onLaunch starts
-        // from a clean state, preventing a spurious committed implementer entry.
+        // Legacy launches can undo their mirror-only write. Once activation
+        // commits through the lifecycle authority, retain active for retry.
         rollbackIfNeeded({ throwOnFailure: false });
       },
       // The agent's own terminal stream is the progress record. Keep only
@@ -280,7 +310,9 @@ function applyExecuteFallback(opts) {
   const taskResolutionTyped2 = /** @type{{ok: boolean, taskFile?: string} | undefined} */(taskResolution);
   if (taskResolutionTyped2 && taskResolutionTyped2.ok) {
     log(fmt.status('INFO', `Execute agent fell back from ${fmt.agent(preselected)} to ${fmt.agent(actual)}; enforcing backlog assignee.`));
-    transitionTaskFn(slug, 'active', { implementer: actual, rootDir: worktree, log }).catch(() => {});
+    transitionTaskFn(slug, 'active', { implementer: actual, rootDir: worktree, log }).catch((err) => {
+      log(fmt.status('WARN', `Could not record fallback implementer ${fmt.agent(actual)} in backlog task: ${err instanceof Error ? err.message : String(err)}`));
+    });
   }
   return actual;
 }

@@ -203,6 +203,7 @@ export function buildRebasePrompt({
  */
 /** Everything the rebase phases share, resolved once at the command boundary. */
 interface RebaseContext {
+  repairImplementer?: string;
   readonly args: string[];
   readonly port: RebaseWorkflowPort;
   readonly gitFn: GitRunner;
@@ -308,6 +309,7 @@ function verifyBaseAncestry(ctx: RebaseContext): boolean {
 /** The one success tail: verify ancestry, announce, push, then name what is next. */
 async function finishRebase(ctx: RebaseContext, message: string): Promise<void> {
   if (!verifyBaseAncestry(ctx)) { return; }
+  if (ctx.repairImplementer) { await ctx.port.resumeReviewAfterRepair?.(ctx.slug, ctx.executionRoot, ctx.repairImplementer); }
   fmt.log.pass(message);
   await performPush(ctx);
   fmt.log.info(`Next: ${fmt.command(ctx.port.formatVerificationCommand(ctx.area, ctx.executionRoot))}`);
@@ -379,6 +381,7 @@ async function reboundHookFailure(
       },
     },
   );
+  if (outcome.outcome === 'fixed') { await port.resumeReviewAfterRepair?.(slug, executionRoot, outcome.implementer); }
   return { outcome: outcome.outcome === 'fixed' ? 'fixed' : 'stranded', result: lastResult };
 }
 
@@ -680,6 +683,10 @@ async function launchConflictResolver(ctx: RebaseContext, implementer: string, p
   const { port, executionRoot, slug } = ctx;
   const launchOptions = { prompt, worktree: executionRoot, slug, role: 'implementer' };
   try {
+    if (typeof port.missionServices === 'function') {
+      await port.transitionTask(slug, 'active', { rootDir: executionRoot, log: fmt.log.plain });
+      ctx.repairImplementer = implementer;
+    }
     return await port.startAgent('conflict-resolution', { ...launchOptions, agent: implementer, pinnedAgent: true });
   } catch (err: any) {
     const message = err?.message || String(err);

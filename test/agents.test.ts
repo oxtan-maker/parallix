@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawn as spawnChildProcess } from 'node:child_process';
 import { mockModule, installModuleMocks } from './lib/module-mock.js';
 // custom-capacity holds process-local mutable state and is only read here.
 // A plain import keeps the single production-graph instance; declaring it
@@ -1011,9 +1011,13 @@ test('resolveClaudeCommand returns bare claude', () => {
 
 test('startAgent calls onLaunch callback immediately after process launch', async () => {
   const launches = [];
+  let launchLoggedAtMs = Number.POSITIVE_INFINITY;
   const result = await startAgent('review', {
     prompt: 'test',
     selectAgentFn: () => 'claude',
+    log: (message) => {
+      if (message.includes('Launching:')) { launchLoggedAtMs = performance.now(); }
+    },
     onLaunch: async (opts) => {
       launches.push(opts);
     }
@@ -1022,7 +1026,101 @@ test('startAgent calls onLaunch callback immediately after process launch', asyn
   assert.equal(launches.length, 1);
   assert.equal(launches[0].agent, 'claude');
   assert.equal(launches[0].invocation.command, 'claude');
+  assert.ok(Number.isFinite(launchLoggedAtMs));
+  assert.ok(launches[0].startedAtMs <= launchLoggedAtMs, 'deadline starts before launch logging');
   assert.equal(result.result.status, 0);
+});
+
+test('a rejecting onLaunch stops the already-spawned agent child (TASK-2582 F4)', async () => {
+  const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-onlaunch-refusal-'));
+  try {
+    await withPathLaunchers({
+      // A long-lived fake agent; the launcher reports its child pid on the
+      // invocation, so the test proves that exact process is actually gone.
+      opencode: 'if (process.argv.includes("--help")) process.exit(0); setInterval(() => {}, 1000);'
+    }, async () => {
+      let childPid: number | null = null;
+      await assert.rejects(
+        startAgent('active', {
+          agent: 'custom',
+          prompt: 'Execute.',
+          worktree: tmpRoot,
+          log: () => {},
+          isAgentBlockedFn: () => false,
+          onLaunch: async ({ invocation }) => {
+            childPid = invocation?.childPid ?? null;
+            throw new Error('activation boundary refused');
+          }
+        }),
+        /activation boundary refused/,
+      );
+
+      assert.ok(typeof childPid === 'number', 'the launcher must expose the spawned child pid on the invocation');
+
+      // The launcher must have stopped the child after the rejection.
+      let alive = true;
+      const deadline = Date.now() + 5000;
+      while (Date.now() < deadline) {
+        try { process.kill(childPid, 0); }
+        catch (err) { if ((err as NodeJS.ErrnoException).code === 'ESRCH') { alive = false; break; } }
+        await new Promise((resolve) => { setTimeout(resolve, 50); });
+      }
+      assert.equal(alive, false, 'the already-spawned agent child must be stopped when onLaunch rejects');
+    });
+  } finally {
+    fs.rmSync(tmpRoot, { recursive: true, force: true });
+  }
+});
+
+test('the active deadline starts at the real spawn, excluding slow pre-spawn launch prep (TASK-2582 SC8)', async () => {
+  const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-deadline-spawn-'));
+  // A real long-lived child whose pid the fake launcher reports through
+  // onSpawn, so the refusal path's child-stop exercises a live process.
+  const probe = spawnChildProcess(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { stdio: 'ignore' });
+  try {
+    let boundaryStartMs: number | null = null;
+    const preLaunchMs = performance.now();
+    await assert.rejects(
+      startAgent('active', {
+        agent: 'custom',
+        prompt: 'Execute.',
+        worktree: tmpRoot,
+        log: () => {},
+        isAgentBlockedFn: () => false,
+        // The launcher does slow synchronous prep (300 ms — the shape of a
+        // heavy CLI feature-detect or SDK module load) before it spawns the
+        // child and reports it through teeOptions.onSpawn. That prep must not
+        // sit inside the lifecycle persistence window: the deadline has to
+        // start at the real spawn, not before the launcher.
+        launchAgentFn: (/** @type{{ teeOptions: { onSpawn: (child: {pid?: number}) => void} }} */ opts) => {
+          const t = Date.now();
+          while (Date.now() - t < 300) { /* slow pre-spawn launch prep */ }
+          opts.teeOptions.onSpawn({ pid: probe.pid });
+          return {
+            invocation: { command: 'fake', args: [], options: {} },
+            resultPromise: new Promise(() => {}),
+          };
+        },
+        onLaunch: async ({ startedAtMs }) => {
+          boundaryStartMs = startedAtMs;
+          throw new Error('stop after boundary start captured');
+        }
+      }),
+      /stop after boundary start captured/,
+    );
+    assert.ok(typeof boundaryStartMs === 'number', 'onLaunch must receive the deadline start');
+    // The 300 ms pre-spawn prep must not sit inside the lifecycle persistence
+    // window: the clock has to start at the real child spawn, well after the
+    // pre-launch instant. (Pre-spawn clocking is what made the real-agent
+    // smoke miss the 200 ms deadline on a loaded host.)
+    assert.ok(boundaryStartMs! - preLaunchMs >= 200,
+      `deadline started only ${Math.round(boundaryStartMs! - preLaunchMs)} ms after pre-launch; the 300 ms pre-spawn launch prep must be excluded`);
+  } finally {
+    if (probe.exitCode === null && probe.signalCode === null) {
+      try { probe.kill('SIGKILL'); } catch { /* already gone */ }
+    }
+    fs.rmSync(tmpRoot, { recursive: true, force: true });
+  }
 });
 
 test('startAgent logs no-output diagnostics with agent, step, and child pid', async () => {

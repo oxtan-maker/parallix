@@ -50,6 +50,22 @@ const pending: PendingRegistration[] = [];
 const installed = new Map<string, ModuleState>();
 let freshCounter = 0;
 
+/**
+ * Node 22 and Node 24 expose incompatible shapes for `mock.module()`.
+ * Node 22 requires named/default exports as separate fields; Node 24 requires
+ * the consolidated `exports` object. Keep the version boundary here so every
+ * test seam registers an importable namespace on either supported runtime.
+ */
+export function moduleMockOptions(exports: Record<string, unknown>): Record<string, unknown> {
+  const major = Number(process.versions.node.split('.', 1)[0]);
+  if (major >= 24) { return { exports }; }
+  const { default: defaultExport, ...namedExports } = exports;
+  return {
+    namedExports,
+    ...(defaultExport === undefined ? {} : { defaultExport }),
+  };
+}
+
 function isClass(value: unknown): value is new (..._args: unknown[]) => unknown {
   return typeof value === 'function'
     && /^class[\s{]/.test(Function.prototype.toString.call(value));
@@ -183,7 +199,7 @@ export async function installModuleMocks(): Promise<void> {
       // at the facade so `import fs from 'node:fs'` consumers are patched too.
       facade.default = facade;
     }
-    mock.module(entry.url, { exports: facade });
+    mock.module(entry.url, moduleMockOptions(facade));
     installed.set(entry.url, entry.state);
   }
 

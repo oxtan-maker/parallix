@@ -115,6 +115,10 @@ and hotspot policy; Parallix does not add a total-code assertion for unrelated
 legacy code. After confirmed integration, the repository deletes the
 comparison branch; cleanup failures do not reverse integration.
 
+After confirmed integration, the repository deletes that mission's SonarQube
+Cloud branch analysis. Cleanup failures are reported without reversing the
+integration.
+
 Parallix currently uses a progressive quality policy: HIGH and BLOCKER
 impacts are blocking; MEDIUM, LOW, and INFO findings remain visible in the
 provider but are non-blocking. The provider quality gate owns that new-code

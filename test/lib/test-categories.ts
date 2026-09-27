@@ -229,6 +229,9 @@ export const INTEGRATION_CI_TESTS: readonly string[] = [
   // repository to prove local branch discovery. A clean GitHub runner provides
   // every dependency, so it is CI-safe.
   'task-2525.03-sonar-enforcement.test.ts',
+  // TASK-2582: real migrated SQLite lifecycle boundaries; CI-safe.
+  'task-2582-lifecycle-ordering.test.ts',
+  'task-2582-repro.test.ts',
   // TASK-2521.03: seeds an isolated SQLite operator database and drives the
   // production `px status --json` composition path.
   'task-2521-03-context-cli.integration.test.ts',

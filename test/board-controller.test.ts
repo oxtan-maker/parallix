@@ -39,7 +39,7 @@ test('controller dispatches active:execute through ExecuteMissionService', async
   const controller = new BoardCommandController(ports);
   const result = await controller.dispatch(makeRequest());
   assert.equal(result.status, 'completed');
-  assert.deepEqual(calls, ['validate:task-0001', 'launch:task-0001:codex', 'record:task-0001:codex', 'handoff:task-0001:codex']);
+  assert.deepEqual(calls, ['validate:task-0001', 'launch:task-0001:codex', 'synchronize', 'record:task-0001:codex', 'handoff:task-0001:codex']);
 });
 
 test('controller honors attached CLI launches while defaulting board launches to detached', async () => {
@@ -214,7 +214,9 @@ test('authoritative matching status proceeds to dispatch once', async () => {
   const controller = new BoardCommandController(ports);
   const result = await controller.dispatch(makeRequest({ missionStatusAtRequest: 'refined' }));
   assert.equal(result.status, 'completed');
-  assert.equal(calls.length, 4);
+  // validate, launch, the boundary write at launch confirmation (TASK-2582),
+  // record, handoff.
+  assert.equal(calls.length, 5);
 });
 
 test('authoritative read failure fails closed before the effect is called', async () => {

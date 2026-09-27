@@ -194,6 +194,10 @@ Parallix also dismisses the matching pull-request approval; if it is unavailable
 the local correction remains durable and the command reports that the provider
 was not updated.
 
+The same correction accepts a historical mission whose approval was recorded
+while its authoritative lane remained active. It opens review directly and
+preserves the withdrawn approval; a later review must earn its own approval.
+
 Integration accepts a mission contract recorded in the operator database;
 it does not require a `MISSION.md` file for those missions. Use `px status
 <slug> --json` to inspect the recorded brief. Historical missions without a

@@ -248,7 +248,7 @@ test('reboundPreReviewFailure rebounces a gate failure with arbitrary test outpu
 
     assert.equal(result.bounced, true);
     assert.equal(result.stranded, false);
-    assert.deepEqual(transitions, [{ slug: 'task-1385', status: 'active' }]);
+    assert.deepEqual(transitions, [{ slug: 'task-1385', status: 'active' }, { slug: 'task-1385', status: 'review' }]);
     assert.equal(launches.length, 1);
     assert.match(launches[0].prompt, /assertion failed/);
   });

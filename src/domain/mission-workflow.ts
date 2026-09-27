@@ -212,7 +212,10 @@ export function decideMission(mission: Mission, command: MissionCommand): Missio
     if (mission.brief) { requireDraftedContract(mission, command); }
     return { ...mission, status: 'active', assignee: command.agent };
   case 'rebound-to-active':
-    requireStatus(mission, ['integration'], command);
+    requireStatus(mission, ['integration', 'review', 'active'], command);
+    if (mission.status === 'review' && (!mission.review || reviewStatus(mission.review) !== 'awaiting-review')) {
+      throw new MissionRuleViolation('A review repair rebound requires an undecided review round');
+    }
     return {
       ...mission, status: 'active', assignee: command.agent,
       review: mission.review && reviewStatus(mission.review) === 'approved'
@@ -260,7 +263,10 @@ export function decideMission(mission: Mission, command: MissionCommand): Missio
     }
     return { ...mission, status: 'integration', review: command.review };
   case 'revoke-approval':
-    requireStatus(mission, ['integration'], command);
+    requireStatus(mission, ['integration', 'active'], command);
+    if (!mission.review || reviewStatus(mission.review) !== 'approved') {
+      throw new MissionRuleViolation('Revocation requires a current effective approval');
+    }
     requireSameReviewedRevision(mission, command.review);
     if (reviewStatus(command.review) !== 'awaiting-review') {
       throw new MissionRuleViolation('Revocation must open an awaiting-review round');

@@ -43,7 +43,7 @@
       "always": true
     },
     "workflow": {
-      "command": "node --import tsx --import ./test/bootstrap-e2e-parallix-home.ts test/e2e-mission-lifecycle.test.ts",
+      "command": "node --test --import tsx --import ./test/bootstrap-e2e-parallix-home.ts test/e2e-mission-lifecycle.test.ts",
       "order": 50,
       "run_last": true
     },

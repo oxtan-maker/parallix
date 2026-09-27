@@ -19,6 +19,7 @@ import { buildAutonomousReviewMatrix, formatMatrixSummary } from '../agents/runt
 import { buildReviewPrompt, buildActOnReviewPrompt, buildCompactReviewPrompt, buildCompactActOnReviewPrompt } from './review-prompts.js';
 import { ReviewState, readReviewState, writeReviewState, resetReviewState, persistReviewStateOrThrow, assertReviewStatePersisted } from './review-state.js';
 import type { MissionStore } from '../../application/domain-ports.js';
+import type { MissionLifecycleService } from '../../application/mission-lifecycle-service.js';
 import type { AgentSelectionSnapshotPort } from '../../application/domain-ports.js';
 import { PreparedAgentSelection } from '../../application/services/agent-selection.js';
 import { recordAgentSelectionOutcome } from '../../application/services/agent-selection-telemetry.js';
@@ -47,6 +48,8 @@ import {
   stageLaunchSinceMs,
   maybeUpdateGraphifyBeforeReview,
 } from './review-agent-fallback.js';
+import { openReviewRound } from './review-round-open.js';
+import { transitionReviewRepair } from '../../application/review-repair-lifecycle.js';
 const MODULE_DIR = path.dirname(fileURLToPath(import.meta.url));
 /**
  * Per-round relaunch cap (TASK-2377.04): bounds the total bounce launch
@@ -169,7 +172,7 @@ async function performStartHandoff(slug: string, state: ProviderPrelude, deps: a
     return { ok: false, ran: true };
   }
   if (!handoff?.ok) {
-    await reportFailedStartHandoff(slug, handoff || {}, { forgejoEnabled, branch, worktree, transitionTaskFn, readReviewStateFn, writeReviewStateFn, missionStore, getPrStatusFn, log, error });
+    await reportFailedStartHandoff(slug, handoff || {}, { ...deps, forgejoEnabled, branch, worktree, transitionTaskFn, readReviewStateFn, writeReviewStateFn, missionStore, getPrStatusFn, log, error });
     exit(1);
     return { ok: false, ran: true };
   }
@@ -197,6 +200,7 @@ async function performStartHandoff(slug: string, state: ProviderPrelude, deps: a
 async function reportFailedStartHandoff(slug: string, handoff: any, deps: any): Promise<void> {
   const { forgejoEnabled, branch, worktree, transitionTaskFn, readReviewStateFn, writeReviewStateFn, missionStore, getPrStatusFn, log, error } = deps;
   if (handoff.reason === 'validation-failed' && !handoff.recoveryAttempted) {
+    if (missionStore) { await transitionReviewRepair(slug, 'active', deps.implementer, missionStore, deps.lifecycleService ?? null); }
     await transitionTaskFn(slug, 'active', { rootDir: worktree, log });
     log(fmt.status('INFO', `Auto-bounced ${slug} to active: declared-gate validation failure. Fix the gate in MISSION.md and retry.`));
     const persisted = await Promise.resolve(readReviewStateFn(slug, worktree));
@@ -240,6 +244,25 @@ interface RoundScratch {
   preReviewSetupVerified: boolean;
   reviewerTimeoutRetries: number;
   blockingFindings: { id: string; summary: string }[];
+}
+
+/** The round-open handoff boundary (TASK-2582). Returns true when the round must stop. */
+async function runRoundOpenBoundary(deps: ReviewerPhaseDeps): Promise<boolean> {
+  const { ctx, state } = deps;
+  const { slug, worktree, log, error, writeReviewStateFn, missionStore, lifecycleService, exit } = ctx;
+  const boundary = await openReviewRound(slug, state, {
+    worktree,
+    log,
+    error,
+    writeReviewStateFn,
+    missionStore,
+    lifecycleService: lifecycleService ?? null,
+  });
+  if (boundary.ok) { return false; }
+  // The boundary already emitted the diagnostic; stop the round so no
+  // reviewer runs against an unopened round and no success is reported.
+  exit(1);
+  return true;
 }
 
 /**
@@ -305,16 +328,17 @@ function dryRunReviewerPrompt(deps: ReviewerPhaseDeps): void {
  * rebound kernel. Returns 'stop' when the round must end.
  */
 async function runPreReviewRebase(deps: ReviewerPhaseDeps): Promise<'stop' | null> {
-  const { ctx, state, round, scratch } = deps;
+  const { ctx, round, scratch } = deps;
   const {
     dryRun, rebaseBeforeReviewRoundFn, slug, worktree, log, error, verbose, taskResolution, gitFn,
-    forgejoEnabledFn, reboundPreReviewFailureFn, transitionTaskFn, writeReviewStateFn, missionStore, exit,
+    forgejoEnabledFn, reboundPreReviewFailureFn, transitionTaskFn, exit,
   } = ctx;
   const rebaseResult = await rebaseBeforeReviewRoundFn(slug, {
     worktree, log, error, verbose,
     taskFile: taskResolution.taskFile,
     gitFn,
-    isReviewProviderEnabledFn: forgejoEnabledFn
+    isReviewProviderEnabledFn: forgejoEnabledFn,
+    ...(ctx.rebaseWorkflowOptions ? { rebaseWorkflowOptions: ctx.rebaseWorkflowOptions } : {})
   });
   if (!rebaseResult.ok) {
     const rebaseFailure = rebaseResult.failure;
@@ -412,9 +436,10 @@ async function runPreReviewRebase(deps: ReviewerPhaseDeps): Promise<'stop' | nul
     }
   }
   round.reviewBaseline = round.captureReviewBaseline();
+  // The Backlog mirror follows the rebase outcome: a failed rebase never
+  // transitions the task to review (the database lane was already settled by
+  // the round-open boundary, TASK-2582).
   if (!dryRun) { await transitionTaskFn(slug, 'review', { rootDir: worktree, log }); }
-  state.phase = 'reviewing';
-  await persistReviewStateOrThrow(writeReviewStateFn, slug, state, worktree, missionStore);
   return null;
 }
 
@@ -796,6 +821,11 @@ async function runReviewerPhase(
   const deps: ReviewerPhaseDeps = { ctx, state, round, attempt, scratch };
   try {
     if (state.phase === 'reviewing') {
+      // TASK-2582: the round-open boundary persists the authoritative
+      // active → review transition at the accepted boundary, before any
+      // destination-state work (existing-review poll, rebase, gates, reviewer
+      // launch) starts.
+      if (!dryRun && !scratch.reviewState && await runRoundOpenBoundary(deps)) { return { outcome: 'stop' }; }
       await checkExistingReviewOnContinue(deps);
       if (dryRun) {
         dryRunReviewerPrompt(deps);
@@ -1313,7 +1343,8 @@ async function runReviewRound(
         worktree, runFn: runFn as any, log, error, verbose,
         taskFile: taskResolution.taskFile,
         gitFn,
-        isReviewProviderEnabledFn: forgejoEnabledFn
+        isReviewProviderEnabledFn: forgejoEnabledFn,
+        ...(ctx.rebaseWorkflowOptions ? { rebaseWorkflowOptions: ctx.rebaseWorkflowOptions } : {})
       });
       if (!rebaseRetry.ok) {
         return {
@@ -1345,6 +1376,7 @@ async function runReviewRound(
       log,
       error,
       missionStore,
+      lifecycleService: ctx.lifecycleService,
     });
     const round: RoundScratch = {
       get reboundsUsedThisRound() { return reboundsUsedThisRound; },
@@ -1510,6 +1542,7 @@ async function prepareStartTransition(params: {
   readReviewStateFn: Function;
   writeReviewStateFn: Function;
   missionStore: MissionStore | null;
+  lifecycleService?: MissionLifecycleService | null;
   log: (_msg: string) => void;
   error: (_msg: string) => void;
   exit: (_code: number) => void;
@@ -1542,7 +1575,7 @@ async function prepareStartTransition(params: {
     const handedOff = await performStartHandoff(slug, providerState, {
       performHandoffFn, implementer, worktree, branch, forgejoEnabled, taskResolution,
       getTaskStatusFn, getPrStatusFn, transitionTaskFn, readReviewStateFn, writeReviewStateFn,
-      missionStore, pullRequestReference, log, error, exit,
+      missionStore, lifecycleService: params.lifecycleService, pullRequestReference, log, error, exit,
     });
     handoffJustRan = handedOff.ran;
     if (!handedOff.ok) {
@@ -1658,6 +1691,7 @@ export async function startReviewLoop(slug: string, opts: {
   recordStageStatsSafeFn?: (..._args: any[]) => void | Promise<void>;
   runPreReviewGateFn?: typeof runPreReviewGate;
   reboundPreReviewFailureFn?: typeof reboundPreReviewFailure;
+  lifecycleService?: MissionLifecycleService | null;
   pushReviewRefFn?: typeof pushReviewRef;
   isStaleInfoPushRejectionFn?: typeof isStaleInfoPushRejection;
   fetchReviewBranchFn?: typeof fetchReviewBranch;
@@ -1733,6 +1767,7 @@ export async function startReviewLoop(slug: string, opts: {
     recordStageStatsSafeFn = () => {},
     pushReviewRefFn = pushReviewRef,
     isStaleInfoPushRejectionFn = isStaleInfoPushRejection,
+    lifecycleService = null,
     fetchReviewBranchFn = fetchReviewBranch,
     hasNewCommittedChangeFn = null,
     missionStore = null,
@@ -1798,7 +1833,7 @@ export async function startReviewLoop(slug: string, opts: {
     slug, dryRun, forgejoEnabled, verbose, isContinue, providerState, implementer: implementer!,
     branch, worktree, taskResolution, pullRequestReference, resolvedProviderAvailableFn, runFn,
     getPrStatusFn, performHandoffFn, getTaskStatusFn, transitionTaskFn, readReviewStateFn, writeReviewStateFn,
-    missionStore, log, error, exit,
+    missionStore, lifecycleService, log, error, exit,
   });
   if (transitionPrep.stopped) { return; }
   ({ prNumber, confirmedPullRequest, skipHandoff } = transitionPrep);
@@ -1902,6 +1937,8 @@ export async function startReviewLoop(slug: string, opts: {
     readTokenFn,
     rebaseBeforeReviewRoundFn,
     reboundPreReviewFailureFn,
+    lifecycleService,
+    rebaseWorkflowOptions: missionStore ? { missionServicesFn: async () => ({ store: missionStore, lifecycle: lifecycleService }) } : undefined,
     reboundsPerRound,
     recordStageStatsSafeFn,
     runFn,

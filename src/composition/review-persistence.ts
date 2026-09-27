@@ -154,6 +154,9 @@ export function reviewLoopBindings(store: MissionStore, lifecycleService?: Missi
     resetReviewStateFn: persistence.resetReviewState,
     consumeReviewerArtifactsFn: reviewerOutput,
     consumeImplementerArtifactsFn: implementerOutput,
+    // TASK-2582: the round-open boundary needs the lifecycle service to move
+    // an active Mission back to review at the boundary.
+    lifecycleService: lifecycleService ?? null,
     missionStore: store,
   };
 }

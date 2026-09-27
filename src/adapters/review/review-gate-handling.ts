@@ -24,6 +24,8 @@ import { formatVerificationCommand, isTransientVerificationFailure, resolveEffec
 import { enforceTaskAssignee, transitionTask } from '../backlog/backlog.js';
 import { readReviewState, writeReviewState } from './review-state.js';
 import type { MissionStore } from '../../application/domain-ports.js';
+import type { MissionLifecycleService } from '../../application/mission-lifecycle-service.js';
+import { transitionReviewRepair } from '../../application/review-repair-lifecycle.js';
 import { startAgent } from '../agents/agents.js';
 import { applyAgentFallback } from './review-agent-fallback.js';
 
@@ -164,6 +166,7 @@ export interface ReboundPreReviewOptions {
   error?: (_msg: string) => void;
   maxAttempts?: number;
   missionStore?: MissionStore | null;
+  lifecycleService?: MissionLifecycleService | null;
 }
 
 export interface ReboundPreReviewResult {
@@ -206,6 +209,7 @@ export async function reboundPreReviewFailure(
     error = fmt.log.plainError,
     maxAttempts,
     missionStore = null,
+    lifecycleService = null,
   } = opts;
 
   if (typeof verifyFn !== 'function') {
@@ -222,6 +226,7 @@ export async function reboundPreReviewFailure(
     verify: verifyFn,
     startAgent: startAgentFn as unknown as ReboundContext['startAgent'],
     transitionToImplementer: async (missionSlug: string) => {
+      if (missionStore) { await transitionReviewRepair(missionSlug, 'active', implementer, missionStore, lifecycleService); }
       await transitionTaskFn(missionSlug, 'active', { rootDir: worktree, log });
     },
     applyAgentFallback: async ({ launchResult, original }) => await applyAgentFallbackFn({
@@ -241,6 +246,10 @@ export async function reboundPreReviewFailure(
     error,
   });
 
+  if (outcome.outcome === 'fixed') {
+    if (missionStore) { await transitionReviewRepair(slug, 'review', outcome.implementer, missionStore, lifecycleService); }
+    await transitionTaskFn(slug, 'review', { rootDir: worktree, log });
+  }
   return {
     bounced: outcome.outcome === 'fixed',
     stranded: outcome.outcome !== 'fixed',

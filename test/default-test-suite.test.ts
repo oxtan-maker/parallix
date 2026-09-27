@@ -182,6 +182,12 @@ const expectedIntegrationFiles = [
   // TASK-2577: runs fixture scenarios in `node --import tsx --test` child
   // processes and reclaims their leftovers; crosses the process boundary only.
   'task-2577-tmp-fixture-leaks-repro.test.ts',
+  // TASK-2582: opens a real migrated SQLite operator database in a temp
+  // directory and drives the real MissionLifecycleService and review
+  // persistence boundaries, so it crosses the SQLite boundary and runs in
+  // the integration layer (INTEGRATION_CI_TESTS).
+  'task-2582-lifecycle-ordering.test.ts',
+  'task-2582-repro.test.ts',
   // TASK-2532: seeds temporary Git repositories to exercise the base-worktree
   // repair, so it crosses the git boundary and runs in the integration layer.
   'task-2532-stale-integration-state-repro.test.ts',

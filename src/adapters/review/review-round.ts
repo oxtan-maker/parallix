@@ -180,6 +180,17 @@ function approvalBlockedDiagnostic(status: string): string {
 }
 
 /**
+ * The TASK-2582 mismatch: an approval whose Mission is not in the review lane
+ * cannot complete the `review → integration` boundary. The diagnostic names
+ * the recorded lane state and the two supported repairs: open the round so
+ * the Mission returns to review, or recover an already-approved round through
+ * `px integrate` (TASK-2397).
+ */
+function approvalLaneDiagnostic(slug: string, status: string): string {
+  return `The Mission is ${status}, not review; the review → integration boundary cannot complete from ${status}. Open the round with \`px review ${slug} --start\` so the Mission returns to review, or recover an already-approved round with \`px integrate ${slug}\`.`;
+}
+
+/**
  * Non-mutating legality guard for an `approve` verdict, backing
  * {@link recordApproval} and the provider-backed pre-check in
  * `submitReviewRound`.
@@ -274,6 +285,16 @@ export async function recordApproval(
         diagnostic: approvalBlockedDiagnostic(status),
       };
     }
+    if (mission.status !== 'review' && mission.status !== 'integration') {
+      // TASK-2582: an approve recorded over a Mission that is not in the review
+      // lane is the TASK-2579 mismatch. Fail before writing the decision
+      // instead of reporting `recorded` over a Mission the boundary cannot
+      // move.
+      return {
+        outcome: 'failed',
+        diagnostic: `Approve cannot be recorded for ${slug}: ${approvalLaneDiagnostic(slug, mission.status)}`,
+      };
+    }
     const review = applyReviewerCommand(mission.review, {
       type: 'approve',
       decidedAt: input.decidedAt,
@@ -295,6 +316,15 @@ async function transitionApprovedReview(
   review: Review,
   ports: ReviewRoundPorts,
 ): Promise<ReviewRoundResult | null> {
+  // TASK-2582: the approval may not report success from a lane the
+  // `review → integration` boundary cannot leave. `integration` is already the
+  // destination, so the recorded decision stands with no lane move.
+  if (mission.status !== 'review' && mission.status !== 'integration') {
+    return {
+      outcome: 'failed',
+      diagnostic: `review → integration transition failed for ${slug}: ${approvalLaneDiagnostic(slug, mission.status)}`,
+    };
+  }
   if (!ports.lifecycleService || mission.status !== 'review') { return null; }
   const round = currentReviewRound(review);
   const transition = await ports.lifecycleService.transition({
@@ -314,7 +344,20 @@ async function replayApprovalTransition(
   version: MissionVersion,
   ports: ReviewRoundPorts,
 ): Promise<ReviewRoundResult | null> {
-  if (!ports.lifecycleService || mission.status !== 'review' || !('review' in mission) || !mission.review) { return null; }
+  if (!('review' in mission) || !mission.review) { return null; }
+  // TASK-2582: a replay over a Mission that never reached the review lane is
+  // the TASK-2579 stranded shape. It fails loudly instead of reporting the
+  // approval as already handled.
+  if (mission.status === 'integration') {
+    return { outcome: 'unchanged', reason: 'mission is already in integration' };
+  }
+  if (mission.status !== 'review') {
+    return {
+      outcome: 'failed',
+      diagnostic: `review → integration replay failed for ${slug}: ${approvalLaneDiagnostic(slug, mission.status)}`,
+    };
+  }
+  if (!ports.lifecycleService) { return null; }
   const round = currentReviewRound(mission.review);
   const transition = await ports.lifecycleService.transition({
     operationId: `review-approve:${slug}`,

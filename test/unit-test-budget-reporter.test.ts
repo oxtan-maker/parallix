@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
-import unitTestBudgetReporter, { UNIT_TEST_BUDGET_MS, UNIT_TEST_HEADROOM_MS, onGitHubActions } from './lib/unit-test-budget-reporter.js';
+import unitTestBudgetReporter, { UNIT_TEST_BUDGET_MS, UNIT_TEST_HEADROOM_MS, onGitHubActions } from './lib/unit-test-budget-reporter.mjs';
 
 test('unit-test budget reporter marks measured synchronous work over the bound', { skip: onGitHubActions() }, async () => {
   async function* events() {
@@ -115,7 +115,7 @@ test('GitHub Actions detection keys on the exact env value, not any GitHub-ish v
 test('the suite-level budget check is gated on the shared GitHub Actions detection', () => {
   const runnerSource = fs.readFileSync(path.join(process.cwd(), 'test', 'run-default-tests.ts'), 'utf8');
   // Criterion 4: one detection, imported by both enforcement points.
-  assert.match(runnerSource, /import \{[^}]*onGitHubActions[^}]*\} from '\.\/lib\/unit-test-budget-reporter\.js'/);
+  assert.match(runnerSource, /import \{[^}]*onGitHubActions[^}]*\} from '\.\/lib\/unit-test-budget-reporter\.mjs'/);
   // Criterion 2: the suite budget block does not run on GitHub Actions.
   assert.match(runnerSource, /if \(!runsIntegrationSuite && !onGitHubActions\(\)\)/);
   // Criterion 3: off GitHub the suite budget still fails the run.

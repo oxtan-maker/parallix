@@ -322,19 +322,29 @@ function workflowEnv(binDir, stateHome, repoRoot) {
   };
 }
 
-async function runWorkflow(repoRoot, env, args, _timeout = 60000, { allowFailure = false } = {}) {
+async function runWorkflow(repoRoot, env, args, _timeout = 60000, { allowFailure = false, invokeFromTarget = false } = {}) {
+  const previousCwd = process.cwd();
   const previous = new Map(Object.entries(process.env));
   const previousStdoutWrite = process.stdout.write;
   const previousStderrWrite = process.stderr.write;
   let stdout = '';
   let stderr = '';
   try {
+    if (invokeFromTarget) { process.chdir(repoRoot); }
     for (const key of Object.keys(process.env)) {
       if (!(key in env)) { delete process.env[key]; }
     }
     Object.assign(process.env, env);
-    process.stdout.write = ((chunk) => { stdout += chunk; return true; }) as typeof process.stdout.write;
-    process.stderr.write = ((chunk) => { stderr += chunk; return true; }) as typeof process.stderr.write;
+    process.stdout.write = ((chunk, ...args) => {
+      // node --test serializes its worker events as binary writes. Preserve
+      // those events while capturing the CLI's text output.
+      if (typeof chunk !== 'string') { return previousStdoutWrite.call(process.stdout, chunk, ...args); }
+      stdout += chunk; return true;
+    }) as typeof process.stdout.write;
+    process.stderr.write = ((chunk, ...args) => {
+      if (typeof chunk !== 'string') { return previousStderrWrite.call(process.stderr, chunk, ...args); }
+      stderr += chunk; return true;
+    }) as typeof process.stderr.write;
     const status = await run(args, {
       baseCwd: repoRoot,
       log: line => { stdout += `${line}\n`; return ''; },
@@ -345,6 +355,7 @@ async function runWorkflow(repoRoot, env, args, _timeout = 60000, { allowFailure
     }
     return { status, stdout, stderr };
   } finally {
+    if (invokeFromTarget) { process.chdir(previousCwd); }
     process.stdout.write = previousStdoutWrite;
     process.stderr.write = previousStderrWrite;
     for (const key of Object.keys(process.env)) {
@@ -598,7 +609,7 @@ async function runScenario({ launchFromFeatureBranch = false, integrate = true, 
       return summary;
     }
 
-    await runWorkflow(worktree, env, ['integrate', slug]);
+    await runWorkflow(worktree, env, ['integrate', slug], 60000, { invokeFromTarget: true });
 
     const rootTask = taskFileIn(repo.repoRoot, slug);
     assert.ok(rootTask, 'integrate should leave the task in the base checkout');

@@ -104,7 +104,7 @@ export function createMissionRecovery(ports: IntegrateWorkflowPorts) {
     // below runs at the stored decidedAt. A genuinely fresh round still goes
     // through the handoff operation unchanged (AC #3).
     if (entryRound?.decision?.kind === 'approved') {
-      await missionServices.lifecycle.transition({
+      const transition = await missionServices.lifecycle.transition({
         operationId: `integrate-active-review:${context.slug}`,
         missionId: slugId,
         expectedVersion: missionLoad.version,
@@ -125,6 +125,12 @@ export function createMissionRecovery(ports: IntegrateWorkflowPorts) {
         occurredAt: reviewEntryAt,
         idempotencyKey: `active-review:${context.slug}:${reviewEntryAt}`,
       });
+      // A boundary that cannot commit must stop recovery loudly; the approve
+      // transition below can never run from a lane this transition was meant
+      // to reach (TASK-2582 audit: the result used to be discarded).
+      if (transition.status !== 'completed') {
+        throw abortWith(landing, `Mission ${slugId} could not be moved to review for integration: ${transition.error?.message || 'unknown'}.`);
+      }
       return missionServices.store.load(slugId);
     }
     // Submit through the existing handoff operation; it alone owns the

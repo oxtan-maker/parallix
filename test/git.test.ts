@@ -3,9 +3,9 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import childProcess from 'child_process';
+import * as childProcess from 'node:child_process';
 import pathModule from 'path';
-import { mockModule, installModuleMocks } from './lib/module-mock.js';
+import { mockModule, installModuleMocks, moduleMockOptions } from './lib/module-mock.js';
 import { createRequire } from 'node:module';
 const _require = createRequire(import.meta.url);
 const git = mockModule<typeof import('../src/adapters/git/git.js')>('../src/adapters/git/git.js', import.meta.url);
@@ -16,7 +16,7 @@ function mockSpawnSync(fake: (...args: unknown[]) => Record<string, unknown>): v
   mock.restoreAll();
   mock.module('node:child_process', {
     fallback: true,
-    exports: { ...childProcess, spawnSync: fake },
+    ...moduleMockOptions({ ...childProcess, spawnSync: fake }),
   });
 }
 

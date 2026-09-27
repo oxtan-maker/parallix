@@ -2,7 +2,7 @@ import { completed, failure, type ApplicationOutcome } from './contracts.js';
 import type { MissionStore } from './domain-ports.js';
 import type { MissionLifecycleService } from './mission-lifecycle-service.js';
 import { missionId } from '../domain/mission.js';
-import { revokeApprovedDecision } from '../domain/review.js';
+import { revokeApprovedDecision, reviewStatus } from '../domain/review.js';
 
 export interface RevokeReviewDecisionRequest {
   readonly slug: string;
@@ -37,8 +37,10 @@ export class RevokeReviewDecisionUseCase {
     const loaded = await this._store.load(missionId(request.slug));
     if (loaded.kind !== 'found') { return failure('validation', `Mission ${request.slug} has no recorded review decision`); }
     if (loaded.mission.status === 'done') { return failure('validation', `Mission ${request.slug} is closed and cannot be reopened by revocation`); }
-    if (loaded.mission.status !== 'integration') {
-      return failure('validation', `Mission ${request.slug} is ${loaded.mission.status}; only its current effective integration approval can be revoked`);
+    const strandedApproval = loaded.mission.status === 'active' && loaded.mission.review
+      && reviewStatus(loaded.mission.review) === 'approved';
+    if (loaded.mission.status !== 'integration' && !strandedApproval) {
+      return failure('validation', `Mission ${request.slug} is ${loaded.mission.status}; revocation requires its current effective approval in integration or a stranded active lane`);
     }
     if (!loaded.mission.review) { return failure('validation', `Mission ${request.slug} has no recorded review decision`); }
 

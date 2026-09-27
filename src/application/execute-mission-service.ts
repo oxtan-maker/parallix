@@ -1,8 +1,9 @@
 import type { ApplicationOutcome, Cancellation, Capability, DurableEvidence } from './contracts.js';
 import { failure, rejected } from './contracts.js';
 import { MissionLifecycleService } from './mission-lifecycle-service.js';
+import { checkLifecycleDeadline, monotonicNowMs } from './lifecycle-timing.js';
 import { agentFamily } from '../domain/agents.js';
-import { missionId, isMissionSlugCandidate, isDbAdhocIdentity } from '../domain/mission.js';
+import { missionId, isMissionSlugCandidate } from '../domain/mission.js';
 import type {
   AgentLaunchOutcome,
   AgentLaunchPlan,
@@ -55,11 +56,11 @@ interface ExecuteWorkspace {
  *
  *   1. request guards and the pre-launch cancellation boundary
  *   2. workspace resolution (preflight, worktree, task file)
- *   3. agent preparation and launch
+ *   3. agent preparation and launch, with the authoritative active boundary
+ *      committing at launch confirmation (fail-closed, ADR 0053 rule 5)
  *   4. the durable launch record (commit safety + evidence)
- *   5. lifecycle synchronization through the checked Mission authority
- *   6. best-effort telemetry
- *   7. the post-record cancellation boundary, then handoff and review
+ *   5. best-effort telemetry
+ *   6. the post-record cancellation boundary, then handoff and review
  *
  * It also owns the partial-failure policy: a launcher error or a non-zero agent
  * status stops the run before any durable record; a telemetry failure never
@@ -173,6 +174,13 @@ export class ExecuteMissionService {
       // board shows, so it has to land before the run publishes its next
       // state. A dropped promise here reorders the board behind reality.
       onAgentChanged: (agent) => this.publishWork(request, 'execute', `running execute agent (${agent})`, agent),
+      // TASK-2582: the authoritative active boundary persists as the launch
+      // is confirmed, before destination-state work proceeds — not after the
+      // agent finishes. A rejection propagates as a launch failure and stops
+      // the run. The launcher fires this for every family it actually starts,
+      // so an automatic fallback re-asserts the boundary with the new agent
+      // and no second lane event (activation is idempotent on an active lane).
+      onActivated: (agent, startedAtMs) => this.activateAtBoundary(request.slug, agent, startedAtMs),
     });
     if (launch.errored) {
       throw new Error(`Could not start execute agent (${launch.agent}): ${launch.errorMessage}`);
@@ -184,9 +192,8 @@ export class ExecuteMissionService {
   }
 
   /**
-   * Make the launch durable: commit whatever the agent left behind, synchronize
-   * the Mission lane when the launch left it unsynchronized, then record
-   * telemetry.
+   * Make the launch durable: commit whatever the agent left behind, then
+   * record telemetry.
    */
   private async recordLaunch(
     slug: string,
@@ -194,25 +201,6 @@ export class ExecuteMissionService {
     launch: AgentLaunchOutcome,
   ): Promise<DurableEvidence> {
     await this._ports.workspace.enforceCommitSafety({ slug, worktree: prepared.worktree });
-
-    if (isDbAdhocIdentity(slug)) {
-      // DB-owned adhoc identity (task-2468): the mission store is the authority,
-      // not a Backlog task file. The best-effort mirror is optional — its
-      // absence (deleted or relocated after draft) must not suppress the
-      // authoritative active transition. The DB store is always the revision the
-      // transition writes through.
-      await this.synchronizeLifecycle(slug, launch.agent);
-    } else if (prepared.taskResolution.ok && prepared.taskResolution.taskFile) {
-      const status = await this._ports.workspace.readTaskStatus(prepared.taskResolution.taskFile);
-      // Whether the recorded lane still needs synchronizing is an observation of
-      // the launch (a deferred rebase, or a task that is not yet active). What
-      // the transition *is* — and whether it is legal from the current status —
-      // is decided by `decideMission` inside the lifecycle use case, which then
-      // writes through the Mission authority with the exact revision it read.
-      if (launch.rebaseDeferred || (status && status !== 'active')) {
-        await this.synchronizeLifecycle(slug, launch.agent);
-      }
-    }
 
     try {
       await this._ports.telemetry.recordLaunchTelemetry({
@@ -229,22 +217,44 @@ export class ExecuteMissionService {
   }
 
   /**
-   * Route activation through the checked Mission boundary.
+   * Persist the `active` boundary the moment the launcher confirms the spawn.
    *
-   * The failure keeps its existing operator prefix and carries the Mission
-   * authority's reason (for example, which contract parts are missing).
+   * The destination state and its lane event commit before destination-state
+   * work proceeds (TASK-2582): a slow agent run, Git operation, or gate can
+   * no longer delay the transition, and a persistence failure throws so the
+   * run stops before any success output or Backlog promotion. An unavailable
+   * operator database fails closed like any other persistence failure
+   * (ADR 0053 rule 5): active work and handoff never run over an uncommitted
+   * lane.
    */
-  private async synchronizeLifecycle(slug: string, agent: string): Promise<void> {
-    const outcome = await new MissionLifecycleService(this._ports.missionTransitions).activate({
+  private async activateAtBoundary(slug: string, agent: string, workStartedAtMs = monotonicNowMs()): Promise<void> {
+    // Production launchers carry the monotonic timestamp of the real child
+    // spawn — destination-work start (TASK-2582 SC8) — so the budget covers
+    // work-start → persistence, not pre-spawn launch prep. The default keeps
+    // injected launchers that call the boundary immediately compatible.
+    const outcome = await this.activateMission(slug, agent);
+    if (outcome.status === 'completed') {
+      checkLifecycleDeadline({ startedAtMs: workStartedAtMs, what: `active lifecycle boundary for ${slug}` });
+      return;
+    }
+    // ADR 0053 rule 5: database-owned mutations fail closed when the database
+    // is unavailable or corrupt. An activation that cannot commit must stop
+    // the run — no active work, no handoff — never skip (TASK-2582 F9).
+    throw new Error(`active lifecycle boundary for ${slug} failed: ${outcome.error?.message ?? outcome.status}`);
+  }
+
+  /**
+   * Route activation through the checked Mission boundary.
+   */
+
+  private async activateMission(slug: string, agent: string) {
+    return new MissionLifecycleService(this._ports.missionTransitions).activate({
       operationId: `active-${slug}`,
       missionId: missionId(slug),
       capabilities: new Set(['mission:transition']),
       agent: agentFamily(agent),
       occurredAt: new Date().toISOString(),
     });
-    if (outcome.status !== 'completed') {
-      throw new Error(`legacy task lifecycle synchronization failed: ${outcome.error?.message ?? outcome.status}`);
-    }
   }
 
   private emit(request: ExecuteMissionRequest, sequence: number, phase: string, message: string, agent?: string) {

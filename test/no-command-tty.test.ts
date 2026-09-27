@@ -20,7 +20,7 @@ function captureBareInvocation(overrides: MainOverrides = {}) {
 test('no-command TTY dispatches the same ui command as explicit px ui', async () => {
   const calls: Array<[string, string[], { command: string }]> = [];
   const commandFns = {
-    ui: async (args: string[], options: { command: string }) => calls.push(['ui', args, options]),
+    ui: async (args: string[], options: { command: string }) => calls.push(['ui', args, { command: options.command }]),
   };
 
   await main([], {

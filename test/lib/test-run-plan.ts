@@ -13,7 +13,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
-import { UNIT_TEST_BUDGET_MS, UNIT_TEST_HEADROOM_MS, onGitHubActions } from './unit-test-budget-reporter.js';
+import { UNIT_TEST_BUDGET_MS, UNIT_TEST_HEADROOM_MS, onGitHubActions } from './unit-test-budget-reporter.mjs';
 import { selectTierFiles } from './test-tier-selection.js';
 // Re-export so the test/lib surface stays the single authority entry point for
 // coverage and the regression test.
@@ -31,6 +31,11 @@ export interface TestRunPlanOptions {
    * without spawning a process.
    */
   probeNodeVersion?: (executable: string) => string | null;
+  /**
+   * Reports whether a candidate supports `--test-concurrency`. Injected by
+   * plan tests so they do not spawn a nested Node process.
+   */
+  probeTestConcurrency?: (executable: string) => boolean;
 }
 
 export interface TestRunPlan {
@@ -73,6 +78,7 @@ const testConcurrencySupport = new Map<string, boolean>();
 export function buildTestRunPlan(options: TestRunPlanOptions): TestRunPlan {
   const { executionRoot, requestedArgs } = options;
   const probeNodeVersion = options.probeNodeVersion ?? defaultProbeNodeVersion;
+  const probeTestConcurrency = options.probeTestConcurrency;
   const testRoot = path.join(executionRoot, 'test');
   const MINIMUM_TEST_NODE_MAJOR = 20;
   const MINIMUM_TEST_NODE_MINOR = 6;
@@ -115,6 +121,9 @@ export function buildTestRunPlan(options: TestRunPlanOptions): TestRunPlan {
   // `--test-concurrency` exists from Node 20.15 on; probe empirically so no
   // version table has to be maintained for older supported runtimes.
   function supportsTestConcurrency(executable: string): boolean {
+    if (probeTestConcurrency) {
+      return probeTestConcurrency(executable);
+    }
     const cached = testConcurrencySupport.get(executable);
     if (cached !== undefined) { return cached; }
     const result = spawnSync(executable, ['--test', '--test-concurrency=1', '--help'], { stdio: 'ignore' });
@@ -192,16 +201,17 @@ export function buildTestRunPlan(options: TestRunPlanOptions): TestRunPlan {
   // tests run via --integration and are exempt because they cross real boundaries.
   // Suite-level budget: 180 s for the full default suite on a typical developer
   // workstation. Adjust PARALLIX_UNIT_TEST_BUDGET_MS to override.
-  // TASK-2542: on GitHub-hosted runners the budget reporter is not executed at
-  // all. The per-test --test-timeout safety net stays (it is not a timing test
-  // nor a reporter); only the runtime timing reporter is dropped. The
-  // `--unit-test-headroom` authoring path is local-only and never carries the
-  // GitHub flag, so its reporter is unaffected.
+  // Node's --test-timeout wraps each test-file worker, including the mandatory
+  // isolation bootstrap. Under host contention that creates false failures
+  // before a test begins. The reporter instead measures each test:pass event,
+  // preserving the 1,000 ms unit-test cap without charging worker startup.
+  // GitHub-hosted runners intentionally suspend this local timing policy.
   const githubTimingSuspended = onGitHubActions();
-  const testTimeoutArgs = runsIntegrationSuite ? [] : [
-    '--test-timeout=' + UNIT_TEST_BUDGET_MS,
+  const testReporterArgs = runsIntegrationSuite ? [] : [
     ...(githubTimingSuspended ? [] : [
-      '--test-reporter=' + pathToFileURL(path.join(testRoot, 'lib', 'unit-test-budget-reporter.ts')).href,
+      // Node loads custom reporters outside the test files' TypeScript preload
+      // on Node 22, so this entrypoint must be native ESM rather than `.ts`.
+      '--test-reporter=' + pathToFileURL(path.join(testRoot, 'lib', 'unit-test-budget-reporter.mjs')).href,
     ]),
   ];
 
@@ -225,7 +235,7 @@ export function buildTestRunPlan(options: TestRunPlanOptions): TestRunPlan {
       ...bootstrapArgs,
       ...moduleMockArgs,
       ...testConcurrencyArgs,
-      ...testTimeoutArgs,
+      ...testReporterArgs,
       '--test',
       ...testFiles,
     ],

@@ -133,7 +133,7 @@ describe('TASK-2385 verdict persistence through the bound reviewer output seam',
       reviewerRetryCount: 0,
       implementerRetryCount: 0,
     };
-    const state = { mission: { review: { rounds: [base, { ...base, number: 2 }], intervention: null, stageLaunches: [], reviewEvents: [] } as any }, version: 1, saves: [] as unknown[] };
+    const state = { mission: { id: 'task-2385', status: 'review', review: { rounds: [base, { ...base, number: 2 }], intervention: null, stageLaunches: [], reviewEvents: [] } as any }, version: 1, saves: [] as unknown[] };
     return {
       state,
       async load() { return { kind: 'found', mission: state.mission, version: state.version }; },

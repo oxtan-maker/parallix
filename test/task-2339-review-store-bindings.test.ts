@@ -69,6 +69,9 @@ test('reviewLoopBindings supplies persisted-output readers, not only review-stat
   assert.deepEqual(Object.keys(bindings).sort(), [
     'consumeImplementerArtifactsFn',
     'consumeReviewerArtifactsFn',
+    // TASK-2582: the round-open boundary moves an active Mission back to
+    // review at the boundary, so the loop needs the lifecycle service.
+    'lifecycleService',
     'missionStore',
     'readReviewStateFn',
     'resetReviewStateFn',

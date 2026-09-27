@@ -1,8 +1,9 @@
 /**
  * TASK-2326 — deterministic proof that the unit-test timing guard fires.
  *
- * The default test suite passes `--test-timeout=1000` to node --test.
- * This test proves the guard is active and correctly configured.
+ * The default test suite's reporter enforces the 1,000 ms per-test cap.
+ * Node's file-worker timeout is intentionally not used: it charges bootstrap
+ * startup as test time under host contention.
  *
  * Note: We cannot use `node --test` inside a running test (Node detects
  * recursive test runner calls and skips). Instead, we verify the guard
@@ -14,13 +15,13 @@ import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { UNIT_TEST_BUDGET_MS, UNIT_TEST_HEADROOM_MS, onGitHubActions } from './lib/unit-test-budget-reporter.js';
+import { UNIT_TEST_BUDGET_MS, UNIT_TEST_HEADROOM_MS, onGitHubActions } from './lib/unit-test-budget-reporter.mjs';
 import { buildTestRunPlan } from './lib/test-run-plan.js';
 
 const ROOT = process.cwd();
 const RUNNER_PATH = path.join(ROOT, 'test', 'run-default-tests.ts');
 
-test('unit-test timeout guard: runner enforces --test-timeout for the default suite', () => {
+test('unit-test timeout guard: runner enforces the reporter budget for the default suite', () => {
   const planContent = fs.readFileSync(path.join(ROOT, 'test', 'lib', 'test-run-plan.ts'), 'utf8');
 
   // Must define a numeric timeout constant
@@ -29,10 +30,10 @@ test('unit-test timeout guard: runner enforces --test-timeout for the default su
     'test-run-plan.ts must use the unit-test budget',
   );
 
-  // Must pass --test-timeout to the node test runner
+  // The runtime reporter measures individual test events, not worker startup.
   assert.ok(
-    planContent.includes('--test-timeout='),
-    'test-run-plan.ts must include --test-timeout argument',
+    planContent.includes('unit-test-budget-reporter.mjs'),
+    'test-run-plan.ts must include the unit-test budget reporter',
   );
   assert.ok(
     UNIT_TEST_BUDGET_MS === 1_000,
@@ -46,16 +47,16 @@ test('unit-test timeout guard: runner enforces --test-timeout for the default su
   );
 });
 
-test('unit-test timeout guard: default plan keeps 1000ms while headroom mode is opt-in', () => {
+test('unit-test timeout guard: default plan keeps the reporter while headroom mode is opt-in', () => {
   const options = { executionRoot: ROOT, probeNodeVersion: () => 'v24.15.0' };
   const defaultPlan = buildTestRunPlan({ ...options, requestedArgs: [] });
   const headroomPlan = buildTestRunPlan({ ...options, requestedArgs: ['--unit-test-headroom'] });
 
   assert.equal(UNIT_TEST_HEADROOM_MS, 500);
-  assert.ok(defaultPlan.nodeArgs.includes('--test-timeout=1000'));
+  assert.ok(defaultPlan.nodeArgs.some(arg => arg.includes('unit-test-budget-reporter.mjs')));
   assert.equal(defaultPlan.unitTestHeadroomMs, null);
   assert.equal(headroomPlan.unitTestHeadroomMs, UNIT_TEST_HEADROOM_MS);
-  assert.ok(headroomPlan.nodeArgs.includes('--test-timeout=1000'));
+  assert.ok(headroomPlan.nodeArgs.some(arg => arg.includes('unit-test-budget-reporter.mjs')));
 });
 
 test('unit-test timeout guard: suite-level budget is configurable and documented', () => {

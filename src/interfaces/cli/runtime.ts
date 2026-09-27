@@ -156,7 +156,7 @@ async function runKnownCommand(command: string, commandFn: Command | undefined, 
     }
   }
   if (typeof commandFn === 'function') {
-    await commandFn(args.slice(1), { command });
+    await commandFn(args.slice(1), { command, exitFn, exit: exitFn });
     return;
   }
   errorFn(fmt.status('FAIL', `Command module '${command}' does not export a function.`));

@@ -171,6 +171,12 @@ export function selectTierFiles(executionRoot: string): TierFileSelection {
     // TASK-2438 composes concrete board readers over temporary repository
     // files, which invokes the worktree/Git topology boundary.
     'task-2438-worktree-board-repro.test.ts',
+    // TASK-2582: opens a real migrated SQLite operator database in a temp
+    // directory and drives the real MissionLifecycleService and review
+    // persistence boundaries. The SQLite boundary is not visible to the
+    // content heuristic, so both files are declared here.
+    'task-2582-lifecycle-ordering.test.ts',
+    'task-2582-repro.test.ts',
   ]);
 
   // Classify subdir tests through the same boundary filter as root-level tests,

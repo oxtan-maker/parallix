@@ -32,6 +32,7 @@ import type { HandoffWorkflowPorts, HandoffResult } from './ports/handoff-workfl
 import type { MissionStore } from './domain-ports.js';
 import type { CheckpointData } from '../domain/checkpoint.js';
 import { rebound } from './rebound-kernel.js';
+import { transitionReviewRepair } from './review-repair-lifecycle.js';
 
 /**
  * A selection failure that means "no other family is available right now",
@@ -1210,7 +1211,11 @@ export class HandoffCommandUseCase {
         worktree: rootDir,
         implementer: forgejoUser,
         startAgent: startAgentFn,
-        transitionToImplementer: (missionSlug) => ports.backlog.transitionTask(missionSlug, 'active', { rootDir, log }),
+        transitionToImplementer: async (missionSlug) => {
+          const services = await missionServicesFn(rootDir, { missionDir: missionDirPath });
+          await transitionReviewRepair(missionSlug, 'active', forgejoUser, services.store, services.lifecycle);
+          return ports.backlog.transitionTask(missionSlug, 'active', { rootDir, log });
+        },
         verify: async () => {
           retried = await this.performHandoff(slug, { ...opts, worktree: rootDir, force: true, recoverGateFailure: false });
           return {
