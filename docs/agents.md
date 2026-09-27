@@ -360,6 +360,22 @@ observation: `live px command[ (<family>)] — recovery evidence only`,
 `px command liveness unknown` (the scan could not run). The two are never
 merged, because a live coordinator is not a running agent.
 
+`px status <slug>` also lists every checkpoint of the mission in execution
+order, so an operator can review delivered and pending slices in one view.
+Each checkpoint shows what it was planned to deliver; a recorded checkpoint
+also shows every Goal Check criterion with its paired evidence:
+
+```
+Checkpoints:
+  [x] CP-1: Add focused status-rendering coverage
+      Goal Check: Status output lists every checkpoint
+        Evidence: ./scripts/verify-local.sh all passes
+  [ ] CP-2: Update the px status renderer
+```
+
+`px status <slug> --json` carries the same list, with a `goalCheck` array on
+each checkpoint (empty while it is only planned).
+
 The known-family list comes from `config/agents.json`
 (`resolveKnownAgentFamilies`, `src/adapters/agents/known-agent-families.ts`):
 

@@ -3,7 +3,7 @@ import { git } from '../../git/git.js';
 import { resolveMissionBaseBranch } from '../../filesystem/mission-utils.js';
 import { findTaskFile, getTaskFrontmatterValue, getTaskLabels, getTaskStatus } from '../../backlog/backlog.js';
 import { resolveCanonicalRepositoryId } from '../../git/repository-identity.js';
-import { isLandedSquashMessage, parseCommitMessageRecords } from './integrate-conflict.js';
+import { isLandedSquashMessage, parseCommitMessageRecords } from './landed-squash.js';
 import { missionId, missionLabels, type MissionIntake } from '../../../domain/mission.js';
 
 /**

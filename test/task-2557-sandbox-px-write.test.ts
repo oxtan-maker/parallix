@@ -129,6 +129,7 @@ function setupFixture(slug: string, title: string): { tmpRoot: string; repo: str
   fs.mkdirSync(path.join(repo, 'backlog', 'archive'), { recursive: true });
   fs.mkdirSync(path.join(repo, 'config'), { recursive: true });
   fs.mkdirSync(binDir, { recursive: true });
+  fs.mkdirSync(path.join(repo, '.tmp'), { recursive: true });
   fs.mkdirSync(reviewTmpDir, { recursive: true });
 
   // The custom runner resolves to opencode, so stub every launcher name the
@@ -193,6 +194,9 @@ function pxEnv(cwd: string, stateHome: string, binDir: string): NodeJS.ProcessEn
     PARALLIX_HOME: stateHome,
     PARALLIX_E2E_PX_ENTRY: CLI_ENTRY,
     PARALLIX_E2E_PX_LOADER: TSX_LOADER,
+    // /tmp stays readonly in the outer sandbox. Give tsx a writable cache
+    // inside the repo so each contract command can reuse compiled modules.
+    TMPDIR: path.join(cwd, '.tmp'),
     // Restricted PATH: only the fixture stubs and symlinks resolve, so the
     // sandboxed px can never reach a real agent or remote.
     PATH: binDir,

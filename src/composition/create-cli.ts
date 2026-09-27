@@ -14,7 +14,7 @@ import { recoverMissionCommand } from '../interfaces/cli/recover.js';
 import { ensureFirstRunAgentConfig } from '../adapters/agents/first-run-config.js';
 import { findTaskFile, getTaskStatus } from '../adapters/backlog/backlog.js';
 import { cleanupMissionWorktree } from '../adapters/cli/commands/integrate-post.js';
-import { findLandedSquashOnBaseBranch } from '../adapters/cli/commands/integrate-conflict.js';
+import { findLandedSquashOnBaseBranch } from '../adapters/cli/commands/landed-squash.js';
 import { landedMissionIntake } from '../adapters/cli/commands/recover-landed-intake.js';
 import type { BoardProgressSink } from '../application/controller/board-command.js';
 import configWorkflow from '../adapters/cli/commands/config.js';
@@ -254,7 +254,7 @@ function createCommandRegistry(rootDir: string): Record<string, Command> {
         // reachable from `main`. Detect the squash commit by subject in the
         // primary branch log instead of branch ancestry (TASK-2492). A branch
         // with no committed payload produces no squash commit, so it is never
-        // misreported as landed and never deleted (F2). See integrate-conflict.findLandedSquashOnBaseBranch.
+        // misreported as landed and never deleted (F2). See landed-squash.findLandedSquashOnBaseBranch.
         alreadyMerged: async (slug) => findLandedSquashOnBaseBranch(rootDir, slug) !== null,
         // Absent-aggregate recovery only: local Git evidence that the payload
         // was squash-landed on the mission's recorded base branch (TASK-2516).

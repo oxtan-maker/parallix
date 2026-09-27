@@ -123,7 +123,13 @@ function logBriefAndGates(missionData: StatusMissionData, log: (_msg: string) =>
   const checkpoints = missionData.checkpoints ?? [];
   if (checkpoints.length > 0) {
     log('Checkpoints:');
-    for (const checkpoint of checkpoints) { log(`  ${checkpoint.recorded ? '[x]' : '[ ]'} ${checkpoint.name}: ${checkpoint.description}`.trimEnd()); }
+    for (const checkpoint of checkpoints) {
+      log(`  ${checkpoint.recorded ? '[x]' : '[ ]'} ${checkpoint.name}: ${checkpoint.description}`.trimEnd());
+      for (const row of checkpoint.goalCheck) {
+        log(`      Goal Check: ${row.criterion}`);
+        log(`        Evidence: ${row.evidence}`);
+      }
+    }
   }
   const gates = missionData.declaredGates ?? [];
   log(gates.length > 0 ? `Declared gates: ${gates.join('; ')}` : 'Declared gates: none');

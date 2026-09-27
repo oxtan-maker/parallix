@@ -107,8 +107,8 @@ export interface StatusMissionData {
   readonly successCriteria?: readonly string[];
   /** Missions this one depends on; recorded for readers, enforced by nothing. */
   readonly dependencies?: readonly string[];
-  /** Every checkpoint in order, planned or evidenced, marked with whether its evidence is recorded. */
-  readonly checkpoints?: readonly { readonly name: string; readonly description: string; readonly recorded: boolean }[];
+  /** Every checkpoint in execution order, planned or evidenced, with its recorded Goal Check rows (empty while planned). */
+  readonly checkpoints?: readonly StatusCheckpoint[];
   /** The draft's predicted NEL bucket, when recorded. */
   readonly predictedNelBucket?: string | null;
   /** The bug mission's declared red-to-green reproduction test, when one is recorded. */
@@ -137,6 +137,15 @@ export interface StatusMissionData {
 }
 
 /** One Goal Check evidence row as `px status` reports it. */
+/** One planned or recorded checkpoint as `px status` presents it. */
+export interface StatusCheckpoint {
+  readonly name: string;
+  /** What the checkpoint was planned to deliver. */
+  readonly description: string;
+  readonly recorded: boolean;
+  readonly goalCheck: readonly StatusGoalCheckRow[];
+}
+
 export interface StatusGoalCheckRow {
   readonly criterion: string;
   readonly evidence: string;

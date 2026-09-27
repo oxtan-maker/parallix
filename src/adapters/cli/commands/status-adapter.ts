@@ -157,6 +157,7 @@ export function createStatusBoardAdapter(options: {
             name: checkpoint.name,
             description: checkpoint.firstLine ?? '',
             recorded: checkpoint.goalCheck.length > 0,
+            goalCheck: checkpoint.goalCheck.map((r) => ({ criterion: r.criterion, evidence: r.evidence })),
           })),
           predictedNelBucket: recorded?.mission.predictedNelBucket ?? null,
           reproductionTest: recorded?.mission.reproductionTest ?? null,
