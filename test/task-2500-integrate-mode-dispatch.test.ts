@@ -128,7 +128,7 @@ async function runIntegrate(mode: 'local' | 'github-pr'): Promise<RunResult> {
     gitCalls.push(args);
     const joined = args.join(' ');
     if (joined.includes('branch --show-current')) { return ok('main\n'); }
-    if (joined.includes('log --format=%H %s')) { return ok('other0 unrelated subject\n'); }
+    if (joined.includes('log --format=%x00%H%x00%B')) { return ok('\0other0\0unrelated subject\n'); }
     if (args.includes('show')) { return ok(`${LANDED_SHA}\n`); }
     if (joined.includes('merge') && joined.includes('--no-commit')) { return ok(''); }
     if (joined.includes('merge') && joined.includes('--abort')) { return ok(''); }

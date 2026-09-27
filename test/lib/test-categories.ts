@@ -267,6 +267,11 @@ export const INTEGRATION_CI_TESTS: readonly string[] = [
   // processes and reclaims their leftovers; a clean GitHub runner provides
   // every dependency (node, tsx from devDependencies, temp directories).
   'task-2577-tmp-fixture-leaks-repro.test.ts',
+  // TASK-2595: drives the real local squash landing against a throwaway Git
+  // repo to prove the landed commit message carries the recorded title and
+  // task reference, so it crosses the git boundary and runs only in the
+  // integration layer.
+  'task-2595-squash-landing-commit-message.test.ts',
   'test-hygiene.test.ts',
   'tui-command-flow.test.ts',
   'tui-pty-smoke.test.ts',

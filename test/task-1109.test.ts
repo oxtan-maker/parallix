@@ -512,7 +512,7 @@ test('integrate Variant B resumed partial state prints sync diagnostics on sync 
     if (args.includes('rev-parse')) return { status: 0, stdout: 'deadbeef', stderr: '' };
     if (args.includes('merge') && args.includes('--no-commit')) return { status: 1, stdout: 'conflict', stderr: 'conflict' };
     if (args.includes('merge') && args.includes('--abort')) return { status: 1, stdout: '', stderr: 'There is no merge to abort' };
-    if (args.includes('log') && args.includes('--format=%H %s')) return { status: 0, stdout: `deadbeef mission/${TEST_SLUG}: Test Mission\n`, stderr: '' };
+    if (args.includes('log') && args.includes('--format=%x00%H%x00%B')) return { status: 0, stdout: `\0deadbeef\0mission/${TEST_SLUG}: Test Mission\n`, stderr: '' };
     return { status: 0, stdout: '', stderr: '' };
   });
   mock.method(forgejo, 'syncMerged', () => ({ ok: false, error: 'api-failed', statusCode: 500 }));

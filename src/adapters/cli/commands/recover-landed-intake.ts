@@ -1,8 +1,9 @@
 import fs from 'node:fs';
 import { git } from '../../git/git.js';
-import { missionBranchName, resolveMissionBaseBranch } from '../../filesystem/mission-utils.js';
+import { resolveMissionBaseBranch } from '../../filesystem/mission-utils.js';
 import { findTaskFile, getTaskFrontmatterValue, getTaskLabels, getTaskStatus } from '../../backlog/backlog.js';
 import { resolveCanonicalRepositoryId } from '../../git/repository-identity.js';
+import { isLandedSquashMessage, parseCommitMessageRecords } from './integrate-conflict.js';
 import { missionId, missionLabels, type MissionIntake } from '../../../domain/mission.js';
 
 /**
@@ -12,7 +13,8 @@ import { missionId, missionLabels, type MissionIntake } from '../../../domain/mi
  *
  * `px integrate` lands with `git merge --squash`, so the mission branch tip is
  * never reachable from the base branch; the landing is instead recorded by the
- * squash commit's `mission/<slug>:` subject (same evidence
+ * squash commit's message (TASK-2595 shape: `Task: <slug>` body line; legacy
+ * shape: `mission/<slug>:` subject prefix — same evidence
  * `findExistingSquashCommit` uses, but scoped to the recorded base branch
  * instead of the current HEAD). Forgejo PR state is deliberately not consulted:
  * local Git history is the only merge authority.
@@ -32,10 +34,9 @@ export function landedMissionIntake(slug: string, rootDir: string): MissionIntak
   const baseRef = git(['-C', rootDir, 'rev-parse', '--verify', `${base}^{commit}`]);
   if (baseRef.status !== 0) {return null;}
 
-  const prefix = `${missionBranchName(slug, rootDir)}:`;
-  const log = git(['-C', rootDir, 'log', base, '--format=%s', '-200']);
+  const log = git(['-C', rootDir, 'log', base, '--format=%x00%H%x00%B', '-200']);
   if (log.status !== 0) {return null;}
-  const landed = log.stdout.split('\n').some(subject => subject.startsWith(prefix));
+  const landed = parseCommitMessageRecords(log.stdout).some(record => isLandedSquashMessage(record.message, slug, rootDir));
   if (!landed) {return null;}
 
   return {

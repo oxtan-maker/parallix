@@ -134,7 +134,13 @@ export function reportStashPopFailure(slug: string, restoreResult: any, opts: {r
   const rootDir = opts.rootDir || getPrimaryWorktree();
   const headResult = runner(['-C', rootDir, 'log', '-1', '--oneline']);
   const headLine = headResult.status === 0 ? headResult.stdout.trim() : '(unavailable)';
-  const integrationLanded = headLine.includes(`${missionBranchName(slug, rootDir)}:`);
+  // The landed-squash evidence lives in the full message: legacy commits
+  // carry the `mission/<slug>:` subject prefix, TASK-2595 commits carry the
+  // `Task: <slug>` body line. `--oneline` cannot show the body, so match on
+  // the full message (TASK-2595).
+  const headMessageResult = runner(['-C', rootDir, 'log', '-1', '--format=%x00%H%x00%B']);
+  const headRecords = headMessageResult.status === 0 ? parseCommitMessageRecords(headMessageResult.stdout) : [];
+  const integrationLanded = headRecords.some(record => isLandedSquashMessage(record.message, slug, rootDir));
   const indexConflicts = (opts.getUnresolvedIndexConflictsFn || getUnresolvedIndexConflicts)(rootDir);
   const collisionFiles = parseStashPopCollisionFiles(output);
 
@@ -286,17 +292,51 @@ export function maybeDropStashAfterCollision(
 
 /** @param {string} rootDir @param {string} slug */
 export function findExistingSquashCommit(rootDir: string, slug: string) {
-  const result = git(['-C', rootDir, 'log', '--format=%H %s', '-50']);
+  const result = git(['-C', rootDir, 'log', '--format=%x00%H%x00%B', '-50']);
   if (result.status !== 0) {return null;}
-  const prefix = `${missionBranchName(slug, rootDir)}:`;
-  for (const line of result.stdout.trim().split('\n')) {
-    const spaceIdx = line.indexOf(' ');
-    if (spaceIdx === -1) {continue;}
-    const hash = line.slice(0, spaceIdx);
-    const subject = line.slice(spaceIdx + 1);
-    if (subject.startsWith(prefix)) {return hash;}
+  for (const record of parseCommitMessageRecords(result.stdout)) {
+    if (isLandedSquashMessage(record.message, slug, rootDir)) {return record.hash;}
   }
   return null;
+}
+
+/**
+ * Parse `git log --format=%x00%H%x00%B` output into per-commit records. Each
+ * record starts with a NUL, so the split tokens strictly alternate
+ * (hash, full raw message) after the leading empty token; git's trailing
+ * record newline lands at the end of the message and is harmless to the
+ * line-based matchers. Commit messages never contain NUL, so the record
+ * delimiters are unambiguous for any hash length.
+ *
+ * @param {string} stdout
+ * @returns {Array<{hash: string, message: string}>} records in `git log`
+ * order (newest first)
+ */
+export function parseCommitMessageRecords(stdout: string): Array<{ hash: string, message: string }> {
+  const tokens = stdout.split('\0');
+  const records: Array<{ hash: string, message: string }> = [];
+  for (let i = 1; i + 1 < tokens.length; i += 2) {
+    records.push({ hash: tokens[i], message: tokens[i + 1] });
+  }
+  return records;
+}
+
+/**
+ * Whether a commit message is the landed squash of `slug` (TASK-2595).
+ *
+ * The current shape is subject = recorded mission title with the body line
+ * `Task: <slug>`; history predating TASK-2595 carries the subject prefix
+ * `mission/<slug>:`. Both are durable evidence of the same landing, so every
+ * landed-squash detector must accept either — existing commits on base
+ * branches keep the old shape and are never rewritten.
+ *
+ * @param {string} message the full commit message (subject + body)
+ * @param {string} slug
+ * @param {string} rootDir resolves the mission branch prefix for the legacy shape
+ */
+export function isLandedSquashMessage(message: string, slug: string, rootDir: string): boolean {
+  if (message.startsWith(`${missionBranchName(slug, rootDir)}:`)) {return true;}
+  return message.split('\n').some(line => line === `Task: ${slug}`);
 }
 
 /**
@@ -326,13 +366,10 @@ export function findLandedSquashOnBaseBranch(rootDir: string, slug: string) {
   if (!base) {return null;}
   const baseRef = git(['-C', rootDir, 'rev-parse', '--verify', `${base}^{commit}`]);
   if (baseRef.status !== 0) {return null;}
-  const prefix = `${missionBranchName(slug, rootDir)}:`;
-  const log = git(['-C', rootDir, 'log', base, '--format=%H %s', '-200']);
+  const log = git(['-C', rootDir, 'log', base, '--format=%x00%H%x00%B', '-200']);
   if (log.status !== 0) {return null;}
-  for (const line of log.stdout.trim().split('\n')) {
-    const spaceIdx = line.indexOf(' ');
-    if (spaceIdx === -1) {continue;}
-    if (line.slice(spaceIdx + 1).startsWith(prefix)) {return line.slice(0, spaceIdx);}
+  for (const record of parseCommitMessageRecords(log.stdout)) {
+    if (isLandedSquashMessage(record.message, slug, rootDir)) {return record.hash;}
   }
   return null;
 }

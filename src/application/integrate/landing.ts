@@ -6,6 +6,7 @@
 import * as fmt from '../presentation/cli-format.js';
 import { abortWith, resolveIntegrationTaskPath } from './support.js';
 import { createSquashLanding, type LandingRun } from './squash.js';
+import { missionId } from '../../domain/mission.js';
 import type { IntegrateWorkflowPorts } from '../ports/integrate-workflow.js';
 
 /**
@@ -161,7 +162,12 @@ export function createMissionLanding(ports: IntegrateWorkflowPorts, collaborator
     // TASK-2479: capture the pre-integration base-branch tip so the landing
     // result can show the `<before> → <after>` SHA transition.
     const landedFromSha = git(['-C', baseWorktree, 'rev-parse', baseBranch]).stdout.trim();
-    const summary = (missionPaths.missionTitle(slug) || slug).replace(/\s+/g, ' ').trim();
+    // TASK-2595: the landed commit's subject is the recorded mission title. The
+    // Mission store is the record of that title (typed drafts do not generate
+    // a MISSION.md); the file title and the slug are fallbacks only.
+    const lane = await run.missionServices.store.load(missionId(slug));
+    const recordedTitle = lane.kind === 'found' ? String(lane.mission.title ?? '').trim() : '';
+    const summary = (recordedTitle || missionPaths.missionTitle(slug) || slug).replace(/\s+/g, ' ').trim();
     // A DB-owned adhoc identity has no Backlog task file; the closeout is
     // best-effort and guards every task-file access, so mainTaskFile stays empty.
     const mainTaskFile = resolveIntegrationTaskPath(context.task?.taskFile, context.missionWorktree, baseWorktree);

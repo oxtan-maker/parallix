@@ -235,7 +235,7 @@ export function createSquashLanding(ports: IntegrateWorkflowPorts, { promoteTask
   }
 
   async function squashAndLand(run: LandingRun, { branch, summary, landedFromSha, mainTaskFile }: { branch: string, summary: string, landedFromSha: string, mainTaskFile: string }) {
-    const { context, baseWorktree, baseBranch } = run;
+    const { slug, context, baseWorktree, baseBranch } = run;
     squashMerge(run, branch);
 
     // Capture the squash payload before closeout changes the checkout. The
@@ -270,7 +270,12 @@ export function createSquashLanding(ports: IntegrateWorkflowPorts, { promoteTask
         `Remove them on ${baseBranch} (git rm) and retry integrate.`,
       );
     }
-    await commitLandedSquash(run, ['-C', baseWorktree, 'commit', '--only', '-m', `${branch}: ${summary}`, '--', ...intendedPayloadPaths], intendedPayloadPaths);
+    // TASK-2595: the landed commit reads like the mission, not the machinery —
+    // the subject is the recorded mission title (`summary`) and the body
+    // records the mission task reference. Landed-squash detectors key on the
+    // `Task: <slug>` body line (isLandedSquashMessage), so keep the two in
+    // step when the message shape ever changes again.
+    await commitLandedSquash(run, ['-C', baseWorktree, 'commit', '--only', '-m', summary, '-m', `Task: ${slug}`, '--', ...intendedPayloadPaths], intendedPayloadPaths);
 
     const mergedCommit = git(['-C', baseWorktree, 'rev-parse', 'HEAD']).stdout.trim();
     await finishLanding(run, { branch, mergedCommit, stepLabel: 'Step 6', variant: 'variant-b' });

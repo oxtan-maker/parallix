@@ -1651,8 +1651,14 @@ test('reportStashPopFailure confirms landed integration and prints merge-conflic
     reportStashPopFailure('task-113', { status: 1, stdout: '', stderr: 'conflict output' }, {
       rootDir: '/tmp/main-checkout',
       gitRunner(args) {
-        assert.deepEqual(args, ['-C', '/tmp/main-checkout', 'log', '-1', '--oneline']);
-        return { status: 0, stdout: 'abc123 mission/task-113: harden integrate preflight\n', stderr: '' };
+        if (args.includes('--oneline')) {
+          assert.deepEqual(args, ['-C', '/tmp/main-checkout', 'log', '-1', '--oneline']);
+          return { status: 0, stdout: 'abc123 mission/task-113: harden integrate preflight\n', stderr: '' };
+        }
+        // TASK-2595: the landed match runs on the full message (subject + body),
+        // which `--oneline` cannot show.
+        assert.deepEqual(args, ['-C', '/tmp/main-checkout', 'log', '-1', '--format=%x00%H%x00%B']);
+        return { status: 0, stdout: '\0abc123\0mission/task-113: harden integrate preflight\n', stderr: '' };
       },
       getUnresolvedIndexConflictsFn: () => ({
         ok: true,
@@ -1682,8 +1688,13 @@ test('reportStashPopFailure prints file-collision recovery steps when no merge e
       stderr: 'error: could not restore untracked files from stash'
     }, {
       rootDir: '/tmp/main-checkout',
-      gitRunner() {
-        return { status: 0, stdout: 'def456 unrelated latest commit\n', stderr: '' };
+      gitRunner(args) {
+        if (args.includes('--oneline')) {
+          return { status: 0, stdout: 'def456 unrelated latest commit\n', stderr: '' };
+        }
+        // TASK-2595: the landed match runs on the full message (subject + body);
+        // this HEAD is unrelated, so no landed-squash shape is present.
+        return { status: 0, stdout: '\0def456\0unrelated latest commit\n', stderr: '' };
       },
       getUnresolvedIndexConflictsFn: () => ({
         ok: true,

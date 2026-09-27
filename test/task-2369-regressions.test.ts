@@ -172,8 +172,8 @@ async function runIntegrate(scenario: Scenario) {
   mock.method(git, 'git', (args: string[]) => {
     const joined = args.join(' ');
     if (joined.includes('branch --show-current')) { return ok('main\n'); }
-    if (joined.includes('log --format=%H %s')) {
-      return ok(scenario.resume ? `${LANDED_SHA} mission/${SLUG}: fixture\n` : 'other0 unrelated subject\n');
+    if (joined.includes('log --format=%x00%H%x00%B')) {
+      return ok(scenario.resume ? `\0${LANDED_SHA}\0mission/${SLUG}: fixture\n` : '\0other0\0unrelated subject\n');
     }
     // Landed-commit metadata read: the timestamp must come from this commit.
     if (args.includes('show')) {

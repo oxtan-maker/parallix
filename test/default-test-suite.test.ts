@@ -207,6 +207,11 @@ const expectedIntegrationFiles = [
   // to prove stale backlog/tasks copies never land, so it crosses the
   // version-control boundary and runs only in the integration layer.
   'task-2534-stale-backlog-copy-landing-repro.test.ts',
+  // TASK-2595: drives the real squash landing against a throwaway repository
+  // to prove the landed commit message carries the recorded title and task
+  // reference, so it crosses the version-control boundary and runs only in
+  // the integration layer.
+  'task-2595-squash-landing-commit-message.test.ts',
   'task-2517-cp3-landed-closeout.test.ts',
   'task-2517-landed-squash-base-branch-detection.test.ts',
   'tui-pty-smoke.test.ts', 'task-2313-repro.test.ts', 'task-2370-repro.test.ts',

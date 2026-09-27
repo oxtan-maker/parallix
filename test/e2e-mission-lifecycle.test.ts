@@ -644,6 +644,7 @@ async function runScenario({ launchFromFeatureBranch = false, integrate = true, 
 
     if (preCommitHook) {
       summary.integrate.landedSubject = runGit(repo.repoRoot, ['log', '-1', '--format=%s', 'main']);
+      summary.integrate.landedBody = runGit(repo.repoRoot, ['log', '-1', '--format=%b', 'main']);
       summary.integrate.landedFiles = runGit(repo.repoRoot, ['show', '--name-only', '--format=', 'main']).split('\n').filter(Boolean);
       summary.integrate.versionAtMain = runGit(repo.repoRoot, ['show', 'main:version.txt']);
     }
@@ -980,7 +981,13 @@ test('configured post-integrate hook runs exactly once with slug/base-worktree/b
 test('pre-commit hook changes land inside the mission squash commit, not a follow-up commit (task-2510)', async () => {
   const summary = await runScenario({ launchFromFeatureBranch: false, integrate: true, preCommitHook: true });
   assert.equal(summary.integrate.rootTaskStatus, 'done');
-  assert.match(summary.integrate.landedSubject, /^mission\/task-2002: /, 'main tip must be the mission commit itself');
+  // TASK-2595: the landed subject is the recorded mission title, and the body
+  // records the mission task reference — main history reads like the mission.
+  assert.equal(summary.integrate.landedSubject, 'Primary Branch Lifecycle', 'main tip subject must be the recorded mission title');
+  assert.ok(
+    summary.integrate.landedBody.split('\n').includes('Task: task-2002'),
+    `main tip body must record the mission task reference; body was ${JSON.stringify(summary.integrate.landedBody)}`,
+  );
   assert.ok(summary.integrate.landedFiles.includes('version.txt'), `landed commit must carry the hook change: ${summary.integrate.landedFiles.join(', ')}`);
   assert.equal(summary.integrate.versionAtMain, '1.0.1');
 });
