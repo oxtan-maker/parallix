@@ -171,7 +171,7 @@ An **internal retrospective, not external evidence,** measured the isolated work
 
 **Alpha, local-first, and best suited to operators comfortable with Git and CLI workflows.**
 
-- **Distribution:** Published to the public npm registry as `@magnusekdahl/parallix`. Local tarball install (`npm pack`) is also supported. No Homebrew, no Docker image, no standalone binary, and no CI/release automation today.
+- **Distribution:** Published to the public npm registry as @magnusekdahl/parallix. Verified main commits are continuously delivered/ published through GitHub Actions using npm Trusted Publishing with provenance, with a matching Git tag and GitHub Release. Local tarball installation (npm pack) is also supported.
 - **Review surface:** Forgejo is supported as the hosted PR viewer/publication surface, but the workflow remains local-first and can run without Forgejo when that provider is disabled.
 - **Telemetry:** structured token/usage telemetry exists for the codex and claude families; the local-custom and mistral paths record honest zeros by design rather than fabricated numbers.
 - **Graphify:** the knowledge-graph path is supported for codex, claude, and custom/opencode after one-time operator setup. It is optional, not a workflow prerequisite. The credible claim today is better-scoped context retrieval, not a proven token-savings benchmark.
