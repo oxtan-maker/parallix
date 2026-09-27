@@ -4,6 +4,7 @@ title: Recognize the actual human provider approver during integration recovery
 status: backlog
 assignee: []
 created_date: '2026-09-27 06:03'
+updated_date: '2026-09-27 06:06'
 labels:
   - bug
   - review
@@ -33,6 +34,12 @@ Also px integrate --dry-run prints preflight passed / READY TO INTEGRATE despite
 - [ ] #3 Regression coverage reproduces magnus approval with assigned reviewer codex and default alias human; negative cases reject unauthorized, withdrawn and invalid revision approvals.
 - [ ] #4 Approved plus BLOCKED state remains recoverable without inventing findings, deleting review history, direct SQL edits or bypassing required gates.
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Workaround completed on 2026-09-27: loaded locked goal/scope, CP-4 evidence, current round 2 and version 62; verified no unresolved findings and unchanged mission source/tests relative to the actual operator-approved commit. Invoked existing recoverMissionForIntegration with getLatestReviewDecision(reviewerUser=magnus), validating PR #507 and provider approval timestamp. This persisted active -> review -> integration through MissionLifecycleService (version 64), without direct SQL writes or provider posting. Recorded durable human_note as codex via px review-event (version 65). px status now reports missionStatus=integration; px integrate --dry-run passes. Remaining landing work: rebase predicts conflicts and all eight configured integration gates still need to run. Historical round-2 disposition BLOCKED and approvalOwed=true remain stale despite integration; reviewApprovalOwed in src/domain/review.ts uses any historical external-formal-approval-owed event, so it never clears after provider corroboration. Include projection/reconciliation regression coverage for this shape. TASK-2582 already tracks the lifecycle writer defect; this task tracks actual human approver recognition, dry-run parity and stale approval/blocker reconciliation.
+<!-- SECTION:NOTES:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
