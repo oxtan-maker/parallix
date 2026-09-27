@@ -14,6 +14,29 @@ test.afterEach(() => {
   setBubblewrapProbeForTest(null);
 });
 
+test('reviewer under /tmp can write explicit runtime state and artifacts while source stays read-only', () => {
+  const worktree = fs.mkdtempSync(path.join(os.tmpdir(), 'bwrap-review-runtime-'));
+  const artifacts = path.join(worktree, '.workflow', 'review-artifacts');
+  const runtime = path.join(worktree, '.workflow', 'codex-home', '.codex');
+  const source = path.join(worktree, 'hello.sh');
+  fs.writeFileSync(source, 'original source\n');
+  fs.mkdirSync(runtime, { recursive: true });
+  try {
+    const profile = resolveSandboxProfile('review', worktree, artifacts, 'codex');
+    const args = buildBubblewrapArgs(profile, worktree);
+    for (const target of [path.join(runtime, 'session.json'), path.join(artifacts, 'outcome.txt')]) {
+      const result = childProcess.spawnSync('bwrap', [...args, 'sh', '-c', 'printf evidence > "$1"', 'sh', target], { encoding: 'utf8' });
+      assert.equal(result.status, 0, result.stderr);
+      assert.equal(fs.readFileSync(target, 'utf8'), 'evidence');
+    }
+    const denied = childProcess.spawnSync('bwrap', [...args, 'sh', '-c', 'printf mutation > "$1"', 'sh', source], { encoding: 'utf8' });
+    assert.notEqual(denied.status, 0, 'reviewed source must remain read-only');
+    assert.equal(fs.readFileSync(source, 'utf8'), 'original source\n');
+  } finally {
+    fs.rmSync(worktree, { recursive: true, force: true });
+  }
+});
+
 /**
  * Regression for TASK-2391: a Bubblewrap-confined implementer inside a *linked*
  * Git worktree cannot `git add`/`commit` because the guard only binds the

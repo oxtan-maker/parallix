@@ -16,6 +16,10 @@ import { isDbAdhocIdentity } from '../../../domain/mission.js';
 // rebound kernel, so a bounce is only reported fixed when the check that failed
 // re-runs and passes. The kernel owns the per-occurrence budget in memory.
 import { rebound, DEFAULT_REBOUND_ATTEMPTS, type ReboundContext } from '../../../application/rebound-kernel.js';
+import {
+  buildTypedMissionRecoveryAdvice,
+  isTypedCheckpointEvidenceFailure,
+} from '../../../application/typed-mission-recovery-advice.js';
 
 function renderActiveProgress(event, logFn) {
   if (event.phase === 'handoff') {
@@ -337,7 +341,10 @@ function nextMissingCheckpointFromError(errorMsg) {
 }
 
 /** @param {string} slug @param {string} worktree @param {string} nextCheckpoint */
-function buildCheckpointContinuationPrompt(slug, worktree, nextCheckpoint) {
+function buildCheckpointContinuationPrompt(slug, worktree, nextCheckpoint, typedMission = false) {
+  if (typedMission) {
+    return buildTypedMissionRecoveryAdvice(slug, nextCheckpoint);
+  }
   return `Mission ${slug} is incomplete: ${nextCheckpoint}. Continue the existing execute mission in ${worktree} from ${nextCheckpoint}. ` +
     `Complete ${nextCheckpoint} and record its evidence, then immediately continue to every remaining declared checkpoint and mission gate. ` +
     `Do not exit or send a final response until every declared checkpoint has its evidence and every mission-declared gate passes, unless a mission stop rule applies or a genuine external dependency blocks progress.`;
@@ -472,6 +479,10 @@ async function validateCheckpointsBeforeHandoff(slug, worktree, options = {}) {
 
 /** @param {string} errorMsg @param {string} slug @param {string} worktree */
 function checkpointValidationNextAction(errorMsg, slug, worktree) {
+  if (isTypedCheckpointEvidenceFailure(errorMsg)) {
+    const checkpoint = /Planned checkpoint evidence is missing before handoff:\s*(CP-\d+)/i.exec(errorMsg)?.[1] || 'CP-N';
+    return buildTypedMissionRecoveryAdvice(slug, checkpoint);
+  }
   if (/MISSION\.md.*## Checkpoints|Malformed checkpoint declaration/i.test(errorMsg)) {
     return `Update ${fmt.path(path.join(missionDirForSlug(worktree, slug), 'MISSION.md'))} with valid - CP N: <name> or - CP-N: <name> declarations, then re-run: ${fmt.command(`px review ${slug} --submit`)}.`;
   }
@@ -552,7 +563,7 @@ async function repairCheckpointsBeforeHandoff(validation, context): Promise<bool
   // and exits again, which is the loop this bounce exists to end.
   const nextCheckpoint = validation.nextCheckpoint || nextMissingCheckpointFromError(gapError);
   const checkpointError = nextCheckpoint
-    ? `${gapError}\n\n${buildCheckpointContinuationPrompt(slug, worktree, nextCheckpoint)}`
+    ? `${gapError}\n\n${buildCheckpointContinuationPrompt(slug, worktree, nextCheckpoint, isTypedCheckpointEvidenceFailure(gapError))}`
     : gapError;
   const outcome = await rebound({ kind: 'handoff-verification', error: checkpointError }, {
     slug, worktree, implementer: agent, startAgent: reboundLaunchPort,

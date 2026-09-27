@@ -8,6 +8,11 @@ import {
   classifyReboundReason,
   type HandoffVerificationReason,
 } from '../../../application/rebound-kernel.js';
+import {
+  buildTypedMissionRecoveryAdvice,
+  isTypedCheckpointEvidenceFailure,
+  namedCheckpointFromTypedFailure,
+} from '../../../application/typed-mission-recovery-advice.js';
 
 // ── ADR 0048 classification (single table, owned by the application layer) ───
 // The eight failure classes, the three dispatch actions, and `classifyError`
@@ -60,7 +65,9 @@ function buildRelaunchPrompt(errorMsg: string, slug: string, worktree: string, g
       `Fix the specific handoff verification failure shown above: fix the failing verification or test named in the captured output in ${worktree}, rerun that verification, and commit the fix.`,
       `Post-return action: px review ${slug} --submit.`,
     ].join('\n')
-    : [
+    : isTypedCheckpointEvidenceFailure(errorMsg)
+      ? buildTypedMissionRecoveryAdvice(slug, namedCheckpointFromTypedFailure(errorMsg) || 'CP-N')
+      : [
       `${errorMsg.includes('No checkpoint documents found') ? 'Create CP-1.md' : 'Fix the final checkpoint document (CP-N.md)'} in ${missionDir} with a Goal Check table.`,
       'Use one canonical heading: ## Goal Check',
       'Use this exact table shape:',

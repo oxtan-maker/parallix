@@ -212,7 +212,14 @@ export function buildBubblewrapArgs(profile: SandboxProfile, cwd: string): strin
   const optionalFiles = (profile.optionalWritableFiles || [])
     .map(file => path.resolve(file))
     .filter(file => fs.existsSync(file) && fs.statSync(file).isFile());
-  const writable = dedupeMounts([...(profile.worktreeWritable ? [worktree] : []), ...required, ...optional, ...optionalDirectories, ...optionalFiles]);
+  const permitted = [...(profile.worktreeWritable ? [worktree] : []), ...required, ...optional, ...optionalDirectories, ...optionalFiles];
+  // A readonly worktree is mounted after writable ancestors such as /tmp.
+  // Keep explicit descendants on their own side of that mount boundary:
+  // deduplicating them against /tmp would hide launcher state and artifacts.
+  const writable = [
+    ...dedupeMounts(permitted.filter(dir => !isWithin(worktree, dir))),
+    ...dedupeMounts(permitted.filter(dir => isWithin(worktree, dir))),
+  ];
   // `dedupeMounts` intentionally removes generic nested binds (for example an
   // artifact dir under /tmp). Git metadata is different: the common dir and
   // its per-worktree dir are both Git-resolved authorization boundaries, so

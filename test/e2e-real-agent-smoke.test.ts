@@ -328,7 +328,7 @@ function temporaryCapacityPreflight({
   }
 }
 
-function classifyFailure({ stdout, stderr, status, signal }) {
+function classifyFailure({ stdout, stderr, status, signal }, phase = 'draft') {
   const text = `${stdout || ''}\n${stderr || ''}`;
   if (TEMPORARY_RESOURCE_FAILURE_PATTERNS.some((re) => re.test(text))) {
     return { bucket: 'environment-resource', detail: 'temporary-storage or Git index/lock creation failed; reclaim capacity and retry' };
@@ -345,7 +345,7 @@ function classifyFailure({ stdout, stderr, status, signal }) {
   if (LAUNCHER_FAILURE_PATTERNS.some((re) => re.test(text))) {
     return { bucket: 'opencode-launcher-failure', detail: 'opencode rejected the launch (bad model argument, auth failure, or missing binary)' };
   }
-  return { bucket: 'parallix-workflow-failure', detail: `px draft exited ${status} without a recognizable launcher/model error signature` };
+  return { bucket: 'parallix-workflow-failure', detail: `px ${phase} exited ${status} without a recognizable launcher/model error signature` };
 }
 
 // Cheap preflight: confirms the real opencode binary exists before spending
@@ -1025,10 +1025,11 @@ function runRealAgentSmoke(agent, runner) {
     const activeStartedAt = Date.now();
     const activeResult = runWorkflowAllowFail(worktree, env, ['active', slug, '--implementer', agent], ACTIVE_TIMEOUT_MS);
     const activeDurationMs = Date.now() - activeStartedAt;
+    const activeFailure = classifyFailure(activeResult, 'active');
     assert.equal(
       activeResult.status,
       0,
-      `[parallix-workflow-failure] px active --implementer ${agent} failed (status=${activeResult.status}):\nstdout:\n${activeResult.stdout}\nstderr:\n${activeResult.stderr}`
+      `[${activeFailure.bucket}] px active --implementer ${agent} failed (status=${activeResult.status}, signal=${activeResult.signal}): ${activeFailure.detail}\nstdout:\n${activeResult.stdout}\nstderr:\n${activeResult.stderr}`
     );
 
     assert.match(
@@ -1058,7 +1059,7 @@ function runRealAgentSmoke(agent, runner) {
     assert.deepEqual(
       reviewState.disposition,
       'APPROVED',
-      `[parallix-workflow-failure] expected review loop to complete with APPROVED disposition (got: "${reviewState.disposition}")`
+      `[parallix-workflow-failure] expected review loop to complete with APPROVED disposition (got: "${reviewState.disposition}", phase: "${reviewState.phase}")\n${activeResult.stderr || activeResult.stdout}`
     );
 
     // Verify review phase reached approved state

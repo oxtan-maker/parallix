@@ -146,3 +146,12 @@ test('real-agent smoke classifies a trapped SIGTERM as a runner or model failure
   assert.equal(classifyFailure({ stdout: '', stderr: '', status: 143, signal: null }).bucket, 'local-model-environment');
   delete process.env.PARALLIX_E2E_SMOKE_TEST_HELPERS;
 });
+
+test('real-agent smoke distinguishes active timeout from active workflow rejection', () => {
+  const { classifyFailure } = loadSmokeHelpers();
+  const output = { stdout: 'Implementation in progress', stderr: '', status: null, signal: 'SIGTERM' };
+  assert.equal(classifyFailure(output, 'active').bucket, 'local-model-environment');
+  const rejected = classifyFailure({ ...output, status: 1, signal: null }, 'active');
+  assert.equal(rejected.bucket, 'parallix-workflow-failure');
+  assert.match(rejected.detail, /px active exited 1/);
+});

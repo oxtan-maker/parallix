@@ -179,7 +179,10 @@ A failing run prefixes its assertion message with one of three buckets:
 - `[parallix-workflow-failure]` — `opencode` launched and produced output,
   but the mission did not get through the lifecycle: the draft ended with an
   incomplete mission contract after Parallix's own bounce-back, the draft-stats
-  line was missing or malformed, or a later phase failed. This is the
+  line was missing or malformed, or a later phase exited unsuccessfully
+  without a recognized environment or launcher error. Timeouts in the active
+  phase use the same environment classification as draft and health-probe
+  timeouts. This is the
   `TASK-1273` class of bug.
 
 Mission activation and integration read the recorded contract in SQLite, and
