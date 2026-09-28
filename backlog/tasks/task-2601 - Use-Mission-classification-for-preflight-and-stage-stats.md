@@ -15,7 +15,13 @@ ordinal: 132008
 ## Description
 
 <!-- SECTION:DESCRIPTION:BEGIN -->
-Mission classification is stored in the Mission database, but startup preflight and stage statistics still require a classification label in the Backlog task file. This blocked task-2599 after a successful draft. See the task for reproduction and acceptance criteria.
+After the 2521.03 migration, `px classification set` writes classification to the Mission database. The draft completion check reads that Mission state, but other lifecycle paths still require the legacy Backlog task label.
+
+Observed with task-2599: the draft agent recorded `user_value`, `px draft` reported a verified contract and completed successfully, and the task file still had `labels: []`. Draft telemetry then warned `Could not record draft stats ... Missing or invalid classification ... in the labels of ...task-2599...md`. Running `px active --implementer codex` in the mission worktree failed startup preflight with the same Backlog classification diagnostic and never launched the implementer. This is a workflow-wide authority mismatch, not a missing draft classification.
+
+The missed legacy reads are `src/adapters/cli/startup-preflight.ts` (`reportBacklogClassification` calls `stats.resolveMissionClassification`), and `src/adapters/cli/commands/stats.ts` (`resolveMissionClassification` reads the task file; `recordStageStats` and `accumulateStageStats` call it). `src/adapters/cli/commands/draft-stats.ts` correctly checks stored Mission labels to complete a draft, then calls `recordStageStats`, producing the contradictory success and warning. The draft prompt already states that Mission state is authoritative. Audit the other callers of this resolver, including backfill and draft compatibility paths, for the same stale assumption.
+
+Use the Mission database through `px` for classification after 2521.03. A Backlog task remains useful for its task details, but its classification label must not gate a classified Mission or override its value. Preserve a clearly scoped migration fallback only where an imported legacy Mission has no authoritative database classification, if that case is still supported.
 <!-- SECTION:DESCRIPTION:END -->
 
 ## Acceptance Criteria
