@@ -21,7 +21,10 @@ import { successCriteria } from '../domain/mission-success-criteria.js';
 import { missionDependencies } from '../domain/mission-dependencies.js';
 import type { NelBucketLabel } from '../domain/net-engineering-lines.js';
 import type { CheckpointData } from '../domain/checkpoint.js';
-import { type MissionId } from '../domain/mission.js';
+import { missionLabel, type MissionId } from '../domain/mission.js';
+
+export const MISSION_CLASSIFICATIONS = ['ai_sdlc', 'user_value', 'unknown'] as const;
+export type MissionClassification = typeof MISSION_CLASSIFICATIONS[number];
 
 /** Named partial brief update: omitted fields keep their recorded value. */
 export interface UpdateMissionBriefRequest extends MissionCommandRequest {
@@ -68,6 +71,8 @@ export interface MissionGatesResult {
   readonly declaredGates: readonly string[];
   readonly version: MissionVersion;
 }
+export interface SetMissionClassificationRequest extends MissionCommandRequest { readonly classification: string; }
+export interface MissionClassificationResult { readonly classification: MissionClassification; readonly version: MissionVersion; }
 
 export class MissionBriefService {
   constructor(private readonly _store: MissionStore) {}
@@ -189,6 +194,21 @@ export class MissionBriefService {
     try {
       const version = await this._store.save({ ...loaded.mission, reproductionTest: testPath }, loaded.version);
       return completed({ reproductionTest: testPath, version }, [storeEvidence(request.missionId, 'reproduction-test', testPath ? `reproduction test recorded: ${testPath}` : 'reproduction test cleared')]);
+    } catch (error) { return writeFailure(error); }
+  }
+
+  /** Replace only the classification dimension; all unrelated labels survive. */
+  async setClassification(request: SetMissionClassificationRequest): Promise<ApplicationOutcome<MissionClassificationResult>> {
+    const guard = missingCapability<MissionClassificationResult>(request, 'mission:context'); if (guard) { return guard; }
+    const loaded = await loadForCommand<MissionClassificationResult>(this._store, request); if (!isLoaded(loaded)) { return loaded; }
+    const classification = request.classification.trim().toLowerCase() as MissionClassification;
+    if (!MISSION_CLASSIFICATIONS.includes(classification)) {
+      return failure('validation', 'classification must be exactly one of ai_sdlc, user_value, or unknown');
+    }
+    const labels = [...loaded.mission.labels.filter(label => !MISSION_CLASSIFICATIONS.includes(String(label) as MissionClassification)), missionLabel(classification)];
+    try {
+      const version = await this._store.save({ ...loaded.mission, labels }, loaded.version);
+      return completed({ classification, version }, [storeEvidence(request.missionId, 'mission-classification', `classification: ${classification}`)]);
     } catch (error) { return writeFailure(error); }
   }
 

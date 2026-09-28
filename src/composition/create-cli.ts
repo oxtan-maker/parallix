@@ -74,6 +74,7 @@ import {
   createGoalCommand,
   createReproCommand,
   createScopeCommand,
+  createClassificationCommand,
   type MissionWriteServices,
 } from '../interfaces/cli/mission-writes.js';
 import { createGithubPublishStatusCommand } from '../interfaces/cli/github-publish-status.js';
@@ -267,6 +268,7 @@ function createCommandRegistry(rootDir: string): Record<string, Command> {
     // Typed Mission write verbs: one command per domain part, no JSON blob.
     goal: (args) => withGraph(services => createGoalCommand(missionWrites(services))(args)),
     repro: (args) => withGraph(services => createReproCommand(missionWrites(services))(args)),
+    classification: (args) => withGraph(services => createClassificationCommand(missionWrites(services))(args)),
     scope: (args) => withGraph(services => createScopeCommand(missionWrites(services))(args)),
     gate: (args) => withGraph(services => createGateCommand(missionWrites(services), (command) => {
       const result = validateDeclaredGates([command], rootDir, { checkFiles: false });

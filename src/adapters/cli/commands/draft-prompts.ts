@@ -31,7 +31,7 @@ function resolveClassificationInstructions(taskPath) {
       return 'because this task was synthesized by the harness, preserve the `unknown` label unless you have concrete repo-specific evidence to replace it. Do not add a separate frontmatter field for mission type.';
     }
   }
-  return 'set exactly one of `ai_sdlc` or `user_value` in the Backlog task labels — plus optionally `bug` for bug-fix missions. Use `ai_sdlc` for workflow, prompt, or agent-fix work; use `user_value` for everything else (including code tech debt). Do not add a separate frontmatter field for mission type.';
+  return 'set exactly one Mission classification with `px classification set --value <ai_sdlc|user_value|unknown> --expected-version <n>`. Backlog task labels may describe the task, but Mission state is authoritative. Use `ai_sdlc` for workflow, prompt, or agent-fix work; use `user_value` for everything else; use `unknown` only when evidence is unavailable.';
 }
 
 // @ts-expect-error implicit any on slug/rootDir/worktree
@@ -117,10 +117,9 @@ function buildRestartPrompt(slug, { rootDir = process.cwd(), worktree = null } =
   return `${buildDraftPrompt(slug, { rootDir, worktree })}
 
 Focused repair:
-- update the backlog task so labels contain exactly one of \`ai_sdlc\` or \`user_value\` (plus optionally \`bug\` if this is a bug fix)
-- use \`ai_sdlc\` for workflow, prompt, or agent-fix work; use \`user_value\` for everything else, including standard code tech debt
-- do not add a separate frontmatter field for mission type
-- if both classification labels are present, keep only the correct one
+- read \`px status ${slug}\`, then use \`px classification set --value <ai_sdlc|user_value|unknown> --expected-version <n>\`
+- choose exactly one of \`ai_sdlc\` or \`user_value\` when the Mission has evidence; use \`unknown\` only when it does not
+- classification is Mission state: do not repair it by editing a provider task
 `;
 }
 

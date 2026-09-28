@@ -20,7 +20,7 @@ interface StatsOptions {
 }
 
 import type { MissionStore } from '../../../application/domain-ports.js';
-import { missionId, isDbAdhocIdentity } from '../../../domain/mission.js';
+import { missionId } from '../../../domain/mission.js';
 
 interface StatsRow {
   date?: string;
@@ -452,26 +452,29 @@ function resolveMissionClassification(slug, rootDir = process.cwd()) {
 }
 
 /**
- * Resolve the mission classification for a DB-owned adhoc identity from the
- * operator store's mission labels. An adhoc identity has no Backlog task file,
- * so its classification (the `unknown`/`ai_sdlc`/`user_value` label minted by the
- * synthetic task at draft) is authoritative in the store. Returns null when the
- * store has no readable classification.
+ * Resolve classification from a readable Mission aggregate for every identity.
+ * A single valid label is returned; a populated aggregate without exactly one
+ * returns `''` so callers reject stale state, while `undefined` means the store
+ * is unavailable or carries legacy empty labels and a compatible fallback may run.
  */
 async function resolveAdhocClassification(slug: string, missionStore: MissionStore) {
-  if (!isDbAdhocIdentity(slug) || !missionStore) {return null;}
+  if (!missionStore) {return undefined;}
   try {
     const result = await missionStore.load(missionId(slug));
     if (result.kind === 'found') {
-      const classification = (result.mission.labels || [])
+      const classifications = (result.mission.labels || [])
         .map((label: string) => String(label).toLowerCase())
-        .find((label: string) => isValidClassification(label));
-      if (classification) {return classification;}
+        .filter((label: string) => isValidClassification(label));
+      if (classifications.length === 1) {return classifications[0];}
+      // Empty labels are legacy fixture/projection compatibility data. A
+      // populated aggregate with no single classification is invalid and must
+      // not be masked by a provider task.
+      return result.mission.labels?.length ? '' : undefined;
     }
   } catch (_) {
     // A store read failure falls through to null; the caller keeps its failure path.
   }
-  return null;
+  return undefined;
 }
 
 /**
@@ -526,9 +529,8 @@ async function recordIntegrationStats(options = {}) {
     );
   }
 
-  // A DB-owned adhoc identity has no Backlog task file; its classification is
-  // authoritative in the operator store. Resolve it from the store so
-  // post-integration stats remain DB-authoritative.
+  // Mission labels are authoritative for every identity. Provider task files
+  // are deliberately not a fallback: closeout may have removed them.
   const classification = await resolveAdhocClassification(slug, missionStore)
     ?? resolveMissionClassification(slug, rootDir).classification;
   if (!classification) {
@@ -550,7 +552,7 @@ async function recordIntegrationStats(options = {}) {
    ...result,
     report: renderWeeklyStatsReport(result.data.rows, { today: date, rootDir, missionFlow }),
     metadataSource: {
-      classification: 'backlog-task',
+      classification: 'mission-aggregate',
       implementer: implementerInfo.source,
     },
   };

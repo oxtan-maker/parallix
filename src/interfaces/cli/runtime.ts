@@ -282,6 +282,7 @@ ${fmt.bold('Advanced Commands:')}
   depends add|remove --on <slug>       Record or drop one Mission-to-Mission dependency; nothing enforces it.
   nel set --predicted <bucket>        Record the draft's predicted NEL bucket (Small|Medium|Large).
   repro set --test <path> | repro clear  Record the bug mission's red-to-green reproduction test.
+  classification set --value <type>    Record ai_sdlc, user_value, or unknown on the Mission.
   checkpoint plan|unplan|record --name <CP-N> ...  Plan a checkpoint, drop one with no evidence, or record its Goal Check evidence.
   assign --agent <family>             Set the Mission's assignee.
   unassign                            Clear the Mission's assignee.

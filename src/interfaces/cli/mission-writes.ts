@@ -173,6 +173,12 @@ Record the red-to-green reproduction test a bug mission declares, so a reviewer
 reads it from \`px status\` instead of a line in a mission document. Recording a
 path says which test it is; it does not assert that the test has run.
 `.trimStart();
+export const CLASSIFICATION_HELP = `
+Usage: px classification set [--slug <slug>] --value <ai_sdlc|user_value|unknown> --expected-version <n>
+
+Set the Mission-owned classification without editing a provider task. Exactly one
+classification is retained and unrelated labels are preserved.
+`.trimStart();
 
 export const ASSIGN_HELP = `
 Usage:
@@ -333,6 +339,15 @@ export function createReproCommand(services: MissionWriteServices) {
       testPath: action === 'clear' ? null : required(args, '--test'),
     });
     output(unwrap(outcome, `repro ${action}`));
+  };
+}
+
+export function createClassificationCommand(services: MissionWriteServices) {
+  return async (args: string[] = []): Promise<void> => {
+    if (helped(args, CLASSIFICATION_HELP)) { return; }
+    if (args[0] !== 'set') { fail(CLASSIFICATION_HELP); }
+    const req = request(args, 'classification-set', services.resolveSlug);
+    output(unwrap(await services.brief.setClassification({ ...req, classification: required(args, '--value') }), 'classification set'));
   };
 }
 

@@ -18,6 +18,23 @@ import { buildDraftPrompt, buildRestartPrompt, buildContractRepairPrompt, valida
 import { enforceDraftCommitSafety } from './draft-conflicts.js';
 import { runPreDraftHook } from '../../process/pre-draft-hook.js';
 
+const CLASSIFICATION_LABELS = new Set(['ai_sdlc', 'user_value', 'unknown']);
+
+/** Authoritative post-draft classification check; null means use legacy fallback. */
+async function validateStoredDraftClassification(ctx) {
+  try {
+    const services = await ctx.missionServicesFn(ctx.targetWorktree);
+    const loaded = await services.store.load(missionId(ctx.slug));
+    if (loaded.kind !== 'found') { return null; }
+    const labels = loaded.mission.labels
+      .map((label: string) => String(label).toLowerCase())
+      .filter((label: string) => CLASSIFICATION_LABELS.has(label));
+    return labels.length === 1
+      ? { ok: true, classification: labels[0] }
+      : { ok: false, reason: 'missing-classification' };
+  } catch { return null; }
+}
+
 /**
  * Read the display title from the Backlog task mirror during draft setup.
  * Completed drafts use the recorded Mission title.
@@ -721,7 +738,7 @@ function createDraftWorkflowAdapter(deps: Record<string, unknown> = {}) {
       const restartDraftAgentFn = merged.restartDraftAgentFn || restartDraftAgent;
       const readAgentConfigOrExitFn = merged.readAgentConfigOrExitFn || readAgentConfigOrExit;
 
-      const normalizationResult = normalizeDraftClassificationFn(ctx.slug, ctx.targetWorktree, {
+      const normalizationResult = await validateStoredDraftClassification(ctx) ?? normalizeDraftClassificationFn(ctx.slug, ctx.targetWorktree, {
         errorFn
       });
       if (!normalizationResult.ok) {
@@ -737,7 +754,7 @@ function createDraftWorkflowAdapter(deps: Record<string, unknown> = {}) {
           safeExit(1);
           return exitedContext({ ...ctx });
         }
-        const postRestartNorm = normalizeDraftClassificationFn(ctx.slug, ctx.targetWorktree, {
+        const postRestartNorm = await validateStoredDraftClassification(ctx) ?? normalizeDraftClassificationFn(ctx.slug, ctx.targetWorktree, {
           errorFn
         });
         if (!postRestartNorm.ok) {

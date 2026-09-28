@@ -90,12 +90,19 @@ export function createIntegrationPreflight(ports: IntegrateWorkflowPorts) {
     if (context.task.ok) {
       report.detail(`Backlog task: ${path.basename(context.task.taskFile)} (${context.missionStatus || 'mission store'})`);
       try {
-        const classification = backlog.getTaskClassification(context.task.taskFile);
+        // Mission labels are authoritative when the aggregate was loaded. A
+        // missing label projection is a legacy/injected-fixture boundary, not
+        // proof of an unclassified aggregate, so retain the task resolver for
+        // that compatibility path.
+        const hasMissionLabels = Array.isArray(context.missionLabels) && context.missionLabels.length > 0;
+        const classification = hasMissionLabels
+          ? backlog.classificationFromLabels(context.missionLabels)
+          : backlog.getTaskClassification(context.task.taskFile);
         if (!classification) {
           report.failures.push('classification');
-          report.log(fmt.status('FAIL', `Backlog classification: Missing or invalid classification for ${context.slug}; expected exactly one of ai_sdlc, user_value, or unknown in the labels of ${context.task.taskFile}. Fix: add exactly one of those labels and do not use a separate frontmatter field for mission type.`));
+          report.log(fmt.status('FAIL', `Mission classification: expected exactly one of ai_sdlc, user_value, or unknown in authoritative Mission state for ${context.slug}. Fix: run px classification set --value <type> --expected-version <n>.`));
         } else {
-          report.detail(`Backlog classification: ${classification}`);
+          report.detail(`${hasMissionLabels ? 'Mission' : 'Backlog'} classification: ${classification}`);
         }
       } catch (error) {
         report.failures.push('classification');
