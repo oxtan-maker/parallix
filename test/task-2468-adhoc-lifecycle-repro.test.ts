@@ -11,7 +11,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import childProcess from 'node:child_process';
-import test from 'node:test';
+import test, { after } from 'node:test';
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
 const CLI_ENTRY = path.resolve(import.meta.dirname, '..', 'src', 'entry', 'px.ts');
@@ -372,27 +372,31 @@ function discoverAdhocSlug(repoRoot) {
   return null;
 }
 
+let sharedFixture: ReturnType<typeof setupRepository> | undefined;
+after(() => {
+  if (sharedFixture) {
+    fs.rmSync(sharedFixture.tmpRoot, { recursive: true, force: true });
+  }
+});
+
 test('a free-text adhoc mission reaches active on a DB-owned adhoc identity in a Backlog-less repo', () => {
   const repo = setupRepository({ slug: 'fix-hello-world-greeting', title: 'fix hello world greeting' });
+  sharedFixture = repo;
   const env = workflowEnv(repo.binDir, repo.stateHome, repo.repoRoot);
 
-  try {
-    runWorkflow(repo.repoRoot, env, ['draft', 'fix hello world greeting', '--agent', 'custom']);
+  runWorkflow(repo.repoRoot, env, ['draft', 'fix hello world greeting', '--agent', 'custom']);
 
-    const slug = discoverAdhocSlug(repo.repoRoot);
-    assert.ok(slug, 'draft must materialize an adhoc mission under missions/');
-    assert.match(slug, /^(parallix-adhoc|adhoc)-/i, 'materialized identity must be adhoc-owned');
+  const slug = discoverAdhocSlug(repo.repoRoot);
+  assert.ok(slug, 'draft must materialize an adhoc mission under missions/');
+  assert.match(slug, /^(parallix-adhoc|adhoc)-/i, 'materialized identity must be adhoc-owned');
 
-    const worktree = worktreePathFor(repo.repoRoot, slug);
-    assert.ok(fs.existsSync(worktree), `expected mission worktree at ${worktree}`);
+  const worktree = worktreePathFor(repo.repoRoot, slug);
+  assert.ok(fs.existsSync(worktree), `expected mission worktree at ${worktree}`);
 
-    // The red line on the parent commit: the `task-` prefix guard refuses this
-    // with "slug must begin with task-". It passes once the DB-owned adhoc
-    // identity and lifecycle work land.
-    runWorkflow(worktree, env, ['active', slug, '--implementer', 'custom']);
-  } finally {
-    fs.rmSync(repo.tmpRoot, { recursive: true, force: true });
-  }
+  // The red line on the parent commit: the `task-` prefix guard refuses this
+  // with "slug must begin with task-". It passes once the DB-owned adhoc
+  // identity and lifecycle work land.
+  runWorkflow(worktree, env, ['active', slug, '--implementer', 'custom']);
 });
 
 // F9 (task-2468): Success Criterion 5 guards the draft-side rejection path this
@@ -402,24 +406,21 @@ test('a free-text adhoc mission reaches active on a DB-owned adhoc identity in a
 // Backlog-less repo with a missing `task-<N>` argument and asserts the
 // draft command itself rejects it (exit 1), not a sibling command.
 test('px draft task-<missing> rejects a missing task file at the draft boundary', () => {
-  const repo = setupRepository({ slug: 'task-missing', title: 'missing task' });
+  assert.ok(sharedFixture, 'the lifecycle fixture must be available for the draft rejection proof');
+  const repo = sharedFixture;
   const env = workflowEnv(repo.binDir, repo.stateHome, repo.repoRoot);
 
-  try {
-    const result = runWorkflow(
-      repo.repoRoot,
-      env,
-      ['draft', 'task-missing-missing'],
-      60000,
-      { allowFailure: true }
-    );
-    assert.equal(result.status, 1, 'px draft must reject a missing task file with a non-zero exit');
-    assert.match(
-      `${result.stdout}${result.stderr}`,
-      /task.*(not found|ambiguous|could not be resolved)/i,
-      'the draft rejection must name the missing/ambiguous task file'
-    );
-  } finally {
-    fs.rmSync(repo.tmpRoot, { recursive: true, force: true });
-  }
+  const result = runWorkflow(
+    repo.repoRoot,
+    env,
+    ['draft', 'task-missing-missing'],
+    60000,
+    { allowFailure: true }
+  );
+  assert.equal(result.status, 1, 'px draft must reject a missing task file with a non-zero exit');
+  assert.match(
+    `${result.stdout}${result.stderr}`,
+    /task.*(not found|ambiguous|could not be resolved)/i,
+    'the draft rejection must name the missing/ambiguous task file'
+  );
 });

@@ -79,34 +79,44 @@ describe('TASK-2363 production certification: persisted weekly FLOW decision sur
       writeOpenTask(checkouts.primary);
 
       await withStatisticsDatabase(async ({ db, laneEventRepo, usageRepo, historyRepo }) => {
-        for (let index = 0; index < 240; index += 1) {
-          const id = `task-old-${index}`;
-          writeCompletedTask(checkouts.primary, id, OLD_CLOSED);
-          await persistMission(laneEventRepo, db, {
-            repositoryId: REPO, missionId: id, closedAt: OLD_CLOSED,
-            cycleTimeMinutes: 1_000, shape: OLD_SHAPE, bounced: false, classification: 'ai_sdlc',
-            telemetry: { durationMinutes: 1_000, prFixRounds: 9 },
-          });
+        // All rows still traverse the production repositories. One outer
+        // transaction removes only repeated SQLite fsync/lock churn while
+        // keeping the real migrated database, worktree and projection proof.
+        await db.beginTransaction();
+        try {
+          for (let index = 0; index < 240; index += 1) {
+            const id = `task-old-${index}`;
+            writeCompletedTask(checkouts.primary, id, OLD_CLOSED);
+            await persistMission(laneEventRepo, db, {
+              repositoryId: REPO, missionId: id, closedAt: OLD_CLOSED,
+              cycleTimeMinutes: 1_000, shape: OLD_SHAPE, bounced: false, classification: 'ai_sdlc',
+              telemetry: { durationMinutes: 1_000, prFixRounds: 9 },
+            });
+          }
+          for (let index = 0; index < 28; index += 1) {
+            const id = `task-previous-${index}`;
+            writeCompletedTask(checkouts.primary, id, PREVIOUS_CLOSED);
+            await persistMission(laneEventRepo, db, {
+              repositoryId: REPO, missionId: id, closedAt: PREVIOUS_CLOSED,
+              cycleTimeMinutes: 140, shape: PREVIOUS_SHAPE, bounced: true, classification: 'ai_sdlc',
+              telemetry: { durationMinutes: 25, prFixRounds: 1 },
+            });
+          }
+          for (let index = 0; index < 31; index += 1) {
+            const id = `task-current-${index}`;
+            writeCompletedTask(checkouts.primary, id, CURRENT_CLOSED);
+            await persistMission(laneEventRepo, db, {
+              repositoryId: REPO, missionId: id, closedAt: CURRENT_CLOSED,
+              cycleTimeMinutes: 40, shape: CURRENT_SHAPE, bounced: index < 5, classification: 'ai_sdlc',
+              telemetry: { durationMinutes: 15, prFixRounds: index === 0 ? 0 : index === 1 ? undefined : 1 },
+            });
+          }
+          await persistOpenMission(laneEventRepo, REPO, 'task-open', '2026-08-10T08:00:00.000Z');
+          await db.commitTransaction();
+        } catch (error) {
+          await db.rollbackTransaction();
+          throw error;
         }
-        for (let index = 0; index < 28; index += 1) {
-          const id = `task-previous-${index}`;
-          writeCompletedTask(checkouts.primary, id, PREVIOUS_CLOSED);
-          await persistMission(laneEventRepo, db, {
-            repositoryId: REPO, missionId: id, closedAt: PREVIOUS_CLOSED,
-            cycleTimeMinutes: 140, shape: PREVIOUS_SHAPE, bounced: true, classification: 'ai_sdlc',
-            telemetry: { durationMinutes: 25, prFixRounds: 1 },
-          });
-        }
-        for (let index = 0; index < 31; index += 1) {
-          const id = `task-current-${index}`;
-          writeCompletedTask(checkouts.primary, id, CURRENT_CLOSED);
-          await persistMission(laneEventRepo, db, {
-            repositoryId: REPO, missionId: id, closedAt: CURRENT_CLOSED,
-            cycleTimeMinutes: 40, shape: CURRENT_SHAPE, bounced: index < 5, classification: 'ai_sdlc',
-            telemetry: { durationMinutes: 15, prFixRounds: index === 0 ? 0 : index === 1 ? undefined : 1 },
-          });
-        }
-        await persistOpenMission(laneEventRepo, REPO, 'task-open', '2026-08-10T08:00:00.000Z');
 
         const missionReader = new ConcreteMissionReadAdapter({ rootDir: checkouts.primary, repositoryId: REPO });
         const metricsAdapter = new ConcreteMetricsReadAdapter({

@@ -6,6 +6,8 @@ import { buildTestRunPlan, withCoverageReporters } from './lib/test-run-plan.js'
 import { defaultManifestDir, ensureManifestDir, recoverRecordedTempRoots } from '../src/adapters/verification/temp-root-registry.js';
 import { cleanupRunnerTempRoots, signalExitCode } from './lib/test-runner-temp-roots.js';
 import { onGitHubActions } from './lib/unit-test-budget-reporter.mjs';
+import { resolveFileTimingProfile, printFileTimingSummary } from './lib/file-timing-profile.js';
+import { PROFILE_ENV } from './lib/file-timing-reporter.js';
 
 // A verifier may be launched from an operator checkout while it is validating
 // a mission worktree. Capture that selected root once and use it for every
@@ -53,6 +55,14 @@ const nodeArgsWithCoverage = coverageEnabled
 if (coverageEnabled) {
   fs.mkdirSync(path.dirname(coverageDestination), { recursive: true });
 }
+// TASK-2590: opt-in per-file wall-time profile (PARALLIX_TEST_PROFILE). When
+// unset the argv above is used unchanged.
+const fileTimingProfile = resolveFileTimingProfile({
+  executionRoot,
+  requestedArgs: process.argv.slice(2),
+  nodeArgs: nodeArgsWithCoverage,
+});
+const suiteNodeArgs = fileTimingProfile?.nodeArgs ?? nodeArgsWithCoverage;
 
 // Unit tests import production modules directly from `src/` and replace
 // dependencies through the ESM-native seam in `test/lib/module-mock.ts`
@@ -79,7 +89,7 @@ fs.mkdirSync(testManifestDir, { recursive: true });
 // acceptable because healthy workers self-clean their temp roots on exit and
 // finish their file, and a worker that would hang is exactly the case the
 // watchdog turns into a loud failure.
-const child = spawn(testNode, nodeArgsWithCoverage, {
+const child = spawn(testNode, suiteNodeArgs, {
   stdio: ['inherit', 'pipe', 'pipe'],
   cwd: executionRoot,
   env: {
@@ -93,6 +103,9 @@ const child = spawn(testNode, nodeArgsWithCoverage, {
     // V8 coverage payload lives repo-locally (not the shared tmpfs) so the
     // per-tier fragments survive into the coverage:merge step.
     ...(coverageScratchDir ? { NODE_V8_COVERAGE: coverageScratchDir } : {}),
+    // The profile belongs to this invocation only: runners that tests spawn as
+    // fixtures keep their unprofiled argv and write no profile of their own.
+    ...(fileTimingProfile ? { ...fileTimingProfile.env, [PROFILE_ENV]: '' } : {}),
   },
   detached: process.platform !== 'win32'
 });
@@ -187,6 +200,8 @@ child.on('close', (code, signal) => {
       suiteExceeded = true;
     }
   }
+
+  if (fileTimingProfile) { printFileTimingSummary(fileTimingProfile.destination); }
 
   // Clean up roots before propagating failure status.
   cleanupRunnerTempRoots(testManifestDir);

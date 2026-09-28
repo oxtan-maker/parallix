@@ -68,6 +68,34 @@ export function withCoverageReporters(nodeArgs: readonly string[], coverageDesti
   ];
 }
 
+/**
+ * TASK-2590: add the opt-in per-file timing reporter. Node pairs reporters with
+ * destinations by index and only lets a lone reporter omit its destination, so
+ * existing console output is pinned to stdout (the implicit `spec` default
+ * when no reporter is configured) before the timing reporter is appended with
+ * its own file destination. Callers invoke this only when profiling is enabled;
+ * disabled runs keep the exact argv from {@link buildTestRunPlan}.
+ */
+export function withFileTimingReporter(nodeArgs: readonly string[], reporterModule: string, destination: string): string[] {
+  const testIndex = nodeArgs.indexOf('--test');
+  const reporters = nodeArgs.filter(arg => arg.startsWith('--test-reporter=')).length;
+  const destinations = nodeArgs.filter(arg => arg.startsWith('--test-reporter-destination=')).length;
+  const consoleArgs = reporters === 0
+    ? ['--test-reporter=spec', '--test-reporter-destination=stdout']
+    : reporters > destinations ? ['--test-reporter-destination=stdout'] : [];
+  return [
+    ...nodeArgs.slice(0, testIndex),
+    // Node attaches one `end` listener per reporter to its shared TestsStream;
+    // a third reporter (unit budget + coverage + timing) crosses the default
+    // limit of ten and prints a spurious leak warning in the parent process.
+    '--disable-warning=MaxListenersExceededWarning',
+    ...consoleArgs,
+    `--test-reporter=${reporterModule}`,
+    `--test-reporter-destination=${destination}`,
+    ...nodeArgs.slice(testIndex),
+  ];
+}
+
 function defaultProbeNodeVersion(executable: string): string | null {
   const result = spawnSync(executable, ['--version'], { encoding: 'utf8' });
   return result.status === 0 ? String(result.stdout || '') : null;
@@ -189,12 +217,21 @@ export function buildTestRunPlan(options: TestRunPlanOptions): TestRunPlan {
   // Integration files spawn real children; task-2318/2327/2212 showed that
   // unrestricted concurrency can starve their startup past internal deadlines.
   const INTEGRATION_TEST_CONCURRENCY = 4;
+  // Profiling may opt into a bounded worker-count matrix without changing the
+  // repository default. Invalid values deliberately retain the defended four
+  // workers rather than weakening the suite with an unbounded setting.
+  const requestedIntegrationConcurrency = Number(process.env.PARALLIX_INTEGRATION_TEST_CONCURRENCY);
+  const integrationTestConcurrency = Number.isInteger(requestedIntegrationConcurrency)
+    && requestedIntegrationConcurrency >= 1
+    && requestedIntegrationConcurrency <= 8
+    ? requestedIntegrationConcurrency
+    : INTEGRATION_TEST_CONCURRENCY;
   // Unit-test timing is per test, so avoid worker contention turning hermetic
   // tests into false budget failures on a shared developer machine.
   const UNIT_TEST_CONCURRENCY = 4;
   const testNode = compatibleTestNode();
   const testConcurrencyArgs = supportsTestConcurrency(testNode)
-    ? [`--test-concurrency=${runsIntegrationSuite ? INTEGRATION_TEST_CONCURRENCY : UNIT_TEST_CONCURRENCY}`]
+    ? [`--test-concurrency=${runsIntegrationSuite ? integrationTestConcurrency : UNIT_TEST_CONCURRENCY}`]
     : [];
 
   // Unit tests are hermetic and must complete within one second. Integration
