@@ -4,6 +4,7 @@ title: Reviewer fallback fails to classify Qwen denial and bound silent Vibe
 status: backlog
 assignee: []
 created_date: '2026-09-29 15:00'
+updated_date: '2026-09-29 15:01'
 labels:
   - bug
 dependencies: []
@@ -14,9 +15,9 @@ ordinal: 144008
 ## Description
 
 <!-- SECTION:DESCRIPTION:BEGIN -->
-During TASK-2615 review on 2026-09-29, the repository CLI `npm run dev -- review --start` launched Qwen 0.21.9. Qwen exited 1 after `[API Error: 403 Access to model denied. Please make sure you are eligible for using the model.]`. Parallix logged `Skipping blocklist write for qwen; failure not positively classified as a provider availability/quota block` and fell back. Claude then reached a session limit. Vibe 2.24.0 was selected and stayed silent for more than four minutes while the review launcher only reported observational no-output notices; this may be a usage cap or a CLI/reporting change, but the cause is not yet proven. The expected final fallback is the configured `custom` family (localAI).
+During TASK-2615 review on 2026-09-29, `npm run dev -- review --start` launched Qwen 0.21.9. Qwen exited 1 after `[API Error: 403 Access to model denied. Please make sure you are eligible for using the model.]`. Parallix logged `Skipping blocklist write for qwen; failure not positively classified as a provider availability/quota block` and fell back. Claude reached a session limit. Vibe 2.24.0 then produced no visible output for about five minutes, exited 1 with `Error: Rate limits exceeded. Please wait a moment before trying again.`, and Parallix again logged `Skipping blocklist write for vibe; failure not positively classified as a provider availability/quota block`. The review finally fell back to `custom (pi)`, the configured localAI family.
 
-Investigate the exact current Qwen and Vibe exit, stderr, stdout, and session-log formats and the paths through `src/application/services/agent-limit.ts`, `src/adapters/agents/agents.ts`, `src/adapters/agents/qwen.ts`, and `src/adapters/agents/vibe.ts`. Distinguish provider quota or availability from model entitlement, bad credentials, transient transport, and generic crashes. Existing code intentionally avoids long family-wide blocks for deterministic setup errors; preserve that protection while preventing the same unusable reviewer from being selected repeatedly on subsequent missions. Bound a silent Vibe launch so review can reach the next eligible family, including `custom`, without operator intervention.
+Investigate Qwen and Vibe CLI error formats and the paths through `src/application/services/agent-limit.ts`, `src/adapters/agents/agents.ts`, `src/adapters/agents/qwen.ts`, and `src/adapters/agents/vibe.ts`. Qwen's 403 may be model entitlement rather than a quota; distinguish that from provider-wide quota, bad credentials, transient transport, and generic crashes. Existing code intentionally avoids long family-wide blocks for deterministic setup errors; preserve that protection while preventing an unusable reviewer from being selected again on the next mission. Vibe's plural `Rate limits exceeded` wording appears unmatched by the current Vibe/Mistral patterns. Bound silent reviewer launches so fallback reaches `custom` without waiting indefinitely.
 <!-- SECTION:DESCRIPTION:END -->
 
 ## Acceptance Criteria
