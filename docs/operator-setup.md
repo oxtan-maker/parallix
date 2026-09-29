@@ -175,6 +175,41 @@ When installed, `~/.agents/skills/graphify/` is also copied to
 `<worktree>/.workflow/codex-home/.agents/skills/graphify/`; it is instruction
 content and not a Codex configuration or credential file.
 
+## Claude credentials across missions
+
+A `claude` login stores an OAuth access token that expires after about eight
+hours, plus a refresh token that the server replaces on every refresh. When a
+Claude agent finds its access token expired, it refreshes it and saves the new
+pair to `~/.claude/.credentials.json`. Parallix makes that save work inside the
+Bubblewrap sandbox for every lifecycle step (draft, execute, review, fix,
+integration, and smoke), so one login keeps working across missions.
+
+Inside the sandbox, `~/.claude` is a Parallix-owned directory,
+`<parallix state home>/claude-config-cell` (on Linux
+`~/.local/state/parallix/claude-config-cell`), which shows your real `~/.claude`
+entries read-only. Only `.credentials.json`, `session-env`, and the mission's
+transcript directory are writable; settings, hooks, skills, agents, commands,
+plugins, `CLAUDE.md`, and memory stay read-only, and so do the ones you do not
+have, which the sandbox sees as empty. Claude's refresh lock is created in that shared
+directory, so concurrent missions refresh one at a time and never reuse a
+refresh token that another mission has already replaced. Anything else an agent
+creates there is removed at the next Claude launch. The sandbox always uses
+`~/.claude`, even when `CLAUDE_CONFIG_DIR` is set.
+
+A running mission keeps using the credential file it started with. If a `claude`
+session outside Parallix refreshes the token in the meantime, it replaces that
+file, and the running mission cannot see the new token. New launches pick up
+the new file.
+
+When a refresh is impossible, for example because the refresh token was
+revoked, the launch fails with the "credentials need refreshing" warning and
+Parallix tries the next eligible agent without blocking the Claude family. Run
+`claude` once on the host to log in again.
+
+As an alternative, run `claude setup-token` and export the long-lived token as
+`CLAUDE_CODE_OAUTH_TOKEN` in the environment that runs `px`. Claude then uses
+that token directly, never refreshes, and leaves `.credentials.json` untouched.
+
 ## Mistral Exclusion
 
 Graphify ships no `mistral` or `vibe` platform. The `graphify install --platform mistral` command does not exist and will fail. The parallix harness skips mistral without error during any Graphify-related operations.

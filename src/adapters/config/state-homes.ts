@@ -39,8 +39,26 @@ export function claudeProjectDir(worktree: string): string {
   return path.join(os.homedir(), '.claude', 'projects', mangled);
 }
 
+export function claudeConfigDir(): string {
+  return path.join(os.homedir(), '.claude');
+}
+
 export function claudeCredentialsPath(): string {
-  return path.join(os.homedir(), '.claude', '.credentials.json');
+  return path.join(claudeConfigDir(), '.credentials.json');
+}
+
+/**
+ * The Parallix-owned directory a sandboxed Claude sees as `~/.claude`. Shared
+ * by every sandboxed Claude launch so the CLI's OAuth refresh lock, created
+ * there, serialises token rotations across concurrent missions.
+ */
+export function claudeConfigCellDir(): string {
+  return path.join(parallixStateHome(), 'claude-config-cell');
+}
+
+/** Claude's auto-memory for one worktree; stays read-only in the sandbox. */
+export function claudeProjectMemoryDir(worktree: string): string {
+  return path.join(claudeProjectDir(worktree), 'memory');
 }
 
 export function claudeSessionEnvDir(): string {

@@ -196,6 +196,11 @@ export function selectTierFiles(executionRoot: string): TierFileSelection {
     'task-2582-repro.test.ts',
     // TASK-2601 opens a migrated SQLite Mission store and measurement store.
     'task-2601-repro.test.ts',
+    // TASK-2598: run the real `bwrap` binary through
+    // test/lib/claude-credential-fixture.ts, where the content heuristic
+    // cannot see the spawn, so both files are declared here.
+    'task-2598-claude-credential-cell.test.ts',
+    'task-2598-repro.test.ts',
   ]);
 
   // Classify subdir tests through the same boundary filter as root-level tests,

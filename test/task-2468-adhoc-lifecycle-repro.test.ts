@@ -16,6 +16,13 @@ import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
 const CLI_ENTRY = path.resolve(import.meta.dirname, '..', 'src', 'entry', 'px.ts');
 const TSX_LOADER = createRequire(import.meta.url).resolve('tsx');
+// The prebuilt integration lanes build the canonical bundle first. The stub
+// agent's own `px` writes are harness, not the code under test, so there they
+// run from the bundle and skip tsx's multi-second start-up on each spawn.
+const PREBUILT_ENTRY = path.resolve(import.meta.dirname, '..', 'build', 'px.mjs');
+const STUB_PX = process.env.PARALLIX_PREBUILT_PACK === '1' && fs.existsSync(PREBUILT_ENTRY)
+  ? { entry: PREBUILT_ENTRY, loader: '' }
+  : { entry: CLI_ENTRY, loader: TSX_LOADER };
 function runCommand(command, args, options = {}) {
   const result = childProcess.spawnSync(command, args, {
     encoding: 'utf8',
@@ -78,52 +85,46 @@ const path = require('node:path');
 function px(args) {
   const entry = process.env.PARALLIX_E2E_PX_ENTRY;
   const loader = process.env.PARALLIX_E2E_PX_LOADER;
-  if (!entry || !loader) { return null; }
+  if (!entry) { return null; }
   const run = require('node:child_process').spawnSync(
-    process.execPath, ['--import', loader, entry].concat(args),
+    process.execPath, (loader ? ['--import', loader] : []).concat([entry], args),
     { cwd: process.cwd(), encoding: 'utf8' }
   );
   return run.status === 0 ? (run.stdout || '') : null;
 }
 
-function recordMissionContract(missionSlug) {
-  const version = () => {
-    const out = px(['status', missionSlug, '--json']);
-    if (!out) { return null; }
-    try { return String(JSON.parse(out).version); } catch (_) { return null; }
-  };
-  let v = version();
-  if (v === null) { return; }
-  px(['goal', 'set', '--slug', missionSlug,
-    '--goal', 'Exercise the real lifecycle with a deterministic stub agent',
-    '--why', 'Protect the workflow surface from regression drift',
-    '--expected-version', v]);
-  v = version();
-  if (v !== null) {
-    px(['scope', 'set', '--slug', missionSlug,
-      '--scope', 'Run draft, active, review and integrate through the real CLI',
-      '--out-of-scope', 'Real model execution',
-      '--expected-version', v]);
-  }
-  v = version();
-  if (v !== null) {
-    px(['gate', 'add', '--slug', missionSlug, '--command', 'node -e ""',
-      '--expected-version', v]);
-  }
-  v = version();
-  if (v !== null) {
-    px(['criterion', 'add', '--slug', missionSlug, '--text', 'The lifecycle reaches integration through the real CLI',
-      '--expected-version', v]);
-  }
-  for (const [name, text] of [['CP-1', 'Execute the stub deliverable'], ['CP-2', 'Ready the mission for review']]) {
-    v = version();
-    if (v !== null) { px(['checkpoint', 'plan', '--slug', missionSlug, '--name', name, '--text', text, '--expected-version', v]); }
-  }
-  v = version();
-  if (v !== null) {
-    px(['nel', 'set', '--slug', missionSlug, '--predicted', 'Small', '--expected-version', v]);
+// Each write prints the Mission's new version, so the stub chains writes from
+// that instead of re-reading \`px status\` between them: every \`px\` spawn
+// costs a full CLI start-up.
+function missionVersion(missionSlug) {
+  const out = px(['status', missionSlug, '--json']);
+  if (!out) { return null; }
+  try { return String(JSON.parse(out).version); } catch (_) { return null; }
+}
+
+function writeChain(missionSlug, writes) {
+  let v = missionVersion(missionSlug);
+  for (const args of writes) {
+    if (v === null) { return; }
+    const out = px(args.concat(['--slug', missionSlug, '--expected-version', v]));
+    try { v = out ? String(JSON.parse(out).version) : null; } catch (_) { v = null; }
   }
 }
+
+function recordMissionContract(missionSlug) {
+  writeChain(missionSlug, [
+    ['goal', 'set', '--goal', 'Exercise the real lifecycle with a deterministic stub agent',
+      '--why', 'Protect the workflow surface from regression drift'],
+    ['scope', 'set', '--scope', 'Run draft, active, review and integrate through the real CLI',
+      '--out-of-scope', 'Real model execution'],
+    ['gate', 'add', '--command', 'node -e ""'],
+    ['criterion', 'add', '--text', 'The lifecycle reaches integration through the real CLI'],
+    ['checkpoint', 'plan', '--name', 'CP-1', '--text', 'Execute the stub deliverable'],
+    ['checkpoint', 'plan', '--name', 'CP-2', '--text', 'Ready the mission for review'],
+    ['nel', 'set', '--predicted', 'Small'],
+  ]);
+}
+
 function writeFile(filePath, content) {
   fs.mkdirSync(path.dirname(filePath), { recursive: true });
   fs.writeFileSync(filePath, content, 'utf8');
@@ -171,17 +172,11 @@ if (/^Mode: draft\\./m.test(prompt)) {
 
 if (/^Mode: execute after lock\\./m.test(prompt)) {
   writeFile(path.join(process.cwd(), 'deliverable.txt'), 'stub execute output\\n');
-  for (const [name, criterion, next] of [
+  writeChain(slug, [
     ['CP-1', 'Execute artifacts committed', 'Run review.'],
     ['CP-2', 'The lifecycle reaches integration through the real CLI', 'Approve the mission in review.'],
-  ]) {
-    const out = px(['status', slug, '--json']);
-    if (out) {
-      px(['checkpoint', 'record', '--slug', slug, '--name', name,
-        '--criterion', criterion, '--evidence', 'deliverable.txt:1',
-        '--next', next, '--expected-version', String(JSON.parse(out).version)]);
-    }
-  }
+  ].map(([name, criterion, next]) => ['checkpoint', 'record', '--name', name,
+    '--criterion', criterion, '--evidence', 'deliverable.txt:1', '--next', next]));
 }
 
 if (/^Mode: review\\./m.test(prompt)) {
@@ -303,8 +298,8 @@ function workflowEnv(binDir, stateHome, repoRoot) {
     // the draft prompt names, because activation now refuses an incomplete one.
     // It runs as a bare executable on the fixture PATH, so it cannot resolve
     // the CLI entry itself.
-    PARALLIX_E2E_PX_ENTRY: CLI_ENTRY,
-    PARALLIX_E2E_PX_LOADER: TSX_LOADER,
+    PARALLIX_E2E_PX_ENTRY: STUB_PX.entry,
+    PARALLIX_E2E_PX_LOADER: STUB_PX.loader,
     PATH: binDir
   };
 }

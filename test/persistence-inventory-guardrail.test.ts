@@ -534,6 +534,9 @@ test('SC1 reverse: all durable-IO files under src/ are present in the inventory'
     'src/adapters/agents/qwen-telemetry.ts',
     // Bubblewrap probes and validates process mounts, not durable domain state.
     'src/adapters/process/bubblewrap.ts',
+    // The Claude config cell holds sandbox mount stubs and CLI lock state,
+    // not durable domain state.
+    'src/adapters/process/config-cell.ts',
     // Opencode export — writes temporary scratch files
     'src/adapters/agents/opencode-export.ts',
     // Mission utility helpers — read mission files for path resolution

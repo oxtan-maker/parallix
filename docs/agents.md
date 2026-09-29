@@ -29,6 +29,13 @@ state directories of its configured runner (opencode or pi), which do not
 override `HOME`. This keeps a round-1 claude session resumable in a later round
 while the reviewed worktree itself stays read-only.
 
+For every claude launch, `~/.claude` inside the sandbox is a shared
+Parallix-owned directory that shows the host entries read-only. Only the
+credential file, `session-env`, and the mission's transcript directory are
+writable, so the Claude CLI can take its refresh lock and save a rotated OAuth
+token to the host `~/.claude/.credentials.json`. See
+[operator setup](operator-setup.md#claude-credentials-across-missions).
+
 If `bwrap` is unavailable, confinement falls back in order for a **mutating**
 launch: a family with a supported agent-native sandbox (codex, via
 `--sandbox`) keeps its native sandbox; otherwise the launch is blocked until an

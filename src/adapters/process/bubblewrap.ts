@@ -5,7 +5,10 @@ import path from 'node:path';
 import * as fmt from '../../application/presentation/cli-format.js';
 import { resolveCustomRunner } from '../config/product-config.js';
 import {
+  claudeConfigCellDir,
+  claudeConfigDir,
   claudeProjectDir,
+  claudeProjectMemoryDir,
   claudeCredentialsPath,
   claudeSessionEnvDir,
   codexAuthPath,
@@ -16,6 +19,7 @@ import {
   qwenHomeRoot,
   vibeHomeRoot
 } from '../config/state-homes.js';
+import { configCellArgs, type ConfigCell } from './config-cell.js';
 
 /**
  * Bubblewrap guard.
@@ -45,6 +49,8 @@ export interface SandboxProfile {
   optionalWritableDirectories?: string[];
   /** Existing credential leaves; omitted rather than created on a first run. */
   optionalWritableFiles?: string[];
+  /** Launcher config dir the sandbox sees through a Parallix-owned cell. */
+  configCell?: ConfigCell;
 }
 
 export class BubblewrapGuardError extends Error {
@@ -213,11 +219,16 @@ export function buildBubblewrapArgs(profile: SandboxProfile, cwd: string): strin
     .map(file => path.resolve(file))
     .filter(file => fs.existsSync(file) && fs.statSync(file).isFile());
   const permitted = [...(profile.worktreeWritable ? [worktree] : []), ...required, ...optional, ...optionalDirectories, ...optionalFiles];
+  // Binds beneath a config cell are mounted over the cell, after the host
+  // entries it re-mounts read-only, so they never merge with an ancestor bind.
+  const cell = resolveConfigCell(profile.configCell);
+  const inCell = (dir: string) => cell !== null && dir !== cell.target && isWithin(cell.target, dir);
+  const cellWritable = dedupeMounts(permitted.filter(inCell));
   // A readonly worktree is mounted after writable ancestors such as /tmp.
   // Keep explicit descendants on their own side of that mount boundary:
   // deduplicating them against /tmp would hide launcher state and artifacts.
   const writable = [
-    ...dedupeMounts(permitted.filter(dir => !isWithin(worktree, dir))),
+    ...dedupeMounts(permitted.filter(dir => !isWithin(worktree, dir) && !inCell(dir))),
     ...dedupeMounts(permitted.filter(dir => isWithin(worktree, dir))),
   ];
   // `dedupeMounts` intentionally removes generic nested binds (for example an
@@ -232,26 +243,72 @@ export function buildBubblewrapArgs(profile: SandboxProfile, cwd: string): strin
   // broader writable path such as /tmp, then allow explicit nested paths.
   for (const dir of writable.filter(dir => !isWithin(worktree, dir))) { args.push('--bind', dir, dir); }
   for (const dir of nestedGitMetadata.filter(dir => !isWithin(worktree, dir))) { args.push('--bind', dir, dir); }
+  if (cell) { args.push(...configCellArgs(cell, cellWritable)); }
   args.push(profile.worktreeWritable ? '--bind' : '--ro-bind', worktree, worktree);
   for (const dir of writable.filter(dir => dir !== worktree && isWithin(worktree, dir))) { args.push('--bind', dir, dir); }
   return [...args, '--chdir', path.resolve(cwd), '--'];
 }
 
 /**
+ * A config cell needs its host directory to mirror. When the cell cannot be
+ * prepared the launch keeps the plain binds, as optional state homes do.
+ */
+function resolveConfigCell(configCell: ConfigCell | undefined): ConfigCell | null {
+  if (!configCell) { return null; }
+  const target = path.resolve(configCell.target);
+  try {
+    if (!fs.statSync(target).isDirectory()) { return null; }
+    fs.mkdirSync(configCell.cell, { recursive: true, mode: 0o700 });
+  } catch (err) {
+    fmt.log.warn(`launcher config cell is unavailable: ${(err as Error).message}`);
+    return null;
+  }
+  return { ...configCell, target, cell: path.resolve(configCell.cell) };
+}
+
+interface LauncherStateHomes { directories: string[], files: string[], configCell?: ConfigCell }
+
+// Live state the Claude CLI keeps beside its credentials: the OAuth refresh
+// lock and the temp file of an in-flight credential save.
+const CLAUDE_CELL_STATE = [/^\.oauth_refresh\.lock$/, /^\.credentials\.json\.tmp\.[0-9a-f]{8}$/];
+
+// What the Claude CLI reads from its config dir as settings, instructions,
+// hooks, extensions or memory.
+const CLAUDE_GUARDED = {
+  files: ['CLAUDE.md', 'CLAUDE.local.md', 'keybindings.json', 'settings.json', 'settings.local.json'],
+  directories: ['agents', 'commands', 'hooks', 'output-styles', 'plugins', 'projects', 'rules', 'skills'],
+};
+
+function claudeStateHomes(worktree: string): LauncherStateHomes {
+  return {
+    directories: [parallixStateHome(), claudeSessionEnvDir(), claudeProjectDir(worktree)],
+    files: [claudeCredentialsPath()],
+    configCell: {
+      target: claudeConfigDir(),
+      cell: claudeConfigCellDir(),
+      readOnly: [claudeProjectMemoryDir(worktree)],
+      keep: CLAUDE_CELL_STATE,
+      guarded: CLAUDE_GUARDED,
+    },
+  };
+}
+
+/**
  * Resolve the launcher state homes kept writable for one family. Codex, Qwen and Vibe keep their state under the worktree's
  * git-ignored `.workflow/` (not reviewed source); Claude keeps its per-worktree
- * transcript under the host home; the custom family resolves to its configured
+ * transcript under the host home and sees `~/.claude` through a config cell
+ * so its OAuth refresh can lock and save; the custom family resolves to its configured
  * runner (opencode or pi), both of which are host-home based. Returns an empty
  * list for families the guard does not scope, so the caller keeps the plain
  * artifact-dir-only profile.
  */
-function resolveLauncherStateHomes(family: string | null | undefined, worktree: string): { directories: string[], files: string[] } {
+function resolveLauncherStateHomes(family: string | null | undefined, worktree: string): LauncherStateHomes {
   const directories = (...homes: string[]) => [parallixStateHome(), ...homes];
   switch (family) {
     case 'codex': return { directories: directories(codexHomeRoot(worktree)), files: [codexAuthPath()] };
     case 'qwen': return { directories: directories(qwenHomeRoot(worktree)), files: [] };
     case 'vibe': return { directories: directories(vibeHomeRoot(worktree)), files: [] };
-    case 'claude': return { directories: directories(claudeSessionEnvDir(), claudeProjectDir(worktree)), files: [claudeCredentialsPath()] };
+    case 'claude': return claudeStateHomes(worktree);
     case 'opencode': return { directories: directories(...opencodeStateHomes()), files: [] };
     case 'pi': return { directories: directories(...piStateHomes()), files: [] };
     case 'custom': return resolveLauncherStateHomes(resolveCustomRunner(worktree), worktree);
@@ -271,7 +328,8 @@ export function resolveSandboxProfile(
     const stateHomes = resolveLauncherStateHomes(family, worktree);
     return {
       worktree, worktreeWritable: false, writable: [artifactDir],
-      optionalWritable: ['/tmp'], optionalWritableDirectories: stateHomes.directories, optionalWritableFiles: stateHomes.files
+      optionalWritable: ['/tmp'], optionalWritableDirectories: stateHomes.directories, optionalWritableFiles: stateHomes.files,
+      ...(stateHomes.configCell ? { configCell: stateHomes.configCell } : {})
     };
   }
   // Implementer steps may mutate the mission branch. Grant the Git metadata that
@@ -288,7 +346,8 @@ export function resolveSandboxProfile(
     gitMetadata: gitMounts,
     optionalWritable: ['/tmp'],
     optionalWritableDirectories: stateHomes.directories,
-    optionalWritableFiles: stateHomes.files
+    optionalWritableFiles: stateHomes.files,
+    ...(stateHomes.configCell ? { configCell: stateHomes.configCell } : {})
   };
 }
 
