@@ -102,8 +102,6 @@ export function selectTierFiles(executionRoot: string): TierFileSelection {
     'task-2312-label-sync.test.ts',
     'task-2318-temp-directory-leaks.test.ts',
     'task-2319-notices-git-tracking.test.ts',
-    // TASK-2327: subprocess-based regression for SIGKILL orphan recovery
-    'task-2327-coverage-gate-tmp-leaks.test.ts',
     // TASK-2326 round 2: tui-spawn uses execFileSync (real process boundary)
     // and was relocated from the default suite to integration.
     'tui-spawn.test.ts',

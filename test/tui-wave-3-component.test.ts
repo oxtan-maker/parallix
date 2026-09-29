@@ -10,6 +10,16 @@ function renderShell(props: Record<string, unknown>): string {
   return renderToString(React.createElement(BoardShell, props as never), { columns: 120 });
 }
 
+async function waitForRender(predicate: () => boolean, description: string): Promise<void> {
+  const deadline = Date.now() + 250;
+  while (!predicate()) {
+    if (Date.now() >= deadline) {
+      assert.fail(`timed out waiting for ${description}`);
+    }
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+}
+
 test('component: selected mission has an explicit focused marker in wide and narrow board layouts', async () => {
   const projection = makeProjection({ active: [makeCard({ id: 'task-focus' as never, lane: 'active' })] });
   for (const columns of [120, 60]) {
@@ -60,9 +70,17 @@ test('component: keyboard help is visible on demand and ordinary keys have no wo
       patchConsole: false,
       exitOnCtrlC: false,
     });
-    await new Promise((resolve) => setTimeout(resolve, 10));
+    await waitForRender(
+      () => stdout.writes.join('').includes('?: help'),
+      'the initial keyboard footer',
+    );
     stdin.send(key);
-    await new Promise((resolve) => setTimeout(resolve, 10));
+    if (key === '?') {
+      await waitForRender(
+        () => stdout.writes.join('').includes('?: hide help'),
+        'the expanded keyboard reference',
+      );
+    }
     instance.unmount();
     const output = stdout.writes.join('');
     if (key === '?') {

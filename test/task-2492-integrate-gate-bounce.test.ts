@@ -214,28 +214,18 @@ async function runIntegrate(scenario: Scenario) {
       routeIntegrationGateFailureFn: routeIntegrationGateFailureFn as never,
       ...(scenario.repairs ? { reReviewFn: async () => {
         reviews++;
-        const eligibility = ConfiguredReviewerEligibility.fromReviewStep({ eligible: [agentFamily('claude')], strategy: 'random' });
-        const move = async (command: Parameters<MissionLifecycleService['transition']>[0]['command']) => {
-          const loaded = await services.store.load();
-          const result = await services.lifecycle.transition({ operationId: 'repair-test', missionId: missionId(SLUG),
-            expectedVersion: loaded.version, capabilities: new Set(['mission:transition']), command, actor: 'claude',
-            occurredAt: new Date().toISOString(), idempotencyKey: `repair-test:${loaded.version}` });
-          assert.equal(result.status, 'completed', result.error?.message);
-        };
+        // The lifecycle service owns its transition coverage. This CLI-wiring
+        // fixture needs only the state a completed re-review hands back to the
+        // integration restart, so keep the seam in-memory and deterministic.
         let review = services.store.mission().review!;
-        const round = currentReviewRound(review);
-        review = { ...review, rounds: [...review.rounds.slice(0, -1), { ...round,
-          subject: { ...round.subject, revision: changeRevision(`repair-${reviews}`) } }] as unknown as typeof review.rounds };
-        await move({ type: 'submit-for-review', review, gatesPassed: true, reviewerEligibility: eligibility });
         review = applyReviewerCommand(review, { type: 'request-changes', decidedAt: new Date().toISOString(), comment: null,
           findings: [{ id: reviewFindingId('F1'), summary: 'finish repair', location: null }] });
-        await move({ type: 'request-changes', review });
         review = applyImplementerCommand(review, { type: 'submit-resolution', respondedAt: new Date().toISOString(),
           resultingRevision: changeRevision(`repair-${reviews}-resolved`), resolutions: [{ findingId: reviewFindingId('F1'), kind: 'fixed', evidence: 'fixed' }] });
-        review = beginNextReviewRound(review, agentFamily('claude'), agentFamily('codex'), new Date().toISOString(), eligibility);
-        await move({ type: 'submit-for-review', review, gatesPassed: true, reviewerEligibility: eligibility });
+        review = beginNextReviewRound(review, agentFamily('claude'), agentFamily('codex'), new Date().toISOString(),
+          ConfiguredReviewerEligibility.fromReviewStep({ eligible: [agentFamily('claude')], strategy: 'random' }));
         review = applyReviewerCommand(review, { type: 'approve', decidedAt: new Date().toISOString(), comment: null, source: { kind: 'local' } });
-        await move({ type: 'approve', review });
+        await services.store.save({ ...services.store.mission(), status: 'integration', closedAt: null, review } as Mission);
         return true;
       } } : {}),
     });

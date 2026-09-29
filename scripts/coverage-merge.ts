@@ -11,6 +11,7 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { mergeLcov } from '../src/adapters/verification/coverage-gate.js';
+import { removeNonExecutableCoverage, removeTypeOnlyCoverage } from '../src/adapters/verification/type-only-coverage.js';
 import { packageRoot } from '../src/adapters/filesystem/package-root.js';
 
 function fail(message: string): never {
@@ -50,5 +51,7 @@ try {
 }
 
 const fragments = inputs.map(inPath => fs.readFileSync(resolve(root, inPath), 'utf8'));
-fs.writeFileSync(outPath, mergeLcov(fragments));
+// Type-only modules compile to no runtime code; include-all would otherwise
+// report them as uncovered (TASK-2521.07, ADR 0062).
+fs.writeFileSync(outPath, removeNonExecutableCoverage(removeTypeOnlyCoverage(mergeLcov(fragments), root), root));
 console.error(`[coverage-merge] wrote ${outPath} from ${inputs.length} fragment(s)`);

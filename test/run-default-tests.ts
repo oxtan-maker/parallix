@@ -19,7 +19,18 @@ if (!fs.existsSync(path.join(executionRoot, 'package.json')) || !fs.existsSync(t
   throw new Error(`PARALLIX_EXECUTION_ROOT is not a Parallix checkout: ${executionRoot}`);
 }
 
-const plan = buildTestRunPlan({ executionRoot, requestedArgs: process.argv.slice(2) });
+// TASK-2547: coverage is a reporting mode of the CI-safe execution, not a
+// second test pass. When PARALLIX_TEST_COVERAGE is set (GitHub ci-required or
+// the local pre-integration gates),
+// enable Node's built-in coverage and emit one lcov per tier so `npm run
+// coverage:merge` can union them. Unit and integration-ci stay separate Node
+// invocations (their execution semantics require it) but each selected test
+// still runs at most once; the two fragments are merged with LCOV semantics.
+// TASK-2591 (ADR 0062): coverage runs select Node 26.7+ for the native
+// include-all contract that replaced c8.
+const coverageEnabled = process.env.PARALLIX_TEST_COVERAGE === '1'
+  || process.env.PARALLIX_TEST_COVERAGE === 'true';
+const plan = buildTestRunPlan({ executionRoot, requestedArgs: process.argv.slice(2), coverage: coverageEnabled });
 const { testNode, nodeArgs, runsIntegrationSuite, runsIntegrationCiSuite, unitTestHeadroomMs } = plan;
 const UNIT_TEST_BUDGET_MS = plan.unitTestBudgetMs; // PARALLIX_UNIT_TEST_BUDGET_MS
 const UNIT_TEST_TIMEOUT_MS = plan.unitTestTimeoutMs;
@@ -28,22 +39,15 @@ const UNIT_TEST_TIMEOUT_MS = plan.unitTestTimeoutMs;
 // relaxing the per-test timeout or headroom contracts below.
 const COVERAGE_UNIT_TEST_SUITE_BUDGET_MS = 300_000;
 
-// TASK-2547: coverage is a reporting mode of the CI-safe execution, not a
-// second test pass. When PARALLIX_TEST_COVERAGE is set (GitHub ci-required or
-// the local pre-integration gates),
-// enable Node's built-in coverage and emit one lcov per tier so `npm run
-// coverage:merge` can union them. Unit and integration-ci stay separate Node
-// invocations (their execution semantics require it) but each selected test
-// still runs at most once; the two fragments are merged with LCOV semantics.
-const coverageEnabled = process.env.PARALLIX_TEST_COVERAGE === '1'
-  || process.env.PARALLIX_TEST_COVERAGE === 'true';
 const coverageDestination = runsIntegrationCiSuite
   ? path.join(executionRoot, 'coverage', '.lcov-integration-ci.info')
   : path.join(executionRoot, 'coverage', '.lcov-unit.info');
 const coverageTier = runsIntegrationCiSuite ? 'integration-ci' : 'unit';
 // The unit and integration-ci gates may run concurrently. Give each invocation
 // a unique repo-local V8 payload directory; the LCOV destinations above remain
-// the deliberate per-tier hand-off consumed by coverage:merge.
+// the deliberate per-tier hand-off consumed by coverage:merge. The payload is
+// ~1.2 GB per integration-ci run, too large for the shared tmpfs /tmp that
+// Node would otherwise use (ADR 0062).
 let coverageScratchDir: string | null = null;
 if (coverageEnabled) {
   fs.mkdirSync(path.join(executionRoot, 'tmp'), { recursive: true });

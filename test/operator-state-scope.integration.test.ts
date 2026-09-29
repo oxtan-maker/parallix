@@ -17,6 +17,9 @@ test('review scope cleanup leaves the enclosing integration store usable', async
     const integration = await createProductionApplicationServices(process.cwd());
     const review = await createProductionApplicationServices(process.cwd());
     assert.ok(integration.mission);
+    assert.equal(integration.executeMission.constructor.name, 'ExecuteMissionService');
+    assert.equal(integration.statsBackfill.constructor.name, 'StatsBackfillService');
+    assert.equal(integration.mission.store.constructor.name, 'SqliteMissionStore');
     assert.ok(review.mission);
     assert.ok(integration.operatorState.db);
     assert.strictEqual(review.operatorState.db, integration.operatorState.db);

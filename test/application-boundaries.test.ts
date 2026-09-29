@@ -101,10 +101,12 @@ test('boundary guard permits src/adapters/sqlite/ repository adapter path', () =
 
 test('composition guard accepts the sole production composition root', async () => {
   assert.deepEqual(findCompositionViolations(path.join(root, 'src', 'composition')), []);
-  const graph = await createProductionApplicationServices(root);
+  // The ownership assertion is static. Keep the construction smoke test
+  // in-process by opting out of the real operator database and Git identity.
+  const graph = await createProductionApplicationServices(root, undefined, { includeOperatorState: false });
   assert.equal(graph.executeMission.constructor.name, 'ExecuteMissionService');
   assert.equal(graph.statsBackfill.constructor.name, 'StatsBackfillService');
-  assert.equal(graph.mission.store.constructor.name, 'SqliteMissionStore');
+  assert.equal(graph.mission, null);
 });
 
 test('composition guard rejects complete adapter construction fixture', () => {

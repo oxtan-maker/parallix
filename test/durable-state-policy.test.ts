@@ -16,7 +16,6 @@ const { MACHINE_WRITTEN_PATH_INVENTORY } = MACHINE_WRITTEN_PATH_INVENTORYModule;
 const ROOT = path.resolve(import.meta.dirname, '..');
 const RUNTIME_LIB = path.join(ROOT, 'src');
 const DIRECT_JSON_EXCEPTIONS = new Map([
-  ['src/adapters/verification/coverage-gate.ts:coverageManifestPath()', 'coverage-manifest'],
   ['src/adapters/verification/temp-root-registry.ts:manifestPath', 'coverage-manifest'],
   ['src/adapters/review/setup-review-config.ts:configPath', 'workflow-config'],
   ['src/adapters/agents/qwen.ts:targetSettings', 'qwen-settings'],

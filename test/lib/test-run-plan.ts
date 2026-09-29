@@ -14,7 +14,7 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
 import { UNIT_TEST_BUDGET_MS, UNIT_TEST_HEADROOM_MS, onGitHubActions } from './unit-test-budget-reporter.mjs';
-import { selectTierFiles } from './test-tier-selection.js';
+import { selectTierFiles, type TierFileSelection } from './test-tier-selection.js';
 // Re-export so the test/lib surface stays the single authority entry point for
 // coverage and the regression test.
 export { selectTierFiles };
@@ -36,6 +36,13 @@ export interface TestRunPlanOptions {
    * plan tests so they do not spawn a nested Node process.
    */
   probeTestConcurrency?: (executable: string) => boolean;
+  /**
+   * The run reports coverage (PARALLIX_TEST_COVERAGE). Coverage needs Node
+   * 26.7+ for --test-coverage-include-all, so the plan selects such a Node.
+   */
+  coverage?: boolean;
+  /** Reuse a single filesystem snapshot when comparing multiple suite plans. */
+  tierFiles?: TierFileSelection;
 }
 
 export interface TestRunPlan {
@@ -49,10 +56,22 @@ export interface TestRunPlan {
   unitTestHeadroomMs: number | null;
 }
 
+// TASK-2591 (ADR 0062): the coverage contract formerly enforced through c8.
+// The denominator is every production TypeScript module, including modules no
+// test loads, with test and non-source paths excluded.
+export const COVERAGE_INCLUDES = ['src/**/*.ts'];
+export const COVERAGE_EXCLUDES = ['test/**', 'prompts/**', 'config/*.json', '.workflow/**', 'node_modules/**'];
+const MINIMUM_COVERAGE_NODE_MAJOR = 26;
+const MINIMUM_COVERAGE_NODE_MINOR = 7;
+
 /**
  * Add Node's LCOV reporter without breaking its positional reporter/destination
  * pairing. Always retain a console reporter so a failing covered gate shows
  * the failing test instead of writing its only output to the LCOV file.
+ *
+ * --enable-source-maps makes the reporter attribute V8 ranges to .ts source
+ * lines instead of tsx's transpiled positions; --test-coverage-include-all
+ * reports unloaded sources at 0% (Node 26.7+).
  */
 export function withCoverageReporters(nodeArgs: readonly string[], coverageDestination: string): string[] {
   const testIndex = nodeArgs.indexOf('--test');
@@ -62,7 +81,11 @@ export function withCoverageReporters(nodeArgs: readonly string[], coverageDesti
     ...(hasExistingReporter
       ? ['--test-reporter-destination=stdout']
       : ['--test-reporter=spec', '--test-reporter-destination=stdout']),
+    '--enable-source-maps',
     '--experimental-test-coverage',
+    '--test-coverage-include-all',
+    ...COVERAGE_INCLUDES.map(pattern => `--test-coverage-include=${pattern}`),
+    ...COVERAGE_EXCLUDES.map(pattern => `--test-coverage-exclude=${pattern}`),
     '--test-coverage-lines=0',
     '--test-reporter=lcov',
     `--test-reporter-destination=${coverageDestination}`,
@@ -112,6 +135,9 @@ export function buildTestRunPlan(options: TestRunPlanOptions): TestRunPlan {
   const testRoot = path.join(executionRoot, 'test');
   const MINIMUM_TEST_NODE_MAJOR = 20;
   const MINIMUM_TEST_NODE_MINOR = 6;
+  const [minimumMajor, minimumMinor] = options.coverage
+    ? [MINIMUM_COVERAGE_NODE_MAJOR, MINIMUM_COVERAGE_NODE_MINOR]
+    : [MINIMUM_TEST_NODE_MAJOR, MINIMUM_TEST_NODE_MINOR];
 
   function supportsTestImports(executable: string): boolean {
     const version = probeNodeVersion(executable);
@@ -119,8 +145,8 @@ export function buildTestRunPlan(options: TestRunPlanOptions): TestRunPlan {
     if (!match) { return false; }
     const major = Number(match[1]);
     const minor = Number(match[2]);
-    return major > MINIMUM_TEST_NODE_MAJOR
-      || (major === MINIMUM_TEST_NODE_MAJOR && minor >= MINIMUM_TEST_NODE_MINOR);
+    return major > minimumMajor
+      || (major === minimumMajor && minor >= minimumMinor);
   }
 
   function compatibleTestNode(): string {
@@ -145,7 +171,9 @@ export function buildTestRunPlan(options: TestRunPlanOptions): TestRunPlan {
         return candidate;
       }
     }
-    throw new Error(`Node ${MINIMUM_TEST_NODE_MAJOR}.${MINIMUM_TEST_NODE_MINOR}+ is required for TypeScript tests; set PARALLIX_TEST_NODE to a compatible executable.`);
+    throw new Error(options.coverage
+      ? `Node ${minimumMajor}.${minimumMinor}+ is required for coverage runs (--test-coverage-include-all); set PARALLIX_TEST_NODE to a compatible executable.`
+      : `Node ${MINIMUM_TEST_NODE_MAJOR}.${MINIMUM_TEST_NODE_MINOR}+ is required for TypeScript tests; set PARALLIX_TEST_NODE to a compatible executable.`);
   }
 
   // `--test-concurrency` exists from Node 20.15 on; probe empirically so no
@@ -162,7 +190,7 @@ export function buildTestRunPlan(options: TestRunPlanOptions): TestRunPlan {
     return supported;
   }
 
-  const tierFiles = selectTierFiles(executionRoot);
+  const tierFiles = options.tierFiles ?? selectTierFiles(executionRoot);
   // Verification-tier selectors (TASK-2500.04). `--integration` keeps running
   // the whole integration layer so the existing local gate is unchanged, while
   // `--integration-ci` and `--integration-local` select POSITIVELY from the

@@ -923,15 +923,6 @@ export const ADR0053_PERSISTENCE_INVENTORY: readonly ADR0053BoundaryEntry[] = [
     cutoverTask: null,
   },
   {
-    id: 'artifacts-coverage-gate-write',
-    concept: 'LargeArtifacts',
-    pathType: 'compatibility',
-    fileLocation: 'src/adapters/verification/coverage-gate.ts',
-    operation: 'write',
-    classification: 'generated-artifact',
-    cutoverTask: 'TASK-2322.02',
-  },
-  {
     id: 'artifacts-sqlite-importer-read',
     concept: 'LargeArtifacts',
     pathType: 'compatibility',
@@ -1240,7 +1231,7 @@ export const MACHINE_WRITTEN_PATH_INVENTORY: readonly MachineWrittenPathInventor
   {
     id: 'coverage-manifest',
     pathPattern: '<tmp>/parallix-temp-root-manifests/<pid>.json',
-    writer: 'lib/commands/coverage-gate.ts#flushCoverageManifest',
+    writer: 'src/adapters/verification/temp-root-registry.ts',
     classification: 'cache-scratch-data',
     persistencePolicy: 'PID-scoped scratch manifest for SIGKILL orphan recovery; documented direct-write exception.',
   },

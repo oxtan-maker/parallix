@@ -1,61 +1,13 @@
-// @ts-nocheck -- TASK-2328: partial test doubles from ESM seam migration; resolve in follow-up
-
-
-
-import test, { mock } from 'node:test';
+// TASK-2591 (ADR 0062): coverage-gate.ts keeps only the coverage population
+// and the LCOV union; the native Node coverage contract that replaced c8 is
+// asserted through the runner's argv here.
+import test from 'node:test';
 import assert from 'node:assert/strict';
-import fs from 'fs';
-import os from 'os';
-import path from 'path';
-import { mockModule, installModuleMocks } from './lib/module-mock.js';
-// cli-format is observed, not patched: import it directly so the logger this
-// test installs is the same module instance coverage-gate writes through.
-import * as fmt from '../src/application/presentation/cli-format.js';
-const coverageGate = mockModule<typeof import('../src/adapters/verification/coverage-gate.js')>('../src/adapters/verification/coverage-gate.js', import.meta.url);
-await installModuleMocks();
-test.afterEach(() => mock.restoreAll());
+import path from 'node:path';
+import { coverageTestFiles, discoverTestFiles, mergeLcov, normalizeLcov } from '../src/adapters/verification/coverage-gate.js';
+import { buildTestRunPlan, COVERAGE_EXCLUDES, COVERAGE_INCLUDES, withCoverageReporters } from './lib/test-run-plan.js';
+
 const REPO_ROOT = path.join(import.meta.dirname, '..');
-const {
-  buildC8Args,
-  buildCoverageArgs,
-  cleanupNewTempDirs,
-  cleanupPerRunScratch,
-  COVERAGE_EXCLUDES,
-  COVERAGE_INCLUDES,
-  createPerRunScratchDirs,
-  DEFAULT_TEST_TIMEOUT_MS,
-  coverageTestFiles,
-  discoverTestFiles,
-  listTempEntries,
-  normalizeLcov,
-  mergeLcov,
-  resetPerRunScratchState,
-  resolveTestTimeoutMs,
-  runTests
-} = coverageGate;
-
-function runGate(args = []) {
-  const logs = [];
-  const errors = [];
-  let exitCode = null;
-  const previousLogger = fmt.setLogger({
-    log: message => logs.push(fmt.stripAnsi(message)),
-    error: message => errors.push(fmt.stripAnsi(message)),
-  });
-  try {
-    coverageGate.default(args, { exitFn: code => { exitCode = code; } });
-    return { status: exitCode, stdout: logs.join('\n'), stderr: errors.join('\n') };
-  } finally {
-    fmt.setLogger(previousLogger);
-  }
-}
-
-test('coverage-gate dry-run exits 0 and lists files', () => {
-  const result = runGate(['--dry-run']);
-  assert.equal(result.status, 0, `dry-run should exit 0, got: ${result.stderr}`);
-  assert.match(result.stdout, /DRY-RUN mode/);
-  assert.match(result.stdout, /Found \d+ test file/);
-});
 
 test('coverage-gate includes its own test file in authoritative discovery', () => {
   const testFiles = discoverTestFiles();
@@ -66,110 +18,40 @@ test('coverage-gate includes its own test file in authoritative discovery', () =
   assert.ok(coverageTestFiles().some(file => /task-1209-review-loop\.test\.ts$/.test(file)));
 });
 
-test('coverage-gate reports denominator and metric in output', () => {
-  const result = runGate(['--dry-run']);
-  assert.match(result.stdout, /Denominator: src\/\*\*\/\*\.ts/);
-  assert.match(result.stdout, /Include globs:/);
+test('native coverage keeps the historical c8 contract: src denominator, unloaded files, exclusions, source maps', () => {
+  const plan = buildTestRunPlan({ executionRoot: REPO_ROOT, requestedArgs: ['--integration-ci'], probeNodeVersion: () => 'v26.7.0', coverage: true });
+  const args = withCoverageReporters(plan.nodeArgs, 'coverage/.lcov-integration-ci.info');
+  const coverageArgs = args.slice(0, args.indexOf('--test'));
+  assert.deepEqual(COVERAGE_INCLUDES, ['src/**/*.ts']);
+  assert.deepEqual(COVERAGE_EXCLUDES, ['test/**', 'prompts/**', 'config/*.json', '.workflow/**', 'node_modules/**']);
+  for (const flag of [
+    '--enable-source-maps',
+    '--experimental-test-coverage',
+    '--test-coverage-include-all',
+    '--test-coverage-include=src/**/*.ts',
+    ...COVERAGE_EXCLUDES.map(pattern => `--test-coverage-exclude=${pattern}`),
+    '--test-coverage-lines=0',
+    '--test-reporter=lcov',
+    '--test-reporter-destination=coverage/.lcov-integration-ci.info',
+  ]) {
+    assert.ok(coverageArgs.includes(flag), `coverage argv carries ${flag}`);
+  }
 });
 
-test('coverage-gate shows per-file breakdown', () => {
-  const result = runGate(['--dry-run']);
-  assert.match(result.stdout, /--lines=90/);
-  assert.match(result.stdout, /--exclude test\/\*\*/);
-});
-
-test('cleanupNewTempDirs removes only newly created matching directories', () => {
-  const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'coverage-gate-cleanup-'));
+test('coverage runs require Node 26.7+ for --test-coverage-include-all', () => {
+  const options = { executionRoot: REPO_ROOT, requestedArgs: [], coverage: true };
+  const previous = process.env.PARALLIX_TEST_NODE;
+  delete process.env.PARALLIX_TEST_NODE;
   try {
-    const preexisting = 'visualBoard-task-existing';
-    const newMatching = 'visualBoard-task-new';
-    const newNonMatching = 'keep-me';
-
-    fs.mkdirSync(path.join(tmpRoot, preexisting));
-    const beforeEntries = listTempEntries(tmpRoot);
-    fs.mkdirSync(path.join(tmpRoot, newMatching));
-    fs.mkdirSync(path.join(tmpRoot, newNonMatching));
-
-    cleanupNewTempDirs(beforeEntries, tmpRoot);
-
-    assert.equal(fs.existsSync(path.join(tmpRoot, preexisting)), true);
-    assert.equal(fs.existsSync(path.join(tmpRoot, newMatching)), false);
-    assert.equal(fs.existsSync(path.join(tmpRoot, newNonMatching)), true);
+    assert.throws(
+      () => buildTestRunPlan({ ...options, probeNodeVersion: () => 'v26.6.0' }),
+      /Node 26\.7\+ is required for coverage runs/,
+    );
+    assert.doesNotThrow(() => buildTestRunPlan({ ...options, probeNodeVersion: () => 'v26.7.0' }));
+    assert.doesNotThrow(() => buildTestRunPlan({ ...options, coverage: false, probeNodeVersion: () => 'v24.15.0' }));
   } finally {
-    fs.rmSync(tmpRoot, { recursive: true, force: true });
+    if (previous !== undefined) { process.env.PARALLIX_TEST_NODE = previous; }
   }
-});
-
-test('cleanupNewTempDirs does not remove active runtime-matrix launcher dirs', () => {
-  const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'coverage-gate-runtime-cleanup-'));
-  try {
-    const beforeEntries = listTempEntries(tmpRoot);
-    const launcherDir = 'runtime-matrix-launcher-active';
-    fs.mkdirSync(path.join(tmpRoot, launcherDir));
-
-    cleanupNewTempDirs(beforeEntries, tmpRoot);
-
-    assert.equal(fs.existsSync(path.join(tmpRoot, launcherDir)), true);
-  } finally {
-    fs.rmSync(tmpRoot, { recursive: true, force: true });
-  }
-});
-
-test('runTests returns 1 when spawn fails with error', () => {
-  const mockSpawn = () => ({ error: new Error('ENOENT'), signal: null, status: null });
-  const exitCode = runTests(['/tmp/fake.test.js'], 90, mockSpawn);
-  assert.equal(exitCode, 1);
-});
-
-test('runTests returns 1 when child process is killed by signal', () => {
-  const mockSpawn = () => ({ error: null, signal: 'SIGKILL', status: null });
-  const exitCode = runTests(['/tmp/fake.test.js'], 90, mockSpawn);
-  assert.equal(exitCode, 1);
-});
-
-test('runTests returns 1 when status is null and no error or signal', () => {
-  const mockSpawn = () => ({ error: null, signal: null, status: null });
-  const exitCode = runTests(['/tmp/fake.test.js'], 90, mockSpawn);
-  assert.equal(exitCode, 1);
-});
-
-test('runTests returns subprocess exit code on normal exit', () => {
-  const mockSpawn = () => ({ error: null, signal: null, status: 0 });
-  const exitCode = runTests(['/tmp/fake.test.js'], 90, mockSpawn);
-  assert.equal(exitCode, 0);
-});
-
-test('runTests returns non-zero subprocess exit code on test failure', () => {
-  const mockSpawn = () => ({ error: null, signal: null, status: 1 });
-  const exitCode = runTests(['/tmp/fake.test.js'], 90, mockSpawn);
-  assert.equal(exitCode, 1);
-});
-
-test('coverage command keeps node:test execution separate from c8 reporting', () => {
-  const args = buildCoverageArgs(['/tmp/a.test.ts']);
-  const c8Args = buildC8Args(90, true);
-  assert.deepEqual(args.slice(0, 2), ['--import', 'tsx']);
-  assert.ok(args.some(arg => arg.includes('bootstrap-parallix-home.ts')));
-  assert.ok(args.includes('--experimental-test-module-mocks'));
-  assert.ok(!args.includes('--experimental-test-coverage'));
-  assert.ok(c8Args.includes('--check-coverage'));
-  assert.ok(c8Args.includes('--lines=90'));
-  for (const pattern of COVERAGE_INCLUDES) {
-    assert.ok(c8Args.includes(pattern));
-  }
-  for (const pattern of COVERAGE_EXCLUDES) {
-    assert.ok(c8Args.includes(pattern));
-  }
-  assert.ok(args.includes('/tmp/a.test.ts'));
-  assert.ok(
-    c8Args.includes(`--reports-dir=${path.join(REPO_ROOT, 'coverage')}`),
-    'lcov output should be rooted under parallix/coverage'
-  );
-});
-
-test('buildCoverageArgs does not load tsx for JavaScript-only test lists', () => {
-  const args = buildCoverageArgs(['/tmp/a.test.js']);
-  assert.ok(!args.includes('tsx'));
 });
 
 test('normalizeLcov unions duplicate worker records by source line', () => {
@@ -209,69 +91,4 @@ test('mergeLcov handles a line zero-hit in both fragments and empty input', () =
   // Both lines are zero-hit: LF counts them, LH counts only covered lines.
   assert.equal(merged, 'SF:src/a.ts\nDA:1,0\nDA:2,0\nLF:2\nLH:0\nend_of_record\n');
   assert.equal(mergeLcov([]), '');
-});
-
-test('resolveTestTimeoutMs uses default and valid env override', () => {
-  assert.equal(resolveTestTimeoutMs({}), DEFAULT_TEST_TIMEOUT_MS);
-  assert.equal(resolveTestTimeoutMs({ WORKFLOW_COVERAGE_GATE_TIMEOUT_MS: '12345' }), 12345);
-  assert.equal(resolveTestTimeoutMs({ WORKFLOW_COVERAGE_GATE_TIMEOUT_MS: 'not-a-number' }), DEFAULT_TEST_TIMEOUT_MS);
-});
-
-test('createPerRunScratchDirs creates a node-coverage-* dir and records it', () => {
-  resetPerRunScratchState();
-  const dir = createPerRunScratchDirs();
-  assert.ok(path.basename(dir).startsWith('node-coverage-'), `dir ${dir} should start with node-coverage- prefix`);
-  assert.ok(fs.existsSync(dir), `dir ${dir} should exist`);
-  assert.ok(dir.match(/node-coverage-[a-zA-Z0-9]{6}/), `dir ${dir} should have mkdtemp-style suffix`);
-});
-
-test('createPerRunScratchDirs honors PARALLIX_COVERAGE_TMP_DIR override', () => {
-  const override = path.join(os.tmpdir(), `coverage-override-${process.pid}-${Date.now()}`);
-  const previous = process.env.PARALLIX_COVERAGE_TMP_DIR;
-  process.env.PARALLIX_COVERAGE_TMP_DIR = override;
-  try {
-    resetPerRunScratchState();
-    const dir = createPerRunScratchDirs();
-    assert.ok(dir.startsWith(override), `dir ${dir} should live under the override base`);
-    assert.ok(fs.existsSync(dir), 'override base scratch dir should exist');
-  } finally {
-    if (previous === undefined) {delete process.env.PARALLIX_COVERAGE_TMP_DIR;} else {process.env.PARALLIX_COVERAGE_TMP_DIR = previous;}
-  }
-});
-
-test('cleanupPerRunScratch removes only tracked dirs', () => {
-  resetPerRunScratchState();
-  const dir = createPerRunScratchDirs();
-  assert.ok(fs.existsSync(dir), 'tracked dir should exist before cleanup');
-  cleanupPerRunScratch();
-  assert.equal(fs.existsSync(dir), false, `tracked dir ${dir} should be removed after cleanup`);
-  // Verify second call is no-op (cleanupDone flag)
-  assert.doesNotThrow(() => cleanupPerRunScratch(), 'second call should not throw');
-});
-
-test('cleanupPerRunScratch is idempotent', () => {
-  resetPerRunScratchState();
-  const dir = createPerRunScratchDirs();
-  assert.ok(fs.existsSync(dir), 'dir should exist before cleanup');
-  cleanupPerRunScratch();
-  assert.equal(fs.existsSync(dir), false, 'dir should be removed on first call');
-  assert.doesNotThrow(() => cleanupPerRunScratch(), 'second call should not throw');
-});
-
-test('runTests sets NODE_V8_COVERAGE to the created dir', () => {
-  let capturedOptions = null;
-  const mockSpawn = (_execPath, _args, options) => {
-    capturedOptions = options;
-    return { error: null, signal: null, status: 0 };
-  };
-  const exitCode = runTests(['/tmp/fake.test.js'], 90, mockSpawn);
-  assert.equal(exitCode, 0);
-  assert.ok(capturedOptions, 'spawnSync should have been called with options');
-  assert.ok(capturedOptions.env.NODE_V8_COVERAGE, 'NODE_V8_COVERAGE should be set in child env');
-  assert.ok(
-    path.basename(capturedOptions.env.NODE_V8_COVERAGE).startsWith('node-coverage-'),
-    `NODE_V8_COVERAGE ${capturedOptions.env.NODE_V8_COVERAGE} should start with node-coverage- prefix`);
-  assert.ok(capturedOptions.env.GRAPHIFY_BIN, 'GRAPHIFY_BIN should be set to a mock in child env');
-  assert.ok(capturedOptions.env.GRAPHIFY_BIN.startsWith(path.join(os.tmpdir(), 'graphify-')),
-    `GRAPHIFY_BIN ${capturedOptions.env.GRAPHIFY_BIN} should start with graphify- prefix`);
 });

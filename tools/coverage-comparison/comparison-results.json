@@ -1,0 +1,4144 @@
+{
+  "generatedAt": "2026-09-27T15:11:46.283Z",
+  "commit": "a992758c61c08b4c99ae9b711ffa10b07ead6c52",
+  "runs": [
+    {
+      "variant": "c8",
+      "run": 1,
+      "node": "v26.10.0",
+      "status": 0,
+      "seconds": 149.6,
+      "v8PayloadBytes": 1077652079
+    },
+    {
+      "variant": "c8",
+      "run": 2,
+      "node": "v26.10.0",
+      "status": 0,
+      "seconds": 150,
+      "v8PayloadBytes": 1077636647
+    },
+    {
+      "variant": "native-current",
+      "run": 1,
+      "node": "v24.21.0",
+      "status": 0,
+      "seconds": 181.8,
+      "v8PayloadBytes": 1217442669
+    },
+    {
+      "variant": "native-include-all",
+      "run": 1,
+      "node": "v26.10.0",
+      "status": 0,
+      "seconds": 151,
+      "v8PayloadBytes": 1184951806
+    },
+    {
+      "variant": "native-include-all",
+      "run": 2,
+      "node": "v26.10.0",
+      "status": 0,
+      "seconds": 144.7,
+      "v8PayloadBytes": 1184952335
+    },
+    {
+      "variant": "none",
+      "run": 1,
+      "node": "v26.10.0",
+      "status": 0,
+      "seconds": 95.1,
+      "v8PayloadBytes": 0
+    },
+    {
+      "variant": "none",
+      "run": 2,
+      "node": "v26.10.0",
+      "status": 0,
+      "seconds": 89.2,
+      "v8PayloadBytes": 0
+    }
+  ],
+  "medianSeconds": {
+    "c8": 149.8,
+    "native-current": 181.8,
+    "native-include-all": 147.8,
+    "none": 92.2
+  },
+  "coverage": {
+    "c8": {
+      "files": 332,
+      "untestedFiles": 32,
+      "outsideSrc": 0,
+      "linesFound": 72362,
+      "linesHit": 68222,
+      "pct": 94.28
+    },
+    "native-current": {
+      "files": 332,
+      "untestedFiles": 0,
+      "outsideSrc": 33,
+      "linesFound": 74610,
+      "linesHit": 65690,
+      "pct": 88.04
+    },
+    "native-include-all": {
+      "files": 332,
+      "untestedFiles": 33,
+      "outsideSrc": 0,
+      "linesFound": 66510,
+      "linesHit": 51622,
+      "pct": 77.62
+    }
+  },
+  "comparisons": {
+    "c8-vs-native-current": {
+      "onlyReference": [
+        "src/adapters/agents/agent-selection-snapshot.ts",
+        "src/adapters/architecture/boundary-guards.ts",
+        "src/adapters/cli/commands/review.ts",
+        "src/adapters/sqlite/index.ts",
+        "src/adapters/sqlite/ports.ts",
+        "src/adapters/verification/redgreen.ts",
+        "src/application/consumer-domain-requirements.ts",
+        "src/application/github-publish/publication-engine.ts",
+        "src/application/github-publish/state-machine.ts",
+        "src/application/github-publish/verification-ref.ts",
+        "src/application/mission-authority.ts",
+        "src/application/persistence-domain-map.ts",
+        "src/application/ports.ts",
+        "src/application/ports/agent-blocklist.ts",
+        "src/application/ports/cli-workflows.ts",
+        "src/application/ports/execute-mission.ts",
+        "src/application/ports/github-publish.ts",
+        "src/application/ports/handoff-workflow.ts",
+        "src/application/ports/integrate-workflow.ts",
+        "src/application/ports/mission-measurements.ts",
+        "src/application/ports/mission-store.ts",
+        "src/application/ports/operation-history.ts",
+        "src/application/ports/operator-preferences.ts",
+        "src/application/ports/rebase-workflow.ts",
+        "src/application/ports/repository-catalog.ts",
+        "src/application/ports/review-workflow.ts",
+        "src/application/projections/activity.ts",
+        "src/application/projections/analytics.ts",
+        "src/application/projections/bug-frequency.ts",
+        "src/application/projections/repository-selector.ts",
+        "src/application/tui-capabilities.ts",
+        "src/interfaces/tui/index.ts",
+        "src/interfaces/tui/ui-command.ts"
+      ],
+      "onlyCandidate": [
+        "../../../../tmp/parallix-docs-5LFGT2/scripts/verify-docs.mjs",
+        "../../../../tmp/parallix-docs-FLGxWw/scripts/verify-docs.mjs",
+        "../../../../tmp/parallix-docs-kbAhqg/scripts/verify-docs.mjs",
+        "build/px.mjs",
+        "package.json",
+        "scripts/build-canonical-bundle.ts",
+        "scripts/release-metadata.ts",
+        "scripts/repair-task-2367.ts",
+        "scripts/sonar-local.ts",
+        "scripts/verify-docs.mjs",
+        "src/interfaces/tui/action-bar.tsx",
+        "src/interfaces/tui/agent-strip.tsx",
+        "src/interfaces/tui/board-layout.tsx",
+        "src/interfaces/tui/confirmation-dialog.tsx",
+        "src/interfaces/tui/flow-panel.tsx",
+        "src/interfaces/tui/lane-column.tsx",
+        "src/interfaces/tui/mission-card.tsx",
+        "src/interfaces/tui/outcome-banner.tsx",
+        "src/interfaces/tui/shell.tsx",
+        "web/src/action-button.tsx",
+        "web/src/attention-rail.tsx",
+        "web/src/board-data.ts",
+        "web/src/board.tsx",
+        "web/src/done-rail.tsx",
+        "web/src/fan.tsx",
+        "web/src/flight-column.tsx",
+        "web/src/flow-panel.tsx",
+        "web/src/format.ts",
+        "web/src/intake-column.tsx",
+        "web/src/lane-header.tsx",
+        "web/src/operation-log.tsx",
+        "web/src/palette.ts",
+        "web/src/top-bar.tsx"
+      ],
+      "sameLineSet": 299,
+      "differentLineSet": 0,
+      "coveredDisagreements": 7589,
+      "differingFiles": [
+        {
+          "file": "src/adapters/agents/agent-block-authority.ts",
+          "referenceLf": 45,
+          "candidateLf": 45,
+          "referenceLh": 45,
+          "candidateLh": 40
+        },
+        {
+          "file": "src/adapters/agents/agent-config.ts",
+          "referenceLf": 221,
+          "candidateLf": 221,
+          "referenceLh": 221,
+          "candidateLh": 217
+        },
+        {
+          "file": "src/adapters/agents/agent-stream-events.ts",
+          "referenceLf": 137,
+          "candidateLf": 137,
+          "referenceLh": 137,
+          "candidateLh": 100
+        },
+        {
+          "file": "src/adapters/agents/agent-stream-view.ts",
+          "referenceLf": 302,
+          "candidateLf": 302,
+          "referenceLh": 302,
+          "candidateLh": 186
+        },
+        {
+          "file": "src/adapters/agents/agents.ts",
+          "referenceLf": 995,
+          "candidateLf": 995,
+          "referenceLh": 995,
+          "candidateLh": 956
+        },
+        {
+          "file": "src/adapters/agents/claude-stream-render.ts",
+          "referenceLf": 294,
+          "candidateLf": 294,
+          "referenceLh": 294,
+          "candidateLh": 159
+        },
+        {
+          "file": "src/adapters/agents/claude-stream-view.ts",
+          "referenceLf": 50,
+          "candidateLf": 50,
+          "referenceLh": 50,
+          "candidateLh": 45
+        },
+        {
+          "file": "src/adapters/agents/claude-telemetry.ts",
+          "referenceLf": 228,
+          "candidateLf": 228,
+          "referenceLh": 228,
+          "candidateLh": 159
+        },
+        {
+          "file": "src/adapters/agents/claude.ts",
+          "referenceLf": 187,
+          "candidateLf": 187,
+          "referenceLh": 187,
+          "candidateLh": 164
+        },
+        {
+          "file": "src/adapters/agents/codex-telemetry.ts",
+          "referenceLf": 172,
+          "candidateLf": 172,
+          "referenceLh": 172,
+          "candidateLh": 170
+        },
+        {
+          "file": "src/adapters/agents/codex.ts",
+          "referenceLf": 251,
+          "candidateLf": 251,
+          "referenceLh": 251,
+          "candidateLh": 242
+        },
+        {
+          "file": "src/adapters/agents/custom-capacity.ts",
+          "referenceLf": 51,
+          "candidateLf": 51,
+          "referenceLh": 51,
+          "candidateLh": 50
+        },
+        {
+          "file": "src/adapters/agents/first-run-config.ts",
+          "referenceLf": 121,
+          "candidateLf": 121,
+          "referenceLh": 121,
+          "candidateLh": 120
+        },
+        {
+          "file": "src/adapters/agents/launcher-availability.ts",
+          "referenceLf": 78,
+          "candidateLf": 78,
+          "referenceLh": 78,
+          "candidateLh": 65
+        },
+        {
+          "file": "src/adapters/agents/launcher-selection.ts",
+          "referenceLf": 321,
+          "candidateLf": 321,
+          "referenceLh": 321,
+          "candidateLh": 316
+        },
+        {
+          "file": "src/adapters/agents/opencode-export.ts",
+          "referenceLf": 218,
+          "candidateLf": 218,
+          "referenceLh": 218,
+          "candidateLh": 217
+        },
+        {
+          "file": "src/adapters/agents/opencode-telemetry.ts",
+          "referenceLf": 221,
+          "candidateLf": 221,
+          "referenceLh": 221,
+          "candidateLh": 169
+        },
+        {
+          "file": "src/adapters/agents/opencode.ts",
+          "referenceLf": 423,
+          "candidateLf": 423,
+          "referenceLh": 423,
+          "candidateLh": 393
+        },
+        {
+          "file": "src/adapters/agents/pi-stream-render.ts",
+          "referenceLf": 82,
+          "candidateLf": 82,
+          "referenceLh": 82,
+          "candidateLh": 30
+        },
+        {
+          "file": "src/adapters/agents/pi.ts",
+          "referenceLf": 455,
+          "candidateLf": 455,
+          "referenceLh": 455,
+          "candidateLh": 233
+        },
+        {
+          "file": "src/adapters/agents/qwen-telemetry.ts",
+          "referenceLf": 273,
+          "candidateLf": 273,
+          "referenceLh": 273,
+          "candidateLh": 158
+        },
+        {
+          "file": "src/adapters/agents/qwen.ts",
+          "referenceLf": 292,
+          "candidateLf": 292,
+          "referenceLh": 292,
+          "candidateLh": 159
+        },
+        {
+          "file": "src/adapters/agents/running-sessions.ts",
+          "referenceLf": 308,
+          "candidateLf": 308,
+          "referenceLh": 308,
+          "candidateLh": 295
+        },
+        {
+          "file": "src/adapters/agents/stage-telemetry.ts",
+          "referenceLf": 49,
+          "candidateLf": 49,
+          "referenceLh": 49,
+          "candidateLh": 47
+        },
+        {
+          "file": "src/adapters/agents/vibe-telemetry.ts",
+          "referenceLf": 160,
+          "candidateLf": 160,
+          "referenceLh": 160,
+          "candidateLh": 129
+        },
+        {
+          "file": "src/adapters/agents/vibe.ts",
+          "referenceLf": 325,
+          "candidateLf": 325,
+          "referenceLh": 325,
+          "candidateLh": 322
+        },
+        {
+          "file": "src/adapters/assets/asset-store.ts",
+          "referenceLf": 35,
+          "candidateLf": 35,
+          "referenceLh": 35,
+          "candidateLh": 33
+        },
+        {
+          "file": "src/adapters/assets/runtime-assets.ts",
+          "referenceLf": 74,
+          "candidateLf": 74,
+          "referenceLh": 74,
+          "candidateLh": 70
+        },
+        {
+          "file": "src/adapters/backlog/checkpoint-document.ts",
+          "referenceLf": 177,
+          "candidateLf": 177,
+          "referenceLh": 177,
+          "candidateLh": 167
+        },
+        {
+          "file": "src/adapters/backlog/concrete-agent-read-adapter.ts",
+          "referenceLf": 247,
+          "candidateLf": 247,
+          "referenceLh": 247,
+          "candidateLh": 225
+        },
+        {
+          "file": "src/adapters/backlog/concrete-gate-read-adapter.ts",
+          "referenceLf": 181,
+          "candidateLf": 181,
+          "referenceLh": 181,
+          "candidateLh": 163
+        },
+        {
+          "file": "src/adapters/backlog/concrete-git-read-adapter.ts",
+          "referenceLf": 114,
+          "candidateLf": 114,
+          "referenceLh": 114,
+          "candidateLh": 99
+        },
+        {
+          "file": "src/adapters/backlog/concrete-mission-read-adapter.ts",
+          "referenceLf": 457,
+          "candidateLf": 457,
+          "referenceLh": 375,
+          "candidateLh": 425
+        },
+        {
+          "file": "src/adapters/backlog/concrete-operation-log-read-adapter.ts",
+          "referenceLf": 68,
+          "candidateLf": 68,
+          "referenceLh": 68,
+          "candidateLh": 58
+        },
+        {
+          "file": "src/adapters/backlog/concrete-review-read-adapter.ts",
+          "referenceLf": 252,
+          "candidateLf": 252,
+          "referenceLh": 252,
+          "candidateLh": 215
+        },
+        {
+          "file": "src/adapters/backlog/legacy-mission-audit.ts",
+          "referenceLf": 344,
+          "candidateLf": 344,
+          "referenceLh": 344,
+          "candidateLh": 307
+        },
+        {
+          "file": "src/adapters/backlog/legacy-mission-content.ts",
+          "referenceLf": 81,
+          "candidateLf": 81,
+          "referenceLh": 81,
+          "candidateLh": 72
+        },
+        {
+          "file": "src/adapters/backlog/legacy-mission-document.ts",
+          "referenceLf": 87,
+          "candidateLf": 87,
+          "referenceLh": 87,
+          "candidateLh": 86
+        },
+        {
+          "file": "src/adapters/backlog/legacy-mission-import.ts",
+          "referenceLf": 1129,
+          "candidateLf": 1129,
+          "referenceLh": 1129,
+          "candidateLh": 1026
+        },
+        {
+          "file": "src/adapters/backlog/mission-materialization.ts",
+          "referenceLf": 162,
+          "candidateLf": 162,
+          "referenceLh": 162,
+          "candidateLh": 146
+        },
+        {
+          "file": "src/adapters/backlog/task-file-io.ts",
+          "referenceLf": 411,
+          "candidateLf": 411,
+          "referenceLh": 411,
+          "candidateLh": 391
+        },
+        {
+          "file": "src/adapters/backlog/task-metadata.ts",
+          "referenceLf": 389,
+          "candidateLf": 389,
+          "referenceLh": 389,
+          "candidateLh": 380
+        },
+        {
+          "file": "src/adapters/backlog/task-transitions.ts",
+          "referenceLf": 475,
+          "candidateLf": 475,
+          "referenceLh": 475,
+          "candidateLh": 412
+        },
+        {
+          "file": "src/adapters/cli/startup-preflight.ts",
+          "referenceLf": 308,
+          "candidateLf": 308,
+          "referenceLh": 308,
+          "candidateLh": 306
+        },
+        {
+          "file": "src/adapters/cli/commands/active.ts",
+          "referenceLf": 886,
+          "candidateLf": 886,
+          "referenceLh": 886,
+          "candidateLh": 851
+        },
+        {
+          "file": "src/adapters/cli/commands/cohort-report.ts",
+          "referenceLf": 95,
+          "candidateLf": 95,
+          "referenceLh": 95,
+          "candidateLh": 94
+        },
+        {
+          "file": "src/adapters/cli/commands/config.ts",
+          "referenceLf": 80,
+          "candidateLf": 80,
+          "referenceLh": 80,
+          "candidateLh": 58
+        },
+        {
+          "file": "src/adapters/cli/commands/diff.ts",
+          "referenceLf": 126,
+          "candidateLf": 126,
+          "referenceLh": 126,
+          "candidateLh": 37
+        },
+        {
+          "file": "src/adapters/cli/commands/draft-conflicts.ts",
+          "referenceLf": 186,
+          "candidateLf": 186,
+          "referenceLh": 186,
+          "candidateLh": 180
+        },
+        {
+          "file": "src/adapters/cli/commands/draft-prompts.ts",
+          "referenceLf": 146,
+          "candidateLf": 146,
+          "referenceLh": 146,
+          "candidateLh": 130
+        },
+        {
+          "file": "src/adapters/cli/commands/draft-setup.ts",
+          "referenceLf": 376,
+          "candidateLf": 376,
+          "referenceLh": 376,
+          "candidateLh": 349
+        },
+        {
+          "file": "src/adapters/cli/commands/draft-stats.ts",
+          "referenceLf": 861,
+          "candidateLf": 861,
+          "referenceLh": 861,
+          "candidateLh": 795
+        },
+        {
+          "file": "src/adapters/cli/commands/draft.ts",
+          "referenceLf": 19,
+          "candidateLf": 19,
+          "referenceLh": 19,
+          "candidateLh": 17
+        },
+        {
+          "file": "src/adapters/cli/commands/handoff.ts",
+          "referenceLf": 196,
+          "candidateLf": 196,
+          "referenceLh": 196,
+          "candidateLh": 186
+        },
+        {
+          "file": "src/adapters/cli/commands/integrate-conflict.ts",
+          "referenceLf": 470,
+          "candidateLf": 470,
+          "referenceLh": 470,
+          "candidateLh": 460
+        },
+        {
+          "file": "src/adapters/cli/commands/integrate-gate-rebound.ts",
+          "referenceLf": 443,
+          "candidateLf": 443,
+          "referenceLh": 443,
+          "candidateLh": 228
+        },
+        {
+          "file": "src/adapters/cli/commands/integrate-gates.ts",
+          "referenceLf": 341,
+          "candidateLf": 341,
+          "referenceLh": 341,
+          "candidateLh": 323
+        },
+        {
+          "file": "src/adapters/cli/commands/integrate-post.ts",
+          "referenceLf": 393,
+          "candidateLf": 393,
+          "referenceLh": 393,
+          "candidateLh": 372
+        },
+        {
+          "file": "src/adapters/cli/commands/integrate.ts",
+          "referenceLf": 322,
+          "candidateLf": 322,
+          "referenceLh": 322,
+          "candidateLh": 318
+        },
+        {
+          "file": "src/adapters/cli/commands/recover-landed-intake.ts",
+          "referenceLf": 48,
+          "candidateLf": 48,
+          "referenceLh": 48,
+          "candidateLh": 47
+        },
+        {
+          "file": "src/adapters/cli/commands/repair-handoff.ts",
+          "referenceLf": 216,
+          "candidateLf": 216,
+          "referenceLh": 216,
+          "candidateLh": 110
+        },
+        {
+          "file": "src/adapters/cli/commands/setup-review.ts",
+          "referenceLf": 15,
+          "candidateLf": 15,
+          "referenceLh": 15,
+          "candidateLh": 12
+        },
+        {
+          "file": "src/adapters/cli/commands/stats-backfill.ts",
+          "referenceLf": 414,
+          "candidateLf": 414,
+          "referenceLh": 414,
+          "candidateLh": 389
+        },
+        {
+          "file": "src/adapters/cli/commands/stats-cohorts.ts",
+          "referenceLf": 231,
+          "candidateLf": 231,
+          "referenceLh": 231,
+          "candidateLh": 180
+        },
+        {
+          "file": "src/adapters/cli/commands/stats-normalization.ts",
+          "referenceLf": 228,
+          "candidateLf": 228,
+          "referenceLh": 228,
+          "candidateLh": 202
+        },
+        {
+          "file": "src/adapters/cli/commands/stats-report-rendering.ts",
+          "referenceLf": 614,
+          "candidateLf": 614,
+          "referenceLh": 614,
+          "candidateLh": 503
+        },
+        {
+          "file": "src/adapters/cli/commands/stats-report.ts",
+          "referenceLf": 364,
+          "candidateLf": 364,
+          "referenceLh": 364,
+          "candidateLh": 350
+        },
+        {
+          "file": "src/adapters/cli/commands/stats.ts",
+          "referenceLf": 1018,
+          "candidateLf": 1018,
+          "referenceLh": 1018,
+          "candidateLh": 946
+        },
+        {
+          "file": "src/adapters/cli/commands/status-adapter.ts",
+          "referenceLf": 359,
+          "candidateLf": 359,
+          "referenceLh": 359,
+          "candidateLh": 320
+        },
+        {
+          "file": "src/adapters/cli/commands/status.ts",
+          "referenceLf": 349,
+          "candidateLf": 349,
+          "referenceLh": 326,
+          "candidateLh": 316
+        },
+        {
+          "file": "src/adapters/config/gate-dashboard.ts",
+          "referenceLf": 109,
+          "candidateLf": 109,
+          "referenceLh": 109,
+          "candidateLh": 38
+        },
+        {
+          "file": "src/adapters/config/product-config.ts",
+          "referenceLf": 854,
+          "candidateLf": 854,
+          "referenceLh": 854,
+          "candidateLh": 833
+        },
+        {
+          "file": "src/adapters/config/repository-gates.ts",
+          "referenceLf": 522,
+          "candidateLf": 522,
+          "referenceLh": 522,
+          "candidateLh": 484
+        },
+        {
+          "file": "src/adapters/config/state-map.ts",
+          "referenceLf": 119,
+          "candidateLf": 119,
+          "referenceLh": 119,
+          "candidateLh": 104
+        },
+        {
+          "file": "src/adapters/filesystem/gitignore.ts",
+          "referenceLf": 104,
+          "candidateLf": 104,
+          "referenceLh": 104,
+          "candidateLh": 76
+        },
+        {
+          "file": "src/adapters/filesystem/mission-graphify.ts",
+          "referenceLf": 162,
+          "candidateLf": 162,
+          "referenceLh": 162,
+          "candidateLh": 130
+        },
+        {
+          "file": "src/adapters/filesystem/mission-paths.ts",
+          "referenceLf": 276,
+          "candidateLf": 276,
+          "referenceLh": 276,
+          "candidateLh": 266
+        },
+        {
+          "file": "src/adapters/filesystem/package-root.ts",
+          "referenceLf": 68,
+          "candidateLf": 68,
+          "referenceLh": 68,
+          "candidateLh": 64
+        },
+        {
+          "file": "src/adapters/filesystem/recovery-claim.ts",
+          "referenceLf": 221,
+          "candidateLf": 221,
+          "referenceLh": 221,
+          "candidateLh": 218
+        },
+        {
+          "file": "src/adapters/forgejo/forgejo-api.ts",
+          "referenceLf": 185,
+          "candidateLf": 185,
+          "referenceLh": 185,
+          "candidateLh": 124
+        },
+        {
+          "file": "src/adapters/forgejo/forgejo-auth.ts",
+          "referenceLf": 152,
+          "candidateLf": 152,
+          "referenceLh": 152,
+          "candidateLh": 149
+        },
+        {
+          "file": "src/adapters/forgejo/forgejo-git.ts",
+          "referenceLf": 572,
+          "candidateLf": 572,
+          "referenceLh": 572,
+          "candidateLh": 504
+        },
+        {
+          "file": "src/adapters/forgejo/forgejo-pr.ts",
+          "referenceLf": 1052,
+          "candidateLf": 1052,
+          "referenceLh": 1052,
+          "candidateLh": 966
+        },
+        {
+          "file": "src/adapters/git/agent-worktree.ts",
+          "referenceLf": 124,
+          "candidateLf": 124,
+          "referenceLh": 124,
+          "candidateLh": 103
+        },
+        {
+          "file": "src/adapters/git/git.ts",
+          "referenceLf": 174,
+          "candidateLf": 174,
+          "referenceLh": 174,
+          "candidateLh": 157
+        },
+        {
+          "file": "src/adapters/git/github-publish-git.ts",
+          "referenceLf": 59,
+          "candidateLf": 59,
+          "referenceLh": 59,
+          "candidateLh": 33
+        },
+        {
+          "file": "src/adapters/git/merge-noise.ts",
+          "referenceLf": 259,
+          "candidateLf": 259,
+          "referenceLh": 259,
+          "candidateLh": 238
+        },
+        {
+          "file": "src/adapters/git/repository-identity.ts",
+          "referenceLf": 52,
+          "candidateLf": 52,
+          "referenceLh": 52,
+          "candidateLh": 51
+        },
+        {
+          "file": "src/adapters/git/worktree.ts",
+          "referenceLf": 446,
+          "candidateLf": 446,
+          "referenceLh": 446,
+          "candidateLh": 438
+        },
+        {
+          "file": "src/adapters/github/github-pr.ts",
+          "referenceLf": 76,
+          "candidateLf": 76,
+          "referenceLh": 76,
+          "candidateLh": 33
+        },
+        {
+          "file": "src/adapters/mission/execute-mission-adapters.ts",
+          "referenceLf": 271,
+          "candidateLf": 271,
+          "referenceLh": 271,
+          "candidateLh": 269
+        },
+        {
+          "file": "src/adapters/process/bubblewrap.ts",
+          "referenceLf": 299,
+          "candidateLf": 299,
+          "referenceLh": 299,
+          "candidateLh": 276
+        },
+        {
+          "file": "src/adapters/process/confinement.ts",
+          "referenceLf": 78,
+          "candidateLf": 78,
+          "referenceLh": 78,
+          "candidateLh": 65
+        },
+        {
+          "file": "src/adapters/process/post-integrate-hook.ts",
+          "referenceLf": 83,
+          "candidateLf": 83,
+          "referenceLh": 83,
+          "candidateLh": 70
+        },
+        {
+          "file": "src/adapters/process/pre-draft-hook.ts",
+          "referenceLf": 38,
+          "candidateLf": 38,
+          "referenceLh": 38,
+          "candidateLh": 34
+        },
+        {
+          "file": "src/adapters/process/process-liveness.ts",
+          "referenceLf": 43,
+          "candidateLf": 43,
+          "referenceLh": 43,
+          "candidateLh": 42
+        },
+        {
+          "file": "src/adapters/process/spawn-tee.ts",
+          "referenceLf": 190,
+          "candidateLf": 190,
+          "referenceLh": 190,
+          "candidateLh": 179
+        },
+        {
+          "file": "src/adapters/rebase/rebase-workflow-adapter.ts",
+          "referenceLf": 173,
+          "candidateLf": 173,
+          "referenceLh": 173,
+          "candidateLh": 166
+        },
+        {
+          "file": "src/adapters/review/rebase.ts",
+          "referenceLf": 351,
+          "candidateLf": 351,
+          "referenceLh": 351,
+          "candidateLh": 309
+        },
+        {
+          "file": "src/adapters/review/review-adapter.ts",
+          "referenceLf": 198,
+          "candidateLf": 198,
+          "referenceLh": 198,
+          "candidateLh": 147
+        },
+        {
+          "file": "src/adapters/review/review-agent-fallback.ts",
+          "referenceLf": 482,
+          "candidateLf": 482,
+          "referenceLh": 482,
+          "candidateLh": 415
+        },
+        {
+          "file": "src/adapters/review/review-artifacts.ts",
+          "referenceLf": 1283,
+          "candidateLf": 1283,
+          "referenceLh": 1283,
+          "candidateLh": 1222
+        },
+        {
+          "file": "src/adapters/review/review-cli-flags.ts",
+          "referenceLf": 54,
+          "candidateLf": 54,
+          "referenceLh": 54,
+          "candidateLh": 45
+        },
+        {
+          "file": "src/adapters/review/review-commands.ts",
+          "referenceLf": 1740,
+          "candidateLf": 1740,
+          "referenceLh": 1740,
+          "candidateLh": 1460
+        },
+        {
+          "file": "src/adapters/review/review-events.ts",
+          "referenceLf": 740,
+          "candidateLf": 740,
+          "referenceLh": 740,
+          "candidateLh": 692
+        },
+        {
+          "file": "src/adapters/review/review-gate-handling.ts",
+          "referenceLf": 252,
+          "candidateLf": 252,
+          "referenceLh": 252,
+          "candidateLh": 197
+        },
+        {
+          "file": "src/adapters/review/review-loop.ts",
+          "referenceLf": 1956,
+          "candidateLf": 1956,
+          "referenceLh": 1956,
+          "candidateLh": 1760
+        },
+        {
+          "file": "src/adapters/review/review-polling.ts",
+          "referenceLf": 206,
+          "candidateLf": 206,
+          "referenceLh": 206,
+          "candidateLh": 203
+        },
+        {
+          "file": "src/adapters/review/review-prompts.ts",
+          "referenceLf": 273,
+          "candidateLf": 273,
+          "referenceLh": 273,
+          "candidateLh": 253
+        },
+        {
+          "file": "src/adapters/review/review-round.ts",
+          "referenceLf": 414,
+          "candidateLf": 414,
+          "referenceLh": 414,
+          "candidateLh": 330
+        },
+        {
+          "file": "src/adapters/review/review-state-mapping.ts",
+          "referenceLf": 193,
+          "candidateLf": 193,
+          "referenceLh": 193,
+          "candidateLh": 192
+        },
+        {
+          "file": "src/adapters/review/review-state.ts",
+          "referenceLf": 976,
+          "candidateLf": 976,
+          "referenceLh": 976,
+          "candidateLh": 941
+        },
+        {
+          "file": "src/adapters/review/review-static-evidence.ts",
+          "referenceLf": 173,
+          "candidateLf": 173,
+          "referenceLh": 173,
+          "candidateLh": 118
+        },
+        {
+          "file": "src/adapters/review/review-workflow-adapter.ts",
+          "referenceLf": 80,
+          "candidateLf": 80,
+          "referenceLh": 80,
+          "candidateLh": 78
+        },
+        {
+          "file": "src/adapters/review/setup-review-config.ts",
+          "referenceLf": 44,
+          "candidateLf": 44,
+          "referenceLh": 44,
+          "candidateLh": 43
+        },
+        {
+          "file": "src/adapters/review/setup-review-repository.ts",
+          "referenceLf": 58,
+          "candidateLf": 58,
+          "referenceLh": 58,
+          "candidateLh": 56
+        },
+        {
+          "file": "src/adapters/review/setup-review.ts",
+          "referenceLf": 162,
+          "candidateLf": 162,
+          "referenceLh": 162,
+          "candidateLh": 155
+        },
+        {
+          "file": "src/adapters/sqlite/adapter-factory.ts",
+          "referenceLf": 173,
+          "candidateLf": 173,
+          "referenceLh": 173,
+          "candidateLh": 171
+        },
+        {
+          "file": "src/adapters/sqlite/adhoc-counter.ts",
+          "referenceLf": 90,
+          "candidateLf": 90,
+          "referenceLh": 90,
+          "candidateLh": 85
+        },
+        {
+          "file": "src/adapters/sqlite/custom-agent-lease-repository.ts",
+          "referenceLf": 41,
+          "candidateLf": 41,
+          "referenceLh": 41,
+          "candidateLh": 39
+        },
+        {
+          "file": "src/adapters/sqlite/database-adapter.ts",
+          "referenceLf": 511,
+          "candidateLf": 511,
+          "referenceLh": 511,
+          "candidateLh": 497
+        },
+        {
+          "file": "src/adapters/sqlite/importer.ts",
+          "referenceLf": 537,
+          "candidateLf": 537,
+          "referenceLh": 477,
+          "candidateLh": 510
+        },
+        {
+          "file": "src/adapters/sqlite/measurement-store.ts",
+          "referenceLf": 364,
+          "candidateLf": 364,
+          "referenceLh": 364,
+          "candidateLh": 344
+        },
+        {
+          "file": "src/adapters/sqlite/mission-serialization.ts",
+          "referenceLf": 595,
+          "candidateLf": 595,
+          "referenceLh": 595,
+          "candidateLh": 561
+        },
+        {
+          "file": "src/adapters/sqlite/mission-store.ts",
+          "referenceLf": 733,
+          "candidateLf": 733,
+          "referenceLh": 733,
+          "candidateLh": 729
+        },
+        {
+          "file": "src/adapters/sqlite/operational-history-repository.ts",
+          "referenceLf": 101,
+          "candidateLf": 101,
+          "referenceLh": 101,
+          "candidateLh": 83
+        },
+        {
+          "file": "src/adapters/sqlite/review-projection-reader.ts",
+          "referenceLf": 81,
+          "candidateLf": 81,
+          "referenceLh": 81,
+          "candidateLh": 73
+        },
+        {
+          "file": "src/adapters/sqlite/session-marker-adapter.ts",
+          "referenceLf": 58,
+          "candidateLf": 58,
+          "referenceLh": 58,
+          "candidateLh": 57
+        },
+        {
+          "file": "src/adapters/sqlite/session-marker-import.ts",
+          "referenceLf": 299,
+          "candidateLf": 299,
+          "referenceLh": 264,
+          "candidateLh": 284
+        },
+        {
+          "file": "src/adapters/sqlite/session-marker-repository.ts",
+          "referenceLf": 163,
+          "candidateLf": 163,
+          "referenceLh": 163,
+          "candidateLh": 157
+        },
+        {
+          "file": "src/adapters/storage/persistent-data-migration.ts",
+          "referenceLf": 88,
+          "candidateLf": 88,
+          "referenceLh": 88,
+          "candidateLh": 87
+        },
+        {
+          "file": "src/adapters/storage/storage.ts",
+          "referenceLf": 193,
+          "candidateLf": 193,
+          "referenceLh": 193,
+          "candidateLh": 185
+        },
+        {
+          "file": "src/adapters/verification/coverage-gate.ts",
+          "referenceLf": 497,
+          "candidateLf": 497,
+          "referenceLh": 155,
+          "candidateLh": 313
+        },
+        {
+          "file": "src/adapters/verification/gatekeeper.ts",
+          "referenceLf": 143,
+          "candidateLf": 143,
+          "referenceLh": 143,
+          "candidateLh": 88
+        },
+        {
+          "file": "src/adapters/verification/temp-root-registry.ts",
+          "referenceLf": 127,
+          "candidateLf": 127,
+          "referenceLh": 126,
+          "candidateLh": 122
+        },
+        {
+          "file": "src/adapters/verification/verification.ts",
+          "referenceLf": 478,
+          "candidateLf": 478,
+          "referenceLh": 478,
+          "candidateLh": 455
+        },
+        {
+          "file": "src/adapters/web/asset-store.ts",
+          "referenceLf": 81,
+          "candidateLf": 81,
+          "referenceLh": 81,
+          "candidateLh": 74
+        },
+        {
+          "file": "src/application/draft-command-use-case.ts",
+          "referenceLf": 113,
+          "candidateLf": 113,
+          "referenceLh": 113,
+          "candidateLh": 104
+        },
+        {
+          "file": "src/application/execute-mission-service.ts",
+          "referenceLf": 296,
+          "candidateLf": 296,
+          "referenceLh": 296,
+          "candidateLh": 278
+        },
+        {
+          "file": "src/application/failure-classification.ts",
+          "referenceLf": 223,
+          "candidateLf": 223,
+          "referenceLh": 223,
+          "candidateLh": 221
+        },
+        {
+          "file": "src/application/handoff-command-use-case.ts",
+          "referenceLf": 1586,
+          "candidateLf": 1586,
+          "referenceLh": 1586,
+          "candidateLh": 1402
+        },
+        {
+          "file": "src/application/integrate-command-use-case.ts",
+          "referenceLf": 46,
+          "candidateLf": 46,
+          "referenceLh": 46,
+          "candidateLh": 36
+        },
+        {
+          "file": "src/application/integrate-workflow.ts",
+          "referenceLf": 357,
+          "candidateLf": 357,
+          "referenceLh": 357,
+          "candidateLh": 313
+        },
+        {
+          "file": "src/application/integration-repair-review.ts",
+          "referenceLf": 36,
+          "candidateLf": 36,
+          "referenceLh": 36,
+          "candidateLh": 25
+        },
+        {
+          "file": "src/application/lifecycle-lane-event.ts",
+          "referenceLf": 117,
+          "candidateLf": 117,
+          "referenceLh": 117,
+          "candidateLh": 109
+        },
+        {
+          "file": "src/application/mission-assignment-service.ts",
+          "referenceLf": 23,
+          "candidateLf": 23,
+          "referenceLh": 23,
+          "candidateLh": 22
+        },
+        {
+          "file": "src/application/mission-brief-service.ts",
+          "referenceLf": 246,
+          "candidateLf": 246,
+          "referenceLh": 246,
+          "candidateLh": 217
+        },
+        {
+          "file": "src/application/mission-checkpoint-service.ts",
+          "referenceLf": 197,
+          "candidateLf": 197,
+          "referenceLh": 197,
+          "candidateLh": 194
+        },
+        {
+          "file": "src/application/mission-command-support.ts",
+          "referenceLf": 128,
+          "candidateLf": 128,
+          "referenceLh": 128,
+          "candidateLh": 126
+        },
+        {
+          "file": "src/application/mission-handoff-service.ts",
+          "referenceLf": 145,
+          "candidateLf": 145,
+          "referenceLh": 145,
+          "candidateLh": 144
+        },
+        {
+          "file": "src/application/mission-intake-service.ts",
+          "referenceLf": 140,
+          "candidateLf": 140,
+          "referenceLh": 140,
+          "candidateLh": 135
+        },
+        {
+          "file": "src/application/mission-integration-service.ts",
+          "referenceLf": 129,
+          "candidateLf": 129,
+          "referenceLh": 129,
+          "candidateLh": 119
+        },
+        {
+          "file": "src/application/mission-lifecycle-recovery.ts",
+          "referenceLf": 107,
+          "candidateLf": 107,
+          "referenceLh": 107,
+          "candidateLh": 84
+        },
+        {
+          "file": "src/application/mission-lifecycle-service.ts",
+          "referenceLf": 182,
+          "candidateLf": 182,
+          "referenceLh": 182,
+          "candidateLh": 170
+        },
+        {
+          "file": "src/application/output-elision.ts",
+          "referenceLf": 38,
+          "candidateLf": 38,
+          "referenceLh": 38,
+          "candidateLh": 35
+        },
+        {
+          "file": "src/application/rebase-workflow.ts",
+          "referenceLf": 848,
+          "candidateLf": 848,
+          "referenceLh": 848,
+          "candidateLh": 807
+        },
+        {
+          "file": "src/application/rebound-kernel.ts",
+          "referenceLf": 620,
+          "candidateLf": 620,
+          "referenceLh": 620,
+          "candidateLh": 590
+        },
+        {
+          "file": "src/application/revoke-review-decision-use-case.ts",
+          "referenceLf": 78,
+          "candidateLf": 78,
+          "referenceLh": 78,
+          "candidateLh": 56
+        },
+        {
+          "file": "src/application/static-evidence.ts",
+          "referenceLf": 176,
+          "candidateLf": 176,
+          "referenceLh": 176,
+          "candidateLh": 155
+        },
+        {
+          "file": "src/application/stats-backfill-service.ts",
+          "referenceLf": 36,
+          "candidateLf": 36,
+          "referenceLh": 36,
+          "candidateLh": 35
+        },
+        {
+          "file": "src/application/stats-command-use-case.ts",
+          "referenceLf": 78,
+          "candidateLf": 78,
+          "referenceLh": 78,
+          "candidateLh": 72
+        },
+        {
+          "file": "src/application/status-command-use-case.ts",
+          "referenceLf": 137,
+          "candidateLf": 137,
+          "referenceLh": 137,
+          "candidateLh": 133
+        },
+        {
+          "file": "src/application/controller/board-controller.ts",
+          "referenceLf": 386,
+          "candidateLf": 386,
+          "referenceLh": 386,
+          "candidateLh": 259
+        },
+        {
+          "file": "src/application/github-publish/status-command-use-case.ts",
+          "referenceLf": 78,
+          "candidateLf": 78,
+          "referenceLh": 78,
+          "candidateLh": 51
+        },
+        {
+          "file": "src/application/github-publish/status.ts",
+          "referenceLf": 72,
+          "candidateLf": 72,
+          "referenceLh": 72,
+          "candidateLh": 45
+        },
+        {
+          "file": "src/application/integrate/approval.ts",
+          "referenceLf": 136,
+          "candidateLf": 136,
+          "referenceLh": 136,
+          "candidateLh": 124
+        },
+        {
+          "file": "src/application/integrate/base-worktree-repair.ts",
+          "referenceLf": 224,
+          "candidateLf": 224,
+          "referenceLh": 224,
+          "candidateLh": 216
+        },
+        {
+          "file": "src/application/integrate/gates.ts",
+          "referenceLf": 205,
+          "candidateLf": 205,
+          "referenceLh": 205,
+          "candidateLh": 119
+        },
+        {
+          "file": "src/application/integrate/github-pr.ts",
+          "referenceLf": 73,
+          "candidateLf": 73,
+          "referenceLh": 73,
+          "candidateLh": 36
+        },
+        {
+          "file": "src/application/integrate/landed-recovery.ts",
+          "referenceLf": 77,
+          "candidateLf": 77,
+          "referenceLh": 77,
+          "candidateLh": 69
+        },
+        {
+          "file": "src/application/integrate/landing.ts",
+          "referenceLf": 182,
+          "candidateLf": 182,
+          "referenceLh": 182,
+          "candidateLh": 126
+        },
+        {
+          "file": "src/application/integrate/preflight-review.ts",
+          "referenceLf": 97,
+          "candidateLf": 97,
+          "referenceLh": 97,
+          "candidateLh": 78
+        },
+        {
+          "file": "src/application/integrate/preflight.ts",
+          "referenceLf": 200,
+          "candidateLf": 200,
+          "referenceLh": 200,
+          "candidateLh": 198
+        },
+        {
+          "file": "src/application/integrate/readiness.ts",
+          "referenceLf": 62,
+          "candidateLf": 62,
+          "referenceLh": 62,
+          "candidateLh": 58
+        },
+        {
+          "file": "src/application/integrate/rebase.ts",
+          "referenceLf": 123,
+          "candidateLf": 123,
+          "referenceLh": 123,
+          "candidateLh": 108
+        },
+        {
+          "file": "src/application/integrate/recovery.ts",
+          "referenceLf": 273,
+          "candidateLf": 273,
+          "referenceLh": 273,
+          "candidateLh": 255
+        },
+        {
+          "file": "src/application/integrate/squash.ts",
+          "referenceLf": 293,
+          "candidateLf": 293,
+          "referenceLh": 293,
+          "candidateLh": 265
+        },
+        {
+          "file": "src/application/integrate/support.ts",
+          "referenceLf": 127,
+          "candidateLf": 127,
+          "referenceLh": 127,
+          "candidateLh": 123
+        },
+        {
+          "file": "src/application/presentation/cli-flags.ts",
+          "referenceLf": 33,
+          "candidateLf": 33,
+          "referenceLh": 33,
+          "candidateLh": 12
+        },
+        {
+          "file": "src/application/presentation/cli-format.ts",
+          "referenceLf": 203,
+          "candidateLf": 203,
+          "referenceLh": 203,
+          "candidateLh": 186
+        },
+        {
+          "file": "src/application/projections/agent-countdown.ts",
+          "referenceLf": 25,
+          "candidateLf": 25,
+          "referenceLh": 25,
+          "candidateLh": 20
+        },
+        {
+          "file": "src/application/projections/agent-status.ts",
+          "referenceLf": 80,
+          "candidateLf": 80,
+          "referenceLh": 80,
+          "candidateLh": 77
+        },
+        {
+          "file": "src/application/projections/board-readers.ts",
+          "referenceLf": 389,
+          "candidateLf": 389,
+          "referenceLh": 389,
+          "candidateLh": 383
+        },
+        {
+          "file": "src/application/projections/board-subscription.ts",
+          "referenceLf": 160,
+          "candidateLf": 160,
+          "referenceLh": 160,
+          "candidateLh": 154
+        },
+        {
+          "file": "src/application/projections/board.ts",
+          "referenceLf": 455,
+          "candidateLf": 455,
+          "referenceLh": 455,
+          "candidateLh": 449
+        },
+        {
+          "file": "src/application/projections/cohorts.ts",
+          "referenceLf": 359,
+          "candidateLf": 359,
+          "referenceLh": 359,
+          "candidateLh": 351
+        },
+        {
+          "file": "src/application/projections/current-work.ts",
+          "referenceLf": 243,
+          "candidateLf": 243,
+          "referenceLh": 243,
+          "candidateLh": 233
+        },
+        {
+          "file": "src/application/projections/metrics-read-adapter.ts",
+          "referenceLf": 607,
+          "candidateLf": 607,
+          "referenceLh": 607,
+          "candidateLh": 603
+        },
+        {
+          "file": "src/application/projections/metrics.ts",
+          "referenceLf": 744,
+          "candidateLf": 744,
+          "referenceLh": 744,
+          "candidateLh": 725
+        },
+        {
+          "file": "src/application/projections/mission-activity.ts",
+          "referenceLf": 187,
+          "candidateLf": 187,
+          "referenceLh": 187,
+          "candidateLh": 175
+        },
+        {
+          "file": "src/application/projections/mission-board.ts",
+          "referenceLf": 436,
+          "candidateLf": 436,
+          "referenceLh": 436,
+          "candidateLh": 357
+        },
+        {
+          "file": "src/application/projections/mission-detail.ts",
+          "referenceLf": 45,
+          "candidateLf": 45,
+          "referenceLh": 45,
+          "candidateLh": 41
+        },
+        {
+          "file": "src/application/projections/mission-query.ts",
+          "referenceLf": 19,
+          "candidateLf": 19,
+          "referenceLh": 19,
+          "candidateLh": 17
+        },
+        {
+          "file": "src/application/recording/board-event-recorder.ts",
+          "referenceLf": 129,
+          "candidateLf": 129,
+          "referenceLh": 125,
+          "candidateLh": 127
+        },
+        {
+          "file": "src/application/recording/current-work-recorder.ts",
+          "referenceLf": 372,
+          "candidateLf": 372,
+          "referenceLh": 372,
+          "candidateLh": 367
+        },
+        {
+          "file": "src/application/recording/operation-event-recorder.ts",
+          "referenceLf": 76,
+          "candidateLf": 76,
+          "referenceLh": 72,
+          "candidateLh": 67
+        },
+        {
+          "file": "src/application/services/agent-limit.ts",
+          "referenceLf": 297,
+          "candidateLf": 297,
+          "referenceLh": 297,
+          "candidateLh": 257
+        },
+        {
+          "file": "src/application/services/agent-selection.ts",
+          "referenceLf": 20,
+          "candidateLf": 20,
+          "referenceLh": 20,
+          "candidateLh": 18
+        },
+        {
+          "file": "src/application/services/integration-dispatch.ts",
+          "referenceLf": 144,
+          "candidateLf": 144,
+          "referenceLh": 144,
+          "candidateLh": 136
+        },
+        {
+          "file": "src/application/services/statistics-service.ts",
+          "referenceLf": 69,
+          "candidateLf": 69,
+          "referenceLh": 69,
+          "candidateLh": 64
+        },
+        {
+          "file": "src/composition/application-services.ts",
+          "referenceLf": 452,
+          "candidateLf": 452,
+          "referenceLh": 452,
+          "candidateLh": 423
+        },
+        {
+          "file": "src/composition/board-projection.ts",
+          "referenceLf": 172,
+          "candidateLf": 172,
+          "referenceLh": 172,
+          "candidateLh": 170
+        },
+        {
+          "file": "src/composition/create-cli.ts",
+          "referenceLf": 949,
+          "candidateLf": 949,
+          "referenceLh": 949,
+          "candidateLh": 723
+        },
+        {
+          "file": "src/composition/github-publish-status.ts",
+          "referenceLf": 28,
+          "candidateLf": 28,
+          "referenceLh": 28,
+          "candidateLh": 25
+        },
+        {
+          "file": "src/composition/production-capabilities.ts",
+          "referenceLf": 277,
+          "candidateLf": 277,
+          "referenceLh": 277,
+          "candidateLh": 222
+        },
+        {
+          "file": "src/composition/review-persistence.ts",
+          "referenceLf": 159,
+          "candidateLf": 159,
+          "referenceLh": 159,
+          "candidateLh": 136
+        },
+        {
+          "file": "src/domain/agents.ts",
+          "referenceLf": 99,
+          "candidateLf": 99,
+          "referenceLh": 99,
+          "candidateLh": 71
+        },
+        {
+          "file": "src/domain/checkpoint.ts",
+          "referenceLf": 97,
+          "candidateLf": 97,
+          "referenceLh": 97,
+          "candidateLh": 92
+        },
+        {
+          "file": "src/domain/external-task.ts",
+          "referenceLf": 71,
+          "candidateLf": 71,
+          "referenceLh": 71,
+          "candidateLh": 65
+        },
+        {
+          "file": "src/domain/integration.ts",
+          "referenceLf": 81,
+          "candidateLf": 81,
+          "referenceLh": 81,
+          "candidateLh": 66
+        },
+        {
+          "file": "src/domain/mission-brief.ts",
+          "referenceLf": 65,
+          "candidateLf": 65,
+          "referenceLh": 65,
+          "candidateLh": 63
+        },
+        {
+          "file": "src/domain/mission-dependencies.ts",
+          "referenceLf": 55,
+          "candidateLf": 55,
+          "referenceLh": 55,
+          "candidateLh": 51
+        },
+        {
+          "file": "src/domain/mission-gates.ts",
+          "referenceLf": 49,
+          "candidateLf": 49,
+          "referenceLh": 49,
+          "candidateLh": 47
+        },
+        {
+          "file": "src/domain/mission-workflow.ts",
+          "referenceLf": 273,
+          "candidateLf": 273,
+          "referenceLh": 273,
+          "candidateLh": 249
+        },
+        {
+          "file": "src/domain/mission.ts",
+          "referenceLf": 232,
+          "candidateLf": 232,
+          "referenceLh": 232,
+          "candidateLh": 225
+        },
+        {
+          "file": "src/domain/net-engineering-lines.ts",
+          "referenceLf": 144,
+          "candidateLf": 144,
+          "referenceLh": 144,
+          "candidateLh": 142
+        },
+        {
+          "file": "src/domain/review.ts",
+          "referenceLf": 923,
+          "candidateLf": 923,
+          "referenceLh": 923,
+          "candidateLh": 782
+        },
+        {
+          "file": "src/domain/usage.ts",
+          "referenceLf": 228,
+          "candidateLf": 228,
+          "referenceLh": 228,
+          "candidateLh": 202
+        },
+        {
+          "file": "src/interfaces/cli/active.ts",
+          "referenceLf": 25,
+          "candidateLf": 25,
+          "referenceLh": 25,
+          "candidateLh": 22
+        },
+        {
+          "file": "src/interfaces/cli/cancel.ts",
+          "referenceLf": 68,
+          "candidateLf": 68,
+          "referenceLh": 68,
+          "candidateLh": 65
+        },
+        {
+          "file": "src/interfaces/cli/config.ts",
+          "referenceLf": 17,
+          "candidateLf": 17,
+          "referenceLh": 17,
+          "candidateLh": 14
+        },
+        {
+          "file": "src/interfaces/cli/diff.ts",
+          "referenceLf": 17,
+          "candidateLf": 17,
+          "referenceLh": 17,
+          "candidateLh": 16
+        },
+        {
+          "file": "src/interfaces/cli/draft.ts",
+          "referenceLf": 63,
+          "candidateLf": 63,
+          "referenceLh": 63,
+          "candidateLh": 47
+        },
+        {
+          "file": "src/interfaces/cli/github-publish-status.ts",
+          "referenceLf": 57,
+          "candidateLf": 57,
+          "referenceLh": 57,
+          "candidateLh": 34
+        },
+        {
+          "file": "src/interfaces/cli/import-legacy.ts",
+          "referenceLf": 68,
+          "candidateLf": 68,
+          "referenceLh": 68,
+          "candidateLh": 34
+        },
+        {
+          "file": "src/interfaces/cli/integrate.ts",
+          "referenceLf": 17,
+          "candidateLf": 17,
+          "referenceLh": 17,
+          "candidateLh": 11
+        },
+        {
+          "file": "src/interfaces/cli/lead.ts",
+          "referenceLf": 167,
+          "candidateLf": 167,
+          "referenceLh": 167,
+          "candidateLh": 163
+        },
+        {
+          "file": "src/interfaces/cli/mission-writes.ts",
+          "referenceLf": 350,
+          "candidateLf": 350,
+          "referenceLh": 350,
+          "candidateLh": 337
+        },
+        {
+          "file": "src/interfaces/cli/rebase.ts",
+          "referenceLf": 72,
+          "candidateLf": 72,
+          "referenceLh": 72,
+          "candidateLh": 70
+        },
+        {
+          "file": "src/interfaces/cli/recover.ts",
+          "referenceLf": 59,
+          "candidateLf": 59,
+          "referenceLh": 59,
+          "candidateLh": 56
+        },
+        {
+          "file": "src/interfaces/cli/resolve-conflict.ts",
+          "referenceLf": 17,
+          "candidateLf": 17,
+          "referenceLh": 17,
+          "candidateLh": 16
+        },
+        {
+          "file": "src/interfaces/cli/review-verbs.ts",
+          "referenceLf": 224,
+          "candidateLf": 224,
+          "referenceLh": 224,
+          "candidateLh": 209
+        },
+        {
+          "file": "src/interfaces/cli/review.ts",
+          "referenceLf": 50,
+          "candidateLf": 50,
+          "referenceLh": 50,
+          "candidateLh": 47
+        },
+        {
+          "file": "src/interfaces/cli/revoke-review.ts",
+          "referenceLf": 41,
+          "candidateLf": 41,
+          "referenceLh": 41,
+          "candidateLh": 20
+        },
+        {
+          "file": "src/interfaces/cli/runtime.ts",
+          "referenceLf": 323,
+          "candidateLf": 323,
+          "referenceLh": 323,
+          "candidateLh": 257
+        },
+        {
+          "file": "src/interfaces/cli/setup.ts",
+          "referenceLf": 17,
+          "candidateLf": 17,
+          "referenceLh": 17,
+          "candidateLh": 16
+        },
+        {
+          "file": "src/interfaces/cli/status.ts",
+          "referenceLf": 275,
+          "candidateLf": 275,
+          "referenceLh": 275,
+          "candidateLh": 161
+        },
+        {
+          "file": "src/interfaces/cli/verify.ts",
+          "referenceLf": 15,
+          "candidateLf": 15,
+          "referenceLh": 15,
+          "candidateLh": 14
+        },
+        {
+          "file": "src/interfaces/cli/web.ts",
+          "referenceLf": 124,
+          "candidateLf": 124,
+          "referenceLh": 124,
+          "candidateLh": 108
+        },
+        {
+          "file": "src/interfaces/tui/navigation.ts",
+          "referenceLf": 96,
+          "candidateLf": 96,
+          "referenceLh": 96,
+          "candidateLh": 52
+        },
+        {
+          "file": "src/interfaces/web/host.ts",
+          "referenceLf": 515,
+          "candidateLf": 515,
+          "referenceLh": 515,
+          "candidateLh": 500
+        },
+        {
+          "file": "src/interfaces/web/security.ts",
+          "referenceLf": 187,
+          "candidateLf": 187,
+          "referenceLh": 187,
+          "candidateLh": 186
+        },
+        {
+          "file": "src/interfaces/web/stream.ts",
+          "referenceLf": 131,
+          "candidateLf": 131,
+          "referenceLh": 131,
+          "candidateLh": 129
+        },
+        {
+          "file": "src/interfaces/web/transport.ts",
+          "referenceLf": 1323,
+          "candidateLf": 1323,
+          "referenceLh": 1323,
+          "candidateLh": 1011
+        }
+      ]
+    },
+    "c8-vs-native-include-all": {
+      "onlyReference": [],
+      "onlyCandidate": [],
+      "sameLineSet": 88,
+      "differentLineSet": 244,
+      "coveredDisagreements": 12264,
+      "differingFiles": [
+        {
+          "file": "src/adapters/agents/agent-block-authority.ts",
+          "referenceLf": 45,
+          "candidateLf": 44,
+          "referenceLh": 45,
+          "candidateLh": 38
+        },
+        {
+          "file": "src/adapters/agents/agent-config.ts",
+          "referenceLf": 221,
+          "candidateLf": 213,
+          "referenceLh": 221,
+          "candidateLh": 188
+        },
+        {
+          "file": "src/adapters/agents/agent-selection-snapshot.ts",
+          "referenceLf": 69,
+          "candidateLf": 59,
+          "referenceLh": 0,
+          "candidateLh": 0
+        },
+        {
+          "file": "src/adapters/agents/agent-stream-events.ts",
+          "referenceLf": 137,
+          "candidateLf": 123,
+          "referenceLh": 137,
+          "candidateLh": 103
+        },
+        {
+          "file": "src/adapters/agents/agent-stream-view.ts",
+          "referenceLf": 302,
+          "candidateLf": 285,
+          "referenceLh": 302,
+          "candidateLh": 157
+        },
+        {
+          "file": "src/adapters/agents/agents.ts",
+          "referenceLf": 995,
+          "candidateLf": 995,
+          "referenceLh": 995,
+          "candidateLh": 856
+        },
+        {
+          "file": "src/adapters/agents/claude-stream-render.ts",
+          "referenceLf": 294,
+          "candidateLf": 285,
+          "referenceLh": 294,
+          "candidateLh": 109
+        },
+        {
+          "file": "src/adapters/agents/claude-stream-view.ts",
+          "referenceLf": 50,
+          "candidateLf": 45,
+          "referenceLh": 50,
+          "candidateLh": 39
+        },
+        {
+          "file": "src/adapters/agents/claude-telemetry.ts",
+          "referenceLf": 228,
+          "candidateLf": 228,
+          "referenceLh": 228,
+          "candidateLh": 51
+        },
+        {
+          "file": "src/adapters/agents/claude.ts",
+          "referenceLf": 187,
+          "candidateLf": 169,
+          "referenceLh": 187,
+          "candidateLh": 109
+        },
+        {
+          "file": "src/adapters/agents/codex-telemetry.ts",
+          "referenceLf": 172,
+          "candidateLf": 172,
+          "referenceLh": 172,
+          "candidateLh": 151
+        },
+        {
+          "file": "src/adapters/agents/codex.ts",
+          "referenceLf": 251,
+          "candidateLf": 251,
+          "referenceLh": 251,
+          "candidateLh": 219
+        },
+        {
+          "file": "src/adapters/agents/custom-capacity.ts",
+          "referenceLf": 51,
+          "candidateLf": 47,
+          "referenceLh": 51,
+          "candidateLh": 39
+        },
+        {
+          "file": "src/adapters/agents/first-run-config.ts",
+          "referenceLf": 121,
+          "candidateLf": 100,
+          "referenceLh": 121,
+          "candidateLh": 92
+        },
+        {
+          "file": "src/adapters/agents/known-agent-families.ts",
+          "referenceLf": 71,
+          "candidateLf": 71,
+          "referenceLh": 71,
+          "candidateLh": 69
+        },
+        {
+          "file": "src/adapters/agents/launcher-availability.ts",
+          "referenceLf": 78,
+          "candidateLf": 62,
+          "referenceLh": 78,
+          "candidateLh": 41
+        },
+        {
+          "file": "src/adapters/agents/launcher-selection.ts",
+          "referenceLf": 321,
+          "candidateLf": 308,
+          "referenceLh": 321,
+          "candidateLh": 283
+        },
+        {
+          "file": "src/adapters/agents/opencode-export.ts",
+          "referenceLf": 218,
+          "candidateLf": 207,
+          "referenceLh": 218,
+          "candidateLh": 187
+        },
+        {
+          "file": "src/adapters/agents/opencode-telemetry.ts",
+          "referenceLf": 221,
+          "candidateLf": 221,
+          "referenceLh": 221,
+          "candidateLh": 123
+        },
+        {
+          "file": "src/adapters/agents/opencode.ts",
+          "referenceLf": 423,
+          "candidateLf": 423,
+          "referenceLh": 423,
+          "candidateLh": 363
+        },
+        {
+          "file": "src/adapters/agents/pi-stream-render.ts",
+          "referenceLf": 82,
+          "candidateLf": 82,
+          "referenceLh": 82,
+          "candidateLh": 11
+        },
+        {
+          "file": "src/adapters/agents/pi.ts",
+          "referenceLf": 455,
+          "candidateLf": 422,
+          "referenceLh": 455,
+          "candidateLh": 113
+        },
+        {
+          "file": "src/adapters/agents/qwen-telemetry.ts",
+          "referenceLf": 273,
+          "candidateLf": 273,
+          "referenceLh": 273,
+          "candidateLh": 59
+        },
+        {
+          "file": "src/adapters/agents/qwen.ts",
+          "referenceLf": 292,
+          "candidateLf": 274,
+          "referenceLh": 292,
+          "candidateLh": 74
+        },
+        {
+          "file": "src/adapters/agents/running-sessions.ts",
+          "referenceLf": 308,
+          "candidateLf": 263,
+          "referenceLh": 308,
+          "candidateLh": 213
+        },
+        {
+          "file": "src/adapters/agents/runtime-matrix.ts",
+          "referenceLf": 103,
+          "candidateLf": 85,
+          "referenceLh": 103,
+          "candidateLh": 84
+        },
+        {
+          "file": "src/adapters/agents/stage-telemetry.ts",
+          "referenceLf": 49,
+          "candidateLf": 42,
+          "referenceLh": 49,
+          "candidateLh": 22
+        },
+        {
+          "file": "src/adapters/agents/subagent-limit.ts",
+          "referenceLf": 25,
+          "candidateLf": 25,
+          "referenceLh": 25,
+          "candidateLh": 24
+        },
+        {
+          "file": "src/adapters/agents/vibe-telemetry.ts",
+          "referenceLf": 160,
+          "candidateLf": 132,
+          "referenceLh": 160,
+          "candidateLh": 81
+        },
+        {
+          "file": "src/adapters/agents/vibe.ts",
+          "referenceLf": 325,
+          "candidateLf": 325,
+          "referenceLh": 325,
+          "candidateLh": 283
+        },
+        {
+          "file": "src/adapters/architecture/boundary-guards.ts",
+          "referenceLf": 410,
+          "candidateLf": 378,
+          "referenceLh": 0,
+          "candidateLh": 0
+        },
+        {
+          "file": "src/adapters/assets/asset-store.ts",
+          "referenceLf": 35,
+          "candidateLf": 35,
+          "referenceLh": 35,
+          "candidateLh": 31
+        },
+        {
+          "file": "src/adapters/assets/runtime-assets.ts",
+          "referenceLf": 74,
+          "candidateLf": 73,
+          "referenceLh": 74,
+          "candidateLh": 66
+        },
+        {
+          "file": "src/adapters/backlog/backlog-input-reader.ts",
+          "referenceLf": 26,
+          "candidateLf": 25,
+          "referenceLh": 26,
+          "candidateLh": 24
+        },
+        {
+          "file": "src/adapters/backlog/checkpoint-document.ts",
+          "referenceLf": 177,
+          "candidateLf": 175,
+          "referenceLh": 177,
+          "candidateLh": 137
+        },
+        {
+          "file": "src/adapters/backlog/concrete-agent-read-adapter.ts",
+          "referenceLf": 247,
+          "candidateLf": 204,
+          "referenceLh": 247,
+          "candidateLh": 152
+        },
+        {
+          "file": "src/adapters/backlog/concrete-current-work-read-adapter.ts",
+          "referenceLf": 37,
+          "candidateLf": 34,
+          "referenceLh": 37,
+          "candidateLh": 34
+        },
+        {
+          "file": "src/adapters/backlog/concrete-gate-read-adapter.ts",
+          "referenceLf": 181,
+          "candidateLf": 167,
+          "referenceLh": 181,
+          "candidateLh": 118
+        },
+        {
+          "file": "src/adapters/backlog/concrete-git-read-adapter.ts",
+          "referenceLf": 114,
+          "candidateLf": 102,
+          "referenceLh": 114,
+          "candidateLh": 70
+        },
+        {
+          "file": "src/adapters/backlog/concrete-mission-read-adapter.ts",
+          "referenceLf": 457,
+          "candidateLf": 405,
+          "referenceLh": 375,
+          "candidateLh": 327
+        },
+        {
+          "file": "src/adapters/backlog/concrete-operation-log-read-adapter.ts",
+          "referenceLf": 68,
+          "candidateLf": 57,
+          "referenceLh": 68,
+          "candidateLh": 31
+        },
+        {
+          "file": "src/adapters/backlog/concrete-review-read-adapter.ts",
+          "referenceLf": 252,
+          "candidateLf": 228,
+          "referenceLh": 252,
+          "candidateLh": 147
+        },
+        {
+          "file": "src/adapters/backlog/legacy-mission-audit.ts",
+          "referenceLf": 344,
+          "candidateLf": 319,
+          "referenceLh": 344,
+          "candidateLh": 275
+        },
+        {
+          "file": "src/adapters/backlog/legacy-mission-content.ts",
+          "referenceLf": 81,
+          "candidateLf": 76,
+          "referenceLh": 81,
+          "candidateLh": 69
+        },
+        {
+          "file": "src/adapters/backlog/legacy-mission-document.ts",
+          "referenceLf": 87,
+          "candidateLf": 77,
+          "referenceLh": 87,
+          "candidateLh": 73
+        },
+        {
+          "file": "src/adapters/backlog/legacy-mission-import.ts",
+          "referenceLf": 1129,
+          "candidateLf": 1021,
+          "referenceLh": 1129,
+          "candidateLh": 857
+        },
+        {
+          "file": "src/adapters/backlog/legacy-task-content.ts",
+          "referenceLf": 51,
+          "candidateLf": 51,
+          "referenceLh": 51,
+          "candidateLh": 47
+        },
+        {
+          "file": "src/adapters/backlog/mission-materialization.ts",
+          "referenceLf": 162,
+          "candidateLf": 121,
+          "referenceLh": 162,
+          "candidateLh": 97
+        },
+        {
+          "file": "src/adapters/backlog/task-file-io.ts",
+          "referenceLf": 411,
+          "candidateLf": 411,
+          "referenceLh": 411,
+          "candidateLh": 331
+        },
+        {
+          "file": "src/adapters/backlog/task-metadata.ts",
+          "referenceLf": 389,
+          "candidateLf": 389,
+          "referenceLh": 389,
+          "candidateLh": 362
+        },
+        {
+          "file": "src/adapters/backlog/task-transitions.ts",
+          "referenceLf": 475,
+          "candidateLf": 470,
+          "referenceLh": 475,
+          "candidateLh": 375
+        },
+        {
+          "file": "src/adapters/cli/startup-preflight.ts",
+          "referenceLf": 308,
+          "candidateLf": 307,
+          "referenceLh": 308,
+          "candidateLh": 302
+        },
+        {
+          "file": "src/adapters/cli/commands/active.ts",
+          "referenceLf": 886,
+          "candidateLf": 886,
+          "referenceLh": 886,
+          "candidateLh": 832
+        },
+        {
+          "file": "src/adapters/cli/commands/cohort-report.ts",
+          "referenceLf": 95,
+          "candidateLf": 94,
+          "referenceLh": 95,
+          "candidateLh": 81
+        },
+        {
+          "file": "src/adapters/cli/commands/config.ts",
+          "referenceLf": 80,
+          "candidateLf": 74,
+          "referenceLh": 80,
+          "candidateLh": 48
+        },
+        {
+          "file": "src/adapters/cli/commands/diff.ts",
+          "referenceLf": 126,
+          "candidateLf": 126,
+          "referenceLh": 126,
+          "candidateLh": 9
+        },
+        {
+          "file": "src/adapters/cli/commands/draft-conflicts.ts",
+          "referenceLf": 186,
+          "candidateLf": 186,
+          "referenceLh": 186,
+          "candidateLh": 179
+        },
+        {
+          "file": "src/adapters/cli/commands/draft-prompts.ts",
+          "referenceLf": 146,
+          "candidateLf": 146,
+          "referenceLh": 146,
+          "candidateLh": 134
+        },
+        {
+          "file": "src/adapters/cli/commands/draft-setup.ts",
+          "referenceLf": 376,
+          "candidateLf": 376,
+          "referenceLh": 376,
+          "candidateLh": 327
+        },
+        {
+          "file": "src/adapters/cli/commands/draft-stats.ts",
+          "referenceLf": 861,
+          "candidateLf": 860,
+          "referenceLh": 861,
+          "candidateLh": 787
+        },
+        {
+          "file": "src/adapters/cli/commands/draft.ts",
+          "referenceLf": 19,
+          "candidateLf": 19,
+          "referenceLh": 19,
+          "candidateLh": 14
+        },
+        {
+          "file": "src/adapters/cli/commands/handoff.ts",
+          "referenceLf": 196,
+          "candidateLf": 196,
+          "referenceLh": 196,
+          "candidateLh": 171
+        },
+        {
+          "file": "src/adapters/cli/commands/integrate-conflict.ts",
+          "referenceLf": 470,
+          "candidateLf": 470,
+          "referenceLh": 470,
+          "candidateLh": 457
+        },
+        {
+          "file": "src/adapters/cli/commands/integrate-gate-rebound.ts",
+          "referenceLf": 443,
+          "candidateLf": 371,
+          "referenceLh": 443,
+          "candidateLh": 99
+        },
+        {
+          "file": "src/adapters/cli/commands/integrate-gates.ts",
+          "referenceLf": 341,
+          "candidateLf": 341,
+          "referenceLh": 341,
+          "candidateLh": 311
+        },
+        {
+          "file": "src/adapters/cli/commands/integrate-post.ts",
+          "referenceLf": 393,
+          "candidateLf": 384,
+          "referenceLh": 393,
+          "candidateLh": 350
+        },
+        {
+          "file": "src/adapters/cli/commands/integrate.ts",
+          "referenceLf": 322,
+          "candidateLf": 322,
+          "referenceLh": 322,
+          "candidateLh": 297
+        },
+        {
+          "file": "src/adapters/cli/commands/rebase.ts",
+          "referenceLf": 39,
+          "candidateLf": 38,
+          "referenceLh": 39,
+          "candidateLh": 20
+        },
+        {
+          "file": "src/adapters/cli/commands/recover-landed-intake.ts",
+          "referenceLf": 48,
+          "candidateLf": 48,
+          "referenceLh": 48,
+          "candidateLh": 47
+        },
+        {
+          "file": "src/adapters/cli/commands/repair-handoff.ts",
+          "referenceLf": 216,
+          "candidateLf": 216,
+          "referenceLh": 216,
+          "candidateLh": 75
+        },
+        {
+          "file": "src/adapters/cli/commands/resolve-conflict.ts",
+          "referenceLf": 157,
+          "candidateLf": 151,
+          "referenceLh": 157,
+          "candidateLh": 143
+        },
+        {
+          "file": "src/adapters/cli/commands/setup-review.ts",
+          "referenceLf": 15,
+          "candidateLf": 15,
+          "referenceLh": 15,
+          "candidateLh": 11
+        },
+        {
+          "file": "src/adapters/cli/commands/stats-backfill.ts",
+          "referenceLf": 414,
+          "candidateLf": 414,
+          "referenceLh": 414,
+          "candidateLh": 375
+        },
+        {
+          "file": "src/adapters/cli/commands/stats-cohorts.ts",
+          "referenceLf": 231,
+          "candidateLf": 193,
+          "referenceLh": 231,
+          "candidateLh": 133
+        },
+        {
+          "file": "src/adapters/cli/commands/stats-normalization.ts",
+          "referenceLf": 228,
+          "candidateLf": 192,
+          "referenceLh": 228,
+          "candidateLh": 149
+        },
+        {
+          "file": "src/adapters/cli/commands/stats-report-rendering.ts",
+          "referenceLf": 614,
+          "candidateLf": 614,
+          "referenceLh": 614,
+          "candidateLh": 442
+        },
+        {
+          "file": "src/adapters/cli/commands/stats-report.ts",
+          "referenceLf": 364,
+          "candidateLf": 364,
+          "referenceLh": 364,
+          "candidateLh": 336
+        },
+        {
+          "file": "src/adapters/cli/commands/stats.ts",
+          "referenceLf": 1018,
+          "candidateLf": 1018,
+          "referenceLh": 1018,
+          "candidateLh": 1006
+        },
+        {
+          "file": "src/adapters/cli/commands/status-adapter.ts",
+          "referenceLf": 359,
+          "candidateLf": 306,
+          "referenceLh": 359,
+          "candidateLh": 213
+        },
+        {
+          "file": "src/adapters/cli/commands/status.ts",
+          "referenceLf": 349,
+          "candidateLf": 337,
+          "referenceLh": 326,
+          "candidateLh": 313
+        },
+        {
+          "file": "src/adapters/config/gate-dashboard.ts",
+          "referenceLf": 109,
+          "candidateLf": 107,
+          "referenceLh": 109,
+          "candidateLh": 41
+        },
+        {
+          "file": "src/adapters/config/product-config.ts",
+          "referenceLf": 854,
+          "candidateLf": 854,
+          "referenceLh": 854,
+          "candidateLh": 786
+        },
+        {
+          "file": "src/adapters/config/repository-gates.ts",
+          "referenceLf": 522,
+          "candidateLf": 463,
+          "referenceLh": 522,
+          "candidateLh": 419
+        },
+        {
+          "file": "src/adapters/config/state-homes.ts",
+          "referenceLf": 82,
+          "candidateLf": 82,
+          "referenceLh": 82,
+          "candidateLh": 81
+        },
+        {
+          "file": "src/adapters/config/state-map.ts",
+          "referenceLf": 119,
+          "candidateLf": 105,
+          "referenceLh": 119,
+          "candidateLh": 89
+        },
+        {
+          "file": "src/adapters/filesystem/gitignore.ts",
+          "referenceLf": 104,
+          "candidateLf": 85,
+          "referenceLh": 104,
+          "candidateLh": 49
+        },
+        {
+          "file": "src/adapters/filesystem/mission-graphify.ts",
+          "referenceLf": 162,
+          "candidateLf": 162,
+          "referenceLh": 162,
+          "candidateLh": 117
+        },
+        {
+          "file": "src/adapters/filesystem/mission-paths.ts",
+          "referenceLf": 276,
+          "candidateLf": 276,
+          "referenceLh": 276,
+          "candidateLh": 247
+        },
+        {
+          "file": "src/adapters/filesystem/mission-utils.ts",
+          "referenceLf": 64,
+          "candidateLf": 64,
+          "referenceLh": 64,
+          "candidateLh": 63
+        },
+        {
+          "file": "src/adapters/filesystem/package-root.ts",
+          "referenceLf": 68,
+          "candidateLf": 68,
+          "referenceLh": 68,
+          "candidateLh": 61
+        },
+        {
+          "file": "src/adapters/filesystem/recovery-claim.ts",
+          "referenceLf": 221,
+          "candidateLf": 211,
+          "referenceLh": 221,
+          "candidateLh": 186
+        },
+        {
+          "file": "src/adapters/forgejo/forgejo-api.ts",
+          "referenceLf": 185,
+          "candidateLf": 185,
+          "referenceLh": 185,
+          "candidateLh": 84
+        },
+        {
+          "file": "src/adapters/forgejo/forgejo-auth.ts",
+          "referenceLf": 152,
+          "candidateLf": 152,
+          "referenceLh": 152,
+          "candidateLh": 151
+        },
+        {
+          "file": "src/adapters/forgejo/forgejo-git.ts",
+          "referenceLf": 572,
+          "candidateLf": 572,
+          "referenceLh": 572,
+          "candidateLh": 465
+        },
+        {
+          "file": "src/adapters/forgejo/forgejo-pr.ts",
+          "referenceLf": 1052,
+          "candidateLf": 1052,
+          "referenceLh": 1052,
+          "candidateLh": 900
+        },
+        {
+          "file": "src/adapters/git/agent-worktree.ts",
+          "referenceLf": 124,
+          "candidateLf": 124,
+          "referenceLh": 124,
+          "candidateLh": 89
+        },
+        {
+          "file": "src/adapters/git/git.ts",
+          "referenceLf": 174,
+          "candidateLf": 174,
+          "referenceLh": 174,
+          "candidateLh": 136
+        },
+        {
+          "file": "src/adapters/git/github-publish-git.ts",
+          "referenceLf": 59,
+          "candidateLf": 58,
+          "referenceLh": 59,
+          "candidateLh": 29
+        },
+        {
+          "file": "src/adapters/git/merge-noise.ts",
+          "referenceLf": 259,
+          "candidateLf": 259,
+          "referenceLh": 259,
+          "candidateLh": 223
+        },
+        {
+          "file": "src/adapters/git/net-engineering-lines.ts",
+          "referenceLf": 84,
+          "candidateLf": 84,
+          "referenceLh": 84,
+          "candidateLh": 82
+        },
+        {
+          "file": "src/adapters/git/repository-identity.ts",
+          "referenceLf": 52,
+          "candidateLf": 52,
+          "referenceLh": 52,
+          "candidateLh": 49
+        },
+        {
+          "file": "src/adapters/git/worktree.ts",
+          "referenceLf": 446,
+          "candidateLf": 446,
+          "referenceLh": 446,
+          "candidateLh": 417
+        },
+        {
+          "file": "src/adapters/github/github-pr.ts",
+          "referenceLf": 76,
+          "candidateLf": 62,
+          "referenceLh": 76,
+          "candidateLh": 11
+        },
+        {
+          "file": "src/adapters/mission/execute-mission-adapters.ts",
+          "referenceLf": 271,
+          "candidateLf": 267,
+          "referenceLh": 271,
+          "candidateLh": 264
+        },
+        {
+          "file": "src/adapters/mission/stats-backfill-adapter.ts",
+          "referenceLf": 45,
+          "candidateLf": 43,
+          "referenceLh": 45,
+          "candidateLh": 43
+        },
+        {
+          "file": "src/adapters/process/bubblewrap.ts",
+          "referenceLf": 299,
+          "candidateLf": 286,
+          "referenceLh": 299,
+          "candidateLh": 254
+        },
+        {
+          "file": "src/adapters/process/confinement.ts",
+          "referenceLf": 78,
+          "candidateLf": 59,
+          "referenceLh": 78,
+          "candidateLh": 50
+        },
+        {
+          "file": "src/adapters/process/output-watchdog.ts",
+          "referenceLf": 38,
+          "candidateLf": 32,
+          "referenceLh": 38,
+          "candidateLh": 30
+        },
+        {
+          "file": "src/adapters/process/polling-pause.ts",
+          "referenceLf": 29,
+          "candidateLf": 26,
+          "referenceLh": 29,
+          "candidateLh": 12
+        },
+        {
+          "file": "src/adapters/process/post-integrate-hook.ts",
+          "referenceLf": 83,
+          "candidateLf": 83,
+          "referenceLh": 83,
+          "candidateLh": 65
+        },
+        {
+          "file": "src/adapters/process/pre-draft-hook.ts",
+          "referenceLf": 38,
+          "candidateLf": 30,
+          "referenceLh": 38,
+          "candidateLh": 30
+        },
+        {
+          "file": "src/adapters/process/process-liveness.ts",
+          "referenceLf": 43,
+          "candidateLf": 42,
+          "referenceLh": 43,
+          "candidateLh": 36
+        },
+        {
+          "file": "src/adapters/process/process-runner.ts",
+          "referenceLf": 8,
+          "candidateLf": 8,
+          "referenceLh": 8,
+          "candidateLh": 1
+        },
+        {
+          "file": "src/adapters/process/spawn-tee.ts",
+          "referenceLf": 190,
+          "candidateLf": 151,
+          "referenceLh": 190,
+          "candidateLh": 116
+        },
+        {
+          "file": "src/adapters/rebase/rebase-workflow-adapter.ts",
+          "referenceLf": 173,
+          "candidateLf": 149,
+          "referenceLh": 173,
+          "candidateLh": 136
+        },
+        {
+          "file": "src/adapters/review/rebase.ts",
+          "referenceLf": 351,
+          "candidateLf": 351,
+          "referenceLh": 351,
+          "candidateLh": 242
+        },
+        {
+          "file": "src/adapters/review/review-adapter.ts",
+          "referenceLf": 198,
+          "candidateLf": 198,
+          "referenceLh": 198,
+          "candidateLh": 152
+        },
+        {
+          "file": "src/adapters/review/review-agent-fallback.ts",
+          "referenceLf": 482,
+          "candidateLf": 439,
+          "referenceLh": 482,
+          "candidateLh": 332
+        },
+        {
+          "file": "src/adapters/review/review-artifacts.ts",
+          "referenceLf": 1283,
+          "candidateLf": 1283,
+          "referenceLh": 1283,
+          "candidateLh": 982
+        },
+        {
+          "file": "src/adapters/review/review-cli-flags.ts",
+          "referenceLf": 54,
+          "candidateLf": 54,
+          "referenceLh": 54,
+          "candidateLh": 39
+        },
+        {
+          "file": "src/adapters/review/review-commands.ts",
+          "referenceLf": 1740,
+          "candidateLf": 1740,
+          "referenceLh": 1740,
+          "candidateLh": 1124
+        },
+        {
+          "file": "src/adapters/review/review-events.ts",
+          "referenceLf": 740,
+          "candidateLf": 740,
+          "referenceLh": 740,
+          "candidateLh": 550
+        },
+        {
+          "file": "src/adapters/review/review-gate-handling.ts",
+          "referenceLf": 252,
+          "candidateLf": 206,
+          "referenceLh": 252,
+          "candidateLh": 98
+        },
+        {
+          "file": "src/adapters/review/review-loop.ts",
+          "referenceLf": 1956,
+          "candidateLf": 1956,
+          "referenceLh": 1956,
+          "candidateLh": 1514
+        },
+        {
+          "file": "src/adapters/review/review-polling.ts",
+          "referenceLf": 206,
+          "candidateLf": 206,
+          "referenceLh": 206,
+          "candidateLh": 179
+        },
+        {
+          "file": "src/adapters/review/review-prompts.ts",
+          "referenceLf": 273,
+          "candidateLf": 267,
+          "referenceLh": 273,
+          "candidateLh": 246
+        },
+        {
+          "file": "src/adapters/review/review-round.ts",
+          "referenceLf": 414,
+          "candidateLf": 380,
+          "referenceLh": 414,
+          "candidateLh": 259
+        },
+        {
+          "file": "src/adapters/review/review-state-mapping.ts",
+          "referenceLf": 193,
+          "candidateLf": 191,
+          "referenceLh": 193,
+          "candidateLh": 182
+        },
+        {
+          "file": "src/adapters/review/review-state.ts",
+          "referenceLf": 976,
+          "candidateLf": 976,
+          "referenceLh": 976,
+          "candidateLh": 882
+        },
+        {
+          "file": "src/adapters/review/review-static-evidence.ts",
+          "referenceLf": 173,
+          "candidateLf": 162,
+          "referenceLh": 173,
+          "candidateLh": 95
+        },
+        {
+          "file": "src/adapters/review/review-workflow-adapter.ts",
+          "referenceLf": 80,
+          "candidateLf": 78,
+          "referenceLh": 80,
+          "candidateLh": 55
+        },
+        {
+          "file": "src/adapters/review/setup-review-auth.ts",
+          "referenceLf": 96,
+          "candidateLf": 96,
+          "referenceLh": 96,
+          "candidateLh": 95
+        },
+        {
+          "file": "src/adapters/review/setup-review-repository.ts",
+          "referenceLf": 58,
+          "candidateLf": 58,
+          "referenceLh": 58,
+          "candidateLh": 57
+        },
+        {
+          "file": "src/adapters/review/setup-review.ts",
+          "referenceLf": 162,
+          "candidateLf": 162,
+          "referenceLh": 162,
+          "candidateLh": 157
+        },
+        {
+          "file": "src/adapters/sqlite/adapter-factory.ts",
+          "referenceLf": 173,
+          "candidateLf": 147,
+          "referenceLh": 173,
+          "candidateLh": 140
+        },
+        {
+          "file": "src/adapters/sqlite/adhoc-counter.ts",
+          "referenceLf": 90,
+          "candidateLf": 84,
+          "referenceLh": 90,
+          "candidateLh": 77
+        },
+        {
+          "file": "src/adapters/sqlite/authority-map.ts",
+          "referenceLf": 301,
+          "candidateLf": 296,
+          "referenceLh": 301,
+          "candidateLh": 277
+        },
+        {
+          "file": "src/adapters/sqlite/blocklist-repository.ts",
+          "referenceLf": 83,
+          "candidateLf": 73,
+          "referenceLh": 83,
+          "candidateLh": 73
+        },
+        {
+          "file": "src/adapters/sqlite/blocklist-snapshot.ts",
+          "referenceLf": 56,
+          "candidateLf": 47,
+          "referenceLh": 56,
+          "candidateLh": 23
+        },
+        {
+          "file": "src/adapters/sqlite/board-lane-event-repository.ts",
+          "referenceLf": 132,
+          "candidateLf": 103,
+          "referenceLh": 132,
+          "candidateLh": 101
+        },
+        {
+          "file": "src/adapters/sqlite/custom-agent-lease-repository.ts",
+          "referenceLf": 41,
+          "candidateLf": 40,
+          "referenceLh": 41,
+          "candidateLh": 35
+        },
+        {
+          "file": "src/adapters/sqlite/database-adapter.ts",
+          "referenceLf": 511,
+          "candidateLf": 486,
+          "referenceLh": 511,
+          "candidateLh": 448
+        },
+        {
+          "file": "src/adapters/sqlite/database-path-resolver.ts",
+          "referenceLf": 40,
+          "candidateLf": 40,
+          "referenceLh": 40,
+          "candidateLh": 39
+        },
+        {
+          "file": "src/adapters/sqlite/importer.ts",
+          "referenceLf": 537,
+          "candidateLf": 519,
+          "referenceLh": 477,
+          "candidateLh": 463
+        },
+        {
+          "file": "src/adapters/sqlite/index.ts",
+          "referenceLf": 98,
+          "candidateLf": 50,
+          "referenceLh": 0,
+          "candidateLh": 0
+        },
+        {
+          "file": "src/adapters/sqlite/measurement-store.ts",
+          "referenceLf": 364,
+          "candidateLf": 358,
+          "referenceLh": 364,
+          "candidateLh": 319
+        },
+        {
+          "file": "src/adapters/sqlite/migration-checksums.ts",
+          "referenceLf": 11,
+          "candidateLf": 11,
+          "referenceLh": 11,
+          "candidateLh": 7
+        },
+        {
+          "file": "src/adapters/sqlite/migration-ledger-repository.ts",
+          "referenceLf": 54,
+          "candidateLf": 46,
+          "referenceLh": 54,
+          "candidateLh": 46
+        },
+        {
+          "file": "src/adapters/sqlite/migration-runner.ts",
+          "referenceLf": 188,
+          "candidateLf": 187,
+          "referenceLh": 188,
+          "candidateLh": 185
+        },
+        {
+          "file": "src/adapters/sqlite/mission-serialization.ts",
+          "referenceLf": 595,
+          "candidateLf": 430,
+          "referenceLh": 595,
+          "candidateLh": 388
+        },
+        {
+          "file": "src/adapters/sqlite/mission-store.ts",
+          "referenceLf": 733,
+          "candidateLf": 727,
+          "referenceLh": 733,
+          "candidateLh": 717
+        },
+        {
+          "file": "src/adapters/sqlite/operational-history-repository.ts",
+          "referenceLf": 101,
+          "candidateLf": 87,
+          "referenceLh": 101,
+          "candidateLh": 77
+        },
+        {
+          "file": "src/adapters/sqlite/ports.ts",
+          "referenceLf": 23,
+          "candidateLf": 6,
+          "referenceLh": 0,
+          "candidateLh": 0
+        },
+        {
+          "file": "src/adapters/sqlite/repository-repository.ts",
+          "referenceLf": 81,
+          "candidateLf": 73,
+          "referenceLh": 81,
+          "candidateLh": 73
+        },
+        {
+          "file": "src/adapters/sqlite/review-projection-reader.ts",
+          "referenceLf": 81,
+          "candidateLf": 77,
+          "referenceLh": 81,
+          "candidateLh": 70
+        },
+        {
+          "file": "src/adapters/sqlite/session-marker-adapter.ts",
+          "referenceLf": 58,
+          "candidateLf": 52,
+          "referenceLh": 58,
+          "candidateLh": 50
+        },
+        {
+          "file": "src/adapters/sqlite/session-marker-import.ts",
+          "referenceLf": 299,
+          "candidateLf": 250,
+          "referenceLh": 264,
+          "candidateLh": 216
+        },
+        {
+          "file": "src/adapters/sqlite/session-marker-repository.ts",
+          "referenceLf": 163,
+          "candidateLf": 150,
+          "referenceLh": 163,
+          "candidateLh": 150
+        },
+        {
+          "file": "src/adapters/sqlite/ui-preferences-repository.ts",
+          "referenceLf": 76,
+          "candidateLf": 68,
+          "referenceLh": 76,
+          "candidateLh": 68
+        },
+        {
+          "file": "src/adapters/sqlite/usage-repository.ts",
+          "referenceLf": 71,
+          "candidateLf": 69,
+          "referenceLh": 71,
+          "candidateLh": 69
+        },
+        {
+          "file": "src/adapters/storage/persistent-data-migration.ts",
+          "referenceLf": 88,
+          "candidateLf": 87,
+          "referenceLh": 88,
+          "candidateLh": 80
+        },
+        {
+          "file": "src/adapters/storage/storage.ts",
+          "referenceLf": 193,
+          "candidateLf": 170,
+          "referenceLh": 193,
+          "candidateLh": 154
+        },
+        {
+          "file": "src/adapters/verification/coverage-gate.ts",
+          "referenceLf": 497,
+          "candidateLf": 494,
+          "referenceLh": 155,
+          "candidateLh": 161
+        },
+        {
+          "file": "src/adapters/verification/gatekeeper.ts",
+          "referenceLf": 143,
+          "candidateLf": 143,
+          "referenceLh": 143,
+          "candidateLh": 95
+        },
+        {
+          "file": "src/adapters/verification/temp-root-registry.ts",
+          "referenceLf": 127,
+          "candidateLf": 124,
+          "referenceLh": 126,
+          "candidateLh": 113
+        },
+        {
+          "file": "src/adapters/verification/verification.ts",
+          "referenceLf": 478,
+          "candidateLf": 478,
+          "referenceLh": 478,
+          "candidateLh": 420
+        },
+        {
+          "file": "src/adapters/web/asset-store.ts",
+          "referenceLf": 81,
+          "candidateLf": 67,
+          "referenceLh": 81,
+          "candidateLh": 40
+        },
+        {
+          "file": "src/application/consumer-domain-requirements.ts",
+          "referenceLf": 424,
+          "candidateLf": 372,
+          "referenceLh": 0,
+          "candidateLh": 0
+        },
+        {
+          "file": "src/application/contracts.ts",
+          "referenceLf": 68,
+          "candidateLf": 23,
+          "referenceLh": 68,
+          "candidateLh": 21
+        },
+        {
+          "file": "src/application/domain-ports.ts",
+          "referenceLf": 166,
+          "candidateLf": 160,
+          "referenceLh": 166,
+          "candidateLh": 125
+        },
+        {
+          "file": "src/application/draft-command-use-case.ts",
+          "referenceLf": 113,
+          "candidateLf": 112,
+          "referenceLh": 113,
+          "candidateLh": 104
+        },
+        {
+          "file": "src/application/execute-mission-service.ts",
+          "referenceLf": 296,
+          "candidateLf": 293,
+          "referenceLh": 296,
+          "candidateLh": 274
+        },
+        {
+          "file": "src/application/failure-classification.ts",
+          "referenceLf": 223,
+          "candidateLf": 220,
+          "referenceLh": 223,
+          "candidateLh": 202
+        },
+        {
+          "file": "src/application/handoff-command-use-case.ts",
+          "referenceLf": 1586,
+          "candidateLf": 1570,
+          "referenceLh": 1586,
+          "candidateLh": 1331
+        },
+        {
+          "file": "src/application/hook-failure-workflow.ts",
+          "referenceLf": 40,
+          "candidateLf": 40,
+          "referenceLh": 40,
+          "candidateLh": 16
+        },
+        {
+          "file": "src/application/integrate-command-use-case.ts",
+          "referenceLf": 46,
+          "candidateLf": 45,
+          "referenceLh": 46,
+          "candidateLh": 18
+        },
+        {
+          "file": "src/application/integrate-workflow.ts",
+          "referenceLf": 357,
+          "candidateLf": 349,
+          "referenceLh": 357,
+          "candidateLh": 253
+        },
+        {
+          "file": "src/application/integration-repair-review.ts",
+          "referenceLf": 36,
+          "candidateLf": 35,
+          "referenceLh": 36,
+          "candidateLh": 23
+        },
+        {
+          "file": "src/application/lifecycle-lane-event.ts",
+          "referenceLf": 117,
+          "candidateLf": 102,
+          "referenceLh": 117,
+          "candidateLh": 61
+        },
+        {
+          "file": "src/application/measurement-ports.ts",
+          "referenceLf": 109,
+          "candidateLf": 55,
+          "referenceLh": 109,
+          "candidateLh": 55
+        },
+        {
+          "file": "src/application/mission-assignment-service.ts",
+          "referenceLf": 23,
+          "candidateLf": 20,
+          "referenceLh": 23,
+          "candidateLh": 20
+        },
+        {
+          "file": "src/application/mission-authority.ts",
+          "referenceLf": 97,
+          "candidateLf": 74,
+          "referenceLh": 0,
+          "candidateLh": 0
+        },
+        {
+          "file": "src/application/mission-brief-service.ts",
+          "referenceLf": 246,
+          "candidateLf": 242,
+          "referenceLh": 246,
+          "candidateLh": 208
+        },
+        {
+          "file": "src/application/mission-cancel-service.ts",
+          "referenceLf": 43,
+          "candidateLf": 41,
+          "referenceLh": 43,
+          "candidateLh": 41
+        },
+        {
+          "file": "src/application/mission-checkpoint-service.ts",
+          "referenceLf": 197,
+          "candidateLf": 194,
+          "referenceLh": 197,
+          "candidateLh": 175
+        },
+        {
+          "file": "src/application/mission-command-support.ts",
+          "referenceLf": 128,
+          "candidateLf": 106,
+          "referenceLh": 128,
+          "candidateLh": 87
+        },
+        {
+          "file": "src/application/mission-handoff-service.ts",
+          "referenceLf": 145,
+          "candidateLf": 142,
+          "referenceLh": 145,
+          "candidateLh": 134
+        },
+        {
+          "file": "src/application/mission-intake-service.ts",
+          "referenceLf": 140,
+          "candidateLf": 135,
+          "referenceLh": 140,
+          "candidateLh": 119
+        },
+        {
+          "file": "src/application/mission-integration-service.ts",
+          "referenceLf": 129,
+          "candidateLf": 126,
+          "referenceLh": 129,
+          "candidateLh": 106
+        },
+        {
+          "file": "src/application/mission-lifecycle-recovery.ts",
+          "referenceLf": 107,
+          "candidateLf": 85,
+          "referenceLh": 107,
+          "candidateLh": 61
+        },
+        {
+          "file": "src/application/mission-lifecycle-service.ts",
+          "referenceLf": 182,
+          "candidateLf": 178,
+          "referenceLh": 182,
+          "candidateLh": 157
+        },
+        {
+          "file": "src/application/output-elision.ts",
+          "referenceLf": 38,
+          "candidateLf": 38,
+          "referenceLh": 38,
+          "candidateLh": 17
+        },
+        {
+          "file": "src/application/persistence-domain-map.ts",
+          "referenceLf": 240,
+          "candidateLf": 205,
+          "referenceLh": 0,
+          "candidateLh": 0
+        },
+        {
+          "file": "src/application/ports.ts",
+          "referenceLf": 56,
+          "candidateLf": 12,
+          "referenceLh": 0,
+          "candidateLh": 0
+        },
+        {
+          "file": "src/application/rebase-command-use-case.ts",
+          "referenceLf": 12,
+          "candidateLf": 11,
+          "referenceLh": 12,
+          "candidateLh": 11
+        },
+        {
+          "file": "src/application/rebase-workflow.ts",
+          "referenceLf": 848,
+          "candidateLf": 810,
+          "referenceLh": 848,
+          "candidateLh": 744
+        },
+        {
+          "file": "src/application/rebound-kernel.ts",
+          "referenceLf": 620,
+          "candidateLf": 471,
+          "referenceLh": 620,
+          "candidateLh": 418
+        },
+        {
+          "file": "src/application/recovery-supervisor.ts",
+          "referenceLf": 665,
+          "candidateLf": 537,
+          "referenceLh": 665,
+          "candidateLh": 495
+        },
+        {
+          "file": "src/application/review-command-use-case.ts",
+          "referenceLf": 98,
+          "candidateLf": 97,
+          "referenceLh": 98,
+          "candidateLh": 93
+        },
+        {
+          "file": "src/application/revoke-review-decision-use-case.ts",
+          "referenceLf": 78,
+          "candidateLf": 76,
+          "referenceLh": 78,
+          "candidateLh": 65
+        },
+        {
+          "file": "src/application/static-evidence.ts",
+          "referenceLf": 176,
+          "candidateLf": 165,
+          "referenceLh": 176,
+          "candidateLh": 132
+        },
+        {
+          "file": "src/application/stats-backfill-service.ts",
+          "referenceLf": 36,
+          "candidateLf": 34,
+          "referenceLh": 36,
+          "candidateLh": 32
+        },
+        {
+          "file": "src/application/stats-command-use-case.ts",
+          "referenceLf": 78,
+          "candidateLf": 77,
+          "referenceLh": 78,
+          "candidateLh": 72
+        },
+        {
+          "file": "src/application/status-command-use-case.ts",
+          "referenceLf": 137,
+          "candidateLf": 136,
+          "referenceLh": 137,
+          "candidateLh": 109
+        },
+        {
+          "file": "src/application/tui-capabilities.ts",
+          "referenceLf": 14,
+          "candidateLf": 2,
+          "referenceLh": 0,
+          "candidateLh": 0
+        },
+        {
+          "file": "src/application/controller/board-command.ts",
+          "referenceLf": 169,
+          "candidateLf": 91,
+          "referenceLh": 169,
+          "candidateLh": 90
+        },
+        {
+          "file": "src/application/controller/board-controller.ts",
+          "referenceLf": 386,
+          "candidateLf": 346,
+          "referenceLh": 386,
+          "candidateLh": 180
+        },
+        {
+          "file": "src/application/github-publish/state-machine.ts",
+          "referenceLf": 48,
+          "candidateLf": 42,
+          "referenceLh": 0,
+          "candidateLh": 0
+        },
+        {
+          "file": "src/application/github-publish/status-command-use-case.ts",
+          "referenceLf": 78,
+          "candidateLf": 76,
+          "referenceLh": 78,
+          "candidateLh": 73
+        },
+        {
+          "file": "src/application/github-publish/status.ts",
+          "referenceLf": 72,
+          "candidateLf": 56,
+          "referenceLh": 72,
+          "candidateLh": 5
+        },
+        {
+          "file": "src/application/integrate/approval.ts",
+          "referenceLf": 136,
+          "candidateLf": 124,
+          "referenceLh": 136,
+          "candidateLh": 105
+        },
+        {
+          "file": "src/application/integrate/base-worktree-repair.ts",
+          "referenceLf": 224,
+          "candidateLf": 214,
+          "referenceLh": 224,
+          "candidateLh": 181
+        },
+        {
+          "file": "src/application/integrate/context.ts",
+          "referenceLf": 135,
+          "candidateLf": 121,
+          "referenceLh": 135,
+          "candidateLh": 112
+        },
+        {
+          "file": "src/application/integrate/gates.ts",
+          "referenceLf": 205,
+          "candidateLf": 204,
+          "referenceLh": 205,
+          "candidateLh": 95
+        },
+        {
+          "file": "src/application/integrate/github-pr.ts",
+          "referenceLf": 73,
+          "candidateLf": 65,
+          "referenceLh": 73,
+          "candidateLh": 10
+        },
+        {
+          "file": "src/application/integrate/landed-recovery.ts",
+          "referenceLf": 77,
+          "candidateLf": 69,
+          "referenceLh": 77,
+          "candidateLh": 50
+        },
+        {
+          "file": "src/application/integrate/landing.ts",
+          "referenceLf": 182,
+          "candidateLf": 178,
+          "referenceLh": 182,
+          "candidateLh": 99
+        },
+        {
+          "file": "src/application/integrate/preflight-checkout.ts",
+          "referenceLf": 168,
+          "candidateLf": 154,
+          "referenceLh": 168,
+          "candidateLh": 141
+        },
+        {
+          "file": "src/application/integrate/preflight-review.ts",
+          "referenceLf": 97,
+          "candidateLf": 89,
+          "referenceLh": 97,
+          "candidateLh": 65
+        },
+        {
+          "file": "src/application/integrate/preflight.ts",
+          "referenceLf": 200,
+          "candidateLf": 174,
+          "referenceLh": 200,
+          "candidateLh": 157
+        },
+        {
+          "file": "src/application/integrate/readiness.ts",
+          "referenceLf": 62,
+          "candidateLf": 62,
+          "referenceLh": 62,
+          "candidateLh": 58
+        },
+        {
+          "file": "src/application/integrate/rebase.ts",
+          "referenceLf": 123,
+          "candidateLf": 113,
+          "referenceLh": 123,
+          "candidateLh": 85
+        },
+        {
+          "file": "src/application/integrate/recovery.ts",
+          "referenceLf": 273,
+          "candidateLf": 267,
+          "referenceLh": 273,
+          "candidateLh": 238
+        },
+        {
+          "file": "src/application/integrate/squash.ts",
+          "referenceLf": 293,
+          "candidateLf": 275,
+          "referenceLh": 293,
+          "candidateLh": 218
+        },
+        {
+          "file": "src/application/integrate/support.ts",
+          "referenceLf": 127,
+          "candidateLf": 110,
+          "referenceLh": 127,
+          "candidateLh": 94
+        },
+        {
+          "file": "src/application/ports/agent-blocklist.ts",
+          "referenceLf": 14,
+          "candidateLf": 1,
+          "referenceLh": 0,
+          "candidateLh": 0
+        },
+        {
+          "file": "src/application/ports/cli-workflows.ts",
+          "referenceLf": 320,
+          "candidateLf": 50,
+          "referenceLh": 0,
+          "candidateLh": 0
+        },
+        {
+          "file": "src/application/ports/execute-mission.ts",
+          "referenceLf": 178,
+          "candidateLf": 62,
+          "referenceLh": 0,
+          "candidateLh": 0
+        },
+        {
+          "file": "src/application/ports/github-publish.ts",
+          "referenceLf": 18,
+          "candidateLf": 10,
+          "referenceLh": 0,
+          "candidateLh": 0
+        },
+        {
+          "file": "src/application/ports/handoff-workflow.ts",
+          "referenceLf": 245,
+          "candidateLf": 72,
+          "referenceLh": 0,
+          "candidateLh": 0
+        },
+        {
+          "file": "src/application/ports/integrate-workflow.ts",
+          "referenceLf": 217,
+          "candidateLf": 50,
+          "referenceLh": 0,
+          "candidateLh": 0
+        },
+        {
+          "file": "src/application/ports/integration-strategy.ts",
+          "referenceLf": 53,
+          "candidateLf": 35,
+          "referenceLh": 53,
+          "candidateLh": 14
+        },
+        {
+          "file": "src/application/ports/mission-measurements.ts",
+          "referenceLf": 30,
+          "candidateLf": 1,
+          "referenceLh": 0,
+          "candidateLh": 0
+        },
+        {
+          "file": "src/application/ports/mission-store.ts",
+          "referenceLf": 24,
+          "candidateLf": 3,
+          "referenceLh": 0,
+          "candidateLh": 0
+        },
+        {
+          "file": "src/application/ports/operation-history.ts",
+          "referenceLf": 36,
+          "candidateLf": 3,
+          "referenceLh": 0,
+          "candidateLh": 0
+        },
+        {
+          "file": "src/application/ports/operator-preferences.ts",
+          "referenceLf": 13,
+          "candidateLf": 1,
+          "referenceLh": 0,
+          "candidateLh": 0
+        },
+        {
+          "file": "src/application/ports/rebase-workflow.ts",
+          "referenceLf": 170,
+          "candidateLf": 45,
+          "referenceLh": 0,
+          "candidateLh": 0
+        },
+        {
+          "file": "src/application/ports/repository-catalog.ts",
+          "referenceLf": 13,
+          "candidateLf": 1,
+          "referenceLh": 0,
+          "candidateLh": 0
+        },
+        {
+          "file": "src/application/ports/review-workflow.ts",
+          "referenceLf": 25,
+          "candidateLf": 2,
+          "referenceLh": 0,
+          "candidateLh": 0
+        },
+        {
+          "file": "src/application/presentation/cli-flags.ts",
+          "referenceLf": 33,
+          "candidateLf": 33,
+          "referenceLh": 33,
+          "candidateLh": 2
+        },
+        {
+          "file": "src/application/presentation/cli-format.ts",
+          "referenceLf": 203,
+          "candidateLf": 203,
+          "referenceLh": 203,
+          "candidateLh": 139
+        },
+        {
+          "file": "src/application/projections/activity.ts",
+          "referenceLf": 26,
+          "candidateLf": 17,
+          "referenceLh": 0,
+          "candidateLh": 0
+        },
+        {
+          "file": "src/application/projections/agent-countdown.ts",
+          "referenceLf": 25,
+          "candidateLf": 25,
+          "referenceLh": 25,
+          "candidateLh": 1
+        },
+        {
+          "file": "src/application/projections/agent-status.ts",
+          "referenceLf": 80,
+          "candidateLf": 61,
+          "referenceLh": 80,
+          "candidateLh": 61
+        },
+        {
+          "file": "src/application/projections/analytics.ts",
+          "referenceLf": 51,
+          "candidateLf": 41,
+          "referenceLh": 0,
+          "candidateLh": 0
+        },
+        {
+          "file": "src/application/projections/board-readers.ts",
+          "referenceLf": 389,
+          "candidateLf": 382,
+          "referenceLh": 389,
+          "candidateLh": 364
+        },
+        {
+          "file": "src/application/projections/board-subscription.ts",
+          "referenceLf": 160,
+          "candidateLf": 136,
+          "referenceLh": 160,
+          "candidateLh": 129
+        },
+        {
+          "file": "src/application/projections/board.ts",
+          "referenceLf": 455,
+          "candidateLf": 226,
+          "referenceLh": 455,
+          "candidateLh": 217
+        },
+        {
+          "file": "src/application/projections/bug-frequency.ts",
+          "referenceLf": 233,
+          "candidateLf": 168,
+          "referenceLh": 0,
+          "candidateLh": 0
+        },
+        {
+          "file": "src/application/projections/cohorts.ts",
+          "referenceLf": 359,
+          "candidateLf": 264,
+          "referenceLh": 359,
+          "candidateLh": 252
+        },
+        {
+          "file": "src/application/projections/current-work.ts",
+          "referenceLf": 243,
+          "candidateLf": 209,
+          "referenceLh": 243,
+          "candidateLh": 157
+        },
+        {
+          "file": "src/application/projections/metrics-read-adapter.ts",
+          "referenceLf": 607,
+          "candidateLf": 546,
+          "referenceLh": 607,
+          "candidateLh": 535
+        },
+        {
+          "file": "src/application/projections/metrics.ts",
+          "referenceLf": 744,
+          "candidateLf": 686,
+          "referenceLh": 744,
+          "candidateLh": 655
+        },
+        {
+          "file": "src/application/projections/mission-activity.ts",
+          "referenceLf": 187,
+          "candidateLf": 157,
+          "referenceLh": 187,
+          "candidateLh": 102
+        },
+        {
+          "file": "src/application/projections/mission-board.ts",
+          "referenceLf": 436,
+          "candidateLf": 316,
+          "referenceLh": 436,
+          "candidateLh": 214
+        },
+        {
+          "file": "src/application/projections/mission-detail.ts",
+          "referenceLf": 45,
+          "candidateLf": 31,
+          "referenceLh": 45,
+          "candidateLh": 25
+        },
+        {
+          "file": "src/application/projections/mission-query.ts",
+          "referenceLf": 19,
+          "candidateLf": 16,
+          "referenceLh": 19,
+          "candidateLh": 13
+        },
+        {
+          "file": "src/application/projections/repository-selector.ts",
+          "referenceLf": 7,
+          "candidateLf": 6,
+          "referenceLh": 0,
+          "candidateLh": 0
+        },
+        {
+          "file": "src/application/recording/board-event-recorder.ts",
+          "referenceLf": 129,
+          "candidateLf": 124,
+          "referenceLh": 125,
+          "candidateLh": 120
+        },
+        {
+          "file": "src/application/recording/current-work-recorder.ts",
+          "referenceLf": 372,
+          "candidateLf": 371,
+          "referenceLh": 372,
+          "candidateLh": 371
+        },
+        {
+          "file": "src/application/recording/operation-event-recorder.ts",
+          "referenceLf": 76,
+          "candidateLf": 56,
+          "referenceLh": 72,
+          "candidateLh": 52
+        },
+        {
+          "file": "src/application/services/agent-block-service.ts",
+          "referenceLf": 63,
+          "candidateLf": 53,
+          "referenceLh": 63,
+          "candidateLh": 53
+        },
+        {
+          "file": "src/application/services/agent-limit.ts",
+          "referenceLf": 297,
+          "candidateLf": 297,
+          "referenceLh": 297,
+          "candidateLh": 228
+        },
+        {
+          "file": "src/application/services/agent-selection-telemetry.ts",
+          "referenceLf": 11,
+          "candidateLf": 10,
+          "referenceLh": 11,
+          "candidateLh": 9
+        },
+        {
+          "file": "src/application/services/agent-selection.ts",
+          "referenceLf": 20,
+          "candidateLf": 18,
+          "referenceLh": 20,
+          "candidateLh": 12
+        },
+        {
+          "file": "src/application/services/decision-window.ts",
+          "referenceLf": 104,
+          "candidateLf": 93,
+          "referenceLh": 104,
+          "candidateLh": 79
+        },
+        {
+          "file": "src/application/services/integration-dispatch.ts",
+          "referenceLf": 144,
+          "candidateLf": 144,
+          "referenceLh": 144,
+          "candidateLh": 135
+        },
+        {
+          "file": "src/application/services/known-repository-service.ts",
+          "referenceLf": 65,
+          "candidateLf": 63,
+          "referenceLh": 65,
+          "candidateLh": 61
+        },
+        {
+          "file": "src/application/services/operational-history-service.ts",
+          "referenceLf": 67,
+          "candidateLf": 66,
+          "referenceLh": 67,
+          "candidateLh": 64
+        },
+        {
+          "file": "src/application/services/statistics-service.ts",
+          "referenceLf": 69,
+          "candidateLf": 55,
+          "referenceLh": 69,
+          "candidateLh": 41
+        },
+        {
+          "file": "src/application/services/ui-preferences-service.ts",
+          "referenceLf": 62,
+          "candidateLf": 61,
+          "referenceLh": 62,
+          "candidateLh": 59
+        },
+        {
+          "file": "src/composition/application-services.ts",
+          "referenceLf": 452,
+          "candidateLf": 349,
+          "referenceLh": 452,
+          "candidateLh": 310
+        },
+        {
+          "file": "src/composition/board-projection.ts",
+          "referenceLf": 172,
+          "candidateLf": 131,
+          "referenceLh": 172,
+          "candidateLh": 128
+        },
+        {
+          "file": "src/composition/create-cli.ts",
+          "referenceLf": 949,
+          "candidateLf": 917,
+          "referenceLh": 949,
+          "candidateLh": 546
+        },
+        {
+          "file": "src/composition/github-publish-status.ts",
+          "referenceLf": 28,
+          "candidateLf": 27,
+          "referenceLh": 28,
+          "candidateLh": 11
+        },
+        {
+          "file": "src/composition/operator-state-lifecycle.ts",
+          "referenceLf": 37,
+          "candidateLf": 34,
+          "referenceLh": 37,
+          "candidateLh": 33
+        },
+        {
+          "file": "src/composition/production-capabilities.ts",
+          "referenceLf": 277,
+          "candidateLf": 227,
+          "referenceLh": 277,
+          "candidateLh": 172
+        },
+        {
+          "file": "src/composition/review-persistence.ts",
+          "referenceLf": 159,
+          "candidateLf": 157,
+          "referenceLh": 159,
+          "candidateLh": 116
+        },
+        {
+          "file": "src/domain/agents.ts",
+          "referenceLf": 99,
+          "candidateLf": 67,
+          "referenceLh": 99,
+          "candidateLh": 24
+        },
+        {
+          "file": "src/domain/board-event.ts",
+          "referenceLf": 110,
+          "candidateLf": 86,
+          "referenceLh": 110,
+          "candidateLh": 48
+        },
+        {
+          "file": "src/domain/checkpoint.ts",
+          "referenceLf": 97,
+          "candidateLf": 78,
+          "referenceLh": 97,
+          "candidateLh": 71
+        },
+        {
+          "file": "src/domain/external-task.ts",
+          "referenceLf": 71,
+          "candidateLf": 61,
+          "referenceLh": 71,
+          "candidateLh": 52
+        },
+        {
+          "file": "src/domain/integration.ts",
+          "referenceLf": 81,
+          "candidateLf": 72,
+          "referenceLh": 81,
+          "candidateLh": 45
+        },
+        {
+          "file": "src/domain/mission-brief.ts",
+          "referenceLf": 65,
+          "candidateLf": 50,
+          "referenceLh": 65,
+          "candidateLh": 47
+        },
+        {
+          "file": "src/domain/mission-dependencies.ts",
+          "referenceLf": 55,
+          "candidateLf": 55,
+          "referenceLh": 55,
+          "candidateLh": 52
+        },
+        {
+          "file": "src/domain/mission-gates.ts",
+          "referenceLf": 49,
+          "candidateLf": 49,
+          "referenceLh": 49,
+          "candidateLh": 48
+        },
+        {
+          "file": "src/domain/mission-success-criteria.ts",
+          "referenceLf": 22,
+          "candidateLf": 22,
+          "referenceLh": 22,
+          "candidateLh": 21
+        },
+        {
+          "file": "src/domain/mission-workflow.ts",
+          "referenceLf": 273,
+          "candidateLf": 235,
+          "referenceLh": 273,
+          "candidateLh": 198
+        },
+        {
+          "file": "src/domain/mission.ts",
+          "referenceLf": 232,
+          "candidateLf": 156,
+          "referenceLh": 232,
+          "candidateLh": 142
+        },
+        {
+          "file": "src/domain/net-engineering-lines.ts",
+          "referenceLf": 144,
+          "candidateLf": 108,
+          "referenceLh": 144,
+          "candidateLh": 103
+        },
+        {
+          "file": "src/domain/repository.ts",
+          "referenceLf": 15,
+          "candidateLf": 10,
+          "referenceLh": 15,
+          "candidateLh": 6
+        },
+        {
+          "file": "src/domain/review.ts",
+          "referenceLf": 923,
+          "candidateLf": 729,
+          "referenceLh": 923,
+          "candidateLh": 562
+        },
+        {
+          "file": "src/domain/session.ts",
+          "referenceLf": 40,
+          "candidateLf": 30,
+          "referenceLh": 40,
+          "candidateLh": 21
+        },
+        {
+          "file": "src/domain/usage.ts",
+          "referenceLf": 228,
+          "candidateLf": 131,
+          "referenceLh": 228,
+          "candidateLh": 101
+        },
+        {
+          "file": "src/entry/px.ts",
+          "referenceLf": 9,
+          "candidateLf": 9,
+          "referenceLh": 9,
+          "candidateLh": 8
+        },
+        {
+          "file": "src/interfaces/cli/active.ts",
+          "referenceLf": 25,
+          "candidateLf": 19,
+          "referenceLh": 25,
+          "candidateLh": 14
+        },
+        {
+          "file": "src/interfaces/cli/cancel.ts",
+          "referenceLf": 68,
+          "candidateLf": 60,
+          "referenceLh": 68,
+          "candidateLh": 55
+        },
+        {
+          "file": "src/interfaces/cli/config.ts",
+          "referenceLf": 17,
+          "candidateLf": 15,
+          "referenceLh": 17,
+          "candidateLh": 11
+        },
+        {
+          "file": "src/interfaces/cli/diff.ts",
+          "referenceLf": 17,
+          "candidateLf": 15,
+          "referenceLh": 17,
+          "candidateLh": 8
+        },
+        {
+          "file": "src/interfaces/cli/draft.ts",
+          "referenceLf": 63,
+          "candidateLf": 59,
+          "referenceLh": 63,
+          "candidateLh": 42
+        },
+        {
+          "file": "src/interfaces/cli/github-publish-status.ts",
+          "referenceLf": 57,
+          "candidateLf": 50,
+          "referenceLh": 57,
+          "candidateLh": 9
+        },
+        {
+          "file": "src/interfaces/cli/import-legacy.ts",
+          "referenceLf": 68,
+          "candidateLf": 53,
+          "referenceLh": 68,
+          "candidateLh": 11
+        },
+        {
+          "file": "src/interfaces/cli/integrate.ts",
+          "referenceLf": 17,
+          "candidateLf": 16,
+          "referenceLh": 17,
+          "candidateLh": 7
+        },
+        {
+          "file": "src/interfaces/cli/lead.ts",
+          "referenceLf": 167,
+          "candidateLf": 158,
+          "referenceLh": 167,
+          "candidateLh": 151
+        },
+        {
+          "file": "src/interfaces/cli/mission-writes.ts",
+          "referenceLf": 350,
+          "candidateLf": 336,
+          "referenceLh": 350,
+          "candidateLh": 309
+        },
+        {
+          "file": "src/interfaces/cli/rebase.ts",
+          "referenceLf": 72,
+          "candidateLf": 64,
+          "referenceLh": 72,
+          "candidateLh": 62
+        },
+        {
+          "file": "src/interfaces/cli/recover.ts",
+          "referenceLf": 59,
+          "candidateLf": 45,
+          "referenceLh": 59,
+          "candidateLh": 42
+        },
+        {
+          "file": "src/interfaces/cli/resolve-conflict.ts",
+          "referenceLf": 17,
+          "candidateLf": 15,
+          "referenceLh": 17,
+          "candidateLh": 8
+        },
+        {
+          "file": "src/interfaces/cli/review-verbs.ts",
+          "referenceLf": 224,
+          "candidateLf": 198,
+          "referenceLh": 224,
+          "candidateLh": 176
+        },
+        {
+          "file": "src/interfaces/cli/review.ts",
+          "referenceLf": 50,
+          "candidateLf": 46,
+          "referenceLh": 50,
+          "candidateLh": 38
+        },
+        {
+          "file": "src/interfaces/cli/revoke-review.ts",
+          "referenceLf": 41,
+          "candidateLf": 40,
+          "referenceLh": 41,
+          "candidateLh": 8
+        },
+        {
+          "file": "src/interfaces/cli/runtime.ts",
+          "referenceLf": 323,
+          "candidateLf": 299,
+          "referenceLh": 323,
+          "candidateLh": 205
+        },
+        {
+          "file": "src/interfaces/cli/setup.ts",
+          "referenceLf": 17,
+          "candidateLf": 15,
+          "referenceLh": 17,
+          "candidateLh": 8
+        },
+        {
+          "file": "src/interfaces/cli/status.ts",
+          "referenceLf": 275,
+          "candidateLf": 262,
+          "referenceLh": 275,
+          "candidateLh": 96
+        },
+        {
+          "file": "src/interfaces/cli/verify.ts",
+          "referenceLf": 15,
+          "candidateLf": 13,
+          "referenceLh": 15,
+          "candidateLh": 7
+        },
+        {
+          "file": "src/interfaces/cli/web.ts",
+          "referenceLf": 124,
+          "candidateLf": 93,
+          "referenceLh": 124,
+          "candidateLh": 57
+        },
+        {
+          "file": "src/interfaces/tui/navigation.ts",
+          "referenceLf": 96,
+          "candidateLf": 89,
+          "referenceLh": 96,
+          "candidateLh": 28
+        },
+        {
+          "file": "src/interfaces/tui/ui-command.ts",
+          "referenceLf": 83,
+          "candidateLf": 82,
+          "referenceLh": 83,
+          "candidateLh": 0
+        },
+        {
+          "file": "src/interfaces/web/host.ts",
+          "referenceLf": 515,
+          "candidateLf": 443,
+          "referenceLh": 515,
+          "candidateLh": 396
+        },
+        {
+          "file": "src/interfaces/web/security.ts",
+          "referenceLf": 187,
+          "candidateLf": 165,
+          "referenceLh": 187,
+          "candidateLh": 154
+        },
+        {
+          "file": "src/interfaces/web/stream.ts",
+          "referenceLf": 131,
+          "candidateLf": 95,
+          "referenceLh": 131,
+          "candidateLh": 72
+        },
+        {
+          "file": "src/interfaces/web/transport.ts",
+          "referenceLf": 1323,
+          "candidateLf": 1321,
+          "referenceLh": 1323,
+          "candidateLh": 987
+        }
+      ]
+    }
+  }
+}

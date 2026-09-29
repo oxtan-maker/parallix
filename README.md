@@ -205,7 +205,7 @@ npm run test:codeql       # CodeQL SAST scan (javascript-typescript security/cod
 LCOV reports omit TypeScript modules that compile to no runtime code. Modules
 with runtime declarations or imports remain subject to coverage requirements.
 
-The test suite is the verification gate this repo declares in `workflow.config.json`. Run it before integrating any change. Contributions follow the same mission lifecycle the tool itself runs: branch, worktree, checkpoints, a second review, and a passing gate before integration. To exercise the packaged artifact the way a user receives it: `npm pack && npm install -g ./magnusekdahl-parallix-*.tgz`.
+The test suite is the verification gate this repo declares in `workflow.config.json`. Run it before integrating any change. Coverage runs (`PARALLIX_TEST_COVERAGE=1`, used by GitHub CI and the local pre-integration gates) use Node's built-in coverage with `--test-coverage-include-all` and need Node 26.7 or newer; the runner picks one from `PATH` or nvm, or from `PARALLIX_TEST_NODE` (ADR 0062). Contributions follow the same mission lifecycle the tool itself runs: branch, worktree, checkpoints, a second review, and a passing gate before integration. To exercise the packaged artifact the way a user receives it: `npm pack && npm install -g ./magnusekdahl-parallix-*.tgz`.
 
 If you are developing Parallix itself from a checkout, use the built runtime
 after `npm run build`, or run the TypeScript entry directly with the development

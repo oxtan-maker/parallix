@@ -33,8 +33,7 @@
  * facade publishes the first instance's value while the handle holds the
  * second's. For a module you only read from, a plain `import` keeps a single
  * instance and therefore a single identity — see
- * `test/task-2233-reviewer-non-submission-bounce.test.ts` and
- * `test/coverage-gate.test.ts` for that pattern.
+ * `test/task-2233-reviewer-non-submission-bounce.test.ts` for that pattern.
  */
 import { mock } from 'node:test';
 

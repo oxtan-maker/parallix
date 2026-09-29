@@ -118,9 +118,9 @@ take an exclusive host-level lock so concurrent worktrees do not overload that
 shared model; a queued run may therefore wait for an earlier smoke lifecycle.
 A green full-lifecycle run measured ~4
 minutes (242s) on the reference workstation; failing runs usually fail faster
-(the launcher health probe fails in seconds, a draft-phase failure within
-~40s). The health probe allows up to 120s by default so a cold or queued local
-backend can return its first response; set
+(a draft-phase failure is often visible within ~40s). After a draft failure,
+the diagnostic health probe allows up to 120s by default so a cold or queued
+local backend can return its first response; set
 `PARALLIX_REAL_AGENT_HEALTHCHECK_TIMEOUT_MS` to tune that limit. The
 single-session timeout defaults to 600s and can be raised via
 `PARALLIX_REAL_AGENT_TIMEOUT_MS`; the health-probe limit is capped at that

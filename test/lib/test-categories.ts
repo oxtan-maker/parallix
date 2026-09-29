@@ -145,7 +145,6 @@ export const INTEGRATION_CI_TESTS: readonly string[] = [
   'task-2322.12-review-recovery.integration.test.ts',
   'task-2322.12-stray-persistence.test.ts',
   'task-2337-repro.test.ts',
-  'task-2327-coverage-gate-tmp-leaks.test.ts',
   'task-2339-aggregate-read-during-write.test.ts',
   'task-2339-writes-outlive-close.test.ts',
   'task-2345-repro.test.ts',

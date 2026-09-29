@@ -114,20 +114,20 @@ jobs:
           retry-on-snapshot-warnings: true
           retry-on-snapshot-warnings-timeout: 300
 
-      # node-version: '24' + check-latest: true installs the latest 24.x (24.21.0
-      # today), which is >= 24.15.0 — the floor the unit suite actually needs,
-      # because test/lib/module-mock.ts uses mock.module's exports option that
-      # Node < 24.15.0 ignores (46 unit tests fail on 22.x). cache: npm is the
-      # built-in setup-node npm cache (no external cache action, so this stays
-      # within the checkout + Node setup only allowance in Restricted Areas);
-      # the npm cache is keyed on package-lock.json by setup-node.
+      # node-version: '26' + check-latest: true installs the latest 26.x.
+      # TASK-2591 (ADR 0062): coverage uses Node's native include-all contract
+      # (--test-coverage-include-all), which needs Node >= 26.7; the unit suite
+      # itself needs >= 24.15.0 because test/lib/module-mock.ts uses
+      # mock.module's exports option. cache: npm is the built-in setup-node npm
+      # cache (no external cache action, so this stays within the checkout +
+      # Node setup only allowance in Restricted Areas); the npm cache is keyed
+      # on package-lock.json by setup-node.
       # NOTE: package.json engines.node stays >=22.23.1 (its floor is the runtime
-      # floor for shipped code, not the test floor); raising it is outside this
-      # mission's Restricted Areas (package.json).
-      - name: Set up Node (>= 24.15.0)
+      # floor for shipped code, not the test floor).
+      - name: Set up Node (>= 26.7 for native coverage)
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020  # v7.0.0
         with:
-          node-version: '24'
+          node-version: '26'
           check-latest: true
           cache: npm
 

@@ -15,9 +15,8 @@ const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..'
 // TASK-2547: coverage is a reporting mode of the CI-safe execution, not a second
 // pass. GitHub unions the per-tier LCOV fragments with `npm run coverage:merge`
 // after the unit and integration-ci populations run once with built in coverage;
-// the local pre-integration gate still emits LCOV through `npm run test:coverage`
-// (which selects through the planner, never a glob). Both reach the single
-// `npm run sonar` entrypoint (ADR 0060).
+// the local pre-integration gates run the same coverage-aware tiers and merge
+// (ADR 0062). Both reach the single `npm run sonar` entrypoint (ADR 0060).
 
 function escaped(source: string): RegExp {
   return new RegExp(source.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));

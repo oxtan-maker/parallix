@@ -839,27 +839,6 @@ function runRealAgentSmoke(agent, runner) {
       `[parallix-workflow-failure] CLI Entry point ${CLI_ENTRY} does not point to build/px.mjs; may be using stale installed px`
     );
 
-    // Fast-fail launcher sanity check: probe the real child path with the
-    // configured model before spending the full workflow timeout. This
-    // catches broken local launcher/model state without misattributing it
-    // to Parallix's mission lifecycle.
-    const healthcheckResult = runHealthcheck(agent, runner, repo.repoRoot, env);
-    // Exit status alone does not prove the model answered: every runner can
-    // settle a turn that only contains provider errors and still exit 0. The
-    // probe asks for the literal token `OK`, so require it in the transcript;
-    // otherwise the backend is unreachable and the lifecycle below would fail
-    // later as a misattributed "phantom draft".
-    if (healthcheckResult.status === 0 && !/OK/.test(`${healthcheckResult.stdout || ''}${healthcheckResult.stderr || ''}`)) {
-      healthcheckResult.status = 1;
-    }
-    if (healthcheckResult.status !== 0) {
-      const { bucket, detail } = classifyFailure(healthcheckResult);
-      assert.fail(
-        `[${bucket}] ${agent} healthcheck for the configured model failed (status=${healthcheckResult.status}, signal=${healthcheckResult.signal}): ${detail}\n` +
-        `stdout:\n${healthcheckResult.stdout}\nstderr:\n${healthcheckResult.stderr}`
-      );
-    }
-
     // Phase 1: Draft
     const draftStartedAt = Date.now();
     let draftResult = runWorkflowAllowFail(repo.repoRoot, env, ['draft', slug, '--agent', agent], RUN_TIMEOUT_MS);
@@ -869,6 +848,20 @@ function runRealAgentSmoke(agent, runner) {
     // (TASK-2561). The harness must not do that for it: a draft that still
     // ends without its contract is a Parallix failure, never retried here.
     if (draftResult.status !== 0) {
+      // Only diagnose the model after the production draft path has failed.
+      // This probe is not a separate prerequisite for a healthy workflow.
+      const healthcheckResult = runHealthcheck(agent, runner, repo.repoRoot, env);
+      if (healthcheckResult.status === 0 && !/OK/.test(`${healthcheckResult.stdout || ''}${healthcheckResult.stderr || ''}`)) {
+        healthcheckResult.status = 1;
+      }
+      if (healthcheckResult.status !== 0) {
+        const { bucket, detail } = classifyFailure(healthcheckResult);
+        assert.fail(
+          `[${bucket}] ${agent} healthcheck after draft failure failed (status=${healthcheckResult.status}, signal=${healthcheckResult.signal}): ${detail}\n` +
+          `stdout:\n${healthcheckResult.stdout}\nstderr:\n${healthcheckResult.stderr}\n` +
+          `draft stdout:\n${draftResult.stdout}\ndraft stderr:\n${draftResult.stderr}`
+        );
+      }
       const { bucket, detail } = /mission contract is incomplete/.test(`${draftResult.stdout || ''}${draftResult.stderr || ''}`)
         ? { bucket: 'parallix-workflow-failure', detail: 'the draft ended with an incomplete mission contract after its bounce-back budget' }
         : classifyFailure(draftResult);
