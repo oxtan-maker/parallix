@@ -20,7 +20,7 @@ const expectedIntegrationFiles = [
   'task-2220-repro.test.ts', 'task-2241-tmp-cleanup-repro.test.ts',
   'task-2322-05-mission-sqlite-fixture.test.ts', 'task-2322-05-mission-use-cases.test.ts',
   'task-2322.11-operator-state.test.ts',
-  'task-2322.12-stray-persistence.test.ts', 'task-2339-aggregate-read-during-write.test.ts',
+  'task-2322.12-stray-persistence.test.ts', 'task-2337-repro.test.ts', 'task-2339-aggregate-read-during-write.test.ts',
   'task-2339-writes-outlive-close.test.ts', 'task-2345-repro.test.ts',
   'task-2347-01-repository-identity-repro.test.ts', 'task-2347.02-lifecycle-history.test.ts',
   'task-2347.02-repro.test.ts', 'task-2348-implementer-attribution.test.ts',
@@ -55,7 +55,7 @@ const expectedIntegrationFiles = [
   'draft_preflight_modern.test.ts', 'durable-state-policy.test.ts',
   'external-target-resolution.test.ts', 'forgejo-independence.test.ts',
   'forgejo-pr-round-sync.test.ts', 'forgejo.test.ts', 'handoff.test.ts', 'install.test.ts',
-  'integrate-conflict.test.ts', 'integrate-task-1410-stash-pop-corruption.test.ts', 'integrate-workflow-gate.test.ts',
+  'integrate-conflict.test.ts', 'integrate-exclusive-process.integration.test.ts', 'integrate-task-1410-stash-pop-corruption.test.ts', 'integrate-workflow-gate.test.ts',
   'integrate.test.ts', 'integration-pipelines.test.ts', 'startup-preflight.test.ts',
   'mission-utils-worktree.test.ts', 'mistral.test.ts', 'nels.test.ts',
   'noise-reduction.test.ts', 'opencode-export.test.ts', 'package-persistent-data.test.ts',
@@ -75,7 +75,7 @@ const expectedIntegrationFiles = [
   // discovery, so it crosses the Git process boundary.
   'task-2525.03-sonar-enforcement.test.ts',
   'sqlite-mission-store.integration.test.ts', 'sqlite-recovery-cp5.test.ts',
-  'stats-backfill.test.ts', 'status.test.ts',
+  'stats-backfill.test.ts',
   'task-1048-regression.test.ts',
   'task-1049-force-push.test.ts', 'task-1080-sync-merged-hardening.test.ts',
   'task-1104-rebase-cleanup.test.ts',
@@ -212,6 +212,7 @@ const expectedIntegrationFiles = [
   // reference, so it crosses the version-control boundary and runs only in
   // the integration layer.
   'task-2595-squash-landing-commit-message.test.ts',
+  'task-2601-repro.test.ts',
   'task-2517-cp3-landed-closeout.test.ts',
   'task-2517-landed-squash-base-branch-detection.test.ts',
   'tui-pty-smoke.test.ts', 'task-2313-repro.test.ts', 'task-2370-repro.test.ts',

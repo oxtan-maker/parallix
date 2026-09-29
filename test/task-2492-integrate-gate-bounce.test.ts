@@ -48,7 +48,7 @@ function createFakeStore(status: MissionStatus) {
     id: missionId(SLUG),
     repositoryId: repositoryId('parallix'),
     title: 'fixture',
-    labels: [],
+    labels: ['ai_sdlc'],
     assignee: 'codex',
     checkpoints: [],
     review: status === 'review'
@@ -189,7 +189,7 @@ async function runIntegrate(scenario: Scenario) {
   const routeIntegrationGateFailureFn = mock.fn(async (args: Record<string, unknown>) => {
     captured.push(args);
     if (scenario.repairs) {
-      await (args.reactivateMissionFn as (slug: string) => Promise<unknown>)(SLUG);
+      await (args.reactivateMissionFn as (_slug: string) => Promise<unknown>)(SLUG);
       assert.equal(services.store.mission().status, 'active');
       assert.equal(reviewStatus(services.store.mission().review!), 'awaiting-review');
       return { route: 'revision-changed', rebounds: captured.length, repairedRevision: `repair-${captured.length}`, invalidation: { ok: true } };
@@ -197,7 +197,7 @@ async function runIntegrate(scenario: Scenario) {
     if (scenario.route === 'fixed') {
       // A recoverable mission-regression route transitions the task back to
       // the implementer and relaunches exactly once.
-      await (args.transitionTaskFn as (slug: string) => Promise<unknown> | unknown)(args.slug as string);
+      await (args.transitionTaskFn as (_slug: string) => Promise<unknown> | unknown)(args.slug as string);
       seamLaunches.push('launched');
       return { route: 'fixed', rebounds: 1 };
     }

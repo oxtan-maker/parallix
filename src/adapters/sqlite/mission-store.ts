@@ -278,6 +278,10 @@ export class SqliteMissionStore implements MissionStore, MissionNelRecorder {
     }
     await this.db.beginTransaction();
     try {
+      const current = await this.db.query<{ status: string }>('SELECT status FROM missions WHERE id = ?', [id]);
+      if (current[0]?.status === 'done') {
+        throw new Error(`Refusing to cancel ${id}: integrated Mission closeout must finish through px integrate --recover-landed`);
+      }
       await this.db.execute('DELETE FROM session_markers WHERE mission_id = ?', [id]);
       await this.db.execute('DELETE FROM board_lane_events WHERE mission_id = ?', [id]);
       await this.db.execute('DELETE FROM missions WHERE id = ?', [id]);

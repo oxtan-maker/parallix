@@ -32,7 +32,7 @@ const { SqliteMigrationRunner, loadDefaultMigrations } = await import('../src/ad
 const { SqliteMissionStore } = await import('../src/adapters/sqlite/mission-store.js');
 const { clearOperatorStateCache } = await import('../src/adapters/sqlite/adapter-factory.js');
 const { recoverMissionForIntegration } = await import('../src/adapters/cli/commands/integrate.js');
-const { persistLandedIntegrationOrAbort, cleanupMissionWorktree } = await import('../src/adapters/cli/commands/integrate-post.js');
+const { persistLandedIntegrationOrAbort, closeLandedIntegrationOrAbort, cleanupMissionWorktree } = await import('../src/adapters/cli/commands/integrate-post.js');
 const { findExistingSquashCommit } = await import('../src/adapters/cli/commands/integrate-conflict.js');
 const { recoverLandedIntegration } = await import('../src/application/integrate/landed-recovery.js');
 
@@ -112,6 +112,8 @@ for (const status of ['active', 'review']) test(`TASK-2517 CP-3: stranded ${stat
     findSquashCommit: (dir, s) => findExistingSquashCommit(dir, s),
     recoverMissionForIntegration,
     persistLandedIntegrationOrAbort,
+    recordPostIntegrationStatsOrAbort: async () => {},
+    closeLandedIntegrationOrAbort,
     cleanupMissionWorktree: (s) => { cleaned.push(s); return true; },
     runPostIntegrateHookOrAbort: () => { hookRan.push(slug); },
     createAbort: () => new Error('IntegrationAbort'),
@@ -133,6 +135,8 @@ test('TASK-2517 CP-3: closeout fails when worktree cleanup fails', async () => {
       findSquashCommit: () => 'abc123',
       recoverMissionForIntegration: async () => ({ status: 'integration' }),
       persistLandedIntegrationOrAbort: async () => {},
+      recordPostIntegrationStatsOrAbort: async () => {},
+      closeLandedIntegrationOrAbort: async () => { throw new Error('closed before cleanup'); },
       cleanupMissionWorktree: () => false,
       runPostIntegrateHookOrAbort: (s: string) => { hookCalls.push(s); },
       createAbort: () => new Error('IntegrationAbort'),

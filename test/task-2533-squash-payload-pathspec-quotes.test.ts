@@ -150,6 +150,7 @@ test('TASK-2533: squash landing commits backslash and non-ASCII payload paths wi
       createAbort: () => abort,
       classifyHookFailure: () => ({ isHookFailure: false }),
       persistLandedIntegrationOrAbort: async () => {},
+      closeLandedIntegrationOrAbort: async () => {},
       recordPostIntegrationStatsOrAbort: async () => {},
       cleanupMissionWorktree: () => true,
       runPostIntegrateHookOrAbort: () => {},

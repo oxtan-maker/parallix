@@ -9,6 +9,7 @@ import * as fmt from '../presentation/cli-format.js';
 import { rebound } from '../rebound-kernel.js';
 import { abortWith, resolveBounceImplementer, type BounceSeams } from './support.js';
 import { missionId } from '../../domain/mission.js';
+import { completeLandedCloseout } from './landed-closeout.js';
 import type { IntegrateWorkflowPorts } from '../ports/integrate-workflow.js';
 
 /** Run-scoped values the final `finally` block of `integrate()` still reads after a failure. */
@@ -76,14 +77,10 @@ export function createSquashLanding(ports: IntegrateWorkflowPorts, { promoteTask
     if (ports.fileSystem.existsSync(baseWorktree)) {
       state.nextActionMessage = `Next: cd ${baseWorktree}`;
     }
-    await landing.persistLandedIntegrationOrAbort(slug, mergedCommit, missionServices, { rootDir: baseWorktree });
-    await landing.recordPostIntegrationStatsOrAbort(slug, { rootDir: baseWorktree, missionStore: missionServices.store });
-    if (!landing.cleanupMissionWorktree(slug)) {
-      throw abortWith(landing, 'Mission worktree cleanup failed.');
-    }
-    fmt.log.pass('Mission worktree cleaned up.');
-    checkout.maybeUpdateGraphifyOnPrimary(baseWorktree, { log: fmt.log.debug });
-    landing.runPostIntegrateHookOrAbort(slug, { baseWorktree, baseBranch, variant });
+    await completeLandedCloseout({
+      slug, landedCommit: mergedCommit, missionServices, baseWorktree, baseBranch, variant, landing,
+      afterCleanup: () => { checkout.maybeUpdateGraphifyOnPrimary(baseWorktree, { log: fmt.log.debug }); },
+    });
   }
 
   /** `git merge --squash`, preserving trailing backlog noise across the merge. */

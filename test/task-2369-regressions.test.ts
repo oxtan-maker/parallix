@@ -46,6 +46,7 @@ import { SqliteBoardLaneEventRepository } from '../src/adapters/sqlite/board-lan
 import { SqliteMeasurementStore } from '../src/adapters/sqlite/measurement-store.js';
 import { ConcreteMetricsReadAdapter } from '../src/application/projections/metrics-read-adapter.js';
 import { createPrimaryAndWorktree, laneEvent } from './fixtures/task-2357-statistics-fixture.js';
+import { seedStoredMissionClassification } from './fixtures/stored-mission-classification.js';
 
 const SLUG = 'task-2369-fixture';
 const LANDED_SHA = 'a11ced0000000000000000000000000000000001';
@@ -70,7 +71,7 @@ function createFakeStore(status: MissionStatus): FakeStore {
     id: missionId(SLUG),
     repositoryId: repositoryId('parallix'),
     title: 'fixture',
-    labels: [],
+    labels: ['ai_sdlc'],
     assignee: 'codex',
     checkpoints: [],
     // An approved last round is what the CLI reads as its approval source when
@@ -388,6 +389,8 @@ test('R5: the live review-fix writers keep known zero and unknown apart', async 
   try {
     writeTask(root, 'task-2369-known');
     writeTask(root, 'task-2369-unknown');
+    await seedStoredMissionClassification('task-2369-known');
+    await seedStoredMissionClassification('task-2369-unknown');
 
     stats.recordActiveStats({ slug: 'task-2369-known', rootDir: root, dbPath, implementer: 'claude', prFixRounds: '0', date: '2026-08-04' } as never);
     stats.recordReviewStats({ slug: 'task-2369-unknown', rootDir: root, dbPath, reviewer: 'claude', implementer: 'claude', date: '2026-08-04' } as never);
@@ -430,7 +433,10 @@ test('R5: carrying a prior count forward skips NULL rows, and a read failure sta
   const dbPath = path.join(root, 'parallix.db');
   const store = new SqliteMeasurementStore(dbPath);
   try {
-    for (const slug of ['task-2369-nulls', 'task-2369-carry', 'task-2369-broken']) { writeTask(root, slug); }
+    for (const slug of ['task-2369-nulls', 'task-2369-carry', 'task-2369-broken']) {
+      writeTask(root, slug);
+      await seedStoredMissionClassification(slug);
+    }
 
     // [NULL, NULL] -> unknown.
     stats.recordActiveStats({ slug: 'task-2369-nulls', rootDir: root, store, implementer: 'claude', date: '2026-08-04' } as never);
@@ -479,6 +485,7 @@ test('R6: [0, 2, unknown, unknown] reports exactly two review-fix observations',
     try {
       for (const mission of missions) {
         writeTask(checkout.primary, mission.slug);
+        await seedStoredMissionClassification(mission.slug);
         // The LIVE convenience writer, not a direct repository insert.
         stats.recordActiveStats({
           slug: mission.slug, rootDir: checkout.primary, store,
@@ -528,6 +535,7 @@ test('the integration-time report, px stats, and BoardMetrics agree on the compl
     try {
       for (const [slug, completed] of [['task-2369-landed', true], ['task-2369-open', false]] as const) {
         writeTask(checkout.primary, slug);
+        await seedStoredMissionClassification(slug);
         stats.recordActiveStats({ slug, rootDir: checkout.primary, store, implementer: 'claude', prFixRounds: '1', date: '2026-08-04' } as never);
         await events.append(laneEvent({ repositoryId: repo, missionId: slug, from: null, to: 'backlog', at: '2026-08-01T09:00:00.000Z' }));
         if (completed) {

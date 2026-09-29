@@ -59,5 +59,5 @@ test('missionStart resolves classification using the mission worktree cwd, not p
     `expected resolveMissionClassificationFn to be called with the mission worktree cwd; got rootDirs: ${JSON.stringify(seenRootDirs)}`
   );
   assert.deepEqual(result, { pass: true });
-  assert.ok(output.includes('[PASS] Backlog classification: ai_sdlc'));
+  assert.ok(output.includes('[PASS] Mission classification: ai_sdlc'));
 });

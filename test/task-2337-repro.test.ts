@@ -9,6 +9,9 @@ import path from 'node:path';
 // than the module's named exports, so this must be the default import.
 import stats from '../src/adapters/cli/commands/stats.js';
 import { stripAnsi } from '../src/application/presentation/cli-format.js';
+import { SqliteDatabaseAdapter } from '../src/adapters/sqlite/database-adapter.js';
+import { loadDefaultMigrations, SqliteMigrationRunner } from '../src/adapters/sqlite/migration-runner.js';
+import { closeMeasurementStores } from '../src/adapters/sqlite/measurement-store.js';
 
 function createRepoFixture() {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'task-2337-fixture-'));
@@ -21,6 +24,25 @@ function createRepoFixture() {
     'utf8'
   );
   return root;
+}
+
+async function withStoredClassification(run: () => Promise<void> | void) {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'task-2337-home-'));
+  const previousHome = process.env.PARALLIX_HOME;
+  process.env.PARALLIX_HOME = home;
+  try {
+    const database = new SqliteDatabaseAdapter();
+    await database.open({ path: path.join(home, 'parallix.db') });
+    await new SqliteMigrationRunner(database).applyPending(loadDefaultMigrations());
+    await database.execute('INSERT INTO missions (id, repository_id, title, status) VALUES (?, ?, ?, ?)', ['task-2337', 'parallix', 'Custom model stats', 'active']);
+    await database.execute('INSERT INTO mission_labels (mission_id, position, label) VALUES (?, ?, ?)', ['task-2337', 0, 'user_value']);
+    await database.close();
+    await run();
+  } finally {
+    closeMeasurementStores();
+    if (previousHome === undefined) { delete process.env.PARALLIX_HOME; } else { process.env.PARALLIX_HOME = previousHome; }
+    fs.rmSync(home, { recursive: true, force: true });
+  }
 }
 
 // Reproduction test for task-2337: custom model name lost in stats display.
@@ -54,20 +76,22 @@ test('task-2337: telemetryToStatsFields prefers telemetry.model over model optio
   assert.equal(result.model, 'gpt-5.4-mini');
 });
 
-test('task-2337: recordStageStats records model for custom agent', () => {
+test('task-2337: recordStageStats records model for custom agent', async () => {
   const root = createRepoFixture();
   try {
-    const { row } = stats.recordStageStats({
-      slug: 'task-2337',
-      stage: 'active',
-      rootDir: root,
-      implementer: 'custom',
-      model: 'qwen3.6-27b-q8',
-      telemetry: { inputTokens: 100, outputTokens: 50, cachedTokens: 0, totalTokens: 150, toolCalls: 3, usagePercent: 10 },
-      durationMinutes: 5,
+    await withStoredClassification(async () => {
+      const { row } = stats.recordStageStats({
+        slug: 'task-2337',
+        stage: 'active',
+        rootDir: root,
+        implementer: 'custom',
+        model: 'qwen3.6-27b-q8',
+        telemetry: { inputTokens: 100, outputTokens: 50, cachedTokens: 0, totalTokens: 150, toolCalls: 3, usagePercent: 10 },
+        durationMinutes: 5,
+      });
+      assert.equal(row.model, 'qwen3.6-27b-q8', 'recorded row should have the actual model name, not "custom"');
+      assert.equal(row.implementer, 'custom');
     });
-    assert.equal(row.model, 'qwen3.6-27b-q8', 'recorded row should have the actual model name, not "custom"');
-    assert.equal(row.implementer, 'custom');
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
@@ -97,41 +121,21 @@ test('task-2337: weekly stats report renders model name for custom agent rows', 
   assert.doesNotMatch(plain, /Agent performance this week[\s\S]*custom\s+\d+/, 'should not show "custom" as display key when model is populated');
 });
 
-test('task-2337: accumulateStageStats preserves model for custom agent', () => {
+test('task-2337: accumulateStageStats preserves model for custom agent', async () => {
   const root = createRepoFixture();
   // An isolated database. Measurement rows are keyed by the canonical repository
   // id (TASK-2363), so a shared database also holds the rows other tests in this
   // file wrote from their own fixture checkouts.
   const dbPath = path.join(root, 'parallix.db');
   try {
-    // First recording
-    stats.accumulateStageStats({
-      slug: 'task-2337',
-      stage: 'active',
-      rootDir: root,
-      implementer: 'custom',
-      model: 'qwen3.6-27b-q8',
-      telemetry: { inputTokens: 100, outputTokens: 50, cachedTokens: 0, totalTokens: 150, toolCalls: 3, usagePercent: 10 },
-      durationMinutes: 5,
-      dbPath,
+    await withStoredClassification(async () => {
+      stats.accumulateStageStats({ slug: 'task-2337', stage: 'active', rootDir: root, implementer: 'custom', model: 'qwen3.6-27b-q8', telemetry: { inputTokens: 100, outputTokens: 50, cachedTokens: 0, totalTokens: 150, toolCalls: 3, usagePercent: 10 }, durationMinutes: 5, dbPath });
+      stats.accumulateStageStats({ slug: 'task-2337', stage: 'active', rootDir: root, implementer: 'custom', model: 'qwen3.6-27b-q8', telemetry: { inputTokens: 200, outputTokens: 100, cachedTokens: 0, totalTokens: 300, toolCalls: 5, usagePercent: 20 }, durationMinutes: 8, dbPath });
+      const data = stats.loadMeasurementRows({ rootDir: root, dbPath });
+      assert.equal(data.rows.length, 1, 'should have exactly one accumulated row');
+      assert.equal(data.rows[0].model, 'qwen3.6-27b-q8', 'accumulated row should preserve model name');
+      assert.equal(data.rows[0].implementer, 'custom');
     });
-
-    // Second recording (should accumulate)
-    stats.accumulateStageStats({
-      slug: 'task-2337',
-      stage: 'active',
-      rootDir: root,
-      implementer: 'custom',
-      model: 'qwen3.6-27b-q8',
-      telemetry: { inputTokens: 200, outputTokens: 100, cachedTokens: 0, totalTokens: 300, toolCalls: 5, usagePercent: 20 },
-      durationMinutes: 8,
-      dbPath,
-    });
-
-    const data = stats.loadMeasurementRows({ rootDir: root, dbPath });
-    assert.equal(data.rows.length, 1, 'should have exactly one accumulated row');
-    assert.equal(data.rows[0].model, 'qwen3.6-27b-q8', 'accumulated row should preserve model name');
-    assert.equal(data.rows[0].implementer, 'custom');
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }

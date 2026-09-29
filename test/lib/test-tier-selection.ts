@@ -135,6 +135,9 @@ export function selectTierFiles(executionRoot: string): TierFileSelection {
     'task-2322.04-mission-import.test.ts',
     'task-2322.11-operator-state.test.ts',
     'task-2322.12-stray-persistence.test.ts',
+    // TASK-2337 records stage statistics against a migrated Mission database
+    // to prove the authoritative classification required by the producer.
+    'task-2337-repro.test.ts',
     'task-2339-aggregate-read-during-write.test.ts',
     'task-2339-writes-outlive-close.test.ts',
     'task-2345-repro.test.ts',
@@ -177,6 +180,8 @@ export function selectTierFiles(executionRoot: string): TierFileSelection {
     // content heuristic, so both files are declared here.
     'task-2582-lifecycle-ordering.test.ts',
     'task-2582-repro.test.ts',
+    // TASK-2601 opens a migrated SQLite Mission store and measurement store.
+    'task-2601-repro.test.ts',
   ]);
 
   // Classify subdir tests through the same boundary filter as root-level tests,

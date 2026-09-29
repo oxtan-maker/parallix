@@ -14,8 +14,7 @@ import { findMissionDir } from '../../filesystem/mission-utils.js';
 import type { StatsBackfillService } from '../../../application/stats-backfill-service.js';
 
 interface StatsAugmented {
-  resolveMissionClassification: (_slug: string, _rootDir?: string) => { classification?: string; source?: string };
-  _internals: Record<string, (..._args: unknown[]) => unknown>;
+  resolveMissionClassification: (_slug: string, _rootDir?: string) => { classification?: string | null; source?: string };
   resolveStatsRepoName: (_rootDir: string) => string;
   loadMeasurementRows: (_options?: { rootDir?: string; dbPath?: string; store?: unknown }) => { rows: Record<string, string>[] };
   deriveImplementerAndFixRounds: (_slug: string, _rootDir?: string, _missionStore?: unknown) => { implementer: string; prFixRounds: number | null; source: string };
@@ -101,90 +100,10 @@ function deriveDateFromGitHistory(slug: string, taskFile: string, rootDir = proc
   return extractDateOnly(result.stdout.trim());
 }
 
-function inferHistoricalClassificationFromMissionDoc(slug: string, rootDir = process.cwd()) {
-  const missionDir = findMissionDir(slug, rootDir);
-  if (!missionDir) {return null;}
-
-  const missionFile = path.join(missionDir, 'MISSION.md');
-  if (!fs.existsSync(missionFile)) {return null;}
-  const text = fs.readFileSync(missionFile, 'utf8').toLowerCase();
-
-  const productSurfacePatterns = [
-    /web-client\//g,
-    /\bios\b/g,
-    /\bandroid\b/g,
-    /\bwearos\b/g,
-    /\bauth-server\b/g,
-    /\bserver\/src\b/g,
-    /\bgrocer(?:y|ies)\b/g,
-    /\bboard\b/g,
-    /\bdelta\b/g,
-    /\bsync\b/g,
-    /\bprice\b/g,
-    /\bstore\b/g,
-    /\bshopping\b/g,
-    /\bui\b/g,
-    /\bclient\b/g,
-    /\bcheapest\b/g,
-  ];
-  const workflowPatterns = [
-    /workflow\//g,
-    /node parallix\/index\.js/g,
-    /\bworkflow\b/g,
-    /\bagent\b/g,
-    /\bbacklog\b/g,
-    /\bforgejo\b/g,
-    /\breview loop\b/g,
-    /\breview\b/g,
-    /\bdraft\b/g,
-    /\bintegrate\b/g,
-    /\brebase\b/g,
-    /\bcheckpoint\b/g,
-    /\bprompt\b/g,
-    /\bstats\b/g,
-    /\bworktree\b/g,
-    /\bcli\b/g,
-    /\bgit\b/g,
-    /\bcoverage\b/g,
-    /\bverification\b/g,
-  ];
-
-  const score = (patterns: RegExp[]) => patterns.reduce((sum: number, pattern: RegExp) => sum + ((text.match(pattern) || []).length), 0);
-  const productScore = score(productSurfacePatterns);
-  const workflowScore = score(workflowPatterns);
-
-  if (productScore === 0 && workflowScore === 0) {return null;}
-  if (workflowScore >= productScore + 2) {return 'ai_sdlc';}
-  if (productScore >= workflowScore + 2) {return 'user_value';}
-
-  const titleLine = text.split('\n')[0] || '';
-  if (/\bworkflow|agent|forgejo|backlog|review|rebase|checkpoint|stats|cli\b/.test(titleLine)) {
-    return 'ai_sdlc';
-  }
-  if (/\bweb client|web-client|ios|android|grocer|board|delta|sync|store|price\b/.test(titleLine)) {
-    return 'user_value';
-  }
-
-  return null;
-}
-
-function resolveHistoricalClassification(slug: string, taskFile: string, rootDir = process.cwd()) {
+function resolveHistoricalClassification(slug: string, rootDir = process.cwd()) {
   const s = getStats();
   const resolution = s.resolveMissionClassification(slug, rootDir);
-  if (resolution.classification) {
-    return { value: resolution.classification, source: 'backlog-label' };
-  }
-  // Classification missing or invalid — fall through to fallbacks.
-  const classificationValue = getTaskFrontmatterValue(taskFile, 'classification');
-  const legacy = (s._internals as Record<string, (_v: string) => string | null>).normalizeClassification(classificationValue ?? '');
-  if (legacy) {
-    return { value: legacy, source: 'backlog-classification' };
-  }
-  const inferred = inferHistoricalClassificationFromMissionDoc(slug, rootDir);
-  if (inferred) {
-    return { value: inferred, source: 'mission-doc-heuristic' };
-  }
-  return { value: null, source: null };
+  return { value: resolution.classification || null, source: 'mission-state' };
 }
 
 type HistoricalMissionOutcome =
@@ -203,7 +122,7 @@ async function collectHistoricalMission(slug: string, rootDir: string, repoName:
     return { kind: 'skipped', skipped: { slug, reason: `status=${status || 'unknown'}` } };
   }
   const date = extractDateOnly(getTaskFrontmatterValue(taskFile, 'updated_date') ?? '') || deriveDateFromGitHistory(slug, taskFile, rootDir);
-  const classification = resolveHistoricalClassification(slug, taskFile, rootDir);
+  const classification = resolveHistoricalClassification(slug, rootDir);
   let implementerInfo: { implementer: string; prFixRounds: number | null; source: string } | null = null;
   let implementerError: string | null = null;
   try {
@@ -327,7 +246,7 @@ Notes:
   - This command is for historical stats recovery only.
   - It reads and writes the measurement database (<PARALLIX_HOME>/parallix.db),
     which is the authority for statistics. It never reads or writes a legacy CSV.
-  - It uses strict workflow stats derivation for implementer/fix rounds and historical fallbacks for classification.
+  - Classification comes only from stored px Mission labels.
   - Non-done missions are skipped and unresolved missions are reported without being written.`);
 }
 
@@ -408,7 +327,6 @@ async function statsBackfill(args: string[], options: BackfillOptions = {}) {
 }
 
 (statsBackfill as any).collectHistoricalStatsBackfill = collectHistoricalStatsBackfill;
-(statsBackfill as any).inferHistoricalClassificationFromMissionDoc = inferHistoricalClassificationFromMissionDoc;
 (statsBackfill as any).extractDateOnly = extractDateOnly;
 export default statsBackfill;
-export { statsBackfill, collectHistoricalStatsBackfill, inferHistoricalClassificationFromMissionDoc, extractDateOnly };
+export { statsBackfill, collectHistoricalStatsBackfill, extractDateOnly };

@@ -131,6 +131,7 @@ const {
   reportSyncMergedFailure,
   recordPostIntegrationStats,
   persistLandedIntegrationOrAbort,
+  closeLandedIntegrationOrAbort,
   formatRecordedStatsRow,
   resolveIntegrationVerificationWorktree,
   buildIntegrationVerificationInvocation,
@@ -146,7 +147,7 @@ const PRIMARY = getPrimaryBranch();
 
 import { stubMissionServices } from './helpers/stub-mission-services.js';
 
-test('persistLandedIntegrationOrAbort records lifecycle completion and closure', async () => {
+test('landed delivery and administrative closure are separate writes', async () => {
   const calls = [];
   const integration = { status: 'integration', closedAt: null, assignee: 'codex' };
   const done = { status: 'done', closedAt: null, assignee: 'codex' };
@@ -162,6 +163,9 @@ test('persistLandedIntegrationOrAbort records lifecycle completion and closure',
 
   await persistLandedIntegrationOrAbort('task-close', 'abc123', services, { landedAt: '2026-08-12T10:00:00.000Z' });
 
+  assert.deepEqual(calls.map(([kind]) => kind), ['decide']);
+  assert.equal(state.closedAt, null);
+  await closeLandedIntegrationOrAbort('task-close', 'abc123', services);
   assert.deepEqual(calls.map(([kind]) => kind), ['decide', 'close']);
   assert.equal(calls[0][1].occurredAt, '2026-08-12T10:00:00.000Z');
   assert.equal(calls[1][1].expectedVersion, 1);

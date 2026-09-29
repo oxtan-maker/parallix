@@ -41,7 +41,7 @@ test('missionStart fails if the backlog task is missing classification', () => {
 
   assert.deepEqual(result, { pass: false });
   const output = lines.join('\n').replace(/\x1B\[\d+m/g, ''); // Strip colors
-  assert.ok(output.includes('[FAIL] Backlog classification: Missing or invalid classification'));
+  assert.ok(output.includes('[FAIL] Mission classification: Missing or invalid classification'));
 });
 
 test('missionStart passes if the backlog task has classification', () => {
@@ -69,7 +69,7 @@ test('missionStart passes if the backlog task has classification', () => {
 
   assert.deepEqual(result, { pass: true });
   const output = lines.join('\n').replace(/\x1B\[\d+m/g, ''); // Strip colors
-  assert.ok(output.includes('[PASS] Backlog classification: ai_sdlc'));
+  assert.ok(output.includes('[PASS] Mission classification: ai_sdlc'));
 });
 
 test('missionStart quiet mode drops routine PASS diagnostics and the PASS USABLE verdict but keeps WARN', () => {
@@ -136,8 +136,8 @@ test('missionStart passes when the task file is missing and classification falls
 
   assert.deepEqual(result, { pass: true });
   const output = lines.join('\n').replace(/\x1B\[\d+m/g, '');
-  assert.ok(output.includes('[WARN] Backlog task: no task file found for task-free-text; continuing with classification unknown.'));
-  assert.ok(output.includes('[PASS] Backlog classification: unknown'));
+  assert.ok(output.includes('[WARN] Backlog task: no task file found for task-free-text; continuing with Mission state.'));
+  assert.ok(output.includes('[PASS] Mission classification: unknown'));
 });
 
 test('missionStart verify-env reports standalone adapter readiness once', () => {
@@ -235,10 +235,10 @@ test('missionStart passes if classification is provided via labels', () => {
   });
 
   const output = lines.join('\n').replace(/\x1B\[\d+m/g, '');
-  assert.ok(output.includes('[PASS] Backlog classification: user_value'));
+  assert.ok(output.includes('[PASS] Mission classification: user_value'));
 });
 
-test('missionStart resolves classification for a task labeled with a primary classification plus bug, using the mission worktree (task-2200)', () => {
+test('missionStart rejects a task label without stored Mission state (task-2604)', () => {
 
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'mission-start-bug-label-'));
   const tasksDir = path.join(root, 'backlog', 'tasks');
@@ -249,17 +249,11 @@ test('missionStart resolves classification for a task labeled with a primary cla
   const lines = [];
   const errors = [];
 
-  // resolveMissionClassificationFn and resolveTaskFileFn are left as real
-  // (unmocked) so the test exercises the actual worktree-cwd plumbing:
-  // resolveMissionClassificationFn must be called with the worktree cwd
-  // (`root`), not process.cwd(), to find the task file created above.
+  // Task resolution is available, but statistics classification requires px state.
   const result = missionStart(['task-2200-bug-combo'], {
     returnResult: true,
     cwdFn: () => root,
     getCurrentBranchFn: () => 'mission/task-2200-bug-combo',
-    // Mocked so this test does not depend on process.cwd() finding the
-    // temp task file; resolveMissionClassificationFn below is left real so
-    // it must be called with the worktree cwd (root) to resolve the file.
     resolveTaskFileFn: () => ({ ok: true, taskFile }),
     getTaskStatusFn: () => 'ready',
     toVirtualFn: (s) => s,
@@ -275,8 +269,8 @@ test('missionStart resolves classification for a task labeled with a primary cla
   });
 
   const output = lines.join('\n').replace(/\x1B\[\d+m/g, '');
-  assert.ok(output.includes('[PASS] Backlog classification: ai_sdlc'), output);
-  assert.deepEqual(result, { pass: true });
+  assert.match(output, /\[FAIL\] Mission classification: Mission (database unavailable|task-2200-bug-combo is absent)/);
+  assert.deepEqual(result, { pass: false });
 
   fs.rmSync(root, { recursive: true, force: true });
 });
@@ -353,7 +347,7 @@ test('missionStart verify-env with slug checks classification', () => {
 
   assert.deepEqual(result, { pass: false });
   const output = lines.join('\n').replace(/\x1B\[\d+m/g, '');
-  assert.ok(output.includes('[FAIL] Backlog classification: missing classification'));
+  assert.ok(output.includes('[FAIL] Mission classification: missing classification'));
 });
 
 for (const missionDir of ['/tmp/docs/missions/2026/task-test', null]) {

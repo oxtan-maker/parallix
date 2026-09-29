@@ -80,6 +80,7 @@ function landing(root: string, extraBacklog: Record<string, unknown> = {}) {
       createAbort: () => abort,
       classifyHookFailure: () => ({ isHookFailure: false }),
       persistLandedIntegrationOrAbort: async () => {},
+      closeLandedIntegrationOrAbort: async () => {},
       recordPostIntegrationStatsOrAbort: async () => {},
       cleanupMissionWorktree: () => true,
       runPostIntegrateHookOrAbort: () => {},

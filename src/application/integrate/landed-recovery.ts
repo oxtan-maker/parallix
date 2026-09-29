@@ -11,6 +11,7 @@
 import * as fmt from '../presentation/cli-format.js';
 import { missionId } from '../../domain/mission.js';
 import type { IntegrateLandingPort, IntegrateCheckoutPort } from '../ports/integrate-workflow.js';
+import { completeLandedCloseout } from './landed-closeout.js';
 
 /** @param {string[]} messages */
 function fail(createAbort: () => Error, ...messages: string[]): never {
@@ -31,18 +32,26 @@ export async function recoverLandedIntegration(
     findSquashCommit,
     recoverMissionForIntegration,
     persistLandedIntegrationOrAbort,
+    recordPostIntegrationStatsOrAbort,
+    closeLandedIntegrationOrAbort,
     cleanupMissionWorktree,
     runPostIntegrateHookOrAbort,
     createAbort,
     baseBranch,
+    hasIntegrationMeasurement,
+    hasCleanupArtifacts,
   }: {
     findSquashCommit: IntegrateCheckoutPort['findExistingSquashCommit'];
     recoverMissionForIntegration: (_context: any, _opts: { missionServices: any; missionLoad: any }) => Promise<{ status: string }>;
     persistLandedIntegrationOrAbort: IntegrateLandingPort['persistLandedIntegrationOrAbort'];
+    recordPostIntegrationStatsOrAbort: IntegrateLandingPort['recordPostIntegrationStatsOrAbort'];
+    closeLandedIntegrationOrAbort: IntegrateLandingPort['closeLandedIntegrationOrAbort'];
     cleanupMissionWorktree: IntegrateLandingPort['cleanupMissionWorktree'];
     runPostIntegrateHookOrAbort: IntegrateLandingPort['runPostIntegrateHookOrAbort'];
     createAbort: () => Error;
     baseBranch: string;
+    hasIntegrationMeasurement?: (_slug: string, _rootDir: string) => boolean;
+    hasCleanupArtifacts?: (_slug: string, _rootDir: string) => boolean;
   },
 ): Promise<void> {
   const landedCommit = findSquashCommit(rootDir, slug);
@@ -52,6 +61,15 @@ export async function recoverLandedIntegration(
   const missionLoad = await missionServices.store.load(missionId(slug));
   if (missionLoad.kind !== 'found') {
     fail(createAbort, `Mission ${missionId(slug)} is unavailable for closeout.`);
+  }
+  const alreadyClosed = typeof missionLoad.mission.closedAt === 'string';
+  const alreadyMeasured = alreadyClosed && hasIntegrationMeasurement
+    ? hasIntegrationMeasurement(slug, rootDir) : false;
+  const artifactsRemain = alreadyClosed && hasCleanupArtifacts
+    ? hasCleanupArtifacts(slug, rootDir) : false;
+  if (alreadyClosed && alreadyMeasured && !artifactsRemain) { return; }
+  if (alreadyClosed && !artifactsRemain && hasCleanupArtifacts && !alreadyMeasured) {
+    fail(createAbort, `Mission ${slug} is closed with no cleanup artifacts but lacks integration statistics; recovery cannot prove whether its post-integrate hook ran.`);
   }
   // The payload is already delivered, so the stored approved round is the
   // authority for recovery even when its provider is no longer reachable.
@@ -63,15 +81,12 @@ export async function recoverLandedIntegration(
       `Mission ${slug} is ${restored.status}; integration requires an authoritative approved Review before closeout.`,
     );
   }
-  // decideIntegration (integration -> done) then close (closedAt). The squash is
-  // already on the base branch, so no merge, push, PR merge, or branch delete runs.
-  await persistLandedIntegrationOrAbort(slug, landedCommit, missionServices, { rootDir });
-  if (!cleanupMissionWorktree(slug)) {
-    fail(createAbort, `Mission worktree cleanup failed for ${slug}.`);
-  }
-  // The remote effect is already delivered, but the repo-owned post-integrate
-  // hook (e.g. the ADR 0060 SonarQube branch cleanup) is a closeout side effect
-  // the normal landing path also performs — run the same seam so a recovered
-  // confirmation does not leave the mission branch analysis behind.
-  runPostIntegrateHookOrAbort(slug, { baseWorktree: rootDir, baseBranch, variant: 'variant-b-resumed' });
+  await completeLandedCloseout({
+    slug, landedCommit, missionServices, baseWorktree: rootDir, baseBranch, variant: 'variant-b-resumed',
+    ...(alreadyClosed && artifactsRemain ? { legacyClosedRecovery: { skipStats: alreadyMeasured } } : {}),
+    landing: {
+      createAbort, persistLandedIntegrationOrAbort, recordPostIntegrationStatsOrAbort,
+      cleanupMissionWorktree, runPostIntegrateHookOrAbort, closeLandedIntegrationOrAbort,
+    },
+  });
 }

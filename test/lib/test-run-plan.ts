@@ -51,15 +51,17 @@ export interface TestRunPlan {
 
 /**
  * Add Node's LCOV reporter without breaking its positional reporter/destination
- * pairing. The resolved plan omits the local timing reporter on GitHub Actions,
- * so stdout is only a destination when that reporter is actually present.
+ * pairing. Always retain a console reporter so a failing covered gate shows
+ * the failing test instead of writing its only output to the LCOV file.
  */
 export function withCoverageReporters(nodeArgs: readonly string[], coverageDestination: string): string[] {
   const testIndex = nodeArgs.indexOf('--test');
   const hasExistingReporter = nodeArgs.some(arg => arg.startsWith('--test-reporter='));
   return [
     ...nodeArgs.slice(0, testIndex),
-    ...(hasExistingReporter ? ['--test-reporter-destination=stdout'] : []),
+    ...(hasExistingReporter
+      ? ['--test-reporter-destination=stdout']
+      : ['--test-reporter=spec', '--test-reporter-destination=stdout']),
     '--experimental-test-coverage',
     '--test-coverage-lines=0',
     '--test-reporter=lcov',

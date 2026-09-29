@@ -85,13 +85,18 @@ function reportBacklogTaskStatus(status: string, virtualStatus: string, isVerify
   verdict.fail = true;
 }
 
-function reportBacklogClassification(slug: string, cwd: string, resolveMissionClassificationFn: Function, verdict: PreflightVerdict, log: Function): void {
+/**
+ * Classification is Mission state: a missing or unreadable aggregate fails
+ * preflight even when a provider task carries a valid label.
+ */
+function reportMissionClassification(slug: string, cwd: string, resolveMissionClassificationFn: Function, verdict: PreflightVerdict, log: Function): void {
   try {
     const { classification, error: classificationError } = resolveMissionClassificationFn(slug, cwd);
-    if (classification) { log(fmt.status('PASS', `Backlog classification: ${classification}`)); return; }
-    log(fmt.status('FAIL', `Backlog classification: ${classificationError || 'missing'}`));
+    const label = 'Mission classification';
+    if (classification) { log(fmt.status('PASS', `${label}: ${classification}`)); return; }
+    log(fmt.status('FAIL', `${label}: ${classificationError || 'missing'}`));
   } catch (error) {
-    log(fmt.status('FAIL', `Backlog classification: ${(error as Error).message}`));
+    log(fmt.status('FAIL', `Mission classification: ${(error as Error).message}`));
   }
   verdict.fail = true;
 }
@@ -102,7 +107,7 @@ function checkBacklogTask(slug: string, cwd: string, isVerifyOnly: boolean, verd
   if (taskResolution.ok) {
     const status = getTaskStatusFn(taskResolution.taskFile);
     reportBacklogTaskStatus(status, toVirtualFn(status), isVerifyOnly, verdict, log);
-    reportBacklogClassification(slug, cwd, resolveMissionClassificationFn, verdict, log);
+    reportMissionClassification(slug, cwd, resolveMissionClassificationFn, verdict, log);
     return;
   }
   if (taskResolution.reason !== 'missing') {
@@ -110,10 +115,10 @@ function checkBacklogTask(slug: string, cwd: string, isVerifyOnly: boolean, verd
     verdict.fail = true;
     return;
   }
-  // An adhoc mission has no Backlog backing; its classification still resolves.
-  const fallback = resolveMissionClassificationFn(slug, cwd);
-  log(fmt.status('WARN', `Backlog task: no task file found for ${fmt.slug(slug)}; continuing with classification ${fallback.classification}.`));
-  log(fmt.status('PASS', `Backlog classification: ${fallback.classification}`));
+  // An adhoc mission has no Backlog backing; its classification still resolves
+  // from Mission state.
+  log(fmt.status('WARN', `Backlog task: no task file found for ${fmt.slug(slug)}; continuing with Mission state.`));
+  reportMissionClassification(slug, cwd, resolveMissionClassificationFn, verdict, log);
 }
 
 /**

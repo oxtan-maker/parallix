@@ -84,30 +84,24 @@ test('refresh-global-px.sh builds dist (task-2203 prerequisite)', () => {
 // Before the fix: captureVerifiedTreeProof appeared BEFORE runPostIntegrateHook.
 // After the fix:  runPostIntegrateHook appears BEFORE captureVerifiedTreeProof.
 //
-// TASK-2512 moved that sequencing out of the CLI adapter into the application
-// layer; `src/adapters/cli/commands/integrate.ts` now only binds ports, so the
-// order lives in `src/application/integrate/squash.ts`.
+// TASK-2604 moved the hook into shared landed closeout. The squash flow must
+// await that closeout before capturing the publish proof.
 // ---------------------------------------------------------------------------
 test('Variant B: post-integrate hook runs before proof capture (task-2203 fix)', () => {
   const REPO_ROOT = path.join(import.meta.dirname, '..');
   const squashPath = path.join(REPO_ROOT, 'src', 'application', 'integrate', 'squash.ts');
   const content = fs.readFileSync(squashPath, 'utf8');
+  const closeoutPath = path.join(REPO_ROOT, 'src', 'application', 'integrate', 'landed-closeout.ts');
+  const closeout = fs.readFileSync(closeoutPath, 'utf8');
 
-  // Find the positions of the key function calls in the source.
-  // We look for the pattern in the Variant B closeout path (after squash commit).
-  const hookIdx = content.indexOf('runPostIntegrateHookOrAbort');
+  const finishIdx = content.indexOf('await finishLanding(run, { branch, mergedCommit');
   const proofIdx = content.indexOf('captureVerifiedTreeProof');
 
-  assert.ok(hookIdx >= 0, 'squash.ts must call runPostIntegrateHookOrAbort');
+  assert.match(content, /await completeLandedCloseout\(/);
+  assert.match(closeout, /await landing\.runPostIntegrateHookOrAbort\(/);
+  assert.ok(finishIdx >= 0, 'squash.ts must await landed closeout');
   assert.ok(proofIdx >= 0, 'squash.ts must call captureVerifiedTreeProof');
-
-  // The proof capture must appear AFTER the post-integrate hook in the source.
-  // In the source, this means the proof function call text comes after the
-  // hook function call text in the Variant B flow.
-  assert.ok(proofIdx > hookIdx,
-    'captureVerifiedTreeProof must appear AFTER runPostIntegrateHookOrAbort in '
-    + 'src/application/integrate/squash.ts (proof must be captured after the '
-    + 'post-integrate rebuild, not before — task-2203 fix)');
+  assert.ok(proofIdx > finishIdx, 'proof must follow the awaited closeout hook');
 });
 
 // ---------------------------------------------------------------------------

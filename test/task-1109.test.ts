@@ -111,7 +111,7 @@ function setupMocks() {
   // store at `review` and contradict the production restore that precedes
   // finishLanding.
   let storedMission = {
-    status: 'review', assignee: 'claude', review: {
+    status: 'review', closedAt: null, assignee: 'claude', review: {
       rounds: [{
         number: 1,
         subject: { change: { kind: 'local-branch', sourceBranch: `mission/${TEST_SLUG}`, targetBranch: 'main' }, revision: 'fixture' },
@@ -131,9 +131,16 @@ function setupMocks() {
        storedMission.status = 'integration';
        return { status: 'completed', value: { to: 'integration', version: 2 } };
      },
-   },
+    },
     integration: {
-      decideIntegration: async () => ({ status: 'completed' }),
+      decideIntegration: async () => {
+        storedMission.status = 'done';
+        return { status: 'completed' };
+      },
+      close: async () => {
+        storedMission.closedAt = '2026-05-15T12:00:00.000Z';
+        return { status: 'completed' };
+      },
     },
     handoff: {
       recordNel: async () => ({}),

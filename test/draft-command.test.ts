@@ -9,6 +9,7 @@ import os from 'os';
 import path from 'path';
 import childProcess from 'child_process';
 import { mockModule, installModuleMocks } from './lib/module-mock.js';
+import { seedStoredMissionClassification } from './fixtures/stored-mission-classification.js';
 const runDraftCommandModule = mockModule<typeof import('../src/adapters/cli/commands/draft.js')>('../src/adapters/cli/commands/draft.js', import.meta.url);
 await installModuleMocks();
 test.afterEach(() => mock.restoreAll());
@@ -48,6 +49,7 @@ test('draft accepts a mission-worktree classification without touching the prima
     assert.equal(childProcess.spawnSync('git', args, { cwd: root }).status, 0, `git ${args.join(' ')}`);
   }
   fs.writeFileSync(missionTask, '---\nid: TASK-2472\nstatus: backlog\nlabels: [ai_sdlc]\n---\n');
+  await seedStoredMissionClassification(slug);
 
   try {
     process.chdir(root);
@@ -138,6 +140,7 @@ test('runDraftCommand top-level flows are covered with injected dependencies', a
         recordDraftImplementerFn: (opts) => calls.push(['record', opts.slug, opts.actual]),
         recordDraftStatsFn: (opts) => calls.push(['stats', opts.slug, opts.rootDir]),
         [normalizeKey]: () => ({ ok: true, [typeKey]: 'ai_sdlc' }),
+        validateDraftClassificationFn: () => ({ ok: true, classification: 'ai_sdlc' }),
         enforceDraftCommitSafetyFn: (opts) => calls.push(['safety', opts.slug, opts.worktree]),
         transitionTaskFn: (slug, status) => calls.push(['transition', slug, status]),
         missionServicesFn,
@@ -580,6 +583,7 @@ test('runDraftCommand honors an explicit --agent override without consulting sel
       recordDraftImplementerFn: (opts) => calls.push(['record', opts.selected, opts.actual]),
       recordDraftStatsFn: () => {},
       [normalizeKey]: () => ({ ok: true, [typeKey]: 'ai_sdlc' }),
+      validateDraftClassificationFn: () => ({ ok: true, classification: 'ai_sdlc' }),
       enforceDraftCommitSafetyFn: () => {},
       transitionTaskFn: () => true,
       missionServicesFn,

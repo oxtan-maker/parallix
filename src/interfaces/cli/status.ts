@@ -146,6 +146,9 @@ function logMissionData(missionData: StatusMissionData | null, log: (_msg: strin
   if (missionData.title) { log(`Title: ${missionData.title}`); }
   log(`Mission status: ${missionData.missionStatus ?? missionData.backlogStatus}`);
   if (missionData.closedAt) { log(`Closed at: ${missionData.closedAt}`); }
+  else if (missionData.missionStatus === 'done') {
+    log('Closeout: pending; resume with px integrate <slug> --recover-landed');
+  }
   log(`Assignee: ${missionData.assignee ?? 'none'}`);
   if (missionData.externalTaskRef) {
     const ref = missionData.externalTaskRef;

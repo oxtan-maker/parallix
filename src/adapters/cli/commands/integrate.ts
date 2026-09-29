@@ -9,6 +9,7 @@
  */
 import { createIntegrateWorkflow } from '../../../application/integrate-workflow.js';
 import fs from 'node:fs';
+import crypto from 'node:crypto';
 import { spawnSync } from '../../process/process-runner.js';
 import * as git from '../../git/git.js';
 import * as backlog from '../../backlog/backlog.js';
@@ -17,6 +18,7 @@ import * as forgejo from '../../forgejo/forgejo.js';
 import * as github from '../../github/github-pr.js';
 import * as missionUtils from '../../filesystem/mission-utils.js';
 import { getPrimaryWorktree } from '../../filesystem/mission-utils.js';
+import { claimRecoveryLock } from '../../filesystem/recovery-claim.js';
 import * as verification from '../../verification/verification.js';
 import * as agents from '../../agents/agents.js';
 import * as runtimeMatrix from '../../agents/runtime-matrix.js';
@@ -46,6 +48,12 @@ export function createIntegratePorts(): IntegrateWorkflowPorts {
   return {
     process: {
       terminate: code => process.exit(code),
+      cwd: () => process.cwd(),
+      chdir: directory => process.chdir(directory),
+      claimIntegration: async slug => {
+        const rootKey = crypto.createHash('sha256').update(getPrimaryWorktree()).digest('hex').slice(0, 16);
+        return claimRecoveryLock(`integrate-${rootKey}-${slug}`);
+      },
     },
     fileSystem: {
       existsSync: target => fs.existsSync(target),
@@ -156,7 +164,9 @@ export function createIntegratePorts(): IntegrateWorkflowPorts {
       resolveForgejoUserForIntegration: taskAssignee => post.resolveForgejoUserForIntegration(taskAssignee),
       isNoMergeToAbortResult: result => post.isNoMergeToAbortResult(result),
       persistLandedIntegrationOrAbort: (slug, commit, missionServices, options) => post.persistLandedIntegrationOrAbort(slug, commit, missionServices, options),
+      closeLandedIntegrationOrAbort: (slug, commit, missionServices) => post.closeLandedIntegrationOrAbort(slug, commit, missionServices),
       recordPostIntegrationStatsOrAbort: (slug, options) => post.recordPostIntegrationStatsOrAbort(slug, options),
+      hasIntegrationMeasurement: (slug, rootDir) => post.hasIntegrationMeasurement(slug, rootDir),
       runPreCommitHookOrAbort: (slug, options) => post.runPreCommitHookOrAbort(slug, options),
       runPostIntegrateHookOrAbort: (slug, options) => post.runPostIntegrateHookOrAbort(slug, options),
       cleanupMissionWorktree: slug => post.cleanupMissionWorktree(slug),
@@ -214,6 +224,7 @@ export {
   recordPostIntegrationStats,
   recordPostIntegrationStatsOrAbort,
   persistLandedIntegrationOrAbort,
+  closeLandedIntegrationOrAbort,
   runPostIntegrateHookOrAbort,
   runPreCommitHookOrAbort,
   cleanupMissionWorktree,

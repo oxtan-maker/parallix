@@ -191,8 +191,9 @@ test('task-1342: upsertMeasurementRow keeps same mission/stage separate by actin
   }
 });
 
-test('task-1342: accumulateStageStats sums repeated launches for the same mission/stage/family', () => {
+test('task-1342: accumulateStageStats sums repeated launches for the same mission/stage/family', async () => {
   const root = createRepoFixture();
+  let restoreHome = async () => {};
   try {
     const taskFile = path.join(root, 'backlog', 'tasks', 'task-2000 - Example.md');
     fs.writeFileSync(taskFile, [
@@ -204,6 +205,7 @@ test('task-1342: accumulateStageStats sums repeated launches for the same missio
       '---',
       '',
     ].join('\n'));
+    restoreHome = await seedMissionDatabase(path.join(root, 'parallix-home'), 'task-2000', root);
     const dbFile = path.join(root, 'workflow', 'data', 'parallix.db');
 
     stats.accumulateStageStats({
@@ -237,19 +239,19 @@ test('task-1342: accumulateStageStats sums repeated launches for the same missio
     assert.equal(result.row.openai_usage_after, '9');
     assert.equal(result.row.cost_usd, '0.75');
   } finally {
+    await restoreHome();
     fs.rmSync(root, { recursive: true, force: true });
   }
 });
 
-test('resolveMissionClassification returns null classification with error when no task file exists', () => {
+test('resolveMissionClassification requires a stored px Mission', () => {
   const root = createRepoFixture();
   try {
     const result = stats.resolveMissionClassification('task-missing', root);
-    assert.deepEqual(result, {
-      classification: null,
-      taskFile: null,
-      error: 'Could not resolve backlog task for task-missing.',
-    });
+    assert.equal(result.classification, null);
+    assert.equal(result.taskFile, null);
+    assert.equal(result.source, 'mission');
+    assert.match(result.error, /Mission database unavailable for task-missing/);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
@@ -638,7 +640,7 @@ test('stats command help documents the pre-integration preview workflow', () => 
   assert.doesNotMatch(output, /stats\.csv|import-legacy|--csv-file/);
 });
 
-test('recordIntegrationStats reads backlog classification and Review aggregate final implementer/fix rounds', async () => {
+test('recordIntegrationStats reads Mission classification and Review aggregate final implementer/fix rounds', async () => {
 
   const { reviewFindingId } = __mm3;
   const root = createRepoFixture();
@@ -904,8 +906,9 @@ test('task-1314: renderRangeStatsReport counts same mission separately across re
 // reviewer in the `implementer` column would make reviewers appear to have
 // implemented missions they only reviewed in the weekly per-implementer table.)
 
-test('recordReviewStats keeps the mission implementer for grouping and records the reviewer in reviewer_agent (task-1318)', () => {
+test('recordReviewStats keeps the mission implementer for grouping and records the reviewer in reviewer_agent (task-1318)', async () => {
   const root = createRepoFixture();
+  let restoreHome = async () => {};
   try {
     const taskFile = path.join(root, 'backlog', 'tasks', 'task-2000 - Example.md');
     fs.writeFileSync(taskFile, [
@@ -917,6 +920,7 @@ test('recordReviewStats keeps the mission implementer for grouping and records t
       '---',
       '',
     ].join('\n'));
+    restoreHome = await seedMissionDatabase(path.join(root, 'parallix-home'), 'task-2000', root);
 
     const dbFile = path.join(root, 'workflow', 'data', 'parallix.db');
     const result = stats.recordReviewStats({
@@ -935,12 +939,14 @@ test('recordReviewStats keeps the mission implementer for grouping and records t
     assert.equal(result.row.reviewer_agent, 'claude');
     assert.equal(result.row.stage, 'review');
   } finally {
+    await restoreHome();
     fs.rmSync(root, { recursive: true, force: true });
   }
 });
 
-test('recordReviewStats records the reviewer-session telemetry on the review row (task-1318)', () => {
+test('recordReviewStats records the reviewer-session telemetry on the review row (task-1318)', async () => {
   const root = createRepoFixture();
+  let restoreHome = async () => {};
   try {
     const taskFile = path.join(root, 'backlog', 'tasks', 'task-2000 - Example.md');
     fs.writeFileSync(taskFile, [
@@ -952,6 +958,7 @@ test('recordReviewStats records the reviewer-session telemetry on the review row
       '---',
       '',
     ].join('\n'));
+    restoreHome = await seedMissionDatabase(path.join(root, 'parallix-home'), 'task-2000', root);
 
     const dbFile = path.join(root, 'workflow', 'data', 'parallix.db');
     const result = stats.recordReviewStats({
@@ -972,6 +979,7 @@ test('recordReviewStats records the reviewer-session telemetry on the review row
     assert.equal(result.row.input_tokens, '800');
     assert.equal(result.row.output_tokens, '150');
   } finally {
+    await restoreHome();
     fs.rmSync(root, { recursive: true, force: true });
   }
 });

@@ -1,18 +1,22 @@
 ---
-id: TASK-2559
-title: minor ux issues post 2521.03 migration
+id: TASK-2608
+title: px got triggered by logging
 status: backlog
 assignee: []
-created_date: '2026-09-23 08:31'
+created_date: '2026-09-29 04:36'
 labels: []
 dependencies: []
-ordinal: 96008
+ordinal: 136008
 ---
 
 ## Description
 
 <!-- SECTION:DESCRIPTION:BEGIN -->
-[INFO] Mission task-2553: <Title>
+[PASS] Autonomous review stopped: reviewer approved the PR. Hand off to human review/integration.
+[PASS] Task task-2599 transitioned to ready-for-integration and committed.
+[px] Switched terminal context to: /mnt/data/code/parallix
+
+this is not the correct state to switch dir
 <!-- SECTION:DESCRIPTION:END -->
 
 ## Definition of Done

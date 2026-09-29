@@ -213,6 +213,11 @@ file is archived, not deleted, and keeps whatever `status` it had: move it back
 out of `backlog/archive/tasks/` and set its `status` to `backlog` if you plan to
 redo the work.
 
+Once a mission reaches `done`, cancellation is unavailable. An interrupted
+integration closeout resumes through `px integrate <slug> --recover-landed` so
+the remaining statistics, cleanup and post-integration hook finish without
+another gate run or merge.
+
 ## Leaving
 
 Press `q` or `Ctrl+C`.

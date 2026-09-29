@@ -75,7 +75,7 @@ test('TASK-2594: TASK-2521.07 requires stored classification before draft comple
     const staleStore = missionStore(missionWithLabels(['migration', 'workflow']));
     await assert.rejects(
       recordIntegrationStats({ slug, rootDir: root, date: '2026-09-27', store: inMemoryMeasurements(), missionStore: staleStore as never }),
-      /missing classification|authoritative Mission classification/i,
+      /requires exactly one classification|px state/i,
       'provider-only ai_sdlc must not allow draft/closeout to treat an unclassified Mission as valid',
     );
 

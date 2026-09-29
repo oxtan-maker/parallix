@@ -8,6 +8,8 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import childProcess from 'child_process';
+import { SqliteDatabaseAdapter } from '../src/adapters/sqlite/database-adapter.js';
+import { SqliteMigrationRunner, loadDefaultMigrations } from '../src/adapters/sqlite/migration-runner.js';
 import { mockModule, installModuleMocks } from './lib/module-mock.js';
 const statsBackfill = mockModule<typeof import('../src/adapters/cli/commands/stats-backfill.js')>('../src/adapters/cli/commands/stats-backfill.js', import.meta.url);
 const stats = mockModule<typeof import('../src/adapters/cli/commands/stats.js')>('../src/adapters/cli/commands/stats.js', import.meta.url);
@@ -17,7 +19,6 @@ await installModuleMocks();
 test.afterEach(() => mock.restoreAll());
 const {
   collectHistoricalStatsBackfill,
-  inferHistoricalClassificationFromMissionDoc,
 } = statsBackfill;
 const { LegacyStatsBackfillAdapter } = statsBackfillAdapterModule;
 const { StatsBackfillService } = statsBackfillServiceModule;
@@ -30,6 +31,13 @@ test('stats-backfill module loads without a parse-time SyntaxError', async () =>
 
 function withFixture(fn) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'workflow-stats-backfill-'));
+  const previousHome = process.env.PARALLIX_HOME;
+  process.env.PARALLIX_HOME = path.join(root, 'parallix-home');
+  const finish = () => {
+    if (previousHome === undefined) delete process.env.PARALLIX_HOME;
+    else process.env.PARALLIX_HOME = previousHome;
+    fs.rmSync(root, { recursive: true, force: true });
+  };
   fs.mkdirSync(path.join(root, 'workflow', 'config'), { recursive: true });
   fs.mkdirSync(path.join(root, 'workflow', 'data'), { recursive: true });
   fs.mkdirSync(path.join(root, 'backlog', 'completed'), { recursive: true });
@@ -51,12 +59,28 @@ function withFixture(fn) {
   try {
     const result = fn(root);
     if (result && typeof result.then === 'function') {
-      return result.finally(() => fs.rmSync(root, { recursive: true, force: true }));
+      return result.finally(finish);
     }
-    fs.rmSync(root, { recursive: true, force: true });
+    finish();
   } catch (error) {
-    fs.rmSync(root, { recursive: true, force: true });
+    finish();
     throw error;
+  }
+}
+
+async function seedMissionClassifications(root, entries) {
+  const db = new SqliteDatabaseAdapter();
+  await db.open({ path: path.join(root, 'parallix-home', 'parallix.db') });
+  try {
+    await new SqliteMigrationRunner(db).applyPending(loadDefaultMigrations());
+    for (const [slug, classification] of entries) {
+      await db.execute('INSERT INTO missions (id, repository_id, title, status) VALUES (?, ?, ?, ?)',
+        [slug, 'parallix', slug, 'done']);
+      await db.execute('INSERT INTO mission_labels (mission_id, position, label) VALUES (?, ?, ?)',
+        [slug, 0, classification]);
+    }
+  } finally {
+    await db.close();
   }
 }
 
@@ -77,43 +101,6 @@ function writeMission(root, slug, missionText, checkpoint = 'CP-1.md') {
   fs.writeFileSync(path.join(missionDir, 'MISSION.md'), missionText, 'utf8');
   fs.writeFileSync(path.join(missionDir, checkpoint), '# checkpoint\n', 'utf8');
 }
-
-test('inferHistoricalClassificationFromMissionDoc distinguishes workflow from product missions', () => {
-  withFixture(root => {
-    writeMission(root, 'task-2000', [
-      '# Mission: Fix workflow crash in review loop',
-      '',
-      'Update `workflow/lib/review/review.js` and `node parallix review` handling.',
-    ].join('\n'));
-    writeMission(root, 'task-2001', [
-      '# Mission: Fix iOS add flow',
-      '',
-      'Update `ios/` and improve grocery add UX in the client.',
-    ].join('\n'));
-
-    assert.equal(inferHistoricalClassificationFromMissionDoc('task-2000', root), 'ai_sdlc');
-    assert.equal(inferHistoricalClassificationFromMissionDoc('task-2001', root), 'user_value');
-  });
-});
-
-test('inferHistoricalClassificationFromMissionDoc uses title fallback and returns null when no signal exists', () => {
-  withFixture(root => {
-    writeMission(root, 'task-2004', [
-      '# Mission: Workflow bookkeeping cleanup',
-      '',
-      'Minimal note.',
-    ].join('\n'));
-    writeMission(root, 'task-2005', [
-      '# Mission: Mystery task',
-      '',
-      'Minimal note with no known signals.',
-    ].join('\n'));
-
-    assert.equal(inferHistoricalClassificationFromMissionDoc('task-2004', root), 'ai_sdlc');
-    assert.equal(inferHistoricalClassificationFromMissionDoc('task-2005', root), null);
-    assert.equal(inferHistoricalClassificationFromMissionDoc('task-missing', root), null);
-  });
-});
 
 test('collectHistoricalStatsBackfill resolves done missions, skips non-done missions, and reports unresolved items', async () => {
   await withFixture(async root => {
@@ -165,6 +152,7 @@ test('collectHistoricalStatsBackfill resolves done missions, skips non-done miss
     ].join('\n'));
 
     commitAll(root, 'fixture');
+    await seedMissionClassifications(root, [['task-2000', 'ai_sdlc'], ['task-2002', 'ai_sdlc']]);
 
     const report = await collectHistoricalStatsBackfill(root, { dbPath: path.join(root, 'parallix.db') });
     const repoName = stats.resolveStatsRepoName(root);
@@ -182,7 +170,7 @@ test('collectHistoricalStatsBackfill resolves done missions, skips non-done miss
       pr_fix_rounds: '0',
       sources: {
         date: 'backlog-updated_date',
-        classification: 'mission-doc-heuristic',
+        classification: 'mission-state',
         implementer: 'git-history-author',
       },
     });
@@ -195,7 +183,7 @@ test('collectHistoricalStatsBackfill resolves done missions, skips non-done miss
       pr_fix_rounds: '0',
       sources: {
         date: 'backlog-updated_date',
-        classification: 'mission-doc-heuristic',
+        classification: 'mission-state',
         implementer: 'git-history-author',
       },
     });
@@ -224,6 +212,7 @@ test('collectHistoricalStatsBackfill falls back to git history for date and huma
     ].join('\n'));
 
     commitAll(root, 'task-2003 fixture');
+    await seedMissionClassifications(root, [['task-2003', 'ai_sdlc']]);
 
     const report = await collectHistoricalStatsBackfill(root, { dbPath: path.join(root, 'parallix.db') });
     const row = report.rows.find(item => item.mission === 'task-2003');
@@ -237,7 +226,7 @@ test('collectHistoricalStatsBackfill falls back to git history for date and huma
   });
 });
 
-test('collectHistoricalStatsBackfill reports unresolved task resolution and legacy classification fallback', async () => {
+test('collectHistoricalStatsBackfill requires stored classification for historical rows', async () => {
   await withFixture(async root => {
     initGitRepo(root);
 
@@ -264,13 +253,14 @@ test('collectHistoricalStatsBackfill reports unresolved task resolution and lega
     ].join('\n'));
 
     commitAll(root, 'task-2006 task-2007 fixture');
+    await seedMissionClassifications(root, [['task-2007', 'user_value']]);
 
     const report = await collectHistoricalStatsBackfill(root, { dbPath: path.join(root, 'parallix.db') });
     const resolved = report.rows.find(item => item.mission === 'task-2007');
 
     assert.ok(resolved);
     assert.equal(resolved.classification, 'user_value');
-    assert.equal(resolved.sources.classification, 'backlog-classification');
+    assert.equal(resolved.sources.classification, 'mission-state');
 
     assert.equal(report.unresolved.length, 1);
     assert.deepEqual(report.unresolved[0], {
@@ -316,6 +306,7 @@ test('statsBackfill supports help, json output, summary output, and apply mode',
     ].join('\n'));
 
     commitAll(root, 'task-2008 task-2009 fixture');
+    await seedMissionClassifications(root, [['task-2008', 'ai_sdlc']]);
 
     // The whole command run is bound to an isolated PARALLIX_HOME so the
     // measurement database it reads and writes is a temporary one.

@@ -90,11 +90,11 @@ export function createIntegrationPreflight(ports: IntegrateWorkflowPorts) {
     if (context.task.ok) {
       report.detail(`Backlog task: ${path.basename(context.task.taskFile)} (${context.missionStatus || 'mission store'})`);
       try {
-        // Mission labels are authoritative when the aggregate was loaded. A
-        // missing label projection is a legacy/injected-fixture boundary, not
-        // proof of an unclassified aggregate, so retain the task resolver for
-        // that compatibility path.
-        const hasMissionLabels = Array.isArray(context.missionLabels) && context.missionLabels.length > 0;
+        // Mission labels are authoritative whenever the aggregate was loaded,
+        // including an empty label list: a Backlog label never classifies a
+        // stored Mission (TASK-2601). Only a context with no loaded aggregate
+        // keeps the legacy task-label read.
+        const hasMissionLabels = Array.isArray(context.missionLabels);
         const classification = hasMissionLabels
           ? backlog.classificationFromLabels(context.missionLabels)
           : backlog.getTaskClassification(context.task.taskFile);

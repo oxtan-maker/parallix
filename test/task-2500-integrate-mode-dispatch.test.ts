@@ -44,7 +44,7 @@ function createFakeStore(status: MissionStatus) {
     id: missionId(SLUG),
     repositoryId: repositoryId('parallix'),
     title: 'fixture',
-    labels: [],
+    labels: ['ai_sdlc'],
     assignee: 'codex',
     checkpoints: [],
     review: status === 'review'
@@ -156,7 +156,7 @@ async function runIntegrate(mode: 'local' | 'github-pr'): Promise<RunResult> {
     await integrate.default([SLUG, '--no-integration-gates'], {
       missionServicesFn: async () => services,
     });
-  } catch (e) {
+  } catch {
     // fall through; assertions below inspect exitCode/logs/gitCalls
   } finally {
     mock.reset();

@@ -105,6 +105,27 @@ const OPEN_TASK = frontmatter({
   labels: '[ai_sdlc]',
 });
 
+it('does not turn a native landed Mission into a closed Mission during import', async () => {
+  const root = workspace([]);
+  const store = new RecordingStore();
+  const mission = {
+    id: 'task-9007' as MissionId, repositoryId: REPOSITORY, title: 'Landed, closeout pending',
+    labels: [missionLabel('ai_sdlc')], assignee: null, checkpoints: [], review: null,
+    netEngineeringLines: null, status: 'done' as const, closedAt: null,
+  };
+  store.missions.set(mission.id, { mission, version: missionVersion(1) });
+  let historyReads = 0;
+  const withHistory = Object.assign(store, {
+    loadByRepository: async () => [mission],
+    findTransitions: async () => { historyReads++; return [{ trigger: 'integrate', toStatus: 'done', occurredAt: '2026-09-27T20:50:33Z' }]; },
+  });
+
+  const report = await importLegacyMissions(services(withHistory), { rootDir: root, commit: COMMIT });
+  assert.equal(report.importable, 0);
+  assert.equal(historyReads, 0);
+  assert.equal(store.missions.get(mission.id)?.mission.closedAt, null);
+});
+
 it('parses bounded historical contract fields without treating templates as current data', () => {
   const parsed = parseLegacyMissionDocument(`## Goal\nShip the fix.\n## Why Now\nThe old path fails.\n## Scope\n- Fix import.\n## Out of Scope\n- Rewrite review.\n## Success Criteria\n> Falsifiability rule\n- Import preserves old text.\n## Checkpoints\n- CP 1: Verify import.\n## Gates\n- [ ] npm test\n`);
   assert.equal(parsed.brief?.goal, 'Ship the fix.');

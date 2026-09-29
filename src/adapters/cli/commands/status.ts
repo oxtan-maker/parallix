@@ -95,12 +95,9 @@ function findStaleMissionWorktrees({
         path: entry.path,
         branch: branchRef,
         taskStatus: taskStatus || 'missing',
-        // A done task's worktree is retained only when its integrate closeout
-        // was interrupted; the cleanup is the same local git one-liner the
-        // non-done branch uses. There is no `scripts/cleanup-mission-worktree.sh`
-        // on disk (SC5), so the hint must name a real git command, never a
-        // phantom script.
-        cleanupCommand: `git worktree remove ${entry.path} && git branch -D ${missionBranchName(slug, resolvedPrimary || process.cwd())}`
+        // Recovery verifies the landed commit and completes stats and hooks
+        // before removing a worktree left by interrupted closeout.
+        cleanupCommand: `px integrate ${slug} --recover-landed`
       };
     })
     .filter(Boolean);

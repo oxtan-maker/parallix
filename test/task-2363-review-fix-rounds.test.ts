@@ -9,6 +9,7 @@ import { SqliteMeasurementStore } from '../src/adapters/sqlite/measurement-store
 import { ConcreteMetricsReadAdapter } from '../src/application/projections/metrics-read-adapter.js';
 import type { MissionId, MissionStatus } from '../src/domain/mission.js';
 import { missionId } from '../src/domain/mission.js';
+import { seedStoredMissionClassification } from './fixtures/stored-mission-classification.js';
 import { repositoryId } from '../src/domain/repository.js';
 import {
   fixedClock,
@@ -48,6 +49,7 @@ function repoWithMission(slug: string): string {
 describe('TASK-2363 defect A: an unrecorded review-fix count stays unknown', () => {
   it('writes SQL NULL when a stage row has no review-fix count yet', async () => {
     const root = repoWithMission('task-501');
+    await seedStoredMissionClassification('task-501');
     await withStatisticsDatabase(async ({ db, databasePath }) => {
       const store = new SqliteMeasurementStore(databasePath);
       try {
@@ -66,6 +68,7 @@ describe('TASK-2363 defect A: an unrecorded review-fix count stays unknown', () 
 
   it('keeps an explicitly recorded zero as a zero', async () => {
     const root = repoWithMission('task-500');
+    await seedStoredMissionClassification('task-500');
     await withStatisticsDatabase(async ({ db, databasePath }) => {
       const store = new SqliteMeasurementStore(databasePath);
       try {
@@ -127,4 +130,3 @@ describe('TASK-2363 defect A: an unrecorded review-fix count stays unknown', () 
     });
   });
 });
-

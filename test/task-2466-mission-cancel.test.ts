@@ -204,6 +204,18 @@ describe('mission:cancel deletes one mission and nothing else', () => {
     assert.deepEqual(await lifecycleCounts(db, TARGET), before);
   });
 
+  it('refuses to delete a delivered Mission while closeout is pending', async () => {
+    const db = await isolatedDatabase();
+    await seedBoard(db);
+    await db.execute("UPDATE missions SET status = 'done', closed_at = NULL WHERE id = ?", [TARGET]);
+    const before = await lifecycleCounts(db, TARGET);
+    await assert.rejects(
+      () => new SqliteMissionStore(db).cancel(missionId(TARGET)),
+      /integrated Mission closeout must finish/,
+    );
+    assert.deepEqual(await lifecycleCounts(db, TARGET), before);
+  });
+
   it('reports the operator git cleanup without running a git command', async () => {
     const db = await isolatedDatabase();
     await seedBoard(db);
@@ -277,6 +289,15 @@ test('every persisted mission advertises an enabled cancel command, last', () =>
     { reviewApproval: null } as never,
   );
   assert.deepEqual(commands.at(-1), { command: 'cancel', enabled: true, reason: null, targetLane: null, label: 'cancel ✕' });
+});
+
+test('a delivered Mission does not offer cancellation during closeout', () => {
+  const commands = availableBoardCommands(
+    { id: missionId(SLUG), repositoryId: repositoryId('parallix'), title: 'Delivered', labels: [], status: 'done', closedAt: null, assignee: null, checkpoints: [], review: null, netEngineeringLines: null } as never,
+    { reviewApproval: null } as never,
+  );
+  assert.equal(commands.at(-1)?.command, 'cancel');
+  assert.equal(commands.at(-1)?.enabled, false);
 });
 
 // ---------------------------------------------------------------------------

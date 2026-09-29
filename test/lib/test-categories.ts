@@ -59,6 +59,7 @@ export const INTEGRATION_CI_TESTS: readonly string[] = [
   'handoff.test.ts',
   'install.test.ts',
   'integrate-conflict.test.ts',
+  'integrate-exclusive-process.integration.test.ts',
   'integrate-task-1410-stash-pop-corruption.test.ts',
   'integrate-workflow-gate.test.ts',
   'integrate.test.ts',
@@ -143,6 +144,7 @@ export const INTEGRATION_CI_TESTS: readonly string[] = [
   'task-2322.11-operator-state.test.ts',
   'task-2322.12-review-recovery.integration.test.ts',
   'task-2322.12-stray-persistence.test.ts',
+  'task-2337-repro.test.ts',
   'task-2327-coverage-gate-tmp-leaks.test.ts',
   'task-2339-aggregate-read-during-write.test.ts',
   'task-2339-writes-outlive-close.test.ts',
@@ -201,6 +203,8 @@ export const INTEGRATION_CI_TESTS: readonly string[] = [
   // real temporary Git repository, so it crosses the git boundary and runs only
   // in the integration layer.
   'task-2492-already-merged-detection.test.ts',
+  // TASK-2601 uses temporary SQLite Mission and measurement stores only.
+  'task-2601-repro.test.ts',
   // TASK-2502: CodeQL gate tests. --dry-run resolves the plan without spawning
   // the CLI, and the clean-cache test skips when no pinned codeql is on PATH, so
   // both run on a clean GitHub-hosted runner with only bash.

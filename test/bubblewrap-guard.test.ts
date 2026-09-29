@@ -218,7 +218,9 @@ test('review profile buildBubblewrapArgs binds the claude transcript directory w
 
 test('buildBubblewrapArgs keeps review worktree read-only and binds an outside artifact directory', () => {
   const worktree = makeWorktree();
-  const artifactRoot = makeWorktree();
+  // This assertion specifically exercises the fixed /tmp bind, regardless
+  // of the operator's TMPDIR setting.
+  const artifactRoot = fs.mkdtempSync(path.join('/tmp', 'bwrap-guard-'));
   const artifactDir = path.join(artifactRoot, 'review-artifacts');
   try {
     const args = buildBubblewrapArgs(resolveSandboxProfile('review', worktree, artifactDir), worktree);

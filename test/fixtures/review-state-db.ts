@@ -19,13 +19,17 @@ import { repositoryId } from '../../src/domain/repository.js';
 import { agentFamily } from '../../src/domain/agents.js';
 import { changeRevision } from '../../src/domain/review.js';
 
-/** A Mission carrying a round-1 Review, the shape `px handoff` produces. */
+/**
+ * A Mission carrying a round-1 Review, the shape `px handoff` produces. It is
+ * classified in Mission state, which is the classification authority after
+ * TASK-2521.03 (TASK-2601).
+ */
 function missionWithReview(slug, rootDir, overrides = {}) {
   return {
     id: missionId(slug),
     repositoryId: repositoryId(rootDir),
     title: `Mission ${slug}`,
-    labels: missionLabels([]),
+    labels: missionLabels(['ai_sdlc']),
     assignee: agentFamily('claude'),
     status: 'review',
     rawStatus: 'review',

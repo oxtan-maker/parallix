@@ -109,14 +109,13 @@ test('task-1415: recordPostIntegrationStats counts a closed mission in the curre
   assert.equal(committerDate, '2026-06-13',
     'fixture setup: base worktree tip commit must carry the stale committer date');
 
-  // TASK-2378: recordIntegrationStats requires the operator MissionStore for
-  // the authoritative derivation. This test asserts only the closed row's
-  // date/window, so an empty store (mission absent => no Review => unknown)
-  // is sufficient and keeps the test focused on the date fix.
+  // Statistics require a classified Mission in the operator store.
   const database = new SqliteDatabaseAdapter();
   await database.open({ path: path.join(root, 'operator.db') });
   await new SqliteMigrationRunner(database).applyPending(loadDefaultMigrations());
   const missionStore = new SqliteMissionStore(database);
+  await database.execute('INSERT INTO missions (id, repository_id, title, status) VALUES (?, ?, ?, ?)', ['task-1388', 'fixture', 'Example Mission', 'done']);
+  await database.execute('INSERT INTO mission_labels (mission_id, position, label) VALUES (?, ?, ?)', ['task-1388', 0, 'ai_sdlc']);
 
   try {
     await recordPostIntegrationStats('task-1388', {

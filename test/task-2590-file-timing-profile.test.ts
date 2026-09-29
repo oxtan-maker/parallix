@@ -52,7 +52,9 @@ test('task-2590: enabled profiling appends one balanced reporter pair for every 
           assert.equal(destinations.at(-1), '--test-reporter-destination=/tmp/profile.jsonl', label);
           // Existing console/coverage output is preserved, in order.
           const before = reporterFlags(base);
-          assert.deepEqual(reporters.slice(0, -1).filter(r => r !== '--test-reporter=spec'), before.reporters, label);
+          assert.deepEqual(reporters.slice(0, -1), before.reporters.length === 0
+            ? ['--test-reporter=spec']
+            : before.reporters, label);
           // Every non-reporter flag and the file list are untouched.
           const strip = (args: readonly string[]) => args.filter(arg => !arg.startsWith('--test-reporter') && arg !== '--disable-warning=MaxListenersExceededWarning');
           assert.deepEqual(strip(profiled), strip(base), label);

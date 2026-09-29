@@ -155,6 +155,13 @@ export async function recordPostIntegrationStatsOrAbort(slug: string, options: {
   }
 }
 
+/** Read the operator measurement database before retrying a legacy closeout. */
+export function hasIntegrationMeasurement(slug: string, rootDir: string): boolean {
+  const repo = stats.resolveStatsRepoName(rootDir);
+  return stats.loadMeasurementRows({ rootDir }).rows.some((row: any) =>
+    row.repo === repo && row.mission === slug && row.stage === 'default');
+}
+
 /**
  * The committer timestamp of the specific landed commit.
  *
@@ -178,7 +185,8 @@ function resolveLandedCommitTimestamp(landedCommit: string, rootDir: string) {
 }
 
 /**
- * Persist the sole completion authority once the squash commit exists.
+ * Persist delivery once the squash commit exists. Administrative closure is
+ * recorded separately, after all closeout effects succeed.
  *
  * One timestamp resolution serves every caller — normal integration, resume,
  * and partial-closeout recovery — so no path can record a retry time as the
@@ -225,6 +233,15 @@ export async function persistLandedIntegrationOrAbort(slug: string, landedCommit
       fmt.log.fail(`Mission ${missionId(slug)} is unavailable for closure after landing.`);
       throw new IntegrationAbort();
     }
+  }
+}
+
+/** Record administrative closure only after cleanup and the post-integrate hook. */
+export async function closeLandedIntegrationOrAbort(slug: string, landedCommit: string, missionServices: any) {
+  const loaded = await missionServices.store.load(missionId(slug));
+  if (loaded.kind !== 'found' || loaded.mission.status !== 'done') {
+    fmt.log.fail(`Mission ${missionId(slug)} is unavailable for closure after landing.`);
+    throw new IntegrationAbort();
   }
   if (loaded.mission.closedAt !== null) { return; }
   const result = await missionServices.integration.close({
@@ -358,7 +375,9 @@ export function cleanupMissionWorktree(
 
   const branchExists = gitRunner(['-C', rootDir, 'show-ref', '--verify', '--quiet', `refs/heads/${branch}`]);
   if (branchExists.status !== 0) {
-    return false;
+    // A retry after cleanup but before administrative closure must still be
+    // able to finish closeout. Absence of both branch and worktree is success.
+    return !existsSync(worktreePath);
   }
 
   const worktreeList = gitRunner(['-C', rootDir, 'worktree', 'list', '--porcelain']).stdout;

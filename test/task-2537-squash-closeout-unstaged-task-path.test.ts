@@ -108,6 +108,7 @@ async function landMission(root: string, { selfHostedCloseout }: { selfHostedClo
       createAbort: () => abort,
       classifyHookFailure: () => ({ isHookFailure: false }),
       persistLandedIntegrationOrAbort: async () => {},
+      closeLandedIntegrationOrAbort: async () => {},
       recordPostIntegrationStatsOrAbort: async () => {},
       cleanupMissionWorktree: () => true,
       runPostIntegrateHookOrAbort: () => {},

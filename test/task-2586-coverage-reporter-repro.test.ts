@@ -1,5 +1,5 @@
 // TASK-2586 — Node pairs test reporters and destinations by index. GitHub
-// suppresses the local timing reporter, so coverage must not add stdout there.
+// suppresses the local timing reporter, so coverage must add a console reporter.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import path from 'node:path';
@@ -31,6 +31,10 @@ test('task-2586: GitHub coverage balances reporter and destination flags for uni
       args.filter(arg => arg.startsWith('--test-reporter-destination=')).length,
       `${requestedArgs.join(' ') || 'unit'} has one destination per reporter`,
     );
-    assert.deepEqual(args.filter(arg => arg.startsWith('--test-reporter-destination=')), ['--test-reporter-destination=coverage/test.info']);
+    assert.deepEqual(args.filter(arg => arg.startsWith('--test-reporter-destination=')), [
+      '--test-reporter-destination=stdout',
+      '--test-reporter-destination=coverage/test.info',
+    ]);
+    assert.ok(args.includes('--test-reporter=spec'));
   }
 });

@@ -61,18 +61,31 @@ export function createIntegrateWorkflow(ports: IntegrateWorkflowPorts) {
     // primary branch).
     let baseBranch: string;
     try { baseBranch = missionPaths.resolveMissionBaseBranch(slug, rootDir); } catch { baseBranch = missionPaths.getPrimaryBranch(); }
+    const baseWorktree = missionPaths.resolveBaseWorktree(slug, { rootDir });
+    const missionWorktree = missionPaths.conventionalWorktreePath(slug);
+    if (ports.process.cwd() === missionWorktree || ports.process.cwd().startsWith(missionWorktree + '/')) {
+      ports.process.chdir(baseWorktree);
+    }
     await recoverLandedIntegration(
       slug,
       missionServices,
-      rootDir,
+      baseWorktree,
       {
         findSquashCommit: ports.checkout.findLandedSquashOnBaseBranch,
         recoverMissionForIntegration,
         persistLandedIntegrationOrAbort: ports.landing.persistLandedIntegrationOrAbort,
+        recordPostIntegrationStatsOrAbort: ports.landing.recordPostIntegrationStatsOrAbort,
+        closeLandedIntegrationOrAbort: ports.landing.closeLandedIntegrationOrAbort,
         cleanupMissionWorktree: ports.landing.cleanupMissionWorktree,
         runPostIntegrateHookOrAbort: ports.landing.runPostIntegrateHookOrAbort,
         createAbort: landing.createAbort,
         baseBranch,
+        hasIntegrationMeasurement: landing.hasIntegrationMeasurement,
+        hasCleanupArtifacts: (mission: string) => {
+          const branch = missionPaths.missionBranchName(mission, baseWorktree);
+          return ports.fileSystem.existsSync(missionPaths.conventionalWorktreePath(mission))
+            || ports.git.git(['-C', baseWorktree, 'show-ref', '--verify', '--quiet', `refs/heads/${branch}`]).status === 0;
+        },
       },
     );
     return 0;
@@ -192,11 +205,26 @@ export function createIntegrateWorkflow(ports: IntegrateWorkflowPorts) {
     // Resolve the authoritative store before buildIntegrationContext so the
     // reviewer lookup (TASK-2420 review round 2, F1) receives its `missionStore`
     // argument; the store is rootDir-independent.
-    const missionServices = await missionServicesFn(process.cwd());
+    const missionServices = await missionServicesFn(ports.process.cwd());
     // TASK-2517 CP-3: a landed-but-stranded mission short-circuits the whole run —
     // no rebase, no gates, no publish — and closes directly.
     if (request.recoverLanded) {
-      await recoverLandedCloseout(slug, missionServices, process.cwd());
+      await recoverLandedCloseout(slug, missionServices, ports.process.cwd());
+      return 0;
+    }
+    const existing = await missionServices.store.load(missionId(slug));
+    if (existing.kind === 'found' && existing.mission.status === 'done' && existing.mission.closedAt) {
+      const landed = ports.checkout.findLandedSquashOnBaseBranch(ports.process.cwd(), slug);
+      if (!landed) {
+        throw abortWith(landing, `Mission ${slug} is closed in SQLite, but its landed commit is absent from the base branch. Inspect the lifecycle record before retrying integration.`);
+      }
+      const primary = missionPaths.getPrimaryWorktree();
+      const branch = missionPaths.missionBranchName(slug, primary);
+      const branchExists = ports.git.git(['-C', primary, 'show-ref', '--verify', '--quiet', `refs/heads/${branch}`]).status === 0;
+      if (branchExists || ports.fileSystem.existsSync(missionPaths.conventionalWorktreePath(slug))) {
+        throw abortWith(landing, `Mission ${slug} is marked closed but its branch or worktree remains. Preserve any work in the mission worktree, then run px integrate ${slug} --recover-landed to finish closeout.`);
+      }
+      fmt.log.info(`Mission ${slug} already integrated as ${landed.slice(0, 12)}; no integration gates or merge rerun.`);
       return 0;
     }
     if (!dryRun) {
@@ -206,7 +234,7 @@ export function createIntegrateWorkflow(ports: IntegrateWorkflowPorts) {
         if (!seams.reReviewFn) {
           throw abortWith(ports.landing, `The repaired mission ${slug} requires review. Run px review ${slug} --continue.`);
         }
-        if (!await seams.reReviewFn(slug, process.cwd())) {
+        if (!await seams.reReviewFn(slug, ports.process.cwd())) {
           throw abortWith(ports.landing, `Review of the repaired mission ${slug} stopped. Run px review ${slug} --continue to resume.`);
         }
         throw new IntegrationRestartRequired(slug);
@@ -235,7 +263,7 @@ export function createIntegrateWorkflow(ports: IntegrateWorkflowPorts) {
     // real integration operations run through `strategy.run`, so a non-local
     // mode refuses the local primary merge / unimplemented steps instead of
     // silently performing them (SC4 / SC6).
-    const strategy = createIntegrationStrategy(ports.productConfig.resolveIntegrationMode(context.baseWorktree ?? process.cwd()));
+    const strategy = createIntegrationStrategy(ports.productConfig.resolveIntegrationMode(context.baseWorktree ?? ports.process.cwd()));
     const verificationEvidence = await strategy.run('run-required-local-gates', () =>
       runRequiredLocalGates({ slug, context, missionLoad, missionServices, ...request, seams }));
     printIntegrationReadiness(buildIntegrationReadiness(context, { verification: verificationEvidence }, missionPaths.getPrimaryBranch));
@@ -267,6 +295,7 @@ export function createIntegrateWorkflow(ports: IntegrateWorkflowPorts) {
   async function integrate(args: string[], options: IntegrateOptions = {}) {
     const exitFn = options.exitFn ?? ports.process.terminate;
     let request: IntegrateRequest;
+    let exitCode = 0;
     try {
       request = parseIntegrateArgs(args);
     } catch (error) {
@@ -290,47 +319,57 @@ export function createIntegrateWorkflow(ports: IntegrateWorkflowPorts) {
       fmt.log.warn('integrate ignores --no-gate. The landed squash commit relies on the local git hooks for validation.');
     }
 
-    const seams: IntegrateSeams = {
-      // SC2: kernel-context injection seams. Both bounces build their rebound
-      // context from these so tests keep a mock launch/transition/fallback
-      // port instead of a real agent, git, or Forgejo.
-      startAgentFn: options.startAgentFn ?? ports.agents.startAgent,
-      transitionTaskFn: options.transitionTaskFn ?? ports.backlog.transitionTask,
-      applyAgentFallbackFn: options.applyAgentFallbackFn ?? ports.agents.applyAgentFallback,
-      selectAgentFn: options.selectAgentFn ?? ports.agents.selectAgent,
-      workflowLauncherStatusFn: options.workflowLauncherStatusFn ?? ports.agents.workflowLauncherStatus,
-      routeIntegrationGateFailureFn: options.routeIntegrationGateFailureFn ?? ports.gates.routeIntegrationGateFailure,
-      ...(options.reReviewFn ? { reReviewFn: options.reReviewFn } : {}),
-    };
-    const state: IntegrateRunState = { temporaryStash: null, nextActionMessage: null };
-    let exitCode = 0;
-    try {
-      for (;;) {
-        try {
-          exitCode = await runIntegration(slug, request, options, seams, state);
-          break;
-        } catch (error) {
-          if (!(error instanceof IntegrationRestartRequired)) { throw error; }
-          // The persisted integration-gate rebound budget bounds repairs. A
-          // restart retains review orchestration and refreshes every fact.
-          fmt.log.info(`Restarting integration of ${slug} on the re-reviewed revision.`);
-        }
-      }
-    } catch (error) {
-      // Report and fail. Rethrowing here is swallowed by the terminal exit
-      // port call below, which would end the run with a success code and no
-      // output at all.
-      if (!landing.isAbort(error)) {
-        fmt.log.fail(`Integration failed: ${(error as Error)?.message || String(error)}`);
-        if ((error as Error)?.stack) {
-          fmt.log.fail(String((error as Error).stack));
-        }
-      }
-      exitCode = 1;
+    const releaseIntegration = await ports.process.claimIntegration(slug);
+    if (!releaseIntegration) {
+      fmt.log.fail(`Integration of ${slug} is already running in another process. Wait for it to finish before retrying.`);
+      exitFn(1);
+      return { exitCode: 1 };
     }
-    exitCode = Math.max(exitCode, restoreTemporaryStash(slug, state.temporaryStash));
-    if (state.nextActionMessage) {
-      fmt.log.info(state.nextActionMessage);
+
+    try {
+      const seams: IntegrateSeams = {
+        // SC2: kernel-context injection seams. Both bounces build their rebound
+        // context from these so tests keep a mock launch/transition/fallback
+        // port instead of a real agent, git, or Forgejo.
+        startAgentFn: options.startAgentFn ?? ports.agents.startAgent,
+        transitionTaskFn: options.transitionTaskFn ?? ports.backlog.transitionTask,
+        applyAgentFallbackFn: options.applyAgentFallbackFn ?? ports.agents.applyAgentFallback,
+        selectAgentFn: options.selectAgentFn ?? ports.agents.selectAgent,
+        workflowLauncherStatusFn: options.workflowLauncherStatusFn ?? ports.agents.workflowLauncherStatus,
+        routeIntegrationGateFailureFn: options.routeIntegrationGateFailureFn ?? ports.gates.routeIntegrationGateFailure,
+        ...(options.reReviewFn ? { reReviewFn: options.reReviewFn } : {}),
+      };
+      const state: IntegrateRunState = { temporaryStash: null, nextActionMessage: null };
+      try {
+        for (;;) {
+          try {
+            exitCode = await runIntegration(slug, request, options, seams, state);
+            break;
+          } catch (error) {
+            if (!(error instanceof IntegrationRestartRequired)) { throw error; }
+            // The persisted integration-gate rebound budget bounds repairs. A
+            // restart retains review orchestration and refreshes every fact.
+            fmt.log.info(`Restarting integration of ${slug} on the re-reviewed revision.`);
+          }
+        }
+      } catch (error) {
+        // Report and fail. Rethrowing here is swallowed by the terminal exit
+        // port call below, which would end the run with a success code and no
+        // output at all.
+        if (!landing.isAbort(error)) {
+          fmt.log.fail(`Integration failed: ${(error as Error)?.message || String(error)}`);
+          if ((error as Error)?.stack) {
+            fmt.log.fail(String((error as Error).stack));
+          }
+        }
+        exitCode = 1;
+      }
+      exitCode = Math.max(exitCode, restoreTemporaryStash(slug, state.temporaryStash));
+      if (state.nextActionMessage) {
+        fmt.log.info(state.nextActionMessage);
+      }
+    } finally {
+      await releaseIntegration();
     }
     exitFn(exitCode);
     return { exitCode };

@@ -118,10 +118,10 @@ test('findStaleMissionWorktrees returns cleanup command for done task', () => {
   });
   assert.equal(stale.length, 1);
   assert.equal(stale[0].slug, 'task-done');
-  assert.equal(stale[0].cleanupCommand, 'git worktree remove /home/magnus/code/repo-task-done && git branch -D mission/task-done');
+  assert.equal(stale[0].cleanupCommand, 'px integrate task-done --recover-landed');
 });
 
-test('findStaleMissionWorktrees returns git remove command for missing task file', () => {
+test('findStaleMissionWorktrees directs missing-task closeout through integrate recovery', () => {
   const stale = findStaleMissionWorktrees({
     primaryWorktree: '/home/magnus/code/repo',
     gitRun() {
@@ -145,8 +145,7 @@ test('findStaleMissionWorktrees returns git remove command for missing task file
   assert.equal(stale.length, 1);
   assert.equal(stale[0].slug, 'task-orphan');
   assert.equal(stale[0].taskStatus, 'missing');
-  assert.ok(stale[0].cleanupCommand.includes('git worktree remove'));
-  assert.ok(stale[0].cleanupCommand.includes('git branch -D'));
+  assert.equal(stale[0].cleanupCommand, 'px integrate task-orphan --recover-landed');
 });
 
 test('status prints mission details and agent matrix for inferred slug', async () => {

@@ -111,7 +111,9 @@ const child = spawn(testNode, suiteNodeArgs, {
 });
 let unitTestExceeded = false;
 let reporterOutput = '';
+let outputBytes = 0;
 child.stdout.on('data', (chunk: Buffer) => {
+  outputBytes += chunk.length;
   process.stdout.write(chunk);
   if (!runsIntegrationSuite) {
     reporterOutput = (reporterOutput + chunk.toString()).slice(-4096);
@@ -180,8 +182,13 @@ child.on('close', (code, signal) => {
   if (signal !== null) {
     // The group was terminated by the watchdog or a forwarded signal; a
     // terminated suite is a failed suite.
+    console.error(`[suite-process] test runner terminated by ${signal} after ${Math.round(suiteElapsedMs)}ms`);
     cleanupRunnerTempRoots(testManifestDir);
     process.exit(exitCodeAfterKill);
+  }
+
+  if (code !== 0 && outputBytes === 0) {
+    console.error(`[suite-process] test runner exited ${code} after ${Math.round(suiteElapsedMs)}ms without stdout`);
   }
 
   // Suite-level budget enforcement (unit suite only).

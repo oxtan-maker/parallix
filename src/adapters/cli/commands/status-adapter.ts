@@ -87,10 +87,9 @@ function findStaleMissionWorktrees(opts: {
         path: entry.path,
         branch: branchRef,
         taskStatus: taskStatus || 'missing',
-        // SC5: no `scripts/cleanup-mission-worktree.sh` exists on disk. The
-        // cleanup is the same local git one-liner for every stranded mission
-        // worktree, so the hint must name a real git command.
-        cleanupCommand: `git worktree remove ${entry.path} && git branch -D ${missionBranchName(slug, opts.primaryWorktree || process.cwd())}`,
+        // Recovery verifies the landed commit and completes stats and hooks
+        // before removing a worktree left by interrupted closeout.
+        cleanupCommand: `px integrate ${slug} --recover-landed`,
       };
     })
     .filter(Boolean) as StatusStaleWorktree[];

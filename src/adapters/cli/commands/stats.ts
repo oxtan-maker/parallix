@@ -62,11 +62,11 @@ import * as fs from 'node:fs';
 import * as fmt from '../../../application/presentation/cli-format.js';
 import { statsCohorts, resolveOperatorRepositories } from './stats-cohorts.js';
 import { ConcreteMetricsReadAdapter, missionCohortMetadata } from '../../../application/projections/metrics-read-adapter.js';
-import { resolveTaskFile, getTaskClassification } from '../../backlog/backlog.js';
 import { resolveCanonicalRepositoryId } from '../../git/repository-identity.js';
 import * as forgejo from '../../forgejo/forgejo.js';
 import * as statsReport from './stats-report.js';
 import { resolveMeasurementStore } from '../../sqlite/measurement-store.js';
+import { resolveMissionClassification } from './mission-classification.js';
 import { StatsCommandUseCase } from '../../../application/stats-command-use-case.js';
 import type { StatsWorkflowPort } from '../../../application/ports/cli-workflows.js';
 // Report rendering lives in its own module (task-2369.02). Re-exported below so
@@ -421,60 +421,27 @@ async function deriveImplementerAndFixRounds(slug, rootDir = process.cwd(), miss
 }
 
 /**
- * @param {string} slug
- * @param {string} [rootDir]
+ * Resolve classification from the Mission aggregate used by integration.
+ * Missing, unreadable, or unclassified state is an error.
  */
-// @ts-ignore -- retained reporting helper is dynamically typed
-function resolveMissionClassification(slug, rootDir = process.cwd()) {
-  const resolution = resolveTaskFile(slug, rootDir);
-  if (!resolution.ok) {
-    return {
-      classification: null,
-      taskFile: null,
-      error: `Could not resolve backlog task for ${slug}.`,
-    };
-  }
-
-// @ts-ignore -- task resolution guarantees a task file for successful lookups
-  const classification = normalizeClassification(getTaskClassification(resolution.taskFile) || '');
-  if (!classification) {
-    return {
-      classification: null,
-      taskFile: resolution.taskFile,
-      error: `Missing or invalid classification for ${slug}; expected exactly one of ai_sdlc, user_value, or unknown in the labels of ${resolution.taskFile}. Fix: add exactly one of those labels and do not use a separate frontmatter field for mission type.`,
-    };
-  }
-
-  return {
-    classification,
-    taskFile: resolution.taskFile,
-  };
-}
-
-/**
- * Resolve classification from a readable Mission aggregate for every identity.
- * A single valid label is returned; a populated aggregate without exactly one
- * returns `''` so callers reject stale state, while `undefined` means the store
- * is unavailable or carries legacy empty labels and a compatible fallback may run.
- */
-async function resolveAdhocClassification(slug: string, missionStore: MissionStore) {
-  if (!missionStore) {return undefined;}
+async function resolveStoredMissionClassification(slug: string, missionStore: MissionStore) {
+  if (!missionStore) {throw new Error('Mission store is required for statistics classification.');}
+  let result;
   try {
-    const result = await missionStore.load(missionId(slug));
-    if (result.kind === 'found') {
-      const classifications = (result.mission.labels || [])
-        .map((label: string) => String(label).toLowerCase())
-        .filter((label: string) => isValidClassification(label));
-      if (classifications.length === 1) {return classifications[0];}
-      // Empty labels are legacy fixture/projection compatibility data. A
-      // populated aggregate with no single classification is invalid and must
-      // not be masked by a provider task.
-      return result.mission.labels?.length ? '' : undefined;
-    }
-  } catch (_) {
-    // A store read failure falls through to null; the caller keeps its failure path.
+    result = await missionStore.load(missionId(slug));
+  } catch (error) {
+    throw new Error(`Cannot read Mission ${slug} from px database for statistics: ${(error as Error).message || String(error)}`);
   }
-  return undefined;
+  if (result.kind !== 'found') {
+    throw new Error(`Mission ${slug} is absent from the px database; cannot record statistics.`);
+  }
+  const classifications = (result.mission.labels || [])
+    .map((label: string) => String(label).toLowerCase())
+    .filter((label: string) => isValidClassification(label));
+  if (classifications.length !== 1) {
+    throw new Error(`Mission ${slug} requires exactly one classification in px state. Fix: px classification set --value <ai_sdlc|user_value|unknown> --expected-version <n>.`);
+  }
+  return classifications[0];
 }
 
 /**
@@ -529,13 +496,7 @@ async function recordIntegrationStats(options = {}) {
     );
   }
 
-  // Mission labels are authoritative for every identity. Provider task files
-  // are deliberately not a fallback: closeout may have removed them.
-  const classification = await resolveAdhocClassification(slug, missionStore)
-    ?? resolveMissionClassification(slug, rootDir).classification;
-  if (!classification) {
-    throw new Error(`Cannot record integration stats for ${slug}: missing classification`);
-  }
+  const classification = await resolveStoredMissionClassification(slug, missionStore);
   const implementerInfo = await deriveImplementerAndFixRounds(slug, rootDir, missionStore);
  const result = upsertMeasurementRow({
     date,

@@ -45,7 +45,7 @@ function createFakeStore(status: MissionStatus) {
     id: missionId(SLUG),
     repositoryId: repositoryId('parallix'),
     title: 'fixture',
-    labels: [],
+    labels: ['ai_sdlc'],
     assignee: 'codex',
     checkpoints: [],
     review: status === 'review'

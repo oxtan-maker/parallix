@@ -707,13 +707,15 @@ export async function importLegacyMissions(
   importable += await importLegacyReviewLaunches(services, options, commit, conflicts);
   importable += await importLegacyMissionDocuments(services, options, commit, conflicts);
 
-  // Older Mission rows can be complete while missing the closure timestamp.
-  // Their durable transition event supplies the date; no task-file guess is
-  // needed and no new review/checkpoint evidence is invented.
+  // Repair only legacy-imported rows. A native Mission can be `done` with no
+  // closedAt while integration finishes stats, cleanup, and the post hook;
+  // import-legacy must not close that in-flight delivery from its lane event.
   if (services.store.loadByRepository && services.store.findTransitions) {
     const missions = await services.store.loadByRepository(services.repositoryId);
     for (const mission of missions) {
-      if (mission.status !== 'done' || mission.closedAt !== null || bySourceId.has(mission.id.toUpperCase())) { continue; }
+      if (mission.status !== 'done' || mission.closedAt !== null
+        || mission.externalTaskRef?.source !== LEGACY_TASK_SOURCE
+        || bySourceId.has(mission.id.toUpperCase())) { continue; }
       const transitions = await services.store.findTransitions(mission.id);
       const doneAt = [...transitions].reverse().find(event => event.toStatus === 'done' && event.occurredAt)?.occurredAt;
       if (!doneAt || Number.isNaN(Date.parse(doneAt))) {

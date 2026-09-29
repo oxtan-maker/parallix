@@ -326,11 +326,9 @@ export function availableBoardCommands(
     // been created yet. Once draft work exists the mission has moved on, and
     // re-drafting is refused by the dispatch backstop, not the projection.
     availability('draft', open && mission.status === 'backlog', 'Draft is available only while the mission is in the pre-draft (backlog) state', 'refined', 'draft ▸'),
-    // Cancellation is offered for every mission the store still holds: an
-    // abandoned mission is precisely one no other command can move. It is last
-    // so a renderer that picks the first enabled action never picks the
-    // destructive one, and it targets no lane — cancel is not a lane move.
-    availability('cancel', true, 'Cancellation is always available for a persisted mission', null, 'cancel ✕'),
+    // A delivered Mission may still be finishing statistics and cleanup.
+    // Cancellation must never delete its lifecycle record mid-closeout.
+    availability('cancel', mission.status !== 'done', 'Delivered missions must finish integration closeout', null, 'cancel ✕'),
   ];
 }
 

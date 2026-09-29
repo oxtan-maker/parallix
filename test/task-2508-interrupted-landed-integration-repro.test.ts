@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import { printIntegrationPreflight } from '../src/adapters/cli/commands/integrate.js';
-import { cleanupMissionWorktree, persistLandedIntegrationOrAbort } from '../src/adapters/cli/commands/integrate-post.js';
+import { cleanupMissionWorktree, persistLandedIntegrationOrAbort, closeLandedIntegrationOrAbort } from '../src/adapters/cli/commands/integrate-post.js';
 import { conventionalWorktreePath } from '../src/adapters/filesystem/mission-utils.js';
 import status from '../src/adapters/cli/commands/status.js';
 
@@ -45,7 +45,7 @@ test('printIntegrationPreflight does not fail on a merged PR for a landed integr
   assert.ok(preflight('review').failures.includes('pr-merged'));
 });
 
-test('persistLandedIntegrationOrAbort closes an interrupted landing once', async () => {
+test('interrupted landing decides delivery once and closes after retry', async () => {
   const calls = [];
   let mission = { status: 'integration', closedAt: null, assignee: 'codex' };
   const services = {
@@ -66,6 +66,9 @@ test('persistLandedIntegrationOrAbort closes an interrupted landing once', async
 
   await persistLandedIntegrationOrAbort('task-2508', 'landed-sha', services, { landedAt: '2026-09-14T10:00:00.000Z' });
   await persistLandedIntegrationOrAbort('task-2508', 'landed-sha', services, { landedAt: '2026-09-14T10:00:00.000Z' });
+  assert.equal(mission.closedAt, null);
+  await closeLandedIntegrationOrAbort('task-2508', 'landed-sha', services);
+  await closeLandedIntegrationOrAbort('task-2508', 'landed-sha', services);
 
   assert.deepEqual(calls.map(([kind]) => kind), ['decide', 'close']);
   assert.equal(calls[0][1].idempotencyKey, 'integrate:task-2508:landed-sha');
@@ -73,7 +76,7 @@ test('persistLandedIntegrationOrAbort closes an interrupted landing once', async
   assert.notEqual(mission.closedAt, null);
 });
 
-test('cleanupMissionWorktree removes an interrupted landing once', () => {
+test('cleanupMissionWorktree accepts a retry after worktree and branch removal', () => {
   const rootDir = '/tmp/task-2508-root';
   const worktree = conventionalWorktreePath('task-2508', rootDir);
   let branchExists = true;
@@ -88,7 +91,7 @@ test('cleanupMissionWorktree removes an interrupted landing once', () => {
   const options = { rootDir, gitRunner, existsSync: target => target === worktree && worktreeExists, removeDir: () => { worktreeExists = false; } };
 
   assert.equal(cleanupMissionWorktree('task-2508', options), true);
-  assert.equal(cleanupMissionWorktree('task-2508', options), false);
+  assert.equal(cleanupMissionWorktree('task-2508', options), true);
 });
 
 test('px status reports the authoritative done lifecycle', async () => {

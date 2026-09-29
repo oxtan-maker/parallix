@@ -15,6 +15,8 @@ function baseOptions(overrides: Record<string, unknown> = {}) {
     findSquashCommit: () => 'abc123',
     recoverMissionForIntegration: async () => ({ status: 'integration' }),
     persistLandedIntegrationOrAbort: async () => {},
+    recordPostIntegrationStatsOrAbort: async () => {},
+    closeLandedIntegrationOrAbort: async () => {},
     cleanupMissionWorktree: () => true,
     runPostIntegrateHookOrAbort: (_slug: string, _options: unknown) => {},
     createAbort: () => new Error('IntegrationAbort'),
@@ -27,13 +29,17 @@ test('recovered landed integration runs the post-integrate hook after persisting
   const calls: Array<{ stage: string, slug?: string, options?: unknown }> = [];
   await recoverLandedIntegration('task-2551', missionServices, '/work/base', baseOptions({
     persistLandedIntegrationOrAbort: async () => { calls.push({ stage: 'persist' }); },
+    recordPostIntegrationStatsOrAbort: async () => { calls.push({ stage: 'stats' }); },
     cleanupMissionWorktree: () => { calls.push({ stage: 'cleanup' }); return true; },
     runPostIntegrateHookOrAbort: (slug: string, options: unknown) => { calls.push({ stage: 'hook', slug, options }); },
+    closeLandedIntegrationOrAbort: async () => { calls.push({ stage: 'close' }); },
   }));
   assert.deepEqual(calls, [
     { stage: 'persist' },
+    { stage: 'stats' },
     { stage: 'cleanup' },
     { stage: 'hook', slug: 'task-2551', options: { baseWorktree: '/work/base', baseBranch: 'main', variant: 'variant-b-resumed' } },
+    { stage: 'close' },
   ]);
 });
 
@@ -45,3 +51,62 @@ test('recovered landed integration surfaces a post-integrate hook failure as an 
     /Post-integrate hook failed/,
   );
 });
+
+test('recovered landed integration stops before cleanup when statistics cannot be recorded', async () => {
+  let cleaned = false;
+  await assert.rejects(
+    recoverLandedIntegration('task-2551', missionServices, '/work/base', baseOptions({
+      recordPostIntegrationStatsOrAbort: async () => { throw new Error('classification missing'); },
+      cleanupMissionWorktree: () => { cleaned = true; return true; },
+    })),
+    /classification missing/,
+  );
+  assert.equal(cleaned, false);
+});
+
+for (const interruptedAfter of ['stats', 'cleanup'] as const) {
+  test(`landed closeout resumes after interruption following ${interruptedAfter}`, async () => {
+    let closedAt: string | null = null;
+    let worktreePresent = true;
+    let measurementCount = 0;
+    let closeCalls = 0;
+    let interrupt = true;
+    const effects: string[] = [];
+    const options = baseOptions({
+      recoverMissionForIntegration: async () => ({ status: 'done' }),
+      persistLandedIntegrationOrAbort: async () => { effects.push('decide'); },
+      recordPostIntegrationStatsOrAbort: async () => {
+        effects.push('stats');
+        if (measurementCount === 0) { measurementCount = 1; }
+      },
+      cleanupMissionWorktree: () => {
+        effects.push('cleanup');
+        if (interrupt && interruptedAfter === 'stats') { throw new Error('interrupted after stats'); }
+        worktreePresent = false;
+        return true;
+      },
+      runPostIntegrateHookOrAbort: () => {
+        effects.push('hook');
+        if (interrupt && interruptedAfter === 'cleanup') { throw new Error('interrupted after cleanup'); }
+      },
+      closeLandedIntegrationOrAbort: async () => {
+        closeCalls++;
+        closedAt = '2026-09-28T10:00:00Z';
+        effects.push('close');
+      },
+    });
+
+    await assert.rejects(recoverLandedIntegration('task-2551', missionServices, '/work/base', options), /interrupted after/);
+    assert.equal(closedAt, null, 'administrative closure waits for all closeout steps');
+    assert.equal(measurementCount, 1);
+    assert.equal(worktreePresent, interruptedAfter === 'stats');
+
+    interrupt = false;
+    await recoverLandedIntegration('task-2551', missionServices, '/work/base', options);
+    assert.equal(measurementCount, 1, 'retry preserves the single integration measurement');
+    assert.equal(worktreePresent, false);
+    assert.equal(closeCalls, 1);
+    assert.ok(closedAt);
+    assert.equal(effects.at(-1), 'close');
+  });
+}

@@ -303,6 +303,8 @@ async function seedInflightMission(fixtureRoot: string, stateRoot: string): Prom
     () => services.brief.setSuccessCriteria({ ...context, operationId: `${SC3_SLUG}-criteria`, criteria: ['The fixture shuts down'] }),
     () => services.brief.setGates({ ...context, operationId: `${SC3_SLUG}-gates`, gates: ['npm test'] }),
     () => services.brief.setPredictedNelBucket({ ...context, operationId: `${SC3_SLUG}-nel`, bucket: 'Small' }),
+    // Classification is Mission state; startup preflight reads it, not the task label (TASK-2601).
+    () => services.brief.setClassification({ ...context, operationId: `${SC3_SLUG}-classification`, classification: 'ai_sdlc' }),
     () => services.checkpoints.plan({ ...context, operationId: `${SC3_SLUG}-plan`, name: 'CP-1', description: 'Shut down' }),
   ]) {
     assert.equal((await write() as { status: string }).status, 'completed', 'the fixture contract must be recorded before refine');

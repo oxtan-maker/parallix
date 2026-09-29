@@ -569,6 +569,22 @@ the reviewer's behalf and the superseded approval stays in the review history.
 When the new round is approved, `px integrate` starts over once on the approved
 revision; otherwise it stops before the merge with the review outcome.
 
+Only one `px integrate` process may run for a mission at a time. A second run
+stops before reading or changing mission state and asks the operator to retry
+after the first finishes. After a commit lands, `px status` shows `done` and
+`Closeout: pending` until worktree cleanup and the post-integration hook succeed;
+`Closed at` is recorded only then. Repeating `px integrate` for an already
+closed mission confirms its landed commit and returns without running gates or
+merging again when cleanup is complete. If its branch or worktree remains, the
+command reports the incomplete closeout and directs the operator to
+`--recover-landed` after preserving any work in that worktree.
+The explicit recovery command also repairs older landed missions that were
+already marked closed before statistics or cleanup finished. It requires a
+classified Mission in the px database and proof of the landed commit; it keeps
+the original `Closed at` time and does not rerun gates or merge. For those old
+records, the branch and worktree remain until the post-integration hook
+succeeds, so a failed hook leaves a visible retry path.
+
 Three guarantees govern that bounce:
 
 - **A bounce counts as fixed only when the failing check passes again.** After

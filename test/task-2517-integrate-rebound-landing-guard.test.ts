@@ -9,6 +9,40 @@ import assert from 'node:assert/strict';
 import { createSquashLanding } from '../src/application/integrate/squash.js';
 import { createGithubPrLanding } from '../src/application/integrate/github-pr.js';
 
+for (const failedStep of ['stats', 'cleanup', 'hook', 'none']) {
+  test(`landed mission closes only after post-merge effects: ${failedStep}`, async () => {
+    const effects: string[] = [];
+    const abort = new Error('closeout failed');
+    const { finishLanding } = createSquashLanding({
+      productConfig: { isForgejoReviewEnabled: () => false },
+      fileSystem: { existsSync: () => false },
+      git: { git: () => ({ status: 0, stdout: '', stderr: '' }) },
+      checkout: { maybeUpdateGraphifyOnPrimary: () => {} },
+      landing: {
+        createAbort: () => abort,
+        persistLandedIntegrationOrAbort: async () => { effects.push('decide'); },
+        recordPostIntegrationStatsOrAbort: async () => { effects.push('stats'); if (failedStep === 'stats') { throw abort; } },
+        cleanupMissionWorktree: () => { effects.push('cleanup'); return failedStep !== 'cleanup'; },
+        runPostIntegrateHookOrAbort: () => { effects.push('hook'); if (failedStep === 'hook') { throw abort; } },
+        closeLandedIntegrationOrAbort: async () => { effects.push('close'); },
+      },
+    } as never, { promoteTaskForIntegrationIfNeeded: async () => {} });
+    const run = {
+      slug: 'task-closeout', context: {},
+      missionServices: { store: { load: async () => ({ kind: 'found', mission: { status: 'integration' } }) } },
+      baseWorktree: '/tmp/base', baseBranch: 'main', seams: {},
+      state: { temporaryStash: null, nextActionMessage: null },
+    } as never;
+    const landing = finishLanding(run, { branch: 'mission/task-closeout', mergedCommit: 'abc', stepLabel: 'test', variant: 'variant-b' });
+    if (failedStep === 'none') { await landing; }
+    else { await assert.rejects(landing, error => error === abort); }
+    assert.deepEqual(effects, failedStep === 'stats' ? ['decide', 'stats']
+      : failedStep === 'cleanup' ? ['decide', 'stats', 'cleanup']
+      : failedStep === 'hook' ? ['decide', 'stats', 'cleanup', 'hook']
+        : ['decide', 'stats', 'cleanup', 'hook', 'close']);
+  });
+}
+
 test('TASK-2517: rebounded landing aborts before Forgejo sync when the lane is ineligible', async () => {
   const effects: string[] = [];
   const abort = new Error('IntegrationAbort');
