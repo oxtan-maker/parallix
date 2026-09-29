@@ -31,6 +31,7 @@ import * as rebaseWorkflow from '../../rebase/rebase-workflow-adapter.js';
 import * as repositoryGates from '../../config/repository-gates.js';
 import * as gates from './integrate-gates.js';
 import * as integrationGateRebound from './integrate-gate-rebound.js';
+import * as reviewResume from './integrate-review-resume.js';
 import * as conflict from './integrate-conflict.js';
 import * as post from './integrate-post.js';
 import type { IntegrateGitRunner, IntegrateWorkflowPorts } from '../../../application/ports/integrate-workflow.js';
@@ -128,6 +129,7 @@ export function createIntegratePorts(): IntegrateWorkflowPorts {
       readReviewState: (slug, rootDir, missionStore) => reviewState.readReviewState(slug, rootDir, missionStore),
       submitForReview: (slug, skipGate, options) => reviewCommands.submitForReview(slug, skipGate, options),
       resolveForgejoUser: reviewer => reviewAdapter.resolveForgejoUser(reviewer),
+      startReviewRound: (slug, options) => reviewResume.startAutoReviewRound(slug, options),
     },
     rebase: {
       createRebaseWorkflowPort: options => rebaseWorkflow.createRebaseWorkflowPort(options),

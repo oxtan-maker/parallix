@@ -17,8 +17,9 @@
 //     could be named, which is the pre-TASK-2492 abort behaviour.
 //  4. `revision-changed` — the repair worked, but it changed the mission diff
 //     the reviewer approved. The standing approval is retracted on the pull
-//     request and the integration attempt stops, so the reviewer decides on
-//     the revision that actually lands (TASK-2528).
+//     request (TASK-2528) and the integration gate step resumes review of the
+//     repaired revision automatically (TASK-2550), continuing through the
+//     merge in the same invocation when that revision is approved.
 //
 // The dependency direction matches `integrate-gates.ts`: `integrate.ts` imports
 // from here, never the other way round.
@@ -274,6 +275,14 @@ async function routeFixedIntegrationGateRebound({
   }
   if (!(opts.reReviewFollows && invalidation.ok)) {
     error(fmt.status('INFO', `${opts.slug} must go back through review: run px review ${opts.slug} --continue to review the repaired revision ${repairedLabel} and resume integration.`));
+  }
+  // TASK-2550: the consumer (the integration gate step) now resumes the
+  // review of the repaired revision automatically; the route no longer tells
+  // the operator to re-run px review by hand. It reports the fact, and the
+  // gate step reports the action it takes (or the fallback when no reviewer
+  // can be named).
+  if (opts.reReviewFollows && invalidation.ok) {
+    log(fmt.status('INFO', `The repair is recoverable: the workflow resumes review of the repaired revision ${repairedLabel} automatically (automatic revbounce).`));
   }
   return { route: 'revision-changed', rebounds, approvedRevision: approvedLabel, repairedRevision: repairedLabel, invalidation };
 }

@@ -132,6 +132,16 @@ test('TASK-2528: an unchanged retry after the same integration error still lands
   assert.deepEqual(h.invalidations, [], 'an unchanged retry never retracts the approval');
 });
 
+test('TASK-2528: a pre-retracted approval cannot take the fixed route even when the tree is unchanged', async () => {
+  const h = harness();
+  const route = await routeIntegrationGateFailure({
+    ...routeArgs(h, false),
+    reactivateMissionFn: async () => true,
+  });
+  assert.equal(route.route, 'revision-changed');
+  assert.equal(h.invalidations.length, 1);
+});
+
 // ── Retraction targets the account that actually holds the approval ──────────
 
 test('TASK-2528: only the logins holding a standing approval are retracted', () => {

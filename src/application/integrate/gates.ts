@@ -7,7 +7,17 @@ import * as fmt from '../presentation/cli-format.js';
 import { missionId } from '../../domain/mission.js';
 import { integrationRepairNeedsReview } from '../integration-repair-review.js';
 import { abortWith, resolveBounceImplementer, type BounceSeams } from './support.js';
-import type { IntegrateGatesPort, IntegrateWorkflowPorts } from '../ports/integrate-workflow.js';
+import type { IntegrateGatesPort, IntegrateLandingPort, IntegrateWorkflowPorts } from '../ports/integrate-workflow.js';
+
+/** The review-resume seam's input: one new review round for one repaired revision. */
+export interface ReviewResumeOptions {
+  slug: string;
+  branch: string;
+  /** The mission worktree the repaired revision is committed on. */
+  worktree: string;
+  /** The post-repair revision the new review round must cover. */
+  revision: string;
+}
 
 export interface IntegrateSeams extends BounceSeams {
   routeIntegrationGateFailureFn: IntegrateGatesPort['routeIntegrationGateFailure'];
@@ -17,6 +27,13 @@ export interface IntegrateSeams extends BounceSeams {
    * Absent, a changed revision stops integration for the operator to re-review.
    */
   reReviewFn?: (_slug: string, _worktree: string) => Promise<boolean>;
+  /**
+   * Review-resume seam (TASK-2550): resumes the rebound round through the
+   * existing review pipeline and returns the reviewer selected by handoff.
+   */
+  resumeReviewFn?: (_options: ReviewResumeOptions) => Promise<string> | string;
+  /** Re-reads the provider approval for the mission branch after the auto re-review. */
+  readApprovalFn?: (_branch: string, _options: Record<string, unknown>) => any;
 }
 
 /**
@@ -43,7 +60,7 @@ export interface GateStepRequest {
   seams: IntegrateSeams;
 }
 
-export function createIntegrationGateStep({ gates, landing, verification }: IntegrateWorkflowPorts) {
+export function createIntegrationGateStep({ gates, landing, verification, forgejo }: IntegrateWorkflowPorts) {
   /**
    * Returns the Verification evidence the readiness view reports: exactly what
    * ran, never "passed" without a gate result behind it.
@@ -173,7 +190,7 @@ export function createIntegrationGateStep({ gates, landing, verification }: Inte
         taskResolution: context.task,
         missionStore: missionServices.store,
       }),
-      reReviewFollows: Boolean(seams.reReviewFn),
+      reReviewFollows: Boolean(seams.reReviewFn || seams.resumeReviewFn),
     });
     if (route.route === 'revision-changed' && seams.reReviewFn) {
       // A failed provider projection cannot restore the withdrawn local
@@ -183,11 +200,27 @@ export function createIntegrationGateStep({ gates, landing, verification }: Inte
         await reReviewRepairedRevision(slug, checkout, route.repairedRevision ?? 'unknown', seams.reReviewFn);
       }
     }
+    if (route.route === 'revision-changed' && !seams.reReviewFn) {
+      if (!route.invalidation?.ok) {
+        throw abortWith(landing, `The approval for ${slug}'s superseded revision could not be retracted. Aborting before merge.`);
+      }
+      return await resumeReviewAfterRepairedRevision({
+        slug,
+        branch: context.branch,
+        worktree: checkout,
+        repairedRevision: route.repairedRevision ?? 'unknown',
+        context,
+        seams,
+        landing,
+        readApproval: seams.readApprovalFn ?? ((branch: string, options: Record<string, unknown>) => forgejo.getLatestReviewDecision(branch, options)),
+      });
+    }
     if (route.route !== 'fixed') {
       throw abortWith(landing, `Aborting before merge. Resume the repair review with px review ${slug} --continue; approval restarts integration.`);
     }
-    // A red gate withdrew the approval, even when the repaired tree is
-    // unchanged. Complete a fresh review before any integration work resumes.
+    // A route may report `fixed` only if approval was never retracted. Restore
+    // the original lifecycle guard so an injected or legacy route cannot
+    // claim a green gate while the mission is still in its active repair lane.
     const repaired = await missionServices.store.load(missionId(slug));
     if (repaired.kind !== 'found') { throw abortWith(landing, `Mission ${slug} is unavailable after integration repair.`); }
     if (integrationRepairNeedsReview(repaired.mission) && seams.reReviewFn) {
@@ -222,4 +255,70 @@ export function createIntegrationGateStep({ gates, landing, verification }: Inte
   }
 
   return { runRequiredLocalGates };
+}
+
+/**
+ * The automatic revbounce (TASK-2550). The integration-gate repair changed
+ * the approved revision, so the standing approval was already retracted by
+ * the route (TASK-2528). Instead of dead-ending with the human "must go back
+ * through review" abort, the workflow resumes the rebound's round through
+ * the existing review pipeline and re-reads the
+ * approval for that revision. An approval of the repaired revision continues
+ * the integration through the merge in the same invocation; anything else
+ * aborts before any merge. The TASK-2528 invariant holds because every
+ * standing approval was retracted before the resume, the review pipeline
+ * pushes the repaired revision before the reviewer decides, and the merge
+ * proceeds only on the re-read approval of that same revision.
+ */
+async function resumeReviewAfterRepairedRevision(options: {
+  slug: string;
+  branch: string;
+  worktree: string;
+  repairedRevision: string;
+  context: any;
+  seams: IntegrateSeams;
+  landing: IntegrateLandingPort;
+  readApproval: (_branch: string, _options: Record<string, unknown>) => any;
+}): Promise<string> {
+  const { slug, branch, worktree, repairedRevision, context, seams, landing, readApproval } = options;
+  const reviewer = context.configuredReviewer ?? null;
+  if (!reviewer || !seams.resumeReviewFn) {
+    throw abortWith(
+      landing,
+      `${slug} must go back through review: run px review ${slug} --start and have the repaired revision ${repairedRevision} re-reviewed before integrating again.`
+      + (reviewer ? ' The automatic re-review is unavailable in this invocation.' : ' No configured reviewer could be named for approval retraction.'),
+    );
+  }
+  fmt.log.info(`Automatic revbounce: resuming review for ${slug}'s repaired revision ${repairedRevision}...`);
+  const reviewStartedAt = new Date().toISOString();
+  const assignedReviewer = await seams.resumeReviewFn({ slug, branch, worktree, revision: repairedRevision });
+  if (!assignedReviewer) {
+    throw abortWith(landing, `Automatic re-review of ${slug} did not record a reviewer for the repaired revision ${repairedRevision}. Aborting before merge.`);
+  }
+  const freshApproval = readApproval(branch, {
+    forgejoUser: context.forgejoUser ?? undefined,
+    token: context.forgejoToken ?? undefined,
+    reviewerUser: assignedReviewer,
+    sinceIso: reviewStartedAt,
+  });
+  // The re-read is the current provider state for the branch: it replaces the
+  // retracted approval in the context on every outcome, so a stale pre-repair
+  // APPROVED can never linger into the downstream recovery.
+  context.approval = freshApproval;
+  if (freshApproval?.ok === true && freshApproval?.reviewState === 'APPROVED' && freshApproval?.reviewerApproved === true) {
+    // The re-read approval covers the repaired revision: it is the latest
+    // formal decision on the branch the review pipeline pushed, posted after
+    // every standing approval was retracted.
+    fmt.log.pass(`Automatic re-review approved the repaired revision ${repairedRevision}; restarting integration with fresh approval and gate state.`);
+    throw new IntegrationRestartRequired(slug);
+  }
+  const state = freshApproval?.ok === true
+    ? (freshApproval?.reviewState === 'APPROVED' && freshApproval?.reviewerApproved !== true
+      ? `APPROVED by someone other than the assigned reviewer ${assignedReviewer}`
+      : (freshApproval?.reviewState ?? 'no formal review yet'))
+    : `unreadable (${freshApproval?.error ?? 'unknown error'})`;
+  throw abortWith(
+    landing,
+    `Automatic re-review of ${slug}'s repaired revision ${repairedRevision} did not approve (latest review state: ${state}). The integration does not merge: ${slug} stays out of the integration lane until that revision is approved. Run px review ${slug} --continue to resolve the review, then px integrate ${slug}.`,
+  );
 }

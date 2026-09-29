@@ -338,6 +338,12 @@ export function createIntegrateWorkflow(ports: IntegrateWorkflowPorts) {
         workflowLauncherStatusFn: options.workflowLauncherStatusFn ?? ports.agents.workflowLauncherStatus,
         routeIntegrationGateFailureFn: options.routeIntegrationGateFailureFn ?? ports.gates.routeIntegrationGateFailure,
         ...(options.reReviewFn ? { reReviewFn: options.reReviewFn } : {}),
+        resumeReviewFn: options.resumeReviewFn ?? (review => ports.review.startReviewRound(review.slug, {
+          worktree: review.worktree,
+          revision: review.revision,
+          missionServicesFn: options.missionServicesFn!,
+        })),
+        readApprovalFn: options.readApprovalFn,
       };
       const state: IntegrateRunState = { temporaryStash: null, nextActionMessage: null };
       try {
