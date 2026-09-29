@@ -28,6 +28,26 @@ test('handoff use case completes the full workflow over mocked ports', async () 
   assert.ok(recorder.log.some(line => line.includes('Repository verification passed')), 'verification outcome is reported');
 });
 
+test('handoff use case advances after pre-review rebase accepts non-mission files', async () => {
+  const recorder = makeRecorder();
+  let rebaseCalls = 0;
+  const ports = makePorts(recorder, {
+    rebase: {
+      rebaseBeforeReviewRound: async () => {
+        rebaseCalls += 1;
+        return { ok: true, sharedFileConflicts: false, hookFailure: false };
+      },
+    },
+  });
+
+  const result = await new HandoffCommandUseCase(ports).performHandoff(SLUG, runOptions(recorder));
+
+  assert.equal(result.ok, true, recorder.errors.join('\n'));
+  assert.equal(rebaseCalls, 1);
+  assert.deepEqual(recorder.transitions, ['review']);
+  assert.equal(recorder.errors.some(line => line.includes('Rebase failed before handoff')), false);
+});
+
 test('recorded contract and evidence complete handoff without a metadata directory', async () => {
   const recorder = makeRecorder();
   const ports = makePorts(recorder);

@@ -523,12 +523,12 @@ Backlog lifecycle state changes are committed in the active mission worktree. Th
 The workflow harness automatically recovers from routine handoff hygiene issues after a successful execute-agent exit. When `px active <slug>` completes its execution phase, it attempts automated handoff. If handoff fails, the harness runs a repair step and retries exactly once before declaring failure.
 
 #### Repaired conditions:
-1. **Uncommitted mission artifacts**: If the worktree is dirty but only mission-owned files (the configured mission base dir for the repo, `backlog/tasks/<slug> - *`, or `backlog/completed/<slug> - *`) are modified, the harness automatically commits them with a deterministic message: `workflow(<slug>): auto-commit mission artifacts before handoff`.
+1. **Uncommitted mission artifacts**: The harness commits mission-owned files (the configured mission base dir for the repo, `backlog/tasks/<slug> - *`, or `backlog/completed/<slug> - *`) with a deterministic message: `workflow(<slug>): auto-commit mission artifacts before handoff`. Unrelated dirty files are left untouched and do not block that mission commit.
 2. **Branch behind primary branch (main)**: If the handoff fails because the branch is behind its remote (non-fast-forward), the harness automatically invokes `px rebase <slug>`.
 
 #### Hard blockers:
 Automatic repair is refused and the harness stops if:
-- Dirty files include paths outside the mission-owned set.
+- Git reports unmerged or conflicting files.
 - Rebase requires manual conflict resolution or agent assistance for shared files.
 - Handoff fails for non-hygiene reasons (missing checkpoints, missing `## Goal Check` evidence, failed verification gates).
 

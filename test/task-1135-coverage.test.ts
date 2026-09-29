@@ -52,10 +52,7 @@ test('commitSafeMissionArtifacts no longer treats a repo stats CSV as a safe mis
   assert.equal(typeof commitSafeMissionArtifactsCjs, 'function', 'commitSafeMissionArtifacts should be a function');
 });
 
-test('commitSafeMissionArtifacts commits the configured stats CSV the review loop writes', async () => {
-  // Regression: the review loop's own recordStageStatsSafe writes a row to the
-  // configured stats CSV; without treating it as a safe artifact the pre-rebase
-  // auto-commit aborts every multi-round mission with "non-mission paths".
+test('commitSafeMissionArtifacts leaves a non-mission stats CSV untouched', async () => {
   const added = [];
   const errors = [];
 
@@ -71,12 +68,12 @@ test('commitSafeMissionArtifacts commits the configured stats CSV the review loo
     error: m => errors.push(m)
   });
 
-  assert.equal(result.ok, false, 'a repo stats.csv is no longer a workflow-owned artifact');
+  assert.equal(result.ok, true, 'a repo stats.csv must not block a mission auto-commit');
   assert.deepEqual(added, [], 'nothing may be staged for a non-mission path');
-  assert.ok(errors.some(e => e.includes('stats.csv')), `Expected stats.csv to be reported; got: ${errors.join(' | ')}`);
+  assert.deepEqual(errors, []);
 });
 
-test('commitSafeMissionArtifacts still rejects genuinely non-mission paths', async () => {
+test('commitSafeMissionArtifacts leaves genuinely non-mission paths untouched', async () => {
   const errors = [];
 
   const result = await commitSafeMissionArtifacts(TEST_SLUG, '/tmp/worktree', {
@@ -89,8 +86,8 @@ test('commitSafeMissionArtifacts still rejects genuinely non-mission paths', asy
     error: m => errors.push(m)
   });
 
-  assert.equal(result.ok, false, 'Should refuse unrelated product code');
-  assert.ok(errors.some(e => e.includes('server/src/Main.java')), `Expected the offending path to be reported; got: ${errors.join(' | ')}`);
+  assert.equal(result.ok, true, 'unrelated product code must not block a mission auto-commit');
+  assert.deepEqual(errors, []);
 });
 
 test('postStaticReviewComment handles missing token', async () => {

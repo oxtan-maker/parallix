@@ -80,7 +80,7 @@ test('rebaseBeforeReviewRound auto-commits safe mission artifacts', async () => 
   });
 });
 
-test('rebaseBeforeReviewRound does NOT auto-commit unsafe files', async () => {
+test('rebaseBeforeReviewRound leaves unrelated dirty files untouched', async () => {
   await withTempGitRepo(async (root) => {
     const slug = 'task-1104';
     const unsafePath = path.join(root, 'unsafe.js');
@@ -92,22 +92,22 @@ test('rebaseBeforeReviewRound does NOT auto-commit unsafe files', async () => {
     // Make unsafe file dirty
     fs.writeFileSync(unsafePath, 'console.log(2)');
 
-    const errors = [];
     const runFn = mock.fn(() => ({ status: 1, stdout: '', stderr: 'dirty worktree' }));
 
     const result = await rebaseBeforeReviewRound(slug, {
       worktree: root,
       runFn,
-      error: m => errors.push(m)
+      isForgejoReviewEnabledFn: () => false,
+      error: m => assert.fail(`Should not have errored: ${m}`)
     });
 
-    assert.equal(result.ok, false);
+    assert.equal(result.ok, true);
 
-    // Verify NOT auto-committed
+    // Unrelated content remains outside the mission auto-commit.
     const statusRes = childProcess.spawnSync('git', ['status', '--porcelain'], { cwd: root, encoding: 'utf8' });
     const status = (statusRes.stdout || '').trim();
     assert.ok(status.includes('unsafe.js'), 'Unsafe file should still be dirty');
 
-    assert.ok(errors.some(m => m.includes('Worktree is dirty with unsafe or conflicted files')));
+    assert.equal(runFn.mock.callCount(), 0, 'standalone mode still skips the rebase workflow');
   });
 });

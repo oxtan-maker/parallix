@@ -128,14 +128,15 @@ test('rebaseBeforeReviewRound parses rename, copy, and space paths from porcelai
   assert.ok(gitCalls.some(args => args.includes('add') && args.includes(`docs/missions/2026/${slug}/path with space.md`)));
 });
 
-test('rebaseBeforeReviewRound refuses rename or copy records with unsafe sources', async () => {
-  const errors = [];
+test('rebaseBeforeReviewRound leaves rename records with unsafe sources unstaged', async () => {
+  const gitCalls = [];
   const slug = 'task-1107';
 
   const result = await rebaseBeforeReviewRound(slug, {
     worktree: '/tmp/worktree',
     isForgejoReviewEnabledFn: () => true,
     gitFn: (args) => {
+      gitCalls.push(args);
       if (args.includes('status')) {
         return {
           status: 0,
@@ -148,43 +149,41 @@ test('rebaseBeforeReviewRound refuses rename or copy records with unsafe sources
       }
       return { status: 0, stdout: '', stderr: '' };
     },
-    ...inProcessWorkflow([], { onRun: () => assert.fail('Should not have run rebase') }),
+    ...inProcessWorkflow([]),
     log: () => {},
-    error: message => errors.push(message)
+    error: message => assert.fail(`Should not have errored: ${message}`)
   });
 
-  assert.equal(result.ok, false);
+  assert.equal(result.ok, true);
   assert.equal(result.sharedFileConflicts, false);
   assert.equal(result.hookFailure, false);
-  assert.equal(result.failure.kind, 'unsafe-worktree');
-  assert.ok(errors.some(m => m.includes('workflow/lib/review/review.js')), 'Should list the unsafe rename source');
+  assert.equal(gitCalls.some(args => args.includes('add')), false, 'a mixed-safety rename must not be staged');
 });
 
-test('rebaseBeforeReviewRound refuses to auto-commit when unsafe files are present', async () => {
-  const logs = [];
-  const errors = [];
+test('rebaseBeforeReviewRound commits mission files despite non-mission files', async () => {
+  const gitCalls = [];
   const slug = 'task-1107';
 
   const result = await rebaseBeforeReviewRound(slug, {
     worktree: '/tmp/worktree',
     isForgejoReviewEnabledFn: () => true,
     gitFn: (args) => {
+      gitCalls.push(args);
       if (args.includes('status')) {
         return { status: 0, stdout: porcelainZ([` M docs/missions/2026/${slug}/MISSION.md`, ' M workflow/lib/review/review.js']), stderr: '' };
       }
       return { status: 0, stdout: '', stderr: '' };
     },
-    ...inProcessWorkflow([], { onRun: () => assert.fail('Should not have run rebase') }),
-    log: message => logs.push(message),
-    error: message => errors.push(message)
+    ...inProcessWorkflow([]),
+    log: () => {},
+    error: message => assert.fail(`Should not have errored: ${message}`)
   });
 
-  assert.equal(result.ok, false);
+  assert.equal(result.ok, true);
   assert.equal(result.sharedFileConflicts, false);
   assert.equal(result.hookFailure, false);
-  assert.equal(result.failure.kind, 'unsafe-worktree');
-  assert.ok(errors.some(m => m.includes('Cannot auto-commit: dirty files include non-mission paths')), 'Should report unsafe files');
-  assert.ok(errors.some(m => m.includes('workflow/lib/review/review.js')), 'Should list the unsafe file');
+  assert.ok(gitCalls.some(args => args.includes('add') && args.includes(`docs/missions/2026/${slug}/MISSION.md`)));
+  assert.equal(gitCalls.some(args => args.includes('add') && args.includes('workflow/lib/review/review.js')), false);
 });
 
 test('rebaseBeforeReviewRound ignores workflow-generated runtime state when checking for unsafe files', async () => {

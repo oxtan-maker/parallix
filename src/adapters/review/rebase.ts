@@ -99,22 +99,24 @@ export async function commitSafeMissionArtifacts(slug: string, worktree: string,
     || isMissionArtifactFn(file, slug, rootDir)
     || !!(resolvedTaskFile && file === resolvedTaskFile);
 
-  const unsafeFiles = dirtyFiles
-    .flatMap((f: { paths: string[] }) => f.paths)
-    .filter((file: string) => !isSafeToCommit(file));
-  if (unsafeFiles.length > 0) {
-    error(fmt.status('FAIL', `Cannot auto-commit: dirty files include non-mission paths:`));
-    unsafeFiles.forEach((file: string) => error(`       - ${file}`));
-    return { ok: false, dirty: true, unsafe: true, unsafeFiles };
+  // Unrelated dirty files belong to the caller and must remain untouched. Git's
+  // index is shared by a normal commit, so commit only the vetted paths below
+  // rather than allowing a pre-staged unrelated path into the auto-commit.
+  const safeRecords = dirtyFiles.filter((f: { paths: string[] }) => f.paths.every(isSafeToCommit));
+  if (safeRecords.length === 0) {
+    return { ok: true, dirty: true };
   }
 
   log(`Auto-committing safe mission artifacts for ${fmt.branch(`mission/${slug}`)} before rebase...`);
-  dirtyFiles.forEach((f: { file: string }) => {
+  safeRecords.forEach((f: { file: string }) => {
     log(`       - ${f.file}`);
     gitFn(['-C', rootDir, 'add', '--', f.file]);
   });
 
-  const commitRes = gitFn(['-C', rootDir, 'commit', '-m', `workflow(${slug}): auto-commit mission artifacts before pre-review rebase`]);
+  const commitRes = gitFn([
+    '-C', rootDir, 'commit', '--only', '-m', `workflow(${slug}): auto-commit mission artifacts before pre-review rebase`,
+    '--', ...safeRecords.map((f: { file: string }) => f.file),
+  ]);
   if (commitRes.status === 0) {
     log(fmt.status('PASS', 'Mission artifacts committed.'));
     return { ok: true, dirty: true };
