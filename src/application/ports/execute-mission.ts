@@ -51,6 +51,8 @@ export interface MissionWorkspacePort {
  */
 export interface AgentLaunchPlan {
   readonly prompt: string;
+  /** Selected before provider startup; fallbacks are reported by `onAgentChanged`. */
+  readonly agent?: string | null;
   /**
    * Agent configuration (eligibility, steps, weights, operator blocklist
    * overlay) resolved by the adapter. Opaque to the application layer: it is
@@ -81,6 +83,8 @@ export interface AgentLaunchRequest {
    * current work instead of becoming a lifecycle event or a new run entity.
    */
   readonly onAgentChanged?: (_agent: string) => Promise<void>;
+  /** The application already committed the authoritative active transition. */
+  readonly authorityAlreadyActive?: boolean;
   /**
    * Called once per family the launcher confirms has spawned. The use case
    * persists the mission's `active` boundary here: the destination state and

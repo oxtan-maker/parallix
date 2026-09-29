@@ -26,6 +26,9 @@ import { SqliteDatabaseAdapter } from '../src/adapters/sqlite/database-adapter.j
 import { SqliteMigrationRunner, loadDefaultMigrations } from '../src/adapters/sqlite/migration-runner.js';
 import { SqliteOperationalHistoryRepository } from '../src/adapters/sqlite/operational-history-repository.js';
 import { missionId } from '../src/domain/mission.js';
+import type { Mission } from '../src/domain/mission.js';
+import { repositoryId } from '../src/domain/repository.js';
+import { missionVersion } from '../src/application/domain-ports.js';
 import type { AgentLaunchOutcome, AgentLaunchRequest, ExecuteMissionPorts } from '../src/application/ports/execute-mission.js';
 
 const SLUG = 'task-9101';
@@ -89,6 +92,13 @@ function errorOutcome(message: string): AgentLaunchOutcome {
  * window the defect requires.
  */
 function makePorts(launch: (request: AgentLaunchRequest) => Promise<AgentLaunchOutcome>): ExecuteMissionPorts {
+  let mission: Mission = {
+    id: missionId(SLUG), repositoryId: repositoryId('repo'), title: 'Fixture', labels: [], assignee: null,
+    checkpoints: [{ missionId: missionId(SLUG), name: 'CP-1', firstLine: 'test', goalCheck: [], nextActionText: '' }],
+    review: null, netEngineeringLines: null,
+    brief: { goal: 'g', why: 'w', scope: 's', outOfScope: [] }, declaredGates: ['npm test'],
+    successCriteria: ['done'], predictedNelBucket: 'Small', status: 'refined' as const, closedAt: null,
+  };
   return {
     workspace: {
       preflight: async () => true,
@@ -98,15 +108,17 @@ function makePorts(launch: (request: AgentLaunchRequest) => Promise<AgentLaunchO
       enforceCommitSafety: async () => {},
     },
     agentExecution: {
-      prepare: async () => ({ prompt: 'execute', agentConfig: {} }),
+      prepare: async () => ({ prompt: 'execute', agent: 'claude', agentConfig: {} }),
       launch,
     },
-    // Never reached: task file resolution is `ok: false` and the launch is
-    // never rebase-deferred, so lifecycle synchronization is skipped.
-    missionTransitions: { save: async () => { throw new Error('missionTransitions must not be called'); }, saveWithTransition: async () => { throw new Error('missionTransitions must not be called'); } } as unknown as ExecuteMissionPorts['missionTransitions'],
+    missionTransitions: {
+      async load() { return { kind: 'found' as const, mission, version: missionVersion(1) }; },
+      async save(next: Mission) { mission = next; return missionVersion(2); },
+      async saveWithTransition(next: Mission) { mission = next; return missionVersion(2); },
+    },
     telemetry: { recordLaunchTelemetry: async () => {} },
     handoffReview: { runHandoffAndReview: async () => true },
-  } as ExecuteMissionPorts;
+  };
 }
 
 /**

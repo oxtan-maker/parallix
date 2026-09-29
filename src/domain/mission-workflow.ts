@@ -23,6 +23,7 @@ import {
 export type MissionCommand =
   | { readonly type: 'refine' }
   | { readonly type: 'activate'; readonly agent: AgentFamily }
+  | { readonly type: 'abort-activation'; readonly assignee: AgentFamily | null }
   | { readonly type: 'rebound-to-active'; readonly agent: AgentFamily; readonly occurredAt?: string }
   | {
     readonly type: 'submit-for-review';
@@ -211,6 +212,10 @@ export function decideMission(mission: Mission, command: MissionCommand): Missio
     requireStatus(mission, ['refined', 'active'], command);
     if (mission.brief) { requireDraftedContract(mission, command); }
     return { ...mission, status: 'active', assignee: command.agent };
+  case 'abort-activation':
+    requireStatus(mission, ['refined', 'active'], command);
+    if (mission.status === 'refined') { return mission; }
+    return { ...mission, status: 'refined', assignee: command.assignee };
   case 'rebound-to-active':
     requireStatus(mission, ['integration', 'review', 'active'], command);
     if (mission.status === 'review' && (!mission.review || reviewStatus(mission.review) !== 'awaiting-review')) {

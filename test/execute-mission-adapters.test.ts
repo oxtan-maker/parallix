@@ -1,6 +1,7 @@
 // @ts-nocheck -- TASK-2328: partial test doubles from ESM seam migration; resolve in follow-up
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { setCommandPathProbe, setLauncherHealthProbe } from '../src/adapters/agents/agents.js';
 
 // Adapter-level contract for the execute mechanism set. The workflow ordering
 // itself is covered by test/execute-mission-characterization.test.ts, which
@@ -152,6 +153,20 @@ test('agent execution adapter leaves the file agent config untouched without a b
   const ports = createExecuteMissionPorts('/repo', { missionTransitionStore: transitionStore }, runtimeStub());
   const plan = await ports.agentExecution.prepare({ slug: 'task-1', worktree: '/worktree' });
   assert.deepEqual(plan.agentConfig, { steps: ['active'] });
+});
+
+test('agent execution adapter selects before launch without probing a launcher', async () => {
+  setCommandPathProbe(() => '/bin/true');
+  setLauncherHealthProbe(() => { throw new Error('prepare must not probe a launcher'); });
+  try {
+    const ports = createExecuteMissionPorts('/repo', { missionTransitionStore: transitionStore }, runtimeStub({
+      readAgentConfig() { return { steps: { active: { eligible: ['codex'], selection: 'first' } } }; },
+    }));
+    assert.equal((await ports.agentExecution.prepare({ slug: 'task-1', worktree: '/worktree' })).agent, 'codex');
+  } finally {
+    setCommandPathProbe(null);
+    setLauncherHealthProbe(null);
+  }
 });
 
 test('agent execution adapter reports launcher errors and exit status as raw facts', async () => {

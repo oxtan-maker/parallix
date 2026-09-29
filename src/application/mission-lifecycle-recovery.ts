@@ -59,7 +59,7 @@ async function recoverLandedMission(input: {
   return completed({ taskStatus, aggregateStatus: 'missing', action: 'recovered-landed', recovered: readBack.mission });
 }
 
-/** Reopens only the proven interrupted `active` task / `done` aggregate split. */
+/** Reconciles a task already marked active without launching another agent. */
 export async function recoverMissionLifecycle(input: {
   readonly missionId: MissionId;
   readonly taskStatus: string | null;
@@ -80,6 +80,18 @@ export async function recoverMissionLifecycle(input: {
   const aggregateStatus = loaded.mission.status;
   if (taskStatus === 'active' && aggregateStatus === 'active' && input.alreadyMerged && await input.alreadyMerged()) {
     return completed({ taskStatus, aggregateStatus, action: 'refused-integrated', recovered: null });
+  }
+  if (taskStatus === 'active' && aggregateStatus === 'refined') {
+    const recovered = { ...loaded.mission, status: 'active' as const };
+    try {
+      await input.store.saveWithTransition(recovered, loaded.version, lifecycleLaneEvent({
+        mission: recovered, from: 'refined', trigger: 'recover-active',
+        agent: input.actor, occurredAt: input.occurredAt,
+      }));
+    } catch (error) {
+      return writeFailure(error);
+    }
+    return completed({ taskStatus, aggregateStatus, action: 'recover-to-active', recovered });
   }
   if (taskStatus !== 'active' || aggregateStatus !== 'done') {
     return completed({ taskStatus, aggregateStatus, action: 'none', recovered: null });

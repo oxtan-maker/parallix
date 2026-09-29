@@ -74,9 +74,9 @@ function strictPorts(overrides: Record<string, unknown> = {}) {
       },
     },
     missionTransitions: {
-      async load() { throw new Error('lifecycle must not be touched by publication'); },
-      async save() { throw new Error('lifecycle must not be touched by publication'); },
-      async saveWithTransition() { throw new Error('lifecycle must not be touched by publication'); },
+      async load() { return { kind: 'found' as const, version: 1, mission: { id: SLUG, repositoryId: 'repo', title: 'Fixture', labels: [], assignee: null, checkpoints: [{ missionId: SLUG, name: 'CP-1', firstLine: 'work', goalCheck: [], nextActionText: '' }], review: null, netEngineeringLines: null, brief: { goal: 'g', why: 'w', scope: 's', outOfScope: [] }, declaredGates: ['npm test'], successCriteria: ['done'], predictedNelBucket: 'Small', status: 'refined' as const, closedAt: null } }; },
+      async save() { return 2; },
+      async saveWithTransition() { return 2; },
     },
     telemetry: { async recordLaunchTelemetry() {} },
     handoffReview: { async runHandoffAndReview() { return true; } },

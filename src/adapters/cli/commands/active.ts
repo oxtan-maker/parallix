@@ -137,7 +137,7 @@ function reportActiveFailure(outcome, slug, errorFn, exitFn) {
 // immediately after the launcher successfully spawns the process. If the final
 // launch result later fails, we roll the task status back to the prior status.
 /**
- * @param {{slug: string, worktree: string, preselectedAgent?: string | null, agentConfig: object, taskResolution: object, prompt: string, startAgentFn?: Function, transitionTaskFn?: Function, getTaskStatusFn?: Function, getTaskImplementerFn?: Function, selectAgentFn?: Function, log?: Function, sessionMarkerPort?: object | null, onAgentLaunched?: (agent: string) => Promise<void>, unrefChild?: boolean}} opts
+ * @param {{slug: string, worktree: string, preselectedAgent?: string | null, agentConfig: object, taskResolution: object, prompt: string, startAgentFn?: Function, transitionTaskFn?: Function, getTaskStatusFn?: Function, getTaskImplementerFn?: Function, selectAgentFn?: Function, log?: Function, sessionMarkerPort?: object | null, onAgentLaunched?: (agent: string) => Promise<void>, authorityAlreadyActive?: boolean, unrefChild?: boolean}} opts
  */
 async function selectLaunchAndRecord(opts) {
   const {
@@ -162,6 +162,7 @@ async function selectLaunchAndRecord(opts) {
     // persists the Mission's active transition (state + lane event) when the
     // launcher confirms the spawn; a rejection fails the run.
     onActivated = null,
+    authorityAlreadyActive = false,
     // Board fire-and-forget dispatch: unref the child so the board process can
     // exit on q/Ctrl+C while the action runs on (CP-4 ownership rule).
     unrefChild = false,
@@ -174,7 +175,7 @@ async function selectLaunchAndRecord(opts) {
   const priorStatus = taskFile ? getTaskStatusFn(taskFile) : null;
   const priorImplementer = taskFile ? getTaskImplementerFn(taskFile) : null;
   let launchRecorded = false;
-  let authoritativeActivationCommitted = false;
+  let authoritativeActivationCommitted = authorityAlreadyActive;
   let launchTransitionFailed = false;
   let rebaseDeferred = false;
   let launchedAgent = null;

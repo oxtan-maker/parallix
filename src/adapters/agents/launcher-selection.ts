@@ -23,6 +23,7 @@ type AgentSelectionOptions = ReadAgentConfigOptions & {
   configPath?: string;
   exclude?: any;
   worktree?: string;
+  checkAvailability?: boolean;
 };
 
 const LAUNCHERS: {[key: string]: Function} = {
@@ -186,26 +187,29 @@ function selectAgent(step: string, options: AgentSelectionOptions = {}) {
     );
   }
 
-  const { worktree } = options;
-  const statuses = new Map(
-    pool
-      .map((agent) => [agent, workflowLauncherStatus(agent, worktree)] as [string, LauncherStatus])
-  );
-  const available = pool.filter((agent) => {
-    const status = statuses.get(agent);
-    return Boolean(status && status.supported);
-  });
-  if (available.length === 0) {
-    const blockers = pool.map((agent) => {
-      const status = statuses.get(agent) || { detail: agent, reason: 'unsupported-agent' };
-      const suffix = status.reason ? `; ${status.reason}` : '';
-      return `${agent} (looked for: ${status.detail}${suffix})`;
-    });
-    throw new Error(
-      `No eligible agents have a working launcher for step "${step}". ` +
-      `Eligible but blocked: ${blockers.join(', ')}. ` +
-      `Set WORKFLOW_AGENT=<name> to override or install a supported agent.`
+  let available = pool;
+  if (options.checkAvailability !== false) {
+    const { worktree } = options;
+    const statuses = new Map(
+      pool
+        .map((agent) => [agent, workflowLauncherStatus(agent, worktree)] as [string, LauncherStatus])
     );
+    available = pool.filter((agent) => {
+      const status = statuses.get(agent);
+      return Boolean(status && status.supported);
+    });
+    if (available.length === 0) {
+      const blockers = pool.map((agent) => {
+        const status = statuses.get(agent) || { detail: agent, reason: 'unsupported-agent' };
+        const suffix = status.reason ? `; ${status.reason}` : '';
+        return `${agent} (looked for: ${status.detail}${suffix})`;
+      });
+      throw new Error(
+        `No eligible agents have a working launcher for step "${step}". ` +
+        `Eligible but blocked: ${blockers.join(', ')}. ` +
+        `Set WORKFLOW_AGENT=<name> to override or install a supported agent.`
+      );
+    }
   }
 
   const config = options.config !== undefined

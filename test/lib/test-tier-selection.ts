@@ -56,6 +56,10 @@ export function selectTierFiles(executionRoot: string): TierFileSelection {
   // through the explicit integration command rather than the hermetic default.
   const boundaryDependencyPattern = /\b(?:\w+\.)?(?:spawnSync|spawn|execSync|execFileSync|execFile|fork)\s*\(|git\s+(?:init|worktree|clone|commit|checkout|rebase|merge)|npm\s+(?:pack|install)|createServer|\bfetch\s*\(/;
   const knownIntegrationTestFiles = new Set([
+    // Constructs the production composition graph, including a real SQLite
+    // Mission store, so it crosses an adapter boundary even without a visible
+    // process or database marker in the test source.
+    'application-boundaries.test.ts',
     // Measured at 55.7s in the CP-1 uncontended run; it drives draft workflow
     // fixtures across the command boundary even though its process launcher is
     // dependency-injected in the source.
@@ -163,6 +167,16 @@ export function selectTierFiles(executionRoot: string): TierFileSelection {
     'task-2373-shutdown.test.ts',
     'task-2375-active-invocation-overlap.test.ts',
     'task-2375-current-work-operation-repro.test.ts',
+    // TASK-2566 creates temporary Git repositories to exercise mission Sonar
+    // classification; the fixture helper hides that boundary from the scan.
+    'task-2566-sonar-boundary-repro.test.ts',
+    // TASK-2585 verifies provider publication proofs through injected API
+    // responses, so it is integration-only even without a visible boundary
+    // token in its test source.
+    'task-2585-github-publication-proof.test.ts',
+    'task-2585-workflow-proof-reuse.test.ts',
+    // TASK-2580 crosses the real active-command and loopback web boundaries.
+    'task-2580-active-persisted-mission-repro.test.ts',
     // TASK-2397: integrate active+approved recovery repro. It builds throwaway
     // git repos in a temp dir to stage the stuck-lane scenario, so it crosses a
     // real git boundary the content heuristic sees and belongs in integration.

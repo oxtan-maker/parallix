@@ -1,4 +1,5 @@
 import { readAgentConfigOrExit } from '../agents/agents.js';
+import { selectAgent } from '../agents/agents.js';
 import { resolveWorktree } from '../filesystem/mission-utils.js';
 import startupPreflight from '../cli/startup-preflight.js';
 import { buildCheckpointContext, buildExecutePrompt, enforceExecuteCommitSafety, runHandoffAndReview, selectLaunchAndRecord } from '../cli/commands/active.js';
@@ -132,6 +133,9 @@ export class AgentExecutionAdapter implements AgentExecutionPort {
     const agentConfig = this.resolveAgentConfig();
     return {
       agentConfig,
+      // `startAgent` checks the selected launcher's health after the Mission
+      // transition; do not block the active lifecycle on a CLI probe here.
+      agent: selectAgent('active', { config: agentConfig, checkAvailability: false }),
       prompt: this._runtime.buildExecutePrompt(request.slug, launchContext, { rootDir: request.worktree }),
     };
   }
@@ -140,13 +144,14 @@ export class AgentExecutionAdapter implements AgentExecutionPort {
     const launch = await this._runtime.selectLaunchAndRecord({
       slug: request.slug,
       worktree: request.worktree,
-      preselectedAgent: request.preselectedAgent,
+      preselectedAgent: request.preselectedAgent ?? request.plan.agent ?? null,
       agentConfig: request.plan.agentConfig as object,
       taskResolution: request.taskResolution,
       prompt: request.plan.prompt,
       sessionMarkerPort: this._sessionMarkerPort,
       onAgentLaunched: request.onAgentChanged,
       onActivated: request.onActivated,
+      authorityAlreadyActive: request.authorityAlreadyActive === true,
       unrefChild: request.detached === true,
     });
     const result = launch.result;

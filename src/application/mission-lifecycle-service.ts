@@ -38,6 +38,8 @@ export interface MissionTransitionRequest extends MissionCommandRequest {
 
 export interface MissionTransitionResult {
   readonly mission: Mission;
+  /** Assignment before this transition, for a failed pre-launch activation rollback. */
+  readonly previousAssignee: AgentFamily | null;
   readonly version: MissionVersion;
   readonly from: MissionStatus;
   readonly to: MissionStatus;
@@ -51,6 +53,12 @@ export interface MissionActivationRequest extends MissionCommandRequest {
   readonly idempotencyKey?: string;
 }
 
+export interface MissionActivationAbortRequest extends MissionCommandRequest {
+  readonly assignee: AgentFamily | null;
+  readonly actor: string;
+  readonly occurredAt: string;
+}
+
 export class MissionLifecycleService {
   constructor(private readonly _store: MissionTransitionStore) {}
 
@@ -62,6 +70,16 @@ export class MissionLifecycleService {
       ...request,
       command: { type: 'activate', agent: request.agent },
       actor: request.agent,
+    });
+  }
+
+  /** Undo an activation only when no agent was ever started. */
+  async abortActivation(
+    request: MissionActivationAbortRequest,
+  ): Promise<ApplicationOutcome<MissionTransitionResult>> {
+    return this.transition({
+      ...request,
+      command: { type: 'abort-activation', assignee: request.assignee },
     });
   }
 
@@ -98,6 +116,7 @@ export class MissionLifecycleService {
       return completed(
         {
           mission: decided,
+          previousAssignee: mission.assignee,
           version: nextVersion,
           from,
           to: decided.status,
@@ -124,6 +143,7 @@ export class MissionLifecycleService {
         return completed(
           {
             mission: decided,
+            previousAssignee: mission.assignee,
             version: replayedVersion,
             from,
             to: decided.status,

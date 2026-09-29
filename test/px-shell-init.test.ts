@@ -15,8 +15,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import test from 'node:test';
-// @ts-expect-error -- TASK-2328: partial test double after ESM seam migration
-import { shellInit } from '../src/entry/px.ts';
+import { shellInit } from '../src/composition/create-cli.js';
 
 
 // Builds a fake `px` executable that prints the given transition signal.

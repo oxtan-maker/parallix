@@ -2254,7 +2254,7 @@ test('selectLaunchAndRecord keeps the implementer announcement but drops the Bac
 
 test('failed execute runs preserve the Backlog lane after authoritative activation', async () => {
   for (const failure of ['exit', 'exhausted', 'limit'] as const) {
-    let authoritativeLane = 'refined';
+    let authoritativeLane = 'active';
     let mirrorLane = 'refined';
     await assert.rejects(async () => {
       const launch = await selectLaunchAndRecord({
@@ -2262,7 +2262,7 @@ test('failed execute runs preserve the Backlog lane after authoritative activati
         taskResolution: { ok: true, taskFile: '/tmp/task.md' },
         getTaskStatusFn: () => mirrorLane, getTaskImplementerFn: () => 'claude',
         prompt: 'Execute.', selectAgentFn: () => 'claude',
-        onActivated: async () => { authoritativeLane = 'active'; },
+        authorityAlreadyActive: true,
         startAgentFn: async (_step, opts) => {
           await opts.onLaunch({ agent: 'claude', startedAtMs: 123 });
           assert.equal(mirrorLane, authoritativeLane);

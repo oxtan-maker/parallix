@@ -126,7 +126,7 @@ export const CONSUMER_DOMAIN_REQUIREMENTS: readonly ConsumerRequirement[] = [
     id: 'launch-agent-selection',
     family: 'launch',
     fileLocation: 'src/adapters/agents/launcher-selection.ts',
-    line: 170,
+    line: 171,
     anchor: 'function selectAgent',
     reads: ['AgentBlock'],
     requirement:
@@ -137,7 +137,7 @@ export const CONSUMER_DOMAIN_REQUIREMENTS: readonly ConsumerRequirement[] = [
     id: 'launch-blocklist-filter',
     family: 'launch',
     fileLocation: 'src/adapters/agents/launcher-selection.ts',
-    line: 157,
+    line: 158,
     anchor: 'isAgentBlocked',
     reads: ['AgentBlock'],
     requirement:

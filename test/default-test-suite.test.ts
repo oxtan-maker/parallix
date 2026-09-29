@@ -6,229 +6,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { buildTestRunPlan } from './lib/test-run-plan.js';
-const expectedIntegrationFiles = [
-  'operator-state-scope.integration.test.ts',
-  'custom-capacity-cross-repo.integration.test.ts',
-  'active.test.ts', 'agents-limit-hit.test.ts', 'agents.test.ts', 'backlog.test.ts',
-  // Real SQL databases (even temp files) and process boundaries do not run in
-  // the hermetic unit suite; see knownIntegrationTestFiles in test-run-plan.ts.
-  'board-event-metrics-fixture.test.ts', 'board-event-recorder.test.ts',
-  'board-lane-events-migration.test.ts', 'e2e-mission-sqlite-cutover.test.ts',
-  'review-backfill.test.ts', 'review-events.test.ts', 'session-marker-repository.test.ts',
-  'sqlite-adapter-cp1.test.ts', 'sqlite-async-cascade-cp3.test.ts',
-  'sqlite-importer-cp4.test.ts', 'sqlite-ports-cp2.test.ts', 'stats.test.ts',
-  'task-2220-repro.test.ts', 'task-2241-tmp-cleanup-repro.test.ts',
-  'task-2322-05-mission-sqlite-fixture.test.ts', 'task-2322-05-mission-use-cases.test.ts',
-  'task-2322.11-operator-state.test.ts',
-  'task-2322.12-stray-persistence.test.ts', 'task-2337-repro.test.ts', 'task-2339-aggregate-read-during-write.test.ts',
-  'task-2339-writes-outlive-close.test.ts', 'task-2345-repro.test.ts',
-  'task-2347-01-repository-identity-repro.test.ts', 'task-2347.02-lifecycle-history.test.ts',
-  'task-2347.02-repro.test.ts', 'task-2348-implementer-attribution.test.ts',
-  'task-2350-reconcile-interrupted-handoff.test.ts', 'task-2357-certification.test.ts',
-  'task-2357.a-historical-intake.test.ts', 'task-2357.c-unknown-review-fix-rounds.test.ts',
-  'task-2357.d-completion-population.test.ts', 'task-2357.e-legacy-history-scope.test.ts',
-  'task-2357.g-per-metric-evidence.test.ts',
-  'task-2363-repository-identity.test.ts', 'task-2363-review-fix-rounds.test.ts',
-  'task-2363-windowed-cohorts.test.ts', 'task-2367-certification.test.ts',
-  'task-2367-regressions.test.ts', 'task-2367-repair.test.ts',
-  'task-2367-telemetry-schema.test.ts', 'task-2369-regressions.test.ts',
-  'task-2373-shutdown.test.ts', 'task-2375-active-invocation-overlap.test.ts',
-  'task-2375-current-work-operation-repro.test.ts',
-  'task-2468-adhoc-lifecycle-repro.test.ts',
-  'bubblewrap-worktree-git.test.ts',
-  // TASK-2475: two real child processes contend for one custom slot over a
-  // durable lease; the spawn process boundary keeps it in the integration suite.
-  'custom-capacity-multiprocess-repro.test.ts',
-  'bootstrap-isolation.test.ts', 'documentation-verification.test.ts',
-  'task-2484-npm-metadata-urls-repro.test.ts',
-  'task-2489-lead-from-worktree.test.ts',
-  // TASK-2489: the fleet recovery supervisor writes temp lock files and reads
-  // production source, so it runs in the integration layer. It is registered as
-  // INTEGRATION_CI_TESTS in test/lib/test-categories.ts; the runner routes it
-  // there and this inventory must name it or the default/integration split
-  // drifts out of agreement.
-  'task-2489-recovery-supervisor.test.ts',
-  // TASK-2494: the rebase-handoff usage-block repro (test/task-2494-repro.test.ts)
-  // is a hermetic in-memory-fake unit test, so it runs in the default suite and
-  // is deliberately absent from this integration inventory.
-  'draft-command.test.ts', 'draft.test.ts',
-  'draft_preflight_modern.test.ts', 'durable-state-policy.test.ts',
-  'external-target-resolution.test.ts', 'forgejo-independence.test.ts',
-  'forgejo-pr-round-sync.test.ts', 'forgejo.test.ts', 'handoff.test.ts', 'install.test.ts',
-  'integrate-conflict.test.ts', 'integrate-exclusive-process.integration.test.ts', 'integrate-task-1410-stash-pop-corruption.test.ts', 'integrate-workflow-gate.test.ts',
-  'integrate.test.ts', 'integration-pipelines.test.ts', 'startup-preflight.test.ts',
-  'mission-utils-worktree.test.ts', 'mistral.test.ts', 'nels.test.ts',
-  'noise-reduction.test.ts', 'opencode-export.test.ts', 'package-persistent-data.test.ts',
-  'product-config-cp.test.ts', 'product-config-validation.test.ts', 'product-config.test.ts',
-  'px-runner.test.ts', 'px-runtime-smoke.test.ts', 'px-shell-init.test.ts',
-  'rebase-use-case.test.ts', 'rebase.test.ts', 'rebase_diagnostics.test.ts', 'rebase_hardening.test.ts',
-  'refresh-global-px-script.test.ts', 'repository-gates.integration.test.ts', 'repository-gates.test.ts', 'resolve-conflict.test.ts',
-  'review-artifacts.test.ts', 'review-autoderive.test.ts',
-  'review-commands-additional.test.ts', 'review-commands-supplemental.test.ts',
-  'review-identity-placeholder.test.ts', 'review-identity.test.ts',
-  'review-prompts.test.ts', 'review-state-class.test.ts', 'review-state.test.ts',
-  'review.test.ts', 'runtime-matrix.test.ts', 'setup-review.test.ts',
-  // TASK-2546: reads the worktree's real Git branch and tracked-file list to
-  // prove the Cloud scan identity, so it crosses the git boundary.
-  'sonarqube-cloud-wiring.test.ts',
-  // TASK-2525.03: creates a temporary Git repository to prove local branch
-  // discovery, so it crosses the Git process boundary.
-  'task-2525.03-sonar-enforcement.test.ts',
-  'sqlite-mission-store.integration.test.ts', 'sqlite-recovery-cp5.test.ts',
-  'stats-backfill.test.ts',
-  'task-1048-regression.test.ts',
-  'task-1049-force-push.test.ts', 'task-1080-sync-merged-hardening.test.ts',
-  'task-1104-rebase-cleanup.test.ts',
-  'task-1272-standalone-cycle.test.ts', 'task-1272-standalone-rebase.test.ts',
-  'task-1390-shell-init-shebang.test.ts',
-  'task-1415-closed-mission-counts.test.ts', 'task-1416-repro.test.ts',
-  'task-1424-post-integrate-publish-reinstall.test.ts',
-  'task-2203-publish-proof-refresh-order.test.ts',
-  'task-2206-post-integrate-hook-errors.test.ts', 'task-2212-repro.test.ts',
-  'task-2231-unit-tests-hang-repro.test.ts',
-  'task-2285-pack-install-smoke.test.ts',
-  'task-2286-native-sea-smoke.test.ts',
-  'task-2455-config-exit-status-repro.test.ts',
-  // The database half opens a migrated SQLite fixture on disk. The surface half
-  // runs no git at all, but it asserts on the advisory cleanup text a cancel
-  // prints, which names git commands the boundary heuristic reads as a real git
-  // dependency; both therefore run in the integration suite.
-  'task-2466-cancel-surfaces.test.ts',
-  'task-2466-mission-cancel.test.ts',
-  'task-2234-push-to-reviewer-autobounce.test.ts',
-  'task-2270-graphify-exclusion.test.ts',
-  'task-2322.12-review-recovery.integration.test.ts',
-  'task-2273-review-gate-ownership.test.ts',
-  'task-2312-label-sync.test.ts',
-  'task-2318-temp-directory-leaks.test.ts',
-  'task-2319-notices-git-tracking.test.ts',
-  'task-2327-coverage-gate-tmp-leaks.test.ts',
-  'task-2347.10-repro.test.ts',
-  'task-2349-integrate-stage-commit-race.test.ts',
-  // Builds a real Git primary checkout and a real linked worktree, because the
-  // canonical repository identity it certifies is resolved by shelling out to
-  // Git (TASK-2357 defect B).
-  'task-2357.b-canonical-repository-identity.test.ts',
-  'task-2363-production-certification.test.ts',
-  // TASK-2376 CP-2: drives a real temporary Git repository through the
-  // lifecycle transitions, so it crosses the process boundary and runs only
-  // in the integration layer.
-  'task-2376-lifecycle-timing.test.ts',
-  // TASK-2378: seeds a real temporary Git repository plus a migrated operator
-  // database for the authoritative stats / approval-boundary reproduction,
-  // so it crosses the process boundary and runs only in the integration layer.
-  'task-2378-authoritative-stats.test.ts',
-  // TASK-2379: seeds a real temporary Git repository plus a migrated operator
-  // database for the delayed approval-boundary reproduction (review dwell /
-  // integration dwell), so it crosses the process boundary and runs only in
-  // the integration layer.
-  'task-2379-approval-boundary-repro.test.ts',
-  'task-2397-integrate-active-approved-recovery.test.ts',
-  // TASK-2413: seeds real temporary Git repositories to reproduce the
-  // exit-code-only verifier loss and pin proof-reuse/invalidation, so they
-  // cross the process boundary and run only in the integration layer.
-  'task-2413-proof-reuse.test.ts', 'task-2413-publication-seam.test.ts', 'task-2413-repro.test.ts',
-  // TASK-2420: integrate recovery repro by the assigned reviewer. It builds
-  // throwaway git repos in a temp dir to stage the stranded-lane scenario, so
-  // it crosses a real git boundary like task-2397 and runs only in integration.
-  'task-2420-integrate-recovery-assigned-reviewer.test.ts',
-  // TASK-2492: fixture-git coverage of the squash-landing detection seam runs a
-  // real temporary Git repository, so it crosses the git boundary and runs only
-  // in the integration layer.
-  'task-2492-already-merged-detection.test.ts',
-  'task-2424-repro.test.ts',
-  // TASK-2438 composes concrete board readers over temporary repository files
-  // and the worktree/Git topology boundary.
-  'task-2438-worktree-board-repro.test.ts',
-  // TASK-2440: drives a temporary Git repository and migrated SQLite database
-  // through an external task update before reading the persisted board lane.
-  'task-2440-repro.test.ts',
-  // TASK-2441: board title repro. Seeds a temporary Git repository and a
-  // migrated SQLite database, then renders the composed board, so it crosses
-  // the same real git/database boundary as task-2438 and task-2440.
-      'task-2441-mission-title-repro.test.ts',
-      'task-2443-repro.test.ts',
-  // TASK-2433: real-socket proof of the guarded mutation route (schema,
-  // advertised gate, stale guard wiring, security rejections, safe bodies).
-  // Loopback-only with injected dispatcher spy and projection builder.
-  'task-2433-web-mutation.integration.test.ts',
-  // TASK-2516: landed-mission recovery seeds a real temporary Git repository
-  // with a worktree, so it crosses the git boundary and runs only in the
-  // integration layer.
-  'task-2516-recover-landed-mission-repro.test.ts',
-  'task-2521-03-context-cli.integration.test.ts',
-  // TASK-2521.04: the imported trace's commit pin is read from a real Git
-  // checkout, so it crosses the git boundary and runs only in integration.
-  'task-2521.04-legacy-trace-commit.integration.test.ts',
-  'task-2521.04-mission-dependencies.integration.test.ts',
-  'task-2521.06-audit.integration.test.ts',
-  'task-2521.06-legacy-task-content.test.ts',
-  'task-2533-squash-payload-pathspec-quotes.test.ts',
-  // TASK-2537: seeds throwaway Git repositories to land a draft-authored task
-  // file, so it crosses the git boundary and runs in the integration layer.
-  'task-2537-squash-closeout-unstaged-task-path.test.ts',
-  // TASK-2557: spawns the real `bwrap` binary to run `px` inside the codex
-  // sandbox profile, so it crosses the bubblewrap boundary and runs only in
-  // the local integration layer.
-  'task-2557-sandbox-px-write.test.ts',
-  // TASK-2551: one real subprocess (node --import tsx, missing SONAR_TOKEN) to
-  // prove the delete-branch subcommand's exit-0 failure semantics; the rest is
-  // request-injected, so it crosses only the process boundary.
-  'task-2551-sonar-branch-cleanup.test.ts',
-  // TASK-2554: proves the e2e entries' import chains isolate PARALLIX_HOME by
-  // spawning the entry's own node process; crosses the process boundary only.
-  'task-2554-guard.test.ts',
-  'task-2554-repro.test.ts',
-  // TASK-2577: runs fixture scenarios in `node --import tsx --test` child
-  // processes and reclaims their leftovers; crosses the process boundary only.
-  'task-2577-tmp-fixture-leaks-repro.test.ts',
-  // TASK-2582: opens a real migrated SQLite operator database in a temp
-  // directory and drives the real MissionLifecycleService and review
-  // persistence boundaries, so it crosses the SQLite boundary and runs in
-  // the integration layer (INTEGRATION_CI_TESTS).
-  'task-2582-lifecycle-ordering.test.ts',
-  'task-2582-repro.test.ts',
-  // TASK-2532: seeds temporary Git repositories to exercise the base-worktree
-  // repair, so it crosses the git boundary and runs in the integration layer.
-  'task-2532-stale-integration-state-repro.test.ts',
-      'test-hygiene.test.ts',
-  // TASK-2502: the CodeQL clean-cache bootstrap test shells out to the runner
-  // (bash) to prove a fresh cache directory bootstraps the pinned CLI, so it
-  // crosses the process boundary and runs only in the integration layer.
-  'task-2502-codeql-clean-cache.test.ts',
-  // TASK-2502: the --suite flag regression test shells out to the runner (bash)
-  // to prove the documented two-argument form parses, so it crosses the process
-  // boundary and runs only in the integration layer.
-  'task-2502-codeql-suite-flag.test.ts',
-  // TASK-2507: routes a failed integration gate against a temporary Git
-  // repository to prove the base worktree stays clean.
-  'task-2509-local-version-allocation.test.ts', 'task-2509-release-workflow.test.ts',
-  // TASK-2534: drives the real squash landing against a throwaway repository
-  // to prove stale backlog/tasks copies never land, so it crosses the
-  // version-control boundary and runs only in the integration layer.
-  'task-2534-stale-backlog-copy-landing-repro.test.ts',
-  // TASK-2595: drives the real squash landing against a throwaway repository
-  // to prove the landed commit message carries the recorded title and task
-  // reference, so it crosses the version-control boundary and runs only in
-  // the integration layer.
-  'task-2595-squash-landing-commit-message.test.ts',
-  'task-2601-repro.test.ts',
-  'task-2517-cp3-landed-closeout.test.ts',
-  'task-2517-landed-squash-base-branch-detection.test.ts',
-  'tui-pty-smoke.test.ts', 'task-2313-repro.test.ts', 'task-2370-repro.test.ts',
-  'tui-command-flow.test.ts',
-  'tui-spawn.test.ts',
-  'type-only-coverage.integration.test.ts',
-  'unit-test-timeout-guard.test.ts',
-  'verification.test.ts', 'verify-local-integrate.test.ts',
-  // TASK-2431: real-socket loopback web host proof (bind, Host, Origin,
-  // session, CSRF, method, body-size, traversal). Runs only in integration.
-  'web-host.integration.test.ts',
-  // TASK-2431: package-mode smoke — packs the real artifact and serves the
-  // shell from the packaged built assets. Crosses the npm-pack boundary, so
-  // it runs only in integration.
-  'web-package-smoke.integration.test.ts'
-].sort();
+import { INTEGRATION_CI_TESTS, INTEGRATION_LOCAL_TESTS } from './lib/test-categories.js';
 
 function selectedFiles(args, version = process.version) {
   // TASK-2328: the runner's suite selection and argv assembly live in
@@ -245,7 +23,7 @@ function selectedFiles(args, version = process.version) {
   };
 }
 
-test('default test runner routes every moved group to integration and excludes it from default', () => {
+test('default test runner routes registered integration tests out of the default suite', () => {
   const runner = fs.readFileSync(path.join(import.meta.dirname, 'run-default-tests.ts'), 'utf8')
     + fs.readFileSync(path.join(import.meta.dirname, 'lib', 'test-run-plan.ts'), 'utf8')
     + fs.readFileSync(path.join(import.meta.dirname, 'lib', 'test-tier-selection.ts'), 'utf8');
@@ -256,12 +34,11 @@ test('default test runner routes every moved group to integration and excludes i
   const defaultFiles = defaultRun.files;
   const integrationFiles = integrationRun.files;
 
-  assert.deepEqual(integrationFiles, expectedIntegrationFiles);
-  for (const file of expectedIntegrationFiles) {
+  const registeredIntegrationFiles = [...INTEGRATION_CI_TESTS, ...INTEGRATION_LOCAL_TESTS].sort();
+  assert.deepEqual(integrationFiles, registeredIntegrationFiles);
+  for (const file of registeredIntegrationFiles) {
     assert.ok(!defaultFiles.includes(file), `${file} must be excluded from npm test`);
   }
-  // TASK-2596: the 500-line production source cap must run in the default
-  // (unit) suite so the guardrail is enforced on every `npm test`.
   assert.ok(defaultFiles.includes('file-size-cap.test.ts'),
     'the file-size-cap guardrail must stay in the default unit suite');
   assert.ok(!integrationFiles.includes('e2e-mission-lifecycle.test.ts'));
@@ -306,8 +83,16 @@ test('default test runner preserves an explicitly selected execution root for ev
 });
 
 test('default test runner classifies tui-spawn as default (not integration) and pins bootstrap bypass', () => {
-  // The complete default/integration partition (including tui-spawn) is
-  // asserted above. This focused test only verifies its bootstrap exception.
+  const defaultRun = selectedFiles([]);
+  const integrationRun = selectedFiles(['--integration']);
+  const defaultFiles = defaultRun.files;
+  const integrationFiles = integrationRun.files;
+
+  // tui-spawn is in the integration suite (execFileSync process boundary)
+  assert.ok(!defaultFiles.includes('tui-spawn.test.ts'),
+    'tui-spawn.test.ts must NOT be in the default (unit) suite');
+  assert.ok(integrationFiles.includes('tui-spawn.test.ts'),
+    'tui-spawn.test.ts must be in the integration suite');
 
   // Bootstrap bypass: solo run skips preload so child CLI gets real environment
   const soloRun = selectedFiles(['test/tui-spawn.test.ts']);

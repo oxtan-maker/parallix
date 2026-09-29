@@ -5,9 +5,9 @@ import type { ExecuteMissionPorts } from '../../src/application/ports/execute-mi
  *
  * Shared by the board controller and progress-event suites so both dispatch
  * through the real `ExecuteMissionService` while every effect stays in memory.
- * The launch mock confirms the spawn and runs the boundary callback, exactly
- * as the real adapter does: the active transition commits at launch
- * confirmation (TASK-2582), and `missionTransitions` records that one write.
+ * The default run needs no lifecycle synchronization (the launch deferred no
+ * rebase and the task is already active), so `missionTransitions` stays untouched
+ * unless a test asks for it.
  */
 export function makeExecutePorts(overrides: Record<string, unknown> = {}) {
   const calls: string[] = [];
@@ -21,12 +21,8 @@ export function makeExecutePorts(overrides: Record<string, unknown> = {}) {
     },
     agentExecution: {
       async prepare() { return { prompt: 'execute prompt', agentConfig: {} }; },
-      async launch(request: { slug: string; preselectedAgent: string | null, onActivated?: (agent: string) => Promise<void> }) {
+      async launch(request: { slug: string; preselectedAgent: string | null }) {
         calls.push(`launch:${request.slug}:${request.preselectedAgent ?? 'default'}`);
-        // The real adapter confirms the spawn, then runs the boundary callback
-        // the use case supplies: the active transition commits as
-        // destination-state work begins (TASK-2582).
-        await request.onActivated?.(request.preselectedAgent ?? 'codex');
         return {
           agent: request.preselectedAgent ?? 'codex',
           rebaseDeferred: false,
@@ -45,21 +41,15 @@ export function makeExecutePorts(overrides: Record<string, unknown> = {}) {
         return {
           kind: 'found',
           mission: {
-            id: 'task-0001',
-            repositoryId: 'fixture-repo',
-            title: 'Fixture mission',
-            labels: [],
-            assignee: null,
+            id: 'task-0001', repositoryId: 'repo', title: 'Fixture', labels: [], assignee: null,
             status: 'refined',
             brief: { goal: 'Fixture goal', why: 'Fixture why', scope: 'Fixture scope', outOfScope: [] },
             declaredGates: ['npm test'],
             successCriteria: ['The mission is done'],
             predictedNelBucket: 'Small',
             // A planned checkpoint with no evidence yet: draft plans, execution records.
-    checkpoints: [{ missionId: 'task-1', name: 'CP-1', firstLine: 'Do the work', goalCheck: [], nextActionText: '' }],
-            review: null,
-            netEngineeringLines: null,
-            closedAt: null,
+            checkpoints: [{ missionId: 'task-0001', name: 'CP-1', firstLine: 'Do the work', goalCheck: [], nextActionText: '' }],
+            review: null, netEngineeringLines: null, closedAt: null,
           },
           version: 1,
         };

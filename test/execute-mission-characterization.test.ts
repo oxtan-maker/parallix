@@ -59,12 +59,8 @@ function executeFixture(overrides: Record<string, unknown> = {}) {
     buildCheckpointContext() { calls.push('checkpoint'); return 'CP-5'; },
     readAgentConfig() { calls.push('config'); return {}; },
     buildExecutePrompt() { calls.push('prompt'); return 'execute prompt'; },
-    async selectLaunchAndRecord(opts: { preselectedAgent?: string | null, onActivated?: (agent: string) => Promise<void> }) {
+    async selectLaunchAndRecord(opts: { preselectedAgent?: string | null }) {
       calls.push(`launch-record:${opts.preselectedAgent ?? 'default'}`);
-      // The real adapter confirms the spawn, then runs the boundary callback
-      // the use case supplies: the active transition commits as
-      // destination-state work begins (TASK-2582).
-      await opts.onActivated?.('codex');
       return {
         agent: 'codex',
         result: { status: 0, startedAt: '2026-07-20T10:00:00Z', endedAt: '2026-07-20T10:01:00Z' },
@@ -99,7 +95,7 @@ function executeRequest(overrides: Record<string, unknown> = {}) {
 // Scenario 1 — `active` success
 // ---------------------------------------------------------------------------
 
-test('execute workflow: success runs preflight, prepare, launch, record, telemetry, handoff in order', async () => {
+test('execute workflow: activation precedes launch, record, telemetry, and handoff', async () => {
   const { runtime, calls, transitionStore } = executeFixture();
   const events: Array<{ sequence: number; phase: string; agent?: string }> = [];
   const outcome = await buildExecuteWorkflow(runtime, transitionStore, (event) =>
@@ -108,11 +104,8 @@ test('execute workflow: success runs preflight, prepare, launch, record, telemet
   assert.equal(outcome.status, 'completed');
   assert.deepEqual(outcome.value, { agent: 'codex' });
   assert.deepEqual(calls, [
-    'preflight', 'worktree', 'task', 'checkpoint', 'config', 'prompt',
-    'launch-record:codex',
-    // the active boundary commits at launch confirmation (TASK-2582);
-    // the committed boundary needs no re-assert in the durable record
-    'load', 'synchronize', 'safety',
+    'preflight', 'worktree', 'task', 'checkpoint', 'config', 'prompt', 'load', 'synchronize',
+    'launch-record:codex', 'safety',
     'model', 'telemetry', 'stats:codex',
     'handoff:task-1:/worktree:codex',
   ]);
@@ -120,6 +113,18 @@ test('execute workflow: success runs preflight, prepare, launch, record, telemet
   assert.deepEqual(events.map((event) => event.sequence), [1, 2, 3]);
   assert.deepEqual(events.map((event) => event.phase), ['launch', 'record', 'handoff']);
   assert.equal(events[2].agent, 'codex');
+});
+
+test('execute workflow: real launch adapter retains the active mirror after a started-agent failure', async () => {
+  const { runtime, transitionStore } = executeFixture({
+    async selectLaunchAndRecord(opts: { authorityAlreadyActive?: boolean }) {
+      assert.equal(opts.authorityAlreadyActive, true);
+      return { agent: 'codex', result: { status: 19 }, rebaseDeferred: true };
+    },
+  });
+  const outcome = await buildExecuteWorkflow(runtime, transitionStore).execute(executeRequest());
+  assert.equal(outcome.status, 'failed');
+  assert.match(outcome.error?.message ?? '', /exited with status 19/);
 });
 
 test('execute workflow: telemetry failure cannot fail a launch', async () => {
@@ -132,60 +137,31 @@ test('execute workflow: telemetry failure cannot fail a launch', async () => {
   assert.ok(calls.includes('handoff:task-1:/worktree:codex'));
 });
 
-test('execute workflow: an unavailable store at the launch boundary fails the run fail-closed', async () => {
-  // ADR 0053 rule 5: database-owned mutations fail closed when the database
-  // is unavailable. The run stops at the boundary — no active work, no
-  // handoff — instead of skipping the write and re-asserting later.
-  const { runtime, calls } = executeFixture();
-  const unavailableStore = {
-    async load() { return { kind: 'missing' }; },
-    async save() { calls.push('synchronize'); return 2; },
-    async saveWithTransition() { calls.push('synchronize'); return 2; },
-  };
-  const outcome = await buildExecuteWorkflow(runtime, unavailableStore).execute(executeRequest());
-  assert.equal(outcome.status, 'failed');
-  assert.equal(outcome.error.kind, 'execution');
-  assert.match(outcome.error.message ?? '', /active lifecycle boundary for task-1 failed/);
-  assert.equal(calls.includes('synchronize'), false, 'no lane write: the unavailable store was not retried later');
-  assert.equal(calls.includes('safety'), false);
-  assert.equal(calls.some((call) => call.startsWith('handoff:')), false);
-});
-
-test('execute workflow: an unavailable activation never reaches handoff, even while the store stays down', async () => {
-  const { runtime, calls } = executeFixture({
-    async selectLaunchAndRecord(opts: { onActivated?: (agent: string) => Promise<void> }) {
+test('execute workflow: an already-active task still synchronizes the Mission authority', async () => {
+  const { runtime, calls, transitionStore } = executeFixture({
+    async selectLaunchAndRecord() {
       calls.push('launch-record:codex');
-      await opts.onActivated?.('codex');
       return { agent: 'codex', result: { status: 0 }, rebaseDeferred: false };
     },
   });
-  const unavailableStore = {
-    async load() { calls.push('load'); return { kind: 'missing' }; },
-    async save() { calls.push('synchronize'); return 1; },
-    async saveWithTransition() { calls.push('synchronize'); return 1; },
-  };
-  const outcome = await buildExecuteWorkflow(runtime, unavailableStore).execute(executeRequest());
-  assert.equal(outcome.status, 'failed');
-  assert.match(outcome.error.message ?? '', /active lifecycle boundary for task-1 failed/);
-  assert.equal(calls.includes('synchronize'), false, 'no committed boundary, no lane write, no handoff');
-  assert.equal(calls.some((call) => call.startsWith('handoff:')), false, 'dependent work stops at the refused boundary');
+  const outcome = await buildExecuteWorkflow(runtime, transitionStore).execute(executeRequest());
+  assert.equal(outcome.status, 'completed');
+  assert.equal(calls.includes('load'), true);
+  assert.equal(calls.includes('synchronize'), true);
 });
 
 test('execute workflow: lifecycle synchronization fails closed when the Mission authority refuses activation', async () => {
   const { runtime, calls } = executeFixture();
-  // A domain refusal (activation is illegal from review), not an unavailable
-  // store: the run must stop, not skip the write.
-  const refusedStore = {
-    async load() { calls.push('load'); return { kind: 'found', version: 3, mission: { id: 'task-1', repositoryId: 'repo', title: 'F', labels: [], assignee: null, checkpoints: [], review: null, netEngineeringLines: null, brief: { goal: 'g', why: 'w', scope: 's', outOfScope: [] }, declaredGates: [], successCriteria: [], predictedNelBucket: 'Small', status: 'review' as const, closedAt: null } }; },
-    async save() { calls.push('synchronize'); return 4; },
-    async saveWithTransition() { calls.push('synchronize'); return 4; },
+  const missingStore = {
+    async load() { calls.push('load'); return { kind: 'missing' }; },
+    async save() { calls.push('synchronize'); return 1; },
+    async saveWithTransition() { calls.push('synchronize'); return 1; },
   };
-  const outcome = await buildExecuteWorkflow(runtime, refusedStore).execute(executeRequest());
+  const outcome = await buildExecuteWorkflow(runtime, missingStore).execute(executeRequest());
   assert.equal(outcome.status, 'failed');
   assert.equal(outcome.error.kind, 'execution');
-  assert.match(outcome.error.message ?? '', /active lifecycle boundary for task-1 failed/);
+  assert.match(outcome.error.message ?? '', /^legacy task lifecycle synchronization failed: /);
   assert.equal(calls.includes('synchronize'), false);
-  assert.equal(calls.includes('safety'), false);
   assert.equal(calls.some((call) => call.startsWith('handoff:')), false);
 });
 
@@ -243,7 +219,7 @@ test('execute workflow: handoff-and-review failure surfaces as an execution fail
 // Scenario 4 — non-zero agent exit status / launcher error
 // ---------------------------------------------------------------------------
 
-test('execute workflow: a non-zero agent exit status stops before safety, telemetry, and handoff', async () => {
+test('execute workflow: a non-zero agent exit status stops after pre-launch activation and before safety, telemetry, and handoff', async () => {
   const { runtime, calls, transitionStore } = executeFixture({
     async selectLaunchAndRecord() {
       calls.push('launch-record:codex');
@@ -255,7 +231,7 @@ test('execute workflow: a non-zero agent exit status stops before safety, teleme
   assert.equal(outcome.error.kind, 'execution');
   assert.equal(outcome.error.message, 'Execute agent (codex) exited with status 23.');
   assert.deepEqual(calls, [
-    'preflight', 'worktree', 'task', 'checkpoint', 'config', 'prompt', 'launch-record:codex',
+    'preflight', 'worktree', 'task', 'checkpoint', 'config', 'prompt', 'load', 'synchronize', 'launch-record:codex', 'load', 'synchronize',
   ]);
 });
 

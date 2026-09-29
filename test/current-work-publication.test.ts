@@ -5,8 +5,7 @@
  * These tests pin the authority allocation the mission requires, in code
  * rather than prose:
  *
- *  - current work is recorded on the existing operational-history authority
- *    and nowhere else — no Mission write, no lane event, no session marker;
+ *  - current work is recorded on the existing operational-history authority;
  *  - `AgentBlock` is untouched by publication, so family availability stays
  *    its own authority;
  *  - an automatic family handoff updates the *same* mission's current work
@@ -67,16 +66,21 @@ function strictPorts(overrides: Record<string, unknown> = {}) {
       async enforceCommitSafety() { calls.push('safety'); },
     },
     agentExecution: {
-      async prepare() { return { prompt: 'execute prompt', agentConfig: {} }; },
+      async prepare() { return { prompt: 'execute prompt', agent: 'claude', agentConfig: {} }; },
       async launch() {
         calls.push('launch');
         return { agent: 'codex', rebaseDeferred: false, errored: false, errorMessage: null, exitStatus: 0, detail: null };
       },
     },
     missionTransitions: {
-      async load() { throw new Error('lifecycle must not be touched by publication'); },
-      async save() { throw new Error('lifecycle must not be touched by publication'); },
-      async saveWithTransition() { throw new Error('lifecycle must not be touched by publication'); },
+      async load() { return { kind: 'found' as const, version: 1, mission: {
+        id: 'task-2370', repositoryId: 'repo', title: 'Fixture', labels: [], assignee: null,
+        checkpoints: [{ missionId: 'task-2370', name: 'CP-1', firstLine: 'work', goalCheck: [], nextActionText: '' }],
+        review: null, netEngineeringLines: null, brief: { goal: 'g', why: 'w', scope: 's', outOfScope: [] },
+        declaredGates: ['npm test'], successCriteria: ['done'], predictedNelBucket: 'Small', status: 'refined' as const, closedAt: null,
+      } }; },
+      async save() { calls.push('lifecycle'); return 2; },
+      async saveWithTransition() { calls.push('lifecycle'); return 2; },
     },
     telemetry: { async recordLaunchTelemetry() { calls.push('telemetry'); } },
     handoffReview: { async runHandoffAndReview() { calls.push('handoff'); return true; } },
@@ -191,9 +195,9 @@ test('an automatic family handoff updates the same mission current work and crea
   const { ports } = strictPorts({
     agentExecution: {
       async prepare() { return { prompt: 'p', agentConfig: {} }; },
-      async launch(request: { onAgentChanged?: (_agent: string) => void }) {
-        request.onAgentChanged?.('claude');
-        request.onAgentChanged?.('qwen');
+      async launch(request: { onAgentChanged?: (_agent: string) => Promise<void> }) {
+        await request.onAgentChanged?.('claude');
+        await request.onAgentChanged?.('qwen');
         return { agent: 'qwen', rebaseDeferred: false, errored: false, errorMessage: null, exitStatus: 0, detail: null };
       },
     },
@@ -248,15 +252,13 @@ test('a recorder outage never turns a completed execute run into a failure', asy
 // Authority separation
 // ---------------------------------------------------------------------------
 
-test('publishing current work writes only operational history and touches no other authority', async () => {
+test('publishing current work remains isolated from the activation write', async () => {
   const { repo, appended } = makeHistoryRepo();
   const { ports, calls } = strictPorts();
-  // `missionTransitions` throws on any call, so a lifecycle write would fail
-  // this test rather than pass silently.
   await new ExecuteMissionService(ports, undefined, new CurrentWorkRecorder(repo, { processId: 7 })).execute(executeRequest());
 
   assert.ok(appended.every((entry) => entry.eventType === CURRENT_WORK_EVENT_TYPE));
-  assert.deepEqual(calls, ['launch', 'safety', 'telemetry', 'handoff']);
+  assert.deepEqual(calls, ['lifecycle', 'launch', 'safety', 'telemetry', 'handoff']);
 });
 
 // ---------------------------------------------------------------------------

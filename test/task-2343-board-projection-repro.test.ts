@@ -274,13 +274,16 @@ test('task-2343 repro: mission adapter parses the checkpoint Goal Check table', 
 test('task-2343 repro: gate status comes from the recorded verifier exit code', async () => {
   const fixture = makeFixture();
   try {
+    const gates = new ConcreteGateReadAdapter({
+      rootDir: fixture.rootDir,
+      findMissionDir: () => fixture.missionDir,
+      resolveWorktree: () => null,
+    });
     recordGateResult(fixture.missionDir, { area: 'all', command: './scripts/verify-local.sh all', exitCode: 0 });
-    const passed = await cardFor(fixture);
-    assert.equal(passed.card.gate, 'passed');
+    assert.equal(await gates.loadGateStatus(MISSION), 'passed');
 
     recordGateResult(fixture.missionDir, { area: 'all', command: './scripts/verify-local.sh all', exitCode: 1 });
-    const failed = await cardFor(fixture);
-    assert.equal(failed.card.gate, 'failed');
+    assert.equal(await gates.loadGateStatus(MISSION), 'failed');
   } finally {
     cleanup(fixture);
   }

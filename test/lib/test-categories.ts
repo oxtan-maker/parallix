@@ -38,6 +38,7 @@ export const INTEGRATION_CI_TESTS: readonly string[] = [
   'active.test.ts',
   'agents-limit-hit.test.ts',
   'agents.test.ts',
+  'application-boundaries.test.ts',
   'backlog.test.ts',
   'board-event-metrics-fixture.test.ts',
   'board-event-recorder.test.ts',
@@ -115,7 +116,6 @@ export const INTEGRATION_CI_TESTS: readonly string[] = [
   'startup-preflight.test.ts',
   'stats-backfill.test.ts',
   'stats.test.ts',
-  'status.test.ts',
   'task-1048-regression.test.ts',
   'task-1049-force-push.test.ts',
   'task-1080-sync-merged-hardening.test.ts',
@@ -236,6 +236,14 @@ export const INTEGRATION_CI_TESTS: readonly string[] = [
   // TASK-2582: real migrated SQLite lifecycle boundaries; CI-safe.
   'task-2582-lifecycle-ordering.test.ts',
   'task-2582-repro.test.ts',
+  // TASK-2566: creates temporary Git repositories (mission/non-mission
+  // branches) and injects a fetch spy for the Sonar API, so it crosses the
+  // git/process boundary; every dependency is what a clean GitHub runner
+  // provides, so it is CI-safe.
+  'task-2566-sonar-boundary-repro.test.ts',
+  // TASK-2580: drives the real `px active` command and a loopback web snapshot
+  // to measure command-to-rendered-card delivery; both are CI-safe boundaries.
+  'task-2580-active-persisted-mission-repro.test.ts',
   // TASK-2521.03: seeds an isolated SQLite operator database and drives the
   // production `px status --json` composition path.
   'task-2521-03-context-cli.integration.test.ts',
@@ -256,6 +264,11 @@ export const INTEGRATION_CI_TESTS: readonly string[] = [
   // prove stale backlog/tasks copies never enter the landed payload, so it
   // crosses the git boundary and runs only in the integration layer.
   'task-2534-stale-backlog-copy-landing-repro.test.ts',
+  // TASK-2595: drives the real local squash landing against a throwaway Git
+  // repo to prove the landed commit message carries the recorded title and
+  // task reference, so it crosses the git boundary and runs only in the
+  // integration layer.
+  'task-2595-squash-landing-commit-message.test.ts',
   // TASK-2537: drives the real squash landing against throwaway Git repos to
   // prove closeout pathspecs stay valid when the base branch never tracked the
   // task file, so it crosses the git boundary and runs only in the integration
@@ -265,17 +278,13 @@ export const INTEGRATION_CI_TESTS: readonly string[] = [
   // prove the delete-branch subcommand's exit-0 failure semantics; the rest is
   // request-injected, so it crosses only the process boundary.
   'task-2551-sonar-branch-cleanup.test.ts',
+  // TASK-2554: probes the real bootstrap chain in Node subprocesses with
+  // temporary SQLite databases; no operator database or service is required.
   'task-2554-guard.test.ts',
   'task-2554-repro.test.ts',
-  // TASK-2577: runs fixture scenarios in `node --import tsx --test` child
-  // processes and reclaims their leftovers; a clean GitHub runner provides
-  // every dependency (node, tsx from devDependencies, temp directories).
+  // TASK-2577: checks fixture teardown in local Node subprocesses under
+  // private temporary directories, using only clean-runner dependencies.
   'task-2577-tmp-fixture-leaks-repro.test.ts',
-  // TASK-2595: drives the real local squash landing against a throwaway Git
-  // repo to prove the landed commit message carries the recorded title and
-  // task reference, so it crosses the git boundary and runs only in the
-  // integration layer.
-  'task-2595-squash-landing-commit-message.test.ts',
   'test-hygiene.test.ts',
   'tui-command-flow.test.ts',
   'tui-pty-smoke.test.ts',

@@ -51,6 +51,7 @@ export interface LaneTransitionEvent {
  * The mapping follows the `decideMission` state machine in mission-workflow.ts:
  *   - backlog → refined      : 'refine'
  *   - refined/active/null → active : 'activate' (null is the intake identity)
+ *   - active → refined       : 'abort-activation'
  *   - active → review         : 'submit-for-review'
  *   - review → active         : 'request-changes'
  *   - review → integration    : 'approve'
@@ -69,6 +70,9 @@ export function triggerFromTransition(
   }
   if (to === 'active' && (from === 'refined' || from === 'active' || from === null)) {
     return 'activate';
+  }
+  if (from === 'active' && to === 'refined') {
+    return 'abort-activation';
   }
   if (from === 'active' && to === 'review') {
     return 'submit-for-review';

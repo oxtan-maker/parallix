@@ -1,6 +1,5 @@
-// TASK-2582 CP-5 — regression coverage for lifecycle transition ordering and
-// the 200 ms persistence contract, with external boundaries (the agent run)
-// mocked and made slow.
+// TASK-2582 CP-5 — regression coverage for lifecycle transition ordering,
+// with external boundaries (the agent run) mocked and made slow.
 //
 // The companion coverage this file relies on:
 //   - multi-round review: test/task-2582-repro.test.ts
@@ -29,7 +28,6 @@ import { missionId, missionLabels, type Mission } from '../src/domain/mission.js
 import { repositoryId } from '../src/domain/repository.js';
 import { ExecuteMissionService } from '../src/application/execute-mission-service.js';
 import type { ExecuteMissionPorts } from '../src/application/ports/execute-mission.js';
-import { LIFECYCLE_DEADLINE_MS, monotonicNowMs } from '../src/application/lifecycle-timing.js';
 import { SqliteDatabaseAdapter } from '../src/adapters/sqlite/database-adapter.js';
 import { SqliteMigrationRunner, loadDefaultMigrations } from '../src/adapters/sqlite/migration-runner.js';
 import { SqliteMissionStore } from '../src/adapters/sqlite/mission-store.js';
@@ -92,16 +90,17 @@ interface Fixture {
 }
 
 async function openFixture(
-  launch: (request: { onActivated?: (agent: string, startedAtMs?: number) => Promise<void> }) => Promise<{
+  launch: (request: { onAgentChanged?: (agent: string) => Promise<void> }) => Promise<{
     agent: string; rebaseDeferred: boolean; errored: boolean; errorMessage: string | null; exitStatus: number | null; detail: unknown;
   }>,
+  mission: Mission = seedMission(),
 ): Promise<Fixture> {
   const root = makeTempRoot();
   const database = new SqliteDatabaseAdapter();
   await database.open({ path: path.join(root, 'parallix.db') });
   await new SqliteMigrationRunner(database).applyPending(loadDefaultMigrations());
   const store = new SqliteMissionStore(database);
-  await store.save(seedMission(), null);
+  await store.save(mission, null);
   const ports = {
     workspace: {
       async preflight() { return true; },
@@ -150,15 +149,10 @@ test('a slow downstream agent run does not delay the active transition', async (
   let releaseAgent: () => void = () => {};
   const agentGate = new Promise<void>((resolve) => { releaseAgent = resolve; });
   let launchEntered = false;
-  let boundaryElapsedMs = Number.NaN;
   const { database, store, ports } = await openFixture(async (request) => {
     launchEntered = true;
-    // Confirm the spawn, run the boundary the use case supplies, and measure
-    // it end to end on the monotonic clock — while the agent run (the
-    // destination-state work) is still pending on the gate.
-    const startedAtMs = monotonicNowMs();
-    await request.onActivated?.(AGENT);
-    boundaryElapsedMs = monotonicNowMs() - startedAtMs;
+    // Activation is committed before the launcher enters provider work.
+    assert.equal(request.onAgentChanged instanceof Function, true);
     await agentGate;
     return { agent: AGENT, rebaseDeferred: false, errored: false, errorMessage: null, exitStatus: 0, detail: null };
   });
@@ -180,11 +174,6 @@ test('a slow downstream agent run does not delay the active transition', async (
       'the destination state commits at the boundary, before the slow work finishes');
     const events = await laneEvents(database);
     assert.deepEqual(events, [{ from_status: 'refined', to_status: 'active', trigger: 'activate' }]);
-    // The 200 ms contract, measured end to end with the downstream work slow.
-    assert.ok(Number.isFinite(boundaryElapsedMs), 'the boundary persistence was measured');
-    assert.ok(boundaryElapsedMs <= LIFECYCLE_DEADLINE_MS,
-      `boundary persistence took ${boundaryElapsedMs} ms, over the ${LIFECYCLE_DEADLINE_MS} ms deadline`);
-
     releaseAgent();
     const outcome = await pending;
     assert.equal(outcome.status, 'completed');
@@ -197,13 +186,13 @@ test('a slow downstream agent run does not delay the active transition', async (
 test('a fallback relaunch re-asserts the active boundary with no second lane event', async () => {
   const boundaryAgents: string[] = [];
   const { database, store, ports } = await openFixture(async (request) => {
-    // The launcher confirms the first family, then — after a usage block —
-    // the replacement family it actually runs.
-    if (request.onActivated) {
+    // The launch was pre-activated for the selected family. After a usage
+    // block, the replacement family updates the authoritative assignee.
+    if (request.onAgentChanged) {
       boundaryAgents.push(AGENT);
-      await request.onActivated(AGENT);
+      await request.onAgentChanged(AGENT);
       boundaryAgents.push(FALLBACK_AGENT);
-      await request.onActivated(FALLBACK_AGENT);
+      await request.onAgentChanged(FALLBACK_AGENT);
     }
     return { agent: FALLBACK_AGENT, rebaseDeferred: false, errored: false, errorMessage: null, exitStatus: 0, detail: null };
   });
@@ -232,21 +221,21 @@ test('a fallback relaunch re-asserts the active boundary with no second lane eve
 });
 
 
-test('activation deadline includes elapsed work before the boundary callback', async () => {
-  let downstreamRan = false;
-  const { database, ports } = await openFixture(async (request) => {
-    // Mock a launcher whose spawn/bookkeeping already consumed the budget.
-    await request.onActivated?.(AGENT, monotonicNowMs() - LIFECYCLE_DEADLINE_MS - 50);
-    downstreamRan = true;
+test('an immediate activation blocker stops before launching the agent', async () => {
+  let launched = false;
+  const { database, store, ports } = await openFixture(async () => {
+    launched = true;
     return { agent: AGENT, rebaseDeferred: false, errored: false, errorMessage: null, exitStatus: 0, detail: null };
-  });
+  }, { ...seedMission(), status: 'backlog', rawStatus: 'backlog' } as Mission);
   try {
     const outcome = await new ExecuteMissionService(ports).execute({
-      operationId: `active:${SLUG}:late-launch`, slug: SLUG, agent: 'claude',
+      operationId: `active:${SLUG}:blocked`, slug: SLUG, agent: 'claude',
       capabilities: new Set(['active:execute']),
     } as never);
     assert.equal(outcome.status, 'failed');
-    assert.match(outcome.error?.message ?? '', /missed the 200 ms/);
-    assert.equal(downstreamRan, false);
+    assert.equal(launched, false);
+    const loaded = await store.load(missionId(SLUG));
+    assert.equal(loaded.kind === 'found' ? loaded.mission.status : null, 'backlog');
+    assert.deepEqual(await laneEvents(database), []);
   } finally { await database.close(); }
 });

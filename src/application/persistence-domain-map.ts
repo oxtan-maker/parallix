@@ -106,7 +106,7 @@ export const DOMAIN_CONCEPT_INVARIANTS: Readonly<
     invariant:
       'A lane transition is only recorded for a status pair the mission state machine owns; an unmodelled pair yields no trigger rather than a synthesised one.',
     fileLocation: 'src/domain/board-event.ts',
-    line: 63,
+    line: 64,
     anchor: 'export function triggerFromTransition',
   },
   AgentBlock: {

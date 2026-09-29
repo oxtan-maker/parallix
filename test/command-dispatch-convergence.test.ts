@@ -118,6 +118,7 @@ function createPorts(launchSpy: any): ExecuteMissionPorts {
     agentExecution: {
       prepare: async () => ({
         prompt: 'test',
+        agent: 'codex',
         agentConfig: null,
       }),
       launch: launchSpy,

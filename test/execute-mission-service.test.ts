@@ -11,6 +11,13 @@ import type { ExecuteMissionPorts } from '../src/application/ports/execute-missi
 
 function strictPorts(overrides: Record<string, unknown> = {}) {
   const calls: string[] = [];
+  let mission = {
+    id: 'task-1', repositoryId: 'repo', title: 'Fixture', labels: [],
+    assignee: null, checkpoints: [{ missionId: 'task-1', name: 'CP-1', firstLine: 'Do the work', goalCheck: [], nextActionText: '' }], review: null, netEngineeringLines: null,
+    brief: { goal: 'Fixture goal', why: 'Fixture why', scope: 'Fixture scope', outOfScope: [] },
+    declaredGates: ['npm test'], successCriteria: ['The mission is done'], predictedNelBucket: 'Small',
+    status: 'refined' as const, closedAt: null,
+  };
   const parts = {
     workspace: {
       async preflight(slug: string) { calls.push(`preflight:${slug}`); return true; },
@@ -20,36 +27,19 @@ function strictPorts(overrides: Record<string, unknown> = {}) {
       async enforceCommitSafety() { calls.push('safety'); },
     },
     agentExecution: {
-      async prepare() { calls.push('prepare'); return { prompt: 'execute prompt', agentConfig: {} }; },
-      async launch(request: { preselectedAgent: string | null, onActivated?: (agent: string) => Promise<void> }) {
+      async prepare() { calls.push('prepare'); return { prompt: 'execute prompt', agent: 'codex', agentConfig: {} }; },
+      async launch(request: { preselectedAgent: string | null }) {
         calls.push(`launch:${request.preselectedAgent ?? 'default'}`);
-        // The real adapter confirms the spawn, then runs the boundary callback
-        // the use case supplies: the active transition commits as
-        // destination-state work begins (TASK-2582).
-        await request.onActivated?.('codex');
         return { agent: 'codex', rebaseDeferred: true, errored: false, errorMessage: null, exitStatus: 0, detail: { startedAt: 'now' } };
       },
     },
     missionTransitions: {
       async load() {
         calls.push('load');
-        return {
-          kind: 'found', version: 3,
-          mission: {
-            id: 'task-1', repositoryId: 'repo', title: 'Fixture', labels: [],
-            assignee: null, checkpoints: [{ missionId: 'task-1', name: 'CP-1', firstLine: 'Do the work', goalCheck: [], nextActionText: '' }], review: null, netEngineeringLines: null,
-            // Activation refuses an incomplete contract, so a refined fixture
-            // carries the goal, scope and gate draft settles.
-            brief: { goal: 'Fixture goal', why: 'Fixture why', scope: 'Fixture scope', outOfScope: [] },
-            declaredGates: ['npm test'],
-            successCriteria: ['The mission is done'],
-            predictedNelBucket: 'Small',
-            status: 'refined', closedAt: null,
-          },
-        };
+        return { kind: 'found', version: 3, mission };
       },
-      async save(_mission: unknown, expectedVersion: number) { calls.push('synchronize'); return expectedVersion + 1; },
-      async saveWithTransition(_mission: unknown, expectedVersion: number) { calls.push('synchronize'); return expectedVersion + 1; },
+      async save(next: typeof mission, expectedVersion: number) { mission = next; calls.push('synchronize'); return expectedVersion + 1; },
+      async saveWithTransition(next: typeof mission, expectedVersion: number) { mission = next; calls.push('synchronize'); return expectedVersion + 1; },
     },
     telemetry: {
       async recordLaunchTelemetry(record: { agent: string }) { calls.push(`telemetry:${record.agent}`); },
@@ -72,7 +62,7 @@ function request(overrides: Record<string, unknown> = {}) {
   } as never;
 }
 
-test('execute mission use case sequences workspace, agent, lifecycle, telemetry, then handoff', async () => {
+test('execute mission use case activates before launch, then records telemetry and handoff', async () => {
   const { ports, calls } = strictPorts();
   const events: Array<{ sequence: number; phase: string }> = [];
   const work: Array<{ phase: string; agent: string | null }> = [];
@@ -85,10 +75,8 @@ test('execute mission use case sequences workspace, agent, lifecycle, telemetry,
     .execute(request());
   assert.equal(outcome.status, 'completed');
   assert.deepEqual(calls, [
-    'preflight:task-1', 'worktree:task-1', 'task:task-1', 'prepare', 'launch:codex',
-    // the active boundary commits at launch confirmation (TASK-2582);
-    // the committed boundary needs no re-assert in the durable record
-    'load', 'synchronize', 'safety', 'telemetry:codex', 'handoff:codex',
+    'preflight:task-1', 'worktree:task-1', 'task:task-1', 'prepare', 'load', 'synchronize',
+    'launch:codex', 'safety', 'telemetry:codex', 'handoff:codex',
   ]);
   assert.deepEqual(events.map((event) => event.sequence), [1, 2, 3]);
   assert.deepEqual(work.filter((entry) => entry.phase === 'handoff'), [
@@ -184,88 +172,44 @@ test('execute mission use case stops the run on a launcher error whose message i
   assert.equal(failed.calls.includes('safety'), false);
 });
 
-test('execute mission use case fails closed when the checked Mission authority refuses activation', async () => {
-  const refusedMission = {
-    id: 'task-1', repositoryId: 'repo', title: 'Fixture', labels: [],
-    assignee: null, checkpoints: [], review: null, netEngineeringLines: null,
-    brief: { goal: 'g', why: 'w', scope: 's', outOfScope: [] },
-    declaredGates: [], successCriteria: [], predictedNelBucket: 'Small',
-    status: 'review' as const, closedAt: null,
+test('execute mission use case blocks work and preserves the launch error when activation compensation fails', async () => {
+  const { ports } = strictPorts({
+    agentExecution: {
+      async prepare() { return { prompt: 'p', agent: 'codex', agentConfig: {} }; },
+      async launch() { throw new Error('launcher exploded'); },
+    },
+  });
+  const transitions = ports.missionTransitions as { saveWithTransition: (...args: unknown[]) => Promise<number> };
+  const save = transitions.saveWithTransition.bind(transitions);
+  let writes = 0;
+  transitions.saveWithTransition = async (...args) => {
+    writes += 1;
+    if (writes === 2) { throw new Error('compensation store unavailable'); }
+    return save(...args);
   };
+  const blocked: string[] = [];
+  const outcome = await new ExecuteMissionService(ports, undefined, {
+    async running() {}, async ended() {}, async blocked(_publication, reason) { blocked.push(reason); },
+  }).execute(request());
+  assert.equal(outcome.status, 'failed');
+  assert.match(outcome.error?.message ?? '', /launcher exploded/);
+  assert.match(outcome.error?.message ?? '', /Could not undo failed activation/);
+  assert.equal(blocked.length, 1);
+});
+
+test('execute mission use case fails closed when the checked Mission authority refuses activation', async () => {
   const { ports, calls } = strictPorts({
     missionTransitions: {
-      async load() { calls.push('load'); return { kind: 'found', version: 3, mission: refusedMission }; },
-      async save() { calls.push('synchronize'); return 4; },
-      async saveWithTransition() { calls.push('synchronize'); return 4; },
+      async load() { calls.push('load'); return { kind: 'missing' }; },
+      async save() { calls.push('synchronize'); return 1; },
+      async saveWithTransition() { calls.push('synchronize'); return 1; },
     },
   });
   const outcome = await new ExecuteMissionService(ports).execute(request());
   assert.equal(outcome.status, 'failed');
-  assert.match(outcome.error?.message ?? '', /active lifecycle boundary for task-1 failed/);
+  assert.match(outcome.error?.message ?? '', /^legacy task lifecycle synchronization failed: /);
   assert.equal(calls.includes('synchronize'), false);
   assert.equal(calls.some((call) => call.startsWith('handoff:')), false);
-});
-
-test('execute mission use case stops the run when the active boundary misses the 200 ms deadline', async () => {
-  const refinedMission = { id: 'task-1', repositoryId: 'repo', title: 'Fixture', labels: [], assignee: null, checkpoints: [{ missionId: 'task-1', name: 'CP-1', firstLine: 'Do the work', goalCheck: [], nextActionText: '' }], review: null, netEngineeringLines: null, brief: { goal: 'Fixture goal', why: 'Fixture why', scope: 'Fixture scope', outOfScope: [] }, declaredGates: ['npm test'], successCriteria: ['The mission is done'], predictedNelBucket: 'Small', status: 'refined' as const, closedAt: null };
-  const handoffCalls: string[] = [];
-  const { ports } = strictPorts({
-    agentExecution: {
-      async prepare() { return { prompt: 'execute prompt', agentConfig: {} }; },
-      async launch(request: { onActivated?: (agent: string) => Promise<void> }) {
-        await request.onActivated?.('codex');
-      },
-    },
-    missionTransitions: {
-      async load() { return { kind: 'found', version: 3, mission: refinedMission }; },
-      async save() { return 4; },
-      // A slow operator database: the commit succeeds, but only after the
-      // 200 ms deadline from work start — the contract says surface and stop.
-      async saveWithTransition() { await new Promise((resolve) => setTimeout(resolve, 220)); return 4; },
-    },
-    handoffReview: { async runHandoffAndReview() { handoffCalls.push('handoff'); return true; } },
-  });
-  const outcome = await new ExecuteMissionService(ports).execute(request());
-  assert.equal(outcome.status, 'failed');
-  assert.match(outcome.error?.message ?? '', /active lifecycle boundary for task-1 missed the 200 ms lifecycle persistence deadline/);
-  assert.deepEqual(handoffCalls, []);
-});
-
-test('execute mission use case stops the run when the active boundary cannot commit at launch', async () => {
-  const handoffCalls: string[] = [];
-  const recordCalls: string[] = [];
-  const { ports } = strictPorts({
-    agentExecution: {
-      async prepare() { return { prompt: 'execute prompt', agentConfig: {} }; },
-      async launch(request: { onActivated?: (agent: string) => Promise<void> }) {
-        // The boundary callback rejects (store refused the transition); the
-        // real adapter lets that stop the run before any success output.
-        await request.onActivated?.('codex');
-      },
-    },
-    missionTransitions: {
-      // A domain refusal (activation is illegal from review), not an
-      // unavailable store: the run must stop, not skip the write.
-      async load() { return { kind: 'found', version: 3, mission: { id: 'task-1', repositoryId: 'repo', title: 'F', labels: [], assignee: null, checkpoints: [], review: null, netEngineeringLines: null, brief: { goal: 'g', why: 'w', scope: 's', outOfScope: [] }, declaredGates: [], successCriteria: [], predictedNelBucket: 'Small', status: 'review' as const, closedAt: null } }; },
-      async save() { return 4; },
-      async saveWithTransition() { return 4; },
-    },
-    workspace: {
-      async preflight() { return true; },
-      async resolveWorktree() { return '/worktree'; },
-      async resolveTaskFile() { return { ok: true, taskFile: '/worktree/task.md' }; },
-      async readTaskStatus() { return 'active'; },
-      async enforceCommitSafety() { recordCalls.push('safety'); },
-    },
-    telemetry: { async recordLaunchTelemetry() { recordCalls.push('telemetry'); } },
-    handoffReview: { async runHandoffAndReview() { handoffCalls.push('handoff'); return true; } },
-  });
-  const outcome = await new ExecuteMissionService(ports).execute(request());
-  assert.equal(outcome.status, 'failed');
-  assert.match(outcome.error?.message ?? '', /active lifecycle boundary for task-1 failed/);
-  // No durable record, telemetry, or handoff follows an uncommitted boundary.
-  assert.deepEqual(recordCalls, []);
-  assert.deepEqual(handoffCalls, []);
 });
 
 test('execute mission use case carries run state per call instead of holding it per slug', async () => {
