@@ -194,6 +194,11 @@ export function selectTierFiles(executionRoot: string): TierFileSelection {
     'task-2582-repro.test.ts',
     // TASK-2601 opens a migrated SQLite Mission store and measurement store.
     'task-2601-repro.test.ts',
+    // TASK-2492 drives the composed integration command against an on-disk
+    // repository fixture and a real lifecycle state machine. Its injected
+    // external seams keep the assertions deterministic, but that composition
+    // belongs to the integration tier rather than the hermetic unit suite.
+    'task-2492-integrate-gate-bounce.test.ts',
     // TASK-2598: run the real `bwrap` binary through
     // test/lib/claude-credential-fixture.ts, where the content heuristic
     // cannot see the spawn, so both files are declared here.

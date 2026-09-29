@@ -175,7 +175,7 @@ export function createSquashLanding(ports: IntegrateWorkflowPorts, { promoteTask
 
   /** Create the landed squash commit; a hook failure bounces through the rebound kernel. */
   async function commitLandedSquash(run: LandingRun, commitArgs: string[], intendedPayloadPaths: Set<string>) {
-    const { slug, context, baseWorktree, seams } = run;
+    const { slug, context, baseWorktree, seams, missionServices } = run;
     fmt.log.debug('Step 5: Creating the landed squash commit in the local integration checkout...');
     const commitResult = git(commitArgs);
     if (commitResult.status === 0) { return; }
@@ -216,7 +216,16 @@ export function createSquashLanding(ports: IntegrateWorkflowPorts, { promoteTask
         // This repair completes the pending integration commit; it does not
         // return the reviewed mission to implementation.
         transitionToImplementer: (bounceSlug: string) => seams.transitionTaskFn(bounceSlug, 'ready-for-integration'),
-        applyAgentFallback: seams.applyAgentFallbackFn,
+        applyAgentFallback: ({ launchResult, original }) => seams.applyAgentFallbackFn({
+          launchResult,
+          original,
+          role: 'implementer',
+          slug,
+          worktree: baseWorktree,
+          state: context.reviewState ?? {},
+          taskResolution: context.task,
+          missionStore: missionServices.store,
+        }),
         verify: () => {
           const retryResult = git(commitArgs);
           return { ok: retryResult.status === 0, diagnostic: [retryResult.stdout, retryResult.stderr].filter(Boolean).join('\n').trim() };

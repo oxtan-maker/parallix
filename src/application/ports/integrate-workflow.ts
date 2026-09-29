@@ -123,9 +123,25 @@ export interface IntegrateAgentsPort {
   startAgent: ReboundContext['startAgent'];
   selectAgent(_step: string): string | null;
   workflowLauncherStatus(_agent: string, _rootDir: string): { supported: boolean; agent?: string | null } | null;
-  applyAgentFallback: NonNullable<ReboundContext['applyAgentFallback']>;
+  /**
+   * Persist an integration rebound's changed implementer. Unlike the kernel's
+   * launch-only callback, this boundary requires the mission context the
+   * review-state writer needs to address its authoritative aggregate.
+   */
+  applyAgentFallback(_options: IntegrationAgentFallbackOptions): Promise<string> | string;
   /** The autonomous review matrix, already formatted as operator lines. */
   describeReviewMatrix(): string[];
+}
+
+export interface IntegrationAgentFallbackOptions {
+  launchResult: unknown;
+  original: string;
+  role: 'implementer';
+  slug: string;
+  worktree: string;
+  state: Record<string, unknown>;
+  taskResolution?: Record<string, unknown>;
+  missionStore: MissionStore;
 }
 
 export interface IntegrateProductConfigPort {

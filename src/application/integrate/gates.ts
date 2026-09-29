@@ -163,7 +163,16 @@ export function createIntegrationGateStep({ gates, landing, verification }: Inte
       startAgentFn: seams.startAgentFn,
       transitionTaskFn: (bounceSlug: string) => seams.transitionTaskFn(bounceSlug, 'active'),
       reactivateMissionFn: reactivateMission,
-      applyAgentFallbackFn: seams.applyAgentFallbackFn,
+      applyAgentFallbackFn: ({ launchResult, original }: { launchResult: unknown; original: string }) => seams.applyAgentFallbackFn({
+        launchResult,
+        original,
+        role: 'implementer',
+        slug,
+        worktree: checkout,
+        state: context.reviewState ?? {},
+        taskResolution: context.task,
+        missionStore: missionServices.store,
+      }),
       reReviewFollows: Boolean(seams.reReviewFn),
     });
     if (route.route === 'revision-changed' && seams.reReviewFn) {

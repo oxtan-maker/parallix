@@ -202,6 +202,10 @@ export const INTEGRATION_CI_TESTS: readonly string[] = [
   // real temporary Git repository, so it crosses the git boundary and runs only
   // in the integration layer.
   'task-2492-already-merged-detection.test.ts',
+  // TASK-2492: exercises the composed integration command and lifecycle flow
+  // against an on-disk repository fixture. All external seams are injected, so
+  // a clean GitHub-hosted runner can execute it safely.
+  'task-2492-integrate-gate-bounce.test.ts',
   // TASK-2601 uses temporary SQLite Mission and measurement stores only.
   'task-2601-repro.test.ts',
   // TASK-2502: CodeQL gate tests. --dry-run resolves the plan without spawning

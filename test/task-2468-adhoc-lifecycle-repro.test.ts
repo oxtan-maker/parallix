@@ -304,7 +304,11 @@ function workflowEnv(binDir, stateHome, repoRoot) {
   };
 }
 
-function runWorkflow(repoRoot, env, args, timeout = 60000, { allowFailure = false } = {}) {
+// This test launches real CLI and agent-stub processes. Coverage instrumentation
+// and concurrent integration workers can delay startup beyond one minute even
+// though the fixture remains healthy, so keep the boundary bounded but give it
+// the same two-minute allowance used by the end-to-end workflow lane.
+function runWorkflow(repoRoot, env, args, timeout = 120000, { allowFailure = false } = {}) {
   const stdoutPath = path.join(os.tmpdir(), `parallix-e2e-stdout-${process.pid}-${Date.now()}.log`);
   const stderrPath = path.join(os.tmpdir(), `parallix-e2e-stderr-${process.pid}-${Date.now()}.log`);
   const stdoutFd = fs.openSync(stdoutPath, 'w');

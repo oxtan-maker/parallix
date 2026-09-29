@@ -36,7 +36,7 @@ export function createIntegrationContextBuilder(ports: IntegrateWorkflowPorts) {
     return { branch, worktree };
   }
 
-  async function forgejoContext(enabled: boolean, taskAssignee: string | null, slug: string, branch: string, integrationRoot: string, missionStore: MissionStore | null, readTokenFn: Function, getPrStatusFn: Function, getLatestReviewDecisionFn: Function, readReviewStateFn: Function) {
+  async function forgejoContext(enabled: boolean, taskAssignee: string | null, slug: string, branch: string, integrationRoot: string, reviewState: any, readTokenFn: Function, getPrStatusFn: Function, getLatestReviewDecisionFn: Function) {
     const absent = { forgejoIdentity: { forgejoUser: null, warning: null }, forgejoToken: null, configuredReviewer: null, pr: { exists: false }, siblingPrs: [] as any[], approval: { ok: false, error: 'forgejo-off', reviewState: null } };
     if (!enabled) { return absent; }
     const forgejoIdentity = landing.resolveForgejoUserForIntegration(taskAssignee);
@@ -44,7 +44,6 @@ export function createIntegrationContextBuilder(ports: IntegrateWorkflowPorts) {
     // Recovery authority is the reviewer from the persisted current round, not
     // the task assignee. Pass the Mission store because the production reader
     // otherwise cannot resolve that authoritative review state.
-    const reviewState = await Promise.resolve(readReviewStateFn(slug, integrationRoot, missionStore));
     const configuredReviewer = reviewState?.reviewer ? ports.review.resolveForgejoUser(reviewState.reviewer) : null;
     let pr = getPrStatusFn(branch, process.cwd(), { forgejoUser: forgejoIdentity.forgejoUser, token: forgejoToken });
     if (pr.exists && pr.merged === true) { pr = { ...pr, state: 'merged' }; }
@@ -55,14 +54,6 @@ export function createIntegrationContextBuilder(ports: IntegrateWorkflowPorts) {
       ? getLatestReviewDecisionFn(branch, { forgejoUser: forgejoIdentity.forgejoUser, token: forgejoToken, reviewerUser: configuredReviewer, sinceIso: reviewState?.startedAt })
       : { ok: false, error: 'pr-missing', reviewState: undefined };
     return { forgejoIdentity, forgejoToken, configuredReviewer, pr, siblingPrs, approval };
-  }
-
-  async function localApprovalFallback(enabled: boolean, approval: any, slug: string, integrationRoot: string, readReviewStateFn: Function) {
-    if (!enabled || approval.ok) { return approval; }
-    const localState = await Promise.resolve(readReviewStateFn(slug, integrationRoot));
-    return localState?.phase === 'approved' && localState.disposition === 'APPROVED'
-      ? { ok: true, reviewState: 'APPROVED', source: 'local-review-state' }
-      : approval;
   }
 
   async function buildIntegrationContext(slug: string, {
@@ -97,8 +88,19 @@ export function createIntegrationContextBuilder(ports: IntegrateWorkflowPorts) {
     const taskAssignee = task.ok ? backlog.getTaskAssignee(task.taskFile as string) : null;
     const forgejoEnabled = isForgejoReviewEnabledFn(integrationRoot);
 
-    const forgejoState = await forgejoContext(forgejoEnabled, taskAssignee, slug, branch, integrationRoot, missionStore, readTokenFn, getPrStatusFn, getLatestReviewDecisionFn, readReviewStateFn);
-    const approval = await localApprovalFallback(forgejoEnabled, forgejoState.approval, slug, integrationRoot, readReviewStateFn);
+    // Lightweight integration-context consumers that have Forgejo disabled do
+    // not compose the review reader. Production composition always does; keep
+    // the former context-only path compatible while a rebound simply receives
+    // an empty state when no review authority is available.
+    const reviewState = typeof readReviewStateFn === 'function'
+      ? await Promise.resolve(readReviewStateFn(slug, integrationRoot, missionStore))
+      : null;
+    const forgejoState = await forgejoContext(forgejoEnabled, taskAssignee, slug, branch, integrationRoot, reviewState, readTokenFn, getPrStatusFn, getLatestReviewDecisionFn);
+    const approval = !forgejoEnabled || forgejoState.approval.ok
+      ? forgejoState.approval
+      : reviewState?.phase === 'approved' && reviewState.disposition === 'APPROVED'
+        ? { ok: true, reviewState: 'APPROVED', source: 'local-review-state' }
+        : forgejoState.approval;
 
     const mainBranch = gitFn(['-C', integrationRoot, 'branch', '--show-current']).stdout.trim();
     const mainStatus = gitFn(['-C', integrationRoot, 'status', '--short']).stdout.trim();
@@ -110,6 +112,7 @@ export function createIntegrationContextBuilder(ports: IntegrateWorkflowPorts) {
       missionDir,
       area,
       task,
+      reviewState,
       missionWorktree,
       missionStatus: undefined as string | undefined,
       promoteBacklogOnCloseout: false,

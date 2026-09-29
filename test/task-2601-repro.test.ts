@@ -29,7 +29,10 @@ test('a failed px integrate exits even when an agent-style handle remains active
   const entry = path.resolve('src/entry/px.ts');
   const script = `setInterval(() => {}, 1000); process.argv = [process.execPath, ${JSON.stringify(entry)}, 'integrate', 'task-does-not-exist', '--invalid-option']; await import(${JSON.stringify(entry)});`;
   const child = spawnSync(process.execPath, ['--import', 'tsx', '-e', script], {
-    cwd: process.cwd(), encoding: 'utf8', timeout: 5000,
+    // The child deliberately keeps an interval alive; the assertion is that
+    // CLI validation exits anyway. Allow prebuilt coverage workers enough time
+    // to load the TypeScript entry before treating that as a regression.
+    cwd: process.cwd(), encoding: 'utf8', timeout: 20000,
   });
   assert.equal(child.error, undefined, child.error?.message);
   assert.equal(child.status, 1, child.stderr);
