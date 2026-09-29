@@ -21,7 +21,10 @@ export type PromptStage = 'draft' | 'execute' | 'review' | 'act-on-review' | 'po
  * `adapters.prompts.override` configuration key (resolved by the config package).
  *
  * Shape is load-two-files-and-concatenate: the core half is always assembled in
- * and cannot be dropped by an override, so no core instruction is removable. No
+ * and cannot be dropped by an override, so no core instruction is removable.
+ * The review default-opinion half is also retained before an override: it
+ * contains the workflow guidance against redundant batched coverage, which
+ * must reach reviewers regardless of local opinion customization. No
  * templating, registry, resolver hierarchy, plugin interface, factory, or new
  * dependency (mission-2465 guardrail 4).
  *
@@ -33,9 +36,12 @@ export type PromptStage = 'draft' | 'execute' | 'review' | 'act-on-review' | 'po
  */
 export function assembleStagePrompt(stage: PromptStage, { overridePath, assets = runtimeAssetStore }: { overridePath?: string | null; assets?: AssetStore } = {}): string {
   const core = assets.readText(`prompts/${stage}-core.md`);
+  const defaultOpinion = assets.readText(`prompts/${stage}.md`);
   const opinion = overridePath
-    ? readOverride(stage, overridePath)
-    : assets.readText(`prompts/${stage}.md`);
+    ? stage === 'review'
+      ? `${defaultOpinion.replace(/\n+$/, '')}\n\n${readOverride(stage, overridePath).replace(/^\n+/, '')}`
+      : readOverride(stage, overridePath)
+    : defaultOpinion;
   // Strip the file-naming heading from the core before assembly so a no-override
   // launch reproduces the pre-split prompt byte-for-byte (one added heading per
   // file is required for the split but is not part of the original prompt).

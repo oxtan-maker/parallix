@@ -130,6 +130,8 @@ export const INTEGRATION_CI_TESTS: readonly string[] = [
   'task-2206-post-integrate-hook-errors.test.ts',
   'task-2212-repro.test.ts',
   'task-2220-repro.test.ts',
+  // TASK-2239 drives the review-loop lifecycle over a filesystem fixture.
+  'task-2239-rereview-after-response.test.ts',
   'task-2231-unit-tests-hang-repro.test.ts',
   'task-2234-push-to-reviewer-autobounce.test.ts',
   'task-2241-tmp-cleanup-repro.test.ts',
@@ -144,6 +146,8 @@ export const INTEGRATION_CI_TESTS: readonly string[] = [
   'task-2322.11-operator-state.test.ts',
   'task-2322.12-review-recovery.integration.test.ts',
   'task-2322.12-stray-persistence.test.ts',
+  // TASK-2343 composes concrete filesystem adapters over a temporary repository.
+  'task-2343-board-projection-repro.test.ts',
   'task-2337-repro.test.ts',
   'task-2339-aggregate-read-during-write.test.ts',
   'task-2339-writes-outlive-close.test.ts',
@@ -155,6 +159,13 @@ export const INTEGRATION_CI_TESTS: readonly string[] = [
   'task-2348-implementer-attribution.test.ts',
   'task-2349-integrate-stage-commit-race.test.ts',
   'task-2350-reconcile-interrupted-handoff.test.ts',
+  // These integration workflow regressions create real temporary filesystem
+  // or SQLite fixtures; clean hosted runners provide every dependency.
+  'task-1109.test.ts',
+  'task-2367-integration-completion-repro.test.ts',
+  'task-2377.05-integrate-squash-bounce.test.ts',
+  'task-2426-repro.test.ts',
+  'task-2454-web-board-draft-repro.test.ts',
   'task-2357-certification.test.ts',
   'task-2357.a-historical-intake.test.ts',
   'task-2357.b-canonical-repository-identity.test.ts',

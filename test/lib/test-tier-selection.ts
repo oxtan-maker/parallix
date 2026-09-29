@@ -131,6 +131,8 @@ export function selectTierFiles(executionRoot: string): TierFileSelection {
     'sqlite-ports-cp2.test.ts',
     'stats.test.ts',
     'task-2220-repro.test.ts',
+    // TASK-2239 drives the review-loop lifecycle over a filesystem fixture.
+    'task-2239-rereview-after-response.test.ts',
     'task-2241-tmp-cleanup-repro.test.ts',
     'task-2322-05-mission-sqlite-fixture.test.ts',
     'task-2322-05-mission-use-cases.test.ts',
@@ -142,6 +144,16 @@ export function selectTierFiles(executionRoot: string): TierFileSelection {
     'task-2337-repro.test.ts',
     'task-2339-aggregate-read-during-write.test.ts',
     'task-2339-writes-outlive-close.test.ts',
+    // TASK-2343 composes concrete filesystem adapters over a temporary repository.
+    'task-2343-board-projection-repro.test.ts',
+    // These workflow regressions create real temporary filesystem or SQLite
+    // fixtures. Their mocked remote seams retain deterministic assertions, but
+    // the fixtures mean they are CI-safe integration tests rather than units.
+    'task-1109.test.ts',
+    'task-2367-integration-completion-repro.test.ts',
+    'task-2377.05-integrate-squash-bounce.test.ts',
+    'task-2426-repro.test.ts',
+    'task-2454-web-board-draft-repro.test.ts',
     'task-2345-repro.test.ts',
     'task-2347-01-repository-identity-repro.test.ts',
     'task-2347.02-lifecycle-history.test.ts',

@@ -14,6 +14,8 @@ import { buildExecutePrompt } from '../src/adapters/cli/commands/active.js';
 import { buildCompactReviewPrompt, buildCompactActOnReviewPrompt } from '../src/adapters/review/review-prompts.js';
 
 const STAGES = ['draft', 'execute', 'review', 'act-on-review', 'portfolio'] as const;
+const REVIEW_COVERAGE_GUIDANCE =
+  'Do not run large batched test coverage commands that Parallix has already run or intentionally schedules for a later verification phase. Run a focused test only when it validates a specific review finding.';
 
 function realRepoRoot(): string {
   let dir = path.dirname(fileURLToPath(import.meta.url));
@@ -34,7 +36,12 @@ const PARENT_FIXTURE = JSON.parse(
 function parentPrompt(stage: string): string {
   const parent = PARENT_FIXTURE[stage];
   assert.ok(parent, `parent-commit fixture missing for stage ${stage}`);
-  return parent;
+  return stage === 'review'
+    ? `${parent.replace(
+      'Do not run any large test gates, thats run automatically by parallix at suitable steps and is not your job. Specific test to validate a code finding is ok.',
+      REVIEW_COVERAGE_GUIDANCE,
+    )}\n`
+    : parent;
 }
 function nonBlank(s: string): string[] { return s.split('\n').filter(l => l.trim().length > 0); }
 function counts(lines: string[]): Map<string, number> {
@@ -158,10 +165,11 @@ test('task-2465: a configured override whose file is missing surfaces a config e
   }
 });
 
-// --- override retention: the single key swaps only the opinion half; core is
-// always assembled in and cannot be dropped by an override. ---
+// --- override retention: the single key supplies opinion content; core is
+// always assembled in and cannot be dropped by an override. The review stage
+// additionally retains its shipped verification guidance before the override.
 
-test('task-2465: configured override replaces opinion content but retains a named core instruction', () => {
+test('task-2465: configured override supplies opinion content and retains a named core instruction', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'task-2465-override-'));
   try {
     fs.writeFileSync(path.join(root, 'workflow.config.json'), JSON.stringify({
@@ -173,6 +181,29 @@ test('task-2465: configured override replaces opinion content but retains a name
     assert.ok(assembled.includes('Separation of duties — you are the reviewer, not the implementer'), 'a named core instruction must survive the override');
     assert.ok(assembled.includes('Mode: review.'), 'the mandatory core header must survive the override');
     assert.equal(resolvePromptOverride(root), path.join(root, 'repo-opinion.md'));
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('task-2602: runtime review prompt retains non-core coverage guidance with the shipped asset and configured override', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'task-2602-review-prompt-'));
+  try {
+    fs.writeFileSync(path.join(root, 'workflow.config.json'), JSON.stringify({
+      adapters: { prompts: { override: 'repo-opinion.md' } },
+    }));
+    fs.writeFileSync(path.join(root, 'repo-opinion.md'), 'REPO-LOCAL-OPINION-PLACEHOLDER-2602\n');
+
+    const defaultPrompt = buildCompactReviewPrompt({
+      reviewer: 'codex', branch: 'mission/task-2602', implementer: 'claude', attempt: 1,
+    });
+    const overriddenPrompt = buildCompactReviewPrompt({
+      reviewer: 'codex', branch: 'mission/task-2602', implementer: 'claude', attempt: 1, repoRoot: root,
+    });
+
+    assert.ok(defaultPrompt.includes(REVIEW_COVERAGE_GUIDANCE));
+    assert.ok(overriddenPrompt.includes(REVIEW_COVERAGE_GUIDANCE));
+    assert.match(overriddenPrompt, /REPO-LOCAL-OPINION-PLACEHOLDER-2602/);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }

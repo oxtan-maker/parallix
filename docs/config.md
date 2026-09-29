@@ -184,10 +184,14 @@ halves. A shipped default-opinion half may be empty when a stage has no
 tailorable opinion content.
 
 When `override` is set to a repo-relative or absolute path, Parallix assembles
-the same mandatory core half but reads every stage's opinion half from that one
-file instead of its shipped default (including an empty shipped default). The
-core half is always assembled in and cannot be dropped by an override, so no
-mechanically required instruction is removable.
+the same mandatory core half and reads the local opinion from that one file.
+For draft, execute, act-on-review, and portfolio, that file replaces the shipped
+opinion half (including an empty shipped default). For review, Parallix keeps
+the shipped default-opinion guidance before appending the local opinion, so
+reviewers retain the instruction not to repeat large batched coverage that
+Parallix already ran or deliberately schedules later. The core half is always
+assembled in and cannot be dropped by an override, so no mechanically required
+instruction is removable.
 There is exactly one such key; there are no per-stage, per-agent, per-model,
 or per-user override keys.
 
