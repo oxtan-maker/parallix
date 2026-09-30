@@ -1,8 +1,8 @@
 ---
 id: TASK-2570
 title: Remove unsupported project approval settings from Codex launch config
-status: backlog
-assignee: []
+status: done
+assignee: [codex]
 created_date: '2026-09-24 19:00'
 labels:
   - bug

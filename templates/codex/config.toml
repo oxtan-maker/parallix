@@ -1,6 +1,6 @@
 sandbox_mode = "danger-full-access"
 model = "gpt-5.5"
+approval_policy = "never"
 
 [projects.".."]
 trust_level = "trusted"
-approval_policy = "never"

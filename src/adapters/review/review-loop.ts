@@ -1956,6 +1956,7 @@ async function startReviewLoopOwned(slug: string, opts: {
     consumeReviewerArtifactsFn,
     dryRun,
     effectiveMissionPath,
+    eligibleAgentsForStepFn,
     enforceTaskAssigneeFn,
     error,
     escalateToHumanReview,

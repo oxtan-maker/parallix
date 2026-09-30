@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { startReviewLoop } from '../src/adapters/review/review-loop.js';
+import { reboundPreReviewFailure, startReviewLoop } from '../src/adapters/review/review-loop.js';
 
 // TASK-2415 repro: a typed gate-only failure from `rebaseBeforeReviewRound`
 // bounces to the implementer, the rebound kernel verifies the repair, and the
@@ -27,6 +27,11 @@ test('task-2415 repro: repaired pre-review gate continues the review round inste
     resolveTaskFileFn: () => ({ ok: true, taskFile: '/tmp/task-2415.md', matches: [] }),
     getTaskStatusFn: () => 'review',
     eligibleAgentsForStepFn: () => ['codex', 'claude'],
+    reboundPreReviewFailureFn: async (...args) => {
+      assert.deepEqual(args[4].reviewerEligibility?.reviewers, ['codex', 'claude'],
+        'repair resumption receives the full configured review pool');
+      return reboundPreReviewFailure(...args);
+    },
     workflowLauncherStatusFn: () => ({ supported: true, agent: 'codex', detail: null }),
     isForgejoReviewEnabledFn: () => true,
     forgejoAvailableFn: async () => true,

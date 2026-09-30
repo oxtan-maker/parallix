@@ -55,6 +55,27 @@ test('extractCodexSessionId returns null for no match', () => {
 
 // ---------- buildCodexDraftInvocation ----------
 
+test('Codex template keeps approval policy at top level and project trust intact', () => {
+  const template = fs.readFileSync(new URL('../templates/codex/config.toml', import.meta.url), 'utf8');
+  const firstTable = template.indexOf('[');
+  assert.ok(firstTable >= 0);
+  assert.match(template.slice(0, firstTable), /^approval_policy = "never"$/m);
+  assert.match(template.slice(firstTable), /^\[projects\."\.\."\]\s*\ntrust_level = "trusted"$/m);
+  assert.doesNotMatch(template.slice(firstTable), /approval_policy/);
+});
+
+test('headless Codex launches and resumes use top-level approval and project trust overrides', () => {
+  const worktree = '/tmp/codex-config-regression/mission';
+  for (const options of [{}, { resume: true }, { resume: true, sessionId: 'session-1' }]) {
+    const invocation = buildCodexDraftInvocation({ prompt: 'config check', worktree, interactive: false, ...options });
+    const overrides = invocation.args.filter((_, index) => invocation.args[index - 1] === '--config');
+    assert.equal(overrides.filter(arg => arg === 'approval_policy="never"').length, 1);
+    assert.ok(overrides.includes('projects."/tmp/codex-config-regression".trust_level="trusted"'));
+    assert.ok(overrides.includes('projects."/tmp/codex-config-regression/mission".trust_level="trusted"'));
+    assert.equal(overrides.some(arg => arg.includes('.approval_policy=')), false);
+  }
+});
+
 test('buildCodexDraftInvocation leaves native sandboxing to Bubblewrap by default', () => {
   const inv = buildCodexDraftInvocation({ prompt: 'test', worktree: '/tmp', interactive: false });
   assert.equal(inv.command, 'codex');

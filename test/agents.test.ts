@@ -907,6 +907,16 @@ test('workflowLauncherStatus rejects a launcher that exists but fails its health
   }));
 });
 
+test('workflowLauncherStatus probes Pi with its side-effect-free version command', () => {
+  withPathLaunchers({
+    pi: 'process.exit(process.argv.includes("--version") ? 0 : 1);'
+  }, () => withRealHealthProbe(() => {
+    const status = workflowLauncherStatus('pi');
+    assert.equal(status.supported, true);
+    assert.equal(status.health, 'ok');
+  }));
+});
+
 test('selectAgent bypasses a broken launcher even when the binary exists', () => {
   const previous = process.env.WORKFLOW_AGENT;
   delete process.env.WORKFLOW_AGENT;

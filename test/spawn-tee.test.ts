@@ -430,12 +430,18 @@ test('spawnAndTee leaves no-output watchdog intact when no stall cutoff is confi
   assert.equal(result.status, 0);
 });
 
-test('spawnAndTee marks a real no-output deadline as a bounded timeout', async () => {
+test('spawnAndTee marks a real no-output deadline as a bounded timeout', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'], now: 1000 });
   const signals = [];
   const kill = mock.method(process, 'kill', (_pid, signal) => { signals.push(signal); return true; });
-  const result = await withMockSpawn({ stdoutChunks: ['Interrupted'], stdoutDelayMs: 10, closeDelayMs: 600, status: 1 }, async () => spawnAndTee('mock-node', [], {
+  const pending = withMockSpawn({ stdoutChunks: ['Interrupted'], stdoutDelayMs: 10, closeDelayMs: 600, status: 1 }, async () => spawnAndTee('mock-node', [], {
     stdoutSink: noopSink(), stderrSink: noopSink(), noOutputWatchdog: { maxNoOutputMs: 5 },
   }));
+  t.mock.timers.tick(5);
+  t.mock.timers.tick(250);
+  t.mock.timers.tick(250);
+  t.mock.timers.tick(95);
+  const result = await pending;
   kill.mock.restore();
   assert.equal((result.error as { code?: string }).code, 'NO_OUTPUT_TIMEOUT');
   assert.equal(result.status, null);

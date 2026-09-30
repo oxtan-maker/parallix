@@ -56,7 +56,10 @@ const HEALTH_PROBE_ARGS: {[key: string]: string[]} = Object.freeze({
   claude: ['--help'],
   vibe: ['--help'],
   opencode: ['--help'],
-  pi: ['--help'],
+  // Pi's help command initializes its mutable agent state.  Availability is
+  // only an executable probe, so use the side-effect-free version command
+  // instead; this also works for confined, throwaway PI_CODING_AGENT_DIRs.
+  pi: ['--version'],
   qwen: ['--help']
 });
 const LAUNCHER_HEALTH_TIMEOUT_MS = 3000;

@@ -351,6 +351,7 @@ export const INTEGRATION_LOCAL_TESTS: readonly string[] = [
   'task-2557-sandbox-px-write.test.ts',
   'task-2598-claude-credential-cell.test.ts',
   'task-2598-repro.test.ts',
+  'task-2570-repro.test.ts',
   'unit-test-timeout-guard.test.ts',
 ];
 
@@ -370,6 +371,8 @@ export const INTEGRATION_LOCAL_REASONS: Readonly<Record<string, string>> = {
     'Spawns the real `bwrap` binary to run every Claude lifecycle sandbox profile against a stand-in CLI; bubblewrap is not part of the GitHub-hosted runner image.',
   'task-2598-repro.test.ts':
     'Spawns the real `bwrap` binary to refresh Claude credentials inside the claude sandbox profile; bubblewrap is not part of the GitHub-hosted runner image.',
+  'task-2570-repro.test.ts':
+    'Downloads and launches the pinned Codex v0.156.1 CLI to verify its real configuration parser; that versioned CLI and registry access are not clean-runner dependencies.',
   'unit-test-timeout-guard.test.ts':
     'TASK-2542: proves the unit-test timing guard fires by spawning the runner against a slow fixture; the budget/reporter path is disabled on GitHub-hosted runners, so this timing proof is retained in required local verification rather than the GitHub CI lane.',
 };

@@ -84,12 +84,12 @@ test('the common draft prompt body is intake-independent modulo identity and the
     // Normalize away the per-mission identity (slug + absolute paths) and the
     // substituted intake block, then the instruction bodies must match: the
     // intake difference is confined to that one block.
-    const normalize = (prompt, instructions) =>
+    const normalize = (prompt, instructions, root) =>
       prompt
         .replace(instructions, '{{classificationInstructions}}')
-        .replace(/\/tmp\/[^\s`]+/g, '<root>')
+        .replaceAll(root, '<root>')
         .replace(/(?:task-1000|adhoc-fix-hello)/g, '<slug>');
-    assert.equal(normalize(ahPrompt, ahInstructions), normalize(bgPrompt, bgInstructions));
+    assert.equal(normalize(ahPrompt, ahInstructions, ah.root), normalize(bgPrompt, bgInstructions, bg.root));
     // The adhoc rendering must not instruct through a Backlog task file it has no such file for.
     assert.doesNotMatch(ahInstructions, /Backlog task labels/);
   } finally {
