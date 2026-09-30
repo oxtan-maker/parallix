@@ -87,7 +87,7 @@
     "brace-expansion": "5.0.12",
     "esbuild": "^0.25.12",
     "eslint": "^9.39.4",
-    "fast-uri": "^3.1.6",
+    "fast-uri": "^4.2.1",
     "fastify": "^5.12.1",
     "happy-dom": "^20.14.5",
     "ink": "^6.8.0",
