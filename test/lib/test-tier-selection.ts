@@ -204,6 +204,9 @@ export function selectTierFiles(executionRoot: string): TierFileSelection {
     // content heuristic, so both files are declared here.
     'task-2582-lifecycle-ordering.test.ts',
     'task-2582-repro.test.ts',
+    // TASK-2514 opens a migrated SQLite Mission store and drives the real
+    // MissionLifecycleService through the approve path.
+    'task-2514-human-approve-after-active-repair.test.ts',
     // TASK-2601 opens a migrated SQLite Mission store and measurement store.
     'task-2601-repro.test.ts',
     // TASK-2492 drives the composed integration command against an on-disk

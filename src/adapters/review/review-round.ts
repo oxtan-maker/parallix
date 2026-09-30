@@ -240,7 +240,8 @@ export async function approvalLegalDiagnostic(
  * move the current round to `approved` (for example a round still in `fixing`
  * after a request-changes) fails loudly with a diagnostic naming the illegal
  * transition rather than writing `disposition === 'APPROVED'` over a
- * `changes-requested` decision.
+ * `changes-requested` decision. An awaiting-review round on a Mission that a
+ * manual repair left active is approved in one `active → integration` move.
  */
 export async function recordApproval(
   slug: string,
@@ -285,7 +286,7 @@ export async function recordApproval(
         diagnostic: approvalBlockedDiagnostic(status),
       };
     }
-    if (mission.status !== 'review' && mission.status !== 'integration') {
+    if (mission.status !== 'review' && mission.status !== 'integration' && mission.status !== 'active') {
       // TASK-2582: an approve recorded over a Mission that is not in the review
       // lane is the TASK-2579 mismatch. Fail before writing the decision
       // instead of reporting `recorded` over a Mission the boundary cannot
@@ -301,11 +302,41 @@ export async function recordApproval(
       comment: input.comment,
       source,
     });
+    if (mission.status === 'active') {
+      return await approveRepairedActiveLane(slug, input.decidedAt, loaded.version, review, ports);
+    }
     const version = await store.save({ ...mission, review }, loaded.version);
     return await transitionApprovedReview(slug, input.decidedAt, mission, version, review, ports) ?? { outcome: 'recorded' };
   } catch (error) {
     return { outcome: 'failed', diagnostic: diagnosticFrom(error, 'Approval write failed') };
   }
+}
+
+/**
+ * TASK-2514: approve the awaiting-review round of a Mission whose lane a manual
+ * repair left active. The decision and the `active → integration` move commit
+ * in one lifecycle transition, so a refused transition never leaves an approval
+ * attached to an active Mission (the TASK-2579 shape).
+ */
+async function approveRepairedActiveLane(
+  slug: string,
+  decidedAt: string,
+  version: MissionVersion,
+  review: Review,
+  ports: ReviewRoundPorts,
+): Promise<ReviewRoundResult> {
+  if (!ports.lifecycleService) {
+    return { outcome: 'failed', diagnostic: `Approve cannot be recorded for ${slug}: the Mission is active and no lifecycle service is bound to move it to integration` };
+  }
+  const round = currentReviewRound(review);
+  const transition = await ports.lifecycleService.transition({
+    operationId: `review-approve:${slug}`,
+    missionId: missionId(slug), expectedVersion: version, capabilities: new Set(['mission:transition']),
+    command: { type: 'approve', review }, actor: round.reviewer, occurredAt: decidedAt,
+    idempotencyKey: `approve:${slug}:round-${round.number}`,
+  });
+  if (transition.status === 'completed') { return { outcome: 'recorded' }; }
+  return { outcome: 'failed', diagnostic: `active → integration transition failed for ${slug}: ${transition.error?.message ?? 'unknown failure'}` };
 }
 
 async function transitionApprovedReview(

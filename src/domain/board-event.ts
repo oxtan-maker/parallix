@@ -55,6 +55,7 @@ export interface LaneTransitionEvent {
  *   - active → review         : 'submit-for-review'
  *   - review → active         : 'request-changes'
  *   - review → integration    : 'approve'
+ *   - active → integration    : 'approve' (the repaired active lane, TASK-2514)
  *   - integration → active    : 'rebound-to-active'
  *   - integration → done      : 'integrate'
  *
@@ -80,7 +81,7 @@ export function triggerFromTransition(
   if (from === 'review' && to === 'active') {
     return 'request-changes';
   }
-  if (from === 'review' && to === 'integration') {
+  if ((from === 'review' || from === 'active') && to === 'integration') {
     return 'approve';
   }
  if (from === 'integration' && to === 'active') {

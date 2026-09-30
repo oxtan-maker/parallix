@@ -359,6 +359,7 @@ test('SC3: triggerFromTransition maps all known transitions correctly', () => {
   assert.equal(triggerFromTransition('active', 'review'), 'submit-for-review');
   assert.equal(triggerFromTransition('review', 'active'), 'request-changes');
   assert.equal(triggerFromTransition('review', 'integration'), 'approve');
+  assert.equal(triggerFromTransition('active', 'integration'), 'approve');
   assert.equal(triggerFromTransition('integration', 'done'), 'integrate');
   assert.equal(triggerFromTransition('backlog', 'review'), null);
 });

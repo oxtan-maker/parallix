@@ -270,6 +270,9 @@ export const INTEGRATION_CI_TESTS: readonly string[] = [
   // TASK-2582: real migrated SQLite lifecycle boundaries; CI-safe.
   'task-2582-lifecycle-ordering.test.ts',
   'task-2582-repro.test.ts',
+  // TASK-2514: real migrated SQLite lifecycle boundary for the human approve
+  // after an active-state repair; CI-safe.
+  'task-2514-human-approve-after-active-repair.test.ts',
   // TASK-2566: creates temporary Git repositories (mission/non-mission
   // branches) and injects a fetch spy for the Sonar API, so it crosses the
   // git/process boundary; every dependency is what a clean GitHub runner

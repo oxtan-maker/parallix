@@ -1,13 +1,15 @@
 ---
 id: TASK-2514
 title: Allow human review approval after active-state repair
-status: backlog
-assignee: []
+status: done
+assignee: [claude]
 created_date: '2026-09-14 14:20'
 labels:
   - review
   - lifecycle
   - human-override
+  - ai_sdlc
+  - bug
 dependencies: []
 references:
   - src/adapters/review/review-commands.ts

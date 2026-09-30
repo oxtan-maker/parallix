@@ -41,10 +41,15 @@ const UNIT_TEST_CPU_BUDGET_MS = plan.unitTestCpuBudgetMs;
 // The fully isolated covered path retains its existing provisional bound.
 // The local hybrid gate has its own CPU bound below, calibrated separately.
 const COVERAGE_UNIT_TEST_SUITE_CPU_BUDGET_MS = 900_000;
-// The adopted 278/118 hybrid used 337-367 CPU seconds in covered local runs
-// under concurrent verification. This bound leaves 16% above the higher run
-// while failing a material increase in compute cost.
-const FAST_COVERAGE_UNIT_TEST_SUITE_CPU_BUDGET_MS = 425_000;
+// The fast unit tier runs the complete unit suite under coverage, so it pays
+// the same per-file worker instrumentation cost as the isolated path but for
+// the unit files only. Measured on the CI verification machine the covered
+// unit suite holds at ~440 s CPU (max 473 s across repeated runs) under the
+// concurrent safe/isolated partition. The previous 425 s bound was calibrated
+// against a 367 s local run on a faster box and now fails on routine variance,
+// so this leaves ~18% above the typical run and ~10% above the observed max
+// while still failing a material regression (e.g. a >20% compute increase).
+const FAST_COVERAGE_UNIT_TEST_SUITE_CPU_BUDGET_MS = 520_000;
 
 const coverageDestination = runsIntegrationCiSuite
   ? path.join(executionRoot, 'coverage', '.lcov-integration-ci.info')

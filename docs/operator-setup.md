@@ -278,6 +278,14 @@ including when the previous round limit was exhausted. A continued integration
 repair resumes integration automatically after approval. Repair budgets and
 mandatory gates still apply; a failed gate never counts as approval.
 
+If a request-changes review was interrupted and repaired by hand, the mission
+can be left active while its next round awaits review. A human reviewer
+approves that round with `px review <slug> --submit-review approve`; the one
+command records the approval and moves the mission to integration. An approve
+is still refused while the round awaits implementation, so the requested
+changes and their findings stay intact, and a round reopened by an
+integration-gate repair must go back through review first.
+
 ## Summary Checklist
 
 After setup, an operator should be able to:

@@ -226,6 +226,19 @@ function submitForReview(mission: Mission, command: SubmitForReviewCommand): Mis
   return { ...mission, status: 'review', review: command.review };
 }
 
+/**
+ * An active Mission is the manually repaired shape (TASK-2514) when the lane was
+ * left active while the valid next round awaits review. Only that undecided
+ * round may be approved from active. A round reopened by revoking an approval
+ * is an integration repair (`rebound-to-active`): its implementer must repair
+ * the change and resubmit through review, so it is not approvable here.
+ */
+function approvableFromActiveLane(review: Review | null): boolean {
+  if (!review || reviewStatus(review) !== 'awaiting-review') { return false; }
+  const previous = review.rounds.at(-2)?.decision;
+  return !(previous?.kind === 'approved' && previous.revocation);
+}
+
 export function decideMission(mission: Mission, command: MissionCommand): Mission {
   switch (command.type) {
   case 'refine':
@@ -292,7 +305,10 @@ export function decideMission(mission: Mission, command: MissionCommand): Missio
     }
     return { ...mission, status: 'active', review: command.review };
   case 'approve':
-    requireStatus(mission, ['review'], command);
+    requireStatus(mission, ['review', 'active'], command);
+    if (mission.status === 'active' && !approvableFromActiveLane(mission.review)) {
+      throw new MissionRuleViolation('Approval from an active Mission requires an awaiting-review round outside an integration repair');
+    }
     requireSameReviewedRevision(mission, command.review);
     if (reviewStatus(command.review) !== 'approved') {
       throw new MissionRuleViolation('Approval requires an approved review');
