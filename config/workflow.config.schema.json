@@ -36,7 +36,6 @@
           "properties": {
             "provider": { "type": "string", "enum": ["backlog-md"], "description": "Task tracker provider. backlog-md is the only supported value; any other value is rejected." },
             "stateMap": { "type": "string", "description": "Repo-relative path to the virtual-to-actual Backlog state map." },
-            "selfHostedCloseout": { "type": "boolean", "description": "When true, integration removes this repository's completed task artifact instead of creating a completed-task mirror. Defaults to false." },
             "storage": {
               "description": "Task storage directory (string) or an object with tasksDir/completedDir.",
               "oneOf": [

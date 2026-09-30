@@ -37,7 +37,7 @@ import { resolveCustomRunner } from '../config/product-config.js';
 import { warmPiSdk } from './pi.js';
 import { resolveSandboxProfile, withSandboxProfile } from '../process/bubblewrap.js';
 import { selectConfinement, supportsNativeSandbox, ConfinementBlockedError, isBubblewrapDisabled, isBubblewrapAvailable, BUBBLEWRAP_COMMAND } from '../process/confinement.js';
-import { tryAcquireCustomCapacity } from './custom-capacity.js';
+import { waitForCustomCapacity } from './custom-capacity.js';
 import type { SessionMarkerPort } from '../../application/domain-ports.js';
 import type { AgentFamily } from '../../domain/agents.js';
 import type { MissionId } from '../../domain/mission.js';
@@ -514,8 +514,7 @@ async function selectAndGateAgent(state: StartAgentLoopState, deps: StartAgentLo
 /**
  * Resolve everything the launch needs: launcher (custom runners included),
  * session resume, prompt and model, and the custom-capacity reservation.
- * Returns null when the loop must continue with a fresh selection
- * (custom capacity saturated).
+ * Waits for custom capacity before returning a launch reservation.
  */
 async function prepareLaunch(state: StartAgentLoopState, deps: StartAgentLoopDeps): Promise<PreparedLaunch | null> {
   const { step, log, opts, worktree, slug, role } = deps;
@@ -600,16 +599,6 @@ async function prepareLaunch(state: StartAgentLoopState, deps: StartAgentLoopDep
   }
 
   const watchdogConfig = resolveNoOutputWatchdogConfig(deps.noOutputWatchdog, step);
-  const customReservation = state.chosen === 'custom'
-    ? await tryAcquireCustomCapacity(worktree)
-    : null;
-  if (state.chosen === 'custom' && !customReservation) {
-    deps.refuseFallbackWhenPinned('custom-agent capacity is saturated');
-    log(fmt.status('WARN', 'Custom-agent capacity is saturated; selecting another eligible agent.'));
-    state.tried.add(chosen);
-    state.chosen = undefined;
-    return null;
-  }
 
   // This is the sole production policy decision. The AsyncLocalStorage
   // context reaches the shared process seam through every family launcher.
@@ -657,6 +646,11 @@ async function prepareLaunch(state: StartAgentLoopState, deps: StartAgentLoopDep
     }
   }
 
+  const customReservation = chosen === 'custom'
+    ? await waitForCustomCapacity(worktree, () => {
+      log(fmt.status('INFO', 'Custom-agent capacity is saturated; waiting for an available slot.'));
+    })
+    : null;
   return { launcher, agentEnv, resume, sessionId, launchSessionMarkerPort, sessionRole, actualPrompt, model, watchdogConfig, customReservation, effectiveProfile, nativeSandbox };
 }
 

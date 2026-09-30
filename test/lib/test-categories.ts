@@ -304,6 +304,11 @@ export const INTEGRATION_CI_TESTS: readonly string[] = [
   // task file, so it crosses the git boundary and runs only in the integration
   // layer.
   'task-2537-squash-closeout-unstaged-task-path.test.ts',
+  // TASK-2613: lands two missions through the production integrate ports in a
+  // throwaway Git repo to prove closeout archives the task file and re-arms the
+  // stale-copy guards, so it crosses the git boundary and runs only in the
+  // integration layer.
+  'task-2613-repro.test.ts',
   // TASK-2551: one real subprocess (node --import tsx, missing SONAR_TOKEN) to
   // prove the delete-branch subcommand's exit-0 failure semantics; the rest is
   // request-injected, so it crosses only the process boundary.

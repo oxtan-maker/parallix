@@ -75,9 +75,9 @@ The `custom` agent family supports multiple backends through the `adapters.agent
 
 ### Custom capacity
 
-`adapters.agents.maxConcurrentCustom` optionally sets the maximum number of local `custom` instances that can run simultaneously in one workflow process. When unset, launches are unlimited; configured values must be positive integers. Invalid values are rejected by workflow configuration validation.
+`adapters.agents.maxConcurrentCustom` optionally limits local `custom` instances across processes sharing `PARALLIX_HOME`. When unset, launches are unlimited; configured values must be positive integers. Invalid values are rejected by workflow configuration validation.
 
-The launcher reserves capacity immediately before starting a custom instance and releases it when that instance completes, fails to launch, exits with an error or cancellation signal, or its launcher promise rejects. A no-output watchdog message does not itself release capacity because the process is still running. While the custom pool is full, selection treats `custom` as unavailable and chooses another eligible, working non-custom family. If no such family exists, selection retains its explicit exhausted-pool error.
+The launcher reserves capacity immediately before starting a custom instance and releases it when that instance completes, fails to launch, exits with an error or cancellation signal, or its launcher promise rejects. A no-output watchdog message does not itself release capacity because the process is still running. While the custom pool is full, the selected custom launch waits for a slot without consuming retries or switching families. This also applies to explicitly pinned custom agents.
 
 ## Tool Calling Workaround (custom/opencode)
 

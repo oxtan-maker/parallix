@@ -132,6 +132,12 @@ function workflowLauncherStatus(agent: string, worktree?: string): LauncherStatu
   const probeArgs = HEALTH_PROBE_ARGS[effectiveAgent] || ['--help'];
   const health = probeLauncherHealth(command, probeArgs);
   const detail = `${command} ${probeArgs.join(' ')}`.trim();
+  // A loaded workstation can delay even --help. The executable is present;
+  // let the actual launch report failures rather than exhausting the pool on
+  // an inconclusive startup probe.
+  if (!health.ok && health.reason === 'ETIMEDOUT') {
+    return { agent: effectiveAgent, supported: true, detail, health: 'probe-timeout', reason: health.reason };
+  }
   if (!health.ok) {
     return {
       agent: effectiveAgent,

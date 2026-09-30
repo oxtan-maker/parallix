@@ -8,6 +8,23 @@ export interface CustomCapacityReservation {
   release: () => void;
 }
 
+/** Wait for admission without changing the selected agent or consuming a retry. */
+export async function waitForCustomCapacity(
+  rootDir?: string,
+  onWaiting: () => void = () => {},
+  acquire = tryAcquireCustomCapacity,
+  pause: () => Promise<void> = () => new Promise(resolve => setTimeout(resolve, 1000)),
+): Promise<CustomCapacityReservation> {
+  let reservation = await acquire(rootDir);
+  if (reservation) { return reservation; }
+  onWaiting();
+  do {
+    await pause();
+    reservation = await acquire(rootDir);
+  } while (!reservation);
+  return reservation;
+}
+
 export async function tryAcquireCustomCapacity(rootDir?: string): Promise<CustomCapacityReservation | null> {
   const repositoryRoot = resolveCanonicalRepositoryRoot(rootDir);
   const capacity = resolveCanonicalMaxConcurrentCustom(repositoryRoot);

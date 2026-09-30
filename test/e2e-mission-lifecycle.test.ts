@@ -232,7 +232,7 @@ function writePostIntegrateHookScript(repoRoot) {
   return scriptPath;
 }
 
-function setupRepository({ slug, title, postIntegrateHook = false, preCommitHook = false, selfHostedCloseout = false }) {
+function setupRepository({ slug, title, postIntegrateHook = false, preCommitHook = false }) {
   const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'parallix-e2e-'));
   const repoRoot = path.join(tmpRoot, 'repo');
   const binDir = path.join(repoRoot, 'bin');
@@ -256,7 +256,7 @@ function setupRepository({ slug, title, postIntegrateHook = false, preCommitHook
   }
 
   const adapters = {
-    tasks: { provider: 'backlog-md', storage: 'backlog', stateMap: 'config/state-map.json', selfHostedCloseout },
+    tasks: { provider: 'backlog-md', storage: 'backlog', stateMap: 'config/state-map.json' },
     agents: { models: { custom: 'stub/custom' } },
     missions: { baseDir: 'missions', branchPrefix: 'mission/', worktreePattern: '../<repo>-<slug>' },
     verification: { command: ':', defaultArea: 'all' },
@@ -520,10 +520,10 @@ function countTaskIds(rootDir, id) {
   return count;
 }
 
-async function runScenario({ launchFromFeatureBranch = false, integrate = true, postIntegrateHook = false, preCommitHook = false, failIntegrationGate = false, selfHostedCloseout = false }) {
+async function runScenario({ launchFromFeatureBranch = false, integrate = true, postIntegrateHook = false, preCommitHook = false, failIntegrationGate = false }) {
   const slug = launchFromFeatureBranch ? 'task-2001' : 'task-2002';
   const title = launchFromFeatureBranch ? 'Feature Branch Lifecycle' : 'Primary Branch Lifecycle';
-  const repo = setupRepository({ slug, title, postIntegrateHook, preCommitHook, selfHostedCloseout });
+  const repo = setupRepository({ slug, title, postIntegrateHook, preCommitHook });
   const env = workflowEnv(repo.binDir, repo.stateHome, repo.repoRoot);
   const worktree = worktreePathFor(repo.repoRoot, slug);
   /** @type {any} */
@@ -613,12 +613,8 @@ async function runScenario({ launchFromFeatureBranch = false, integrate = true, 
     await runWorkflow(worktree, env, ['integrate', slug], 60000, { invokeFromTarget: true });
 
     const rootTask = taskFileIn(repo.repoRoot, slug);
-    if (selfHostedCloseout) {
-      assert.equal(rootTask, null, 'self-hosted closeout retires the provider task');
-    } else {
-      assert.ok(rootTask, 'integrate should leave the task in the base checkout');
-      assert.equal(taskStatus(rootTask), 'done');
-    }
+    assert.ok(rootTask, 'integrate should leave the task in the base checkout');
+    assert.equal(taskStatus(rootTask), 'done');
     assert.ok(!fs.existsSync(worktree), 'integrate should clean up the mission worktree');
 
     const authority = new DatabaseSync(path.join(repo.stateHome, 'parallix.db'), { readOnly: true });
@@ -638,7 +634,7 @@ async function runScenario({ launchFromFeatureBranch = false, integrate = true, 
     }
 
     summary.integrate = {
-      rootTaskStatus: rootTask ? taskStatus(rootTask) : null,
+      rootTaskStatus: taskStatus(rootTask),
       worktreeExistsAfter: fs.existsSync(worktree),
       closeout,
       mainHeadBefore,
@@ -981,9 +977,9 @@ test('primary-branch lifecycle integrates cleanly to main and marks the task don
   assert.notEqual(summary.integrate.mainHeadAfter, summary.integrate.mainHeadBefore);
 });
 
-test('self-hosted closeout records integration stats after task retirement', async () => {
-  const summary = await runScenario({ selfHostedCloseout: true });
-  assert.equal(summary.integrate.rootTaskStatus, null);
+test('closeout records integration stats and keeps the completed task record', async () => {
+  const summary = await runScenario({});
+  assert.equal(summary.integrate.rootTaskStatus, 'done');
   assert.equal(summary.integrate.closeout.mission?.status, 'done');
   assert.ok(summary.integrate.closeout.mission?.closed_at);
   assert.equal(summary.integrate.closeout.measurements?.total, 1);

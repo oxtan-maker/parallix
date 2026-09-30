@@ -6,7 +6,7 @@ graphify-out/
 .forgejo-local/
 .session/
 .workflow/
-
+.sea-staging*
 .sessions/
 workflow/.cache/
 workflow/.sessions/

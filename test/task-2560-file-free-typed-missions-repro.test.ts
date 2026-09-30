@@ -28,9 +28,10 @@ test('a new typed draft does not prepare a retired mission directory', () => {
 });
 
 test('the self-hosted tree contains no retired workflow ledger roots', () => {
+  // backlog/completed/ is not retired: landing archives each task file there
+  // and the stale-copy guards check later landings against it (TASK-2613).
   const retiredDirectories = [
     'missions',
-    'backlog/completed',
     'backlog/archive',
   ];
   for (const retiredRoot of retiredDirectories) {

@@ -884,6 +884,18 @@ async function withRealHealthProbe(run) {
   try { return await run(); } finally { setLauncherHealthProbe(() => ({ ok: true })); }
 }
 
+test('a help probe timeout keeps the present launcher eligible for a real launch', () => {
+  setLauncherHealthProbe(() => ({ ok: false, reason: 'ETIMEDOUT' }));
+  try {
+    withPathLaunchers({ pi: 'process.exit(0);' }, () => {
+      const status = workflowLauncherStatus('pi');
+      assert.equal(status.supported, true);
+      assert.equal(status.health, 'probe-timeout');
+      assert.doesNotThrow(() => assertAgentSupported('custom'));
+    });
+  } finally { setLauncherHealthProbe(() => ({ ok: true })); }
+});
+
 test('workflowLauncherStatus rejects a launcher that exists but fails its health probe', () => {
   withPathLaunchers({
     codex: 'process.exit(process.argv.includes("--help") ? 1 : 0);'

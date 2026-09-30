@@ -28,7 +28,7 @@ const DEFAULT_CONFIG = Object.freeze({
     mode: DEFAULT_INTEGRATION_MODE,
   },
   adapters: {
-    tasks: { provider: 'backlog-md', storage: 'backlog', stateMap: 'state-map.json', selfHostedCloseout: false },
+    tasks: { provider: 'backlog-md', storage: 'backlog', stateMap: 'state-map.json' },
     missions: {
       baseDir: 'missions',
       branchPrefix: 'mission/',
@@ -238,9 +238,6 @@ function validateTasksSection(section: unknown, issues: string[]): void {
     issues.push(taskProviderIssue(section.provider));
   }
   validateStringField(section, 'stateMap', 'adapters.tasks.stateMap', issues);
-  if ('selfHostedCloseout' in section && typeof section.selfHostedCloseout !== 'boolean') {
-    issues.push('adapters.tasks.selfHostedCloseout must be a boolean');
-  }
   if ('storage' in section && !isValidTaskStorage(section.storage)) {
     issues.push('adapters.tasks.storage must be a string or an object of string values');
   }
@@ -727,11 +724,6 @@ export function resolveTaskStorage(rootDir: string = process.cwd()): TaskStorage
   }
 
   return fallback;
-}
-
-/** Whether this repository opts out of recording its own completed task files. */
-export function isSelfHostedTaskCloseout(rootDir: string = process.cwd()): boolean {
-  return loadEffectiveConfig(rootDir).adapters.tasks.selfHostedCloseout === true;
 }
 
 interface ReviewAdapterResult {

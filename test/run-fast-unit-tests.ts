@@ -28,6 +28,10 @@ async function runGroup(name: 'safe' | 'isolated', files: string[]) {
   const env: NodeJS.ProcessEnv = {
     ...process.env,
     PARALLIX_EXECUTION_ROOT: root,
+    // Bootstrap-owned homes are numerous under process isolation. Keep only
+    // those on the workspace filesystem; tests still need os.tmpdir() to be
+    // outside this checkout for package-root characterization.
+    PARALLIX_TEST_HOME_TMPDIR: scratch,
   };
   // The native test coverage reporter emits this group's LCOV directly.
   // NODE_V8_COVERAGE would additionally dump a raw payload for every worker,

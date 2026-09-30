@@ -107,7 +107,7 @@ function landing(root: string) {
       parseConflictFilesFromMergeOutput: () => [],
       softResetTrailingBacklogNoise: () => false,
     },
-    productConfig: { isForgejoReviewEnabled: () => false, isSelfHostedTaskCloseout: () => true },
+    productConfig: { isForgejoReviewEnabled: () => false },
     checkout: {
       stashMainCheckoutIfNeeded: () => null,
       findLandedSquashOnBaseBranch: () => null,

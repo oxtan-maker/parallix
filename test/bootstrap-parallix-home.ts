@@ -16,9 +16,10 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 startDefaultDbGuard('unit-test');
 
 const tempRoots = [];
+const testHomeTempRoot = process.env.PARALLIX_TEST_HOME_TMPDIR || os.tmpdir();
 
 function makeTempDir(prefix) {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
+  const dir = fs.mkdtempSync(path.join(testHomeTempRoot, prefix));
   tempRoots.push(dir);
   return dir;
 }

@@ -572,7 +572,7 @@ function createDraftWorkflowAdapter(deps: Record<string, unknown> = {}) {
       // (e.g. an invalid-classification throw, which returns ok:false) still
       // surfaces before the scaffold safeExits.
       const suppressDraftStartClassificationFail = (message) => {
-        if (/Missing or invalid classification/i.test(message)) {
+        if (/Missing or invalid classification|Mission .* is absent from the px database/i.test(message)) {
           return;
         }
         errorFn(message);

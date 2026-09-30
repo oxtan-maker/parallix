@@ -10,7 +10,6 @@ import {
   validateWorkflowConfig,
   resolveTaskProvider,
   resolveIntegrationMode,
-  isSelfHostedTaskCloseout,
   resolvePromptOverride,
   resolveGithubPublishConfig,
   resolveReviewAdapter,
@@ -151,13 +150,6 @@ test('validateWorkflowConfig passes a schema-valid config with extra storage key
   assert.deepEqual(issues, []);
 });
 
-test('validateWorkflowConfig rejects a non-boolean selfHostedCloseout setting', () => {
-  const issues = validateWorkflowConfig({
-    adapters: { tasks: { selfHostedCloseout: 'yes' } },
-  });
-  assert.ok(issues.includes('adapters.tasks.selfHostedCloseout must be a boolean'));
-});
-
 test('resolveTaskProvider returns the default when no provider is configured and rejects an unknown one', () => {
   withTempConfig(rootDir => {
     assert.equal(resolveTaskProvider(rootDir), 'backlog-md');
@@ -179,14 +171,6 @@ test('resolveIntegrationMode defaults to local and throws on an unknown mode', (
   withTempConfig(rootDir => {
     writeConfig(rootDir, { integration: 'nope' });
     assert.throws(() => resolveIntegrationMode(rootDir), /integration must be an object/);
-  });
-});
-
-test('isSelfHostedTaskCloseout defaults off and accepts an explicit repository setting', () => {
-  withTempConfig(rootDir => {
-    assert.equal(isSelfHostedTaskCloseout(rootDir), false);
-    writeConfig(rootDir, { adapters: { tasks: { selfHostedCloseout: true } } });
-    assert.equal(isSelfHostedTaskCloseout(rootDir), true);
   });
 });
 

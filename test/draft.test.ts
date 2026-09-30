@@ -698,7 +698,7 @@ test('runDraftCommand scaffold does not emit a classification FAIL for an unset 
 
     // The scaffold step must not surface a classification FAIL at draft start.
     assert.ok(
-      !errors.some((m) => /FAIL.*Missing or invalid classification/i.test(m)),
+      !errors.some((m) => /FAIL.*(?:Missing or invalid classification|Mission .* is absent from the px database)/i.test(m)),
       `scaffold must not emit a classification FAIL at draft start, captured: ${JSON.stringify(errors)}`,
     );
     // The draft is not blocked: the scaffold step returned without exiting.

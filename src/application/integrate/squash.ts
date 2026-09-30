@@ -132,7 +132,7 @@ export function createSquashLanding(ports: IntegrateWorkflowPorts, { promoteTask
     }
   }
 
-  /** Close out the task according to this repository's configured task-history policy. */
+  /** Complete the Backlog task in the checkout and add its moved paths to the payload. */
   async function stageCloseout(run: LandingRun, mainTaskFile: string, intendedPayloadPaths: Set<string>) {
     const { slug, context, baseWorktree } = run;
     fmt.log.debug('Step 4: Final closeout checks in the local integration checkout...');
@@ -141,29 +141,30 @@ export function createSquashLanding(ports: IntegrateWorkflowPorts, { promoteTask
     // early promotion can make `merge --abort` fail and leave index conflicts.
     await promoteTaskForIntegrationIfNeeded(context, { missionServicesFn: run.missionServicesFn });
     if (!ports.fileSystem.existsSync(mainTaskFile)) { return; }
+    backlog.completeTask(slug, baseWorktree);
     const originalTaskPath = path.relative(baseWorktree, mainTaskFile);
-    const selfHostedCloseout = ports.productConfig.isSelfHostedTaskCloseout(baseWorktree);
-    // The Mission aggregate owns this repository's lifecycle history. Other
-    // Backlog.md repositories retain their configured completed-task mirror.
-    backlog.completeTask(slug, baseWorktree, { retainLegacyRecord: !selfHostedCloseout });
     intendedPayloadPaths.add(originalTaskPath);
+    // Re-resolve because it moved. The completed copy is the canonical record
+    // the stale-copy guards (task-2534) check every later landing against.
     const updatedResolution = backlog.resolveTaskFile(slug, baseWorktree);
-    const completedTaskPath = !selfHostedCloseout && updatedResolution.ok
-      ? path.relative(baseWorktree, updatedResolution.taskFile as string)
-      : null;
-    if (completedTaskPath) {
-      intendedPayloadPaths.add(completedTaskPath);
-      checkout.rewriteWorktreePaths(updatedResolution.taskFile as string, slug, { rootDir: baseWorktree });
-    }
-    if (git(['-C', baseWorktree, 'add', '-A', '--', originalTaskPath, ...(completedTaskPath ? [completedTaskPath] : [])]).status !== 0) {
+    if (!updatedResolution.ok) { return; }
+    const completedTaskPath = path.relative(baseWorktree, updatedResolution.taskFile as string);
+    intendedPayloadPaths.add(completedTaskPath);
+    checkout.rewriteWorktreePaths(updatedResolution.taskFile as string, slug, { rootDir: baseWorktree });
+    if (git(['-C', baseWorktree, 'add', '-A', '--', originalTaskPath, completedTaskPath]).status !== 0) {
       throw abortWith(landing, 'Could not stage backlog closeout for the landed squash commit.');
     }
-    // A self-hosted task authored on the mission branch vanishes from both the
-    // index and HEAD after closeout. It cannot be named by `git commit --only`;
-    // a base-tracked task remains a staged deletion and stays in the payload.
+    // task-2537: the move above can leave the source path outside everything
+    // git knows. A task file authored on the mission branch has no base-branch
+    // entry, so once closeout moves it to `backlog/completed/` it is in neither
+    // the index nor `HEAD` — and `git commit --only` fails-closed on such a
+    // pathspec, aborting the whole landing over a path that carries no change.
+    // Drop it from the payload instead. A path still in `HEAD` but gone from
+    // the index is a staged deletion and stays: that is how a base-tracked task
+    // file lands its removal.
     if (!isLivePathspec(baseWorktree, originalTaskPath)) {
       intendedPayloadPaths.delete(originalTaskPath);
-      fmt.log.debug(`Closeout retired ${originalTaskPath} and the base branch never tracked it; it is in neither the index nor HEAD, so it carries no change to land.`);
+      fmt.log.debug(`Closeout moved ${originalTaskPath} and the base branch never tracked it; it is in neither the index nor HEAD, so it carries no change to land.`);
     }
   }
 

@@ -348,17 +348,6 @@ test('completeTask moves active tasks into backlog/completed and marks them done
   });
 });
 
-test('completeTask removes a self-hosted closeout task without creating a completed record', () => {
-  withTempRepo(root => {
-    const taskPath = path.join(root, 'backlog', 'tasks', 'task-122.01 - remove-me.md');
-    fs.writeFileSync(taskPath, 'id: TASK-122.01\nstatus: active\n');
-
-    assert.equal(completeTask('task-122.01', root, { retainLegacyRecord: false }), true);
-    assert.equal(fs.existsSync(taskPath), false);
-    assert.equal(fs.existsSync(path.join(root, 'backlog', 'completed')), false);
-  });
-});
-
 test('completeTask marks already-completed tasks done in place', () => {
   withTempRepo(root => {
     const completedDir = path.join(root, 'backlog', 'completed');

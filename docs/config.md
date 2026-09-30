@@ -49,14 +49,14 @@ recognises `tasksDir`, `completedDir`, and `archiveTasksDir`; each one it omits
 is derived from the parent of `tasksDir` as usual, and the drafts directory is
 always derived.
 
+When a mission lands, Parallix moves its task file from the tasks directory to
+the completed directory (`backlog/completed/` by default) and sets
+`status: done`. No setting turns this off: the
+completed record is what later landings check to drop stale task copies.
+
 `adapters.tasks.stateMap` is a string path, defaulting to `state-map.json`.
 When that relative file is absent, Parallix uses its shipped state map. Point it
 at a repository map to translate lifecycle states for another board.
-
-`adapters.tasks.selfHostedCloseout` is a boolean, defaulting to `false`.
-Set it to `true` only when the repository's Mission aggregate is the durable
-history and it intentionally does not retain completed Backlog task files.
-Other Backlog.md repositories keep the default completion move.
 
 ```json
 {
@@ -64,8 +64,7 @@ Other Backlog.md repositories keep the default completion move.
     "tasks": {
       "provider": "backlog-md",
       "storage": { "tasksDir": "work/items", "completedDir": "work/done" },
-      "stateMap": "config/state-map.json",
-      "selfHostedCloseout": false
+      "stateMap": "config/state-map.json"
     }
   }
 }

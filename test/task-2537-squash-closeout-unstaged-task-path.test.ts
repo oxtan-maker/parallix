@@ -1,8 +1,8 @@
 // TASK-2537: the landed squash names its payload explicitly
 // (`git commit --only -- <paths>`), and git fails-closed when a named pathspec
-// matches nothing it knows. Closeout removes `backlog/tasks/<slug>`; when the
-// task file was authored on the mission branch, the base branch never carried
-// it, so after removal that source path
+// matches nothing it knows. Closeout moves `backlog/tasks/<slug>` to
+// `backlog/completed/<slug>`; when the task file was authored on the mission
+// branch, the base branch never carried it, so after the move that source path
 // exists in neither the index nor HEAD and the whole landing aborts with
 // "pathspec did not match any git-known files".
 //
@@ -71,37 +71,27 @@ function seedRepository({ baseTracksTask }: { baseTracksTask: boolean }): string
 }
 
 /** Drive the production `squashAndLand` with only the non-git seams stubbed. */
-async function landMission(root: string, { selfHostedCloseout }: { selfHostedCloseout: boolean }): Promise<void> {
+async function landMission(root: string): Promise<void> {
   const abort = new Error('IntegrationAbort');
   const { squashAndLand } = createSquashLanding({
     git: { git: gitRun },
     fileSystem: { existsSync: (target: string) => fs.existsSync(target) },
     backlog: {
       checkBacklogIntegrity: () => [],
-      // Self-hosted closeout removes the task file; external Backlog.md
-      // repositories retain the completed-task mirror. Staging an unrelated file
+      // The real `completeTask` moves the file on disk; that move is what
+      // leaves the source path outside the index. Staging an unrelated file
       // here stands in for a concurrent bare-board commit dirtying the index
       // after the payload was captured: `--only` must not inherit it.
-      completeTask: (_slug, _rootDir, options) => {
-        assert.deepEqual(options, { retainLegacyRecord: !selfHostedCloseout });
-        if (selfHostedCloseout) {
-          fs.rmSync(path.join(root, TASKS_PATH));
-        } else {
-          fs.mkdirSync(path.join(root, 'backlog/completed'), { recursive: true });
-          fs.renameSync(path.join(root, TASKS_PATH), path.join(root, COMPLETED_PATH));
-        }
+      completeTask: () => {
+        fs.mkdirSync(path.join(root, 'backlog/completed'), { recursive: true });
+        fs.renameSync(path.join(root, TASKS_PATH), path.join(root, COMPLETED_PATH));
         writeFile(root, AMBIENT_PATH, 'not payload\n');
         git(root, ['add', '--', AMBIENT_PATH]);
       },
-      resolveTaskFile: () => selfHostedCloseout
-        ? ({ ok: false, reason: 'missing', matches: [] })
-        : ({ ok: true, taskFile: path.join(root, COMPLETED_PATH), matches: [path.join(root, COMPLETED_PATH)] }),
+      resolveTaskFile: () => ({ ok: true, taskFile: path.join(root, COMPLETED_PATH) }),
     },
     missionPaths: { softResetTrailingBacklogNoise: () => false },
-    productConfig: {
-      isForgejoReviewEnabled: () => false,
-      isSelfHostedTaskCloseout: () => selfHostedCloseout,
-    },
+    productConfig: { isForgejoReviewEnabled: () => false },
     checkout: { maybeUpdateGraphifyOnPrimary: () => {}, rewriteWorktreePaths: () => {} },
     gates: { isIntendedPayloadAtHead: () => false },
     landing: {
@@ -146,13 +136,6 @@ function landedStatus(root: string): Record<string, string> {
   return status;
 }
 
-function completedTaskFiles(root: string): string[] {
-  return git(root, ['ls-tree', '-r', '--name-only', 'HEAD', '--', 'backlog/completed'])
-    .trim()
-    .split('\n')
-    .filter(Boolean);
-}
-
 function quietLogs(t: { mock: { method: Function } }): void {
   for (const quiet of ['debug', 'pass', 'plain', 'fail', 'info'] as const) { t.mock.method(fmt.log, quiet, () => {}); }
 }
@@ -161,13 +144,13 @@ test('TASK-2537: a task file absent from the base branch lands without a pathspe
   quietLogs(t as never);
   const root = seedRepository({ baseTracksTask: false });
 
-  await landMission(root, { selfHostedCloseout: true });
+  await landMission(root);
 
   const status = landedStatus(root);
+  assert.equal(status[COMPLETED_PATH], 'A', 'the completed task file is added by the landed commit');
   assert.equal(status[MISSION_PAYLOAD], 'A', 'the mission payload lands alongside the closeout');
   assert.equal(status[TASKS_PATH], undefined, 'the never-tracked source path carries no change to land');
   assert.equal(status[AMBIENT_PATH], undefined, 'the ambient staged entry stays outside the landed commit');
-  assert.deepEqual(completedTaskFiles(root), [], 'self-hosted closeout creates no completed-task ledger');
   // The landed tree must not resurrect the tasks copy of a completed task.
   assert.notEqual(
     spawnSync('git', ['cat-file', '-e', `HEAD:${TASKS_PATH}`], { cwd: root }).status,
@@ -177,30 +160,16 @@ test('TASK-2537: a task file absent from the base branch lands without a pathspe
   assert.equal(git(root, ['status', '--porcelain']).trim(), `A  ${AMBIENT_PATH}`, 'only the ambient entry remains staged');
 });
 
-test('TASK-2537: a base-tracked task file lands its removal without a completed ledger', async (t) => {
+test('TASK-2537: a base-tracked task file still lands its removal and completed addition', async (t) => {
   quietLogs(t as never);
   const root = seedRepository({ baseTracksTask: true });
 
-  await landMission(root, { selfHostedCloseout: true });
+  await landMission(root);
 
   const status = landedStatus(root);
   assert.equal(status[TASKS_PATH], 'D', 'the base-tracked source path is removed by the landed commit');
+  assert.equal(status[COMPLETED_PATH], 'A', 'the completed task file is added by the landed commit');
   assert.equal(status[MISSION_PAYLOAD], 'A', 'the mission payload lands alongside the closeout');
   assert.equal(status[AMBIENT_PATH], undefined, 'the ambient staged entry stays outside the landed commit');
-  assert.deepEqual(completedTaskFiles(root), [], 'self-hosted closeout creates no completed-task ledger');
-  assert.equal(git(root, ['status', '--porcelain']).trim(), `A  ${AMBIENT_PATH}`, 'only the ambient entry remains staged');
-});
-
-test('TASK-2537: an external Backlog.md repository retains its completed-task ledger', async (t) => {
-  quietLogs(t as never);
-  const root = seedRepository({ baseTracksTask: true });
-
-  await landMission(root, { selfHostedCloseout: false });
-
-  const status = landedStatus(root);
-  assert.equal(status[TASKS_PATH], 'D', 'the source task leaves the active task directory');
-  assert.equal(status[COMPLETED_PATH], 'A', 'external repositories retain the configured completed-task mirror');
-  assert.equal(status[MISSION_PAYLOAD], 'A', 'the mission payload lands with external closeout');
-  assert.deepEqual(completedTaskFiles(root), [COMPLETED_PATH], 'the completed record is committed for the external repository');
   assert.equal(git(root, ['status', '--porcelain']).trim(), `A  ${AMBIENT_PATH}`, 'only the ambient entry remains staged');
 });

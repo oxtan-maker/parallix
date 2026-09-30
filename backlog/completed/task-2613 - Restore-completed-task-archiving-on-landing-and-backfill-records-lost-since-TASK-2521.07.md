@@ -3,8 +3,8 @@ id: TASK-2613
 title: >-
   Restore completed-task archiving on landing and backfill records lost since
   TASK-2521.07
-status: backlog
-assignee: []
+status: done
+assignee: [claude]
 created_date: '2026-09-29 10:26'
 labels:
   - bug
