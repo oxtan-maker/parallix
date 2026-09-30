@@ -23,7 +23,12 @@ async function runGroup(name: 'safe' | 'isolated', files: string[]) {
     throw new Error(`${name} group lost unit-test membership`);
   }
   const fragment = path.join(scratch, `${name}.lcov`);
-  const argv = coverage ? withCoverageReporters(plan.nodeArgs, fragment) : [...plan.nodeArgs];
+  // The shared fragment supplies unloaded sources for the merged denominator.
+  // Repeating include-all in isolated workers scans and parses the same unused
+  // sources for every file; their fragment only needs executed-code coverage.
+  const argv = coverage
+    ? withCoverageReporters(plan.nodeArgs, fragment, { includeAll: name === 'safe' })
+    : [...plan.nodeArgs];
   argv.splice(argv.indexOf('--test'), 0, `--test-isolation=${name === 'safe' ? 'none' : 'process'}`);
   const env: NodeJS.ProcessEnv = {
     ...process.env,

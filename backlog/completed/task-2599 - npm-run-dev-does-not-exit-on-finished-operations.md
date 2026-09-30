@@ -1,8 +1,8 @@
 ---
 id: TASK-2599
 title: npm run dev does not exit on finished operations
-status: backlog
-assignee: []
+status: done
+assignee: [codex]
 created_date: '2026-09-28 03:54'
 labels: []
 dependencies: []

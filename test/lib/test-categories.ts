@@ -219,6 +219,10 @@ export const INTEGRATION_CI_TESTS: readonly string[] = [
   'task-2492-integrate-gate-bounce.test.ts',
   // TASK-2601 uses temporary SQLite Mission and measurement stores only.
   'task-2601-repro.test.ts',
+  // TASK-2599 spawns the dev entry in a child process and materialises a
+  // temporary SQLite Mission store, so it crosses the process and SQLite
+  // boundaries and runs only in the integration layer (clean runner is enough).
+  'task-2599-repro.test.ts',
   // TASK-2502: CodeQL gate tests. --dry-run resolves the plan without spawning
   // the CLI, and the clean-cache test skips when no pinned codeql is on PATH, so
   // both run on a clean GitHub-hosted runner with only bash.

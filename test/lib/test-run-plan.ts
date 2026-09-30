@@ -72,7 +72,9 @@ const MINIMUM_COVERAGE_NODE_MINOR = 7;
  * lines instead of tsx's transpiled positions; --test-coverage-include-all
  * reports unloaded sources at 0% (Node 26.7+).
  */
-export function withCoverageReporters(nodeArgs: readonly string[], coverageDestination: string): string[] {
+export function withCoverageReporters(
+  nodeArgs: readonly string[], coverageDestination: string, options: { includeAll?: boolean } = {},
+): string[] {
   const testIndex = nodeArgs.indexOf('--test');
   const hasExistingReporter = nodeArgs.some(arg => arg.startsWith('--test-reporter='));
   return [
@@ -82,7 +84,7 @@ export function withCoverageReporters(nodeArgs: readonly string[], coverageDesti
       : ['--test-reporter=spec', '--test-reporter-destination=stdout']),
     '--enable-source-maps',
     '--experimental-test-coverage',
-    '--test-coverage-include-all',
+    ...(options.includeAll === false ? [] : ['--test-coverage-include-all']),
     ...COVERAGE_INCLUDES.map(pattern => `--test-coverage-include=${pattern}`),
     ...COVERAGE_EXCLUDES.map(pattern => `--test-coverage-exclude=${pattern}`),
     '--test-coverage-lines=0',

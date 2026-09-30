@@ -54,6 +54,17 @@ test('coverage runs require Node 26.7+ for --test-coverage-include-all', () => {
   }
 });
 
+test('coverage fragments can omit unloaded sources while retaining instrumentation and source maps', () => {
+  const args = withCoverageReporters(['--test', 'test/example.test.ts'], 'isolated.lcov', { includeAll: false });
+  assert.ok(!args.includes('--test-coverage-include-all'));
+  for (const flag of ['--experimental-test-coverage', '--enable-source-maps',
+    '--test-coverage-include=src/**/*.ts', '--test-reporter=lcov',
+    '--test-reporter-destination=isolated.lcov']) {
+    assert.ok(args.includes(flag));
+  }
+  assert.deepEqual(args.slice(args.indexOf('--test')), ['--test', 'test/example.test.ts']);
+});
+
 test('normalizeLcov unions duplicate worker records by source line', () => {
   const normalized = normalizeLcov('SF:src/example.ts\nDA:1,0\nDA:2,3\nend_of_record\nSF:src/example.ts\nDA:1,2\nDA:2,0\nend_of_record\n');
   assert.equal(normalized, 'SF:src/example.ts\nDA:1,2\nDA:2,3\nLF:2\nLH:2\nend_of_record\n');
