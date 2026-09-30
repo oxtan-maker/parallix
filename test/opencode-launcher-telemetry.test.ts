@@ -8,6 +8,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { EventEmitter } from 'node:events';
 import { mockModule, installModuleMocks } from './lib/module-mock.js';
+import { mkdtemp as registeredMkdtemp } from './helpers/temp-dir.js';
 const opencode = mockModule<typeof import('../src/adapters/agents/opencode.js')>('../src/adapters/agents/opencode.js', import.meta.url);
 const captureOpencodeExportModule = mockModule<typeof import('../src/adapters/agents/opencode-export.js')>('../src/adapters/agents/opencode-export.js', import.meta.url);
 const stats = mockModule<typeof import('../src/adapters/cli/commands/stats.js')>('../src/adapters/cli/commands/stats.js', import.meta.url);
@@ -125,7 +126,7 @@ test('startOpencodeAgent telemetry flows through to a non-zero stored measuremen
   const { resultPromise } = opencode.startOpencodeAgent({ prompt: 'p', worktree: '/tmp' });
   const result = await resultPromise;
 
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'opencode-stats-'));
+  const dir = registeredMkdtemp('opencode-stats-');
   const dbFile = path.join(dir, 'parallix.db');
   try {
     const fields = stats.telemetryToStatsFields(result.telemetry, {

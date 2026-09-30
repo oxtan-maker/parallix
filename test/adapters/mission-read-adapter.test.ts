@@ -12,6 +12,7 @@ import type {
   BacklogMissionSnapshot,
   BacklogMissionMaterializationResult,
 } from '../../src/adapters/backlog/mission-materialization.js';
+import { mkdtemp as registeredMkdtemp } from '../helpers/temp-dir.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -19,7 +20,7 @@ import type {
 
 /** Create a temporary directory with a realistic backlog structure. */
 function createTempBacklog(files: Record<string, string>, rootDir?: string): string {
-  const tmp = rootDir || fs.mkdtempSync(path.join(os.tmpdir(), 'px-mra-test-'));
+  const tmp = rootDir || registeredMkdtemp('px-mra-test-');
   const tasksDir = path.join(tmp, 'backlog', 'tasks');
   const completedDir = path.join(tmp, 'backlog', 'completed');
   const archiveDir = path.join(tmp, 'backlog', 'archive', 'tasks');
@@ -201,7 +202,7 @@ test('ConcreteMissionReadAdapter deduplicates task ids across stores preferring 
 });
 
 test('ConcreteMissionReadAdapter returns empty array when no task files exist', async () => {
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'px-mra-empty-'));
+  const tmp = registeredMkdtemp('px-mra-empty-');
   try {
     const adapter = new ConcreteMissionReadAdapter({
       rootDir: tmp,
@@ -300,7 +301,7 @@ test('ConcreteMissionReadAdapter loadMission returns mission by id', async () =>
 });
 
 test('ConcreteMissionReadAdapter loadMission returns null for missing id', async () => {
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'px-mra-missing-'));
+  const tmp = registeredMkdtemp('px-mra-missing-');
   try {
     const adapter = new ConcreteMissionReadAdapter({
       rootDir: tmp,
@@ -324,7 +325,7 @@ test('ConcreteMissionReadAdapter loadMission returns null for missing id', async
 });
 
 test('ConcreteMissionReadAdapter tolerates a task removed during materialization', async () => {
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'px-mission-read-race-'));
+  const tmp = registeredMkdtemp('px-mission-read-race-');
   const missing = path.join(tmp, 'backlog', 'tasks', 'task-9999.md');
   try {
     const adapter = new ConcreteMissionReadAdapter({

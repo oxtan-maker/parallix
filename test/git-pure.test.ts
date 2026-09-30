@@ -7,9 +7,10 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import * as git from '../src/adapters/git/git.js';
+import { mkdtemp as registeredMkdtemp } from './helpers/temp-dir.js';
 
 function tempDir(prefix = 'git-pure-') {
-  return fs.mkdtempSync(path.join(os.tmpdir(), prefix));
+  return registeredMkdtemp(prefix);
 }
 function cleanup(dir) { fs.rmSync(dir, { recursive: true, force: true }); }
 

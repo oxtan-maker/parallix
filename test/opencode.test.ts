@@ -8,6 +8,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { mockModule, installModuleMocks } from './lib/module-mock.js';
+import { mkdtemp as registeredMkdtemp } from './helpers/temp-dir.js';
 const opencode = mockModule<typeof import('../src/adapters/agents/opencode.js')>('../src/adapters/agents/opencode.js', import.meta.url);
 await installModuleMocks();
 test.afterEach(() => mock.restoreAll());
@@ -22,7 +23,7 @@ test.afterEach(() => {
 
 test('resolveOpencodeCommand prefers OPENCODE_BIN when it points to an executable', () => {
   const { resolveOpencodeCommand } = opencode;
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'opencode-bin-'));
+  const tmpDir = registeredMkdtemp('opencode-bin-');
   const customBin = path.join(tmpDir, 'opencode');
   fs.writeFileSync(customBin, '#!/usr/bin/env bash\nexit 0\n', 'utf8');
   fs.chmodSync(customBin, 0o755);
@@ -42,7 +43,7 @@ test('resolveOpencodeCommand prefers OPENCODE_BIN when it points to an executabl
 
 test('resolveOpencodeCommand falls back to bare "opencode" when no candidate exists', () => {
   const { resolveOpencodeCommand } = opencode;
-  const tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'opencode-home-'));
+  const tmpHome = registeredMkdtemp('opencode-home-');
   const originalHome = process.env.HOME;
   const originalPath = process.env.PATH;
   const originalBin = process.env.OPENCODE_BIN;

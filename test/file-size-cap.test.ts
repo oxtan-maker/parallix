@@ -126,6 +126,45 @@ const applicableFiles: ReadonlyArray<{ path: string; lines: number }> = collectS
 
 const exceptionSet = new Set(EXCEPTIONS);
 
+// Test files are kept separate for readability. A faster runner may group
+// their execution, but must not turn those groups into giant source files.
+// These exact paths are pre-existing debt; remove entries as tests are
+// refactored into cohesive files.
+const TEST_MAX_LINES = 1_000;
+const TEST_EXCEPTIONS: readonly string[] = [
+  'test/active.test.ts',
+  'test/agents.test.ts',
+  'test/backlog.test.ts',
+  'test/draft.test.ts',
+  'test/e2e-mission-lifecycle.test.ts',
+  'test/e2e-real-agent-smoke.test.ts',
+  'test/forgejo.test.ts',
+  'test/handoff.test.ts',
+  'test/integrate.test.ts',
+  'test/integration-pipelines.test.ts',
+  'test/review-artifacts.test.ts',
+  'test/review.test.ts',
+  'test/setup-review.test.ts',
+  'test/stats.test.ts',
+  'test/task-2489-recovery-supervisor.test.ts',
+];
+
+const testFiles: ReadonlyArray<{ path: string; lines: number }> = (() => {
+  const found: Array<{ path: string; lines: number }> = [];
+  const stack = ['test'];
+  while (stack.length > 0) {
+    const relative = stack.pop() as string;
+    for (const entry of fs.readdirSync(path.join(ROOT, relative), { withFileTypes: true })) {
+      const child = path.posix.join(relative, entry.name);
+      if (entry.isDirectory()) stack.push(child);
+      else if (entry.isFile() && /\.test\.[cm]?[jt]sx?$/.test(entry.name)) {
+        found.push({ path: child, lines: physicalLineCount(fs.readFileSync(path.join(ROOT, child), 'utf8')) });
+      }
+    }
+  }
+  return found;
+})();
+
 test('file-size cap: production source files stay at or under 500 lines unless explicitly excepted', () => {
   const violations = applicableFiles
     .filter(file => file.lines > MAX_LINES && !exceptionSet.has(file.path))
@@ -179,4 +218,13 @@ test('file-size cap: the guardrail actually enumerates production sources', () =
       `expected applicable files under ${sourceRoot}/; the walk found none in that root`,
     );
   }
+});
+
+test('file-size cap: new test files stay at or under 1000 lines', () => {
+  const exceptions = new Set(TEST_EXCEPTIONS);
+  const violations = testFiles.filter(file => file.lines > TEST_MAX_LINES && !exceptions.has(file.path));
+  assert.deepEqual(violations, [], 'Refactor large tests into cohesive files; execution grouping must not merge source files.');
+  const current = new Map(testFiles.map(file => [file.path, file.lines]));
+  const stale = TEST_EXCEPTIONS.filter(file => (current.get(file) ?? 0) <= TEST_MAX_LINES);
+  assert.deepEqual(stale, [], 'Remove test-size exceptions once the file is at or under 1000 lines.');
 });

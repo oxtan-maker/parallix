@@ -233,6 +233,33 @@ The same correction accepts a historical mission whose approval was recorded
 while its authoritative lane remained active. It opens review directly and
 preserves the withdrawn approval; a later review must earn its own approval.
 
+## Re-reviewing an approval the branch moved away from
+
+A stale approval is different from an unfounded one. The reviewer approved real
+work, and then the branch changed: a rebase resolved conflicts differently, a
+dependency landed part of the change first, or the mission was re-scoped. The
+approval is not wrong. It is about code that would no longer land.
+
+Parallix detects this itself. An approval covers the branch while the branch
+would land the same change: the diff from its target, ignoring Backlog lifecycle
+commits. A clean rebase replays the same change and keeps the approval. Any
+other change makes it stale. `px status`, `px status --json` and the board report
+a stale approval as soon as the branch moves. `px rebase` also records the move
+against the approval, naming the revision that superseded it. If an integration
+gate later refuses the merge, the refusal names the staleness already reported.
+
+A stale approval does not request changes and raises no finding, so the
+implementer owes nothing. It is not re-approved automatically, and no agent or
+review loop can withdraw it. An operator stands it down with the same
+`px revoke-review` command used for an unfounded approval. The new round reviews
+the revision that would land. The superseded approval stays in the review
+history.
+
+Use `px revoke-review` for either case. The difference is the trigger: an
+unfounded approval is withdrawn on the operator's judgement; a stale approval is
+reported by Parallix, and the operator only confirms that it should be reviewed
+again.
+
 Integration accepts a mission contract recorded in the operator database;
 it does not require a `MISSION.md` file for those missions. Use `px status
 <slug> --json` to inspect the recorded brief. Historical missions without a

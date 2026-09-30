@@ -8,7 +8,14 @@ test('integrate CLI interface delegates the unchanged argv and options to its ap
   const calls: unknown[][] = [];
   const command = createIntegrateCommand(new IntegrateCommandUseCase({ execute: (...args) => calls.push(args) }));
   await command(['task-2332.07', '--dry-run'], { source: 'test' });
-  assert.deepEqual(calls, [[['task-2332.07', '--dry-run'], { source: 'test' }]]);
+  assert.equal(calls.length, 1);
+  const [argv, options] = calls[0] as [string[], Record<string, unknown>];
+  assert.deepEqual(argv, ['task-2332.07', '--dry-run']);
+  // The caller's options pass through unchanged; the use case adds only the
+  // publisher its nested repair and re-review report into (TASK-2620).
+  const { nestedWork, ...passed } = options;
+  assert.deepEqual(passed, { source: 'test' });
+  assert.equal((nestedWork as { parent: { phase: string } }).parent.phase, 'integrate');
 });
 
 test('integrate CLI interface parses the public flags without adapter dependencies', () => {

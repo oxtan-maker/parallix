@@ -6,6 +6,7 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import { fileURLToPath } from 'node:url';
+import { mkdtempAt } from './helpers/temp-dir.js';
 import {
   canonicalSourceContainsFile,
   collectGoalCheckEvidenceRows,
@@ -76,7 +77,7 @@ test('review static evidence preserves its goal-check helper exports', () => {
 // ============================================================================
 
 test('performStaticReview accepts Goal Check with recognized repo command', () => {
-  const tmpDir = fs.mkdtempSync(path.join(REPO_ROOT, '.tmp-review-evidence-'));
+  const tmpDir = mkdtempAt(REPO_ROOT, '.tmp-review-evidence-');
   const missionDir = path.join(tmpDir, 'missions', 'task-evidence');
   const scriptsDir = path.join(tmpDir, 'scripts');
   fs.mkdirSync(missionDir, { recursive: true });
@@ -110,7 +111,7 @@ test('performStaticReview accepts Goal Check with recognized repo command', () =
 });
 
 test('performStaticReview accepts Goal Check with recognized test name', () => {
-  const tmpDir = fs.mkdtempSync(path.join(REPO_ROOT, '.tmp-review-evidence-'));
+  const tmpDir = mkdtempAt(REPO_ROOT, '.tmp-review-evidence-');
   const missionDir = path.join(tmpDir, 'missions', 'task-testname');
   const testDir = path.join(tmpDir, 'test');
   fs.mkdirSync(missionDir, { recursive: true });
@@ -150,7 +151,7 @@ test('performStaticReview accepts Goal Check with recognized test name', () => {
 });
 
 test('performStaticReview accepts Goal Check with test file path', () => {
-  const tmpDir = fs.mkdtempSync(path.join(REPO_ROOT, '.tmp-review-evidence-'));
+  const tmpDir = mkdtempAt(REPO_ROOT, '.tmp-review-evidence-');
   const missionDir = path.join(tmpDir, 'missions', 'task-testpath');
   const testDir = path.join(tmpDir, 'test');
   fs.mkdirSync(missionDir, { recursive: true });
@@ -188,7 +189,7 @@ test('performStaticReview accepts Goal Check with test file path', () => {
 // ============================================================================
 
 test('performStaticReview accepts a bare repo path whose file exists (may contain spaces)', () => {
-  const tmpDir = fs.mkdtempSync(path.join(REPO_ROOT, '.tmp-review-evidence-'));
+  const tmpDir = mkdtempAt(REPO_ROOT, '.tmp-review-evidence-');
   const missionDir = path.join(tmpDir, 'missions', 'task-spacepath');
   const backlogDir = path.join(tmpDir, 'backlog', 'tasks');
   fs.mkdirSync(missionDir, { recursive: true });
@@ -238,7 +239,7 @@ test('performStaticReview accepts a bare repo path whose file exists (may contai
 });
 
 test('performStaticReview accepts a bare repo path without a :line suffix', () => {
-  const tmpDir = fs.mkdtempSync(path.join(REPO_ROOT, '.tmp-review-evidence-'));
+  const tmpDir = mkdtempAt(REPO_ROOT, '.tmp-review-evidence-');
   const missionDir = path.join(tmpDir, 'missions', 'task-barepath');
   const scriptsDir = path.join(tmpDir, 'scripts');
   fs.mkdirSync(missionDir, { recursive: true });
@@ -276,7 +277,7 @@ test('performStaticReview accepts a bare repo path without a :line suffix', () =
 });
 
 test('performStaticReview accepts a bare repo path named mid-sentence', () => {
-  const tmpDir = fs.mkdtempSync(path.join(REPO_ROOT, '.tmp-review-evidence-'));
+  const tmpDir = mkdtempAt(REPO_ROOT, '.tmp-review-evidence-');
   const missionDir = path.join(tmpDir, 'missions', 'task-prosepath');
   fs.mkdirSync(missionDir, { recursive: true });
   fs.writeFileSync(path.join(tmpDir, 'package.json'), '{}');
@@ -312,7 +313,7 @@ test('performStaticReview accepts a bare repo path named mid-sentence', () => {
 });
 
 test('performStaticReview rejects placeholder-only evidence', () => {
-  const tmpDir = fs.mkdtempSync(path.join(REPO_ROOT, '.tmp-review-evidence-'));
+  const tmpDir = mkdtempAt(REPO_ROOT, '.tmp-review-evidence-');
   const missionDir = path.join(tmpDir, 'missions', 'task-placeholder');
   fs.mkdirSync(missionDir, { recursive: true });
 
@@ -344,7 +345,7 @@ test('performStaticReview rejects placeholder-only evidence', () => {
 });
 
 test('performStaticReview rejects separator-only table', () => {
-  const tmpDir = fs.mkdtempSync(path.join(REPO_ROOT, '.tmp-review-evidence-'));
+  const tmpDir = mkdtempAt(REPO_ROOT, '.tmp-review-evidence-');
   const missionDir = path.join(tmpDir, 'missions', 'task-separator');
   fs.mkdirSync(missionDir, { recursive: true });
 
@@ -374,7 +375,7 @@ test('performStaticReview rejects separator-only table', () => {
 });
 
 test('performStaticReview rejects prose-only evidence', () => {
-  const tmpDir = fs.mkdtempSync(path.join(REPO_ROOT, '.tmp-review-evidence-'));
+  const tmpDir = mkdtempAt(REPO_ROOT, '.tmp-review-evidence-');
   const missionDir = path.join(tmpDir, 'missions', 'task-prose');
   fs.mkdirSync(missionDir, { recursive: true });
 

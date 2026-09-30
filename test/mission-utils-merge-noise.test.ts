@@ -6,6 +6,7 @@ import assert from 'node:assert/strict';
 import fs from 'fs';
 import path from 'path';
 import { createRequire } from 'node:module';
+import { mkdtemp } from './helpers/temp-dir.js';
 const _require = createRequire(import.meta.url);
 import { parseConflictFilesFromMergeOutput, getConflictFiles, findLastNonNoiseCommit, squashTrailingBacklogNoiseIntoPreviousMission, softResetTrailingBacklogNoise, findMissionDocInBranches, isMissionArtifact, } from '../src/adapters/filesystem/mission-utils.js';
 test('parseConflictFilesFromMergeOutput parses content and modify/delete conflicts and deduplicates paths', () => {
@@ -161,7 +162,7 @@ test('findMissionDocInBranches finds mission docs on slug and base-slug branches
 // ============================================================
 
 test('isMissionArtifact respects adapter baseDir instead of hardcoded docs/missions', () => {
-  const root = fs.mkdtempSync(path.join(_require('os').tmpdir(), 'workflow-mission-utils-'));
+  const root = mkdtemp('workflow-mission-utils-');
   try {
     // Create a custom adapter config that sets baseDir to 'missions' (without docs/)
     fs.mkdirSync(path.join(root, 'workflow'), { recursive: true });

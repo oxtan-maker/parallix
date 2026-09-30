@@ -1,0 +1,24 @@
+{
+  "schemaVersion": 2,
+  "purpose": "Historical candidate pool from the original ten-mission proposal; not a scored or validated replay",
+  "recordedAt": "2026-09-29",
+  "recordedFromCommit": "96a52071ccfa3de295a5f4be012c126e74636492",
+  "proposedCommands": [
+    "npm run build",
+    "./scripts/verify-local.sh static-analysis",
+    "npm test",
+    "npm run test:integration:ci:prebuilt"
+  ],
+  "candidatePool": [
+    { "slug": "task-2555", "revision": "cae2b16e1e098770f73610f2656bc634d0a6026a", "worktree": "/mnt/data/code/parallix-task-2555", "rationale": "component behavior change" },
+    { "slug": "task-2556", "revision": "d83680463634e2e4aed7b21c6411da81f26b0a78", "worktree": "/mnt/data/code/parallix-task-2556", "rationale": "shared workflow helper change" },
+    { "slug": "task-2570", "revision": "a61b5e36dea5c443e279ae6ea48bb19ed8b0ed19", "worktree": "/mnt/data/code/parallix-task-2570", "rationale": "configuration and workflow boundary change" },
+    { "slug": "task-2590", "revision": "078593220b63bb3830680d34e145125d7edd4cd0", "worktree": "/mnt/data/code/parallix-task-2590", "rationale": "verification profiling change" },
+    { "slug": "task-2592", "revision": "ce78711e06104185df2671e56b012bbb5db39778", "worktree": "/mnt/data/code/parallix-task-2592", "rationale": "review persistence change" },
+    { "slug": "task-2599", "revision": "4dbbc1cf0d079f5a247d6e5ef773c45e6a5977db", "worktree": "/mnt/data/code/parallix-task-2599", "rationale": "entrypoint and process behavior change" },
+    { "slug": "task-2600", "revision": "b51b8d191209128fda0011817080bcbc5961c6b3", "worktree": "/mnt/data/code/parallix-task-2600", "rationale": "concurrent review-controller change" },
+    { "slug": "task-2602", "revision": "94d773ba4d78e56d7fb727c0233b283014001b1c", "worktree": "/mnt/data/code/parallix-task-2602", "rationale": "test-registry dependency change" },
+    { "slug": "task-2613", "revision": "57679878c1e7b5d64dab1df0dd0502d9e27fc3e7", "worktree": "/mnt/data/code/parallix-task-2613", "rationale": "integration/archive behavior change" },
+    { "slug": "task-2614", "revision": "81982eb68d697ba05641ba3b166cb98c28d9ddb6", "worktree": "/mnt/data/code/parallix-task-2614", "rationale": "integration refresh behavior change" }
+  ]
+}

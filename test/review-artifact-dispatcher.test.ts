@@ -12,13 +12,14 @@ import {
   ARTIFACT_REBOUND_ATTEMPTS,
   isArtifactInfraDiagnostic,
 } from '../src/adapters/review/review-artifacts.js';
+import { mkdtemp as registeredMkdtemp } from './helpers/temp-dir.js';
 
 // ============================================================================
 // consumeReviewerArtifacts — diagnostic field tests
 // ============================================================================
 
 test('consumeReviewerArtifacts returns diagnostic when findings are missing', async () => {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'test-dispatcher-'));
+  const tmpDir = registeredMkdtemp('test-dispatcher-');
   const findingsPath = path.join(tmpDir, 'test-slug-review-findings.md');
   const outcomePath = path.join(tmpDir, 'test-slug-review-outcome.md');
   const verdictPath = path.join(tmpDir, 'test-slug-review-verdict.txt');
@@ -51,7 +52,7 @@ test('consumeReviewerArtifacts returns diagnostic when findings are missing', as
 });
 
 test('consumeReviewerArtifacts returns diagnostic when outcome is missing', async () => {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'test-dispatcher-'));
+  const tmpDir = registeredMkdtemp('test-dispatcher-');
   const findingsPath = path.join(tmpDir, 'test-slug-review-findings.md');
   const verdictPath = path.join(tmpDir, 'test-slug-review-verdict.txt');
 
@@ -83,7 +84,7 @@ test('consumeReviewerArtifacts returns diagnostic when outcome is missing', asyn
 });
 
 test('consumeReviewerArtifacts returns diagnostic when verdict is missing', async () => {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'test-dispatcher-'));
+  const tmpDir = registeredMkdtemp('test-dispatcher-');
   const findingsPath = path.join(tmpDir, 'test-slug-review-findings.md');
   const outcomePath = path.join(tmpDir, 'test-slug-review-outcome.md');
 
@@ -114,7 +115,7 @@ test('consumeReviewerArtifacts returns diagnostic when verdict is missing', asyn
 });
 
 test('consumeReviewerArtifacts returns diagnostic when persist fails', async () => {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'test-dispatcher-'));
+  const tmpDir = registeredMkdtemp('test-dispatcher-');
 
   const result = await consumeReviewerArtifacts('test-slug', 'test-reviewer', {
     readArtifactFn: (p) => {
@@ -145,7 +146,7 @@ test('consumeReviewerArtifacts returns diagnostic when persist fails', async () 
 // ============================================================================
 
 test('consumeImplementerArtifacts returns diagnostic when round-resolution is missing', async () => {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'test-dispatcher-'));
+  const tmpDir = registeredMkdtemp('test-dispatcher-');
   const dispositionPath = path.join(tmpDir, 'test-slug-review-disposition.txt');
 
   fs.writeFileSync(dispositionPath, 'CHANGES_MADE', 'utf8');
@@ -174,7 +175,7 @@ test('consumeImplementerArtifacts returns diagnostic when round-resolution is mi
 });
 
 test('consumeImplementerArtifacts returns diagnostic when disposition is missing', async () => {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'test-dispatcher-'));
+  const tmpDir = registeredMkdtemp('test-dispatcher-');
   const resolutionPath = path.join(tmpDir, 'test-slug-round-resolution.md');
 
   fs.writeFileSync(resolutionPath, 'fixed_items: ["f1"]', 'utf8');
@@ -203,7 +204,7 @@ test('consumeImplementerArtifacts returns diagnostic when disposition is missing
 });
 
 test('consumeImplementerArtifacts returns diagnostic when persist fails', async () => {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'test-dispatcher-'));
+  const tmpDir = registeredMkdtemp('test-dispatcher-');
 
   const result = await consumeImplementerArtifacts('test-slug', 'test-implementer', {
     readArtifactFn: (p) => {

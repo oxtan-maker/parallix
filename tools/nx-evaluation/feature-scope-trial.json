@@ -1,0 +1,80 @@
+{
+  "schemaVersion": 1,
+  "recordedAt": "2026-09-29",
+  "trialBranch": "trial/nx-feature-2615",
+  "baseCommit": "173275ce0",
+  "scope": "Configuration-only Nx feature-project probe in a separate worktree; no trial wiring adopted by the mission branch",
+  "toolchain": {
+    "nx": "23.2.1",
+    "typescriptPlugin": "@nx/js/typescript 23.2.1",
+    "smolTomlOverride": "1.9.0",
+    "npmAuditVulnerabilities": 0
+  },
+  "projectGraph": {
+    "withoutTypescriptPlugin": "Project metadata appeared but no source import edges were inferred; ^production could not safely hash transitive source inputs.",
+    "scopedApplicationTarget": [
+      "trial-application",
+      "trial-application-test-fixtures"
+    ],
+    "fixtureDependencies": [
+      "trial-application",
+      "trial-domain"
+    ],
+    "correctedRuntimeClosure": [
+      "trial-application",
+      "trial-application-test-fixtures",
+      "trial-backlog-adapter",
+      "trial-composition",
+      "trial-domain",
+      "trial-src-remainder",
+      "trial-test-lib",
+      "trial-verification-adapter"
+    ]
+  },
+  "applicationProbe": {
+    "files": 8,
+    "assertionsPassed": 60,
+    "guardedDirectSuiteCpuSeconds": 10.46,
+    "narrowButIncompleteInputs": {
+      "baselineCommit": "5f59ce630",
+      "cold": { "cacheHits": 0, "cpuSeconds": 12.78, "wallSeconds": 4.02 },
+      "sameCommitWarm": { "cacheHits": 1, "cpuSeconds": 1.28, "wallSeconds": 0.77 },
+      "unrelatedBacklogChangeCommit": "53ba22360",
+      "unrelatedBacklogChange": { "cacheHits": 1, "cpuSeconds": 1.36, "wallSeconds": 0.80 },
+      "dependentDomainChangeCommit": "4f6b83912",
+      "dependentDomainChange": { "cacheHits": 0, "cpuSeconds": 12.70, "wallSeconds": 3.88 },
+      "validForAdoption": false,
+      "reason": "The target named input hashed the common bootstrap and runner files but omitted transitive agent, database, and test-lib source dependencies. The selective hit is unsafe."
+    },
+    "conservativeRuntimeClosure": {
+      "baselineCommit": "f4b874d7a",
+      "cold": { "cacheHits": 0, "cpuSeconds": 13.07, "wallSeconds": 3.94 },
+      "unrelatedBacklogChangeCommit": "a77c41d51",
+      "unrelatedBacklogChange": { "cacheHits": 0, "cpuSeconds": 12.96, "wallSeconds": 3.93 },
+      "validForAdoption": false,
+      "reason": "The safe conservative closure pulls the whole remainder source project through common test-runtime dependencies, so this group has no selective reuse on the tested unrelated edit."
+    }
+  },
+  "coverageProbe": {
+    "command": "PARALLIX_TEST_COVERAGE=1 npm test -- test/application/*.test.ts",
+    "result": "60 tests passed; LCOV included src/adapters/backlog/legacy-task-content.ts at zero hits although the application test target does not execute it.",
+    "implication": "A cached whole-repository LCOV fragment cannot safely use a narrow runtime-only source key. Component coverage fragments plus fresh source inventory, or conservative whole-source inputs, are required."
+  },
+  "integrationCiProfile": {
+    "files": 194,
+    "passed": 2455,
+    "skipped": 26,
+    "failed": 0,
+    "cpuSeconds": 608.85,
+    "wallSeconds": 156.79,
+    "topTenFileElapsedSeconds": 174.26,
+    "constraint": "The expensive files exercise CLI, package, process, or full-gate behavior; no complete narrow input model or feature-owned coverage artifacts were established for them."
+  },
+  "scaleCheck": {
+    "coveredUnitCpuSeconds": 645,
+    "coveredIntegrationCiCpuSeconds": 608.85,
+    "perfectNineHitSavingFromProbedGroupPercentOfTwoTierTenCandidateBaseline": 0.75,
+    "note": "This is an illustrative ceiling for the 10.46-CPU-second application group alone, before Nx overhead and other gates; it is not a cohort result."
+  },
+  "decision": "Do not adopt this trial configuration. A feature-scoped model can produce a selective hit, but this probe showed that hit was unsafe; the conservative correction lost it. The broader Nx adoption question remains pending a safe runtime and coverage boundary plus a representative CPU replay."
+}

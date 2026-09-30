@@ -190,7 +190,7 @@ recorded in [ADR 0056](adr/0056-claude-stream-json-output-rendering.md).
 
 All workflow agent launches use the shared `startAgent` path and tee child stdout/stderr through the parent terminal. While the child process stays running, the harness emits a bounded status line after a configurable delay and then once per that interval until the agent result settles.
 
-The watchdog is purely observational: it never kills, times out, or cancels an agent, and its reports do not release custom capacity. Reporting continues **after** the agent's first visible output, so an agent that announces a plan and then stalls still produces liveness lines; only the process exiting (or the SDK session settling) stops them.
+The watchdog is observational unless a review-specific liveness deadline is explicitly configured. `WORKFLOW_REVIEW_AGENT_NO_OUTPUT_MAX_MS` cancels only a reviewer that has produced no visible stdout or stderr before that deadline, then tries the next eligible reviewer. It is opt-in because text-mode launchers can buffer healthy output until completion. Reporting continues **after** the agent's first visible output, so an agent that announces a plan and then stalls still produces liveness lines; only the process exiting (or the SDK session settling) stops them.
 
 A tick is suppressed while the agent is visibly streaming: once output has been seen, the harness reports only when that output is at least 15 seconds old. A live agent is its own liveness evidence, and the earlier unconditional report told the operator it was "still waiting" on a stream that was moving. Silence — before the first output or after the stream stops — is always reported.
 
@@ -211,6 +211,7 @@ Per-step timing can be overridden via environment variables:
 |----------|-----------|----------------|
 | `WORKFLOW_AGENT_NO_OUTPUT_INITIAL_MS` / `WORKFLOW_AGENT_NO_OUTPUT_INTERVAL_MS` | All steps | Fallback generic watchdog |
 | `WORKFLOW_DRAFT_AGENT_NO_OUTPUT_INITIAL_MS` / `WORKFLOW_DRAFT_AGENT_NO_OUTPUT_INTERVAL_MS` | `draft` step only | Overrides the 15s/30s draft defaults |
+| `WORKFLOW_REVIEW_AGENT_NO_OUTPUT_MAX_MS` | `review` step only | Opt-in deadline for a reviewer with no visible output; disabled by default |
 
 Set `WORKFLOW_AGENT_NO_OUTPUT_WATCHDOG=0` to disable the watchdog entirely for a single command when investigating output interleaving.
 
@@ -569,12 +570,29 @@ drafts keep the contract in recorded Mission state, available through
 `px status`; they do not generate a `MISSION.md`. The Backlog task remains a
 user-facing mirror of lifecycle status.
 
-An integration-gate repair that changes the revision the reviewer approved
-retracts that approval, as before, and then sends the repaired revision back
-through the same review `px review <slug> --start` runs. Nothing is approved on
-the reviewer's behalf and the superseded approval stays in the review history.
-When the new round is approved, `px integrate` starts over once on the approved
-revision; otherwise it stops before the merge with the review outcome.
+A red integration gate withdraws the approval and returns the mission to
+`active`. Each `px integrate` run then gets a fresh, bounded repair budget: the
+implementer is told the mission was approved at revision A, which gate failed,
+its command and its captured output. `agent-smoke` is retried once on the
+unchanged tree first; if it still fails, the environment failure goes back to
+the human without spending the repair budget. A repair that changes the
+approved revision is reviewed again through `px review <slug> --continue`, and
+the reviewer's prompt carries the failed gate, its output, and the repair range
+A..B; the reviewer decides how much to review. On approval the mission stops in
+the integration lane. Parallix never merges an approval a human has not seen:
+`px integrate`, `px review --continue` and `px lead` all stop there, and
+`px lead` never records a review decision. `px status` and a pull-request
+comment show the previous failed gate, the repair range and the re-review
+outcome, so the human reads what went wrong before running `px integrate`
+again. When the budget is spent, `px integrate` stops with the gate that still
+fails and the command to resume.
+
+With a Forgejo review provider, the withdrawn approval is dismissed on the pull
+request by the dedicated `parallix` account; Parallix never posts a review as
+another account. A commit Parallix makes for its own bookkeeping — a Backlog
+mirror transition or the integrate pre-commit hook — carries a
+`Parallix-Bookkeeping` trailer. An approval of revision A still covers A plus
+only such commits; any other commit needs a new review.
 
 Only one `px integrate` process may run for a mission at a time. A second run
 stops before reading or changing mission state and asks the operator to retry

@@ -35,8 +35,6 @@ function routeArgs(prompts: string[], messages: string[], treeFinalized: boolean
     repositoryId: 'parallix',
     startAgentFn: (async (_step: string, o: any) => { prompts.push(o.prompt('codex')); return { agent: 'codex', result: { status: 0 } }; }) as never,
     transitionTaskFn: async () => true,
-    readReboundsFn: async () => 0,
-    recordReboundFn: async () => true,
     captureFinalTreeFn: (() => (treeFinalized
       ? { ok: true, rootDir: '/tmp/mission', commit: 'c', tree: 't' }
       : { ok: false, error: 'selected execution root is not finalized (dirty tree): /tmp/mission' })) as never,

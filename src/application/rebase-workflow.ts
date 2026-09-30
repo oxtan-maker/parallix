@@ -214,6 +214,8 @@ interface RebaseContext {
   readonly baseBranch: string;
   readonly isPush: boolean;
   readonly recordedImplementer: string | null;
+  /** Mission HEAD before the rebase, when the port records branch moves. */
+  readonly movedFrom: string | null;
 }
 
 const combineOutput = (result: GitCommandResult) =>
@@ -309,6 +311,13 @@ function verifyBaseAncestry(ctx: RebaseContext): boolean {
 /** The one success tail: verify ancestry, announce, push, then name what is next. */
 async function finishRebase(ctx: RebaseContext, message: string): Promise<void> {
   if (!verifyBaseAncestry(ctx)) { return; }
+  // The branch just moved: record, at this moment, an approval it no longer
+  // covers (TASK-2555). Recording is an audit fact; standing the approval down
+  // stays an operator decision.
+  if (ctx.port.recordBranchMove) {
+    const moved = await ctx.port.recordBranchMove(ctx.slug, ctx.executionRoot, ctx.movedFrom);
+    if (moved) { fmt.log.warn(moved); }
+  }
   if (ctx.repairImplementer) { await ctx.port.resumeReviewAfterRepair?.(ctx.slug, ctx.executionRoot, ctx.repairImplementer); }
   fmt.log.pass(message);
   await performPush(ctx);
@@ -809,6 +818,7 @@ export async function runRebaseWorkflow(args: string[], port: RebaseWorkflowPort
     baseBranch: port.resolveMissionBaseBranch(slug, executionRoot, { gitFn }),
     isPush: flags.includes('--push'),
     recordedImplementer: await resolveRecordedImplementer(slug, executionRoot, port),
+    movedFrom: port.recordBranchMove ? (gitFn(['-C', executionRoot, 'rev-parse', 'HEAD']).stdout || '').trim() || null : null,
   };
 
   fmt.log.info(`Rebasing ${fmt.branch(branch)} onto local ${fmt.branch(ctx.baseBranch)}...`);

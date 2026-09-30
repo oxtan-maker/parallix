@@ -148,6 +148,7 @@ test('bootstrapReviewSurface writes token files and configures the review remote
 
     const requests = [];
     const requestFn = (method, url, requestOptions = {}) => {
+      if (method === 'GET' && /\/api\/v1\/users\//.test(url)) return { ok: true, statusCode: 200, data: {} };
       requests.push({ method, url, requestOptions });
       if (method === 'POST' && url.endsWith('/api/v1/users/magnus/tokens')) {
         return { ok: true, statusCode: 201, data: { sha1: 'owner-token' } };
@@ -186,13 +187,34 @@ test('bootstrapReviewSurface writes token files and configures the review remote
     assert.equal(fs.statSync(path.join(forgejoHome, 'tokens', 'magnus')).mode & 0o777, 0o600);
     assert.equal(fs.statSync(path.join(forgejoHome, 'tokens', 'codex')).mode & 0o777, 0o600);
     const ownerTokenRequest = requests.find(entry => entry.method === 'POST' && entry.url.endsWith('/api/v1/users/magnus/tokens'));
-    assert.deepEqual(ownerTokenRequest.requestOptions.body.scopes, ['write:user', 'write:repository', 'write:issue', 'write:organization']);
+    assert.deepEqual(ownerTokenRequest.requestOptions.body.scopes, ['write:user', 'write:repository', 'write:issue', 'write:organization', 'write:admin']);
     assert.ok(requests.some(entry => entry.method === 'PUT' && entry.url.endsWith('/api/v1/repos/test-org/test-repo/collaborators/codex')));
 
     const remoteUrl = spawnSync('git', ['-C', root, 'remote', 'get-url', 'review'], { encoding: 'utf8' });
     assert.equal(remoteUrl.status, 0, remoteUrl.stderr);
     assert.equal(remoteUrl.stdout.trim(), 'http://localhost:3300/test-org/test-repo.git');
     assert.ok(requests.some(entry => entry.url.endsWith('/api/v1/orgs/test-org/repos')));
+  });
+});
+
+test('bootstrapReviewSurface grants the parallix login admin so it can dismiss stale approvals (TASK-2620)', async () => {
+  await withTempDir(async root => {
+    writeConfig(root);
+    spawnSync('git', ['init', '-b', 'main'], { cwd: root, encoding: 'utf8' });
+    const grants = [];
+    const requestFn = (method, url, requestOptions = {}) => {
+      if (method === 'GET' && /\/api\/v1\/users\//.test(url)) return { ok: true, statusCode: 200, data: {} };
+      if (method === 'POST' && url.endsWith('/api/v1/users/magnus/tokens')) { return { ok: true, statusCode: 201, data: { sha1: 'owner-token' } }; }
+      if (method === 'GET' && url.endsWith('/api/v1/repos/test-org/test-repo')) { return { ok: true, statusCode: 200, data: {} }; }
+      if (method === 'PUT' && url.includes('/collaborators/')) { grants.push({ user: url.split('/').pop(), permission: requestOptions.body.permission }); return { ok: true, statusCode: 204, data: {} }; }
+      return { ok: false, statusCode: 500, data: { error: 'unexpected request' } };
+    };
+    const result = await bootstrapReviewSurface(root, {
+      baseUrl: 'http://localhost:3300/', repo: 'test-org/test-repo', ownerLogin: 'magnus', ownerPassword: 'secret',
+      agentPasswords: [], agentUsers: ['codex', 'parallix'],
+    }, { requestFn, forgejoHome: path.join(root, '.forgejo-local'), reviewRemoteUrlFn: () => null, log: () => {} });
+    assert.equal(result.ok, true, JSON.stringify(result));
+    assert.deepEqual(grants, [{ user: 'codex', permission: 'write' }, { user: 'parallix', permission: 'admin' }]);
   });
 });
 
@@ -374,7 +396,8 @@ test('ensureForgejoUser skips existing users, creates missing ones via basic aut
   result = ensureForgejoUser('http://localhost:3300', 'vibe', 'magnus', 'owner-pw', 'vibe-pw', () => ({
     ok: false, statusCode: 500, data: {},
   }));
-  assert.deepEqual(result, { ok: true, created: false });
+  assert.equal(result.ok, false);
+  assert.match(result.error, /failed to check Forgejo user vibe \(HTTP 500\)/);
 });
 
 test('collectSetupAnswers uses defaults and skips blank agent passwords', async () => {
@@ -636,6 +659,7 @@ test('bootstrapReviewSurface reprompts on Forgejo auth failure and succeeds on r
         return '';
       },
       requestFn(method, url, requestOptions = {}) {
+      if (method === 'GET' && /\/api\/v1\/users\//.test(url)) return { ok: true, statusCode: 200, data: {} };
         if (method === 'POST' && url.endsWith('/api/v1/users/magnus/tokens')) {
           ownerAttempts += 1;
           if (ownerAttempts === 1) {
@@ -679,6 +703,7 @@ test('bootstrapReviewSurface uses unique token names across reruns', async () =>
 
     const seenTokenNames = new Set();
     const requestFn = (method, url, requestOptions = {}) => {
+      if (method === 'GET' && /\/api\/v1\/users\//.test(url)) return { ok: true, statusCode: 200, data: {} };
       if (method === 'POST' && url.includes('/tokens')) {
 // @ts-expect-error -- Legacy fixture intentionally accesses runtime-only `body` absent from its inferred mock shape.
         const tokenName = requestOptions.body && requestOptions.body.name;
@@ -775,6 +800,7 @@ test('bootstrapReviewSurface reports local validation and downstream setup failu
       log: () => {},
       forgejoHome,
       requestFn(method, url) {
+      if (method === 'GET' && /\/api\/v1\/users\//.test(url)) return { ok: true, statusCode: 200, data: {} };
         if (method === 'POST' && url.endsWith('/api/v1/users/magnus/tokens')) {
           return { ok: true, statusCode: 201, data: { sha1: 'owner-token' } };
         }
@@ -861,6 +887,7 @@ test('setupWizard writes config, bootstraps review, and verifies the install', a
         return '';
       },
       requestFn(method, url) {
+      if (method === 'GET' && /\/api\/v1\/users\//.test(url)) return { ok: true, statusCode: 200, data: {} };
         if (method === 'POST' && url.endsWith('/api/v1/users/magnus/tokens')) return { ok: true, statusCode: 201, data: { sha1: 'owner-token' } };
         if (method === 'GET' && url.endsWith('/api/v1/repos/magnus/demo')) return { ok: false, statusCode: 404, data: {} };
         if (method === 'POST' && url.endsWith('/api/v1/user/repos')) return { ok: true, statusCode: 201, data: {} };
@@ -902,6 +929,7 @@ test('setupWizard continues when optional agent token creation fails', async () 
         return '';
       },
       requestFn(method, url) {
+      if (method === 'GET' && /\/api\/v1\/users\//.test(url)) return { ok: true, statusCode: 200, data: {} };
         if (method === 'POST' && url.endsWith('/api/v1/users/magnus/tokens')) {
           return { ok: true, statusCode: 201, data: { sha1: 'owner-token' } };
         }
@@ -956,6 +984,7 @@ test('setupWizard writes Forgejo tokens under rootDir when cwd differs', async (
           return '';
         },
         requestFn(method, url) {
+      if (method === 'GET' && /\/api\/v1\/users\//.test(url)) return { ok: true, statusCode: 200, data: {} };
           if (method === 'POST' && url.endsWith('/api/v1/users/magnus/tokens')) return { ok: true, statusCode: 201, data: { sha1: 'owner-token' } };
           if (method === 'GET' && url.endsWith('/api/v1/repos/magnus/demo')) return { ok: false, statusCode: 404, data: {} };
           if (method === 'POST' && url.endsWith('/api/v1/user/repos')) return { ok: true, statusCode: 201, data: {} };
@@ -1049,6 +1078,8 @@ test('bootstrapReviewSurface non-interactive mode creates agent token via owner 
       }, {
         interactive: false,
         requestFn(method, url, requestOptions = {}) {
+      if (method === 'GET' && /\/api\/v1\/users\//.test(url)) return { ok: true, statusCode: 200, data: {} };
+          if (method === 'GET' && /\/api\/v1\/users\//.test(url)) return { ok: true, statusCode: 200, data: {} };
           if (method === 'GET' && url.endsWith('/api/v1/repos/test-org/test-repo')) {
             return { ok: false, statusCode: 404, data: {} };
           }
@@ -1135,6 +1166,7 @@ test('bootstrapReviewSurface non-interactive reports agent token failure via war
       }, {
         interactive: false,
         requestFn(method, url) {
+      if (method === 'GET' && /\/api\/v1\/users\//.test(url)) return { ok: true, statusCode: 200, data: {} };
           if (method === 'GET' && url.endsWith('/api/v1/repos/test-org/test-repo')) {
             return { ok: false, statusCode: 404, data: {} };
           }

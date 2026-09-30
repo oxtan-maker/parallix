@@ -9,6 +9,7 @@ import { buildBoardMetrics, buildBoardProjection } from '../src/application/proj
 import { projectMissionCard } from '../src/application/projections/mission-board.js';
 import { missionId } from '../src/domain/mission.js';
 import { repositoryId } from '../src/domain/repository.js';
+import { mkdtemp as registeredMkdtemp } from './helpers/temp-dir.js';
 
 const id = missionId('task-2392');
 const repo = repositoryId('task-2392-repro');
@@ -18,7 +19,7 @@ function task(status: string, title: string, labels: string, assignee: string): 
 }
 
 test('task-2392: active task appears in active stage, not backlog', async () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'px-2392-'));
+  const root = registeredMkdtemp('px-2392-');
   const base = path.join(root, 'base');
   const worktree = path.join(root, 'worktree');
   const writeTask = (dir: string, content: string) => {

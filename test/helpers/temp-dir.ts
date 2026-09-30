@@ -15,7 +15,11 @@ import * as bootstrap from '../bootstrap-parallix-home.js';
  * @returns {string} Absolute path to the created directory
  */
 function mkdtemp(prefix = 'parallix-test-') {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
+  return mkdtempAt(os.tmpdir(), prefix);
+}
+
+function mkdtempAt(parent: string, prefix: string) {
+  const dir = fs.mkdtempSync(path.join(parent, prefix));
   // Register with the bootstrap manifest if available (task-2326).
   // The bootstrap exposes registerTempRoot when loaded via --import.
   // When running outside the bootstrap (e.g., integration solo runs),
@@ -26,4 +30,4 @@ function mkdtemp(prefix = 'parallix-test-') {
   return dir;
 }
 
-export { mkdtemp };
+export { mkdtemp, mkdtempAt };

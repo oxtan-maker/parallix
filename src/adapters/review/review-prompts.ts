@@ -192,10 +192,10 @@ export function buildCompletedControlsBlock(missionPath: string, repoRoot?: stri
  * @param {{reviewer: string, branch: string, implementer: string, focus?: string, attempt: number, repoRoot?: string, missionPath?: string}} opts
  * @returns {string}
  */
-export function buildReviewPrompt({ reviewer, branch, implementer, focus = 'all', attempt, actualReviewer, repoRoot = '', missionPath: missionPathOverride, reviewBaseline }: {
-  reviewer: string; branch: string; implementer: string; focus?: string; attempt: number; actualReviewer?: string; repoRoot?: string; missionPath?: string; reviewBaseline?: string;
+export function buildReviewPrompt({ reviewer, branch, implementer, focus = 'all', attempt, actualReviewer, repoRoot = '', missionPath: missionPathOverride, reviewBaseline, integrationRepair }: {
+  reviewer: string; branch: string; implementer: string; focus?: string; attempt: number; actualReviewer?: string; repoRoot?: string; missionPath?: string; reviewBaseline?: string; integrationRepair?: string;
 }): string {
-  return buildCompactReviewPrompt({ reviewer, branch, implementer, focus, attempt, actualReviewer, repoRoot, missionPath: missionPathOverride, reviewBaseline });
+  return buildCompactReviewPrompt({ reviewer, branch, implementer, focus, attempt, actualReviewer, repoRoot, missionPath: missionPathOverride, reviewBaseline, integrationRepair });
 }
 
 /**
@@ -212,8 +212,10 @@ export function buildActOnReviewPrompt({ implementer, branch, attempt, reviewOut
  * @param {{reviewer: string, branch: string, implementer: string, focus?: string, attempt: number, actualReviewer?: string, repoRoot?: string, missionPath?: string}} opts
  * @returns {string}
  */
-export function buildCompactReviewPrompt({ reviewer, branch, implementer, focus = 'all', attempt, actualReviewer, repoRoot = '', missionPath: missionPathOverride, reviewBaseline }: {
+export function buildCompactReviewPrompt({ reviewer, branch, implementer, focus = 'all', attempt, actualReviewer, repoRoot = '', missionPath: missionPathOverride, reviewBaseline, integrationRepair = '' }: {
   reviewer: string; branch: string; implementer: string; focus?: string; attempt: number; actualReviewer?: string; repoRoot?: string; missionPath?: string; reviewBaseline?: string;
+  /** Integration repair context (TASK-2620); empty when the round follows no integration repair. */
+  integrationRepair?: string;
 }): string {
   const slug = branch.replace(/^mission\//, '');
   const finalReviewer = actualReviewer || reviewer;
@@ -239,6 +241,7 @@ export function buildCompactReviewPrompt({ reviewer, branch, implementer, focus 
     .replaceAll('{{primaryBranch}}',    primaryBranch)
     .replaceAll('{{reviewBaseline}}',   reviewBaseline || primaryBranch)
     .replaceAll('{{completedControls}}', buildCompletedControlsBlock(missionPath, repoRoot))
+    .replaceAll('{{integrationRepair}}', integrationRepair)
     .replaceAll('YYYY',                year)
     .replaceAll('{{review_entrypoint}}', reviewEntrypoint(entrypointAgent));
 }

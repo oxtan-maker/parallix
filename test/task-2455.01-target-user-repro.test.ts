@@ -11,13 +11,14 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { loadEffectiveConfig } from '../src/adapters/config/product-config.js';
 import { buildWorkflowConfig } from '../src/adapters/review/setup-review-config.js';
+import { mkdtemp as registeredMkdtemp } from './helpers/temp-dir.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(__dirname, '..');
 const schemaPath = path.join(repoRoot, 'config', 'workflow.config.schema.json');
 
 function withTempDir(fn) {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'task-2455.01-'));
+  const dir = registeredMkdtemp('task-2455.01-');
   try {
     fn(dir);
   } finally {

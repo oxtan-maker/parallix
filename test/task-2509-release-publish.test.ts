@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { isNewerNormalVersion, parseNormalVersion, publishTrustedRelease, validateMetadata, validateTrustedRelease } from '../scripts/release-publish.js';
+import { mkdtemp as registeredMkdtemp } from './helpers/temp-dir.js';
 
 test('task-2509: release metadata accepts only matching normal SemVer versions', () => {
   assert.deepEqual(parseNormalVersion('1.5.120'), [1, 5, 120]);
@@ -20,7 +21,7 @@ test('task-2509: normal releases must advance the current normal release', () =>
 });
 
 function withReleaseRoot(run: (root: string) => void) {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'task-2509-release-'));
+  const root = registeredMkdtemp('task-2509-release-');
   fs.writeFileSync(path.join(root, 'package.json'), JSON.stringify({ version: '1.5.120' }));
   fs.writeFileSync(path.join(root, 'package-lock.json'), JSON.stringify({ version: '1.5.120' }));
   try { run(root); } finally { fs.rmSync(root, { recursive: true, force: true }); }

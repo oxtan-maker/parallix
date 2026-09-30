@@ -32,12 +32,14 @@ const PATTERN_SETS = Object.freeze({
     /\bmistral (?:ai )?rate limit(?: reached| exceeded)/i,
     /you(?:'|')?ve hit your (?:mistral|vibe) (?:weekly|daily|monthly|usage) limit/i,
     /\b429\b[^\n]*?\b(?:rate|quota|usage)\b/i,
-    /\bvibe\b[^\n]*?\b(?:quota exceeded|rate limit exceeded)\b/i,
+    /\brate limits exceeded\b/i,
+    /\bvibe\b[^\n]*?\b(?:quota exceeded|rate limits? exceeded)\b/i,
     /\bmistral\b[^\n]*?\b(?:quota exceeded|rate limit exceeded)\b/i,
     /\bresource[_ ]has[_ ]been[_ ]exhausted\b/i,
     /\bresource_exhausted\b/i
   ],
   qwen: [
+    /\b403\b[^\n]*?\baccess to model denied\b/i,
     /(?:\b429\b[^\n]*?\bAllocated quota exceeded\b|\bQuota exhausted:[\s\S]{0,500}\bcause:\s*insufficient_quota:\s*429\b)/i,
     /\b429\b[^\n]*?\bRequests rate limit exceeded\b/i
   ]
@@ -209,6 +211,12 @@ interface DetectLimitHitOptions {
 
 function matchedLimitHit(agent: string, combined: string, match: any, now: Date) {
   const matchedText = combined.slice(match.index, match.index + match.length);
+  if (agent === 'qwen' && /\b403\b[^\n]*?\baccess to model denied\b/i.test(matchedText)) {
+    // A model-level 403 means this invocation cannot use its selected model.
+    // It is neither provider-wide quota nor a reason to poison all Qwen
+    // launches: reroute the current work and tell the operator what to fix.
+    return { reroute: true, kind: 'entitlement', reason: 'model entitlement denied (scoped, no family block)' };
+  }
   if (agent === 'qwen' && /Requests rate limit exceeded/i.test(matchedText)) {
     return { reroute: true, reason: 'rate limit (transient, no block)' };
   }

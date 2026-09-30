@@ -20,7 +20,7 @@
  * | `verification`     | `adapters/verification/verification` — command naming and tree proofs      |
  * | `agents`           | `adapters/agents/*`, `review-loop` — launch, selection, fallback, matrix     |
  * | `productConfig`    | `adapters/config/product-config` — review provider, integration mode        |
- * | `review`           | `adapters/review/*`, `integrate-review-resume` — review state, submit-for-review, reviewer login, review-round start |
+ * | `review`           | `adapters/review/*` — review state, submit-for-review, reviewer login, review-round start |
  * | `rebase`           | `adapters/rebase/rebase-workflow-adapter` — the shared `px rebase` port     |
  * | `gates`            | `adapters/config/repository-gates`, `integrate-gates`, `integrate-gate-rebound` |
  * | `checkout`         | `integrate-conflict` — stash, noise patch, conflict and squash helpers      |
@@ -154,15 +154,6 @@ export interface IntegrateReviewPort {
   readReviewState(_slug: string, _rootDir: string, _missionStore?: MissionStore | null): Promise<any> | any;
   submitForReview(_slug: string, _skipGate: boolean, _options: Record<string, unknown>): Promise<unknown>;
   resolveForgejoUser(_reviewer: string): string | null;
-  /**
-   * Resume the round opened by the gate rebound and return its assigned
-   * reviewer (TASK-2550 automatic revbounce).
-   */
-  startReviewRound(_slug: string, _options: {
-    worktree: string;
-    revision: string;
-    missionServicesFn: Function;
-  }): Promise<string>;
 }
 
 export interface IntegrateRebasePort {
@@ -185,7 +176,7 @@ export interface IntegrationGateRoute {
   /** The post-repair revision, named on the `revision-changed` route (TASK-2550). */
   readonly repairedRevision?: string;
   /** The retraction outcome, named on the `revision-changed` route (TASK-2528). */
-  readonly invalidation?: { readonly ok: boolean; readonly retracted: readonly string[]; readonly errors: readonly string[] };
+  readonly invalidation?: { readonly ok: boolean; readonly dismissed: readonly string[]; readonly errors: readonly string[] };
 }
 
 export interface IntegrateGatesPort {

@@ -18,6 +18,7 @@ export {
 import * as postIntegrateHook from '../../process/post-integrate-hook.js';
 import { missionId } from '../../../domain/mission.js';
 import { classifyHookFailure } from '../../../application/hook-failure-workflow.js';
+import { bookkeepingCommitMessage } from '../../../domain/approval-coverage.js';
 
 export { classifyHookFailure };
 
@@ -298,7 +299,7 @@ export function runPreCommitHookOrAbort(slug: string, {
   }
   const changed = [...modifiedPaths()].filter(file => !before.has(file));
   if (changed.length > 0) {
-    const commit = gitRunner(['-C', missionWorktree, 'commit', '--only', '-m', `chore(${slug}): integrate pre-commit hook`, '--', ...changed]);
+    const commit = gitRunner(['-C', missionWorktree, 'commit', '--only', '-m', bookkeepingCommitMessage(`chore(${slug}): integrate pre-commit hook`, 'pre-commit-hook'), '--', ...changed]);
     if (commit.status !== 0) {
       fmt.log.fail(`Could not commit pre-commit hook changes (${changed.join(', ')}) onto the mission branch.`);
       const output = [commit.stdout, commit.stderr].filter(Boolean).join('\n').trim();

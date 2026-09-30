@@ -695,6 +695,8 @@ test('transitionTask updates status and implementer and commits the change in a 
 
     const lastSubject = childProcess.spawnSync('git', ['log', '-1', '--format=%s'], { cwd: root, encoding: 'utf8' }).stdout.trim();
     assert.equal(lastSubject, 'backlog(task-128): transition to active and implementer=codex');
+    const trailer = childProcess.spawnSync('git', ['log', '-1', '--format=%(trailers:key=Parallix-Bookkeeping,valueonly)'], { cwd: root, encoding: 'utf8' }).stdout.trim();
+    assert.equal(trailer, 'backlog-mirror', 'the Backlog mirror commit is recognisable bookkeeping (TASK-2620)');
     assert.ok(logs.some(msg => msg.includes('transitioned to active')));
   });
 });

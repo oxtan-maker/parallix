@@ -298,7 +298,31 @@ describe('SQLite Mission aggregate integration', () => {
       assert.equal(decision?.kind, 'approved');
       assert.deepEqual(decision.revocation, {
         revokedAt: '2026-09-25T00:00:00Z', revokedBy: 'operator', reason: 'The approval was unfounded',
+        cause: { kind: 'operator' },
       });
+    } finally {
+      await database.close();
+    }
+  });
+
+  it('persists an integration-gate rebound cause with its failed gate (TASK-2620)', async () => {
+    const database = await migratedDatabase();
+    try {
+      const store = new SqliteMissionStore(database);
+      const recorded = completeMission({ status: 'integration', rawStatus: 'integration' });
+      const version = await store.save(recorded, null);
+      const result = await new MissionLifecycleService(store).transition({
+        operationId: 'rebound', missionId: recorded.id, expectedVersion: version,
+        capabilities: new Set(['mission:transition']),
+        command: { type: 'rebound-to-active', agent: recorded.assignee!, cause: { kind: 'integration-gate-failure', gate: 'agent-smoke', command: 'npm run test:agent-e2e', log: 'model slot busy' }, occurredAt: '2026-09-25T00:00:00Z' },
+        actor: 'workflow', occurredAt: '2026-09-25T00:00:00Z', idempotencyKey: 'rebound:1',
+      });
+      assert.equal(result.status, 'completed');
+      const loaded = await store.load(recorded.id);
+      assert.equal(loaded.kind, 'found');
+      const decision = loaded.mission.review?.rounds[1]?.decision;
+      assert.equal(decision?.kind, 'approved');
+      assert.deepEqual(decision.revocation?.cause, { kind: 'integration-gate-failure', gate: 'agent-smoke', command: 'npm run test:agent-e2e', log: 'model slot busy' });
     } finally {
       await database.close();
     }

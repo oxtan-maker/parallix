@@ -67,9 +67,9 @@ cat <<EOF
 [INFO] Next steps:
 [INFO]   1. docker compose -f forgejo/docker-compose.yml up -d
 [INFO]   2. Open http://localhost:\${FORGEJO_PORT:-3300}
-[INFO]   3. Create the agent accounts (owner + codex/claude/custom/mistral) with
-[INFO]      'forgejo admin user create' — px setup mints tokens but does not create
-[INFO]      accounts. See parallix/docs/forgejo-setup.md ("Create the agent accounts").
+[INFO]   3. Create human with 'forgejo admin user create --username human --admin'.
+[INFO]      px setup-review can then create agent accounts and mint tokens.
+[INFO]      See parallix/docs/forgejo-setup.md ("Create the agent accounts").
 [INFO]   4. Read parallix/docs/forgejo-setup.md for token and remote wiring
 [INFO]   5. Run px setup after export to finish config and review wiring
 EOF

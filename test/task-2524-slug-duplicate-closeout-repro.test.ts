@@ -5,9 +5,10 @@ import os from 'node:os';
 import path from 'node:path';
 
 import { checkBacklogIntegrity, completeTask, resolveTaskFile } from '../src/adapters/backlog/backlog.js';
+import { mkdtemp as registeredMkdtemp } from './helpers/temp-dir.js';
 
 test('TASK-2524: completeTask closes the sole open slug-prefix twin without hiding ambiguity', () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'task-2524-'));
+  const root = registeredMkdtemp('task-2524-');
   const tasksDir = path.join(root, 'backlog', 'tasks');
   const completedDir = path.join(root, 'backlog', 'completed');
   const openFile = path.join(tasksDir, 'task-2524 - open.md');
@@ -38,7 +39,7 @@ test('TASK-2524: completeTask closes the sole open slug-prefix twin without hidi
 });
 
 test('TASK-2524: backlog integrity rejects renamed slug-prefix twins', () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'task-2524-'));
+  const root = registeredMkdtemp('task-2524-');
   const tasksDir = path.join(root, 'backlog', 'tasks');
   const completedDir = path.join(root, 'backlog', 'completed');
 

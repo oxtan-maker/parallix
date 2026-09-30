@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { mockModule, installModuleMocks } from './lib/module-mock.js';
+import { mkdtemp as registeredMkdtemp } from './helpers/temp-dir.js';
 
 const git = mockModule<typeof import('../src/adapters/git/git.js')>('../src/adapters/git/git.js', import.meta.url);
 const missionUtils = mockModule<typeof import('../src/adapters/filesystem/mission-utils.js')>('../src/adapters/filesystem/mission-utils.js', import.meta.url);
@@ -16,7 +17,7 @@ const integrate = mockModule<typeof import('../src/adapters/cli/commands/integra
 await installModuleMocks();
 
 const SLUG = 'task-2367-fixture';
-const ROOT = fs.mkdtempSync(path.join(os.tmpdir(), 'parallix-task-2367-'));
+const ROOT = registeredMkdtemp('parallix-task-2367-');
 
 test('TASK-2367: a landed approved integration persists done once before statistics', async () => {
   process.env.PARALLIX_TEST_ALLOW_INTEGRATION_GATE_BYPASS = '1';

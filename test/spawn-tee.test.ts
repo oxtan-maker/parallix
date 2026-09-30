@@ -10,6 +10,7 @@ import { EventEmitter } from 'node:events';
 import childProcess from 'node:child_process';
 import { Writable } from 'node:stream';
 import { mockModule, installModuleMocks } from './lib/module-mock.js';
+import { mkdtemp as registeredMkdtemp } from './helpers/temp-dir.js';
 const spawnAndTeeModule = mockModule<typeof import('../src/adapters/process/spawn-tee.js')>('../src/adapters/process/spawn-tee.js', import.meta.url);
 await installModuleMocks();
 test.afterEach(() => mock.restoreAll());
@@ -382,7 +383,7 @@ test('spawnAndTee clears no-output watchdog on signal exit', async () => {
 // ---------- Working-directory propagation ----------
 
 test('spawnAndTee rewrites PWD to the spawned cwd so child CLIs see the mission worktree', async () => {
-  const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'spawn-tee-pwd-'));
+  const tmpRoot = registeredMkdtemp('spawn-tee-pwd-');
   const parentPwd = process.env.PWD;
   try {
     process.env.PWD = '/tmp/not-the-child-worktree';
@@ -427,4 +428,34 @@ test('spawnAndTee leaves no-output watchdog intact when no stall cutoff is confi
   }));
 
   assert.equal(result.status, 0);
+});
+
+test('spawnAndTee marks a real no-output deadline as a bounded timeout', async () => {
+  const signals = [];
+  const kill = mock.method(process, 'kill', (_pid, signal) => { signals.push(signal); return true; });
+  const result = await withMockSpawn({ stdoutChunks: ['Interrupted'], stdoutDelayMs: 10, closeDelayMs: 600, status: 1 }, async () => spawnAndTee('mock-node', [], {
+    stdoutSink: noopSink(), stderrSink: noopSink(), noOutputWatchdog: { maxNoOutputMs: 5 },
+  }));
+  kill.mock.restore();
+  assert.equal((result.error as { code?: string }).code, 'NO_OUTPUT_TIMEOUT');
+  assert.equal(result.status, null);
+  assert.equal(result.signal, null);
+  assert.deepEqual(signals, ['SIGINT', 'SIGTERM', 'SIGKILL']);
+});
+
+test('spawnAndTee cancels the no-output deadline after visible output', async () => {
+  const kill = mock.method(process, 'kill', () => true);
+  const result = await withMockSpawn({ stdoutChunks: ['ready'], stdoutDelayMs: 2, closeDelayMs: 20, status: 0 }, async () => spawnAndTee('mock-node', [], {
+    stdoutSink: noopSink(), stderrSink: noopSink(),
+    noOutputWatchdog: { maxNoOutputMs: 5 },
+  }));
+  kill.mock.restore();
+  assert.equal(result.error, null);
+  assert.equal(result.status, 0);
+});
+
+test('spawnAndTee installs parent signal forwarding only for detached deadline launches', async () => {
+  const before = process.listenerCount('SIGINT');
+  await withMockSpawn({ status: 0, closeDelayMs: 1 }, async () => spawnAndTee('mock-node', [], { stdoutSink: noopSink(), stderrSink: noopSink() }));
+  assert.equal(process.listenerCount('SIGINT'), before);
 });

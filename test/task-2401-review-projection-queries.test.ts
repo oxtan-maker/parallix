@@ -13,6 +13,7 @@ import { repositoryId } from '../src/domain/repository.js';
 import { SqliteDatabaseAdapter } from '../src/adapters/sqlite/database-adapter.js';
 import { SqliteMigrationRunner, loadDefaultMigrations } from '../src/adapters/sqlite/migration-runner.js';
 import { missionId, type MissionId } from '../src/domain/mission.js';
+import { mkdtemp as registeredMkdtemp } from './helpers/temp-dir.js';
 
 function countingDatabase() {
   const calls: string[] = [];
@@ -68,7 +69,7 @@ test('SQLite review projection uses four queries for one or many missions', asyn
 });
 
 test('SQLite review projection SQL executes against the migrated schema', async () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'task-2401-review-projection-'));
+  const dir = registeredMkdtemp('task-2401-review-projection-');
   try {
     const database = new SqliteDatabaseAdapter();
     await database.open({ path: path.join(dir, 'operator.db') });

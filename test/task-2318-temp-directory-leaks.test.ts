@@ -443,6 +443,8 @@ test('test/helpers/temp-dir.ts mkdtemp registers directory with manifest', async
     [
       `const { mkdtemp } = await import('./test/helpers/temp-dir.ts');`,
       `const dir = mkdtemp('task-2318-helper-');`,
+      `const fs = await import('node:fs'); const os = await import('node:os'); const path = await import('node:path');`,
+      `fs.mkdtempSync(path.join(os.tmpdir(), 'task-2318-direct-'));`,
       `process.env._TEST_TEMP_DIR = dir;`,
       `setTimeout(() => {}, 30000);`,
     ].join('\n'),
@@ -452,8 +454,9 @@ test('test/helpers/temp-dir.ts mkdtemp registers directory with manifest', async
   });
 
   await waitFor(
-    () => manifestRoots(manifestDir).some(dir => dir.includes('task-2318-helper-')),
-    'helper temp directory in manifest',
+    () => manifestRoots(manifestDir).some(dir => dir.includes('task-2318-helper-'))
+      && manifestRoots(manifestDir).some(dir => dir.includes('task-2318-direct-')),
+    'helper and direct temp directories in manifest',
   );
 
   // Read manifest
@@ -469,6 +472,8 @@ test('test/helpers/temp-dir.ts mkdtemp registers directory with manifest', async
     hasHelperDir,
     'temp-dir.ts mkdtemp must register directory with manifest',
   );
+  assert.ok(allRoots.some(dir => dir.includes('task-2318-direct-')),
+    'direct fs.mkdtempSync must register directory with manifest');
 
   child.kill('SIGKILL');
   await new Promise(r => child.on('close', r));

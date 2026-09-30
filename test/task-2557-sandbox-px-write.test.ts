@@ -15,11 +15,12 @@ import path from 'node:path';
 import childProcess from 'node:child_process';
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createRequire } from 'node:module';
 import { buildBubblewrapArgs, resolveSandboxProfile } from '../src/adapters/process/bubblewrap.js';
+import { pxNodeArgs, resolvePxEntryLoader } from './lib/px-entry.js';
 
-const CLI_ENTRY = path.resolve(import.meta.dirname, '..', 'src', 'entry', 'px.ts');
-const TSX_LOADER = createRequire(import.meta.url).resolve('tsx');
+// The prebuilt integration lanes run px from the bundle, which the sandbox
+// reaches through the same checkout bind as the source entry.
+const PX = resolvePxEntryLoader();
 
 const SLUG = 'task-2599';
 
@@ -57,8 +58,8 @@ function write(f, c) { fs.mkdirSync(path.dirname(f), { recursive: true }); fs.wr
 function px(args) {
   const entry = process.env.PARALLIX_E2E_PX_ENTRY;
   const loader = process.env.PARALLIX_E2E_PX_LOADER;
-  if (!entry || !loader) { return null; }
-  const run = childProcess.spawnSync(process.execPath, ['--import', loader, entry].concat(args), { cwd: process.cwd(), encoding: 'utf8' });
+  if (!entry) { return null; }
+  const run = childProcess.spawnSync(process.execPath, (loader ? ['--import', loader] : []).concat([entry], args), { cwd: process.cwd(), encoding: 'utf8' });
   return run.status === 0 ? (run.stdout || '') : null;
 }
 function missionVersion(slug) {
@@ -66,36 +67,29 @@ function missionVersion(slug) {
   if (!out) { return null; }
   try { return String(JSON.parse(out).version); } catch (_) { return null; }
 }
-function recordContract(slug) {
+// Each write prints the Mission's new version, so the stub chains writes from
+// that instead of re-reading \`px status\` between them: every \`px\` spawn
+// costs a full CLI start-up.
+function writeChain(slug, writes) {
   let v = missionVersion(slug);
-  if (v === null) { return; }
-  px(['goal', 'set', '--slug', slug,
-    '--goal', 'Exercise the sandbox px-write path with a deterministic stub agent',
-    '--why', 'Protect the sandbox Parallix state-home bind from regression',
-    '--expected-version', v]);
-  v = missionVersion(slug);
-  if (v !== null) {
-    px(['scope', 'set', '--slug', slug,
-      '--scope', 'Run draft through the real CLI inside bubblewrap',
-      '--out-of-scope', 'Real model execution',
-      '--expected-version', v]);
+  for (const args of writes) {
+    if (v === null) { return; }
+    const out = px(args.concat(['--slug', slug, '--expected-version', v]));
+    try { v = out ? String(JSON.parse(out).version) : null; } catch (_) { v = null; }
   }
-  v = missionVersion(slug);
-  if (v !== null) {
-    px(['gate', 'add', '--slug', slug, '--command', 'node -e ""', '--expected-version', v]);
-  }
-  v = missionVersion(slug);
-  if (v !== null) {
-    px(['criterion', 'add', '--slug', slug, '--text', 'Sandboxed px writes Parallix mission state', '--expected-version', v]);
-  }
-  for (const [name, text] of [['CP-1', 'Draft and execute'], ['CP-2', 'Review and integrate']]) {
-    v = missionVersion(slug);
-    if (v !== null) { px(['checkpoint', 'plan', '--slug', slug, '--name', name, '--text', text, '--expected-version', v]); }
-  }
-  v = missionVersion(slug);
-  if (v !== null) {
-    px(['nel', 'set', '--slug', slug, '--predicted', 'Small', '--expected-version', v]);
-  }
+}
+function recordContract(slug) {
+  writeChain(slug, [
+    ['goal', 'set', '--goal', 'Exercise the sandbox px-write path with a deterministic stub agent',
+      '--why', 'Protect the sandbox Parallix state-home bind from regression'],
+    ['scope', 'set', '--scope', 'Run draft through the real CLI inside bubblewrap',
+      '--out-of-scope', 'Real model execution'],
+    ['gate', 'add', '--command', 'node -e ""'],
+    ['criterion', 'add', '--text', 'Sandboxed px writes Parallix mission state'],
+    ['checkpoint', 'plan', '--name', 'CP-1', '--text', 'Draft and execute'],
+    ['checkpoint', 'plan', '--name', 'CP-2', '--text', 'Review and integrate'],
+    ['nel', 'set', '--predicted', 'Small'],
+  ]);
 }
 const prompt = process.argv[process.argv.length - 1] || '';
 const match = (re) => { const m = prompt.match(re); return m && m[1] ? m[1].trim() : null; };
@@ -192,10 +186,11 @@ function pxEnv(cwd: string, stateHome: string, binDir: string): NodeJS.ProcessEn
     FORGEJO_USER: 'custom',
     PRIMARY_WORKTREE: cwd,
     PARALLIX_HOME: stateHome,
-    PARALLIX_E2E_PX_ENTRY: CLI_ENTRY,
-    PARALLIX_E2E_PX_LOADER: TSX_LOADER,
-    // /tmp stays readonly in the outer sandbox. Give tsx a writable cache
-    // inside the repo so each contract command can reuse compiled modules.
+    PARALLIX_E2E_PX_ENTRY: PX.entry,
+    PARALLIX_E2E_PX_LOADER: PX.loader,
+    // /tmp stays readonly in the outer sandbox. Give a source (tsx) run a
+    // writable cache inside the repo so each contract command can reuse
+    // compiled modules.
     TMPDIR: path.join(cwd, '.tmp'),
     // Restricted PATH: only the fixture stubs and symlinks resolve, so the
     // sandboxed px can never reach a real agent or remote.
@@ -224,7 +219,7 @@ test('sandboxed codex profile writes Parallix mission state through px under bwr
     );
     const confined = childProcess.spawnSync(
       bwrapPath,
-      [...buildBubblewrapArgs(profile, fixture.repo), process.execPath, '--import', TSX_LOADER, CLI_ENTRY, 'draft', SLUG, '--agent', 'custom'],
+      [...buildBubblewrapArgs(profile, fixture.repo), process.execPath, ...pxNodeArgs(PX, ['draft', SLUG, '--agent', 'custom'])],
       {
         cwd: fixture.repo,
         encoding: 'utf8',
@@ -239,7 +234,7 @@ test('sandboxed codex profile writes Parallix mission state through px under bwr
     // written from inside the sandbox.
     const status = childProcess.spawnSync(
       process.execPath,
-      ['--import', TSX_LOADER, CLI_ENTRY, 'status', SLUG, '--json'],
+      pxNodeArgs(PX, ['status', SLUG, '--json']),
       {
         cwd: fixture.repo,
         encoding: 'utf8',

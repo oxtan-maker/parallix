@@ -7,12 +7,13 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import { mockModule, installModuleMocks } from './lib/module-mock.js';
+import { mkdtemp as registeredMkdtemp } from './helpers/temp-dir.js';
 const startReviewLoopModule = mockModule<typeof import('../src/adapters/review/review-loop.js')>('../src/adapters/review/review-loop.js', import.meta.url);
 await installModuleMocks();
 const { startReviewLoop } = startReviewLoopModule;
 test.afterEach(() => mock.restoreAll());
 test('startReviewLoop skips reviewer and implementer launches for autonomous fallback in provider=none mode', async () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'task-1209-review-loop-'));
+  const root = registeredMkdtemp('task-1209-review-loop-');
   const logs = [];
   const errors = [];
   const launches = [];

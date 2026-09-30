@@ -34,6 +34,7 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import { mockModule, installModuleMocks } from './lib/module-mock.js';
+import { mkdtemp as registeredMkdtemp } from './helpers/temp-dir.js';
 
 const agentsModule = mockModule<typeof import('../src/adapters/agents/agents.js')>(
   '../src/adapters/agents/agents.js',
@@ -43,7 +44,7 @@ await installModuleMocks();
 const { startAgent } = agentsModule;
 
 test('task-2536: ambiguous launch does not write a global block and leaves the family selectable', async () => {
-  const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'task-2536-ambiguous-'));
+  const tmpRoot = registeredMkdtemp('task-2536-ambiguous-');
   try {
     const blockCalls: string[] = [];
     let attempt = 0;

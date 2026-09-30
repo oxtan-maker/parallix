@@ -2,6 +2,8 @@ import * as fmt from '../../application/presentation/cli-format.js';
 import type { StatusResult } from '../../application/status-command-use-case.js';
 import type { StatusMissionData, StatusPrInfo } from '../../application/ports/cli-workflows.js';
 import { describeCoordinatorEvidence, describeMissionWork } from '../../application/projections/mission-activity.js';
+import { staleApprovalSentence } from '../../domain/approval-coverage.js';
+import { integrationRepairSummary } from '../../application/integration-repair-review.js';
 
 /** Parse public CLI flags for the status command. */
 export interface StatusCliRequest {
@@ -65,6 +67,8 @@ export function statusJson(result: StatusResult): string {
         phase: md.reviewPhase,
         disposition: md.reviewDisposition ?? null,
         approvalOwed: md.approvalOwed ?? false,
+        approvalCoverage: md.approvalCoverage ?? null,
+        integrationRepair: md.integrationRepair ?? null,
         history: md.reviewHistory,
       }
       : null,
@@ -82,15 +86,27 @@ function logRebaseFiles(heading: string, rebaseInfo: { detached: boolean; unmerg
 
 /** Every settled round, so a verdict survives a reviewer reroute. */
 function logReviewRounds(missionData: StatusMissionData, log: (_msg: string) => void): void {
-  if (!missionData.reviewPhase) { log('Review: not started'); return; }
+  // What failed at integration last time, read from the Mission record rather
+  // than the board card, so it shows whenever the repair is recorded.
+  const repair = missionData.integrationRepair ? integrationRepairSummary(missionData.integrationRepair) : null;
+  if (!missionData.reviewPhase) { log('Review: not started'); if (repair) { log(repair); } return; }
   log(`Review: round ${missionData.reviewRound ?? 1}, phase ${missionData.reviewPhase}, disposition ${missionData.reviewDisposition ?? 'none'}`);
   if (missionData.approvalOwed) {
     log('Formal approval owed: external provider approval is still required after the local self-review.');
+  }
+  if (repair) { log(repair); }
+  const coverage = missionData.approvalCoverage;
+  if (coverage?.kind === 'stale') {
+    log(`Approval no longer covers the branch: ${staleApprovalSentence(coverage)}`);
+    log(`  A human operator, never an agent, stands it down for re-review: px revoke-review --decision ${coverage.round} --reason <text> --operator <name> --expected-version ${missionData.version ?? '<n>'}`);
+  } else if (coverage?.kind === 'unverifiable') {
+    log(`Approval coverage unknown: ${coverage.reason}.`);
   }
   for (const round of missionData.reviewHistory) {
     log(`  Round ${round.number} [${round.reviewer} -> ${round.implementer}]: ${round.disposition ?? 'pending'}`);
     if (round.comment) { log(`    comment: ${round.comment}`); }
     if (round.revocation) { log(`    revoked by ${round.revocation.by}: ${round.revocation.reason} (${round.revocation.at})`); }
+    if (round.supersession) { log(`    superseded by revision ${round.supersession.revision} (${round.supersession.by}, ${round.supersession.at})`); }
     for (const summary of round.findingSummaries) { log(`    finding: ${summary}`); }
     for (const fix of round.fixes) { log(`    fixed: ${fix}`); }
     for (const pushback of round.pushbacks) { log(`    pushback: ${pushback}`); }

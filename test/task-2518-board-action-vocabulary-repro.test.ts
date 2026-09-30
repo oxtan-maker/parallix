@@ -19,6 +19,7 @@ import {
 import { agentFamily } from '../src/domain/agents.js';
 import { BoardCommandController } from '../src/application/controller/board-controller.js';
 import { makeExecutePorts } from './fixtures/execute-mission-ports.js';
+import { mkdtemp as registeredMkdtemp } from './helpers/temp-dir.js';
 
 /**
  * TASK-2518: the board producer emitted `recover:mission` for a stranded
@@ -63,7 +64,7 @@ async function strandedProjection(root: string) {
 }
 
 test('stranded active mission snapshot validates and advertises active:execute', async () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'task-2518-'));
+  const root = registeredMkdtemp('task-2518-');
   try {
     const projection = await strandedProjection(root);
     const wire: unknown = JSON.parse(JSON.stringify(toWebBoardSnapshot(projection)));

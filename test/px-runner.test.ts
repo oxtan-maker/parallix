@@ -1,8 +1,9 @@
 
 
-// This source-checkout runner launches the source entrypoint from a separate caller CWD.
-// Use the project's tsx loader so module classification stays tied to the
-// source entrypoint rather than the caller's temporary CommonJS package.
+// Runs px from a separate caller CWD. Spawns resolve through the shared helper
+// (the prebuilt bundle in prebuilt lanes); the runtime-path assertion pins the
+// tsx-loaded source entry so module classification stays tied to the source
+// rather than the caller's temporary CommonJS package.
 // Skip the entire file on older runtimes.
 
 import assert from 'node:assert/strict';
@@ -12,8 +13,8 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { mkdtemp } from './helpers/temp-dir.js';
 import test from 'node:test';
-import { fileURLToPath } from 'node:url';
 import { seedMissionDatabase } from './fixtures/review-state-db.js';
+import { SOURCE_PX, pxNodeArgs, resolvePxEntryLoader, type PxEntryLoader } from './lib/px-entry.js';
 const major = Number(process.versions.node.split('.')[0]);
 if (major < 24) {
   console.warn(`px-runner tests require Node >= 24 (got ${process.version}); skipping all tests.`);
@@ -21,9 +22,8 @@ if (major < 24) {
 }
 
 const repoRoot = path.resolve(import.meta.dirname, '..');
-const pxPath = path.join(repoRoot, 'src', 'entry', 'px.ts');
 const runtimePxPath = path.join(repoRoot, 'src', 'composition', 'create-cli.ts');
-const tsxLoaderPath = fileURLToPath(import.meta.resolve('tsx'));
+const PX = resolvePxEntryLoader();
 // Read the version from the manifest so version bumps do not break these tests.
 const pkgVersion = JSON.parse(fs.readFileSync(path.join(repoRoot, 'package.json'), 'utf8')).version;
 const versionRe = new RegExp(`parallix ${pkgVersion.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`);
@@ -80,12 +80,10 @@ function makeTargetRepo({ slug = 'task-px-001' } = {}) {
   return { root, slug, year, missionDir };
 }
 
-function runPx(args, options = {}) {
-  return spawnSync(process.execPath, ['--import', tsxLoaderPath, pxPath, ...args], {
-// @ts-expect-error -- Legacy fixture intentionally accesses runtime-only `cwd` absent from its inferred mock shape.
+function runPx(args: string[], options: { cwd?: string; env?: NodeJS.ProcessEnv; px?: PxEntryLoader } = {}) {
+  return spawnSync(process.execPath, pxNodeArgs(options.px || PX, args), {
     cwd: options.cwd || repoRoot,
     encoding: 'utf8',
-// @ts-expect-error -- Legacy fixture intentionally accesses runtime-only `env` absent from its inferred mock shape.
     env: { ...process.env, ...(options.env || {}) },
   });
 }
@@ -135,7 +133,8 @@ test('px verify-env reads repo state from the caller cwd', () => {
 test('px --version reports package version and executing runtime path', () => {
   const caller = fs.mkdtempSync(path.join(os.tmpdir(), 'px-version-cwd-'));
   try {
-    const result = runPx(['--version'], { cwd: caller });
+    // Stays on source: the assertion is the source runtime path it reports.
+    const result = runPx(['--version'], { cwd: caller, px: SOURCE_PX });
     if (skipIfSandboxBlocked(result)) return;
     const output = `${result.stdout}${result.stderr}`;
 

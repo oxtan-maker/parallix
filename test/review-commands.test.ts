@@ -9,6 +9,7 @@ import { mockModule, installModuleMocks } from './lib/module-mock.js';
 import { createRequire } from 'node:module';
 import { ReviewCommandUseCase } from '../src/application/review-command-use-case.js';
 import { createReviewCommand } from '../src/interfaces/cli/review.js';
+import { mkdtemp as registeredMkdtemp } from './helpers/temp-dir.js';
 const _require = createRequire(import.meta.url);
 const missionUtils = mockModule<typeof import('../src/adapters/filesystem/mission-utils.js')>('../src/adapters/filesystem/mission-utils.js', import.meta.url);
 const reviewModule = mockModule<typeof import('../src/adapters/review/review-commands.js')>('../src/adapters/review/review-commands.js', import.meta.url);
@@ -64,7 +65,7 @@ test('flagValue finds flag in middle of array', () => {
 // ============================================================================
 
 test('readTextFlag reads from file when fileFlag is provided', () => {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'test-readTextFlag-'));
+  const tmpDir = registeredMkdtemp('test-readTextFlag-');
   const filePath = path.join(tmpDir, 'test-file.txt');
   fs.writeFileSync(filePath, 'file content\n', 'utf8');
 
@@ -161,7 +162,7 @@ test('formatStaticReviewSuccess formats success message', () => {
 
 test('performStaticReview rejects placeholder-only Goal Check evidence rows', (t) => {
   const { mock } = t;
-  const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), 'static-review-placeholder-'));
+  const rootDir = registeredMkdtemp('static-review-placeholder-');
   const missionDir = path.join(rootDir, 'missions', 'task-placeholder');
   const checkpointPath = path.join(missionDir, 'CP-1.md');
 
@@ -187,7 +188,7 @@ test('performStaticReview rejects placeholder-only Goal Check evidence rows', (t
 
 test('performStaticReview accepts a shell command that references an existing repository file', (t) => {
   const { mock } = t;
-  const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), 'static-review-shell-command-'));
+  const rootDir = registeredMkdtemp('static-review-shell-command-');
   const missionDir = path.join(rootDir, 'missions', 'task-shell-command');
   const checkpointPath = path.join(missionDir, 'CP-1.md');
   fs.mkdirSync(missionDir, { recursive: true });
@@ -212,7 +213,7 @@ test('performStaticReview accepts a shell command that references an existing re
 
 test('performStaticReview rejects separator-only Goal Check tables', (t) => {
   const { mock } = t;
-  const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), 'static-review-separator-'));
+  const rootDir = registeredMkdtemp('static-review-separator-');
   const missionDir = path.join(rootDir, 'missions', 'task-separator');
   const checkpointPath = path.join(missionDir, 'CP-1.md');
 
@@ -238,7 +239,7 @@ test('performStaticReview rejects separator-only Goal Check tables', (t) => {
 
 test('performStaticReview accepts Goal Check evidence that cites a real test name', (t) => {
   const { mock } = t;
-  const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), 'static-review-test-name-'));
+  const rootDir = registeredMkdtemp('static-review-test-name-');
   const missionDir = path.join(rootDir, 'missions', 'task-test-name');
   const checkpointPath = path.join(missionDir, 'CP-1.md');
   const testFilePath = path.join(rootDir, 'test', 'sample.test.js');
@@ -451,7 +452,8 @@ test('review rejects an unknown flag with a suggestion instead of ignoring it', 
 
 test('review passes an explicit --max-attempts through to the review loop', async () => {
   let received = null;
-  const exit = () => {};
+  const exits = [];
+  const exit = (code) => { exits.push(code); };
 
   await review(['task-2322', '--continue', '--max-attempts', '7'], {
     inferSlugFn: (s) => s || 'task-2322',
@@ -462,7 +464,10 @@ test('review passes an explicit --max-attempts through to the review loop', asyn
   });
 
   assert.equal(received && received.maxAttempts, 7);
-  assert.equal(received && received.exit, exit, 'nested review loops must not retain process.exit from the parent command');
+  assert.notEqual(received && received.exit, process.exit, 'nested review loops must not retain process.exit from the parent command');
+  // The use case observes the injected exit (TASK-2620) and still forwards to it.
+  received.exit(3);
+  assert.equal(exits.at(-1), 3);
 });
 
 test('a manual review continuation renews the five-round budget at the current round', async () => {

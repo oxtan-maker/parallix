@@ -5,10 +5,11 @@ import os from 'node:os';
 import path from 'node:path';
 
 import { MAX_RETAINED_BACKUPS, SqliteDatabaseAdapter } from '../src/adapters/sqlite/database-adapter.js';
+import { mkdtemp as registeredMkdtemp } from './helpers/temp-dir.js';
 
 describe('task-2569 — backup retention ignores legacy sidecars', () => {
   it('keeps and restores the returned snapshot when legacy sidecars sort later', async () => {
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'parallix-task-2569-'));
+    const dir = registeredMkdtemp('parallix-task-2569-');
     const dbPath = path.join(dir, 'parallix.db');
     const db = new SqliteDatabaseAdapter();
     await db.open({ path: dbPath, enableWal: false });

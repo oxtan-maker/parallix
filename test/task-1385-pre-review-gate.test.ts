@@ -8,6 +8,7 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import { runPreReviewGate, reboundPreReviewFailure, gateFailureReason } from '../src/adapters/review/review-loop.js';
+import { mkdtemp as registeredMkdtemp } from './helpers/temp-dir.js';
 
 /**
  * TASK-2377.03: the pre-review bounce path is the rebound kernel
@@ -18,7 +19,7 @@ import { runPreReviewGate, reboundPreReviewFailure, gateFailureReason } from '..
  */
 const passingVerify = () => ({ ok: true });
 async function withTempDir(fn) {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'task-1385-'));
+  const dir = registeredMkdtemp('task-1385-');
   try {
     return await fn(dir);
   } finally {

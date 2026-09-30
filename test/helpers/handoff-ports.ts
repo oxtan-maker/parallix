@@ -84,7 +84,7 @@ export function makePorts(recorder: Recorder, overrides: Record<string, unknown>
       listEntries: () => [],
     },
     git: {
-      git: () => ({ status: 0, stdout: '', stderr: '' }),
+      git: args => ({ status: 0, stdout: args.includes('rev-parse') ? 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' : '', stderr: '' }),
       run: () => ({ status: 0 }),
       getCurrentBranch: () => BRANCH,
       getWorktreeStatus: () => [] as string[],

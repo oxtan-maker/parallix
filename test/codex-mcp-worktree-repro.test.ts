@@ -11,6 +11,7 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import { mockModule, installModuleMocks } from './lib/module-mock.js';
+import { mkdtemp as registeredMkdtemp } from './helpers/temp-dir.js';
 const ensureCodexHomeModule = mockModule<typeof import('../src/adapters/agents/codex.js')>('../src/adapters/agents/codex.js', import.meta.url);
 await installModuleMocks();
 test.afterEach(() => mock.restoreAll());
@@ -18,8 +19,8 @@ const { ensureCodexHome, codexConfigPath } = ensureCodexHomeModule;
 
 test('MCP config is linked, not copied, into worktree codex-home (reproduction)', () => {
 
-  const fakeHome = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-mcp-repro-'));
-  const worktree = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-mcp-wt-'));
+  const fakeHome = registeredMkdtemp('codex-mcp-repro-');
+  const worktree = registeredMkdtemp('codex-mcp-wt-');
   const origHome = process.env.HOME;
 
   try {

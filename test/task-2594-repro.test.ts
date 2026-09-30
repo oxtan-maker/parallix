@@ -12,6 +12,7 @@ import { missionId, missionLabels, type Mission } from '../src/domain/mission.js
 import { repositoryId } from '../src/domain/repository.js';
 import { recordIntegrationStats } from '../src/adapters/cli/commands/stats.js';
 import { MissionBriefService } from '../src/application/mission-brief-service.js';
+import { mkdtemp as registeredMkdtemp } from './helpers/temp-dir.js';
 
 const slug = 'task-2521.07';
 
@@ -64,7 +65,7 @@ test('TASK-2594: classification writes preserve labels for native and imported M
 });
 
 test('TASK-2594: TASK-2521.07 requires stored classification before draft completion and after provider-file closeout', async () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'task-2594-'));
+  const root = registeredMkdtemp('task-2594-');
   const taskFile = path.join(root, 'backlog', 'tasks', `${slug} - provider.md`);
   try {
     fs.mkdirSync(path.dirname(taskFile), { recursive: true });

@@ -12,6 +12,7 @@ import {
   COMPLETED_CONTROLS_MAX_CHARS,
   COMPLETED_CONTROLS_MAX_LINES,
 } from '../src/adapters/review/review-prompts.js';
+import { mkdtemp as registeredMkdtemp } from './helpers/temp-dir.js';
 
 type Fixture = { repoRoot: string; missionPath: string };
 
@@ -20,7 +21,7 @@ function makeFixture(options: {
   gates?: unknown;
   missionBody?: string;
 } = {}): Fixture {
-  const repoRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'task-2483-'));
+  const repoRoot = registeredMkdtemp('task-2483-');
   const missionDir = path.join(repoRoot, 'missions', 'task-2483');
   fs.mkdirSync(missionDir, { recursive: true });
   const missionPath = path.join(missionDir, 'MISSION.md');

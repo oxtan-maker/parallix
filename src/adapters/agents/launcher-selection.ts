@@ -273,11 +273,11 @@ function readPositiveMsEnv(name: string) {
   return Number.isFinite(value) && value >= 0 ? value : null;
 }
 
-function resolveNoOutputWatchdogConfig(config: {initialDelayMs?: number, intervalMs?: number} | boolean, step: string | null = null) {
+function resolveNoOutputWatchdogConfig(config: {initialDelayMs?: number, intervalMs?: number, maxNoOutputMs?: number} | boolean, step: string | null = null) {
   if (config === false || process.env.WORKFLOW_AGENT_NO_OUTPUT_WATCHDOG === '0') {
     return null;
   }
-  const explicit: {initialDelayMs?: number, intervalMs?: number} = config && typeof config === 'object' ? config : {};
+  const explicit: {initialDelayMs?: number, intervalMs?: number, maxNoOutputMs?: number} = config && typeof config === 'object' ? config : {};
   let initialDelayMs;
   let intervalMs;
   if (step === 'draft') {
@@ -295,7 +295,10 @@ function resolveNoOutputWatchdogConfig(config: {initialDelayMs?: number, interva
       readPositiveMsEnv('WORKFLOW_AGENT_NO_OUTPUT_INTERVAL_MS') ??
       DEFAULT_NO_OUTPUT_INTERVAL_MS;
   }
-  return { initialDelayMs, intervalMs };
+  const maxNoOutputMs = step === 'review'
+    ? explicit.maxNoOutputMs ?? readPositiveMsEnv('WORKFLOW_REVIEW_AGENT_NO_OUTPUT_MAX_MS')
+    : explicit.maxNoOutputMs;
+  return { initialDelayMs, intervalMs, maxNoOutputMs };
 }
 
 const setCommandPathProbe = (fn: ((name: string) => string | null) | null) => {

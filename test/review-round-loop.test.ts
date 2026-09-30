@@ -38,6 +38,7 @@ import {
   reviewStatus,
   startReview,
 } from '../src/domain/review.js';
+import { mkdtemp as registeredMkdtemp } from './helpers/temp-dir.js';
 
 const MISSION = missionId('task-round-loop');
 const REPOSITORY = repositoryId('parallix');
@@ -58,7 +59,7 @@ const change = {
 const temporaryDirectories: string[] = [];
 
 async function reviewInProgress() {
-  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'parallix-round-loop-'));
+  const directory = registeredMkdtemp('parallix-round-loop-');
   temporaryDirectories.push(directory);
   const db = new SqliteDatabaseAdapter();
   await db.open({ path: path.join(directory, 'fixture.db') });

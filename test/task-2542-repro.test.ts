@@ -25,17 +25,23 @@ const TIMEOUT_GUARD = 'unit-test-timeout-guard';
  * headroom` is the local authoring path and never carries the GitHub flag.
  */
 function planFor(args: string[], github: boolean) {
-  if (github) {
-    process.env.GITHUB_ACTIONS = 'true';
-  } else {
-    delete process.env.GITHUB_ACTIONS;
+  const previous = process.env.GITHUB_ACTIONS;
+  try {
+    if (github) {
+      process.env.GITHUB_ACTIONS = 'true';
+    } else {
+      delete process.env.GITHUB_ACTIONS;
+    }
+    return buildTestRunPlan({
+      executionRoot: ROOT,
+      requestedArgs: args,
+      probeNodeVersion: () => 'v24.15.0',
+      probeTestConcurrency: () => true,
+    });
+  } finally {
+    if (previous === undefined) delete process.env.GITHUB_ACTIONS;
+    else process.env.GITHUB_ACTIONS = previous;
   }
-  return buildTestRunPlan({
-    executionRoot: ROOT,
-    requestedArgs: args,
-    probeNodeVersion: () => 'v24.15.0',
-    probeTestConcurrency: () => true,
-  });
 }
 
 test('task-2542: GitHub default plan must not select the timing reporter', () => {

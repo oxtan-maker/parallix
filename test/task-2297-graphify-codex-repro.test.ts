@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { mkdtemp as registeredMkdtemp } from './helpers/temp-dir.js';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 // Reproduction test for task-2297: graphify does not work for codex
@@ -70,7 +71,7 @@ test('queryGraph from worktree without graph returns actionable missing-graph re
   // Exercise the programmatic queryGraph helper with mocked dependencies.
   // This verifies the active-worktree resolution path that the Codex-facing
   // query uses via the AGENTS.md instruction mechanism.
-  const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'graphify-codex-repro-'));
+  const tmpRoot = registeredMkdtemp('graphify-codex-repro-');
 
   try {
     // Active worktree: has graphify-out/ but no graph.json
@@ -172,7 +173,7 @@ test('Codex launcher sets cwd to active worktree so $(pwd)/graphify-out resolves
   // shell resolve to the active worktree. Combined with AGENTS.md instructions
   // to use $(pwd)/graphify-out/graph.json, this ensures the graph path never
   // resolves to a sibling worktree.
-  const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'graphify-codex-launcher-'));
+  const tmpRoot = registeredMkdtemp('graphify-codex-launcher-');
 
   try {
     // Active worktree: has graphify-out/graph.json

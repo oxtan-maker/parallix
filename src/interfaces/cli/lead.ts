@@ -10,6 +10,8 @@ import {
   type SupervisionOutcome,
 } from '../../application/recovery-supervisor.js';
 import type { AttentionAction } from '../../application/projections/board.js';
+import type { MissionLoadResult } from '../../application/domain-ports.js';
+import { reviewStatus } from '../../domain/review.js';
 
 /** The verdict tag shown beside each supervision result, keyed by outcome. */
 const SUPERVISION_LABELS: Record<SupervisionOutcome, string> = {
@@ -38,6 +40,18 @@ export function leadInvocation(kind: AttentionAction['kind'], mission: string): 
     case 'review:submit': return { command: 'review', args: [mission, '--continue'] };
     default: return null;
   }
+}
+
+/**
+ * Whether `px lead` may finish a review-lane mission's lost review →
+ * integration move itself. Only a round a reviewer already approved qualifies;
+ * lead never records a reviewer decision, so an undecided round is forwarded
+ * to `px review --continue` instead (TASK-2620).
+ */
+export function leadFinishesParkedApproval(loaded: MissionLoadResult): boolean {
+  if (loaded.kind !== 'found') { return false; }
+  const { mission } = loaded;
+  return mission.status === 'review' && Boolean(mission.review) && reviewStatus(mission.review!) === 'approved';
 }
 
 /** The evidence behind an escalation, indented under its mission. */

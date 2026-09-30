@@ -86,7 +86,11 @@ gate_all() {
   # SQLite migration. Build it here so this declared gate never validates a
   # stale ignored build/ tree after a rebase or fresh checkout.
   npm run build
-  npm test
+  # The complete unit population has a reviewed fast partition: stateless
+  # allowlisted files share one worker and every other unit file remains
+  # process-isolated. Keep the per-test headroom guard enabled while avoiding
+  # redundant Node worker startup that otherwise exhausts the suite CPU cap.
+  PARALLIX_FAST_UNIT=1 npm test -- --unit-test-headroom
 }
 
 # Static-analysis gate: runs ESLint, tsc --checkJs, and test-hygiene sequentially

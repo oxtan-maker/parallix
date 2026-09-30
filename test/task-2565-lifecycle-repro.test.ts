@@ -21,8 +21,6 @@ test('TASK-2565: integration-gate rebound reactivates through the lifecycle path
     startAgentFn: async () => ({ result: { status: 0 } }),
     transitionTaskFn: async () => { backlogTransitions += 1; },
     reactivateMissionFn: async () => { lifecycleTransitions += 1; },
-    readReboundsFn: async () => 0,
-    recordReboundFn: async () => true,
     captureFinalTreeFn: () => ({ ok: true, rootDir: '/tmp/mission', tree: 'tree' }),
     runPhaseGatesFn: async () => ({ ok: true, phase: 'integration', gates: [], executed: 0, skipped: false, dryRun: false, failedGate: null, error: null }),
     reboundFn: async (_reason, context) => {

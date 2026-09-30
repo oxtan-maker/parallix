@@ -9,11 +9,12 @@ import os from 'os';
 import path from 'path';
 import { findIgnoredSourceFiles } from '../src/adapters/git/git.js';
 import { mockModule, installModuleMocks } from './lib/module-mock.js';
+import { mkdtemp as registeredMkdtemp } from './helpers/temp-dir.js';
 const ensureWorkflowGitignore = mockModule<typeof import('../src/adapters/filesystem/gitignore.js')>('../src/adapters/filesystem/gitignore.js', import.meta.url);
 await installModuleMocks();
 test.afterEach(() => mock.restoreAll());
 function mktempDir(prefix = 'gitignore-test-') {
-  return fs.mkdtempSync(path.join(os.tmpdir(), prefix));
+  return registeredMkdtemp(prefix);
 }
 
 function cleanupDir(dir) {

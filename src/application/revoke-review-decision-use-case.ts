@@ -2,7 +2,9 @@ import { completed, failure, type ApplicationOutcome } from './contracts.js';
 import type { MissionStore } from './domain-ports.js';
 import type { MissionLifecycleService } from './mission-lifecycle-service.js';
 import { missionId } from '../domain/mission.js';
-import { revokeApprovedDecision, reviewStatus } from '../domain/review.js';
+import { revokeApprovedDecision, reviewStatus, type Review } from '../domain/review.js';
+import { recordApprovalSuperseded } from '../domain/approval-coverage.js';
+import { missionApprovalCoverage, type ChangeIdentityPort } from './approval-coverage.js';
 
 export interface RevokeReviewDecisionRequest {
   readonly slug: string;
@@ -22,13 +24,28 @@ export interface RevokeReviewDecisionResult {
   readonly providerDiagnostic: string | null;
 }
 
-/** Human-only corrective path for an unfounded effective approval. */
+/**
+ * Human-only corrective path for an effective approval: one an operator judges
+ * unfounded, and one that no longer covers the branch (TASK-2555).  The second
+ * opens its new round on the revision that superseded the approval.
+ */
 export class RevokeReviewDecisionUseCase {
   constructor(
     private readonly _store: MissionStore,
     private readonly _lifecycle: MissionLifecycleService,
     private readonly _provider: ReviewProviderRevocationPort | null = null,
+    private readonly _changeIdentity: ChangeIdentityPort | null = null,
   ) {}
+
+  /** A staleness observed but never recorded (the branch moved outside px rebase) is recorded now. */
+  private withObservedSupersession(review: Review, occurredAt: string): Review {
+    if (!this._changeIdentity) { return review; }
+    const coverage = missionApprovalCoverage(review, this._changeIdentity);
+    if (coverage?.kind !== 'stale' || coverage.recorded) { return review; }
+    return recordApprovalSuperseded(review, {
+      supersededAt: occurredAt, supersedingRevision: coverage.landedRevision, recordedBy: 'px revoke-review',
+    });
+  }
 
   async execute(request: RevokeReviewDecisionRequest): Promise<ApplicationOutcome<RevokeReviewDecisionResult>> {
     if (!request.reason.trim()) { return failure('validation', 'Revocation requires --reason <text> from the operator'); }
@@ -46,10 +63,11 @@ export class RevokeReviewDecisionUseCase {
 
     let review;
     try {
-      review = revokeApprovedDecision(loaded.mission.review, request.round, {
+      review = revokeApprovedDecision(this.withObservedSupersession(loaded.mission.review, request.occurredAt), request.round, {
         revokedAt: request.occurredAt,
         revokedBy: request.operator,
         reason: request.reason,
+        cause: { kind: 'operator' },
       });
     } catch (error) {
       return failure('validation', error instanceof Error ? error.message : 'Review decision cannot be revoked');

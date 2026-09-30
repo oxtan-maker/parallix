@@ -8,6 +8,7 @@ import path from 'path';
 'use strict';
 
 import { parseCodexRollout, collectRolloutFiles, extractCodexTelemetry, codexSessionsDir, } from '../src/adapters/agents/codex-telemetry.js';
+import { mkdtemp as registeredMkdtemp } from './helpers/temp-dir.js';
 // Minimal but schema-faithful rollout JSONL, modelled on the real Codex
 // `~/.codex/sessions/.../rollout-*.jsonl` format (task-1251). Tests are fully
 // offline — no agent is launched, so no tokens are consumed.
@@ -93,7 +94,7 @@ test('parseCodexRollout returns null for empty/garbage content', () => {
 });
 
 test('extractCodexTelemetry SUMS total_token_usage across multiple rollouts (resumed rounds)', () => {
-  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-home-'));
+  const home = registeredMkdtemp('codex-home-');
   const sdir = path.join(codexSessionsDir(home), '2026', '06', '07');
   fs.mkdirSync(sdir, { recursive: true });
 
@@ -121,7 +122,7 @@ test('extractCodexTelemetry SUMS total_token_usage across multiple rollouts (res
 });
 
 test('extractCodexTelemetry sinceMs window excludes older rollouts (stage attribution)', () => {
-  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-home-'));
+  const home = registeredMkdtemp('codex-home-');
   const sdir = path.join(codexSessionsDir(home), '2026', '06', '07');
   fs.mkdirSync(sdir, { recursive: true });
 
@@ -141,7 +142,7 @@ test('extractCodexTelemetry sinceMs window excludes older rollouts (stage attrib
 });
 
 test('extractCodexTelemetry returns null when no rollouts exist', () => {
-  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-home-empty-'));
+  const home = registeredMkdtemp('codex-home-empty-');
   assert.equal(extractCodexTelemetry(home, { sinceMs: 0 }), null);
   assert.deepEqual(collectRolloutFiles(codexSessionsDir(home), { sinceMs: 0 }), []);
 });

@@ -35,7 +35,7 @@ test('TASK-2604: failed closeout stays open and resumes without another landing 
   failStats = false;
   await recoverLandedIntegration('task-2604', missionServices, '/tmp/base', options);
 
-  assert.deepEqual(steps, ['delivered', 'stats', 'stats', 'cleanup', 'hook', 'closed']);
+  assert.deepEqual(steps, ['delivered', 'stats', 'stats', 'hook', 'cleanup', 'closed']);
   assert.equal(closedAt, '2026-09-28T12:00:00Z');
   assert.equal(mergeCalls, 0, 'a landed retry must never merge again');
   assert.equal(gateCalls, 0, 'a landed retry must never rerun integration gates');
@@ -66,12 +66,12 @@ test('TASK-2604: recovered closeout succeeds after its worktree was already clea
   };
 
   await assert.rejects(recoverLandedIntegration('task-2604', missionServices, '/tmp/base', options), /hook unavailable/);
-  assert.equal(worktreePresent, false, 'the first closeout cleaned the worktree before its hook failed');
+  assert.equal(worktreePresent, true, 'a failed refresh leaves cleanup artifacts as the retry marker');
   assert.equal(closedAt, null);
 
   failHook = false;
   await recoverLandedIntegration('task-2604', missionServices, '/tmp/base', options);
 
-  assert.deepEqual(steps, ['delivered', 'stats', 'cleanup', 'hook', 'stats', 'cleanup-idempotent', 'hook', 'closed']);
+  assert.deepEqual(steps, ['delivered', 'stats', 'hook', 'stats', 'hook', 'cleanup', 'closed']);
   assert.equal(closedAt, '2026-09-28T12:00:00Z');
 });

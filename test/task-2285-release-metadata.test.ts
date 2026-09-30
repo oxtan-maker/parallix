@@ -21,6 +21,7 @@ import {
   renderNotices,
   renderSbom,
 } from '../scripts/release-metadata.js';
+import { mkdtemp as registeredMkdtemp } from './helpers/temp-dir.js';
 
 const ROOT = path.resolve(import.meta.dirname, '..');
 const packageJson = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8'));
@@ -173,7 +174,7 @@ test('task-2285 release metadata requires the bundle metafile', () => {
 });
 
 test('task-2285 notices deduplicate a shared license text across packages', () => {
-  const fixture = fs.mkdtempSync(path.join(os.tmpdir(), 'px-notices-'));
+  const fixture = registeredMkdtemp('px-notices-');
   const packages = ['alpha', 'beta'].map(name => {
     const packageDir = path.join(fixture, 'node_modules', name);
     fs.mkdirSync(packageDir, { recursive: true });

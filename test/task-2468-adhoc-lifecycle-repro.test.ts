@@ -13,16 +13,11 @@ import path from 'node:path';
 import childProcess from 'node:child_process';
 import test, { after } from 'node:test';
 import assert from 'node:assert/strict';
-import { createRequire } from 'node:module';
-const CLI_ENTRY = path.resolve(import.meta.dirname, '..', 'src', 'entry', 'px.ts');
-const TSX_LOADER = createRequire(import.meta.url).resolve('tsx');
-// The prebuilt integration lanes build the canonical bundle first. The stub
-// agent's own `px` writes are harness, not the code under test, so there they
-// run from the bundle and skip tsx's multi-second start-up on each spawn.
-const PREBUILT_ENTRY = path.resolve(import.meta.dirname, '..', 'build', 'px.mjs');
-const STUB_PX = process.env.PARALLIX_PREBUILT_PACK === '1' && fs.existsSync(PREBUILT_ENTRY)
-  ? { entry: PREBUILT_ENTRY, loader: '' }
-  : { entry: CLI_ENTRY, loader: TSX_LOADER };
+import { pxNodeArgs, resolvePxEntryLoader } from './lib/px-entry.js';
+// Both the CLI under test and the stub agent's own `px` writes run from the
+// prebuilt bundle in the prebuilt integration lanes, skipping tsx's
+// multi-second start-up on each spawn.
+const PX = resolvePxEntryLoader();
 function runCommand(command, args, options = {}) {
   const result = childProcess.spawnSync(command, args, {
     encoding: 'utf8',
@@ -298,8 +293,8 @@ function workflowEnv(binDir, stateHome, repoRoot) {
     // the draft prompt names, because activation now refuses an incomplete one.
     // It runs as a bare executable on the fixture PATH, so it cannot resolve
     // the CLI entry itself.
-    PARALLIX_E2E_PX_ENTRY: STUB_PX.entry,
-    PARALLIX_E2E_PX_LOADER: STUB_PX.loader,
+    PARALLIX_E2E_PX_ENTRY: PX.entry,
+    PARALLIX_E2E_PX_LOADER: PX.loader,
     PATH: binDir
   };
 }
@@ -315,7 +310,7 @@ function runWorkflow(repoRoot, env, args, timeout = 120000, { allowFailure = fal
   const stderrFd = fs.openSync(stderrPath, 'w');
   let result;
   try {
-    result = childProcess.spawnSync(process.execPath, ['--import', TSX_LOADER, CLI_ENTRY, ...args], {
+    result = childProcess.spawnSync(process.execPath, pxNodeArgs(PX, args), {
       cwd: repoRoot,
       env,
       timeout,

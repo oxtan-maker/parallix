@@ -4,7 +4,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { assembleStagePrompt } from '../src/adapters/assets/runtime-assets.js';
@@ -12,6 +11,7 @@ import { resolvePromptOverride, validateWorkflowConfig } from '../src/adapters/c
 import { buildDraftPrompt } from '../src/adapters/cli/commands/draft-prompts.js';
 import { buildExecutePrompt } from '../src/adapters/cli/commands/active.js';
 import { buildCompactReviewPrompt, buildCompactActOnReviewPrompt } from '../src/adapters/review/review-prompts.js';
+import { mkdtemp as registeredMkdtemp } from './helpers/temp-dir.js';
 
 const STAGES = ['draft', 'execute', 'review', 'act-on-review', 'portfolio'] as const;
 const REVIEW_COVERAGE_GUIDANCE =
@@ -148,7 +148,7 @@ for (const [i, stage] of STAGES.entries()) {
 // missing file is a configuration error, not a silently-ignored no-op. ---
 
 test('task-2465: a configured override whose file is missing surfaces a config error', () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'task-2465-missing-override-'));
+  const root = registeredMkdtemp('task-2465-missing-override-');
   try {
     fs.writeFileSync(path.join(root, 'workflow.config.json'), JSON.stringify({
       adapters: { prompts: { override: 'does-not-exist.md' } },
@@ -170,7 +170,7 @@ test('task-2465: a configured override whose file is missing surfaces a config e
 // additionally retains its shipped verification guidance before the override.
 
 test('task-2465: configured override supplies opinion content and retains a named core instruction', () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'task-2465-override-'));
+  const root = registeredMkdtemp('task-2465-override-');
   try {
     fs.writeFileSync(path.join(root, 'workflow.config.json'), JSON.stringify({
       adapters: { prompts: { override: 'repo-opinion.md' } },
@@ -187,7 +187,7 @@ test('task-2465: configured override supplies opinion content and retains a name
 });
 
 test('task-2602: runtime review prompt retains non-core coverage guidance with the shipped asset and configured override', () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'task-2602-review-prompt-'));
+  const root = registeredMkdtemp('task-2602-review-prompt-');
   try {
     fs.writeFileSync(path.join(root, 'workflow.config.json'), JSON.stringify({
       adapters: { prompts: { override: 'repo-opinion.md' } },
@@ -210,7 +210,7 @@ test('task-2602: runtime review prompt retains non-core coverage guidance with t
 });
 
 test('task-2465: override cannot drop core resolution instructions when the repo opinion omits them', () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'task-2465-core-drop-'));
+  const root = registeredMkdtemp('task-2465-core-drop-');
   try {
     fs.writeFileSync(path.join(root, 'workflow.config.json'), JSON.stringify({
       adapters: { prompts: { override: 'minimal.md' } },

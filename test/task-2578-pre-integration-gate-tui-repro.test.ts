@@ -6,6 +6,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { mockModule, installModuleMocks } from './lib/module-mock.js';
 import { runPhaseGates } from '../src/adapters/config/repository-gates.js';
+import { mkdtemp as registeredMkdtemp } from './helpers/temp-dir.js';
 
 const git = mockModule<typeof import('../src/adapters/git/git.js')>('../src/adapters/git/git.js', import.meta.url);
 const missionUtils = mockModule<typeof import('../src/adapters/filesystem/mission-utils.js')>('../src/adapters/filesystem/mission-utils.js', import.meta.url);
@@ -20,7 +21,7 @@ await installModuleMocks();
 const integrate = integrateModule.default;
 
 test('TASK-2578: parallel pre-integration fallback renders live start and completion progress', async () => {
-  const checkout = fs.mkdtempSync(path.join(os.tmpdir(), 'task-2578-'));
+  const checkout = registeredMkdtemp('task-2578-');
   const output: string[] = [];
   const started: string[] = [];
   const originalLog = console.log;
@@ -57,7 +58,7 @@ test('TASK-2578: parallel pre-integration fallback renders live start and comple
 });
 
 test('TASK-2578: px integrate renders parallel gate progress after rebase and pre-commit', async () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'task-2578-integrate-'));
+  const root = registeredMkdtemp('task-2578-integrate-');
   const slug = 'task-2578';
   const logs: string[] = [];
   const rebased = { value: false };

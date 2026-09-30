@@ -48,6 +48,7 @@ import {
   reviewStatus,
   startReview,
 } from '../src/domain/review.js';
+import { mkdtemp as registeredMkdtemp } from './helpers/temp-dir.js';
 
 const MISSION = missionId('task-2398');
 const REPOSITORY = repositoryId('parallix');
@@ -73,7 +74,7 @@ const temporaryDirectories: string[] = [];
  * leave behind before the reviewer acts.
  */
 async function awaitingReview() {
-  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'parallix-task-2398-'));
+  const directory = registeredMkdtemp('parallix-task-2398-');
   temporaryDirectories.push(directory);
   const db = new SqliteDatabaseAdapter();
   await db.open({ path: path.join(directory, 'fixture.db') });
@@ -355,7 +356,7 @@ describe('TASK-2398 SC3: review-artifacts.ts approve path (recordLocalReviewVerd
     // self-author verdict path never drops a real markdown file into a live
     // mission's review-events directory (which fails EROFS on a read-only CI
     // checkout). The operator DB is already a throwaway temp SQLite.
-    const worktree = fs.mkdtempSync(path.join(os.tmpdir(), 'parallix-selfauthor-'));
+    const worktree = registeredMkdtemp('parallix-selfauthor-');
     temporaryDirectories.push(worktree);
     return {
       reviewIdentity: 'codex',
@@ -412,7 +413,7 @@ describe('TASK-2398 SC3: review-commands.ts submitReviewRound approve path', () 
   // temp SQLite. `resolveReviewIdentity` reads the faked review state, so no
   // real mission dir is required.
   function tempWorktree(): string {
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'parallix-review-cmds-'));
+    const dir = registeredMkdtemp('parallix-review-cmds-');
     temporaryDirectories.push(dir);
     return dir;
   }

@@ -10,6 +10,7 @@ import { createRequire } from 'node:module';
 import { seedMissionDatabase } from './fixtures/review-state-db.js';
 import { createStatsCommand, createStatsWorkflowAdapter } from '../src/adapters/cli/commands/stats.js';
 import { StatsCommandUseCase } from '../src/application/stats-command-use-case.js';
+import { clearOperatorStateCache } from '../src/adapters/sqlite/adapter-factory.js';
 
 // Render-only `px stats` command: these tests exercise measurement-row reads
 // and never consult the Mission authority, so a store placeholder satisfies
@@ -350,7 +351,7 @@ test('recording a measurement with no explicit path writes no CSV under PARALLIX
   }
 });
 
-test('stats command defaults to the shared PARALLIX_HOME database across target repos', () => {
+test('stats command defaults to the shared PARALLIX_HOME database across target repos', async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'workflow-stats-command-default-'));
   const repoOne = path.join(root, 'repo-one');
   const repoTwo = path.join(root, 'repo-two');
@@ -368,7 +369,11 @@ test('stats command defaults to the shared PARALLIX_HOME database across target 
 
   try {
     process.env.PARALLIX_HOME = home;
-    statsCommand(['--today', '2026-05-18'], {
+    // Awaited: the weekly report's mission-flow tail opens the operator-state
+    // database after the synchronous log lines. Left floating, it resolves
+    // PARALLIX_HOME later, under whichever test owns it by then, and races that
+    // test's own migration into "database is locked".
+    await statsCommand(['--today', '2026-05-18'], {
       rootDir: repoOne,
       log: line => logs.push(line),
       error: line => logs.push(`ERR:${line}`),
@@ -383,7 +388,7 @@ test('stats command defaults to the shared PARALLIX_HOME database across target 
     assert.doesNotMatch(output, /Loading CSV/);
 
     const secondLogs = [];
-    statsCommand(['--today', '2026-05-18'], {
+    await statsCommand(['--today', '2026-05-18'], {
       rootDir: repoTwo,
       log: line => secondLogs.push(line),
       error: line => secondLogs.push(`ERR:${line}`),
@@ -395,6 +400,7 @@ test('stats command defaults to the shared PARALLIX_HOME database across target 
     assert.match(secondLogs.join('\n'), /Loaded 1 measurements from the statistics database/);
     assert.deepEqual(fs.readdirSync(home).filter(name => name.endsWith('.csv')), []);
   } finally {
+    await clearOperatorStateCache();
     if (previousHome === undefined) delete process.env.PARALLIX_HOME;
     else process.env.PARALLIX_HOME = previousHome;
     fs.rmSync(root, { recursive: true, force: true });

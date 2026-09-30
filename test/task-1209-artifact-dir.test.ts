@@ -7,12 +7,13 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import { mockModule, installModuleMocks } from './lib/module-mock.js';
+import { mkdtemp as registeredMkdtemp } from './helpers/temp-dir.js';
 const reviewArtifactPathModule = mockModule<typeof import('../src/adapters/review/review-artifacts.js')>('../src/adapters/review/review-artifacts.js', import.meta.url);
 await installModuleMocks();
 test.afterEach(() => mock.restoreAll());
 const { reviewArtifactPath, resolveArtifactDir } = reviewArtifactPathModule;
 function withTempRepo(config, fn) {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'task-1209-artifact-dir-'));
+  const root = registeredMkdtemp('task-1209-artifact-dir-');
   try {
     if (config !== null) {
       fs.writeFileSync(path.join(root, 'workflow.config.json'), JSON.stringify(config));

@@ -16,6 +16,7 @@ import {
   currentWorkEventToEntry,
   type CurrentWorkEvent,
 } from '../src/application/recording/current-work-recorder.js';
+import { mkdtemp as registeredMkdtemp } from './helpers/temp-dir.js';
 
 /**
  * Regression for the stranded-active observation boundary: a mission whose
@@ -60,7 +61,7 @@ function storeFor(persisted: readonly Mission[]): MissionStore {
 const gitDouble = () => ({ status: 0, stdout: '', stderr: '' });
 
 async function board(store: MissionStore, currentWork: readonly CurrentWorkEvent[] = []): Promise<BoardHarness> {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'orphaned-active-'));
+  const root = registeredMkdtemp('orphaned-active-');
   const historyEvents = currentWork.map((event) => currentWorkEventToEntry(event));
   const projection = await composeBoardProjection({
     rootDir: root,

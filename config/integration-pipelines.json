@@ -13,7 +13,7 @@
       "always": true
     },
     "unit": {
-      "command": "PARALLIX_TEST_COVERAGE=1 npm test -- --unit-test-headroom",
+      "command": "PARALLIX_FAST_UNIT=1 PARALLIX_TEST_COVERAGE=1 npm test -- --unit-test-headroom",
       "order": 3,
       "run_last": false,
       "always": true
@@ -25,7 +25,7 @@
       "always": true
     },
     "integration-local": {
-      "command": "npm run test:integration:local",
+      "command": "npm run test:integration:local:prebuilt",
       "order": 5,
       "run_last": false,
       "always": true

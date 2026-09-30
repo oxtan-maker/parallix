@@ -7,8 +7,9 @@ import path from 'path';
 // @ts-expect-error -- TASK-2328: partial test double after ESM seam migration
 import { migrateStats, migrateAgentBlocklists, } from '../src/adapters/storage/persistent-data-migration.js';
 import * as persistentDataMigration from '../src/adapters/storage/persistent-data-migration.js';
+import { mkdtemp as registeredMkdtemp } from './helpers/temp-dir.js';
 function withTempRoot(run) {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'parallix-migration-'));
+  const root = registeredMkdtemp('parallix-migration-');
   try {
     run(root);
   } finally {

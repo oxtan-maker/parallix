@@ -4,9 +4,10 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import * as v from '../src/adapters/verification/verification.js';
+import { mkdtemp as registeredMkdtemp } from './helpers/temp-dir.js';
 
 function tempDir(prefix = 'verification-') {
-  return fs.mkdtempSync(path.join(os.tmpdir(), prefix));
+  return registeredMkdtemp(prefix);
 }
 function cleanup(dir) { fs.rmSync(dir, { recursive: true, force: true }); }
 

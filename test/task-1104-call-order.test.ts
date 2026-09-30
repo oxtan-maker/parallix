@@ -29,7 +29,7 @@ const { mock } = test;
 let _prevParallixHome;
 let _tmpHome;
 test.beforeEach(() => {
-  _tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'task-1104-home-'));
+  _tmpHome = registeredMkdtemp('task-1104-home-');
   _prevParallixHome = process.env.PARALLIX_HOME;
   process.env.PARALLIX_HOME = _tmpHome;
 });
@@ -166,6 +166,7 @@ test('pushRound follows the transition contract: review before createPr', async 
 });
 
 import { stubRecordedMissionServices } from './helpers/stub-mission-services.js';
+import { mkdtemp as registeredMkdtemp } from './helpers/temp-dir.js';
 
 test('performHandoff follows the sequence: createPr -> gatekeeper -> transitionTask -> push', async () => {
   const events = [];
@@ -176,6 +177,7 @@ test('performHandoff follows the sequence: createPr -> gatekeeper -> transitionT
     mock.method(git, 'getCurrentBranch', () => `mission/${slug}`),
     mock.method(git, 'getWorktreeStatus', () => []),
     mock.method(git, 'git', (args) => {
+      if (args.includes('rev-parse')) return { status: 0, stdout: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' };
       if (args && args.includes('push')) {
         events.push({ type: 'push' });
       }

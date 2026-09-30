@@ -7,8 +7,9 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import { resolvePostIntegrateCommand, resolvePreCommitCommand, buildPostIntegrateHookEnv, runPostIntegrateHook, runPreCommitHook, } from '../src/adapters/process/post-integrate-hook.js';
+import { mkdtemp as registeredMkdtemp } from './helpers/temp-dir.js';
 function withTempDir(fn) {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'workflow-post-integrate-hook-'));
+  const dir = registeredMkdtemp('workflow-post-integrate-hook-');
   try {
     fn(dir);
   } finally {

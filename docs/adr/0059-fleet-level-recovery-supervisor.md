@@ -69,6 +69,9 @@ command line to narrow the run; that filters the queue, it does not replace it.
 
 1. an item whose action is `integrate:merge` is left on the board — the
    supervisor never integrates;
+   a review-lane item runs `px review --continue`, so the configured reviewer
+   decides; the supervisor never records a review decision itself and only
+   finishes the lane move of a round a reviewer already approved;
 2. otherwise the action the item advertises is run through its existing use
    case, once per distinct mission state, so an action that does not help is not
    repeated;

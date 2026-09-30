@@ -1,0 +1,67 @@
+{
+  "schemaVersion": 1,
+  "recordedAt": "2026-09-29",
+  "host": "Linux x86_64; local repository trial, no macOS execution",
+  "measurement": "POSIX /usr/bin/time user+system CPU seconds for the command and waited descendants; wall seconds reported separately",
+  "commands": {
+    "directBuild": "npm run build",
+    "nxBuild": "NX_DAEMON=false NX_CACHE_DIRECTORY=tmp/nx-evaluation/cache nx run parallix-trial:build",
+    "nxUnit": "NX_DAEMON=false NX_CACHE_DIRECTORY=tmp/nx-evaluation/cache nx run parallix-trial:unit",
+    "nxIntegrationCi": "NX_DAEMON=false NX_CACHE_DIRECTORY=tmp/nx-evaluation/cache nx run parallix-trial:integration-ci"
+  },
+  "build": {
+    "direct": { "userSeconds": 2.57, "systemSeconds": 0.60, "wallSeconds": 2.33, "actualExecutions": 1 },
+    "nxCacheBypassed": { "userSeconds": 3.51, "systemSeconds": 0.98, "wallSeconds": 3.24, "actualExecutions": 1 },
+    "nxCold": { "userSeconds": 3.47, "systemSeconds": 1.01, "wallSeconds": 3.17, "actualExecutions": 1 },
+    "nxWarm": { "userSeconds": 0.76, "systemSeconds": 0.32, "wallSeconds": 0.81, "actualExecutions": 0 },
+    "restore": { "userSeconds": 0.74, "systemSeconds": 0.32, "wallSeconds": 0.75, "cacheHit": true, "bundleSha256": "6d6609d6b0a21de1bbbf26a531c83bc436b127c979c56555bb02365d57a4bc68" },
+    "sourceEdit": { "userSeconds": 3.22, "systemSeconds": 1.03, "wallSeconds": 3.11, "cacheHit": false },
+    "semanticLockfileEdit": { "userSeconds": 3.39, "systemSeconds": 1.04, "wallSeconds": 3.21, "cacheHit": false },
+    "lockfileWhitespaceEdit": { "userSeconds": 0.75, "systemSeconds": 0.36, "wallSeconds": 0.79, "cacheHit": true },
+    "brokenSourceTwice": { "exitCodes": [1, 1], "cacheHits": [false, false], "error": "esbuild Unexpected semicolon" }
+  },
+  "unitCoverage": {
+    "firstCold": { "userSeconds": 508.10, "systemSeconds": 130.12, "wallSeconds": 138.44, "testsPassed": 3084, "suiteCpuSeconds": 634.727, "actualExecutionMarkerLines": 1 },
+    "warm": { "userSeconds": 0.72, "systemSeconds": 0.34, "wallSeconds": 0.81, "cacheHit": true, "actualExecutionMarkerLines": 1 },
+    "restoredLcovSha256": "54e1706b77916daf86ec08e31d5347226d4bdf096620af9aa124fd265d83b8dc",
+    "sourceChangeMiss": { "userSeconds": 509.29, "systemSeconds": 130.67, "wallSeconds": 138.79, "cacheHit": false, "actualExecutionMarkerLines": 2 },
+    "finalCleanRevision": { "revision": "9bc12a86e", "userSeconds": 512.47, "systemSeconds": 130.93, "wallSeconds": 140.78, "testsPassed": 3085, "suiteCpuSeconds": 639.858, "budgetCpuSeconds": 740, "cacheHit": false, "actualExecutionMarkerLines": 3 }
+  },
+  "unitPlainFinal": { "testsPassed": 3085, "suiteCpuSeconds": 567.024, "budgetCpuSeconds": 650, "wallSeconds": 117.314 },
+  "isolationProbe": {
+    "command": "node --import tsx tools/nx-evaluation/test-isolation-probe.ts <selection> <none|process>",
+    "node": "v26.10.0",
+    "profile": "covered unit, same bootstrap and CPU hook, 4-way file concurrency for process isolation",
+    "safeFilter": "Excludes test files containing mockModule, mock.module/method/timers/fn, process.env/chdir/exit, globalThis, or before/after hooks; this source-text filter does not inspect imported dependencies",
+    "fullShared": { "files": 396, "observedPassed": 2853, "observedFailed": 105, "completeResults": false, "userSeconds": 26.65, "systemSeconds": 10.87, "wallSeconds": 35.16 },
+    "safeIsolated": { "files": 278, "testsPassed": 2082, "userSeconds": 339.39, "systemSeconds": 86.24, "wallSeconds": 91.06 },
+    "safeShared": { "files": 278, "testsPassed": 2082, "userSeconds": 13.74, "systemSeconds": 3.33, "wallSeconds": 15.49 },
+    "safeSharedReversed": { "files": 278, "testsPassed": 2082, "userSeconds": 13.90, "systemSeconds": 3.28, "wallSeconds": 15.35 },
+    "unsafeIsolated": { "files": 118, "testsPassed": 1003, "userSeconds": 168.19, "systemSeconds": 41.76, "wallSeconds": 47.40 },
+    "pairedCpuSeconds": { "fullyIsolated": 635.58, "experimentalPartition": 227.02, "potentialReductionPercent": 64.3 },
+    "limitations": "The two partition commands were sequential, not a production hybrid runner. The shared group has one disposable HOME and one module cache for all files, so passing assertions and reverse order do not re-create per-file isolation or prove safe future changes. No default verification gate was changed."
+  },
+  "otherUncachedTargets": {
+    "static": { "userSeconds": 45.34, "systemSeconds": 4.23, "wallSeconds": 24.08, "passed": true },
+    "integrationCi": { "userSeconds": 473.63, "systemSeconds": 150.28, "wallSeconds": 160.46, "testsPassed": 2455, "testsSkipped": 26, "failed": 0 }
+  },
+  "rawLocalLogs": "tmp/nx-evaluation/ (ignored workspace files)",
+  "notScored": [
+    "Cancellation of a cacheable target was not run after the stop result; no cancellation safety claim is made.",
+    "Dirty snapshots were used only for invalidation probes and never accepted as verification or published evidence.",
+    "Historical ten-mission candidate revisions were not replayed or scored; the trial bounds mechanism and one changed candidate.",
+    "The shared-process probe is not a validated replacement for TASK-2328 per-file module isolation or TASK-2554 per-process operator-state protection."
+  ],
+  "rawLogSha256": {
+    "finalPlain": "f24aa18b44c455597c613cfb1902337ee2c0011d0afe8216a501f01a79ba8f26",
+    "finalNxUnitCold": "dac5021d703eedb4076275542c9d78bcdbc5aa7682bc2339c91b9dc0011dfbd5",
+    "integrationCi": "a4a987489f816f0ae7d593925d0838461f646e95308fdfe5d84e313039e09f60",
+    "static": "1c3e58453f11ada4326a6a901f31ed9608a1c18e3621e5fcea1da46958c0d541",
+    "isolationSafe": "a7bf38d5a74b9a12936aff6f91bb233e3db8e1988a092b5578994b7106d447db",
+    "isolationSafeShared": "0b2f7053839d211663b584374915824fd3732417e0c71d2f04e7d7ee78956bb3",
+    "isolationSafeSharedReversed": "9cd870e5f626c84cc2208b104e637230514afe5f39ea48d0ec98888fbdf999a9",
+    "isolationUnsafe": "6a99802654af23f2b6ccdbcde461e6265accdc12acbd412904b1ea9336ea0fe5",
+    "isolationFullSharedFailure": "89f943857f9c7eef46cc995dec09c287358cbec2ac404aab7466ba564a967b32"
+  },
+  "conclusion": "Do not adopt the coarse Nx targets. Exact-input replay works, but source changes invalidate the whole unit target and cross-worktree savings remain unproven. Independent profiling found per-file process startup dominates unit CPU; a shared-process subset is much cheaper but does not yet preserve file isolation, so it is not enabled. No macOS performance claim."
+}

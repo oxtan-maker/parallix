@@ -19,6 +19,7 @@ import {
   withSandboxProfile,
   wrapWithBubblewrap
 } from '../src/adapters/process/bubblewrap.js';
+import { mkdtemp as registeredMkdtemp, mkdtempAt } from './helpers/temp-dir.js';
 
 test.afterEach(() => {
   setBubblewrapProbeForTest(null);
@@ -38,7 +39,7 @@ function captureLogs<T>(fn: () => T): { result: T; lines: string[] } {
   }
 }
 
-function makeWorktree(): string { return fs.mkdtempSync(path.join(os.tmpdir(), 'bwrap-guard-')); }
+function makeWorktree(): string { return registeredMkdtemp('bwrap-guard-'); }
 
 test('isBubblewrapAvailable returns true when bwrap is executable', () => {
   setBubblewrapProbeForTest(() => true);
@@ -114,7 +115,7 @@ function withTempHome<T>(fn: (home: string) => T): T {
   const previous = process.env.HOME;
   const root = path.join(process.cwd(), '.workflow');
   fs.mkdirSync(root, { recursive: true });
-  const home = fs.mkdtempSync(path.join(root, 'bwrap-home-'));
+  const home = mkdtempAt(root, 'bwrap-home-');
   process.env.HOME = home;
   try { return fn(home); }
   finally {
@@ -220,7 +221,7 @@ test('buildBubblewrapArgs keeps review worktree read-only and binds an outside a
   const worktree = makeWorktree();
   // This assertion specifically exercises the fixed /tmp bind, regardless
   // of the operator's TMPDIR setting.
-  const artifactRoot = fs.mkdtempSync(path.join('/tmp', 'bwrap-guard-'));
+  const artifactRoot = mkdtempAt('/tmp', 'bwrap-guard-');
   const artifactDir = path.join(artifactRoot, 'review-artifacts');
   try {
     const args = buildBubblewrapArgs(resolveSandboxProfile('review', worktree, artifactDir), worktree);

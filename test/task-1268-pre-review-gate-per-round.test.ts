@@ -4,29 +4,12 @@
 
 import test, { mock } from 'node:test';
 import assert from 'node:assert/strict';
-import fs from 'node:fs';
-import os from 'node:os';
-import path from 'node:path';
 import { mockModule, installModuleMocks } from './lib/module-mock.js';
 const startReviewLoopModule = mockModule<typeof import('../src/adapters/review/review-loop.js')>('../src/adapters/review/review-loop.js', import.meta.url);
 await installModuleMocks();
 test.afterEach(() => mock.restoreAll());
 const { startReviewLoop } = startReviewLoopModule;
 const TEST_SLUG = `task-1268-gate-per-round-${process.pid}`;
-let previousHome;
-let temporaryHome;
-
-test.beforeEach(() => {
-  temporaryHome = fs.mkdtempSync(path.join(os.tmpdir(), 'task-1268-gate-home-'));
-  previousHome = process.env.PARALLIX_HOME;
-  process.env.PARALLIX_HOME = temporaryHome;
-});
-
-test.afterEach(() => {
-  if (previousHome === undefined) delete process.env.PARALLIX_HOME;
-  else process.env.PARALLIX_HOME = previousHome;
-  fs.rmSync(temporaryHome, { recursive: true, force: true });
-});
 
 test('startReviewLoop runs the pre-review gate before every reviewer round', async () => {
   const events = [];
@@ -40,6 +23,9 @@ test('startReviewLoop runs the pre-review gate before every reviewer round', asy
     transitionTaskFn: async () => {},
     transitionVirtualFn: async () => {},
     implementer: 'claude', reviewer: 'codex', dryRun: false,
+    // Every boundary this scenario reaches is injected, so do not resolve the
+    // repository worktree or create per-test operator state.
+    worktree: '/tmp',
     workflowLauncherStatusFn: () => ({ supported: true }),
     isForgejoReviewEnabledFn: () => true,
     forgejoAvailableFn: async () => true,

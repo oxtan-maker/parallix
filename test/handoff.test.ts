@@ -143,6 +143,7 @@ test('performHandoff skips commit in Step 4 when Backlog transition already comm
   mock.method(git, 'getWorktreeStatus', () => []);
   mock.method(git, 'run', () => ({ status: 0 }));
   mock.method(git, 'git', (args) => {
+    if (args.includes('rev-parse') && args.includes('HEAD')) return { status: 0, stdout: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n', stderr: '' };
     if (args.includes('origin')) assert.fail('Should not push to origin');
     if (args.includes('commit')) assert.fail('Should not commit when diff --cached shows nothing staged');
     // diff --cached --quiet exits 0 = nothing staged
@@ -166,6 +167,12 @@ test('performHandoff skips commit in Step 4 when Backlog transition already comm
   const result = await performHandoff(slug, { worktree, skipGate: true, missionServicesFn: stubMissionServices() });
   assert.strictEqual(result.ok, true);
 
+  mock.method(git, 'git', args => ({ status: args.includes('rev-parse') ? 1 : 0, stdout: '', stderr: '' }));
+  const missingHead = await performHandoff(slug, { worktree, skipGate: true, missionServicesFn: stubMissionServices() });
+  assert.equal(missingHead.ok, false);
+  assert.match(missingHead.error, /Cannot capture the HEAD commit/);
+
+
   fs.rmSync(cpPath, { force: true });
   fs.rmSync(missionMdPath, { force: true });
 });
@@ -183,6 +190,7 @@ test('performHandoff refreshes the review tracking ref and lease-updates the reb
   mock.method(git, 'getWorktreeStatus', () => []);
   mock.method(git, 'run', () => ({ status: 0 }));
   mock.method(git, 'git', (args) => {
+    if (args.includes('rev-parse') && args.includes('HEAD')) return { status: 0, stdout: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n', stderr: '' };
     gitCalls.push(args);
     if (args.includes('fetch')) return { status: 0, stdout: '', stderr: '' };
     if (args.includes('rev-parse')) return { status: 0, stdout: 'lease-sha\n', stderr: '' };
@@ -242,6 +250,7 @@ test('performHandoff falls back to magnus and persists bootstrap failure summary
   mock.method(git, 'getWorktreeStatus', () => []);
   mock.method(git, 'run', () => ({ status: 0 }));
   mock.method(git, 'git', (args) => {
+    if (args.includes('rev-parse') && args.includes('HEAD')) return { status: 0, stdout: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n', stderr: '' };
     gitCalls.push(args);
     return { status: 0, stdout: '', stderr: '' };
   });
@@ -292,7 +301,7 @@ test('performHandoff falls back to magnus and persists bootstrap failure summary
     assert.match(taskContent, /## Fallback: PR submitted as human/);
     assert.match(taskContent, /Original user: custom/);
     assert.match(taskContent, /Bootstrap failure reason: No owner token found for human at \/tmp\/no-token/);
-    assert.ok(gitCalls.some(args => args.includes('commit') && args.includes(`backlog(${slug}): set fallback summary`)));
+    assert.ok(gitCalls.some(args => args.includes('commit') && args.includes(`backlog(${slug}): set fallback summary\n\nParallix-Bookkeeping: backlog-mirror`)));
   } finally {
     fs.rmSync(worktree, { recursive: true, force: true });
   }
@@ -311,6 +320,7 @@ test('performHandoff fails hard when git commit fails in Step 4', async (t) => {
     mock.method(git, 'getWorktreeStatus', () => []);
     mock.method(git, 'run', () => ({ status: 0 }));
     mock.method(git, 'git', (args) => {
+    if (args.includes('rev-parse') && args.includes('HEAD')) return { status: 0, stdout: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n', stderr: '' };
         if (args.includes('origin')) assert.fail('Should not push to origin');
         if (args.includes('commit')) return { status: 1 }; // Step 4 Commit fail
         // diff --cached --quiet exits 1 = staged changes exist, proceed to commit
@@ -383,6 +393,7 @@ test('performHandoff succeeds with ## Goal Check Table heading variant', async (
   mock.method(git, 'getWorktreeStatus', () => []);
   mock.method(git, 'run', () => ({ status: 0 }));
   mock.method(git, 'git', (args) => {
+    if (args.includes('rev-parse') && args.includes('HEAD')) return { status: 0, stdout: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n', stderr: '' };
     if (args.includes('origin')) assert.fail('Should not push to origin');
     if (args.includes('--cached') && args.includes('--quiet')) return { status: 0 };
     return { status: 0 };
@@ -481,6 +492,7 @@ test('legacy handoff fails closed without synthesizing or committing checkpoint 
   mock.method(git, 'getWorktreeStatus', () => []);
   mock.method(git, 'run', () => ({ status: 0 }));
   mock.method(git, 'git', (args) => {
+    if (args.includes('rev-parse') && args.includes('HEAD')) return { status: 0, stdout: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n', stderr: '' };
     gitCalls.push(args);
     return { status: 0, stdout: '', stderr: '' };
   });
@@ -729,7 +741,7 @@ test('performHandoff accepts final checkpoint evidence row with a real file:line
   mock.method(git, 'getCurrentBranch', () => 'mission/task-098');
   mock.method(git, 'getWorktreeStatus', () => []);
   mock.method(git, 'run', () => ({ status: 0 }));
-  mock.method(git, 'git', () => ({ status: 0, stdout: '', stderr: '' }));
+  mock.method(git, 'git', (args) => ({ status: 0, stdout: args.includes('rev-parse') ? 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' : '', stderr: '' }));
   mock.method(forgejo, 'readToken', () => 'fake-token');
   mock.method(forgejo, 'createPr', () => ({ ok: true, url: 'http://fake-pr' }));
   mock.method(forgejo, 'authenticatedReviewUrl', () => 'http://fake-url');
@@ -766,7 +778,7 @@ test('performHandoff accepts file:line evidence with supporting shell context in
   mock.method(git, 'getCurrentBranch', () => 'mission/task-098');
   mock.method(git, 'getWorktreeStatus', () => []);
   mock.method(git, 'run', () => ({ status: 0 }));
-  mock.method(git, 'git', () => ({ status: 0, stdout: '', stderr: '' }));
+  mock.method(git, 'git', (args) => ({ status: 0, stdout: args.includes('rev-parse') ? 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' : '', stderr: '' }));
   mock.method(forgejo, 'readToken', () => 'fake-token');
   mock.method(forgejo, 'createPr', () => ({ ok: true, url: 'http://fake-pr' }));
   mock.method(forgejo, 'authenticatedReviewUrl', () => 'http://fake-url');
@@ -813,6 +825,7 @@ test('performHandoff calls rebaseBeforeReviewRound before Forgejo PR creation', 
   mock.method(git, 'getWorktreeStatus', () => []);
   mock.method(git, 'run', () => ({ status: 0 }));
   mock.method(git, 'git', (args) => {
+    if (args.includes('rev-parse') && args.includes('HEAD')) return { status: 0, stdout: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n', stderr: '' };
     if (args.includes('origin')) prCallOrder.push('git-origin');
     return { status: 0, stdout: '', stderr: '' };
   });
@@ -868,7 +881,7 @@ test('performHandoff fails when rebase returns ok=false with no shared-file conf
   mock.method(git, 'getCurrentBranch', () => `mission/${slug}`);
   mock.method(git, 'getWorktreeStatus', () => []);
   mock.method(git, 'run', () => ({ status: 0 }));
-  mock.method(git, 'git', () => ({ status: 0, stdout: '', stderr: '' }));
+  mock.method(git, 'git', (args) => ({ status: 0, stdout: args.includes('rev-parse') ? 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' : '', stderr: '' }));
   mock.method(forgejo, 'readToken', () => 'fake-token');
   mock.method(forgejo, 'createPr', () => {
     assert.fail('createPr should NOT be called when rebase fails');
@@ -919,7 +932,7 @@ test('performHandoff fails when rebase returns sharedFileConflicts=true', async 
   mock.method(git, 'getCurrentBranch', () => `mission/${slug}`);
   mock.method(git, 'getWorktreeStatus', () => []);
   mock.method(git, 'run', () => ({ status: 0 }));
-  mock.method(git, 'git', () => ({ status: 0, stdout: '', stderr: '' }));
+  mock.method(git, 'git', (args) => ({ status: 0, stdout: args.includes('rev-parse') ? 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' : '', stderr: '' }));
   mock.method(forgejo, 'readToken', () => 'fake-token');
   mock.method(forgejo, 'createPr', () => {
     assert.fail('createPr should NOT be called when rebase has shared-file conflicts');
@@ -974,6 +987,7 @@ test('performHandoff proceeds normally when rebase is a no-op (branch already up
   mock.method(git, 'getWorktreeStatus', () => []);
   mock.method(git, 'run', () => ({ status: 0 }));
   mock.method(git, 'git', (args) => {
+    if (args.includes('rev-parse') && args.includes('HEAD')) return { status: 0, stdout: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n', stderr: '' };
     if (args.includes('origin')) assert.fail('Should not push to origin');
     if (args.includes('--cached') && args.includes('--quiet')) return { status: 0 };
     return { status: 0, stdout: '', stderr: '' };
@@ -1347,6 +1361,7 @@ test('performHandoff no longer stages or commits a legacy NEL record before tran
   t.mock.method(git, 'getCurrentBranch', () => `mission/${slug}`);
   t.mock.method(git, 'getWorktreeStatus', () => []);
   t.mock.method(git, 'git', args => {
+    if (args.includes('rev-parse') && args.includes('HEAD')) return { status: 0, stdout: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n', stderr: '' };
     gitCalls.push(args);
     if (args.includes('diff')) { return { status: 1, stdout: '', stderr: '' }; }
     return { status: 0, stdout: '', stderr: '' };
@@ -1463,7 +1478,7 @@ test('performHandoff captures verification gate stdout/stderr on non-zero exit (
   mock.method(git, 'getCurrentBranch', () => `mission/${slug}`);
   mock.method(git, 'getWorktreeStatus', () => []);
   mock.method(git, 'run', () => ({ status: 0 }));
-  mock.method(git, 'git', () => ({ status: 0, stdout: '', stderr: '' }));
+  mock.method(git, 'git', (args) => ({ status: 0, stdout: args.includes('rev-parse') ? 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' : '', stderr: '' }));
   mock.method(forgejo, 'readToken', () => 'fake-token');
   mock.method(forgejo, 'createPr', () => ({ ok: true, url: 'http://fake-pr' }));
   mock.method(forgejo, 'authenticatedReviewUrl', () => 'http://fake-url');
@@ -1848,7 +1863,7 @@ test('performHandoff attempts agent relaunch when gatekeeper posts pushback', as
   mock.method(git, 'getCurrentBranch', () => `mission/${slug}`);
   mock.method(git, 'getWorktreeStatus', () => []);
   mock.method(git, 'run', () => ({ status: 0 }));
-  mock.method(git, 'git', () => ({ status: 0, stdout: '', stderr: '' }));
+  mock.method(git, 'git', (args) => ({ status: 0, stdout: args.includes('rev-parse') ? 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' : '', stderr: '' }));
   mock.method(forgejo, 'readToken', () => 'fake-token');
   mock.method(forgejo, 'createPr', () => ({ ok: true, url: 'http://fake-pr' }));
   mock.method(forgejo, 'authenticatedReviewUrl', () => 'http://fake-url');
@@ -1915,7 +1930,7 @@ test('performHandoff respects bounded retry limit of 2 for gatekeeper pushback',
   mock.method(git, 'getCurrentBranch', () => `mission/${slug}`);
   mock.method(git, 'getWorktreeStatus', () => []);
   mock.method(git, 'run', () => ({ status: 0 }));
-  mock.method(git, 'git', () => ({ status: 0, stdout: '', stderr: '' }));
+  mock.method(git, 'git', (args) => ({ status: 0, stdout: args.includes('rev-parse') ? 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' : '', stderr: '' }));
   mock.method(forgejo, 'readToken', () => 'fake-token');
   mock.method(forgejo, 'createPr', () => ({ ok: true, url: 'http://fake-pr' }));
   mock.method(forgejo, 'authenticatedReviewUrl', () => 'http://fake-url');
@@ -1981,7 +1996,7 @@ test('performHandoff consumes full retry budget when relaunch succeeds but pushb
   mock.method(git, 'getCurrentBranch', () => `mission/${slug}`);
   mock.method(git, 'getWorktreeStatus', () => []);
   mock.method(git, 'run', () => ({ status: 0 }));
-  mock.method(git, 'git', () => ({ status: 0, stdout: '', stderr: '' }));
+  mock.method(git, 'git', (args) => ({ status: 0, stdout: args.includes('rev-parse') ? 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' : '', stderr: '' }));
   mock.method(forgejo, 'readToken', () => 'fake-token');
   mock.method(forgejo, 'createPr', () => ({ ok: true, url: 'http://fake-pr' }));
   mock.method(forgejo, 'authenticatedReviewUrl', () => 'http://fake-url');
@@ -2045,7 +2060,7 @@ test('performHandoff succeeds after successful agent relaunch', async (t) => {
   mock.method(git, 'getCurrentBranch', () => `mission/${slug}`);
   mock.method(git, 'getWorktreeStatus', () => []);
   mock.method(git, 'run', () => ({ status: 0 }));
-  mock.method(git, 'git', () => ({ status: 0, stdout: '', stderr: '' }));
+  mock.method(git, 'git', (args) => ({ status: 0, stdout: args.includes('rev-parse') ? 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' : '', stderr: '' }));
   mock.method(forgejo, 'readToken', () => 'fake-token');
   mock.method(forgejo, 'createPr', () => ({ ok: true, url: 'http://fake-pr' }));
   mock.method(forgejo, 'authenticatedReviewUrl', () => 'http://fake-url');
@@ -2107,7 +2122,7 @@ test('performHandoff relaunch prompt lists all missing artifact types', async (t
   mock.method(git, 'getCurrentBranch', () => `mission/${slug}`);
   mock.method(git, 'getWorktreeStatus', () => []);
   mock.method(git, 'run', () => ({ status: 0 }));
-  mock.method(git, 'git', () => ({ status: 0, stdout: '', stderr: '' }));
+  mock.method(git, 'git', (args) => ({ status: 0, stdout: args.includes('rev-parse') ? 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' : '', stderr: '' }));
   mock.method(forgejo, 'readToken', () => 'fake-token');
   mock.method(forgejo, 'createPr', () => ({ ok: true, url: 'http://fake-pr' }));
   mock.method(forgejo, 'authenticatedReviewUrl', () => 'http://fake-url');

@@ -12,12 +12,13 @@ import { toWebBoardSnapshot } from '../src/interfaces/web/transport.js';
 import { agentFamily } from '../src/domain/agents.js';
 import { missionId, missionLabels } from '../src/domain/mission.js';
 import { repositoryId } from '../src/domain/repository.js';
+import { mkdtemp as registeredMkdtemp } from './helpers/temp-dir.js';
 
 const repo = repositoryId('parallix');
 
 /** Build the WebBoardSnapshot for a single mission loaded from a task file. */
 async function webTitleFor(taskFile: string, titleFrontmatter: string): Promise<string | null> {
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'px-2526-'));
+  const tmp = registeredMkdtemp('px-2526-');
   try {
     const tasksDir = path.join(tmp, 'backlog', 'tasks');
     fs.mkdirSync(tasksDir, { recursive: true });

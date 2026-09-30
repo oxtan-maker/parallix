@@ -12,6 +12,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import { buildDraftPrompt, resolveClassificationInstructions } from '../src/adapters/cli/commands/draft-prompts.js';
+import { mkdtemp as registeredMkdtemp } from './helpers/temp-dir.js';
 
 function writeTask(rootDir, slug, body) {
   const tasksDir = path.join(rootDir, 'backlog', 'tasks');
@@ -22,7 +23,7 @@ function writeTask(rootDir, slug, body) {
 }
 
 function backlogTaskPath() {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'parallix-bg-'));
+  const root = registeredMkdtemp('parallix-bg-');
   // A real Backlog task: classified, no synthetic marker.
   const file = writeTask(
     root,
@@ -33,7 +34,7 @@ function backlogTaskPath() {
 }
 
 function syntheticTaskPath() {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'parallix-ah-'));
+  const root = registeredMkdtemp('parallix-ah-');
   // An adhoc draft's synthetic task: source marker present, unknown label.
   const file = writeTask(
     root,

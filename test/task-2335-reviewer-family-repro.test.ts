@@ -29,6 +29,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 import { selectAgent, eligibleAgentsForStep, setCommandPathProbe, readAgentConfig, workflowLauncherStatus, } from '../src/adapters/agents/agents.js';
 import { startReviewLoop, } from '../src/adapters/review/review-loop.js';
 import { resolveHandoffReviewAssignment, } from '../src/adapters/cli/commands/handoff.js';
+import { mkdtemp as registeredMkdtemp } from './helpers/temp-dir.js';
 const originalPath = process.env.PATH;
 const originalWorkflowAgent = process.env.WORKFLOW_AGENT;
 const originalCodexHome = process.env.CODEX_HOME;
@@ -109,7 +110,7 @@ test('handoff uses same-family reviewer only when cross-family selection is exha
 // config/agents.json on disk, matching the production code path.
 
 test('selectAgent review selection excludes the author family and picks a cross-family reviewer (real launch path)', () => {
-  const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'task-2335-repro-'));
+  const tmpRoot = registeredMkdtemp('task-2335-repro-');
   try {
     installPathLaunchers(tmpRoot);
     delete process.env.WORKFLOW_AGENT;
@@ -141,7 +142,7 @@ test('selectAgent review selection excludes the author family and picks a cross-
 });
 
 test('selectAgent review selection with multiple runs always excludes the author family', () => {
-  const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'task-2335-repro-multi-'));
+  const tmpRoot = registeredMkdtemp('task-2335-repro-multi-');
   try {
     installPathLaunchers(tmpRoot);
     delete process.env.WORKFLOW_AGENT;
@@ -172,7 +173,7 @@ test('selectAgent review selection with multiple runs always excludes the author
 });
 
 test('selectAgent uses configured random selection over the eligible cross-family set', () => {
-  const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'task-2335-repro-random-'));
+  const tmpRoot = registeredMkdtemp('task-2335-repro-random-');
   try {
     installPathLaunchers(tmpRoot);
     delete process.env.WORKFLOW_AGENT;
@@ -209,7 +210,7 @@ test('selectAgent uses configured random selection over the eligible cross-famil
 // =============================================================================
 
 test('selectAgent throws when all eligible agents are excluded (no-cross-family fallback)', () => {
-  const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'task-2335-repro-fallback-'));
+  const tmpRoot = registeredMkdtemp('task-2335-repro-fallback-');
   try {
     installPathLaunchers(tmpRoot);
     delete process.env.WORKFLOW_AGENT;
@@ -237,7 +238,7 @@ test('selectAgent throws when all eligible agents are excluded (no-cross-family 
 // production config-reading and launcher-availability logic is exercised.
 
 test('startReviewLoop reviewer selection excludes the author family (review-loop path)', async () => {
-  const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'task-2335-repro-loop-'));
+  const tmpRoot = registeredMkdtemp('task-2335-repro-loop-');
   try {
     installPathLaunchers(tmpRoot);
     delete process.env.WORKFLOW_AGENT;
@@ -325,7 +326,7 @@ test('startReviewLoop reviewer selection excludes the author family (review-loop
 // review-loop see the same availability: only codex is runnable.
 
 test('startReviewLoop single-family fallback when no cross-family reviewer is runnable', async () => {
-  const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'task-2335-repro-sff-'));
+  const tmpRoot = registeredMkdtemp('task-2335-repro-sff-');
   try {
     // Create launcher symlinks only for codex (the implementer).
     // Cross-family agents have no launcher, so selectAgent will see them

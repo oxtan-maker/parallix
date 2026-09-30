@@ -4,10 +4,11 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { tryAcquireCustomCapacity, resetCustomCapacity } from '../src/adapters/agents/custom-capacity.js';
+import { mkdtemp as registeredMkdtemp } from './helpers/temp-dir.js';
 
 test('repositories sharing PARALLIX_HOME share custom capacity', async (t) => {
-  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'custom-capacity-home-'));
-  const roots = ['one', 'two'].map(name => fs.mkdtempSync(path.join(os.tmpdir(), `custom-capacity-${name}-`)));
+  const home = registeredMkdtemp('custom-capacity-home-');
+  const roots = ['one', 'two'].map(name => registeredMkdtemp(`custom-capacity-${name}-`));
   for (const root of roots) fs.writeFileSync(path.join(root, 'workflow.config.json'), JSON.stringify({ adapters: { agents: { maxConcurrentCustom: 1 } } }));
   const oldHome = process.env.PARALLIX_HOME;
   process.env.PARALLIX_HOME = home;

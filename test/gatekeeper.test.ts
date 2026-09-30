@@ -7,13 +7,14 @@ import os from 'os';
 import path from 'path';
 import fs from 'fs';
 import { mockModule, installModuleMocks } from './lib/module-mock.js';
+import { mkdtemp as registeredMkdtemp } from './helpers/temp-dir.js';
 const gatekeeper = mockModule<typeof import('../src/adapters/verification/gatekeeper.js')>('../src/adapters/verification/gatekeeper.js', import.meta.url);
 await installModuleMocks();
 test.afterEach(() => mock.restoreAll());
 const { DEFAULT_GATEKEEPER_USER } = gatekeeper;
 
 function withTempRoot(run) {
-  const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'gatekeeper-test-'));
+  const tmpRoot = registeredMkdtemp('gatekeeper-test-');
   try {
     run(tmpRoot);
   } finally {

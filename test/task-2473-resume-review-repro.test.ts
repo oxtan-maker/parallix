@@ -45,6 +45,7 @@ import { continueReviewClearsIntervention, createReviewWorkflowAdapter } from '.
 import { unknownReviewFlags } from '../src/adapters/review/review-cli-flags.js';
 import { applyReviewStateToReview, reviewStateDataFrom } from '../src/adapters/review/review-state-mapping.js';
 import { readAllEvents } from '../src/adapters/review/review-events.js';
+import { mkdtemp as registeredMkdtemp } from './helpers/temp-dir.js';
 
 const SLUG = 'task-2473-resume';
 const REVIEWER = agentFamily('configured-reviewer');
@@ -59,7 +60,7 @@ after(() => {
 });
 
 function createTempRoot(): string {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), `parallix-task-2473-resume-`));
+  const dir = registeredMkdtemp(`parallix-task-2473-resume-`);
   tempDirs.push(dir);
   fs.mkdirSync(path.join(dir, 'missions', SLUG), { recursive: true });
   fs.writeFileSync(path.join(dir, 'missions', SLUG, 'MISSION.md'), `# Mission: ${SLUG}\n`);

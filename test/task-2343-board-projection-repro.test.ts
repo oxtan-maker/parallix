@@ -33,6 +33,7 @@ import type {
   OperationalHistoryRepository,
 } from '../src/application/ports/operation-history.js';
 import type { UsageRecord, UsageRepository } from '../src/application/ports/mission-measurements.js';
+import { mkdtemp as registeredMkdtemp } from './helpers/temp-dir.js';
 
 const SLUG = 'task-2343';
 const MISSION = missionId(SLUG);
@@ -105,7 +106,7 @@ interface Fixture {
 }
 
 function makeFixture(): Fixture {
-  const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), 'px-2343-'));
+  const rootDir = registeredMkdtemp('px-2343-');
   const tasksDir = path.join(rootDir, 'backlog', 'tasks');
   const missionDir = path.join(rootDir, 'missions', SLUG);
   fs.mkdirSync(tasksDir, { recursive: true });

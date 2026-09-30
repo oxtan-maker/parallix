@@ -37,8 +37,8 @@ test('recovered landed integration runs the post-integrate hook after persisting
   assert.deepEqual(calls, [
     { stage: 'persist' },
     { stage: 'stats' },
-    { stage: 'cleanup' },
     { stage: 'hook', slug: 'task-2551', options: { baseWorktree: '/work/base', baseBranch: 'main', variant: 'variant-b-resumed' } },
+    { stage: 'cleanup' },
     { stage: 'close' },
   ]);
 });
@@ -64,7 +64,7 @@ test('recovered landed integration stops before cleanup when statistics cannot b
   assert.equal(cleaned, false);
 });
 
-for (const interruptedAfter of ['stats', 'cleanup'] as const) {
+for (const interruptedAfter of ['stats', 'hook'] as const) {
   test(`landed closeout resumes after interruption following ${interruptedAfter}`, async () => {
     let closedAt: string | null = null;
     let worktreePresent = true;
@@ -87,7 +87,7 @@ for (const interruptedAfter of ['stats', 'cleanup'] as const) {
       },
       runPostIntegrateHookOrAbort: () => {
         effects.push('hook');
-        if (interrupt && interruptedAfter === 'cleanup') { throw new Error('interrupted after cleanup'); }
+        if (interrupt && interruptedAfter === 'hook') { throw new Error('interrupted after hook'); }
       },
       closeLandedIntegrationOrAbort: async () => {
         closeCalls++;
@@ -99,7 +99,7 @@ for (const interruptedAfter of ['stats', 'cleanup'] as const) {
     await assert.rejects(recoverLandedIntegration('task-2551', missionServices, '/work/base', options), /interrupted after/);
     assert.equal(closedAt, null, 'administrative closure waits for all closeout steps');
     assert.equal(measurementCount, 1);
-    assert.equal(worktreePresent, interruptedAfter === 'stats');
+    assert.equal(worktreePresent, true, 'a pre-cleanup interruption retains the worktree as the retry marker');
 
     interrupt = false;
     await recoverLandedIntegration('task-2551', missionServices, '/work/base', options);

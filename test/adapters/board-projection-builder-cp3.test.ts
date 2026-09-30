@@ -20,6 +20,7 @@ import type {
 } from '../../src/application/ports/agent-blocklist.js';
 import type { BoardLaneEventRepository, OperationalHistoryRepository } from '../../src/application/ports/operation-history.js';
 import type { UsageRepository } from '../../src/application/ports/mission-measurements.js';
+import { mkdtemp as registeredMkdtemp } from '../helpers/temp-dir.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -31,7 +32,7 @@ function taskMd(frontmatter: Record<string, string>): string {
 }
 
 function createTempBacklog(files: Record<string, string>): string {
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'px-board-test-'));
+  const tmp = registeredMkdtemp('px-board-test-');
   for (const [relPath, content] of Object.entries(files)) {
     const fullPath = path.join(tmp, relPath);
     fs.mkdirSync(path.dirname(fullPath), { recursive: true });

@@ -18,6 +18,7 @@ import { agentFamily } from '../src/domain/agents.js';
 import { missionId, missionLabels } from '../src/domain/mission.js';
 import { repositoryId } from '../src/domain/repository.js';
 import { makeExecutePorts } from './fixtures/execute-mission-ports.js';
+import { mkdtemp as registeredMkdtemp } from './helpers/temp-dir.js';
 
 const directories: string[] = [];
 const repositories = {
@@ -28,7 +29,7 @@ const repositories = {
 };
 
 async function isolatedStore() {
-  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'parallix-task-2426-'));
+  const directory = registeredMkdtemp('parallix-task-2426-');
   directories.push(directory);
   const db = new SqliteDatabaseAdapter();
   await db.open({ path: path.join(directory, 'fixture.db') });
@@ -244,7 +245,7 @@ test('read-only production controller does not advertise Mission commands', asyn
 });
 
 test('production application services wire Mission commands through their shared controller', async () => {
-  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'parallix-task-2426-home-'));
+  const home = registeredMkdtemp('parallix-task-2426-home-');
   directories.push(home);
   const previousHome = process.env.PARALLIX_HOME;
   process.env.PARALLIX_HOME = home;

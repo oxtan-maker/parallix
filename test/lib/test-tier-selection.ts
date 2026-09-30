@@ -216,6 +216,11 @@ export function selectTierFiles(executionRoot: string): TierFileSelection {
     // cannot see the spawn, so both files are declared here.
     'task-2598-claude-credential-cell.test.ts',
     'task-2598-repro.test.ts',
+    // TASK-2620: a full CLI composition (real Git + SQLite) with only the agent
+    // launcher, Forgejo HTTP, and gate runner injected. The clean-runner Git and
+    // SQLite boundaries are not visible to the content heuristic, so this
+    // integration-ci test must be excluded from the CPU-budgeted unit tier.
+    'task-2620-integration-repair-loop-repro.test.ts',
   ]);
 
   // Classify subdir tests through the same boundary filter as root-level tests,

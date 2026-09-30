@@ -13,6 +13,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { mockModule, installModuleMocks } from './lib/module-mock.js';
+import { mkdtemp as registeredMkdtemp } from './helpers/temp-dir.js';
 const startReviewLoopModule = mockModule<typeof import('../src/adapters/review/review-loop.js')>('../src/adapters/review/review-loop.js', import.meta.url);
 await installModuleMocks();
 test.afterEach(() => mock.restoreAll());
@@ -24,7 +25,7 @@ let previousHome;
 let temporaryHome;
 
 test.beforeEach(() => {
-  temporaryHome = fs.mkdtempSync(path.join(os.tmpdir(), 'task-2377.04-cap-home-'));
+  temporaryHome = registeredMkdtemp('task-2377.04-cap-home-');
   previousHome = process.env.PARALLIX_HOME;
   process.env.PARALLIX_HOME = temporaryHome;
 });

@@ -35,7 +35,7 @@ export interface VerificationAdapterConfig {
 /** Adapter-owned machine markers for unchanged-tree verifier contention. */
 export function isTransientVerificationFailure(output: { stdout?: unknown; stderr?: unknown }): boolean {
   const diagnostic = `${String(output.stdout ?? '')}\n${String(output.stderr ?? '')}`;
-  return /\[unit-test-budget:exceeded\]|\[unit-test-budget\]\s+SUITE BUDGET EXCEEDED:/i.test(diagnostic);
+  return /\[unit-test-(?:budget|cpu):exceeded\]|\[unit-test-(?:budget|cpu)\]\s+SUITE (?:CPU )?BUDGET EXCEEDED:/i.test(diagnostic);
 }
 
 export interface VerificationProof {

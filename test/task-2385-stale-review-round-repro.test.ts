@@ -32,6 +32,7 @@ import {
   ReviewRound,
   startReview,
 } from '../src/domain/review.js';
+import { mkdtemp as registeredMkdtemp } from './helpers/temp-dir.js';
 
 function twoRoundReview(): Review {
   const change = { kind: 'local-branch' as const, sourceBranch: 'mission/task-2385', targetBranch: 'main' };
@@ -143,7 +144,7 @@ describe('TASK-2385 verdict persistence through the bound reviewer output seam',
   }
 
   function artifactDir(files: Record<string, string>) {
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'task-2385-'));
+    const dir = registeredMkdtemp('task-2385-');
     for (const [name, content] of Object.entries(files)) { fs.writeFileSync(path.join(dir, name), content, 'utf8'); }
     return dir;
   }

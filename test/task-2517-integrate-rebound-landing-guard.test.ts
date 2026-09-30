@@ -37,9 +37,9 @@ for (const failedStep of ['stats', 'cleanup', 'hook', 'none']) {
     if (failedStep === 'none') { await landing; }
     else { await assert.rejects(landing, error => error === abort); }
     assert.deepEqual(effects, failedStep === 'stats' ? ['decide', 'stats']
-      : failedStep === 'cleanup' ? ['decide', 'stats', 'cleanup']
-      : failedStep === 'hook' ? ['decide', 'stats', 'cleanup', 'hook']
-        : ['decide', 'stats', 'cleanup', 'hook', 'close']);
+      : failedStep === 'cleanup' ? ['decide', 'stats', 'hook', 'cleanup']
+      : failedStep === 'hook' ? ['decide', 'stats', 'hook']
+        : ['decide', 'stats', 'hook', 'cleanup', 'close']);
   });
 }
 

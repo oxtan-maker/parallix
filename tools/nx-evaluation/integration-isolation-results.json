@@ -1,0 +1,80 @@
+{
+  "purpose": "Bounded Linux process-isolation probe for integration-ci tests; not an adopted verification gate",
+  "date": "2026-09-29",
+  "population": "Only integration-ci files from test/lib/test-tier-selection.ts; agent-e2e and integration-local are excluded",
+  "execution": "Node 26.10.0 node:test with tsx, bootstrap-parallix-home, module mocks, concurrency 4, and /usr/bin/time user+system CPU",
+  "sqliteSubset": {
+    "files": 10,
+    "testsPassedInBothModes": 158,
+    "plain": {
+      "fileProcesses": { "cpuSeconds": 17.45, "wallSeconds": 4.45 },
+      "sharedProcess": { "cpuSeconds": 6.50, "wallSeconds": 6.27 }
+    },
+    "coverage": {
+      "fileProcesses": { "cpuSeconds": 21.38, "wallSeconds": 5.86, "coveredLines": 7017 },
+      "sharedProcess": { "cpuSeconds": 7.64, "wallSeconds": 6.56, "coveredLines": 7008 },
+      "onlyFileProcessesCoveredLines": 11,
+      "onlySharedProcessCoveredLines": 2
+    }
+  },
+  "screenedSubset": {
+    "selection": "Thirty integration-ci files with direct source-text markers for module mocks, mutable process/global state, hooks, and process/network launches excluded; TUI and type-only coverage files also excluded. This screen does not prove transitive purity.",
+    "files": 30,
+    "testFiles": [
+      "board-event-metrics-fixture.test.ts",
+      "board-event-recorder.test.ts",
+      "board-lane-events-migration.test.ts",
+      "review-backfill.test.ts",
+      "review-state.test.ts",
+      "session-marker-repository.test.ts",
+      "sqlite-adapter-cp1.test.ts",
+      "sqlite-async-cascade-cp3.test.ts",
+      "sqlite-importer-cp4.test.ts",
+      "sqlite-ports-cp2.test.ts",
+      "task-2312-label-sync.test.ts",
+      "task-2322.12-stray-persistence.test.ts",
+      "task-2339-aggregate-read-during-write.test.ts",
+      "task-2339-writes-outlive-close.test.ts",
+      "task-2348-implementer-attribution.test.ts",
+      "task-2350-reconcile-interrupted-handoff.test.ts",
+      "task-2357.a-historical-intake.test.ts",
+      "task-2357.c-unknown-review-fix-rounds.test.ts",
+      "task-2357.e-legacy-history-scope.test.ts",
+      "task-2357.g-per-metric-evidence.test.ts",
+      "task-2363-repository-identity.test.ts",
+      "task-2363-review-fix-rounds.test.ts",
+      "task-2363-windowed-cohorts.test.ts",
+      "task-2367-certification.test.ts",
+      "task-2367-regressions.test.ts",
+      "task-2367-repair.test.ts",
+      "task-2367-telemetry-schema.test.ts",
+      "task-2375-current-work-operation-repro.test.ts",
+      "task-2566-sonar-boundary-repro.test.ts",
+      "task-2585-github-publication-proof.test.ts"
+    ],
+    "testsPassedInProcessSharedAndReversedSharedRuns": 223,
+    "plain": {
+      "fileProcesses": { "cpuSeconds": 47.22, "wallSeconds": 10.46 },
+      "sharedProcess": { "cpuSeconds": 8.82, "wallSeconds": 8.10 },
+      "reversedSharedProcess": { "cpuSeconds": 8.56, "wallSeconds": 7.80 }
+    },
+    "coverage": {
+      "fileProcesses": { "cpuSeconds": 54.84, "wallSeconds": 12.99, "coveredLines": 10078 },
+      "sharedProcess": { "cpuSeconds": 10.51, "wallSeconds": 8.99, "coveredLines": 10069 },
+      "onlyFileProcessesCoveredLines": 38,
+      "onlySharedProcessCoveredLines": 29,
+      "sourceFilesInBothReports": 328,
+      "sourceLinesInBothReports": 46786
+    }
+  },
+  "interpretation": "Sharing saves about 44 CPU seconds in this 30-file covered subset. All assertions passed, including reversed order, but coverage differs and the shared process loses per-file HOME, PARALLIX_HOME, and module-cache isolation. Node 26 offers process and none test isolation modes, so the existing runner cannot preserve these boundaries while reusing one process. Keep the integration gate unchanged.",
+  "nodeReference": "https://nodejs.org/api/test.html#test-runner-execution-model",
+  "rawLocalLogs": "tmp/nx-evaluation/integration-*.log (ignored workspace files)",
+  "rawLogSha256": {
+    "screenedFileProcesses": "6c5cf2f1360958b87d06dde89134c787e9181621b06766fa21474f53a7a5851a",
+    "screenedSharedProcess": "165750680ec2d5bc39167808221a49ab0210219dec9eaefe08b817a998122a61",
+    "screenedCoveredFileProcesses": "5545553080cafb472ea3d9d3c05528925b164f5d4820b7e81d09651a6ce31e8e",
+    "screenedCoveredSharedProcess": "3f88fa4f3977caa017b3daefeff47062f43128adbf311552b314460b7bc7417d",
+    "screenedReversedSharedProcess": "8564ae6b2265470663fd2944340cdf515c283341650bc82f61ec2a9e334abb99"
+  }
+}

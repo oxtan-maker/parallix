@@ -3,8 +3,11 @@ import type { RevokeReviewDecisionUseCase } from '../../application/revoke-revie
 
 export const REVOKE_REVIEW_HELP = `Usage: px revoke-review [--slug <slug>] --decision <round-number> --reason <text> --operator <name> --expected-version <n>
 
-Withdraw the current effective approval after an operator's human judgement.
-The approval remains in review history with the operator, time, and reason.`;
+Withdraw the current effective approval after an operator's human judgement,
+or because the branch moved away from the change it approved (px status reports
+that as a stale approval). The approval remains in review history with the
+operator, time, and reason; a stale approval's new round reviews the revision
+that would land.`;
 
 function value(args: readonly string[], name: string): string | null {
   const index = args.lastIndexOf(name);

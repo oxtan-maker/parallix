@@ -12,6 +12,8 @@ Load before reviewing:
 
 `px status` is the authority for Mission state. Nothing in the repository records it.
 
+{{integrationRepair}}
+
 Review history is not optional context:
 - You may not be the agent family that reviewed the previous round. When a family is usage-blocked the workflow reroutes the launch, so the round-1 reviewer's context is simply gone. `px status {{slug}}` is how that continuity is preserved.
 - Do not re-raise a finding a previous round already settled. If the implementer fixed it, verify the fix instead of restating the finding. If the implementer pushed back, engage with their rationale — accept it, or explain specifically why it does not hold.

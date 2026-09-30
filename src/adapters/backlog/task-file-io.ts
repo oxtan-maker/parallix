@@ -3,6 +3,7 @@ import path from 'path';
 import { git } from '../git/git.js';
 import * as fmt from '../../application/presentation/cli-format.js';
 import { resolveTaskStorage } from '../config/product-config.js';
+import { bookkeepingCommitMessage } from '../../domain/approval-coverage.js';
 
 function resolveStableRepositoryId(rootDir: string): string {
   // Prefer the git common dir: shared by the primary checkout and every linked
@@ -304,7 +305,7 @@ function commitTaskFileUpdate(taskFilePath: string, message: string, rootDir: st
   const relativeTaskPath = path.relative(gitDir, taskFilePath);
   try {
     git(['-C', gitDir, 'add', relativeTaskPath]);
-    const result = git(['-C', gitDir, 'commit', '-m', message]);
+    const result = git(['-C', gitDir, 'commit', '-m', bookkeepingCommitMessage(message, 'backlog-mirror')]);
     if (result.status !== 0) {
       // If there's nothing to commit (e.g. no change), git commit exits with status 1
       // but we should check if it was really a failure or just no-op.

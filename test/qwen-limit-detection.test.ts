@@ -4,9 +4,9 @@ import assert from 'node:assert/strict';
 
 import { detectLimitHit, findLimitHitMatch, PATTERN_SETS } from '../src/application/services/agent-limit.js';
 
-test('qwen PATTERN_SETS exists with two patterns', () => {
+test('qwen PATTERN_SETS includes entitlement, quota, and rate-limit patterns', () => {
   assert.ok(PATTERN_SETS.qwen, 'qwen pattern set exists');
-  assert.equal(PATTERN_SETS.qwen.length, 2, 'two qwen patterns (quota + rate-limit)');
+  assert.equal(PATTERN_SETS.qwen.length, 3, 'three qwen patterns (entitlement + quota + rate-limit)');
 });
 
 test('qwen quota pattern matches "429 Allocated quota exceeded"', () => {

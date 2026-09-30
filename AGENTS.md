@@ -21,4 +21,4 @@ Push mission branches only to `review` (Forgejo), never to `origin` (GitHub). On
 - Read ADR 0059 before changing test selection. Tiers: `unit`, `integration-ci`, `integration-local`, `agent-e2e`.
 - Classify every new integration test in `test/lib/test-categories.ts`. Put it in the CI list, or in the local-only list with the missing GitHub-runner dependency named.
 - Production source files under `src/` and `web/` must stay at or under 500 lines. `test/file-size-cap.test.ts` (default unit suite) fails for any non-exempt file over the cap; fix with a cohesive, senior-reviewable refactor, not a file split. Pre-existing over-cap files are named in the test's exception list — work entries down and remove them as the debt shrinks.
-
+- Test source files must stay at or under 1,000 lines unless listed as pre-existing debt in `test/file-size-cap.test.ts`. Keep test files cohesive; group execution without merging files for speed.

@@ -6,6 +6,7 @@ import path from 'node:path';
 
 import { SqliteMeasurementStore } from '../src/adapters/sqlite/measurement-store.js';
 import { MeasurementStoreUnavailableError } from '../src/application/measurement-ports.js';
+import { mkdtemp as registeredMkdtemp } from './helpers/temp-dir.js';
 
 /**
  * TASK-2322.08 CP-2: the `MeasurementStorePort` / SQLite cut-over.
@@ -20,7 +21,7 @@ interface MeasureFixture {
 }
 
 function createMeasureFixture(label: string): MeasureFixture {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), `px-measure-${label}-`));
+  const dir = registeredMkdtemp(`px-measure-${label}-`);
   return { dir, dbPath: path.join(dir, 'parallix.db') };
 }
 

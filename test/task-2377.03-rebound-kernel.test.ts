@@ -191,6 +191,24 @@ test('task-2377.03: the hook fix prompt uses the same builder with hook slots', 
   assert.match(prompt, /The failing check re-runs automatically after your fix/);
 });
 
+test('task-2620 AC3: the gate fix prompt names the approved revision and states integration (not review) failed', async () => {
+  const prompts: string[] = [];
+  await rebound(
+    { ...gateReason, area: 'integration gate agent-smoke', approvedRevision: 'abc1234' },
+    contextFor({
+      startAgent: async (_step, options: any) => {
+        prompts.push(options.prompt('codex'));
+        return { agent: 'codex', result: { status: 0 } };
+      },
+    }),
+  );
+  assert.equal(prompts.length, 1);
+  assert.match(prompts[0], /Approved revision: abc1234/);
+  assert.match(prompts[0], /integration gate agent-smoke/);
+  assert.match(prompts[0], /The integration gate \(not the review gate\) failed/);
+  assert.match(prompts[0], /reviewed and approved, then a red pre-integration gate/);
+});
+
 test('task-2386: the rebound fix prompt states a stage-specific execute-verify-report contract', () => {
   const classification = classifyReboundReason(hookReason);
   const prompt = buildReboundFixPrompt({

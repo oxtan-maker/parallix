@@ -1,4 +1,5 @@
 import type { AgentFamily } from '../domain/agents.js';
+import { createGitChangeIdentity } from '../adapters/git/change-identity.js';
 import type { RepositoryId } from '../domain/repository.js';
 import type {
   AgentBlocklistRepository,
@@ -137,6 +138,7 @@ export function composeBoardProjection(deps: BoardProjectionCompositionDeps) {
       // the agent adapter above is left in place only as bounded recovery.
       currentWork,
       isProcessAlive: processLivenessProbe,
+      changeIdentity: createGitChangeIdentity(deps.rootDir, deps.gitFn ?? undefined),
       metricsAdapter: new ConcreteMetricsReadAdapter({
         laneEventRepo: deps.laneEventRepo,
         usageRepo: deps.usageRepo,

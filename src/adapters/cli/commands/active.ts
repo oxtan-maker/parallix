@@ -4,7 +4,7 @@ import { git, getWorktreeStatus } from '../../git/git.js';
 import * as path from 'node:path';
 import * as fmt from '../../../application/presentation/cli-format.js';
 import * as agents from '../../agents/agents.js';
-import { findMissionDir, findCheckpoints, getFirstLine, missionTitle, readMissionFile, inferSlug, getMissionYear, missionDirForSlug, isWorkflowGeneratedArtifact } from '../../filesystem/mission-utils.js';
+import { findMissionDir, findCheckpoints, getFirstLine, readMissionFile, inferSlug, getMissionYear, missionDirForSlug, isWorkflowGeneratedArtifact } from '../../filesystem/mission-utils.js';
 import * as handoff from './handoff.js';
 import { resolveTaskFile, transitionTask, getTaskStatus, getTaskImplementer } from '../../backlog/backlog.js';
 import { recordStageStatsSafe, startReviewLoop } from '../../review/review-loop.js';
@@ -42,7 +42,9 @@ function suppressTaskSyncCommitLog(l) {
 
 /**
  * @param {string[]} args
- * @param {{inferSlugFn?: Function, service?: {execute: Function}, controller?: {dispatch: Function}, controllerFactory?: Function, rootDir?: string, exitFn?: Function, logFn?: Function, errorFn?: Function}} [options]
+ * `missionTitleFn` resolves the headline title from the same authority `px status`
+ * reports (composition supplies it); without one the headline names only the slug.
+ * @param {{inferSlugFn?: Function, service?: {execute: Function}, controller?: {dispatch: Function}, controllerFactory?: Function, rootDir?: string, exitFn?: Function, logFn?: Function, errorFn?: Function, missionTitleFn?: (slug: string) => string | null | Promise<string | null>}} [options]
  */
 async function active(args, options = {}) {
   const {
@@ -55,7 +57,7 @@ async function active(args, options = {}) {
     exitFn = process.exit,
     logFn = fmt.log.info,
     errorFn = fmt.log.fail,
-    missionTitleFn = missionTitle
+    missionTitleFn = () => null
   } = options;
   const explicitSlug = args[0];
   const slug = inferSlugFn(explicitSlug);
@@ -81,8 +83,10 @@ async function active(args, options = {}) {
   // Strip a trailing mission id from the title so the headline never repeats
   // the slug (SC4/Why Now: repeated identity is a defect). Works for any id
   // shape, not just `task-NNNN` (e.g. `parallix-adhoc-<NNNN>` adhoc slugs).
+  // The `<Title>` draft scaffold is not a title, so it is never shown.
   const stripTrailingId = (t: string) => t.replace(/\s*\([\w.-]+\)\s*$/i, '');
-  const title = stripTrailingId(missionTitleFn(normalizedSlug) ?? '');
+  const recordedTitle = stripTrailingId((await missionTitleFn(normalizedSlug)) ?? '');
+  const title = recordedTitle.startsWith('<Title>') ? '' : recordedTitle;
   logFn(`Mission ${fmt.slug(normalizedSlug)}${title ? `: ${title}` : ''}`);
 
   // Allow operators to pin the implementer agent family via CLI flag instead of WORKFLOW_AGENT env var.

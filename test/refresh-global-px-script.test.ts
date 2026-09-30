@@ -67,6 +67,7 @@ test('scripts/refresh-global-px.sh is syntactically valid bash', () => {
 
 test('scripts/refresh-global-px.sh rebuilds and reinstalls from a packed tarball without allocating a version', () => {
   const content = fs.readFileSync(SCRIPT_PATH, 'utf8');
+  assert.match(content, /npm ci/);
   assert.match(content, /npm run build/);
   assert.match(content, /npm pack/);
   assert.match(content, /npm install -g/);

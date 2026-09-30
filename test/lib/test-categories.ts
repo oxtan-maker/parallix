@@ -243,10 +243,26 @@ export const INTEGRATION_CI_TESTS: readonly string[] = [
   // a real temporary Git repository with a retained mission worktree, so it
   // crosses the git boundary and runs in the integration layer.
   'task-2517-landed-squash-base-branch-detection.test.ts',
+  // TASK-2620: composes the production `px integrate` CLI against a temporary
+  // Git repository and a migrated SQLite Mission store. A red integration gate
+  // revokes the approval, the bounded implementer budget repairs once, the
+  // repaired revision re-reviews through the single live `px review --continue`
+  // route, and the mission stops in the integration lane. Only the agent
+  // launcher, the Forgejo HTTP layer, and the gate runner are injected, so the
+  // real Git and SQLite boundaries are clean-runner dependencies and the suite
+  // is CI-safe. It is a full CLI composition (real git + SQLite), so it runs in
+  // the integration layer rather than the CPU-budgeted unit tier.
+  'task-2620-integration-repair-loop-repro.test.ts',
   // TASK-2525.03: reads repository configuration and creates a temporary Git
   // repository to prove local branch discovery. A clean GitHub runner provides
   // every dependency, so it is CI-safe.
   'task-2525.03-sonar-enforcement.test.ts',
+  // TASK-2620: approval coverage of bookkeeping commits against a temporary
+  // Git repository; git is on every GitHub runner, so CI-safe.
+  'task-2620-bookkeeping-coverage.test.ts',
+  // TASK-2555: runs px rebase against a temporary Git repository and a migrated
+  // SQLite Mission store; git and SQLite are on every GitHub runner, so CI-safe.
+  'task-2555-rebase-stale-approval.test.ts',
   // TASK-2582: real migrated SQLite lifecycle boundaries; CI-safe.
   'task-2582-lifecycle-ordering.test.ts',
   'task-2582-repro.test.ts',
@@ -299,6 +315,9 @@ export const INTEGRATION_CI_TESTS: readonly string[] = [
   // TASK-2577: checks fixture teardown in local Node subprocesses under
   // private temporary directories, using only clean-runner dependencies.
   'task-2577-tmp-fixture-leaks-repro.test.ts',
+  // TASK-2621: uses temporary directories plus mocked npm and px binaries;
+  // all process boundaries are available on a clean GitHub-hosted runner.
+  'task-2621-repro.test.ts',
   'test-hygiene.test.ts',
   'tui-command-flow.test.ts',
   'tui-pty-smoke.test.ts',

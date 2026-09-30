@@ -10,6 +10,7 @@ import {
   resolveTaskStorage,
   validateWorkflowConfig,
 } from '../src/adapters/config/product-config.js';
+import { mkdtemp as registeredMkdtemp } from './helpers/temp-dir.js';
 
 // task-2455.02: `adapters.tasks.provider` was schema-declared and written by
 // setup, but no code read it. An operator could persist `other`, see it echoed
@@ -18,7 +19,7 @@ import {
 // configuration validation and must not resolve to a task adapter.
 
 function withTempRoot(config: unknown, fn: (_root: string) => void): void {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'task-2455-02-provider-'));
+  const root = registeredMkdtemp('task-2455-02-provider-');
   try {
     fs.writeFileSync(path.join(root, 'workflow.config.json'), `${JSON.stringify(config, null, 2)}\n`, 'utf8');
     fn(root);

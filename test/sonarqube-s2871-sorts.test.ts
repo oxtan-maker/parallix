@@ -5,6 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { resolveKnownAgentFamilies } from '../src/adapters/agents/known-agent-families.js';
 import { discoverTestFiles } from '../src/adapters/verification/coverage-gate.js';
+import { mkdtemp as registeredMkdtemp } from './helpers/temp-dir.js';
 
 // Regression guard for SonarQube S2871 (implicit string sort). The mission
 // baseline flagged every default-ordering `.sort()` in `src/` as a latent
@@ -15,7 +16,7 @@ import { discoverTestFiles } from '../src/adapters/verification/coverage-gate.js
 
 /** Create a temp root with a config/agents.json written from `contents`. */
 function tempRoot(contents: string): string {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'sonarqube-s2871-'));
+  const root = registeredMkdtemp('sonarqube-s2871-');
   fs.mkdirSync(path.join(root, 'config'), { recursive: true });
   fs.writeFileSync(path.join(root, 'config', 'agents.json'), contents);
   return root;

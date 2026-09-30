@@ -3,6 +3,8 @@ export interface NoOutputWatchdog {
   onNoOutput?: (_event: { command: string; args: string[]; pid: number | undefined; elapsedMs: number; sawOutput: boolean; msSinceLastOutput: number | null }) => void;
   initialDelayMs?: number;
   intervalMs?: number;
+  /** Abort a launch which has not emitted any stdout/stderr by this deadline. */
+  maxNoOutputMs?: number;
 }
 
 /** The same liveness clock for a child process or an in-process SDK session. */

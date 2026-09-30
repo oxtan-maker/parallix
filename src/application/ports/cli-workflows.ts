@@ -60,6 +60,8 @@ export interface StatusReviewRound {
   readonly pushbacks: readonly string[];
   /** Operator withdrawal of this round's approval, if any. */
   readonly revocation?: { readonly by: string; readonly reason: string; readonly at: string } | null;
+  /** The branch move that superseded this round's approval, if any. */
+  readonly supersession?: { readonly revision: string; readonly by: string; readonly at: string } | null;
 }
 
 /** Mission-specific data returned by status projection. */
@@ -82,6 +84,10 @@ export interface StatusMissionData {
   readonly reviewDisposition?: string;
   /** A local self-review awaits an external formal approval. */
   readonly approvalOwed?: boolean;
+  /** Whether the effective approval still covers what the branch would land (TASK-2555). */
+  readonly approvalCoverage?: import('../../domain/approval-coverage.js').ApprovalCoverage | null;
+  /** The latest integration repair: failed gate, repair range, re-review outcome (TASK-2620). */
+  readonly integrationRepair?: import('../integration-repair-review.js').IntegrationRepairFacts | null;
   /** Review history rounds. */
   readonly reviewHistory: readonly StatusReviewRound[];
   /**

@@ -4,7 +4,14 @@ import { apiRequest, normalizeBaseUrl, parseRepoSlug, unique } from './setup-rev
 
 const { spawnSync } = _cp;
 
-export function suggestedForgejoUsers(): string[] { return unique([...eligibleAgentsForStep('active'), ...eligibleAgentsForStep('review')]); }
+/**
+ * The Forgejo login Parallix itself acts as (TASK-2620): it dismisses a stale
+ * approval through the review dismissal API instead of posting a review as
+ * another login. Dismissal needs repository admin, so setup grants it admin.
+ */
+export const PARALLIX_FORGEJO_USER = 'parallix';
+
+export function suggestedForgejoUsers(): string[] { return unique([...eligibleAgentsForStep('active'), ...eligibleAgentsForStep('review'), PARALLIX_FORGEJO_USER]); }
 export function readConfiguredReviewRemote(rootDir?: string, remoteName?: string): string | null {
   const result = spawnSync('git', ['-C', rootDir || process.cwd(), 'remote', 'get-url', remoteName || 'review'], { encoding: 'utf8' });
   return result.status === 0 ? (result.stdout || '').trim() || null : null;
@@ -42,11 +49,13 @@ export function ensureRepoCollaborators(baseUrl: string, repoSlug: string, owner
 
 export function ensureForgejoUser(baseUrl: string, user: string, ownerLogin: string, ownerPassword: string, password: string, requestFn: Function = apiRequest, options: any = {}) {
   const normalizedBaseUrl = normalizeBaseUrl(baseUrl);
-  const existing = requestFn('GET', `${normalizedBaseUrl}/api/v1/users/${encodeURIComponent(user)}`, { basicAuth: { user: ownerLogin, password: ownerPassword } });
-  if (existing.ok || existing.statusCode !== 404) {return { ok: true, created: false };}
-  const created = requestFn('POST', `${normalizedBaseUrl}/api/v1/admin/users`, { basicAuth: { user: ownerLogin, password: ownerPassword }, body: { username: user, email: options.email || `${user}@example.com`, password, must_change_password: false } });
+  const auth = options.ownerToken ? { token: options.ownerToken } : { basicAuth: { user: ownerLogin, password: ownerPassword } };
+  const existing = requestFn('GET', `${normalizedBaseUrl}/api/v1/users/${encodeURIComponent(user)}`, auth);
+  if (existing.ok) {return { ok: true, created: false };}
+  if (existing.statusCode !== 404) {return { ok: false, error: `failed to check Forgejo user ${user} (HTTP ${existing.statusCode || 'n/a'})`, response: existing.data };}
+  const created = requestFn('POST', `${normalizedBaseUrl}/api/v1/admin/users`, { ...auth, body: { username: user, email: options.email || `${user}@example.com`, password, must_change_password: false } });
   if (created.ok) {return { ok: true, created: true };}
-  const scopeHint = created.statusCode === 403 ? ` "${ownerLogin}" may not be a Forgejo site admin; create the user manually (e.g. \`forgejo admin user create --username ${user} --email ${user}@example.com --password '<password>'\`) and re-run setup-review.` : '';
+  const scopeHint = created.statusCode === 403 ? ` "${ownerLogin}" may not be a Forgejo site admin; owner-token bootstrap also requires write:admin scope. Re-run px setup-review with the site admin password to rotate the token, or create the user manually (e.g. \`forgejo admin user create --username ${user} --email ${user}@example.com --password '<password>'\`) and re-run setup-review.` : '';
   return { ok: false, error: `failed to create Forgejo user ${user} (HTTP ${created.statusCode || 'n/a'}).${scopeHint}`, response: created.data };
 }
 

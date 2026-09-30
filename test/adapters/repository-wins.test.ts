@@ -10,6 +10,7 @@ import { ConcreteGateReadAdapter } from '../../src/adapters/backlog/concrete-gat
 import { ConcreteReviewReadAdapter } from '../../src/adapters/backlog/concrete-review-read-adapter.js';
 import { repositoryId } from '../../src/domain/repository.js';
 import type { MissionId } from '../../src/domain/mission.js';
+import { mkdtemp as registeredMkdtemp } from '../helpers/temp-dir.js';
 
 // SC11 — Repository-wins test: concrete adapters prefer committed
 // integration-base/Git state over any SQLite or board cache.
@@ -30,7 +31,7 @@ function taskMd(frontmatter: Record<string, string | string[]>): string {
 }
 
 function createTempBacklog(files: Record<string, string>): string {
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'px-repo-wins-'));
+  const tmp = registeredMkdtemp('px-repo-wins-');
   for (const [relPath, content] of Object.entries(files)) {
     const fullPath = path.join(tmp, relPath);
     fs.mkdirSync(path.dirname(fullPath), { recursive: true });
@@ -102,7 +103,7 @@ test('SC11: ConcreteMissionReadAdapter prefers tasks store over completed store 
 });
 
 test('SC11: ConcreteGitReadAdapter reads from Git config (repository authority)', async () => {
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'px-git-wins-'));
+  const tmp = registeredMkdtemp('px-git-wins-');
   try {
     const adapter = new ConcreteGitReadAdapter({
       rootDir: tmp,
@@ -118,7 +119,7 @@ test('SC11: ConcreteGitReadAdapter reads from Git config (repository authority)'
 });
 
 test('SC11: ConcreteGateReadAdapter returns unknown when no gate artifacts exist (repository authority)', async () => {
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'px-gate-wins-'));
+  const tmp = registeredMkdtemp('px-gate-wins-');
   try {
     const adapter = new ConcreteGateReadAdapter({
       rootDir: tmp,
@@ -132,7 +133,7 @@ test('SC11: ConcreteGateReadAdapter returns unknown when no gate artifacts exist
 });
 
 test('SC11: ConcreteReviewReadAdapter returns null when no review state exists (repository authority)', async () => {
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'px-review-wins-'));
+  const tmp = registeredMkdtemp('px-review-wins-');
   try {
     const adapter = new ConcreteReviewReadAdapter({
       rootDir: tmp,

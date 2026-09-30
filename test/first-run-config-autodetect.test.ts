@@ -14,11 +14,12 @@ import {
 } from '../src/adapters/agents/launcher-selection.js';
 import { readAgentConfig } from '../src/adapters/agents/agent-config.js';
 import { eligibleAgentsForStep } from '../src/adapters/agents/launcher-selection.js';
+import { mkdtemp as registeredMkdtemp } from './helpers/temp-dir.js';
 
 const CONFIG_REL = 'config/agents.json';
 
 function withTempDir(fn) {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'first-run-config-'));
+  const root = registeredMkdtemp('first-run-config-');
   try {
     return fn(root);
   } finally {

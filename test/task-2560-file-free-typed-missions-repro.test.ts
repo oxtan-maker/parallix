@@ -7,6 +7,7 @@ import { ensureMissionFile } from '../src/adapters/cli/commands/draft-setup.js';
 import { runDraftCommand } from '../src/adapters/cli/commands/draft.js';
 import { HandoffCommandUseCase } from '../src/application/handoff-command-use-case.js';
 import { SLUG, LEGACY_MISSION_LOAD, makePorts, makeRecorder, runOptions } from './helpers/handoff-ports.js';
+import { mkdtemp as registeredMkdtemp } from './helpers/temp-dir.js';
 
 function containsFile(directory: string): boolean {
   for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
@@ -17,7 +18,7 @@ function containsFile(directory: string): boolean {
 }
 
 test('a new typed draft does not prepare a retired mission directory', () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'parallix-typed-draft-'));
+  const root = registeredMkdtemp('parallix-typed-draft-');
   try {
     assert.equal(ensureMissionFile(root, 'task-2560-repro', { logFn: (message) => message }), '');
     assert.equal(fs.existsSync(path.join(root, 'missions')), false);
@@ -45,7 +46,7 @@ test('the self-hosted tree contains no retired workflow ledger roots', () => {
 });
 
 test('a normal typed draft workflow does not recreate the retired mission tree', async () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'parallix-file-free-draft-'));
+  const root = registeredMkdtemp('parallix-file-free-draft-');
   const slug = 'task-2560-repro';
   try {
     const missionServices = async () => ({

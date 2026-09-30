@@ -4,6 +4,7 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import { mockModule, installModuleMocks } from './lib/module-mock.js';
+import { mkdtemp as registeredMkdtemp } from './helpers/temp-dir.js';
 const startReviewLoopModule = mockModule<typeof import('../src/adapters/review/review-loop.js')>('../src/adapters/review/review-loop.js', import.meta.url);
 await installModuleMocks();
 const { startReviewLoop } = startReviewLoopModule;
@@ -20,7 +21,7 @@ test.afterEach(() => mock.restoreAll());
 // clean. The ESM seam migration left these doubles partial on purpose.
 function happyPathDeps(opts: { verbose?: boolean; outcome?: string; findings?: string[] }, logs: string[], errors: string[], launches: string[]): any {
   return {
-    worktree: fs.mkdtempSync(path.join(os.tmpdir(), 'task-2477-pres-')),
+    worktree: registeredMkdtemp('task-2477-pres-'),
     maxAttempts: 1,
     verbose: opts.verbose,
     maybeUpdateGraphifyBeforeReviewFn: () => {},
@@ -49,7 +50,7 @@ test('single pre-review gate pass emission on the happy path', async () => {
   const logs: string[] = [];
   const errors: string[] = [];
   const launches: string[] = [];
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'task-2477-gate-'));
+  const root = registeredMkdtemp('task-2477-gate-');
   try {
     await startReviewLoop('task-999', {
       ...happyPathDeps({ outcome: 'APPROVED' }, logs, errors, launches),
@@ -119,7 +120,7 @@ test('incomplete reviewer-artifact infrastructure failure survives at default ve
   const logs: string[] = [];
   const errors: string[] = [];
   const launches: string[] = [];
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'task-2477-pres-'));
+  const root = registeredMkdtemp('task-2477-pres-');
   try {
     await startReviewLoop('task-999', {
       ...happyPathDeps({ outcome: 'APPROVED' }, logs, errors, launches),

@@ -27,6 +27,7 @@ import { repositoryId } from '../src/domain/repository.js';
 import { changeRevision } from '../src/domain/review.js';
 import type { Review } from '../src/domain/review.js';
 import type { OperationalHistoryEntry, OperationalHistoryRepository } from '../src/application/ports/operation-history.js';
+import { mkdtemp as registeredMkdtemp } from './helpers/temp-dir.js';
 
 const MISSION = missionId('task-2343');
 
@@ -104,7 +105,7 @@ test('a lifecycle operation that changes no lane still records its own entry', a
 // ---------------------------------------------------------------------------
 
 test('recordGateResult writes the exit code and derives the status from it', () => {
-  const missionDir = fs.mkdtempSync(path.join(os.tmpdir(), 'px-gate-'));
+  const missionDir = registeredMkdtemp('px-gate-');
   try {
     const record = recordGateResult(missionDir, {
       area: 'all', command: './scripts/verify-local.sh all', exitCode: 0,
@@ -127,7 +128,7 @@ test('recordGateResult writes the exit code and derives the status from it', () 
 });
 
 test('a null gate exit code is recorded as failed, never as passed', () => {
-  const missionDir = fs.mkdtempSync(path.join(os.tmpdir(), 'px-gate-'));
+  const missionDir = registeredMkdtemp('px-gate-');
   try {
     const record = recordGateResult(missionDir, { area: 'all', command: 'gate', exitCode: null });
     assert.equal(record!.status, 'failed');
@@ -152,7 +153,7 @@ test('ConcreteGateReadAdapter reads the gate artifact from the mission worktree'
   // Verification runs in the mission worktree and writes the gitignored
   // artifact there; the board is composed from the primary checkout, which
   // never receives it.
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'px-gate-worktree-'));
+  const tmp = registeredMkdtemp('px-gate-worktree-');
   try {
     const primaryRoot = path.join(tmp, 'primary');
     const worktreeRoot = path.join(tmp, 'wt-task-2343');

@@ -746,13 +746,18 @@ test('lead starts long forward workflows without blocking fleet supervision', ()
   );
   assert.match(
     composition,
-    /void Promise\.resolve\(\)\.then\(work\)[\s\S]*?currentWork\.ended\(publication\)/,
+    /const forward: Promise<unknown> = Promise\.resolve\(\)\.then\(work\)[\s\S]*?currentWork\.ended\(publication\)/,
     'the forward workflow runs in the background and clears its liveness marker when it ends',
   );
   assert.match(
     runAction,
-    /startForward\(mission, action, \(\) => Promise\.resolve\(run\(invocation\.args, \{ exitFn: exitAsError, exit: exitAsError \}\)\)\)/,
-    'review work is also started without awaiting its autonomous loop',
+    /startForward\(mission, action, \(\) => run\(\s*\[invocation\.command, \.\.\.invocation\.args\],\s*\{ baseCwd: missionWorktree,/,
+    'review work is also started without awaiting its autonomous loop, targeted at the mission worktree',
+  );
+  assert.match(
+    composition,
+    /createLeadCommand\(buildLeadPort\(services, forwards\)\)\(args\); \} finally \{ await Promise\.allSettled\(forwards\); \}/,
+    'lead settles the forwards it started only after its fleet loop returns, before its graph closes',
   );
 });
 
@@ -806,14 +811,15 @@ test('a pending agent does not stop the queue from being read for new missions',
 });
 
 test('a live or claimed mission is polled, not spun on', async () => {
-  // The mission stays live for a fixed window. A loop that treats a step
-  // returning `watching` as a wake-up reads the queue thousands of times in it.
+  // Keep the mission live until eight polling intervals have elapsed. Advancing
+  // only from wait avoids a clock boundary between attention and liveness.
+  // A loop that treats `watching` as a wake-up still reads the queue too often.
   const live = item({ working: true, workingDetail: 'execute — running (live, now)' });
-  const started = Date.now();
+  let elapsedPolls = 0;
   let reads = 0;
   const waits: number[] = [];
   const ran: string[] = [];
-  const current = (): AttentionObservation[] => (Date.now() - started < 40 ? [live] : []);
+  const current = (): AttentionObservation[] => (elapsedPolls < 8 ? [live] : []);
   const port: SupervisorPort = {
     attention: async () => { reads += 1; return current(); },
     missionExists: async () => true,
@@ -821,7 +827,11 @@ test('a live or claimed mission is polled, not spun on', async () => {
     runAction: async (mission) => { ran.push(mission); },
     claimRecovery: async () => async () => {},
     launchRecovery: async () => 'claude ran in /tmp/worktree',
-    wait: (milliseconds) => { waits.push(milliseconds); return pause(milliseconds); },
+    wait: (milliseconds) => {
+      waits.push(milliseconds);
+      const poll = pause(milliseconds);
+      return { elapsed: poll.elapsed.then(() => { elapsedPolls += 1; }), cancel: poll.cancel };
+    },
   };
 
   await superviseFleet(port, { pollMs: 5 });

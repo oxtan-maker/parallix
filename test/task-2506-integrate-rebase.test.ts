@@ -11,6 +11,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { mockModule, installModuleMocks } from './lib/module-mock.js';
+import { mkdtemp as registeredMkdtemp } from './helpers/temp-dir.js';
 
 const git = mockModule<typeof import('../src/adapters/git/git.js')>('../src/adapters/git/git.js', import.meta.url);
 const missionUtils = mockModule<typeof import('../src/adapters/filesystem/mission-utils.js')>('../src/adapters/filesystem/mission-utils.js', import.meta.url);
@@ -25,7 +26,7 @@ const integrate = integrateModule.default;
 
 const SLUG = 'task-2506-intreg';
 const BRANCH = `mission/${SLUG}`;
-const ROOT = fs.mkdtempSync(path.join(os.tmpdir(), 'parallix-task-2506-'));
+const ROOT = registeredMkdtemp('parallix-task-2506-');
 
 /**
  * Stateful git double: the probe merge conflicts only until the integration

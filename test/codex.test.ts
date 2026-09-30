@@ -8,6 +8,7 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import { mockModule, installModuleMocks } from './lib/module-mock.js';
+import { mkdtemp as registeredMkdtemp } from './helpers/temp-dir.js';
 const resolveCodexCommandModule = mockModule<typeof import('../src/adapters/agents/codex.js')>('../src/adapters/agents/codex.js', import.meta.url);
 const extractCodexSessionIdModule = mockModule<typeof import('../src/adapters/agents/codex.js')>('../src/adapters/agents/codex.js', import.meta.url);
 const buildCodexDraftInvocationModule = mockModule<typeof import('../src/adapters/agents/codex.js')>('../src/adapters/agents/codex.js', import.meta.url);
@@ -120,8 +121,8 @@ test('buildCodexDraftInvocation applies headless multi-agent and trust overrides
 });
 
 test('ensureCodexHome completes without optional source config', () => {
-  const fakeHome = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-nohome-'));
-  const worktree = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-wt2-'));
+  const fakeHome = registeredMkdtemp('codex-nohome-');
+  const worktree = registeredMkdtemp('codex-wt2-');
   const origHome = process.env.HOME;
   try {
     process.env.HOME = fakeHome;

@@ -6,7 +6,6 @@ import { resolveTaskFile, getTaskStatus, getTaskImplementer } from '../backlog/b
 import { getPrStatus } from './review-adapter.js';
 import { readReviewState, reconcileInterruptedHandoff } from './review-state.js';
 import type { MissionStore } from '../../application/domain-ports.js';
-import { recoverLegacyIntegrationRepairReview } from '../../application/integration-repair-review.js';
 import { startAgent } from '../agents/agents.js';
 import { startReviewLoop, recordStageStatsSafe } from './review-loop.js';
 import type { ReviewWorkflowContext, ReviewWorkflowPort } from '../../application/ports/review-workflow.js';
@@ -35,9 +34,6 @@ export class ReviewWorkflowAdapter implements ReviewWorkflowPort {
   async start(context: ReviewWorkflowContext): Promise<void> { await this.runLoop(context, false); }
   async continue(context: ReviewWorkflowContext): Promise<void> {
     const o = context.options as typeof this._defaults;
-    if (o.missionStore && !context.args.includes('--dry-run')) {
-      await recoverLegacyIntegrationRepairReview(o.missionStore, context.slug);
-    }
     // A review stopped in `human-intervention` cannot resume by relaunching the
     // loop (the loop drives off the persisted ReviewState phase, not the
     // domain intervention flag); clearing the stop is a review-state mutation

@@ -99,6 +99,15 @@ test('prohibited workstation dependencies cannot enter the GitHub-safe lane', ()
   assert.deepEqual(violations, [], 'move these files to INTEGRATION_LOCAL_TESTS');
 });
 
+test('unit fixtures register temporary directories through the shared helper', () => {
+  const direct: string[] = [];
+  for (const file of selected([])) {
+    const source = fs.readFileSync(path.join(testRoot, file), 'utf8');
+    if (/\bmkdtempSync\s*\(/.test(source)) { direct.push(file); }
+  }
+  assert.deepEqual(direct, [], 'use test/helpers/temp-dir.ts so failed or killed workers reclaim fixture roots');
+});
+
 test('the real-agent and lifecycle suites stay out of the unit and integration lanes', () => {
   const lanes = [selected([]), selected(['--integration'])];
   for (const file of AGENT_E2E_TESTS) {
@@ -114,6 +123,7 @@ test('the verification tiers have stable npm commands', () => {
   assert.equal(pkg.scripts['test:integration:ci'], 'npm run build && npm run test:integration:ci:prebuilt');
   assert.equal(pkg.scripts['test:integration:ci:prebuilt'], 'PARALLIX_PREBUILT_PACK=1 FORCE_COLOR=0 tsx test/run-default-tests.ts --integration-ci');
   assert.equal(pkg.scripts['test:integration:local'], 'FORCE_COLOR=0 tsx test/run-default-tests.ts --integration-local');
+  assert.equal(pkg.scripts['test:integration:local:prebuilt'], 'PARALLIX_PREBUILT_PACK=1 FORCE_COLOR=0 tsx test/run-default-tests.ts --integration-local');
   assert.equal(pkg.scripts['test:agent-e2e'], 'node --import tsx --import ./test/bootstrap-e2e-parallix-home.ts test/e2e-real-agent-smoke.test.ts');
   assert.equal(pkg.scripts['test:lifecycle-e2e'], 'node --test --import tsx --import ./test/bootstrap-e2e-parallix-home.ts test/e2e-mission-lifecycle.test.ts');
   // The GitHub-safe aggregate covers build, typecheck, hermetic unit tests, the

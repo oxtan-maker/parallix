@@ -34,7 +34,7 @@ import { createGithubPublishStatusUseCase } from './github-publish-status.js';
 import { createDraftCommand } from '../interfaces/cli/draft.js';
 import type { HandoffMissionServicesPort } from '../application/ports/handoff-workflow.js';
 import { createIntegrateCommand } from '../interfaces/cli/integrate.js';
-import { createLeadCommand, leadInvocation } from '../interfaces/cli/lead.js';
+import { createLeadCommand, leadFinishesParkedApproval, leadInvocation } from '../interfaces/cli/lead.js';
 import { recordApproval } from '../adapters/review/review-round.js';
 import { currentWorkPublication, type CurrentWorkPort } from '../application/recording/current-work-recorder.js';
 import type { AttentionAction } from '../application/projections/board.js';
@@ -46,8 +46,7 @@ import { pollingPause } from '../adapters/process/polling-pause.js';
 import { ConcreteCurrentWorkReadAdapter } from '../adapters/backlog/concrete-current-work-read-adapter.js';
 import { CURRENT_WORK_TTL_MS, reconcileCurrentWork } from '../application/projections/current-work.js';
 import { processLivenessProbe } from '../adapters/process/process-liveness.js';
-import { missionId } from '../domain/mission.js';
-import { hasIntegrationRepairHistory } from '../application/integration-repair-review.js';
+import { missionId, type Mission } from '../domain/mission.js';
 import { conventionalWorktreePath, resolveWorktree } from '../adapters/git/worktree.js';
 import { git } from '../adapters/git/git.js';
 import * as agents from '../adapters/agents/agents.js';
@@ -62,7 +61,11 @@ import { createStatusCommand } from '../interfaces/cli/status.js';
 import { createResolveCommand, createVerdictCommand, type ReviewVerbPorts } from '../interfaces/cli/review-verbs.js';
 import { createRevokeReviewCommand } from '../interfaces/cli/revoke-review.js';
 import { RevokeReviewDecisionUseCase } from '../application/revoke-review-decision-use-case.js';
-import { dismissProviderApproval } from '../adapters/review/review-adapter.js';
+import { createGitChangeIdentity } from '../adapters/git/change-identity.js';
+import { dismissProviderApproval, postComment } from '../adapters/review/review-adapter.js';
+import { readToken } from '../adapters/forgejo/forgejo.js';
+import { PARALLIX_FORGEJO_USER } from '../adapters/review/setup-review-repository.js';
+import { integrationRepairPrComment, latestIntegrationRepair } from '../application/integration-repair-review.js';
 import { readReviewState } from '../adapters/review/review-state.js';
 import {
   createAssignCommand,
@@ -89,7 +92,6 @@ import { createSetupCommand } from '../interfaces/cli/setup.js';
 import setupReview from '../adapters/cli/commands/setup-review.js';
 import { createStatsCommand, createStatsWorkflowAdapter } from '../adapters/cli/commands/stats.js';
 import {
-  createStatusBoardAdapter,
   createStatusGitAdapter,
   createStatusPrAdapter,
   createStatusAgentAdapter,
@@ -101,6 +103,7 @@ import { runWebCommand } from '../interfaces/cli/web.js';
 import { loadWebAssets, resolveWebAssetRoot } from '../adapters/web/asset-store.js';
 import { deriveAliases, type Command, type MainOptions } from '../interfaces/cli/runtime.js';
 import { createProductionApplicationServices } from './application-services.js';
+import { createStatusBoardFor, statusMissionTitle } from './status-board.js';
 import { bindReviewPersistence, reviewLoopBindings } from './review-persistence.js';
 import { SqliteSessionMarkerAdapter } from '../adapters/sqlite/session-marker-adapter.js';
 import type { SqliteDatabaseAdapter } from '../adapters/sqlite/database-adapter.js';
@@ -197,26 +200,41 @@ function createCommandRegistry(rootDir: string): Record<string, Command> {
         if (code !== 0) { throw new Error(`Integration exited with status ${code}`); }
       }),
       missionServicesFn,
-      reReviewFn: (slug: string) => reReviewRepairedRevision(slug, services),
+      reReviewFn: (slug: string) => reReviewRepairedRevision(slug, services, innerOptions.nestedWork),
     }));
   // An integration-gate repair that changed the approved revision is reviewed
   // again through exactly what `px review <slug> --start` runs. Approved means
   // the review came back with a new approved round and moved the mission to
   // integration; the superseded round stays in the history.
-  const reReviewRepairedRevision = async (slug: string, services: Awaited<ReturnType<typeof createProductionApplicationServices>>) => {
+  const reReviewRepairedRevision = async (slug: string, services: Awaited<ReturnType<typeof createProductionApplicationServices>>, nestedWork?: unknown) => {
     if (!services.mission) { throw new Error('mission services are unavailable'); }
     const before = await services.mission.store.load(missionId(slug));
     const roundBefore = before.kind === 'found' ? before.mission.review?.rounds.at(-1) : null;
     await registry.review([slug, '--continue'], {
       integrationOwnsReview: true,
+      // The re-review runs inside `px integrate`: it publishes under that
+      // operation and hands the board back to it when it ends (TASK-2620).
+      nestedWork,
       exit: (code?: number) => { if (code) { throw new Error(`px review ${slug} --continue exited with status ${code}`); } },
     });
     const after = await services.mission.store.load(missionId(slug));
     if (after.kind !== 'found' || after.mission.status !== 'integration' || !after.mission.review) { return false; }
     const rounds = after.mission.review.rounds;
     const current = rounds[rounds.length - 1];
-    return current.decision?.kind === 'approved' && !current.decision.revocation
+    const approved = current.decision?.kind === 'approved' && !current.decision.revocation
       && (!roundBefore?.decision || current.number > roundBefore.number);
+    if (approved) { announceIntegrationRepair(slug, after.mission); }
+    return approved;
+  };
+  // The human reads the pull request before integrating again, so it states
+  // what failed last time, the repair range and the re-review outcome. Posted
+  // as the dedicated parallix login; a disabled provider skips it.
+  const announceIntegrationRepair = (slug: string, mission: Mission) => {
+    const facts = latestIntegrationRepair(mission);
+    const token = facts ? readToken(PARALLIX_FORGEJO_USER, rootDir) : null;
+    if (!facts || !token) { return; }
+    const posted = postComment(`mission/${slug}`, token, integrationRepairPrComment(facts), { rootDir, forgejoUser: PARALLIX_FORGEJO_USER });
+    if (posted && !posted.ok) { fmt.log.warn(`Could not post the integration repair summary on ${slug}'s pull request: ${posted.error ?? 'unknown error'}`); }
   };
   // `active` needs to create its ExecuteMissionService only after it has
   // installed its progress renderer. Supplying a pre-built service loses the
@@ -230,6 +248,8 @@ function createCommandRegistry(rootDir: string): Record<string, Command> {
         ...options,
         // SC4: refuse to activate a mission whose payload already landed.
         payloadLandedFn: (s: string) => findLandedSquashOnBaseBranch(rootDir, s) !== null,
+        // The headline names the Mission exactly as `px status` does.
+        missionTitleFn: (s: string) => withGraph(services => statusMissionTitle(services, s, rootDir)),
         controllerFactory: async (requestedRoot: string, progress: BoardProgressSink) => {
           activeServices.value = await createProductionApplicationServices(requestedRoot, progress);
           const controller = activeServices.value.presentationCapabilities?.commandController;
@@ -241,6 +261,21 @@ function createCommandRegistry(rootDir: string): Record<string, Command> {
       await activeServices.value?.operatorState.close();
     }
   };
+  // Human-only stand-down of the current approval, for an unfounded approval
+  // (operator judgement) and for one the branch moved away from (TASK-2555).
+  const revokeReview: Command = (args) => withGraph(services => {
+    if (!services.mission) { throw new Error('mission services are unavailable'); }
+    return createRevokeReviewCommand(
+      new RevokeReviewDecisionUseCase(services.mission.store, services.mission.lifecycle, {
+        async dismissApproval(mission, round, reason) {
+          const decision = mission.review?.rounds.find((entry) => entry.number === round)?.decision;
+          if (decision?.kind !== 'approved') { throw new Error('matching approval is not recorded'); }
+          dismissProviderApproval(`mission/${mission.id}`, decision.decidedAt, reason, { rootDir });
+        },
+      }, createGitChangeIdentity(rootDir)),
+      (explicit) => inferSlug(explicit),
+    )(args);
+  });
   const registry: Record<string, Command> = {
     active: withActiveService,
     recover: (args) => withGraph(services => {
@@ -283,32 +318,8 @@ function createCommandRegistry(rootDir: string): Record<string, Command> {
     resolve: (args) => withGraph(services => createResolveCommand(reviewVerbPorts(services))(args)),
     // Deliberately outside `px review`: the review loop and its agent prompts
     // cannot dispatch this human-only corrective command.
-    'revoke-review': (args) => withGraph(services => {
-      if (!services.mission) { throw new Error('mission services are unavailable'); }
-      return createRevokeReviewCommand(
-        new RevokeReviewDecisionUseCase(services.mission.store, services.mission.lifecycle, {
-          async dismissApproval(mission, round, reason) {
-            const decision = mission.review?.rounds.find((entry) => entry.number === round)?.decision;
-            if (decision?.kind !== 'approved') { throw new Error('matching approval is not recorded'); }
-            dismissProviderApproval(`mission/${mission.id}`, decision.decidedAt, reason, { rootDir });
-          },
-        }),
-        (explicit) => inferSlug(explicit),
-      )(args);
-    }),
-    revoke: (args) => withGraph(services => {
-      if (!services.mission) { throw new Error('mission services are unavailable'); }
-      return createRevokeReviewCommand(
-        new RevokeReviewDecisionUseCase(services.mission.store, services.mission.lifecycle, {
-          async dismissApproval(mission, round, reason) {
-            const decision = mission.review?.rounds.find((entry) => entry.number === round)?.decision;
-            if (decision?.kind !== 'approved') { throw new Error('matching approval is not recorded'); }
-            dismissProviderApproval(`mission/${mission.id}`, decision.decidedAt, reason, { rootDir });
-          },
-        }),
-        (explicit) => inferSlug(explicit),
-      )(args);
-    }),
+    'revoke-review': revokeReview,
+    revoke: revokeReview,
     unassign: (args) => withGraph(services => createAssignCommand(missionWrites(services), true)(args)),
     diff,
     draft: (args, options) => withMissionAndGraph((missionServicesFn, services) => {
@@ -394,13 +405,10 @@ function createCommandRegistry(rootDir: string): Record<string, Command> {
           } as any),
         } as any);
         const result = await createReviewCommand(new ReviewCommandUseCase(adapter, services.currentWork))(args, options);
-        if (args.includes('--continue') && !args.includes('--dry-run') && !options?.integrationOwnsReview) {
-          const slug = inferSlug(args.find((arg: string) => !arg.startsWith('--')));
-          const resumed = slug ? await services.mission.store.load(missionId(slug)) : null;
-          if (resumed?.kind === 'found' && resumed.mission.status === 'integration' && hasIntegrationRepairHistory(resumed.mission)) {
-            return runIntegrated([slug!], options ?? {});
-          }
-        }
+        // TASK-2620: `px review --continue` never chains into `px integrate`.
+        // On approval of a repaired revision the mission stays in the integration
+        // lane for the human to read the fresh PR and integrate; no path
+        // auto-restarts integration or merges.
         return result;
     }),
     setup,
@@ -414,21 +422,7 @@ function createCommandRegistry(rootDir: string): Record<string, Command> {
       return createGithubPublishStatusCommand(useCase)(args, options);
     },
     status: (args, options) => withGraph(services => {
-      const board = createStatusBoardAdapter({
-        buildProjectionFn: async () => {
-          const builder = services.presentationCapabilities?.boardProjection;
-          if (!builder) { throw new Error('board projection is unavailable'); }
-          return builder;
-        },
-        // `px status` is the single Mission reporting surface, so it reads the
-        // recorded execution context and write version from the store itself.
-        loadMissionFn: services.mission
-          ? async (slug) => {
-            const loaded = await services.mission!.store.load(missionId(slug));
-            return loaded.kind === 'found' ? { mission: loaded.mission, version: loaded.version } : null;
-          }
-          : undefined,
-      });
+      const board = createStatusBoardFor(services);
       const gitPort = createStatusGitAdapter();
       const prPort = createStatusPrAdapter({ rootDir });
       const agentPort = createStatusAgentAdapter({
@@ -482,11 +476,19 @@ function createCommandRegistry(rootDir: string): Record<string, Command> {
   // human would run: it acquires no authority of its own, and there is no second
   // dispatch path to keep in step. `integrate` is not among the actions it can
   // press — landing stays the human decision.
-  registry.lead = (args: string[]) => withGraph(services => createLeadCommand(buildLeadPort(services))(args));
+  // Forwarded commands outlive the pass that started them. Lead settles them
+  // before its graph closes: a borrowed `active` graph shares that SQLite
+  // handle, and an in-process caller must not see `lead` return while its
+  // forwarded review is still running.
+  registry.lead = (args: string[]) => withGraph(async services => {
+    const forwards = new Set<Promise<unknown>>();
+    try { return await createLeadCommand(buildLeadPort(services, forwards))(args); } finally { await Promise.allSettled(forwards); }
+  });
   return registry;
 
   function buildLeadPort(
     services: Awaited<ReturnType<typeof createProductionApplicationServices>>,
+    forwards: Set<Promise<unknown>>,
   ): SupervisorPort {
     const builder = services.presentationCapabilities?.boardProjection;
     if (!builder) { throw new Error('board projection is unavailable for px lead'); }
@@ -521,9 +523,10 @@ function createCommandRegistry(rootDir: string): Record<string, Command> {
       });
       if (publication) { await currentWork.running(publication); }
       fmt.log.info(`[lead] Started ${action.display}; continuing to supervise the fleet.`);
-      void Promise.resolve().then(work)
+      const forward: Promise<unknown> = Promise.resolve().then(work)
         .catch((error) => fmt.log.fail(`[lead] ${action.display} stopped: ${error instanceof Error ? error.message : String(error)}`))
-        .finally(() => finishPublication(publication, currentWork));
+        .finally(() => { finishPublication(publication, currentWork); forwards.delete(forward); });
+      forwards.add(forward);
     };
     // Finishing a publication is fire-and-forget: the board update may reject
     // after the process is gone, and that is not a step the fleet can act on.
@@ -568,7 +571,10 @@ function createCommandRegistry(rootDir: string): Record<string, Command> {
         }
         // An approved round still parked in review lost its review → integration
         // transition. Finishing it moves the lane only; merging stays human.
-        if (action.kind === 'review:submit' && services.mission) {
+        // Lead never decides a review: an undecided round goes to
+        // `review --continue`, whose configured reviewer decides (TASK-2620).
+        if (action.kind === 'review:submit' && services.mission
+          && leadFinishesParkedApproval(await services.mission.store.load(missionId(mission)))) {
           const finished = await recordApproval(mission, { comment: null, decidedAt: new Date().toISOString() }, {
             missionStore: services.mission.store,
             lifecycleService: services.mission.lifecycle,
@@ -589,15 +595,25 @@ function createCommandRegistry(rootDir: string): Record<string, Command> {
           if (!controller) { throw new Error(`No active controller available for ${mission}`); }
           await startForward(mission, action, () => active(invocation.args, {
             controller,
+            missionTitleFn: (s: string) => statusMissionTitle(targetServices, s, missionWorktree),
             rootDir: missionWorktree,
             exitFn: exitAsError,
             exit: exitAsError,
           }));
           return;
         }
-        const run = registry[invocation.command];
-        if (!run) { throw new Error(`No runnable px command for ${action.kind}`); }
-        await startForward(mission, action, () => Promise.resolve(run(invocation.args, { exitFn: exitAsError, exit: exitAsError })));
+        const commandRun = registry[invocation.command];
+        if (!commandRun) { throw new Error(`No runnable px command for ${action.kind}`); }
+        const missionWorktree = resolveWorktree(mission, {});
+        if (!missionWorktree) { throw new Error(`No worktree resolved for ${mission}`); }
+        // Run a forwarded command through the public CLI entry point so its
+        // target is explicit. Calling the cached registry directly inherits
+        // the process directory of `px lead`; that is wrong when lead is
+        // supervising a sibling worktree and forces callers to mutate cwd.
+        await startForward(mission, action, () => run(
+          [invocation.command, ...invocation.args],
+          { baseCwd: missionWorktree, log: fmt.log.plain, error: fmt.log.plainError },
+        ));
       },
       claimRecovery: async (mission) => claimRecoveryLock(mission),
       wait: pollingPause,

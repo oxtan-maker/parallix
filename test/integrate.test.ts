@@ -998,7 +998,7 @@ test('runPreCommitHookOrAbort commits only the tracked files the hook modified o
   assert.equal(hookParams.cwd, '/mission');
   assert.equal(hookParams.baseBranch, 'main');
   const commits = gitCalls.filter(args => args.includes('commit'));
-  assert.deepEqual(commits, [['-C', '/mission', 'commit', '--only', '-m', 'chore(task-2510): integrate pre-commit hook', '--', 'package.json', 'package-lock.json']]);
+  assert.deepEqual(commits, [['-C', '/mission', 'commit', '--only', '-m', 'chore(task-2510): integrate pre-commit hook\n\nParallix-Bookkeeping: pre-commit-hook', '--', 'package.json', 'package-lock.json']]);
 });
 
 test('runPreCommitHookOrAbort creates no commit when the hook changes nothing (task-2510)', () => {

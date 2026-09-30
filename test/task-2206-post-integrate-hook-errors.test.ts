@@ -24,7 +24,7 @@ function setupFixture() {
 
   fs.mkdirSync(path.join(repoRoot, 'scripts'), { recursive: true });
   fs.copyFileSync(SCRIPT_SOURCE, path.join(repoRoot, 'scripts', 'refresh-global-px.sh'));
-  fs.writeFileSync(path.join(repoRoot, 'package.json'), JSON.stringify({ name: 'fixture', version: '1.0.0' }, null, 2));
+  fs.writeFileSync(path.join(repoRoot, 'package.json'), JSON.stringify({ name: 'fixture', version: '1.0.1' }, null, 2));
   fs.writeFileSync(path.join(repoRoot, 'package-lock.json'), '{}\n');
 
   writeExecutable(path.join(binDir, 'git'), `#!/usr/bin/env node
@@ -34,7 +34,8 @@ process.exit(0);
 `);
 
   writeExecutable(path.join(binDir, 'px'), `#!/usr/bin/env node
-process.stdout.write('1.0.1\\n');
+const fs = require('node:fs');
+process.stdout.write(fs.readFileSync(${JSON.stringify(path.join(root, 'installed-version'))}, 'utf8'));
 `);
 
   writeExecutable(path.join(binDir, 'npm'), `#!/usr/bin/env node
@@ -42,6 +43,10 @@ const fs = require('node:fs');
 const logPath = ${JSON.stringify(logPath)};
 const args = process.argv.slice(2);
 fs.appendFileSync(logPath, 'npm ' + args.join(' ') + '\\n');
+
+if (args[0] === 'ci') {
+  process.exit(0);
+}
 
 if (args[0] === 'run' && args[1] === 'build') {
   process.exit(0);
@@ -61,6 +66,7 @@ if (args[0] === 'install' && args[1] === '-g') {
     process.stderr.write('ENOENT ' + JSON.stringify(tarballArg) + '\\n');
     process.exit(254);
   }
+  fs.writeFileSync(${JSON.stringify(path.join(root, 'installed-version'))}, tarballArg.match(/(\\d+\\.\\d+\\.\\d+)/)[1] + '\\n');
   process.exit(0);
 }
 
@@ -100,6 +106,9 @@ test('refresh-global-px.sh passes a real tarball path to npm install even when n
     const calls = fs.readFileSync(fixture.logPath, 'utf8');
     assert.match(calls, /npm pack/);
     assert.match(calls, /npm install -g \.\/fixture-1\.0\.1\.tgz/);
+    assert.match(result.stdout, /Global px runner refreshed/);
+    assert.match(result.stdout, /1\.0\.1/, 'the reported installed px version equals the landed package version');
+    assert.match(calls, /npm ci\nnpm run build\nnpm pack\nnpm install -g/, 'dependency reconciliation precedes build, pack, and global installation');
   } finally {
     fs.rmSync(fixture.root, { recursive: true, force: true });
   }
@@ -109,6 +118,9 @@ test('refresh-global-px.sh still fails closed when npm pack itself fails', () =>
   const fixture = setupFixture();
   writeExecutable(path.join(fixture.binDir, 'npm'), `#!/usr/bin/env node
 const args = process.argv.slice(2);
+if (args[0] === 'ci') {
+  process.exit(0);
+}
 if (args[0] === 'run' && args[1] === 'build') {
   process.exit(0);
 }

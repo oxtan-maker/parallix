@@ -7,6 +7,7 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import { mockModule, installModuleMocks } from './lib/module-mock.js';
+import { mkdtemp as registeredMkdtemp } from './helpers/temp-dir.js';
 const loadStateMapModule = mockModule<typeof import('../src/adapters/config/state-map.js')>('../src/adapters/config/state-map.js', import.meta.url);
 await installModuleMocks();
 test.afterEach(() => mock.restoreAll());
@@ -25,7 +26,7 @@ test('toVirtual matches mapped statuses case-insensitively', () => {
 });
 
 test('loadStateMap resolves configured state map from target repo root', () => {
-  const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), 'workflow-state-map-'));
+  const rootDir = registeredMkdtemp('workflow-state-map-');
   const repoMapPath = path.join(rootDir, 'config', 'board-state.json');
   fs.mkdirSync(path.dirname(repoMapPath), { recursive: true });
   fs.writeFileSync(repoMapPath, JSON.stringify({ ready: 'queued', approved: 'accepted' }), 'utf8');
@@ -43,7 +44,7 @@ test('loadStateMap resolves configured state map from target repo root', () => {
 });
 
 test('loadStateMap falls back to shipped state map when target repo override is absent', () => {
-  const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), 'workflow-state-map-missing-'));
+  const rootDir = registeredMkdtemp('workflow-state-map-missing-');
 
   try {
     const options = {

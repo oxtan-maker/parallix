@@ -25,7 +25,10 @@ import type { DraftWorkflowPort } from '../application/ports/cli-workflows.js';
 import type { BoardMissionServices } from '../application/controller/board-controller.js';
 import type { CurrentWorkPort } from '../application/recording/current-work-recorder.js';
 import { createDraftWorkflowAdapter, ensureWorktree } from '../adapters/cli/commands/draft.js';
-import { readAgentConfig } from '../adapters/agents/agent-config.js';
+import { CONFIG_PATH, readAgentConfig } from '../adapters/agents/agent-config.js';
+import { eligibleAgentsForStep } from '../adapters/agents/agents.js';
+import { git } from '../adapters/git/git.js';
+import path from 'node:path';
 import { missionBranchName } from '../adapters/filesystem/mission-paths.js';
 import { conventionalWorktreePath, resolveWorktree } from '../adapters/git/worktree.js';
 import { performHandoff } from '../adapters/cli/commands/handoff.js';
@@ -140,12 +143,19 @@ async function resumeActiveBoardHandoff(existing: any, store: MissionStore & Mis
   const previous = existing.mission.review;
   const decision = currentReviewRound(previous).decision;
   const findings = decision !== null && decision.kind === 'changes-requested' ? decision.findings : [];
+  // The handed-off revision is the worktree's commit, and reviewer eligibility
+  // is the configured review step, never the prior round's reviewer (TASK-2620).
+  const worktree = resolveWorktree(slug, {}) ?? process.cwd();
+  const head = git(['-C', worktree, 'rev-parse', 'HEAD']);
+  if (head.status !== 0 || !head.stdout.trim()) { throw new Error(`Cannot read the handed-off commit of ${slug}.`); }
   const resolved = reviewStatus(previous) === 'awaiting-implementation'
-    ? applyImplementerCommand(previous, { type: 'submit-resolution', respondedAt: new Date().toISOString(), resultingRevision: changeRevision(`handoff-${Date.now()}`), resolutions: findings.map((finding) => ({ findingId: finding.id, kind: 'fixed', evidence: 'Resolved in the handed-off revision.' })) })
+    ? applyImplementerCommand(previous, { type: 'submit-resolution', respondedAt: new Date().toISOString(), resultingRevision: changeRevision(head.stdout.trim()), resolutions: findings.map((finding) => ({ findingId: finding.id, kind: 'fixed', evidence: 'Resolved in the handed-off revision.' })) })
     : previous;
-  const reviewerEligibility = ConfiguredReviewerEligibility.fromReviewStep({ eligible: [currentReviewRound(resolved).reviewer], strategy: 'random' });
+  const eligible = eligibleAgentsForStep('review', { configPath: path.join(worktree, CONFIG_PATH) }).map(agentFamily);
+  const reviewerEligibility = ConfiguredReviewerEligibility.fromReviewStep({ eligible, strategy: 'random' });
+  const priorReviewer = currentReviewRound(resolved).reviewer;
   const review = reviewStatus(resolved) === 'ready-for-next-round'
-    ? beginNextReviewRound(resolved, currentReviewRound(resolved).reviewer, existing.mission.assignee ?? agentFamily('codex'), new Date().toISOString(), reviewerEligibility)
+    ? beginNextReviewRound(resolved, eligible.includes(priorReviewer) ? priorReviewer : eligible[0] ?? priorReviewer, existing.mission.assignee ?? agentFamily('codex'), new Date().toISOString(), reviewerEligibility)
     : resolved;
   if (review === previous) { throw new Error('Review is not ready to resume.'); }
   await store.save({ ...existing.mission, review }, existing.version);

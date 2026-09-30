@@ -41,6 +41,7 @@ import { completedMissionStatistics, type MissionOutcome } from '../src/domain/u
 import { missionOutcome } from './fixtures/mission-outcome.js';
 import statsBackfill from '../src/adapters/cli/commands/stats-backfill.js';
 import { resolveKnownAgentFamilies } from '../src/adapters/agents/known-agent-families.js';
+import { mkdtemp as registeredMkdtemp } from './helpers/temp-dir.js';
 
 const ROOT = process.cwd();
 const repo = repositoryId('parallix');
@@ -171,7 +172,7 @@ test('SC3: TUI resolveKnownAgentFamilies reads config/agents.json and returns fa
   // Calls the real resolveKnownAgentFamilies function from ui-command.ts.
   // It reads config/agents.json via readFileSync to resolve known agent families.
   // This is a Configuration concept (ADR 0053: configuration-or-secret).
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'tui-agent-config-'));
+  const tmpDir = registeredMkdtemp('tui-agent-config-');
   try {
     const configPath = path.join(tmpDir, 'config', 'agents.json');
     fs.mkdirSync(path.dirname(configPath), { recursive: true });
@@ -193,7 +194,7 @@ test('SC3: TUI resolveKnownAgentFamilies reads config/agents.json and returns fa
 test('SC3: TUI resolveKnownAgentFamilies returns empty list when config is missing', () => {
   // Calls the real resolveKnownAgentFamilies function with a missing config.
   // It must return an empty list rather than crashing.
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'tui-agent-config-missing-'));
+  const tmpDir = registeredMkdtemp('tui-agent-config-missing-');
   try {
     // Do not create config/agents.json — simulate missing config
     const families = resolveKnownAgentFamilies(tmpDir);

@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { missionId } from '../domain/mission.js';
 import type { IntegrateWorkflowPort } from './ports/cli-workflows.js';
-import { NO_CURRENT_WORK_PORT, type CurrentWorkPort } from './recording/current-work-recorder.js';
+import { NO_CURRENT_WORK_PORT, nestedWorkPublisher, type CurrentWorkPort } from './recording/current-work-recorder.js';
 
 /** CLI-independent application entry point for the integration workflow. */
 export class IntegrateCommandUseCase {
@@ -26,11 +26,20 @@ export class IntegrateCommandUseCase {
       agent: null,
     };
     await bestEffort(() => this._currentWork.running(publication));
+    // The repair agent and the re-review run inside this operation; they
+    // publish under it so the board keeps showing live work (TASK-2620).
+    const nestedWork = nestedWorkPublisher(this._currentWork, publication);
+    let result: unknown;
     try {
-      return await this._workflow.execute(args, options);
-    } finally {
-      await bestEffort(() => this._currentWork.ended(publication));
+      result = await this._workflow.execute(args, { ...options, nestedWork });
+    } catch (error) {
+      // A stop reason appears only when automation genuinely cannot continue.
+      const reason = error instanceof Error ? error.message : 'integration cannot continue autonomously';
+      await bestEffort(() => this._currentWork.blocked(publication, reason));
+      throw error;
     }
+    await bestEffort(() => this._currentWork.ended(publication));
+    return result;
   }
 
   /** Board entry point: the mission identity is the complete trusted input. */

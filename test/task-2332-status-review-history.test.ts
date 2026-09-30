@@ -30,6 +30,7 @@ import { repositoryId } from '../src/domain/repository.js';
 import { agentFamily } from '../src/domain/agents.js';
 import { changeRevision, type Review, type ReviewRound } from '../src/domain/review.js';
 import type { StatusResult } from '../src/application/ports/cli-workflows.js';
+import { mkdtemp as registeredMkdtemp } from './helpers/temp-dir.js';
 
 const SLUG = 'task-2332-status';
 const tempDirs: string[] = [];
@@ -83,7 +84,7 @@ slug: ${SLUG}
 `;
 
 function createRoot(): string {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'parallix-2332-status-'));
+  const root = registeredMkdtemp('parallix-2332-status-');
   tempDirs.push(root);
   const eventsDir = path.join(root, 'missions', SLUG, 'review-events');
   fs.mkdirSync(eventsDir, { recursive: true });

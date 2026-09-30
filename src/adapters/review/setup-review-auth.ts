@@ -7,6 +7,7 @@ import { resolveForgejoHome } from '../forgejo/forgejo.js';
 const { spawnSync } = _cp;
 let tokenNameCounter = 0;
 export const REVIEW_TOKEN_SCOPES = ['write:user', 'write:repository', 'write:issue', 'write:organization'];
+export const SETUP_OWNER_TOKEN_SCOPES = [...REVIEW_TOKEN_SCOPES, 'write:admin'];
 export const PASSWORD_PROMPT_OPTIONS = { hidden: false };
 
 export function parseRepoSlug(repo: string): { owner: string; repo: string } | null {
@@ -88,7 +89,7 @@ export function tokenCreateViaOwnerToken(baseUrl: string, _repoSlug: string, own
   const createdTokens = []; const warnings = [];
   for (const agent of agentPasswords) {
     const result = requestFn('POST', `${normalizeBaseUrl(baseUrl)}/api/v1/users/${encodeURIComponent(agent.user)}/tokens`, { token: ownerToken, body: { name: buildTokenNameFn(repoInfo.repo, agent.user), scopes: REVIEW_TOKEN_SCOPES } });
-    if (!result.ok || !(result.data && result.data.sha1)) { warnings.push({ user: agent.user, error: !result.ok ? `token creation via owner token failed (HTTP ${result.statusCode || 'n/a'})` : 'token creation via owner token did not return a token', response: result.data }); continue; }
+    if (!result.ok || !(result.data && result.data.sha1)) { warnings.push({ user: agent.user, error: !result.ok ? `token creation via owner token failed (HTTP ${result.statusCode || 'n/a'}); bootstrap requires a Forgejo site-admin owner with write:admin token scope. Re-run px setup-review with that owner's password to rotate the token` : 'token creation via owner token did not return a token', response: result.data }); continue; }
     createdTokens.push({ user: agent.user, path: writeTokenFn(agent.user, result.data.sha1, forgejoHome) });
   }
   if (createdTokens.length === 0) {const first = warnings[0]; return { ok: false, createdTokens, warnings, error: first ? `${first.user}: ${first.error}` : 'no requested agent token was created' };}

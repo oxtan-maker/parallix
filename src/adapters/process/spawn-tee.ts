@@ -118,11 +118,13 @@ export function spawnAndTee(command: string, args: string[], options: SpawnTeeOp
     // but broken Bubblewrap guard must never retry the child unsandboxed.
     const launch = wrapWithBubblewrap(command, args, resolvedCwd);
 
+    const hasNoOutputDeadline = Number.isFinite(noOutputWatchdog?.maxNoOutputMs) && (noOutputWatchdog?.maxNoOutputMs ?? 0) > 0;
     let child: ChildProcess;
     try {
       child = childProcess.spawn(launch.command, launch.args, {
         ...spawnOptions,
         env,
+        ...(hasNoOutputDeadline ? { detached: true } : {}),
         stdio: ['inherit', 'pipe', 'pipe']
       } as SpawnOptions);
       onSpawn?.(child);
@@ -142,17 +144,60 @@ export function spawnAndTee(command: string, args: string[], options: SpawnTeeOp
     }
 
     const watchdog = createOutputWatchdog(noOutputWatchdog, { command, args, pid: child.pid }, startTime);
+    let noOutputTimedOut = false;
+    let noOutputTimer: ReturnType<typeof setTimeout> | null = null;
+    let escalationTimer: ReturnType<typeof setTimeout> | null = null;
+    const clearDeadlineTimer = () => {
+      if (noOutputTimer) { clearTimeout(noOutputTimer); noOutputTimer = null; }
+    };
+    const clearEscalationTimer = () => {
+      if (escalationTimer) { clearTimeout(escalationTimer); escalationTimer = null; }
+    };
+    const killGroup = (signal: NodeJS.Signals) => {
+      try { process.kill(-child.pid!, signal); } catch { try { child.kill(signal); } catch { /* settled */ } }
+    };
+    const forward = (signal: NodeJS.Signals) => {
+      killGroup(signal);
+      // Detached children miss the terminal signal, but the parent must retain
+      // Node's normal termination semantics after forwarding it.
+      process.kill(process.pid, signal);
+    };
+    const forwardSigint = () => forward('SIGINT');
+    const forwardSigterm = () => forward('SIGTERM');
+    if (hasNoOutputDeadline) {
+      process.once('SIGINT', forwardSigint);
+      process.once('SIGTERM', forwardSigterm);
+      noOutputTimer = setTimeout(() => {
+        noOutputTimer = null;
+        noOutputTimedOut = true;
+        killGroup('SIGINT');
+        escalationTimer = setTimeout(() => {
+          killGroup('SIGTERM');
+          escalationTimer = setTimeout(() => killGroup('SIGKILL'), 250);
+          escalationTimer.unref?.();
+        }, 250);
+        escalationTimer.unref?.();
+      }, noOutputWatchdog!.maxNoOutputMs);
+      noOutputTimer.unref?.();
+    }
 
     const finish = (payload: FinishPayload): void => {
       if (settled) {return;}
       settled = true;
       watchdog.clear();
+      clearDeadlineTimer();
+      clearEscalationTimer();
+      if (hasNoOutputDeadline) {
+        process.removeListener('SIGINT', forwardSigint);
+        process.removeListener('SIGTERM', forwardSigterm);
+      }
       payload.startedAt = new Date(startTime).toISOString();
       payload.endedAt = new Date().toISOString();
       resolve(payload as SpawnTeeResult);
     };
 
     child.stdout?.on('data', (chunk: Buffer) => {
+      if (!noOutputTimedOut) { clearDeadlineTimer(); }
       watchdog.noteOutput();
       stdoutTail.push(chunk);
       if (stdoutSink && typeof stdoutSink.write === 'function') {
@@ -160,6 +205,7 @@ export function spawnAndTee(command: string, args: string[], options: SpawnTeeOp
       }
     });
     child.stderr?.on('data', (chunk: Buffer) => {
+      if (!noOutputTimedOut) { clearDeadlineTimer(); }
       watchdog.noteOutput();
       stderrTail.push(chunk);
       if (stderrSink && typeof stderrSink.write === 'function') {
@@ -179,11 +225,11 @@ export function spawnAndTee(command: string, args: string[], options: SpawnTeeOp
 
     child.on('close', (code: number | null, signal: string | null) => {
       finish({
-        status: code,
-        signal,
+        status: noOutputTimedOut ? null : code,
+        signal: noOutputTimedOut ? null : signal,
         stdout: stdoutTail.toString(),
         stderr: stderrTail.toString(),
-        error: null,
+        error: noOutputTimedOut ? Object.assign(new Error('No output before configured liveness deadline'), { code: 'NO_OUTPUT_TIMEOUT' }) : null,
       });
     });
   });

@@ -1369,9 +1369,9 @@ test('every representative changed-area plan includes the unconditional tier gat
     const tierGates = ['unit', 'integration-ci', 'integration-local'].map(key => plan.gates.find(gate => gate.key === key));
     assert.ok(tierGates.every(Boolean), `${label} plan must include every required test tier`);
     assert.deepEqual(tierGates.map(gate => gate?.command), [
-      'PARALLIX_TEST_COVERAGE=1 npm test -- --unit-test-headroom',
+      'PARALLIX_FAST_UNIT=1 PARALLIX_TEST_COVERAGE=1 npm test -- --unit-test-headroom',
       'PARALLIX_TEST_COVERAGE=1 npm run test:integration:ci:prebuilt',
-      'npm run test:integration:local',
+      'npm run test:integration:local:prebuilt',
     ]);
     const workflowGate = plan.gates.find(gate => gate.key === 'workflow');
     const smokeGate = plan.gates.find(gate => gate.key === 'custom-agent-smoke');

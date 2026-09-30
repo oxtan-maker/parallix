@@ -23,10 +23,8 @@ import {
   invalidateApprovedPrReview,
   routeIntegrationGateFailure,
   staleApprovalSummary,
-  standingApprovalHolders,
   type IntegrationGateRouteOptions,
 } from '../src/adapters/cli/commands/integrate-gate-rebound.js';
-import { DEFAULT_FORGEJO_USER } from '../src/adapters/forgejo/forgejo.js';
 import type { GateRunOutcome } from '../src/adapters/config/repository-gates.js';
 
 const SLUG = 'task-2528-fixture';
@@ -45,7 +43,7 @@ interface Harness {
   /** The mission worktree HEAD, as the gate runner and the recovery observe it. */
   head: { commit: string; tree: string };
   transitions: string[];
-  invalidations: Array<{ slug: string; branch: string; reviewerUser: string | null }>;
+  invalidations: Array<{ slug: string; branch: string }>;
   messages: string[];
 }
 
@@ -86,8 +84,6 @@ function routeArgs(h: Harness, repairChangesDiff: boolean): IntegrationGateRoute
       return { agent: 'codex', result: { status: 0 } };
     }) as never,
     transitionTaskFn: async (slug: string) => { h.transitions.push(slug); return true; },
-    readReboundsFn: async () => 0,
-    recordReboundFn: async () => true,
     probeBaseBranchReproductionFn: (async () => ({ checked: true, reproduced: false, detail: 'passes on main', baseCommit: 'base-commit' })) as never,
     captureFinalTreeFn: (() => ({ ok: true, rootDir: '/tmp/mission', commit: h.head.commit, tree: h.head.tree })) as never,
     // The identical gate set re-runs green once the repair is in place.
@@ -95,8 +91,8 @@ function routeArgs(h: Harness, repairChangesDiff: boolean): IntegrationGateRoute
       ok: true, phase: 'integration', gates: o.gates, executed: 1, skipped: false, dryRun: false, failedGate: null, error: null,
     })) as never,
     invalidateApprovalFn: (async (opts: any) => {
-      h.invalidations.push({ slug: opts.slug, branch: opts.branch, reviewerUser: opts.reviewerUser ?? null });
-      return { ok: true, retracted: [REVIEWER], errors: [] };
+      h.invalidations.push({ slug: opts.slug, branch: opts.branch });
+      return { ok: true, dismissed: [REVIEWER], errors: [] };
     }) as never,
     log: (m: string) => h.messages.push(m),
     error: (m: string) => h.messages.push(m),
@@ -117,11 +113,11 @@ test('TASK-2528: a post-integration-error repair that changes the mission diff c
   assert.equal(route.route, 'revision-changed', 'the changed revision is its own operator-facing route');
   assert.deepEqual(h.transitions, [SLUG], 'the mission is handed back to the implementer exactly once');
   assert.equal(h.invalidations.length, 1, 'the standing approval is invalidated exactly once');
-  assert.deepEqual(h.invalidations[0], { slug: SLUG, branch: `mission/${SLUG}`, reviewerUser: REVIEWER });
+  assert.deepEqual(h.invalidations[0], { slug: SLUG, branch: `mission/${SLUG}` });
   const said = h.messages.join('\n');
   assert.match(said, /re-review|review/i, 'the operator is told the mission must be re-reviewed');
-  assert.match(said, /approved-tree/, 'the approved revision is named as evidence');
-  assert.match(said, /repaired-tree/, 'the repaired revision is named as evidence');
+  assert.match(said, /approved-commit/, 'the approved commit is named as evidence');
+  assert.match(said, /repaired-commit/, 'the repaired commit is named as evidence');
 });
 
 test('TASK-2528: an unchanged retry after the same integration error still lands on its existing approval', async () => {
@@ -142,52 +138,37 @@ test('TASK-2528: a pre-retracted approval cannot take the fixed route even when 
   assert.equal(h.invalidations.length, 1);
 });
 
-// ── Retraction targets the account that actually holds the approval ──────────
+// ── Dismissal acts as the dedicated parallix login (TASK-2620) ───────────────
 
-test('TASK-2528: only the logins holding a standing approval are retracted', () => {
-  assert.deepEqual(
-    standingApprovalHolders({ ok: true, defaultUserApproved: true, reviewerApproved: true }, REVIEWER),
-    [DEFAULT_FORGEJO_USER, REVIEWER],
-    'both the repo default user and the configured reviewer are retracted when both approved',
-  );
-  assert.deepEqual(
-    standingApprovalHolders({ ok: true, defaultUserApproved: false, reviewerApproved: true }, REVIEWER),
-    [REVIEWER],
-    'a reviewer-only approval retracts the reviewer, never the default user',
-  );
-  assert.deepEqual(
-    standingApprovalHolders({ ok: true, defaultUserApproved: true, reviewerApproved: false }, REVIEWER),
-    [DEFAULT_FORGEJO_USER],
-    'a reviewer who did not approve is not posted as',
-  );
-  assert.deepEqual(
-    standingApprovalHolders({ ok: false, error: 'api-failed' }, REVIEWER),
-    [],
-    'an unreadable approval names no holder rather than guessing one',
-  );
-});
-
-test('TASK-2528: the approval is retracted as the approving login, not the integrating one', async () => {
-  const posted: Array<{ branch: string; user: string; outcome: string; body: string }> = [];
+test('TASK-2620: a stale approval is dismissed as parallix; no review is posted as the reviewer', async () => {
+  const dismissals: Array<{ branch: string; user: string; token: string; reason: string }> = [];
   const result = await invalidateApprovedPrReview({
     slug: SLUG,
     branch: `mission/${SLUG}`,
     approval: { ok: true, reviewerApproved: true },
-    reviewerUser: REVIEWER,
-    summary: staleApprovalSummary(SLUG, 'approved-tree', 'repaired-tree', 'integration-suite'),
+    summary: staleApprovalSummary(SLUG, 'approved-commit', 'repaired-commit', 'integration-suite'),
     readTokenFn: ((user: string) => `token-for-${user}`) as never,
-    postReviewFn: ((branch: string, _token: string, outcome: string, body: string, o: any) => {
-      posted.push({ branch, user: o.forgejoUser, outcome, body });
-      return { ok: true, data: null, status: 200 };
+    dismissFn: ((branch: string, token: string, reason: string, o: any) => {
+      dismissals.push({ branch, user: o.forgejoUser, token, reason });
+      return { ok: true, dismissed: [REVIEWER], errors: [] };
     }) as never,
   });
 
-  assert.deepEqual(result, { ok: true, retracted: [REVIEWER], errors: [] });
-  assert.equal(posted.length, 1, 'exactly one retraction per standing approval');
-  assert.equal(posted[0]!.user, REVIEWER, 'the retraction is posted as the login whose approval it retracts');
-  assert.equal(posted[0]!.outcome, 'request-changes');
-  assert.match(posted[0]!.body, /approved-tree/);
-  assert.match(posted[0]!.body, /repaired-tree/);
+  assert.deepEqual(result, { ok: true, dismissed: [REVIEWER], errors: [] });
+  assert.equal(dismissals.length, 1);
+  assert.equal(dismissals[0]!.user, 'parallix', 'Parallix acts as its own login');
+  assert.equal(dismissals[0]!.token, 'token-for-parallix', 'never the reviewer\'s token');
+  assert.match(dismissals[0]!.reason, /approved-commit/);
+  assert.match(dismissals[0]!.reason, /repaired-commit/);
+  assert.doesNotMatch(dismissals[0]!.reason, /\bF\d+\b|blocking/i, 'the reason is not a fabricated finding');
+});
+
+test('TASK-2620: no provider approval means nothing to dismiss', async () => {
+  const result = await invalidateApprovedPrReview({
+    slug: SLUG, branch: `mission/${SLUG}`, approval: { ok: false, error: 'forgejo-off' }, summary: 'irrelevant',
+    readTokenFn: (() => { throw new Error('must not read a token'); }) as never,
+  });
+  assert.deepEqual(result, { ok: true, dismissed: [], errors: [] });
 });
 
 test('TASK-2528: an approval that cannot be retracted is reported and still refuses the merge', async () => {
@@ -195,21 +176,20 @@ test('TASK-2528: an approval that cannot be retracted is reported and still refu
     slug: SLUG,
     branch: `mission/${SLUG}`,
     approval: { ok: true, reviewerApproved: true },
-    reviewerUser: REVIEWER,
     summary: 'irrelevant',
     readTokenFn: (() => null) as never,
-    postReviewFn: (() => { throw new Error('must not post without a token'); }) as never,
+    dismissFn: (() => { throw new Error('must not dismiss without a token'); }) as never,
   });
 
   assert.equal(result.ok, false, 'a missing token is a failure, never a silent skip');
-  assert.deepEqual(result.retracted, []);
-  assert.match(result.errors.join('\n'), /no Forgejo token for qwen/);
+  assert.deepEqual(result.dismissed, []);
+  assert.match(result.errors.join('\n'), /no Forgejo token for parallix/);
 
   // The merge refusal does not depend on the retraction succeeding.
   const h = harness();
   const route = await routeIntegrationGateFailure({
     ...routeArgs(h, true),
-    invalidateApprovalFn: (async () => ({ ok: false, retracted: [], errors: ['provider rejected the retraction'] })) as never,
+    invalidateApprovalFn: (async () => ({ ok: false, dismissed: [], errors: ['provider rejected the dismissal'] })) as never,
   } as never);
   assert.equal(route.route, 'revision-changed', 'a failed retraction still refuses to land the changed revision');
   assert.match(h.messages.join('\n'), /Provider approval was not updated/);

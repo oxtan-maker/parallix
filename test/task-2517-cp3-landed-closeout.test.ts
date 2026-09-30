@@ -144,5 +144,9 @@ test('TASK-2517 CP-3: closeout fails when worktree cleanup fails', async () => {
     }),
     /IntegrationAbort/,
   );
-  assert.deepEqual(hookCalls, [], 'no post-integrate hook runs when worktree cleanup fails');
+  assert.deepEqual(
+    hookCalls,
+    ['task-2517-cleanup'],
+    'the post-integrate hook runs before a cleanup failure so the local px refresh is not skipped',
+  );
 });

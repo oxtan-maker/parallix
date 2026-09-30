@@ -7,6 +7,7 @@ import * as fmt from '../src/application/presentation/cli-format.js';
 import { setBubblewrapProbeForTest } from '../src/adapters/process/bubblewrap.js';
 import { ConfinementBlockedError } from '../src/adapters/process/confinement.js';
 import { __setSpawnAndTeeForTest } from '../src/adapters/agents/qwen.js';
+import { mkdtemp as registeredMkdtemp } from './helpers/temp-dir.js';
 
 /**
  * Launch-level coverage for the task-2513 confinement gate. These exercise the
@@ -19,7 +20,7 @@ function makeWorktree(): string {
   // A non-git temp dir: resolveGitMetadataMounts returns [] for a non-repo, so
   // the profile resolves without spawning git and the confinement gate is the
   // only policy under test.
-  return fs.mkdtempSync(path.join(os.tmpdir(), 'confinement-launch-'));
+  return registeredMkdtemp('confinement-launch-');
 }
 
 function fakeLauncher(command = 'claude') {

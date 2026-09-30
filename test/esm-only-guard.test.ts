@@ -4,9 +4,10 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { findEsmOnlyViolations } from '../scripts/esm-only-guard.js';
+import { mkdtemp as registeredMkdtemp } from './helpers/temp-dir.js';
 
 test('ESM-only guard accepts the repository and rejects module syntax, configuration, output, and retired-runtime references', () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'esm-only-guard-'));
+  const root = registeredMkdtemp('esm-only-guard-');
   try {
     assert.deepEqual(findEsmOnlyViolations(process.cwd()), []);
     fs.mkdirSync(path.join(root, 'src'), { recursive: true });

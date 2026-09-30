@@ -10,6 +10,8 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
+import { pathToFileURL } from 'node:url';
+import { resolvePxEntryLoader } from './lib/px-entry.js';
 
 import { SqliteDatabaseAdapter } from '../src/adapters/sqlite/database-adapter.js';
 import { loadDefaultMigrations, SqliteMigrationRunner } from '../src/adapters/sqlite/migration-runner.js';
@@ -26,12 +28,12 @@ import type { IntegrateWorkflowPorts } from '../src/application/ports/integrate-
 const slug = 'task-2599';
 
 test('a failed px integrate exits even when an agent-style handle remains active', () => {
-  const entry = path.resolve('src/entry/px.ts');
-  const script = `setInterval(() => {}, 1000); process.argv = [process.execPath, ${JSON.stringify(entry)}, 'integrate', 'task-does-not-exist', '--invalid-option']; await import(${JSON.stringify(entry)});`;
-  const child = spawnSync(process.execPath, ['--import', 'tsx', '-e', script], {
+  const { entry, loader } = resolvePxEntryLoader();
+  const script = `setInterval(() => {}, 1000); process.argv = [process.execPath, ${JSON.stringify(entry)}, 'integrate', 'task-does-not-exist', '--invalid-option']; await import(${JSON.stringify(pathToFileURL(entry).href)});`;
+  const child = spawnSync(process.execPath, [...(loader ? ['--import', loader] : []), '--input-type=module', '-e', script], {
     // The child deliberately keeps an interval alive; the assertion is that
     // CLI validation exits anyway. Allow prebuilt coverage workers enough time
-    // to load the TypeScript entry before treating that as a regression.
+    // to load the px entry before treating that as a regression.
     cwd: process.cwd(), encoding: 'utf8', timeout: 20000,
   });
   assert.equal(child.error, undefined, child.error?.message);

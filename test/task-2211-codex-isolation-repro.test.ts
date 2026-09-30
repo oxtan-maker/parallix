@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { mockModule, installModuleMocks } from './lib/module-mock.js';
+import { mkdtemp as registeredMkdtemp } from './helpers/temp-dir.js';
 const codexModule = mockModule<typeof import('../src/adapters/agents/codex.js')>('../src/adapters/agents/codex.js', import.meta.url);
 await installModuleMocks();
 test.afterEach(() => mock.restoreAll());
@@ -11,8 +12,8 @@ const { buildCodexDraftInvocation, codexStateRoot } = codexModule;
 const codex = codexModule;
 
 test('codex launcher keeps operator-home nested tool resolution while isolating Codex state', () => {
-  const operatorHome = fs.mkdtempSync(path.join(os.tmpdir(), 'task-2211-operator-home-'));
-  const worktree = fs.mkdtempSync(path.join(os.tmpdir(), 'task-2211-worktree-'));
+  const operatorHome = registeredMkdtemp('task-2211-operator-home-');
+  const worktree = registeredMkdtemp('task-2211-worktree-');
   const originalHome = process.env.HOME;
 
   try {
@@ -36,8 +37,8 @@ test('codex launcher keeps operator-home nested tool resolution while isolating 
 });
 
 test('Codex setup links operator config and auth without copying their contents', () => {
-  const operatorHome = fs.mkdtempSync(path.join(os.tmpdir(), 'task-2211-state-operator-home-'));
-  const worktree = fs.mkdtempSync(path.join(os.tmpdir(), 'task-2211-state-worktree-'));
+  const operatorHome = registeredMkdtemp('task-2211-state-operator-home-');
+  const worktree = registeredMkdtemp('task-2211-state-worktree-');
   const originalHome = process.env.HOME;
   const originalCodexHome = process.env.CODEX_HOME;
 

@@ -293,6 +293,69 @@ export function reviewLoopPublisher(
   };
 }
 
+/**
+ * Work nested inside a still-running outer operation, such as the repair agent
+ * and the re-review `px integrate` runs (TASK-2620).
+ *
+ * Nested work publishes under the outer operation's identity, so the board
+ * shows its phase and family, and finishing it restores the outer operation
+ * instead of ending the mission's live work while the outer process continues.
+ */
+export interface NestedWorkPublisher {
+  readonly parent: CurrentWorkPublication;
+  /** Nested work is running under the outer operation. */
+  running(_phase: CurrentWorkPhase, _summary: string, _agent?: string | null): Promise<void>;
+  /** Nested work finished; the outer operation is still the mission's current work. */
+  resume(): Promise<void>;
+}
+
+export function nestedWorkPublisher(port: CurrentWorkPort, parent: CurrentWorkPublication): NestedWorkPublisher {
+  const publish = async (publication: CurrentWorkPublication) => {
+    try {
+      await port.running(publication);
+    } catch {}
+  };
+  return {
+    parent,
+    running: (phase, summary, agent) => publish({ ...parent, phase, summary, agent: parseFamily(agent ?? null) }),
+    resume: () => publish(parent),
+  };
+}
+
+/** Whether an option bag carries a nested-work publisher from an outer operation. */
+export function isNestedWorkPublisher(value: unknown): value is NestedWorkPublisher {
+  const candidate = value as NestedWorkPublisher | null;
+  return Boolean(candidate && typeof candidate.running === 'function' && typeof candidate.resume === 'function' && candidate.parent);
+}
+
+/**
+ * Wrap an agent launch port so each launch inside an outer operation shows
+ * its phase and actual family, then hands the board back to the outer operation.
+ */
+export function publishedAgentLaunch<T>(
+  start: (_step: string, _options: Record<string, unknown>) => Promise<T>,
+  nested: NestedWorkPublisher,
+  phase: CurrentWorkPhase,
+  describe: (_agent: string) => string,
+): (_step: string, _options: Record<string, unknown>) => Promise<T> {
+  return async (step, launchOptions) => {
+    const requested = typeof launchOptions.agent === 'string' ? launchOptions.agent : null;
+    const onLaunch = launchOptions.onLaunch as ((_info: { agent: string }) => unknown) | undefined;
+    await nested.running(phase, describe(requested ?? 'agent'), requested);
+    try {
+      return await start(step, {
+        ...launchOptions,
+        onLaunch: async (info: { agent: string }) => {
+          await nested.running(phase, describe(info.agent), info.agent);
+          return onLaunch?.(info);
+        },
+      });
+    } finally {
+      await nested.resume();
+    }
+  };
+}
+
 export interface CurrentWorkRecorderOptions {
   /**
    * This process's identifier, supplied by composition. The application layer

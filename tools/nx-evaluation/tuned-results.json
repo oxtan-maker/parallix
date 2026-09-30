@@ -1,0 +1,59 @@
+{
+  "purpose": "Bounded Linux trial of covered unit tests with selective process isolation and Nx Core task caching; this is historical evidence, not an adopted gate",
+  "date": "2026-09-29",
+  "testPopulation": { "files": 396, "tests": 3086, "sharedProcessFiles": 278, "isolatedFiles": 118 },
+  "machine": "local Linux host; /usr/bin/time process-tree user+system CPU and elapsed wall seconds",
+  "commands": {
+    "isolated": "PARALLIX_TEST_COVERAGE=1 npm test -- --unit-test-headroom",
+    "directTuned": "npm run build; node --import tsx tools/nx-evaluation/tuned-unit-runner.ts safe; node --import tsx tools/nx-evaluation/tuned-unit-runner.ts unsafe",
+    "nxTuned": "NX_DAEMON=false nx run-many -t safe unsafe --parallel=1 --outputStyle=stream"
+  },
+  "seconds": {
+    "fullIsolated": { "cpu": 645.49, "wall": 139.99, "testsPassed": 3086 },
+    "directBuild": { "cpu": 3.23, "wall": 2.37 },
+    "directSharedPartition": { "cpu": 18.54, "wall": 16.43, "testsPassed": 2083 },
+    "directIsolatedPartition": { "cpu": 213.46, "wall": 49.07, "testsPassed": 1003 },
+    "directTunedIncludingBuild": { "cpu": 235.23, "wall": 67.87 },
+    "nxCacheBypassedTestsOnly": { "cpu": 233.21, "wall": 66.23 },
+    "nxColdWithBuild": { "cpu": 237.79, "wall": 69.36, "cacheHits": 0, "tasks": 3 },
+    "nxWarmWithBuild": { "cpu": 1.33, "wall": 0.87, "cacheHits": 3, "tasks": 3 },
+    "nxDefaultCacheCold": { "cpu": 238.34, "wall": 69.19, "cacheHits": 0, "tasks": 3 },
+    "nxDefaultCacheSecondWorktreeSameCommit": { "cpu": 1.30, "wall": 0.83, "cacheHits": 3, "tasks": 3 },
+    "nxDefaultCacheSecondWorktreeSourceCommentChange": { "cpu": 236.66, "wall": 68.56, "cacheHits": 0, "tasks": 3 }
+  },
+  "candidate": {
+    "sameInput": "6f31f888b / 62187a2a5 trial revisions; identical clean candidate in a second worktree restored build and both LCOV outputs byte-for-byte without execution markers",
+    "changedInput": "cbd64e27a in second worktree changes only a comment in src/domain/comparators.ts; all three conservatively hashed targets reran"
+  },
+  "coverage": {
+    "comparison": "Both LCOV reports passed through the repository coverage-merge normalization before comparing source/line covered sets",
+    "files": 328,
+    "lines": 47626,
+    "isolatedCoveredLines": 33546,
+    "tunedCoveredLines": 33376,
+    "onlyIsolatedCoveredLines": 262,
+    "onlyTunedCoveredLines": 92,
+    "result": "All assertions passed in both modes, but the covered-line sets differ; the shared-process selection was not proven semantically equivalent"
+  },
+  "pluginInvestigation": {
+    "communityNodeTestExecutor": "https://github.com/SimoneGianni/nx-nodejs-test-runner",
+    "finding": "The package exports a node:test executor with a testFiles glob; it declares no Nx createNodes/createDependencies plugin and does not infer transitive affected tests or preserve the repository's guarded runner",
+    "officialAlternatives": [
+      "https://nx.dev/docs/technologies/test-tools/jest/introduction",
+      "https://nx.dev/docs/technologies/test-tools/vitest/introduction"
+    ],
+    "alternativeCost": "Official Jest/Vitest Atomizer support requires migrating the test runner, and file splitting alone does not establish per-test-file source dependencies"
+  },
+  "dependencyAudit": "Nx 23.2.1 introduced two high npm audit findings via its pinned smol-toml 1.6.1 on the trial date; see ignored raw audit output. Trial wiring was removed instead of weakening the mandatory audit gate.",
+  "rawLocalLogs": "tmp/nx-evaluation/ (ignored workspace files)",
+  "rawLogSha256": {
+    "directSharedPartition": "6c1c069b0a3ac1b6fecf964af7e2fa31f7b105962c1ddab8f66633ac4109907b",
+    "directIsolatedPartition": "9745321e07f55d886d84ed41966607c5889c4be14f864f53675227600233b917",
+    "nxCacheBypassed": "c56bb60a449263465ca0f0b123d8f2847c601effd3394e7529888df75dd61e57",
+    "nxColdWithBuild": "8bdfcf67926921701b5332e2d979d28b90552e01fb0a9ee3648298280cd45aad",
+    "nxWarmWithBuild": "794cdea5c9ff2ea9ede3ac6eaf57061b28876925a2c3e79a0a129a6b8d1034d0",
+    "nxDefaultCacheSecondWorktreeSameCommit": "01c929e8c8b611455217ef9cd0d50158468b0a967c1e4b53b5761e0de455b0d4",
+    "nxDefaultCacheSecondWorktreeSourceChange": "4d9513d42380a90fb85cdd21828dbf068689802beecd4bb7a69afbf41bfe5bc1",
+    "fullIsolated": "b6ae7a2b35da0e44c979fc8031376f021c3368d4fdf5b8a4ddeae60c815df5b4"
+  }
+}

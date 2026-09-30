@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { resolveKnownAgentFamilies } from '../src/adapters/agents/known-agent-families.js';
+import { mkdtemp as registeredMkdtemp } from './helpers/temp-dir.js';
 
 // ---------------------------------------------------------------------------
 // resolveKnownAgentFamilies — family derivation for the board's agent strip.
@@ -14,7 +15,7 @@ import { resolveKnownAgentFamilies } from '../src/adapters/agents/known-agent-fa
 
 /** Create a temp root, optionally writing raw config/agents.json contents. */
 function tempRoot(contents?: string): string {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-config-resolver-'));
+  const root = registeredMkdtemp('agent-config-resolver-');
   if (contents !== undefined) {
     fs.mkdirSync(path.join(root, 'config'), { recursive: true });
     fs.writeFileSync(path.join(root, 'config', 'agents.json'), contents);

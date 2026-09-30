@@ -9,6 +9,7 @@ import type { MissionStore } from '../src/application/domain-ports.js';
 import type { Mission, MissionId, MissionStatus } from '../src/domain/mission.js';
 import { missionId } from '../src/domain/mission.js';
 import { repositoryId } from '../src/domain/repository.js';
+import { mkdtemp as registeredMkdtemp } from './helpers/temp-dir.js';
 
 /**
  * Regression for TASK-2515: a mission whose SQLite `Mission` aggregate is stuck
@@ -66,7 +67,7 @@ function writeCompletedTask(root: string, id: string, status: string): void {
 }
 
 test('task-2515 integration lifecycle not masked by completed backlog task', async () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'task-2515-'));
+  const root = registeredMkdtemp('task-2515-');
   try {
     // Completed task Markdown says `done`; the persisted aggregate says `integration`.
     writeCompletedTask(root, 'task-2515', 'done');
@@ -106,7 +107,7 @@ test('task-2515 integration lifecycle not masked by completed backlog task', asy
 const NON_TERMINAL: MissionStatus[] = ['backlog', 'refined', 'active', 'review', 'integration'];
 test('task-2515 every non-terminal persisted lifecycle wins over completed Markdown', async () => {
   for (const status of NON_TERMINAL) {
-    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'task-2515-'));
+    const root = registeredMkdtemp('task-2515-');
     try {
       writeCompletedTask(root, 'task-2515', 'done');
       const projection = await board(root, storeFor([mission('task-2515', status)])).builder.build();

@@ -20,9 +20,10 @@ import {
   dependencyLayers,
   layerRoots,
 } from '../src/adapters/architecture/boundary-guards.js';
+import { mkdtemp as registeredMkdtemp } from './helpers/temp-dir.js';
 
 function withTempRoot(run: (_root: string) => void): void {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'dependency-graph-'));
+  const root = registeredMkdtemp('dependency-graph-');
   try {
     run(root);
   } finally {

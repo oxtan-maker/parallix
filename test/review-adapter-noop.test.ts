@@ -24,12 +24,13 @@ import {
   resolveForgejoUser,
   resolveReviewUser,
 } from '../src/adapters/review/review-adapter.js';
+import { mkdtemp as registeredMkdtemp } from './helpers/temp-dir.js';
 
 // Forgejo is disabled when adapters.review.provider is null (empty config), so
 // every guarded review entry point returns its noop value without touching the
 // network. These exercises the disabled-provider surface hermetically.
 async function withDisabledReview(run: (rootDir: string) => void | Promise<void>): Promise<void> {
-  const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), 'review-noop-'));
+  const rootDir = registeredMkdtemp('review-noop-');
   fs.writeFileSync(path.join(rootDir, 'workflow.config.json'), '{}\n');
   try { await run(rootDir); } finally { fs.rmSync(rootDir, { recursive: true, force: true }); }
 }

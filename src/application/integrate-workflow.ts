@@ -13,10 +13,10 @@
 import * as fmt from './presentation/cli-format.js';
 import { createIntegrationStrategy } from './services/integration-dispatch.js';
 import { missionId } from '../domain/mission.js';
-import { recoverLegacyIntegrationRepairReview, integrationRepairNeedsReview } from './integration-repair-review.js';
+import { integrationRepairNeedsReview } from './integration-repair-review.js';
 import { evaluateTaskStatusForIntegration, recoveryEstablishesApproval, resolveAuthoritativeApprovalAt } from './integrate/approval.js';
 import { createIntegrationContextBuilder } from './integrate/context.js';
-import { createIntegrationGateStep, IntegrationRestartRequired, type IntegrateSeams } from './integrate/gates.js';
+import { createIntegrationGateStep, IntegrationStopsForHuman, type IntegrateSeams } from './integrate/gates.js';
 import { createGithubPrLanding } from './integrate/github-pr.js';
 import { createMissionLanding } from './integrate/landing.js';
 import { createIntegrationPreflight } from './integrate/preflight.js';
@@ -34,12 +34,15 @@ import {
   type IntegrateRequest,
 } from './integrate/support.js';
 import type { IntegrateWorkflowPorts } from './ports/integrate-workflow.js';
+import { isNestedWorkPublisher, publishedAgentLaunch } from './recording/current-work-recorder.js';
 
 /** The injection seams `px integrate` callers and the characterization suites bind. */
 export interface IntegrateOptions extends Partial<IntegrateSeams> {
   missionServicesFn?: Function;
   /** Board composition receives the terminal status without terminating the UI process. */
   exitFn?: (_code: number) => void;
+  /** The outer `px integrate` publication nested repair and review report into (TASK-2620). */
+  nestedWork?: unknown;
 }
 
 export function createIntegrateWorkflow(ports: IntegrateWorkflowPorts) {
@@ -228,7 +231,6 @@ export function createIntegrateWorkflow(ports: IntegrateWorkflowPorts) {
       return 0;
     }
     if (!dryRun) {
-      await recoverLegacyIntegrationRepairReview(missionServices.store, slug);
       const repair = await missionServices.store.load(missionId(slug));
       if (repair.kind === 'found' && integrationRepairNeedsReview(repair.mission)) {
         if (!seams.reReviewFn) {
@@ -237,7 +239,11 @@ export function createIntegrateWorkflow(ports: IntegrateWorkflowPorts) {
         if (!await seams.reReviewFn(slug, ports.process.cwd())) {
           throw abortWith(ports.landing, `Review of the repaired mission ${slug} stopped. Run px review ${slug} --continue to resume.`);
         }
-        throw new IntegrationRestartRequired(slug);
+        // TASK-2620: on approval the repaired mission sits in the integration
+        // lane for the human to read the fresh PR and integrate. No path
+        // auto-restarts integration or merges, so stop here.
+        state.nextActionMessage = `The repaired mission ${slug} was re-reviewed and approved; it now sits in the integration lane. Read the fresh PR and run px integrate ${slug} to land.`;
+        return 0;
       }
     }
     const context: any = await buildIntegrationContext(slug, { missionStore: missionServices.store });
@@ -331,34 +337,32 @@ export function createIntegrateWorkflow(ports: IntegrateWorkflowPorts) {
         // SC2: kernel-context injection seams. Both bounces build their rebound
         // context from these so tests keep a mock launch/transition/fallback
         // port instead of a real agent, git, or Forgejo.
-        startAgentFn: options.startAgentFn ?? ports.agents.startAgent,
+        startAgentFn: isNestedWorkPublisher(options.nestedWork)
+          ? publishedAgentLaunch(options.startAgentFn ?? ports.agents.startAgent, options.nestedWork, 'execute', (agent) => `integration repair: implementer ${agent}`)
+          : options.startAgentFn ?? ports.agents.startAgent,
         transitionTaskFn: options.transitionTaskFn ?? ports.backlog.transitionTask,
         applyAgentFallbackFn: options.applyAgentFallbackFn ?? ports.agents.applyAgentFallback,
         selectAgentFn: options.selectAgentFn ?? ports.agents.selectAgent,
         workflowLauncherStatusFn: options.workflowLauncherStatusFn ?? ports.agents.workflowLauncherStatus,
         routeIntegrationGateFailureFn: options.routeIntegrationGateFailureFn ?? ports.gates.routeIntegrationGateFailure,
+        // TASK-2620: the single live re-review route. Absent, a changed
+        // revision stops integration for the operator to re-review; nothing
+        // auto-restarts integration or merges.
         ...(options.reReviewFn ? { reReviewFn: options.reReviewFn } : {}),
-        resumeReviewFn: options.resumeReviewFn ?? (review => ports.review.startReviewRound(review.slug, {
-          worktree: review.worktree,
-          revision: review.revision,
-          missionServicesFn: options.missionServicesFn!,
-        })),
-        readApprovalFn: options.readApprovalFn,
       };
       const state: IntegrateRunState = { temporaryStash: null, nextActionMessage: null };
       try {
-        for (;;) {
-          try {
-            exitCode = await runIntegration(slug, request, options, seams, state);
-            break;
-          } catch (error) {
-            if (!(error instanceof IntegrationRestartRequired)) { throw error; }
-            // The persisted integration-gate rebound budget bounds repairs. A
-            // restart retains review orchestration and refreshes every fact.
-            fmt.log.info(`Restarting integration of ${slug} on the re-reviewed revision.`);
-          }
-        }
+        // TASK-2620: a repair re-review no longer restarts integration. The
+        // run executes once; on a repaired-and-re-approved revision it stops in
+        // the integration lane for the human.
+        exitCode = await runIntegration(slug, request, options, seams, state);
       } catch (error) {
+        // TASK-2620: a repaired-and-re-approved revision stops cleanly in the
+        // integration lane for the human; this is not a failure.
+        if (error instanceof IntegrationStopsForHuman) {
+          state.nextActionMessage = error.message;
+          exitCode = 0;
+        } else {
         // Report and fail. Rethrowing here is swallowed by the terminal exit
         // port call below, which would end the run with a success code and no
         // output at all.
@@ -369,6 +373,7 @@ export function createIntegrateWorkflow(ports: IntegrateWorkflowPorts) {
           }
         }
         exitCode = 1;
+        }
       }
       exitCode = Math.max(exitCode, restoreTemporaryStash(slug, state.temporaryStash));
       if (state.nextActionMessage) {

@@ -6,6 +6,7 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import { mockModule, installModuleMocks } from './lib/module-mock.js';
+import { mkdtemp as registeredMkdtemp } from './helpers/temp-dir.js';
 const backlog = mockModule<typeof import('../src/adapters/backlog/backlog.js')>('../src/adapters/backlog/backlog.js', import.meta.url);
 const missionUtils = mockModule<typeof import('../src/adapters/filesystem/mission-utils.js')>('../src/adapters/filesystem/mission-utils.js', import.meta.url);
 const evaluateTaskStatusForIntegrationModule = mockModule<typeof import('../src/adapters/cli/commands/integrate.js')>('../src/adapters/cli/commands/integrate.js', import.meta.url);
@@ -223,7 +224,7 @@ test('printIntegrationPreflight PASS for approval when token and forgejo report 
 
 // SC 5a: buildIntegrationContext returns local-approved approval when readToken returns null but review-state.json has phase=approved
 test('buildIntegrationContext returns local-review-state approval when token missing but review-state is approved', async () => {
-  const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'task-1219-bic-test-'));
+  const tmpRoot = registeredMkdtemp('task-1219-bic-test-');
   const missionDir = path.join(tmpRoot, 'docs', 'missions', '2026', 'task-1219');
   fs.mkdirSync(missionDir, { recursive: true });
   fs.writeFileSync(path.join(missionDir, 'MISSION.md'), '# Mission: task-1219\n');
@@ -271,7 +272,7 @@ test('buildIntegrationContext returns local-review-state approval when token mis
 
 // SC 5a negation: no local fallback when review-state.json is missing and Forgejo is down
 test('buildIntegrationContext does not fallback when review-state.json is absent', async () => {
-  const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'task-1219-bic-no-rs-'));
+  const tmpRoot = registeredMkdtemp('task-1219-bic-no-rs-');
   const missionDir = path.join(tmpRoot, 'docs', 'missions', '2026', 'task-1219');
   fs.mkdirSync(missionDir, { recursive: true });
   fs.writeFileSync(path.join(missionDir, 'MISSION.md'), '# Mission: task-1219\n');
@@ -307,7 +308,7 @@ test('buildIntegrationContext does not fallback when review-state.json is absent
 
 // SC 5a disposition guard: phase=approved but disposition=REQUEST_CHANGES should NOT produce local fallback
 test('buildIntegrationContext requires disposition=APPROVED not just phase=approved', async () => {
-  const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'task-1219-disposition-'));
+  const tmpRoot = registeredMkdtemp('task-1219-disposition-');
   const missionDir = path.join(tmpRoot, 'docs', 'missions', '2026', 'task-1219');
   fs.mkdirSync(missionDir, { recursive: true });
   fs.writeFileSync(path.join(missionDir, 'MISSION.md'), '# Mission: task-1219\n');

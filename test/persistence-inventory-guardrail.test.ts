@@ -9,6 +9,7 @@ import {
   type ADR0053BoundaryEntry,
   type ADR0053ConceptName,
 } from './fixtures/durable-state-inventory.js';
+import { mkdtemp as registeredMkdtemp } from './helpers/temp-dir.js';
 
 const ROOT = process.cwd();
 const APPLICATION_DIR = path.join(ROOT, 'src', 'application');
@@ -246,7 +247,7 @@ test('SC2: src/adapters/sqlite/ is the sole allowed location for node:sqlite imp
 // ---------------------------------------------------------------------------
 
 test('SC2 fixture: SQL guard rejects node:sqlite import in application code', () => {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'sql-guard-fixture-'));
+  const tmpDir = registeredMkdtemp('sql-guard-fixture-');
   try {
     // Write a test file that imports node:sqlite
     const testFile = path.join(tmpDir, 'test-import.ts');
@@ -430,7 +431,7 @@ test('SC7: no unclassified durable file read/write in src/application/ or src/in
 // ---------------------------------------------------------------------------
 
 test('SC7 fixture: durable-file guard rejects writeFileSync in a new application file', () => {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'durable-guard-fixture-'));
+  const tmpDir = registeredMkdtemp('durable-guard-fixture-');
   try {
     // Create a temporary application file with a durable write
     const appDir = path.join(tmpDir, 'src', 'application', 'test');

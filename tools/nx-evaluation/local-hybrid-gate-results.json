@@ -1,0 +1,56 @@
+{
+  "purpose": "Covered local pre-integration unit gate after adopting the screened hybrid without Nx",
+  "date": "2026-09-29",
+  "command": "PARALLIX_FAST_UNIT=1 PARALLIX_TEST_COVERAGE=1 npm test -- --unit-test-headroom",
+  "population": {
+    "files": 396,
+    "sharedProcessFiles": 278,
+    "isolatedFiles": 118,
+    "testsPassed": 3086,
+    "testsFailed": 0,
+    "testsCancelled": 0
+  },
+  "guard": {
+    "metric": "waited process-tree user plus system CPU, including descendants",
+    "coveredSuiteBudgetSeconds": 425,
+    "wallWatchdogSeconds": 600,
+    "perTestCpuBudgetSeconds": 1,
+    "isolatedGroupConcurrency": 4
+  },
+  "coveredRuns": [
+    {
+      "profile": "extra NODE_V8_COVERAGE raw payload in each group, unused by the LCOV merge",
+      "cpuSeconds": 369.819,
+      "wallSeconds": 100.505,
+      "testOutcome": "3086 passed; exploratory 300-second CPU bound failed",
+      "rawLogSha256": "9545fec03731102c7f656819fdb318c47521f2b0dfe84d6eadb8f7eebe17d6e4"
+    },
+    {
+      "profile": "native Node LCOV reporter, no extra group V8 payload",
+      "cpuSeconds": 337.336,
+      "wallSeconds": 90.566,
+      "testOutcome": "3086 passed; exploratory 300-second CPU bound failed",
+      "rawLogSha256": "513e7007fd1923827885a4550a8accc34d782f3a05123e3d8221c47d7306f8ea"
+    },
+    {
+      "profile": "native Node LCOV reporter, no extra group V8 payload",
+      "cpuSeconds": 367.102,
+      "wallSeconds": 98.870,
+      "testOutcome": "3086 passed; 400-second CPU bound passed",
+      "rawLogSha256": "9f2e09cd20261c0016cf65ac13ea83772c7aede52cb3b2b59929877737f7b79a"
+    }
+  ],
+  "coverage": {
+    "artifact": "coverage/.lcov-unit.info",
+    "artifactSha256LastRun": "0a34936165ad6f8a28977329a4f88f6ff977ca17575e19018f72bb5c6b5464b9",
+    "historicalArtifact": "tmp/nx-evaluation/tuned-output/merged.lcov",
+    "sourceFiles": 328,
+    "executableLines": 47626,
+    "coveredLinesLastRun": 33375,
+    "coveredLinesHistorical": 33376,
+    "sameExecutableLineSet": true,
+    "coveredOnlyLastRun": 0,
+    "coveredOnlyHistorical": 1
+  },
+  "interpretation": "The adopted local gate passes the complete unit population with a 425-second CPU bound, 16 percent above the higher observed no-extra-payload run. The historical 240.69-second overlap trial is not a reliable calibration for this host's later 337-367-second runs. No Nx result reuse is claimed. One LCOV hit difference is within the separately demonstrated coverage-attribution instability, not proof of changed test behavior."
+}

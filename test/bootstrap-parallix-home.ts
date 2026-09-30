@@ -7,6 +7,7 @@ import childProcess from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { setCommandPathProbe, setLauncherHealthProbe } from '../src/adapters/agents/launcher-selection.js';
 import { startDefaultDbGuard } from './lib/default-db-guard.js';
+import { trackWorkerTempDirs } from './lib/track-worker-temp-dirs.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -204,6 +205,11 @@ function registerTempRoot(dir) {
   }
   return dir;
 }
+
+// Test fixtures sometimes call fs.mkdtempSync directly instead of the helper.
+// Register those roots too, so assertion failures and SIGKILL cannot strand
+// them outside the runner's per-worker cleanup manifest.
+trackWorkerTempDirs(registerTempRoot);
 
 // Idempotent cleanup: safe to invoke from both `exit` and `SIGTERM`.
 // When `SIGTERM` fires first, cleanup runs and then `process.exit()`

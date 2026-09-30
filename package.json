@@ -1,6 +1,6 @@
 {
   "name": "@magnusekdahl/parallix",
-  "version": "1.5.203",
+  "version": "1.5.213",
   "description": "Trust ladder for AI coding work — separate review, configured verification, conditional Linux confinement, and human-owned merges",
   "license": "AGPL-3.0-or-later",
   "private": false,
@@ -40,6 +40,7 @@
   ],
   "scripts": {
     "build": "npm run bundle",
+    "prepare": "node scripts/repair-pi-brace-expansion.mjs",
     "build:web": "vite build --config web/vite.config.ts",
     "bundle": "tsx scripts/build-canonical-bundle.ts",
     "dev": "tsx src/entry/px.ts",
@@ -52,6 +53,7 @@
     "test:integration:ci": "npm run build && npm run test:integration:ci:prebuilt",
     "test:integration:ci:prebuilt": "PARALLIX_PREBUILT_PACK=1 FORCE_COLOR=0 tsx test/run-default-tests.ts --integration-ci",
     "test:integration:local": "FORCE_COLOR=0 tsx test/run-default-tests.ts --integration-local",
+    "test:integration:local:prebuilt": "PARALLIX_PREBUILT_PACK=1 FORCE_COLOR=0 tsx test/run-default-tests.ts --integration-local",
     "test:agent-e2e": "node --import tsx --import ./test/bootstrap-e2e-parallix-home.ts test/e2e-real-agent-smoke.test.ts",
     "test:lifecycle-e2e": "node --test --import tsx --import ./test/bootstrap-e2e-parallix-home.ts test/e2e-mission-lifecycle.test.ts",
     "test:ci": "npm run typecheck && npm run build && npm test && npm run test:integration:ci:prebuilt && npm run test:bundle && npm run test:package-content:prebuilt",
@@ -82,6 +84,7 @@
     "@types/react": "^19.2.14",
     "@typescript-eslint/eslint-plugin": "^8.62.1",
     "@typescript-eslint/parser": "^8.62.1",
+    "brace-expansion": "5.0.12",
     "esbuild": "^0.25.12",
     "eslint": "^9.39.4",
     "fast-uri": "^3.1.6",

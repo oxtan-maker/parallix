@@ -4,6 +4,7 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { mockModule, installModuleMocks } from './lib/module-mock.js';
+import { mkdtemp as registeredMkdtemp } from './helpers/temp-dir.js';
 
 const missionUtils = mockModule<typeof import('../src/adapters/filesystem/mission-utils.js')>('../src/adapters/filesystem/mission-utils.js', import.meta.url);
 const handoffModule = mockModule<typeof import('../src/adapters/cli/commands/handoff.js')>('../src/adapters/cli/commands/handoff.js', import.meta.url);
@@ -23,7 +24,7 @@ test.afterEach(() => {
 });
 
 function missionFixture(slug: string, predicted = 'Large'): { rootDir: string; missionDir: string } {
-  const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), 'parallix-nel-characterization-'));
+  const rootDir = registeredMkdtemp('parallix-nel-characterization-');
   fixtures.push(rootDir);
   const missionDir = path.join(rootDir, 'missions', slug);
   fs.mkdirSync(missionDir, { recursive: true });

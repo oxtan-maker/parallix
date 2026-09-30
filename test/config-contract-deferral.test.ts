@@ -11,8 +11,9 @@ import os from 'os';
 import path from 'path';
 
 import { configCandidates, evaluateRepositoryReadiness, findWorkflowConfig, } from '../src/adapters/config/product-config.js';
+import { mkdtemp as registeredMkdtemp } from './helpers/temp-dir.js';
 function withTempDir(fn) {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'workflow-config-deferral-'));
+  const dir = registeredMkdtemp('workflow-config-deferral-');
   try {
     fn(dir);
   } finally {

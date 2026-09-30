@@ -13,6 +13,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { mockModule, installModuleMocks } from './lib/module-mock.js';
+import { mkdtemp as registeredMkdtemp } from './helpers/temp-dir.js';
 const runHandoffAndReviewModule = mockModule<typeof import('../src/adapters/cli/commands/active.js')>('../src/adapters/cli/commands/active.js', import.meta.url);
 const repairHandoff = mockModule<typeof import('../src/adapters/cli/commands/repair-handoff.js')>('../src/adapters/cli/commands/repair-handoff.js', import.meta.url);
 await installModuleMocks();
@@ -183,7 +184,7 @@ test('exhaustion: runHandoffAndReview stops after bounded relaunch attempts with
 test('missing checkpoint: valid CP after relaunch unblocks handoff and starts review loop', async () => {
   // Deterministic filesystem fixture: creates a real CP-1.md with Goal Check table
   // and one evidence row per mission criterion, then verifies the validation path accepts it.
-  const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'task-2261-valid-cp-'));
+  const tmpRoot = registeredMkdtemp('task-2261-valid-cp-');
   const slug = 'task-2261';
   const missionDir = path.join(tmpRoot, 'missions', slug);
   fs.mkdirSync(missionDir, { recursive: true });

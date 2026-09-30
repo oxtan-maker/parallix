@@ -10,8 +10,8 @@ import {
 } from '../src/domain/review.js';
 import { MissionLifecycleService } from '../src/application/mission-lifecycle-service.js';
 import type { MissionVersion } from '../src/application/domain-ports.js';
-import { recoverLegacyIntegrationRepairReview, integrationRepairNeedsReview } from '../src/application/integration-repair-review.js';
-import { createIntegrationGateStep, IntegrationRestartRequired } from '../src/application/integrate/gates.js';
+import { integrationRepairNeedsReview } from '../src/application/integration-repair-review.js';
+import { createIntegrationGateStep } from '../src/application/integrate/gates.js';
 import { routeIntegrationGateFailure } from '../src/adapters/cli/commands/integrate-gate-rebound.js';
 import { createReviewWorkflowAdapter } from '../src/adapters/review/review-workflow-adapter.js';
 import { reviewStateDataFrom } from '../src/adapters/review/review-state-mapping.js';
@@ -74,7 +74,6 @@ async function transition(fixture: ReturnType<typeof memoryMission>, command: Pa
 
 test('integration repair withdraws approval before launch, survives review pingpong, and requests integration restart', async () => {
   const fixture = memoryMission();
-  let repairs = 0;
   let providerRetracted = false;
   let repaired = false;
   const failedGate = { key: 'integration', command: 'gate', exitCode: 1, stdout: '', stderr: 'regression' };
@@ -109,10 +108,10 @@ test('integration repair withdraws approval before launch, survives review pingp
           return { agent: implementer, result: { status: 0 } } as never;
         },
         routeIntegrationGateFailureFn: async options => routeIntegrationGateFailure({
-          ...options, readReboundsFn: async () => repairs, recordReboundFn: async () => { repairs++; return true; },
+          ...options,
           captureFinalTreeFn: ports.gates.captureFinalIntegrationTree as never,
           runPhaseGatesFn: ports.gates.runPhaseGates as never,
-          invalidateApprovalFn: async () => { providerRetracted = true; return { ok: true, retracted: ['custom'], errors: [] }; },
+          invalidateApprovalFn: async () => { providerRetracted = true; return { ok: true, dismissed: ['custom'], errors: [] }; },
           reboundFn: (async (_reason: unknown, context: any) => {
             await context.transitionToImplementer(slug);
             await context.startAgent();
@@ -139,22 +138,12 @@ test('integration repair withdraws approval before launch, survives review pingp
           return true;
         },
       },
-    }), IntegrationRestartRequired);
+    }), error => (error as Error).name === 'IntegrationStopsForHuman');
     assert.equal(fixture.mission().status, 'integration');
     assert.equal(fixture.mission().review!.rounds.length, 3);
     assert.equal(currentReviewRound(fixture.mission().review!).subject.revision, 'repair-2');
     assert.deepEqual(fixture.history.map(event => event.trigger), ['rebound-to-active', 'submit-for-review', 'request-changes', 'submit-for-review', 'approve']);
   } finally { setLogger(previous); }
-});
-
-test('legacy gate rebound recovery invalidates its approval once without reopening unrelated approved missions', async () => {
-  const fixture = memoryMission('active');
-  assert.equal(await recoverLegacyIntegrationRepairReview(fixture.store, slug), false);
-  fixture.history.push({ trigger: 'rebound-to-active', idempotencyKey: `integration-gate-rebound:${slug}:1` });
-  assert.equal(await recoverLegacyIntegrationRepairReview(fixture.store, slug), true);
-  assert.equal(await recoverLegacyIntegrationRepairReview(fixture.store, slug), false);
-  assert.equal(integrationRepairNeedsReview(fixture.mission()), true);
-  assert.equal(fixture.mission().review!.rounds.length, 2);
 });
 
 test('operator continue clears escalation and permits an attempt even when its old round limit was exhausted', async () => {
@@ -198,7 +187,7 @@ test('a repair review cannot consume an old or unassigned provider approval', as
 
 test('the real handoff binds an invalidated round to the committed repair and mirrors the review lane', async () => {
   const fixture = memoryMission();
-  await transition(fixture, { type: 'rebound-to-active', agent: implementer, occurredAt: new Date().toISOString() });
+  await transition(fixture, { type: 'rebound-to-active', agent: implementer, cause: { kind: 'integration-gate-failure', gate: 'unit' }, occurredAt: new Date().toISOString() });
   const recorder = makeRecorder();
   const base = makePorts(recorder);
   const ports = makePorts(recorder, {

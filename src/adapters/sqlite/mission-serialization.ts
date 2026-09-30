@@ -25,6 +25,7 @@ import {
   type ReviewPhase,
   type ReviewRound,
   type ReviewerDecision,
+  type ReviewRevocationCause,
   type StageLaunchWindow,
 } from '../../domain/review.js';
 import { missionVersion, type MissionVersion } from '../../application/domain-ports.js';
@@ -107,6 +108,13 @@ export interface MissionReviewRoundRecord {
   readonly revoked_at: string | null;
   readonly revoked_by: string | null;
   readonly revoked_reason: string | null;
+  readonly revoked_cause?: string | null;
+  readonly revoked_gate?: string | null;
+  readonly revoked_gate_command?: string | null;
+  readonly revoked_gate_log?: string | null;
+  readonly superseded_at?: string | null;
+  readonly superseding_revision?: string | null;
+  readonly superseded_by?: string | null;
   readonly responded_at: string | null;
   readonly resulting_revision: string | null;
   readonly phase: string;
@@ -195,6 +203,39 @@ type MissionReviewRecords = Pick<
 export interface HydratedMission {
   readonly mission: Mission;
   readonly version: MissionVersion;
+}
+
+/** The withdrawal recorded on an approval, with its typed cause when one was recorded. */
+function approvalRevocation(row: MissionReviewRoundRecord) {
+  if (!row.revoked_at) { return {}; }
+  const cause = revocationCause(row);
+  return { revocation: {
+    revokedAt: requiredText(row.revoked_at, 'revocation time'),
+    revokedBy: requiredText(row.revoked_by ?? '', 'revoker'),
+    reason: requiredText(row.revoked_reason ?? '', 'revocation reason'),
+    ...(cause ? { cause } : {}),
+  } };
+}
+
+function revocationCause(row: MissionReviewRoundRecord): ReviewRevocationCause | null {
+  const kind = row.revoked_cause ?? null;
+  switch (kind) {
+    case null: return null;
+    case 'integration-gate-failure':
+      return { kind, gate: row.revoked_gate ?? null, command: row.revoked_gate_command ?? null, log: row.revoked_gate_log ?? null };
+    case 'operator': case 'review-repair': case 'rebase-repair': return { kind };
+    default: throw new Error(`Persisted revocation cause is invalid: ${kind}`);
+  }
+}
+
+/** The recorded branch move against an approval, when one was recorded (TASK-2555). */
+function approvalSupersession(row: MissionReviewRoundRecord) {
+  if (!row.superseded_at) { return {}; }
+  return { supersession: {
+    supersededAt: requiredText(row.superseded_at, 'supersession time'),
+    supersedingRevision: changeRevision(requiredText(row.superseding_revision ?? '', 'superseding revision')),
+    recordedBy: requiredText(row.superseded_by ?? '', 'superseding operation'),
+  } };
 }
 
 function requiredText(value: string, field: string): string {
@@ -313,11 +354,8 @@ function decisionFor(
       decidedAt,
       comment: row.decision_comment,
       source: { kind: 'local' },
-      ...(!row.revoked_at ? {} : { revocation: {
-        revokedAt: requiredText(row.revoked_at, 'revocation time'),
-        revokedBy: requiredText(row.revoked_by ?? '', 'revoker'),
-        reason: requiredText(row.revoked_reason ?? '', 'revocation reason'),
-      } }),
+      ...approvalRevocation(row),
+      ...approvalSupersession(row),
     };
   }
   if (row.approval_source_kind === 'provider') {
@@ -329,11 +367,8 @@ function decisionFor(
         kind: 'provider',
         provider: requiredText(row.approval_source_provider ?? '', 'approval provider'),
       },
-      ...(!row.revoked_at ? {} : { revocation: {
-        revokedAt: requiredText(row.revoked_at, 'revocation time'),
-        revokedBy: requiredText(row.revoked_by ?? '', 'revoker'),
-        reason: requiredText(row.revoked_reason ?? '', 'revocation reason'),
-      } }),
+      ...approvalRevocation(row),
+      ...approvalSupersession(row),
     };
   }
   throw new Error(`Persisted approval source is invalid: ${row.approval_source_kind}`);

@@ -14,6 +14,7 @@ import { missionId } from '../../src/domain/mission.js';
 import { repositoryId } from '../../src/domain/repository.js';
 import type { AgentBlocklistRepository } from '../../src/application/ports/agent-blocklist.js';
 import type { OperationalHistoryRepository } from '../../src/application/ports/operation-history.js';
+import { mkdtemp as registeredMkdtemp } from '../helpers/temp-dir.js';
 
 // ---------------------------------------------------------------------------
 // Mock repositories
@@ -303,7 +304,7 @@ test('AgentReadAdapter loadAgentAvailability handles timed blocks', async () => 
 });
 
 test('AgentReadAdapter loadAssignedAgent returns agent from task file', async () => {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'px-agent-test-'));
+  const tmpDir = registeredMkdtemp('px-agent-test-');
   try {
     const taskFile = path.join(tmpDir, 'task-1001.md');
     fs.writeFileSync(taskFile, '---\nid: TASK-1001\nassignee: [codex]\n---\n', 'utf8');

@@ -9,8 +9,9 @@ import * as fmt from '../../application/presentation/cli-format.js';
 import { git, run } from '../git/git.js';
 import { findMissionDir, resolveWorktree, missionBranchName, getPrimaryBranch } from '../filesystem/mission-utils.js';
 import { isDbAdhocIdentity, missionId } from '../../domain/mission.js';
-import { reviewStatus } from '../../domain/review.js';
-import { recoverLegacyIntegrationRepairReview } from '../../application/integration-repair-review.js';
+import { reviewStatus, ConfiguredReviewerEligibility } from '../../domain/review.js';
+import { integrationRepairReviewBrief, latestIntegrationRepair } from '../../application/integration-repair-review.js';
+import { agentFamily } from '../../domain/agents.js';
 import type { PullRequestReference } from '../../domain/review.js';
 import { resolveTaskFile, getTaskImplementer, getTaskStatus, enforceTaskAssignee, transitionTask, reportTaskResolution } from '../backlog/backlog.js';
 import { toVirtual, transitionVirtual } from '../config/state-map.js';
@@ -61,6 +62,34 @@ export const DEFAULT_REBOUNDS_PER_ROUND = 6;
 
 /** Named escalation reason: the per-round relaunch cap is exhausted. */
 export const REBOUNDS_PER_ROUND_EXHAUSTED = 'REBOUNDS_PER_ROUND_EXHAUSTED';
+
+/**
+ * One Node process can receive overlapping CLI/controller calls for the same
+ * worktree. Keep one effective loop owner so a nested `--start`/`--continue`
+ * cannot race the outer loop's delayed writes. Cross-process contention is
+ * additionally fenced by the authoritative review round checks below.
+ */
+const activeReviewControllers = new Set<string>();
+
+function reviewControllerKey(slug: string, worktree?: string): string {
+  return `${path.resolve(worktree || process.cwd())}\u0000${slug}`;
+}
+
+function controllerSuperseded(current: ReviewState, authoritative: ReviewState | null): boolean {
+  if (!authoritative) { return false; }
+  // An approval for this same round is an outcome, not a competing controller:
+  // consumeAndRecoverReviewerArtifacts() reconciles it through
+  // applyReviewerOutcome(), including the Backlog review → integration mirror.
+  // Only a later round proves this controller's snapshot is stale.
+  return authoritative.round > current.round;
+}
+
+async function stopIfControllerSuperseded(ctx: any, state: ReviewState, boundary: string): Promise<boolean> {
+  const authoritative = await Promise.resolve(ctx.readReviewStateFn(ctx.slug, ctx.worktree, ctx.missionStore));
+  if (!controllerSuperseded(state, authoritative)) { return false; }
+  ctx.log(fmt.status('INFO', `Review controller for ${ctx.slug} was superseded before ${boundary} by authoritative round ${authoritative!.round} (${authoritative!.phase}). Stopping without applying stale state; run px review ${ctx.slug} --continue only if the authoritative round still needs work.`));
+  return true;
+}
 
 /** The review relationship is expressed using configured agent-family IDs. */
 export function reviewIndependence(implementer: string, reviewer: string): string {
@@ -276,6 +305,8 @@ type ReviewerPhaseScratch = {
   implementer: string | undefined;
   reviewer: string | undefined;
   reviewState: unknown;
+  /** Integration repair context for the reviewer prompt (TASK-2620); empty otherwise. */
+  integrationRepair: string;
 };
 
 type ReviewerPhaseDeps = {
@@ -319,7 +350,7 @@ function dryRunReviewerPrompt(deps: ReviewerPhaseDeps): void {
     log(fmt.status('INFO', `Round ${attempt}: reviewer identity is autonomous; skipping dry-run reviewer prompt and using local review artifacts only.`));
   } else {
     log(`\n--- DRY-RUN: reviewer (${scratch.reviewer}) prompt ---`);
-    log((buildReviewPromptFn as any)({ reviewer: scratch.reviewer!, branch, implementer: scratch.implementer!, focus, attempt, repoRoot: worktree, missionPath: effectiveMissionPath || undefined, actualReviewer: scratch.reviewer!, reviewBaseline: round.reviewBaseline }));
+    log((buildReviewPromptFn as any)({ reviewer: scratch.reviewer!, branch, implementer: scratch.implementer!, focus, attempt, repoRoot: worktree, missionPath: effectiveMissionPath || undefined, actualReviewer: scratch.reviewer!, reviewBaseline: round.reviewBaseline, integrationRepair: scratch.integrationRepair }));
   }
 }
 
@@ -510,13 +541,19 @@ async function launchReviewer(deps: ReviewerPhaseDeps): Promise<'stop' | null> {
   try {
     reviewerLaunchResult = await startAgentFn('review', {
       agent: scratch.reviewer,
-      prompt: (actualReviewer: string) => (buildCompactReviewPromptFn as any)({ reviewer: scratch.reviewer!, branch, implementer: scratch.implementer!, focus, attempt, repoRoot: worktree, missionPath: effectiveMissionPath || undefined, actualReviewer, reviewBaseline: round.reviewBaseline }),
+      prompt: (actualReviewer: string) => (buildCompactReviewPromptFn as any)({ reviewer: scratch.reviewer!, branch, implementer: scratch.implementer!, focus, attempt, repoRoot: worktree, missionPath: effectiveMissionPath || undefined, actualReviewer, reviewBaseline: round.reviewBaseline, integrationRepair: scratch.integrationRepair }),
       worktree, slug, role: 'reviewer', exclude: [scratch.implementer], onLaunch: ({ agent }: { agent: string }) => onAgentLaunched?.(agent, 'review')
     });
   } catch (err: unknown) {
     recordAgentSelectionOutcome(log, 'launch-failed', { agent: scratch.reviewer, step: 'review', error: (err as Error).message });
     error(fmt.status('FAIL', `Could not launch reviewer agent (${scratch.reviewer}): ${(err as Error).message}`));
     await escalateToHumanReview('REVIEWER_LAUNCH_FAILURE');
+    return 'stop';
+  }
+  // A reviewer launch is an await boundary. A concurrent controller can
+  // advance/approve while it is pending; re-read before fallback identity,
+  // telemetry, or any other flattened state write touches the old round.
+  if (await stopIfControllerSuperseded(ctx, state, 'reviewer-launch fallback')) {
     return 'stop';
   }
   scratch.reviewer = await applyAgentFallbackFn({
@@ -600,7 +637,7 @@ async function consumeAndRecoverReviewerArtifacts(deps: ReviewerPhaseDeps): Prom
         agent: scratch.reviewer!,
         startAgentFn: async (_step, launchOptions) => await (startAgentFn as any)('review', {
           agent: scratch.reviewer,
-          prompt: (actualReviewer: string) => (buildCompactReviewPromptFn as any)({ reviewer: scratch.reviewer!, branch, implementer: scratch.implementer!, focus: ctx.focus, attempt, repoRoot: worktree, missionPath: effectiveMissionPath || undefined, actualReviewer, reviewBaseline: round.reviewBaseline })
+          prompt: (actualReviewer: string) => (buildCompactReviewPromptFn as any)({ reviewer: scratch.reviewer!, branch, implementer: scratch.implementer!, focus: ctx.focus, attempt, repoRoot: worktree, missionPath: effectiveMissionPath || undefined, actualReviewer, reviewBaseline: round.reviewBaseline, integrationRepair: scratch.integrationRepair })
             + '\n\n' + String((launchOptions as any).prompt(actualReviewer)),
           worktree, slug, role: 'reviewer', exclude: [scratch.implementer],
           onLaunch: ({ agent }: { agent: string }) => onAgentLaunched?.(agent, 'review'),
@@ -703,7 +740,7 @@ async function recoverReviewerTimeout(deps: ReviewerPhaseDeps): Promise<'stop' |
     maxAttempts: Math.min(DEFAULT_REBOUND_ATTEMPTS, round.reboundsRemainingThisRound()),
     startAgent: async (_step, launchOptions) => await (startAgentFn as any)('review', {
       agent: scratch.reviewer,
-      prompt: (actualReviewer: string) => (buildCompactReviewPromptFn as any)({ reviewer: scratch.reviewer!, branch, implementer: scratch.implementer!, focus: ctx.focus, attempt, repoRoot: worktree, missionPath: effectiveMissionPath || undefined, actualReviewer, reviewBaseline: round.reviewBaseline })
+      prompt: (actualReviewer: string) => (buildCompactReviewPromptFn as any)({ reviewer: scratch.reviewer!, branch, implementer: scratch.implementer!, focus: ctx.focus, attempt, repoRoot: worktree, missionPath: effectiveMissionPath || undefined, actualReviewer, reviewBaseline: round.reviewBaseline, integrationRepair: scratch.integrationRepair })
         + '\n\n' + String((launchOptions as any).prompt(actualReviewer)),
       worktree, slug, role: 'reviewer', exclude: [scratch.implementer],
       onLaunch: ({ agent }: { agent: string }) => onAgentLaunched?.(agent, 'review'),
@@ -805,6 +842,13 @@ async function resumeFixingPhaseReview(deps: ReviewerPhaseDeps): Promise<void> {
   log(fmt.status('INFO', `Round ${attempt}: resuming in fixing phase with review outcome = ${scratch.reviewState}`));
 }
 
+/** The recorded integration repair the reviewer is told about, from the Mission store. */
+async function integrationRepairBriefFor(ctx: any): Promise<string> {
+  if (!ctx.missionStore) { return ''; }
+  const loaded = await ctx.missionStore.load(missionId(ctx.slug));
+  return loaded.kind === 'found' ? integrationRepairReviewBrief(latestIntegrationRepair(loaded.mission)) : '';
+}
+
 async function runReviewerPhase(
   attempt: number,
   ctx: any,
@@ -817,6 +861,7 @@ async function runReviewerPhase(
     implementer: identities.implementer,
     reviewer: identities.reviewer,
     reviewState: undefined,
+    integrationRepair: await integrationRepairBriefFor(ctx),
   };
   const deps: ReviewerPhaseDeps = { ctx, state, round, attempt, scratch };
   try {
@@ -1307,6 +1352,8 @@ async function runReviewRound(
   let reboundsUsedThisRound = 0;
   try {
 
+    if (await stopIfControllerSuperseded(ctx, state, `round ${attempt}`)) { return 'stop'; }
+
     log('\n' + fmt.status('INFO', `========== Round ${attempt} / ${maxAttempts} ==========`));
     const reboundsRemainingThisRound = () => reboundsPerRound < 0
       ? Number.POSITIVE_INFINITY
@@ -1377,6 +1424,12 @@ async function runReviewRound(
       error,
       missionStore,
       lifecycleService: ctx.lifecycleService,
+      reviewerEligibility: ctx.eligibleAgentsForStepFn
+        ? ConfiguredReviewerEligibility.fromReviewStep({
+          eligible: ctx.eligibleAgentsForStepFn('review').map(agentFamily),
+          strategy: 'random',
+        })
+        : undefined,
     });
     const round: RoundScratch = {
       get reboundsUsedThisRound() { return reboundsUsedThisRound; },
@@ -1618,7 +1671,7 @@ async function buildStartReviewState(params: {
   return state;
 }
 
-export async function startReviewLoop(slug: string, opts: {
+async function startReviewLoopOwned(slug: string, opts: {
   implementer?: string;
   reviewer?: string;
   focus?: string;
@@ -1808,7 +1861,6 @@ export async function startReviewLoop(slug: string, opts: {
     await maybeUpdateGraphifyBeforeReviewFn(worktree, { commandRunner: runFn, log });
   }
   await applyStartReset(reset, slug, worktree, { resetReviewStateFn, log });
-  if (missionStore && !dryRun) { await recoverLegacyIntegrationRepairReview(missionStore, slug); }
   const preparedSelection = agentSelectionSnapshotPort
     ? await PreparedAgentSelection.prepare(agentSelectionSnapshotPort)
     : null;
@@ -1966,6 +2018,29 @@ export async function startReviewLoop(slug: string, opts: {
   };
   await persistReviewStateOrThrow(writeReviewStateFn, slug, state, worktree, missionStore);
   log(fmt.status('INFO', `Autonomous review stopped: reached ${maxAttempts} attempts. Hand off to human review.`));
+}
+
+/**
+ * Enter a local single-controller section before any review state is read or
+ * written. A second in-process CLI invocation is told how to resume instead of
+ * silently running a competing loop; a process that loses a cross-process race
+ * is stopped by `stopIfControllerSuperseded` at each authoritative boundary.
+ */
+export async function startReviewLoop(...args: Parameters<typeof startReviewLoopOwned>): Promise<void> {
+  const [slug, suppliedOpts] = args;
+  const opts = suppliedOpts || {};
+  const key = reviewControllerKey(slug, opts.worktree);
+  const log = opts.log || fmt.log.plain;
+  if (activeReviewControllers.has(key)) {
+    log(fmt.status('INFO', `Review controller already active for ${slug}; this invocation is not starting a competing loop. Run px review ${slug} --continue after the active controller stops if the authoritative round still needs work.`));
+    return;
+  }
+  activeReviewControllers.add(key);
+  try {
+    await startReviewLoopOwned(slug, opts);
+  } finally {
+    activeReviewControllers.delete(key);
+  }
 }
 export { commitSafeMissionArtifacts, rebaseBeforeReviewRound };
 export {

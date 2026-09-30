@@ -58,12 +58,21 @@ export interface GateFailureReason {
   /** Declared by the verification adapter; the kernel never infers this from prose. */
   transient?: boolean;
   /**
-   * Declared coverage fact about the failing command, printed as a prompt fact
-   * rather than mixed into the diagnostic: an integration-only gate must say so
-   * explicitly, because a green ordinary verification command is then no
-   * evidence the failure is fixed (TASK-2492). The classifier never reads it.
+   * Declared for a gate that is an environment/infrastructure failure, not an
+   * implementer repair (TASK-2620 AC4). It does not affect the initial
+   * classification, so the gate still retries once; after that single retry
+   * fails, the kernel returns it to the human instead of launching an
+   * implementer. Only agent-smoke sets this today.
    */
+  environment?: boolean;
   coverageNote?: string;
+  /**
+   * The revision the withdrawn approval was given to (TASK-2620 AC3). The
+   * implementer fix prompt names it so the repair is understood as a change to
+   * previously-approved code, not an independent fix. The classifier never
+   * reads it; only the prompt facts print it.
+   */
+  approvedRevision?: string | null;
 }
 
 /** A Git hook rejected a workflow-owned Git operation. */
@@ -419,6 +428,10 @@ function promptSlotsFor(reason: ReboundReason): Pick<FixPromptSlots, 'area' | 'f
           ['Area', reason.area],
           ['Gate command', reason.command],
           ['Exit code', String(reason.exitCode)],
+          ...(reason.approvedRevision
+            ? [['Approved revision', reason.approvedRevision] as [string, string]]
+            : []),
+          ['Cause', 'The integration gate (not the review gate) failed: the mission was reviewed and approved, then a red pre-integration gate rejected the finalized tree on the way to a human integration. Repair the integration failure, not a review finding.'],
           ...(reason.coverageNote ? [['Coverage', reason.coverageNote] as [string, string]] : []),
         ],
         remedy: `Start with the listed gate command in the listed worktree and the captured failure output. Repair the specific failing test or code path named there, including making a slow unit test hermetic when its budget is exceeded. Do not substitute a broader verification command or integration suite to rediscover the failure. Commit the repair before the automatic re-verification: Parallix reruns this exact gate against the finalized mission tree, so an uncommitted repair cannot be verified and is reported as still failing.`,
@@ -493,6 +506,14 @@ async function reboundImpl(reason: ReboundReason, context: ReboundContext): Prom
   if (!state.classification.isRelaunchable) { return humanOnlyOutcome(state, context, error); }
   const transientOutcome = await retryTransientVerification(state, verify, maxTransientRetries, log);
   if (transientOutcome) { return transientOutcome; }
+  // A transient verifier (agent-smoke) exhausted its single retry on an
+  // unchanged tree without fixing. A persistent environment failure is not an
+  // implementer repair: return it to the human with the exact diagnostic
+  // instead of spending the repair budget (TASK-2620 AC4). The lane move and
+  // approval withdrawal already happened before the kernel ran, so this only
+  // skips the implementer launch. Other transient gates remain fixable and
+  // still launch an implementer after their retry.
+  if (isTransientVerifierFailure(state.reason) && (state.reason as GateFailureReason).environment === true) { return humanOnlyOutcome(state, context, error); }
   const repairOutcome = await runRepairAttempts(state, { context, slug, worktree, verify, startAgent, maxAttempts, maxLaunchRetries, transitionToImplementer, applyAgentFallback, log, error });
   if (repairOutcome) { return repairOutcome; }
   const why = !state.classification.isRelaunchable

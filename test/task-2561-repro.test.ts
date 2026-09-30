@@ -93,7 +93,7 @@ test('(b) the push-time gate verifies the mission area, not the configured defau
   const createPrOptions: Record<string, unknown>[] = [];
   const ok = { status: 0, stdout: '', stderr: '', signal: null };
   const port = {
-    git: () => ok,
+    git: (args: string[]) => args.includes('rev-parse') ? { ...ok, stdout: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' } : ok,
     detectRebaseState: () => ({ inProgress: false, unmergedFiles: [] }),
     getCurrentBranch: () => `mission/${SLUG}`,
     cwd: () => '/wt',
@@ -191,14 +191,14 @@ function gateRequest(reReviewFn?: () => Promise<boolean>) {
   } as never;
 }
 
-test('(d) a gate repair that changed the approved revision is re-reviewed and integration restarts on the approval', async () => {
+test('(d) a gate repair that changed the approved revision is re-reviewed, then integration stops in the integration lane for the human', async () => {
   const reviewed: string[] = [];
   const { runRequiredLocalGates } = createIntegrationGateStep(gateStepPorts(REVISION_CHANGED));
   await assert.rejects(
     quietly(() => runRequiredLocalGates(gateRequest(async () => { reviewed.push('task-2547'); return true; }))),
-    (error: unknown) => (error as Error).name === 'IntegrationRestartRequired',
+    (error: unknown) => (error as Error).name === 'IntegrationStopsForHuman',
   );
-  assert.deepEqual(reviewed, ['task-2547']);
+  assert.deepEqual(reviewed, ['task-2547'], 'the repaired revision was re-reviewed through the single live route');
 });
 
 // --- (e) gatekeeper on a typed-verb mission ----------------------------------------

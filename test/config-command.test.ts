@@ -7,11 +7,12 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import { mockModule, installModuleMocks } from './lib/module-mock.js';
+import { mkdtemp as registeredMkdtemp } from './helpers/temp-dir.js';
 const config = mockModule<typeof import('../src/adapters/cli/commands/config.js')>('../src/adapters/cli/commands/config.js', import.meta.url);
 await installModuleMocks();
 test.afterEach(() => mock.restoreAll());
 async function withTempDir(fn) {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'workflow-config-command-'));
+  const root = registeredMkdtemp('workflow-config-command-');
   try {
     await fn(root);
   } finally {

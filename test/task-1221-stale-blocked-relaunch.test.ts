@@ -8,6 +8,7 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import { mockModule, installModuleMocks } from './lib/module-mock.js';
+import { mkdtemp as registeredMkdtemp } from './helpers/temp-dir.js';
 const startReviewLoopModule = mockModule<typeof import('../src/adapters/review/review-loop.js')>('../src/adapters/review/review-loop.js', import.meta.url);
 const ReviewStateModule = mockModule<typeof import('../src/adapters/review/review-state.js')>('../src/adapters/review/review-state.js', import.meta.url);
 await installModuleMocks();
@@ -15,7 +16,7 @@ test.afterEach(() => mock.restoreAll());
 const { startReviewLoop } = startReviewLoopModule;
 const { ReviewState } = ReviewStateModule;
 async function createWorktree(slug, config) {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), `task-1221-${slug}-`));
+  const root = registeredMkdtemp(`task-1221-${slug}-`);
   if (config) {
     fs.writeFileSync(
       path.join(root, 'workflow.config.json'),

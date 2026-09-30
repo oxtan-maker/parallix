@@ -10,6 +10,7 @@ import path from 'path';
 import { fakeLauncher } from './lib/agent-mock';
 import { eligibleAgentsForStep, startAgent, selectAgent } from '../src/adapters/agents/agents.js';
 import { setBubblewrapProbeForTest } from '../src/adapters/process/bubblewrap.js';
+import { mkdtemp as registeredMkdtemp } from './helpers/temp-dir.js';
 function withStubbedMathRandom(value, fn) {
   const previousRandom = Math.random;
   Math.random = () => value;
@@ -69,7 +70,7 @@ test('eligibleAgentsForStep returns all current launchers when act-on-review ste
 test('startAgent review fallback selects vibe when claude hits limit and review step is missing (TASK-1036 transcript)', async () => {
   // Current behavior: pinned reviewer=claude, implementer=codex, claude limit-hit,
   // fallback selects vibe because review step has no explicit eligibility config.
-  const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'task-1036-review-fallback-'));
+  const tmpRoot = registeredMkdtemp('task-1036-review-fallback-');
   try {
     const order = ['claude', 'vibe'];
     const selectAgentFn = (step, opts = {}) => {
@@ -134,7 +135,7 @@ test('startAgent review fallback selects vibe when claude hits limit and review 
 });
 
 test('startAgent act-on-review fallback selects vibe when implementer hits limit and act-on-review step is missing (TASK-1036)', async () => {
-  const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'task-1036-act-on-review-fallback-'));
+  const tmpRoot = registeredMkdtemp('task-1036-act-on-review-fallback-');
   try {
     const order = ['custom', 'vibe'];
     const selectAgentFn = (step, opts = {}) => {

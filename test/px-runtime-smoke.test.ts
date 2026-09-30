@@ -18,6 +18,8 @@ test('px runtime smoke test verifies the source entrypoint executes without modu
     t.skip(`Node runtime lacks built-in TypeScript entrypoint support (process.features.typescript=${String(process.features?.typescript)})`);
     return;
   }
+  // Stays on source without the shared px-entry helper: the proof is that
+  // Node's built-in type stripping runs the source entry with no loader.
   const result = spawnSync('node', ['src/entry/px.ts', '--version'], {
     cwd: repoRoot,
     encoding: 'utf8',

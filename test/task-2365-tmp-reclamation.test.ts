@@ -5,9 +5,10 @@ import path from 'node:path';
 import test from 'node:test';
 import { addTrustedTempRoot, createTempRootRegistry, recoverRecordedTempRoots } from '../src/adapters/verification/temp-root-registry.js';
 import { cleanupRunnerTempRoots, signalExitCode } from './lib/test-runner-temp-roots.js';
+import { mkdtemp as registeredMkdtemp, mkdtempAt } from './helpers/temp-dir.js';
 
 test('recorded dead roots are reclaimed while live and unrecorded roots survive', () => {
-  const fixture = fs.mkdtempSync(path.join(os.tmpdir(), 'task-2365-'));
+  const fixture = registeredMkdtemp('task-2365-');
   const manifests = path.join(fixture, 'manifests');
   fs.mkdirSync(manifests);
   const recordedRoots = [
@@ -16,10 +17,10 @@ test('recorded dead roots are reclaimed while live and unrecorded roots survive'
     'coverage-gate-tmp-',
     'codex-home-',
     'task-2339-aggregate-',
-  ].map(prefix => fs.mkdtempSync(path.join(fixture, prefix)));
-  const liveRoot = fs.mkdtempSync(path.join(fixture, 'parallix-real-agent-'));
-  const unrecordedRoot = fs.mkdtempSync(path.join(fixture, 'node-coverage-'));
-  const runnerRoot = fs.mkdtempSync(path.join(fixture, 'task-2339-aggregate-'));
+  ].map(prefix => mkdtempAt(fixture, prefix));
+  const liveRoot = mkdtempAt(fixture, 'parallix-real-agent-');
+  const unrecordedRoot = mkdtempAt(fixture, 'node-coverage-');
+  const runnerRoot = mkdtempAt(fixture, 'task-2339-aggregate-');
 
   try {
     fs.writeFileSync(path.join(manifests, '111.json'), JSON.stringify({ pid: 111, roots: recordedRoots }));
@@ -44,9 +45,9 @@ test('recorded dead roots are reclaimed while live and unrecorded roots survive'
 });
 
 test('runner cleanup removes worker roots before forwarding child failure or a handled signal', () => {
-  const fixture = fs.mkdtempSync(path.join(os.tmpdir(), 'task-2365-'));
+  const fixture = registeredMkdtemp('task-2365-');
   const manifests = path.join(fixture, 'test-run-333');
-  const root = fs.mkdtempSync(path.join(fixture, 'codex-home-'));
+  const root = mkdtempAt(fixture, 'codex-home-');
   try {
     fs.mkdirSync(manifests);
     fs.writeFileSync(path.join(manifests, '444.json'), JSON.stringify([root]));
@@ -74,7 +75,7 @@ test('addTrustedTempRoot is idempotent for a repeated base', () => {
 });
 
 test('recovery ignores raced entries and roots outside the temporary directory', () => {
-  const fixture = fs.mkdtempSync(path.join(os.tmpdir(), 'task-2365-'));
+  const fixture = registeredMkdtemp('task-2365-');
   const manifests = path.join(fixture, 'manifests');
   const outside = path.join(process.cwd(), `.task-2365-outside-${process.pid}`);
   fs.mkdirSync(manifests);

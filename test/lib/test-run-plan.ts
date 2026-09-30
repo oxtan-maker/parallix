@@ -51,8 +51,7 @@ export interface TestRunPlan {
   nodeArgs: string[];
   runsIntegrationSuite: boolean;
   runsIntegrationCiSuite: boolean;
-  unitTestBudgetMs: number;
-  unitTestTimeoutMs: number;
+  unitTestCpuBudgetMs: number;
   unitTestHeadroomMs: number | null;
 }
 
@@ -264,16 +263,13 @@ export function buildTestRunPlan(options: TestRunPlanOptions): TestRunPlan {
     ? [`--test-concurrency=${runsIntegrationSuite ? integrationTestConcurrency : UNIT_TEST_CONCURRENCY}`]
     : [];
 
-  // Unit tests are hermetic and must complete within one second. Integration
-  // tests run via --integration and are exempt because they cross real boundaries.
-  // Suite-level budget: 180 s for the full default suite on a typical developer
-  // workstation. Adjust PARALLIX_UNIT_TEST_BUDGET_MS to override.
-  // Node's --test-timeout wraps each test-file worker, including the mandatory
-  // isolation bootstrap. Under host contention that creates false failures
-  // before a test begins. The reporter instead measures each test:pass event,
-  // preserving the 1,000 ms unit-test cap without charging worker startup.
-  // GitHub-hosted runners intentionally suspend this local timing policy.
+  // Cost is sampled in the isolated worker; elapsed time remains a separate
+  // liveness contract. GitHub-hosted runners retain their suspended local
+  // budget policy.
   const githubTimingSuspended = onGitHubActions();
+  if (process.env.PARALLIX_UNIT_TEST_BUDGET_MS !== undefined) {
+    throw new Error('PARALLIX_UNIT_TEST_BUDGET_MS was a wall-time override; use PARALLIX_UNIT_TEST_CPU_BUDGET_MS for CPU time');
+  }
   const testReporterArgs = runsIntegrationSuite ? [] : [
     ...(githubTimingSuspended ? [] : [
       // Node loads custom reporters outside the test files' TypeScript preload
@@ -287,8 +283,7 @@ export function buildTestRunPlan(options: TestRunPlanOptions): TestRunPlan {
     testFiles,
     runsIntegrationSuite,
     runsIntegrationCiSuite,
-    unitTestBudgetMs: Number(process.env.PARALLIX_UNIT_TEST_BUDGET_MS) || 180_000,
-    unitTestTimeoutMs: UNIT_TEST_BUDGET_MS,
+    unitTestCpuBudgetMs: Number(process.env.PARALLIX_UNIT_TEST_CPU_BUDGET_MS) || 650_000,
     unitTestHeadroomMs: enforcesUnitTestHeadroom ? UNIT_TEST_HEADROOM_MS : null,
     // Deliberately no `--test-force-exit`: it makes the per-file workers call
     // process.exit() before their result stream is flushed, so trailing test
@@ -300,6 +295,9 @@ export function buildTestRunPlan(options: TestRunPlanOptions): TestRunPlan {
       // bootstrap module resolves (--import entries load in argv order).
       ...typeScriptLoaderArgs,
       ...bootstrapArgs,
+      ...(!runsIntegrationSuite && !githubTimingSuspended
+        ? ['--import', pathToFileURL(path.join(testRoot, 'lib', 'cpu-test-hook.mjs')).href]
+        : []),
       ...moduleMockArgs,
       ...testConcurrencyArgs,
       ...testReporterArgs,

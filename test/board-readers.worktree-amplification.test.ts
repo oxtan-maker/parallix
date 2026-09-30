@@ -10,13 +10,14 @@ import { ConcreteMissionReadAdapter } from '../src/adapters/backlog/concrete-mis
 import { BoardProjectionBuilder } from '../src/application/projections/board-readers.js';
 import { snapshotWorktreeTopology } from '../src/adapters/git/worktree.js';
 import { repositoryId } from '../src/domain/repository.js';
+import { mkdtemp as registeredMkdtemp } from './helpers/temp-dir.js';
 
 function taskDocument(id: string, title = id): string {
   return `---\nid: ${id}\ntitle: ${title}\nstatus: active\nassignee: codex\nlabels: [user_value]\nclosedAt: 2026-08-23\n---\n`;
 }
 
 function fixture(count: number, archive = false) {
-  const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), 'px-board-read-amplification-'));
+  const rootDir = registeredMkdtemp('px-board-read-amplification-');
   const dir = path.join(rootDir, archive ? 'backlog/archive/tasks' : 'backlog/tasks');
   fs.mkdirSync(dir, { recursive: true });
   const taskFiles = new Map<string, string>();

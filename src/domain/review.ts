@@ -61,11 +61,44 @@ export type ReviewApprovalSource =
   | { readonly kind: 'provider'; readonly provider: string }
   | { readonly kind: 'local' };
 
+/**
+ * Why an approval was withdrawn, as a typed fact rather than reason text.
+ * `integration-gate-failure` names the red gate so the repaired mission can
+ * show the human what failed last time (TASK-2620).
+ */
+export type ReviewRevocationCause =
+  | { readonly kind: 'operator' }
+  | {
+    readonly kind: 'integration-gate-failure';
+    readonly gate: string | null;
+    readonly command?: string | null;
+    /** Tail of the failed gate's output, kept so the repair can be reviewed with it. */
+    readonly log?: string | null;
+  }
+  | { readonly kind: 'review-repair' }
+  | { readonly kind: 'rebase-repair' };
+
 /** An operator correction of an approval that must remain auditable. */
 export interface ReviewDecisionRevocation {
   readonly revokedAt: string;
   readonly revokedBy: string;
   readonly reason: string;
+  /** Absent only on revocations recorded before causes were typed. */
+  readonly cause?: ReviewRevocationCause;
+}
+
+/**
+ * A branch move recorded against an approval: the approved change is no longer
+ * what the branch would land.  Unlike a revocation this is a mechanical fact,
+ * not a judgement; the approval stays effective until an operator stands it
+ * down, and nothing is owed a resolution.
+ */
+export interface ReviewDecisionSupersession {
+  readonly supersededAt: string;
+  /** The branch revision whose change the approval no longer covers. */
+  readonly supersedingRevision: ChangeRevision;
+  /** The operation that moved the branch, for example `px rebase`. */
+  readonly recordedBy: string;
 }
 
 export type ReviewerDecision =
@@ -76,6 +109,8 @@ export type ReviewerDecision =
     readonly source: ReviewApprovalSource;
     /** Present only when this formerly-effective approval was withdrawn. */
     readonly revocation?: ReviewDecisionRevocation;
+    /** Present once the branch moved to a change this approval does not cover. */
+    readonly supersession?: ReviewDecisionSupersession;
   }
   | {
     readonly kind: 'changes-requested';
@@ -526,9 +561,10 @@ export function reviewStatus(review: Review): ReviewStatus {
 
 /**
  * Revoke the current approved decision without erasing its round, then open a
- * fresh awaiting-review round over the same reviewed revision.  This is a
- * deliberately narrow recovery operation: it is not a general way to edit
- * review history or choose a lifecycle lane.
+ * fresh awaiting-review round.  The new round reviews the superseding revision
+ * when a branch move was recorded against the approval, and the same reviewed
+ * revision otherwise.  This is a deliberately narrow recovery operation: it is
+ * not a general way to edit review history or choose a lifecycle lane.
  */
 export function revokeApprovedDecision(
   review: Review,
@@ -558,9 +594,10 @@ export function revokeApprovedDecision(
     ...current,
     decision: { ...current.decision, revocation },
   };
+  const superseding = current.decision.supersession?.supersedingRevision;
   const nextRound: ReviewRound = {
     number: current.number + 1,
-    subject: current.subject,
+    subject: superseding ? { ...current.subject, revision: superseding } : current.subject,
     reviewer: current.reviewer,
     implementer: current.implementer,
     startedAt: revocation.revokedAt,

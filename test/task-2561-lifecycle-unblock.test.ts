@@ -26,6 +26,7 @@ import type { AgentBlocklistRepository } from '../src/application/ports/agent-bl
 import { agentFamily } from '../src/domain/agents.js';
 import { createGateCommand } from '../src/interfaces/cli/mission-writes.js';
 import { SLUG, makePorts, makeRecorder, runOptions } from './helpers/handoff-ports.js';
+import { mkdtemp as registeredMkdtemp } from './helpers/temp-dir.js';
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -124,7 +125,7 @@ test('the draft prompt marks as required exactly the parts refine refuses withou
 // --- pre-draft hook ------------------------------------------------------------------
 
 function withWorktree<T>(config: unknown, run: (_dir: string) => T): T {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pre-draft-hook-'));
+  const dir = registeredMkdtemp('pre-draft-hook-');
   try {
     fs.writeFileSync(path.join(dir, 'workflow.config.json'), JSON.stringify(config));
     return run(dir);

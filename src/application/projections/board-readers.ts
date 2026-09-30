@@ -1,5 +1,6 @@
 import type { AgentAvailability, AgentFamily } from '../../domain/agents.js';
-import type { Mission, MissionId, MissionStatus } from '../../domain/mission.js';
+import { isClosedMission, type Mission, type MissionId, type MissionStatus } from '../../domain/mission.js';
+import { missionApprovalCoverage, recordedApprovalCoverage, type ChangeIdentityPort } from '../approval-coverage.js';
 import type { RepositoryId } from '../../domain/repository.js';
 import type { Review, ReviewedRevision } from '../../domain/review.js';
 import type { SourceFact } from '../contracts.js';
@@ -113,6 +114,11 @@ export interface BoardProjectionOptions {
   currentWorkTtlMs?: number;
   /** Clock seam; defaults to the wall clock. */
   now?: () => number;
+  /**
+   * Reads what a mission branch would land, to tell whether its approval still
+   * covers it (TASK-2555). Omitted means only a recorded branch move is shown.
+   */
+  changeIdentity?: ChangeIdentityPort;
 }
 
 /** A mission that published no current-work fact at all. */
@@ -253,6 +259,10 @@ export class BoardProjectionBuilder {
     // "nothing running" that `null` means.
     liveSession: RunningAgentSession | null | undefined,
   ): MissionCard {
+    const identity = this._options?.changeIdentity;
+    const approvalCoverage = isClosedMission(mission) ? null
+      : identity ? missionApprovalCoverage(reviewFact.review, identity)
+        : recordedApprovalCoverage(reviewFact.review);
     const facts: MissionOperationalFacts = {
       latestGate,
       reviewApproval: reviewFact.approval,
@@ -260,6 +270,7 @@ export class BoardProjectionBuilder {
       liveSession,
       blockingReason: work.blockingReason,
       flags: [],
+      approvalCoverage,
     };
     return projectMissionCard({ ...mission, review: reviewFact.review }, facts);
   }

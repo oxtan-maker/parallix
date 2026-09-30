@@ -4,6 +4,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { pushRound } from '../src/adapters/review/review-commands.js';
 import { defaultRepoSlug, collectSetupAnswers, buildNonInteractiveAnswers } from '../src/adapters/review/setup-review.js';
+import { mkdtemp as registeredMkdtemp } from './helpers/temp-dir.js';
 
 const mockSlug = 'task-2364';
 
@@ -78,7 +79,7 @@ test('setup-review collectSetupAnswers defaults owner to human when repo is empt
   const os = await import('node:os');
   const fs = await import('node:fs');
   const path = await import('node:path');
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'task-2364-'));
+  const root = registeredMkdtemp('task-2364-');
   try {
     const prompts = [];
     const answers = ['', 'owner-password', '', 'agent-password', ''];
@@ -102,7 +103,7 @@ test('setup-review buildNonInteractiveAnswers defaults owner to human without en
   const os = await import('node:os');
   const fs = await import('node:fs');
   const path = await import('node:path');
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'task-2364-'));
+  const root = registeredMkdtemp('task-2364-');
   try {
     const oldEnv = process.env.WORKFLOW_SETUP_OWNER_LOGIN;
     const oldProvider = process.env.WORKFLOW_SETUP_REVIEW_PROVIDER;

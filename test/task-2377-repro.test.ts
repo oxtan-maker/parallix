@@ -21,9 +21,10 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 import { startAgent } from '../src/adapters/agents/agents.js';
 // @ts-expect-error -- TASK-2328: partial test double after ESM seam migration
 import { fakeLauncher } from './lib/agent-mock.js';
+import { mkdtemp as registeredMkdtemp } from './helpers/temp-dir.js';
 
 test('startAgent tries excluded agents after non-excluded pool exhausts (TASK-2377)', async () => {
-  const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'task-2377-repro-'));
+  const tmpRoot = registeredMkdtemp('task-2377-repro-');
   try {
     // Simulate: codex and qwen fail, then pool exhausts.
     // Excluded agent 'claude' (the implementer) should be tried as last resort.
@@ -79,7 +80,7 @@ test('startAgent tries excluded agents after non-excluded pool exhausts (TASK-23
 });
 
 test('startAgent throws exhaustion after both non-excluded and excluded agents fail (TASK-2377)', async () => {
-  const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'task-2377-exhaust-'));
+  const tmpRoot = registeredMkdtemp('task-2377-exhaust-');
   try {
     let callCount = 0;
 
@@ -129,7 +130,7 @@ test('startAgent throws exhaustion after both non-excluded and excluded agents f
 });
 
 test('startAgent does not try excluded agents when non-excluded agent succeeds (TASK-2377)', async () => {
-  const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'task-2377-succeed-'));
+  const tmpRoot = registeredMkdtemp('task-2377-succeed-');
   try {
     const result = await startAgent('review', {
       prompt: 'Review.',

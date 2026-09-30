@@ -1,25 +1,20 @@
-// Integration-gate failure routing for `px integrate` (TASK-2492).
+// Integration-gate failure routing for `px integrate` (TASK-2492, TASK-2620).
 //
-// `runPhaseGates('integration', ...)` used to dead-end: a red gate logged and
-// threw `IntegrationAbort`, leaving an approved mission parked in
-// `ready-for-integration` until a human noticed. This module classifies that
-// failure into bounded operator-facing routes and, for the recoverable route,
-// recoverable route, hands the failure to the same rebound kernel the
-// squash-commit hook bounce already uses:
+// A red integration gate is classified into bounded operator-facing routes;
+// the recoverable route hands the failure to the rebound kernel with a fresh
+// per-invocation repair budget:
 //
-//  1. `limit-reached` — the mission has already spent its persisted
-//     integration-gate rebound budget. No transition, no implementer launch.
-//  2. `fixed` / `exhausted` — a mission regression inside budget. The kernel
-//     transitions the task back to `active`, launches the implementer with the
-//     gate evidence, and re-runs the identical gate set. Only a passing re-run
-//     is reported `fixed`.
-//  3. `stranded`      — the failure could not be classified or no implementer
-//     could be named, which is the pre-TASK-2492 abort behaviour.
-//  4. `revision-changed` — the repair worked, but it changed the mission diff
-//     the reviewer approved. The standing approval is retracted on the pull
-//     request (TASK-2528) and the integration gate step resumes review of the
-//     repaired revision automatically (TASK-2550), continuing through the
-//     merge in the same invocation when that revision is approved.
+//  1. `fixed` / `exhausted` — a mission regression inside the budget. The
+//     kernel returns the mission to `active`, launches the implementer with the
+//     gate evidence and the approved revision, and re-runs the identical gate
+//     set. Only a passing re-run is reported `fixed`.
+//  2. `stranded` — the failure could not be classified or no implementer could
+//     be named.
+//  3. `revision-changed` — the repair worked but changed what the reviewer
+//     approved. Parallix dismisses the standing approval as its own `parallix`
+//     login, and the caller re-reviews the repaired revision; an approval stops
+//     the mission in the integration lane for the human. A staleness already
+//     reported before integration (TASK-2555) is named rather than rediscovered.
 //
 // The dependency direction matches `integrate-gates.ts`: `integrate.ts` imports
 // from here, never the other way round.
@@ -28,31 +23,32 @@ import { rebound, type GateFailureReason, type ReboundContext } from '../../../a
 import { runPhaseGates, type GateRunOutcome, type RepositoryGate } from '../../config/repository-gates.js';
 import { captureFinalIntegrationTree } from './integrate-gates.js';
 
-import { DEFAULT_FORGEJO_USER, postReview, readToken } from '../../forgejo/forgejo.js';
-import { missionId } from '../../../domain/mission.js';
+import { dismissStandingApprovals, readToken } from '../../forgejo/forgejo.js';
+import { PARALLIX_FORGEJO_USER } from '../../review/setup-review-repository.js';
 
 /**
- * How many integration-gate rebounds one mission may spend before a further
- * red gate escalates to a human. The budget is deliberately small: an
- * integration gate that survives two implementer repairs is evidence the
- * diagnosis, not the code, is wrong.
+ * How many implementer repairs one `px integrate` invocation may spend before
+ * it returns the mission to the human. The budget is deliberately small and
+ * fresh every invocation: an integration gate that survives two implementer
+ * repairs is evidence the diagnosis, not the code, is wrong (TASK-2620 AC5).
+ *
+ * This is a per-invocation bound enforced by the rebound kernel's own attempt
+ * counter (`maxAttempts`), not a lifetime counter. A lifetime counter would
+ * make later human resumes repair-free, which is exactly the defect AC5
+ * removes: every human-initiated `px integrate` starts with this full budget.
  */
-export const INTEGRATION_GATE_REBOUND_LIMIT = 2;
+export const INTEGRATION_GATE_REBOUND_ATTEMPTS_PER_INVOCATION = 2;
 
 /**
  * `operational_history.event_type` for one spent integration-gate rebound.
  *
- * The log is append-only and keyed on the mission id, which fixes the reset
- * boundary exactly: the budget never resets inside a mission — not on a new
- * commit, a new review round, or a new `px integrate` process — and never
- * carries into a different mission. Unlike a mutable retry column, two
- * concurrent processes cannot consume one counter; appending twice only ever
- * stops sooner, never denies a rebound that was never spent.
+ * Retained as an audit label only: the enforcement budget is per-invocation
+ * (TASK-2620 AC5), so nothing records or reads a lifetime count here. The log
+ * is append-only and keyed on the mission id, which fixes the reset boundary
+ * exactly for the audit trail: the count of these rows names how many repairs
+ * a mission has ever spent, never what a fresh `px integrate` may still spend.
  */
 export const INTEGRATION_GATE_REBOUND_EVENT = 'integration.gate-rebound';
-
-/** Exactly one implementer relaunch per `px integrate` invocation. */
-const REBOUND_ATTEMPTS_PER_INVOCATION = 1;
 
 export type IntegrationGateRoute =
   | { route: 'fixed'; rebounds: number }
@@ -79,10 +75,10 @@ export function integrationOnlyCoverageNote(gateCommand: string, verificationCom
 /** Structured gate-failure reason for the rebound kernel. */
 export function integrationGateFailureReason(
   failedGate: GateRunOutcome,
-  opts: { gateError?: string | null; verificationCommand?: string | null } = {},
+  opts: { gateError?: string | null; verificationCommand?: string | null; approvedRevision?: string | null } = {},
 ): GateFailureReason {
   const coverageNote = integrationOnlyCoverageNote(failedGate.command, opts.verificationCommand ?? null);
-  return {
+  const reason: GateFailureReason = {
     kind: 'gate-failure',
     area: `integration gate ${failedGate.key}`,
     command: failedGate.command,
@@ -90,169 +86,91 @@ export function integrationGateFailureReason(
     stdout: failedGate.stdout,
     stderr: failedGate.stderr,
     ...(opts.gateError ? { error: opts.gateError } : {}),
+    ...(opts.approvedRevision !== undefined ? { approvedRevision: opts.approvedRevision } : {}),
     ...(coverageNote ? { coverageNote } : {}),
   };
-}
-
-// ── Persisted rebound budget ─────────────────────────────────────────────────
-
-/**
- * Open the operator database, hand the operational-history repository to `fn`,
- * and close it again. Returns `null` when the database cannot be opened or
- * migrated, which callers must treat as "the budget cannot be enforced".
- */
-async function withHistoryRepo<T>(fn: (_repo: any, _db: any) => Promise<T>): Promise<T | null> {
-  try {
-    const { SqliteDatabaseAdapter } = await import('../../sqlite/database-adapter.js');
-    const { SqliteMigrationRunner, loadDefaultMigrations } = await import('../../sqlite/migration-runner.js');
-    const { SqliteOperationalHistoryRepository } = await import('../../sqlite/operational-history-repository.js');
-    const { resolveDatabasePath } = await import('../../sqlite/database-path-resolver.js');
-    const db = new SqliteDatabaseAdapter();
-    await db.open({ path: resolveDatabasePath() });
-    try {
-      await new SqliteMigrationRunner(db).applyPending(loadDefaultMigrations());
-      return await fn(new SqliteOperationalHistoryRepository(db), db);
-    } finally {
-      await db.close();
-    }
-  } catch {
-    return null;
+  // TASK-2620 AC4: agent-smoke runs against a shared local vLLM under
+  // concurrency and flakes. Retry it once on an unchanged tree; a persistent
+  // failure is an environment failure and returns to the human without
+  // spending the repair budget. The gate itself stays mandatory.
+  if (failedGate.key === 'agent-smoke' || failedGate.key === 'custom-agent-smoke') {
+    reason.transient = true;
+    reason.environment = true;
   }
+  return reason;
 }
 
-/**
- * Integration-gate rebounds already spent by this mission.
- *
- * `null` means the operator database could not be read. The caller fails
- * closed on `null`: an unbounded bounce loop is the failure mode this mission
- * exists to prevent, so an unenforceable budget must stop rather than retry.
- */
-export async function readIntegrationGateRebounds(slug: string): Promise<number | null> {
-  return await withHistoryRepo(async (repo) => {
-    if (typeof repo.findByTypeForMission !== 'function') { return null; }
-    const rows = await repo.findByTypeForMission(INTEGRATION_GATE_REBOUND_EVENT, missionId(slug));
-    return rows.length;
-  });
-}
-
-/** Append one spent integration-gate rebound. Best effort; reports success. */
-export async function recordIntegrationGateRebound(
-  slug: string,
-  facts: { repositoryId: string; gate: string; implementer: string; occurredAt?: string },
-): Promise<boolean> {
-  const appended = await withHistoryRepo(async (repo) => {
-    await repo.append({
-      eventType: INTEGRATION_GATE_REBOUND_EVENT,
-      eventData: JSON.stringify({
-        missionId: missionId(slug),
-        repositoryId: facts.repositoryId,
-        message: `${missionId(slug)} integration gate ${facts.gate} bounced to the implementer`,
-        agent: facts.implementer,
-        gate: facts.gate,
-      }),
-      createdAt: facts.occurredAt ?? new Date().toISOString(),
-    });
-    return true;
-  });
-  return appended === true;
-}
-
-// ── Stale-approval retraction (TASK-2528) ────────────────────────────────────
-
-/** The Forgejo logins whose standing approval a changed revision invalidates. */
-export function standingApprovalHolders(approval: any, reviewerUser: string | null | undefined): string[] {
-  const holders: string[] = [];
-  if (approval?.ok !== true) { return holders; }
-  if (Array.isArray(approval.approvalHolders)) {
-    holders.push(...approval.approvalHolders.filter((user: unknown): user is string => typeof user === 'string' && Boolean(user.trim())));
-  }
-  if (approval.defaultUserApproved === true && !holders.includes(DEFAULT_FORGEJO_USER)) { holders.push(DEFAULT_FORGEJO_USER); }
-  if (approval.reviewerApproved === true && reviewerUser && !holders.includes(reviewerUser)) { holders.push(reviewerUser); }
-  return holders;
-}
+// ── Stale-approval dismissal (TASK-2528, TASK-2620) ─────────────────────────
 
 export interface ApprovalInvalidation {
-  /** False when at least one standing approval could not be retracted. */
+  /** False when at least one standing approval could not be dismissed. */
   ok: boolean;
-  /** Logins whose approval was retracted with a REQUEST_CHANGES review. */
-  retracted: string[];
+  /** Logins whose approval Parallix dismissed. */
+  dismissed: string[];
   errors: string[];
 }
 
 /**
- * Retract the standing approval on the mission pull request by posting a
- * `request-changes` review as each login that holds one.
+ * Dismiss the standing approvals on the mission pull request as the dedicated
+ * `parallix` Forgejo login, through the review dismissal API.
  *
- * Retraction is per-reviewer because approval is: `getLatestReviewDecision`
- * keeps a login's approval standing until that same login posts a later formal
- * decision. Posting as a third party would leave the original approval intact
- * and the stale-approval recovery would still fire.
- *
- * A login whose token is unavailable is reported as an error rather than
- * silently skipped — an unretractable approval must fail closed, because the
- * whole point is that the changed revision cannot land under it.
+ * Parallix never posts a review as another login and never writes a finding
+ * nobody raised: the approval is dismissed with the integration failure as
+ * the stated reason. A missing `parallix` token is an error, not a silent skip
+ * — an undismissed approval must fail closed so the changed revision cannot
+ * land under it.
  */
 export async function invalidateApprovedPrReview(opts: {
   slug: string;
   branch: string;
   approval: any;
-  reviewerUser?: string | null;
   summary: string;
   readTokenFn?: typeof readToken;
-  postReviewFn?: typeof postReview;
+  dismissFn?: typeof dismissStandingApprovals;
 }): Promise<ApprovalInvalidation> {
-  const { readTokenFn = readToken, postReviewFn = postReview } = opts;
-  const holders = standingApprovalHolders(opts.approval, opts.reviewerUser);
-  const retracted: string[] = [];
-  const errors: string[] = [];
-  for (const holder of holders) {
-    const token = readTokenFn(holder);
-    if (!token) {
-      errors.push(`no Forgejo token for ${holder}; the standing approval on ${opts.branch} could not be retracted`);
-      continue;
-    }
-    const posted = postReviewFn(opts.branch, token, 'request-changes', opts.summary, { forgejoUser: holder });
-    if (posted?.ok) { retracted.push(holder); }
-    else { errors.push(`request-changes as ${holder} on ${opts.branch} failed: ${posted?.error ?? posted?.raw ?? 'unknown error'}`); }
+  const { readTokenFn = readToken, dismissFn = dismissStandingApprovals } = opts;
+  if (opts.approval?.ok !== true) { return { ok: true, dismissed: [], errors: [] }; }
+  const token = readTokenFn(PARALLIX_FORGEJO_USER);
+  if (!token) {
+    return { ok: false, dismissed: [], errors: [`no Forgejo token for ${PARALLIX_FORGEJO_USER}; run px setup-review to create the ${PARALLIX_FORGEJO_USER} user so it can dismiss the standing approval on ${opts.branch}`] };
   }
-  return { ok: errors.length === 0, retracted, errors };
+  const result = dismissFn(opts.branch, token, opts.summary, { forgejoUser: PARALLIX_FORGEJO_USER });
+  return { ok: result.ok, dismissed: result.dismissed, errors: result.errors };
 }
 
 /**
- * The review body posted when a gate repair changed the approved diff. It is a
- * reviewer findings document so the reviewer reads what changed under them,
- * and it names both revisions so the claim is checkable.
+ * The dismissal reason. It states what happened and names both revisions so
+ * the claim is checkable; it is not a review finding.
  */
 export function staleApprovalSummary(slug: string, approvedRevision: string, repairedRevision: string, gateKey: string): string {
   return [
-    `## F1 (blocking): the approved revision is not the revision that would land`,
-    '',
-    `Integration gate \`${gateKey}\` failed for ${slug} and the implementer repaired the mission in place.`,
-    `The repair changed the mission tree from \`${approvedRevision}\` (the revision this approval was given to) to \`${repairedRevision}\`.`,
-    '',
-    'This approval is retracted so the repaired revision is reviewed before it lands.',
+    `Integration gate \`${gateKey}\` failed for ${slug} after this approval.`,
+    `The approval was given to \`${approvedRevision}\`; the integration repair produces \`${repairedRevision}\`.`,
+    'Parallix dismissed this approval so the repaired revision is reviewed before it lands.',
   ].join('\n');
 }
 
 async function routeFixedIntegrationGateRebound({
-  opts, failedGate, outcome, rebounds, approvedRevision, captureFinalTreeFn, invalidateApprovalFn, initialInvalidation, log, error,
+  opts, failedGate, outcome, rebounds, approvedRevision, preRepairRevision, captureFinalTreeFn, invalidateApprovalFn, initialInvalidation, log, error,
 }: {
   opts: IntegrationGateRouteOptions;
   failedGate: GateRunOutcome;
   outcome: any;
   rebounds: number;
   approvedRevision: string | null;
+  /** HEAD before the repair; an unchanged HEAD means the repair changed nothing. */
+  preRepairRevision: string | null;
   captureFinalTreeFn: typeof captureFinalIntegrationTree;
   invalidateApprovalFn: typeof invalidateApprovedPrReview;
   initialInvalidation: ApprovalInvalidation | null;
   log: (_msg: string) => void;
   error: (_msg: string) => void;
 }): Promise<IntegrationGateRoute> {
-  log(fmt.status('PASS', `Integration gate ${failedGate.key} repaired by ${outcome.implementer} and re-ran green (${rebounds}/${INTEGRATION_GATE_REBOUND_LIMIT} integration-gate rebounds spent).`));
+  log(fmt.status('PASS', `Integration gate ${failedGate.key} repaired by ${outcome.implementer} and re-ran green (${rebounds}/${INTEGRATION_GATE_REBOUND_ATTEMPTS_PER_INVOCATION} integration-gate repairs allowed per integrate).`));
   const repairedTree = captureFinalTreeFn(opts.missionWorktree);
-  const repairedRevision = repairedTree.ok ? (repairedTree.tree ?? repairedTree.commit ?? null) : null;
-  if (!initialInvalidation && approvedRevision !== null && repairedRevision !== null && approvedRevision === repairedRevision) {
-    log(fmt.status('INFO', `The repair left the mission tree at ${approvedRevision}, the revision the review approved; the existing approval still covers what would land.`));
+  const repairedRevision = repairedTree.ok ? (repairedTree.commit ?? null) : null;
+  if (!initialInvalidation && preRepairRevision !== null && repairedRevision !== null && preRepairRevision === repairedRevision) {
+    log(fmt.status('INFO', `The repair left the mission at ${preRepairRevision}, unchanged since the review approved it; the existing approval still covers what would land.`));
     return { route: 'fixed', rebounds };
   }
 
@@ -263,18 +181,20 @@ async function routeFixedIntegrationGateRebound({
     slug: opts.slug,
     branch,
     approval: opts.approval,
-    reviewerUser: opts.reviewerUser ?? null,
     summary: staleApprovalSummary(opts.slug, approvedLabel, repairedLabel, failedGate.key),
   });
   error(fmt.status('INFO', `The integration-gate repair of ${opts.slug} requires a fresh review: prior approved revision ${approvedLabel}, repaired revision ${repairedLabel}. The withdrawn approval cannot authorize the merge.`));
-  for (const holder of invalidation.retracted) {
-    error(fmt.status('INFO', `Retracted ${holder}'s approval on ${branch} with a request-changes review.`));
+  if (opts.reportedStaleness) {
+    error(fmt.status('INFO', `This approval was already reported as no longer covering the branch before integration (px status ${opts.slug}): ${opts.reportedStaleness}`));
+  }
+  for (const holder of invalidation.dismissed) {
+    error(fmt.status('INFO', `Parallix dismissed ${holder}'s approval on ${branch}.`));
   }
   for (const problem of invalidation.errors) {
     error(fmt.status('WARN', `Provider approval was not updated: ${problem}. The old local decision remains invalid; the fresh review excludes it.`));
   }
   if (!(opts.reReviewFollows && invalidation.ok)) {
-    error(fmt.status('INFO', `${opts.slug} must go back through review: run px review ${opts.slug} --continue to review the repaired revision ${repairedLabel} and resume integration.`));
+    error(fmt.status('INFO', `${opts.slug} must go back through review: run px review ${opts.slug} --continue to review the repaired revision ${repairedLabel}; an approval returns it to the integration lane.`));
   }
   // TASK-2550: the consumer (the integration gate step) now resumes the
   // review of the repaired revision automatically; the route no longer tells
@@ -301,12 +221,14 @@ export interface IntegrationGateRouteOptions {
   gates: RepositoryGate[];
   implementer: string;
   repositoryId: string;
-  /** Mission pull-request branch, for retracting a stale approval (TASK-2528). */
+  /** The commit the withdrawn approval was given to, from the review record. */
+  approvedRevision?: string | null;
+  /** Mission pull-request branch, for dismissing a stale approval (TASK-2528). */
   branch?: string | null;
   /** Provider approval as read at context-build time (TASK-2528). */
   approval?: any;
-  /** Forgejo login of the configured reviewer whose approval may stand. */
-  reviewerUser?: string | null;
+  /** Staleness already reported for this approval before integration (TASK-2555), named in the refusal. */
+  reportedStaleness?: string | null;
   /** The caller re-reviews a changed revision itself, so no manual instruction is printed. */
   reReviewFollows?: boolean;
   realAgent?: string | null;
@@ -318,8 +240,6 @@ export interface IntegrationGateRouteOptions {
   applyAgentFallbackFn?: ReboundContext['applyAgentFallback'];
   // Injected so tests exercise the routing without a database, an agent, or a
   // second gate execution.
-  readReboundsFn?: typeof readIntegrationGateRebounds;
-  recordReboundFn?: typeof recordIntegrationGateRebound;
   runPhaseGatesFn?: typeof runPhaseGates;
   captureFinalTreeFn?: typeof captureFinalIntegrationTree;
   reboundFn?: typeof rebound;
@@ -343,8 +263,6 @@ export async function routeIntegrationGateFailure(opts: IntegrationGateRouteOpti
     missionWorktree,
     failedGate,
     gates,
-    readReboundsFn = readIntegrationGateRebounds,
-    recordReboundFn = recordIntegrationGateRebound,
     runPhaseGatesFn = runPhaseGates,
     captureFinalTreeFn = captureFinalIntegrationTree,
     reboundFn = rebound,
@@ -360,43 +278,32 @@ export async function routeIntegrationGateFailure(opts: IntegrationGateRouteOpti
     return { route: 'stranded', detail: 'no failed gate recorded' };
   }
 
-  // 1. Budget first: an exhausted mission must not pay for a probe or a launch.
-  const spent = await readReboundsFn(slug);
-  if (spent === null) {
-    error(fmt.status('FAIL', `Cannot read the integration-gate rebound budget for ${slug} from the operator database; refusing to bounce an unbounded number of times. Human action required.`));
-    return { route: 'stranded', detail: 'rebound budget unreadable' };
-  }
-  if (spent >= INTEGRATION_GATE_REBOUND_LIMIT) {
-    error(fmt.status('FAIL', `Integration gate ${failedGate.key} failed again for ${slug} after ${spent}/${INTEGRATION_GATE_REBOUND_LIMIT} integration-gate rebounds. The automatic repair budget is exhausted; no implementer will be launched. After addressing the failed gate, run px review ${slug} --continue to resume review and integration.`));
-    error(fmt.status('FAIL', `Reproduce with: ${failedGate.command} (from ${missionWorktree}).`));
-    return { route: 'limit-reached', rebounds: spent };
-  }
-
+  // A fresh bounded repair budget starts here, per `px integrate` (TASK-2620
+  // AC5). The kernel's own attempt counter enforces it, so no lifetime counter
+  // is read or spent: a later human resume starts with the full budget again.
   if (!opts.implementer) {
     error(fmt.status('FAIL', `No implementer could be named for ${slug}; not bouncing the integration gate failure. Human action required.`));
     return { route: 'stranded', detail: 'no implementer resolvable' };
   }
 
-  // 3. Spend the budget before launching: a process that dies mid-repair must
-  //    still have paid for the attempt, or the bound is not a bound.
-  await recordReboundFn(slug, { repositoryId: opts.repositoryId, gate: failedGate.key, implementer: opts.implementer });
-
-  // 4. The revision the reviewer's approval was given to, observed before the
+  // The revision the reviewer's approval was given to, observed before the
   //    implementer touches the worktree. Comparing it with the revision the
   //    repair leaves behind is the only truthful way to tell a repaired diff
   //    from an unchanged retry (TASK-2528); an unreadable tree is treated as
   //    changed, because "unchanged" is the claim that must be proven.
   const approvedTree = captureFinalTreeFn(missionWorktree);
-  const approvedRevision = approvedTree.ok ? (approvedTree.tree ?? approvedTree.commit ?? null) : null;
+  const preRepairRevision = approvedTree.ok ? (approvedTree.commit ?? null) : null;
+  // The revision the reviewer approved (A); HEAD may already carry bookkeeping after it.
+  const approvedRevision = opts.approvedRevision ?? preRepairRevision;
   let initialInvalidation: ApprovalInvalidation | null = null;
 
   const outcome = await reboundFn(
-    integrationGateFailureReason(failedGate, { gateError: opts.gateError, verificationCommand: opts.verificationCommand }),
+    integrationGateFailureReason(failedGate, { gateError: opts.gateError, verificationCommand: opts.verificationCommand, approvedRevision }),
     {
       slug,
       worktree: missionWorktree,
       implementer: opts.implementer,
-      maxAttempts: REBOUND_ATTEMPTS_PER_INVOCATION,
+      maxAttempts: INTEGRATION_GATE_REBOUND_ATTEMPTS_PER_INVOCATION,
       startAgent: opts.startAgentFn,
       transitionToImplementer: opts.reactivateMissionFn ? async (bounceSlug: string) => {
         // The durable lane move withdraws the local approval atomically. Its
@@ -405,7 +312,6 @@ export async function routeIntegrationGateFailure(opts: IntegrationGateRouteOpti
         const transitioned = await opts.reactivateMissionFn!(bounceSlug);
         initialInvalidation = await invalidateApprovalFn({
           slug, branch: opts.branch ?? `mission/${slug}`, approval: opts.approval,
-          reviewerUser: opts.reviewerUser ?? null,
           summary: staleApprovalSummary(slug, approvedRevision ?? 'unknown', 'pending repair', failedGate.key),
         });
         for (const problem of initialInvalidation.errors) { error(fmt.status('WARN', problem)); }
@@ -434,7 +340,7 @@ export async function routeIntegrationGateFailure(opts: IntegrationGateRouteOpti
           ok: false,
           diagnostic: rerun.error ?? 'integration gates failed again',
           ...(rerun.failedGate
-            ? { reason: integrationGateFailureReason(rerun.failedGate, { gateError: rerun.error, verificationCommand: opts.verificationCommand }) }
+            ? { reason: integrationGateFailureReason(rerun.failedGate, { gateError: rerun.error, verificationCommand: opts.verificationCommand, approvedRevision }) }
             : {}),
         };
       },
@@ -443,10 +349,10 @@ export async function routeIntegrationGateFailure(opts: IntegrationGateRouteOpti
     },
   );
 
-  const rebounds = spent + 1;
+  const rebounds = outcome.attempts;
   if (outcome.outcome === 'fixed') {
-    return routeFixedIntegrationGateRebound({ opts, failedGate, outcome, rebounds, approvedRevision, captureFinalTreeFn, invalidateApprovalFn, initialInvalidation, log, error });
+    return routeFixedIntegrationGateRebound({ opts, failedGate, outcome, rebounds, approvedRevision, preRepairRevision, captureFinalTreeFn, invalidateApprovalFn, initialInvalidation, log, error });
   }
-  error(fmt.status('FAIL', `Integration gate ${failedGate.key} still fails for ${slug} after the bounce (${rebounds}/${INTEGRATION_GATE_REBOUND_LIMIT} integration-gate rebounds spent).`));
+  error(fmt.status('FAIL', `Integration gate ${failedGate.key} still fails for ${slug} after ${rebounds} repair(s) within this integrate's bounded budget. Address the failed gate, then run px integrate ${slug} again for a fresh repair budget, or px review ${slug} --continue once the gate is fixed.`));
   return { route: 'exhausted', rebounds, diagnostic: outcome.diagnostic };
 }

@@ -7,13 +7,14 @@ import os from 'node:os';
 import { SqliteDatabaseAdapter } from '../src/adapters/sqlite/database-adapter.js';
 import { SqliteMigrationRunner } from '../src/adapters/sqlite/migration-runner.js';
 import type { Migration } from '../src/adapters/sqlite/database-adapter.js';
+import { mkdtemp as registeredMkdtemp } from './helpers/temp-dir.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
 function createTempDir(name: string): string {
-  return fs.mkdtempSync(path.join(os.tmpdir(), `parallix-task-2530-${name}-`));
+  return registeredMkdtemp(`parallix-task-2530-${name}-`);
 }
 
 function cleanupTempDir(dir: string): void {

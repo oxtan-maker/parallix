@@ -8,6 +8,7 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import { mockModule, installModuleMocks } from './lib/module-mock.js';
+import { mkdtemp as registeredMkdtemp } from './helpers/temp-dir.js';
 const storage = mockModule<typeof import('../src/adapters/storage/storage.js')>('../src/adapters/storage/storage.js', import.meta.url);
 await installModuleMocks();
 test.afterEach(() => mock.restoreAll());
@@ -23,7 +24,7 @@ test('resolveParallixHome honors PARALLIX_HOME env var', () => {
 });
 
 test('resolveParallixHome creates directory when ensureDir is true', () => {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'storage-test-'));
+  const tmpDir = registeredMkdtemp('storage-test-');
   const testHome = path.join(tmpDir, 'new-dir', 'parallix');
   const savedHome = process.env.PARALLIX_HOME;
   try {
@@ -38,7 +39,7 @@ test('resolveParallixHome creates directory when ensureDir is true', () => {
 });
 
 test('resolveParallixHome returns existing directory when ensureDir is false', () => {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'storage-test-'));
+  const tmpDir = registeredMkdtemp('storage-test-');
   const savedHome = process.env.PARALLIX_HOME;
   try {
     process.env.PARALLIX_HOME = tmpDir;
@@ -134,7 +135,7 @@ test('storage exposes no stats.csv resolver after the measurement cut-over', () 
 });
 
 test('resolveAgentsLocalPath returns <PARALLIX_HOME>/agents.local.json', () => {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'storage-agents-'));
+  const tmpDir = registeredMkdtemp('storage-agents-');
   const savedHome = process.env.PARALLIX_HOME;
   try {
     process.env.PARALLIX_HOME = tmpDir;
@@ -152,7 +153,7 @@ test('resolveAgentsLocalPath accepts an explicit string path', () => {
 // ---------- readJson ----------
 
 test('readJson returns { ok: true } for valid JSON', () => {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'storage-json-'));
+  const tmpDir = registeredMkdtemp('storage-json-');
   const savedHome = process.env.PARALLIX_HOME;
   try {
     process.env.PARALLIX_HOME = tmpDir;
@@ -176,7 +177,7 @@ test('readJson returns { ok: false, error: null } for missing file', () => {
 });
 
 test('readJson returns { ok: false, error } for malformed JSON', () => {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'storage-json-'));
+  const tmpDir = registeredMkdtemp('storage-json-');
   try {
     const file = path.join(tmpDir, 'bad.json');
     fs.writeFileSync(file, '{ invalid json }', 'utf8');
@@ -189,7 +190,7 @@ test('readJson returns { ok: false, error } for malformed JSON', () => {
 });
 
 test('readJson accepts a resolver function instead of a path', () => {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'storage-json-'));
+  const tmpDir = registeredMkdtemp('storage-json-');
   const savedHome = process.env.PARALLIX_HOME;
   try {
     process.env.PARALLIX_HOME = tmpDir;
@@ -208,7 +209,7 @@ test('readJson accepts a resolver function instead of a path', () => {
 // ---------- writeJson ----------
 
 test('writeJson writes JSON and creates parent dirs', () => {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'storage-write-'));
+  const tmpDir = registeredMkdtemp('storage-write-');
   const savedHome = process.env.PARALLIX_HOME;
   try {
     process.env.PARALLIX_HOME = tmpDir;
@@ -223,7 +224,7 @@ test('writeJson writes JSON and creates parent dirs', () => {
 });
 
 test('writeJson accepts a resolver function instead of a path', () => {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'storage-write-'));
+  const tmpDir = registeredMkdtemp('storage-write-');
   const savedHome = process.env.PARALLIX_HOME;
   try {
     process.env.PARALLIX_HOME = tmpDir;
@@ -238,7 +239,7 @@ test('writeJson accepts a resolver function instead of a path', () => {
 });
 
 test('writeFileAtomic propagates write failure and removes its stale temporary file', () => {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'storage-write-fail-'));
+  const tmpDir = registeredMkdtemp('storage-write-fail-');
   const target = path.join(tmpDir, 'state.json');
   const staleTemp = path.join(tmpDir, '.state.json.stale.tmp');
   fs.writeFileSync(staleTemp, 'stale');
@@ -256,7 +257,7 @@ test('writeFileAtomic propagates write failure and removes its stale temporary f
 });
 
 test('writeFileAtomic propagates rename failure and preserves the previous valid file', () => {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'storage-rename-fail-'));
+  const tmpDir = registeredMkdtemp('storage-rename-fail-');
   const target = path.join(tmpDir, 'state.json');
   const temp = path.join(tmpDir, '.state.json.rename.tmp');
   fs.writeFileSync(target, 'previous\n');
@@ -274,7 +275,7 @@ test('writeFileAtomic propagates rename failure and preserves the previous valid
 });
 
 test('writeFileAtomic successfully replaces content and preserves permission mode', () => {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'storage-mode-'));
+  const tmpDir = registeredMkdtemp('storage-mode-');
   const target = path.join(tmpDir, 'state.json');
   try {
     fs.writeFileSync(target, 'old\n', { mode: 0o640 });
@@ -288,7 +289,7 @@ test('writeFileAtomic successfully replaces content and preserves permission mod
 });
 
 test('writeJson creates parents and serializes UTF-8 with exactly one final newline', () => {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'storage-utf8-'));
+  const tmpDir = registeredMkdtemp('storage-utf8-');
   const target = path.join(tmpDir, 'nested', 'state.json');
   try {
     storage.writeJson(target, { label: 'räksmörgås' });
@@ -303,7 +304,7 @@ test('writeJson creates parents and serializes UTF-8 with exactly one final newl
 });
 
 test('writeFileAtomic applies a restrictive requested mode to new sensitive state', () => {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'storage-sensitive-'));
+  const tmpDir = registeredMkdtemp('storage-sensitive-');
   const target = path.join(tmpDir, 'operator.json');
   try {
     storage.writeFileAtomic(target, '{}\n', { mode: 0o600 });

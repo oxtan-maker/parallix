@@ -14,8 +14,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  INTEGRATION_GATE_REBOUND_LIMIT,
-  INTEGRATION_GATE_REBOUND_EVENT,
+  INTEGRATION_GATE_REBOUND_ATTEMPTS_PER_INVOCATION,
   integrationGateFailureReason,
   integrationOnlyCoverageNote,
   routeIntegrationGateFailure,
@@ -37,7 +36,6 @@ const failedGate = (over: Partial<GateRunOutcome> = {}): GateRunOutcome => ({
   ...over,
 });
 
-const okRun = { status: 0, stdout: '', stderr: '' };
 
 // ── Classification and integration-only coverage wording ────────────────────
 
@@ -89,12 +87,11 @@ test('TASK-2492: the bounced prompt names the failed gate command and the integr
 interface Harness {
   launches: number;
   transitions: string[];
-  recorded: Array<{ slug: string; gate: string }>;
   messages: string[];
 }
 
-function routeArgs(over: Partial<IntegrationGateRouteOptions> & { spent?: number | null; rerunOk?: boolean }, harness: Harness): IntegrationGateRouteOptions {
-  const { spent = 0, rerunOk = true, ...rest } = over;
+function routeArgs(over: Partial<IntegrationGateRouteOptions> & { rerunOk?: boolean }, harness: Harness): IntegrationGateRouteOptions {
+  const { rerunOk = true, ...rest } = over;
   return {
     slug: SLUG,
     missionWorktree: '/tmp/mission',
@@ -108,8 +105,6 @@ function routeArgs(over: Partial<IntegrationGateRouteOptions> & { spent?: number
     repositoryId: 'parallix',
     startAgentFn: (async () => { harness.launches += 1; return { agent: 'codex', result: { status: 0 } }; }) as never,
     transitionTaskFn: async (slug: string) => { harness.transitions.push(slug); return true; },
-    readReboundsFn: async () => spent,
-    recordReboundFn: async (slug: string, facts: any) => { harness.recorded.push({ slug, gate: facts.gate }); return true; },
     captureFinalTreeFn: (() => ({ ok: true, rootDir: '/tmp/mission', commit: 'c', tree: 't' })) as never,
     runPhaseGatesFn: (async (_p: string, o: any) => (rerunOk
       ? { ok: true, phase: 'integration', gates: o.gates, executed: 1, skipped: false, dryRun: false, failedGate: null, error: null }
@@ -123,42 +118,24 @@ function routeArgs(over: Partial<IntegrationGateRouteOptions> & { spent?: number
 }
 
 function harness(): Harness {
-  return { launches: 0, transitions: [], recorded: [], messages: [] };
+  return { launches: 0, transitions: [], messages: [] };
 }
 
-test('TASK-2492: a mission regression inside budget bounces once, re-runs the gates, and reports fixed', async () => {
+test('TASK-2492: a mission regression inside budget re-runs the gates and reports fixed', async () => {
   const h = harness();
-  const route = await routeIntegrationGateFailure(routeArgs({ spent: 0, rerunOk: true }, h));
+  const route = await routeIntegrationGateFailure(routeArgs({ rerunOk: true }, h));
   assert.equal(route.route, 'fixed');
   assert.equal(h.launches, 1, 'exactly one implementer relaunch');
   assert.deepEqual(h.transitions, [SLUG], 'the task is transitioned back to the implementer exactly once');
-  assert.deepEqual(h.recorded, [{ slug: SLUG, gate: 'integration-suite' }], 'the spent rebound is persisted');
 });
 
-test('TASK-2492: a bounce whose re-run stays red reports exhausted without a second launch', async () => {
+test('TASK-2492: a bounce whose re-run stays red reports exhausted after the per-invocation budget', async () => {
   const h = harness();
-  const route = await routeIntegrationGateFailure(routeArgs({ spent: 0, rerunOk: false }, h));
+  const route = await routeIntegrationGateFailure(routeArgs({ rerunOk: false }, h));
   assert.equal(route.route, 'exhausted');
-  assert.equal(h.launches, 1, 'one relaunch per px integrate invocation');
-});
-
-test('TASK-2492: an exhausted rebound budget escalates to a human without a transition or a launch', async () => {
-  const h = harness();
-  const route = await routeIntegrationGateFailure(routeArgs({ spent: INTEGRATION_GATE_REBOUND_LIMIT }, h));
-  assert.equal(route.route, 'limit-reached');
-  assert.equal(h.launches, 0);
-  assert.deepEqual(h.transitions, []);
-  assert.deepEqual(h.recorded, []);
-  assert.match(h.messages.join('\n'), /automatic repair budget is exhausted/i);
-  assert.match(h.messages.join('\n'), /px review .* --continue/, 'the escalation names its continuation');
-  assert.match(h.messages.join('\n'), /npm run test:integration/, 'the escalation names the reproduction command');
-});
-
-test('TASK-2492: an unreadable rebound budget strands rather than bouncing an unbounded number of times', async () => {
-  const h = harness();
-  const route = await routeIntegrationGateFailure(routeArgs({ spent: null }, h));
-  assert.equal(route.route, 'stranded');
-  assert.equal(h.launches, 0);
+  assert.equal(h.launches, INTEGRATION_GATE_REBOUND_ATTEMPTS_PER_INVOCATION, 'the bounded per-integrate repair budget is spent, then it stops');
+  assert.match(h.messages.join('\n'), /bounded budget/i);
+  assert.match(h.messages.join('\n'), /px review .* --continue/, 'the exhaustion names its human continuation');
 });
 
 test('TASK-2492: a repair left uncommitted fails the re-run instead of being reported as fixed', async () => {
@@ -170,11 +147,9 @@ test('TASK-2492: a repair left uncommitted fails the re-run instead of being rep
   assert.match(h.messages.join('\n'), /not committed|dirty tree/);
 });
 
-test('TASK-2492: the persisted rebound budget is keyed on the mission and never resets inside it', () => {
-  // The reset boundary is structural, not temporal: the budget is the count of
-  // append-only `integration.gate-rebound` rows carrying this mission id, so it
-  // cannot reset on a new commit, review round, or process, and cannot be
-  // inherited from another mission.
-  assert.equal(INTEGRATION_GATE_REBOUND_EVENT, 'integration.gate-rebound');
-  assert.equal(INTEGRATION_GATE_REBOUND_LIMIT, 2);
+test('TASK-2492: the repair budget is bounded per px integrate invocation', () => {
+  // The budget is a per-invocation bound, not a lifetime counter (TASK-2620
+  // AC5): every human-initiated `px integrate` may spend this many repairs,
+  // and a later resume starts with the full budget again.
+  assert.equal(INTEGRATION_GATE_REBOUND_ATTEMPTS_PER_INVOCATION, 2);
 });

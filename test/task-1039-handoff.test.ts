@@ -29,7 +29,7 @@ function setupMocks() {
   mock.method(git, 'getCurrentBranch', () => 'mission/' + TEST_SLUG);
   mock.method(git, 'getWorktreeStatus', () => []);
   mock.method(git, 'run', () => ({ status: 0 }));
-  mock.method(git, 'git', () => ({ status: 0 }));
+  mock.method(git, 'git', args => ({ status: 0, stdout: args.includes('rev-parse') ? 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' : '' }));
   mock.method(backlog, 'resolveTaskFile', () => ({ ok: true, taskFile: '/tmp/task.md' }));
   mock.method(backlog, 'getTaskImplementer', () => 'claude');
   // Keep agent selection and branch probing in-memory: the real paths spawn
@@ -180,7 +180,7 @@ test('performHandoff fails when git add fails', async (t) => {
 
 test('performHandoff fails when git push fails', async (t) => {
   setupMocks();
-  mock.method(git, 'git', (args) => args.includes('push') ? { status: 1, stderr: 'fatal: Unable to create .git/index.lock: No space left on device' } : { status: 0 });
+  mock.method(git, 'git', (args) => args.includes('push') ? { status: 1, stderr: 'fatal: Unable to create .git/index.lock: No space left on device' } : { status: 0, stdout: args.includes('rev-parse') ? 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' : '' });
   mock.method(forgejo, 'authenticatedReviewUrl', () => 'url');
   const result = await performHandoff(TEST_SLUG, { worktree: WORKTREE, skipGate: true, error: () => {}, rebaseFn: mockRebase, missionServicesFn: stubRecordedMissionServices() });
   assert.strictEqual(result.ok, false);

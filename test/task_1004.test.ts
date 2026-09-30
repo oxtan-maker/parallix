@@ -7,6 +7,7 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import { mockModule, installModuleMocks } from './lib/module-mock.js';
+import { mkdtemp as registeredMkdtemp } from './helpers/temp-dir.js';
 const resolveTaskFileModule = mockModule<typeof import('../src/adapters/backlog/backlog.js')>('../src/adapters/backlog/backlog.js', import.meta.url);
 const findMissionDirModule = mockModule<typeof import('../src/adapters/filesystem/mission-utils.js')>('../src/adapters/filesystem/mission-utils.js', import.meta.url);
 await installModuleMocks();
@@ -15,7 +16,7 @@ const { resolveTaskFile, checkBacklogIntegrity } = resolveTaskFileModule;
 const { findMissionDir, getMissionYear } = findMissionDirModule;
 function withTempRepo(fn) {
   const previous = process.cwd();
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'workflow-task-1004-'));
+  const root = registeredMkdtemp('workflow-task-1004-');
   fs.mkdirSync(path.join(root, 'backlog', 'tasks'), { recursive: true });
   process.chdir(root);
 

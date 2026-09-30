@@ -60,10 +60,11 @@ import { ReviewState, writeReviewState } from '../src/adapters/review/review-sta
 import { bindReviewPersistence } from '../src/composition/review-persistence.js';
 import { reboundPreReviewFailure, gateFailureReason } from '../src/adapters/review/review-gate-handling.js';
 import { transitionReviewRepair } from '../src/application/review-repair-lifecycle.js';
-import { createIntegrationGateStep, IntegrationRestartRequired } from '../src/application/integrate/gates.js';
+import { createIntegrationGateStep } from '../src/application/integrate/gates.js';
 import { RevokeReviewDecisionUseCase } from '../src/application/revoke-review-decision-use-case.js';
 import { createRebaseWorkflowPort } from '../src/adapters/rebase/rebase-workflow-adapter.js';
 import { runRebaseWorkflow } from '../src/application/rebase-workflow.js';
+import { SOURCE_PX } from './lib/px-entry.js';
 
 const SLUG = 'task-2582-repro';
 const REVIEWER = agentFamily('configured-reviewer');
@@ -97,6 +98,7 @@ test('review gate repair commits active before launch and review before resuming
       ok: false, area: 'test', command: 'npm test', exitCode: 1, stdout: 'AssertionError: expected true', stderr: '',
     }), IMPLEMENTER, {
       missionStore: fixture.store, lifecycleService: fixture.lifecycle,
+      reviewerEligibility: REVIEWER_ELIGIBILITY,
       ...bindReviewPersistence(fixture.store, fixture.lifecycle),
       readReviewStateFn: async () => null,
       startAgentFn: async () => {
@@ -152,10 +154,9 @@ test('repair rebound refuses an approved review rather than fabricating a return
   }
 });
 
-test('integration gates require fresh approval after repair and stop when re-review fails', async () => {
+test('integration gates stop in the integration lane on a successful re-review and abort on a refused one', async () => {
   for (const refuseReview of [false, true]) {
-    const fixture = await openFixture(seedMission('integration', strandedApprovedReview()));
-    const mirrors: string[] = [];
+    const fixture = await openFixture(seedMission('active', null));
     try {
       const step = createIntegrationGateStep({
         gates: {
@@ -176,39 +177,24 @@ test('integration gates require fresh approval after repair and stop when re-rev
         seams: {
           startAgentFn: async () => assert.fail('launch belongs to the injected repair boundary'),
           applyAgentFallbackFn: async () => IMPLEMENTER,
-          transitionTaskFn: async (_slug, status) => {
-            assert.equal(await missionStatus(fixture), status === 'ready-for-integration' ? 'integration' : status);
-            mirrors.push(status);
-          },
-          routeIntegrationGateFailureFn: async () => {
-            assert.equal(await missionStatus(fixture), 'active', 'repair work observes the committed lane');
-            assert.ok(currentReviewRound(await currentReviewOf(fixture)).decision === null, 'repair has no effective approval');
-            return { route: 'fixed', rebounds: 1 };
-          },
-          reReviewFn: async () => {
-            assert.equal(await missionStatus(fixture), 'active');
-            if (refuseReview) { return false; }
-            await transitionReviewRepair(SLUG, 'review', IMPLEMENTER, fixture.store, fixture.lifecycle);
-            assert.equal(await missionStatus(fixture), 'review');
-            mirrors.push('review');
-            const result = await recordApproval(SLUG, { decidedAt: APPROVED_AT, comment: null, source: { kind: 'local' } }, {
-              missionStore: fixture.store, lifecycleService: fixture.lifecycle,
-            });
-            assert.equal(result.outcome, 'recorded');
-            assert.equal(await missionStatus(fixture), 'integration');
-            mirrors.push('ready-for-integration');
-            return true;
-          },
+          transitionTaskFn: async () => true,
+          routeIntegrationGateFailureFn: async () => ({
+            route: 'revision-changed', rebounds: 1, approvedRevision: 'rev-1', repairedRevision: 'rev-2', invalidation: { ok: true, dismissed: [], errors: [] },
+          }),
+          // The injected live re-review route: approve (refuse) the repaired
+          // revision. The gate step owns the lane decision from the result.
+          reReviewFn: async () => !refuseReview,
         },
       });
       if (refuseReview) {
+        // Re-review refused: the repair is not approved, so integration aborts
+        // before any merge.
         await assert.rejects(run, /integration aborted/);
-        assert.equal(await missionStatus(fixture), 'active');
-        assert.deepEqual(mirrors, ['active']);
       } else {
-        await assert.rejects(run, error => error instanceof IntegrationRestartRequired);
-        assert.equal(await missionStatus(fixture), 'integration');
-        assert.deepEqual(mirrors, ['active', 'review', 'ready-for-integration']);
+        // Re-review approved: the repaired revision is re-reviewed through the
+        // single live route and integration stops in the integration lane for
+        // the human (no auto-restart, no merge).
+        await assert.rejects(run, error => (error as Error).name === 'IntegrationStopsForHuman');
       }
     } finally { await closeFixture(fixture); }
   }
@@ -219,7 +205,7 @@ test('integration repair withdraws the old approval and returns through a new re
   try {
     const rebound = await fixture.lifecycle.transition({
       operationId: 'integration-repair', missionId: missionId(SLUG), capabilities: new Set(['mission:transition']),
-      command: { type: 'rebound-to-active', agent: IMPLEMENTER, occurredAt: APPROVED_AT }, actor: IMPLEMENTER, occurredAt: APPROVED_AT,
+      command: { type: 'rebound-to-active', agent: IMPLEMENTER, cause: { kind: 'integration-gate-failure', gate: 'unit' }, occurredAt: APPROVED_AT }, actor: IMPLEMENTER, occurredAt: APPROVED_AT,
     });
     assert.equal(rebound.status, 'completed');
     const review = await currentReviewOf(fixture);
@@ -233,7 +219,7 @@ test('integration repair withdraws the old approval and returns through a new re
     });
     assert.notEqual(rejected.status, 'completed');
     assert.equal(await missionStatus(fixture), 'active');
-    await transitionReviewRepair(SLUG, 'review', IMPLEMENTER, fixture.store, fixture.lifecycle);
+    await transitionReviewRepair(SLUG, 'review', IMPLEMENTER, fixture.store, fixture.lifecycle, REVIEWER_ELIGIBILITY);
     const approve = () => recordApproval(SLUG, { comment: null, decidedAt: APPROVED_AT, source: { kind: 'local' } }, {
       missionStore: fixture.store, lifecycleService: fixture.lifecycle,
     });
@@ -264,6 +250,12 @@ test('composed rebase conflict repair commits active before its agent and review
   try {
     fs.mkdirSync(path.dirname(taskFile), { recursive: true });
     fs.writeFileSync(taskFile, '---\nid: TASK-2582\ntitle: Conflict repair\nstatus: review\nassignee: [configured-implementer]\n---\n');
+    // AC12: the rebase repair derives reviewer eligibility from this worktree's
+    // configured review step, so register the custom reviewer as eligible here.
+    fs.mkdirSync(path.join(fixture.root, 'config'), { recursive: true });
+    fs.writeFileSync(path.join(fixture.root, 'config', 'agents.json'), JSON.stringify({
+      steps: { review: { eligible: ['configured-reviewer'], selection: 'random' } },
+    }));
     for (const args of [
       ['init', '-b', `mission/${slug}`], ['config', 'user.email', 'test@example.com'],
       ['config', 'user.name', 'test'], ['config', 'commit.gpgsign', 'false'], ['add', '.'], ['commit', '-m', 'fixture'],
@@ -374,10 +366,13 @@ test('production CLI autonomous re-review and child verdict/resolve keep authori
   const store = new SqliteMissionStore(database);
   const seed = seedMission('review', review);
   await store.save({ ...seed, id: missionId(slug), checkpoints: seed.checkpoints.map(checkpoint => ({ ...checkpoint, missionId: missionId(slug) })), assignee: implementer }, null);
-  const entry = path.resolve('src/entry/px.ts');
+  // Stays on source: the preload swaps agent ports through setters on the
+  // source `src/adapters/agents/agents.ts` module, which the bundle's inlined
+  // copy never sees, and the trace asserts the pinned child CLI entry.
+  const { entry, loader } = SOURCE_PX;
   const trace = path.join(root, 'trace.jsonl');
   try {
-    const result = spawnSync(process.execPath, ['--import', path.resolve('node_modules/tsx/dist/loader.mjs'), '--import', path.resolve('test/fixtures/task-2582-review-agent-preload.ts'), entry,
+    const result = spawnSync(process.execPath, ['--import', loader, '--import', path.resolve('test/fixtures/task-2582-review-agent-preload.ts'), entry,
       'review', slug, '--continue', '--reviewer', 'codex', '--implementer', 'custom', '--max-attempts', '3'], {
       cwd: repo, encoding: 'utf8', timeout: 90_000,
       env: { ...process.env, PARALLIX_HOME: stateHome, PRIMARY_WORKTREE: repo, PARALLIX_NO_BUBBLEWRAP: '1', TASK_2582_SLUG: slug, TASK_2582_TRACE: trace, TASK_2582_REVIEWED: path.join(root, 'reviewed') },

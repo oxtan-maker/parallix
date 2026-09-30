@@ -9,6 +9,7 @@ import { agentFamily } from '../src/domain/agents.js';
 import { AgentStrip } from '../src/interfaces/tui/agent-strip.js';
 import { resolveKnownAgentFamilies } from '../src/adapters/agents/known-agent-families.js';
 import { fileURLToPath } from 'node:url';
+import { mkdtemp as registeredMkdtemp } from './helpers/temp-dir.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -28,7 +29,7 @@ const repoRoot = path.resolve(__dirname, '..');
 
 /** Copy the repository's real config/agents.json into a temp root. */
 function tempRootWithShippedConfig(): string {
-  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'task-2336-repro-'));
+  const tempRoot = registeredMkdtemp('task-2336-repro-');
   fs.mkdirSync(path.join(tempRoot, 'config'), { recursive: true });
   fs.copyFileSync(
     path.join(repoRoot, 'config', 'agents.json'),

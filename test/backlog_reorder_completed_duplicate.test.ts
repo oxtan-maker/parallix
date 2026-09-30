@@ -11,8 +11,9 @@ import os from 'os';
 import path from 'path';
 
 import { checkBacklogIntegrity, pruneStaleBacklogDuplicates, resolveTaskFile, } from '../src/adapters/backlog/backlog.js';
+import { mkdtemp as registeredMkdtemp } from './helpers/temp-dir.js';
 function withTempRepo(fn) {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'workflow-reorder-dup-'));
+  const root = registeredMkdtemp('workflow-reorder-dup-');
   fs.mkdirSync(path.join(root, 'backlog', 'tasks'), { recursive: true });
   fs.mkdirSync(path.join(root, 'backlog', 'completed'), { recursive: true });
   fs.mkdirSync(path.join(root, 'backlog', 'archive', 'tasks'), { recursive: true });

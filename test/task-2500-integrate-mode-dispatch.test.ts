@@ -35,6 +35,7 @@ import type { Mission, MissionStatus } from '../src/domain/mission.js';
 import type { MissionVersion } from '../src/application/domain-ports.js';
 import { missionId } from '../src/domain/mission.js';
 import { repositoryId } from '../src/domain/repository.js';
+import { mkdtemp as registeredMkdtemp } from './helpers/temp-dir.js';
 
 const SLUG = 'task-2500-mode';
 const LANDED_SHA = 'a11ced0000000000000000000000000000000001';
@@ -97,7 +98,7 @@ interface RunResult {
 }
 
 async function runIntegrate(mode: 'local' | 'github-pr'): Promise<RunResult> {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'parallix-2500-mode-'));
+  const root = registeredMkdtemp('parallix-2500-mode-');
   fs.mkdirSync(path.join(root, 'backlog', 'tasks'), { recursive: true });
   // The only thing the scenario changes: the repository's configured mode.
   fs.writeFileSync(path.join(root, 'workflow.config.json'), JSON.stringify({

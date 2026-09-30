@@ -26,6 +26,7 @@ import { readReviewState, writeReviewState } from './review-state.js';
 import type { MissionStore } from '../../application/domain-ports.js';
 import type { MissionLifecycleService } from '../../application/mission-lifecycle-service.js';
 import { transitionReviewRepair } from '../../application/review-repair-lifecycle.js';
+import type { ConfiguredReviewerEligibility } from '../../domain/review.js';
 import { startAgent } from '../agents/agents.js';
 import { applyAgentFallback } from './review-agent-fallback.js';
 
@@ -167,6 +168,8 @@ export interface ReboundPreReviewOptions {
   maxAttempts?: number;
   missionStore?: MissionStore | null;
   lifecycleService?: MissionLifecycleService | null;
+  /** Configured review-step reviewer eligibility for the review-repair transition (AC12). */
+  reviewerEligibility?: ConfiguredReviewerEligibility;
 }
 
 export interface ReboundPreReviewResult {
@@ -210,6 +213,7 @@ export async function reboundPreReviewFailure(
     maxAttempts,
     missionStore = null,
     lifecycleService = null,
+    reviewerEligibility,
   } = opts;
 
   if (typeof verifyFn !== 'function') {
@@ -247,7 +251,7 @@ export async function reboundPreReviewFailure(
   });
 
   if (outcome.outcome === 'fixed') {
-    if (missionStore) { await transitionReviewRepair(slug, 'review', outcome.implementer, missionStore, lifecycleService); }
+    if (missionStore) { await transitionReviewRepair(slug, 'review', outcome.implementer, missionStore, lifecycleService, reviewerEligibility); }
     await transitionTaskFn(slug, 'review', { rootDir: worktree, log });
   }
   return {

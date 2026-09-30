@@ -17,7 +17,7 @@ import {
   findMissionDir, findMissionArea, inferSlug, resolveWorktree, conventionalWorktreePath,
   getPrimaryBranch, resolveMissionBaseBranch, missionBranchName, missionDirForSlug,
 } from '../filesystem/mission-utils.js';
-import { startAgent, selectAgent, workflowLauncherStatus } from '../agents/agents.js';
+import { startAgent, selectAgent, workflowLauncherStatus, eligibleAgentsForStep } from '../agents/agents.js';
 import { applyAgentFallback } from '../review/review-loop.js';
 import { createPr, readToken, resolveForgejoUser, fetchReviewBranch } from '../forgejo/forgejo.js';
 import { resolveTaskFile, getTaskImplementer, transitionTask } from '../backlog/backlog.js';
@@ -27,7 +27,12 @@ import { formatVerificationCommand } from '../verification/verification.js';
 import { buildRebasePrompt as buildRebasePromptPolicy } from '../../application/rebase-workflow.js';
 import type { GitRunner, RebaseWorkflowPort } from '../../application/ports/rebase-workflow.js';
 import { transitionReviewRepair } from '../../application/review-repair-lifecycle.js';
+import { describeBranchMove, recordBranchMove } from '../../application/approval-coverage.js';
+import { createGitChangeIdentity } from '../git/change-identity.js';
 import { missionId } from '../../domain/mission.js';
+import { agentFamily } from '../../domain/agents.js';
+import { ConfiguredReviewerEligibility } from '../../domain/review.js';
+import { CONFIG_PATH } from '../agents/agent-config.js';
 
 /** Legacy `*Fn` seam accepted by `px rebase` and by its tests. */
 export interface RebaseCommandOptions {
@@ -163,7 +168,7 @@ export function createRebaseWorkflowPort(options: RebaseCommandOptions = {}): Re
         }
         const implementer = loaded.mission.assignee ?? loaded.mission.review?.rounds.at(-1)?.implementer;
         if (!implementer) { throw new Error(`Mission ${slug} has no implementer for rebase repair`); }
-        await transitionReviewRepair(slug, 'active', implementer, services.store, services.lifecycle);
+        await transitionReviewRepair(slug, 'active', implementer, services.store, services.lifecycle, undefined, { kind: 'rebase-repair' });
       }
       return transitionTask(slug, status, transitionOptions as any);
     },
@@ -173,10 +178,32 @@ export function createRebaseWorkflowPort(options: RebaseCommandOptions = {}): Re
       const loaded = await services.store.load(missionId(slug));
       if (loaded.kind !== 'found') { throw new Error(`Mission ${slug} is unavailable after rebase repair`); }
       if (loaded.mission.status === 'active' && loaded.mission.review && !loaded.mission.review.rounds.at(-1)?.decision) {
-        await transitionReviewRepair(slug, 'review', implementer, services.store, services.lifecycle);
+        // AC12: reviewer eligibility always comes from the configured review step
+        // of THIS mission's worktree, never from the prior round's reviewer.
+        const reviewerEligibility = ConfiguredReviewerEligibility.fromReviewStep({
+          eligible: eligibleAgentsForStep('review', { configPath: path.join(root, CONFIG_PATH) }).map(agentFamily),
+          strategy: 'random',
+        });
+        await transitionReviewRepair(slug, 'review', implementer, services.store, services.lifecycle, reviewerEligibility);
         await transitionTask(slug, 'review', { rootDir: root });
       }
     },
+
+    recordBranchMove: missionServicesFn ? async (slug, root, movedFrom) => {
+      const head = (gitFn as GitRunner)(['-C', root, 'rev-parse', 'HEAD']);
+      const landedRevision = head.status === 0 ? head.stdout.trim() : '';
+      if (!landedRevision || landedRevision === movedFrom) { return null; }
+      try {
+        const services = await missionServicesFn(root);
+        return describeBranchMove(slug, await recordBranchMove({
+          store: services.store, slug, identity: createGitChangeIdentity(root, gitFn as GitRunner),
+          landedRevision, movedFrom, recordedBy: 'px rebase', occurredAt: new Date().toISOString(),
+        }));
+      } catch (error) {
+        // The rebase itself succeeded; px status still computes the staleness.
+        return `The rebase moved ${slug}, but whether its approval still covers the branch was not recorded: ${error instanceof Error ? error.message : String(error)}`;
+      }
+    } : undefined,
 
     resolveReviewIdentity: resolveReviewIdentityFn as unknown as RebaseWorkflowPort['resolveReviewIdentity'],
     readReviewState,

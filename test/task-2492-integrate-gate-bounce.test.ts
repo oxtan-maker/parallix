@@ -269,21 +269,12 @@ test('TASK-2492: a limit-reached route aborts before merge', async () => {
   assert.equal(result.seamLaunches.length, 0);
 });
 
-test('integration restarts after repair and review pingpong and lands only the new approval', async () => {
+test('TASK-2620: after repair and re-approval integration stops in the integration lane without landing', async () => {
   const result = await runIntegrate({ route: 'fixed', repairs: 1 });
   assert.equal(result.exitCode, 0, result.logs.join('\n'));
-  assert.equal(result.gateRuns, 2);
+  assert.equal(result.gateRuns, 1, 'integration is not restarted after the re-review');
   assert.equal(result.reviews, 1);
-  assert.equal(result.mission.status, 'done');
+  assert.equal(result.mission.status, 'integration', 'the re-approved mission waits for a human to integrate');
   assert.ok(result.mission.review!.rounds[0].decision?.kind === 'approved' && result.mission.review!.rounds[0].decision.revocation);
   assert.equal(currentReviewRound(result.mission.review!).subject.revision, 'repair-1-resolved');
-});
-
-test('a second integration failure repeats repair and review automatically before landing', async () => {
-  const result = await runIntegrate({ route: 'fixed', repairs: 2 });
-  assert.equal(result.exitCode, 0, result.logs.join('\n'));
-  assert.equal(result.gateRuns, 3);
-  assert.equal(result.reviews, 2);
-  assert.equal(result.mission.status, 'done');
-  assert.equal(currentReviewRound(result.mission.review!).subject.revision, 'repair-2-resolved');
 });

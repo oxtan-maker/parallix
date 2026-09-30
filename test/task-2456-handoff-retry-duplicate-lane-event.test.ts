@@ -50,6 +50,7 @@ import { MissionLifecycleService } from '../src/application/mission-lifecycle-se
 import { SqliteDatabaseAdapter } from '../src/adapters/sqlite/database-adapter.js';
 import { SqliteMigrationRunner, loadDefaultMigrations } from '../src/adapters/sqlite/migration-runner.js';
 import { SqliteMissionStore } from '../src/adapters/sqlite/mission-store.js';
+import { mkdtemp as registeredMkdtemp } from './helpers/temp-dir.js';
 
 const HANDOFF_1_AT = '2026-02-01T10:00:00Z';
 const CHANGES_REQUESTED_AT = '2026-02-01T11:00:00Z';
@@ -105,7 +106,7 @@ function seedMission(slug: string): Mission {
 }
 
 async function openFixture(slug: string): Promise<Fixture> {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'task-2456-repro-'));
+  const root = registeredMkdtemp('task-2456-repro-');
   const database = new SqliteDatabaseAdapter();
   await database.open({ path: path.join(root, 'parallix.db') });
   await new SqliteMigrationRunner(database).applyPending(loadDefaultMigrations());

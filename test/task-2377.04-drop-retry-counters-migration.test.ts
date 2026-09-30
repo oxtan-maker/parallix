@@ -26,11 +26,12 @@ import { missionId, missionLabels } from '../src/domain/mission.js';
 import { repositoryId } from '../src/domain/repository.js';
 import { agentFamily } from '../src/domain/agents.js';
 import { changeRevision } from '../src/domain/review.js';
+import { mkdtemp as registeredMkdtemp } from './helpers/temp-dir.js';
 
 const MIGRATION_ID = '0016-review-drop-retry-counters';
 
 function createTempDir(): string {
-  return fs.mkdtempSync(path.join(os.tmpdir(), 'parallix-0016-mig-'));
+  return registeredMkdtemp('parallix-0016-mig-');
 }
 
 function cleanup(dir: string): void {

@@ -69,7 +69,7 @@ interface StartAgentOptions {
   /** Checked application port for session markers (architecture migration cutover). */
   sessionMarkerPort?: SessionMarkerPort;
   log?: Function;
-  noOutputWatchdog?: {initialDelayMs?: number, intervalMs?: number} | boolean;
+  noOutputWatchdog?: {initialDelayMs?: number, intervalMs?: number, maxNoOutputMs?: number} | boolean;
   launchAgentFn?: Function;
   assertAgentSupportedFn?: Function;
   /**
@@ -420,7 +420,7 @@ type StartAgentLoopDeps = {
   slug: string | null;
   role: string | null;
   env: Record<string, string>;
-  noOutputWatchdog: { initialDelayMs?: number; intervalMs?: number } | boolean;
+  noOutputWatchdog: { initialDelayMs?: number; intervalMs?: number; maxNoOutputMs?: number } | boolean;
   unrefChild: boolean;
   allowUnsandboxedMutation: boolean;
   refuseFallbackWhenPinned: (_detail: string) => void;
@@ -805,6 +805,15 @@ type LaunchVerdict = { kind: 'continue' } | { kind: 'return'; invocation: any; r
  */
 async function classifyLaunchOutcome(state: StartAgentLoopState, deps: StartAgentLoopDeps, chosen: string, invocation: any, result: any): Promise<LaunchVerdict> {
   const { log } = deps;
+  if (result?.error?.code === 'NO_OUTPUT_TIMEOUT') {
+    deps.refuseFallbackWhenPinned('reviewer produced no output before configured liveness deadline');
+    log(fmt.status('WARN', `No output from ${fmt.agent(chosen)} before the configured liveness deadline; rerouting without block.`));
+    state.agentErrors.set(chosen, { exitInfo: 'stalled', stderr: result.stderr, stdout: result.stdout });
+    state.tried.add(chosen);
+    state.launched.add(chosen);
+    state.chosen = undefined;
+    return { kind: 'continue' };
+  }
   // Pass exit metadata so detectLimitHit only treats matching transcript text
   // as a real limit hit when the launcher actually failed. A successful run
   // (status === 0) that happens to contain limit-hit phrases — for example,
@@ -823,7 +832,11 @@ async function classifyLaunchOutcome(state: StartAgentLoopState, deps: StartAgen
     // Reroute signal: transient limit (e.g. qwen rate-limit) — exclude from
     // current retry cycle without persisting a long block to blocklist.
     if (limitHit.reroute) {
-      log(fmt.status('WARN', `Transient limit for ${fmt.agent(chosen)}; ${limitHit.reason}. Rerouting without block.`));
+      const label = limitHit.kind === 'entitlement' ? 'Model entitlement failure' : 'Transient limit';
+      const action = limitHit.kind === 'entitlement'
+        ? `Check the configured Qwen model and account entitlement, then retry.`
+        : 'Rerouting without block.';
+      log(fmt.status('WARN', `${label} for ${fmt.agent(chosen)}; ${limitHit.reason}. ${action}`));
       state.tried.add(chosen);
       state.chosen = undefined;
       return { kind: 'continue' };

@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "frozenAt": "2026-09-29",
+  "controlRevision": "a1f5f058ad78f42827cbedc3eb3a0f48558984f3",
+  "purpose": "Bounded mechanism trial; no ten-client throughput or adoption claim",
+  "commands": {
+    "build": "npm run build",
+    "static": "./scripts/verify-local.sh static-analysis",
+    "unit": "PARALLIX_TEST_COVERAGE=1 npm test -- --unit-test-headroom",
+    "integrationCi": "PARALLIX_TEST_COVERAGE=1 npm run test:integration:ci:prebuilt"
+  },
+  "scenarios": [
+    "clean tree: direct, Nx cache bypass, cold Nx, warm Nx",
+    "relevant source edit: build must miss",
+    "lockfile edit: build must miss",
+    "restored artifact: delete build output and repeat warm Nx",
+    "failed command and cancellation: failed/incomplete output must not be cached",
+    "dirty tree: Nx cache must be bypassed"
+  ],
+  "acceptance": "Expand only after a separate ten-mission replay proves at least 50% less total verification CPU per completed candidate, with fresh trust gates and unchanged coverage."
+}

@@ -877,6 +877,29 @@ function dismissApproval(branch: string, token: string, decidedAt: string, reaso
 }
 
 /**
+ * Dismiss every standing approval on a mission pull request through the review
+ * dismissal API (TASK-2620). The caller acts as the dedicated `parallix` login:
+ * no review is posted as another login and no finding is written.
+ */
+function dismissStandingApprovals(branch: string, token: string, reason: string, options: any = {}) {
+  const { apiCall = forgejoApi, forgejoUser, rootDir = process.cwd() } = options;
+  const slugMatch = branch.match(/^mission\/(task-\d+)/);
+  const access = resolvePrAccess(branch, token, { apiCall, slug: slugMatch?.[1] ?? null, forgejoUser, rootDir });
+  if (!access || isApiErrorResult(access)) { return { ok: false, dismissed: [], errors: ['pr-not-found'] }; }
+  const reviews = apiCall('GET', `/pulls/${access.prNumber}/reviews`, access.token);
+  if (!reviews.ok || !Array.isArray(reviews.data)) { return { ok: false, dismissed: [], errors: ['reviews-unavailable'] }; }
+  const dismissed: string[] = [];
+  const errors: string[] = [];
+  for (const review of reviews.data.filter((entry: any) => entry.state === 'APPROVED' && !entry.dismissed && entry.id)) {
+    const login = review.user?.login ?? `review ${review.id}`;
+    const result = apiCall('POST', `/pulls/${access.prNumber}/reviews/${review.id}/dismissals`, access.token, { message: reason });
+    if (result.ok) { dismissed.push(login); }
+    else { errors.push(`dismissing ${login}'s approval failed (HTTP ${result.statusCode ?? result.status ?? 'n/a'})`); }
+  }
+  return { ok: errors.length === 0, dismissed, errors };
+}
+
+/**
  * Retrieve all comments (issue, review, and inline) for a given branch.
  *
  * @param {string} branch  - Mission branch
@@ -1040,7 +1063,7 @@ export { authenticatedReviewUrl };
 export { reviewRemoteUrl };
 export { getLatestReview };
 export { getLatestReviewForPr };
-export { dismissApproval };
+export { dismissApproval, dismissStandingApprovals };
 export { getLatestReviewDecision };
 export { getLatestDisposition };
 export { getLatestDispositionForPr };

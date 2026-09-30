@@ -6,6 +6,7 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import { mockModule, installModuleMocks } from './lib/module-mock.js';
+import { mkdtemp as registeredMkdtemp } from './helpers/temp-dir.js';
 
 const config = mockModule<typeof import('../src/adapters/cli/commands/config.js')>('../src/adapters/cli/commands/config.js', import.meta.url);
 const status = mockModule<typeof import('../src/adapters/cli/commands/status.js')>('../src/adapters/cli/commands/status.js', import.meta.url);
@@ -13,7 +14,7 @@ await installModuleMocks();
 test.afterEach(() => mock.restoreAll());
 
 function withTempConfig(config: unknown, run: (_root: string) => void): void {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'task-2500.01-cli-'));
+  const root = registeredMkdtemp('task-2500.01-cli-');
   try {
     if (config !== null) {
       fs.writeFileSync(path.join(root, 'workflow.config.json'), JSON.stringify(config));

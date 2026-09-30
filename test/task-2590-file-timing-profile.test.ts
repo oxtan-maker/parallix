@@ -10,6 +10,7 @@ import type { TestEvent } from 'node:test/reporters';
 import { buildTestRunPlan, withCoverageReporters, withFileTimingReporter } from './lib/test-run-plan.js';
 import { resolveFileTimingProfile, printFileTimingSummary, profileTierOf } from './lib/file-timing-profile.js';
 import fileTimingReporter, { isFileCompletion, summarizeFileTimings, PROFILE_TIER_ENV } from './lib/file-timing-reporter.js';
+import { mkdtemp as registeredMkdtemp } from './helpers/temp-dir.js';
 
 const root = path.join(import.meta.dirname, '..');
 
@@ -67,7 +68,7 @@ test('task-2590: enabled profiling appends one balanced reporter pair for every 
 });
 
 test('task-2590: resolveFileTimingProfile names the tier and a destination under the execution root', () => {
-  const executionRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'px-2590-profile-'));
+  const executionRoot = registeredMkdtemp('px-2590-profile-');
   try {
     const profile = resolveFileTimingProfile({
       executionRoot,
@@ -122,7 +123,7 @@ test('task-2590: reporter emits JSON Lines records and a duration-sorted summary
   assert.deepEqual(records[2].files.map((entry: { file: string }) => entry.file), [path.join('test', 'slow.test.ts'), path.join('test', 'fast.test.ts')]);
   assert.equal(records[2].sumDurationMs, 4580.2);
 
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'px-2590-summary-'));
+  const dir = registeredMkdtemp('px-2590-summary-');
   try {
     const destination = path.join(dir, 'p.jsonl');
     fs.writeFileSync(destination, lines.join(''));

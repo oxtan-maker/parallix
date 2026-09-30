@@ -14,6 +14,7 @@ import { declaredGates } from '../../domain/mission-gates.js';
 import { successCriteria } from '../../domain/mission-success-criteria.js';
 import { missionDependencies } from '../../domain/mission-dependencies.js';
 import type { KnownRepository, RepositoryId } from '../../domain/repository.js';
+import type { ReviewerDecision } from '../../domain/review.js';
 import type { SqliteDatabaseAdapter } from './database-adapter.js';
 import { SqliteBoardLaneEventRepository } from './board-lane-event-repository.js';
 import {
@@ -201,7 +202,8 @@ export class SqliteMissionStore implements MissionStore, MissionNelRecorder {
                   provider_change_id, provider_url, source_branch, target_branch,
                   revision, reviewer, implementer, started_at, decision_kind,
                   decided_at, decision_comment, approval_source_kind,
-                  approval_source_provider, revoked_at, revoked_by, revoked_reason, responded_at, resulting_revision,
+                  approval_source_provider, revoked_at, revoked_by, revoked_reason, revoked_cause, revoked_gate, revoked_gate_command, revoked_gate_log,
+                  superseded_at, superseding_revision, superseded_by, responded_at, resulting_revision,
                   phase, disposition, reviewer_retry_count, implementer_retry_count,
                   implementer_response_content, item_dispositions, blocked_reason
            FROM mission_review_rounds WHERE mission_id = ? ORDER BY position`,
@@ -661,10 +663,11 @@ export class SqliteMissionStore implements MissionStore, MissionNelRecorder {
             provider_change_id, provider_url, source_branch, target_branch,
             revision, reviewer, implementer, started_at, decision_kind,
             decided_at, decision_comment, approval_source_kind,
-            approval_source_provider, revoked_at, revoked_by, revoked_reason, responded_at, resulting_revision,
+            approval_source_provider, revoked_at, revoked_by, revoked_reason, revoked_cause, revoked_gate, revoked_gate_command, revoked_gate_log,
+                  superseded_at, superseding_revision, superseded_by, responded_at, resulting_revision,
             phase, disposition, reviewer_retry_count, implementer_retry_count,
             implementer_response_content, item_dispositions, blocked_reason)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           missionId,
           roundPosition,
@@ -687,6 +690,11 @@ export class SqliteMissionStore implements MissionStore, MissionNelRecorder {
           decision?.kind === 'approved' ? decision.revocation?.revokedAt ?? null : null,
           decision?.kind === 'approved' ? decision.revocation?.revokedBy ?? null : null,
           decision?.kind === 'approved' ? decision.revocation?.reason ?? null : null,
+          decision?.kind === 'approved' ? decision.revocation?.cause?.kind ?? null : null,
+          ...gateFailureColumns(decision),
+          decision?.kind === 'approved' ? decision.supersession?.supersededAt ?? null : null,
+          decision?.kind === 'approved' ? decision.supersession?.supersedingRevision ?? null : null,
+          decision?.kind === 'approved' ? decision.supersession?.recordedBy ?? null : null,
           round.response?.respondedAt ?? null,
           round.response?.resultingRevision ?? null,
           round.phase,
@@ -734,4 +742,11 @@ export class SqliteMissionStore implements MissionStore, MissionNelRecorder {
         }
       }
   }
+}
+
+/** The red integration gate recorded on a withdrawn approval, as its three columns. */
+function gateFailureColumns(decision: ReviewerDecision | null): [string | null, string | null, string | null] {
+  const cause = decision?.kind === 'approved' ? decision.revocation?.cause : undefined;
+  if (cause?.kind !== 'integration-gate-failure') { return [null, null, null]; }
+  return [cause.gate, cause.command ?? null, cause.log ?? null];
 }

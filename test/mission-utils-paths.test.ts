@@ -8,6 +8,7 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import { mockModule, installModuleMocks } from './lib/module-mock.js';
+import { mkdtemp as registeredMkdtemp } from './helpers/temp-dir.js';
 const git = mockModule<typeof import('../src/adapters/git/git.js')>('../src/adapters/git/git.js', import.meta.url);
 mockModule<typeof import('../src/adapters/filesystem/mission-paths.js')>('../src/adapters/filesystem/mission-paths.js', import.meta.url);
 const __mm1 = mockModule<typeof import('../src/adapters/filesystem/mission-utils.js')>('../src/adapters/filesystem/mission-utils.js', import.meta.url);
@@ -30,7 +31,7 @@ const FAKE_ROOT = '/tmp/mission';
 
 function withTempRepo(fn) {
   const previous = process.cwd();
-  const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'workflow-mission-utils-')));
+  const root = fs.realpathSync(registeredMkdtemp('workflow-mission-utils-'));
   process.chdir(root);
   fs.writeFileSync(path.join(root, 'workflow.config.json'), JSON.stringify({
     adapters: { missions: { baseDir: 'docs/missions' } },
@@ -167,7 +168,7 @@ test('findMissionDir and getMissionYear handle year rollover and prior-year miss
 });
 
 test('missionDirForSlug and missionPathForSlug honor configured year-tier mission paths', () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'workflow-mission-path-'));
+  const root = registeredMkdtemp('workflow-mission-path-');
   try {
     fs.writeFileSync(path.join(root, 'workflow.config.json'), JSON.stringify({
       adapters: {

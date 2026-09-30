@@ -7,6 +7,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { mockModule, installModuleMocks } from './lib/module-mock.js';
+import { mkdtemp as registeredMkdtemp } from './helpers/temp-dir.js';
 const detectAreasFromChangedFilesModule = mockModule<typeof import('../src/adapters/verification/verification.js')>('../src/adapters/verification/verification.js', import.meta.url);
 const runPreReviewGateModule = mockModule<typeof import('../src/adapters/review/review-loop.js')>('../src/adapters/review/review-loop.js', import.meta.url);
 await installModuleMocks();
@@ -34,7 +35,7 @@ test('detectMissionChangedArea selects the strict all area for mixed-area diffs'
 });
 
 test('runPreReviewGate runs the diff-scoped resolver and executes its selected area', async () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'task-1268-area-'));
+  const root = registeredMkdtemp('task-1268-area-');
   try {
     const missionDir = path.join(root, 'missions', 'task-1268');
     fs.mkdirSync(missionDir, { recursive: true });

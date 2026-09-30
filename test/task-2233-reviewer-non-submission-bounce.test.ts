@@ -23,6 +23,7 @@ import { mockModule, installModuleMocks } from './lib/module-mock.js';
 // review-polling is not patched here, so import it directly: POLL_TIMEOUT is an
 // identity sentinel and must be the very object review-loop compares against.
 import { POLL_TIMEOUT, isPollTimeout } from '../src/adapters/review/review-polling.js';
+import { mkdtemp as registeredMkdtemp } from './helpers/temp-dir.js';
 const startReviewLoopModule = mockModule<typeof import('../src/adapters/review/review-loop.js')>('../src/adapters/review/review-loop.js', import.meta.url);
 await installModuleMocks();
 test.afterEach(() => mock.restoreAll());
@@ -31,7 +32,7 @@ const { startReviewLoop } = startReviewLoopModule;
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
 function createWorktree() {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'task-2233-'));
+  const root = registeredMkdtemp('task-2233-');
   fs.writeFileSync(
     path.join(root, 'workflow.config.json'),
     JSON.stringify({

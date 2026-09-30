@@ -7,6 +7,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { graphifyAvailable, probeGraphifyAvailability, updateGraphifyKnowledgeGraph, resolveGraphPath, queryGraph, } from '../src/adapters/filesystem/mission-utils.js';
+import { mkdtemp as registeredMkdtemp } from './helpers/temp-dir.js';
 test('probeGraphifyAvailability and graphifyAvailable distinguish missing commands from probe failures', () => {
   const missing = probeGraphifyAvailability({
     commandRunner: () => {
@@ -32,8 +33,8 @@ test('probeGraphifyAvailability and graphifyAvailable distinguish missing comman
 });
 
 test('updateGraphifyKnowledgeGraph logs missing graph, missing command, probe-failed, update-failed, and success outcomes', () => {
-  const graphRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'graphify-update-test-'));
-  const emptyRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'graphify-empty-test-'));
+  const graphRoot = registeredMkdtemp('graphify-update-test-');
+  const emptyRoot = registeredMkdtemp('graphify-empty-test-');
   fs.mkdirSync(path.join(graphRoot, 'graphify-out'), { recursive: true });
   fs.writeFileSync(path.join(graphRoot, 'graphify-out', 'graph.json'), '{}\n');
   const logs = [];
@@ -101,8 +102,8 @@ test('updateGraphifyKnowledgeGraph logs missing graph, missing command, probe-fa
 // ---------- resolveGraphPath (task-2297: active-worktree anchoring) ----------
 
 test('resolveGraphPath returns absolute path when graph exists, null when absent', () => {
-  const graphRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'graphify-resolve-'));
-  const emptyRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'graphify-resolve-empty-'));
+  const graphRoot = registeredMkdtemp('graphify-resolve-');
+  const emptyRoot = registeredMkdtemp('graphify-resolve-empty-');
   fs.mkdirSync(path.join(graphRoot, 'graphify-out'), { recursive: true });
   fs.writeFileSync(path.join(graphRoot, 'graphify-out', 'graph.json'), '{}\n');
 
@@ -121,7 +122,7 @@ test('resolveGraphPath returns absolute path when graph exists, null when absent
 // ---------- queryGraph (task-2297: actionable missing-graph handling) ----------
 
 test('queryGraph returns missing-graph when graph.json is absent', () => {
-  const emptyRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'graphify-query-empty-'));
+  const emptyRoot = registeredMkdtemp('graphify-query-empty-');
   const logs = [];
   const result = queryGraph({
     question: 'test',
@@ -136,7 +137,7 @@ test('queryGraph returns missing-graph when graph.json is absent', () => {
 });
 
 test('queryGraph passes --graph with absolute path anchored to active worktree', () => {
-  const graphRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'graphify-query-anchored-'));
+  const graphRoot = registeredMkdtemp('graphify-query-anchored-');
   fs.mkdirSync(path.join(graphRoot, 'graphify-out'), { recursive: true });
   fs.writeFileSync(path.join(graphRoot, 'graphify-out', 'graph.json'), '{}\n');
 

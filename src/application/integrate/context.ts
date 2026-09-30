@@ -119,8 +119,7 @@ export function createIntegrationContextBuilder(ports: IntegrateWorkflowPorts) {
       taskAssignee,
       forgejoUser: forgejoState.forgejoIdentity.forgejoUser,
       forgejoToken: forgejoState.forgejoToken,
-      // The login whose provider APPROVED counts as the reviewer's; carried so
-      // a stale approval can be retracted as that same login (TASK-2528).
+      // The login whose provider APPROVED counts as the reviewer's.
       configuredReviewer: forgejoState.configuredReviewer,
       taskAssigneeWarning: forgejoState.forgejoIdentity.warning,
       pr: forgejoState.pr,

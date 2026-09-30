@@ -642,6 +642,16 @@ test('a typed-verb Mission cannot hand off while a success criterion has no row 
   const covered = await new HandoffCommandUseCase(makePorts(coveredRecorder, contractServices(load(['the greeting is fixed']))))
     .performHandoff(SLUG, runOptions(coveredRecorder));
   assert.match(covered.error ?? '', /no recorded verification gate/, 'every criterion was evidenced, so handoff moved on to the gates');
+
+  // A row copied from the numbered `px status` list still names its criterion.
+  const numberedRecorder = makeRecorder();
+  const numbered = await new HandoffCommandUseCase(makePorts(numberedRecorder, contractServices(async () => ({
+    ...(await load(['The greeting is fixed'])()),
+    mission: { ...(await load(['The greeting is fixed'])()).mission,
+      checkpoints: [{ name: 'CP-1', goalCheck: [{ criterion: '1. The greeting is fixed', evidence: '`test/handoff-use-case.test.ts`' }], nextAction: 'review' }] },
+  }))))
+    .performHandoff(SLUG, runOptions(numberedRecorder));
+  assert.match(numbered.error ?? '', /no recorded verification gate/, 'the list number is not part of the criterion');
 });
 
 test('a typed-verb Mission whose recorded evidence cites nothing verifiable is sent back to the implementer', async () => {

@@ -9,6 +9,7 @@ import {
   roundTrip,
   type TaskRecord,
 } from './helpers/task-2284-catalog-round-trip.js';
+import { mkdtemp as registeredMkdtemp } from './helpers/temp-dir.js';
 
 const root = process.cwd();
 
@@ -66,7 +67,7 @@ const FIXTURE = [
 ].join('\n');
 
 function withTempCopies(files: readonly string[], run: (_copies: readonly string[]) => void): void {
-  const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'task-2284-round-trip-')));
+  const dir = fs.realpathSync(registeredMkdtemp('task-2284-round-trip-'));
   try {
     const copies = files.map((relative, index) => {
       const target = path.join(dir, `${index}-${path.basename(relative)}`);

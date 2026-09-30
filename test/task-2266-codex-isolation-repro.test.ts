@@ -4,15 +4,16 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { mockModule, installModuleMocks } from './lib/module-mock.js';
+import { mkdtemp as registeredMkdtemp } from './helpers/temp-dir.js';
 
 const codexModule = mockModule<typeof import('../src/adapters/agents/codex.js')>('../src/adapters/agents/codex.js', import.meta.url);
 await installModuleMocks();
 test.afterEach(() => mock.restoreAll());
 
 test('codex launch keeps the operator HOME when caller env supplies a worktree HOME', () => {
-  const operatorHome = fs.mkdtempSync(path.join(os.tmpdir(), 'task-2266-operator-home-'));
-  const callerHome = fs.mkdtempSync(path.join(os.tmpdir(), 'task-2266-caller-home-'));
-  const worktree = fs.mkdtempSync(path.join(os.tmpdir(), 'task-2266-worktree-'));
+  const operatorHome = registeredMkdtemp('task-2266-operator-home-');
+  const callerHome = registeredMkdtemp('task-2266-caller-home-');
+  const worktree = registeredMkdtemp('task-2266-worktree-');
   const originalHome = process.env.HOME;
 
   try {
@@ -48,9 +49,9 @@ test('codex launch keeps the operator HOME when caller env supplies a worktree H
 });
 
 test('Codex bootstrap reads operator state from process HOME when caller env supplies HOME', () => {
-  const operatorHome = fs.mkdtempSync(path.join(os.tmpdir(), 'task-2266-bootstrap-operator-home-'));
-  const callerHome = fs.mkdtempSync(path.join(os.tmpdir(), 'task-2266-bootstrap-caller-home-'));
-  const worktree = fs.mkdtempSync(path.join(os.tmpdir(), 'task-2266-bootstrap-worktree-'));
+  const operatorHome = registeredMkdtemp('task-2266-bootstrap-operator-home-');
+  const callerHome = registeredMkdtemp('task-2266-bootstrap-caller-home-');
+  const worktree = registeredMkdtemp('task-2266-bootstrap-worktree-');
   const originalHome = process.env.HOME;
   const originalCodexHome = process.env.CODEX_HOME;
 

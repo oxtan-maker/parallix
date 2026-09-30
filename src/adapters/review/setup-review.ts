@@ -1,4 +1,5 @@
 import * as fs from 'fs';
+import { randomBytes } from 'node:crypto';
 import * as path from 'path';
 import * as readline from 'readline';
 import _cp from 'child_process';
@@ -6,8 +7,8 @@ import * as fmt from '../../application/presentation/cli-format.js';
 import { loadWorkflowConfig, resolveReviewAdapter } from '../config/product-config.js';
 import { resolveForgejoSettings, reviewRemoteUrl } from '../forgejo/forgejo.js';
 import ensureWorkflowGitignore from '../filesystem/gitignore.js';
-import { PASSWORD_PROMPT_OPTIONS, apiRequest, buildTokenName, createToken, createTokenWithRetries, normalizeBaseUrl, parseRepoSlug, passwordPrompt, resolveBootstrapForgejoHome, tokenCreateViaOwnerToken, tokenFilePath, unique, writeToken } from './setup-review-auth.js';
-import { ensureForgejoUser, ensureRepo, ensureRepoCollaborators, ensureReviewRemote, readConfiguredReviewRemote, suggestedForgejoUsers } from './setup-review-repository.js';
+import { PASSWORD_PROMPT_OPTIONS, SETUP_OWNER_TOKEN_SCOPES, apiRequest, buildTokenName, createToken, createTokenWithRetries, normalizeBaseUrl, parseRepoSlug, passwordPrompt, resolveBootstrapForgejoHome, tokenCreateViaOwnerToken, tokenFilePath, unique, writeToken } from './setup-review-auth.js';
+import { ensureForgejoUser, ensureRepo, ensureRepoCollaborator, ensureRepoCollaborators, ensureReviewRemote, PARALLIX_FORGEJO_USER, readConfiguredReviewRemote, suggestedForgejoUsers } from './setup-review-repository.js';
 import { buildWorkflowConfig, evaluateReviewSetup, standardLayoutDescription, writeWorkflowConfig } from './setup-review-config.js';
 
 const { spawnSync } = _cp;
@@ -84,7 +85,7 @@ async function bootstrapAgentToken(setup: any, baseUrl: string, agent: any, forg
 /** Mint the owner token, then one token per configured agent, prompting as needed. */
 async function bootstrapInteractiveTokens(setup: any, baseUrl: string, forgejoHome: string, options: any) {
   const { log, promptFn, requestFn, maxPasswordAttempts } = options;
-  const owner = await createTokenWithRetries({ ...setup, baseUrl }, setup.ownerLogin, setup.ownerPassword, { allowBlank: false, log, promptFn, maxAttempts: maxPasswordAttempts, requestFn });
+  const owner = await createTokenWithRetries({ ...setup, baseUrl }, setup.ownerLogin, setup.ownerPassword, { allowBlank: false, log, promptFn, maxAttempts: maxPasswordAttempts, requestFn, scopes: SETUP_OWNER_TOKEN_SCOPES });
   if (!owner.ok) { return owner; }
   const ownerToken = (owner as any).token as string;
   const createdTokens: any[] = [{ user: setup.ownerLogin, path: writeToken(setup.ownerLogin, ownerToken, forgejoHome) }];
@@ -108,7 +109,7 @@ function readBootstrapOwnerToken(setup: any, forgejoHome: string) {
 
 /** Report what the bootstrap created, granted, wrote and skipped. */
 function logBootstrapOutcome(setup: any, log: Function, facts: { repoCreated: boolean | undefined; grantedCollaborators: string[]; createdTokens: any[]; warnings: any[]; remoteName: string; remoteUrl: string }): void {
-  if (facts.grantedCollaborators.length) { log(fmt.status('PASS', `Granted write access on ${setup.repo} to ${facts.grantedCollaborators.join(', ')}`)); }
+  if (facts.grantedCollaborators.length) { log(fmt.status('PASS', `Granted access on ${setup.repo} to ${facts.grantedCollaborators.join(', ')}`)); }
   log(fmt.status('PASS', `Forgejo repo ${setup.repo} ${facts.repoCreated ? 'created' : 'already exists'}.`));
   for (const token of facts.createdTokens) { log(fmt.status('PASS', `Wrote Forgejo token for ${token.user} to ${token.path}`)); }
   for (const warning of facts.warnings) {
@@ -135,10 +136,23 @@ export async function bootstrapReviewSurface(rootDir: string, setup: any, option
   const createdTokens: any[] = bootstrapped.createdTokens || [];
   const warnings: any[] = bootstrapped.warnings || [];
 
+  if (!interactive) {
+    for (const user of collaborators) {
+      const account = ensureForgejoUser(baseUrl, user, setup.ownerLogin, '', randomBytes(32).toString('base64url'), requestFn, { ownerToken });
+      if (!account.ok) { return account; }
+      if (account.created) { log(fmt.status('PASS', `Created Forgejo user ${user}.`)); }
+    }
+  }
+
   const repo = ensureRepo(baseUrl, setup.repo, setup.ownerLogin, ownerToken, requestFn);
   if (!repo.ok) { return repo; }
-  const collaboratorResult = ensureRepoCollaborators(baseUrl, setup.repo, ownerToken, collaborators, 'write', requestFn);
+  const collaboratorResult = ensureRepoCollaborators(baseUrl, setup.repo, ownerToken, collaborators.filter((user) => user !== PARALLIX_FORGEJO_USER), 'write', requestFn);
   if (!collaboratorResult.ok) { return collaboratorResult; }
+  if (collaborators.includes(PARALLIX_FORGEJO_USER)) {
+    const parallix = ensureRepoCollaborator(baseUrl, setup.repo, ownerToken, PARALLIX_FORGEJO_USER, 'admin', requestFn);
+    if (!parallix.ok) { return parallix; }
+    if (parallix.created) { collaboratorResult.created.push(`${PARALLIX_FORGEJO_USER} (admin)`); }
+  }
 
   if (!interactive) {
     const tokens = tokenCreateViaOwnerToken(baseUrl, setup.repo, ownerToken, setup.agentPasswords, repoInfo, { requestFn, writeTokenFn: writeToken, forgejoHome });

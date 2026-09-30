@@ -7,6 +7,7 @@ import os from 'node:os';
 import path from 'node:path';
 
 import { parseVibeMeta, extractVibeTelemetry, getVibeProviderModel, } from '../src/adapters/agents/vibe-telemetry.js';
+import { mkdtemp as registeredMkdtemp } from './helpers/temp-dir.js';
 // ---------- parseVibeMeta ----------
 
 // Sample meta.json content for fixture-backed tests.
@@ -107,7 +108,7 @@ test('parseVibeMeta coerces string-like numbers gracefully', () => {
 // ---------- extractVibeTelemetry ----------
 
 test('extractVibeTelemetry returns null for empty session directory', () => {
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'vibe-empty-'));
+  const tmp = registeredMkdtemp('vibe-empty-');
   try {
     assert.equal(extractVibeTelemetry(null, tmp), null);
   } finally {
@@ -116,7 +117,7 @@ test('extractVibeTelemetry returns null for empty session directory', () => {
 });
 
 test('extractVibeTelemetry returns null when no sessions exist', () => {
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'vibe-nosess-'));
+  const tmp = registeredMkdtemp('vibe-nosess-');
   try {
     assert.equal(extractVibeTelemetry(null, tmp), null);
   } finally {
@@ -125,7 +126,7 @@ test('extractVibeTelemetry returns null when no sessions exist', () => {
 });
 
 test('extractVibeTelemetry parses the most recent session meta.json', () => {
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'vibe-fix-'));
+  const tmp = registeredMkdtemp('vibe-fix-');
   try {
     // Create two sessions; older one first.
     const oldDir = path.join(tmp, 'session_20260601_100000_aaaaaaaa');
@@ -159,7 +160,7 @@ test('extractVibeTelemetry parses the most recent session meta.json', () => {
 });
 
 test('extractVibeTelemetry skips sessions without meta.json', () => {
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'vibe-nometa-'));
+  const tmp = registeredMkdtemp('vibe-nometa-');
   try {
     const dir = path.join(tmp, 'session_20260701_171711_ccdddddd');
     fs.mkdirSync(dir, { recursive: true });
@@ -173,7 +174,7 @@ test('extractVibeTelemetry skips sessions without meta.json', () => {
 });
 
 test('extractVibeTelemetry skips corrupt meta.json', () => {
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'vibe-corrupt-'));
+  const tmp = registeredMkdtemp('vibe-corrupt-');
   try {
     const dir = path.join(tmp, 'session_20260701_171711_eefffff');
     fs.mkdirSync(dir, { recursive: true });
@@ -186,7 +187,7 @@ test('extractVibeTelemetry skips corrupt meta.json', () => {
 });
 
 test('extractVibeTelemetry skips session with all-zero stats', () => {
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'vibe-zero-'));
+  const tmp = registeredMkdtemp('vibe-zero-');
   try {
     const dir = path.join(tmp, 'session_20260701_171711_gggggggg');
     fs.mkdirSync(dir, { recursive: true });
@@ -200,7 +201,7 @@ test('extractVibeTelemetry skips session with all-zero stats', () => {
 });
 
 test('extractVibeTelemetry picks valid session when newer one has zero stats', () => {
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'vibe-zeronew-'));
+  const tmp = registeredMkdtemp('vibe-zeronew-');
   try {
     const oldDir = path.join(tmp, 'session_20260601_100000_hhhhhhhh');
     const newDir = path.join(tmp, 'session_20260701_171711_iiiiiiii');

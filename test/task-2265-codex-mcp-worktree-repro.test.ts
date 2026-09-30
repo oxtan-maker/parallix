@@ -4,10 +4,11 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import * as codex from '../src/adapters/agents/codex.js';
+import { mkdtemp as registeredMkdtemp } from './helpers/temp-dir.js';
 
 test('mission Codex launcher retains the originating CODEX_HOME MCP configuration without copying it', async () => {
-  const parentCodexHome = fs.mkdtempSync(path.join(os.tmpdir(), 'task-2265-parent-codex-home-'));
-  const worktree = fs.mkdtempSync(path.join(os.tmpdir(), 'task-2265-worktree-'));
+  const parentCodexHome = registeredMkdtemp('task-2265-parent-codex-home-');
+  const worktree = registeredMkdtemp('task-2265-worktree-');
   const originalCodexHome = process.env.CODEX_HOME;
   let launchedInvocation;
 
@@ -44,8 +45,8 @@ test('mission Codex launcher retains the originating CODEX_HOME MCP configuratio
 });
 
 test('mission Codex launcher completes when optional CODEX_HOME MCP configuration is absent', async () => {
-  const originatingCodexHome = fs.mkdtempSync(path.join(os.tmpdir(), 'task-2265-no-mcp-origin-'));
-  const worktree = fs.mkdtempSync(path.join(os.tmpdir(), 'task-2265-no-mcp-worktree-'));
+  const originatingCodexHome = registeredMkdtemp('task-2265-no-mcp-origin-');
+  const worktree = registeredMkdtemp('task-2265-no-mcp-worktree-');
   let launchedInvocation;
 
   try {
@@ -74,9 +75,9 @@ test('mission Codex launcher completes when optional CODEX_HOME MCP configuratio
 });
 
 test('mission bootstrap removes stale configuration links when a repeated launch has no optional input', () => {
-  const configuredOrigin = fs.mkdtempSync(path.join(os.tmpdir(), 'task-2265-configured-origin-'));
-  const absentOrigin = fs.mkdtempSync(path.join(os.tmpdir(), 'task-2265-absent-origin-'));
-  const worktree = fs.mkdtempSync(path.join(os.tmpdir(), 'task-2265-repeat-worktree-'));
+  const configuredOrigin = registeredMkdtemp('task-2265-configured-origin-');
+  const absentOrigin = registeredMkdtemp('task-2265-absent-origin-');
+  const worktree = registeredMkdtemp('task-2265-repeat-worktree-');
 
   try {
     fs.writeFileSync(path.join(configuredOrigin, 'config.toml'), '[mcp_servers.slack]\n', 'utf8');
@@ -98,9 +99,9 @@ test('mission bootstrap removes stale configuration links when a repeated launch
 });
 
 test('concurrent mission launches isolate Codex session state while linking one originating config', () => {
-  const parentCodexHome = fs.mkdtempSync(path.join(os.tmpdir(), 'task-2265-shared-config-'));
-  const firstWorktree = fs.mkdtempSync(path.join(os.tmpdir(), 'task-2265-first-worktree-'));
-  const secondWorktree = fs.mkdtempSync(path.join(os.tmpdir(), 'task-2265-second-worktree-'));
+  const parentCodexHome = registeredMkdtemp('task-2265-shared-config-');
+  const firstWorktree = registeredMkdtemp('task-2265-first-worktree-');
+  const secondWorktree = registeredMkdtemp('task-2265-second-worktree-');
   const originalCodexHome = process.env.CODEX_HOME;
 
   try {
@@ -124,9 +125,9 @@ test('concurrent mission launches isolate Codex session state while linking one 
 });
 
 test('mission bootstrap retains the installed Graphify skill seed', () => {
-  const operatorHome = fs.mkdtempSync(path.join(os.tmpdir(), 'task-2265-graphify-home-'));
-  const originatingCodexHome = fs.mkdtempSync(path.join(os.tmpdir(), 'task-2265-graphify-codex-home-'));
-  const worktree = fs.mkdtempSync(path.join(os.tmpdir(), 'task-2265-graphify-worktree-'));
+  const operatorHome = registeredMkdtemp('task-2265-graphify-home-');
+  const originatingCodexHome = registeredMkdtemp('task-2265-graphify-codex-home-');
+  const worktree = registeredMkdtemp('task-2265-graphify-worktree-');
   const originalHome = process.env.HOME;
 
   try {

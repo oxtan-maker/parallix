@@ -18,12 +18,13 @@ import {
   resolveIntegrationMode,
   validateWorkflowConfig,
 } from '../src/adapters/config/product-config.js';
+import { mkdtemp as registeredMkdtemp } from './helpers/temp-dir.js';
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const schemaPath = path.join(repoRoot, 'config', 'workflow.config.schema.json');
 
 function withConfig(config: unknown | null, run: (_root: string) => void): void {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'task-2500.01-integration-mode-'));
+  const root = registeredMkdtemp('task-2500.01-integration-mode-');
   try {
     if (config !== null) {
       fs.writeFileSync(path.join(root, 'workflow.config.json'), JSON.stringify(config));

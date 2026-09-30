@@ -3,6 +3,7 @@ import { missionId } from '../domain/mission.js';
 import type { ReviewWorkflowContext, ReviewWorkflowPort } from './ports/review-workflow.js';
 import {
   NO_CURRENT_WORK_PORT,
+  isNestedWorkPublisher,
   reviewLoopPublisher,
   type CurrentWorkPhase,
   type CurrentWorkPort,
@@ -65,16 +66,24 @@ export class ReviewCommandUseCase {
     const phase = PUBLISHED_PHASES[operation];
     if (!phase) { await this._workflow[operation](context); return; }
 
-    const publication = {
+    // A review run inside an outer operation (`px integrate`'s re-review)
+    // publishes under that operation and hands the board back to it, whatever
+    // the outcome, because the outer process is still working the mission.
+    const nested = isNestedWorkPublisher(context.options.nestedWork) ? context.options.nestedWork : null;
+    const summary = `px review --${operation} ${context.slug}`;
+    const publication = nested?.parent ?? {
       missionId: missionId(context.slug),
       operationId: `review:${context.slug}:${randomUUID()}`,
       phase,
-      summary: `px review --${operation} ${context.slug}`,
+      summary,
       agent: null,
     };
-    await bestEffort(() => this._currentWork.running(publication));
+    if (nested) { await nested.running(phase, `${summary} (inside ${nested.parent.summary})`); }
+    else { await bestEffort(() => this._currentWork.running(publication)); }
+    const exits = exitRecorder(context.options);
     const options = {
       ...context.options,
+      ...exits.options,
       ...reviewLoopPublisher(this._currentWork, {
         slug: context.slug,
         operationId: publication.operationId,
@@ -83,12 +92,36 @@ export class ReviewCommandUseCase {
     try {
       await this._workflow[operation]({ ...context, options });
     } catch (error) {
+      if (nested) { await nested.resume(); throw error; }
       const reason = error instanceof Error ? error.message : 'review operation cannot continue autonomously';
       await bestEffort(() => this._currentWork.blocked(publication, reason));
       throw error;
     }
+    if (nested) { await nested.resume(); return; }
+    // An injected exit that does not terminate the process still reports a
+    // failure: it is published as one, never as a finished review.
+    const failed = exits.failure();
+    if (failed !== null) {
+      await bestEffort(() => this._currentWork.blocked(publication, `${summary} exited with status ${failed}`));
+      return;
+    }
     await bestEffort(() => this._currentWork.ended(publication));
   }
+}
+
+/** Observe the exit codes an injected, non-terminating exit reports. */
+function exitRecorder(options: Record<string, unknown>) {
+  let code: number | null = null;
+  const observed: Record<string, unknown> = {};
+  for (const key of ['exit', 'exitFn'] as const) {
+    const exit = options[key];
+    if (typeof exit !== 'function') { continue; }
+    observed[key] = (value?: number) => {
+      if (value) { code = value; }
+      return (exit as (_code?: number) => unknown)(value);
+    };
+  }
+  return { options: observed, failure: () => code };
 }
 
 async function bestEffort(publish: () => Promise<void>): Promise<void> {

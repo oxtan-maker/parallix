@@ -21,6 +21,7 @@ const statsCommand = createStatsCommand(
   new StatsCommandUseCase(createStatsWorkflowAdapter({} as never)),
 );
 import { ADR0053_PERSISTENCE_INVENTORY } from './fixtures/durable-state-inventory';
+import { mkdtemp as registeredMkdtemp } from './helpers/temp-dir.js';
 /**
  * TASK-2322.08 CP-4: prove no UNCLASSIFIED `stats.csv` read or write survives.
  *
@@ -102,7 +103,7 @@ test('the ADR 0053 inventory has no stats CSV compatibility boundary', () => {
 });
 
 test('px stats fails with the database error instead of reading a CSV when the store is unavailable', () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'px-stats-dbfail-'));
+  const dir = registeredMkdtemp('px-stats-dbfail-');
   const dbPath = path.join(dir, 'parallix.db');
   // The database path is a directory: it cannot be opened.
   fs.mkdirSync(dbPath);
@@ -136,7 +137,7 @@ test('px stats fails with the database error instead of reading a CSV when the s
 });
 
 test('a recorded measurement survives a full store restart and is still reported by px stats', () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'px-stats-restart-'));
+  const dir = registeredMkdtemp('px-stats-restart-');
   const dbPath = path.join(dir, 'parallix.db');
   try {
     stats.upsertMeasurementRow(
@@ -173,7 +174,7 @@ test('a recorded measurement survives a full store restart and is still reported
 });
 
 test('concurrent measurement updates through the command layer retain every required record', () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'px-stats-concurrent-'));
+  const dir = registeredMkdtemp('px-stats-concurrent-');
   const dbPath = path.join(dir, 'parallix.db');
   // Two independent store handles stand in for two runtime processes writing
   // the same database file.

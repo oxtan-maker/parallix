@@ -3,6 +3,7 @@ import { latestEvidencedCheckpoint } from '../../domain/checkpoint.js';
 import { isClosedMission, type Mission, type MissionId, type MissionLabel, type MissionStatus } from '../../domain/mission.js';
 import type { RepositoryId } from '../../domain/repository.js';
 import type { RunningAgentSession } from './agent-status.js';
+import type { ApprovalCoverage } from '../../domain/approval-coverage.js';
 import {
   currentReviewRound,
   reviewApprovalOwed,
@@ -77,6 +78,8 @@ export interface MissionOperationalFacts {
   readonly currentWork: LiveMissionWork | null;
   readonly blockingReason: string | null;
   readonly flags: readonly string[];
+  /** Whether the effective approval still covers the branch (TASK-2555); absent when not observed. */
+  readonly approvalCoverage?: ApprovalCoverage | null;
 }
 
 export interface CommandAvailability {
@@ -124,6 +127,11 @@ export interface MissionCard {
   /** An approved local self-review still needs a formal provider approval. */
   readonly approvalOwed?: boolean;
   /**
+   * Whether the effective approval still covers what the branch would land,
+   * null when there is no effective approval or it was not observed.
+   */
+  readonly approvalCoverage?: ApprovalCoverage | null;
+  /**
    * Every round so far, oldest first.
    *
    * A reviewer is not guaranteed to be the agent family that reviewed the
@@ -161,6 +169,8 @@ export interface ReviewRoundSummary {
   readonly fixes: readonly string[];
   /** Operator withdrawal of this round's approval, if any. */
   readonly revocation?: { readonly by: string; readonly reason: string; readonly at: string };
+  /** A branch move after this round's approval: the revision that superseded it. */
+  readonly supersession?: { readonly revision: string; readonly by: string; readonly at: string };
 }
 
 function outcomeComment(content: string): string | null {
@@ -258,6 +268,9 @@ export function projectReviewHistory(review: Review | null): readonly ReviewRoun
             .map((d) => String(d.findingId)),
       ...(round.decision?.kind === 'approved' && round.decision.revocation
         ? { revocation: { by: round.decision.revocation.revokedBy, reason: round.decision.revocation.reason, at: round.decision.revocation.revokedAt } }
+        : {}),
+      ...(round.decision?.kind === 'approved' && round.decision.supersession
+        ? { supersession: { revision: round.decision.supersession.supersedingRevision, by: round.decision.supersession.recordedBy, at: round.decision.supersession.supersededAt } }
         : {}),
     };
   });
@@ -374,11 +387,16 @@ export function projectMissionCard(mission: Mission, facts: MissionOperationalFa
     reviewPhase: currentRound?.phase ?? null,
     reviewDisposition: currentRound?.disposition ?? null,
     approvalOwed: reviewApprovalOwed(mission.review),
+    approvalCoverage: facts.approvalCoverage ?? null,
     reviewHistory: projectReviewHistory(mission.review),
     currentWork: facts.currentWork,
     liveSession: facts.liveSession,
     blockingReason: facts.blockingReason,
-    flags: facts.flags,
+    // The board renders flags on the card, so a stale approval is visible there
+    // before anyone reaches the integration gate.
+    flags: facts.approvalCoverage?.kind === 'stale'
+      ? [...facts.flags, `approval no longer covers the branch (round ${facts.approvalCoverage.round})`]
+      : facts.flags,
     commands: availableBoardCommands(mission, facts),
   };
 }

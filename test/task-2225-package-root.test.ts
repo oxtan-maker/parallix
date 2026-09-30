@@ -15,6 +15,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { mockModule, installModuleMocks } from './lib/module-mock.js';
+import { mkdtemp as registeredMkdtemp } from './helpers/temp-dir.js';
 const packageRootModule = mockModule<typeof import('../src/adapters/filesystem/package-root.js')>('../src/adapters/filesystem/package-root.js', import.meta.url);
 const reviewPrompts = mockModule<typeof import('../src/adapters/review/review-prompts.js')>('../src/adapters/review/review-prompts.js', import.meta.url);
 const draft = mockModule<typeof import('../src/adapters/cli/commands/draft.js')>('../src/adapters/cli/commands/draft.js', import.meta.url);
@@ -39,7 +40,7 @@ function readPkgName(root) {
 // restoring the original CWD (and cleaning up) afterwards.
 function withTempCwd(fn) {
   const original = process.cwd();
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'px-t2225-'));
+  const tmp = registeredMkdtemp('px-t2225-');
   try {
     process.chdir(tmp);
     return fn(tmp);
@@ -51,7 +52,7 @@ function withTempCwd(fn) {
 
 async function withTempCwdAsync(fn) {
   const original = process.cwd();
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'px-t2225-'));
+  const tmp = registeredMkdtemp('px-t2225-');
   try {
     process.chdir(tmp);
     return await fn(tmp);

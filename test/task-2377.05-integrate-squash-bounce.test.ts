@@ -35,6 +35,7 @@ import type { Mission, MissionStatus } from '../src/domain/mission.js';
 import { missionId } from '../src/domain/mission.js';
 import { repositoryId } from '../src/domain/repository.js';
 import type { MissionVersion } from '../src/application/domain-ports.js';
+import { mkdtemp as registeredMkdtemp } from './helpers/temp-dir.js';
 
 const SLUG = 'task-2377.05-squash';
 const LANDED_SHA = 'a11ced0000000000000000000000000000000001';
@@ -96,7 +97,7 @@ interface Scenario {
 }
 
 async function runIntegrate(scenario: Scenario) {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'parallix-2377-'));
+  const root = registeredMkdtemp('parallix-2377-');
   fs.mkdirSync(path.join(root, 'backlog', 'tasks'), { recursive: true });
   fs.writeFileSync(path.join(root, 'workflow.config.json'), JSON.stringify({ adapters: { verification: { command: 'true' } } }));
   const taskFile = path.join(root, 'backlog', 'tasks', 'task.md');

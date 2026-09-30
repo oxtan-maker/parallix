@@ -21,6 +21,7 @@ import os from 'os';
 import path from 'path';
 
 import { printIntegrationPreflight, buildIntegrationContext } from '../src/adapters/cli/commands/integrate.js';
+import { mkdtemp as registeredMkdtemp } from './helpers/temp-dir.js';
 // TASK-2479: the preflight classification detail is demoted to DEBUG so the
 // default happy path stays concise. The checks are unchanged, so these
 // regression locks ask for the detail explicitly to keep coverage of the
@@ -36,7 +37,7 @@ function withDebug(fn) {
 }
 
 function withTempBaseWorktree(fn) {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'task-1431-base-'));
+  const root = registeredMkdtemp('task-1431-base-');
   try {
     fs.mkdirSync(path.join(root, 'backlog', 'tasks'), { recursive: true });
     fn(root);

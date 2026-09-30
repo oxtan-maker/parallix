@@ -1,0 +1,24 @@
+{
+  "purpose": "Covered unit-suite parallelism probe; preserve four isolated workers as the baseline and do not adopt the experimental shared-process partition",
+  "date": "2026-09-29",
+  "revision": "c7b5e2210",
+  "profile": "Node 26.10.0, existing unit tier selection, TypeScript bootstrap, CPU test hook, Node LCOV reporter, /usr/bin/time user+system CPU",
+  "population": { "unitFiles": 396, "tests": 3086, "experimentalSharedFiles": 278, "isolatedFiles": 118 },
+  "coveredIsolatedPartition": [
+    { "workers": 4, "testsPassed": 1003, "cpuSeconds": 214.51, "wallSeconds": 48.71 },
+    { "workers": 6, "testsPassed": 1003, "cpuSeconds": 244.58, "wallSeconds": 39.51 },
+    { "workers": 8, "testsPassed": 1003, "cpuSeconds": 267.66, "wallSeconds": 34.36 }
+  ],
+  "experimentalPartitionOverlap": [
+    { "isolatedWorkers": 4, "sharedProcessParallel": true, "testsPassed": 3086, "cpuSeconds": 240.69, "wallSeconds": 50.41 },
+    { "isolatedWorkers": 6, "sharedProcessParallel": true, "testsPassed": 3086, "cpuSeconds": 268.95, "wallSeconds": 40.39 }
+  ],
+  "control": "Previous direct covered sequential partition used about 233.05 CPU seconds and 65.14 wall seconds for the same test counts; the four-worker overlap saved about 23% wall time for about 3% more CPU. The fully isolated authoritative suite remains at four workers and previously measured 645.49 CPU seconds/139.99 wall seconds.",
+  "decision": "Keep four isolated workers. The overlap is the best measured CPU/wall compromise but depends on the unadopted shared-process partition, whose coverage and home/module isolation differ. Raising isolated workers to six or eight adds 14% or 25% CPU for this partition, costly under concurrent missions.",
+  "rawLocalLogs": "tmp/nx-evaluation/parallel-*.log and parallel-*.time (ignored workspace files)",
+  "rawLogSha256": {
+    "isolated4": "d6e3e06ef22b52b18e4c3a80f70b7ef9fdb260c68662a12f5615acc4a914602e",
+    "isolated6": "a612ca961b91e8faf409d4216deec91919e9b539fb9321eb747f93d793327cc7",
+    "isolated8": "26038cb6b0c4b9348e1a6ffb04d59f1d034e862e6a1314c8e97c9dba20528cb0"
+  }
+}

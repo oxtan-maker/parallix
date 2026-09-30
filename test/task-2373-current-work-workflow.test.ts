@@ -266,7 +266,10 @@ test('SC7: a delayed current-work publication lands before the next state is rea
   const slowRecorder = new CurrentWorkRecorder(repo, { processId: 7 });
   const delayed = {
     async running(publication: Parameters<CurrentWorkRecorder['running']>[0]) {
-      await new Promise((resolve) => setTimeout(resolve, 5));
+      // Defer to the next event-loop turn so a missing await remains visible,
+      // without a fixed timer delay. A resolved promise can complete before
+      // the caller observes the board even when publication is not awaited.
+      await new Promise<void>((resolve) => setImmediate(resolve));
       await slowRecorder.running(publication);
     },
     blocked: slowRecorder.blocked.bind(slowRecorder),

@@ -5,6 +5,7 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import { mockModule, installModuleMocks } from './lib/module-mock.js';
+import { mkdtemp } from './helpers/temp-dir.js';
 import { createRequire } from 'node:module';
 import { classifyError } from '../src/application/failure-classification.js';
 const _require = createRequire(import.meta.url);
@@ -2186,6 +2187,55 @@ test('px active opens with the mission identity and drops preflight/launch narra
   assert.equal(logs[0], 'Mission task-2476: fix hello world greeting');
   assert.ok(!output.includes('Running execute preflight'), output);
   assert.ok(!output.includes('Launching execute agent'), output);
+});
+
+// --- TASK-2606: the headline names the Mission exactly as `px status` does ---
+
+const { createStatusBoardFor, statusMissionTitle } = await import('../src/composition/status-board.js');
+
+function statusServices(recordedTitle: string, cardTitle: string | null) {
+  const mission = {
+    id: 'task-2606', title: recordedTitle, status: 'active', assignee: 'claude', checkpoints: [],
+    brief: null, declaredGates: [], successCriteria: [], dependencies: [], externalTaskRef: null, closedAt: null,
+  };
+  return {
+    presentationCapabilities: {
+      boardProjection: { buildMissionCard: async () => (cardTitle === null ? null : { id: 'task-2606', title: cardTitle, status: 'active', currentWork: null, blockingReason: null }) },
+    },
+    mission: { store: { load: async () => ({ kind: 'found', mission, version: 1 }) } },
+  } as never;
+}
+
+async function activeHeadlineAndStatusTitle(services: never) {
+  const rootDir = mkdtemp('task-2606-active-');
+  try {
+    const logs: string[] = [];
+    await active(['task-2606'], {
+      inferSlugFn: () => 'task-2606',
+      rootDir,
+      missionTitleFn: (slug: string) => statusMissionTitle(services, slug, rootDir),
+      serviceFactory: async () => ({ execute: async () => ({ status: 'completed', value: { agent: 'claude' }, durableEvidence: [] }) }),
+      exitFn: (code: number) => { throw new Error(`unexpected exit ${code}`); },
+      logFn: (message: string) => logs.push(message),
+      errorFn: (message: string) => { throw new Error(`unexpected error: ${message}`); },
+    });
+    const status = await createStatusBoardFor(services).getMissionData('task-2606', rootDir);
+    return { headline: logs[0], statusTitle: status?.title };
+  } finally {
+    fs.rmSync(rootDir, { recursive: true, force: true });
+  }
+}
+
+test('px active headline prefers the task-card title, as px status does', async () => {
+  const { headline, statusTitle } = await activeHeadlineAndStatusTitle(statusServices('Recorded title (task-2606)', 'Card title (task-2606)'));
+  assert.equal(statusTitle, 'Card title (task-2606)');
+  assert.equal(headline, 'Mission task-2606: Card title');
+});
+
+test('px active headline falls back to the recorded Mission title when no task card exists, as px status does', async () => {
+  const { headline, statusTitle } = await activeHeadlineAndStatusTitle(statusServices('Recorded title (task-2606)', null));
+  assert.equal(statusTitle, 'Recorded title (task-2606)');
+  assert.equal(headline, 'Mission task-2606: Recorded title');
 });
 
 test('px active states implementation completion rather than handoff mechanics', () => {

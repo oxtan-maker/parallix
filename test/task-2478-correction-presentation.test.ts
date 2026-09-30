@@ -1,8 +1,5 @@
 import test, { mock } from 'node:test';
 import assert from 'node:assert/strict';
-import fs from 'fs';
-import os from 'os';
-import path from 'path';
 import { mockModule, installModuleMocks } from './lib/module-mock.js';
 const startReviewLoopModule = mockModule<typeof import('../src/adapters/review/review-loop.js')>('../src/adapters/review/review-loop.js', import.meta.url);
 await installModuleMocks();
@@ -21,7 +18,7 @@ function requestChangesDeps(
   opts: { logs?: string[]; errors?: string[]; launches?: string[] },
 ): any {
   return {
-    worktree: fs.mkdtempSync(path.join(os.tmpdir(), 'task-2478-corr-')),
+    worktree: '/virtual/task-2478-worktree',
     maxAttempts: 1,
     verbose: false,
     maybeUpdateGraphifyBeforeReviewFn: () => {},

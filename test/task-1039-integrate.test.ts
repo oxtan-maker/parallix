@@ -6,6 +6,7 @@ import os from 'os';
 import path from 'path';
 import { mockModule, installModuleMocks } from './lib/module-mock.js';
 import { createRequire } from 'node:module';
+import { mkdtemp as registeredMkdtemp } from './helpers/temp-dir.js';
 const _require = createRequire(import.meta.url);
 const gitModule = mockModule<typeof import('../src/adapters/git/git.js')>('../src/adapters/git/git.js', import.meta.url);
 const missionUtilsModule = mockModule<typeof import('../src/adapters/filesystem/mission-utils.js')>('../src/adapters/filesystem/mission-utils.js', import.meta.url);
@@ -244,7 +245,7 @@ test('resolveConflictsForMission - shared vs mission-specific classification', (
 // that neither the failing-gate test nor the repro tests exercise.
 test('integrate fails closed when no pre-integration gates are configured', async (t) => {
   setupMocks();
-  const checkout = fs.mkdtempSync(path.join(os.tmpdir(), 'px-integ-empty-'));
+  const checkout = registeredMkdtemp('px-integ-empty-');
   try {
     fs.writeFileSync(
       path.join(checkout, 'workflow.config.json'),
@@ -294,7 +295,7 @@ test('integrate fails closed when no pre-integration gates are configured', asyn
 // first success criterion guarantees; the F9 test above is the opt-in opposite.
 test('integrate proceeds without a gate when the repository does not opt into requirePreIntegration', async (t) => {
   setupMocks();
-  const checkout = fs.mkdtempSync(path.join(os.tmpdir(), 'px-integ-uncfg-'));
+  const checkout = registeredMkdtemp('px-integ-uncfg-');
   try {
     fs.writeFileSync(
       path.join(checkout, 'workflow.config.json'),
@@ -343,7 +344,7 @@ test('integrate proceeds without a gate when the repository does not opt into re
 // checkout it ran from; the real merge never happens.
 test('integrate aborts before merge when a pre-integration gate fails', async (t) => {
   setupMocks();
-  const checkout = fs.mkdtempSync(path.join(os.tmpdir(), 'px-integ-gate-'));
+  const checkout = registeredMkdtemp('px-integ-gate-');
   try {
     fs.writeFileSync(
       path.join(checkout, 'workflow.config.json'),

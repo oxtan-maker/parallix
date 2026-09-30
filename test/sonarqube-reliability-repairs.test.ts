@@ -9,6 +9,7 @@ import { slugifyDraftIntent } from '../src/adapters/cli/commands/draft-setup.js'
 import { parseAssigneeFamilies } from '../src/adapters/backlog/task-metadata.js';
 import { replaceTaskAssignees } from '../src/adapters/backlog/task-transitions.js';
 import { normalizeVerifyArea } from '../src/adapters/filesystem/mission-paths.js';
+import { mkdtemp as registeredMkdtemp } from './helpers/temp-dir.js';
 
 // Regression guards for the non-sort half of the 2026-09-16 SonarQube
 // reliability baseline: S6324 (control characters in regex literals), S5850
@@ -59,7 +60,7 @@ test('parseAssigneeFamilies strips leading and trailing quotes only', () => {
 });
 
 test('replaceTaskAssignees rewrites a block field without consuming the next frontmatter field', () => {
-  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'parallix-sonar-'));
+  const directory = registeredMkdtemp('parallix-sonar-');
   const task = path.join(directory, 'task.md');
   fs.writeFileSync(task, 'id: task-1\r\nassignee:\r\n\r\n  - claude\r\nstatus: active\r\n');
   assert.equal(replaceTaskAssignees(task, ['codex', 'claude']), true);

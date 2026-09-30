@@ -1,43 +1,45 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import unitTestBudgetReporter, { onGitHubActions } from './lib/unit-test-budget-reporter.mjs';
 import { buildTestRunPlan } from './lib/test-run-plan.js';
+import { UNIT_TEST_BUDGET_MS, UNIT_TEST_HEADROOM_MS } from './lib/unit-test-budget-reporter.mjs';
 
-test('TASK-2423: headroom mode reports 501ms work while preserving the 1000ms hard cap', { skip: onGitHubActions() }, async () => {
-  async function* events() {
-    for (const [name, duration_ms] of [['headroom work', 501], ['hard-cap work', 1001]] as const) {
-      yield {
-        type: 'test:pass' as const,
-        data: {
-          name, nesting: 0, testNumber: 1,
-          details: { duration_ms, type: 'test' as const },
-          file: 'task-2423-repro.test.ts', line: 1, column: 1,
-        },
-      };
-    }
-  }
+const BUDGET_REPORTER_PATH = 'unit-test-budget-reporter.mjs';
 
-  const priorHeadroom = process.env.PARALLIX_UNIT_TEST_HEADROOM;
-  process.env.PARALLIX_UNIT_TEST_HEADROOM = '1';
+function withGitHubActions<T>(github: boolean, callback: () => T): T {
+  const previous = process.env.GITHUB_ACTIONS;
+  if (github) process.env.GITHUB_ACTIONS = 'true'; else delete process.env.GITHUB_ACTIONS;
   try {
-    let output = '';
-    for await (const chunk of unitTestBudgetReporter(events())) { output += chunk; }
-    assert.match(output, /\[unit-test-budget:headroom\] headroom work: 501ms > 500ms/);
-    assert.match(output, /\[unit-test-budget:exceeded\] hard-cap work: 1001ms > 1000ms/);
+    return callback();
   } finally {
-    if (priorHeadroom === undefined) { delete process.env.PARALLIX_UNIT_TEST_HEADROOM; }
-    else { process.env.PARALLIX_UNIT_TEST_HEADROOM = priorHeadroom; }
+    if (previous === undefined) delete process.env.GITHUB_ACTIONS;
+    else process.env.GITHUB_ACTIONS = previous;
   }
+}
+
+test('TASK-2423: GitHub default plan omits the unit-test budget reporter', () => {
+  const plan = withGitHubActions(true, () => buildTestRunPlan({
+    executionRoot: process.cwd(),
+    requestedArgs: [],
+    probeNodeVersion: () => 'v24.15.0',
+  }));
+
+  assert.ok(!plan.nodeArgs.some(arg => arg.includes(BUDGET_REPORTER_PATH)));
 });
 
-test('TASK-2423: headroom mode keeps the per-test reporter without changing the default plan', () => {
-  const options = {
-    executionRoot: process.cwd(),
-    probeNodeVersion: () => 'v24.15.0',
-  };
-  const defaultPlan = buildTestRunPlan({ ...options, requestedArgs: [] });
-  const headroomPlan = buildTestRunPlan({ ...options, requestedArgs: ['--unit-test-headroom'] });
+test('TASK-2423: headroom remains an opt-in per-test CPU bound', () => {
+  const { defaultPlan, headroomPlan } = withGitHubActions(false, () => {
+    const options = { executionRoot: process.cwd(), probeNodeVersion: () => 'v24.15.0' };
+    return {
+      defaultPlan: buildTestRunPlan({ ...options, requestedArgs: [] }),
+      headroomPlan: buildTestRunPlan({ ...options, requestedArgs: ['--unit-test-headroom'] }),
+    };
+  });
 
-  assert.ok(defaultPlan.nodeArgs.some(arg => arg.includes('unit-test-budget-reporter.mjs')));
-  assert.equal(headroomPlan.unitTestHeadroomMs, 500);
+  assert.equal(UNIT_TEST_BUDGET_MS, 1_000);
+  assert.equal(defaultPlan.unitTestHeadroomMs, null);
+  assert.equal(headroomPlan.unitTestHeadroomMs, UNIT_TEST_HEADROOM_MS);
+  assert.ok(defaultPlan.nodeArgs.some(arg => arg.includes('cpu-test-hook.mjs')));
+  assert.ok(headroomPlan.nodeArgs.some(arg => arg.includes('cpu-test-hook.mjs')));
+  assert.ok(defaultPlan.nodeArgs.some(arg => arg.includes(BUDGET_REPORTER_PATH)));
+  assert.ok(headroomPlan.nodeArgs.some(arg => arg.includes(BUDGET_REPORTER_PATH)));
 });

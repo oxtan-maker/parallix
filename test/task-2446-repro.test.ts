@@ -10,6 +10,7 @@ import { missionId } from '../src/domain/mission.js';
 import { SqliteDatabaseAdapter } from '../src/adapters/sqlite/database-adapter.js';
 import { SqliteMigrationRunner, loadDefaultMigrations } from '../src/adapters/sqlite/migration-runner.js';
 import { SqliteMissionStore } from '../src/adapters/sqlite/mission-store.js';
+import { mkdtemp as registeredMkdtemp } from './helpers/temp-dir.js';
 
 test('TASK-2438-shaped active task and closed aggregate reports supported recovery and resumes active', async () => {
   const events: Array<{ from: string | null; to: string; trigger: string }> = [];
@@ -140,7 +141,7 @@ test('recovery reports a stale lifecycle write as a conflict', async () => {
 });
 
 test('TASK-2438 durable fixture persists recovery and its lane-history record', async () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'task-2446-'));
+  const dir = registeredMkdtemp('task-2446-');
   const database = new SqliteDatabaseAdapter();
   try {
     await database.open({ path: path.join(dir, 'operator.db') });

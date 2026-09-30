@@ -10,9 +10,10 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 
 import * as tm from '../src/adapters/backlog/task-metadata.js';
+import { mkdtemp as registeredMkdtemp } from './helpers/temp-dir.js';
 
 function writeTask(body: string): string {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-'));
+  const dir = registeredMkdtemp('tm-');
   const file = path.join(dir, 'task-1.md');
   fs.writeFileSync(file, body);
   return file;

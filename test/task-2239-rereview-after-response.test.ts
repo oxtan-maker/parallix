@@ -4,9 +4,10 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { startReviewLoop } from '../src/adapters/review/review-loop.js';
+import { mkdtemp as registeredMkdtemp } from './helpers/temp-dir.js';
 
 function reviewLoopHarness(overrides: Record<string, unknown> = {}) {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'task-2239-rereview-'));
+  const root = registeredMkdtemp('task-2239-rereview-');
   fs.writeFileSync(path.join(root, 'workflow.config.json'), JSON.stringify({ adapters: { review: { provider: 'none' } } }));
   const launches: Array<{ step: string; agent: string }> = [];
   const writes: Array<{ round: number; phase: string; disposition: string; metadata: Record<string, unknown> }> = [];

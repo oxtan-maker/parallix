@@ -52,6 +52,7 @@ import {
   collectGoalCheckEvidenceRows,
   findUnverifiableGoalCheckRow,
 } from './static-evidence.js';
+import { bookkeepingCommitMessage } from '../domain/approval-coverage.js';
 
 /**
  * Read the recorded Mission contract handoff verifies: checkpoint evidence and
@@ -260,7 +261,7 @@ export class HandoffCommandUseCase {
       return false;
     }
 
-    const commitResult = git.git(['commit', '-m', `backlog(${slug}): set fallback summary`]);
+    const commitResult = git.git(['commit', '-m', bookkeepingCommitMessage(`backlog(${slug}): set fallback summary`, 'backlog-mirror')]);
     if (commitResult.status !== 0) {
       log(fmt.status('WARN', `Failed to commit fallback summary for ${fmt.slug(slug)}`));
       return false;
@@ -953,7 +954,9 @@ export class HandoffCommandUseCase {
       // The final checkpoint evidences every success criterion, one row named
       // after each; without this the criteria would only be advice.
       const named = (text: string) => text.trim().replace(/\s+/g, ' ').toLowerCase();
-      const evidenced = new Set(latest.goalCheck.map((row) => named(row.criterion)));
+      // `px status` numbers the criteria it lists; a row copied with that list
+      // number still names the criterion.
+      const evidenced = new Set(latest.goalCheck.map((row) => named(row.criterion.trim().replace(/^\d+\.\s+/, ''))));
       const unevidenced = contract.successCriteria.filter((criterion) => !evidenced.has(named(criterion)));
       if (unevidenced.length > 0) {
         const msg = `Success-criterion evidence is missing before handoff in ${latest.name}: ${unevidenced.map((criterion) => `"${criterion}"`).join(', ')}. Re-record ${latest.name} with \`px checkpoint record\`, one --criterion per success criterion, named exactly as \`px status\` reports it.`;
@@ -1284,6 +1287,21 @@ export class HandoffCommandUseCase {
       selectAgentFn,
       log,
     });
+    // AC11: capture the commit hash the branch is headed to. A review subject
+    // is a git commit hash, never a placeholder, so an approval of A covers A
+    // (plus whitelisted bookkeeping) and a moved branch is provably stale.
+    const reviewHeadSha = (() => {
+      try {
+        const head = ports.git.git(['-C', rootDir, 'rev-parse', 'HEAD']);
+        if (head.status === 0 && head.stdout?.trim()) { return head.stdout.trim(); }
+      } catch { /* Report a failed revision capture below. */ }
+      return null;
+    })();
+    if (!reviewHeadSha) {
+      const msg = `Cannot capture the HEAD commit for ${slug}; repair the Git checkout and retry handoff before starting review.`;
+      error(msg);
+      return { ok: false, error: msg };
+    }
     // A mission that already carries a Review is handing back a later round of
     // the same change, not starting a new review. Restarting it would submit
     // round 1 against a recorded round N and the workflow would reject the
@@ -1297,6 +1315,9 @@ export class HandoffCommandUseCase {
     // A review with no round carries no change identity to advance, so it is
     // treated as no review at all rather than read for a current round.
     const priorReview = loadedReview && loadedReview.rounds?.length > 0 ? loadedReview : null;
+    // AC11: the review subject records the git commit hash the branch is headed
+    // to, never a placeholder. Capture it once here so a fresh review round and
+    // any later correction bind to the same commit identity.
     const startedAt = occurredAt;
     let reviewForHandoff = priorReview;
     if (reviewForHandoff && reviewStatus(reviewForHandoff) === 'awaiting-implementation') {
@@ -1326,7 +1347,7 @@ export class HandoffCommandUseCase {
             sourceBranch: branch,
             targetBranch,
           },
-        revision: changeRevision(`handoff-${Date.now()}`),
+        revision: changeRevision(reviewHeadSha),
       }, reviewer, implementer, startedAt, reviewerEligibility);
     // Repair invalidation has already opened an undecided round. Bind it to
     // the committed repair only when handoff's gates have passed, retaining

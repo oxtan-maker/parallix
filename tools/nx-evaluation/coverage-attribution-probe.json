@@ -1,0 +1,35 @@
+{
+  "purpose": "Diagnose whether the historical isolated/shared LCOV difference proves different execution",
+  "date": "2026-09-29",
+  "revision": "dcb15e434",
+  "runtime": "Node 26.10.0, buildTestRunPlan unit coverage argv, native LCOV reporter, tsx, source maps, include-all, bootstrap, CPU hook",
+  "files": [
+    "test/verification-helpers.test.ts",
+    "test/task-1268-diff-scoped-area.test.ts"
+  ],
+  "probe": {
+    "singleFile": {
+      "file": "test/verification-helpers.test.ts",
+      "processIsolation": { "passed": 12, "line158Hits": 3 },
+      "sharedProcess": { "passed": 12, "line158Hits": 3 },
+      "rawLcovByteIdentical": true
+    },
+    "twoFiles": {
+      "processIsolationFourWorkers": { "passed": 16, "line158Hits": 0 },
+      "processIsolationOneWorker": { "passed": 16, "line158Hits": 3 },
+      "sharedProcessFourWorkers": { "passed": 16, "line158Hits": 3 },
+      "reverseFileOrder": "Both modes again passed 16 tests; process isolation at four workers reported zero hits on line 158, shared process reported three",
+      "withoutNodeV8CoverageEnv": "Process isolation at four workers still reported zero hits on line 158"
+    },
+    "line": "src/adapters/verification/verification.ts:158, the body of resolveEffectiveArea, which passing verification-helpers tests call",
+    "interpretation": "The current native coverage path can report a zero-hit executable line for passing tests when two isolated files run concurrently. The probe does not identify whether Node, tsx/source maps, or their interaction causes the attribution error. It does not prove that sharing test files preserves state isolation."
+  },
+  "historicalTrialReanalysis": {
+    "sourceFilesInBothReports": 328,
+    "sameExecutableLineSet": true,
+    "coveredOnlyWithIsolation": 262,
+    "coveredOnlyWithSharing": 92,
+    "recomputedMergedLcovByteIdentical": true,
+    "interpretation": "The source inventory and line denominator did not change; the difference is in zero-versus-positive line hits. Recomputing safe plus unsafe fragments through mergeLcov, removeTypeOnlyCoverage, and removeNonExecutableCoverage reproduced the saved tuned report exactly. The attribution probe means the hit disagreement alone cannot establish different runtime paths."
+  }
+}

@@ -34,6 +34,7 @@ import type { BoardProjectionBuilder } from '../../../application/projections/bo
 import type { MissionId } from '../../../domain/mission.js';
 import { projectMissionActivity, type MissionActivitySource } from '../../../application/projections/mission-activity.js';
 import { latestEvidencedCheckpoint } from '../../../domain/checkpoint.js';
+import { latestIntegrationRepair } from '../../../application/integration-repair-review.js';
 
 function parseWorktreeList(porcelain: string) {
   const entries: { path: string; branch: string | null }[] = [];
@@ -196,6 +197,8 @@ export function createStatusBoardAdapter(options: {
           reviewRound: (card as any)?.reviewRound,
           reviewDisposition: (card as any)?.reviewDisposition,
           approvalOwed: (card as any)?.approvalOwed,
+          approvalCoverage: card?.approvalCoverage ?? null,
+          integrationRepair: recorded ? latestIntegrationRepair(recorded.mission) : null,
           reviewHistory: ((card as any)?.reviewHistory || []).map((r: any) => ({
             number: r.number,
             reviewer: r.reviewer,
@@ -206,6 +209,7 @@ export function createStatusBoardAdapter(options: {
             fixes: r.fixes || [],
             pushbacks: r.pushbacks || [],
             revocation: r.revocation ?? null,
+            supersession: r.supersession ?? null,
           })),
         };
       } catch { /* projection unavailable */ }

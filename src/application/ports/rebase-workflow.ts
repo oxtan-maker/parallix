@@ -154,6 +154,14 @@ export interface RebaseWorkflowPort {
   // --- integrate application contract (TASK-2332.07) --------------------
   resolveConflictsForMission(_slug: string, _area: string, _options: { worktreePathOverride?: string }): MissionConflictClassification;
 
+  // --- approval coverage (TASK-2555) ------------------------------------
+  /**
+   * Record that the completed rebase moved the branch away from the change its
+   * current approval covers. Returns an operator-facing line when there is
+   * something to report. Absent for callers that did not compose persistence.
+   */
+  recordBranchMove?: (_slug: string, _root: string, _movedFrom: string | null) => Promise<string | null>;
+
   // --- runtime seams -----------------------------------------------------
   /** Mission persistence services for the selected root; absent for callers that did not compose them. */
   missionServices?: ((_root: string) => Promise<{ store: unknown }>) | null;

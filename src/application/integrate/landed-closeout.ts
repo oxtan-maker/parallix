@@ -33,6 +33,11 @@ export async function completeLandedCloseout(options: {
   if (!legacyClosedRecovery?.skipStats) {
     await landing.recordPostIntegrationStatsOrAbort(slug, { rootDir: baseWorktree, missionStore: missionServices.store });
   }
+  // The landed payload is now durable, and this hook rebuilds and installs the
+  // repository's local px. It must not be contingent on cleanup: cleanup only
+  // removes delivery artifacts, while an integration that has already landed
+  // must still refresh the CLI even if those artifacts cannot be removed.
+  await landing.runPostIntegrateHookOrAbort(slug, { baseWorktree, baseBranch, variant });
   const cleanup = () => {
     if (!landing.cleanupMissionWorktree(slug)) {
       fmt.log.fail(`Mission worktree cleanup failed for ${slug}.`);
@@ -41,15 +46,6 @@ export async function completeLandedCloseout(options: {
     fmt.log.pass('Mission worktree cleaned up.');
     afterCleanup?.();
   };
-  // Old records already have closedAt, so their remaining branch/worktree is
-  // the durable retry marker. Keep it until the hook succeeds; new closeout
-  // keeps its established cleanup-then-hook order and closes afterward.
-  if (legacyClosedRecovery) {
-    await landing.runPostIntegrateHookOrAbort(slug, { baseWorktree, baseBranch, variant });
-    cleanup();
-  } else {
-    cleanup();
-    await landing.runPostIntegrateHookOrAbort(slug, { baseWorktree, baseBranch, variant });
-  }
+  cleanup();
   await landing.closeLandedIntegrationOrAbort(slug, landedCommit, missionServices);
 }

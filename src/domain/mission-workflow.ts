@@ -17,14 +17,24 @@ import {
   sameReviewedRevision,
   type ConfiguredReviewerEligibility,
   type Review,
+  type ReviewRevocationCause,
 } from './review.js';
+
+/** Why a mission returns to implementation; recorded on a withdrawn approval. */
+export type ReboundCause = Exclude<ReviewRevocationCause, { readonly kind: 'operator' }>;
+
+const REBOUND_REASONS: Record<ReboundCause['kind'], string> = {
+  'integration-gate-failure': 'Integration gates failed; the mission returned to implementation for repair.',
+  'review-repair': 'Review repair; the mission returned to implementation.',
+  'rebase-repair': 'Rebase repair; the mission returned to implementation.',
+};
 
 /** Names match the workflow operations that persist these transitions. */
 export type MissionCommand =
   | { readonly type: 'refine' }
   | { readonly type: 'activate'; readonly agent: AgentFamily }
   | { readonly type: 'abort-activation'; readonly assignee: AgentFamily | null }
-  | { readonly type: 'rebound-to-active'; readonly agent: AgentFamily; readonly occurredAt?: string }
+  | { readonly type: 'rebound-to-active'; readonly agent: AgentFamily; readonly cause: ReboundCause; readonly occurredAt?: string }
   | {
     readonly type: 'submit-for-review';
     readonly gatesPassed: boolean;
@@ -134,6 +144,26 @@ function requireSameReviewedRevision(mission: OpenMission, review: Review): void
   }
 }
 
+/**
+ * The revoked round keeps the approved subject, and the round it opens reviews
+ * either that subject or the revision a recorded branch move superseded it
+ * with — never a revision nobody recorded.
+ */
+function requireRevocationSubject(recorded: Review, revoked: Review): void {
+  const approved = currentReviewRound(recorded);
+  const withdrawn = revoked.rounds[revoked.rounds.length - 2];
+  const opened = currentReviewRound(revoked);
+  const superseding = withdrawn?.decision?.kind === 'approved' ? withdrawn.decision.supersession?.supersedingRevision : undefined;
+  if (
+    !withdrawn
+    || !sameReviewedRevision(approved.subject, withdrawn.subject)
+    || !sameReviewedChange(approved.subject.change, opened.subject.change)
+    || opened.subject.revision !== (superseding ?? approved.subject.revision)
+  ) {
+    throw new MissionRuleViolation('Review decision must preserve the exact reviewed revision');
+  }
+}
+
 type SubmitForReviewCommand = Extract<MissionCommand, { readonly type: 'submit-for-review' }>;
 
 function hasApprovedRecordedRound(mission: OpenMission): boolean {
@@ -227,7 +257,8 @@ export function decideMission(mission: Mission, command: MissionCommand): Missio
         ? revokeApprovedDecision(mission.review, currentReviewRound(mission.review).number, {
           revokedAt: command.occurredAt ?? '',
           revokedBy: 'workflow',
-          reason: 'Integration gates failed; the mission returned to implementation for repair.',
+          reason: REBOUND_REASONS[command.cause.kind],
+          cause: command.cause,
         })
         : mission.review,
     };
@@ -272,7 +303,7 @@ export function decideMission(mission: Mission, command: MissionCommand): Missio
     if (!mission.review || reviewStatus(mission.review) !== 'approved') {
       throw new MissionRuleViolation('Revocation requires a current effective approval');
     }
-    requireSameReviewedRevision(mission, command.review);
+    requireRevocationSubject(mission.review, command.review);
     if (reviewStatus(command.review) !== 'awaiting-review') {
       throw new MissionRuleViolation('Revocation must open an awaiting-review round');
     }

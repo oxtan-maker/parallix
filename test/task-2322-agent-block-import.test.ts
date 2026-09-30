@@ -5,6 +5,7 @@ import path from 'node:path';
 import test from 'node:test';
 
 import { SqliteImporter } from '../src/adapters/sqlite/importer.js';
+import { mkdtemp as registeredMkdtemp } from './helpers/temp-dir.js';
 
 type BlockRow = { agent: string; blocked: number; until?: string; reason?: string };
 
@@ -29,7 +30,7 @@ class MockDatabase {
 }
 
 function legacyFile(contents: unknown): { dir: string; file: string; original: string } {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'parallix-agent-block-import-'));
+  const dir = registeredMkdtemp('parallix-agent-block-import-');
   const file = path.join(dir, 'agents.local.json');
   const original = JSON.stringify(contents, null, 2);
   fs.writeFileSync(file, original);
