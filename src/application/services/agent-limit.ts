@@ -10,6 +10,7 @@ const PATTERN_SETS = Object.freeze({
     /you(?:'|')?ve hit your limit(?:\b|$)/i,
     /you(?:'|')?ve hit your (?:weekly|daily|monthly|usage) limit/i,
     /(?:usage|rate)\s*limit (?:has been )?(?:reached|exceeded)/i,
+    /you['’]?ve hit your session limit/i,
     /\b429\b[^\n]*?\b(?:rate|usage|quota)\b/i
   ],
   codex: [

@@ -245,6 +245,46 @@ describe('Limit-hit detection', () => {
     assert.ok(result.reason.startsWith('parsed:'));
   });
 
+  for (const apostrophe of ["'", '’']) {
+    test(`detectLimitHit classifies the Claude session limit with parsed reset (${apostrophe}) (TASK-2628)`, () => {
+      const now = new Date('2026-05-01T16:30:00+02:00');
+      const result = detectLimitHit({
+        agent: 'claude',
+        stdout: `You${apostrophe}ve hit your session limit · resets 6:20pm (Europe/Stockholm)`,
+        stderr: '',
+        status: 1,
+        signal: null,
+        error: null,
+        now
+      });
+
+      assert.ok(result);
+      assert.equal(result.source, 'parsed');
+      assert.equal(result.until, '2026-05-01 19');
+    });
+  }
+
+  test('parseResetTime parses the Claude session limit clock time to a future instant (TASK-2628)', () => {
+    const now = new Date('2026-05-01T16:30:00+02:00');
+    const result = parseResetTime("You've hit your session limit · resets 6:20pm (Europe/Stockholm)", now);
+    assert.ok(result instanceof Date);
+    assert.equal(result.getHours(), 18);
+    assert.equal(result.getMinutes(), 20);
+    assert.ok(result.getTime() > now.getTime(), 'parsed reset time must be in the future');
+  });
+
+  test('detectLimitHit ignores ordinary Claude output mentioning a session (TASK-2628)', () => {
+    const result = detectLimitHit({
+      agent: 'claude',
+      stdout: 'Starting a new session; your session limit settings are unchanged.',
+      stderr: '',
+      status: 1,
+      signal: null,
+      error: null
+    });
+    assert.equal(result, null);
+  });
+
   test('detectLimitHit returns reason for fallback source', () => {
     const result = detectLimitHit({
       agent: 'codex',

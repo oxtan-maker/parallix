@@ -1,8 +1,8 @@
 ---
 id: TASK-2628
 title: missing quota classification on claude
-status: backlog
-assignee: []
+status: done
+assignee: [claude]
 created_date: '2026-10-01 14:41'
 labels: []
 dependencies: []
