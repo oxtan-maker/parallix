@@ -185,6 +185,7 @@ export interface IntegrateGatesPort {
   captureFinalIntegrationTree(_rootDir: string): { ok: boolean; error?: string; rootDir?: string; commit?: string; tree?: string };
   resolveIntegrationVerificationWorktree(_slug: string, _options: { baseWorktree: string }): string;
   isIntendedPayloadAtHead(_rootDir: string, _paths: Iterable<string>, _options: { gitRunner: IntegrateGitRunner }): boolean;
+  runStagedTierGuards?(_rootDir: string): { ok: boolean; error?: string };
   routeIntegrationGateFailure(_options: any): Promise<IntegrationGateRoute>;
 }
 

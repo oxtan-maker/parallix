@@ -20,6 +20,7 @@ import childProcess from 'child_process';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
+import { initCommittedRepository } from './fixtures/git-repository.js';
 import { captureVerifiedTreeProof, isTransientVerificationFailure } from '../src/adapters/verification/verification.js';
 import { classifyReboundReason, rebound, type ReboundReason } from '../src/application/rebound-kernel.js';
 
@@ -28,26 +29,17 @@ function withTempDir(fn) {
   try { fn(dir); } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 }
 
+// A configured verification command so the gate actually runs the injected
+// runFn instead of no-op passing (mirrors workflow.config.json).
 function initCommittedGitRepo(root) {
-  const runGit = (args) => {
-    const result = childProcess.spawnSync('git', ['-C', root, ...args], { encoding: 'utf8' });
-    assert.equal(result.status, 0, result.stderr || result.stdout || `git ${args.join(' ')} failed`);
-  };
-  runGit(['init']);
-  runGit(['checkout', '-b', 'main']);
-  runGit(['config', 'user.name', 'Test User']);
-  runGit(['config', 'user.email', 'test@example.com']);
-  fs.writeFileSync(path.join(root, 'README.md'), '# temp repo\n', 'utf8');
-  // A configured verification command so the gate actually runs the injected
-  // runFn instead of no-op passing (mirrors workflow.config.json).
-  fs.writeFileSync(path.join(root, 'workflow.config.json'), JSON.stringify({
-    product: { name: 'Task 2413 Repro' },
-    adapters: {
-      verification: { command: 'npm run verify:{{area}}', defaultArea: 'docs' },
-    },
-  }), 'utf8');
-  runGit(['add', 'README.md', 'workflow.config.json']);
-  runGit(['commit', '-m', 'init']);
+  initCommittedRepository(root, {
+    'workflow.config.json': JSON.stringify({
+      product: { name: 'Task 2413 Repro' },
+      adapters: {
+        verification: { command: 'npm run verify:{{area}}', defaultArea: 'docs' },
+      },
+    }),
+  });
 }
 
 test('task-2413: publication verifier failure preserves the structured root failure', () => {
@@ -210,7 +202,7 @@ test('task-2413: an exhausted slow-test retry launches a repair with the exact g
   assert.match(prompts[0], /Gate command: \.\/scripts\/verify-local\.sh all/);
   assert.match(prompts[0], /unit-test-budget:exceeded/);
   assert.match(prompts[0], /Do not substitute a broader verification command or integration suite/);
-  assert.match(prompts[1], /Original failure output[\s\S]*unit-test-budget:exceeded/);
+  assert.match(prompts[1], /Original failure evidence[\s\S]*unit-test-budget:exceeded/);
 });
 
 test('task-2413: fresh structured evidence reclassifies recovery instead of retaining a stale gate policy', async () => {

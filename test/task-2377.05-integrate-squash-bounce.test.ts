@@ -17,7 +17,6 @@
 import test, { mock } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import { mockModule, installModuleMocks } from './lib/module-mock.js';
 
@@ -31,10 +30,8 @@ await installModuleMocks();
 
 import { MissionIntegrationService } from '../src/application/mission-integration-service.js';
 import { MissionLifecycleService } from '../src/application/mission-lifecycle-service.js';
-import type { Mission, MissionStatus } from '../src/domain/mission.js';
-import { missionId } from '../src/domain/mission.js';
-import { repositoryId } from '../src/domain/repository.js';
-import type { MissionVersion } from '../src/application/domain-ports.js';
+import type { MissionStatus } from '../src/domain/mission.js';
+import { approvedReview, inMemoryTransitionStore, integrateCommandMission } from './fixtures/mission-builders.js';
 import { mkdtemp as registeredMkdtemp } from './helpers/temp-dir.js';
 
 const SLUG = 'task-2377.05-squash';
@@ -42,39 +39,10 @@ const LANDED_SHA = 'a11ced0000000000000000000000000000000001';
 const LANDED_AT = '2026-08-04T23:30:00+02:00';
 
 function createFakeStore(status: MissionStatus) {
-  const current = {
-    id: missionId(SLUG),
-    repositoryId: repositoryId('parallix'),
-    title: 'fixture',
-    labels: ['ai_sdlc'],
-    assignee: 'codex',
-    checkpoints: [],
-    review: status === 'review'
-      ? {
-          rounds: [{
-            number: 1,
-            subject: {
-              change: { kind: 'local-branch', sourceBranch: `mission/${SLUG}`, targetBranch: 'main' },
-              revision: 'fixture-revision',
-            },
-            reviewer: 'claude', implementer: 'codex', startedAt: '2026-08-04T10:00:00Z',
-            decision: { kind: 'approved', decidedAt: '2026-08-04T10:30:00Z', comment: null, source: { kind: 'local' } },
-            response: null, phase: 'approved', disposition: 'APPROVED', reviewerRetryCount: 0, implementerRetryCount: 0,
-          }],
-          intervention: null, stageLaunches: [], reviewEvents: [],
-        }
-      : null,
-    netEngineeringLines: null,
-    status,
-    closedAt: null,
-  } as unknown as Mission;
-  let version = 1;
-  return {
-    mission: () => current,
-    load: async () => ({ kind: 'found', mission: current, version: version as MissionVersion }),
-    save: async () => (version as MissionVersion),
-    saveWithTransition: async () => (version as MissionVersion),
-  };
+  return inMemoryTransitionStore(
+    integrateCommandMission(SLUG, status, status === 'review' ? approvedReview(SLUG) : null),
+    { persist: false },
+  );
 }
 
 function servicesFor() {

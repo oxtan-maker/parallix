@@ -56,6 +56,9 @@ if (args[0] === 'pack') {
   process.stdout.write('> fixture@1.0.1 prepack\\n');
   process.stdout.write('> npm run build\\n');
   process.stdout.write('\\n');
+  const destination = args[args.indexOf('--pack-destination') + 1];
+  if (!args.includes('--pack-destination') || destination === process.cwd()) process.exit(1);
+  fs.writeFileSync(require('node:path').join(destination, 'fixture-1.0.1.tgz'), 'fixture');
   process.stdout.write('fixture-1.0.1.tgz\\n');
   process.exit(0);
 }
@@ -105,10 +108,13 @@ test('refresh-global-px.sh passes a real tarball path to npm install even when n
 
     const calls = fs.readFileSync(fixture.logPath, 'utf8');
     assert.match(calls, /npm pack/);
-    assert.match(calls, /npm install -g \.\/fixture-1\.0\.1\.tgz/);
+    const packedPath = calls.match(/npm install -g (.+fixture-1\.0\.1\.tgz)/)?.[1];
+    assert.ok(packedPath);
+    assert.equal(fs.existsSync(path.dirname(packedPath)), false, 'temporary archives are removed after installation');
+    assert.deepEqual(fs.readdirSync(fixture.repoRoot).filter(file => file.endsWith('.tgz')), []);
     assert.match(result.stdout, /Global px runner refreshed/);
     assert.match(result.stdout, /1\.0\.1/, 'the reported installed px version equals the landed package version');
-    assert.match(calls, /npm ci\nnpm run build\nnpm pack\nnpm install -g/, 'dependency reconciliation precedes build, pack, and global installation');
+    assert.match(calls, /npm ci\nnpm run build\nnpm pack --pack-destination [^\n]+\nnpm install -g/, 'dependency reconciliation precedes build, pack, and global installation');
   } finally {
     fs.rmSync(fixture.root, { recursive: true, force: true });
   }

@@ -71,11 +71,13 @@ test('normalizeLcov unions duplicate worker records by source line', () => {
   assert.equal(normalizeLcov(''), '');
 });
 
-// TASK-2547: the hosted ci-required job unions the per-tier LCOV fragments via
-// scripts/coverage-merge.ts -> mergeLcov(). This pins the multi-fragment union
-// correctness SC4 forbids raw concatenation for: overlapping source/line records
-// keep the larger hit count with no duplicated DA: record, LF/LH are recomputed
-// from the union, distinct SF: files stay separate, and empty input yields "".
+// TASK-2547: this behavior-owned coverage suite absorbs the former
+// task-2547-coverage-merge regression. The hosted ci-required job unions the
+// per-tier LCOV fragments via scripts/coverage-merge.ts -> mergeLcov(). These
+// cases pin the multi-fragment union correctness SC4 forbids raw concatenation
+// for: overlapping source/line records keep the larger hit count with no
+// duplicated DA: record, LF/LH are recomputed from the union, distinct SF:
+// files stay separate, and empty input yields "".
 test('mergeLcov unions duplicate records across fragments with no DA: duplication', () => {
   const fragmentA = 'SF:src/a.ts\nDA:1,0\nDA:2,3\nend_of_record\n';
   const fragmentB = 'SF:src/a.ts\nDA:1,2\nDA:2,0\nend_of_record\n';

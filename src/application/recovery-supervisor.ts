@@ -38,7 +38,7 @@
  * Application layer: all I/O arrives through the injected port.
  */
 
-import type { SessionMarkerPort } from './domain-ports.js';
+export { FRESH_SESSION_MARKER_PORT } from './fresh-session-marker-port.js';
 import type { AttentionAction, AttentionItem, AttentionReason } from './projections/board.js';
 import type { BoardLane } from './projections/mission-board.js';
 import { agentIsWorking } from './projections/mission-board.js';
@@ -211,12 +211,6 @@ export function failureFingerprint(observation: AttentionObservation): string {
  * and never resumes, and it records nothing, so a recovery launch also cannot
  * overwrite the implementer's own session identity.
  */
-export const FRESH_SESSION_MARKER_PORT: SessionMarkerPort = {
-  find: async () => null,
-  save: async () => {},
-  delete: async () => {},
-  shouldResume: async () => false,
-};
 
 /** The recovery instruction: general by design, constrained explicitly. */
 export function recoveryInstruction(request: Omit<RecoveryRequest, 'instruction'>): string {

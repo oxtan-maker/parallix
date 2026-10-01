@@ -4,7 +4,7 @@ Planning snapshot captured 2026-09-30 at `78c1fc1464c931ec2afdbd92dc66975726dbe4
 
 ## Population
 
-610 test files; 340 task-named. Tiers: 397 unit, 203 integration-ci, 8 integration-local, 2 agent/lifecycle E2E. All actual test files are accounted for. The JSON contains each original path, SHA-256, current tier, proposed owner, migration task, task provenance, direct runtime/fixture references, direct state markers, potential transitive local-module count and routing confidence.
+610 test files; 341 task-named by filename glob test/task-*.test.ts (340 of them carry a numeric task ID task-\d+; the one difference is test/task-metadata-pure.test.ts, a textual suffix). Tiers: 397 unit, 203 integration-ci, 8 integration-local, 2 agent/lifecycle E2E. All actual test files are accounted for. The JSON contains each original path, SHA-256, current tier, proposed owner, migration task, task provenance, direct runtime/fixture references, direct state markers, potential transitive local-module count and routing confidence.
 
 | Child | Proposed owner | Files | Unit | CI integration | Local integration | Agent E2E |
 |---|---|---:|---:|---:|---:|---:|

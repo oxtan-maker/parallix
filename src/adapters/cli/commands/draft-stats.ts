@@ -1,6 +1,5 @@
 // @ts-nocheck
 import type { DraftWorkflowPort, DraftWorkflowContext } from '../../../application/ports/cli-workflows.js';
-import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as fmt from '../../../application/presentation/cli-format.js';
 import { startDraftAgent, selectAgent, readAgentConfigOrExit, formatElapsed } from '../../agents/agents.js';
@@ -17,6 +16,7 @@ import { resolveDraftTarget, ensureMissionBranch, ensureWorktree, ensureGraphify
 import { buildDraftPrompt, buildRestartPrompt, buildContractRepairPrompt, validateDraftClassification, normalizeDraftClassification } from './draft-prompts.js';
 import { enforceDraftCommitSafety } from './draft-conflicts.js';
 import { runPreDraftHook } from '../../process/pre-draft-hook.js';
+import { getTaskFrontmatterValue } from '../../backlog/task-file-io.js';
 
 const CLASSIFICATION_LABELS = new Set(['ai_sdlc', 'user_value', 'unknown']);
 
@@ -42,8 +42,7 @@ async function validateStoredDraftClassification(ctx) {
 // @ts-expect-error implicit any on taskFile/fallback
 function readTaskTitle(taskFile, fallback) {
   try {
-    const match = /^title:\s*(.+)$/mi.exec(fs.readFileSync(taskFile, 'utf8'));
-    return match?.[1]?.trim().replace(/^['"]|['"]$/g, '') || fallback;
+    return getTaskFrontmatterValue(taskFile, 'title')?.trim() || fallback;
   } catch { return fallback; }
 }
 

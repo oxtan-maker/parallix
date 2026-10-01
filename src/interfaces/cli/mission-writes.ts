@@ -10,7 +10,10 @@
  * The slug is inferred from the branch or worktree; `--slug` is only needed
  * outside the mission worktree. Every write takes `--expected-version`, whose
  * value comes from `px status --json`, so a stale write is rejected instead of
- * silently winning.
+ * silently winning. Classification set is the one exception: it discovers the
+ * current version from stored mission state itself, so the caller never threads
+ * the flag. The optimistic-concurrency guard still runs — the store rejects a
+ * write whose version no longer matches — it just resolves the version internally.
  */
 
 import * as fmt from '../../application/presentation/cli-format.js';
@@ -174,10 +177,11 @@ reads it from \`px status\` instead of a line in a mission document. Recording a
 path says which test it is; it does not assert that the test has run.
 `.trimStart();
 export const CLASSIFICATION_HELP = `
-Usage: px classification set [--slug <slug>] --value <ai_sdlc|user_value|unknown> --expected-version <n>
+Usage: px classification set [--slug <slug>] --value <ai_sdlc|user_value|unknown>
 
 Set the Mission-owned classification without editing a provider task. Exactly one
-classification is retained and unrelated labels are preserved.
+classification is retained and unrelated labels are preserved. No --expected-version:
+the current version is discovered from stored mission state for the write.
 `.trimStart();
 
 export const ASSIGN_HELP = `
@@ -342,11 +346,26 @@ export function createReproCommand(services: MissionWriteServices) {
   };
 }
 
+/**
+ * `px classification set` — the only write that does not take `--expected-version`.
+ *
+ * The version is discovered from stored mission state: slug is resolved, the
+ * request carries no expectedVersion, and `setClassification` loads the current
+ * revision and writes it back through the store's own optimistic-concurrency
+ * guard. The flag is dropped from the command, its help, and its call path only;
+ * `request()` and every other verb keep their mandatory guard untouched.
+ */
 export function createClassificationCommand(services: MissionWriteServices) {
   return async (args: string[] = []): Promise<void> => {
     if (helped(args, CLASSIFICATION_HELP)) { return; }
     if (args[0] !== 'set') { fail(CLASSIFICATION_HELP); }
-    const req = request(args, 'classification-set', services.resolveSlug);
+    const slug = services.resolveSlug(flag(args, '--slug') ?? undefined);
+    if (!slug) { fail('no mission slug: run inside the mission worktree or pass --slug <slug>'); }
+    const req = {
+      operationId: `px-classification-set-${slug}`,
+      missionId: missionId(slug),
+      capabilities: new Set(['mission:context'] as const),
+    };
     output(unwrap(await services.brief.setClassification({ ...req, classification: required(args, '--value') }), 'classification set'));
   };
 }

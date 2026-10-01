@@ -38,10 +38,11 @@ import { warmPiSdk } from './pi.js';
 import { resolveSandboxProfile, withSandboxProfile } from '../process/bubblewrap.js';
 import { selectConfinement, supportsNativeSandbox, ConfinementBlockedError, isBubblewrapDisabled, isBubblewrapAvailable, BUBBLEWRAP_COMMAND } from '../process/confinement.js';
 import { waitForCustomCapacity } from './custom-capacity.js';
+import { FRESH_SESSION_MARKER_PORT } from '../../application/fresh-session-marker-port.js';
 import type { SessionMarkerPort } from '../../application/domain-ports.js';
 import type { AgentFamily } from '../../domain/agents.js';
 import type { MissionId } from '../../domain/mission.js';
-import type { SessionRole } from '../../domain/session.js';
+import type { SessionLaunchPolicy, SessionRole } from '../../domain/session.js';
 
 interface LaunchResultLike {
   stdout?: string;
@@ -68,6 +69,8 @@ interface StartAgentOptions {
   isAgentBlockedFn?: Function;
   /** Checked application port for session markers (architecture migration cutover). */
   sessionMarkerPort?: SessionMarkerPort;
+  /** Whether this launch may resume its normal session or requires fresh context. */
+  sessionPolicy?: SessionLaunchPolicy;
   log?: Function;
   noOutputWatchdog?: {initialDelayMs?: number, intervalMs?: number, maxNoOutputMs?: number} | boolean;
   launchAgentFn?: Function;
@@ -562,7 +565,9 @@ async function prepareLaunch(state: StartAgentLoopState, deps: StartAgentLoopDep
   let sessionRole: SessionRole | null = null;
   if (worktree && slug && role) {
     sessionRole = normalizeSessionRole(role);
-    launchSessionMarkerPort = deps.sessionMarkerPort || await defaultSessionMarkerPort(worktree);
+    launchSessionMarkerPort = opts.sessionPolicy === 'fresh-ephemeral'
+      ? FRESH_SESSION_MARKER_PORT
+      : deps.sessionMarkerPort || await defaultSessionMarkerPort(worktree);
     resume = RESUME_CAPABLE.has(chosen) &&
       await launchSessionMarkerPort.shouldResume(
         sessionMissionId(slug),
@@ -767,7 +772,9 @@ async function launchPrepared(prepared: PreparedLaunch, deps: StartAgentLoopDeps
         .join(' ');
       log(fmt.status('INFO', `Launching: ${fmt.command(`${invocation.command} ${echoedArgs}`)}`));
       if (invocation.options && invocation.options.cwd) {
-        log(fmt.status('INFO', `Working directory: ${fmt.path(invocation.options.cwd)}`));
+        // Keep this routine launch diagnostic distinct from the shell-init
+        // transition sentinel emitted by `px draft`.
+        log(fmt.status('INFO', `Agent working directory: ${fmt.path(invocation.options.cwd)}`));
       }
     }
 

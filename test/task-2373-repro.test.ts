@@ -24,6 +24,7 @@ import {
   type CurrentWorkEvent,
 } from '../src/application/recording/current-work-recorder.js';
 import type { OperationalHistoryEntry, OperationalHistoryRepository } from '../src/application/ports/operation-history.js';
+import { inMemoryOperationalHistory } from './fixtures/operational-history.js';
 import { ConcreteCurrentWorkReadAdapter } from '../src/adapters/backlog/concrete-current-work-read-adapter.js';
 import { reconcileCurrentWork } from '../src/application/projections/current-work.js';
 import { agentFamily } from '../src/domain/agents.js';
@@ -32,17 +33,6 @@ import { missionId } from '../src/domain/mission.js';
 // ---------------------------------------------------------------------------
 // Fakes
 // ---------------------------------------------------------------------------
-
-function makeHistoryRepo() {
-  const appended: OperationalHistoryEntry[] = [];
-  const repo: OperationalHistoryRepository = {
-    async findAll() { return appended; },
-    async findByType(type: string) { return appended.filter((entry) => entry.eventType === type); },
-    async append(entry: OperationalHistoryEntry) { appended.push(entry); },
-    async clear() { appended.length = 0; },
-  };
-  return { repo, appended };
-}
 
 function published(appended: readonly OperationalHistoryEntry[]) {
   return appended.flatMap((entry) => parseCurrentWorkEntry(entry) ?? []);
@@ -119,7 +109,7 @@ function currentWorkEvent(overrides: Partial<CurrentWorkEvent> = {}): CurrentWor
 // ---------------------------------------------------------------------------
 
 test('TASK-2373 defect 1: px active publishes the agents launched inside the autonomous review loop', async () => {
-  const { repo, appended } = makeHistoryRepo();
+  const { repo, appended } = inMemoryOperationalHistory();
   let seen: Record<string, unknown> | null = null;
   const ports = strictPorts({
     handoffReview: {
@@ -160,7 +150,7 @@ test('TASK-2373 defect 1: px active publishes the agents launched inside the aut
 // ---------------------------------------------------------------------------
 
 test('TASK-2373 defect 2: an agent-change publication is awaited before the run reads later state', async () => {
-  const { repo, appended } = makeHistoryRepo();
+  const { repo, appended } = inMemoryOperationalHistory();
   // A recorder that only settles on a later macrotask: a fire-and-forget
   // publication cannot have landed by the time the launcher returns.
   const slowRecorder = {
@@ -237,7 +227,7 @@ test('TASK-2373 defect 3: same-operation replacement is deterministic under iden
 // ---------------------------------------------------------------------------
 
 test('TASK-2373 defect 4: a review loop that cannot continue publishes its blocking reason', async () => {
-  const { repo, appended } = makeHistoryRepo();
+  const { repo, appended } = inMemoryOperationalHistory();
   const workflow = makeReviewWorkflow({
     start: async () => { throw new Error('review loop exhausted: no eligible implementer remains'); },
   });

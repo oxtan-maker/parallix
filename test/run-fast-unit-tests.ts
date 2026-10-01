@@ -9,9 +9,9 @@ import { removeNonExecutableCoverage, removeTypeOnlyCoverage } from '../src/adap
 const root = path.resolve(process.env.PARALLIX_EXECUTION_ROOT || process.cwd());
 const coverage = process.env.PARALLIX_TEST_COVERAGE === '1' || process.env.PARALLIX_TEST_COVERAGE === 'true';
 const { unit, safe, isolated } = unitProcessPartition(root);
-// The outer runner owns and removes the V8 scratch root even when its child
-// is killed by the wall watchdog. Plain opt-in runs clean their own root.
-const scratchParent = process.env.NODE_V8_COVERAGE || path.join(root, 'tmp');
+// The outer runner owns and removes the covered scratch root even when its
+// child is killed by the wall watchdog. Plain opt-in runs clean their own root.
+const scratchParent = process.env.PARALLIX_FAST_UNIT_SCRATCH_DIR || path.join(root, 'tmp');
 fs.mkdirSync(scratchParent, { recursive: true });
 const scratch = fs.mkdtempSync(path.join(scratchParent, 'fast-unit-'));
 const report = path.join(root, 'coverage', '.lcov-unit.info');

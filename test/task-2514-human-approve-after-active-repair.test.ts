@@ -19,8 +19,7 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 
 import { agentFamily } from '../src/domain/agents.js';
-import { missionId, missionLabels, type Mission } from '../src/domain/mission.js';
-import { repositoryId } from '../src/domain/repository.js';
+import { missionId, type Mission } from '../src/domain/mission.js';
 import {
   applyImplementerCommand,
   applyReviewerCommand,
@@ -35,11 +34,10 @@ import {
   type ReviewedChange,
 } from '../src/domain/review.js';
 import { MissionLifecycleService } from '../src/application/mission-lifecycle-service.js';
-import { SqliteDatabaseAdapter } from '../src/adapters/sqlite/database-adapter.js';
-import { SqliteMigrationRunner, loadDefaultMigrations } from '../src/adapters/sqlite/migration-runner.js';
-import { SqliteMissionStore } from '../src/adapters/sqlite/mission-store.js';
 import { recordApproval } from '../src/adapters/review/review-round.js';
 import { submitReviewRound } from '../src/adapters/review/review-commands.js';
+import { fixtureMission } from './fixtures/mission-builders.js';
+import { openMigratedMissionStore, type MigratedMissionStore } from './fixtures/mission-sqlite-store.js';
 
 const SLUG = 'task-2514-repro';
 const HUMAN = agentFamily('magnus');
@@ -74,50 +72,13 @@ function tempDir(): string {
   return dir;
 }
 
-interface Fixture {
-  readonly database: SqliteDatabaseAdapter;
-  readonly store: SqliteMissionStore;
+interface Fixture extends MigratedMissionStore {
   readonly lifecycle: MissionLifecycleService;
 }
 
-function seedMission(review: Review, status: 'active' | 'integration'): Mission {
-  return {
-    id: missionId(SLUG),
-    repositoryId: repositoryId('parallix'),
-    title: `Mission ${SLUG}`,
-    labels: missionLabels([]),
-    status,
-    rawStatus: status,
-    checkpoints: [{
-      missionId: missionId(SLUG),
-      name: 'CP-1',
-      rawFilename: 'CP-1.md',
-      firstLine: 'CP-1',
-      goalCheck: [{ criterion: 'criterion', evidence: 'evidence' }],
-      nextActionText: 'hand off',
-    }],
-    brief: null,
-    declaredGates: [],
-    successCriteria: [],
-    dependencies: [],
-    predictedNelBucket: null,
-    reproductionTest: null,
-    assignee: IMPLEMENTER,
-    externalTaskRef: null,
-    intakeTrace: null,
-    review,
-    netEngineeringLines: null,
-    closedAt: null,
-  } as Mission;
-}
-
 async function openFixture(review: Review, status: 'active' | 'integration' = 'active'): Promise<Fixture> {
-  const database = new SqliteDatabaseAdapter();
-  await database.open({ path: path.join(tempDir(), 'parallix.db') });
-  await new SqliteMigrationRunner(database).applyPending(loadDefaultMigrations());
-  const store = new SqliteMissionStore(database);
-  await store.save(seedMission(review, status), null);
-  return { database, store, lifecycle: new MissionLifecycleService(store) };
+  const migrated = await openMigratedMissionStore([fixtureMission(SLUG, { status, review, assignee: IMPLEMENTER })]);
+  return { ...migrated, lifecycle: new MissionLifecycleService(migrated.store) };
 }
 
 async function loadMission(fixture: Fixture): Promise<Mission> {
@@ -127,11 +88,7 @@ async function loadMission(fixture: Fixture): Promise<Mission> {
 }
 
 async function laneEvents(fixture: Fixture): Promise<Array<[string | null, string, string]>> {
-  const rows = await fixture.database.query<{ from_status: string | null; to_status: string; trigger: string }>(
-    'SELECT from_status, to_status, trigger FROM board_lane_events WHERE mission_id = ? ORDER BY id',
-    [SLUG],
-  );
-  return rows.map((row) => [row.from_status, row.to_status, row.trigger]);
+  return (await fixture.laneEvents(SLUG)).map((row) => [row.from_status, row.to_status, row.trigger]);
 }
 
 function roundOneAwaitingReview(): Review {
@@ -191,7 +148,7 @@ test('a human approve of an awaiting-review round moves an active Mission to int
     assert.equal(mission.status, 'integration', 'the repaired lane leaves for integration in one command');
     assert.deepEqual(await laneEvents(fixture), [['active', 'integration', 'approve']]);
   } finally {
-    await fixture.database.close();
+    await fixture.close();
   }
 });
 
@@ -207,7 +164,7 @@ test('a human approve of the repaired next round moves an active Mission to inte
     assert.deepEqual(await laneEvents(fixture), [['active', 'integration', 'approve']]);
     assert.deepEqual(await approve(fixture), { outcome: 'unchanged', reason: 'mission is already in integration' });
   } finally {
-    await fixture.database.close();
+    await fixture.close();
   }
 });
 
@@ -219,7 +176,7 @@ test('an approve of an awaiting-implementation round on an active Mission fails 
     assert.match(result.outcome === 'failed' ? result.diagnostic : '', /awaiting-implementation/);
     await assertChangesRequestedIntact(fixture);
   } finally {
-    await fixture.database.close();
+    await fixture.close();
   }
 });
 
@@ -234,7 +191,7 @@ test('an active-lane approve without a lifecycle service writes no approval', as
     assert.equal(mission.status, 'active');
     assert.equal(reviewStatus(mission.review!), 'awaiting-review', 'no approval is left attached to an active Mission');
   } finally {
-    await fixture.database.close();
+    await fixture.close();
   }
 });
 
@@ -256,7 +213,7 @@ test('an integration-repair round reopened by a revoked approval is not approvab
     assert.equal(mission.status, 'active', 'the implementer still owns the integration repair');
     assert.equal(reviewStatus(mission.review!), 'awaiting-review');
   } finally {
-    await fixture.database.close();
+    await fixture.close();
   }
 });
 
@@ -286,7 +243,7 @@ test('px review --submit-review approve records a human approval over the repair
     assert.equal(currentReviewRound(mission.review!).decision?.kind, 'approved');
     assert.equal(mission.status, 'integration');
   } finally {
-    await fixture.database.close();
+    await fixture.close();
   }
 });
 
@@ -300,6 +257,6 @@ test('px review --submit-review approve over an awaiting-implementation round ex
     assert.ok(errors.some((message) => /awaiting-implementation/.test(message)), errors.join('\n'));
     await assertChangesRequestedIntact(fixture);
   } finally {
-    await fixture.database.close();
+    await fixture.close();
   }
 });

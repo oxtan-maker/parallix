@@ -21,6 +21,11 @@ const __mm2 = mockModule<typeof import('../src/adapters/cli/commands/integrate.j
 // re-linked module, so it resolves its runner import through this facade.
 const repositoryGatesModule = mockModule<typeof import('../src/adapters/config/repository-gates.js')>(
   '../src/adapters/config/repository-gates.js', import.meta.url);
+// The integration gate resolves its verification worktree through this facade.
+// Pin it to each temporary checkout: isolated unit workers otherwise fall back
+// to the real primary worktree and make unrelated preflight tests non-hermetic.
+const integrateGatesModule = mockModule<typeof import('../src/adapters/cli/commands/integrate-gates.js')>(
+  '../src/adapters/cli/commands/integrate-gates.js', import.meta.url);
 await installModuleMocks();
 const { mock } = test;
 
@@ -301,6 +306,7 @@ test('integrate proceeds without a gate when the repository does not opt into re
       path.join(checkout, 'workflow.config.json'),
       JSON.stringify({ adapters: { gates: {} } }),
     );
+    mock.method(integrateGatesModule, 'resolveIntegrationVerificationWorktree', () => checkout);
     mock.method(missionUtils, 'resolveWorktree', () => checkout);
     mock.method(git, 'git', (args) => {
       const cmd = Array.isArray(args) ? args.join(' ') : String(args);
@@ -350,6 +356,7 @@ test('integrate aborts before merge when a pre-integration gate fails', async (t
       path.join(checkout, 'workflow.config.json'),
       JSON.stringify({ adapters: { gates: { preIntegration: [{ key: 'smoke', command: 'exit 1', order: 0 }] } } }),
     );
+    mock.method(integrateGatesModule, 'resolveIntegrationVerificationWorktree', () => checkout);
     mock.method(missionUtils, 'resolveWorktree', () => checkout);
     // captureFinalIntegrationTree needs a clean, finalized tree to proceed.
     mock.method(git, 'git', (args) => {

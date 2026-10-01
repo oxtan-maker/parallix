@@ -44,6 +44,9 @@ import {
 /** Default per-occurrence attempt budget. */
 export const DEFAULT_REBOUND_ATTEMPTS = 2;
 
+/** Stable recovery strategy identifiers for telemetry and escalation evidence. */
+export type RepairStrategy = 'targeted' | 'fresh-diagnostic';
+
 // ── Reason: structured failure values, never a regex match on combined text ──
 
 /** A declared verification gate ran and exited non-zero. */
@@ -163,6 +166,10 @@ export interface ReboundContext {
   maxLaunchRetries?: number;
   /** Revision already known by the stage adapter, for an actionable prompt. */
   head?: string;
+  /** Reads the mission revision around each repair; absent callers retain `head`. */
+  readHead?: () => Promise<string | null> | string | null;
+  /** Best-effort observer for stable recovery-strategy telemetry. */
+  onRepairTelemetry?: (_event: { strategy: RepairStrategy; outcome: 'pass' | 'advance' | 'rescue' | 'escalate' }) => void;
   /** Stage adapter chooses the existing launcher step; policy stays here. */
   step?: string;
   role?: string;
@@ -174,6 +181,14 @@ export interface ReboundContext {
   applyAgentFallback?: (_options: { launchResult: unknown; original: string }) => Promise<string> | string;
   log?: (_msg: string) => void;
   error?: (_msg: string) => void;
+}
+
+function recordRepairTelemetry(context: ReboundContext, event: { strategy: RepairStrategy; outcome: 'pass' | 'advance' | 'rescue' | 'escalate' }) {
+  // Logs are the recovery event sink shared by every rebound consumer. Keep the
+  // identifiers structured and stable so operators can aggregate outcomes
+  // without parsing prompt prose.
+  context.log?.(fmt.status('INFO', `RECOVERY_TELEMETRY strategy=${event.strategy} outcome=${event.outcome}`));
+  context.onRepairTelemetry?.(event);
 }
 
 export type ReboundOutcomeKind = 'fixed' | 'exhausted' | 'human-only';
@@ -189,7 +204,10 @@ export interface ReboundOutcome {
   implementer: string;
   /** Short, bounded record for an operator when automatic recovery stops. */
   dossier?: string;
+  attemptsDetail?: readonly RepairEvidence[];
 }
+/** Process-local verification evidence; no durable identity or lifecycle. */
+export interface RepairEvidence { strategy: RepairStrategy; agent: string; context: 'resumed' | 'fresh'; headBefore: string | null; headAfter: string | null; fingerprintBefore: string; fingerprintAfter: string; }
 
 export interface ReboundClassification {
   failureClass: FailureClassType;
@@ -345,7 +363,7 @@ function hookRecoveryAction(reason: Extract<ReboundReason, { kind: 'hook-failure
   return `Repair the reported ${reason.hook} hook failure, then rerun ${operation}${abortAdvice}.`;
 }
 
-function recoveryDossier(reason: ReboundReason, context: ReboundContext, history: string[], diagnostic: string, why: string): string {
+function recoveryDossier(reason: ReboundReason, context: ReboundContext, history: string[], diagnostic: string, why: string, attempts: readonly RepairEvidence[] = []): string {
   const command = reason.kind === 'gate-failure' ? reason.command : reason.kind === 'hook-failure' ? reason.operation || 'Git hook operation' : 'stage recovery';
   const manualNextAction = recoveryManualNextAction(reason, context);
   return [
@@ -354,6 +372,7 @@ function recoveryDossier(reason: ReboundReason, context: ReboundContext, history
     `HEAD: ${context.head || 'not captured'}`,
     `Last action: ${command}`,
     `Failure history: ${history.join(' -> ') || failureFingerprint(reason)}`,
+    ...attempts.map((attempt, index) => `Attempt ${index + 1}: ${attempt.strategy}; agent=${attempt.agent}; context=${attempt.context}; HEAD ${attempt.headBefore || 'not captured'} -> ${attempt.headAfter || 'not captured'}; fingerprint ${attempt.fingerprintBefore} -> ${attempt.fingerprintAfter}`),
     `Last diagnostic: ${elideBounceOutput(diagnostic || '(no output)')}`,
     `Successful checks: none recorded before exhaustion`,
     `Stopped because: ${why}`,
@@ -418,8 +437,55 @@ export function buildReboundFixPrompt(slots: FixPromptSlots): string {
   ].join('\n');
 }
 
+/**
+ * Repair authority for a gate or hook rebound (TASK-2575). The failed check and
+ * its logs are evidence, not a verdict: the prompt names no cause, repair
+ * location, or commit, so an implementer who traces the failure to the
+ * environment or runner configuration repairs it there, and one who finds an
+ * external blocker reports it instead of spending the budget on guesses.
+ */
+const REPAIR_AUTHORITY = 'Diagnose the actual cause from the failed check and its logs; do not assume it is a test or code path inside the original mission scope. Repair the cause wherever it lies within your authority (repository code, tests, configuration, the local environment, or runner configuration) and fix the mission without breaking the repository: preserve the mission deliverables and safety boundaries, and never weaken, skip, or delete a check to make it pass. If the repair changes tracked files, commit it before the automatic re-verification: the re-run verifies the committed mission tree, so an uncommitted repair cannot be verified and is reported as still failing. A repair outside the repository needs no commit. If the cause is external and you cannot repair it (for example a model service or network dependency that is down), make no speculative changes: report the exact blocker with its evidence and stop, because another repair attempt cannot fix it.';
+
+function missionOutcomeFact(slug: string): [string, string] {
+  return ['Mission outcome', `the locked goal and success criteria of ${slug} (px status ${slug}), delivered with this check passing`];
+}
+
+/**
+ * The second and final repair gets a fresh context rather than another version
+ * of the targeted prompt.  The failure output is evidence, not a diagnosis:
+ * the worker must be free to investigate the actual cause in the worktree.
+ */
+export function buildFreshDiagnosticRepairPrompt(slots: FixPromptSlots): string {
+  const { label, slug, worktree, facts, diagnostic, originalDiagnostic, classification, attempt, maxAttempts, remedy } = slots;
+  return [
+    `${label} — FRESH-CONTEXT DIAGNOSTIC REPAIR REQUIRED`,
+    '',
+    `Mission: ${slug}`,
+    ...(worktree ? [`Working directory: ${worktree}`] : []),
+    ...facts.map(([name, value]) => `${name}: ${value}`),
+    '',
+    'Original failure evidence (this is not necessarily the root cause):',
+    '---',
+    elideBounceOutput(originalDiagnostic || '(no output)'),
+    '---',
+    'Latest failure evidence (this is not necessarily the root cause):',
+    '---',
+    elideBounceOutput(diagnostic || '(no output)'),
+    '---',
+    '',
+    `Classification: ${classification.failureClass} — ${classification.dispatchAction}`,
+    `Recovery strategy: fresh-diagnostic (${attempt}/${maxAttempts})`,
+    `Retry attempt: ${attempt}/${maxAttempts}`,
+    '',
+    'You have a fresh context. Re-diagnose the failure from the repository and exact evidence; do not assume either diagnostic identifies the root cause.',
+    'The locked mission goal and scope remain binding. Preserve all gate and test invariants: do not weaken, bypass, replace, or claim to satisfy any check.',
+    remedy,
+    'Perform the repair, preserve valid committed work already in the mission worktree, and commit your repair. Only the harness rerunning this exact failing check can establish success.',
+  ].join('\n');
+}
+
 /** Prompt slots derived from a structured reason. */
-function promptSlotsFor(reason: ReboundReason): Pick<FixPromptSlots, 'area' | 'facts' | 'remedy'> {
+function promptSlotsFor(reason: ReboundReason, slug: string): Pick<FixPromptSlots, 'area' | 'facts' | 'remedy'> {
   switch (reason.kind) {
     case 'gate-failure':
       return {
@@ -427,6 +493,7 @@ function promptSlotsFor(reason: ReboundReason): Pick<FixPromptSlots, 'area' | 'f
         facts: [
           ['Area', reason.area],
           ['Gate command', reason.command],
+          missionOutcomeFact(slug),
           ['Exit code', String(reason.exitCode)],
           ...(reason.approvedRevision
             ? [['Approved revision', reason.approvedRevision] as [string, string]]
@@ -434,7 +501,7 @@ function promptSlotsFor(reason: ReboundReason): Pick<FixPromptSlots, 'area' | 'f
           ['Cause', 'The integration gate (not the review gate) failed: the mission was reviewed and approved, then a red pre-integration gate rejected the finalized tree on the way to a human integration. Repair the integration failure, not a review finding.'],
           ...(reason.coverageNote ? [['Coverage', reason.coverageNote] as [string, string]] : []),
         ],
-        remedy: `Start with the listed gate command in the listed worktree and the captured failure output. Repair the specific failing test or code path named there, including making a slow unit test hermetic when its budget is exceeded. Do not substitute a broader verification command or integration suite to rediscover the failure. Commit the repair before the automatic re-verification: Parallix reruns this exact gate against the finalized mission tree, so an uncommitted repair cannot be verified and is reported as still failing.`,
+        remedy: `Start with the listed gate command in the listed worktree and the captured failure output. Do not substitute a broader verification command or integration suite to rediscover the failure. ${REPAIR_AUTHORITY}`,
       };
     case 'hook-failure':
       return {
@@ -442,8 +509,10 @@ function promptSlotsFor(reason: ReboundReason): Pick<FixPromptSlots, 'area' | 'f
         facts: [
           ['Hook type', reason.hook || 'unknown'],
           ...(reason.operation ? [['Git operation', reason.operation] as [string, string]] : []),
+          ['Failed check', `${reason.hook || 'Git'} hook on ${reason.operation || 'a workflow Git operation'}`],
+          missionOutcomeFact(slug),
         ],
-        remedy: `Fix the underlying issue so the Git hook passes when Parallix commits or rebases this mission.`,
+        remedy: `Make the Git hook pass when Parallix commits or rebases this mission. ${REPAIR_AUTHORITY}`,
       };
     case 'artifact-incomplete':
       return {
@@ -502,7 +571,7 @@ async function reboundImpl(reason: ReboundReason, context: ReboundContext): Prom
   // here, before the transient-verifier loop can refresh `diagnostic`, so the fix
   // prompt can still show what originally failed alongside the latest output.
   const firstDiagnostic = reboundDiagnostic(reason);
-  const state: ReboundState = { implementer: context.implementer, reason, classification: classifyReboundReason(reason), diagnostic: firstDiagnostic, originalDiagnostic: firstDiagnostic, history: [failureFingerprint(reason)], launchFailures: 0, attempts: 0 };
+  const state: ReboundState = { implementer: context.implementer, reason, classification: classifyReboundReason(reason), diagnostic: firstDiagnostic, originalDiagnostic: firstDiagnostic, history: [failureFingerprint(reason)], launchFailures: 0, attempts: 0, attemptsDetail: [] };
   if (!state.classification.isRelaunchable) { return humanOnlyOutcome(state, context, error); }
   const transientOutcome = await retryTransientVerification(state, verify, maxTransientRetries, log);
   if (transientOutcome) { return transientOutcome; }
@@ -521,23 +590,24 @@ async function reboundImpl(reason: ReboundReason, context: ReboundContext): Prom
     : state.attempts >= maxAttempts
       ? `implementer repair budget (${maxAttempts}): attempt budget spent (${state.attempts})`
       : `launcher budget spent (${maxLaunchRetries} session retries; ${state.launchFailures} failed launches)`;
-  const dossier = recoveryDossier(state.reason, context, state.history, state.diagnostic, why);
+  const dossier = recoveryDossier(state.reason, context, state.history, state.diagnostic, why, state.attemptsDetail);
   error(fmt.status('FAIL', dossier));
-  return { outcome: 'exhausted', attempts: state.attempts, diagnostic: state.diagnostic, classification: state.classification, implementer: state.implementer, dossier };
+  recordRepairTelemetry(context, { strategy: state.attemptsDetail.at(-1)?.strategy || 'targeted', outcome: 'escalate' });
+  return { outcome: 'exhausted', attempts: state.attempts, diagnostic: state.diagnostic, classification: state.classification, implementer: state.implementer, dossier, attemptsDetail: state.attemptsDetail };
 }
 
 export async function rebound(reason: ReboundReason, context: ReboundContext): Promise<ReboundOutcome> {
   return await reboundImpl(reason, context);
 }
 
-interface ReboundState { implementer: string; reason: ReboundReason; classification: ReboundClassification; diagnostic: string; originalDiagnostic: string; history: string[]; launchFailures: number; attempts: number; }
+interface ReboundState { implementer: string; reason: ReboundReason; classification: ReboundClassification; diagnostic: string; originalDiagnostic: string; history: string[]; launchFailures: number; attempts: number; attemptsDetail: RepairEvidence[]; }
 
 function humanOnlyOutcome(state: ReboundState, context: ReboundContext, error: ReboundContext['error']): ReboundOutcome {
   error?.(fmt.status('FAIL', `${state.classification.label}: ${state.classification.failureClass} (${state.classification.dispatchAction}). Human intervention required — not bouncing.`));
   error?.(fmt.status('FAIL', `Failure output:\n${state.diagnostic || '(no output)'}\n`));
-  const dossier = recoveryDossier(state.reason, context, state.history, state.diagnostic, 'the structured failure requires human action');
+  const dossier = recoveryDossier(state.reason, context, state.history, state.diagnostic, 'the structured failure requires human action', state.attemptsDetail);
   error?.(fmt.status('FAIL', dossier));
-  return { outcome: 'human-only', attempts: 0, diagnostic: state.diagnostic, classification: state.classification, implementer: state.implementer, dossier };
+  return { outcome: 'human-only', attempts: 0, diagnostic: state.diagnostic, classification: state.classification, implementer: state.implementer, dossier, attemptsDetail: state.attemptsDetail };
 }
 
 async function retryTransientVerification(state: ReboundState, verify: ReboundContext['verify'], retries: number, log: ReboundContext['log']): Promise<ReboundOutcome | null> {
@@ -564,26 +634,38 @@ async function runRepairAttempts(state: ReboundState, options: any): Promise<Reb
   const { context, slug, worktree, verify, startAgent, maxAttempts, maxLaunchRetries, transitionToImplementer, applyAgentFallback, log, error } = options;
   const originalDiagnostic = state.originalDiagnostic;
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-    const fixPrompt = buildReboundFixPrompt({ label: state.classification.label, slug, worktree, diagnostic: state.diagnostic, originalDiagnostic, classification: state.classification, attempt, maxAttempts, ...promptSlotsFor(state.reason) });
+    const strategy: RepairStrategy = attempt === 1 ? 'targeted' : 'fresh-diagnostic';
+    const promptSlots = { label: state.classification.label, slug, worktree, diagnostic: state.diagnostic, originalDiagnostic, classification: state.classification, attempt, maxAttempts, ...promptSlotsFor(state.reason, slug) };
+    const fixPrompt = strategy === 'targeted'
+      ? buildReboundFixPrompt(promptSlots)
+      : buildFreshDiagnosticRepairPrompt(promptSlots);
     if (transitionToImplementer) { await transitionToImplementer(slug); }
-    log(fmt.status('INFO', `Bouncing to implementer (${state.implementer}) with a ${state.classification.failureClass} fix prompt. Attempt ${attempt}/${maxAttempts}.`));
-    const launch = await launchFixAttempt({ startAgent, applyAgentFallback, implementer: state.implementer, fixPrompt, slug, worktree, step: context.step, role: context.role, exclude: context.exclude });
+    log(fmt.status('INFO', `Bouncing to implementer (${state.implementer}) with ${strategy} ${state.classification.failureClass} repair. Attempt ${attempt}/${maxAttempts}.`));
+    const headBefore = await currentHead(context);
+    const fingerprintBefore = failureFingerprint(state.reason);
+    const launch = await launchFixAttempt({ startAgent, applyAgentFallback, implementer: state.implementer, fixPrompt, slug, worktree, step: context.step, role: context.role, exclude: context.exclude, sessionPolicy: strategy === 'fresh-diagnostic' ? 'fresh-ephemeral' : 'resume' });
     state.implementer = launch.implementer;
     const launchResult = handleLaunchResult(state, launch, maxLaunchRetries, error);
     if (launchResult === 'retry') { attempt--; continue; }
     if (launchResult === 'skip') { continue; }
     if (launchResult === 'stop') { break; }
     const verified = await verify(attempt);
+    const detail: RepairEvidence = { strategy, agent: state.implementer, context: strategy === 'fresh-diagnostic' ? 'fresh' : 'resumed', headBefore, headAfter: await currentHead(context), fingerprintBefore, fingerprintAfter: verified.ok ? fingerprintBefore : failureFingerprint(refreshedReason(state.reason, verified)) };
+    state.attemptsDetail.push(detail);
     if (verified.ok) {
       log(fmt.status('PASS', `${state.classification.label} repaired: the failing check re-ran and passed (attempt ${attempt}/${maxAttempts}).`));
-      return { outcome: 'fixed', attempts: state.attempts, diagnostic: verified.diagnostic || '', classification: state.classification, implementer: state.implementer };
+      recordRepairTelemetry(context, { strategy, outcome: strategy === 'targeted' ? 'pass' : 'rescue' });
+      return { outcome: 'fixed', attempts: state.attempts, diagnostic: verified.diagnostic || '', classification: state.classification, implementer: state.implementer, attemptsDetail: state.attemptsDetail };
     }
     refreshReboundState(state, verified, log);
+    if (strategy === 'targeted') { recordRepairTelemetry(context, { strategy, outcome: 'advance' }); }
     if (!state.classification.isRelaunchable) { break; }
     error(fmt.status('WARN', `${state.classification.label}: the check still fails after attempt ${attempt}/${maxAttempts}.`));
   }
   return null;
 }
+
+async function currentHead(context: ReboundContext): Promise<string | null> { return await context.readHead?.() ?? context.head ?? null; }
 
 function handleLaunchResult(state: ReboundState, launch: Awaited<ReturnType<typeof launchFixAttempt>>, maxRetries: number, error: ReboundContext['error']): 'verify' | 'retry' | 'skip' | 'stop' {
   if (launch.ok) { state.attempts++; return 'verify'; }
@@ -605,8 +687,9 @@ async function launchFixAttempt(options: {
   step?: string;
   role?: string;
   exclude?: string[];
+  sessionPolicy: 'resume' | 'fresh-ephemeral';
 }): Promise<{ ok: boolean; implementer: string; diagnostic: string; repairAttempted: boolean }> {
-  const { startAgent, applyAgentFallback, fixPrompt, slug, worktree, step = 'act-on-review', role = 'implementer', exclude = [] } = options;
+  const { startAgent, applyAgentFallback, fixPrompt, slug, worktree, step = 'act-on-review', role = 'implementer', exclude = [], sessionPolicy } = options;
   let implementer = options.implementer;
   let launchResult: Awaited<ReturnType<ReboundStartAgent>>;
   try {
@@ -617,6 +700,7 @@ async function launchFixAttempt(options: {
       slug,
       role,
       exclude,
+      sessionPolicy,
     });
   } catch (err: unknown) {
     return { ok: false, implementer, diagnostic: `Could not launch implementer (${implementer}): ${(err as Error).message}`, repairAttempted: false };

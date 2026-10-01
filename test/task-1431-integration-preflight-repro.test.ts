@@ -58,6 +58,9 @@ function baseContext(overrides) {
     pr: { exists: false, raw: 'no PR found' },
     approval: { ok: false, error: 'pr-missing', reviewState: null },
     mainBranch: 'main',
+    baseWorktree: '/tmp',
+    baseBranch: 'main',
+    missionWorktree: '/tmp/mission',
     mainDirty: false,
     mainDirtyEntries: []
   }, overrides);
@@ -72,6 +75,7 @@ const defaultPreflightOpts = {
   readTokenFn: () => 'secret-token',
   resolveTokenFileFn: () => '/tmp/tokens/codex',
   isForgejoReviewEnabledFn: () => false,
+  conventionalWorktreePathFn: () => '/tmp/mission',
   getUnresolvedIndexConflictsFn: () => ({ ok: true, files: [] })
 };
 

@@ -26,6 +26,7 @@ export interface PreflightOptions {
   detectRebaseStateFn?: IntegrateGitPort['detectRebaseState'];
   getUnresolvedIndexConflictsFn?: IntegrateCheckoutPort['getUnresolvedIndexConflicts'];
   findMissionDocInBranchesFn?: IntegrateMissionPathsPort['findMissionDocInBranches'];
+  conventionalWorktreePathFn?: IntegrateMissionPathsPort['conventionalWorktreePath'];
   isForgejoReviewEnabledFn?: (_rootDir: string) => boolean;
   gitFn?: IntegrateGitRunner;
   // Matches `fmt.log.plain`, the production default.
@@ -100,7 +101,7 @@ export function createIntegrationPreflight(ports: IntegrateWorkflowPorts) {
           : backlog.getTaskClassification(context.task.taskFile);
         if (!classification) {
           report.failures.push('classification');
-          report.log(fmt.status('FAIL', `Mission classification: expected exactly one of ai_sdlc, user_value, or unknown in authoritative Mission state for ${context.slug}. Fix: run px classification set --value <type> --expected-version <n>.`));
+          report.log(fmt.status('FAIL', `Mission classification: expected exactly one of ai_sdlc, user_value, or unknown in authoritative Mission state for ${context.slug}. Fix: run px classification set --value <type>.`));
         } else {
           report.detail(`${hasMissionLabels ? 'Mission' : 'Backlog'} classification: ${classification}`);
         }
@@ -142,6 +143,7 @@ export function createIntegrationPreflight(ports: IntegrateWorkflowPorts) {
       detectRebaseStateFn = ports.git.detectRebaseState,
       getUnresolvedIndexConflictsFn = ports.checkout.getUnresolvedIndexConflicts,
       findMissionDocInBranchesFn = missionPaths.findMissionDocInBranches,
+      conventionalWorktreePathFn = missionPaths.conventionalWorktreePath,
       isForgejoReviewEnabledFn = ports.productConfig.isForgejoReviewEnabled,
       gitFn = ports.git.git,
       log = fmt.log.plain,
@@ -190,7 +192,7 @@ export function createIntegrationPreflight(ports: IntegrateWorkflowPorts) {
       log(fmt.status('WARN', `${context.taskAssigneeWarning}`));
     }
 
-    checkIntegrationCheckout(report, context, ports, { baseWorktree, baseBranch, detectRebaseStateFn, getUnresolvedIndexConflictsFn, gitFn });
+    checkIntegrationCheckout(report, context, ports, { baseWorktree, baseBranch, detectRebaseStateFn, getUnresolvedIndexConflictsFn, gitFn, conventionalWorktreePathFn });
 
     report.detail('Forgejo configuration: allow_manual_merge assumed enabled');
 

@@ -523,12 +523,18 @@ function createReboundLaunchPort(context) {
       agent,
       slug,
       role: 'implementer',
+      sessionPolicy: launchOptions.sessionPolicy,
       // startAgent uses the RESUME_CAPABLE set and session markers to decide resume.
       onLaunch: (/** @type{{agent: string}} */ { agent: launchedAgent }) => {
         log(`Relaunched ${fmt.agent(launchedAgent)} for repair. Session persistence will be used if available.`);
       }
     });
   }) as ReboundContext['startAgent'];
+}
+
+function readReboundHead(worktree) {
+  const result = git(['-C', worktree, 'rev-parse', 'HEAD']);
+  return result.status === 0 ? result.stdout.trim() : null;
 }
 
 /**
@@ -571,7 +577,7 @@ async function repairCheckpointsBeforeHandoff(validation, context): Promise<bool
     ? `${gapError}\n\n${buildCheckpointContinuationPrompt(slug, worktree, nextCheckpoint, isTypedCheckpointEvidenceFailure(gapError))}`
     : gapError;
   const outcome = await rebound({ kind: 'handoff-verification', error: checkpointError }, {
-    slug, worktree, implementer: agent, startAgent: reboundLaunchPort,
+    slug, worktree, implementer: agent, startAgent: reboundLaunchPort, readHead: () => readReboundHead(worktree),
     verify: async () => {
       const retry = await validateCheckpointsBeforeHandoffFn(slug, worktree, { log, error });
       return { ok: Boolean(retry.ok), diagnostic: retry.error || '' };
@@ -601,7 +607,7 @@ async function reboundFailedHandoff(holder, classification, context): Promise<vo
     ? { kind: 'gate-failure', ...gateFailure }
     : { kind: 'handoff-verification', error: /** @type{string} */(holder.result.error), gateOutput: flattenGateOutput(holder.result.gateOutput) };
   const outcome = await rebound(failureReason, {
-    slug, worktree, implementer: agent, startAgent: reboundLaunchPort,
+    slug, worktree, implementer: agent, startAgent: reboundLaunchPort, readHead: () => readReboundHead(worktree),
     verify: async () => {
       holder.result = await performHandoffFn(slug, { forgejoUser: agent, worktree, force: true });
       return {
@@ -642,7 +648,7 @@ async function repairHygieneHandoff(holder, context): Promise<void> {
   log(`Content error detected. Attempting agent relaunch to fix...`);
   const contentError = /** @type{string} */(holder.result.error);
   const outcome = await rebound({ kind: 'handoff-verification', error: contentError }, {
-    slug, worktree, implementer: agent, startAgent: reboundLaunchPort,
+    slug, worktree, implementer: agent, startAgent: reboundLaunchPort, readHead: () => readReboundHead(worktree),
     verify: async () => {
       holder.result = await performHandoffFn(slug, { forgejoUser: agent, worktree, force: true });
       return { ok: Boolean(holder.result.ok), diagnostic: holder.result.error || '' };

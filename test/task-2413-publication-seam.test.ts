@@ -12,29 +12,15 @@
  */
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import childProcess from 'child_process';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
+import { initCommittedRepository } from './fixtures/git-repository.js';
 import { createPr } from '../src/adapters/forgejo/forgejo-pr.js';
 
 function withCommittedRepo(fn) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'workflow-2413-pub-'));
   try { fn(root); } finally { fs.rmSync(root, { recursive: true, force: true }); }
-}
-
-function initCommittedGitRepo(root) {
-  const runGit = (args) => {
-    const result = childProcess.spawnSync('git', ['-C', root, ...args], { encoding: 'utf8' });
-    assert.equal(result.status, 0, result.stderr || result.stdout || `git ${args.join(' ')} failed`);
-  };
-  runGit(['init']);
-  runGit(['checkout', '-b', 'main']);
-  runGit(['config', 'user.name', 'Test User']);
-  runGit(['config', 'user.email', 'test@example.com']);
-  fs.writeFileSync(path.join(root, 'README.md'), '# temp repo\n', 'utf8');
-  runGit(['add', 'README.md']);
-  runGit(['commit', '-m', 'init']);
 }
 
 function writeWorkflowConfig(root, verificationCommand) {
@@ -49,7 +35,7 @@ function writeWorkflowConfig(root, verificationCommand) {
 
 test('task-2413: publication verifier failure carries captured output through createPr', () => {
   withCommittedRepo(root => {
-    initCommittedGitRepo(root);
+    initCommittedRepository(root);
     // A verifier that emits diagnostic output and fails non-zero, mirroring a
     // timing/resource-contention gate collapse under host contention.
     const verificationCommand = "sh -c 'echo captured-stdout-line; echo captured-stderr-line 1>&2; exit 3'";
@@ -79,7 +65,7 @@ test('task-2413: publication verifier failure carries captured output through cr
 
 test('task-2413: an exit-code-only wrapper string still propagates without crashing createPr', () => {
   withCommittedRepo(root => {
-    initCommittedGitRepo(root);
+    initCommittedRepository(root);
     // A verifier that fails with no stdout/stderr still yields a structured,
     // non-empty gate failure (exit code preserved), never a hidden success.
     const verificationCommand = 'sh -c "exit 2"';

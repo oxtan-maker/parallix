@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
-import { execFileSync, spawn as spawnChildProcess } from 'node:child_process';
+import { execFileSync, spawn as spawnChildProcess, spawnSync } from 'node:child_process';
 import { mockModule, installModuleMocks } from './lib/module-mock.js';
 // custom-capacity holds process-local mutable state and is only read here.
 // A plain import keeps the single production-graph instance; declaring it
@@ -43,6 +43,35 @@ test('a recovery launch uses the fresh-session marker port', async () => {
   });
   assert.equal(launched.resume, false);
   assert.equal(launched.sessionId, null);
+});
+
+test('startAgent sessionPolicy keeps the normal marker while fresh recovery bypasses it', async () => {
+  const markerCalls = { shouldResume: 0, find: 0, save: 0, delete: 0 };
+  const sessionMarkerPort = {
+    shouldResume: () => (markerCalls.shouldResume++, true),
+    find: () => (markerCalls.find++, { sessionId: 'durable-normal-session' }),
+    save: () => { markerCalls.save++; },
+    delete: () => { markerCalls.delete++; },
+  };
+  const launches: any[] = [];
+  const launchAgentFn = (options) => {
+    launches.push(options);
+    return { invocation: { command: 'claude', args: [], options: {} }, resultPromise: Promise.resolve({ status: 0, stdout: '', stderr: '' }) };
+  };
+  const common = { prompt: 'repair', worktree: '/tmp/task-2588-session-policy', agent: 'claude', slug: 'task-2588', role: 'implementer', sessionMarkerPort, isAgentBlockedFn: () => false, resolveAgentModelFn: () => null, assertAgentSupportedFn: () => {}, log: () => {}, launchAgentFn };
+
+  await startAgent('act-on-review', { ...common, sessionPolicy: 'resume' });
+  const callsAfterResume = { ...markerCalls };
+  await startAgent('act-on-review', { ...common, sessionPolicy: 'fresh-ephemeral' });
+  assert.deepEqual(markerCalls, callsAfterResume, 'fresh recovery must neither read nor mutate the durable marker');
+  await startAgent('act-on-review', common);
+
+  assert.equal(launches[0].resume, true);
+  assert.equal(launches[0].sessionId, 'durable-normal-session');
+  assert.equal(launches[1].resume, false);
+  assert.equal(launches[1].sessionId, null);
+  assert.equal(launches[2].resume, true, 'ordinary launch still resumes the original normal session');
+  assert.equal(launches[2].sessionId, 'durable-normal-session');
 });
 
 if (process.env.PARALLIX_HOME) {
@@ -896,8 +925,10 @@ test('a help probe timeout keeps the present launcher eligible for a real launch
   } finally { setLauncherHealthProbe(() => ({ ok: true })); }
 });
 
-test('workflowLauncherStatus rejects a launcher that exists but fails its health probe', () => {
-  withPathLaunchers({
+test('workflowLauncherStatus rejects a launcher that exists but fails its health probe', async () => {
+  // withRealHealthProbe is async: await it so an assertion fails this test
+  // instead of surfacing as an unattributed unhandled rejection.
+  await withPathLaunchers({
     codex: 'process.exit(process.argv.includes("--help") ? 1 : 0);'
   }, () => withRealHealthProbe(() => {
     const status = workflowLauncherStatus('codex');
@@ -908,20 +939,32 @@ test('workflowLauncherStatus rejects a launcher that exists but fails its health
 });
 
 test('workflowLauncherStatus probes Pi with its side-effect-free version command', () => {
-  withPathLaunchers({
-    pi: 'process.exit(process.argv.includes("--version") ? 0 : 1);'
-  }, () => withRealHealthProbe(() => {
-    const status = workflowLauncherStatus('pi');
-    assert.equal(status.supported, true);
-    assert.equal(status.health, 'ok');
-  }));
+  // Record the probe and run it to completion. The production probe's 3 s
+  // timeout reports 'probe-timeout' on a loaded host, which says nothing about
+  // the argument under test (TASK-2622.04 integration-gate repair).
+  const probes: string[][] = [];
+  setLauncherHealthProbe((command, args) => {
+    probes.push(args);
+    const result = spawnSync(command, args, { stdio: 'ignore' });
+    return result.status === 0 ? { ok: true } : { ok: false, reason: `exit ${result.status}` };
+  });
+  try {
+    withPathLaunchers({
+      pi: 'process.exit(process.argv.includes("--version") ? 0 : 1);'
+    }, () => {
+      const status = workflowLauncherStatus('pi');
+      assert.deepEqual(probes, [['--version']]);
+      assert.equal(status.supported, true);
+      assert.equal(status.health, 'ok');
+    });
+  } finally { setLauncherHealthProbe(() => ({ ok: true })); }
 });
 
-test('selectAgent bypasses a broken launcher even when the binary exists', () => {
+test('selectAgent bypasses a broken launcher even when the binary exists', async () => {
   const previous = process.env.WORKFLOW_AGENT;
   delete process.env.WORKFLOW_AGENT;
   try {
-    withRealHealthProbe(() => withPathLaunchers({
+    await withRealHealthProbe(() => withPathLaunchers({
       codex: 'process.exit(process.argv.includes("--help") ? 1 : 0);'
     }, () => {
       const config = {

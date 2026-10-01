@@ -54,6 +54,9 @@ export const INTEGRATION_CI_TESTS: readonly string[] = [
   'durable-state-policy.test.ts',
   'e2e-mission-sqlite-cutover.test.ts',
   'external-target-resolution.test.ts',
+  // Spawns bootstrapped child workers that build Git and SQLite case fixtures,
+  // then fails, signals, or kills them to prove the fixtures are reclaimed.
+  'fixture-lifetime.integration.test.ts',
   'forgejo-independence.test.ts',
   'forgejo-pr-round-sync.test.ts',
   'forgejo.test.ts',
@@ -106,12 +109,12 @@ export const INTEGRATION_CI_TESTS: readonly string[] = [
   // prove the SonarQube Cloud branch identity and the absence of the retired
   // local path. A plain Git checkout is enough, so it is CI-safe.
   'sonarqube-cloud-wiring.test.ts',
-  'sqlite-adapter-cp1.test.ts',
-  'sqlite-async-cascade-cp3.test.ts',
-  'sqlite-importer-cp4.test.ts',
+  'sqlite-schema-and-migrations.integration.test.ts',
+  'sqlite-operator-state.integration.test.ts',
+  'sqlite-import-and-audit.integration.test.ts',
   'sqlite-mission-store.integration.test.ts',
   'operator-state-scope.integration.test.ts',
-  'sqlite-ports-cp2.test.ts',
+  'sqlite-repository-contract.integration.test.ts',
   'sqlite-recovery-cp5.test.ts',
   'startup-preflight.test.ts',
   'stats-backfill.test.ts',
@@ -219,10 +222,19 @@ export const INTEGRATION_CI_TESTS: readonly string[] = [
   'task-2492-integrate-gate-bounce.test.ts',
   // TASK-2601 uses temporary SQLite Mission and measurement stores only.
   'task-2601-repro.test.ts',
+  // TASK-2609: seeds a temporary SQLite operator database and drives the
+  // production `px classification set` composition path to prove the command
+  // discovers the version itself. Real SQLite is a clean-runner dependency, so
+  // this CLI-composition test runs in the integration layer rather than the
+  // CPU-budgeted unit tier.
+  'task-2609-classification-set.test.ts',
   // TASK-2599 spawns the dev entry in a child process and materialises a
   // temporary SQLite Mission store, so it crosses the process and SQLite
   // boundaries and runs only in the integration layer (clean runner is enough).
   'task-2599-repro.test.ts',
+  // TASK-2614 opens a migrated SQLite Mission store in a temporary directory;
+  // clean GitHub-hosted runners provide every required dependency.
+  'task-2614-review-start-recovery.test.ts',
   // TASK-2502: CodeQL gate tests. --dry-run resolves the plan without spawning
   // the CLI, and the clean-cache test skips when no pinned codeql is on PATH, so
   // both run on a clean GitHub-hosted runner with only bash.
@@ -284,11 +296,11 @@ export const INTEGRATION_CI_TESTS: readonly string[] = [
   // TASK-2521.03: seeds an isolated SQLite operator database and drives the
   // production `px status --json` composition path.
   'task-2521-03-context-cli.integration.test.ts',
-  'task-2521.04-legacy-trace-commit.integration.test.ts',
+  'legacy-import-trace.integration.test.ts',
   'task-2521.04-mission-dependencies.integration.test.ts',
-  'task-2521.06-audit.integration.test.ts',
+  'legacy-persistence-audit.integration.test.ts',
   // Reads and commits artifacts in temporary Git repositories; standard Git is enough for CI.
-  'task-2521.06-legacy-task-content.test.ts',
+  'legacy-content-history.integration.test.ts',
   // TASK-2532: seeds temporary Git repositories to exercise the base-worktree
   // repair (marker-stash sweep + dead-rebase abort), so it crosses the git
   // boundary and runs only in the integration layer.
@@ -311,6 +323,9 @@ export const INTEGRATION_CI_TESTS: readonly string[] = [
   // task file, so it crosses the git boundary and runs only in the integration
   // layer.
   'task-2537-squash-closeout-unstaged-task-path.test.ts',
+  // TASK-2627 drives production squash landing through temporary Git repos;
+  // standard Git is the only external dependency, so it is CI-safe.
+  'task-2627-squash-rename-repro.test.ts',
   // TASK-2613: lands two missions through the production integrate ports in a
   // throwaway Git repo to prove closeout archives the task file and re-arms the
   // stale-copy guards, so it crosses the git boundary and runs only in the

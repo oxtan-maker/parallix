@@ -19,88 +19,42 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import * as fs from 'node:fs';
-import * as os from 'node:os';
-import * as path from 'node:path';
 
 import { agentFamily } from '../src/domain/agents.js';
-import { missionId, missionLabels, type Mission } from '../src/domain/mission.js';
-import { repositoryId } from '../src/domain/repository.js';
+import { missionId, type Mission } from '../src/domain/mission.js';
 import { ExecuteMissionService } from '../src/application/execute-mission-service.js';
 import type { ExecuteMissionPorts } from '../src/application/ports/execute-mission.js';
-import { SqliteDatabaseAdapter } from '../src/adapters/sqlite/database-adapter.js';
-import { SqliteMigrationRunner, loadDefaultMigrations } from '../src/adapters/sqlite/migration-runner.js';
-import { SqliteMissionStore } from '../src/adapters/sqlite/mission-store.js';
+import { fixtureMission } from './fixtures/mission-builders.js';
+import { openMigratedMissionStore, type MigratedMissionStore } from './fixtures/mission-sqlite-store.js';
 
 const SLUG = 'task-2582-ordering';
 const AGENT = agentFamily('claude');
 const FALLBACK_AGENT = agentFamily('codex');
 
-const tempDirs: string[] = [];
-
-function makeTempRoot(): string {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), `parallix-task-2582-ordering-`));
-  tempDirs.push(root);
-  return root;
-}
-
-test.after(() => {
-  for (const dir of tempDirs) {
-    fs.rmSync(dir, { recursive: true, force: true });
-  }
-});
-
 /** A refined mission carrying the full drafted contract: activatable. */
 function seedMission(): Mission {
-  return {
-    id: missionId(SLUG),
-    repositoryId: repositoryId('parallix'),
-    title: `Mission ${SLUG}`,
-    labels: missionLabels([]),
+  return fixtureMission(SLUG, {
     status: 'refined',
-    rawStatus: 'refined',
-    checkpoints: [{
-      missionId: missionId(SLUG),
-      name: 'CP-1',
-      rawFilename: 'CP-1.md',
-      firstLine: 'CP-1',
-      goalCheck: [{ criterion: 'criterion', evidence: 'evidence' }],
-      nextActionText: 'hand off',
-    }],
     brief: { goal: 'Goal', why: 'Why', scope: 'Scope', outOfScope: [] },
     declaredGates: ['npm test'],
     successCriteria: ['The mission is done'],
-    dependencies: [],
     predictedNelBucket: 'Small',
-    reproductionTest: null,
-    assignee: null,
-    externalTaskRef: null,
-    intakeTrace: null,
-    review: null,
-    netEngineeringLines: null,
-    closedAt: null,
-  } as Mission;
+  });
 }
 
-interface Fixture {
-  readonly database: SqliteDatabaseAdapter;
-  readonly store: SqliteMissionStore;
+interface Fixture extends MigratedMissionStore {
   /** Inert mechanism ports over the real mission store. */
   readonly ports: ExecuteMissionPorts;
 }
 
 async function openFixture(
-  launch: (request: { onAgentChanged?: (agent: string) => Promise<void> }) => Promise<{
+  launch: (_request: { onAgentChanged?: (_agent: string) => Promise<void> }) => Promise<{
     agent: string; rebaseDeferred: boolean; errored: boolean; errorMessage: string | null; exitStatus: number | null; detail: unknown;
   }>,
   mission: Mission = seedMission(),
 ): Promise<Fixture> {
-  const root = makeTempRoot();
-  const database = new SqliteDatabaseAdapter();
-  await database.open({ path: path.join(root, 'parallix.db') });
-  await new SqliteMigrationRunner(database).applyPending(loadDefaultMigrations());
-  const store = new SqliteMissionStore(database);
-  await store.save(mission, null);
+  const migrated = await openMigratedMissionStore([mission]);
+  const { store } = migrated;
   const ports = {
     workspace: {
       async preflight() { return true; },
@@ -118,22 +72,7 @@ async function openFixture(
     telemetry: { async recordLaunchTelemetry() {} },
     handoffReview: { async runHandoffAndReview() { return true; } },
   } as unknown as ExecuteMissionPorts;
-  return { database, store, ports };
-}
-
-interface LaneEventRow {
-  from_status: string | null;
-  to_status: string;
-  trigger: string;
-}
-
-async function laneEvents(database: SqliteDatabaseAdapter): Promise<Array<{ from_status: string | null, to_status: string, trigger: string }>> {
-  const rows = await database.query<LaneEventRow>(
-    'SELECT from_status, to_status, trigger FROM board_lane_events WHERE mission_id = ? ORDER BY id',
-    [SLUG],
-  );
-  // node:sqlite returns null-prototype rows; normalize for plain-object asserts.
-  return rows.map((row) => ({ from_status: row.from_status, to_status: row.to_status, trigger: row.trigger }));
+  return { ...migrated, ports };
 }
 
 /** Bounded wait on an observable condition (explicit synchronization, no sleeps). */
@@ -149,7 +88,7 @@ test('a slow downstream agent run does not delay the active transition', async (
   let releaseAgent: () => void = () => {};
   const agentGate = new Promise<void>((resolve) => { releaseAgent = resolve; });
   let launchEntered = false;
-  const { database, store, ports } = await openFixture(async (request) => {
+  const { store, ports, laneEvents, close } = await openFixture(async (request) => {
     launchEntered = true;
     // Activation is committed before the launcher enters provider work.
     assert.equal(request.onAgentChanged instanceof Function, true);
@@ -172,20 +111,20 @@ test('a slow downstream agent run does not delay the active transition', async (
     assert.equal(loaded.kind, 'found');
     assert.equal(loaded.kind === 'found' ? loaded.mission.status : null, 'active',
       'the destination state commits at the boundary, before the slow work finishes');
-    const events = await laneEvents(database);
+    const events = await laneEvents(SLUG);
     assert.deepEqual(events, [{ from_status: 'refined', to_status: 'active', trigger: 'activate' }]);
     releaseAgent();
     const outcome = await pending;
     assert.equal(outcome.status, 'completed');
   } finally {
     releaseAgent();
-    await database.close();
+    await close();
   }
 });
 
 test('a fallback relaunch re-asserts the active boundary with no second lane event', async () => {
   const boundaryAgents: string[] = [];
-  const { database, store, ports } = await openFixture(async (request) => {
+  const { store, ports, laneEvents, close } = await openFixture(async (request) => {
     // The launch was pre-activated for the selected family. After a usage
     // block, the replacement family updates the authoritative assignee.
     if (request.onAgentChanged) {
@@ -213,17 +152,17 @@ test('a fallback relaunch re-asserts the active boundary with no second lane eve
       'the assignee is the family that actually ran');
     // Activation is idempotent on an active lane: the failover re-assert must
     // not invent a second lane event.
-    const events = await laneEvents(database);
+    const events = await laneEvents(SLUG);
     assert.deepEqual(events, [{ from_status: 'refined', to_status: 'active', trigger: 'activate' }]);
   } finally {
-    await database.close();
+    await close();
   }
 });
 
 
 test('an immediate activation blocker stops before launching the agent', async () => {
   let launched = false;
-  const { database, store, ports } = await openFixture(async () => {
+  const { store, ports, laneEvents, close } = await openFixture(async () => {
     launched = true;
     return { agent: AGENT, rebaseDeferred: false, errored: false, errorMessage: null, exitStatus: 0, detail: null };
   }, { ...seedMission(), status: 'backlog', rawStatus: 'backlog' } as Mission);
@@ -236,6 +175,6 @@ test('an immediate activation blocker stops before launching the agent', async (
     assert.equal(launched, false);
     const loaded = await store.load(missionId(SLUG));
     assert.equal(loaded.kind === 'found' ? loaded.mission.status : null, 'backlog');
-    assert.deepEqual(await laneEvents(database), []);
-  } finally { await database.close(); }
+    assert.deepEqual(await laneEvents(SLUG), []);
+  } finally { await close(); }
 });

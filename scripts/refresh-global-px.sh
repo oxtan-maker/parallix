@@ -25,17 +25,18 @@ echo "[refresh-global-px] Building the distributable (esbuild -> build/px.mjs)..
 npm run build
 
 echo "[refresh-global-px] Packing a tarball of this checkout..."
-PACK_OUTPUT="$(npm pack)"
+PACK_DIR="$(mktemp -d "${TMPDIR:-/tmp}/parallix-refresh.XXXXXX")"
+trap 'rm -rf "${PACK_DIR}"' EXIT
+PACK_OUTPUT="$(npm pack --pack-destination "${PACK_DIR}")"
 TARBALL="$(printf '%s\n' "${PACK_OUTPUT}" | awk '/\.tgz$/ { tarball = $0 } END { print tarball }')"
 if [[ -z "${TARBALL}" ]]; then
   echo "[refresh-global-px] npm pack did not report a tarball filename." >&2
   printf '%s\n' "${PACK_OUTPUT}" >&2
   exit 1
 fi
-trap 'rm -f "${TARBALL}"' EXIT
 
 echo "[refresh-global-px] Installing ${TARBALL} globally..."
-npm install -g "./${TARBALL}"
+npm install -g "${PACK_DIR}/${TARBALL}"
 
 echo "[refresh-global-px] Global px runner refreshed from ${REPO_ROOT}."
 px --version || true

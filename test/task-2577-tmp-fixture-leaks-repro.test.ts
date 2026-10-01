@@ -10,11 +10,11 @@
  *   px-measure-*       test/measurement-store-cutover.test.ts (tempDbPath + the
  *                      px-measure-fail- scenario) — closed the store but never
  *                      removed the fixture root; 8 dirs, ~34 MB per run
- *   task-2521.04-*     test/task-2521.04-legacy-mission-import.test.ts
+ *   task-2521.04-*     test/legacy-mission-import.test.ts
  *                      (workspace(), 27 dirs),
  *                      test/task-2521.04-imported-mission-board-path.test.ts
  *                      (workspace(), 3 dirs), and
- *                      test/task-2521.04-legacy-trace-commit.integration.test.ts
+ *                      test/legacy-import-trace.integration.test.ts
  *                      (1 dir) — raw mkdtempSync, no cleanup owner;
  *                      ~31 dirs, ~4 KB per focused run
  *   qwen-*             test/qwen-telemetry.test.ts, test/qwen-launcher.test.ts
@@ -54,9 +54,9 @@ const REPO_ROOT = path.join(import.meta.dirname, '..');
 const CUTOVER_FILE = path.join('test', 'measurement-store-cutover.test.ts');
 const DRAIN_FILE = path.join('test', 'task-2339-writes-outlive-close.test.ts');
 const TASK_2521_04_FILES = [
-  path.join('test', 'task-2521.04-legacy-mission-import.test.ts'),
+  path.join('test', 'legacy-mission-import.test.ts'),
   path.join('test', 'task-2521.04-imported-mission-board-path.test.ts'),
-  path.join('test', 'task-2521.04-legacy-trace-commit.integration.test.ts'),
+  path.join('test', 'legacy-import-trace.integration.test.ts'),
 ] as const;
 
 /** Confirmed leaking family prefixes (see the file header inventory). */

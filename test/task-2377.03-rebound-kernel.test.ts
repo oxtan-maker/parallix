@@ -425,3 +425,79 @@ test('task-2525.05: a transient gate rerun preserves the original diagnostic in 
   assert.match(capturedPrompt, /REFRESHED_GATE_OUTPUT/);
   assert.match(capturedPrompt, /ORIGINAL_GATE_OUTPUT/);
 });
+
+test('task-2588: targeted failure then fresh diagnostic success keeps both verifier passes and strategies', async () => {
+  const launches: any[] = []; const logs: string[] = []; let verifies = 0;
+  const outcome = await rebound(gateReason, contextFor({
+    verify: () => ({ ok: ++verifies === 2, diagnostic: verifies === 1 ? 'LATEST_FAILURE' : '' }),
+    startAgent: async (_step, options: any) => { launches.push(options); return { agent: 'codex', result: { status: 0 } }; },
+    log: message => logs.push(message),
+  }));
+  assert.equal(outcome.outcome, 'fixed'); assert.equal(launches.length, 2); assert.equal(verifies, 2);
+  assert.equal(launches[0].sessionPolicy, 'resume'); assert.equal(launches[1].sessionPolicy, 'fresh-ephemeral');
+  const freshPrompt = launches[1].prompt('codex'); assert.match(freshPrompt, /LATEST_FAILURE/); assert.match(freshPrompt, /failing test: preserves diagnostic/);
+  assert.deepEqual(outcome.attemptsDetail?.map(a => a.strategy), ['targeted', 'fresh-diagnostic']);
+  assert.ok(logs.some(line => line.includes('RECOVERY_TELEMETRY strategy=targeted outcome=advance')));
+  assert.ok(logs.some(line => line.includes('RECOVERY_TELEMETRY strategy=fresh-diagnostic outcome=rescue')));
+});
+
+test('task-2588: fresh failure escalates after two strategies with no false pass', async () => {
+  let launches = 0; const logs: string[] = [];
+  const outcome = await rebound(gateReason, contextFor({ verify: () => ({ ok: false, diagnostic: 'STILL_RED' }), startAgent: async () => ({ result: { status: 0, }, agent: (++launches, 'codex') }), log: message => logs.push(message) }));
+  assert.equal(outcome.outcome, 'exhausted'); assert.equal(launches, 2); assert.match(outcome.dossier || '', /fresh-diagnostic/); assert.ok(!/PASS|APPROVED/.test(outcome.dossier || ''));
+  assert.ok(logs.some(line => line.includes('RECOVERY_TELEMETRY strategy=targeted outcome=advance')));
+  assert.ok(logs.some(line => line.includes('RECOVERY_TELEMETRY strategy=fresh-diagnostic outcome=escalate')));
+});
+
+test('task-2588: targeted success launches once and emits stable pass telemetry', async () => {
+  const launches: any[] = []; const logs: string[] = [];
+  const outcome = await rebound(gateReason, contextFor({
+    startAgent: async (_step, options: any) => (launches.push(options), { agent: 'codex', result: { status: 0 } }),
+    log: message => logs.push(message),
+  }));
+  assert.equal(outcome.outcome, 'fixed');
+  assert.equal(launches.length, 1); assert.equal(launches[0].sessionPolicy, 'resume');
+  assert.ok(logs.some(line => line.includes('RECOVERY_TELEMETRY strategy=targeted outcome=pass')));
+});
+
+test('task-2588: no HEAD change and same failure escalate with per-attempt evidence', async () => {
+  const outcome = await rebound(gateReason, contextFor({
+    readHead: () => 'head-unchanged', verify: () => ({ ok: false, diagnostic: gateReason.stdout, reason: gateReason }),
+  }));
+  assert.equal(outcome.outcome, 'exhausted'); assert.equal(outcome.attempts, 2);
+  assert.deepEqual(outcome.attemptsDetail?.map(detail => [detail.headBefore, detail.headAfter, detail.fingerprintBefore === detail.fingerprintAfter]), [
+    ['head-unchanged', 'head-unchanged', true], ['head-unchanged', 'head-unchanged', true],
+  ]);
+});
+
+test('task-2588: changed code with the same failure still exhausts the bounded budget', async () => {
+  let head = 'before'; let launches = 0;
+  const outcome = await rebound(gateReason, contextFor({
+    readHead: () => head,
+    startAgent: async () => { head = `after-${++launches}`; return { agent: 'codex', result: { status: 0 } }; },
+    verify: () => ({ ok: false, diagnostic: gateReason.stdout }),
+  }));
+  assert.equal(outcome.outcome, 'exhausted'); assert.equal(launches, 2);
+  assert.deepEqual(outcome.attemptsDetail?.map(detail => [detail.headBefore, detail.headAfter]), [['before', 'after-1'], ['after-1', 'after-2']]);
+});
+
+test('task-2588: a changed failure after attempt one remains bounded at two launches', async () => {
+  let launches = 0; let verifies = 0;
+  const outcome = await rebound(gateReason, contextFor({
+    startAgent: async () => ({ agent: 'codex', result: { status: 0 }, ...(launches++, {}) }),
+    verify: () => ({ ok: false, diagnostic: ++verifies === 1 ? 'SECOND_FAILURE' : 'THIRD_FAILURE' }),
+  }));
+  assert.equal(outcome.outcome, 'exhausted'); assert.equal(launches, 2);
+  assert.equal(outcome.attemptsDetail?.[0].fingerprintAfter, outcome.attemptsDetail?.[1].fingerprintBefore);
+  assert.notEqual(outcome.attemptsDetail?.[0].fingerprintBefore, outcome.attemptsDetail?.[0].fingerprintAfter);
+});
+
+test('task-2588: fresh repair observes the commit created by targeted repair', async () => {
+  let head = 'base'; const headsAtLaunch: string[] = []; let verifies = 0;
+  const outcome = await rebound(gateReason, contextFor({
+    readHead: () => head,
+    startAgent: async () => { headsAtLaunch.push(head); head = headsAtLaunch.length === 1 ? 'targeted-commit' : 'fresh-commit'; return { agent: 'codex', result: { status: 0 } }; },
+    verify: () => ({ ok: ++verifies === 2, diagnostic: 'still red' }),
+  }));
+  assert.equal(outcome.outcome, 'fixed'); assert.deepEqual(headsAtLaunch, ['base', 'targeted-commit']);
+});

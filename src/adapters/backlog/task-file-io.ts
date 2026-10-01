@@ -106,10 +106,12 @@ function resolveMissingPrefixTask(slug: string, normalizedId: string, files: str
   // Only a single exact-id hit resolves here. Several files claiming one id is
   // not authority to pick one, so the base-task-id fallback still runs and the
   // unresolved answer stays `missing` — the reason this seam reported before the
-  // id lookup was factored out.
+  // id lookup was factored out. The base id keeps a dotted subtask number: an
+  // explicit `task-2623.04` names that exact task, so it never falls back to
+  // TASK-2623 (task-2624); `task-115-modernized` still falls back to TASK-115.
   const idMatches = findTaskFilesById(files, normalizedId);
   if (idMatches.length === 1) { return { ok: true, taskFile: idMatches[0], matches: idMatches }; }
-  const baseId = slug.match(/^(task-\d+)/i)?.[1]?.toUpperCase();
+  const baseId = slug.match(/^(task-\d+(?:\.\d+)?)/i)?.[1]?.toUpperCase();
   if (!baseId) { return { ok: false, reason: 'missing', matches: idMatches }; }
   const baseMatches = findTaskFilesById(files, baseId);
   return baseMatches.length > 0

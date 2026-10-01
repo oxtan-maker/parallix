@@ -34,11 +34,10 @@ await installModuleMocks();
 
 import { MissionIntegrationService } from '../src/application/mission-integration-service.js';
 import { MissionLifecycleService } from '../src/application/mission-lifecycle-service.js';
-import type { LaneTransitionEvent } from '../src/domain/board-event.js';
-import type { Mission, MissionStatus } from '../src/domain/mission.js';
+import type { MissionStatus } from '../src/domain/mission.js';
 import { missionId } from '../src/domain/mission.js';
 import { repositoryId } from '../src/domain/repository.js';
-import type { MissionVersion } from '../src/application/domain-ports.js';
+import { approvedReview, inMemoryTransitionStore, integrateCommandMission, type InMemoryTransitionStore } from './fixtures/mission-builders.js';
 import { SqliteDatabaseAdapter } from '../src/adapters/sqlite/database-adapter.js';
 import { SqliteMigrationRunner, loadDefaultMigrations } from '../src/adapters/sqlite/migration-runner.js';
 import { SqliteUsageRepository } from '../src/adapters/sqlite/usage-repository.js';
@@ -57,61 +56,15 @@ const RETRY_AT = '2026-08-06T10:00:00+02:00';
 
 // --- shared fakes ----------------------------------------------------------
 
-interface FakeStore {
-  readonly events: LaneTransitionEvent[];
-  mission(): Mission;
-  load(): Promise<unknown>;
-  save(_m: Mission, _v: MissionVersion | null): Promise<MissionVersion>;
-  saveWithTransition(_m: Mission, _v: MissionVersion | null, _e: LaneTransitionEvent): Promise<MissionVersion>;
-}
+type FakeStore = InMemoryTransitionStore;
 
-/** A MissionTransitionStore that records lane events, so completions are countable. */
+/**
+ * A MissionTransitionStore that records lane events, so completions are countable.
+ * An approved last round is what the CLI reads as its approval source when
+ * no review provider is reachable (integrate.ts, "mission-store" approval).
+ */
 function createFakeStore(status: MissionStatus): FakeStore {
-  let current = {
-    id: missionId(SLUG),
-    repositoryId: repositoryId('parallix'),
-    title: 'fixture',
-    labels: ['ai_sdlc'],
-    assignee: 'codex',
-    checkpoints: [],
-    // An approved last round is what the CLI reads as its approval source when
-    // no review provider is reachable (integrate.ts, "mission-store" approval).
-    review: {
-      rounds: [{
-        number: 1,
-        subject: {
-          change: { kind: 'local-branch', sourceBranch: `mission/${SLUG}`, targetBranch: 'main' },
-          revision: 'fixture-revision',
-        },
-        reviewer: 'claude', implementer: 'codex', startedAt: '2026-08-04T10:00:00Z',
-        decision: { kind: 'approved', decidedAt: '2026-08-04T10:30:00Z', comment: null, source: { kind: 'local' } },
-        response: null, phase: 'approved', disposition: 'APPROVED', reviewerRetryCount: 0, implementerRetryCount: 0,
-      }],
-      intervention: null, stageLaunches: [], reviewEvents: [],
-    },
-    netEngineeringLines: null,
-    status,
-    closedAt: null,
-  } as unknown as Mission;
-  let version = 1;
-  const events: LaneTransitionEvent[] = [];
-  const keys = new Set<string>();
-  return {
-    events,
-    mission: () => current,
-    async load() { return { kind: 'found', mission: current, version: version as MissionVersion }; },
-    async save(next: Mission) { current = next; version += 1; return version as MissionVersion; },
-    async saveWithTransition(next: Mission, _expected, event: LaneTransitionEvent) {
-      if (event.idempotencyKey && keys.has(event.idempotencyKey)) {
-        throw new Error(`Duplicate idempotency key ${event.idempotencyKey}`);
-      }
-      if (event.idempotencyKey) { keys.add(event.idempotencyKey); }
-      events.push(event);
-      current = next;
-      version += 1;
-      return version as MissionVersion;
-    },
-  };
+  return inMemoryTransitionStore(integrateCommandMission(SLUG, status, approvedReview(SLUG)));
 }
 
 function servicesFor(store: FakeStore) {

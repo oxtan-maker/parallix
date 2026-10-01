@@ -5,7 +5,7 @@ import { BoardCommandController } from '../src/application/controller/board-cont
 import type { BoardCommandRequest } from '../src/application/controller/board-command.js';
 import type { CurrentWorkPort } from '../src/application/recording/current-work-recorder.js';
 import { CurrentWorkRecorder } from '../src/application/recording/current-work-recorder.js';
-import type { OperationalHistoryEntry, OperationalHistoryRepository } from '../src/application/ports/operation-history.js';
+import { inMemoryOperationalHistory } from './fixtures/operational-history.js';
 import { makeExecutePorts } from './fixtures/execute-mission-ports.js';
 import { composeProductionCapabilities } from '../src/composition/production-capabilities.js';
 import { repositoryId } from '../src/domain/repository.js';
@@ -15,7 +15,6 @@ import { ConcreteCurrentWorkReadAdapter } from '../src/adapters/backlog/concrete
 import { reconcileCurrentWork, isWorkInProgress } from '../src/application/projections/current-work.js';
 
 const CURRENT_WORK_TTL_MS = 5 * 60 * 1000;
-const noopProgress = (() => {}) as never;
 
 function boardRequest(overrides: Record<string, unknown> = {}): BoardCommandRequest {
   return {
@@ -39,17 +38,6 @@ function spyCurrentWork(): CurrentWorkPort & { calls: Array<{ phase: string; sta
     async blocked(publication) { calls.push({ phase: publication.phase, state: 'blocked' }); },
     async ended(publication) { calls.push({ phase: publication.phase, state: 'ended' }); },
   };
-}
-
-function makeHistoryRepo() {
-  const appended: OperationalHistoryEntry[] = [];
-  const repo: OperationalHistoryRepository = {
-    async findAll() { return appended; },
-    async findByType(type: string) { return appended.filter((entry) => entry.eventType === type); },
-    async append(entry: OperationalHistoryEntry) { appended.push(entry); },
-    async clear() { appended.length = 0; },
-  };
-  return { repo, appended };
 }
 
 // ---------------------------------------------------------------------------
@@ -124,7 +112,7 @@ test('a board cancellation observed after the durable launch publishes ended', a
 
 test('production composition delivers a board controller that publishes to the wired recorder', async () => {
   const { ports } = makeExecutePorts();
-  const { repo } = makeHistoryRepo();
+  const { repo } = inMemoryOperationalHistory();
   const recorder = new CurrentWorkRecorder(repo, { processId: 2387 });
   const missionStore = {
     async load() { return { kind: 'found', mission: { status: 'refined' }, version: 1 }; },
@@ -170,7 +158,7 @@ test('production composition delivers a board controller that publishes to the w
 // ---------------------------------------------------------------------------
 
 test('a board-launched agent surfaces in the WORKING projection and clears on completion', async () => {
-  const { repo } = makeHistoryRepo();
+  const { repo } = inMemoryOperationalHistory();
   const recorder = new CurrentWorkRecorder(repo, { processId: 999 });
   const controller = new BoardCommandController(makeExecutePorts().ports, undefined, {}, recorder);
 
@@ -204,7 +192,7 @@ test('a board-launched agent surfaces in the WORKING projection and clears on co
 });
 
 test('a blocked board launch records a blocking reason in the projection', async () => {
-  const { repo } = makeHistoryRepo();
+  const { repo } = inMemoryOperationalHistory();
   const controller = new BoardCommandController(
     makeExecutePorts({
       agentExecution: {
@@ -237,7 +225,7 @@ test('a blocked board launch records a blocking reason in the projection', async
 
 test('the no-op default records no current work', async () => {
   const { ports } = makeExecutePorts();
-  const { repo } = makeHistoryRepo();
+  const { repo } = inMemoryOperationalHistory();
   // No current-work argument supplied: the controller falls back to the
   // NO_CURRENT_WORK_PORT default for read-only shells and test fixtures.
   const controller = new BoardCommandController(ports);

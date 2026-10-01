@@ -11,7 +11,8 @@ import assert from 'node:assert/strict';
 import { ExecuteMissionService } from '../src/application/execute-mission-service.js';
 import type { ExecuteMissionPorts, HandoffReviewRequest } from '../src/application/ports/execute-mission.js';
 import { CurrentWorkRecorder, parseCurrentWorkEntry } from '../src/application/recording/current-work-recorder.js';
-import type { OperationalHistoryEntry, OperationalHistoryRepository } from '../src/application/ports/operation-history.js';
+import type { OperationalHistoryEntry } from '../src/application/ports/operation-history.js';
+import { inMemoryOperationalHistory } from './fixtures/operational-history.js';
 import { reconcileCurrentWork, isWorkInProgress } from '../src/application/projections/current-work.js';
 import { attentionReason } from '../src/application/projections/board.js';
 import { makeCard } from './fixtures/board-projection.js';
@@ -19,18 +20,6 @@ import { missionId } from '../src/domain/mission.js';
 
 const SLUG = 'task-2373';
 const MISSION = missionId(SLUG);
-
-function makeHistoryRepo() {
-  const appended: OperationalHistoryEntry[] = [];
-  let sequence = 0;
-  const repo: OperationalHistoryRepository = {
-    async findAll() { return appended; },
-    async findByType(type: string) { return appended.filter((entry) => entry.eventType === type); },
-    async append(entry: OperationalHistoryEntry) { sequence += 1; appended.push({ ...entry, id: sequence }); },
-    async clear() { appended.length = 0; },
-  };
-  return { repo, appended };
-}
 
 /** WORKING and NEEDS YOU as the board would render them for this mission. */
 function boardState(appended: readonly OperationalHistoryEntry[], options: { nowMs?: number; alive?: boolean | null } = {}) {
@@ -89,7 +78,7 @@ function executeRequest() {
 // ---------------------------------------------------------------------------
 
 test('SC10: review-loop escalation during px active leaves the mission in NEEDS YOU with its reason', async () => {
-  const { repo, appended } = makeHistoryRepo();
+  const { repo, appended } = inMemoryOperationalHistory({ assignIds: true });
   const ports = strictPorts({
     handoffReview: {
       async runHandoffAndReview(request: HandoffReviewRequest) {
@@ -113,7 +102,7 @@ test('SC10: review-loop escalation during px active leaves the mission in NEEDS 
 });
 
 test('SC10: the bracket-closing ended fact cannot erase an escalation reason', async () => {
-  const { repo, appended } = makeHistoryRepo();
+  const { repo, appended } = inMemoryOperationalHistory({ assignIds: true });
   const ports = strictPorts({
     handoffReview: {
       async runHandoffAndReview(request: HandoffReviewRequest) {
@@ -131,7 +120,7 @@ test('SC10: the bracket-closing ended fact cannot erase an escalation reason', a
 });
 
 test('SC11: exhausted execute options survive into NEEDS YOU as the operator-facing reason', async () => {
-  const { repo, appended } = makeHistoryRepo();
+  const { repo, appended } = inMemoryOperationalHistory({ assignIds: true });
   const ports = strictPorts({
     agentExecution: {
       async prepare() { return { prompt: 'p', agentConfig: {} }; },
@@ -155,7 +144,7 @@ test('SC11: exhausted execute options survive into NEEDS YOU as the operator-fac
 });
 
 test('SC11: one family becoming usage-blocked while another can take over creates no attention', async () => {
-  const { repo, appended } = makeHistoryRepo();
+  const { repo, appended } = inMemoryOperationalHistory({ assignIds: true });
   const ports = strictPorts({
     agentExecution: {
       async prepare() { return { prompt: 'p', agentConfig: {} }; },
@@ -185,7 +174,7 @@ test('SC11: one family becoming usage-blocked while another can take over create
 test('SC12: active work, failover, exhaustion, and dead work each project one truthful state', async () => {
   // 1. active autonomous work -> WORKING. Sampled from inside the review loop:
   // after the bracket closes the mission is legitimately idle.
-  const sampled = makeHistoryRepo();
+  const sampled = inMemoryOperationalHistory({ assignIds: true });
   let duringWork = boardState(sampled.appended);
   await new ExecuteMissionService(strictPorts({
     handoffReview: {
@@ -203,7 +192,7 @@ test('SC12: active work, failover, exhaustion, and dead work each project one tr
   );
 
   // 2. failover in progress -> still WORKING
-  const failover = makeHistoryRepo();
+  const failover = inMemoryOperationalHistory({ assignIds: true });
   let duringFailover = boardState(failover.appended);
   await new ExecuteMissionService(strictPorts({
     agentExecution: {
@@ -223,7 +212,7 @@ test('SC12: active work, failover, exhaustion, and dead work each project one tr
   );
 
   // 3. no autonomous progress possible -> NEEDS YOU
-  const exhausted = makeHistoryRepo();
+  const exhausted = inMemoryOperationalHistory({ assignIds: true });
   await new ExecuteMissionService(strictPorts({
     handoffReview: {
       async runHandoffAndReview(request: HandoffReviewRequest) {
@@ -239,7 +228,7 @@ test('SC12: active work, failover, exhaustion, and dead work each project one tr
   );
 
   // 4. stale/dead work -> not WORKING
-  const stale = makeHistoryRepo();
+  const stale = inMemoryOperationalHistory({ assignIds: true });
   await new ExecuteMissionService(strictPorts({
     handoffReview: {
       async runHandoffAndReview(request: HandoffReviewRequest) {

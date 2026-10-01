@@ -65,6 +65,8 @@ test('integrate-gates plans only the gates matching the mission changed areas', 
   const plan = gates.getIntegrationGatePlan('task-2369.05', {
     dryRun: true,
     configPath,
+    rootDir: import.meta.dirname,
+    baseBranch: 'main',
     gitRunner: () => ({ status: 0, stdout: 'server/app.ts\n', stderr: '' })
   });
   assert.deepEqual(plan.changedAreas, ['server']);

@@ -3,7 +3,7 @@ import { getPrimaryBranch, resolveMissionBaseBranch } from '../filesystem/missio
 import { getTaskImplementer, findTaskFile } from '../backlog/backlog.js';
 import * as verification from '../verification/verification.js';
 import * as fmt from '../../application/presentation/cli-format.js';
-import { DEFAULT_FORGEJO_USER, DISPOSITION_PATTERN, readToken, resolveForgejoAuth, resolveForgejoHome, resolveForgejoSettings, resolveForgejoUser } from './forgejo-auth.js';
+import { DEFAULT_FORGEJO_USER, DISPOSITION_PATTERN, readToken, resolveAuthorizedApproverUser, resolveForgejoAuth, resolveForgejoHome, resolveForgejoSettings, resolveForgejoUser } from './forgejo-auth.js';
 import { forgejoApi, forgejoApiAsync, codexSandboxHint } from './forgejo-api.js';
 import { git } from '../git/git.js';
 import { syncPrimaryBaseline, ensureRemoteBaseBranch, fetchReviewBranch, buildCreatePrPushArgs, cLocaleEnv, deleteReviewRef, isStaleInfoPushRejection } from './forgejo-git.js';
@@ -612,7 +612,7 @@ function getLatestReview(branch: string, reviewerUser: string, sinceIso: string,
   return eligible.length > 0 ? eligible[eligible.length - 1] : null;
 }
 
-function reviewDecisionFromReviews(data: any[], prNumber: number, reviewerUser?: string, sinceIso?: string) {
+function reviewDecisionFromReviews(data: any[], prNumber: number, reviewerUser?: string, sinceIso?: string, authorizedApproverUser?: string) {
   const reviews = data
     .map((review: any) => ({ user: (review.user || {}).login || '?', state: review.state || '', submittedAt: review.submitted_at || review.created_at || '', dismissed: !!review.dismissed }))
     .filter((review: any) => review.state && review.submittedAt && !review.dismissed)
@@ -623,10 +623,17 @@ function reviewDecisionFromReviews(data: any[], prNumber: number, reviewerUser?:
   const finalState = formalReviews.at(-1)?.state ?? (sinceIso ? null : reviews.at(-1)!.state);
   const latestDefaultUserFormal = formalReviews.filter((review: any) => review.user === DEFAULT_FORGEJO_USER).at(-1);
   const defaultUserApproved = finalState === 'APPROVED' && latestDefaultUserFormal?.state === 'APPROVED';
+  const operatorUser = authorizedApproverUser && authorizedApproverUser !== DEFAULT_FORGEJO_USER ? authorizedApproverUser : undefined;
+  const latestOperatorFormal = operatorUser ? formalReviews.filter((review: any) => review.user === operatorUser).at(-1) : undefined;
+  const operatorApproved = !!operatorUser && finalState === 'APPROVED' && latestOperatorFormal?.state === 'APPROVED';
   const latestByUser = new Map(allFormalReviews.map((review: any) => [review.user, review]));
   const approvalHolders = [...latestByUser.values()].filter((review: any) => review.state === 'APPROVED').map((review: any) => review.user);
   const decision: any = { ok: true, prNumber, reviewState: finalState, defaultUserApproved, approvalHolders };
   if (defaultUserApproved) { decision.defaultUserApprovedAt = latestDefaultUserFormal.submittedAt; }
+  if (operatorUser) {
+    decision.operatorApproved = operatorApproved;
+    if (operatorApproved) { decision.operatorApprovedAt = latestOperatorFormal!.submittedAt; }
+  }
   if (reviewerUser) {
     const latestReviewerFormal = formalReviews.filter((review: any) => review.user === reviewerUser).at(-1);
     decision.reviewerApproved = finalState === 'APPROVED' && latestReviewerFormal?.state === 'APPROVED';
@@ -637,10 +644,10 @@ function reviewDecisionFromReviews(data: any[], prNumber: number, reviewerUser?:
 
 /**
  * @param {string} branch
- * @param {{forgejoUser?: string, token?: string, apiCall?: Function, rootDir?: string, reviewerUser?: string}} [options]
- * @returns {{ok: boolean, error?: string, reviewState?: string|null, prNumber?: number, defaultUserApproved?: boolean, defaultUserApprovedAt?: string, reviewerApproved?: boolean, reviewerApprovedAt?: string, raw?: string}}
+ * @param {{forgejoUser?: string, token?: string, apiCall?: Function, rootDir?: string, reviewerUser?: string, authorizedApproverUser?: string}} [options]
+ * @returns {{ok: boolean, error?: string, reviewState?: string|null, prNumber?: number, defaultUserApproved?: boolean, defaultUserApprovedAt?: string, operatorApproved?: boolean, operatorApprovedAt?: string, reviewerApproved?: boolean, reviewerApprovedAt?: string, raw?: string}}
  */
-function getLatestReviewDecision(branch: string, options: any = {}): { ok: boolean, error?: string, reviewState?: string | null, prNumber?: number, defaultUserApproved?: boolean, defaultUserApprovedAt?: string, reviewerApproved?: boolean, reviewerApprovedAt?: string, raw?: string } {
+function getLatestReviewDecision(branch: string, options: any = {}): { ok: boolean, error?: string, reviewState?: string | null, prNumber?: number, defaultUserApproved?: boolean, defaultUserApprovedAt?: string, operatorApproved?: boolean, operatorApprovedAt?: string, reviewerApproved?: boolean, reviewerApprovedAt?: string, raw?: string } {
   /** @type {{forgejoUser?: string, token?: string, apiCall?: Function, rootDir?: string, reviewerUser?: string}} */
   const {
     forgejoUser,
@@ -648,6 +655,7 @@ function getLatestReviewDecision(branch: string, options: any = {}): { ok: boole
     apiCall = forgejoApi,
     rootDir = process.cwd(),
     reviewerUser,
+    authorizedApproverUser,
     sinceIso,
   } = options;
 
@@ -679,7 +687,7 @@ function getLatestReviewDecision(branch: string, options: any = {}): { ok: boole
     return { ok: false, error: 'reviews-unavailable', reviewState: null, prNumber };
   }
 
-  return reviewDecisionFromReviews(result.data, prNumber, reviewerUser, sinceIso);
+  return reviewDecisionFromReviews(result.data, prNumber, reviewerUser, sinceIso, resolveAuthorizedApproverUser(authorizedApproverUser));
 }
 
 /**

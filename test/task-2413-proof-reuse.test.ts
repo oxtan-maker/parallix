@@ -14,6 +14,7 @@ import childProcess from 'child_process';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
+import { initCommittedRepository } from './fixtures/git-repository.js';
 import {
   createVerificationProofIdentity,
   readReusableVerificationProof,
@@ -33,23 +34,9 @@ function withTempDir(fn) {
 
 const proofPath = root => `${root}.verification-proof.json`;
 
-function initCommittedGitRepo(root) {
-  const runGit = (args) => {
-    const result = childProcess.spawnSync('git', ['-C', root, ...args], { encoding: 'utf8' });
-    assert.equal(result.status, 0, result.stderr || result.stdout || `git ${args.join(' ')} failed`);
-  };
-  runGit(['init']);
-  runGit(['checkout', '-b', 'main']);
-  runGit(['config', 'user.name', 'Test User']);
-  runGit(['config', 'user.email', 'test@example.com']);
-  fs.writeFileSync(path.join(root, 'README.md'), '# temp repo\n', 'utf8');
-  runGit(['add', 'README.md']);
-  runGit(['commit', '-m', 'init']);
-}
-
 test('task-2413: unchanged tree/command/toolchain reuses authoritative proof without re-verification', { concurrency: false }, () => {
   withTempDir(root => {
-    initCommittedGitRepo(root);
+    initCommittedRepository(root);
     const command = './scripts/verify-local.sh all';
     const written = writeReusableVerificationProof(command, root, { proofPath: proofPath(root) });
     assert.equal(written.ok, true);
@@ -77,7 +64,7 @@ test('task-2413: unchanged tree/command/toolchain reuses authoritative proof wit
 
 test('task-2413: changing HEAD/tree invalidates proof reuse', { concurrency: false }, () => {
   withTempDir(root => {
-    initCommittedGitRepo(root);
+    initCommittedRepository(root);
     const command = './scripts/verify-local.sh all';
     const written = writeReusableVerificationProof(command, root, { proofPath: proofPath(root) });
     assert.equal(written.ok, true);
@@ -97,7 +84,7 @@ test('task-2413: changing HEAD/tree invalidates proof reuse', { concurrency: fal
 
 test('task-2413: changing HEAD alone invalidates proof reuse', { concurrency: false }, () => {
   withTempDir(root => {
-    initCommittedGitRepo(root);
+    initCommittedRepository(root);
     const command = './scripts/verify-local.sh all';
     assert.equal(writeReusableVerificationProof(command, root, { proofPath: proofPath(root) }).ok, true);
 
@@ -109,7 +96,7 @@ test('task-2413: changing HEAD alone invalidates proof reuse', { concurrency: fa
 
 test('task-2413: publication consumes an unchanged reusable proof without executing the gate', { concurrency: false }, () => {
   withTempDir(root => {
-    initCommittedGitRepo(root);
+    initCommittedRepository(root);
     const command = 'exit 9';
     fs.writeFileSync(path.join(root, 'workflow.config.json'), JSON.stringify({
       adapters: { verification: { command, defaultArea: 'all' } },
@@ -129,7 +116,7 @@ test('task-2413: publication consumes an unchanged reusable proof without execut
 
 test('task-2413: publication reuse matches the handoff command after area placeholder resolution', { concurrency: false }, () => {
   withTempDir(root => {
-    initCommittedGitRepo(root);
+    initCommittedRepository(root);
     const template = './scripts/verify-local.sh {{area}}';
     fs.writeFileSync(path.join(root, 'workflow.config.json'), JSON.stringify({
       adapters: { verification: { command: template, defaultArea: 'all' } },
@@ -150,7 +137,7 @@ test('task-2413: publication reuse matches the handoff command after area placeh
 
 test('task-2413: changing the verification command invalidates proof reuse', { concurrency: false }, () => {
   withTempDir(root => {
-    initCommittedGitRepo(root);
+    initCommittedRepository(root);
     const written = writeReusableVerificationProof('./scripts/verify-local.sh all', root, { proofPath: proofPath(root) });
     assert.equal(written.ok, true);
     const reused = readReusableVerificationProof('./scripts/verify-local.sh static-analysis', root, { proofPath: proofPath(root) });
@@ -160,7 +147,7 @@ test('task-2413: changing the verification command invalidates proof reuse', { c
 
 test('task-2573: proof context is exact and cannot cross phase, mission, or checkout', { concurrency: false }, () => {
   withTempDir(root => {
-    initCommittedGitRepo(root);
+    initCommittedRepository(root);
     const command = 'true';
     const context = JSON.stringify({ phase: 'integration', slug: 'task-1', checkoutPath: root, gate: 'verify' });
     assert.equal(writeReusableVerificationProof(command, root, { proofPath: proofPath(root), context }).ok, true);
@@ -177,7 +164,7 @@ test('task-2573: proof context is exact and cannot cross phase, mission, or chec
 
 test('task-2413: a stale/mismatched proof cannot authorize publication', { concurrency: false }, () => {
   withTempDir(root => {
-    initCommittedGitRepo(root);
+    initCommittedRepository(root);
     const state = readPublishedTreeState(root);
     assert.equal(state.ok, true);
 
@@ -202,7 +189,7 @@ test('task-2413: a stale/mismatched proof cannot authorize publication', { concu
 
 test('task-2413: a dirty worktree cannot issue a reusable proof (fails closed)', { concurrency: false }, () => {
   withTempDir(root => {
-    initCommittedGitRepo(root);
+    initCommittedRepository(root);
     fs.writeFileSync(path.join(root, 'README.md'), 'dirty\n');
     const identity = createVerificationProofIdentity('./scripts/verify-local.sh all', root);
     assert.equal(identity.ok, false);

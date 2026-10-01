@@ -69,7 +69,10 @@ function runLoop(options: Record<string, unknown>) {
     runPreReviewGateFn: async () => ({ ok: true, area: 'lib', command: 'true', exitCode: 0, stdout: '', stderr: '' }),
     startAgentFn: async (step: string, opts: Record<string, unknown>) => {
       events.push(`${step}:${(opts as any).role}`);
-      return { agent: (opts as any).agent, result: { status: 0 } };
+      // These cap fixtures model the provider-disposition path after a live
+      // implementer launch. A completed implementer process is exercised by
+      // task-2623; that path now reconciles immediately instead of polling.
+      return { agent: (opts as any).agent, result: step === 'act-on-review' ? {} : { status: 0 } };
     },
     applyAgentFallbackFn: ({ original }: { original: string }) => original,
     buildCompactReviewPromptFn: () => 'review prompt',

@@ -32,6 +32,15 @@ function deriveRepoFromGitRemote(rootDir: string, remoteName: string): string | 
 /** @param {string} [explicitUser] @returns {string} */
 function resolveForgejoUser(explicitUser?: string): string { return explicitUser || process.env.FORGEJO_USER || DEFAULT_FORGEJO_USER; }
 
+/**
+ * The provider login authorized to make the human integration decision.
+ * Deliberately do not derive this from FORGEJO_USER: that variable selects an
+ * API credential, while authority still requires an actual provider APPROVED.
+ */
+function resolveAuthorizedApproverUser(explicitUser?: string): string | undefined {
+  return explicitUser || process.env.FORGEJO_AUTHORIZED_APPROVER || undefined;
+}
+
 function listGitWorktrees(rootDir: string = process.cwd()): string[] {
   try {
     const result = spawnSync('git', ['-C', rootDir, 'worktree', 'list', '--porcelain'], { encoding: 'utf8', timeout: 2000 });
@@ -149,4 +158,4 @@ function forgejoAvailable(url = process.env.FORGEJO_URL || 'http://localhost:330
   });
 }
 
-export { DEFAULT_FORGEJO_USER, DISPOSITION_PATTERN, cacheKey, deriveRepoFromGitRemote, forgejoAvailable, isForgejoPath, listGitWorktrees, normalizePathForComparison, readToken, resolveForgejoAuth, resolveForgejoHome, resolveForgejoSettings, resolveForgejoUser, resolveTokenFile };
+export { DEFAULT_FORGEJO_USER, DISPOSITION_PATTERN, cacheKey, deriveRepoFromGitRemote, forgejoAvailable, isForgejoPath, listGitWorktrees, normalizePathForComparison, readToken, resolveAuthorizedApproverUser, resolveForgejoAuth, resolveForgejoHome, resolveForgejoSettings, resolveForgejoUser, resolveTokenFile };

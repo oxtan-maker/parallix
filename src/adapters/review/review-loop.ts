@@ -9,7 +9,7 @@ import * as fmt from '../../application/presentation/cli-format.js';
 import { git, run } from '../git/git.js';
 import { findMissionDir, resolveWorktree, missionBranchName, getPrimaryBranch } from '../filesystem/mission-utils.js';
 import { isDbAdhocIdentity, missionId } from '../../domain/mission.js';
-import { reviewStatus, ConfiguredReviewerEligibility } from '../../domain/review.js';
+import { currentReviewRound, reviewStatus, ConfiguredReviewerEligibility } from '../../domain/review.js';
 import { integrationRepairReviewBrief, latestIntegrationRepair } from '../../application/integration-repair-review.js';
 import { agentFamily } from '../../domain/agents.js';
 import type { PullRequestReference } from '../../domain/review.js';
@@ -640,6 +640,7 @@ async function consumeAndRecoverReviewerArtifacts(deps: ReviewerPhaseDeps): Prom
           prompt: (actualReviewer: string) => (buildCompactReviewPromptFn as any)({ reviewer: scratch.reviewer!, branch, implementer: scratch.implementer!, focus: ctx.focus, attempt, repoRoot: worktree, missionPath: effectiveMissionPath || undefined, actualReviewer, reviewBaseline: round.reviewBaseline, integrationRepair: scratch.integrationRepair })
             + '\n\n' + String((launchOptions as any).prompt(actualReviewer)),
           worktree, slug, role: 'reviewer', exclude: [scratch.implementer],
+          sessionPolicy: (launchOptions as any).sessionPolicy,
           onLaunch: ({ agent }: { agent: string }) => onAgentLaunched?.(agent, 'review'),
         }),
         applyAgentFallbackFn: async ({ launchResult, original }) => {
@@ -738,11 +739,16 @@ async function recoverReviewerTimeout(deps: ReviewerPhaseDeps): Promise<'stop' |
     slug, worktree, implementer: scratch.reviewer!, step: 'review', role: 'reviewer',
     exclude: [scratch.implementer!],
     maxAttempts: Math.min(DEFAULT_REBOUND_ATTEMPTS, round.reboundsRemainingThisRound()),
+    readHead: () => {
+      const result = git(['-C', worktree, 'rev-parse', 'HEAD']);
+      return result.status === 0 ? result.stdout.trim() : null;
+    },
     startAgent: async (_step, launchOptions) => await (startAgentFn as any)('review', {
       agent: scratch.reviewer,
       prompt: (actualReviewer: string) => (buildCompactReviewPromptFn as any)({ reviewer: scratch.reviewer!, branch, implementer: scratch.implementer!, focus: ctx.focus, attempt, repoRoot: worktree, missionPath: effectiveMissionPath || undefined, actualReviewer, reviewBaseline: round.reviewBaseline, integrationRepair: scratch.integrationRepair })
         + '\n\n' + String((launchOptions as any).prompt(actualReviewer)),
       worktree, slug, role: 'reviewer', exclude: [scratch.implementer],
+      sessionPolicy: (launchOptions as any).sessionPolicy,
       onLaunch: ({ agent }: { agent: string }) => onAgentLaunched?.(agent, 'review'),
     }),
     applyAgentFallback: async ({ launchResult, original }) => {
@@ -915,6 +921,7 @@ type RoundPhaseScratch = {
   sinceIso: string;
   implementer: string | undefined;
   implementerSkippedResume: boolean;
+  implementerExited: boolean;
 };
 
 type RoundPhaseDeps = {
@@ -1005,6 +1012,7 @@ async function launchImplementerActOnReview(deps: RoundPhaseDeps): Promise<'stop
     role: 'implementer', original: scratch.implementer!, launchResult: implementerLaunchResult,
     state: state as unknown as Record<string, any>, slug, worktree, taskResolution, log, writeReviewStateFn, enforceTaskAssigneeFn, missionStore
   });
+  scratch.implementerExited = implementerLaunchResult?.result?.status === 0;
   const followUpSinceMs = stageLaunchSinceMs(implementerLaunchResult?.result);
   await recordStageStatsSafeFn('active', {
     stage: 'follow-up', slug, rootDir: worktree, worktree, implementer: scratch.implementer, reviewer: identities.reviewer,
@@ -1013,7 +1021,31 @@ async function launchImplementerActOnReview(deps: RoundPhaseDeps): Promise<'stop
     model: resolveAgentModel(scratch.implementer!, worktree),
     missionStore,
   });
+  log(fmt.status('INFO', `Round ${attempt}: implementer (${scratch.implementer}) completed act-on-review; reconciling workflow output.`));
   return null;
+}
+
+/**
+ * A resolution can commit to Mission authority while the implementer is still
+ * running.  After it exits, accept that durable result only when it belongs to
+ * this exact implementer turn and its resulting revision is the branch tip.
+ * This keeps an old or another agent's resolution from answering this round.
+ */
+async function reconcileStoredImplementerResolution(ctx: any, state: ReviewState, scratch: RoundPhaseScratch): Promise<string | null> {
+  if (!ctx.missionStore) { return null; }
+  try {
+    const loaded = await ctx.missionStore.load(missionId(ctx.slug));
+    if (loaded.kind !== 'found' || !loaded.mission.review) { return null; }
+    const round = currentReviewRound(loaded.mission.review);
+    if (round.number !== state.round || round.implementer !== scratch.implementer || round.disposition !== 'CHANGES_MADE' || !round.response) {
+      return null;
+    }
+    const head = ctx.gitFn(['-C', ctx.worktree, 'rev-parse', 'HEAD']);
+    const revision = (head.stdout || '').trim();
+    return revision && round.response.resultingRevision === revision ? 'CHANGES_MADE' : null;
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -1042,7 +1074,16 @@ async function consumeAndRecoverImplementerArtifacts(deps: RoundPhaseDeps): Prom
     log,
     error
   });
-  if (!implementerArtifacts.consumed) { return null; }
+  if (!implementerArtifacts.consumed && scratch.implementerExited) {
+    const storedDisposition = await reconcileStoredImplementerResolution(ctx, state, scratch);
+    if (storedDisposition) {
+      scratch.disposition = storedDisposition;
+      log(fmt.status('PASS', `Round ${attempt}: recognized stored workflow resolution from implementer ${scratch.implementer} for the matching round and revision.`));
+      return null;
+    }
+    log(fmt.status('WARN', `Round ${attempt}: implementer ${scratch.implementer} completed with missing protocol output; starting artifact recovery before provider disposition polling.`));
+  }
+  if (!implementerArtifacts.consumed && !scratch.implementerExited) { return null; }
   if (implementerArtifacts.changedRevision === false) {
     await escalateToHumanReview('IMPLEMENTER_NO_CHANGE');
     return 'stop';
@@ -1051,7 +1092,9 @@ async function consumeAndRecoverImplementerArtifacts(deps: RoundPhaseDeps): Prom
     scratch.disposition = implementerArtifacts.disposition;
     return null;
   }
-  const implDiagnostic = implementerArtifacts.diagnostic || `Implementer ${scratch.implementer} produced incomplete or invalid artifacts`;
+  const implDiagnostic = implementerArtifacts.diagnostic || (implementerArtifacts.consumed
+    ? `Implementer ${scratch.implementer} produced incomplete or invalid artifacts`
+    : `Implementer ${scratch.implementer} completed with no protocol output`);
   if (isArtifactInfraDiagnostic(implDiagnostic)) {
     error(fmt.status('FAIL', `Implementer artifact infrastructure failure: ${implDiagnostic}`));
     await escalateToHumanReview('IMPLEMENTER_ARTIFACT_INFRA_FAILURE');
@@ -1066,6 +1109,7 @@ async function consumeAndRecoverImplementerArtifacts(deps: RoundPhaseDeps): Prom
     return 'stop';
   }
   let recoveredImplementerArtifacts = implementerArtifacts;
+  let recoveredStoredDisposition: string | null = null;
   const implDispatch = await dispatchArtifactFailure('implementer', implDiagnostic, {
     // TASK-2377.04: the per-occurrence budget is clamped to the
     // remaining per-round relaunch cap before the launch.
@@ -1078,6 +1122,7 @@ async function consumeAndRecoverImplementerArtifacts(deps: RoundPhaseDeps): Prom
       prompt: (actualImplementer: string) => (buildCompactActOnReviewPromptFn as any)({ implementer: scratch.implementer!, branch, attempt, reviewOutcome: reviewState, repoRoot: worktree, missionPath: effectiveMissionPath || undefined, actualImplementer, reviewBaseline: round.reviewBaseline })
         + '\n\n' + String((launchOptions as any).prompt(actualImplementer)),
       worktree, slug, role: 'implementer', exclude: [identities.reviewer],
+      sessionPolicy: (launchOptions as any).sessionPolicy,
       onLaunch: ({ agent }: { agent: string }) => onAgentLaunched?.(agent, 'review-response'),
     }),
     applyAgentFallbackFn: async ({ launchResult, original }) => {
@@ -1100,6 +1145,11 @@ async function consumeAndRecoverImplementerArtifacts(deps: RoundPhaseDeps): Prom
         error
       });
       if (!recoveredImplementerArtifacts.consumed) {
+        recoveredStoredDisposition = await reconcileStoredImplementerResolution(ctx, state, scratch);
+        if (recoveredStoredDisposition) {
+          log(fmt.status('PASS', `Round ${attempt}: recovery recognized stored workflow resolution from implementer ${scratch.implementer}.`));
+          return { ok: true };
+        }
         return { ok: false, diagnostic: `Implementer ${scratch.implementer} produced no round artifacts after the relaunch` };
       }
       if (!recoveredImplementerArtifacts.ok) {
@@ -1128,7 +1178,7 @@ async function consumeAndRecoverImplementerArtifacts(deps: RoundPhaseDeps): Prom
     return 'stop';
   }
   log(fmt.status('PASS', `Implementer artifacts re-consumed and complete after ${implDispatch.attempts} attempt(s).`));
-  scratch.disposition = recoveredImplementerArtifacts.disposition;
+  scratch.disposition = recoveredImplementerArtifacts.disposition || recoveredStoredDisposition;
   return null;
 }
 
@@ -1161,11 +1211,16 @@ async function pollDispositionWithTimeoutRecovery(deps: RoundPhaseDeps): Promise
       slug, worktree, implementer: scratch.implementer!, step: 'act-on-review', role: 'implementer',
       exclude: [identities.reviewer!],
       maxAttempts: Math.min(DEFAULT_REBOUND_ATTEMPTS, round.reboundsRemainingThisRound()),
+      readHead: () => {
+        const result = git(['-C', worktree, 'rev-parse', 'HEAD']);
+        return result.status === 0 ? result.stdout.trim() : null;
+      },
       startAgent: async (_step, launchOptions) => await (startAgentFn as any)('act-on-review', {
         agent: scratch.implementer,
         prompt: (actualImplementer: string) => (buildCompactActOnReviewPromptFn as any)({ implementer: scratch.implementer!, branch, attempt, reviewOutcome: reviewState, repoRoot: worktree, missionPath: effectiveMissionPath || undefined, actualImplementer, reviewBaseline: round.reviewBaseline })
           + '\n\n' + String((launchOptions as any).prompt(actualImplementer)),
         worktree, slug, role: 'implementer', exclude: [identities.reviewer],
+        sessionPolicy: (launchOptions as any).sessionPolicy,
         onLaunch: ({ agent }: { agent: string }) => onAgentLaunched?.(agent, 'review-response'),
       }),
       applyAgentFallback: async ({ launchResult, original }) => {
@@ -1469,6 +1524,7 @@ async function runReviewRound(
       sinceIso: state.startedAt,
       implementer,
       implementerSkippedResume: false,
+      implementerExited: false,
     };
     await checkContinueDisposition({ ctx, state, attempt, scratch });
     if (!scratch.disposition) {

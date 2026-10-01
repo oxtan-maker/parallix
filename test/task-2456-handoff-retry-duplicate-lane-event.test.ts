@@ -27,13 +27,9 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import fs from 'node:fs';
-import os from 'node:os';
-import path from 'node:path';
 
 import { agentFamily } from '../src/domain/agents.js';
-import { missionId, type Mission } from '../src/domain/mission.js';
-import { repositoryId } from '../src/domain/repository.js';
+import { missionId } from '../src/domain/mission.js';
 import {
   ConfiguredReviewerEligibility,
   applyImplementerCommand,
@@ -47,10 +43,8 @@ import {
 } from '../src/domain/review.js';
 import type { MissionVersion } from '../src/application/domain-ports.js';
 import { MissionLifecycleService } from '../src/application/mission-lifecycle-service.js';
-import { SqliteDatabaseAdapter } from '../src/adapters/sqlite/database-adapter.js';
-import { SqliteMigrationRunner, loadDefaultMigrations } from '../src/adapters/sqlite/migration-runner.js';
-import { SqliteMissionStore } from '../src/adapters/sqlite/mission-store.js';
-import { mkdtemp as registeredMkdtemp } from './helpers/temp-dir.js';
+import { fixtureMission } from './fixtures/mission-builders.js';
+import { openMigratedMissionStore, type MigratedMissionStore } from './fixtures/mission-sqlite-store.js';
 
 const HANDOFF_1_AT = '2026-02-01T10:00:00Z';
 const CHANGES_REQUESTED_AT = '2026-02-01T11:00:00Z';
@@ -73,51 +67,16 @@ const pullRequest: ReviewedChange = {
   targetBranch: 'main',
 };
 
-interface Fixture {
-  readonly database: SqliteDatabaseAdapter;
-  readonly store: SqliteMissionStore;
+interface Fixture extends MigratedMissionStore {
   readonly lifecycle: MissionLifecycleService;
   readonly slug: string;
-  readonly root: string;
-}
-
-function seedMission(slug: string): Mission {
-  return {
-    id: missionId(slug),
-    repositoryId: repositoryId('parallix'),
-    title: 'Task 2456 repro',
-    labels: [],
-    assignee: implementer,
-    status: 'active' as const,
-    rawStatus: 'active',
-    checkpoints: [{
-      missionId: missionId(slug),
-      name: 'CP-1',
-      rawFilename: 'CP-1.md',
-      firstLine: 'CP-1',
-      goalCheck: [{ criterion: 'c', evidence: 'e' }],
-      nextActionText: 'hand off',
-    }],
-    netEngineeringLines: null,
-    closedAt: null,
-    externalTaskRef: null,
-    review: null,
-  };
 }
 
 async function openFixture(slug: string): Promise<Fixture> {
-  const root = registeredMkdtemp('task-2456-repro-');
-  const database = new SqliteDatabaseAdapter();
-  await database.open({ path: path.join(root, 'parallix.db') });
-  await new SqliteMigrationRunner(database).applyPending(loadDefaultMigrations());
-  const store = new SqliteMissionStore(database);
-  await store.save(seedMission(slug), null);
-  return { database, store, lifecycle: new MissionLifecycleService(store), slug, root };
-}
-
-async function closeFixture(fixture: Fixture): Promise<void> {
-  await fixture.database.close();
-  fs.rmSync(fixture.root, { recursive: true, force: true });
+  const migrated = await openMigratedMissionStore([
+    fixtureMission(slug, { title: 'Task 2456 repro', assignee: implementer }),
+  ]);
+  return { ...migrated, lifecycle: new MissionLifecycleService(migrated.store), slug };
 }
 
 async function currentVersion(fixture: Fixture): Promise<MissionVersion> {
@@ -235,7 +194,7 @@ test('a retried handoff replays its already recorded active -> review lane event
     );
     assert.equal(events.length, 1, 'the stable key still records exactly one lane event');
   } finally {
-    await closeFixture(fixture);
+    await fixture.close();
   }
 });
 
@@ -285,6 +244,6 @@ test('a duplicate handoff key on a distinct approve transition stays a conflict'
       'the refused transition left the mission untouched',
     );
   } finally {
-    await closeFixture(fixture);
+    await fixture.close();
   }
 });

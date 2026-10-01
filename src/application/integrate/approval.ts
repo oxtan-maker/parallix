@@ -30,6 +30,7 @@ export interface TaskStatusCheck {
 export function resolveAuthoritativeApprovalAt(approval: any): string | undefined {
   if (!approval || approval.ok !== true) {return undefined;}
   if (approval.defaultUserApproved) {return approval.defaultUserApprovedAt;}
+  if (approval.operatorApproved) {return approval.operatorApprovedAt;}
   if (approval.reviewerApproved) {return approval.reviewerApprovedAt;}
   return undefined;
 }
@@ -74,7 +75,15 @@ export function recoveryEstablishesApproval(context: any): RecoveryDecision {
   const lastRound = rounds && rounds.length > 0 ? rounds[rounds.length - 1] : null;
   const overrideAt = resolveAuthoritativeApprovalAt(context.approval);
 
-  if (lastRound?.decision?.kind === 'approved') {
+  // An active Mission's persisted decision still needs current provider
+  // corroboration (unless the provider is disabled), matching recovery's
+  // active→review guard. Without this, dry-run reports READY while the real
+  // run refuses the same stale approval.
+  const activeStoredApprovalWithoutProvider = status === 'active'
+    && lastRound?.decision?.kind === 'approved'
+    && overrideAt === undefined
+    && context.approval?.providerDisabled !== true;
+  if (lastRound?.decision?.kind === 'approved' && !activeStoredApprovalWithoutProvider) {
     return { established: true, via: 'mission-review', decidedAt: lastRound.decision.decidedAt, reason: '' };
   }
 
@@ -116,6 +125,15 @@ export function evaluateTaskStatusForIntegration(context: any, stateMap: Integra
       ok: true,
       level: 'warn',
       message: `Mission status: ${stateMap.toVirtual(missionStatus, stateMapOptions)} accepted for integration because ${how} and recovery would move the Mission to integration`,
+    };
+  }
+
+  const latestRound = context.missionReview?.rounds?.at(-1);
+  if (missionStatus === 'active' && latestRound?.decision?.kind === 'approved' && resolveAuthoritativeApprovalAt(context.approval) === undefined) {
+    return {
+      ok: false,
+      level: 'fail',
+      message: 'Mission status: active has a stored approval without the required qualifying provider approval; refresh provider review state before integration.',
     };
   }
 

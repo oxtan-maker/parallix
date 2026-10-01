@@ -1709,14 +1709,14 @@ export async function reconcileInterruptedHandoffHandler(
   const error = options.error || fmt.log.plainError;
   const exit = options.exit || process.exit;
   const worktree = (options.resolveWorktreeFn || resolveWorktree)(slug) || process.cwd();
-  const taskResolution = (options.resolveTaskFileFn || resolveTaskFile)(slug, worktree);
-  if (!taskResolution.ok) {
-    error(fmt.status('FAIL', `Cannot reconcile ${slug}: Backlog task is missing or ambiguous. Restore the task in review, then retry.`));
-    exit(1);
-    return;
-  }
-  if ((options.getTaskStatusFn || getTaskStatus)(taskResolution.taskFile!) !== 'review') {
-    error(fmt.status('FAIL', `Cannot reconcile ${slug}: Backlog task is not in review. Restore its review status before retrying.`));
+  // The Mission status is the sole authority for reconciliation: a completed
+  // native Mission carries no Backlog task file marked review, so the retired
+  // task-file check is replaced by the operator-database lane status. The
+  // recovery command rebuilds the missing round-one Review in the store without
+  // recreating any legacy file.
+  const reconcilable = await isReconcilableMission(slug, options.missionStore);
+  if (!reconcilable) {
+    error(fmt.status('FAIL', `Cannot reconcile ${slug}: no Mission in the operator database is in the review lane. Restore the Mission to review, then retry.`));
     exit(1);
     return;
   }
@@ -1739,6 +1739,28 @@ export async function reconcileInterruptedHandoffHandler(
   }
   error(fmt.status('FAIL', `Cannot reconcile ${slug}: ${result.diagnostic}`));
   exit(1);
+}
+
+/**
+ * Whether a slug is reconcilable.
+ *
+ * The operator database holding the Mission in the `review` lane is the only
+ * authority `--reconcile-review` accepts. This replaces the retired Backlog
+ * task-file check so a completed native Mission with no task file can be
+ * recovered. A store read failure is not reconcilable: the loop keeps failing
+ * closed rather than inventing a round-one Review behind the operator's back.
+ *
+ * @param {string} slug
+ * @param {MissionStore|null|undefined} store
+ */
+async function isReconcilableMission(slug: string, store: MissionStore | null | undefined): Promise<boolean> {
+  if (!store) { return false; }
+  try {
+    const loaded = await store.load(missionId(slug));
+    return loaded.kind === 'found' && loaded.mission.status === 'review';
+  } catch {
+    return false;
+  }
 }
 
 export { ReviewWorkflowAdapter, createReviewWorkflowAdapter } from './review-workflow-adapter.js';

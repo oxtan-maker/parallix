@@ -10,7 +10,7 @@ const root = process.cwd();
 const fixture = (name: string) => path.join(root, 'test', 'fixtures', 'application-boundary', name);
 const APPLICATION_DIR = path.join(root, 'src', 'application');
 
-/** Walk src/application/ and return every .ts file (mirrors domain-import-boundary pattern). */
+/** Walk src/application/ and return every .ts file (mirrors the domain import boundary pattern). */
 function applicationFiles(applicationDir = APPLICATION_DIR): string[] {
   return fs.readdirSync(applicationDir, { withFileTypes: true }).flatMap(entry => {
     const filePath = path.join(applicationDir, entry.name);

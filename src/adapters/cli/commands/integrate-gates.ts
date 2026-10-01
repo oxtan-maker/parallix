@@ -179,8 +179,8 @@ export function loadIntegrationConfig(opts: {configPath?: string} = {}) {
  * Get the integration gate plan for changed areas
  * Returns { gates: [{key, command, run_last}], changedAreas: [...] }
  */
-/** @param {string} slug @param {{runIntegrationGates?: boolean, gitRunner?: Function, dryRun?: boolean, configPath?: string}} opts */
-export function getIntegrationGatePlan(slug: string, opts: {runIntegrationGates?: boolean, gitRunner?: Function, dryRun?: boolean, configPath?: string} = {}) {
+/** @param {string} slug @param {{runIntegrationGates?: boolean, gitRunner?: Function, dryRun?: boolean, configPath?: string, rootDir?: string, baseBranch?: string|null}} opts */
+export function getIntegrationGatePlan(slug: string, opts: {runIntegrationGates?: boolean, gitRunner?: Function, dryRun?: boolean, configPath?: string, rootDir?: string, baseBranch?: string | null} = {}) {
   // Check config
   const configResult = loadIntegrationConfig(opts);
   if (!configResult.ok) {

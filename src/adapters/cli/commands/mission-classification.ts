@@ -21,7 +21,7 @@ export function resolveMissionClassification(
     return classification
       ? { classification, taskFile: null, source: 'mission' }
       : { classification: null, taskFile: null, source: 'mission',
-        error: `Missing or invalid classification for ${slug} in authoritative Mission state; expected exactly one of ai_sdlc, user_value, or unknown in the Mission labels. Fix: run px classification set --value <ai_sdlc|user_value|unknown> --expected-version <n>; a Backlog task label does not classify a stored Mission.` };
+        error: `Missing or invalid classification for ${slug} in authoritative Mission state; expected exactly one of ai_sdlc, user_value, or unknown in the Mission labels. Fix: run px classification set --value <ai_sdlc|user_value|unknown>; a Backlog task label does not classify a stored Mission.` };
   }
 
   return {

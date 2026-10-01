@@ -7,8 +7,8 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import * as fmt from '../../application/presentation/cli-format.js';
-import { missionBranchName, resolveWorktree } from '../filesystem/mission-utils.js';
 import { git } from '../git/git.js';
+import { missionBranchName, resolveWorktree } from '../filesystem/mission-utils.js';
 import { readReviewState, writeReviewState, reviewStateFile, ReviewState, resolveReviewIdentity, persistReviewStateOrThrow, type ReviewStateData } from './review-state.js';
 import {
   rebound,
@@ -1246,6 +1246,10 @@ export async function dispatchArtifactFailure(
       maxAttempts,
       verify: verifyFn,
       startAgent: startAgentFn,
+      readHead: () => {
+        const result = git(['-C', worktree, 'rev-parse', 'HEAD']);
+        return result.status === 0 ? result.stdout.trim() : null;
+      },
       applyAgentFallback: options.applyAgentFallbackFn,
       transitionToImplementer: options.transitionToImplementerFn,
       log,

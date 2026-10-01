@@ -18,7 +18,7 @@ import {
   type VerifyResult,
 } from '../../application/rebound-kernel.js';
 import { classifyHookFailure } from '../../application/hook-failure-workflow.js';
-import { run } from '../git/git.js';
+import { git, run } from '../git/git.js';
 import { findMissionDir, findMissionArea } from '../filesystem/mission-utils.js';
 import { formatVerificationCommand, isTransientVerificationFailure, resolveEffectiveArea } from '../verification/verification.js';
 import { enforceTaskAssignee, transitionTask } from '../backlog/backlog.js';
@@ -229,6 +229,10 @@ export async function reboundPreReviewFailure(
     maxAttempts,
     verify: verifyFn,
     startAgent: startAgentFn as unknown as ReboundContext['startAgent'],
+    readHead: () => {
+      const result = git(['-C', worktree, 'rev-parse', 'HEAD']);
+      return result.status === 0 ? result.stdout.trim() : null;
+    },
     transitionToImplementer: async (missionSlug: string) => {
       if (missionStore) { await transitionReviewRepair(missionSlug, 'active', implementer, missionStore, lifecycleService); }
       await transitionTaskFn(missionSlug, 'active', { rootDir: worktree, log });

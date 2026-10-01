@@ -396,10 +396,12 @@ test('this repository exposes the full independent gate width and orders Sonar a
   assert.deepEqual(gates.filter(g => ['unit', 'integration-ci', 'integration-local', 'workflow', 'agent-smoke'].includes(g.key)).map(g => g.after),
     [['build'], ['build'], ['build'], ['build'], ['build']]);
   const runner = fs.readFileSync(path.join(repoRoot, 'test', 'run-default-tests.ts'), 'utf8');
-  assert.match(runner, /mkdtempSync\(path\.join\(executionRoot, 'tmp', `coverage-v8-\$\{coverageTier\}-`\)\)/,
-    'concurrent coverage producers own distinct tier- and process-specific V8 scratch directories');
-  assert.doesNotMatch(runner, /path\.join\(executionRoot, 'tmp', 'coverage-v8'\)/,
-    'coverage producers must not share one fixed V8 scratch directory');
+  assert.match(runner, /mkdtempSync\(path\.join\(executionRoot, 'tmp', 'fast-unit-scratch-'\)\)/,
+    'the covered fast unit tier owns a process-specific scratch root, so concurrent gates never share one');
+  // TASK-2622.04: Node's test runner records coverage in its own temporary
+  // directory; a preset NODE_V8_COVERAGE only receives an unread ~1.5 GB copy.
+  assert.doesNotMatch(runner, /NODE_V8_COVERAGE:/,
+    'coverage producers must not ask Node to copy the raw V8 payload');
   assert.ok(!gates.some((g) => g.command === 'npm run test:codeql'), 'preIntegration must not run CodeQL automatically');
   // The runner executes them from this checkout with the phase contract.
   const env = buildGateEnv('integration', 'task-2457', repoRoot);

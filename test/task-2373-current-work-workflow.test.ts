@@ -10,6 +10,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
+import { setImmediate } from 'node:timers';
 
 import { ExecuteMissionService } from '../src/application/execute-mission-service.js';
 import type { ExecuteMissionPorts, HandoffReviewRequest } from '../src/application/ports/execute-mission.js';
@@ -20,7 +21,8 @@ import {
   parseCurrentWorkEntry,
   type AgentLaunchPhase,
 } from '../src/application/recording/current-work-recorder.js';
-import type { OperationalHistoryEntry, OperationalHistoryRepository } from '../src/application/ports/operation-history.js';
+import type { OperationalHistoryEntry } from '../src/application/ports/operation-history.js';
+import { inMemoryOperationalHistory } from './fixtures/operational-history.js';
 import { reconcileCurrentWork, isWorkInProgress } from '../src/application/projections/current-work.js';
 import { attentionReason } from '../src/application/projections/board.js';
 import { makeCard } from './fixtures/board-projection.js';
@@ -28,18 +30,6 @@ import { missionId } from '../src/domain/mission.js';
 
 const SLUG = 'task-2373';
 const MISSION = missionId(SLUG);
-
-function makeHistoryRepo() {
-  const appended: OperationalHistoryEntry[] = [];
-  let sequence = 0;
-  const repo: OperationalHistoryRepository = {
-    async findAll() { return appended; },
-    async findByType(type: string) { return appended.filter((entry) => entry.eventType === type); },
-    async append(entry: OperationalHistoryEntry) { sequence += 1; appended.push({ ...entry, id: sequence }); },
-    async clear() { appended.length = 0; },
-  };
-  return { repo, appended };
-}
 
 function published(appended: readonly OperationalHistoryEntry[]) {
   return appended.flatMap((entry) => parseCurrentWorkEntry(entry) ?? []);
@@ -111,7 +101,7 @@ function scriptedReviewLoop(rounds: readonly (readonly [string, AgentLaunchPhase
 // ---------------------------------------------------------------------------
 
 test('SC2: current work follows reviewer and implementer launches after handoff instead of the original implementer', async () => {
-  const { repo, appended } = makeHistoryRepo();
+  const { repo, appended } = inMemoryOperationalHistory({ assignIds: true });
   const observed: { agent: string | null; phase: string | null; working: boolean }[] = [];
   const ports = strictPorts({
     handoffReview: scriptedReviewLoop(
@@ -135,7 +125,7 @@ test('SC2: current work follows reviewer and implementer launches after handoff 
 });
 
 test('SC3: reviewer launches publish a review phase and implementer launches publish review-response', async () => {
-  const { repo, appended } = makeHistoryRepo();
+  const { repo, appended } = inMemoryOperationalHistory({ assignIds: true });
   const ports = strictPorts({
     handoffReview: scriptedReviewLoop([['qwen', 'review'], ['claude', 'review-response']]),
   });
@@ -150,7 +140,7 @@ test('SC3: reviewer launches publish a review phase and implementer launches pub
 });
 
 test('SC4: three consecutive review rounds each update the same mission current work', async () => {
-  const { repo, appended } = makeHistoryRepo();
+  const { repo, appended } = inMemoryOperationalHistory({ assignIds: true });
   const seen: (string | null)[] = [];
   const ports = strictPorts({
     handoffReview: scriptedReviewLoop(
@@ -178,14 +168,14 @@ test('SC4: three consecutive review rounds each update the same mission current 
 
 test('SC5: px review and px active publish nested review work through one seam', async () => {
   // Behavioural half: both entry points produce the same fact for the same launch.
-  const viaActive = makeHistoryRepo();
+  const viaActive = inMemoryOperationalHistory({ assignIds: true });
   await new ExecuteMissionService(
     strictPorts({ handoffReview: scriptedReviewLoop([['qwen', 'review']]) }),
     undefined,
     new CurrentWorkRecorder(viaActive.repo, { processId: 7 }),
   ).execute(executeRequest());
 
-  const viaReview = makeHistoryRepo();
+  const viaReview = inMemoryOperationalHistory({ assignIds: true });
   const operation = () => async () => {};
   await new ReviewCommandUseCase({
     preflight: (args: string[]) => ({ slug: SLUG, args, options: {} }),
@@ -234,7 +224,7 @@ test('SC5: px review and px active publish nested review work through one seam',
 // ---------------------------------------------------------------------------
 
 test('SC6: claude blocked by usage limits and replaced by qwen keeps the mission WORKING throughout', async () => {
-  const { repo, appended } = makeHistoryRepo();
+  const { repo, appended } = inMemoryOperationalHistory({ assignIds: true });
   const timeline: { agent: string | null; working: boolean; attention: string }[] = [];
   const ports = strictPorts({
     agentExecution: {
@@ -262,7 +252,7 @@ test('SC6: claude blocked by usage limits and replaced by qwen keeps the mission
 });
 
 test('SC7: a delayed current-work publication lands before the next state is read', async () => {
-  const { repo, appended } = makeHistoryRepo();
+  const { repo, appended } = inMemoryOperationalHistory({ assignIds: true });
   const slowRecorder = new CurrentWorkRecorder(repo, { processId: 7 });
   const delayed = {
     async running(publication: Parameters<CurrentWorkRecorder['running']>[0]) {

@@ -163,10 +163,18 @@ const bundleResult = esbuild.buildSync({
     '.tsx': 'tsx',
   },
   banner: {
+    // SQLite is a startup requirement of the distributable CLI. Keep its
+    // builtin import explicit even when all production references currently
+    // sit behind deferred composition imports, which esbuild may otherwise
+    // lower into lazy bundle initializers.
+    //
+    // The installed-package smoke test deliberately checks this surface: a
+    // startup import proves the Node runtime can resolve the required builtin
+    // before any command reaches operator-state initialization.
     // esbuild's ESM output delegates dynamic imports from bundled third-party
     // CommonJS packages (for example Ink's signal-exit) through `require`.
     // This is bundler interop only: do not add project-facing CJS globals here.
-    js: "import { createRequire as __pxCreateRequire } from 'node:module'; const require = __pxCreateRequire(import.meta.url);",
+    js: "import { DatabaseSync as __pxDatabaseSync } from 'node:sqlite'; import { createRequire as __pxCreateRequire } from 'node:module'; const require = __pxCreateRequire(import.meta.url);",
   },
 });
 

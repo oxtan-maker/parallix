@@ -8,7 +8,7 @@ import type {
 import { missionVersion } from '../../application/domain-ports.js';
 import type { LaneTransitionEvent } from '../../domain/board-event.js';
 import type { MissionNelRecord } from '../../domain/net-engineering-lines.js';
-import type { Mission, MissionId } from '../../domain/mission.js';
+import { missionTitle, type Mission, type MissionId } from '../../domain/mission.js';
 import { missionBrief } from '../../domain/mission-brief.js';
 import { declaredGates } from '../../domain/mission-gates.js';
 import { successCriteria } from '../../domain/mission-success-criteria.js';
@@ -416,6 +416,7 @@ export class SqliteMissionStore implements MissionStore, MissionNelRecorder {
     // MissionStore is a public persistence port: callers other than the brief
     // service may save an aggregate, so reject an invalid brief or gate list
     // before any relational row can make a Mission unloadable on restart.
+    mission = { ...mission, title: missionTitle(mission.title, mission.id) };
     if (mission.brief) {
       mission = { ...mission, brief: missionBrief(mission.brief) };
     }

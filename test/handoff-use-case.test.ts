@@ -161,7 +161,15 @@ test('direct handoff recovers a gate failure through the kernel with its exact p
   const recorder = makeRecorder();
   let gateRuns = 0;
   let repairPrompt = '';
+  const gitCalls: string[][] = [];
   const ports = makePorts(recorder, {
+    git: {
+      git: (args: string[]) => {
+        gitCalls.push(args);
+        return { status: 0, stdout: args.includes('rev-parse') ? 'repair-before-and-after' : '', stderr: '' };
+      },
+      run: () => ({ status: 0 }), getCurrentBranch: () => BRANCH, getWorktreeStatus: () => [],
+    },
     agents: {
       startAgent: async (_step: string, options: Record<string, unknown>) => {
         recorder.relaunches.push(1);
@@ -184,6 +192,8 @@ test('direct handoff recovers a gate failure through the kernel with its exact p
   assert.match(repairPrompt, /Working directory: \/root/);
   assert.match(repairPrompt, /assertion failed in test\/example.test.ts/);
   assert.doesNotMatch(repairPrompt, /GIT HOOK FAILURE/);
+  assert.ok(gitCalls.filter(args => args.join(' ') === `-C ${ROOT} rev-parse HEAD`).length >= 2,
+    'the rebound dossier reads HEAD before the repair and after verification');
 });
 
 test('direct handoff retries a slow-test verifier result before it disturbs an agent', async () => {

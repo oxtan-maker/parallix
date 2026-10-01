@@ -434,6 +434,11 @@ export interface Review {
 
 /** Whether an approved self-review still needs a provider-side approval. */
 export function reviewApprovalOwed(review: Review | null): boolean {
+  const current = review?.rounds.at(-1);
+  // The audit event is historical evidence, not a permanent blocker. A later
+  // provider-backed decision on that round fulfils the owed approval while
+  // preserving the event for the review timeline.
+  if (current?.decision?.kind === 'approved' && current.decision.source.kind === 'provider') { return false; }
   return review?.reviewEvents.some((event) => event.blockedReason === 'external-formal-approval-owed') ?? false;
 }
 
@@ -745,7 +750,7 @@ export function transitionReviewPhase(review: Review, phase: ReviewPhase): Revie
   if (!allowed.includes(phase)) {
     // Worded so the phase never follows the word "from" in quotes: the domain
     // import-boundary scanner reads that as an import specifier
-    // (test/domain-import-boundary.test.ts).
+    // (test/domain-architecture-guards.test.ts).
     throw new Error(
       `Review phase "${current.phase}" cannot move to "${phase}". Allowed: ${allowed.join(', ') || 'none'}`,
     );

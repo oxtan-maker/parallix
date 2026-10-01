@@ -376,6 +376,10 @@ async function reboundHookFailure(
       worktree: executionRoot,
       implementer,
       startAgent: port.startAgent,
+      readHead: () => {
+        const result = gitFn(['-C', executionRoot, 'rev-parse', 'HEAD']);
+        return result.status === 0 ? result.stdout.trim() : null;
+      },
       transitionToImplementer: (bounceSlug: string) =>
         port.transitionTask(bounceSlug, 'active', { rootDir: executionRoot, log: fmt.log.plain }),
       applyAgentFallback: async ({ launchResult, original }) =>

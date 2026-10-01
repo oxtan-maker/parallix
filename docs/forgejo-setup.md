@@ -55,6 +55,8 @@ Then run `px setup` and enter each account's password so the token files are min
 
 An owner token minted before setup included `write:admin` may return HTTP 403 when bootstrapping another user’s token even if its owner is a site admin. Re-run `px setup-review` with the site admin’s password to rotate that token. Repository admin access, such as the access granted to `parallix`, does not confer site admin privileges.
 
+If the human who may approve integration uses a Forgejo login other than `human`, set `FORGEJO_AUTHORIZED_APPROVER` to that login in the integration environment. This is an approval-identity setting: `FORGEJO_USER` still selects credentials and does not make an account's approval authoritative by itself.
+
 - The configured review repo is created only if it does not already exist.
 - Existing review repos are updated to grant the listed agent users `write` access, so implementer identities can see and update their own PRs, and `parallix` `admin` access, so it can dismiss stale approvals.
 - You can leave an agent password blank to skip that token on this machine.

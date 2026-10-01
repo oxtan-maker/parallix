@@ -439,7 +439,7 @@ async function resolveStoredMissionClassification(slug: string, missionStore: Mi
     .map((label: string) => String(label).toLowerCase())
     .filter((label: string) => isValidClassification(label));
   if (classifications.length !== 1) {
-    throw new Error(`Mission ${slug} requires exactly one classification in px state. Fix: px classification set --value <ai_sdlc|user_value|unknown> --expected-version <n>.`);
+    throw new Error(`Mission ${slug} requires exactly one classification in px state. Fix: px classification set --value <ai_sdlc|user_value|unknown>.`);
   }
   return classifications[0];
 }

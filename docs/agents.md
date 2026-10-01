@@ -350,6 +350,16 @@ worktree list, or the session markers cannot answer, the strip prints
 `px cmd unknown` — the count is never derived from board cards and an
 unobserved state is never rendered as `0 px cmd live`.
 
+### Fresh diagnostic rebound context
+
+For an agent-correctable rebound, the first repair may use the ordinary
+implementer session. If the authoritative failing check remains red, the final
+repair uses a fresh ephemeral context: it receives the original and latest
+failure outputs as evidence, but does not resume or replace the normal session
+marker. This preserves valid work in the mission worktree while avoiding a
+repeat of the failed reasoning context. The same failing check, not the repair
+agent's report, remains the only proof of recovery.
+
 ### Mission activity in `px status`
 
 For a selected mission, `px status <slug>` prints the same two facts the strip
@@ -540,6 +550,18 @@ pre-review commit or rebase, or when a reviewer or implementer hands back
 incomplete artifacts, the harness bounces the mission back to the responsible
 agent with a fix prompt built from the failure's structured evidence and its
 classification.
+
+A gate or hook fix prompt gives the implementer the exact failed check, its
+captured output, and the mission outcome, and asks it to fix the mission
+without breaking the repository. It does not presume the cause or where the
+repair belongs: the implementer diagnoses the actual cause and may repair it in
+repository code, tests, configuration, the local environment, or runner
+configuration, but must keep the mission deliverables and safeguards and never
+weaken, skip, or delete a check. A repair that changes tracked files must be
+committed before the automatic re-run; a repair outside the repository needs
+no commit. When the cause is external and the implementer cannot repair it,
+such as a model service that is down, the prompt tells it to report the exact
+blocker with its evidence and stop instead of guessing.
 
 The CLI commands run the same path. A Git hook that rejects `px rebase`'s
 `rebase --continue` or `px integrate`'s squash commit, the final gate in

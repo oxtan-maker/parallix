@@ -50,7 +50,7 @@ export const DOMAIN_CONCEPT_INVARIANTS: Readonly<
     invariant:
       'A mission cannot close before integration reports `done`, cannot close twice, and cannot close without an actual closure time; each violation throws MissionRuleViolation.',
     fileLocation: 'src/domain/mission.ts',
-    line: 214,
+    line: 222,
     anchor: 'export function closeMission',
   },
   CheckpointData: {
@@ -66,7 +66,7 @@ export const DOMAIN_CONCEPT_INVARIANTS: Readonly<
     invariant:
       'A reviewer decision is rejected unless the review is awaiting one, and request-changes is rejected without at least one identified finding carrying an id and summary.',
     fileLocation: 'src/domain/review.ts',
-    line: 680,
+    line: 685,
     anchor: 'export function applyReviewerCommand',
   },
   MissionOutcome: {
@@ -98,7 +98,7 @@ export const DOMAIN_CONCEPT_INVARIANTS: Readonly<
     invariant:
       'Resume is permitted only when mission, role, and agent family all match the recorded marker; a fallback to another family invalidates it.',
     fileLocation: 'src/domain/session.ts',
-    line: 33,
+    line: 42,
     anchor: 'export function shouldResume',
   },
   LaneTransitionEvent: {

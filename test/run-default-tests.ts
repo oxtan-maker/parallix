@@ -54,17 +54,6 @@ const FAST_COVERAGE_UNIT_TEST_SUITE_CPU_BUDGET_MS = 520_000;
 const coverageDestination = runsIntegrationCiSuite
   ? path.join(executionRoot, 'coverage', '.lcov-integration-ci.info')
   : path.join(executionRoot, 'coverage', '.lcov-unit.info');
-const coverageTier = runsIntegrationCiSuite ? 'integration-ci' : 'unit';
-// The unit and integration-ci gates may run concurrently. Give each invocation
-// a unique repo-local V8 payload directory; the LCOV destinations above remain
-// the deliberate per-tier hand-off consumed by coverage:merge. The payload is
-// ~1.2 GB per integration-ci run, too large for the shared tmpfs /tmp that
-// Node would otherwise use (ADR 0062).
-let coverageScratchDir: string | null = null;
-if (coverageEnabled) {
-  fs.mkdirSync(path.join(executionRoot, 'tmp'), { recursive: true });
-  coverageScratchDir = fs.mkdtempSync(path.join(executionRoot, 'tmp', `coverage-v8-${coverageTier}-`));
-}
 const nodeArgsWithCoverage = coverageEnabled
   ? withCoverageReporters(nodeArgs, coverageDestination)
   : nodeArgs;
@@ -89,6 +78,18 @@ if (fastUnit && fileTimingProfile) {
 const executedNodeArgs = fastUnit
   ? ['--import', 'tsx', path.join(testRoot, 'run-fast-unit-tests.ts')]
   : suiteNodeArgs;
+// The covered fast unit tier writes its group LCOV fragments and bootstrap
+// homes under a scratch root this runner owns, so the root is removed even
+// when the watchdog kills the child. The unit and integration-ci gates may run
+// concurrently, so the root is unique per invocation. No raw V8 payload
+// directory is set: Node's test runner always records coverage in its own
+// temporary directory and would only copy the ~1.5 GB payload into a preset
+// NODE_V8_COVERAGE after reporting (ADR 0062).
+let fastUnitScratchDir: string | null = null;
+if (fastUnit && coverageEnabled) {
+  fs.mkdirSync(path.join(executionRoot, 'tmp'), { recursive: true });
+  fastUnitScratchDir = fs.mkdtempSync(path.join(executionRoot, 'tmp', 'fast-unit-scratch-'));
+}
 
 // Unit tests import production modules directly from `src/` and replace
 // dependencies through the ESM-native seam in `test/lib/module-mock.ts`
@@ -130,9 +131,7 @@ const child = spawn(meter ?? testNode, meter ? ['--cpu-report', cpuReportPath, t
     PARALLIX_TEST_MANIFEST_DIR: testManifestDir,
     // Keeps tsx's transpile cache per checkout; see test/lib/test-tmpdir.ts.
     TMPDIR: checkoutTestTmpdir(executionRoot),
-    // V8 coverage payload lives repo-locally (not the shared tmpfs) so the
-    // per-tier fragments survive into the coverage:merge step.
-    ...(coverageScratchDir ? { NODE_V8_COVERAGE: coverageScratchDir } : {}),
+    ...(fastUnitScratchDir ? { PARALLIX_FAST_UNIT_SCRATCH_DIR: fastUnitScratchDir } : {}),
     // The profile belongs to this invocation only: runners that tests spawn as
     // fixtures keep their unprofiled argv and write no profile of their own.
     ...(fileTimingProfile ? { ...fileTimingProfile.env, [PROFILE_ENV]: '' } : {}),
@@ -186,14 +185,20 @@ function forwardSignal(signal: NodeJS.Signals) {
 process.on('SIGINT', () => forwardSignal('SIGINT'));
 process.on('SIGTERM', () => forwardSignal('SIGTERM'));
 
+// Every exit path (spawn error, watchdog or forwarded signal, normal close)
+// reclaims the worker manifests and the runner-owned fast unit scratch root.
+function cleanupRunnerOwnedRoots() {
+  cleanupRunnerTempRoots(testManifestDir);
+  if (fastUnitScratchDir) { fs.rmSync(fastUnitScratchDir, { recursive: true, force: true }); }
+}
+
 // Measure elapsed time for the suite-level budget check.
 const suiteStart = process.hrtime.bigint();
 child.on('error', (error) => {
   if (suiteSettled) { return; }
   suiteSettled = true;
   clearTimeout(watchdog);
-  cleanupRunnerTempRoots(testManifestDir);
-  if (coverageScratchDir) { fs.rmSync(coverageScratchDir, { recursive: true, force: true }); }
+  cleanupRunnerOwnedRoots();
   throw error;
 });
 child.on('close', (code, signal) => {
@@ -206,7 +211,7 @@ child.on('close', (code, signal) => {
     // The group was terminated by the watchdog or a forwarded signal; a
     // terminated suite is a failed suite.
     console.error(`[suite-process] test runner terminated by ${signal} after ${Math.round(suiteElapsedMs)}ms`);
-    cleanupRunnerTempRoots(testManifestDir);
+    cleanupRunnerOwnedRoots();
     process.exit(exitCodeAfterKill);
   }
 
@@ -242,8 +247,7 @@ child.on('close', (code, signal) => {
   if (fileTimingProfile) { printFileTimingSummary(fileTimingProfile.destination); }
 
   // Clean up roots before propagating failure status.
-  cleanupRunnerTempRoots(testManifestDir);
-  if (coverageScratchDir) { fs.rmSync(coverageScratchDir, { recursive: true, force: true }); }
+  cleanupRunnerOwnedRoots();
 
   process.exit((code ?? 0) || (suiteExceeded ? 1 : 0));
 });

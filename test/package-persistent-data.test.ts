@@ -67,25 +67,26 @@ test('global tarball reinstall preserves PARALLIX_HOME measurements and agent bl
   fs.mkdirSync(npmHome, { recursive: true });
   fs.mkdirSync(repoOne);
   fs.mkdirSync(repoTwo);
-  const rootTarballsBefore = new Set(
-    fs.readdirSync(PACKAGE_ROOT).filter(entry => entry.endsWith('.tgz'))
-  );
 
   try {
-    const packResult = run('npm', [
+    const packArgs = [
       'pack',
       PACKAGE_ROOT,
-      '--json'
-    ], { tempHome: npmHome, cwd: packDir });
+      '--json',
+      '--pack-destination',
+      packDir
+    ];
+    // The prebuilt integration lanes validate the already-built tarball.  Do
+    // not queue another canonical build behind the concurrent pack smoke
+    // tests; dedicated non-prebuilt packaging tests still exercise prepack.
+    if (process.env.PARALLIX_PREBUILT_PACK === '1') { packArgs.push('--ignore-scripts'); }
+    const packResult = run('npm', packArgs, { tempHome: npmHome, cwd: packDir });
     const filename = packFilename(packResult.stdout);
     if (!filename) {
       return;
     }
     const tarball = path.join(packDir, filename);
-    const rootTarball = path.join(PACKAGE_ROOT, filename);
-    if (!fs.existsSync(tarball) && fs.existsSync(rootTarball)) {
-      fs.renameSync(rootTarball, tarball);
-    }
+    assert.ok(fs.existsSync(tarball), 'npm pack must write its archive only to the temporary destination');
     const installArgs = ['install', '-g', '--prefix', prefix, tarball];
     run('npm', installArgs, { tempHome: npmHome });
 
@@ -153,11 +154,6 @@ test('global tarball reinstall preserves PARALLIX_HOME measurements and agent bl
     assert.equal(fs.existsSync(path.join(repoTwo, 'stats.csv')), false);
     assert.equal(fs.existsSync(path.join(repoTwo, 'agents.local.json')), false);
   } finally {
-    for (const entry of fs.readdirSync(PACKAGE_ROOT)) {
-      if (entry.endsWith('.tgz') && !rootTarballsBefore.has(entry)) {
-        fs.rmSync(path.join(PACKAGE_ROOT, entry), { force: true });
-      }
-    }
     fs.rmSync(root, { recursive: true, force: true });
   }
 });

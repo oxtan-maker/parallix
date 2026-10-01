@@ -3,7 +3,7 @@
 
 import test, { mock } from 'node:test';
 import assert from 'node:assert/strict';
-import { EventEmitter } from 'node:events';
+import { childProcessDouble } from './fixtures/child-process-double.js';
 import { spawn as realSpawn } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -14,14 +14,6 @@ await installModuleMocks();
 test.afterEach(() => mock.restoreAll());
 const { captureOpencodeExport } = captureOpencodeExportModule;
 'use strict';
-
-function makeFakeChild() {
-  const child = new EventEmitter();
-  child.stdout = new EventEmitter();
-  child.killed = false;
-  child.kill = () => { child.killed = true; };
-  return child;
-}
 
 test('captureOpencodeExport returns the full stdout JSON on clean exit', async () => {
   const expected = JSON.stringify({ info: { tokens: { input: 1, output: 2 } } });
@@ -34,7 +26,7 @@ test('captureOpencodeExport returns the full stdout JSON on clean exit', async (
 });
 
 test('captureOpencodeExport times out and kills a non-exiting export child', async () => {
-  const child = makeFakeChild();
+  const child = childProcessDouble();
   const spawn = () => child;
   const result = await captureOpencodeExport('ses_hang', { spawn, timeoutMs: 50 });
   assert.equal(result, null, 'must degrade to null, not hang');
@@ -59,7 +51,7 @@ test('captureOpencodeExport removes its owned temporary directory after launch e
   try {
     assert.equal(await captureOpencodeExport('ses_launch', { tmpDir, spawn: () => { throw new Error('ENOENT'); } }), null);
     assert.deepEqual(fs.readdirSync(tmpDir), []);
-    const child = makeFakeChild();
+    const child = childProcessDouble();
     assert.equal(await captureOpencodeExport('ses_timeout', { tmpDir, timeoutMs: 20, spawn: () => child }), null);
     assert.deepEqual(fs.readdirSync(tmpDir), []);
   } finally {
@@ -88,7 +80,7 @@ test('captureOpencodeExport retains only its owned temporary directory when opte
 });
 
 test('captureOpencodeExport resolves null on child error event', async () => {
-  const child = makeFakeChild();
+  const child = childProcessDouble();
   const spawn = () => child;
   const p = captureOpencodeExport('ses_x', { spawn });
   child.emit('error', new Error('spawn ENOENT'));
@@ -96,7 +88,7 @@ test('captureOpencodeExport resolves null on child error event', async () => {
 });
 
 test('captureOpencodeExport returns null for missing session id', async () => {
-  assert.equal(await captureOpencodeExport('', { spawn: () => makeFakeChild() }), null);
+  assert.equal(await captureOpencodeExport('', { spawn: () => childProcessDouble() }), null);
 });
 
 test('captureOpencodeExport captures full output with large payloads (regression for pipe-buffer truncation)', async () => {

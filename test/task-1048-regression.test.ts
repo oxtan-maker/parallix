@@ -66,7 +66,8 @@ test('TASK-1048: startReviewLoop does not crash when taskResolution is needed fo
       assert.equal(step, 'act-on-review');
       assert.equal(options.agent, 'gemini');
       assert.deepEqual(options.exclude, ['codex']);
-      return { agent: 'custom', result: { status: 0 } };
+      // Model a still-running fallback whose provider disposition is polled below.
+      return { agent: 'custom', result: {} };
     },
     pollForReviewFn: async () => 'CHANGES_REQUESTED',
     pollForDispositionFn: async (prNumber, implementerUser) => {

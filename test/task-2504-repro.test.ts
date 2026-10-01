@@ -53,7 +53,7 @@ test('TASK-2504: the integration-gate bounce prompt requires committing the repa
   assert.equal(prompts.length, 1, 'exactly one implementer fix prompt');
   const prompt = prompts[0] as string;
   assert.match(prompt, /GATE FAILURE/, 'the prompt is the gate-failure rebound');
-  assert.match(prompt, /[Cc]ommit (the|your) repair before/, 'the remedy requires a commit before re-verification');
+  assert.match(prompt, /If the repair changes tracked files, commit it before the automatic re-verification/, 'the remedy requires committing a tracked-file repair before re-verification');
   assert.match(prompt, /uncommitted repair cannot be verified/, 'the remedy states the dirty-tree consequence');
 });
 

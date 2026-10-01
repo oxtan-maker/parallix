@@ -1042,6 +1042,10 @@ export class HandoffCommandUseCase {
           worktree: rootDir,
           implementer: forgejoUser,
           startAgent: startAgentFn,
+          readHead: () => {
+            const result = ports.git.git(['-C', rootDir, 'rev-parse', 'HEAD']);
+            return result.status === 0 ? result.stdout.trim() : null;
+          },
           verify: async () => {
             retried = await this.performHandoff(slug, {
               ...opts, worktree: rootDir, force: true, recoverGateFailure: false,
@@ -1214,6 +1218,10 @@ export class HandoffCommandUseCase {
         worktree: rootDir,
         implementer: forgejoUser,
         startAgent: startAgentFn,
+        readHead: () => {
+          const result = this.ports.git.git(['-C', rootDir, 'rev-parse', 'HEAD']);
+          return result.status === 0 ? result.stdout.trim() : null;
+        },
         transitionToImplementer: async (missionSlug) => {
           const services = await missionServicesFn(rootDir, { missionDir: missionDirPath });
           await transitionReviewRepair(missionSlug, 'active', forgejoUser, services.store, services.lifecycle);
@@ -1552,6 +1560,10 @@ export class HandoffCommandUseCase {
         maxAttempts: 1,
         maxLaunchRetries: 0,
         startAgent: startAgentFn,
+        readHead: () => {
+          const result = this.ports.git.git(['-C', rootDir, 'rev-parse', 'HEAD']);
+          return result.status === 0 ? result.stdout.trim() : null;
+        },
         verify: async (attempt: number) => {
           const retryResult = await this.performHandoff(slug, {
             worktree,

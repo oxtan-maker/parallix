@@ -161,6 +161,14 @@ export interface MissionIntake {
   readonly externalTaskRef?: ExternalTaskRef | null;
 }
 
+const BLOCK_SCALAR_TITLE = /^(?:>|\|)[-+]?\d*$/;
+
+/** A YAML scalar header is syntax, never a usable Mission title. */
+export function missionTitle(value: string, fallback: string): string {
+  const title = value.trim();
+  return title && !BLOCK_SCALAR_TITLE.test(title) ? title : fallback;
+}
+
 /**
  * Materialize a new Mission at intake.
  *
@@ -179,7 +187,7 @@ export function intakeMission(intake: MissionIntake): OpenMission {
   return {
     id: intake.id,
     repositoryId: intake.repositoryId,
-    title: intake.title.trim(),
+    title: missionTitle(intake.title, intake.id),
     labels: intake.labels === undefined ? [] : [...new Set(intake.labels)],
     assignee: intake.assignee ?? null,
     checkpoints: [],

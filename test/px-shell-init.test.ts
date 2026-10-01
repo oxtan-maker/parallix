@@ -15,11 +15,12 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import test from 'node:test';
+import { startAgent } from '../src/adapters/agents/agents.js';
 import { shellInit } from '../src/composition/create-cli.js';
 
 
 // Builds a fake `px` executable that prints the given transition signal.
-function makeFakePx({ signalPath, exitCode = 0, signal = 'next' }) {
+function makeFakePx({ signalPath, exitCode = 0, signal = 'next', messages = [] }) {
   const fakeBin = fs.mkdtempSync(path.join(os.tmpdir(), 'px-shell-init-bin-'));
   const pxPath = path.join(fakeBin, 'px');
   const message = signal === 'working-directory'
@@ -27,7 +28,7 @@ function makeFakePx({ signalPath, exitCode = 0, signal = 'next' }) {
     : `[INFO] Next: cd ${signalPath}`;
   fs.writeFileSync(
     pxPath,
-    ['#!/usr/bin/env bash', `echo ${JSON.stringify(message)}`, `exit ${exitCode}`, ''].join('\n'),
+    ['#!/usr/bin/env bash', ...messages.map(line => `echo ${JSON.stringify(line)}`), `echo ${JSON.stringify(message)}`, `exit ${exitCode}`, ''].join('\n'),
   );
   fs.chmodSync(pxPath, 0o755);
   return fakeBin;
@@ -112,6 +113,44 @@ test('px function follows a Working directory transition', () => {
 
   fs.rmSync(fakeBin, { recursive: true, force: true });
   fs.rmSync(target, { recursive: true, force: true });
+});
+
+test('px function ignores a routine agent-launch working-directory log', async () => {
+  const target = fs.mkdtempSync(path.join(os.tmpdir(), 'px-shell-init-agent-cwd-'));
+  const startDirectory = fs.mkdtempSync(path.join(os.tmpdir(), 'px-shell-init-start-'));
+  const launchLogs = [];
+  await startAgent('review', {
+    agent: 'claude',
+    prompt: 'Test launch logging.',
+    isAgentBlockedFn: () => false,
+    resolveAgentModelFn: () => null,
+    assertAgentSupportedFn: () => {},
+    log: message => launchLogs.push(message),
+    launchAgentFn: () => ({
+      invocation: { command: 'claude', args: [], options: { cwd: target } },
+      resultPromise: Promise.resolve({ status: 0, stdout: '', stderr: '' }),
+    }),
+  });
+  const fakeBin = makeFakePx({ signalPath: '', messages: launchLogs });
+  const initPath = writeShellInit(fakeBin);
+
+  const result = runBash(
+    [
+      `cd ${JSON.stringify(startDirectory)}`,
+      `source ${JSON.stringify(initPath)}`,
+      'px review task-1 >/dev/null',
+      'printf "PWD_AFTER=%s\\n" "$(pwd -P)"',
+    ],
+    fakeBin,
+  );
+
+  const output = `${result.stdout}${result.stderr}`;
+  assert.equal(result.status, 0, output);
+  assert.match(output, new RegExp(`PWD_AFTER=${fs.realpathSync(startDirectory).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`));
+
+  fs.rmSync(fakeBin, { recursive: true, force: true });
+  fs.rmSync(target, { recursive: true, force: true });
+  fs.rmSync(startDirectory, { recursive: true, force: true });
 });
 
 test('px function preserves the runner exit code', () => {

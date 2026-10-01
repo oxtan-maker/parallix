@@ -61,26 +61,26 @@ test('installed bundle-layout tarball runs read-only commands outside the checko
   fs.mkdirSync(packDir, { recursive: true });
   fs.mkdirSync(npmHome, { recursive: true });
   fs.mkdirSync(target, { recursive: true });
-  const rootTarballsBefore = new Set(
-    fs.readdirSync(PACKAGE_ROOT).filter(entry => entry.endsWith('.tgz'))
-  );
 
   try {
-    const packResult = run('npm', [
+    const packArgs = [
       'pack',
       PACKAGE_ROOT,
-      '--json'
-    ], { tempHome: npmHome, cwd: packDir });
+      '--json',
+      '--pack-destination',
+      packDir
+    ];
+    // Match the other package smoke tests: CI's prebuilt lane packs the
+    // prepared artifact without serializing redundant prepack builds.
+    if (process.env.PARALLIX_PREBUILT_PACK === '1') { packArgs.push('--ignore-scripts'); }
+    const packResult = run('npm', packArgs, { tempHome: npmHome, cwd: packDir });
     assert.equal(packResult.status, 0, `npm pack failed\nstdout:\n${packResult.stdout}\nstderr:\n${packResult.stderr}`);
     const filename = packFilename(packResult.stdout);
     if (!filename) {
       return;
     }
     const tarball = path.join(packDir, filename);
-    const rootTarball = path.join(PACKAGE_ROOT, filename);
-    if (!fs.existsSync(tarball) && fs.existsSync(rootTarball)) {
-      fs.renameSync(rootTarball, tarball);
-    }
+    assert.ok(fs.existsSync(tarball), 'npm pack must write its archive only to the temporary destination');
 
     const installResult = run('npm', ['install', '-g', '--prefix', prefix, tarball], { tempHome: npmHome });
 // @ts-expect-error -- TASK-2328: partial test double after ESM seam migration
@@ -127,11 +127,6 @@ test('installed bundle-layout tarball runs read-only commands outside the checko
       'the installed CLI must not write a stats CSV'
     );
   } finally {
-    for (const entry of fs.readdirSync(PACKAGE_ROOT)) {
-      if (entry.endsWith('.tgz') && !rootTarballsBefore.has(entry)) {
-        fs.rmSync(path.join(PACKAGE_ROOT, entry), { force: true });
-      }
-    }
     fs.rmSync(root, { recursive: true, force: true });
   }
 });

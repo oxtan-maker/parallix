@@ -35,6 +35,9 @@ test('printIntegrationPreflight branch failure', (t) => {
     pr: { exists: true, state: 'open', merged: false, number: 41 },
     approval: { ok: true, reviewState: 'APPROVED' },
     mainBranch: 'main',
+    baseWorktree: '/tmp',
+    baseBranch: 'main',
+    missionWorktree: '/tmp/mission',
     mainDirty: false,
     mainDirtyEntries: []
   };
@@ -44,7 +47,8 @@ test('printIntegrationPreflight branch failure', (t) => {
     resolveTokenFileFn: () => 'file',
     getUnresolvedIndexConflictsFn: () => ({ ok: true, files: [] }),
     detectRebaseStateFn: cleanRebaseState,
-    findMissionDocInBranchesFn: noMissionDocBranches
+    findMissionDocInBranchesFn: noMissionDocBranches,
+    conventionalWorktreePathFn: () => '/tmp/mission'
   });
 
   assert.ok(result.failures.includes('branch'));
@@ -61,6 +65,9 @@ test('printIntegrationPreflight mission-doc failure', (t) => {
     pr: { exists: true, state: 'open', merged: false, number: 41 },
     approval: { ok: true, reviewState: 'APPROVED' },
     mainBranch: 'main',
+    baseWorktree: '/tmp',
+    baseBranch: 'main',
+    missionWorktree: '/tmp/mission',
     mainDirty: false,
     mainDirtyEntries: []
   };
@@ -70,7 +77,8 @@ test('printIntegrationPreflight mission-doc failure', (t) => {
     resolveTokenFileFn: () => 'file',
     getUnresolvedIndexConflictsFn: () => ({ ok: true, files: [] }),
     detectRebaseStateFn: cleanRebaseState,
-    findMissionDocInBranchesFn: noMissionDocBranches
+    findMissionDocInBranchesFn: noMissionDocBranches,
+    conventionalWorktreePathFn: () => '/tmp/mission'
   });
 
   assert.ok(result.failures.includes('mission-doc'));
@@ -87,6 +95,9 @@ test('printIntegrationPreflight task failures', (t) => {
     pr: { exists: true, state: 'open', merged: false, number: 41 },
     approval: { ok: true, reviewState: 'APPROVED' },
     mainBranch: 'main',
+    baseWorktree: '/tmp',
+    baseBranch: 'main',
+    missionWorktree: '/tmp/mission',
     mainDirty: false,
     mainDirtyEntries: []
   };
@@ -96,7 +107,8 @@ test('printIntegrationPreflight task failures', (t) => {
     resolveTokenFileFn: () => 'file',
     getUnresolvedIndexConflictsFn: () => ({ ok: true, files: [] }),
     detectRebaseStateFn: cleanRebaseState,
-    findMissionDocInBranchesFn: noMissionDocBranches
+    findMissionDocInBranchesFn: noMissionDocBranches,
+    conventionalWorktreePathFn: () => '/tmp/mission'
   });
   assert.ok(res1.failures.includes('task-ambiguity'));
 
@@ -107,7 +119,8 @@ test('printIntegrationPreflight task failures', (t) => {
     resolveTokenFileFn: () => 'file',
     getUnresolvedIndexConflictsFn: () => ({ ok: true, files: [] }),
     detectRebaseStateFn: cleanRebaseState,
-    findMissionDocInBranchesFn: noMissionDocBranches
+    findMissionDocInBranchesFn: noMissionDocBranches,
+    conventionalWorktreePathFn: () => '/tmp/mission'
   });
   assert.ok(!res2.failures.includes('task-missing'));
 });
@@ -124,6 +137,9 @@ test('printIntegrationPreflight PR approval failures', (t) => {
     pr: { exists: true, state: 'open', merged: false, number: 41 },
     approval: { ok: false, error: 'api error' },
     mainBranch: 'main',
+    baseWorktree: '/tmp',
+    baseBranch: 'main',
+    missionWorktree: '/tmp/mission',
     mainDirty: false,
     mainDirtyEntries: []
   };
@@ -136,7 +152,8 @@ test('printIntegrationPreflight PR approval failures', (t) => {
     isForgejoReviewEnabledFn: () => true,
     getUnresolvedIndexConflictsFn: () => ({ ok: true, files: [] }),
     detectRebaseStateFn: cleanRebaseState,
-    findMissionDocInBranchesFn: noMissionDocBranches
+    findMissionDocInBranchesFn: noMissionDocBranches,
+    conventionalWorktreePathFn: () => '/tmp/mission'
   });
   assert.ok(res1.failures.includes('pr-approval'));
 
@@ -150,7 +167,8 @@ test('printIntegrationPreflight PR approval failures', (t) => {
     isForgejoReviewEnabledFn: () => true,
     getUnresolvedIndexConflictsFn: () => ({ ok: true, files: [] }),
     detectRebaseStateFn: cleanRebaseState,
-    findMissionDocInBranchesFn: noMissionDocBranches
+    findMissionDocInBranchesFn: noMissionDocBranches,
+    conventionalWorktreePathFn: () => '/tmp/mission'
   });
   assert.ok(res2.failures.includes('pr-approval'));
 });
@@ -166,6 +184,9 @@ test('printIntegrationPreflight main-index-conflict-check failure', (t) => {
     pr: { exists: true, state: 'open', merged: false, number: 41 },
     approval: { ok: true, reviewState: 'APPROVED' },
     mainBranch: 'main',
+    baseWorktree: '/tmp',
+    baseBranch: 'main',
+    missionWorktree: '/tmp/mission',
     mainDirty: false,
     mainDirtyEntries: []
   };
@@ -176,7 +197,8 @@ test('printIntegrationPreflight main-index-conflict-check failure', (t) => {
 // @ts-expect-error -- TASK-2328: partial test double after ESM seam migration
     getUnresolvedIndexConflictsFn: () => ({ ok: false, error: 'git error' }),
     detectRebaseStateFn: cleanRebaseState,
-    findMissionDocInBranchesFn: noMissionDocBranches
+    findMissionDocInBranchesFn: noMissionDocBranches,
+    conventionalWorktreePathFn: () => '/tmp/mission'
   });
 
   assert.ok(result.failures.includes('main-index-conflict-check'));
@@ -193,6 +215,9 @@ test('printIntegrationPreflight main-dirty warning', (t) => {
     pr: { exists: true, state: 'open', merged: false, number: 41 },
     approval: { ok: true, reviewState: 'APPROVED' },
     mainBranch: 'main',
+    baseWorktree: '/tmp',
+    baseBranch: 'main',
+    missionWorktree: '/tmp/mission',
     mainDirty: true,
     mainDirtyEntries: ['modified.js']
   };
@@ -202,7 +227,8 @@ test('printIntegrationPreflight main-dirty warning', (t) => {
     resolveTokenFileFn: () => 'file',
     getUnresolvedIndexConflictsFn: () => ({ ok: true, files: [] }),
     detectRebaseStateFn: cleanRebaseState,
-    findMissionDocInBranchesFn: noMissionDocBranches
+    findMissionDocInBranchesFn: noMissionDocBranches,
+    conventionalWorktreePathFn: () => '/tmp/mission'
   });
 
   assert.ok(result.warnings.includes('main-dirty'));

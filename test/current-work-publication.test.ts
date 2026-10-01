@@ -20,7 +20,6 @@ import assert from 'node:assert/strict';
 
 import { ExecuteMissionService } from '../src/application/execute-mission-service.js';
 import type { ExecuteMissionPorts } from '../src/application/ports/execute-mission.js';
-import type { ReviewWorkflowContext } from '../src/application/ports/review-workflow.js';
 import { ReviewCommandUseCase } from '../src/application/review-command-use-case.js';
 import { IntegrateCommandUseCase } from '../src/application/integrate-command-use-case.js';
 import {
@@ -30,25 +29,14 @@ import {
   currentWorkPublication,
   parseCurrentWorkEntry,
 } from '../src/application/recording/current-work-recorder.js';
-import type { OperationalHistoryEntry, OperationalHistoryRepository } from '../src/application/ports/operation-history.js';
+import type { OperationalHistoryEntry } from '../src/application/ports/operation-history.js';
+import { inMemoryOperationalHistory } from './fixtures/operational-history.js';
 import { agentFamily } from '../src/domain/agents.js';
 import { missionId } from '../src/domain/mission.js';
 
 // ---------------------------------------------------------------------------
 // Fakes
 // ---------------------------------------------------------------------------
-
-/** The only storage authority publication is allowed to touch. */
-function makeHistoryRepo() {
-  const appended: OperationalHistoryEntry[] = [];
-  const repo: OperationalHistoryRepository = {
-    async findAll() { return appended; },
-    async findByType(type: string) { return appended.filter((entry) => entry.eventType === type); },
-    async append(entry: OperationalHistoryEntry) { appended.push(entry); },
-    async clear() { appended.length = 0; },
-  };
-  return { repo, appended };
-}
 
 /** Parsed current-work facts in publication order. */
 function published(appended: readonly OperationalHistoryEntry[]) {
@@ -103,7 +91,7 @@ function executeRequest(overrides: Record<string, unknown> = {}) {
 // ---------------------------------------------------------------------------
 
 test('a recorded current-work fact round-trips through the operational-history entry', async () => {
-  const { repo, appended } = makeHistoryRepo();
+  const { repo, appended } = inMemoryOperationalHistory();
   const recorder = new CurrentWorkRecorder(repo, { processId: 4242, now: () => new Date('2026-08-13T10:00:00.000Z') });
 
   await recorder.running({
@@ -172,7 +160,7 @@ test('publication of a non-mission slug is skipped instead of throwing into the 
 // ---------------------------------------------------------------------------
 
 test('an execute run publishes execute work, then handoff work, then clears it', async () => {
-  const { repo, appended } = makeHistoryRepo();
+  const { repo, appended } = inMemoryOperationalHistory();
   const { ports } = strictPorts();
   const outcome = await new ExecuteMissionService(ports, undefined, new CurrentWorkRecorder(repo, { processId: 7 }))
     .execute(executeRequest());
@@ -189,7 +177,7 @@ test('an execute run publishes execute work, then handoff work, then clears it',
 });
 
 test('an automatic family handoff updates the same mission current work and creates no second identity', async () => {
-  const { repo, appended } = makeHistoryRepo();
+  const { repo, appended } = inMemoryOperationalHistory();
   // The launcher hits a usage block on claude and continues with qwen inside
   // the same call — exactly what startAgent's retry loop does today.
   const { ports } = strictPorts({
@@ -217,7 +205,7 @@ test('an automatic family handoff updates the same mission current work and crea
 });
 
 test('an execute run that cannot finish publishes blocked work carrying the reason', async () => {
-  const { repo, appended } = makeHistoryRepo();
+  const { repo, appended } = inMemoryOperationalHistory();
   const { ports } = strictPorts({
     agentExecution: {
       async prepare() { return { prompt: 'p', agentConfig: {} }; },
@@ -253,7 +241,7 @@ test('a recorder outage never turns a completed execute run into a failure', asy
 // ---------------------------------------------------------------------------
 
 test('publishing current work remains isolated from the activation write', async () => {
-  const { repo, appended } = makeHistoryRepo();
+  const { repo, appended } = inMemoryOperationalHistory();
   const { ports, calls } = strictPorts();
   await new ExecuteMissionService(ports, undefined, new CurrentWorkRecorder(repo, { processId: 7 })).execute(executeRequest());
 
@@ -288,7 +276,7 @@ function makeReviewWorkflow(ran: string[]) {
 }
 
 test('px review --start brackets the review loop with review-phase current work', async () => {
-  const { repo, appended } = makeHistoryRepo();
+  const { repo, appended } = inMemoryOperationalHistory();
   const ran: string[] = [];
   await new ReviewCommandUseCase(makeReviewWorkflow(ran), new CurrentWorkRecorder(repo, { processId: 9 }))
     .execute(['task-2370', '--start']);
@@ -301,7 +289,7 @@ test('px review --start brackets the review loop with review-phase current work'
 });
 
 test('px review republishes current work with the family that actually launched', async () => {
-  const { repo, appended } = makeHistoryRepo();
+  const { repo, appended } = inMemoryOperationalHistory();
   const workflow = {
     ...makeReviewWorkflow([]),
     start: async (context) => {
@@ -319,7 +307,7 @@ test('px review republishes current work with the family that actually launched'
 });
 
 test('a short review read publishes no current work', async () => {
-  const { repo, appended } = makeHistoryRepo();
+  const { repo, appended } = inMemoryOperationalHistory();
   const ran: string[] = [];
   await new ReviewCommandUseCase(makeReviewWorkflow(ran), new CurrentWorkRecorder(repo, { processId: 9 }))
     .execute(['task-2370', '--status']);
@@ -329,7 +317,7 @@ test('a short review read publishes no current work', async () => {
 });
 
 test('a failing review operation stops claiming work and keeps its reason', async () => {
-  const { repo, appended } = makeHistoryRepo();
+  const { repo, appended } = inMemoryOperationalHistory();
   const workflow = {
     ...makeReviewWorkflow([]),
     start: async () => { throw new Error('review loop failed'); },
@@ -350,7 +338,7 @@ test('a failing review operation stops claiming work and keeps its reason', asyn
 // ---------------------------------------------------------------------------
 
 test('px integrate brackets the run with integrate-phase current work', async () => {
-  const { repo, appended } = makeHistoryRepo();
+  const { repo, appended } = inMemoryOperationalHistory();
   let ran = 0;
   const outcome = await new IntegrateCommandUseCase(
     { execute: async () => { ran += 1; return 'merged'; } },
@@ -366,7 +354,7 @@ test('px integrate brackets the run with integrate-phase current work', async ()
 });
 
 test('px integrate without a slug publishes for the adapter-inferred mission', async () => {
-  const { repo, appended } = makeHistoryRepo();
+  const { repo, appended } = inMemoryOperationalHistory();
   let ran = 0;
   await new IntegrateCommandUseCase(
     { execute: async () => { ran += 1; return null; } },

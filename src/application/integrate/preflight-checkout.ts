@@ -11,6 +11,7 @@ import type {
   IntegrateCheckoutPort,
   IntegrateGitPort,
   IntegrateGitRunner,
+  IntegrateMissionPathsPort,
   IntegrateWorkflowPorts,
 } from '../ports/integrate-workflow.js';
 
@@ -20,6 +21,7 @@ interface CheckoutTarget {
   detectRebaseStateFn: IntegrateGitPort['detectRebaseState'];
   getUnresolvedIndexConflictsFn: IntegrateCheckoutPort['getUnresolvedIndexConflicts'];
   gitFn: IntegrateGitRunner;
+  conventionalWorktreePathFn: IntegrateMissionPathsPort['conventionalWorktreePath'];
 }
 
 function checkRebaseAndIndex(report: PreflightReport, context: any, { baseWorktree, detectRebaseStateFn, getUnresolvedIndexConflictsFn }: CheckoutTarget) {
@@ -151,7 +153,7 @@ export function checkIntegrationCheckout(report: PreflightReport, context: any, 
   // Running `px integrate` from the mission's own worktree is the documented
   // flow, not an anomaly.
   const insideMissionWorktree = () => {
-    const missionWorktree = ports.missionPaths.conventionalWorktreePath(context.slug);
+    const missionWorktree = target.conventionalWorktreePathFn(context.slug);
     return cwd === missionWorktree || cwd.startsWith(missionWorktree + path.sep);
   };
   if (isMainRepo && cwd === baseWorktree) {

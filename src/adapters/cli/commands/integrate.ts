@@ -9,6 +9,7 @@
  */
 import { createIntegrateWorkflow } from '../../../application/integrate-workflow.js';
 import fs from 'node:fs';
+import path from 'node:path';
 import crypto from 'node:crypto';
 import { spawnSync } from '../../process/process-runner.js';
 import * as git from '../../git/git.js';
@@ -138,6 +139,14 @@ export function createIntegratePorts(): IntegrateWorkflowPorts {
       captureFinalIntegrationTree: rootDir => gates.captureFinalIntegrationTree(rootDir),
       resolveIntegrationVerificationWorktree: (slug, options) => gates.resolveIntegrationVerificationWorktree(slug, options),
       isIntendedPayloadAtHead: (rootDir, paths, options) => gates.isIntendedPayloadAtHead(rootDir, paths, options),
+      runStagedTierGuards: rootDir => {
+        // Minimal Git fixtures exercise the landing workflow without carrying
+        // a Parallix checkout. They cannot run repository-owned guards; a real
+        // integration checkout must contain every guard source and is checked.
+        if (!fs.existsSync(path.join(rootDir, 'test', 'test-categories.test.ts'))) { return { ok: true }; }
+        const result = spawnSync('node', ['--test', '--import', 'tsx', 'test/test-categories.test.ts', 'test/default-test-suite.test.ts', 'test/file-size-cap.test.ts'], { cwd: rootDir, encoding: 'utf8' });
+        return result.status === 0 ? { ok: true } : { ok: false, error: [result.stdout, result.stderr].filter(Boolean).join('\n').trim() };
+      },
       routeIntegrationGateFailure: options => integrationGateRebound.routeIntegrationGateFailure(options),
     },
     checkout: {
@@ -256,6 +265,7 @@ function printIntegrationPreflight(context: any, options: {
   detectRebaseStateFn?: typeof git.detectRebaseState,
   getUnresolvedIndexConflictsFn?: typeof conflict.getUnresolvedIndexConflicts,
   findMissionDocInBranchesFn?: typeof missionUtils.findMissionDocInBranches,
+  conventionalWorktreePathFn?: typeof missionUtils.conventionalWorktreePath,
   isForgejoReviewEnabledFn?: typeof productConfig.isForgejoReviewEnabled,
   gitFn?: typeof git.git,
   // Matches `fmt.log.plain`, the production default the workflow uses.

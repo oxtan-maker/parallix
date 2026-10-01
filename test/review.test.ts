@@ -2283,7 +2283,9 @@ test('startReviewLoop polls for the fallback reviewer identity after a limit-hit
       assert.equal(step, 'act-on-review');
       assert.equal(options.agent, 'custom');
       assert.deepEqual(options.exclude, ['codex']);
-      return { agent: 'custom', result: { status: 0 } };
+      // This fixture models the asynchronous provider-poll path, not a
+      // completed implementer process with missing protocol output.
+      return { agent: 'custom', result: {} };
     },
     pollForReviewFn: async (prNumber, reviewerUser) => {
       reviewPolls.push({ prNumber, reviewerUser });
@@ -2339,7 +2341,8 @@ test('startReviewLoop polls for the fallback implementer identity after a limit-
       assert.equal(step, 'act-on-review');
       assert.equal(options.agent, 'claude');
       assert.deepEqual(options.exclude, ['codex']);
-      return { agent: 'gemini', result: { status: 0 } };
+      // Keep this fallback-identity test on the asynchronous poll path.
+      return { agent: 'gemini', result: {} };
     },
     pollForReviewFn: async () => 'CHANGES_REQUESTED',
     pollForDispositionFn: async (prNumber, implementerUser) => {
@@ -2782,6 +2785,7 @@ test('startReviewLoop performs the implementer recovery relaunch without persist
   // may carry a retry count anymore.
   const events = [];
   let dispositionPolls = 0;
+  let implementerLaunches = 0;
 
   await startReviewLoop(TEST_SLUG, {
     eligibleAgentsForStepFn: () => ['codex', 'claude', 'gemini', 'custom'],
@@ -2807,7 +2811,8 @@ test('startReviewLoop performs the implementer recovery relaunch without persist
     },
     startAgentFn: async (step, options) => {
       events.push({ type: 'start', step, prompt: options.prompt(step === 'review' ? 'codex' : 'claude'), exclude: options.exclude });
-      return { agent: step === 'review' ? 'codex' : 'claude', result: { status: 0 } };
+      if (step === 'act-on-review') { implementerLaunches += 1; }
+      return { agent: step === 'review' ? 'codex' : 'claude', result: step === 'review' || implementerLaunches > 1 ? { status: 0 } : {} };
     },
     pollForReviewFn: async () => 'REQUEST_CHANGES',
     pollForDispositionFn: async () => {
@@ -2838,6 +2843,7 @@ test('startReviewLoop preserves an implementer artifact infrastructure failure d
   const errors = [];
   const launches = [];
   let artifactReads = 0;
+  let implementerLaunches = 0;
 
   await startReviewLoop(TEST_SLUG, {
     ...hermeticLoopCollaborators,
@@ -2855,7 +2861,8 @@ test('startReviewLoop preserves an implementer artifact infrastructure failure d
     pollForDispositionFn: async () => POLL_TIMEOUT,
     startAgentFn: async (step, options) => {
       launches.push({ step, agent: options.agent });
-      return { agent: options.agent, result: { status: 0 } };
+      if (step === 'act-on-review') { implementerLaunches += 1; }
+      return { agent: options.agent, result: step === 'review' || implementerLaunches > 1 ? { status: 0 } : {} };
     },
     applyAgentFallbackFn: ({ original }) => original,
     consumeReviewerArtifactsFn: async () => ({ consumed: false }),

@@ -125,10 +125,10 @@ export function selectTierFiles(executionRoot: string): TierFileSelection {
     'review-backfill.test.ts',
     'review-events.test.ts',
     'session-marker-repository.test.ts',
-    'sqlite-adapter-cp1.test.ts',
-    'sqlite-async-cascade-cp3.test.ts',
-    'sqlite-importer-cp4.test.ts',
-    'sqlite-ports-cp2.test.ts',
+    'sqlite-schema-and-migrations.integration.test.ts',
+    'sqlite-operator-state.integration.test.ts',
+    'sqlite-import-and-audit.integration.test.ts',
+    'sqlite-repository-contract.integration.test.ts',
     'stats.test.ts',
     'task-2220-repro.test.ts',
     // TASK-2239 drives the review-loop lifecycle over a filesystem fixture.
@@ -180,6 +180,10 @@ export function selectTierFiles(executionRoot: string): TierFileSelection {
     // TASK-2566 creates temporary Git repositories to exercise mission Sonar
     // classification; the fixture helper hides that boundary from the scan.
     'task-2566-sonar-boundary-repro.test.ts',
+    // TASK-2413 commits real temporary Git repositories through
+    // test/fixtures/git-repository.ts (TASK-2622.04), which hides the boundary
+    // from the scan.
+    'task-2413-publication-seam.test.ts',
     // TASK-2585 verifies provider publication proofs through injected API
     // responses, so it is integration-only even without a visible boundary
     // token in its test source.
@@ -209,6 +213,14 @@ export function selectTierFiles(executionRoot: string): TierFileSelection {
     'task-2514-human-approve-after-active-repair.test.ts',
     // TASK-2601 opens a migrated SQLite Mission store and measurement store.
     'task-2601-repro.test.ts',
+    // TASK-2609 seeds a real SQLite operator database and drives the production
+    // `px classification set` composition. The SQLite boundary is not visible to
+    // the content heuristic above, so this CLI-composition test is declared here
+    // and registered in INTEGRATION_CI_TESTS so it runs in the integration tier.
+    'task-2609-classification-set.test.ts',
+    // TASK-2614 opens a real migrated SQLite Mission store to exercise native
+    // review start and recovery, so it belongs outside the hermetic unit tier.
+    'task-2614-review-start-recovery.test.ts',
     // TASK-2492 drives the composed integration command against an on-disk
     // repository fixture and a real lifecycle state machine. Its injected
     // external seams keep the assertions deterministic, but that composition
@@ -240,7 +252,6 @@ export function selectTierFiles(executionRoot: string): TierFileSelection {
   // relocated to the integration layer in task-2326 round 2.
   // When explicitly requested as the sole file, the bootstrap preload is
   // bypassed so the child runs with the real environment.
-  const artifactSpawnTestFiles = new Set();
   const integrationTestFiles = allRootTestFiles
     .filter(file => {
       // New boundary tests declare their category in the filename. This avoids

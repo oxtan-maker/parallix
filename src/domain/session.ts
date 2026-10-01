@@ -11,6 +11,15 @@ import type { MissionId } from './mission.js';
 /** Roles distinguished by the checked session-marker repository. */
 export type SessionRole = 'execute' | 'draft' | 'review';
 
+/**
+ * Semantic context policy for a launcher invocation.
+ *
+ * `resume` uses the normal checked session-marker authority.  A
+ * `fresh-ephemeral` launch deliberately receives no prior marker and records
+ * none, preserving the normal marker for a later ordinary launch.
+ */
+export type SessionLaunchPolicy = 'resume' | 'fresh-ephemeral';
+
 export function sessionRole(value: string): SessionRole {
   if (value === 'execute' || value === 'draft' || value === 'review') {
     return value;

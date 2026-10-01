@@ -7,6 +7,7 @@ import childProcess from 'child_process';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
+import { initCommittedRepository } from './fixtures/git-repository.js';
 import { captureVerifiedTreeProof, NO_GATE_NOTICE, formatVerificationCommand, resolveVerificationAdapter, readPublishedTreeState, runVerificationGate, createVerificationProofIdentity, readReusableVerificationProof, writeReusableVerificationProof, } from '../src/adapters/verification/verification.js';
 function withTempDir(fn) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'workflow-verification-'));
@@ -15,21 +16,6 @@ function withTempDir(fn) {
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
-}
-
-function initCommittedGitRepo(root) {
-  const runGit = (args) => {
-    const result = childProcess.spawnSync('git', ['-C', root, ...args], { encoding: 'utf8' });
-    assert.equal(result.status, 0, result.stderr || result.stdout || `git ${args.join(' ')} failed`);
-  };
-  // Older supported Git releases do not support `git init -b`.
-  runGit(['init']);
-  runGit(['checkout', '-b', 'main']);
-  runGit(['config', 'user.name', 'Test User']);
-  runGit(['config', 'user.email', 'test@example.com']);
-  fs.writeFileSync(path.join(root, 'README.md'), '# temp repo\n', 'utf8');
-  runGit(['add', 'README.md']);
-  runGit(['commit', '-m', 'init']);
 }
 
 test('resolveVerificationAdapter defaults to no validation (no command)', () => {
@@ -160,7 +146,7 @@ test('readPublishedTreeState uses the git-style runner by default', () => {
 
 test('captureVerifiedTreeProof uses the git-style runner by default', () => {
   withTempDir(root => {
-    initCommittedGitRepo(root);
+    initCommittedRepository(root);
     const proofResult = captureVerifiedTreeProof('docs', root, {
       runFn() {
         return { status: 0 };
@@ -180,7 +166,7 @@ test('captureVerifiedTreeProof uses the git-style runner by default', () => {
 
 test('captureVerifiedTreeProof warns but succeeds when guarded compiled output is stale', () => {
   withTempDir(root => {
-    initCommittedGitRepo(root);
+    initCommittedRepository(root);
 
     const commandsDir = path.join(root, 'lib', 'commands');
     fs.mkdirSync(commandsDir, { recursive: true });
@@ -217,7 +203,7 @@ test('captureVerifiedTreeProof warns but succeeds when guarded compiled output i
 
 test('reusable verification proof reuses only the exact clean command, tracked inputs, and toolchain identity', () => {
   withTempDir(root => {
-    initCommittedGitRepo(root);
+    initCommittedRepository(root);
     const proofPath = path.join(os.tmpdir(), `task-2273-proof-${process.pid}-${Date.now()}.json`);
     const command = './scripts/verify-local.sh all';
     const written = writeReusableVerificationProof(command, root, { proofPath });
@@ -239,7 +225,7 @@ test('reusable verification proof reuses only the exact clean command, tracked i
 
 test('verification proof identity changes for tracked production, test, package, script, config, and generated inputs', () => {
   withTempDir(root => {
-    initCommittedGitRepo(root);
+    initCommittedRepository(root);
     const command = './scripts/verify-local.sh all';
     const initial = createVerificationProofIdentity(command, root);
     assert.equal(initial.ok, true);
@@ -259,7 +245,7 @@ test('verification proof identity changes for tracked production, test, package,
 
 test('reusable proof refuses to publish when inputs changed during gate execution', () => {
   withTempDir(root => {
-    initCommittedGitRepo(root);
+    initCommittedRepository(root);
     const command = './scripts/verify-local.sh all';
     const before = createVerificationProofIdentity(command, root);
     assert.equal(before.ok, true);

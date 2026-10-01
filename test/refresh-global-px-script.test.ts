@@ -81,7 +81,7 @@ test('scripts/refresh-global-px.sh cleans up the packed tarball on both success 
   const content = fs.readFileSync(SCRIPT_PATH, 'utf8');
   // A trap-based cleanup fires on EXIT regardless of whether a later step fails,
   // so no tarball is left behind in the repo root either way (task-1424).
-  assert.match(content, /trap\s+'rm -f "\$\{TARBALL\}"'\s+EXIT/);
+  assert.match(content, /trap\s+'rm -rf "\$\{PACK_DIR\}"'\s+EXIT/);
 });
 
 test('workflow.config.json wires local version allocation as the integrate pre-commit hook', () => {

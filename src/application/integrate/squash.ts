@@ -174,6 +174,23 @@ export function createSquashLanding(ports: IntegrateWorkflowPorts, { promoteTask
     return git(['-C', baseWorktree, 'cat-file', '-e', `HEAD:${pathspec}`]).status === 0;
   }
 
+  /** Paths whose staged tree entries differ from the gated mission-tip tree. */
+  function stagedPayloadTreeMismatches(baseWorktree: string, missionTip: string, paths: ReadonlySet<string>): string[] {
+    const pathspecs = [...paths];
+    if (pathspecs.length === 0) { return []; }
+    const entries = (args: string[]) => new Map(
+      git(args).stdout.split('\0').filter(Boolean).map(line => {
+        const [metadata, file] = line.split('\t');
+        const fields = metadata.split(' ');
+        const object = fields[1] === 'blob' ? fields[2] : fields[1];
+        return [file, `${fields[0]} ${object}`] as const;
+      }),
+    );
+    const staged = entries(['-C', baseWorktree, 'ls-files', '-s', '-z', '--', ...pathspecs]);
+    const expected = entries(['-C', baseWorktree, 'ls-tree', '-r', '-z', missionTip, '--', ...pathspecs]);
+    return pathspecs.filter(file => staged.get(file) !== expected.get(file));
+  }
+
   /** Create the landed squash commit; a hook failure bounces through the rebound kernel. */
   async function commitLandedSquash(run: LandingRun, commitArgs: string[], intendedPayloadPaths: Set<string>) {
     const { slug, context, baseWorktree, seams, missionServices } = run;
@@ -214,6 +231,10 @@ export function createSquashLanding(ports: IntegrateWorkflowPorts, { promoteTask
         worktree: baseWorktree,
         implementer,
         startAgent: seams.startAgentFn,
+        readHead: () => {
+          const result = git(['-C', baseWorktree, 'rev-parse', 'HEAD']);
+          return result.status === 0 ? result.stdout.trim() : null;
+        },
         // This repair completes the pending integration commit; it does not
         // return the reviewed mission to implementation.
         transitionToImplementer: (bounceSlug: string) => seams.transitionTaskFn(bounceSlug, 'ready-for-integration'),
@@ -256,13 +277,24 @@ export function createSquashLanding(ports: IntegrateWorkflowPorts, { promoteTask
       // Split on NUL so every captured path stays a literal pathspec. Do NOT
       // trim: filenames may legally start or end with whitespace, and trimming
       // would corrupt that pathspec (task-2533 codex review L206).
-      git(['-C', baseWorktree, 'diff', '--cached', '--name-only', '-z', '--']).stdout
+      git(['-C', baseWorktree, 'diff', '--cached', '--name-only', '-z', '--no-renames', '--']).stdout
         .split('\0')
         .filter(Boolean),
     );
     dropStaleBacklogCopies(run, capturePayloadPaths());
     const intendedPayloadPaths = capturePayloadPaths();
+    const treeMismatches = stagedPayloadTreeMismatches(baseWorktree, branch, intendedPayloadPaths);
+    if (treeMismatches.length > 0) {
+      throw abortWith(
+        landing,
+        `Staged squash payload does not match gated mission tip ${branch}: ${treeMismatches.join(', ')}`,
+      );
+    }
     await stageCloseout(run, mainTaskFile, intendedPayloadPaths);
+    const tierGuardResult = ports.gates.runStagedTierGuards?.(baseWorktree) ?? { ok: true };
+    if (!tierGuardResult.ok) {
+      throw abortWith(landing, `Staged squash fails fast tier guards before commit: ${tierGuardResult.error || 'test-categories, default-test-suite, or file-size-cap failed'}`);
+    }
     // Fail-closed backstop: nothing may land while the repository still holds a
     // `backlog/tasks/` copy of a completed or archived task (task-2534).
     const remainingDuplicates = backlog.checkBacklogIntegrity(baseWorktree)

@@ -97,10 +97,13 @@ line-attribution findings on a four-file fixture.
   directories, orphan-recovery manifest and `/tmp` sweeper go with it. The LCOV
   normalisation and merge used by `npm run coverage:merge`, and the
   tier-authority test selection, remain.
-- The runner keeps one raw V8 setting: `NODE_V8_COVERAGE` points at a
-  repo-local scratch directory, which the runner deletes. The native payload
-  is about 1.2 GB per integration-ci run. Without the setting it would be
-  written to the shared tmpfs `/tmp`.
+- The runner sets no `NODE_V8_COVERAGE`. Node's test runner always writes the
+  raw payload to its own directory under the test `TMPDIR` and points child
+  processes there, so subprocess coverage reaches the report either way. It
+  deletes that directory after reporting. A preset `NODE_V8_COVERAGE` only
+  receives a copy after the report is written: about 1.5 GB per
+  integration-ci run that nothing reads. Removing it left the integration-ci
+  LCOV's executable and covered line sets unchanged.
 - LCOV normalization removes comment-only and blank lines and local export
   lists from the line denominator. Native include-all reports these as
   zero-hit lines even though they contain no executable code. Runtime imports,
