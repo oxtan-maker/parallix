@@ -1591,7 +1591,7 @@ test('active() state-ordering contract: does not write Backlog before launch (re
 //   - "not relaunchable" declined without a launch  → the kernel's classifier;
 //     "SC3: a non-relaunchable checkpoint error launches no agent at all" and
 //     "SC4: a HumanOnly classification launches no agent and takes the
-//     repairHandoffFn branch" in test/task-2377.05-handoff-bounce.test.ts.
+//     repairHandoffFn branch" in test/mission-handoff-lane-events-contract.test.ts.
 //   - launcher unavailable                          → "the launch port declines
 //     when the agent launcher is unavailable" below.
 //   - startAgent call shape                         → "the launch port calls

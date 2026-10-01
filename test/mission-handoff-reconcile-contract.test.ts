@@ -1,3 +1,9 @@
+// Mission handoff reconcile contract: reconciling an interrupted handoff against the recorded Mission
+// review state.
+//
+// Behavior-owned suite (TASK-2622.07). Legacy case names are unchanged; regression provenance
+// TASK-2350 (was test/task-2350-reconcile-interrupted-handoff.test.ts).
+
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';

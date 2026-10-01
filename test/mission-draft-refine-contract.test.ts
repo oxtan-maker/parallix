@@ -1,3 +1,6 @@
+// Mission draft refine contract (TASK-2622.07 behavior-owned suite; was test/task-2561-lifecycle-unblock.test.ts).
+// Legacy case names are unchanged; regression provenance TASK-2561.
+//
 // TASK-2561 regression coverage beyond the red-to-green repro: the bounded
 // draft bounce-back, the draft prompt matching the enforced contract, the
 // pre-draft worktree hook, the handoff PR area, the integration re-review

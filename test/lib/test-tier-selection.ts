@@ -64,8 +64,7 @@ export function selectTierFiles(executionRoot: string): TierFileSelection {
     // fixtures across the command boundary even though its process launcher is
     // dependency-injected in the source.
     'draft.test.ts',
-    'draft-command.test.ts',
-    'draft_preflight_modern.test.ts',
+    'draft-command-boundary-contract.test.ts',
     'durable-state-policy.test.ts',
     'startup-preflight.test.ts',
     // The final CP-3 timing capture found these groups still crossing the
@@ -135,7 +134,6 @@ export function selectTierFiles(executionRoot: string): TierFileSelection {
     'task-2239-rereview-after-response.test.ts',
     'task-2241-tmp-cleanup-repro.test.ts',
     'task-2322-05-mission-sqlite-fixture.test.ts',
-    'task-2322-05-mission-use-cases.test.ts',
     'task-2322.04-mission-import.test.ts',
     'task-2322.11-operator-state.test.ts',
     'task-2322.12-stray-persistence.test.ts',
@@ -159,7 +157,7 @@ export function selectTierFiles(executionRoot: string): TierFileSelection {
     'task-2347.02-lifecycle-history.test.ts',
     'task-2347.02-repro.test.ts',
     'task-2348-implementer-attribution.test.ts',
-    'task-2350-reconcile-interrupted-handoff.test.ts',
+    'mission-handoff-reconcile-contract.test.ts',
     'task-2357-certification.test.ts',
     'task-2357.a-historical-intake.test.ts',
     'task-2357.c-unknown-review-fix-rounds.test.ts',
@@ -205,8 +203,9 @@ export function selectTierFiles(executionRoot: string): TierFileSelection {
     // TASK-2582: opens a real migrated SQLite operator database in a temp
     // directory and drives the real MissionLifecycleService and review
     // persistence boundaries. The SQLite boundary is not visible to the
-    // content heuristic, so both files are declared here.
-    'task-2582-lifecycle-ordering.test.ts',
+    // content heuristic, so the consolidated suite (which also carries the
+    // TASK-2322.05 Mission use-case cases) is declared here.
+    'mission-use-case-persistence-contract.test.ts',
     'task-2582-repro.test.ts',
     // TASK-2514 opens a migrated SQLite Mission store and drives the real
     // MissionLifecycleService through the approve path.

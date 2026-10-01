@@ -23,7 +23,7 @@ import { resolveParallixHome } from '../src/adapters/storage/storage.js';
 //   workflow-stats-fixture-                                                 → test/stats.test.ts
 //   parallix-pty-ui-fixture-                                                → test/tui-pty-smoke.test.ts
 //   parallix-tui-spawn-                                                     → test/tui-spawn.test.ts
-//   main-task-1038 (worktree name)                                          → test/draft-command.test.ts
+//   main-task-1038 (worktree name)                                          → test/draft-command-boundary-contract.test.ts
 //   main-task-fail, main-task-fix, parallix-first-value-*, task-1209-consume-,
 //   adhoc-create-a-hello-world-program, repo                                → earlier fixture runs (same tmp-dir naming scheme)
 const FIXTURE_REPOS = [

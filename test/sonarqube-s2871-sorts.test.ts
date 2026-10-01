@@ -51,7 +51,7 @@ test('discoverTestFiles preserves UTF-16 filename order', () => {
 
   assert.deepEqual(files, expected);
   assert.ok(
-    files.indexOf(path.join(testDir, 'backlog-mission-materialization.test.ts'))
+    files.indexOf(path.join(testDir, 'backlog.test.ts'))
       < files.indexOf(path.join(testDir, 'backlog_gate.test.ts')),
   );
 });

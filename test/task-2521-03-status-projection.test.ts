@@ -28,7 +28,7 @@ function missionData(overrides: Partial<StatusMissionData> = {}): StatusMissionD
     declaredGates: ['./scripts/verify-local.sh all'],
     checkpoint: 'CP-1',
     checkpointDescription: 'Typed write surface',
-    goalCheck: [{ criterion: 'Typed verbs exist', evidence: 'test/task-2521-03-mutation-parity.test.ts' }],
+    goalCheck: [{ criterion: 'Typed verbs exist', evidence: 'test/mission-brief-and-mutation-contract.test.ts' }],
     nextAction: 'Record the next checkpoint.',
     version: 7,
     reviewHistory: [],
@@ -67,7 +67,7 @@ test('AC #1: px status reports the brief, the declared gates and the latest chec
   assert.match(output, /Out of scope: A generic patch endpoint; Direct SQL for agents/);
   assert.match(output, /Declared gates: \.\/scripts\/verify-local\.sh all/);
   assert.match(output, /Last checkpoint: CP-1/);
-  assert.match(output, /Typed verbs exist: test\/task-2521-03-mutation-parity\.test\.ts/);
+  assert.match(output, /Typed verbs exist: test\/mission-brief-and-mutation-contract\.test\.ts/);
   assert.match(output, /Next action: Record the next checkpoint\./);
 });
 

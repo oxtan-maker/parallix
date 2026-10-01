@@ -48,9 +48,8 @@ export const INTEGRATION_CI_TESTS: readonly string[] = [
   'custom-capacity-cross-repo.integration.test.ts',
   'custom-capacity-multiprocess-repro.test.ts',
   'documentation-verification.test.ts',
-  'draft-command.test.ts',
+  'draft-command-boundary-contract.test.ts',
   'draft.test.ts',
-  'draft_preflight_modern.test.ts',
   'durable-state-policy.test.ts',
   'e2e-mission-sqlite-cutover.test.ts',
   'external-target-resolution.test.ts',
@@ -68,6 +67,8 @@ export const INTEGRATION_CI_TESTS: readonly string[] = [
   'integrate-workflow-gate.test.ts',
   'integrate.test.ts',
   'integration-pipelines.test.ts',
+  'mission-cancel-contract.test.ts',
+  'mission-handoff-reconcile-contract.test.ts',
   'mission-utils-worktree.test.ts',
   'mistral.test.ts',
   'nels.test.ts',
@@ -145,7 +146,6 @@ export const INTEGRATION_CI_TESTS: readonly string[] = [
   'task-2318-temp-directory-leaks.test.ts',
   'task-2319-notices-git-tracking.test.ts',
   'task-2322-05-mission-sqlite-fixture.test.ts',
-  'task-2322-05-mission-use-cases.test.ts',
   'task-2322.11-operator-state.test.ts',
   'task-2322.12-review-recovery.integration.test.ts',
   'task-2322.12-stray-persistence.test.ts',
@@ -161,7 +161,6 @@ export const INTEGRATION_CI_TESTS: readonly string[] = [
   'task-2347.10-repro.test.ts',
   'task-2348-implementer-attribution.test.ts',
   'task-2349-integrate-stage-commit-race.test.ts',
-  'task-2350-reconcile-interrupted-handoff.test.ts',
   // These integration workflow regressions create real temporary filesystem
   // or SQLite fixtures; clean hosted runners provide every dependency.
   'task-1109.test.ts',
@@ -200,12 +199,8 @@ export const INTEGRATION_CI_TESTS: readonly string[] = [
   'task-2433-web-mutation.integration.test.ts',
   'task-2438-worktree-board-repro.test.ts',
   'task-2440-repro.test.ts',
-  'task-2441-mission-title-repro.test.ts',
   'task-2443-repro.test.ts',
   'task-2455-config-exit-status-repro.test.ts',
-  'task-2466-cancel-surfaces.test.ts',
-  'task-2466-mission-cancel.test.ts',
-  'task-2468-adhoc-lifecycle-repro.test.ts',
   'task-2484-npm-metadata-urls-repro.test.ts',
   'task-2489-lead-from-worktree.test.ts',
   // TASK-2489: the recovery supervisor drives only injected doubles and temp
@@ -279,8 +274,8 @@ export const INTEGRATION_CI_TESTS: readonly string[] = [
   // TASK-2555: runs px rebase against a temporary Git repository and a migrated
   // SQLite Mission store; git and SQLite are on every GitHub runner, so CI-safe.
   'task-2555-rebase-stale-approval.test.ts',
-  // TASK-2582: real migrated SQLite lifecycle boundaries; CI-safe.
-  'task-2582-lifecycle-ordering.test.ts',
+  // TASK-2582 / TASK-2322.05: real migrated SQLite lifecycle boundaries; CI-safe.
+  'mission-use-case-persistence-contract.test.ts',
   'task-2582-repro.test.ts',
   // TASK-2514: real migrated SQLite lifecycle boundary for the human approve
   // after an active-state repair; CI-safe.
@@ -294,10 +289,10 @@ export const INTEGRATION_CI_TESTS: readonly string[] = [
   // to measure command-to-rendered-card delivery; both are CI-safe boundaries.
   'task-2580-active-persisted-mission-repro.test.ts',
   // TASK-2521.03: seeds an isolated SQLite operator database and drives the
-  // production `px status --json` composition path.
-  'task-2521-03-context-cli.integration.test.ts',
+  // production `px status --json` composition path; the ad hoc lifecycle section
+  // (TASK-2468) runs the real `px` entry against an isolated Parallix home.
+  'mission-adhoc-and-context-cli-contract.test.ts',
   'legacy-import-trace.integration.test.ts',
-  'task-2521.04-mission-dependencies.integration.test.ts',
   'legacy-persistence-audit.integration.test.ts',
   // Reads and commits artifacts in temporary Git repositories; standard Git is enough for CI.
   'legacy-content-history.integration.test.ts',

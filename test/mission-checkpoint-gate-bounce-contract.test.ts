@@ -1,3 +1,8 @@
+// Mission checkpoint gate bounce contract: missing or invalid checkpoint evidence is repairable and
+// relaunches the agent within a bounded budget.
+//
+// Behavior-owned suite (TASK-2622.07). Legacy case names are unchanged; provenance TASK-2261
+// (was test/task-2261-checkpoint-gates-repro.test.ts).
 // Reproduction test for task-2261: checkpoint gates bouncing not working.
 //
 // Models a completed execute phase whose mission directory contains no CP-N.md

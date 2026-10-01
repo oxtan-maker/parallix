@@ -1,4 +1,7 @@
-
+// Mission handoff verification contract: verifyHandoff and performHandoff failure paths.
+//
+// Behavior-owned suite (TASK-2622.07). Legacy case names are unchanged; provenance TASK-1039
+// (was test/task-1039-handoff.test.ts).
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';

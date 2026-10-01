@@ -1,3 +1,7 @@
+// Mission execute service contract: ExecuteMission use case ordering and rollback against in-memory
+// mechanism ports.
+//
+// Behavior-owned suite (TASK-2622.07). Legacy case names are unchanged (was test/execute-mission-service.test.ts).
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
@@ -6,7 +10,7 @@ import type { ExecuteMissionPorts } from '../src/application/ports/execute-missi
 
 // Unit coverage for the ExecuteMission use case against in-memory mechanism
 // ports. This is the port-level counterpart of
-// test/execute-mission-characterization.test.ts, which drives the same workflow
+// test/mission-execute-adapter-contract.test.ts (Execute Mission characterization section), which drives the same workflow
 // through the real adapters.
 
 function strictPorts(overrides: Record<string, unknown> = {}) {
