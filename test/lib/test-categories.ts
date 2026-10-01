@@ -155,11 +155,6 @@ export const INTEGRATION_CI_TESTS: readonly string[] = [
   'task-2339-aggregate-read-during-write.test.ts',
   'task-2339-writes-outlive-close.test.ts',
   'task-2345-repro.test.ts',
-  'task-2347-01-repository-identity-repro.test.ts',
-  'task-2347.02-lifecycle-history.test.ts',
-  'task-2347.02-repro.test.ts',
-  'task-2347.10-repro.test.ts',
-  'task-2348-implementer-attribution.test.ts',
   'task-2349-integrate-stage-commit-race.test.ts',
   // These integration workflow regressions create real temporary filesystem
   // or SQLite fixtures; clean hosted runners provide every dependency.
@@ -169,16 +164,9 @@ export const INTEGRATION_CI_TESTS: readonly string[] = [
   'task-2426-repro.test.ts',
   'task-2454-web-board-draft-repro.test.ts',
   'task-2357-certification.test.ts',
-  'task-2357.a-historical-intake.test.ts',
-  'task-2357.b-canonical-repository-identity.test.ts',
   'task-2357.c-unknown-review-fix-rounds.test.ts',
-  'task-2357.d-completion-population.test.ts',
-  'task-2357.e-legacy-history-scope.test.ts',
-  'task-2357.g-per-metric-evidence.test.ts',
   'task-2363-production-certification.test.ts',
-  'task-2363-repository-identity.test.ts',
   'task-2363-review-fix-rounds.test.ts',
-  'task-2363-windowed-cohorts.test.ts',
   'task-2367-certification.test.ts',
   'task-2367-regressions.test.ts',
   'task-2367-repair.test.ts',
@@ -188,7 +176,6 @@ export const INTEGRATION_CI_TESTS: readonly string[] = [
   'task-2373-shutdown.test.ts',
   'task-2375-active-invocation-overlap.test.ts',
   'task-2375-current-work-operation-repro.test.ts',
-  'task-2378-authoritative-stats.test.ts',
   'task-2379-approval-boundary-repro.test.ts',
   'task-2397-integrate-active-approved-recovery.test.ts',
   'task-2413-proof-reuse.test.ts',
@@ -350,6 +337,37 @@ export const INTEGRATION_CI_TESTS: readonly string[] = [
   'verify-local-integrate.test.ts',
   'web-host.integration.test.ts',
   'web-package-smoke.integration.test.ts',
+  // TASK-2622.13: canonical repository identity over the real sqlite operator
+  // database via test/fixtures/task-2357-statistics-fixture.ts. The fixture
+  // hides the sqlite boundary from the content heuristic, so this integration-ci
+  // test is declared here rather than silently inheriting unit membership.
+  'canonical-repository-identity.test.ts',
+  // TASK-2622.13: windowed default FLOW cohort over the real sqlite operator
+  // database via test/fixtures/task-2357-statistics-fixture.ts. The fixture
+  // hides the sqlite boundary from the content heuristic, so this integration-ci
+  // test is declared here rather than silently inheriting unit membership.
+  'cohort-windowing.test.ts',
+  // TASK-2622.13: deriveImplementerAndFixRounds, the production stats adapter
+  // reaching the Review aggregate, and the closed rollup row as the grouping
+  // authority. Real sqlite operator database behind clearOperatorStateCache and
+  // throwaway git repos, so declared here rather than inheriting unit membership.
+  'stats-internals.test.ts',
+  // TASK-2622.13: the completed-mission population shared by the board and the
+  // CLI mission-flow report. The sqlite boundary lives in the statistics
+  // fixture, so this integration-ci test is declared here.
+  'stats-population.test.ts',
+  // TASK-2622.13: per-metric low-sample cohort judgement over the real sqlite
+  // operator database and the production cohort report. The fixture hides the
+  // sqlite boundary, so this integration-ci test is declared here.
+  'stats-cohorts.test.ts',
+  // TASK-2622.13: the lifecycle event stream leaves exactly one gap-free,
+  // ordered lane event per transition. Real sqlite fixture plus throwaway git
+  // repos, so declared here rather than inheriting unit membership.
+  'lifecycle-events.test.ts',
+  // TASK-2622.13: gap-free ordered lane history and the repository-scoped
+  // legacy lifecycle-entry fallback. The sqlite boundary lives in the
+  // statistics fixture, so this integration-ci test is declared here.
+  'lifecycle-history.test.ts',
 ];
 
 /**
@@ -360,7 +378,7 @@ export const INTEGRATION_LOCAL_TESTS: readonly string[] = [
   'bubblewrap-worktree-git.test.ts',
   'task-2270-graphify-exclusion.test.ts',
   'task-2286-native-sea-smoke.test.ts',
-  'task-2376-lifecycle-timing.test.ts',
+  'lifecycle-timing-local.test.ts',
   'task-2557-sandbox-px-write.test.ts',
   'task-2598-claude-credential-cell.test.ts',
   'task-2598-repro.test.ts',
@@ -376,8 +394,8 @@ export const INTEGRATION_LOCAL_REASONS: Readonly<Record<string, string>> = {
     'Spawns the uv-installed `graphify` CLI; neither uv nor graphify exists on a clean GitHub-hosted runner.',
   'task-2286-native-sea-smoke.test.ts':
     'Builds and runs the native single-executable artifact, which needs a Node >= MINIMUM_SEA_NODE_MAJOR SEA toolchain and per-OS packaging; the portable npm package and bundle checks cover packaging in the CI lane instead.',
-  'task-2376-lifecycle-timing.test.ts':
-    'Asserts lifecycle dwell and cycle-time values; retain that timing-dependent coverage in required local verification rather than GitHub CI\'s 1000ms test budget.',
+  'lifecycle-timing-local.test.ts':
+    'TASK-2622.13: consolidates task-2376 lifecycle-approval timing over a real migrated SQLite Mission store and the production review-persistence + MissionLifecycleService composition; the SQLite boundary is not visible to the content heuristic, so it stays in required local verification rather than the GitHub CI lane.',
   'task-2557-sandbox-px-write.test.ts':
     'Spawns the real `bwrap` binary to run `px` inside the codex sandbox profile; bubblewrap is not part of the GitHub-hosted runner image.',
   'task-2598-claude-credential-cell.test.ts':

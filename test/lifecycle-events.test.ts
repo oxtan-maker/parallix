@@ -1,19 +1,19 @@
 /**
- * TASK-2347.02 — reproduction: the lifecycle event stream has holes.
+ * Lifecycle event stream for the metrics slice (TASK-2622.13 consolidation).
  *
- * Mission intake and `integration -> done` need lane events so backlog age
- * and throughput can be derived from the event stream. Closure records its
- * timestamp on the aggregate without changing lanes.
- *
- * Every lane transition below leaves exactly one event behind.
+ * integration-ci tier provenance test migrated from
+ * `test/task-2347.02-repro.test.ts` (TASK-2347.02): every lifecycle transition
+ * leaves exactly one gap-free, ordered lane event behind, and closure records
+ * its timestamp without inventing a done -> done move. These drive the real
+ * application use cases against a migrated SQLite fixture, so they stay in the
+ * integration-ci lane. Historical task ID retained in the case name as
+ * regression provenance (AC#7).
  */
-
 import { afterEach, describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-
 import { MissionBriefService } from '../src/application/mission-brief-service.js';
 import { MissionCheckpointService } from '../src/application/mission-checkpoint-service.js';
 import { MissionIntakeService } from '../src/application/mission-intake-service.js';
@@ -27,6 +27,18 @@ import { SqliteMissionStore } from '../src/adapters/sqlite/mission-store.js';
 import { agentFamily } from '../src/domain/agents.js';
 import { missionId, missionLabels } from '../src/domain/mission.js';
 import { repositoryId } from '../src/domain/repository.js';
+
+/**
+ * TASK-2347.02 — reproduction: the lifecycle event stream has holes.
+ *
+ * Mission intake and `integration -> done` need lane events so backlog age
+ * and throughput can be derived from the event stream. Closure records its
+ * timestamp on the aggregate without changing lanes.
+ *
+ * Every lane transition below leaves exactly one event behind.
+ */
+
+
 
 /**
  * Draft settles the contract activation demands: a goal, a why, a scope and at

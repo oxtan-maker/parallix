@@ -1,6 +1,17 @@
+/**
+ * Completed-mission population for the metrics slice (TASK-2622.13
+ * consolidation).
+ *
+ * integration-ci tier provenance test migrated from
+ * `test/task-2357.d-completion-population.test.ts` (TASK-2357 defect D): the
+ * completed population is exactly the missions the lifecycle reached `done`,
+ * shared by the board projection and the CLI mission-flow report. These exercise
+ * the real sqlite operator database and the production `px stats` composition,
+ * so they stay in the integration-ci lane. Historical task ID retained in the
+ * case name as regression provenance (AC#7).
+ */
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-
 import { createStatsCommand, createStatsWorkflowAdapter } from '../src/adapters/cli/commands/stats.js';
 import { StatsCommandUseCase } from '../src/application/stats-command-use-case.js';
 import type { MissionStore } from '../src/application/domain-ports.js';

@@ -153,20 +153,10 @@ export function selectTierFiles(executionRoot: string): TierFileSelection {
     'task-2426-repro.test.ts',
     'task-2454-web-board-draft-repro.test.ts',
     'task-2345-repro.test.ts',
-    'task-2347-01-repository-identity-repro.test.ts',
-    'task-2347.02-lifecycle-history.test.ts',
-    'task-2347.02-repro.test.ts',
-    'task-2348-implementer-attribution.test.ts',
     'mission-handoff-reconcile-contract.test.ts',
     'task-2357-certification.test.ts',
-    'task-2357.a-historical-intake.test.ts',
     'task-2357.c-unknown-review-fix-rounds.test.ts',
-    'task-2357.d-completion-population.test.ts',
-    'task-2357.e-legacy-history-scope.test.ts',
-    'task-2357.g-per-metric-evidence.test.ts',
-    'task-2363-repository-identity.test.ts',
     'task-2363-review-fix-rounds.test.ts',
-    'task-2363-windowed-cohorts.test.ts',
     'task-2367-certification.test.ts',
     'task-2367-regressions.test.ts',
     'task-2367-repair.test.ts',
@@ -235,6 +225,30 @@ export function selectTierFiles(executionRoot: string): TierFileSelection {
     // SQLite boundaries are not visible to the content heuristic, so this
     // integration-ci test must be excluded from the CPU-budgeted unit tier.
     'task-2620-integration-repair-loop-repro.test.ts',
+    // TASK-2622.13: windowed default FLOW cohort over the real sqlite operator
+    // database via test/fixtures/task-2357-statistics-fixture.ts. The fixture
+    // hides the sqlite boundary from the content heuristic, so this integration-ci
+    // test is declared here rather than silently inheriting unit membership.
+    'cohort-windowing.test.ts',
+    // TASK-2622.13: consolidates task-2376 lifecycle-approval timing over a real
+    // migrated SQLite Mission store and the production review-persistence /
+    // MissionLifecycleService composition. The SQLite boundary is not visible to
+    // the content heuristic, so it stays in required local verification rather
+    // than the GitHub CI lane.
+    'lifecycle-timing-local.test.ts',
+    // TASK-2622.13: deriveImplementerAndFixRounds, the production stats adapter
+    // reaching the Review aggregate, and the closed rollup row as the grouping
+    // authority. Real sqlite operator database behind clearOperatorStateCache and
+    // throwaway git repos, so declared here rather than inheriting unit
+    // membership.
+    'stats-internals.test.ts',
+    'stats-population.test.ts',
+    'stats-cohorts.test.ts',
+    // TASK-2622.13: the lifecycle event stream leaves exactly one gap-free,
+    // ordered lane event per transition. Real sqlite fixture plus throwaway git
+    // repos, so declared here rather than inheriting unit membership.
+    'lifecycle-events.test.ts',
+    'lifecycle-history.test.ts',
   ]);
 
   // Classify subdir tests through the same boundary filter as root-level tests,

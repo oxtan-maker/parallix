@@ -1,3 +1,10 @@
+/**
+ * Bug-frequency projection for the metrics slice (TASK-2622.13 consolidation).
+ *
+ * Unit-tier regression tests that migrated from
+ * `test/task-2361-bug-frequency.test.ts` (TASK-2361). Historical task ID kept in
+ * the case names as regression provenance (AC#7).
+ */
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
@@ -34,7 +41,7 @@ function taskFile(options: {
   return { path: options.path, rawText: text, store: options.store ?? 'completed' };
 }
 
-test('unions labels across duplicate copies of one task id', () => {
+test('task-2361: unions labels across duplicate copies of one task id', () => {
   const measurement = measureBugFrequency({
     cohortIds: ['TASK-2001'],
     files: [
@@ -56,7 +63,7 @@ test('unions labels across duplicate copies of one task id', () => {
   assert.deepEqual(measurement.aborts, []);
 });
 
-test('classifies by the labels present at report time, so a bug label added after the transition commit counts', () => {
+test('task-2361: classifies by the labels present at report time, so a bug label added after the transition commit counts', () => {
   // The transition commit itself is never read; the runner hands the module
   // the working-tree copies as they exist now. A `bug` label attached after
   // completion therefore lands in the label union and moves the numerator.
@@ -76,7 +83,7 @@ test('classifies by the labels present at report time, so a bug label added afte
   assert.equal(measurement.bugPer100NonBug, null);
 });
 
-test('counts only the exact bug label, not lookalikes or title keywords', () => {
+test('task-2361: counts only the exact bug label, not lookalikes or title keywords', () => {
   const measurement = measureBugFrequency({
     cohortIds: ['TASK-2003', 'TASK-2004'],
     files: [
@@ -98,7 +105,7 @@ test('counts only the exact bug label, not lookalikes or title keywords', () => 
   assert.equal(measurement.bugPer100NonBug, 100);
 });
 
-test('reports malformed frontmatter as a warning without aborting the run', () => {
+test('task-2361: reports malformed frontmatter as a warning without aborting the run', () => {
   const measurement = measureBugFrequency({
     cohortIds: ['TASK-2005', 'TASK-2006'],
     files: [
@@ -119,7 +126,7 @@ test('reports malformed frontmatter as a warning without aborting the run', () =
   assert.equal(measurement.total, 1);
 });
 
-test('aborts ambiguous id or label data instead of classifying the record', () => {
+test('task-2361: aborts ambiguous id or label data instead of classifying the record', () => {
   const measurement = measureBugFrequency({
     cohortIds: ['TASK-2007', 'TASK-2008', 'TASK-2009'],
     files: [
@@ -156,7 +163,7 @@ test('aborts ambiguous id or label data instead of classifying the record', () =
   assert.equal(measurement.bugOverTotal, null);
 });
 
-test('aborts an unterminated inline label list instead of classifying the partial copy', () => {
+test('task-2361: aborts an unterminated inline label list instead of classifying the partial copy', () => {
   const measurement = measureBugFrequency({
     cohortIds: ['TASK-2020', 'TASK-2021'],
     files: [
@@ -183,7 +190,7 @@ test('aborts an unterminated inline label list instead of classifying the partia
   assert.equal(measurement.total, 1);
 });
 
-test('parses a real frozen member with trailing junk after the inline list', () => {
+test('task-2361: parses a real frozen member with trailing junk after the inline list', () => {
   // The frozen cohort member TASK-2305 has `labels: [ai_sdlc]y` in the working
   // tree: a well-formed inline list with a trailing character. This must not
   // abort; it classifies as the non-bug label `ai_sdlc` so the report
@@ -215,7 +222,7 @@ test('parses a real frozen member with trailing junk after the inline list', () 
   assert.deepEqual(measurement.nonBugIds, ['TASK-2305']);
 });
 
-test('records fail-closed aborts for cohort members with no readable record', () => {
+test('task-2361: records fail-closed aborts for cohort members with no readable record', () => {
   const measurement = measureBugFrequency({
     cohortIds: ['TASK-2010', 'TASK-2011'],
     files: [
@@ -237,7 +244,7 @@ test('records fail-closed aborts for cohort members with no readable record', ()
   assert.equal(measurement.total, 1);
 });
 
-test('aborts a malformed indented label list instead of classifying the partial copy', () => {
+test('task-2361: aborts a malformed indented label list instead of classifying the partial copy', () => {
   const measurement = measureBugFrequency({
     cohortIds: ['TASK-2012', 'TASK-2013'],
     files: [
@@ -268,7 +275,7 @@ test('aborts a malformed indented label list instead of classifying the partial 
   assert.equal(measurement.total, 1);
 });
 
-test('computes the cohort-1 shape exactly: bug / total and 100 * bug / non-bug', () => {
+test('task-2361: computes the cohort-1 shape exactly: bug / total and 100 * bug / non-bug', () => {
   const files: BugFrequencyTaskFile[] = [];
   for (let i = 0; i < 20; i += 1) {
     const id = `TASK-${2100 + i}`;

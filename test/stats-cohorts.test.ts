@@ -1,6 +1,17 @@
+/**
+ * Per-metric low-sample cohort judgement for the metrics slice (TASK-2622.13
+ * consolidation).
+ *
+ * integration-ci tier provenance test migrated from
+ * `test/task-2357.g-per-metric-evidence.test.ts` (TASK-2357 defect G): a
+ * metric's low-sample judgement is its own, judged against the shared threshold
+ * per observation count rather than per cohort. These exercise the real sqlite
+ * operator database and the production cohort report, so they stay in the
+ * integration-ci lane. Historical task ID retained in the case name as
+ * regression provenance (AC#7).
+ */
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-
 import { renderCohortComparison } from '../src/adapters/cli/commands/cohort-report.js';
 import { ConcreteMetricsReadAdapter } from '../src/application/projections/metrics-read-adapter.js';
 import type { MissionLabel, MissionId, MissionStatus } from '../src/domain/mission.js';

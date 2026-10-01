@@ -1,6 +1,17 @@
+/**
+ * Windowed default FLOW cohort for the metrics slice (TASK-2622.13
+ * consolidation).
+ *
+ * integration-ci tier provenance test migrated from
+ * `test/task-2363-windowed-cohorts.test.ts` (TASK-2363): the board's default
+ * experiment cohort is the current rolling seven-day window, excluding a
+ * six-month-old mission carrying the same label. Historical task ID retained in
+ * the case name as regression provenance (AC#7). A shared real git primary +
+ * linked-worktree fixture (`test/fixtures/task-2357-statistics-fixture.ts`)
+ * seeds the fixed event history pinned to a rolling seven-day decision window.
+ */
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-
 import { ConcreteMetricsReadAdapter } from '../src/application/projections/metrics-read-adapter.js';
 import type { MissionId, MissionStatus } from '../src/domain/mission.js';
 import { missionId } from '../src/domain/mission.js';

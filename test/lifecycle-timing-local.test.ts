@@ -1,21 +1,32 @@
+/**
+ * Local lifecycle-approval timing for the metrics slice (TASK-2622.13
+ * consolidation).
+ *
+ * integration-local tier provenance tests migrated from
+ * `test/task-2376-lifecycle-timing.test.ts` (TASK-2376): the approve boundary
+ * timestamps the review → integration lane event with ReviewerDecision.decidedAt
+ * (not wall clock), and the review-aggregate fix-round source is authoritative.
+ * These exercise the real sqlite + git boundaries under a declared workstation
+ * dependency, so they stay in the required-local tier (AC#2). Historical task ID
+ * retained in the case names as regression provenance (AC#7).
+ */
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
-
 import { agentFamily } from '../src/domain/agents.js';
-import { triggerFromTransition, type LaneTransitionEvent } from '../src/domain/board-event.js';
+import { triggerFromTransition } from '../src/domain/board-event.js';
 import { missionId, MissionRuleViolation } from '../src/domain/mission.js';
-import { decideMission, type MissionTransition } from '../src/domain/mission-workflow.js';
+import { decideMission } from '../src/domain/mission-workflow.js';
+import type { MissionTransition } from '../src/domain/mission-workflow.js';
 import { repositoryId } from '../src/domain/repository.js';
 import {
   applyReviewerCommand,
   changeRevision,
   ConfiguredReviewerEligibility,
   currentReviewRound,
-  reviewStatus,
   startReview,
   type ReviewedChange,
   type Review,
@@ -26,7 +37,6 @@ import { SqliteDatabaseAdapter } from '../src/adapters/sqlite/database-adapter.j
 import { SqliteMigrationRunner, loadDefaultMigrations } from '../src/adapters/sqlite/migration-runner.js';
 import { SqliteMissionStore } from '../src/adapters/sqlite/mission-store.js';
 import { clearOperatorStateCache } from '../src/adapters/sqlite/adapter-factory.js';
-import { reviewFindingId } from '../src/domain/review.js';
 import { submitReviewRound } from '../src/adapters/review/review-commands.js';
 import { bindReviewPersistence } from '../src/composition/review-persistence.js';
 import { MissionLifecycleService } from '../src/application/mission-lifecycle-service.js';
@@ -105,7 +115,7 @@ function makeMissionInReview(review: Review) {
 // this test captures the expected behavior.
 // ---------------------------------------------------------------------------
 
-test('R1: normal approval transitions review to integration immediately with decidedAt', () => {
+test('R1: normal approval transitions review to integration immediately with decidedAt (task-2376)', () => {
   const decidedAt = '2026-01-01T10:30:00Z';
   const approvedReview = createApprovedReview(decidedAt);
 
@@ -154,7 +164,7 @@ test('R1: normal approval transitions review to integration immediately with dec
 // `review` until `px integrate` repaired it at wall-clock time.
 // ---------------------------------------------------------------------------
 
-test('R1 production: local approval path transitions Mission to integration before px integrate', async () => {
+test('R1 production: local approval path transitions Mission to integration before px integrate (task-2376)', async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'task-2376-r1prod-'));
   fs.mkdirSync(path.join(root, 'missions'), { recursive: true });
   spawnSync('git', ['init'], { cwd: root });
@@ -276,15 +286,11 @@ test('R1 production: local approval path transitions Mission to integration befo
 // This shifts dwell: review = 240m, integration = 15m.
 // ---------------------------------------------------------------------------
 
-test('R2: delayed integration dwell — review 30m, integration 225m', () => {
+test('R2: delayed integration dwell — review 30m, integration 225m (task-2376)', () => {
   // Deterministic timestamps
   const reviewStart = '2026-01-01T10:00:00Z';
   const approveAt = '2026-01-01T10:30:00Z';
-  const integrateAt = '2026-01-01T14:00:00Z';
   const doneAt = '2026-01-01T14:15:00Z';
-
-  const approvedReview = createApprovedReview(approveAt);
-  const missionInReview = makeMissionInReview(approvedReview);
 
   // Simulate full lifecycle with correct decidedAt
   const transitions: MissionTransition[] = [];
@@ -356,7 +362,7 @@ test('R2: delayed integration dwell — review 30m, integration 225m', () => {
 });
 
 // Old-bug sensitivity: using wall-clock time (14:00) for approve shifts dwell
-test('R2 sensitivity: wall-clock approve shifts dwell from 30m/225m to 240m/15m', () => {
+test('R2 sensitivity: wall-clock approve shifts dwell from 30m/225m to 240m/15m (task-2376)', () => {
   const reviewStart = '2026-01-01T10:00:00Z';
   const wallClockApprove = '2026-01-01T14:00:00Z'; // new Date() at integrate time
   const doneAt = '2026-01-01T14:15:00Z';
@@ -405,7 +411,7 @@ test('R2 sensitivity: wall-clock approve shifts dwell from 30m/225m to 240m/15m'
 // occurredAt: new Date().toISOString() for the approve command.
 // ---------------------------------------------------------------------------
 
-test('R3: stale review recovery uses ReviewerDecision.decidedAt for approve transition', () => {
+test('R3: stale review recovery uses ReviewerDecision.decidedAt for approve transition (task-2376)', () => {
   const decidedAt = '2026-01-01T10:30:00Z';
   const approvedReview = createApprovedReview(decidedAt);
   const missionInReview = makeMissionInReview(approvedReview);
@@ -446,7 +452,7 @@ test('R3: stale review recovery uses ReviewerDecision.decidedAt for approve tran
 // review → done shortcut that skips the integration lane entirely.
 // ---------------------------------------------------------------------------
 
-test('R8: direct review → done forbidden — integrate requires integration status', () => {
+test('R8: direct review → done forbidden — integrate requires integration status (task-2376)', () => {
   const approvedReview = createApprovedReview('2026-01-01T10:30:00Z');
   const missionInReview = makeMissionInReview(approvedReview);
 
@@ -459,7 +465,7 @@ test('R8: direct review → done forbidden — integrate requires integration st
 });
 
 // Old-bug sensitivity: review → done shortcut is now forbidden
-test('R8 sensitivity: review → done shortcut skips integration lane', () => {
+test('R8 sensitivity: review → done shortcut skips integration lane (task-2376)', () => {
   const approvedReview = createApprovedReview('2026-01-01T10:30:00Z');
   const missionInReview = makeMissionInReview(approvedReview);
 
@@ -479,7 +485,7 @@ test('R8 sensitivity: review → done shortcut skips integration lane', () => {
 // This is distinct from unknown (no evidence).
 // ---------------------------------------------------------------------------
 
-test('R10: first-pass approval yields known reviewFixRounds=0', async () => {
+test('R10: first-pass approval yields known reviewFixRounds=0 (task-2376)', async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'task-2376-r10-'));
   fs.mkdirSync(path.join(root, 'missions'), { recursive: true });
   spawnSync('git', ['init'], { cwd: root });
@@ -557,7 +563,7 @@ test('R10: first-pass approval yields known reviewFixRounds=0', async () => {
 // 2 request-changes cycles then approval → known 2.
 // ---------------------------------------------------------------------------
 
-test('R11: two request-changes cycles yield known reviewFixRounds=2', async () => {
+test('R11: two request-changes cycles yield known reviewFixRounds=2 (task-2376)', async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'task-2376-r11-'));
   fs.mkdirSync(path.join(root, 'missions'), { recursive: true });
   spawnSync('git', ['init'], { cwd: root });
@@ -639,7 +645,7 @@ test('R11: two request-changes cycles yield known reviewFixRounds=2', async () =
 // Expected: authoritative values win.
 // ---------------------------------------------------------------------------
 
-test('R12: external artifacts with misleading values do not affect authoritative result', async () => {
+test('R12: external artifacts with misleading values do not affect authoritative result (task-2376)', async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'task-2376-r12-'));
   fs.mkdirSync(path.join(root, 'missions'), { recursive: true });
   fs.mkdirSync(path.join(root, 'backlog', 'tasks'), { recursive: true });
@@ -730,7 +736,7 @@ test('R12: external artifacts with misleading values do not affect authoritative
 // `missing-authority` result. The throw happens before any PR lookup,
 // branch-history lookup, or task-text lookup, and no value is fabricated.
 
-test('R13: missing MissionStore cannot activate heuristic inference', async () => {
+test('R13: missing MissionStore cannot activate heuristic inference (task-2376)', async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'task-2376-r13-'));
   fs.mkdirSync(path.join(root, 'missions'), { recursive: true });
   fs.mkdirSync(path.join(root, 'backlog', 'tasks'), { recursive: true });
