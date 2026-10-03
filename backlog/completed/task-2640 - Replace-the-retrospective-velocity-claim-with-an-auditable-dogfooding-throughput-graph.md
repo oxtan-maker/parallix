@@ -3,8 +3,8 @@ id: TASK-2640
 title: >-
   Replace the retrospective velocity claim with an auditable dogfooding
   throughput graph
-status: backlog
-assignee: []
+status: done
+assignee: [codex]
 created_date: '2026-10-03 15:35'
 labels: []
 dependencies: []
@@ -132,31 +132,17 @@ Do not count agent telemetry rows as completed work.
 
 ---
 
-# Define the comparison before rendering it
+# Define the population before rendering it
 
-The manual baseline and Parallix series must measure the same thing.
+For Parallix dogfooding, include all completed lifecycle missions. `ai_sdlc`
+work improves the workflow Parallix provides to its users; it is product value
+alongside `user_value`. Classification must not exclude delivered work from
+this graph, and unclassified completed missions must also remain visible.
 
-For example, if the historical baseline counted only user-value work, then:
-
-```text
-manual user-value deliveries/week
-```
-
-must not be compared against:
-
-```text
-all Parallix missions/week
-```
-
-including internal SDLC/refactoring missions.
-
-Likewise, if the baseline genuinely counted all delivered work, use that definition for both periods.
-
-## Required rule
-
-Choose the narrowest metric that is actually comparable.
-
-If no apples-to-apples comparison can be established, STOP and document the mismatch instead of drawing the baseline line.
+The retained manual baseline counts historical work clusters, while the
+Parallix series counts lifecycle missions. Label those units explicitly and
+show the baseline as a historical reference only. Do not claim equivalent
+units or derive a productivity multiplier from them.
 
 ---
 
@@ -257,7 +243,7 @@ Suggested semantic content, not mandatory wording:
 
 ```text
 Observed dogfooding throughput on Parallix itself.
-Manual baseline and weekly Parallix outcomes use the same delivery definition.
+All completed Parallix missions are included; the manual reference counts historical work clusters.
 This is maintainer data, not an external benchmark.
 ```
 
@@ -484,10 +470,10 @@ Add targeted tests for:
 - weekly aggregation boundaries;
 - exclusion of current partial week;
 - zero weeks being retained;
-- metric/classification filtering;
+- inclusion of all completed mission classifications;
 - deterministic rendering;
 - malformed snapshot rejection;
-- baseline/Parallix definition mismatch failing closed where mechanically detectable.
+- rejection of snapshots that restrict the mission population by classification.
 
 Run normal repository verification.
 
@@ -516,7 +502,7 @@ This mission is complete when:
 1. the old `+57% → ~10x` README claim is gone;
 2. README contains a graph of actual observed weekly throughput;
 3. the manual baseline comes from real retained data;
-4. baseline and Parallix observations use a demonstrably comparable definition;
+4. baseline and Parallix delivery units are explicitly distinguished;
 5. every trustworthy full week in the defined period is represented;
 6. incomplete current week is not presented as comparable;
 7. the aggregate dataset is committed and inspectable;
@@ -537,7 +523,7 @@ Do not:
 - infer baseline numbers from the old multiplier;
 - select only favorable weeks;
 - omit zero weeks;
-- compare different mission classifications;
+- exclude completed missions because they are classified as `ai_sdlc`;
 - count commits as missions;
 - count telemetry events as completed missions;
 - count agent runs as delivery;
@@ -565,3 +551,7 @@ The evidence is the feature.
 - [ ] #5 Docs updated to reflect any workflow or user-facing behavior change
 - [ ] #6 Bug-labeled missions include a red-to-green reproduction test that fails before the fix and passes after
 <!-- DOD:END -->
+
+## Operator correction (2026-10-03)
+
+Forgejo PR #582 human review supersedes the agent findings that demanded a user_value-only series and five-decimal chart label. Count all completed missions: ai_sdlc improvements are Parallix user value too. Restore the agreed bar graph and label the historical manual proxy as **2 missions/week**, preserving the exact source rate only in the inspectable data and methodology. Historical clusters and lifecycle missions remain different recording units; explain that limitation without asserting a multiplier. The durable Mission scope and acceptance criterion record this correction. Review-loop failure is tracked separately as TASK-2641.

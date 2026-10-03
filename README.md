@@ -35,6 +35,10 @@ The main reason to use coding agents is leverage: while one agent is working, an
 
 Parallix is a mission-based development workflow that addresses each of these directly so parallel agents can translate into actual delivery throughput. The mechanics live in tested code rather than in prompts. It is not another agent or model — it is the operator-owned layer around the agents you already use.
 
+![Observed one-maintainer dogfooding throughput: all completed Parallix missions per full UTC ISO week, with a manual proxy of 2 missions/week.](https://raw.githubusercontent.com/oxtan-maker/parallix/main/docs/assets/velocity-throughput.svg)
+
+Observed one-maintainer dogfooding throughput. The [methodology](docs/metrics/velocity/README.md) defines the mission population, historical manual reference, and limitations.
+
 ## What it does
 
 - **Run several AI coding agents on one repo without clobbering each other**. Every mission gets its own `mission/<slug>` branch and its own sibling git worktree (`../<repo>-<slug>`) automatically, so N agents make progress independently and each lands by squash-merge.
@@ -157,8 +161,6 @@ Both are optional integrations, and each one is wired independently of the other
 ## Use cases
 
 The durable capability guide and confidence boundaries are in [`docs/use-cases.md`](docs/use-cases.md).
-
-An **internal retrospective, not external evidence,** measured the isolated worktree-per-mission model as the only configuration to beat a human baseline. Depending on whether you frame output as direct user-value missions or total completed missions in an already-productized setup, the observed gain ranges from roughly **+57%** to about **an order of magnitude**.
 
 ## What Parallix is not
 

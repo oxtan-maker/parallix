@@ -1,6 +1,6 @@
 {
   "name": "@magnusekdahl/parallix",
-  "version": "1.5.251",
+  "version": "1.5.252",
   "description": "Trust ladder for AI coding work — separate review, configured verification, conditional Linux confinement, and human-owned merges",
   "license": "AGPL-3.0-or-later",
   "private": false,
@@ -68,7 +68,10 @@
     "release:publish": "tsx scripts/release-publish.ts",
     "benchmark:runtime": "tsx scripts/benchmark-runtime.ts",
     "coverage:merge": "tsx scripts/coverage-merge.ts coverage/lcov.info coverage/.lcov-unit.info coverage/.lcov-integration-ci.info",
-    "coverage:summary": "tsx scripts/render-lcov-summary.ts coverage/lcov.info"
+    "coverage:summary": "tsx scripts/render-lcov-summary.ts coverage/lcov.info",
+    "docs:velocity:export": "tsx scripts/docs-velocity-export.ts",
+    "docs:velocity:render": "tsx scripts/docs-velocity-render.ts",
+    "docs:velocity:verify": "tsx scripts/docs-velocity-render.ts --verify"
   },
   "peerDependencies": {
     "@earendil-works/pi-coding-agent": "^0.80.6"

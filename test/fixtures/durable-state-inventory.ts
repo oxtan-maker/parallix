@@ -1174,6 +1174,13 @@ export const MISSION_DOCUMENT_CALL_SITES: readonly MissionDocumentCallSiteEntry[
     pathPatterns: ['MISSION.md'],
     classification: 'mission-document-evidence',
   },
+  {
+    id: 'mission-doc-call-velocity-svg-copy',
+    fileLocation: 'src/application/docs/velocity.ts',
+    purpose: 'render the completed-Mission rate unit in the generated velocity SVG without resolving or persisting a Mission document',
+    pathPatterns: ['missions/week'],
+    classification: 'mission-document-evidence',
+  },
 ] as const;
 
 /**
