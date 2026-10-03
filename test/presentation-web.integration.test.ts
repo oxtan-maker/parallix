@@ -1,7 +1,7 @@
 // TASK-2622.15: Stable CI-safe web host, mutation, and package behavior suite.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import './task-2433-web-mutation.integration.cases.js';
+import './web-mutation-contract.integration.cases.js';
 import './web-host.integration.cases.js';
 import './web-package-smoke.integration.cases.js';
 

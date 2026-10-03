@@ -1,3 +1,4 @@
+// Historical regression provenance: TASK-2413, TASK-2369.13, TASK-2492.
 // Rebound kernel contract: the single repair loop (classification, per-occurrence budget, fix prompts,
 // root-failure dossier, output elision) shared by every automatic bounce.
 //
@@ -519,7 +520,7 @@ test('task-2588: fresh repair observes the commit created by targeted repair', a
  * Hermetic: `startAgent` and `verify` are injected; no real agents, git, or
  * Forgejo. Runs in the default unit suite.
  */
-describe('Recovery dossier — TASK-2413', () => {
+describe("Recovery dossier —", () => {
   const gateReason: ReboundReason = {
     kind: 'gate-failure',
     area: 'docs',
@@ -596,7 +597,7 @@ describe('Recovery dossier — TASK-2413', () => {
  * session past its 128k-token context window. Pi then clamped max_tokens to
  * 1 on every turn and the mission silently timed out on every retry.
  */
-describe('Bounce output elision — TASK-2369.13', () => {
+describe("Bounce output elision —", () => {
   describe('elideBounceOutput', () => {
     it('passes through output at or under the cap unchanged', () => {
       const short = 'pre-commit: ESLint found 3 errors';
@@ -691,12 +692,12 @@ describe('Bounce output elision — TASK-2369.13', () => {
 // classification of one failed `runPhaseGates('integration', ...)` run, the
 // reset boundary of the persisted rebound budget, and the four operator-facing
 // outcomes. The CLI-level wiring is covered by
-// `test/task-2492-integrate-gate-bounce.test.ts`.
+// `test/integration-gate-repair-routing.test.ts`.
 //
 // Nothing here launches an agent, opens a database, or executes a gate: every
 // boundary is injected, and the real rebound kernel runs in the middle.
 // ---------------------------------------------------------------------------
-describe('Integration gate rebound — TASK-2492', () => {
+describe("Integration gate rebound —", () => {
   const SLUG = 'task-2492-fixture';
   const GATE_COMMAND = 'npm run test:integration';
   const VERIFY_COMMAND = './scripts/verify-local.sh workflow';

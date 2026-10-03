@@ -1,3 +1,4 @@
+// Historical regression provenance: TASK-2225, TASK-2279.
 // Behavior-owned suite (TASK-2622.17, unit): packageRoot() resolution and the runtime AssetStore routing of
 // shipped prompts, templates and configuration. Legacy case names unchanged.
 //
@@ -23,7 +24,7 @@ const reviewLoop = mockModule<typeof import('../src/adapters/review/review-loop.
 await installModuleMocks();
 
 // ---- task-2225 packageRoot asset resolution is independent of the working directory ----
-describe('task-2225 packageRoot asset resolution is independent of the working directory', () => {
+describe("packageRoot asset resolution is independent of the working directory", () => {
   test.afterEach(() => mock.restoreAll());
   // task-2225 — TS migration phase T2: packageRoot() asset-resolution hardening.
   //
@@ -185,7 +186,7 @@ describe('task-2225 packageRoot asset resolution is independent of the working d
 });
 
 // ---- task-2279 shipped prompts and configuration route through the runtime AssetStore ----
-describe('task-2279 shipped prompts and configuration route through the runtime AssetStore', () => {
+describe("shipped prompts and configuration route through the runtime AssetStore", () => {
   const ROOT = path.resolve(import.meta.dirname, '..');
   const assetStoreSource = fs.readFileSync(path.join(ROOT, 'src/adapters/assets/runtime-assets.ts'), 'utf8');
 

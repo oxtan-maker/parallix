@@ -1,3 +1,4 @@
+// Historical regression provenance: TASK-2616.
 // Agent limit detection contract: pattern sets, reset-time parsing, block-until formatting,
 // Qwen quota detection, and the Qwen 403 / Vibe rate-limit classification.
 //
@@ -600,7 +601,7 @@ describe('Qwen limit detection', () => {
   });
 });
 
-describe('Qwen 403 and Vibe rate limit (task-2616)', () => {
+describe("Qwen 403 and Vibe rate limit", () => {
   const QWEN_MODEL_DENIAL = '[API Error: 403 Access to model denied. Please make sure you are eligible for using the model.]';
   const VIBE_RATE_LIMIT = 'Error: Rate limits exceeded. Please wait a moment before trying again.';
 

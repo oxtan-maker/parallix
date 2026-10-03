@@ -27,7 +27,8 @@ beforeEach((context) => {
   active.push(sample);
   // A context.after callback runs after the test's own afterEach hooks. A
   // preload-level afterEach registered first would miss their CPU entirely.
-  context.after(() => finish(context));
+  // Append the sample after test-owned context.after callbacks as well.
+  context.after(() => context.after(() => finish(context)));
 });
 
 function finish(context) {

@@ -166,7 +166,8 @@ test('TASK-2622.04: a signalled covered fast-unit run removes its runner-owned s
   const checkout = caseRoot('lifetime-runner-');
   test.after(() => checkout.dispose());
   const report = path.join(checkout.root, 'scratch.txt');
-  fs.mkdirSync(path.join(checkout.root, 'test'));
+  fs.mkdirSync(path.join(checkout.root, 'test', 'lib'), { recursive: true });
+  fs.copyFileSync(path.join(testRoot, 'lib', 'test-cpu-budgets.json'), path.join(checkout.root, 'test', 'lib', 'test-cpu-budgets.json'));
   fs.writeFileSync(path.join(checkout.root, 'package.json'), '{}\n');
   fs.symlinkSync(path.join(testRoot, '..', 'node_modules'), path.join(checkout.root, 'node_modules'));
   fs.writeFileSync(path.join(checkout.root, 'test', 'run-fast-unit-tests.ts'), [

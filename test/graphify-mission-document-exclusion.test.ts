@@ -8,7 +8,7 @@ import test from 'node:test';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(__dirname, '..');
-const fixtureRoot = path.join(__dirname, 'fixtures', 'task-2270-graphify-exclusion');
+const fixtureRoot = path.join(__dirname, 'fixtures', 'graphify-exclusion');
 
 function graphifyPython(): string {
   const executable = childProcess.spawnSync('which', ['graphify'], { encoding: 'utf8' });

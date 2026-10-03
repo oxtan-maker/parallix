@@ -17,6 +17,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { UNIT_TEST_BUDGET_MS, UNIT_TEST_HEADROOM_MS, onGitHubActions } from './lib/unit-test-budget-reporter.mjs';
 import { buildTestRunPlan } from './lib/test-run-plan.js';
+import { childCpuUsageModule } from './lib/child-cpu-usage.js';
 import { cpuSupervisor, readCpuReport } from './lib/cpu-supervisor.js';
 
 const ROOT = process.cwd();
@@ -80,8 +81,8 @@ test('unit-test timeout guard: suite-level budget is configurable and documented
   const planContent = fs.readFileSync(path.join(ROOT, 'test', 'lib', 'test-run-plan.ts'), 'utf8');
 
   assert.ok(
-    runnerContent.includes('UNIT_TEST_CPU_BUDGET_MS'),
-    'run-default-tests.ts must define UNIT_TEST_CPU_BUDGET_MS',
+    runnerContent.includes('suiteCpuBudget'),
+    'run-default-tests.ts must resolve the executable suite CPU policy',
   );
 
   assert.ok(
@@ -332,5 +333,86 @@ test('unit-test CPU guard: suite budget enforcement fails when exceeded', () => 
       combinedOutput.includes('SUITE CPU BUDGET EXCEEDED'),
       `Expected budget output in: ${combinedOutput.slice(-500)}`,
     );
+  }
+});
+
+// Integration CPU limits include waited command trees, unlike process.cpuUsage().
+function runIntegrationCpuFixture(source: string, extraEnv: Record<string, string> = {}) {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'integration-cpu-proof-'));
+  const file = path.join(directory, 'probe.test.ts');
+  fs.writeFileSync(file, `import test from 'node:test';\nimport { spawnSync } from 'node:child_process';\n${source}\n`);
+  const env: NodeJS.ProcessEnv = {
+    ...process.env, NODE_NO_WARNINGS: '1',
+    PARALLIX_CHILD_CPU_USAGE_MODULE: childCpuUsageModule(ROOT, process.execPath),
+    PARALLIX_EXECUTION_ROOT: ROOT, ...extraEnv,
+  };
+  delete env.NODE_TEST_CONTEXT;
+  delete env.NODE_V8_COVERAGE;
+  delete env.PARALLIX_TEST_CPU_PROFILE_DIR;
+  try {
+    return spawnSync(process.execPath, [
+      '--import', 'tsx', '--import', path.join(ROOT, 'test/lib/integration-cpu-hook.mjs'), '--test', file,
+    ], { encoding: 'utf8', timeout: 20_000, env });
+  } finally {
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+}
+
+test('integration hook CPU guard rejects CPU burned by a waited grandchild (TASK-2622.20)', () => {
+  const burner = burnCpuSource(200_000);
+  const child = `require('node:child_process').spawnSync(process.execPath, ['-e', ${JSON.stringify(burner)}]);`;
+  const result = runIntegrationCpuFixture(`test('hook command tree', () => {
+    const result = spawnSync(process.execPath, ['-e', ${JSON.stringify(child)}]);
+    if (result.status !== 0) throw new Error('child failed');
+  });`, { PARALLIX_INTEGRATION_TEST_CPU_BUDGET_MS: '100' });
+  assert.notEqual(result.status, 0, `${result.stdout}\n${result.stderr}`);
+  assert.match(result.stdout, /\[integration-test-cpu:exceeded\] hook command tree/);
+});
+
+test('integration hook CPU guard accepts low-CPU waits beyond the CPU limit (TASK-2622.20)', () => {
+  const result = runIntegrationCpuFixture("test('slow wait', async () => { await new Promise(r => setTimeout(r, 350)); });", {
+    PARALLIX_INTEGRATION_TEST_CPU_BUDGET_MS: '100',
+  });
+  assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
+});
+
+test('integration hook CPU guard counts teardown and nested cases without double charging (TASK-2622.20)', () => {
+  const teardown = runIntegrationCpuFixture(`test('teardown burner', t => { t.after(() => { ${burnCpuSource(150_000)} }); });`, {
+    PARALLIX_INTEGRATION_TEST_CPU_BUDGET_MS: '100',
+  });
+  assert.notEqual(teardown.status, 0);
+  assert.match(teardown.stdout, /\[integration-test-cpu:exceeded\] teardown burner/);
+  const burn = burnCpuSource(40_000);
+  const nested = runIntegrationCpuFixture(`test('outer', async t => { ${burn} await t.test('inner', () => { ${burn} }); });`, {
+    PARALLIX_INTEGRATION_TEST_CPU_BUDGET_MS: '75',
+  });
+  assert.equal(nested.status, 0, `${nested.stdout}\n${nested.stderr}`);
+});
+
+test('integration suite CPU budget rejects a passing hook suite (TASK-2622.20)', () => {
+  const env: NodeJS.ProcessEnv = { ...process.env, PARALLIX_INTEGRATION_SUITE_CPU_BUDGET_MS: '1', NODE_NO_WARNINGS: '1' };
+  delete env.NODE_TEST_CONTEXT;
+  delete env.NODE_V8_COVERAGE;
+  delete env.PARALLIX_TEST_CPU_PROFILE_DIR;
+  const result = spawnSync(process.execPath, ['--import', 'tsx', RUNNER_PATH, 'test/repository-gates.integration.test.ts'], {
+    encoding: 'utf8', timeout: 20_000, env,
+  });
+  assert.notEqual(result.status, 0);
+  assert.match(result.stdout, /(?:ℹ|#) fail 0/);
+  assert.match(result.stderr, /\[integration-test-cpu\] SUITE CPU BUDGET EXCEEDED:/);
+});
+
+test('CPU accounting fails closed for missing modules and missing or malformed reports (TASK-2622.20)', () => {
+  const result = runIntegrationCpuFixture("test('passes', () => {});", { PARALLIX_CHILD_CPU_USAGE_MODULE: '' });
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr + result.stdout, /integration CPU accounting module is missing/);
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'cpu-report-proof-'));
+  const report = path.join(directory, 'report.json');
+  try {
+    assert.throws(() => readCpuReport(report), /ENOENT/);
+    fs.writeFileSync(report, JSON.stringify({ userUs: -1, systemUs: 0 }));
+    assert.throws(() => readCpuReport(report), /invalid CPU supervisor report/);
+  } finally {
+    fs.rmSync(directory, { recursive: true, force: true });
   }
 });

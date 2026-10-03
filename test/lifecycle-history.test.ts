@@ -1,3 +1,4 @@
+// Historical regression provenance: TASK-2347.02, TASK-2357.
 /**
  * Lifecycle history for the metrics slice (TASK-2622.13 consolidation).
  *
@@ -41,7 +42,7 @@ import {
   fixedClock,
   laneEvent,
   withStatisticsDatabase,
-} from './fixtures/task-2357-statistics-fixture.js';
+} from './fixtures/statistics-database.js';
 
 /**
  * TASK-2347.02 SC4 — one mission, one gap-free lane history.
@@ -126,7 +127,7 @@ afterEach(() => {
   }
 });
 
-describe('TASK-2347.02 full lifecycle lane history', () => {
+describe("full lifecycle lane history", () => {
   it('records a gap-free ordered lane history from backlog entry to closure', async () => {
     const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'parallix-task-2347-02-history-'));
     temporaryDirectories.push(directory);
@@ -315,7 +316,7 @@ const WEDNESDAY = '2026-06-03T09:00:00.000Z';
 const THURSDAY = '2026-06-04T09:00:00.000Z';
 const FRIDAY = '2026-06-05T09:00:00.000Z';
 
-describe('TASK-2357 defect A: historical flow excludes missions before intake', () => {
+describe("defect A: historical flow excludes missions before intake", () => {
   it('leaves a Thursday-intaked mission absent from Monday, Tuesday and Wednesday', async () => {
     await withStatisticsDatabase(async ({ laneEventRepo, usageRepo }) => {
       // Task A is intaked Monday and walks the board.
@@ -414,7 +415,7 @@ const e_ANCHOR_EVENT = '2026-06-05T11:30:00.000Z';
 /** Hand-computed: A's own row is 60 minutes old; B's is 600 and must not win. */
 const e_EXPECTED_REVIEW_AGE_MINUTES = 60;
 
-describe('TASK-2357 defect E: legacy lifecycle-entry fallback stays inside its repository', () => {
+describe("defect E: legacy lifecycle-entry fallback stays inside its repository", () => {
   it('reads only its own repository history for a colliding mission id', async () => {
     await withStatisticsDatabase(async ({ laneEventRepo, usageRepo, historyRepo }) => {
       // An anchor mission with real lane events in repository A.

@@ -1,3 +1,4 @@
+// Historical regression provenance: TASK-2513, TASK-2383.
 // Confinement contract: selectConfinement decisions, launch gating on missing Bubblewrap and
 // operator consent, and the Bubblewrap argv/guard profile.
 //
@@ -90,7 +91,7 @@ describe('Confinement selection', () => {
   });
 });
 
-describe('Confinement launch gating (task-2513)', () => {
+describe("Confinement launch gating", () => {
   /**
    * Launch-level coverage for the task-2513 confinement gate. These exercise the
    * real `startAgent` policy branch (not the pure decision function): a mutating
@@ -357,7 +358,7 @@ describe('Confinement launch gating (task-2513)', () => {
   });
 });
 
-describe('Bubblewrap guard (task-2383)', () => {
+describe("Bubblewrap guard", () => {
   test.afterEach(() => {
     setBubblewrapProbeForTest(null);
     delete process.env.PARALLIX_NO_BUBBLEWRAP;

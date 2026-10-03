@@ -1,3 +1,4 @@
+// Historical regression provenance: TASK-1109, TASK-2367.
 // Behavior-owned suite (TASK-2622.09, integration-ci): `px integrate` Variant B landing — the full
 // squash-merge path and its guards (task-1109) and the completion persistence order before statistics
 // (task-2367). Legacy case names unchanged.
@@ -25,7 +26,7 @@ await installModuleMocks();
 const { reportMergeConflicts } = await import('../src/application/integrate/landing.js');
 
 // ---- task-1109 Variant B landing (consolidated from test/task-1109.test.ts, TASK-2622.09) ----
-describe("task-1109 Variant B landing", () => {
+describe("Variant B landing", () => {
   const _require = createRequire(import.meta.url);
   const gitModule = mockModule<typeof import('../src/adapters/git/git.js')>('../src/adapters/git/git.js', import.meta.url);
   const missionUtilsModule = mockModule<typeof import('../src/adapters/filesystem/mission-utils.js')>('../src/adapters/filesystem/mission-utils.js', import.meta.url);
@@ -674,7 +675,7 @@ describe("task-1109 Variant B landing", () => {
 });
 
 // ---- task-2367 integration completion order (consolidated from test/task-2367-integration-completion-repro.test.ts, TASK-2622.09) ----
-describe("task-2367 integration completion order", () => {
+describe("integration completion order", () => {
   const git = mockModule<typeof import('../src/adapters/git/git.js')>('../src/adapters/git/git.js', import.meta.url);
   const missionUtils = mockModule<typeof import('../src/adapters/filesystem/mission-utils.js')>('../src/adapters/filesystem/mission-utils.js', import.meta.url);
   const backlog = mockModule<typeof import('../src/adapters/backlog/backlog.js')>('../src/adapters/backlog/backlog.js', import.meta.url);

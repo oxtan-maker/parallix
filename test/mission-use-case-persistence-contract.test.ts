@@ -711,15 +711,15 @@ describe('Mission use cases', () => {
   });
 });
 
-// TASK-2582 (was test/task-2582-lifecycle-ordering.test.ts)
+// TASK-2582 (was test/mission-activation-launch-order.test.ts)
 describe('Lifecycle ordering', () => {
   // TASK-2582 CP-5 — regression coverage for lifecycle transition ordering,
   // with external boundaries (the agent run) mocked and made slow.
   //
   // The companion coverage this file relies on:
-  //   - multi-round review: test/task-2582-repro.test.ts
+  //   - multi-round review: test/workflow-repair-lane-boundaries.test.ts
   //   - approval replay without duplicate lane events:
-  //     test/task-2582-repro.test.ts 'approval replay emits no duplicate lane event',
+  //     test/workflow-repair-lane-boundaries.test.ts 'approval replay emits no duplicate lane event',
   //     test/mission-handoff-lane-events-contract.test.ts
   //   - stale versions never overwriting state:
   //     this suite (Mission use cases section) 'SC2: a stale expected
@@ -729,7 +729,7 @@ describe('Lifecycle ordering', () => {
   //     test/integration-mode-dispatch-contract.test.ts (decideIntegration requires
   //     fresh merged Git and passing verification facts)
   //   - resume/recovery: test/integrate-lifecycle-recovery-and-closeout-contract.test.ts,
-  //     test/task-2420-integrate-recovery-assigned-reviewer.test.ts,
+  //     test/integration-provider-approval-recovery.test.ts,
   //     test/recover-command.test.ts
 
 

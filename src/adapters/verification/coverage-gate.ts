@@ -17,7 +17,7 @@ import { fileURLToPath } from 'node:url';
 import { packageRoot } from '../filesystem/package-root.js';
 // Coverage consumes the single verification-tier authority (test/lib/
 // test-tier-selection.ts, extracted from test/lib/test-run-plan.ts). It never
-// derives membership from a glob: see test/task-2547-repro.test.ts.
+// derives membership from a glob: see test/coverage-tier-selection.test.ts.
 import { selectTierFiles } from '../../../test/lib/test-tier-selection.js';
 
 const MODULE_DIR = path.dirname(fileURLToPath(import.meta.url));

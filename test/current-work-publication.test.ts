@@ -1,3 +1,4 @@
+// Historical regression provenance: TASK-2373, TASK-2387.
 /**
  * TASK-2370 CP-2 — the mission-scoped current-work authority and the
  * publication lifecycle around it.
@@ -389,7 +390,7 @@ test('px integrate without a slug publishes for the adapter-inferred mission', a
  * the board would show, so a publication that is written but never reconciled
  * into WORKING still fails.
  */
-describe('Workflow current work follows launches — TASK-2373', () => {
+describe("Workflow current work follows launches —", () => {
   const SLUG = 'task-2373';
   const MISSION = missionId(SLUG);
 
@@ -646,7 +647,7 @@ describe('Workflow current work follows launches — TASK-2373', () => {
 });
 
 // ── Board-launched current work — TASK-2387 (was task-2387-board-current-work.test.ts) ──
-describe('Board-launched current work — TASK-2387', () => {
+describe("Board-launched current work —", () => {
   const CURRENT_WORK_TTL_MS = 5 * 60 * 1000;
 
   function boardRequest(overrides: Record<string, unknown> = {}): BoardCommandRequest {

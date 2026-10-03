@@ -346,7 +346,7 @@ describe('Handoff bounce', () => {
   });
 });
 
-// TASK-2456 (was test/task-2456-handoff-retry-duplicate-lane-event.test.ts)
+// TASK-2456 (was test/handoff-transition-idempotency.test.ts)
 describe('Handoff retry lane events', () => {
   // TASK-2456 CP-1 — red reproduction of the handoff retry that a duplicate lane
   // event turns into a failure.

@@ -1,3 +1,4 @@
+// Historical regression provenance: TASK-2294.
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -70,7 +71,7 @@ async function seedUsage(db: SqliteDatabaseAdapter, records: readonly UsageRecor
 // Tests
 // ---------------------------------------------------------------------------
 
-describe('SQLite repository contract (task-2294)', () => {
+describe("SQLite repository contract", () => {
   it('implements the six application-owned capability contracts', async () => {
     const { db, dir } = await createDbWithSchema();
     try {

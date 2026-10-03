@@ -1,3 +1,4 @@
+// Historical regression provenance: TASK-2373, TASK-2393.
 
 
 import assert from 'node:assert/strict';
@@ -59,7 +60,7 @@ test('current work distinguishes unverified, stale, and known-stopped publishers
  * ordered by the operational store's durable row order rather than by timestamp
  * coincidence.
  */
-describe('Operation-aware terminal events — TASK-2373', () => {
+describe("Operation-aware terminal events —", () => {
   const MISSION = missionId('task-2373');
   const NOW = Date.parse('2026-08-13T12:00:00.000Z');
 
@@ -140,7 +141,7 @@ describe('Operation-aware terminal events — TASK-2373', () => {
 });
 
 // ── Live session attribution — TASK-2393 (was task-2393-current-work-attribution-repro.test.ts) ──
-describe('Live session attribution — TASK-2393', () => {
+describe("Live session attribution —", () => {
   class EmptyBlocklistRepo implements AgentBlocklistRepository {
     async findAll(): Promise<readonly AgentBlockEntry[]> { return []; }
     async findByAgent(): Promise<AgentBlockEntry | undefined> { return undefined; }
@@ -250,7 +251,7 @@ describe('Live session attribution — TASK-2393', () => {
  * `test/task-2373-shutdown.test.ts`; mock evidence is explicitly not accepted
  * for it.
  */
-describe('Publish-then-reconcile defects — TASK-2373', () => {
+describe("Publish-then-reconcile defects —", () => {
   // ---------------------------------------------------------------------------
   // Fakes
   // ---------------------------------------------------------------------------

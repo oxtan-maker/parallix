@@ -1,3 +1,4 @@
+// Historical regression provenance: TASK-2363.
 /**
  * Windowed default FLOW cohort for the metrics slice (TASK-2622.13
  * consolidation).
@@ -7,7 +8,7 @@
  * experiment cohort is the current rolling seven-day window, excluding a
  * six-month-old mission carrying the same label. Historical task ID retained in
  * the case name as regression provenance (AC#7). A shared real git primary +
- * linked-worktree fixture (`test/fixtures/task-2357-statistics-fixture.ts`)
+ * linked-worktree fixture (`test/fixtures/statistics-database.ts`)
  * seeds the fixed event history pinned to a rolling seven-day decision window.
  */
 import { describe, it } from 'node:test';
@@ -21,7 +22,7 @@ import {
   insertUsageRow,
   laneEvent,
   withStatisticsDatabase,
-} from './fixtures/task-2357-statistics-fixture.js';
+} from './fixtures/statistics-database.js';
 
 // ---------------------------------------------------------------------------
 // TASK-2363 — the board's default experiment cohort is this week's experiment.
@@ -37,7 +38,7 @@ const SIX_MONTHS_OLD = missionId('task-301');
 
 const NOW = '2026-08-11T12:00:00.000Z';
 
-describe('TASK-2363: the default FLOW cohort is the current rolling week', () => {
+describe("the default FLOW cohort is the current rolling week", () => {
   it('excludes a six-month-old mission carrying the same experiment label', async () => {
     await withStatisticsDatabase(async ({ db, laneEventRepo, usageRepo }) => {
       await laneEventRepo.append(laneEvent({ repositoryId: REPO, missionId: RECENT, from: null, to: 'backlog', at: '2026-08-04T09:00:00.000Z' }));

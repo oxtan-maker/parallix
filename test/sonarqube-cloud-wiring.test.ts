@@ -163,7 +163,7 @@ test('sonar analysis configuration consumes LCOV without a Cloud-unsupported new
 });
 
 test('no local SonarQube path survives anywhere in the tracked tree', () => {
-  const tracked = spawnSync('git', ['ls-files'], { cwd: repoRoot, encoding: 'utf8' }).stdout.split('\n').filter(Boolean);
+  const tracked = spawnSync('git', ['ls-files', '--cached', '--others', '--exclude-standard'], { cwd: repoRoot, encoding: 'utf8' }).stdout.split('\n').filter(file => file && fs.existsSync(path.join(repoRoot, file)));
   // ADR 0060 and this file are excluded on purpose: a decision record names the
   // mechanisms it rejects, and this test must quote the retired literals to
   // search for them. Neither is surviving machinery.

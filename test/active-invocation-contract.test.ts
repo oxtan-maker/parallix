@@ -1,3 +1,4 @@
+// Historical regression provenance: TASK-2375, TASK-2580.
 import test, { describe } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -25,7 +26,7 @@ import { WEB_SNAPSHOT_PATH, createWebHost } from '../src/interfaces/web/host.js'
 import { recoverMissionLifecycle } from '../src/application/mission-lifecycle-recovery.js';
 import { MissionCardView } from '../web/src/mission-card.js';
 
-describe('active invocation overlap (task-2375)', () => {
+describe("active invocation overlap", () => {
   /**
    * TASK-2375 F1 / SC2 — `px active` carries a per-invocation operationId, proved
    * through the real command wiring.
@@ -226,7 +227,7 @@ describe('active invocation overlap (task-2375)', () => {
   });
 });
 
-describe('active persisted Mission (task-2580)', () => {
+describe("active persisted Mission", () => {
   function deferred() {
     let resolve!: () => void;
     const promise = new Promise<void>((done) => { resolve = done; });

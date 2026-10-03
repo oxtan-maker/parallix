@@ -1,3 +1,4 @@
+// Historical regression provenance: TASK-1039, TASK-1219, TASK-1431, TASK-2204.
 // Behavior-owned suite (TASK-2622.09): `px integrate` preflight reporting and approval evidence —
 // printIntegrationPreflight outcomes (task-1039), local review-state approval fallback (task-1219),
 // base-worktree classification resolution (task-1431), and merged-PR rejection (task-2204).
@@ -23,7 +24,7 @@ await installModuleMocks();
 const { checkReviewProvider } = await import('../src/application/integrate/preflight-review.js');
 
 // ---- task-1039 preflight reporting (consolidated from test/task-1039-integrate-v3.test.ts, TASK-2622.09) ----
-describe("task-1039 preflight reporting", () => {
+describe("preflight reporting", () => {
   const printIntegrationPreflightModule = mockModule<typeof import('../src/adapters/cli/commands/integrate.js')>('../src/adapters/cli/commands/integrate.js', import.meta.url);
   const getUnresolvedIndexConflictsModule = mockModule<typeof import('../src/adapters/cli/commands/integrate.js')>('../src/adapters/cli/commands/integrate.js', import.meta.url);
   const promoteTaskForIntegrationIfNeededModule = mockModule<typeof import('../src/adapters/cli/commands/integrate.js')>('../src/adapters/cli/commands/integrate.js', import.meta.url);
@@ -313,7 +314,7 @@ describe("task-1039 preflight reporting", () => {
 });
 
 // ---- task-1219 local review-state approval fallback (consolidated from test/task-1219-fallback.test.ts, TASK-2622.09) ----
-describe("task-1219 local review-state approval fallback", () => {
+describe("local review-state approval fallback", () => {
   const backlog = mockModule<typeof import('../src/adapters/backlog/backlog.js')>('../src/adapters/backlog/backlog.js', import.meta.url);
   const missionUtils = mockModule<typeof import('../src/adapters/filesystem/mission-utils.js')>('../src/adapters/filesystem/mission-utils.js', import.meta.url);
   const evaluateTaskStatusForIntegrationModule = mockModule<typeof import('../src/adapters/cli/commands/integrate.js')>('../src/adapters/cli/commands/integrate.js', import.meta.url);
@@ -705,7 +706,7 @@ describe("task-1219 local review-state approval fallback", () => {
 });
 
 // ---- task-1431 preflight classification source (consolidated from test/task-1431-integration-preflight-repro.test.ts, TASK-2622.09) ----
-describe("task-1431 preflight classification source", () => {
+describe("preflight classification source", () => {
   // Regression coverage for task-1431: integration preflight backlog-resolution
   // regressions.
   //
@@ -869,7 +870,7 @@ describe("task-1431 preflight classification source", () => {
 });
 
 // ---- task-2204 merged Forgejo PR rejection (consolidated from test/task-2204-integrate-no-variant-a.test.ts, TASK-2622.09) ----
-describe("task-2204 merged Forgejo PR rejection", () => {
+describe("merged Forgejo PR rejection", () => {
   test('integrate rejects merged Forgejo PRs during preflight with recovery guidance', () => {
     const output: string[] = [];
     const report = { failures: [], warnings: [], log: (line: string) => output.push(line), detail: () => {} };

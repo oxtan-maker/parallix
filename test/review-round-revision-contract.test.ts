@@ -1,3 +1,4 @@
+// Historical regression provenance: TASK-2478.
 // review round revision contract.
 // Related scenarios share imports; each contract keeps its own hooks and mutable fixtures.
 
@@ -357,7 +358,7 @@ describe("revision integrity", { concurrency: false }, () => {
 // as "resolve the blocker"). Green after the fix: a `--continue` on a BLOCKED
 // review clears the disposition, resets the round to `reviewing`, and records
 // the operator attribution.
-describe('--continue invalidates a BLOCKED/PARKED stop — TASK-2478', () => {
+describe("continue invalidates a BLOCKED/PARKED stop —", () => {
   const SLUG = 'task-2478-invalidate-blocker';
   const REVIEWER = agentFamily('configured-reviewer');
   const IMPLEMENTER = agentFamily('configured-implementer');
@@ -466,7 +467,7 @@ describe('--continue invalidates a BLOCKED/PARKED stop — TASK-2478', () => {
     return { root, store };
   }
 
-  describe('TASK-2478: px review --continue invalidates a BLOCKED/PARKED stop', () => {
+  describe("px review --continue invalidates a BLOCKED/PARKED stop", () => {
     it('clears a BLOCKED disposition and resets the round to reviewing', async () => {
       await withHome(createTempRoot(), async () => {
         const { root, store } = await seedRoot(blockedRound());

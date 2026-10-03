@@ -63,3 +63,13 @@ Cohesive implementation changes inside existing boundaries are in scope when sup
 - [ ] #5 Docs updated to reflect any workflow or user-facing behavior change
 - [ ] #6 Bug-labeled missions include a red-to-green reproduction test that fails before the fix and passes after
 <!-- DOD:END -->
+
+## Final cleanup and regression protection
+
+On 2026-10-03 the user replaced TASK-2622.20's certification-only framing with
+finishing the remaining task-owned test migration and enforcing the wave's
+performance gains. The [cleanup and CPU evidence](../docs/task-2622.20-cleanup-and-cpu-protection.md)
+records the implemented ownership guards, assertion dispositions, calibrated
+CPU limits and verification outcomes. The parent's pinned parity, 50% targets,
+concurrent replay and complete gate certification remain unchecked; this
+cleanup is not evidence that those separate criteria have passed.

@@ -1,3 +1,4 @@
+// Historical regression provenance: TASK-2375.
 // @ts-nocheck -- TASK-2328: partial test doubles from ESM seam migration; resolve in follow-up
 
 import assert from 'node:assert/strict';
@@ -468,7 +469,7 @@ function createCardHelpers() {
  * SC5: PID-only liveness on non-Linux must be `unverified` and age out via TTL;
  * Linux start-identity checks remain authoritative.
  */
-describe('Slow metrics cache reuse — TASK-2375 SC4', () => {
+describe("Slow metrics cache reuse — SC4", () => {
   // ---------------------------------------------------------------------------
   // Fixtures
   // ---------------------------------------------------------------------------

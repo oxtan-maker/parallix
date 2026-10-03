@@ -1,3 +1,4 @@
+// Historical regression provenance: TASK-2484, TASK-2622.17.
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -54,7 +55,7 @@ test('general verification gate runs the documentation verifier', () => {
 });
 
 // ---- task-2484 npm manifest metadata must agree with the origin remote (consolidated from test/task-2484-npm-metadata-urls-repro.test.ts, TASK-2622.17) ----
-describe('task-2484 npm manifest metadata must agree with the origin remote (consolidated from test/task-2484-npm-metadata-urls-repro.test.ts, TASK-2622.17)', () => {
+describe("npm manifest metadata must agree with the origin remote (consolidated from test/-npm-metadata-urls-repro.test.ts,", () => {
   // Reproduction for task-2484: npm manifest metadata (repository.url, homepage,
   // bugs.url) must agree with `git remote get-url origin`. This test runs the
   // documentation verifier against a synthetic fixture whose manifest disagrees

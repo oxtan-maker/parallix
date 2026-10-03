@@ -1,3 +1,4 @@
+// Historical regression provenance: TASK-2565, TASK-2603, TASK-2369.05, TASK-1124, TASK-2561, TASK-2543, TASK-1268.
 // Behavior-owned suite (TASK-2622.09): integration-gate failure rebound and repair — lifecycle
 // reactivation (task-2565), active mission context binding (task-2603), gate helper ownership
 // (task-2369.05), relaunchable repair (task-1124), push-gate/handoff regressions (task-2561), integration
@@ -44,7 +45,7 @@ const { ReviewState } = await import('../src/adapters/review/review-state.js');
 const { getLatestReviewForPr, getLatestReviewDecision } = await import('../src/adapters/forgejo/forgejo.js');
 
 // ---- task-2565 gate rebound lifecycle (consolidated from test/task-2565-lifecycle-repro.test.ts, TASK-2622.09) ----
-describe("task-2565 gate rebound lifecycle", () => {
+describe("gate rebound lifecycle", () => {
   test('TASK-2565: integration-gate rebound reactivates through the lifecycle path', async () => {
     let lifecycleTransitions = 0;
     let backlogTransitions = 0;
@@ -77,7 +78,7 @@ describe("task-2565 gate rebound lifecycle", () => {
 });
 
 // ---- task-2603 rebound active mission context (consolidated from test/task-2603-repro.test.ts, TASK-2622.09) ----
-describe("task-2603 rebound active mission context", () => {
+describe("rebound active mission context", () => {
   // TASK-2603 — integration rebounds must retain the identity persistence context
   // that ordinary review-loop fallbacks receive.
 
@@ -152,7 +153,7 @@ describe("task-2603 rebound active mission context", () => {
 });
 
 // ---- task-2369.05 integrate gate helpers (consolidated from test/task-2369.05-integrate-gates.test.ts, TASK-2622.09) ----
-describe("task-2369.05 integrate gate helpers", () => {
+describe("integrate gate helpers", () => {
   // TASK-2369.05 — integration gate helpers now live in `integrate-gates.ts`.
   //
   // The extraction risk is the boundary, not the gate logic (that stays covered
@@ -210,7 +211,7 @@ describe("task-2369.05 integrate gate helpers", () => {
   });
 
   test('integrate-gates plans only the gates matching the mission changed areas', () => {
-    const configPath = path.join(import.meta.dirname, 'fixtures', 'task-2369.05-integration-pipelines.json');
+    const configPath = path.join(import.meta.dirname, 'fixtures', 'integration-pipelines.json');
     const plan = gates.getIntegrationGatePlan('task-2369.05', {
       dryRun: true,
       configPath,
@@ -246,7 +247,7 @@ describe("task-2369.05 integrate gate helpers", () => {
 });
 
 // ---- task-1124 relaunchable repair (consolidated from test/task-1124-integrate.test.ts, TASK-2622.09) ----
-describe("task-1124 relaunchable repair", () => {
+describe("relaunchable repair", () => {
   // CP-4 integration tests for task-1124
 
   const isRelaunchableErrorModule = mockModule<typeof import('../src/adapters/cli/commands/repair-handoff.js')>('../src/adapters/cli/commands/repair-handoff.js', import.meta.url);
@@ -329,7 +330,7 @@ describe("task-1124 relaunchable repair", () => {
 });
 
 // ---- task-2561 handoff and push-gate regressions (consolidated from test/task-2561-repro.test.ts, TASK-2622.09) ----
-describe("task-2561 handoff and push-gate regressions", () => {
+describe("handoff and push-gate regressions", () => {
   // ---------------------------------------------------------------------------
   // TASK-2561 — no mission could get from the backlog to integration without a
   // human workaround after TASK-2521.03. Each scenario is one stage where a real
@@ -565,7 +566,7 @@ describe("task-2561 handoff and push-gate regressions", () => {
 });
 
 // ---- task-2543 integration repair (consolidated from test/task-2543-integration-repair.test.ts, TASK-2622.09) ----
-describe("task-2543 integration repair", () => {
+describe("integration repair", () => {
   const slug = 'task-2543';
   const reviewer = agentFamily('claude');
   const implementer = agentFamily('codex');
@@ -803,7 +804,7 @@ describe("task-2543 integration repair", () => {
 });
 
 // ---- task-1268 diff-scoped gate area (consolidated from test/task-1268-diff-scoped-area.test.ts, TASK-2622.09) ----
-describe("task-1268 diff-scoped gate area", () => {
+describe("diff-scoped gate area", () => {
   const detectAreasFromChangedFilesModule = mockModule<typeof import('../src/adapters/verification/verification.js')>('../src/adapters/verification/verification.js', import.meta.url);
   const runPreReviewGateModule = mockModule<typeof import('../src/adapters/review/review-loop.js')>('../src/adapters/review/review-loop.js', import.meta.url);
 

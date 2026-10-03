@@ -1,3 +1,4 @@
+// Historical regression provenance: TASK-2551, TASK-2604, TASK-2605, TASK-2517, TASK-2508, TASK-2515, TASK-2614, TASK-2622.17.
 // Behavior-owned suite (TASK-2622.09): recovery and closeout of an already-landed integration —
 // post-integrate hook ordering (task-2551), closed-Mission recovery (task-2604, task-2605), landed
 // payload guards (task-2517), interrupted landing (task-2508), lifecycle precedence (task-2515) and
@@ -25,7 +26,7 @@ import { mkdtemp as registeredMkdtemp } from './helpers/temp-dir.js';
 import { resolvePostIntegrateCommand, resolvePreCommitCommand, buildPostIntegrateHookEnv, runPostIntegrateHook, runPreCommitHook } from '../src/adapters/process/post-integrate-hook.js';
 
 // ---- task-2551 recovery post-integrate hook (consolidated from test/task-2551-recovery-post-integrate-hook.test.ts, TASK-2622.09) ----
-describe("task-2551 recovery post-integrate hook", () => {
+describe("recovery post-integrate hook", () => {
   // TASK-2551: a recovered landed integration persists its confirmation without
   // running the repo post-integrate hook, leaving the mission's SonarQube Cloud
   // branch analysis behind (review round 1 finding). The recovery closeout must
@@ -138,7 +139,7 @@ describe("task-2551 recovery post-integrate hook", () => {
 });
 
 // ---- task-2604 failed closeout resumes (consolidated from test/task-2604-repro.test.ts, TASK-2622.09) ----
-describe("task-2604 failed closeout resumes", () => {
+describe("failed closeout resumes", () => {
   test('TASK-2604: failed closeout stays open and resumes without another landing transition', async () => {
     const steps: string[] = [];
     let status = 'integration';
@@ -215,7 +216,7 @@ describe("task-2604 failed closeout resumes", () => {
 });
 
 // ---- task-2605 legacy closed Mission recovery (consolidated from test/task-2605-repro.test.ts, TASK-2622.09) ----
-describe("task-2605 legacy closed Mission recovery", () => {
+describe("legacy closed Mission recovery", () => {
   test('TASK-2605: explicitly recover legacy closed Mission once without redelivery', async () => {
     const steps: string[] = [];
     const closedAt = '2026-09-27T20:11:10.440Z';
@@ -297,7 +298,7 @@ describe("task-2605 legacy closed Mission recovery", () => {
 });
 
 // ---- task-2517 SC4 landed guard on active/review (consolidated from test/task-2517-sc4-landed-guard.test.ts, TASK-2622.09) ----
-describe("task-2517 SC4 landed guard on active/review", async () => {
+describe("landed guard on active/review", async () => {
   // TASK-2517 SC4: `px active` and `px review` refuse a mission whose payload
   // already landed on the base branch and point at the closeout command.
   //
@@ -340,7 +341,7 @@ describe("task-2517 SC4 landed guard on active/review", async () => {
 });
 
 // ---- task-2517 rebounded landing guard (consolidated from test/task-2517-integrate-rebound-landing-guard.test.ts, TASK-2622.09) ----
-describe("task-2517 rebounded landing guard", () => {
+describe("rebounded landing guard", () => {
   // TASK-2517: closeout eligibility must be proven before any landing effect.
   //
   // Red before the fix: `finishLanding` syncs the Forgejo PR before asking the
@@ -492,7 +493,7 @@ describe("task-2517 rebounded landing guard", () => {
 });
 
 // ---- task-2508 interrupted landed integration (consolidated from test/task-2508-interrupted-landed-integration-repro.test.ts, TASK-2622.09) ----
-describe("task-2508 interrupted landed integration", () => {
+describe("interrupted landed integration", () => {
   function preflight(missionStatus) {
     return printIntegrationPreflight({
       slug: 'task-2508',
@@ -607,7 +608,7 @@ describe("task-2508 interrupted landed integration", () => {
 });
 
 // ---- task-2515 lifecycle not masked by completed backlog task (consolidated from test/task-2515-integration-lifecycle-not-masked.test.ts, TASK-2622.09) ----
-describe("task-2515 lifecycle not masked by completed backlog task", () => {
+describe("lifecycle not masked by completed backlog task", () => {
   /**
    * Regression for TASK-2515: a mission whose SQLite `Mission` aggregate is stuck
    * in a non-terminal lifecycle (`integration`) must project into the integration
@@ -857,7 +858,7 @@ describe("post-integrate hook", () => {
 });
 
 // ---- task-2614 landed integration refreshes the local px before cleanup (consolidated from test/task-2614-local-autoinstall-repro.test.ts, TASK-2622.17) ----
-describe('task-2614 landed integration refreshes the local px before cleanup (consolidated from test/task-2614-local-autoinstall-repro.test.ts, TASK-2622.17)', () => {
+describe("landed integration refreshes the local px before cleanup (consolidated from test/-local-autoinstall-repro.test.ts,", () => {
   test('TASK-2614: a landed integration refreshes the repository-built local px before cleanup', async () => {
     const effects: string[] = [];
     const cleanupFailure = new Error('cleanup failed');

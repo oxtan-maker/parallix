@@ -515,3 +515,19 @@ test.before(() => {
 test.after(() => {
   cleanupTempDir();
 });
+
+// TASK-2502: regression for review-event string escaping.
+test('buildEventFrontmatter round-trips a backslash and quote in blockedReason', () => {
+  const event = {
+    eventType: 'blocked_publication',
+    timestamp: '2026-05-25T14:30:22.000Z',
+    content: '',
+    blockedReason: 'injection"; rm -rf / #',
+  };
+
+  const front = buildEventFrontmatter(event);
+
+  // The quote is escaped to \" so the field does not terminate early; the value
+  // survives verbatim inside the double-quoted field.
+  assert.ok(front.includes('blocked_reason: "injection\\"; rm -rf / #"'), front);
+});

@@ -28,7 +28,7 @@ const TEST_SLUG = `task-2240-test-${process.pid}`;
 // ---------------------------------------------------------------------------
 // The injected bag is a deliberately partial set of stubs, so it is typed as a
 // loose record rather than startReviewLoop's full options type — the same shape
-// test/task-2239-rereview-after-response.test.ts uses.
+// test/review-response-relaunch.test.ts uses.
 function baseLoopOpts(overrides: Record<string, unknown> = {}): Record<string, unknown> {
   return {
     eligibleAgentsForStepFn: () => ['codex', 'claude', 'gemini', 'custom'],

@@ -1,3 +1,4 @@
+// Historical regression provenance: TASK-1322, TASK-2328, TASK-2209, TASK-2211, TASK-2266.
 // @ts-nocheck -- TASK-2328: partial test doubles from ESM seam migration; resolve in follow-up
 // Codex launcher contract: command/session parsing, draft invocation, CODEX_HOME isolation
 // and operator config/auth/MCP linking.
@@ -19,7 +20,7 @@ import { mockModule, installModuleMocks } from './lib/module-mock.js';
 const codexModule = mockModule<typeof import('../src/adapters/agents/codex.js')>('../src/adapters/agents/codex.js', import.meta.url);
 await installModuleMocks();
 
-describe('Codex launcher basics (task-1322, TASK-2328)', () => {
+describe("Codex launcher basics ,", () => {
   test.afterEach(() => mock.restoreAll());
 
   const codex = codexModule;
@@ -256,7 +257,7 @@ describe('Codex launcher basics (task-1322, TASK-2328)', () => {
   });
 });
 
-describe('Codex MCP config linked into worktree CODEX_HOME (task-2209)', () => {
+describe("Codex MCP config linked into worktree CODEX_HOME", () => {
   test.afterEach(() => mock.restoreAll());
 
   // Reproduction test for task-2209: codex fails on mcp
@@ -307,7 +308,7 @@ describe('Codex MCP config linked into worktree CODEX_HOME (task-2209)', () => {
   });
 });
 
-describe('Codex operator-state isolation (task-2211)', () => {
+describe("Codex operator-state isolation", () => {
   test.afterEach(() => mock.restoreAll());
 
   const { buildCodexDraftInvocation, codexStateRoot } = codexModule;
@@ -369,7 +370,7 @@ describe('Codex operator-state isolation (task-2211)', () => {
   });
 });
 
-describe('Codex operator HOME retention (task-2266)', () => {
+describe("Codex operator HOME retention", () => {
   test.afterEach(() => mock.restoreAll());
 
   test('codex launch keeps the operator HOME when caller env supplies a worktree HOME', () => {

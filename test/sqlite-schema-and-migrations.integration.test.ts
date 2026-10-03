@@ -1,3 +1,4 @@
+// Historical regression provenance: TASK-2521.
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -40,7 +41,7 @@ function createTempDb(): { db: SqliteDatabaseAdapter; dir: string; dbPath: strin
 // Tests
 // ---------------------------------------------------------------------------
 
-describe('SQLite schema and migration runner (task-2521)', () => {
+describe("SQLite schema and migration runner", () => {
   // --- Connection rules ---
 
   it('enables foreign keys on connection', async () => {

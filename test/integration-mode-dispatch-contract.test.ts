@@ -1,3 +1,4 @@
+// Historical regression provenance: TASK-2500.
 // Behavior-owned suite (TASK-2622.09): integration mode capability dispatch (local, github-publish,
 // github-pr), mode reporting in config/status, the recorded-brief contract, the Mission integration
 // service, and mode dispatch through `px integrate` (task-2500). Legacy case names unchanged.
@@ -396,7 +397,7 @@ describe("Mission integration service", () => {
 });
 
 // ---- task-2500 integrate mode dispatch (consolidated from test/task-2500-integrate-mode-dispatch.test.ts, TASK-2622.09) ----
-describe("task-2500 integrate mode dispatch", () => {
+describe("integrate mode dispatch", () => {
   // ---------------------------------------------------------------------------
   // task-2500.01 CP-4 / F1 — the `px integrate` entrypoint routes the real merge
   // operations through the integration capability boundary (integration-dispatch),

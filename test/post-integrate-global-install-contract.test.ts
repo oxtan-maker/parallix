@@ -1,3 +1,4 @@
+// Historical regression provenance: TASK-1424, TASK-2206, TASK-2203, TASK-2622.17, TASK-2621.
 // Behavior-owned suite (TASK-2622.09, integration-ci): the post-integrate global install script and
 // installed bundle layout — npm pack lifecycle output (task-2206), publish/reinstall layout (task-1424),
 // publish-proof ordering after the rebuild (task-2203, TASK-2622.17) and stale-lockfile reconciliation (task-2621,
@@ -102,7 +103,7 @@ describe("refresh-global-px script", () => {
 });
 
 // ---- task-1424 publish and reinstall (consolidated from test/task-1424-post-integrate-publish-reinstall.test.ts, TASK-2622.09) ----
-describe("task-1424 publish and reinstall", () => {
+describe("publish and reinstall", () => {
   const PACKAGE_ROOT = path.join(import.meta.dirname, '..');
 
   type RunOptions = import('node:child_process').SpawnSyncOptions & {
@@ -229,7 +230,7 @@ describe("task-1424 publish and reinstall", () => {
 });
 
 // ---- task-2206 post-integrate hook errors (consolidated from test/task-2206-post-integrate-hook-errors.test.ts, TASK-2622.09) ----
-describe("task-2206 post-integrate hook errors", () => {
+describe("post-integrate hook errors", () => {
   const REPO_ROOT = path.join(import.meta.dirname, '..');
   const SCRIPT_SOURCE = path.join(REPO_ROOT, 'scripts', 'refresh-global-px.sh');
 
@@ -371,7 +372,7 @@ process.exit(0);
 });
 
 // ---- task-2203 publish proof is captured after the post-integrate rebuild (consolidated from test/task-2203-publish-proof-refresh-order.test.ts, TASK-2622.17) ----
-describe('task-2203 publish proof is captured after the post-integrate rebuild (consolidated from test/task-2203-publish-proof-refresh-order.test.ts, TASK-2622.17)', () => {
+describe("publish proof is captured after the post-integrate rebuild (consolidated from test/-publish-proof-refresh-order.test.ts,", () => {
   // ---------------------------------------------------------------------------
   // Regression test for task-2203: publish-proof must be captured AFTER the
   // post-integrate rebuild, not before it.
@@ -528,7 +529,7 @@ describe('task-2203 publish proof is captured after the post-integrate rebuild (
 });
 
 // ---- task-2621 refresh reconciles the landed lockfile before pack (consolidated from test/task-2621-repro.test.ts, TASK-2622.17) ----
-describe('task-2621 refresh reconciles the landed lockfile before pack (consolidated from test/task-2621-repro.test.ts, TASK-2622.17)', () => {
+describe("refresh reconciles the landed lockfile before pack (consolidated from test/-repro.test.ts,", () => {
   const REPO_ROOT = path.join(import.meta.dirname, '..');
   const REFRESH_SCRIPT = path.join(REPO_ROOT, 'scripts', 'refresh-global-px.sh');
 

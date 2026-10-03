@@ -1,3 +1,4 @@
+// Historical regression provenance: TASK-2357.
 /**
  * Per-metric low-sample cohort judgement for the metrics slice (TASK-2622.13
  * consolidation).
@@ -24,7 +25,7 @@ import {
   insertUsageRow,
   laneEvent,
   withStatisticsDatabase,
-} from './fixtures/task-2357-statistics-fixture.js';
+} from './fixtures/statistics-database.js';
 
 // ---------------------------------------------------------------------------
 // TASK-2357 defect G — a metric's low-sample judgement is its own.
@@ -50,7 +51,7 @@ const RUNTIME_OBSERVATIONS = 14;
 const COST_OBSERVATIONS = 2;
 const THRESHOLD = 5;
 
-describe('TASK-2357 defect G: low-sample is judged per metric, not per cohort', () => {
+describe("defect G: low-sample is judged per metric, not per cohort", () => {
   it('marks cost low-sample at n=2 while the 30-mission cohort is not', async () => {
     await withStatisticsDatabase(async ({ db, laneEventRepo, usageRepo }) => {
       const missions: MissionId[] = [];

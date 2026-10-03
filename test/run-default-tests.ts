@@ -9,6 +9,8 @@ import { onGitHubActions } from './lib/unit-test-budget-reporter.mjs';
 import { resolveFileTimingProfile, printFileTimingSummary } from './lib/file-timing-profile.js';
 import { PROFILE_ENV } from './lib/file-timing-reporter.js';
 import { cpuSupervisor, readCpuReport } from './lib/cpu-supervisor.js';
+import { childCpuUsageModule } from './lib/child-cpu-usage.js';
+import { readCpuBudgetPolicy, suiteCpuBudget } from './lib/test-cpu-policy.mjs';
 import { checkoutTestTmpdir } from './lib/test-tmpdir.js';
 
 // A verifier may be launched from an operator checkout while it is validating
@@ -34,22 +36,6 @@ const coverageEnabled = process.env.PARALLIX_TEST_COVERAGE === '1'
   || process.env.PARALLIX_TEST_COVERAGE === 'true';
 const plan = buildTestRunPlan({ executionRoot, requestedArgs: process.argv.slice(2), coverage: coverageEnabled });
 const { testNode, nodeArgs, runsIntegrationSuite, runsIntegrationCiSuite, unitTestHeadroomMs } = plan;
-const UNIT_TEST_CPU_BUDGET_MS = plan.unitTestCpuBudgetMs;
-// V8 instrumentation is intentionally enabled for the one unit execution in
-// pre-integration. It makes the complete suite materially slower without
-// relaxing the per-test timeout or headroom contracts below.
-// The fully isolated covered path retains its existing provisional bound.
-// The local hybrid gate has its own CPU bound below, calibrated separately.
-const COVERAGE_UNIT_TEST_SUITE_CPU_BUDGET_MS = 900_000;
-// The fast unit tier runs the complete unit suite under coverage, so it pays
-// the same per-file worker instrumentation cost as the isolated path but for
-// the unit files only. Measured on the CI verification machine the covered
-// unit suite holds at ~440 s CPU (max 473 s across repeated runs) under the
-// concurrent safe/isolated partition. The previous 425 s bound was calibrated
-// against a 367 s local run on a faster box and now fails on routine variance,
-// so this leaves ~18% above the typical run and ~10% above the observed max
-// while still failing a material regression (e.g. a >20% compute increase).
-const FAST_COVERAGE_UNIT_TEST_SUITE_CPU_BUDGET_MS = 520_000;
 
 const coverageDestination = runsIntegrationCiSuite
   ? path.join(executionRoot, 'coverage', '.lcov-integration-ci.info')
@@ -107,7 +93,8 @@ const testManifestDir = path.join(tempManifestDir, `test-run-${process.pid}`);
 recoverRecordedTempRoots({ manifestDir: tempManifestDir });
 fs.mkdirSync(testManifestDir, { recursive: true });
 const cpuReportPath = path.join(testManifestDir, 'suite-cpu.json');
-const meter = !runsIntegrationSuite && !onGitHubActions() ? cpuSupervisor(executionRoot) : null;
+const meter = !onGitHubActions() ? cpuSupervisor(executionRoot) : null;
+const childCpuModule = runsIntegrationSuite && !onGitHubActions() ? childCpuUsageModule(executionRoot, testNode) : null;
 
 // The suite runs in its own process group (detached) so the watchdog and the
 // signal handler can terminate the whole tree — node --test, its per-file
@@ -127,6 +114,7 @@ const child = spawn(meter ?? testNode, meter ? ['--cpu-report', cpuReportPath, t
     // Its instrumentation timing is not a hermetic per-test performance
     // measurement; ordinary unit runs retain the explicit 500 ms headroom.
     ...(unitTestHeadroomMs === null || coverageEnabled ? {} : { PARALLIX_UNIT_TEST_CPU_HEADROOM_US: String(unitTestHeadroomMs * 1_000) }),
+    ...(childCpuModule ? { PARALLIX_CHILD_CPU_USAGE_MODULE: childCpuModule } : {}),
     PARALLIX_EXECUTION_ROOT: executionRoot,
     PARALLIX_TEST_MANIFEST_DIR: testManifestDir,
     // Keeps tsx's transpile cache per checkout; see test/lib/test-tmpdir.ts.
@@ -226,20 +214,22 @@ child.on('close', (code, signal) => {
   // speed is uncontrollable, so the suite must not fail on the timing gate
   // there. Local runs keep enforcing it. Gated independently of the reporter
   // (task-2531).
-  if (!runsIntegrationSuite && !onGitHubActions()) {
+  if (!onGitHubActions()) {
     try {
       const cpu = readCpuReport(cpuReportPath);
       const cpuMs = (cpu.userUs + cpu.systemUs) / 1_000;
-      const actualBudget = fastUnit && coverageEnabled
-        ? FAST_COVERAGE_UNIT_TEST_SUITE_CPU_BUDGET_MS
-        : coverageEnabled ? COVERAGE_UNIT_TEST_SUITE_CPU_BUDGET_MS : UNIT_TEST_CPU_BUDGET_MS;
-      console.error(`[unit-test-cpu] suite budget=${actualBudget}ms CPU, used=${Math.round(cpuMs)}ms CPU, elapsed=${Math.round(suiteElapsedMs)}ms`);
+      const actualBudget = suiteCpuBudget(readCpuBudgetPolicy(executionRoot), {
+        integration: runsIntegrationSuite, ci: runsIntegrationCiSuite,
+        local: plan.runsIntegrationLocalSuite, fast: fastUnit, covered: coverageEnabled,
+      });
+      const label = runsIntegrationSuite ? 'integration-test-cpu' : 'unit-test-cpu';
+      console.error(`[${label}] suite budget=${actualBudget}ms CPU, used=${Math.round(cpuMs)}ms CPU, elapsed=${Math.round(suiteElapsedMs)}ms`);
       if (cpuMs > actualBudget) {
-        console.error(`[unit-test-cpu] SUITE CPU BUDGET EXCEEDED: ${Math.round(cpuMs)}ms > ${actualBudget}ms`);
+        console.error(`[${label}] SUITE CPU BUDGET EXCEEDED: ${Math.round(cpuMs)}ms > ${actualBudget}ms`);
         suiteExceeded = true;
       }
     } catch (error) {
-      console.error(`[unit-test-cpu] measurement unavailable: ${error instanceof Error ? error.message : String(error)}`);
+      console.error(`[test-suite-cpu] measurement unavailable: ${error instanceof Error ? error.message : String(error)}`);
       suiteExceeded = true;
     }
   }

@@ -1,3 +1,4 @@
+// Historical regression provenance: TASK-2377.
 // Behavior-owned suite (TASK-2622.09): the pre-review rebase runs in-process through the rebase workflow
 // port (task-2377-02) and hook/gate failures during it classify correctly. Legacy case names unchanged.
 import test, { describe } from 'node:test';
@@ -12,7 +13,7 @@ import { startReviewLoop } from '../src/adapters/review/review-loop.js';
 import type { RebaseWorkflowPort } from '../src/application/ports/rebase-workflow.js';
 
 // ---- task-2377-02 pre-review rebase in-process (consolidated from test/task-2377-02-pre-review-rebase-inprocess.test.ts, TASK-2622.09) ----
-describe("task-2377-02 pre-review rebase in-process", () => {
+describe("02 pre-review rebase in-process", () => {
   /**
    * TASK-2377.02: the pre-review rebase runs in-process through
    * `RebaseWorkflowPort` and reports typed gate / hook evidence.

@@ -1,3 +1,4 @@
+// Historical regression provenance: TASK-2373.
 /**
  * SC7: Component tests assert rendered semantics using mocked BoardProjection.
  *
@@ -281,7 +282,7 @@ describe('BoardShell component renders with mocked BoardProjection', () => {
 });
 
 // ── Operator rail — TASK-2373 SC15-SC18 (was task-2373-operator-rail.test.ts) ──
-describe('Operator rail — TASK-2373 SC15-SC18', () => {
+describe("Operator rail — SC15-SC18", () => {
   test('SC15: the rail begins with the attention heading; live-work totals stay in the agent strip', () => {
     const cards = Array.from({ length: 4 }, (_unused, index) => makeCard({
       id: `task-working-${index + 1}` as never,

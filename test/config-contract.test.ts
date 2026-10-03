@@ -1,3 +1,4 @@
+// Historical regression provenance: TASK-1233, TASK-2500.01, TASK-2455.01, TASK-2455.02.
 // Workflow configuration contract: discovery, readiness, integration mode,
 // product defaults and task-provider validation. Each describe block keeps the
 // historical task ID as regression provenance. Merged from the former
@@ -50,7 +51,7 @@ function withConfig(config: unknown | null, run: (_root: string) => void): void 
   });
 }
 
-describe('workflow.config.json discovery and readiness (task-1233)', () => {
+describe("workflow.config.json discovery and readiness", () => {
   // GAP from CP-2 row 2: malformed JSON reaches the parseError -> 'invalid' branch
   // of evaluateRepositoryReadiness, which had no direct unit coverage.
   test('evaluateRepositoryReadiness returns invalid for malformed workflow.config.json', () => {
@@ -98,7 +99,7 @@ describe('workflow.config.json discovery and readiness (task-1233)', () => {
   });
 });
 
-describe('integration.mode configuration (task-2500.01)', () => {
+describe("integration.mode configuration", () => {
   test('integration mode defaults to local when no repository config is present', () => {
     withConfig(null, root => {
       assert.equal(resolveIntegrationMode(root), 'local');
@@ -163,7 +164,7 @@ describe('integration.mode configuration (task-2500.01)', () => {
   });
 });
 
-describe('product.targetUser retirement (TASK-2455.01)', () => {
+describe("product.targetUser retirement", () => {
   function productHasTargetUser(config: unknown): boolean {
     const product = (config as { product?: { targetUser?: unknown } } | null)?.product;
     return Boolean(product) && Object.prototype.hasOwnProperty.call(product, 'targetUser');
@@ -199,7 +200,7 @@ describe('product.targetUser retirement (TASK-2455.01)', () => {
   });
 });
 
-describe('adapters.tasks.provider validation (task-2455.02)', () => {
+describe("adapters.tasks.provider validation", () => {
   const OTHER_PROVIDER_CONFIG = { adapters: { tasks: { provider: 'other' } } };
 
   test('an unsupported adapters.tasks.provider is rejected by configuration validation', () => {

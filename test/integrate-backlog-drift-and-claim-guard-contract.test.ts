@@ -1,3 +1,4 @@
+// Historical regression provenance: TASK-2242, TASK-2411.
 // Behavior-owned suite (TASK-2622.09): backlog-only conflict drift retry (task-2242), the integrate
 // guard, the exclusive per-mission claim, and integrate work detection (task-2411).
 // Legacy case names unchanged; Git, Backlog and Forgejo are injected doubles.
@@ -31,7 +32,7 @@ const { repositoryId } = await import('../src/domain/repository.js');
 const { AttentionItems } = await import('../src/interfaces/tui/shell.js');
 
 // ---- task-2242 backlog drift retry (consolidated from test/task-2242-backlog-drift.test.ts, TASK-2622.09) ----
-describe("task-2242 backlog drift retry", () => {
+describe("backlog drift retry", () => {
   // ---------------------------------------------------------------------------
   // Tier 1: Classification tests (areAllBacklogOnlyConflicts)
   // ---------------------------------------------------------------------------
@@ -806,7 +807,7 @@ describe("exclusive integrate claim", () => {
 });
 
 // ---- task-2411 integrate work detection (consolidated from test/task-2411-integrate-work-detection.test.ts, TASK-2622.09) ----
-describe("task-2411 integrate work detection", () => {
+describe("integrate work detection", () => {
   const repository = repositoryId('parallix');
   const id = missionId('task-2411');
 

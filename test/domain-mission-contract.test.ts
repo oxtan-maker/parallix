@@ -1,3 +1,4 @@
+// Historical regression provenance: TASK-2294, TASK-2322, TASK-2322.09, TASK-2347.09.
 // Mission domain contract: pure Mission invariants, authority, and outcomes.
 //
 // Behavior-owned suite (TASK-2622.06 pilot). Sections keep their historical
@@ -22,7 +23,7 @@ import { AGENT_WORK_STAGE_BY_ACTIVITY, AGENT_WORK_STAGES, ATTRIBUTED_AGENT_WORK_
 import { missionOutcome } from './fixtures/mission-outcome.js';
 import { laneEvent, metricsAdapter } from './fixtures/metrics-adapter.js';
 
-describe('Mission lifecycle and review invariants (task-2294, task-2322, task-2322.09)', () => {
+describe("Mission lifecycle and review invariants , ,", () => {
   const id = missionId('task-2294');
   const repo = repositoryId('parallix');
   const implementer = agentFamily('configured-implementer');
@@ -491,7 +492,7 @@ describe('Mission lifecycle and review invariants (task-2294, task-2322, task-23
   });
 });
 
-describe('Mission field and legacy-path authority (TASK-2294)', () => {
+describe("Mission field and legacy-path authority", () => {
   const repositoryMission: Mission = {
     id: missionId('task-2294'), repositoryId: repositoryId('parallix'), title: 'authoritative',
     labels: missionLabels(['user_value', 'bug']), status: 'active', rawStatus: 'active', closedAt: null, assignee: agentFamily('codex'),
@@ -519,7 +520,7 @@ describe('Mission field and legacy-path authority (TASK-2294)', () => {
   });
 });
 
-describe('Mission outcome and completed statistics (task-2294, task-2347.09)', () => {
+describe("Mission outcome and completed statistics ,", () => {
   const measured = <T>(value: T): Measurement<T> => ({ kind: 'measured', value });
   const unavailable = <T>(reason: string): Measurement<T> => ({ kind: 'unavailable', reason });
 

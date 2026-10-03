@@ -1,3 +1,4 @@
+// Historical regression provenance: TASK-2347.02.
 /**
  * Lifecycle event stream for the metrics slice (TASK-2622.13 consolidation).
  *
@@ -160,7 +161,7 @@ afterEach(() => {
   }
 });
 
-describe('TASK-2347.02 lifecycle event stream gaps', () => {
+describe("lifecycle event stream gaps", () => {
   it('intake produces a backlog-entry lane event', async () => {
     const fixture = await isolatedStore();
     await intake(fixture, '2026-08-08T00:00:00.000Z');

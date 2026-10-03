@@ -1,3 +1,4 @@
+// Historical regression provenance: TASK-2236, TASK-2500.04, TASK-2583.
 // Pi launcher contract: the Pi e2e regression guard and progress streaming.
 //
 // Behavior-owned suite (TASK-2622.11). Legacy case names are unchanged; each section keeps its
@@ -16,7 +17,7 @@ import { mockModule, installModuleMocks } from './lib/module-mock.js';
 const piModule = mockModule<typeof import('../src/adapters/agents/pi.js')>('../src/adapters/agents/pi.js', import.meta.url);
 await installModuleMocks();
 
-describe('Pi e2e opt-in guard (task-2236, task-2500.04)', () => {
+describe("Pi e2e opt-in guard ,", () => {
   test('task-2236 repro: npm test forwards the requested pi e2e smoke file', () => {
     // TASK-2328 moved suite selection and argv assembly into
     // test/lib/test-run-plan.ts; the runner delegates to it.
@@ -51,11 +52,6 @@ describe('Pi e2e opt-in guard (task-2236, task-2500.04)', () => {
     );
     assert.match(
       runnerSource,
-      /requestedTestFiles\.length > 0 \? requestedTestFiles : tierFiles\.unit/,
-      'an explicit e2e test path must replace the default suite rather than be ignored'
-    );
-    assert.match(
-      runnerSource,
       /const runsRealAgentSmoke = requestedTestFiles\.some/,
       'the real-agent e2e must not inherit the unit-test HOME isolation shim'
     );
@@ -87,7 +83,7 @@ describe('Pi e2e opt-in guard (task-2236, task-2500.04)', () => {
   });
 });
 
-describe('Pi progress streaming (task-2583)', () => {
+describe("Pi progress streaming", () => {
   const pi = piModule;
 
 

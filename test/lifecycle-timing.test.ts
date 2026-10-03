@@ -1,3 +1,4 @@
+// Historical regression provenance: TASK-2363.
 import { describe, it, test } from 'node:test';
 import assert from 'node:assert/strict';
 
@@ -43,7 +44,7 @@ import {
   PREVIOUS_WINDOW_LABEL,
   completedMission,
   contaminatedHistory,
-} from './fixtures/task-2363-decision-window-fixture.js';
+} from './fixtures/flow-decision-window.js';
 
 // The Mission lifecycle timing contract (TASK-2582): deferred destination
 // persistence must complete within LIFECYCLE_DEADLINE_MS of destination-work
@@ -489,7 +490,7 @@ test('SC6: CompletedMissionStatistics still sums runtime from outcome.runs (task
 // TASK-2363 — the one application-owned rolling-window definition.
 // ---------------------------------------------------------------------------
 
-describe('TASK-2363: weekly decision windows', () => {
+describe("weekly decision windows", () => {
   it('returns current and previous non-overlapping 7-day ranges', () => {
     const windows = weeklyDecisionWindows('2026-08-11');
     assert.equal(windows.current.startDate, '2026-08-05');
@@ -561,7 +562,7 @@ function metricsOverContaminatedHistory(): BoardMetrics {
   }) as BoardMetrics;
 }
 
-describe('TASK-2363: completed-mission decision metrics use the rolling 7-day window', () => {
+describe("completed-mission decision metrics use the rolling 7-day window", () => {
   it('reports the current-window cycle-time population, not all history', () => {
     const metrics = metricsOverContaminatedHistory();
     const point = metrics.medianStateTimes.series.at(-1);

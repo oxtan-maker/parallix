@@ -1,3 +1,4 @@
+// Historical regression provenance: TASK-2402, TASK-2593.
 import test, { describe } from 'node:test';
 import assert from 'node:assert/strict';
 import { type AgentReadAdapter, BoardProjectionBuilder, type GateReadAdapter, type GitReadAdapter, type MissionReadAdapter, type OperationLogReadAdapter, type ReviewProjectionFact, type ReviewReadAdapter } from '../src/application/projections/board-readers.js';
@@ -12,7 +13,7 @@ import { type StatusResult } from '../src/application/ports/cli-workflows.js';
 import { renderStatus, statusJson } from '../src/interfaces/cli/status.js';
 import { type CheckpointData } from '../src/domain/checkpoint.js';
 
-describe('focused Mission status reads only the selected Mission (task-2402)', () => {
+describe("focused Mission status reads only the selected Mission", () => {
   // TASK-2402: `px status <slug>` must answer from a focused mission read rather
   // than building the whole board. These tests observe the read boundary itself —
   // which adapter calls happen — not elapsed time.
@@ -408,7 +409,7 @@ describe('focused Mission status reads only the selected Mission (task-2402)', (
   });
 });
 
-describe('status lists all checkpoints and evidence (task-2593)', () => {
+describe("status lists all checkpoints and evidence", () => {
   // TASK-2593: `px status` presents every checkpoint of a Mission in execution
   // order — planned ones with what they deliver, recorded ones with every Goal
   // Check criterion and its paired evidence — not only the latest checkpoint.

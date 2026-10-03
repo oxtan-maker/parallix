@@ -1,3 +1,4 @@
+// Historical regression provenance: TASK-2215, TASK-2581.
 // Mission checkpoint gate bounce contract: missing or invalid checkpoint evidence is repairable and
 // relaunches the agent within a bounded budget.
 //
@@ -390,7 +391,7 @@ test('dirty checkpoint: classifyError does NOT classify uncommitted checkpoint a
 });
 
 // ── Missing checkpoint error classification — TASK-2215 (was 2215.ts) ──
-describe('Missing checkpoint error classification — TASK-2215', () => {
+describe("Missing checkpoint error classification —", () => {
   const { classifyError, FailureClass, DispatchAction } = repairHandoff;
 
   // Reproduction tests for task-2215 (missing error bounce).
@@ -425,7 +426,7 @@ describe('Missing checkpoint error classification — TASK-2215', () => {
 // Regression coverage for typed-mission recovery advice. Both paths use
 // injected boundaries: no agent process, network service, or Mission write is
 // involved.
-describe('Typed checkpoint recovery advice — TASK-2581', () => {
+describe("Typed checkpoint recovery advice —", () => {
   const { buildRelaunchPrompt } = repairHandoff;
   const slug = 'task-2581';
   const worktree = '/tmp/worktree-task-2581';

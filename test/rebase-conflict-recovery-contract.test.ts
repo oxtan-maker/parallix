@@ -1,3 +1,4 @@
+// Historical regression provenance: TASK-2294.01, TASK-2503, TASK-2506, TASK-2494.
 // Behavior-owned suite (TASK-2622.09): `px rebase`/`px resolve-conflict` conflict recovery over injected
 // workflow ports — pinned implementer dispatch (task-2294.01, task-2503), usage-blocked implementer
 // handling (task-2494), and integration rebase prediction (task-2506). Legacy case names unchanged.
@@ -14,7 +15,7 @@ import { runRebaseWorkflow } from '../src/application/rebase-workflow.js';
 import { classifyError, hasExplicitHumanOnlyDiagnostic, FailureClass, DispatchAction } from '../src/application/failure-classification.js';
 
 // ---- task-2294.01 pinned conflict agent (consolidated from test/task-2294.01-repro.test.ts, TASK-2622.09) ----
-describe("task-2294.01 pinned conflict agent", () => {
+describe("pinned conflict agent", () => {
   /**
    * TASK-2294.01 reproduction test.
    *
@@ -171,7 +172,7 @@ describe("task-2294.01 pinned conflict agent", () => {
 });
 
 // ---- task-2503 recorded implementer dispatch (consolidated from test/task-2503-repro.test.ts, TASK-2622.09) ----
-describe("task-2503 recorded implementer dispatch", () => {
+describe("recorded implementer dispatch", () => {
   /**
    * TASK-2503 reproduction test.
    *
@@ -339,7 +340,7 @@ describe("task-2503 recorded implementer dispatch", () => {
 });
 
 // ---- task-2506 dry-run rebase prediction (consolidated from test/task-2506-dry-run-rebase.test.ts, TASK-2622.09) ----
-describe("task-2506 dry-run rebase prediction", () => {
+describe("dry-run rebase prediction", () => {
   // TASK-2506: `px integrate --dry-run` must report whether a rebase is needed
   // and whether it would conflict, without mutating the mission branch. These
   // drive `predictIntegrationRebase` with an injected git runner so the decision
@@ -411,7 +412,7 @@ describe("task-2506 dry-run rebase prediction", () => {
 });
 
 // ---- task-2494 usage-blocked implementer (consolidated from test/task-2494-repro.test.ts, TASK-2622.09) ----
-describe("task-2494 usage-blocked implementer", () => {
+describe("usage-blocked implementer", () => {
   /**
    * TASK-2494 reproduction tests.
    *

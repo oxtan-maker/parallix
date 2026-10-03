@@ -1,0 +1,143 @@
+[plain-unit-headroom] npm test -- --unit-test-headroom
+ℹ tests 3199
+ℹ suites 236
+ℹ pass 3199
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 27528.411087
+[unit-test-cpu] suite budget=200000ms CPU, used=135615ms CPU, elapsed=27588ms
+
+[fast-unit-headroom] PARALLIX_FAST_UNIT=1 npm test -- --unit-test-headroom
+ℹ tests 1182
+ℹ suites 48
+ℹ pass 1182
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 6492.752293
+ℹ tests 2017
+ℹ suites 188
+ℹ pass 2017
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 16299.713802
+[fast-unit] 227 files, 3199 tests; shared=101, isolated=126
+[unit-test-cpu] suite budget=150000ms CPU, used=88238ms CPU, elapsed=17033ms
+
+[covered-fast-unit] PARALLIX_FAST_UNIT=1 PARALLIX_TEST_COVERAGE=1 npm test -- --unit-test-headroom
+ℹ tests 1169
+ℹ suites 48
+ℹ pass 1169
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 7492.217259
+ℹ tests 2029
+ℹ suites 188
+ℹ pass 2029
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 19305.379548
+[fast-unit] 227 files, 3198 tests; shared=98, isolated=129
+[unit-test-cpu] suite budget=180000ms CPU, used=115523ms CPU, elapsed=25948ms
+
+[covered-isolated-unit-calibration] PARALLIX_TEST_COVERAGE=1 npm test
+ℹ tests 3195
+ℹ suites 236
+ℹ pass 3195
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 38296.605561
+[unit-test-cpu] suite budget=900000ms CPU, used=174166ms CPU, elapsed=42821ms
+
+[plain-integration-calibration] npm run test:integration:ci:prebuilt
+PASS: authored documentation contains no volatile implementation evidence and relative links resolve
+PASS: authored documentation contains no volatile implementation evidence and relative links resolve
+ℹ tests 2616
+ℹ suites 113
+ℹ pass 2589
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 26
+ℹ todo 0
+ℹ duration_ms 58872.80615
+[integration-test-cpu] suite budget=650000ms CPU, used=238005ms CPU, elapsed=58917ms
+
+[covered-integration-enforced] PARALLIX_TEST_COVERAGE=1 npm run test:integration:ci:prebuilt
+PASS: authored documentation contains no volatile implementation evidence and relative links resolve
+PASS: authored documentation contains no volatile implementation evidence and relative links resolve
+ℹ tests 2616
+ℹ suites 113
+ℹ pass 2590
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 26
+ℹ todo 0
+ℹ duration_ms 71825.784232
+[integration-test-cpu] suite budget=405000ms CPU, used=291171ms CPU, elapsed=79805ms
+
+[local-integration-enforced] npm run test:integration:local:prebuilt
+ℹ tests 64
+ℹ suites 0
+ℹ pass 64
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 44218.231767
+[integration-test-cpu] suite budget=85000ms CPU, used=51424ms CPU, elapsed=44257ms
+
+[focused-hooks] npm test -- --integration-ci test/repository-gates.integration.test.ts test/repository-gates.test.ts test/integration-pipelines.test.ts test/review-gate-ownership.test.ts test/integrate-gate-and-exclusivity-process-contract.test.ts
+ℹ tests 115
+ℹ suites 3
+ℹ pass 105
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 10
+ℹ todo 0
+ℹ duration_ms 11553.164656
+[integration-test-cpu] suite budget=310000ms CPU, used=19725ms CPU, elapsed=11587ms
+
+[organization-discovery-size-guards] npm test -- test/default-test-suite.test.ts test/typescript-test-authoring.test.ts test/test-categories.test.ts test/file-size-cap.test.ts
+ℹ tests 30
+ℹ suites 0
+ℹ pass 30
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 1100.795209
+[unit-test-cpu] suite budget=200000ms CPU, used=2769ms CPU, elapsed=1140ms
+
+[cpu-counter-contract] npm test -- --integration-local test/unit-test-timeout-guard.test.ts
+ℹ tests 17
+ℹ suites 0
+ℹ pass 17
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 17671.221066
+[integration-test-cpu] suite budget=85000ms CPU, used=10865ms CPU, elapsed=17710ms
+
+[static-analysis] ./scripts/verify-local.sh static-analysis
+PASS: ESLint — 0 errors, 0 warnings (budget 300)
+PASS: tsc typecheck clean
+PASS: no test-hygiene violations
+PASS: test-hygiene clean
+PASS: test typecheck clean
+=== Static Analysis Gate: ALL STAGES PASSED ===
+
+[docs] ./scripts/verify-local.sh docs
+PASS: authored documentation contains no volatile implementation evidence and relative links resolve
+

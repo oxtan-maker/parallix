@@ -1,3 +1,4 @@
+// Historical regression provenance: TASK-1322, TASK-1339, TASK-1316.
 // @ts-nocheck -- TASK-2328: partial test doubles from ESM seam migration; resolve in follow-up
 // OpenCode launcher contract: command/invocation building, stale-session detection, launcher
 // telemetry capture, and bounded in-family retry on provider failures.
@@ -22,7 +23,7 @@ const statsModule = mockModule<typeof import('../src/adapters/cli/commands/stats
 const agentLimitModule = mockModule<typeof import('../src/application/services/agent-limit.js')>('../src/application/services/agent-limit.js', import.meta.url);
 await installModuleMocks();
 
-describe('OpenCode launcher (task-1322, task-1339)', () => {
+describe("OpenCode launcher ,", () => {
   test.afterEach(() => mock.restoreAll());
 
   const opencode = opencodeModule;
@@ -341,7 +342,7 @@ describe('OpenCode launcher (task-1322, task-1339)', () => {
   });
 });
 
-describe('OpenCode launcher telemetry (task-1316, task-1339)', () => {
+describe("OpenCode launcher telemetry ,", () => {
   test.afterEach(() => mock.restoreAll());
 
   const stats = statsModule;

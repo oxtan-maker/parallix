@@ -1,3 +1,4 @@
+// Historical regression provenance: TASK-2332.05.
 // Application port contracts: typed outcomes, production capability
 // composition, and single-dispatcher convergence for CLI and TUI.
 //
@@ -58,7 +59,7 @@ describe('Production capability composition', () => {
   });
 });
 
-describe('Command dispatch convergence (TASK-2332.05)', () => {
+describe("Command dispatch convergence", () => {
   /**
    * TASK-2332.05 — CLI and TUI route through one canonical dispatcher
    * (BoardCommandController). Behavioral test proves both surfaces reach it.

@@ -1,3 +1,4 @@
+// Historical regression provenance: TASK-2521.04.
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -165,7 +166,7 @@ it('imports missing typed fields from a historical mission document once', async
   assert.equal((await importLegacyMissions(services(store), { rootDir: root, commit: COMMIT })).importable, 0);
 });
 
-describe('legacy Mission import into the existing aggregate (task-2521.04)', () => {
+describe("legacy Mission import into the existing aggregate", () => {
   it('a dry run reads the legacy locations and writes no Mission rows', async () => {
     const root = workspace([{ name: 'task-9001 - Open.md', body: OPEN_TASK }]);
     const store = new RecordingStore();

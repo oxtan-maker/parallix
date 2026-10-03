@@ -1,3 +1,4 @@
+// Historical regression provenance: TASK-2521.04.
 /**
  * The imported trace's commit pin, against a real Git checkout (TASK-2521.04).
  *
@@ -68,7 +69,7 @@ function services(store: MissionTransitionStore): MissionImportServices {
   };
 }
 
-describe('legacy import trace pins its commit (task-2521.04)', () => {
+describe("legacy import trace pins its commit", () => {
   it('pins the trace to the checkout HEAD when no commit is passed', async () => {
     const root = mkdtemp('task-2521.04-commit-');
     const file = path.join('backlog', 'tasks', 'task-9001 - Open.md');

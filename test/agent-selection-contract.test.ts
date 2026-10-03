@@ -1,3 +1,4 @@
+// Historical regression provenance: TASK-2626, TASK-2351.
 // Agent selection contract: pure selection over a materialized snapshot, the SQLite snapshot
 // adapter, selection telemetry, launcher availability probing, and known-family resolution.
 //
@@ -96,7 +97,7 @@ describe('Domain agent selection', () => {
   });
 });
 
-describe('Workflow selection excludes runtime-blocked families (TASK-2626)', () => {
+describe("Workflow selection excludes runtime-blocked families", () => {
   // The production startAgent loop is the workflow launch path (draft/active).
   // Its selection must consult the authoritative runtime blocklist, not just the
   // static config blocklist, so a family blocked at runtime (e.g. month-end rate
@@ -256,7 +257,7 @@ describe('Workflow selection excludes runtime-blocked families (TASK-2626)', () 
   });
 });
 
-describe('SQLite agent selection snapshot adapter (TASK-2351)', () => {
+describe("SQLite agent selection snapshot adapter", () => {
   const families = [agentFamily('codex'), agentFamily('claude')];
 
   test('SQLite snapshot adapter materializes active blocks, launcher status, and step policy', async () => {
@@ -292,7 +293,7 @@ describe('SQLite agent selection snapshot adapter (TASK-2351)', () => {
   });
 });
 
-describe('Reviewer nomination with stale JSON blocklist (TASK-2351)', () => {
+describe("Reviewer nomination with stale JSON blocklist", () => {
   test('SQLite-blocked reviewer is not nominated when JSON blocklist is stale (TASK-2351 repro)', async () => {
     const codex = agentFamily('codex');
     const claude = agentFamily('claude');
@@ -317,7 +318,7 @@ describe('Reviewer nomination with stale JSON blocklist (TASK-2351)', () => {
   });
 });
 
-describe('Agent selection telemetry outcomes (TASK-2351)', () => {
+describe("Agent selection telemetry outcomes", () => {
   test('selection telemetry records nominated, skipped-blocked, launch-failed, and fallback outcomes', () => {
     const lines: string[] = [];
     for (const outcome of AGENT_SELECTION_OUTCOMES) {

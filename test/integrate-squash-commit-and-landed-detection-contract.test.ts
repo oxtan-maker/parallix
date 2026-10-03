@@ -1,3 +1,4 @@
+// Historical regression provenance: TASK-2595, TASK-2377.05, TASK-2517, TASK-2492.
 // Behavior-owned suite (TASK-2622.09, integration-ci): the landed squash commit and its detection —
 // commit subject/body (task-2595), hook-failure bounce (task-2377.05), base-branch landed scan
 // (task-2517 F1), and already-merged detection and recovery refusal (task-2492). Legacy case names unchanged.
@@ -33,7 +34,7 @@ const { recoverMissionLifecycle } = await import('../src/application/mission-lif
 const { missionId } = await import('../src/domain/mission.js');
 
 // ---- task-2595 squash landing commit message (consolidated from test/task-2595-squash-landing-commit-message.test.ts, TASK-2622.09) ----
-describe("task-2595 squash landing commit message", () => {
+describe("squash landing commit message", () => {
   // TASK-2595: a landed squash commit must read like the mission, not the
   // machinery. The subject carries the recorded mission title; the body records
   // the mission task reference.
@@ -236,7 +237,7 @@ describe("task-2595 squash landing commit message", () => {
 });
 
 // ---- task-2377.05 squash hook bounce (consolidated from test/task-2377.05-integrate-squash-bounce.test.ts, TASK-2622.09) ----
-describe("task-2377.05 squash hook bounce", () => {
+describe("squash hook bounce", () => {
   // ---------------------------------------------------------------------------
   // TASK-2377.05 — the `px integrate` squash-commit hook bounce runs through the
   // rebound kernel (SC2).
@@ -415,7 +416,7 @@ describe("task-2377.05 squash hook bounce", () => {
 });
 
 // ---- task-2517 base-branch landed squash detection (consolidated from test/task-2517-landed-squash-base-branch-detection.test.ts, TASK-2622.09) ----
-describe("task-2517 base-branch landed squash detection", async () => {
+describe("base-branch landed squash detection", async () => {
   // TASK-2517 F1 (round 2): the SC4 landed-payload predicate must detect a squash
   // that landed on the *base branch*, because a landed mission's squash is created
   // with `git merge --squash` onto the base branch and is never reachable from the
@@ -522,7 +523,7 @@ describe("task-2517 base-branch landed squash detection", async () => {
 });
 
 // ---- task-2492 already-merged detection (consolidated from test/task-2492-already-merged-detection.test.ts, TASK-2622.09) ----
-describe("task-2492 already-merged detection", () => {
+describe("already-merged detection", () => {
   // Fixture-git coverage for the TASK-2492 detection wiring. Integration lands
   // mission work with `git merge --squash`, so a landed mission branch tip is not
   // reachable from `main`; detection must key on the squash commit subject, not

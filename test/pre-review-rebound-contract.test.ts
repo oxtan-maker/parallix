@@ -1,3 +1,4 @@
+// Historical regression provenance: TASK-2369.17, TASK-2377.05, TASK-2353.
 // Pre-review rebound contract: hook and declared-gate failures before review bounce through the rebound
 // kernel and resume the review loop.
 //
@@ -223,7 +224,7 @@ describe('Pre-review lifecycle hook rebounce', () => {
   });
 });
 
-describe('Shared hook-failure-workflow module — TASK-2369.17', () => {
+describe("Shared hook-failure-workflow module —", () => {
   it('exports classifyHookFailure identical to rebase and integrate copies', () => {
     assert.equal(classifyHookFailureShared('pre-commit: error').hookType, 'pre-commit');
     assert.equal(classifyHookFailureShared('hook failed').hookType, 'hook');
@@ -250,7 +251,7 @@ describe('Shared hook-failure-workflow module — TASK-2369.17', () => {
 // metadata writes and `MAX_HOOK_RETRY`), the bounce-prompt case, and the
 // transition-before-launch case. ────────────────────────────────────────────
 
-describe('Hook bounce on the rebound kernel — TASK-2377.05', () => {
+describe("Hook bounce on the rebound kernel —", () => {
   const hookReason = (output: string) =>
     ({ kind: 'hook-failure', hook: 'pre-commit', operation: 'squash commit', output }) as const;
 
@@ -354,7 +355,7 @@ describe('Hook bounce on the rebound kernel — TASK-2377.05', () => {
 });
 
 // ── Declared gate rebounce and review-loop resume — TASK-2353 (was task-2353-rebounce-reproduction.test.ts) ──
-describe('Declared gate rebounce and review-loop resume — TASK-2353', () => {
+describe("Declared gate rebounce and review-loop resume —", () => {
   test('task-2353 repro: declared pre-review gate rebounces, replays, and resumes the review loop', async () => {
     const slug = 'task-2353-rebounce-repro';
     const worktree = '/tmp/task-2353-rebounce-repro';

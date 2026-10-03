@@ -1,3 +1,4 @@
+// Historical regression provenance: TASK-2285, TASK-2381, TASK-1391, TASK-2288, TASK-2509.
 // Behavior-owned suite (TASK-2622.17, unit): the published package and canonical bundle, its release
 // metadata, and release publication trust. Hermetic: reads committed files and build output and uses
 // injected process runners, so it crosses no process, Git, or network boundary. Legacy case names unchanged.
@@ -29,7 +30,7 @@ import { isNewerNormalVersion, parseNormalVersion, publishTrustedRelease, valida
 import { mkdtemp as registeredMkdtemp } from './helpers/temp-dir.js';
 
 // ---- task-2285 release metadata for the canonical ESM bundle ----
-describe('task-2285 release metadata for the canonical ESM bundle', () => {
+describe("release metadata for the canonical ESM bundle", () => {
   // task-2285 — release metadata for the canonical ESM bundle published to npm.
   // (Hermetic: it reads committed files and build outputs, and crosses no process,
   // Git, or network boundary, so it belongs in the default suite.)
@@ -226,7 +227,7 @@ describe('task-2285 release metadata for the canonical ESM bundle', () => {
 });
 
 // ---- task-2381 SEA payload never reaches the npm tarball ----
-describe('task-2381 SEA payload never reaches the npm tarball', () => {
+describe("SEA payload never reaches the npm tarball", () => {
   // TASK-2381 reproduction: the SEA payload under build/sea/ must never reach the
   // npm tarball. build/sea/ is written by scripts/build-sea.ts and released via
   // scripts/package-native-release.ts; build/manifest.sha256 deliberately does not
@@ -282,7 +283,7 @@ describe('task-2381 SEA payload never reaches the npm tarball', () => {
 });
 
 // ---- task-1391 runtime entry points avoid import-equals syntax ----
-describe('task-1391 runtime entry points avoid import-equals syntax', () => {
+describe("runtime entry points avoid import-equals syntax", () => {
   /**
    * Regression test for task-1391: TypeScript import-equals syntax errors.
    *
@@ -389,7 +390,7 @@ describe('task-1391 runtime entry points avoid import-equals syntax', () => {
 });
 
 // ---- task-2288 canonical bundle is the sole executable package target ----
-describe('task-2288 canonical bundle is the sole executable package target', () => {
+describe("canonical bundle is the sole executable package target", () => {
   const ROOT = path.resolve(import.meta.dirname, '..');
 
   // TASK-2288 retired the transitional CommonJS rollback tree. The build no longer
@@ -410,7 +411,7 @@ describe('task-2288 canonical bundle is the sole executable package target', () 
 });
 
 // ---- task-2509 release publication trust ----
-describe('task-2509 release publication trust', () => {
+describe("release publication trust", () => {
   test('task-2509: release metadata accepts only matching normal SemVer versions', () => {
     assert.deepEqual(parseNormalVersion('1.5.120'), [1, 5, 120]);
     assert.equal(parseNormalVersion('1.5.120-beta.1'), null);

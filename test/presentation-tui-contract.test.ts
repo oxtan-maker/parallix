@@ -15,7 +15,7 @@ import './tui-rollback-proof.cases.js';
 import './tui-shell-component.cases.js';
 import './tui-wave-3-component.cases.js';
 import './tui-wave-4-attention.cases.js';
-import './task-2377-sigint-pty-repro.cases.js';
+import './tui-interrupt-terminal-restore.cases.js';
 
 test('presentation TUI contract entrypoint registers its behavior cases', () => {
   assert.ok(true, 'the static case-module imports above are evaluated before this entrypoint test');

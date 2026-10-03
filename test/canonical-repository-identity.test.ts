@@ -1,3 +1,4 @@
+// Historical regression provenance: TASK-2347.01, TASK-2357, TASK-2363.
 /**
  * Canonical repository identity for the metrics slice (TASK-2622.13
  * consolidation).
@@ -10,7 +11,7 @@
  * (a display `product.name` never splits repository identity). Historical task
  * IDs are kept in case names as regression provenance (AC#7). A shared real git
  * primary + linked-worktree fixture
- * (`test/fixtures/task-2357-statistics-fixture.ts`) seeds the fixed event
+ * (`test/fixtures/statistics-database.ts`) seeds the fixed event
  * history pinned to a rolling seven-day decision window.
  */
 import { describe, it } from 'node:test';
@@ -37,7 +38,7 @@ import type { UsageRecord, UsageRepository } from '../src/application/ports/miss
 import type { BoardLaneEventEntry } from '../src/application/ports/operation-history.js';
 import {
   createPrimaryAndWorktree, fixedClock, insertUsageRow, laneEvent, withStatisticsDatabase,
-} from './fixtures/task-2357-statistics-fixture.js';
+} from './fixtures/statistics-database.js';
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -116,7 +117,7 @@ function r2347_01_laneEvent(
 // Reproduction tests — all must be RED at parent commit ed52d6abf
 // ---------------------------------------------------------------------------
 
-describe('task-2347.01 — repository identity through lane events and board metrics', () => {
+describe("repository identity through lane events and board metrics", () => {
   describe('cross-repository contamination (SC1)', () => {
     it('metrics built for alpha exclude lane events recorded for beta', async () => {
       await r2347_01_withDb(async (laneRepo) => {
@@ -384,7 +385,7 @@ const ACTIVE = '2026-06-01T11:00:00.000Z';
 const DONE = '2026-06-02T09:00:00.000Z';
 const NOW = '2026-06-03T09:00:00.000Z';
 
-describe('TASK-2357 defect B: canonical repository identity from a worktree', () => {
+describe("defect B: canonical repository identity from a worktree", () => {
   it('resolves `px stats cohorts` to the primary checkout identity, not the worktree path', async () => {
     const checkouts = createPrimaryAndWorktree('fixture-product');
     try {
@@ -495,7 +496,7 @@ function writeProductName(rootDir: string, name: string): void {
   );
 }
 
-describe('TASK-2363 defect B: a display product name never splits repository identity', () => {
+describe("defect B: a display product name never splits repository identity", () => {
   it('writes new measurement rows under the canonical repository id, not product.name', () => {
     const checkouts = createPrimaryAndWorktree('actual-repository-name');
     try {

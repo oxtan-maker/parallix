@@ -1,0 +1,2064 @@
+{
+  "migrationBase": "8b1277e2edb74342e1f1accf779a80242bf50838",
+  "originalAssertions": 2112,
+  "originalCases": 592,
+  "missing": [],
+  "dispositions": [
+    {
+      "original": "test/task-1048-regression.test.ts",
+      "owners": [
+        "test/review-loop-resolution-fallback.test.ts"
+      ],
+      "disposition": "retained-contract",
+      "assertionCalls": 7,
+      "caseDeclarations": 1,
+      "originalSha256": "324b1d6bc74e809db3e75a1dc139c14e959c2af6c291be9863c96fd86224bbc8"
+    },
+    {
+      "original": "test/task-1135-coverage.test.ts",
+      "owners": [
+        "test/review-artifact-publication-failures.test.ts"
+      ],
+      "disposition": "retained-contract",
+      "assertionCalls": 15,
+      "caseDeclarations": 7,
+      "originalSha256": "6867c66062fd0b68c0b9fe0537388eee4130ce449a2a2a1926e5110fae6b0788"
+    },
+    {
+      "original": "test/task-1272-standalone-cycle.test.ts",
+      "owners": [
+        "test/standalone-review-cycle.test.ts"
+      ],
+      "disposition": "retained-contract",
+      "assertionCalls": 20,
+      "caseDeclarations": 5,
+      "originalSha256": "552e259c92975b462e9da74992b79c0b64ff1e0988b75504cf6fcbd61487711b"
+    },
+    {
+      "original": "test/task-1415-closed-mission-counts.test.ts",
+      "owners": [
+        "test/stats-current-week-completion.test.ts"
+      ],
+      "disposition": "retained-contract",
+      "assertionCalls": 4,
+      "caseDeclarations": 1,
+      "originalSha256": "01ba09b65e96a94df933f4e5178697992e9adaa16c6c7037cae711a4d9b907fa"
+    },
+    {
+      "original": "test/task-1416-repro.test.ts",
+      "owners": [
+        "test/agent-exit-telemetry-classification.test.ts"
+      ],
+      "disposition": "retained-contract",
+      "assertionCalls": 10,
+      "caseDeclarations": 4,
+      "originalSha256": "c3a698d0a0099346d88363fb11c700df822095900b45f167939cfa53290b2265"
+    },
+    {
+      "original": "test/task-2220-repro.test.ts",
+      "owners": [
+        "test/review-state-durability.test.ts"
+      ],
+      "disposition": "retained-contract",
+      "assertionCalls": 6,
+      "caseDeclarations": 3,
+      "originalSha256": "b35977a9082e607662d10e4c611272eda2bff5195cc5fa8c10392a71bc345316"
+    },
+    {
+      "original": "test/task-2228-distribution-verification.test.ts",
+      "owners": [
+        "test/package-audit-contract.test.ts"
+      ],
+      "disposition": "retained-contract",
+      "assertionCalls": 19,
+      "caseDeclarations": 7,
+      "originalSha256": "f58d8cafac6e1ccf25b7be81c5d93ab7b9a656f063e3ce0d5b85969eaf4deaf4"
+    },
+    {
+      "original": "test/task-2231-unit-tests-hang-repro.test.ts",
+      "owners": [
+        "test/bootstrap-launcher-isolation.test.ts"
+      ],
+      "disposition": "retained-contract",
+      "assertionCalls": 4,
+      "caseDeclarations": 1,
+      "originalSha256": "582a80dfb09b4fac8ab240368d77cf2b792a8d2fa0ed053d2ee4aad01cbe7049"
+    },
+    {
+      "original": "test/task-2234-push-to-reviewer-autobounce.test.ts",
+      "owners": [
+        "test/review-validation-rebound.test.ts"
+      ],
+      "disposition": "retained-contract",
+      "assertionCalls": 24,
+      "caseDeclarations": 8,
+      "originalSha256": "a47255d9ea8303804f2d7f81c46d1caf499b81798be12a8c1d69d7602da75e94"
+    },
+    {
+      "original": "test/task-2239-rereview-after-response.test.ts",
+      "owners": [
+        "test/review-response-relaunch.test.ts"
+      ],
+      "disposition": "retained-contract",
+      "assertionCalls": 11,
+      "caseDeclarations": 4,
+      "originalSha256": "0778a1ac147efd1b6b8ea28a190cc1e573e13ad2911fd83a45cc5342be3490c8"
+    },
+    {
+      "original": "test/task-2241-tmp-cleanup-repro.test.ts",
+      "owners": [
+        "test/agent-smoke-capture-cleanup.test.ts"
+      ],
+      "disposition": "retained-contract",
+      "assertionCalls": 16,
+      "caseDeclarations": 8,
+      "originalSha256": "ec14f06901b2510f78cf5b310c30bc38e9366713982e1717da1387d4c0076315"
+    },
+    {
+      "original": "test/task-2265-codex-mcp-worktree-repro.test.ts",
+      "owners": [
+        "test/codex-mission-config-inheritance.test.ts"
+      ],
+      "disposition": "retained-contract",
+      "assertionCalls": 14,
+      "caseDeclarations": 5,
+      "originalSha256": "07c5bd1bf2ef83abf3564f5730859b2a5f339d456c5156cf4a3ba9337478c198"
+    },
+    {
+      "original": "test/task-2273-review-gate-ownership.test.ts",
+      "owners": [
+        "test/review-gate-ownership.test.ts"
+      ],
+      "disposition": "retained-contract",
+      "assertionCalls": 9,
+      "caseDeclarations": 3,
+      "originalSha256": "a65426644123a374f4f68b0e33954830e5e77af2218ed76fc82ca588f5f9bc7e"
+    },
+    {
+      "original": "test/task-2284-catalog-round-trip.test.ts",
+      "owners": [
+        "test/backlog-catalog-round-trip.test.ts"
+      ],
+      "disposition": "retained-contract",
+      "assertionCalls": 21,
+      "caseDeclarations": 5,
+      "originalSha256": "eb0bc36bd7d51fc4682ace294446f1c9b60339312b5ec3e07bf3cf2eac8e121e"
+    },
+    {
+      "original": "test/task-2297-graphify-codex-repro.test.ts",
+      "owners": [
+        "test/codex-graphify-skill-inheritance.test.ts"
+      ],
+      "disposition": "retained-contract",
+      "assertionCalls": 20,
+      "caseDeclarations": 4,
+      "originalSha256": "96289493dc63d0e7d020531506c518ea3a6bf0d92386b0e11cdee5110c5490ba"
+    },
+    {
+      "original": "test/task-2311-console-empty-repro.test.ts",
+      "owners": [
+        "test/pi-sdk-live-output.test.ts"
+      ],
+      "disposition": "retained-contract",
+      "assertionCalls": 9,
+      "caseDeclarations": 2,
+      "originalSha256": "91bc39390f4c2c7fca6521619f6790f702efee4ba5b9c155f81683d31754a811"
+    },
+    {
+      "original": "test/task-2313-repro.test.ts",
+      "owners": [
+        "test/board-terminal-resize-lifetime.test.ts"
+      ],
+      "disposition": "retained-contract",
+      "assertionCalls": 6,
+      "caseDeclarations": 4,
+      "originalSha256": "a2cec2f9923817c18ad07b71db5961e69f402ccffa23d6b621e05645e003550c"
+    },
+    {
+      "original": "test/task-2318-temp-directory-leaks.test.ts",
+      "owners": [
+        "test/bootstrap-process-cleanup.test.ts"
+      ],
+      "disposition": "retained-contract",
+      "assertionCalls": 22,
+      "caseDeclarations": 7,
+      "originalSha256": "b552f9091f2d537889112bd07692ad19e241381871beedfc96fae289ffa9a17a"
+    },
+    {
+      "original": "test/task-2322-05-mission-sqlite-fixture.test.ts",
+      "owners": [
+        "test/mission-sqlite-use-cases.test.ts"
+      ],
+      "disposition": "retained-contract",
+      "assertionCalls": 34,
+      "caseDeclarations": 6,
+      "originalSha256": "68030738ed5b338fc6e4a22ac45f7b05602f5d73c96db52ee5949de7f03ff5a4"
+    },
+    {
+      "original": "test/task-2322-agent-block-import.test.ts",
+      "owners": [
+        "test/agent-block-legacy-import.test.ts"
+      ],
+      "disposition": "retained-contract",
+      "assertionCalls": 17,
+      "caseDeclarations": 5,
+      "originalSha256": "6508b2bf74b5fbf3ee0db23222f21044705ebff57b54c8289ba7ff840de2b7a7"
+    },
+    {
+      "original": "test/task-2322-agent-block-service.test.ts",
+      "owners": [
+        "test/agent-block-service.test.ts"
+      ],
+      "disposition": "retained-contract",
+      "assertionCalls": 7,
+      "caseDeclarations": 5,
+      "originalSha256": "134dc6803cd97ece25476541a9101671d41232ae8d8a2ad75594e292630219a9"
+    },
+    {
+      "original": "test/task-2322-persistence-adr.test.ts",
+      "owners": [
+        "test/persistence-authority-contract.test.ts"
+      ],
+      "disposition": "retained-contract",
+      "assertionCalls": 10,
+      "caseDeclarations": 3,
+      "originalSha256": "9526e083b3d591b3f93b8ba37f45a52e2886e339ad4b2e16f1e613cbabab1763"
+    },
+    {
+      "original": "test/task-2322.11-operator-state.test.ts",
+      "owners": [
+        "test/operator-state-services.test.ts"
+      ],
+      "disposition": "retained-contract",
+      "assertionCalls": 50,
+      "caseDeclarations": 22,
+      "originalSha256": "036d66df915a1897bdd923f841e4301013d54e6f779e7693315663d0311d857b"
+    },
+    {
+      "original": "test/task-2322.12-review-recovery.integration.test.ts",
+      "owners": [
+        "test/review-state-restart-recovery.integration.test.ts"
+      ],
+      "disposition": "retained-contract",
+      "assertionCalls": 29,
+      "caseDeclarations": 8,
+      "originalSha256": "32f78e311fab0b68a595b4e0ef7e6866458e2a4d419d8ad03785450cb32d4ac2"
+    },
+    {
+      "original": "test/task-2322.12-stray-persistence.test.ts",
+      "owners": [
+        "test/persistence-cutover-boundaries.test.ts"
+      ],
+      "disposition": "retained-contract",
+      "assertionCalls": 12,
+      "caseDeclarations": 10,
+      "originalSha256": "c94314f7b2dece7bddd61a37bf75cdbdd3ff1c95141e5cf2519141dcccd75dc8"
+    },
+    {
+      "original": "test/task-2336-repro.test.ts",
+      "owners": [
+        "test/agent-strip.test.ts"
+      ],
+      "disposition": "extended-owner",
+      "assertionCalls": 6,
+      "caseDeclarations": 3,
+      "originalSha256": "d042bd49670991f52e4b00db0c1edcc60e761c1a986f49df29be624c58e03968"
+    },
+    {
+      "original": "test/task-2337-repro.test.ts",
+      "owners": [
+        "test/stats-custom-agent-model.test.ts"
+      ],
+      "disposition": "retained-contract",
+      "assertionCalls": 12,
+      "caseDeclarations": 5,
+      "originalSha256": "f14c40414e20a07cb81a4e3c52c59a8170e0ea47cb6a32944b6cfca16b6829e3"
+    },
+    {
+      "original": "test/task-2339-aggregate-read-during-write.test.ts",
+      "owners": [
+        "test/mission-aggregate-write-isolation.test.ts"
+      ],
+      "disposition": "retained-contract",
+      "assertionCalls": 9,
+      "caseDeclarations": 3,
+      "originalSha256": "ba5fc4d9005f9c31c565c8849c36e646a1ea5b30dc473ad14ef4b3711dbf5479"
+    },
+    {
+      "original": "test/task-2339-writes-outlive-close.test.ts",
+      "owners": [
+        "test/mission-store-drain.test.ts"
+      ],
+      "disposition": "retained-contract",
+      "assertionCalls": 4,
+      "caseDeclarations": 2,
+      "originalSha256": "4359322adcdd8eeae2d1a1ea29bcab9dbfb5de1db3b31d430e36803eb0625794"
+    },
+    {
+      "original": "test/task-2343-board-projection-repro.cases.ts",
+      "owners": [
+        "test/board-persisted-fact-projection.cases.ts"
+      ],
+      "disposition": "retained-contract",
+      "assertionCalls": 18,
+      "caseDeclarations": 7,
+      "originalSha256": "4beb130db48accf54a93f145ffd7f29e337606845b5743fb5fea7f50c2b9fc3b"
+    },
+    {
+      "original": "test/task-2343-lifecycle-persistence.test.ts",
+      "owners": [
+        "test/operation-event-recording.test.ts",
+        "test/gate-result-recording.test.ts",
+        "test/review-state-pr-mapping.test.ts"
+      ],
+      "disposition": "split",
+      "assertionCalls": 36,
+      "caseDeclarations": 13,
+      "originalSha256": "eec8a6bd3ff9b1eee7e1382aaa2dc7347490569992b5a027f39a1dddf82bbfc5"
+    },
+    {
+      "original": "test/task-2345-repro.test.ts",
+      "owners": [
+        "test/agent-block-authority.test.ts"
+      ],
+      "disposition": "retained-contract",
+      "assertionCalls": 5,
+      "caseDeclarations": 3,
+      "originalSha256": "e81621f1ff5b6da46e85ed02b31ba54e14eb9d1c066fdbc17eee60feb8f4ec95"
+    },
+    {
+      "original": "test/task-2357-certification.test.ts",
+      "owners": [
+        "test/board-metrics-persistence.test.ts"
+      ],
+      "disposition": "retained-contract",
+      "assertionCalls": 12,
+      "caseDeclarations": 1,
+      "originalSha256": "85f9e517ef017d45da0cd83e0a4eb76eb9a996fbd45342af725333d15bc2bb3f"
+    },
+    {
+      "original": "test/task-2357.c-unknown-review-fix-rounds.test.ts",
+      "owners": [
+        "test/metrics-review-fix-observations.test.ts"
+      ],
+      "disposition": "retained-contract",
+      "assertionCalls": 11,
+      "caseDeclarations": 2,
+      "originalSha256": "efe514b9de4346f0b0fa5723933fb1ec6be97d42afaade2daa5c2b0d59cb78c3"
+    },
+    {
+      "original": "test/task-2363-flow-presentation.test.ts",
+      "owners": [
+        "test/flow-decision-window-presentation.test.ts"
+      ],
+      "disposition": "retained-contract",
+      "assertionCalls": 15,
+      "caseDeclarations": 7,
+      "originalSha256": "0643bd5690189c75b72a90a3a30700a705b9a11f073bacdd42b09f39a996d5be"
+    },
+    {
+      "original": "test/task-2363-production-certification.test.ts",
+      "owners": [
+        "test/flow-persisted-decision-window.test.ts"
+      ],
+      "disposition": "retained-contract",
+      "assertionCalls": 17,
+      "caseDeclarations": 1,
+      "originalSha256": "f7e34bf57701be93f8ab81582db9bec4b7ae75f21b5deffc8d5e7c610df8b4ff"
+    },
+    {
+      "original": "test/task-2363-review-fix-rounds.test.ts",
+      "owners": [
+        "test/measurement-review-fix-nullability.test.ts"
+      ],
+      "disposition": "retained-contract",
+      "assertionCalls": 8,
+      "caseDeclarations": 3,
+      "originalSha256": "2c70639b943e9f474c66103c36829ddb71df73ee77a2654dd8da21e4c9c65949"
+    },
+    {
+      "original": "test/task-2365-tmp-reclamation.test.ts",
+      "owners": [
+        "test/test-runner-root-reclamation.test.ts"
+      ],
+      "disposition": "retained-contract",
+      "assertionCalls": 15,
+      "caseDeclarations": 5,
+      "originalSha256": "ee309f4b1c8d734dc5a5f186ca51414196e850058d6da1c86f6bc004d3a481f1"
+    },
+    {
+      "original": "test/task-2367-certification.test.ts",
+      "owners": [
+        "test/lifecycle-completion-persistence.test.ts"
+      ],
+      "disposition": "retained-contract",
+      "assertionCalls": 15,
+      "caseDeclarations": 1,
+      "originalSha256": "14bf20cfea91370888cff15f6f7b0a3f0141dcfe5959d0b5fd101698c94d8132"
+    },
+    {
+      "original": "test/task-2367-regressions.test.ts",
+      "owners": [
+        "test/lifecycle-telemetry-completion-authority.test.ts"
+      ],
+      "disposition": "retained-contract",
+      "assertionCalls": 3,
+      "caseDeclarations": 1,
+      "originalSha256": "a33f2039c27c8f6d6231b0de19ceb3b5fc25b35feaca190ee52b0801c6367b11"
+    },
+    {
+      "original": "test/task-2367-repair.test.ts",
+      "owners": [
+        "test/lifecycle-historical-completion-repair.test.ts"
+      ],
+      "disposition": "retained-contract",
+      "assertionCalls": 5,
+      "caseDeclarations": 1,
+      "originalSha256": "d773a79e0214f68f78c1e07157eb66f4277951b74b83b8b6c9f4c719897e245a"
+    },
+    {
+      "original": "test/task-2367-telemetry-schema.test.ts",
+      "owners": [
+        "test/telemetry-completion-schema.test.ts"
+      ],
+      "disposition": "retained-contract",
+      "assertionCalls": 3,
+      "caseDeclarations": 2,
+      "originalSha256": "43a310a485b45fed763dd8bbcc7e214e7a65bd2db05d1e4ab65db25680b348f1"
+    },
+    {
+      "original": "test/task-2368-agent-running-review-detection.test.ts",
+      "owners": [
+        "test/review-session-liveness.test.ts"
+      ],
+      "disposition": "retained-contract",
+      "assertionCalls": 8,
+      "caseDeclarations": 4,
+      "originalSha256": "d732af4f46993e0bcf2ae38e6fbb9edcf770a15dea0acba73532304d00356744"
+    },
+    {
+      "original": "test/task-2369-regressions.test.ts",
+      "owners": [
+        "test/integration-landed-completion.test.ts"
+      ],
+      "disposition": "retained-contract",
+      "assertionCalls": 48,
+      "caseDeclarations": 14,
+      "originalSha256": "f4593c927969a4388698ec1106e96444099050d9dd84f06c6e1e0119e1c1235d"
+    },
+    {
+      "original": "test/task-2370-repro.test.ts",
+      "owners": [
+        "test/board-live-work-refresh.test.ts"
+      ],
+      "disposition": "retained-contract",
+      "assertionCalls": 11,
+      "caseDeclarations": 3,
+      "originalSha256": "ed63787fd078d46c682ba9fa597e80879d35b5b77eff96146ff52a1da4be2366"
+    },
+    {
+      "original": "test/task-2373-needs-you.test.ts",
+      "owners": [
+        "test/board-attention-escalation.test.ts"
+      ],
+      "disposition": "retained-contract",
+      "assertionCalls": 16,
+      "caseDeclarations": 5,
+      "originalSha256": "5e5d2adffbbc7c970d73bc42970447eb513ddb7cd3a953b1ff701c9c4575a191"
+    },
+    {
+      "original": "test/task-2373-refresh-performance.cases.ts",
+      "owners": [
+        "test/board-refresh-scheduling.cases.ts"
+      ],
+      "disposition": "retained-contract",
+      "assertionCalls": 7,
+      "caseDeclarations": 3,
+      "originalSha256": "dc89eaf0c78184c9169c939463270413215cd8c4666f56b7b272719b94ed0ac3"
+    },
+    {
+      "original": "test/task-2377-repro.test.ts",
+      "owners": [
+        "test/agent-selection-excluded-fallback.test.ts"
+      ],
+      "disposition": "retained-contract",
+      "assertionCalls": 5,
+      "caseDeclarations": 3,
+      "originalSha256": "c2b0b50c0275b655faf51ed08cff2cc03b027360a8676d4b3415e58535e90014"
+    },
+    {
+      "original": "test/task-2377-sigint-pty-repro.cases.ts",
+      "owners": [
+        "test/tui-interrupt-terminal-restore.cases.ts"
+      ],
+      "disposition": "retained-contract",
+      "assertionCalls": 3,
+      "caseDeclarations": 1,
+      "originalSha256": "5294eaf519167d32d28afb38fb21274583435109842fd92a7d713104e0ca2b37"
+    },
+    {
+      "original": "test/task-2377.04-drop-retry-counters-migration.test.ts",
+      "owners": [
+        "test/review-retry-counter-migration.test.ts"
+      ],
+      "disposition": "retained-contract",
+      "assertionCalls": 20,
+      "caseDeclarations": 4,
+      "originalSha256": "d0b4a6c90ac13b2566b194b71af31377419499663b2ba753a96b5f23c7d9aab7"
+    },
+    {
+      "original": "test/task-2379-approval-boundary-repro.test.ts",
+      "owners": [
+        "test/lifecycle-approval-dwell.test.ts"
+      ],
+      "disposition": "retained-contract",
+      "assertionCalls": 12,
+      "caseDeclarations": 1,
+      "originalSha256": "69cb3f29fa4bc1de350d4f5c5c0066c36c765592e42709a5d88bab5493726407"
+    },
+    {
+      "original": "test/task-2388-repro.test.ts",
+      "owners": [
+        "test/board-session-repository-scope.test.ts"
+      ],
+      "disposition": "retained-contract",
+      "assertionCalls": 5,
+      "caseDeclarations": 5,
+      "originalSha256": "45d503d6bcf2b16ef73e954526e4a0acb65ed0155b759256b1f1e736df061770"
+    },
+    {
+      "original": "test/task-2408-board-hallucinated-content-repro.cases.ts",
+      "owners": [
+        "test/board-attention-rail-presentation.cases.ts"
+      ],
+      "disposition": "retained-contract",
+      "assertionCalls": 8,
+      "caseDeclarations": 2,
+      "originalSha256": "2f3627c329153c45d825d66d90324b1e53c754c5f383f2066b3b3452ccc6ddeb"
+    },
+    {
+      "original": "test/task-2413-proof-reuse.test.ts",
+      "owners": [
+        "test/verification-proof-reuse.test.ts"
+      ],
+      "disposition": "retained-contract",
+      "assertionCalls": 40,
+      "caseDeclarations": 9,
+      "originalSha256": "c6e949b78eeeecfa685992be958bde9ebbd7c4c15fb8ac2daeda7122f7d49193"
+    },
+    {
+      "original": "test/task-2420-integrate-recovery-assigned-reviewer.test.ts",
+      "owners": [
+        "test/integration-provider-approval-recovery.test.ts"
+      ],
+      "disposition": "retained-contract",
+      "assertionCalls": 28,
+      "caseDeclarations": 9,
+      "originalSha256": "3d96d24b239a8617c9b83cd873ea52e2c29d4282683aa7110f60544bc870dd7a"
+    },
+    {
+      "original": "test/task-2423-repro.test.ts",
+      "owners": [
+        "test/default-test-suite.test.ts"
+      ],
+      "disposition": "extended-owner",
+      "assertionCalls": 8,
+      "caseDeclarations": 2,
+      "originalSha256": "4c4ceafa731123678b86e0828525716124b6073af17b546204e3a97a0b991e19"
+    },
+    {
+      "original": "test/task-2424-repro-body.ts",
+      "owners": [
+        "test/board-shell-subscription-lifetime-body.ts"
+      ],
+      "disposition": "retained-contract",
+      "assertionCalls": 5,
+      "caseDeclarations": 0,
+      "originalSha256": "389f1098bf5061e0f8eb795cfee13e5081d31567b03ea36d54c9ba1d53bbf9a0"
+    },
+    {
+      "original": "test/task-2424-repro.test.ts",
+      "owners": [
+        "test/board-shell-subscription-lifetime.test.ts"
+      ],
+      "disposition": "retained-contract",
+      "assertionCalls": 1,
+      "caseDeclarations": 1,
+      "originalSha256": "9e06b1ca55a7d1e554b7b8a19c589ced6eb7dda70ecc1dfc90ef1c2d19e9c2c2"
+    },
+    {
+      "original": "test/task-2425-repro.test.ts",
+      "owners": [
+        "test/board-command-stale-status.test.ts"
+      ],
+      "disposition": "retained-contract",
+      "assertionCalls": 4,
+      "caseDeclarations": 2,
+      "originalSha256": "a1566b09dcb788321fc9a730f6479ff719d3a622c55f26c9dfe564ef8badcafa"
+    },
+    {
+      "original": "test/task-2426-repro.test.ts",
+      "owners": [
+        "test/board-draft-composition.test.ts"
+      ],
+      "disposition": "retained-contract",
+      "assertionCalls": 27,
+      "caseDeclarations": 6,
+      "originalSha256": "b607a10fa78b7db280dd453b577560cb8ece70c53654dc589697a3c97b169951"
+    },
+    {
+      "original": "test/task-2427-board-draft.cases.ts",
+      "owners": [
+        "test/board-draft-dispatch.cases.ts"
+      ],
+      "disposition": "retained-contract",
+      "assertionCalls": 39,
+      "caseDeclarations": 11,
+      "originalSha256": "3bc16ba332155f729c17512ff8a2585223c6a2f4803ec40acf613531fcf162c8"
+    },
+    {
+      "original": "test/task-2428-review-board-safety.cases.ts",
+      "owners": [
+        "test/board-review-capability-safety.cases.ts"
+      ],
+      "disposition": "retained-contract",
+      "assertionCalls": 9,
+      "caseDeclarations": 3,
+      "originalSha256": "62526efd450b31fe90a72a98b607f61ff187e71bbd60f6b362f75172ca514861"
+    },
+    {
+      "original": "test/task-2429-board-integrate.cases.ts",
+      "owners": [
+        "test/board-integration-dispatch.cases.ts"
+      ],
+      "disposition": "retained-contract",
+      "assertionCalls": 17,
+      "caseDeclarations": 5,
+      "originalSha256": "0d76a28350039516c003c5657320353a684fa921250e1caa851ba8c2fc6ec583"
+    },
+    {
+      "original": "test/task-2433-web-mutation.integration.cases.ts",
+      "owners": [
+        "test/web-mutation-contract.integration.cases.ts"
+      ],
+      "disposition": "retained-contract",
+      "assertionCalls": 79,
+      "caseDeclarations": 12,
+      "originalSha256": "b0463b8a336ae65c0baa8b752f42c3150647ac7b174727926260d0f55ad0cfcf"
+    },
+    {
+      "original": "test/task-2436-board-handoff-resume.cases.ts",
+      "owners": [
+        "test/board-handoff-resume.cases.ts"
+      ],
+      "disposition": "retained-contract",
+      "assertionCalls": 21,
+      "caseDeclarations": 3,
+      "originalSha256": "f001384396d6fac26747dab3cc1d2d0df133051e9c9e2ada7befdae420382592"
+    },
+    {
+      "original": "test/task-2438-worktree-board-repro.test.ts",
+      "owners": [
+        "test/board-worktree-mission-scope.test.ts"
+      ],
+      "disposition": "retained-contract",
+      "assertionCalls": 11,
+      "caseDeclarations": 2,
+      "originalSha256": "3ae8cbac0632fa4286098e50a316395a2af25e102b857024b38adb2536191cb8"
+    },
+    {
+      "original": "test/task-2440-repro.test.ts",
+      "owners": [
+        "test/board-task-update-authority.test.ts"
+      ],
+      "disposition": "retained-contract",
+      "assertionCalls": 4,
+      "caseDeclarations": 1,
+      "originalSha256": "b2b14595df708d205185bceecd4f41747c522597e9e689b1f20c041f5a239d42"
+    },
+    {
+      "original": "test/task-2442-repro.cases.ts",
+      "owners": [
+        "test/board-countdown-refresh.cases.ts"
+      ],
+      "disposition": "retained-contract",
+      "assertionCalls": 34,
+      "caseDeclarations": 17,
+      "originalSha256": "3f26c30c48c8cd7fa77e1ff84a09eed5ea3d6b647553bfe48a7fa9a6a573a9d8"
+    },
+    {
+      "original": "test/task-2443-repro.test.ts",
+      "owners": [
+        "test/agent-sandbox-state-bindings.test.ts"
+      ],
+      "disposition": "retained-contract",
+      "assertionCalls": 10,
+      "caseDeclarations": 6,
+      "originalSha256": "b351c4827914113ccbb1e240dac43242319db664d4e4b2fd69d7f447fba2aefa"
+    },
+    {
+      "original": "test/task-2446-repro.test.ts",
+      "owners": [
+        "test/mission-recovery-landed-guard.test.ts"
+      ],
+      "disposition": "retained-contract",
+      "assertionCalls": 20,
+      "caseDeclarations": 7,
+      "originalSha256": "bf9cebe7d343cd90f4b7dfe297b3c89aa5288395deafe0cae2f9280f23df5036"
+    },
+    {
+      "original": "test/task-2447-repro.cases.ts",
+      "owners": [
+        "test/board-review-wire-facts.cases.ts"
+      ],
+      "disposition": "retained-contract",
+      "assertionCalls": 4,
+      "caseDeclarations": 1,
+      "originalSha256": "36cc5ce15064abcee990e532fe4829e67ba7e8239438206219b67d1133118079"
+    },
+    {
+      "original": "test/task-2452-repro.cases.ts",
+      "owners": [
+        "test/board-wip-presentation.cases.ts"
+      ],
+      "disposition": "retained-contract",
+      "assertionCalls": 3,
+      "caseDeclarations": 1,
+      "originalSha256": "ee33d5619ad39b86d0fa3a30aabe09116b867085d8ff1b94560671556c461c31"
+    },
+    {
+      "original": "test/task-2453-repro.cases.ts",
+      "owners": [
+        "test/board-live-work-presentation.cases.ts"
+      ],
+      "disposition": "retained-contract",
+      "assertionCalls": 10,
+      "caseDeclarations": 3,
+      "originalSha256": "b4e92a67c9fd361bf2e16d71e55b6b9286a48941605b0d60dda7339ee6b03347"
+    },
+    {
+      "original": "test/task-2454-web-board-draft-repro.cases.ts",
+      "owners": [
+        "test/board-backlog-draft-launch-context.cases.ts"
+      ],
+      "disposition": "retained-contract",
+      "assertionCalls": 14,
+      "caseDeclarations": 5,
+      "originalSha256": "481da5fa182d4d0b9b8ba39baa30f818bcdfee2890430b86f6be9ac46aa81a82"
+    },
+    {
+      "original": "test/task-2456-handoff-retry-duplicate-lane-event.test.ts",
+      "owners": [
+        "test/handoff-transition-idempotency.test.ts"
+      ],
+      "disposition": "retained-contract",
+      "assertionCalls": 14,
+      "caseDeclarations": 2,
+      "originalSha256": "48e6a2edea7a7f9f0b5eea8a8d527f4b8b08e3da6bb3c010f87b07de1299a5f2"
+    },
+    {
+      "original": "test/task-2459-repro.test.ts",
+      "owners": [
+        "test/stats-flow-window-origin.test.ts"
+      ],
+      "disposition": "retained-contract",
+      "assertionCalls": 7,
+      "caseDeclarations": 1,
+      "originalSha256": "a45a5ab2a53d701fd006b41f248c0a337dd2968c00fa9a65a3b66b58b588cc81"
+    },
+    {
+      "original": "test/task-2461-claude-stream-render.test.ts",
+      "owners": [
+        "test/claude-stream-normalization.test.ts"
+      ],
+      "disposition": "retained-contract",
+      "assertionCalls": 122,
+      "caseDeclarations": 26,
+      "originalSha256": "8867a729d8a7489981e77e8b1801fb34c245147f2c8f9c821e786c1cd02a2d21"
+    },
+    {
+      "original": "test/task-2478-correction-presentation.test.ts",
+      "owners": [
+        "test/review-correction-round-presentation.test.ts"
+      ],
+      "disposition": "retained-contract",
+      "assertionCalls": 13,
+      "caseDeclarations": 4,
+      "originalSha256": "92ca8e172c09ad1b600a0e5a26a203bd6b977bf1891c0697119e17147f94783a"
+    },
+    {
+      "original": "test/task-2492-integrate-gate-bounce.test.ts",
+      "owners": [
+        "test/integration-gate-repair-routing.test.ts"
+      ],
+      "disposition": "retained-contract",
+      "assertionCalls": 23,
+      "caseDeclarations": 4,
+      "originalSha256": "a5a0337f84852a02f4e18d84d4e03c185b8334c5214e3e830ca7fffd82130673"
+    },
+    {
+      "original": "test/task-2498-review-null-agent-board.test.ts",
+      "owners": [
+        "test/board-live-agent-attribution.test.ts"
+      ],
+      "disposition": "retained-contract",
+      "assertionCalls": 7,
+      "caseDeclarations": 5,
+      "originalSha256": "b5af9472cefbf02ec47d1261108bd17321774ee93a8de37f7117f433b95bdb8b"
+    },
+    {
+      "original": "test/task-2502-codeql-clean-cache.test.ts",
+      "owners": [
+        "test/codeql-suite-options.test.ts"
+      ],
+      "disposition": "extended-owner",
+      "assertionCalls": 3,
+      "caseDeclarations": 1,
+      "originalSha256": "422078fcdafaf62cea9256ae4dd015a5a401d4e171b4cb2b6a1a753309bcca9d"
+    },
+    {
+      "original": "test/task-2502-codeql-regression.test.ts",
+      "owners": [
+        "test/launcher-command-input-safety.test.ts",
+        "test/review-events.test.ts"
+      ],
+      "disposition": "split",
+      "assertionCalls": 2,
+      "caseDeclarations": 2,
+      "originalSha256": "16d2c0fd60083f14eb0c56fa0e1a5f04c721e3fca7451c68d7219fd38620c2f8"
+    },
+    {
+      "original": "test/task-2502-codeql-suite-flag.test.ts",
+      "owners": [
+        "test/codeql-suite-options.test.ts"
+      ],
+      "disposition": "retained-contract",
+      "assertionCalls": 7,
+      "caseDeclarations": 3,
+      "originalSha256": "9dca4ee9af4dd01817e0b2b0413d02c081190d8a3bca6842f3b4a7dc33559c4c"
+    },
+    {
+      "original": "test/task-2504-repro.test.ts",
+      "owners": [
+        "test/integration-repair-finalized-tree.test.ts"
+      ],
+      "disposition": "retained-contract",
+      "assertionCalls": 7,
+      "caseDeclarations": 2,
+      "originalSha256": "4e4e60b1eed484f8ad80a09f76d9b9723fe018b1339cfd97d604e65ab90c8dd0"
+    },
+    {
+      "original": "test/task-2514-human-approve-after-active-repair.test.ts",
+      "owners": [
+        "test/review-active-repair-approval.test.ts"
+      ],
+      "disposition": "retained-contract",
+      "assertionCalls": 33,
+      "caseDeclarations": 7,
+      "originalSha256": "ddd4ec54e88e73c3aaa0dbeaec42d8c4a5d54522b46226093d9f60877c7409f1"
+    },
+    {
+      "original": "test/task-2518-board-action-vocabulary-repro.cases.ts",
+      "owners": [
+        "test/board-action-vocabulary.cases.ts"
+      ],
+      "disposition": "retained-contract",
+      "assertionCalls": 19,
+      "caseDeclarations": 3,
+      "originalSha256": "2235bf4583efca5059a1af17adb3e923e22606cb29b3c3423e9224a634921a37"
+    },
+    {
+      "original": "test/task-2521.04-imported-mission-board-path.cases.ts",
+      "owners": [
+        "test/board-imported-mission-lifecycle.cases.ts"
+      ],
+      "disposition": "retained-contract",
+      "assertionCalls": 15,
+      "caseDeclarations": 5,
+      "originalSha256": "626dc046c2837722c7a7e57e6be566922ec620067c28e96d9856845f98b9ab46"
+    },
+    {
+      "original": "test/task-2525.03-sonar-enforcement.test.ts",
+      "owners": [
+        "test/hosted-quality-gate-contract.test.ts"
+      ],
+      "disposition": "retained-contract",
+      "assertionCalls": 39,
+      "caseDeclarations": 7,
+      "originalSha256": "d5d506abb8596e477e8afd6de97217867cab851403bc4d2a2b9331dfd5cd4e21"
+    },
+    {
+      "original": "test/task-2526-web-summary-repro.cases.ts",
+      "owners": [
+        "test/web-mission-summary.cases.ts"
+      ],
+      "disposition": "retained-contract",
+      "assertionCalls": 4,
+      "caseDeclarations": 2,
+      "originalSha256": "6a8c10bdcc4c946e52b81b11fab3e3a721645db7ae8008078618e37e0d27f471"
+    },
+    {
+      "original": "test/task-2528-repro.test.ts",
+      "owners": [
+        "test/integration-repair-approval-invalidation.test.ts"
+      ],
+      "disposition": "retained-contract",
+      "assertionCalls": 25,
+      "caseDeclarations": 6,
+      "originalSha256": "e8a621839ba94905df55896ff53924b655c8c9a12ed1788b057633b3c6802151"
+    },
+    {
+      "original": "test/task-2530-backup-retention-repro.test.ts",
+      "owners": [
+        "test/sqlite-backup-retention.test.ts"
+      ],
+      "disposition": "retained-contract",
+      "assertionCalls": 4,
+      "caseDeclarations": 2,
+      "originalSha256": "b2c57843fea4047822974846beac45153433fca660b67099f716ceab8aadb238"
+    },
+    {
+      "original": "test/task-2534-backlog-repo-state.test.ts",
+      "owners": [
+        "test/backlog-completed-task-consistency.test.ts"
+      ],
+      "disposition": "retained-contract",
+      "assertionCalls": 1,
+      "caseDeclarations": 1,
+      "originalSha256": "4542f766839612d3edb34b5be5e7becf167d0962c77914be956189c6b25d91d3"
+    },
+    {
+      "original": "test/task-2536-ambiguous-launch-no-global-block.test.ts",
+      "owners": [
+        "test/agent-ambiguous-launch-blocking.test.ts"
+      ],
+      "disposition": "retained-contract",
+      "assertionCalls": 3,
+      "caseDeclarations": 1,
+      "originalSha256": "4d01bef34964f7e271d8c8aaa1db36a85cb8a7fbcf88ab184e6aba9b88c5f628"
+    },
+    {
+      "original": "test/task-2542-repro.test.ts",
+      "owners": [
+        "test/default-test-suite.test.ts"
+      ],
+      "disposition": "extended-owner",
+      "assertionCalls": 6,
+      "caseDeclarations": 4,
+      "originalSha256": "9b7cb9eb52e94d2146624fc64f7095fcbafc32cecc6721369172b42244928951"
+    },
+    {
+      "original": "test/task-2547-repro.test.ts",
+      "owners": [
+        "test/coverage-tier-selection.test.ts"
+      ],
+      "disposition": "retained-contract",
+      "assertionCalls": 5,
+      "caseDeclarations": 1,
+      "originalSha256": "6e14468b035dc04b1fbd0f5a7cf4cd552c7270e6a8d9b1754d10c17cd88035bf"
+    },
+    {
+      "original": "test/task-2548-lcov-summary.test.ts",
+      "owners": [
+        "test/lcov-summary-contract.test.ts"
+      ],
+      "disposition": "retained-contract",
+      "assertionCalls": 10,
+      "caseDeclarations": 5,
+      "originalSha256": "be00706b0005a3309c75d60f2dd30cc64225b6729f6247139d4c70c65da7d2c9"
+    },
+    {
+      "original": "test/task-2551-sonar-branch-cleanup.test.ts",
+      "owners": [
+        "test/sonar-branch-cleanup.test.ts"
+      ],
+      "disposition": "retained-contract",
+      "assertionCalls": 20,
+      "caseDeclarations": 7,
+      "originalSha256": "7f17511a1335e18b6499dc1233de9487e59f70cbb26c865d041842b0e530f232"
+    },
+    {
+      "original": "test/task-2554-guard.test.ts",
+      "owners": [
+        "test/operator-database-pollution-guard.test.ts"
+      ],
+      "disposition": "retained-contract",
+      "assertionCalls": 10,
+      "caseDeclarations": 2,
+      "originalSha256": "1e4cb4e63d01df32542aac7b09ff04913bd30e247660dcb497d250b3af281f0d"
+    },
+    {
+      "original": "test/task-2554-repro.test.ts",
+      "owners": [
+        "test/storage-bootstrap-isolation.test.ts"
+      ],
+      "disposition": "retained-contract",
+      "assertionCalls": 9,
+      "caseDeclarations": 1,
+      "originalSha256": "781fc3fc5a0796a4852ad5694ad9eb427616f74397ca5e9d92ded90dc4be3623"
+    },
+    {
+      "original": "test/task-2555-rebase-stale-approval.test.ts",
+      "owners": [
+        "test/rebase-approval-coverage.test.ts"
+      ],
+      "disposition": "retained-contract",
+      "assertionCalls": 28,
+      "caseDeclarations": 3,
+      "originalSha256": "adc6471a8650a272153aa0eab5ec993251259fccdc31babfddf579f8ec8f7ef3"
+    },
+    {
+      "original": "test/task-2557-sandbox-px-write.test.ts",
+      "owners": [
+        "test/codex-sandbox-mission-state-write.test.ts"
+      ],
+      "disposition": "retained-contract",
+      "assertionCalls": 6,
+      "caseDeclarations": 1,
+      "originalSha256": "d1ad98148ac7a74696bebe4a9c6816466f77cf81278d8216015667e6d0b13a81"
+    },
+    {
+      "original": "test/task-2560-file-free-typed-missions-repro.test.ts",
+      "owners": [
+        "test/mission-directory-free-workflow.test.ts"
+      ],
+      "disposition": "retained-contract",
+      "assertionCalls": 16,
+      "caseDeclarations": 7,
+      "originalSha256": "02c4cbbf56b52a768a2c10022ee6c8cb0aac03bd37b787c982f5a293f88e8c05"
+    },
+    {
+      "original": "test/task-2566-sonar-boundary-repro.test.ts",
+      "owners": [
+        "test/sonar-short-branch-confirmation.test.ts"
+      ],
+      "disposition": "retained-contract",
+      "assertionCalls": 5,
+      "caseDeclarations": 3,
+      "originalSha256": "1fefca4c1f1d7006fa1ef90f1b1f8a527580df216d34613db07febabccd00bdf"
+    },
+    {
+      "original": "test/task-2569-backup-retention-repro.test.ts",
+      "owners": [
+        "test/sqlite-backup-retention.test.ts"
+      ],
+      "disposition": "extended-owner",
+      "assertionCalls": 4,
+      "caseDeclarations": 1,
+      "originalSha256": "0e68e789e3eabe4366d083b162622bb60c78f78c31e24ad3ce29140746bd374b"
+    },
+    {
+      "original": "test/task-2570-repro.test.ts",
+      "owners": [
+        "test/codex-approval-policy-config.test.ts"
+      ],
+      "disposition": "retained-contract",
+      "assertionCalls": 14,
+      "caseDeclarations": 1,
+      "originalSha256": "9a979e2c05273aebc4e7b32be76e8437ab17f74fec96ca57cbd12e04b84ca3d0"
+    },
+    {
+      "original": "test/task-2575-repair-capable-rebound-prompt.test.ts",
+      "owners": [
+        "test/rebound-repair-authority-prompts.test.ts"
+      ],
+      "disposition": "retained-contract",
+      "assertionCalls": 20,
+      "caseDeclarations": 5,
+      "originalSha256": "3ca1586e5d59ecbc77b32fd410d4fdbff709b80cf3988e6f4a0e342f3e123794"
+    },
+    {
+      "original": "test/task-2576-agent-activity-repro.test.ts",
+      "owners": [
+        "test/board-integration-agent-activity.test.ts"
+      ],
+      "disposition": "retained-contract",
+      "assertionCalls": 7,
+      "caseDeclarations": 1,
+      "originalSha256": "f32bddceb6443d3b21cddbb2637a6958c0568de414a5bb00363d1b6160a98a0e"
+    },
+    {
+      "original": "test/task-2577-tmp-fixture-leaks-repro.test.ts",
+      "owners": [
+        "test/test-fixture-process-cleanup.test.ts"
+      ],
+      "disposition": "retained-contract",
+      "assertionCalls": 8,
+      "caseDeclarations": 4,
+      "originalSha256": "8467bcbab4802088f0c9c7ed7183e45036bf3fb7d5cd205362157ef85e4a9f02"
+    },
+    {
+      "original": "test/task-2578-pre-integration-gate-tui-repro.test.ts",
+      "owners": [
+        "test/integration-gate-progress-presentation.test.ts"
+      ],
+      "disposition": "retained-contract",
+      "assertionCalls": 11,
+      "caseDeclarations": 2,
+      "originalSha256": "3d477cff12d8b8e69b112ffc785af6ed10270a126cd07f63809a33188e776cb9"
+    },
+    {
+      "original": "test/task-2582-lifecycle-ordering.test.ts",
+      "owners": [
+        "test/mission-activation-launch-order.test.ts"
+      ],
+      "disposition": "retained-contract",
+      "assertionCalls": 15,
+      "caseDeclarations": 3,
+      "originalSha256": "c9d18464f7bbecaf8637375196fec16163b7e2aac3deea9bbecff0e096968d32"
+    },
+    {
+      "original": "test/task-2582-repro.test.ts",
+      "owners": [
+        "test/workflow-repair-lane-boundaries.test.ts"
+      ],
+      "disposition": "retained-contract",
+      "assertionCalls": 106,
+      "caseDeclarations": 16,
+      "originalSha256": "636ffa8f194210587ffd15461c7dc97262b6edbacffb36fb4abffc0c318aa327"
+    },
+    {
+      "original": "test/task-2585-github-publication-proof.test.ts",
+      "owners": [
+        "test/github-publication-proof.test.ts"
+      ],
+      "disposition": "retained-contract",
+      "assertionCalls": 14,
+      "caseDeclarations": 8,
+      "originalSha256": "4c831717b1c7c1a220ce355bf9511f0d16cf9a0282bc157a16701aeaa7d67b09"
+    },
+    {
+      "original": "test/task-2585-workflow-proof-reuse.test.ts",
+      "owners": [
+        "test/github-release-proof-reuse.test.ts"
+      ],
+      "disposition": "retained-contract",
+      "assertionCalls": 31,
+      "caseDeclarations": 3,
+      "originalSha256": "399eda76811ef4db1e0726b65da886a8c027fa177e6110212a1bd7ea8178d719"
+    },
+    {
+      "original": "test/task-2586-coverage-reporter-repro.test.ts",
+      "owners": [
+        "test/default-test-suite.test.ts"
+      ],
+      "disposition": "extended-owner",
+      "assertionCalls": 3,
+      "caseDeclarations": 1,
+      "originalSha256": "3ab5def22ca2e335ad5b1d39d78e1b3ca13ed2b5256e3cfe64e45927a64898e4"
+    },
+    {
+      "original": "test/task-2587-repro.test.ts",
+      "owners": [
+        "test/integration-human-provider-approval.test.ts"
+      ],
+      "disposition": "retained-contract",
+      "assertionCalls": 13,
+      "caseDeclarations": 5,
+      "originalSha256": "f4daae8069f7af0832c6b7f0fb3d50e1a889354681eeae2edf07297f248dea8a"
+    },
+    {
+      "original": "test/task-2590-file-timing-profile.test.ts",
+      "owners": [
+        "test/test-file-timing-profile.test.ts"
+      ],
+      "disposition": "retained-contract",
+      "assertionCalls": 24,
+      "caseDeclarations": 5,
+      "originalSha256": "e14efa7f87b83a6d15f5ef0ecd42926765ec28966f704f3bbd55192ddd6abce3"
+    },
+    {
+      "original": "test/task-2598-claude-credential-cell.test.ts",
+      "owners": [
+        "test/claude-credential-refresh-isolation.test.ts"
+      ],
+      "disposition": "retained-contract",
+      "assertionCalls": 35,
+      "caseDeclarations": 6,
+      "originalSha256": "a60212359a665cabbb539ab51c573216b552cfd7e9d618b80e110c070ac7244b"
+    },
+    {
+      "original": "test/task-2598-repro.test.ts",
+      "owners": [
+        "test/claude-sandbox-credential-persistence.test.ts"
+      ],
+      "disposition": "retained-contract",
+      "assertionCalls": 4,
+      "caseDeclarations": 1,
+      "originalSha256": "ea2e9587b80c5f52602afd3fcada48254b998f6a4c0147a09f95c10e22bd1d53"
+    },
+    {
+      "original": "test/task-2599-repro.test.ts",
+      "owners": [
+        "test/cli-command-exit-and-output.test.ts"
+      ],
+      "disposition": "retained-contract",
+      "assertionCalls": 13,
+      "caseDeclarations": 4,
+      "originalSha256": "1329a4eacc561e73fa4eb60ca9fa9f1daa5f4fbed452b9d538211262e2bea538"
+    },
+    {
+      "original": "test/task-2601-repro.test.ts",
+      "owners": [
+        "test/mission-classification-authority.test.ts",
+        "test/cli-command-exit-and-output.test.ts"
+      ],
+      "disposition": "split",
+      "assertionCalls": 47,
+      "caseDeclarations": 10,
+      "originalSha256": "2d7ebac8a247469e0b0d3e9246a22f7089da6df24ff3cbfaf67eb0d099d55416"
+    },
+    {
+      "original": "test/task-2609-classification-set.test.ts",
+      "owners": [
+        "test/mission-classification-update.test.ts"
+      ],
+      "disposition": "retained-contract",
+      "assertionCalls": 9,
+      "caseDeclarations": 3,
+      "originalSha256": "71c93feec0b1373ced06a02c937d2be3ca8668619f5657f6e85d73c8378493de"
+    },
+    {
+      "original": "test/task-2612-folded-title.test.ts",
+      "owners": [
+        "test/draft-frontmatter-title.test.ts"
+      ],
+      "disposition": "retained-contract",
+      "assertionCalls": 2,
+      "caseDeclarations": 2,
+      "originalSha256": "fd639525da4923c1c604f752ed5058b51c1be183990a7cd40fed312f807e224b"
+    },
+    {
+      "original": "test/task-2613-repro.test.ts",
+      "owners": [
+        "test/integration-backlog-closeout.test.ts"
+      ],
+      "disposition": "retained-contract",
+      "assertionCalls": 12,
+      "caseDeclarations": 3,
+      "originalSha256": "52af457b424680f1e8824eff0061e8caa7ca603dfe1a997c02e79ea0983e544c"
+    },
+    {
+      "original": "test/task-2614-review-start-recovery.test.ts",
+      "owners": [
+        "test/review-native-mission-recovery.test.ts"
+      ],
+      "disposition": "retained-contract",
+      "assertionCalls": 17,
+      "caseDeclarations": 8,
+      "originalSha256": "ef4733b54ee6177339577c773b9943316d5c475416e784aef2f9265f6c43f25a"
+    },
+    {
+      "original": "test/task-2620-agent-smoke-retry.test.ts",
+      "owners": [
+        "test/integration-agent-smoke-retry.test.ts"
+      ],
+      "disposition": "retained-contract",
+      "assertionCalls": 12,
+      "caseDeclarations": 4,
+      "originalSha256": "3d9b7420ee95c670907983ca9b525c12d238a7f2706d9eca27110bd9487c90c2"
+    },
+    {
+      "original": "test/task-2620-bookkeeping-coverage.test.ts",
+      "owners": [
+        "test/approval-bookkeeping-coverage.test.ts"
+      ],
+      "disposition": "retained-contract",
+      "assertionCalls": 4,
+      "caseDeclarations": 3,
+      "originalSha256": "e59b7a67e1617670cb9dee9f877a8f889caf95c77170b579cfa7393fd96f7cca"
+    },
+    {
+      "original": "test/task-2620-integration-repair-loop-repro.test.ts",
+      "owners": [
+        "test/integration-repair-review-loop.test.ts"
+      ],
+      "disposition": "retained-contract",
+      "assertionCalls": 19,
+      "caseDeclarations": 2,
+      "originalSha256": "e2cbd4e3a7201d9017750767323fc62f8ce4fbb99a83db35fffb68dcd6f50a15"
+    },
+    {
+      "original": "test/task-2620-integration-repair-needs-review.test.ts",
+      "owners": [
+        "test/integration-repair-review-projection.test.ts"
+      ],
+      "disposition": "retained-contract",
+      "assertionCalls": 19,
+      "caseDeclarations": 5,
+      "originalSha256": "c237abd5900bdc7574bcbd49dd6875c75f491ef39a4be9d6cd94ad34fd8a00a2"
+    },
+    {
+      "original": "test/task-2620-live-work-publication.test.ts",
+      "owners": [
+        "test/workflow-live-work-publication.test.ts"
+      ],
+      "disposition": "retained-contract",
+      "assertionCalls": 6,
+      "caseDeclarations": 3,
+      "originalSha256": "3a7b944ba8fc3bfae21716ca39ea956272ab84f890d97eef297625a3b5689f9b"
+    },
+    {
+      "original": "test/task-2620-parallix-dismissal.test.ts",
+      "owners": [
+        "test/forgejo-approval-dismissal.test.ts"
+      ],
+      "disposition": "retained-contract",
+      "assertionCalls": 7,
+      "caseDeclarations": 3,
+      "originalSha256": "66e86d8dc0e612374d35b538975107cc068a38f972a73b0914714db32c6b41f0"
+    },
+    {
+      "original": "test/task-2623-repro.test.ts",
+      "owners": [
+        "test/review-implementer-exit-recovery.test.ts"
+      ],
+      "disposition": "retained-contract",
+      "assertionCalls": 13,
+      "caseDeclarations": 4,
+      "originalSha256": "1f9d8f66de0097e576db86ed4334d89a82117ec6de83e120cf673db73fcafc48"
+    },
+    {
+      "original": "test/task-2624-repro.test.ts",
+      "owners": [
+        "test/draft-dotted-task-resolution.test.ts"
+      ],
+      "disposition": "retained-contract",
+      "assertionCalls": 22,
+      "caseDeclarations": 5,
+      "originalSha256": "9353cc55a20af62f068f506afdef81688dd2a71f84c1dd9ea0a2b6caea3d71f3"
+    },
+    {
+      "original": "test/task-2627-squash-rename-repro.test.ts",
+      "owners": [
+        "test/integration-squash-staged-payload.test.ts"
+      ],
+      "disposition": "retained-contract",
+      "assertionCalls": 17,
+      "caseDeclarations": 4,
+      "originalSha256": "e2f912b30d848eca78131a9fc4d6e7ba88b0e58c978b8ac2aa77c7bb1077e993"
+    },
+    {
+      "original": "test/helpers/task-2284-catalog-round-trip.ts",
+      "owners": [
+        "test/helpers/backlog-catalog-round-trip.ts"
+      ],
+      "disposition": "retained-contract",
+      "assertionCalls": 0,
+      "caseDeclarations": 0,
+      "originalSha256": "cef3f7f68a07dadcb26f45c782e91f52fa715012c0434a2587bf0246f0b6fef2"
+    },
+    {
+      "original": "test/fixtures/task-2582-review-agent-preload.ts",
+      "owners": [
+        "test/fixtures/review-repair-agent-preload.ts"
+      ],
+      "disposition": "retained-contract",
+      "assertionCalls": 0,
+      "caseDeclarations": 0,
+      "originalSha256": "731c40cbc0aa7b9556f60f9aa449dda97591677a3827e61cfe2c69edfbd919b1"
+    },
+    {
+      "original": "test/fixtures/task-2357-statistics-fixture.ts",
+      "owners": [
+        "test/fixtures/statistics-database.ts"
+      ],
+      "disposition": "retained-contract",
+      "assertionCalls": 0,
+      "caseDeclarations": 0,
+      "originalSha256": "66bc71928097fa14955851b7fe8040ff2b6d5e2c252f6172e73e516fa1265e6c"
+    },
+    {
+      "original": "test/fixtures/task-2363-decision-window-fixture.ts",
+      "owners": [
+        "test/fixtures/flow-decision-window.ts"
+      ],
+      "disposition": "retained-contract",
+      "assertionCalls": 0,
+      "caseDeclarations": 0,
+      "originalSha256": "02fe5873a34239d9e31bd801577c383fcb7ee877e9290d852aebf8e5cbd9f20f"
+    },
+    {
+      "original": "test/fixtures/task-2363-certification-fixture.ts",
+      "owners": [
+        "test/fixtures/flow-persistence.ts"
+      ],
+      "disposition": "retained-contract",
+      "assertionCalls": 0,
+      "caseDeclarations": 0,
+      "originalSha256": "c55850cf2d06123acd305bf062983868e81ae28299057f2bd71e0ab09391c5dd"
+    },
+    {
+      "original": "test/fixtures/task-2369.05-integration-pipelines.json",
+      "owners": [
+        "test/fixtures/integration-pipelines.json"
+      ],
+      "disposition": "retained-contract",
+      "originalSha256": "4f20d844c5ec997b0b00bd362a043f2569c4e6d3822640f112ea81e90b0f5d44",
+      "assertionCalls": 0,
+      "caseDeclarations": 0
+    }
+  ],
+  "date": "2026-10-04",
+  "checks": [
+    {
+      "name": "plain-unit-headroom",
+      "command": "npm test -- --unit-test-headroom",
+      "logSha256": "6fbc4810c59af95db098d76502c1554ca0bd59f231d4904cf7e34abf4c4e4a24",
+      "recordedSummary": [
+        "\u2139 tests 3199",
+        "\u2139 suites 236",
+        "\u2139 pass 3199",
+        "\u2139 fail 0",
+        "\u2139 cancelled 0",
+        "\u2139 skipped 0",
+        "\u2139 todo 0",
+        "\u2139 duration_ms 27528.411087",
+        "[unit-test-cpu] suite budget=200000ms CPU, used=135615ms CPU, elapsed=27588ms"
+      ]
+    },
+    {
+      "name": "fast-unit-headroom",
+      "command": "PARALLIX_FAST_UNIT=1 npm test -- --unit-test-headroom",
+      "logSha256": "f15bee8bc6c086ff8135813b5463af3195ae42ebc37d950c94eeb7788878a587",
+      "recordedSummary": [
+        "\u2139 tests 1182",
+        "\u2139 suites 48",
+        "\u2139 pass 1182",
+        "\u2139 fail 0",
+        "\u2139 cancelled 0",
+        "\u2139 skipped 0",
+        "\u2139 todo 0",
+        "\u2139 duration_ms 6492.752293",
+        "\u2139 tests 2017",
+        "\u2139 suites 188",
+        "\u2139 pass 2017",
+        "\u2139 fail 0",
+        "\u2139 cancelled 0",
+        "\u2139 skipped 0",
+        "\u2139 todo 0",
+        "\u2139 duration_ms 16299.713802",
+        "[fast-unit] 227 files, 3199 tests; shared=101, isolated=126",
+        "[unit-test-cpu] suite budget=150000ms CPU, used=88238ms CPU, elapsed=17033ms"
+      ]
+    },
+    {
+      "name": "covered-fast-unit",
+      "command": "PARALLIX_FAST_UNIT=1 PARALLIX_TEST_COVERAGE=1 npm test -- --unit-test-headroom",
+      "logSha256": "2d62341cead41beb0715841151427919c828a148f78f0bc3eae5c680ce98aa1c",
+      "recordedSummary": [
+        "\u2139 tests 1169",
+        "\u2139 suites 48",
+        "\u2139 pass 1169",
+        "\u2139 fail 0",
+        "\u2139 cancelled 0",
+        "\u2139 skipped 0",
+        "\u2139 todo 0",
+        "\u2139 duration_ms 7492.217259",
+        "\u2139 tests 2029",
+        "\u2139 suites 188",
+        "\u2139 pass 2029",
+        "\u2139 fail 0",
+        "\u2139 cancelled 0",
+        "\u2139 skipped 0",
+        "\u2139 todo 0",
+        "\u2139 duration_ms 19305.379548",
+        "[fast-unit] 227 files, 3198 tests; shared=98, isolated=129",
+        "[unit-test-cpu] suite budget=180000ms CPU, used=115523ms CPU, elapsed=25948ms"
+      ]
+    },
+    {
+      "name": "covered-isolated-unit-calibration",
+      "command": "PARALLIX_TEST_COVERAGE=1 npm test",
+      "logSha256": "c8e281a418b98c1c00d4aa0c27cc4b521645e46d3f48028c945aa3ee35337077",
+      "recordedSummary": [
+        "\u2139 tests 3195",
+        "\u2139 suites 236",
+        "\u2139 pass 3195",
+        "\u2139 fail 0",
+        "\u2139 cancelled 0",
+        "\u2139 skipped 0",
+        "\u2139 todo 0",
+        "\u2139 duration_ms 38296.605561",
+        "[unit-test-cpu] suite budget=900000ms CPU, used=174166ms CPU, elapsed=42821ms"
+      ],
+      "disposition": "Calibration preceding teardown-accounting repair; final corrected hook separately verified by plain headroom and covered fast unit."
+    },
+    {
+      "name": "plain-integration-calibration",
+      "command": "npm run test:integration:ci:prebuilt",
+      "logSha256": "e50ed6299f7bcd499b3d9377b9b82699d247664fc85fdfdc0518778cdfc551ff",
+      "recordedSummary": [
+        "PASS: authored documentation contains no volatile implementation evidence and relative links resolve",
+        "PASS: authored documentation contains no volatile implementation evidence and relative links resolve",
+        "\u2139 tests 2616",
+        "\u2139 suites 113",
+        "\u2139 pass 2589",
+        "\u2139 fail 1",
+        "\u2139 cancelled 0",
+        "\u2139 skipped 26",
+        "\u2139 todo 0",
+        "\u2139 duration_ms 58872.80615",
+        "[integration-test-cpu] suite budget=650000ms CPU, used=238005ms CPU, elapsed=58917ms"
+      ],
+      "disposition": "Calibration only; one pre-existing index-only source guard failed on unstaged renames. Guard fixed and covered integration then passed."
+    },
+    {
+      "name": "covered-integration-enforced",
+      "command": "PARALLIX_TEST_COVERAGE=1 npm run test:integration:ci:prebuilt",
+      "logSha256": "a838804d2a1425f8bcf30c039c38c875a07e4e329612b6fbf85b1f8e276379a8",
+      "recordedSummary": [
+        "PASS: authored documentation contains no volatile implementation evidence and relative links resolve",
+        "PASS: authored documentation contains no volatile implementation evidence and relative links resolve",
+        "\u2139 tests 2616",
+        "\u2139 suites 113",
+        "\u2139 pass 2590",
+        "\u2139 fail 0",
+        "\u2139 cancelled 0",
+        "\u2139 skipped 26",
+        "\u2139 todo 0",
+        "\u2139 duration_ms 71825.784232",
+        "[integration-test-cpu] suite budget=405000ms CPU, used=291171ms CPU, elapsed=79805ms"
+      ]
+    },
+    {
+      "name": "local-integration-enforced",
+      "command": "npm run test:integration:local:prebuilt",
+      "logSha256": "0f090d1bcd8756ed4a1d1edec81bc59178ac9e6c55b70b78799a5fdf970d817e",
+      "recordedSummary": [
+        "\u2139 tests 64",
+        "\u2139 suites 0",
+        "\u2139 pass 64",
+        "\u2139 fail 0",
+        "\u2139 cancelled 0",
+        "\u2139 skipped 0",
+        "\u2139 todo 0",
+        "\u2139 duration_ms 44218.231767",
+        "[integration-test-cpu] suite budget=85000ms CPU, used=51424ms CPU, elapsed=44257ms"
+      ]
+    },
+    {
+      "name": "focused-hooks",
+      "command": "npm test -- --integration-ci test/repository-gates.integration.test.ts test/repository-gates.test.ts test/integration-pipelines.test.ts test/review-gate-ownership.test.ts test/integrate-gate-and-exclusivity-process-contract.test.ts",
+      "logSha256": "9f4bcfa9e0f747723fcc4003c6f9491569618fb9f43c8af9545d8a1910e6da54",
+      "recordedSummary": [
+        "\u2139 tests 115",
+        "\u2139 suites 3",
+        "\u2139 pass 105",
+        "\u2139 fail 0",
+        "\u2139 cancelled 0",
+        "\u2139 skipped 10",
+        "\u2139 todo 0",
+        "\u2139 duration_ms 11553.164656",
+        "[integration-test-cpu] suite budget=310000ms CPU, used=19725ms CPU, elapsed=11587ms"
+      ]
+    },
+    {
+      "name": "organization-discovery-size-guards",
+      "command": "npm test -- test/default-test-suite.test.ts test/typescript-test-authoring.test.ts test/test-categories.test.ts test/file-size-cap.test.ts",
+      "logSha256": "cd029ef243e7336bc4559593520a965439c8875cd77befc4e9d74590ecf0ff4e",
+      "recordedSummary": [
+        "\u2139 tests 30",
+        "\u2139 suites 0",
+        "\u2139 pass 30",
+        "\u2139 fail 0",
+        "\u2139 cancelled 0",
+        "\u2139 skipped 0",
+        "\u2139 todo 0",
+        "\u2139 duration_ms 1100.795209",
+        "[unit-test-cpu] suite budget=200000ms CPU, used=2769ms CPU, elapsed=1140ms"
+      ]
+    },
+    {
+      "name": "cpu-counter-contract",
+      "command": "npm test -- --integration-local test/unit-test-timeout-guard.test.ts",
+      "logSha256": "3d51689af18d78989d34a5d401683a17464c73fed6e539017261f2c82a2edbf7",
+      "recordedSummary": [
+        "\u2139 tests 17",
+        "\u2139 suites 0",
+        "\u2139 pass 17",
+        "\u2139 fail 0",
+        "\u2139 cancelled 0",
+        "\u2139 skipped 0",
+        "\u2139 todo 0",
+        "\u2139 duration_ms 17671.221066",
+        "[integration-test-cpu] suite budget=85000ms CPU, used=10865ms CPU, elapsed=17710ms"
+      ]
+    },
+    {
+      "name": "static-analysis",
+      "command": "./scripts/verify-local.sh static-analysis",
+      "logSha256": "1093eae9941b2c209583077213cec740420935674a4ba63eef2a5615f95c9ebc",
+      "recordedSummary": [
+        "PASS: ESLint \u2014 0 errors, 0 warnings (budget 300)",
+        "PASS: tsc typecheck clean",
+        "PASS: no test-hygiene violations",
+        "PASS: test-hygiene clean",
+        "PASS: test typecheck clean",
+        "=== Static Analysis Gate: ALL STAGES PASSED ==="
+      ]
+    },
+    {
+      "name": "docs",
+      "command": "./scripts/verify-local.sh docs",
+      "logSha256": "08538e8066d2a9aee165741d52747e22247bec2b5855e383a61f0ecf5d83b6be",
+      "recordedSummary": [
+        "PASS: authored documentation contains no volatile implementation evidence and relative links resolve"
+      ]
+    },
+    {
+      "name": "reproducible-assertion-audit",
+      "command": "node tools/test-ownership-audit/audit.mjs",
+      "exitCode": 0,
+      "logSha256": "409bbe39cebf2b2e68e8690861081b09a23b3c2871d30389d73223968131e339",
+      "recordedSummary": [
+        "assertionCalls: 2112",
+        "caseDeclarations: 592",
+        "missing: []",
+        "All original source hashes matched."
+      ]
+    }
+  ],
+  "cpuPolicy": {
+    "unitSuites": {
+      "plain": 200000,
+      "fastPlain": 150000,
+      "covered": 225000,
+      "fastCovered": 180000
+    },
+    "integrationSuites": {
+      "plainCi": 310000,
+      "coveredCi": 405000,
+      "local": 85000,
+      "all": 395000
+    },
+    "integrationCases": {
+      "defaultMs": 500,
+      "plain": {
+        "active-invocation-contract.test.ts": 400,
+        "active.test.ts": 100,
+        "agent-block-authority.test.ts": 150,
+        "agent-exit-telemetry-classification.test.ts": 300,
+        "agent-sandbox-state-bindings.test.ts": 100,
+        "agent-smoke-capture-cleanup.test.ts": 300,
+        "agents-limit-hit.test.ts": 150,
+        "agents.test.ts": 1950,
+        "application-boundaries.test.ts": 100,
+        "approval-bookkeeping-coverage.test.ts": 300,
+        "backlog.test.ts": 500,
+        "board-draft-composition.test.ts": 150,
+        "board-event-metrics-fixture.test.ts": 100,
+        "board-event-recorder.test.ts": 100,
+        "board-lane-events-migration.test.ts": 100,
+        "board-live-work-refresh.test.ts": 1600,
+        "board-metrics-persistence.test.ts": 200,
+        "board-shell-subscription-lifetime.test.ts": 2100,
+        "board-shutdown-signals.test.ts": 1300,
+        "board-task-update-authority.test.ts": 350,
+        "board-terminal-resize-lifetime.test.ts": 1650,
+        "board-worktree-mission-scope.test.ts": 100,
+        "bootstrap-isolation.test.ts": 350,
+        "bootstrap-launcher-isolation.test.ts": 550,
+        "bootstrap-process-cleanup.test.ts": 1350,
+        "bubblewrap-worktree-git.test.ts": 1150,
+        "canonical-repository-identity.test.ts": 250,
+        "claude-credential-refresh-isolation.test.ts": 550,
+        "claude-sandbox-credential-persistence.test.ts": 150,
+        "cli-command-exit-and-output.test.ts": 2250,
+        "codeql-suite-options.test.ts": 100,
+        "codex-approval-policy-config.test.ts": 17150,
+        "codex-sandbox-mission-state-write.test.ts": 5750,
+        "cohort-windowing.test.ts": 150,
+        "config-exit-status.test.ts": 350,
+        "current-work-operation-identity.test.ts": 100,
+        "custom-capacity-cross-repo.integration.test.ts": 150,
+        "custom-capacity-multiprocess-repro.test.ts": 100,
+        "documentation-verification.test.ts": 100,
+        "draft-command-boundary-contract.test.ts": 250,
+        "draft.test.ts": 150,
+        "durable-state-policy.test.ts": 2450,
+        "e2e-mission-sqlite-cutover.test.ts": 100,
+        "external-target-resolution.test.ts": 500,
+        "fixture-lifetime.integration.test.ts": 900,
+        "flow-persisted-decision-window.test.ts": 27650,
+        "forgejo-independence.test.ts": 150,
+        "forgejo-pr-round-sync.test.ts": 650,
+        "forgejo-publication-gate-failure-contract.test.ts": 150,
+        "forgejo-sync-merged-force-push-contract.test.ts": 200,
+        "forgejo.test.ts": 200,
+        "github-publication-proof.test.ts": 100,
+        "github-release-proof-reuse.test.ts": 100,
+        "graphify-mission-document-exclusion.test.ts": 350,
+        "handoff.test.ts": 150,
+        "hosted-quality-gate-contract.test.ts": 100,
+        "integrate-conflict.test.ts": 100,
+        "integrate-gate-and-exclusivity-process-contract.test.ts": 7800,
+        "integrate-lifecycle-recovery-and-closeout-contract.test.ts": 200,
+        "integrate-squash-commit-and-landed-detection-contract.test.ts": 350,
+        "integrate-squash-payload-pathspec-contract.test.ts": 550,
+        "integrate-stale-state-and-stash-safety-contract.test.ts": 1500,
+        "integrate-variant-b-landing-contract.test.ts": 200,
+        "integrate.test.ts": 250,
+        "integration-backlog-closeout.test.ts": 450,
+        "integration-gate-repair-routing.test.ts": 150,
+        "integration-gate-skip-contract.test.ts": 200,
+        "integration-landed-completion.test.ts": 300,
+        "integration-pipelines.test.ts": 250,
+        "integration-provider-approval-recovery.test.ts": 300,
+        "integration-repair-review-loop.test.ts": 2200,
+        "integration-squash-staged-payload.test.ts": 250,
+        "legacy-content-history.integration.test.ts": 100,
+        "legacy-import-trace.integration.test.ts": 400,
+        "legacy-persistence-audit.integration.test.ts": 200,
+        "lifecycle-approval-dwell.test.ts": 150,
+        "lifecycle-completion-persistence.test.ts": 200,
+        "lifecycle-events.test.ts": 100,
+        "lifecycle-historical-completion-repair.test.ts": 100,
+        "lifecycle-history.test.ts": 150,
+        "lifecycle-telemetry-completion-authority.test.ts": 100,
+        "lifecycle-timing-local.test.ts": 200,
+        "measurement-review-fix-nullability.test.ts": 150,
+        "metrics-review-fix-observations.test.ts": 100,
+        "mission-adhoc-and-context-cli-contract.test.ts": 7100,
+        "mission-aggregate-write-isolation.test.ts": 100,
+        "mission-cancel-contract.test.ts": 1200,
+        "mission-classification-authority.test.ts": 250,
+        "mission-classification-update.test.ts": 200,
+        "mission-handoff-reconcile-contract.test.ts": 150,
+        "mission-sqlite-use-cases.test.ts": 100,
+        "mission-store-drain.test.ts": 100,
+        "mission-use-case-persistence-contract.test.ts": 100,
+        "mission-utils-worktree.test.ts": 100,
+        "mistral.test.ts": 100,
+        "native-sea-executable-smoke.test.ts": 8300,
+        "nels.test.ts": 100,
+        "npm-pack-install-smoke.test.ts": 750,
+        "opencode-export.test.ts": 100,
+        "operator-database-pollution-guard.test.ts": 600,
+        "operator-state-scope.integration.test.ts": 250,
+        "operator-state-services.test.ts": 100,
+        "package-persistent-data.test.ts": 7000,
+        "persistence-cutover-boundaries.test.ts": 100,
+        "post-integrate-global-install-contract.test.ts": 4600,
+        "presentation-board.integration.test.ts": 200,
+        "presentation-tui.integration.test.ts": 750,
+        "presentation-web.integration.test.ts": 500,
+        "product-config-cp.test.ts": 100,
+        "product-config-validation.test.ts": 100,
+        "product-config.test.ts": 100,
+        "px-runner.test.ts": 1300,
+        "px-runtime-smoke.test.ts": 100,
+        "px-shell-init.test.ts": 300,
+        "rebase-approval-coverage.test.ts": 500,
+        "rebase-before-review-contract.test.ts": 150,
+        "rebase-use-case.test.ts": 100,
+        "rebase.test.ts": 100,
+        "rebound-gate-recovery.test.ts": 200,
+        "recover-landed-mission.test.ts": 200,
+        "recovery-claim.test.ts": 100,
+        "recovery-supervisor.test.ts": 100,
+        "release-publication-and-version-allocation-contract.test.ts": 250,
+        "repository-gates.integration.test.ts": 350,
+        "repository-gates.test.ts": 400,
+        "resolve-conflict.test.ts": 100,
+        "review-active-repair-approval.test.ts": 100,
+        "review-artifacts.test.ts": 100,
+        "review-autoderive.test.ts": 200,
+        "review-backfill.test.ts": 200,
+        "review-commands-additional.test.ts": 100,
+        "review-commands-supplemental.test.ts": 200,
+        "review-events.test.ts": 100,
+        "review-gate-ownership.test.ts": 300,
+        "review-identity.test.ts": 100,
+        "review-intervention-resume.integration.test.ts": 100,
+        "review-loop-resolution-fallback.test.ts": 150,
+        "review-native-mission-recovery.test.ts": 150,
+        "review-prompts.test.ts": 100,
+        "review-response-relaunch.test.ts": 150,
+        "review-state-class.test.ts": 150,
+        "review-state-durability.test.ts": 150,
+        "review-state-restart-recovery.integration.test.ts": 100,
+        "review-state.test.ts": 200,
+        "review-status-backfill.integration.test.ts": 100,
+        "review-validation-rebound.test.ts": 100,
+        "review.test.ts": 200,
+        "runtime-matrix.test.ts": 100,
+        "session-marker-repository.test.ts": 100,
+        "setup-review.test.ts": 100,
+        "sonar-branch-cleanup.test.ts": 300,
+        "sonar-short-branch-confirmation.test.ts": 100,
+        "sonarqube-cloud-wiring.test.ts": 150,
+        "sqlite-import-and-audit.integration.test.ts": 100,
+        "sqlite-mission-store.integration.test.ts": 100,
+        "sqlite-operator-state.integration.test.ts": 100,
+        "sqlite-recovery-cp5.test.ts": 1300,
+        "sqlite-repository-contract.integration.test.ts": 100,
+        "sqlite-schema-and-migrations.integration.test.ts": 100,
+        "standalone-review-cycle.test.ts": 150,
+        "startup-preflight.test.ts": 150,
+        "stats-backfill.test.ts": 250,
+        "stats-cohorts.test.ts": 150,
+        "stats-current-week-completion.test.ts": 250,
+        "stats-custom-agent-model.test.ts": 150,
+        "stats-internals.test.ts": 150,
+        "stats-population.test.ts": 200,
+        "stats.test.ts": 150,
+        "storage-bootstrap-isolation.test.ts": 350,
+        "task-label-persistence.test.ts": 100,
+        "telemetry-completion-schema.test.ts": 100,
+        "test-fixture-process-cleanup.test.ts": 2800,
+        "test-hygiene.test.ts": 100,
+        "type-only-coverage.integration.test.ts": 100,
+        "unit-test-timeout-guard.test.ts": 3750,
+        "verification-proof-reuse.test.ts": 200,
+        "verification.test.ts": 350,
+        "workflow-repair-lane-boundaries.test.ts": 14250
+      },
+      "covered": {
+        "active-invocation-contract.test.ts": 400,
+        "active.test.ts": 100,
+        "agent-block-authority.test.ts": 150,
+        "agent-exit-telemetry-classification.test.ts": 300,
+        "agent-sandbox-state-bindings.test.ts": 100,
+        "agent-smoke-capture-cleanup.test.ts": 300,
+        "agents-limit-hit.test.ts": 150,
+        "agents.test.ts": 2200,
+        "application-boundaries.test.ts": 100,
+        "approval-bookkeeping-coverage.test.ts": 300,
+        "backlog.test.ts": 500,
+        "board-draft-composition.test.ts": 150,
+        "board-event-metrics-fixture.test.ts": 150,
+        "board-event-recorder.test.ts": 100,
+        "board-lane-events-migration.test.ts": 100,
+        "board-live-work-refresh.test.ts": 1950,
+        "board-metrics-persistence.test.ts": 250,
+        "board-shell-subscription-lifetime.test.ts": 2600,
+        "board-shutdown-signals.test.ts": 1300,
+        "board-task-update-authority.test.ts": 450,
+        "board-terminal-resize-lifetime.test.ts": 1900,
+        "board-worktree-mission-scope.test.ts": 100,
+        "bootstrap-isolation.test.ts": 400,
+        "bootstrap-launcher-isolation.test.ts": 600,
+        "bootstrap-process-cleanup.test.ts": 1350,
+        "canonical-repository-identity.test.ts": 250,
+        "cli-command-exit-and-output.test.ts": 3850,
+        "codeql-suite-options.test.ts": 100,
+        "cohort-windowing.test.ts": 150,
+        "config-exit-status.test.ts": 750,
+        "current-work-operation-identity.test.ts": 100,
+        "custom-capacity-cross-repo.integration.test.ts": 150,
+        "custom-capacity-multiprocess-repro.test.ts": 100,
+        "documentation-verification.test.ts": 100,
+        "draft-command-boundary-contract.test.ts": 250,
+        "draft.test.ts": 150,
+        "durable-state-policy.test.ts": 6250,
+        "e2e-mission-sqlite-cutover.test.ts": 150,
+        "external-target-resolution.test.ts": 900,
+        "fixture-lifetime.integration.test.ts": 1050,
+        "flow-persisted-decision-window.test.ts": 25450,
+        "forgejo-independence.test.ts": 150,
+        "forgejo-pr-round-sync.test.ts": 650,
+        "forgejo-publication-gate-failure-contract.test.ts": 150,
+        "forgejo-sync-merged-force-push-contract.test.ts": 200,
+        "forgejo.test.ts": 200,
+        "github-publication-proof.test.ts": 100,
+        "github-release-proof-reuse.test.ts": 100,
+        "handoff.test.ts": 150,
+        "hosted-quality-gate-contract.test.ts": 100,
+        "integrate-conflict.test.ts": 100,
+        "integrate-gate-and-exclusivity-process-contract.test.ts": 8900,
+        "integrate-lifecycle-recovery-and-closeout-contract.test.ts": 150,
+        "integrate-squash-commit-and-landed-detection-contract.test.ts": 300,
+        "integrate-squash-payload-pathspec-contract.test.ts": 450,
+        "integrate-stale-state-and-stash-safety-contract.test.ts": 1350,
+        "integrate-variant-b-landing-contract.test.ts": 200,
+        "integrate.test.ts": 200,
+        "integration-backlog-closeout.test.ts": 400,
+        "integration-gate-repair-routing.test.ts": 100,
+        "integration-gate-skip-contract.test.ts": 200,
+        "integration-landed-completion.test.ts": 300,
+        "integration-pipelines.test.ts": 250,
+        "integration-provider-approval-recovery.test.ts": 350,
+        "integration-repair-review-loop.test.ts": 2150,
+        "integration-squash-staged-payload.test.ts": 250,
+        "legacy-content-history.integration.test.ts": 100,
+        "legacy-import-trace.integration.test.ts": 350,
+        "legacy-persistence-audit.integration.test.ts": 150,
+        "lifecycle-approval-dwell.test.ts": 150,
+        "lifecycle-completion-persistence.test.ts": 200,
+        "lifecycle-events.test.ts": 100,
+        "lifecycle-historical-completion-repair.test.ts": 100,
+        "lifecycle-history.test.ts": 150,
+        "lifecycle-telemetry-completion-authority.test.ts": 100,
+        "measurement-review-fix-nullability.test.ts": 150,
+        "metrics-review-fix-observations.test.ts": 100,
+        "mission-adhoc-and-context-cli-contract.test.ts": 11850,
+        "mission-aggregate-write-isolation.test.ts": 100,
+        "mission-cancel-contract.test.ts": 1300,
+        "mission-classification-authority.test.ts": 300,
+        "mission-classification-update.test.ts": 200,
+        "mission-handoff-reconcile-contract.test.ts": 150,
+        "mission-sqlite-use-cases.test.ts": 100,
+        "mission-store-drain.test.ts": 100,
+        "mission-use-case-persistence-contract.test.ts": 100,
+        "mission-utils-worktree.test.ts": 100,
+        "mistral.test.ts": 150,
+        "nels.test.ts": 100,
+        "npm-pack-install-smoke.test.ts": 800,
+        "opencode-export.test.ts": 100,
+        "operator-database-pollution-guard.test.ts": 650,
+        "operator-state-scope.integration.test.ts": 250,
+        "operator-state-services.test.ts": 100,
+        "package-persistent-data.test.ts": 7600,
+        "persistence-cutover-boundaries.test.ts": 100,
+        "post-integrate-global-install-contract.test.ts": 5150,
+        "presentation-board.integration.test.ts": 200,
+        "presentation-tui.integration.test.ts": 1100,
+        "presentation-web.integration.test.ts": 750,
+        "product-config-cp.test.ts": 100,
+        "product-config-validation.test.ts": 100,
+        "product-config.test.ts": 100,
+        "px-runner.test.ts": 1650,
+        "px-runtime-smoke.test.ts": 100,
+        "px-shell-init.test.ts": 700,
+        "rebase-approval-coverage.test.ts": 500,
+        "rebase-before-review-contract.test.ts": 150,
+        "rebase-use-case.test.ts": 100,
+        "rebase.test.ts": 100,
+        "rebound-gate-recovery.test.ts": 200,
+        "recover-landed-mission.test.ts": 250,
+        "recovery-claim.test.ts": 100,
+        "recovery-supervisor.test.ts": 100,
+        "release-publication-and-version-allocation-contract.test.ts": 250,
+        "repository-gates.integration.test.ts": 400,
+        "repository-gates.test.ts": 450,
+        "resolve-conflict.test.ts": 100,
+        "review-active-repair-approval.test.ts": 100,
+        "review-artifacts.test.ts": 100,
+        "review-autoderive.test.ts": 200,
+        "review-backfill.test.ts": 200,
+        "review-commands-additional.test.ts": 100,
+        "review-commands-supplemental.test.ts": 250,
+        "review-events.test.ts": 100,
+        "review-gate-ownership.test.ts": 300,
+        "review-identity.test.ts": 100,
+        "review-intervention-resume.integration.test.ts": 100,
+        "review-loop-resolution-fallback.test.ts": 150,
+        "review-native-mission-recovery.test.ts": 150,
+        "review-prompts.test.ts": 100,
+        "review-response-relaunch.test.ts": 100,
+        "review-state-class.test.ts": 150,
+        "review-state-durability.test.ts": 150,
+        "review-state-restart-recovery.integration.test.ts": 100,
+        "review-state.test.ts": 200,
+        "review-status-backfill.integration.test.ts": 100,
+        "review-validation-rebound.test.ts": 100,
+        "review.test.ts": 200,
+        "runtime-matrix.test.ts": 100,
+        "session-marker-repository.test.ts": 100,
+        "setup-review.test.ts": 100,
+        "sonar-branch-cleanup.test.ts": 350,
+        "sonar-short-branch-confirmation.test.ts": 100,
+        "sonarqube-cloud-wiring.test.ts": 150,
+        "sqlite-import-and-audit.integration.test.ts": 150,
+        "sqlite-mission-store.integration.test.ts": 100,
+        "sqlite-operator-state.integration.test.ts": 100,
+        "sqlite-recovery-cp5.test.ts": 1650,
+        "sqlite-repository-contract.integration.test.ts": 100,
+        "sqlite-schema-and-migrations.integration.test.ts": 100,
+        "standalone-review-cycle.test.ts": 150,
+        "startup-preflight.test.ts": 150,
+        "stats-backfill.test.ts": 300,
+        "stats-cohorts.test.ts": 150,
+        "stats-current-week-completion.test.ts": 300,
+        "stats-custom-agent-model.test.ts": 150,
+        "stats-internals.test.ts": 150,
+        "stats-population.test.ts": 250,
+        "stats.test.ts": 200,
+        "storage-bootstrap-isolation.test.ts": 350,
+        "task-label-persistence.test.ts": 100,
+        "telemetry-completion-schema.test.ts": 100,
+        "test-fixture-process-cleanup.test.ts": 3100,
+        "test-hygiene.test.ts": 100,
+        "type-only-coverage.integration.test.ts": 100,
+        "verification-proof-reuse.test.ts": 200,
+        "verification.test.ts": 350,
+        "workflow-repair-lane-boundaries.test.ts": 17300
+      }
+    }
+  },
+  "scope": "Test ownership and CPU regression protection; no claim of pinned-baseline coverage parity, a 50% whole-gate gain or five/ten-client throughput certification.",
+  "storedMission": {
+    "version": 63,
+    "brief": {
+      "goal": "Finish the remaining behavior-owned test migration and lock in the verification CPU gains from TASK-2622.",
+      "why": "The wave left numeric task-owned tests and permissive or missing CPU limits. Future missions must extend stable behavior owners and fail on CPU regressions without brittle wall-time limits under concurrent load.",
+      "scope": "Migrate remaining numeric task-ID suites, case modules and helpers by assertion ownership; consolidate compatible groups and split mixed contracts; preserve assertions, task provenance, tiers, isolation and cleanup. Add default authoring/discovery guards. Retune existing unit CPU ceilings and add integration-case and suite CPU limits, including hook command descendants and teardown, from measured plain/covered costs with margin. Attach actual verification and dispositions to the parent.",
+      "outOfScope": [
+        "Changing ports-and-adapters principles, typed application ports, dependency direction, composition authority or adapter boundaries.",
+        "Claiming pinned-baseline coverage parity, 50% whole-verification savings or doubled concurrent throughput without separately matched parent evidence.",
+        "Weakening required integration gates, E2E obligations, skip policy, unit headroom, watchdogs or fixture cleanup."
+      ]
+    },
+    "successCriteria": [
+      "No numeric task-ID test suites, case modules or test helpers remain; reviewed assertions belong to cohesive behavior contracts with regression provenance intact.",
+      "Mixed task suites are routed by assertion ownership; compatible regression groups extend established owners without duplicate setup, giant files or weakened isolation.",
+      "A default-suite executable guard rejects renewed task-ID organization, including nested files and disguised case/helper modules, while allowing legitimate task-domain names.",
+      "Runtime discovery, integration categories, local dependency reasons and shared-process isolation preserve every migrated case and original tier.",
+      "Existing limits are retuned from current measurements; integration cases (especially hook contracts) and suites have CPU budgets with reasonable margin; over-budget and unavailable-accounting runs fail, and hosted timing policy and watchdog/cleanup behavior remain intact.",
+      "Focused migrated-contract and guard checks, plain unit headroom, static analysis, graph update and documentation checks pass with captured evidence.",
+      "Final evidence records old-to-owner dispositions, actual test outcomes and CPU measurements; no unsupported parity, throughput or completion claims."
+    ],
+    "completedSuccessCriteria": [
+      0,
+      1,
+      2,
+      3,
+      4,
+      5,
+      6
+    ],
+    "latestCheckpoint": {
+      "name": "CP-5",
+      "description": "User-authorized restart: complete remaining behavior ownership and enforce measured CPU protection. This checkpoint supersedes prior certification-only completion claims.",
+      "goalCheck": [
+        {
+          "criterion": "No numeric task-ID test suites, case modules or test helpers remain; reviewed assertions belong to cohesive behavior contracts with regression provenance intact.",
+          "evidence": "backlog/docs/task-2622.20-cleanup-and-cpu-protection.md:16; test/typescript-test-authoring.test.ts:59 `every executable test suite remains discoverable`; 139 paths migrated, zero numeric task-owned source filenames remain. Captured guards passed 30 cases."
+        },
+        {
+          "criterion": "Mixed task suites are routed by assertion ownership; compatible regression groups extend established owners without duplicate setup, giant files or weakened isolation.",
+          "evidence": "backlog/docs/task-2622.20-cleanup-and-cpu-protection.md:21; normalized AST audit in backlog/docs/task-2622.20-results.json preserves all 592 original case declarations and 2,112 assertions. Mixed CLI exit, event serialization and board write/read responsibilities were routed to owners."
+        },
+        {
+          "criterion": "A default-suite executable guard rejects renewed task-ID organization, including nested files and disguised case/helper modules, while allowing legitimate task-domain names.",
+          "evidence": "test/typescript-test-authoring.test.ts:43 `test ownership rejects numeric task filenames`; test/typescript-test-authoring.test.ts:71 `suite titles name behavior`; actual recursive tree and synthetic nested/helper/JSON examples passed."
+        },
+        {
+          "criterion": "Runtime discovery, integration categories, local dependency reasons and shared-process isolation preserve every migrated case and original tier.",
+          "evidence": "backlog/docs/task-2622.20-cleanup-and-cpu-protection.md:35; test/test-categories.test.ts:53 `the CI and local integration lanes partition the integration layer`; complete covered CI has 2590 passing / 26 existing skips, local 64 passing / no skips, zero cancelled. Reversed shared owner proof passed 13 cases."
+        },
+        {
+          "criterion": "Existing limits are retuned from current measurements; integration cases (especially hook contracts) and suites have CPU budgets with reasonable margin; over-budget and unavailable-accounting runs fail, and hosted timing policy and watchdog/cleanup behavior remain intact.",
+          "evidence": "backlog/docs/task-2622.20-cleanup-and-cpu-protection.md:51; test/unit-test-timeout-guard.test.ts:361 `integration hook CPU guard rejects CPU burned by a waited grandchild`; CPU contracts passed 17 cases, including teardown, low-CPU waits, exclusive nesting and suite overruns. Plain unit ceiling 650->200 CPU seconds; covered isolated 900->225; covered fast 520->180; integration cases and all integration tiers now budgeted."
+        },
+        {
+          "criterion": "Focused migrated-contract and guard checks, plain unit headroom, static analysis, graph update and documentation checks pass with captured evidence.",
+          "evidence": "backlog/docs/task-2622.20-cleanup-and-cpu-protection.md:100; captured summaries in backlog/docs/task-2622.20-verification.txt: final plain and fast unit headroom 3199 passed; covered CI 2590 passed; local 64 passed; static analysis all four stages clean, docs verified; graphify update . completed with 10863 nodes."
+        },
+        {
+          "criterion": "Final evidence records old-to-owner dispositions, actual test outcomes and CPU measurements; no unsupported parity, throughput or completion claims.",
+          "evidence": "backlog/docs/task-2622.20-results.json:1 records original source hashes, old-to-owner dispositions, CPU policy and real command summaries. backlog/docs/task-2622.20-cleanup-and-cpu-protection.md:119 leaves separate parent parity/50%/concurrency obligations explicitly unmet. Parent links this evidence; production executable behavior and architecture unchanged."
+        }
+      ],
+      "nextAction": "Review the corrected cleanup and CPU-protection diff; run the repository-owned mandatory integration gate plan on the committed candidate before landing."
+    }
+  },
+  "graphUpdate": {
+    "command": "graphify update .",
+    "nodes": 10863,
+    "edges": 28337,
+    "communities": 517,
+    "logSha256": "e4c6152ab99416ed0dc4e375b5c2cc5fbe3e47f54cc529793829e05ac35432f7"
+  }
+}

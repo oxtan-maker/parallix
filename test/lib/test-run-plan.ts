@@ -14,6 +14,7 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
 import { UNIT_TEST_BUDGET_MS, UNIT_TEST_HEADROOM_MS, onGitHubActions } from './unit-test-budget-reporter.mjs';
+import { readCpuBudgetPolicy, positiveCpuBudget } from './test-cpu-policy.mjs';
 import { selectTierFiles, type TierFileSelection } from './test-tier-selection.js';
 // Re-export so the test/lib surface stays the single authority entry point for
 // coverage and the regression test.
@@ -51,6 +52,7 @@ export interface TestRunPlan {
   nodeArgs: string[];
   runsIntegrationSuite: boolean;
   runsIntegrationCiSuite: boolean;
+  runsIntegrationLocalSuite: boolean;
   unitTestCpuBudgetMs: number;
   unitTestHeadroomMs: number | null;
 }
@@ -201,20 +203,32 @@ export function buildTestRunPlan(options: TestRunPlanOptions): TestRunPlan {
   // selectTierFiles() authority (test/lib/test-tier-selection.ts, extracted
   // from here), never a glob.
   const SUITE_FLAGS = new Set(['--integration', '--integration-ci', '--integration-local', '--unit-test-headroom']);
-  const runsIntegrationCiSuite = requestedArgs.includes('--integration-ci');
-  const runsIntegrationLocalSuite = requestedArgs.includes('--integration-local');
-  const runsIntegrationSuite = requestedArgs.includes('--integration')
-    || runsIntegrationCiSuite
-    || runsIntegrationLocalSuite;
-  const enforcesUnitTestHeadroom = requestedArgs.includes('--unit-test-headroom');
   const requestedTestFiles = requestedArgs.filter(arg => !SUITE_FLAGS.has(arg));
-  const testFiles = runsIntegrationCiSuite
-    ? tierFiles.integrationCi
-    : runsIntegrationLocalSuite
-      ? tierFiles.integrationLocal
-      : runsIntegrationSuite
-        ? tierFiles.allIntegration
-        : (requestedTestFiles.length > 0 ? requestedTestFiles : tierFiles.unit);
+  const requestedPaths = requestedTestFiles.map(file => path.resolve(executionRoot, file));
+  for (const file of requestedPaths) {
+    if (/\.test\.(?:ts|js)$/.test(file) && !fs.existsSync(file)) {
+      throw new Error(`requested test file does not exist: ${file}`);
+    }
+  }
+  const explicitCi = requestedArgs.includes('--integration-ci');
+  const explicitLocal = requestedArgs.includes('--integration-local');
+  const explicitIntegration = requestedArgs.includes('--integration') || explicitCi || explicitLocal;
+  // Focused adapter contracts retain their actual CPU/timing profile, even
+  // when invoked as npm test -- path/to/contract.test.ts.
+  const focusedIntegration = requestedPaths.some(file => tierFiles.allIntegration.includes(file));
+  const runsIntegrationCiSuite = explicitCi || (!explicitIntegration && requestedPaths.length > 0
+    && requestedPaths.every(file => tierFiles.integrationCi.includes(file)));
+  const runsIntegrationLocalSuite = explicitLocal || (!explicitIntegration && requestedPaths.length > 0
+    && requestedPaths.every(file => tierFiles.integrationLocal.includes(file)));
+  const runsIntegrationSuite = explicitIntegration || focusedIntegration;
+  const enforcesUnitTestHeadroom = requestedArgs.includes('--unit-test-headroom');
+  const population = runsIntegrationCiSuite ? tierFiles.integrationCi
+    : runsIntegrationLocalSuite ? tierFiles.integrationLocal
+      : runsIntegrationSuite ? tierFiles.allIntegration : tierFiles.unit;
+  if (explicitIntegration && requestedPaths.some(file => !population.includes(file))) {
+    throw new Error('focused integration files must belong to the requested verification tier');
+  }
+  const testFiles = requestedTestFiles.length > 0 ? requestedTestFiles : population;
   // The real-agent smoke test deliberately reads the operator's configured Pi
   // model/auth files and then copies them into its own disposable state root.
   // The consolidated TUI process/PTY contract, when explicitly requested as the
@@ -286,7 +300,9 @@ export function buildTestRunPlan(options: TestRunPlanOptions): TestRunPlan {
     testFiles,
     runsIntegrationSuite,
     runsIntegrationCiSuite,
-    unitTestCpuBudgetMs: Number(process.env.PARALLIX_UNIT_TEST_CPU_BUDGET_MS) || 650_000,
+    runsIntegrationLocalSuite,
+    unitTestCpuBudgetMs: positiveCpuBudget(process.env.PARALLIX_UNIT_TEST_CPU_BUDGET_MS
+      ?? readCpuBudgetPolicy(executionRoot).unitSuites.plain, 'unit suite'),
     unitTestHeadroomMs: enforcesUnitTestHeadroom ? UNIT_TEST_HEADROOM_MS : null,
     // Deliberately no `--test-force-exit`: it makes the per-file workers call
     // process.exit() before their result stream is flushed, so trailing test
@@ -298,8 +314,8 @@ export function buildTestRunPlan(options: TestRunPlanOptions): TestRunPlan {
       // bootstrap module resolves (--import entries load in argv order).
       ...typeScriptLoaderArgs,
       ...bootstrapArgs,
-      ...(!runsIntegrationSuite && !githubTimingSuspended
-        ? ['--import', pathToFileURL(path.join(testRoot, 'lib', 'cpu-test-hook.mjs')).href]
+      ...(!githubTimingSuspended
+        ? ['--import', pathToFileURL(path.join(testRoot, 'lib', runsIntegrationSuite ? 'integration-cpu-hook.mjs' : 'cpu-test-hook.mjs')).href]
         : []),
       ...moduleMockArgs,
       ...testConcurrencyArgs,

@@ -1,3 +1,4 @@
+// Historical regression provenance: TASK-2375.
 // Current-work liveness contract: a publisher's pid and process-start identity decide whether its work is
 // live, aged out, or cleared; probes cover Linux, macOS, native Windows and WSL.
 //
@@ -169,7 +170,7 @@ test('WSL keeps the /proc path rather than the native Windows path', () => {
 });
 
 // ── Unverifiable process liveness — TASK-2375 SC5 (was task-2375-metrics-cache-and-liveness.test.ts, SC5) ──
-describe('Unverifiable process liveness — TASK-2375 SC5', () => {
+describe("Unverifiable process liveness — SC5", () => {
   // ---------------------------------------------------------------------------
   // SC5 — unverifiable process liveness
   // ---------------------------------------------------------------------------

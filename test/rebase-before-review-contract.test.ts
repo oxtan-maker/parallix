@@ -1,3 +1,4 @@
+// Historical regression provenance: TASK-1104, TASK-1272.
 // Behavior-owned suite (TASK-2622.09, integration-ci): the pre-review rebase over disposable Git
 // topologies — safe artifact auto-commit (task-1104), standalone mode (task-1272), hardening, and
 // diagnostics. Legacy case names unchanged.
@@ -18,7 +19,7 @@ mockModule('../src/adapters/cli/commands/integrate.js', import.meta.url);
 await installModuleMocks();
 
 // ---- task-1104 rebase cleanup (consolidated from test/task-1104-rebase-cleanup.test.ts, TASK-2622.09) ----
-describe("task-1104 rebase cleanup", () => {
+describe("rebase cleanup", () => {
   const rebaseBeforeReviewRoundModule = mockModule<typeof import('../src/adapters/review/rebase.js')>('../src/adapters/review/rebase.js', import.meta.url);
 
   test.afterEach(() => mock.restoreAll());
@@ -126,7 +127,7 @@ describe("task-1104 rebase cleanup", () => {
 });
 
 // ---- task-1272 standalone rebase (consolidated from test/task-1272-standalone-rebase.test.ts, TASK-2622.09) ----
-describe("task-1272 standalone rebase", () => {
+describe("standalone rebase", () => {
   /**
    * task-1272: standalone (Forgejo-disabled) pre-review rebase behavior.
    *

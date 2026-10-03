@@ -1,3 +1,4 @@
+// Historical regression provenance: TASK-2521.03, TASK-2419.
 import test, { describe, mock } from 'node:test';
 import assert from 'node:assert/strict';
 import { StatusCommandUseCase } from '../src/application/status-command-use-case.js';
@@ -456,7 +457,7 @@ describe('StatusCommandUseCase and status rendering', () => {
   });
 });
 
-describe('status projection of Mission brief and checkpoint (task-2521.03)', () => {
+describe("status projection of Mission brief and checkpoint", () => {
   /**
    * TASK-2521.03 — the Mission projection behind `px status` and `px status --json`.
    *
@@ -609,7 +610,7 @@ describe('status projection of Mission brief and checkpoint (task-2521.03)', () 
   });
 });
 
-describe('PR lookup follows the requested Mission branch (task-2419)', () => {
+describe("PR lookup follows the requested Mission branch", () => {
   // Regression test for task-2419: `px status <slug>` must report the Forgejo PR
   // of the *requested* mission's branch, not the PR of whatever branch the
   // command happens to run on.

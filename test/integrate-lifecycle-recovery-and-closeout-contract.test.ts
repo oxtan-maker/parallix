@@ -1,3 +1,4 @@
+// Historical regression provenance: TASK-2397, TASK-2517.
 // @ts-nocheck -- TASK-2328: partial test doubles from ESM seam migration; resolve in follow-up
 // Behavior-owned suite (TASK-2622.09, integration-ci): integration lifecycle recovery and closeout over
 // disposable Git topologies and a migrated SQLite store — active+approved lane recovery without
@@ -11,7 +12,7 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 
 // ---- task-2397 active+approved recovery (consolidated from test/task-2397-integrate-active-approved-recovery.test.ts, TASK-2622.09) ----
-describe("task-2397 active+approved recovery", async () => {
+describe("active+approved recovery", async () => {
   // Reproduction test for TASK-2397: an `active` Mission whose latest review round
   // is already `approved` (approval landed on the provider before the local status
   // advanced to `review`) must recover to `integration` under `px integrate`
@@ -278,7 +279,7 @@ describe("task-2397 active+approved recovery", async () => {
 });
 
 // ---- task-2517 CP-3 landed closeout (consolidated from test/task-2517-cp3-landed-closeout.test.ts, TASK-2622.09) ----
-describe("task-2517 CP-3 landed closeout", async () => {
+describe("CP-3 landed closeout", async () => {
   // TASK-2517 CP-3: a landed-but-stranded mission closes to `done`.
   //
   // Red before the fix: there is no closeout for a mission whose squash already

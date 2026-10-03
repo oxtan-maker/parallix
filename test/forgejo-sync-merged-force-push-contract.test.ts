@@ -1,3 +1,4 @@
+// Historical regression provenance: TASK-1049, TASK-1080.
 // Behavior-owned suite (TASK-2622.09, integration-ci): force-push safety and syncMerged hardening —
 // review-ref force push (task-1049) and stale-info retry capture (task-1080). Legacy case names unchanged.
 import test, { mock, describe } from 'node:test';
@@ -18,7 +19,7 @@ const { ReviewCommandUseCase } = await import('../src/application/review-command
 const { createReviewCommand } = await import('../src/interfaces/cli/review.js');
 
 // ---- task-1049 review ref force push (consolidated from test/task-1049-force-push.test.ts, TASK-2622.09) ----
-describe("task-1049 review ref force push", () => {
+describe("review ref force push", () => {
   const git = mockModule<typeof import('../src/adapters/git/git.js')>('../src/adapters/git/git.js', import.meta.url);
   // Sub-modules must be declared so they re-link with the facaded git binding
   // (forgejo.ts is a barrel that re-exports from these; without re-linking them,
@@ -462,7 +463,7 @@ describe("task-1049 review ref force push", () => {
 });
 
 // ---- task-1080 syncMerged hardening (consolidated from test/task-1080-sync-merged-hardening.test.ts, TASK-2622.09) ----
-describe("task-1080 syncMerged hardening", () => {
+describe("syncMerged hardening", () => {
   const syncMergedModule = mockModule<typeof import('../src/adapters/forgejo/forgejo.js')>('../src/adapters/forgejo/forgejo.js', import.meta.url);
 
   test.afterEach(() => mock.restoreAll());

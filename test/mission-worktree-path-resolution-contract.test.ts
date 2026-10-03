@@ -1,3 +1,4 @@
+// Historical regression provenance: TASK-1004, TASK-2407.
 // Behavior-owned suite (TASK-2622.09): mission path, worktree-topology, and Backlog task-file resolution
 // as the unit-tier application seams see them (task-1004 slug suffixes, task-2407 topology export,
 // backlog/ merge noise, worktree amplification, completed-duplicate reorder). Legacy case names unchanged.
@@ -24,7 +25,7 @@ const { snapshotWorktreeTopology } = await import('../src/adapters/git/worktree.
 const { repositoryId } = await import('../src/domain/repository.js');
 
 // ---- task-1004 task-file and slug-suffix resolution (consolidated from test/task_1004.test.ts, TASK-2622.09) ----
-describe("task-1004 task-file and slug-suffix resolution", () => {
+describe("task-file and slug-suffix resolution", () => {
   const resolveTaskFileModule = mockModule<typeof import('../src/adapters/backlog/backlog.js')>('../src/adapters/backlog/backlog.js', import.meta.url);
   const findMissionDirModule = mockModule<typeof import('../src/adapters/filesystem/mission-utils.js')>('../src/adapters/filesystem/mission-utils.js', import.meta.url);
 
@@ -312,7 +313,7 @@ describe("merge-noise classification of backlog paths", () => {
 });
 
 // ---- task-2407 snapshotWorktreeTopology composition export (consolidated from test/task-2407-snapshot-worktree-topology-runtime-repro.test.ts, TASK-2622.09) ----
-describe("task-2407 snapshotWorktreeTopology composition export", async () => {
+describe("snapshotWorktreeTopology composition export", async () => {
   /**
    * Runtime regression for task-2407: `snapshotWorktreeTopology` must be a
    * callable named export once the real CLI composition graph is loaded.

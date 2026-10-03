@@ -1,3 +1,4 @@
+// Historical regression provenance: TASK-2294, TASK-2295.
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -45,7 +46,7 @@ async function createDbWithSchema(): Promise<{
 // Tests
 // ---------------------------------------------------------------------------
 
-describe('SQLite import and audit contract (task-2294, task-2295)', () => {
+describe("SQLite import and audit contract ,", () => {
   // --- Blocklist import ---
 
   it('importBlocklist: transactional import from JSON', async () => {

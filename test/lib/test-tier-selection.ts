@@ -4,7 +4,7 @@
  * Extracted from test/lib/test-run-plan.ts so that coverage execution, the
  * runner, and the regression test all consume the SAME membership authority
  * instead of re-deriving it from filesystem globs or heuristics. See
- * test/task-2547-repro.test.ts. The CI/local arrays live only in
+ * test/coverage-tier-selection.test.ts. The CI/local arrays live only in
  * test/lib/test-categories.ts and are never copied here.
  */
 import fs from 'node:fs';
@@ -56,6 +56,8 @@ export function selectTierFiles(executionRoot: string): TierFileSelection {
   // through the explicit integration command rather than the hermetic default.
   const boundaryDependencyPattern = /\b(?:\w+\.)?(?:spawnSync|spawn|execSync|execFileSync|execFile|fork)\s*\(|git\s+(?:init|worktree|clone|commit|checkout|rebase|merge)|npm\s+(?:pack|install)|createServer|\bfetch\s*\(/;
   const knownIntegrationTestFiles = new Set([
+    'codex-approval-policy-config.test.ts',
+    'mission-classification-authority.test.ts',
     // Real SQLite/launcher boundaries whose setup lives behind fixture helpers.
     'review-status-backfill.integration.test.ts',
     'review-intervention-resume.integration.test.ts',
@@ -94,14 +96,14 @@ export function selectTierFiles(executionRoot: string): TierFileSelection {
     // does not scan, so they are declared here instead.
     'review-state.test.ts',
     'review-state-class.test.ts',
-    'task-1416-repro.test.ts',
+    'agent-exit-telemetry-classification.test.ts',
     // TASK-2326: relocated from default suite — these cross a real process,
     // Git, or packaging boundary and are not hermetic unit tests.
     'npm-pack-install-smoke.test.ts',
     'native-sea-executable-smoke.test.ts',
     'config-exit-status.test.ts',
     'task-label-persistence.test.ts',
-    'task-2318-temp-directory-leaks.test.ts',
+    'bootstrap-process-cleanup.test.ts',
     'release-publication-and-version-allocation-contract.test.ts',
     // TASK-2326 round 2: tui-spawn uses execFileSync (real process boundary)
     // and was relocated from the default suite to integration.
@@ -109,13 +111,13 @@ export function selectTierFiles(executionRoot: string): TierFileSelection {
     // This PTY smoke test launches the packaged CLI through a real child process.
     // These render the live Ink terminal surface with TTY-like streams. They
     // are renderer integration tests, not unit tests of the pure board logic.
-    'task-2313-repro.test.ts',
-    'task-2370-repro.test.ts',
+    'board-terminal-resize-lifetime.test.ts',
+    'board-live-work-refresh.test.ts',
     // Unit tests must not open a real SQL database or cross a process
     // boundary, even when the database is a temp file and the spawn is a
     // tiny script. The content heuristic above cannot see boundaries that
-    // live in test/fixtures/* helpers (review-state-db.ts, 
-    // task-2357-statistics-fixture.ts) or behind a promisified/execFile 
+    // live in test/fixtures/* helpers (review-state-db.ts,
+    // statistics-database.ts) or behind a promisified/execFile
     // wrapper, so every such file is declared here.
     'board-event-metrics-fixture.test.ts',
     'board-event-recorder.test.ts',
@@ -129,19 +131,19 @@ export function selectTierFiles(executionRoot: string): TierFileSelection {
     'sqlite-import-and-audit.integration.test.ts',
     'sqlite-repository-contract.integration.test.ts',
     'stats.test.ts',
-    'task-2220-repro.test.ts',
+    'review-state-durability.test.ts',
     // TASK-2239 drives the review-loop lifecycle over a filesystem fixture.
-    'task-2239-rereview-after-response.test.ts',
-    'task-2241-tmp-cleanup-repro.test.ts',
-    'task-2322-05-mission-sqlite-fixture.test.ts',
+    'review-response-relaunch.test.ts',
+    'agent-smoke-capture-cleanup.test.ts',
+    'mission-sqlite-use-cases.test.ts',
     'task-2322.04-mission-import.test.ts',
-    'task-2322.11-operator-state.test.ts',
-    'task-2322.12-stray-persistence.test.ts',
+    'operator-state-services.test.ts',
+    'persistence-cutover-boundaries.test.ts',
     // TASK-2337 records stage statistics against a migrated Mission database
     // to prove the authoritative classification required by the producer.
-    'task-2337-repro.test.ts',
-    'task-2339-aggregate-read-during-write.test.ts',
-    'task-2339-writes-outlive-close.test.ts',
+    'stats-custom-agent-model.test.ts',
+    'mission-aggregate-write-isolation.test.ts',
+    'mission-store-drain.test.ts',
     // TASK-2343 composes concrete filesystem adapters over a temporary repository.
     'presentation-board.integration.test.ts',
     // These workflow regressions create real temporary filesystem or SQLite
@@ -151,23 +153,23 @@ export function selectTierFiles(executionRoot: string): TierFileSelection {
     // task-2377.05 in the squash commit/landed-detection suite.
     'integrate-variant-b-landing-contract.test.ts',
     'integrate-squash-commit-and-landed-detection-contract.test.ts',
-    'task-2426-repro.test.ts',
-    'task-2345-repro.test.ts',
+    'board-draft-composition.test.ts',
+    'agent-block-authority.test.ts',
     'mission-handoff-reconcile-contract.test.ts',
-    'task-2357-certification.test.ts',
-    'task-2357.c-unknown-review-fix-rounds.test.ts',
-    'task-2363-review-fix-rounds.test.ts',
-    'task-2367-certification.test.ts',
-    'task-2367-regressions.test.ts',
-    'task-2367-repair.test.ts',
-    'task-2367-telemetry-schema.test.ts',
-    'task-2369-regressions.test.ts',
+    'board-metrics-persistence.test.ts',
+    'metrics-review-fix-observations.test.ts',
+    'measurement-review-fix-nullability.test.ts',
+    'lifecycle-completion-persistence.test.ts',
+    'lifecycle-telemetry-completion-authority.test.ts',
+    'lifecycle-historical-completion-repair.test.ts',
+    'telemetry-completion-schema.test.ts',
+    'integration-landed-completion.test.ts',
     'board-shutdown-signals.test.ts',
     'active-invocation-contract.test.ts',
     'current-work-operation-identity.test.ts',
     // TASK-2566 creates temporary Git repositories to exercise mission Sonar
     // classification; the fixture helper hides that boundary from the scan.
-    'task-2566-sonar-boundary-repro.test.ts',
+    'sonar-short-branch-confirmation.test.ts',
     // TASK-2413 commits real temporary Git repositories through
     // test/fixtures/git-repository.ts (TASK-2622.04), which hides the boundary
     // from the scan.
@@ -178,53 +180,53 @@ export function selectTierFiles(executionRoot: string): TierFileSelection {
     // TASK-2585 verifies provider publication proofs through injected API
     // responses, so it is integration-only even without a visible boundary
     // token in its test source.
-    'task-2585-github-publication-proof.test.ts',
-    'task-2585-workflow-proof-reuse.test.ts',
+    'github-publication-proof.test.ts',
+    'github-release-proof-reuse.test.ts',
     // TASK-2580 crosses the real active-command and loopback web boundaries.
     // TASK-2420: integrate recovery repro by the assigned reviewer. It builds
     // throwaway git repos in a temp dir to stage the stranded-lane scenario,
     // so it crosses a real git boundary like the TASK-2397 recovery repro and belongs in integration.
-    'task-2420-integrate-recovery-assigned-reviewer.test.ts',
+    'integration-provider-approval-recovery.test.ts',
     // TASK-2438 composes concrete board readers over temporary repository
     // files, which invokes the worktree/Git topology boundary.
-    'task-2438-worktree-board-repro.test.ts',
+    'board-worktree-mission-scope.test.ts',
     // TASK-2582: opens a real migrated SQLite operator database in a temp
     // directory and drives the real MissionLifecycleService and review
     // persistence boundaries. The SQLite boundary is not visible to the
     // content heuristic, so the consolidated suite (which also carries the
     // TASK-2322.05 Mission use-case cases) is declared here.
     'mission-use-case-persistence-contract.test.ts',
-    'task-2582-repro.test.ts',
+    'workflow-repair-lane-boundaries.test.ts',
     // TASK-2514 opens a migrated SQLite Mission store and drives the real
     // MissionLifecycleService through the approve path.
-    'task-2514-human-approve-after-active-repair.test.ts',
+    'review-active-repair-approval.test.ts',
     // TASK-2601 opens a migrated SQLite Mission store and measurement store.
-    'task-2601-repro.test.ts',
+    'mission-classification-authority.test.ts',
     // TASK-2609 seeds a real SQLite operator database and drives the production
     // `px classification set` composition. The SQLite boundary is not visible to
     // the content heuristic above, so this CLI-composition test is declared here
     // and registered in INTEGRATION_CI_TESTS so it runs in the integration tier.
-    'task-2609-classification-set.test.ts',
+    'mission-classification-update.test.ts',
     // TASK-2614 opens a real migrated SQLite Mission store to exercise native
     // review start and recovery, so it belongs outside the hermetic unit tier.
-    'task-2614-review-start-recovery.test.ts',
+    'review-native-mission-recovery.test.ts',
     // TASK-2492 drives the composed integration command against an on-disk
     // repository fixture and a real lifecycle state machine. Its injected
     // external seams keep the assertions deterministic, but that composition
     // belongs to the integration tier rather than the hermetic unit suite.
-    'task-2492-integrate-gate-bounce.test.ts',
+    'integration-gate-repair-routing.test.ts',
     // TASK-2598: run the real `bwrap` binary through
     // test/lib/claude-credential-fixture.ts, where the content heuristic
     // cannot see the spawn, so both files are declared here.
-    'task-2598-claude-credential-cell.test.ts',
-    'task-2598-repro.test.ts',
+    'claude-credential-refresh-isolation.test.ts',
+    'claude-sandbox-credential-persistence.test.ts',
     // TASK-2620: a full CLI composition (real Git + SQLite) with only the agent
     // launcher, Forgejo HTTP, and gate runner injected. The clean-runner Git and
     // SQLite boundaries are not visible to the content heuristic, so this
     // integration-ci test must be excluded from the CPU-budgeted unit tier.
-    'task-2620-integration-repair-loop-repro.test.ts',
+    'integration-repair-review-loop.test.ts',
     // TASK-2622.13: windowed default FLOW cohort over the real sqlite operator
-    // database via test/fixtures/task-2357-statistics-fixture.ts. The fixture
+    // database via test/fixtures/statistics-database.ts. The fixture
     // hides the sqlite boundary from the content heuristic, so this integration-ci
     // test is declared here rather than silently inheriting unit membership.
     'cohort-windowing.test.ts',

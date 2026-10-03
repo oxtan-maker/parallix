@@ -1,3 +1,4 @@
+// Historical regression provenance: TASK-2533, TASK-2534, TASK-2537, TASK-2349.
 // Behavior-owned suite (TASK-2622.09, integration-ci): squash landing payload and backlog noise over
 // disposable Git topologies — quoted/special-character pathspecs (task-2533), stale Backlog copies
 // (task-2534), task files absent from the base branch (task-2537), the stage/commit race (task-2349),
@@ -25,7 +26,7 @@ const fmt = await import('../src/application/presentation/cli-format.js');
 const { checkBacklogIntegrity } = await import('../src/adapters/backlog/task-file-io.js');
 
 // ---- task-2533 squash payload pathspec quoting (consolidated from test/task-2533-squash-payload-pathspec-quotes.test.ts, TASK-2622.09) ----
-describe("task-2533 squash payload pathspec quoting", () => {
+describe("squash payload pathspec quoting", () => {
   // TASK-2533: the landed squash captures its payload with
   // `git diff --cached --name-only -z --`, which emits git's RAW NUL-delimited,
   // unquoted paths (NUL-delimited so special filenames — backslash, non-ASCII —
@@ -204,7 +205,7 @@ describe("task-2533 squash payload pathspec quoting", () => {
 });
 
 // ---- task-2534 stale Backlog copy at landing (consolidated from test/task-2534-stale-backlog-copy-landing-repro.test.ts, TASK-2622.09) ----
-describe("task-2534 stale Backlog copy at landing", () => {
+describe("stale Backlog copy at landing", () => {
   // TASK-2534: a landed squash must not resurrect stale `backlog/tasks/` copies.
   //
   // Shape mirrors `mission/task-2489` / `mission/task-2478`: the mission branch's
@@ -352,7 +353,7 @@ describe("task-2534 stale Backlog copy at landing", () => {
 });
 
 // ---- task-2537 unstaged task path at closeout (consolidated from test/task-2537-squash-closeout-unstaged-task-path.test.ts, TASK-2622.09) ----
-describe("task-2537 unstaged task path at closeout", () => {
+describe("unstaged task path at closeout", () => {
   // TASK-2537: the landed squash names its payload explicitly
   // (`git commit --only -- <paths>`), and git fails-closed when a named pathspec
   // matches nothing it knows. Closeout moves `backlog/tasks/<slug>` to
@@ -523,7 +524,7 @@ describe("task-2537 unstaged task path at closeout", () => {
 });
 
 // ---- task-2349 stage/commit race (consolidated from test/task-2349-integrate-stage-commit-race.test.ts, TASK-2622.09) ----
-describe("task-2349 stage/commit race", () => {
+describe("stage/commit race", () => {
   const gitModule = mockModule<typeof import('../src/adapters/git/git.js')>('../src/adapters/git/git.js', import.meta.url);
   const missionUtils = mockModule<typeof import('../src/adapters/filesystem/mission-utils.js')>('../src/adapters/filesystem/mission-utils.js', import.meta.url);
   const backlog = mockModule<typeof import('../src/adapters/backlog/backlog.js')>('../src/adapters/backlog/backlog.js', import.meta.url);

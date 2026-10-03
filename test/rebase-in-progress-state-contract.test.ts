@@ -1,3 +1,4 @@
+// Historical regression provenance: TASK-2520.
 // Behavior-owned suite (TASK-2622.09): a paused rebase is never reported as a clean completion — the
 // integration-time rebase inspects the mission worktree (task-2520 SC4/SC7) and `px rebase` reports
 // clean completion only when no rebase is active (task-2520 SC6). The rebase-workflow module is mocked
@@ -12,7 +13,7 @@ mockModule('../src/application/rebase-workflow.js', import.meta.url);
 await installModuleMocks();
 
 // ---- task-2520 integration rebase state (consolidated from test/task-2520-integrate-rebase-state.test.ts, TASK-2622.09) ----
-describe("task-2520 integration rebase state", async () => {
+describe("integration rebase state", async () => {
   // TASK-2520 SC7 / AC8: the integration-time rebase must inspect the mission
   // worktree for an active rebase, not the base worktree. The rebase runs in the
   // mission worktree, so a mid-rebase state there is the only one that matters;
@@ -130,7 +131,7 @@ describe("task-2520 integration rebase state", async () => {
 });
 
 // ---- task-2520 px rebase in-progress (consolidated from test/task-2520-rebase-inprogress.test.ts, TASK-2622.09) ----
-describe("task-2520 px rebase in-progress", async () => {
+describe("px rebase in-progress", async () => {
   // TASK-2520 SC6 / AC7: `px rebase` must never report "Rebase completed cleanly"
   // while the mission worktree still has a rebase in progress. The shared rebase
   // workflow treats a non-empty `rebase --show-current` after a status-0

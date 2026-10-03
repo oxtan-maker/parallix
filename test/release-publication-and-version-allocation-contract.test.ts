@@ -1,3 +1,4 @@
+// Historical regression provenance: TASK-2509, TASK-2319.
 // Behavior-owned suite (TASK-2622.17, integration-ci): release version allocation, the release workflow, and the
 // published-package metadata guards. Crosses a real Git/process boundary through temporary repositories and
 // `git ls-files`, using only what a clean GitHub-hosted runner provides. Legacy case names unchanged.
@@ -14,7 +15,7 @@ import os from 'node:os';
 import path from 'node:path';
 
 // ---- task-2509 local version allocation lands in the one mission commit ----
-describe('task-2509 local version allocation lands in the one mission commit', () => {
+describe("local version allocation lands in the one mission commit", () => {
   const root = path.join(import.meta.dirname, '..');
 
   // Runs the real bump script against a throwaway repo: branch `main` models the
@@ -86,7 +87,7 @@ describe('task-2509 local version allocation lands in the one mission commit', (
 });
 
 // ---- task-2509 release workflow trusts only the main-push SHA ----
-describe('task-2509 release workflow trusts only the main-push SHA', () => {
+describe("release workflow trusts only the main-push SHA", () => {
   const workflow = fs.readFileSync(path.join(import.meta.dirname, '..', '.github/workflows/ci-required.yml'), 'utf8');
 
   test('task-2509: release trusts only the successful main-push SHA with release-only OIDC permissions', () => {
@@ -112,7 +113,7 @@ describe('task-2509 release workflow trusts only the main-push SHA', () => {
 });
 
 // ---- task-2319 NOTICES is an untracked, ignored, published artifact ----
-describe('task-2319 NOTICES is an untracked, ignored, published artifact', () => {
+describe("NOTICES is an untracked, ignored, published artifact", () => {
   // task-2319 — regression test: root NOTICES must be untracked and ignored by
   // an exact root-level .gitignore entry, while nested NOTICES files are not hidden.
   //

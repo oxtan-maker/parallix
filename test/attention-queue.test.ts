@@ -1,3 +1,4 @@
+// Historical regression provenance: TASK-2444.
 // Attention queue contract: which missions the board asks a human (or the supervisor) to look at, how
 // they rank, and what source facts back each reason.
 //
@@ -164,7 +165,7 @@ test('attention a done mission is not stranded', async () => {
 });
 
 // ── Attention queue ranking and sources — TASK-2444 (was task-2444-attention-queue-repro.test.ts) ──
-describe('Attention queue ranking and sources — TASK-2444', () => {
+describe("Attention queue ranking and sources —", () => {
   const repo = repositoryId('task-2444');
 
   function makeCard(

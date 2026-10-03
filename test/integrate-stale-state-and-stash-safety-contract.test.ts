@@ -1,3 +1,4 @@
+// Historical regression provenance: TASK-2532, TASK-1410, TASK-2212, TASK-2489.
 // Behavior-owned suite (TASK-2622.09, integration-ci): stale integration state and stash safety over
 // disposable Git topologies — dead rebase and marker-stash repair (task-2532), stash-pop payload collisions
 // (task-1410), and interrupted e2e fixtures leaving no branch or worktree (task-2212). Legacy case names unchanged.
@@ -19,7 +20,7 @@ const { resolveWorktree } = await import('../src/adapters/git/worktree.js');
 const { resolveCanonicalRepositoryId } = await import('../src/adapters/git/repository-identity.js');
 
 // ---- task-2532 stale integration state repair (consolidated from test/task-2532-stale-integration-state-repro.test.ts, TASK-2622.09) ----
-describe("task-2532 stale integration state repair", () => {
+describe("stale integration state repair", () => {
   // so it crosses the git boundary and runs in the integration layer.
 
   const { mock } = test;
@@ -233,7 +234,7 @@ describe("task-2532 stale integration state repair", () => {
 });
 
 // ---- task-1410 stash-pop corruption (consolidated from test/integrate-task-1410-stash-pop-corruption.test.ts, TASK-2622.09) ----
-describe("task-1410 stash-pop corruption", () => {
+describe("stash-pop corruption", () => {
   const missionUtils = mockModule<typeof import('../src/adapters/filesystem/mission-utils.js')>('../src/adapters/filesystem/mission-utils.js', import.meta.url);
   const printIntegrationPreflightModule = mockModule<typeof import('../src/adapters/cli/commands/integrate.js')>('../src/adapters/cli/commands/integrate.js', import.meta.url);
 
@@ -787,7 +788,7 @@ describe("task-1410 stash-pop corruption", () => {
 });
 
 // ---- task-2212 interrupted fixtures leave no residue (consolidated from test/task-2212-repro.test.ts, TASK-2622.09) ----
-describe("task-2212 interrupted fixtures leave no residue", () => {
+describe("interrupted fixtures leave no residue", () => {
   const repoRoot = path.resolve(import.meta.dirname, '..');
 
   function removeTestRepository(root) {
@@ -919,7 +920,7 @@ fs.writeFileSync = function (file, data, ...rest) {
 });
 
 // ---- task-2489 lead from a mission worktree (consolidated from test/task-2489-lead-from-worktree.test.ts, TASK-2622.09) ----
-describe("task-2489 lead from a mission worktree", () => {
+describe("lead from a mission worktree", () => {
   // task-2489: `px lead` is started from any worktree, not only the primary
   // checkout. Everything it acts through — the mission worktree it presses a
   // command in or launches a recovery agent in, and the repository its operator

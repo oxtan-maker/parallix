@@ -21,8 +21,9 @@ Push mission branches only to `review` (Forgejo), never to `origin` (GitHub). On
   evidence (TASK-2622.19)` to the existing checkpoint-validation suite.
 - Create a cohesive, contract-named suite only when no owner exists; explain its
   boundary. Example: a new webhook-signature contract warrants its own suite.
-  Permit legacy task-named migration debt and legitimate new contracts; reject
-  new task-local duplicates. Do not force unrelated behaviors into giant suites.
+  Reject numeric task-ID filenames for executable suites, case modules and
+  helpers; preserve legitimate task-domain names and regression IDs in cases
+  or comments. Do not force unrelated behaviors into giant suites.
 - Use the narrowest tier proving the behavior (ADR 0057): `unit` for in-process
   tests with doubles and isolated state; adapter integration for real boundaries
   (`integration-ci` when a clean hosted runner supplies all dependencies,
@@ -44,6 +45,9 @@ Push mission branches only to `review` (Forgejo), never to `origin` (GitHub). On
 - Other than that, do not run full test gates when a focused test run is enough, parallix will run the complete test gates automatically at appropriate times.
 - `px integrate` uses `adapters.gates.preIntegration` in `workflow.config.json` as its mandatory gate plan. `config/integration-pipelines.json` is for the standalone `./scripts/verify-local.sh integrate` script.
 - `px integrate` skips re-running high-level integration hooks a mission already ran green: when a mission was bounced from the integration lane back to active and its fix was validated green by those tests, the next integrate run skips the already-validated hooks for the same commit, and falls back to the full suite when the branch has moved or no validation is recorded. The skip is a sha-keyed whitelist decided purely from the recorded validation, with no repo, branch, or mission special-casing.
+- Retune CPU budgets only from current CPU profiles with explicit margin.
+  Integration cases and suites, including hook contracts and their waited
+  children, must retain finite CPU budgets. Wall deadlines remain hang bounds.
 - Unit tests must finish within 500 ms alone; check with `npm test -- --unit-test-headroom`. Mock external boundaries and do not contact real Forgejo. Default `npm test` has a 1,000 ms per-test cap.
 - Read ADR 0057 before choosing or changing test selection. Tiers: `unit`, `integration-ci`, `integration-local`, `agent-e2e`.
 - Classify every new integration test in `test/lib/test-categories.ts`. Put it in the CI list, or in the local-only list with the missing GitHub-runner dependency named.

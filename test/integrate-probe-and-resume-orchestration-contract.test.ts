@@ -1,3 +1,4 @@
+// Historical regression provenance: TASK-1039, TASK-2243, TASK-2520, TASK-2506.
 // Behavior-owned suite (TASK-2622.09): `px integrate` orchestration over injected Git, Backlog, Forgejo,
 // verification and stats ports — argument/preflight/gate stops (task-1039), probe-merge abort without
 // review-task promotion (task-2243), landing resume after a failed sync-merged (task-2520), and the
@@ -27,7 +28,7 @@ mockModule('../src/adapters/cli/commands/integrate-gates.js', import.meta.url);
 await installModuleMocks();
 
 // ---- task-1039 integrate orchestration and gates (consolidated from test/task-1039-integrate.test.ts, TASK-2622.09) ----
-describe("task-1039 integrate orchestration and gates", () => {
+describe("integrate orchestration and gates", () => {
   const _require = createRequire(import.meta.url);
   const gitModule = mockModule<typeof import('../src/adapters/git/git.js')>('../src/adapters/git/git.js', import.meta.url);
   const missionUtilsModule = mockModule<typeof import('../src/adapters/filesystem/mission-utils.js')>('../src/adapters/filesystem/mission-utils.js', import.meta.url);
@@ -446,7 +447,7 @@ describe("task-1039 integrate orchestration and gates", () => {
 });
 
 // ---- task-2243 probe abort without promotion (consolidated from test/task-2243-probe-abort-promotion.test.ts, TASK-2622.09) ----
-describe("task-2243 probe abort without promotion", () => {
+describe("probe abort without promotion", () => {
   // Module dependencies are replaced with mock.method() through the ESM-native
   // seam in testS2/lib/module-mock.ts: an ESM namespace object is read-only, so the
   // helper registers a mutable delegating facade per module URL instead.
@@ -562,7 +563,7 @@ describe("task-2243 probe abort without promotion", () => {
 });
 
 // ---- task-2520 resume landing closeout (consolidated from test/task-2520-resume-landing.test.ts, TASK-2622.09) ----
-describe("task-2520 resume landing closeout", () => {
+describe("resume landing closeout", () => {
   // TASK-2520 SC5 / AC6: a retry after a failed sync-merged has the mission squash
   // already on the local base. `px integrate` must skip the integration rebase and
   // resume the landing closeout (finishLanding / sync-merged) instead of replaying
@@ -681,7 +682,7 @@ describe("task-2520 resume landing closeout", () => {
 });
 
 // ---- task-2506 behind-primary integrate (consolidated from test/task-2506-integrate-rebase.test.ts, TASK-2622.09) ----
-describe("task-2506 behind-primary integrate", () => {
+describe("behind-primary integrate", () => {
   // TASK-2506 regression: `px integrate` must rebase the mission onto its
   // primary/parent branch before the probe merge and gates. Before the fix the
   // probe merge dead-ends with "Rebase the mission branch before integrating";

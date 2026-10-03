@@ -1,4 +1,3 @@
-// Historical regression provenance: task-2521.06.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readLegacyTaskContent } from '../src/adapters/backlog/legacy-task-content.js';

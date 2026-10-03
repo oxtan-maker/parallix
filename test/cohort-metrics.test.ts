@@ -1,3 +1,4 @@
+// Historical regression provenance: TASK-2347.09.
 /**
  * Cohort behavior for the metrics slice (TASK-2622.13 consolidation).
  *
@@ -489,7 +490,7 @@ test('px stats routes the cohorts subcommand without touching the weekly or rang
 });
 
 // ── Review bounce rate — TASK-2347.09 SC4 (was task-2347.09-bounce-rate.test.ts) ──
-describe('Review bounce rate — TASK-2347.09 SC4', () => {
+describe("Review bounce rate — SC4", () => {
   // ---------------------------------------------------------------------------
   // task-2347.09 SC4 — the review bounce rate is a lane fact
   //

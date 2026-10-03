@@ -1,3 +1,4 @@
+// Historical regression provenance: TASK-2520.
 // Behavior-owned suite (TASK-2622.09): Forgejo base synchronisation safety over recorded Git/Forgejo
 // doubles — stale-info push detection (task-1080), syncMerged retry/force fallback, and diverged-base
 // reconciliation (task-2520). Legacy case names unchanged.
@@ -201,7 +202,7 @@ describe("syncMerged retry on stale info", () => {
 });
 
 // ---- task-2520 diverged base reconcile (consolidated from test/task-2520-diverged-base-reconcile.test.ts, TASK-2622.09) ----
-describe("task-2520 diverged base reconcile", () => {
+describe("diverged base reconcile", () => {
   /**
    * task-2520 — Forgejo base reconciliation before sync-merged.
    *

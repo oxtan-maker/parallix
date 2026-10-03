@@ -1,3 +1,4 @@
+// Historical regression provenance: TASK-2322.02.
 // Domain architecture guards: src/domain stays free of infrastructure imports,
 // excludes Attempt, and every consumer requirement stays traced to real code.
 //
@@ -91,7 +92,7 @@ describe('Domain import boundary (SC1)', () => {
   });
 });
 
-describe('Attempt exclusion guard (TASK-2322.02)', () => {
+describe("Attempt exclusion guard", () => {
   // TASK-2322.02 CP 3 — lock the "Attempt is not required" branch.
   //
   // CP 1 traced every launch, retry, failover, usage/statistics, review, and
@@ -354,7 +355,7 @@ describe('Attempt exclusion guard (TASK-2322.02)', () => {
   });
 });
 
-describe('Consumer-to-domain requirements (TASK-2322.02)', () => {
+describe("Consumer-to-domain requirements", () => {
   // TASK-2322.02 CP 1 — the consumer → domain-concept mapping must stay true.
   //
   // These tests fail if a consumer family disappears from the mapping, if a

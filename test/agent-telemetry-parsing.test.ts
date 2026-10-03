@@ -1,3 +1,4 @@
+// Historical regression provenance: TASK-1251, TASK-1288.
 // Agent telemetry parsing contract: Codex rollout JSONL and Vibe session meta extraction.
 //
 // Behavior-owned suite (TASK-2622.11). Legacy case names are unchanged; each section keeps its
@@ -14,7 +15,7 @@ import { parseCodexRollout, collectRolloutFiles, extractCodexTelemetry, codexSes
 import { mkdtemp as registeredMkdtemp } from './helpers/temp-dir.js';
 import { parseVibeMeta, extractVibeTelemetry, getVibeProviderModel } from '../src/adapters/agents/vibe-telemetry.js';
 
-describe('Codex rollout telemetry (task-1251)', () => {
+describe("Codex rollout telemetry", () => {
   'use strict';
 
   // Minimal but schema-faithful rollout JSONL, modelled on the real Codex
@@ -156,7 +157,7 @@ describe('Codex rollout telemetry (task-1251)', () => {
   });
 });
 
-describe('Vibe telemetry (task-1288)', () => {
+describe("Vibe telemetry", () => {
   // ---------- parseVibeMeta ----------
 
   // Sample meta.json content for fixture-backed tests.

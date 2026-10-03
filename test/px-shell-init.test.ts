@@ -1,3 +1,4 @@
+// Historical regression provenance: TASK-1390.
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -238,7 +239,7 @@ describe('px shell-init function', () => {
   });
 });
 
-describe('built px.mjs shell-init shebang (task-1390)', () => {
+describe("built px.mjs shell-init shebang", () => {
   /**
    * Reproduction test for task-1390: px shell-init bash broken after
    * TypeScript conversion.

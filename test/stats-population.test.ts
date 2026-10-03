@@ -1,3 +1,4 @@
+// Historical regression provenance: TASK-2357.
 /**
  * Completed-mission population for the metrics slice (TASK-2622.13
  * consolidation).
@@ -25,7 +26,7 @@ import {
   insertUsageRow,
   laneEvent,
   withStatisticsDatabase,
-} from './fixtures/task-2357-statistics-fixture.js';
+} from './fixtures/statistics-database.js';
 
 // ---------------------------------------------------------------------------
 // TASK-2357 defect D — one completed-mission population.
@@ -79,7 +80,7 @@ async function seed(
   });
 }
 
-describe('TASK-2357 defect D: lifecycle `done` is the only completion definition', () => {
+describe("defect D: lifecycle `done` is the only completion definition", () => {
   it('reports exactly the lifecycle-completed missions as outcomes', async () => {
     await withStatisticsDatabase(async ({ db, laneEventRepo, usageRepo }) => {
       await seed(laneEventRepo, db);
