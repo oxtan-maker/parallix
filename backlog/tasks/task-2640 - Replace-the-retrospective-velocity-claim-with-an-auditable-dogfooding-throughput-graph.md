@@ -40,6 +40,8 @@ vs.
 actual completed Parallix missions per week
 ```
 
+The weeks needs to be completed weeks starting from Mondays only so next time we recalculate graph numbers are stable if we do it on different day of the week. This differs to how stats usualy do it, ensure current use cases on stats continue to work, do not generate a completly new statistics infrastructure.
+
 The graph should make the observed throughput visible without converting one maintainer's dogfooding data into a universal productivity claim.
 
 The data, definitions, and graph-generation code must be inspectable.
