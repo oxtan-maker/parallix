@@ -276,7 +276,7 @@ test('upsertMeasurementRow accepts unknown classification rows and weekly report
       today: '2026-06-23',
       missionFlow: [{ repo: 'parallix', mission: 'task-unknown', closedAt: '2026-06-23T00:00:00Z', labels: ['unknown'], implementer: null }],
     });
-    assert.match(report, /# unknown missions/);
+    assert.match(report, /# unclassified missions/);
     assert.match(report, /\b1\b/);
   } finally {
     fs.rmSync(path.dirname(dbFile), { recursive: true, force: true });
@@ -415,10 +415,9 @@ test('stats command defaults to the shared PARALLIX_HOME database across target 
      { date: '2026-05-05', mission: 'task-d', classification: 'user_value', implementer: 'custom', pr_fix_rounds: '0', completedForTest: 'yes' },
    ], { today: '2026-05-18' });
 
-  assert.match(report, /Agent telemetry — current week \(2026-05-12 → 2026-05-18\)/);
-  assert.match(report, /Agent telemetry — previous week \(2026-05-05 → 2026-05-11\)/);
-  assert.match(report, /# missions with telemetry\s+# user value missions\s+# AI SDLC missions/);
-  assert.match(report, /2\s+1\s+1/);
+  assert.doesNotMatch(report, /Agent telemetry/);
+  assert.match(report, /Mission flow — current week \(2026-05-12 → 2026-05-18\)/);
+  assert.match(report, /Mission flow — previous week \(2026-05-05 → 2026-05-11\)/);
   assert.match(report, /Agent performance this week \(2026-05-12 → 2026-05-18\)/);
   assert.match(report, /codex\s+1\s+2\.00/);
   assert.match(report, /gemini\s+1\s+1\.00/);
@@ -438,15 +437,14 @@ test('renderRangeStatsReport filters inclusive boundary dates and summarizes mis
 
   const plain = __mm2.stripAnsi(report);
   assert.match(plain, /Mission flow \(2026-05-01 → 2026-05-31\)/);
-  assert.match(plain, /# missions with telemetry\s+# user value missions\s+# AI SDLC missions/);
-  assert.match(plain, /3\s+2\s+1/);
+  assert.doesNotMatch(plain, /Agent telemetry/);
   assert.match(plain, /Agent performance \(2026-05-01 → 2026-05-31\)/);
   assert.match(plain, /codex\s+2\s+3\.00/);
   assert.match(plain, /gemini\s+1\s+1\.00/);
   assert.doesNotMatch(plain, /claude/);
 });
 
-test('renderRangeStatsReport keeps end-day lifecycle completions and independent telemetry', () => {
+test('renderRangeStatsReport keeps end-day lifecycle completions', () => {
   const report = __mm2.stripAnsi(renderRangeStatsReport([
     { date: '2026-05-31', repo: 'r', mission: 'task-telemetry', classification: 'ai_sdlc', implementer: 'codex' },
   ], {
@@ -456,7 +454,7 @@ test('renderRangeStatsReport keeps end-day lifecycle completions and independent
   }));
 
   assert.match(report, /# completed missions\s+# user value missions\s+# AI SDLC missions[\s\S]*\n1\s+1\s+0/);
-  assert.match(report, /# missions with telemetry\s+# user value missions\s+# AI SDLC missions[\s\S]*\n1\s+0\s+1/);
+  assert.doesNotMatch(report, /# missions with telemetry/);
 });
 
 test('renderRangeStatsReport rejects missing, malformed, and inverted range arguments', () => {
@@ -763,11 +761,9 @@ test('recordIntegrationStats returns the unchanged weekly report labels for inte
     });
 
     const report = __mm2.stripAnsi(result.report);
-    assert.match(report, /Agent telemetry — current week \(2026-05-12 → 2026-05-18\)/);
-    assert.match(report, /Agent telemetry — previous week \(2026-05-05 → 2026-05-11\)/);
+    assert.doesNotMatch(report, /Agent telemetry/);
     assert.match(report, /Agent performance this week \(2026-05-12 → 2026-05-18\)/);
     assert.match(report, /Agent performance previous week \(2026-05-05 → 2026-05-11\)/);
-    assert.match(report, /# missions with telemetry\s+# user value missions\s+# AI SDLC missions/);
     assert.match(report, /Agent family\s+# missions as implementer\s+Average PR fix rounds to complete mission/);
     assert.doesNotMatch(report, /Mission flow \(2026-05-12 → 2026-05-18\)/);
   } finally {
@@ -887,7 +883,6 @@ test('task-1301: renderRangeStatsReport counts unique missions when a mission ha
   ];
   const report = renderRangeStatsReport(rows, { from: '2026-06-10', to: '2026-06-10' });
   const plain = __mm2.stripAnsi(report);
-  assert.match(plain, /2\s+1\s+1/); // 2 missions total, 1 user_value, 1 ai_sdlc
   assert.match(plain, /codex\s+1\s+2\.00/); // 1 unique codex mission with pr_fix_rounds=2
   assert.match(plain, /\bcustom\s+1\s+1\.00/); // 1 unique custom mission with pr_fix_rounds=1
 });
@@ -902,7 +897,6 @@ test('task-1314: renderRangeStatsReport counts same mission separately across re
   ];
   const report = renderRangeStatsReport(rows, { from: '2026-06-10', to: '2026-06-10' });
   const plain = __mm2.stripAnsi(report);
-  assert.match(plain, /2\s+1\s+1/); // two repo-distinct missions with the same slug
   assert.match(plain, /codex\s+1\s+3\.00/); // repo-distinct codex mission with pr_fix_rounds=3
   assert.match(plain, /\bcustom\s+1\s+1\.00/); // repo-distinct custom mission with pr_fix_rounds=1
 });
@@ -1107,60 +1101,6 @@ test('summarizeAgentWindow reports the stored fix-round count, and honors an inj
     deriveFixRoundsFn: () => 5,
   });
   assert.equal(injected[0].averageFixRounds, '5.00', 'an injected derivation overrides the stored value');
-});
-
-// task-1342: weekly classification count reconciliation regression
-
-test('task-1342: weekly summary total equals user_value + ai_sdlc even with unclassified missions', () => {
-  // Simulate the task-1339 scenario: 35 missions in the window, but only 3 have
-  // user_value and 12 have ai_sdlc. The remaining 20 have empty/null classification.
-  // The total must equal user_value + ai_sdlc (15), not 35.
-  const rows = [];
-  for (let i = 0; i < 3; i++) {
-    rows.push({
-      date: `2026-06-${20 + i}`, mission: `task-u${i}`, classification: 'user_value',
-      implementer: 'codex', pr_fix_rounds: '0', completedForTest: 'yes',
-    });
-  }
-  for (let i = 0; i < 12; i++) {
-    rows.push({
-      date: `2026-06-${20 + (i % 5)}`, mission: `task-a${i}`, classification: 'ai_sdlc',
-      implementer: 'custom', pr_fix_rounds: '1', completedForTest: 'yes',
-    });
-  }
-  // 20 missions with empty/null/unrecognized classification
-  for (let i = 0; i < 20; i++) {
-    rows.push({
-      date: `2026-06-${20 + (i % 5)}`, mission: `task-x${i}`, classification: '',
-      implementer: 'claude', pr_fix_rounds: '0', completedForTest: 'yes',
-    });
-  }
-
-  const report = renderWeeklyStatsReport(rows, { today: '2026-06-24' });
-  const plain = __mm2.stripAnsi(report);
-
-  // The current week (2026-06-18 to 2026-06-24) contains all 35 rows.
-  // total should equal userValue + aiSdlc = 3 + 12 = 15, NOT 35.
-  assert.match(plain, /# missions with telemetry\s+# user value missions\s+# AI SDLC missions/);
-  assert.match(plain, /15\s+3\s+12/);
-});
-
-test('task-1342: weekly summary total equals user_value + ai_sdlc + unknown when some missions have invalid classification strings', () => {
-  const rows = [
-    { date: '2026-06-20', mission: 'task-good1', classification: 'user_value', implementer: 'codex', pr_fix_rounds: '0', completedForTest: 'yes' },
-    { date: '2026-06-20', mission: 'task-good2', classification: 'ai_sdlc', implementer: 'custom', pr_fix_rounds: '1', completedForTest: 'yes' },
-    { date: '2026-06-20', mission: 'task-bad1', classification: 'USER_VALUE', implementer: 'claude', pr_fix_rounds: '0', completedForTest: 'yes' },
-    { date: '2026-06-20', mission: 'task-bad2', classification: 'unknown', implementer: 'gemini', pr_fix_rounds: '0', completedForTest: 'yes' },
-    { date: '2026-06-20', mission: 'task-bad3', classification: null, implementer: 'custom', pr_fix_rounds: '0', completedForTest: 'yes' },
-  ];
-
-  const report = renderWeeklyStatsReport(rows, { today: '2026-06-24' });
-  const plain = __mm2.stripAnsi(report);
-
-  // 'USER_VALUE' is lowercased by normalizeClassification, so it counts as user_value.
-  // 'unknown' is a valid classification and counts toward the total; null does not.
-  // So: total=4, userValue=2, aiSdlc=1, unknown=1.
-  assert.match(plain, /4\s+2\s+1\s+1/);
 });
 
 // task-1342: mixed-agent per-mission phase telemetry regression

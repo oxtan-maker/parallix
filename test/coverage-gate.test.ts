@@ -15,7 +15,7 @@ test('coverage-gate includes its own test file in authoritative discovery', () =
   assert.ok(basenames.includes('coverage-gate.test.ts'));
   assert.ok(basenames.includes('e2e-real-agent-smoke.test.ts'));
   assert.ok(!coverageTestFiles().some(file => /e2e-(?:real-agent-smoke|mission-lifecycle)\.test\.ts$/.test(file)));
-  assert.ok(coverageTestFiles().some(file => /task-1209-review-loop\.test\.ts$/.test(file)));
+  assert.ok(coverageTestFiles().some(file => /review-loop-presentation-contract\.test\.ts$/.test(file)));
 });
 
 test('native coverage keeps the historical c8 contract: src denominator, unloaded files, exclusions, source maps', () => {

@@ -134,6 +134,18 @@ export function createIntegrateWorkflow(ports: IntegrateWorkflowPorts) {
     return missionLoad;
   }
 
+  /** Fail closed when the revision an approval names cannot be inspected. */
+  function requireReadableApprovedRevision(context: any, missionLoad: any) {
+    const round = missionLoad?.kind === 'found' ? missionLoad.mission.review?.rounds.at(-1) : null;
+    const revision = round?.decision?.kind === 'approved' ? round.subject?.revision : null;
+    if (!revision) { return; }
+    const readable = ports.git.git(['-C', context.baseWorktree, 'cat-file', '-e', `${revision}^{commit}`]);
+    if (readable.status === 0) { return; }
+    throw abortWith(landing,
+      `Approved revision ${revision} cannot be read; integration cannot prove approval coverage for the landing payload.`,
+      `Fetch or restore revision ${revision}, then run px review ${context.slug} --continue to establish review for the current branch before retrying integrate.`);
+  }
+
   /**
    * Rebase the mission onto its resolved local primary/parent (ADR 0043)
    * BEFORE any gate runs and before the probe merge, so gates and the merge
@@ -248,6 +260,7 @@ export function createIntegrateWorkflow(ports: IntegrateWorkflowPorts) {
     }
     const context: any = await buildIntegrationContext(slug, { missionStore: missionServices.store });
     const missionLoad = await loadMissionAuthority(slug, context, missionServices);
+    requireReadableApprovedRevision(context, missionLoad);
 
     // Reconcile the authoritative Mission before preflight or merge work.
     // Backlog promotion remains delayed until closeout, because it can be
@@ -261,6 +274,15 @@ export function createIntegrateWorkflow(ports: IntegrateWorkflowPorts) {
       throw abortWith(landing, '\nIntegration preflight failed. Resolve the blockers above before running integrate.');
     }
 
+    // TASK-2625: capture the mission branch HEAD before the rebase so the
+    // integration-validation marker is keyed on the validating commit (the
+    // implementer's fixed tree). A rebase produces a new SHA even for an
+    // identical diff, so this must be read pre-rebase to stay stable across
+    // integrate invocations. Absent, the skip feature is inert (full suite).
+    const integrationCheckout = ports.gates.resolveIntegrationVerificationWorktree(slug, { baseWorktree: context.baseWorktree });
+    const headResolution = ports.git.git(['-C', integrationCheckout, 'rev-parse', 'HEAD']);
+    context.missionHeadSha = headResolution.status === 0 ? String(headResolution.stdout || '').trim() : null;
+
     await rebaseForIntegration(slug, context, dryRun, missionServicesFn);
 
     // Resolve the repository's integration mode and build the capability
@@ -270,8 +292,21 @@ export function createIntegrateWorkflow(ports: IntegrateWorkflowPorts) {
     // mode refuses the local primary merge / unimplemented steps instead of
     // silently performing them (SC4 / SC6).
     const strategy = createIntegrationStrategy(ports.productConfig.resolveIntegrationMode(context.baseWorktree ?? ports.process.cwd()));
-    const verificationEvidence = await strategy.run('run-required-local-gates', () =>
+    let verificationEvidence = await strategy.run('run-required-local-gates', () =>
       runRequiredLocalGates({ slug, context, missionLoad, missionServices, ...request, seams }));
+    // Gates certify a particular landing candidate.  If the primary advanced
+    // while they ran, rebase again and run the complete configured set against
+    // that new candidate; never squash a comparison tree the gates did not see.
+    if (!dryRun && predictIntegrationRebase(slug, {
+      baseWorktree: context.baseWorktree,
+      baseBranch: context.baseBranch,
+      git: ports.git.git,
+    }).needed) {
+      fmt.log.info(`${context.baseBranch} advanced while integration gates ran; rebasing and re-running gates on the updated landing candidate.`);
+      await rebaseForIntegration(slug, context, false, missionServicesFn);
+      verificationEvidence = await strategy.run('run-required-local-gates', () =>
+        runRequiredLocalGates({ slug, context, missionLoad, missionServices, ...request, seams }));
+    }
     printIntegrationReadiness(buildIntegrationReadiness(context, { verification: verificationEvidence }, missionPaths.getPrimaryBranch));
 
     if (dryRun) {

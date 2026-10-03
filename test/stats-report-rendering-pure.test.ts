@@ -94,21 +94,6 @@ test('summarizeAgentStageSpend sums spend per stage by family and skips unknown 
   assert.equal(out[0].total, 105);
 });
 
-test('summarizeMissionWindow counts unique missions by classification', () => {
-  const keys = new Set(['acme/app::task-1', 'acme/app::task-2', 'acme/app::task-3']);
-  const out = sr.summarizeMissionWindow(
-    [row({ mission: 'task-1', classification: 'user_value' }),
-      row({ mission: 'task-2', classification: 'ai_sdlc' }),
-      row({ mission: 'task-3', classification: 'unknown' })],
-    WIN,
-    keys,
-  );
-  assert.equal(out.total, 3);
-  assert.equal(out.userValue, 1);
-  assert.equal(out.aiSdlc, 1);
-  assert.equal(out.unknown, 1);
-});
-
 test('AGENT_SPEND_STAGE_COLUMNS and MISSION_PHASE_ORDER expose their stage buckets', () => {
   assert.equal(sr.AGENT_SPEND_STAGE_COLUMNS.length, 5);
   assert.equal(sr.MISSION_PHASE_ORDER.length, 4);

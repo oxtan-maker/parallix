@@ -540,9 +540,10 @@ test('R7: telemetry cannot decide Mission completion', async () => {
   const window = { start: new Date('2026-07-29T00:00:00Z'), end: new Date('2026-08-05T00:00:00Z') };
 
   // Lifecycle supplies the completed population; a final-looking row supplies none.
-  assert.equal(stats.summarizeMissionWindow(rows, window, new Set()).total, 0);
+  const { summarizeCompletedMissionWindow } = await import('../src/application/services/statistics-service.js');
+  assert.equal(summarizeCompletedMissionWindow(rows, window, new Set()).missions.length, 0);
   assert.equal(
-    stats.summarizeMissionWindow(rows, window, new Set(['parallix::task-2369-telemetry'])).total,
+    summarizeCompletedMissionWindow(rows, window, new Set(['parallix::task-2369-telemetry'])).missions.length,
     1,
     'only the lifecycle key admits the mission to the completed population',
   );

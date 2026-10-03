@@ -1,4 +1,5 @@
 import type { OperationalHistoryEntry, OperationalHistoryRepository } from '../ports/operation-history.js';
+import { INTEGRATION_VALIDATION_EVENT_TYPE } from '../integrate/validation-marker.js';
 
 /**
  * Application boundary for operational history recording and querying.
@@ -63,5 +64,38 @@ export class OperationalHistoryService {
    */
   async clear(): Promise<void> {
     await this.repository.clear();
+  }
+
+  /**
+   * Record a durable, sha-keyed integration-validation marker (TASK-2625). The
+   * marker is appended to operational_history as an `integration.integration-
+   * validation` row whose `event_data` carries { missionId, sha, hooks }.
+   */
+  async recordIntegrationValidation(marker: {
+    missionId: string;
+    sha: string;
+    hooks: readonly string[];
+  }): Promise<void> {
+    await this.append(
+      INTEGRATION_VALIDATION_EVENT_TYPE,
+      JSON.stringify({ missionId: marker.missionId, sha: marker.sha, hooks: [...marker.hooks] }),
+    );
+  }
+
+  /**
+   * Load the newest operational-history row of a single type for one mission.
+   * Returns null when the mission has no row of that type. Repository errors
+   * propagate so an unreadable history is explicit rather than silently empty.
+   */
+  async loadLatestByTypeForMission(
+    type: string,
+    missionId: string,
+  ): Promise<OperationalHistoryEntry | null> {
+    const findByTypeForMission = this.repository.findByTypeForMission;
+    if (!findByTypeForMission) {
+      throw new Error('operational history repository does not support per-mission lookup');
+    }
+    const entries = await findByTypeForMission.call(this.repository, type, missionId);
+    return entries.length === 0 ? null : entries[entries.length - 1];
   }
 }

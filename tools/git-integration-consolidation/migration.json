@@ -1,0 +1,1263 @@
+{
+ "task": "TASK-2622.09",
+ "baselineCommit": "43e484f1c",
+ "note": "Case titles are verbatim; every merged case keeps its legacy name inside a describe section named after its task ID and behavior. Historical task IDs live in section names, case names and source comments.",
+ "merged": [
+  {
+   "source": "test/task_1004.test.ts",
+   "tier": "unit",
+   "tests": 3,
+   "destination": "test/mission-worktree-path-resolution-contract.test.ts",
+   "section": "task-1004 task-file and slug-suffix resolution",
+   "disposition": "merged-into-behavior-suite",
+   "cases": [
+    "resolveTaskFile prefers exact frontmatter id: match over filename-prefix matches",
+    "resolveTaskFile handles slugs with suffixes by falling back to base task ID",
+    "findMissionDir and getMissionYear handle slugs with suffixes"
+   ]
+  },
+  {
+   "source": "test/mission-utils-merge-noise.test.ts",
+   "tier": "unit",
+   "tests": 7,
+   "destination": "test/mission-worktree-path-resolution-contract.test.ts",
+   "section": "merge-noise classification of backlog paths",
+   "disposition": "merged-into-behavior-suite",
+   "cases": [
+    "parseConflictFilesFromMergeOutput parses content and modify/delete conflicts and deduplicates paths",
+    "getConflictFiles returns conflict paths, empty arrays for clean merges, and throws on non-conflict failures",
+    "findLastNonNoiseCommit skips trailing backlog noise and stops on shared commits",
+    "squashTrailingBacklogNoiseIntoPreviousMission and softResetTrailingBacklogNoise refuse dirty trees and run resets on clean ones",
+    "findMissionDocInBranches finds mission docs on slug and base-slug branches and ignores branch lookup failures",
+    "isMissionArtifact respects adapter baseDir instead of hardcoded docs/missions",
+    "findMissionDocInBranches uses exact slug matching, not substring"
+   ]
+  },
+  {
+   "source": "test/task-2407-snapshot-worktree-topology-runtime-repro.test.ts",
+   "tier": "unit",
+   "tests": 2,
+   "destination": "test/mission-worktree-path-resolution-contract.test.ts",
+   "section": "task-2407 snapshotWorktreeTopology composition export",
+   "disposition": "merged-into-behavior-suite",
+   "cases": [
+    "task-2407 CLI composition graph provides snapshotWorktreeTopology as a callable named export",
+    "task-2407 snapshotWorktreeTopology topology resolves a worktree through its own gitFn boundary"
+   ]
+  },
+  {
+   "source": "test/board-readers.worktree-amplification.test.ts",
+   "tier": "unit",
+   "tests": 3,
+   "destination": "test/mission-worktree-path-resolution-contract.test.ts",
+   "section": "board readers worktree amplification",
+   "disposition": "merged-into-behavior-suite",
+   "cases": [
+    "board projection worktree-list count is O(1) vs mission count",
+    "board projection reads each distinct task document once for metadata",
+    "board projection does not scan or materialize backlog archive"
+   ]
+  },
+  {
+   "source": "test/backlog_reorder_completed_duplicate.test.ts",
+   "tier": "unit",
+   "tests": 4,
+   "destination": "test/mission-worktree-path-resolution-contract.test.ts",
+   "section": "backlog reorder with completed duplicates",
+   "disposition": "merged-into-behavior-suite",
+   "cases": [
+    "checkBacklogIntegrity flags a reorder-recreated backlog copy of a completed task",
+    "checkBacklogIntegrity also flags a tasks/ copy that duplicates an archived task",
+    "pruneStaleBacklogDuplicates removes the stale copy and clears the gate",
+    "integrity gate stays clean when no duplicate exists"
+   ]
+  },
+  {
+   "source": "test/task-1039-integrate-v3.test.ts",
+   "tier": "unit",
+   "tests": 8,
+   "destination": "test/integrate-preflight-and-approval-contract.test.ts",
+   "section": "task-1039 preflight reporting",
+   "disposition": "merged-into-behavior-suite",
+   "cases": [
+    "printIntegrationPreflight branch failure",
+    "printIntegrationPreflight mission-doc failure",
+    "printIntegrationPreflight task failures",
+    "printIntegrationPreflight PR approval failures",
+    "printIntegrationPreflight main-index-conflict-check failure",
+    "printIntegrationPreflight main-dirty warning",
+    "getUnresolvedIndexConflicts failure path",
+    "promoteTaskForIntegrationIfNeeded failure path"
+   ]
+  },
+  {
+   "source": "test/task-1219-fallback.test.ts",
+   "tier": "unit",
+   "tests": 10,
+   "destination": "test/integrate-preflight-and-approval-contract.test.ts",
+   "section": "task-1219 local review-state approval fallback",
+   "disposition": "merged-into-behavior-suite",
+   "cases": [
+    "evaluateTaskStatusForIntegration accepts local-review-state approval for review status",
+    "evaluateTaskStatusForIntegration rejects when token and review-state both missing",
+    "evaluateTaskStatusForIntegration: defaultUserApproved boolean is not an approval authority without the lifecycle",
+    "printIntegrationPreflight logs INFO instead of FAIL for token + approval when local review-state is approved",
+    "printIntegrationPreflight still fails when no token AND no local review-state",
+    "printIntegrationPreflight PASS for approval when token and forgejo report approved",
+    "buildIntegrationContext returns local-review-state approval when token missing but review-state is approved",
+    "buildIntegrationContext does not fallback when review-state.json is absent",
+    "buildIntegrationContext requires disposition=APPROVED not just phase=approved",
+    "printIntegrationPreflight accepts buildIntegrationContext local-review-state output without forgejo-token FAIL"
+   ]
+  },
+  {
+   "source": "test/task-1431-integration-preflight-repro.test.ts",
+   "tier": "unit",
+   "tests": 5,
+   "destination": "test/integrate-preflight-and-approval-contract.test.ts",
+   "section": "task-1431 preflight classification source",
+   "disposition": "merged-into-behavior-suite",
+   "cases": [
+    "printIntegrationPreflight resolves classification from the mission base worktree, not process.cwd()",
+    "printIntegrationPreflight still hard-fails on an ambiguous slug rather than degrading to missing-task",
+    "printIntegrationPreflight still warns and falls back to unknown classification for a genuinely missing task",
+    "printIntegrationPreflight refuses to run with a null mission slug instead of printing \"for null\"",
+    "buildIntegrationContext refuses to build a context for a null mission slug"
+   ]
+  },
+  {
+   "source": "test/task-2204-integrate-no-variant-a.test.ts",
+   "tier": "unit",
+   "tests": 1,
+   "destination": "test/integrate-preflight-and-approval-contract.test.ts",
+   "section": "task-2204 merged Forgejo PR rejection",
+   "disposition": "merged-into-behavior-suite",
+   "cases": [
+    "integrate rejects merged Forgejo PRs during preflight with recovery guidance"
+   ]
+  },
+  {
+   "source": "test/task-1039-integrate.test.ts",
+   "tier": "unit",
+   "tests": 10,
+   "destination": "test/integrate-probe-and-resume-orchestration-contract.test.ts",
+   "section": "task-1039 integrate orchestration and gates",
+   "disposition": "merged-into-behavior-suite",
+   "cases": [
+    "integrate fails when slug is missing",
+    "integrate preflight failure stops execution",
+    "integrate dry-run mode",
+    "resolveConflictsForMission - worktree missing",
+    "resolveConflictsForMission - merge check failed",
+    "resolveConflictsForMission - shared vs mission-specific classification",
+    "integrate fails closed when no pre-integration gates are configured",
+    "integrate proceeds without a gate when the repository does not opt into requirePreIntegration",
+    "integrate aborts before merge when a pre-integration gate fails",
+    "buildConflictResolutionPrompt returns formatted array"
+   ]
+  },
+  {
+   "source": "test/task-2243-probe-abort-promotion.test.ts",
+   "tier": "unit",
+   "tests": 1,
+   "destination": "test/integrate-probe-and-resume-orchestration-contract.test.ts",
+   "section": "task-2243 probe abort without promotion",
+   "disposition": "merged-into-behavior-suite",
+   "cases": [
+    "Variant B rejects a failed probe abort without promoting the review-approved task fixture (task-2243)"
+   ]
+  },
+  {
+   "source": "test/task-2520-resume-landing.test.ts",
+   "tier": "unit",
+   "tests": 1,
+   "destination": "test/integrate-probe-and-resume-orchestration-contract.test.ts",
+   "section": "task-2520 resume landing closeout",
+   "disposition": "merged-into-behavior-suite",
+   "cases": [
+    "retry after failed sync-merged skips rebase and resumes landing closeout"
+   ]
+  },
+  {
+   "source": "test/task-2506-integrate-rebase.test.ts",
+   "tier": "unit",
+   "tests": 2,
+   "destination": "test/integrate-probe-and-resume-orchestration-contract.test.ts",
+   "section": "task-2506 behind-primary integrate",
+   "disposition": "merged-into-behavior-suite",
+   "cases": [
+    "behind-primary conflict-free mission integrates without a manual rebase (task-2506)",
+    "px integrate --dry-run reports a needed rebase and mutates nothing (task-2506)"
+   ]
+  },
+  {
+   "source": "test/task-2242-backlog-drift.test.ts",
+   "tier": "unit",
+   "tests": 16,
+   "destination": "test/integrate-backlog-drift-and-claim-guard-contract.test.ts",
+   "section": "task-2242 backlog drift retry",
+   "disposition": "merged-into-behavior-suite",
+   "cases": [
+    "areAllBacklogOnlyConflicts returns true for empty file list",
+    "areAllBacklogOnlyConflicts returns true when all files are under backlog/",
+    "areAllBacklogOnlyConflicts returns false when a non-backlog file is present",
+    "areAllBacklogOnlyConflicts is case-sensitive on the backlog/ prefix",
+    "areAllBacklogOnlyConflicts handles nested backlog paths",
+    "backlog-only conflict files trigger retry with fetch, pull --ff-only, and proceed to squash",
+    "non-backlog conflict fails without retry and skips fetch/pull",
+    "mission backlog task file conflict triggers retry path",
+    "fetch failure during retry aborts integration without retry merge",
+    "pull --ff-only failure during retry aborts integration without retry merge",
+    "unabortable initial merge is rescued by reset --hard for backlog-only conflicts",
+    "happy path: probe merge succeeds on first try with no conflicts",
+    "integrate SC2b: non-backlog conflict exits with conflict files and helper path",
+    "integrate SC2c: mission backlog task overlap retries and falls through with conflict details",
+    "integrate P1: recovered abort failure uses normal conflict output after reset",
+    "integrate P1: retry abort failure routes to inspect-checkout path (not rebase guidance)"
+   ]
+  },
+  {
+   "source": "test/integrate-guard.test.ts",
+   "tier": "unit",
+   "tests": 4,
+   "destination": "test/integrate-backlog-drift-and-claim-guard-contract.test.ts",
+   "section": "integrate guard",
+   "disposition": "merged-into-behavior-suite",
+   "cases": [
+    "blocks FORGEJO_USER=gemini",
+    "blocks WORKFLOW_AGENT=gemini",
+    "does not block other agents (e.g. codex)",
+    "integrate guard"
+   ]
+  },
+  {
+   "source": "test/integrate-exclusive-claim.test.ts",
+   "tier": "unit",
+   "tests": 2,
+   "destination": "test/integrate-backlog-drift-and-claim-guard-contract.test.ts",
+   "section": "exclusive integrate claim",
+   "disposition": "merged-into-behavior-suite",
+   "cases": [
+    "a second integrate for the same mission stops before reading or changing mission state",
+    "repeat integrate reports a landed closed mission without rerunning gates"
+   ]
+  },
+  {
+   "source": "test/task-2411-integrate-work-detection.test.ts",
+   "tier": "unit",
+   "tests": 1,
+   "destination": "test/integrate-backlog-drift-and-claim-guard-contract.test.ts",
+   "section": "task-2411 integrate work detection",
+   "disposition": "merged-into-behavior-suite",
+   "cases": [
+    "running integrate projects as working, not integrate-lane"
+   ]
+  },
+  {
+   "source": "test/task-2551-recovery-post-integrate-hook.test.ts",
+   "tier": "unit",
+   "tests": 5,
+   "destination": "test/integrate-landed-closeout-recovery-contract.test.ts",
+   "section": "task-2551 recovery post-integrate hook",
+   "disposition": "merged-into-behavior-suite",
+   "cases": [
+    "recovered landed integration runs the post-integrate hook after persisting, from the base worktree",
+    "recovered landed integration surfaces a post-integrate hook failure as an abort",
+    "recovered landed integration stops before cleanup when statistics cannot be recorded",
+    "landed closeout resumes after interruption following stats",
+    "landed closeout resumes after interruption following hook"
+   ]
+  },
+  {
+   "source": "test/task-2604-repro.test.ts",
+   "tier": "unit",
+   "tests": 2,
+   "destination": "test/integrate-landed-closeout-recovery-contract.test.ts",
+   "section": "task-2604 failed closeout resumes",
+   "disposition": "merged-into-behavior-suite",
+   "cases": [
+    "TASK-2604: failed closeout stays open and resumes without another landing transition",
+    "TASK-2604: recovered closeout succeeds after its worktree was already cleaned"
+   ]
+  },
+  {
+   "source": "test/task-2605-repro.test.ts",
+   "tier": "unit",
+   "tests": 3,
+   "destination": "test/integrate-landed-closeout-recovery-contract.test.ts",
+   "section": "task-2605 legacy closed Mission recovery",
+   "disposition": "merged-into-behavior-suite",
+   "cases": [
+    "TASK-2605: explicitly recover legacy closed Mission once without redelivery",
+    "TASK-2605: missing landed proof stops legacy recovery before mutation",
+    "TASK-2605: invalid stored classification stops before hook and cleanup"
+   ]
+  },
+  {
+   "source": "test/task-2517-sc4-landed-guard.test.ts",
+   "tier": "unit",
+   "tests": 2,
+   "destination": "test/integrate-landed-closeout-recovery-contract.test.ts",
+   "section": "task-2517 SC4 landed guard on active/review",
+   "disposition": "merged-into-behavior-suite",
+   "cases": [
+    "SC4: px active refuses a landed payload and names the closeout command",
+    "SC4: px review refuses a landed payload"
+   ]
+  },
+  {
+   "source": "test/task-2517-integrate-rebound-landing-guard.test.ts",
+   "tier": "unit",
+   "tests": 8,
+   "destination": "test/integrate-landed-closeout-recovery-contract.test.ts",
+   "section": "task-2517 rebounded landing guard",
+   "disposition": "merged-into-behavior-suite",
+   "cases": [
+    "landed mission closes only after post-merge effects: stats",
+    "landed mission closes only after post-merge effects: cleanup",
+    "landed mission closes only after post-merge effects: hook",
+    "landed mission closes only after post-merge effects: none",
+    "TASK-2517: rebounded landing aborts before Forgejo sync when the lane is ineligible",
+    "TASK-2517: finishLanding rejects an approved review lane at the landing boundary",
+    "TASK-2517: github-pr landing aborts before the PR is observed or merged when the lane is active",
+    "TASK-2517: github-pr landing rejects an approved review lane at the landing boundary"
+   ]
+  },
+  {
+   "source": "test/task-2508-interrupted-landed-integration-repro.test.ts",
+   "tier": "unit",
+   "tests": 4,
+   "destination": "test/integrate-landed-closeout-recovery-contract.test.ts",
+   "section": "task-2508 interrupted landed integration",
+   "disposition": "merged-into-behavior-suite",
+   "cases": [
+    "printIntegrationPreflight does not fail on a merged PR for a landed integration",
+    "interrupted landing decides delivery once and closes after retry",
+    "cleanupMissionWorktree accepts a retry after worktree and branch removal",
+    "px status reports the authoritative done lifecycle"
+   ]
+  },
+  {
+   "source": "test/task-2515-integration-lifecycle-not-masked.test.ts",
+   "tier": "unit",
+   "tests": 2,
+   "destination": "test/integrate-landed-closeout-recovery-contract.test.ts",
+   "section": "task-2515 lifecycle not masked by completed backlog task",
+   "disposition": "merged-into-behavior-suite",
+   "cases": [
+    "task-2515 integration lifecycle not masked by completed backlog task",
+    "task-2515 every non-terminal persisted lifecycle wins over completed Markdown"
+   ]
+  },
+  {
+   "source": "test/post-integrate-hook.test.ts",
+   "tier": "unit",
+   "tests": 9,
+   "destination": "test/integrate-landed-closeout-recovery-contract.test.ts",
+   "section": "post-integrate hook",
+   "disposition": "merged-into-behavior-suite",
+   "cases": [
+    "resolvePostIntegrateCommand returns null when no workflow.config.json is present",
+    "resolvePostIntegrateCommand returns null when postIntegrateCommand is absent",
+    "resolvePostIntegrateCommand returns the trimmed configured command",
+    "buildPostIntegrateHookEnv exposes slug, base worktree, base branch, and variant",
+    "runPostIntegrateHook is a no-op when no command is configured",
+    "runPostIntegrateHook runs the configured command from the base worktree with hook env",
+    "runPostIntegrateHook reports a non-zero exit as a failed hook, not thrown",
+    "resolvePreCommitCommand reads preCommitCommand independently of postIntegrateCommand",
+    "runPreCommitHook resolves the pre-commit command from the base worktree"
+   ]
+  },
+  {
+   "source": "test/task-2565-lifecycle-repro.test.ts",
+   "tier": "unit",
+   "tests": 1,
+   "destination": "test/integrate-gate-rebound-and-repair-contract.test.ts",
+   "section": "task-2565 gate rebound lifecycle",
+   "disposition": "merged-into-behavior-suite",
+   "cases": [
+    "TASK-2565: integration-gate rebound reactivates through the lifecycle path"
+   ]
+  },
+  {
+   "source": "test/task-2603-repro.test.ts",
+   "tier": "unit",
+   "tests": 2,
+   "destination": "test/integrate-gate-rebound-and-repair-contract.test.ts",
+   "section": "task-2603 rebound active mission context",
+   "disposition": "merged-into-behavior-suite",
+   "cases": [
+    "TASK-2603: integration-gate rebound binds active mission context before persisting a fallback implementer",
+    "TASK-2603: squash-hook rebound binds the same active mission context before persisting a fallback implementer"
+   ]
+  },
+  {
+   "source": "test/task-2369.05-integrate-gates.test.ts",
+   "tier": "unit",
+   "tests": 6,
+   "destination": "test/integrate-gate-rebound-and-repair-contract.test.ts",
+   "section": "task-2369.05 integrate gate helpers",
+   "disposition": "merged-into-behavior-suite",
+   "cases": [
+    "integrate re-exports the extracted gate helpers as the same functions integrate-gates owns",
+    "integrate.ts keeps no second implementation of the extracted gate helpers",
+    "integrate-gates owns gate ordering with run_last gates sorted after the rest",
+    "integrate-gates plans only the gates matching the mission changed areas",
+    "integrate-gates resolves the verification worktree from the mission worktree before the conventional path",
+    "integrate-gates falls back to the conventional worktree path when the mission worktree is unresolved"
+   ]
+  },
+  {
+   "source": "test/task-1124-integrate.test.ts",
+   "tier": "unit",
+   "tests": 8,
+   "destination": "test/integrate-gate-rebound-and-repair-contract.test.ts",
+   "section": "task-1124 relaunchable repair",
+   "disposition": "merged-into-behavior-suite",
+   "cases": [
+    "SC 1: isRelaunchableError returns true for goal-check missing evidence rows",
+    "SC 2: buildRelaunchPrompt delegates to the kernel and keeps the mission evidence",
+    "SC 3: active.js runHandoffAndReview bounces through the kernel when repair fails and error is relaunchable",
+    "SC 4: reviewer fallback uses the review eligibility selector",
+    "SC 5: reviewer fallback does not update the Backlog task",
+    "SC 6: resume-capable agents use session persistence via startAgent",
+    "SC 8: manual handoff path preserved - outputs manual handoff message when relaunch fails",
+    "runtime-matrix no longer exports hardcoded reviewer routing (reviewerFor/fallbackFor removed)"
+   ]
+  },
+  {
+   "source": "test/task-2561-repro.test.ts",
+   "tier": "unit",
+   "tests": 5,
+   "destination": "test/integrate-gate-rebound-and-repair-contract.test.ts",
+   "section": "task-2561 handoff and push-gate regressions",
+   "disposition": "merged-into-behavior-suite",
+   "cases": [
+    "(a) an incomplete draft contract is sent back to the drafting agent, not reported as a database fault",
+    "(b) the push-time gate verifies the mission area, not the configured defaultArea",
+    "(c) a handoff push-gate failure carries its gate evidence instead of a generic rebase message",
+    "(d) a gate repair that changed the approved revision is re-reviewed, then integration stops in the integration lane for the human",
+    "(e) the gatekeeper does not demand CP-*.md from a mission whose checkpoints are recorded in Mission state"
+   ]
+  },
+  {
+   "source": "test/task-2543-integration-repair.test.ts",
+   "tier": "unit",
+   "tests": 7,
+   "destination": "test/integrate-gate-rebound-and-repair-contract.test.ts",
+   "section": "task-2543 integration repair",
+   "disposition": "merged-into-behavior-suite",
+   "cases": [
+    "integration repair withdraws approval before launch, survives review pingpong, and requests integration restart",
+    "operator continue clears escalation and permits an attempt even when its old round limit was exhausted",
+    "a repair review cannot consume an old or unassigned provider approval",
+    "the real handoff binds an invalidated round to the committed repair and mirrors the review lane",
+    "integration excludes a legacy approval from an earlier round but retains its holder for retraction",
+    "a limit-reached repair route leaves the old approval invalid and continuation available",
+    "a revision-changed repair route leaves the old approval invalid and continuation available"
+   ]
+  },
+  {
+   "source": "test/task-1268-diff-scoped-area.test.ts",
+   "tier": "unit",
+   "tests": 4,
+   "destination": "test/integrate-gate-rebound-and-repair-contract.test.ts",
+   "section": "task-1268 diff-scoped gate area",
+   "disposition": "merged-into-behavior-suite",
+   "cases": [
+    "detectAreasFromChangedFiles maps changed lib files to the lib verification area",
+    "detectMissionChangedArea selects an area from the mission worktree diff",
+    "detectMissionChangedArea selects the strict all area for mixed-area diffs",
+    "runPreReviewGate runs the diff-scoped resolver and executes its selected area"
+   ]
+  },
+  {
+   "source": "test/task-2294.01-repro.test.ts",
+   "tier": "unit",
+   "tests": 2,
+   "destination": "test/rebase-conflict-recovery-contract.test.ts",
+   "section": "task-2294.01 pinned conflict agent",
+   "disposition": "merged-into-behavior-suite",
+   "cases": [
+    "TASK-2294.01 repro: px resolve-conflict pins the mission implementer as the conflict agent",
+    "TASK-2294.01 repro: px rebase shared-file conflict path pins the mission implementer"
+   ]
+  },
+  {
+   "source": "test/task-2503-repro.test.ts",
+   "tier": "unit",
+   "tests": 2,
+   "destination": "test/rebase-conflict-recovery-contract.test.ts",
+   "section": "task-2503 recorded implementer dispatch",
+   "disposition": "merged-into-behavior-suite",
+   "cases": [
+    "shared-file rebase recovery dispatches the implementer recorded before commit replay",
+    "unavailable local mission metadata is reported as a local workflow condition, not an infrastructure blocker"
+   ]
+  },
+  {
+   "source": "test/task-2506-dry-run-rebase.test.ts",
+   "tier": "unit",
+   "tests": 4,
+   "destination": "test/rebase-conflict-recovery-contract.test.ts",
+   "section": "task-2506 dry-run rebase prediction",
+   "disposition": "merged-into-behavior-suite",
+   "cases": [
+    "predicts {\"needed\":false,\"wouldConflict\":false} — no rebase when the primary branch is already an ancestor of the mission",
+    "predicts {\"needed\":true,\"wouldConflict\":false} — clean rebase when the primary advanced on an unrelated change",
+    "predicts {\"needed\":true,\"wouldConflict\":true} — conflict when the primary advanced and the virtual merge conflicts",
+    "predictIntegrationRebase falls back to main when no base branch is resolved"
+   ]
+  },
+  {
+   "source": "test/task-2494-repro.test.ts",
+   "tier": "unit",
+   "tests": 11,
+   "destination": "test/rebase-conflict-recovery-contract.test.ts",
+   "section": "task-2494 usage-blocked implementer",
+   "disposition": "merged-into-behavior-suite",
+   "cases": [
+    "TASK-2494 repro: usage-blocked pinned implementer during rebase conflict names the usage block and reset time, never infra/Forgejo",
+    "TASK-2494 repro: usage-blocked pinned implementer substitutes an eligible replacement family when policy permits",
+    "TASK-2494 repro: selector never returns the excluded pinned implementer",
+    "TASK-2494 repro: selector exhaustion emits the reset-time diagnostic, not a throw",
+    "TASK-2494 repro: selector returns a family with no working launcher emits the diagnostic",
+    "TASK-2494 repro: usage-block diagnostic classifies as a non-InfraBlocker, non-HumanOnly class",
+    "TASK-2494 repro: classifier must not widen the HumanOnly catch-all to generic limit / infra markers",
+    "TASK-2494 repro: infra marker beats agent-capacity quota marker (F1)",
+    "TASK-2494 repro: a pure agent usage limit still classifies as AgentCapacity",
+    "TASK-2494 repro: agent-branded rate limits classify as AgentCapacity (F1 round 4)",
+    "TASK-2494 repro: infra-branded rate limit still classifies as InfraBlocker"
+   ]
+  },
+  {
+   "source": "test/task-2377-02-pre-review-rebase-inprocess.test.ts",
+   "tier": "unit",
+   "tests": 8,
+   "destination": "test/pre-review-rebase-in-process-contract.test.ts",
+   "section": "task-2377-02 pre-review rebase in-process",
+   "disposition": "merged-into-behavior-suite",
+   "cases": [
+    "pre-review rebase module spawns no CLI subprocess",
+    "pre-review rebase drives the rebase workflow port in-process exactly once",
+    "push-time gate failure whose output contains pre-push classifies as a gate failure",
+    "genuine hook failure during the pre-review rebase reports hook identity and output",
+    "a pre-review rebase hook failure requests the hook bounce at most once",
+    "genuine pre-commit failure on the pre-review safety commit reports hook evidence",
+    "review loop rebounces a pre-review rebase gate failure as a gate failure, not a hook bounce",
+    "shared-file rebase conflict emits the repair instruction at WARN level"
+   ]
+  },
+  {
+   "source": "test/integration-dispatch.test.ts",
+   "tier": "unit",
+   "tests": 8,
+   "destination": "test/integration-mode-dispatch-contract.test.ts",
+   "section": "integration strategy dispatch",
+   "disposition": "merged-into-behavior-suite",
+   "cases": [
+    "local owns every operation it performs itself",
+    "local refuses to submit for external verification (no external provider)",
+    "local run executes the supplied local implementation",
+    "local run fails closed on an operation it does not own",
+    "github-publish owns the local preparation steps and fails closed on the provider steps",
+    "github-pr owns the branch-push verification step and refuses the local primary merge",
+    "github-pr run fails closed on publish",
+    "closure blocker enforces each mode's evidence requirement"
+   ]
+  },
+  {
+   "source": "test/integration-mode-cli.test.ts",
+   "tier": "unit",
+   "tests": 2,
+   "destination": "test/integration-mode-dispatch-contract.test.ts",
+   "section": "integration mode CLI reporting",
+   "disposition": "merged-into-behavior-suite",
+   "cases": [
+    "config prints an explicit active integration mode line",
+    "status prints the active integration mode for the configured mode"
+   ]
+  },
+  {
+   "source": "test/integration-recorded-contract.test.ts",
+   "tier": "unit",
+   "tests": 2,
+   "destination": "test/integration-mode-dispatch-contract.test.ts",
+   "section": "integration recorded contract",
+   "disposition": "merged-into-behavior-suite",
+   "cases": [
+    "integration accepts a recorded brief without files",
+    "integration explains how to recover a missing historical contract"
+   ]
+  },
+  {
+   "source": "test/mission-integration-service.test.ts",
+   "tier": "unit",
+   "tests": 6,
+   "destination": "test/integration-mode-dispatch-contract.test.ts",
+   "section": "Mission integration service",
+   "disposition": "merged-into-behavior-suite",
+   "cases": [
+    "accepts explicit fresh merge and verification facts before integration persistence",
+    "rejects an absent observed verification fact before loading the Mission",
+    "returns a conflict when persistence rejects the observed Mission version",
+    "rejects integration from a Mission outside the integration lane",
+    "reports a non-stale persistence failure after a valid integration decision",
+    "records closure only from a fresh completed integration observation",
+    "MissionIntegrationService"
+   ]
+  },
+  {
+   "source": "test/task-2500-integrate-mode-dispatch.test.ts",
+   "tier": "unit",
+   "tests": 2,
+   "destination": "test/integration-mode-dispatch-contract.test.ts",
+   "section": "task-2500 integrate mode dispatch",
+   "disposition": "merged-into-behavior-suite",
+   "cases": [
+    "local mode dispatches through the capability boundary and reaches the local squash/merge",
+    "github-pr mode waits for GitHub evidence and never reaches the local squash/merge path"
+   ]
+  },
+  {
+   "source": "test/stale-push.test.ts",
+   "tier": "unit",
+   "tests": 2,
+   "destination": "test/forgejo-sync-and-base-reconcile-contract.test.ts",
+   "section": "stale push rejection detection",
+   "disposition": "merged-into-behavior-suite",
+   "cases": [
+    "pushReviewRef captures output allowing stale info detection (FIXED)",
+    "isStaleInfoPushRejection detects various git stale messages when captured"
+   ]
+  },
+  {
+   "source": "test/sync-merged-retry.test.ts",
+   "tier": "unit",
+   "tests": 2,
+   "destination": "test/forgejo-sync-and-base-reconcile-contract.test.ts",
+   "section": "syncMerged retry on stale info",
+   "disposition": "merged-into-behavior-suite",
+   "cases": [
+    "syncMerged retries push on stale info rejection with strong assertions",
+    "syncMerged retries push and falls back to force push if still stale"
+   ]
+  },
+  {
+   "source": "test/task-2520-diverged-base-reconcile.test.ts",
+   "tier": "unit",
+   "tests": 3,
+   "destination": "test/forgejo-sync-and-base-reconcile-contract.test.ts",
+   "section": "task-2520 diverged base reconcile",
+   "disposition": "merged-into-behavior-suite",
+   "cases": [
+    "diverged-but-content-equivalent Forgejo base is reconciled with force-with-lease, then the landed commit fast-forwards",
+    "ancestor Forgejo base is reconciled by a normal fast-forward push",
+    "content-different Forgejo base refuses the force push before any force update"
+   ]
+  },
+  {
+   "source": "test/git.test.ts",
+   "tier": "unit",
+   "tests": 11,
+   "destination": "test/git-and-mission-path-adapter-contract.test.ts",
+   "section": "git adapter wrappers",
+   "disposition": "merged-into-behavior-suite",
+   "cases": [
+    "git returns successful output when spawnSync reports status 0 with a non-fatal error object",
+    "run throws when spawnSync reports an error without a status",
+    "getCurrentBranch trims stdout",
+    "getWorktreeStatus returns trimmed non-empty lines",
+    "isDirty reflects porcelain output presence",
+    "getUncommittedCount counts lines and returns zero when clean",
+    "detectRebaseState reports active rebase with detached head and unmerged files",
+    "detectRebaseState reports false for a clean worktree with no rebase activity",
+    "detectRebaseState reports false once rebase metadata is gone and head is attached",
+    "getLastCommit parses sha, date, and subject",
+    "getLastThreeCommits splits commit subjects"
+   ]
+  },
+  {
+   "source": "test/git-pure.test.ts",
+   "tier": "unit",
+   "tests": 8,
+   "destination": "test/git-and-mission-path-adapter-contract.test.ts",
+   "section": "git pure helpers",
+   "disposition": "merged-into-behavior-suite",
+   "cases": [
+    "parseUnmergedFiles extracts the second column from porcelain -u output",
+    "parseUnmergedFiles dedupes identical rows and skips blank lines",
+    "parseUnmergedFiles returns an empty array for empty output",
+    "detectRebaseState reports in-progress when a rebase-merge directory exists",
+    "detectRebaseState reports a clean, attached HEAD when no rebase is running",
+    "detectRebaseState reports detached HEAD when symbolic-ref fails",
+    "findIgnoredSourceFiles returns source files that the injected git function reports as ignored",
+    "findIgnoredSourceFiles returns an empty list when the directory cannot be read"
+   ]
+  },
+  {
+   "source": "test/diff.test.ts",
+   "tier": "unit",
+   "tests": 10,
+   "destination": "test/git-and-mission-path-adapter-contract.test.ts",
+   "section": "diff adapter",
+   "disposition": "merged-into-behavior-suite",
+   "cases": [
+    "node parallix diff resolves correct target branches",
+    "node parallix diff detects pager.diff",
+    "node parallix diff detects core.pager",
+    "node parallix diff rejects less variants",
+    "node parallix diff fails on spawn error",
+    "node parallix diff fails on spawn signal",
+    "node parallix diff fails when slug cannot be inferred",
+    "node parallix diff fails when primary branch detection fails",
+    "node parallix diff fails when no tool is configured",
+    "node parallix diff fails when mission worktree cannot be resolved"
+   ]
+  },
+  {
+   "source": "test/mission-utils-paths.test.ts",
+   "tier": "unit",
+   "tests": 11,
+   "destination": "test/git-and-mission-path-adapter-contract.test.ts",
+   "section": "mission path resolution",
+   "disposition": "merged-into-behavior-suite",
+   "cases": [
+    "findCheckpoints supports CP-* and CHECKPOINT_* naming",
+    "inferSlug identifies slug from explicit arg, current branch, directory name, or worktree",
+    "detectMissionAreaFromContent uses repo gates deterministically",
+    "normalizeVerifyArea preserves supported gates and remaps auth-server",
+    "findMissionDir and getMissionYear handle year rollover and prior-year missions",
+    "missionDirForSlug and missionPathForSlug honor configured year-tier mission paths",
+    "findMissionArea returns docs when MISSION.md is missing and parses verify gate when present",
+    "findMissionDir and missionTitle handle null/undefined slug without throwing",
+    "getMissionYear resolves year from a configured non-default baseDir (task-1209 SC1)",
+    "getMissionYear ignores year dirs under the default path when baseDir is customized (task-1209 SC1)",
+    "getMissionYear handles non-directory baseDir without throwing"
+   ]
+  },
+  {
+   "source": "test/task-2520-integrate-rebase-state.test.ts",
+   "tier": "unit",
+   "tests": 3,
+   "destination": "test/rebase-in-progress-state-contract.test.ts",
+   "section": "task-2520 integration rebase state",
+   "disposition": "merged-into-behavior-suite",
+   "cases": [
+    "integration rebase reports a paused rebase in the mission worktree (SC7)",
+    "integration rebase aborts when the local base is not an ancestor of the mission (SC4)",
+    "integration rebase completes cleanly when no rebase is active in the mission worktree (SC7)"
+   ]
+  },
+  {
+   "source": "test/task-2520-rebase-inprogress.test.ts",
+   "tier": "unit",
+   "tests": 2,
+   "destination": "test/rebase-in-progress-state-contract.test.ts",
+   "section": "task-2520 px rebase in-progress",
+   "disposition": "merged-into-behavior-suite",
+   "cases": [
+    "px rebase does not report clean completion while a rebase is in progress (SC6)",
+    "px rebase reports clean completion only when no rebase is active (SC6)"
+   ]
+  },
+  {
+   "source": "test/task-2533-squash-payload-pathspec-quotes.test.ts",
+   "tier": "ci",
+   "tests": 4,
+   "destination": "test/integrate-squash-payload-pathspec-contract.test.ts",
+   "section": "task-2533 squash payload pathspec quoting",
+   "disposition": "merged-into-behavior-suite",
+   "cases": [
+    "TASK-2533: the quoted `--name-only` form is NOT a valid commit pathspec",
+    "TASK-2533: the `-z` raw-path form commits the special file as a pathspec",
+    "TASK-2533: `-z` capture preserves leading/trailing whitespace in filenames (no trim)",
+    "TASK-2533: squash landing commits backslash and non-ASCII payload paths with ordinary ones"
+   ]
+  },
+  {
+   "source": "test/task-2534-stale-backlog-copy-landing-repro.test.ts",
+   "tier": "ci",
+   "tests": 2,
+   "destination": "test/integrate-squash-payload-pathspec-contract.test.ts",
+   "section": "task-2534 stale Backlog copy at landing",
+   "disposition": "merged-into-behavior-suite",
+   "cases": [
+    "TASK-2534: squash landing drops the stale task-9001 copy and keeps new task-9002",
+    "TASK-2534: landing aborts before the squash commit when a duplicate survives closeout"
+   ]
+  },
+  {
+   "source": "test/task-2537-squash-closeout-unstaged-task-path.test.ts",
+   "tier": "ci",
+   "tests": 2,
+   "destination": "test/integrate-squash-payload-pathspec-contract.test.ts",
+   "section": "task-2537 unstaged task path at closeout",
+   "disposition": "merged-into-behavior-suite",
+   "cases": [
+    "TASK-2537: a task file absent from the base branch lands without a pathspec abort",
+    "TASK-2537: a base-tracked task file still lands its removal and completed addition"
+   ]
+  },
+  {
+   "source": "test/task-2349-integrate-stage-commit-race.test.ts",
+   "tier": "ci",
+   "tests": 3,
+   "destination": "test/integrate-squash-payload-pathspec-contract.test.ts",
+   "section": "task-2349 stage/commit race",
+   "disposition": "merged-into-behavior-suite",
+   "cases": [
+    "intervening bare board commit cannot contain the prepared mission payload",
+    "non-zero squash commit reports the carrying commit when HEAD has the complete payload",
+    "non-zero squash commit with an absent payload retains hook recovery guidance"
+   ]
+  },
+  {
+   "source": "test/noise-reduction.test.ts",
+   "tier": "ci",
+   "tests": 9,
+   "destination": "test/integrate-squash-payload-pathspec-contract.test.ts",
+   "section": "backlog noise reduction",
+   "disposition": "merged-into-behavior-suite",
+   "cases": [
+    "findLastNonNoiseCommit identifies non-noise commits correctly",
+    "findLastNonNoiseCommit identifies generic noise messages as noise when only touching backlog",
+    "findLastNonNoiseCommit identifies \"fixes\" with mission files as non-noise",
+    "findLastNonNoiseCommit stops at branch-off points even if they are noise",
+    "findLastNonNoiseCommit returns null if the non-noise commit is shared",
+    "squashTrailingBacklogNoiseIntoPreviousMission skips when worktree is dirty",
+    "squashTrailingBacklogNoiseIntoPreviousMission skips when index is dirty",
+    "softResetTrailingBacklogNoise skips when worktree is dirty",
+    "squashTrailingBacklogNoiseIntoPreviousMission succeeds when clean"
+   ]
+  },
+  {
+   "source": "test/task-2595-squash-landing-commit-message.test.ts",
+   "tier": "ci",
+   "tests": 3,
+   "destination": "test/integrate-squash-commit-and-landed-detection-contract.test.ts",
+   "section": "task-2595 squash landing commit message",
+   "disposition": "merged-into-behavior-suite",
+   "cases": [
+    "TASK-2595: landed squash subject is the recorded title and body records the task reference",
+    "TASK-2595: landed-squash detection recognises the title subject plus task reference body",
+    "TASK-2595: landed-squash detection still recognises the legacy mission/<slug>: subject"
+   ]
+  },
+  {
+   "source": "test/task-2377.05-integrate-squash-bounce.test.ts",
+   "tier": "ci",
+   "tests": 4,
+   "destination": "test/integrate-squash-commit-and-landed-detection-contract.test.ts",
+   "section": "task-2377.05 squash hook bounce",
+   "disposition": "merged-into-behavior-suite",
+   "cases": [
+    "SC2 S1: hook failure bounces through the kernel and lands when the re-run commit passes",
+    "SC2 S2: two failed re-run commits exhaust the budget and throw IntegrationAbort",
+    "SC2 S3: an already-landed payload short-circuits without bouncing",
+    "SC2 S4: a non-hook commit failure aborts without bouncing"
+   ]
+  },
+  {
+   "source": "test/task-2517-landed-squash-base-branch-detection.test.ts",
+   "tier": "ci",
+   "tests": 2,
+   "destination": "test/integrate-squash-commit-and-landed-detection-contract.test.ts",
+   "section": "task-2517 base-branch landed squash detection",
+   "disposition": "merged-into-behavior-suite",
+   "cases": [
+    "TASK-2517 F1: HEAD-scoped scan misses a base-branch squash; base-branch scan finds it from the mission worktree",
+    "TASK-2517 F1: base-branch scan misses a payload that never landed on the base branch"
+   ]
+  },
+  {
+   "source": "test/task-2492-already-merged-detection.test.ts",
+   "tier": "ci",
+   "tests": 4,
+   "destination": "test/integrate-squash-commit-and-landed-detection-contract.test.ts",
+   "section": "task-2492 already-merged detection",
+   "disposition": "merged-into-behavior-suite",
+   "cases": [
+    "TASK-2492: squash-landed mission payload is detected as already merged",
+    "TASK-2492: branch with no committed payload is not reported as merged",
+    "TASK-2492: recover command refuses a squash-landed mission and cleans up exactly once",
+    "TASK-2492: recovery does not fire for a not-yet-committed mission"
+   ]
+  },
+  {
+   "source": "test/task-2532-stale-integration-state-repro.test.ts",
+   "tier": "ci",
+   "tests": 5,
+   "destination": "test/integrate-stale-state-and-stash-safety-contract.test.ts",
+   "section": "task-2532 stale integration state repair",
+   "disposition": "merged-into-behavior-suite",
+   "cases": [
+    "drops a marker-tagged integration stash and leaves a real stash untouched",
+    "aborts a dead rebase and clears the unmerged index",
+    "drops two marker stashes in descending order and keeps a non-marker stash",
+    "dry-run detects poison without mutating the base worktree",
+    "leaves an already-clean base worktree unchanged"
+   ]
+  },
+  {
+   "source": "test/integrate-task-1410-stash-pop-corruption.test.ts",
+   "tier": "ci",
+   "tests": 9,
+   "destination": "test/integrate-stale-state-and-stash-safety-contract.test.ts",
+   "section": "task-1410 stash-pop corruption",
+   "disposition": "merged-into-behavior-suite",
+   "cases": [
+    "reproduction: overlapping dirty paths trigger FAIL in preflight (blocks integrate)",
+    "dirty path in the mission squash payload still blocks integration",
+    "unresolvable mission payload blocks a dirty integration checkout",
+    "untracked first-run agent config is restored after a payload collision",
+    "reproduction: non-overlapping dirty paths produce WARN not FAIL (narrow scope)",
+    "reproduction: dirty task+mission files cause stash-pop collision (proves corruption vector)",
+    "reproduction: dirty non-overlapping file restores cleanly (sanity)",
+    "cross-task dirty backlog file is safe to stash and restore",
+    "cross-task dirty completed backlog file is safe to stash and restore"
+   ]
+  },
+  {
+   "source": "test/task-2212-repro.test.ts",
+   "tier": "ci",
+   "tests": 2,
+   "destination": "test/integrate-stale-state-and-stash-safety-contract.test.ts",
+   "section": "task-2212 interrupted fixtures leave no residue",
+   "disposition": "merged-into-behavior-suite",
+   "cases": [
+    "interrupted feature lifecycle leaves no e2e branch or worktree behind (SC1/SC2)",
+    "interrupted review fixture leaves no TASK-2198 stale-active task behind (SC1/SC3)"
+   ]
+  },
+  {
+   "source": "test/task-2489-lead-from-worktree.test.ts",
+   "tier": "ci",
+   "tests": 1,
+   "destination": "test/integrate-stale-state-and-stash-safety-contract.test.ts",
+   "section": "task-2489 lead from a mission worktree",
+   "disposition": "merged-into-behavior-suite",
+   "cases": [
+    "lead started in one mission worktree resolves a sibling mission worktree and the shared repository"
+   ]
+  },
+  {
+   "source": "test/task-1104-rebase-cleanup.test.ts",
+   "tier": "ci",
+   "tests": 2,
+   "destination": "test/rebase-before-review-contract.test.ts",
+   "section": "task-1104 rebase cleanup",
+   "disposition": "merged-into-behavior-suite",
+   "cases": [
+    "rebaseBeforeReviewRound auto-commits safe mission artifacts",
+    "rebaseBeforeReviewRound leaves unrelated dirty files untouched"
+   ]
+  },
+  {
+   "source": "test/task-1272-standalone-rebase.test.ts",
+   "tier": "ci",
+   "tests": 3,
+   "destination": "test/rebase-before-review-contract.test.ts",
+   "section": "task-1272 standalone rebase",
+   "disposition": "merged-into-behavior-suite",
+   "cases": [
+    "rebaseBeforeReviewRound commits safe artifacts and skips rebase when Forgejo is disabled",
+    "rebaseBeforeReviewRound carries committed mission work forward with non-mission files present",
+    "rebaseBeforeReviewRound leaves non-mission dirty files alone in standalone mode"
+   ]
+  },
+  {
+   "source": "test/rebase_hardening.test.ts",
+   "tier": "ci",
+   "tests": 3,
+   "destination": "test/rebase-before-review-contract.test.ts",
+   "section": "rebase hardening",
+   "disposition": "merged-into-behavior-suite",
+   "cases": [
+    "rebase applies core.editor=true to initial rebase call",
+    "rebase applies core.editor=true to continueRebase calls",
+    "rebase uses the selected mission root for rebase state, Git, and publication"
+   ]
+  },
+  {
+   "source": "test/rebase_diagnostics.test.ts",
+   "tier": "ci",
+   "tests": 3,
+   "destination": "test/rebase-before-review-contract.test.ts",
+   "section": "rebase diagnostics",
+   "disposition": "merged-into-behavior-suite",
+   "cases": [
+    "rebase reports git output and hook hints on non-conflict failure",
+    "rebase reports git output on failed continue attempt",
+    "task-1322 recovery diagnostics report an in-progress rebase across status, rebase, and integrate preflight"
+   ]
+  },
+  {
+   "source": "test/task-1049-force-push.test.ts",
+   "tier": "ci",
+   "tests": 11,
+   "destination": "test/forgejo-sync-merged-force-push-contract.test.ts",
+   "section": "task-1049 review ref force push",
+   "disposition": "merged-into-behavior-suite",
+   "cases": [
+    "createPr includes explicit force-with-lease sha when forceWithLease is true",
+    "createPr does NOT include --force-with-lease when forceWithLease is false",
+    "pushReviewRef prioritizes forceWithLease over force",
+    "review --push --force passes force:true to pushRound",
+    "rebase --push calls createPrFn with forceWithLease:true on success",
+    "rebase without --push does NOT call createPrFn",
+    "rebase --push preserves push and dependencies in recursive calls (chained conflicts)",
+    "rebase --push does NOT push if agent returns success but rebase is still in progress",
+    "rebase --push does NOT push if git rebase returns 0 but --show-current is non-empty",
+    "createPr fails cleanly (no --force fallback) when stale push persists after fetch+retry",
+    "rebase --push ignores FORGEJO_USER and falls back to task identity"
+   ]
+  },
+  {
+   "source": "test/task-1080-sync-merged-hardening.test.ts",
+   "tier": "ci",
+   "tests": 2,
+   "destination": "test/forgejo-sync-merged-force-push-contract.test.ts",
+   "section": "task-1080 syncMerged hardening",
+   "disposition": "merged-into-behavior-suite",
+   "cases": [
+    "syncMerged retries twice on stale info rejection with strong assertions",
+    "syncMerged fails to retry if output is not captured (REPRODUCTION)"
+   ]
+  },
+  {
+   "source": "test/refresh-global-px-script.test.ts",
+   "tier": "ci",
+   "tests": 8,
+   "destination": "test/post-integrate-global-install-contract.test.ts",
+   "section": "refresh-global-px script",
+   "disposition": "merged-into-behavior-suite",
+   "cases": [
+    "workflow.config.json wires the generic post-integrate hook to the checked-in script",
+    "the post-integrate hook chain runs the global px refresh before the SonarQube mission branch deletion",
+    "no product code path invokes the SonarQube mission branch deletion",
+    "scripts/refresh-global-px.sh exists and is executable",
+    "scripts/refresh-global-px.sh is syntactically valid bash",
+    "scripts/refresh-global-px.sh rebuilds and reinstalls from a packed tarball without allocating a version",
+    "scripts/refresh-global-px.sh cleans up the packed tarball on both success and failure",
+    "workflow.config.json wires local version allocation as the integrate pre-commit hook"
+   ]
+  },
+  {
+   "source": "test/task-1424-post-integrate-publish-reinstall.test.ts",
+   "tier": "ci",
+   "tests": 1,
+   "destination": "test/post-integrate-global-install-contract.test.ts",
+   "section": "task-1424 publish and reinstall",
+   "disposition": "merged-into-behavior-suite",
+   "cases": [
+    "installed bundle-layout tarball runs read-only commands outside the checkout"
+   ]
+  },
+  {
+   "source": "test/task-2206-post-integrate-hook-errors.test.ts",
+   "tier": "ci",
+   "tests": 2,
+   "destination": "test/post-integrate-global-install-contract.test.ts",
+   "section": "task-2206 post-integrate hook errors",
+   "disposition": "merged-into-behavior-suite",
+   "cases": [
+    "refresh-global-px.sh passes a real tarball path to npm install even when npm pack prints lifecycle output",
+    "refresh-global-px.sh still fails closed when npm pack itself fails"
+   ]
+  },
+  {
+   "source": "test/verify-local-integrate.test.ts",
+   "tier": "ci",
+   "tests": 11,
+   "destination": "test/integrate-gate-and-exclusivity-process-contract.test.ts",
+   "section": "verify-local integrate gate",
+   "disposition": "merged-into-behavior-suite",
+   "cases": [
+    "verify-local Git shim handles init flags without mistaking them for the target directory",
+    "verify-local integrate fails closed when integration config is missing (task-2300)",
+    "verify-local integrate runs static analysis before configured integration gates (task-2414)",
+    "verify-local integrate stops before configured gates when static analysis fails (task-2414)",
+    "verify-local integrate prints the resolved dry-run plan for workflow gates",
+    "verify-local integrate fails closed when no mandatory gate applies (task-2300)",
+    "verify-local integrate resolves the unconditional integration suite for every required area class (task-2292)",
+    "verify-local integrate aborts after an integration-suite failure before a later command (task-2292)",
+    "verify-local integrate forwards the Codex override only to custom-agent-smoke",
+    "verify-local integrate rejects incomplete or unsupported real-agent overrides",
+    "verify-local integrate does not source login-shell startup files for gates"
+   ]
+  },
+  {
+   "source": "test/integrate-workflow-gate.test.ts",
+   "tier": "ci",
+   "tests": 3,
+   "destination": "test/integrate-gate-and-exclusivity-process-contract.test.ts",
+   "section": "integrate workflow gate",
+   "disposition": "merged-into-behavior-suite",
+   "cases": [
+    "integrate-workflow-gate: workflow changed + direct run => workflow suite is enforced",
+    "integrate-workflow-gate: workflow changed + suite context => nested gate skips recursion",
+    "integrate-workflow-gate: no workflow change => gate skipped (exit 0)"
+   ]
+  },
+  {
+   "source": "test/integrate-exclusive-process.integration.test.ts",
+   "tier": "ci",
+   "tests": 1,
+   "destination": "test/integrate-gate-and-exclusivity-process-contract.test.ts",
+   "section": "exclusive integrate process claim",
+   "disposition": "merged-into-behavior-suite",
+   "cases": [
+    "two integrate processes cannot both read one Mission"
+   ]
+  },
+  {
+   "source": "test/task-1109.test.ts",
+   "tier": "ci",
+   "tests": 14,
+   "destination": "test/integrate-variant-b-landing-contract.test.ts",
+   "section": "task-1109 Variant B landing",
+   "disposition": "merged-into-behavior-suite",
+   "cases": [
+    "integrate full squash-merge (Variant B) success path",
+    "integrate Variant B promotes and completes a review-approved task in the landed closeout",
+    "integrate Variant B preserves soft-reset backlog noise across squash merge",
+    "integrate resolves PR and approval using the task assignee Forgejo identity",
+    "integrate passes the pre-resolved Forgejo token into syncMerged",
+    "integrate rejects a Forgejo PR that is already merged",
+    "integrate warns that --no-gate is ignored",
+    "integrate exits non-zero when post-integration stats recording fails",
+    "integrate reports merged-PR recovery guidance before any closeout work",
+    "integrate Variant B stops when dry-run merge cannot be aborted cleanly",
+    "integrate Variant B resumed partial state prints sync diagnostics on sync failure",
+    "integrate Variant B conflict path prints conflicting files and helper guidance",
+    "evaluateTaskStatusForIntegration edge cases",
+    "recordPostIntegrationStats keeps operator-owned stats outside git"
+   ]
+  },
+  {
+   "source": "test/task-2367-integration-completion-repro.test.ts",
+   "tier": "ci",
+   "tests": 1,
+   "destination": "test/integrate-variant-b-landing-contract.test.ts",
+   "section": "task-2367 integration completion order",
+   "disposition": "merged-into-behavior-suite",
+   "cases": [
+    "TASK-2367: a landed approved integration persists done once before statistics"
+   ]
+  },
+  {
+   "source": "test/task-2397-integrate-active-approved-recovery.test.ts",
+   "tier": "ci",
+   "tests": 2,
+   "destination": "test/integrate-lifecycle-recovery-and-closeout-contract.test.ts",
+   "section": "task-2397 active+approved recovery",
+   "disposition": "merged-into-behavior-suite",
+   "cases": [
+    "task-2397: active + approved review recovers to integration without resubmitting",
+    "task-2397: active + approved review preserves the round across recovery"
+   ]
+  },
+  {
+   "source": "test/task-2517-cp3-landed-closeout.test.ts",
+   "tier": "ci",
+   "tests": 3,
+   "destination": "test/integrate-lifecycle-recovery-and-closeout-contract.test.ts",
+   "section": "task-2517 CP-3 landed closeout",
+   "disposition": "merged-into-behavior-suite",
+   "cases": [
+    "TASK-2517 CP-3: stranded active mission closes to done with a landed squash",
+    "TASK-2517 CP-3: stranded review mission closes to done with a landed squash",
+    "TASK-2517 CP-3: closeout fails when worktree cleanup fails"
+   ]
+  }
+ ],
+ "retained": [
+  {
+   "source": "test/integrate.test.ts",
+   "tier": "ci",
+   "tests": 88,
+   "skipped": 0,
+   "disposition": "keep",
+   "reason": "already behavior-owned (`px integrate` orchestration; documented size debt in file-size-cap)"
+  },
+  {
+   "source": "test/integration-pipelines.test.ts",
+   "tier": "ci",
+   "tests": 58,
+   "skipped": 10,
+   "disposition": "keep",
+   "reason": "already behavior-owned (integration gate plan); size debt"
+  },
+  {
+   "source": "test/integrate-conflict.test.ts",
+   "tier": "ci",
+   "tests": 19,
+   "skipped": 0,
+   "disposition": "keep",
+   "reason": "already behavior-owned (integrate-conflict helpers)"
+  },
+  {
+   "source": "test/rebase.test.ts",
+   "tier": "ci",
+   "tests": 45,
+   "skipped": 0,
+   "disposition": "keep",
+   "reason": "already behavior-owned (`px rebase`); 987 lines, merging would breach the 1,000-line test cap"
+  },
+  {
+   "source": "test/rebase-use-case.test.ts",
+   "tier": "ci",
+   "tests": 18,
+   "skipped": 0,
+   "disposition": "keep",
+   "reason": "already behavior-owned (rebase command use case); 489 lines of injected-port cases"
+  },
+  {
+   "source": "test/resolve-conflict.test.ts",
+   "tier": "ci",
+   "tests": 24,
+   "skipped": 0,
+   "disposition": "keep",
+   "reason": "already behavior-owned (`px resolve-conflict`)"
+  },
+  {
+   "source": "test/gitignore.test.ts",
+   "tier": "unit",
+   "tests": 14,
+   "skipped": 0,
+   "disposition": "keep",
+   "reason": "already behavior-owned (gitignore adapter); distinct mock set"
+  },
+  {
+   "source": "test/git_hardening.test.ts",
+   "tier": "unit",
+   "tests": 3,
+   "skipped": 0,
+   "disposition": "keep",
+   "reason": "already behavior-owned (git() default stdio); retains its own node:child_process module mock, typed (no ts-nocheck), so it cannot join the ts-nocheck adapter suite"
+  },
+  {
+   "source": "test/mission-utils-worktree.test.ts",
+   "tier": "ci",
+   "tests": 22,
+   "skipped": 0,
+   "disposition": "keep",
+   "reason": "already behavior-owned (worktree resolution against real Git); carries a file-level ts-nocheck that would otherwise blanket a typed suite"
+  },
+  {
+   "source": "test/task-2601-repro.test.ts",
+   "tier": "ci",
+   "tests": 11,
+   "skipped": 0,
+   "disposition": "keep",
+   "reason": "cross-owner (mission classification authority / statistics, TASK-2622.13 owner); retained byte-for-byte pending that owner, no deletion"
+  }
+ ],
+ "absentAtBaseline": [
+  {
+   "source": "test/task-2550-repro.test.ts",
+   "reason": "absent at the baseline commit (deleted by an earlier mission); listed in the task inventory only"
+  }
+ ]
+}

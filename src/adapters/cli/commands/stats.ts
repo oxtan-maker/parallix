@@ -73,7 +73,6 @@ import type { StatsWorkflowPort } from '../../../application/ports/cli-workflows
 // every existing caller keeps importing it from `./stats.js`.
 import {
   generateMarkdownReport,
-  summarizeMissionWindow,
   computeAgentMissionGroups,
   summarizeAgentWindow,
   summarizeAgentStageSpend,
@@ -507,11 +506,21 @@ async function recordIntegrationStats(options = {}) {
 // @ts-ignore -- retained reporting helper is dynamically typed
     pr_fix_rounds: implementerInfo.prFixRounds,
  }, { rootDir, store, dbPath });
-  const missionFlow = await readMissionFlowPopulation({ rootDir });
+  // The row is already persisted; a report that cannot be read or rendered is
+  // returned as `reportError` rather than failing the recording.
+  let report: string | null = null;
+  let reportError: string | undefined;
+  try {
+    const missionFlow = await readMissionFlowPopulation({ rootDir });
+    report = renderWeeklyStatsReport(result.data.rows, { today: date, rootDir, missionFlow });
+  } catch (err: any) {
+    reportError = err && err.message ? err.message : String(err);
+  }
 
  return {
    ...result,
-    report: renderWeeklyStatsReport(result.data.rows, { today: date, rootDir, missionFlow }),
+    report,
+    reportError,
     metadataSource: {
       classification: 'mission-aggregate',
       implementer: implementerInfo.source,
@@ -927,7 +936,6 @@ const _internals = {
   parseDateOnlyStrict,
   createRangeWindow,
   deriveImplementerAndFixRounds,
-  summarizeMissionWindow,
   summarizeAgentWindow,
   summarizeAgentStageSpend,
   classifyAgentSpendFamily,
@@ -963,7 +971,6 @@ const stats = {
   formatStatsTable,
   computeAgentMissionGroups,
   createRangeWindow,
-  summarizeMissionWindow,
   summarizeAgentWindow,
   summarizeAgentStageSpend,
   formatAgentSpendCell,
@@ -978,4 +985,4 @@ const stats = {
 };
 
 export default stats;
-export { stats, _internals, statsCohorts, STATS_HEADERS, USAGE_NUMBERS, VALID_CLASSIFICATIONS, normalizeStatsRow, normalizeImplementer, parseDateOnly, parseDateOnlyStrict, formatDateOnly, parseToday, createWindow, createRangeWindow, buildWeeklyWindows, canonicalizeStatsRow, sameStatsIdentity, accumulateIntegerStrings, accumulateDecimalStrings, mergeLabel, parseBooleanish, normalizeRow, normalizeRows, statsMissionKey, modelBelongsToImplFamily, isValidClassification, normalizeClassification, rowInWindow, resolveStatsRepoName, recordIntegrationStats, renderWeeklyStatsReport, renderMissionPhaseReport, renderRangeStatsReport, resolveMissionClassification, deriveImplementerAndFixRounds, upsertMeasurementRow, loadMeasurementRows, measurementToStatsRow, statsRowToMeasurement, recordStageStats, accumulateStageStats, defaultPrFixRounds, recordActiveStats, recordReviewStats, telemetryToStatsFields, formatStatsTable, computeAgentMissionGroups, summarizeMissionWindow, summarizeAgentWindow, summarizeAgentStageSpend, formatAgentSpendCell, colorAverageFixRounds, colorMissionCounts, AGENT_SPEND_STAGE_COLUMNS, MISSION_PHASE_ORDER, statsRowActorKey };
+export { stats, _internals, statsCohorts, STATS_HEADERS, USAGE_NUMBERS, VALID_CLASSIFICATIONS, normalizeStatsRow, normalizeImplementer, parseDateOnly, parseDateOnlyStrict, formatDateOnly, parseToday, createWindow, createRangeWindow, buildWeeklyWindows, canonicalizeStatsRow, sameStatsIdentity, accumulateIntegerStrings, accumulateDecimalStrings, mergeLabel, parseBooleanish, normalizeRow, normalizeRows, statsMissionKey, modelBelongsToImplFamily, isValidClassification, normalizeClassification, rowInWindow, resolveStatsRepoName, recordIntegrationStats, renderWeeklyStatsReport, renderMissionPhaseReport, renderRangeStatsReport, resolveMissionClassification, deriveImplementerAndFixRounds, upsertMeasurementRow, loadMeasurementRows, measurementToStatsRow, statsRowToMeasurement, recordStageStats, accumulateStageStats, defaultPrFixRounds, recordActiveStats, recordReviewStats, telemetryToStatsFields, formatStatsTable, computeAgentMissionGroups, summarizeAgentWindow, summarizeAgentStageSpend, formatAgentSpendCell, colorAverageFixRounds, colorMissionCounts, AGENT_SPEND_STAGE_COLUMNS, MISSION_PHASE_ORDER, statsRowActorKey };

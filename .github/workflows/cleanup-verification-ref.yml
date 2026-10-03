@@ -14,17 +14,51 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Delete published verification ref
+      - name: Check out main history
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Delete published and stale verification refs
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
           SHA: ${{ github.sha }}
+          DRY_RUN: "false"
         run: |
-          ref="heads/github-publish/$SHA"
+          set -euo pipefail
 
-          if gh api "repos/$GH_REPO/git/ref/$ref" >/dev/null 2>&1; then
-            gh api --method DELETE "repos/$GH_REPO/git/refs/$ref"
-            echo "Deleted refs/$ref"
-          else
-            echo "No verification ref exists for $SHA"
+          # Verification refs are ephemeral. Remove the ref for the sha that
+          # just reached main, and every other github-publish/<sha> ref whose
+          # target is not an ancestor of the new main tip (failed branches and
+          # superseded commits never reach main, so nothing else removes them).
+          # A ref whose target is reachable from main is never deleted here
+          # unless it is the triggering sha.
+          git fetch --no-tags origin '+refs/heads/github-publish/*:refs/remotes/github-publish/*'
+
+          delete_ref() {
+            if [ "$DRY_RUN" = "true" ]; then
+              echo "Would delete refs/heads/github-publish/$1 ($2)"
+              return
+            fi
+            gh api --method DELETE "repos/$GH_REPO/git/refs/heads/github-publish/$1"
+            echo "Deleted refs/heads/github-publish/$1 ($2)"
+          }
+
+          found=0
+          while read -r name target; do
+            found=1
+            if [ "$name" = "$SHA" ]; then
+              delete_ref "$name" "published"
+            elif git merge-base --is-ancestor "$target" "$SHA"; then
+              echo "Keeping refs/heads/github-publish/$name: reachable from main"
+            else
+              delete_ref "$name" "not reachable from main"
+            fi
+          done < <(git for-each-ref \
+            --format='%(refname:strip=3) %(objectname)' \
+            refs/remotes/github-publish/)
+
+          if [ "$found" = "0" ]; then
+            echo "No verification refs exist"
           fi

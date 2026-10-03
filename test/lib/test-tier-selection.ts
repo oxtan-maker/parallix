@@ -56,6 +56,9 @@ export function selectTierFiles(executionRoot: string): TierFileSelection {
   // through the explicit integration command rather than the hermetic default.
   const boundaryDependencyPattern = /\b(?:\w+\.)?(?:spawnSync|spawn|execSync|execFileSync|execFile|fork)\s*\(|git\s+(?:init|worktree|clone|commit|checkout|rebase|merge)|npm\s+(?:pack|install)|createServer|\bfetch\s*\(/;
   const knownIntegrationTestFiles = new Set([
+    // Real SQLite/launcher boundaries whose setup lives behind fixture helpers.
+    'review-status-backfill.integration.test.ts',
+    'review-intervention-resume.integration.test.ts',
     // Constructs the production composition graph, including a real SQLite
     // Mission store, so it crosses an adapter boundary even without a visible
     // process or database marker in the test source.
@@ -78,12 +81,11 @@ export function selectTierFiles(executionRoot: string): TierFileSelection {
     // child process to verify stdout and pipe-buffer behavior.
     'opencode-export.test.ts',
     'runtime-matrix.test.ts',
-    'rebase_hardening.test.ts',
+    'rebase-before-review-contract.test.ts',
     'review-artifacts.test.ts',
     'review-commands-additional.test.ts',
     'review-commands-supplemental.test.ts',
     'review-identity.test.ts',
-    'review-identity-placeholder.test.ts',
     'review.test.ts',
     'review-prompts.test.ts',
     // TASK-2322.12: review state moved onto the operator database, so these open
@@ -95,22 +97,20 @@ export function selectTierFiles(executionRoot: string): TierFileSelection {
     'task-1416-repro.test.ts',
     // TASK-2326: relocated from default suite — these cross a real process,
     // Git, or packaging boundary and are not hermetic unit tests.
-    'task-2285-pack-install-smoke.test.ts',
-    'task-2286-native-sea-smoke.test.ts',
-    'task-2455-config-exit-status-repro.test.ts',
-    'task-2312-label-sync.test.ts',
+    'npm-pack-install-smoke.test.ts',
+    'native-sea-executable-smoke.test.ts',
+    'config-exit-status.test.ts',
+    'task-label-persistence.test.ts',
     'task-2318-temp-directory-leaks.test.ts',
-    'task-2319-notices-git-tracking.test.ts',
+    'release-publication-and-version-allocation-contract.test.ts',
     // TASK-2326 round 2: tui-spawn uses execFileSync (real process boundary)
     // and was relocated from the default suite to integration.
-    'tui-spawn.test.ts',
+    'presentation-tui.integration.test.ts',
     // This PTY smoke test launches the packaged CLI through a real child process.
-    'tui-pty-smoke.test.ts',
     // These render the live Ink terminal surface with TTY-like streams. They
     // are renderer integration tests, not unit tests of the pure board logic.
     'task-2313-repro.test.ts',
     'task-2370-repro.test.ts',
-    'tui-command-flow.test.ts',
     // Unit tests must not open a real SQL database or cross a process
     // boundary, even when the database is a temp file and the spawn is a
     // tiny script. The content heuristic above cannot see boundaries that
@@ -143,15 +143,15 @@ export function selectTierFiles(executionRoot: string): TierFileSelection {
     'task-2339-aggregate-read-during-write.test.ts',
     'task-2339-writes-outlive-close.test.ts',
     // TASK-2343 composes concrete filesystem adapters over a temporary repository.
-    'task-2343-board-projection-repro.test.ts',
+    'presentation-board.integration.test.ts',
     // These workflow regressions create real temporary filesystem or SQLite
     // fixtures. Their mocked remote seams retain deterministic assertions, but
     // the fixtures mean they are CI-safe integration tests rather than units.
-    'task-1109.test.ts',
-    'task-2367-integration-completion-repro.test.ts',
-    'task-2377.05-integrate-squash-bounce.test.ts',
+    // TASK-2622.09: task-1109 and task-2367 live in the Variant B landing suite;
+    // task-2377.05 in the squash commit/landed-detection suite.
+    'integrate-variant-b-landing-contract.test.ts',
+    'integrate-squash-commit-and-landed-detection-contract.test.ts',
     'task-2426-repro.test.ts',
-    'task-2454-web-board-draft-repro.test.ts',
     'task-2345-repro.test.ts',
     'mission-handoff-reconcile-contract.test.ts',
     'task-2357-certification.test.ts',
@@ -162,30 +162,28 @@ export function selectTierFiles(executionRoot: string): TierFileSelection {
     'task-2367-repair.test.ts',
     'task-2367-telemetry-schema.test.ts',
     'task-2369-regressions.test.ts',
-    'task-2373-shutdown.test.ts',
-    'task-2375-active-invocation-overlap.test.ts',
-    'task-2375-current-work-operation-repro.test.ts',
+    'board-shutdown-signals.test.ts',
+    'active-invocation-contract.test.ts',
+    'current-work-operation-identity.test.ts',
     // TASK-2566 creates temporary Git repositories to exercise mission Sonar
     // classification; the fixture helper hides that boundary from the scan.
     'task-2566-sonar-boundary-repro.test.ts',
     // TASK-2413 commits real temporary Git repositories through
     // test/fixtures/git-repository.ts (TASK-2622.04), which hides the boundary
     // from the scan.
-    'task-2413-publication-seam.test.ts',
+    'forgejo-publication-gate-failure-contract.test.ts',
+    // TASK-2489 claim and takeover-lock cases use real temporary directories
+    // through the filesystem recovery-claim adapter.
+    'recovery-claim.test.ts',
     // TASK-2585 verifies provider publication proofs through injected API
     // responses, so it is integration-only even without a visible boundary
     // token in its test source.
     'task-2585-github-publication-proof.test.ts',
     'task-2585-workflow-proof-reuse.test.ts',
     // TASK-2580 crosses the real active-command and loopback web boundaries.
-    'task-2580-active-persisted-mission-repro.test.ts',
-    // TASK-2397: integrate active+approved recovery repro. It builds throwaway
-    // git repos in a temp dir to stage the stuck-lane scenario, so it crosses a
-    // real git boundary the content heuristic sees and belongs in integration.
-    'task-2397-integrate-active-approved-recovery.test.ts',
     // TASK-2420: integrate recovery repro by the assigned reviewer. It builds
     // throwaway git repos in a temp dir to stage the stranded-lane scenario,
-    // so it crosses a real git boundary like task-2397 and belongs in integration.
+    // so it crosses a real git boundary like the TASK-2397 recovery repro and belongs in integration.
     'task-2420-integrate-recovery-assigned-reviewer.test.ts',
     // TASK-2438 composes concrete board readers over temporary repository
     // files, which invokes the worktree/Git topology boundary.
@@ -249,6 +247,11 @@ export function selectTierFiles(executionRoot: string): TierFileSelection {
     // repos, so declared here rather than inheriting unit membership.
     'lifecycle-events.test.ts',
     'lifecycle-history.test.ts',
+    // TASK-2625: exercises the sha-keyed integration-validation skip over a
+    // real migrated SQLite operator database in a temporary directory. The
+    // SQLite boundary is not visible to the content heuristic, so it is
+    // declared here to run in the integration layer rather than the unit tier.
+    'integration-gate-skip-contract.test.ts',
   ]);
 
   // Classify subdir tests through the same boundary filter as root-level tests,

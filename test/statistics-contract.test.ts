@@ -15,6 +15,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { summarizeCompletedMissionWindow } from '../src/application/services/statistics-service.js';
 import { ConcreteMetricsReadAdapter } from '../src/application/projections/metrics-read-adapter.js';
 import type { MetricsReadAdapter } from '../src/application/projections/metrics-read-adapter.js';
 import {
@@ -73,7 +74,7 @@ const ROWS: readonly UsageRecord[] = [
 ];
 
 test('task-2347.08 repro: CLI and board agree on identity, completions, and cycle time', async () => {
-  const cli = stats.summarizeMissionWindow(ROWS, WINDOW, new Set([`${REPOSITORY}::task-2347.08`]));
+  const cli = summarizeCompletedMissionWindow(ROWS, WINDOW, new Set([`${REPOSITORY}::task-2347.08`]));
   const board = new ConcreteMetricsReadAdapter({
     laneEventRepo: new DoneLaneEventRepository(),
     usageRepo: new MemoryUsageRepository(ROWS),
@@ -86,7 +87,7 @@ test('task-2347.08 repro: CLI and board agree on identity, completions, and cycl
   const outcomes = await board.readOutcomes();
   const metrics = await board.buildMetrics(new Map<MissionId, MissionStatus>());
 
-  assert.equal(cli.total, outcomes.length, 'mission count must agree');
+  assert.equal(cli.missions.length, outcomes.length, 'mission count must agree');
   assert.deepEqual([...new Set(outcomes.map((outcome) => outcome.missionId.toLowerCase()))], ['task-2347.08']);
   assert.equal(metrics.medianStateTimes.series.at(-1)?.value, 0, 'cycle-time figure must agree for the same completed mission');
 });
@@ -104,7 +105,6 @@ test('task-2347.08: CLI delegates identity, completion, and window rules to stat
   ].map(file => fs.readFileSync(path.join(root, file), 'utf8')).join('\n');
   assert.match(source, /statisticsMissionKey\(row\)/);
   assert.match(source, /statisticsRowInWindow\(row, window\)/);
-  assert.match(source, /summarizeCompletedMissionWindow\(rows, window, completedMissionKeys\)/);
   assert.doesNotMatch(source, /return `\$\{String\(row\.repo/);
 });
 

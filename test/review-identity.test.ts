@@ -1,183 +1,222 @@
-// @ts-nocheck -- TASK-2328: partial test doubles from ESM seam migration; resolve in follow-up
-
-
-
-import test, { mock } from 'node:test';
+// @ts-nocheck -- Retained legacy partial request doubles (TASK-2328).
+// review identity.
+// Related scenarios share imports; each contract keeps its own hooks and mutable fixtures.
+import test, { describe } from 'node:test';
 import assert from 'node:assert/strict';
-import fs from 'fs';
-import os from 'os';
-import path from 'path';
-import { mockModule, installModuleMocks } from './lib/module-mock.js';
-const readCommentsModule = mockModule<typeof import('../src/adapters/review/review-commands.js')>('../src/adapters/review/review-commands.js', import.meta.url);
-await installModuleMocks();
-test.afterEach(() => mock.restoreAll());
-const { readComments, commentRound, submitReviewRound, closeMissionPr, readTextFlag } = readCommentsModule;
-const TEST_SLUG = 'task-test-identity-fail';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import {
+  readComments,
+  commentRound,
+  submitReviewRound,
+  closeMissionPr,
+  readTextFlag,
+} from '../src/adapters/review/review-commands.js';
+import { buildCompactReviewPrompt, buildCompactActOnReviewPrompt } from '../src/adapters/review/review-prompts.js';
 
-function reviewStateStub(reviewer = 'claude', implementer = 'mistral') {
-  return {
-    reviewer,
-    implementer,
-    round: 1,
-    phase: 'reviewing',
-    startedAt: '2026-05-25T19:35:13Z'
-  };
-}
+// Regression provenance: TASK-2622.08.
+describe("review identity", { concurrency: false }, () => {
+  const TEST_SLUG = 'task-test-identity-fail';
 
-async function captureExit(fn) {
-  const originalExit = process.exit;
-  const originalError = console.error;
-  const originalLog = console.log;
-  const errors = [];
-  let exitCode = null;
-
-  process.exit = (code) => {
-    exitCode = code;
-    throw new Error(`process.exit(${code})`);
-  };
-  console.error = (...args) => errors.push(args.join(' '));
-  console.log = () => {};
-
-  try {
-    await fn();
-  } catch (err) {
-    if (!err.message.startsWith('process.exit(')) throw err;
-  } finally {
-    process.exit = originalExit;
-    console.error = originalError;
-    console.log = originalLog;
+  function reviewStateStub(reviewer = 'claude', implementer = 'mistral') {
+    return {
+      reviewer,
+      implementer,
+      round: 1,
+      phase: 'reviewing',
+      startedAt: '2026-05-25T19:35:13Z'
+    };
   }
 
-  return { exitCode, errors };
-}
+  async function captureExit(fn) {
+    const originalExit = process.exit;
+    const originalError = console.error;
+    const originalLog = console.log;
+    const errors = [];
+    let exitCode = null;
 
-test('readComments falls back to review-state identity when FORGEJO_USER is missing', async () => {
-  const originalUser = process.env.FORGEJO_USER;
-  delete process.env.FORGEJO_USER;
+    process.exit = (code) => {
+      exitCode = code;
+      throw new Error(`process.exit(${code})`);
+    };
+    console.error = (...args) => errors.push(args.join(' '));
+    console.log = () => {};
 
-  try {
-    const logs = [];
-    const { exitCode, errors } = await captureExit(async () => {
-      await readComments(TEST_SLUG, {
+    try {
+      await fn();
+    } catch (err) {
+      if (!err.message.startsWith('process.exit(')) throw err;
+    } finally {
+      process.exit = originalExit;
+      console.error = originalError;
+      console.log = originalLog;
+    }
+
+    return { exitCode, errors };
+  }
+
+  test('readComments falls back to review-state identity when FORGEJO_USER is missing', async () => {
+    const originalUser = process.env.FORGEJO_USER;
+    delete process.env.FORGEJO_USER;
+
+    try {
+      const logs = [];
+      const { exitCode, errors } = await captureExit(async () => {
+        await readComments(TEST_SLUG, {
+          readReviewStateFn: () => reviewStateStub('claude', 'mistral'),
+          readTokenFn: () => 'token-123',
+          getCommentsFn: async () => [],
+          isForgejoReviewEnabledFn: () => true,
+          log: (line) => logs.push(line)
+        });
+      });
+      assert.equal(exitCode, null);
+      assert.equal(errors.length, 0);
+      assert.ok(logs.some(line => line.includes('Reading PR comments on mission/task-test-identity-fail as claude')));
+    } finally {
+      process.env.FORGEJO_USER = originalUser;
+    }
+  });
+
+  test('commentRound falls back to review-state identity when FORGEJO_USER is missing', async () => {
+    const originalUser = process.env.FORGEJO_USER;
+    delete process.env.FORGEJO_USER;
+
+    try {
+      const writes = [];
+      const { exitCode, errors } = await captureExit(() => commentRound(TEST_SLUG, 'test message', {
+        readReviewStateFn: () => reviewStateStub('claude', 'mistral'),
+        writeReviewStateFn: (slug, state) => writes.push({ slug, reviewer: state.reviewer }),
+        postCommentFn: () => ({ ok: true }),
+        readTokenFn: () => 'token-123'
+      }));
+      assert.equal(exitCode, null);
+      assert.equal(errors.length, 0);
+      assert.equal(writes.length, 1);
+      assert.equal(writes[0].reviewer, 'claude');
+    } finally {
+      process.env.FORGEJO_USER = originalUser;
+    }
+  });
+
+  test('readTextFlag prefers file content for multiline markdown bodies', () => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'review-text-flag-'));
+    const commentPath = path.join(tempDir, 'comment.md');
+    fs.writeFileSync(commentPath, '## Header\n\n`code`\n', 'utf8');
+
+    try {
+      const value = readTextFlag(
+        ['--comment-file', commentPath, '--comment', 'inline fallback'],
+        '--comment',
+        '--comment-file',
+        'comment'
+      );
+      assert.equal(value, '## Header\n\n`code`');
+    } finally {
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  test('submitReviewRound falls back to review-state identity when FORGEJO_USER is missing', async () => {
+    const originalUser = process.env.FORGEJO_USER;
+    delete process.env.FORGEJO_USER;
+
+    try {
+      const writes = [];
+      const { exitCode, errors } = await captureExit(() => submitReviewRound(TEST_SLUG, 'approve', 'test summary', {
+        readReviewStateFn: () => reviewStateStub('claude', 'mistral'),
+        writeReviewStateFn: (slug, state) => writes.push({ slug, disposition: state.disposition, phase: state.phase }),
+        getPrAuthorFn: () => 'different-author',
+        postReviewFn: () => ({ ok: true }),
+        readTokenFn: () => 'token-123',
+        isForgejoReviewEnabledFn: () => true
+      }));
+      assert.equal(exitCode, null);
+      assert.equal(errors.length, 0);
+      assert.equal(writes.length, 1);
+      assert.equal(writes[0].disposition, 'APPROVED');
+    } finally {
+      process.env.FORGEJO_USER = originalUser;
+    }
+  });
+
+  test('submitReviewRound ignores FORGEJO_USER and uses review-state identity', async () => {
+    const originalUser = process.env.FORGEJO_USER;
+    process.env.FORGEJO_USER = 'override-reviewer';
+
+    try {
+      let capturedUser = null;
+      const { exitCode, errors } = await captureExit(() => submitReviewRound(TEST_SLUG, 'approve', 'test summary', {
+        readReviewStateFn: () => reviewStateStub('state-reviewer', 'state-implementer'),
+        writeReviewStateFn: () => {},
+        postReviewFn: () => ({ ok: true }),
+        readTokenFn: (user) => {
+          capturedUser = user;
+          return 'token-123';
+        },
+        isForgejoReviewEnabledFn: () => true,
+        getPrAuthorFn: () => 'different-author'
+      }));
+      assert.equal(exitCode, null);
+      assert.equal(errors.length, 0);
+      assert.equal(capturedUser, 'state-reviewer');
+    } finally {
+      if (originalUser === undefined) delete process.env.FORGEJO_USER;
+      else process.env.FORGEJO_USER = originalUser;
+    }
+  });
+
+  test('closeMissionPr falls back to review-state identity when FORGEJO_USER is missing', async () => {
+    const originalUser = process.env.FORGEJO_USER;
+    delete process.env.FORGEJO_USER;
+
+    try {
+      const logs = [];
+      const { exitCode, errors } = await captureExit(() => closeMissionPr(TEST_SLUG, {
         readReviewStateFn: () => reviewStateStub('claude', 'mistral'),
         readTokenFn: () => 'token-123',
-        getCommentsFn: async () => [],
-        isForgejoReviewEnabledFn: () => true,
+        closePrFn: async () => ({ ok: true }),
         log: (line) => logs.push(line)
-      });
+      }));
+      assert.equal(exitCode, null);
+      assert.equal(errors.length, 0);
+      assert.ok(logs.some(line => line.includes('Closing PR')));
+    } finally {
+      process.env.FORGEJO_USER = originalUser;
+    }
+  });
+});
+
+// Regression provenance: TASK-2622.08.
+describe("review identity placeholder", { concurrency: false }, () => {
+  test('buildCompactReviewPrompt uses actualReviewer when provided', () => {
+    const prompt = buildCompactReviewPrompt({
+      reviewer: 'claude',
+      branch: 'mission/task-1051',
+      implementer: 'codex',
+      attempt: 1,
+      actualReviewer: 'vibe'
     });
-    assert.equal(exitCode, null);
-    assert.equal(errors.length, 0);
-    assert.ok(logs.some(line => line.includes('Reading PR comments on mission/task-test-identity-fail as claude')));
-  } finally {
-    process.env.FORGEJO_USER = originalUser;
-  }
-});
 
-test('commentRound falls back to review-state identity when FORGEJO_USER is missing', async () => {
-  const originalUser = process.env.FORGEJO_USER;
-  delete process.env.FORGEJO_USER;
+    // TASK-2521.03 replaced the artifact protocol: the reviewer's one write is
+    // `px verdict`, and the context read is `px status`.
+    assert.match(prompt, /Submit your final decision with `px verdict`/);
+    assert.match(prompt, /px status/);
+    assert.doesNotMatch(prompt, /Reviewer: claude/);
+    assert.doesNotMatch(prompt, /Reviewer: vibe/);
+  });
 
-  try {
-    const writes = [];
-    const { exitCode, errors } = await captureExit(() => commentRound(TEST_SLUG, 'test message', {
-      readReviewStateFn: () => reviewStateStub('claude', 'mistral'),
-      writeReviewStateFn: (slug, state) => writes.push({ slug, reviewer: state.reviewer }),
-      postCommentFn: () => ({ ok: true }),
-      readTokenFn: () => 'token-123'
-    }));
-    assert.equal(exitCode, null);
-    assert.equal(errors.length, 0);
-    assert.equal(writes.length, 1);
-    assert.equal(writes[0].reviewer, 'claude');
-  } finally {
-    process.env.FORGEJO_USER = originalUser;
-  }
-});
+  test('buildCompactActOnReviewPrompt uses actualImplementer when provided', () => {
+    const prompt = buildCompactActOnReviewPrompt({
+      implementer: 'custom',
+      branch: 'mission/task-1051',
+      attempt: 1,
+      actualImplementer: 'codex'
+    });
 
-test('readTextFlag prefers file content for multiline markdown bodies', () => {
-  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'review-text-flag-'));
-  const commentPath = path.join(tempDir, 'comment.md');
-  fs.writeFileSync(commentPath, '## Header\n\n`code`\n', 'utf8');
-
-  try {
-    const value = readTextFlag(
-      ['--comment-file', commentPath, '--comment', 'inline fallback'],
-      '--comment',
-      '--comment-file',
-      'comment'
-    );
-    assert.equal(value, '## Header\n\n`code`');
-  } finally {
-    fs.rmSync(tempDir, { recursive: true, force: true });
-  }
-});
-
-test('submitReviewRound falls back to review-state identity when FORGEJO_USER is missing', async () => {
-  const originalUser = process.env.FORGEJO_USER;
-  delete process.env.FORGEJO_USER;
-
-  try {
-    const writes = [];
-    const { exitCode, errors } = await captureExit(() => submitReviewRound(TEST_SLUG, 'approve', 'test summary', {
-      readReviewStateFn: () => reviewStateStub('claude', 'mistral'),
-      writeReviewStateFn: (slug, state) => writes.push({ slug, disposition: state.disposition, phase: state.phase }),
-      getPrAuthorFn: () => 'different-author',
-      postReviewFn: () => ({ ok: true }),
-      readTokenFn: () => 'token-123',
-      isForgejoReviewEnabledFn: () => true
-    }));
-    assert.equal(exitCode, null);
-    assert.equal(errors.length, 0);
-    assert.equal(writes.length, 1);
-    assert.equal(writes[0].disposition, 'APPROVED');
-  } finally {
-    process.env.FORGEJO_USER = originalUser;
-  }
-});
-
-test('submitReviewRound ignores FORGEJO_USER and uses review-state identity', async () => {
-  const originalUser = process.env.FORGEJO_USER;
-  process.env.FORGEJO_USER = 'override-reviewer';
-
-  try {
-    let capturedUser = null;
-    const { exitCode, errors } = await captureExit(() => submitReviewRound(TEST_SLUG, 'approve', 'test summary', {
-      readReviewStateFn: () => reviewStateStub('state-reviewer', 'state-implementer'),
-      writeReviewStateFn: () => {},
-      postReviewFn: () => ({ ok: true }),
-      readTokenFn: (user) => {
-        capturedUser = user;
-        return 'token-123';
-      },
-      isForgejoReviewEnabledFn: () => true,
-      getPrAuthorFn: () => 'different-author'
-    }));
-    assert.equal(exitCode, null);
-    assert.equal(errors.length, 0);
-    assert.equal(capturedUser, 'state-reviewer');
-  } finally {
-    if (originalUser === undefined) delete process.env.FORGEJO_USER;
-    else process.env.FORGEJO_USER = originalUser;
-  }
-});
-
-test('closeMissionPr falls back to review-state identity when FORGEJO_USER is missing', async () => {
-  const originalUser = process.env.FORGEJO_USER;
-  delete process.env.FORGEJO_USER;
-
-  try {
-    const logs = [];
-    const { exitCode, errors } = await captureExit(() => closeMissionPr(TEST_SLUG, {
-      readReviewStateFn: () => reviewStateStub('claude', 'mistral'),
-      readTokenFn: () => 'token-123',
-      closePrFn: async () => ({ ok: true }),
-      log: (line) => logs.push(line)
-    }));
-    assert.equal(exitCode, null);
-    assert.equal(errors.length, 0);
-    assert.ok(logs.some(line => line.includes('Closing PR')));
-  } finally {
-    process.env.FORGEJO_USER = originalUser;
-  }
+    assert.match(prompt, /You are the implementer agent family: `codex`/);
+    assert.match(prompt, /px resolve --slug task-1051 --actor codex/);
+    assert.ok(!prompt.includes('agent family: `custom`'), 'Should not contain the original implementer in identity spot');
+  });
 });

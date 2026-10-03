@@ -1,0 +1,318 @@
+{
+  "baseline": "f8ab466a2",
+  "merged": [
+    {
+      "destination": "test/npm-package-bundle-and-release-contract.test.ts",
+      "tier": "unit",
+      "sources": [
+        {
+          "source": "test/task-2285-release-metadata.test.ts",
+          "cases": [
+            "task-2285 package metadata declares the CLI-only ESM boundary",
+            "task-2285 files allowlist ships only the bundle payload and release metadata",
+            "task-2285 bin path is the bundler entry point reused as SEA input",
+            "task-2285 build/ is a self-contained payload root with staged runtime assets",
+            "task-2285 build/ stages every canonical SQLite migration byte-for-byte",
+            "task-2285 checksum manifest covers every build/ file except itself",
+            "task-2285 SBOM and NOTICES describe the same bundled package set",
+            "task-2285 every bundled package carries an approved license",
+            "task-2285 license audit rejects an unapproved dependency license",
+            "task-2285 bundled-package discovery attributes nested copies to themselves",
+            "task-2285 release metadata requires the bundle metafile",
+            "task-2285 notices deduplicate a shared license text across packages",
+            "task-2285 SBOM records subresource hashes from the lockfile integrity",
+            "task-2285 normalizes the legacy license manifest spellings"
+          ],
+          "missingInDestination": []
+        },
+        {
+          "source": "test/task-2381-repro.test.ts",
+          "cases": [
+            "violationsFor flags build/sea payload files as forbidden package files",
+            "package.json files allowlist negates the SEA payload directory"
+          ],
+          "missingInDestination": []
+        },
+        {
+          "source": "test/task-1391-import-equals-syntax.test.ts",
+          "cases": [
+            "px.ts must not contain import-equals declarations",
+            "px.ts must not contain export = statements",
+            "lib/index.ts must not contain import-equals declarations",
+            "lib/index.ts must not contain export = statements"
+          ],
+          "missingInDestination": []
+        },
+        {
+          "source": "test/task-2279-assets-and-rollback-shim.test.ts",
+          "cases": [
+            "task-2288 build emits the canonical bundle as the sole executable package target"
+          ],
+          "missingInDestination": [],
+          "note": "split by behavior: AssetStore routing here, canonical-bundle target in the sibling destination"
+        },
+        {
+          "source": "test/task-2509-release-publish.test.ts",
+          "cases": [
+            "task-2509: release metadata accepts only matching normal SemVer versions",
+            "task-2509: normal releases must advance the current normal release",
+            "task-2509: tag collision and another SHA publication fail closed",
+            "task-2509: npm lookup errors fail closed",
+            "task-2509: release flow publishes, tags, and creates the matching release",
+            "task-2509: rerun reuses the existing GitHub Release by its verified tag",
+            "task-2509: rerun accepts publication and tag only for the same trusted SHA"
+          ],
+          "missingInDestination": []
+        }
+      ]
+    },
+    {
+      "destination": "test/package-root-and-runtime-asset-resolution-contract.test.ts",
+      "tier": "unit",
+      "sources": [
+        {
+          "source": "test/task-2225-package-root.test.ts",
+          "cases": [
+            "packageRoot resolves the checkout root by package name",
+            "packageRoot walks up from any nested module dir to the same root",
+            "packageRoot does not consult process.cwd()",
+            "packageRoot throws when no matching ancestor package.json exists",
+            "packageRoot rejects an empty starting directory",
+            "every migrated asset resolves under the package root from a temp CWD",
+            "every migrated call site resolves its package asset from a temp CWD"
+          ],
+          "missingInDestination": []
+        },
+        {
+          "source": "test/task-2279-assets-and-rollback-shim.test.ts",
+          "cases": [
+            "task-2279 routes shipped prompts and configuration through the runtime AssetStore"
+          ],
+          "missingInDestination": [],
+          "note": "split by behavior: AssetStore routing here, canonical-bundle target in the sibling destination"
+        }
+      ]
+    },
+    {
+      "destination": "test/native-sea-stop-rules-contract.test.ts",
+      "tier": "unit",
+      "sources": [
+        {
+          "source": "test/task-2286-sea-stop-rules.test.ts",
+          "cases": [
+            "SEA runtime gate: Node 25 and newer are accepted, Node 22/24 are refused before artifact creation (SC1)",
+            "SEA surfaces: the ADR 0044 surface list is exactly Ink, SQLite, assets, signals, Git, and source maps (SC7)",
+            "SEA surfaces: a failing surface raises stop-and-reassess and returns no fallback value (SC7)",
+            "SEA surfaces: a non-boolean surface result is a failure, never an implicit pass (SC7)",
+            "SEA thresholds: measurement stop thresholds are declared for size, cold start, memory, and shutdown (SC5)",
+            "SEA build adapter: restricted areas are untouched by the SEA proof"
+          ],
+          "missingInDestination": []
+        }
+      ]
+    },
+    {
+      "destination": "test/post-integrate-global-install-contract.test.ts",
+      "tier": "integration-ci",
+      "sources": [
+        {
+          "source": "test/task-2203-publish-proof-refresh-order.test.ts",
+          "cases": [
+            "post-integrate hook runs the configured distribution rebuild (task-2203 prerequisite)",
+            "refresh-global-px.sh builds dist (task-2203 prerequisite)",
+            "Variant B: post-integrate hook runs before proof capture (task-2203 fix)",
+            "proof captured before rebuild is stale after post-integrate hook (task-2200 symptom)"
+          ],
+          "missingInDestination": []
+        },
+        {
+          "source": "test/task-2621-repro.test.ts",
+          "cases": [
+            "task-2621: refresh reconciles the landed lockfile before npm pack prepare without a real global install"
+          ],
+          "missingInDestination": []
+        }
+      ]
+    },
+    {
+      "destination": "test/integrate-landed-closeout-recovery-contract.test.ts",
+      "tier": "unit",
+      "sources": [
+        {
+          "source": "test/task-2614-local-autoinstall-repro.test.ts",
+          "cases": [
+            "TASK-2614: a landed integration refreshes the repository-built local px before cleanup"
+          ],
+          "missingInDestination": []
+        }
+      ]
+    },
+    {
+      "destination": "test/documentation-verification.test.ts",
+      "tier": "integration-ci",
+      "sources": [
+        {
+          "source": "test/task-2484-npm-metadata-urls-repro.test.ts",
+          "cases": [
+            "npm metadata that disagrees with origin is rejected by the verifier",
+            "npm metadata that agrees with origin passes the verifier",
+            "scp-style SSH origin normalizes equal to the https manifest"
+          ],
+          "missingInDestination": []
+        }
+      ]
+    },
+    {
+      "destination": "test/release-publication-and-version-allocation-contract.test.ts",
+      "tier": "integration-ci",
+      "sources": [
+        {
+          "source": "test/task-2509-local-version-allocation.test.ts",
+          "cases": [
+            "task-2509: local allocation lands matching package metadata in the one mission commit",
+            "task-2509: local allocation never moves a stale mission version backwards",
+            "task-2509: local allocation keeps a newer version already allocated by a retried integration"
+          ],
+          "missingInDestination": []
+        },
+        {
+          "source": "test/task-2509-release-workflow.test.ts",
+          "cases": [
+            "task-2509: release trusts only the successful main-push SHA with release-only OIDC permissions",
+            "task-2522: ci-required runs and summarizes the existing coverage gate on PRs and main pushes"
+          ],
+          "missingInDestination": []
+        },
+        {
+          "source": "test/task-2319-notices-git-tracking.test.ts",
+          "cases": [
+            "task-2319: NOTICES is not tracked in git",
+            "task-2319: .gitignore contains root-anchored /NOTICES entry",
+            "task-2319: .gitignore does NOT contain a bare (unanchored) NOTICES rule",
+            "task-2319: /NOTICES pattern matches only the root artifact (not nested)",
+            "task-2319: NOTICES is listed in package.json files[] (published artifact)"
+          ],
+          "missingInDestination": []
+        }
+      ]
+    },
+    {
+      "destination": "test/npm-pack-install-smoke.test.ts",
+      "tier": "integration-ci",
+      "sources": [
+        {
+          "source": "test/task-2285-pack-install-smoke.test.ts",
+          "cases": [
+            "task-2285 install: the tarball contains only the bundle payload and release metadata",
+            "task-2285 install: SC4 \u2014 no node_modules anywhere in the installed package",
+            "task-2285 install: SC3 \u2014 px --version reports the bundle as the payload root",
+            "task-2285 install: SC3 \u2014 px --help prints the command surface",
+            "task-2285 install: SC3 \u2014 representative headless JSON command emits parseable JSON",
+            "task-2285 install: SC3 \u2014 embedded assets load from the bundle payload root",
+            "task-2285 install: SC3 \u2014 explicit TUI falls back cleanly on a non-TTY stdin/stdout",
+            "task-2285 install: SC3 \u2014 node:sqlite resolves at startup from the installed bundle",
+            "task-2285 install: the local (non-global) install layout runs the same bundle",
+            "task-2285 install: SC7 \u2014 the installed bin is byte-identical to the built bundle",
+            "task-2285 install: bare `px` on a non-TTY prints help (SC3)"
+          ],
+          "missingInDestination": []
+        }
+      ]
+    },
+    {
+      "destination": "test/forgejo-publication-gate-failure-contract.test.ts",
+      "tier": "integration-ci",
+      "sources": [
+        {
+          "source": "test/task-2413-publication-seam.test.ts",
+          "cases": [
+            "task-2413: publication verifier failure carries captured output through createPr",
+            "task-2413: an exit-code-only wrapper string still propagates without crashing createPr"
+          ],
+          "missingInDestination": []
+        }
+      ]
+    },
+    {
+      "destination": "test/graphify-mission-document-exclusion.test.ts",
+      "tier": "integration-local",
+      "sources": [
+        {
+          "source": "test/task-2270-graphify-exclusion.test.ts",
+          "cases": [
+            "Graphify excludes configured mission documents before extraction while retaining source relationships"
+          ],
+          "missingInDestination": []
+        }
+      ]
+    },
+    {
+      "destination": "test/native-sea-executable-smoke.test.ts",
+      "tier": "integration-local",
+      "sources": [
+        {
+          "source": "test/task-2286-native-sea-smoke.test.ts",
+          "cases": [
+            "native SEA smoke: the build pins and records an ESM-SEA-capable Node and refuses Node 24 before artifact creation (SC1)",
+            "native SEA smoke: SEA input is the byte-identical canonical bundle with snapshot and code cache disabled (SC2)",
+            "native SEA smoke: --version and --help run from the executable (SC3)",
+            "native SEA smoke: headless JSON output is parseable and free of cursor control (SC3)",
+            "native SEA smoke: Ink TUI launches on a real PTY and exits cleanly (SC3, ADR 0044 ink surface)",
+            "native SEA smoke: SIGTERM shuts the running executable down gracefully (SC3, ADR 0044 signals surface)",
+            "native SEA smoke: SQLite create, write, and read round-trip through the executable (SC3, ADR 0044 sqlite surface)",
+            "native SEA smoke: every asset-manifest key resolves from the executable payload (SC3, ADR 0044 assets surface)",
+            "native SEA smoke: temporary Git operation and subprocess spawn succeed from the executable (SC3, ADR 0044 git surface)",
+            "native SEA smoke: uncaught diagnostics map back to TypeScript sources (SC3, ADR 0044 source maps surface)",
+            "native SEA smoke: the executable runs with no Node on PATH and no node_modules in its payload (SC4)",
+            "native SEA smoke: binary size, cold start, idle memory, and shutdown time are measured against the stop thresholds (SC5)",
+            "native SEA smoke: license, notices, SBOM, checksum, runtime, commit, and signature status are inspectable (SC6)",
+            "native SEA smoke: the npm fallback passes the same headless smoke set (SC8)",
+            "native SEA smoke: rollback withdraws the executable without affecting npm or source execution (SC9)"
+          ],
+          "missingInDestination": []
+        }
+      ]
+    }
+  ],
+  "retained": [
+    {
+      "file": "test/esm-only-guard.test.ts",
+      "tier": "unit"
+    },
+    {
+      "file": "test/github-publish.test.ts",
+      "tier": "unit"
+    },
+    {
+      "file": "test/install.test.ts",
+      "tier": "integration-ci"
+    },
+    {
+      "file": "test/mission-utils-graphify.test.ts",
+      "tier": "unit"
+    },
+    {
+      "file": "test/prompt-split.test.ts",
+      "tier": "unit"
+    },
+    {
+      "file": "test/px-runner.test.ts",
+      "tier": "integration-ci"
+    },
+    {
+      "file": "test/runtime-benchmark.test.ts",
+      "tier": "unit"
+    },
+    {
+      "file": "test/e2e-mission-lifecycle.test.ts",
+      "tier": "agent-e2e"
+    },
+    {
+      "file": "test/e2e-real-agent-smoke.test.ts",
+      "tier": "agent-e2e"
+    }
+  ],
+  "totals": {
+    "mergedSourceCases": 90
+  }
+}

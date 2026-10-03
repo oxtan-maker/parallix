@@ -11,7 +11,6 @@ import * as fmt from '../../../application/presentation/cli-format.js';
 import {
   buildWeeklyWindows,
   createRangeWindow,
-  summarizeMissionWindow,
   summarizeAgentWindow,
   summarizeAgentStageSpend,
   formatAgentSpendCell,
@@ -24,25 +23,12 @@ import {
 } from './stats.js';
 import { compareCodeUnits } from '../../../domain/comparators.js';
 
-/** The agent-telemetry table header, in render order. */
-function agentTelemetryHeader() {
-  return ['# missions with telemetry', '# user value missions', '# AI SDLC missions', '# unknown missions'];
-}
-
-/** The agent-telemetry table row, in header order. */
-function agentTelemetryRow(total, userValue, aiSdlc, unknown) {
-  return [String(total), String(userValue), String(aiSdlc), String(unknown)];
-}
-
 // ---------------------------------------------------------------------------
-// Mission flow vs agent telemetry
+// Mission flow
 //
-// These are two different quantities and this file no longer lets them share a
-// heading. Mission flow counts missions whose lifecycle entered `done` — the
-// same population `BoardMetrics` and `px stats cohorts` report, supplied by the
-// caller as `MissionOutcome[]`. The telemetry tables below count what agents
-// wrote about their own work; a mission with no telemetry is invisible to them,
-// and a telemetry row claiming closure does not complete a mission.
+// Mission flow counts missions whose lifecycle entered `done` — the same
+// population `BoardMetrics` and `px stats cohorts` report, supplied by the
+// caller as `MissionOutcome[]`.
 // ---------------------------------------------------------------------------
 
 /** The label buckets the mission-flow table reports, in render order. */
@@ -134,11 +120,6 @@ function renderWeeklyStatsReport(rows, options = {}) {
     .filter(outcome => String(outcome.closedAt).slice(0, 10) >= window.start.toISOString().slice(0, 10)
       && String(outcome.closedAt).slice(0, 10) <= window.end.toISOString().slice(0, 10))
     .map(outcome => `${String(outcome.repo).trim()}::${String(outcome.mission).trim().toLowerCase()}`));
-  const telemetryMissionKeys = new Set(rows.map(row =>
-    `${String(row.repo ?? '').trim()}::${String(row.mission ?? '').trim().toLowerCase()}`,
-  ));
-  const currentMissionStats = summarizeMissionWindow(rows, windows.current, telemetryMissionKeys);
-  const previousMissionStats = summarizeMissionWindow(rows, windows.previous, telemetryMissionKeys);
   const currentAgentStats = missionFlow === null ? [] : summarizeAgentWindow(rows, windows.current, { rootDir, completedMissionKeys: completedMissionKeys(windows.current), completedMissionOwners });
   const previousAgentStats = missionFlow === null ? [] : summarizeAgentWindow(rows, windows.previous, { rootDir, completedMissionKeys: completedMissionKeys(windows.previous), completedMissionOwners });
   const currentMissionColors = colorMissionCounts(currentAgentStats);
@@ -150,18 +131,6 @@ function renderWeeklyStatsReport(rows, options = {}) {
   lines.push(...missionFlowSection('Mission flow — current week', missionFlow, windows.current));
   lines.push('');
   lines.push(...missionFlowSection('Mission flow — previous week', missionFlow, windows.previous));
-  lines.push('');
-  lines.push(fmt.bold(`Agent telemetry — current week (${windows.current.label})`));
-  lines.push(formatStatsTable(
-    agentTelemetryHeader(),
-    [agentTelemetryRow(currentMissionStats.total, currentMissionStats.userValue, currentMissionStats.aiSdlc, currentMissionStats.unknown)]
-  ));
-  lines.push('');
-  lines.push(fmt.bold(`Agent telemetry — previous week (${windows.previous.label})`));
-  lines.push(formatStatsTable(
-    agentTelemetryHeader(),
-    [agentTelemetryRow(previousMissionStats.total, previousMissionStats.userValue, previousMissionStats.aiSdlc, previousMissionStats.unknown)]
-  ));
   lines.push('');
   lines.push(fmt.bold(`Agent performance this week (${windows.current.label}) — completed Missions`));
   lines.push(missionFlow === null ? 'Agent performance unavailable: lifecycle history was not read.' : formatStatsTable(
@@ -212,22 +181,12 @@ function renderRangeStatsReport(rows, options = {}) {
     .filter(outcome => String(outcome.closedAt).slice(0, 10) >= window.start.toISOString().slice(0, 10)
       && String(outcome.closedAt).slice(0, 10) <= window.end.toISOString().slice(0, 10))
     .map(outcome => `${String(outcome.repo).trim()}::${String(outcome.mission).trim().toLowerCase()}`));
-  const telemetryMissionKeys = new Set(rows.map(row =>
-    `${String(row.repo ?? '').trim()}::${String(row.mission ?? '').trim().toLowerCase()}`,
-  ));
-  const missionStats = summarizeMissionWindow(rows, window, telemetryMissionKeys);
   const agentStats = missionFlow === null ? [] : summarizeAgentWindow(rows, window, { rootDir, completedMissionKeys, completedMissionOwners });
   const missionColors = colorMissionCounts(agentStats);
   const agentColors = colorAverageFixRounds(agentStats);
 
   const lines = [];
   lines.push(...missionFlowSection('Mission flow', missionFlow, window));
-  lines.push('');
-  lines.push(fmt.bold(`Agent telemetry missions (${window.label})`));
-  lines.push(formatStatsTable(
-    agentTelemetryHeader(),
-    [agentTelemetryRow(missionStats.total, missionStats.userValue, missionStats.aiSdlc, missionStats.unknown)]
-  ));
   lines.push('');
   lines.push(fmt.bold(`Agent performance (${window.label}) — completed Missions`));
   lines.push(missionFlow === null ? 'Agent performance unavailable: lifecycle history was not read.' : formatStatsTable(

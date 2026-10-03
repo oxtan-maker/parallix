@@ -44,7 +44,7 @@ test('local sonar scan submits the worktree branch to the one Cloud project', ()
   const captured = read()!;
   const branch = spawnSync('git', ['rev-parse', '--abbrev-ref', 'HEAD'], { cwd: repoRoot, encoding: 'utf8' }).stdout.trim();
 
-  assert.equal(path.basename(captured.command), 'sonar-scanner-npm');
+  assert.equal(path.basename(captured.command), 'sonar-scanner');
   assert.deepEqual(captured.args, [
     '-Dsonar.host.url=https://sonarcloud.io',
     '-Dsonar.organization=oxtan-maker',
@@ -120,8 +120,8 @@ test('local verification and GitHub invoke the same pinned sonar entrypoint', ()
   assert.ok(workflow.includes('npm run coverage:merge'), 'ci-required unions per-tier LCOV before the scan');
 
   // The scanner is lockfile-pinned, never fetched at gate time.
-  assert.ok(manifest.devDependencies['sonarqube-scanner'], 'the scanner is a declared dependency');
-  assert.ok(lockfile.packages['node_modules/sonarqube-scanner'], 'the scanner is pinned in the lockfile');
+  assert.ok(manifest.devDependencies['sonar-scanner'], 'the scanner is a declared dependency');
+  assert.ok(lockfile.packages['node_modules/sonar-scanner'], 'the scanner is pinned in the lockfile');
   assert.doesNotMatch(workflow, /npx\s+--yes/);
 });
 

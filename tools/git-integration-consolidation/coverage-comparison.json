@@ -1,0 +1,57 @@
+{
+ "sourceFiles": {
+  "baseline": 334,
+  "candidate": 334
+ },
+ "executableLines": {
+  "baseline": 48237,
+  "candidate": 48461
+ },
+ "coveredLines": {
+  "baseline": 19764,
+  "candidate": 19776
+ },
+ "lineRatePercent": {
+  "baseline": 40.97,
+  "candidate": 40.81
+ },
+ "comparableLineRate": {
+  "identities": 48237,
+  "baselineCovered": 19764,
+  "candidateCovered": 19770,
+  "baselinePercent": 40.97,
+  "candidatePercent": 40.99
+ },
+ "normalizedLineRate": {
+  "baseline": {
+   "lines": 46865,
+   "covered": 18929,
+   "percent": 40.39
+  },
+  "candidate": {
+   "lines": 46866,
+   "covered": 18932,
+   "percent": 40.4
+  }
+ },
+ "lostCovered": 1,
+ "lostCoveredErasedOnly": 1,
+ "inventoryOnlyDeclarationLines": 1,
+ "inventoryOnlyBaseline": 0,
+ "inventoryOnlyCandidate": 224,
+ "inventoryOnlyCandidateCovered": 6,
+ "unresolved": [],
+ "lostCoveredRows": [
+  {
+   "source": "src/adapters/git/git.ts",
+   "line": 7,
+   "baselineHits": 1,
+   "candidateHits": 0,
+   "classification": "erased TypeScript tokens only"
+  }
+ ],
+ "baselineFiles": 90,
+ "candidateFiles": 31,
+ "settings": "tools/coverage-comparison/compare-slice-coverage.ts, one file per covered node --test process, Node 26.10.0, native LCOV reporter, include-all; baseline checkout is the detached pre-migration commit 43e484f1c, candidate is the migrated tree",
+ "productionSourceChanges": 0
+}

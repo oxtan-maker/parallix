@@ -8,7 +8,24 @@ import { missionId } from '../../domain/mission.js';
 import { integrationRepairNeedsReview } from '../integration-repair-review.js';
 import { reportedApprovalStaleness } from '../approval-coverage.js';
 import { abortWith, resolveBounceImplementer, type BounceSeams } from './support.js';
+import {
+  INTEGRATION_VALIDATION_EVENT_TYPE,
+  buildIntegrationValidationMarker,
+  partitionGatesForSkip,
+  parseIntegrationValidationMarker,
+  validationSkipApplies,
+} from './validation-marker.js';
 import type { IntegrateGatesPort, IntegrateWorkflowPorts } from '../ports/integrate-workflow.js';
+import type { OperationalHistoryService } from '../services/operational-history-service.js';
+
+/**
+ * Minimal shape of a configured gate the skip resolver needs. Kept local to
+ * avoid an application→adapter import (ADR 0037); the value returned by
+ * `gates.loadPhaseGates` structurally matches it.
+ */
+interface SkippableGate {
+  readonly key: string;
+}
 
 export interface IntegrateSeams extends BounceSeams {
   routeIntegrationGateFailureFn: IntegrateGatesPort['routeIntegrationGateFailure'];
@@ -72,6 +89,58 @@ export interface GateStepRequest {
   seams: IntegrateSeams;
 }
 
+/**
+ * Decide which of the configured preIntegration gates to run, applying the
+ * TASK-2625 skip: when a durable, sha-keyed marker records that this mission
+ * already ran some hooks green at the current branch HEAD, only the not-yet
+ * validated hooks run. The decision is decided purely from the marker and the
+ * current branch HEAD — no repo, branch, or mission-slug special-casing — and
+ * every fallback (marker missing, whitelist empty, branch moved) runs the full
+ * configured set (SC2/SC3).
+ */
+/**
+ * @param configured   the configured preIntegration gates
+ * @param slug         the mission slug
+ * @param finalizedCommit the finalized integration tree commit the gates will run
+ *   against (post-rebase HEAD) — the exact tree under test. The skip is keyed on
+ *   this commit, never the pre-rebase HEAD: a rebase that changes the tree must
+ *   not let the mission skip a gate suite that never ran against the new tree
+ *   (TASK-2625 round-2 F2). Absent, fall back to the full suite.
+ * @param operationalHistory the operational-history store, or null when unavailable
+ * @param log          the logger
+ */
+async function resolveSkippableGates({
+  configured,
+  slug,
+  finalizedCommit,
+  operationalHistory,
+  log,
+}: {
+  configured: SkippableGate[];
+  slug: string;
+  finalizedCommit: string | null | undefined;
+  operationalHistory: OperationalHistoryService | null | undefined;
+  log: (_message: string) => void;
+}): Promise<{ gates: SkippableGate[]; skippedAll: boolean }> {
+  if (!finalizedCommit || !operationalHistory) { return { gates: configured, skippedAll: false }; }
+  let markerEntry: { eventType?: string; eventData?: string } | null = null;
+  try {
+    const latest = await operationalHistory.loadLatestByTypeForMission(INTEGRATION_VALIDATION_EVENT_TYPE, missionId(slug));
+    markerEntry = latest;
+  } catch {
+    // An unreadable history must never authorize a skip: fall back to the full
+    // suite rather than silently running nothing.
+    return { gates: configured, skippedAll: false };
+  }
+  const marker = parseIntegrationValidationMarker(markerEntry);
+  if (!marker) { return { gates: configured, skippedAll: false }; }
+  if (!validationSkipApplies(marker, finalizedCommit)) { return { gates: configured, skippedAll: false }; }
+  const { skip, run } = partitionGatesForSkip(configured.map(gate => gate.key), marker);
+  log(`Integration gates for ${slug}: ${skip.length} hook(s) already validated at ${marker.sha.slice(0, 12)}; skipping ${skip.join(', ')}.`);
+  const gates = run.map(key => configured.find(gate => gate.key === key) as SkippableGate);
+  return { gates, skippedAll: gates.length === 0 };
+}
+
 export function createIntegrationGateStep({ gates, landing, verification }: IntegrateWorkflowPorts) {
   /**
    * Returns the Verification evidence the readiness view reports: exactly what
@@ -102,10 +171,25 @@ export function createIntegrationGateStep({ gates, landing, verification }: Inte
     // bypass, so the message below never points at it (task-2457 F12).
     const requirePreIntegration = gates.loadRequirePreIntegration(checkout);
     fmt.log.debug(`Integration gate target: slug=${slug} root=${finalTree.rootDir} commit=${finalTree.commit} tree=${finalTree.tree} requirePreIntegration=${requirePreIntegration}`);
+
+    // TASK-2625: skip the high-level hooks this mission already ran green at
+    // the current branch HEAD. Decided purely from the sha-keyed marker; every
+    // fallback (marker missing, whitelist empty, branch moved) runs the full
+    // configured set.
+    const gatesToRun = await resolveSkippableGates({
+      configured,
+      slug,
+      // Key the skip on the finalized (post-rebase) tree the gates run against,
+      // not the pre-rebase HEAD: a rebase that changes the tree must not let the
+      // mission skip a suite that never ran against the new tree (TASK-2625 F2).
+      finalizedCommit: finalTree.commit ?? null,
+      operationalHistory: (missionServices as { operationalHistory?: OperationalHistoryService | null } | null | undefined)?.operationalHistory ?? null,
+      log: fmt.log.plain,
+    });
     const result = await gates.runPhaseGates('integration', {
       slug,
       checkoutPath: checkout,
-      gates: configured,
+      gates: gatesToRun.gates,
       log: fmt.log.plain,
       error: fmt.log.fail,
       // Plan-only dry run executes nothing; self-development agent selection
@@ -116,8 +200,15 @@ export function createIntegrationGateStep({ gates, landing, verification }: Inte
     });
 
     if (dryRun) {
-      fmt.log.info(`Integration gate plan resolved for ${slug}: ${configured.length} gate(s) configured; nothing executed.`);
+      fmt.log.info(`Integration gate plan resolved for ${slug}: ${gatesToRun.gates.length} gate(s) configured; nothing executed.`);
       return 'no gate ran';
+    }
+
+    // TASK-2625: every configured hook was already validated green, so nothing
+    // ran. This is a deliberate skip, not the "none configured" case, so it
+    // must not trip the mandatory-gate fail-closed path below.
+    if (gatesToRun.skippedAll) {
+      return 'all validated integration hooks skipped';
     }
     if (result.skipped) {
       if (requirePreIntegration) {
@@ -135,7 +226,7 @@ export function createIntegrationGateStep({ gates, landing, verification }: Inte
     }
     if (result.ok) {
       fmt.log.pass('All integration gates passed.');
-      return `${configured.length} integration gate(s) passed`;
+      return `${gatesToRun.gates.length} integration gate(s) passed`;
     }
     if (result.cancelled) {
       throw abortWith(landing, `Integration gates cancelled for ${slug}. Aborting before merge.`);
@@ -205,6 +296,19 @@ export function createIntegrationGateStep({ gates, landing, verification }: Inte
         taskResolution: context.task,
         missionStore: missionServices.store,
       }),
+      // TASK-2625: when the rebound verify reruns green against the fixed tree,
+      // persist the sha-keyed whitelist of validated hooks so a later integrate
+      // can skip them. Keyed on the fix commit the rerun ran against. Inert
+      // when the operational-history store is unavailable (older callers).
+      recordIntegrationValidationFn: context.missionHeadSha
+        ? (input: { missionId: string; sha: string; hooks: readonly string[] }) => {
+            const history = (missionServices as { operationalHistory?: OperationalHistoryService | null | undefined } | null | undefined)?.operationalHistory;
+            if (!history) { return; }
+            return history.recordIntegrationValidation(
+              buildIntegrationValidationMarker(input.missionId, input.sha, input.hooks),
+            );
+          }
+        : undefined,
     });
     if (route.route === 'revision-changed' && seams.reReviewFn) {
       // The repair changed what the reviewer approved, so the standing approval
@@ -260,5 +364,5 @@ export function createIntegrationGateStep({ gates, landing, verification }: Inte
     return true;
   }
 
-  return { runRequiredLocalGates };
+  return { runRequiredLocalGates, resolveSkippableGates };
 }

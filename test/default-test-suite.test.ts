@@ -82,25 +82,22 @@ test('default test runner preserves an explicitly selected execution root for ev
   assert.match(runner, /env: \{[\s\S]*?\.\.\.process\.env[\s\S]*?PARALLIX_EXECUTION_ROOT: executionRoot[\s\S]*?PARALLIX_TEST_MANIFEST_DIR/);
 });
 
-test('default test runner classifies tui-spawn as default (not integration) and pins bootstrap bypass', () => {
+test('default test runner classifies the TUI boundary contract as integration and preserves its bootstrap isolation', () => {
   const defaultRun = selectedFiles([]);
   const integrationRun = selectedFiles(['--integration']);
   const defaultFiles = defaultRun.files;
   const integrationFiles = integrationRun.files;
 
-  // tui-spawn is in the integration suite (execFileSync process boundary)
-  assert.ok(!defaultFiles.includes('tui-spawn.test.ts'),
-    'tui-spawn.test.ts must NOT be in the default (unit) suite');
-  assert.ok(integrationFiles.includes('tui-spawn.test.ts'),
-    'tui-spawn.test.ts must be in the integration suite');
+  assert.ok(!defaultFiles.includes('presentation-tui.integration.test.ts'),
+    'the TUI process/PTY contract must NOT be in the default (unit) suite');
+  assert.ok(integrationFiles.includes('presentation-tui.integration.test.ts'),
+    'the TUI process/PTY contract must be in the integration suite');
 
-  // Bootstrap bypass: solo run skips preload so child CLI gets real environment
-  const soloRun = selectedFiles(['test/tui-spawn.test.ts']);
+  const soloRun = selectedFiles(['test/presentation-tui.integration.test.ts']);
   assert.ok(!soloRun.args.some(a => typeof a === 'string' && a.includes('bootstrap-parallix-home')),
-    'solo tui-spawn run must bypass the bootstrap preload');
+    'a solo TUI process/PTY contract run must bypass the full bootstrap preload');
 
-  // Bootstrap bypass must NOT leak to co-requested files (finding-2 regression guard)
-  const batchedRun = selectedFiles(['test/tui-spawn.test.ts', 'test/foo.test.ts']);
+  const batchedRun = selectedFiles(['test/presentation-tui.integration.test.ts', 'test/foo.test.ts']);
   assert.ok(batchedRun.args.some(a => typeof a === 'string' && a.includes('bootstrap-parallix-home')),
-    'batched tui-spawn run must keep the bootstrap preload for co-requested files');
+    'a batched TUI process/PTY contract run must retain the bootstrap preload for co-requested files');
 });

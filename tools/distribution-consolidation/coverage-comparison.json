@@ -1,0 +1,45 @@
+{
+  "sourceFiles": {
+    "baseline": 334,
+    "candidate": 334
+  },
+  "executableLines": {
+    "baseline": 47808,
+    "candidate": 47808
+  },
+  "coveredLines": {
+    "baseline": 8993,
+    "candidate": 8996
+  },
+  "lineRatePercent": {
+    "baseline": 18.81,
+    "candidate": 18.82
+  },
+  "comparableLineRate": {
+    "identities": 47808,
+    "baselineCovered": 8993,
+    "candidateCovered": 8996,
+    "baselinePercent": 18.81,
+    "candidatePercent": 18.82
+  },
+  "normalizedLineRate": {
+    "baseline": {
+      "lines": 46834,
+      "covered": 8582,
+      "percent": 18.32
+    },
+    "candidate": {
+      "lines": 46834,
+      "covered": 8585,
+      "percent": 18.33
+    }
+  },
+  "lostCovered": 0,
+  "lostCoveredErasedOnly": 0,
+  "inventoryOnlyDeclarationLines": 0,
+  "inventoryOnlyBaseline": 0,
+  "inventoryOnlyCandidate": 0,
+  "inventoryOnlyCandidateCovered": 0,
+  "unresolved": [],
+  "lostCoveredRows": []
+}

@@ -35,6 +35,9 @@ export type TestCategory = 'unit' | 'integration-ci' | 'integration-local' | 'ag
  * private local services, and any binary outside the clean runner image.
  */
 export const INTEGRATION_CI_TESTS: readonly string[] = [
+  // Review contracts exercising SQLite backfill and durable CLI recovery.
+  'review-status-backfill.integration.test.ts',
+  'review-intervention-resume.integration.test.ts',
   'active.test.ts',
   'agents-limit-hit.test.ts',
   'agents.test.ts',
@@ -57,14 +60,15 @@ export const INTEGRATION_CI_TESTS: readonly string[] = [
   // then fails, signals, or kills them to prove the fixtures are reclaimed.
   'fixture-lifetime.integration.test.ts',
   'forgejo-independence.test.ts',
+  // TASK-2622.17: commits a real temporary Git repository and runs the configured verification command.
+  'forgejo-publication-gate-failure-contract.test.ts',
   'forgejo-pr-round-sync.test.ts',
   'forgejo.test.ts',
   'handoff.test.ts',
   'install.test.ts',
+  // TASK-2622.17: packs the real tarball and installs it into disposable npm prefixes.
+  'npm-pack-install-smoke.test.ts',
   'integrate-conflict.test.ts',
-  'integrate-exclusive-process.integration.test.ts',
-  'integrate-task-1410-stash-pop-corruption.test.ts',
-  'integrate-workflow-gate.test.ts',
   'integrate.test.ts',
   'integration-pipelines.test.ts',
   'mission-cancel-contract.test.ts',
@@ -72,7 +76,6 @@ export const INTEGRATION_CI_TESTS: readonly string[] = [
   'mission-utils-worktree.test.ts',
   'mistral.test.ts',
   'nels.test.ts',
-  'noise-reduction.test.ts',
   'opencode-export.test.ts',
   'package-persistent-data.test.ts',
   'product-config-cp.test.ts',
@@ -83,13 +86,10 @@ export const INTEGRATION_CI_TESTS: readonly string[] = [
   'px-shell-init.test.ts',
   'rebase-use-case.test.ts',
   'rebase.test.ts',
-  'rebase_diagnostics.test.ts',
-  'rebase_hardening.test.ts',
   'repository-gates.integration.test.ts',
   // TASK-2573: exercises reusable gate proofs against a temporary Git checkout;
   // a clean hosted runner provides Git and the injected command runner.
   'repository-gates.test.ts',
-  'refresh-global-px-script.test.ts',
   'resolve-conflict.test.ts',
   'review-artifacts.test.ts',
   'review-autoderive.test.ts',
@@ -97,7 +97,6 @@ export const INTEGRATION_CI_TESTS: readonly string[] = [
   'review-commands-additional.test.ts',
   'review-commands-supplemental.test.ts',
   'review-events.test.ts',
-  'review-identity-placeholder.test.ts',
   'review-identity.test.ts',
   'review-prompts.test.ts',
   'review-state-class.test.ts',
@@ -121,18 +120,9 @@ export const INTEGRATION_CI_TESTS: readonly string[] = [
   'stats-backfill.test.ts',
   'stats.test.ts',
   'task-1048-regression.test.ts',
-  'task-1049-force-push.test.ts',
-  'task-1080-sync-merged-hardening.test.ts',
-  'task-1104-rebase-cleanup.test.ts',
   'task-1272-standalone-cycle.test.ts',
-  'task-1272-standalone-rebase.test.ts',
-  'task-1390-shell-init-shebang.test.ts',
   'task-1415-closed-mission-counts.test.ts',
   'task-1416-repro.test.ts',
-  'task-1424-post-integrate-publish-reinstall.test.ts',
-  'task-2203-publish-proof-refresh-order.test.ts',
-  'task-2206-post-integrate-hook-errors.test.ts',
-  'task-2212-repro.test.ts',
   'task-2220-repro.test.ts',
   // TASK-2239 drives the review-loop lifecycle over a filesystem fixture.
   'task-2239-rereview-after-response.test.ts',
@@ -140,29 +130,20 @@ export const INTEGRATION_CI_TESTS: readonly string[] = [
   'task-2234-push-to-reviewer-autobounce.test.ts',
   'task-2241-tmp-cleanup-repro.test.ts',
   'task-2273-review-gate-ownership.test.ts',
-  'task-2285-pack-install-smoke.test.ts',
-  'task-2312-label-sync.test.ts',
+  'task-label-persistence.test.ts',
   'task-2313-repro.test.ts',
   'task-2318-temp-directory-leaks.test.ts',
-  'task-2319-notices-git-tracking.test.ts',
   'task-2322-05-mission-sqlite-fixture.test.ts',
   'task-2322.11-operator-state.test.ts',
   'task-2322.12-review-recovery.integration.test.ts',
   'task-2322.12-stray-persistence.test.ts',
   // TASK-2343 composes concrete filesystem adapters over a temporary repository.
-  'task-2343-board-projection-repro.test.ts',
+  'presentation-board.integration.test.ts',
   'task-2337-repro.test.ts',
   'task-2339-aggregate-read-during-write.test.ts',
   'task-2339-writes-outlive-close.test.ts',
   'task-2345-repro.test.ts',
-  'task-2349-integrate-stage-commit-race.test.ts',
-  // These integration workflow regressions create real temporary filesystem
-  // or SQLite fixtures; clean hosted runners provide every dependency.
-  'task-1109.test.ts',
-  'task-2367-integration-completion-repro.test.ts',
-  'task-2377.05-integrate-squash-bounce.test.ts',
   'task-2426-repro.test.ts',
-  'task-2454-web-board-draft-repro.test.ts',
   'task-2357-certification.test.ts',
   'task-2357.c-unknown-review-fix-rounds.test.ts',
   'task-2363-production-certification.test.ts',
@@ -173,31 +154,24 @@ export const INTEGRATION_CI_TESTS: readonly string[] = [
   'task-2367-telemetry-schema.test.ts',
   'task-2369-regressions.test.ts',
   'task-2370-repro.test.ts',
-  'task-2373-shutdown.test.ts',
-  'task-2375-active-invocation-overlap.test.ts',
-  'task-2375-current-work-operation-repro.test.ts',
+  'board-shutdown-signals.test.ts',
+  'active-invocation-contract.test.ts',
+  'current-work-operation-identity.test.ts',
   'task-2379-approval-boundary-repro.test.ts',
-  'task-2397-integrate-active-approved-recovery.test.ts',
   'task-2413-proof-reuse.test.ts',
-  'task-2413-publication-seam.test.ts',
-  'task-2413-repro.test.ts',
+  'rebound-gate-recovery.test.ts',
   'task-2420-integrate-recovery-assigned-reviewer.test.ts',
   'task-2424-repro.test.ts',
-  'task-2433-web-mutation.integration.test.ts',
+  'presentation-web.integration.test.ts',
   'task-2438-worktree-board-repro.test.ts',
   'task-2440-repro.test.ts',
   'task-2443-repro.test.ts',
-  'task-2455-config-exit-status-repro.test.ts',
-  'task-2484-npm-metadata-urls-repro.test.ts',
-  'task-2489-lead-from-worktree.test.ts',
-  // TASK-2489: the recovery supervisor drives only injected doubles and temp
+  'config-exit-status.test.ts',
+  // TASK-2489: the recovery supervisor and claim suites drive only injected doubles and temp
   // directories; the `git worktree` token in a failure message trips the
   // boundary heuristic, so classify it CI-safe (clean runner is enough).
-  'task-2489-recovery-supervisor.test.ts',
-  // TASK-2492: fixture-git coverage of the squash-landing detection seam runs a
-  // real temporary Git repository, so it crosses the git boundary and runs only
-  // in the integration layer.
-  'task-2492-already-merged-detection.test.ts',
+  'recovery-supervisor.test.ts',
+  'recovery-claim.test.ts',
   // TASK-2492: exercises the composed integration command and lifecycle flow
   // against an on-disk repository fixture. All external seams are injected, so
   // a clean GitHub-hosted runner can execute it safely.
@@ -222,25 +196,16 @@ export const INTEGRATION_CI_TESTS: readonly string[] = [
   // both run on a clean GitHub-hosted runner with only bash.
   'task-2502-codeql-clean-cache.test.ts',
   'task-2502-codeql-suite-flag.test.ts',
-  // TASK-2507: runs failed-gate routing against a temporary Git repository to
-  // prove the base worktree stays clean, so it crosses the git boundary.
-  'task-2509-local-version-allocation.test.ts',
-  'task-2509-release-workflow.test.ts',
+  // TASK-2622.17: version allocation and NOTICES tracking run the real bump script and `git ls-files`
+  // against temporary Git repositories; the workflow cases only read committed files.
+  'release-publication-and-version-allocation-contract.test.ts',
   // TASK-2585: injects GitHub Actions API responses to prove the durable
   // publication-proof reader; it makes no live provider call.
   'task-2585-github-publication-proof.test.ts',
   'task-2585-workflow-proof-reuse.test.ts',
   // TASK-2516: landed-mission recovery crosses the git boundary with a real
   // temporary Git repository and worktrees, so it runs in the integration layer.
-  'task-2516-recover-landed-mission-repro.test.ts',
-  // TASK-2517 CP-3: seeds a temporary Git repository and a migrated SQLite
-  // database to drive the stranded-landed-mission closeout, so it crosses the
-  // git/SQLite process boundary and runs only in the integration layer.
-  'task-2517-cp3-landed-closeout.test.ts',
-  // TASK-2517 F1: drives the base-branch-scoped landed-payload detector against
-  // a real temporary Git repository with a retained mission worktree, so it
-  // crosses the git boundary and runs in the integration layer.
-  'task-2517-landed-squash-base-branch-detection.test.ts',
+  'recover-landed-mission.test.ts',
   // TASK-2620: composes the production `px integrate` CLI against a temporary
   // Git repository and a migrated SQLite Mission store. A red integration gate
   // revokes the approval, the bounded implementer budget repairs once, the
@@ -274,7 +239,6 @@ export const INTEGRATION_CI_TESTS: readonly string[] = [
   'task-2566-sonar-boundary-repro.test.ts',
   // TASK-2580: drives the real `px active` command and a loopback web snapshot
   // to measure command-to-rendered-card delivery; both are CI-safe boundaries.
-  'task-2580-active-persisted-mission-repro.test.ts',
   // TASK-2521.03: seeds an isolated SQLite operator database and drives the
   // production `px status --json` composition path; the ad hoc lifecycle section
   // (TASK-2468) runs the real `px` entry against an isolated Parallix home.
@@ -283,28 +247,6 @@ export const INTEGRATION_CI_TESTS: readonly string[] = [
   'legacy-persistence-audit.integration.test.ts',
   // Reads and commits artifacts in temporary Git repositories; standard Git is enough for CI.
   'legacy-content-history.integration.test.ts',
-  // TASK-2532: seeds temporary Git repositories to exercise the base-worktree
-  // repair (marker-stash sweep + dead-rebase abort), so it crosses the git
-  // boundary and runs only in the integration layer.
-  'task-2532-stale-integration-state-repro.test.ts',
-  // TASK-2533: stages a special-character (backslash) payload file in a
-  // throwaway Git repo and drives `git commit --only` pathspecs, so it crosses
-  // the git boundary and runs only in the integration layer.
-  'task-2533-squash-payload-pathspec-quotes.test.ts',
-  // TASK-2534: drives the real squash landing against a throwaway Git repo to
-  // prove stale backlog/tasks copies never enter the landed payload, so it
-  // crosses the git boundary and runs only in the integration layer.
-  'task-2534-stale-backlog-copy-landing-repro.test.ts',
-  // TASK-2595: drives the real local squash landing against a throwaway Git
-  // repo to prove the landed commit message carries the recorded title and
-  // task reference, so it crosses the git boundary and runs only in the
-  // integration layer.
-  'task-2595-squash-landing-commit-message.test.ts',
-  // TASK-2537: drives the real squash landing against throwaway Git repos to
-  // prove closeout pathspecs stay valid when the base branch never tracked the
-  // task file, so it crosses the git boundary and runs only in the integration
-  // layer.
-  'task-2537-squash-closeout-unstaged-task-path.test.ts',
   // TASK-2627 drives production squash landing through temporary Git repos;
   // standard Git is the only external dependency, so it is CI-safe.
   'task-2627-squash-rename-repro.test.ts',
@@ -324,19 +266,11 @@ export const INTEGRATION_CI_TESTS: readonly string[] = [
   // TASK-2577: checks fixture teardown in local Node subprocesses under
   // private temporary directories, using only clean-runner dependencies.
   'task-2577-tmp-fixture-leaks-repro.test.ts',
-  // TASK-2621: uses temporary directories plus mocked npm and px binaries;
-  // all process boundaries are available on a clean GitHub-hosted runner.
-  'task-2621-repro.test.ts',
   'test-hygiene.test.ts',
-  'tui-command-flow.test.ts',
-  'tui-pty-smoke.test.ts',
-  'tui-spawn.test.ts',
+  'presentation-tui.integration.test.ts',
   // Real filesystem and TypeScript emit contract; only npm dependencies required.
   'type-only-coverage.integration.test.ts',
   'verification.test.ts',
-  'verify-local-integrate.test.ts',
-  'web-host.integration.test.ts',
-  'web-package-smoke.integration.test.ts',
   // TASK-2622.13: canonical repository identity over the real sqlite operator
   // database via test/fixtures/task-2357-statistics-fixture.ts. The fixture
   // hides the sqlite boundary from the content heuristic, so this integration-ci
@@ -368,6 +302,25 @@ export const INTEGRATION_CI_TESTS: readonly string[] = [
   // legacy lifecycle-entry fallback. The sqlite boundary lives in the
   // statistics fixture, so this integration-ci test is declared here.
   'lifecycle-history.test.ts',
+  // TASK-2622.09: Git integration, rebase, landing, and closeout safety suites
+  // consolidated by behavior. Each case builds a disposable Git repository (or
+  // runs a real child process) that a clean hosted runner provides.
+  'integrate-squash-payload-pathspec-contract.test.ts',
+  'integrate-squash-commit-and-landed-detection-contract.test.ts',
+  'integrate-variant-b-landing-contract.test.ts',
+  'integrate-lifecycle-recovery-and-closeout-contract.test.ts',
+  'integrate-stale-state-and-stash-safety-contract.test.ts',
+  'rebase-before-review-contract.test.ts',
+  'forgejo-sync-merged-force-push-contract.test.ts',
+  'post-integrate-global-install-contract.test.ts',
+  'integrate-gate-and-exclusivity-process-contract.test.ts',
+  // TASK-2625: exercises the sha-keyed integration-validation skip. The
+  // real-SQLite round-trip test opens a migrated SQLite operator database in a
+  // temporary directory and writes an operational_history row; git and SQLite
+  // are clean-runner dependencies, no Forgejo or agent runner is contacted, so
+  // it is CI-safe. It runs in the integration layer because it crosses the
+  // real SQLite boundary rather than the CPU-budgeted unit tier.
+  'integration-gate-skip-contract.test.ts',
 ];
 
 /**
@@ -376,8 +329,8 @@ export const INTEGRATION_CI_TESTS: readonly string[] = [
  */
 export const INTEGRATION_LOCAL_TESTS: readonly string[] = [
   'bubblewrap-worktree-git.test.ts',
-  'task-2270-graphify-exclusion.test.ts',
-  'task-2286-native-sea-smoke.test.ts',
+  'graphify-mission-document-exclusion.test.ts',
+  'native-sea-executable-smoke.test.ts',
   'lifecycle-timing-local.test.ts',
   'task-2557-sandbox-px-write.test.ts',
   'task-2598-claude-credential-cell.test.ts',
@@ -390,9 +343,9 @@ export const INTEGRATION_LOCAL_TESTS: readonly string[] = [
 export const INTEGRATION_LOCAL_REASONS: Readonly<Record<string, string>> = {
   'bubblewrap-worktree-git.test.ts':
     'Spawns the real `bwrap` binary to certify sandbox profiles; bubblewrap is not part of the GitHub-hosted runner image.',
-  'task-2270-graphify-exclusion.test.ts':
+  'graphify-mission-document-exclusion.test.ts':
     'Spawns the uv-installed `graphify` CLI; neither uv nor graphify exists on a clean GitHub-hosted runner.',
-  'task-2286-native-sea-smoke.test.ts':
+  'native-sea-executable-smoke.test.ts':
     'Builds and runs the native single-executable artifact, which needs a Node >= MINIMUM_SEA_NODE_MAJOR SEA toolchain and per-OS packaging; the portable npm package and bundle checks cover packaging in the CI lane instead.',
   'lifecycle-timing-local.test.ts':
     'TASK-2622.13: consolidates task-2376 lifecycle-approval timing over a real migrated SQLite Mission store and the production review-persistence + MissionLifecycleService composition; the SQLite boundary is not visible to the content heuristic, so it stays in required local verification rather than the GitHub CI lane.',

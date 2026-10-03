@@ -137,13 +137,12 @@ describe('TASK-2357 defect D: lifecycle `done` is the only completion definition
 
       // The shared mission-flow section counts lifecycle completions: 2.
       assert.match(report, /Mission flow — current week/, `no mission-flow section in:\n${report}`);
-      const flowSection = report.split('Mission flow — current week')[1]?.split('Agent telemetry')[0] ?? '';
+      const flowSection = report.split('Mission flow — current week')[1]?.split('Mission flow — previous week')[0] ?? '';
       assert.match(flowSection, /# completed missions/, flowSection);
       assert.match(flowSection, /\b2\b/, `expected 2 lifecycle completions in:\n${flowSection}`);
 
-      // The telemetry tables must not present a competing completed count.
-      assert.match(report, /Agent telemetry — current week/, report);
-      assert.match(report, /# missions with telemetry/, report);
+      // No telemetry table may present a competing completed count.
+      assert.doesNotMatch(report, /Agent telemetry/, report);
       assert.doesNotMatch(report, /^\s*# missions\s{2,}# user value/m, report);
     });
   });

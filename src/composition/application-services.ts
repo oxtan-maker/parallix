@@ -85,6 +85,12 @@ export interface OperatorStateRepositories {
 export interface MissionApplicationServices {
   readonly store: MissionStore & MissionTransitionStore & MissionNelRecorder;
   /**
+   * The append-only operational-history store (TASK-2625): the integration gate
+   * step records and reads the sha-keyed integration-validation marker here.
+   * Bound to the same SQLite authority as `store`.
+   */
+  readonly operationalHistory: import('../application/services/operational-history-service.js').OperationalHistoryService;
+  /**
    * The repository identity these use cases are bound to, canonicalized to the
    * primary checkout. Callers that build an intake request must read it from
    * here rather than deriving their own: a mission worktree and the checkout it
@@ -391,8 +397,11 @@ export async function createMissionApplicationServices(
 
   const store = new SqliteMissionStore(db);
   const lifecycle = new MissionLifecycleService(store);
+  const { SqliteOperationalHistoryRepository } = await import('../adapters/sqlite/operational-history-repository.js');
+  const operationalHistory = new (await import('../application/services/operational-history-service.js')).OperationalHistoryService(new SqliteOperationalHistoryRepository(db));
   return {
     store,
+    operationalHistory,
     repositoryId: repoId,
     intake: new MissionIntakeService(store),
     lifecycle,

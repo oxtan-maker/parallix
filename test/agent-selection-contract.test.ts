@@ -11,6 +11,8 @@
 import test, { describe } from 'node:test';
 import assert from 'node:assert/strict';
 import { blockedForMs, selectAgent, selectableAgents, type AgentSelectionSnapshot, agentFamily } from '../src/domain/agents.js';
+import { startAgent } from '../src/adapters/agents/agents.js';
+import { resolveBlockContext } from '../src/adapters/agents/agent-block-selection.js';
 import { PreparedAgentSelection } from '../src/application/services/agent-selection.js';
 import { SqliteAgentSelectionSnapshotAdapter } from '../src/adapters/agents/agent-selection-snapshot.js';
 import { resolveHandoffReviewAssignment } from '../src/adapters/cli/commands/handoff.js';
@@ -91,6 +93,166 @@ describe('Domain agent selection', () => {
     assert.equal(loads, 1);
     assert.deepEqual(picks, [codex, codex, codex]);
     assert.ok(picks.every((pick) => !((pick as unknown as object) instanceof Promise)));
+  });
+});
+
+describe('Workflow selection excludes runtime-blocked families (TASK-2626)', () => {
+  // The production startAgent loop is the workflow launch path (draft/active).
+  // Its selection must consult the authoritative runtime blocklist, not just the
+  // static config blocklist, so a family blocked at runtime (e.g. month-end rate
+  // limits) is never selected or launched when another eligible family is
+  // available. Injected doubles keep the loop hermetic: selectAgentFn observes
+  // the exclude set the loop builds and deterministically picks the first
+  // non-excluded family; launchAgentFn records which family was actually launched.
+  // Records the family each launchAgentFn call was invoked with via the
+  // ForgeJO_USER env the launcher receives, so the tests prove which family was
+  // actually launched rather than what the selection double returned.
+  function runLoop(opts: {
+    blocked: readonly string[];
+    candidates: readonly string[];
+    eligible?: readonly string[];
+    excludeFromDeps?: readonly string[];
+  }) {
+    const launched: string[] = [];
+    const excludeSets: Set<string>[] = [];
+    const eligible = opts.eligible ?? opts.candidates;
+    return {
+      launched,
+      run: async () =>
+        startAgent('draft', {
+          prompt: 'x',
+          exclude: opts.excludeFromDeps ?? [],
+          selectAgentFn: (step, options) => {
+            const exclude = options?.exclude instanceof Set
+              ? [...options.exclude]
+              : [...(options?.exclude ?? [])];
+            excludeSets.push(new Set(exclude));
+            const pool = eligible.filter((candidate) => !exclude.includes(candidate));
+            if (pool.length === 0) {
+              throw new Error(`All eligible agents for step "draft" are exhausted (limit-hit or excluded).`);
+            }
+            return pool[0];
+          },
+          launchAgentFn: async (launchDeps: any) => {
+            launched.push(launchDeps.env.FORGEJO_USER);
+            return { invocation: {}, result: { status: 0 } };
+          },
+          assertAgentSupportedFn: async () => {},
+          runtimeBlockContextFn: async (_step, tried) => resolveBlockContext(eligible, tried, new Set(opts.blocked)),
+          detectLimitHitFn: () => null,
+          resolveAgentModelFn: () => null,
+          isAgentBlockedFn: async () => false,
+          updateAgentBlockFn: async () => ({ ok: true }),
+          onLaunch: async () => {},
+        } as any),
+      excludeSets,
+    };
+  }
+
+  test('excludes a runtime-blocked family and selects an available eligible family (TASK-2626)', async () => {
+    const loop = runLoop({ blocked: ['vibe'], candidates: ['codex', 'vibe'] });
+    await loop.run();
+    // The build selection exclude set must carry the runtime-blocked family so
+    // selection never considers it.
+    assert.ok(loop.excludeSets.at(-1)!.has('vibe'), 'runtime-blocked family must be in the selection exclude set');
+    // The launch record must never name the blocked family.
+    assert.deepEqual(loop.launched, ['codex'], 'an available eligible family must start, not the blocked one');
+  });
+
+  test('never launches a blocked family when another eligible family is available (TASK-2626)', async () => {
+    // The loop builds the selection exclude set with the runtime-blocked family
+    // up front, so no launch is ever attempted against it.
+    const loop = runLoop({ blocked: ['vibe'], candidates: ['qwen', 'vibe', 'codex'] });
+    await loop.run();
+    assert.ok(loop.excludeSets.at(-1)!.has('vibe'), 'the blocked family must be excluded before selection');
+    // Prove via launchAgentFn which family actually launched.
+    assert.deepEqual(loop.launched, ['qwen'], 'the launch record must name the available family, not the blocked one');
+    assert.equal(loop.launched.length, 1, 'exactly one available family should start');
+  });
+
+  test('fails naming every blocked family when all eligible families are blocked (TASK-2626)', async () => {
+    const loop = runLoop({ blocked: ['vibe', 'codex'], candidates: ['vibe', 'codex'] });
+    await assert.rejects(
+      () => loop.run(),
+      /All eligible agents for step "draft" are blocked by the runtime blocklist: vibe, codex\. No agent started\./,
+      'the step must fail naming the blocked families and start no agent',
+    );
+    // No launch was attempted against any family.
+    assert.deepEqual(loop.launched, [], 'no family should launch when every eligible family is blocked');
+  });
+
+  test('keeps the generic exhaustion error when the pool is exhausted by limit-hit agents, not the blocklist (TASK-2626)', async () => {
+    // qwen and claude both limit-hit (reroute); vibe is runtime-blocked but not
+    // eligible for this step. The pool is exhausted by limit-hit agents, not by
+    // the blocklist covering every eligible family, so the step must keep the
+    // generic exhaustion diagnostic (which carries the error detail) rather than
+    // the all-blocked message.
+    const realLoop = {
+      launched: [] as string[],
+      run: async () =>
+        startAgent('draft', {
+          prompt: 'x',
+          selectAgentFn: (step: string, options: any) => {
+            const exclude = options.exclude instanceof Set ? [...options.exclude] : [...options.exclude];
+            const pool = ['qwen', 'claude'].filter((c) => !exclude.includes(c));
+            if (pool.length === 0) {
+              throw new Error(`All eligible agents for step "draft" are exhausted (limit-hit or excluded).`);
+            }
+            return pool[0];
+          },
+          launchAgentFn: async (launchDeps: any) => {
+            realLoop.launched.push(launchDeps.env.FORGEJO_USER);
+            return { invocation: {}, result: { status: 429 } };
+          },
+          assertAgentSupportedFn: async () => {},
+          runtimeBlockContextFn: async (_step, tried) => resolveBlockContext(['qwen', 'claude'], tried, new Set(['vibe'])),
+          detectLimitHitFn: () => ({ reroute: true, kind: 'rate-limit', until: 'now', reason: 'rate limit' }),
+          resolveAgentModelFn: () => null,
+          isAgentBlockedFn: async () => false,
+          updateAgentBlockFn: async () => ({ ok: true }),
+          onLimitHit: async () => {},
+          onLaunch: async () => {},
+        } as any),
+    };
+    await assert.rejects(
+      () => realLoop.run(),
+      /All eligible agents exhausted for step "draft". Tried: qwen, claude\./,
+      'the generic exhaustion diagnostic must be kept, not the all-blocked message',
+    );
+    // No launch was attempted against the blocked family.
+    assert.ok(!realLoop.launched.includes('vibe'), 'the blocked family must never be launched');
+  });
+
+  test('last-resort fallback skips a runtime-blocked excluded family (TASK-2626)', async () => {
+    // The caller excludes a runtime-blocked family (vibe) plus claude. The
+    // escape hatch must skip the blocked family and start the next available
+    // one from the caller's exclude list. Force selectAgent to throw pool
+    // exhaustion (all candidates excluded by the caller) so the last-resort
+    // fallback path runs.
+    const realLoop = {
+      launched: [] as string[],
+      run: async () =>
+        startAgent('draft', {
+          prompt: 'x',
+          exclude: ['vibe', 'claude'],
+          selectAgentFn: () => {
+            throw new Error(`All eligible agents for step "draft" are exhausted (limit-hit or excluded).`);
+          },
+          launchAgentFn: async (launchDeps: any) => {
+            realLoop.launched.push(launchDeps.env.FORGEJO_USER);
+            return { invocation: {}, result: { status: 0 } };
+          },
+          assertAgentSupportedFn: async () => {},
+          runtimeBlockContextFn: async (_step, tried) => resolveBlockContext(['vibe', 'claude'], tried, new Set(['vibe'])),
+          detectLimitHitFn: () => null,
+          resolveAgentModelFn: () => null,
+          isAgentBlockedFn: async () => false,
+          updateAgentBlockFn: async () => ({ ok: true }),
+          onLaunch: async () => {},
+        } as any),
+    };
+    await realLoop.run();
+    assert.deepEqual(realLoop.launched, ['claude'], 'the fallback must skip the runtime-blocked excluded family and start claude');
   });
 });
 

@@ -146,7 +146,6 @@ const TEST_EXCEPTIONS: readonly string[] = [
   'test/review.test.ts',
   'test/setup-review.test.ts',
   'test/stats.test.ts',
-  'test/task-2489-recovery-supervisor.test.ts',
 ];
 
 const testFiles: ReadonlyArray<{ path: string; lines: number }> = (() => {

@@ -264,6 +264,29 @@ export function createSquashLanding(ports: IntegrateWorkflowPorts, { promoteTask
 
   async function squashAndLand(run: LandingRun, { branch, summary, landedFromSha, mainTaskFile }: { branch: string, summary: string, landedFromSha: string, mainTaskFile: string }) {
     const { slug, context, baseWorktree, baseBranch } = run;
+    // A rejected candidate has not crossed the commit boundary.  Reset only the
+    // merge state back to HEAD: `--merge` removes the squash-owned index and
+    // worktree entries while preserving unrelated local edits in the primary
+    // checkout.  This makes a rejection retryable without discarding operator
+    // work that was present before integration started.
+    const abandonSquash = (payloadPaths: Iterable<string> = []): string | null => {
+      const reset = git(['-C', baseWorktree, 'reset', '-q', '--merge', 'HEAD']);
+      // A payload path deliberately removed from the index before rejection is
+      // untracked by the time `--merge` runs.  Clean only the captured
+      // integration payload paths; never use a broad clean that could erase
+      // unrelated operator files.
+      const paths = [...payloadPaths];
+      const clean = reset.status === 0 && paths.length > 0
+        ? git(['-C', baseWorktree, 'clean', '-q', '-f', '--', ...paths])
+        : { status: 0, stdout: '', stderr: '' };
+      if (reset.status === 0 && clean.status === 0) { return null; }
+      const detail = [reset.stdout, reset.stderr, clean.stdout, clean.stderr].filter(Boolean).join('\n').trim();
+      return `Could not clean up the rejected squash payload; inspect ${baseWorktree} before retrying integrate.${detail ? ` ${detail}` : ''}`;
+    };
+    const rejectSquash = (message: string, payloadPaths: Iterable<string> = [], ...details: string[]) => {
+      const cleanupError = abandonSquash(payloadPaths);
+      throw abortWith(landing, message, ...details, ...(cleanupError ? [cleanupError] : []));
+    };
     squashMerge(run, branch);
 
     // Capture the squash payload before closeout changes the checkout. The
@@ -285,27 +308,24 @@ export function createSquashLanding(ports: IntegrateWorkflowPorts, { promoteTask
     const intendedPayloadPaths = capturePayloadPaths();
     const treeMismatches = stagedPayloadTreeMismatches(baseWorktree, branch, intendedPayloadPaths);
     if (treeMismatches.length > 0) {
-      throw abortWith(
-        landing,
+      rejectSquash(
         `Staged squash payload does not match gated mission tip ${branch}: ${treeMismatches.join(', ')}`,
+        intendedPayloadPaths,
       );
     }
     await stageCloseout(run, mainTaskFile, intendedPayloadPaths);
     const tierGuardResult = ports.gates.runStagedTierGuards?.(baseWorktree) ?? { ok: true };
     if (!tierGuardResult.ok) {
-      throw abortWith(landing, `Staged squash fails fast tier guards before commit: ${tierGuardResult.error || 'test-categories, default-test-suite, or file-size-cap failed'}`);
+      rejectSquash(`Staged squash fails fast tier guards before commit: ${tierGuardResult.error || 'test-categories, default-test-suite, or file-size-cap failed'}`, intendedPayloadPaths);
     }
     // Fail-closed backstop: nothing may land while the repository still holds a
     // `backlog/tasks/` copy of a completed or archived task (task-2534).
     const remainingDuplicates = backlog.checkBacklogIntegrity(baseWorktree)
       .filter(issue => issue.type === 'duplicate-completed');
     if (remainingDuplicates.length > 0) {
-      // Undo the staged squash and closeout so the checkout is clean for a
-      // retry; `--merge` keeps unrelated unstaged changes (trailing noise).
-      git(['-C', baseWorktree, 'reset', '-q', '--merge', 'HEAD']);
-      throw abortWith(
-        landing,
+      rejectSquash(
         `Stale backlog copies remain after closeout: ${remainingDuplicates.map(issue => issue.file).join(', ')}`,
+        intendedPayloadPaths,
         `Remove them on ${baseBranch} (git rm) and retry integrate.`,
       );
     }

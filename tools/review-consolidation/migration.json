@@ -1,0 +1,1861 @@
+{
+  "scope": "Historical assertion migration evidence; runtime membership is owned by test discovery/category registry.",
+  "destinations": [
+    "reviewer-fallback-contract.test.ts",
+    "review-gate-repair-contract.test.ts",
+    "review-loop-retry-contract.test.ts",
+    "review-loop-presentation-contract.test.ts",
+    "review-store-bindings-contract.test.ts",
+    "review-read-projection-contract.test.ts",
+    "review-round-revision-contract.test.ts",
+    "reviewer-independence-contract.test.ts",
+    "review-approval-revocation-contract.test.ts",
+    "review-prompt-evidence-contract.test.ts",
+    "review-cli-dispatch-contract.test.ts",
+    "review-submit-lifecycle-contract.test.ts",
+    "review-rebase-artifact-safety.test.ts",
+    "review-launch-fallback-contract.test.ts",
+    "review-handoff-order-contract.test.ts",
+    "review-artifact-location-contract.test.ts",
+    "review-launcher-family-contract.test.ts",
+    "review-status-backfill.integration.test.ts",
+    "review-human-note-consumption.test.ts",
+    "review-owner-default-contract.test.ts",
+    "review-decision-authority-contract.test.ts",
+    "review-current-work-family-contract.test.ts",
+    "review-intervention-resume.integration.test.ts",
+    "review-controller-concurrency.test.ts",
+    "github-pr.test.ts",
+    "review-identity.test.ts"
+  ],
+  "files": [
+    {
+      "source": "task-1079-review-blocked-fallback.test.ts",
+      "previous": "review-regression-task-1079-review-blocked-fallback.test.ts",
+      "destination": "reviewer-fallback-contract.test.ts",
+      "disposition": "consolidated with related contract; every distinct case/assertion retained",
+      "cases": [
+        {
+          "kind": "test",
+          "name": "startReviewLoop falls back when the auto-derived reviewer is blocked but a different-family agent is available",
+          "line": 24
+        },
+        {
+          "kind": "test",
+          "name": "startReviewLoop iterates past a blocked deterministic fallback to a third unblocked agent (Mission SC #3 \u2014 \"Mistral or Claude\")",
+          "line": 63
+        },
+        {
+          "kind": "test",
+          "name": "startReviewLoop still rejects with a clear error when the explicit reviewer is blocked and no fallback path exists",
+          "line": 102
+        }
+      ]
+    },
+    {
+      "source": "task-1135-review-fallback.test.ts",
+      "previous": "review-regression-task-1135-review-fallback.test.ts",
+      "destination": "reviewer-fallback-contract.test.ts",
+      "disposition": "consolidated with related contract; every distinct case/assertion retained",
+      "cases": [
+        {
+          "kind": "test",
+          "name": "CP-1: blocked auto-derived reviewer falls back via selectAgent without mutating Backlog assignee",
+          "line": 51
+        },
+        {
+          "kind": "test",
+          "name": "CP-1: usage-limit on auto-derived reviewer triggers fallback with blocklist write",
+          "line": 118
+        },
+        {
+          "kind": "test",
+          "name": "CP-1: persisted blocked reviewer falls back via selectAgent without mutating Backlog assignee",
+          "line": 182
+        },
+        {
+          "kind": "test",
+          "name": "CP-1: reviewer fallback with no Backlog assignee mutation (regression)",
+          "line": 256
+        },
+        {
+          "kind": "test",
+          "name": "CP-1: explicit blocked reviewer fails fast without fallback (unchanged behavior)",
+          "line": 296
+        },
+        {
+          "kind": "test",
+          "name": "CP-1: multi-hop fallback scans remaining eligible agents when deterministic fallback is also blocked",
+          "line": 335
+        },
+        {
+          "kind": "test",
+          "name": "CP-1: no runnable reviewer exits with error and does not mutate Backlog assignee",
+          "line": 383
+        },
+        {
+          "kind": "test",
+          "name": "CP-1: single-family fallback when no different-family reviewer is runnable (unchanged)",
+          "line": 427
+        }
+      ]
+    },
+    {
+      "source": "task-2351-review-loop-selection.test.ts",
+      "previous": "review-regression-task-2351-review-loop-selection.test.ts",
+      "destination": "reviewer-fallback-contract.test.ts",
+      "disposition": "consolidated with related contract; every distinct case/assertion retained",
+      "cases": [
+        {
+          "kind": "test",
+          "name": "review-loop prepared selection skips SQLite-blocked reviewer before any launch (TASK-2351)",
+          "line": 8
+        },
+        {
+          "kind": "test",
+          "name": "review presentation classifies different-family and same-family fallback from agent-family identity",
+          "line": 31
+        },
+        {
+          "kind": "test",
+          "name": "review verdict presentation is authoritative and renders blocking findings before follow-up work",
+          "line": 37
+        }
+      ]
+    },
+    {
+      "source": "task-1268-pre-review-gate-per-round.test.ts",
+      "previous": "review-regression-task-1268-pre-review-gate-per-round.test.ts",
+      "destination": "review-gate-repair-contract.test.ts",
+      "disposition": "consolidated with related contract; every distinct case/assertion retained",
+      "cases": [
+        {
+          "kind": "test",
+          "name": "startReviewLoop runs the pre-review gate before every reviewer round",
+          "line": 14
+        },
+        {
+          "kind": "test",
+          "name": "startReviewLoop stops after a gate-failure bounce without launching a reviewer",
+          "line": 67
+        },
+        {
+          "kind": "test",
+          "name": "startReviewLoop rebounces a pre-review safety-commit hook failure before gate or reviewer launch",
+          "line": 107
+        }
+      ]
+    },
+    {
+      "source": "task-1385-pre-review-gate.test.ts",
+      "previous": "review-regression-task-1385-pre-review-gate.test.ts",
+      "destination": "review-gate-repair-contract.test.ts",
+      "disposition": "consolidated with related contract; every distinct case/assertion retained",
+      "cases": [
+        {
+          "kind": "test",
+          "name": "runPreReviewGate passes when gate command succeeds",
+          "line": 34
+        },
+        {
+          "kind": "test",
+          "name": "runPreReviewGate fails when gate command fails",
+          "line": 63
+        },
+        {
+          "kind": "test",
+          "name": "runPreReviewGate passes when no verification gate is configured",
+          "line": 92
+        },
+        {
+          "kind": "test",
+          "name": "runPreReviewGate captures stdout and stderr on failure",
+          "line": 120
+        },
+        {
+          "kind": "test",
+          "name": "runPreReviewGate resolves mission area from mission directory",
+          "line": 149
+        },
+        {
+          "kind": "test",
+          "name": "reboundPreReviewFailure bounces a gate failure whose verify re-run passes",
+          "line": 185
+        },
+        {
+          "kind": "test",
+          "name": "reboundPreReviewFailure rebounces a gate failure with arbitrary test output",
+          "line": 223
+        },
+        {
+          "kind": "test",
+          "name": "reboundPreReviewFailure relaunches with the fresh diagnostic when the verify re-run still fails",
+          "line": 258
+        },
+        {
+          "kind": "test",
+          "name": "reboundPreReviewFailure strands the mission when the per-occurrence budget is spent",
+          "line": 292
+        },
+        {
+          "kind": "test",
+          "name": "reboundPreReviewFailure does not bounce for InfraBlocker (HumanOnly)",
+          "line": 327
+        },
+        {
+          "kind": "test",
+          "name": "reboundPreReviewFailure does not bounce for StateMachineViolation (HumanOnly)",
+          "line": 358
+        },
+        {
+          "kind": "test",
+          "name": "reboundPreReviewFailure includes gate output and the ADR 0048 gate classification in the fix prompt",
+          "line": 387
+        },
+        {
+          "kind": "test",
+          "name": "reboundPreReviewFailure refuses to bounce without a verify callback",
+          "line": 425
+        }
+      ]
+    },
+    {
+      "source": "task-2415-pre-review-gate-repair-continues.test.ts",
+      "previous": "review-regression-task-2415-pre-review-gate-repair-continues.test.ts",
+      "destination": "review-gate-repair-contract.test.ts",
+      "disposition": "consolidated with related contract; every distinct case/assertion retained",
+      "cases": [
+        {
+          "kind": "test",
+          "name": "task-2415 repro: repaired pre-review gate continues the review round instead of exiting",
+          "line": 11
+        }
+      ]
+    },
+    {
+      "source": "task-2439-rebounce-review-submit-repro.test.ts",
+      "previous": "review-regression-task-2439-rebounce-review-submit-repro.test.ts",
+      "destination": "review-gate-repair-contract.test.ts",
+      "disposition": "consolidated with related contract; every distinct case/assertion retained",
+      "cases": [
+        {
+          "kind": "test",
+          "name": "task-2439 repro: review-submit declared-gate prose is a reboundable validation failure, never a Bash command",
+          "line": 7
+        },
+        {
+          "kind": "test",
+          "name": "task-2439 validator keeps exact commands and rejects documented outcomes",
+          "line": 31
+        },
+        {
+          "kind": "test",
+          "name": "task-2439 review-submit enables declared-gate recovery at the handoff seam",
+          "line": 47
+        },
+        {
+          "kind": "test",
+          "name": "task-2439 review-submit recovery uses ADR 0048 classification and the kernel retry budget",
+          "line": 64
+        },
+        {
+          "kind": "test",
+          "name": "task-2439 real declared-gate process failure remains GateFailure",
+          "line": 93
+        },
+        {
+          "kind": "test",
+          "name": "task-2439 malformed-gate classification ignores English and Swedish Bash syntax diagnostics",
+          "line": 102
+        }
+      ]
+    },
+    {
+      "source": "task-1221-stale-blocked-relaunch.test.ts",
+      "previous": "review-regression-task-1221-stale-blocked-relaunch.test.ts",
+      "destination": "review-loop-retry-contract.test.ts",
+      "disposition": "consolidated with related contract; every distinct case/assertion retained",
+      "cases": [
+        {
+          "kind": "test",
+          "name": "SC1: --continue skip-check BLOCKED re-launches implementer instead of skipping",
+          "line": 29
+        },
+        {
+          "kind": "test",
+          "name": "SC2: Re-launched implementer posts CHANGES_MADE \u2192 loop continues to next round",
+          "line": 98
+        },
+        {
+          "kind": "test",
+          "name": "SC3: Re-launched implementer still BLOCKED \u2192 loop stops with handoff",
+          "line": 166
+        },
+        {
+          "kind": "test",
+          "name": "SC4: Non-continue (fresh start) path is unaffected",
+          "line": 243
+        },
+        {
+          "kind": "test",
+          "name": "SC5: PARKED disposition also triggers re-launch (not just BLOCKED)",
+          "line": 282
+        },
+        {
+          "kind": "test",
+          "name": "Skip-check non-BLOCKED/PARKED disposition still skips (existing behaviour preserved)",
+          "line": 348
+        },
+        {
+          "kind": "test",
+          "name": "SC1-Fix: Post-relaunch poll uses updated sinceIso, not stale state.startedAt",
+          "line": 400
+        }
+      ]
+    },
+    {
+      "source": "task-2233-reviewer-non-submission-bounce.test.ts",
+      "previous": "review-regression-task-2233-reviewer-non-submission-bounce.test.ts",
+      "destination": "review-loop-retry-contract.test.ts",
+      "disposition": "consolidated with related contract; every distinct case/assertion retained",
+      "cases": [
+        {
+          "kind": "test",
+          "name": "reviewer-non-submission: error fires without completing recovery retries (forgejoEnabled=true, poll returns POLL_TIMEOUT)",
+          "line": 48
+        },
+        {
+          "kind": "test",
+          "name": "reviewer-non-submission: null poll result breaks recovery loop prematurely (forgejoEnabled=true, poll returns null)",
+          "line": 143
+        },
+        {
+          "kind": "test",
+          "name": "reviewer-non-submission: forgejoEnabled=false \u2014 recovery loop breaks on null reviewState",
+          "line": 219
+        },
+        {
+          "kind": "test",
+          "name": "isPollTimeout correctly distinguishes POLL_TIMEOUT from null and undefined",
+          "line": 294
+        }
+      ]
+    },
+    {
+      "source": "task-1209-review-loop.test.ts",
+      "previous": "review-regression-task-1209-review-loop.test.ts",
+      "destination": "review-loop-presentation-contract.test.ts",
+      "disposition": "consolidated with related contract; every distinct case/assertion retained",
+      "cases": [
+        {
+          "kind": "test",
+          "name": "startReviewLoop skips reviewer and implementer launches for autonomous fallback in provider=none mode",
+          "line": 15
+        }
+      ]
+    },
+    {
+      "source": "task-2477-review-presentation.test.ts",
+      "previous": "review-regression-task-2477-review-presentation.test.ts",
+      "destination": "review-loop-presentation-contract.test.ts",
+      "disposition": "consolidated with related contract; every distinct case/assertion retained",
+      "cases": [
+        {
+          "kind": "test",
+          "name": "single pre-review gate pass emission on the happy path",
+          "line": 49
+        },
+        {
+          "kind": "test",
+          "name": "verdict prominence: APPROVED emitted before the review-stopped transition line",
+          "line": 74
+        },
+        {
+          "kind": "test",
+          "name": "non-APPROVED persisted state emits no APPROVED presentation",
+          "line": 88
+        },
+        {
+          "kind": "test",
+          "name": "verbose review start exposes poll/provider lines that default hides",
+          "line": 99
+        },
+        {
+          "kind": "test",
+          "name": "incomplete reviewer-artifact infrastructure failure survives at default verbosity",
+          "line": 119
+        }
+      ]
+    },
+    {
+      "source": "task-2339-review-store-bindings.test.ts",
+      "previous": "review-regression-task-2339-review-store-bindings.test.ts",
+      "destination": "review-store-bindings-contract.test.ts",
+      "disposition": "consolidated with related contract; every distinct case/assertion retained",
+      "cases": [
+        {
+          "kind": "test",
+          "name": "reviewLoopBindings supplies persisted-output readers, not only review-state projections",
+          "line": 67
+        },
+        {
+          "kind": "test",
+          "name": "loop reviewer reader uses persisted SQLite events rather than artifacts",
+          "line": 82
+        },
+        {
+          "kind": "test",
+          "name": "loop reviewer reader ignores events from another round or reviewer",
+          "line": 99
+        },
+        {
+          "kind": "test",
+          "name": "loop reviewer reader ignores an outcome from before a reset",
+          "line": 113
+        },
+        {
+          "kind": "test",
+          "name": "loop implementer reader uses the persisted disposition event",
+          "line": 124
+        },
+        {
+          "kind": "test",
+          "name": "loop implementer reader ignores a disposition from before a reset",
+          "line": 139
+        },
+        {
+          "kind": "test",
+          "name": "bindReviewPersistence exposes the same bound consumers",
+          "line": 150
+        },
+        {
+          "kind": "test",
+          "name": "an unbound event writer reports the missing store, not a missing Review",
+          "line": 156
+        }
+      ]
+    },
+    {
+      "source": "task-2341-review-store-wiring.test.ts",
+      "previous": "review-regression-task-2341-review-store-wiring.test.ts",
+      "destination": "review-store-bindings-contract.test.ts",
+      "disposition": "consolidated with related contract; every distinct case/assertion retained",
+      "cases": [
+        {
+          "kind": "test",
+          "name": "ConcreteReviewReadAdapter returns a Review when its MissionStore has persisted review data",
+          "line": 54
+        }
+      ]
+    },
+    {
+      "source": "task-2342-missionstore-repro.test.ts",
+      "previous": "review-regression-task-2342-missionstore-repro.test.ts",
+      "destination": "review-store-bindings-contract.test.ts",
+      "disposition": "consolidated with related contract; every distinct case/assertion retained",
+      "cases": [
+        {
+          "kind": "test",
+          "name": "persistReviewStateOrThrow passes missionStore to writeFn",
+          "line": 6
+        },
+        {
+          "kind": "test",
+          "name": "persistReviewStateOrThrow calls writeFn with 4 args even when missionStore omitted",
+          "line": 33
+        }
+      ]
+    },
+    {
+      "source": "task-2358-multi-round-repro.test.ts",
+      "previous": "review-regression-task-2358-multi-round-repro.test.ts",
+      "destination": "review-read-projection-contract.test.ts",
+      "disposition": "consolidated with related contract; every distinct case/assertion retained",
+      "cases": [
+        {
+          "kind": "test",
+          "name": "multi-round fixture does not collapse to 1 round",
+          "line": 179
+        },
+        {
+          "kind": "test",
+          "name": "zero-round mission falls back to flat ReviewState",
+          "line": 237
+        },
+        {
+          "kind": "test",
+          "name": "null missionStore falls back to flat ReviewState",
+          "line": 276
+        },
+        {
+          "kind": "test",
+          "name": "loadReviewApproval returns same subject revision as loadReview for approved mission",
+          "line": 305
+        },
+        {
+          "kind": "test",
+          "name": "loadReviewApproval returns null for non-approved mission",
+          "line": 361
+        },
+        {
+          "kind": "test",
+          "name": "loadReviewApproval falls back to flat ReviewState when store is null",
+          "line": 386
+        }
+      ]
+    },
+    {
+      "source": "task-2401-review-projection-queries.test.ts",
+      "previous": "review-regression-task-2401-review-projection-queries.test.ts",
+      "destination": "review-read-projection-contract.test.ts",
+      "disposition": "consolidated with related contract; every distinct case/assertion retained",
+      "cases": [
+        {
+          "kind": "test",
+          "name": "SQLite review projection uses four queries for one or many missions",
+          "line": 58
+        },
+        {
+          "kind": "test",
+          "name": "SQLite review projection SQL executes against the migrated schema",
+          "line": 71
+        },
+        {
+          "kind": "test",
+          "name": "SQLite review projection chunks mission sets beyond the bind-safe batch",
+          "line": 84
+        },
+        {
+          "kind": "test",
+          "name": "SQLite-backed board review projection never loads Mission aggregates",
+          "line": 92
+        }
+      ]
+    },
+    {
+      "source": "task-2344-review-history-status-repro.test.ts",
+      "previous": "review-regression-task-2344-review-history-status-repro.test.ts",
+      "destination": "review-read-projection-contract.test.ts",
+      "disposition": "consolidated with related contract; every distinct case/assertion retained",
+      "cases": [
+        {
+          "kind": "test",
+          "name": "px status task-2344 renders every persisted review round with earlier findings and resolutions",
+          "line": 52
+        }
+      ]
+    },
+    {
+      "source": "task-2385-stale-review-round-repro.test.ts",
+      "previous": "review-regression-task-2385-stale-review-round-repro.test.ts",
+      "destination": "review-round-revision-contract.test.ts",
+      "disposition": "consolidated with related contract; every distinct case/assertion retained",
+      "cases": [
+        {
+          "kind": "it",
+          "name": "rejects a lower state round without renumbering an existing round",
+          "line": 49
+        },
+        {
+          "kind": "it",
+          "name": "updates the current round when the state round equals it",
+          "line": 80
+        },
+        {
+          "kind": "it",
+          "name": "advances to a higher round without changing prior round numbers",
+          "line": 95
+        },
+        {
+          "kind": "it",
+          "name": "records an approve verdict onto the stored round 2 through the bound output path",
+          "line": 152
+        },
+        {
+          "kind": "it",
+          "name": "fails closed when review state cannot be read instead of fabricating round 1",
+          "line": 190
+        },
+        {
+          "kind": "it",
+          "name": "records an approve verdict onto the current round without renumbering it",
+          "line": 216
+        }
+      ]
+    },
+    {
+      "source": "task-2478-revision-integrity.test.ts",
+      "previous": "review-regression-task-2478-revision-integrity.test.ts",
+      "destination": "review-round-revision-contract.test.ts",
+      "disposition": "consolidated with related contract; every distinct case/assertion retained",
+      "cases": [
+        {
+          "kind": "it",
+          "name": "rejects an approve against a round still awaiting implementation (stale approval cannot advance, ADR 0048)",
+          "line": 53
+        },
+        {
+          "kind": "it",
+          "name": "rejects an empty resolution: CHANGES_MADE alone is not proof the finding was resolved",
+          "line": 63
+        },
+        {
+          "kind": "it",
+          "name": "rejects an implementer resolution on a round that was not requested-for-changes",
+          "line": 72
+        },
+        {
+          "kind": "it",
+          "name": "begins round 2 on the revised revision; an already-approved round is terminal and cannot re-round",
+          "line": 81
+        },
+        {
+          "kind": "it",
+          "name": "round 2 requires its own independent approval, attached to round 2 (criterion 9)",
+          "line": 98
+        }
+      ]
+    },
+    {
+      "source": "task-2339-self-review-forbidden.test.ts",
+      "previous": "review-regression-task-2339-self-review-forbidden.test.ts",
+      "destination": "reviewer-independence-contract.test.ts",
+      "disposition": "consolidated with related contract; every distinct case/assertion retained",
+      "cases": [
+        {
+          "kind": "test",
+          "name": "startReview rejects a reviewer who is the implementer while other families are eligible",
+          "line": 27
+        },
+        {
+          "kind": "test",
+          "name": "startReview allows self-review only when the implementer is the sole eligible family",
+          "line": 35
+        },
+        {
+          "kind": "test",
+          "name": "beginNextReviewRound rejects a self-reviewing round the same way",
+          "line": 42
+        },
+        {
+          "kind": "test",
+          "name": "handoff assigns a reviewer from another family when one is available",
+          "line": 84
+        },
+        {
+          "kind": "test",
+          "name": "handoff falls back to self-review only on an exhausted pool, and records that eligibility",
+          "line": 92
+        },
+        {
+          "kind": "test",
+          "name": "handoff propagates a misconfigured selector instead of reviewing its own work",
+          "line": 108
+        },
+        {
+          "kind": "test",
+          "name": "handoff propagates an unreadable agent policy instead of reviewing its own work",
+          "line": 119
+        }
+      ]
+    },
+    {
+      "source": "task-2384-reviewer-self-review-approval-owed.test.ts",
+      "previous": "review-regression-task-2384-reviewer-self-review-approval-owed.test.ts",
+      "destination": "reviewer-independence-contract.test.ts",
+      "disposition": "consolidated with related contract; every distinct case/assertion retained",
+      "cases": [
+        {
+          "kind": "test",
+          "name": "exhausted reviewer pool launches the PR author, retains its verdict, and marks formal approval owed",
+          "line": 7
+        }
+      ]
+    },
+    {
+      "source": "task-2543-revoke-review.test.ts",
+      "previous": "review-regression-task-2543-revoke-review.test.ts",
+      "destination": "review-approval-revocation-contract.test.ts",
+      "disposition": "consolidated with related contract; every distinct case/assertion retained",
+      "cases": [
+        {
+          "kind": "test",
+          "name": "refused revocation does not read or mutate its store",
+          "line": 19
+        },
+        {
+          "kind": "test",
+          "name": "an active mission without approval leaves its store, lifecycle, and provider untouched",
+          "line": 33
+        },
+        {
+          "kind": "test",
+          "name": "provider failure leaves local revocation durable",
+          "line": 50
+        },
+        {
+          "kind": "test",
+          "name": "provider REQUEST_CHANGES after an agent approval keeps the mission reviewable",
+          "line": 62
+        }
+      ]
+    },
+    {
+      "source": "task-2555-stand-down.test.ts",
+      "previous": "review-regression-task-2555-stand-down.test.ts",
+      "destination": "review-approval-revocation-contract.test.ts",
+      "disposition": "consolidated with related contract; every distinct case/assertion retained",
+      "cases": [
+        {
+          "kind": "test",
+          "name": "the operator stand-down of a stale approval opens a new round for the new revision, never approved",
+          "line": 55
+        },
+        {
+          "kind": "test",
+          "name": "a stale approval is never requested changes: recording it keeps the approval and opens no finding",
+          "line": 78
+        },
+        {
+          "kind": "test",
+          "name": "an automated branch move records staleness only; it never withdraws the approval",
+          "line": 92
+        },
+        {
+          "kind": "test",
+          "name": "no agent-facing prompt or review-loop module can reach the stand-down",
+          "line": 102
+        },
+        {
+          "kind": "test",
+          "name": "a branch move that still carries the approved change leaves the approval untouched",
+          "line": 121
+        },
+        {
+          "kind": "test",
+          "name": "a refused stand-down leaves the mission, its review history and the provider unchanged",
+          "line": 132
+        },
+        {
+          "kind": "test",
+          "name": "an approval whose branch moved to a different change is computed stale without operator input",
+          "line": 159
+        },
+        {
+          "kind": "test",
+          "name": "an approval still covering its branch is reported as covering",
+          "line": 167
+        },
+        {
+          "kind": "test",
+          "name": "an unreadable approved revision or branch is unverifiable, not stale",
+          "line": 173
+        },
+        {
+          "kind": "test",
+          "name": "no effective approval means no coverage question",
+          "line": 178
+        },
+        {
+          "kind": "test",
+          "name": "a recorded supersession keeps the approval effective, in history, and authoritative over later observation",
+          "line": 185
+        },
+        {
+          "kind": "test",
+          "name": "the revision-changed refusal names a staleness px rebase already reported",
+          "line": 228
+        },
+        {
+          "kind": "test",
+          "name": "without a reported staleness the existing refusal is unchanged",
+          "line": 240
+        },
+        {
+          "kind": "test",
+          "name": "a rebased approved mission in integration reports its approval stale in px status and --json",
+          "line": 298
+        },
+        {
+          "kind": "test",
+          "name": "the board card flags a stale approval",
+          "line": 311
+        },
+        {
+          "kind": "test",
+          "name": "an approval that still covers its branch is reported as covering, with no flag",
+          "line": 317
+        },
+        {
+          "kind": "test",
+          "name": "a recorded supersession is shown in status and in the round history without reading git",
+          "line": 326
+        }
+      ]
+    },
+    {
+      "source": "task-2317-context-compaction.test.ts",
+      "previous": "review-regression-task-2317-context-compaction.test.ts",
+      "destination": "review-prompt-evidence-contract.test.ts",
+      "disposition": "consolidated with related contract; every distinct case/assertion retained",
+      "cases": [
+        {
+          "kind": "test",
+          "name": "task-2317: successful declared-gate instruction compacts only after success and retains failed-gate diagnostics",
+          "line": 16
+        },
+        {
+          "kind": "test",
+          "name": "task-2317: no-declared-gates implementation-to-act-on-review prompt compacts and reloads durable state",
+          "line": 26
+        },
+        {
+          "kind": "test",
+          "name": "task-2317: reviewer round-2 prompt compacts after rebase and reloads the rewritten baseline",
+          "line": 40
+        },
+        {
+          "kind": "test",
+          "name": "task-2317: repairable gate-error bounce compacts before repair and retains diagnostic plus retry state",
+          "line": 55
+        },
+        {
+          "kind": "test",
+          "name": "task-2317: reviewer and implementer recovery relaunches compact before work with their retry state",
+          "line": 94
+        },
+        {
+          "kind": "test",
+          "name": "task-2317: reviewer compaction follows successful rebase and baseline recapture before launch",
+          "line": 115
+        }
+      ]
+    },
+    {
+      "source": "task-2359-repro.test.ts",
+      "previous": "review-regression-task-2359-repro.test.ts",
+      "destination": "review-prompt-evidence-contract.test.ts",
+      "disposition": "consolidated with related contract; every distinct case/assertion retained",
+      "cases": [
+        {
+          "kind": "test",
+          "name": "task-2359: rendered review prompts treat unrelated PR history as context only (buildReviewPrompt + buildCompactReviewPrompt)",
+          "line": 21
+        },
+        {
+          "kind": "test",
+          "name": "task-2359: rendered review prompts ground findings in the mission diff, checkpoint evidence, or unidentified reviewed revision",
+          "line": 28
+        },
+        {
+          "kind": "test",
+          "name": "task-2359: rendered review prompts require a finding when the mission materially worsened the inconsistency",
+          "line": 36
+        },
+        {
+          "kind": "test",
+          "name": "task-2359: rendered review prompts require a finding for materially false checkpoint evidence",
+          "line": 42
+        },
+        {
+          "kind": "test",
+          "name": "task-2359: rendered review prompts require a finding when the review surface cannot identify the reviewed revision",
+          "line": 48
+        },
+        {
+          "kind": "test",
+          "name": "task-2359: rendered review prompts retain rebasing-artifact guidance",
+          "line": 54
+        }
+      ]
+    },
+    {
+      "source": "task-2483-completed-controls.test.ts",
+      "previous": "review-regression-task-2483-completed-controls.test.ts",
+      "destination": "review-prompt-evidence-contract.test.ts",
+      "disposition": "consolidated with related contract; every distinct case/assertion retained",
+      "cases": [
+        {
+          "kind": "test",
+          "name": "task-2483: a recorded passing gate renders its command, status, exit code and timestamp (SC2)",
+          "line": 70
+        },
+        {
+          "kind": "test",
+          "name": "task-2483: a recorded failing gate is never reported as passed (ADR 0048)",
+          "line": 84
+        },
+        {
+          "kind": "test",
+          "name": "task-2483: no gate record, no configured gates and no mission gates degrade to one line (SC5)",
+          "line": 101
+        },
+        {
+          "kind": "test",
+          "name": "task-2483: an unreadable gate-result artifact degrades instead of throwing",
+          "line": 114
+        },
+        {
+          "kind": "test",
+          "name": "task-2483: configured preHandoff and preReview gates render with their phase key (SC3)",
+          "line": 127
+        },
+        {
+          "kind": "test",
+          "name": "task-2483: every mission `## Gates` command line appears in the block (SC4)",
+          "line": 148
+        },
+        {
+          "kind": "test",
+          "name": "task-2483: a declared reproduction test is never reported as an executed gate (SC7)",
+          "line": 162
+        },
+        {
+          "kind": "test",
+          "name": "task-2483: a configured preReview gate is never reported as executed (round 1 F1)",
+          "line": 186
+        },
+        {
+          "kind": "test",
+          "name": "task-2483: the fully-populated block stays within 12 non-blank lines and 900 characters (SC6)",
+          "line": 217
+        },
+        {
+          "kind": "test",
+          "name": "task-2483: a long gate command is truncated rather than blowing the character budget",
+          "line": 242
+        },
+        {
+          "kind": "test",
+          "name": "task-2483: buildCompactReviewPrompt substitutes {{completedControls}} and leaks no placeholder (SC2)",
+          "line": 255
+        }
+      ]
+    },
+    {
+      "source": "task-2521-03-review-verbs.test.ts",
+      "previous": "review-regression-task-2521-03-review-verbs.test.ts",
+      "destination": "review-cli-dispatch-contract.test.ts",
+      "disposition": "consolidated with related contract; every distinct case/assertion retained",
+      "cases": [
+        {
+          "kind": "test",
+          "name": "px verdict request-changes pairs each finding with the summary that follows it",
+          "line": 45
+        },
+        {
+          "kind": "test",
+          "name": "px verdict delegates typed output to the existing reviewer consumer",
+          "line": 60
+        },
+        {
+          "kind": "test",
+          "name": "px verdict refuses to approve while naming findings",
+          "line": 71
+        },
+        {
+          "kind": "test",
+          "name": "px verdict refuses to fabricate a round when no review state exists",
+          "line": 80
+        },
+        {
+          "kind": "test",
+          "name": "px verdict rejects a finding with no summary rather than recording a partial decision",
+          "line": 88
+        },
+        {
+          "kind": "test",
+          "name": "px resolve pairs each finding with its fixed or disputed answer",
+          "line": 97
+        },
+        {
+          "kind": "test",
+          "name": "px resolve rejects a finding left without an answer",
+          "line": 119
+        },
+        {
+          "kind": "test",
+          "name": "px resolve reports PUSHBACK_ALL when every finding is disputed",
+          "line": 128
+        },
+        {
+          "kind": "test",
+          "name": "px resolve offers no park answer, so a finding is delivered or argued with",
+          "line": 134
+        },
+        {
+          "kind": "test",
+          "name": "px resolve carries a blocked outcome to the existing consumer",
+          "line": 145
+        },
+        {
+          "kind": "test",
+          "name": "both verbs print help instead of writing when asked",
+          "line": 153
+        },
+        {
+          "kind": "test",
+          "name": "both verbs require the version the caller read",
+          "line": 161
+        },
+        {
+          "kind": "test",
+          "name": "the version reaches the recorder so a stale decision can be refused",
+          "line": 182
+        },
+        {
+          "kind": "test",
+          "name": "px resolve refuses to default the actor the review loop matches on",
+          "line": 190
+        },
+        {
+          "kind": "test",
+          "name": "every review-verb invocation documented in the prompts parses",
+          "line": 205
+        }
+      ]
+    },
+    {
+      "source": "task-2428-review-board-characterization.test.ts",
+      "previous": "review-regression-task-2428-review-board-characterization.test.ts",
+      "destination": "review-cli-dispatch-contract.test.ts",
+      "disposition": "consolidated with related contract; every distinct case/assertion retained",
+      "cases": [
+        {
+          "kind": "test",
+          "name": "task-2428 characterization: review:submit CLI selects submit-for-review, not a reviewer decision",
+          "line": 19
+        },
+        {
+          "kind": "test",
+          "name": "task-2428 characterization: review:act-on-findings CLI rejects retired artifact consumption",
+          "line": 26
+        },
+        {
+          "kind": "test",
+          "name": "task-2428 characterization: approve:review CLI selects reviewer verdict submission and remains unavailable",
+          "line": 30
+        }
+      ]
+    },
+    {
+      "source": "task-2332.14-review-use-case.test.ts",
+      "previous": "review-regression-task-2332.14-review-use-case.test.ts",
+      "destination": "review-cli-dispatch-contract.test.ts",
+      "disposition": "consolidated with related contract; every distinct case/assertion retained",
+      "cases": [
+        {
+          "kind": "test",
+          "name": "ReviewCommandUseCase dispatches approval path to mocked port",
+          "line": 16
+        },
+        {
+          "kind": "test",
+          "name": "ReviewCommandUseCase dispatches requested-changes path to mocked port",
+          "line": 22
+        },
+        {
+          "kind": "test",
+          "name": "ReviewCommandUseCase delegates Forgejo-unavailable submit handling to mocked port",
+          "line": 29
+        },
+        {
+          "kind": "test",
+          "name": "ReviewCommandUseCase dispatches retry-after-failure continuation to mocked port",
+          "line": 37
+        },
+        {
+          "kind": "test",
+          "name": "ReviewCommandUseCase preserves reviewer selection on mocked start path",
+          "line": 43
+        }
+      ]
+    },
+    {
+      "source": "task-2339-submit-for-review-idempotent.test.ts",
+      "previous": "review-regression-task-2339-submit-for-review-idempotent.test.ts",
+      "destination": "review-submit-lifecycle-contract.test.ts",
+      "disposition": "consolidated with related contract; every distinct case/assertion retained",
+      "cases": [
+        {
+          "kind": "test",
+          "name": "retrying submit-for-review on a review mission is an idempotent no-op",
+          "line": 66
+        },
+        {
+          "kind": "test",
+          "name": "submit-for-review retry does not advance the recorded review conversation",
+          "line": 85
+        },
+        {
+          "kind": "test",
+          "name": "retry completes a review lane left without its Review aggregate",
+          "line": 110
+        }
+      ]
+    },
+    {
+      "source": "task-2521-03-review-write.test.ts",
+      "previous": "review-regression-task-2521-03-review-write.test.ts",
+      "destination": "review-submit-lifecycle-contract.test.ts",
+      "disposition": "consolidated with related contract; every distinct case/assertion retained",
+      "cases": [
+        {
+          "kind": "test",
+          "name": "review decision then resolution is versioned and immediately readable",
+          "line": 57
+        }
+      ]
+    },
+    {
+      "source": "task-1107-repro.test.ts",
+      "previous": "review-regression-task-1107-repro.test.ts",
+      "destination": "review-rebase-artifact-safety.test.ts",
+      "disposition": "consolidated with related contract; every distinct case/assertion retained",
+      "cases": [
+        {
+          "kind": "test",
+          "name": "isMissionArtifact identifies safe mission artifacts",
+          "line": 34
+        },
+        {
+          "kind": "test",
+          "name": "isWorkflowGeneratedArtifact identifies ignorable workflow runtime state",
+          "line": 52
+        },
+        {
+          "kind": "test",
+          "name": "rebaseBeforeReviewRound auto-commits safe mission artifacts before rebase",
+          "line": 63
+        },
+        {
+          "kind": "test",
+          "name": "rebaseBeforeReviewRound parses rename, copy, and space paths from porcelain z output",
+          "line": 96
+        },
+        {
+          "kind": "test",
+          "name": "rebaseBeforeReviewRound leaves rename records with unsafe sources unstaged",
+          "line": 131
+        },
+        {
+          "kind": "test",
+          "name": "rebaseBeforeReviewRound commits mission files despite non-mission files",
+          "line": 163
+        },
+        {
+          "kind": "test",
+          "name": "rebaseBeforeReviewRound ignores workflow-generated runtime state when checking for unsafe files",
+          "line": 189
+        },
+        {
+          "kind": "test",
+          "name": "rebaseBeforeReviewRound refuses to auto-commit when unmerged conflicts exist",
+          "line": 218
+        },
+        {
+          "kind": "test",
+          "name": "rebaseBeforeReviewRound reports shared-file rebase conflicts",
+          "line": 244
+        },
+        {
+          "kind": "test",
+          "name": "rebaseBeforeReviewRound reports missing Forgejo token failure from rebase push",
+          "line": 277
+        },
+        {
+          "kind": "test",
+          "name": "rebaseBeforeReviewRound reports generic rebase failure",
+          "line": 300
+        }
+      ]
+    },
+    {
+      "source": "task-2592-autocommit-nonmission.test.ts",
+      "previous": "review-regression-task-2592-autocommit-nonmission.test.ts",
+      "destination": "review-rebase-artifact-safety.test.ts",
+      "disposition": "consolidated with related contract; every distinct case/assertion retained",
+      "cases": [
+        {
+          "kind": "test",
+          "name": "commitSafeMissionArtifacts commits mission work despite an unstaged non-mission file",
+          "line": 7
+        }
+      ]
+    },
+    {
+      "source": "task-1036-review-fallback.test.ts",
+      "previous": "review-regression-task-1036-review-fallback.test.ts",
+      "destination": "review-launch-fallback-contract.test.ts",
+      "disposition": "retained distinct contract; stable behavior name",
+      "cases": [
+        {
+          "kind": "test",
+          "name": "eligibleAgentsForStep returns all current launchers when review step is missing from config (TASK-1036)",
+          "line": 44
+        },
+        {
+          "kind": "test",
+          "name": "eligibleAgentsForStep returns all current launchers when act-on-review step is missing from config (TASK-1036)",
+          "line": 59
+        },
+        {
+          "kind": "test",
+          "name": "startAgent review fallback selects vibe when claude hits limit and review step is missing (TASK-1036 transcript)",
+          "line": 70
+        },
+        {
+          "kind": "test",
+          "name": "startAgent act-on-review fallback selects vibe when implementer hits limit and act-on-review step is missing (TASK-1036)",
+          "line": 137
+        }
+      ]
+    },
+    {
+      "source": "task-1104-call-order.test.ts",
+      "previous": "review-regression-task-1104-call-order.test.ts",
+      "destination": "review-handoff-order-contract.test.ts",
+      "disposition": "retained distinct contract; stable behavior name",
+      "cases": [
+        {
+          "kind": "test",
+          "name": "startReviewLoop follows the transition contract: review before reviewer, active before implementer",
+          "line": 44
+        },
+        {
+          "kind": "test",
+          "name": "pushRound follows the transition contract: review before createPr",
+          "line": 135
+        },
+        {
+          "kind": "test",
+          "name": "performHandoff follows the sequence: createPr -> gatekeeper -> transitionTask -> push",
+          "line": 171
+        },
+        {
+          "kind": "test",
+          "name": "startReviewLoop does not transition to review if rebase fails",
+          "line": 250
+        }
+      ]
+    },
+    {
+      "source": "task-1209-artifact-dir.test.ts",
+      "previous": "review-regression-task-1209-artifact-dir.test.ts",
+      "destination": "review-artifact-location-contract.test.ts",
+      "disposition": "retained distinct contract; stable behavior name",
+      "cases": [
+        {
+          "kind": "test",
+          "name": "reviewArtifactPath builds path under the supplied tmpDir (task-1209 SC3)",
+          "line": 31
+        },
+        {
+          "kind": "test",
+          "name": "reviewArtifactPath falls back to os.tmpdir() when tmpDir omitted",
+          "line": 38
+        },
+        {
+          "kind": "test",
+          "name": "resolveArtifactDir returns configured adapters.review.tmpDir when present (task-1209 SC2)",
+          "line": 49
+        },
+        {
+          "kind": "test",
+          "name": "resolveArtifactDir falls back to os.tmpdir() when tmpDir absent (task-1209 SC2)",
+          "line": 55
+        },
+        {
+          "kind": "test",
+          "name": "resolveArtifactDir falls back to os.tmpdir() when no config file exists",
+          "line": 61
+        },
+        {
+          "kind": "test",
+          "name": "resolveArtifactDir resolves a relative tmpDir against the repo root",
+          "line": 67
+        },
+        {
+          "kind": "test",
+          "name": "resolveArtifactDir ignores a blank tmpDir",
+          "line": 73
+        }
+      ]
+    },
+    {
+      "source": "task-2335-reviewer-family-repro.test.ts",
+      "previous": "review-regression-task-2335-reviewer-family-repro.test.ts",
+      "destination": "review-launcher-family-contract.test.ts",
+      "disposition": "retained distinct contract; stable behavior name",
+      "cases": [
+        {
+          "kind": "test",
+          "name": "handoff persists a configured cross-family reviewer instead of the PR author",
+          "line": 68
+        },
+        {
+          "kind": "test",
+          "name": "handoff uses same-family reviewer only when cross-family selection is exhausted",
+          "line": 91
+        },
+        {
+          "kind": "test",
+          "name": "selectAgent review selection excludes the author family and picks a cross-family reviewer (real launch path)",
+          "line": 112
+        },
+        {
+          "kind": "test",
+          "name": "selectAgent review selection with multiple runs always excludes the author family",
+          "line": 144
+        },
+        {
+          "kind": "test",
+          "name": "selectAgent uses configured random selection over the eligible cross-family set",
+          "line": 175
+        },
+        {
+          "kind": "test",
+          "name": "selectAgent throws when all eligible agents are excluded (no-cross-family fallback)",
+          "line": 212
+        },
+        {
+          "kind": "test",
+          "name": "startReviewLoop reviewer selection excludes the author family (review-loop path)",
+          "line": 240
+        },
+        {
+          "kind": "test",
+          "name": "startReviewLoop single-family fallback when no cross-family reviewer is runnable",
+          "line": 328
+        }
+      ]
+    },
+    {
+      "source": "task-2332-status-review-history.test.ts",
+      "previous": "review-regression-task-2332-status-review-history.test.ts",
+      "destination": "review-status-backfill.integration.test.ts",
+      "disposition": "retained distinct contract; stable behavior name",
+      "cases": [
+        {
+          "kind": "it",
+          "name": "reads the exported events in chronological order with their frontmatter",
+          "line": 195
+        },
+        {
+          "kind": "it",
+          "name": "backfills the events into SQLite and renders them under the round in px status",
+          "line": 211
+        },
+        {
+          "kind": "it",
+          "name": "restores the conversation for a post-cutover mission that has no review-state.json",
+          "line": 254
+        },
+        {
+          "kind": "it",
+          "name": "reports the pending write under --dry-run without touching the database",
+          "line": 277
+        }
+      ]
+    },
+    {
+      "source": "task-2342-consume-human-notes-dedup.test.ts",
+      "previous": "review-regression-task-2342-consume-human-notes-dedup.test.ts",
+      "destination": "review-human-note-consumption.test.ts",
+      "disposition": "retained distinct contract; stable behavior name",
+      "cases": [
+        {
+          "kind": "test",
+          "name": "consumeHumanNotes dedup by comment body on re-invocation",
+          "line": 11
+        },
+        {
+          "kind": "test",
+          "name": "consumeHumanNotes dedup survives across invocations via metadata",
+          "line": 70
+        },
+        {
+          "kind": "test",
+          "name": "consumeHumanNotes skips workflow-generated comments and dedup by body",
+          "line": 117
+        },
+        {
+          "kind": "test",
+          "name": "consumeHumanNotes merges dedup into currentState in-place",
+          "line": 147
+        },
+        {
+          "kind": "test",
+          "name": "consumeHumanNotes dedup key includes author (N4)",
+          "line": 176
+        },
+        {
+          "kind": "test",
+          "name": "consumeHumanNotes retains all dedup keys (no cap)",
+          "line": 208
+        },
+        {
+          "kind": "test",
+          "name": "consumeHumanNotes dedup works for 201+ comments (two invocations)",
+          "line": 236
+        },
+        {
+          "kind": "test",
+          "name": "consumeHumanNotes dedup durable from first invocation (no prior state)",
+          "line": 281
+        }
+      ]
+    },
+    {
+      "source": "task-2364-owner-assumption.test.ts",
+      "previous": "review-regression-task-2364-owner-assumption.test.ts",
+      "destination": "review-owner-default-contract.test.ts",
+      "disposition": "retained distinct contract; stable behavior name",
+      "cases": [
+        {
+          "kind": "test",
+          "name": "auto-bootstrap fallback owner is human not magnus when repo is empty",
+          "line": 11
+        },
+        {
+          "kind": "test",
+          "name": "auto-bootstrap derives owner from repo slug when present",
+          "line": 42
+        },
+        {
+          "kind": "test",
+          "name": "setup-review defaultRepoSlug falls back to human when owner is undefined",
+          "line": 72
+        },
+        {
+          "kind": "test",
+          "name": "setup-review collectSetupAnswers defaults owner to human when repo is empty",
+          "line": 78
+        },
+        {
+          "kind": "test",
+          "name": "setup-review buildNonInteractiveAnswers defaults owner to human without env var",
+          "line": 102
+        }
+      ]
+    },
+    {
+      "source": "task-2398-approve-fixing-round.test.ts",
+      "previous": "review-regression-task-2398-approve-fixing-round.test.ts",
+      "destination": "review-decision-authority-contract.test.ts",
+      "disposition": "retained distinct contract; stable behavior name",
+      "cases": [
+        {
+          "kind": "it",
+          "name": "records decision.kind === approved and moves the mission to integration",
+          "line": 189
+        },
+        {
+          "kind": "it",
+          "name": "reports unchanged when an approve is replayed on an already-approved round",
+          "line": 224
+        },
+        {
+          "kind": "it",
+          "name": "moves the mission to integration when the approve is replayed",
+          "line": 252
+        },
+        {
+          "kind": "it",
+          "name": "rejects approve after request-changes and leaves the changes-requested decision",
+          "line": 283
+        },
+        {
+          "kind": "it",
+          "name": "locks the task-2380 stuck state: an approving fixing round never satisfies the integration gate",
+          "line": 326
+        },
+        {
+          "kind": "it",
+          "name": "records an authoritative approval on an awaiting-review round",
+          "line": 374
+        },
+        {
+          "kind": "it",
+          "name": "fails loudly on a fixing round and leaves the changes-requested decision",
+          "line": 388
+        },
+        {
+          "kind": "it",
+          "name": "provider=none: an illegal approve fails loudly with exit(1) and \"could not be recorded\"",
+          "line": 424
+        },
+        {
+          "kind": "it",
+          "name": "provider=none: no Mission authority bound logs the WARN and does not exit",
+          "line": 445
+        },
+        {
+          "kind": "it",
+          "name": "provider-backed: a failed POST leaves NO approve recorded on the aggregate (F1)",
+          "line": 462
+        },
+        {
+          "kind": "it",
+          "name": "provider-backed: a successful POST records the authoritative approve",
+          "line": 496
+        }
+      ]
+    },
+    {
+      "source": "task-2416-review-family-repro.test.ts",
+      "previous": "review-regression-task-2416-review-family-repro.test.ts",
+      "destination": "review-current-work-family-contract.test.ts",
+      "disposition": "retained distinct contract; stable behavior name",
+      "cases": [
+        {
+          "kind": "test",
+          "name": "TASK-2416 repro: a nested px review --start must not shadow the outer review family",
+          "line": 111
+        },
+        {
+          "kind": "test",
+          "name": "TASK-2416 guard: a live non-agent operation that publishes a null current-work fact stays family unknown",
+          "line": 178
+        },
+        {
+          "kind": "test",
+          "name": "TASK-2416 guard: a dead recording process shows no family attribution",
+          "line": 217
+        }
+      ]
+    },
+    {
+      "source": "task-2473-resume-review-repro.test.ts",
+      "previous": "review-regression-task-2473-resume-review-repro.test.ts",
+      "destination": "review-intervention-resume.integration.test.ts",
+      "disposition": "retained distinct contract; stable behavior name",
+      "cases": [
+        {
+          "kind": "it",
+          "name": "clears a human-intervention stop and derives the surviving-round status",
+          "line": 222
+        },
+        {
+          "kind": "it",
+          "name": "rejects a review that is not in human-intervention",
+          "line": 231
+        },
+        {
+          "kind": "it",
+          "name": "requires an authorized --actor to clear the intervention",
+          "line": 239
+        },
+        {
+          "kind": "it",
+          "name": "does not resurrect the intervention on reload",
+          "line": 247
+        },
+        {
+          "kind": "it",
+          "name": "lets the derived-status handoff proceed without a MissionRuleViolation",
+          "line": 262
+        },
+        {
+          "kind": "it",
+          "name": "leaves an approved review that carries a stale intervention untouched",
+          "line": 283
+        },
+        {
+          "kind": "it",
+          "name": "attributes the clearing actor to a review event",
+          "line": 302
+        },
+        {
+          "kind": "it",
+          "name": "records the audit event at the recovered round",
+          "line": 319
+        },
+        {
+          "kind": "it",
+          "name": "keeps ordinary review command flags parsing (continue and resume coexist)",
+          "line": 336
+        },
+        {
+          "kind": "it",
+          "name": "continue clears a human-intervention stop attributed to the git user",
+          "line": 347
+        },
+        {
+          "kind": "it",
+          "name": "continue falls back to a generic operator when no git user is set",
+          "line": 371
+        },
+        {
+          "kind": "it",
+          "name": "continue leaves a non-intervened review untouched",
+          "line": 389
+        },
+        {
+          "kind": "it",
+          "name": "reproduces the red parent-commit state: dispatch falls through to status",
+          "line": 409
+        }
+      ]
+    },
+    {
+      "source": "task-2600-repro.test.ts",
+      "previous": "review-regression-task-2600-repro.test.ts",
+      "destination": "review-controller-concurrency.test.ts",
+      "disposition": "retained distinct contract; stable behavior name",
+      "cases": [
+        {
+          "kind": "test",
+          "name": "TASK-2600 repro: delayed outer fallback leaves a concurrent round-3 approval authoritative",
+          "line": 25
+        },
+        {
+          "kind": "test",
+          "name": "TASK-2600 controller fence declines a concurrent continue while a start owns the round",
+          "line": 96
+        }
+      ]
+    },
+    {
+      "source": "github-pr.test.ts",
+      "previous": "github-pr.test.ts",
+      "destination": "github-pr.test.ts",
+      "disposition": "consolidated with related contract; every distinct case/assertion retained",
+      "cases": [
+        {
+          "kind": "test",
+          "name": "observeGithubPr reports target-changed when the base ref differs",
+          "line": 11
+        },
+        {
+          "kind": "test",
+          "name": "observeGithubPr reports pending for an open, unmerged PR",
+          "line": 24
+        },
+        {
+          "kind": "test",
+          "name": "observeGithubPr reports closed-unmerged for a closed PR with no merge",
+          "line": 33
+        },
+        {
+          "kind": "test",
+          "name": "observeGithubPr treats a populated mergedAt as a merge attempt (not pending)",
+          "line": 42
+        },
+        {
+          "kind": "test",
+          "name": "observeGithubPr reports unexpected-tree when the resulting tree does not match",
+          "line": 52
+        },
+        {
+          "kind": "test",
+          "name": "observeGithubPr reports merged when the resulting tree matches",
+          "line": 64
+        },
+        {
+          "kind": "test",
+          "name": "observeGithubPr falls back to mergeCommit.oid when merge_commit_sha is absent",
+          "line": 76
+        },
+        {
+          "kind": "test",
+          "name": "observeGithubPr falls back to head.sha when no merge sha fields exist",
+          "line": 85
+        },
+        {
+          "kind": "test",
+          "name": "observeGithubPr reports unavailable when the read throws",
+          "line": 94
+        },
+        {
+          "kind": "test",
+          "name": "observeGithubPr normalizes an empty error into a string message",
+          "line": 106
+        }
+      ]
+    },
+    {
+      "source": "github-pr-observe-pure.test.ts",
+      "previous": "github-pr-observe-pure.test.ts",
+      "destination": "github-pr.test.ts",
+      "disposition": "consolidated with related contract; every distinct case/assertion retained",
+      "cases": [
+        {
+          "kind": "test",
+          "name": "pending: not merged, no mergedAt, open state",
+          "line": 18
+        },
+        {
+          "kind": "test",
+          "name": "closed-unmerged: CLOSED without mergedAt closes as closed-unmerged",
+          "line": 25
+        },
+        {
+          "kind": "test",
+          "name": "target-changed: base ref diverges from expected",
+          "line": 32
+        },
+        {
+          "kind": "test",
+          "name": "merged via merge_commit_sha when trees match",
+          "line": 39
+        },
+        {
+          "kind": "test",
+          "name": "merged falls back to mergeCommit.oid when merge_commit_sha absent",
+          "line": 47
+        },
+        {
+          "kind": "test",
+          "name": "merged falls back to head.sha when no merge metadata present",
+          "line": 55
+        },
+        {
+          "kind": "test",
+          "name": "unexpected-tree: resulting sha exists but trees diverge",
+          "line": 63
+        },
+        {
+          "kind": "test",
+          "name": "unexpected-tree: resulting sha is falsy",
+          "line": 71
+        },
+        {
+          "kind": "test",
+          "name": "unavailable: read() throwing is caught and reported",
+          "line": 79
+        },
+        {
+          "kind": "test",
+          "name": "unavailable: non-Error throw is stringified",
+          "line": 84
+        },
+        {
+          "kind": "test",
+          "name": "mergedAt truthy alone treats the PR as merged",
+          "line": 89
+        }
+      ]
+    },
+    {
+      "source": "github-pr-integration.test.ts",
+      "previous": "github-pr-integration.test.ts",
+      "destination": "github-pr.test.ts",
+      "disposition": "consolidated with related contract; every distinct case/assertion retained",
+      "cases": [
+        {
+          "kind": "test",
+          "name": "direct-to-main GitHub PR is accepted as the expected target",
+          "line": 12
+        },
+        {
+          "kind": "test",
+          "name": "developer feature branch is accepted as the GitHub PR target",
+          "line": 16
+        },
+        {
+          "kind": "test",
+          "name": "pending GitHub PR remains incomplete after local review and gates",
+          "line": 21
+        },
+        {
+          "kind": "test",
+          "name": "successful externally owned GitHub merge supplies completion evidence",
+          "line": 25
+        },
+        {
+          "kind": "test",
+          "name": "closed unmerged GitHub PR reports recoverable state",
+          "line": 29
+        },
+        {
+          "kind": "test",
+          "name": "GitHub squash or rebase merge accepts a different SHA only with matching tree evidence",
+          "line": 33
+        },
+        {
+          "kind": "test",
+          "name": "GitHub target branch changes report recoverable state",
+          "line": 39
+        },
+        {
+          "kind": "test",
+          "name": "unavailable GitHub and local refs cannot produce merge evidence",
+          "line": 43
+        }
+      ]
+    },
+    {
+      "source": "review-identity.test.ts",
+      "previous": "review-identity.test.ts",
+      "destination": "review-identity.test.ts",
+      "disposition": "consolidated with related contract; every distinct case/assertion retained",
+      "cases": [
+        {
+          "kind": "test",
+          "name": "readComments falls back to review-state identity when FORGEJO_USER is missing",
+          "line": 54
+        },
+        {
+          "kind": "test",
+          "name": "commentRound falls back to review-state identity when FORGEJO_USER is missing",
+          "line": 77
+        },
+        {
+          "kind": "test",
+          "name": "readTextFlag prefers file content for multiline markdown bodies",
+          "line": 98
+        },
+        {
+          "kind": "test",
+          "name": "submitReviewRound falls back to review-state identity when FORGEJO_USER is missing",
+          "line": 116
+        },
+        {
+          "kind": "test",
+          "name": "submitReviewRound ignores FORGEJO_USER and uses review-state identity",
+          "line": 139
+        },
+        {
+          "kind": "test",
+          "name": "closeMissionPr falls back to review-state identity when FORGEJO_USER is missing",
+          "line": 165
+        }
+      ]
+    },
+    {
+      "source": "review-identity-placeholder.test.ts",
+      "previous": "review-identity-placeholder.test.ts",
+      "destination": "review-identity.test.ts",
+      "disposition": "consolidated with related contract; every distinct case/assertion retained",
+      "cases": [
+        {
+          "kind": "test",
+          "name": "buildCompactReviewPrompt uses actualReviewer when provided",
+          "line": 11
+        },
+        {
+          "kind": "test",
+          "name": "buildCompactActOnReviewPrompt uses actualImplementer when provided",
+          "line": 28
+        }
+      ]
+    },
+    {
+      "source": "review-verdict.test.ts",
+      "previous": "review-verdict.test.ts",
+      "destination": "review-loop-presentation-contract.test.ts",
+      "disposition": "consolidated with the verdict presentation contract; both case bodies retained",
+      "cases": [
+        {
+          "kind": "test",
+          "name": "renderReviewVerdict renders an APPROVED verdict as a PASS banner"
+        },
+        {
+          "kind": "test",
+          "name": "renderReviewVerdict surfaces a non-binary verdict only when verbose"
+        }
+      ]
+    }
+  ]
+}

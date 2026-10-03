@@ -148,8 +148,6 @@ test('task-2213: weekly agent performance table excludes active-stage agents', (
 });
 
 test('task-2213: range agent performance table excludes active-stage agents', () => {
-  // "# missions with telemetry" renders behind DEBUG only; enable so this
-  // assertion verifies the flagged render path.
   const previousDebug = process.env.DEBUG;
   process.env.DEBUG = '1';
   const rows = [
@@ -189,8 +187,7 @@ test('task-2213: range agent performance table excludes active-stage agents', ()
   const plain = __mm1.stripAnsi(report);
   const performance = plain.slice(plain.indexOf('Agent performance'));
 
-  assert.match(plain, /# missions with telemetry[\s\S]*\n3\s+1\s+2/,
-    'range report should include all telemetry missions');
+  assert.doesNotMatch(plain, /# missions with telemetry/, 'telemetry table was removed (TASK-2633)');
 
   // Active-stage agents must NOT appear in agent performance
   assert.ok(!performance.includes('vibe'),
@@ -244,8 +241,6 @@ test('task-2213: completed missions use recorded-family credit and averages', ()
 });
 
 test('task-1409: active and closed rows coexist without double-counting', () => {
-  // "# missions with telemetry" renders behind DEBUG only; enable so this
-  // assertion verifies the flagged render path.
   const previousDebug = process.env.DEBUG;
   process.env.DEBUG = '1';
   // Same mission with both active and closed rows should not double-count
@@ -285,8 +280,7 @@ test('task-1409: active and closed rows coexist without double-counting', () => 
   const report = renderWeeklyStatsReport(rows, { today: '2026-06-24' });
   const plain = __mm1.stripAnsi(report);
 
-  assert.match(plain, /# missions with telemetry[\s\S]*\n2\s+1\s+1/,
-    'telemetry count should deduplicate rows by mission');
+  assert.doesNotMatch(plain, /# missions with telemetry/, 'telemetry table was removed (TASK-2633)');
 
   // Agent performance: gpt-5 shows 1 mission (only the closed row)
   // Active rows must NOT inflate agent performance counts

@@ -368,6 +368,27 @@ describe('SQLite Mission aggregate integration', () => {
     } finally { await second.close(); }
   });
 
+  it('omits blank goal checks instead of failing Mission loads (TASK-2633)', async () => {
+    const database = await migratedDatabase();
+    try {
+      const store = new SqliteMissionStore(database);
+      const mission = completeMission({ review: null });
+      await store.save(mission, null);
+      assert.ok(mission.checkpoints.length > 0, 'fixture must carry a checkpoint');
+      await database.execute(
+        `INSERT INTO mission_checkpoint_goal_checks
+           (mission_id, checkpoint_position, position, criterion, evidence)
+         VALUES (?, 0, 998, '', 'has evidence'), (?, 0, 999, 'has criterion', '  ')`,
+        [mission.id, mission.id],
+      );
+      const loaded = await store.load(mission.id);
+      assert.equal(loaded.kind, 'found');
+      assert.deepEqual(loaded.mission.checkpoints, mission.checkpoints);
+      const byRepository = await store.loadByRepository(testRepositoryId);
+      assert.equal(byRepository.length, 1);
+    } finally { await database.close(); }
+  });
+
   it('loads legacy requested-changes rounds that have no persisted findings', async () => {
     const database = await migratedDatabase();
     try {

@@ -51,8 +51,8 @@ assertion does not apply. It now skips when no `.git` exists at `../..`. (1 test
 The standalone repo declares `workflow.config.json` with `adapters.review.provider:
 "forgejo"` (required for self-hosting parity). That turns
 `isForgejoReviewEnabled(process.cwd())` ON at the repo root. The rebase tests in
-`test/rebase.test.ts`, `test/rebase_diagnostics.test.ts`, and
-`test/rebase_hardening.test.ts` were written assuming Forgejo-off (in the monorepo
+`test/rebase.test.ts` and `test/rebase-before-review-contract.test.ts` (which holds the former rebase hardening and
+diagnostics cases) were written assuming Forgejo-off (in the monorepo
 they ran with `cwd = parallix/`, which had no local config), and they do not mock the
 Forgejo fetch path. They now inject `isForgejoReviewEnabledFn: () => false` — the same
 injection idiom two sibling tests in the file already use with `() => true` — so they

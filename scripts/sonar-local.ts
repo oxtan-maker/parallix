@@ -90,9 +90,9 @@ export function runSonar(options: { rootDir?: string, spawn?: typeof spawnSync, 
   const token = process.env.SONAR_TOKEN;
   if (!token) { throw new Error('SONAR_TOKEN is not set. Export a SonarQube Cloud token before running `npm run sonar`.'); }
   const branch = options.branch ?? resolveSonarBranch(rootDir);
-  // Lockfile-pinned scanner (devDependency `sonarqube-scanner`), never `npx --yes`.
-  const scannerBin = path.join(rootDir, 'node_modules', '.bin', 'sonar-scanner-npm');
-  if (!fs.existsSync(scannerBin)) { throw new Error('sonar-scanner-npm is not installed. Run `npm ci` before running `npm run sonar`.'); }
+  // Lockfile-pinned scanner (devDependency `sonar-scanner`), never `npx --yes`.
+  const scannerBin = path.join(rootDir, 'node_modules', '.bin', 'sonar-scanner');
+  if (!fs.existsSync(scannerBin)) { throw new Error('sonar-scanner is not installed. Run `npm ci` before running `npm run sonar`.'); }
   const scannerHome = path.join(rootDir, 'tmp', 'sonar');
   fs.mkdirSync(scannerHome, { recursive: true });
   const result = (options.spawn || spawnSync)(scannerBin, [

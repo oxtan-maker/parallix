@@ -1,0 +1,4 @@
+*.lcov
+*.log
+*.time
+*-population.json

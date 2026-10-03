@@ -273,6 +273,23 @@ WORKFLOW_AGENT=codex px draft task-XXX
 WORKFLOW_AGENT=claude px active task-XXX
 ```
 
+## Runtime blocks and step selection
+
+Per-step eligibility (above) says which families *may* run a step. The
+authoritative runtime blocklist says which are *currently* blocked — for
+example a month-end rate-limit block. Workflow steps consult the runtime
+blocklist at selection time, not just the static config, so a blocked family is
+never selected or launched when another eligible family is available: the step
+starts the next available eligible family instead. This is what lets a run
+continue past a rate-limited family (such as `vibe`) rather than launching the
+blocked family and wasting a retry on a denied model call.
+
+When every eligible family for a step is blocked, the step fails with a
+diagnostic that names the blocked families and starts no agent. A missing or
+unreadable blocklist never poisons selection — the per-launch block check
+remains the backstop — but under normal operation a runtime block is honored by
+selection.
+
 ## Agent availability in the board (px UI)
 
 The `px` board renders an agent strip above the lanes with one entry per known

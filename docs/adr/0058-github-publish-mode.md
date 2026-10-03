@@ -143,9 +143,12 @@ closed.
 - **Publication delay.** A failed or delayed selected tip delays its release,
   but later local work may be accumulated into a new exact tip and verified as
   one tree.
-- **Ref lifecycle.** The temporary `github-publish/<D>` ref may be removed
-  after publication. Release authorization remains valid because it reads the
-  durable GitHub Actions/check history, not the ref's continued existence.
+- **Ref lifecycle.** The temporary `github-publish/<D>` ref is ephemeral. On
+  each push to `main`, the cleanup workflow removes the published ref and every
+  other `github-publish/*` ref whose commit is not reachable from `main`
+  (failed or superseded tips). Release authorization remains valid because it
+  reads the durable GitHub Actions/check history, not the ref's continued
+  existence.
 
 ## Reconsideration triggers
 

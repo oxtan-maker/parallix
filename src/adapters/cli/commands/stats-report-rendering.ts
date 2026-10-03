@@ -8,7 +8,6 @@ import * as statsReport from './stats-report.js';
 import { resolveCanonicalRepositoryId } from '../../git/repository-identity.js';
 import { compareCodeUnits } from '../../../domain/comparators.js';
 import {
-  summarizeCompletedMissionWindow,
   statisticsMissionKey,
   statisticsRowInWindow,
 } from '../../../application/services/statistics-service.js';
@@ -189,27 +188,6 @@ function generateMarkdownReport(data, options = {}) {
   lines.push('```\n');
 
   return lines.join('\n');
-}
-
-/**
- * @param {StatsRow[]} rows
- * @param {{start: Date, end: Date}} window
- */
-// @ts-ignore -- retained reporting helper is dynamically typed
-function summarizeMissionWindow(rows, window, completedMissionKeys = new Set()) {
-// @ts-ignore -- retained reporting helper is dynamically typed
-  const { rows: closedRows, missions: uniqueMissions } = summarizeCompletedMissionWindow(rows, window, completedMissionKeys);
-  const userValue = uniqueMissions.filter(row => normalizeClassification(row.classification) === 'user_value').length;
-  const aiSdlc = uniqueMissions.filter(row => normalizeClassification(row.classification) === 'ai_sdlc').length;
-  const unknown = uniqueMissions.filter(row => normalizeClassification(row.classification) === 'unknown').length;
-  const validMissions = uniqueMissions.filter(row => normalizeClassification(row.classification) !== null);
-  return {
-    rows: closedRows,
-    total: validMissions.length,
-    userValue,
-    aiSdlc,
-    unknown,
-  };
 }
 
 /**
@@ -600,7 +578,6 @@ export {
   isValidClassification,
   normalizeClassification,
   rowInWindow,
-  summarizeMissionWindow,
   computeAgentMissionGroups,
   summarizeAgentWindow,
   summarizeAgentStageSpend,

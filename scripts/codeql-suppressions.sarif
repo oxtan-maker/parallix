@@ -107,10 +107,10 @@
             {
               "physicalLocation": {
                 "artifactLocation": {
-                  "uri": "test/task-2285-release-metadata.test.ts"
+                  "uri": "test/npm-package-bundle-and-release-contract.test.ts"
                 },
                 "region": {
-                  "startLine": 126,
+                  "startLine": 140,
                   "startColumn": 1
                 }
               }
@@ -128,7 +128,7 @@
             {
               "physicalLocation": {
                 "artifactLocation": {
-                  "uri": "test/task-2286-native-sea-smoke.test.ts"
+                  "uri": "test/native-sea-executable-smoke.test.ts"
                 },
                 "region": {
                   "startLine": 162,
@@ -212,7 +212,7 @@
             {
               "physicalLocation": {
                 "artifactLocation": {
-                  "uri": "test/task-2286-native-sea-smoke.test.ts"
+                  "uri": "test/native-sea-executable-smoke.test.ts"
                 },
                 "region": {
                   "startLine": 371,
@@ -233,7 +233,7 @@
             {
               "physicalLocation": {
                 "artifactLocation": {
-                  "uri": "test/task-2286-native-sea-smoke.test.ts"
+                  "uri": "test/native-sea-executable-smoke.test.ts"
                 },
                 "region": {
                   "startLine": 522,

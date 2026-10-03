@@ -3,7 +3,7 @@
 // the routing module instead of dead-ending in `IntegrationAbort`.
 //
 // The routing module's four outcomes are covered by
-// `test/task-2492-integration-gate-rebound.test.ts` with injected seams. This
+// `test/rebound-kernel-contract.test.ts` with injected seams. This
 // file proves the CLI wiring: that a red `runPhaseGates('integration', …)`
 // result calls `routeIntegrationGateFailure` with the failed gate, the gate
 // error, the configured gate set, a named implementer, and a transition seam,

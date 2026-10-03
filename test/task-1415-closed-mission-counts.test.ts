@@ -26,10 +26,10 @@ function git(args, cwd) {
 
 // task-1415: "px stats shows stale mission counts when missions are closed."
 //
-// Investigation across `summarizeMissionWindow`, `summarizeAgentWindow`,
+// Investigation across `summarizeAgentWindow`,
 // `rowInWindow`, `canonicalizeStatsRow`, and `upsertMeasurementRow` found all of
 // them already correct on main:
-//   - `summarizeMissionWindow` receives lifecycle-completed Mission IDs.
+//   - the mission-flow section counts lifecycle-completed Missions.
 //   - `summarizeAgentWindow` intentionally does NOT infer completion from telemetry
 //     (task-1409) — its per-mission dedup (`byMission`, keyed on
 //     `statsMissionKey` only) already collapses every stage row for a
@@ -133,7 +133,7 @@ test('task-1415: recordPostIntegrationStats counts a closed mission in the curre
       today: csvData.rows[0].date,
       missionFlow: [{ repo: csvData.rows[0].repo, mission: csvData.rows[0].mission, closedAt: `${csvData.rows[0].date}T00:00:00Z`, labels: ['ai_sdlc'] }],
     });
-    const currentSection = todayReport.split('Agent telemetry — current week')[1] || '';
+    const currentSection = todayReport.split('Mission flow — current week')[1] || '';
     const currentDataLine = currentSection.split('\n').find(l => /^\d/.test(l));
     const missionCount = Number((currentDataLine || '').trim().split(/\s+/)[0]);
 

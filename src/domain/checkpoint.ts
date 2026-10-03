@@ -49,6 +49,7 @@ export function recordCheckpoint(
   if (!isHandoffReadyCheckpoint(replacement)) {
     throw new Error(`Checkpoint ${replacement.name} is not ready for handoff`);
   }
+  assertGoalCheckRows(replacement.goalCheck);
   if (checkpoints.some((checkpoint) => checkpoint.missionId !== replacement.missionId)) {
     throw new Error('Cannot record checkpoint evidence from another mission');
   }
@@ -94,4 +95,12 @@ export function isPlannedCheckpoint(checkpoint: CheckpointData): boolean {
 /** The most recent checkpoint that is progress rather than only a plan. */
 export function latestEvidencedCheckpoint(checkpoints: readonly CheckpointData[]): CheckpointData | null {
   return [...checkpoints].reverse().find((checkpoint) => !isPlannedCheckpoint(checkpoint)) ?? null;
+}
+
+/** Reject blank Goal Check text before it can reach persistence. */
+export function assertGoalCheckRows(rows: readonly GoalCheckRow[]): void {
+  for (const row of rows) {
+    if (row.criterion.trim().length === 0) { throw new Error('Checkpoint goal criterion must not be empty'); }
+    if (row.evidence.trim().length === 0) { throw new Error('Checkpoint goal evidence must not be empty'); }
+  }
 }

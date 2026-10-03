@@ -726,11 +726,11 @@ test('recordPostIntegrationStats logs the persisted stats row including pr_fix_r
     console.log = originalLog;
   }
 
-  // TASK-2479: the recorded row still prints, but the weekly report body and
-  // mission-telemetry table no longer dump on the success path.
+  // TASK-2633: the recorded row prints with the weekly report; the
+  // mission-telemetry table does not return.
   assert.match(logs.join('\n'), /\[INFO\] Workflow stats recorded: task-2000: implementer=claude, pr_fix_rounds=8, classification=ai_sdlc, date=2026-05-18/);
   assert.doesNotMatch(logs.join('\n'), /\[INFO\] Workflow stats updated:/);
-  assert.doesNotMatch(logs.join('\n'), /weekly report/);
+  assert.match(logs.join('\n'), /weekly report/);
   assert.doesNotMatch(logs.join('\n'), /\[INFO\] Mission telemetry by phase: task-2000/);
 });
 
@@ -828,7 +828,7 @@ test('recordPostIntegrationStats passes no file path and stays anchored to PARAL
   }
 });
 
-test('recordPostIntegrationStats does not print the weekly report or mission telemetry on the success path', async () => {
+test('recordPostIntegrationStats prints the weekly report but not mission telemetry on the success path (TASK-2633)', async () => {
   const logs = [];
   const originalLog = console.log;
   console.log = message => logs.push(message);
@@ -856,10 +856,10 @@ test('recordPostIntegrationStats does not print the weekly report or mission tel
     });
 
     const combined = logs.join('\n');
-    // The recorded row still prints; the analytical body does not.
+    // The recorded row prints followed by the weekly report; per-stage telemetry does not.
     assert.match(combined, /\[INFO\] Workflow stats recorded: task-3000/);
     assert.doesNotMatch(combined, /\[INFO\] Workflow stats updated:/);
-    assert.doesNotMatch(combined, /weekly report/);
+    assert.match(combined, /Workflow stats recorded: task-3000[\s\S]*weekly report/);
     assert.doesNotMatch(combined, /\[INFO\] Mission telemetry by phase: task-3000/);
     assert.doesNotMatch(combined, /draft/);
     assert.doesNotMatch(combined, /execute/);
@@ -868,7 +868,7 @@ test('recordPostIntegrationStats does not print the weekly report or mission tel
   }
 });
 
-test('recordPostIntegrationStats stays silent past the recorded row for empty mission-phase rows', async () => {
+test('recordPostIntegrationStats prints only the recorded row and weekly report for empty mission-phase rows', async () => {
   const logs = [];
   const originalLog = console.log;
   console.log = message => logs.push(message);
@@ -894,12 +894,45 @@ test('recordPostIntegrationStats stays silent past the recorded row for empty mi
     const combined = logs.join('\n');
     assert.match(combined, /\[INFO\] Workflow stats recorded: task-4000/);
     assert.doesNotMatch(combined, /\[INFO\] Workflow stats updated:/);
-    assert.doesNotMatch(combined, /weekly report/);
+    assert.match(combined, /weekly report/);
     assert.doesNotMatch(combined, /No telemetry rows recorded for mission "task-4000"/);
-    // The recorded row is the only line emitted on this success path.
-    assert.equal(logs.filter(l => typeof l === 'string' && l.trim().length > 0).length, 1);
+    // Only the recorded row and the weekly report are emitted on this success path.
+    assert.equal(logs.filter(l => typeof l === 'string' && l.trim().length > 0).length, 2);
   } finally {
     console.log = originalLog;
+  }
+});
+
+test('recordPostIntegrationStats contains a weekly report read or render failure (TASK-2633)', async () => {
+  const logs = [];
+  const originalLog = console.log;
+  const originalWarn = console.warn;
+  const originalError = console.error;
+  console.log = message => logs.push(message);
+  console.warn = message => logs.push(message);
+  console.error = message => logs.push(message);
+  try {
+    for (const failure of [{ report: null, reportError: 'database locked' }, { report: undefined }]) {
+      const outcome = await recordPostIntegrationStats('task-5000', {
+        rootDir: FAKE_ROOT,
+        recordIntegrationStatsFn() {
+          return {
+            changed: true,
+            row: { mission: 'task-5000', implementer: 'claude', pr_fix_rounds: '0', classification: 'ai_sdlc', date: '2026-05-18' },
+            data: { rows: [] },
+            ...failure,
+          };
+        },
+      });
+      assert.equal(outcome.row.mission, 'task-5000');
+    }
+    const combined = logs.join('\n');
+    assert.match(combined, /Workflow stats recorded: task-5000/);
+    assert.match(combined, /Weekly stats report unavailable: database locked/);
+  } finally {
+    console.log = originalLog;
+    console.warn = originalWarn;
+    console.error = originalError;
   }
 });
 

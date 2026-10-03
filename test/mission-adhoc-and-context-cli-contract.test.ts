@@ -463,7 +463,7 @@ describe('Context CLI', () => {
    * board projection lists the repository's pull requests, which would put a
    * network call in the middle of a test about the Mission read/write path. The
    * `px status --json` rendering of these same fields is covered by
-   * `test/task-2521-03-status-projection.test.ts`.
+   * `test/status-command-use-case.test.ts`.
    */
 
 

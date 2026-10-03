@@ -8,6 +8,7 @@ import * as path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import * as esbuild from 'esbuild';
 import { generateReleaseMetadata } from './release-metadata.ts';
+import { isBuildLockAbandoned } from './build-lock.ts';
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(scriptDir, '..');
@@ -28,7 +29,6 @@ const lockDir = path.join(
   `parallix-bundle-build-${crypto.createHash('sha256').update(root).digest('hex').slice(0, 16)}.lock`,
 );
 const LOCK_WAIT_MS = 300_000;
-const LOCK_STALE_MS = 600_000;
 
 function acquireBuildLock(): void {
   const deadline = Date.now() + LOCK_WAIT_MS;
@@ -40,8 +40,17 @@ function acquireBuildLock(): void {
     } catch (err) {
       if ((err as NodeJS.ErrnoException).code !== 'EEXIST') { throw err; }
       // Reclaim a lock left behind by a killed build rather than blocking forever.
-      const heldSince = fs.existsSync(lockDir) ? fs.statSync(lockDir).mtimeMs : Date.now();
-      if (Date.now() - heldSince > LOCK_STALE_MS) {
+      let heldSince: number;
+      let owner: string | undefined;
+      try {
+        heldSince = fs.statSync(lockDir).mtimeMs;
+        owner = fs.readFileSync(path.join(lockDir, 'pid'), 'utf8');
+      } catch (readError) {
+        if ((readError as NodeJS.ErrnoException).code !== 'ENOENT') { throw readError; }
+        if (!fs.existsSync(lockDir)) { continue; }
+        heldSince = fs.statSync(lockDir).mtimeMs;
+      }
+      if (isBuildLockAbandoned(owner, Date.now() - heldSince, pid => process.kill(pid, 0))) {
         fs.rmSync(lockDir, { recursive: true, force: true });
         continue;
       }

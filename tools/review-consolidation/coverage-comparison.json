@@ -1,0 +1,22 @@
+{
+  "sourceFiles": {
+    "baseline": 334,
+    "candidate": 334
+  },
+  "executableLines": {
+    "baseline": 47903,
+    "candidate": 47823
+  },
+  "coveredLines": {
+    "baseline": 16165,
+    "candidate": 16165
+  },
+  "lineRatePercent": {
+    "baseline": 33.75,
+    "candidate": 33.8
+  },
+  "changedDenominator": [
+    "src/adapters/review/review-state.ts"
+  ],
+  "lostCovered": []
+}

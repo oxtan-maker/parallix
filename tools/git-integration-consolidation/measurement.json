@@ -1,0 +1,280 @@
+{
+ "method": "min CPU of 3 serial runs per file; node --import tsx --import test/bootstrap-parallix-home.ts --experimental-test-module-mocks --test <file>; baseline and candidate measured back to back on a shared workstation (load average ~15), so absolute figures are inflated and only the paired deltas are meaningful",
+ "before": {
+  "files": 90,
+  "tests": 669,
+  "cpuSeconds": 136.6,
+  "wallSeconds": 111.55
+ },
+ "after": {
+  "files": 31,
+  "tests": 669,
+  "cpuSeconds": 80.3,
+  "wallSeconds": 65.69
+ },
+ "byTier": {
+  "unit": {
+   "filesBefore": 51,
+   "filesAfter": 12,
+   "cpuBefore": 53.0,
+   "cpuAfter": 19.16,
+   "wallBefore": 42.51,
+   "wallAfter": 16.23
+  },
+  "ci": {
+   "filesBefore": 29,
+   "filesAfter": 9,
+   "cpuBefore": 70.22,
+   "cpuAfter": 47.77,
+   "wallBefore": 58.47,
+   "wallAfter": 38.83
+  }
+ },
+ "retainedSuites": {
+  "before": {
+   "files": 10,
+   "tests": 302,
+   "cpuSeconds": 13.38,
+   "wallSeconds": 10.57
+  },
+  "after": {
+   "files": 10,
+   "tests": 302,
+   "cpuSeconds": 13.37,
+   "wallSeconds": 10.63
+  }
+ },
+ "suites": [
+  {
+   "destination": "test/mission-worktree-path-resolution-contract.test.ts",
+   "tier": "unit",
+   "sourceFiles": 5,
+   "casesBefore": 19,
+   "casesAfter": 19,
+   "cpuBefore": 4.14,
+   "cpuAfter": 1.97,
+   "wallBefore": 3.15,
+   "wallAfter": 1.89
+  },
+  {
+   "destination": "test/integrate-preflight-and-approval-contract.test.ts",
+   "tier": "unit",
+   "sourceFiles": 4,
+   "casesBefore": 24,
+   "casesAfter": 24,
+   "cpuBefore": 5.5,
+   "cpuAfter": 2.12,
+   "wallBefore": 4.82,
+   "wallAfter": 2.22
+  },
+  {
+   "destination": "test/integrate-probe-and-resume-orchestration-contract.test.ts",
+   "tier": "unit",
+   "sourceFiles": 4,
+   "casesBefore": 14,
+   "casesAfter": 14,
+   "cpuBefore": 6.39,
+   "cpuAfter": 2.26,
+   "wallBefore": 5.34,
+   "wallAfter": 1.97
+  },
+  {
+   "destination": "test/integrate-backlog-drift-and-claim-guard-contract.test.ts",
+   "tier": "unit",
+   "sourceFiles": 4,
+   "casesBefore": 23,
+   "casesAfter": 23,
+   "cpuBefore": 5.12,
+   "cpuAfter": 2.81,
+   "wallBefore": 3.92,
+   "wallAfter": 2.33
+  },
+  {
+   "destination": "test/integrate-landed-closeout-recovery-contract.test.ts",
+   "tier": "unit",
+   "sourceFiles": 8,
+   "casesBefore": 35,
+   "casesAfter": 35,
+   "cpuBefore": 6.98,
+   "cpuAfter": 1.39,
+   "wallBefore": 5.42,
+   "wallAfter": 1.09
+  },
+  {
+   "destination": "test/integrate-gate-rebound-and-repair-contract.test.ts",
+   "tier": "unit",
+   "sourceFiles": 7,
+   "casesBefore": 33,
+   "casesAfter": 33,
+   "cpuBefore": 7.91,
+   "cpuAfter": 1.53,
+   "wallBefore": 6.76,
+   "wallAfter": 1.18
+  },
+  {
+   "destination": "test/rebase-conflict-recovery-contract.test.ts",
+   "tier": "unit",
+   "sourceFiles": 4,
+   "casesBefore": 19,
+   "casesAfter": 19,
+   "cpuBefore": 4.1,
+   "cpuAfter": 1.29,
+   "wallBefore": 3.23,
+   "wallAfter": 1.02
+  },
+  {
+   "destination": "test/pre-review-rebase-in-process-contract.test.ts",
+   "tier": "unit",
+   "sourceFiles": 1,
+   "casesBefore": 8,
+   "casesAfter": 8,
+   "cpuBefore": 0.93,
+   "cpuAfter": 1.05,
+   "wallBefore": 0.72,
+   "wallAfter": 0.82
+  },
+  {
+   "destination": "test/integration-mode-dispatch-contract.test.ts",
+   "tier": "unit",
+   "sourceFiles": 5,
+   "casesBefore": 20,
+   "casesAfter": 20,
+   "cpuBefore": 4.52,
+   "cpuAfter": 1.95,
+   "wallBefore": 3.49,
+   "wallAfter": 1.62
+  },
+  {
+   "destination": "test/forgejo-sync-and-base-reconcile-contract.test.ts",
+   "tier": "unit",
+   "sourceFiles": 3,
+   "casesBefore": 7,
+   "casesAfter": 7,
+   "cpuBefore": 2.84,
+   "cpuAfter": 1.03,
+   "wallBefore": 2.24,
+   "wallAfter": 0.81
+  },
+  {
+   "destination": "test/git-and-mission-path-adapter-contract.test.ts",
+   "tier": "unit",
+   "sourceFiles": 4,
+   "casesBefore": 40,
+   "casesAfter": 40,
+   "cpuBefore": 2.93,
+   "cpuAfter": 0.94,
+   "wallBefore": 2.18,
+   "wallAfter": 0.69
+  },
+  {
+   "destination": "test/rebase-in-progress-state-contract.test.ts",
+   "tier": "unit",
+   "sourceFiles": 2,
+   "casesBefore": 5,
+   "casesAfter": 5,
+   "cpuBefore": 1.64,
+   "cpuAfter": 0.82,
+   "wallBefore": 1.24,
+   "wallAfter": 0.59
+  },
+  {
+   "destination": "test/integrate-squash-payload-pathspec-contract.test.ts",
+   "tier": "ci",
+   "sourceFiles": 5,
+   "casesBefore": 20,
+   "casesAfter": 20,
+   "cpuBefore": 6.26,
+   "cpuAfter": 4.2,
+   "wallBefore": 5.18,
+   "wallAfter": 3.85
+  },
+  {
+   "destination": "test/integrate-squash-commit-and-landed-detection-contract.test.ts",
+   "tier": "ci",
+   "sourceFiles": 4,
+   "casesBefore": 13,
+   "casesAfter": 13,
+   "cpuBefore": 5.19,
+   "cpuAfter": 2.56,
+   "wallBefore": 4.31,
+   "wallAfter": 2.25
+  },
+  {
+   "destination": "test/integrate-stale-state-and-stash-safety-contract.test.ts",
+   "tier": "ci",
+   "sourceFiles": 4,
+   "casesBefore": 17,
+   "casesAfter": 17,
+   "cpuBefore": 6.17,
+   "cpuAfter": 3.73,
+   "wallBefore": 7.19,
+   "wallAfter": 4.68
+  },
+  {
+   "destination": "test/rebase-before-review-contract.test.ts",
+   "tier": "ci",
+   "sourceFiles": 4,
+   "casesBefore": 11,
+   "casesAfter": 11,
+   "cpuBefore": 5.11,
+   "cpuAfter": 1.6,
+   "wallBefore": 4.68,
+   "wallAfter": 1.33
+  },
+  {
+   "destination": "test/forgejo-sync-merged-force-push-contract.test.ts",
+   "tier": "ci",
+   "sourceFiles": 2,
+   "casesBefore": 13,
+   "casesAfter": 13,
+   "cpuBefore": 2.93,
+   "cpuAfter": 1.49,
+   "wallBefore": 2.68,
+   "wallAfter": 1.2
+  },
+  {
+   "destination": "test/post-integrate-global-install-contract.test.ts",
+   "tier": "ci",
+   "sourceFiles": 3,
+   "casesBefore": 11,
+   "casesAfter": 11,
+   "cpuBefore": 10.8,
+   "cpuAfter": 7.26,
+   "wallBefore": 9.47,
+   "wallAfter": 5.92
+  },
+  {
+   "destination": "test/integrate-gate-and-exclusivity-process-contract.test.ts",
+   "tier": "ci",
+   "sourceFiles": 3,
+   "casesBefore": 15,
+   "casesAfter": 15,
+   "cpuBefore": 27.02,
+   "cpuAfter": 23.84,
+   "wallBefore": 19.02,
+   "wallAfter": 17.02
+  },
+  {
+   "destination": "test/integrate-variant-b-landing-contract.test.ts",
+   "tier": "ci",
+   "sourceFiles": 2,
+   "casesBefore": 15,
+   "casesAfter": 15,
+   "cpuBefore": 3.98,
+   "cpuAfter": 1.68,
+   "wallBefore": 3.68,
+   "wallAfter": 1.4
+  },
+  {
+   "destination": "test/integrate-lifecycle-recovery-and-closeout-contract.test.ts",
+   "tier": "ci",
+   "sourceFiles": 2,
+   "casesBefore": 5,
+   "casesAfter": 5,
+   "cpuBefore": 2.76,
+   "cpuAfter": 1.41,
+   "wallBefore": 2.26,
+   "wallAfter": 1.18
+  }
+ ]
+}

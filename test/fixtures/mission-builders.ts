@@ -1,7 +1,7 @@
 import type { MissionVersion } from '../../src/application/domain-ports.js';
 import { agentFamily } from '../../src/domain/agents.js';
 import type { LaneTransitionEvent } from '../../src/domain/board-event.js';
-import { missionId, missionLabels, type Mission } from '../../src/domain/mission.js';
+import { missionId, missionLabels, type Mission, type MissionId } from '../../src/domain/mission.js';
 import { repositoryId } from '../../src/domain/repository.js';
 import type { Review } from '../../src/domain/review.js';
 
@@ -84,7 +84,7 @@ export interface InMemoryTransitionStore {
   /** Lane events committed through saveWithTransition, in order. */
   readonly events: LaneTransitionEvent[];
   mission(): Mission;
-  load(): Promise<{ kind: 'found'; mission: Mission; version: MissionVersion }>;
+  load(_missionId?: MissionId): Promise<{ kind: 'found'; mission: Mission; version: MissionVersion }>;
   save(_mission: Mission, _expectedVersion?: MissionVersion | null): Promise<MissionVersion>;
   saveWithTransition(_mission: Mission, _expectedVersion: MissionVersion | null, _event: LaneTransitionEvent): Promise<MissionVersion>;
 }

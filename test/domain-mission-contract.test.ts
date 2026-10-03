@@ -428,6 +428,12 @@ describe('Mission lifecycle and review invariants (task-2294, task-2322, task-23
     assert.equal(checkpoints[0]?.nextActionText, 'new action');
   });
 
+  test('recordCheckpoint rejects blank Goal Check text as defense in depth (TASK-2634)', () => {
+    const base = { missionId: id, name: 'CP-1', firstLine: 'CP-1: x', nextActionText: 'next' };
+    assert.throws(() => recordCheckpoint([], { ...base, goalCheck: [{ criterion: ' ', evidence: 'e' }] }), /goal criterion must not be empty/);
+    assert.throws(() => recordCheckpoint([], { ...base, goalCheck: [{ criterion: 'c', evidence: ' ' }] }), /goal evidence must not be empty/);
+  });
+
   test('resume marker is scoped to mission, role, and extensible agent family', () => {
     const marker = { missionId: id, role: 'execute' as const, agent: agentFamily('new-runner'), lastLaunched: 'now', sessionId: null };
     assert.equal(shouldResume(marker, id, 'execute', agentFamily('new-runner')), true);

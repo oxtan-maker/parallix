@@ -464,6 +464,48 @@ describe('Mission use cases', () => {
     assert.deepEqual(store.calls, []);
   });
 
+  test('rejects blank Goal Check criterion before mutation or persistence (TASK-2634)', async () => {
+    for (const criterion of ['', '   ', '\t\n']) {
+      const store = new FakeMissionStore(activeMission(), 1);
+      const service = new MissionCheckpointService(store);
+      const outcome = await service.record({
+        operationId: 'op-blank-criterion', missionId: MISSION, capabilities: ALL_CAPABILITIES,
+        checkpoint: checkpoint({ goalCheck: [{ criterion: 'Fine', evidence: '`npm test`' }, { criterion, evidence: '`npm test`' }] }),
+      });
+      assert.equal(outcome.status, 'failed');
+      assert.equal(outcome.error!.kind, 'validation');
+      assert.equal(outcome.error!.message, 'Checkpoint goal criterion must not be empty');
+      assert.deepEqual(store.calls, []);
+      assert.deepEqual(store.mission!.checkpoints, activeMission().checkpoints);
+    }
+  });
+
+  test('rejects blank Goal Check evidence before mutation or persistence (TASK-2634)', async () => {
+    for (const evidence of ['', '   ', '\t\n']) {
+      const store = new FakeMissionStore(activeMission(), 1);
+      const service = new MissionCheckpointService(store);
+      const outcome = await service.record({
+        operationId: 'op-blank-evidence', missionId: MISSION, capabilities: ALL_CAPABILITIES,
+        checkpoint: checkpoint({ goalCheck: [{ criterion: 'Fine', evidence }] }),
+      });
+      assert.equal(outcome.status, 'failed');
+      assert.equal(outcome.error!.kind, 'validation');
+      assert.equal(outcome.error!.message, 'Checkpoint goal evidence must not be empty');
+      assert.deepEqual(store.calls, []);
+      assert.deepEqual(store.mission!.checkpoints, activeMission().checkpoints);
+    }
+  });
+
+  test('records a Goal Check with non-empty criterion and evidence (TASK-2634)', async () => {
+    const store = new FakeMissionStore(activeMission(), 1);
+    const service = new MissionCheckpointService(store);
+    const outcome = await service.record({
+      operationId: 'op-nonblank', missionId: MISSION, capabilities: ALL_CAPABILITIES,
+      checkpoint: checkpoint({ goalCheck: [{ criterion: 'Fine', evidence: '`npm test`' }] }),
+    });
+    assert.equal(outcome.status, 'completed');
+  });
+
   test('SC3: the checkpoint request carries no persistence path or SQL input', () => {
     const source = fs.readFileSync(
       path.join(process.cwd(), 'src/application/mission-checkpoint-service.ts'),
@@ -684,9 +726,9 @@ describe('Lifecycle ordering', () => {
   //     version is refused before the domain decides' and 'SC2: a stale write
   //     raised by the store surfaces as a conflict'
   //   - done only after all integration work succeeds:
-  //     test/mission-integration-service.test.ts (decideIntegration requires
+  //     test/integration-mode-dispatch-contract.test.ts (decideIntegration requires
   //     fresh merged Git and passing verification facts)
-  //   - resume/recovery: test/task-2397-integrate-active-approved-recovery.test.ts,
+  //   - resume/recovery: test/integrate-lifecycle-recovery-and-closeout-contract.test.ts,
   //     test/task-2420-integrate-recovery-assigned-reviewer.test.ts,
   //     test/recover-command.test.ts
 

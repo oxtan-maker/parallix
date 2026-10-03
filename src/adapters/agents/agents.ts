@@ -34,6 +34,11 @@ import {
   resolveCustomLauncher
 } from './launcher-selection.js';
 import { resolveCustomRunner } from '../config/product-config.js';
+import {
+  defaultBlockContext,
+  filterBlockedFallback,
+  type BlockContext,
+} from './agent-block-selection.js';
 import { warmPiSdk } from './pi.js';
 import { resolveSandboxProfile, withSandboxProfile } from '../process/bubblewrap.js';
 import { selectConfinement, supportsNativeSandbox, ConfinementBlockedError, isBubblewrapDisabled, isBubblewrapAvailable, BUBBLEWRAP_COMMAND } from '../process/confinement.js';
@@ -95,6 +100,8 @@ interface StartAgentOptions {
    * by contract — defaults false, never implied by a fallback or default setting.
    */
   allowUnsandboxedMutation?: boolean;
+  /** Runtime-block context (exclude set, all-blocked flag, eligible/blocked sets); one provider keeps wiring minimal. */
+  runtimeBlockContextFn?: (_step: string, _tried: ReadonlySet<string>) => Promise<BlockContext>;
 }
 
 // Process-wide composition seam for hosts which supply an in-process agent
@@ -427,6 +434,7 @@ type StartAgentLoopDeps = {
   unrefChild: boolean;
   allowUnsandboxedMutation: boolean;
   refuseFallbackWhenPinned: (_detail: string) => void;
+  runtimeBlockContext: (_step: string, _tried: ReadonlySet<string>) => Promise<BlockContext>;
 };
 
 /** Mutable state walked by the one launch loop: selection, tried/launched sets, per-agent failures. */
@@ -461,8 +469,14 @@ type PreparedLaunch = {
  */
 async function selectAndGateAgent(state: StartAgentLoopState, deps: StartAgentLoopDeps): Promise<boolean> {
   if (!state.chosen) {
+    // Exclude every family the runtime blocklist currently blocks so no launch
+    // is ever attempted against a blocked family when another eligible family is
+    // available (SC 2). Recomputed each reselect so blocks written mid-loop
+    // (for example a limit hit on the previous attempt) take effect immediately.
+    const blockedPool = await deps.runtimeBlockContext(deps.step, state.tried);
+    const selectExclude = blockedPool.exclude;
     try {
-      state.chosen = deps.selectAgentFn(deps.step, { exclude: state.tried, worktree: deps.worktree });
+      state.chosen = deps.selectAgentFn(deps.step, { exclude: selectExclude, worktree: deps.worktree });
     } catch (err) {
       // Only catch pool exhaustion errors from selectAgent.
       // Configuration errors (no eligible agents, no working launcher) must
@@ -474,12 +488,23 @@ async function selectAndGateAgent(state: StartAgentLoopState, deps: StartAgentLo
       // This restores the single-family escape hatch: when no different-family
       // reviewer is available, the implementer reviews its own work.
       const excludeList = deps.exclude instanceof Set ? [...deps.exclude] : deps.exclude;
-      const fallbackAgent = excludeList.find((a: string) => !state.launched.has(a));
+      // Last-resort escape hatch: a runtime-blocked family is never a valid
+      // fallback, so filter it out before picking one (SC 2/SC 3).
+      const fallbackCandidates = filterBlockedFallback(excludeList, blockedPool.blocked);
+      const fallbackAgent = fallbackCandidates.find((a: string) => !state.launched.has(a));
       if (fallbackAgent !== undefined) {
         state.chosen = fallbackAgent;
         return true;
       }
-      // No excluded agent available either; build clear exhaustion diagnostics (SC 3)
+      // No excluded agent available either. Only name the runtime blocklist when
+      // it covers every eligible family for the step and nothing launched or
+      // failed yet (SC 3); otherwise keep the generic exhaustion diagnostic,
+      // which carries the launched/agentErrors context (SC 3).
+      if (blockedPool.allEligibleBlocked && state.launched.size === 0 && state.agentErrors.size === 0) {
+        throw new Error(
+          `All eligible agents for step "${deps.step}" are blocked by the runtime blocklist: ${blockedPool.blockedEligible.join(', ')}. No agent started.`
+        );
+      }
       throw agentPoolExhaustedError(deps.step, state.launched, state.agentErrors);
     }
   } else if (await deps.isAgentBlockedFn(state.chosen)) {
@@ -981,6 +1006,7 @@ async function startAgent(step: string, opts: StartAgentOptions = { prompt: '' }
     sessionMarkerPort,
     log = fmt.log.plain,
     pinnedAgent = false,
+    runtimeBlockContextFn = defaultBlockContext,
   } = opts;
 
   // `exclude` seeds the tried-set so callers can reserve agents (e.g. exclude
@@ -1031,6 +1057,7 @@ async function startAgent(step: string, opts: StartAgentOptions = { prompt: '' }
     unrefChild: opts.unrefChild ?? false,
     allowUnsandboxedMutation: opts.allowUnsandboxedMutation ?? false,
     refuseFallbackWhenPinned,
+    runtimeBlockContext: runtimeBlockContextFn,
   };
 
   while (true) {

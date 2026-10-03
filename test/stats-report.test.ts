@@ -35,7 +35,8 @@ test('renderWeeklyStatsReport produces current and previous week sections', () =
     { date: '2026-06-13', repo: 'r', mission: 'm2', classification: 'ai_sdlc', implementer: 'codex', completedForTest: 'yes' },
   ];
   const report = renderWeeklyStatsReport(rows, { today: '2026-06-20' });
-  assert.ok(report.includes('Agent telemetry — current week') && report.includes('Agent telemetry — previous week'));
+  assert.ok(report.includes('Mission flow — current week') && report.includes('Mission flow — previous week'));
+  assert.doesNotMatch(report, /Agent telemetry/);
 });
 
 test('renderWeeklyStatsReport assigns performance cohorts by lifecycle completion, not telemetry date', () => {
@@ -63,7 +64,8 @@ test('renderRangeStatsReport filters by date range', () => {
     { date: '2026-05-25', repo: 'r', mission: 'm3', classification: 'user_value', implementer: 'a', completedForTest: 'yes' },
   ];
   const report = renderRangeStatsReport(rows, { from: '2026-05-10', to: '2026-05-20' });
-  assert.ok(report.includes('Agent telemetry missions'));
+  assert.ok(report.includes('Agent performance'));
+  assert.doesNotMatch(report, /Agent telemetry/);
 });
 
 test('renderRangeStatsReport rejects invalid ranges', () => {
@@ -87,16 +89,6 @@ test('renderMissionPhaseReport shows zeros for unknown mission', () => {
 test('buildWeeklyWindows returns two week windows', () => {
   const w = stats.buildWeeklyWindows(new Date('2026-06-20'));
   assert.ok(w.current && w.previous && w.current.start instanceof Date);
-});
-
-test('summarizeMissionWindow counts unique closed missions', () => {
-  const window = stats.createWindow('2026-06-20', 7);
-  const rows = [
-    { date: '2026-06-15', repo: 'r', mission: 'm1', classification: 'user_value', completedForTest: 'yes' },
-    { date: '2026-06-16', repo: 'r', mission: 'm2', classification: 'ai_sdlc', completedForTest: 'yes' },
-  ];
-  const s = stats.summarizeMissionWindow(rows, window, completedMissionKeys(rows));
-  assert.equal(s.total, 2);
 });
 
 test('formatAgentSpendCell formats metric families', () => {

@@ -271,6 +271,8 @@ function checkpointsFrom(records: MissionAggregateRecords): readonly CheckpointD
     }
     const goalCheck: GoalCheckRow[] = records.goalChecks
       .filter((row) => row.checkpoint_position === checkpoint.position)
+      // Partial rows (blank criterion or evidence) are omitted so one incomplete checkpoint cannot abort aggregate reads.
+      .filter((row) => row.criterion.trim() !== '' && row.evidence.trim() !== '')
       .map((row) => ({
         criterion: requiredText(row.criterion, 'goal criterion'),
         evidence: requiredText(row.evidence, 'goal evidence'),

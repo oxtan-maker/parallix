@@ -11,9 +11,9 @@
 //     version is refused before the domain decides' and 'SC2: a stale write
 //     raised by the store surfaces as a conflict'
 //   - done only after all integration work succeeds:
-//     test/mission-integration-service.test.ts (decideIntegration requires
+//     test/integration-mode-dispatch-contract.test.ts (decideIntegration requires
 //     fresh merged Git and passing verification facts)
-//   - resume/recovery: test/task-2397-integrate-active-approved-recovery.test.ts,
+//   - resume/recovery: test/integrate-lifecycle-recovery-and-closeout-contract.test.ts,
 //     test/task-2420-integrate-recovery-assigned-reviewer.test.ts,
 //     test/recover-command.test.ts
 

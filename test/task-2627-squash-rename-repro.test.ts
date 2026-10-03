@@ -46,6 +46,7 @@ async function land(
   root: string,
   beforeStagedTreeRead?: () => void,
   tierGuards: { ok: boolean, error?: string } = { ok: true },
+  failCleanup = false,
 ): Promise<void> {
   let stagedTreeRead = false;
   const { squashAndLand } = createSquashLanding({
@@ -54,6 +55,9 @@ async function land(
         if (!stagedTreeRead && args.includes('ls-files') && args.includes('-s')) {
           stagedTreeRead = true;
           beforeStagedTreeRead?.();
+        }
+        if (failCleanup && args.includes('reset') && args.includes('--merge')) {
+          return { status: 1, stdout: '', stderr: 'simulated cleanup failure' };
         }
         return gitRun(args);
       },
@@ -100,12 +104,17 @@ test('TASK-2627: landing aborts and names a staged payload path changed after th
   t.mock.method(fmt.log, 'fail', (message: string) => { failures.push(String(message)); });
   const { root, newPath } = fixture(false);
   try {
+    fs.writeFileSync(path.join(root, 'operator-note.txt'), 'retain exactly\n');
     await assert.rejects(
       () => land(root, () => { git(root, ['rm', '--cached', '--', newPath]); }),
       /abort/,
     );
     assert.ok(failures.some(message => message.includes(newPath)), `failure must name ${newPath}: ${JSON.stringify(failures)}`);
     assert.equal(git(root, ['rev-list', '--count', 'main']).trim(), '1', 'the mismatch aborts before a squash commit lands');
+    assert.equal(fs.readFileSync(path.join(root, 'operator-note.txt'), 'utf8'), 'retain exactly\n', 'unrelated local edit is preserved byte-for-byte');
+    assert.equal(git(root, ['status', '--porcelain']).trim(), '?? operator-note.txt', 'rejected squash leaves no abandoned tracked payload');
+    await land(root);
+    assert.equal(git(root, ['rev-list', '--count', 'main']).trim(), '2', 'the cleaned checkout permits retry');
   } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });
 
@@ -118,5 +127,21 @@ test('TASK-2627: a failed staged fast-tier guard aborts before the squash commit
     await assert.rejects(() => land(root, undefined, { ok: false, error: 'test-categories red' }), /abort/);
     assert.ok(failures.some(message => message.includes('test-categories red')), 'the fast-tier failure is reported');
     assert.equal(git(root, ['rev-list', '--count', 'main']).trim(), '1', 'the failed guard prevents a landed commit');
+    assert.equal(git(root, ['status', '--porcelain']).trim(), '', 'failed guard removes the abandoned squash payload');
+    await land(root);
+    assert.equal(git(root, ['rev-list', '--count', 'main']).trim(), '2', 'the cleaned checkout permits retry');
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});
+
+test('TASK-2630: rejected squash reports cleanup failure with retry guidance', async (t) => {
+  for (const method of ['debug', 'pass', 'plain', 'info'] as const) { t.mock.method(fmt.log, method, () => {}); }
+  const failures: string[] = [];
+  t.mock.method(fmt.log, 'fail', (message: string) => { failures.push(String(message)); });
+  const { root } = fixture(false);
+  try {
+    await assert.rejects(() => land(root, undefined, { ok: false, error: 'tier failed' }, true), /abort/);
+    assert.ok(failures.some(message => message.includes('Could not clean up the rejected squash payload')),
+      `cleanup failure gives actionable recovery: ${JSON.stringify(failures)}`);
+    assert.ok(failures.some(message => message.includes(root)), 'recovery identifies the affected checkout');
   } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });

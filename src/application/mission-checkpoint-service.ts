@@ -20,6 +20,7 @@ import {
   type MissionCommandRequest,
 } from './mission-command-support.js';
 import {
+  assertGoalCheckRows,
   isHandoffReadyCheckpoint,
   planCheckpoint,
   recordCheckpoint,
@@ -123,6 +124,9 @@ export class MissionCheckpointService {
         'validation',
         `checkpoint ${request.checkpoint.name} needs a CP-N name, at least one Goal Check row, and a next action`,
       );
+    }
+    try { assertGoalCheckRows(request.checkpoint.goalCheck); } catch (error) {
+      return failure('validation', error instanceof Error ? error.message : 'checkpoint evidence rejected');
     }
 
     const loaded = await loadForCommand<RecordCheckpointResult>(this._store, request);

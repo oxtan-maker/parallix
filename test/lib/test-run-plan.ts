@@ -217,12 +217,13 @@ export function buildTestRunPlan(options: TestRunPlanOptions): TestRunPlan {
         : (requestedTestFiles.length > 0 ? requestedTestFiles : tierFiles.unit);
   // The real-agent smoke test deliberately reads the operator's configured Pi
   // model/auth files and then copies them into its own disposable state root.
-  // The tui-spawn test, when explicitly requested as the sole file, also benefits
+  // The consolidated TUI process/PTY contract, when explicitly requested as the
+  // sole file, also benefits
   // from running without the bootstrap's temp HOME and curl shim.
   // Do not preload the full unit-test HOME isolation shim for these e2e runs.
   // TASK-2554: they still get the PARALLIX_HOME-only isolation preload so the
   // test process never resolves the operator's default database.
-  // When tui-spawn is batched with other files the bootstrap stays active — the
+  // When that contract is batched with other files the bootstrap stays active — the
   // 30 s timeout and marker unlink in the test handle the shim impact.
   const runsRealAgentSmoke = requestedTestFiles.some(
     file => path.basename(file) === 'e2e-real-agent-smoke.test.ts'
@@ -230,9 +231,9 @@ export function buildTestRunPlan(options: TestRunPlanOptions): TestRunPlan {
   const runsLifecycleE2E = requestedTestFiles.some(
     file => path.basename(file) === 'e2e-mission-lifecycle.test.ts'
   );
-  const runsTuiSpawnSolo = requestedTestFiles.length === 1 &&
-    requestedTestFiles.some(file => path.basename(file) === 'tui-spawn.test.ts');
-  const runsIntegrationE2E = runsRealAgentSmoke || runsLifecycleE2E || runsTuiSpawnSolo;
+  const runsTuiContractSolo = requestedTestFiles.length === 1 &&
+    requestedTestFiles.some(file => path.basename(file) === 'presentation-tui.integration.test.ts');
+  const runsIntegrationE2E = runsRealAgentSmoke || runsLifecycleE2E || runsTuiContractSolo;
   const e2eBootstrapFile = runsIntegrationE2E ? 'bootstrap-e2e-parallix-home.ts' : 'bootstrap-parallix-home.ts';
   const bootstrapArgs = [
     '--import', pathToFileURL(path.join(testRoot, e2eBootstrapFile)).href

@@ -4,6 +4,18 @@ import assert from 'node:assert/strict';
 
 import { withMissionDatabase } from './fixtures/review-state-db.js';
 import { reviewLoopBindings } from '../src/composition/review-persistence.js';
+import { openMigratedMissionStore } from './fixtures/mission-sqlite-store.js';
+import { fixtureMission } from './fixtures/mission-builders.js';
+import { MissionLifecycleService } from '../src/application/mission-lifecycle-service.js';
+import { agentFamily } from '../src/domain/agents.js';
+import { missionId } from '../src/domain/mission.js';
+import {
+  beginNextReviewRound, changeRevision, ConfiguredReviewerEligibility,
+  currentReviewRound, startReview,
+} from '../src/domain/review.js';
+import {
+  parseReviewFindings, recordApproval, recordImplementerResolution, recordRequestedChanges,
+} from '../src/adapters/review/review-round.js';
 import {
   reviewStateFile,
   readReviewState,
@@ -13,6 +25,83 @@ import {
 
 test('reviewStateFile returns null for unknown slug', () => {
   assert.equal(reviewStateFile('task-nonexistent-zzz'), null);
+});
+
+async function durableReviewFixture(slug: string) {
+  const reviewer = agentFamily('codex');
+  const implementer = agentFamily('claude');
+  const eligibility = ConfiguredReviewerEligibility.fromReviewStep({ eligible: [reviewer], strategy: 'random' });
+  const review = startReview(
+    { change: { kind: 'local-branch', sourceBranch: `mission/${slug}`, targetBranch: 'main' }, revision: changeRevision('rev-1') },
+    reviewer, implementer, '2026-08-21T07:00:00.000Z', eligibility,
+  );
+  const fixture = await openMigratedMissionStore([fixtureMission(slug, { status: 'review', assignee: implementer, review })]);
+  return { ...fixture, reviewer, implementer, eligibility, lifecycle: new MissionLifecycleService(fixture.store) };
+}
+
+test('approval and its round idempotency key survive SQLite reopen (TASK-2398, TASK-2622.08)', async () => {
+  const slug = 'durable-review-approval';
+  const fixture = await durableReviewFixture(slug);
+  try {
+    const result = await recordApproval(slug, {
+      comment: 'LGTM', decidedAt: '2026-08-21T08:00:00.000Z', source: { kind: 'local' },
+    }, { missionStore: fixture.store, lifecycleService: fixture.lifecycle });
+    assert.deepEqual(result, { outcome: 'recorded' });
+    await fixture.database.close();
+    await fixture.database.open({ path: `${fixture.root}/parallix.db` });
+    const loaded = await fixture.store.load(missionId(slug));
+    assert.equal(loaded.kind, 'found');
+    if (loaded.kind !== 'found') throw new Error('Persisted approval is missing');
+    assert.equal(loaded.mission.status, 'integration');
+    assert.equal(currentReviewRound(loaded.mission.review!).decision?.kind, 'approved');
+    assert.equal(currentReviewRound(loaded.mission.review!).decision?.decidedAt, '2026-08-21T08:00:00.000Z');
+    const rows = await fixture.database.query<{ idempotency_key: string }>(
+      'SELECT idempotency_key FROM board_lane_events WHERE mission_id = ?', [slug],
+    );
+    assert.ok(rows.some(row => row.idempotency_key === `approve:${slug}:round-1`));
+    const replay = await recordApproval(slug, {
+      comment: 'replay', decidedAt: '2026-08-21T09:00:00.000Z',
+    }, { missionStore: fixture.store, lifecycleService: fixture.lifecycle });
+    assert.equal(replay.outcome, 'unchanged');
+    assert.equal((await fixture.laneEvents(slug)).length, 1, 'replay cannot duplicate the persisted lane event');
+  } finally {
+    await fixture.close();
+  }
+});
+
+test('requested changes and resolution persist into a new round after SQLite reopen (TASK-2478, TASK-2622.08)', async () => {
+  const slug = 'durable-review-rounds';
+  const fixture = await durableReviewFixture(slug);
+  try {
+    assert.deepEqual(await recordRequestedChanges(slug, {
+      findings: parseReviewFindings('## F1: first\n## F2: second'), comment: null,
+      decidedAt: '2026-08-21T08:00:00.000Z',
+    }, { missionStore: fixture.store, lifecycleService: fixture.lifecycle }), { outcome: 'recorded' });
+    assert.deepEqual(await recordImplementerResolution(slug, {
+      itemDispositions: [{ kind: 'pushed_back', findingId: 'F2' as never }],
+      evidence: 'CHANGES_MADE', resultingRevision: 'rev-2', respondedAt: '2026-08-21T09:00:00.000Z',
+    }, { missionStore: fixture.store }), { outcome: 'recorded' });
+    const resolved = await fixture.store.load(missionId(slug));
+    assert.equal(resolved.kind, 'found');
+    if (resolved.kind !== 'found') throw new Error('Persisted resolution is missing');
+    const next = beginNextReviewRound(resolved.mission.review!, fixture.reviewer, fixture.implementer,
+      '2026-08-21T10:00:00.000Z', fixture.eligibility);
+    await fixture.store.save({ ...resolved.mission, review: next }, resolved.version);
+    await fixture.database.close();
+    await fixture.database.open({ path: `${fixture.root}/parallix.db` });
+    const loaded = await fixture.store.load(missionId(slug));
+    assert.equal(loaded.kind, 'found');
+    if (loaded.kind !== 'found') throw new Error('Persisted next round is missing');
+    const [first, second] = loaded.mission.review!.rounds;
+    assert.equal(first.decision?.kind, 'changes-requested');
+    assert.equal(first.decision?.decidedAt, '2026-08-21T08:00:00.000Z');
+    assert.deepEqual(first.response?.resolutions.map(resolution => resolution.kind), ['fixed', 'disputed']);
+    assert.equal(second.number, 2);
+    assert.equal(second.subject.revision, changeRevision('rev-2'));
+    assert.equal(second.decision, null);
+  } finally {
+    await fixture.close();
+  }
 });
 
 test('readReviewState returns null when the mission has no review', async () => {

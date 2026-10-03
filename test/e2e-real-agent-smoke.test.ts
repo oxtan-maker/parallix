@@ -508,7 +508,7 @@ function setupRepository({ slug, title, agent = 'custom', runner = 'opencode' })
   // with no dependencies installed. Which area a gate runs is not
   // checked here — the pre-review gate legitimately falls back to the
   // configured defaultArea when the changed files name no area, and the
-  // push-gate area is covered by test/task-2561-repro.test.ts (b).
+  // push-gate area is covered by test/integrate-gate-rebound-and-repair-contract.test.ts (task-2561 (b)).
   fs.mkdirSync(path.join(repoRoot, 'scripts'), { recursive: true });
   const verifyStub = path.join(repoRoot, 'scripts', 'verify-local.sh');
   fs.writeFileSync(verifyStub, [

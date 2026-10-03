@@ -1,0 +1,863 @@
+{
+  "baselineRevision": "b7b304407",
+  "method": "Sequential isolated native coverage, repository merge/type-only/comment normalization; pinned original source/line inventory. Missing zero-hit erased TypeScript lines remain in the comparable denominator at zero. No executable source is excluded and no hit is synthesized.",
+  "rawInventory": {
+    "sourceFiles": {
+      "baseline": 334,
+      "candidate": 334
+    },
+    "executableLines": {
+      "baseline": 47903,
+      "candidate": 47823
+    },
+    "coveredLines": {
+      "baseline": 16165,
+      "candidate": 16165
+    },
+    "lineRatePercent": {
+      "baseline": 33.75,
+      "candidate": 33.8
+    },
+    "changedDenominator": [
+      "src/adapters/review/review-state.ts"
+    ],
+    "lostCovered": []
+  },
+  "inventoryDifference": [
+    {
+      "source": "src/adapters/review/review-state.ts",
+      "line": 32,
+      "hits": 0,
+      "classification": "erased TypeScript tokens only"
+    },
+    {
+      "source": "src/adapters/review/review-state.ts",
+      "line": 33,
+      "hits": 0,
+      "classification": "erased TypeScript tokens only"
+    },
+    {
+      "source": "src/adapters/review/review-state.ts",
+      "line": 34,
+      "hits": 0,
+      "classification": "erased TypeScript tokens only"
+    },
+    {
+      "source": "src/adapters/review/review-state.ts",
+      "line": 35,
+      "hits": 0,
+      "classification": "erased TypeScript tokens only"
+    },
+    {
+      "source": "src/adapters/review/review-state.ts",
+      "line": 36,
+      "hits": 0,
+      "classification": "erased TypeScript tokens only"
+    },
+    {
+      "source": "src/adapters/review/review-state.ts",
+      "line": 37,
+      "hits": 0,
+      "classification": "erased TypeScript tokens only"
+    },
+    {
+      "source": "src/adapters/review/review-state.ts",
+      "line": 38,
+      "hits": 0,
+      "classification": "erased TypeScript tokens only"
+    },
+    {
+      "source": "src/adapters/review/review-state.ts",
+      "line": 39,
+      "hits": 0,
+      "classification": "erased TypeScript tokens only"
+    },
+    {
+      "source": "src/adapters/review/review-state.ts",
+      "line": 41,
+      "hits": 0,
+      "classification": "erased TypeScript tokens only"
+    },
+    {
+      "source": "src/adapters/review/review-state.ts",
+      "line": 42,
+      "hits": 0,
+      "classification": "erased TypeScript tokens only"
+    },
+    {
+      "source": "src/adapters/review/review-state.ts",
+      "line": 43,
+      "hits": 0,
+      "classification": "erased TypeScript tokens only"
+    },
+    {
+      "source": "src/adapters/review/review-state.ts",
+      "line": 44,
+      "hits": 0,
+      "classification": "erased TypeScript tokens only"
+    },
+    {
+      "source": "src/adapters/review/review-state.ts",
+      "line": 45,
+      "hits": 0,
+      "classification": "erased TypeScript tokens only"
+    },
+    {
+      "source": "src/adapters/review/review-state.ts",
+      "line": 46,
+      "hits": 0,
+      "classification": "erased TypeScript tokens only"
+    },
+    {
+      "source": "src/adapters/review/review-state.ts",
+      "line": 47,
+      "hits": 0,
+      "classification": "erased TypeScript tokens only"
+    },
+    {
+      "source": "src/adapters/review/review-state.ts",
+      "line": 50,
+      "hits": 0,
+      "classification": "erased TypeScript tokens only"
+    },
+    {
+      "source": "src/adapters/review/review-state.ts",
+      "line": 51,
+      "hits": 0,
+      "classification": "erased TypeScript tokens only"
+    },
+    {
+      "source": "src/adapters/review/review-state.ts",
+      "line": 52,
+      "hits": 0,
+      "classification": "erased TypeScript tokens only"
+    },
+    {
+      "source": "src/adapters/review/review-state.ts",
+      "line": 53,
+      "hits": 0,
+      "classification": "erased TypeScript tokens only"
+    },
+    {
+      "source": "src/adapters/review/review-state.ts",
+      "line": 54,
+      "hits": 0,
+      "classification": "erased TypeScript tokens only"
+    },
+    {
+      "source": "src/adapters/review/review-state.ts",
+      "line": 156,
+      "hits": 0,
+      "classification": "erased TypeScript tokens only"
+    },
+    {
+      "source": "src/adapters/review/review-state.ts",
+      "line": 157,
+      "hits": 0,
+      "classification": "erased TypeScript tokens only"
+    },
+    {
+      "source": "src/adapters/review/review-state.ts",
+      "line": 158,
+      "hits": 0,
+      "classification": "erased TypeScript tokens only"
+    },
+    {
+      "source": "src/adapters/review/review-state.ts",
+      "line": 159,
+      "hits": 0,
+      "classification": "erased TypeScript tokens only"
+    },
+    {
+      "source": "src/adapters/review/review-state.ts",
+      "line": 160,
+      "hits": 0,
+      "classification": "erased TypeScript tokens only"
+    },
+    {
+      "source": "src/adapters/review/review-state.ts",
+      "line": 161,
+      "hits": 0,
+      "classification": "erased TypeScript tokens only"
+    },
+    {
+      "source": "src/adapters/review/review-state.ts",
+      "line": 162,
+      "hits": 0,
+      "classification": "erased TypeScript tokens only"
+    },
+    {
+      "source": "src/adapters/review/review-state.ts",
+      "line": 208,
+      "hits": 0,
+      "classification": "erased TypeScript tokens only"
+    },
+    {
+      "source": "src/adapters/review/review-state.ts",
+      "line": 209,
+      "hits": 0,
+      "classification": "erased TypeScript tokens only"
+    },
+    {
+      "source": "src/adapters/review/review-state.ts",
+      "line": 210,
+      "hits": 0,
+      "classification": "erased TypeScript tokens only"
+    },
+    {
+      "source": "src/adapters/review/review-state.ts",
+      "line": 211,
+      "hits": 0,
+      "classification": "erased TypeScript tokens only"
+    },
+    {
+      "source": "src/adapters/review/review-state.ts",
+      "line": 212,
+      "hits": 0,
+      "classification": "erased TypeScript tokens only"
+    },
+    {
+      "source": "src/adapters/review/review-state.ts",
+      "line": 213,
+      "hits": 0,
+      "classification": "erased TypeScript tokens only"
+    },
+    {
+      "source": "src/adapters/review/review-state.ts",
+      "line": 230,
+      "hits": 0,
+      "classification": "erased TypeScript tokens only"
+    },
+    {
+      "source": "src/adapters/review/review-state.ts",
+      "line": 231,
+      "hits": 0,
+      "classification": "erased TypeScript tokens only"
+    },
+    {
+      "source": "src/adapters/review/review-state.ts",
+      "line": 232,
+      "hits": 0,
+      "classification": "erased TypeScript tokens only"
+    },
+    {
+      "source": "src/adapters/review/review-state.ts",
+      "line": 233,
+      "hits": 0,
+      "classification": "erased TypeScript tokens only"
+    },
+    {
+      "source": "src/adapters/review/review-state.ts",
+      "line": 234,
+      "hits": 0,
+      "classification": "erased TypeScript tokens only"
+    },
+    {
+      "source": "src/adapters/review/review-state.ts",
+      "line": 235,
+      "hits": 0,
+      "classification": "erased TypeScript tokens only"
+    },
+    {
+      "source": "src/adapters/review/review-state.ts",
+      "line": 236,
+      "hits": 0,
+      "classification": "erased TypeScript tokens only"
+    },
+    {
+      "source": "src/adapters/review/review-state.ts",
+      "line": 237,
+      "hits": 0,
+      "classification": "erased TypeScript tokens only"
+    },
+    {
+      "source": "src/adapters/review/review-state.ts",
+      "line": 320,
+      "hits": 0,
+      "classification": "erased TypeScript tokens only"
+    },
+    {
+      "source": "src/adapters/review/review-state.ts",
+      "line": 321,
+      "hits": 0,
+      "classification": "erased TypeScript tokens only"
+    },
+    {
+      "source": "src/adapters/review/review-state.ts",
+      "line": 322,
+      "hits": 0,
+      "classification": "erased TypeScript tokens only"
+    },
+    {
+      "source": "src/adapters/review/review-state.ts",
+      "line": 323,
+      "hits": 0,
+      "classification": "erased TypeScript tokens only"
+    },
+    {
+      "source": "src/adapters/review/review-state.ts",
+      "line": 324,
+      "hits": 0,
+      "classification": "erased TypeScript tokens only"
+    },
+    {
+      "source": "src/adapters/review/review-state.ts",
+      "line": 325,
+      "hits": 0,
+      "classification": "erased TypeScript tokens only"
+    },
+    {
+      "source": "src/adapters/review/review-state.ts",
+      "line": 326,
+      "hits": 0,
+      "classification": "erased TypeScript tokens only"
+    },
+    {
+      "source": "src/adapters/review/review-state.ts",
+      "line": 328,
+      "hits": 0,
+      "classification": "erased TypeScript tokens only"
+    },
+    {
+      "source": "src/adapters/review/review-state.ts",
+      "line": 329,
+      "hits": 0,
+      "classification": "erased TypeScript tokens only"
+    },
+    {
+      "source": "src/adapters/review/review-state.ts",
+      "line": 331,
+      "hits": 0,
+      "classification": "erased TypeScript tokens only"
+    },
+    {
+      "source": "src/adapters/review/review-state.ts",
+      "line": 332,
+      "hits": 0,
+      "classification": "erased TypeScript tokens only"
+    },
+    {
+      "source": "src/adapters/review/review-state.ts",
+      "line": 333,
+      "hits": 0,
+      "classification": "erased TypeScript tokens only"
+    },
+    {
+      "source": "src/adapters/review/review-state.ts",
+      "line": 334,
+      "hits": 0,
+      "classification": "erased TypeScript tokens only"
+    },
+    {
+      "source": "src/adapters/review/review-state.ts",
+      "line": 655,
+      "hits": 0,
+      "classification": "erased TypeScript tokens only"
+    },
+    {
+      "source": "src/adapters/review/review-state.ts",
+      "line": 656,
+      "hits": 0,
+      "classification": "erased TypeScript tokens only"
+    },
+    {
+      "source": "src/adapters/review/review-state.ts",
+      "line": 657,
+      "hits": 0,
+      "classification": "erased TypeScript tokens only"
+    },
+    {
+      "source": "src/adapters/review/review-state.ts",
+      "line": 658,
+      "hits": 0,
+      "classification": "erased TypeScript tokens only"
+    },
+    {
+      "source": "src/adapters/review/review-state.ts",
+      "line": 659,
+      "hits": 0,
+      "classification": "erased TypeScript tokens only"
+    },
+    {
+      "source": "src/adapters/review/review-state.ts",
+      "line": 660,
+      "hits": 0,
+      "classification": "erased TypeScript tokens only"
+    },
+    {
+      "source": "src/adapters/review/review-state.ts",
+      "line": 661,
+      "hits": 0,
+      "classification": "erased TypeScript tokens only"
+    },
+    {
+      "source": "src/adapters/review/review-state.ts",
+      "line": 662,
+      "hits": 0,
+      "classification": "erased TypeScript tokens only"
+    },
+    {
+      "source": "src/adapters/review/review-state.ts",
+      "line": 670,
+      "hits": 0,
+      "classification": "erased TypeScript tokens only"
+    },
+    {
+      "source": "src/adapters/review/review-state.ts",
+      "line": 671,
+      "hits": 0,
+      "classification": "erased TypeScript tokens only"
+    },
+    {
+      "source": "src/adapters/review/review-state.ts",
+      "line": 748,
+      "hits": 0,
+      "classification": "erased TypeScript tokens only"
+    },
+    {
+      "source": "src/adapters/review/review-state.ts",
+      "line": 749,
+      "hits": 0,
+      "classification": "erased TypeScript tokens only"
+    },
+    {
+      "source": "src/adapters/review/review-state.ts",
+      "line": 750,
+      "hits": 0,
+      "classification": "erased TypeScript tokens only"
+    },
+    {
+      "source": "src/adapters/review/review-state.ts",
+      "line": 751,
+      "hits": 0,
+      "classification": "erased TypeScript tokens only"
+    },
+    {
+      "source": "src/adapters/review/review-state.ts",
+      "line": 752,
+      "hits": 0,
+      "classification": "erased TypeScript tokens only"
+    },
+    {
+      "source": "src/adapters/review/review-state.ts",
+      "line": 753,
+      "hits": 0,
+      "classification": "erased TypeScript tokens only"
+    },
+    {
+      "source": "src/adapters/review/review-state.ts",
+      "line": 754,
+      "hits": 0,
+      "classification": "erased TypeScript tokens only"
+    },
+    {
+      "source": "src/adapters/review/review-state.ts",
+      "line": 755,
+      "hits": 0,
+      "classification": "erased TypeScript tokens only"
+    },
+    {
+      "source": "src/adapters/review/review-state.ts",
+      "line": 758,
+      "hits": 0,
+      "classification": "erased TypeScript tokens only"
+    },
+    {
+      "source": "src/adapters/review/review-state.ts",
+      "line": 759,
+      "hits": 0,
+      "classification": "erased TypeScript tokens only"
+    },
+    {
+      "source": "src/adapters/review/review-state.ts",
+      "line": 760,
+      "hits": 0,
+      "classification": "erased TypeScript tokens only"
+    },
+    {
+      "source": "src/adapters/review/review-state.ts",
+      "line": 761,
+      "hits": 0,
+      "classification": "erased TypeScript tokens only"
+    },
+    {
+      "source": "src/adapters/review/review-state.ts",
+      "line": 762,
+      "hits": 0,
+      "classification": "erased TypeScript tokens only"
+    },
+    {
+      "source": "src/adapters/review/review-state.ts",
+      "line": 763,
+      "hits": 0,
+      "classification": "erased TypeScript tokens only"
+    },
+    {
+      "source": "src/adapters/review/review-state.ts",
+      "line": 764,
+      "hits": 0,
+      "classification": "erased TypeScript tokens only"
+    },
+    {
+      "source": "src/adapters/review/review-state.ts",
+      "line": 765,
+      "hits": 0,
+      "classification": "erased TypeScript tokens only"
+    }
+  ],
+  "comparable": {
+    "sourceFiles": 334,
+    "denominator": 47903,
+    "beforeCovered": 16165,
+    "afterCovered": 16165,
+    "beforeRate": 0.3374527691376323,
+    "afterRate": 0.3374527691376323,
+    "lostCovered": []
+  },
+  "sourceHashes": {
+    "src/adapters/agents/agent-block-authority.ts": "815bdfceed77555642ed16d812d7936c7caff590f61c33ea8cd669fd2032e81b",
+    "src/adapters/agents/agent-config.ts": "a09166cb52d7f5c3dac19893e683ab1d20086dd75c8edfa9a85df33fd0de4076",
+    "src/adapters/agents/agent-selection-snapshot.ts": "ce0bc197b39a9d67a30aca0f55a17b777a8caaaa53478daf4d465a9e8b9e52ef",
+    "src/adapters/agents/agent-stream-events.ts": "d888191f880fe561cfab560ad738c03b68988cb44496751c863ab9dbabc5f570",
+    "src/adapters/agents/agent-stream-view.ts": "e3c0550e2a7dde27031da8df4b5870f08d641b0a2e2f4b0e38eea03f06879e5f",
+    "src/adapters/agents/agents.ts": "a3c8d203e9efeadea093b06d51030027f84a5bb9c090ac5822aefe7796d98e54",
+    "src/adapters/agents/claude-stream-render.ts": "efd5de718adca43b288e6f4e99b852342bdf37eec06c2c6f0fd352135fde8459",
+    "src/adapters/agents/claude-stream-view.ts": "6188dded2b73ecf8820dd4e17f0d0495aa7d23e0a5124b64539c0a5a46ec020a",
+    "src/adapters/agents/claude-telemetry.ts": "52871ea057b99e67c60ccb133cccbedc56f17570350ebfe1b8c7c17d79ee47d5",
+    "src/adapters/agents/claude.ts": "21ffbd204acd175cb6a863371cc64585d94a865ffe36ba67dc888992ebe69a5b",
+    "src/adapters/agents/codex-telemetry.ts": "7d0fa06eb1babcad09be2bb4516b7177764505baf41b536ebf85d165415a8fec",
+    "src/adapters/agents/codex.ts": "22b45c3534f3f80a9f1d47b7b1a12ffa8916eee575bf6792dda66c85db46b33f",
+    "src/adapters/agents/custom-capacity.ts": "7ce8c48f286fcc1aaf10ace5aeaa16347022dd621e98fabee90549316778b5ff",
+    "src/adapters/agents/first-run-config.ts": "6d0579909ab64e439ac673de30e1777a41e6bf1fc14ccf0f7a5c145242cbddde",
+    "src/adapters/agents/known-agent-families.ts": "6dae92901d77ee58d4a5a4d958ab217f94bb6ecb936d5c5636c072aee88dee9e",
+    "src/adapters/agents/launcher-availability.ts": "7558b2aacda673e91f8fdd2751f2a47d8dd23a93765557435a278e758a749114",
+    "src/adapters/agents/launcher-selection.ts": "e63a7caf823f736ed51963015792aa880c914bc12ae2b39690f057e17607d06b",
+    "src/adapters/agents/opencode-export.ts": "b6de227cd12c3104e25bbe4f0e332ee549454058bf3475a772f89c38676e6431",
+    "src/adapters/agents/opencode-telemetry.ts": "d4d2af0c07143ad1d8974cdda9735081da38e8d469f0d5d2e81f0c51c4d5ed74",
+    "src/adapters/agents/opencode.ts": "ac993c5fbc590d77dd96aeb18b1b11437a352e32d970fef7cdc585123e5f0f36",
+    "src/adapters/agents/pi-stream-render.ts": "210f4a34a0e245b335312d819c696e0ffa9d75460460f738b3b95750f1c0cd07",
+    "src/adapters/agents/pi.ts": "5ebaff1f866ea86f7e1c06950fa5235b4a4f2e12010f9876ec9ef12bb5728dca",
+    "src/adapters/agents/qwen-telemetry.ts": "29470ca7e7ff8501de3a9dfa5102155e79a95d69c22b51c9ba1891c18e39355e",
+    "src/adapters/agents/qwen.ts": "887d4839035e9be3c518ed94f8f62903ae768bbbf6832e93ca803dae508bea2c",
+    "src/adapters/agents/running-sessions.ts": "e3004c34b7083b60e5173fa8ad5d404ba48deb0b138696d475397efa693b5333",
+    "src/adapters/agents/runtime-matrix.ts": "db740309a99bc1852b3e1e7434ad6edb3ef1ec36f9a3655937710589fe1fe504",
+    "src/adapters/agents/stage-telemetry.ts": "9f68c1090433883c791748fd797a3475d3505c54a1c65b28dce6ff93d7d7bbb3",
+    "src/adapters/agents/subagent-limit.ts": "13f1f675e1d37d0fab51cc084a072f222214edba59004f82ee3d32fa3b549405",
+    "src/adapters/agents/vibe-telemetry.ts": "dce5ef568c43ec7bf5559d17bac08e5f381cd9470b8ea1d9c898fc45687d0adf",
+    "src/adapters/agents/vibe.ts": "de50d8644874fe77963c9b3e6047e0a9cbec543590e73cc2e6742316c73621fd",
+    "src/adapters/architecture/boundary-guards.ts": "e045e995b9713be0187b050e68cfc9e000147f3e15a8113e026455e49d81a1c9",
+    "src/adapters/assets/asset-store.ts": "1e2b5fd029bcfb6776a4276b066757817d68a827df6efa1fcbd515c281fd4f28",
+    "src/adapters/assets/runtime-assets.ts": "14cc4e2426295a56859f7b906044a4e5d832cc7d6de217ded9d51e0d514b1153",
+    "src/adapters/backlog/backlog-input-reader.ts": "031385a3698bacec7b4a22e4bc8ea50e59ade1b9e85387519d60cf0e1eae075a",
+    "src/adapters/backlog/backlog.ts": "5304ea31dc46bf7db761953adaabcccd93056025a9e69ffcbbb06f49de96f781",
+    "src/adapters/backlog/checkpoint-document.ts": "9ad0be2a8e9e575d2d0e1aa9a02855109ba6e171b7b8ceb90b8bc938a81906c4",
+    "src/adapters/backlog/concrete-agent-read-adapter.ts": "27e1fb3a768b36a496e7532100e47e1a847cd60d1bc3d5e70bc2be2242789398",
+    "src/adapters/backlog/concrete-current-work-read-adapter.ts": "83f7db041ec53a266fec4f11c26e42970a00b13d87f99381b38643656d00b4ae",
+    "src/adapters/backlog/concrete-gate-read-adapter.ts": "8d7f0eb8adaa71ac752332e42a310974927aa61d305fea1acba9c2b1f75ee54e",
+    "src/adapters/backlog/concrete-git-read-adapter.ts": "ae7a08250797377798ab4890882d9ebc0e397562c18b16891ebef8ac488148fd",
+    "src/adapters/backlog/concrete-mission-read-adapter.ts": "b949ea5b44d262a169942102995d08bd607e9206ae3b3380eee609327c4af7bb",
+    "src/adapters/backlog/concrete-operation-log-read-adapter.ts": "0c49407380a0e57060071247a530e0531d3175cdcd5b898ab001f380873fc9e2",
+    "src/adapters/backlog/concrete-review-read-adapter.ts": "60c76e93d85bdabdd0525bbc46e010fb4f674ba8a91209dd36d0a291e7fe6f33",
+    "src/adapters/backlog/legacy-mission-audit.ts": "c030c91320c6033fa097567e27553dcb195b63e37cb635afbcd2174fe8f535b7",
+    "src/adapters/backlog/legacy-mission-content.ts": "2ca2e72a20dbca89b3ef0ca7073cd6b57d1cc42268143e7085d4c1e3e1a8c94a",
+    "src/adapters/backlog/legacy-mission-document.ts": "53f927292620e21f5bcae21e1264f96d3ff3a60329dc0008c0ab331ab66df4b0",
+    "src/adapters/backlog/legacy-mission-import.ts": "8772b2b26e79c06923b6f56c6416189cacd944e922dde1e35e40cf101302f11d",
+    "src/adapters/backlog/legacy-task-content.ts": "bda7f58fd6d16be67786db1e6f43497b60e561066a7ca05d0766f7498d83c105",
+    "src/adapters/backlog/mission-materialization.ts": "835f8a884d77c3821f10ac2957f7d0b5a641fd485f65e3bdfd6f535b8466f0d7",
+    "src/adapters/backlog/task-file-io.ts": "55ef1d31764144c88470cb254ec92e1fb6121072473f86b01f066fe95805e2ea",
+    "src/adapters/backlog/task-metadata.ts": "f64d9bbbca93cefe5d8fe21b5ffb9a038e32a619f449965a7cc37c7706b2466b",
+    "src/adapters/backlog/task-transitions.ts": "4f8d800ff608dac36d945800cf7c7638853cc0da5555dd948a8852c42e418955",
+    "src/adapters/cli/commands/active.ts": "a0a0acf3363e77d0116981ca691d3e746b8d078ea2471912a81a76585fc66ede",
+    "src/adapters/cli/commands/cohort-report.ts": "56d9c275b5e09fbbbe0a0fb01e45a0d824680700c4fe6f71d80f786707cf330e",
+    "src/adapters/cli/commands/config.ts": "1e6b8cac782385c49afc6307ef9036d5599efdbb8e076424622dc1833a120596",
+    "src/adapters/cli/commands/diff.ts": "08f652036e1f74d67aa06183fa3f5c54776b0072f8f6e0dcdc490c1ca5addc31",
+    "src/adapters/cli/commands/draft-conflicts.ts": "02b30757edb8461733002e7229fc66602dae33d9468b126bce42dc532bb1d50d",
+    "src/adapters/cli/commands/draft-prompts.ts": "9da59c48ff1ff64187179c0a6bf35cc271805835dad41dbea1e24d87e1f8b45c",
+    "src/adapters/cli/commands/draft-setup.ts": "d2e5a6bda8bbbbd1c399d2f2d7c01629529ada1ba1a7c62811581f052fe25de8",
+    "src/adapters/cli/commands/draft-stats.ts": "c6ef192774ebdc42a92dd0ec6e7d2eba97e2850c07e0fbe498c8c7760756d24d",
+    "src/adapters/cli/commands/draft.ts": "e91556b2f338ea479146c4778d50183d90ce40e512d9b23f3667b3b244f9b4c1",
+    "src/adapters/cli/commands/handoff.ts": "31ad8b100bcd6df5f2f5c7c22c42c7d60958f5c13b4cbf3d810d0d71ba8e52ce",
+    "src/adapters/cli/commands/integrate-conflict.ts": "3291485b33dcc8ab9f792085d01d4f8c70cb98d91c78be29aa3c3fee7b4eacc3",
+    "src/adapters/cli/commands/integrate-gate-rebound.ts": "51d2b5421091d7296ab30c8d385f7c85ab08b6c140e86fafac2042caa11589c1",
+    "src/adapters/cli/commands/integrate-gates.ts": "4a48c1755aeb286c7d9cfe270b5d3f8e2ad7dfe154920c6db906018b4b0036f4",
+    "src/adapters/cli/commands/integrate-post.ts": "0f2fdd82a0150f76f42f69a49dfc263f409dbf4a0107f503521e27bbfb8a6b02",
+    "src/adapters/cli/commands/integrate.ts": "6ffa989d8369cb859273b6b56b8133de9dd8246a4e8324c250cedf5cb21c6225",
+    "src/adapters/cli/commands/landed-squash.ts": "facb9768c68358399c2ff96f554920dd7d5cb5003f65698ac6c0d5d17b5642fe",
+    "src/adapters/cli/commands/mission-classification.ts": "e302b540ce7e21b409b67ccd7e28533451e6ace8106a4fc18ffa018d2b9cd992",
+    "src/adapters/cli/commands/rebase.ts": "59e68a814e3751bdd02fab292e306d7b032bbb38d67fd0f8cfdd3b08cd770dd6",
+    "src/adapters/cli/commands/recover-landed-intake.ts": "7f3c3b590fd85772409590e5f7ffa2d748f3332f52b35ba074cca1b293e22c85",
+    "src/adapters/cli/commands/repair-handoff.ts": "24d577f716dff5a22b3fe6fade072369cc1b874d6d14a42daec2e785f0908d32",
+    "src/adapters/cli/commands/resolve-conflict.ts": "ebe1b76fa4000600fcc8c06b6862e17ca6c0687ac67236ad165bc96a8dc3f884",
+    "src/adapters/cli/commands/review.ts": "2055875069acb1ec7e912482849ac862b0a8ce34d759ddc72492607278d5f662",
+    "src/adapters/cli/commands/setup-review.ts": "92986f7d7bf073091f4b1912e19c653be86f92306184be3e7a348ce4e4028bae",
+    "src/adapters/cli/commands/stats-backfill.ts": "433e6916cfb1953c86c324da336541686fdf67ad4fbfbc25d6f56b7f4259192d",
+    "src/adapters/cli/commands/stats-cohorts.ts": "bf6689a8c6d45adc0f339b2146e905f69264fb7685af0296ad52d9d6cd498921",
+    "src/adapters/cli/commands/stats-normalization.ts": "28a34b2d8407fca60b7d95c4af54170caa214340820a7e8610fdd91e82a3ee3c",
+    "src/adapters/cli/commands/stats-report-rendering.ts": "bd29ffef82456ff275c01992c27b0c79bb6bf3b18f4b80d12aaf223157df62cf",
+    "src/adapters/cli/commands/stats-report.ts": "2a002d2793fb7f5511116cd4b7f912b075680c9fa183d105fed8565fc15a8446",
+    "src/adapters/cli/commands/stats.ts": "ecc0f8376290493d3acdd78f0f4eedd3e7cb4119c66697f74047e78df71fb22a",
+    "src/adapters/cli/commands/status-adapter.ts": "2c7ab04940d56e1a53bd56654d602c3650647d089bf0db6ef8ade77f53fcce44",
+    "src/adapters/cli/commands/status.ts": "4ba43b085a0dc2f5d6dc730874a30acb2d839bee0f6fe21157909ba17712a4f0",
+    "src/adapters/cli/startup-preflight.ts": "30bd2c58e71c7e20eac37bae57e25c160f54628036053e415b60e282ff363bf8",
+    "src/adapters/config/gate-dashboard.ts": "cda1ec32de6024b4d9693373b7d37e0947519279144977bf745cfcaea792ccfd",
+    "src/adapters/config/product-config.ts": "d71d4831cfd3b63e85dec3e201f123552ccd2f65255e2925ec67a3e019bc520a",
+    "src/adapters/config/repository-gates.ts": "2bdf1469a7f7bb57f310ef8244865492e14fcfbee410c3d2fe3e027b9e064c12",
+    "src/adapters/config/state-homes.ts": "c352192b33ffc55984083c4146e63c244561e8b6d23f3fefa87d03457e329aab",
+    "src/adapters/config/state-map.ts": "9a265bf3dbea9fe383f06c46b435f674557f36f7066e606a43d3f34770bba4a8",
+    "src/adapters/filesystem/gitignore.ts": "886020f68dc10537d15a9b1eeee80a27509679b36e802494333bab46a6ecfe64",
+    "src/adapters/filesystem/mission-graphify.ts": "39c8749bf738842c9c054f8355d8c46713b903de615115a5438f32dd0810a658",
+    "src/adapters/filesystem/mission-paths.ts": "3dac782bc47ed23807f1ec601b4f4c42129c974e9f141eb6a6ed5a0e62f0d649",
+    "src/adapters/filesystem/mission-utils.ts": "76974e90d2733218649fa7b96c4658ad8101b9957cb0080e24c11d7ef45136bd",
+    "src/adapters/filesystem/package-root.ts": "72e087dc46dd2a3a006507caada5fd60ccecc4c37dd36a84666d11dbf0d2b14f",
+    "src/adapters/filesystem/recovery-claim.ts": "e6f68b7fd43d6c24095385e416f7c431dce3f803c841d9e592b74fde3739e265",
+    "src/adapters/forgejo/forgejo-api.ts": "95952d4d5a513bb3a20afbc453a7857bb1d59dbdd79189d425a40862ad66f7a8",
+    "src/adapters/forgejo/forgejo-auth.ts": "5a41ad93571de14c02bdb60c28759da8fe9b31fd2aba5a97bb686d2aa6e0b9cf",
+    "src/adapters/forgejo/forgejo-git.ts": "7f4cf1ae8a2075ae9f0b1ea12276dca3cbdd21703f3b9f815037263ae88fdfd0",
+    "src/adapters/forgejo/forgejo-pr.ts": "1d44e50e64bee881292527fee3acad11b55aefb383347a556e3341619e0c4519",
+    "src/adapters/forgejo/forgejo.ts": "0b5f83118115fcfff6aa9d56baa494849aac4357a13ad9eeebd55f76302cc81f",
+    "src/adapters/git/agent-worktree.ts": "7a85274f6a736c69327c0e755cb51a6f5279ddfaafa1c29faa131d2dbc30ecb3",
+    "src/adapters/git/change-identity.ts": "8accf6306c9c17180f7f54d3ecc575799aa02ce2715ed03ce3757086d1100ae8",
+    "src/adapters/git/git.ts": "06015e78772ca93257e76a684cdbb5dd996af26c4148d59932223e90226380a6",
+    "src/adapters/git/github-publish-git.ts": "04e75677699698bd9220b5fe6354ab98c9c678c687b10d8103b06314db3c08ac",
+    "src/adapters/git/merge-noise.ts": "5d4633e72063a08314871df4701dabebd2ac8f8cf62b894731d544c854b224c6",
+    "src/adapters/git/net-engineering-lines.ts": "d2cafad1f70656840fd0c66b4d07025dc64e5e9e152a06201d1f87cace5067a6",
+    "src/adapters/git/repository-identity.ts": "a8b028d7ea28de09373036c5ac98585fc264bd466fcfb3860c0924cf4a22210f",
+    "src/adapters/git/worktree.ts": "417aa7321ec2c93f52e5dcb0ef1659b48c8d3b02fc891b57c3dc450bf950a235",
+    "src/adapters/github/github-pr.ts": "66d2e8c3113a263442a7dd89b55f89d13c7e2a70cb49aa174444ece3d7f7eb30",
+    "src/adapters/mission/execute-mission-adapters.ts": "1aa14d1d850bb00d4a532fda2b76aa9776a7f4f5325d126d5287b830f30934af",
+    "src/adapters/mission/stats-backfill-adapter.ts": "993574a23252dafa43847d9324c75f1c7a0cebfcbd431e98d3cdd73032ae0a68",
+    "src/adapters/process/bubblewrap.ts": "38f3659fee74175079dca2865a2a920ebe1846ea5a8d90031049daee92ef926a",
+    "src/adapters/process/config-cell.ts": "fb6f553c608d327907dcb0faedb69a6b0565735965b960138f45af9753d70513",
+    "src/adapters/process/confinement.ts": "c66433b2bb699d3a2f5eeab17c5a52b17f22221b6f61d69d2d3aaa7e6fbae778",
+    "src/adapters/process/output-watchdog.ts": "5a5b61513fa58304114655f58294a37b9de61b0981aef5140415ee80df32e930",
+    "src/adapters/process/polling-pause.ts": "e5e877974ec406f70b1888610bfef177237da1628760b31c4e4540003ed43009",
+    "src/adapters/process/post-integrate-hook.ts": "3da27fb2e00426ee9be102d91ae5121929d54adfc6e264acaef6ad49bfdc3b51",
+    "src/adapters/process/pre-draft-hook.ts": "d5c61f3d3926a16d5656353fabad838857ad235bc62bbb88d6fd270e3c93809c",
+    "src/adapters/process/process-liveness.ts": "b4a49c6d3899bef7ea7571dcdd796654e3a8fb83bebfa7ff7c4dcb9e2487b002",
+    "src/adapters/process/process-runner.ts": "7dd594eabf51ab058d77b4735348a325c50cd91c962e8435a2b4d77305d092c2",
+    "src/adapters/process/spawn-tee.ts": "0d3a68818600cd1804115c363778947feabfaae5a56f48a5e4ea5170a15d313e",
+    "src/adapters/rebase/rebase-workflow-adapter.ts": "1d321619f2dc2ca138236a6367c9e01958c9ef0db00b7c61e9eaf6b9b4e5144c",
+    "src/adapters/review/rebase.ts": "6f77b09b97bea316f82483b0d52dd1bb614ff42b3e5d7550a294919328bfb337",
+    "src/adapters/review/review-adapter.ts": "9dd2351cf1a5b738b0021e59a3c575a86d55876f540f7d6ca936ae6ee8dd702b",
+    "src/adapters/review/review-agent-fallback.ts": "5f72eeea81e04cb61314d2fc4d60c5580cbcbd3a9f55acddbc44a23fcb91b99c",
+    "src/adapters/review/review-artifacts.ts": "24d9243b0f43a98ae917fdd23d3feba7a425e356661ad260c4167dc440f53acb",
+    "src/adapters/review/review-cli-flags.ts": "3fc623a6810c548745f390b8179a17fabd0c72f65f9df55dfa41f3823db7ad91",
+    "src/adapters/review/review-commands.ts": "558db73ec12717b21deac2b56bb3faca5788dd57fa208003ceecceff24dd1ed8",
+    "src/adapters/review/review-events.ts": "0c4a7a3f57cac7903b5cf3db59b7ebf9c88942ea8fc24d89045584651b1f694a",
+    "src/adapters/review/review-gate-handling.ts": "2f9fc1e8eec36a16a855a0bd4eab708860cf857ad7db0de73f135fc443713002",
+    "src/adapters/review/review-loop.ts": "dade6c5f1806f70009751078de89cffe60ce0b59d390e7b5a115959eb8e2e9fe",
+    "src/adapters/review/review-persistence.ts": "7ad495715cd7fdbb280473822a1cd0e5fdff5a0d03d5a137f440f4afc910c58d",
+    "src/adapters/review/review-polling.ts": "aff137d2d5ef26dbf61868b2793ed61ca02de2f5bf60d44d346990da6b187878",
+    "src/adapters/review/review-prompts.ts": "2fe4ec51d73d829870bd230f8400f49107be8685bf9a1414b242ecbde290117f",
+    "src/adapters/review/review-round-open.ts": "4b24fd433b3e2b697668966a10e53bdf36047ea8ed111c7b8e3aa236c1f5b0db",
+    "src/adapters/review/review-round.ts": "ed9d35dae5317fe0c8d77f082e6f945a98518c487adf776c88e444ec54080685",
+    "src/adapters/review/review-state-mapping.ts": "25caf41be65d19361e21082a15350b3372161163651fac20abba1fe61ebfd9eb",
+    "src/adapters/review/review-state.ts": "b86bfff5836bc5d56dd38ae9233d32df7756716576d1df1ceb23400d99c7ffa7",
+    "src/adapters/review/review-static-evidence.ts": "6eccfe84d464370c0839c53c9ef3a2f1e1990b326ebd1937868ebc1db4cf0ec8",
+    "src/adapters/review/review-workflow-adapter.ts": "a0312d3cc83fad44e247a12f762762476d4fd02d5bc02c28fb409aa927ef17fa",
+    "src/adapters/review/setup-review-auth.ts": "f19fabf90b4c2250c3f26dec4eee14f5e8e19da85500b94821b902c8b3967334",
+    "src/adapters/review/setup-review-config.ts": "398082ce181d8b92e41149553204d36f12519c6cfa9886bf90d026504cc8cd5a",
+    "src/adapters/review/setup-review-repository.ts": "dae29c43a47452afe221f5609b6cbd901db7ca681e9d75f4883b80a80357a96f",
+    "src/adapters/review/setup-review.ts": "62b4309637b7c56a3a01badb260c435cfd3d47b7e7cb1902903ea93fe1108176",
+    "src/adapters/sqlite/adapter-factory.ts": "f9b42476da464c889370f6520b91643bfb9c1cc6f208dd560815363fa70bceb5",
+    "src/adapters/sqlite/adhoc-counter.ts": "d0dee0888b88e1fe6369de5c4e29f2947ec2a9368907e68c2e2d85c1b205f284",
+    "src/adapters/sqlite/authority-map.ts": "ac1c35080d658f5a15e05f1fe05463754bb40b405dab165a6b69db817b4d8552",
+    "src/adapters/sqlite/blocklist-repository.ts": "f1f71d08227f8afe9819c67472321d2eb4f596b67d9f4168a0e00059890846c3",
+    "src/adapters/sqlite/blocklist-snapshot.ts": "a82a2db2e1f530bc1ea7794c6d21241153acb4762637138ea446b27909d8ca21",
+    "src/adapters/sqlite/board-lane-event-repository.ts": "4208b16d9a01a1d1244bb7b1555eb1dc37abca51933439c6f5b9f45569f26fc1",
+    "src/adapters/sqlite/custom-agent-lease-repository.ts": "1d0b243961ef2413a4b5563aa7de12fbf866af87cc11935b2e2884535ee61634",
+    "src/adapters/sqlite/database-adapter.ts": "fe2e8c9bb8e6cf1e580c7807213c5259efa83b15a8ccd3808aec90d410929c9c",
+    "src/adapters/sqlite/database-path-resolver.ts": "116c39630542c5365301c2275b1bd0908a874302bfb3396f659eb8ead8fd871b",
+    "src/adapters/sqlite/importer.ts": "f90c01b22348a713af91598add1a0839d8055498821bcdd2fc9ce2d21853d4ee",
+    "src/adapters/sqlite/index.ts": "ec433aa81e7754255d833a8184151b2e29de71036912c5af77c60f9cf3cd1e42",
+    "src/adapters/sqlite/measurement-store.ts": "f0077800a596ef787a27f887ffcd588057fbaee338eb0c4ba60923bda5a73207",
+    "src/adapters/sqlite/migration-checksums.ts": "e4fda302354c494528c1405f56c2db3a5d5b78ed3842e0adf1fdc21ce66f9391",
+    "src/adapters/sqlite/migration-ledger-repository.ts": "fd611448b286409dd90c4c95735bc44c7b367439ebee5431d779b10334207042",
+    "src/adapters/sqlite/migration-runner.ts": "1ad1de1784d23d43e140a0f71e351aab997f5560eda4257b3a746adf873560ae",
+    "src/adapters/sqlite/mission-classification-reader.ts": "e418809ecba4ba1b475e19e4af0a7facb11d0e1f1a45cb22d58f1b6b6722da61",
+    "src/adapters/sqlite/mission-serialization.ts": "b1fdc45f43de4dddb4bb012f11e76b9951239f27a70829699e0ce616601c0336",
+    "src/adapters/sqlite/mission-store.ts": "016ae023b1bbab2820d1645cc2816edc9a2d4e561a249568a4e978345c676a0a",
+    "src/adapters/sqlite/operational-history-repository.ts": "9047ef1d3e0c90233d63ee441dfa707cd2cf5fd77986c23276377e8e360d0d71",
+    "src/adapters/sqlite/repository-repository.ts": "73ee4e7d705088dfc98e1d43a60bd8ac8bd874675242051e0e691f7f2eb0edbb",
+    "src/adapters/sqlite/review-projection-reader.ts": "bc531ba21cc2ce7308de368d2174b30eea83a56e73d03b15b451b1b0c7943a3a",
+    "src/adapters/sqlite/session-marker-adapter.ts": "e13e17da57c8351c14dd22ae0fe2c5dae87779231db6d21f20d3c44327814c3d",
+    "src/adapters/sqlite/session-marker-import.ts": "971f46588f067971944822e19376c61c1bf0c595116421461c73e20b77bdaf6e",
+    "src/adapters/sqlite/session-marker-repository.ts": "eb3182b1d71ae33360b4dadcbf3da9ec14dad4efba2ed4712a57ca54b735ebad",
+    "src/adapters/sqlite/ui-preferences-repository.ts": "53dd5d6466d3026eb638692af3d8b90c37d9693e0e34bd47b0887d4fa23bdfdc",
+    "src/adapters/sqlite/usage-repository.ts": "b7d761ce366100cf82ebc676e328287d40c6dad7fda44791c713320aa1744300",
+    "src/adapters/storage/child-cli.ts": "e5dc2302370937cf520b4eba18424920b95c3744bc9225d01d62f279acefef92",
+    "src/adapters/storage/persistent-data-migration.ts": "68bd51563f90f71ac51faa655b37da122fe9dcf410330dfea3082d7e6b85a067",
+    "src/adapters/storage/storage.ts": "1cecb85c419aa81dc4234b53eb31603bcee754540bdaffac474aa8c7797e862c",
+    "src/adapters/verification/coverage-gate.ts": "1d51cd2169a2b8c3b11b583d8d21301d4cd06e1836caaafde3f0f34d6f087b5f",
+    "src/adapters/verification/gatekeeper.ts": "f348e7945c292540a2b6b689a0495f233c32ba31ff4342afcf7732bea9a57f96",
+    "src/adapters/verification/redgreen.ts": "5a375c555636bbcff546c35193c27633b3cbd0342bc429c85beeaddbf8d5e3b9",
+    "src/adapters/verification/temp-root-registry.ts": "096a397547d6593a9939f757dd618ed37289159882758ef1707e0a44c805c9b0",
+    "src/adapters/verification/type-only-coverage.ts": "0f9aab110264c925b6589153d0379478c319b997ff949f253d4f6612d7c92cc7",
+    "src/adapters/verification/verification.ts": "0eaa8d865e1a7a1c27bd760cef2df4ec6b5cf18ac85091bdcbd2972754d2fc9b",
+    "src/adapters/web/asset-store.ts": "6fab285cb0e0a3a1a845d170503a2eadf59c4ded30c8461e6c510a3fa547c53e",
+    "src/application/agent-completion-contract.ts": "67d832660221d7d50058d98264533bd49e024049c722a0f6d5018bb8f109cbd6",
+    "src/application/approval-coverage.ts": "3b1ad8f9d0614140fca7d26c6e905ba8a12fd5e83cc53ecb9580cdaacbb147af",
+    "src/application/consumer-domain-requirements.ts": "9572dee0e128a6c6a3917f49daf23edf6d38a2bbb8c513181c97ae832f2dd533",
+    "src/application/contracts.ts": "f31fbfbe54602318b0033a1c711fd0247b34dbeefef642f62342c899fac93a80",
+    "src/application/controller/board-command.ts": "d50712430e4197825760148a2677308ade9da0b78ebfb97c69d16dc505f650fd",
+    "src/application/controller/board-controller.ts": "43b02985fd09b19201c8cc27075a75fadf6ae64d0c46361744f76ecd0d378a93",
+    "src/application/domain-ports.ts": "9bfd16024d643b13698029ef2ec9e9ba39548344be6359506eb9a03f450830ca",
+    "src/application/draft-command-use-case.ts": "0ab071265c16672924eb50faac6df977e93e40bf5784b96b3c1b5ac70d5e0ff5",
+    "src/application/execute-mission-service.ts": "ca3e3ee48ad8794588093ff2baa3e692226af7cfcc0fffffa7f2e857cd4ef87d",
+    "src/application/failure-classification.ts": "a13596a72d4220d76411ff4ffc6b3bfa12a181bead22ab20b18fa3fbbb03b245",
+    "src/application/fresh-session-marker-port.ts": "a8095740d770c8807f4993f3cb325b7bacfbc99b8ad288c8886e5649017f9536",
+    "src/application/github-publish/publication-engine.ts": "58e989d3891a6dc53b1710f5cef57ca1b70859d4139467b85e26a4cc8effe553",
+    "src/application/github-publish/state-machine.ts": "abae37eff463cd79cd821de30c082ee105ee2f4e48dbdb9a0dcb59e708e0329f",
+    "src/application/github-publish/status-command-use-case.ts": "c24f0b920c24a59e4ef3fb917072ddf3605783d9207ee7ddfe523c9f315b5b86",
+    "src/application/github-publish/status.ts": "93ca58d16acac270aa2c1877c174eb3234d71126fce5ffe78939f96f904195b4",
+    "src/application/github-publish/verification-ref.ts": "d12c738e52017d4c9289a16bf97433da6395a90369b8503a026c743eac48609f",
+    "src/application/handoff-command-use-case.ts": "94c51cd3cfcf997bcff48009316f70adbb0d83ffee4214a239dd5d9a4ae3224b",
+    "src/application/hook-failure-workflow.ts": "6fa9310abb6b5d267927ba77b060a9e1a8f0b7440918b1e346cc7bebc0902f31",
+    "src/application/integrate-command-use-case.ts": "af46d7eaca82f22edfebe26308e65ed0f8999d740dd686df27f1c3d10d29650f",
+    "src/application/integrate-workflow.ts": "8ed88c0b5312f08d8af74daf1e41e92536e89f81044300b6f5ff706bb988c94f",
+    "src/application/integrate/approval.ts": "998d3a1f27009648308a988c2f20698aba91e29f634902b74eb8d6cc2eeb0b26",
+    "src/application/integrate/base-worktree-repair.ts": "03980d4e0f122d7de30568e6fbbbf467d9a5de63c605c5bcb6ceef13ba67b641",
+    "src/application/integrate/context.ts": "3bd22fbaefaed1b0cb33ad0b44270537d308f98f350d2b26e4fa55bcb84d54c8",
+    "src/application/integrate/gates.ts": "744c24c9fdd34b803a237db126424b4c6005c5f4b5129e4d0545393148f1b543",
+    "src/application/integrate/github-pr.ts": "cd55b45ff94793840b6394b4e23dcd770702cbab9343f7034b008c9f0584058f",
+    "src/application/integrate/landed-closeout.ts": "7e01cbd2fb5e828c11f2d93ceb7fd0df0e6cdb34a3a5bd12ffc7d112d1bd376a",
+    "src/application/integrate/landed-recovery.ts": "a74e8df92bc5e1a9547b26743aa4f83667189f2c6809f9283d8b64978ef6d6e7",
+    "src/application/integrate/landing.ts": "bc56a485d997618e2320dc944082d28ea54ab4c097c47e7a3689660bef61a973",
+    "src/application/integrate/preflight-checkout.ts": "4afdb0e1f2d5dd5e6abe88161aeff15e2af256f1ac2cd593e832142dbaa01180",
+    "src/application/integrate/preflight-review.ts": "27d442f11b4e232c83827c9aef84c5a2f080b17ee7b427c905f023aaa1dedcc7",
+    "src/application/integrate/preflight.ts": "1762b117e9dc6b203ed5caf5d851b2db4379a43ff8de8beda61a0ae5efccd070",
+    "src/application/integrate/readiness.ts": "17625116d5cc5e7e445bfe4d604bb735792ff48719179eaa1eec909bcb39ad0a",
+    "src/application/integrate/rebase.ts": "4df556de75ed0dcb070871eb5f78bd2636555cc0a6a8c898c73fc305d8b321b8",
+    "src/application/integrate/recovery.ts": "0d0879aba67ad255a303240b94d60cdc0c7c6710a70372256f6981e1c6a6d970",
+    "src/application/integrate/squash.ts": "a6185482ad30b3b5e1440903fb732bd7ccfcabedf38b08d5e2ae4c98b225e41e",
+    "src/application/integrate/support.ts": "7ca53cf54cf191b02b16c247aebc177f2137b3c9985d21c55aa6dfdde02d8e2c",
+    "src/application/integration-repair-review.ts": "d9cc887d94d6c2965098b287d6d6321ea6dcadfef3fb1ea4b080d7209ca7b9f4",
+    "src/application/lifecycle-lane-event.ts": "8f2cea282ee4a91debb5ecad516bb2545a5cc5ae3e53783c25dc8617c802b32c",
+    "src/application/lifecycle-timing.ts": "38537a47a76c67030180fe8bdfc26a3f4a658df5153834727454b76657a585ff",
+    "src/application/measurement-ports.ts": "647555c366b2bced6c97fb2aae94ffdc71af262391443fc52ec9b2532c98261c",
+    "src/application/mission-assignment-service.ts": "1f36d05db403007729bbb6ca6c56d65b414aeb90fbe1794197e96944b1d50cb9",
+    "src/application/mission-authority.ts": "113ab442bb1f3de3035376412461be46dee4f155540a293fe08cc0b2c1651aa1",
+    "src/application/mission-brief-service.ts": "7fe7522bb40d819da6486b1370060987c9122e6bb02a35a1933fc4a31838f937",
+    "src/application/mission-cancel-service.ts": "e1e84eaaff4e056122584e6a5be04b75d72d145c885862f05ee178d16da76eb2",
+    "src/application/mission-checkpoint-service.ts": "7105e3264850f984c6f5b726fec26129861c9c05d7550f5365721a58cd45530e",
+    "src/application/mission-command-support.ts": "52c9a4f2ddef7f1ca44e72fa375ae2414a8ad628875e12282f32dd6133585061",
+    "src/application/mission-handoff-service.ts": "d3cac3a8eed59901687dbdfcde249537e8d38ab6ded397238be0958cb7d69316",
+    "src/application/mission-intake-service.ts": "d2b85823f413b363f010bfbef93d6ecb1d5b215c4476492ab29421c9214fade5",
+    "src/application/mission-integration-service.ts": "4ed18e3b71e74d40cf15015e75985d216a21fb02581f14a2cf2d16ef8b19c593",
+    "src/application/mission-lifecycle-recovery.ts": "0630c16a4792f080bf539cb81b06140d3316af0ca8a6a98ad110d507275f676f",
+    "src/application/mission-lifecycle-service.ts": "9f534ff48d510c26d49d981669240c4ec884660b2158f1fdfca01945dd7924a2",
+    "src/application/output-elision.ts": "f32fffe3e6e418a2b7fcb8349e3c8e50d4290caa8f76e1c70d0c7be35c9f3ed9",
+    "src/application/persistence-domain-map.ts": "0626e2fdf1791e2335f119d42b4ac749ae3ff4013bdca2ddb13d78508470d312",
+    "src/application/ports/integration-strategy.ts": "581964d3ded52f3719a11fb057024571fc24cc9bebe5fe8d3e35f13a58ac7249",
+    "src/application/presentation/cli-flags.ts": "ba492ef381850935e33bac0ab7dfe3e687fb975cf28630b705fba0a5867b8bd6",
+    "src/application/presentation/cli-format.ts": "6fde2ed35a93ae214e6b90b8a54a26b8c3677f15ba436f7ede6524a16f8fb7c5",
+    "src/application/projections/activity.ts": "9c707d6f67c0e10f1a2b59477cef6e52f9916a343705659ce6dedf7e95d99c8a",
+    "src/application/projections/agent-countdown.ts": "e055e0726799200d44b1be73365110d522ce013542c8881e6869a8d1941b7a61",
+    "src/application/projections/agent-status.ts": "29bf310d91cac8a04c5921bdfaf5f32b023acdad8d713ccd2938f1e5566803e3",
+    "src/application/projections/analytics.ts": "84b52364423ad464b23b20585785e3a00dc9eb473341f601852d94646f92215e",
+    "src/application/projections/board-readers.ts": "855725085cfdbc6542d1cb099e7d3786eda80bbce85e48f10ee3402ad72eb317",
+    "src/application/projections/board-subscription.ts": "d9b882cf57af2d16f81c863b9601ba7a6f323945e34976be4d48dd65b7f185b9",
+    "src/application/projections/board.ts": "498f9fe673d73d846fcad4c98f1e223216dc078769caeae6924899f6df5e6948",
+    "src/application/projections/bug-frequency.ts": "076e4aa7f63083f6aab4e4b6cbfeff1dab15a3669018523a6569c00a611990b3",
+    "src/application/projections/cohorts.ts": "5e37e3a8334e8711cc456e41c5cf9674bbacca33192137613da6984f8443121f",
+    "src/application/projections/current-work.ts": "c525def7c2673a56dcffe6b095df9c8f6227aafd36a467973066def24a0dd2c1",
+    "src/application/projections/metrics-read-adapter.ts": "7720e2f46928b6f7cf0528986bf675278aa98978f0b04b7b1cd019f50c625232",
+    "src/application/projections/metrics.ts": "af3567953d0d7c8ff3a7a3dcfdea6980a5e34b9b960487615afef4dfd7a84f45",
+    "src/application/projections/mission-activity.ts": "241c5809628ecae7b809ba4f1d4bb86072e251db6da3d607034b10064a5bd0a7",
+    "src/application/projections/mission-board.ts": "3150d121ff4729873ac8377dd3a93a4f4a07998af06930115a1ac5220add3fac",
+    "src/application/projections/mission-detail.ts": "8686fd5d9d4df85429e7f73cb7d721476b7112898ea21b82b015cc2bc6a550d0",
+    "src/application/projections/mission-query.ts": "ebece47f339a4969f8b6c287088cb6041d7f485043a57c747d3fc976293e4b31",
+    "src/application/projections/repository-selector.ts": "70b05be959a0642417313c7020eb97c05c8acc46e176a1ca6845204a63cd2aa0",
+    "src/application/rebase-command-use-case.ts": "f91bb5deda03bb93d964b1fdc981a3ea9e1e0a14ea3d59ebe58deb6e44c13738",
+    "src/application/rebase-workflow.ts": "63ea1171accfe6fae3c1cfada374e8399ff1728e8d83bba758c35a5bf7a97683",
+    "src/application/rebound-kernel.ts": "8186343b3e7c14c6b1d84133621ae3ad71f0be7a191579e001494335edf1924b",
+    "src/application/recording/board-event-recorder.ts": "defd0d5f1ab22d8587a9e39889b31064cd4d98938e8743e90c489c4a75c18c1a",
+    "src/application/recording/current-work-recorder.ts": "7ac763b0f265ec269e15aeb3a0b2b693cbabf344ae28670018d92d7703a7b6c4",
+    "src/application/recording/operation-event-recorder.ts": "913514df79bb34c98d89c4ada1854e8e854386abbd79e1addd1e1a7343981132",
+    "src/application/recovery-supervisor.ts": "8a4fd5dc38ea930daf9bbaeacbc0439b621a6270cf06aa805a979b1cca9b5d41",
+    "src/application/review-command-use-case.ts": "8b851bc931a4fb15a55ba39dad735ff5c9cb2edd1087dfa9ca8a9b9fafe87f32",
+    "src/application/review-repair-lifecycle.ts": "c5f2cafd681707f78acc85ba5f143edc47a47369df6c2038ddf05690b758e82d",
+    "src/application/revoke-review-decision-use-case.ts": "58b8ff90070226c0dc43b8da9c6a2d572119226c37da753ec26c34505d95c3a3",
+    "src/application/services/agent-block-service.ts": "915865e15ba98126e55d7ba69acc5673d16ff8cd77482272b6679d59d8631ca9",
+    "src/application/services/agent-limit.ts": "5b32e67101e07ece61a19e7e5cbf220ad91566a33a6d1a25520d6f297c032859",
+    "src/application/services/agent-selection-telemetry.ts": "31683352ffe34554015a5422ec469a211a6c1922292ae84a5cba769a88fd22f4",
+    "src/application/services/agent-selection.ts": "ccc831902cc85f263bd039b5c3349ba7b6b5c24e0a7b76a11f841513c94e0461",
+    "src/application/services/decision-window.ts": "fce6100eedfe1a94cc3b5421af246e244e2d50b036ce26c0783bcae83146c1e2",
+    "src/application/services/integration-dispatch.ts": "8ab82c112476748b88d93a664957d5ceed6406e797a93cdb98618278df0c2eda",
+    "src/application/services/known-repository-service.ts": "ee187691eebf18fb9ab727f477c0f1fefc196d067e855e48a48e5b4e42103ed2",
+    "src/application/services/operational-history-service.ts": "4bbde9741eebf59b6cb681eb1bb593662967bba9bede0d105cbb6d2facd6c4f3",
+    "src/application/services/statistics-service.ts": "f34d2f78536e356247410c8489bd8bd52fad2ee31c702f18fcc6c60db22d469f",
+    "src/application/services/ui-preferences-service.ts": "39b0bb488e5f2931afda10caa05ccf9546a5ec75089aa1eafde998df79906c5f",
+    "src/application/static-evidence.ts": "ee0619ff7769d053a89a1055ec0bac5c42c257c46da7c1109ca7d0993b3010f7",
+    "src/application/stats-backfill-service.ts": "5cc7d7437f7d0768bd2e53331649fdfdfa4cb84722477e88287621abe2f65282",
+    "src/application/stats-command-use-case.ts": "cd4e71103bdeb0baf832e6fb26c70fa734e728e74e2d27f5950660416f570ec7",
+    "src/application/status-command-use-case.ts": "ce57bd7227600d7d3798b54d6ffc367e2515586d8d2bfef071339fb90ac09ab9",
+    "src/application/typed-mission-recovery-advice.ts": "7621476cb93eb1b978f0fb34ea3044c8af62e35ce98a5023c8bc1fe336503446",
+    "src/composition/application-services.ts": "ca1321d4346cabd00671e70f69c54de90d2f093834e0c64b81d3683a60b785f3",
+    "src/composition/board-projection.ts": "d6b763abc13823b80cb6a20c73fe2f1b41285895d6638ac66780818bec6e1e87",
+    "src/composition/child-cli.ts": "ebc1ef240692d1fe061f5b4a2596665c172c2fb617d417e5763d83eaaa42fd91",
+    "src/composition/create-cli.ts": "ed106eb2aded56efc8eeb6dbd0a32f6dae8279de6ecf5a43af4a35a00afc2ce7",
+    "src/composition/github-publish-status.ts": "e089cfa25eb0f5d42e7d4255c5b035ffc2b4477d1b4246b215a56c652fbaaa1a",
+    "src/composition/operator-state-lifecycle.ts": "e0638f3b472bcdd85108a1a68175b167c57be6c435c0a62350ea3f9d94575c37",
+    "src/composition/production-capabilities.ts": "66681814124ad2848065bb17b68fa0741a44cac5f1615186183647e528aa75fb",
+    "src/composition/review-persistence.ts": "1771de70b7b562d8484f4d143407e7d7084bd7e85a0e42b044eba8801ac31641",
+    "src/composition/status-board.ts": "f42107bde2142ec822d420961a354da757e8dedc4466a5e2bdb9e4266c9e13d1",
+    "src/domain/agents.ts": "453b98e6d91346e62e90e06f47579d69ea71f41d2b11020c148623e186de4d68",
+    "src/domain/approval-coverage.ts": "eae81e828b971ce2419ca0cc625e498aed1c8a2deb78f4d684f2186088e02b16",
+    "src/domain/board-event.ts": "be9d0321b4f7f5409492e32aa12cb110c8be0108b4766693f22130243ea365e0",
+    "src/domain/checkpoint.ts": "a5fcc21a2fd44fb34fed7916ed23da819dd7dc1890f711d3a8dccfbf3ef385b0",
+    "src/domain/comparators.ts": "932926d780124b1c0bd7e8ac4e59ccddacb6a314efb1125718b6256d5fc2b248",
+    "src/domain/external-task.ts": "b9d055f2157a72c5a5f9905aff7867ca9173a88a2b717c142d7db2eeeff460ef",
+    "src/domain/integration.ts": "f26a0510bd5ffa7daadef7e790263c3a210b40ea6a259be0e5335dda5557d134",
+    "src/domain/mission-brief.ts": "a5272e8fdd69fd82b46f99d31c9abc737cc531f28fdfbbd17943b06f7626038f",
+    "src/domain/mission-dependencies.ts": "e795fb2fc0f5cb35f37ac126649c3aee95705862a197a884fd457a9b537e2614",
+    "src/domain/mission-gates.ts": "f76a39dbcbf304779aa5980b41e3171084b04c18f25dd79993cb282f71f404f3",
+    "src/domain/mission-success-criteria.ts": "5d484a878fa020d7f277d0fe1ff1f6e3195b355d8044282ebe4c5a89ba96059e",
+    "src/domain/mission-workflow.ts": "1fe9979a43de5b3fc49313cf1bd8fc7eb5a9b3744b003eef6db1af7957cc0add",
+    "src/domain/mission.ts": "cbc83ee94c1d51e9e65e8aef99625285972c3c6a58910f3602232be3f6373f0b",
+    "src/domain/net-engineering-lines.ts": "94e2eeed01bffa60ac7d88bd466ca59939ef0363e1d4604a6c34f0c95a3e0699",
+    "src/domain/repository.ts": "4ca35192961cb126c64fac502f7944eaf45f8c8fb122d111201c477095a829a5",
+    "src/domain/review.ts": "80600141146fe15ed0ef94501a35c78e6f3e706f8ca3b0cee8b001fedf8f42a9",
+    "src/domain/session.ts": "d27294f033a5c3433bf860b8428d276306922a9f4f0a6884ccdef783b703e8f3",
+    "src/domain/usage.ts": "f0701281d25224fa31ee3029efc1fd841b12f87e7d1f1701f17c6b09b25cedc0",
+    "src/entry/px.ts": "f0ce920342650f1e4968edf279315a8900c8e581119f21c63d02e973edbc0eb7",
+    "src/interfaces/cli/active.ts": "c3727750db3b570775a1b2c16eb72e67eaac454bc0c34433e237388bf42fbf05",
+    "src/interfaces/cli/cancel.ts": "f31583ee7298848dd1390eddc42b883d6a66515cf528316ccc299b01aca953f0",
+    "src/interfaces/cli/config.ts": "ef8c305932e0dc47aec4363ed28faeb8d52b442ddaa49c87a92e457e9af9706c",
+    "src/interfaces/cli/diff.ts": "9d24befd9b82c712a119e05f7c9b28173e2753f42699956382d65a93579891be",
+    "src/interfaces/cli/draft.ts": "c06ecddcc73bbfdc4695cadf8aaca4f176adbe6700dac300faa03a60407ec188",
+    "src/interfaces/cli/github-publish-status.ts": "49a17d903d7f86d9ba9530db88190618b966992e41fb458721d2dcd3c5e113f1",
+    "src/interfaces/cli/import-legacy.ts": "4338203843c6866be2a8d9eab56b8299d0cee08701fbd431267ad9e83697bb41",
+    "src/interfaces/cli/integrate.ts": "39286bc0d520bbe547c1364ad2701d34de7835b23f19d66bc8b112866f409cca",
+    "src/interfaces/cli/lead.ts": "7362d4cd620be1d7252b97e493177b8a72f07dd6e13ad94c3f52ce913c4c03d8",
+    "src/interfaces/cli/mission-writes.ts": "149263f0013dbb691d7c36874ed9e5a12ccfa59aa77e5574b8b0623e41e8f77b",
+    "src/interfaces/cli/rebase.ts": "18a787252e95504626d5dbb9446fa8c3b806716f09b672876e18422b24902d32",
+    "src/interfaces/cli/recover.ts": "61c945b9e7cac32679847951581ea0652403bc149a4b95e51be648ca145b1bed",
+    "src/interfaces/cli/resolve-conflict.ts": "4ac9b8a15b2e45b8384e643a187d332ce93b008f1c5bd8139009bf4c9cc87f40",
+    "src/interfaces/cli/review-verbs.ts": "291aa6f0af58a420f2535b03528b19ff28986ab9d2c7822a0d9f45502a6116ed",
+    "src/interfaces/cli/review.ts": "6d853d51a8f2d94c76c979ef4f2d682848c46d78c80800c016bf4a167b7e7a2a",
+    "src/interfaces/cli/revoke-review.ts": "d32cba8da66ce9bfbb76901ed851dbd1d5a4fd9a8a7a802b6a6c961e0c514df1",
+    "src/interfaces/cli/runtime.ts": "f1d6a148873499f070c23997f1ccbc15ee1541440cf41aa8e747e8a0be0ac68d",
+    "src/interfaces/cli/setup.ts": "3b73d7e6ba52800439e85f9cce067c8a68c983fa6dac8af47d4c1e1d7a2b3cd2",
+    "src/interfaces/cli/status.ts": "6058155fc4f6a755a6dbb7568964fdc770dcb183dbd866728821e5346baacc83",
+    "src/interfaces/cli/verify.ts": "1894b3eac7db86939d9ac51f06500a8065f951a916a178fab7f228ab1a7e09b6",
+    "src/interfaces/cli/web.ts": "024198091fd534e73f6632c993e89ebe2e87ccd37c0849ea3809b79248d157aa",
+    "src/interfaces/tui/index.ts": "1346c054f7121b9543b61c864881eba38bf9d35e3e309f181e2290732beb532f",
+    "src/interfaces/tui/navigation.ts": "b0b1bc335dff1164c5b3c625831a16f49cc5038be7de07f511dfe363420b9e5a",
+    "src/interfaces/tui/ui-command.ts": "89de0eee6f04d79f8e77fb88d485d518cc1c6cd31e6a04950cded545c5a4e474",
+    "src/interfaces/web/host.ts": "1065a48ef5fe07f0764b4481849509e0a9e1261d761bf85383b493a9283e2ac7",
+    "src/interfaces/web/security.ts": "918c4b3f01f859ec20b0dd52d46815a9a793e87a3152aa742f7d790c377acf3f",
+    "src/interfaces/web/stream.ts": "e3b681b52e190dfdf9876ce4e1442241c61f894b170248f8629d2a49136c717f",
+    "src/interfaces/web/transport.ts": "47a66319147c9b18f290fd80b2b46bc018448bcd4c67b0c9fb9dc564cb3479a1"
+  },
+  "coverageTransfer": {
+    "removedReviewBootstrap": "Lifecycle setup incidental coverage remains covered by unchanged owning lifecycle and persistence suites, selected on BOTH baseline and candidate.",
+    "owners": [
+      "test/mission-use-case-persistence-contract.test.ts",
+      "test/mission-handoff-lane-events-contract.test.ts",
+      "test/sqlite-repository-contract.integration.test.ts",
+      "test/task-2322-05-mission-sqlite-fixture.test.ts"
+    ],
+    "durableReviewAssertions": "Approval round idempotency and request-changes/resolution history are retained and strengthened by SQLite reopen assertions in test/review-state.test.ts."
+  }
+}

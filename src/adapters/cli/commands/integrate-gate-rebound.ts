@@ -19,6 +19,7 @@
 // The dependency direction matches `integrate-gates.ts`: `integrate.ts` imports
 // from here, never the other way round.
 import * as fmt from '../../../application/presentation/cli-format.js';
+import { missionId } from '../../../domain/mission.js';
 import { rebound, type GateFailureReason, type ReboundContext } from '../../../application/rebound-kernel.js';
 import { runPhaseGates, type GateRunOutcome, type RepositoryGate } from '../../config/repository-gates.js';
 import { captureFinalIntegrationTree } from './integrate-gates.js';
@@ -238,6 +239,14 @@ export interface IntegrationGateRouteOptions {
   /** Authoritative lifecycle transition followed by an optional Backlog mirror. */
   reactivateMissionFn?: (_slug: string) => Promise<unknown> | unknown;
   applyAgentFallbackFn?: ReboundContext['applyAgentFallback'];
+  // TASK-2625: when the verify rerun goes green against the fixed tree, record
+  // a durable, sha-keyed whitelist of the validated hooks so a later integrate
+  // can skip them. Injected so tests exercise the routing without a database.
+  recordIntegrationValidationFn?: (_input: {
+    missionId: string;
+    sha: string;
+    hooks: readonly string[];
+  }) => Promise<void>;
   // Injected so tests exercise the routing without a database, an agent, or a
   // second gate execution.
   runPhaseGatesFn?: typeof runPhaseGates;
@@ -335,7 +344,24 @@ export async function routeIntegrationGateFailure(opts: IntegrationGateRouteOpti
           realAgent: opts.realAgent,
           realAgentModel: opts.realAgentModel,
         });
-        if (rerun.ok) { return { ok: true, diagnostic: '' }; }
+        if (rerun.ok) {
+          // TASK-2625: the rerun went green against the fixed tree. Record a
+          // durable, sha-keyed whitelist of the validated hooks keyed on the
+          // fix commit (the mission branch HEAD at validate time) so a later
+          // integrate can skip them. Inert when the store is unavailable.
+          if (opts.recordIntegrationValidationFn && tree.commit) {
+            try {
+              await opts.recordIntegrationValidationFn({
+                missionId: missionId(slug),
+                sha: tree.commit,
+                hooks: gates.map(gate => gate.key),
+              });
+            } catch (recordError) {
+              log(`Could not record integration-validation marker for ${slug}: ${(recordError as Error)?.message ?? String(recordError)}. The full suite runs next time.`);
+            }
+          }
+          return { ok: true, diagnostic: '' };
+        }
         return {
           ok: false,
           diagnostic: rerun.error ?? 'integration gates failed again',

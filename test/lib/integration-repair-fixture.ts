@@ -38,6 +38,7 @@ export interface RepairFixture {
   readonly worktree: string;
   readonly slug: string;
   readonly approvedRevision: string;
+  readonly database: SqliteDatabaseAdapter;
   git(_cwd: string, _args: string[]): string;
   load(): Promise<Mission>;
   version(): Promise<number>;
@@ -122,7 +123,7 @@ export async function openRepairFixture(options: {
     : seeded, null);
 
   return {
-    root, repo, worktree, slug, approvedRevision,
+    root, repo, worktree, slug, approvedRevision, database,
     git,
     async load() {
       const loaded = await store.load(missionId(slug));

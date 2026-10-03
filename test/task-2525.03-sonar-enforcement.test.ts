@@ -221,7 +221,7 @@ test('task-2525.03: scanner uses an environment SONAR_TOKEN for trusted CI runs'
     else process.env.SONAR_TOKEN = previous;
   }
 
-  assert.equal(path.basename(captured.command), 'sonar-scanner-npm');
+  assert.equal(path.basename(captured.command), 'sonar-scanner');
   assert.deepEqual(captured.args.slice(0, 3), [
     '-Dsonar.host.url=https://sonarcloud.io',
     '-Dsonar.organization=oxtan-maker',

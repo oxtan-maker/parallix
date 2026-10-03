@@ -136,13 +136,27 @@ export async function recordPostIntegrationStats(
     missionStore,
   });
 
-  // TASK-2479: the recording itself stays (fail-closed, TASK-2378) but the full
-  // weekly report and mission-telemetry table move behind an analytical surface
-  // (px stats, an explicit flag, or DEBUG). A successful recording is a single
-  // confirmation line here, not a report dump in the hero path.
+  // The recording is fail-closed (TASK-2378); the weekly report that follows
+  // it is informational. A report that could not be read or rendered is
+  // reported as a warning and never aborts an integration whose work landed.
   fmt.log.info(`Workflow stats recorded: ${formatRecordedStatsRow(outcome.row)}`);
+  printWeeklyStatsReport(outcome);
 
   return outcome;
+}
+
+/** Print the weekly report carried by a recording outcome without ever throwing. */
+function printWeeklyStatsReport(outcome: any): void {
+  try {
+    if (typeof outcome.report !== 'string' || outcome.report === '') {
+      const detail = outcome.reportError ? `: ${outcome.reportError}` : '';
+      fmt.log.warn(`Weekly stats report unavailable${detail}`);
+      return;
+    }
+    fmt.log.plain(outcome.report);
+  } catch (error: any) {
+    fmt.log.warn(`Weekly stats report unavailable: ${error && error.message ? error.message : String(error)}`);
+  }
 }
 
 /** @param {string} slug @param{{rootDir?: string, missionStore?: import('../../../application/domain-ports.js').MissionStore|null}} options */
