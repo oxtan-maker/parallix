@@ -17,9 +17,10 @@ import type { MissionStore, MissionVersion } from './domain-ports.js';
 import { isLoaded, loadForCommand, missingCapability, storeEvidence, writeFailure, type MissionCommandRequest } from './mission-command-support.js';
 import { missionBrief, type MissionBrief } from '../domain/mission-brief.js';
 import { declaredGates } from '../domain/mission-gates.js';
-import { successCriteria } from '../domain/mission-success-criteria.js';
+import { carryCompletion, completedCriteria, successCriteria } from '../domain/mission-success-criteria.js';
 import { missionDependencies } from '../domain/mission-dependencies.js';
 import type { NelBucketLabel } from '../domain/net-engineering-lines.js';
+import type { OperationalHistoryRepository } from './ports/operation-history.js';
 import type { CheckpointData } from '../domain/checkpoint.js';
 import { missionLabel, type MissionId } from '../domain/mission.js';
 
@@ -40,6 +41,16 @@ export interface MissionSuccessCriteriaResult {
   readonly successCriteria: readonly string[];
   readonly version: MissionVersion;
 }
+export interface MarkSuccessCriteriaCompleteRequest extends MissionCommandRequest {
+  /** One-based criterion index as `px status` lists it, or every criterion. */
+  readonly criterion: number | 'all';
+}
+export interface MissionCriteriaCompletionResult {
+  readonly completed: readonly number[];
+  readonly version: MissionVersion;
+}
+/** Operational-history `event_type` for a completion mark; it is not a lane event. */
+export const SUCCESS_CRITERIA_COMPLETED_EVENT = 'mission.success-criteria-completed';
 export interface SetMissionDependenciesRequest extends MissionCommandRequest {
   /** The complete recorded list; the CLI reads, edits and writes it back. */
   readonly dependencies: readonly string[];
@@ -75,7 +86,7 @@ export interface SetMissionClassificationRequest extends MissionCommandRequest {
 export interface MissionClassificationResult { readonly classification: MissionClassification; readonly version: MissionVersion; }
 
 export class MissionBriefService {
-  constructor(private readonly _store: MissionStore) {}
+  constructor(private readonly _store: MissionStore, private readonly _history?: Pick<OperationalHistoryRepository, 'append'>) {}
 
   /**
    * Record or refine the brief.
@@ -127,8 +138,36 @@ export class MissionBriefService {
     let criteria: readonly string[];
     try { criteria = successCriteria(request.criteria); } catch (error) { return failure('validation', error instanceof Error ? error.message : 'invalid success criteria'); }
     try {
-      const version = await this._store.save({ ...loaded.mission, successCriteria: criteria }, loaded.version);
+      const version = await this._store.save({ ...loaded.mission, successCriteria: criteria, completedSuccessCriteria: carryCompletion(loaded.mission.successCriteria ?? [], loaded.mission.completedSuccessCriteria ?? [], criteria) }, loaded.version);
       return completed({ successCriteria: criteria, version }, [storeEvidence(request.missionId, 'success-criteria', `${criteria.length} success criteria recorded`)]);
+    } catch (error) { return writeFailure(error); }
+  }
+
+  /**
+   * Mark one success criterion, addressed by its one-based index, or all of
+   * them complete. The completion is appended to operational history as an
+   * action; it moves no lane, so no lane event is written.
+   */
+  async markSuccessCriteriaComplete(request: MarkSuccessCriteriaCompleteRequest): Promise<ApplicationOutcome<MissionCriteriaCompletionResult>> {
+    const guard = missingCapability<MissionCriteriaCompletionResult>(request, 'mission:context'); if (guard) { return guard; }
+    const loaded = await loadForCommand<MissionCriteriaCompletionResult>(this._store, request); if (!isLoaded(loaded)) { return loaded; }
+    const criteria = loaded.mission.successCriteria ?? [];
+    if (criteria.length === 0) { return failure('validation', `mission ${request.missionId} has no success criteria to complete`); }
+    let marked: readonly number[];
+    try {
+      if (request.criterion !== 'all' && !Number.isInteger(request.criterion)) { throw new Error(`success criterion index must be a whole number (1-${criteria.length})`); }
+      const target = request.criterion === 'all' ? criteria.map((_, index) => index) : [request.criterion - 1];
+      marked = completedCriteria([...(loaded.mission.completedSuccessCriteria ?? []), ...target], criteria.length);
+    } catch (error) { return failure('validation', error instanceof Error ? error.message : 'invalid success criterion index'); }
+    try {
+      const version = await this._store.save({ ...loaded.mission, completedSuccessCriteria: marked }, loaded.version);
+      const detail = request.criterion === 'all' ? `all ${criteria.length} success criteria marked complete` : `success criterion ${request.criterion} marked complete`;
+      await this._history?.append({
+        eventType: SUCCESS_CRITERIA_COMPLETED_EVENT,
+        eventData: JSON.stringify({ missionId: request.missionId, repositoryId: loaded.mission.repositoryId, message: `${request.missionId}: ${detail}`, criterion: request.criterion }),
+        createdAt: new Date().toISOString(),
+      });
+      return completed({ completed: marked, version }, [storeEvidence(request.missionId, 'success-criteria-completed', detail)]);
     } catch (error) { return writeFailure(error); }
   }
 

@@ -10,6 +10,8 @@ import {
 } from '../../../application/rebound-kernel.js';
 import {
   buildTypedMissionRecoveryAdvice,
+  isIncompleteSuccessCriteriaFailure,
+  buildSuccessCriteriaRecoveryAdvice,
   isTypedCheckpointEvidenceFailure,
   namedCheckpointFromTypedFailure,
 } from '../../../application/typed-mission-recovery-advice.js';
@@ -65,7 +67,9 @@ function buildRelaunchPrompt(errorMsg: string, slug: string, worktree: string, g
       `Fix the specific handoff verification failure shown above: fix the failing verification or test named in the captured output in ${worktree}, rerun that verification, and commit the fix.`,
       `Post-return action: px review ${slug} --submit.`,
     ].join('\n')
-    : isTypedCheckpointEvidenceFailure(errorMsg)
+    : isIncompleteSuccessCriteriaFailure(errorMsg)
+      ? buildSuccessCriteriaRecoveryAdvice(slug)
+      : isTypedCheckpointEvidenceFailure(errorMsg)
       ? buildTypedMissionRecoveryAdvice(slug, namedCheckpointFromTypedFailure(errorMsg) || 'CP-N')
       : [
       `${errorMsg.includes('No checkpoint documents found') ? 'Create CP-1.md' : 'Fix the final checkpoint document (CP-N.md)'} in ${missionDir} with a Goal Check table.`,

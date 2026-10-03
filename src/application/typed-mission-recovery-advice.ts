@@ -21,3 +21,17 @@ export function buildTypedMissionRecoveryAdvice(slug: string, checkpoint: string
     'Historical-import compatibility is separate: preserve existing historical mission documents and use `px import-legacy` when applicable; never fabricate checkpoint evidence from those documents.',
   ].join(' ');
 }
+
+export function isIncompleteSuccessCriteriaFailure(errorMsg: string): boolean {
+  return /Success criteria [\d, ]+ are incomplete before handoff\./i.test(errorMsg);
+}
+
+export function buildSuccessCriteriaRecoveryAdvice(slug: string): string {
+  return [
+    `Reload the Mission with \`px status ${slug}\` and read its current Version, success criteria and recorded evidence.`,
+    'Complete and verify the work for each incomplete criterion; mark only criteria actually verified against durable evidence.',
+    `Record each verified criterion with \`px mission mark-complete --slug ${slug} --criterion <index> --expected-version <n>\`, using its one-based index and the current Version.`,
+    'Reload status after each write before recording another criterion. The final checkpoint must evidence every criterion; completion flags do not replace evidence.',
+    'Do not create retired checkpoint documents. Let handoff verification rerun confirm the repair.',
+  ].join(' ');
+}

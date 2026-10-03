@@ -132,6 +132,15 @@ Mission to be done, specific enough to check. Checkpoint Goal Check rows and
 review verify against these; read them back with \`px status\`.
 `.trimStart();
 
+export const MISSION_HELP = `
+Usage:
+  px mission mark-complete [--slug <slug>] (--criterion <n> | --all) --expected-version <n>
+
+Mark one success criterion, by the index \`px status\` lists it with, or every
+criterion complete. Handoff requires every criterion complete and evidenced by
+a verifiable Goal Check row in the final checkpoint.
+`.trimStart();
+
 export const DEPENDS_HELP = `
 Usage:
   px depends add    [--slug <slug>] --on <slug> --expected-version <n>
@@ -256,6 +265,21 @@ export function createCriterionCommand(services: MissionWriteServices) {
     // A duplicate `add` is rejected by the domain, as for gates.
     const criteria = action === 'add' ? [...current, text] : current.filter((entry) => entry !== text);
     output(unwrap(await services.brief.setSuccessCriteria({ ...req, criteria }), `criterion ${action}`));
+  };
+}
+
+/** `px mission mark-complete (--criterion <n> | --all)` */
+export function createMissionCommand(services: MissionWriteServices) {
+  return async (args: string[] = []): Promise<void> => {
+    if (helped(args, MISSION_HELP)) { return; }
+    if (args[0] !== 'mark-complete') { fail(MISSION_HELP); }
+    const index = flag(args, '--criterion');
+    const all = args.includes('--all');
+    if (all === (index !== null)) { fail('give exactly one of --criterion <n> or --all'); }
+    const criterion = all ? 'all' : Number(index);
+    if (criterion !== 'all' && !/^\d+$/.test(index ?? '')) { fail(`--criterion must be a criterion number, got: ${index}`); }
+    const req = request(args, 'mission-mark-complete', services.resolveSlug);
+    output(unwrap(await services.brief.markSuccessCriteriaComplete({ ...req, criterion }), 'mark-complete'));
   };
 }
 

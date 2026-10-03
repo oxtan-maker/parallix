@@ -24,6 +24,7 @@ export const RECORDED_MISSION_LOAD = {
     checkpoints: [{ name: 'CP-1', goalCheck: [{ criterion: 'Workflow re-homed', evidence: 'src/application/handoff-command-use-case.ts' }], nextActionText: 'review' }],
     brief: { goal: 'g', why: 'w', scope: 's', outOfScope: [] },
     successCriteria: ['Workflow re-homed'],
+    completedSuccessCriteria: [0],
     declaredGates: ['npm run typecheck'],
   },
   version: 1,

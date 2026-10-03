@@ -147,6 +147,31 @@ describe('Handoff bounce', () => {
     assert.equal(reviewLoopStarted, false, 'the refreshed result reaches the gatekeeper-pushback branch');
   });
 
+  test('incomplete criteria bounce with an actionable completion prompt and reverify (TASK-2631)', async () => {
+    let handoffs = 0;
+    let launches = 0;
+    let reviewed = false;
+    const result = await runHandoffAndReview(SLUG, WORKTREE, 'codex', {
+      validateCheckpointsBeforeHandoffFn: () => ({ ok: true }),
+      performHandoff: async () => ++handoffs === 1
+        ? { ok: false, error: 'Success criteria 1 are incomplete before handoff.' }
+        : { ok: true },
+      startAgentFn: async (_step: string, opts: { prompt?: unknown }) => {
+        launches++;
+        const prompt = typeof opts.prompt === 'function' ? opts.prompt('codex') : String(opts.prompt);
+        assert.ok(prompt.includes(`px mission mark-complete --slug ${SLUG} --criterion <index> --expected-version <n>`));
+        assert.ok(prompt.includes('actually verified'));
+        return { agent: 'codex', result: { status: 0 } };
+      },
+      startReviewLoop: async () => { reviewed = true; },
+      log: () => {}, error: () => {},
+    });
+    assert.equal(result, true);
+    assert.equal(handoffs, 2);
+    assert.equal(launches, 1);
+    assert.equal(reviewed, true);
+  });
+
   test('SC4: the kernel carries the captured gate output into the bounce', async () => {
     let promptSeen = '';
     await runHandoffAndReview(SLUG, WORKTREE, 'codex', {

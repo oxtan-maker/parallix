@@ -1,3 +1,4 @@
+import { isIncompleteSuccessCriteriaFailure } from './typed-mission-recovery-advice.js';
 /**
  * ADR 0048 failure classification (single dispatch table).
  *
@@ -189,7 +190,8 @@ export function classifyError(errorMsg: string): { failureClass: FailureClassTyp
 }
 
 function classifyIncompleteEvidence(errorMsg: string): { failureClass: FailureClassType; dispatchAction: DispatchActionType } | null {
-  const matches = errorMsg.includes('"## Goal Check"') && errorMsg.includes('required before handoff')
+  const matches = isIncompleteSuccessCriteriaFailure(errorMsg)
+    || errorMsg.includes('"## Goal Check"') && errorMsg.includes('required before handoff')
     || errorMsg.includes('missing a') && errorMsg.includes('"## Goal Check" section')
     || errorMsg.includes('No checkpoint documents found') && errorMsg.includes('Goal Check table')
     || /declared\s+checkpoint\s+documents?\s+(are|is)\s+missing/i.test(errorMsg)

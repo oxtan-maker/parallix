@@ -59,6 +59,10 @@ async function runFakeLifecycleAgent(prompt: string, worktree?: string) {
       }
       if (recorded.status !== 'completed') { throw new Error(`fake checkpoint ${name} failed: ${recorded.error?.message}`); }
     }
+    const loaded = await missionServices.store.load(missionId(slug));
+    if (loaded.kind !== 'found') { throw new Error(`fake agent could not read ${slug}`); }
+    const completion = await missionServices.brief.markSuccessCriteriaComplete({ operationId: `fake-${slug}-complete`, missionId: missionId(slug), expectedVersion: loaded.version, capabilities: new Set(['mission:context']), criterion: 'all' });
+    if (completion.status !== 'completed') { throw new Error(`fake criterion completion failed: ${completion.error?.message}`); }
   }
 
   if (/^Mode: review\./m.test(prompt)) {

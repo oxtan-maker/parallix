@@ -111,6 +111,8 @@ export interface StatusMissionData {
   readonly declaredGates?: readonly string[];
   /** What must be true for the Mission to be done. */
   readonly successCriteria?: readonly string[];
+  /** Zero-based positions in `successCriteria` marked complete. */
+  readonly completedSuccessCriteria?: readonly number[];
   /** Missions this one depends on; recorded for readers, enforced by nothing. */
   readonly dependencies?: readonly string[];
   /** Every checkpoint in execution order, planned or evidenced, with its recorded Goal Check rows (empty while planned). */

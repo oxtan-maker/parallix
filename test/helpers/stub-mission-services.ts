@@ -45,7 +45,7 @@ export function stubRecordedMissionServices() {
             status: 'review', review: { rounds: [] },
             checkpoints: [{ name: 'CP-1', goalCheck: [{ criterion: 'handoff coverage', evidence: '`npm run typecheck`' }], nextActionText: 'review' }],
             brief: { goal: 'g', why: 'w', scope: 's', outOfScope: [] },
-            successCriteria: ['handoff coverage'], declaredGates: ['true'],
+            successCriteria: ['handoff coverage'], completedSuccessCriteria: [0], declaredGates: ['true'],
           },
           version: 1,
         };

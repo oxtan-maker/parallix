@@ -31,7 +31,7 @@ import {
 import { missionVersion, type MissionVersion } from '../../application/domain-ports.js';
 import { missionBrief, type MissionBrief } from '../../domain/mission-brief.js';
 import { declaredGates } from '../../domain/mission-gates.js';
-import { successCriteria } from '../../domain/mission-success-criteria.js';
+import { completedCriteria, successCriteria } from '../../domain/mission-success-criteria.js';
 import { missionDependencies } from '../../domain/mission-dependencies.js';
 import type { NelBucketLabel } from '../../domain/net-engineering-lines.js';
 
@@ -58,7 +58,7 @@ export interface MissionLabelRecord {
 export interface MissionBriefRecord { readonly mission_id: string; readonly goal: string; readonly why_text: string; readonly scope_text: string | null; }
 export interface MissionBriefOutOfScopeRecord { readonly mission_id: string; readonly position: number; readonly entry: string; }
 export interface MissionDeclaredGateRecord { readonly mission_id: string; readonly position: number; readonly command: string; }
-export interface MissionSuccessCriterionRecord { readonly mission_id: string; readonly position: number; readonly criterion: string; }
+export interface MissionSuccessCriterionRecord { readonly mission_id: string; readonly position: number; readonly criterion: string; readonly completed?: number; }
 export interface MissionDependencyRecord { readonly mission_id: string; readonly position: number; readonly depends_on_mission_id: string; }
 
 export interface MissionCheckpointRecord {
@@ -614,6 +614,10 @@ export function hydrateMission(records: MissionAggregateRecords): HydratedMissio
     brief: briefFrom(records),
     declaredGates: declaredGatesFrom(records),
     successCriteria: successCriteria((records.successCriteria ?? []).map(({ criterion }) => criterion)),
+    completedSuccessCriteria: completedCriteria(
+      (records.successCriteria ?? []).flatMap(({ completed }, index) => (completed === 1 ? [index] : [])),
+      (records.successCriteria ?? []).length,
+    ),
     dependencies: missionDependencies(
       (records.dependencies ?? []).map(({ depends_on_mission_id }) => depends_on_mission_id),
       missionId(records.mission.id),

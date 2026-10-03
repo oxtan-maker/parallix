@@ -21,13 +21,19 @@ import { buildDraftPrompt, resolveClassificationInstructions } from '../src/adap
 import { mkdtemp as registeredMkdtemp } from './helpers/temp-dir.js';
 import { KNOWN_COMMANDS } from '../src/interfaces/cli/runtime.js';
 import { missionBrief } from '../src/domain/mission-brief.js';
-import { ASSIGN_HELP, CHECKPOINT_HELP, CRITERION_HELP, GATE_HELP, GOAL_HELP, NEL_HELP, SCOPE_HELP } from '../src/interfaces/cli/mission-writes.js';
+import { ASSIGN_HELP, CHECKPOINT_HELP, CRITERION_HELP, GATE_HELP, GOAL_HELP, MISSION_HELP, NEL_HELP, SCOPE_HELP, createMissionCommand } from '../src/interfaces/cli/mission-writes.js';
 import { MissionDependencyViolation, missionDependencies } from '../src/domain/mission-dependencies.js';
 import { renderStatus, statusJson } from '../src/interfaces/cli/status.js';
 import { StatusMissionData, StatusResult } from '../src/application/ports/cli-workflows.js';
 import { materializeBacklogMission, missionStatusFromBacklog, type BacklogMissionRecord, type BacklogMissionSnapshot } from '../src/adapters/backlog/mission-materialization.js';
+import { carryCompletion, completedCriteria, MissionSuccessCriteriaViolation } from '../src/domain/mission-success-criteria.js';
+import { MissionBriefService, SUCCESS_CRITERIA_COMPLETED_EVENT } from '../src/application/mission-brief-service.js';
+import { missionVersion, type MissionStore } from '../src/application/domain-ports.js';
+import type { Mission } from '../src/domain/mission.js';
+import type { OperationalHistoryEntry } from '../src/application/ports/operation-history.js';
 import { agentFamily } from '../src/domain/agents.js';
 import { repositoryId } from '../src/domain/repository.js';
+import { buildSuccessCriteriaRecoveryAdvice } from '../src/application/typed-mission-recovery-advice.js';
 
 // no task ID in the legacy file (was test/checkpoint-document.test.ts)
 describe('Checkpoint document', () => {
@@ -315,10 +321,12 @@ describe('Prompt authority', () => {
     }
   });
 
-  test('the execute prompt reads Mission state and records only checkpoints', () => {
+  test('the execute prompt records checkpoint evidence and criterion completion (TASK-2631)', () => {
     const source = prompt('execute-core.md');
     assert.match(source, /px status \{\{slug\}\}/);
     assert.match(source, /px checkpoint record --name/);
+    assert.match(source, /px mission mark-complete --slug \{\{slug\}\} --criterion <index> --expected-version <n>/);
+    assert.match(source, /Recording checkpoint evidence does not mark criteria complete/);
     // An executing agent must not be able to rewrite the contract it is judged
     // against: goal, scope and gates are settled at draft.
     for (const write of [/px goal set/, /px scope set/, /px gate add/, /px gate remove/]) {
@@ -335,7 +343,7 @@ describe('Prompt authority', () => {
   test('no runtime prompt tells an agent to read or write a workflow file for Mission state', () => {
     for (const { name, source } of runtimePrompts()) {
       assert.doesNotMatch(source, /px context/, `${name} must not name the retired context command`);
-      assert.doesNotMatch(source, /px mission /, `${name} must not name the retired px mission namespace`);
+      assert.doesNotMatch(source.replaceAll('px mission mark-complete', 'criterion completion'), /px mission /, `${name} must not name the retired px mission namespace`);
       // Naming a workflow file even to deny it authority keeps it in the agent's
       // head as a place Mission state might live. The prompts must not mention
       // one at all.
@@ -360,7 +368,7 @@ describe('Typed Mission mutation parity', () => {
 
 
   /** Every typed write help, concatenated: the agent-facing write surface. */
-  const WRITE_SURFACE = [GOAL_HELP, SCOPE_HELP, CRITERION_HELP, GATE_HELP, NEL_HELP, CHECKPOINT_HELP, ASSIGN_HELP].join('\n');
+  const WRITE_SURFACE = [GOAL_HELP, SCOPE_HELP, CRITERION_HELP, MISSION_HELP, GATE_HELP, NEL_HELP, CHECKPOINT_HELP, ASSIGN_HELP].join('\n');
 
   type Mapping = readonly [legacyMutation: string, replacement: string, authority: 'px' | 'existing' | 'unsupported'];
 
@@ -390,7 +398,7 @@ describe('Typed Mission mutation parity', () => {
     ['scope and out-of-scope', 'px scope set', 'px'],
     ['predicted NEL bucket', 'px nel set', 'px'],
     ['confidence/selection note/drivers', 'unsupported: no consumer reads them; the predicted NEL bucket is the sizing signal handoff calibrates', 'unsupported'],
-    ['success criteria', 'px criterion add / px criterion remove', 'px'],
+    ['success criteria', 'px criterion add / px criterion remove / px mission mark-complete', 'px'],
     ['checkpoint plan', 'px checkpoint plan / px checkpoint unplan', 'px'],
     ['mission gates', 'px gate add / px gate remove', 'px'],
     ['mission activation/state transitions', 'existing px active / px review / px integrate transitions', 'existing'],
@@ -444,7 +452,7 @@ describe('Typed Mission mutation parity', () => {
     // Bidirectional: a write command that no parity row claims is an unaudited
     // mutation path, which is exactly what the audit exists to prevent.
     const claimed = new Set(MUTATION_PARITY.flatMap(([, replacement]) => [...pxCommands(replacement)]));
-    for (const command of ['goal', 'scope', 'criterion', 'gate', 'nel', 'checkpoint', 'assign', 'unassign']) {
+    for (const command of ['goal', 'scope', 'criterion', 'mission', 'gate', 'nel', 'checkpoint', 'assign', 'unassign']) {
       assert.ok(claimed.has(command), `px ${command} is dispatchable but no parity row claims it`);
     }
   });
@@ -711,5 +719,101 @@ describe('Backlog Mission materialization', () => {
     for (const [label, input, reason] of cases) {
       assert.deepEqual(materializeBacklogMission(input), { kind: 'unavailable', reason }, label);
     }
+  });
+});
+
+describe('Success criterion completion value', () => {
+  function fixture(completed: readonly number[] = []) {
+    let mission = {
+      id: missionId('task-2631'), repositoryId: repositoryId('repo'), status: 'active',
+      successCriteria: ['first', 'second', 'third'], completedSuccessCriteria: completed,
+    } as unknown as Mission;
+    let version = 1;
+    const store: MissionStore = {
+      load: async () => ({ kind: 'found', mission, version: missionVersion(version) }) as never,
+      save: async (next) => { mission = next; version += 1; return missionVersion(version); },
+    };
+    const history: OperationalHistoryEntry[] = [];
+    const service = new MissionBriefService(store, { append: async (entry) => { history.push(entry); } });
+    const mark = (criterion: number | 'all') => service.markSuccessCriteriaComplete({
+      operationId: 'op', missionId: missionId('task-2631'), capabilities: new Set(['mission:context']), criterion,
+    } as never);
+    return { mark, history, current: () => mission };
+  }
+
+  test('mark-complete marks one indexed criterion and records operational history, not a lane event (TASK-2631)', async () => {
+    const { mark, history, current } = fixture([0]);
+    const outcome = await mark(3);
+    assert.equal(outcome.status, 'completed');
+    assert.deepEqual(current().completedSuccessCriteria, [0, 2]);
+    assert.equal(history.length, 1);
+    assert.equal(history[0]?.eventType, SUCCESS_CRITERIA_COMPLETED_EVENT);
+    assert.match(history[0]?.eventData ?? '', /success criterion 3 marked complete/);
+  });
+
+  test('mark-complete all marks every criterion (TASK-2631)', async () => {
+    const { mark, current } = fixture();
+    assert.equal((await mark('all')).status, 'completed');
+    assert.deepEqual(current().completedSuccessCriteria, [0, 1, 2]);
+  });
+
+  test('mark-complete rejects invalid indexes and writes nothing (TASK-2631)', async () => {
+    const { mark, history, current } = fixture();
+    for (const bad of [0, 4, -1, 1.5, Number.NaN]) {
+      const outcome = await mark(bad);
+      assert.notEqual(outcome.status, 'completed', `index ${bad}`);
+    }
+    assert.deepEqual(current().completedSuccessCriteria, []);
+    assert.equal(history.length, 0);
+  });
+
+  test('px status renders each criterion with its index and [X] or [ ] (TASK-2631)', () => {
+    const lines: string[] = [];
+    renderStatus({
+      slug: 'task-2631', branch: 'mission/task-2631',
+      missionData: { successCriteria: ['first', 'second'], completedSuccessCriteria: [1] } as unknown as StatusMissionData,
+      staleWorktrees: [], agents: [], lastThreeCommits: [], uncommittedCount: 0,
+    } as unknown as StatusResult, (message) => lines.push(message));
+    assert.ok(lines.includes('  1. [ ] first'), lines.join(' | '));
+    assert.ok(lines.includes('  2. [X] second'), lines.join(' | '));
+  });
+
+  test('completedCriteria sorts, dedupes and rejects positions outside the list (TASK-2631)', () => {
+    assert.deepEqual(completedCriteria([2, 0, 2], 3), [0, 2]);
+    assert.throws(() => completedCriteria([3], 3), MissionSuccessCriteriaViolation);
+    assert.throws(() => completedCriteria([-1], 3), /out of range/);
+  });
+
+  test('carryCompletion keeps completion only for criteria whose text survives (TASK-2631)', () => {
+    assert.deepEqual(carryCompletion(['a', 'b', 'c'], [1, 2], ['c', 'x', 'b']), [0, 2]);
+    assert.deepEqual(carryCompletion(['a'], [], ['a', 'b']), []);
+  });
+
+  test('mission mark-complete CLI maps its exclusive indexed and all forms to the completion service (TASK-2631)', async () => {
+    const received: Array<Record<string, unknown>> = [];
+    const command = createMissionCommand({
+      brief: { markSuccessCriteriaComplete: async (request: Record<string, unknown>) => {
+        received.push(request);
+        return { status: 'completed', value: { completed: [0], version: missionVersion(8) } };
+      } },
+      resolveSlug: () => 'task-2631',
+    } as never);
+
+    await command(['mark-complete', '--criterion', '2', '--expected-version', '7']);
+    await command(['mark-complete', '--all', '--expected-version', '7']);
+    assert.deepEqual(received.map((request) => request.criterion), [2, 'all']);
+    assert.equal(received[0]?.missionId, missionId('task-2631'));
+
+    await assert.rejects(command(['wrong']), /Usage:/);
+    await assert.rejects(command(['mark-complete', '--expected-version', '7']), /exactly one/);
+    await assert.rejects(command(['mark-complete', '--criterion', '2', '--all', '--expected-version', '7']), /exactly one/);
+    await assert.rejects(command(['mark-complete', '--criterion', 'two', '--expected-version', '7']), /criterion number/);
+    await command(['--help']);
+  });
+
+  test('incomplete-success-criteria recovery advice uses the indexed completion command (TASK-2631)', () => {
+    const advice = buildSuccessCriteriaRecoveryAdvice('task-2631');
+    assert.match(advice, /px status task-2631/);
+    assert.match(advice, /px mission mark-complete --slug task-2631 --criterion <index> --expected-version <n>/);
   });
 });

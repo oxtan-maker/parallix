@@ -538,6 +538,7 @@ describe("task-2561 handoff and push-gate regressions", () => {
               checkpoints: [{ name: 'CP-1', goalCheck: [{ criterion: 'works', evidence: 'src/application/handoff-command-use-case.ts:1' }], nextActionText: 'review' }],
               brief: { goal: 'g', why: 'w', scope: 's', outOfScope: [] },
               successCriteria: ['works'],
+              completedSuccessCriteria: [0],
               declaredGates: ['npm test'],
             },
             version: 4,

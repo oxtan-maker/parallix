@@ -72,6 +72,7 @@ import {
   createCheckpointCommand,
   createGateCommand,
   createCriterionCommand,
+  createMissionCommand,
   createDependsCommand,
   createNelCommand,
   createGoalCommand,
@@ -310,6 +311,7 @@ function createCommandRegistry(rootDir: string): Record<string, Command> {
       return result.ok ? null : result.error;
     })(args)),
     criterion: (args) => withGraph(services => createCriterionCommand(missionWrites(services))(args)),
+    mission: (args) => withGraph(services => createMissionCommand(missionWrites(services))(args)),
     depends: (args) => withGraph(services => createDependsCommand(missionWrites(services))(args)),
     nel: (args) => withGraph(services => createNelCommand(missionWrites(services))(args)),
     checkpoint: (args) => withGraph(services => createCheckpointCommand(missionWrites(services).checkpoints, (explicit) => inferSlug(explicit))(args)),

@@ -626,13 +626,14 @@ test('a Mission drafted through the typed verbs with no recorded gate fails hand
 });
 
 
-test('a typed-verb Mission cannot hand off while a success criterion has no row in the final checkpoint', async () => {
-  const load = (criteria: readonly string[]) => async () => ({
+test('a typed-verb Mission requires completion and one verifiable row per criterion without matching criterion prose (TASK-2631)', async () => {
+  const load = (criteria: readonly string[], goalCheck = [{ criterion: 'The  greeting is  fixed', evidence: '`test/handoff-use-case.test.ts`' }]) => async () => ({
     kind: 'found',
     mission: {
-      checkpoints: [{ name: 'CP-1', goalCheck: [{ criterion: 'The  greeting is  fixed', evidence: '`test/handoff-use-case.test.ts`' }], nextAction: 'review' }],
+      checkpoints: [{ name: 'CP-1', goalCheck, nextAction: 'review' }],
       brief: DRAFTED_BRIEF,
       successCriteria: criteria,
+      completedSuccessCriteria: criteria.map((_, index) => index),
       // No gate recorded: a run that gets past the criteria check stops there,
       // which proves the criteria check passed without running the full handoff.
       declaredGates: [],
@@ -644,24 +645,18 @@ test('a typed-verb Mission cannot hand off while a success criterion has no row 
   const missing = await new HandoffCommandUseCase(makePorts(recorder, contractServices(load(['The greeting is fixed', 'Nothing else changes']))))
     .performHandoff(SLUG, runOptions(recorder));
   assert.equal(missing.ok, false);
-  assert.match(missing.error ?? '', /Success-criterion evidence is missing before handoff in CP-1: "Nothing else changes"/);
+  assert.match(missing.error ?? '', /2 completed criteria require 2 Goal Check row/);
   assert.equal(classifyError(missing.error ?? '').dispatchAction, 'AutoSendBack', 'the gap is sent back to the implementer');
 
-  // Matching ignores case and runs of whitespace, never wording.
+  // Completion indexes provide the criterion identity, so checkpoint labels do
+  // not have to reproduce criterion text.
   const coveredRecorder = makeRecorder();
-  const covered = await new HandoffCommandUseCase(makePorts(coveredRecorder, contractServices(load(['the greeting is fixed']))))
+  const covered = await new HandoffCommandUseCase(makePorts(coveredRecorder, contractServices(load(
+    ['the greeting is fixed'],
+    [{ criterion: 'browser behavior', evidence: '`test/handoff-use-case.test.ts`' }],
+  ))))
     .performHandoff(SLUG, runOptions(coveredRecorder));
   assert.match(covered.error ?? '', /no recorded verification gate/, 'every criterion was evidenced, so handoff moved on to the gates');
-
-  // A row copied from the numbered `px status` list still names its criterion.
-  const numberedRecorder = makeRecorder();
-  const numbered = await new HandoffCommandUseCase(makePorts(numberedRecorder, contractServices(async () => ({
-    ...(await load(['The greeting is fixed'])()),
-    mission: { ...(await load(['The greeting is fixed'])()).mission,
-      checkpoints: [{ name: 'CP-1', goalCheck: [{ criterion: '1. The greeting is fixed', evidence: '`test/handoff-use-case.test.ts`' }], nextAction: 'review' }] },
-  }))))
-    .performHandoff(SLUG, runOptions(numberedRecorder));
-  assert.match(numbered.error ?? '', /no recorded verification gate/, 'the list number is not part of the criterion');
 });
 
 test('a typed-verb Mission whose recorded evidence cites nothing verifiable is sent back to the implementer', async () => {
@@ -672,6 +667,7 @@ test('a typed-verb Mission whose recorded evidence cites nothing verifiable is s
       checkpoints: [{ name: 'CP-1', goalCheck: [{ criterion: 'works', evidence: 'it works, trust me' }], nextAction: 'review' }],
       brief: DRAFTED_BRIEF,
       successCriteria: ['works'],
+      completedSuccessCriteria: [0],
       declaredGates: ['npm test'],
     },
     version: 4,

@@ -1,8 +1,8 @@
 ---
 id: TASK-2631
 title: success criteria get completion checkboxes instead of verbatim evidence matching
-status: backlog
-assignee: []
+status: done
+assignee: [codex]
 created_date: '2026-10-02 09:00'
 labels: [ai_sdlc]
 dependencies: []

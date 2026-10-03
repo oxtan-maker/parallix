@@ -11,7 +11,7 @@ import type { MissionNelRecord } from '../../domain/net-engineering-lines.js';
 import { missionTitle, type Mission, type MissionId } from '../../domain/mission.js';
 import { missionBrief } from '../../domain/mission-brief.js';
 import { declaredGates } from '../../domain/mission-gates.js';
-import { successCriteria } from '../../domain/mission-success-criteria.js';
+import { completedCriteria, successCriteria } from '../../domain/mission-success-criteria.js';
 import { missionDependencies } from '../../domain/mission-dependencies.js';
 import type { KnownRepository, RepositoryId } from '../../domain/repository.js';
 import type { ReviewerDecision } from '../../domain/review.js';
@@ -177,7 +177,7 @@ export class SqliteMissionStore implements MissionStore, MissionNelRecorder {
         this.db.query<MissionBriefRecord>('SELECT mission_id, goal, why_text, scope_text FROM mission_briefs WHERE mission_id = ?', [id]),
         this.db.query<MissionBriefOutOfScopeRecord>('SELECT mission_id, position, entry FROM mission_brief_out_of_scope WHERE mission_id = ? ORDER BY position', [id]),
         this.db.query<MissionDeclaredGateRecord>('SELECT mission_id, position, command FROM mission_declared_gates WHERE mission_id = ? ORDER BY position', [id]),
-        this.db.query<MissionSuccessCriterionRecord>('SELECT mission_id, position, criterion FROM mission_success_criteria WHERE mission_id = ? ORDER BY position', [id]),
+        this.db.query<MissionSuccessCriterionRecord>('SELECT mission_id, position, criterion, completed FROM mission_success_criteria WHERE mission_id = ? ORDER BY position', [id]),
         this.db.query<MissionDependencyRecord>('SELECT mission_id, position, depends_on_mission_id FROM mission_dependencies WHERE mission_id = ? ORDER BY position', [id]),
         this.db.query<MissionCheckpointRecord>(
           `SELECT mission_id, position, checkpoint_mission_id, name, raw_filename,
@@ -426,6 +426,9 @@ export class SqliteMissionStore implements MissionStore, MissionNelRecorder {
     if (mission.successCriteria && mission.successCriteria.length > 0) {
       mission = { ...mission, successCriteria: successCriteria(mission.successCriteria) };
     }
+    if (mission.completedSuccessCriteria && mission.completedSuccessCriteria.length > 0) {
+      mission = { ...mission, completedSuccessCriteria: completedCriteria(mission.completedSuccessCriteria, mission.successCriteria?.length ?? 0) };
+    }
     if (mission.dependencies && mission.dependencies.length > 0) {
       mission = { ...mission, dependencies: missionDependencies(mission.dependencies, mission.id) };
     }
@@ -548,8 +551,8 @@ export class SqliteMissionStore implements MissionStore, MissionNelRecorder {
     }
     for (const [position, criterion] of (mission.successCriteria ?? []).entries()) {
       await this.db.execute(
-        'INSERT INTO mission_success_criteria (mission_id, position, criterion) VALUES (?, ?, ?)',
-        [mission.id, position, criterion],
+        'INSERT INTO mission_success_criteria (mission_id, position, criterion, completed) VALUES (?, ?, ?, ?)',
+        [mission.id, position, criterion, (mission.completedSuccessCriteria ?? []).includes(position) ? 1 : 0],
       );
     }
     if (mission.externalTaskRef) {

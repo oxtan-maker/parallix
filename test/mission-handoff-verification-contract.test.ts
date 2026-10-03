@@ -8,7 +8,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { mockModule, installModuleMocks } from './lib/module-mock.js';
-import { stubRecordedMissionServices } from './helpers/stub-mission-services.js';
+import { stubMissionServices, stubRecordedMissionServices } from './helpers/stub-mission-services.js';
 const verifyHandoffModule = mockModule<typeof import('../src/adapters/cli/commands/handoff.js')>('../src/adapters/cli/commands/handoff.js', import.meta.url);
 const git = mockModule<typeof import('../src/adapters/git/git.js')>('../src/adapters/git/git.js', import.meta.url);
 const missionUtils = mockModule<typeof import('../src/adapters/filesystem/mission-utils.js')>('../src/adapters/filesystem/mission-utils.js', import.meta.url);
@@ -65,6 +65,33 @@ function setupMocks() {
 }
 
 const mockRebase = async () => ({ ok: true, sharedFileConflicts: false });
+
+function recordedMissionServices({
+  criteria = ['handoff coverage'],
+  completed = criteria.map((_, index) => index),
+  goalCheck = [{ criterion: 'handoff coverage', evidence: '`npm run typecheck`' }],
+}: {
+  criteria?: string[];
+  completed?: number[];
+  goalCheck?: { criterion: string; evidence: string }[];
+} = {}) {
+  return stubMissionServices({
+    store: {
+      async load() {
+        return {
+          kind: 'found' as const,
+          mission: {
+            status: 'review', review: { rounds: [] },
+            checkpoints: [{ name: 'CP-1', goalCheck, nextActionText: 'review' }],
+            brief: { goal: 'g', why: 'w', scope: 's', outOfScope: [] },
+            successCriteria: criteria, completedSuccessCriteria: completed, declaredGates: ['true'],
+          },
+          version: 1,
+        };
+      },
+    },
+  });
+}
 
 function cleanup() {
   fs.rmSync(WORKTREE, { recursive: true, force: true });
@@ -189,5 +216,55 @@ test('performHandoff fails when git push fails', async (t) => {
   assert.strictEqual(result.ok, false);
   assert.match(result.error, /Failed to push Backlog transition/);
   assert.match(result.error, /Unable to create .git\/index\.lock: No space left on device/);
+  cleanup();
+});
+
+test('performHandoff accepts completed criteria with paraphrased verifiable evidence rows (TASK-2631)', async () => {
+  setupMocks();
+  const result = await performHandoff(TEST_SLUG, {
+    worktree: WORKTREE,
+    skipGate: true,
+    error: () => {},
+    rebaseFn: mockRebase,
+    missionServicesFn: recordedMissionServices({
+      criteria: ['the long stored criterion', 'another stored criterion'],
+      goalCheck: [
+        { criterion: 'database behavior', evidence: '`npm run typecheck`' },
+        { criterion: 'user-visible result', evidence: 'test/mission-handoff-verification-contract.test.ts' },
+      ],
+    }),
+  });
+  assert.strictEqual(result.ok, true);
+  cleanup();
+});
+
+test('performHandoff rejects incomplete success criteria before handoff (TASK-2631)', async () => {
+  setupMocks();
+  const result = await performHandoff(TEST_SLUG, {
+    worktree: WORKTREE,
+    skipGate: true,
+    error: () => {},
+    rebaseFn: mockRebase,
+    missionServicesFn: recordedMissionServices({ criteria: ['first', 'second'], completed: [0] }),
+  });
+  assert.strictEqual(result.ok, false);
+  assert.match(result.error, /Success criteria 2 are incomplete/);
+  cleanup();
+});
+
+test('performHandoff rejects completed criteria lacking one evidence row each (TASK-2631)', async () => {
+  setupMocks();
+  const result = await performHandoff(TEST_SLUG, {
+    worktree: WORKTREE,
+    skipGate: true,
+    error: () => {},
+    rebaseFn: mockRebase,
+    missionServicesFn: recordedMissionServices({
+      criteria: ['first', 'second'],
+      goalCheck: [{ criterion: 'only one row', evidence: '`npm run typecheck`' }],
+    }),
+  });
+  assert.strictEqual(result.ok, false);
+  assert.match(result.error, /2 completed criteria require 2 Goal Check row/);
   cleanup();
 });

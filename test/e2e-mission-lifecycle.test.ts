@@ -179,6 +179,10 @@ if (/^Mode: execute after lock\\./m.test(prompt)) {
         '--next', next, '--expected-version', version]);
     }
   }
+  const completionVersion = missionVersion(slug);
+  if (completionVersion !== null) {
+    px(['mission', 'mark-complete', '--slug', slug, '--all', '--expected-version', completionVersion]);
+  }
 }
 
 if (/^Mode: review\\./m.test(prompt)) {

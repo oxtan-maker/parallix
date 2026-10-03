@@ -395,9 +395,9 @@ export async function createMissionApplicationServices(
       : undefined,
   });
 
+  const { SqliteOperationalHistoryRepository } = await import('../adapters/sqlite/operational-history-repository.js');
   const store = new SqliteMissionStore(db);
   const lifecycle = new MissionLifecycleService(store);
-  const { SqliteOperationalHistoryRepository } = await import('../adapters/sqlite/operational-history-repository.js');
   const operationalHistory = new (await import('../application/services/operational-history-service.js')).OperationalHistoryService(new SqliteOperationalHistoryRepository(db));
   return {
     store,
@@ -407,7 +407,7 @@ export async function createMissionApplicationServices(
     lifecycle,
     integration: new MissionIntegrationService(store),
     checkpoints: new MissionCheckpointService(store),
-    brief: new MissionBriefService(store),
+    brief: new MissionBriefService(store, new SqliteOperationalHistoryRepository(db)),
     assignment: new MissionAssignmentService(store),
     handoff: new MissionHandoffService(store, store),
   };

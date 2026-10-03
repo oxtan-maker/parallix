@@ -62,3 +62,15 @@ test('task-1383: incomplete-evidence compatibility prompts remain evidence-speci
   assert.ok(prompt.includes(errorMsg), 'Prompt should retain the failed checkpoint evidence');
   assert.ok(prompt.includes('Classification: IncompleteEvidence — AutoSendBack'));
 });
+
+
+test('incomplete success criteria receive a typed completion repair (TASK-2631)', () => {
+  const diagnostic = 'Success criteria 1 are incomplete before handoff. Mark every criterion complete with `px mission mark-complete --criterion <index>` (or `--all`) before handoff.';
+  const classified = repairHandoff.classifyError(diagnostic);
+  assert.equal(classified.failureClass, 'IncompleteEvidence');
+  assert.equal(classified.dispatchAction, 'AutoSendBack');
+  const prompt = repairHandoff.buildRelaunchPrompt(diagnostic, 'task-2631', '/tmp/worktree');
+  assert.ok(prompt.includes('px mission mark-complete --slug task-2631 --criterion <index> --expected-version <n>'));
+  assert.ok(!prompt.includes('CP-N.md'));
+  assert.ok(prompt.includes('actually verified'));
+});

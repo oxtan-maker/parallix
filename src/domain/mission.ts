@@ -94,6 +94,8 @@ export interface MissionData {
   readonly declaredGates?: readonly string[];
   /** What must be true for the mission to be done. Empty until the draft records them. */
   readonly successCriteria?: readonly string[];
+  /** Zero-based positions in `successCriteria` marked complete. Empty until marked. */
+  readonly completedSuccessCriteria?: readonly number[];
   /**
    * Missions this one is recorded as depending on. Read by operators and agents
    * only: no lifecycle, activation or scheduling rule consumes them.
@@ -194,6 +196,7 @@ export function intakeMission(intake: MissionIntake): OpenMission {
     brief: null,
     declaredGates: [],
     successCriteria: [],
+    completedSuccessCriteria: [],
     dependencies: [],
     predictedNelBucket: null,
     reproductionTest: null,

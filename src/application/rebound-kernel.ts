@@ -1,3 +1,4 @@
+import { isIncompleteSuccessCriteriaFailure, buildSuccessCriteriaRecoveryAdvice } from './typed-mission-recovery-advice.js';
 /**
  * Rebound kernel (TASK-2377.03).
  *
@@ -530,7 +531,9 @@ function promptSlotsFor(reason: ReboundReason, slug: string): Pick<FixPromptSlot
       return {
         area: 'handoff',
         facts: [['Handoff error', reason.error]],
-        remedy: `Fix the underlying issue so handoff verification passes.`,
+        remedy: isIncompleteSuccessCriteriaFailure(reason.error)
+          ? buildSuccessCriteriaRecoveryAdvice(slug)
+          : `Fix the underlying issue so handoff verification passes.`,
       };
     case 'declared-gate-validation':
       return {

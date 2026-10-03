@@ -69,7 +69,7 @@ async function loadRecordedContract(
   missionDirPath: string,
   slug: string,
 ): Promise<
-  | { ok: true; draftedInDb: boolean; checkpoints: readonly CheckpointData[]; successCriteria: readonly string[]; gates: readonly string[] }
+  | { ok: true; draftedInDb: boolean; checkpoints: readonly CheckpointData[]; successCriteria: readonly string[]; completedSuccessCriteria: readonly number[]; gates: readonly string[] }
   | { ok: false; error: string }
 > {
   try {
@@ -86,6 +86,7 @@ async function loadRecordedContract(
       draftedInDb: Boolean(mission.brief),
       checkpoints: mission.checkpoints.filter(({ goalCheck }) => goalCheck.length > 0),
       successCriteria: mission.successCriteria ?? [],
+      completedSuccessCriteria: mission.completedSuccessCriteria ?? [],
       gates: mission.declaredGates ?? [],
     };
   } catch (cause) {
@@ -951,15 +952,20 @@ export class HandoffCommandUseCase {
         error(msg);
         return { ok: false, error: msg };
       }
-      // The final checkpoint evidences every success criterion, one row named
-      // after each; without this the criteria would only be advice.
-      const named = (text: string) => text.trim().replace(/\s+/g, ' ').toLowerCase();
-      // `px status` numbers the criteria it lists; a row copied with that list
-      // number still names the criterion.
-      const evidenced = new Set(latest.goalCheck.map((row) => named(row.criterion.trim().replace(/^\d+\.\s+/, ''))));
-      const unevidenced = contract.successCriteria.filter((criterion) => !evidenced.has(named(criterion)));
-      if (unevidenced.length > 0) {
-        const msg = `Success-criterion evidence is missing before handoff in ${latest.name}: ${unevidenced.map((criterion) => `"${criterion}"`).join(', ')}. Re-record ${latest.name} with \`px checkpoint record\`, one --criterion per success criterion, named exactly as \`px status\` reports it.`;
+      const incomplete = contract.successCriteria.flatMap((_, index) => (
+        contract.completedSuccessCriteria.includes(index) ? [] : [index + 1]
+      ));
+      if (incomplete.length > 0) {
+        const msg = `Success criteria ${incomplete.join(', ')} are incomplete before handoff. Mark every criterion complete with \`px mission mark-complete --criterion <index> --expected-version <n>\` (or \`--all\`) before handoff.`;
+        error(msg);
+        return { ok: false, error: msg };
+      }
+      // Completion is deliberately addressed by the stored criterion index,
+      // rather than prose copied into a checkpoint row. A completed criterion
+      // still needs its own evidence row, but the row's descriptive label is
+      // not another identity field to match.
+      if (latest.goalCheck.length < contract.successCriteria.length) {
+        const msg = `Success-criterion evidence is missing before handoff in ${latest.name}: ${contract.successCriteria.length} completed criteria require ${contract.successCriteria.length} Goal Check row(s), but only ${latest.goalCheck.length} were recorded. Re-record ${latest.name} with \`px checkpoint record\` and verifiable evidence for every completed criterion.`;
         error(msg);
         return { ok: false, error: msg };
       }

@@ -92,7 +92,7 @@ export function runSonar(options: { rootDir?: string, spawn?: typeof spawnSync, 
   const branch = options.branch ?? resolveSonarBranch(rootDir);
   // Lockfile-pinned scanner (devDependency `sonar-scanner`), never `npx --yes`.
   const scannerBin = path.join(rootDir, 'node_modules', '.bin', 'sonar-scanner');
-  if (!fs.existsSync(scannerBin)) { throw new Error('sonar-scanner is not installed. Run `npm ci` before running `npm run sonar`.'); }
+  if (!options.spawn && !fs.existsSync(scannerBin)) { throw new Error('sonar-scanner is not installed. Run `npm ci` before running `npm run sonar`.'); }
   const scannerHome = path.join(rootDir, 'tmp', 'sonar');
   fs.mkdirSync(scannerHome, { recursive: true });
   const result = (options.spawn || spawnSync)(scannerBin, [

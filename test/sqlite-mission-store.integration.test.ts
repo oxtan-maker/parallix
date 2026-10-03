@@ -165,6 +165,7 @@ function completeMission(overrides: Partial<Mission> = {}): Mission {
     },
     declaredGates: ['./scripts/verify-local.sh all', 'npm test'],
     successCriteria: ['The aggregate survives a restart', 'Stale writes are rejected'],
+    completedSuccessCriteria: [1],
     dependencies: ['task-2521.01', 'task-2521.03'],
     predictedNelBucket: 'Medium',
     reproductionTest: 'test/task-2294-repro.test.ts',
@@ -189,6 +190,45 @@ afterEach(() => {
 });
 
 describe('SQLite Mission aggregate integration', () => {
+  it('migrates stored success criteria as incomplete and keeps their text (TASK-2631)', async () => {
+    const database = await openDatabase();
+    try {
+      const migrations = loadDefaultMigrations();
+      const before = migrations.filter((migration) => !migration.id.startsWith('0029-'));
+      assert.ok(before.length < migrations.length, 'the completion migration must exist');
+      await new SqliteMigrationRunner(database).applyPending(before);
+      const store = new SqliteMissionStore(database);
+      await store.save(completeMission({ successCriteria: [], completedSuccessCriteria: [] }), null);
+      for (const [position, criterion] of ['The aggregate survives a restart', 'Stale writes are rejected'].entries()) {
+        await database.execute(
+          'INSERT INTO mission_success_criteria (mission_id, position, criterion) VALUES (?, ?, ?)',
+          [testMissionId, position, criterion],
+        );
+      }
+      await new SqliteMigrationRunner(database).applyPending(migrations);
+      const loaded = await store.load(testMissionId);
+      assert.equal(loaded.kind, 'found');
+      assert.deepEqual(loaded.mission.successCriteria, ['The aggregate survives a restart', 'Stale writes are rejected']);
+      assert.deepEqual(loaded.mission.completedSuccessCriteria, []);
+    } finally {
+      await database.close();
+    }
+  });
+
+  it('persists completed success criteria by position (TASK-2631)', async () => {
+    const database = await migratedDatabase();
+    try {
+      const store = new SqliteMissionStore(database);
+      const version = await store.save(completeMission({ completedSuccessCriteria: [0] }), null);
+      const loaded = await store.load(testMissionId);
+      assert.equal(loaded.kind, 'found');
+      assert.deepEqual(loaded.mission.completedSuccessCriteria, [0]);
+      await assert.rejects(store.save(completeMission({ completedSuccessCriteria: [2] }), version), /out of range/);
+    } finally {
+      await database.close();
+    }
+  });
+
   it('uses normalized domain-shaped tables and keeps repository observations separate', async () => {
     const database = await migratedDatabase();
     try {

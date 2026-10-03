@@ -54,6 +54,7 @@ export function statusJson(result: StatusResult): string {
     brief: md?.brief ?? null,
     declaredGates: md?.declaredGates ?? [],
     successCriteria: md?.successCriteria ?? [],
+    completedSuccessCriteria: md?.completedSuccessCriteria ?? [],
     dependencies: md?.dependencies ?? [],
     checkpoints: md?.checkpoints ?? [],
     predictedNelBucket: md?.predictedNelBucket ?? null,
@@ -130,7 +131,8 @@ function logBriefAndGates(missionData: StatusMissionData, log: (_msg: string) =>
   const criteria = missionData.successCriteria ?? [];
   if (criteria.length > 0) {
     log('Success criteria:');
-    for (const [index, criterion] of criteria.entries()) { log(`  ${index + 1}. ${criterion}`); }
+    const done = new Set(missionData.completedSuccessCriteria ?? []);
+    for (const [index, criterion] of criteria.entries()) { log(`  ${index + 1}. [${done.has(index) ? 'X' : ' '}] ${criterion}`); }
   } else {
     log('Success criteria: none');
   }

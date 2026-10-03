@@ -32,6 +32,7 @@ export const KNOWN_COMMANDS: string[] = [
   'scope',
   'gate',
   'criterion',
+  'mission',
   'depends',
   'nel',
   'checkpoint',
@@ -279,6 +280,7 @@ ${fmt.bold('Advanced Commands:')}
   scope set --scope <t> [--out-of-scope <t> ...]  Bound a Mission that already has a goal.
   gate add|remove --command <cmd>     Declare or drop one verification gate.
   criterion add|remove --text <t>     Record or drop one success criterion.
+  mission mark-complete --criterion <n>|--all  Mark one indexed success criterion, or all, complete.
   depends add|remove --on <slug>       Record or drop one Mission-to-Mission dependency; nothing enforces it.
   nel set --predicted <bucket>        Record the draft's predicted NEL bucket (Small|Medium|Large).
   repro set --test <path> | repro clear  Record the bug mission's red-to-green reproduction test.

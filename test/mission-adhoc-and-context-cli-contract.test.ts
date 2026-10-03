@@ -199,7 +199,9 @@ describe('Ad hoc lifecycle', () => {
       ['CP-1', 'Execute artifacts committed', 'Run review.'],
       ['CP-2', 'The lifecycle reaches integration through the real CLI', 'Approve the mission in review.'],
     ].map(([name, criterion, next]) => ['checkpoint', 'record', '--name', name,
-      '--criterion', criterion, '--evidence', 'deliverable.txt:1', '--next', next]));
+      '--criterion', criterion, '--evidence', 'deliverable.txt:1', '--next', next]).concat([
+      ['mission', 'mark-complete', '--all'],
+    ]));
   }
 
   if (/^Mode: review\\./m.test(prompt)) {

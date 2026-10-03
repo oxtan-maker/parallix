@@ -558,7 +558,15 @@ The workflow harness automatically recovers from routine handoff hygiene issues 
 Automatic repair is refused and the harness stops if:
 - Git reports unmerged or conflicting files.
 - Rebase requires manual conflict resolution or agent assistance for shared files.
-- Handoff fails for non-hygiene reasons (missing checkpoints, missing `## Goal Check` evidence, failed verification gates).
+- Handoff fails for a genuine infrastructure or state-transition blocker.
+
+Missing checkpoint evidence, incomplete success criteria, and failed verification
+gates bounce to the implementer within the repair budget. For incomplete criteria,
+the implementer reloads `px status <slug>`, verifies the work, and records completion
+with `px mission mark-complete --slug <slug> --criterion <index> --expected-version <n>`.
+The index is one-based and the version comes from current status; reload it after
+each write. Completion flags and final checkpoint evidence are both required.
+The same handoff check must pass after repair.
 
 ### Pre-review bounce policy — verified fixes and a per-failure budget
 

@@ -176,6 +176,7 @@ function seedMission(slug: string, review: Review): Mission {
     brief: { goal: 'Ship the fixture feature', why: 'The fixture needs it', scope: 'feature.txt', outOfScope: [] },
     declaredGates: [':'],
     successCriteria: ['feature ships'],
+    completedSuccessCriteria: [0],
     dependencies: [],
     predictedNelBucket: 'Small',
     reproductionTest: null,
