@@ -1,8 +1,8 @@
 ---
 id: TASK-2635
 title: lates block change was to permissive
-status: backlog
-assignee: []
+status: done
+assignee: [codex]
 created_date: '2026-10-02 12:11'
 labels: []
 dependencies: []

@@ -67,6 +67,12 @@ function clipContext(text: string, index: number, length: number) {
   return text.slice(before, after);
 }
 
+function isQuotedLimitPhrase(text: string, index: number, length: number) {
+  const opening = text[index - 1];
+  const closing = text[index + length];
+  return (opening === '"' || opening === '“') && (closing === '"' || closing === '”');
+}
+
 const ISO_PATTERN = /(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2})(?::(\d{2}))?(?:\.\d+)?(Z|[+-]\d{2}:?\d{2})?/;
 const MONTH_DAY_UTC_PATTERN = /\b(\d{2})-(\d{2})\s+([01]\d|2[0-3]):([0-5]\d)(?::([0-5]\d))?\s*UTC\b/i;
 const TWELVE_HOUR_PATTERN = /\b(\d{1,2})(?::(\d{2}))?\s*(am|pm|AM|PM)\b/;
@@ -211,6 +217,10 @@ interface DetectLimitHitOptions {
 }
 
 function matchedLimitHit(agent: string, combined: string, match: any, now: Date) {
+  // A failed launcher can contain an agent's review of a transcript. Reject a
+  // complete quoted match so that review prose cannot persist a family block;
+  // bare provider messages remain positive limit-hit evidence.
+  if (isQuotedLimitPhrase(combined, match.index, match.length)) {return null;}
   const matchedText = combined.slice(match.index, match.index + match.length);
   if (agent === 'qwen' && /\b403\b[^\n]*?\baccess to model denied\b/i.test(matchedText)) {
     // A model-level 403 means this invocation cannot use its selected model.
@@ -265,6 +275,7 @@ function detectLimitHit({
 
   if (match) {
     const detected = matchedLimitHit(agent, combined, match, now);
+    if (!detected) {return null;}
     if ('reroute' in detected) { return detected; }
     ({ target, source, reason } = detected);
   } else if (signal !== null && signal !== undefined) {

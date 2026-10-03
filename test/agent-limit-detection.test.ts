@@ -285,6 +285,26 @@ describe('Limit-hit detection', () => {
     assert.equal(result, null);
   });
 
+  test('detectLimitHit blocks a reported Claude session limit and ignores a quoted review phrase (TASK-2635)', () => {
+    const now = new Date('2026-10-02T12:00:00+02:00');
+    const hit = detectLimitHit({
+      agent: 'claude',
+      stdout: "You've hit your session limit · resets 2:10pm (Europe/Stockholm)",
+      status: 1,
+      now,
+    });
+
+    assert.ok(hit, 'the reported provider failure must block');
+    assert.equal(hit.source, 'parsed');
+    assert.ok(hit.until! > formatBlockUntil(now), 'block must be in the future');
+    assert.equal(shouldPersistLaunchFailureBlock('claude', { stderr: "You've hit your session limit", status: 1 }), true);
+    assert.equal(
+      shouldPersistLaunchFailureBlock('claude', { stderr: 'The review quotes: "You\'ve hit your session limit"', status: 1 }),
+      false,
+      'quoted review prose is not a provider limit hit',
+    );
+  });
+
   test('detectLimitHit returns reason for fallback source', () => {
     const result = detectLimitHit({
       agent: 'codex',
