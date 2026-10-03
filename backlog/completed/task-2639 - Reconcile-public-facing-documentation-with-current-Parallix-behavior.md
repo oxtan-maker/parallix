@@ -1,8 +1,8 @@
 ---
 id: TASK-2639
 title: Reconcile public-facing documentation with current Parallix behavior
-status: backlog
-assignee: []
+status: done
+assignee: [custom]
 created_date: '2026-10-03 15:07'
 labels: []
 dependencies: []
@@ -111,7 +111,7 @@ what is true now
 `docs/adr/0046-npm-publish-process-and-security.md` currently has:
 
 ```text
-Status: Proposed | Accepted
+Status: done
 ```
 
 Resolve this to the actual current status.

@@ -148,6 +148,13 @@ Scope of A:
 - No CI/release automation exists today; publishing is manual. Not a blocker for A,
   but it caps how fast a positioning fix reaches npm.
 
+  > RECONCILIATION (task-2639, 2026-10-03): historical claim from the 2026-09-05
+  > session. Parallix now has GitHub Actions CI (`ci-required` in
+  > `.github/workflows/ci-required.yml`) and continuous npm Trusted Publishing
+  > with provenance, tag, and GitHub Release (`scripts/release-publish.ts`).
+  > Publishing is no longer manual; the design's trust-layer positioning
+  > experiment and its installation-based kill criterion are unchanged.
+
 ## Success Criteria
 
 - 5 named operators who are not the founder have installed Parallix cold.

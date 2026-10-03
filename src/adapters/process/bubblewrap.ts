@@ -28,10 +28,13 @@ import { configCellArgs, type ConfigCell } from './config-cell.js';
  * so the confinement lives here instead: one shared boundary applied at the
  * single child-process spawn seam (`spawnAndTee`).
  *
- * When `bwrap` is missing or not executable the launch continues unsandboxed
- * with one warning. When `bwrap` is present but the guard cannot be built, the
- * launch fails — an operator must be able to tell "no bubblewrap here" apart
- * from "the guard is broken".
+ * When `bwrap` is missing or not executable, a mutating launch falls back to
+ * the family's native sandbox where one is supported, otherwise it requires
+ * explicit operator consent to run unsandboxed, otherwise it blocks — the
+ * confinement precedence in `confinement.ts`. A read-only launch is never
+ * gated. When `bwrap` is present but the guard cannot be built, the launch
+ * fails — an operator must be able to tell "no bubblewrap here" apart from
+ * "the guard is broken".
  */
 
 export const BUBBLEWRAP_COMMAND = 'bwrap';

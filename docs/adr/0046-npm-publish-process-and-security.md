@@ -1,6 +1,6 @@
 # ADR 0046: parallix npm Registry Publication Process and Security Posture
 
-Status: Proposed | Accepted
+Status: Accepted
 Date: 2026-06-23
 
 Related: ADR 0044 (Workflow Distribution Model), task-1340 (make parallix publishable)
@@ -134,9 +134,11 @@ without a stored npm credential.
 
 Positive: Allows CI workflows to submit packages to staging without 2FA; requires 2FA only for manual approval. Provides an intermediate review step.
 
-Negative: Adds complexity for a solo-maintainer project with no CI. The operator's manual publish sequence already includes a verification step (`npm pack --dry-run`).
+Negative: Adds complexity for a solo-maintainer project with no CI.
 
-Assessment: Not needed for current workflow. Can be adopted later if CI is introduced or if the operator wants an extra review gate.
+> RECONCILIATION (task-2639, 2026-10-03): historical claim. Parallix now ships GitHub Actions CI (`ci-required` in `.github/workflows/ci-required.yml`) and continuous Trusted-Publishing, so the "with no CI" premise no longer holds. The assessment that staged publishing is not needed for a solo-maintainer project is unchanged.
+
+Assessment: Not needed for current workflow. Can be adopted later if an extra review gate is wanted.
 
 ### Scoped package name alternatives
 

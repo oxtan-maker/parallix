@@ -171,7 +171,7 @@ An **internal retrospective, not external evidence,** measured the isolated work
 
 **Alpha, local-first, and best suited to operators comfortable with Git and CLI workflows.**
 
-- **Distribution:** Published to the public npm registry as @magnusekdahl/parallix. Verified main commits are continuously delivered/ published through GitHub Actions using npm Trusted Publishing with provenance, with a matching Git tag and GitHub Release. Local tarball installation (npm pack) is also supported.
+- **Distribution:** Published to the public npm registry as @magnusekdahl/parallix. Verified main commits are continuously published through GitHub Actions using npm Trusted Publishing with provenance, with a matching Git tag and GitHub Release. Local tarball installation (npm pack) is also supported.
 - **Review surface:** Forgejo is supported as the hosted PR viewer/publication surface, but the workflow remains local-first and can run without Forgejo when that provider is disabled.
 - **Telemetry:** structured token/usage telemetry exists for the codex and claude families; the local-custom and mistral paths record honest zeros by design rather than fabricated numbers.
 - **Graphify:** the knowledge-graph path is supported for codex, claude, and custom/opencode after one-time operator setup. It is optional, not a workflow prerequisite. The credible claim today is better-scoped context retrieval, not a proven token-savings benchmark.
@@ -205,7 +205,9 @@ npm run test:codeql       # CodeQL SAST scan (javascript-typescript security/cod
 LCOV reports omit TypeScript modules that compile to no runtime code. Modules
 with runtime declarations or imports remain subject to coverage requirements.
 
-The test suite is the verification gate this repo declares in `workflow.config.json`. Run it before integrating any change. Coverage runs (`PARALLIX_TEST_COVERAGE=1`, used by GitHub CI and the local pre-integration gates) use Node's built-in coverage with `--test-coverage-include-all` and need Node 26.7 or newer; the runner picks one from `PATH` or nvm, or from `PARALLIX_TEST_NODE` (ADR 0062). Contributions follow the same mission lifecycle the tool itself runs: branch, worktree, checkpoints, a second review, and a passing gate before integration. To exercise the packaged artifact the way a user receives it: `npm pack && npm install -g ./magnusekdahl-parallix-*.tgz`.
+The test suite is the verification gate this repo declares in `workflow.config.json`. Run it before integrating any change. Coverage runs (`PARALLIX_TEST_COVERAGE=1`, used by GitHub CI and the local pre-integration gates) use Node's built-in coverage with `--test-coverage-include-all` and need Node 26.7 or newer; the runner picks one from `PATH` or nvm, or from `PARALLIX_TEST_NODE` (ADR 0062).
+
+Four Node floors are distinct here: the shipped runtime floor is `>=22.23.1` (`package.json` `engines.node`, also the bundle target); the ordinary development and unit-test floor is Node `24.15.0` or newer, which the unit-test module mock helper needs; the coverage-tooling floor is Node `26.7` or newer for `--test-coverage-include-all`; and GitHub CI selects Node `26` for the coverage run and Node `24` for the release path. The local verifier accepts any Node `20` or newer so `node --test` runs, but coverage still needs the `26.7` floor. Contributions follow the same mission lifecycle the tool itself runs: branch, worktree, checkpoints, a second review, and a passing gate before integration. To exercise the packaged artifact the way a user receives it: `npm pack && npm install -g ./magnusekdahl-parallix-*.tgz`.
 
 If you are developing Parallix itself from a checkout, use the built runtime
 after `npm run build`, or run the TypeScript entry directly with the development

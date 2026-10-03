@@ -97,13 +97,37 @@ gate_all() {
 gate_static_analysis() {
   echo "=== Static Analysis Gate ==="
 
-  # Stage 1: ESLint on all sources with flat config (no --ext, ignores handled by config)
+  # Stage 1: ESLint on all sources with flat config (no --ext, ignores handled by config).
+  # Report the error and warning counts separately (budget stays 300) so output
+  # distinguishes "no errors" from "zero warnings" rather than a single clean line.
   echo "[1/4] Running ESLint..."
-  if ! npx --yes eslint --max-warnings 300 src/ 2>&1; then
-    echo "FAIL: ESLint reported errors"
+  ESLINT_JSON=$(npx --yes eslint --max-warnings 300 --format json src/ 2>&1)
+  ESLINT_STATUS=$?
+  # eslint exits non-zero on any error or on warnings over --max-warnings. A
+  # non-zero status fails the gate before any parsing, so a real ESLint failure
+  # can never be reported as a pass. Only a zero exit needs the JSON to split
+  # errors from warnings and confirm the warning budget.
+  if [ "$ESLINT_STATUS" -ne 0 ]; then
+    ESLINT_SUMMARY=$(printf '%s' "$ESLINT_JSON" | node --input-type=module -e 'let s="";for await (const c of process.stdin){s+=c}try{let a=JSON.parse(s);let e=0,w=0;for(const f of a){e+=(f.errorCount||0);w+=(f.warningCount||0)}process.stdout.write(e+" "+w)}catch{process.exit(0)}')
+    if [ -n "$ESLINT_SUMMARY" ] && printf '%s' "$ESLINT_SUMMARY" | grep -Eq '^[0-9]+ [0-9]+$'; then
+      ESLINT_ERR=${ESLINT_SUMMARY% *}
+      ESLINT_WARN=${ESLINT_SUMMARY#* }
+      echo "FAIL: ESLint reported ${ESLINT_ERR} error(s) and ${ESLINT_WARN} warning(s) (exit ${ESLINT_STATUS})"
+    else
+      echo "FAIL: ESLint failed (exit ${ESLINT_STATUS})"
+    fi
+    echo "--- ESLint diagnostics ---"
+    npx --yes eslint --max-warnings 300 src/ || true
     return 1
   fi
-  echo "PASS: ESLint clean"
+  ESLINT_SUMMARY=$(printf '%s' "$ESLINT_JSON" | node --input-type=module -e 'let s="";for await (const c of process.stdin){s+=c}try{let a=JSON.parse(s);let e=0,w=0;for(const f of a){e+=(f.errorCount||0);w+=(f.warningCount||0)}process.stdout.write(e+" "+w)}catch{process.exit(0)}')
+  ESLINT_ERRORS=${ESLINT_SUMMARY% *}
+  ESLINT_WARNINGS=${ESLINT_SUMMARY#* }
+  if [ "$ESLINT_WARNINGS" -gt 300 ]; then
+    echo "FAIL: ESLint reported ${ESLINT_ERRORS} errors and ${ESLINT_WARNINGS} warnings over budget 300"
+    return 1
+  fi
+  echo "PASS: ESLint — ${ESLINT_ERRORS} errors, ${ESLINT_WARNINGS} warnings (budget 300)"
 
   # Stage 2: TypeScript typecheck (emission mode)
   echo "[2/4] Running npm run typecheck..."
