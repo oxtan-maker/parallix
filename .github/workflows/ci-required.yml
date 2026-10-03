@@ -191,6 +191,17 @@ jobs:
         run: npm run coverage:merge
       - name: Publish whole-report CI-safe LCOV coverage
         run: npm run coverage:summary -- "$GITHUB_SHA" >> "$GITHUB_STEP_SUMMARY"
+      # TASK-2636: SonarQube Cloud Scanner 3.1+ rejects Java below 21, so the
+      # previous Java 17 runtime failed the trusted CI quality gate. Provision a
+      # pinned Java 21 runtime with the immutable setup-java SHA before the
+      # mandatory quality gate can invoke `npm run sonar`. Same immutable-SHA +
+      # release-version contract as every other action here (TASK-2549).
+      - name: Set up Java 21 (SonarQube Cloud scanner floor)
+        uses: actions/setup-java@7a6d8a8234af8eb26422e24e3006232cccaa061b  # v4.6.0
+        with:
+          java-version: '21'
+          distribution: temurin
+
       - name: Run mandatory SonarQube quality gate
         if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository
         # pipefail is set inline because the step's default bash -e does not

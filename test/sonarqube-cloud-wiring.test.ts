@@ -125,6 +125,32 @@ test('local verification and GitHub invoke the same pinned sonar entrypoint', ()
   assert.doesNotMatch(workflow, /npx\s+--yes/);
 });
 
+test('ci-required provisions Java 21+ via a SHA-pinned setup action before the Sonar gate', () => {
+  const workflow = fs.readFileSync(path.join(repoRoot, '.github/workflows/ci-required.yml'), 'utf8');
+
+  // The Java provisioning action is pinned to an immutable 40-char release SHA
+  // with a release-version comment (TASK-2636), same contract as every other
+  // action in this workflow (TASK-2549). No floating reference or `npx --yes`.
+  const setupJava = workflow.match(/actions\/setup-java@([0-9a-f]{40})\s*#\s*v(\d+\.\d+\.\d+)/);
+  assert.ok(setupJava, 'ci-required pins setup-java to an immutable SHA with a version comment');
+
+  // Java 21 or newer is required: SonarQube Cloud Scanner 3.1+ rejects Java < 21.
+  const javaVersion = workflow.match(/java-version:\s*['"]?(\d+)/);
+  assert.ok(javaVersion, 'ci-required declares an explicit java-version');
+  assert.ok(javaVersion && Number(javaVersion[1]) >= 21, 'the provisioned Java runtime is 21 or newer');
+
+  // Java must be provisioned before the mandatory quality gate can invoke the
+  // shared scanner entrypoint: the pinned setup step precedes the runnable
+  // `npm run sonar` invocation, ignoring the same literal quoted in comments.
+  const setupIdx = workflow.indexOf(setupJava![0]);
+  const sonarIdx = [...workflow.matchAll(/npm run sonar/g)].find((m) => {
+    const lineStart = workflow.lastIndexOf('\n', m.index) + 1;
+    return !workflow.slice(lineStart, m.index).trimStart().startsWith('#');
+  })?.index ?? -1;
+  assert.ok(setupIdx >= 0 && sonarIdx >= 0, 'both the setup-java step and the runnable sonar entrypoint exist');
+  assert.ok(setupIdx < sonarIdx, 'Java is provisioned before npm run sonar');
+});
+
 test('sonar analysis configuration consumes LCOV without a Cloud-unsupported new-code override', () => {
   const props = fs.readFileSync(path.join(repoRoot, 'sonar-project.properties'), 'utf8');
 

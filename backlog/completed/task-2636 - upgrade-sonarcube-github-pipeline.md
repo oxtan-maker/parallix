@@ -1,8 +1,8 @@
 ---
 id: TASK-2636
 title: upgrade sonarcube github pipeline
-status: backlog
-assignee: []
+status: done
+assignee: [custom]
 created_date: '2026-10-03 13:53'
 labels: []
 dependencies: []
