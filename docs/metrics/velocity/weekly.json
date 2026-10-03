@@ -1,0 +1,65 @@
+{
+  "schemaVersion": 1,
+  "metric": {
+    "name": "completed comparable delivery units per ISO week",
+    "classification": "all",
+    "week": {
+      "timezone": "UTC",
+      "starts": "Monday 00:00:00",
+      "ends": "Sunday 23:59:59.999",
+      "currentPartialWeek": "excluded"
+    }
+  },
+  "manualBaseline": {
+    "kind": "aggregate-rate",
+    "label": "Manual coding aggregate baseline",
+    "source": {
+      "type": "retained-git-document",
+      "commit": "ba7d445e246bec73c65762da23ae266657eecf73",
+      "path": "docs/missions/2026/ai-workflow-retrospective-since-october/RETROSPECTIVE.md",
+      "section": "Section 2.1 / H0",
+      "reproduce": "git show ba7d445e246bec73c65762da23ae266657eecf73:docs/missions/2026/ai-workflow-retrospective-since-october/RETROSPECTIVE.md"
+    },
+    "observationPeriod": {
+      "startedOn": "2022-08-16",
+      "endedOn": "2022-09-16",
+      "days": 32
+    },
+    "deliveryUnit": "One coherent user-value work cluster in the Parallix predecessor repository, classified by the retained retrospective from its 2022 Git history; it is not a Git commit.",
+    "observations": {
+      "count": 9,
+      "kind": "retained aggregate only",
+      "note": "The retained source names the nine clusters and their fixed observation period, but does not preserve auditable per-week cluster dates. This baseline is therefore an aggregate rate, never plotted as invented weekly observations."
+    },
+    "unitsPerDay": 0.28125,
+    "unitsPerWeek": 1.96875,
+    "limitations": [
+      "Historical aggregate from a different product phase and codebase maturity.",
+      "Observational one-maintainer data, not a controlled benchmark.",
+      "The graph uses the aggregate rate as a reference line only."
+    ]
+  },
+  "parallix": {
+    "source": "Canonical lifecycle mission outcomes: integration-to-done lifecycle completion across all classifications; exported without mission identities or telemetry.",
+    "observationDates": {
+      "startedOn": "2026-06-22",
+      "endedOn": "2026-10-03"
+    },
+    "weeks": [
+      { "weekOf": "2026-06-22", "completedCount": 64 },
+      { "weekOf": "2026-06-29", "completedCount": 46 },
+      { "weekOf": "2026-07-06", "completedCount": 28 },
+      { "weekOf": "2026-07-13", "completedCount": 22 },
+      { "weekOf": "2026-07-20", "completedCount": 34 },
+      { "weekOf": "2026-07-27", "completedCount": 33 },
+      { "weekOf": "2026-08-03", "completedCount": 27 },
+      { "weekOf": "2026-08-10", "completedCount": 73 },
+      { "weekOf": "2026-08-17", "completedCount": 25 },
+      { "weekOf": "2026-08-24", "completedCount": 42 },
+      { "weekOf": "2026-08-31", "completedCount": 22 },
+      { "weekOf": "2026-09-07", "completedCount": 32 },
+      { "weekOf": "2026-09-14", "completedCount": 48 },
+      { "weekOf": "2026-09-21", "completedCount": 37 }
+    ]
+  }
+}

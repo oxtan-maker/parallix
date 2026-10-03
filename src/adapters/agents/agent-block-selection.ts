@@ -9,7 +9,7 @@
  */
 import { AgentBlockService } from '../../application/services/agent-block-service.js';
 import { CONFIG_PATH, readAgentConfig } from './agent-config.js';
-import { WORKFLOW_AGENT_NAMES } from './launcher-selection.js';
+import { WORKFLOW_AGENT_NAMES } from './agent-family-names.js';
 
 export interface BlockContext {
   /** Families to exclude from selection: already-tried plus runtime-blocked. */

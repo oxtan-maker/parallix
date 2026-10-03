@@ -1,5 +1,5 @@
 import fs from 'fs';
-import { WORKFLOW_AGENT_NAMES } from '../agents/agents.js';
+import { WORKFLOW_AGENT_NAMES } from '../agents/agent-family-names.js';
 
 /** @returns {readonly string[]} */
 function getSupportedAgents() {

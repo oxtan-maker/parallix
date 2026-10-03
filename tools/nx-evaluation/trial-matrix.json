@@ -17,5 +17,15 @@
     "failed command and cancellation: failed/incomplete output must not be cached",
     "dirty tree: Nx cache must be bypassed"
   ],
-  "acceptance": "Expand only after a separate ten-mission replay proves at least 50% less total verification CPU per completed candidate, with fresh trust gates and unchanged coverage."
+  "acceptance": "Expand only after a separate ten-mission replay proves at least 50% less total verification CPU per completed candidate, with fresh trust gates and unchanged coverage.",
+  "tenMissionReplay": {
+    "task": "TASK-2622.18",
+    "result": "reject",
+    "workload": "Ten ordinary actual-parent/candidate pairs; waves excluded; discovery unscored.",
+    "candidateDirectCpuS": 4423.483739,
+    "candidateGroupedNxCpuS": 4783.435347,
+    "parentPreparationCpuS": 4444.383876,
+    "coverage": "Inventories match; attribution unresolved.",
+    "evidence": "px status task-2622.18 --json; CP-1 through CP-5"
+  }
 }

@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import childProcess from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { setCommandPathProbe, setLauncherHealthProbe } from '../src/adapters/agents/launcher-selection.js';
+import { setCommandPathProbe, setLauncherHealthProbe } from '../src/adapters/agents/launcher-probes.js';
 import { startDefaultDbGuard } from './lib/default-db-guard.js';
 import { trackWorkerTempDirs } from './lib/track-worker-temp-dirs.mjs';
 

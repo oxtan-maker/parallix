@@ -1,6 +1,6 @@
 # ADR 0063: Self-hosted verification performance
 
-**Status:** accepted operational decision — retain direct verification; broader Nx evaluation pending data
+**Status:** accepted operational decision — retain direct verification; evaluated Nx configurations not adopted
 
 **Date:** 2026-09-29
 
@@ -27,7 +27,8 @@ Verification tools belong to the developed repository. Parallix must not impose 
 
 ## Decision
 
-Keep the CPU-usage guards and direct verification. The local pre-integration unit gate now runs the screened hybrid: 278 files share a process, while 118 retain per-file isolation and four-worker concurrency. New files default to isolation. The ordinary `npm test` path remains fully isolated. Do not adopt the tested Nx configuration: its useful warm hits require unchanged inputs, while source changes invalidate the whole covered unit target. The trial wiring was removed. Feature-scoped targets remain an open evaluation question; they need complete runtime and coverage inputs, cross-worktree restoration, and exact-candidate proof before adoption.
+Keep the CPU-usage guards and direct verification. The local pre-integration unit gate now runs the screened hybrid: 278 files share a process, while 118 retain per-file isolation and four-worker concurrency. New files default to isolation. The ordinary `npm test` path remains fully isolated. Do not adopt the tested Nx configuration: its useful warm hits require unchanged inputs, while source changes invalidate the whole covered unit target. The trial wiring was removed. TASK-2622.18 rejects the evaluated per-file and grouped Nx layouts: after release-input normalization and small dependency cuts, ten ordinary-development candidates used 4,783 CPU seconds grouped versus 4,423 direct (+8.1%); parent preparation cost another 4,444 seconds separately.
+Coverage attribution remains unresolved; retain direct verification. Detailed results, limitations and raw-artifact references are recorded in `px status task-2622.18 --json` checkpoints.
 
 Preserve test frameworks, source layout, product runtimes, and verification obligations. No product cache/scheduler, shipped Nx dependency, Cloud service, or remote worker in this experiment.
 

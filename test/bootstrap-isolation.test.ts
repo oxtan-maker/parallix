@@ -7,6 +7,28 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import { spawnSync } from 'child_process';
+import { setCommandPathProbe, setLauncherHealthProbe } from '../src/adapters/agents/launcher-probes.js';
+
+test('bootstrap probe doubles reach launcher selection loaded afterwards (TASK-2622.18)', async () => {
+  const observed: { command: string; args: string[] }[] = [];
+  setCommandPathProbe(name => name === 'bootstrap-probe-fixture' ? name : null);
+  setLauncherHealthProbe((command, args) => {
+    observed.push({ command, args });
+    return { ok: false, reason: 'fixture rejection' };
+  });
+  try {
+    const { workflowLauncherStatus } = await import('../src/adapters/agents/launcher-selection.js');
+    const status = workflowLauncherStatus('bootstrap-probe-fixture');
+    assert.equal(status.supported, false);
+    assert.equal(status.health, 'probe-failed');
+    assert.equal(status.reason, 'fixture rejection');
+    assert.deepEqual(observed, [{ command: 'bootstrap-probe-fixture', args: ['--help'] }]);
+  } finally {
+    setCommandPathProbe(name => name);
+    setLauncherHealthProbe(() => ({ ok: true }));
+  }
+});
+
 test('bootstrap forces a temp PARALLIX_HOME with an isolated agents.local.json', () => {
   assert.match(process.env.PARALLIX_HOME || '', new RegExp(`^${os.tmpdir().replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`));
   assert.match(process.env.NPM_CONFIG_CACHE || '', /parallix-test-npm-cache-/);

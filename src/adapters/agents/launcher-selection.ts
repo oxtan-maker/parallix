@@ -1,5 +1,6 @@
 import fs from 'node:fs';
-import { spawnSync } from 'node:child_process';
+import { KNOWN_AGENT_NAMES, WORKFLOW_AGENT_NAMES } from './agent-family-names.js';
+import { commandInPath, probeLauncherHealth, setCommandPathProbe, setLauncherHealthProbe } from './launcher-probes.js';
 import * as fmt from '../../application/presentation/cli-format.js';
 import { startCodexDraftAgent, resolveCodexCommand } from './codex.js';
 import { startClaudeAgent, resolveClaudeCommand } from './claude.js';
@@ -62,55 +63,12 @@ const HEALTH_PROBE_ARGS: {[key: string]: string[]} = Object.freeze({
   pi: ['--version'],
   qwen: ['--help']
 });
-const LAUNCHER_HEALTH_TIMEOUT_MS = 3000;
 const DEFAULT_NO_OUTPUT_INITIAL_DELAY_MS = 60_000;
 const DEFAULT_NO_OUTPUT_INTERVAL_MS = 60_000;
 const DRAFT_NO_OUTPUT_INITIAL_DELAY_MS = 15_000;
 const DRAFT_NO_OUTPUT_INTERVAL_MS = 30_000;
 
-const WORKFLOW_AGENT_NAMES = Object.freeze(['codex', 'claude', 'vibe', 'custom', 'qwen']);
-const KNOWN_AGENT_NAMES = Object.freeze([
-  ...WORKFLOW_AGENT_NAMES,
-  'human'
-]);
 
-let commandPathProbe: ((name: string) => string | null) | null = null;
-
-function commandInPath(name: string) {
-  if (commandPathProbe) {
-    return commandPathProbe(name) || false;
-  }
-  // Pass the allowlisted name as a positional argument ($1) rather than
-  // interpolating it into the shell string, so shell metacharacters in the
-  // name cannot be interpreted by bash (CodeQL js/shell-command-injection).
-  const result = spawnSync('bash', ['-c', 'command -v "$1"', '_', name], {
-    encoding: 'utf8',
-    stdio: ['ignore', 'pipe', 'ignore']
-  });
-  return result.status === 0 && result.stdout.trim().length > 0;
-}
-
-// Injection seam for the `--help` health probe. The default shells out to the
-// real launcher CLI, which is slow (node-based CLIs take hundreds of ms to
-// answer --help) and environment-dependent; unit tests must never trigger it.
-// Mirrors commandPathProbe above: null restores the real spawn-based probe.
-let launcherHealthProbe: ((_command: string, _args: string[]) => { ok: boolean; reason?: string }) | null = null;
-
-function probeLauncherHealth(command: string, args: string[]) {
-  if (launcherHealthProbe) {
-    return launcherHealthProbe(command, args);
-  }
-  const probe = spawnSync(command, args, {
-    encoding: 'utf8',
-    stdio: ['ignore', 'pipe', 'pipe'],
-    timeout: LAUNCHER_HEALTH_TIMEOUT_MS
-  });
-  if (probe.error || probe.status !== 0) {
-    const pErr: Error & { code?: string } = probe.error || new Error('');
-    return { ok: false, reason: probe.error ? (pErr.code || pErr.message) : `exit ${probe.status}` };
-  }
-  return { ok: true };
-}
 
 function workflowLauncherStatus(agent: string, worktree?: string): LauncherStatus {
   // For custom agent, resolve to the actual runner. resolveCustomRunner
@@ -310,13 +268,6 @@ function resolveNoOutputWatchdogConfig(config: {initialDelayMs?: number, interva
   return { initialDelayMs, intervalMs, maxNoOutputMs };
 }
 
-const setCommandPathProbe = (fn: ((name: string) => string | null) | null) => {
-  commandPathProbe = typeof fn === 'function' ? fn : null;
-};
-
-const setLauncherHealthProbe = (fn: ((_command: string, _args: string[]) => { ok: boolean; reason?: string }) | null) => {
-  launcherHealthProbe = typeof fn === 'function' ? fn : null;
-};
 
 export {
   KNOWN_AGENT_NAMES,
