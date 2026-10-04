@@ -266,12 +266,12 @@ export function createIntegrationGateStep({ gates, landing, verification }: Inte
       if (transition.status !== 'completed') { throw new Error(transition.error?.message ?? `Mission ${bounceSlug} could not rebound to active.`); }
       return seams.transitionTaskFn(bounceSlug, 'active');
     };
-    // Withdraw approval for every red gate, including an exhausted repair
-    // budget. An operator continuation must never inherit that approval.
-    const failedMission = await missionServices?.store?.load(missionId(slug));
-    if (failedMission?.kind === 'found' && failedMission.mission.status === 'integration') {
-      await reactivateMission(slug);
-    }
+    // The rebound kernel owns the transition to active, immediately before it
+    // launches an implementer. In particular, a transient verifier retries on
+    // the unchanged approved tree before any repair transition: a green retry
+    // retains the authoritative integration lane and its approval coverage.
+    // Failed retries and ordinary gate failures still enter `reactivateMission`
+    // through `transitionToImplementer` before a repair can begin.
     const route = await seams.routeIntegrationGateFailureFn({
       slug,
       missionWorktree: checkout,
@@ -320,6 +320,17 @@ export function createIntegrationGateStep({ gates, landing, verification }: Inte
           }
         : undefined,
     });
+    // A route that cannot continue landing must leave the authoritative lane
+    // in active repair state. The live rebound reaches this through
+    // `transitionToImplementer`; retain the same fail-closed outcome for
+    // exhausted transient retries and injected routing boundaries that did
+    // not launch a repair.
+    if (route.route !== 'fixed' && missionServices?.store) {
+      const failedMission = await missionServices.store.load(missionId(slug));
+      if (failedMission.kind === 'found' && failedMission.mission.status === 'integration') {
+        await reactivateMission(slug);
+      }
+    }
     if (route.route === 'revision-changed' && seams.reReviewFn) {
       // The repair changed what the reviewer approved, so the standing approval
       // was retracted on the PR. Re-review the repaired revision through the

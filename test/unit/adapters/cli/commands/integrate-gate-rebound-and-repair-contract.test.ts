@@ -617,6 +617,53 @@ describe("integration repair", () => {
     assert.equal(result.status, 'completed', result.error?.message);
   }
 
+  test('an unchanged transient integration-gate retry stays approved and continues landing (TASK-2644)', async () => {
+    const fixture = memoryMission();
+    let gateRuns = 0;
+    let launches = 0;
+    const taskTransitions: string[] = [];
+    const failedGate = { key: 'agent-smoke', command: 'agent-smoke', exitCode: 1, stdout: '', stderr: 'temporary model capacity' };
+    const ports = {
+      gates: {
+        resolveIntegrationVerificationWorktree: () => '/fixture',
+        captureFinalIntegrationTree: () => ({ ok: true, rootDir: '/fixture', commit: 'approved', tree: 'approved' }),
+        loadPhaseGates: () => [{ key: 'agent-smoke', command: 'agent-smoke', order: 1 }],
+        loadRequirePreIntegration: () => true,
+        runPhaseGates: async () => ++gateRuns === 1 ? { ok: false, failedGate, error: 'temporary model capacity' } : { ok: true },
+      },
+      landing: { createAbort: () => Object.assign(new Error('aborted'), { name: 'IntegrationAbort' }) },
+      verification: { formatVerificationCommand: () => 'agent-smoke' },
+    };
+    const step = createIntegrationGateStep(ports as never);
+    const previous = setLogger({ log: () => {} });
+    try {
+      const result = await step.runRequiredLocalGates({
+        slug, context: { taskAssignee: implementer, baseWorktree: '/fixture', area: 'all', branch: `mission/${slug}`, approval: { ok: true } },
+        missionLoad: await fixture.store.load(), missionServices: fixture,
+        dryRun: false, noIntegrationGates: false, realAgent: null, realAgentModel: null,
+        seams: {
+          applyAgentFallbackFn: async () => implementer,
+          transitionTaskFn: async (_slug: string, status: string) => { taskTransitions.push(status); return true; },
+          startAgentFn: async () => { launches += 1; return { agent: implementer, result: { status: 0 } } as never; },
+          routeIntegrationGateFailureFn: async options => routeIntegrationGateFailure({
+            ...options,
+            captureFinalTreeFn: ports.gates.captureFinalIntegrationTree as never,
+            runPhaseGatesFn: ports.gates.runPhaseGates as never,
+            invalidateApprovalFn: async () => { throw new Error('unchanged transient retry must not retract approval'); },
+          }),
+        },
+      } as never);
+
+      assert.equal(result, '1 integration gate(s) passed after 0 integration-gate rebound(s)');
+      assert.equal(gateRuns, 2, 'the outer failure and unchanged retry both ran');
+      assert.equal(launches, 0, 'a green transient retry does not launch an implementer');
+      assert.equal(fixture.mission().status, 'integration');
+      assert.equal(reviewStatus(fixture.mission().review!), 'approved');
+      assert.deepEqual(fixture.history, []);
+      assert.deepEqual(taskTransitions, ['ready-for-integration']);
+    } finally { setLogger(previous); }
+  });
+
   test('integration repair withdraws approval before launch, survives review pingpong, and requests integration restart', async () => {
     const fixture = memoryMission();
     let providerRetracted = false;
@@ -788,11 +835,7 @@ describe("integration repair", () => {
           seams: {
             transitionTaskFn: async () => true, startAgentFn: async () => { throw new Error('no launch'); },
             applyAgentFallbackFn: async () => implementer,
-            routeIntegrationGateFailureFn: async () => {
-              assert.equal(fixture.mission().status, 'active');
-              assert.equal(reviewStatus(fixture.mission().review!), 'awaiting-review');
-              return { route, rebounds: 2, repairedRevision: 'new', invalidation: { ok: false } } as never;
-            },
+            routeIntegrationGateFailureFn: async () => ({ route, rebounds: 2, repairedRevision: 'new', invalidation: { ok: false } } as never),
             reReviewFn: async () => { reviewed = true; return false; },
           },
         }), { name: 'IntegrationAbort' });

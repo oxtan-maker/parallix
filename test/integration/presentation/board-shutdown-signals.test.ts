@@ -425,7 +425,14 @@ async function dispatchAndAwaitStart(fixture: InflightBoardFixture): Promise<voi
   await waitForOutput(session, /CONFIRM CONSEQUENTIAL ACTION/, SHUTDOWN_BUDGET_MS, 'Enter must arm the confirmation dialog');
   session.send('\r'); // confirm — the dispatch is fire-and-forget
   const deadline = Date.now() + DISPATCH_START_BUDGET_MS;
-  while (!existsSync(fixture.markerPath)) {
+  let childPid = 0;
+  while (Date.now() < deadline) {
+    // Shell redirection creates the marker before the builtin writes `$$`.
+    // Seeing the path alone therefore does not prove the launch has started.
+    if (existsSync(fixture.markerPath)) {
+      childPid = Number(readFileSync(fixture.markerPath, 'utf8').trim());
+      if (Number.isInteger(childPid) && childPid > 1) { break; }
+    }
     if (!session.isAlive() || Date.now() >= deadline) { break; }
     await new Promise((resolve) => setTimeout(resolve, 100));
   }
@@ -433,7 +440,6 @@ async function dispatchAndAwaitStart(fixture: InflightBoardFixture): Promise<voi
     existsSync(fixture.markerPath),
     `the dispatched action must be demonstrably in flight before quit (start marker; board alive=${session.isAlive()})`,
   );
-  const childPid = Number(readFileSync(fixture.markerPath, 'utf8').trim());
   assert.ok(Number.isInteger(childPid) && childPid > 1, 'the start marker must carry the child pid');
   assert.ok(pidAlive(childPid), 'the in-flight child must be alive when the quit key is sent');
   fixture.childPid = childPid;

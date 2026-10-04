@@ -1,8 +1,8 @@
 ---
 id: TASK-2644
 title: Resume integration after unchanged transient gate retry passes
-status: backlog
-assignee: []
+status: done
+assignee: [codex]
 created_date: '2026-10-04 09:15'
 labels:
   - bug
