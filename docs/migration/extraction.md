@@ -29,8 +29,8 @@ still executes all tests with zero skips and zero failures.
 
 ### 1. Monorepo-script tests → auto-skip when the script is absent
 
-`test/install.test.ts` and the `scripts/verify-local.sh`-invoking tests in
-`test/integration-pipelines.test.ts` exercise WrGroceries monorepo scripts
+`test/integration/packaging/install.test.ts` and the `scripts/verify-local.sh`-invoking tests in
+`test/integration/verification/integration-pipelines.test.ts` exercise WrGroceries monorepo scripts
 (`scripts/install-workflow.sh`, `scripts/verify-local.sh`) that live **outside** the
 parallix tree and are intentionally **not** carried into the standalone repo
 (MISSION scope item 9 — those scripts stay in WrGroceries and are repointed to the
@@ -41,7 +41,7 @@ reason) in the standalone repo. Tests affected: 13 in `install.test.ts`, 8 in
 
 ### 2. Monorepo `.gitignore` assertion → skip outside the monorepo host
 
-`test/agents.test.ts` has one test asserting the monorepo `.gitignore` semantics for
+`test/integration/agents/agents.test.ts` has one test asserting the monorepo `.gitignore` semantics for
 the embedded `workflow/config/` tree, computed against `../..` (the monorepo root). In
 the standalone repo `../..` is the parent code directory, not a git repo, so the
 assertion does not apply. It now skips when no `.git` exists at `../..`. (1 test.)
@@ -51,7 +51,7 @@ assertion does not apply. It now skips when no `.git` exists at `../..`. (1 test
 The standalone repo declares `workflow.config.json` with `adapters.review.provider:
 "forgejo"` (required for self-hosting parity). That turns
 `isForgejoReviewEnabled(process.cwd())` ON at the repo root. The rebase tests in
-`test/rebase.test.ts` and `test/rebase-before-review-contract.test.ts` (which holds the former rebase hardening and
+`test/integration/rebase/rebase.test.ts` and `test/integration/rebase/rebase-before-review-contract.test.ts` (which holds the former rebase hardening and
 diagnostics cases) were written assuming Forgejo-off (in the monorepo
 they ran with `cwd = parallix/`, which had no local config), and they do not mock the
 Forgejo fetch path. They now inject `isForgejoReviewEnabledFn: () => false` — the same

@@ -64,6 +64,25 @@ overlap. Every local-only entry must state the unavailable dependency. An
 unclassified boundary test fails verification and runs in neither integration
 sub-lane until classified.
 
+### Test layout decision
+
+Keep suites under `test/unit/`, `test/integration/`, and `test/e2e/`.
+Unit directories mirror their source owner: omit the `src/` prefix for
+src-owned code and preserve the repository path for other owners. Checks of
+the repository as a whole use `test/unit/repository/`.
+
+The rationale is that knowing the code should make its tests easy to find.
+A flat tree hides ownership; subsystem-only unit directories require learning
+a second organization; an extra `_repo/` prefix adds a translation for non-src
+owners. Direct mirroring avoids those costs. It reserves non-src owner roots
+alongside src directories, so any future name collision needs an explicit
+layout decision.
+
+Physical level, execution lane, and process isolation remain separate:
+a deterministic E2E workflow can run in `integration-ci`, while sharing a
+unit process still requires explicit approval. Paths make level visible;
+positive lane registration continues to protect the trust boundary.
+
 The existing full integration command remains the union of both integration
 registries. Lifecycle and real-agent checks retain their dedicated commands and
 their places in the repository-owned pre-merge gate plan. Hosted CI supplements
@@ -104,5 +123,7 @@ repository's configured pre-integration gates remain authoritative.
   deliberate cost of preventing accidental trust expansion.
 - Local-only reasons form an auditable queue for future CI provisioning or test
   isolation work.
+- Mirrored unit directories reduce the search from a source owner to the same
+  directory in the unit tree, at the cost of reserving non-src owner roots.
 - The exact commands, membership, and current exclusions remain owned by package
   scripts and the executable test-category registry, not duplicated in this ADR.

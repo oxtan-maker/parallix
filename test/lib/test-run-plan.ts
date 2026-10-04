@@ -4,7 +4,7 @@
  *
  * `run-default-tests.ts` owns the side effects (bundle build, manifest
  * directory, child spawn, cleanup). Everything that decides *what* runs and
- * *with which flags* lives here so `test/default-test-suite.test.ts` can assert
+ * *with which flags* lives here so `test/unit/test/lib/default-test-suite.test.ts` can assert
  * the plan by calling this function directly — no CommonJS transpile and no
  * `vm` sandbox of the runner script.
  */
@@ -15,11 +15,16 @@ import { spawnSync } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
 import { UNIT_TEST_BUDGET_MS, UNIT_TEST_HEADROOM_MS, onGitHubActions } from './unit-test-budget-reporter.mjs';
 import { readCpuBudgetPolicy, positiveCpuBudget } from './test-cpu-policy.mjs';
-import { selectTierFiles, type TierFileSelection } from './test-tier-selection.js';
+import { selectTierFiles, suiteIdentity, type TierFileSelection } from './test-tier-selection.js';
 // Re-export so the test/lib surface stays the single authority entry point for
 // coverage and the regression test.
 export { selectTierFiles };
 
+
+/** Suites whose sole or batched selection swaps in the e2e bootstrap preload. */
+export const REAL_AGENT_SMOKE_SUITE = 'e2e/agents/real-agent-smoke.test.ts';
+export const LIFECYCLE_E2E_SUITE = 'e2e/lifecycle/mission-lifecycle.test.ts';
+export const TUI_PROCESS_CONTRACT_SUITE = 'integration/presentation/presentation-tui.integration.test.ts';
 
 export interface TestRunPlanOptions {
   /** Checkout the suite runs against. */
@@ -205,9 +210,20 @@ export function buildTestRunPlan(options: TestRunPlanOptions): TestRunPlan {
   const SUITE_FLAGS = new Set(['--integration', '--integration-ci', '--integration-local', '--unit-test-headroom']);
   const requestedTestFiles = requestedArgs.filter(arg => !SUITE_FLAGS.has(arg));
   const requestedPaths = requestedTestFiles.map(file => path.resolve(executionRoot, file));
-  for (const file of requestedPaths) {
-    if (/\.test\.(?:ts|js)$/.test(file) && !fs.existsSync(file)) {
+  // A focused selector must name a discovered suite exactly once (TASK-2638):
+  // a typo, a moved path, or a support file would otherwise run nothing, or
+  // something else, and still report green. Inside the checkout the catalog is
+  // authoritative; runner proofs may still name a fixture outside it.
+  const discovered = new Set([...tierFiles.unit, ...tierFiles.allIntegration, ...tierFiles.agentE2e]);
+  for (const [index, file] of requestedPaths.entries()) {
+    if (!fs.existsSync(file)) {
       throw new Error(`requested test file does not exist: ${file}`);
+    }
+    if (!discovered.has(file) && !path.relative(executionRoot, file).startsWith('..')) {
+      throw new Error(`requested test file matches no discovered suite below test/{unit,integration,e2e}: ${file}`);
+    }
+    if (requestedPaths.indexOf(file) !== index) {
+      throw new Error(`requested test file is selected twice: ${file}`);
     }
   }
   const explicitCi = requestedArgs.includes('--integration-ci');
@@ -239,14 +255,10 @@ export function buildTestRunPlan(options: TestRunPlanOptions): TestRunPlan {
   // test process never resolves the operator's default database.
   // When that contract is batched with other files the bootstrap stays active — the
   // 30 s timeout and marker unlink in the test handle the shim impact.
-  const runsRealAgentSmoke = requestedTestFiles.some(
-    file => path.basename(file) === 'e2e-real-agent-smoke.test.ts'
-  );
-  const runsLifecycleE2E = requestedTestFiles.some(
-    file => path.basename(file) === 'e2e-mission-lifecycle.test.ts'
-  );
-  const runsTuiContractSolo = requestedTestFiles.length === 1 &&
-    requestedTestFiles.some(file => path.basename(file) === 'presentation-tui.integration.test.ts');
+  const requestedIdentities = requestedPaths.map(file => suiteIdentity(testRoot, file));
+  const runsRealAgentSmoke = requestedIdentities.includes(REAL_AGENT_SMOKE_SUITE);
+  const runsLifecycleE2E = requestedIdentities.includes(LIFECYCLE_E2E_SUITE);
+  const runsTuiContractSolo = requestedIdentities.length === 1 && requestedIdentities[0] === TUI_PROCESS_CONTRACT_SUITE;
   const runsIntegrationE2E = runsRealAgentSmoke || runsLifecycleE2E || runsTuiContractSolo;
   const e2eBootstrapFile = runsIntegrationE2E ? 'bootstrap-e2e-parallix-home.ts' : 'bootstrap-parallix-home.ts';
   const bootstrapArgs = [

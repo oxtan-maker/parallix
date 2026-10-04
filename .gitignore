@@ -41,5 +41,5 @@ parallix.db*
 tmp/
 # Agent run logs (older npmtest.out landed here before tmp/ covered it)
 .tmp-run/
-# Test-run pid residue (test/agents.test.ts F4 regression fixture)
+# Test-run pid residue (test/integration/agents/agents.test.ts F4 regression fixture)
 /child.pid

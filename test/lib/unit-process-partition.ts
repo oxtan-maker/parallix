@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { selectTierFiles } from './test-tier-selection.js';
+import { selectTierFiles, suiteIdentity } from './test-tier-selection.js';
 
 interface SharedFilePolicy { files: string[] }
 
@@ -22,7 +22,7 @@ export function unitProcessPartition(root: string) {
   const safe: string[] = [];
   const isolated: string[] = [];
   for (const file of unit) {
-    const relative = path.relative(testRoot, file);
+    const relative = suiteIdentity(testRoot, file);
     if (allowed.has(relative) && !sharedStateMarker.test(fs.readFileSync(file, 'utf8'))) {
       safe.push(file);
     } else {

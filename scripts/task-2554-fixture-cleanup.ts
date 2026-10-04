@@ -18,12 +18,12 @@ import { resolveParallixHome } from '../src/adapters/storage/storage.js';
 
 // The fixture repository ids are the throwaway tmp-dir / worktree names the
 // test fixtures created (mkdtemp prefixes or draft worktree names). Sources:
-//   handoff-fallback-, nel-capture-, nel-capture-fail-, nel-capture-bucket- → test/handoff.test.ts
+//   handoff-fallback-, nel-capture-, nel-capture-fail-, nel-capture-bucket- → test/integration/mission/handoff.test.ts
 //   px-board-test-                                                          → test/adapters/board-projection-builder-cp3.test.ts
-//   workflow-stats-fixture-                                                 → test/stats.test.ts
+//   workflow-stats-fixture-                                                 → test/integration/stats/stats.test.ts
 //   parallix-pty-ui-fixture-                                                → test/tui-pty-smoke.test.ts
 //   parallix-tui-spawn-                                                     → test/tui-spawn.test.ts
-//   main-task-1038 (worktree name)                                          → test/draft-command-boundary-contract.test.ts
+//   main-task-1038 (worktree name)                                          → test/integration/cli/draft-command-boundary-contract.test.ts
 //   main-task-fail, main-task-fix, parallix-first-value-*, task-1209-consume-,
 //   adhoc-create-a-hello-world-program, repo                                → earlier fixture runs (same tmp-dir naming scheme)
 const FIXTURE_REPOS = [

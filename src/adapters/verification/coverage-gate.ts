@@ -17,18 +17,18 @@ import { fileURLToPath } from 'node:url';
 import { packageRoot } from '../filesystem/package-root.js';
 // Coverage consumes the single verification-tier authority (test/lib/
 // test-tier-selection.ts, extracted from test/lib/test-run-plan.ts). It never
-// derives membership from a glob: see test/coverage-tier-selection.test.ts.
-import { selectTierFiles } from '../../../test/lib/test-tier-selection.js';
+// derives membership from a glob: see test/unit/test/lib/coverage-tier-selection.test.ts.
+import { discoverSuites, selectTierFiles } from '../../../test/lib/test-tier-selection.js';
 
 const MODULE_DIR = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = packageRoot(MODULE_DIR);
 
+/** Every runnable suite below test/{unit,integration,e2e}, in UTF-16 order. */
 function discoverTestFiles() {
   const testDir = path.join(REPO_ROOT, 'test');
   if (!fs.existsSync(testDir)) {return [];}
-  return fs.readdirSync(testDir)
-    .filter(file => file.endsWith('.test.ts'))
-    .map(file => path.join(testDir, file))
+  return discoverSuites(testDir)
+    .map(file => path.join(testDir, ...file.split('/')))
     .sort(compareCodeUnits);
 }
 

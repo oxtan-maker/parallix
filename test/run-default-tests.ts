@@ -12,6 +12,7 @@ import { cpuSupervisor, readCpuReport } from './lib/cpu-supervisor.js';
 import { childCpuUsageModule } from './lib/child-cpu-usage.js';
 import { readCpuBudgetPolicy, suiteCpuBudget } from './lib/test-cpu-policy.mjs';
 import { checkoutTestTmpdir } from './lib/test-tmpdir.js';
+import { assertValidTestLayout } from './lib/test-layout-validation.js';
 
 // A verifier may be launched from an operator checkout while it is validating
 // a mission worktree. Capture that selected root once and use it for every
@@ -21,6 +22,14 @@ const executionRoot = path.resolve(process.env.PARALLIX_EXECUTION_ROOT || path.j
 const testRoot = path.join(executionRoot, 'test');
 if (!fs.existsSync(path.join(executionRoot, 'package.json')) || !fs.existsSync(testRoot)) {
   throw new Error(`PARALLIX_EXECUTION_ROOT is not a Parallix checkout: ${executionRoot}`);
+}
+
+// TASK-2638: every plan over a checkout that carries the verification-lane
+// registry starts from a validated layout, so a misplaced or unregistered suite
+// fails the run instead of silently leaving its lane. Runner proofs that drive
+// a stand-in checkout without a registry have no layout to validate.
+if (fs.existsSync(path.join(testRoot, 'lib', 'test-categories.ts'))) {
+  assertValidTestLayout(executionRoot);
 }
 
 // TASK-2547: coverage is a reporting mode of the CI-safe execution, not a

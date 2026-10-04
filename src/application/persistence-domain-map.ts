@@ -8,7 +8,7 @@
 //      migration identity, import identity, an idempotency key, or an opaque
 //      operator setting that is deliberately NOT a domain entity.
 //
-// `test/persistence-domain-mapping.test.ts` enumerates the inventory and fails
+// `test/unit/application/persistence-domain-mapping.test.ts` enumerates the inventory and fails
 // when an entry resolves to neither, to both, or to a concept the domain does
 // not export. Entry ids are plain strings here on purpose: the ADR 0051
 // dependency direction forbids `src/application` from importing the runtime

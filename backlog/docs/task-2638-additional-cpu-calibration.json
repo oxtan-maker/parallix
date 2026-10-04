@@ -1,0 +1,922 @@
+{
+  "task": "TASK-2638",
+  "date": "2026-10-04",
+  "measurement": "integration-cpu-hook: own CPU plus waited-child CPU, including case teardown",
+  "command": "PARALLIX_TEST_COVERAGE=1 PARALLIX_TEST_CPU_PROFILE_DIR=<profile-dir> npm run test:integration:ci:prebuilt -- test/integration/agents/session-marker-repository.test.ts test/integration/backlog/legacy-import-trace.integration.test.ts test/integration/cli/active-invocation-contract.test.ts test/integration/cli/startup-preflight.test.ts test/integration/stats/stats.test.ts",
+  "focusedRuns": 2,
+  "margin": 0.5,
+  "roundUpMs": 50,
+  "entries": [
+    {
+      "file": "integration/agents/session-marker-repository.test.ts",
+      "previousCoveredBudgetMs": 100,
+      "reportedFullSuiteCpuMs": 119,
+      "focusedCoveredRecords": [
+        {
+          "file": "integration/agents/session-marker-repository.test.ts",
+          "name": "resume \u2014 same family matches, different family rejects > shouldResume returns true when mission, role, and agent all match",
+          "profile": "covered",
+          "cpuMs": 45.168,
+          "limitMs": 100
+        },
+        {
+          "file": "integration/agents/session-marker-repository.test.ts",
+          "name": "resume \u2014 same family matches, different family rejects > shouldResume returns false when agent family differs",
+          "profile": "covered",
+          "cpuMs": 36.4,
+          "limitMs": 100
+        },
+        {
+          "file": "integration/agents/session-marker-repository.test.ts",
+          "name": "resume \u2014 same family matches, different family rejects > shouldResume returns false when no marker exists",
+          "profile": "covered",
+          "cpuMs": 32.129,
+          "limitMs": 100
+        },
+        {
+          "file": "integration/agents/session-marker-repository.test.ts",
+          "name": "resume \u2014 same family matches, different family rejects > shouldResume returns false when role differs",
+          "profile": "covered",
+          "cpuMs": 33.418,
+          "limitMs": 100
+        },
+        {
+          "file": "integration/agents/session-marker-repository.test.ts",
+          "name": "failover \u2014 marker replaced on new launch > save replaces existing marker for same (mission, role)",
+          "profile": "covered",
+          "cpuMs": 33.472,
+          "limitMs": 100
+        },
+        {
+          "file": "integration/agents/session-marker-repository.test.ts",
+          "name": "failover \u2014 marker replaced on new launch > failover does not affect other (mission, role) pairs",
+          "profile": "covered",
+          "cpuMs": 34.336,
+          "limitMs": 100
+        },
+        {
+          "file": "integration/agents/session-marker-repository.test.ts",
+          "name": "duplicate marker \u2014 upsert replaces > save is idempotent for the same (mission, role)",
+          "profile": "covered",
+          "cpuMs": 33.229,
+          "limitMs": 100
+        },
+        {
+          "file": "integration/agents/session-marker-repository.test.ts",
+          "name": "duplicate marker \u2014 upsert replaces > UNIQUE constraint prevents duplicate rows",
+          "profile": "covered",
+          "cpuMs": 33.957,
+          "limitMs": 100
+        },
+        {
+          "file": "integration/agents/session-marker-repository.test.ts",
+          "name": "repository-scoped identity > same mission and role coexist in different repositories",
+          "profile": "covered",
+          "cpuMs": 36.106,
+          "limitMs": 100
+        },
+        {
+          "file": "integration/agents/session-marker-repository.test.ts",
+          "name": "stale update \u2014 concurrent write handling > last write wins for concurrent saves on same (mission, role)",
+          "profile": "covered",
+          "cpuMs": 31.312,
+          "limitMs": 100
+        },
+        {
+          "file": "integration/agents/session-marker-repository.test.ts",
+          "name": "stale update \u2014 concurrent write handling > updated_at is set by the database on each save (ON CONFLICT)",
+          "profile": "covered",
+          "cpuMs": 30.547,
+          "limitMs": 100
+        },
+        {
+          "file": "integration/agents/session-marker-repository.test.ts",
+          "name": "restart \u2014 marker survives process exit > marker persists across database close/reopen",
+          "profile": "covered",
+          "cpuMs": 31.544,
+          "limitMs": 100
+        },
+        {
+          "file": "integration/agents/session-marker-repository.test.ts",
+          "name": "restart \u2014 marker survives process exit > marker survives worktree directory removal (SC8)",
+          "profile": "covered",
+          "cpuMs": 29.347,
+          "limitMs": 100
+        },
+        {
+          "file": "integration/agents/session-marker-repository.test.ts",
+          "name": "database-unavailable \u2014 explicit error, no file fallback > findByMissionAndRole throws when database is not open",
+          "profile": "covered",
+          "cpuMs": 33.43,
+          "limitMs": 100
+        },
+        {
+          "file": "integration/agents/session-marker-repository.test.ts",
+          "name": "database-unavailable \u2014 explicit error, no file fallback > save throws when database is not open",
+          "profile": "covered",
+          "cpuMs": 30.311,
+          "limitMs": 100
+        },
+        {
+          "file": "integration/agents/session-marker-repository.test.ts",
+          "name": "database-unavailable \u2014 explicit error, no file fallback > SqliteSessionMarkerAdapter throws when database is closed (no file fallback)",
+          "profile": "covered",
+          "cpuMs": 30.673,
+          "limitMs": 100
+        },
+        {
+          "file": "integration/agents/session-marker-repository.test.ts",
+          "name": "session identity round-trips without data loss > all identity fields round-trip through SQLite adapter",
+          "profile": "covered",
+          "cpuMs": 33.643,
+          "limitMs": 100
+        },
+        {
+          "file": "integration/agents/session-marker-repository.test.ts",
+          "name": "session identity round-trips without data loss > null sessionId round-trips correctly",
+          "profile": "covered",
+          "cpuMs": 32.035,
+          "limitMs": 100
+        },
+        {
+          "file": "integration/agents/session-marker-repository.test.ts",
+          "name": "session identity round-trips without data loss > empty sessionId remains distinct from null",
+          "profile": "covered",
+          "cpuMs": 32.263,
+          "limitMs": 100
+        },
+        {
+          "file": "integration/agents/session-marker-repository.test.ts",
+          "name": "session identity round-trips without data loss > rejects persisted rows that cannot form checked domain values",
+          "profile": "covered",
+          "cpuMs": 37.152,
+          "limitMs": 100
+        },
+        {
+          "file": "integration/agents/session-marker-repository.test.ts",
+          "name": "clear behavior is observable and tested > delete removes specific (mission, role) marker",
+          "profile": "covered",
+          "cpuMs": 38.736,
+          "limitMs": 100
+        },
+        {
+          "file": "integration/agents/session-marker-repository.test.ts",
+          "name": "clear behavior is observable and tested > clear removes all markers",
+          "profile": "covered",
+          "cpuMs": 39.774,
+          "limitMs": 100
+        },
+        {
+          "file": "integration/agents/session-marker-repository.test.ts",
+          "name": "migration 0004 \u2014 session_markers table schema > role CHECK constraint rejects invalid role values",
+          "profile": "covered",
+          "cpuMs": 31.517,
+          "limitMs": 100
+        },
+        {
+          "file": "integration/agents/session-marker-repository.test.ts",
+          "name": "migration 0004 \u2014 session_markers table schema > all three known roles (execute, draft, review) are accepted",
+          "profile": "covered",
+          "cpuMs": 29.436,
+          "limitMs": 100
+        },
+        {
+          "file": "integration/agents/session-marker-repository.test.ts",
+          "name": "migration 0005 \u2014 repository-scoped session markers > loads table creation before repository scoping",
+          "profile": "covered",
+          "cpuMs": 0.864,
+          "limitMs": 100
+        },
+        {
+          "file": "integration/agents/session-marker-repository.test.ts",
+          "name": "migration 0005 \u2014 repository-scoped session markers > upgrades the unscoped table without changing either migration or losing rows",
+          "profile": "covered",
+          "cpuMs": 29.854,
+          "limitMs": 100
+        },
+        {
+          "file": "integration/agents/session-marker-repository.test.ts",
+          "name": "migration 0005 \u2014 repository-scoped session markers > does not re-scope rows when repository scoping was already applied",
+          "profile": "covered",
+          "cpuMs": 33.51,
+          "limitMs": 100
+        },
+        {
+          "file": "integration/agents/session-marker-repository.test.ts",
+          "name": "runtime launch role mapping \u2014 real SQLite adapter > persists implementer and reviewer launches using checked SessionRole values",
+          "profile": "covered",
+          "cpuMs": 51.282,
+          "limitMs": 100
+        },
+        {
+          "file": "integration/agents/session-marker-repository.test.ts",
+          "name": "import \u2014 dry-run and atomic idempotent import > dry-run returns report without writing to database",
+          "profile": "covered",
+          "cpuMs": 30.589,
+          "limitMs": 100
+        },
+        {
+          "file": "integration/agents/session-marker-repository.test.ts",
+          "name": "import \u2014 dry-run and atomic idempotent import > atomic commit imports all markers in a single transaction",
+          "profile": "covered",
+          "cpuMs": 29.23,
+          "limitMs": 100
+        },
+        {
+          "file": "integration/agents/session-marker-repository.test.ts",
+          "name": "import \u2014 dry-run and atomic idempotent import > conflict detection reports both sides without overwriting",
+          "profile": "covered",
+          "cpuMs": 29.318,
+          "limitMs": 100
+        },
+        {
+          "file": "integration/agents/session-marker-repository.test.ts",
+          "name": "import \u2014 dry-run and atomic idempotent import > unknown roles are reported as skippedUnknownRole",
+          "profile": "covered",
+          "cpuMs": 32.011,
+          "limitMs": 100
+        },
+        {
+          "file": "integration/agents/session-marker-repository.test.ts",
+          "name": "resume \u2014 same family matches, different family rejects > shouldResume returns true when mission, role, and agent all match",
+          "profile": "covered",
+          "cpuMs": 58.461,
+          "limitMs": 100
+        },
+        {
+          "file": "integration/agents/session-marker-repository.test.ts",
+          "name": "resume \u2014 same family matches, different family rejects > shouldResume returns false when agent family differs",
+          "profile": "covered",
+          "cpuMs": 43.547,
+          "limitMs": 100
+        },
+        {
+          "file": "integration/agents/session-marker-repository.test.ts",
+          "name": "resume \u2014 same family matches, different family rejects > shouldResume returns false when no marker exists",
+          "profile": "covered",
+          "cpuMs": 37.702,
+          "limitMs": 100
+        },
+        {
+          "file": "integration/agents/session-marker-repository.test.ts",
+          "name": "resume \u2014 same family matches, different family rejects > shouldResume returns false when role differs",
+          "profile": "covered",
+          "cpuMs": 42.616,
+          "limitMs": 100
+        },
+        {
+          "file": "integration/agents/session-marker-repository.test.ts",
+          "name": "failover \u2014 marker replaced on new launch > save replaces existing marker for same (mission, role)",
+          "profile": "covered",
+          "cpuMs": 37.247,
+          "limitMs": 100
+        },
+        {
+          "file": "integration/agents/session-marker-repository.test.ts",
+          "name": "failover \u2014 marker replaced on new launch > failover does not affect other (mission, role) pairs",
+          "profile": "covered",
+          "cpuMs": 42.058,
+          "limitMs": 100
+        },
+        {
+          "file": "integration/agents/session-marker-repository.test.ts",
+          "name": "duplicate marker \u2014 upsert replaces > save is idempotent for the same (mission, role)",
+          "profile": "covered",
+          "cpuMs": 45.363,
+          "limitMs": 100
+        },
+        {
+          "file": "integration/agents/session-marker-repository.test.ts",
+          "name": "duplicate marker \u2014 upsert replaces > UNIQUE constraint prevents duplicate rows",
+          "profile": "covered",
+          "cpuMs": 41.653,
+          "limitMs": 100
+        },
+        {
+          "file": "integration/agents/session-marker-repository.test.ts",
+          "name": "repository-scoped identity > same mission and role coexist in different repositories",
+          "profile": "covered",
+          "cpuMs": 49.345,
+          "limitMs": 100
+        },
+        {
+          "file": "integration/agents/session-marker-repository.test.ts",
+          "name": "stale update \u2014 concurrent write handling > last write wins for concurrent saves on same (mission, role)",
+          "profile": "covered",
+          "cpuMs": 38.601,
+          "limitMs": 100
+        },
+        {
+          "file": "integration/agents/session-marker-repository.test.ts",
+          "name": "stale update \u2014 concurrent write handling > updated_at is set by the database on each save (ON CONFLICT)",
+          "profile": "covered",
+          "cpuMs": 40.586,
+          "limitMs": 100
+        },
+        {
+          "file": "integration/agents/session-marker-repository.test.ts",
+          "name": "restart \u2014 marker survives process exit > marker persists across database close/reopen",
+          "profile": "covered",
+          "cpuMs": 42.695,
+          "limitMs": 100
+        },
+        {
+          "file": "integration/agents/session-marker-repository.test.ts",
+          "name": "restart \u2014 marker survives process exit > marker survives worktree directory removal (SC8)",
+          "profile": "covered",
+          "cpuMs": 39.951,
+          "limitMs": 100
+        },
+        {
+          "file": "integration/agents/session-marker-repository.test.ts",
+          "name": "database-unavailable \u2014 explicit error, no file fallback > findByMissionAndRole throws when database is not open",
+          "profile": "covered",
+          "cpuMs": 46.381,
+          "limitMs": 100
+        },
+        {
+          "file": "integration/agents/session-marker-repository.test.ts",
+          "name": "database-unavailable \u2014 explicit error, no file fallback > save throws when database is not open",
+          "profile": "covered",
+          "cpuMs": 44.682,
+          "limitMs": 100
+        },
+        {
+          "file": "integration/agents/session-marker-repository.test.ts",
+          "name": "database-unavailable \u2014 explicit error, no file fallback > SqliteSessionMarkerAdapter throws when database is closed (no file fallback)",
+          "profile": "covered",
+          "cpuMs": 43.305,
+          "limitMs": 100
+        },
+        {
+          "file": "integration/agents/session-marker-repository.test.ts",
+          "name": "session identity round-trips without data loss > all identity fields round-trip through SQLite adapter",
+          "profile": "covered",
+          "cpuMs": 39.655,
+          "limitMs": 100
+        },
+        {
+          "file": "integration/agents/session-marker-repository.test.ts",
+          "name": "session identity round-trips without data loss > null sessionId round-trips correctly",
+          "profile": "covered",
+          "cpuMs": 47.632,
+          "limitMs": 100
+        },
+        {
+          "file": "integration/agents/session-marker-repository.test.ts",
+          "name": "session identity round-trips without data loss > empty sessionId remains distinct from null",
+          "profile": "covered",
+          "cpuMs": 49.74,
+          "limitMs": 100
+        },
+        {
+          "file": "integration/agents/session-marker-repository.test.ts",
+          "name": "session identity round-trips without data loss > rejects persisted rows that cannot form checked domain values",
+          "profile": "covered",
+          "cpuMs": 42.208,
+          "limitMs": 100
+        },
+        {
+          "file": "integration/agents/session-marker-repository.test.ts",
+          "name": "clear behavior is observable and tested > delete removes specific (mission, role) marker",
+          "profile": "covered",
+          "cpuMs": 45.649,
+          "limitMs": 100
+        },
+        {
+          "file": "integration/agents/session-marker-repository.test.ts",
+          "name": "clear behavior is observable and tested > clear removes all markers",
+          "profile": "covered",
+          "cpuMs": 51.036,
+          "limitMs": 100
+        },
+        {
+          "file": "integration/agents/session-marker-repository.test.ts",
+          "name": "migration 0004 \u2014 session_markers table schema > role CHECK constraint rejects invalid role values",
+          "profile": "covered",
+          "cpuMs": 43.044,
+          "limitMs": 100
+        },
+        {
+          "file": "integration/agents/session-marker-repository.test.ts",
+          "name": "migration 0004 \u2014 session_markers table schema > all three known roles (execute, draft, review) are accepted",
+          "profile": "covered",
+          "cpuMs": 37.292,
+          "limitMs": 100
+        },
+        {
+          "file": "integration/agents/session-marker-repository.test.ts",
+          "name": "migration 0005 \u2014 repository-scoped session markers > loads table creation before repository scoping",
+          "profile": "covered",
+          "cpuMs": 0.952,
+          "limitMs": 100
+        },
+        {
+          "file": "integration/agents/session-marker-repository.test.ts",
+          "name": "migration 0005 \u2014 repository-scoped session markers > upgrades the unscoped table without changing either migration or losing rows",
+          "profile": "covered",
+          "cpuMs": 37.109,
+          "limitMs": 100
+        },
+        {
+          "file": "integration/agents/session-marker-repository.test.ts",
+          "name": "migration 0005 \u2014 repository-scoped session markers > does not re-scope rows when repository scoping was already applied",
+          "profile": "covered",
+          "cpuMs": 42.633,
+          "limitMs": 100
+        },
+        {
+          "file": "integration/agents/session-marker-repository.test.ts",
+          "name": "runtime launch role mapping \u2014 real SQLite adapter > persists implementer and reviewer launches using checked SessionRole values",
+          "profile": "covered",
+          "cpuMs": 59.92,
+          "limitMs": 100
+        },
+        {
+          "file": "integration/agents/session-marker-repository.test.ts",
+          "name": "import \u2014 dry-run and atomic idempotent import > dry-run returns report without writing to database",
+          "profile": "covered",
+          "cpuMs": 48.539,
+          "limitMs": 100
+        },
+        {
+          "file": "integration/agents/session-marker-repository.test.ts",
+          "name": "import \u2014 dry-run and atomic idempotent import > atomic commit imports all markers in a single transaction",
+          "profile": "covered",
+          "cpuMs": 46.181,
+          "limitMs": 100
+        },
+        {
+          "file": "integration/agents/session-marker-repository.test.ts",
+          "name": "import \u2014 dry-run and atomic idempotent import > conflict detection reports both sides without overwriting",
+          "profile": "covered",
+          "cpuMs": 43.451,
+          "limitMs": 100
+        },
+        {
+          "file": "integration/agents/session-marker-repository.test.ts",
+          "name": "import \u2014 dry-run and atomic idempotent import > unknown roles are reported as skippedUnknownRole",
+          "profile": "covered",
+          "cpuMs": 44.495,
+          "limitMs": 100
+        }
+      ],
+      "maximumObservedCpuMs": 119,
+      "coveredBudgetMs": 200
+    },
+    {
+      "file": "integration/backlog/legacy-import-trace.integration.test.ts",
+      "previousCoveredBudgetMs": 350,
+      "reportedFullSuiteCpuMs": 358,
+      "focusedCoveredRecords": [
+        {
+          "file": "integration/backlog/legacy-import-trace.integration.test.ts",
+          "name": "legacy import trace pins its commit > pins the trace to the checkout HEAD when no commit is passed",
+          "profile": "covered",
+          "cpuMs": 82.182,
+          "limitMs": 350
+        },
+        {
+          "file": "integration/backlog/legacy-import-trace.integration.test.ts",
+          "name": "legacy import trace pins its commit > refreshes a changed canonical task body from its committed source",
+          "profile": "covered",
+          "cpuMs": 238.489,
+          "limitMs": 350
+        },
+        {
+          "file": "integration/backlog/legacy-import-trace.integration.test.ts",
+          "name": "legacy import trace pins its commit > preserves a historical completed lane with a Git-backed closedAt",
+          "profile": "covered",
+          "cpuMs": 48.825,
+          "limitMs": 350
+        },
+        {
+          "file": "integration/backlog/legacy-import-trace.integration.test.ts",
+          "name": "legacy import trace pins its commit > dates a done task left in the tasks directory from its status transition",
+          "profile": "covered",
+          "cpuMs": 66.801,
+          "limitMs": 350
+        },
+        {
+          "file": "integration/backlog/legacy-import-trace.integration.test.ts",
+          "name": "legacy import trace pins its commit > imports committed Goal Check rows once without inventing review evidence",
+          "profile": "covered",
+          "cpuMs": 58.419,
+          "limitMs": 350
+        },
+        {
+          "file": "integration/backlog/legacy-import-trace.integration.test.ts",
+          "name": "legacy import trace pins its commit > replaces disputed checkpoint evidence only with a committed provenance artifact",
+          "profile": "covered",
+          "cpuMs": 162.456,
+          "limitMs": 350
+        },
+        {
+          "file": "integration/backlog/legacy-import-trace.integration.test.ts",
+          "name": "legacy import trace pins its commit > pins the trace to the checkout HEAD when no commit is passed",
+          "profile": "covered",
+          "cpuMs": 78.154,
+          "limitMs": 350
+        },
+        {
+          "file": "integration/backlog/legacy-import-trace.integration.test.ts",
+          "name": "legacy import trace pins its commit > refreshes a changed canonical task body from its committed source",
+          "profile": "covered",
+          "cpuMs": 293.573,
+          "limitMs": 350
+        },
+        {
+          "file": "integration/backlog/legacy-import-trace.integration.test.ts",
+          "name": "legacy import trace pins its commit > preserves a historical completed lane with a Git-backed closedAt",
+          "profile": "covered",
+          "cpuMs": 58.972,
+          "limitMs": 350
+        },
+        {
+          "file": "integration/backlog/legacy-import-trace.integration.test.ts",
+          "name": "legacy import trace pins its commit > dates a done task left in the tasks directory from its status transition",
+          "profile": "covered",
+          "cpuMs": 93.278,
+          "limitMs": 350
+        },
+        {
+          "file": "integration/backlog/legacy-import-trace.integration.test.ts",
+          "name": "legacy import trace pins its commit > imports committed Goal Check rows once without inventing review evidence",
+          "profile": "covered",
+          "cpuMs": 79.106,
+          "limitMs": 350
+        },
+        {
+          "file": "integration/backlog/legacy-import-trace.integration.test.ts",
+          "name": "legacy import trace pins its commit > replaces disputed checkpoint evidence only with a committed provenance artifact",
+          "profile": "covered",
+          "cpuMs": 219.542,
+          "limitMs": 350
+        }
+      ],
+      "maximumObservedCpuMs": 358,
+      "coveredBudgetMs": 550
+    },
+    {
+      "file": "integration/cli/active-invocation-contract.test.ts",
+      "previousCoveredBudgetMs": 400,
+      "reportedFullSuiteCpuMs": 463,
+      "focusedCoveredRecords": [
+        {
+          "file": "integration/cli/active-invocation-contract.test.ts",
+          "name": "active invocation overlap > TASK-2375 SC2: the real px active command assigns a unique per-invocation operationId",
+          "profile": "covered",
+          "cpuMs": 48.425,
+          "limitMs": 400
+        },
+        {
+          "file": "integration/cli/active-invocation-contract.test.ts",
+          "name": "active invocation overlap > TASK-2375 SC2: two overlapping real px active runs cannot cross-terminate each other",
+          "profile": "covered",
+          "cpuMs": 38.454,
+          "limitMs": 400
+        },
+        {
+          "file": "integration/cli/active-invocation-contract.test.ts",
+          "name": "active persisted Mission > px active delivers an active web card before its held agent completes",
+          "profile": "covered",
+          "cpuMs": 285.527,
+          "limitMs": 400
+        },
+        {
+          "file": "integration/cli/active-invocation-contract.test.ts",
+          "name": "active persisted Mission > recovery reconciles an already-running active task without relaunching or losing Mission evidence",
+          "profile": "covered",
+          "cpuMs": 0.874,
+          "limitMs": 400
+        },
+        {
+          "file": "integration/cli/active-invocation-contract.test.ts",
+          "name": "active persisted Mission > an immediate activation blocker launches no agent, preserves lifecycle, and returns within 200 ms",
+          "profile": "covered",
+          "cpuMs": 1.019,
+          "limitMs": 400
+        },
+        {
+          "file": "integration/cli/active-invocation-contract.test.ts",
+          "name": "active persisted Mission > a launcher blocker before onLaunch restores the refined Mission",
+          "profile": "covered",
+          "cpuMs": 0.628,
+          "limitMs": 400
+        },
+        {
+          "file": "integration/cli/active-invocation-contract.test.ts",
+          "name": "active invocation overlap > TASK-2375 SC2: the real px active command assigns a unique per-invocation operationId",
+          "profile": "covered",
+          "cpuMs": 58.649,
+          "limitMs": 400
+        },
+        {
+          "file": "integration/cli/active-invocation-contract.test.ts",
+          "name": "active invocation overlap > TASK-2375 SC2: two overlapping real px active runs cannot cross-terminate each other",
+          "profile": "covered",
+          "cpuMs": 48.866,
+          "limitMs": 400
+        },
+        {
+          "file": "integration/cli/active-invocation-contract.test.ts",
+          "name": "active persisted Mission > px active delivers an active web card before its held agent completes",
+          "profile": "covered",
+          "cpuMs": 330.105,
+          "limitMs": 400
+        },
+        {
+          "file": "integration/cli/active-invocation-contract.test.ts",
+          "name": "active persisted Mission > recovery reconciles an already-running active task without relaunching or losing Mission evidence",
+          "profile": "covered",
+          "cpuMs": 4.15,
+          "limitMs": 400
+        },
+        {
+          "file": "integration/cli/active-invocation-contract.test.ts",
+          "name": "active persisted Mission > an immediate activation blocker launches no agent, preserves lifecycle, and returns within 200 ms",
+          "profile": "covered",
+          "cpuMs": 1.872,
+          "limitMs": 400
+        },
+        {
+          "file": "integration/cli/active-invocation-contract.test.ts",
+          "name": "active persisted Mission > a launcher blocker before onLaunch restores the refined Mission",
+          "profile": "covered",
+          "cpuMs": 1.802,
+          "limitMs": 400
+        }
+      ],
+      "maximumObservedCpuMs": 463,
+      "coveredBudgetMs": 700
+    },
+    {
+      "file": "integration/cli/startup-preflight.test.ts",
+      "previousCoveredBudgetMs": 150,
+      "reportedFullSuiteCpuMs": 199,
+      "focusedCoveredRecords": [
+        {
+          "file": "integration/cli/startup-preflight.test.ts",
+          "name": "missionStart fails if the backlog task is missing classification",
+          "profile": "covered",
+          "cpuMs": 43.112,
+          "limitMs": 150
+        },
+        {
+          "file": "integration/cli/startup-preflight.test.ts",
+          "name": "missionStart passes if the backlog task has classification",
+          "profile": "covered",
+          "cpuMs": 19.846,
+          "limitMs": 150
+        },
+        {
+          "file": "integration/cli/startup-preflight.test.ts",
+          "name": "missionStart quiet mode drops routine PASS diagnostics and the PASS USABLE verdict but keeps WARN",
+          "profile": "covered",
+          "cpuMs": 26.405,
+          "limitMs": 150
+        },
+        {
+          "file": "integration/cli/startup-preflight.test.ts",
+          "name": "missionStart passes when the task file is missing and classification falls back to unknown",
+          "profile": "covered",
+          "cpuMs": 20.214,
+          "limitMs": 150
+        },
+        {
+          "file": "integration/cli/startup-preflight.test.ts",
+          "name": "missionStart verify-env reports standalone adapter readiness once",
+          "profile": "covered",
+          "cpuMs": 1.248,
+          "limitMs": 150
+        },
+        {
+          "file": "integration/cli/startup-preflight.test.ts",
+          "name": "missionStart passes if classification is provided via labels",
+          "profile": "covered",
+          "cpuMs": 90.4,
+          "limitMs": 150
+        },
+        {
+          "file": "integration/cli/startup-preflight.test.ts",
+          "name": "missionStart rejects a task label without stored Mission state (task-2604)",
+          "profile": "covered",
+          "cpuMs": 24.869,
+          "limitMs": 150
+        },
+        {
+          "file": "integration/cli/startup-preflight.test.ts",
+          "name": "missionStart resolves the backlog task from the mission worktree, not process.cwd() (task-2200)",
+          "profile": "covered",
+          "cpuMs": 25.923,
+          "limitMs": 150
+        },
+        {
+          "file": "integration/cli/startup-preflight.test.ts",
+          "name": "missionStart fails if the mission is already complete",
+          "profile": "covered",
+          "cpuMs": 22.479,
+          "limitMs": 150
+        },
+        {
+          "file": "integration/cli/startup-preflight.test.ts",
+          "name": "missionStart verify-env with slug checks classification",
+          "profile": "covered",
+          "cpuMs": 41.465,
+          "limitMs": 150
+        },
+        {
+          "file": "integration/cli/startup-preflight.test.ts",
+          "name": "missionStart accepts a typed mission without MISSION.md",
+          "profile": "covered",
+          "cpuMs": 24.168,
+          "limitMs": 150
+        },
+        {
+          "file": "integration/cli/startup-preflight.test.ts",
+          "name": "missionStart accepts a typed mission without a metadata directory",
+          "profile": "covered",
+          "cpuMs": 23.644,
+          "limitMs": 150
+        },
+        {
+          "file": "integration/cli/startup-preflight.test.ts",
+          "name": "missionStart rejects a missing recorded base branch with a metadata directory",
+          "profile": "covered",
+          "cpuMs": 1.494,
+          "limitMs": 150
+        },
+        {
+          "file": "integration/cli/startup-preflight.test.ts",
+          "name": "missionStart rejects a missing recorded base branch without a metadata directory",
+          "profile": "covered",
+          "cpuMs": 1.023,
+          "limitMs": 150
+        },
+        {
+          "file": "integration/cli/startup-preflight.test.ts",
+          "name": "missionStart passes when recorded base branch exists locally",
+          "profile": "covered",
+          "cpuMs": 0.621,
+          "limitMs": 150
+        },
+        {
+          "file": "integration/cli/startup-preflight.test.ts",
+          "name": "missionStart skips base branch check when recorded base equals primary",
+          "profile": "covered",
+          "cpuMs": 0.535,
+          "limitMs": 150
+        },
+        {
+          "file": "integration/cli/startup-preflight.test.ts",
+          "name": "verify-env happy path prints USABLE verdict",
+          "profile": "covered",
+          "cpuMs": 0.459,
+          "limitMs": 150
+        },
+        {
+          "file": "integration/cli/startup-preflight.test.ts",
+          "name": "verify-env blocked path prints NOT USABLE verdict with remediation",
+          "profile": "covered",
+          "cpuMs": 0.605,
+          "limitMs": 150
+        },
+        {
+          "file": "integration/cli/startup-preflight.test.ts",
+          "name": "missionStart fails if the backlog task is missing classification",
+          "profile": "covered",
+          "cpuMs": 59.73,
+          "limitMs": 150
+        },
+        {
+          "file": "integration/cli/startup-preflight.test.ts",
+          "name": "missionStart passes if the backlog task has classification",
+          "profile": "covered",
+          "cpuMs": 24.49,
+          "limitMs": 150
+        },
+        {
+          "file": "integration/cli/startup-preflight.test.ts",
+          "name": "missionStart quiet mode drops routine PASS diagnostics and the PASS USABLE verdict but keeps WARN",
+          "profile": "covered",
+          "cpuMs": 34.673,
+          "limitMs": 150
+        },
+        {
+          "file": "integration/cli/startup-preflight.test.ts",
+          "name": "missionStart passes when the task file is missing and classification falls back to unknown",
+          "profile": "covered",
+          "cpuMs": 28.029,
+          "limitMs": 150
+        },
+        {
+          "file": "integration/cli/startup-preflight.test.ts",
+          "name": "missionStart verify-env reports standalone adapter readiness once",
+          "profile": "covered",
+          "cpuMs": 1.373,
+          "limitMs": 150
+        },
+        {
+          "file": "integration/cli/startup-preflight.test.ts",
+          "name": "missionStart passes if classification is provided via labels",
+          "profile": "covered",
+          "cpuMs": 124.653,
+          "limitMs": 150
+        },
+        {
+          "file": "integration/cli/startup-preflight.test.ts",
+          "name": "missionStart rejects a task label without stored Mission state (task-2604)",
+          "profile": "covered",
+          "cpuMs": 32.217,
+          "limitMs": 150
+        },
+        {
+          "file": "integration/cli/startup-preflight.test.ts",
+          "name": "missionStart resolves the backlog task from the mission worktree, not process.cwd() (task-2200)",
+          "profile": "covered",
+          "cpuMs": 28.468,
+          "limitMs": 150
+        },
+        {
+          "file": "integration/cli/startup-preflight.test.ts",
+          "name": "missionStart fails if the mission is already complete",
+          "profile": "covered",
+          "cpuMs": 27.072,
+          "limitMs": 150
+        },
+        {
+          "file": "integration/cli/startup-preflight.test.ts",
+          "name": "missionStart verify-env with slug checks classification",
+          "profile": "covered",
+          "cpuMs": 52.209,
+          "limitMs": 150
+        },
+        {
+          "file": "integration/cli/startup-preflight.test.ts",
+          "name": "missionStart accepts a typed mission without MISSION.md",
+          "profile": "covered",
+          "cpuMs": 31.571,
+          "limitMs": 150
+        },
+        {
+          "file": "integration/cli/startup-preflight.test.ts",
+          "name": "missionStart accepts a typed mission without a metadata directory",
+          "profile": "covered",
+          "cpuMs": 29.379,
+          "limitMs": 150
+        },
+        {
+          "file": "integration/cli/startup-preflight.test.ts",
+          "name": "missionStart rejects a missing recorded base branch with a metadata directory",
+          "profile": "covered",
+          "cpuMs": 1.414,
+          "limitMs": 150
+        },
+        {
+          "file": "integration/cli/startup-preflight.test.ts",
+          "name": "missionStart rejects a missing recorded base branch without a metadata directory",
+          "profile": "covered",
+          "cpuMs": 0.575,
+          "limitMs": 150
+        },
+        {
+          "file": "integration/cli/startup-preflight.test.ts",
+          "name": "missionStart passes when recorded base branch exists locally",
+          "profile": "covered",
+          "cpuMs": 0.66,
+          "limitMs": 150
+        },
+        {
+          "file": "integration/cli/startup-preflight.test.ts",
+          "name": "missionStart skips base branch check when recorded base equals primary",
+          "profile": "covered",
+          "cpuMs": 0.535,
+          "limitMs": 150
+        },
+        {
+          "file": "integration/cli/startup-preflight.test.ts",
+          "name": "verify-env happy path prints USABLE verdict",
+          "profile": "covered",
+          "cpuMs": 0.494,
+          "limitMs": 150
+        },
+        {
+          "file": "integration/cli/startup-preflight.test.ts",
+          "name": "verify-env blocked path prints NOT USABLE verdict with remediation",
+          "profile": "covered",
+          "cpuMs": 0.681,
+          "limitMs": 150
+        }
+      ],
+      "maximumObservedCpuMs": 199,
+      "coveredBudgetMs": 300
+    }
+  ],
+  "calibratedCasesPassedInFocusedRuns": true,
+  "verification": {
+    "coveredTestsPassed": 109,
+    "coveredTestsFailed": 0,
+    "suiteCpuUsedMs": 10086,
+    "suiteCpuBudgetMs": 405000
+  }
+}

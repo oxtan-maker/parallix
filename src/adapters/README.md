@@ -92,7 +92,7 @@ below.
 ## Enforced rules and the fixtures that prove they bite
 
 Each rule below is exercised by a hermetic fixture in
-`test/dependency-graph.test.ts` that builds a temporary tree with
+`test/unit/adapters/architecture/dependency-graph.test.ts` that builds a temporary tree with
 `fs.mkdtempSync`. Every fixture has been mutation-checked: disabling the rule
 turns that fixture red.
 
@@ -115,7 +115,7 @@ src/application/ports/; expected owner: application, actual owner: adapters
 
 The guards run under the static-analysis workflow and use only `node:fs` and
 `node:path`. They reach no network service, Forgejo instance, agent, or CLI
-process; run them with `npm test -- test/dependency-graph.test.ts`.
+process; run them with `npm test -- test/unit/adapters/architecture/dependency-graph.test.ts`.
 
 ## Known outstanding debt
 
@@ -128,7 +128,7 @@ still combine request handling, rendering and workflow sequencing with concrete
 integrations, and several mechanism packages (`git`, `forgejo`, `verification`,
 `agents`) wire three or more siblings too. Nothing in CI fails on workflow
 ownership itself; the two thinned adapters are guarded only by the line ceiling
-and port-binding assertions in `test/dependency-graph.test.ts`. The list of
+and port-binding assertions in `test/unit/adapters/architecture/dependency-graph.test.ts`. The list of
 enforced rules above is exhaustive: it is what the tree is actually protected
 against, and this axis is not on it.
 

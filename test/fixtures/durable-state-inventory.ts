@@ -964,8 +964,8 @@ export const ADR0053_PERSISTENCE_INVENTORY: readonly ADR0053BoundaryEntry[] = [
 // ADR 0053 cutover guardrails (task-2521.01)
 //
 // Two allowlists back the executable anti-regression guards in
-// test/retired-workflow-path-write-guard.test.ts (guard 1) and
-// test/mission-persistence-authority-guard.test.ts (guard 2). Each entry names
+// test/unit/retired-workflow-path-write-guard.test.ts (guard 1) and
+// test/unit/mission-persistence-authority-guard.test.ts (guard 2). Each entry names
 // a call site that legitimately touches a retired workflow path so the guards
 // consult this inventory instead of a hand-maintained pattern list. Any new
 // normal-runtime write to a retired workflow path, or any new application/

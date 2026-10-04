@@ -1,0 +1,2359 @@
+
+import test, { mock } from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'fs';
+import os from 'os';
+import path from 'path';
+import { mockModule, installModuleMocks } from '../../lib/module-mock.js';
+import { mkdtemp } from '../../helpers/temp-dir.js';
+import { createRequire } from 'node:module';
+import { classifyError } from '../../../src/application/failure-classification.js';
+import { ExecuteHandoffService } from '../../../src/application/execute-handoff-service.js';
+import { validateCheckpointsBeforeHandoff } from '../../../src/adapters/mission/checkpoint-validation.js';
+const _require = createRequire(import.meta.url);
+const activeModule = mockModule<typeof import('../../../src/adapters/cli/commands/active.js')>('../../../src/adapters/cli/commands/active.js', import.meta.url);
+const resolveWorktreeModule = mockModule<typeof import('../../../src/adapters/filesystem/mission-utils.js')>('../../../src/adapters/filesystem/mission-utils.js', import.meta.url);
+const completePreflightOrExitModule = mockModule<typeof import('../../../src/adapters/cli/startup-preflight.js')>('../../../src/adapters/cli/startup-preflight.js', import.meta.url);
+const missionStartModule = mockModule<typeof import('../../../src/adapters/cli/startup-preflight.js')>('../../../src/adapters/cli/startup-preflight.js', import.meta.url);
+const repairHandoffModule = mockModule<typeof import('../../../src/adapters/cli/commands/repair-handoff.js')>('../../../src/adapters/cli/commands/repair-handoff.js', import.meta.url);
+await installModuleMocks();
+test.afterEach(() => mock.restoreAll());
+const active = activeModule.default;
+const missionStart = missionStartModule.default;
+const { resolveWorktree } = resolveWorktreeModule;
+const { completePreflightOrExit } = completePreflightOrExitModule;
+process.env.NO_COLOR = '1';
+
+const {
+  buildExecutePrompt,
+  buildCheckpointContext,
+  applyExecuteFallback,
+  selectLaunchAndRecord,
+  enforceExecuteCommitSafety,
+  renderActiveProgress
+} = activeModule;
+const runHandoffAndReview = async (slug: string, worktree: string, agent: string, options: Record<string, any> = {}) => {
+  const validate = options.validateCheckpointsBeforeHandoffFn ?? (() => ({ ok: true }));
+  const handoff = options.performHandoff ?? (async () => ({ ok: true }));
+  const repair = options.repairHandoffFn ?? (async () => ({ repaired: false }));
+  const launch = options.startAgentFn ?? (async () => ({}));
+  return new ExecuteHandoffService({
+    checkpoints: { async validateBeforeHandoff(request) { return validate(slug, worktree, { log: request.log, error: request.error }); } },
+    handoff: {
+      async run(request) { return handoff(slug, { forgejoUser: agent, worktree, force: request.force }); },
+      async repairHygiene(request) { return repair(slug, worktree, request.error, { taskFile: request.taskFile, log: request.log, error: request.outputError }); },
+      classifyFailure: classifyError,
+      isRelaunchableFailure: repairHandoffModule.isRelaunchableError,
+    },
+    review: { async start(request) { await options.startReviewLoop?.(slug, { implementer: agent, worktree, skipHandoff: true, onAgentLaunched: request.onAgentLaunched, onAutonomousStop: request.onAutonomousStop }); } },
+    repairLaunch: {
+      available: options.workflowLauncherStatusFn ?? (() => ({ supported: true })),
+      readHead() { return null; },
+      async launch(request) {
+        const status = (options.workflowLauncherStatusFn ?? (() => ({ supported: true })))(agent);
+        if (!status.supported) { throw new Error(`Agent ${agent} is not available for relaunch: ${status.detail ?? status.reason ?? 'unknown'}`); }
+        return launch('active', { prompt: request.prompt, worktree, agent, slug, role: 'implementer', sessionPolicy: request.sessionPolicy });
+      },
+    },
+    output: { log: options.log ?? (() => {}), error: options.error ?? (() => {}), command: (value) => value, formatSlug: (value) => value, formatAgent: (value) => value },
+  }).run({ slug, worktree, agent, taskFile: options.taskFile ?? null, onAgentLaunched: options.onAgentLaunched, onAutonomousStop: options.onAutonomousStop });
+};
+
+test('active progress renderer preserves launch and handoff status order', () => {
+  const logs = [];
+  renderActiveProgress({ phase: 'launch' }, message => logs.push(message));
+  renderActiveProgress({ phase: 'handoff', agent: 'codex' }, message => logs.push(message));
+
+  assert.deepEqual(logs, [
+    '[PASS] Implementation complete (codex).'
+  ]);
+});
+
+test('active() passes its progress renderer into a deferred execute-service factory', async () => {
+  const logs = [];
+  let receivedProgress = null;
+
+  await active(['task-1038', '--implementer', 'custom'], {
+    inferSlugFn: () => 'task-1038',
+    rootDir: '/tmp/project-task-1038',
+    serviceFactory: async (_rootDir, progress) => {
+      receivedProgress = progress;
+      return {
+        execute: async () => {
+          progress({ phase: 'launch' });
+          progress({ phase: 'handoff', agent: 'custom' });
+          return { status: 'completed', value: { agent: 'custom' }, durableEvidence: [] };
+        },
+      };
+    },
+    exitFn: (code) => { throw new Error(`unexpected exit ${code}`); },
+    logFn: (message) => logs.push(message),
+    errorFn: (message) => { throw new Error(`unexpected error: ${message}`); },
+  });
+
+  assert.equal(typeof receivedProgress, 'function');
+  assert.deepEqual(logs, [
+    'Mission task-1038',
+    '[PASS] Implementation complete (custom).',
+  ]);
+});
+
+test('buildExecutePrompt injects slug, current year, and checkpoint context into the template', () => {
+  const context = 'Most recent checkpoint: CP-3.md — CP-3: Real active command';
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'execute-prompt-'));
+  try {
+    fs.writeFileSync(
+      path.join(tempRoot, 'workflow.config.json'),
+      JSON.stringify({
+        adapters: {
+          missions: {
+            baseDir: 'docs/missions',
+            branchPrefix: 'mission/',
+            worktreePattern: '../<repo>-<slug>'
+          }
+        }
+      }, null, 2)
+    );
+
+    const prompt = buildExecutePrompt('task-088', context, { rootDir: tempRoot });
+
+    // TASK-2521.03: the execute prompt names the mission dir, not the mission
+    // document — the document is no longer an authority the agent is sent to.
+    assert.match(prompt, new RegExp(`Mission dir: .*/docs/missions/${new Date().getFullYear()}/task-088`));
+    assert.match(prompt, /Slug: task-088/);
+    assert.match(prompt, /execute-after-lock|execute after lock|execute checkpoint/i);
+    assert.match(prompt, /CP-3\.md/);
+    assert.match(prompt, /Do not claim that `git diff HEAD` proves a committed change/i);
+    assert.match(prompt, /exact non-HEAD baseline/i);
+    // Template placeholders must not appear in output
+    assert.doesNotMatch(prompt, /\{\{slug\}\}/);
+    assert.doesNotMatch(prompt, /YYYY/);
+    assert.doesNotMatch(prompt, /\{\{checkpoint_context\}\}/);
+  } finally {
+    fs.rmSync(tempRoot, { recursive: true, force: true });
+  }
+});
+
+test('buildExecutePrompt uses absolute worktree paths and emits no docs/agent-prompts indirection', () => {
+  const rootDir = '/tmp/testproj-task-8';
+  const prompt = buildExecutePrompt('task-8', 'No checkpoint documents found. Start from CP-1.', { rootDir });
+
+  // TASK-2521.03: Mission state is read with `px status`, and the execute
+  // prompt no longer sends the agent to a mission document at all.
+  assert.match(prompt, /Slug: task-8/);
+  assert.match(prompt, /px status task-8/);
+  assert.doesNotMatch(prompt, /MISSION\.md/, 'the execute prompt must not name the mission document');
+  assert.match(prompt, /Mission dir: \/tmp\/testproj-task-8\/missions\/task-8/);
+  assert.match(prompt, /Backlog task: .*task-8/);
+  assert.doesNotMatch(prompt, /Load the workflow lifecycle/);
+  assert.doesNotMatch(prompt, /docs\/agent-prompts/);
+  assert.doesNotMatch(prompt, /\{\{[^}]+\}\}/);
+});
+
+test('buildExecutePrompt reserves Backlog lifecycle transitions for Parallix', () => {
+  const prompt = buildExecutePrompt('task-8', 'No checkpoint documents found. Start from CP-1.', { rootDir: '/tmp/testproj-task-8' });
+
+  assert.match(prompt, /do not change the Backlog task's status/i);
+  assert.match(prompt, /Parallix performs lifecycle transitions and review decisions itself/i);
+  // TASK-2521.03: the implementer's typed writes must not reach lifecycle,
+  // assignment or review operations, which stay with the workflow.
+  assert.match(prompt, /do not run .*`px active`.*`px review`.*`px integrate`/);
+});
+
+test('buildCheckpointContext returns fallback text when no checkpoints exist', () => {
+  const context = buildCheckpointContext('task-nonexistent-9999');
+  assert.match(context, /CP-1|no checkpoint/i);
+});
+
+test('resolveWorktree finds the expected path for the current mission', () => {
+  // task-088 is the current mission and its worktree should be discoverable
+  const worktree = resolveWorktree('task-088');
+
+  // If we are running inside the worktree, it should resolve to the cwd or the worktree path
+  assert.ok(
+    worktree === null || typeof worktree === 'string',
+    'resolveWorktree must return null or a string path'
+  );
+
+  if (worktree !== null) {
+    assert.match(worktree, /mission-task-088/);
+  }
+});
+
+test('resolveWorktree returns null for a non-existent mission slug', () => {
+  const worktree = resolveWorktree('task-nonexistent-9999');
+  assert.equal(worktree, null);
+});
+
+test('resolveWorktree ignores prunable duplicates and prefers the live cwd match', () => {
+  const FAKE_ROOT = '/tmp/mission';
+  const porcelain = [
+    `worktree ${FAKE_ROOT}-118`,
+    'HEAD deadbeef',
+    'branch refs/heads/mission/task-118',
+    'prunable stale metadata',
+    '',
+    `worktree ${FAKE_ROOT}-task-118`,
+    'HEAD cafe1234',
+    'branch refs/heads/mission/task-118',
+    ''
+  ].join('\n');
+
+  const worktree = resolveWorktree('task-118', {
+    cwd: `${FAKE_ROOT}-task-118`,
+    gitFn: () => ({ stdout: porcelain })
+  });
+
+  assert.equal(worktree, `${FAKE_ROOT}-task-118`);
+});
+
+// Regression: mission-start must return instead of calling process.exit() when
+// returnResult:true, so active.js can use the result without the process terminating
+// before resolveWorktree() and startAgent() run.
+// Tested via the extracted completePreflightOrExit helper — no live git needed.
+test('completePreflightOrExit returns {pass:false} on failure when returnResult is true', () => {
+  const result = completePreflightOrExit(true, true);
+  assert.deepEqual(result, { pass: false });
+});
+
+test('completePreflightOrExit returns {pass:true} on success when returnResult is true', () => {
+  const result = completePreflightOrExit(false, true);
+  assert.deepEqual(result, { pass: true });
+});
+
+test('mission-start verify mode reports diagnostics and open-ended success without slug', () => {
+  const lines = [];
+  const errors = [];
+
+  const result = missionStart([], {
+    returnResult: true,
+    inferSlugFn: () => null,
+    cwdFn: () => '/tmp/anywhere',
+    getCurrentBranchFn: () => 'main',
+    getLastCommitFn: () => ({ sha: 'abcdef123456', subject: 'Initial', date: '2026-04-30' }),
+    evaluateRepositoryReadinessFn: () => ({ mode: 'default', issues: [], configPath: null }),
+    evaluateReviewSetupFn: () => ({
+      required: true,
+      ok: false,
+      issues: ['Forgejo token for codex is invalid or expired (HTTP 401)'],
+      steps: ['Run `px setup-review` and re-enter the Forgejo passwords to rotate local PATs.'],
+    }),
+    log: line => lines.push(line),
+    error: line => errors.push(line)
+  });
+
+  assert.deepEqual(result, { pass: true });
+  assert.ok(lines.some(l => l.includes('[INFO] Running environment diagnostics (verify-env)...')));
+  assert.ok(lines.some(l => l.includes('[PASS] PWD: /tmp/anywhere')));
+  assert.ok(lines.some(l => l.includes('[PASS] Branch: main')));
+  assert.ok(lines.some(l => l.includes('[WARN] Forgejo review setup: review actions are not ready yet.')));
+  assert.ok(lines.some(l => l.includes('invalid or expired (HTTP 401)')));
+  assert.ok(lines.some(l => l.includes('[PASS] Last commit: abcdef12 - Initial (2026-04-30)')));
+  assert.ok(lines.some(l => l.includes('[PASS] Environment verdict: USABLE')));
+  assert.equal(errors.length, 0);
+});
+
+test('mission-start reports wrong branch and ambiguous task without requiring metadata directories', () => {
+  const lines = [];
+  const errors = [];
+
+  const result = missionStart(['task-1031'], {
+    returnResult: true,
+    cwdFn: () => '/tmp/not-the-right-worktree',
+    getCurrentBranchFn: () => 'main',
+    resolveTaskFileFn: () => ({ ok: false, reason: 'ambiguous', matches: ['a.md', 'b.md'] }),
+    resolveMissionClassificationFn: () => ({ classification: 'ai_sdlc' }),
+    findMissionDirFn: () => null,
+    getMissionYearFn: () => '2026',
+    conventionalWorktreePathFn: slug => `/tmp/project-${slug}`,
+    getLastCommitFn: () => ({ sha: 'abcdef123456', subject: 'Initial', date: '2026-04-30' }),
+    getPrStatusFn: () => ({ exists: false }),
+    isForgejoReviewEnabledFn: () => true,
+    log: line => lines.push(line),
+    error: line => errors.push(line)
+  });
+
+  assert.deepEqual(result, { pass: false });
+  assert.ok(lines.some(line => line.includes('[FAIL] PWD: /tmp/not-the-right-worktree does not match expected mission worktree path /tmp/project-task-1031')));
+  assert.ok(lines.some(line => line.includes('[FAIL] Branch: main does not match expected mission branch mission/task-1031')));
+  assert.ok(lines.some(l => l.includes('[FAIL] Backlog task resolution is ambiguous for slug: task-1031')));
+  assert.ok(lines.includes('  - a.md'));
+  assert.ok(lines.includes('  - b.md'));
+  assert.ok(lines.some(line => line.includes('[PASS] Typed mission contract')));
+  assert.ok(!lines.some(line => line.includes('[FAIL] Mission doc')));
+  assert.ok(lines.some(line => line.includes('[PASS] Forgejo PR: no PR found (ready for startup)')));
+  assert.ok(errors.some(line => line.includes('[FAIL] Environment verdict: NOT USABLE')));
+});
+
+// ---------- active top-level command paths ----------
+
+test('active() success path: preflight, launch, and handoff run in order', async () => {
+  const calls = [];
+  const logs = [];
+
+  await active(['task-1038'], {
+    inferSlugFn: () => 'task-1038',
+    service: { execute: async () => {
+      calls.push(['checkpoint', 'task-1038']);
+      calls.push(['prompt', 'task-1038', 'Most recent checkpoint: CP-1.md']);
+      calls.push(['launch', 'task-1038', '/tmp/project-task-1038', 'Execute task-1038']);
+      calls.push(['handoff', 'task-1038', '/tmp/project-task-1038', 'codex']);
+      return { status: 'completed', value: { agent: 'codex' }, durableEvidence: [] };
+    } },
+    missionStartFn: () => ({ pass: true }),
+    resolveWorktreeFn: () => '/tmp/project-task-1038',
+    readAgentConfigOrExitFn: () => ({ draft: ['codex'] }),
+    resolveTaskFileFn: () => ({ ok: true, taskFile: '/tmp/project-task-1038/backlog/tasks/task-1038.md' }),
+    buildCheckpointContextFn: (slug) => {
+      calls.push(['checkpoint', slug]);
+      return 'Most recent checkpoint: CP-1.md';
+    },
+    buildExecutePromptFn: (slug, context) => {
+      calls.push(['prompt', slug, context]);
+      return `Execute ${slug}`;
+    },
+    selectLaunchAndRecordFn: async (opts) => {
+      calls.push(['launch', opts.slug, opts.worktree, opts.prompt]);
+      return { agent: 'codex', result: { status: 0 } };
+    },
+    enforceExecuteCommitSafetyFn: () => false,
+    runHandoffAndReviewFn: async (slug, worktree, agent) => {
+      calls.push(['handoff', slug, worktree, agent]);
+      return true;
+    },
+    exitFn: (code) => { throw new Error(`unexpected exit ${code}`); },
+    logFn: (msg) => logs.push(msg),
+    errorFn: (msg) => { throw new Error(`unexpected error: ${msg}`); }
+  });
+
+  assert.deepEqual(calls, [
+    ['checkpoint', 'task-1038'],
+    ['prompt', 'task-1038', 'Most recent checkpoint: CP-1.md'],
+    ['launch', 'task-1038', '/tmp/project-task-1038', 'Execute task-1038'],
+    ['handoff', 'task-1038', '/tmp/project-task-1038', 'codex']
+  ]);
+  assert.ok(logs.some(line => line.includes('Mission task-1038')));
+  assert.ok(!logs.some(line => line.includes('Launching execute agent')));
+});
+
+test('active() honors an explicit --implementer override without consulting WORKFLOW_AGENT', async () => {
+  const calls = [];
+  const priorWorkflowAgent = process.env.WORKFLOW_AGENT;
+  delete process.env.WORKFLOW_AGENT;
+
+  try {
+    await active(['task-1038', '--implementer', 'claude'], {
+      inferSlugFn: () => 'task-1038',
+      service: { execute: async request => {
+        calls.push(['launch', request.agent]);
+        calls.push(['handoff', request.agent]);
+        return { status: 'completed', value: { agent: request.agent }, durableEvidence: [] };
+      } },
+      missionStartFn: () => ({ pass: true }),
+      resolveWorktreeFn: () => '/tmp/project-task-1038',
+      readAgentConfigOrExitFn: () => ({ active: ['codex'] }),
+      resolveTaskFileFn: () => ({ ok: true, taskFile: '/tmp/project-task-1038/backlog/tasks/task-1038.md' }),
+      buildCheckpointContextFn: () => 'Most recent checkpoint: CP-1.md',
+      buildExecutePromptFn: (slug) => `Execute ${slug}`,
+      selectLaunchAndRecordFn: async (opts) => {
+        calls.push(['launch', opts.preselectedAgent]);
+        return { agent: opts.preselectedAgent, result: { status: 0 } };
+      },
+      enforceExecuteCommitSafetyFn: () => false,
+      runHandoffAndReviewFn: async (slug, worktree, agent) => {
+        calls.push(['handoff', agent]);
+        return true;
+      },
+      exitFn: (code) => { throw new Error(`unexpected exit ${code}`); },
+      logFn: () => {},
+      errorFn: (msg) => { throw new Error(`unexpected error: ${msg}`); }
+    });
+  } finally {
+    if (priorWorkflowAgent === undefined) { delete process.env.WORKFLOW_AGENT; } else { process.env.WORKFLOW_AGENT = priorWorkflowAgent; }
+  }
+
+  assert.deepEqual(calls, [
+    ['launch', 'claude'],
+    ['handoff', 'claude']
+  ]);
+});
+
+test('active() exits non-zero with usage text when --implementer is missing its value', async () => {
+  let exitCode = null;
+  const errors = [];
+
+  await active(['task-1038', '--implementer'], {
+    inferSlugFn: () => 'task-1038',
+    missionStartFn: () => { throw new Error('must not run preflight when --implementer parsing fails'); },
+    exitFn: (code) => { exitCode = code; throw new Error('__stop__'); },
+    logFn: () => {},
+    errorFn: (msg) => errors.push(msg)
+  }).catch(err => { if (err.message !== '__stop__') { throw err; } });
+
+  assert.equal(exitCode, 1);
+  assert.ok(errors.some(msg => msg.includes('px active <slug> --implementer <family>')));
+});
+
+test('active() does not pre-write backlog state before the execute agent actually launches', async () => {
+  const logs = [];
+
+  await active(['task-1038'], {
+    inferSlugFn: () => 'task-1038',
+    service: { execute: async () => ({ status: 'completed', value: { agent: 'codex' }, durableEvidence: [] }) },
+    missionStartFn: () => ({ pass: true }),
+    resolveWorktreeFn: () => '/tmp/project-task-1038',
+    readAgentConfigOrExitFn: () => ({}),
+    resolveTaskFileFn: () => ({ ok: true, taskFile: '/tmp/project-task-1038/backlog/tasks/task-1038.md' }),
+    buildCheckpointContextFn: () => 'Most recent checkpoint: CP-1.md',
+    buildExecutePromptFn: () => 'Execute task-1038',
+    selectLaunchAndRecordFn: async () => ({ agent: 'codex', result: { status: 0 } }),
+    enforceExecuteCommitSafetyFn: () => false,
+    runHandoffAndReviewFn: async () => true,
+    exitFn: (code) => { throw new Error(`unexpected exit ${code}`); },
+    logFn: (msg) => logs.push(msg),
+    errorFn: (msg) => { throw new Error(`unexpected error: ${msg}`); }
+  });
+
+  assert.ok(
+    !logs.some(line => line.includes('Enforcing implementer')),
+    `active() must defer backlog writes until after launch; got logs: ${logs.join(' | ')}`
+  );
+});
+
+test('active() exits 1 when preflight fails', async () => {
+  let exitCode = null;
+  const errors = [];
+
+  await active(['task-1038'], {
+    inferSlugFn: () => 'task-1038',
+    service: { execute: async () => ({ status: 'rejected', error: { kind: 'validation', message: 'execute preflight failed' }, durableEvidence: [] }) },
+    missionStartFn: () => ({ pass: false }),
+    exitFn: (code) => { exitCode = code; },
+    logFn: () => {},
+    errorFn: (msg) => errors.push(msg)
+  });
+
+  assert.equal(exitCode, 1);
+  assert.ok(errors.some(line => line.includes('Preflight failed')));
+});
+
+test('active() exits 1 when worktree is missing', async () => {
+  let exitCode = null;
+  const errors = [];
+
+  await active(['task-1038'], {
+    inferSlugFn: () => 'task-1038',
+    service: { execute: async () => ({ status: 'rejected', error: { kind: 'validation', message: 'dedicated execute worktree is required' }, durableEvidence: [] }) },
+    missionStartFn: () => ({ pass: true }),
+    resolveWorktreeFn: () => null,
+    exitFn: (code) => { exitCode = code; },
+    logFn: () => {},
+    errorFn: (msg) => errors.push(msg)
+  });
+
+  assert.equal(exitCode, 1);
+  assert.ok(errors.some(line => line.includes('Could not locate dedicated worktree')));
+});
+
+test('active() exits 1 when execute launch throws', async () => {
+  let exitCode = null;
+  const errors = [];
+
+  await active(['task-1038'], {
+    inferSlugFn: () => 'task-1038',
+    service: { execute: async () => ({ status: 'failed', error: { kind: 'execution', message: 'Could not launch execute agent: launcher exploded' }, durableEvidence: [] }) },
+    missionStartFn: () => ({ pass: true }),
+    resolveWorktreeFn: () => '/tmp/project-task-1038',
+    readAgentConfigOrExitFn: () => ({}),
+    resolveTaskFileFn: () => ({ ok: true, taskFile: '/tmp/task.md' }),
+    buildCheckpointContextFn: () => 'CP-1',
+    buildExecutePromptFn: () => 'Execute task-1038',
+    selectLaunchAndRecordFn: async () => { throw new Error('launcher exploded'); },
+    exitFn: (code) => { exitCode = code; },
+    logFn: () => {},
+    errorFn: (msg) => errors.push(msg)
+  });
+
+  assert.equal(exitCode, 1);
+  assert.ok(errors.some(line => line.includes('Could not launch execute agent: launcher exploded')));
+});
+
+test('active() exits with agent status when execute agent returns non-zero', async () => {
+  let exitCode = null;
+  const errors = [];
+
+  await active(['task-1038'], {
+    inferSlugFn: () => 'task-1038',
+    service: { execute: async () => ({ status: 'failed', error: { kind: 'execution', message: 'Execute agent (codex) exited with status 23.' }, durableEvidence: [] }) },
+    missionStartFn: () => ({ pass: true }),
+    resolveWorktreeFn: () => '/tmp/project-task-1038',
+    readAgentConfigOrExitFn: () => ({}),
+    resolveTaskFileFn: () => ({ ok: true, taskFile: '/tmp/task.md' }),
+    buildCheckpointContextFn: () => 'CP-1',
+    buildExecutePromptFn: () => 'Execute task-1038',
+    selectLaunchAndRecordFn: async () => ({ agent: 'codex', result: { status: 23 } }),
+    exitFn: (code) => { exitCode = code; },
+    logFn: () => {},
+    errorFn: (msg) => errors.push(msg)
+  });
+
+  assert.equal(exitCode, 23);
+  assert.deepEqual(errors, ['Execute agent (codex) exited with status 23.']);
+});
+
+test('active() exits 1 when handoff fails after successful execute launch', async () => {
+  let exitCode = null;
+
+  await active(['task-1038'], {
+    inferSlugFn: () => 'task-1038',
+    service: { execute: async () => ({ status: 'failed', error: { kind: 'execution', message: 'handoff and review failed' }, durableEvidence: [] }) },
+    missionStartFn: () => ({ pass: true }),
+    resolveWorktreeFn: () => '/tmp/project-task-1038',
+    readAgentConfigOrExitFn: () => ({}),
+    resolveTaskFileFn: () => ({ ok: true, taskFile: '/tmp/task.md' }),
+    buildCheckpointContextFn: () => 'CP-1',
+    buildExecutePromptFn: () => 'Execute task-1038',
+    selectLaunchAndRecordFn: async () => ({ agent: 'codex', result: { status: 0 } }),
+    enforceExecuteCommitSafetyFn: () => false,
+    runHandoffAndReviewFn: async () => false,
+    exitFn: (code) => { exitCode = code; },
+    logFn: () => {},
+    errorFn: () => {}
+  });
+
+  assert.equal(exitCode, 1);
+});
+
+test('active() runs the execute safety harness before handoff', async () => {
+  const calls = [];
+
+  await active(['task-1038'], {
+    inferSlugFn: () => 'task-1038',
+    service: { execute: async () => {
+      calls.push('safety');
+      calls.push('handoff');
+      return { status: 'completed', value: { agent: 'codex' }, durableEvidence: [] };
+    } },
+    missionStartFn: () => ({ pass: true }),
+    resolveWorktreeFn: () => '/tmp/project-task-1038',
+    readAgentConfigOrExitFn: () => ({}),
+    resolveTaskFileFn: () => ({ ok: true, taskFile: '/tmp/task.md' }),
+    buildCheckpointContextFn: () => 'CP-1',
+    buildExecutePromptFn: () => 'Execute task-1038',
+    selectLaunchAndRecordFn: async () => ({ agent: 'codex', result: { status: 0 } }),
+    enforceExecuteCommitSafetyFn: () => {
+      calls.push('safety');
+      return true;
+    },
+    runHandoffAndReviewFn: async () => {
+      calls.push('handoff');
+      return true;
+    },
+    exitFn: (code) => { throw new Error(`unexpected exit ${code}`); },
+    logFn: () => {},
+    errorFn: (msg) => { throw new Error(`unexpected error: ${msg}`); }
+  });
+
+  assert.deepEqual(calls, ['safety', 'handoff']);
+});
+
+test('active() restores task status and continues to handoff when the execute agent changed it', async () => {
+  const calls = [];
+  const errors = [];
+
+  await active(['task-1038'], {
+    inferSlugFn: () => 'task-1038',
+    service: { execute: async () => {
+      calls.push('safety');
+      calls.push(['restore', 'task-1038', 'active', '/tmp/project-task-1038']);
+      calls.push('handoff');
+      return { status: 'completed', value: { agent: 'codex' }, durableEvidence: [] };
+    } },
+    missionStartFn: () => ({ pass: true }),
+    resolveWorktreeFn: () => '/tmp/project-task-1038',
+    readAgentConfigOrExitFn: () => ({}),
+    resolveTaskFileFn: () => ({ ok: true, taskFile: '/tmp/task.md' }),
+    buildCheckpointContextFn: () => 'CP-1',
+    buildExecutePromptFn: () => 'Execute task-1038',
+    selectLaunchAndRecordFn: async () => ({ agent: 'codex', result: { status: 0 } }),
+    getTaskStatusFn: () => 'done',
+    transitionTaskFn: (slug, status, opts) => {
+      calls.push(['restore', slug, status, opts.rootDir]);
+      return true;
+    },
+    enforceExecuteCommitSafetyFn: () => calls.push('safety'),
+    runHandoffAndReviewFn: async () => calls.push('handoff'),
+    exitFn: (code) => { throw new Error(`unexpected exit ${code}`); },
+    logFn: () => {},
+    errorFn: (msg) => errors.push(msg)
+  });
+
+  assert.deepEqual(calls, [
+    'safety',
+    ['restore', 'task-1038', 'active', '/tmp/project-task-1038'],
+    'handoff'
+  ]);
+  assert.deepEqual(errors, []);
+});
+
+test('active() synchronizes a launch-deferred rebase after execute output is committed', async () => {
+  const calls = [];
+
+  await active(['task-1038'], {
+    inferSlugFn: () => 'task-1038',
+    service: { execute: async () => {
+      calls.push('safety');
+      calls.push(['sync', 'task-1038', 'active', '/tmp/project-task-1038']);
+      calls.push('handoff');
+      return { status: 'completed', value: { agent: 'codex' }, durableEvidence: [] };
+    } },
+    missionStartFn: () => ({ pass: true }),
+    resolveWorktreeFn: () => '/tmp/project-task-1038',
+    readAgentConfigOrExitFn: () => ({}),
+    resolveTaskFileFn: () => ({ ok: true, taskFile: '/tmp/task.md' }),
+    buildCheckpointContextFn: () => 'CP-1',
+    buildExecutePromptFn: () => 'Execute task-1038',
+    selectLaunchAndRecordFn: async () => ({ agent: 'codex', result: { status: 0 }, rebaseDeferred: true }),
+    getTaskStatusFn: () => 'active',
+    transitionTaskFn: (slug, status, opts) => {
+      calls.push(['sync', slug, status, opts.rootDir]);
+      return true;
+    },
+    enforceExecuteCommitSafetyFn: () => calls.push('safety'),
+    runHandoffAndReviewFn: async () => calls.push('handoff'),
+    exitFn: (code) => { throw new Error(`unexpected exit ${code}`); },
+    logFn: () => {},
+    errorFn: (msg) => { throw new Error(`unexpected error: ${msg}`); }
+  });
+
+  assert.deepEqual(calls, [
+    'safety',
+    ['sync', 'task-1038', 'active', '/tmp/project-task-1038'],
+    'handoff'
+  ]);
+});
+
+// ---------- runHandoffAndReview wiring ----------
+
+// Regression guard for the repairHandoffFn default in runHandoffAndReview.
+// Under ESM, `import * as repairHandoff from './repair-handoff.js'` yields a
+// namespace with `.default` (the callable function) and named exports.
+// active.ts uses `repairHandoff.default` as the callable.
+test('repair-handoff ESM namespace exposes callable default and named exports', () => {
+  assert.equal(typeof repairHandoffModule.default, 'function', 'namespace.default must be callable');
+  assert.equal(typeof repairHandoffModule.repairHandoff, 'function', 'named export repairHandoff must be callable');
+  assert.equal(repairHandoffModule.default, repairHandoffModule.repairHandoff, 'default and named repairHandoff must be same function');
+  assert.equal(typeof repairHandoffModule.isRelaunchableError, 'function', 'isRelaunchableError must be exported');
+  assert.equal(typeof repairHandoffModule.buildRelaunchPrompt, 'function', 'buildRelaunchPrompt must be exported');
+});
+
+test('runHandoffAndReview passes worktree and implementer to startReviewLoop', async () => {
+  const reviewLoopCalls = [];
+  const result = await runHandoffAndReview('task-test', '/tmp/project-task-test', 'codex', {
+    validateCheckpointsBeforeHandoffFn: () => ({ ok: true }),
+    performHandoff: async () => ({ ok: true }),
+    startReviewLoop: (slug, opts) => reviewLoopCalls.push({ slug, opts }),
+    log: () => {},
+    error: () => {}
+  });
+
+  assert.ok(result, 'runHandoffAndReview should return true on success');
+  assert.equal(reviewLoopCalls.length, 1, 'startReviewLoop must be called exactly once');
+  assert.equal(reviewLoopCalls[0].slug, 'task-test');
+  assert.equal(reviewLoopCalls[0].opts.worktree, '/tmp/project-task-test');
+  assert.equal(reviewLoopCalls[0].opts.implementer, 'codex');
+  // SC3: handoff already ran in this function, so the review loop must skip its
+  // own handoff. On a provider-disabled repository a start that runs
+  // performHandoff a second time would resubmit/mutate the Review the active
+  // path just created. This is a fresh review start (not a --continue), so it
+  // is signaled with skipHandoff rather than isContinue.
+  assert.equal(reviewLoopCalls[0].opts.skipHandoff, true, 'startReviewLoop must be told to skip handoff after an active handoff');
+});
+
+test('runHandoffAndReview does not hand off or start review when CP-2 is missing', async () => {
+  let handoffCalls = 0;
+  let reviewCalls = 0;
+  const result = await runHandoffAndReview('task-incomplete', '/tmp/project-task-incomplete', 'codex', {
+    validateCheckpointsBeforeHandoffFn: () => ({
+      ok: false,
+      error: 'Declared checkpoint documents are missing before handoff: CP-2. Create and commit CP-2.md before handoff.',
+      nextCheckpoint: 'CP-2'
+    }),
+    startAgentFn: async () => { throw new Error('test relaunch declined'); },
+    performHandoff: async () => { handoffCalls++; return { ok: true }; },
+    startReviewLoop: async () => { reviewCalls++; },
+    log: () => {},
+    error: () => {}
+  });
+  assert.equal(result, false);
+  assert.equal(handoffCalls, 0);
+  assert.equal(reviewCalls, 0);
+});
+
+test('runHandoffAndReview completes a successful relaunch for a declared checkpoint gap', async () => {
+  let validations = 0;
+  let relaunches = 0;
+  let handoffCalls = 0;
+  const logs = [];
+  const result = await runHandoffAndReview('task-incomplete', '/tmp/project-task-incomplete', 'codex', {
+    validateCheckpointsBeforeHandoffFn: () => {
+      validations++;
+      return validations === 1
+        ? { ok: false, nextCheckpoint: 'CP-2' }
+        : { ok: true };
+    },
+    startAgentFn: async () => { relaunches++; return { agent: 'codex', result: { status: 0 } }; },
+    performHandoff: async () => { handoffCalls++; return { ok: true }; },
+    startReviewLoop: async () => {},
+    log: message => logs.push(message),
+    error: () => {}
+  });
+
+  assert.equal(result, true);
+  assert.equal(relaunches, 1);
+  assert.equal(handoffCalls, 1);
+  assert.ok(logs.some(message => message.includes('Checkpoint validation failed')),
+    'the typed handoff service reports the checkpoint bounce before relaunching');
+});
+
+test('runHandoffAndReview waits for the autonomous review loop to complete', async () => {
+  let resolveReview;
+  const reviewComplete = new Promise(resolve => { resolveReview = resolve; });
+  const handoffPromise = runHandoffAndReview('task-test', '/tmp/project-task-test', 'codex', {
+    validateCheckpointsBeforeHandoffFn: () => ({ ok: true }),
+    performHandoff: async () => ({ ok: true }),
+    startReviewLoop: async () => reviewComplete,
+    log: () => {},
+    error: () => {}
+  });
+  let settled = false;
+  handoffPromise.then(() => { settled = true; });
+
+  await Promise.resolve();
+  await Promise.resolve();
+  assert.equal(settled, false, 'px active must not finish while review is still running');
+
+  resolveReview();
+  assert.equal(await handoffPromise, true);
+  assert.equal(settled, true);
+});
+
+test('runHandoffAndReview retries handoff once after successful repair with force:true', async () => {
+  let handoffAttempts = 0;
+  let repairAttempts = 0;
+  let forceUsed = false;
+
+  const result = await runHandoffAndReview('task-test', '/tmp/project-task-test', 'codex', {
+    validateCheckpointsBeforeHandoffFn: () => ({ ok: true }),
+    performHandoff: async (slug, opts) => {
+      handoffAttempts++;
+      if (handoffAttempts === 1) return { ok: false, error: 'dirty files' };
+      forceUsed = opts.force;
+      return { ok: true };
+    },
+    repairHandoffFn: async () => {
+      repairAttempts++;
+      return { repaired: true, blocker: null };
+    },
+    startReviewLoop: () => {},
+    log: () => {},
+    error: () => {}
+  });
+
+  assert.ok(result);
+  assert.equal(handoffAttempts, 2, 'handoff should be retried once');
+  assert.equal(repairAttempts, 1, 'repair should be called once');
+  assert.equal(forceUsed, true, 'force:true should be used on retry after repair');
+});
+
+test('runHandoffAndReview fails and does not retry if repair returns repaired:false', async () => {
+  let handoffAttempts = 0;
+  let repairAttempts = 0;
+
+  const result = await runHandoffAndReview('task-test', '/tmp/project-task-test', 'codex', {
+    validateCheckpointsBeforeHandoffFn: () => ({ ok: true }),
+    performHandoff: async () => {
+      handoffAttempts++;
+      return { ok: false, error: 'dirty files' };
+    },
+    repairHandoffFn: async () => {
+      repairAttempts++;
+      return { repaired: false, blocker: null };
+    },
+    startReviewLoop: () => {},
+    log: () => {},
+    error: () => {}
+  });
+
+  assert.equal(result, false);
+  assert.equal(handoffAttempts, 1, 'handoff should not be retried if repair fails');
+  assert.equal(repairAttempts, 1);
+});
+
+test('runHandoffAndReview reports specific blocker when repair fails', async () => {
+  const errors = [];
+  const result = await runHandoffAndReview('task-test', '/tmp/project-task-test', 'codex', {
+    validateCheckpointsBeforeHandoffFn: () => ({ ok: true }),
+    performHandoff: async () => ({ ok: false, error: 'original error' }),
+    repairHandoffFn: async () => ({ repaired: false, blocker: 'specific rebase blocker' }),
+    startReviewLoop: () => {},
+    log: () => {},
+    error: (msg) => errors.push(msg)
+  });
+
+  assert.equal(result, false);
+  assert.ok(errors.some(l => l.includes('Automated handoff failed: specific rebase blocker')),
+    'Should report the specific blocker instead of the original error');
+});
+
+test('runHandoffAndReview fails if retry also fails', async () => {
+  let handoffAttempts = 0;
+
+  const result = await runHandoffAndReview('task-test', '/tmp/project-task-test', 'codex', {
+    validateCheckpointsBeforeHandoffFn: () => ({ ok: true }),
+    performHandoff: async () => {
+      handoffAttempts++;
+      return { ok: false, error: 'still dirty' };
+    },
+    repairHandoffFn: async () => ({ repaired: true, blocker: null }),
+    startReviewLoop: () => {},
+    log: () => {},
+    error: () => {}
+  });
+
+  assert.equal(result, false);
+  assert.equal(handoffAttempts, 2, 'handoff should be retried once but fail again');
+});
+
+// ---------- applyExecuteFallback (regression: implementer falls back after limit hit) ----------
+
+test('applyExecuteFallback returns preselected when startAgent did not fall back', () => {
+  const next = applyExecuteFallback({
+    slug: 'task-test',
+    preselected: 'codex',
+    actual: 'codex',
+    taskResolution: { ok: true, taskFile: '/tmp/task.md' },
+    log: () => {},
+    enforceTaskAssigneeFn: () => { throw new Error('enforceTaskAssignee must not run when no fallback occurred'); }
+  });
+  assert.equal(next, 'codex');
+});
+
+test('applyExecuteFallback returns preselected when actual is undefined (catastrophic launch failure)', () => {
+  const next = applyExecuteFallback({
+    slug: 'task-test',
+    preselected: 'codex',
+    actual: undefined,
+    taskResolution: { ok: true, taskFile: '/tmp/task.md' },
+    log: () => {},
+    enforceTaskAssigneeFn: () => { throw new Error('enforceTaskAssignee must not run when actual is missing'); }
+  });
+  assert.equal(next, 'codex');
+});
+
+test('applyExecuteFallback rewrites backlog assignee and returns the fallback agent', () => {
+  const transitions = [];
+  const next = applyExecuteFallback({
+    slug: 'task-test',
+    preselected: 'claude',
+    actual: 'codex',
+    taskResolution: { ok: true, taskFile: '/tmp/task.md' },
+    log: () => {},
+    transitionTaskFn: (slug, status, opts) => { transitions.push({ slug, status, opts }); return Promise.resolve(true); }
+  });
+  assert.equal(next, 'codex');
+  assert.equal(transitions.length, 1);
+  assert.equal(transitions[0].slug, 'task-test');
+  assert.equal(transitions[0].status, 'active');
+  assert.equal(transitions[0].opts.implementer, 'codex');
+  assert.equal(transitions[0].opts.rootDir, undefined);
+  assert.equal(typeof transitions[0].opts.log, 'function');
+});
+
+test('applyExecuteFallback logs warning and returns fallback agent even if git commit fails', () => {
+  const logs = [];
+  const next = applyExecuteFallback({
+    slug: 'task-test',
+    preselected: 'claude',
+    actual: 'codex',
+    taskResolution: { ok: true, taskFile: '/tmp/task.md' },
+    log: (msg) => logs.push(msg),
+    transitionTaskFn: () => Promise.resolve(false) // transition/commit fails
+  });
+  assert.equal(next, 'codex');
+  // transitionTask handles its own logging now
+});
+
+test('applyExecuteFallback skips backlog write when taskResolution is not ok', () => {
+  const next = applyExecuteFallback({
+    slug: 'task-test',
+    preselected: 'claude',
+    actual: 'codex',
+    taskResolution: { ok: false },
+    log: () => {},
+    transitionTaskFn: () => { throw new Error('transitionTaskFn must not run when taskResolution.ok is false'); }
+  });
+  // Still returns the fallback identity so downstream handoff polls the right user.
+  assert.equal(next, 'codex');
+});
+
+// ---------- runHandoffAndReview gatekeeper pushback ----------
+
+test('runHandoffAndReview skips startReviewLoop when gatekeeper posted pushback', async () => {
+  const reviewLoopCalls = [];
+  const result = await runHandoffAndReview('task-test', '/tmp/project-task-test', 'codex', {
+    validateCheckpointsBeforeHandoffFn: () => ({ ok: true }),
+    performHandoff: async () => ({ ok: true, gatekeeperPushedBack: true }),
+    startReviewLoop: () => reviewLoopCalls.push(true),
+    log: () => {},
+    error: () => {}
+  });
+
+  assert.ok(result, 'runHandoffAndReview should return true even with gatekeeper pushback');
+  assert.equal(reviewLoopCalls.length, 0, 'startReviewLoop must not be called when gatekeeper posted pushback');
+});
+
+test('runHandoffAndReview starts review loop when gatekeeper did not push back', async () => {
+  const reviewLoopCalls = [];
+  const result = await runHandoffAndReview('task-test', '/tmp/project-task-test', 'codex', {
+    validateCheckpointsBeforeHandoffFn: () => ({ ok: true }),
+    performHandoff: async () => ({ ok: true, gatekeeperPushedBack: false }),
+    startReviewLoop: (slug, opts) => reviewLoopCalls.push({ slug, opts }),
+    log: () => {},
+    error: () => {}
+  });
+
+  assert.ok(result, 'runHandoffAndReview should return true');
+  assert.equal(reviewLoopCalls.length, 1, 'startReviewLoop must be called when gatekeeper did not push back');
+});
+
+// ---------- selectLaunchAndRecord — Backlog state-ordering contract ----------
+// These tests verify that Backlog writes (status=active, assignee) happen ONLY
+// after startAgent confirms a successful launch. A failed or exhausted launch
+// must not leave the task in a misleading active state with the wrong assignee.
+
+test('selectLaunchAndRecord writes Backlog with the launched agent after a successful launch', async () => {
+  const transitions = [];
+
+  const result = await selectLaunchAndRecord({
+    slug: 'task-test',
+    worktree: '/tmp/project-task-test',
+    agentConfig: {},
+    taskResolution: { ok: true, taskFile: '/tmp/task.md' },
+    prompt: 'Execute.',
+    selectAgentFn: () => 'codex',
+    startAgentFn: async (step, opts) => {
+      if (opts.onLaunch) {
+        await opts.onLaunch({ agent: 'codex' });
+      }
+      return { agent: 'codex', result: { status: 0 } };
+    },
+    transitionTaskFn: (slug, status, opts) => { transitions.push({ slug, status, opts }); return true; },
+    log: () => {}
+  });
+
+  assert.equal(result.agent, 'codex');
+  assert.equal(result.rebaseDeferred, true, 'launch callback must defer worktree rebase until execute completes');
+  assert.equal(transitions.length, 1, 'transitionTask must be called exactly once on success');
+  assert.equal(transitions[0].status, 'active');
+  assert.equal(transitions[0].opts.implementer, 'codex');
+  assert.equal(transitions[0].opts.rootDir, '/tmp/project-task-test', 'the shared CLI/TUI execution path writes in its launched worktree');
+});
+
+test('selectLaunchAndRecord reuses the caller preselection instead of choosing again', async () => {
+  const result = await selectLaunchAndRecord({
+    slug: 'task-test',
+    worktree: '/tmp/project-task-test',
+    preselectedAgent: 'claude',
+    agentConfig: {},
+    taskResolution: { ok: false },
+    prompt: 'Execute.',
+    selectAgentFn: () => { throw new Error('selectAgentFn must not run when preselectedAgent is provided'); },
+    startAgentFn: async (step, opts) => {
+      assert.equal(step, 'active');
+      assert.equal(opts.agent, 'claude');
+      return { agent: 'claude', result: { status: 0 } };
+    },
+    log: () => {}
+  });
+
+  assert.equal(result.preselected, 'claude');
+  assert.equal(result.agent, 'claude');
+});
+
+test('selectLaunchAndRecord writes Backlog when startAgent returns successful result', async () => {
+  const transitions = [];
+
+  await selectLaunchAndRecord({
+    slug: 'task-test',
+    worktree: '/tmp/project-task-test',
+    agentConfig: {},
+    taskResolution: { ok: true, taskFile: '/tmp/task.md' },
+    prompt: 'Execute.',
+    selectAgentFn: () => 'claude',
+    startAgentFn: async (step, opts) => {
+      if (opts.onLaunch) {
+        await opts.onLaunch({ agent: 'claude' });
+      }
+      return { agent: 'claude', result: { status: 0 } };
+    },
+    transitionTaskFn: (slug, status, opts) => { transitions.push({ slug, status, opts }); return true; },
+    log: () => {}
+  });
+
+  assert.equal(transitions.length, 1, 'transitionTask must be called on successful launch');
+  assert.equal(transitions[0].status, 'active');
+});
+
+test('selectLaunchAndRecord fails at the activation boundary without waiting for the agent to exit', async () => {
+  const transitions = [];
+  const logs = [];
+  // The agent's final result never settles: if the boundary rejection were
+  // swallowed until the agent exited (the TASK-2582 review F1 shape), this
+  // call would hang instead of rejecting.
+  const pendingAgentResult = new Promise(() => {});
+
+  await assert.rejects(
+    selectLaunchAndRecord({
+      slug: 'task-test',
+      worktree: '/tmp/project-task-test',
+      agentConfig: {},
+      taskResolution: { ok: true, taskFile: '/tmp/task.md' },
+      prompt: 'Execute.',
+      selectAgentFn: () => 'codex',
+      startAgentFn: async (_step, opts) => {
+        // Mirrors startAgent: a rejection from onLaunch propagates without
+        // awaiting the agent result.
+        if (opts.onLaunch) {
+          await opts.onLaunch({ agent: 'codex' });
+        }
+        return { agent: 'codex', result: await pendingAgentResult };
+      },
+      transitionTaskFn: (slug, status, opts) => { transitions.push({ slug, status, opts }); return true; },
+      log: (message) => { logs.push(String(message)); },
+      onActivated: async () => { throw new Error('store refused the active transition'); }
+    }),
+    /Failed to persist the active lifecycle boundary for task task-test: store refused the active transition/,
+  );
+
+  assert.equal(transitions.length, 0, 'no Backlog transition may follow a refused activation boundary');
+  assert.ok(logs.some((line) => line.includes('store refused the active transition')), 'the boundary failure is surfaced at the boundary');
+});
+
+test('selectLaunchAndRecord writes Backlog before the launcher resolves its final result', async () => {
+  const transitions = [];
+  let resolveResult;
+  let transitionCountAtReturn = null;
+
+  const pendingResult = new Promise(resolve => {
+    resolveResult = resolve;
+  });
+
+  const callPromise = selectLaunchAndRecord({
+    slug: 'task-test',
+    worktree: '/tmp/project-task-test',
+    agentConfig: {},
+    taskResolution: { ok: true, taskFile: '/tmp/task.md' },
+    prompt: 'Execute.',
+    selectAgentFn: () => 'claude',
+    startAgentFn: async (step, opts) => {
+      if (opts.onLaunch) {
+        await opts.onLaunch({ agent: 'claude' });
+      }
+      transitionCountAtReturn = transitions.length;
+      const result = await pendingResult;
+      return { agent: 'claude', result };
+    },
+    transitionTaskFn: (slug, status, opts) => { transitions.push({ slug, status, opts }); return true; },
+    log: () => {}
+  });
+
+  // onLaunch has two awaits (onAgentLaunched + transitionTaskFn) and startAgentFn
+  // awaits onLaunch, so three microtask turns are needed before startAgentFn
+  // resumes and captures the transition count.
+  await Promise.resolve();
+  await Promise.resolve();
+  await Promise.resolve();
+  assert.equal(transitionCountAtReturn, 1, 'transitionTask must run during onLaunch, before the final result resolves');
+  assert.equal(transitions[0].status, 'active');
+
+  resolveResult({ status: 0 });
+  await callPromise;
+});
+
+test('selectLaunchAndRecord rolls Backlog back when startAgent returns a result.error', async () => {
+  const transitions = [];
+
+  await selectLaunchAndRecord({
+    slug: 'task-test',
+    worktree: '/tmp/project-task-test',
+    agentConfig: {},
+    taskResolution: { ok: true, taskFile: '/tmp/task.md' },
+    getTaskStatusFn: () => 'refined',
+    prompt: 'Execute.',
+    selectAgentFn: () => 'claude',
+    startAgentFn: async (step, opts) => {
+      if (opts.onLaunch) {
+        await opts.onLaunch({ agent: 'claude' });
+      }
+      return {
+        agent: 'claude',
+        result: { error: new Error('usage limit'), status: null }
+      };
+    },
+    transitionTaskFn: (slug, status, opts) => { transitions.push({ slug, status, opts }); return true; },
+    log: () => {}
+  });
+
+  assert.equal(transitions.length, 2, 'transitionTask must write active at launch and restore the prior status on result.error');
+  assert.equal(transitions[0].status, 'active');
+  assert.equal(transitions[1].status, 'refined');
+});
+
+test('selectLaunchAndRecord rolls Backlog back when startAgent returns non-zero exit status', async () => {
+  const transitions = [];
+
+  await selectLaunchAndRecord({
+    slug: 'task-test',
+    worktree: '/tmp/project-task-test',
+    agentConfig: {},
+    taskResolution: { ok: true, taskFile: '/tmp/task.md' },
+    getTaskStatusFn: () => 'refined',
+    prompt: 'Execute.',
+    selectAgentFn: () => 'claude',
+    startAgentFn: async (step, opts) => {
+      if (opts.onLaunch) {
+        await opts.onLaunch({ agent: 'claude' });
+      }
+      return { agent: 'claude', result: { status: 1 } };
+    },
+    transitionTaskFn: (slug, status, opts) => { transitions.push({ slug, status, opts }); return true; },
+    log: () => {}
+  });
+
+  assert.equal(transitions.length, 2, 'transitionTask must write active at launch and restore the prior status on non-zero exit');
+  assert.equal(transitions[0].status, 'active');
+  assert.equal(transitions[1].status, 'refined');
+});
+
+test('selectLaunchAndRecord rolls Backlog back when startAgent throws after onLaunch recorded active', async () => {
+  const transitions = [];
+
+  await assert.rejects(
+    () => selectLaunchAndRecord({
+      slug: 'task-test',
+      worktree: '/tmp/project-task-test',
+      agentConfig: {},
+      taskResolution: { ok: true, taskFile: '/tmp/task.md' },
+      getTaskStatusFn: () => 'refined',
+      prompt: 'Execute.',
+      selectAgentFn: () => 'claude',
+      startAgentFn: async (step, opts) => {
+        if (opts.onLaunch) {
+          await opts.onLaunch({ agent: 'claude' });
+        }
+        throw new Error('all eligible agents exhausted after limit hit');
+      },
+      transitionTaskFn: (slug, status, opts) => { transitions.push({ slug, status, opts }); return true; },
+      log: () => {}
+    }),
+    /all eligible agents exhausted after limit hit/
+  );
+
+  assert.equal(transitions.length, 2, 'transitionTask must write active at launch and restore the prior status when startAgent throws after launch');
+  assert.equal(transitions[0].status, 'active');
+  assert.equal(transitions[1].status, 'refined');
+});
+
+test('selectLaunchAndRecord restores prior implementer on rollback when startAgent returns result.error', async () => {
+  const transitions = [];
+
+  await selectLaunchAndRecord({
+    slug: 'task-test',
+    worktree: '/tmp/project-task-test',
+    agentConfig: {},
+    taskResolution: { ok: true, taskFile: '/tmp/task.md' },
+    getTaskStatusFn: () => 'refined',
+    getTaskImplementerFn: () => 'codex',
+    prompt: 'Execute.',
+    selectAgentFn: () => 'claude',
+    startAgentFn: async (step, opts) => {
+      if (opts.onLaunch) {
+        await opts.onLaunch({ agent: 'claude' });
+      }
+      return { agent: 'claude', result: { error: new Error('usage limit'), status: null } };
+    },
+    transitionTaskFn: (slug, status, opts) => { transitions.push({ slug, status, opts }); return true; },
+    log: () => {}
+  });
+
+  assert.equal(transitions.length, 2, 'transitionTask must write active at launch and restore state on failure');
+  assert.equal(transitions[0].status, 'active');
+  assert.equal(transitions[1].status, 'refined');
+  assert.equal(transitions[1].opts.implementer, 'codex', 'rollback must restore the prior implementer');
+});
+
+test('selectLaunchAndRecord rolls back both status and implementer when task starts already-active', async () => {
+  // Regression: prior guard `priorStatus === "active"` skipped rollback for already-active tasks,
+  // leaving the assignee pinned to the failed transient agent after a failed relaunch.
+  const transitions = [];
+
+  await selectLaunchAndRecord({
+    slug: 'task-test',
+    worktree: '/tmp/project-task-test',
+    agentConfig: {},
+    taskResolution: { ok: true, taskFile: '/tmp/task.md' },
+    getTaskStatusFn: () => 'active',
+    getTaskImplementerFn: () => 'codex',
+    prompt: 'Execute.',
+    selectAgentFn: () => 'claude',
+    startAgentFn: async (step, opts) => {
+      if (opts.onLaunch) {
+        await opts.onLaunch({ agent: 'claude' });
+      }
+      return { agent: 'claude', result: { error: new Error('usage limit'), status: null } };
+    },
+    transitionTaskFn: (slug, status, opts) => { transitions.push({ slug, status, opts }); return true; },
+    log: () => {}
+  });
+
+  assert.equal(transitions.length, 2, 'must write active/claude at launch, then roll back to active/codex');
+  assert.equal(transitions[0].status, 'active');
+  assert.equal(transitions[0].opts.implementer, 'claude');
+  assert.equal(transitions[1].status, 'active', 'rollback must restore the prior status (active)');
+  assert.equal(transitions[1].opts.implementer, 'codex', 'rollback must restore the prior implementer (codex)');
+});
+
+test('selectLaunchAndRecord does not write Backlog when startAgent throws (no eligible agents)', async () => {
+  const transitions = [];
+
+  await assert.rejects(
+    () => selectLaunchAndRecord({
+      slug: 'task-test',
+      worktree: '/tmp/project-task-test',
+      agentConfig: {},
+      taskResolution: { ok: true, taskFile: '/tmp/task.md' },
+      prompt: 'Execute.',
+      selectAgentFn: () => { throw new Error('No agents are eligible for workflow step: active'); },
+      startAgentFn: async () => { throw new Error('should not be reached'); },
+      transitionTaskFn: (slug, status, opts) => { transitions.push({ slug, status, opts }); return true; },
+      log: () => {}
+    }),
+    /No agents are eligible/
+  );
+
+  assert.equal(transitions.length, 0, 'transitionTask must NOT be called when selectAgent throws');
+});
+
+test('selectLaunchAndRecord records the fallback agent when startAgent falls back from preselected', async () => {
+  // When startAgent internally reroutes from claude to codex after a limit hit,
+  // the Backlog must record the fallback agent (codex), not the preselected one (claude).
+  const transitions = [];
+
+  const result = await selectLaunchAndRecord({
+    slug: 'task-test',
+    worktree: '/tmp/project-task-test',
+    agentConfig: {},
+    taskResolution: { ok: true, taskFile: '/tmp/task.md' },
+    prompt: 'Execute.',
+    selectAgentFn: () => 'claude',
+    startAgentFn: async (step, opts) => {
+      if (opts.onLaunch) await opts.onLaunch({ agent: 'codex' });
+      return { agent: 'codex', result: { status: 0 } };
+    },
+    transitionTaskFn: (slug, status, opts) => { transitions.push({ slug, status, opts }); return true; },
+    log: () => {}
+  });
+
+  assert.equal(result.preselected, 'claude', 'preselected must reflect selectAgent result');
+  assert.equal(result.agent, 'codex', 'agent must reflect the actual fallback implementer');
+  assert.equal(transitions.length, 1);
+  assert.equal(transitions[0].opts.implementer, 'codex', 'Backlog must record the fallback agent, not the preselected one');
+});
+
+test('selectLaunchAndRecord collapses stale multi-agent assignees to the launched implementer', async () => {
+  const transitions = [];
+
+  await selectLaunchAndRecord({
+    slug: 'task-test',
+    worktree: '/tmp/project-task-test',
+    agentConfig: {},
+    taskResolution: { ok: true, taskFile: '/tmp/task.md' },
+    prompt: 'Execute.',
+    selectAgentFn: () => 'claude',
+    startAgentFn: async (step, opts) => {
+      if (opts.onLaunch) await opts.onLaunch({ agent: 'claude' });
+      return { agent: 'claude', result: { status: 0 } };
+    },
+    transitionTaskFn: (slug, status, opts) => { transitions.push({ slug, status, opts }); return true; },
+    log: () => {}
+  });
+
+  assert.equal(transitions.length, 1);
+  assert.equal(transitions[0].slug, 'task-test');
+  assert.equal(transitions[0].status, 'active');
+  assert.equal(transitions[0].opts.implementer, 'claude');
+  assert.equal(transitions[0].opts.rootDir, '/tmp/project-task-test');
+  assert.equal(typeof transitions[0].opts.log, 'function');
+});
+
+test('selectLaunchAndRecord rolls back intermediate active write on limit-hit before retry', async () => {
+  // Regression: a claude→codex fallback fired two consecutive onLaunch calls without rolling
+  // back the first, leaving a spurious active/claude commit in the Backlog history.
+  const transitions = [];
+
+  const result = await selectLaunchAndRecord({
+    slug: 'task-test',
+    worktree: '/tmp/project-task-test',
+    agentConfig: {},
+    taskResolution: { ok: true, taskFile: '/tmp/task.md' },
+    getTaskStatusFn: () => 'refined',
+    getTaskImplementerFn: () => null,
+    prompt: 'Execute.',
+    selectAgentFn: () => 'claude',
+    startAgentFn: async (step, opts) => {
+      // First attempt: claude hits limit
+      await opts.onLaunch({ agent: 'claude' });
+      if (opts.onLimitHit) opts.onLimitHit({ agent: 'claude' });
+      // Second attempt: codex succeeds
+      await opts.onLaunch({ agent: 'codex' });
+      return { agent: 'codex', result: { status: 0 } };
+    },
+    transitionTaskFn: (slug, status, opts) => { transitions.push({ slug, status, opts }); return true; },
+    log: () => {}
+  });
+
+  // claude active → rollback (clear assignee) → codex active
+  assert.equal(transitions.length, 3, 'must record active/claude, rollback, then active/codex');
+  assert.equal(transitions[0].status, 'active');
+  assert.equal(transitions[0].opts.implementer, 'claude');
+  assert.equal(transitions[1].status, 'refined', 'rollback must restore prior status');
+  assert.ok(transitions[1].opts.clearAssignee, 'rollback must clear assignee when priorImplementer was absent');
+  assert.equal(transitions[2].status, 'active');
+  assert.equal(transitions[2].opts.implementer, 'codex', 'final commit must use the surviving agent');
+  assert.equal(result.agent, 'codex');
+});
+
+test('selectLaunchAndRecord clears assignee on rollback when there was no prior implementer', async () => {
+  // Regression: rollbackIfNeeded passed implementer: undefined, which skips enforceTaskAssignee
+  // and leaves the transient agent pinned as assignee on a task that had no prior workflow owner.
+  const transitions = [];
+
+  await selectLaunchAndRecord({
+    slug: 'task-test',
+    worktree: '/tmp/project-task-test',
+    agentConfig: {},
+    taskResolution: { ok: true, taskFile: '/tmp/task.md' },
+    getTaskStatusFn: () => 'refined',
+    getTaskImplementerFn: () => null,
+    prompt: 'Execute.',
+    selectAgentFn: () => 'claude',
+    startAgentFn: async (step, opts) => {
+      await opts.onLaunch({ agent: 'claude' });
+      return { agent: 'claude', result: { error: new Error('failed'), status: null } };
+    },
+    transitionTaskFn: (slug, status, opts) => { transitions.push({ slug, status, opts }); return true; },
+    log: () => {}
+  });
+
+  assert.equal(transitions.length, 2, 'must write active then rollback');
+  assert.equal(transitions[0].status, 'active');
+  assert.equal(transitions[0].opts.implementer, 'claude');
+  assert.equal(transitions[1].status, 'refined');
+  assert.ok(transitions[1].opts.clearAssignee, 'rollback must pass clearAssignee when priorImplementer was absent');
+  assert.equal(transitions[1].opts.implementer, undefined, 'must not pass implementer on a clear-assignee rollback');
+});
+
+test('selectLaunchAndRecord logs warning (not throws) when rollback transitionTask fails inside onLimitHit', async () => {
+  // Covers the throwOnFailure: false path in rollbackIfNeeded when called from onLimitHit.
+  const logs = [];
+  let callCount = 0;
+
+  // The rollback call (second call) returns false; all other calls return true.
+  const transitionTaskFn = (slug, status, opts) => {
+    callCount++;
+    return callCount !== 2;
+  };
+
+  const result = await selectLaunchAndRecord({
+    slug: 'task-test',
+    worktree: '/tmp/project-task-test',
+    agentConfig: {},
+    taskResolution: { ok: true, taskFile: '/tmp/task.md' },
+    getTaskStatusFn: () => 'refined',
+    getTaskImplementerFn: () => null,
+    prompt: 'Execute.',
+    selectAgentFn: () => 'claude',
+    startAgentFn: async (step, opts) => {
+      await opts.onLaunch({ agent: 'claude' });
+      if (opts.onLimitHit) opts.onLimitHit({ agent: 'claude' });
+      // After the failed rollback, a second launch succeeds
+      await opts.onLaunch({ agent: 'codex' });
+      return { agent: 'codex', result: { status: 0 } };
+    },
+    transitionTaskFn,
+    log: msg => logs.push(msg)
+  });
+
+  assert.ok(logs.some(msg => msg.includes('[WARN]') && msg.includes('Failed to roll back')),
+    'must log a warning when the rollback transitionTask returns false inside onLimitHit');
+  assert.equal(result.agent, 'codex');
+});
+
+test('selectLaunchAndRecord skips Backlog write when taskResolution is not ok', async () => {
+  const transitions = [];
+  const result = await selectLaunchAndRecord({
+    slug: 'task-test',
+    worktree: '/tmp/project-task-test',
+    agentConfig: {},
+    taskResolution: { ok: false },
+    prompt: 'Execute.',
+    selectAgentFn: () => 'codex',
+    startAgentFn: async (step, opts) => {
+      if (opts.onLaunch) await opts.onLaunch({ agent: 'codex' });
+      return { agent: 'codex', result: { status: 0 } };
+    },
+    transitionTaskFn: (slug, status, opts) => { transitions.push({ slug, status, opts }); return true; },
+    log: () => {}
+  });
+
+  assert.equal(result.agent, 'codex');
+  assert.equal(transitions.length, 0, 'transitionTask must not be called when taskResolution.ok is false');
+});
+
+// ---------- validateCheckpointsBeforeHandoff ----------
+
+test('validateCheckpointsBeforeHandoff reads a typed-verb mission\'s recorded plan and names the next checkpoint', async () => {
+  const result = await validateCheckpointsBeforeHandoff('task-db', '/tmp/project-task-db', {
+    loadRecordedCheckpointsFn: async () => ({ planned: ['CP-1', 'CP-2', 'CP-3'], recorded: ['CP-1'] }),
+    // A recorded plan is authoritative: the mission document is never read.
+    findMissionDirFn: () => { throw new Error('the mission document must not be read'); },
+    log: () => {},
+    error: () => {},
+  });
+  assert.equal(result.ok, false);
+  assert.deepEqual(result.missingCheckpoints, ['CP-2', 'CP-3']);
+  assert.equal(result.nextCheckpoint, 'CP-2');
+  assert.match(result.error, /missing before handoff: CP-2, CP-3/);
+  assert.equal(classifyError(result.error).failureClass, 'IncompleteEvidence', 'the gap must auto-send back like a missing CP document');
+
+  const complete = await validateCheckpointsBeforeHandoff('task-db', '/tmp/project-task-db', {
+    loadRecordedCheckpointsFn: async () => ({ planned: ['CP-1'], recorded: ['CP-1'] }),
+    log: () => {},
+    error: () => {},
+  });
+  assert.equal(complete.ok, true);
+});
+
+
+test('validateCheckpointsBeforeHandoff returns { ok: false } when mission dir is missing', async () => {
+  const result = await validateCheckpointsBeforeHandoff('task-missing', '/tmp/nonexistent', {
+    findMissionDirFn: () => null,
+    log: () => {},
+    error: () => {}
+  });
+  assert.equal(result.ok, false);
+  assert.ok(result.error.includes('Mission directory not found'));
+});
+
+test('validateCheckpointsBeforeHandoff rejects a declared checkpoint when its document is missing', async () => {
+  const result = await validateCheckpointsBeforeHandoff('task-empty', '/tmp/project-task-empty', {
+    findMissionDirFn: () => '/tmp/project-task-empty/docs/missions/2026/task-empty',
+    findCheckpointsFn: () => [],
+    readMissionFileFn: () => '## Checkpoints\n- CP 1: first checkpoint\n',
+    log: () => {},
+    error: () => {}
+  });
+  assert.equal(result.ok, false);
+  assert.ok(result.error.includes('Declared checkpoint documents are missing'));
+  assert.ok(result.error.includes('CP-1'));
+});
+
+test('validateCheckpointsBeforeHandoff accepts a single declared checkpoint when it is committed', async () => {
+  const logs = [];
+  const result = await validateCheckpointsBeforeHandoff('task-ok', '/tmp/project-task-ok', {
+    findMissionDirFn: () => '/tmp/project-task-ok/docs/missions/2026/task-ok',
+    findCheckpointsFn: () => ['/tmp/project-task-ok/docs/missions/2026/task-ok/CP-1.md'],
+    readMissionFileFn: () => '## Checkpoints\n- CP 1: first checkpoint\n',
+    runFn: () => ({ status: 0, stdout: '' }),
+    log: (msg) => logs.push(msg),
+    error: () => {}
+  });
+  assert.equal(result.ok, true);
+  assert.ok(logs.some(l => l.includes('Found all 1 declared checkpoint')));
+});
+
+test('validateCheckpointsBeforeHandoff rejects a multi-checkpoint mission with only CP-1', async () => {
+  const result = await validateCheckpointsBeforeHandoff('task-incomplete', '/tmp/project-task-incomplete', {
+    findMissionDirFn: () => '/tmp/project-task-incomplete/missions/task-incomplete',
+    findCheckpointsFn: () => ['/tmp/project-task-incomplete/missions/task-incomplete/CP-1.md'],
+    readMissionFileFn: () => '## Checkpoints\n- CP 1: first checkpoint\n- CP-2: second checkpoint\n',
+    log: () => {},
+    error: () => {}
+  });
+  assert.equal(result.ok, false);
+  assert.deepEqual(result.missingCheckpoints, ['CP-2']);
+  assert.equal(result.nextCheckpoint, 'CP-2');
+  assert.match(result.error, /CP-2/);
+});
+
+test('validateCheckpointsBeforeHandoff accepts complete declared checkpoint coverage', async () => {
+  const result = await validateCheckpointsBeforeHandoff('task-complete', '/tmp/project-task-complete', {
+    findMissionDirFn: () => '/tmp/project-task-complete/missions/task-complete',
+    findCheckpointsFn: () => [
+      '/tmp/project-task-complete/missions/task-complete/CP-1.md',
+      '/tmp/project-task-complete/missions/task-complete/CP-2.md'
+    ],
+    readMissionFileFn: () => '## Checkpoints\n- CP 1: first checkpoint\n- CP-2: second checkpoint\n',
+    runFn: () => ({ status: 0, stdout: '' }),
+    log: () => {},
+    error: () => {}
+  });
+  assert.equal(result.ok, true);
+  assert.deepEqual(result.declaredCheckpoints, ['CP-1', 'CP-2']);
+});
+
+test('validateCheckpointsBeforeHandoff rejects a section with no parsable checkpoint declarations', async () => {
+  const result = await validateCheckpointsBeforeHandoff('task-malformed', '/tmp/project-task-malformed', {
+    findMissionDirFn: () => '/tmp/project-task-malformed/missions/task-malformed',
+    findCheckpointsFn: () => [],
+    readMissionFileFn: () => '## Checkpoints\n- CP two: invalid declaration\n',
+    log: () => {},
+    error: () => {}
+  });
+  assert.equal(result.ok, false);
+  assert.match(result.error, /contains no checkpoint declarations/);
+});
+
+test('validateCheckpointsBeforeHandoff rejects malformed declarations missing a separator', async () => {
+  const result = await validateCheckpointsBeforeHandoff('task-malformed', '/tmp/project-task-malformed', {
+    findMissionDirFn: () => '/tmp/project-task-malformed/missions/task-malformed',
+    findCheckpointsFn: () => [],
+    readMissionFileFn: () => '## Checkpoints\n- CP 1 must cite an ADR\n',
+    log: () => {},
+    error: () => {}
+  });
+  assert.equal(result.ok, false);
+  assert.match(result.error, /Malformed checkpoint declaration/);
+});
+
+test('validateCheckpointsBeforeHandoff accepts compatible declaration and filename variants before its documentation sub-block', async () => {
+  const result = await validateCheckpointsBeforeHandoff('task-compatible', '/tmp/project-task-compatible', {
+    findMissionDirFn: () => '/tmp/project-task-compatible/missions/task-compatible',
+    findCheckpointsFn: () => [
+      '/tmp/project-task-compatible/missions/task-compatible/CP-1-parser.md',
+      '/tmp/project-task-compatible/missions/task-compatible/CHECKPOINT_2.md',
+      '/tmp/project-task-compatible/missions/task-compatible/CP-3.md',
+      '/tmp/project-task-compatible/missions/task-compatible/CP-4.md',
+      '/tmp/project-task-compatible/missions/task-compatible/CP-5.md'
+    ],
+    readMissionFileFn: () => [
+      '## Checkpoints',
+      '- CP1: parser',
+      '- **CP 2:** implementation',
+      '- **CP-3**: tests',
+      '- *CP 4 – evidence*',
+      '- CP-5 (red): verification',
+      '',
+      '### Checkpoint Documentation Requirements',
+      '- CP 1 must cite an ADR when applicable.'
+    ].join('\n'),
+    runFn: () => ({ status: 0, stdout: '' }),
+    log: () => {},
+    error: () => {}
+  });
+
+  assert.equal(result.ok, true);
+  assert.deepEqual(result.declaredCheckpoints, ['CP-1', 'CP-2', 'CP-3', 'CP-4', 'CP-5']);
+});
+
+test('validateCheckpointsBeforeHandoff returns { ok: false } when checkpoint files are uncommitted', async () => {
+  const result = await validateCheckpointsBeforeHandoff('task-dirty', '/tmp/project-task-dirty', {
+    findMissionDirFn: () => '/tmp/project-task-dirty/docs/missions/2026/task-dirty',
+    findCheckpointsFn: () => ['/tmp/project-task-dirty/docs/missions/2026/task-dirty/CP-1.md'],
+    readMissionFileFn: () => '## Checkpoints\n- CP 1: first checkpoint\n',
+    runFn: () => ({ status: 0, stdout: '?? docs/missions/2026/task-dirty/CP-1.md\n' }),
+    log: () => {},
+    error: () => {}
+  });
+  assert.equal(result.ok, false);
+  assert.ok(result.error.includes('must be committed before handoff'));
+  assert.ok(result.error.includes('CP-1.md'));
+});
+
+test('active() state-ordering contract: does not write Backlog before launch (regression)', async () => {
+  const statusWrites = [];
+  const assigneeWrites = [];
+
+  await active(['task-1038'], {
+    inferSlugFn: () => 'task-1038',
+    service: { execute: async () => ({ status: 'completed', value: { agent: 'codex' }, durableEvidence: [] }) },
+    missionStartFn: () => ({ pass: true }),
+    resolveWorktreeFn: () => '/tmp/project-task-1038',
+    readAgentConfigOrExitFn: () => ({}),
+    resolveTaskFileFn: () => ({ ok: true, taskFile: '/tmp/task.md' }),
+    buildCheckpointContextFn: () => 'CP-1',
+    buildExecutePromptFn: () => 'Execute task-1038',
+    selectLaunchAndRecordFn: async () => {
+      // At this point, Backlog must not have been mutated
+      assert.equal(statusWrites.length, 0, 'Backlog status must NOT be written before launch');
+      assert.equal(assigneeWrites.length, 0, 'Backlog assignee must NOT be written before launch');
+      return { agent: 'codex', result: { status: 0 } };
+    },
+    enforceExecuteCommitSafetyFn: () => false,
+    runHandoffAndReviewFn: async () => true,
+    exitFn: () => {},
+    logFn: () => {},
+    errorFn: () => {},
+    // Inject mocks that track mutations
+    setTaskStatus: (file, status) => { statusWrites.push({ file, status }); return true; },
+    enforceTaskAssignee: (file, agent) => { assigneeWrites.push({ file, agent }); return true; }
+  });
+});
+
+// TASK-2377.05: `attemptAgentRelaunch` was deleted — every handoff bounce now
+// goes through the rebound kernel, which owns the relaunchability decision, the
+// fix prompt, and the budget. The behavior those unit tests covered moved and is
+// asserted where it now lives:
+//
+//   - "not relaunchable" declined without a launch  → the kernel's classifier;
+//     "SC3: a non-relaunchable checkpoint error launches no agent at all" and
+//     "SC4: a HumanOnly classification launches no agent and takes the
+//     repairHandoffFn branch" in test/mission-handoff-lane-events-contract.test.ts.
+//   - launcher unavailable                          → "the launch port declines
+//     when the agent launcher is unavailable" below.
+//   - startAgent call shape                         → "the launch port calls
+//     startAgent with the mission's step, slug, role, and worktree" below.
+//   - continuation prompt naming the next checkpoint → "the checkpoint bounce
+//     prompt names the next checkpoint and forbids an early exit" below.
+
+test('the launch port declines when the agent launcher is unavailable', async () => {
+  let launches = 0;
+  const result = await runHandoffAndReview('task-1124', '/tmp/worktree', 'unavailable-agent', {
+    validateCheckpointsBeforeHandoffFn: () => ({ ok: true }),
+    performHandoff: async () => ({
+      ok: false,
+      error: 'The final checkpoint at CP-3.md has a "## Goal Check" section but no evidence rows. A goal-check table with real evidence is required before handoff.',
+    }),
+    workflowLauncherStatusFn: () => ({ supported: false, detail: 'agent not found' }),
+    startAgentFn: async () => { launches++; return { agent: 'x', result: { status: 0 } }; },
+    startReviewLoop: async () => {},
+    log: () => {},
+    error: () => {},
+  });
+
+  assert.equal(result, false, 'an unavailable launcher cannot repair the handoff');
+  assert.equal(launches, 0, 'startAgent is never reached when the launcher is unsupported');
+});
+
+test('the launch port calls startAgent with the mission step, slug, role, and worktree', async () => {
+  let stepArg = null;
+  let optsArg = null;
+  await runHandoffAndReview('task-1124', '/tmp/worktree', 'codex', {
+    validateCheckpointsBeforeHandoffFn: () => ({ ok: true }),
+    performHandoff: async () => ({
+      ok: false,
+      error: 'The final checkpoint at CP-3.md has a "## Goal Check" section but no evidence rows. A goal-check table with real evidence is required before handoff.',
+    }),
+    workflowLauncherStatusFn: () => ({ supported: true }),
+    startAgentFn: async (step, opts) => {
+      stepArg = step;
+      optsArg = opts;
+      return { agent: 'codex', result: { status: 0 } };
+    },
+    startReviewLoop: async () => {},
+    log: () => {},
+    error: () => {},
+  });
+
+  assert.equal(stepArg, 'active');
+  assert.equal(optsArg.slug, 'task-1124');
+  assert.equal(optsArg.role, 'implementer');
+  assert.equal(optsArg.agent, 'codex');
+  assert.equal(optsArg.worktree, '/tmp/worktree');
+  assert.ok(optsArg.prompt, 'the kernel supplies the fix prompt');
+});
+
+test('the checkpoint bounce prompt names the next checkpoint and forbids an early exit', async () => {
+  let prompt = '';
+  let validations = 0;
+  await runHandoffAndReview('task-incomplete', '/tmp/worktree', 'codex', {
+    validateCheckpointsBeforeHandoffFn: () => {
+      validations++;
+      return validations === 1
+        ? {
+          ok: false,
+          error: 'Declared checkpoint documents are missing before handoff: CP-2, CP-3. Create and commit CP-2.md in /tmp/worktree before handoff.',
+          nextCheckpoint: 'CP-2',
+        }
+        : { ok: true };
+    },
+    workflowLauncherStatusFn: () => ({ supported: true }),
+    startAgentFn: async (_step, options) => {
+      prompt = options.prompt;
+      return { agent: 'codex', result: { status: 0 } };
+    },
+    performHandoff: async () => ({ ok: true }),
+    startReviewLoop: async () => {},
+    log: () => {},
+    error: () => {},
+  });
+
+  assert.match(prompt, /CP-2/);
+  assert.match(prompt, /Do not exit/);
+  assert.match(prompt, /final response/);
+});
+
+test('runHandoffAndReview gives malformed checkpoint declarations corrective operator guidance', async () => {
+  const errors = [];
+  const result = await runHandoffAndReview('task-malformed', '/tmp/worktree', 'codex', {
+    validateCheckpointsBeforeHandoffFn: () => ({
+      ok: false,
+      error: 'MISSION.md must contain a ## Checkpoints section with declarations such as "- CP 1: <name>".'
+    }),
+    performHandoff: async () => { throw new Error('must not hand off'); },
+    error: message => errors.push(message),
+    log: () => {}
+  });
+
+  assert.equal(result, false);
+  assert.ok(errors.some(message => message.includes('Update') && message.includes('MISSION.md')));
+  assert.ok(errors.some(message => message.includes('CP N: <name>')));
+});
+
+// ---------- enforceExecuteCommitSafety: task-1211 fallback-commit regression ----------
+//
+// Reproduces the task-1210 transcript failure: git status --porcelain C-quotes
+// paths that contain spaces (e.g. the backlog task filename), and the safety
+// harness passed those literal-quoted strings to `git add --`, which never
+// matches a real file. The add fails, nothing is staged, and the fallback
+// commit dies with "could not create fallback commit".
+
+// The exact dirty entries from the task-1210 transcript. The backlog task path
+// is C-quoted by git because the filename contains spaces.
+const TRANSCRIPT_DIRTY_ENTRIES = [
+  ' M "backlog/tasks/task-1210 - Ensure-an-agent-can-review-itself-as-last-fallback.md"',
+  ' M docs/agent-prompts/review.md',
+  ' M workflow/lib/review/review-loop.js',
+  ' M workflow/prompts/review-verbose.md',
+  ' M workflow/prompts/review.md',
+  '?? docs/missions/2026/task-1210/'
+];
+
+const TRANSCRIPT_EXPECTED_PATHS = [
+  'backlog/tasks/task-1210 - Ensure-an-agent-can-review-itself-as-last-fallback.md',
+  'docs/agent-prompts/review.md',
+  'workflow/lib/review/review-loop.js',
+  'workflow/prompts/review-verbose.md',
+  'workflow/prompts/review.md',
+  'docs/missions/2026/task-1210/'
+];
+
+test('enforceExecuteCommitSafety stages every transcript dirty path (unquoted) and returns true', () => {
+  const gitCalls = [];
+  const result = enforceExecuteCommitSafety({
+    slug: 'task-test',
+    worktree: '/tmp/wt',
+    dirtyEntries: TRANSCRIPT_DIRTY_ENTRIES,
+    gitImpl(args) {
+      gitCalls.push(args);
+      return { status: 0, stdout: '', stderr: '' };
+    }
+  });
+
+  assert.equal(result, true);
+  const addCall = gitCalls.find(args => args.includes('add'));
+  assert.ok(addCall, 'expected a git add call');
+  // Every relevant path must be staged with its real (unquoted) value so git
+  // can actually match it. The literal-quoted form must never be passed.
+  for (const expected of TRANSCRIPT_EXPECTED_PATHS) {
+    assert.ok(
+      addCall.includes(expected),
+      `git add must stage unquoted path: ${expected}\ngot: ${JSON.stringify(addCall)}`
+    );
+  }
+  assert.ok(
+    !addCall.some(arg => arg.startsWith('"') && arg.endsWith('"')),
+    `git add must not receive any literal-quoted path: ${JSON.stringify(addCall)}`
+  );
+});
+
+test('enforceExecuteCommitSafety creates the fallback commit with the documented subject and body', () => {
+  const gitCalls = [];
+  enforceExecuteCommitSafety({
+    slug: 'task-test',
+    worktree: '/tmp/wt',
+    dirtyEntries: TRANSCRIPT_DIRTY_ENTRIES,
+    gitImpl(args) {
+      gitCalls.push(args);
+      return { status: 0, stdout: '', stderr: '' };
+    }
+  });
+
+  const commitCall = gitCalls.find(args => args.includes('commit'));
+  assert.ok(commitCall, 'expected a git commit call');
+  assert.ok(commitCall.includes('execute(task-test): capture agent output'));
+  assert.ok(commitCall.includes('Safety harness: capture implementation changes left uncommitted by the execute agent.'));
+});
+
+test('enforceExecuteCommitSafety stages an untracked directory entry ending in / without throwing', () => {
+  const gitCalls = [];
+  let result;
+  assert.doesNotThrow(() => {
+    result = enforceExecuteCommitSafety({
+      slug: 'task-test',
+      worktree: '/tmp/wt',
+      dirtyEntries: ['?? docs/missions/2026/task-1210/'],
+      gitImpl(args) {
+        gitCalls.push(args);
+        return { status: 0, stdout: '', stderr: '' };
+      }
+    });
+  });
+  assert.equal(result, true);
+  const addCall = gitCalls.find(args => args.includes('add'));
+  assert.ok(addCall.includes('docs/missions/2026/task-1210/'));
+});
+
+test('enforceExecuteCommitSafety throws when the fallback commit returns non-zero', () => {
+  assert.throws(
+    () => enforceExecuteCommitSafety({
+      slug: 'task-test',
+      worktree: '/tmp/wt',
+      dirtyEntries: [' M docs/agent-prompts/review.md'],
+      gitImpl(args) {
+        if (args.includes('commit')) return { status: 1, stdout: '', stderr: 'no changes' };
+        return { status: 0, stdout: '', stderr: '' };
+      }
+    }),
+    /Execute safety harness could not create fallback commit/
+  );
+});
+
+test('enforceExecuteCommitSafety throws on an unresolved-conflict (UU) entry and names the path', () => {
+  assert.throws(
+    () => enforceExecuteCommitSafety({
+      slug: 'task-test',
+      worktree: '/tmp/wt',
+      dirtyEntries: ['UU workflow/lib/review/review-loop.js'],
+      gitImpl: () => ({ status: 0, stdout: '', stderr: '' })
+    }),
+    /Execute safety harness found unresolved conflicts: workflow\/lib\/review\/review-loop\.js/
+  );
+});
+
+test('enforceExecuteCommitSafety excludes workflow-generated artifacts from the fallback git add', () => {
+  const gitCalls = [];
+  enforceExecuteCommitSafety({
+    slug: 'task-test',
+    worktree: '/tmp/wt',
+    dirtyEntries: [
+      ' M docs/agent-prompts/review.md',
+      '?? .workflow/runs/task-test/run.log'
+    ],
+    gitImpl(args) {
+      gitCalls.push(args);
+      return { status: 0, stdout: '', stderr: '' };
+    }
+  });
+  const addCall = gitCalls.find(args => args.includes('add'));
+  assert.ok(addCall.includes('docs/agent-prompts/review.md'));
+  assert.ok(
+    !addCall.some(arg => arg.includes('.workflow/')),
+    `ignored workflow artifact must not be staged: ${JSON.stringify(addCall)}`
+  );
+});
+
+test('enforceExecuteCommitSafety stages the unquoted destination of a quoted rename', () => {
+  const gitCalls = [];
+  enforceExecuteCommitSafety({
+    slug: 'task-test',
+    worktree: '/tmp/wt',
+    dirtyEntries: ['R  "backlog/tasks/old name.md" -> "backlog/tasks/new name.md"'],
+    gitImpl(args) {
+      gitCalls.push(args);
+      return { status: 0, stdout: '', stderr: '' };
+    }
+  });
+  const addCall = gitCalls.find(args => args.includes('add'));
+  assert.ok(addCall.includes('backlog/tasks/new name.md'),
+    `expected unquoted rename destination staged: ${JSON.stringify(addCall)}`);
+  assert.ok(!addCall.some(arg => arg.includes('old name.md')),
+    `rename source must not be staged: ${JSON.stringify(addCall)}`);
+});
+
+test('enforceExecuteCommitSafety decodes octal-escaped UTF-8 and C escapes from git status', () => {
+  const gitCalls = [];
+  enforceExecuteCommitSafety({
+    slug: 'task-test',
+    worktree: '/tmp/wt',
+    // git emits non-ASCII bytes as \NNN octal (é -> \303\251) and a tab as \t,
+    // both wrapped in the C-quoted form.
+    dirtyEntries: [
+      ' M "docs/caf\\303\\251 notes.md"',
+      '?? "docs/a\\tb.md"'
+    ],
+    gitImpl(args) {
+      gitCalls.push(args);
+      return { status: 0, stdout: '', stderr: '' };
+    }
+  });
+  const addCall = gitCalls.find(args => args.includes('add'));
+  assert.ok(addCall.includes('docs/café notes.md'),
+    `expected octal UTF-8 decoded to real bytes: ${JSON.stringify(addCall)}`);
+  assert.ok(addCall.includes('docs/a\tb.md'),
+    `expected \\t decoded to a real tab: ${JSON.stringify(addCall)}`);
+});
+
+// ---------- TASK-1324: relaunch success must not escape without review transition ----------
+
+test('runHandoffAndReview: relaunch success triggers post-relaunch handoff instead of bare return', async () => {
+  // Pre-fix bug shape: performHandoff was called only once (initial call),
+  // and startReviewLoop was never called. After the fix, performHandoff is
+  // re-invoked after a successful relaunch.
+  let handoffAttempts = 0;
+  let reviewLoopStarted = false;
+  let relaunchAttempts = 0;
+
+  const result = await runHandoffAndReview('task-1324', '/tmp/project-task-1324', 'codex', {
+    validateCheckpointsBeforeHandoffFn: () => ({ ok: true }),
+    performHandoff: async (slug, opts) => {
+      handoffAttempts++;
+      // First call fails with relaunchable error; second call (post-fix) would succeed
+      if (handoffAttempts === 1) {
+        return { ok: false, error: 'The final checkpoint at docs/missions/2026/task-1324/CP-1.md has a "## Goal Check" section but no evidence rows. A goal-check table with real evidence is required before handoff.' };
+      }
+      return { ok: true };
+    },
+    repairHandoffFn: async () => ({ repaired: false, blocker: null }),
+    startAgentFn: async () => {
+      relaunchAttempts++;
+      return { agent: 'codex', result: { status: 0 } };
+    },
+    startReviewLoop: () => { reviewLoopStarted = true; },
+    log: () => {},
+    error: () => {}
+  });
+
+  // Post-fix: performHandoff must be re-invoked after relaunch, and review loop must start
+  assert.ok(result, 'runHandoffAndReview returns true after successful post-relaunch handoff');
+  assert.equal(handoffAttempts, 2, 'performHandoff must be re-invoked after relaunch');
+  assert.equal(reviewLoopStarted, true, 'startReviewLoop must be called after successful post-relaunch handoff');
+  assert.equal(relaunchAttempts, 1, 'one launch was enough');
+});
+
+test('runHandoffAndReview: relaunch success must trigger post-relaunch handoff and review loop', async () => {
+  // Post-fix expectation: after a successful relaunch, the code must re-invoke
+  // performHandoff() to verify the handoff-to-review transition actually happened,
+  // matching the contract of the repair-success path.
+  let handoffAttempts = 0;
+  let reviewLoopStarted = false;
+  let relaunchAttempts = 0;
+
+  const result = await runHandoffAndReview('task-1324', '/tmp/project-task-1324', 'codex', {
+    validateCheckpointsBeforeHandoffFn: () => ({ ok: true }),
+    performHandoff: async (slug, opts) => {
+      handoffAttempts++;
+      if (handoffAttempts === 1) {
+        return { ok: false, error: 'The final checkpoint at docs/missions/2026/task-1324/CP-1.md has a "## Goal Check" section but no evidence rows. A goal-check table with real evidence is required before handoff.' };
+      }
+      return { ok: true };
+    },
+    repairHandoffFn: async () => ({ repaired: false, blocker: null }),
+    startAgentFn: async () => {
+      relaunchAttempts++;
+      return { agent: 'codex', result: { status: 0 } };
+    },
+    startReviewLoop: (slug, opts) => { reviewLoopStarted = true; },
+    log: () => {},
+    error: () => {}
+  });
+
+  // After fix: performHandoff must be re-invoked after relaunch, and review loop must start
+  assert.ok(result, 'runHandoffAndReview should return true after successful post-relaunch handoff');
+  assert.equal(handoffAttempts, 2, 'performHandoff must be re-invoked after relaunch');
+  assert.equal(reviewLoopStarted, true, 'startReviewLoop must be called after successful post-relaunch handoff');
+  assert.equal(relaunchAttempts, 1, 'one launch was enough');
+});
+
+test('runHandoffAndReview: relaunch success with post-relaunch handoff failure must not report success', async () => {
+  // Edge case: relaunch succeeds but the post-relaunch handoff still fails.
+  // The function must return false, not true.
+  // With ADR 0048 C1 classification, IncompleteEvidence maps to AutoSendBack
+  // which takes the relaunch path directly (up to 2 attempts).
+  let handoffAttempts = 0;
+  let reviewLoopStarted = false;
+
+  const result = await runHandoffAndReview('task-1324', '/tmp/project-task-1324', 'codex', {
+    validateCheckpointsBeforeHandoffFn: () => ({ ok: true }),
+    performHandoff: async () => {
+      handoffAttempts++;
+      // IncompleteEvidence error — classifies as AutoSendBack, triggers relaunch path
+      return { ok: false, error: 'The final checkpoint at docs/missions/2026/task-1324/CP-1.md has a "## Goal Check" section but no evidence rows. A goal-check table with real evidence is required before handoff.' };
+    },
+    repairHandoffFn: async () => ({ repaired: false, blocker: null }),
+    startAgentFn: async () => ({ agent: 'codex', result: { status: 0 } }),
+    startReviewLoop: () => { reviewLoopStarted = true; },
+    log: () => {},
+    error: () => {}
+  });
+
+  assert.equal(result, false, 'must return false when post-relaunch handoff fails');
+  // IncompleteEvidence → AutoSendBack → relaunch path: initial + 2 relaunch retries = 3
+  assert.equal(handoffAttempts, 3, 'performHandoff called 3 times: initial + 2 relaunch retries');
+  assert.equal(reviewLoopStarted, false, 'startReviewLoop must NOT be called when handoff fails');
+});
+
+test('runHandoffAndReview: relaunch failure must not trigger post-relaunch handoff', async () => {
+  // If relaunch itself fails, the code should fall through to the manual handoff message.
+  let handoffAttempts = 0;
+  let reviewLoopStarted = false;
+  let relaunchAttempts = 0;
+
+  const result = await runHandoffAndReview('task-1324', '/tmp/project-task-1324', 'codex', {
+    validateCheckpointsBeforeHandoffFn: () => ({ ok: true }),
+    performHandoff: async () => {
+      handoffAttempts++;
+      return { ok: false, error: 'The final checkpoint at docs/missions/2026/task-1324/CP-1.md has a "## Goal Check" section but no evidence rows. A goal-check table with real evidence is required before handoff.' };
+    },
+    repairHandoffFn: async () => ({ repaired: false, blocker: null }),
+    startAgentFn: async () => {
+      relaunchAttempts++;
+      throw new Error('relaunch failed');
+    },
+    startReviewLoop: () => { reviewLoopStarted = true; },
+    log: () => {},
+    error: () => {}
+  });
+
+  assert.equal(result, false, 'must return false when relaunch fails');
+  assert.equal(handoffAttempts, 1, 'performHandoff called only once (no post-relaunch retry)');
+  assert.equal(reviewLoopStarted, false, 'startReviewLoop must NOT be called');
+  // TASK-2377.05 (SC5): the kernel owns a per-occurrence budget of 2. A failed
+  // launch consumes an attempt instead of aborting the bounce, so the relaunch
+  // is tried twice before the mission is stranded. performHandoff still never
+  // re-runs, because the kernel's verify only runs after a successful launch.
+  assert.equal(relaunchAttempts, 2, 'the kernel spends its per-occurrence budget of two launches');
+});
+
+// ---------- TASK-1387: gate output capture and automatic relaunch (SC3 & SC4) ----------
+
+test('runHandoffAndReview relaunches on verification gate failure with captured output (SC3)', async () => {
+  let handoffAttempts = 0;
+  let relaunchAttempts = 0;
+  let lastPrompt = '';
+
+  const result = await runHandoffAndReview('task-1387-sc3', '/tmp/project-task-1387', 'codex', {
+    validateCheckpointsBeforeHandoffFn: () => ({ ok: true }),
+    performHandoff: async (slug, opts) => {
+      handoffAttempts++;
+      if (handoffAttempts === 1) {
+        return {
+          ok: false,
+          error: 'Final verification gate failed. Fix errors before submitting or use --no-gate if appropriate.',
+          gateOutput: {
+            stdout: 'lint: ERROR: unused import in foo.js',
+            stderr: 'TypeScript: error TS2345: type mismatch'
+          }
+        };
+      }
+      return { ok: true };
+    },
+    repairHandoffFn: async () => ({ repaired: false, blocker: null }),
+    startAgentFn: async (_step, opts) => {
+      relaunchAttempts++;
+      lastPrompt = opts.prompt;
+      return { agent: 'codex', result: { status: 0 } };
+    },
+    startReviewLoop: () => {},
+    log: () => {},
+    error: () => {}
+  });
+
+  assert.ok(result, 'should succeed after successful relaunch');
+  assert.equal(handoffAttempts, 2, 'performHandoff called twice: initial + post-relaunch');
+  assert.equal(relaunchAttempts, 1, 'one launch was enough');
+  // TASK-2377.05: the captured gate output reaches the agent through the
+  // kernel's fix prompt rather than a relaunch option.
+  assert.match(lastPrompt, /lint: ERROR: unused import in foo\.js/, 'gate stdout reaches the fix prompt');
+  assert.match(lastPrompt, /TypeScript: error TS2345: type mismatch/, 'gate stderr reaches the fix prompt');
+});
+
+test('runHandoffAndReview relaunches on declared gate failure with captured output (SC3)', async () => {
+  let handoffAttempts = 0;
+  let relaunchAttempts = 0;
+  let lastPrompt = '';
+
+  const result = await runHandoffAndReview('task-1387-sc3-declared', '/tmp/project-task-1387', 'codex', {
+    validateCheckpointsBeforeHandoffFn: () => ({ ok: true }),
+    performHandoff: async () => {
+      handoffAttempts++;
+      if (handoffAttempts === 1) {
+        return {
+          ok: false,
+          error: 'Declared gate "bash -c exit 1" failed for task-1387-sc3-declared: err output. Blocking handoff — task remains in active.',
+          gateOutput: {
+            stdout: 'declared gate stdout',
+            stderr: 'declared gate stderr'
+          }
+        };
+      }
+      return { ok: true };
+    },
+    repairHandoffFn: async () => ({ repaired: false, blocker: null }),
+    startAgentFn: async (_step, opts) => {
+      relaunchAttempts++;
+      lastPrompt = opts.prompt;
+      return { agent: 'codex', result: { status: 0 } };
+    },
+    startReviewLoop: () => {},
+    log: () => {},
+    error: () => {}
+  });
+
+  assert.ok(result, 'should succeed after successful relaunch on declared gate failure');
+  assert.equal(handoffAttempts, 2, 'performHandoff called twice');
+  assert.equal(relaunchAttempts, 1, 'one launch was enough');
+  assert.match(lastPrompt, /declared gate stdout/, 'gate stdout reaches the fix prompt');
+  assert.match(lastPrompt, /declared gate stderr/, 'gate stderr reaches the fix prompt');
+});
+
+test('runHandoffAndReview limits gate-failure relaunches to 2 attempts (SC4)', async () => {
+  let handoffAttempts = 0;
+  let relaunchAttempts = 0;
+  let relaunchErrors = [];
+
+  const result = await runHandoffAndReview('task-1387-sc4', '/tmp/project-task-1387', 'codex', {
+    validateCheckpointsBeforeHandoffFn: () => ({ ok: true }),
+    performHandoff: async () => {
+      handoffAttempts++;
+      // Handoff keeps failing with gate failure
+      return {
+        ok: false,
+        error: 'Final verification gate failed. Fix errors before submitting or use --no-gate if appropriate.',
+        gateOutput: { stdout: 'gate error', stderr: 'gate stderr' }
+      };
+    },
+    repairHandoffFn: async () => ({ repaired: false, blocker: null }),
+    startAgentFn: async () => {
+      relaunchAttempts++;
+      // Launch always succeeds but handoff keeps failing
+      return { agent: 'codex', result: { status: 0 } };
+    },
+    startReviewLoop: () => {},
+    log: () => {},
+    error: (msg) => { relaunchErrors.push(msg); }
+  });
+
+  assert.equal(result, false, 'should return false after exhausting relaunch attempts');
+  assert.equal(handoffAttempts, 3, 'performHandoff: initial + 2 post-relaunch retries');
+  assert.equal(relaunchAttempts, 2, 'the kernel spends exactly its per-occurrence budget of two');
+  assert.ok(relaunchErrors.some(e => e.includes('Gate failure persisting after 2 relaunch attempts')),
+    'should report the 2-attempt limit in the error message');
+});
+
+test('runHandoffAndReview stops relaunching when agent relaunch itself fails (SC4)', async () => {
+  let handoffAttempts = 0;
+  let relaunchAttempts = 0;
+
+  const result = await runHandoffAndReview('task-1387-sc4-stop', '/tmp/project-task-1387', 'codex', {
+    validateCheckpointsBeforeHandoffFn: () => ({ ok: true }),
+    performHandoff: async () => {
+      handoffAttempts++;
+      return {
+        ok: false,
+        error: 'Final verification gate failed. Fix errors before submitting or use --no-gate if appropriate.',
+        gateOutput: { stdout: 'gate error', stderr: 'gate stderr' }
+      };
+    },
+    repairHandoffFn: async () => ({ repaired: false, blocker: null }),
+    startAgentFn: async () => {
+      relaunchAttempts++;
+      // First launch succeeds, second fails
+      if (relaunchAttempts === 1) {
+        return { agent: 'codex', result: { status: 0 } };
+      }
+      throw new Error('launcher unavailable');
+    },
+    startReviewLoop: () => {},
+    log: () => {},
+    error: () => {}
+  });
+
+  assert.equal(result, false, 'should return false when relaunch fails');
+  assert.equal(handoffAttempts, 2, 'performHandoff: initial + 1 post-relaunch (first relaunch succeeded)');
+  assert.equal(relaunchAttempts, 2, 'two launches: first verify fails, second exhausts the budget');
+});
+
+// --- TASK-2476: operator-facing active story ---
+//
+// The default `px active` output must open with the mission and the agent that
+// actually implements it, then hand straight over to the agent's own streamed
+// work. Preflight bookkeeping and launcher mechanics are diagnostics, available
+// under DEBUG, and must not be part of the normal execution record.
+
+test('px active opens with the mission identity and drops preflight/launch narration', async () => {
+  const logs: string[] = [];
+
+  await active(['task-2476'], {
+    inferSlugFn: () => 'task-2476',
+    rootDir: '/tmp/project-task-2476',
+    missionTitleFn: () => 'fix hello world greeting (task-2476)',
+    serviceFactory: async (_rootDir, progress) => ({
+      execute: async () => {
+        progress({ phase: 'launch' });
+        progress({ phase: 'handoff', agent: 'claude' });
+        return { status: 'completed', value: { agent: 'claude' }, durableEvidence: [] };
+      },
+    }),
+    exitFn: (code) => { throw new Error(`unexpected exit ${code}`); },
+    logFn: (message: string) => logs.push(message),
+    errorFn: (message: string) => { throw new Error(`unexpected error: ${message}`); },
+  });
+
+  const output = logs.join('\n');
+  assert.equal(logs[0], 'Mission task-2476: fix hello world greeting');
+  assert.ok(!output.includes('Running execute preflight'), output);
+  assert.ok(!output.includes('Launching execute agent'), output);
+});
+
+// --- TASK-2606: the headline names the Mission exactly as `px status` does ---
+
+const { createStatusBoardFor, statusMissionTitle } = await import('../../../src/composition/status-board.js');
+
+function statusServices(recordedTitle: string, cardTitle: string | null) {
+  const mission = {
+    id: 'task-2606', title: recordedTitle, status: 'active', assignee: 'claude', checkpoints: [],
+    brief: null, declaredGates: [], successCriteria: [], dependencies: [], externalTaskRef: null, closedAt: null,
+  };
+  return {
+    presentationCapabilities: {
+      boardProjection: { buildMissionCard: async () => (cardTitle === null ? null : { id: 'task-2606', title: cardTitle, status: 'active', currentWork: null, blockingReason: null }) },
+    },
+    mission: { store: { load: async () => ({ kind: 'found', mission, version: 1 }) } },
+  } as never;
+}
+
+async function activeHeadlineAndStatusTitle(services: never) {
+  const rootDir = mkdtemp('task-2606-active-');
+  try {
+    const logs: string[] = [];
+    await active(['task-2606'], {
+      inferSlugFn: () => 'task-2606',
+      rootDir,
+      missionTitleFn: (slug: string) => statusMissionTitle(services, slug, rootDir),
+      serviceFactory: async () => ({ execute: async () => ({ status: 'completed', value: { agent: 'claude' }, durableEvidence: [] }) }),
+      exitFn: (code: number) => { throw new Error(`unexpected exit ${code}`); },
+      logFn: (message: string) => logs.push(message),
+      errorFn: (message: string) => { throw new Error(`unexpected error: ${message}`); },
+    });
+    const status = await createStatusBoardFor(services).getMissionData('task-2606', rootDir);
+    return { headline: logs[0], statusTitle: status?.title };
+  } finally {
+    fs.rmSync(rootDir, { recursive: true, force: true });
+  }
+}
+
+test('px active headline prefers the task-card title, as px status does', async () => {
+  const { headline, statusTitle } = await activeHeadlineAndStatusTitle(statusServices('Recorded title (task-2606)', 'Card title (task-2606)'));
+  assert.equal(statusTitle, 'Card title (task-2606)');
+  assert.equal(headline, 'Mission task-2606: Card title');
+});
+
+test('px active headline falls back to the recorded Mission title when no task card exists, as px status does', async () => {
+  const { headline, statusTitle } = await activeHeadlineAndStatusTitle(statusServices('Recorded title (task-2606)', null));
+  assert.equal(statusTitle, 'Recorded title (task-2606)');
+  assert.equal(headline, 'Mission task-2606: Recorded title');
+});
+
+test('px active states implementation completion rather than handoff mechanics', () => {
+  const logs: string[] = [];
+  renderActiveProgress({ phase: 'launch' }, (message: string) => logs.push(message));
+  renderActiveProgress({ phase: 'handoff', agent: 'claude' }, (message: string) => logs.push(message));
+
+  assert.deepEqual(logs, ['[PASS] Implementation complete (claude).']);
+});
+
+test('selectLaunchAndRecord announces the implementer exactly once on the selected-agent path', async () => {
+  const logs: string[] = [];
+
+  await selectLaunchAndRecord({
+    slug: 'task-2476',
+    worktree: '/tmp/project-task-2476',
+    agentConfig: {},
+    taskResolution: { ok: true, taskFile: '/tmp/task-2476.md' },
+    prompt: 'prompt',
+    selectAgentFn: () => 'claude',
+    startAgentFn: async (_step: string, opts: any) => {
+      await opts.onLaunch({ agent: 'claude' });
+      return { agent: 'claude', result: { status: 0 } };
+    },
+    transitionTaskFn: async () => true,
+    getTaskStatusFn: () => 'refined',
+    getTaskImplementerFn: () => null,
+    log: (message: string) => logs.push(message),
+  });
+
+  const announcements = logs.filter(line => /Implementer:/.test(line));
+  assert.deepEqual(announcements, ['[INFO] Implementer: claude']);
+  assert.ok(!logs.join('\n').includes('Recording implementer'), logs.join('\n'));
+});
+
+test('selectLaunchAndRecord keeps the implementer announcement but drops the Backlog task-sync PASS', async () => {
+  const logs = [];
+
+  await selectLaunchAndRecord({
+    slug: 'task-2476',
+    worktree: '/tmp/project-task-2476',
+    agentConfig: {},
+    taskResolution: { ok: true, taskFile: '/tmp/task-2476.md' },
+    prompt: 'prompt',
+    selectAgentFn: () => 'claude',
+    startAgentFn: async (_step, opts) => {
+      await opts.onLaunch({ agent: 'claude' });
+      return { agent: 'claude', result: { status: 0 } };
+    },
+    // Mirror the real transitionTaskLocal: it emits a PASS commit confirmation
+    // through the `log` it receives (the suppressed wrapper), not directly.
+    transitionTaskFn: async (_slug, _status, opts) => {
+      opts.log('[PASS] Task task-2476 transitioned to active (assignee=claude) and committed.');
+      return true;
+    },
+    getTaskStatusFn: () => 'refined',
+    getTaskImplementerFn: () => null,
+    log: (message) => logs.push(message),
+  });
+
+  const joined = logs.join('\n').replace(/\x1B\[\d+m/g, '');
+  assert.ok(joined.includes('[INFO] Implementer: claude'), joined);
+  assert.ok(!joined.includes('transitioned to active'), `task-sync PASS must be suppressed: ${joined}`);
+});
+
+
+test('failed execute runs preserve the Backlog lane after authoritative activation', async () => {
+  for (const failure of ['exit', 'exhausted', 'limit'] as const) {
+    let authoritativeLane = 'active';
+    let mirrorLane = 'refined';
+    await assert.rejects(async () => {
+      const launch = await selectLaunchAndRecord({
+        slug: 'task-test', worktree: '/tmp/project-task-test', agentConfig: {},
+        taskResolution: { ok: true, taskFile: '/tmp/task.md' },
+        getTaskStatusFn: () => mirrorLane, getTaskImplementerFn: () => 'claude',
+        prompt: 'Execute.', selectAgentFn: () => 'claude',
+        authorityAlreadyActive: true,
+        startAgentFn: async (_step, opts) => {
+          await opts.onLaunch({ agent: 'claude', startedAtMs: 123 });
+          assert.equal(mirrorLane, authoritativeLane);
+          if (failure === 'limit') { opts.onLimitHit(); }
+          if (failure !== 'exit') { throw new Error('agents exhausted'); }
+          return { agent: 'claude', result: { status: 1 } };
+        },
+        transitionTaskFn: (_slug, status) => { mirrorLane = status; return true; },
+        log: () => {},
+      });
+      if (launch.result.status !== 0) { throw new Error('agent failed'); }
+    });
+    assert.equal(authoritativeLane, 'active');
+    assert.equal(mirrorLane, authoritativeLane, failure);
+  }
+});

@@ -24,7 +24,7 @@ There is no production `Attempt` type: current agent work is modeled as
 Attempt identity or lifecycle invariant. That is not merely an implementation
 boundary — no traced launch, retry, failover, usage, review, or UI consumer
 needs one (`src/application/consumer-domain-requirements.ts`), and
-`test/domain-architecture-guards.test.ts` fails if an Attempt-shaped type, table, or
+`test/unit/domain/domain-architecture-guards.test.ts` fails if an Attempt-shaped type, table, or
 record is declared under `src/domain`, `src/application`, or `src/adapters`.
 
 Labels are an open-ended collection, matching Backlog task frontmatter. They
@@ -291,7 +291,7 @@ agent-family label or inventing a zero.
   `SessionMarker` per (mission, role), and measurement rows grouped by
   `(repo, mission)`. ADR 0053 therefore excludes `Attempt` from persistence
   until domain code establishes its identity and invariants, and
-  `test/domain-architecture-guards.test.ts` enforces that.
+  `test/unit/domain/domain-architecture-guards.test.ts` enforces that.
 - Each `database-owned-domain-state` boundary in the ADR 0053 inventory resolves
   to one of these concepts plus its invariant, or to the explicit
   technical-persistence-metadata list, in

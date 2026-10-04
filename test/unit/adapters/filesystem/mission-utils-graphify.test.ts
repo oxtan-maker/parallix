@@ -1,0 +1,162 @@
+
+
+
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { graphifyAvailable, probeGraphifyAvailability, updateGraphifyKnowledgeGraph, resolveGraphPath, queryGraph, } from '../../../../src/adapters/filesystem/mission-utils.js';
+import { mkdtemp as registeredMkdtemp } from '../../../helpers/temp-dir.js';
+test('probeGraphifyAvailability and graphifyAvailable distinguish missing commands from probe failures', () => {
+  const missing = probeGraphifyAvailability({
+    commandRunner: () => {
+      const error = new Error('missing');
+// @ts-expect-error -- Legacy fixture intentionally accesses runtime-only `code` absent from its inferred mock shape.
+      error.code = 'ENOENT';
+      throw error;
+    }
+  });
+  assert.equal(missing.available, false);
+  assert.equal(missing.reason, 'missing-command');
+  assert.equal(graphifyAvailable({ commandRunner: () => ({ status: 0 }) }), true);
+
+  const failure = probeGraphifyAvailability({
+    commandRunner: () => {
+      throw new Error('permission denied');
+    }
+  });
+  assert.equal(failure.available, false);
+  assert.equal(failure.reason, 'probe-failed');
+// @ts-expect-error -- TASK-2328: partial test double after ESM seam migration
+  assert.match(failure.error.message, /permission denied/);
+});
+
+test('updateGraphifyKnowledgeGraph logs missing graph, missing command, probe-failed, update-failed, and success outcomes', () => {
+  const graphRoot = registeredMkdtemp('graphify-update-test-');
+  const emptyRoot = registeredMkdtemp('graphify-empty-test-');
+  fs.mkdirSync(path.join(graphRoot, 'graphify-out'), { recursive: true });
+  fs.writeFileSync(path.join(graphRoot, 'graphify-out', 'graph.json'), '{}\n');
+  const logs = [];
+  let missingGraphRunnerCalled = false;
+  const missingGraph = updateGraphifyKnowledgeGraph({
+    rootDir: emptyRoot,
+    log: msg => logs.push(msg),
+    commandRunner: () => {
+      missingGraphRunnerCalled = true;
+      return { status: 0 };
+    }
+  });
+  assert.deepEqual(missingGraph, { updated: false, skipped: true, reason: 'missing-graph' });
+  assert.equal(missingGraphRunnerCalled, false);
+
+  const missing = updateGraphifyKnowledgeGraph({
+    rootDir: graphRoot,
+    log: msg => logs.push(msg),
+    commandRunner: () => {
+      const error = new Error('missing');
+// @ts-expect-error -- Legacy fixture intentionally accesses runtime-only `code` absent from its inferred mock shape.
+      error.code = 'ENOENT';
+      throw error;
+    }
+  });
+  assert.deepEqual(missing, { updated: false, skipped: true, reason: 'missing-command' });
+
+  const probeFailure = updateGraphifyKnowledgeGraph({
+    rootDir: graphRoot,
+    log: msg => logs.push(msg),
+    commandRunner: () => {
+      throw new Error('boom');
+    }
+  });
+  assert.equal(probeFailure.reason, 'probe-failed');
+
+  let calls = [];
+  const updateFailure = updateGraphifyKnowledgeGraph({
+    rootDir: graphRoot,
+    log: msg => logs.push(msg),
+    commandRunner: (command, args, options) => {
+      calls.push({ command, args, options });
+      if (args[0] === '--help') return { status: 0 };
+      return { status: 3 };
+    }
+  });
+  assert.equal(updateFailure.reason, 'update-failed');
+  assert.equal(calls[1].args.join(' '), 'update .');
+  assert.equal(calls[1].options.cwd, graphRoot);
+
+  const success = updateGraphifyKnowledgeGraph({
+    rootDir: graphRoot,
+    log: msg => logs.push(msg),
+    commandRunner: (_command, args) => ({ status: args[0] === '--help' ? 0 : 0 })
+  });
+  assert.deepEqual(success, { updated: true, skipped: false });
+  assert.ok(logs.some(msg => msg.includes('No existing graphify graph found')));
+  assert.ok(logs.some(msg => msg.includes('graphify not found')));
+  assert.ok(logs.some(msg => msg.includes('graphify probe failed')));
+  assert.ok(logs.some(msg => msg.includes('graphify update failed with status 3')));
+  fs.rmSync(graphRoot, { recursive: true, force: true });
+  fs.rmSync(emptyRoot, { recursive: true, force: true });
+});
+
+// ---------- resolveGraphPath (task-2297: active-worktree anchoring) ----------
+
+test('resolveGraphPath returns absolute path when graph exists, null when absent', () => {
+  const graphRoot = registeredMkdtemp('graphify-resolve-');
+  const emptyRoot = registeredMkdtemp('graphify-resolve-empty-');
+  fs.mkdirSync(path.join(graphRoot, 'graphify-out'), { recursive: true });
+  fs.writeFileSync(path.join(graphRoot, 'graphify-out', 'graph.json'), '{}\n');
+
+  const result = resolveGraphPath({ rootDir: graphRoot });
+  assert.ok(result, 'should return non-null when graph exists');
+  assert.equal(result.graphPath, path.join(graphRoot, 'graphify-out', 'graph.json'));
+  assert.ok(path.isAbsolute(result.graphPath), 'graphPath must be absolute');
+
+  const absent = resolveGraphPath({ rootDir: emptyRoot });
+  assert.equal(absent, null, 'should return null when graph is absent');
+
+  fs.rmSync(graphRoot, { recursive: true, force: true });
+  fs.rmSync(emptyRoot, { recursive: true, force: true });
+});
+
+// ---------- queryGraph (task-2297: actionable missing-graph handling) ----------
+
+test('queryGraph returns missing-graph when graph.json is absent', () => {
+  const emptyRoot = registeredMkdtemp('graphify-query-empty-');
+  const logs = [];
+  const result = queryGraph({
+    question: 'test',
+    rootDir: emptyRoot,
+    log: msg => logs.push(msg),
+    commandRunner: () => { throw new Error('should not be called'); },
+  });
+  assert.deepEqual(result.success, false);
+  assert.equal(result.reason, 'missing-graph');
+  assert.ok(logs.some(msg => msg.includes('No graphify graph')));
+  fs.rmSync(emptyRoot, { recursive: true, force: true });
+});
+
+test('queryGraph passes --graph with absolute path anchored to active worktree', () => {
+  const graphRoot = registeredMkdtemp('graphify-query-anchored-');
+  fs.mkdirSync(path.join(graphRoot, 'graphify-out'), { recursive: true });
+  fs.writeFileSync(path.join(graphRoot, 'graphify-out', 'graph.json'), '{}\n');
+
+  let capturedArgs;
+  const result = queryGraph({
+    question: 'how does it work',
+    rootDir: graphRoot,
+    commandRunner: (command, args, options) => {
+      if (args[0] === '--help') return { status: 0 };
+      capturedArgs = { command, args, options };
+      return { status: 0, stdout: 'query result' };
+    },
+  });
+  assert.ok(result.success);
+  assert.equal(capturedArgs.args[0], 'query');
+  assert.equal(capturedArgs.args[1], 'how does it work');
+  assert.equal(capturedArgs.args[2], '--graph');
+  assert.equal(capturedArgs.args[3], path.join(graphRoot, 'graphify-out', 'graph.json'));
+  assert.ok(path.isAbsolute(capturedArgs.args[3]), '--graph path must be absolute');
+  assert.equal(capturedArgs.options.cwd, graphRoot);
+  fs.rmSync(graphRoot, { recursive: true, force: true });
+});

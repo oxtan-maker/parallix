@@ -144,7 +144,7 @@ export function createIntegratePorts(): IntegrateWorkflowPorts {
         // a Parallix checkout. They cannot run repository-owned guards; a real
         // integration checkout must contain every guard source and is checked.
         if (!fs.existsSync(path.join(rootDir, 'test', 'test-categories.test.ts'))) { return { ok: true }; }
-        const result = spawnSync('node', ['--test', '--import', 'tsx', 'test/test-categories.test.ts', 'test/default-test-suite.test.ts', 'test/file-size-cap.test.ts'], { cwd: rootDir, encoding: 'utf8' });
+        const result = spawnSync('node', ['--test', '--import', 'tsx', 'test/unit/test/lib/test-categories.test.ts', 'test/unit/test/lib/default-test-suite.test.ts', 'test/unit/repository/file-size-cap.test.ts'], { cwd: rootDir, encoding: 'utf8' });
         return result.status === 0 ? { ok: true } : { ok: false, error: [result.stdout, result.stderr].filter(Boolean).join('\n').trim() };
       },
       routeIntegrationGateFailure: options => integrationGateRebound.routeIntegrationGateFailure(options),

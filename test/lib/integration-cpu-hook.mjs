@@ -26,7 +26,7 @@ beforeEach(context => {
   if (parent && !name.startsWith(`${parent.name} > `)) {
     throw new Error(`overlapping integration tests cannot share one process CPU counter: ${parent.name}, ${name}`);
   }
-  const file = path.relative(path.join(root, 'test'), context.filePath || process.argv[1]);
+  const file = path.relative(path.join(root, 'test'), context.filePath || process.argv[1]).split(path.sep).join('/');
   const limitMs = positiveCpuBudget(process.env.PARALLIX_INTEGRATION_TEST_CPU_BUDGET_MS
     ?? policy.integrationCases[profile][file] ?? policy.integrationCases.defaultMs, 'integration case');
   if (!Number.isSafeInteger(limitMs) || limitMs <= 0) throw new Error('invalid integration test CPU budget');

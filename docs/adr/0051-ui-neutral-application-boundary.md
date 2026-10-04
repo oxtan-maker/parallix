@@ -39,8 +39,8 @@ differences away.
 Repository automation evidence also constrains this decision. ADR 0048 and
 completed TASK-1384 document the fail-closed response to unsupported agent
 claims and lifecycle failures. The deterministic lifecycle suite
-`test/e2e-mission-lifecycle.test.ts` and real-agent smoke suite
-`test/e2e-real-agent-smoke.test.ts`, together with completed TASK-2205,
+`test/e2e/lifecycle/mission-lifecycle.test.ts` and real-agent smoke suite
+`test/e2e/agents/real-agent-smoke.test.ts`, together with completed TASK-2205,
 TASK-2236, and TASK-2269, record operational constraints from slow or
 workstation-dependent agent runs, runner/configuration failures, and unavailable
 environment resources. Therefore the proposed boundary must retain deterministic

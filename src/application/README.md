@@ -10,4 +10,4 @@ application boundary defined by [ADR 0051](../../docs/adr/0051-ui-neutral-applic
 ## What this directory is not
 
 It is not a database, CLI, filesystem, Git, process, or provider layer. The
-complete dependency rule is executable in `test/dependency-graph.test.ts`.
+complete dependency rule is executable in `test/unit/adapters/architecture/dependency-graph.test.ts`.

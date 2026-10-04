@@ -1,0 +1,59 @@
+
+
+
+import test, { mock } from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'fs';
+import os from 'os';
+import path from 'path';
+import { mockModule, installModuleMocks } from '../../../lib/module-mock.js';
+import { mkdtemp as registeredMkdtemp } from '../../../helpers/temp-dir.js';
+const loadStateMapModule = mockModule<typeof import('../../../../src/adapters/config/state-map.js')>('../../../../src/adapters/config/state-map.js', import.meta.url);
+await installModuleMocks();
+test.afterEach(() => mock.restoreAll());
+const { loadStateMap, resolveStateMapPath, SHIPPED_STATE_MAP_PATH, toVirtual } = loadStateMapModule;
+test('toVirtual matches mapped statuses case-insensitively', () => {
+  const map = {
+    draft: 'To Do',
+    ready: 'To Do',
+    active: 'In Progress',
+    done: 'Done',
+  };
+
+  assert.equal(toVirtual('to do', map), 'draft');
+  assert.equal(toVirtual('IN PROGRESS', map), 'active');
+  assert.equal(toVirtual('Done', map), 'done');
+});
+
+test('loadStateMap resolves configured state map from target repo root', () => {
+  const rootDir = registeredMkdtemp('workflow-state-map-');
+  const repoMapPath = path.join(rootDir, 'config', 'board-state.json');
+  fs.mkdirSync(path.dirname(repoMapPath), { recursive: true });
+  fs.writeFileSync(repoMapPath, JSON.stringify({ ready: 'queued', approved: 'accepted' }), 'utf8');
+
+  try {
+    const options = {
+      rootDir,
+      config: { adapters: { tasks: { stateMap: 'config/board-state.json' } } },
+    };
+    assert.equal(resolveStateMapPath(options), repoMapPath);
+    assert.deepEqual(loadStateMap(options), { ready: 'queued', approved: 'accepted' });
+  } finally {
+    fs.rmSync(rootDir, { recursive: true, force: true });
+  }
+});
+
+test('loadStateMap falls back to shipped state map when target repo override is absent', () => {
+  const rootDir = registeredMkdtemp('workflow-state-map-missing-');
+
+  try {
+    const options = {
+      rootDir,
+      config: { adapters: { tasks: { stateMap: 'missing-state-map.json' } } },
+    };
+    assert.equal(resolveStateMapPath(options), SHIPPED_STATE_MAP_PATH);
+    assert.deepEqual(loadStateMap(options), { ready: 'refined', approved: 'ready-for-integration' });
+  } finally {
+    fs.rmSync(rootDir, { recursive: true, force: true });
+  }
+});

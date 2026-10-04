@@ -147,6 +147,10 @@ gate_static_analysis() {
     echo "FAIL: test-hygiene scanner found violations"
     return 1
   fi
+  if ! npx tsx test/lib/test-layout-validation.ts; then
+    echo "FAIL: test layout or verification-lane registration drifted"
+    return 1
+  fi
   echo "PASS: test-hygiene clean"
 
   # Stage 4: Test typecheck (check-only project; production emission is owned

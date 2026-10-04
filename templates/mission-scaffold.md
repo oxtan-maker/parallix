@@ -37,7 +37,7 @@ Every checkpoint document (CP-N.md) MUST include:
 - At least one evidence row per criterion using durable, verifiable references. Parallix already accepts:
   1. **Recognized repo commands or paths** — e.g., `` `npm test -- test/repair-handoff.test.ts` ``, `` `px review <slug> --verify` ``, or `` `./scripts/verify-local.sh all` ``
   2. **Test names** — e.g., `"real custom-agent launcher smoke: full lifecycle with hello-world task (SC3/SC4/SC5/SC6/SC7)"` (must match a test name in the repo)
-  3. **Test file paths** — e.g., `test/e2e-real-agent-smoke.test.ts` (must be an existing test file)
+  3. **Test file paths** — e.g., `test/e2e/agents/real-agent-smoke.test.ts` (must be an existing test file)
   4. **ADR references** — e.g., `ADR 0048` (must correspond to an existing file under `docs/adr/`)
   5. **File:line references** — accepted when needed, but line numbers eventually rot; prefer the forms above
 - Raw `stat`/`ls` output or generic prose may appear as supplemental context, but pair them with one of the accepted references above

@@ -96,7 +96,7 @@ changing this fixture's classifications.
 
 ## Enforcement
 
-The inventory is enforced by architecture tests in `test/persistence-inventory-guardrail.test.ts`:
+The inventory is enforced by architecture tests in `test/unit/persistence-inventory-guardrail.test.ts`:
 
 - **SC1** — All 15 ADR 0053 concepts covered; every entry has valid classification,
   pathType, operation, unique ID, and existing file location.
@@ -111,7 +111,7 @@ The inventory is enforced by architecture tests in `test/persistence-inventory-g
 The following files perform durable IO but are excluded from the concept inventory
 because they are infrastructure, not domain-boundary readers or writers
 (13 files, maintained in the `infrastructureExclusions` set in
-`test/persistence-inventory-guardrail.test.ts`):
+`test/unit/persistence-inventory-guardrail.test.ts`):
 
 - `src/adapters/storage/storage.ts` — defines the persistence API itself
 - `src/adapters/architecture/boundary-guards.ts` — internal guard helper

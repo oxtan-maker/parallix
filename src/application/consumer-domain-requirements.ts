@@ -4,7 +4,7 @@
 // launch, retry, failover, usage/statistics, review, and UI/board consumer
 // reads information that an existing `src/domain` concept already carries.
 // ADR 0053 excludes `Attempt`; this mapping is the consumer evidence that
-// exclusion is re-tested against, and `test/domain-architecture-guards.test.ts`
+// exclusion is re-tested against, and `test/unit/domain/domain-architecture-guards.test.ts`
 // fails if a family disappears, names a concept that does not exist in
 // `src/domain`, or cites a source location that no longer matches.
 //

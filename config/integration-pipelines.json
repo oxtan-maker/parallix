@@ -43,12 +43,12 @@
       "always": true
     },
     "workflow": {
-      "command": "node --test --import tsx --import ./test/bootstrap-e2e-parallix-home.ts test/e2e-mission-lifecycle.test.ts",
+      "command": "node --test --import tsx --import ./test/bootstrap-e2e-parallix-home.ts test/e2e/lifecycle/mission-lifecycle.test.ts",
       "order": 50,
       "run_last": true
     },
     "custom-agent-smoke": {
-      "command": "node --import tsx --import ./test/bootstrap-e2e-parallix-home.ts test/e2e-real-agent-smoke.test.ts",
+      "command": "node --import tsx --import ./test/bootstrap-e2e-parallix-home.ts test/e2e/agents/real-agent-smoke.test.ts",
       "order": 51,
       "run_last": true
     }

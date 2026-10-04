@@ -30,8 +30,8 @@
         { "key": "integration-ci", "command": "PARALLIX_TEST_COVERAGE=1 npm run test:integration:ci:prebuilt", "order": 5, "after": ["build"] },
         { "key": "integration-local", "command": "npm run test:integration:local:prebuilt", "order": 6, "after": ["build"] },
         { "key": "coverage-merge", "command": "rm -f coverage/lcov.info && npm run coverage:merge && test -s coverage/lcov.info", "order": 7, "after": ["unit", "integration-ci"] },
-        { "key": "workflow", "command": "node --test --import tsx --import ./test/bootstrap-e2e-parallix-home.ts test/e2e-mission-lifecycle.test.ts", "order": 8, "after": ["build"] },
-        { "key": "agent-smoke", "command": "node --import tsx --import ./test/bootstrap-e2e-parallix-home.ts test/e2e-real-agent-smoke.test.ts", "order": 9, "after": ["build"] },
+        { "key": "workflow", "command": "node --test --import tsx --import ./test/bootstrap-e2e-parallix-home.ts test/e2e/lifecycle/mission-lifecycle.test.ts", "order": 8, "after": ["build"] },
+        { "key": "agent-smoke", "command": "node --import tsx --import ./test/bootstrap-e2e-parallix-home.ts test/e2e/agents/real-agent-smoke.test.ts", "order": 9, "after": ["build"] },
         { "key": "quality-gate", "command": "npm run sonar", "order": 10, "after": ["coverage-merge"] }
       ]
     }

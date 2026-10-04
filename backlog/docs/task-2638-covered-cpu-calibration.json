@@ -1,0 +1,403 @@
+{
+  "task": "TASK-2638",
+  "date": "2026-10-04",
+  "measurement": "integration-cpu-hook: own CPU plus waited-child CPU, including case teardown",
+  "command": "PARALLIX_TEST_COVERAGE=1 PARALLIX_TEST_CPU_PROFILE_DIR=<profile-dir> npm run test:integration:ci:prebuilt -- test/integration/cli/px-runner.test.ts test/integration/integrate/integrate-gate-and-exclusivity-process-contract.test.ts test/integration/integrate/integration-repair-review-loop.test.ts",
+  "focusedRuns": 2,
+  "focusedRunsPassed": true,
+  "margin": 0.5,
+  "roundUpMs": 50,
+  "entries": [
+    {
+      "file": "integration/cli/px-runner.test.ts",
+      "previousCoveredBudgetMs": 1650,
+      "reportedFullSuiteCpuMs": 1696,
+      "focusedCoveredRecords": [
+        {
+          "file": "integration/cli/px-runner.test.ts",
+          "name": "px verify-env reads repo state from the caller cwd",
+          "profile": "covered",
+          "cpuMs": 424.407,
+          "limitMs": 1650
+        },
+        {
+          "file": "integration/cli/px-runner.test.ts",
+          "name": "px --version reports package version and executing runtime path",
+          "profile": "covered",
+          "cpuMs": 1078.11,
+          "limitMs": 1650
+        },
+        {
+          "file": "integration/cli/px-runner.test.ts",
+          "name": "px version is equivalent to --version",
+          "profile": "covered",
+          "cpuMs": 309.543,
+          "limitMs": 1650
+        },
+        {
+          "file": "integration/cli/px-runner.test.ts",
+          "name": "px review-event writes only inside the caller cwd repo mission artifacts",
+          "profile": "covered",
+          "cpuMs": 411.144,
+          "limitMs": 1650
+        },
+        {
+          "file": "integration/cli/px-runner.test.ts",
+          "name": "px review-event accepts an implementer disposition",
+          "profile": "covered",
+          "cpuMs": 433.082,
+          "limitMs": 1650
+        },
+        {
+          "file": "integration/cli/px-runner.test.ts",
+          "name": "px works from a different caller cwd without copying workflow source",
+          "profile": "covered",
+          "cpuMs": 406.383,
+          "limitMs": 1650
+        },
+        {
+          "file": "integration/cli/px-runner.test.ts",
+          "name": "px defaults to the caller cwd when no target option is provided",
+          "profile": "covered",
+          "cpuMs": 399.552,
+          "limitMs": 1650
+        },
+        {
+          "file": "integration/cli/px-runner.test.ts",
+          "name": "verify-env exits 0 and prints USABLE verdict on a healthy repo",
+          "profile": "covered",
+          "cpuMs": 396.592,
+          "limitMs": 1650
+        },
+        {
+          "file": "integration/cli/px-runner.test.ts",
+          "name": "verify-env exits 1 and prints NOT USABLE verdict with remediation on invalid config",
+          "profile": "covered",
+          "cpuMs": 344.813,
+          "limitMs": 1650
+        },
+        {
+          "file": "integration/cli/px-runner.test.ts",
+          "name": "px verify-env reads repo state from the caller cwd",
+          "profile": "covered",
+          "cpuMs": 530.015,
+          "limitMs": 1650
+        },
+        {
+          "file": "integration/cli/px-runner.test.ts",
+          "name": "px --version reports package version and executing runtime path",
+          "profile": "covered",
+          "cpuMs": 1298.21,
+          "limitMs": 1650
+        },
+        {
+          "file": "integration/cli/px-runner.test.ts",
+          "name": "px version is equivalent to --version",
+          "profile": "covered",
+          "cpuMs": 380.808,
+          "limitMs": 1650
+        },
+        {
+          "file": "integration/cli/px-runner.test.ts",
+          "name": "px review-event writes only inside the caller cwd repo mission artifacts",
+          "profile": "covered",
+          "cpuMs": 505.829,
+          "limitMs": 1650
+        },
+        {
+          "file": "integration/cli/px-runner.test.ts",
+          "name": "px review-event accepts an implementer disposition",
+          "profile": "covered",
+          "cpuMs": 514.234,
+          "limitMs": 1650
+        },
+        {
+          "file": "integration/cli/px-runner.test.ts",
+          "name": "px works from a different caller cwd without copying workflow source",
+          "profile": "covered",
+          "cpuMs": 470.82,
+          "limitMs": 1650
+        },
+        {
+          "file": "integration/cli/px-runner.test.ts",
+          "name": "px defaults to the caller cwd when no target option is provided",
+          "profile": "covered",
+          "cpuMs": 481.365,
+          "limitMs": 1650
+        },
+        {
+          "file": "integration/cli/px-runner.test.ts",
+          "name": "verify-env exits 0 and prints USABLE verdict on a healthy repo",
+          "profile": "covered",
+          "cpuMs": 463.606,
+          "limitMs": 1650
+        },
+        {
+          "file": "integration/cli/px-runner.test.ts",
+          "name": "verify-env exits 1 and prints NOT USABLE verdict with remediation on invalid config",
+          "profile": "covered",
+          "cpuMs": 406.871,
+          "limitMs": 1650
+        }
+      ],
+      "maximumObservedCpuMs": 1696,
+      "coveredBudgetMs": 2550
+    },
+    {
+      "file": "integration/integrate/integrate-gate-and-exclusivity-process-contract.test.ts",
+      "previousCoveredBudgetMs": 8900,
+      "reportedFullSuiteCpuMs": 8936,
+      "focusedCoveredRecords": [
+        {
+          "file": "integration/integrate/integrate-gate-and-exclusivity-process-contract.test.ts",
+          "name": "verify-local integrate gate > verify-local Git shim handles init flags without mistaking them for the target directory",
+          "profile": "covered",
+          "cpuMs": 33.628,
+          "limitMs": 8900
+        },
+        {
+          "file": "integration/integrate/integrate-gate-and-exclusivity-process-contract.test.ts",
+          "name": "verify-local integrate gate > verify-local integrate fails closed when integration config is missing (task-2300)",
+          "profile": "covered",
+          "cpuMs": 804.92,
+          "limitMs": 8900
+        },
+        {
+          "file": "integration/integrate/integrate-gate-and-exclusivity-process-contract.test.ts",
+          "name": "verify-local integrate gate > verify-local integrate runs static analysis before configured integration gates (task-2414)",
+          "profile": "covered",
+          "cpuMs": 1.551,
+          "limitMs": 8900
+        },
+        {
+          "file": "integration/integrate/integrate-gate-and-exclusivity-process-contract.test.ts",
+          "name": "verify-local integrate gate > verify-local integrate stops before configured gates when static analysis fails (task-2414)",
+          "profile": "covered",
+          "cpuMs": 86.141,
+          "limitMs": 8900
+        },
+        {
+          "file": "integration/integrate/integrate-gate-and-exclusivity-process-contract.test.ts",
+          "name": "verify-local integrate gate > verify-local integrate prints the resolved dry-run plan for workflow gates",
+          "profile": "covered",
+          "cpuMs": 753.265,
+          "limitMs": 8900
+        },
+        {
+          "file": "integration/integrate/integrate-gate-and-exclusivity-process-contract.test.ts",
+          "name": "verify-local integrate gate > verify-local integrate fails closed when no mandatory gate applies (task-2300)",
+          "profile": "covered",
+          "cpuMs": 783.728,
+          "limitMs": 8900
+        },
+        {
+          "file": "integration/integrate/integrate-gate-and-exclusivity-process-contract.test.ts",
+          "name": "verify-local integrate gate > verify-local integrate resolves the unconditional integration suite for every required area class (task-2292)",
+          "profile": "covered",
+          "cpuMs": 5010.939,
+          "limitMs": 8900
+        },
+        {
+          "file": "integration/integrate/integrate-gate-and-exclusivity-process-contract.test.ts",
+          "name": "verify-local integrate gate > verify-local integrate aborts after an integration-suite failure before a later command (task-2292)",
+          "profile": "covered",
+          "cpuMs": 3444.775,
+          "limitMs": 8900
+        },
+        {
+          "file": "integration/integrate/integrate-gate-and-exclusivity-process-contract.test.ts",
+          "name": "verify-local integrate gate > verify-local integrate forwards the Codex override only to custom-agent-smoke",
+          "profile": "covered",
+          "cpuMs": 3485.507,
+          "limitMs": 8900
+        },
+        {
+          "file": "integration/integrate/integrate-gate-and-exclusivity-process-contract.test.ts",
+          "name": "verify-local integrate gate > verify-local integrate rejects incomplete or unsupported real-agent overrides",
+          "profile": "covered",
+          "cpuMs": 175.471,
+          "limitMs": 8900
+        },
+        {
+          "file": "integration/integrate/integrate-gate-and-exclusivity-process-contract.test.ts",
+          "name": "verify-local integrate gate > verify-local integrate does not source login-shell startup files for gates",
+          "profile": "covered",
+          "cpuMs": 3415.262,
+          "limitMs": 8900
+        },
+        {
+          "file": "integration/integrate/integrate-gate-and-exclusivity-process-contract.test.ts",
+          "name": "integrate workflow gate > integrate-workflow-gate: workflow changed + direct run => workflow suite is enforced",
+          "profile": "covered",
+          "cpuMs": 2.159,
+          "limitMs": 8900
+        },
+        {
+          "file": "integration/integrate/integrate-gate-and-exclusivity-process-contract.test.ts",
+          "name": "integrate workflow gate > integrate-workflow-gate: workflow changed + suite context => nested gate skips recursion",
+          "profile": "covered",
+          "cpuMs": 0.689,
+          "limitMs": 8900
+        },
+        {
+          "file": "integration/integrate/integrate-gate-and-exclusivity-process-contract.test.ts",
+          "name": "integrate workflow gate > integrate-workflow-gate: no workflow change => gate skipped (exit 0)",
+          "profile": "covered",
+          "cpuMs": 0.592,
+          "limitMs": 8900
+        },
+        {
+          "file": "integration/integrate/integrate-gate-and-exclusivity-process-contract.test.ts",
+          "name": "exclusive integrate process claim > two integrate processes cannot both read one Mission",
+          "profile": "covered",
+          "cpuMs": 653.084,
+          "limitMs": 8900
+        },
+        {
+          "file": "integration/integrate/integrate-gate-and-exclusivity-process-contract.test.ts",
+          "name": "verify-local integrate gate > verify-local Git shim handles init flags without mistaking them for the target directory",
+          "profile": "covered",
+          "cpuMs": 39.206,
+          "limitMs": 8900
+        },
+        {
+          "file": "integration/integrate/integrate-gate-and-exclusivity-process-contract.test.ts",
+          "name": "verify-local integrate gate > verify-local integrate fails closed when integration config is missing (task-2300)",
+          "profile": "covered",
+          "cpuMs": 919.249,
+          "limitMs": 8900
+        },
+        {
+          "file": "integration/integrate/integrate-gate-and-exclusivity-process-contract.test.ts",
+          "name": "verify-local integrate gate > verify-local integrate runs static analysis before configured integration gates (task-2414)",
+          "profile": "covered",
+          "cpuMs": 1.819,
+          "limitMs": 8900
+        },
+        {
+          "file": "integration/integrate/integrate-gate-and-exclusivity-process-contract.test.ts",
+          "name": "verify-local integrate gate > verify-local integrate stops before configured gates when static analysis fails (task-2414)",
+          "profile": "covered",
+          "cpuMs": 100.034,
+          "limitMs": 8900
+        },
+        {
+          "file": "integration/integrate/integrate-gate-and-exclusivity-process-contract.test.ts",
+          "name": "verify-local integrate gate > verify-local integrate prints the resolved dry-run plan for workflow gates",
+          "profile": "covered",
+          "cpuMs": 967.989,
+          "limitMs": 8900
+        },
+        {
+          "file": "integration/integrate/integrate-gate-and-exclusivity-process-contract.test.ts",
+          "name": "verify-local integrate gate > verify-local integrate fails closed when no mandatory gate applies (task-2300)",
+          "profile": "covered",
+          "cpuMs": 922.355,
+          "limitMs": 8900
+        },
+        {
+          "file": "integration/integrate/integrate-gate-and-exclusivity-process-contract.test.ts",
+          "name": "verify-local integrate gate > verify-local integrate resolves the unconditional integration suite for every required area class (task-2292)",
+          "profile": "covered",
+          "cpuMs": 5920.448,
+          "limitMs": 8900
+        },
+        {
+          "file": "integration/integrate/integrate-gate-and-exclusivity-process-contract.test.ts",
+          "name": "verify-local integrate gate > verify-local integrate aborts after an integration-suite failure before a later command (task-2292)",
+          "profile": "covered",
+          "cpuMs": 4056.226,
+          "limitMs": 8900
+        },
+        {
+          "file": "integration/integrate/integrate-gate-and-exclusivity-process-contract.test.ts",
+          "name": "verify-local integrate gate > verify-local integrate forwards the Codex override only to custom-agent-smoke",
+          "profile": "covered",
+          "cpuMs": 4061.567,
+          "limitMs": 8900
+        },
+        {
+          "file": "integration/integrate/integrate-gate-and-exclusivity-process-contract.test.ts",
+          "name": "verify-local integrate gate > verify-local integrate rejects incomplete or unsupported real-agent overrides",
+          "profile": "covered",
+          "cpuMs": 208.421,
+          "limitMs": 8900
+        },
+        {
+          "file": "integration/integrate/integrate-gate-and-exclusivity-process-contract.test.ts",
+          "name": "verify-local integrate gate > verify-local integrate does not source login-shell startup files for gates",
+          "profile": "covered",
+          "cpuMs": 3984.345,
+          "limitMs": 8900
+        },
+        {
+          "file": "integration/integrate/integrate-gate-and-exclusivity-process-contract.test.ts",
+          "name": "integrate workflow gate > integrate-workflow-gate: workflow changed + direct run => workflow suite is enforced",
+          "profile": "covered",
+          "cpuMs": 2.169,
+          "limitMs": 8900
+        },
+        {
+          "file": "integration/integrate/integrate-gate-and-exclusivity-process-contract.test.ts",
+          "name": "integrate workflow gate > integrate-workflow-gate: workflow changed + suite context => nested gate skips recursion",
+          "profile": "covered",
+          "cpuMs": 0.706,
+          "limitMs": 8900
+        },
+        {
+          "file": "integration/integrate/integrate-gate-and-exclusivity-process-contract.test.ts",
+          "name": "integrate workflow gate > integrate-workflow-gate: no workflow change => gate skipped (exit 0)",
+          "profile": "covered",
+          "cpuMs": 1.277,
+          "limitMs": 8900
+        },
+        {
+          "file": "integration/integrate/integrate-gate-and-exclusivity-process-contract.test.ts",
+          "name": "exclusive integrate process claim > two integrate processes cannot both read one Mission",
+          "profile": "covered",
+          "cpuMs": 644.014,
+          "limitMs": 8900
+        }
+      ],
+      "maximumObservedCpuMs": 8936,
+      "coveredBudgetMs": 13450
+    },
+    {
+      "file": "integration/integrate/integration-repair-review-loop.test.ts",
+      "previousCoveredBudgetMs": 2150,
+      "reportedFullSuiteCpuMs": 2222,
+      "focusedCoveredRecords": [
+        {
+          "file": "integration/integrate/integration-repair-review-loop.test.ts",
+          "name": "task-2620: a red integration gate repairs once, re-reviews, and stops in the integration lane",
+          "profile": "covered",
+          "cpuMs": 1354.009,
+          "limitMs": 2150
+        },
+        {
+          "file": "integration/integrate/integration-repair-review-loop.test.ts",
+          "name": "task-2620 AC1: px lead forwards an undecided review round to review --continue and records no approval",
+          "profile": "covered",
+          "cpuMs": 533.553,
+          "limitMs": 2150
+        },
+        {
+          "file": "integration/integrate/integration-repair-review-loop.test.ts",
+          "name": "task-2620: a red integration gate repairs once, re-reviews, and stops in the integration lane",
+          "profile": "covered",
+          "cpuMs": 1709.788,
+          "limitMs": 2150
+        },
+        {
+          "file": "integration/integrate/integration-repair-review-loop.test.ts",
+          "name": "task-2620 AC1: px lead forwards an undecided review round to review --continue and records no approval",
+          "profile": "covered",
+          "cpuMs": 727.081,
+          "limitMs": 2150
+        }
+      ],
+      "maximumObservedCpuMs": 2222,
+      "coveredBudgetMs": 3350
+    }
+  ]
+}

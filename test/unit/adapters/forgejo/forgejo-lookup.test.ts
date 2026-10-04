@@ -1,0 +1,45 @@
+
+
+
+import test, { mock } from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'fs';
+import path from 'path';
+import { mockModule, installModuleMocks } from '../../../lib/module-mock.js';
+const getPrNumberModule = mockModule<typeof import('../../../../src/adapters/forgejo/forgejo.js')>('../../../../src/adapters/forgejo/forgejo.js', import.meta.url);
+await installModuleMocks();
+test.afterEach(() => mock.restoreAll());
+const { getPrNumber } = getPrNumberModule;
+test('getPrNumber robust matching', (t) => {
+  const apiCall = (method, apiPath) => {
+    if (apiPath.includes('state=open')) return { ok: true, data: [] };
+    return {
+      ok: true,
+      data: [
+        { number: 101, head: { ref: 'other', label: 'user:mission/task-101' } },
+        { number: 102, head: { ref: 'mission/task-102', label: 'mission/task-102' } }
+      ]
+    };
+  };
+
+  assert.strictEqual(getPrNumber('mission/task-101', 'token', { apiCall }), 101, 'Should match by label suffix');
+  assert.strictEqual(getPrNumber('mission/task-102', 'token', { apiCall }), 102, 'Should match by ref');
+});
+
+test('getPrNumber pagination and sorting', (t) => {
+  const calls = [];
+  const apiCall = (method, apiPath) => {
+    calls.push(apiPath);
+    return { ok: true, data: [] };
+  };
+
+  getPrNumber('any', 'token', { apiCall });
+
+  // TASK-2561: the direct base/head lookup comes first; this one answers with
+  // no PR number, so the page scans still run in their original order.
+  const scans = calls.filter(call => call.startsWith('/pulls?'));
+  assert.ok(!calls[0].startsWith('/pulls?'), 'Should ask for the branch by base and head first');
+  assert.ok(scans[0].includes('state=open'), 'Should check open PRs first');
+  assert.ok(scans[0].includes('sort=recentupdate'), 'Should use sorting');
+  assert.ok(scans[1].includes('state=all'), 'Should check all PRs if open check fails');
+});

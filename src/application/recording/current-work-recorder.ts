@@ -16,7 +16,7 @@ import type { OperationalHistoryEntry, OperationalHistoryRepository } from '../p
  *  - It is **not** a durable per-launch entity. There is no run/attempt
  *    identity: the mission is the key, `operationId` is a correlation string,
  *    and the newest event for a mission replaces every older one. ADR 0053
- *    excludes `Attempt`, and `test/domain-architecture-guards.test.ts` enforces it.
+ *    excludes `Attempt`, and `test/unit/domain/domain-architecture-guards.test.ts` enforces it.
  *  - It is **not** the availability authority. A family being usable is still
  *    `AgentBlock`; this only records which family is presently running.
  *  - It is **not** proof that a process exists. The recorded `processId` is

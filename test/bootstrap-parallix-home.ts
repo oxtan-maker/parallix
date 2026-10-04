@@ -155,7 +155,7 @@ delete process.env.PI_BIN;
 // non-interactive terminal: it skips re-renders, so TUI tests that drive a fake
 // or real terminal see no frames and time out. Test behaviour must not depend on
 // the ambient CI flag; tests that exercise CI detection pass it explicitly
-// (see test/no-command-tty.test.ts).
+// (see test/unit/interfaces/cli/no-command-tty.test.ts).
 delete process.env.CI;
 delete process.env.CONTINUOUS_INTEGRATION;
 

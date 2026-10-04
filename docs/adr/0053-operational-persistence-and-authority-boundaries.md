@@ -299,7 +299,7 @@ justification is that a table would be convenient.
 
 | Concept | Decision | Rejected alternative | Consequence |
 | --- | --- | --- | --- |
-| `Attempt` | **Excluded.** No checked production domain type defines its identity, lifecycle, or relationship to `AgentRunMeasurement` and `SessionMarker`, and no launch, retry, failover, usage, review, or UI consumer requires durable per-launch identity. The exclusion is enforced, not asserted: `test/domain-architecture-guards.test.ts` fails if an Attempt-shaped type, table, or record appears under `src/domain`, `src/application`, or `src/adapters`. | Create attempt tables from the desired persistence shape first. | Avoids a schema-led domain model; failover history stays limited until the domain earns the concept. |
+| `Attempt` | **Excluded.** No checked production domain type defines its identity, lifecycle, or relationship to `AgentRunMeasurement` and `SessionMarker`, and no launch, retry, failover, usage, review, or UI consumer requires durable per-launch identity. The exclusion is enforced, not asserted: `test/unit/domain/domain-architecture-guards.test.ts` fails if an Attempt-shaped type, table, or record appears under `src/domain`, `src/application`, or `src/adapters`. | Create attempt tables from the desired persistence shape first. | Avoids a schema-led domain model; failover history stays limited until the domain earns the concept. |
 
 ## Legacy and migration boundary
 

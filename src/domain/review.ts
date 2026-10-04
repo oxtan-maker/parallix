@@ -750,7 +750,7 @@ export function transitionReviewPhase(review: Review, phase: ReviewPhase): Revie
   if (!allowed.includes(phase)) {
     // Worded so the phase never follows the word "from" in quotes: the domain
     // import-boundary scanner reads that as an import specifier
-    // (test/domain-architecture-guards.test.ts).
+    // (test/unit/domain/domain-architecture-guards.test.ts).
     throw new Error(
       `Review phase "${current.phase}" cannot move to "${phase}". Allowed: ${allowed.join(', ') || 'none'}`,
     );
