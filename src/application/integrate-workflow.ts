@@ -274,11 +274,12 @@ export function createIntegrateWorkflow(ports: IntegrateWorkflowPorts) {
       throw abortWith(landing, '\nIntegration preflight failed. Resolve the blockers above before running integrate.');
     }
 
-    // TASK-2625: capture the mission branch HEAD before the rebase so the
-    // integration-validation marker is keyed on the validating commit (the
-    // implementer's fixed tree). A rebase produces a new SHA even for an
-    // identical diff, so this must be read pre-rebase to stay stable across
-    // integrate invocations. Absent, the skip feature is inert (full suite).
+    // TASK-2625: a resolvable mission HEAD only enables recording the
+    // integration-validation marker. The marker itself is keyed on the commit
+    // the rebound verify rerun ran green against (its finalized `tree.commit`),
+    // and a later integrate looks it up against the post-rebase finalized
+    // commit, which may differ from it only in backlog bookkeeping
+    // (TASK-2646). Absent, no marker is recorded and the full suite runs.
     const integrationCheckout = ports.gates.resolveIntegrationVerificationWorktree(slug, { baseWorktree: context.baseWorktree });
     const headResolution = ports.git.git(['-C', integrationCheckout, 'rev-parse', 'HEAD']);
     context.missionHeadSha = headResolution.status === 0 ? String(headResolution.stdout || '').trim() : null;

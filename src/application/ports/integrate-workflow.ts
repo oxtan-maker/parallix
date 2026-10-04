@@ -183,6 +183,8 @@ export interface IntegrateGatesPort {
   loadRequirePreIntegration(_rootDir: string): boolean;
   runPhaseGates(_phase: 'integration', _options: Record<string, unknown>): Promise<IntegrationGateRunResult>;
   captureFinalIntegrationTree(_rootDir: string): { ok: boolean; error?: string; rootDir?: string; commit?: string; tree?: string };
+  /** Repository-relative paths whose content differs between two commits; any git failure is `ok: false`. */
+  listChangedPathsBetween(_rootDir: string, _fromCommit: string, _toCommit: string): { ok: true; paths: string[] } | { ok: false; error: string };
   resolveIntegrationVerificationWorktree(_slug: string, _options: { baseWorktree: string }): string;
   isIntendedPayloadAtHead(_rootDir: string, _paths: Iterable<string>, _options: { gitRunner: IntegrateGitRunner }): boolean;
   runStagedTierGuards?(_rootDir: string): { ok: boolean; error?: string };

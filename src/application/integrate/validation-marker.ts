@@ -6,8 +6,9 @@
  * The marker is a whitelist of gate keys keyed on the validating commit SHA. It
  * is recorded by the integration gate step when the suite passes green and read
  * back by the same step on a later run. The decision to skip is decided purely
- * from the marker plus the current branch HEAD: there is no repo, branch, or
- * mission-slug special-casing anywhere in this module (SC2).
+ * from the marker, the finalized commit under test, and the paths that differ
+ * between the two: there is no repo, branch, or mission-slug special-casing
+ * anywhere in this module (SC2).
  *
  * Pure by construction: every export is a pure function over plain data with no
  * filesystem, database, or git dependency, so the whole decision surface is
@@ -103,18 +104,46 @@ function tryParseMarker(value: Partial<IntegrationValidationMarkerRecord>): Inte
 }
 
 /**
+ * The repository-general bookkeeping rule (TASK-2646): a Backlog task record
+ * under `backlog/tasks/` or `backlog/completed/`. Lane transitions and
+ * integration closeout rewrite only these files, so a tree that differs from a
+ * validated tree in nothing else exercises the same code, tests, and
+ * configuration. Every other path — `src/`, `test/`, `config/`,
+ * `workflow.config.json`, package manifests — is substantive.
+ */
+export const BOOKKEEPING_PATH_RULE = /^backlog\/(?:tasks|completed)\/[^/]+\.md$/;
+
+/** True when `filePath` (repository-relative, `/`-separated) is bookkeeping only. */
+export function isBookkeepingPath(filePath: string): boolean {
+  return BOOKKEEPING_PATH_RULE.test(filePath);
+}
+
+/**
+ * The paths that differ between the validated commit and the finalized commit,
+ * as reported through the gates port. `ok: false` covers every git failure,
+ * including an unreachable validated commit.
+ */
+export type ValidatedCommitDiff =
+  | { readonly ok: true; readonly paths: readonly string[] }
+  | { readonly ok: false; readonly error?: string };
+
+/**
  * True when the marker authorizes a skip: it exists, its whitelist is
- * non-empty, and the validating SHA still covers the current branch — the
- * current mission branch HEAD equals the validating SHA (a moved, reset, or
- * rebased branch fails this and falls back to the full suite).
+ * non-empty, and the validated commit still covers the finalized commit — it
+ * is the same commit, or the two trees differ only in bookkeeping paths
+ * (TASK-2646). A missing, failed, or substantive diff falls back to the full
+ * suite, so a rebase that brings in real changes never skips (TASK-2625 F2).
  */
 export function validationSkipApplies(
   marker: IntegrationValidationMarker | null,
-  currentBranchHeadSha: string | null | undefined,
+  finalizedCommit: string | null | undefined,
+  diffFromValidated: ValidatedCommitDiff | null = null,
 ): boolean {
   if (!marker || marker.hooks.length === 0) { return false; }
-  if (!currentBranchHeadSha) { return false; }
-  return marker.sha === currentBranchHeadSha;
+  if (!finalizedCommit) { return false; }
+  if (marker.sha === finalizedCommit) { return true; }
+  if (!diffFromValidated?.ok) { return false; }
+  return diffFromValidated.paths.every(isBookkeepingPath);
 }
 
 /**

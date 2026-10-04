@@ -3,8 +3,8 @@ id: TASK-2646
 title: >-
   Integration-validation skip marker never hits after a rebound because
   bookkeeping commits move HEAD
-status: backlog
-assignee: []
+status: done
+assignee: [claude]
 created_date: '2026-10-04 10:43'
 updated_date: '2026-10-04 10:43'
 labels:

@@ -14,6 +14,7 @@ import {
   partitionGatesForSkip,
   parseIntegrationValidationMarker,
   validationSkipApplies,
+  type ValidatedCommitDiff,
 } from './validation-marker.js';
 import type { IntegrateGatesPort, IntegrateWorkflowPorts } from '../ports/integrate-workflow.js';
 import type { OperationalHistoryService } from '../services/operational-history-service.js';
@@ -89,59 +90,68 @@ export interface GateStepRequest {
   seams: IntegrateSeams;
 }
 
-/**
- * Decide which of the configured preIntegration gates to run, applying the
- * TASK-2625 skip: when a durable, sha-keyed marker records that this mission
- * already ran some hooks green at the current branch HEAD, only the not-yet
- * validated hooks run. The decision is decided purely from the marker and the
- * current branch HEAD — no repo, branch, or mission-slug special-casing — and
- * every fallback (marker missing, whitelist empty, branch moved) runs the full
- * configured set (SC2/SC3).
- */
-/**
- * @param configured   the configured preIntegration gates
- * @param slug         the mission slug
- * @param finalizedCommit the finalized integration tree commit the gates will run
- *   against (post-rebase HEAD) — the exact tree under test. The skip is keyed on
- *   this commit, never the pre-rebase HEAD: a rebase that changes the tree must
- *   not let the mission skip a gate suite that never ran against the new tree
- *   (TASK-2625 round-2 F2). Absent, fall back to the full suite.
- * @param operationalHistory the operational-history store, or null when unavailable
- * @param log          the logger
- */
-async function resolveSkippableGates({
-  configured,
-  slug,
-  finalizedCommit,
-  operationalHistory,
-  log,
-}: {
-  configured: SkippableGate[];
-  slug: string;
-  finalizedCommit: string | null | undefined;
-  operationalHistory: OperationalHistoryService | null | undefined;
-  log: (_message: string) => void;
-}): Promise<{ gates: SkippableGate[]; skippedAll: boolean }> {
-  if (!finalizedCommit || !operationalHistory) { return { gates: configured, skippedAll: false }; }
-  let markerEntry: { eventType?: string; eventData?: string } | null = null;
-  try {
-    const latest = await operationalHistory.loadLatestByTypeForMission(INTEGRATION_VALIDATION_EVENT_TYPE, missionId(slug));
-    markerEntry = latest;
-  } catch {
-    // An unreadable history must never authorize a skip: fall back to the full
-    // suite rather than silently running nothing.
-    return { gates: configured, skippedAll: false };
-  }
-  const marker = parseIntegrationValidationMarker(markerEntry);
-  if (!marker) { return { gates: configured, skippedAll: false }; }
-  if (!validationSkipApplies(marker, finalizedCommit)) { return { gates: configured, skippedAll: false }; }
-  const { skip, run } = partitionGatesForSkip(configured.map(gate => gate.key), marker);
-  log(`Integration gates for ${slug}: ${skip.length} hook(s) already validated at ${marker.sha.slice(0, 12)}; skipping ${skip.join(', ')}.`);
-  const gates = run.map(key => configured.find(gate => gate.key === key) as SkippableGate);
-  return { gates, skippedAll: gates.length === 0 };
-}
-
 export function createIntegrationGateStep({ gates, landing, verification }: IntegrateWorkflowPorts) {
+  /**
+   * Decide which of the configured preIntegration gates to run, applying the
+   * TASK-2625 skip: when a durable, sha-keyed marker records that this mission
+   * already ran some hooks green on a tree that still covers the finalized
+   * commit, only the not-yet validated hooks run. The decision is pure over the
+   * marker, the finalized commit, and the paths that differ between them — no
+   * repo, branch, or mission-slug special-casing — and every fallback (marker
+   * missing or unreadable, whitelist empty, git diff failed, substantive diff)
+   * runs the full configured set.
+   *
+   * @param finalizedCommit the finalized integration tree commit the gates will
+   *   run against (post-rebase HEAD). A commit other than the validated one is
+   *   covered only when the two trees differ solely in bookkeeping paths
+   *   (TASK-2646); a rebase that changes code, tests, or configuration never
+   *   skips a suite that did not run against the new tree (TASK-2625 F2).
+   */
+  async function resolveSkippableGates({
+    configured,
+    slug,
+    checkout,
+    finalizedCommit,
+    operationalHistory,
+    log,
+  }: {
+    configured: SkippableGate[];
+    slug: string;
+    checkout: string;
+    finalizedCommit: string | null | undefined;
+    operationalHistory: OperationalHistoryService | null | undefined;
+    log: (_message: string) => void;
+  }): Promise<{ gates: SkippableGate[]; skippedAll: boolean }> {
+    const full = { gates: configured, skippedAll: false };
+    if (!finalizedCommit || !operationalHistory) { return full; }
+    let markerEntry: { eventType?: string; eventData?: string } | null = null;
+    try {
+      markerEntry = await operationalHistory.loadLatestByTypeForMission(INTEGRATION_VALIDATION_EVENT_TYPE, missionId(slug));
+    } catch {
+      // An unreadable history must never authorize a skip: fall back to the full
+      // suite rather than silently running nothing.
+      return full;
+    }
+    const marker = parseIntegrationValidationMarker(markerEntry);
+    if (!marker) { return full; }
+    const diff = marker.sha === finalizedCommit ? null : diffFromValidated(checkout, marker.sha, finalizedCommit);
+    if (!validationSkipApplies(marker, finalizedCommit, diff)) { return full; }
+    const { skip, run } = partitionGatesForSkip(configured.map(gate => gate.key), marker);
+    const coverage = diff ? ` (finalized ${finalizedCommit.slice(0, 12)} differs only in backlog bookkeeping)` : '';
+    log(`Integration gates for ${slug}: ${skip.length} hook(s) already validated at ${marker.sha.slice(0, 12)}${coverage}; skipping ${skip.join(', ')}.`);
+    const toRun = run.map(key => configured.find(gate => gate.key === key) as SkippableGate);
+    return { gates: toRun, skippedAll: toRun.length === 0 };
+  }
+
+  /** The validated-to-finalized path diff; any git failure reads as `ok: false` (fail open). */
+  function diffFromValidated(checkout: string, validatedSha: string, finalizedCommit: string): ValidatedCommitDiff {
+    try {
+      return gates.listChangedPathsBetween(checkout, validatedSha, finalizedCommit);
+    } catch (error) {
+      return { ok: false, error: (error as Error).message };
+    }
+  }
+
   /**
    * Returns the Verification evidence the readiness view reports: exactly what
    * ran, never "passed" without a gate result behind it.
@@ -172,13 +182,13 @@ export function createIntegrationGateStep({ gates, landing, verification }: Inte
     const requirePreIntegration = gates.loadRequirePreIntegration(checkout);
     fmt.log.debug(`Integration gate target: slug=${slug} root=${finalTree.rootDir} commit=${finalTree.commit} tree=${finalTree.tree} requirePreIntegration=${requirePreIntegration}`);
 
-    // TASK-2625: skip the high-level hooks this mission already ran green at
-    // the current branch HEAD. Decided purely from the sha-keyed marker; every
-    // fallback (marker missing, whitelist empty, branch moved) runs the full
-    // configured set.
+    // TASK-2625/TASK-2646: skip the high-level hooks this mission already ran
+    // green on a tree that differs from the finalized one at most in backlog
+    // bookkeeping. Every other case runs the full configured set.
     const gatesToRun = await resolveSkippableGates({
       configured,
       slug,
+      checkout,
       // Key the skip on the finalized (post-rebase) tree the gates run against,
       // not the pre-rebase HEAD: a rebase that changes the tree must not let the
       // mission skip a suite that never ran against the new tree (TASK-2625 F2).

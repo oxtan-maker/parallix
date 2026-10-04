@@ -137,6 +137,7 @@ export function createIntegratePorts(): IntegrateWorkflowPorts {
       loadRequirePreIntegration: rootDir => repositoryGates.loadRequirePreIntegration(rootDir),
       runPhaseGates: (phase, options) => repositoryGates.runPhaseGates(phase, options as Parameters<typeof repositoryGates.runPhaseGates>[1]),
       captureFinalIntegrationTree: rootDir => gates.captureFinalIntegrationTree(rootDir),
+      listChangedPathsBetween: (rootDir, fromCommit, toCommit) => gates.listChangedPathsBetween(rootDir, fromCommit, toCommit),
       resolveIntegrationVerificationWorktree: (slug, options) => gates.resolveIntegrationVerificationWorktree(slug, options),
       isIntendedPayloadAtHead: (rootDir, paths, options) => gates.isIntendedPayloadAtHead(rootDir, paths, options),
       runStagedTierGuards: rootDir => {

@@ -278,6 +278,26 @@ export function captureFinalIntegrationTree(rootDir: string, opts: {gitRunner?: 
   return { ok: true, rootDir: resolvedRoot, commit: String(commit.stdout || '').trim(), tree: String(tree.stdout || '').trim() };
 }
 
+const COMMIT_ID = /^[0-9a-f]{4,64}$/i;
+
+/**
+ * Repository-relative paths whose content differs between two commits, read
+ * NUL-separated without rename pairing so both sides of a move are reported.
+ * A malformed id, an unreachable commit, or any other git failure is
+ * `ok: false`; callers treat it as "cannot prove coverage".
+ */
+export function listChangedPathsBetween(rootDir: string, fromCommit: string, toCommit: string, opts: {gitRunner?: Function} = {}): { ok: true; paths: string[] } | { ok: false; error: string } {
+  if (!COMMIT_ID.test(fromCommit) || !COMMIT_ID.test(toCommit)) {
+    return { ok: false, error: `not a commit id: ${COMMIT_ID.test(fromCommit) ? toCommit : fromCommit}` };
+  }
+  const runner = (opts.gitRunner || git) as Function;
+  const diff = runner(['-C', rootDir, 'diff', '--name-only', '--no-renames', '-z', fromCommit, toCommit, '--']);
+  if (diff.status !== 0) {
+    return { ok: false, error: String(diff.stderr || diff.stdout || `git diff exited ${diff.status}`).trim() };
+  }
+  return { ok: true, paths: String(diff.stdout || '').split('\0').filter(Boolean) };
+}
+
 /**
  * @param {string} slug
  * @param {{baseWorktree?: string, resolveWorktreeFn?: Function, conventionalWorktreePathFn?: Function}} opts
