@@ -4,7 +4,7 @@
 import assert from 'node:assert/strict';
 import test, { describe } from 'node:test';
 import type { SourceFact } from '../../../../src/application/contracts.js';
-import { BoardProjectionBuilder, checkProjectionStaleness, type AgentReadAdapter, type GateReadAdapter, type GitReadAdapter, type MissionReadAdapter, type OperationLogReadAdapter, type ReviewReadAdapter } from '../../../../src/application/projections/board-readers.js';
+import { BoardProjectionBuilder, checkProjectionStaleness, filterCompletedMissions, type AgentReadAdapter, type GateReadAdapter, type GitReadAdapter, type MissionReadAdapter, type OperationLogReadAdapter, type ReviewReadAdapter } from '../../../../src/application/projections/board-readers.js';
 import type { MissionReadAdapter, ReviewReadAdapter, GateReadAdapter, AgentReadAdapter, GitReadAdapter, OperationLogReadAdapter, BoardProjectionOptions } from '../../../../src/application/projections/board-readers.js';
 import type { CurrentWorkReadAdapter, ProcessLivenessProbe } from '../../../../src/application/projections/current-work.js';
 import type { MetricsReadAdapter } from '../../../../src/application/projections/metrics-read-adapter.js';
@@ -14,6 +14,7 @@ import type { AgentAvailability, AgentFamily } from '../../../../src/domain/agen
 import { missionId, missionLabels, type Mission } from '../../../../src/domain/mission.js';
 import type { Mission, MissionId, MissionStatus } from '../../../../src/domain/mission.js';
 import { repositoryId } from '../../../../src/domain/repository.js';
+import { buildBoardMetrics } from '../../../../src/application/projections/board.js';
 import type { RepositoryId } from '../../../../src/domain/repository.js';
 import { changeRevision, reviewFindingId, type Review, type ReviewRound } from '../../../../src/domain/review.js';
 
@@ -94,6 +95,48 @@ test('BoardProjectionBuilder builds projection with repository identity and stag
   assert.equal(projection.stages.length, 6);
   assert.equal(projection.stages.find((s) => s.lane === 'active')?.count, 1);
   assert.equal(projection.stages.find((s) => s.lane === 'backlog')?.count, 1);
+});
+
+test('completed-mission retention keeps the preceding seven days and preserves unknown closure timestamps (TASK-2645)', () => {
+  const now = Date.parse('2026-10-04T12:00:00.000Z');
+  const done = (id: string, closedAt: string) => ({
+    id: missionId(id), repositoryId: repo, title: id, labels: missionLabels([]),
+    status: 'done' as const, closedAt, assignee: null, checkpoints: [], review: null, netEngineeringLines: null,
+  });
+  const visible = filterCompletedMissions([
+    done('task-recent', '2026-09-27T12:00:00.000Z'),
+    done('task-old', '2026-09-27T11:59:59.999Z'),
+    done('task-unknown-date', 'not-a-date'),
+    { id: missionId('task-active'), repositoryId: repo, title: 'active', labels: missionLabels([]), status: 'active' as const, closedAt: null, assignee: null, checkpoints: [], review: null, netEngineeringLines: null },
+  ], 7, now);
+  assert.deepEqual(visible.map(mission => mission.id), [missionId('task-recent'), missionId('task-unknown-date'), missionId('task-active')]);
+});
+
+test('BoardProjectionBuilder applies its configured completed-mission retention before dependent reads (TASK-2645)', async () => {
+  const recent = { id: missionId('task-recent'), repositoryId: repo, title: 'recent', labels: missionLabels([]), status: 'done' as const, closedAt: '2026-09-28T12:00:00.000Z', assignee: null, checkpoints: [], review: null, netEngineeringLines: null };
+  const old = { id: missionId('task-old'), repositoryId: repo, title: 'old', labels: missionLabels([]), status: 'done' as const, closedAt: '2026-09-20T12:00:00.000Z', assignee: null, checkpoints: [], review: null, netEngineeringLines: null };
+  let reviewed: readonly string[] = [];
+  let metricStates: readonly string[] = [];
+  const reviews: ReviewReadAdapter = { async loadReviews(ids) { reviewed = ids; return new Map(); } };
+  const projection = await new BoardProjectionBuilder(
+    makeMissionAdapter([recent, old]), reviews, makeGateAdapter(), makeAgentAdapter(), makeGitAdapter(), makeOperationLogAdapter(),
+    {
+      completedMissionRetentionDays: 7,
+      now: () => Date.parse('2026-10-04T12:00:00.000Z'),
+      metricsAdapter: {
+        async buildMetrics(states) {
+          metricStates = [...states.keys()];
+          return buildBoardMetrics({
+            cumulativeFlow: { series: [], missingHistoryFallback: 'skip' }, medianStateTimes: { series: [], missingHistoryFallback: 'skip' },
+            throughput: { series: [], missingHistoryFallback: 'skip' }, reviewBounceRate: { series: [], missingHistoryFallback: 'skip' },
+          });
+        },
+      },
+    },
+  ).build();
+  assert.deepEqual(projection.stages.find(stage => stage.lane === 'done')?.cards.map(card => card.id), [recent.id]);
+  assert.deepEqual(reviewed, [recent.id]);
+  assert.deepEqual(metricStates, [recent.id, old.id], 'retention is a presentation filter, not a metrics filter');
 });
 
 test('BoardProjectionBuilder projects the review loaded by its review adapter', async () => {

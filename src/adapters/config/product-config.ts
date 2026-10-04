@@ -37,6 +37,7 @@ const DEFAULT_CONFIG = Object.freeze({
     verification: { defaultArea: 'docs' },
     review: {},
     agents: {},
+    web: { completedMissionRetentionDays: 7 },
     integrate: {},
     draft: {},
   },
@@ -229,6 +230,7 @@ function validateAdapterSections(adapters: PlainObject, issues: string[]): void 
   validateGithubPublishSection(adapters.githubPublish, issues);
   validateReviewSection(adapters.review, issues);
   validateAgentsSection(adapters.agents, issues);
+  validateWebSection(adapters.web, issues);
 }
 
 function validateTasksSection(section: unknown, issues: string[]): void {
@@ -318,6 +320,14 @@ function validateAgentsSection(section: unknown, issues: string[]): void {
   validateAgentModels(section, issues);
   validateRunnerSelection(section, issues);
   validateSubagents(section, issues);
+}
+
+function validateWebSection(section: unknown, issues: string[]): void {
+  if (!isPlainObject(section)) { return; }
+  if ('completedMissionRetentionDays' in section
+    && (!Number.isInteger(section.completedMissionRetentionDays) || (section.completedMissionRetentionDays as number) < 0)) {
+    issues.push('adapters.web.completedMissionRetentionDays must be a non-negative integer');
+  }
 }
 
 function validateStringField(obj: PlainObject, key: string, label: string, issues: string[]): void {

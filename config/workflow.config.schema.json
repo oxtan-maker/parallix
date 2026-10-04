@@ -72,6 +72,14 @@
             "defaultArea": { "type": "string", "description": "Default verification area." }
           }
         },
+        "web": {
+          "type": "object",
+          "description": "Local web-board presentation settings.",
+          "additionalProperties": true,
+          "properties": {
+            "completedMissionRetentionDays": { "type": "integer", "minimum": 0, "description": "Number of days completed missions remain visible on the web board. Defaults to 7; 0 shows only missions closed at the current instant." }
+          }
+        },
         "gates": {
           "type": "object",
           "description": "Ordered, per-phase lifecycle gate commands. Disabled by default: omit this section (or a phase key) to run no lifecycle gate for that phase. Each phase is an ordered array of gate objects; the array order is the execution order. A gate object has a required string `key`, a required string `command` (a runnable shell command, no trailing prose), an optional numeric `order` (default 0, ascending), and optional `after` gate keys. Each configured command runs in the phase checkout and receives PARALLIX_MISSION_SLUG, PARALLIX_CHECKOUT_PATH, and PARALLIX_PHASE in its environment; a non-zero exit blocks that phase's state transition or merge.",

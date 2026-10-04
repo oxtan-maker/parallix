@@ -20,6 +20,24 @@ Sections not marked as closed below accept extra keys, matching the schema.
 An extra key is not an override: only the fields documented here have an
 effect.
 
+## Web board
+
+The local web board shows open missions and, by default, completed missions
+closed during the preceding seven days. Set
+`adapters.web.completedMissionRetentionDays` to a non-negative integer to
+change that completed-mission visibility window; `0` keeps only missions closed
+at the current instant. The board never hides a completed mission whose closure
+timestamp is unavailable or malformed, so incomplete historical data remains
+visible rather than being silently omitted.
+
+```json
+{
+  "adapters": {
+    "web": { "completedMissionRetentionDays": 14 }
+  }
+}
+```
+
 ## Product
 
 `product.name` is a string, defaulting to `Workflow`. It pre-fills the product

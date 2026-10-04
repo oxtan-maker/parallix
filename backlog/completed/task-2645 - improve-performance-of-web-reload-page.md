@@ -1,8 +1,8 @@
 ---
 id: TASK-2645
 title: improve performance of web reload page
-status: backlog
-assignee: []
+status: done
+assignee: [codex]
 created_date: '2026-10-04 09:43'
 labels: []
 dependencies: []

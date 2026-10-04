@@ -30,6 +30,7 @@ import type { MissionStore } from '../application/domain-ports.js';
 import type { CurrentWorkPort } from '../application/recording/current-work-recorder.js';
 import type { SqliteDatabaseAdapter } from '../adapters/sqlite/database-adapter.js';
 import { SqliteReviewProjectionReader } from '../adapters/sqlite/review-projection-reader.js';
+import { loadEffectiveConfig } from '../adapters/config/product-config.js';
 
 export interface BoardProjectionCompositionDeps {
   readonly rootDir: string;
@@ -97,6 +98,7 @@ export function composeBoardProjection(deps: BoardProjectionCompositionDeps) {
     return title ? { ...mission, title } : mission;
   }
   const currentWork = new ConcreteCurrentWorkReadAdapter(deps.historyRepo);
+  const completedMissionRetentionDays = loadEffectiveConfig(deps.rootDir).adapters.web.completedMissionRetentionDays;
   const gates = new ConcreteGateReadAdapter({ rootDir: deps.rootDir });
   const builder = new BoardProjectionBuilder(
     missions,
@@ -139,6 +141,7 @@ export function composeBoardProjection(deps: BoardProjectionCompositionDeps) {
       currentWork,
       isProcessAlive: processLivenessProbe,
       changeIdentity: createGitChangeIdentity(deps.rootDir, deps.gitFn ?? undefined),
+      completedMissionRetentionDays,
       metricsAdapter: new ConcreteMetricsReadAdapter({
         laneEventRepo: deps.laneEventRepo,
         usageRepo: deps.usageRepo,

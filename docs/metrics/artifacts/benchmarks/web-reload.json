@@ -1,0 +1,43 @@
+{
+  "schemaVersion": 1,
+  "generatedAt": "2026-10-04T16:48:02.922Z",
+  "environment": {
+    "os": "linux 6.18.5+deb14-amd64",
+    "node": "v24.21.0",
+    "cpu": "AMD Ryzen 7 3700X 8-Core Processor"
+  },
+  "scenario": "GET /, packaged module asset, then GET /api/board over the composed projection builder and seeded SQLite operator state",
+  "fixture": {
+    "missions": 120,
+    "completedMissions": 10,
+    "warmups": 3,
+    "samples": 20
+  },
+  "thresholdMs": 200,
+  "summary": {
+    "samplesMs": [
+      133.109167,
+      156.114025,
+      136.726475,
+      157.755026,
+      131.76704,
+      129.523219,
+      130.270536,
+      126.857415,
+      121.641853,
+      117.17306,
+      258.108333,
+      135.812231,
+      121.506795,
+      119.711836,
+      122.013497,
+      123.365355,
+      132.37904,
+      117.73177,
+      123.235847,
+      125.550457
+    ],
+    "medianMs": 129.523219,
+    "p95Ms": 157.755026
+  }
+}

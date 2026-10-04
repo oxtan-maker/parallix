@@ -113,6 +113,14 @@ test('validateWorkflowConfig accepts a null maxPollAttempts and rejects an unkno
   assert.ok(issues.some(i => i.includes('review.provider')));
 });
 
+test('validateWorkflowConfig accepts a completed-mission retention window and rejects invalid values (TASK-2645)', () => {
+  assert.deepEqual(validateWorkflowConfig({ adapters: { web: { completedMissionRetentionDays: 14 } } }), []);
+  for (const value of [-1, 1.5, 'seven']) {
+    assert.ok(validateWorkflowConfig({ adapters: { web: { completedMissionRetentionDays: value } } })
+      .some(issue => issue.includes('completedMissionRetentionDays')));
+  }
+});
+
 test('validateWorkflowConfig flags invalid agents fields across every validator', () => {
   const issues = validateWorkflowConfig({
     adapters: {

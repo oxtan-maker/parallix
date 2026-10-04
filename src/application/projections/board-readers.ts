@@ -114,6 +114,8 @@ export interface BoardProjectionOptions {
   currentWorkTtlMs?: number;
   /** Clock seam; defaults to the wall clock. */
   now?: () => number;
+  /** Number of days completed missions remain visible on the board. */
+  completedMissionRetentionDays?: number;
   /**
    * Reads what a mission branch would land, to tell whether its approval still
    * covers it (TASK-2555). Omitted means only a recorded branch move is shown.
@@ -123,6 +125,24 @@ export interface BoardProjectionOptions {
 
 /** A mission that published no current-work fact at all. */
 const NO_CURRENT_WORK: CurrentWorkFacts = { currentWork: null, blockingReason: null };
+
+/**
+ * Keep every open mission and only the completed missions within the configured
+ * retention window. A missing or malformed historical closure timestamp stays
+ * visible: hiding it would turn incomplete authority data into an omission.
+ */
+export function filterCompletedMissions(
+  missions: readonly Mission[],
+  retentionDays: number,
+  nowMs: number,
+): readonly Mission[] {
+  const cutoffMs = nowMs - retentionDays * 24 * 60 * 60 * 1_000;
+  return missions.filter((mission) => {
+    if (!isClosedMission(mission)) { return true; }
+    const closedAtMs = Date.parse(mission.closedAt);
+    return Number.isNaN(closedAtMs) || closedAtMs >= cutoffMs;
+  });
+}
 
 /**
  * Builds a BoardProjection by reading from multiple authority adapters.
@@ -153,7 +173,12 @@ export class BoardProjectionBuilder {
     ]);
 
     const sourceFacts = this._missions.getSourceFacts();
-    const reviews = await this._reviews.loadReviews(missions.map((mission) => mission.id));
+    const visibleMissions = filterCompletedMissions(
+      missions,
+      this._options?.completedMissionRetentionDays ?? 7,
+      (this._options?.now ?? Date.now)(),
+    );
+    const reviews = await this._reviews.loadReviews(visibleMissions.map((mission) => mission.id));
 
     // The authoritative answer to "what is being worked on right now?". It is
     // reconciled once per build so every card sees the same clock reading.
@@ -171,7 +196,7 @@ export class BoardProjectionBuilder {
     );
 
     // Build mission cards with operational facts
-    const cards = await Promise.all(missions.map(async (mission) => this.composeCard(
+    const cards = await Promise.all(visibleMissions.map(async (mission) => this.composeCard(
       mission,
       reviews.get(mission.id) ?? { review: null, approval: null },
       await this._gates.loadGateStatus(mission.id),
