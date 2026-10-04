@@ -223,3 +223,13 @@ function classifyGateOrArtifactFailure(errorMsg: string): { failureClass: Failur
   if (errorMsg.includes('even after auto-remediation') || errorMsg.includes('No checkpoint documents found in ') || /mandatory\s+(artifact|file|document)|missing\s+(mission\s+)?(artifact|file|document)|required\s+(artifact|file|document)\s+(not\s+)?found/i.test(errorMsg) || /gatekeeper/i.test(errorMsg) && /missing\s+(artifact|file|document)/i.test(errorMsg)) {return { failureClass: FailureClass.MissingArtifacts, dispatchAction: DispatchAction.AutoSendBack };}
   return null;
 }
+
+/**
+ * Classification of artifact publication/persistence diagnostics. Keep this
+ * operation-specific rule distinct from the general diagnostic classifier:
+ * the legacy artifact boundary recognizes only these case-sensitive markers.
+ */
+export function isArtifactInfraDiagnostic(diagnostic: string | undefined | null): boolean {
+  if (!diagnostic) { return false; }
+  return diagnostic.includes('post failed') || diagnostic.includes('persist failed');
+}

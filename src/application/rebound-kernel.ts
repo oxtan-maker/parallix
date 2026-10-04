@@ -42,6 +42,10 @@ import {
   type FailureClassType,
 } from './failure-classification.js';
 
+// Artifact-boundary classification shares the application classifier.
+// The kernel's structured-reason classification retains its existing semantics.
+export { isArtifactInfraDiagnostic } from './failure-classification.js';
+
 /** Default per-occurrence attempt budget. */
 export const DEFAULT_REBOUND_ATTEMPTS = 2;
 

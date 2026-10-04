@@ -8,10 +8,10 @@ import path from 'path';
 import {
   consumeReviewerArtifacts,
   consumeImplementerArtifacts,
-  dispatchArtifactFailure,
-  ARTIFACT_REBOUND_ATTEMPTS,
   isArtifactInfraDiagnostic,
 } from '../src/adapters/review/review-artifacts.js';
+import { dispatchArtifactFailure, artifactRecoveryRequiresHuman, type ArtifactDispatchResult } from '../src/application/review-artifact-recovery.js';
+import { DEFAULT_REBOUND_ATTEMPTS } from '../src/application/rebound-kernel.js';
 import { mkdtemp as registeredMkdtemp } from './helpers/temp-dir.js';
 
 // ============================================================================
@@ -244,6 +244,7 @@ function dispatcherOptions(overrides = {}) {
     slug: 'test-slug',
     worktree: '/mock/worktree',
     agent: 'codex',
+    readHead: () => null,
     startAgentFn: async () => ({ agent: 'codex', result: { status: 0 } }),
     log: () => {},
     error: () => {},
@@ -262,7 +263,7 @@ test('dispatchArtifactFailure reports fixed only when the re-consumed reviewer a
   assert.equal(result.action, 'fixed');
   assert.equal(result.role, 'reviewer');
   assert.equal(result.attempts, 1);
-  assert.equal(result.maxAttempts, ARTIFACT_REBOUND_ATTEMPTS);
+  assert.equal(result.maxAttempts, DEFAULT_REBOUND_ATTEMPTS);
   assert.equal(launches, 1);
   assert.equal(verifies, 1, 'the artifacts must be re-consumed before reporting fixed');
 });
@@ -295,8 +296,8 @@ test('dispatchArtifactFailure strands with the last diagnostic when the occurren
   }));
 
   assert.equal(result.action, 'strand');
-  assert.equal(result.attempts, ARTIFACT_REBOUND_ATTEMPTS);
-  assert.equal(launches, ARTIFACT_REBOUND_ATTEMPTS, 'no third launch after the budget is spent');
+  assert.equal(result.attempts, DEFAULT_REBOUND_ATTEMPTS);
+  assert.equal(launches, DEFAULT_REBOUND_ATTEMPTS, 'no third launch after the budget is spent');
   assert.match(result.diagnostic, /still missing verdict/);
 });
 
@@ -315,7 +316,7 @@ test('dispatchArtifactFailure gives every occurrence a fresh budget (no persiste
 
   assert.equal(first.outcome.action, 'strand');
   assert.equal(second.outcome.action, 'strand');
-  assert.equal(second.launches, ARTIFACT_REBOUND_ATTEMPTS,
+  assert.equal(second.launches, DEFAULT_REBOUND_ATTEMPTS,
     'the second occurrence starts with a full budget: nothing carries over');
 });
 
@@ -428,5 +429,46 @@ test('isArtifactInfraDiagnostic gates infra failures from artifact dispatcher', 
 
   for (const diag of artifactDiagnostics) {
     assert.equal(isArtifactInfraDiagnostic(diag), false, `should NOT classify as infra: ${diag}`);
+  }
+});
+
+
+test('artifact recovery preserves role-specific post-bounce classification (TASK-2637.02)', () => {
+  const result: ArtifactDispatchResult = {
+    role: 'reviewer', action: 'strand', diagnostic: 'artifact persist failed: DB unavailable',
+    attempts: 2, maxAttempts: 2, agent: 'codex',
+  };
+  assert.equal(artifactRecoveryRequiresHuman(result), false);
+  assert.equal(artifactRecoveryRequiresHuman({ ...result, role: 'implementer' }), true);
+  for (const role of ['reviewer', 'implementer'] as const) {
+    assert.equal(artifactRecoveryRequiresHuman({ ...result, role, action: 'human-only' }), true);
+    assert.equal(artifactRecoveryRequiresHuman({ ...result, role, diagnostic: 'still missing artifacts' }), false);
+  }
+});
+
+test('artifact recovery retains kernel outcomes and attempt accounting on fresh infrastructure diagnostics (TASK-2637.02)', async () => {
+  for (const role of ['reviewer', 'implementer'] as const) {
+    for (const [diagnostic, expectedAttempts] of [
+      ['artifact persist failed: DB unavailable', 2],
+      ['Forgejo infrastructure unavailable', 1],
+    ] as const) {
+      let launches = 0;
+      const result = await dispatchArtifactFailure(role, 'missing artifacts', dispatcherOptions({
+        startAgentFn: async () => { launches++; return { agent: 'codex', result: { status: 0 } }; },
+        verifyFn: () => ({ ok: false, diagnostic }),
+      }));
+      assert.equal(result.action, 'strand');
+      assert.equal(result.diagnostic, diagnostic);
+      assert.equal(result.attempts, expectedAttempts);
+      assert.equal(launches, expectedAttempts);
+    }
+    let launches = 0;
+    const result = await dispatchArtifactFailure(role, 'Forgejo infrastructure unavailable', dispatcherOptions({
+      startAgentFn: async () => { launches++; return { agent: 'codex', result: { status: 0 } }; },
+      verifyFn: () => ({ ok: true }),
+    }));
+    assert.equal(result.action, 'human-only');
+    assert.equal(result.attempts, 0);
+    assert.equal(launches, 0);
   }
 });

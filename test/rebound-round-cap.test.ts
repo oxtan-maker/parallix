@@ -13,6 +13,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { mockModule, installModuleMocks } from './lib/module-mock.js';
+import { ReviewRoundRecoveryBudget } from '../src/application/review-artifact-recovery.js';
 import { mkdtemp as registeredMkdtemp } from './helpers/temp-dir.js';
 const startReviewLoopModule = mockModule<typeof import('../src/adapters/review/review-loop.js')>('../src/adapters/review/review-loop.js', import.meta.url);
 await installModuleMocks();
@@ -138,6 +139,54 @@ test('task-2377.04: a round under the per-round cap is unaffected and keeps the 
   assert.ok(!errors.some((line) => line.includes('Per-round relaunch cap reached')), 'no cap diagnostic below the cap');
 });
 
+test('artifact infrastructure stops the reviewer before an artifact rebound (TASK-2637.02)', async () => {
+  const { events, stops, run } = runLoop({
+    consumeReviewerArtifactsFn: async () => incomplete('Reviewer artifact persist failed (findings): DB unavailable'),
+  });
+
+  await run();
+
+  assert.deepEqual(stops, ['REVIEWER_ARTIFACT_INFRA_FAILURE']);
+  assert.equal(events.filter((event) => event === 'review:reviewer').length, 1,
+    'only the normal reviewer launch occurs; infrastructure never enters the rebound occurrence');
+});
+
+test('reviewer recovery preserves exhaustion after a post-bounce persist failure (TASK-2637.02)', async () => {
+  let consumed = 0;
+  const { events, stops, run } = runLoop({
+    consumeReviewerArtifactsFn: async () => {
+      consumed++;
+      return incomplete(consumed === 1
+        ? 'Reviewer artifacts incomplete: missing findings'
+        : 'Reviewer artifact persist failed (findings): DB unavailable');
+    },
+  });
+
+  await run();
+
+  assert.equal(consumed, 3, 'initial consumption plus both occurrence attempts');
+  assert.equal(events.filter(event => event === 'review:reviewer').length, 3);
+  assert.deepEqual(stops, ['REVIEWER_ARTIFACT_RETRY_EXHAUSTED']);
+});
+
+test('implementer recovery reclassifies an infrastructure diagnostic returned after a bounce (TASK-2637.02)', async () => {
+  const implementerArtifacts = [
+    incomplete('Implementer artifacts incomplete: missing disposition'),
+    incomplete('Implementer artifacts incomplete: still missing disposition'),
+    incomplete('Implementer artifact persist failed (disposition): DB unavailable'),
+  ];
+  const { stops, run } = runLoop({
+    consumeReviewerArtifactsFn: async () => complete('REQUEST_CHANGES'),
+    consumeImplementerArtifactsFn: async () => implementerArtifacts.shift() ?? incomplete('Implementer artifact persist failed (disposition): DB unavailable'),
+    startAgentFn: async (_step: string, opts: Record<string, unknown>) => ({ agent: opts.agent, result: { status: 0 } }),
+  });
+
+  await run();
+
+  assert.deepEqual(stops, ['IMPLEMENTER_ARTIFACT_INFRA_FAILURE'],
+    'the implementer path overrides a stranded artifact result when its verify diagnostic is infrastructure');
+});
+
 test('task-2377.04: the per-round relaunch counter resets when the next round starts (SC4)', async () => {
   const cap = 3;
   const results = [
@@ -189,4 +238,25 @@ test('task-2377.04: an exhausted artifact occurrence gets a fresh per-occurrence
   const secondBounce = second.events.filter((event) => event === 'review:reviewer').length - 1;
   assert.equal(secondBounce, 2, 'the later same-kind occurrence gets a fresh budget of 2 — no cumulative carryover');
   assert.deepEqual(second.stops, ['REVIEWER_ARTIFACT_RETRY_EXHAUSTED'], 'the resumed occurrence strands on the per-kind reason');
+});
+
+
+test('round recovery budget preserves clamping, consumption and unbounded configuration (TASK-2637.02)', () => {
+  const budget = new ReviewRoundRecoveryBudget(3);
+  assert.equal(budget.attemptLimit(), 2);
+  budget.consume(2);
+  assert.equal(budget.remaining(), 1);
+  assert.equal(budget.attemptLimit(), 1);
+  assert.equal(budget.reached(), false);
+  budget.consume(1);
+  assert.equal(budget.remaining(), 0);
+  assert.equal(budget.attemptLimit(), 0);
+  assert.equal(budget.reached(), true);
+  assert.equal(new ReviewRoundRecoveryBudget(3).used, 0);
+  assert.equal(new ReviewRoundRecoveryBudget(0).reached(), true);
+  const unbounded = new ReviewRoundRecoveryBudget(-1);
+  unbounded.consume(20);
+  assert.equal(unbounded.remaining(), Infinity);
+  assert.equal(unbounded.attemptLimit(), 2);
+  assert.equal(unbounded.reached(), false);
 });
