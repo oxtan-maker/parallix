@@ -1,6 +1,6 @@
 {
   "name": "@magnusekdahl/parallix",
-  "version": "1.5.265",
+  "version": "1.5.266",
   "description": "Trust ladder for AI coding work — separate review, configured verification, conditional Linux confinement, and human-owned merges",
   "license": "AGPL-3.0-or-later",
   "private": false,
@@ -41,7 +41,7 @@
   "scripts": {
     "build": "npm run bundle",
     "prepare": "node scripts/repair-pi-brace-expansion.mjs",
-    "build:web": "vite build --config web/vite.config.ts",
+    "build:web": "node scripts/run-build-web.mjs",
     "bundle": "tsx scripts/build-canonical-bundle.ts",
     "dev": "tsx src/entry/px.ts",
     "dev:web": "vite --config web/vite.config.ts",
@@ -84,24 +84,24 @@
   },
   "devDependencies": {
     "@earendil-works/pi-coding-agent": "^0.87.1",
-    "@types/node": "^26.0.1",
+    "@types/node": "^26.6.2",
     "@types/react": "^19.2.14",
     "@typescript-eslint/eslint-plugin": "^8.62.1",
     "@typescript-eslint/parser": "^8.62.1",
     "brace-expansion": "5.0.12",
     "esbuild": "^0.25.12",
     "eslint": "^9.39.4",
-    "fast-uri": "^3.1.6",
+    "fast-uri": "^4.2.1",
     "fastify": "^5.12.1",
     "happy-dom": "^20.14.5",
     "ink": "^6.8.0",
     "postject": "^1.0.0-alpha.6",
-    "react": "^19.2.3",
-    "react-dom": "^19.2.8",
+    "react": "^19.3.0",
+    "react-dom": "^19.3.0",
     "sonar-scanner": "3.1.0",
     "tsx": "4.20.6",
     "typescript": "^5.9.3",
-    "vite": "^7.3.6"
+    "vite": "^8.3.0"
   },
   "overrides": {
     "@earendil-works/pi-coding-agent": {

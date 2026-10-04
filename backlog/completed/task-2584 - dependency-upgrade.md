@@ -1,8 +1,8 @@
 ---
 id: TASK-2584
 title: dependency upgrade
-status: backlog
-assignee: []
+status: done
+assignee: [custom]
 created_date: '2026-09-26 11:19'
 labels: []
 dependencies: []

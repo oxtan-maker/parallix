@@ -9,6 +9,7 @@ import { fileURLToPath } from 'node:url';
 import * as esbuild from 'esbuild';
 import { generateReleaseMetadata } from './release-metadata.ts';
 import { isBuildLockAbandoned } from './build-lock.ts';
+import { writeWebManifest } from './web-manifest.mjs';
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(scriptDir, '..');
@@ -245,39 +246,11 @@ const webAssetsDir = path.join(buildDir, 'web');
 if (!fs.existsSync(path.join(webAssetsDir, 'index.html'))) {
   throw new Error('build/web/index.html missing after the build:web step');
 }
-const WEB_CONTENT_TYPES: Array<[RegExp, string]> = [
-  [/\.html?$/, 'text/html; charset=utf-8'],
-  [/\.m?js$/, 'text/javascript'],
-  [/\.css$/, 'text/css'],
-  [/\.map$/, 'application/json'],
-  [/\.svg$/, 'image/svg+xml'],
-  [/\.png$/, 'image/png'],
-  [/\.ico$/, 'image/x-icon'],
-  [/\.woff2$/, 'font/woff2'],
-];
-function webContentType(file: string): string {
-  for (const [pattern, type] of WEB_CONTENT_TYPES) { if (pattern.test(file)) { return type; } }
-  return 'application/octet-stream';
-}
-function collectWebFiles(dir: string, relative = ''): string[] {
-  return fs.readdirSync(path.join(dir, relative), { withFileTypes: true }).flatMap(entry => {
-    const child = relative ? path.posix.join(relative, entry.name) : entry.name;
-    return entry.isDirectory() ? collectWebFiles(dir, child) : [child];
-  });
-}
-const webFiles: Record<string, { size: number; sha256: string; contentType: string }> = {};
-for (const relativeFile of collectWebFiles(webAssetsDir).sort()) {
-  const contents = fs.readFileSync(path.join(webAssetsDir, relativeFile));
-  webFiles[relativeFile] = {
-    size: contents.length,
-    sha256: crypto.createHash('sha256').update(contents).digest('hex'),
-    contentType: webContentType(relativeFile),
-  };
-}
-fs.writeFileSync(
-  path.join(buildDir, 'web', 'manifest.json'),
-  `${JSON.stringify({ version: 1, files: webFiles }, null, 2)}\n`,
-);
+// build:web writes its own manifest.json into the staging tree; drop it here so
+// the canonical manifest is recomputed from the assets only and never lists a
+// stale digest of its own previous contents.
+fs.rmSync(path.join(webAssetsDir, 'manifest.json'), { force: true });
+writeWebManifest(webAssetsDir);
 
 // NOTICES and build/sbom.json are written before the checksum manifest so that
 // manifest.sha256 covers the SBOM as well as the bundle and staged assets.
