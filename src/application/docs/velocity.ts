@@ -19,9 +19,23 @@ export function weeklyComparableOutcomes(outcomes: readonly MissionOutcome[], no
 
 export function assertVelocitySnapshot(snapshot: any): void {
   if (snapshot?.metric?.classification !== 'all') { throw new Error('Velocity snapshot must include all mission classifications.'); }
-  if (snapshot?.manualBaseline?.kind !== 'aggregate-rate' || !Number.isFinite(snapshot?.manualBaseline?.unitsPerWeek)) { throw new Error('Velocity snapshot must contain an aggregate manual baseline rate.'); }
+  const baseline = snapshot?.manualBaseline;
+  if (baseline?.kind !== 'aggregate-rate' || !Number.isFinite(baseline?.unitsPerWeek)) { throw new Error('Velocity snapshot must contain an aggregate manual baseline rate.'); }
+  const count = baseline?.observations?.count, days = baseline?.observationPeriod?.days;
+  if (!Number.isInteger(count) || count <= 0 || !Number.isInteger(days) || days <= 0) { throw new Error('Velocity baseline must contain positive observation count and days.'); }
+  const derivedRate = count / days * 7;
+  if (Math.abs(baseline.unitsPerWeek - derivedRate) > Number.EPSILON) { throw new Error(`Velocity baseline rate must equal observations.count / observationPeriod.days * 7 (${derivedRate}).`); }
+  const evidencePath = baseline?.source?.path;
+  if (typeof evidencePath !== 'string' || !evidencePath.startsWith('docs/') || evidencePath.split('/').includes('..')) { throw new Error('Velocity baseline must reference a retained public evidence path.'); }
+  if (snapshot?.metric?.week?.currentPartialWeek !== 'excluded') { throw new Error('Velocity snapshot must exclude the current partial week.'); }
   if (!Array.isArray(snapshot?.parallix?.weeks)) { throw new Error('Velocity snapshot must contain weekly Parallix outcomes.'); }
   for (const week of snapshot.parallix.weeks) { if (!/^\d{4}-\d{2}-\d{2}$/.test(week.weekOf) || !Number.isInteger(week.completedCount) || week.completedCount < 0) { throw new Error('Velocity snapshot contains an invalid weekly outcome.'); } }
+}
+
+/** The exporter reports ambiguous completed work instead of silently counting it. */
+export function assertVelocityOutcomesAreUnambiguous(outcomes: readonly MissionOutcome[]): void {
+  const unknown = outcomes.filter(outcome => outcome.labels.some(label => label === 'unknown')).map(outcome => outcome.missionId);
+  if (unknown.length > 0) { throw new Error(`Velocity export cannot publish completed missions with unresolved classification: ${unknown.join(', ')}.`); }
 }
 const esc = (value: unknown) => String(value).replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[char]!));
 

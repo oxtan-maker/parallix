@@ -3,8 +3,8 @@ id: TASK-2648
 title: >-
   Make the README velocity evidence independently auditable without complicating
   the graph
-status: backlog
-assignee: []
+status: done
+assignee: [codex]
 created_date: '2026-10-04 15:11'
 labels: []
 dependencies: []

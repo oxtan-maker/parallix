@@ -35,9 +35,9 @@ The main reason to use coding agents is leverage: while one agent is working, an
 
 Parallix is a mission-based development workflow that addresses each of these directly so parallel agents can translate into actual delivery throughput. The mechanics live in tested code rather than in prompts. It is not another agent or model — it is the operator-owned layer around the agents you already use.
 
-![Observed one-maintainer dogfooding throughput: all completed Parallix missions per full UTC ISO week, with a manual proxy of 2 missions/week.](https://raw.githubusercontent.com/oxtan-maker/parallix/main/docs/assets/velocity-throughput.svg)
+![Observed one-maintainer dogfooding throughput: all completed Parallix missions per full UTC ISO week, with a historical baseline of approximately 2 delivery units/week.](https://raw.githubusercontent.com/oxtan-maker/parallix/main/docs/assets/velocity-throughput.svg)
 
-Observed one-maintainer dogfooding throughput. The [methodology](docs/metrics/velocity/README.md) defines the mission population, historical manual reference, and limitations.
+Observed one-maintainer dogfooding throughput. The [methodology and evidence](docs/metrics/velocity/README.md) define the mission population, historical reference, and limitations.
 
 ## What it does
 

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import test from 'node:test';
-import { assertVelocitySnapshot, renderVelocitySvg, weeklyComparableOutcomes } from '../../../../src/application/docs/velocity.js';
+import { assertVelocityOutcomesAreUnambiguous, assertVelocitySnapshot, renderVelocitySvg, weeklyComparableOutcomes } from '../../../../src/application/docs/velocity.js';
 
 const outcome = (closedAt: string, labels = ['user_value']) => ({ closedAt, labels }) as any;
 
@@ -16,13 +16,19 @@ test('weeklyComparableOutcomes includes all delivered work as requested by opera
 });
 
 test('velocity rendering is deterministic and rejects malformed snapshots', () => {
-  const snapshot = { metric: { classification: 'all' }, manualBaseline: { kind: 'aggregate-rate', unitsPerWeek: 1.96875 }, parallix: { weeks: [{ weekOf: '2026-09-21', completedCount: 1 }] } };
+  const snapshot = JSON.parse(fs.readFileSync('docs/metrics/velocity/weekly.json', 'utf8'));
   assert.equal(renderVelocitySvg(snapshot), renderVelocitySvg(snapshot));
   assert.throws(() => assertVelocitySnapshot({ ...snapshot, metric: { classification: 'user_value' } }));
   assert.match(renderVelocitySvg(snapshot), /Manual proxy: 2 missions\/week/);
   assert.doesNotMatch(renderVelocitySvg(snapshot), /1\.96875/);
   assert.equal(snapshot.manualBaseline.unitsPerWeek, 1.96875);
+  assert.throws(() => assertVelocitySnapshot({ ...snapshot, manualBaseline: { ...snapshot.manualBaseline, unitsPerWeek: 2 } }));
   assert.throws(() => assertVelocitySnapshot({ ...snapshot, parallix: { weeks: [{ weekOf: 'bad', completedCount: -1 }] } }));
+});
+
+test('velocity export rejects an explicit unknown completed-mission classification', () => {
+  assert.throws(() => assertVelocityOutcomesAreUnambiguous([outcome('2026-09-21T12:00:00Z', ['unknown'])]), /unresolved classification/);
+  assert.doesNotThrow(() => assertVelocityOutcomesAreUnambiguous([outcome('2026-09-21T12:00:00Z', ['user_value'])]));
 });
 
 test('README image contracts use raw GitHub assets that exist locally', () => {
@@ -31,5 +37,5 @@ test('README image contracts use raw GitHub assets that exist locally', () => {
     assert.match(readme, new RegExp(`https://raw\\.githubusercontent\\.com/oxtan-maker/parallix/main/docs/assets/${asset}`));
     assert.ok(fs.existsSync(`docs/assets/${asset}`));
   }
-  assert.match(readme, /all completed Parallix missions per full UTC ISO week, with a manual proxy of 2 missions\/week/);
+  assert.match(readme, /historical baseline of approximately 2 delivery units\/week/);
 });

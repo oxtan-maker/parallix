@@ -14,11 +14,10 @@
     "kind": "aggregate-rate",
     "label": "Manual coding aggregate baseline",
     "source": {
-      "type": "retained-git-document",
-      "commit": "ba7d445e246bec73c65762da23ae266657eecf73",
-      "path": "docs/missions/2026/ai-workflow-retrospective-since-october/RETROSPECTIVE.md",
-      "section": "Section 2.1 / H0",
-      "reproduce": "git show ba7d445e246bec73c65762da23ae266657eecf73:docs/missions/2026/ai-workflow-retrospective-since-october/RETROSPECTIVE.md"
+      "type": "retained-repository-evidence",
+      "path": "docs/metrics/velocity/historical-baseline.md",
+      "originalContext": "AI Workflow Retrospective — October 2025 to March 2026, Section 2.1 / H0; generated 2026-03-28 on mission/ai-workflow-retrospective-since-october",
+      "originalCommit": "ba7d445e246bec73c65762da23ae266657eecf73"
     },
     "observationPeriod": {
       "startedOn": "2022-08-16",
