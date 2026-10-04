@@ -6,6 +6,7 @@ title: >-
 status: backlog
 assignee: []
 created_date: '2026-10-04 10:43'
+updated_date: '2026-10-04 10:43'
 labels:
   - bug
   - integration
@@ -54,13 +55,15 @@ If the only difference between the validated commit and the finalized integratio
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 #1 A focused reproduction in the owning validation-marker / integration-gate suite is red on main: a marker at commit A, followed by a commit that only touches backlog/ task files, results in the full gate set running
-- [ ] #2 #2 With the fix, the same scenario skips the whitelisted hooks and logs which hooks were skipped and at which validated sha
-- [ ] #3 #3 A finalized commit whose diff from the marker sha touches any non-bookkeeping path (src, test, config, workflow.config.json) still runs the full configured suite
-- [ ] #4 #4 A rebase onto a main that advanced only by bookkeeping commits still honours the marker; a rebase that brings in non-bookkeeping changes does not
-- [ ] #5 #5 Missing marker, unreadable history, unreachable marker sha, or a git diff error all fall back to the full suite
-- [ ] #6 #6 The bookkeeping-path definition is a single named, repository-general rule (not a slug, branch, or repo check), and the misleading missionHeadSha comment in integrate-workflow.ts is corrected
+- [ ] #1 A focused reproduction in the owning validation-marker / integration-gate suite is red on main: a marker at commit A, followed by a commit that only touches backlog/ task files, results in the full gate set running
+- [ ] #2 With the fix, the same scenario skips the whitelisted hooks and logs which hooks were skipped and at which validated sha
+- [ ] #3 A finalized commit whose diff from the marker sha touches any non-bookkeeping path (src, test, config, workflow.config.json) still runs the full configured suite
+- [ ] #4 A rebase onto a main that advanced only by bookkeeping commits still honours the marker; a rebase that brings in non-bookkeeping changes does not
+- [ ] #5 Missing marker, unreadable history, unreachable marker sha, or a git diff error all fall back to the full suite
+- [ ] #6 The bookkeeping-path definition is a single named, repository-general rule (not a slug, branch, or repo check), and the misleading missionHeadSha comment in integrate-workflow.ts is corrected
 <!-- AC:END -->
+
+
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
