@@ -4,17 +4,17 @@
 
 Adapters implement application-owned ports or provide concrete mechanisms used
 by composition. The guards in `src/adapters/architecture/boundary-guards.ts`
-classify every production module by location and then check four specific
+classify every production module by location and then check five specific
 things, listed in full under "Enforced rules" below: that the module sits in a
 canonical root, that each cross-adapter import matches a named package rule,
-that it resolves no collaborator by dynamic key lookup, and that it does not
-assemble the complete object graph. Those four bite regardless of where a module
-is moved or renamed to.
+that it resolves no collaborator by dynamic key lookup, that it does not
+assemble the complete object graph, and that a workflow-facing adapter does not
+choose the follow-on workflow action itself. Those five bite regardless of where
+a module is moved or renamed to.
 
 They are not a general test of whether a module owns another layer's
-responsibility. In particular, **an adapter that sequences a multi-integration
-workflow — an application responsibility — is not caught by any of them**; see
-"Known outstanding debt" below.
+responsibility; "Workflow ownership" below states exactly what the fifth rule
+covers and what it deliberately leaves alone.
 
 ## The layer DAG
 
@@ -67,10 +67,7 @@ An adapter that needs behaviour it may not import directly depends on an
 supplies the implementation. The failure diagnostic names that remedy directly.
 
 Naming an edge satisfies the dependency rule but does not grant workflow
-ownership. Workflow sequencing across several integrations remains an
-application responsibility — but no guard currently enforces that, so an adapter
-module that sequences one is caught only in review. See "Known outstanding debt"
-below.
+ownership; see "Workflow ownership" below.
 
 ## Layout
 
@@ -102,6 +99,7 @@ turns that fixture red.
 | `cross-adapter-dependency-not-named` | An import between adapter packages with no named rule | `"cross-adapter guard rejects a prohibited direct import between unnamed adapter packages"`, `"cross-adapter rules name every adapter package and grant no wildcard"` |
 | `hidden-service-location` | Resolving collaborators by dynamic key lookup | `"responsibility guard fails hidden service location in an adapter module"` |
 | `complete-graph-outside-composition` | Building the complete object graph outside `src/composition/application-services.ts` | `"responsibility guard fails complete-graph construction outside the composition root"` |
+| `adapter-owned-workflow-control` | A workflow-facing adapter invoking a workflow-control operation under a branch outside a typed port binding | `"workflow ownership rejects an adapter-owned control loop that selects the follow-on action (TASK-2637.06)"`; accepted bindings: `"workflow ownership accepts an adapter that binds a named typed port and delegates once to its application entry"`, `"workflow ownership accepts a typed port factory and unconditional single delegation"` |
 
 Every diagnostic names the offending file, the failed rule, and the expected
 owner, for example:
@@ -117,39 +115,32 @@ The guards run under the static-analysis workflow and use only `node:fs` and
 `node:path`. They reach no network service, Forgejo instance, agent, or CLI
 process; run them with `npm test -- test/unit/adapters/architecture/dependency-graph.test.ts`.
 
-## Known outstanding debt
+## Workflow ownership
 
-**Multi-integration workflow sequencing under `src/adapters/` is unguarded.**
-The `handoff.ts` and `integrate.ts` command adapters no longer sequence: each
-binds concrete mechanisms to an application-owned port set and delegates to a
-use case under `src/application/`. Other command surfaces — notably
-`review/review-loop.ts` and `cli/commands/active.ts` —
-still combine request handling, rendering and workflow sequencing with concrete
-integrations, and several mechanism packages (`git`, `forgejo`, `verification`,
-`agents`) wire three or more siblings too. Nothing in CI fails on workflow
-ownership itself; the two thinned adapters are guarded only by the line ceiling
-and port-binding assertions in `test/unit/adapters/architecture/dependency-graph.test.ts`. The list of
-enforced rules above is exhaustive: it is what the tree is actually protected
-against, and this axis is not on it.
+An adapter is **workflow-facing** when it value-imports an application entry: a
+module under `src/application/` outside `ports/` and `presentation/`. Such an
+adapter may bind typed application ports and delegate to that entry. It may not
+decide what the workflow does next: invoking a workflow-control operation —
+lifecycle transition, retry, recovery, phase gate, agent launch, or review round,
+named in `workflowControlOperations` — under an `if`, `else`, loop, `catch`,
+ternary, or `&&` fails the rule unless the call sits inside an object literal or
+factory typed as an imported application port. Inside a port binding the
+application entry decides when the operation runs.
 
-A rule did exist. It flagged any adapter module importing three or more distinct
-sibling packages, and it was retired rather than repaired, because **a fan-out
-count cannot distinguish a mechanism from a workflow sequencer** — a host
-mechanism such as `git` legitimately uses three siblings, so the threshold
-reported 23 production modules and its tree-wide assertion could only ever be
-skipped. A permanently skipped guard is not a guard; removing it makes the repo
-claim strictly less than it enforces rather than more. Raising the threshold or
-adding an allowlist would have been worse: both restore the directory-placement
-bypass the rule was meant to close.
+`test/integration/composition/application-boundaries.test.ts` applies the rule to the whole production
+tree. The re-homed review and active workflow adapters satisfy it by binding
+typed ports to their application entries, not through an exception.
 
-Replacing it needs a structural invariant rather than a count — candidates are
-dependence on the `cli` adapter package, dependence on more than one
-*integration* package as opposed to a host mechanism, or constructing
-collaborators rather than receiving them. That invariant can only be enforced
-after the modules it would flag are re-homed into `src/application/`. The
-ports-and-adapters cleanup that performed that re-homing is complete; a future
-structural invariant, if one is adopted, replaces the retired count rather than
-restoring it.
+The rule judges responsibility, not shape, and deliberately excludes:
+
+* **Concrete mechanisms.** An adapter with no application entry — `git`,
+  `forgejo`, `verification`, `agents` and the other host mechanisms — is left to
+  the named package rules however many siblings it uses.
+* **Counts.** There is no sibling-import count, fan-out threshold, allowlist, or
+  per-file exception. A count cannot tell a host mechanism that uses three
+  siblings from a module that sequences a workflow.
+* **Unlisted control.** Sequencing through an operation that is not in
+  `workflowControlOperations` is not detected; review still owns that judgment.
 
 `adapterPackageDependencies` is the enforced host-mechanism design. It does not
 authorize workflow sequencing: that behaviour must cross an application-owned

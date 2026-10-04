@@ -15,6 +15,7 @@ import {
   productionDependencyExceptions,
   findResponsibilityViolations,
   findServiceLocationViolations,
+  findWorkflowOwnershipViolations,
   findUnclassifiedProductionModules,
   formatResponsibilityViolation,
   dependencyLayers,
@@ -314,6 +315,92 @@ test('responsibility guard fails complete-graph construction outside the composi
 
 test('production tree has no hidden service location', () => {
   assert.deepEqual(findServiceLocationViolations(process.cwd()), []);
+});
+
+/* ------------------------------------------------------------------ *
+ * Workflow ownership — workflow-facing adapters bind ports and delegate
+ * ------------------------------------------------------------------ */
+
+/** A workflow-facing adapter fixture with an application entry, a typed port, and real control-operation module paths. */
+function withWorkflowAdapter(body: string, run: (_root: string) => void): void {
+  withTempRoot(root => {
+    writeModule(root, 'src/application/ports/round.ts', 'export interface RoundPort { runRound(_slug: string): Promise<void>; }\n');
+    writeModule(root, 'src/application/round-use-case.ts', 'export class RoundUseCase { constructor(_port: unknown) {} async start(_slug: string) {} }\n');
+    writeModule(root, 'src/adapters/agents/agents.ts', 'export const startAgent = async (..._args: unknown[]) => ({});\n');
+    writeModule(root, 'src/adapters/backlog/backlog.ts', 'export const transitionTask = async (..._args: unknown[]) => true;\n');
+    writeModule(root, 'src/adapters/review/review-loop.ts', 'export const startReviewLoop = async (..._args: unknown[]) => {};\n');
+    writeModule(root, 'src/adapters/review/workflow-adapter.ts', [
+      "import { startAgent } from '../agents/agents.js';",
+      "import { transitionTask as moveTask } from '../backlog/backlog.js';",
+      "import { startReviewLoop } from './review-loop.js';",
+      "import { RoundUseCase } from '../../application/round-use-case.js';",
+      "import type { RoundPort } from '../../application/ports/round.js';",
+      body,
+    ].join('\n'));
+    run(root);
+  });
+}
+
+test('workflow ownership accepts an adapter that binds a named typed port and delegates once to its application entry', () => {
+  withWorkflowAdapter([
+    'export async function review(slug: string, dryRun: boolean) {',
+    '  const port: RoundPort = {',
+    '    runRound: async s => { if (!dryRun) { await startReviewLoop(s); } await moveTask(s, "review"); },',
+    '  };',
+    '  await new RoundUseCase(port).start(slug);',
+    '}',
+    '// if (failed) { startAgent("active"); } is prose, not control flow.',
+  ].join('\n'), root => {
+    assert.deepEqual(findWorkflowOwnershipViolations(root), []);
+  });
+});
+
+test('workflow ownership accepts a typed port factory and unconditional single delegation', () => {
+  withWorkflowAdapter([
+    'export function createRoundPort(): RoundPort {',
+    '  return { runRound: async s => { if (s) { await startAgent("active", { slug: s }); } } };',
+    '}',
+    'export async function relaunch(slug: string) { await startAgent("active", { slug }); }',
+    'export async function start(slug: string) { await new RoundUseCase(createRoundPort()).start(slug); }',
+  ].join('\n'), root => {
+    assert.deepEqual(findWorkflowOwnershipViolations(root), []);
+  });
+});
+
+test('workflow ownership rejects an adapter-owned control loop that selects the follow-on action (TASK-2637.06)', () => {
+  withWorkflowAdapter([
+    'export async function review(slug: string, result: { findings: string[] }) {',
+    '  await new RoundUseCase({}).start(slug);',
+    '  if (result.findings.length) {',
+    '    await startAgent("active", { slug });',
+    '  } else {',
+    '    await moveTask(slug, "review");',
+    '  }',
+    '  for (let attempt = 0; attempt < 3; attempt += 1) { await startReviewLoop(slug); }',
+    '  return result.findings.length ? null : startAgent("review", { slug });',
+    '}',
+  ].join('\n'), root => {
+    const violations = findWorkflowOwnershipViolations(root);
+    assert.deepEqual(violations.map(violation => [violation.file, violation.rule, violation.expectedOwner, violation.actualOwner]),
+      Array(4).fill([path.join('src', 'adapters', 'review', 'workflow-adapter.ts'), 'adapter-owned-workflow-control', 'application', 'adapters']));
+    const details = violations.map(violation => violation.detail).join('\n');
+    for (const control of ['agent-launch operation "startAgent"', 'lifecycle operation "transitionTask"', 'review-round operation "startReviewLoop"']) {
+      assert.match(details, new RegExp(control), `diagnostic must name ${control}`);
+    }
+    assert.match(formatResponsibilityViolation(violations[0]), /workflow-adapter\.ts: rule adapter-owned-workflow-control failed — line 9 selects agent-launch/);
+    assert.deepEqual(findResponsibilityViolations(root).map(violation => violation.rule), Array(4).fill('adapter-owned-workflow-control'));
+  });
+});
+
+test('workflow ownership leaves a host mechanism without an application entry to the named package rules', () => {
+  withWorkflowAdapter('export {};\n', root => {
+    writeModule(root, 'src/adapters/git/mechanism.ts', [
+      "import { startAgent } from '../agents/agents.js';",
+      "import type { RoundPort } from '../../application/ports/round.js';",
+      'export async function retry(ok: boolean) { if (!ok) { await startAgent("active"); } }',
+    ].join('\n'));
+    assert.deepEqual(findWorkflowOwnershipViolations(root), []);
+  });
 });
 
 /* ------------------------------------------------------------------ *

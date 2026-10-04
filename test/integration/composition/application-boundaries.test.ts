@@ -4,7 +4,7 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 
-import { findForbiddenApplicationDependencies, findCompositionViolations } from '../../../src/adapters/architecture/boundary-guards.js';
+import { findForbiddenApplicationDependencies, findCompositionViolations, findWorkflowOwnershipViolations } from '../../../src/adapters/architecture/boundary-guards.js';
 import { createProductionApplicationServices } from '../../../src/composition/application-services.js';
 const root = process.cwd();
 const fixture = (name: string) => path.join(root, 'test', 'fixtures', 'application-boundary', name);
@@ -115,4 +115,45 @@ test('composition guard rejects complete adapter construction fixture', () => {
 
 test('composition guard rejects service-locator access fixture', () => {
   assert.ok(findCompositionViolations(path.dirname(fixture('locator-violation.ts'))).includes(fixture('locator-violation.ts')));
+});
+
+const REVIEW_WORKFLOW_ADAPTER = 'src/adapters/review/review-workflow-adapter.ts';
+
+/** A scratch repository holding `source` at `relative`, with every relative import target stubbed. */
+function adapterRepo(t: { after: (_fn: () => void) => void }, relative: string, source: string): string {
+  const repo = fs.mkdtempSync(path.join(os.tmpdir(), 'px-workflow-ownership-'));
+  t.after(() => fs.rmSync(repo, { recursive: true, force: true }));
+  const file = path.join(repo, relative);
+  for (const [, specifier] of source.matchAll(/from\s+'(\.[^']+)'/g)) {
+    const target = path.resolve(path.dirname(file), specifier.replace(/\.js$/, '.ts'));
+    fs.mkdirSync(path.dirname(target), { recursive: true });
+    fs.writeFileSync(target, '');
+  }
+  fs.writeFileSync(file, source);
+  return repo;
+}
+
+test('workflow ownership guard finds no adapter-owned workflow control in production adapters (TASK-2637.06)', () => {
+  const violations = findWorkflowOwnershipViolations(root);
+  assert.deepEqual(violations, [], violations.map(violation => `${violation.file}: ${violation.detail}`).join('\n'));
+});
+
+test('workflow ownership guard accepts the re-homed review adapter through its typed port bindings', t => {
+  const source = fs.readFileSync(path.join(root, REVIEW_WORKFLOW_ADAPTER), 'utf8');
+  assert.match(source, /: StaticReviewWorkflowPort = \{/);
+  assert.match(source, /: ReviewRoundWorkflowPort = \{/);
+  assert.deepEqual(findWorkflowOwnershipViolations(adapterRepo(t, REVIEW_WORKFLOW_ADAPTER, source)), []);
+});
+
+test('workflow ownership guard rejects the review adapter choosing a follow-on action outside a typed port', t => {
+  const source = fs.readFileSync(path.join(root, REVIEW_WORKFLOW_ADAPTER), 'utf8').replace(
+    /\n\}\n\nexport function createReviewWorkflowAdapter/,
+    "\n  private async relaunch(findings: string[], agent: string): Promise<void> { if (findings.length) { await startAgent('active', { prompt: '', worktree: '', agent }); } else { await submitForReview('', true, {}); } }\n}\n\nexport function createReviewWorkflowAdapter",
+  );
+  const violations = findWorkflowOwnershipViolations(adapterRepo(t, REVIEW_WORKFLOW_ADAPTER, source));
+  assert.deepEqual(violations.map(violation => [violation.file, violation.rule]), [
+    [REVIEW_WORKFLOW_ADAPTER, 'adapter-owned-workflow-control'],
+    [REVIEW_WORKFLOW_ADAPTER, 'adapter-owned-workflow-control'],
+  ]);
+  assert.match(violations.map(violation => violation.detail).join('\n'), /agent-launch operation "startAgent"[\s\S]*lifecycle operation "submitForReview"/);
 });
