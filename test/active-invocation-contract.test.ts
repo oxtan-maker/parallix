@@ -127,7 +127,11 @@ describe("active invocation overlap", () => {
         async saveWithTransition(next: Mission) { mission = next; return missionVersion(2); },
       },
       telemetry: { recordLaunchTelemetry: async () => {} },
-      handoffReview: { runHandoffAndReview: async () => true },
+      checkpointValidation: { validateBeforeHandoff: async () => ({ ok: true }) },
+      handoffExecution: { run: async () => ({ ok: true }), repairHygiene: async () => ({ repaired: false }), classifyFailure: () => null, isRelaunchableFailure: () => false },
+      autonomousReview: { start: async () => {} },
+      repairLaunch: { launch: async () => {}, available: () => ({ supported: false }), readHead: () => null },
+      output: { log: () => {}, error: () => {}, command: (value: string) => value, formatSlug: (value: string) => value, formatAgent: (value: string) => value },
     };
   }
 
@@ -265,7 +269,11 @@ describe("active persisted Mission", () => {
         async saveWithTransition(next: Mission) { mission = next; return 2; },
       },
       telemetry: { async recordLaunchTelemetry() {} },
-      handoffReview: { async runHandoffAndReview() { return true; } },
+      checkpointValidation: { async validateBeforeHandoff() { return { ok: true }; } },
+      handoffExecution: { async run() { return { ok: true }; }, async repairHygiene() { return { repaired: false }; }, classifyFailure() { return null; }, isRelaunchableFailure() { return false; } },
+      autonomousReview: { async start() {} },
+      repairLaunch: { async launch() {}, available() { return { supported: false }; }, readHead() { return null; } },
+      output: { log() {}, error() {}, command(value: string) { return value; }, formatSlug(value: string) { return value; }, formatAgent(value: string) { return value; } },
     } as unknown as ExecuteMissionPorts;
 
     const host = createWebHost({
@@ -344,7 +352,7 @@ describe("active persisted Mission", () => {
         async load() { return { kind: 'found' as const, version: 1, mission }; },
         async save() { throw new Error('must not save'); }, async saveWithTransition() { throw new Error('must not save'); },
       },
-      telemetry: { async recordLaunchTelemetry() {} }, handoffReview: { async runHandoffAndReview() { return true; } },
+      telemetry: { async recordLaunchTelemetry() {} }, checkpointValidation: { async validateBeforeHandoff() { return { ok: true }; } }, handoffExecution: { async run() { return { ok: true }; }, async repairHygiene() { return { repaired: false }; }, classifyFailure() { return null; }, isRelaunchableFailure() { return false; } }, autonomousReview: { async start() {} }, repairLaunch: { async launch() {}, available() { return { supported: false }; }, readHead() { return null; } }, output: { log() {}, error() {}, command(value: string) { return value; }, formatSlug(value: string) { return value; }, formatAgent(value: string) { return value; } },
     } as unknown as ExecuteMissionPorts).execute({
       operationId: 'active:task-2580', slug: 'task-2580', agent: 'codex', capabilities: new Set(['active:execute']),
     });
@@ -374,7 +382,7 @@ describe("active persisted Mission", () => {
         async load() { return { kind: 'found' as const, mission, version: 1 }; },
         async save(next: Mission) { mission = next; return 2; }, async saveWithTransition(next: Mission) { mission = next; return 2; },
       },
-      telemetry: { async recordLaunchTelemetry() {} }, handoffReview: { async runHandoffAndReview() { return true; } },
+      telemetry: { async recordLaunchTelemetry() {} }, checkpointValidation: { async validateBeforeHandoff() { return { ok: true }; } }, handoffExecution: { async run() { return { ok: true }; }, async repairHygiene() { return { repaired: false }; }, classifyFailure() { return null; }, isRelaunchableFailure() { return false; } }, autonomousReview: { async start() {} }, repairLaunch: { async launch() {}, available() { return { supported: false }; }, readHead() { return null; } }, output: { log() {}, error() {}, command(value: string) { return value; }, formatSlug(value: string) { return value; }, formatAgent(value: string) { return value; } },
     } as unknown as ExecuteMissionPorts).execute({
       operationId: 'active:task-2580', slug: 'task-2580', agent: 'codex', capabilities: new Set(['active:execute']),
     });

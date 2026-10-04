@@ -1,5 +1,6 @@
 import type { MissionTransitionStore } from '../domain-ports.js';
 import type { AgentLaunchPhase } from '../recording/current-work-recorder.js';
+import type { GateFailureReason } from '../rebound-kernel.js';
 
 /**
  * Mechanism ports for the execute (`px active`) workflow.
@@ -147,32 +148,104 @@ export interface ExecuteTelemetryPort {
   recordLaunchTelemetry(_record: ExecuteTelemetryRecord): Promise<void>;
 }
 
-export interface HandoffReviewRequest {
+/** Result of checking whether every planned checkpoint has durable evidence. */
+export interface CheckpointValidationVerdict {
+  readonly ok: boolean;
+  readonly error?: string;
+  readonly missingCheckpoints?: readonly string[];
+  readonly nextCheckpoint?: string;
+  readonly declaredCheckpoints?: readonly string[];
+}
+
+
+/** Mechanism request for the pre-handoff checkpoint evidence check. */
+export interface CheckpointValidationRequest {
   readonly slug: string;
   readonly worktree: string;
-  readonly agent: string;
-  readonly taskFile: string | null;
-  /**
-   * Publishes the family and phase of each agent the autonomous review loop
-   * launches. Supplied by the use case and awaited by the loop, so nested
-   * review work reaches the board from the place that performs it.
-   */
-  readonly onAgentLaunched?: (_agent: string, _phase: AgentLaunchPhase) => Promise<void>;
-  /**
-   * Publishes why the autonomous review loop stopped when it cannot continue
-   * on its own. Without it the reason dies with the loop and the operator is
-   * told only that nothing is running.
-   */
-  readonly onAutonomousStop?: (_reason: string) => Promise<void>;
+  readonly log?: (_message: string) => void;
+  readonly error?: (_message: string) => void;
 }
 
 /**
- * The handoff and autonomous-review pipeline. Its internal repair, relaunch,
- * and retry loops are mechanism detail; the use case observes only the final
- * verdict.
+ * The checkpoint-evidence mechanism. The use case decides whether a failed
+ * verdict can be repaired and whether handoff may proceed.
  */
-export interface HandoffReviewPort {
-  runHandoffAndReview(_request: HandoffReviewRequest): Promise<boolean>;
+export interface CheckpointValidationPort {
+  validateBeforeHandoff(_request: CheckpointValidationRequest): Promise<CheckpointValidationVerdict>;
+}
+
+/** A handoff attempt and its mechanism facts. */
+export interface HandoffRunRequest {
+  readonly slug: string;
+  readonly worktree: string;
+  readonly agent: string;
+  /** Retry after a repair without creating a second workflow authority. */
+  readonly force?: boolean;
+}
+
+export interface HandoffRunResult {
+  readonly ok: boolean;
+  readonly error?: string;
+  readonly gateFailure?: GateFailureReason;
+  readonly gateOutput?: { readonly stdout?: string; readonly stderr?: string };
+  readonly gatekeeperPushedBack?: boolean;
+}
+
+/**
+ * Handoff and its one-shot hygiene repair are adapter mechanisms. The service
+ * owns attempts, classification, rebound sequencing, and the terminal policy.
+ */
+export interface HandoffExecutionPort {
+  run(_request: HandoffRunRequest): Promise<HandoffRunResult>;
+  repairHygiene(_request: {
+    readonly slug: string;
+    readonly worktree: string;
+    readonly taskFile: string | null;
+    readonly error: string;
+    readonly log: (_message: string) => void;
+    readonly outputError: (_message: string) => void;
+  }): Promise<{ readonly repaired: boolean; readonly blocker?: string }>;
+  classifyFailure(_error: string): {
+    readonly failureClass: string;
+    readonly dispatchAction: string;
+  } | null;
+  isRelaunchableFailure(_error: string): boolean;
+}
+
+/** Mechanism request for beginning autonomous review after a successful handoff. */
+export interface AutonomousReviewRequest {
+  readonly slug: string;
+  readonly worktree: string;
+  readonly implementer: string;
+  readonly onAgentLaunched?: (_agent: string, _phase: AgentLaunchPhase) => Promise<void>;
+  readonly onAutonomousStop?: (_reason: string) => Promise<void>;
+}
+
+/** The autonomous-review mechanism has completed its own loop. */
+export interface AutonomousReviewPort {
+  start(_request: AutonomousReviewRequest): Promise<void>;
+}
+
+/** Launches a bounded repair bounce; classification and retry policy stay in the use case. */
+export interface ExecuteRepairLaunchPort {
+  launch(_request: {
+    readonly slug: string;
+    readonly worktree: string;
+    readonly agent: string;
+    readonly prompt: string;
+    readonly sessionPolicy?: unknown;
+  }): Promise<unknown>;
+  available(_agent: string): { readonly supported: boolean; readonly detail?: string; readonly reason?: string };
+  readHead(_worktree: string): string | null;
+}
+
+/** Presentation is a mechanism: workflow decisions never write directly to the CLI. */
+export interface ExecuteOperatorOutputPort {
+  log(_message: string): void;
+  error(_message: string): void;
+  command(_command: string): string;
+  formatSlug(_slug: string): string;
+  formatAgent(_agent: string): string;
 }
 
 /**
@@ -188,5 +261,9 @@ export interface ExecuteMissionPorts {
   readonly agentExecution: AgentExecutionPort;
   readonly missionTransitions: MissionTransitionStore;
   readonly telemetry: ExecuteTelemetryPort;
-  readonly handoffReview: HandoffReviewPort;
+  readonly checkpointValidation: CheckpointValidationPort;
+  readonly handoffExecution: HandoffExecutionPort;
+  readonly autonomousReview: AutonomousReviewPort;
+  readonly repairLaunch: ExecuteRepairLaunchPort;
+  readonly output: ExecuteOperatorOutputPort;
 }

@@ -48,8 +48,20 @@ function strictPorts(overrides: Record<string, unknown> = {}) {
     telemetry: {
       async recordLaunchTelemetry(record: { agent: string }) { calls.push(`telemetry:${record.agent}`); },
     },
-    handoffReview: {
-      async runHandoffAndReview(request: { agent: string }) { calls.push(`handoff:${request.agent}`); return true; },
+    checkpointValidation: {
+      async validateBeforeHandoff() { calls.push('checkpoints'); return { ok: true }; },
+    },
+    handoffExecution: {
+      async run(request: { agent: string }) { calls.push(`handoff:${request.agent}`); return { ok: true }; },
+      async repairHygiene() { return { repaired: false }; },
+      classifyFailure() { return null; },
+    },
+    autonomousReview: { async start() {} },
+    repairLaunch: {
+      async launch() {}, available() { return { supported: false }; }, readHead() { return null; },
+    },
+    output: {
+      log() {}, error() {}, command(command: string) { return command; }, formatSlug(slug: string) { return slug; }, formatAgent(agent: string) { return agent; },
     },
   };
   const ports = { ...parts, ...overrides } as unknown as ExecuteMissionPorts;
@@ -80,13 +92,43 @@ test('execute mission use case activates before launch, then records telemetry a
   assert.equal(outcome.status, 'completed');
   assert.deepEqual(calls, [
     'preflight:task-1', 'worktree:task-1', 'task:task-1', 'prepare', 'load', 'synchronize',
-    'launch:codex', 'safety', 'telemetry:codex', 'handoff:codex',
+    'launch:codex', 'safety', 'telemetry:codex', 'checkpoints', 'handoff:codex',
   ]);
   assert.deepEqual(events.map((event) => event.sequence), [1, 2, 3]);
   assert.deepEqual(work.filter((entry) => entry.phase === 'handoff'), [
     { phase: 'handoff', agent: null },
   ]);
   assert.equal(outcome.durableEvidence.length, 2);
+});
+
+test('execute mission use case sequences typed checkpoint, handoff, and review ports instead of the legacy delegation', async () => {
+  const { ports, calls } = strictPorts({
+    checkpointValidation: {
+      async validateBeforeHandoff() { calls.push('checkpoints'); return { ok: true }; },
+    },
+    handoffExecution: {
+      async run() { calls.push('typed-handoff'); return { ok: true }; },
+      async repairHygiene() { throw new Error('unexpected hygiene repair'); },
+      classifyFailure() { return null; },
+      isRelaunchableFailure() { return false; },
+    },
+    autonomousReview: {
+      async start() { calls.push('review'); },
+    },
+    repairLaunch: {
+      async launch() { throw new Error('unexpected repair launch'); },
+      available() { return { supported: false }; },
+      readHead() { return null; },
+    },
+    output: {
+      log(message: string) { calls.push(`output:${message.startsWith('\nStarting autonomous') ? 'review' : 'other'}`); },
+      error() {}, command(command: string) { return command; }, formatSlug(slug: string) { return slug; }, formatAgent(agent: string) { return agent; },
+    },
+  });
+  const outcome = await new ExecuteMissionService(ports).execute(request());
+  assert.equal(outcome.status, 'completed');
+  assert.ok(calls.indexOf('checkpoints') < calls.indexOf('typed-handoff'));
+  assert.ok(calls.indexOf('typed-handoff') < calls.indexOf('review'));
 });
 
 test('execute mission use case rejects invalid or incapable requests before any mechanism port', async () => {
@@ -123,7 +165,12 @@ test('execute mission use case cancels after the durable record without a rollba
 
 test('execute mission use case reports a refused handoff as an execution failure', async () => {
   const { ports } = strictPorts({
-    handoffReview: { async runHandoffAndReview() { return false; } },
+    handoffExecution: {
+      async run() { return { ok: false }; },
+      async repairHygiene() { return { repaired: false }; },
+      classifyFailure() { return null; },
+      isRelaunchableFailure() { return false; },
+    },
   });
   const outcome = await new ExecuteMissionService(ports).execute(request());
   assert.equal(outcome.status, 'failed');

@@ -1112,6 +1112,13 @@ export interface MissionDocumentCallSiteEntry {
  */
 export const MISSION_DOCUMENT_CALL_SITES: readonly MissionDocumentCallSiteEntry[] = [
   {
+    id: 'mission-doc-call-execute-handoff',
+    fileLocation: 'src/application/execute-handoff-service.ts',
+    purpose: 'describe legacy checkpoint evidence repair paths without persisting Mission state',
+    pathPatterns: ['missions/', 'MISSION.md'],
+    classification: 'mission-document-evidence',
+  },
+  {
     id: 'mission-doc-call-handoff',
     fileLocation: 'src/application/handoff-command-use-case.ts',
     purpose: 'verify MISSION.md exists and read Refinement Signals / Gates as the mission contract evidence before handoff',

@@ -10,7 +10,7 @@
 import test, { describe } from 'node:test';
 import assert from 'node:assert/strict';
 import { setCommandPathProbe, setLauncherHealthProbe } from '../src/adapters/agents/agents.js';
-import { createExecuteMissionPorts, MissionWorkspaceAdapter, AgentExecutionAdapter, ExecuteTelemetryAdapter, HandoffReviewAdapter } from '../src/adapters/mission/execute-mission-adapters.js';
+import { createExecuteMissionPorts, MissionWorkspaceAdapter, AgentExecutionAdapter, ExecuteTelemetryAdapter } from '../src/adapters/mission/execute-mission-adapters.js';
 import { ExecuteMissionService } from '../src/application/execute-mission-service.js';
 
 // no task ID in the legacy file (was test/execute-mission-adapters.test.ts)
@@ -35,7 +35,10 @@ describe('Execute Mission adapters', () => {
       recordActiveStats() {},
       resolveAgentModel() { return 'gpt-5'; },
       resolveStageTelemetry() { return null; },
-      async runHandoffAndReview() { return true; },
+      async validateCheckpointsBeforeHandoff() { return { ok: true }; },
+      async performHandoff() { return { ok: true }; },
+      async repairHandoff() { return { repaired: false }; },
+      async startReviewLoop() {},
       ...overrides,
     };
   }
@@ -63,7 +66,9 @@ describe('Execute Mission adapters', () => {
     assert.ok(ports.workspace instanceof MissionWorkspaceAdapter);
     assert.ok(ports.agentExecution instanceof AgentExecutionAdapter);
     assert.ok(ports.telemetry instanceof ExecuteTelemetryAdapter);
-    assert.ok(ports.handoffReview instanceof HandoffReviewAdapter);
+    assert.ok(ports.checkpointValidation);
+    assert.ok(ports.handoffExecution);
+    assert.ok(ports.autonomousReview);
   });
 
   test('workspace adapter runs the execute preflight quiet (routine PASS diagnostics suppressed)', async () => {
@@ -230,23 +235,17 @@ describe('Execute Mission adapters', () => {
     assert.equal(windows[0].sinceMs, Date.parse('2026-07-20T10:00:00Z'));
   });
 
-  test('handoff review adapter forwards the resolved task file and returns the pipeline verdict', async () => {
+  test('typed handoff adapter forwards the resolved task file and returns the pipeline verdict', async () => {
     const seen: Array<unknown[]> = [];
     const ports = createExecuteMissionPorts('/repo', { missionTransitionStore: transitionStore }, runtimeStub({
-      async runHandoffAndReview(...args: unknown[]) { seen.push(args); return false; },
+      async performHandoff(...args: unknown[]) { seen.push(args); return { ok: false }; },
     }));
     const onAgentLaunched = async () => {};
     const onAutonomousStop = async () => {};
-    const verdict = await ports.handoffReview.runHandoffAndReview({
-      slug: 'task-1', worktree: '/worktree', agent: 'codex', taskFile: '/worktree/task.md',
-      onAgentLaunched, onAutonomousStop,
-    });
-    assert.equal(verdict, false);
-    // The current-work publication seam is forwarded verbatim into the review
-    // loop; the adapter neither builds nor interprets it (TASK-2373 SC5).
+    const verdict = await ports.handoffExecution.run({ slug: 'task-1', worktree: '/worktree', agent: 'codex' });
+    assert.equal(verdict.ok, false);
     assert.deepEqual(seen[0], [
-      'task-1', '/worktree', 'codex',
-      { taskFile: '/worktree/task.md', onAgentLaunched, onAutonomousStop },
+      'task-1', { forgejoUser: 'codex', worktree: '/worktree', force: undefined },
     ]);
   });
 });
@@ -323,10 +322,13 @@ describe('Execute Mission characterization', () => {
       recordActiveStats(record: { implementer: string }) { calls.push(`stats:${record.implementer}`); },
       resolveAgentModel() { calls.push('model'); return 'gpt-5'; },
       resolveStageTelemetry() { calls.push('telemetry'); return null; },
-      async runHandoffAndReview(slug: string, worktree: string, agent: string) {
-        calls.push(`handoff:${slug}:${worktree}:${agent}`);
-        return true;
+      async validateCheckpointsBeforeHandoff() { return { ok: true }; },
+      async performHandoff(slug: string, options: { worktree: string; forgejoUser: string }) {
+        calls.push(`handoff:${slug}:${options.worktree}:${options.forgejoUser}`);
+        return { ok: true };
       },
+      async repairHandoff() { return { repaired: false }; },
+      async startReviewLoop() {},
       ...overrides,
     };
     return { runtime, calls, transitionStore };
@@ -437,12 +439,12 @@ describe('Execute Mission characterization', () => {
   test('execute workflow: a handoff relaunch retry that recovers still completes the launch', async () => {
     let handoffAttempts = 0;
     const { runtime, calls, transitionStore } = executeFixture({
-      async runHandoffAndReview(slug: string, worktree: string, agent: string) {
+      async performHandoff(slug: string, options: { worktree: string; forgejoUser: string }) {
         handoffAttempts++;
-        calls.push(`handoff:${slug}:${worktree}:${agent}`);
+        calls.push(`handoff:${slug}:${options.worktree}:${options.forgejoUser}`);
         // The relaunch/retry loop lives inside the handoff mechanism; the
         // workflow observes only its final boolean verdict.
-        return handoffAttempts >= 1;
+        return { ok: handoffAttempts >= 1 };
       },
     });
     const outcome = await buildExecuteWorkflow(runtime, transitionStore).execute(executeRequest());
@@ -456,7 +458,7 @@ describe('Execute Mission characterization', () => {
 
   test('execute workflow: handoff-and-review failure surfaces as an execution failure after durable evidence', async () => {
     const { runtime, calls, transitionStore } = executeFixture({
-      async runHandoffAndReview() { calls.push('handoff'); return false; },
+      async performHandoff() { calls.push('handoff'); return { ok: false, error: 'handoff rejected' }; },
     });
     const outcome = await buildExecuteWorkflow(runtime, transitionStore).execute(executeRequest());
     assert.equal(outcome.status, 'failed');

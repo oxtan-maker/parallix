@@ -257,13 +257,11 @@ export async function createProductionApplicationServices(
   const handoffWithMissionServices = mission && performHandoffWithMissionServices(mission);
   const executeRuntime = mission ? {
     ...defaultExecuteRuntime,
-    runHandoffAndReview: (slug: string, worktree: string, agent: string, runtimeOptions: Record<string, unknown> = {}) =>
-      defaultExecuteRuntime.runHandoffAndReview(slug, worktree, agent, {
+    performHandoff: (slug: string, handoffOptions: Record<string, unknown> = {}) =>
+      handoffWithMissionServices!(slug, handoffOptions),
+    validateCheckpointsBeforeHandoff: (slug: string, worktree: string, runtimeOptions: Record<string, unknown> = {}) =>
+      defaultExecuteRuntime.validateCheckpointsBeforeHandoff!(slug, worktree, {
         ...runtimeOptions,
-        performHandoff: handoffWithMissionServices!,
-        // A mission drafted through the typed verbs declares its checkpoint plan
-        // and evidence as Mission state; one without a recorded brief keeps its
-        // mission document and CP-N.md files (null here selects that path).
         loadRecordedCheckpointsFn: async (checkpointSlug: string) => {
           const loaded = await mission.store.load(missionId(checkpointSlug));
           if (loaded.kind !== 'found' || !loaded.mission.brief) { return null; }
@@ -272,22 +270,13 @@ export async function createProductionApplicationServices(
             recorded: loaded.mission.checkpoints.filter(({ goalCheck }) => goalCheck.length > 0).map(({ name }) => name),
           };
         },
-        startReviewLoop: (reviewSlug: string, loopOptions: Record<string, unknown>) => startReviewLoop(reviewSlug, {
-          ...loopOptions,
-          // Every Mission-authority injection the loop needs, including the
-          // artifact consumers that persist review events: an omitted binding
-          // leaves the adapter default, which resolves no store and reports the
-          // mission as having no Review.
-          performHandoffFn: handoffWithMissionServices!,
-          ...reviewLoopBindings(mission.store, mission.lifecycle, sessionMarkerPort),
-          // The recorded brief is the authoritative launch context; the default
-          // runtime's null resolver is the file-backed fallback. Route through
-          // the application-owned MissionBriefService (not a raw store read)
-          // and reuse Mission.checkpoints so the launch read carries the latest
-          // checkpoint alongside the brief.
-          resolveExecutionContext: (slug: string) => resolveMissionLaunchContext(mission, slug),
-        } as any),
       }),
+    startReviewLoop: (reviewSlug: string, loopOptions: Record<string, unknown> = {}) => startReviewLoop(reviewSlug, {
+      ...loopOptions,
+      performHandoffFn: handoffWithMissionServices!,
+      ...reviewLoopBindings(mission.store, mission.lifecycle, sessionMarkerPort),
+      resolveExecutionContext: (slug: string) => resolveMissionLaunchContext(mission, slug),
+    } as any),
   } : defaultExecuteRuntime;
   const executePorts = createExecuteMissionPorts(rootDir, {
     missionTransitionStore: mission?.store ?? unavailableMissionTransitionStore(),

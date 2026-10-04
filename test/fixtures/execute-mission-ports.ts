@@ -62,12 +62,19 @@ export function makeExecutePorts(overrides: Record<string, unknown> = {}) {
         calls.push(`record:${record.slug}:${record.agent}`);
       },
     },
-    handoffReview: {
-      async runHandoffAndReview(request: { slug: string; agent: string }) {
+    checkpointValidation: { async validateBeforeHandoff() { return { ok: true }; } },
+    handoffExecution: {
+      async run(request: { slug: string; agent: string }) {
         calls.push(`handoff:${request.slug}:${request.agent}`);
-        return true;
+        return { ok: true };
       },
+      async repairHygiene() { return { repaired: false }; },
+      classifyFailure() { return null; },
+      isRelaunchableFailure() { return false; },
     },
+    autonomousReview: { async start() {} },
+    repairLaunch: { async launch() {}, available() { return { supported: false }; }, readHead() { return null; } },
+    output: { log() {}, error() {}, command(value: string) { return value; }, formatSlug(value: string) { return value; }, formatAgent(value: string) { return value; } },
     ...overrides,
   };
   return { ports: ports as unknown as ExecuteMissionPorts, calls };

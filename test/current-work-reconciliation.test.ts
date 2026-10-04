@@ -5,6 +5,7 @@ import assert from 'node:assert/strict';
 import test, { describe } from 'node:test';
 import { ConcreteAgentReadAdapter } from '../src/adapters/backlog/concrete-agent-read-adapter.js';
 import { ConcreteCurrentWorkReadAdapter } from '../src/adapters/backlog/concrete-current-work-read-adapter.js';
+import { makeExecutePorts } from './fixtures/execute-mission-ports.js';
 import { ExecuteMissionService } from '../src/application/execute-mission-service.js';
 import type { AgentBlockEntry, AgentBlocklistRepository } from '../src/application/ports/agent-blocklist.js';
 import type { ExecuteMissionPorts } from '../src/application/ports/execute-mission.js';
@@ -262,6 +263,7 @@ describe("Publish-then-reconcile defects —", () => {
 
   function strictPorts(overrides: Record<string, unknown> = {}) {
     const parts = {
+      ...makeExecutePorts().ports,
       workspace: {
         async preflight() { return true; },
         async resolveWorktree() { return '/worktree'; },
@@ -281,7 +283,7 @@ describe("Publish-then-reconcile defects —", () => {
         async saveWithTransition() { return 2; },
       },
       telemetry: { async recordLaunchTelemetry() {} },
-      handoffReview: { async runHandoffAndReview() { return true; } },
+      autonomousReview: { async start() { return true; } },
     };
     return { ...parts, ...overrides } as unknown as ExecuteMissionPorts;
   }
@@ -334,8 +336,8 @@ describe("Publish-then-reconcile defects —", () => {
     const { repo, appended } = inMemoryOperationalHistory();
     let seen: Record<string, unknown> | null = null;
     const ports = strictPorts({
-      handoffReview: {
-        async runHandoffAndReview(request: Record<string, unknown>) {
+      autonomousReview: {
+        async start(request: Record<string, unknown>) {
           seen = request;
           const onAgentLaunched = request.onAgentLaunched;
           if (typeof onAgentLaunched === 'function') {

@@ -24,6 +24,19 @@ import {
   validateRepositoryGates,
 } from '../src/adapters/config/repository-gates.js';
 import { loadEffectiveConfig, validateWorkflowConfig } from '../src/adapters/config/product-config.js';
+import { unitGroupFailure } from './lib/unit-group-failure.js';
+import { elideBounceOutput } from '../src/application/output-elision.js';
+
+test('parallel unit gate retains failed assertions after a passing group for repair prompts (TASK-2637.03)', () => {
+  const assertion = 'AssertionError: checkpointValidation is missing from the execute fixture';
+  const failed = `✖ stale execute fixture\nℹ fail 1\n✖ failing tests:\n${assertion}`;
+  const passing = `${'✔ unrelated passing case\n'.repeat(4000)}ℹ pass 2019\nℹ fail 0`;
+  const error = unitGroupFailure('safe', 1, null, failed, 'worker diagnostic');
+  const promptDiagnostic = elideBounceOutput(`${'gate setup\n'.repeat(1000)}${failed}\n${passing}\n${error.message}`);
+  assert.ok(promptDiagnostic.includes(assertion), 'the failure must survive bounce output elision');
+  assert.match(error.message, /worker diagnostic/);
+  assert.match(error.message, /safe unit group failed: exit=1/);
+});
 
 /** Create a throwaway checkout directory that exists on disk. */
 function makeCheckout(): string {

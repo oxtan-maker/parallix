@@ -70,7 +70,11 @@ async function openFixture(
     // The real mission store: the authoritative boundary under test.
     missionTransitions: store as unknown as ExecuteMissionPorts['missionTransitions'],
     telemetry: { async recordLaunchTelemetry() {} },
-    handoffReview: { async runHandoffAndReview() { return true; } },
+    checkpointValidation: { async validateBeforeHandoff() { return { ok: true }; } },
+    handoffExecution: { async run() { return { ok: true }; }, async repairHygiene() { return { repaired: false }; }, classifyFailure() { return null; }, isRelaunchableFailure() { return false; } },
+    autonomousReview: { async start() {} },
+    repairLaunch: { async launch() {}, available() { return { supported: false }; }, readHead() { return null; } },
+    output: { log() {}, error() {}, command(value: string) { return value; }, formatSlug(value: string) { return value; }, formatAgent(value: string) { return value; } },
   } as unknown as ExecuteMissionPorts;
   return { ...migrated, ports };
 }

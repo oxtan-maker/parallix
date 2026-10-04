@@ -30,8 +30,6 @@ export type {
   AgentLaunchOutcome,
   ExecuteTelemetryPort,
   ExecuteTelemetryRecord,
-  HandoffReviewPort,
-  HandoffReviewRequest,
   ExecuteMissionPorts,
 } from './ports/execute-mission.js';
 

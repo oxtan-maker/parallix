@@ -186,9 +186,11 @@ describe("Command dispatch convergence", () => {
       telemetry: {
         recordLaunchTelemetry: async () => {},
       },
-      handoffReview: {
-        runHandoffAndReview: async () => true,
-      },
+      checkpointValidation: { validateBeforeHandoff: async () => ({ ok: true }) },
+      handoffExecution: { run: async () => ({ ok: true }), repairHygiene: async () => ({ repaired: false }), classifyFailure: () => null, isRelaunchableFailure: () => false },
+      autonomousReview: { start: async () => {} },
+      repairLaunch: { launch: async () => {}, available: () => ({ supported: false }), readHead: () => null },
+      output: { log: () => {}, error: () => {}, command: (value: string) => value, formatSlug: (value: string) => value, formatAgent: (value: string) => value },
     };
   }
 });

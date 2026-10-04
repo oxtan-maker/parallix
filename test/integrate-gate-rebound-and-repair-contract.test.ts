@@ -272,15 +272,15 @@ describe("relaunchable repair", () => {
     assert.ok(prompt.includes('Retry attempt: 1/2'));
   });
 
-  test('SC 3: active.js runHandoffAndReview bounces through the kernel when repair fails and error is relaunchable', () => {
+  test('SC 3: ExecuteHandoffService bounces through the kernel when repair fails and error is relaunchable', () => {
     // TASK-2377.05: `attemptAgentRelaunch` was deleted; the relaunch is a
     // `rebound()` call whose launch port is the injected `startAgentFn`.
-    const activeSource = fs.readFileSync(path.join(import.meta.dirname, '../src/adapters/cli/commands/active.ts'), 'utf8');
-    assert.ok(activeSource.includes('startAgentFn'), 'runHandoffAndReview should have a startAgentFn launch seam');
-    assert.ok(activeSource.includes('rebound('), 'Should bounce through the rebound kernel');
+    const serviceSource = fs.readFileSync(path.join(import.meta.dirname, '../src/application/execute-handoff-service.ts'), 'utf8');
+    assert.ok(serviceSource.includes('repairLaunch.launch'), 'handoff service should have a typed repair-launch seam');
+    assert.ok(serviceSource.includes('rebound('), 'Should bounce through the rebound kernel');
     // Matched on the classifier call rather than one spelling of its argument, so
     // extracting the repair helpers does not silently drop the guard.
-    assert.match(activeSource, /repairHandoff\.isRelaunchableError\([^)]*\.error\)/, 'Should check isRelaunchableError before bouncing');
+    assert.match(serviceSource, /isRelaunchableFailure\(error\)/, 'Should check relaunchability before bouncing');
   });
 
   test('SC 4: reviewer fallback uses the review eligibility selector', () => {
@@ -313,9 +313,9 @@ describe("relaunchable repair", () => {
   });
 
   test('SC 8: manual handoff path preserved - outputs manual handoff message when relaunch fails', () => {
-    const activeSource = fs.readFileSync(path.join(import.meta.dirname, '../src/adapters/cli/commands/active.ts'), 'utf8');
-    assert.ok(activeSource.includes('You may need to complete the handoff manually:'), 'Manual handoff message should be preserved');
-    assert.ok(activeSource.includes('px review ${slug} --submit'), 'Manual handoff command should be preserved');
+    const serviceSource = fs.readFileSync(path.join(import.meta.dirname, '../src/application/execute-handoff-service.ts'), 'utf8');
+    assert.ok(serviceSource.includes('You may need to complete the handoff manually:'), 'Manual handoff message should be preserved');
+    assert.ok(serviceSource.includes('px review ${request.slug} --submit'), 'Manual handoff command should be preserved');
   });
 
   test('runtime-matrix no longer exports hardcoded reviewer routing (reviewerFor/fallbackFor removed)', () => {

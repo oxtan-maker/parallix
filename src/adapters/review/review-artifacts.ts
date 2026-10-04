@@ -10,9 +10,13 @@ import * as fmt from '../../application/presentation/cli-format.js';
 import { git } from '../git/git.js';
 import { missionBranchName, resolveWorktree } from '../filesystem/mission-utils.js';
 import { readReviewState, writeReviewState, reviewStateFile, ReviewState, resolveReviewIdentity, persistReviewStateOrThrow, type ReviewStateData } from './review-state.js';
-import { dispatchArtifactFailure as recoverArtifactFailure, type ArtifactRole, type ArtifactDispatchResult, type ArtifactRecoveryOptions } from '../../application/review-artifact-recovery.js';
-export type { ArtifactRole, ArtifactDispatchAction, ArtifactDispatchResult } from '../../application/review-artifact-recovery.js';
-export { isArtifactInfraDiagnostic } from '../../application/rebound-kernel.js';
+import {
+  rebound,
+  DEFAULT_REBOUND_ATTEMPTS,
+  type ReboundContext,
+  type ReboundStartAgent,
+  type VerifyResult,
+} from '../../application/rebound-kernel.js';
 import type { MissionStore } from '../../application/domain-ports.js';
 import { parseResolutionDispositions, type ReviewFinding, type ReviewItemDisposition } from '../../domain/review.js';
 import { readToken, postComment, postReview, getPrAuthor, isEnabled, resolveArtifactDir as resolveConfiguredArtifactDir } from './review-adapter.js';
@@ -1134,22 +1138,137 @@ async function consumeImplementerArtifacts(
 // Role-Owned Artifact Recovery Dispatcher
 // ============================================================================
 
-/** Concrete Git revision adapter for application-owned artifact recovery. */
+/**
+ * Producing role for review-loop artifacts.
+ * Maps artifact categories to the agent role that produces them.
+ */
+export type ArtifactRole = 'reviewer' | 'implementer';
+
+/**
+ * Outcome of one artifact-failure occurrence, mapped from the rebound kernel.
+ * `fixed` — the relaunched role's artifacts were re-consumed and are complete
+ * `strand` — the per-occurrence attempt budget is spent; human intervention
+ * `human-only` — the ADR 0048 table says no agent relaunch can fix this
+ */
+export type ArtifactDispatchAction = 'fixed' | 'strand' | 'human-only';
+
+export interface ArtifactDispatchResult {
+  action: ArtifactDispatchAction;
+  role: ArtifactRole;
+  /** Last diagnostic observed: the verify re-consume's, or the original one. */
+  diagnostic: string;
+  /** Completed repair attempts consumed by this occurrence. */
+  attempts: number;
+  maxAttempts: number;
+  /** Agent that ran the final attempt (fallback-resolved). */
+  agent: string;
+}
+
+/**
+ * Per-occurrence attempt budget for artifact recovery.
+ *
+ * The kernel's budget is per local failure and in-memory: every occurrence
+ * starts fresh, nothing is persisted (TASK-2377.04 deleted the review-state
+ * metadata retry counters this dispatcher used to read and write).
+ */
+export const ARTIFACT_REBOUND_ATTEMPTS = DEFAULT_REBOUND_ATTEMPTS;
+
+/**
+ * Check if a diagnostic string indicates an infrastructure failure
+ * (provider-post or repo-store-persist) rather than an artifact production
+ * failure (missing/malformed content).
+ *
+ * Infrastructure diagnostics contain "post failed" or "persist failed" markers
+ * emitted by consumeReviewerArtifacts / consumeImplementerArtifacts on
+ * downstream Forgejo/network/storage errors. These map to ADR 0048 InfraBlocker
+ * (HumanOnly) and must not be dispatched to the artifact recovery dispatcher.
+ *
+ * @param diagnostic - The diagnostic string from consume*Artifacts
+ * @returns true if this is an infrastructure-level failure
+ */
+export function isArtifactInfraDiagnostic(diagnostic: string | undefined | null): boolean {
+  if (!diagnostic) { return false; }
+  return diagnostic.includes('post failed') || diagnostic.includes('persist failed');
+}
+
+/**
+ * Bounce one artifact-failure occurrence back to the producing role.
+ *
+ * This is the artifact-path adapter over the rebound kernel
+ * (`src/application/rebound-kernel.ts`): the kernel owns classification (ADR
+ * 0048), the fix prompt, the launch, the verify loop, and the attempt budget;
+ * this function contributes the structured `artifact-incomplete` reason and
+ * the role-aware collaborators.
+ *
+ * `verifyFn` re-consumes the role's artifacts. The occurrence is only reported
+ * `fixed` when that re-consumption returns complete, ok artifacts — a relaunch
+ * on its own is no evidence that the artifacts exist.
+ *
+ * Nothing is persisted: the budget is per occurrence and in-memory.
+ *
+ * @param role - The producing role ('reviewer' or 'implementer')
+ * @param diagnostic - Captured diagnostic describing the artifact failure
+ * @param options - Verify callback, launch port, and role collaborators
+ */
 export async function dispatchArtifactFailure(
   role: ArtifactRole,
   diagnostic: string,
-  options: Omit<ArtifactRecoveryOptions, 'readHead' | 'log' | 'error'>
-    & Partial<Pick<ArtifactRecoveryOptions, 'log' | 'error'>>,
+  options: {
+    slug: string;
+    worktree: string;
+    /** Agent identity to relaunch for this role. */
+    agent: string;
+    /** Re-consumes the role's artifacts; `ok` only when they are complete. */
+    verifyFn: (_attempt: number) => Promise<VerifyResult> | VerifyResult;
+    /** Role-shaped launch port (step, role, exclude, base prompt). */
+    startAgentFn: ReboundStartAgent;
+    applyAgentFallbackFn?: ReboundContext['applyAgentFallback'];
+    transitionToImplementerFn?: ReboundContext['transitionToImplementer'];
+    maxAttempts?: number;
+    log?: (_msg: string) => void;
+    error?: (_msg: string) => void;
+  }
 ): Promise<ArtifactDispatchResult> {
-  return await recoverArtifactFailure(role, diagnostic, {
-    ...options,
-    log: options.log || fmt.log.plain,
-    error: options.error || fmt.log.plainError,
-    readHead: () => {
-      const result = git(['-C', options.worktree, 'rev-parse', 'HEAD']);
-      return result.status === 0 ? result.stdout.trim() : null;
+  const { slug, worktree, agent, verifyFn, startAgentFn, maxAttempts = ARTIFACT_REBOUND_ATTEMPTS } = options;
+  const log = options.log || fmt.log.plain;
+  const error = options.error || fmt.log.plainError;
+
+  if (typeof verifyFn !== 'function') {
+    throw new Error('dispatchArtifactFailure requires a verify callback: an artifact bounce may only be reported fixed when the artifacts are re-consumed and complete.');
+  }
+
+  const outcome = await rebound(
+    { kind: 'artifact-incomplete', role, diagnostic },
+    {
+      slug,
+      worktree,
+      implementer: agent,
+      maxAttempts,
+      verify: verifyFn,
+      startAgent: startAgentFn,
+      readHead: () => {
+        const result = git(['-C', worktree, 'rev-parse', 'HEAD']);
+        return result.status === 0 ? result.stdout.trim() : null;
+      },
+      applyAgentFallback: options.applyAgentFallbackFn,
+      transitionToImplementer: options.transitionToImplementerFn,
+      log,
+      error,
     },
-  });
+  );
+
+  const action: ArtifactDispatchAction = outcome.outcome === 'fixed'
+    ? 'fixed'
+    : (outcome.outcome === 'human-only' ? 'human-only' : 'strand');
+
+  return {
+    action,
+    role,
+    diagnostic: outcome.diagnostic,
+    attempts: outcome.attempts,
+    maxAttempts,
+    agent: outcome.implementer,
+  };
 }
 
 // Module exports

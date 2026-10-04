@@ -9,6 +9,7 @@ import type {
   ExecuteMissionPorts,
   TaskFileResolution,
 } from './ports/execute-mission.js';
+import { ExecuteHandoffService } from './execute-handoff-service.js';
 import type { ProgressPort } from './ports.js';
 import {
   reviewLoopPublisher,
@@ -115,7 +116,7 @@ export class ExecuteMissionService {
 
       this.emit(request, 3, 'handoff', 'starting handoff', launch.agent);
       await this.publishWork(request, 'handoff', 'handing off and reviewing', null);
-      const handedOff = await this._ports.handoffReview.runHandoffAndReview({
+      const handoffRequest = {
         slug: request.slug,
         worktree: prepared.worktree,
         agent: launch.agent,
@@ -128,7 +129,14 @@ export class ExecuteMissionService {
           slug: request.slug,
           operationId: request.operationId,
         }),
-      });
+      };
+      const handedOff = await new ExecuteHandoffService({
+        checkpoints: this._ports.checkpointValidation,
+        handoff: this._ports.handoffExecution,
+        review: this._ports.autonomousReview,
+        repairLaunch: this._ports.repairLaunch,
+        output: this._ports.output,
+      }).run(handoffRequest);
       if (!handedOff) {throw new Error('handoff and review failed');}
 
       await this.endWork(request);

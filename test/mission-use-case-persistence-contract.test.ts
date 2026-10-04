@@ -777,7 +777,20 @@ describe('Lifecycle ordering', () => {
       // The real mission store: the authoritative boundary under test.
       missionTransitions: store as unknown as ExecuteMissionPorts['missionTransitions'],
       telemetry: { async recordLaunchTelemetry() {} },
-      handoffReview: { async runHandoffAndReview() { return true; } },
+      checkpointValidation: { async validateBeforeHandoff() { return { ok: true }; } },
+      handoffExecution: {
+        async run() { return { ok: true }; },
+        async repairHygiene() { return { repaired: false }; },
+        classifyFailure() { return null; },
+        isRelaunchableFailure() { return false; },
+      },
+      autonomousReview: { async start() {} },
+      repairLaunch: {
+        async launch() { return {}; },
+        available() { return { supported: true }; },
+        readHead() { return null; },
+      },
+      output: { log() {}, error() {}, command(value: string) { return value; }, formatSlug(value: string) { return value; }, formatAgent(value: string) { return value; } },
     } as unknown as ExecuteMissionPorts;
     return { ...migrated, ports };
   }

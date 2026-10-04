@@ -8,8 +8,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
+import { makeExecutePorts } from './fixtures/execute-mission-ports.js';
 import { ExecuteMissionService } from '../src/application/execute-mission-service.js';
-import type { ExecuteMissionPorts, HandoffReviewRequest } from '../src/application/ports/execute-mission.js';
+import type { ExecuteMissionPorts } from '../src/application/ports/execute-mission.js';
+type HandoffReviewRequest = { onAgentLaunched?: (_agent: string, _phase: 'review' | 'review-response') => Promise<void>; onAutonomousStop?: (_reason: string) => Promise<void> };
 import { CurrentWorkRecorder, parseCurrentWorkEntry } from '../src/application/recording/current-work-recorder.js';
 import type { OperationalHistoryEntry } from '../src/application/ports/operation-history.js';
 import { inMemoryOperationalHistory } from './fixtures/operational-history.js';
@@ -40,6 +42,7 @@ function boardState(appended: readonly OperationalHistoryEntry[], options: { now
 
 function strictPorts(overrides: Record<string, unknown> = {}) {
   const parts = {
+    ...makeExecutePorts().ports,
     workspace: {
       async preflight() { return true; },
       async resolveWorktree() { return '/worktree'; },
@@ -59,7 +62,7 @@ function strictPorts(overrides: Record<string, unknown> = {}) {
       async saveWithTransition() { return 2; },
     },
     telemetry: { async recordLaunchTelemetry() {} },
-    handoffReview: { async runHandoffAndReview() { return true; } },
+    autonomousReview: { async start() { return true; } },
   };
   return { ...parts, ...overrides } as unknown as ExecuteMissionPorts;
 }
@@ -80,8 +83,8 @@ function executeRequest() {
 test('SC10: review-loop escalation during px active leaves the mission in NEEDS YOU with its reason', async () => {
   const { repo, appended } = inMemoryOperationalHistory({ assignIds: true });
   const ports = strictPorts({
-    handoffReview: {
-      async runHandoffAndReview(request: HandoffReviewRequest) {
+    autonomousReview: {
+      async start(request: HandoffReviewRequest) {
         await request.onAgentLaunched?.('qwen', 'review');
         // The loop gives up: no eligible reviewer remains for this round.
         await request.onAutonomousStop?.('REVIEWER_ARTIFACT_RETRY_EXHAUSTED');
@@ -104,8 +107,8 @@ test('SC10: review-loop escalation during px active leaves the mission in NEEDS 
 test('SC10: the bracket-closing ended fact cannot erase an escalation reason', async () => {
   const { repo, appended } = inMemoryOperationalHistory({ assignIds: true });
   const ports = strictPorts({
-    handoffReview: {
-      async runHandoffAndReview(request: HandoffReviewRequest) {
+    autonomousReview: {
+      async start(request: HandoffReviewRequest) {
         await request.onAutonomousStop?.('implementer reported BLOCKED');
         return true;
       },
@@ -154,8 +157,8 @@ test('SC11: one family becoming usage-blocked while another can take over create
         return { agent: 'qwen', rebaseDeferred: false, errored: false, errorMessage: null, exitStatus: 0, detail: null };
       },
     },
-    handoffReview: {
-      async runHandoffAndReview(request: HandoffReviewRequest) {
+    autonomousReview: {
+      async start(request: HandoffReviewRequest) {
         await request.onAgentLaunched?.('codex', 'review');
         return true;
       },
@@ -177,8 +180,8 @@ test('SC12: active work, failover, exhaustion, and dead work each project one tr
   const sampled = inMemoryOperationalHistory({ assignIds: true });
   let duringWork = boardState(sampled.appended);
   await new ExecuteMissionService(strictPorts({
-    handoffReview: {
-      async runHandoffAndReview(request: HandoffReviewRequest) {
+    autonomousReview: {
+      async start(request: HandoffReviewRequest) {
         await request.onAgentLaunched?.('qwen', 'review');
         duringWork = boardState(sampled.appended);
         return true;
@@ -214,8 +217,8 @@ test('SC12: active work, failover, exhaustion, and dead work each project one tr
   // 3. no autonomous progress possible -> NEEDS YOU
   const exhausted = inMemoryOperationalHistory({ assignIds: true });
   await new ExecuteMissionService(strictPorts({
-    handoffReview: {
-      async runHandoffAndReview(request: HandoffReviewRequest) {
+    autonomousReview: {
+      async start(request: HandoffReviewRequest) {
         await request.onAutonomousStop?.('REVIEWER_NON_APPROVAL');
         return true;
       },
@@ -230,8 +233,8 @@ test('SC12: active work, failover, exhaustion, and dead work each project one tr
   // 4. stale/dead work -> not WORKING
   const stale = inMemoryOperationalHistory({ assignIds: true });
   await new ExecuteMissionService(strictPorts({
-    handoffReview: {
-      async runHandoffAndReview(request: HandoffReviewRequest) {
+    autonomousReview: {
+      async start(request: HandoffReviewRequest) {
         await request.onAgentLaunched?.('qwen', 'review');
         return false; // the pipeline never closed its bracket
       },

@@ -574,7 +574,9 @@ When the pre-review verification gate fails, when a Git hook rejects the
 pre-review commit or rebase, or when a reviewer or implementer hands back
 incomplete artifacts, the harness bounces the mission back to the responsible
 agent with a fix prompt built from the failure's structured evidence and its
-classification.
+classification. Parallel unit verification retains failed assertions in its
+final diagnostic even when another group finishes successfully afterward, so
+the repair prompt keeps the actionable failure within its bounded output.
 
 A gate or hook fix prompt gives the implementer the exact failed check, its
 captured output, and the mission outcome, and asks it to fix the mission

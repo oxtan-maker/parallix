@@ -3,6 +3,7 @@ import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { buildTestRunPlan, withCoverageReporters } from './lib/test-run-plan.js';
 import { unitProcessPartition } from './lib/unit-process-partition.js';
+import { unitGroupFailure } from './lib/unit-group-failure.js';
 import { mergeLcov } from '../src/adapters/verification/coverage-gate.js';
 import { removeNonExecutableCoverage, removeTypeOnlyCoverage } from '../src/adapters/verification/type-only-coverage.js';
 
@@ -45,11 +46,12 @@ async function runGroup(name: 'safe' | 'isolated', files: string[]) {
   const summary = await new Promise<string>((resolve, reject) => {
     const child = spawn(plan.testNode, argv, { cwd: root, env, stdio: ['inherit', 'pipe', 'pipe'] });
     let stdout = '';
+    let stderr = '';
     child.stdout.on('data', (chunk: Buffer) => { stdout += chunk.toString(); process.stdout.write(chunk); });
-    child.stderr.pipe(process.stderr);
+    child.stderr.on('data', (chunk: Buffer) => { stderr += chunk.toString(); process.stderr.write(chunk); });
     child.on('error', reject);
     child.on('close', (code, signal) => {
-      if (signal || code !== 0) { reject(new Error(`${name} unit group failed: exit=${code} signal=${signal}`)); }
+      if (signal || code !== 0) { reject(unitGroupFailure(name, code, signal, stdout, stderr)); }
       else { resolve(stdout); }
     });
   });
@@ -71,8 +73,8 @@ try {
   const results = await Promise.allSettled([
     runGroup('safe', safe), runGroup('isolated', isolated),
   ]);
-  const failure = results.find(result => result.status === 'rejected');
-  if (failure?.status === 'rejected') { throw failure.reason; }
+  const failures = results.filter(result => result.status === 'rejected');
+  if (failures.length) { throw new Error(failures.map(result => result.reason instanceof Error ? result.reason.message : String(result.reason)).join('\n\n')); }
   const [sharedResult, isolatedResult] = results.map(result => {
     if (result.status !== 'fulfilled') { throw new Error('missing unit group result'); }
     return result.value;

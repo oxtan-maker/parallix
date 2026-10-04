@@ -24,9 +24,11 @@ import { setImmediate } from 'node:timers';
 import { ConcreteCurrentWorkReadAdapter } from '../src/adapters/backlog/concrete-current-work-read-adapter.js';
 import type { BoardCommandRequest } from '../src/application/controller/board-command.js';
 import { BoardCommandController } from '../src/application/controller/board-controller.js';
+import { makeExecutePorts } from './fixtures/execute-mission-ports.js';
 import { ExecuteMissionService } from '../src/application/execute-mission-service.js';
 import { IntegrateCommandUseCase } from '../src/application/integrate-command-use-case.js';
-import type { ExecuteMissionPorts, HandoffReviewRequest } from '../src/application/ports/execute-mission.js';
+import type { ExecuteMissionPorts } from '../src/application/ports/execute-mission.js';
+type HandoffReviewRequest = { onAgentLaunched?: (_agent: string, _phase: 'review' | 'review-response') => Promise<void>; onAutonomousStop?: (_reason: string) => Promise<void> };
 import type { OperationalHistoryEntry } from '../src/application/ports/operation-history.js';
 import type { ReviewWorkflowContext } from '../src/application/ports/review-workflow.js';
 import { attentionReason } from '../src/application/projections/board.js';
@@ -39,7 +41,6 @@ import { agentFamily } from '../src/domain/agents.js';
 import { missionId } from '../src/domain/mission.js';
 import { repositoryId } from '../src/domain/repository.js';
 import { makeCard } from './fixtures/board-projection.js';
-import { makeExecutePorts } from './fixtures/execute-mission-ports.js';
 import { inMemoryOperationalHistory } from './fixtures/operational-history.js';
 
 // ── Current-work publication ──
@@ -57,6 +58,7 @@ function published(appended: readonly OperationalHistoryEntry[]) {
 function strictPorts(overrides: Record<string, unknown> = {}) {
   const calls: string[] = [];
   const parts = {
+    ...makeExecutePorts().ports,
     workspace: {
       async preflight() { return true; },
       async resolveWorktree() { return '/worktree'; },
@@ -82,7 +84,7 @@ function strictPorts(overrides: Record<string, unknown> = {}) {
       async saveWithTransition() { calls.push('lifecycle'); return 2; },
     },
     telemetry: { async recordLaunchTelemetry() { calls.push('telemetry'); } },
-    handoffReview: { async runHandoffAndReview() { calls.push('handoff'); return true; } },
+    handoffExecution: { ...makeExecutePorts().ports.handoffExecution, async run() { calls.push('handoff'); return { ok: true }; } },
   };
   return { ports: { ...parts, ...overrides } as unknown as ExecuteMissionPorts, calls };
 }
@@ -413,6 +415,7 @@ describe("Workflow current work follows launches —", () => {
 
   function strictPorts(overrides: Record<string, unknown> = {}) {
     const parts = {
+      ...makeExecutePorts().ports,
       workspace: {
         async preflight() { return true; },
         async resolveWorktree() { return '/worktree'; },
@@ -432,7 +435,7 @@ describe("Workflow current work follows launches —", () => {
         async saveWithTransition() { return 2; },
       },
       telemetry: { async recordLaunchTelemetry() {} },
-      handoffReview: { async runHandoffAndReview() { return true; } },
+      autonomousReview: { async start() { return true; } },
     };
     return { ...parts, ...overrides } as unknown as ExecuteMissionPorts;
   }
@@ -449,7 +452,7 @@ describe("Workflow current work follows launches —", () => {
   /** A handoff/review port that replays a scripted sequence of agent launches. */
   function scriptedReviewLoop(rounds: readonly (readonly [string, AgentLaunchPhase])[], observe?: () => void) {
     return {
-      async runHandoffAndReview(request: HandoffReviewRequest) {
+      async start(request: HandoffReviewRequest) {
         for (const [agent, phase] of rounds) {
           await request.onAgentLaunched?.(agent, phase);
           observe?.();
@@ -467,7 +470,7 @@ describe("Workflow current work follows launches —", () => {
     const { repo, appended } = inMemoryOperationalHistory({ assignIds: true });
     const observed: { agent: string | null; phase: string | null; working: boolean }[] = [];
     const ports = strictPorts({
-      handoffReview: scriptedReviewLoop(
+      autonomousReview: scriptedReviewLoop(
         [['qwen', 'review'], ['claude', 'review-response'], ['codex', 'review']],
         () => {
           const state = boardState(appended);
@@ -490,7 +493,7 @@ describe("Workflow current work follows launches —", () => {
   test('SC3: reviewer launches publish a review phase and implementer launches publish review-response', async () => {
     const { repo, appended } = inMemoryOperationalHistory({ assignIds: true });
     const ports = strictPorts({
-      handoffReview: scriptedReviewLoop([['qwen', 'review'], ['claude', 'review-response']]),
+      autonomousReview: scriptedReviewLoop([['qwen', 'review'], ['claude', 'review-response']]),
     });
     await new ExecuteMissionService(ports, undefined, new CurrentWorkRecorder(repo, { processId: 7 })).execute(executeRequest());
 
@@ -506,7 +509,7 @@ describe("Workflow current work follows launches —", () => {
     const { repo, appended } = inMemoryOperationalHistory({ assignIds: true });
     const seen: (string | null)[] = [];
     const ports = strictPorts({
-      handoffReview: scriptedReviewLoop(
+      autonomousReview: scriptedReviewLoop(
         [
           ['qwen', 'review'], ['claude', 'review-response'],
           ['codex', 'review'], ['claude', 'review-response'],
@@ -533,7 +536,7 @@ describe("Workflow current work follows launches —", () => {
     // Behavioural half: both entry points produce the same fact for the same launch.
     const viaActive = inMemoryOperationalHistory({ assignIds: true });
     await new ExecuteMissionService(
-      strictPorts({ handoffReview: scriptedReviewLoop([['qwen', 'review']]) }),
+      strictPorts({ autonomousReview: scriptedReviewLoop([['qwen', 'review']]) }),
       undefined,
       new CurrentWorkRecorder(viaActive.repo, { processId: 7 }),
     ).execute(executeRequest());
@@ -602,7 +605,7 @@ describe("Workflow current work follows launches —", () => {
           return { agent: 'qwen', rebaseDeferred: false, errored: false, errorMessage: null, exitStatus: 0, detail: null };
         },
       },
-      handoffReview: scriptedReviewLoop([['qwen', 'review']], () => { timeline.push(boardState(appended)); }),
+      autonomousReview: scriptedReviewLoop([['qwen', 'review']], () => { timeline.push(boardState(appended)); }),
     });
 
     const outcome = await new ExecuteMissionService(ports, undefined, new CurrentWorkRecorder(repo, { processId: 7 }))

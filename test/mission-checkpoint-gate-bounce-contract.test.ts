@@ -20,13 +20,36 @@ import path from 'node:path';
 import test, { mock, describe } from 'node:test';
 import { mkdtemp as registeredMkdtemp } from './helpers/temp-dir.js';
 import { mockModule, installModuleMocks } from './lib/module-mock.js';
+import { ExecuteHandoffService } from '../src/application/execute-handoff-service.js';
+import { classifyError } from '../src/application/failure-classification.js';
+import { isRelaunchableError } from '../src/adapters/cli/commands/repair-handoff.js';
 
 // ── Checkpoint gate bounce — TASK-2261 ──
-const runHandoffAndReviewModule = mockModule<typeof import('../src/adapters/cli/commands/active.js')>('../src/adapters/cli/commands/active.js', import.meta.url);
 const repairHandoff = mockModule<typeof import('../src/adapters/cli/commands/repair-handoff.js')>('../src/adapters/cli/commands/repair-handoff.js', import.meta.url);
 await installModuleMocks();
 test.afterEach(() => mock.restoreAll());
-const { runHandoffAndReview } = runHandoffAndReviewModule;
+const runHandoffAndReview = async (slug: string, worktree: string, agent: string, options: Record<string, any> = {}) => {
+  const validate = options.validateCheckpointsBeforeHandoffFn ?? (() => ({ ok: true }));
+  const handoff = options.performHandoff ?? (async () => ({ ok: true }));
+  const repair = options.repairHandoffFn ?? (async () => ({ repaired: false }));
+  const launch = options.startAgentFn ?? (async () => ({}));
+  return new ExecuteHandoffService({
+    checkpoints: { async validateBeforeHandoff(request) { return validate(slug, worktree, { log: request.log, error: request.error }); } },
+    handoff: {
+      async run(request) { return handoff(slug, { forgejoUser: agent, worktree, force: request.force }); },
+      async repairHygiene(request) { return repair(slug, worktree, request.error, { taskFile: request.taskFile, log: request.log, error: request.outputError }); },
+      classifyFailure: classifyError,
+      isRelaunchableFailure: isRelaunchableError,
+    },
+    review: { async start(request) { await options.startReviewLoop?.(slug, { implementer: agent, worktree, skipHandoff: true, onAgentLaunched: request.onAgentLaunched, onAutonomousStop: request.onAutonomousStop }); } },
+    repairLaunch: {
+      available: options.workflowLauncherStatusFn ?? (() => ({ supported: true })),
+      readHead() { return null; },
+      async launch(request) { return launch('active', { prompt: request.prompt, worktree, agent, slug, role: 'implementer', sessionPolicy: request.sessionPolicy }); },
+    },
+    output: { log: options.log ?? (() => {}), error: options.error ?? (() => {}), command: (value) => value, formatSlug: (value) => value, formatAgent: (value) => value },
+  }).run({ slug, worktree, agent, taskFile: options.taskFile ?? null, onAgentLaunched: options.onAgentLaunched, onAutonomousStop: options.onAutonomousStop });
+};
 
 // ── CP-1: Missing checkpoint → repairable relaunch (not stranded instruction) ──
 

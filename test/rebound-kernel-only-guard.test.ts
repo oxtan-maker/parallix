@@ -51,8 +51,8 @@ const ALLOWED: Record<string, string> = {
   // The kernel's own launch port, and the two adapters that supply it.
   'src/application/rebound-kernel.ts::launchFixAttempt':
     'the rebound kernel launch port — the one permitted failure-repair launch',
-  'src/adapters/cli/commands/active.ts::createReboundLaunchPort':
-    'the `reboundLaunchPort` adapter the kernel drives for the handoff bounces; it decides nothing, '
+  'src/adapters/mission/execute-mission-adapters.ts::<module>':
+    'the `ExecuteRepairLaunchPort` adapter the kernel drives for the handoff bounces; it decides nothing, '
     + 'and the test below pins the launch inside that adapter',
   'src/adapters/cli/commands/handoff.ts::createHandoffPorts':
     'port wiring that hands `startAgent` to the use case for the kernel to drive',
@@ -135,18 +135,18 @@ test('SC7: the handoff launch lives inside the kernel launch-port adapter, not i
   // `createReboundLaunchPort` is allow-listed because it *is* the kernel's launch
   // port. Pin the launch inside it so a future direct launch in the surrounding
   // bounce logic cannot ride in on the same allow-list entry.
-  const source = fs.readFileSync('src/adapters/cli/commands/active.ts', 'utf8');
-  const portStart = source.indexOf('function createReboundLaunchPort');
-  const portEnd = source.indexOf("as ReboundContext['startAgent'];", portStart);
+  const source = fs.readFileSync('src/adapters/mission/execute-mission-adapters.ts', 'utf8');
+  const portStart = source.indexOf('class RepairLaunchAdapter');
+  const portEnd = source.indexOf('class CliOutputAdapter', portStart);
   assert.ok(portStart > 0 && portEnd > portStart, 'the kernel launch-port adapter is present');
 
-  const call = /\bstartAgentFn\s*\(/g;
+  const call = /\bagents\.startAgent\s*\(/g;
   const insideAdapter = (source.slice(portStart, portEnd).match(call) || []).length;
   assert.equal(insideAdapter, 1, 'the adapter launches exactly once');
 
   // The bounce logic itself launches nothing: it only hands the port to the kernel.
-  const bounceStart = source.indexOf('async function runHandoffAndReview');
-  assert.equal((source.slice(bounceStart).match(call) || []).length, 0, 'runHandoffAndReview launches only through the adapter');
+  const handoff = fs.readFileSync('src/application/execute-handoff-service.ts', 'utf8');
+  assert.equal((handoff.match(call) || []).length, 0, 'ExecuteHandoffService launches only through the adapter');
 });
 
 test('SC5/SC6: the deleted standalone bounce policy leaves no trace in src/', () => {

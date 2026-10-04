@@ -296,7 +296,7 @@ export const CONSUMER_DOMAIN_REQUIREMENTS: readonly ConsumerRequirement[] = [
     id: 'review-loop-round-progression',
     family: 'review',
     fileLocation: 'src/adapters/review/review-loop.ts',
-    line: 1715,
+    line: 1730,
     anchor: 'function startReviewLoopOwned',
     reads: ['Review', 'Mission'],
     requirement:

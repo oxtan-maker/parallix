@@ -2,11 +2,18 @@ import { readAgentConfigOrExit } from '../agents/agents.js';
 import { selectAgent } from '../agents/agents.js';
 import { resolveWorktree } from '../filesystem/mission-utils.js';
 import startupPreflight from '../cli/startup-preflight.js';
-import { buildCheckpointContext, buildExecutePrompt, enforceExecuteCommitSafety, runHandoffAndReview, selectLaunchAndRecord } from '../cli/commands/active.js';
+import { buildCheckpointContext, buildExecutePrompt, enforceExecuteCommitSafety, selectLaunchAndRecord } from '../cli/commands/active.js';
+import { validateCheckpointsBeforeHandoff } from './checkpoint-validation.js';
 import { getTaskStatus, resolveTaskFile } from '../backlog/backlog.js';
 import { resolveAgentModel } from '../config/product-config.js';
 import * as stats from '../cli/commands/stats.js';
 import { resolveStageTelemetry } from '../agents/stage-telemetry.js';
+import { git as awaitableGit } from '../git/git.js';
+import * as agents from '../agents/agents.js';
+import * as fmt from '../../application/presentation/cli-format.js';
+import { performHandoff } from '../cli/commands/handoff.js';
+import { recordStageStatsSafe, startReviewLoop } from '../review/review-loop.js';
+import * as repairHandoff from '../cli/commands/repair-handoff.js';
 import type { MissionTransitionStore, SessionMarkerPort } from '../../application/domain-ports.js';
 import type {
   AgentExecutionPort,
@@ -16,10 +23,18 @@ import type {
   ExecuteMissionPorts,
   ExecuteTelemetryPort,
   ExecuteTelemetryRecord,
-  HandoffReviewPort,
-  HandoffReviewRequest,
   MissionWorkspacePort,
   TaskFileResolution,
+  CheckpointValidationPort,
+  CheckpointValidationRequest,
+  CheckpointValidationVerdict,
+  HandoffExecutionPort,
+  HandoffRunRequest,
+  HandoffRunResult,
+  AutonomousReviewPort,
+  AutonomousReviewRequest,
+  ExecuteRepairLaunchPort,
+  ExecuteOperatorOutputPort,
 } from '../../application/ports/execute-mission.js';
 // Type-only import (erased at runtime): the plain overlay shape materialized at
 // the composition root. No SQLite driver binding reaches this module.
@@ -57,7 +72,11 @@ export interface ExecuteMissionRuntime {
   readonly recordActiveStats: typeof stats.recordActiveStats;
   readonly resolveAgentModel: typeof resolveAgentModel;
   readonly resolveStageTelemetry: typeof resolveStageTelemetry;
-  readonly runHandoffAndReview: typeof runHandoffAndReview;
+  /** Individual post-execute mechanisms. The application service owns their ordering. */
+  readonly performHandoff: typeof performHandoff;
+  readonly startReviewLoop: typeof startReviewLoop;
+  readonly repairHandoff: typeof repairHandoff.default;
+  readonly validateCheckpointsBeforeHandoff: typeof validateCheckpointsBeforeHandoff;
 }
 
 export interface ExecuteMissionAdapterOptions {
@@ -211,22 +230,63 @@ export class ExecuteTelemetryAdapter implements ExecuteTelemetryPort {
   }
 }
 
-/** The handoff and autonomous-review pipeline. */
-export class HandoffReviewAdapter implements HandoffReviewPort {
+/** Typed mechanism adapters; ExecuteHandoffService owns their ordering. */
+class CheckpointValidationAdapter implements CheckpointValidationPort {
   constructor(private readonly _runtime: ExecuteMissionRuntime) {}
-
-  async runHandoffAndReview(request: HandoffReviewRequest): Promise<boolean> {
-    return Boolean(await this._runtime.runHandoffAndReview(
-      request.slug,
-      request.worktree,
-      request.agent,
-      {
-        taskFile: request.taskFile ?? undefined,
-        onAgentLaunched: request.onAgentLaunched,
-        onAutonomousStop: request.onAutonomousStop,
-      },
-    ));
+  async validateBeforeHandoff(request: CheckpointValidationRequest): Promise<CheckpointValidationVerdict> {
+    return this._runtime.validateCheckpointsBeforeHandoff(request.slug, request.worktree, { log: request.log, error: request.error }) as Promise<CheckpointValidationVerdict>;
   }
+}
+
+class HandoffExecutionAdapter implements HandoffExecutionPort {
+  constructor(private readonly _runtime: ExecuteMissionRuntime) {}
+  async run(request: HandoffRunRequest): Promise<HandoffRunResult> {
+    const result = await this._runtime.performHandoff(request.slug, { forgejoUser: request.agent, worktree: request.worktree, force: request.force });
+    const { gateFailure, ...handoff } = result;
+    return gateFailure
+      ? { ...handoff, gateFailure: { kind: 'gate-failure', ...gateFailure } }
+      : handoff;
+  }
+  async repairHygiene(request: { slug: string; worktree: string; taskFile: string | null; error: string; log: (_message: string) => void; outputError: (_message: string) => void }) {
+    const result = await this._runtime.repairHandoff(request.slug, request.worktree, request.error, { log: request.log, error: request.outputError });
+    return result.blocker ? { repaired: result.repaired, blocker: result.blocker } : { repaired: result.repaired };
+  }
+  classifyFailure(error: string) {
+    const classified = repairHandoff.classifyError(error);
+    return classified ? { failureClass: classified.failureClass, dispatchAction: classified.dispatchAction } : null;
+  }
+  isRelaunchableFailure(error: string) { return repairHandoff.isRelaunchableError(error); }
+}
+
+class AutonomousReviewAdapter implements AutonomousReviewPort {
+  constructor(private readonly _runtime: ExecuteMissionRuntime) {}
+  async start(request: AutonomousReviewRequest): Promise<void> {
+    await this._runtime.startReviewLoop(request.slug, { implementer: request.implementer, worktree: request.worktree, skipHandoff: true, recordStageStatsSafeFn: recordStageStatsSafe, onAgentLaunched: request.onAgentLaunched, onAutonomousStop: request.onAutonomousStop });
+  }
+}
+
+class RepairLaunchAdapter implements ExecuteRepairLaunchPort {
+  available(agent: string) { return agents.workflowLauncherStatus(agent); }
+  readHead(worktree: string) {
+    const result = (awaitableGit as any)(['-C', worktree, 'rev-parse', 'HEAD']);
+    return result.status === 0 ? result.stdout.trim() : null;
+  }
+  async launch(request: { slug: string; worktree: string; agent: string; prompt: string; sessionPolicy?: unknown }): Promise<unknown> {
+    const status = this.available(request.agent);
+    if (!status.supported) { throw new Error(`Agent ${request.agent} is not available for relaunch: ${status.detail || status.reason || 'unknown'}`); }
+    return agents.startAgent('active', {
+      prompt: request.prompt, worktree: request.worktree, agent: request.agent, slug: request.slug, role: 'implementer', sessionPolicy: request.sessionPolicy as any,
+      onLaunch: ({ agent }: { agent: string }) => fmt.log.plain(`Relaunched ${fmt.agent(agent)} for repair. Session persistence will be used if available.`),
+    });
+  }
+}
+
+class CliOutputAdapter implements ExecuteOperatorOutputPort {
+  log(message: string) { fmt.log.plain(message); }
+  error(message: string) { fmt.log.plainError(message); }
+  command(command: string) { return fmt.command(command); }
+  formatSlug(slug: string) { return fmt.slug(slug); }
+  formatAgent(agent: string) { return fmt.agent(agent); }
 }
 
 /**
@@ -253,7 +313,11 @@ export function createExecuteMissionPorts(
     ),
     missionTransitions: options.missionTransitionStore,
     telemetry: new ExecuteTelemetryAdapter(resolved),
-    handoffReview: new HandoffReviewAdapter(resolved),
+    checkpointValidation: new CheckpointValidationAdapter(resolved),
+    handoffExecution: new HandoffExecutionAdapter(resolved),
+    autonomousReview: new AutonomousReviewAdapter(resolved),
+    repairLaunch: new RepairLaunchAdapter(),
+    output: new CliOutputAdapter(),
   };
 }
 
@@ -271,7 +335,10 @@ export function createDefaultExecuteMissionRuntime(): ExecuteMissionRuntime {
     recordActiveStats: stats.recordActiveStats,
     resolveAgentModel,
     resolveStageTelemetry,
-    runHandoffAndReview,
+    performHandoff,
+    startReviewLoop,
+    repairHandoff: repairHandoff.default,
+    validateCheckpointsBeforeHandoff,
     resolveExecutionContext: async () => null,
   };
 }

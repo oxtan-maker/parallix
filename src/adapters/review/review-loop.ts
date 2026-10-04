@@ -29,8 +29,8 @@ import { commitSafeMissionArtifacts, rebaseBeforeReviewRound } from './rebase.js
 import { packageRoot } from '../filesystem/package-root.js';
 import { resolveAgentModel } from '../config/product-config.js';
 import { POLL_TIMEOUT, delay, resolvePollIntervalMs, resolvePollTimeoutMs, formatElapsed, isPollTimeout, pollForReview, pollForDisposition } from './review-polling.js';
-import { buildMetadataFooter, resolveArtifactDir, consumeReviewerArtifacts, consumeImplementerArtifacts, dispatchArtifactFailure } from './review-artifacts.js';
-import { rebound, isArtifactInfraDiagnostic } from '../../application/rebound-kernel.js';
+import { buildMetadataFooter, resolveArtifactDir, consumeReviewerArtifacts, consumeImplementerArtifacts, dispatchArtifactFailure, isArtifactInfraDiagnostic, ARTIFACT_REBOUND_ATTEMPTS } from './review-artifacts.js';
+import { DEFAULT_REBOUND_ATTEMPTS, rebound } from '../../application/rebound-kernel.js';
 import { pushReviewRef, isStaleInfoPushRejection, fetchReviewBranch } from '../forgejo/forgejo.js';
 import {
   DEFAULT_MAX_ATTEMPTS,
@@ -51,9 +51,18 @@ import {
 } from './review-agent-fallback.js';
 import { openReviewRound } from './review-round-open.js';
 import { transitionReviewRepair } from '../../application/review-repair-lifecycle.js';
-import { artifactRecoveryRequiresHuman, ReviewRoundRecoveryBudget, DEFAULT_REBOUNDS_PER_ROUND, REBOUNDS_PER_ROUND_EXHAUSTED } from '../../application/review-artifact-recovery.js';
-export { DEFAULT_REBOUNDS_PER_ROUND, REBOUNDS_PER_ROUND_EXHAUSTED } from '../../application/review-artifact-recovery.js';
 const MODULE_DIR = path.dirname(fileURLToPath(import.meta.url));
+/**
+ * Per-round relaunch cap (TASK-2377.04): bounds the total bounce launch
+ * attempts in one review round — every launch consumed by a rebound-kernel
+ * occurrence (gate, hook, artifact) plus every timeout-recovery relaunch.
+ * In-memory and round-local: it persists nothing and resets each round.
+ */
+export const DEFAULT_REBOUNDS_PER_ROUND = 6;
+
+/** Named escalation reason: the per-round relaunch cap is exhausted. */
+export const REBOUNDS_PER_ROUND_EXHAUSTED = 'REBOUNDS_PER_ROUND_EXHAUSTED';
+
 /**
  * One Node process can receive overlapping CLI/controller calls for the same
  * worktree. Keep one effective loop owner so a nested `--start`/`--continue`
@@ -253,8 +262,8 @@ async function reportFailedStartHandoff(slug: string, handoff: any, deps: any): 
  */
 /** Scratch shared by a round's two halves; nothing here is persisted. */
 interface RoundScratch {
-  recordRebounds: (_attempts: number) => void;
-  reboundAttemptLimit: () => number;
+  reboundsUsedThisRound: number;
+  reboundsRemainingThisRound: () => number;
   roundReboundCapReached: () => boolean;
   stopForRoundReboundCap: (_context: string) => Promise<void>;
   verifyPreReviewSetup: () => Promise<{ ok: boolean; diagnostic: string; reason?: any }>;
@@ -390,10 +399,10 @@ async function runPreReviewRebase(deps: ReviewerPhaseDeps): Promise<'stop' | nul
         {
           ...round.reboundCollaborators(),
           verifyFn: round.verifyPreReviewSetup,
-          maxAttempts: round.reboundAttemptLimit(),
+          maxAttempts: Math.min(DEFAULT_REBOUND_ATTEMPTS, round.reboundsRemainingThisRound()),
         },
       );
-      round.recordRebounds(bounceResult.attempts ?? 0);
+      round.reboundsUsedThisRound += bounceResult.attempts ?? 0;
       scratch.implementer = bounceResult.implementer || scratch.implementer;
       if (!bounceResult.bounced) {
         if (round.roundReboundCapReached()) {
@@ -430,10 +439,10 @@ async function runPreReviewRebase(deps: ReviewerPhaseDeps): Promise<'stop' | nul
           verifyFn: round.verifyPreReviewSetup,
           // TASK-2377.04: the per-occurrence budget is clamped to the
           // remaining per-round relaunch cap before the launch.
-          maxAttempts: round.reboundAttemptLimit(),
+          maxAttempts: Math.min(DEFAULT_REBOUND_ATTEMPTS, round.reboundsRemainingThisRound()),
         },
       );
-      round.recordRebounds(bounceResult.attempts ?? 0);
+      round.reboundsUsedThisRound += bounceResult.attempts ?? 0;
       scratch.implementer = bounceResult.implementer || scratch.implementer;
       if (bounceResult.bounced) {
         // The kernel's verify re-ran the pre-review rebase and the
@@ -491,10 +500,10 @@ async function runDeclaredPreReviewGate(deps: ReviewerPhaseDeps): Promise<'stop'
         verifyFn: round.verifyPreReviewSetup,
         // TASK-2377.04: the per-occurrence budget is clamped to the
         // remaining per-round relaunch cap before the launch.
-        maxAttempts: round.reboundAttemptLimit(),
+        maxAttempts: Math.min(DEFAULT_REBOUND_ATTEMPTS, round.reboundsRemainingThisRound()),
       },
     );
-    round.recordRebounds(bounceResult.attempts ?? 0);
+    round.reboundsUsedThisRound += bounceResult.attempts ?? 0;
     scratch.implementer = bounceResult.implementer || scratch.implementer;
     if (!bounceResult.bounced) {
       if (round.roundReboundCapReached()) {
@@ -622,7 +631,7 @@ async function consumeAndRecoverReviewerArtifacts(deps: ReviewerPhaseDeps): Prom
       const reviewerDispatch = await dispatchArtifactFailure('reviewer', reviewerDiagnostic, {
         // TASK-2377.04: the per-occurrence budget is clamped to the
         // remaining per-round relaunch cap before the launch.
-        maxAttempts: round.reboundAttemptLimit(),
+        maxAttempts: Math.min(ARTIFACT_REBOUND_ATTEMPTS, round.reboundsRemainingThisRound()),
         slug,
         worktree,
         agent: scratch.reviewer!,
@@ -666,10 +675,10 @@ async function consumeAndRecoverReviewerArtifacts(deps: ReviewerPhaseDeps): Prom
         },
         log, error,
       });
-      round.recordRebounds(reviewerDispatch.attempts ?? 0);
+      round.reboundsUsedThisRound += reviewerDispatch.attempts ?? 0;
       scratch.reviewer = reviewerDispatch.agent || scratch.reviewer;
       if (reviewerDispatch.action !== 'fixed') {
-        if (artifactRecoveryRequiresHuman(reviewerDispatch)) {
+        if (reviewerDispatch.action === 'human-only') {
           error(fmt.status('FAIL', `Reviewer artifact recovery requires human intervention for ${slug}.`));
           await ctx.escalateToHumanReview('REVIEWER_ARTIFACT_INFRA_FAILURE');
           return 'stop';
@@ -729,7 +738,7 @@ async function recoverReviewerTimeout(deps: ReviewerPhaseDeps): Promise<'stop' |
   }, {
     slug, worktree, implementer: scratch.reviewer!, step: 'review', role: 'reviewer',
     exclude: [scratch.implementer!],
-    maxAttempts: round.reboundAttemptLimit(),
+    maxAttempts: Math.min(DEFAULT_REBOUND_ATTEMPTS, round.reboundsRemainingThisRound()),
     readHead: () => {
       const result = git(['-C', worktree, 'rev-parse', 'HEAD']);
       return result.status === 0 ? result.stdout.trim() : null;
@@ -776,7 +785,7 @@ async function recoverReviewerTimeout(deps: ReviewerPhaseDeps): Promise<'stop' |
         : { ok: false, diagnostic: retryDiagnostic, reason: { kind: 'artifact-incomplete', role: 'reviewer', diagnostic: retryDiagnostic } };
     }, log, error,
   });
-  round.recordRebounds(timeoutRecovery.attempts);
+  round.reboundsUsedThisRound += timeoutRecovery.attempts;
   scratch.reviewer = timeoutRecovery.implementer || scratch.reviewer;
   if (timeoutRecovery.outcome !== 'fixed') {
     if (round.roundReboundCapReached()) {
@@ -1104,7 +1113,7 @@ async function consumeAndRecoverImplementerArtifacts(deps: RoundPhaseDeps): Prom
   const implDispatch = await dispatchArtifactFailure('implementer', implDiagnostic, {
     // TASK-2377.04: the per-occurrence budget is clamped to the
     // remaining per-round relaunch cap before the launch.
-    maxAttempts: round.reboundAttemptLimit(),
+    maxAttempts: Math.min(ARTIFACT_REBOUND_ATTEMPTS, round.reboundsRemainingThisRound()),
     slug,
     worktree,
     agent: scratch.implementer!,
@@ -1150,10 +1159,12 @@ async function consumeAndRecoverImplementerArtifacts(deps: RoundPhaseDeps): Prom
     },
     log, error,
   });
-  round.recordRebounds(implDispatch.attempts ?? 0);
+  round.reboundsUsedThisRound += implDispatch.attempts ?? 0;
   scratch.implementer = implDispatch.agent || scratch.implementer;
   if (implDispatch.action !== 'fixed') {
-    if (artifactRecoveryRequiresHuman(implDispatch)) {
+    const infraAfterBounce = isArtifactInfraDiagnostic(implDispatch.diagnostic);
+    const infra = implDispatch.action === 'human-only' || infraAfterBounce;
+    if (infra) {
       error(fmt.status('FAIL', `Implementer artifact recovery requires human intervention for ${slug}.`));
       await escalateToHumanReview('IMPLEMENTER_ARTIFACT_INFRA_FAILURE');
       return 'stop';
@@ -1199,7 +1210,7 @@ async function pollDispositionWithTimeoutRecovery(deps: RoundPhaseDeps): Promise
     }, {
       slug, worktree, implementer: scratch.implementer!, step: 'act-on-review', role: 'implementer',
       exclude: [identities.reviewer!],
-      maxAttempts: round.reboundAttemptLimit(),
+      maxAttempts: Math.min(DEFAULT_REBOUND_ATTEMPTS, round.reboundsRemainingThisRound()),
       readHead: () => {
         const result = git(['-C', worktree, 'rev-parse', 'HEAD']);
         return result.status === 0 ? result.stdout.trim() : null;
@@ -1238,7 +1249,7 @@ async function pollDispositionWithTimeoutRecovery(deps: RoundPhaseDeps): Promise
           : { ok: false, diagnostic: retryDiagnostic, reason: { kind: 'artifact-incomplete', role: 'implementer', diagnostic: retryDiagnostic } };
       }, log, error,
     });
-    round.recordRebounds(timeoutRecovery.attempts);
+    round.reboundsUsedThisRound += timeoutRecovery.attempts;
     scratch.implementer = timeoutRecovery.implementer || scratch.implementer;
     if (timeoutRecovery.outcome !== 'fixed') {
       if (isArtifactInfraDiagnostic(timeoutRecovery.diagnostic)) {
@@ -1393,20 +1404,23 @@ async function runReviewRound(
   let reviewer = identities.reviewer;
   // The per-round relaunch cap is round-local scratch (TASK-2377.04): every
   // round starts with a fresh counter; nothing is persisted.
-  const recoveryBudget = new ReviewRoundRecoveryBudget(reboundsPerRound);
+  let reboundsUsedThisRound = 0;
   try {
 
     if (await stopIfControllerSuperseded(ctx, state, `round ${attempt}`)) { return 'stop'; }
 
     log('\n' + fmt.status('INFO', `========== Round ${attempt} / ${maxAttempts} ==========`));
-    const roundReboundCapReached = () => recoveryBudget.reached();
+    const reboundsRemainingThisRound = () => reboundsPerRound < 0
+      ? Number.POSITIVE_INFINITY
+      : Math.max(0, reboundsPerRound - reboundsUsedThisRound);
+    const roundReboundCapReached = () => reboundsPerRound >= 0 && reboundsUsedThisRound >= reboundsPerRound;
     /**
      * Stop the loop when the per-round relaunch cap is exhausted (TASK-2377.04):
      * explicit diagnostic plus the named escalation reason; no further
      * relaunches happen this round.
      */
     const stopForRoundReboundCap = async (context: string) => {
-      error(fmt.status('FAIL', `Per-round relaunch cap reached for ${slug}: ${recoveryBudget.used}/${reboundsPerRound} relaunches used in round ${attempt}; no further ${context} relaunches.`));
+      error(fmt.status('FAIL', `Per-round relaunch cap reached for ${slug}: ${reboundsUsedThisRound}/${reboundsPerRound} relaunches used in round ${attempt}; no further ${context} relaunches.`));
       await escalateToHumanReview(REBOUNDS_PER_ROUND_EXHAUSTED);
     };
     if (attempt > state.round) {
@@ -1473,8 +1487,8 @@ async function runReviewRound(
         : undefined,
     });
     const round: RoundScratch = {
-      recordRebounds: attempts => recoveryBudget.consume(attempts),
-      reboundAttemptLimit: () => recoveryBudget.attemptLimit(),
+      get reboundsUsedThisRound() { return reboundsUsedThisRound; },
+      set reboundsUsedThisRound(value: number) { reboundsUsedThisRound = value; },
       reviewBaseline: captureReviewBaseline(),
       /** True when a kernel verify already re-ran the rebase and gate this round. */
       preReviewSetupVerified: false,
@@ -1482,6 +1496,7 @@ async function runReviewRound(
       // attempts themselves are owned by the rebound kernel.
       reviewerTimeoutRetries: 0,
       blockingFindings: [],
+      reboundsRemainingThisRound,
       roundReboundCapReached,
       stopForRoundReboundCap,
       verifyPreReviewSetup,
