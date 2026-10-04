@@ -31,7 +31,10 @@ export async function completeLandedCloseout(options: {
     await landing.persistLandedIntegrationOrAbort(slug, landedCommit, missionServices, { rootDir: baseWorktree });
   }
   if (!legacyClosedRecovery?.skipStats) {
-    await landing.recordPostIntegrationStatsOrAbort(slug, { rootDir: baseWorktree, missionStore: missionServices.store });
+    await landing.recordPostIntegrationStatsOrAbort(slug, {
+      rootDir: baseWorktree, missionStore: missionServices.store,
+      ...(missionServices.readStatsMissionFlow ? { readMissionFlow: missionServices.readStatsMissionFlow } : {}),
+    });
   }
   // The landed payload is now durable, and this hook rebuilds and installs the
   // repository's local px. It must not be contingent on cleanup: cleanup only

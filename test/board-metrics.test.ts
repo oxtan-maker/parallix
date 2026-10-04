@@ -422,8 +422,8 @@ test('buildMetrics omits the weekly series when no decision window was injected'
 
 test('px stats and the weekly FLOW series read the same injected-clock window authority', () => {
   const repoRoot = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
-  const statsSource = fs.readFileSync(path.join(repoRoot, 'src', 'application', 'stats-command-use-case.ts'), 'utf8');
-  assert.match(statsSource, /weeklyDecisionWindows\(request\.today \?\? new Date\(\)\)\.current/);
+  const statsSelectionSource = fs.readFileSync(path.join(repoRoot, 'src', 'application', 'services', 'statistics-report-selection.ts'), 'utf8');
+  assert.match(statsSelectionSource, /weeklyDecisionWindows\(request\.today \?\? new Date\(\)\)/);
 
   const today = '2026-08-31T12:00:00Z';
   const statsWindow = weeklyDecisionWindows(today).current;
@@ -781,4 +781,3 @@ test('cohort labels and implementer come from canonical Mission metadata, not te
   assert.deepEqual(outcome?.labels, ['ai_sdlc']);
   assert.equal(outcome?.implementer, 'codex');
 });
-

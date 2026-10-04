@@ -361,7 +361,8 @@ test('R5: the live review-fix writers keep known zero and unknown apart', async 
     try {
       const stored = store.listMeasurements().find(record => record.mission === 'task-2369-unknown');
       assert.equal(stored?.pr_fix_rounds, undefined, 'an unknown count reads back as no value, not zero');
-      assert.equal(stats.statsRowToMeasurement(unknown as never).pr_fix_rounds, null, 'unknown writes back as SQL NULL');
+      assert.equal(stats.statsRowToMeasurement(unknown as never).pr_fix_rounds, undefined,
+        'the port preserves unknown as undefined; its SQLite adapter binds that value as SQL NULL');
       assert.equal(stats.statsRowToMeasurement(known as never).pr_fix_rounds, 0, 'a known zero writes back as a genuine 0');
 
       // Rewriting the row read back from the store must not manufacture a zero.

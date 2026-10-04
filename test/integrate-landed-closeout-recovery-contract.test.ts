@@ -888,3 +888,29 @@ describe("landed integration refreshes the local px before cleanup (consolidated
     assert.deepEqual(effects, ['persist', 'stats', 'install-repository-built-px', 'cleanup']);
   });
 });
+
+test('landed closeout forwards the composition-bound statistics lifecycle reader (TASK-2637.04)', async () => {
+  const readMissionFlow = async () => [];
+  const store = { load: async () => ({ kind: 'found', mission: { status: 'done', closedAt: null } }) };
+  const calls: string[] = [];
+  await completeLandedCloseout({
+    slug: 'task-stats-closeout', landedCommit: 'landed', baseWorktree: '/repo/base',
+    baseBranch: 'main', variant: 'variant-b',
+    missionServices: { store, readStatsMissionFlow: readMissionFlow },
+    landing: {
+      createAbort: () => new Error('unexpected abort'),
+      persistLandedIntegrationOrAbort: async () => { throw new Error('delivery already persisted'); },
+      recordPostIntegrationStatsOrAbort: async (slug, options) => {
+        assert.equal(slug, 'task-stats-closeout');
+        assert.equal(options.missionStore, store);
+        assert.equal(options.readMissionFlow, readMissionFlow);
+        assert.deepEqual(await options.readMissionFlow!(), []);
+        calls.push('statistics');
+      },
+      runPostIntegrateHookOrAbort: () => { calls.push('hook'); },
+      cleanupMissionWorktree: () => { calls.push('cleanup'); return true; },
+      closeLandedIntegrationOrAbort: async () => { calls.push('close'); },
+    },
+  });
+  assert.deepEqual(calls, ['statistics', 'hook', 'cleanup', 'close']);
+});

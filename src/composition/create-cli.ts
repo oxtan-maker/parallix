@@ -29,7 +29,6 @@ import { IntegrateCommandUseCase } from '../application/integrate-command-use-ca
 import { ReviewCommandUseCase } from '../application/review-command-use-case.js';
 import { ReviewRoundUseCase } from '../application/review-round-use-case.js';
 import type { ReviewRoundWorkflowPort } from '../application/ports/review-round-workflow.js';
-import { StatsCommandUseCase } from '../application/stats-command-use-case.js';
 import { HandoffCommandUseCase } from '../application/handoff-command-use-case.js';
 import { StatusCommandUseCase } from '../application/status-command-use-case.js';
 import { createGithubPublishStatusUseCase } from './github-publish-status.js';
@@ -93,7 +92,7 @@ import { createReviewWorkflowAdapter } from '../adapters/review/review-commands.
 import { setupWizard } from '../adapters/review/setup-review.js';
 import { createSetupCommand } from '../interfaces/cli/setup.js';
 import setupReview from '../adapters/cli/commands/setup-review.js';
-import { createStatsCommand, createStatsWorkflowAdapter } from '../adapters/cli/commands/stats.js';
+import { createStatisticsCommand } from './stats.js';
 import {
   createStatusGitAdapter,
   createStatusPrAdapter,
@@ -423,7 +422,12 @@ function createCommandRegistry(rootDir: string): Record<string, Command> {
     'setup-review': setupReview,
     stats: (args, options) => withGraph(services => {
       if (!services.mission) { throw new Error('mission services are unavailable'); }
-      return createStatsCommand(new StatsCommandUseCase(createStatsWorkflowAdapter(services.mission.store)))(args, options);
+      return createStatisticsCommand({
+        ...options, rootDir, missionStore: services.mission.store,
+        laneEventRepo: services.operatorState.repositories?.boardLaneEvents,
+        usageRepo: services.operatorState.repositories?.usage,
+        repositoryId: services.mission.repositoryId,
+      })(args, options);
     }),
     'github-publish-status': (args, options) => {
       const useCase = createGithubPublishStatusUseCase();

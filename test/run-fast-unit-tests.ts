@@ -70,9 +70,14 @@ async function runGroup(name: 'safe' | 'isolated', files: string[]) {
 }
 
 try {
-  const results = await Promise.allSettled([
-    runGroup('safe', safe), runGroup('isolated', isolated),
-  ]);
+  // Files in the two partitions still share operator-scoped external state
+  // (for example PARALLIX_HOME-backed capacity and repository fixtures).
+  // Process isolation protects module and process state, not those resources.
+  // Run both groups to retain their diagnostics, but never concurrently.
+  const results = [
+    await Promise.allSettled([runGroup('safe', safe)]).then(([result]) => result),
+    await Promise.allSettled([runGroup('isolated', isolated)]).then(([result]) => result),
+  ];
   const failures = results.filter(result => result.status === 'rejected');
   if (failures.length) { throw new Error(failures.map(result => result.reason instanceof Error ? result.reason.message : String(result.reason)).join('\n\n')); }
   const [sharedResult, isolatedResult] = results.map(result => {

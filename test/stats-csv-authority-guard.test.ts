@@ -10,16 +10,12 @@ import os from 'os';
 import path from 'path';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
-import stats, { createStatsCommand, createStatsWorkflowAdapter } from '../src/adapters/cli/commands/stats.js';
-import { StatsCommandUseCase } from '../src/application/stats-command-use-case.js';
+import stats from '../src/adapters/cli/commands/stats.js';
+import { createStatisticsCommand, type StatsCompositionOptions } from '../src/composition/stats.js';
 import { SqliteMeasurementStore } from '../src/adapters/sqlite/measurement-store.js';
 
-// Render-only `px stats` command: the tested paths read measurement rows and
-// never consult the Mission authority, so a store placeholder satisfies the
-// required wiring (SC13).
-const statsCommand = createStatsCommand(
-  new StatsCommandUseCase(createStatsWorkflowAdapter({} as never)),
-);
+// Compose each invocation with its isolated storage dependencies.
+const statsCommand = (args: string[], options: StatsCompositionOptions = {}) => createStatisticsCommand(options)(args, options);
 import { ADR0053_PERSISTENCE_INVENTORY } from './fixtures/durable-state-inventory';
 import { mkdtemp as registeredMkdtemp } from './helpers/temp-dir.js';
 /**
@@ -102,7 +98,7 @@ test('the ADR 0053 inventory has no stats CSV compatibility boundary', () => {
   assert.ok(defaults.includes('src/adapters/sqlite/measurement-store.ts'));
 });
 
-test('px stats fails with the database error instead of reading a CSV when the store is unavailable', () => {
+test('px stats fails with the database error instead of reading a CSV when the store is unavailable', async () => {
   const dir = registeredMkdtemp('px-stats-dbfail-');
   const dbPath = path.join(dir, 'parallix.db');
   // The database path is a directory: it cannot be opened.
@@ -119,7 +115,7 @@ test('px stats fails with the database error instead of reading a CSV when the s
   const errors: string[] = [];
   let exitCode: number | null = null;
   try {
-    statsCommand(['--today', '2026-06-23'], {
+    await statsCommand(['--today', '2026-06-23'], {
       rootDir: dir,
       dbPath,
       log: (line: string) => logs.push(String(line)),
@@ -136,7 +132,7 @@ test('px stats fails with the database error instead of reading a CSV when the s
   }
 });
 
-test('a recorded measurement survives a full store restart and is still reported by px stats', () => {
+test('a recorded measurement survives a full store restart and is still reported by px stats', async () => {
   const dir = registeredMkdtemp('px-stats-restart-');
   const dbPath = path.join(dir, 'parallix.db');
   try {
@@ -159,7 +155,7 @@ test('a recorded measurement survives a full store restart and is still reported
     }
 
     const logs: string[] = [];
-    statsCommand(['--today', '2026-06-23'], {
+    await statsCommand(['--today', '2026-06-23'], {
       rootDir: dir,
       dbPath,
       log: (line: string) => logs.push(String(line)),

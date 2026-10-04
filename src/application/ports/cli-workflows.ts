@@ -270,12 +270,17 @@ export interface IntegrateWorkflowPort {
 /** Adapter operations required by the stats reporting workflow. The application
  * owns the sequence; CLI and infrastructure provide these operations. */
 export interface StatsWorkflowPort<Row = unknown> {
-  loadMeasurements(_options: Record<string, unknown>): readonly Row[];
-  resolveClassification(_slug: string, _options: Record<string, unknown>): unknown;
-  deriveImplementerAndFixRounds(_slug: string, _options: Record<string, unknown>): unknown;
-  resolveRepositoryName(_options: Record<string, unknown>): string;
-  lookupForgejo?(_slug: string, _options: Record<string, unknown>): unknown;
-  backfill?(_options: Record<string, unknown>): unknown;
+  loadMeasurements(): Promise<readonly Row[]>;
+  loadMissionFlow(): Promise<readonly StatsMissionFlow[] | null>;
+}
+
+/** Lifecycle data consumed by statistics presentation without exposing a store. */
+export interface StatsMissionFlow {
+  readonly repo: string;
+  readonly mission: string;
+  readonly closedAt: string;
+  readonly labels: readonly string[];
+  readonly implementer?: string | null;
 }
 
 /** Context passed between draft workflow steps.

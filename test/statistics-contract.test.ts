@@ -102,6 +102,7 @@ test('task-2347.08: CLI delegates identity, completion, and window rules to stat
   const source = [
     'src/adapters/cli/commands/stats.ts',
     'src/adapters/cli/commands/stats-report-rendering.ts',
+    'src/application/services/statistics-row.ts',
   ].map(file => fs.readFileSync(path.join(root, file), 'utf8')).join('\n');
   assert.match(source, /statisticsMissionKey\(row\)/);
   assert.match(source, /statisticsRowInWindow\(row, window\)/);
@@ -238,3 +239,51 @@ function gitAdapter(): GitReadAdapter {
 function operationLogAdapter(): OperationLogReadAdapter {
   return { async loadOperationLog() { return []; } };
 }
+
+test('stats CLI renders the application-selected population without selecting completion again (TASK-2637.04)', async () => {
+  const { StatsCommandUseCase } = await import('../src/application/stats-command-use-case.js');
+  const { createStatsCommand } = await import('../src/interfaces/cli/stats.js');
+  const { selectStatsReport } = await import('../src/application/services/statistics-report-selection.js');
+  const rows = [
+    { repo: 'r', mission: 'task-done', date: '2026-06-01', implementer: 'codex', stage: 'default', classification: 'user_value', pr_fix_rounds: '2' },
+    { repo: 'r', mission: 'task-active', date: '2026-06-23', implementer: 'claude', stage: 'active', classification: 'ai_sdlc', pr_fix_rounds: '9' },
+  ];
+  const flow = [
+    { repo: 'r', mission: 'task-done', closedAt: '2026-06-23T12:00:00Z', labels: ['user_value'], implementer: 'codex' },
+    { repo: 'r', mission: 'task-no-telemetry', closedAt: '2026-06-23T13:00:00Z', labels: ['ai_sdlc'], implementer: 'custom' },
+  ];
+  for (const mode of ['weekly', 'range'] as const) {
+    const request = { mode, today: '2026-06-23', from: '2026-06-23', to: '2026-06-23' };
+    const selection = selectStatsReport(rows, flow, request);
+    const reportRows = [...selection.current.completedMissions];
+    assert.deepEqual(reportRows.map(row => row.mission), ['task-done'], 'closure date selects old telemetry for completed performance');
+    assert.deepEqual(selection.current.windowedRows.map(row => row.mission), ['task-active'], 'spend still uses measurement dates');
+    const lines: string[] = [];
+    const command = createStatsCommand({
+      // Deliberately supply no raw lifecycle population: the contracted
+      // selection is sufficient, so accidentally recomputing from raw data fails.
+      execute: async () => ({ mode, rows, missionFlow: [], selection }),
+    }, {
+      renderWeekly: (data, options) => stats.renderWeeklyStatsReport(data, options),
+      renderRange: (data, options) => stats.renderRangeStatsReport(data, options),
+      renderMission: () => { throw new Error('unexpected mission route'); },
+      writeReport: () => { throw new Error('unexpected file write'); },
+      cohorts: async () => { throw new Error('unexpected cohort route'); },
+    });
+    await command(mode === 'weekly' ? ['--today', '2026-06-23'] : ['--from', '2026-06-23', '--to', '2026-06-23'], {
+      log: message => { lines.push(message); }, error: message => { throw new Error(message); },
+      exit: () => { throw new Error('unexpected exit'); },
+    });
+    const report = lines.join('\n').replace(/\u001b\[[0-9;]*m/g, '');
+    assert.match(report, /codex\s+1\s+2\.00/);
+    const performance = report.split(mode === 'weekly' ? 'Agent performance this week' : 'Agent performance')[1]!.split('Agent spend')[0]!;
+    assert.doesNotMatch(performance, /claude|custom/, 'active and telemetry-free missions receive no fabricated performance credit');
+    assert.equal(selection.current.flow?.total, 2, 'flow counts lifecycle completions without telemetry');
+    assert.match(report.split('Agent performance')[0]!, /2\s+1\s+1\s+0/);
+    // Also exercise the real use case rather than just the presentation seam.
+    const result = await new StatsCommandUseCase({
+      loadMeasurements: async () => rows, loadMissionFlow: async () => flow,
+    }).execute(request);
+    assert.deepEqual(result.selection, selection);
+  }
+});

@@ -123,7 +123,7 @@ process; run them with `npm test -- test/dependency-graph.test.ts`.
 The `handoff.ts` and `integrate.ts` command adapters no longer sequence: each
 binds concrete mechanisms to an application-owned port set and delegates to a
 use case under `src/application/`. Other command surfaces — notably
-`review/review-loop.ts`, `cli/commands/stats.ts` and `cli/commands/active.ts` —
+`review/review-loop.ts` and `cli/commands/active.ts` —
 still combine request handling, rendering and workflow sequencing with concrete
 integrations, and several mechanism packages (`git`, `forgejo`, `verification`,
 `agents`) wire three or more siblings too. Nothing in CI fails on workflow

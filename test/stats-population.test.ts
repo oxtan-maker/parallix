@@ -13,9 +13,7 @@
  */
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { createStatsCommand, createStatsWorkflowAdapter } from '../src/adapters/cli/commands/stats.js';
-import { StatsCommandUseCase } from '../src/application/stats-command-use-case.js';
-import type { MissionStore } from '../src/application/domain-ports.js';
+import { createStatisticsCommand, type StatsCompositionOptions } from '../src/composition/stats.js';
 import { SqliteMeasurementStore } from '../src/adapters/sqlite/measurement-store.js';
 import { ConcreteMetricsReadAdapter } from '../src/application/projections/metrics-read-adapter.js';
 import type { MissionId, MissionStatus } from '../src/domain/mission.js';
@@ -48,12 +46,8 @@ const INTAKE = '2026-06-01T09:00:00.000Z';
 const CLOSED = '2026-06-02T09:00:00.000Z';
 const NOW = '2026-06-05T09:00:00.000Z';
 
-// Render-only `px stats` invocation: the mission-flow report reads
-// measurement rows and never consults the Mission authority, so a store
-// placeholder satisfies the required wiring without touching derivation.
-const stats = createStatsCommand(
-  new StatsCommandUseCase(createStatsWorkflowAdapter({} as MissionStore)),
-);
+// Compose each invocation with its isolated storage dependencies.
+const stats = (args: string[], options: StatsCompositionOptions = {}) => createStatisticsCommand(options)(args, options);
 
 /** Hand-computed: two missions entered `done` in the reporting week. */
 const EXPECTED_COMPLETED = [DONE_WITH_TELEMETRY, DONE_WITHOUT_TELEMETRY];
@@ -146,5 +140,34 @@ describe("defect D: lifecycle `done` is the only completion definition", () => {
       assert.doesNotMatch(report, /Agent telemetry/, report);
       assert.doesNotMatch(report, /^\s*# missions\s{2,}# user value/m, report);
     });
+  });
+});
+
+it('weekly and range CLI reports preserve the composed lifecycle population across the application boundary (TASK-2637.04)', async () => {
+  await withStatisticsDatabase(async ({ db, databasePath, laneEventRepo, usageRepo }) => {
+    await seed(laneEventRepo, db);
+    const store = new SqliteMeasurementStore(databasePath);
+    try {
+      const command = createStatisticsCommand({
+        store, laneEventRepo, usageRepo, repositoryId: REPO, cohortMetadata: async () => new Map(),
+      });
+      for (const args of [
+        ['--today', '2026-06-05'],
+        ['--from', '2026-06-01', '--to', '2026-06-05'],
+      ]) {
+        const lines: string[] = [];
+        await command(args, {
+          log: message => { lines.push(String(message)); },
+          error: message => { throw new Error(String(message)); },
+          exit: () => { throw new Error('unexpected exit'); },
+        });
+        const report = lines.join('\n').replace(/\u001b\[[0-9;]*m/g, '');
+        const flow = report.split('Agent performance')[0]!;
+        assert.match(flow, /# completed missions/);
+        assert.match(flow, /2\s+1\s+0\s+1/, 'both lifecycle completions count, including the mission without telemetry');
+        assert.doesNotMatch(flow, /Mission flow unavailable/, 'the bound repositories reach the use case and presentation');
+        assert.doesNotMatch(report, /task-303/, 'telemetry cannot manufacture a completion');
+      }
+    } finally { store.close(); }
   });
 });

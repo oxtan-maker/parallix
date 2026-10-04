@@ -411,6 +411,10 @@ test('this repository exposes the full independent gate width and orders Sonar a
   const runner = fs.readFileSync(path.join(repoRoot, 'test', 'run-default-tests.ts'), 'utf8');
   assert.match(runner, /mkdtempSync\(path\.join\(executionRoot, 'tmp', 'fast-unit-scratch-'\)\)/,
     'the covered fast unit tier owns a process-specific scratch root, so concurrent gates never share one');
+  assert.match(runner, /mkdtempSync\(path\.join\(checkoutTestTmpdir\(executionRoot\), 'coverage-scratch-'\)\)/,
+    'covered workers own a scratch root outside the checkout so fixtures cannot inherit repository state (TASK-2637.04)');
+  assert.match(runner, /fs\.rmSync\(coverageScratchDir, \{ recursive: true, force: true \}\)/,
+    'the raw coverage payload scratch root is reclaimed on every runner exit path');
   // TASK-2622.04: Node's test runner records coverage in its own temporary
   // directory; a preset NODE_V8_COVERAGE only receives an unread ~1.5 GB copy.
   assert.doesNotMatch(runner, /NODE_V8_COVERAGE:/,

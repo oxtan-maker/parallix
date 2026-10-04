@@ -27,7 +27,7 @@ import {
   startReview,
   type ReviewedChange,
 } from '../src/domain/review.js';
-import { createStatsWorkflowAdapter } from '../src/adapters/cli/commands/stats.js';
+import { createStatsRecordingUseCase } from '../src/adapters/cli/commands/stats.js';
 import { submitReviewRound } from '../src/adapters/review/review-commands.js';
 import { bindReviewPersistence } from '../src/composition/review-persistence.js';
 import { MissionLifecycleService } from '../src/application/mission-lifecycle-service.js';
@@ -442,10 +442,9 @@ function reviewerOutcome(position: number, roundNumber: number, verdict: string,
 // ---------------------------------------------------------------------------
 // Case 1 — the production stats adapter must reach the Review aggregate.
 //
-// RED on parent: `createStatsWorkflowAdapter()` takes no MissionStore and
-// calls `deriveImplementerAndFixRounds(slug, rootDir)`, which returns
-// `{ implementer: 'unknown', prFixRounds: null, source: 'missing-authority' }`.
-// ---------------------------------------------------------------------------
+// TASK-2378 regression: the production recording port must reach the
+// authoritative Review aggregate, never misleading backlog/event-file metadata.
+// TASK-2637.04 extends this case through the application recording use case.
 
 test('live stats workflow adapter derives authoritative implementer and reviewFixRounds from the Review aggregate (task-2378)', async () => {
   const fixture = await createFixture('task-2378-stats-');
@@ -462,7 +461,7 @@ test('live stats workflow adapter derives authoritative implementer and reviewFi
     id: missionId(slug),
     repositoryId: repo,
     title: 'Stats adapter authority',
-    labels: [],
+    labels: ['user_value'],
     assignee: implementer,
     status: 'review' as const,
     rawStatus: 'review',
@@ -498,13 +497,19 @@ test('live stats workflow adapter derives authoritative implementer and reviewFi
   await fixture.store.save(mission, null);
 
   try {
-    const adapter = createStatsWorkflowAdapter(fixture.store);
-    const info = await adapter.deriveImplementerAndFixRounds(slug, { rootDir: fixture.root }) as {
-      implementer: string;
-      prFixRounds: number | null;
-      source: string;
+    const recording = createStatsRecordingUseCase({
+      missionStore: fixture.store, rootDir: fixture.root,
+      dbPath: path.join(fixture.root, 'recording.db'),
+      readMissionFlow: async () => [],
+    });
+    const recorded = await recording.recordIntegration({ slug, date: '2026-01-01' });
+    const info = {
+      source: recorded.metadataSource.implementer,
+      implementer: recorded.row.implementer,
+      prFixRounds: Number(recorded.row.pr_fix_rounds),
     };
 
+    assert.equal(recorded.row.classification, 'user_value', 'recording uses Mission labels, not misleading backlog labels');
     assert.equal(info.source, 'review-aggregate', 'production stats wiring must read the Review aggregate');
     assert.equal(info.implementer, 'configured-implementer', 'implementer comes from the Review aggregate, not the backlog task');
     assert.equal(info.prFixRounds, 2, 'two request-changes rounds = known 2');

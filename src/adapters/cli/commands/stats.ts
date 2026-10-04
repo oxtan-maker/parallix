@@ -1,10 +1,14 @@
 #!/usr/bin/env node
 
+type StatisticsMeasurementStore = Pick<MeasurementStorePort, 'listMeasurements' | 'upsertMeasurement'>
+  & Partial<Pick<MeasurementStorePort, 'findByMission'>>;
+type ReviewReadStore = Pick<MissionStore, 'load'>;
+
 interface StatsOptions {
   rootDir?: string;
   ensureDir?: boolean;
   /** Inject a `MeasurementStorePort` (fast isolated tests use a temp database). */
-  store?: unknown;
+  store?: StatisticsMeasurementStore;
   /** Override the measurement database path instead of `<PARALLIX_HOME>/parallix.db`. */
   dbPath?: string;
   groupBy?: string;
@@ -22,53 +26,18 @@ interface StatsOptions {
 import type { MissionStore } from '../../../application/domain-ports.js';
 import { missionId } from '../../../domain/mission.js';
 
-interface StatsRow {
-  date?: string;
-  repo?: string;
-  mission?: string;
-  classification?: string;
-  implementer?: string;
-  pr_fix_rounds?: string;
-  provider?: string;
-  model?: string;
-  implementer_agent?: string;
-  reviewer_agent?: string;
-  stage?: string;
-  input_tokens?: string;
-  output_tokens?: string;
-  cached_tokens?: string;
-  thoughts_tokens?: string;
-  context_tokens?: string;
-  tool_calls?: string;
-  openai_usage_before?: string;
-  openai_usage_after?: string;
-  openai_usage_delta?: string;
-  duration_minutes?: string;
-  cost_usd?: string;
-  isMerged?: boolean;
-  normalizedDate?: string;
-  normalizedMerged?: string;
-  review_count?: string;
-  reviewer?: string;
-  merged?: string | boolean;
-  has_pr?: string | boolean;
-  created_at?: string;
-  averageFixRounds?: string;
-  missions?: number;
-}
 
-import * as fs from 'node:fs';
-
-import * as fmt from '../../../application/presentation/cli-format.js';
-import { statsCohorts, resolveOperatorRepositories } from './stats-cohorts.js';
-import { ConcreteMetricsReadAdapter, missionCohortMetadata } from '../../../application/projections/metrics-read-adapter.js';
+import { statsCohorts } from './stats-cohorts.js';
 import { resolveCanonicalRepositoryId } from '../../git/repository-identity.js';
-import * as forgejo from '../../forgejo/forgejo.js';
 import * as statsReport from './stats-report.js';
 import { resolveMeasurementStore } from '../../sqlite/measurement-store.js';
 import { resolveMissionClassification } from './mission-classification.js';
-import { StatsCommandUseCase } from '../../../application/stats-command-use-case.js';
-import type { StatsWorkflowPort } from '../../../application/ports/cli-workflows.js';
+import type { StatsWorkflowPort, StatsMissionFlow } from '../../../application/ports/cli-workflows.js';
+import type { MeasurementStorePort } from '../../../application/measurement-ports.js';
+import type { StatsRow } from '../../../application/services/statistics-row.js';
+import type { StatisticsRecordingPort } from '../../../application/ports/statistics-recording.js';
+import { StatsRecordingUseCase, telemetryToStatsFields, type StageStatsRequest } from '../../../application/stats-recording-use-case.js';
+import { reviewStatistics } from '../../../application/services/review-statistics.js';
 // Report rendering lives in its own module (task-2369.02). Re-exported below so
 // every existing caller keeps importing it from `./stats.js`.
 import {
@@ -119,7 +88,7 @@ function resolveStatsRepoName(rootDir = process.cwd()) {
  * `options.store` lets callers (and fast isolated tests) inject a store bound
  * to a temporary database.
  */
-function getMeasurementStore(options: StatsOptions = {}) {
+function getMeasurementStore(options: StatsOptions = {}): StatisticsMeasurementStore {
   if (options.store) {return options.store;}
   return resolveMeasurementStore(options.dbPath ? { dbPath: options.dbPath } : {});
 }
@@ -188,7 +157,7 @@ function statsRowToMeasurement(row: StatsRow) {
     date: row.date || '',
     classification: row.classification || '',
     implementer: row.implementer || '',
-    pr_fix_rounds: row.pr_fix_rounds === undefined ? null : int(row.pr_fix_rounds),
+    pr_fix_rounds: row.pr_fix_rounds === undefined ? undefined : int(row.pr_fix_rounds),
     provider: row.provider || '',
     model: row.model || '',
     implementer_agent: row.implementer_agent || '',
@@ -220,77 +189,14 @@ function loadMeasurementRows(options: StatsOptions = {}) {
   };
 }
 
-/** One lifecycle-completed mission, as the mission-flow report reads it. */
-export interface MissionFlowCompletion {
-  readonly repo: string;
-  readonly mission: string;
-  readonly closedAt: string;
-  readonly labels: readonly string[];
-  readonly implementer?: string | null;
+export interface StatsReadBinding extends StatsOptions {
+  readonly readMissionFlow: () => Promise<readonly StatsMissionFlow[] | null>;
 }
 
-/**
- * The lifecycle-completed mission population behind the mission-flow report.
- *
- * This is deliberately the same `MissionOutcome[]` that `BoardMetrics` and
- * `px stats cohorts` report, read through `ConcreteMetricsReadAdapter`, so the
- * board and the CLI cannot disagree about which missions completed. Telemetry
- * rows answer a different question and are counted separately.
- *
- * Returns `null` — not an empty population — when lane history cannot be read
- * at all (the rollback bundle has no SQLite driver). The report then states
- * that mission flow is unavailable, because "not read" and "nothing completed"
- * are different facts.
- */
-async function readMissionFlowPopulation(options: {
-  rootDir: string;
-  laneEventRepo?: unknown;
-  usageRepo?: unknown;
-  repositoryId?: string;
-}): Promise<MissionFlowCompletion[] | null> {
-  try {
-    const repositories = options.laneEventRepo && options.usageRepo
-      ? { laneEventRepo: options.laneEventRepo as any, usageRepo: options.usageRepo as any }
-      : await resolveOperatorRepositories();
-    const repositoryId = (options.repositoryId ?? resolveCanonicalRepositoryId(options.rootDir)) as any;
-    const outcomes = await new ConcreteMetricsReadAdapter({
-      laneEventRepo: repositories.laneEventRepo,
-      usageRepo: repositories.usageRepo,
-      repositoryId,
-      cohortMetadata: async () => {
-        const { initOperatorState } = await import('../../sqlite/adapter-factory.js');
-        const { SqliteMissionStore } = await import('../../sqlite/mission-store.js');
-        const { db } = await initOperatorState();
-        return missionCohortMetadata(await new SqliteMissionStore(db).loadByRepository(repositoryId));
-      },
-    }).readOutcomes();
-    return outcomes.map((outcome) => ({ repo: String(repositoryId), mission: String(outcome.missionId), closedAt: outcome.closedAt, labels: outcome.labels, implementer: outcome.implementer }));
-  } catch {
-    return null;
-  }
-}
-
-/**
- * Infrastructure implementation supplied to the application workflow.
- *
- * `missionStore` is the operator Mission authority the stats derivation reads
- * the authoritative Review aggregate from (TASK-2378). It is required: a
- * caller that cannot supply the operator store has a wiring defect, not a
- * missing-data condition — there is no store-less adapter form (SC13).
- */
-export function createStatsWorkflowAdapter(missionStore: MissionStore): StatsWorkflowPort<StatsRow> {
+export function createStatsWorkflowAdapter(binding: StatsReadBinding): StatsWorkflowPort<StatsRow> {
   return {
-    loadMeasurements: (options) => loadMeasurementRows(options as StatsOptions).rows,
-    resolveClassification: (slug, options) => resolveMissionClassification(slug, String(options.rootDir || process.cwd())),
-    // No `px stats` render path calls this method: the rendered rows are the
-    // measurement rows `recordIntegrationStats` wrote at integrate time, which
-    // is where the authoritative derivation already happened. It stays on the
-    // port because the derivation is the port's contract — do not "fix" the
-    // render path to derive per row, which would re-derive at read time from a
-    // Mission whose Review has since advanced.
-    deriveImplementerAndFixRounds: (slug, options) => deriveImplementerAndFixRounds(slug, String(options.rootDir || process.cwd()), missionStore),
-    resolveRepositoryName: (options) => resolveStatsRepoName(String(options.rootDir || process.cwd())),
-    lookupForgejo: (slug, options) => forgejo.getPrStatus(slug, String(options.rootDir || process.cwd())),
+    loadMeasurements: async () => loadMeasurementRows(binding).rows,
+    loadMissionFlow: binding.readMissionFlow,
   };
 }
 
@@ -316,23 +222,6 @@ const { formatStatsTable, renderWeeklyStatsReport, renderRangeStatsReport } = st
 
 
 /**
- * @param {string} slug
- * @param {string} finalImplementer
- * @param {string} latestRound
- * @param {string} [rootDir]
- */
-// @ts-ignore -- retained reporting helper is dynamically typed
-/**
- * @param {string} slug
- * @param {string} [rootDir]
- */
-// @ts-ignore -- retained reporting helper is dynamically typed
-/**
- * @param {string} slug
- * @param {string} [rootDir]
- */
-// @ts-ignore -- retained reporting helper is dynamically typed
-/**
  * Load a mission's `Review` aggregate from the operator database.
  *
  * The statistics projection reads review data through `SqliteMissionStore`
@@ -344,7 +233,7 @@ const { formatStatsTable, renderWeeklyStatsReport, renderRangeStatsReport } = st
  * @returns {Promise<import('../../../domain/review.js').Review|null>}  Null when the mission has no Review.
  */
 // @ts-ignore -- retained reporting helper is dynamically typed
-async function loadMissionReview(slug, _rootDir = process.cwd(), missionStore: MissionStore) {
+async function loadMissionReview(slug, _rootDir = process.cwd(), missionStore: ReviewReadStore) {
   if (!missionStore) {
     throw new Error(
       `loadMissionReview requires a MissionStore: the stats caller must supply the operator store so ${slug} is read from the authoritative Review aggregate. Store omission is an invariant error; there is no heuristic fallback.`,
@@ -362,68 +251,20 @@ async function loadMissionReview(slug, _rootDir = process.cwd(), missionStore: M
  * @param {string} [rootDir]
  */
 // @ts-ignore -- retained reporting helper is dynamically typed
-async function deriveImplementerAndFixRounds(slug, rootDir = process.cwd(), missionStore: MissionStore) {
+async function deriveImplementerAndFixRounds(slug, rootDir = process.cwd(), missionStore: ReviewReadStore) {
   if (!missionStore) {
     throw new Error(
       `deriveImplementerAndFixRounds requires a MissionStore: the stats caller must supply the operator store so ${slug} is read from the authoritative Review aggregate. Store omission is an invariant error; there is no PR, Git, or backlog fallback.`,
     );
   }
-  const review = await loadMissionReview(slug, rootDir, missionStore);
-  const rounds = review ? review.rounds : [];
-  if (rounds.length > 0) {
-    const implementer = normalizeImplementer(rounds[rounds.length - 1].implementer);
-    if (implementer) {
-      // Primary: count from reviewEvents — the live review loop writes
-      // reviewer_outcome events with verdict 'request-changes' via
-      // persistEventInStore. This is the authoritative source.
-// @ts-ignore -- retained reporting helper is dynamically typed
-      const events = review.reviewEvents || [];
-      const hasOutcomes = events.some((e) => e.eventType === 'reviewer_outcome');
-      const eventCount = events.filter(
-        (e) => e.eventType === 'reviewer_outcome' && e.verdict === 'request-changes',
-      ).length;
-
-      // Fallback: rounds[].decision.kind === 'changes-requested' for
-      // pre-cutover missions or missions seeded via applyReviewerCommand.
-      // Filter by implementer to ensure we count rounds for the correct implementer.
-      const decisionCount = rounds.filter(
-        (round) => round.decision?.kind === 'changes-requested' && round.implementer === implementer,
-      ).length;
-
-      if (eventCount > 0) {
-        return { implementer, prFixRounds: eventCount, source: 'review-aggregate' };
-      }
-      if (decisionCount > 0) {
-        return { implementer, prFixRounds: decisionCount, source: 'review-aggregate' };
-      }
-
-      // reviewEvents has outcomes (live loop ran) but none requested changes.
-      // This is a determined zero — approved first time or comment-only.
-      if (hasOutcomes) {
-        return { implementer, prFixRounds: 0, source: 'review-aggregate' };
-      }
-
-      // No fix-round signal from either source — count cannot be determined.
-      // Return null so callers exclude this mission from averages.
-      return { implementer, prFixRounds: null, source: 'review-aggregate' };
-    }
-  }
-
-  // Store present but no Review aggregate (or no implementer on the last
-  // round): unknown, never a fabricated zero and never an external lookup
-  // (PR comments, Git history, or backlog text).
-  return {
-    implementer: 'unknown',
-    prFixRounds: null,
-    source: 'no-review',
-  };
+  return reviewStatistics(await loadMissionReview(slug, rootDir, missionStore));
 }
 
 /**
  * Resolve classification from the Mission aggregate used by integration.
  * Missing, unreadable, or unclassified state is an error.
  */
-async function resolveStoredMissionClassification(slug: string, missionStore: MissionStore) {
+async function resolveStoredMissionClassification(slug: string, missionStore: ReviewReadStore) {
   if (!missionStore) {throw new Error('Mission store is required for statistics classification.');}
   let result;
   try {
@@ -456,7 +297,7 @@ async function resolveStoredMissionClassification(slug: string, missionStore: Mi
  * @param {UpsertStatsRowOptions} options
  */
 // @ts-ignore -- retained reporting helper is dynamically typed
-function upsertMeasurementRow(row: StatsRow, options: {rootDir?: string, store?: unknown, dbPath?: string} = {}) {
+function upsertMeasurementRow(row: StatsRow, options: StatsOptions = {}) {
   /** @type {UpsertStatsRowOptions} */
   const opts = options;
   const canonicalRow = canonicalizeStatsRow(row, /** @type {any} */ ({ rootDir: opts.rootDir }));
@@ -476,450 +317,84 @@ function upsertMeasurementRow(row: StatsRow, options: {rootDir?: string, store?:
   return { changed, row: canonicalRow, data };
 }
 
-/**
- * @param {RecordIntegrationStatsOptions} options
- */
-// @ts-ignore -- retained reporting helper is dynamically typed
-// @ts-ignore -- retained reporting helper is dynamically typed
-async function recordIntegrationStats(options = {}) {
-  /** @type {RecordIntegrationStatsOptions} */
-  const opts = options;
-// @ts-ignore -- retained reporting helper is dynamically typed
-  const { slug, rootDir = process.cwd(), date = formatDateOnly(new Date()), store = undefined, dbPath = undefined, missionStore } = opts;
-  if (!slug) {
-    throw new Error('recordIntegrationStats requires a mission slug.');
-  }
-  if (!missionStore) {
-    throw new Error(
-      'recordIntegrationStats requires a MissionStore: the post-integration stats caller must supply the operator store so the implementer and fix rounds are read from the authoritative Review aggregate. Store omission is an invariant error; there is no heuristic fallback.',
-    );
-  }
+export interface StatsRecordingOptions extends StatsOptions {
+  slug?: string;
+  stage?: string;
+  date?: string;
+  implementer?: string;
+  reviewer?: string;
+  prFixRounds?: string | null;
+  telemetry?: StageStatsRequest['telemetry'];
+  durationMinutes?: number;
+  model?: string | null;
+  missionStore?: ReviewReadStore;
+  readMissionFlow?: StatsReadBinding['readMissionFlow'];
+}
 
-  const classification = await resolveStoredMissionClassification(slug, missionStore);
-  const implementerInfo = await deriveImplementerAndFixRounds(slug, rootDir, missionStore);
- const result = upsertMeasurementRow({
-    date,
-    mission: slug,
-    classification,
-// @ts-ignore -- retained reporting helper is dynamically typed
-    implementer: implementerInfo.implementer,
-// @ts-ignore -- retained reporting helper is dynamically typed
-    pr_fix_rounds: implementerInfo.prFixRounds,
- }, { rootDir, store, dbPath });
-  // The row is already persisted; a report that cannot be read or rendered is
-  // returned as `reportError` rather than failing the recording.
-  let report: string | null = null;
-  let reportError: string | undefined;
-  try {
-    const missionFlow = await readMissionFlowPopulation({ rootDir });
-    report = renderWeeklyStatsReport(result.data.rows, { today: date, rootDir, missionFlow });
-  } catch (err: any) {
-    reportError = err && err.message ? err.message : String(err);
-  }
-
- return {
-   ...result,
-    report,
-    reportError,
-    metadataSource: {
-      classification: 'mission-aggregate',
-      implementer: implementerInfo.source,
+export function createStatsRecordingUseCase(options: StatsRecordingOptions): StatsRecordingUseCase {
+  const rootDir = options.rootDir || process.cwd();
+  const port: StatisticsRecordingPort = {
+    get repositoryName() { return resolveStatsRepoName(rootDir); },
+    readClassification: slug => resolveMissionClassification(slug, rootDir),
+    readStoredClassification: slug => resolveStoredMissionClassification(slug, options.missionStore!),
+    readReview: slug => loadMissionReview(slug, rootDir, options.missionStore!),
+    readMeasurements: () => loadMeasurementRows(options).rows,
+    readFixRoundHistory: slug => {
+      const store = getMeasurementStore(options);
+      if (!store.findByMission) { throw new Error('Measurement history reader is unavailable.'); }
+      return store.findByMission(slug).map(record => record.pr_fix_rounds);
     },
+    upsert: row => upsertMeasurementRow(row, options),
+    readMissionFlow: options.readMissionFlow ?? (async () => null),
   };
+  return new StatsRecordingUseCase(port);
 }
 
-/**
- * Map an agent telemetry object onto the numeric stats columns. The mapping is
- * agent-family-agnostic: it consumes the normalized fields produced by either
- * `codex-telemetry.js` (`extractCodexTelemetry`) or `claude-telemetry.js`
- * (`extractClaudeTelemetryFromStdout`) — both expose the same shape
- * (`inputTokens`, `outputTokens`, `cachedTokens`, `totalTokens`, `toolCalls`,
- * `provider`, `model`, `usagePercent`). When telemetry is absent the token
- * columns are honest zeros and provider/model fall back to the agent family
- * name.
- *
- * NOTE: `context_tokens` records the session's cumulative `total_tokens` as a
- * coarse context-size signal. `cached_tokens` records prompt-cache reads
- * (Codex `cached_input_tokens`; Claude `cache_read_input_tokens`).
- * `openai_usage_after` records the rate-limit `used_percent` snapshot when
- * available — Codex exposes it; Claude has no CLI rate-limit endpoint so it
- * stays 0. `openai_usage_before`/`_delta` are left at 0 — proper
- * before/after/delta attribution is deferred to the follow-up mission that adds
- * the regression model.
- */
-/**
- * @param {*} telemetry
- * @param {TelemetryToStatsOptions} options
- */
-// @ts-ignore -- retained reporting helper is dynamically typed
-function telemetryToStatsFields(telemetry: any, options: {agentFamily: string, durationMinutes?: number, model?: string} = {}) {
-  const { agentFamily, durationMinutes = 0, model } = options;
-  const t = telemetry || null;
-  const usageAfter = t && typeof t.usagePercent === 'number' ? Math.round(t.usagePercent) : 0;
+function stageRequest(options: StatsRecordingOptions): StageStatsRequest {
   return {
-    provider: (t && t.provider) || model || agentFamily || '',
-    model: (t && t.model) || model || agentFamily || '',
-    input_tokens: String((t && t.inputTokens) || 0),
-    output_tokens: String((t && t.outputTokens) || 0),
-    cached_tokens: String((t && t.cachedTokens) || 0),
-    thoughts_tokens: String((t && t.thoughtsTokens) || 0),
-    context_tokens: String((t && t.totalTokens) || 0),
-    tool_calls: String((t && t.toolCalls) || 0),
-    openai_usage_before: '0',
-    openai_usage_after: String(usageAfter),
-    openai_usage_delta: '0',
-    duration_minutes: String(Math.max(0, Math.round(durationMinutes) || 0)),
-    cost_usd: String((t && typeof t.cost_usd === 'number') ? t.cost_usd : 0),
+    slug: options.slug || '', stage: options.stage || '',
+    date: options.date ?? formatDateOnly(new Date()),
+    implementer: options.implementer, reviewer: options.reviewer, prFixRounds: options.prFixRounds,
+    telemetry: options.telemetry, durationMinutes: options.durationMinutes, model: options.model,
   };
 }
 
-/**
- * Record one stage row (draft/active/review/...) keyed by (repo, mission, stage).
- * Shared by the draft launcher and the review-loop hooks. Token columns come
- * from `telemetry` when supplied, else honest zeros.
-  */
-/**
- * @param {RecordStageStatsOptions} options
- */
-// @ts-expect-error recordStageStats options missing slug/stage
-function recordStageStats(options: {slug: string, stage: string, rootDir?: string, date?: string, implementer?: string, reviewer?: string, prFixRounds?: string, telemetry?: any, durationMinutes?: number, model?: string} = {}) {
-  /** @type {any} */
-  const opts = options;
-  // `prFixRounds` is deliberately not defaulted to '0'. A draft or active stage
-  // row has no review-fix count yet, and writing a zero there fabricates a
-  // measured zero that the board can no longer tell from unknown (TASK-2363).
-// @ts-ignore -- retained reporting helper is dynamically typed
-  const { slug, stage, rootDir = process.cwd(), date = formatDateOnly(new Date()), implementer, reviewer = '', prFixRounds = undefined, telemetry = null, durationMinutes = 0, model = null, store = undefined, dbPath = undefined } = opts;
-  if (!slug) {throw new Error('recordStageStats requires a mission slug.');}
-  if (!stage) {throw new Error('recordStageStats requires a stage.');}
-
-  const { classification, error: classificationError } = resolveMissionClassification(slug, rootDir);
-  if (!classification) {
-    throw new Error(`Cannot record stage stats for ${slug}: ${classificationError || 'missing classification'}`);
+async function recordIntegrationStats(options: StatsRecordingOptions = {}) {
+  if (!options.slug) { throw new Error('recordIntegrationStats requires a mission slug.'); }
+  if (!options.missionStore) {
+    throw new Error('recordIntegrationStats requires a MissionStore: the post-integration stats caller must supply the operator store so the implementer and fix rounds are read from the authoritative Review aggregate. Store omission is an invariant error; there is no heuristic fallback.');
   }
-  const agentFamily = implementer || reviewer || 'unknown';
-
-  return upsertMeasurementRow({
-    date,
-    mission: slug,
-    classification,
-    implementer: agentFamily,
-    pr_fix_rounds: prFixRounds,
-    implementer_agent: implementer || '',
-    reviewer_agent: reviewer || '',
-    stage,
-// @ts-ignore -- retained reporting helper is dynamically typed
-    ...telemetryToStatsFields(telemetry, { agentFamily, durationMinutes, model }),
-  }, { rootDir, store, dbPath });
-}
-
-/**
- * @param {{slug: string, stage: string, rootDir?: string, date?: string, implementer?: string, reviewer?: string, prFixRounds?: string, telemetry?: {provider?: string, model?: string, inputTokens?: number, outputTokens?: number, cachedTokens?: number, totalTokens?: number, toolCalls?: number, usagePercent?: number, cost_usd?: number} | null, durationMinutes?: number, model?: string}} options
- */
-function accumulateStageStats(options: {slug: string, stage: string, rootDir?: string, date?: string, implementer?: string, reviewer?: string, prFixRounds?: string, telemetry?: any, durationMinutes?: number, model?: string}) {
-  // Unknown stays unknown here too; see recordStageStats above.
-// @ts-ignore -- retained reporting helper is dynamically typed
-  const { slug, stage, rootDir = process.cwd(), date = formatDateOnly(new Date()), implementer, reviewer = '', prFixRounds = undefined, telemetry = null, durationMinutes = 0, model = null, store = undefined, dbPath = undefined } = options;
-  if (!slug) {throw new Error('accumulateStageStats requires a mission slug.');}
-  if (!stage) {throw new Error('accumulateStageStats requires a stage.');}
-
-  const { classification, error: classificationError } = resolveMissionClassification(slug, rootDir);
-  if (!classification) {
-    throw new Error(`Cannot record stage stats for ${slug}: ${classificationError || 'missing classification'}`);
-  }
-  const agentFamily = implementer || reviewer || 'unknown';
-  const incomingRow = canonicalizeStatsRow({
-    date,
-    mission: slug,
-    classification,
-    implementer: agentFamily,
-    pr_fix_rounds: prFixRounds,
-    implementer_agent: implementer || '',
-    reviewer_agent: reviewer || '',
-    stage,
-    ...telemetryToStatsFields(telemetry, { agentFamily, durationMinutes, model: model || undefined }),
-  }, { rootDir });
-
-  const data = loadMeasurementRows({ rootDir, store, dbPath });
-// @ts-ignore -- retained reporting helper is dynamically typed
-  const existing = data.rows.find(row => sameStatsIdentity(row, incomingRow));
-  if (!existing) {
-// @ts-ignore -- retained reporting helper is dynamically typed
-    return upsertMeasurementRow(incomingRow, { rootDir, store, dbPath });
-  }
-
-  const mergedRow = {
-    ...existing,
-    date: incomingRow.date,
-    classification: incomingRow.classification,
-    implementer: incomingRow.implementer,
-    pr_fix_rounds: incomingRow.pr_fix_rounds,
-    implementer_agent: incomingRow.implementer_agent,
-    reviewer_agent: incomingRow.reviewer_agent,
-    provider: mergeLabel(String(existing.provider), String(incomingRow.provider)),
-    model: mergeLabel(String(existing.model), String(incomingRow.model)),
-    input_tokens: accumulateIntegerStrings(String(existing.input_tokens), String(incomingRow.input_tokens)),
-    output_tokens: accumulateIntegerStrings(String(existing.output_tokens), String(incomingRow.output_tokens)),
-    cached_tokens: accumulateIntegerStrings(String(existing.cached_tokens), String(incomingRow.cached_tokens)),
-    thoughts_tokens: accumulateIntegerStrings(String(existing.thoughts_tokens), String(incomingRow.thoughts_tokens)),
-    context_tokens: accumulateIntegerStrings(String(existing.context_tokens), String(incomingRow.context_tokens)),
-    tool_calls: accumulateIntegerStrings(String(existing.tool_calls), String(incomingRow.tool_calls)),
-    openai_usage_before: accumulateIntegerStrings(String(existing.openai_usage_before), String(incomingRow.openai_usage_before), { mode: 'replace' }),
-    openai_usage_after: accumulateIntegerStrings(String(existing.openai_usage_after), String(incomingRow.openai_usage_after), { mode: 'max' }),
-    openai_usage_delta: accumulateIntegerStrings(String(existing.openai_usage_delta), String(incomingRow.openai_usage_delta)),
-    duration_minutes: accumulateIntegerStrings(String(existing.duration_minutes), String(incomingRow.duration_minutes)),
-    cost_usd: accumulateDecimalStrings(String(existing.cost_usd), String(incomingRow.cost_usd)),
-  };
-
-  return upsertMeasurementRow(mergedRow, { rootDir, store, dbPath });
-}
-
-/**
- * Default the per-mission fix-round count when the caller didn't supply one.
- *
- * Fix rounds are a property of the mission/implementer (NOT of integration), so
- * the count is stamped onto the implementer-attributed stage rows as the loop
- * progresses; the final round's row then carries the true count even if the
- * mission is never integrated. A stage row written without a count carries the
- * highest count already recorded for the mission forward, so an intermediate
- * row can't silently reset it to zero.
- *
- * This reads the measurement store (SQLite), synchronously, on the same port
- * the row is about to be written through — the review event files it used to
- * read are gone, and the Review aggregate is only reachable asynchronously.
- */
-/**
- * A caller that supplies no count, with no prior KNOWN count on the mission,
- * has measured nothing — so this returns `undefined` (unknown), never `'0'`.
- * NULL rows are skipped when searching for the prior maximum: `[NULL, NULL]`
- * is unknown, `[NULL, 0]` is a known zero, `[NULL, 2]` is a known 2. A store
- * that cannot be read yields unknown as well, because a read failure is not
- * evidence of zero rounds (TASK-2369 Part D).
- *
- * @param {string} slug
- * @param {string} rootDir
- * @param {string|null|undefined} provided
- * @param{{store?: unknown, dbPath?: string}} storeOptions
- */
-function defaultPrFixRounds(slug: string, rootDir: string, provided: string | null | undefined, storeOptions: {store?: unknown, dbPath?: string} = {}) {
-  if (provided !== undefined && provided !== null) {return provided;}
-  if (!slug) {return undefined;}
-  try {
-    // The same port the row is about to be written through, so a caller writing
-    // to an injected store reads its own history rather than the ambient one.
-    const store = getMeasurementStore({ rootDir, ...storeOptions });
-// @ts-ignore -- retained reporting helper is dynamically typed
-    const recorded = store.findByMission(slug)
-// @ts-ignore -- retained reporting helper is dynamically typed
-      .map((record) => record.pr_fix_rounds)
-// @ts-ignore -- retained reporting helper is dynamically typed
-      .filter((value) => value !== null && value !== undefined)
-// @ts-ignore -- retained reporting helper is dynamically typed
-      .map((value) => Number.parseInt(String(value), 10) || 0);
-    return recorded.length > 0 ? String(Math.max(...recorded)) : undefined;
-  } catch {
-    return undefined;
-  }
-}
-
-/**
- * @param {RecordActiveStatsOptions} options
- */
-// @ts-expect-error recordActiveStats options missing slug
-function recordActiveStats(options: {slug: string, stage?: string, rootDir?: string, implementer?: string, prFixRounds?: string, telemetry?: any, durationMinutes?: number, model?: string, store?: unknown, dbPath?: string} = {}) {
-  /** @type {any} */
-  const opts = options;
-  const { stage = 'active', slug, rootDir = process.cwd(), prFixRounds, model, ...rest } = opts;
-  return recordStageStats({
-    stage, slug, rootDir, model,
-    prFixRounds: defaultPrFixRounds(slug, rootDir, prFixRounds, { store: rest.store, dbPath: rest.dbPath }),
-    ...rest,
+  const result = await createStatsRecordingUseCase(options).recordIntegration({
+    slug: options.slug, date: options.date ?? formatDateOnly(new Date()),
   });
-}
-
-/**
- * @param {RecordReviewStatsOptions} options
- */
-// @ts-expect-error recordReviewStats options missing slug
-function recordReviewStats(options: {slug: string, stage?: string, rootDir?: string, reviewer?: string, implementer?: string, prFixRounds?: string, model?: string, store?: unknown, dbPath?: string} = {}) {
-  /** @type {any} */
-  const opts = options;
-  const { stage = 'review', slug, rootDir = process.cwd(), reviewer, implementer, prFixRounds, model, ...rest } = opts;
-  // A review row's TOKENS belong to the reviewer (telemetry is the reviewer's
-  // session), but the row stays keyed to the MISSION'S implementer so the weekly
-  // per-implementer summary counts the mission under whoever implemented it — not
-  // under the reviewer. The phase report surfaces the reviewer for review phases
-  // via `reviewer_agent` (see renderMissionPhaseReport), so no information is lost.
-  return recordStageStats({
-    stage, slug, rootDir, reviewer, model,
-    implementer: implementer || reviewer,
-    prFixRounds: defaultPrFixRounds(slug, rootDir, prFixRounds, { store: rest.store, dbPath: rest.dbPath }),
-    ...rest,
-  });
-}
-
-/**
- * @param {Function} [log]
- */
-function printStatsUsage(log: typeof fmt.log.plain = fmt.log.plain) {
-  log(`Usage: px stats [--today YYYY-MM-DD] [--from YYYY-MM-DD --to YYYY-MM-DD] [--output <file>]
-       px stats cohorts [--by label|implementer|model|provider] [--min-sample <n>]
-
-Examples:
-  px stats
-  px stats --today 2026-05-18
-  px stats --from 2026-05-01 --to 2026-05-31
-  px stats architecture migration
-  px stats --mission architecture migration
-  px stats cohorts
-  px stats cohorts --by implementer --min-sample 8
-
-Notes:
-  - The measurement DATABASE is the authority for statistics:
-    <PARALLIX_HOME>/parallix.db. The command reads the database, and an
-    unavailable database fails the command.
-  - Pass a mission slug (e.g. architecture migration) or --mission <slug> to print a single
-    mission broken down by phase (draft, execute, review, follow-up).
-  - "px stats cohorts" compares completed missions along one experiment
-    dimension. Every cohort figure is printed beside its sample size n, and a
-    cohort with too few completed missions is marked low-sample rather than
-    presented as a comparable result. Run "px stats cohorts --help" for detail.
-  - Workflow-owned stats datasets print the current/previous-week summary tables by default.
-  - Use --from and --to together to print one inclusive arbitrary-range report.`);
-}
-
-/**
- * @param {string[]} args
- * @param {StatsCmdOptions} options
- */
-export function createStatsCommand(useCase: StatsCommandUseCase<StatsRow>) {
-  return async function stats(args: string[], options: {log?: Function, error?: Function, exit?: Function, rootDir?: string, store?: unknown, dbPath?: string, laneEventRepo?: unknown, usageRepo?: unknown, repositoryId?: string} = {}) {
-  /** @type {StatsCmdOptions} */
-  const opts = options;
-  const log = opts.log || fmt.log.plain;
-  const error = opts.error || fmt.log.plainError;
-  const exit = opts.exit || process.exit;
-  const rootDir = opts.rootDir || process.cwd();
-
-  // Cohort comparison reads lane-event history as well as measurements, so it
-  // owns its own module — including its own --help. The weekly, range, and
-  // mission paths below are untouched by it.
-  if (args[0] === 'cohorts') {
-    return statsCohorts(args.slice(1), {
-// @ts-ignore -- retained reporting helper is dynamically typed
-      log, error, exit, rootDir,
-// @ts-ignore -- retained reporting helper is dynamically typed
-      laneEventRepo: opts.laneEventRepo,
-// @ts-ignore -- retained reporting helper is dynamically typed
-      usageRepo: opts.usageRepo,
-// @ts-ignore -- retained reporting helper is dynamically typed
-      repositoryId: opts.repositoryId,
-    });
-  }
-
-  if (args.includes('--help') || args.includes('-h')) {
-// @ts-ignore -- retained reporting helper is dynamically typed
-    printStatsUsage(log);
-    return;
-  }
-
-  const { outputFile, today, from, to, mission } = parseStatsArgs(args);
-
-  // Mission-phase breakdown from the measurement database.
-  if (mission) {
-    let rows;
+  let report: string | null = null;
+  let reportError = result.reportError;
+  if (result.selection) {
     try {
-      rows = useCase.execute({
-          mode: 'mission',
-          mission,
-          options: { rootDir, store: opts.store, dbPath: opts.dbPath },
-        }).rows;
-    } catch (err: any) {
-      error(fmt.status('FAIL', err.message));
-      exit(1);
-      return;
-    }
-    emitStatsReport(renderMissionPhaseReport(rows, mission, { rootDir }), outputFile, log);
-    return;
+      report = renderWeeklyStatsReport(result.data.rows, { rootDir: options.rootDir, selection: result.selection });
+    } catch (error) { reportError = error instanceof Error ? error.message : String(error); }
   }
-
-  // Validate range args before async work so sync callers see the error.
-  if (from !== null || to !== null) {
-    try { createRangeWindow({ from: from || undefined, to: to || undefined }); }
-    catch (err: any) {
-      error(fmt.status('FAIL', err.message));
-      exit(1);
-      return;
-    }
-  }
-
-  let report;
-  try {
-      const result = useCase.execute({
-        mode: from !== null || to !== null ? 'range' : 'weekly',
-        from: from || undefined,
-        to: to || undefined,
-        today,
-        options: { rootDir, store: opts.store, dbPath: opts.dbPath },
-      });
-      const rows = result.rows;
-      log(fmt.status('INFO', `Loaded ${rows.length} measurements from the statistics database`));
-      // Mission flow is a lifecycle fact and telemetry is an agent fact. Both
-      // are read here so the report can state them side by side instead of
-      // letting one stand in for the other.
-      const missionFlow = await readMissionFlowPopulation({
-        rootDir,
-        laneEventRepo: opts.laneEventRepo,
-        usageRepo: opts.usageRepo,
-        repositoryId: opts.repositoryId,
-      });
-      report = from !== null || to !== null
-        ? renderRangeStatsReport(rows, { from: from || undefined, to: to || undefined, rootDir, missionFlow })
-        : renderWeeklyStatsReport(rows, { today, rootDir, missionFlow });
-  } catch (err: any) {
-    error(fmt.status('FAIL', err.message));
-    exit(1);
-    return;
-  }
-
-  emitStatsReport(report, outputFile, log);
-  };
+  return { changed: result.changed, row: result.row, data: result.data, metadataSource: result.metadataSource, report, reportError };
 }
 
-/** A report goes to `--output` when one was given, otherwise to the log. */
-function emitStatsReport(report: string, outputFile: string | null, log: Function): void {
-  if (!outputFile) { log(report); return; }
-  fs.writeFileSync(outputFile, `${report}\n`, 'utf8');
-  log(fmt.status('PASS', `Report written to ${outputFile}`));
+function recordStageStats(options: StatsRecordingOptions = {}) {
+  return createStatsRecordingUseCase(options).recordStage(stageRequest(options));
 }
 
-/** `--<flag> <value>` options and the field each one fills. */
-const STATS_VALUE_FLAGS: Readonly<Record<string, 'mission' | 'outputFile' | 'today' | 'from' | 'to'>> = {
-  '--mission': 'mission', '--output': 'outputFile', '--today': 'today', '--from': 'from', '--to': 'to',
-};
-// A positional mission slug selects a per-mission report.
-const MISSION_SLUG_RE = /^[a-z][a-z0-9]*-\d+$/i;
+function accumulateStageStats(options: StatsRecordingOptions) {
+  return createStatsRecordingUseCase(options).accumulateStage(stageRequest(options));
+}
 
-function parseStatsArgs(args: string[]) {
-  const parsed: any = { outputFile: null, today: new Date(), from: null, to: null, mission: null };
-  const positionalArgs: string[] = [];
-  for (let i = 0; i < args.length; i += 1) {
-    const arg = args[i];
-    const field = STATS_VALUE_FLAGS[arg];
-    if (field) {
-      // `--from`/`--to` accept an empty value so the range validator, not the
-      // parser, reports what is wrong with it.
-      const trailing = field === 'from' || field === 'to';
-      if (i + 1 < args.length) { parsed[field] = args[i + 1]; i += 1; }
-      else if (trailing) { parsed[field] = ''; i += 1; }
-      continue;
-    }
-    if (!arg.startsWith('--')) { positionalArgs.push(arg); }
-  }
-  if (!parsed.mission && positionalArgs.length > 0 && MISSION_SLUG_RE.test(positionalArgs[0])) {
-    parsed.mission = positionalArgs[0];
-  }
-  return parsed as { outputFile: string | null; today: Date; from: string | null; to: string | null; mission: string | null };
+function defaultPrFixRounds(slug: string, rootDir: string, provided: string | null | undefined, options: StatsOptions = {}) {
+  return createStatsRecordingUseCase({ ...options, rootDir }).defaultPrFixRounds(slug, provided);
+}
+
+function recordActiveStats(options: StatsRecordingOptions = {}) {
+  return createStatsRecordingUseCase(options).recordActive({ ...stageRequest(options), stage: options.stage });
+}
+
+function recordReviewStats(options: StatsRecordingOptions = {}) {
+  return createStatsRecordingUseCase(options).recordReview({ ...stageRequest(options), stage: options.stage });
 }
 
 // Module-level helper namespace (not a command): consumers use it for helpers
@@ -942,7 +417,6 @@ const _internals = {
   formatAgentSpendCell,
   colorAverageFixRounds,
   colorMissionCounts,
-  printStatsUsage,
 };
 
 const stats = {

@@ -14,7 +14,7 @@ export class LegacyStatsBackfillAdapter implements StatsBackfillPort {
    */
   constructor(
     private readonly _rootDir: string,
-    private readonly _measurementStore: { dbPath?: string; store?: unknown } = {},
+    private readonly _measurementStore: { dbPath?: string; store?: import('../../application/measurement-ports.js').MeasurementStorePort } = {},
     private readonly _missionStore: unknown = null,
   ) {}
 

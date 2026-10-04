@@ -77,6 +77,16 @@ if (fastUnit && coverageEnabled) {
   fastUnitScratchDir = fs.mkdtempSync(path.join(executionRoot, 'tmp', 'fast-unit-scratch-'));
 }
 
+// Node writes raw V8 payloads below TMPDIR. Give each covered invocation an
+// owned scratch root outside the checkout: fixtures must not inherit its Git
+// history, package metadata or configuration through ancestor discovery.
+// The finalized LCOV still goes to coverageDestination; cleanup removes this
+// invocation's payload on every runner exit path.
+let coverageScratchDir: string | null = null;
+if (coverageEnabled) {
+  coverageScratchDir = fs.mkdtempSync(path.join(checkoutTestTmpdir(executionRoot), 'coverage-scratch-'));
+}
+
 // Unit tests import production modules directly from `src/` and replace
 // dependencies through the ESM-native seam in `test/lib/module-mock.ts`
 // (node:test module mocking). There is no transpiled compatibility tree.
@@ -118,7 +128,7 @@ const child = spawn(meter ?? testNode, meter ? ['--cpu-report', cpuReportPath, t
     PARALLIX_EXECUTION_ROOT: executionRoot,
     PARALLIX_TEST_MANIFEST_DIR: testManifestDir,
     // Keeps tsx's transpile cache per checkout; see test/lib/test-tmpdir.ts.
-    TMPDIR: checkoutTestTmpdir(executionRoot),
+    TMPDIR: checkoutTestTmpdir(executionRoot, coverageScratchDir ?? undefined),
     ...(fastUnitScratchDir ? { PARALLIX_FAST_UNIT_SCRATCH_DIR: fastUnitScratchDir } : {}),
     // The profile belongs to this invocation only: runners that tests spawn as
     // fixtures keep their unprofiled argv and write no profile of their own.
@@ -178,6 +188,7 @@ process.on('SIGTERM', () => forwardSignal('SIGTERM'));
 function cleanupRunnerOwnedRoots() {
   cleanupRunnerTempRoots(testManifestDir);
   if (fastUnitScratchDir) { fs.rmSync(fastUnitScratchDir, { recursive: true, force: true }); }
+  if (coverageScratchDir) { fs.rmSync(coverageScratchDir, { recursive: true, force: true }); }
 }
 
 // Measure elapsed time for the suite-level budget check.

@@ -8,16 +8,11 @@ import path from 'path';
 import { mockModule, installModuleMocks } from './lib/module-mock.js';
 import { createRequire } from 'node:module';
 import { seedMissionDatabase } from './fixtures/review-state-db.js';
-import { createStatsCommand, createStatsWorkflowAdapter } from '../src/adapters/cli/commands/stats.js';
-import { StatsCommandUseCase } from '../src/application/stats-command-use-case.js';
+import { createStatisticsCommand, createStatsMissionFlowReader, type StatsCompositionOptions } from '../src/composition/stats.js';
 import { clearOperatorStateCache } from '../src/adapters/sqlite/adapter-factory.js';
 
-// Render-only `px stats` command: these tests exercise measurement-row reads
-// and never consult the Mission authority, so a store placeholder satisfies
-// the required wiring (SC13).
-const statsCommand = createStatsCommand(
-  new StatsCommandUseCase(createStatsWorkflowAdapter({})),
-);
+// Compose each invocation with its isolated storage dependencies.
+const statsCommand = (args: string[], options: StatsCompositionOptions = {}) => createStatisticsCommand(options)(args, options);
 const _require = createRequire(import.meta.url);
 const stats = mockModule<typeof import('../src/adapters/cli/commands/stats.js')>('../src/adapters/cli/commands/stats.js', import.meta.url);
 const forgejo = mockModule<typeof import('../src/adapters/forgejo/forgejo.js')>('../src/adapters/forgejo/forgejo.js', import.meta.url);
@@ -701,6 +696,7 @@ test('recordIntegrationStats reads Mission classification and Review aggregate f
       dbPath: dbFile,
       date: '2026-05-18',
       missionStore: restoreHome.store,
+      readMissionFlow: createStatsMissionFlowReader({ rootDir: root, missionStore: restoreHome.store }),
     });
     const repoName = stats.resolveStatsRepoName(root);
 
@@ -758,6 +754,7 @@ test('recordIntegrationStats returns the unchanged weekly report labels for inte
       dbPath: dbFile,
       date: '2026-05-18',
       missionStore: restoreHome.store,
+      readMissionFlow: createStatsMissionFlowReader({ rootDir: root, missionStore: restoreHome.store }),
     });
 
     const report = __mm2.stripAnsi(result.report);
@@ -787,7 +784,7 @@ test('task-1251 and task-1314: normalizeStatsRow migrates a legacy 5-column row 
   assert.equal(row.openai_usage_after, '0');
 });
 
-test('task-1314: stats mission reports filter to the active repo', () => {
+test('task-1314: stats mission reports filter to the active repo', async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'workflow-stats-mission-repo-'));
   try {
     const dbPath = path.join(root, 'parallix.db');
@@ -810,7 +807,7 @@ test('task-1314: stats mission reports filter to the active repo', () => {
     }, { dbPath });
 
     const logs = [];
-    statsCommand(['--mission', 'task-alpha'], {
+    await statsCommand(['--mission', 'task-alpha'], {
       rootDir: root,
       dbPath,
       log: line => logs.push(line),

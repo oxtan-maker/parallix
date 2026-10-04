@@ -21,6 +21,7 @@ import { SqliteSessionMarkerRepository } from '../adapters/sqlite/session-marker
 import type { SessionMarkerRepository } from '../application/ports/mission-store.js';
 import { repositoryId, type RepositoryId } from '../domain/repository.js';
 import { latestEvidencedCheckpoint } from '../domain/checkpoint.js';
+import { createStatsMissionFlowReader } from './stats.js';
 import { missionId } from '../domain/mission.js';
 import { resolveCanonicalRepositoryId } from '../adapters/git/repository-identity.js';
 import { createDefaultExecuteMissionRuntime, createExecuteMissionPorts } from '../adapters/mission/execute-mission-adapters.js';
@@ -99,6 +100,8 @@ export interface MissionApplicationServices {
    * no other command resolves to.
    */
   readonly repositoryId: RepositoryId;
+  /** Bound lifecycle population used by the post-integration statistics report. */
+  readonly readStatsMissionFlow?: () => Promise<readonly import('../application/ports/cli-workflows.js').StatsMissionFlow[] | null>;
   readonly intake: MissionIntakeService;
   readonly lifecycle: MissionLifecycleService;
   readonly integration: MissionIntegrationService;
@@ -386,11 +389,18 @@ export async function createMissionApplicationServices(
 
   const { SqliteOperationalHistoryRepository } = await import('../adapters/sqlite/operational-history-repository.js');
   const store = new SqliteMissionStore(db);
+  const { SqliteBoardLaneEventRepository } = await import('../adapters/sqlite/board-lane-event-repository.js');
+  const { SqliteUsageRepository } = await import('../adapters/sqlite/usage-repository.js');
+  const readStatsMissionFlow = createStatsMissionFlowReader({
+    rootDir, missionStore: store, repositoryId: repoId,
+    laneEventRepo: new SqliteBoardLaneEventRepository(db), usageRepo: new SqliteUsageRepository(db),
+  });
   const lifecycle = new MissionLifecycleService(store);
   const operationalHistory = new (await import('../application/services/operational-history-service.js')).OperationalHistoryService(new SqliteOperationalHistoryRepository(db));
   return {
     store,
     operationalHistory,
+    readStatsMissionFlow,
     repositoryId: repoId,
     intake: new MissionIntakeService(store),
     lifecycle,

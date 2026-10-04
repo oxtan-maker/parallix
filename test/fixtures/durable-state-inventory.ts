@@ -899,7 +899,7 @@ export const ADR0053_PERSISTENCE_INVENTORY: readonly ADR0053BoundaryEntry[] = [
     id: 'artifacts-stats-output',
     concept: 'LargeArtifacts',
     pathType: 'default',
-    fileLocation: 'src/adapters/cli/commands/stats.ts',
+    fileLocation: 'src/composition/stats.ts',
     operation: 'write',
     classification: 'generated-artifact',
     cutoverTask: null,

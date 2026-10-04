@@ -3,7 +3,6 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { spawn } from 'node:child_process';
 import { runPhaseGates, runGateCommand } from '../src/adapters/config/repository-gates.js';
 import { MAX_GATE_OUTPUT_CHARS } from '../src/adapters/config/gate-dashboard.js';
 
@@ -92,21 +91,36 @@ test('gate output retention keeps a bounded tail', async () => {
   assert.match(result.stdout, /x+$/);
 });
 
-test('serial non-TTY gate output arrives before the gate finishes', async () => {
-  const script = `import { runPhaseGates } from './src/adapters/config/repository-gates.ts';
-    await runPhaseGates('integration', { slug: 'task-2558', checkoutPath: process.cwd(),
-      gates: [{ key: 'slow', command: 'printf ready; sleep 0.2; printf done', order: 1 }], maxParallel: 1 });`;
-  const child = spawn(process.execPath, ['--import', 'tsx', '--input-type=module', '-e', script], {
-    cwd: process.cwd(), stdio: ['ignore', 'pipe', 'pipe'],
-  });
-  let sawReadyWhileRunning = false;
+test('serial non-TTY gate output arrives before the gate finishes (TASK-2637.04)', async t => {
+  const checkout = fs.mkdtempSync(path.join(os.tmpdir(), 'px-gates-streaming-'));
+  const ttyDescriptor = Object.getOwnPropertyDescriptor(process.stdout, 'isTTY');
   let output = '';
-  child.stdout.on('data', chunk => {
-    output += String(chunk);
-    if (output.includes('ready') && !output.includes('done') && child.exitCode === null) { sawReadyWhileRunning = true; }
-  });
-  const exitCode = await new Promise<number | null>(resolve => child.once('close', resolve));
-  assert.equal(exitCode, 0);
-  assert.equal(sawReadyWhileRunning, true);
-  assert.match(output, /done/);
+  let finished = false;
+  let sawReadyWhileRunning = false;
+  try {
+    Object.defineProperty(process.stdout, 'isTTY', { configurable: true, value: false });
+    t.mock.method(process.stdout, 'write', (chunk: string | Uint8Array) => {
+      output += String(chunk);
+      if (output.includes('ready') && !output.includes('done') && !finished) {
+        sawReadyWhileRunning = true;
+        fs.writeFileSync(path.join(checkout, 'release'), '');
+      }
+      return true;
+    });
+    const result = await runPhaseGates('integration', {
+      slug: 'task-2558', checkoutPath: checkout, maxParallel: 1,
+      // The gate cannot finish successfully until the parent observes live output.
+      // Bound the wait so a buffering regression fails without leaking a child.
+      gates: [{ key: 'slow', command: 'printf ready; i=0; while [ ! -f release ]; do i=$((i + 1)); [ "$i" -lt 100 ] || exit 1; sleep 0.01; done; printf done', order: 1 }],
+    });
+    finished = true;
+    assert.equal(result.ok, true);
+    assert.equal(sawReadyWhileRunning, true);
+    assert.match(output, /done/);
+  } finally {
+    t.mock.restoreAll();
+    if (ttyDescriptor) Object.defineProperty(process.stdout, 'isTTY', ttyDescriptor);
+    else Reflect.deleteProperty(process.stdout, 'isTTY');
+    fs.rmSync(checkout, { recursive: true, force: true });
+  }
 });

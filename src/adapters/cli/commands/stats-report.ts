@@ -9,8 +9,6 @@
 import * as fmt from '../../../application/presentation/cli-format.js';
 
 import {
-  buildWeeklyWindows,
-  createRangeWindow,
   summarizeAgentWindow,
   summarizeAgentStageSpend,
   formatAgentSpendCell,
@@ -21,6 +19,8 @@ import {
   resolveStatsRepoName,
   statsRowActorKey,
 } from './stats.js';
+import { statisticsMissionKey } from '../../../application/services/statistics-service.js';
+import { selectStatsReport } from '../../../application/services/statistics-report-selection.js';
 import { compareCodeUnits } from '../../../domain/comparators.js';
 
 // ---------------------------------------------------------------------------
@@ -31,57 +31,24 @@ import { compareCodeUnits } from '../../../domain/comparators.js';
 // caller as `MissionOutcome[]`.
 // ---------------------------------------------------------------------------
 
-/** The label buckets the mission-flow table reports, in render order. */
-const MISSION_FLOW_LABELS = ['user_value', 'ai_sdlc'];
-
-/**
- * Count lifecycle completions inside one window, bucketed by mission label.
- *
- * @param {{closedAt: string, labels: readonly string[]}[]} outcomes
- * @param {{start: Date, end: Date}} window
- */
-function summarizeMissionFlowWindow(outcomes, window) {
-  const inWindow = outcomes.filter(outcome => {
-    const closed = Date.parse(outcome.closedAt);
-    const day = String(outcome.closedAt).slice(0, 10);
-    return Number.isFinite(closed)
-      && day >= window.start.toISOString().slice(0, 10)
-      && day <= window.end.toISOString().slice(0, 10);
-  });
-  const withLabel = label => inWindow.filter(outcome => outcome.labels.includes(label)).length;
-  return {
-    total: inWindow.length,
-    userValue: withLabel('user_value'),
-    aiSdlc: withLabel('ai_sdlc'),
-    unclassified: inWindow.filter(
-      outcome => !outcome.labels.some(label => MISSION_FLOW_LABELS.includes(label)),
-    ).length,
-  };
-}
-
-/**
- * Render one mission-flow section.
- *
- * `outcomes` is null when the caller could not read lifecycle history. That is
- * reported as unavailable rather than as a zero: an unread lane history and a
- * week in which nothing completed are different facts.
- *
- * @param {string} heading
- * @param {{closedAt: string, labels: readonly string[]}[] | null} outcomes
- * @param {{start: Date, end: Date, label: string}} window
- */
-function missionFlowSection(heading, outcomes, window) {
-  const lines = [fmt.bold(`${heading} (${window.label})`)];
-  if (outcomes === null) {
+function missionFlowSection(heading, selected) {
+  const lines = [fmt.bold(`${heading} (${selected.window.label})`)];
+  if (selected.flow === null) {
     lines.push('Mission flow unavailable: lifecycle history was not read.');
     return lines;
   }
-  const flow = summarizeMissionFlowWindow(outcomes, window);
+  const flow = selected.flow;
   lines.push(formatStatsTable(
     ['# completed missions', '# user value missions', '# AI SDLC missions', '# unclassified missions'],
     [[String(flow.total), String(flow.userValue), String(flow.aiSdlc), String(flow.unclassified)]],
   ));
   return lines;
+}
+
+function selectedAgentStats(selected, rootDir) {
+  return selected.flow === null ? [] : summarizeAgentWindow(selected.completedRows, selected.window, {
+    rootDir, completedMissionKeys: new Set(selected.completedMissions.map(statisticsMissionKey)), completedMissionOwners: selected.completedMissionOwners,
+  });
 }
 
 /**
@@ -108,29 +75,21 @@ function formatStatsTable(headers, rows) {
  * @param {object} options
  */
 function renderWeeklyStatsReport(rows, options = {}) {
-  const today = options.today || new Date();
   const rootDir = options.rootDir || null;
-  const windows = buildWeeklyWindows(/** @type{Date} */(typeof today === 'string' ? new Date(`${today}T00:00:00Z`) : today));
-  const missionFlow = options.missionFlow ?? null;
-  const completedMissionOwners = new Map((missionFlow || []).map(outcome => [
-    `${String(outcome.repo).trim()}::${String(outcome.mission).trim().toLowerCase()}`,
-    outcome.implementer ?? null,
-  ]));
-  const completedMissionKeys = window => new Set((missionFlow || [])
-    .filter(outcome => String(outcome.closedAt).slice(0, 10) >= window.start.toISOString().slice(0, 10)
-      && String(outcome.closedAt).slice(0, 10) <= window.end.toISOString().slice(0, 10))
-    .map(outcome => `${String(outcome.repo).trim()}::${String(outcome.mission).trim().toLowerCase()}`));
-  const currentAgentStats = missionFlow === null ? [] : summarizeAgentWindow(rows, windows.current, { rootDir, completedMissionKeys: completedMissionKeys(windows.current), completedMissionOwners });
-  const previousAgentStats = missionFlow === null ? [] : summarizeAgentWindow(rows, windows.previous, { rootDir, completedMissionKeys: completedMissionKeys(windows.previous), completedMissionOwners });
+  const selection = options.selection ?? selectStatsReport(rows, options.missionFlow ?? null, { mode: 'weekly', today: options.today });
+  const windows = { current: selection.current.window, previous: selection.previous.window };
+  const missionFlow = selection.current.flow;
+  const currentAgentStats = selectedAgentStats(selection.current, rootDir);
+  const previousAgentStats = selectedAgentStats(selection.previous, rootDir);
   const currentMissionColors = colorMissionCounts(currentAgentStats);
   const currentAgentColors = colorAverageFixRounds(currentAgentStats);
   const previousMissionColors = colorMissionCounts(previousAgentStats);
   const previousAgentColors = colorAverageFixRounds(previousAgentStats);
 
   const lines = [];
-  lines.push(...missionFlowSection('Mission flow — current week', missionFlow, windows.current));
+  lines.push(...missionFlowSection('Mission flow — current week', selection.current));
   lines.push('');
-  lines.push(...missionFlowSection('Mission flow — previous week', missionFlow, windows.previous));
+  lines.push(...missionFlowSection('Mission flow — previous week', selection.previous));
   lines.push('');
   lines.push(fmt.bold(`Agent performance this week (${windows.current.label}) — completed Missions`));
   lines.push(missionFlow === null ? 'Agent performance unavailable: lifecycle history was not read.' : formatStatsTable(
@@ -140,7 +99,7 @@ function renderWeeklyStatsReport(rows, options = {}) {
       : [['none', '0', 'unavailable', '0']]
   ));
   lines.push('');
-  const currentAgentSpend = summarizeAgentStageSpend(rows, windows.current);
+  const currentAgentSpend = summarizeAgentStageSpend(selection.current.windowedRows, windows.current);
   lines.push(fmt.bold(`Agent spend by stage this week (${windows.current.label}) — resource consumption`));
   lines.push(formatStatsTable(
     ['Agent family', ...AGENT_SPEND_STAGE_COLUMNS.map(entry => entry.label), 'total'],
@@ -168,25 +127,16 @@ function renderWeeklyStatsReport(rows, options = {}) {
  * @param {object} options
  */
 function renderRangeStatsReport(rows, options = {}) {
-  const from = options.from;
-  const to = options.to;
   const rootDir = options.rootDir || null;
-  const window = createRangeWindow({ from, to });
-  const missionFlow = options.missionFlow ?? null;
-  const completedMissionOwners = new Map((missionFlow || []).map(outcome => [
-    `${String(outcome.repo).trim()}::${String(outcome.mission).trim().toLowerCase()}`,
-    outcome.implementer ?? null,
-  ]));
-  const completedMissionKeys = new Set((missionFlow || [])
-    .filter(outcome => String(outcome.closedAt).slice(0, 10) >= window.start.toISOString().slice(0, 10)
-      && String(outcome.closedAt).slice(0, 10) <= window.end.toISOString().slice(0, 10))
-    .map(outcome => `${String(outcome.repo).trim()}::${String(outcome.mission).trim().toLowerCase()}`));
-  const agentStats = missionFlow === null ? [] : summarizeAgentWindow(rows, window, { rootDir, completedMissionKeys, completedMissionOwners });
+  const selection = options.selection ?? selectStatsReport(rows, options.missionFlow ?? null, { mode: 'range', from: options.from, to: options.to });
+  const window = selection.current.window;
+  const missionFlow = selection.current.flow;
+  const agentStats = selectedAgentStats(selection.current, rootDir);
   const missionColors = colorMissionCounts(agentStats);
   const agentColors = colorAverageFixRounds(agentStats);
 
   const lines = [];
-  lines.push(...missionFlowSection('Mission flow', missionFlow, window));
+  lines.push(...missionFlowSection('Mission flow', selection.current));
   lines.push('');
   lines.push(fmt.bold(`Agent performance (${window.label}) — completed Missions`));
   lines.push(missionFlow === null ? 'Agent performance unavailable: lifecycle history was not read.' : formatStatsTable(

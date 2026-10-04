@@ -8,7 +8,7 @@ export interface StatisticsRow {
   readonly repo?: string;
   readonly mission?: string;
   readonly date?: string;
-  readonly classification?: string;
+  readonly classification?: string | null;
 }
 
 export interface ReportingWindow {

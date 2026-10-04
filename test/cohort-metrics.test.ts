@@ -16,11 +16,10 @@ import assert from 'node:assert/strict';
 import test, { describe } from 'node:test';
 import { COHORT_REPORT_COLUMNS, LOW_SAMPLE_MARKER, renderCohortComparison } from '../src/adapters/cli/commands/cohort-report.js';
 import { statsCohorts, parseCohortArgs } from '../src/adapters/cli/commands/stats-cohorts.js';
-import { createStatsCommand, createStatsWorkflowAdapter } from '../src/adapters/cli/commands/stats.js';
+import { createStatisticsCommand, type StatsCompositionOptions } from '../src/composition/stats.js';
 import type { UsageRecord } from '../src/application/ports/mission-measurements.js';
 import { LOW_SAMPLE_THRESHOLD, UNASSIGNED_COHORT, compareCohorts, groupIntoCohorts, percentile75, type CohortMetrics, type CohortComparison, reviewPassagesByMission } from '../src/application/projections/cohorts.js';
 import { missionCohortMetadata } from '../src/application/projections/metrics-read-adapter.js';
-import { StatsCommandUseCase } from '../src/application/stats-command-use-case.js';
 import { agentFamily } from '../src/domain/agents.js';
 import type { MissionTransition } from '../src/domain/mission-workflow.js';
 import type { Mission } from '../src/domain/mission.js';
@@ -34,11 +33,8 @@ import { missionOutcome } from './fixtures/mission-outcome.js';
 // ── Cohort metrics ──
 
 
-// Render-only `px stats` command: the cohorts path never consults the Mission
-// authority, so a store placeholder satisfies the required wiring (SC13).
-const statsCommand = createStatsCommand(
-  new StatsCommandUseCase(createStatsWorkflowAdapter({} as never)),
-);
+// Compose each invocation with its isolated storage dependencies.
+const statsCommand = (args: string[], options: StatsCompositionOptions = {}) => createStatisticsCommand(options)(args, options);
 
 interface Seed {
   readonly slug: string;

@@ -108,9 +108,11 @@ export async function recordPostIntegrationStats(
     rootDir = getPrimaryWorktree(),
     recordIntegrationStatsFn = (stats as any).recordIntegrationStats,
     missionStore,
+    readMissionFlow,
   }: {
     rootDir?: string;
     recordIntegrationStatsFn?: Function;
+    readMissionFlow?: () => Promise<readonly import('../../../application/ports/cli-workflows.js').StatsMissionFlow[] | null>;
     /**
      * Operator Mission authority for the authoritative stats derivation. There
      * is no null default: omitting it makes `recordIntegrationStats` throw the
@@ -134,6 +136,7 @@ export async function recordPostIntegrationStats(
     slug,
     rootDir,
     missionStore,
+    ...(readMissionFlow ? { readMissionFlow } : {}),
   });
 
   // The recording is fail-closed (TASK-2378); the weekly report that follows
@@ -160,7 +163,7 @@ function printWeeklyStatsReport(outcome: any): void {
 }
 
 /** @param {string} slug @param{{rootDir?: string, missionStore?: import('../../../application/domain-ports.js').MissionStore|null}} options */
-export async function recordPostIntegrationStatsOrAbort(slug: string, options: {rootDir?: string, missionStore?: import('../../../application/domain-ports.js').MissionStore|null} = {}) {
+export async function recordPostIntegrationStatsOrAbort(slug: string, options: {rootDir?: string, missionStore?: import('../../../application/domain-ports.js').MissionStore|null, readMissionFlow?: () => Promise<readonly import('../../../application/ports/cli-workflows.js').StatsMissionFlow[] | null>} = {}) {
   try {
     return await recordPostIntegrationStats(slug, options);
   } catch (error: any) {

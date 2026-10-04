@@ -215,7 +215,7 @@ export interface IntegrateLandingPort {
   isNoMergeToAbortResult(_result: IntegrateCommandResult): boolean;
   persistLandedIntegrationOrAbort(_slug: string, _commit: string, _missionServices: any, _options: { rootDir: string }): Promise<unknown>;
   closeLandedIntegrationOrAbort(_slug: string, _commit: string, _missionServices: any): Promise<unknown>;
-  recordPostIntegrationStatsOrAbort(_slug: string, _options: { rootDir: string; missionStore: MissionStore }): Promise<unknown>;
+  recordPostIntegrationStatsOrAbort(_slug: string, _options: { rootDir: string; missionStore: MissionStore; readMissionFlow?: () => Promise<readonly import('./cli-workflows.js').StatsMissionFlow[] | null> }): Promise<unknown>;
   hasIntegrationMeasurement?(_slug: string, _rootDir: string): boolean;
   runPreCommitHookOrAbort(_slug: string, _options: { missionWorktree: string; baseWorktree: string; baseBranch: string; variant: string }): unknown;
   runPostIntegrateHookOrAbort(_slug: string, _options: { baseWorktree: string; baseBranch: string; variant: string }): unknown;

@@ -720,8 +720,9 @@ describe('SQLite Mission aggregate integration', () => {
     const compositionRoot = path.join(
       sourceRoot, 'composition', 'application-services.ts',
     );
+    const statisticsCompositionRoot = path.join(sourceRoot, 'composition', 'stats.ts');
     const forbidden = files
-      .filter((file) => !file.startsWith(sqliteRoot) && file !== compositionRoot)
+      .filter((file) => !file.startsWith(sqliteRoot) && file !== compositionRoot && file !== statisticsCompositionRoot)
       .filter((file) => /(?:from\s+|import\s*\()['"](?:node:sqlite|[^'"]*adapters\/sqlite\/mission-store)/.test(
         fs.readFileSync(file, 'utf8'),
       ));
