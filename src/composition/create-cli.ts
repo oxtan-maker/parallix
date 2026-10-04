@@ -27,6 +27,8 @@ import integrate from '../adapters/cli/commands/integrate.js';
 import { DraftCommandUseCase } from '../application/draft-command-use-case.js';
 import { IntegrateCommandUseCase } from '../application/integrate-command-use-case.js';
 import { ReviewCommandUseCase } from '../application/review-command-use-case.js';
+import { ReviewRoundUseCase } from '../application/review-round-use-case.js';
+import type { ReviewRoundWorkflowPort } from '../application/ports/review-round-workflow.js';
 import { StatsCommandUseCase } from '../application/stats-command-use-case.js';
 import { HandoffCommandUseCase } from '../application/handoff-command-use-case.js';
 import { StatusCommandUseCase } from '../application/status-command-use-case.js';
@@ -400,6 +402,10 @@ function createCommandRegistry(rootDir: string): Record<string, Command> {
           // decision, so it needs the same authority the loop paths use.
           missionStore: services.mission.store,
           lifecycleService: services.mission.lifecycle,
+          // The composition root chooses the application coordinator; the
+          // review adapter supplies only its typed persistence, gate, provider,
+          // agent, artifact, and telemetry effects for this invocation.
+          reviewRoundUseCaseFactory: (port: ReviewRoundWorkflowPort) => new ReviewRoundUseCase(port),
           startReviewLoopFn: (slug: string, loopOptions: Record<string, unknown>) => startReviewLoop(slug, {
             ...loopOptions,
             performHandoffFn: performHandoffWithMissionServices(missionServicesFn as HandoffMissionServicesPort),
