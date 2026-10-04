@@ -13,7 +13,7 @@ import assert from 'node:assert/strict';
 import test, { describe, it } from 'node:test';
 import { INTEGRATION_GATE_REBOUND_ATTEMPTS_PER_INVOCATION, integrationGateFailureReason, integrationOnlyCoverageNote, routeIntegrationGateFailure, type IntegrationGateRouteOptions } from '../../../src/adapters/cli/commands/integrate-gate-rebound.js';
 import type { GateRunOutcome } from '../../../src/adapters/config/repository-gates.js';
-import { reboundPreReviewFailure, gateFailureReason } from '../../../src/adapters/review/review-gate-handling.js';
+import { gateFailureReason } from '../../../src/adapters/review/review-gate-handling.js';
 import { elideBounceOutput, BOUNCE_OUTPUT_MAX_CHARS } from '../../../src/application/output-elision.js';
 import { rebound, classifyReboundReason, buildReboundFixPrompt, reboundDiagnostic, DEFAULT_REBOUND_ATTEMPTS, type ReboundContext, type ReboundReason } from '../../../src/application/rebound-kernel.js';
 
@@ -402,7 +402,7 @@ test('task-2377.03: the context-compaction boilerplate exists in exactly one sou
 
 test('task-2377.03: the pre-review gate and hook paths build no prompt of their own', async () => {
   const { readFileSync } = await import('node:fs');
-  for (const file of ['src/adapters/review/review-gate-handling.ts', 'src/adapters/review/review-loop.ts']) {
+  for (const file of ['src/adapters/review/review-gate-handling.ts', 'src/adapters/review/review-loop.ts', 'src/application/review-loop/pre-review.ts']) {
     const source = readFileSync(file, 'utf8');
     assert.ok(!source.includes('FIX REQUIRED'), `${file} must not construct a fix prompt`);
     assert.ok(!source.includes('Retry attempt:'), `${file} must not render its own retry counter`);
@@ -655,27 +655,24 @@ describe("Bounce output elision —", () => {
         't'.repeat(500_000) +
         '\n> 2 of 2320 tests failed';
       let capturedPrompt = '';
-      const result = await reboundPreReviewFailure('task-2369.13', '/worktree', gateFailureReason({
+      const result = await rebound(gateFailureReason({
         ok: false,
         area: 'all',
         command: './scripts/verify-local.sh all',
         exitCode: 1,
         stdout,
         stderr: '',
-      }), 'claude', {
-        verifyFn: () => ({ ok: true }),
-        readReviewStateFn: () => null,
-        writeReviewStateFn: async () => ({ outcome: 'unchanged' }),
-        transitionTaskFn: async () => true,
-        startAgentFn: async (_mode, opts: any) => {
+      }), {
+        slug: 'task-2369.13', worktree: '/worktree', implementer: 'claude',
+        verify: () => ({ ok: true }),
+        startAgent: async (_mode, opts: any) => {
           capturedPrompt = typeof opts.prompt === 'function' ? opts.prompt('claude') : String(opts.prompt);
-          return { agent: 'claude', invocation: null, result: { status: 0 } };
+          return { agent: 'claude', result: { status: 0 } };
         },
-        applyAgentFallbackFn: async () => 'claude',
         log: () => {},
         error: () => {},
-      } as any);
-      assert.equal(result.bounced, true);
+      });
+      assert.equal(result.outcome, 'fixed');
       assert.ok(capturedPrompt.includes('[INFO] Rebasing mission/task-2369.13'), 'head of gate output preserved');
       assert.ok(capturedPrompt.includes('2 of 2320 tests failed'), 'tail (failure) of gate output preserved');
       assert.ok(capturedPrompt.length < 100_000, `prompt must stay small, got ${capturedPrompt.length}`);

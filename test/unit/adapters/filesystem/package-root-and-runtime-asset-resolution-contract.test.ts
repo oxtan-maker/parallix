@@ -21,6 +21,8 @@ const agentConfig = mockModule<typeof import('../../../../src/adapters/agents/ag
 const runtimeMatrix = mockModule<typeof import('../../../../src/adapters/agents/runtime-matrix.js')>('../../../../src/adapters/agents/runtime-matrix.js', import.meta.url);
 const stats = mockModule<typeof import('../../../../src/adapters/cli/commands/stats.js')>('../../../../src/adapters/cli/commands/stats.js', import.meta.url);
 const reviewLoop = mockModule<typeof import('../../../../src/adapters/review/review-loop.js')>('../../../../src/adapters/review/review-loop.js', import.meta.url);
+const reviewAdapter = mockModule<typeof import('../../../../src/adapters/review/review-adapter.js')>('../../../../src/adapters/review/review-adapter.js', import.meta.url);
+const gitModule = mockModule<typeof import('../../../../src/adapters/git/git.js')>('../../../../src/adapters/git/git.js', import.meta.url);
 await installModuleMocks();
 
 // ---- task-2225 packageRoot asset resolution is independent of the working directory ----
@@ -160,27 +162,16 @@ describe("packageRoot asset resolution is independent of the working directory",
       assert.equal(stats.resolveStatsPath, undefined);
 
       // The bootstrap path is used only when the provider is unavailable. Drive
-      // that branch with injected dependencies and assert the actual command.
-      const stop = new Error('stop after bootstrap failure');
-      await assert.rejects(
-        reviewLoop.startReviewLoop('task-2225', {
-          worktree: ROOT,
-          isReviewProviderEnabledFn: () => true,
-          providerAvailableFn: async () => false,
-          runFn: (command, args) => {
-            assert.equal(command, 'bash');
-            assert.deepEqual(args, [path.join(ROOT, 'scripts', 'bootstrap.sh')]);
-            return { status: 1, signal: null, stdout: '', stderr: '' };
-          },
-          resolveTaskFileFn: () => {
-            const taskFile = path.join(ROOT, 'backlog', 'tasks', 'task-2225 - TS-migration-phase-T2-packageRoot-asset-resolution-hardening.md');
-            return { ok: true, taskFile, matches: [taskFile] };
-          },
-          exit: () => { throw stop; },
-          log: () => {}, error: () => {},
-        }),
-        (error) => error === stop,
-      );
+      // that branch of the review provider mechanism and assert the command.
+      mock.method(reviewAdapter, 'isProviderEnabled', () => true);
+      mock.method(reviewAdapter, 'providerAvailable', async () => false);
+      mock.method(gitModule, 'run', (command, args) => {
+        assert.equal(command, 'bash');
+        assert.deepEqual(args, [path.join(ROOT, 'scripts', 'bootstrap.sh')]);
+        return { status: 1, signal: null, stdout: '', stderr: '' };
+      });
+      const ports = reviewLoop.createReviewLoopPorts('task-2225', { worktree: ROOT }, { log: () => {}, error: () => {} });
+      assert.equal(await ports.provider!.ensureReachable(), false, 'a failed bootstrap leaves the provider unreachable');
     });
   });
 });

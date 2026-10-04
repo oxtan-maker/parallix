@@ -58,7 +58,9 @@ import {
 import { openReviewRound } from '../../../src/adapters/review/review-round-open.js';
 import { ReviewState, writeReviewState } from '../../../src/adapters/review/review-state.js';
 import { bindReviewPersistence } from '../../../src/composition/review-persistence.js';
-import { reboundPreReviewFailure, gateFailureReason } from '../../../src/adapters/review/review-gate-handling.js';
+import { gateFailureReason } from '../../../src/adapters/review/review-gate-handling.js';
+import { repairPreReviewFailure } from '../../../src/application/review-loop/pre-review.js';
+import { fakeLoopContext, fakeReviewLoopPorts } from '../../../test/helpers/review-loop-ports.js';
 import { transitionReviewRepair } from '../../../src/application/review-repair-lifecycle.js';
 import { createIntegrationGateStep } from '../../../src/application/integrate/gates.js';
 import { RevokeReviewDecisionUseCase } from '../../../src/application/revoke-review-decision-use-case.js';
@@ -93,27 +95,32 @@ test('review gate repair commits active before launch and review before resuming
   const review = startReview({ change: PULL_REQUEST, revision: changeRevision('rev-1') }, REVIEWER, IMPLEMENTER, HANDOFF_AT, REVIEWER_ELIGIBILITY);
   const fixture = await openFixture(seedMission('review', review));
   try {
-    const mirrors: string[] = [];
-    const result = await reboundPreReviewFailure(SLUG, fixture.root, gateFailureReason({
-      ok: false, area: 'test', command: 'npm test', exitCode: 1, stdout: 'AssertionError: expected true', stderr: '',
-    }), IMPLEMENTER, {
-      missionStore: fixture.store, lifecycleService: fixture.lifecycle,
-      reviewerEligibility: REVIEWER_ELIGIBILITY,
-      ...bindReviewPersistence(fixture.store, fixture.lifecycle),
-      readReviewStateFn: async () => null,
-      startAgentFn: async () => {
-        assert.equal(await missionStatus(fixture), 'active');
-        assert.equal(currentReviewRound(await currentReviewOf(fixture)).decision, null);
-        return { agent: IMPLEMENTER, result: { status: 0 } } as any;
+    // Drive the application-owned repair through a fake loop context wired to the
+    // fixture's real mission store and lifecycle, so the review-repair transitions
+    // and board lane events are the real ones.
+    const fake = fakeReviewLoopPorts({
+      slug: SLUG,
+      missionStore: fixture.store,
+      lifecycle: fixture.lifecycle,
+      state: new ReviewState(SLUG, { reviewer: REVIEWER, implementer: IMPLEMENTER }),
+      routing: { eligibleFamilies: () => [REVIEWER] },
+      agents: {
+        launch: async (launch) => {
+          assert.equal(await missionStatus(fixture), 'active');
+          assert.equal(currentReviewRound(await currentReviewOf(fixture)).decision, null);
+          return { agent: launch.agent, result: { status: 0 } } as any;
+        },
       },
-      transitionTaskFn: async (_slug, status) => { assert.equal(await missionStatus(fixture), status); mirrors.push(status); return true; },
-      applyAgentFallbackFn: async () => IMPLEMENTER,
-      verifyFn: async () => { assert.equal(await missionStatus(fixture), 'active'); return { ok: true, diagnostic: '' }; },
-      log: () => undefined, error: () => undefined,
     });
+    const context = fakeLoopContext(fake, { slug: SLUG, identities: { implementer: IMPLEMENTER, reviewer: REVIEWER } });
+    const result = await repairPreReviewFailure(
+      context,
+      gateFailureReason({ ok: false, area: 'test', command: 'npm test', exitCode: 1, stdout: 'AssertionError: expected true', stderr: '' }),
+      5,
+    );
     assert.equal(result.bounced, true);
     assert.equal(await missionStatus(fixture), 'review');
-    assert.deepEqual(mirrors, ['active', 'review']);
+    assert.deepEqual(fake.mirrors, ['active', 'review']);
     assert.deepEqual((await laneEvents(fixture)).map(event => ({ ...event })), [
       { from_status: 'review', to_status: 'active', trigger: 'rebound-to-active' },
       { from_status: 'active', to_status: 'review', trigger: 'submit-for-review' },
@@ -127,17 +134,26 @@ test('a refused repair boundary stops before launch or mirror changes and preser
   const review = startReview({ change: PULL_REQUEST, revision: changeRevision('rev-1') }, REVIEWER, IMPLEMENTER, HANDOFF_AT, REVIEWER_ELIGIBILITY);
   const fixture = await openFixture(seedMission('review', review));
   try {
-    await assert.rejects(reboundPreReviewFailure(SLUG, fixture.root, gateFailureReason({
-      ok: false, area: 'test', command: 'npm test', exitCode: 1, stdout: 'AssertionError: expected true', stderr: '',
-    }), IMPLEMENTER, {
-      missionStore: fixture.store, lifecycleService: null,
-      readReviewStateFn: async () => null,
-      startAgentFn: async () => { assert.fail('a refused transition must not launch repair'); },
-      transitionTaskFn: async () => { assert.fail('a refused transition must not change the mirror'); },
-      verifyFn: () => { assert.fail('a refused transition must not begin downstream work'); },
-      log: () => undefined, error: () => undefined,
-    }), /no lifecycle service/);
+    // No lifecycle service: the review-repair transition refuses before any launch,
+    // mirror change, or downstream work, and preserves the outstanding review.
+    const fake = fakeReviewLoopPorts({
+      slug: SLUG,
+      missionStore: fixture.store,
+      lifecycle: null,
+      state: new ReviewState(SLUG, { reviewer: REVIEWER, implementer: IMPLEMENTER }),
+      routing: { eligibleFamilies: () => [REVIEWER] },
+    });
+    const context = fakeLoopContext(fake, { slug: SLUG, identities: { implementer: IMPLEMENTER, reviewer: REVIEWER } });
+    await assert.rejects(
+      repairPreReviewFailure(
+        context,
+        gateFailureReason({ ok: false, area: 'test', command: 'npm test', exitCode: 1, stdout: 'AssertionError: expected true', stderr: '' }),
+        5,
+      ),
+      /no lifecycle service/,
+    );
     assert.equal(await missionStatus(fixture), 'review');
+    assert.deepEqual(fake.mirrors, [], 'a refused transition changes no backlog mirror');
     assert.deepEqual(await laneEvents(fixture), []);
     assert.deepEqual(await currentReviewOf(fixture), review);
   } finally { await closeFixture(fixture); }

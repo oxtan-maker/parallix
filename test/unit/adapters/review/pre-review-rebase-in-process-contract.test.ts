@@ -9,7 +9,9 @@ import { fileURLToPath } from 'node:url';
 import { setLogger } from '../../../../src/application/presentation/cli-format.js';
 import { runRebaseWorkflow } from '../../../../src/application/rebase-workflow.js';
 import { rebaseBeforeReviewRound } from '../../../../src/adapters/review/rebase.js';
-import { startReviewLoop } from '../../../../src/adapters/review/review-loop.js';
+import { preReviewRebaseFacts } from '../../../../src/adapters/review/review-loop.js';
+import { runReviewLoop } from '../../../../src/application/review-loop/review-loop.js';
+import { fakeReviewLoopPorts } from '../../../helpers/review-loop-ports.js';
 import type { RebaseWorkflowPort } from '../../../../src/application/ports/rebase-workflow.js';
 
 // ---- task-2377-02 pre-review rebase in-process (consolidated from test/task-2377-02-pre-review-rebase-inprocess.test.ts, TASK-2622.09) ----
@@ -230,71 +232,34 @@ describe("02 pre-review rebase in-process", () => {
 
   test('review loop rebounces a pre-review rebase gate failure as a gate failure, not a hook bounce', async () => {
     const gateOutput = GATE_OUTPUT_WITH_PRE_PUSH;
-    const logs: string[] = [];
-    const exits: number[] = [];
-    let preReviewBounces = 0;
-    let reviewerLaunches = 0;
+    // The mechanism maps the typed rebase result onto gate facts, never hook facts.
+    const facts = preReviewRebaseFacts({
+      ok: false,
+      sharedFileConflicts: false,
+      hookFailure: false,
+      failure: {
+        kind: 'gate' as const,
+        operation: 'push' as const,
+        gate: { area: 'lib', command: './scripts/verify-local.sh lib', exitCode: 1, stdout: gateOutput, stderr: gateOutput },
+      },
+    } as never);
+    assert.ok(facts.ok === false && facts.gate && !facts.hook, 'a push-time gate failure is reported as gate facts only');
 
-    const reviewOpts = {
+    const fake = fakeReviewLoopPorts({
+      slug: SLUG,
       worktree: WORKTREE,
-      implementer: 'codex',
-      reviewer: 'claude',
-      maxAttempts: 1,
-      resolveTaskFileFn: () => ({ ok: true, taskFile: '/tmp/task-2377-02.md', matches: [] }),
-      getTaskStatusFn: () => 'review',
-      eligibleAgentsForStepFn: () => ['codex', 'claude'],
-      workflowLauncherStatusFn: () => ({ supported: true, agent: 'codex', detail: null }),
-      isForgejoReviewEnabledFn: () => true,
-      forgejoAvailableFn: async () => true,
-      getPrStatusFn: () => ({ exists: true, state: 'open', number: 2377, url: 'http://forgejo.invalid/pr/2377' }),
-      resolveForgejoUserFn: () => 'reviewer',
-      readTokenFn: () => 'test-token',
-      maybeUpdateGraphifyBeforeReviewFn: () => {},
-      readReviewStateFn: () => null,
-      writeReviewStateFn: async () => ({ outcome: 'committed' as const }),
-      transitionTaskFn: async () => true,
-      rebaseBeforeReviewRoundFn: async () => ({
-        ok: false,
-        sharedFileConflicts: false,
-        hookFailure: false,
-        failure: {
-          kind: 'gate' as const,
-          operation: 'push' as const,
-          gate: {
-            area: 'lib',
-            command: './scripts/verify-local.sh lib',
-            exitCode: 1,
-            stdout: gateOutput,
-            stderr: gateOutput,
-          },
-        },
-      }),
-      runPreReviewGateFn: async () => ({ ok: true, area: 'lib', command: 'true', exitCode: 0, stdout: '', stderr: '' }),
-      reboundPreReviewFailureFn: async () => {
-        preReviewBounces += 1;
-        return { bounced: false, stranded: true, attempts: 0, outcome: 'exhausted' as const, diagnostic: 'gate still failing', implementer: 'codex' };
-      },
-      startAgentFn: async (step: string, options: any) => {
-        if (step === 'review') { reviewerLaunches += 1; }
-        return { agent: options.agent, result: { status: 0 } } as any;
-      },
-      applyAgentFallbackFn: async ({ original }: any) => original,
-      consumeReviewerArtifactsFn: async () => ({ consumed: false }),
-      consumeImplementerArtifactsFn: async () => ({ consumed: false }),
-      buildCompactReviewPromptFn: () => 'review prompt',
-      buildCompactActOnReviewPromptFn: () => 'implementer repair prompt',
-      recordStageStatsSafeFn: () => {},
-      gitFn: () => ({ stdout: 'main\n', stderr: '', status: 0 }) as any,
-      log: (line: string) => logs.push(line),
-      error: (line: string) => logs.push(line),
-      exit: ((code: number) => { exits.push(code); }) as any,
-    };
+      routing: { eligibleFamilies: () => ['codex', 'claude'] },
+      provider: {},
+      preReview: { rebase: async () => facts },
+    });
+    await runReviewLoop({ slug: SLUG, implementer: 'codex', reviewer: 'claude', maxAttempts: 1, skipHandoff: true }, fake.ports);
+    const logs = [...fake.logs, ...fake.errors];
+    const repairs = fake.launches.filter(launch => launch.role === 'implementer');
 
-    await startReviewLoop(SLUG, reviewOpts);
-
-    assert.equal(preReviewBounces, 1, 'a pre-review rebase gate failure must use the rebound path');
-    assert.equal(reviewerLaunches, 0, 'no reviewer launches after a failed pre-review rebase');
-    assert.deepEqual(exits, [1], 'the loop exits on the gate failure');
+    assert.ok(repairs.length >= 1, 'a pre-review rebase gate failure must use the rebound path');
+    assert.match(String(repairs[0].recovery?.prompt('codex')), /PRE-REVIEW GATE FAILURE/);
+    assert.equal(fake.launches.filter(launch => launch.role === 'reviewer').length, 0, 'no reviewer launches after a failed pre-review rebase');
+    assert.deepEqual(fake.exits, [1], 'the loop exits on the gate failure');
     assert.ok(
       logs.some(line => line.includes('Pre-review rebase gate failed for area "lib"')),
       `expected a gate-classified diagnostic, got: ${logs.join(' | ')}`,

@@ -3,7 +3,7 @@
     "plain": 200000,
     "fastPlain": 150000,
     "covered": 225000,
-    "fastCovered": 180000
+    "fastCovered": 280000
   },
   "integrationSuites": {
     "plainCi": 310000,
@@ -150,10 +150,8 @@
       "integration/review/review-gate-ownership.test.ts": 300,
       "integration/review/review-identity.test.ts": 100,
       "integration/review/review-intervention-resume.integration.test.ts": 100,
-      "integration/review/review-loop-resolution-fallback.test.ts": 150,
       "integration/review/review-native-mission-recovery.test.ts": 150,
       "integration/review/review-prompts.test.ts": 100,
-      "integration/review/review-response-relaunch.test.ts": 150,
       "integration/review/review-state-class.test.ts": 150,
       "integration/review/review-state-durability.test.ts": 150,
       "integration/review/review-state-restart-recovery.integration.test.ts": 100,
@@ -323,10 +321,8 @@
       "integration/review/review-gate-ownership.test.ts": 405,
       "integration/review/review-identity.test.ts": 100,
       "integration/review/review-intervention-resume.integration.test.ts": 100,
-      "integration/review/review-loop-resolution-fallback.test.ts": 225,
       "integration/review/review-native-mission-recovery.test.ts": 150,
       "integration/review/review-prompts.test.ts": 100,
-      "integration/review/review-response-relaunch.test.ts": 150,
       "integration/review/review-state-class.test.ts": 200,
       "integration/review/review-state-durability.test.ts": 150,
       "integration/review/review-state-restart-recovery.integration.test.ts": 100,

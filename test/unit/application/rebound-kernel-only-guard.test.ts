@@ -35,12 +35,10 @@ const ALLOWED: Record<string, string> = {
     'px active initial execute launch (phase start)',
   'src/adapters/cli/commands/active.ts::applyExecuteFallback':
     'px active execute launch retried with a fallback agent family (agent eligibility, not failure repair)',
-  'src/adapters/review/review-loop.ts::launchReviewer':
-    'review-round reviewer launch, plus the timeout re-poll relaunches that '
-    + 'TASK-2377.04 deliberately left outside the kernel and docs/agents.md documents as the exception',
-  'src/adapters/review/review-loop.ts::launchImplementerActOnReview':
-    'review-round implementer launch, plus the timeout re-poll relaunches that '
-    + 'TASK-2377.04 deliberately left outside the kernel and docs/agents.md documents as the exception',
+  'src/adapters/review/review-loop.ts::agentPort':
+    'review-round reviewer and implementer launch, plus the timeout re-poll relaunches that '
+    + 'TASK-2377.04 deliberately left outside the kernel and docs/agents.md documents as the exception; '
+    + 'the CP-2 migration folded launchReviewer and launchImplementerActOnReview into this single agent port',
 
   // Conflict resolution: a conflict workflow, not a failure bounce.
   'src/adapters/cli/commands/resolve-conflict.ts::resolveConflict':

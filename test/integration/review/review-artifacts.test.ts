@@ -9,6 +9,10 @@ import path from 'path';
 import { mockModule, installModuleMocks } from '../../lib/module-mock.js';
 const buildCompactReviewPromptModule = mockModule<typeof import('../../../src/adapters/review/review-prompts.js')>('../../../src/adapters/review/review-prompts.js', import.meta.url);
 const __mm1 = mockModule<typeof import('../../../src/adapters/review/review-artifacts.js')>('../../../src/adapters/review/review-artifacts.js', import.meta.url);
+// TASK-2647: isArtifactInfraDiagnostic lives in the application review-round
+// port after the review-loop migration, so the artifacts mock no longer
+// exposes it. Mock the port module and read it from there.
+const __mm2 = mockModule<typeof import('../../../src/application/ports/review-round.js')>('../../../src/application/ports/review-round.js', import.meta.url);
 await installModuleMocks();
 test.afterEach(() => mock.restoreAll());
 const { buildCompactReviewPrompt } = buildCompactReviewPromptModule;
@@ -24,8 +28,8 @@ const {
   consumeReviewerArtifacts,
   consumeImplementerArtifacts,
   resolveArtifactDir,
-  isArtifactInfraDiagnostic,
 } = __mm1;
+const { isArtifactInfraDiagnostic } = __mm2;
 
 // ============================================================================
 // buildMetadataFooter tests

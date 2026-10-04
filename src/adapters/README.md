@@ -131,7 +131,12 @@ application entry decides when the operation runs.
 tree. The re-homed review and active workflow adapters satisfy it by binding
 typed ports to their application entries, not through an exception.
 
-The rule judges responsibility, not shape, and deliberately excludes:
+The syntactic rule follows direct aliases, injected defaults, and chains rooted
+in an imported control operation, including `launch = opts.launch ?? startAgent`
+and parameter defaults. It does not prove arbitrary data flow through unrelated
+objects or higher-order callbacks; those still require source review.
+
+The rule deliberately excludes:
 
 * **Concrete mechanisms.** An adapter with no application entry — `git`,
   `forgejo`, `verification`, `agents` and the other host mechanisms — is left to

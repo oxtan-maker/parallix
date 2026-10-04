@@ -17,13 +17,14 @@ import type { Mission } from '../../../../../src/domain/mission.js';
 import { MissionLifecycleService } from '../../../../../src/application/mission-lifecycle-service.js';
 import type { MissionVersion } from '../../../../../src/application/domain-ports.js';
 import { mkdtemp as registeredMkdtemp } from '../../../../helpers/temp-dir.js';
+import { fakeReviewLoopPorts } from '../../../../helpers/review-loop-ports.js';
 
 // Declaration order is load-bearing: installModuleMocks relinks modules in this order, so a
 // module must be declared after the modules it depends on (merged from every section below).
 mockModule('../../../../../src/adapters/cli/commands/repair-handoff.js', import.meta.url);
 mockModule('../../../../../src/adapters/agents/runtime-matrix.js', import.meta.url);
 mockModule('../../../../../src/adapters/verification/verification.js', import.meta.url);
-mockModule('../../../../../src/adapters/review/review-loop.js', import.meta.url);
+mockModule('../../../../../src/adapters/review/review-gate-handling.js', import.meta.url);
 await installModuleMocks();
 const { routeIntegrationGateFailure } = await import('../../../../../src/adapters/cli/commands/integrate-gate-rebound.js');
 const { createIntegrationGateStep } = await import('../../../../../src/application/integrate/gates.js');
@@ -284,8 +285,8 @@ describe("relaunchable repair", () => {
   });
 
   test('SC 4: reviewer fallback uses the review eligibility selector', () => {
-    const fallbackSource = fs.readFileSync(path.join(import.meta.dirname, '../../../../../src/adapters/review/review-agent-fallback.ts'), 'utf8');
-    assert.ok(fallbackSource.includes('fallback = selectReviewer(excludeSet)'), 'Should select reviewer fallback from the review eligibility pool');
+    const fallbackSource = fs.readFileSync(path.join(import.meta.dirname, '../../../../../src/application/review-loop/reviewer-selection.ts'), 'utf8');
+    assert.ok(fallbackSource.includes('const fallback = context.routing.nominate(excluded);'), 'Should select reviewer fallback from the review eligibility pool');
     assert.ok(!fallbackSource.includes('fallbackForFn(reviewer, implementer)'), 'Should not call fallbackFor for reviewer fallback');
     // Verify the implementer check was removed
     assert.ok(!fallbackSource.includes('if (!agents.includes(implementer))') || fallbackSource.includes('// The strict implementer eligibility check was removed'), 'Implementer eligibility check should be removed or commented');
@@ -754,12 +755,14 @@ describe("integration repair", () => {
       readReviewStateFn: async () => ReviewState.from(slug, reviewStateDataFrom(fixture.mission().review!)),
       createEventFn: async () => undefined as never, run: (() => ({ stdout: 'operator' })) as never,
       log: () => {}, error: () => {}, exit: (() => { throw new Error('must resume'); }) as never,
-      startReviewLoopFn: async (_slug, options) => {
+      reviewLoopMechanisms: request => {
         continued = true;
         assert.equal(fixture.mission().review!.intervention, null);
         assert.deepEqual(fixture.mission().review!.stageLaunches, []);
-        assert.equal(options.isContinue, true);
-        assert.ok(options.maxAttempts! >= 9);
+        assert.equal(request.isContinue, true);
+        assert.ok(request.maxAttempts >= 9);
+        // The loop itself is not exercised: a held controller fence declines it.
+        return fakeReviewLoopPorts({ lock: { tryAcquire: () => false, release: () => {} } }).ports;
       },
     });
     const context = await adapter.preflight([slug, '--continue', '--max-attempts', '1']);
@@ -849,7 +852,7 @@ describe("integration repair", () => {
 // ---- task-1268 diff-scoped gate area (consolidated from test/task-1268-diff-scoped-area.test.ts, TASK-2622.09) ----
 describe("diff-scoped gate area", () => {
   const detectAreasFromChangedFilesModule = mockModule<typeof import('../../../../../src/adapters/verification/verification.js')>('../../../../../src/adapters/verification/verification.js', import.meta.url);
-  const runPreReviewGateModule = mockModule<typeof import('../../../../../src/adapters/review/review-loop.js')>('../../../../../src/adapters/review/review-loop.js', import.meta.url);
+  const runPreReviewGateModule = mockModule<typeof import('../../../../../src/adapters/review/review-gate-handling.js')>('../../../../../src/adapters/review/review-gate-handling.js', import.meta.url);
 
   test.afterEach(() => mock.restoreAll());
   const { detectAreasFromChangedFiles, detectMissionChangedArea } = detectAreasFromChangedFilesModule;

@@ -8,11 +8,13 @@ import path from 'path';
 import {
   consumeReviewerArtifacts,
   consumeImplementerArtifacts,
-  dispatchArtifactFailure,
-  ARTIFACT_REBOUND_ATTEMPTS,
-  isArtifactInfraDiagnostic,
 } from '../../../../src/adapters/review/review-artifacts.js';
-import { DEFAULT_REBOUND_ATTEMPTS } from '../../../../src/application/rebound-kernel.js';
+import { isArtifactInfraDiagnostic } from '../../../../src/application/ports/review-round.js';
+import { DEFAULT_REBOUND_ATTEMPTS, rebound } from '../../../../src/application/rebound-kernel.js';
+import { runReviewLoop } from '../../../../src/application/review-loop/review-loop.js';
+import { fakeReviewLoopPorts } from '../../../helpers/review-loop-ports.js';
+
+const ARTIFACT_REBOUND_ATTEMPTS = DEFAULT_REBOUND_ATTEMPTS;
 import { mkdtemp as registeredMkdtemp } from '../../../helpers/temp-dir.js';
 
 // ============================================================================
@@ -231,12 +233,12 @@ test('consumeImplementerArtifacts returns diagnostic when persist fails', async 
 });
 
 // ============================================================================
-// dispatchArtifactFailure — rebound-kernel occurrence (TASK-2377.04)
+// Artifact recovery — one rebound-kernel occurrence (TASK-2377.04)
 //
-// The dispatcher no longer reads or writes a persisted retry counter. It is an
-// adapter over `rebound()` (src/application/rebound-kernel.ts): the budget is
-// per occurrence and in-memory, and the occurrence is only `fixed` when the
-// verify callback re-consumes complete artifacts.
+// The review loop recovers incomplete artifacts through `rebound()`
+// (src/application/rebound-kernel.ts) with an `artifact-incomplete` reason: the
+// budget is per occurrence and in-memory, and the occurrence is only `fixed`
+// when the verify callback re-consumes complete artifacts.
 // ============================================================================
 
 /** Minimal kernel collaborators: a launch port that always succeeds. */
@@ -244,43 +246,45 @@ function dispatcherOptions(overrides = {}) {
   return {
     slug: 'test-slug',
     worktree: '/mock/worktree',
-    agent: 'codex',
-    startAgentFn: async () => ({ agent: 'codex', result: { status: 0 } }),
+    implementer: 'codex',
+    maxAttempts: ARTIFACT_REBOUND_ATTEMPTS,
+    startAgent: async () => ({ agent: 'codex', result: { status: 0 } }),
     log: () => {},
     error: () => {},
     ...overrides,
   };
 }
 
-test('dispatchArtifactFailure reports fixed only when the re-consumed reviewer artifacts are complete', async () => {
+/** One artifact-failure occurrence for a role. */
+const dispatchArtifactFailure = (role, diagnostic, options) => rebound({ kind: 'artifact-incomplete', role, diagnostic }, options);
+
+test('artifact recovery reports fixed only when the re-consumed reviewer artifacts are complete', async () => {
   let launches = 0;
   let verifies = 0;
   const result = await dispatchArtifactFailure('reviewer', 'Reviewer artifacts incomplete: missing findings', dispatcherOptions({
-    startAgentFn: async () => { launches++; return { agent: 'codex', result: { status: 0 } }; },
-    verifyFn: () => { verifies++; return { ok: true }; },
+    startAgent: async () => { launches++; return { agent: 'codex', result: { status: 0 } }; },
+    verify: () => { verifies++; return { ok: true }; },
   }));
 
-  assert.equal(result.action, 'fixed');
-  assert.equal(result.role, 'reviewer');
+  assert.equal(result.outcome, 'fixed');
   assert.equal(result.attempts, 1);
-  assert.equal(result.maxAttempts, ARTIFACT_REBOUND_ATTEMPTS);
   assert.equal(launches, 1);
   assert.equal(verifies, 1, 'the artifacts must be re-consumed before reporting fixed');
 });
 
-test('dispatchArtifactFailure relaunches with the fresh diagnostic when the re-consume still fails', async () => {
+test('artifact recovery relaunches with the fresh diagnostic when the re-consume still fails', async () => {
   const prompts = [];
   const result = await dispatchArtifactFailure('reviewer', 'Reviewer artifacts incomplete: missing findings', dispatcherOptions({
-    startAgentFn: async (_step, options) => {
+    startAgent: async (_step, options) => {
       prompts.push(options.prompt('codex'));
       return { agent: 'codex', result: { status: 0 } };
     },
-    verifyFn: (attempt) => attempt === 1
+    verify: (attempt) => attempt === 1
       ? { ok: false, diagnostic: 'Reviewer artifacts incomplete: missing verdict' }
       : { ok: true },
   }));
 
-  assert.equal(result.action, 'fixed');
+  assert.equal(result.outcome, 'fixed');
   assert.equal(result.attempts, 2);
   assert.equal(prompts.length, 2, 'a failed re-consume consumes an attempt and relaunches');
   assert.match(prompts[0], /INCOMPLETE ARTIFACTS/);
@@ -288,25 +292,25 @@ test('dispatchArtifactFailure relaunches with the fresh diagnostic when the re-c
   assert.match(prompts[1], /missing verdict/, 'the relaunch carries the fresh diagnostic');
 });
 
-test('dispatchArtifactFailure strands with the last diagnostic when the occurrence budget is spent', async () => {
+test('artifact recovery strands with the last diagnostic when the occurrence budget is spent', async () => {
   let launches = 0;
   const result = await dispatchArtifactFailure('reviewer', 'Reviewer artifacts incomplete: missing findings', dispatcherOptions({
-    startAgentFn: async () => { launches++; return { agent: 'codex', result: { status: 0 } }; },
-    verifyFn: () => ({ ok: false, diagnostic: 'Reviewer artifacts incomplete: still missing verdict' }),
+    startAgent: async () => { launches++; return { agent: 'codex', result: { status: 0 } }; },
+    verify: () => ({ ok: false, diagnostic: 'Reviewer artifacts incomplete: still missing verdict' }),
   }));
 
-  assert.equal(result.action, 'strand');
+  assert.equal(result.outcome, 'exhausted');
   assert.equal(result.attempts, ARTIFACT_REBOUND_ATTEMPTS);
   assert.equal(launches, ARTIFACT_REBOUND_ATTEMPTS, 'no third launch after the budget is spent');
   assert.match(result.diagnostic, /still missing verdict/);
 });
 
-test('dispatchArtifactFailure gives every occurrence a fresh budget (no persisted carryover)', async () => {
+test('artifact recovery gives every occurrence a fresh budget (no persisted carryover)', async () => {
   const runOccurrence = async () => {
     let launches = 0;
     const outcome = await dispatchArtifactFailure('implementer', 'Implementer artifacts incomplete: missing disposition', dispatcherOptions({
-      startAgentFn: async () => { launches++; return { agent: 'codex', result: { status: 0 } }; },
-      verifyFn: () => ({ ok: false, diagnostic: 'Implementer artifacts incomplete: missing disposition' }),
+      startAgent: async () => { launches++; return { agent: 'codex', result: { status: 0 } }; },
+      verify: () => ({ ok: false, diagnostic: 'Implementer artifacts incomplete: missing disposition' }),
     }));
     return { outcome, launches };
   };
@@ -314,63 +318,56 @@ test('dispatchArtifactFailure gives every occurrence a fresh budget (no persiste
   const first = await runOccurrence();
   const second = await runOccurrence();
 
-  assert.equal(first.outcome.action, 'strand');
-  assert.equal(second.outcome.action, 'strand');
+  assert.equal(first.outcome.outcome, 'exhausted');
+  assert.equal(second.outcome.outcome, 'exhausted');
   assert.equal(second.launches, ARTIFACT_REBOUND_ATTEMPTS,
     'the second occurrence starts with a full budget: nothing carries over');
 });
 
-test('dispatchArtifactFailure routes the implementer role through the kernel with its own diagnostic', async () => {
+test('artifact recovery routes the implementer role through the kernel with its own diagnostic', async () => {
   const prompts = [];
   const result = await dispatchArtifactFailure('implementer', 'Implementer artifacts incomplete: missing round-resolution', dispatcherOptions({
-    startAgentFn: async (_step, options) => {
+    startAgent: async (_step, options) => {
       prompts.push(options.prompt('codex'));
       return { agent: 'codex', result: { status: 0 } };
     },
-    verifyFn: () => ({ ok: true }),
+    verify: () => ({ ok: true }),
   }));
 
-  assert.equal(result.action, 'fixed');
-  assert.equal(result.role, 'implementer');
+  assert.equal(result.outcome, 'fixed');
   assert.match(prompts[0], /Role: implementer/);
   assert.match(prompts[0], /missing round-resolution/);
 });
 
-test('dispatchArtifactFailure treats an ambiguous null exit status as a failed attempt', async () => {
+test('artifact recovery treats an ambiguous null exit status as a failed attempt', async () => {
   let verifies = 0;
   const result = await dispatchArtifactFailure('implementer', 'Implementer artifacts incomplete: missing disposition', dispatcherOptions({
-    startAgentFn: async () => ({ agent: 'codex', result: { status: null } }),
-    verifyFn: () => { verifies++; return { ok: true }; },
+    startAgent: async () => ({ agent: 'codex', result: { status: null } }),
+    verify: () => { verifies++; return { ok: true }; },
   }));
 
-  assert.equal(result.action, 'strand');
+  assert.equal(result.outcome, 'exhausted');
   assert.equal(verifies, 0, 'a null-exit launch is no evidence of a fix, so verify never runs');
 });
 
-test('dispatchArtifactFailure resolves the relaunched agent through the fallback port', async () => {
+test('artifact recovery resolves the relaunched agent through the fallback port', async () => {
   const result = await dispatchArtifactFailure('reviewer', 'Reviewer artifacts incomplete: missing findings', dispatcherOptions({
-    applyAgentFallbackFn: () => 'claude',
-    verifyFn: () => ({ ok: true }),
+    applyAgentFallback: () => 'claude',
+    verify: () => ({ ok: true }),
   }));
 
-  assert.equal(result.agent, 'claude');
+  assert.equal(result.implementer, 'claude');
 });
 
-test('dispatchArtifactFailure refuses to run without a verify callback', async () => {
-  await assert.rejects(
-    () => dispatchArtifactFailure('reviewer', 'Reviewer artifacts incomplete: missing findings', dispatcherOptions()),
-    /requires a verify callback/,
-  );
-});
+test('artifact recovery persists no retry state anywhere', async () => {
+  const fake = fakeReviewLoopPorts({
+    artifacts: { consumeReviewer: async () => ({ consumed: true, ok: false, diagnostic: 'Reviewer artifacts incomplete: still incomplete' }) },
+  });
+  await runReviewLoop({ slug: 'test-slug', implementer: 'claude', reviewer: 'codex', maxAttempts: 1, skipHandoff: true }, fake.ports);
 
-test('dispatchArtifactFailure persists no retry state anywhere', async () => {
-  const writes = [];
-  await dispatchArtifactFailure('reviewer', 'Reviewer artifacts incomplete: missing findings', dispatcherOptions({
-    writeReviewStateFn: async (_s, s) => { writes.push(s); return { ok: true }; },
-    verifyFn: () => ({ ok: false, diagnostic: 'still incomplete' }),
-  }));
-
-  assert.equal(writes.length, 0, 'the kernel budget is in-memory: no review-state write may happen');
+  assert.deepEqual(fake.stops, ['REVIEWER_ARTIFACT_RETRY_EXHAUSTED']);
+  assert.ok(fake.writes.every(state => Object.keys((state.metadata ?? {}) as object).every(key => !/retry|attempt/i.test(key))),
+    'the kernel budget is in-memory: no review-state write carries a retry counter');
 });
 
 // ============================================================================
@@ -404,8 +401,8 @@ test('isArtifactInfraDiagnostic handles null/undefined/empty', () => {
   assert.equal(isArtifactInfraDiagnostic(''), false);
 });
 
-test('isArtifactInfraDiagnostic gates infra failures from artifact dispatcher', () => {
-  // Infra diagnostics are caught before reaching dispatchArtifactFailure so
+test('isArtifactInfraDiagnostic gates infra failures from artifact recovery', () => {
+  // Infra diagnostics are caught before artifact recovery starts so
   // they neither consume the occurrence budget nor relaunch an agent.
   const infraDiagnostics = [
     'Reviewer comment post failed: 502 Bad Gateway',

@@ -16,6 +16,8 @@ import { buildAutonomousReviewMatrix, formatMatrixSummary } from '../agents/runt
 import { readReviewState, writeReviewState, resolveReviewIdentity, ReviewState, persistReviewStateOrThrow, backfillReviewFromLegacyState, reconcileInterruptedHandoff } from './review-state.js';
 import type { MissionStore } from '../../application/domain-ports.js';
 import type { MissionLifecycleService } from '../../application/mission-lifecycle-service.js';
+import { repairReviewedTask, mirrorReviewOutcome, reboundRejectedHandoff } from '../../application/review-task-mirroring.js';
+import type { ReviewTaskMirror, ReviewHandoffFailurePort } from '../../application/ports/review-task-mirror.js';
 import { transitionReviewRepair } from '../../application/review-repair-lifecycle.js';
 import { parseReviewFindings, recordRequestedChanges, recordApproval, approvalLegalDiagnostic } from './review-round.js';
 import { missionId } from '../../domain/mission.js';
@@ -52,21 +54,13 @@ async function repairStaleActiveTaskAfterReview(
   const rootDir = options.rootDir || process.cwd();
 
   const taskResolution = resolveTaskFileFn(slug, rootDir);
-  if (!taskResolution.ok) {
-    return { repaired: false, skipped: true };
-  }
-
-  const currentStatus = getTaskStatusFn(taskResolution.taskFile!);
-  if (toVirtual(currentStatus || '') !== 'active') {
-    return { repaired: false, skipped: true, currentStatus: currentStatus ?? undefined };
-  }
-
-  if (!await transitionTaskFn(slug, 'review', { rootDir, log })) {
+  const currentStatus = taskResolution.ok ? getTaskStatusFn(taskResolution.taskFile!) : null;
+  const mirror: ReviewTaskMirror = { transition: status => transitionTaskFn(slug, status, { rootDir, log }) };
+  const result = await repairReviewedTask(taskResolution.ok, currentStatus, toVirtual(currentStatus || ''), mirror);
+  if (!result.repaired && result.skipped === false) {
     error(fmt.status('WARN', `Could not transition backlog task ${slug} to review after recording the review outcome.`));
-    return { repaired: false, skipped: false, currentStatus: currentStatus ?? undefined };
   }
-
-  return { repaired: true, currentStatus: currentStatus ?? undefined };
+  return result;
 }
 
 export async function postStaticReviewComment(
@@ -748,12 +742,14 @@ export async function submitForReview(
 
   const result = await performHandoffFn(slug, { skipGate, reviewIdentity, forgejoUser: reviewIdentity, worktree, missionServicesFn: options.missionServicesFn, occurredAt: options.occurredAt, recoverGateFailure: true });
   if (!result.ok) {
-    // Auto-bounce for declared-gate validation failures
-    if (result.reason === 'validation-failed' && !result.recoveryAttempted) {
-      if (options.missionStore) { await transitionReviewRepair(slug, 'active', reviewIdentity, options.missionStore, options.lifecycleService ?? null); }
-      await transitionTaskFn(slug, 'active', { rootDir: worktree, log });
-      log(fmt.status('INFO', `Auto-bounced ${slug} to active: declared-gate validation failure. Fix the gate in MISSION.md and retry.`));
-    }
+    const failurePort: ReviewHandoffFailurePort = {
+      repairMission: async () => {
+        if (options.missionStore) { await transitionReviewRepair(slug, 'active', reviewIdentity, options.missionStore, options.lifecycleService ?? null); }
+      },
+      transition: status => transitionTaskFn(slug, status, { rootDir: worktree, log }),
+      reportBounce: () => log(fmt.status('INFO', `Auto-bounced ${slug} to active: declared-gate validation failure. Fix the gate in MISSION.md and retry.`)),
+    };
+    await reboundRejectedHandoff(result as { ok: unknown; reason?: unknown; recoveryAttempted?: unknown }, failurePort);
     exit(1);
   }
 }
@@ -1199,18 +1195,13 @@ async function applyLocalReviewState(slug: string, outcome: string, message: str
     return true;
   }
 
-  // Also transition the backlog task for provider=none so integrate preflight passes
-  const backlogStatusMap: Record<string, string> = {
-    'approve': 'approved',
-    'request-changes': 'review',
-    'comment': 'review'
+  const mirror: ReviewTaskMirror = {
+    transition: status => Promise.resolve(transitionTaskFn(slug, status, { rootDir: worktree, log })).catch(() => {
+      log(fmt.status('WARN', `Could not transition backlog task ${slug} to ${status}.`));
+      return false;
+    }),
   };
-  const backlogStatus = backlogStatusMap[outcome];
-  if (backlogStatus) {
-    void Promise.resolve(transitionTaskFn(slug, backlogStatus, { rootDir: worktree, log })).catch(() => {
-      log(fmt.status('WARN', `Could not transition backlog task ${slug} to ${backlogStatus}.`));
-    });
-  }
+  void mirrorReviewOutcome(outcome, false, null, mirror);
 
   log(fmt.status('PASS', `Review outcome "${outcome}" recorded locally for ${slug}.`));
   return false;
@@ -1265,18 +1256,13 @@ async function finalizeProviderReviewState(slug: string, outcome: string, worktr
 
   const taskResolution = resolveTaskFileFn(slug, worktree);
   const currentStatus = taskResolution.ok ? getTaskStatusFn(taskResolution.taskFile!) : null;
-  let backlogStatus: string | null = null;
-  if (outcome === 'approve') {
-    backlogStatus = currentStatus === 'active' ? 'review' : 'approved';
-  } else if (outcome === 'request-changes' || outcome === 'comment') {
-    backlogStatus = 'review';
-  }
-
-  if (backlogStatus) {
-    void Promise.resolve(transitionTaskFn(slug, backlogStatus, { rootDir: worktree, log })).catch(() => {
-      log(fmt.status('WARN', `Could not transition backlog task ${slug} to ${backlogStatus}.`));
-    });
-  }
+  const mirror: ReviewTaskMirror = {
+    transition: status => Promise.resolve(transitionTaskFn(slug, status, { rootDir: worktree, log })).catch(() => {
+      log(fmt.status('WARN', `Could not transition backlog task ${slug} to ${status}.`));
+      return false;
+    }),
+  };
+  void mirrorReviewOutcome(outcome, true, currentStatus, mirror);
   return false;
 }
 

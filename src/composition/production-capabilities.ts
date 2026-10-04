@@ -32,7 +32,8 @@ import path from 'node:path';
 import { missionBranchName } from '../adapters/filesystem/mission-paths.js';
 import { conventionalWorktreePath, resolveWorktree } from '../adapters/git/worktree.js';
 import { performHandoff } from '../adapters/cli/commands/handoff.js';
-import { startReviewLoop } from '../adapters/review/review-loop.js';
+import { createReviewLoopPorts } from '../adapters/review/review-loop.js';
+import { runReviewLoop } from '../application/review-loop/review-loop.js';
 import type { SqliteDatabaseAdapter } from '../adapters/sqlite/database-adapter.js';
 import { composeTuiCapabilities } from './board-projection.js';
 import { reviewLoopBindings } from './review-persistence.js';
@@ -73,7 +74,7 @@ export interface ProductionCompositionOverrides {
    * Production always uses the real loop; a test supplies a recorder so the
    * resume branch can be driven without spawning agents.
    */
-  readonly handoffReviewLoop?: typeof startReviewLoop;
+  readonly handoffReviewLoop?: typeof runReviewLoop;
 }
 
 /**
@@ -174,7 +175,7 @@ async function resumeActiveBoardHandoff(existing: any, store: MissionStore & Mis
 /** The browser hands off exactly as the CLI does: it supplies identity only. */
 function createBoardHandoffWorkflow(
   store: MissionStore & MissionTransitionStore & MissionNelRecorder,
-  reviewLoop: typeof startReviewLoop = startReviewLoop,
+  reviewLoop: typeof runReviewLoop = runReviewLoop,
 ) {
   const lifecycle = new MissionLifecycleService(store);
   const missionServices = {
@@ -195,21 +196,15 @@ function createBoardHandoffWorkflow(
         // is a resume signal, not a second submission (which would replay the
         // lane-event key and violate the lifecycle idempotency contract).
         await resumeActiveBoardHandoff(existing, store, lifecycle, slug);
-        await reviewLoop(slug, {
-          isContinue: true,
-          maxAttempts: existing.mission.review.rounds.length + 1,
-          ...reviewLoopBindings(store, lifecycle),
-          missionStore: store,
-        });
+        await reviewLoop(
+          { slug, isContinue: true, maxAttempts: existing.mission.review.rounds.length + 1 },
+          createReviewLoopPorts(slug, {}, reviewLoopBindings(store, lifecycle)),
+        );
         return;
       }
       const result = await handoff(slug);
       if (!result.ok) { throw new Error(result.error ?? 'handoff workflow aborted'); }
-      await reviewLoop(slug, {
-        performHandoffFn: reviewHandoff,
-        ...reviewLoopBindings(store, lifecycle),
-        missionStore: store,
-      });
+      await reviewLoop({ slug }, createReviewLoopPorts(slug, {}, { performHandoffFn: reviewHandoff, ...reviewLoopBindings(store, lifecycle) }));
     },
   };
 }

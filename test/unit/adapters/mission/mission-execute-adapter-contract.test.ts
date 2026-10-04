@@ -12,6 +12,7 @@ import assert from 'node:assert/strict';
 import { setCommandPathProbe, setLauncherHealthProbe } from '../../../../src/adapters/agents/agents.js';
 import { createExecuteMissionPorts, MissionWorkspaceAdapter, AgentExecutionAdapter, ExecuteTelemetryAdapter } from '../../../../src/adapters/mission/execute-mission-adapters.js';
 import { ExecuteMissionService } from '../../../../src/application/execute-mission-service.js';
+import { fakeReviewLoopPorts } from '../../../helpers/review-loop-ports.js';
 
 // no task ID in the legacy file (was test/execute-mission-adapters.test.ts)
 describe('Execute Mission adapters', () => {
@@ -38,7 +39,9 @@ describe('Execute Mission adapters', () => {
       async validateCheckpointsBeforeHandoff() { return { ok: true }; },
       async performHandoff() { return { ok: true }; },
       async repairHandoff() { return { repaired: false }; },
-      async startReviewLoop() {},
+      // The review loop itself is not exercised here: a held controller fence
+      // makes the application loop decline immediately.
+      reviewLoopMechanisms: () => fakeReviewLoopPorts({ lock: { tryAcquire: () => false, release: () => {} } }).ports,
       ...overrides,
     };
   }
@@ -328,7 +331,9 @@ describe('Execute Mission characterization', () => {
         return { ok: true };
       },
       async repairHandoff() { return { repaired: false }; },
-      async startReviewLoop() {},
+      // The review loop itself is not exercised here: a held controller fence
+      // makes the application loop decline immediately.
+      reviewLoopMechanisms: () => fakeReviewLoopPorts({ lock: { tryAcquire: () => false, release: () => {} } }).ports,
       ...overrides,
     };
     return { runtime, calls, transitionStore };

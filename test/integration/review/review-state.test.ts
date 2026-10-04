@@ -260,7 +260,7 @@ test('review loop reset clears the reviewer session marker', async () => {
       delete: async (mission, role) => { deleted.push([mission, role]); },
     } as never);
 
-    assert.deepEqual(await bindings.resetReviewStateFn(slug, root), { outcome: 'committed' });
+    assert.deepEqual(await bindings.resetReviewState(slug, root), { outcome: 'committed' });
     assert.deepEqual(deleted, [[slug, 'review']]);
   });
 });

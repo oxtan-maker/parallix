@@ -1,3 +1,4 @@
+import { reviewLoopReporter } from '../../../../src/adapters/review/review-loop-presentation.js';
 // @ts-nocheck -- Retained legacy partial request doubles (TASK-2328).
 // review launcher family contract.
 // Related scenarios share imports; each contract keeps its own hooks and mutable fixtures.
@@ -12,7 +13,8 @@ import {
   setCommandPathProbe,
   workflowLauncherStatus,
 } from '../../../../src/adapters/agents/agents.js';
-import { startReviewLoop } from '../../../../src/adapters/review/review-loop.js';
+import { selectReviewer } from '../../../../src/application/review-loop/reviewer-selection.js';
+import type { ReviewerRoutingPort } from '../../../../src/application/ports/review-round.js';
 import { resolveHandoffReviewAssignment } from '../../../../src/adapters/cli/commands/handoff.js';
 import { mkdtemp as registeredMkdtemp } from '../../../helpers/temp-dir.js';
 
@@ -230,83 +232,43 @@ test('selectAgent throws when all eligible agents are excluded (no-cross-family 
 });
 
 // =============================================================================
-// CP-3: Review-loop path — startReviewLoop passes exclude to selectAgentFn
+// CP-3: Review-loop path — reviewer selection excludes the author family
 // =============================================================================
-// This test verifies that startReviewLoop calls selectAgentFn with the
-// implementer in the exclude set, exercising the actual review-launch path.
-// It uses the real selectAgent for the injected selectAgentFn so the
-// production config-reading and launcher-availability logic is exercised.
+// The application reviewer-selection policy nominates through the routing
+// port with the implementer excluded. The port here wraps the real selectAgent
+// so the production config-reading and launcher-availability logic is
+// exercised.
 
-test('startReviewLoop reviewer selection excludes the author family (review-loop path)', async () => {
+function routingOver(nominate: (_excluded: ReadonlySet<string>) => string, status: (_agent: string) => { supported: boolean; detail: string }): ReviewerRoutingPort {
+  return { eligibleFamilies: () => ['codex', 'claude', 'custom', 'vibe'], launcherStatus: status, nominate, runtimeMatrix: () => [] };
+}
+
+function selectFor(implementer: string, routing: ReviewerRoutingPort, logs: string[]) {
+  return selectReviewer({ implementer, isContinue: false, persisted: null, maxAttempts: 1, dryRun: true, providerEnabled: false, slug: 'task-999' }, routing, reviewLoopReporter({ log: msg => logs.push(msg), error: msg => logs.push(msg) }));
+}
+
+test('review-loop reviewer selection excludes the author family (review-loop path)', () => {
   const tmpRoot = registeredMkdtemp('task-2335-repro-loop-');
+  const originalRandom = Math.random;
   try {
     availableLaunchers(tmpRoot);
     delete process.env.WORKFLOW_AGENT;
-
     const logs: string[] = [];
-    const errors: string[] = [];
-    let selectedReviewer: string | null = null;
     let selectAgentCallArgs: { step: string; exclude: string[] } | null = null;
+    // Stub Math.random so selectAgent returns a deterministic agent.
+    Math.random = () => 0.33;
+    const selected = selectFor('codex', routingOver(excluded => {
+      selectAgentCallArgs = { step: 'review', exclude: [...excluded] };
+      // Real selectAgent — reads config/agents.json from disk.
+      return selectAgent('review', { exclude: new Set(excluded), mainWorktreePath: null });
+    }, agent => ({ supported: true, detail: agent })), logs);
 
-    // Stub Math.random so selectAgent returns a deterministic agent
-    const originalRandom = Math.random;
-    Math.random = () => 0.33; // picks middle of pool
-
-    await startReviewLoop('task-999', {
-      worktree: tmpRoot,
-      implementer: 'codex',
-      maxAttempts: 1,
-      dryRun: true,
-      maybeUpdateGraphifyBeforeReviewFn: () => {},
-      resolveTaskFileFn: () => ({ ok: true, taskFile: '/tmp/task-999.md' }),
-      getTaskImplementerFn: () => 'codex',
-      readReviewStateFn: () => null,
-      eligibleAgentsForStepFn: () => ['codex', 'claude', 'custom', 'vibe'],
-      workflowLauncherStatusFn: (agent: string) => ({ agent, supported: true, detail: 'mock' }),
-      // Use the real selectAgent (no custom wrapper) so the production
-      // config-reading and launcher-availability path is exercised.
-      // The review-loop calls selectAgentFn('review', { exclude: new Set([implementer]) }).
-      // We wrap it to capture the call arguments.
-      selectAgentFn: (step: string, opts: { exclude: Set<string> }) => {
-        selectAgentCallArgs = { step, exclude: opts && opts.exclude ? [...opts.exclude] : [] };
-        // Real selectAgent — reads config/agents.json from disk
-        const result = selectAgent(step, { exclude: opts && opts.exclude, mainWorktreePath: null });
-        selectedReviewer = result;
-        return result;
-      },
-      rebaseBeforeReviewRoundFn: async () => ({ ok: true }),
-      startAgentFn: async () => ({ agent: 'codex', result: { status: 0 } }),
-      consumeReviewerArtifactsFn: async () => ({ consumed: true, ok: true, reviewState: 'REQUEST_CHANGES' }),
-      consumeImplementerArtifactsFn: async () => ({ consumed: true, ok: true, disposition: 'CHANGES_MADE' }),
-      transitionTaskFn: () => true,
-      transitionVirtualFn: () => true,
-      writeReviewStateFn: () => {},
-      log: (msg: string) => logs.push(msg),
-      error: (msg: string) => errors.push(msg),
-      exit: (code: number) => { throw new Error(`exit(${code})`); }
-    });
-
-    Math.random = originalRandom;
-
-    // The selectAgentFn should have been called with exclude containing 'codex'
-    assert.ok(
-      selectAgentCallArgs,
-      'selectAgentFn should have been called during reviewer selection'
-    );
-    assert.ok(
-      selectAgentCallArgs.exclude.includes('codex'),
-      `selectAgentFn exclude set should contain the implementer 'codex'; got: ${JSON.stringify(selectAgentCallArgs.exclude)}`
-    );
-    assert.notEqual(
-      selectedReviewer,
-      'codex',
-      `selected reviewer must NOT be the implementer family 'codex'; got '${selectedReviewer}'`
-    );
-    assert.ok(
-      ['claude', 'custom', 'vibe'].includes(selectedReviewer!),
-      `selected reviewer must be an eligible cross-family agent; got '${selectedReviewer}'`
-    );
+    assert.ok(selectAgentCallArgs, 'the selector should have been asked during reviewer selection');
+    assert.ok(selectAgentCallArgs.exclude.includes('codex'), `exclude set should contain the implementer 'codex'; got: ${JSON.stringify(selectAgentCallArgs.exclude)}`);
+    assert.notEqual(selected?.reviewer, 'codex', `selected reviewer must NOT be the implementer family 'codex'; got '${selected?.reviewer}'`);
+    assert.ok(['claude', 'custom', 'vibe'].includes(selected!.reviewer), `selected reviewer must be an eligible cross-family agent; got '${selected?.reviewer}'`);
   } finally {
+    Math.random = originalRandom;
     fs.rmSync(tmpRoot, { recursive: true, force: true });
   }
 });
@@ -314,78 +276,31 @@ test('startReviewLoop reviewer selection excludes the author family (review-loop
 // =============================================================================
 // CP-4: Review-loop single-family fallback path
 // =============================================================================
-// When no different-family reviewer is runnable, the review-loop falls back
-// to the implementer (single-family-fallback). This test verifies that path.
-//
-// The review-loop uses a single consistent launcher-status seam:
-//   - selectAgentFn calls the real selectAgent, which uses workflowLauncherStatus
-//     (backed by commandPathProbe) to check launcher availability.
-//   - workflowLauncherStatusFn (injected into the review-loop) uses the SAME
-//     underlying launcher availability.
-// By setting commandPathProbe to only find 'codex', both selectAgent and the
-// review-loop see the same availability: only codex is runnable.
+// When no different-family reviewer is runnable, reviewer selection falls back
+// to the implementer (single-family-fallback). The selector and the launcher
+// status share one availability seam: commandPathProbe only finds codex.
 
-test('startReviewLoop single-family fallback when no cross-family reviewer is runnable', async () => {
+test('review-loop single-family fallback when no cross-family reviewer is runnable', () => {
   const tmpRoot = registeredMkdtemp('task-2335-repro-sff-');
   try {
     setCommandPathProbe((name: string) => name === 'codex' ? name : null);
     setLauncherHealthProbe(() => ({ ok: true }));
     delete process.env.WORKFLOW_AGENT;
-
     const logs: string[] = [];
-    const errors: string[] = [];
     let selectAgentThrew = false;
+    const selected = selectFor('codex', routingOver(excluded => {
+      try {
+        // Real selectAgent: every cross-family launcher is unavailable.
+        return selectAgent('review', { exclude: new Set(excluded), worktree: tmpRoot, mainWorktreePath: null });
+      } catch (err) {
+        selectAgentThrew = true;
+        throw err;
+      }
+    }, agent => workflowLauncherStatus(agent, tmpRoot)), logs);
 
-    await startReviewLoop('task-999', {
-      worktree: tmpRoot,
-      implementer: 'codex',
-      maxAttempts: 1,
-      dryRun: true,
-      maybeUpdateGraphifyBeforeReviewFn: () => {},
-      resolveTaskFileFn: () => ({ ok: true, taskFile: '/tmp/task-999.md' }),
-      getTaskImplementerFn: () => 'codex',
-      readReviewStateFn: () => null,
-      eligibleAgentsForStepFn: () => ['codex', 'claude', 'custom', 'vibe'],
-      // Inject the real workflowLauncherStatus so the review-loop fallback
-      // check uses the same launcher availability as selectAgent.
-      workflowLauncherStatusFn: (agent: string) => workflowLauncherStatus(agent, tmpRoot),
-      selectAgentFn: (step: string, opts: { exclude: Set<string>; worktree?: string }) => {
-        try {
-          // Real selectAgent — uses commandPathProbe (only codex found),
-          // so cross-family agents are all unavailable. Throws because
-          // no eligible cross-family agent has a working launcher.
-          return selectAgent(step, { exclude: opts && opts.exclude, worktree: tmpRoot, mainWorktreePath: null });
-        } catch (err) {
-          selectAgentThrew = true;
-          throw err;
-        }
-      },
-      rebaseBeforeReviewRoundFn: async () => ({ ok: true }),
-      startAgentFn: async () => ({ agent: 'codex', result: { status: 0 } }),
-      consumeReviewerArtifactsFn: async () => ({ consumed: true, ok: true, reviewState: 'REQUEST_CHANGES' }),
-      consumeImplementerArtifactsFn: async () => ({ consumed: true, ok: true, disposition: 'CHANGES_MADE' }),
-      transitionTaskFn: () => true,
-      transitionVirtualFn: () => true,
-      writeReviewStateFn: () => {},
-      log: (msg: string) => logs.push(msg),
-      error: (msg: string) => errors.push(msg),
-      exit: (code: number) => { throw new Error(`exit(${code})`); }
-    });
-
-    // selectAgent should have thrown (no cross-family launcher available)
-    assert.ok(
-      selectAgentThrew,
-      'selectAgentFn should throw when no cross-family agent has a working launcher'
-    );
-
-    // Verify single-family-fallback was triggered
-    const fallbackLog = logs.find(l =>
-      l.includes('Single-family fallback') || l.includes('single-family-fallback')
-    );
-    assert.ok(
-      fallbackLog,
-      `Expected single-family fallback log message; logs: ${JSON.stringify(logs.filter(l => l.includes('fallback') || l.includes('Family') || l.includes('family'))).slice(0, 300)}`
-    );
+    assert.ok(selectAgentThrew, 'selectAgent should throw when no cross-family agent has a working launcher');
+    assert.equal(selected?.reviewerSource, 'single-family-fallback');
+    assert.ok(logs.some(l => l.includes('Single-family fallback')), `Expected single-family fallback log message; logs: ${logs.join(' | ')}`);
   } finally {
     fs.rmSync(tmpRoot, { recursive: true, force: true });
   }

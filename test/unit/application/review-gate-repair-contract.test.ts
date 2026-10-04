@@ -3,12 +3,11 @@
 // Related scenarios share imports; each contract keeps its own hooks and mutable fixtures.
 import test, { describe } from 'node:test';
 import assert from 'node:assert/strict';
-import {
-  startReviewLoop,
-  runPreReviewGate,
-  reboundPreReviewFailure,
-  gateFailureReason,
-} from '../../../src/adapters/review/review-loop.js';
+import { runPreReviewGate, gateFailureReason } from '../../../src/adapters/review/review-gate-handling.js';
+import { preReviewRebaseFacts } from '../../../src/adapters/review/review-loop.js';
+import { runReviewLoop } from '../../../src/application/review-loop/review-loop.js';
+import { repairPreReviewFailure } from '../../../src/application/review-loop/pre-review.js';
+import { fakeLoopContext, fakeReviewLoopPorts } from '../../helpers/review-loop-ports.js';
 import fs from 'node:fs';
 import path from 'node:path';
 import { mkdtemp as registeredMkdtemp } from '../../helpers/temp-dir.js';
@@ -20,146 +19,84 @@ import { submitForReview } from '../../../src/adapters/review/review-commands.js
 describe("pre review gate per round", { concurrency: false }, () => {
   const TEST_SLUG = `task-1268-gate-per-round-${process.pid}`;
 
-  test('startReviewLoop runs the pre-review gate before every reviewer round', async () => {
-    const events = [];
+  test('review loop runs the pre-review gate before every reviewer round', async () => {
     const gateCalls = [];
     const reviewOutcomes = ['REQUEST_CHANGES', 'APPROVED'];
     const dispositions = ['CHANGES_MADE'];
-
-    await startReviewLoop(TEST_SLUG, {
-      eligibleAgentsForStepFn: () => ['codex', 'claude', 'gemini', 'custom'],
-      resolveTaskFileFn: () => ({ ok: true, taskFile: '/tmp/task.md' }),
-      transitionTaskFn: async () => {},
-      transitionVirtualFn: async () => {},
-      implementer: 'claude', reviewer: 'codex', dryRun: false,
-      // Every boundary this scenario reaches is injected, so do not resolve the
-      // repository worktree or create per-test operator state.
-      worktree: '/tmp',
-      workflowLauncherStatusFn: () => ({ supported: true }),
-      isForgejoReviewEnabledFn: () => true,
-      forgejoAvailableFn: async () => true,
-      getPrStatusFn: () => ({ exists: true, state: 'open', number: 41 }),
-      maybeUpdateGraphifyBeforeReviewFn: () => {},
-      enforceTaskAssigneeFn: () => true,
-      resolveForgejoUserFn: () => 'gemini', readTokenFn: () => 'token',
-      readReviewStateFn: () => null, writeReviewStateFn: () => {},
-      rebaseBeforeReviewRoundFn: async () => ({ ok: true, sharedFileConflicts: false }),
-      runPreReviewGateFn: async () => {
-        gateCalls.push(gateCalls.length + 1);
-        return { ok: true, area: 'lib', command: 'true', exitCode: 0, stdout: '', stderr: '' };
+    let head = 0;
+    const fake = fakeReviewLoopPorts({
+      slug: TEST_SLUG,
+      routing: { eligibleFamilies: () => ['codex', 'claude', 'gemini', 'custom'] },
+      handoff: { handoff: async () => ({ ok: true }) },
+      provider: { pollReview: async () => reviewOutcomes.shift(), pollDisposition: async () => dispositions.shift() },
+      preReview: {
+        runGate: async () => { gateCalls.push(gateCalls.length + 1); return { ok: true }; },
+        // The implementer addressed the finding, so round 2 evaluates a revised
+        // revision (TASK-2478/criterion 8 stops on an unchanged HEAD).
+        head: () => `head-${++head}`,
       },
-      startAgentFn: async (step, options) => {
-        events.push(`${step}:${options.role}`);
-        return { agent: null };
-      },
-      pollForReviewFn: async () => reviewOutcomes.shift(),
-      pollForDispositionFn: async () => dispositions.shift(),
-      applyAgentFallbackFn: ({ original }) => original,
-      buildCompactReviewPromptFn: () => 'review prompt',
-      buildCompactActOnReviewPromptFn: () => 'act-on-review prompt',
-      log: () => {}, error: () => {}, exit: () => {},
-      consumeReviewerArtifactsFn: async () => ({ consumed: false }),
-      consumeImplementerArtifactsFn: async () => ({ consumed: false }),
-      // The implementer addressed the finding, so round 2 evaluates the revised
-      // revision. A CHANGES_MADE with an unchanged HEAD now stops the loop per
-      // TASK-2478/criterion 8, so a real revision (and the push it triggers) is
-      // required for the gate-per-round path to reach round 2.
-      hasNewCommittedChangeFn: () => true,
-      pushReviewRefFn: () => ({ status: 0 }),
+      agents: { launch: async () => ({ agent: null }) },
     });
+    await runReviewLoop({ slug: TEST_SLUG, implementer: 'claude', reviewer: 'codex' }, fake.ports);
 
-    const reviewerLaunches = events.filter((event) => event === 'review:reviewer').length;
+    const reviewerLaunches = fake.launches.filter(launch => launch.role === 'reviewer').length;
     assert.ok(reviewerLaunches >= 2, 'the simulated review loop must attempt multiple rounds');
     assert.equal(gateCalls.length, reviewerLaunches, 'each reviewer round must have exactly one pre-review gate');
   });
 
-  test('startReviewLoop stops after a gate-failure bounce without launching a reviewer', async () => {
-    const events = [];
+  test('review loop stops after a gate-failure bounce without launching a reviewer', async () => {
     let gateCalls = 0;
-
-    await startReviewLoop(TEST_SLUG, {
-      eligibleAgentsForStepFn: () => ['codex', 'claude', 'gemini', 'custom'],
-      resolveTaskFileFn: () => ({ ok: true, taskFile: '/tmp/task.md' }),
-      transitionTaskFn: async () => {},
-      transitionVirtualFn: async () => {},
-      implementer: 'claude', reviewer: 'codex', dryRun: false,
-      workflowLauncherStatusFn: () => ({ supported: true }),
-      isForgejoReviewEnabledFn: () => true,
-      forgejoAvailableFn: async () => true,
-      getPrStatusFn: () => ({ exists: true, state: 'open', number: 41 }),
-      maybeUpdateGraphifyBeforeReviewFn: () => {},
-      enforceTaskAssigneeFn: () => true,
-      resolveForgejoUserFn: () => 'gemini', readTokenFn: () => 'token',
-      readReviewStateFn: () => null, writeReviewStateFn: () => {},
-      rebaseBeforeReviewRoundFn: async () => ({ ok: true, sharedFileConflicts: false }),
-      runPreReviewGateFn: async () => {
-        gateCalls += 1;
-        return { ok: false, area: 'lib', command: 'false', exitCode: 1, stdout: '', stderr: '' };
+    const fake = fakeReviewLoopPorts({
+      slug: TEST_SLUG,
+      routing: { eligibleFamilies: () => ['codex', 'claude', 'gemini', 'custom'] },
+      handoff: { handoff: async () => ({ ok: true }) },
+      provider: {},
+      preReview: {
+        runGate: async () => {
+          gateCalls += 1;
+          return { ok: false, area: 'lib', exitCode: 1, diagnostic: 'still failing', reason: gateFailureReason({ ok: false, area: 'lib', command: 'false', exitCode: 1, stdout: '', stderr: '' }) };
+        },
       },
-      reboundPreReviewFailureFn: async () => ({ bounced: false, stranded: true, outcome: 'exhausted', diagnostic: 'still failing', implementer: 'claude' }),
-      startAgentFn: async (step, options) => {
-        events.push(`${step}:${options.role}`);
-        return { agent: null };
-      },
-      applyAgentFallbackFn: ({ original }) => original,
-      buildCompactReviewPromptFn: () => 'review prompt',
-      buildCompactActOnReviewPromptFn: () => 'act-on-review prompt',
-      log: () => {}, error: () => {}, exit: () => {},
-      consumeReviewerArtifactsFn: async () => ({ consumed: false }),
-      consumeImplementerArtifactsFn: async () => ({ consumed: false }),
     });
+    await runReviewLoop({ slug: TEST_SLUG, implementer: 'claude', reviewer: 'codex' }, fake.ports);
 
-    assert.equal(gateCalls, 1);
-    assert.equal(events.filter((event) => event === 'review:reviewer').length, 0);
+    // The first gate run fails; every later run is the repair's verification.
+    assert.ok(gateCalls >= 1);
+    assert.equal(fake.launches.filter(launch => launch.role === 'reviewer').length, 0);
+    assert.deepEqual(fake.exits, [1], 'a stranded gate repair ends the loop non-zero');
+    assert.ok(fake.errors.some(line => line.includes('Pre-review gate failure stranded mission')), fake.errors.join(' | '));
   });
 
-  test('startReviewLoop rebounces a pre-review safety-commit hook failure before gate or reviewer launch', async () => {
-    const events = [];
-    let hookBounce = null;
+  test('review loop rebounces a pre-review safety-commit hook failure before gate or reviewer launch', async () => {
     let gateCalls = 0;
-
-    await startReviewLoop(TEST_SLUG, {
-      eligibleAgentsForStepFn: () => ['codex', 'claude', 'gemini', 'custom'],
-      resolveTaskFileFn: () => ({ ok: true, taskFile: '/tmp/task.md' }),
-      transitionTaskFn: async () => {},
-      transitionVirtualFn: async () => {},
-      implementer: 'claude', reviewer: 'codex', dryRun: false,
-      workflowLauncherStatusFn: () => ({ supported: true }),
-      isForgejoReviewEnabledFn: () => true,
-      forgejoAvailableFn: async () => true,
-      getPrStatusFn: () => ({ exists: true, state: 'open', number: 41 }),
-      maybeUpdateGraphifyBeforeReviewFn: () => {},
-      enforceTaskAssigneeFn: () => true,
-      resolveForgejoUserFn: () => 'gemini', readTokenFn: () => 'token',
-      readReviewStateFn: () => null, writeReviewStateFn: () => {},
-      rebaseBeforeReviewRoundFn: async () => ({
-        ok: false, sharedFileConflicts: false, hookFailure: true, hookOutput: 'pre-commit hook failed: lint error',
-      }),
-      runPreReviewGateFn: async () => { gateCalls++; return { ok: true, area: 'lib', command: 'true', exitCode: 0, stdout: '', stderr: '' }; },
-      reboundPreReviewFailureFn: async (_slug, _worktree, reason) => {
-        hookBounce = reason;
-        return { bounced: false, stranded: true, outcome: 'exhausted', diagnostic: 'hook still failing', implementer: 'claude' };
-      },
-      startAgentFn: async (step, options) => {
-        events.push(`${step}:${options.role}`);
-        return { agent: null };
-      },
-      applyAgentFallbackFn: ({ original }) => original,
-      buildCompactReviewPromptFn: () => 'review prompt',
-      buildCompactActOnReviewPromptFn: () => 'act-on-review prompt',
-      log: () => {}, error: () => {}, exit: () => {},
-      consumeReviewerArtifactsFn: async () => ({ consumed: false }),
-      consumeImplementerArtifactsFn: async () => ({ consumed: false }),
-    });
-
-    // TASK-2377.03: the hook path no longer synthesizes a `git-hook` gate result;
-    // it passes the kernel a structured hook-failure reason (SC5).
+    const hook = preReviewRebaseFacts({ ok: false, sharedFileConflicts: false, hookFailure: true, hookOutput: 'pre-commit hook failed: lint error' } as never);
+    assert.equal(hook.ok, false);
+    const hookBounce = !hook.ok ? hook.hook : null;
+    // TASK-2377.03: the hook path does not synthesize a `git-hook` gate result;
+    // the rebase facts carry a structured hook-failure reason (SC5).
     assert.equal(hookBounce.kind, 'hook-failure');
     assert.equal(hookBounce.hook, 'pre-commit');
     assert.match(hookBounce.operation, /pre-review safety commit/);
     assert.match(hookBounce.output, /pre-commit hook failed/);
+
+    const fake = fakeReviewLoopPorts({
+      slug: TEST_SLUG,
+      routing: { eligibleFamilies: () => ['codex', 'claude', 'gemini', 'custom'] },
+      handoff: { handoff: async () => ({ ok: true }) },
+      provider: {},
+      preReview: {
+        rebase: async () => hook,
+        runGate: async () => { gateCalls++; return { ok: true }; },
+      },
+      agents: { launch: async launch => ({ agent: launch.agent, result: { status: 0 } }) },
+    });
+    await runReviewLoop({ slug: TEST_SLUG, implementer: 'claude', reviewer: 'codex' }, fake.ports);
+
+    const repairs = fake.launches.filter(launch => launch.role === 'implementer' && !launch.prompt);
+    assert.equal(repairs.length, 2, 'the hook failure is bounced to the implementer through the kernel budget');
+    assert.match(String(repairs[0].recovery?.prompt('claude')), /pre-commit hook failed: lint error/);
     assert.equal(gateCalls, 0, 'the gate must wait until the rebounced safety commit succeeds');
-    assert.equal(events.filter((event) => event === 'review:reviewer').length, 0);
+    assert.equal(fake.launches.filter(launch => launch.role === 'reviewer').length, 0);
   });
 });
 
@@ -334,265 +271,142 @@ describe("pre review gate", { concurrency: false }, () => {
   });
 
   // ============================================================================
-  // reboundPreReviewFailure tests (TASK-2377.03 kernel wiring)
+  // Pre-review repair (TASK-2377.03 kernel wiring): the application bounces a
+  // pre-review failure through one rebound-kernel occurrence.
   // ============================================================================
 
-  test('reboundPreReviewFailure bounces a gate failure whose verify re-run passes', async () => {
-    await withTempDir(async root => {
-      const launches = [];
-      const stateWrites = [];
-      let verifyRuns = 0;
-
-      const result = await reboundPreReviewFailure('task-1385', root, gateFailureReason({
-        ok: false,
-        area: 'docs',
-        command: 'exit 1',
-        exitCode: 1,
-        stdout: 'stdout output',
-        stderr: 'verification gate failed with exit code 1',
-      }), 'codex', {
-        verifyFn: () => { verifyRuns++; return { ok: true }; },
-        readReviewStateFn: () => null,
-        writeReviewStateFn: (slug, state) => { stateWrites.push(state); },
-        transitionTaskFn: () => {},
-        startAgentFn: async (mode, opts) => {
-          launches.push({ mode, hasPrompt: !!opts.prompt });
-          return { agent: 'codex', result: { status: 0 } };
-        },
-        applyAgentFallbackFn: () => 'codex',
-        log: () => {}, error: () => {},
-      });
-
-      assert.equal(result.bounced, true);
-      assert.equal(result.stranded, false);
-      assert.equal(result.outcome, 'fixed');
-      assert.equal(launches.length, 1);
-      assert.equal(launches[0].hasPrompt, true);
-      assert.equal(verifyRuns, 1, 'the failing check must re-run before the bounce is reported fixed');
-      // TASK-2377.03 SC3: the budget is in-memory per occurrence, so the bounce
-      // path writes no retry counter to review state.
-      assert.deepEqual(stateWrites, []);
+  function repairFixture(verify: { rebase?: () => unknown; runGate?: () => unknown } = {}, launch?: (_launch: any) => unknown) {
+    const fake = fakeReviewLoopPorts({
+      slug: 'task-1385',
+      preReview: {
+        ...(verify.rebase ? { rebase: verify.rebase } : {}),
+        ...(verify.runGate ? { runGate: verify.runGate } : {}),
+      } as never,
+      agents: launch ? { launch: launch as never } : {},
     });
+    return { fake, context: fakeLoopContext(fake, { slug: 'task-1385' }) };
+  }
+
+  const gateFailure = (overrides: Record<string, unknown>) => gateFailureReason({ ok: false, area: 'docs', command: 'exit 1', exitCode: 1, stdout: 'output', stderr: '', ...overrides } as never);
+
+  test('pre-review repair bounces a gate failure whose verification re-run passes', async () => {
+    let verifyRuns = 0;
+    const { fake, context } = repairFixture({ runGate: () => { verifyRuns++; return { ok: true }; } });
+
+    const result = await repairPreReviewFailure(context, gateFailure({ stdout: 'stdout output', stderr: 'verification gate failed with exit code 1' }), 2);
+
+    assert.equal(result.bounced, true);
+    assert.equal(result.outcome, 'fixed');
+    assert.equal(fake.launches.length, 1);
+    assert.equal(typeof fake.launches[0].recovery?.prompt, 'function');
+    assert.equal(verifyRuns, 1, 'the failing check must re-run before the bounce is reported fixed');
+    // TASK-2377.03 SC3: the budget is in-memory per occurrence, so the bounce
+    // path writes no retry counter to review state.
+    assert.deepEqual(fake.writes, []);
   });
 
-  test('reboundPreReviewFailure rebounces a gate failure with arbitrary test output', async () => {
-    await withTempDir(async root => {
-      const launches = [];
-      const transitions = [];
+  test('pre-review repair rebounces a gate failure with arbitrary test output', async () => {
+    const { fake, context } = repairFixture();
 
-      const result = await reboundPreReviewFailure('task-1385', root, gateFailureReason({
-        ok: false,
-        area: 'static-analysis',
-        command: './scripts/verify-local.sh static-analysis',
-        exitCode: 1,
-        stdout: 'test/example.test.js:42: assertion failed',
-        stderr: '',
-        error: 'verification gate failed with exit code 1',
-      }), 'codex', {
-        verifyFn: passingVerify,
-        readReviewStateFn: () => null,
-        writeReviewStateFn: () => {},
-        transitionTaskFn: (slug, status) => { transitions.push({ slug, status }); },
-        startAgentFn: async (mode, opts) => {
-          const prompt = typeof opts.prompt === 'function' ? opts.prompt('codex') : opts.prompt;
-          launches.push({ mode, prompt });
-          return { agent: 'codex', result: { status: 0 } };
-        },
-        applyAgentFallbackFn: () => 'codex',
-        log: () => {}, error: () => {},
-      });
+    const result = await repairPreReviewFailure(context, gateFailure({
+      area: 'static-analysis', command: './scripts/verify-local.sh static-analysis',
+      stdout: 'test/example.test.js:42: assertion failed', error: 'verification gate failed with exit code 1',
+    }), 2);
 
-      assert.equal(result.bounced, true);
-      assert.equal(result.stranded, false);
-      assert.deepEqual(transitions, [{ slug: 'task-1385', status: 'active' }, { slug: 'task-1385', status: 'review' }]);
-      assert.equal(launches.length, 1);
-      assert.match(launches[0].prompt, /assertion failed/);
-    });
+    assert.equal(result.bounced, true);
+    assert.deepEqual(fake.mirrors, ['active', 'review'], 'the task returns to active for the repair and to review once verified');
+    assert.equal(fake.launches.length, 1);
+    assert.match(String(fake.launches[0].recovery?.prompt('codex')), /assertion failed/);
   });
 
-  test('reboundPreReviewFailure relaunches with the fresh diagnostic when the verify re-run still fails', async () => {
-    await withTempDir(async root => {
-      const prompts = [];
-      const verifyDiagnostics = ['second run: 1 test still failing'];
-
-      const result = await reboundPreReviewFailure('task-1385', root, gateFailureReason({
-        ok: false,
-        area: 'docs',
-        command: 'exit 1',
-        exitCode: 1,
-        stdout: 'first run diagnostic',
-        stderr: '',
-      }), 'codex', {
-        verifyFn: () => verifyDiagnostics.length
-          ? { ok: false, diagnostic: verifyDiagnostics.shift() }
-          : { ok: true },
-        readReviewStateFn: () => null,
-        writeReviewStateFn: () => {},
-        transitionTaskFn: () => {},
-        startAgentFn: async (mode, opts) => {
-          prompts.push(typeof opts.prompt === 'function' ? opts.prompt('codex') : opts.prompt);
-          return { agent: 'codex', result: { status: 0 } };
-        },
-        applyAgentFallbackFn: () => 'codex',
-        log: () => {}, error: () => {},
-      });
-
-      assert.equal(result.bounced, true);
-      assert.equal(prompts.length, 2);
-      assert.match(prompts[0], /first run diagnostic/);
-      assert.match(prompts[1], /second run: 1 test still failing/);
+  test('pre-review repair relaunches with the fresh diagnostic when the verification re-run still fails', async () => {
+    const verifyDiagnostics = ['second run: 1 test still failing'];
+    const { fake, context } = repairFixture({
+      runGate: () => verifyDiagnostics.length
+        ? { ok: false, area: 'docs', exitCode: 1, diagnostic: verifyDiagnostics.shift(), reason: undefined }
+        : { ok: true },
     });
+
+    const result = await repairPreReviewFailure(context, gateFailure({ stdout: 'first run diagnostic' }), 2);
+
+    assert.equal(result.bounced, true);
+    const prompts = fake.launches.map(launch => String(launch.recovery?.prompt('codex')));
+    assert.equal(prompts.length, 2);
+    assert.match(prompts[0], /first run diagnostic/);
+    assert.match(prompts[1], /second run: 1 test still failing/);
   });
 
-  test('reboundPreReviewFailure strands the mission when the per-occurrence budget is spent', async () => {
-    await withTempDir(async root => {
-      const errors = [];
-      let launches = 0;
+  test('pre-review repair strands the mission when the per-occurrence budget is spent', async () => {
+    const { fake, context } = repairFixture({ runGate: () => ({ ok: false, area: 'docs', exitCode: 1, diagnostic: 'gate still failing', reason: undefined }) });
 
-      const result = await reboundPreReviewFailure('task-1385', root, gateFailureReason({
-        ok: false,
-        area: 'docs',
-        command: 'exit 1',
-        exitCode: 1,
-        stdout: 'output',
-        stderr: '',
-      }), 'codex', {
-        verifyFn: () => ({ ok: false, diagnostic: 'gate still failing' }),
-        readReviewStateFn: () => null,
-        writeReviewStateFn: () => {},
-        transitionTaskFn: () => {},
-        startAgentFn: async () => { launches++; return { agent: 'codex', result: { status: 0 } }; },
-        applyAgentFallbackFn: () => 'codex',
-        log: () => {}, error: (msg) => errors.push(msg),
-      });
+    const result = await repairPreReviewFailure(context, gateFailure({}), 2);
 
-      assert.equal(result.bounced, false);
-      assert.equal(result.stranded, true);
-      assert.equal(result.outcome, 'exhausted');
-      assert.equal(result.diagnostic, 'gate still failing');
-      assert.equal(launches, 2, 'the default budget is two attempts per occurrence');
-      assert.ok(errors.some(e =>
-        e.includes('Recovery dossier for task-1385') &&
-        e.includes('implementer repair budget (2)') &&
-        e.includes('gate still failing')
-      ));
-    });
+    assert.equal(result.bounced, false);
+    assert.equal(result.outcome, 'exhausted');
+    assert.equal(result.diagnostic, 'gate still failing');
+    assert.equal(fake.launches.length, 2, 'the default budget is two attempts per occurrence');
+    assert.ok(fake.errors.some(e =>
+      e.includes('Recovery dossier for task-1385') &&
+      e.includes('implementer repair budget (2)') &&
+      e.includes('gate still failing')
+    ));
+    assert.ok(!fake.mirrors.includes('review'), 'a stranded repair never returns the task to review');
   });
 
-  test('reboundPreReviewFailure does not bounce for InfraBlocker (HumanOnly)', async () => {
-    await withTempDir(async root => {
-      const errors = [];
-      const launches = [];
+  test('pre-review repair does not bounce for InfraBlocker (HumanOnly)', async () => {
+    const { fake, context } = repairFixture();
 
-      const result = await reboundPreReviewFailure('task-1385', root, gateFailureReason({
-        ok: false,
-        area: 'docs',
-        command: 'node parallix verify docs',
-        exitCode: 1,
-        stdout: '',
-        stderr: 'connection refused to forgejo server',
-      }), 'codex', {
-        verifyFn: passingVerify,
-        readReviewStateFn: () => null,
-        writeReviewStateFn: () => {},
-        transitionTaskFn: () => {},
-        startAgentFn: async () => { launches.push('should-not-launch'); },
-        applyAgentFallbackFn: () => 'codex',
-        log: () => {}, error: (msg) => errors.push(msg),
-      });
+    const result = await repairPreReviewFailure(context, gateFailure({ command: 'node parallix verify docs', stdout: '', stderr: 'connection refused to forgejo server' }), 2);
 
-      assert.equal(result.bounced, false);
-      assert.equal(result.stranded, true);
-      assert.equal(result.outcome, 'human-only');
-      assert.equal(launches.length, 0, 'should not launch agent for HumanOnly errors');
-      assert.ok(errors.some(e => e.includes('InfraBlocker')));
-      assert.ok(errors.some(e => e.includes('Human intervention required')));
-    });
+    assert.equal(result.bounced, false);
+    assert.equal(result.outcome, 'human-only');
+    assert.equal(fake.launches.length, 0, 'should not launch agent for HumanOnly errors');
+    assert.ok(fake.errors.some(e => e.includes('InfraBlocker')));
+    assert.ok(fake.errors.some(e => e.includes('Human intervention required')));
   });
 
-  test('reboundPreReviewFailure does not bounce for StateMachineViolation (HumanOnly)', async () => {
-    await withTempDir(async root => {
-      const errors = [];
-      const launches = [];
+  test('pre-review repair does not bounce for StateMachineViolation (HumanOnly)', async () => {
+    const { fake, context } = repairFixture();
 
-      const result = await reboundPreReviewFailure('task-1385', root, gateFailureReason({
-        ok: false,
-        area: 'docs',
-        command: 'node parallix verify docs',
-        exitCode: 1,
-        stdout: '',
-        stderr: 'transition not allowed for this task',
-      }), 'codex', {
-        verifyFn: passingVerify,
-        readReviewStateFn: () => null,
-        writeReviewStateFn: () => {},
-        transitionTaskFn: () => {},
-        startAgentFn: async () => { launches.push('should-not-launch'); },
-        applyAgentFallbackFn: () => 'codex',
-        log: () => {}, error: (msg) => errors.push(msg),
-      });
+    const result = await repairPreReviewFailure(context, gateFailure({ command: 'node parallix verify docs', stdout: '', stderr: 'transition not allowed for this task' }), 2);
 
-      assert.equal(result.bounced, false);
-      assert.equal(result.stranded, true);
-      assert.equal(launches.length, 0);
-      assert.ok(errors.some(e => e.includes('StateMachineViolation')));
-    });
+    assert.equal(result.bounced, false);
+    assert.equal(fake.launches.length, 0);
+    assert.ok(fake.errors.some(e => e.includes('StateMachineViolation')));
   });
 
-  test('reboundPreReviewFailure includes gate output and the ADR 0048 gate classification in the fix prompt', async () => {
-    await withTempDir(async root => {
-      let capturedPrompt = '';
+  test('pre-review repair includes gate output and the ADR 0048 gate classification in the fix prompt', async () => {
+    const { fake, context } = repairFixture();
 
-      await reboundPreReviewFailure('task-1385', root, gateFailureReason({
-        ok: false,
-        area: 'workflow',
-        command: 'npm run verify:workflow',
-        exitCode: 3,
-        stdout: 'test failed: assertion error',
-        stderr: 'verification gate failed with exit code 3',
-      }), 'codex', {
-        verifyFn: passingVerify,
-        readReviewStateFn: () => null,
-        writeReviewStateFn: () => {},
-        transitionTaskFn: () => {},
-        startAgentFn: async (mode, opts) => {
-          capturedPrompt = typeof opts.prompt === 'function' ? opts.prompt('codex') : opts.prompt;
-          return { agent: 'codex', result: { status: 0 } };
-        },
-        applyAgentFallbackFn: () => 'codex',
-        log: () => {}, error: () => {},
-      });
+    await repairPreReviewFailure(context, gateFailure({
+      area: 'workflow', command: 'npm run verify:workflow', exitCode: 3,
+      stdout: 'test failed: assertion error', stderr: 'verification gate failed with exit code 3',
+    }), 2);
 
-      assert.ok(capturedPrompt.includes('PRE-REVIEW GATE FAILURE'));
-      assert.ok(capturedPrompt.includes('task-1385'));
-      assert.ok(capturedPrompt.includes('workflow'));
-      assert.ok(capturedPrompt.includes('test failed: assertion error'));
-      assert.ok(capturedPrompt.includes('verification gate failed'));
-      assert.ok(capturedPrompt.includes('Retry attempt: 1/2'));
-      // TASK-2377.03 SC5: a declared gate that ran and exited non-zero is a
-      // GateFailure; the former GitBlockers/AutoRepair relabel was the per-site
-      // remap the kernel deleted.
-      assert.ok(capturedPrompt.includes('Classification: GateFailure — AutoSendBack'));
-      assert.ok(capturedPrompt.includes('The failing check re-runs automatically after your fix'));
-    });
+    const capturedPrompt = String(fake.launches[0].recovery?.prompt('codex'));
+    assert.ok(capturedPrompt.includes('PRE-REVIEW GATE FAILURE'));
+    assert.ok(capturedPrompt.includes('task-1385'));
+    assert.ok(capturedPrompt.includes('workflow'));
+    assert.ok(capturedPrompt.includes('test failed: assertion error'));
+    assert.ok(capturedPrompt.includes('verification gate failed'));
+    assert.ok(capturedPrompt.includes('Retry attempt: 1/2'));
+    // TASK-2377.03 SC5: a declared gate that ran and exited non-zero is a
+    // GateFailure, never a GitBlockers/AutoRepair relabel.
+    assert.ok(capturedPrompt.includes('Classification: GateFailure — AutoSendBack'));
+    assert.ok(capturedPrompt.includes('The failing check re-runs automatically after your fix'));
   });
 
-  test('reboundPreReviewFailure refuses to bounce without a verify callback', async () => {
-    await withTempDir(async root => {
-      await assert.rejects(
-        () => reboundPreReviewFailure('task-1385', root, gateFailureReason({
-          ok: false, area: 'docs', command: 'exit 1', exitCode: 1, stdout: 'output', stderr: '',
-        }), 'codex', {
-          readReviewStateFn: () => null,
-          writeReviewStateFn: () => {},
-          transitionTaskFn: () => {},
-          startAgentFn: async () => ({ agent: 'codex', result: { status: 0 } }),
-          applyAgentFallbackFn: () => 'codex',
-          log: () => {}, error: () => {},
-        }),
-        /requires a verify callback/,
-      );
+  test('pre-review repair verifies by re-running the rebase before the gate', async () => {
+    const order: string[] = [];
+    const { context } = repairFixture({
+      rebase: () => { order.push('rebase'); return { ok: true }; },
+      runGate: () => { order.push('gate'); return { ok: true }; },
     });
+
+    const result = await repairPreReviewFailure(context, gateFailure({}), 2);
+
+    assert.equal(result.bounced, true);
+    assert.deepEqual(order, ['rebase', 'gate'], 'a repair is fixed only when the rebase and the gate both re-run and pass');
   });
 });
 
@@ -615,86 +429,49 @@ describe("pre review gate repair continues", { concurrency: false }, () => {
     let rebaseRuns = 0;
     let reviewerLaunches = 0;
 
-    await startReviewLoop(slug, {
+    const lifecycleCommands: any[] = [];
+    const missionStore = {
+      load: async () => ({ kind: 'found', version: 1, mission: { id: slug, status: lifecycleCommands.at(-1)?.command.type === 'rebound-to-active' ? 'active' : 'review', review: { rounds: [{ number: 1, reviewer: 'claude', implementer: 'codex' }] } } }),
+    };
+    const lifecycle = { transition: async (request: any) => { lifecycleCommands.push(request); return { status: 'completed' }; } };
+    const gateFailure = { area: 'static-analysis', exitCode: 1, diagnostic: 'gate diagnostic', reason: gateFailureReason({ ok: false, area: 'static-analysis', command: './scripts/verify-local.sh static-analysis', exitCode: 1, stdout: 'gate diagnostic', stderr: '', error: 'gate failed' }) };
+    const fake = fakeReviewLoopPorts({
+      slug,
       worktree,
-      implementer: 'codex',
-      reviewer: 'claude',
-      maxAttempts: 1,
-      resolveTaskFileFn: () => ({ ok: true, taskFile: '/tmp/task-2415.md', matches: [] }),
-      getTaskStatusFn: () => 'review',
-      eligibleAgentsForStepFn: () => ['codex', 'claude'],
-      reboundPreReviewFailureFn: async (...args) => {
-        assert.deepEqual(args[4].reviewerEligibility?.reviewers, ['codex', 'claude'],
-          'repair resumption receives the full configured review pool');
-        return reboundPreReviewFailure(...args);
+      routing: { eligibleFamilies: () => ['codex', 'claude'] },
+      handoff: { handoff: async () => ({ ok: true }) },
+      provider: { pollReview: async () => 'APPROVED', pollDisposition: async () => 'CHANGES_MADE' },
+      missionStore: missionStore as never,
+      lifecycle: lifecycle as never,
+      stateport: {
+        read: async () => persisted,
+        persist: async state => { persisted = state; },
       },
-      workflowLauncherStatusFn: () => ({ supported: true, agent: 'codex', detail: null }),
-      isForgejoReviewEnabledFn: () => true,
-      forgejoAvailableFn: async () => true,
-      getPrStatusFn: () => ({ exists: true, state: 'open', number: 2415, url: 'http://forgejo.invalid/pr/2415' }),
-      resolveForgejoUserFn: () => 'reviewer',
-      readTokenFn: () => 'test-token',
-      maybeUpdateGraphifyBeforeReviewFn: () => {},
-      readReviewStateFn: () => persisted,
-      writeReviewStateFn: async (_slug, state) => {
-        persisted = state;
-        return { outcome: 'committed' as const };
+      task: { mirror: async lane => { transitions.push(lane); } },
+      preReview: {
+        rebase: async () => {
+          rebaseRuns++;
+          // A gate-only failure typed by the in-process pre-review rebase.
+          return rebaseRuns === 1
+            ? { ok: false, gate: { area: 'static-analysis', exitCode: 1, command: './scripts/verify-local.sh static-analysis', operation: 'pre-push', reason: gateFailure.reason }, diagnostic: '' }
+            : { ok: true };
+        },
+        runGate: async () => (++gateRuns === 1 ? { ok: false, ...gateFailure } : { ok: true }),
       },
-      transitionTaskFn: async (_slug, status) => { transitions.push(status); return true; },
-      rebaseBeforeReviewRoundFn: async () => {
-        rebaseRuns++;
-        if (rebaseRuns === 1) {
-          // Gate-only failure typed by the in-process pre-review rebase; the
-          // `operation` value is injected evidence and cast because the port's
-          // union names the git operation, not the hook, being exercised here.
-          return {
-            ok: false,
-            sharedFileConflicts: false,
-            hookFailure: false,
-            failure: {
-              kind: 'gate',
-              operation: 'pre-push',
-              gate: {
-                area: 'static-analysis',
-                command: './scripts/verify-local.sh static-analysis',
-                exitCode: 1,
-                stdout: 'gate diagnostic',
-                stderr: '',
-                error: 'gate failed',
-              },
-            },
-          } as any;
-        }
-        return { ok: true, sharedFileConflicts: false, hookFailure: false };
+      agents: {
+        launch: async launch => {
+          if (launch.role === 'implementer') { prompts.push(String(launch.recovery?.prompt('codex'))); }
+          if (launch.role === 'reviewer') { reviewerLaunches++; }
+          return { agent: launch.agent, result: { status: 0 } };
+        },
       },
-      runPreReviewGateFn: async () => {
-        gateRuns++;
-        return gateRuns === 1
-          ? {
-              ok: false, area: 'static-analysis', command: './scripts/verify-local.sh static-analysis', exitCode: 1,
-              stdout: 'gate diagnostic', stderr: '', error: 'gate failed',
-            }
-          : { ok: true, area: 'static-analysis', command: './scripts/verify-local.sh static-analysis', exitCode: 0, stdout: '', stderr: '' };
-      },
-      startAgentFn: async (step, options: any) => {
-        if (step === 'act-on-review') { prompts.push(options.prompt('codex')); }
-        if (step === 'review') { reviewerLaunches++; }
-        return { agent: options.agent, result: { status: 0 } } as any;
-      },
-      applyAgentFallbackFn: async ({ original }) => original,
-      pollForReviewFn: async () => 'APPROVED',
-      pollForDispositionFn: async () => 'CHANGES_MADE',
-      consumeReviewerArtifactsFn: async () => ({ consumed: false }),
-      consumeImplementerArtifactsFn: async () => ({ consumed: false }),
-      buildCompactReviewPromptFn: () => 'review prompt',
-      buildCompactActOnReviewPromptFn: () => 'implementer repair prompt',
-      recordStageStatsSafeFn: () => {},
-      gitFn: () => ({ stdout: 'main\n', stderr: '', status: 0 }) as any,
-      log: line => logs.push(line),
-      error: line => logs.push(line),
-      exit: (() => { throw new Error('unexpected exit'); }) as any,
+      output: { log: line => logs.push(line), error: line => logs.push(line), exit: () => { throw new Error('unexpected exit'); } },
     });
+    await runReviewLoop({ slug, implementer: 'codex', reviewer: 'claude', maxAttempts: 1 }, fake.ports);
 
+    const resumed = lifecycleCommands.find(request => request.command.type === 'submit-for-review');
+    assert.deepEqual(resumed?.command.reviewerEligibility?.reviewers, ['codex', 'claude'],
+      'repair resumption receives the full configured review pool');
     // Green contract: the verified gate-only repair never reaches exit(1) and
     // launches the reviewer exactly once in the same round.
     assert.equal(reviewerLaunches, 1, 'a verified gate-only repair launches the reviewer exactly once in the same round');

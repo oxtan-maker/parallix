@@ -30,8 +30,9 @@ import { changeRevision, startReview, ConfiguredReviewerEligibility } from '../.
 import { ReviewCommandUseCase } from '../../../src/application/review-command-use-case.js';
 import { createReviewWorkflowAdapter, reconcileInterruptedHandoffHandler } from '../../../src/adapters/review/review-commands.js';
 import { readReviewState } from '../../../src/adapters/review/review-state.js';
-import { startReviewLoop } from '../../../src/adapters/review/review-loop.js';
-import { resolveTaskFile } from '../../../src/adapters/backlog/backlog.js';
+import { createReviewLoopPorts } from '../../../src/adapters/review/review-loop.js';
+import { runReviewLoop } from '../../../src/application/review-loop/review-loop.js';
+import { fakeReviewLoopPorts } from '../../helpers/review-loop-ports.js';
 
 const SLUG = 'task-2614-review';
 const REVIEWER = agentFamily('codex');
@@ -116,7 +117,7 @@ async function invokeStart(store: SqliteMissionStore, root: string, status: 'act
     inferSlugFn: () => SLUG,
     requireReviewAggregate: true,
     readReviewStateFn: (target: string, worktree: string, missionStore: import('../../../src/application/domain-ports.js').MissionStore | null | undefined) => readReviewState(target, worktree, missionStore),
-    startReviewLoopFn: async () => { launched = true; },
+    reviewLoopMechanisms: () => { launched = true; return fakeReviewLoopPorts({ lock: { tryAcquire: () => false, release: () => {} } }).ports; },
   });
   const useCase = new ReviewCommandUseCase(adapter);
   try {
@@ -162,13 +163,12 @@ interface StartTransitionResult {
 }
 
 /**
- * Drive the real exported `startReviewLoop` fresh-start transition through the
- * public entry point with every external seam injected, so the review-loop's
- * open-PR handoff path executes for real — no copied helper, no Forgejo, no
- * live reviewer. The injected handoff writes the missing round-one Review and
- * performs the active → review transition (what the real handoff does), so the
- * loop then reaches the reviewer-launch boundary and the Review is persisted to
- * the operator store.
+ * Drive the application review loop's fresh-start transition over the real
+ * SQLite Mission store and the real round-open mechanism, with the provider,
+ * handoff, and reviewer faked — no Forgejo, no live reviewer. The injected
+ * handoff writes the missing round-one Review and performs the active → review
+ * transition (what the real handoff does), so the loop then reaches the
+ * reviewer-launch boundary and the Review is persisted to the operator store.
  *
  * Returns whether the handoff ran, whether the reviewer was launched, whether a
  * Review aggregate is persisted in the store, and any surfaced loop failure.
@@ -179,42 +179,35 @@ async function driveStartTransition(
   opts: { openPr: boolean; launchReviewer?: boolean },
 ): Promise<StartTransitionResult> {
   let handoffRan = false;
-  let reviewerLaunched = false;
   let error: string | null = null;
   let handoffWroteReview = false;
-  // readReviewStateFn returns null until the handoff has run (so the fresh
-  // start sees no Review and the Mission-authority reset lets the handoff
-  // proceed), then returns an approved round-one view so the launched round
-  // stops cleanly after the reviewer launch instead of spinning.
+  // The review state reads null until the handoff has run (so the fresh start
+  // sees no Review and the Mission-authority reset lets the handoff proceed),
+  // then the round-one view the handoff created.
   let reviewed = false;
-  try {
-    // Typed `any`: the loop exposes 60+ injected seams, so a structural cast
-    // against the full options type trips TS overlap checks. The seams are
-    // exercised at runtime, not validated by their static shapes here.
-    const loopOptions: any = {
-      implementer: 'claude',
-      reviewer: 'codex',
-      worktree: root,
-      missionStore: store,
-      dryRun: false,
-      isContinue: false,
-      maxAttempts: 1,
-      log: () => undefined,
-      error: (msg: string) => { error = msg; },
-      exit: (() => {}) as unknown as (_code: number) => never,
-      providerAvailableFn: () => Promise.resolve(true),
-      isForgejoReviewEnabledFn: () => true,
-      maybeUpdateGraphifyBeforeReviewFn: async () => {},
-      resolveTaskFileFn: () => ({ ok: true, taskFile: 'task.md' }) as ReturnType<typeof resolveTaskFile>,
-      getTaskStatusFn: () => 'review',
-      transitionTaskFn: () => Promise.resolve(true),
-      getPrStatusFn: () =>
-        opts.openPr
-          ? ({ exists: true, number: 536, state: 'open', url: 'https://forgejo.example/reviews/536' })
-          : ({ exists: false }),
-      readReviewStateFn: () =>
-        Promise.resolve((reviewed ? { reviewer: 'codex', round: 1, phase: 'reviewing', disposition: 'APPROVED' } : null) as unknown as ReturnType<typeof readReviewState>),
-      performHandoffFn: async () => {
+  const bound = createReviewLoopPorts(SLUG, { worktree: root }, {
+    missionStore: store,
+    log: () => undefined,
+    error: (msg: string) => { error = msg; },
+    readReviewState: () => (reviewed ? { reviewer: 'codex', round: 1, phase: 'reviewing', disposition: null } : null) as never,
+    writeReviewState: (async () => ({ outcome: 'committed' as const })) as never,
+  });
+  const fake = fakeReviewLoopPorts({
+    slug: SLUG,
+    worktree: root,
+    missionStore: store as never,
+    stateport: bound.state,
+    routing: {
+      eligibleFamilies: () => [agentFamily('codex'), agentFamily('qwen'), agentFamily('vibe')],
+      launcherStatus: agent => ({ supported: Boolean(opts.launchReviewer), detail: agent }),
+    },
+    provider: {
+      openPullRequest: () => (opts.openPr
+        ? { kind: 'pull-request', provider: 'forgejo', id: '536', url: 'https://forgejo.example/reviews/536', sourceBranch: `mission/${SLUG}`, targetBranch: 'main' }
+        : null),
+    },
+    handoff: {
+      handoff: async () => {
         handoffRan = true;
         const loaded = await store.load(missionId(SLUG));
         if (loaded.kind === 'found' && !loaded.mission.review) {
@@ -231,29 +224,19 @@ async function driveStartTransition(
         reviewed = true;
         return { ok: true };
       },
-      rebaseBeforeReviewRoundFn: async () => ({ ok: true }),
-      runPreReviewGateFn: async () => ({ ok: true, area: 'all', exitCode: 0 }),
-      workflowLauncherStatusFn: () => ({ agent: 'codex', supported: opts.launchReviewer, detail: 'test-seam' }),
-      writeReviewStateFn: async () => ({ outcome: 'committed' as const }),
-      recordStageStatsSafeFn: async () => {},
-      readTokenFn: () => null,
-      ...(opts.launchReviewer
-        ? {
-          startAgentFn: async (step: string) => { if (step === 'review') { reviewerLaunched = true; } return { agent: 'codex' }; },
-          applyAgentFallbackFn: async ({ original }: { original: string }) => original,
-          // Approve immediately after launch so the round stops cleanly instead
-          // of spinning on a missing reviewer outcome.
-          consumeReviewerArtifactsFn: async () => ({ consumed: true, ok: true, reviewState: 'APPROVED', reviewFindings: [] }),
-        }
-        : {}),
-      eligibleAgentsForStepFn: () => [agentFamily('codex'), agentFamily('qwen'), agentFamily('vibe')],
-    };
-    await startReviewLoop(SLUG, loopOptions);
+    },
+    // Approve immediately after launch so the round stops cleanly.
+    artifacts: { consumeReviewer: async () => ({ consumed: true, ok: true, reviewState: 'APPROVED', reviewFindings: [] }) },
+    output: { error: (msg: string) => { error = msg; }, exit: () => {} },
+  });
+  try {
+    await runReviewLoop({ slug: SLUG, implementer: 'claude', reviewer: 'codex', maxAttempts: 1 }, fake.ports);
   } catch (err) {
     error = err instanceof Error ? err.message : String(err);
   }
   const loaded = await store.load(missionId(SLUG));
   const reviewPersisted = loaded.kind === 'found' && Boolean(loaded.mission.review);
+  const reviewerLaunched = fake.launches.some(launch => launch.role === 'reviewer');
   return { handoffRan, reviewerLaunched, reviewPersisted: reviewPersisted || handoffWroteReview, error };
 }
 
@@ -262,9 +245,8 @@ describe("native Mission review start and recovery", () => {
     // The TASK-2614 shape: a handoff already opened a Forgejo PR, but the
     // round-one Review aggregate was never persisted to the operator store
     // (Review null). A fresh `px review <slug> --start` must resume. This drives
-    // the real exported `startReviewLoop` transition through the public entry
-    // point with every external seam injected, so the review-loop's open-PR
-    // handoff path executes for real — not a copied helper.
+    // the application review loop's start transition over the real Mission
+    // store, so the open-PR handoff path executes for real — not a copied helper.
     const root = createFileFreeHome(SLUG);
     const previousHome = process.env.PARALLIX_HOME;
     process.env.PARALLIX_HOME = path.join(root, 'parallix-home');
@@ -300,28 +282,17 @@ describe("native Mission review start and recovery", () => {
     try {
       const store = await openStore(root);
       await store.save(completedNativeMission(SLUG, root), null);
-      await startReviewLoop(SLUG, {
-        implementer: 'claude',
-        reviewer: 'codex',
+      const fake = fakeReviewLoopPorts({
+        slug: SLUG,
         worktree: root,
-        missionStore: store,
-        dryRun: false,
-        isContinue: false,
-        log: () => undefined,
-        error: () => undefined,
+        missionStore: store as never,
+        provider: { openPullRequest: () => null },
+        handoff: { handoff: async () => ({ ok: true }) },
+        routing: { eligibleFamilies: () => [], nominate: () => { throw new Error('No agents available'); } }, // no reviewer can be routed
         // A real exit throws, so a loop that fails closed is observed.
-        exit: (() => { surfaced = true; throw new Error('loop-exit'); }) as unknown as (_code: number) => never,
-        providerAvailableFn: () => Promise.resolve(true),
-        isForgejoReviewEnabledFn: () => true,
-        maybeUpdateGraphifyBeforeReviewFn: async () => {},
-        resolveTaskFileFn: () => ({ ok: true, taskFile: 'task.md' }) as ReturnType<typeof resolveTaskFile>,
-        getTaskStatusFn: () => 'review',
-        transitionTaskFn: () => Promise.resolve(true),
-        getPrStatusFn: () => ({ exists: false }),
-        readReviewStateFn: () => Promise.resolve(null),
-        performHandoffFn: async () => ({ ok: true }),
-        eligibleAgentsForStepFn: () => [], // no reviewer can be routed
-      } as Parameters<typeof startReviewLoop>[1]);
+        output: { exit: () => { surfaced = true; throw new Error('loop-exit'); } },
+      });
+      await runReviewLoop({ slug: SLUG, implementer: 'claude', reviewer: 'codex' }, fake.ports);
     } catch {
       // expected: the surfaced exit throws
     } finally {

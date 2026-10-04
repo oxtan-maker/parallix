@@ -1,45 +1,20 @@
 /**
- * Pre-review Gate Handling (ADR 0048 Control C1 / architecture migration)
+ * Pre-review Gate Handling (ADR 0048 Control C1)
  *
- * Owns pre-review verification-gate execution and the mapping of a pre-review
- * failure onto the rebound kernel. Classification, fix prompt, launch, verify
- * loop, and attempt budget all live in `src/application/rebound-kernel.ts`
- * (TASK-2377.03); this module contributes structured reasons and collaborators
- * only, so the review loop keeps orchestration.
+ * Runs the pre-review verification gate and maps gate and Git-hook failures
+ * onto the structured rebound-kernel reasons. Whether and how a failure is
+ * repaired is decided by `src/application/review-loop/pre-review.ts`.
  */
 
 import * as fmt from '../../application/presentation/cli-format.js';
-import {
-  rebound,
-  type GateFailureReason,
-  type HookFailureReason,
-  type ReboundContext,
-  type ReboundOutcome,
-  type VerifyResult,
-} from '../../application/rebound-kernel.js';
+import type { GateFailureReason, HookFailureReason } from '../../application/rebound-kernel.js';
 import { classifyHookFailure } from '../../application/hook-failure-workflow.js';
-import { git, run } from '../git/git.js';
+import { run } from '../git/git.js';
 import { findMissionDir, findMissionArea } from '../filesystem/mission-utils.js';
 import { formatVerificationCommand, isTransientVerificationFailure, resolveEffectiveArea } from '../verification/verification.js';
-import { enforceTaskAssignee, transitionTask } from '../backlog/backlog.js';
-import { readReviewState, writeReviewState } from './review-state.js';
-import type { MissionStore } from '../../application/domain-ports.js';
-import type { MissionLifecycleService } from '../../application/mission-lifecycle-service.js';
-import { transitionReviewRepair } from '../../application/review-repair-lifecycle.js';
-import type { ConfiguredReviewerEligibility } from '../../domain/review.js';
-import { startAgent } from '../agents/agents.js';
-import { applyAgentFallback } from './review-agent-fallback.js';
 
-export const DEFAULT_MAX_ATTEMPTS = 5;
+/** How long a --continue skip-check waits for an existing disposition. */
 export const CONTINUE_SKIP_CHECK_TIMEOUT_MS = 10_000;
-
-export function strictlyLaterIso(earlierIso: string, nowMs = Date.now()): string {
-  const earlierMs = Date.parse(earlierIso);
-  if (!Number.isFinite(earlierMs)) {
-    return new Date(nowMs).toISOString();
-  }
-  return new Date(Math.max(nowMs, earlierMs + 1)).toISOString();
-}
 
 export interface PreReviewGateResult {
   ok: boolean;
@@ -150,120 +125,5 @@ export function hookFailureReason(hookOutput: string, operation: string): HookFa
     hook: classifyHookFailure(hookOutput).hookType,
     operation,
     output: hookOutput,
-  };
-}
-
-export interface ReboundPreReviewOptions {
-  /** Re-runs the failing check; a bounce is `fixed` only when this passes. */
-  verifyFn: (_attempt: number) => Promise<VerifyResult> | VerifyResult;
-  startAgentFn?: typeof startAgent;
-  writeReviewStateFn?: typeof writeReviewState;
-  readReviewStateFn?: typeof readReviewState;
-  transitionTaskFn?: typeof transitionTask;
-  applyAgentFallbackFn?: typeof applyAgentFallback;
-  taskResolution?: { ok: boolean; taskFile?: string };
-  enforceTaskAssigneeFn?: typeof enforceTaskAssignee;
-  log?: (_msg: string) => void;
-  error?: (_msg: string) => void;
-  maxAttempts?: number;
-  missionStore?: MissionStore | null;
-  lifecycleService?: MissionLifecycleService | null;
-  /** Configured review-step reviewer eligibility for the review-repair transition (AC12). */
-  reviewerEligibility?: ConfiguredReviewerEligibility;
-}
-
-export interface ReboundPreReviewResult {
-  /** True when the kernel verified a fix: the failing check re-ran and passed. */
-  bounced: boolean;
-  /** True when the occurrence exhausted its budget or is human-only. */
-  stranded: boolean;
-  outcome: ReboundOutcome['outcome'];
-  /** Launch attempts consumed by this occurrence (the per-round cap counts them). */
-  attempts: number;
-  diagnostic: string;
-  implementer: string;
-}
-
-/**
- * Route a pre-review failure through the rebound kernel.
- *
- * This adapter owns no classification, no prompt text, and no launch: it maps
- * the review loop's collaborators onto the kernel context and maps the kernel
- * outcome back onto the loop's bounced/stranded decision. The per-occurrence
- * budget lives in the kernel, so no retry counter is read or written here.
- */
-export async function reboundPreReviewFailure(
-  slug: string,
-  worktree: string,
-  reason: GateFailureReason | HookFailureReason,
-  implementer: string,
-  opts: ReboundPreReviewOptions,
-): Promise<ReboundPreReviewResult> {
-  const {
-    verifyFn,
-    startAgentFn = startAgent,
-    writeReviewStateFn = writeReviewState,
-    readReviewStateFn = readReviewState,
-    transitionTaskFn = transitionTask,
-    applyAgentFallbackFn = applyAgentFallback,
-    taskResolution,
-    enforceTaskAssigneeFn,
-    log = fmt.log.plain,
-    error = fmt.log.plainError,
-    maxAttempts,
-    missionStore = null,
-    lifecycleService = null,
-    reviewerEligibility,
-  } = opts;
-
-  if (typeof verifyFn !== 'function') {
-    throw new Error('reboundPreReviewFailure requires a verify callback: a bounce may only be reported fixed when the failing check re-runs and passes.');
-  }
-
-  const persisted = await Promise.resolve(readReviewStateFn(slug, worktree));
-
-  const outcome = await rebound(reason, {
-    slug,
-    worktree,
-    implementer,
-    maxAttempts,
-    verify: verifyFn,
-    startAgent: startAgentFn as unknown as ReboundContext['startAgent'],
-    readHead: () => {
-      const result = git(['-C', worktree, 'rev-parse', 'HEAD']);
-      return result.status === 0 ? result.stdout.trim() : null;
-    },
-    transitionToImplementer: async (missionSlug: string) => {
-      if (missionStore) { await transitionReviewRepair(missionSlug, 'active', implementer, missionStore, lifecycleService); }
-      await transitionTaskFn(missionSlug, 'active', { rootDir: worktree, log });
-    },
-    applyAgentFallback: async ({ launchResult, original }) => await applyAgentFallbackFn({
-      role: 'implementer',
-      original,
-      launchResult: launchResult as any,
-      state: (persisted || {}) as any,
-      slug,
-      worktree,
-      taskResolution,
-      log,
-      writeReviewStateFn,
-      enforceTaskAssigneeFn,
-      missionStore,
-    }),
-    log,
-    error,
-  });
-
-  if (outcome.outcome === 'fixed') {
-    if (missionStore) { await transitionReviewRepair(slug, 'review', outcome.implementer, missionStore, lifecycleService, reviewerEligibility); }
-    await transitionTaskFn(slug, 'review', { rootDir: worktree, log });
-  }
-  return {
-    bounced: outcome.outcome === 'fixed',
-    stranded: outcome.outcome !== 'fixed',
-    outcome: outcome.outcome,
-    attempts: outcome.attempts,
-    diagnostic: outcome.diagnostic,
-    implementer: outcome.implementer,
   };
 }

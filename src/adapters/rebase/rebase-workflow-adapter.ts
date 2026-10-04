@@ -18,7 +18,7 @@ import {
   getPrimaryBranch, resolveMissionBaseBranch, missionBranchName, missionDirForSlug,
 } from '../filesystem/mission-utils.js';
 import { startAgent, selectAgent, workflowLauncherStatus, eligibleAgentsForStep } from '../agents/agents.js';
-import { applyAgentFallback } from '../review/review-loop.js';
+import { applyAgentFallback } from '../review/review-agent-fallback.js';
 import { createPr, readToken, resolveForgejoUser, fetchReviewBranch } from '../forgejo/forgejo.js';
 import { resolveTaskFile, getTaskImplementer, transitionTask } from '../backlog/backlog.js';
 import { resolveReviewIdentity, readReviewState, writeReviewState, persistReviewStateOrThrow } from '../review/review-state.js';

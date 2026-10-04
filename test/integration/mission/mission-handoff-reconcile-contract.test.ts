@@ -16,6 +16,10 @@ import { createReviewCommand } from '../../../src/interfaces/cli/review.js';
 import { createReviewWorkflowAdapter } from '../../../src/adapters/review/review-commands.js';
 const review = (args, options = {}) => createReviewCommand(new ReviewCommandUseCase(createReviewWorkflowAdapter(options)))(args, options);
 import { status } from '../../../src/adapters/cli/commands/status.js';
+import { fakeReviewLoopPorts } from '../../helpers/review-loop-ports.js';
+
+/** Bound loop mechanisms whose held controller fence declines the run at the reviewer-launch boundary. */
+const declinedLoop = () => fakeReviewLoopPorts({ lock: { tryAcquire: () => false, release: () => {} } }).ports;
 
 const canonicalHandoff = {
   sourceBranch: 'mission/task-2350-reconcile',
@@ -85,7 +89,7 @@ test('px review reconciles canonical inputs then reaches the reviewer-launch bou
       log: (line: string) => logs.push(line), error: (line: string) => logs.push(line), exit: (() => undefined) as never,
       resolveWorktreeFn: () => root, missionStore: store, requireReviewAggregate: true,
       readReviewStateFn: (target: string, worktree: string, missionStore: any) => readReviewState(target, worktree, missionStore),
-      startReviewLoopFn: async () => { launched = true; },
+      reviewLoopMechanisms: () => { launched = true; return declinedLoop(); },
     };
     await review([slug, '--start'], options);
     assert.equal(launched, true, 'a fresh start may rerun handoff to complete the Review');
@@ -109,7 +113,7 @@ test('px review production start guard gives reconciliation guidance before revi
     inferSlugFn: (slug: string) => slug,
     resolveWorktreeFn: () => process.cwd(),
     requireReviewAggregate: true,
-    startReviewLoopFn: async () => { launched = true; },
+    reviewLoopMechanisms: () => { launched = true; return declinedLoop(); },
   });
   assert.equal(launched, false, 'the default path stops before the reviewer-launch seam');
   assert.match(logs.join('\n'), /--reconcile-review/);

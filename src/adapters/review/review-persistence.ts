@@ -97,7 +97,7 @@ export function bindReviewPersistence(store: MissionStore, lifecycleService?: Mi
 }
 
 /**
- * Every Mission-authority injection `startReviewLoop` needs, in one object.
+ * Every Mission-authority binding the review-loop mechanisms need, in one object.
  *
  * A composition root that spreads this cannot forget one of them. Omitting a
  * single binding does not degrade gracefully: the adapter default resolves no
@@ -149,11 +149,11 @@ export function reviewLoopBindings(store: MissionStore, lifecycleService?: Missi
       : { consumed: false };
   };
   return {
-    readReviewStateFn: persistence.readReviewState,
-    writeReviewStateFn: persistence.writeReviewState,
-    resetReviewStateFn: persistence.resetReviewState,
-    consumeReviewerArtifactsFn: reviewerOutput,
-    consumeImplementerArtifactsFn: implementerOutput,
+    readReviewState: persistence.readReviewState,
+    writeReviewState: persistence.writeReviewState,
+    resetReviewState: persistence.resetReviewState,
+    consumeReviewerArtifacts: reviewerOutput,
+    consumeImplementerArtifacts: implementerOutput,
     missionStore: store,
     // The round-open boundary owns the `active → review` transition. Keep
     // this alongside the bound store so every loop composition receives both

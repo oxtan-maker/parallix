@@ -74,15 +74,15 @@ describe("review store bindings", { concurrency: false }, () => {
   test('reviewLoopBindings supplies persisted-output readers, not only review-state projections', () => {
     const bindings = reviewLoopBindings(fakeStore() as never);
     assert.deepEqual(Object.keys(bindings).sort(), [
-      'consumeImplementerArtifactsFn',
-      'consumeReviewerArtifactsFn',
+      'consumeImplementerArtifacts',
+      'consumeReviewerArtifacts',
       // TASK-2582: the round-open boundary moves an active Mission back to
       // review at the boundary, so the loop needs the lifecycle service.
       'lifecycleService',
       'missionStore',
-      'readReviewStateFn',
-      'resetReviewStateFn',
-      'writeReviewStateFn',
+      'readReviewState',
+      'resetReviewState',
+      'writeReviewState',
     ]);
   });
 
@@ -93,7 +93,7 @@ describe("review store bindings", { concurrency: false }, () => {
       { eventType: 'reviewer_outcome', roundNumber: 3, actor: 'claude', verdict: 'request-changes', content: 'Outcome: request-changes', createdAt: '2026-08-04T10:00:01.000Z' },
     ];
 
-    const result = await reviewLoopBindings(store as never).consumeReviewerArtifactsFn('task-9001', 'claude', {
+    const result = await reviewLoopBindings(store as never).consumeReviewerArtifacts('task-9001', 'claude', {
       worktree: '/tmp/worktree',
     });
 
@@ -110,7 +110,7 @@ describe("review store bindings", { concurrency: false }, () => {
       { eventType: 'reviewer_outcome', roundNumber: 3, actor: 'codex', verdict: 'approve', content: 'other', createdAt: '2026-08-04T10:00:01.000Z' },
     ];
 
-    const result = await reviewLoopBindings(store as never).consumeReviewerArtifactsFn('task-9001', 'claude', {
+    const result = await reviewLoopBindings(store as never).consumeReviewerArtifacts('task-9001', 'claude', {
       worktree: '/tmp/worktree',
     });
 
@@ -124,7 +124,7 @@ describe("review store bindings", { concurrency: false }, () => {
       { eventType: 'reviewer_outcome', roundNumber: 3, actor: 'claude', verdict: 'approve', content: 'old approval', createdAt: '2026-08-04T10:00:00.000Z' },
     ];
 
-    const result = await reviewLoopBindings(store as never).consumeReviewerArtifactsFn('task-9001', 'claude', { worktree: '/tmp/worktree' });
+    const result = await reviewLoopBindings(store as never).consumeReviewerArtifacts('task-9001', 'claude', { worktree: '/tmp/worktree' });
     assert.equal(result.consumed, false);
   });
 
@@ -134,7 +134,7 @@ describe("review store bindings", { concurrency: false }, () => {
       { eventType: 'implementer_disposition', roundNumber: 3, actor: 'codex', disposition: 'PUSHBACK_ALL', content: 'Autonomous review disposition: PUSHBACK_ALL', createdAt: '2026-08-04T10:00:00.000Z' },
     ];
 
-    const result = await reviewLoopBindings(store as never).consumeImplementerArtifactsFn('task-9001', 'codex', {
+    const result = await reviewLoopBindings(store as never).consumeImplementerArtifacts('task-9001', 'codex', {
       worktree: '/tmp/worktree',
     });
 
@@ -150,7 +150,7 @@ describe("review store bindings", { concurrency: false }, () => {
       { eventType: 'implementer_disposition', roundNumber: 3, actor: 'codex', disposition: 'CHANGES_MADE', content: 'old', createdAt: '2026-08-04T10:00:00.000Z' },
     ];
 
-    const result = await reviewLoopBindings(store as never).consumeImplementerArtifactsFn('task-9001', 'codex', { worktree: '/tmp/worktree' });
+    const result = await reviewLoopBindings(store as never).consumeImplementerArtifacts('task-9001', 'codex', { worktree: '/tmp/worktree' });
     assert.equal(result.consumed, false);
   });
 

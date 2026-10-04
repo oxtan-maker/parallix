@@ -17,11 +17,9 @@ const { performStaticReview } = performStaticReviewModule;
 
 const TEST_SLUG = 'task-1135-coverage';
 
-// NOTE: The previous test here ('startReviewLoop fails when no reviewer could be auto-derived')
-// was written for the old buggy behaviour where startReviewLoop called exit(1) when no reviewer
-// could be auto-derived. Per CP-4, that exit(1) was replaced by 'autonomous' fallback.
-// This test is removed because startReviewLoop does a full review loop execution that is
-// impractical to fully mock; the identity-fallback behaviour is verified manually.
+// Reviewer identity fallback ("autonomous" when no reviewer can be derived) is
+// owned by src/application/review-loop/reviewer-selection.ts and covered by its
+// application tests.
 
 test('commitSafeMissionArtifacts handles commit failure', async () => {
   const logs = [];

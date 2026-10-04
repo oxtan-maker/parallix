@@ -4,6 +4,7 @@
  */
 
 import { log, status } from '../../application/presentation/cli-format.js';
+import { POLL_TIMEOUT, isPollTimeout } from '../../application/ports/review-round.js';
 import {
   getLatestReviewForPr,
   getLatestDispositionForPr
@@ -13,7 +14,13 @@ const DEFAULT_POLL_INTERVAL_MS = 10_000;
 const DEFAULT_POLL_MAX_WAIT_MS = 600_000;
 const POLL_PROGRESS_EVERY_MS = 30_000;
 
-export const POLL_TIMEOUT = Object.freeze({ __isPollTimeout: true });
+export { POLL_TIMEOUT };
+
+/** @param {number} startMs */
+function formatElapsed(startMs: number): string {
+  const secs = Math.round((Date.now() - startMs) / 1000);
+  return `${secs}s`;
+}
 
 /** @param {number} ms */
 export function delay(ms: number): Promise<void> {
@@ -36,30 +43,6 @@ function resolvePollTimeoutMs(explicitSeconds?: number): number {
   const parsed = raw ? parseInt(raw, 10) : NaN;
   if (!Number.isFinite(parsed) || parsed <= 0) { return DEFAULT_POLL_MAX_WAIT_MS; }
   return parsed;
-}
-
-/** @param {number} startMs */
-function formatElapsed(startMs: number): string {
-  const secs = Math.round((Date.now() - startMs) / 1000);
-  return `${secs}s`;
-}
-
-/**
- * Identify the poll-timeout sentinel.
- *
- * Reference equality alone is not sufficient: a module graph can hold more than
- * one evaluation of this file (the ESM test seam re-links modules past the
- * import cache, and the canonical bundle inlines it alongside the source tree),
- * which yields structurally identical but non-identical frozen sentinels. The
- * `__isPollTimeout` brand exists for exactly that case, so recognise it too.
- *
- * @param {*} result
- */
-function isPollTimeout(result: unknown): boolean {
-  if (result === POLL_TIMEOUT) { return true; }
-  return typeof result === 'object'
-    && result !== null
-    && (result as { __isPollTimeout?: unknown }).__isPollTimeout === true;
 }
 
 /**
@@ -199,7 +182,6 @@ async function pollForDisposition(
 export {
   resolvePollIntervalMs,
   resolvePollTimeoutMs,
-  formatElapsed,
   isPollTimeout,
   pollForReview,
   pollForDisposition

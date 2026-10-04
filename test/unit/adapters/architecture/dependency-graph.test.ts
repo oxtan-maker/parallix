@@ -403,6 +403,30 @@ test('workflow ownership leaves a host mechanism without an application entry to
   });
 });
 
+test('workflow ownership rejects injected and chained control aliases (TASK-2647)', () => {
+  for (const declaration of [
+    'const launch = startAgent;',
+    'const launch = opts.startAgentFn ?? startAgent;',
+    'const { startAgentFn: launch = startAgent } = opts;',
+    'const first = startAgent; const launch = first;',
+  ]) {
+    withWorkflowAdapter(`export async function review(opts = {}) { ${declaration} for (let attempt = 0; attempt < 2; attempt++) { if (attempt) { await launch("review", {}); } } }`, root => {
+      const violations = findWorkflowOwnershipViolations(root);
+      assert.equal(violations.length, 1, declaration);
+      assert.match(violations[0].detail, /agent-launch operation "startAgent"/);
+    });
+  }
+  withWorkflowAdapter('export async function review(startAgentFn = startAgent) { if (true) { await startAgentFn("review", {}); } }', root => {
+    assert.equal(findWorkflowOwnershipViolations(root).length, 1);
+  });
+});
+
+test('workflow ownership accepts an injected mechanism inside a typed port (TASK-2647)', () => {
+  withWorkflowAdapter('export async function review(opts = {}) { const launch = opts.startAgentFn ?? startAgent; const port: RoundPort = { runRound: async slug => { if (slug) { await launch("review", { slug }); } } }; await new RoundUseCase(port).start("task"); }', root => {
+    assert.deepEqual(findWorkflowOwnershipViolations(root), []);
+  });
+});
+
 /* ------------------------------------------------------------------ *
  * SC4/SC5 — aggregate scan and actionable diagnostics
  * ------------------------------------------------------------------ */

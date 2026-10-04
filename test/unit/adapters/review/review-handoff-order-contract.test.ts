@@ -6,9 +6,10 @@ import fs from 'node:fs';
 import { mockModule, installModuleMocks } from '../../../lib/module-mock.js';
 import { stubRecordedMissionServices } from '../../../helpers/stub-mission-services.js';
 import { mkdtemp as registeredMkdtemp } from '../../../helpers/temp-dir.js';
+import { runReviewLoop } from '../../../../src/application/review-loop/review-loop.js';
+import { fakeReviewLoopPorts } from '../../../helpers/review-loop-ports.js';
 
 // Regression provenance: TASK-1104.
-const startReviewLoopModule = mockModule<typeof import('../../../../src/adapters/review/review-loop.js')>('../../../../src/adapters/review/review-loop.js', import.meta.url);
 const pushRoundModule = mockModule<typeof import('../../../../src/adapters/review/review-commands.js')>('../../../../src/adapters/review/review-commands.js', import.meta.url);
 const performHandoffModule = mockModule<typeof import('../../../../src/adapters/cli/commands/handoff.js')>('../../../../src/adapters/cli/commands/handoff.js', import.meta.url);
 const forgejo = mockModule<typeof import('../../../../src/adapters/forgejo/forgejo.js')>('../../../../src/adapters/forgejo/forgejo.js', import.meta.url);
@@ -21,7 +22,6 @@ const git = mockModule<typeof import('../../../../src/adapters/git/git.js')>('..
 // reaches it — the doubles below must be installed through the module seam.
 const nodeFs = mockModule<typeof import('node:fs')>('node:fs', import.meta.url);
 await installModuleMocks();
-const { startReviewLoop } = startReviewLoopModule;
 const { pushRound } = pushRoundModule;
 const { performHandoff } = performHandoffModule;
 const { mock } = test;
@@ -43,63 +43,26 @@ test.afterEach(() => {
 
 const TEST_SLUG = 'task-1104-test';
 
-test('startReviewLoop follows the transition contract: review before reviewer, active before implementer', async () => {
+test('review loop follows the transition contract: review before reviewer, active before implementer', async () => {
   const events = [];
-  const logs = [];
-
-  const baseOpts = {
-    isForgejoReviewEnabledFn: () => true,
-    eligibleAgentsForStepFn: () => ['codex', 'claude', 'gemini', 'custom'],
-    resolveTaskFileFn: () => ({ ok: true, taskFile: '/tmp/task.md' }),
-    implementer: 'claude',
-    reviewer: 'codex',
-    worktree: '/tmp/test',
-    gitFn: () => ({ status: 0, stdout: 'main\n', stderr: '' }),
-    dryRun: false,
-    log: (m) => logs.push(m),
-    error: (m) => console.error(m),
-    exit: (code) => { if (code !== 0) throw new Error(`Exit ${code}`); },
-    workflowLauncherStatusFn: () => ({ supported: true }),
-    forgejoAvailableFn: async () => true,
-    getPrStatusFn: () => ({ exists: true, state: 'open', number: 41 }),
-    maybeUpdateGraphifyBeforeReviewFn: () => {},
-    enforceTaskAssigneeFn: () => true,
-    resolveForgejoUserFn: () => 'gemini',
-    readTokenFn: () => 'token',
-    readReviewStateFn: () => null,
-    writeReviewStateFn: () => {},
-    rebaseBeforeReviewRoundFn: async () => ({ ok: true, sharedFileConflicts: false }),
-    performHandoffFn: async () => {},
-    // Track transition calls
-    transitionTaskFn: (slug, status, options) => {
-      events.push({ type: 'transition', status, implementer: options.implementer });
-      return true;
+  const fake = fakeReviewLoopPorts({
+    slug: TEST_SLUG,
+    routing: { eligibleFamilies: () => ['codex', 'claude', 'gemini', 'custom'] },
+    provider: {
+      pollReview: async () => 'REQUEST_CHANGES',
+      // A terminal disposition proves the complete reviewer -> implementer
+      // order in one round without exercising the five-round retry policy.
+      pollDisposition: async () => 'PUSHBACK_ALL',
     },
-    transitionVirtualFn: (transition, slug, status, options) => transition(slug, status, options),
-
-    // Track agent launches
-    startAgentFn: async (step, options) => {
-      events.push({ type: 'launch', step, agent: options.agent });
-      return { agent: options.agent };
+    task: {
+      mirror: async (lane, implementer) => { events.push({ type: 'transition', status: lane, implementer }); },
+      mirrorApproved: async () => { events.push({ type: 'transition', status: 'approved' }); },
     },
+    agents: { launch: async launch => { events.push({ type: 'launch', step: launch.role === 'reviewer' ? 'review' : 'act-on-review', agent: launch.agent }); return { agent: launch.agent }; } },
+    output: { exit: (code) => { if (code !== 0) { throw new Error(`Exit ${code}`); } } },
+  });
 
-    // Mock polling results to ensure we go through one full round
-    pollForReviewFn: async () => 'REQUEST_CHANGES',
-    // A terminal disposition proves the complete reviewer -> implementer order
-    // in one round without exercising the five-round retry policy.
-    pollForDispositionFn: async () => 'PUSHBACK_ALL',
-
-    applyAgentFallbackFn: (args) => args.original,
-    buildCompactReviewPromptFn: () => 'review prompt',
-    buildCompactActOnReviewPromptFn: () => 'act-on-review prompt',
-    consumeReviewerArtifactsFn: async () => ({ consumed: false }),
-    consumeImplementerArtifactsFn: async () => ({ consumed: false }),
-    recordStageStatsSafeFn: () => {},
-    runPreReviewGateFn: async () => ({ ok: true, area: 'all', command: 'mock gate', exitCode: 0, stdout: '', stderr: '' }),
-  };
-
-// @ts-expect-error -- TASK-2328: partial test double after ESM seam migration
-  await startReviewLoop(TEST_SLUG, baseOpts);
+  await runReviewLoop({ slug: TEST_SLUG, implementer: 'claude', reviewer: 'codex', skipHandoff: true }, fake.ports);
 
   // Expected sequence:
   // 1. transition to 'review' (before reviewer launch)
@@ -246,47 +209,20 @@ test('performHandoff follows the sequence: createPr -> gatekeeper -> transitionT
   }
 });
 
-test('startReviewLoop does not transition to review if rebase fails', async () => {
+test('review loop does not transition to review if rebase fails', async () => {
   const events = [];
-  const logs = [];
-
-  const baseOpts = {
-    isForgejoReviewEnabledFn: () => true,
-    eligibleAgentsForStepFn: () => ['codex'],
-    resolveTaskFileFn: () => ({ ok: true, taskFile: '/tmp/task.md' }),
-    implementer: 'claude',
-    reviewer: 'codex',
-    dryRun: false,
-    log: (m) => logs.push(m),
-    error: (m) => {},
-    exit: (code) => { if (code !== 0) events.push({ type: 'exit', code }); },
-    workflowLauncherStatusFn: () => ({ supported: true }),
-    forgejoAvailableFn: async () => true,
-    getPrStatusFn: () => ({ exists: true, state: 'open', number: 41 }),
-    maybeUpdateGraphifyBeforeReviewFn: () => {},
-    enforceTaskAssigneeFn: () => true,
-    resolveForgejoUserFn: () => 'gemini',
-    readTokenFn: () => 'token',
-    readReviewStateFn: () => null,
-    writeReviewStateFn: () => {},
-
+  const fake = fakeReviewLoopPorts({
+    slug: TEST_SLUG,
+    routing: { eligibleFamilies: () => ['codex'] },
+    provider: {},
     // FAILING REBASE
-    rebaseBeforeReviewRoundFn: async () => ({ ok: false, sharedFileConflicts: false }),
+    preReview: { rebase: async () => ({ ok: false, diagnostic: '' }) },
+    task: { mirror: async lane => { events.push({ type: 'transition', status: lane }); } },
+    agents: { launch: async launch => { events.push({ type: 'launch', step: launch.role }); return { agent: launch.agent }; } },
+    output: { exit: (code) => { if (code !== 0) { events.push({ type: 'exit', code }); } } },
+  });
 
-    transitionTaskFn: (slug, status, options) => {
-      events.push({ type: 'transition', status });
-      return true;
-    },
-
-    startAgentFn: async (step, options) => {
-      events.push({ type: 'launch', step });
-      return { agent: options.agent };
-    },
-
-  };
-
-// @ts-expect-error -- TASK-2328: partial test double after ESM seam migration
-  await startReviewLoop(TEST_SLUG, baseOpts);
+  await runReviewLoop({ slug: TEST_SLUG, implementer: 'claude', reviewer: 'codex', skipHandoff: true }, fake.ports);
 
   const reviewTransitions = events.filter(e => e.type === 'transition' && e.status === 'review');
   assert.equal(reviewTransitions.length, 0, "Should NOT transition to 'review' if rebase fails");

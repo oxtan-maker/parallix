@@ -203,14 +203,21 @@ test('verifyReview skips Forgejo PR check when review provider is not forgejo', 
 });
 
 // =============================================================================
-// Section 7: review.js startReviewLoop gates Forgejo availability check
+// Section 7: the review loop binds a review provider only when one is enabled
 // =============================================================================
 
-test('startReviewLoop gates Forgejo availability behind isForgejoReviewEnabled', () => {
-  // Check review-loop.js since startReviewLoop is now extracted there
-  const src = fs.readFileSync(path.join(ADAPTERS, 'review', 'review-loop.ts'), 'utf8');
-  assert.ok(src.includes('forgejoEnabled') && src.includes('isForgejoReviewEnabled'),
-    'review-loop.js startReviewLoop should gate Forgejo checks behind isForgejoReviewEnabled');
+test('review loop binds the Forgejo provider only behind isProviderEnabled', async () => {
+  const { createReviewLoopPorts } = await import('../../../src/adapters/review/review-loop.js');
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'forgejo-independence-loop-'));
+  try {
+    const quiet = { log: () => {}, error: () => {} };
+    fs.writeFileSync(path.join(root, 'workflow.config.json'), JSON.stringify({ adapters: { review: { provider: 'none' } } }));
+    assert.equal(createReviewLoopPorts('task-1', { worktree: root }, quiet).provider, null, 'provider=none binds no review provider');
+    fs.writeFileSync(path.join(root, 'workflow.config.json'), JSON.stringify({ adapters: { review: { provider: 'forgejo' } } }));
+    assert.notEqual(createReviewLoopPorts('task-1', { worktree: root }, quiet).provider, null, 'provider=forgejo binds the Forgejo review provider');
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
 });
 
 // =============================================================================

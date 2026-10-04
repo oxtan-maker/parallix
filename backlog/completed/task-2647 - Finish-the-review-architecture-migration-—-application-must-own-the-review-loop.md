@@ -3,8 +3,8 @@ id: TASK-2647
 title: >-
   Finish the review architecture migration — application must own the review
   loop
-status: backlog
-assignee: []
+status: done
+assignee: [custom]
 created_date: '2026-10-04 15:02'
 labels: []
 dependencies: []

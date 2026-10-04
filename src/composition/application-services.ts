@@ -20,14 +20,13 @@ import { SqliteSessionMarkerAdapter } from '../adapters/sqlite/session-marker-ad
 import { SqliteSessionMarkerRepository } from '../adapters/sqlite/session-marker-repository.js';
 import type { SessionMarkerRepository } from '../application/ports/mission-store.js';
 import { repositoryId, type RepositoryId } from '../domain/repository.js';
-import { latestEvidencedCheckpoint } from '../domain/checkpoint.js';
 import { createStatsMissionFlowReader } from './stats.js';
 import { missionId } from '../domain/mission.js';
 import { resolveCanonicalRepositoryId } from '../adapters/git/repository-identity.js';
 import { createDefaultExecuteMissionRuntime, createExecuteMissionPorts } from '../adapters/mission/execute-mission-adapters.js';
 import { performHandoff } from '../adapters/cli/commands/handoff.js';
 import integrate from '../adapters/cli/commands/integrate.js';
-import { startReviewLoop } from '../adapters/review/review-loop.js';
+import { createReviewLoopPorts, type ReviewLoopBindings, type ReviewLoopTarget } from '../adapters/review/review-loop.js';
 import { reviewLoopBindings } from './review-persistence.js';
 import { LegacyStatsBackfillAdapter } from '../adapters/mission/stats-backfill-adapter.js';
 import type { ProgressPort } from '../application/ports.js';
@@ -109,32 +108,6 @@ export interface MissionApplicationServices {
   readonly brief: MissionBriefService;
   readonly assignment: MissionAssignmentService;
   readonly handoff: MissionHandoffService;
-}
-
-function resolveMissionLaunchContext(mission: MissionApplicationServices, slug: string) {
-  const request = (operationId: string, capability: 'mission:context' | 'checkpoint:record') => ({
-    operationId, missionId: missionId(slug), capabilities: new Set([capability] as const),
-  });
-  return Promise.all([
-    mission.brief.read(request('execute-launch-brief', 'mission:context')),
-    mission.brief.readGates(request('execute-launch-gates', 'mission:context')),
-    mission.checkpoints.read(request('execute-launch-checkpoints', 'checkpoint:record')),
-    mission.brief.readSuccessCriteria(request('execute-launch-criteria', 'mission:context')),
-  ]).then(([briefOutcome, gatesOutcome, checkpointsOutcome, criteriaOutcome]) => {
-    // No recorded brief means no recorded launch context: the caller falls back
-    // to the file-backed checkpoint context rather than launching on a partial
-    // one assembled from whichever reads happened to succeed.
-    const brief = briefOutcome.status === 'completed' ? briefOutcome.value?.brief ?? null : null;
-    if (!brief) { return null; }
-    const checkpoints = checkpointsOutcome.status === 'completed' ? checkpointsOutcome.value?.checkpoints ?? [] : [];
-    return {
-      brief,
-      successCriteria: criteriaOutcome.status === 'completed' ? criteriaOutcome.value?.successCriteria ?? [] : [],
-      checkpoints,
-      declaredGates: gatesOutcome.status === 'completed' ? gatesOutcome.value?.declaredGates ?? [] : [],
-      latestCheckpoint: latestEvidencedCheckpoint(checkpoints),
-    };
-  });
 }
 
 export interface ProductionApplicationServices {
@@ -274,12 +247,11 @@ export async function createProductionApplicationServices(
           };
         },
       }),
-    startReviewLoop: (reviewSlug: string, loopOptions: Record<string, unknown> = {}) => startReviewLoop(reviewSlug, {
-      ...loopOptions,
+    reviewLoopMechanisms: (reviewSlug: string, target: ReviewLoopTarget, bindings: ReviewLoopBindings = {}) => createReviewLoopPorts(reviewSlug, target, {
+      ...bindings,
       performHandoffFn: handoffWithMissionServices!,
       ...reviewLoopBindings(mission.store, mission.lifecycle, sessionMarkerPort),
-      resolveExecutionContext: (slug: string) => resolveMissionLaunchContext(mission, slug),
-    } as any),
+    }),
   } : defaultExecuteRuntime;
   const executePorts = createExecuteMissionPorts(rootDir, {
     missionTransitionStore: mission?.store ?? unavailableMissionTransitionStore(),

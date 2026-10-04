@@ -141,7 +141,10 @@ test('workflow ownership guard finds no adapter-owned workflow control in produc
 test('workflow ownership guard accepts the re-homed review adapter through its typed port bindings', t => {
   const source = fs.readFileSync(path.join(root, REVIEW_WORKFLOW_ADAPTER), 'utf8');
   assert.match(source, /: StaticReviewWorkflowPort = \{/);
-  assert.match(source, /: ReviewRoundWorkflowPort = \{/);
+  // The autonomous review loop is re-homed through the typed entry port and its
+  // mechanism bindings, not through a broad workflow port.
+  assert.match(source, /: ReviewRoundEntryPort = \{/);
+  assert.doesNotMatch(source, /: ReviewRoundWorkflowPort = \{/);
   assert.deepEqual(findWorkflowOwnershipViolations(adapterRepo(t, REVIEW_WORKFLOW_ADAPTER, source)), []);
 });
 

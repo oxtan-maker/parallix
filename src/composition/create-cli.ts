@@ -27,8 +27,6 @@ import integrate from '../adapters/cli/commands/integrate.js';
 import { DraftCommandUseCase } from '../application/draft-command-use-case.js';
 import { IntegrateCommandUseCase } from '../application/integrate-command-use-case.js';
 import { ReviewCommandUseCase } from '../application/review-command-use-case.js';
-import { ReviewRoundUseCase } from '../application/review-round-use-case.js';
-import type { ReviewRoundWorkflowPort } from '../application/ports/review-round-workflow.js';
 import { HandoffCommandUseCase } from '../application/handoff-command-use-case.js';
 import { StatusCommandUseCase } from '../application/status-command-use-case.js';
 import { createGithubPublishStatusUseCase } from './github-publish-status.js';
@@ -109,7 +107,9 @@ import { createStatusBoardFor, statusMissionTitle } from './status-board.js';
 import { bindReviewPersistence, reviewLoopBindings } from './review-persistence.js';
 import { SqliteSessionMarkerAdapter } from '../adapters/sqlite/session-marker-adapter.js';
 import type { SqliteDatabaseAdapter } from '../adapters/sqlite/database-adapter.js';
-import { startReviewLoop } from '../adapters/review/review-loop.js';
+import { createReviewLoopPorts } from '../adapters/review/review-loop.js';
+import type { ReviewLoopObservers } from '../adapters/review/review-workflow-adapter.js';
+import type { StartReviewRound } from '../application/ports/review-round.js';
 import { inferSlug } from '../adapters/filesystem/mission-paths.js';
 
 function resolveRuntimePath(): string {
@@ -401,15 +401,13 @@ function createCommandRegistry(rootDir: string): Record<string, Command> {
           // decision, so it needs the same authority the loop paths use.
           missionStore: services.mission.store,
           lifecycleService: services.mission.lifecycle,
-          // The composition root chooses the application coordinator; the
-          // review adapter supplies only its typed persistence, gate, provider,
-          // agent, artifact, and telemetry effects for this invocation.
-          reviewRoundUseCaseFactory: (port: ReviewRoundWorkflowPort) => new ReviewRoundUseCase(port),
-          startReviewLoopFn: (slug: string, loopOptions: Record<string, unknown>) => startReviewLoop(slug, {
-            ...loopOptions,
+          // The composition root binds the review-loop mechanisms; the
+          // application review loop decides how they are sequenced.
+          reviewLoopMechanisms: (request: StartReviewRound, observers: ReviewLoopObservers) => createReviewLoopPorts(request.slug, request, {
+            ...observers,
             performHandoffFn: performHandoffWithMissionServices(missionServicesFn as HandoffMissionServicesPort),
             ...reviewLoopBindings(services.mission!.store, services.mission!.lifecycle, reviewerSessionPort),
-          } as any),
+          }),
         } as any);
         const result = await createReviewCommand(new ReviewCommandUseCase(adapter, services.currentWork))(args, options);
         // TASK-2620: `px review --continue` never chains into `px integrate`.

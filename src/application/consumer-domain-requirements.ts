@@ -196,7 +196,7 @@ export const CONSUMER_DOMAIN_REQUIREMENTS: readonly ConsumerRequirement[] = [
     id: 'retry-stage-launch-dedupe',
     family: 'retry',
     fileLocation: 'src/adapters/review/review-agent-fallback.ts',
-    line: 42,
+    line: 38,
     anchor: 'function stageLaunchFingerprint',
     reads: ['AgentRunMeasurement', 'Review'],
     requirement:
@@ -295,9 +295,9 @@ export const CONSUMER_DOMAIN_REQUIREMENTS: readonly ConsumerRequirement[] = [
   {
     id: 'review-loop-round-progression',
     family: 'review',
-    fileLocation: 'src/adapters/review/review-loop.ts',
-    line: 1730,
-    anchor: 'function startReviewLoopOwned',
+    fileLocation: 'src/application/review-loop/review-loop.ts',
+    line: 190,
+    anchor: 'function runOwnedReviewLoop',
     reads: ['Review', 'Mission'],
     requirement:
       'The reviewed revision, the reviewer decision for it, and the implementer response, so the next round opens against an exact revision rather than a mutable phase flag.',

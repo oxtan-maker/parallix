@@ -1,3 +1,4 @@
+import { reviewLoopReporter } from '../../../../src/adapters/review/review-loop-presentation.js';
 // reviewer independence contract.
 // Related scenarios share imports; each contract keeps its own hooks and mutable fixtures.
 import test, { describe } from 'node:test';
@@ -9,7 +10,7 @@ import {
   startReview,
 } from '../../../../src/domain/review.js';
 import { resolveHandoffReviewAssignment } from '../../../../src/adapters/cli/commands/handoff.js';
-import { resolveReviewerIdentity } from '../../../../src/adapters/review/review-agent-fallback.js';
+import { selectReviewer } from '../../../../src/application/review-loop/reviewer-selection.js';
 import { postWorkflowReview } from '../../../../src/adapters/review/review-artifacts.js';
 import { renderStatus } from '../../../../src/interfaces/cli/status.js';
 
@@ -136,26 +137,23 @@ describe("self review forbidden", { concurrency: false }, () => {
 describe("reviewer self review approval owed", { concurrency: false }, () => {
   test('exhausted reviewer pool launches the PR author, retains its verdict, and marks formal approval owed', async () => {
     const selectionLogs: string[] = [];
-    const selected = resolveReviewerIdentity({
+    const selected = selectReviewer({
       implementer: 'custom',
       isContinue: false,
       persisted: null,
-      agents: ['custom', 'claude', 'codex'],
-      selectReviewer: () => { throw new Error('No agents available'); },
-      workflowLauncherStatusFn: (agent: string) => ({
-        agent,
+      maxAttempts: 1,
+      dryRun: false,
+      providerEnabled: true,
+      slug: 'task-2384',
+    }, {
+      eligibleFamilies: () => ['custom', 'claude', 'codex'],
+      nominate: () => { throw new Error('No agents available'); },
+      launcherStatus: (agent: string) => ({
         supported: agent === 'custom',
         detail: agent === 'claude' ? 'blocked: stale session' : 'launcher unavailable: review sandbox',
       }),
-      buildAutonomousReviewMatrixFn: () => ({}),
-      formatMatrixSummaryFn: () => [],
-      maxAttempts: 1,
-      dryRun: false,
-      forgejoEnabled: true,
-      slug: 'task-2384',
-      log: (message: string) => selectionLogs.push(message),
-      error: () => {},
-    });
+      runtimeMatrix: () => [],
+    }, reviewLoopReporter({ log: (message: string) => selectionLogs.push(message), error: () => {} }));
 
     assert.equal(selected?.reviewer, 'custom', 'the single-family escape hatch must still select the author');
     assert.ok(

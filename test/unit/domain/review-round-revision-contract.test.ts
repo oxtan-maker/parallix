@@ -178,7 +178,7 @@ describe("stale review round repro", { concurrency: false }, () => {
 
       assert.equal(result.ok, true, 'the bound verdict writer consumes the artifacts');
       assert.equal(providerReviewCalled, false, 'a self-author verdict skips the provider review POST');
-      const output = await reviewLoopBindings(store as never).consumeReviewerArtifactsFn('task-2385', 'claude', { worktree: tmpDir });
+      const output = await reviewLoopBindings(store as never).consumeReviewerArtifacts('task-2385', 'claude', { worktree: tmpDir });
       assert.equal(output.consumed, true, 'the review loop reads the persisted verdict output');
       // The persisted verdict survives on round 2, not a fabricated round 1, and
       // round 1 keeps its number: the stale-round invariant holds end to end.

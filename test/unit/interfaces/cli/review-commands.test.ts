@@ -10,6 +10,10 @@ import { createRequire } from 'node:module';
 import { ReviewCommandUseCase } from '../../../../src/application/review-command-use-case.js';
 import { createReviewCommand } from '../../../../src/interfaces/cli/review.js';
 import { mkdtemp as registeredMkdtemp } from '../../../helpers/temp-dir.js';
+import { fakeReviewLoopPorts } from '../../../helpers/review-loop-ports.js';
+
+/** Bound loop mechanisms whose held controller fence declines the run. */
+const declinedLoop = () => fakeReviewLoopPorts({ lock: { tryAcquire: () => false, release: () => {} } }).ports;
 const _require = createRequire(import.meta.url);
 const missionUtils = mockModule<typeof import('../../../../src/adapters/filesystem/mission-utils.js')>('../../../../src/adapters/filesystem/mission-utils.js', import.meta.url);
 const reviewModule = mockModule<typeof import('../../../../src/adapters/review/review-commands.js')>('../../../../src/adapters/review/review-commands.js', import.meta.url);
@@ -334,7 +338,7 @@ test('no-PR + static review findings re-launches the implementer (not the review
     performStaticReviewFn: () => ({ ok: false, findings }),
     resolveTaskFileFn: () => ({ ok: true, taskFile: '/tmp/task-1259.md' }),
     getTaskImplementerFn: () => 'claude',
-    startReviewLoopFn: async () => { startReviewLoopCalled += 1; },
+    reviewLoopMechanisms: () => { startReviewLoopCalled += 1; return declinedLoop(); },
     startAgentFn: async (step, opts) => { startAgentCalls.push({ step, opts }); },
     submitForReviewFn: async () => { submitForReviewCalled = true; },
     postStaticReviewCommentFn: () => { postStaticReviewCalled = true; },
@@ -345,7 +349,7 @@ test('no-PR + static review findings re-launches the implementer (not the review
 
   // SC1: the review loop must NOT start on the findings path.
   assert.equal(startReviewLoopCalled, 0,
-    'startReviewLoopFn must NOT be called when static review finds trivial issues');
+    'the review loop must NOT be bound when static review finds trivial issues');
 
   // SC1: the implementer is re-launched exactly once via the 'active' step.
   assert.equal(startAgentCalls.length, 1,
@@ -392,7 +396,7 @@ test('no-PR + static review findings with unresolvable implementer logs WARN and
     performStaticReviewFn: () => ({ ok: false, findings: ['Missing Goal Check section'] }),
     resolveTaskFileFn: () => ({ ok: false, taskFile: null }),
     getTaskImplementerFn: () => null,
-    startReviewLoopFn: async () => { startReviewLoopCalled += 1; },
+    reviewLoopMechanisms: () => { startReviewLoopCalled += 1; return declinedLoop(); },
     startAgentFn: async () => { startAgentCalled += 1; },
     resolveWorktreeFn: () => null,
     readReviewStateFn: () => null,
@@ -403,7 +407,7 @@ test('no-PR + static review findings with unresolvable implementer logs WARN and
   assert.equal(startAgentCalled, 0,
     'startAgentFn must not be called when the implementer cannot be resolved');
   assert.equal(startReviewLoopCalled, 0,
-    'startReviewLoopFn must not be called when the implementer cannot be resolved');
+    'the review loop must not be bound when the implementer cannot be resolved');
   assert.ok(
     logs.some(l => /WARN/.test(l) && /implementer could not be resolved/i.test(l)),
     `expected a WARN log about unresolved implementer; got: ${logs.join(' | ')}`
@@ -439,7 +443,7 @@ test('review rejects an unknown flag with a suggestion instead of ignoring it', 
     log: () => {},
     error: (m) => errors.push(m),
     exit: (c) => { exitCode = c; },
-    startReviewLoopFn: async () => { startReviewLoopCalled += 1; }
+    reviewLoopMechanisms: () => { startReviewLoopCalled += 1; return declinedLoop(); }
   });
 
   assert.equal(startReviewLoopCalled, 0, 'the loop must not start when a flag is misspelled');
@@ -460,7 +464,7 @@ test('review passes an explicit --max-attempts through to the review loop', asyn
     log: () => {},
     error: () => {},
     exit,
-    startReviewLoopFn: async (_slug, opts) => { received = opts; }
+    reviewLoopMechanisms: (request, observers) => { received = { ...request, ...observers }; return declinedLoop(); }
   });
 
   assert.equal(received && received.maxAttempts, 7);
@@ -477,7 +481,7 @@ test('a manual review continuation renews the five-round budget at the current r
     inferSlugFn: (s) => s || 'task-2436',
     log: () => {}, error: () => {}, exit: () => {},
     readReviewStateFn: async () => ({ round: 5 }),
-    startReviewLoopFn: async (_slug, opts) => { received = opts; },
+    reviewLoopMechanisms: (request, observers) => { received = { ...request, ...observers }; return declinedLoop(); },
   });
 
   assert.equal(received && received.maxAttempts, 9);
@@ -490,7 +494,7 @@ test('review automation retains its five-round limit', async () => {
     inferSlugFn: (s) => s || 'task-2436',
     log: () => {}, error: () => {}, exit: () => {},
     readReviewStateFn: async () => ({ round: 5 }),
-    startReviewLoopFn: async (_slug, opts) => { received = opts; },
+    reviewLoopMechanisms: (request, observers) => { received = { ...request, ...observers }; return declinedLoop(); },
   });
 
   assert.equal(received && received.maxAttempts, 5);
@@ -509,7 +513,7 @@ test('a fresh --start requires the DB-native Review aggregate', async () => {
     exit: () => {},
     requireReviewAggregate: true,
     readReviewStateFn: async () => null,
-    startReviewLoopFn: async () => { startReviewLoopCalled += 1; },
+    reviewLoopMechanisms: () => { startReviewLoopCalled += 1; return declinedLoop(); },
   });
 
   assert.equal(startReviewLoopCalled, 0, '--start must not reintroduce retired file-backed review state when the DB-native aggregate is absent');
@@ -529,7 +533,7 @@ test('a --continue with no persisted Review aggregate exits with the reconcile d
     exit: () => {},
     requireReviewAggregate: true,
     readReviewStateFn: async () => null,
-    startReviewLoopFn: async () => { startReviewLoopCalled += 1; },
+    reviewLoopMechanisms: () => { startReviewLoopCalled += 1; return declinedLoop(); },
   });
 
   assert.equal(startReviewLoopCalled, 0, `--continue must not reach the review loop without a persisted Review`);
@@ -547,7 +551,7 @@ test('review forwards current-work agent publication into the review loop', asyn
     log: () => {},
     error: () => {},
     exit: () => {},
-    startReviewLoopFn: async (_slug, opts) => { received = opts; },
+    reviewLoopMechanisms: (request, observers) => { received = { ...request, ...observers }; return declinedLoop(); },
   });
 
   assert.equal(typeof received?.onAgentLaunched, 'function');
@@ -563,7 +567,7 @@ test('review rejects a non-numeric --max-attempts', async () => {
     log: () => {},
     error: (m) => errors.push(m),
     exit: (c) => { exitCode = c; },
-    startReviewLoopFn: async () => { startReviewLoopCalled += 1; }
+    reviewLoopMechanisms: () => { startReviewLoopCalled += 1; return declinedLoop(); }
   });
 
   assert.equal(startReviewLoopCalled, 0);

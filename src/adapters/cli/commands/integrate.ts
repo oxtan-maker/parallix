@@ -26,7 +26,7 @@ import * as runtimeMatrix from '../../agents/runtime-matrix.js';
 import * as productConfig from '../../config/product-config.js';
 import * as reviewState from '../../review/review-state.js';
 import * as reviewCommands from '../../review/review-commands.js';
-import * as reviewLoop from '../../review/review-loop.js';
+import { applyAgentFallback } from '../../review/review-agent-fallback.js';
 import * as reviewAdapter from '../../review/review-adapter.js';
 import * as rebaseWorkflow from '../../rebase/rebase-workflow-adapter.js';
 import * as repositoryGates from '../../config/repository-gates.js';
@@ -117,7 +117,7 @@ export function createIntegratePorts(): IntegrateWorkflowPorts {
       startAgent: (step, options) => agents.startAgent(step, options as unknown as Parameters<typeof agents.startAgent>[1]),
       selectAgent: step => agents.selectAgent(step),
       workflowLauncherStatus: (agent, rootDir) => agents.workflowLauncherStatus(agent, rootDir),
-      applyAgentFallback: options => reviewLoop.applyAgentFallback(options as Parameters<typeof reviewLoop.applyAgentFallback>[0]),
+      applyAgentFallback: options => applyAgentFallback(options as Parameters<typeof applyAgentFallback>[0]),
       describeReviewMatrix: () => runtimeMatrix.formatMatrixSummary(runtimeMatrix.buildAutonomousReviewMatrix()),
     },
     productConfig: {

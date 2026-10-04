@@ -8,14 +8,14 @@ import { missionId } from '../../domain/mission.js';
 import { readReviewState, reconcileInterruptedHandoff } from './review-state.js';
 import type { MissionStore } from '../../application/domain-ports.js';
 import { startAgent } from '../agents/agents.js';
-import { startReviewLoop, recordStageStatsSafe } from './review-loop.js';
 import type { ReviewWorkflowContext, ReviewWorkflowPort } from '../../application/ports/review-workflow.js';
 import { ReviewRoundUseCase } from '../../application/review-round-use-case.js';
-import type { ReviewRoundWorkflowPort, StartReviewRound } from '../../application/ports/review-round-workflow.js';
+import type { ReviewLoopPorts, ReviewRoundEntryPort, StartReviewRound } from '../../application/ports/review-round.js';
 import { StaticReviewUseCase } from '../../application/static-review-use-case.js';
 import type { StaticReviewWorkflowPort } from '../../application/ports/static-review-workflow.js';
 import { flagValue, readTextFlag } from './review-cli-flags.js';
 import { createEvent } from './review-events.js';
+import type { ReviewLoopBindings } from './review-loop.js';
 import { backfillReviewHandler, continueReviewClearsIntervention, continueReviewInvalidatesBlocker, closeMissionPr, commentRound, createEventHandler, formatStaticReviewSuccess, importLegacyHandler, performStaticReview, postStaticReviewComment, pushRound, readComments, reconcileInterruptedHandoffHandler, resumeIntervenedReview, showReviewStatus, submitForReview, submitReviewRound, verifyReview } from './review-commands.js';
 
 /**
@@ -38,11 +38,16 @@ async function isKnownMission(slug: string, store: MissionStore | null | undefin
   }
 }
 
+/** Per-invocation output and current-work observers the review loop reports to. */
+export type ReviewLoopObservers = Pick<ReviewLoopBindings, 'log' | 'error' | 'exit' | 'onAgentLaunched' | 'onAutonomousStop'>;
+
 export class ReviewWorkflowAdapter implements ReviewWorkflowPort {
   constructor(private readonly _defaults: {
     inferSlugFn?: typeof inferSlug; log?: (_msg: string) => void; error?: (_msg: string) => void; exit?: (_code: number) => never;
-    verifyReviewFn?: typeof verifyReview; submitForReviewFn?: typeof submitForReview; pushRoundFn?: typeof pushRound; readCommentsFn?: typeof readComments; commentRoundFn?: typeof commentRound; submitReviewRoundFn?: typeof submitReviewRound; closeMissionPrFn?: typeof closeMissionPr; startReviewLoopFn?: typeof startReviewLoop; recordStageStatsSafeFn?: typeof recordStageStatsSafe; startAgentFn?: typeof startAgent; resolveTaskFileFn?: typeof resolveTaskFile; getTaskStatusFn?: typeof getTaskStatus; getTaskImplementerFn?: typeof getTaskImplementer; getPrStatusFn?: typeof getPrStatus; readReviewStateFn?: typeof readReviewState; performStaticReviewFn?: typeof performStaticReview; postStaticReviewCommentFn?: typeof postStaticReviewComment; resolveWorktreeFn?: typeof resolveWorktree; reconcileInterruptedHandoffFn?: typeof reconcileInterruptedHandoff;
-    requireReviewAggregate?: boolean; missionStore?: MissionStore | null; run?: typeof run; missionPath?: string; continueReviewClearsInterventionFn?: typeof continueReviewClearsIntervention; createEventFn?: typeof createEvent; onAgentLaunched?: (_agent: string, _phase: 'review' | 'review-response') => Promise<void> | void; onAutonomousStop?: (_reason: string) => Promise<void> | void; payloadLandedFn?: (_slug: string) => boolean | Promise<boolean>; reviewRoundUseCaseFactory?: (_port: ReviewRoundWorkflowPort) => ReviewRoundUseCase;
+    verifyReviewFn?: typeof verifyReview; submitForReviewFn?: typeof submitForReview; pushRoundFn?: typeof pushRound; readCommentsFn?: typeof readComments; commentRoundFn?: typeof commentRound; submitReviewRoundFn?: typeof submitReviewRound; closeMissionPrFn?: typeof closeMissionPr; startAgentFn?: typeof startAgent; resolveTaskFileFn?: typeof resolveTaskFile; getTaskStatusFn?: typeof getTaskStatus; getTaskImplementerFn?: typeof getTaskImplementer; getPrStatusFn?: typeof getPrStatus; readReviewStateFn?: typeof readReviewState; performStaticReviewFn?: typeof performStaticReview; postStaticReviewCommentFn?: typeof postStaticReviewComment; resolveWorktreeFn?: typeof resolveWorktree; reconcileInterruptedHandoffFn?: typeof reconcileInterruptedHandoff;
+    requireReviewAggregate?: boolean; missionStore?: MissionStore | null; run?: typeof run; missionPath?: string; continueReviewClearsInterventionFn?: typeof continueReviewClearsIntervention; createEventFn?: typeof createEvent; payloadLandedFn?: (_slug: string) => boolean | Promise<boolean>;
+    /** The composition root binds the review-loop mechanisms for each request. */
+    reviewLoopMechanisms?: (_request: StartReviewRound, _observers: ReviewLoopObservers) => Promise<ReviewLoopPorts> | ReviewLoopPorts;
   } = {}) {}
 
   async preflight(args: string[], suppliedOptions: Record<string, unknown> = {}): Promise<ReviewWorkflowContext | null> {
@@ -69,16 +74,20 @@ export class ReviewWorkflowAdapter implements ReviewWorkflowPort {
   private invalidMaxAttempts(raw: string): void { const o = this._defaults; (o.error || fmt.log.plainError)(fmt.status('FAIL', `--max-attempts requires a positive integer (got "${raw}").`)); (o.exit || process.exit)(1); }
   private roundUseCase(context: ReviewWorkflowContext): ReviewRoundUseCase {
     const o = context.options as typeof this._defaults; const worktree = o.resolveWorktreeFn || resolveWorktree;
-    const port: ReviewRoundWorkflowPort = {
+    const port: ReviewRoundEntryPort = {
       loadRound: async slug => await Promise.resolve((o.readReviewStateFn || readReviewState)(slug, worktree(slug) || process.cwd(), o.missionStore)),
       isKnownMission: async slug => !o.requireReviewAggregate || await isKnownMission(slug, o.missionStore),
       clearHumanIntervention: async slug => { await (o.continueReviewClearsInterventionFn ?? continueReviewClearsIntervention)(slug, context.args, { log: o.log, error: o.error, exit: o.exit, resolveWorktreeFn: o.resolveWorktreeFn, missionStore: o.missionStore, createEventFn: o.createEventFn, runFn: o.run }); },
       invalidateResolvedBlocker: async slug => { if (o.missionStore) { await continueReviewInvalidatesBlocker(slug, context.args, { ...o, runFn: o.run }); } },
-      runRound: async request => { await (o.startReviewLoopFn ?? startReviewLoop)(request.slug, { ...request, recordStageStatsSafeFn: o.recordStageStatsSafeFn ?? recordStageStatsSafe, onAgentLaunched: o.onAgentLaunched, onAutonomousStop: o.onAutonomousStop, exit: o.exit || process.exit }); },
+      mechanisms: request => {
+        if (!o.reviewLoopMechanisms) { throw new Error('review loop mechanisms are not bound by the composition root'); }
+        const observers = context.options as ReviewLoopObservers;
+        return o.reviewLoopMechanisms(request, { log: observers.log, error: observers.error, exit: observers.exit || process.exit, onAgentLaunched: observers.onAgentLaunched, onAutonomousStop: observers.onAutonomousStop });
+      },
       invalidMaxAttempts: raw => this.invalidMaxAttempts(raw),
       missingReviewAggregate: slug => { (o.error || fmt.log.plainError)(fmt.status('FAIL', `Mission ${slug} has no valid Review aggregate. Stop before reviewer launch and run px review ${slug} --reconcile-review --branch <branch> --target <branch> --reviewer <agent> --implementer <agent> --revision <revision> --eligible-reviewer <agent>.`)); (o.exit || process.exit)(1); },
     };
-    return o.reviewRoundUseCaseFactory?.(port) ?? new ReviewRoundUseCase(port);
+    return new ReviewRoundUseCase(port);
   }
   async comment(context: ReviewWorkflowContext): Promise<void> { const o = context.options as typeof this._defaults; const message = readTextFlag(context.args, '--comment', '--comment-file', 'comment', o); if (!message) { (o.error || fmt.log.plainError)(fmt.status('FAIL', '--comment requires text via --comment "<text>" or --comment-file <path>.')); (o.exit || process.exit)(1); return; } await (o.commentRoundFn || commentRound)(context.slug, message, o); }
   async readComments(context: ReviewWorkflowContext): Promise<void> { const o = context.options as typeof this._defaults; await (o.readCommentsFn || readComments)(context.slug, o); }

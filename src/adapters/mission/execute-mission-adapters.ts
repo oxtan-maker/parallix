@@ -12,7 +12,8 @@ import { git as awaitableGit } from '../git/git.js';
 import * as agents from '../agents/agents.js';
 import * as fmt from '../../application/presentation/cli-format.js';
 import { performHandoff } from '../cli/commands/handoff.js';
-import { recordStageStatsSafe, startReviewLoop } from '../review/review-loop.js';
+import { createReviewLoopPorts } from '../review/review-loop.js';
+import { runReviewLoop } from '../../application/review-loop/review-loop.js';
 import * as repairHandoff from '../cli/commands/repair-handoff.js';
 import type { MissionTransitionStore, SessionMarkerPort } from '../../application/domain-ports.js';
 import type {
@@ -74,7 +75,8 @@ export interface ExecuteMissionRuntime {
   readonly resolveStageTelemetry: typeof resolveStageTelemetry;
   /** Individual post-execute mechanisms. The application service owns their ordering. */
   readonly performHandoff: typeof performHandoff;
-  readonly startReviewLoop: typeof startReviewLoop;
+  /** Binds the review-loop mechanisms; the application review loop sequences them. */
+  readonly reviewLoopMechanisms: typeof createReviewLoopPorts;
   readonly repairHandoff: typeof repairHandoff.default;
   readonly validateCheckpointsBeforeHandoff: typeof validateCheckpointsBeforeHandoff;
 }
@@ -261,7 +263,8 @@ class HandoffExecutionAdapter implements HandoffExecutionPort {
 class AutonomousReviewAdapter implements AutonomousReviewPort {
   constructor(private readonly _runtime: ExecuteMissionRuntime) {}
   async start(request: AutonomousReviewRequest): Promise<void> {
-    await this._runtime.startReviewLoop(request.slug, { implementer: request.implementer, worktree: request.worktree, skipHandoff: true, recordStageStatsSafeFn: recordStageStatsSafe, onAgentLaunched: request.onAgentLaunched, onAutonomousStop: request.onAutonomousStop });
+    const mechanisms = this._runtime.reviewLoopMechanisms(request.slug, { worktree: request.worktree }, { onAgentLaunched: request.onAgentLaunched, onAutonomousStop: request.onAutonomousStop });
+    await runReviewLoop({ slug: request.slug, implementer: request.implementer, skipHandoff: true }, mechanisms);
   }
 }
 
@@ -336,7 +339,7 @@ export function createDefaultExecuteMissionRuntime(): ExecuteMissionRuntime {
     resolveAgentModel,
     resolveStageTelemetry,
     performHandoff,
-    startReviewLoop,
+    reviewLoopMechanisms: createReviewLoopPorts,
     repairHandoff: repairHandoff.default,
     validateCheckpointsBeforeHandoff,
     resolveExecutionContext: async () => null,

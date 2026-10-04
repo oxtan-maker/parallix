@@ -518,6 +518,9 @@ test('SC1 reverse: all durable-IO files under src/ are present in the inventory'
     // Adapter-layer boundary guard scans source files to enforce dependency rules,
     // rather than reading or writing an ADR 0053 durable-state concept.
     'src/adapters/architecture/boundary-guards.ts',
+    // Adapter-layer workflow-control guard scans source files to enforce
+    // ownership rules, rather than reading or writing an ADR 0053 durable concept.
+    'src/adapters/architecture/workflow-ownership.ts',
     // The inventory file itself
     'test/fixtures/durable-state-inventory.ts',
     // Core storage abstraction (defines the API, not a concept reader/writer)

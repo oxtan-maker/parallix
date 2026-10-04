@@ -8,14 +8,15 @@ import path from 'node:path';
 import childProcess from 'child_process';
 import { mockModule, installModuleMocks } from '../../lib/module-mock.js';
 const runDeclaredGatesModule = mockModule<typeof import('../../../src/adapters/cli/commands/handoff.js')>('../../../src/adapters/cli/commands/handoff.js', import.meta.url);
-const startReviewLoopModule = mockModule<typeof import('../../../src/adapters/review/review-loop.js')>('../../../src/adapters/review/review-loop.js', import.meta.url);
 const reviewCommandsModule = mockModule<typeof import('../../../src/adapters/review/review-commands.js')>('../../../src/adapters/review/review-commands.js', import.meta.url);
 await installModuleMocks();
 test.afterEach(() => mock.restoreAll());
 const { runDeclaredGates } = runDeclaredGatesModule;
-const { startReviewLoop } = startReviewLoopModule;
 const { submitForReview } = reviewCommandsModule;
 const { mock } = test;
+import { createReviewLoopPorts } from '../../../src/adapters/review/review-loop.js';
+import { runReviewLoop } from '../../../src/application/review-loop/review-loop.js';
+import { fakeReviewLoopPorts } from '../../helpers/review-loop-ports.js';
 
 // Reproduction tests for task-2234 (push-to-reviewer autobounce).
 //
@@ -82,7 +83,7 @@ test('task-2234 repro: runDeclaredGates rejects explanatory en-dash and double-d
 });
 
 // ============================================================================
-// CP-2: Auto-bounce behavior (behavioral via startReviewLoop seams)
+// CP-2: Auto-bounce behavior (behavioral via the application review loop)
 // ============================================================================
 
 async function withTempGitRepo(fn) {
@@ -106,50 +107,22 @@ async function withTempGitRepo(fn) {
 
 // The self-heal handoff (and its auto-bounce) only runs when a review
 // provider is enabled and reachable and no open PR exists for the mission
-// branch, so the harness enables the provider and stubs it reachable.
-// Every test asserts on `logs`/`errors` that the self-heal path actually
-// executed, so these tests cannot pass by skipping the code under test.
-function baseLoopHarness(root, overrides = {}) {
-  const taskFile = path.join(root, 'task.md');
-  fs.writeFileSync(taskFile, '# task');
-  const logs = [];
-  const errors = [];
-  const exitCodes = [];
-  const opts = {
+// branch, so the harness binds a reachable provider with no PR. Every test
+// asserts on `logs`/`errors` that the self-heal path actually executed, so
+// these tests cannot pass by skipping the code under test.
+function baseLoopHarness(root, handoff, overrides: Record<string, unknown> = {}) {
+  const transitions = [];
+  const fake = fakeReviewLoopPorts({
     slug: 'task-2234',
-    implementer: 'claude',
-    reviewer: 'codex',
     worktree: root,
-    dryRun: false,
-    isForgejoReviewEnabledFn: () => true,
-    getPrStatusFn: () => ({ exists: false }),
-    forgejoAvailableFn: async () => true,
-    readTokenFn: () => 'token',
-    pollForReviewFn: async () => 'TIMEOUT',
-    pollForDispositionFn: async () => 'TIMEOUT',
-    getLatestReviewForPrFn: async () => null,
-    maybeUpdateGraphifyBeforeReviewFn: () => {},
-    resolveTaskFileFn: () => ({ ok: true, taskFile }),
-    getTaskStatusFn: () => 'review',
-    transitionTaskFn: () => {},
-    transitionVirtualFn: () => {},
-    toVirtualFn: (s) => s,
-    workflowLauncherStatusFn: () => ({ supported: true }),
-    eligibleAgentsForStepFn: () => ['codex', 'claude'],
-    enforceTaskAssigneeFn: () => true,
-    applyAgentFallbackFn: (a) => a.original,
-    readReviewStateFn: () => null,
-    writeReviewStateFn: () => {},
-    startAgentFn: async () => ({ agent: null }),
-    rebaseBeforeReviewRoundFn: async () => ({ ok: true, sharedFileConflicts: false }),
-    buildCompactReviewPromptFn: () => 'review prompt',
-    buildCompactActOnReviewPromptFn: () => 'act-on-review prompt',
-    log: (m) => logs.push(m),
-    error: (m) => errors.push(m),
-    exit: (c) => { exitCodes.push(c); },
-    ...overrides
-  };
-  return { opts, logs, errors, exitCodes };
+    routing: { eligibleFamilies: () => ['codex', 'claude'] },
+    provider: { openPullRequest: () => null },
+    handoff: { handoff: async () => handoff },
+    task: { mirror: async lane => { transitions.push({ slug: 'task-2234', status: lane }); } },
+    ...overrides,
+  });
+  const run = () => runReviewLoop({ slug: 'task-2234', implementer: 'claude', reviewer: 'codex' }, fake.ports);
+  return { fake, run, transitions, logs: fake.logs, errors: fake.errors, exitCodes: fake.exits };
 }
 
 function assertSelfHealAttempted(logs) {
@@ -161,21 +134,13 @@ function assertSelfHealAttempted(logs) {
 
 test('task-2234 repro: review-loop self-heal auto-bounces to active on validation-failed handoff', async () => {
   await withTempGitRepo(async (root) => {
-    const transitions = [];
-    const writtenStates = [];
-
-    const { opts, logs, exitCodes } = baseLoopHarness(root, {
-      performHandoffFn: async () => ({
-        ok: false,
-        reason: 'validation-failed',
-        error: 'Declared gate "true — some description" failed for task-2234: Gate declaration must contain an exact runnable command only. Blocking handoff — task remains in active.'
-      }),
-      transitionTaskFn: (slug, status) => { transitions.push({ slug, status }); },
-      writeReviewStateFn: (slug, state) => { writtenStates.push({ slug, state }); },
+    const { run, logs, exitCodes, transitions, fake } = baseLoopHarness(root, {
+      ok: false,
+      reason: 'validation-failed',
+      error: 'Declared gate "true — some description" failed for task-2234: Gate declaration must contain an exact runnable command only. Blocking handoff — task remains in active.'
     });
-
-// @ts-expect-error -- TASK-2328: partial test double after ESM seam migration
-    await startReviewLoop('task-2234', opts);
+    await run();
+    const writtenStates = fake.writes.map(state => ({ slug: 'task-2234', state }));
 
     assertSelfHealAttempted(logs);
     assert.deepEqual(
@@ -183,13 +148,16 @@ test('task-2234 repro: review-loop self-heal auto-bounces to active on validatio
       [{ slug: 'task-2234', status: 'active' }],
       'self-heal must transition exactly this task to active on validation-failed'
     );
+    // `fake.writes` is `Record<string, unknown>[]`, so metadata is unknown until
+    // cast; narrow on a literal comparison so the shape resolves without strict mode.
+    const metadataOf = (entry: { state: Record<string, unknown> }) => entry.state.metadata as Record<string, unknown> | undefined;
     const bounced = writtenStates.find(
-      s => s.slug === 'task-2234' && s.state && s.state.metadata
-        && s.state.metadata.gateFailureReason === 'validation-failed'
+      s => s.slug === 'task-2234' && metadataOf(s)
+        && metadataOf(s)?.gateFailureReason === 'validation-failed'
     );
     assert.ok(bounced, 'self-heal must persist gateFailureReason in review-state metadata');
     assert.match(
-      String(bounced.state.metadata.gateFailureError),
+      String(metadataOf(bounced)!.gateFailureError),
       /true — some description/,
       'persisted gateFailureError must retain the invalid gate text for the follow-up action'
     );
@@ -203,23 +171,17 @@ test('task-2234 repro: review-loop self-heal auto-bounces to active on validatio
 
 test('task-2234 repro: review-loop self-heal fails closed when validation-failure state cannot commit', async () => {
   await withTempGitRepo(async (root) => {
-    const { opts, logs, exitCodes } = baseLoopHarness(root, {
-      performHandoffFn: async () => ({
-        ok: false,
-        reason: 'validation-failed',
-        error: 'Declared gate is invalid'
-      }),
-      writeReviewStateFn: () => ({
-        outcome: 'commit-failed-dirty',
-        stage: 'commit',
-        diagnostic: 'simulated commit failure'
-      })
+    // The real review-state mechanism reports the write that did not commit.
+    const bound = createReviewLoopPorts('task-2234', { worktree: root }, {
+      log: () => {}, error: () => {},
+      readReviewState: () => null,
+      writeReviewState: (() => ({ outcome: 'commit-failed-dirty', stage: 'commit', diagnostic: 'simulated commit failure' })) as never,
     });
+    const { run, logs, exitCodes } = baseLoopHarness(root, { ok: false, reason: 'validation-failed', error: 'Declared gate is invalid' }, { stateport: bound.state });
 
     await assert.rejects(
-// @ts-expect-error -- TASK-2328: partial test double after ESM seam migration
-      () => startReviewLoop('task-2234', opts),
-      /Review-state persistence failed for mission task-2234, phase unknown, round unknown, stage commit: simulated commit failure/
+      run,
+      /Review-state persistence failed for mission task-2234, phase reviewing, round 1, stage commit: simulated commit failure/
     );
     assertSelfHealAttempted(logs);
     assert.deepEqual(exitCodes, [], 'fail-closed persistence must stop before the explicit error exit');
@@ -228,19 +190,12 @@ test('task-2234 repro: review-loop self-heal fails closed when validation-failur
 
 test('task-2234 repro: review-loop self-heal does NOT bounce on gate-failed (execution failure)', async () => {
   await withTempGitRepo(async (root) => {
-    const transitions = [];
-
-    const { opts, logs, errors, exitCodes } = baseLoopHarness(root, {
-      performHandoffFn: async () => ({
-        ok: false,
-        reason: 'gate-failed',
-        error: 'Declared gate "./scripts/verify-local.sh all" failed for task-2234: Gate exited with status 1. Blocking handoff — task remains in active.'
-      }),
-      transitionTaskFn: (slug, status) => { transitions.push({ slug, status }); },
+    const { run, logs, errors, exitCodes, transitions } = baseLoopHarness(root, {
+      ok: false,
+      reason: 'gate-failed',
+      error: 'Declared gate "./scripts/verify-local.sh all" failed for task-2234: Gate exited with status 1. Blocking handoff — task remains in active.'
     });
-
-// @ts-expect-error -- TASK-2328: partial test double after ESM seam migration
-    await startReviewLoop('task-2234', opts);
+    await run();
 
     assertSelfHealAttempted(logs);
     // The self-heal only bounces for validation-failed, not gate-failed:
@@ -260,18 +215,11 @@ test('task-2234 repro: review-loop self-heal does NOT bounce on gate-failed (exe
 
 test('task-2234 repro: infra/auth errors do NOT bounce (mission risk: narrow classification boundary)', async () => {
   await withTempGitRepo(async (root) => {
-    const transitions = [];
-
-    const { opts, logs, errors, exitCodes } = baseLoopHarness(root, {
-      performHandoffFn: async () => ({
-        ok: false,
-        error: 'Forgejo authentication failed: token expired'
-      }),
-      transitionTaskFn: (slug, status) => { transitions.push({ slug, status }); },
+    const { run, logs, errors, exitCodes, transitions } = baseLoopHarness(root, {
+      ok: false,
+      error: 'Forgejo authentication failed: token expired'
     });
-
-// @ts-expect-error -- TASK-2328: partial test double after ESM seam migration
-    await startReviewLoop('task-2234', opts);
+    await run();
 
     assertSelfHealAttempted(logs);
     assert.deepEqual(

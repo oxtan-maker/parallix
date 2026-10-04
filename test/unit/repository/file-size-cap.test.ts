@@ -51,7 +51,6 @@ const EXCEPTIONS: readonly string[] = [
   'src/adapters/review/review-artifacts.ts',
   'src/adapters/review/review-commands.ts',
   'src/adapters/review/review-events.ts',
-  'src/adapters/review/review-loop.ts',
   'src/adapters/review/review-state.ts',
   'src/adapters/sqlite/database-adapter.ts',
   'src/adapters/sqlite/importer.ts',

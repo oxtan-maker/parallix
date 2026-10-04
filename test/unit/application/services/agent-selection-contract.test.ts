@@ -329,10 +329,14 @@ describe("Agent selection telemetry outcomes", () => {
   });
 
   test('review flow emits skipped-blocked and launch-failed outcomes from production branches', () => {
-    const fallbackSource = fs.readFileSync(new URL('../../../../src/adapters/review/review-agent-fallback.ts', import.meta.url), 'utf8');
-    const loopSource = fs.readFileSync(new URL('../../../../src/adapters/review/review-loop.ts', import.meta.url), 'utf8');
-    assert.ok(fallbackSource.includes("recordAgentSelectionOutcome(log, 'skipped-blocked'"));
-    assert.ok(loopSource.includes("recordAgentSelectionOutcome(log, 'launch-failed'"));
+    // The review-loop ownership migrated to the application layer (task-2647), so
+    // the production branches that emit these outcomes now live there, not in the
+    // review adapter. The invariant is unchanged: the emitted outcomes come from
+    // the owning review-flow branches.
+    const fallbackSource = fs.readFileSync(new URL('../../../../src/application/review-loop/reviewer-selection.ts', import.meta.url), 'utf8');
+    const loopSource = fs.readFileSync(new URL('../../../../src/application/review-loop/reviewer-phase.ts', import.meta.url), 'utf8');
+    assert.ok(fallbackSource.includes("kind: 'agent-selection', outcome: 'skipped-blocked'"));
+    assert.ok(loopSource.includes("kind: 'agent-selection', outcome: 'launch-failed'"));
   });
 });
 

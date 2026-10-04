@@ -157,8 +157,8 @@ function composeWithRecordedLoop(store: FakeMissionStore) {
     undefined,
     null,
     {
-      handoffReviewLoop: (async (slug: string, options: Record<string, unknown>) => {
-        launches.push({ slug, options });
+      handoffReviewLoop: (async (request: { slug: string }) => {
+        launches.push({ slug: request.slug, options: request as Record<string, unknown> });
       }) as never,
     },
   );

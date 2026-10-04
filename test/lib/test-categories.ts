@@ -124,13 +124,10 @@ export const INTEGRATION_CI_TESTS: readonly string[] = [
   'integration/cli/startup-preflight.test.ts',
   'integration/stats/stats-backfill.test.ts',
   'integration/stats/stats.test.ts',
-  'integration/review/review-loop-resolution-fallback.test.ts',
   'integration/review/standalone-review-cycle.test.ts',
   'integration/stats/stats-current-week-completion.test.ts',
   'integration/agents/agent-exit-telemetry-classification.test.ts',
   'integration/review/review-state-durability.test.ts',
-  // TASK-2239 drives the review-loop lifecycle over a filesystem fixture.
-  'integration/review/review-response-relaunch.test.ts',
   'integration/test-harness/bootstrap-launcher-isolation.test.ts',
   'integration/review/review-validation-rebound.test.ts',
   'integration/test-harness/agent-smoke-capture-cleanup.test.ts',

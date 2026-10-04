@@ -12,17 +12,15 @@ import {
   COMPLETED_CONTROLS_MAX_CHARS,
   COMPLETED_CONTROLS_MAX_LINES,
 } from '../../../../src/adapters/review/review-prompts.js';
-import { reboundPreReviewFailure, gateFailureReason } from '../../../../src/adapters/review/review-loop.js';
+import { gateFailureReason } from '../../../../src/adapters/review/review-gate-handling.js';
+import { runReviewLoop } from '../../../../src/application/review-loop/review-loop.js';
+import { fakeReviewLoopPorts } from '../../../helpers/review-loop-ports.js';
 import { rebound } from '../../../../src/application/rebound-kernel.js';
 import { mkdtemp as registeredMkdtemp } from '../../../helpers/temp-dir.js';
 
 // Regression provenance: TASK-2317.
 describe("context compaction", { concurrency: false }, () => {
   const repoRoot = path.resolve(import.meta.dirname, '..', '..', '..', '..');
-  const reviewLoopSource = fs.readFileSync(
-    path.join(repoRoot, 'src/adapters/review/review-loop.ts'),
-    'utf8'
-  );
 
   test('task-2317: successful declared-gate instruction compacts only after success and retains failed-gate diagnostics', () => {
     // The compaction requirement is a lifecycle mechanic, so it lives in the
@@ -65,7 +63,7 @@ describe("context compaction", { concurrency: false }, () => {
 
   test('task-2317: repairable gate-error bounce compacts before repair and retains diagnostic plus retry state', async () => {
     let repairPrompt = '';
-    const result = await reboundPreReviewFailure('task-2317-bounce', repoRoot, gateFailureReason({
+    const result = await rebound(gateFailureReason({
       ok: false,
       area: 'workflow',
       command: './scripts/verify-local.sh all',
@@ -73,19 +71,11 @@ describe("context compaction", { concurrency: false }, () => {
       stdout: 'failing test: preserves diagnostic',
       stderr: 'assertion failed',
       error: 'verification gate failed with exit code 1',
-    }), 'codex', {
-      verifyFn: () => ({ ok: true }),
-  // @ts-expect-error -- TASK-2328: partial test double after ESM seam migration
-      readReviewStateFn: () => ({ round: 2, disposition: 'REQUEST_CHANGES', metadata: {} }),
-  // @ts-expect-error -- TASK-2328: partial test double after ESM seam migration
-      writeReviewStateFn: () => {},
-  // @ts-expect-error -- TASK-2328: partial test double after ESM seam migration
-      transitionTaskFn: async () => {},
-  // @ts-expect-error -- TASK-2328: partial test double after ESM seam migration
-      applyAgentFallbackFn: ({ original }: { original: string }) => original,
-  // @ts-expect-error -- TASK-2328: partial test double after ESM seam migration
-      startAgentFn: async (_step: string, options: { prompt: (agent: string) => string }) => {
-        repairPrompt = options.prompt('codex');
+    }), {
+      slug: 'task-2317-bounce', worktree: repoRoot, implementer: 'codex',
+      verify: () => ({ ok: true }),
+      startAgent: async (_step, options) => {
+        repairPrompt = (options.prompt as (agent: string) => string)('codex');
         return { agent: 'codex', result: { status: 0 } };
       },
       log: () => {}, error: () => {},
@@ -93,8 +83,6 @@ describe("context compaction", { concurrency: false }, () => {
 
     // TASK-2377.03: the bounce is reported fixed only after the kernel's verify
     // callback re-runs the failing check and passes.
-    assert.equal(result.bounced, true);
-    assert.equal(result.stranded, false);
     assert.equal(result.outcome, 'fixed');
     assert.match(repairPrompt, /Before repair work, compact the aborted working context/i);
     assert.match(repairPrompt, /failing test: preserves diagnostic/);
@@ -123,18 +111,26 @@ describe("context compaction", { concurrency: false }, () => {
     }
   });
 
-  test('task-2317: reviewer compaction follows successful rebase and baseline recapture before launch', () => {
-    const rebaseIndex = reviewLoopSource.indexOf('const rebaseResult = await rebaseBeforeReviewRoundFn');
-    // The baseline and its capture now live on the round's scratch record, so the
-    // order is asserted on the assignment rather than on one spelling of it.
-    const recaptureIndex = reviewLoopSource.search(
-      new RegExp('(?:round\\.)?reviewBaseline = (?:round\\.)?captureReviewBaseline\\(\\);'),
-    );
-    const launchIndex = reviewLoopSource.indexOf("reviewerLaunchResult = await startAgentFn('review'", recaptureIndex);
+  test('task-2317: reviewer compaction follows successful rebase and baseline recapture before launch', async () => {
+    const order: string[] = [];
+    let baseline = 'pre-rebase-baseline-sha';
+    const fake = fakeReviewLoopPorts({
+      preReview: {
+        rebase: async () => { order.push('rebase'); baseline = 'post-rebase-baseline-sha'; return { ok: true }; },
+        reviewBaseline: () => { order.push('baseline'); return baseline; },
+      },
+      agents: { launch: async launch => { order.push(`launch:${launch.role}`); return { agent: launch.agent, result: { status: 0 } }; } },
+      artifacts: { consumeReviewer: async () => ({ consumed: true, ok: true, reviewState: 'APPROVED' }) },
+    });
+    await runReviewLoop({ slug: 'task-2317-baseline', implementer: 'claude', reviewer: 'codex', maxAttempts: 1, skipHandoff: true }, fake.ports);
 
+    const rebaseIndex = order.indexOf('rebase');
+    const recaptureIndex = order.indexOf('baseline', rebaseIndex);
+    const launchIndex = order.indexOf('launch:reviewer');
     assert.ok(rebaseIndex >= 0, 'review loop must rebase before reviewer launch');
     assert.ok(recaptureIndex > rebaseIndex, 'review baseline must be recaptured after successful rebase');
     assert.ok(launchIndex > recaptureIndex, 'reviewer prompt must receive the post-rebase baseline');
+    assert.equal(fake.launches[0].prompt?.reviewBaseline, 'post-rebase-baseline-sha');
   });
 });
 

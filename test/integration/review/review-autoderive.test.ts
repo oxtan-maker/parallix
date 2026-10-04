@@ -1,7 +1,7 @@
 
 
 /**
- * Test for startReviewLoop auto-derivation from Backlog task.
+ * Test for review-loop implementer auto-derivation from the Backlog task.
  * Requires a temporary repo with a task file.
  */
 import test, { mock } from 'node:test';
@@ -10,11 +10,26 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import { execSync } from 'child_process';
-import { mockModule, installModuleMocks } from '../../lib/module-mock.js';
-const startReviewLoopModule = mockModule<typeof import('../../../src/adapters/review/review-loop.js')>('../../../src/adapters/review/review-loop.js', import.meta.url);
-await installModuleMocks();
+import { createReviewLoopPorts } from '../../../src/adapters/review/review-loop.js';
+import { runReviewLoop } from '../../../src/application/review-loop/review-loop.js';
+import type { ReviewLoopRequest } from '../../../src/application/ports/review-round.js';
 test.afterEach(() => mock.restoreAll());
-const { startReviewLoop } = startReviewLoopModule;
+
+/**
+ * The bound review-loop mechanisms over the temporary repository: the real
+ * Backlog task mirror reads the task file; reviewer routing is pinned.
+ */
+async function startReviewLoop(root: string, request: ReviewLoopRequest) {
+  const logs: string[] = [];
+  const errors: string[] = [];
+  const exits: number[] = [];
+  const ports = createReviewLoopPorts(request.slug, { worktree: root }, { log: line => logs.push(line), error: line => errors.push(line), exit: code => exits.push(code) });
+  await runReviewLoop(request, {
+    ...ports,
+    routing: { ...ports.routing, eligibleFamilies: () => ['codex', 'claude', 'gemini'], launcherStatus: agent => ({ supported: true, detail: agent }), nominate: () => 'claude' },
+  });
+  return { logs, errors, exits };
+}
 
 
 async function withTempRepo(fn) {
@@ -52,49 +67,15 @@ async function withTempRepo(fn) {
   }
 }
 
-async function captureExit(fn) {
-  const originalExit = process.exit;
-  const originalError = console.error;
-  const originalLog = console.log;
-  const errors = [];
-  const logs = [];
-  let exitCode = null;
-
-  process.exit = (code) => {
-    exitCode = code;
-    throw new Error(`process.exit(${code})`);
-  };
-  console.error = (...args) => errors.push(args.join(' '));
-  console.log = (...args) => logs.push(args.join(' '));
-
-  try {
-    await fn();
-  } catch (err) {
-    if (!err.message.startsWith('process.exit(')) throw err;
-  } finally {
-    process.exit = originalExit;
-    console.error = originalError;
-    console.log = originalLog;
-  }
-
-  return { exitCode, errors, logs };
-}
-
-test('startReviewLoop auto-derives implementer from backlog task', { concurrency: false }, async () => {
+test('review loop auto-derives implementer from backlog task', { concurrency: false }, async () => {
 
   await withTempRepo(async root => {
     const slug = 'task-999';
     const taskPath = path.join(root, 'backlog', 'tasks', `${slug} - test.md`);
     fs.writeFileSync(taskPath, '---\nid: TASK-999\nassignee: [claude]\n---\n');
 
-    const { exitCode, logs, errors } = await captureExit(() => {
-      // dryRun: true prevents it from trying to poll Forgejo or launch agents
-      // It should still fail eventually because there's no PR, but we want to see the auto-derive log
-      return startReviewLoop(slug, {
-        eligibleAgentsForStepFn: () => ['codex', 'claude', 'gemini'],
-        dryRun: true
-      });
-    });
+    // dryRun: true never polls a provider or launches agents.
+    const { logs } = await startReviewLoop(root, { slug, dryRun: true });
 
     // We expect it to reach the dryRun return point if auto-derivation worked
     assert.ok(
@@ -104,23 +85,14 @@ test('startReviewLoop auto-derives implementer from backlog task', { concurrency
   });
 });
 
-test('startReviewLoop prioritizes explicit implementer over backlog task', { concurrency: false }, async () => {
+test('review loop prioritizes explicit implementer over backlog task', { concurrency: false }, async () => {
 
   await withTempRepo(async root => {
     const slug = 'task-999';
     const taskPath = path.join(root, 'backlog', 'tasks', `${slug} - test.md`);
     fs.writeFileSync(taskPath, '---\nid: TASK-999\nassignee: [claude]\n---\n');
 
-    const { logs } = await captureExit(() => {
-      return startReviewLoop(slug, {
-        implementer: 'gemini',
-        eligibleAgentsForStepFn: () => ['codex', 'claude', 'gemini'],
-// @ts-expect-error -- TASK-2328: partial test double after ESM seam migration
-        workflowLauncherStatusFn: () => ({ supported: true, detail: 'mock' }),
-        selectAgentFn: () => 'claude',
-        dryRun: true
-      });
-    });
+    const { logs } = await startReviewLoop(root, { slug, implementer: 'gemini', dryRun: true });
 
     assert.ok(
       logs.some(l => l.includes('Implementer: gemini')),

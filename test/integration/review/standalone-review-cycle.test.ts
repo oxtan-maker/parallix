@@ -18,11 +18,15 @@ import os from 'os';
 import path from 'path';
 import childProcess from 'child_process';
 import { mockModule, installModuleMocks } from '../../lib/module-mock.js';
-const startReviewLoopModule = mockModule<typeof import('../../../src/adapters/review/review-loop.js')>('../../../src/adapters/review/review-loop.js', import.meta.url);
+import { runReviewLoop } from '../../../src/application/review-loop/review-loop.js';
+import { fakeReviewLoopPorts } from '../../helpers/review-loop-ports.js';
+const agentsModule = mockModule<typeof import('../../../src/adapters/agents/agents.js')>('../../../src/adapters/agents/agents.js', import.meta.url);
+const reviewAdapterModule = mockModule<typeof import('../../../src/adapters/review/review-adapter.js')>('../../../src/adapters/review/review-adapter.js', import.meta.url);
 const findMissionDirModule = mockModule<typeof import('../../../src/adapters/filesystem/mission-utils.js')>('../../../src/adapters/filesystem/mission-utils.js', import.meta.url);
+const reviewLoopModule = mockModule<typeof import('../../../src/adapters/review/review-loop.js')>('../../../src/adapters/review/review-loop.js', import.meta.url);
 await installModuleMocks();
 test.afterEach(() => mock.restoreAll());
-const { startReviewLoop } = startReviewLoopModule;
+const { createReviewLoopPorts } = reviewLoopModule;
 const { findMissionDir, missionDirForSlug, missionPathForSlug } = findMissionDirModule;
 
 const { mock } = test;
@@ -80,79 +84,57 @@ test('findMissionDir reads a mission contract from a non-standard --mission path
   });
 });
 
-function standaloneOpts(root, overrides = {}) {
-  const taskFile = path.join(root, 'task.md');
-  fs.writeFileSync(taskFile, '# task');
-
+/**
+ * A standalone review loop: the real review-loop mechanisms bound to a git repo
+ * with no review provider configured, with the reviewer/implementer outputs,
+ * the Backlog mirror and the pre-review checks faked.
+ */
+function standalone(root, options: { missionPath?: string; reviewer?: () => Promise<unknown>; implementer?: () => Promise<unknown> } = {}) {
   // Forgejo surfaces — must remain untouched in standalone mode (SC2).
-  const getPrStatusFn = mock.fn(() => ({ exists: false }));
-  const forgejoAvailableFn = mock.fn(async () => false);
-  const readTokenFn = mock.fn(() => 'should-not-be-read');
-  const pollForReviewFn = mock.fn(async () => 'TIMEOUT');
-  const pollForDispositionFn = mock.fn(async () => 'TIMEOUT');
-  const getLatestReviewForPrFn = mock.fn(async () => null);
-
-  const logs = [];
-  const errors = [];
-  const exitCodes = [];
-
-  const opts = {
-    slug: 'task-1272',
-    implementer: 'claude',
-    reviewer: 'codex',
-    worktree: root,
-    dryRun: false,
-    // Standalone: provider unset.
-    isForgejoReviewEnabledFn: () => false,
-    // Forgejo surfaces (asserted untouched).
-    getPrStatusFn,
-    forgejoAvailableFn,
-    readTokenFn,
-    pollForReviewFn,
-    pollForDispositionFn,
-    getLatestReviewForPrFn,
-    // Loop plumbing.
-    maybeUpdateGraphifyBeforeReviewFn: () => {},
-    resolveTaskFileFn: () => ({ ok: true, taskFile }),
-    getTaskStatusFn: () => 'review',
-    transitionTaskFn: () => {},
-    transitionVirtualFn: () => {},
-    toVirtualFn: (s) => s,
-    workflowLauncherStatusFn: () => ({ supported: true }),
-    eligibleAgentsForStepFn: () => ['codex', 'claude', 'gemini', 'custom'],
-    // Provider-disabled --start bakes the handoff transition inline (MISSION.md
-    // SC1/SC1b); the retired standalone `px handoff` no longer exists, so the
-    // loop calls the performHandoffFn seam. Standalone mode has no PR, so the
-    // handoff is a no-op transition here.
-    performHandoffFn: async () => ({ ok: true }),
-    enforceTaskAssigneeFn: () => true,
-    applyAgentFallbackFn: (a) => a.original,
-    readReviewStateFn: () => null,
-    writeReviewStateFn: () => {},
-    startAgentFn: async () => ({ agent: null }),
-    rebaseBeforeReviewRoundFn: async () => ({ ok: true, sharedFileConflicts: false }),
-    buildCompactReviewPromptFn: () => 'review prompt',
-    buildCompactActOnReviewPromptFn: () => 'act-on-review prompt',
-    log: (m) => logs.push(m),
-    error: (m) => errors.push(m),
-    exit: (c) => exitCodes.push(c),
-    ...overrides
+  const forgejo = {
+    getPrStatus: mock.method(reviewAdapterModule, 'getPrStatus', () => ({ exists: false })),
+    providerAvailable: mock.method(reviewAdapterModule, 'providerAvailable', async () => false),
+    readToken: mock.method(reviewAdapterModule, 'readToken', () => 'should-not-be-read'),
+    getLatestReviewForPr: mock.method(reviewAdapterModule, 'getLatestReviewForPr', async () => null),
   };
-  return { opts, logs, errors, exitCodes, mocks: { getPrStatusFn, forgejoAvailableFn, readTokenFn, pollForReviewFn, pollForDispositionFn, getLatestReviewForPrFn } };
+  const bound = createReviewLoopPorts('task-1272', { worktree: root, missionPath: options.missionPath }, { log: () => {}, error: () => {} });
+  let head = 0;
+  const fake = fakeReviewLoopPorts({
+    slug: 'task-1272',
+    worktree: root,
+    handoff: { handoff: async () => ({ ok: true }) },
+    routing: { eligibleFamilies: () => ['codex', 'claude', 'gemini', 'custom'] },
+    artifacts: {
+      ...(options.reviewer ? { consumeReviewer: options.reviewer as never } : {}),
+      ...(options.implementer ? { consumeImplementer: options.implementer as never } : {}),
+    },
+    // The implementer commits a revised tree between rounds.
+    preReview: { head: () => `head-${++head}` },
+  });
+  const ports = { ...fake.ports, provider: bound.provider, agents: bound.agents };
+  return { fake, ports, forgejo };
 }
 
-function assertNoForgejoApiCalls(mocks) {
-  assert.equal(mocks.getPrStatusFn.mock.callCount(), 0, 'no PR status check in standalone mode');
-  assert.equal(mocks.forgejoAvailableFn.mock.callCount(), 0, 'no Forgejo availability probe in standalone mode');
-  assert.equal(mocks.readTokenFn.mock.callCount(), 0, 'no Forgejo token read in standalone mode');
-  assert.equal(mocks.pollForReviewFn.mock.callCount(), 0, 'no Forgejo review poll in standalone mode');
-  assert.equal(mocks.pollForDispositionFn.mock.callCount(), 0, 'no Forgejo disposition poll in standalone mode');
-  assert.equal(mocks.getLatestReviewForPrFn.mock.callCount(), 0, 'no Forgejo review fetch in standalone mode');
+function assertNoForgejoApiCalls(ports, forgejo) {
+  assert.equal(ports.provider, null, 'standalone mode binds no review provider');
+  for (const [name, fn] of Object.entries(forgejo)) {
+    assert.equal((fn as any).mock.callCount(), 0, `no Forgejo ${name} call in standalone mode`);
+  }
 }
 
-// SC7 integration: startReviewLoop must thread a --mission override into the
+/** Capture the rendered reviewer prompt from the real agent port. */
+function capturePrompt() {
+  const captured: { prompt: string | null } = { prompt: null };
+  mock.method(agentsModule, 'startAgent', async (step, agentOpts) => {
+    if (step === 'review' && typeof agentOpts.prompt === 'function') { captured.prompt = agentOpts.prompt('codex'); }
+    return { agent: agentOpts.agent };
+  });
+  return captured;
+}
+
+// SC7 integration: the review loop must thread a --mission override into the
 // launched reviewer/implementer prompts (not just findMissionDir in isolation).
-test('startReviewLoop threads --mission override into the launched reviewer prompt', async () => {
+test('review loop threads --mission override into the launched reviewer prompt', async () => {
   await withTempGitRepo(async (root) => {
     // Mission contract at a non-standard location (outside docs/missions/).
     const customDir = path.join(root, 'review-pack');
@@ -163,25 +145,10 @@ test('startReviewLoop threads --mission override into the launched reviewer prom
     // declared-gate list in the completed-controls block.
     fs.writeFileSync(customMission, '# Mission: custom standalone contract\n\n## Gates\n- `npm run override-gate`\n');
 
-    let capturedPrompt = null;
-    const { opts } = standaloneOpts(root, {
-      missionPath: customMission,
-      // Use the REAL prompt builder (undefined => destructuring default) so the
-      // captured prompt reflects actual {{missionPath}} substitution.
-      buildCompactReviewPromptFn: undefined,
-      // Force the reviewer prompt callback to execute so we can capture it,
-      // then approve immediately so the loop terminates after one launch.
-      startAgentFn: async (step, agentOpts) => {
-        if (step === 'review' && typeof agentOpts.prompt === 'function') {
-          capturedPrompt = agentOpts.prompt('codex');
-        }
-        return { agent: 'codex' };
-      },
-      consumeReviewerArtifactsFn: async () => ({ consumed: true, ok: true, reviewState: 'APPROVED' })
-    });
-
-// @ts-expect-error -- TASK-2328: partial test double after ESM seam migration
-    await startReviewLoop('task-1272', opts);
+    const captured = capturePrompt();
+    const { ports } = standalone(root, { missionPath: customMission, reviewer: async () => ({ consumed: true, ok: true, reviewState: 'APPROVED' }) });
+    await runReviewLoop({ slug: 'task-1272', implementer: 'claude', reviewer: 'codex' }, ports);
+    const capturedPrompt = captured.prompt;
 
     assert.ok(capturedPrompt, 'reviewer prompt should have been built');
     assert.ok(
@@ -197,26 +164,15 @@ test('startReviewLoop threads --mission override into the launched reviewer prom
 });
 
 // Negative control: absent --mission, the harness resolves the slug-derived path.
-test('startReviewLoop uses the slug-derived mission path when --mission is absent', async () => {
+test('review loop uses the slug-derived mission path when --mission is absent', async () => {
   await withTempGitRepo(async (root) => {
     const derived = missionPathForSlug(root, 'task-1272');
     fs.mkdirSync(path.dirname(derived), { recursive: true });
     fs.writeFileSync(derived, '# Mission: derived\n\n## Gates\n- `npm run derived-gate`\n');
-    let capturedPrompt = null;
-    const { opts } = standaloneOpts(root, {
-      // no missionPath; use the REAL prompt builder.
-      buildCompactReviewPromptFn: undefined,
-      startAgentFn: async (step, agentOpts) => {
-        if (step === 'review' && typeof agentOpts.prompt === 'function') {
-          capturedPrompt = agentOpts.prompt('codex');
-        }
-        return { agent: 'codex' };
-      },
-      consumeReviewerArtifactsFn: async () => ({ consumed: true, ok: true, reviewState: 'APPROVED' })
-    });
-
-// @ts-expect-error -- TASK-2328: partial test double after ESM seam migration
-    await startReviewLoop('task-1272', opts);
+    const captured = capturePrompt();
+    const { ports } = standalone(root, { reviewer: async () => ({ consumed: true, ok: true, reviewState: 'APPROVED' }) });
+    await runReviewLoop({ slug: 'task-1272', implementer: 'claude', reviewer: 'codex' }, ports);
+    const capturedPrompt = captured.prompt;
 
     assert.ok(capturedPrompt, 'reviewer prompt should have been built');
     assert.ok(
@@ -230,16 +186,13 @@ test('startReviewLoop uses the slug-derived mission path when --mission is absen
 // SC1 + SC2: first reviewer round reaching APPROVED via artifacts, no Forgejo calls.
 test('standalone review loop completes a first round to APPROVED with no Forgejo calls', async () => {
   await withTempGitRepo(async (root) => {
-    const { opts, logs, errors, exitCodes, mocks } = standaloneOpts(root, {
-      // SC4: the disabled-provider "Forgejo validation skipped" line is demoted
-      // to verbose by default (MISSION.md SC criterion 4). Reveal it here to
-      // prove no Forgejo calls while keeping default output SC4-clean.
-      verbose: true,
-      consumeReviewerArtifactsFn: async () => ({ consumed: true, ok: true, reviewState: 'APPROVED' })
-    });
-
-// @ts-expect-error -- TASK-2328: partial test double after ESM seam migration
-    await startReviewLoop('task-1272', opts);
+    capturePrompt();
+    const { fake, ports, forgejo } = standalone(root, { reviewer: async () => ({ consumed: true, ok: true, reviewState: 'APPROVED' }) });
+    // SC4: the disabled-provider "Forgejo validation skipped" line is demoted
+    // to verbose by default; reveal it here to prove no Forgejo calls.
+    await runReviewLoop({ slug: 'task-1272', implementer: 'claude', reviewer: 'codex', verbose: true }, ports);
+    const { logs, errors, exits: exitCodes } = fake;
+    const mocks = forgejo;
 
     assert.deepEqual(exitCodes, [], `loop must not exit(1); errors=${errors.join(' | ')}`);
     assert.ok(logs.some(l => /reviewer approved/.test(l)), 'should stop on reviewer approval');
@@ -247,7 +200,7 @@ test('standalone review loop completes a first round to APPROVED with no Forgejo
       logs.some(l => /Forgejo validation skipped/.test(l)),
       'should log that Forgejo validation was skipped'
     );
-    assertNoForgejoApiCalls(mocks);
+    assertNoForgejoApiCalls(ports, mocks);
   });
 });
 
@@ -256,23 +209,16 @@ test('standalone loop survives REQUEST_CHANGES -> CHANGES_MADE -> APPROVED acros
   await withTempGitRepo(async (root) => {
     const reviewOutcomes = ['REQUEST_CHANGES', 'APPROVED'];
     let reviewIdx = 0;
-    const { opts, errors, exitCodes, mocks } = standaloneOpts(root, {
-      consumeReviewerArtifactsFn: async () => ({
-        consumed: true, ok: true, reviewState: reviewOutcomes[reviewIdx++]
-      }),
-      consumeImplementerArtifactsFn: async () => ({
-        consumed: true, ok: true, disposition: 'CHANGES_MADE'
-      }),
-      // The implementer actually commits a revised tree between rounds, so the
-      // criterion-8 no-new-revision guard does not stop the round-trip.
-      hasNewCommittedChangeFn: () => true
+    mock.method(agentsModule, 'startAgent', async (_step, agentOpts) => ({ agent: agentOpts.agent }));
+    const { fake, ports, forgejo } = standalone(root, {
+      reviewer: async () => ({ consumed: true, ok: true, reviewState: reviewOutcomes[reviewIdx++] }),
+      implementer: async () => ({ consumed: true, ok: true, disposition: 'CHANGES_MADE' }),
     });
-
-// @ts-expect-error -- TASK-2328: partial test double after ESM seam migration
-    await startReviewLoop('task-1272', opts);
+    await runReviewLoop({ slug: 'task-1272', implementer: 'claude', reviewer: 'codex' }, ports);
+    const { errors, exits: exitCodes } = fake;
 
     assert.deepEqual(exitCodes, [], `multi-round loop must not exit(1); errors=${errors.join(' | ')}`);
     assert.equal(reviewIdx, 2, 'reviewer artifacts consumed across two rounds');
-    assertNoForgejoApiCalls(mocks);
+    assertNoForgejoApiCalls(ports, forgejo);
   });
 });
