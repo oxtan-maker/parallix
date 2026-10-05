@@ -128,6 +128,48 @@ describe("rebound active mission context", () => {
     } as never);
   });
 
+  test('TASK-2642: rebound fallback persists the live current round, not a stale snapshot round', async () => {
+    // The repair advanced the live aggregate to round 5, but the integration
+    // context snapshot still carries round 2. Persisting the stale round below
+    // the current round trips the TASK-2385 stale-flattened-write guard and
+    // drops the fallback identity write. The snapshot must be aligned to the
+    // live current round before it is handed to the fallback.
+    const liveReview = { kind: 'found', status: 'integration', repositoryId: 'repo', mission: { status: 'integration', repositoryId: 'repo', review: { rounds: [{ number: 5, phase: 'fixing', disposition: null, implementer: 'claude', reviewer: 'codex' }] } } };
+    const staleSnapshot = { implementer: 'claude', reviewer: 'codex', phase: 'approved', round: 2 };
+
+    const { runRequiredLocalGates } = createIntegrationGateStep({
+      gates: {
+        resolveIntegrationVerificationWorktree: () => '/mission-worktree',
+        captureFinalIntegrationTree: () => ({ ok: true, rootDir: '/mission-worktree', commit: 'c', tree: 't' }),
+        loadPhaseGates: () => [{ key: 'required', command: 'false', order: 1 }],
+        loadRequirePreIntegration: () => false,
+        runPhaseGates: async () => ({ ok: false, skipped: false, cancelled: false, failedGate: { key: 'required' }, error: 'red' }),
+      },
+      landing: { createAbort: () => new Error('abort') },
+      verification: { formatVerificationCommand: () => 'npm test' },
+    } as never);
+
+    await runRequiredLocalGates({
+      slug, context: { baseWorktree: '/base', taskAssignee: 'claude', branch: `mission/${slug}`, approval: {}, configuredReviewer: null, task: taskResolution, reviewState: staleSnapshot },
+      missionLoad: liveReview, missionServices: { store: missionStore, lifecycle: { transition: async () => ({ status: 'completed' }) } },
+      dryRun: false, noIntegrationGates: false, realAgent: null, realAgentModel: null,
+      seams: {
+        startAgentFn: async () => ({ agent: 'codex', result: { status: 0 } }), transitionTaskFn: () => true,
+        applyAgentFallbackFn: (options: Record<string, unknown>) => {
+          const state = options.state as { round: number; implementer: string };
+          assert.notEqual(state, staleSnapshot, 'a aligned copy is passed, not the stale snapshot');
+          assert.equal(state.round, 5, 'the fallback persists the live current round');
+          assert.equal(state.implementer, 'claude', 'the snapshot identity is preserved for the fallback to override');
+          return 'codex';
+        },
+        routeIntegrationGateFailureFn: async (options: Record<string, any>) => {
+          await options.applyAgentFallbackFn({ original: 'claude', launchResult: { agent: 'codex' } });
+          return { route: 'fixed', rebounds: 1 };
+        },
+      },
+    } as never);
+  });
+
   test('TASK-2603: squash-hook rebound binds the same active mission context before persisting a fallback implementer', async () => {
     let commits = 0;
     const { squashAndLand } = createSquashLanding({

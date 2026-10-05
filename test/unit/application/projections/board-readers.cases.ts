@@ -211,7 +211,10 @@ test('BoardProjectionBuilder preserves populated multi-round review cards from a
     ],
     intervention: null,
     stageLaunches: [],
-    reviewEvents: [{ position: 1, eventType: 'blocked_publication', roundNumber: 1, phase: 'approved', actor: 'workflow', content: '', disposition: null, verdict: null, itemDispositions: null, blockedReason: 'external-formal-approval-owed', followUpReference: null, createdAt: '2026-08-23T09:01:00.000Z' }],
+    reviewEvents: [
+      { position: 1, eventType: 'blocked_publication', roundNumber: 1, phase: 'approved', actor: 'workflow', content: '', disposition: null, verdict: null, itemDispositions: null, blockedReason: 'external-formal-approval-owed', followUpReference: null, createdAt: '2026-08-23T09:01:00.000Z' },
+      { position: 2, eventType: 'human_note', roundNumber: 1, phase: 'fixing', actor: 'operator', content: 'Keep the correction.', disposition: null, verdict: null, itemDispositions: null, blockedReason: null, followUpReference: 'forgejo:review:42', createdAt: '2026-08-23T09:02:00.000Z' },
+    ],
   };
   const approvedSubject = subject(ids[3], 'approved-revision', true);
   const approvedReview: Review = {
@@ -247,6 +250,7 @@ test('BoardProjectionBuilder preserves populated multi-round review cards from a
   assert.equal(cards.get(ids[1])?.reviewHistory[0].reviewer, agentFamily('codex'));
   assert.equal(cards.get(ids[1])?.reviewHistory[0].implementer, agentFamily('custom'));
   assert.equal(cards.get(ids[2])?.reviewHistory[0].findingSummaries[0], 'Broken projection');
+  assert.equal(cards.get(ids[2])?.reviewHistory[0].findingSummaries[2], 'Human feedback from operator: Keep the correction.');
   assert.equal(cards.get(ids[2])?.reviewHistory[0].disposition, 'CHANGES_MADE');
   assert.equal(cards.get(ids[2])?.approvalOwed, true);
   assert.match(cards.get(ids[2])?.reviewHistory[0].fixes[0] ?? '', /Covered by regression/);

@@ -64,6 +64,27 @@ function approvedRevisionOf(missionLoad: any): string | null {
   return revision ? String(revision) : null;
 }
 
+/**
+ * The flattened review-state snapshot the integration context read at build time.
+ *
+ * TASK-2642: the rebound repair advances the live review aggregate to a new
+ * current round, but this snapshot is read once at context-build and keeps its
+ * original round. Persisting a round lower than the aggregate's current round
+ * trips the stale-flattened-write guard (TASK-2385) and drops the repair's
+ * identity write. Align the snapshot to the live current round so the fallback
+ * lands on the round the repair is actually on. When no live aggregate is
+ * available the snapshot is returned unchanged.
+ */
+function currentRepairState(missionLoad: any, snapshot: Record<string, unknown> | null | undefined): Record<string, unknown> {
+  const review = missionLoad?.kind === 'found' ? missionLoad.mission?.review : null;
+  const currentNumber = typeof review?.rounds?.at(-1)?.number === 'number' ? review.rounds.at(-1).number : null;
+  const snapshotRound = typeof snapshot?.round === 'number' ? snapshot.round : null;
+  if (currentNumber !== null && (snapshotRound === null || snapshotRound < currentNumber)) {
+    return { ...snapshot, round: currentNumber };
+  }
+  return snapshot ?? {};
+}
+
 /** Output kept with a withdrawn approval; enough to diagnose, bounded for storage. */
 const GATE_LOG_TAIL_CHARS = 4000;
 
@@ -302,7 +323,7 @@ export function createIntegrationGateStep({ gates, landing, verification }: Inte
         role: 'implementer',
         slug,
         worktree: checkout,
-        state: context.reviewState ?? {},
+        state: currentRepairState(missionLoad, context.reviewState),
         taskResolution: context.task,
         missionStore: missionServices.store,
       }),

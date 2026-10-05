@@ -12,6 +12,11 @@ function familyFrom(value: unknown, fallback: AgentFamily): AgentFamily {
 
 function metadataFromReview(review: Review): Record<string, unknown> {
   const metadata: Record<string, unknown> = {};
+  const feedbackSources = review.reviewEvents
+    .filter(event => event.eventType === 'human_note' && event.followUpReference?.startsWith('forgejo:'))
+    .map(event => event.followUpReference!.split(';', 1)[0])
+    .filter((source): source is string => Boolean(source));
+  if (feedbackSources.length > 0) { metadata.humanFeedbackSources = [...new Set(feedbackSources)]; }
   if (review.stageLaunches.length > 0) {
     metadata.recordedStageLaunches = Object.fromEntries(
       review.stageLaunches.map(window => [window.stageKey, [...window.fingerprints]]),

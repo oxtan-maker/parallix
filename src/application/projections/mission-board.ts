@@ -229,6 +229,9 @@ export function projectReviewHistory(review: Review | null): readonly ReviewRoun
     const outcome = [...events].reverse().find((event) => event.eventType === 'reviewer_outcome');
     const findings = [...events].reverse().find((event) => event.eventType === 'reviewer_findings');
     const summary = [...events].reverse().find((event) => event.eventType === 'implementer_round_summary');
+    const humanNotes = events
+      .filter((event) => event.eventType === 'human_note' && event.content.trim())
+      .map((event) => `Human feedback from ${event.actor ?? 'operator'}: ${event.content}`);
     const resolutions = round.response?.resolutions;
     const hasResolutions = resolutions && resolutions.length > 0;
 
@@ -254,8 +257,8 @@ export function projectReviewHistory(review: Review | null): readonly ReviewRoun
         : round.disposition,
       comment: round.decision?.comment ?? outcomeComment(outcome?.content ?? ''),
       findingSummaries: round.decision?.kind === 'changes-requested'
-        ? round.decision.findings.map((finding) => finding.summary)
-        : findings ? findingSummaries(findings.content) : [],
+        ? [...round.decision.findings.map((finding) => finding.summary), ...humanNotes]
+        : findings ? [...findingSummaries(findings.content), ...humanNotes] : humanNotes,
       pushbacks: hasResolutions
         ? resolutions.filter((r) => r.kind === 'disputed')
             .map((r) => `${r.findingId}: ${r.rationale}`)

@@ -9,6 +9,7 @@
  */
 import * as fs from 'fs';
 import * as path from 'path';
+import * as crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import * as fmt from '../../application/presentation/cli-format.js';
 import { renderReviewLoopEvent } from './review-loop-presentation.js';
@@ -17,7 +18,7 @@ import { findMissionDir, resolveWorktree, missionBranchName, getPrimaryBranch } 
 import type { PullRequestReference } from '../../domain/review.js';
 import { resolveTaskFile, getTaskImplementer, getTaskStatus, enforceTaskAssignee, transitionTask, reportTaskResolution } from '../backlog/backlog.js';
 import { transitionVirtual } from '../config/state-map.js';
-import { getPrStatus, readToken, getLatestReviewForPr, providerAvailable, resolveReviewUser, isProviderEnabled } from './review-adapter.js';
+import { getPrStatus, readToken, getLatestReviewForPr, getComments, providerAvailable, resolveReviewUser, isProviderEnabled } from './review-adapter.js';
 import { buildAutonomousReviewMatrix, formatMatrixSummary } from '../agents/runtime-matrix.js';
 import { buildReviewPrompt, buildActOnReviewPrompt, buildCompactReviewPrompt, buildCompactActOnReviewPrompt } from './review-prompts.js';
 import { ReviewState, readReviewState, writeReviewState, resetReviewState, persistReviewStateOrThrow, assertReviewStatePersisted } from './review-state.js';
@@ -28,6 +29,7 @@ import type {
   ReviewLoopState, ReviewPromptFacts, ReviewProviderPort, StartReviewRound,
 } from '../../application/ports/review-round.js';
 import { workflowLauncherStatus, startAgent, eligibleAgentsForStep, selectAgent } from '../agents/agents.js';
+import { WORKFLOW_AGENT_NAMES } from '../agents/agent-family-names.js';
 import { rebaseBeforeReviewRound } from './rebase.js';
 import { packageRoot } from '../filesystem/package-root.js';
 import { resolveAgentModel } from '../config/product-config.js';
@@ -37,6 +39,7 @@ import { pushReviewRef, isStaleInfoPushRejection, fetchReviewBranch } from '../f
 import { CONTINUE_SKIP_CHECK_TIMEOUT_MS, runPreReviewGate, gateFailureReason, hookFailureReason } from './review-gate-handling.js';
 import { persistNormalizedPhaseRepair, recordStageStatsSafe, stageLaunchSinceMs, maybeUpdateGraphifyBeforeReview } from './review-agent-fallback.js';
 import { openReviewRound } from './review-round-open.js';
+import { createEvent, VALID_EVENT_TYPES } from './review-events.js';
 
 const MODULE_DIR = path.dirname(fileURLToPath(import.meta.url));
 
@@ -55,6 +58,11 @@ export interface ReviewLoopBindings {
   readonly log?: (_msg: string) => void;
   readonly error?: (_msg: string) => void;
   readonly exit?: (_code: number) => void;
+  /** Provider seams retained here so adapter contracts can exercise normalization. */
+  readonly getComments?: typeof getComments;
+  readonly readToken?: typeof readToken;
+  readonly isProviderEnabled?: typeof isProviderEnabled;
+  readonly createEvent?: typeof createEvent;
 }
 
 /** The per-request knobs the mechanisms read. */
@@ -65,6 +73,40 @@ export type ReviewLoopTarget = Partial<Pick<StartReviewRound, 'focus' | 'verbose
  * worktree; this process-local set keeps one effective loop owner per key.
  */
 const activeReviewControllers = new Set<string>();
+
+type ForgejoFeedbackComment = {
+  readonly kind?: string;
+  readonly id?: string;
+  readonly user?: string;
+  readonly isBot?: boolean;
+  readonly created?: string;
+  readonly updated?: string;
+  readonly body?: string;
+  readonly state?: string;
+  readonly dismissed?: boolean;
+  readonly location?: string;
+  readonly reviewId?: string;
+};
+
+function isHumanAuthor(comment: ForgejoFeedbackComment, configuredAgents: ReadonlySet<string>): boolean {
+  const author = (comment.user ?? '').trim().toLowerCase();
+  return Boolean(author) && !comment.isBot && !configuredAgents.has(author) && !author.endsWith('[bot]');
+}
+
+function feedbackSource(comment: ForgejoFeedbackComment, index: number): string {
+  const id = comment.id?.trim() || `legacy-${index}`;
+  const revision = comment.updated?.trim() || comment.created?.trim() || '';
+  const bodyHash = crypto.createHash('sha256').update(comment.body ?? '').digest('hex').slice(0, 16);
+  return `forgejo:${comment.kind ?? 'comment'}:${id}:${revision}:${bodyHash}:${comment.location ?? ''}`;
+}
+
+function isRequestChanges(comment: ForgejoFeedbackComment): boolean {
+  return (comment.state ?? '').trim().toUpperCase() === 'REQUEST_CHANGES';
+}
+
+function isApproval(comment: ForgejoFeedbackComment): boolean {
+  return comment.kind === 'review' && (comment.state ?? '').trim().toUpperCase() === 'APPROVED';
+}
 
 /** The explicit --mission override wins over the slug-derived mission location. */
 function resolveEffectiveMissionPath(missionPath: string | undefined, missionDir: string | null, log: (_msg: string) => void): string | null {
@@ -158,8 +200,8 @@ function providerPort(slug: string, branch: string, worktree: string, target: Re
 function agentPort(slug: string, branch: string, worktree: string, missionPath: string | undefined, target: ReviewLoopTarget, bindings: ReviewLoopBindings, writeState: typeof writeReviewState, log: (_msg: string) => void, error: (_msg: string) => void): ReviewAgentPort {
   const focus = target.focus ?? 'all';
   const rolePrompt = (role: ReviewAgentLaunch['role'], facts: ReviewPromptFacts, actual: string): string => role === 'reviewer'
-    ? buildCompactReviewPrompt({ reviewer: facts.reviewer, branch, implementer: facts.implementer, focus, attempt: facts.attempt, repoRoot: worktree, missionPath, actualReviewer: actual, reviewBaseline: facts.reviewBaseline, integrationRepair: facts.integrationRepair } as never)
-    : buildCompactActOnReviewPrompt({ implementer: facts.implementer, branch, attempt: facts.attempt, reviewOutcome: facts.reviewOutcome, repoRoot: worktree, missionPath, actualImplementer: actual, reviewBaseline: facts.reviewBaseline } as never);
+    ? `${buildCompactReviewPrompt({ reviewer: facts.reviewer, branch, implementer: facts.implementer, focus, attempt: facts.attempt, repoRoot: worktree, missionPath, actualReviewer: actual, reviewBaseline: facts.reviewBaseline, integrationRepair: facts.integrationRepair } as never)}${facts.humanFeedback ? `\n\nHuman review correction (authoritative): ${facts.humanFeedback}` : ''}`
+    : `${buildCompactActOnReviewPrompt({ implementer: facts.implementer, branch, attempt: facts.attempt, reviewOutcome: facts.reviewOutcome, repoRoot: worktree, missionPath, actualImplementer: actual, reviewBaseline: facts.reviewBaseline } as never)}${facts.humanFeedback ? `\n\nHuman review correction (authoritative): ${facts.humanFeedback}` : ''}`;
   return {
     async launch({ role, agent, exclude, prompt, recovery }) {
       const phase = role === 'reviewer' ? 'review' : 'review-response';
@@ -233,7 +275,10 @@ export function createReviewLoopPorts(slug: string, target: ReviewLoopTarget, bi
   const readState = bindings.readReviewState ?? readReviewState;
   const writeState = bindings.writeReviewState ?? writeReviewState;
   const missionPath = resolveEffectiveMissionPath(target.missionPath, findMissionDir(slug, worktree, { missionPath: target.missionPath }), log) || undefined;
-  const providerEnabled = isProviderEnabled(worktree);
+  const providerEnabled = (bindings.isProviderEnabled ?? isProviderEnabled)(worktree);
+  const fetchComments = bindings.getComments ?? getComments;
+  const tokenFor = bindings.readToken ?? readToken;
+  const recordHumanNote = bindings.createEvent ?? createEvent;
   const artifactDir = resolveArtifactDir(worktree);
   const task = resolveTaskFile(slug, worktree);
   const key = `${path.resolve(worktree)}\u0000${slug}`;
@@ -271,6 +316,63 @@ export function createReviewLoopPorts(slug: string, target: ReviewLoopTarget, bi
       ? { handoff: async implementer => await bindings.performHandoffFn!(slug, { forgejoUser: implementer, worktree, recoverGateFailure: true }) as HandoffFacts }
       : null,
     provider: providerEnabled ? providerPort(slug, branch, worktree, target, log, error) : null,
+    humanFeedback: {
+      async reconcile(state) {
+        if (!providerEnabled) { return null; }
+        const identity = state.reviewer || state.implementer;
+        const token = identity ? tokenFor(identity, { rootDir: worktree }) : null;
+        if (!token) { return null; }
+        const comments = await fetchComments(branch, token, { rootDir: worktree });
+        if (!Array.isArray(comments)) { return null; }
+        const seen = new Set(Array.isArray(state.metadata.humanFeedbackSources) ? state.metadata.humanFeedbackSources as string[] : []);
+        const configuredAgents = new Set([...WORKFLOW_AGENT_NAMES, state.reviewer ?? '', state.implementer ?? ''].map(value => value.toLowerCase()).filter(Boolean));
+        const normalized = comments.map((raw, index) => ({ comment: raw as ForgejoFeedbackComment, index }));
+        // Only human review bodies and their inline comments are operator
+        // corrections. Issue prose is discussion, never a workflow command.
+        const feedback = normalized
+          .filter(({ comment }) => (comment.kind === 'review' || comment.kind === 'inline-comment') && isHumanAuthor(comment, configuredAgents))
+          .map(({ comment, index }) => {
+            const requested = isRequestChanges(comment);
+            return {
+              source: feedbackSource(comment, index), author: comment.user || 'unknown',
+              state: comment.dismissed ? 'dismissed' as const : 'current' as const,
+              disposition: requested ? 'REQUEST_CHANGES' as const : null,
+              approval: isApproval(comment), reason: comment.body || '',
+              reviewId: comment.kind === 'inline-comment' ? comment.reviewId || comment.id || String(index) : comment.id || String(index),
+              findings: requested ? [{ id: `human-${comment.id || index + 1}`, summary: comment.body || 'Operator requested changes' }] : [],
+            };
+          });
+        const newFeedback = feedback.filter(item => !seen.has(item.source));
+        const consumedSources = new Set([...seen, ...newFeedback.map(item => item.source)]);
+        state.metadata.humanFeedbackSources = [...consumedSources];
+        state.metadata.humanFeedbackHistory = feedback.map(item => ({ source: item.source, author: item.author, state: item.state, disposition: item.disposition, reason: item.reason }));
+        for (const item of newFeedback) {
+          await recordHumanNote(slug, VALID_EVENT_TYPES.HUMAN_NOTE, {
+            content: item.reason, actor: item.author, round: state.round, phase: state.phase,
+            followUpReference: `${item.source}; state=${item.state}`,
+          }, { worktree, skipGit: true, missionStore, log, error });
+        }
+        const currentRequest = [...newFeedback].reverse().find(item => item.disposition === 'REQUEST_CHANGES' && item.state === 'current');
+        if (currentRequest) {
+          const related = newFeedback.filter(item => item.disposition === 'REQUEST_CHANGES' && item.state === 'current' && item.reviewId === currentRequest.reviewId);
+          return { ...currentRequest, reason: related.map(item => item.reason).filter(Boolean).join('\n'), findings: related.flatMap(item => item.findings) };
+        }
+        // A dismissal is relevant only when the newest review decision is the
+        // approval that would otherwise authorize this continuation. Older or
+        // dismissed change requests are historical facts, not permanent stops.
+        const latestReview = [...normalized].reverse().find(({ comment }) => comment.kind === 'review');
+        if (latestReview && latestReview.comment.dismissed && isApproval(latestReview.comment) && isHumanAuthor(latestReview.comment, configuredAgents)) {
+          // A dismissed approval remains the latest provider decision even
+          // after its audit note has been consumed. It must stop this pass
+          // every time; source de-duplication controls only event recording.
+          return {
+            source: feedbackSource(latestReview.comment, latestReview.index), author: latestReview.comment.user || 'unknown',
+            state: 'dismissed', disposition: null, approval: true, reason: latestReview.comment.body || '', findings: [],
+          };
+        }
+        return null;
+      },
+    },
     routing: {
       eligibleFamilies: () => eligibleAgentsForStep('review'),
       launcherStatus: agent => workflowLauncherStatus(agent),

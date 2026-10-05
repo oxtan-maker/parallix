@@ -1,8 +1,8 @@
 ---
 id: TASK-2641
 title: Human review must reach the review loop and supersede stale agent approval
-status: backlog
-assignee: []
+status: done
+assignee: [codex]
 created_date: '2026-10-03 16:49'
 labels:
   - bug

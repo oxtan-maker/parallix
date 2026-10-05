@@ -8,6 +8,8 @@ import { fileURLToPath } from 'node:url';
 import { setCommandPathProbe, setLauncherHealthProbe } from '../src/adapters/agents/launcher-probes.js';
 import { startDefaultDbGuard } from './lib/default-db-guard.js';
 import { trackWorkerTempDirs } from './lib/track-worker-temp-dirs.mjs';
+// Binds the recovery-store filesystem for every test process (TASK-2642).
+import './lib/bootstrap-recovery-evidence-fs.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 

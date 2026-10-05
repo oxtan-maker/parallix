@@ -1,12 +1,12 @@
 # Parallix
 
-**Parallix is an agent-agnostic, local-first workflow that puts a trust ladder around AI coding work: separate review that prefers a different agent family when one is available, repository-owned verification where you configure a gate, Linux Bubblewrap confinement when available (falling back to an agent's native sandbox, or blocking until explicit consent when neither exists), and a human-owned squash merge.**
+**Parallix is a local-first workflow and trust layer for AI coding agents: it runs each piece of work as an isolated mission in its own Git worktree, sends the result to a separate code review that prefers a different agent family when one is available, runs repository-owned verification where you configure a gate, confines agents with Linux Bubblewrap when available (falling back to an agent's native sandbox, or blocking until explicit consent when neither exists), and leaves the squash merge to a human.**
+
+It works with Codex CLI, Claude Code, Qwen Code, and Mistral Vibe, and runs OpenCode or Pi through its configurable custom runner, so drafting, implementation, and review can use different agent families, including locally hosted AI.
 
 Coding agents become much more useful when you can run several pieces of work at once. But simply starting more agents quickly creates a new bottleneck: they compete for the same working tree, lose context across long runs, hit provider limits, and produce more changes than one engineer can safely supervise and integrate.
 
 Parallix is the delivery layer around those agents. It gives every piece of work an isolated mission, lets multiple missions progress concurrently, preserves execution across sessions, separates implementation from review, runs repository-owned verification, and leaves the final integration decision with the human operator. Parallel Git isolation is how that trust ladder can operate across concurrent missions instead of one shared checkout.
-
-Parallix is deliberately not tied to one agent vendor or model family. The same mission workflow can use different agent families for drafting, implementation, and review, including commercially hosted agents, locally hosted AI, and custom runtimes.
 
 ## Install
 
@@ -51,6 +51,13 @@ Observed one-maintainer dogfooding throughput. The [methodology and evidence](do
 - **Keep your existing verification gate instead of agent self-reporting**. The gate is a configured shell command with a no-op default: declare your existing `make` / `npm` / script command in `workflow.config.json` and it runs verbatim; declare nothing and verification is a documented no-op pass, not an invented gate.
 - **Confine supported agent processes with Bubblewrap on Linux**. When Bubblewrap is available, Parallix mounts the host filesystem read-only and selectively grants write access required by the current mission. Implementation gets its mission worktree and required Git state writable; review keeps the worktree read-only. If Bubblewrap is unavailable, Parallix falls back to the agent's own native sandbox where the family exposes one (e.g. Codex `--sandbox`, Qwen `-s`), otherwise it blocks the mutating launch until the operator explicitly consents to run unsandboxed — no silent fallback.
 - **Evaluate which agent family actually pays off across every repo one runtime drives**. A single operator-owned measurement database (`<PARALLIX_HOME>/parallix.db`) accumulates per-agent usage telemetry across repositories.
+
+## Supported coding agents
+
+- **Built-in families:** Codex CLI (`codex`), Claude Code (`claude`), Qwen Code (`qwen`), and Mistral Vibe (`vibe`). Install and sign in to each agent CLI you want Parallix to use.
+- **Custom runner:** OpenCode (`opencode`) or Pi (`pi`) run as the `custom` family. Select one with `adapters.agents.runners.custom` in `workflow.config.json`; OpenCode is the default. Pi needs the optional `@earendil-works/pi-coding-agent` package.
+
+Which families may draft, implement, and review is set per step in `config/agents.json`; Parallix chooses among the eligible families that are installed and not blocked by a usage limit. Mistral Vibe runs do not resume an earlier session; an interrupted Vibe run starts fresh from the recorded checkpoints. See the [agent configuration](docs/config.md#agents) for model and runner options.
 
 ## The core workflow
 

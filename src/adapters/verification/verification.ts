@@ -7,6 +7,7 @@ import * as pathMod from 'node:path';
 import { createHash } from 'node:crypto';
 import { getPrimaryBranch } from '../filesystem/mission-utils.js';
 import { resolveParallixHome, readJson, writeJson } from '../storage/storage.js';
+import { captureRecoveryEvidence, resolveConfiguredCredentialRedactor } from '../../application/recovery-evidence.js';
 
 interface GitOptions {
   encoding?: BufferEncoding;
@@ -361,7 +362,7 @@ function resolveVerificationCommand(rootDir: string, area?: string): string | nu
 }
 
 /** @param {string} [area] @param {string} [rootDir] @param {{gitRunner?: GitFn, runFn?: Function, stdio?: string, maxBuffer?: number}} [options] */
-export function captureVerifiedTreeProof(area: string | undefined, rootDir: string = process.cwd(), options: { gitRunner?: GitFn; runFn?: Function; stdio?: string; maxBuffer?: number; proofPath?: string } = {}): { ok: boolean; proof?: VerificationProof; error?: string; exitCode?: number | null; command?: string | null; cwd?: string; stdout?: string; stderr?: string } {
+export function captureVerifiedTreeProof(area: string | undefined, rootDir: string = process.cwd(), options: { gitRunner?: GitFn; runFn?: Function; stdio?: string; maxBuffer?: number; proofPath?: string; missionId?: string } = {}): { ok: boolean; proof?: VerificationProof; error?: string; exitCode?: number | null; command?: string | null; cwd?: string; stdout?: string; stderr?: string; recoveryEvidence?: import('../../application/recovery-evidence.js').RecoveryEvidenceRef; recoveryEvidenceError?: string } {
   const {
     gitRunner = git,
     runFn = run,
@@ -410,6 +411,26 @@ export function captureVerifiedTreeProof(area: string | undefined, rootDir: stri
     const stdout = String(verification.stdout ?? '').trim().slice(-BOUNDED_VERIFIER_OUTPUT);
     const stderr = String(verification.stderr ?? '').trim().slice(-BOUNDED_VERIFIER_OUTPUT);
     const detail = `${stdout}\n${stderr}`.slice(-BOUNDED_VERIFIER_OUTPUT);
+    // Persist attributable, retrievable evidence of this failed command to the
+    // mission worktree before any repair launches (TASK-2642). The worktree is
+    // unique to one mission and one repository, so original and retry evidence
+    // cannot overwrite or be confused with another concurrent mission. It is a
+    // best-effort side effect: recording never blocks the failure that produced
+    // it, so a write failure reports honestly on the returned ref rather than
+    // hiding the gate failure. Obtain and pass the operator-configured
+    // credential redactor so retained streams scrub before write (mission criterion).
+    const redactor = resolveConfiguredCredentialRedactor();
+    const capture = captureRecoveryEvidence({
+      command: command ?? '',
+      cwd: before.rootDir,
+      capturedRevision: before.commit,
+      exitCode: verification.status,
+      signal: (verification as { signal?: string | null }).signal ?? null,
+      stdout: String(verification.stdout ?? ''),
+      stderr: String(verification.stderr ?? ''),
+      diagnostic: detail,
+      ...(redactor ? { redactor } : {}),
+    });
     return {
       ok: false,
       exitCode: verification.status,
@@ -417,7 +438,8 @@ export function captureVerifiedTreeProof(area: string | undefined, rootDir: stri
       cwd: before.rootDir,
       stdout,
       stderr,
-      error: `verification gate failed for ${before.rootDir} with exit code ${verification.status}${detail ? `:\n${detail}` : ''}`
+      error: `verification gate failed for ${before.rootDir} with exit code ${verification.status}${detail ? `:\n${detail}` : ''}`,
+      ...(capture.ok ? { recoveryEvidence: capture.ref } : { recoveryEvidenceError: 'capture-failed' }),
     };
   }
 

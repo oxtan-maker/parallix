@@ -117,7 +117,9 @@ install without putting a single byte into the payload.
 
 It is now an **optional peer dependency**. This matches how every other agent
 family already works: Parallix resolves an external agent runtime rather than
-vendoring it.
+vendoring it. The supported SDK ranges are `^0.80.6` and `^1.0.2`; new
+installations should use Pi 1.0.2 or later, which includes the upstream
+`brace-expansion` fix without a local install repair.
 
 **If you use the `pi` implementer family**, install the SDK yourself:
 

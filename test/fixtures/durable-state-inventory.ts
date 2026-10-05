@@ -958,6 +958,77 @@ export const ADR0053_PERSISTENCE_INVENTORY: readonly ADR0053BoundaryEntry[] = [
     classification: 'database-owned-domain-state',
     cutoverTask: 'task-2468',
   },
+  // -----------------------------------------------------------------------
+  // MissionOutcome — attributable, retrievable evidence of a failed command
+  // -----------------------------------------------------------------------
+  {
+    // TASK-2642: recovery evidence is derived operational data, written to the
+    // mission worktree under the gitignored .workflow/ tree so it survives a
+    // process restart and is reachable by a fresh-context agent, never as
+    // committed Mission persistence. It is operator-local observation of a
+    // gate outcome, so an agent can read it back after a restart.
+    id: 'mission-outcome-recovery-evidence-write',
+    concept: 'MissionOutcome',
+    pathType: 'default',
+    fileLocation: 'src/application/recovery-evidence.ts',
+    operation: 'write',
+    classification: 'generated-artifact',
+    cutoverTask: null,
+  },
+  {
+    id: 'mission-outcome-recovery-evidence-read',
+    concept: 'MissionOutcome',
+    pathType: 'default',
+    fileLocation: 'src/application/recovery-evidence.ts',
+    operation: 'read',
+    classification: 'generated-artifact',
+    cutoverTask: null,
+  },
+  {
+    // TASK-2642: the application layer cannot import `node:fs` (ADR 0051), so the
+    // physical disk I/O for the recovery-store concept lives in one filesystem
+    // adapter. This adapter writes and reads the same gitignored .workflow/
+    // evidence files the application-layer free functions author; it owns no
+    // Mission persistence, only operator-local gate-failure observation.
+    id: 'mission-outcome-recovery-evidence-adapter-write',
+    concept: 'MissionOutcome',
+    pathType: 'default',
+    fileLocation: 'src/adapters/filesystem/recovery-evidence-fs.ts',
+    operation: 'write',
+    classification: 'generated-artifact',
+    cutoverTask: null,
+  },
+  {
+    id: 'mission-outcome-recovery-evidence-adapter-read',
+    concept: 'MissionOutcome',
+    pathType: 'default',
+    fileLocation: 'src/adapters/filesystem/recovery-evidence-fs.ts',
+    operation: 'read',
+    classification: 'generated-artifact',
+    cutoverTask: null,
+  },
+  {
+    // TASK-2642: the application-layer port types name the node:fs methods the
+    // recovery store reads and writes through, but this file performs no disk I/O
+    // itself. It is the declared contract the filesystem adapter implements, so
+    // SC7 (no unclassified durable file ops in src/application/) lists it here.
+    id: 'mission-outcome-recovery-evidence-port-types-write',
+    concept: 'MissionOutcome',
+    pathType: 'default',
+    fileLocation: 'src/application/recovery-evidence-types.ts',
+    operation: 'write',
+    classification: 'generated-artifact',
+    cutoverTask: null,
+  },
+  {
+    id: 'mission-outcome-recovery-evidence-port-types-read',
+    concept: 'MissionOutcome',
+    pathType: 'default',
+    fileLocation: 'src/application/recovery-evidence-types.ts',
+    operation: 'read',
+    classification: 'generated-artifact',
+    cutoverTask: null,
+  },
 ] as const;
 
 // ---------------------------------------------------------------------------

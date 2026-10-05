@@ -28,6 +28,8 @@ import { performHandoff } from '../adapters/cli/commands/handoff.js';
 import integrate from '../adapters/cli/commands/integrate.js';
 import { createReviewLoopPorts, type ReviewLoopBindings, type ReviewLoopTarget } from '../adapters/review/review-loop.js';
 import { reviewLoopBindings } from './review-persistence.js';
+import { recoveryEvidenceFileSystem } from '../adapters/filesystem/recovery-evidence-fs.js';
+import { setRecoveryEvidenceFileSystem } from '../application/recovery-evidence.js';
 import { LegacyStatsBackfillAdapter } from '../adapters/mission/stats-backfill-adapter.js';
 import type { ProgressPort } from '../application/ports.js';
 import type { MissionNelRecorder, MissionStore, MissionTransitionStore } from '../application/domain-ports.js';
@@ -268,6 +270,10 @@ export async function createProductionApplicationServices(
       processIdentity: processStartIdentity(process.pid),
     })
     : NO_CURRENT_WORK_PORT;
+  // Bind the one production filesystem for the recovery store. The application
+  // layer cannot import `node:fs`, so composition binds the `filesystem`
+  // adapter here for every process (TASK-2642 boundary decision).
+  setRecoveryEvidenceFileSystem(recoveryEvidenceFileSystem);
   const presentationCapabilities = operatorState.repositories
     ? (await import('./production-capabilities.js')).composeProductionCapabilities(
       rootDir,

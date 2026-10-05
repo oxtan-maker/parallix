@@ -11,11 +11,15 @@
 
 import assert from 'node:assert/strict';
 import test, { describe, it } from 'node:test';
+import fs from 'node:fs';
+import path from 'node:path';
+import { mkdtemp } from '../../helpers/temp-dir.js';
 import { INTEGRATION_GATE_REBOUND_ATTEMPTS_PER_INVOCATION, integrationGateFailureReason, integrationOnlyCoverageNote, routeIntegrationGateFailure, type IntegrationGateRouteOptions } from '../../../src/adapters/cli/commands/integrate-gate-rebound.js';
 import type { GateRunOutcome } from '../../../src/adapters/config/repository-gates.js';
 import { gateFailureReason } from '../../../src/adapters/review/review-gate-handling.js';
 import { elideBounceOutput, BOUNCE_OUTPUT_MAX_CHARS } from '../../../src/application/output-elision.js';
 import { rebound, classifyReboundReason, buildReboundFixPrompt, reboundDiagnostic, DEFAULT_REBOUND_ATTEMPTS, type ReboundContext, type ReboundReason } from '../../../src/application/rebound-kernel.js';
+import { listRecoveryEvidence } from '../../../src/application/recovery-evidence.js';
 
 // ── Rebound kernel — TASK-2377.03 (was task-2377.03-rebound-kernel.test.ts) ──
 /**
@@ -509,6 +513,34 @@ test('task-2588: fresh repair observes the commit created by targeted repair', a
     verify: () => ({ ok: ++verifies === 2, diagnostic: 'still red' }),
   }));
   assert.equal(outcome.outcome, 'fixed'); assert.deepEqual(headsAtLaunch, ['base', 'targeted-commit']);
+});
+
+test('task-2642: a failed relaunch persists as a distinct attempt in the original incident', async () => {
+  // Hermetic: `startAgent` and `verify` are injected; no real agents, git, or
+  // Forgejo. The worktree is a real temp dir so the recovery store writes and
+  // reads genuine files. The verify stays red on every launch so the kernel
+  // relaunches the per-occurrence budget and each failed relaunch reaches the
+  // retry-capture path.
+  const worktree = mkdtemp('task-2642-rebound-retry-');
+  const outcome = await rebound(gateReason, contextFor({
+    slug: 'task-2642',
+    worktree,
+    readHead: () => 'head-unchanged',
+    verify: () => ({ ok: false, diagnostic: gateReason.stdout, reason: gateReason }),
+  }));
+  assert.equal(outcome.outcome, 'exhausted');
+  assert.equal(outcome.attempts, DEFAULT_REBOUND_ATTEMPTS);
+  // The original failure and both failed relaunches survive as distinct attempts
+  // in one incident, so a restarted agent sees the whole recovery series rather
+  // than only the latest failure.
+  const refs = listRecoveryEvidence({ cwd: worktree, missionId: 'task-2642' });
+  assert.equal(new Set(refs.map((ref) => ref.incidentId)).size, 1, 'one incident holds the whole recovery series');
+  assert.deepEqual(refs.map((ref) => ref.attempt).sort((a, b) => a - b), [1, 2, 3], 'original plus each failed relaunch as its own attempt');
+  const incidentDir = path.join(worktree, '.workflow', 'recovery-evidence', 'task-2642', refs[0].incidentId);
+  for (const ref of refs) {
+    assert.ok(fs.existsSync(path.join(incidentDir, `attempt-${ref.attempt}.stdout.txt`)), `stream for attempt ${ref.attempt} is retained`);
+    assert.ok(fs.existsSync(path.join(incidentDir, `attempt-${ref.attempt}.stderr.txt`)), `stream for attempt ${ref.attempt} is retained`);
+  }
 });
 
 // ── Recovery dossier — TASK-2413 (was task-2413-recovery-dossier.test.ts) ──

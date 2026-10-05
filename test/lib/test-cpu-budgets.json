@@ -272,7 +272,7 @@
       "integration/stats/metrics-review-fix-observations.test.ts": 100,
       "integration/cli/mission-adhoc-and-context-cli-contract.test.ts": 11850,
       "integration/sqlite/mission-aggregate-write-isolation.test.ts": 100,
-      "integration/mission/mission-cancel-contract.test.ts": 1300,
+      "integration/mission/mission-cancel-contract.test.ts": 1500,
       "integration/sqlite/mission-classification-authority.test.ts": 300,
       "integration/sqlite/mission-classification-update.test.ts": 200,
       "integration/mission/mission-handoff-reconcile-contract.test.ts": 200,

@@ -18,6 +18,8 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { startDefaultDbGuard } from './lib/default-db-guard.js';
+// Binds the recovery-store filesystem for every test process (TASK-2642).
+import './lib/bootstrap-recovery-evidence-fs.js';
 
 startDefaultDbGuard('e2e-test');
 

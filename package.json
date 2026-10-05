@@ -1,7 +1,7 @@
 {
   "name": "@magnusekdahl/parallix",
-  "version": "1.5.267",
-  "description": "Trust ladder for AI coding work — separate review, configured verification, conditional Linux confinement, and human-owned merges",
+  "version": "1.5.271",
+  "description": "Local-first workflow and trust layer for AI coding agents — isolated Git worktree missions, separate code review, repository-owned verification, Linux confinement, and human-owned merges",
   "license": "AGPL-3.0-or-later",
   "private": false,
   "type": "module",
@@ -20,12 +20,21 @@
   },
   "keywords": [
     "parallix",
-    "workflow",
-    "ai",
-    "coding-agents",
-    "multi-agent",
-    "mission",
-    "cli"
+    "coding-agent",
+    "ai-coding-agents",
+    "agent-orchestration",
+    "agent-harness",
+    "git-worktree",
+    "git-worktrees",
+    "code-review",
+    "verification",
+    "local-first",
+    "claude-code",
+    "codex",
+    "qwen-code",
+    "mistral-vibe",
+    "opencode",
+    "pi-coding-agent"
   ],
   "bugs": {
     "url": "https://github.com/oxtan-maker/parallix/issues"
@@ -40,7 +49,6 @@
   ],
   "scripts": {
     "build": "npm run bundle",
-    "prepare": "node scripts/repair-pi-brace-expansion.mjs",
     "build:web": "node scripts/run-build-web.mjs",
     "bundle": "tsx scripts/build-canonical-bundle.ts",
     "dev": "tsx src/entry/px.ts",
@@ -75,7 +83,7 @@
     "docs:velocity:verify": "tsx scripts/docs-velocity-render.ts --verify"
   },
   "peerDependencies": {
-    "@earendil-works/pi-coding-agent": "^0.80.6"
+    "@earendil-works/pi-coding-agent": "^0.80.6 || ^1.0.2"
   },
   "peerDependenciesMeta": {
     "@earendil-works/pi-coding-agent": {
@@ -83,12 +91,11 @@
     }
   },
   "devDependencies": {
-    "@earendil-works/pi-coding-agent": "^0.87.1",
+    "@earendil-works/pi-coding-agent": "^1.0.2",
     "@types/node": "^26.6.2",
     "@types/react": "^19.2.14",
     "@typescript-eslint/eslint-plugin": "^8.62.1",
     "@typescript-eslint/parser": "^8.62.1",
-    "brace-expansion": "5.0.12",
     "esbuild": "^0.25.12",
     "eslint": "^9.39.4",
     "fast-uri": "^4.2.1",
@@ -102,12 +109,5 @@
     "tsx": "4.20.6",
     "typescript": "^5.9.3",
     "vite": "^8.3.0"
-  },
-  "overrides": {
-    "@earendil-works/pi-coding-agent": {
-      "minimatch": {
-        "brace-expansion": "5.0.12"
-      }
-    }
   }
 }

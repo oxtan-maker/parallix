@@ -10,7 +10,7 @@ import { renderReviewLoopEvent } from '../../src/adapters/review/review-loop-pre
 import { ReviewState } from '../../src/adapters/review/review-state.js';
 import type {
   ReviewAgentLaunch, ReviewAgentPort, ReviewArtifactPort, ReviewControllerLock, ReviewerRoutingPort, ReviewHandoffPort,
-  ReviewLoopOutput, ReviewLoopPorts, ReviewLoopState, ReviewProviderPort, ReviewStatePort, ReviewTaskMirrorPort, PreReviewPort,
+  ReviewLoopOutput, ReviewLoopPorts, ReviewLoopState, ReviewProviderPort, ReviewStatePort, ReviewTaskMirrorPort, PreReviewPort, HumanFeedbackPort,
 } from '../../src/application/ports/review-round.js';
 import type { LoopContext } from '../../src/application/review-loop/round.js';
 
@@ -25,6 +25,7 @@ export interface ReviewLoopFakeOverrides {
   readonly handoff?: ReviewHandoffPort | null;
   /** A provider port (merged over the fake provider) or null for provider=none. */
   readonly provider?: Partial<ReviewProviderPort> | null;
+  readonly humanFeedback?: Partial<HumanFeedbackPort>;
   readonly routing?: Partial<ReviewerRoutingPort>;
   readonly agents?: Partial<ReviewAgentPort>;
   readonly artifacts?: Partial<ReviewArtifactPort>;
@@ -99,6 +100,7 @@ export function fakeReviewLoopPorts(overrides: ReviewLoopFakeOverrides = {}): Re
     },
     handoff: overrides.handoff ?? null,
     provider: overrides.provider === undefined || overrides.provider === null ? null : fakeProvider(overrides.provider),
+    humanFeedback: { reconcile: async () => null, ...overrides.humanFeedback },
     routing: {
       eligibleFamilies: () => ['codex', 'claude'],
       launcherStatus: () => ({ supported: true, detail: '' }),

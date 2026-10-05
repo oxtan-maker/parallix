@@ -946,52 +946,54 @@ function getCommentsSync(branch: string, token: string, options: any = {}): any[
 
   const issueComments = issueCommentsRes.data || [];
   const reviews = reviewsRes.data || [];
-  const allComments = /** @type {Array<{kind: string, user: string, created: string, body: string, state?: string, location?: string}>} */ ([]);
+  const allComments = /** @type {Array<{kind: string, id: string, reviewId?: string, user: string, isBot: boolean, created: string, updated: string, body: string, state?: string, dismissed?: boolean, location?: string}>} */ ([]);
 
   // 1. Process issue comments
-  issueComments.forEach(/** @param {{user?: {login?: string}, created_at?: string, body?: string}} c */ (c: any) => {
+  issueComments.forEach(/** @param {{id?: number, user?: {login?: string, type?: string}, created_at?: string, updated_at?: string, body?: string}} c */ (c: any) => {
     allComments.push({
       kind: 'issue-comment',
+      id: String(c.id ?? ''),
       user: (c.user || {}).login || '?',
-      created: (c.created_at || '').substring(0, 16),
+      isBot: (c.user || {}).type === 'bot',
+      created: c.created_at || '',
+      updated: c.updated_at || c.created_at || '',
       body: (c.body || '').trim()
     });
   });
 
   // 2. Process reviews and their inline comments
   for (const r of reviews) {
-    const flags = [];
-    if (r.stale) {flags.push('stale');}
-    if (r.dismissed) {flags.push('dismissed');}
-    const kind = flags.length > 0 ? `review [${flags.join(', ')}]` : 'review';
-
     allComments.push({
-      kind,
+      kind: 'review',
+      id: String(r.id ?? ''),
       user: (r.user || {}).login || '?',
-      created: (r.submitted_at || r.created_at || '').substring(0, 16),
+      isBot: (r.user || {}).type === 'bot',
+      created: r.submitted_at || r.created_at || '',
+      updated: r.updated_at || r.submitted_at || r.created_at || '',
       body: (r.body || '').trim(),
-      state: r.state || ''
+      state: r.state || '',
+      dismissed: Boolean(r.dismissed),
     });
 
     // Fetch inline comments for this review
     const inlineRes = apiCall('GET', `/pulls/${prNumber}/reviews/${r.id}/comments`, accessToken);
     if (inlineRes.ok && Array.isArray(inlineRes.data)) {
       inlineRes.data.forEach(/** @param {{user?: {login?: string}, created_at?: string, body?: string, path?: string, line?: number, original_line?: number}} c */ (c: any) => {
-        const iFlags = [];
-        if (r.stale) {iFlags.push('stale');}
-        if (r.dismissed) {iFlags.push('dismissed');}
-        let iKind = 'inline-comment';
-        if (iFlags.length > 0) {iKind += ` [${iFlags.join(', ')}]`;}
-
         const path = c.path || '';
         const line = c.line || c.original_line || '';
         const location = line ? `${path}:${line}` : path;
 
         allComments.push({
-          kind: iKind,
+          kind: 'inline-comment',
+          id: String(c.id ?? ''),
+          reviewId: String(r.id ?? ''),
           user: (c.user || {}).login || '?',
-          created: (c.created_at || '').substring(0, 16),
+          isBot: (c.user || {}).type === 'bot',
+          created: c.created_at || '',
+          updated: c.updated_at || c.created_at || '',
           body: (c.body || '').trim(),
+          state: r.state || '',
+          dismissed: Boolean(r.dismissed),
           location
         });
       });

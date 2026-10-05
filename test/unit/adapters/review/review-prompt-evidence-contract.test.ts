@@ -14,6 +14,9 @@ import {
 } from '../../../../src/adapters/review/review-prompts.js';
 import { gateFailureReason } from '../../../../src/adapters/review/review-gate-handling.js';
 import { runReviewLoop } from '../../../../src/application/review-loop/review-loop.js';
+import { createReviewLoopPorts } from '../../../../src/adapters/review/review-loop.js';
+import { ReviewState } from '../../../../src/adapters/review/review-state.js';
+import { reviewStateDataFrom } from '../../../../src/adapters/review/review-state-mapping.js';
 import { fakeReviewLoopPorts } from '../../../helpers/review-loop-ports.js';
 import { rebound } from '../../../../src/application/rebound-kernel.js';
 import { mkdtemp as registeredMkdtemp } from '../../../helpers/temp-dir.js';
@@ -131,6 +134,138 @@ describe("context compaction", { concurrency: false }, () => {
     assert.ok(recaptureIndex > rebaseIndex, 'review baseline must be recaptured after successful rebase');
     assert.ok(launchIndex > recaptureIndex, 'reviewer prompt must receive the post-rebase baseline');
     assert.equal(fake.launches[0].prompt?.reviewBaseline, 'post-rebase-baseline-sha');
+  });
+});
+
+// Regression provenance: TASK-2641.
+describe('human review reconciliation', { concurrency: false }, () => {
+  const repoRoot = path.resolve(import.meta.dirname, '..', '..', '..', '..');
+
+  test('task-2641: an operator request for changes after agent approval launches actionable repair instead of preserving no-findings approval', async () => {
+    const fake = fakeReviewLoopPorts({
+      provider: {
+        latestReview: async () => 'APPROVED',
+      },
+      artifacts: {
+        consumeReviewer: async () => ({ consumed: true, ok: true, reviewState: 'APPROVED' }),
+        consumeImplementer: async () => ({ consumed: true, ok: true, disposition: 'CHANGES_MADE', changedRevision: true }),
+      },
+      // The application seam is deliberately injected at the port boundary:
+      // Forgejo retrieval belongs to the adapter, but the loop must reconcile
+      // the returned operator decision before selecting or launching an agent.
+      humanFeedback: { reconcile: async () => ({
+        source: 'forgejo-review:91', author: 'operator', state: 'current',
+        disposition: 'REQUEST_CHANGES', approval: false, reason: 'Please retain the correction.',
+        findings: [{ id: 'human-91', summary: 'Please retain the correction.' }],
+      }) },
+    });
+
+    await runReviewLoop({
+      slug: 'task-2641-human-correction', implementer: 'claude', reviewer: 'codex',
+      maxAttempts: 1, skipHandoff: true,
+    }, fake.ports);
+
+    const implementerLaunch = fake.launches.find(launch => launch.role === 'implementer');
+    assert.ok(implementerLaunch, 'the human request must enter an actionable repair launch');
+    assert.equal(implementerLaunch.prompt?.reviewOutcome, 'REQUEST_CHANGES');
+    assert.ok(fake.logs.some(line => /human-91|Please retain the correction/.test(line)),
+      'the repair context must expose the operator correction rather than no findings');
+    assert.ok(!fake.mirrors.includes('approved'), 'stale agent approval must not authorize continuation');
+    assert.equal(fake.launches.filter(launch => launch.role === 'reviewer').length, 0,
+      'a human correction must not launch a no-findings reviewer before the repair');
+  });
+
+  test('task-2641: only a dismissed approval cannot continue or create no-findings repair', async () => {
+    const fake = fakeReviewLoopPorts({
+      humanFeedback: { reconcile: async () => ({
+        source: 'forgejo-review:92', author: 'operator', state: 'dismissed',
+        disposition: null, approval: true, reason: 'Withdrawn approval.', findings: [],
+      }) },
+      artifacts: { consumeReviewer: async () => ({ consumed: true, ok: true, reviewState: 'APPROVED' }) },
+    });
+    await runReviewLoop({ slug: 'task-2641-dismissed', implementer: 'claude', reviewer: 'codex', maxAttempts: 1, skipHandoff: true }, fake.ports);
+    assert.equal(fake.launches.length, 0);
+    assert.ok(!fake.mirrors.includes('approved'));
+    assert.deepEqual(fake.stops, ['DISMISSED_PROVIDER_APPROVAL']);
+  });
+
+  test('task-2641: adapter reconciles only new human review decisions and preserves edited provider feedback', async () => {
+    const events: Array<{ actor?: string; content?: string; reference?: string }> = [];
+    const comments: any[] = [
+      { kind: 'review', id: 'agent-request', user: 'codex', created: '2026-10-05T10:00:00Z', updated: '2026-10-05T10:00:00Z', state: 'REQUEST_CHANGES', body: 'request changes' },
+      { kind: 'review', id: 'bot-request', user: 'forgejo[bot]', isBot: true, created: '2026-10-05T10:01:00Z', updated: '2026-10-05T10:01:00Z', state: 'REQUEST_CHANGES', body: 'request changes' },
+      { kind: 'issue-comment', id: 'issue-request', user: 'operator', created: '2026-10-05T10:02:00Z', updated: '2026-10-05T10:02:00Z', body: 'please change this' },
+      { kind: 'review', id: 'human-review', user: 'operator', created: '2026-10-05T10:03:00Z', updated: '2026-10-05T10:03:00Z', state: 'REQUEST_CHANGES', body: 'Preserve the correction.' },
+      { kind: 'inline-comment', id: 'human-inline', reviewId: 'human-review', user: 'operator', created: '2026-10-05T10:03:01Z', updated: '2026-10-05T10:03:01Z', state: 'REQUEST_CHANGES', location: 'src/a.ts:4', body: 'Keep this branch.' },
+    ];
+    const ports = createReviewLoopPorts('task-2641', { worktree: repoRoot }, {
+      isProviderEnabled: () => true,
+      readToken: () => 'test-token',
+      getComments: async () => comments,
+      createEvent: async (_slug, _type, event) => {
+        events.push({ actor: event.actor, content: event.content, reference: event.followUpReference });
+        return { ok: true, path: null };
+      },
+      log: () => {}, error: () => {},
+    });
+    const state = new ReviewState('task-2641', { reviewer: 'claude', implementer: 'codex' });
+
+    const first = await ports.humanFeedback.reconcile(state);
+    assert.equal(first?.author, 'operator');
+    assert.equal(first?.disposition, 'REQUEST_CHANGES');
+    assert.deepEqual(first?.findings.map(finding => finding.summary), ['Preserve the correction.', 'Keep this branch.']);
+    assert.equal(events.length, 2, 'only the human review body and inline comment become audit events');
+    assert.match(events[0]?.reference ?? '', /forgejo:review:human-review:2026-10-05T10:03:00Z:/);
+    assert.equal((state.metadata.humanFeedbackHistory as any[]).length, 2);
+    assert.equal(await ports.humanFeedback.reconcile(state), null, 'a current request is consumed instead of re-launching repair every round');
+
+    const reloaded = ReviewState.from('task-2641', reviewStateDataFrom({
+      rounds: [{ number: 1, reviewer: 'claude', implementer: 'codex', startedAt: '2026-10-05T10:00:00Z', phase: 'reviewing', disposition: null, subject: { change: { kind: 'local-branch' }, revision: 'head' }, decision: null, response: null, reviewerRetryCount: 0, implementerRetryCount: 0 }],
+      intervention: null, stageLaunches: [],
+      reviewEvents: events.map((event, position) => ({ position, eventType: 'human_note', roundNumber: 1, phase: 'reviewing', actor: event.actor ?? null, content: event.content ?? '', disposition: null, verdict: null, itemDispositions: null, blockedReason: null, followUpReference: event.reference ?? null, createdAt: '2026-10-05T10:00:00Z' })),
+    } as any));
+    assert.equal(await ports.humanFeedback.reconcile(reloaded), null, 'consumed sources survive a Review aggregate state reload');
+
+    comments[3] = { ...comments[3], updated: '2026-10-05T10:05:00Z', body: 'Preserve the corrected implementation.' };
+    const edited = await ports.humanFeedback.reconcile(state);
+    assert.equal(edited?.reason, 'Preserve the corrected implementation.');
+    assert.equal(events.length, 3, 'an edited review has a new provider revision identity and is retained');
+  });
+
+  test('task-2641: a consumed dismissed human approval still stops the real adapter path', async () => {
+    const events: unknown[] = [];
+    const comments = [{
+      kind: 'review', id: 'dismissed-approval', user: 'operator',
+      created: '2026-10-05T10:00:00Z', updated: '2026-10-05T10:00:00Z',
+      state: 'APPROVED', dismissed: true, body: 'Withdrawn approval.',
+    }];
+    const ports = createReviewLoopPorts('task-2641', { worktree: repoRoot }, {
+      isProviderEnabled: () => true,
+      readToken: () => 'test-token',
+      getComments: async () => comments,
+      createEvent: async () => { events.push({}); return { ok: true, path: null }; },
+      log: () => {}, error: () => {},
+    });
+    const state = new ReviewState('task-2641', { reviewer: 'claude', implementer: 'codex' });
+
+    const first = await ports.humanFeedback.reconcile(state);
+    assert.equal(first?.state, 'dismissed');
+    assert.equal(first?.approval, true);
+    assert.equal(events.length, 1, 'the human review is recorded once as an audit note');
+
+    const repeated = await ports.humanFeedback.reconcile(state);
+    assert.equal(repeated?.state, 'dismissed', 'consuming the audit note must not allow the stale approval to continue');
+    assert.equal(events.length, 1, 'the repeated reconciliation does not duplicate its audit note');
+  });
+
+  test('task-2641: dismissed change requests are historical, while only the newest dismissed approval stops the loop', async () => {
+    const dismissedChange = fakeReviewLoopPorts({
+      humanFeedback: { reconcile: async () => ({ source: 'forgejo:review:31', author: 'operator', state: 'dismissed', disposition: 'REQUEST_CHANGES', approval: false, reason: 'withdrawn', findings: [] }) },
+      artifacts: { consumeReviewer: async () => ({ consumed: true, ok: true, reviewState: 'APPROVED' }) },
+    });
+    await runReviewLoop({ slug: 'task-2641-dismissed-change', implementer: 'claude', reviewer: 'codex', maxAttempts: 1, skipHandoff: true }, dismissedChange.ports);
+    assert.equal(dismissedChange.launches.filter(launch => launch.role === 'reviewer').length, 1);
+    assert.deepEqual(dismissedChange.stops, []);
   });
 });
 

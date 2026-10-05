@@ -162,6 +162,26 @@ export interface ReviewProviderPort {
   publishRevision(): { ok: boolean; detail: string; status: number | null } | null;
 }
 
+/** An operator correction reconciled from the provider before an agent launch. */
+export interface HumanReviewFeedback {
+  readonly source: string;
+  readonly author: string;
+  readonly state: 'current' | 'dismissed';
+  readonly disposition: 'REQUEST_CHANGES' | null;
+  /** A dismissed approval is the only dismissed provider decision that blocks continuation. */
+  readonly approval: boolean;
+  readonly reason: string;
+  readonly findings: readonly { id: string; summary: string }[];
+}
+
+/**
+ * Provider feedback is an input fact, not a workflow decision.  The loop
+ * consumes it before choosing a reviewer or implementer action.
+ */
+export interface HumanFeedbackPort {
+  reconcile(_state: ReviewLoopState): Promise<HumanReviewFeedback | null>;
+}
+
 /* ------------------------------------------------------------------ *
  * Reviewer routing and agent launches
  * ------------------------------------------------------------------ */
@@ -188,6 +208,7 @@ export interface ReviewPromptFacts {
   readonly reviewBaseline: string | undefined;
   readonly integrationRepair: string;
   readonly reviewOutcome?: unknown;
+  readonly humanFeedback?: string;
 }
 
 export interface ReviewAgentLaunch {
@@ -314,6 +335,7 @@ export interface ReviewLoopPorts {
   readonly task: ReviewTaskMirrorPort;
   readonly handoff: ReviewHandoffPort | null;
   readonly provider: ReviewProviderPort | null;
+  readonly humanFeedback: HumanFeedbackPort;
   readonly routing: ReviewerRoutingPort;
   readonly agents: ReviewAgentPort;
   readonly artifacts: ReviewArtifactPort;

@@ -783,6 +783,32 @@ assignee: [custom]
   }
 });
 
+test('getComments preserves provider identities and review context for reconciliation', async () => {
+  const comments = await getComments('mission/task-2641', 'token', {
+    apiCall(method, apiPath) {
+      if (method === 'GET' && apiPath.includes('/pulls?state=open')) {
+        return { ok: true, data: [{ number: 2641, head: { ref: 'mission/task-2641' } }] };
+      }
+      if (method === 'GET' && apiPath === '/issues/2641/comments') {
+        return { ok: true, data: [{ id: 1, user: { login: 'operator', type: 'user' }, created_at: '2026-10-05T10:00:00Z', updated_at: '2026-10-05T10:01:00Z', body: 'Context only' }] };
+      }
+      if (method === 'GET' && apiPath === '/pulls/2641/reviews') {
+        return { ok: true, data: [{ id: 42, user: { login: 'operator', type: 'user' }, created_at: '2026-10-05T10:02:00Z', updated_at: '2026-10-05T10:03:00Z', submitted_at: '2026-10-05T10:02:30Z', body: 'Please repair', state: 'REQUEST_CHANGES', dismissed: true }] };
+      }
+      if (method === 'GET' && apiPath === '/pulls/2641/reviews/42/comments') {
+        return { ok: true, data: [{ id: 43, user: { login: 'forgejo[bot]', type: 'bot' }, created_at: '2026-10-05T10:04:00Z', updated_at: '2026-10-05T10:05:00Z', body: 'Inline detail', path: 'src/review.ts', original_line: 9 }] };
+      }
+      return { ok: false, data: null };
+    },
+  });
+
+  assert.deepEqual(comments, [
+    { kind: 'issue-comment', id: '1', user: 'operator', isBot: false, created: '2026-10-05T10:00:00Z', updated: '2026-10-05T10:01:00Z', body: 'Context only' },
+    { kind: 'review', id: '42', user: 'operator', isBot: false, created: '2026-10-05T10:02:30Z', updated: '2026-10-05T10:03:00Z', body: 'Please repair', state: 'REQUEST_CHANGES', dismissed: true },
+    { kind: 'inline-comment', id: '43', reviewId: '42', user: 'forgejo[bot]', isBot: true, created: '2026-10-05T10:04:00Z', updated: '2026-10-05T10:05:00Z', body: 'Inline detail', state: 'REQUEST_CHANGES', dismissed: true, location: 'src/review.ts:9' },
+  ]);
+});
+
 test('resolveForgejoUser defaults to human when FORGEJO_USER is unset', () => {
   const previous = process.env.FORGEJO_USER;
   delete process.env.FORGEJO_USER;

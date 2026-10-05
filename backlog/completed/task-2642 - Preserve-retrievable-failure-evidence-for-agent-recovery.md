@@ -1,8 +1,8 @@
 ---
 id: TASK-2642
 title: Preserve retrievable failure evidence for agent recovery
-status: backlog
-assignee: []
+status: done
+assignee: [custom]
 created_date: '2026-10-04 05:43'
 labels:
   - bug
