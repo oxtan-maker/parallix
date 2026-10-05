@@ -6,6 +6,7 @@ title: >-
 status: backlog
 assignee: []
 created_date: '2026-10-05 19:16'
+updated_date: '2026-10-05 19:18'
 labels:
   - evaluation
 dependencies: []
@@ -17,6 +18,9 @@ references:
     backlog/completed/task-2575 -
     Give-self-development-gate-rebounds-authority-to-repair-the-failing-defence.md
   - src/application/rebound-kernel.ts
+  - >-
+    backlog/tasks/task-2653 -
+    Record-each-rebound-repair-attempt-as-durable-recovery-telemetry.md
 priority: medium
 ordinal: 164008
 ---
@@ -39,6 +43,8 @@ Historical attempt-1 failures already exist. Before TASK-2588 (landed 2026-10-01
 Use only sessions whose every message reports `provider=vllm`, `model=AtomicChat/Ornith-1.5-35B-A3B-GGUF:Q4_K_M`. It is the fastest local model and has the largest pool. Candidate missions with `2/2` in an Ornith session (verify each; grep counts may include quoted text): 2361, 2373.01, 2390, 2396, 2407, 2413, 2419, 2437, 2455.03, 2465, 2470, 2475, 2477, 2478, 2479, 2489, 2497, 2498, 2502, 2510, 2517, 2525.02, 2525.04, 2527, 2530, 2531, 2546.
 
 Both arms run Pi pinned to that model ID against the configured vllm endpoint. Record what the server reports for that model (`/v1/models` and any quant/file metadata) and confirm it is still the same artifact used historically. If identity cannot be confirmed, label results "same model ID" rather than "same model". Do not mix in other models' sessions. Do not use cloud agents for any benchmark run.
+
+Operator prerequisite: Ornith is not served by default (the current Pi `defaultModel` is `qwen3.8-27b`); the operator must make it available before activation. Preflight before Phase 0: query the endpoint's model list and stop with "Ornith not served" if the Ornith model ID is absent or a one-token completion against it fails. Do not change the operator's Pi `defaultModel` or the inference server configuration; pin the model per invocation in the scratch Pi agent directory.
 
 ## Isolation and write location (mandatory)
 
@@ -100,7 +106,10 @@ Report: paired table (both / fresh only / resumed only / neither), per-arm rescu
 - [ ] #5 No attempt 1 is re-run, no cloud agent is used, and no px command is invoked by the harness
 - [ ] #6 results.jsonl contains one row per arm including failed, timed-out and excluded runs with reasons
 - [ ] #7 report.md gives the paired outcome table, cost comparison, limitations and a decision of supported, weak directional support, inconclusive, contradicted or insufficient cases
+- [ ] #8 Preflight confirms the Ornith model ID is served and answers a one-token completion before Phase 0; otherwise the mission stops with "Ornith not served" without changing operator Pi or server configuration
 <!-- AC:END -->
+
+
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
