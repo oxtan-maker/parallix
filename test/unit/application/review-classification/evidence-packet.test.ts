@@ -54,6 +54,27 @@ test('bounded windows disclose omissions and do not claim resolved dependencies'
   assert.match(result.excerpts[0].boundary!, /no complete-function claim/);
 });
 
+test('absolute citations resolve only inside the supplied worktree and retain line hints', async () => {
+  const source = Array.from({ length: 1000 }, (_, i) => `line ${i + 1} ${'x'.repeat(200)}\n`).join('');
+  const absolute = { ...input, findings: [{ id: 'F1', summary: 'drops output', location: '/repo/mission/lib/x.java:400' }],
+    priorReviewComment: 'at runSmoke (/repo/mission/lib/x.java:400:14)', implementerResponse: 'Fixed F1' };
+  const port = { ...repository, source: async () => source, diff: async () => '' };
+  const packet = await buildEvidencePacket(absolute, port, '/repo/mission/');
+  assert.ok('request' in packet);
+  assert.deepEqual(packet.paths, ['lib/x.java']);
+  assert.match(JSON.stringify(packet.request.state), /"startLine":370,"endLine":430/);
+  assert.equal((packet.request.state as Record<string, unknown>).priorReviewComment, absolute.priorReviewComment);
+  const fileUrl = { ...absolute, findings: [{ ...absolute.findings[0], location: `file://${absolute.findings[0].location}` }],
+    priorReviewComment: 'at file:///repo/mission/lib/x.java:400:14' };
+  const urlPacket = await buildEvidencePacket(fileUrl, port, '/repo/mission');
+  assert.ok('request' in urlPacket);
+  assert.deepEqual(urlPacket.paths, ['lib/x.java']);
+  assert.match(JSON.stringify(urlPacket.request.state), /"startLine":370,"endLine":430/);
+  for (const root of [undefined, '/foreign/mission', '/repo/miss']) {
+    assert.deepEqual(await buildEvidencePacket(absolute, port, root), { fallback: 'missing-or-ambiguous-path' });
+  }
+});
+
 test('source windows retain every line boundary without regex backtracking', () => {
   const result = sourceWindows('first\nsecond\nthird', [], [], []);
   assert.deepEqual(result.excerpts, [{ startLine: 1, endLine: 3, text: 'first\nsecond\nthird' }]);
@@ -106,4 +127,13 @@ test('new intent obligations cannot hide behind task status bookkeeping (TASK-26
   assert.equal(hasBroaderReviewObligations(diff + '-status: active\n+status: review\n', ['x.java'], 'intent.md'), false);
   assert.equal(hasBroaderReviewObligations(diff + '-old criterion\n+new requirement\n', ['x.java'], 'intent.md'), true);
   assert.equal(hasBroaderReviewObligations(diff + '-status: active\n+status: review\n', ['x.java']), true);
+});
+
+test('Git tab-terminated headers preserve status-only task mirrors with spaces', async () => {
+  const { hasBroaderReviewObligations } = await import('../../../../src/application/review-classification/routing-policy.js');
+  const mirror = 'backlog/tasks/task-9001 - Classifier-lifecycle.md';
+  const diff = `diff --git a/x.java b/x.java\n--- a/x.java\n+++ b/x.java\n@@ -1 +1 @@\n-old\n+fixed\n`
+    + `diff --git a/${mirror} b/${mirror}\n--- a/${mirror}\t\n+++ b/${mirror}\t\n@@ -1 +1 @@\n`;
+  assert.equal(hasBroaderReviewObligations(diff + '-status: active\n+status: review\n', ['x.java'], mirror), false);
+  assert.equal(hasBroaderReviewObligations(diff + '-old criterion\n+new requirement\n', ['x.java'], mirror), true);
 });

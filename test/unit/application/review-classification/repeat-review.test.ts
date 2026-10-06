@@ -62,7 +62,7 @@ test('pins an eligible repeat review to the final revision verified after round 
   s.round.verifiedRevision = finalVerifiedRevision;
   s.context.ports.preReview.head = () => finalVerifiedRevision;
 
-  await tryRepeatReview(s.context, s.round);
+  assert.equal(await tryRepeatReview(s.context, s.round), 'APPROVED');
   assert.equal(s.attempts[0]?.candidateRevision, finalVerifiedRevision);
   const loaded = await s.store.load(s.context.slug as never);
   assert.equal(loaded.kind, 'found');
@@ -82,9 +82,34 @@ test('attempts Jev for a verified repair after an integration gate revoked appro
   (prior as { response: typeof prior.response }).response = null;
   s.round.integrationRepair = 'verified integration repair';
   s.round.verifiedRevision = 'b'.repeat(40);
-  await tryRepeatReview(s.context, s.round);
+  assert.equal(await tryRepeatReview(s.context, s.round), 'APPROVED');
   assert.equal(s.attempts.length, 1);
   assert.equal(s.attempts[0]?.reason, 'resolved-threshold');
+});
+
+test('verified integration repair supplies source for its absolute stack path (TASK-2667 regression)', async () => {
+  const s = scenario();
+  const prior = s.store.mission().review!.rounds[0]!;
+  const log = `at runSmoke (${s.context.ports.worktree}/x.java:865:14)\n    at Test.run (node:internal/test_runner/test:1402:25)`;
+  (prior as { decision: typeof prior.decision }).decision = {
+    kind: 'approved', decidedAt: '2026-10-01T00:01:00Z', comment: 'Approved before integration.', source: { kind: 'local' },
+    revocation: { revokedAt: '2026-10-01T00:02:00Z', revokedBy: 'operator', reason: 'Integration failed',
+      cause: { kind: 'integration-gate-failure', gate: 'unit', command: 'npm test', log } },
+  };
+  (prior as { response: typeof prior.response }).response = null;
+  s.round.integrationRepair = 'verified integration repair';
+  s.round.verifiedRevision = 'b'.repeat(40);
+  let called = false;
+  const decide = s.classifier.decision.decide;
+  s.classifier.decision.decide = async request => {
+    called = true;
+    assert.match(JSON.stringify(request.state), /runSmoke/);
+    assert.match(JSON.stringify(request.state), /return output/);
+    return decide(request);
+  };
+  assert.equal(await tryRepeatReview(s.context, s.round), 'APPROVED');
+  assert.equal(s.attempts[0]?.reason, 'resolved-threshold');
+  assert.equal(called, true);
 });
 
 test('opt-out, unavailable provider, API failure and shadow retain the reviewer', async () => {

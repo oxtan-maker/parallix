@@ -33,7 +33,8 @@ export function classifyRepeatFindings(result: DecisionResult, policyVersion = R
 /** Paths beyond cited evidence need general review; only status/date mirror edits are bookkeeping. */
 export function hasBroaderReviewObligations(diff: string, paths: readonly string[], taskMirror?: string): boolean {
   const changed = [...diff.matchAll(/^\+\+\+ b\/(.+)$/gm)].map(m => m[1].split('\t')[0]);
-  const mirror = taskMirror && diff.split(/^diff --git /m).find(block => block.includes(`\n+++ b/${taskMirror}\n`));
+  const mirror = taskMirror && diff.split(/^diff --git /m).find(block => block.split('\n')
+    .some(line => line.startsWith('+++ b/') && line.slice(6).split('\t')[0] === taskMirror));
   const mirrorLines = mirror?.split('\n').filter(line => /^[+-]/.test(line) && !/^---|^\+\+\+/.test(line)) ?? [];
   const bookkeeping = mirrorLines.length > 0 && mirrorLines.every(line => /^[+-](?:status|updated_date):/.test(line));
   return !changed.length || changed.some(path => !(path === taskMirror && bookkeeping) && !paths.includes(path))

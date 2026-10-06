@@ -214,7 +214,7 @@ export function renderReviewLoopEvent(event: ReviewLoopEvent, output: ReviewLoop
       log(fmt.status('INFO', `Round ${event.attempt}: launching reviewer (${event.reviewer})...`));
       return;
     case 'reviewer-classification':
-      log(fmt.status('INFO', `Jev classification: ${event.reason}.`));
+      log(fmt.status('INFO', `Using general reviewer: ${event.reason}.`));
       return;
     case 'reviewer-launch-failed':
       error(fmt.status('FAIL', `Could not launch reviewer agent (${event.reviewer}): ${event.message}`));

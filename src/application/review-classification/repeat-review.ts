@@ -1,11 +1,11 @@
 import { missionId } from '../../domain/mission.js';
 import { changeRevision } from '../../domain/review.js';
-import { applyClassifierReview, type ClassifierReviewSource } from '../../domain/classifier-review.js';
+import { applyClassifierReview, integrationRepairFinding, type ClassifierReviewSource } from '../../domain/classifier-review.js';
 import { buildEvidencePacket, PACKET_VERSION, PROMPT_VERSION } from './evidence-packet.js';
 import { classifyRepeatFindings, hasBroaderReviewObligations, ROUTING_POLICY_VERSION } from './routing-policy.js';
 import type { LoopContext, ReviewRound } from '../review-loop/round.js';
 import type { ClassifierCallMeasurement } from '../ports/review-classification-telemetry.js';
-import { reviewFindingId, type ReviewFinding } from '../../domain/review.js';
+import type { ReviewFinding } from '../../domain/review.js';
 
 /** Application policy at the verified re-review boundary; failures retain normal review. */
 export async function tryRepeatReview(context: LoopContext, round: ReviewRound, cycleStarted?: number): Promise<'APPROVED' | 'REQUEST_CHANGES' | 'stop' | null> {
@@ -33,9 +33,7 @@ export async function tryRepeatReview(context: LoopContext, round: ReviewRound, 
   }
   const response = ordinaryRepeat ? (prior.implementerResponseContent || review.reviewEvents.filter(e =>
     e.roundNumber === prior.number && e.eventType === 'implementer_round_summary').at(-1)?.content || '') : '';
-  const repairFinding: readonly ReviewFinding[] = repairCause ? [{ id: reviewFindingId('integration-gate-repair'),
-    summary: `${repairCause.gate}: ${repairCause.log ?? 'integration gate failure'}`,
-    location: repairCause.log?.match(/([A-Za-z0-9_./-]+):\d+/)?.[1] ? `${repairCause.log.match(/([A-Za-z0-9_./-]+):\d+/)![1]}:1` : null }] : [];
+  const repairFinding: readonly ReviewFinding[] = repairCause ? [integrationRepairFinding(repairCause)] : [];
   const original = prior.decision!;
   const findings: readonly ReviewFinding[] = changesRequested?.findings ?? repairFinding;
   const reviewComment = changesRequested?.comment && !['REQUEST_CHANGES', 'request-changes'].includes(changesRequested.comment.trim())
@@ -77,7 +75,7 @@ export async function tryRepeatReview(context: LoopContext, round: ReviewRound, 
       priorRevision: String(prior.subject.revision), candidateRevision,
       findings, priorReviewComment: evidenceComment, implementerResponse: evidenceResponse,
       resolvedFindingIds: findings.map(f => String(f.id)),
-    }, ports.evidence);
+    }, ports.evidence, context.ports.worktree);
     attempt = { ...attempt, preparationMs: ports.clock() - started };
     if ('fallback' in packet) {
       await telemetry.recordCall({ ...attempt, reason: packet.fallback }); reason(packet.fallback); return null;
@@ -105,7 +103,9 @@ export async function tryRepeatReview(context: LoopContext, round: ReviewRound, 
     const source: ClassifierReviewSource = {
       kind: 'classifier', identity: 'jev', decisionId, provider: result.provider, model: result.model,
       packetHash: attempt.packetHash!, priorRevision: String(prior.subject.revision), candidateRevision,
-      responseRevision: String(prior.response?.resultingRevision ?? candidateRevision),
+      responseRevision: String(verifiedRepair ? current.subject.revision : prior.response!.resultingRevision),
+      ...(verifiedRepair && original.kind === 'approved'
+        ? { integrationRepair: { revokedAt: original.revocation!.revokedAt, gate: repairCause!.gate } } : {}),
       findingIds: base.findingIds, policyVersion: ROUTING_POLICY_VERSION, label: selected.label!, score: selected.score!,
     };
     const at = ports.now();

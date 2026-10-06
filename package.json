@@ -64,6 +64,7 @@
     "test:integration:local:prebuilt": "PARALLIX_PREBUILT_PACK=1 FORCE_COLOR=0 tsx test/run-default-tests.ts --integration-local",
     "test:agent-e2e": "node --import tsx --import ./test/bootstrap-e2e-parallix-home.ts test/e2e/agents/real-agent-smoke.test.ts",
     "test:lifecycle-e2e": "node --test --import tsx --import ./test/bootstrap-e2e-parallix-home.ts test/e2e/lifecycle/mission-lifecycle.test.ts",
+    "test:jev-lifecycle-e2e": "node --test --import tsx --import ./test/bootstrap-e2e-parallix-home.ts test/e2e/lifecycle/repeat-review-classification.test.ts",
     "test:ci": "npm run typecheck && npm run build && npm test && npm run test:integration:ci:prebuilt && npm run test:bundle && npm run test:package-content:prebuilt",
     "test:package-content": "tsx scripts/package-content-audit.ts",
     "test:package-content:prebuilt": "PARALLIX_PREBUILT_PACK=1 tsx scripts/package-content-audit.ts",

@@ -410,3 +410,42 @@ it('classifier decision preserves review authority and rejects stale/partial sco
   assert.throws(() => applyClassifierReview(review, { ...source, candidateRevision: 'c'.repeat(40) }, 'clear', '2026-10-06T00:00:00Z'), /stale/);
   assert.throws(() => applyClassifierReview(review, { ...source, score: 0.50 }, 'clear', '2026-10-06T00:00:00Z'), /provenance/);
 });
+
+it('classifier integration repairs bind the withdrawn gate and retain its complete obligation', async () => {
+  const { applyClassifierReview } = await import('../../../src/domain/classifier-review.js');
+  const { repeatReview } = await import('../../fixtures/repeat-review.js');
+  const initial = repeatReview();
+  const revokedAt = '2026-10-01T00:02:00Z';
+  const revocation = { revokedAt, revokedBy: 'workflow', reason: 'Gate failed',
+    cause: { kind: 'integration-gate-failure' as const, gate: 'output', command: 'node answer.mjs',
+      log: 'at file:///repo/answer.mjs:25:14 required output missing' } };
+  const review = { ...initial, rounds: [{ ...initial.rounds[0], response: null,
+    decision: { kind: 'approved' as const, decidedAt: '2026-10-01T00:01:00Z', comment: 'Prior approval', source: { kind: 'local' as const }, revocation } }, initial.rounds[1]] } as typeof initial;
+  const source = { kind: 'classifier' as const, identity: 'jev' as const, decisionId: 'd', provider: 'typesafe', model: 'jev',
+    packetHash: 'c'.repeat(64), priorRevision: 'a'.repeat(40), candidateRevision: 'b'.repeat(40), responseRevision: 'b'.repeat(40),
+    findingIds: ['integration-gate-repair'], integrationRepair: { revokedAt, gate: 'output' },
+    policyVersion: 'repeat-findings-52-89-v2', label: 'addresses', score: 0.52 };
+  const at = '2026-10-06T00:00:00Z';
+  const approved = applyClassifierReview(review, source, 'clear', at);
+  assert.equal(currentReviewRound(approved).phase, 'approved');
+  assert.deepEqual(approved.rounds[0], review.rounds[0], 'withdrawn approval stays auditable');
+  for (const integrationRepair of [{ revokedAt: at, gate: 'output' }, { revokedAt, gate: 'other' }]) {
+    assert.throws(() => applyClassifierReview(review, { ...source, integrationRepair }, 'clear', at), /scope is stale/);
+  }
+  assert.throws(() => applyClassifierReview(review, { ...source, integrationRepair: undefined }, 'clear', at), /stale/);
+  assert.throws(() => applyClassifierReview(review, { ...source, responseRevision: undefined }, 'clear', at), /stale/);
+  assert.throws(() => applyClassifierReview(review, { ...source, candidateRevision: 'd'.repeat(40) }, 'clear', at), /stale/);
+  assert.throws(() => applyClassifierReview(review, { ...source, findingIds: ['F1'] }, 'clear', at), /complete original/);
+  const operatorRevoked = { ...review, rounds: [{ ...review.rounds[0], decision: {
+    ...review.rounds[0].decision!, revocation: { ...revocation, cause: { kind: 'operator' as const } },
+  } }, review.rounds[1]] } as typeof review;
+  assert.throws(() => applyClassifierReview(operatorRevoked, source, 'clear', at), /stale/);
+  const unresolved = applyClassifierReview(review, { ...source, label: 'does_not_address', score: 0.89 }, 'implementer', at);
+  const decision = currentReviewRound(unresolved).decision;
+  assert.equal(decision?.kind, 'changes-requested');
+  if (decision?.kind === 'changes-requested') {
+    assert.equal(decision.findings[0].id, 'integration-gate-repair');
+    assert.equal(decision.findings[0].location, '/repo/answer.mjs:25');
+    assert.match(decision.findings[0].summary, /required output missing/);
+  }
+});

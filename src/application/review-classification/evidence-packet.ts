@@ -2,7 +2,7 @@ import { TextEncoder } from 'node:util';
 import type { DecisionRequest } from '../ports/decision.js';
 import type { RepeatFindingEvidence, ReviewEvidencePort } from '../ports/review-evidence.js';
 
-export const PACKET_VERSION = 'mechanical-repeat-findings-v1';
+export const PACKET_VERSION = 'mechanical-repeat-findings-v2';
 export const PROMPT_VERSION = 'finding-resolution-preservation-v1';
 export const MAX_PACKET_BYTES = 90_000;
 export const RESOLUTION_QUESTION = {
@@ -75,7 +75,7 @@ export function sourceWindows(source: string, hints: readonly number[], changed:
 }
 
 /** All material is mechanically collected from the same two pinned revisions. */
-export async function buildEvidencePacket(input: RepeatFindingEvidence, repository: ReviewEvidencePort): Promise<PacketResult> {
+export async function buildEvidencePacket(input: RepeatFindingEvidence, repository: ReviewEvidencePort, worktree?: string): Promise<PacketResult> {
   const ids = input.findings.map(f => f.id);
   if (!/^[a-f0-9]{40,64}$/.test(input.priorRevision) || !/^[a-f0-9]{40,64}$/.test(input.candidateRevision)
     || !ids.length || new Set(ids).size !== ids.length || !input.priorReviewComment.trim() || !input.implementerResponse.trim()
@@ -85,11 +85,19 @@ export async function buildEvidencePacket(input: RepeatFindingEvidence, reposito
     await repository.tree(input.priorRevision);
     const tree = await repository.tree(input.candidateRevision);
     const text = [input.priorReviewComment, input.implementerResponse, ...input.findings.map(f => `${f.summary} ${f.location === null ? 'None' : f.location}`)].join('\n');
-    const tokens = [...new Set(text.match(/[A-Za-z0-9_/@-]+(?:\.[A-Za-z0-9_+-]+)+/g) ?? [])];
+    const citations = text.replace(/\bfile:\/\/(?=\/)/g, '');
+    // Stack traces cite absolute paths. Strip only this mission's known root;
+    // foreign worktrees and runtime paths must never become repository evidence.
+    const prefix = worktree ? `${worktree.replace(/\/+$/, '')}/` : null;
+    const relative = (path: string) => {
+      const local = path.replace(/^file:\/\/(?=\/)/, '');
+      return prefix && local.startsWith(prefix) ? local.slice(prefix.length) : local;
+    };
+    const tokens = [...new Set((citations.match(/[A-Za-z0-9_/@-]+(?:\.[A-Za-z0-9_+-]+)+/g) ?? []).map(relative))];
     const roots = tokens.filter(token => tree.includes(token));
     for (const finding of input.findings) {
-      const explicit = finding.location?.match(/^([^:]+):\d+/)?.[1];
-      if (explicit && !resolveEvidencePath(explicit, tree)) { return { fallback: 'missing-or-ambiguous-path' }; }
+      const explicit = finding.location?.replace(/^file:\/\/(?=\/)/, '').match(/^([^:]+):\d+/)?.[1];
+      if (explicit && !resolveEvidencePath(relative(explicit), tree)) { return { fallback: 'missing-or-ambiguous-path' }; }
     }
     if (!roots.length) { return { fallback: 'no-structural-excerpts' }; }
     const additions = [...new Set(tokens.map(token => resolveEvidencePath(token, tree))
@@ -117,8 +125,8 @@ export async function buildEvidencePacket(input: RepeatFindingEvidence, reposito
     for (const path of paths) {
       const source = await repository.source(input.candidateRevision, path);
       whole[path] = [{ startLine: 1, endLine: source.split('\n').length - Number(source.endsWith('\n')), text: source }];
-      const hints = [...text.matchAll(/([A-Za-z0-9_/@-]+(?:\.[A-Za-z0-9_+-]+)+):(\d+)/g)]
-        .filter(m => roots.includes(path) ? m[1] === path : resolveEvidencePath(m[1], tree) === path).map(m => Number(m[2]));
+      const hints = [...citations.matchAll(/([A-Za-z0-9_/@-]+(?:\.[A-Za-z0-9_+-]+)+):(\d+)/g)]
+        .filter(m => roots.includes(path) ? relative(m[1]) === path : resolveEvidencePath(relative(m[1]), tree) === path).map(m => Number(m[2]));
       const extracted = sourceWindows(source, hints, roots.includes(path) ? changed[path] ?? [] : [], symbols);
       if (extracted.excerpts.length) { windows[path] = extracted.excerpts; }
       const evidence = new TextEncoder().encode(source).length <= 6000 ? 'Complete file; dependencies still not established'

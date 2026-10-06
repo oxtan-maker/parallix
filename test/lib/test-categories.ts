@@ -371,6 +371,8 @@ export const INTEGRATION_LOCAL_REASONS: Readonly<Record<string, string>> = {
  */
 export const AGENT_E2E_TESTS: readonly string[] = [
   'e2e/lifecycle/mission-lifecycle.test.ts',
+  // Live Jev backend and a disposable Docker Forgejo instance are required.
+  'e2e/lifecycle/repeat-review-classification.test.ts',
   'e2e/agents/real-agent-smoke.test.ts',
   // TASK-2642 criterion 6: bounded real-agent evaluation that the agent actually
   // retrieves the hidden failure from durable recovery evidence and names the
