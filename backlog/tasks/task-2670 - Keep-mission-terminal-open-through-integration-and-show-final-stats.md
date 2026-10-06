@@ -4,7 +4,7 @@ title: Keep mission terminal open through integration and show final stats
 status: backlog
 assignee: []
 created_date: '2026-10-06 13:57'
-updated_date: '2026-10-06 14:04'
+updated_date: '2026-10-06 14:08'
 labels:
   - bug
   - user_value
@@ -49,6 +49,8 @@ Create a focused reproduction in the owning terminal/workflow suite: the prior b
 Second operator report (2026-10-06): the tmux session terminated again during integration, hiding failing unit tests and at least one integration test. Treat terminal termination at normal review completion and loss of the integration failure/output view as separate P0 candidates requiring reproduction and diagnosis. Repair the real tmux flow, including child exit, failed gates, detach/reattach and output retention; successful mocked host tests alone are insufficient. Keep this follow-up on main rather than rebouncing TASK-2658 for terminal work.
 
 Bounce-back diagnosis: TASK-2658 was already moved to active by the integration attempt. The lifecycle transition therefore appears to have succeeded before terminal loss. Reproduce the sequence failing gate -> integration-to-active transition -> repair handoff/child/session exit, and determine which process terminates the operator terminal. Keep the failure evidence accessible across that transition.
+
+Original tmux inspection: socket /run/user/1000/parallix-terminal/233bbddb32ac/task-2658.sock still serves session task-2658, but only an empty console pane remains. Operation pane and scratch state were removed. Current host completion explicitly kills the operation window; investigate whether attachment exits when its selected window disappears and how to retain/switch to an operator result view. This is evidence of pane loss, not proof of a tmux-server crash. Original durable bounce-back cause identifies integration-local failure in lifecycle-timing-local.test.ts, case R1 production (task-2376): expected ReviewerDecision.decidedAt 2026-01-01T10:30:00Z, actual current wall-clock timestamp. Suite CPU 68671ms / 85000ms: not a CPU-budget failure. Original unit failure cannot be recovered from the retained cause, which stores only one failed gate tail. Require durable per-gate output for all failures. Manual reruns stopped at operator request: unit passed 3380 tests; integration-ci independently failed stats-internals.test.ts R5 (task-2378), same decidedAt versus wall-clock mismatch, CPU 284044ms / 432000ms. These timestamp failures belong to TASK-2658 repair evidence; terminal/output-loss diagnosis remains TASK-2670 scope. Manual logs: /tmp/task-2658-manual-integration-20261006; original operational history export: /tmp/task-2658-original-integration-history.json.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done
