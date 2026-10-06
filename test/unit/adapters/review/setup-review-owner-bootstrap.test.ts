@@ -58,3 +58,10 @@ test('a rejected user lookup stops bootstrap without attempting account creation
   assert.match(result.error ?? '', /failed to check Forgejo user parallix \(HTTP 403\)/);
   assert.equal(calls, 1);
 });
+
+test('setup suggests a dedicated Jev review identity without making it a coding family (TASK-2658)', async () => {
+  const { suggestedForgejoUsers } = await import('../../../../src/adapters/review/setup-review-repository.js');
+  const users = suggestedForgejoUsers();
+  assert.ok(users.includes('jev'));
+  assert.equal(users.filter(user => user === 'jev').length, 1);
+});

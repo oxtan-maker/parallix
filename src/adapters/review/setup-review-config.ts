@@ -3,7 +3,7 @@ import * as path from 'path';
 import { resolveReviewAdapter } from '../config/product-config.js';
 import { resolveForgejoSettings, reviewRemoteUrl } from '../forgejo/forgejo.js';
 import { apiRequest, isAuthFailure, normalizeBaseUrl, tokenFilePath } from './setup-review-auth.js';
-import { readConfiguredReviewRemote, suggestedForgejoUsers } from './setup-review-repository.js';
+import { CLASSIFIER_FORGEJO_USER, readConfiguredReviewRemote, suggestedForgejoUsers } from './setup-review-repository.js';
 
 export function standardLayoutDescription(): string { return ['standard = markdown task storage in `backlog/`', 'missions in `docs/missions/`', 'mission/* branches with auto-detected `main`/`master` primary', 'worktrees in `../<repo>-<slug>`', 'verification via `npm test` with default area `docs`'].join('; '); }
 export function buildReviewAdapterConfig(answers: any) { const provider = answers.reviewProvider || 'forgejo'; return provider === 'forgejo' ? { provider, baseUrl: normalizeBaseUrl(answers.baseUrl), remote: answers.reviewRemote, repo: answers.reviewRepo } : { provider }; }
@@ -14,7 +14,7 @@ export function buildWorkflowConfig(answers: any) {
 }
 export function writeWorkflowConfig(rootDir: string, config: any): string { const configPath = path.join(rootDir, 'workflow.config.json'); fs.writeFileSync(configPath, `${JSON.stringify(config, null, 2)}\n`, 'utf8'); return configPath; }
 export function evaluateReviewSetup(rootDir?: string, options: any = {}) {
-  const { users = suggestedForgejoUsers(), remoteName, remoteUrlFn = reviewRemoteUrl, getRemoteUrlFn = readConfiguredReviewRemote, tokenPathFn = tokenFilePath, requestFn = apiRequest } = options;
+  const { users = suggestedForgejoUsers().filter(user => user !== CLASSIFIER_FORGEJO_USER), remoteName, remoteUrlFn = reviewRemoteUrl, getRemoteUrlFn = readConfiguredReviewRemote, tokenPathFn = tokenFilePath, requestFn = apiRequest } = options;
   const reviewAdapter = resolveReviewAdapter(rootDir);
   if (reviewAdapter.provider !== 'forgejo') {return { required: false, ok: true, issues: [], steps: [] };}
   const review = resolveForgejoSettings(rootDir);

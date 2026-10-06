@@ -838,11 +838,13 @@ function postReview(branch: string, token: string, outcome: string, summary: str
   const {
     apiCall = forgejoApi,
     resolvePrNumber = getPrNumber,
-    forgejoUser
+    forgejoUser,
+    rootDir = process.cwd()
   } = options;
+  const scopedApi = (method: string, endpoint: string, auth: string, data?: unknown) => apiCall(method, endpoint, auth, data, { rootDir });
   const slugMatch = branch.match(/^mission\/(task-\d+)/);
   const slug = slugMatch ? slugMatch[1] : null;
-  const prNumber = resolvePrNumber(branch, token, { apiCall, slug, forgejoUser });
+  const prNumber = resolvePrNumber(branch, token, { apiCall: scopedApi, slug, forgejoUser, rootDir });
   if (isApiErrorResult(prNumber)) {
     const apiErr = prNumber._apiError || {};
     return { ok: false, data: null, status: null, error: 'api-failed', raw: `failed to resolve PR for ${branch}${(apiErr.status || 0) === 7 ? ` (${codexSandboxHint()})` : ''}` };
@@ -850,8 +852,11 @@ function postReview(branch: string, token: string, outcome: string, summary: str
   if (!prNumber) {return { ok: false, data: null, status: null, error: 'pr-not-found' };}
 
   // Resolve current head SHA for the PR to avoid submission failures if PR updated
-  const prRes = apiCall('GET', `/pulls/${prNumber}`, token);
+  const prRes = scopedApi('GET', `/pulls/${prNumber}`, token);
   const commit_id = (prRes.ok && prRes.data && prRes.data.head) ? prRes.data.head.sha : null;
+  if (options.expectedRevision && commit_id !== options.expectedRevision) {
+    return { ok: false, data: null, status: null, error: 'revision-drift' };
+  }
 
   const event = /** @type {'APPROVED'|'REQUEST_CHANGES'|'COMMENT'|undefined} */ (REVIEW_OUTCOME_MAP[outcome as keyof typeof REVIEW_OUTCOME_MAP]);
   if (!event) {return { ok: false, data: null, status: null, error: `unsupported-outcome: ${outcome}` };}
@@ -862,7 +867,7 @@ function postReview(branch: string, token: string, outcome: string, summary: str
     payload.commit_id = commit_id;
   }
 
-  const result = apiCall('POST', `/pulls/${prNumber}/reviews`, token, payload);
+  const result = scopedApi('POST', `/pulls/${prNumber}/reviews`, token, payload);
   if (!result.ok && result.stderr) {
     fmt.log.info(`curl stderr: ${result.stderr}`);
   }

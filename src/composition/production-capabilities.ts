@@ -1,3 +1,4 @@
+import { createRepeatReviewClassification } from './review-classification.js';
 import type { ExecuteMissionPorts } from '../application/ports/execute-mission.js';
 import type { TuiCapabilities } from '../application/tui-capabilities.js';
 import type { BoardCommandDispatcher, BoardProgressSink } from '../application/controller/board-command.js';
@@ -198,13 +199,13 @@ function createBoardHandoffWorkflow(
         await resumeActiveBoardHandoff(existing, store, lifecycle, slug);
         await reviewLoop(
           { slug, isContinue: true, maxAttempts: existing.mission.review.rounds.length + 1 },
-          createReviewLoopPorts(slug, {}, reviewLoopBindings(store, lifecycle)),
+          createReviewLoopPorts(slug, {}, { ...reviewLoopBindings(store, lifecycle), classification: createRepeatReviewClassification(slug, resolveWorktree(slug) ?? process.cwd()) }),
         );
         return;
       }
       const result = await handoff(slug);
       if (!result.ok) { throw new Error(result.error ?? 'handoff workflow aborted'); }
-      await reviewLoop({ slug }, createReviewLoopPorts(slug, {}, { performHandoffFn: reviewHandoff, ...reviewLoopBindings(store, lifecycle) }));
+      await reviewLoop({ slug }, createReviewLoopPorts(slug, {}, { performHandoffFn: reviewHandoff, ...reviewLoopBindings(store, lifecycle), classification: createRepeatReviewClassification(slug, resolveWorktree(slug) ?? process.cwd()) }));
     },
   };
 }

@@ -1,3 +1,4 @@
+import { renderClassifierStatistics } from '../../application/presentation/classifier-statistics.js';
 import * as fmt from '../../application/presentation/cli-format.js';
 import { createRangeWindow } from '../../application/services/statistics-row.js';
 import type { StatsRow } from '../../application/services/statistics-row.js';
@@ -71,6 +72,10 @@ export function createStatsCommand(useCase: Pick<StatsCommandUseCase<StatsRow>, 
         report = range
           ? presentation.renderRange(result.rows, { rootDir, selection: result.selection })
           : presentation.renderWeekly(result.rows, { rootDir, selection: result.selection });
+        report += `\n\n${renderClassifierStatistics(result.classifierStatistics ?? null, result.selection.current.window)}`;
+        if (result.selection.previous) {
+          report += `\n\n${renderClassifierStatistics(result.classifierStatistics ?? null, result.selection.previous.window)}`;
+        }
       }
     } catch (failure) {
       error(fmt.status('FAIL', failure instanceof Error ? failure.message : String(failure)));

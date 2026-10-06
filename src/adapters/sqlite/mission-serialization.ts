@@ -1,4 +1,5 @@
 import { agentFamily } from '../../domain/agents.js';
+import { assertClassifierReviewSource } from '../../domain/classifier-review.js';
 import type { CheckpointData, GoalCheckRow } from '../../domain/checkpoint.js';
 import { externalTaskRef, type ExternalTaskRef } from '../../domain/external-task.js';
 import { isCheckpointName } from '../../domain/checkpoint.js';
@@ -103,6 +104,7 @@ export interface MissionReviewRoundRecord {
   readonly decision_kind: string | null;
   readonly decided_at: string | null;
   readonly decision_comment: string | null;
+  readonly classifier_source?: string | null;
   readonly approval_source_kind: string | null;
   readonly approval_source_provider: string | null;
   readonly revoked_at: string | null;
@@ -395,6 +397,17 @@ function resolutionsFor(
     });
 }
 
+function classifierDecisionFor(row: MissionReviewRoundRecord, records: MissionReviewRecords): ReviewerDecision | null {
+  const decision = decisionFor(row, records);
+  if (!decision || !row.classifier_source) { return decision; }
+  const source = JSON.parse(row.classifier_source) as import('../../domain/classifier-review.js').ClassifierReviewSource;
+  assertClassifierReviewSource(source);
+  if (source.candidateRevision !== row.revision || (source.label === 'addresses') !== (decision.kind === 'approved')) {
+    throw new Error('Invalid persisted classifier provenance');
+  }
+  return { ...decision, classifier: source };
+}
+
 function reviewRoundFrom(
   row: MissionReviewRoundRecord,
   records: MissionReviewRecords,
@@ -438,7 +451,7 @@ function reviewRoundFrom(
     reviewer: agentFamily(row.reviewer),
     implementer: agentFamily(row.implementer),
     startedAt: requiredText(row.started_at, 'review start time'),
-    decision: decisionFor(row, records),
+    decision: classifierDecisionFor(row, records),
     response,
     phase: reviewPhaseFrom(row.phase),
     disposition: reviewDispositionFrom(row.disposition),

@@ -41,6 +41,15 @@ review. Unresolved returns supply a likely-unresolved signal; the implementer
 can make changes or request reviewer investigation. Jev supplies no repair
 instructions. Its selected-choice scores are not correctness probabilities.
 
+For TASK-2658, the operator subsequently chose availability-dependent opt-out
+routing instead of the proposed opt-in rollout. Eligible autonomous decisions
+are attributed to the dedicated Jev review identity; Parallix applies them
+through its existing checked review authority. A finding-resolution signal
+cannot approve a PR with broader obligations. Classifier measurements remain
+local statistics inputs, and Forgejo remains the review publication adapter.
+This follow-up choice does not change the historical research results or turn
+the estimated saving into a measured whole-workflow improvement.
+
 ## Decision matrix
 
 | Option | Use | Measured evidence | Position |
@@ -106,6 +115,18 @@ development; broader review remains necessary for new findings.
   labor and actual lifecycle savings remain unmeasured.
 - Neither mission labeling, NEL prediction nor extra bug-review guidance has
   demonstrated an advantage sufficient for adoption.
+
+## TASK-2658 threshold follow-up
+
+The operator subsequently chose 52% resolved and 89% unresolved for the
+implementation, replacing the historical 51%/90% policy. New decisions record
+a new policy version; historical decisions retain their original interpretation.
+This adjustment trades a borderline clear for general review and retains a
+borderline unresolved return. Validation evaluates Jev decision counts and
+agreement with historical judgments when Jev decides; general-reviewer
+variability is excluded. Thresholds alone do not establish correctness or cover
+new findings outside the classified original scope. The original evidence and
+conclusions above remain historical results.
 
 ## Reconsideration triggers
 

@@ -73,6 +73,14 @@ test('a stale loop write preserves a verdict recorded during reviewer launch', (
   assert.equal(saved.rounds[0].disposition, 'APPROVED');
 });
 
+test('flattened fixing state preserves the actual previous review comment for repeat evidence (TASK-2658)', async () => {
+  const { repeatReview } = await import('../../fixtures/repeat-review.js');
+  const source = repeatReview();
+  const review: Review = { ...source, rounds: [{ ...source.rounds[0], phase: 'fixing', disposition: 'REQUEST_CHANGES', response: null }] };
+  const saved = applyReviewStateToReview(review, { round: 1, phase: 'fixing', disposition: 'REQUEST_CHANGES' });
+  assert.deepEqual(saved.rounds[0].decision, review.rounds[0].decision);
+});
+
 test('an invalid PR reference is refused rather than written onto the round', () => {
   const applied = applyReviewStateToReview(reviewWithLocalBranch(), {
     pullRequest: {

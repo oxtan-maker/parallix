@@ -164,7 +164,7 @@ test('R1: normal approval transitions review to integration immediately with dec
 // `review` until `px integrate` repaired it at wall-clock time.
 // ---------------------------------------------------------------------------
 
-test('R1 production: local approval path transitions Mission to integration before px integrate (task-2376)', async () => {
+test('R1 production: local approval path transitions Mission to integration before px integrate (task-2376)', async (t) => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'task-2376-r1prod-'));
   fs.mkdirSync(path.join(root, 'missions'), { recursive: true });
   spawnSync('git', ['init'], { cwd: root });
@@ -184,9 +184,11 @@ test('R1 production: local approval path transitions Mission to integration befo
   await new SqliteMigrationRunner(database).applyPending(loadDefaultMigrations());
   const store = new SqliteMissionStore(database);
 
-  // The round starts at 10:30; a local (provider=none) approval records the
-  // ReviewerDecision with decidedAt = round start, the authoritative value.
-  const decidedAt = '2026-01-01T10:30:00Z';
+  // Approval occurs after review starts; the flattened state must not replace
+  // the recorded decision time with the round start (TASK-2658).
+  const startedAt = '2026-01-01T10:00:00Z';
+  const decidedAt = '2026-01-01T10:30:00.000Z';
+  t.mock.timers.enable({ apis: ['Date'], now: Date.parse(decidedAt) });
   const slug = 'task-2376-r1prod';
   const mission = {
     id: missionId(slug),
@@ -207,7 +209,7 @@ test('R1 production: local approval path transitions Mission to integration befo
         subject: { change: pullRequest, revision: changeRevision('abc123') },
         reviewer,
         implementer,
-        startedAt: decidedAt,
+        startedAt,
         decision: null,
         response: null,
         phase: 'reviewing',

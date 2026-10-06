@@ -391,3 +391,22 @@ describe("SC3: review-commands.ts submitReviewRound approve path", () => {
     assert.deepEqual(order, ['post', 'record'], 'recordApproval runs only after the POST succeeded');
   });
 });
+
+it('classifier decision preserves review authority and rejects stale/partial scope (TASK-2658)', async () => {
+  const { applyClassifierReview, assertClassifierReviewSource, LEGACY_CLASSIFIER_POLICY_VERSION } = await import('../../../src/domain/classifier-review.js');
+  const { repeatReview } = await import('../../fixtures/repeat-review.js');
+  const source = { kind: 'classifier' as const, identity: 'jev' as const, decisionId: 'd', attemptId: 'a', provider: 'typesafe', model: 'jev',
+    packetHash: 'c'.repeat(64), priorRevision: 'a'.repeat(40), candidateRevision: 'b'.repeat(40), findingIds: ['F1'], policyVersion: 'repeat-findings-52-89-v2', label: 'addresses', score: 0.52 };
+  const review = repeatReview();
+  const legacy = { ...source, policyVersion: LEGACY_CLASSIFIER_POLICY_VERSION, score: 0.51 };
+  assert.doesNotThrow(() => assertClassifierReviewSource(legacy), 'historical decisions retain their original threshold');
+  assert.throws(() => applyClassifierReview(review, legacy, 'clear', '2026-10-06T00:00:00Z'), /current policy/);
+  assert.throws(() => applyClassifierReview(review, { ...source, score: 0.51 }, 'clear', '2026-10-06T00:00:00Z'), /provenance/);
+  const approved = applyClassifierReview(review, source, 'clear', '2026-10-06T00:00:00Z');
+  assert.equal(currentReviewRound(approved).decision?.classifier?.identity, 'jev');
+  assert.equal(currentReviewRound(approved).reviewer, 'claude', 'classifier never impersonates or replaces the general reviewer');
+  assert.equal(currentReviewRound(approved).phase, 'approved');
+  assert.throws(() => applyClassifierReview(review, { ...source, findingIds: [] }, 'clear', '2026-10-06T00:00:00Z'), /provenance/);
+  assert.throws(() => applyClassifierReview(review, { ...source, candidateRevision: 'c'.repeat(40) }, 'clear', '2026-10-06T00:00:00Z'), /stale/);
+  assert.throws(() => applyClassifierReview(review, { ...source, score: 0.50 }, 'clear', '2026-10-06T00:00:00Z'), /provenance/);
+});

@@ -15,6 +15,7 @@ export interface StatsCommandResult<Row extends StatisticsRow = StatisticsRow> {
   readonly rows: readonly Row[];
   readonly missionKey?: string;
   readonly selection?: StatsReportSelection<Row>;
+  readonly classifierStatistics?: import('./review-classification/statistics.js').ClassifierStatisticsInput | null;
   readonly missionFlow?: readonly StatsMissionFlow[] | null;
 }
 
@@ -33,6 +34,7 @@ export class StatsCommandUseCase<Row extends StatisticsRow = StatisticsRow> {
       };
     }
     const missionFlow = await this._workflow.loadMissionFlow();
-    return { mode: request.mode, rows, missionFlow, selection: selectStatsReport(rows, missionFlow, { ...request, mode: request.mode }) };
+    const classifierStatistics = await this._workflow.loadClassifierStatistics?.() ?? null;
+    return { mode: request.mode, rows, missionFlow, classifierStatistics, selection: selectStatsReport(rows, missionFlow, { ...request, mode: request.mode }) };
   }
 }

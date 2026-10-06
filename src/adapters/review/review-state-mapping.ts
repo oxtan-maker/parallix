@@ -66,6 +66,7 @@ function decisionFromState(
   previous: ReviewerDecision | null,
 ): ReviewerDecision | null {
   if (phase === 'approved') {
+    if (previous?.kind === 'approved') { return previous; }
     return { kind: 'approved', decidedAt: startedAt, comment: disposition, source: { kind: 'local' } };
   }
   if (phase === 'fixing' && disposition) {
@@ -78,7 +79,7 @@ function decisionFromState(
     // fired `review -> active`; rewriting it here would skew the aggregate
     // away from the lane event's `occurredAt`.
     if (previous?.kind !== 'changes-requested') { return null; }
-    return { ...previous, comment: disposition };
+    return previous;
   }
   return null;
 }

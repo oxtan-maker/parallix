@@ -10,8 +10,9 @@ const { spawnSync } = _cp;
  * another login. Dismissal needs repository admin, so setup grants it admin.
  */
 export const PARALLIX_FORGEJO_USER = 'parallix';
+export const CLASSIFIER_FORGEJO_USER = 'jev';
 
-export function suggestedForgejoUsers(): string[] { return unique([...eligibleAgentsForStep('active'), ...eligibleAgentsForStep('review'), PARALLIX_FORGEJO_USER]); }
+export function suggestedForgejoUsers(): string[] { return unique([...eligibleAgentsForStep('active'), ...eligibleAgentsForStep('review'), PARALLIX_FORGEJO_USER, CLASSIFIER_FORGEJO_USER]); }
 export function readConfiguredReviewRemote(rootDir?: string, remoteName?: string): string | null {
   const result = spawnSync('git', ['-C', rootDir || process.cwd(), 'remote', 'get-url', remoteName || 'review'], { encoding: 'utf8' });
   return result.status === 0 ? (result.stdout || '').trim() || null : null;

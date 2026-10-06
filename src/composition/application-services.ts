@@ -1,3 +1,4 @@
+import { createRepeatReviewClassification } from './review-classification.js';
 import * as path from 'node:path';
 
 import { ExecuteMissionService } from '../application/execute-mission-service.js';
@@ -251,6 +252,7 @@ export async function createProductionApplicationServices(
       }),
     reviewLoopMechanisms: (reviewSlug: string, target: ReviewLoopTarget, bindings: ReviewLoopBindings = {}) => createReviewLoopPorts(reviewSlug, target, {
       ...bindings,
+      classification: createRepeatReviewClassification(reviewSlug, target.worktree ?? rootDir),
       performHandoffFn: handoffWithMissionServices!,
       ...reviewLoopBindings(mission.store, mission.lifecycle, sessionMarkerPort),
     }),

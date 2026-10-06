@@ -1,3 +1,4 @@
+import { CLASSIFIER_FORGEJO_USER } from './setup-review-repository.js';
 /**
  * Review loop mechanisms.
  *
@@ -45,6 +46,7 @@ const MODULE_DIR = path.dirname(fileURLToPath(import.meta.url));
 
 /** The production review authority a composition root binds for one loop. */
 export interface ReviewLoopBindings {
+  readonly classification?: import('../../application/ports/review-classification.js').RepeatReviewClassificationPorts;
   readonly readReviewState?: (_slug: string, _worktree?: string, _store?: MissionStore | null) => Promise<ReviewState | null> | ReviewState | null;
   readonly writeReviewState?: typeof writeReviewState;
   readonly resetReviewState?: typeof resetReviewState;
@@ -287,6 +289,7 @@ export function createReviewLoopPorts(slug: string, target: ReviewLoopTarget, bi
   return {
     branch,
     worktree,
+    classification: bindings.classification,
     polling: { intervalMs: resolvePollIntervalMs(), timeoutMs: resolvePollTimeoutMs(target.pollTimeoutSeconds || 0) },
     missionStore,
     lifecycle: lifecycleService,
@@ -325,7 +328,7 @@ export function createReviewLoopPorts(slug: string, target: ReviewLoopTarget, bi
         const comments = await fetchComments(branch, token, { rootDir: worktree });
         if (!Array.isArray(comments)) { return null; }
         const seen = new Set(Array.isArray(state.metadata.humanFeedbackSources) ? state.metadata.humanFeedbackSources as string[] : []);
-        const configuredAgents = new Set([...WORKFLOW_AGENT_NAMES, state.reviewer ?? '', state.implementer ?? ''].map(value => value.toLowerCase()).filter(Boolean));
+        const configuredAgents = new Set([...WORKFLOW_AGENT_NAMES, CLASSIFIER_FORGEJO_USER, state.reviewer ?? '', state.implementer ?? ''].map(value => value.toLowerCase()).filter(Boolean));
         const normalized = comments.map((raw, index) => ({ comment: raw as ForgejoFeedbackComment, index }));
         // Only human review bodies and their inline comments are operator
         // corrections. Issue prose is discussion, never a workflow command.

@@ -620,16 +620,19 @@ test('failed approval boundary transition surfaces and blocks Backlog promotion 
 // Review on a live mission is the state a human override applies to.
 // ---------------------------------------------------------------------------
 
-test('R5: human px review approval persists ReviewerDecision and lands integration at decidedAt without a second approval (task-2378)', async () => {
+test('R5: human px review approval persists ReviewerDecision and lands integration at decidedAt without a second approval (task-2378)', async (t) => {
   const fixture = await createFixture('task-2378-r5-');
   const slug = 'task-2378-r5';
-  const decidedAt = '2026-01-01T10:30:00Z';
+  // Separate review start from the recorded approval time (TASK-2658).
+  const startedAt = '2026-01-01T10:00:00Z';
+  const decidedAt = '2026-01-01T10:30:00.000Z';
+  t.mock.timers.enable({ apis: ['Date'], now: Date.parse(decidedAt) });
 
   const review = startReview(
     { change: pullRequest, revision: changeRevision('abc123') },
     reviewer,
     implementer,
-    decidedAt,
+    startedAt,
     reviewerEligibility,
   );
   const mission = {

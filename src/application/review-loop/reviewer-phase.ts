@@ -1,3 +1,5 @@
+import { observeGeneralReview } from '../review-classification/observe-review.js';
+import { tryRepeatReview } from '../review-classification/repeat-review.js';
 /**
  * The reviewing half of a round: open the round, run the pre-review
  * prerequisites, launch the reviewer, consume and recover its output, and turn
@@ -242,6 +244,14 @@ export async function runReviewerPhase(context: LoopContext, round: ReviewRound)
     }
     // The graph is reviewer context, not a correctness gate: refresh it once
     // only after the final rebase and declared verification have succeeded.
+    const cycleStarted = context.ports.classification?.clock();
+    const classified = await tryRepeatReview(context, round, cycleStarted);
+    if (classified === 'stop') { return { outcome: 'stop' }; }
+    if (classified) {
+      if (await applyReviewerOutcome(context, classified)) { return { outcome: 'stop' }; }
+      return { reviewState: classified };
+    }
+    const reviewerStarted = context.ports.classification?.clock() ?? 0;
     await context.ports.preReview.refreshKnowledgeGraph();
     if (await launchReviewer(context, round)) { return { outcome: 'stop' }; }
     const consumed = await consumeReviewerOutput(context, round);
@@ -249,6 +259,7 @@ export async function runReviewerPhase(context: LoopContext, round: ReviewRound)
     const recovered = await recoverReviewerTimeout(context, round, consumed.reviewState);
     if (recovered.step) { return { outcome: 'stop' }; }
     reviewState = recovered.reviewState;
+    await observeGeneralReview(context, reviewerStarted, reviewState, cycleStarted);
   }
   if (await applyReviewerOutcome(context, reviewState)) { return { outcome: 'stop' }; }
   return { reviewState };

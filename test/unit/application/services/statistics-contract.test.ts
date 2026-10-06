@@ -287,3 +287,49 @@ test('stats CLI renders the application-selected population without selecting co
     assert.deepEqual(result.selection, selection);
   }
 });
+
+test('weekly classifier share counts applied PR decisions including open missions (TASK-2658)', async () => {
+  const { classifierStatistics } = await import('../../../../src/application/review-classification/statistics.js');
+  const { weeklyDecisionWindows } = await import('../../../../src/application/services/decision-window.js');
+  const window = weeklyDecisionWindows('2026-10-06').current;
+  const decisions = [
+    { id: 'ordinary', decidedAt: '2026-09-30T00:00:00Z', source: 'reviewer' as const, outcome: 'implementer' as const },
+    { id: 'classifier', decidedAt: '2026-10-06T23:59:59Z', source: 'classifier' as const, outcome: 'clear' as const },
+    { id: 'old', decidedAt: '2026-09-29T23:59:59Z', source: 'reviewer' as const, outcome: 'clear' as const },
+  ];
+  const input = { decisions: [...decisions, decisions[1]], attempts: [], applied: [], observations: [], coverage: 'complete' as const };
+  const stats = classifierStatistics(input, window);
+  assert.equal(stats.total, 2);
+  assert.equal(stats.classifier, 1);
+  assert.equal(stats.percentage, 50);
+  assert.equal(stats.clears, 1);
+  assert.equal(stats.returns, 0);
+  assert.equal(classifierStatistics({ ...input, coverage: 'partial' }, window).percentage, null);
+  assert.equal(classifierStatistics({ ...input, decisions: [] }, window).percentage, null);
+});
+
+test('completed classifier cohorts include old calls and same-scope shadow disagreements (TASK-2658)', async () => {
+  const { classifierGroups, classifierStatistics } = await import('../../../../src/application/review-classification/statistics.js');
+  const { classificationAttempt } = await import('../../../fixtures/repeat-review.js');
+  const { weeklyDecisionWindows } = await import('../../../../src/application/services/decision-window.js');
+  const window = weeklyDecisionWindows('2026-10-06').current;
+  const sample = classificationAttempt({ observedAt: '2026-09-01T00:00:00Z', shadow: true });
+  const observation = { decisionId: sample.decisionId, revision: sample.candidateRevision, findingIds: sample.findingIds,
+    observedAt: '2026-09-01T00:01:00Z', originalFindings: 'unresolved' as const, newFindings: 2, cycleMs: 100.42, ordinaryReviewMs: 100 };
+  const input = { decisions: [], applied: [], attempts: [sample, classificationAttempt({ mission: 'still-open', decisionId: 'open' })],
+    observations: [observation], coverage: 'complete' as const,
+    missions: [{ mission: sample.mission, closedAt: '2026-10-06T00:00:00Z', reviewRounds: 3, fixRounds: 2 },
+      { mission: 'still-open', closedAt: null, reviewRounds: 1, fixRounds: 0 }] };
+  const group = classifierGroups(input, window)![0];
+  assert.equal(group.statistics.calls, 1, 'closure selects the full history, including calls outside this week');
+  assert.equal(group.missions, 1);
+  assert.equal(group.reviewRounds, 3);
+  assert.equal(group.fixRounds, 2);
+  assert.equal(group.statistics.shadowFalseClears, 1);
+  assert.equal(group.statistics.falseClears, 0, 'shadow decisions were never applied');
+  assert.ok(Math.abs(group.measuredNetMs! + 0.42) < 1e-9);
+  assert.equal(classifierStatistics(input, window).calls, 1, 'decision-week counters still include the open mission');
+  const drifted = { ...input, observations: [{ ...observation, revision: 'c'.repeat(40) }] };
+  assert.equal(classifierGroups(drifted, window)![0].statistics.shadowFalseClears, 0);
+  assert.equal(classifierGroups(drifted, window)![0].statistics.shadowUnobserved, 1);
+});

@@ -246,6 +246,7 @@ export const MISSION_REVIEW_ROUNDS_AUTHORITY = {
   decision_kind: MISSION_VALUE_AUTHORITY,
   decided_at: MISSION_VALUE_AUTHORITY,
   decision_comment: MISSION_VALUE_AUTHORITY,
+  classifier_source: MISSION_VALUE_AUTHORITY,
   approval_source_kind: MISSION_VALUE_AUTHORITY,
   approval_source_provider: MISSION_VALUE_AUTHORITY,
   responded_at: MISSION_VALUE_AUTHORITY,
@@ -298,4 +299,6 @@ export const SQLITE_ENTITY_AUTHORITY = {
   mission_review_rounds: MISSION_REVIEW_ROUNDS_AUTHORITY,
   mission_review_findings: MISSION_REVIEW_FINDINGS_AUTHORITY,
   mission_review_resolutions: MISSION_REVIEW_RESOLUTIONS_AUTHORITY,
+  review_classifier_measurements: { decision_id: MISSION_VALUE_AUTHORITY, repository_id: MISSION_VALUE_AUTHORITY, samples: MISSION_VALUE_AUTHORITY },
+  review_classifier_observations: { decision_id: MISSION_VALUE_AUTHORITY, payload: MISSION_VALUE_AUTHORITY },
 } as const;

@@ -1810,6 +1810,25 @@ test('postReview includes commit_id', () => {
   assert.equal(postCall.body.commit_id, 'head-sha-456');
 });
 
+test('classifier publication uses its own identity and rejects a different PR revision (TASK-2658)', () => {
+  for (const head of ['candidate', 'drifted']) {
+    const posts = [];
+    const apiCall = (method, apiPath, token, body, options) => {
+      assert.equal(token, 'jev-token');
+      assert.equal(options.rootDir, '/classifier-worktree');
+      if (method === 'POST') { posts.push(body); }
+      return { ok: true, data: { head: { sha: head } } };
+    };
+    const result = postReview('mission/task-2658', 'jev-token', 'approve', 'Scope F1', {
+      apiCall, rootDir: '/classifier-worktree', forgejoUser: 'jev', expectedRevision: 'candidate',
+      resolvePrNumber: (_branch, _token, options) => { assert.equal(options.forgejoUser, 'jev'); return 1; },
+    });
+    assert.equal(result.ok, head === 'candidate');
+    assert.equal(posts.length, head === 'candidate' ? 1 : 0);
+    if (posts.length) { assert.equal(posts[0].commit_id, 'candidate'); }
+  }
+});
+
 test('postComment resolves PR via default token fallback while posting as codex', () => {
   const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'forgejo-default-token-fallback-comment-'));
   const previousHome = process.env.FORGEJO_HOME;

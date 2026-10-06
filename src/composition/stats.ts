@@ -1,3 +1,4 @@
+import { createClassifierStatisticsReader } from './classifier-statistics.js';
 import fs from 'node:fs';
 import type { MissionStore } from '../application/domain-ports.js';
 import type { StatsMissionFlow } from '../application/ports/cli-workflows.js';
@@ -45,10 +46,13 @@ export function createStatsMissionFlowReader(options: StatsCompositionOptions): 
 
 /** CLI arguments/presentation and bound storage capabilities are assembled here. */
 export function createStatisticsCommand(options: StatsCompositionOptions = {}) {
-  const useCase = new StatsCommandUseCase(createStatsWorkflowAdapter({
+  const useCase = new StatsCommandUseCase({ ...createStatsWorkflowAdapter({
     rootDir: options.rootDir, store: options.store, dbPath: options.dbPath,
     readMissionFlow: options.readMissionFlow ?? createStatsMissionFlowReader(options),
-  }));
+  }), loadClassifierStatistics: async () => {
+    try { return await (await createClassifierStatisticsReader(options.rootDir ?? process.cwd())).read(); }
+    catch { return null; }
+  } });
   return createStatsCommand(useCase, {
     renderWeekly: (rows, report) => renderWeeklyStatsReport(rows, report),
     renderRange: (rows, report) => renderRangeStatsReport(rows, report),

@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { createRepeatReviewClassification } from './review-classification.js';
 
 import fs from 'node:fs';
 import { hostMissionCommand } from './mission-terminal.js';
@@ -413,6 +414,7 @@ function createCommandRegistry(rootDir: string): Record<string, Command> {
           // application review loop decides how they are sequenced.
           reviewLoopMechanisms: (request: StartReviewRound, observers: ReviewLoopObservers) => createReviewLoopPorts(request.slug, request, {
             ...observers,
+            classification: createRepeatReviewClassification(request.slug, resolveWorktree(request.slug) ?? rootDir),
             performHandoffFn: performHandoffWithMissionServices(missionServicesFn as HandoffMissionServicesPort),
             ...reviewLoopBindings(services.mission!.store, services.mission!.lifecycle, reviewerSessionPort),
           }),

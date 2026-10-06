@@ -104,6 +104,7 @@ export interface ReviewDecisionSupersession {
 export type ReviewerDecision =
   | {
     readonly kind: 'approved';
+    readonly classifier?: import('./classifier-review.js').ClassifierReviewSource;
     readonly decidedAt: string;
     readonly comment: string | null;
     readonly source: ReviewApprovalSource;
@@ -114,6 +115,7 @@ export type ReviewerDecision =
   }
   | {
     readonly kind: 'changes-requested';
+    readonly classifier?: import('./classifier-review.js').ClassifierReviewSource;
     readonly decidedAt: string;
     readonly comment: string | null;
     readonly findings: readonly ReviewFinding[];

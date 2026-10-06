@@ -443,3 +443,33 @@ Integration requires a recorded reviewer approval, reruns the repository's
 `adapters.gates.preIntegration` commands before merging, and verifies the exact
 resulting tree. These built-in lifecycle controls remain in force alongside the
 configurable gates above.
+
+## Repeat review classification
+
+Jev can handle eligible repeat findings after the configured verification passes.
+It uses the previous review, the implementer response and mechanically collected
+source at exact revisions. Incomplete evidence, broader changes, unavailable
+configuration and failed calls retain the general reviewer.
+
+The selected-choice routing thresholds are 52% for a resolved finding set and
+89% for unresolved findings; other judgments go to the general reviewer. These
+scores are routing signals, not probabilities that the PR is correct.
+
+Configure Jev through the operator environment used by the decision adapter.
+Run `px setup` or `px setup-review` to provision its dedicated `jev` Forgejo
+review identity and token alongside the review users. Jev is a classifier, not
+an eligible coding-agent family. Its formal review and local decision record
+identify the same candidate revision and original findings.
+
+Set `PARALLIX_JEV_REVIEW=off` in the operator environment to opt out, or `shadow`
+to collect classifier judgments while the general reviewer makes the decision.
+The default is enabled when the decision adapter and review identity are
+available. Invalid mode values disable routing. Missing Jev credentials or
+review tokens leave ordinary review usable.
+
+`px stats` reports total applied PR decisions, classifier decisions and their
+percentage for its existing rolling seven-day UTC windows, including open
+missions. Calls, retries, reviewer fallbacks and shadow judgments are separate
+from applied decisions. An automatic clear without an independent observation
+has unobserved correctness; a zero decision total has no percentage. Statistics
+read local operational state and do not query Forgejo.

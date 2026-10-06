@@ -342,6 +342,7 @@ export interface ReviewLoopPorts {
   readonly preReview: PreReviewPort;
   readonly output: ReviewLoopOutput;
   readonly lock: ReviewControllerLock;
+  readonly classification?: import('./review-classification.js').RepeatReviewClassificationPorts;
   readonly missionStore: MissionStore | null;
   readonly lifecycle: MissionLifecycleService | null;
 }
