@@ -41,9 +41,7 @@ const SOURCE_EXTENSIONS = new Set(['.ts', '.tsx']);
 const EXCEPTIONS: readonly string[] = [
   'src/adapters/agents/agents.ts',
   'src/adapters/backlog/legacy-mission-import.ts',
-  'src/adapters/cli/commands/active.ts',
   'src/adapters/cli/commands/draft-stats.ts',
-  'src/adapters/cli/commands/stats-report-rendering.ts',
   'src/adapters/config/product-config.ts',
   'src/adapters/config/repository-gates.ts',
   'src/adapters/forgejo/forgejo-git.ts',

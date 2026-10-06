@@ -65,6 +65,7 @@ function enableForgejoReview(root) {
   return root;
 }
 
+// TASK-2668.02: supplied dbPath must reach the measurement store after native typing.
 test('upsertMeasurementRow persists the workflow stats schema and updates existing missions idempotently', () => {
   const dbFile = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'workflow-stats-upsert-')), 'parallix.db');
   try {
@@ -1216,7 +1217,7 @@ test('completed-mission credit groups by the recorded family, not telemetry mode
   const result = summarizeAgentWindow(rows, window);
 
   assert.deepEqual(result, [
-    { implementer: 'custom', missions: 3, averageFixRounds: '1.00' },
+    { implementer: 'custom', missions: 3, averageFixRounds: '1.00', prFixObservationCount: 3 },
   ]);
 });
 
@@ -1249,10 +1250,10 @@ test('completed-mission credit does not invent mixed model owners', () => {
   const result = summarizeAgentWindow(rows, window);
 
   assert.deepEqual(result, [
-    { implementer: 'claude', missions: 1, averageFixRounds: '3.00' },
-    { implementer: 'codex', missions: 1, averageFixRounds: '1.00' },
-    { implementer: 'custom', missions: 2, averageFixRounds: '1.50' },
-    { implementer: 'gemini', missions: 1, averageFixRounds: '0.00' },
+    { implementer: 'claude', missions: 1, averageFixRounds: '3.00', prFixObservationCount: 1 },
+    { implementer: 'codex', missions: 1, averageFixRounds: '1.00', prFixObservationCount: 1 },
+    { implementer: 'custom', missions: 2, averageFixRounds: '1.50', prFixObservationCount: 2 },
+    { implementer: 'gemini', missions: 1, averageFixRounds: '0.00', prFixObservationCount: 1 },
   ]);
 });
 

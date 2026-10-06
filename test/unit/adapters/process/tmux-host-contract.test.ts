@@ -1,5 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import { PassThrough } from 'node:stream';
+import childProcess from 'node:child_process';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtemp } from '../../../helpers/temp-dir.js';
@@ -11,6 +13,7 @@ import {
   probeTmux,
   reconcileOrphanSessions,
   shellQuote,
+  superviseTmuxLaunch,
   tmuxAttachArgs,
 } from '../../../../src/adapters/process/tmux-host.js';
 import { ensurePrivateDir, terminalStateRoot } from '../../../../src/adapters/process/terminal-state-root.js';
@@ -117,6 +120,37 @@ test('restart adoption kills sessions whose host or harness died, only for the s
 test('attach targets one exact session and supports read-only watching (TASK-2643)', () => {
   assert.deepEqual(tmuxAttachArgs('/s.sock', 'execute-claude-a1-x', false), ['-S', '/s.sock', 'attach-session', '-t', '=execute-claude-a1-x']);
   assert.deepEqual(tmuxAttachArgs('/s.sock', 'execute-claude-a1-x', true), ['-S', '/s.sock', 'attach-session', '-r', '-t', '=execute-claude-a1-x']);
+});
+
+test('interactive supervision retries an attach that loses the server/window race (TASK-2643)', async context => {
+  const originalStdinTty = process.stdin.isTTY;
+  const originalStdoutTty = process.stdout.isTTY;
+  Object.defineProperty(process.stdin, 'isTTY', { value: true, configurable: true });
+  Object.defineProperty(process.stdout, 'isTTY', { value: true, configurable: true });
+  context.after(() => {
+    Object.defineProperty(process.stdin, 'isTTY', { value: originalStdinTty, configurable: true });
+    Object.defineProperty(process.stdout, 'isTTY', { value: originalStdoutTty, configurable: true });
+  });
+  const child = Object.assign(new PassThrough(), { stderr: new PassThrough(), kill: () => true }) as unknown as childProcess.ChildProcess;
+  const firstAttach = Object.assign(new PassThrough(), { kill: () => true }) as unknown as childProcess.ChildProcess;
+  const secondAttach = Object.assign(new PassThrough(), { kill: () => true }) as unknown as childProcess.ChildProcess;
+  const spawned: string[] = [];
+  context.mock.method(childProcess, 'spawn', ((command: string) => {
+    spawned.push(command);
+    return spawned.length === 1 ? child : spawned.length === 2 ? firstAttach : secondAttach;
+  }) as never);
+  context.mock.method(childProcess, 'execFile', ((_command: string, _args: string[], _options: object, callback: (error: Error | null) => void) => {
+    callback(null);
+    return Object.assign(new PassThrough(), { kill: () => true });
+  }) as never);
+  const result = superviseTmuxLaunch({ command: 'px', args: [], socketPath: '/tmp/task.sock', sessionName: 'task-1', windowName: 'active', started: () => true, cleanup: () => {} });
+  await new Promise(resolve => setTimeout(resolve, 60));
+  firstAttach.emit('exit', 1);
+  await new Promise(resolve => setTimeout(resolve, 60));
+  secondAttach.emit('exit', 0);
+  child.emit('close', 6);
+  assert.equal(await result, 6);
+  assert.deepEqual(spawned, ['px', 'tmux', 'tmux']);
 });
 
 test('retired-session cleanup tolerates a concurrent closer and removes transport (TASK-2643)', context => {

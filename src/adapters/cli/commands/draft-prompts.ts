@@ -1,4 +1,3 @@
-// @ts-nocheck
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as fmt from '../../../application/presentation/cli-format.js';
@@ -8,23 +7,17 @@ import { assembleStagePrompt } from '../../assets/runtime-assets.js';
 import { resolvePromptOverride } from '../../config/product-config.js';
 import * as stats from './stats.js';
 import { formatVerificationCommand } from '../../verification/verification.js';
-
-// @ts-expect-error implicit any on rootDir
-function resolveVerifyCmd(rootDir) {
+function resolveVerifyCmd(rootDir: string) {
   return formatVerificationCommand(undefined, rootDir);
 }
-
-// @ts-expect-error implicit any on slug/promptRoot
-function resolveTaskPath(slug, promptRoot) {
+function resolveTaskPath(slug: string, promptRoot: string) {
   const resolution = resolveTaskFile(slug, promptRoot);
   if (resolution && resolution.ok && resolution.taskFile) {
     return resolution.taskFile;
   }
   return path.join(promptRoot, 'backlog', 'tasks', `<${slug}>.md`);
 }
-
-// @ts-expect-error implicit any on taskPath
-function resolveClassificationInstructions(taskPath) {
+function resolveClassificationInstructions(taskPath: string) {
   if (taskPath && fs.existsSync(taskPath)) {
     const content = fs.readFileSync(taskPath, 'utf8');
     if (/^source:\s*synthetic\s*$/mi.test(content)) {
@@ -33,9 +26,7 @@ function resolveClassificationInstructions(taskPath) {
   }
   return 'set exactly one Mission classification with `px classification set --value <ai_sdlc|user_value|unknown>`. Backlog task labels may describe the task, but Mission state is authoritative. Use `ai_sdlc` for workflow, prompt, or agent-fix work; use `user_value` for everything else; use `unknown` only when evidence is unavailable.';
 }
-
-// @ts-expect-error implicit any on slug/rootDir/worktree
-function buildDraftPrompt(slug, { rootDir = process.cwd(), worktree = null } = {}) {
+function buildDraftPrompt(slug: string, { rootDir = process.cwd(), worktree = null }: { rootDir?: string; worktree?: string | null } = {}) {
   const promptRoot = worktree || rootDir;
   const overridePath = resolvePromptOverride(promptRoot);
   const template = assembleStagePrompt('draft', { overridePath });
@@ -52,13 +43,11 @@ function buildDraftPrompt(slug, { rootDir = process.cwd(), worktree = null } = {
     .replaceAll('{{classificationInstructions}}', resolveClassificationInstructions(taskPath))
     .replaceAll('{{verifyCmd}}', resolveVerifyCmd(promptRoot));
 }
-
-// @ts-expect-error implicit any on slug
-function fallbackDraftCommitMessage(slug) {
+function fallbackDraftCommitMessage(slug: string) {
   return `draft(${slug}): capture agent output`;
 }
 
-function resolveMissionClassificationResolver(resolveMissionClassificationFn) {
+function resolveMissionClassificationResolver(resolveMissionClassificationFn?: typeof stats.resolveMissionClassification) {
   if (typeof resolveMissionClassificationFn === 'function') {
     return resolveMissionClassificationFn;
   }
@@ -67,12 +56,10 @@ function resolveMissionClassificationResolver(resolveMissionClassificationFn) {
   }
   throw new TypeError('resolveMissionClassificationFn is not a function');
 }
-
-// @ts-expect-error implicit any on slug/worktree
-function validateDraftClassification(slug, worktree, {
+function validateDraftClassification(slug: string, worktree: string, {
   resolveMissionClassificationFn = stats.resolveMissionClassification,
   errorFn = fmt.log.plainError
-} = {}) {
+}: { resolveMissionClassificationFn?: typeof stats.resolveMissionClassification; errorFn?: (_message: string) => void } = {}) {
   try {
     const resolveClassification = resolveMissionClassificationResolver(resolveMissionClassificationFn);
     const { classification, error: classificationError } = resolveClassification(slug, worktree);
@@ -82,19 +69,17 @@ function validateDraftClassification(slug, worktree, {
     }
     return { ok: true, classification };
   } catch (error) {
-    if (/** @type {any} */ (error).message.includes('Missing or invalid classification')) {
+    if ((error instanceof Error ? error.message : String(error)).includes('Missing or invalid classification')) {
       return { ok: true, classification: null };
     }
-    errorFn(fmt.status('FAIL', /** @type {any} */ (error).message));
+    errorFn(fmt.status('FAIL', (error instanceof Error ? error.message : String(error))));
     return { ok: false, reason: 'invalid-classification' };
   }
 }
-
-// @ts-expect-error implicit any on slug/worktree
-function normalizeDraftClassification(slug, worktree, {
+function normalizeDraftClassification(slug: string, worktree: string, {
   resolveMissionClassificationFn = stats.resolveMissionClassification,
   errorFn = fmt.log.plainError
-} = {}) {
+}: { resolveMissionClassificationFn?: typeof stats.resolveMissionClassification; errorFn?: (_message: string) => void } = {}) {
   try {
     const resolveClassification = resolveMissionClassificationResolver(resolveMissionClassificationFn);
     const { classification, error: classificationError } = resolveClassification(slug, worktree);
@@ -104,16 +89,14 @@ function normalizeDraftClassification(slug, worktree, {
     }
     return { ok: true, classification };
   } catch (error) {
-    if (/** @type {any} */ (error).message.includes('Missing or invalid classification')) {
+    if ((error instanceof Error ? error.message : String(error)).includes('Missing or invalid classification')) {
       return { ok: false, reason: 'missing-classification' };
     }
-    errorFn(fmt.status('FAIL', /** @type {any} */ (error).message));
+    errorFn(fmt.status('FAIL', (error instanceof Error ? error.message : String(error))));
     return { ok: false, reason: 'invalid-classification' };
   }
 }
-
-// @ts-expect-error implicit any on slug/rootDir/worktree
-function buildRestartPrompt(slug, { rootDir = process.cwd(), worktree = null } = {}) {
+function buildRestartPrompt(slug: string, { rootDir = process.cwd(), worktree = null }: { rootDir?: string; worktree?: string | null } = {}) {
   return `${buildDraftPrompt(slug, { rootDir, worktree })}
 
 Focused repair:
@@ -123,14 +106,12 @@ Focused repair:
 `;
 }
 
-
 /**
  * Prompt for an agent whose contract refine refused. The refusal names every
  * missing part and the command that records it; everything already recorded
  * stays, so the agent only adds what is missing.
  */
-// @ts-expect-error implicit any on slug/rootDir/worktree/refusal
-function buildContractRepairPrompt(slug, { rootDir = process.cwd(), worktree = null, refusal = '' } = {}) {
+function buildContractRepairPrompt(slug: string, { rootDir = process.cwd(), worktree = null, refusal = '' }: { rootDir?: string; worktree?: string | null; refusal?: string } = {}) {
   return `${buildDraftPrompt(slug, { rootDir, worktree })}
 
 Contract repair:

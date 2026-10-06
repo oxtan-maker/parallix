@@ -33,8 +33,8 @@ import * as statsReport from './stats-report.js';
 import { resolveMeasurementStore } from '../../sqlite/measurement-store.js';
 import { resolveMissionClassification } from './mission-classification.js';
 import type { StatsWorkflowPort, StatsMissionFlow } from '../../../application/ports/cli-workflows.js';
-import type { MeasurementStorePort } from '../../../application/measurement-ports.js';
-import type { StatsRow } from '../../../application/services/statistics-row.js';
+import type { MeasurementRecord, MeasurementStorePort } from '../../../application/measurement-ports.js';
+import type { NormalizeStatsRowOptions, StatsRow } from '../../../application/services/statistics-row.js';
 import type { StatisticsRecordingPort } from '../../../application/ports/statistics-recording.js';
 import { StatsRecordingUseCase, telemetryToStatsFields, type StageStatsRequest } from '../../../application/stats-recording-use-case.js';
 import { reviewStatistics } from '../../../application/services/review-statistics.js';
@@ -99,9 +99,7 @@ function getMeasurementStore(options: StatsOptions = {}): StatisticsMeasurementS
  * defaults ('' for text, '0' for numeric) so filtering, totals, grouping,
  * formatting, and missing-data behavior are unchanged by the cut-over.
  */
-// @ts-ignore -- retained reporting helper is dynamically typed
-function measurementToStatsRow(record): StatsRow {
-// @ts-ignore -- retained reporting helper is dynamically typed
+function measurementToStatsRow(record: MeasurementRecord): StatsRow {
   const numeric = (value: unknown) => (value === null || value === undefined ? '0' : String(value));
   // `pr_fix_rounds` is the one measurement that is genuinely nullable: an
   // unknown number of review-fix rounds is not a measured zero, and collapsing
@@ -139,13 +137,11 @@ function measurementToStatsRow(record): StatsRow {
  * so no adapter has to infer an identity (architecture migration: `Attempt` excluded).
  */
 function statsRowToMeasurement(row: StatsRow) {
-// @ts-ignore -- retained reporting helper is dynamically typed
-  const int = (value) => {
+  const int = (value: unknown) => {
     const parsed = Number.parseInt(String(value), 10);
     return Number.isFinite(parsed) ? parsed : 0;
   };
-// @ts-ignore -- retained reporting helper is dynamically typed
-  const dec = (value) => {
+  const dec = (value: unknown) => {
     const parsed = Number.parseFloat(String(value));
     return Number.isFinite(parsed) ? parsed : 0;
   };
@@ -184,7 +180,6 @@ function loadMeasurementRows(options: StatsOptions = {}) {
   const store = getMeasurementStore(options);
   return {
     headers: [...STATS_HEADERS],
-// @ts-ignore -- retained reporting helper is dynamically typed
     rows: store.listMeasurements().map(measurementToStatsRow),
   };
 }
@@ -203,17 +198,11 @@ export function createStatsWorkflowAdapter(binding: StatsReadBinding): StatsWork
 // `saveStatsCsv` was removed by architecture migration: no production path writes CSV.
 // The measurement database is the sole authority (ADR 0053).
 
-/**
- * @param {StatsRow} row
- */
-function statsRowActorKey(row = {}) {
-// @ts-ignore -- retained reporting helper is dynamically typed
+function statsRowActorKey(row: StatsRow = {}) {
   const stage = String(row.stage || 'default').trim().toLowerCase() || 'default';
   if (stage === 'review') {
-// @ts-ignore -- retained reporting helper is dynamically typed
     return normalizeImplementer(row.reviewer_agent || row.implementer_agent || row.implementer || '') || '';
   }
-// @ts-ignore -- retained reporting helper is dynamically typed
   return normalizeImplementer(row.implementer_agent || row.implementer || '') || '';
 }
 
@@ -227,13 +216,8 @@ const { formatStatsTable, renderWeeklyStatsReport, renderRangeStatsReport } = st
  * The statistics projection reads review data through `SqliteMissionStore`
  * (ADR 0053 / architecture migration) rather than through the review modules' readers,
  * so no statistics path can reintroduce a file-backed round history.
- *
- * @param {string} slug
- * @param {string} [rootDir]
- * @returns {Promise<import('../../../domain/review.js').Review|null>}  Null when the mission has no Review.
  */
-// @ts-ignore -- retained reporting helper is dynamically typed
-async function loadMissionReview(slug, _rootDir = process.cwd(), missionStore: ReviewReadStore) {
+async function loadMissionReview(slug: string, _rootDir = process.cwd(), missionStore: ReviewReadStore) {
   if (!missionStore) {
     throw new Error(
       `loadMissionReview requires a MissionStore: the stats caller must supply the operator store so ${slug} is read from the authoritative Review aggregate. Store omission is an invariant error; there is no heuristic fallback.`,
@@ -246,12 +230,8 @@ async function loadMissionReview(slug, _rootDir = process.cwd(), missionStore: R
   return result.kind === 'found' ? result.mission.review : null;
 }
 
-/**
- * @param {string} slug
- * @param {string} [rootDir]
- */
-// @ts-ignore -- retained reporting helper is dynamically typed
-async function deriveImplementerAndFixRounds(slug, rootDir = process.cwd(), missionStore: ReviewReadStore) {
+/** Derive the recorded implementer and fix-round count for one mission. */
+async function deriveImplementerAndFixRounds(slug: string, rootDir = process.cwd(), missionStore: ReviewReadStore) {
   if (!missionStore) {
     throw new Error(
       `deriveImplementerAndFixRounds requires a MissionStore: the stats caller must supply the operator store so ${slug} is read from the authoritative Review aggregate. Store omission is an invariant error; there is no PR, Git, or backlog fallback.`,
@@ -293,14 +273,10 @@ async function resolveStoredMissionClassification(slug: string, missionStore: Re
  * store in the same `date, repo, mission, stage` order the file authority
  * produced, so `recordIntegrationStats` and `px integrate` render identically.
  *
- * @param {StatsRow} row
- * @param {UpsertStatsRowOptions} options
  */
-// @ts-ignore -- retained reporting helper is dynamically typed
 function upsertMeasurementRow(row: StatsRow, options: StatsOptions = {}) {
-  /** @type {UpsertStatsRowOptions} */
-  const opts = options;
-  const canonicalRow = canonicalizeStatsRow(row, /** @type {any} */ ({ rootDir: opts.rootDir }));
+  const opts: NormalizeStatsRowOptions = { rootDir: options.rootDir };
+  const canonicalRow = canonicalizeStatsRow(row, opts);
   if (!canonicalRow.classification) {
     throw new Error(`Invalid classification for ${canonicalRow.mission}.`);
   }
@@ -308,10 +284,8 @@ function upsertMeasurementRow(row: StatsRow, options: StatsOptions = {}) {
     throw new Error(`Invalid implementer for ${canonicalRow.mission}.`);
   }
 
-  const store = getMeasurementStore(opts);
-// @ts-ignore -- retained reporting helper is dynamically typed
+  const store = getMeasurementStore(options);
   const { changed } = store.upsertMeasurement(statsRowToMeasurement(canonicalRow));
-// @ts-ignore -- retained reporting helper is dynamically typed
   const data = { headers: [...STATS_HEADERS], rows: store.listMeasurements().map(measurementToStatsRow) };
 
   return { changed, row: canonicalRow, data };
@@ -371,7 +345,7 @@ async function recordIntegrationStats(options: StatsRecordingOptions = {}) {
   let reportError = result.reportError;
   if (result.selection) {
     try {
-      report = renderWeeklyStatsReport(result.data.rows, { rootDir: options.rootDir, selection: result.selection });
+      report = renderWeeklyStatsReport([...result.data.rows], { rootDir: options.rootDir, selection: result.selection });
     } catch (error) { reportError = error instanceof Error ? error.message : String(error); }
   }
   return { changed: result.changed, row: result.row, data: result.data, metadataSource: result.metadataSource, report, reportError };

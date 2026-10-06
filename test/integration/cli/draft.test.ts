@@ -216,6 +216,19 @@ test('draft classification helpers fall back to stats when an injected resolver 
   assert.deepEqual(normalizeResult, { ok: true, [typeKey]: 'ai_sdlc' });
 });
 
+test('draft classification helpers report non-Error resolver failures (TASK-2668.02)', () => {
+  for (const helper of [validateMissionType, verifyMissionType]) {
+    const errors: string[] = [];
+    const result = helper('task-test', '/tmp/worktree', {
+      resolveMissionClassificationFn: () => { throw 'classification backend unavailable'; },
+      errorFn: (message: string) => errors.push(message),
+    });
+    assert.deepEqual(result, { ok: false, reason: 'invalid-classification' });
+    assert.equal(errors.length, 1);
+    assert.match(errors[0], /classification backend unavailable/);
+  }
+});
+
 test('restartDraftAgent uses the focused repair prompt', async () => {
   let capturedPrompt = null;
   const ok = await restartDraftRepair('task-test', '/tmp/worktree', {

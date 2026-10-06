@@ -1,4 +1,6 @@
-// @ts-nocheck
+import type { ProgressEvent, ApplicationOutcome } from '../../../application/contracts.js';
+import type { Log, Exit, ActiveOptions, ActiveExecution, LaunchOptions } from './active-adapter-types.js';
+import { unquoteGitStatusPath } from '../../git/porcelain-path.js';
 import { randomUUID } from 'node:crypto';
 import { git, getWorktreeStatus } from '../../git/git.js';
 import * as path from 'node:path';
@@ -10,33 +12,29 @@ import { assembleStagePrompt } from '../../assets/runtime-assets.js';
 import { resolvePromptOverride } from '../../config/product-config.js';
 import { isDbAdhocIdentity } from '../../../domain/mission.js';
 
-function renderActiveProgress(event, logFn) {
+function renderActiveProgress(event: { phase: string; agent?: string }, logFn: Log) {
   if (event.phase === 'handoff') {
-    logFn(fmt.status('PASS', `Implementation complete (${fmt.agent(event.agent)}).`));
+    logFn(fmt.status('PASS', `Implementation complete (${event.agent === undefined ? event.agent : fmt.agent(event.agent)}).`));
   }
 }
-
 
 // The active operator story already states the implementer above, so the Backlog
 // task-sync PASS ("transitioned to active ... and committed") is internal
 // bookkeeping, not an operator signal (SC4: task-synchronization narration stays
 // out of the normal active path). Keep genuine WARN lines; drop only the success
 // commit confirmation. Used only for the execute-path transition in onLaunch.
-/** @param {Function} l */
-function suppressTaskSyncCommitLog(l) {
-  return (/** @type{string} */ msg) => {
+function suppressTaskSyncCommitLog(l: Log) {
+  return (msg: string) => {
     if (/^\[PASS\] Task .* transitioned to .* and committed\./.test(fmt.stripAnsi(msg))) {return;}
     l(msg);
   };
 }
 
 /**
- * @param {string[]} args
  * `missionTitleFn` resolves the headline title from the same authority `px status`
  * reports (composition supplies it); without one the headline names only the slug.
- * @param {{inferSlugFn?: Function, service?: {execute: Function}, controller?: {dispatch: Function}, controllerFactory?: Function, rootDir?: string, exitFn?: Function, logFn?: Function, errorFn?: Function, missionTitleFn?: (slug: string) => string | null | Promise<string | null>}} [options]
  */
-async function active(args, options = {}) {
+async function active(args: string[], options: ActiveOptions = {}) {
   const {
     inferSlugFn = inferSlug,
     service,
@@ -80,8 +78,7 @@ async function active(args, options = {}) {
   logFn(`Mission ${fmt.slug(normalizedSlug)}${title ? `: ${title}` : ''}`);
 
   // Allow operators to pin the implementer agent family via CLI flag instead of WORKFLOW_AGENT env var.
-  /** @param {string[]} arr @param {string} flag @param {string} name */
-  function flagValue(arr, flag, name) {
+  function flagValue(arr: string[], flag: string, name: string) {
     const i = arr.indexOf(flag);
     if (i === -1) {return null;}
     const v = arr[i + 1];
@@ -95,7 +92,7 @@ async function active(args, options = {}) {
   const preselectedImplementer = flagValue(args, '--implementer', 'implementer');
   if (args.includes('--implementer') && !preselectedImplementer) {return;}
 
-  const renderProgress = event => renderActiveProgress(event, logFn);
+  const renderProgress = (event: Pick<ProgressEvent, 'phase' | 'agent'>) => renderActiveProgress(event, logFn);
   const operationId = `active:${normalizedSlug}:${randomUUID()}`;
   const outcome = await executeActiveCommand({ controller, controllerFactory, service, serviceFactory, rootDir, renderProgress, operationId, slug: normalizedSlug, agent: preselectedImplementer });
   if (outcome.status !== 'completed' || !outcome.value) {
@@ -104,7 +101,7 @@ async function active(args, options = {}) {
   }
 }
 
-async function executeActiveCommand({ controller, controllerFactory, service, serviceFactory, rootDir, renderProgress, operationId, slug, agent }) {
+async function executeActiveCommand({ controller, controllerFactory, service, serviceFactory, rootDir, renderProgress, operationId, slug, agent }: ActiveExecution) {
   const dispatcher = controller || (typeof controllerFactory === 'function' ? await controllerFactory(rootDir, renderProgress) : null);
   if (dispatcher) { return dispatcher.dispatch({ kind: 'active:execute', missionId: slug, operationId, agent, capabilities: new Set(['active:execute']), detached: false }); }
   const executeService = service || (typeof serviceFactory === 'function' ? await serviceFactory(rootDir, renderProgress) : null);
@@ -112,8 +109,8 @@ async function executeActiveCommand({ controller, controllerFactory, service, se
   return executeService.execute({ operationId, slug, agent, capabilities: new Set(['active:execute']) });
 }
 
-function reportActiveFailure(outcome, slug, errorFn, exitFn) {
-  const message = outcome.error?.message || 'Could not launch execute agent.';
+function reportActiveFailure(outcome: ApplicationOutcome<unknown>, slug: string, errorFn: Log, exitFn: Exit) {
+  const message = ('error' in outcome ? outcome.error?.message : undefined) || 'Could not launch execute agent.';
   const display = message === 'execute preflight failed' ? 'Preflight failed. Fix blockers above before launching the execute agent.'
     : message === 'dedicated execute worktree is required' ? `Could not locate dedicated worktree for mission/${fmt.slug(slug)}. Run "px draft ${slug}" first or create the worktree manually.` : message;
   errorFn(display);
@@ -130,10 +127,8 @@ function reportActiveFailure(outcome, slug, errorFn, exitFn) {
 // Backlog status is moved to 'active' from the onLaunch hook, which fires
 // immediately after the launcher successfully spawns the process. If the final
 // launch result later fails, we roll the task status back to the prior status.
-/**
- * @param {{slug: string, worktree: string, preselectedAgent?: string | null, agentConfig: object, taskResolution: object, prompt: string, startAgentFn?: Function, transitionTaskFn?: Function, getTaskStatusFn?: Function, getTaskImplementerFn?: Function, selectAgentFn?: Function, log?: Function, sessionMarkerPort?: object | null, onAgentLaunched?: (agent: string) => Promise<void>, authorityAlreadyActive?: boolean, unrefChild?: boolean}} opts
- */
-async function selectLaunchAndRecord(opts) {
+
+async function selectLaunchAndRecord(opts: LaunchOptions) {
   const {
     slug,
     worktree,
@@ -141,7 +136,7 @@ async function selectLaunchAndRecord(opts) {
     agentConfig,
     taskResolution,
     prompt,
-    startAgentFn = (/** @type{string} */ step, /** @type{any} */ opts) => agents.startAgent(step, opts),
+    startAgentFn = agents.startAgent,
     transitionTaskFn = transitionTask,
     getTaskStatusFn = getTaskStatus,
     getTaskImplementerFn = getTaskImplementer,
@@ -162,7 +157,7 @@ async function selectLaunchAndRecord(opts) {
     unrefChild = false,
   } = opts;
   const preselected = preselectedAgent || selectAgentFn('active', { config: agentConfig });
-  const taskResolutionTyped = /** @type{{ok: boolean, taskFile?: string} | undefined} */(taskResolution);
+  const taskResolutionTyped = taskResolution;
   const taskFile = taskResolutionTyped && taskResolutionTyped.ok && taskResolutionTyped.taskFile
     ? taskResolutionTyped.taskFile
     : null;
@@ -172,7 +167,7 @@ async function selectLaunchAndRecord(opts) {
   let authoritativeActivationCommitted = authorityAlreadyActive;
   let launchTransitionFailed = false;
   let rebaseDeferred = false;
-  let launchedAgent = null;
+  let launchedAgent: string | null = null;
   const rollbackIfNeeded = async ({ throwOnFailure = true } = {}) => {
     // A failed run does not undo a committed lifecycle transition. Keep the
     // mirror active so retry/resume sees the same lane as the Mission store.
@@ -184,8 +179,8 @@ async function selectLaunchAndRecord(opts) {
     // The rollback transition commits a task-sync PASS too; suppress that
     // bookkeeping line exactly like the onLaunch transition does (F1) so the
     // normal active path never carries task-synchronization narration.
-    /** @type{{rootDir: string, log: Function, implementer?: string, clearAssignee?: boolean}} */
-    const rollbackOpts = { rootDir: worktree, log: suppressTaskSyncCommitLog(log) };
+
+    const rollbackOpts: NonNullable<Parameters<typeof transitionTask>[2]> = { rootDir: worktree, log: suppressTaskSyncCommitLog(log) };
     if (priorImplementer) {
       rollbackOpts.implementer = priorImplementer;
     } else {
@@ -202,7 +197,7 @@ async function selectLaunchAndRecord(opts) {
   let actual;
   let result;
   try {
-    ({ agent: actual, result } = await startAgentFn('active', {
+   ({ agent: actual, result } = await startAgentFn('active', {
       prompt,
       worktree,
       agent: preselected,
@@ -210,7 +205,7 @@ async function selectLaunchAndRecord(opts) {
       role: 'implementer',
       unrefChild,
       sessionMarkerPort: sessionMarkerPort ?? undefined,
-      onLaunch: async (/** @type{{agent: string, startedAtMs?: number}} */ { agent, startedAtMs }) => {
+      onLaunch: async ({ agent, startedAtMs }: { agent: string; startedAtMs?: number }) => {
         launchedAgent = agent;
         // The authoritative active boundary lands here, as destination-state
         // work begins: the Mission state and its lane event persist before the
@@ -259,11 +254,11 @@ async function selectLaunchAndRecord(opts) {
       onLimitHit: () => {
         // Legacy launches can undo their mirror-only write. Once activation
         // commits through the lifecycle authority, retain active for retry.
-        rollbackIfNeeded({ throwOnFailure: false });
+        void rollbackIfNeeded({ throwOnFailure: false });
       },
       // The agent's own terminal stream is the progress record. Keep only
       // conditions an operator must act on; the normal launcher trace is debug detail.
-      log: (message) => {
+      log: (message: string) => {
         if (/\[(WARN|FAIL)\]|No output yet|Still waiting/.test(message)) { log(message); }
       }
     }));
@@ -292,8 +287,8 @@ async function selectLaunchAndRecord(opts) {
 // implementer that actually ran is `actual`, not the originally `preselected`
 // one. Re-record the resolved agent in the Backlog task so the post-active
 // handoff and the autonomous review loop poll the correct Forgejo identity.
-/** @param {{slug: string, preselected: string, actual: string, taskResolution: object, worktree: string, log?: Function, transitionTaskFn?: Function}} opts */
-function applyExecuteFallback(opts) {
+
+function applyExecuteFallback(opts: Pick<LaunchOptions, 'slug' | 'taskResolution' | 'log'> & { preselected: string; actual: string; worktree?: string; transitionTaskFn?: typeof transitionTask; enforceTaskAssigneeFn?: unknown }) {
   const {
     slug,
     preselected,
@@ -306,7 +301,7 @@ function applyExecuteFallback(opts) {
   if (!actual || actual === preselected) {
     return preselected;
   }
-  const taskResolutionTyped2 = /** @type{{ok: boolean, taskFile?: string} | undefined} */(taskResolution);
+  const taskResolutionTyped2 = taskResolution;
   if (taskResolutionTyped2 && taskResolutionTyped2.ok) {
     log(fmt.status('INFO', `Execute agent fell back from ${fmt.agent(preselected)} to ${fmt.agent(actual)}; enforcing backlog assignee.`));
     transitionTaskFn(slug, 'active', { implementer: actual, rootDir: worktree, log }).catch((err) => {
@@ -316,8 +311,7 @@ function applyExecuteFallback(opts) {
   return actual;
 }
 
-/** @param {string} slug */
-function buildCheckpointContext(slug) {
+function buildCheckpointContext(slug: string) {
   const missionDir = findMissionDir(slug);
   if (!missionDir) {return 'No checkpoint documents found. Start from CP-1.';}
 
@@ -337,11 +331,8 @@ function buildCheckpointContext(slug) {
  * instructed the execute agent to preserve a literal path of angle brackets.
  * The task file is a best-effort one-way mirror; its absence is not a failure.
  *
- * @param {string} slug
- * @param {string} rootDir
- * @returns {string | null}
  */
-function resolveExecuteTaskPath(slug, rootDir) {
+function resolveExecuteTaskPath(slug: string, rootDir: string) {
   const resolution = resolveTaskFile(slug, rootDir);
   if (resolution && resolution.ok && resolution.taskFile) {
     return resolution.taskFile;
@@ -354,8 +345,7 @@ function resolveExecuteTaskPath(slug, rootDir) {
   return path.join(rootDir, 'backlog', 'tasks', `<${slug}>.md`);
 }
 
-/** @param {string} slug @param {string} checkpointContext @param {{rootDir?: string}} [options] */
-function buildExecutePrompt(slug, checkpointContext, options = {}) {
+function buildExecutePrompt(slug: string, checkpointContext: string, options: { rootDir?: string } = {}) {
   const { rootDir = process.cwd() } = options;
   const overridePath = resolvePromptOverride(rootDir);
   const template = assembleStagePrompt('execute', { overridePath });
@@ -396,63 +386,7 @@ function buildExecutePrompt(slug, checkpointContext, options = {}) {
     .replaceAll('{{checkpoint_context}}', checkpointContext || '');
 }
 
-// git status --porcelain wraps any path containing a space or other unusual
-// byte in double quotes and C-escapes the contents (\\, \", \t, \n, \r, and
-// \NNN octal for bytes >= 0x80 under the default core.quotePath). Those quotes
-// and escapes are display syntax, not part of the on-disk path, so they must be
-// decoded before the value is handed to `git add --` — otherwise git treats the
-// quote-wrapped string as a pathspec that matches no file and aborts staging.
-/** @param {string} rawPath */
-function unquoteGitStatusPath(rawPath) {
-  if (rawPath.length < 2 || rawPath[0] !== '"' || rawPath[rawPath.length - 1] !== '"') {
-    return rawPath;
-  }
-  const inner = rawPath.slice(1, -1);
-  const simple = { a: 0x07, b: 0x08, t: 0x09, n: 0x0a, v: 0x0b, f: 0x0c, r: 0x0d, '"': 0x22, '\\': 0x5c };
-  const chunks = [];
-  let literal = '';
-  const flush = () => {
-    if (literal) {
-      chunks.push(Buffer.from(literal, 'utf8'));
-      literal = '';
-    }
-  };
-  let offset = 0;
-  while (offset < inner.length) {
-    const ch = inner[offset];
-    if (ch !== '\\') {
-      literal += ch;
-      offset++;
-      continue;
-    }
-    const next = inner[offset + 1];
-    if (next >= '0' && next <= '7') {
-      const { octal, end } = readOctalEscape(inner, offset + 1);
-      flush();
-      chunks.push(Buffer.from([parseInt(octal, 8) & 0xff]));
-      offset = end;
-      continue;
-    }
-    const decoded = decodeSimpleEscape(simple, next);
-    if (decoded === null) { literal += next === undefined ? '\\' : next; offset += 1 + Number(next !== undefined); }
-    else { flush(); chunks.push(Buffer.from([decoded])); offset += 2; }
-  }
-  flush();
-  return Buffer.concat(chunks).toString('utf8');
-}
-
-function readOctalEscape(text, start) {
-  let end = start;
-  while (end < text.length && end - start < 3 && text[end] >= '0' && text[end] <= '7') { end++; }
-  return { octal: text.slice(start, end), end };
-}
-
-function decodeSimpleEscape(simple, value) {
-  return Object.prototype.hasOwnProperty.call(simple, value) ? simple[value] : null;
-}
-
-/** @param {string} entry */
-function parseDirtyEntry(entry) {
+function parseDirtyEntry(entry: string) {
   const match = entry.match(/^(.{1,2})\s+(.*)$/);
   const status = (match ? match[1] : entry.slice(0, 2)).padEnd(2, ' ');
   const rawPath = (match ? match[2] : entry.slice(2)).trim();
@@ -464,15 +398,13 @@ function parseDirtyEntry(entry) {
   return { status, filePath };
 }
 
-/** @param {string} filePath */
-function isExecuteIgnoredPath(filePath) {
+function isExecuteIgnoredPath(filePath: string) {
   return isWorkflowGeneratedArtifact(filePath);
 }
 
-/** @param {{slug: string, worktree: string, dirtyEntries?: Array<{status: string, filePath: string}>, gitImpl?: Function}} opts */
-function enforceExecuteCommitSafety(opts) {
+function enforceExecuteCommitSafety(opts: { slug: string; worktree: string; dirtyEntries?: readonly string[]; gitImpl?: (_args: string[]) => { status: number | null; stdout?: string; stderr?: string } }) {
   const { slug, worktree, dirtyEntries = getWorktreeStatus(worktree), gitImpl = git } = opts;
-  const parsedEntries = /** @type{Array<{status: string, filePath: string}>} */(/** @type{Array<string>} */(dirtyEntries).map(parseDirtyEntry));
+  const parsedEntries = dirtyEntries.map(parseDirtyEntry);
   const relevantEntries = parsedEntries.filter(entry => !isExecuteIgnoredPath(entry.filePath));
   const conflictEntries = relevantEntries.filter(entry =>
     ['DD', 'AU', 'UD', 'UA', 'DU', 'AA', 'UU'].includes(entry.status.trim())
@@ -515,7 +447,6 @@ function enforceExecuteCommitSafety(opts) {
   return true;
 }
 
-/** @type {typeof active & {buildExecutePrompt: typeof buildExecutePrompt, buildCheckpointContext: typeof buildCheckpointContext, applyExecuteFallback: typeof applyExecuteFallback, selectLaunchAndRecord: typeof selectLaunchAndRecord, enforceExecuteCommitSafety: typeof enforceExecuteCommitSafety, unquoteGitStatusPath: typeof unquoteGitStatusPath}} */
 const _activeExport = Object.assign(active, { buildExecutePrompt, buildCheckpointContext, applyExecuteFallback, selectLaunchAndRecord, enforceExecuteCommitSafety, unquoteGitStatusPath, renderActiveProgress });
 export default _activeExport;
 export { _activeExport as active, buildExecutePrompt, buildCheckpointContext, applyExecuteFallback, selectLaunchAndRecord, enforceExecuteCommitSafety, unquoteGitStatusPath, renderActiveProgress };

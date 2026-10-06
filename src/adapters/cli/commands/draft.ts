@@ -1,16 +1,18 @@
-// @ts-nocheck
 import { DraftCommandUseCase } from '../../../application/draft-command-use-case.js';
+import type { DraftWorkflowPort } from '../../../application/ports/cli-workflows.js';
 import { ensureMissionBranch, ensureWorktree, ensureGraphifyWorkspace, ensureGraphifyIgnore, ensureMissionFile, ensureDraftRepoConfigCommitted, ensureRepoExists, bootstrapBacklogTask } from './draft-setup.js';
 import { buildDraftPrompt, buildRestartPrompt, fallbackDraftCommitMessage, validateDraftClassification, normalizeDraftClassification } from './draft-prompts.js';
 import { classifyDraftEntries, isUnmergedStatus, isDeletedStatus, isMissionTaskPath, isExpectedDraftPath, enforceDraftCommitSafety } from './draft-conflicts.js';
 import { recordDraftStats, recordDraftImplementer, restartDraftAgent, createDraftWorkflowAdapter } from './draft-stats.js';
 
-async function runDraftCommand(args: string[], deps = {}) {
-  const adapter = createDraftWorkflowAdapter(deps);
+type DraftDependencies = Parameters<typeof createDraftWorkflowAdapter>[0];
+
+async function runDraftCommand(args: string[], deps: DraftDependencies = {} as DraftDependencies): Promise<void> {
+  const adapter: DraftWorkflowPort = createDraftWorkflowAdapter(deps);
   return new DraftCommandUseCase(adapter).execute(args, deps);
 }
 
-async function draft(args, deps) {
+async function draft(args: string[], deps: DraftDependencies = {} as DraftDependencies): Promise<void> {
   return runDraftCommand(args, deps);
 }
 

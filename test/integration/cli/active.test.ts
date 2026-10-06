@@ -1011,7 +1011,7 @@ test('selectLaunchAndRecord fails at the activation boundary without waiting for
   // The agent's final result never settles: if the boundary rejection were
   // swallowed until the agent exited (the TASK-2582 review F1 shape), this
   // call would hang instead of rejecting.
-  const pendingAgentResult = new Promise(() => {});
+  const pendingAgentResult = new Promise<{ status: number }>(() => {});
 
   await assert.rejects(
     selectLaunchAndRecord({
@@ -1045,7 +1045,7 @@ test('selectLaunchAndRecord writes Backlog before the launcher resolves its fina
   let resolveResult;
   let transitionCountAtReturn = null;
 
-  const pendingResult = new Promise(resolve => {
+  const pendingResult = new Promise<{ status: number }>(resolve => {
     resolveResult = resolve;
   });
 

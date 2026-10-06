@@ -308,19 +308,32 @@ export function superviseTmuxLaunch(launch: TmuxLaunch): Promise<number> {
     let readiness: childProcess.ChildProcess | null = null;
     child.stdout?.on('data', chunk => { if (!client) { process.stdout.write(chunk); } });
     child.stderr?.pipe(process.stderr, { end: false });
+    const scheduleAttach = () => {
+      if (!finished && !client && !attaching) { attaching = setTimeout(attach, 50); }
+    };
     const attach = () => {
+      attaching = null;
       if (finished) { return; }
       readiness = childProcess.execFile('tmux', ['-S', launch.socketPath, 'display-message', '-p', '-t', `=${launch.sessionName}:${launch.windowName}`, '#{pane_id}'], { timeout: 500 }, error => {
         readiness = null;
         if (finished) { return; }
-        if (error) { attaching = setTimeout(attach, 50); return; }
+        if (error) { scheduleAttach(); return; }
         client = childProcess.spawn('tmux', ['-S', launch.socketPath, 'attach-session', '-t', `=${launch.sessionName}:${launch.windowName}`], { stdio: 'inherit' });
         const attached = client;
-        attached.once('error', () => { if (client === attached) { client = null; } });
-        attached.once('exit', () => { if (client === attached) { client = null; } });
+        attached.once('error', () => {
+          if (client === attached) { client = null; scheduleAttach(); }
+        });
+        attached.once('exit', code => {
+          if (client !== attached) { return; }
+          client = null;
+          // A non-zero attach can race the just-created server/window. Retry
+          // while the supervised command is still alive; a clean detach must
+          // remain detached and therefore does not trigger a new attachment.
+          if (code !== 0) { scheduleAttach(); }
+        });
       });
     };
-    if (interactive) { attaching = setTimeout(attach, 50); }
+    if (interactive) { scheduleAttach(); }
     const interrupt = () => { child.kill('SIGINT'); };
     const terminate = () => { child.kill('SIGTERM'); };
     process.on('SIGINT', interrupt);

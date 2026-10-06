@@ -58,8 +58,8 @@ test('task-2213: agent performance counts and fix-round averages use only each r
   ], WINDOW);
 
   assert.deepEqual(summary, [
-    { implementer: 'codex', missions: 1, averageFixRounds: '1.00' },
-    { implementer: 'custom', missions: 2, averageFixRounds: '2.00' },
+    { implementer: 'codex', missions: 1, averageFixRounds: '1.00', prFixObservationCount: 1 },
+    { implementer: 'custom', missions: 2, averageFixRounds: '2.00', prFixObservationCount: 2 },
   ]);
 });
 
@@ -71,7 +71,7 @@ test('task-2213: models do not split recorded delivery-family credit', () => {
   ], WINDOW);
 
   assert.deepEqual(summary, [
-    { implementer: 'claude', missions: 3, averageFixRounds: '1.33' },
+    { implementer: 'claude', missions: 3, averageFixRounds: '1.33', prFixObservationCount: 3 },
   ]);
 });
 
@@ -84,7 +84,7 @@ test('task-2213: completed rows with missing attribution or review-round metadat
   ], WINDOW);
 
   assert.deepEqual(summary, [
-    { implementer: 'custom', missions: 1, averageFixRounds: null },
+    { implementer: 'custom', missions: 1, averageFixRounds: null, prFixObservationCount: 0 },
   ]);
 });
 
@@ -99,7 +99,7 @@ test('blank-model integration rollup supplies owner and fix rounds without a mod
   ], WINDOW);
 
   assert.deepEqual(summary, [
-    { implementer: 'claude', missions: 1, averageFixRounds: '3.00' },
+    { implementer: 'claude', missions: 1, averageFixRounds: '3.00', prFixObservationCount: 1 },
   ]);
 });
 
@@ -132,7 +132,7 @@ test('task-2213: completing implementer fallback is used when its model telemetr
 
   // The closed rollup's implementer wins; fix rounds come from that rollup.
   assert.deepEqual(summary, [
-    { implementer: 'codex', missions: 1, averageFixRounds: '2.00' },
+    { implementer: 'codex', missions: 1, averageFixRounds: '2.00', prFixObservationCount: 1 },
   ]);
 });
 
@@ -151,7 +151,7 @@ test('task-2213: completing implementer model beats reviewer model in attributio
 
   // The recorded family wins; telemetry does not supply delivery ownership.
   assert.deepEqual(summary, [
-    { implementer: 'claude', missions: 1, averageFixRounds: '3.00' },
+    { implementer: 'claude', missions: 1, averageFixRounds: '3.00', prFixObservationCount: 1 },
   ]);
 });
 
@@ -170,7 +170,7 @@ test('task-2213: completing implementer model beats reviewer model even when rev
 
   // The recorded family wins; telemetry does not supply delivery ownership.
   assert.deepEqual(summary, [
-    { implementer: 'claude', missions: 1, averageFixRounds: '3.00' },
+    { implementer: 'claude', missions: 1, averageFixRounds: '3.00', prFixObservationCount: 1 },
   ]);
 });
 
@@ -186,7 +186,7 @@ test('task-2213: the completing implementer owns the model row, not a later revi
   ], WINDOW);
 
   assert.deepEqual(summary, [
-    { implementer: 'custom', missions: 1, averageFixRounds: '3.00' },
+    { implementer: 'custom', missions: 1, averageFixRounds: '3.00', prFixObservationCount: 1 },
   ]);
 });
 
@@ -200,6 +200,6 @@ test('task-2213: a closed reviewer row does not replace the final implementer af
   ], WINDOW, { completedMissionOwners: new Map([['parallix::task-handoff-owner', 'custom']]) });
 
   assert.deepEqual(summary, [
-    { implementer: 'custom', missions: 1, averageFixRounds: '3.00' },
+    { implementer: 'custom', missions: 1, averageFixRounds: '3.00', prFixObservationCount: 1 },
   ]);
 });

@@ -1,4 +1,3 @@
-// @ts-nocheck
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as crypto from 'node:crypto';
@@ -8,9 +7,14 @@ import { resolveTaskFile, reportTaskResolution, getTaskStorage } from '../../bac
 import { getPrimaryBranch, squashTrailingBacklogNoiseIntoPreviousMission } from '../../filesystem/mission-utils.js';
 import { parseDirtyEntry } from './draft-conflicts.js';
 
+export interface SyntheticDraftTask { title: string; intent: string; id: string; source: string }
+export interface DraftTarget { slug: string; syntheticTask: SyntheticDraftTask | null; existingAdhocIdentity?: boolean }
+
+type Log = (_message: string) => void;
+
 const SYNTHETIC_SLUG_PREFIX = 'adhoc-';
 
-function slugifyDraftIntent(/** @type {string} */ value) {
+function slugifyDraftIntent(value: string) {
   return String(value || '')
     .trim()
     .toLowerCase()
@@ -21,7 +25,7 @@ function slugifyDraftIntent(/** @type {string} */ value) {
     .slice(0, 64);
 }
 
-function syntheticTaskId(/** @type {string} */ slug, /** @type {string} */ seed) {
+function syntheticTaskId(slug: string, seed: string) {
   // The DB-owned adhoc identity carries no content hash: the per-repository
   // counter is its sole origin, so the task identity is the slug upper-cased,
   // matching the resolver's own rule (`normalizedId = slug.toUpperCase()`,
@@ -40,7 +44,7 @@ function syntheticTaskId(/** @type {string} */ slug, /** @type {string} */ seed)
   return `${prefix}-${base}-${hash}`;
 }
 
-function resolveDraftTarget(/** @type {string} */ rawInput, cwd = process.cwd()) {
+function resolveDraftTarget(rawInput: string | undefined, cwd = process.cwd()): DraftTarget | null {
   const explicit = String(rawInput || '').trim();
   if (!explicit) {return null;}
 
@@ -105,12 +109,12 @@ function resolveDraftTarget(/** @type {string} */ rawInput, cwd = process.cwd())
   };
 }
 
-function ensureMissionBranch(mainRepo, branchName, {
+function ensureMissionBranch(mainRepo: string, branchName: string, {
   gitFn = git,
   logFn = fmt.log.plain,
   squashTrailingBacklogNoiseIntoPreviousMissionFn = squashTrailingBacklogNoiseIntoPreviousMission,
   baseBranch = null
-} = {}) {
+}: { gitFn?: typeof git; logFn?: (_message: string) => void; squashTrailingBacklogNoiseIntoPreviousMissionFn?: typeof squashTrailingBacklogNoiseIntoPreviousMission; baseBranch?: string | null } = {}) {
   const branches = gitFn(['-C', mainRepo, 'branch', '--list', branchName]).stdout.trim();
   const startPoint = baseBranch || getPrimaryBranch();
   if (branches) {
@@ -125,15 +129,13 @@ function ensureMissionBranch(mainRepo, branchName, {
   const recorded = gitFn(['-C', mainRepo, 'config', '--local', '--replace-all', `branch.${branchName}.parallixBase`, startPoint]);
   if (recorded.status !== 0) { throw new Error(`Could not record base branch for ${branchName}.`); }
 }
-
-// @ts-expect-error implicit any on mainRepo/targetWorktree/branchName
-function ensureWorktree(mainRepo, targetWorktree, branchName, {
+function ensureWorktree(mainRepo: string, targetWorktree: string, branchName: string, {
   existsFn = fs.existsSync,
   gitFn = git,
   logFn = fmt.log.plain,
   errorFn = fmt.log.plainError,
   exitFn = process.exit
-} = {}) {
+}: { existsFn?: typeof fs.existsSync; gitFn?: typeof git; logFn?: Log; errorFn?: Log; exitFn?: (_code?: number) => void } = {}) {
   if (existsFn(targetWorktree)) {
     logFn(fmt.status('PASS', `Worktree directory ${fmt.path(targetWorktree)} already exists.`));
     try {
@@ -148,13 +150,11 @@ function ensureWorktree(mainRepo, targetWorktree, branchName, {
     gitFn(['-C', mainRepo, 'worktree', 'add', targetWorktree, branchName]);
     logFn(fmt.status('PASS', `Created worktree at ${fmt.path(targetWorktree)}.`));
   } catch (error) {
-    errorFn(fmt.status('FAIL', `Could not create worktree: ${/** @type {any} */ (error).message}`));
+    errorFn(fmt.status('FAIL', `Could not create worktree: ${(error instanceof Error ? error.message : String(error))}`));
     exitFn(1);
   }
 }
-
-// @ts-expect-error implicit any on targetWorktree/mainRepo
-function ensureGraphifyWorkspace(targetWorktree, mainRepo, { logFn = fmt.log.plain } = {}) {
+function ensureGraphifyWorkspace(targetWorktree: string, mainRepo: string, { logFn = fmt.log.plain }: { logFn?: Log } = {}) {
   const targetPath = path.join(targetWorktree, 'graphify-out');
 
   if (!fs.existsSync(targetPath)) {
@@ -167,7 +167,7 @@ function ensureGraphifyWorkspace(targetWorktree, mainRepo, { logFn = fmt.log.pla
   return reportGraphifyWorkspace(targetPath, logFn);
 }
 
-function reportGraphifyWorkspace(targetPath, logFn) {
+function reportGraphifyWorkspace(targetPath: string, logFn: (_message: string) => void) {
   try {
     if (fs.lstatSync(targetPath).isDirectory()) {
       logFn(fmt.status('PASS', `graphify-out directory already exists in the mission worktree at ${fmt.path(targetPath)}.`));
@@ -178,7 +178,7 @@ function reportGraphifyWorkspace(targetPath, logFn) {
   return false;
 }
 
-function copyGraphifyWorkspace(mainRepo, targetPath, logFn) {
+function copyGraphifyWorkspace(mainRepo: string, targetPath: string, logFn: (_message: string) => void) {
   if (!mainRepo) { return; }
   const sourcePath = path.join(mainRepo, 'graphify-out');
   try {
@@ -189,9 +189,7 @@ function copyGraphifyWorkspace(mainRepo, targetPath, logFn) {
     // Graceful degradation: graphify not installed, source unavailable, or copy failed.
   }
 }
-
-// @ts-expect-error implicit any on targetWorktree
-function ensureGraphifyIgnore(targetWorktree, { gitFn = git, logFn = fmt.log.plain } = {}) {
+function ensureGraphifyIgnore(targetWorktree: string, { gitFn = git, logFn = fmt.log.plain }: { gitFn?: typeof git; logFn?: Log } = {}) {
   const targetPath = path.join(targetWorktree, '.graphifyignore');
 
   if (fs.existsSync(targetPath) || fs.existsSync(path.join(targetWorktree, '.gitignore'))) {
@@ -218,13 +216,11 @@ function ensureGraphifyIgnore(targetWorktree, { gitFn = git, logFn = fmt.log.pla
     gitFn(['-C', gitRoot, 'commit', '-m', 'workflow: add .graphifyignore to exclude .workflow/ from graphify']);
     logFn(fmt.status('PASS', `Created and committed .graphifyignore in ${fmt.path(gitRoot)}.`));
   } catch (error) {
-    logFn(fmt.status('WARN', `Created .graphifyignore but could not commit: ${/** @type {any} */ (error).message}. It will be picked up by the draft safety harness.`));
+    logFn(fmt.status('WARN', `Created .graphifyignore but could not commit: ${(error instanceof Error ? error.message : String(error))}. It will be picked up by the draft safety harness.`));
   }
 
 }
-
-// @ts-expect-error implicit any on targetWorktree/slug
-function ensureMissionFile(targetWorktree, slug, { logFn = fmt.log.plain } = {}) {
+function ensureMissionFile(targetWorktree: string, slug: string, { logFn = fmt.log.plain }: { logFn?: Log } = {}) {
   // Mission contracts are recorded through the SQLite-backed typed commands.
   // Keep this compatibility seam for callers that sequence scaffold steps, but
   // never materialize the retired repository-backed mission tree.
@@ -233,12 +229,10 @@ function ensureMissionFile(targetWorktree, slug, { logFn = fmt.log.plain } = {})
   logFn(fmt.status('PASS', 'Prepared typed mission contract without repository files.'));
   return '';
 }
-
-// @ts-expect-error implicit any on mainRepo
-function ensureDraftRepoConfigCommitted(mainRepo, {
+function ensureDraftRepoConfigCommitted(mainRepo: string, {
   getWorktreeStatusFn = getWorktreeStatus,
   errorFn = fmt.log.plainError
-} = {}) {
+}: { getWorktreeStatusFn?: typeof getWorktreeStatus; errorFn?: Log } = {}) {
   const dirtyEntries = getWorktreeStatusFn(mainRepo);
   if (!dirtyEntries || dirtyEntries.length === 0) {
     return true;
@@ -264,16 +258,14 @@ function ensureDraftRepoConfigCommitted(mainRepo, {
   errorFn('Commit these repo-state config changes before running draft. Mission worktrees are created from HEAD, so uncommitted config would produce a stale layout.');
   return false;
 }
-
-// @ts-expect-error implicit any on targetWorktree/mainRepo/slug
-function bootstrapBacklogTask(targetWorktree, mainRepo, slug, {
+function bootstrapBacklogTask(targetWorktree: string, mainRepo: string, slug: string, {
   resolveTaskFileFn = resolveTaskFile,
   reportTaskResolutionFn = reportTaskResolution,
   gitFn = git,
   logFn = fmt.log.plain,
   errorFn = fmt.log.plainError,
   syntheticTask = null
-} = {}) {
+}: { resolveTaskFileFn?: typeof resolveTaskFile; reportTaskResolutionFn?: typeof reportTaskResolution; gitFn?: typeof git; logFn?: (_message: string) => void; errorFn?: (_message: string) => void; syntheticTask?: SyntheticDraftTask | null } = {}) {
   const taskResolution = resolveTaskFileFn(slug, targetWorktree);
   if (taskResolution.ok) {
     logFn(fmt.status('PASS', `Backlog task for ${fmt.slug(slug)} already exists in worktree.`));
@@ -293,11 +285,11 @@ function bootstrapBacklogTask(targetWorktree, mainRepo, slug, {
     // it (read-only `backlog/`, a rejecting hook) must never make `px draft`
     // load-bearing on Backlog. Warn and continue; the DB identity is authority.
     const { tasksDir } = getTaskStorage(targetWorktree);
-    const taskPath = path.join(tasksDir, `${slug} - ${slugifyDraftIntent(/** @type {any} */ (syntheticTask).title || slug) || 'mission'}.md`);
+    const taskPath = path.join(tasksDir, `${slug} - ${slugifyDraftIntent( syntheticTask.title || slug) || 'mission'}.md`);
     const body = [
       '---',
-      `id: ${/** @type {any} */ (syntheticTask).id || syntheticTaskId(slug, /** @type {any} */ (syntheticTask).intent || slug)}`,
-      `title: ${/** @type {any} */ (syntheticTask).title || slug}`,
+      `id: ${syntheticTask.id || syntheticTaskId(slug, syntheticTask.intent || slug)}`,
+      `title: ${syntheticTask.title || slug}`,
       'status: backlog',
       'assignee: []',
       "created_date: '" + new Date().toISOString().slice(0, 16).replace('T', ' ') + "'",
@@ -308,7 +300,7 @@ function bootstrapBacklogTask(targetWorktree, mainRepo, slug, {
       '',
       '## Description',
       '',
-      /** @type {any} */ (syntheticTask).intent || `Synthetic task created for ${slug}.`,
+      syntheticTask.intent || `Synthetic task created for ${slug}.`,
       ''
     ].join('\n');
 
@@ -326,24 +318,21 @@ function bootstrapBacklogTask(targetWorktree, mainRepo, slug, {
       // one-way Backlog mirror, not the mission's authority. A commit failure
       // (read-only `backlog/`, a rejecting hook) warns but does not fail the
       // draft — the DB-owned adhoc identity and lifecycle are unaffected.
-      errorFn(fmt.status('WARN', `Could not commit synthetic task: ${/** @type {any} */ (error).message}. The DB-owned adhoc identity is authoritative; the Backlog mirror is best-effort.`));
+      errorFn(fmt.status('WARN', `Could not commit synthetic task: ${(error instanceof Error ? error.message : String(error))}. The DB-owned adhoc identity is authoritative; the Backlog mirror is best-effort.`));
     }
     return true;
   }
 
   logFn(fmt.status('INFO', `Backlog task for ${fmt.slug(slug)} not found in worktree. Attempting to bootstrap from ${fmt.path(mainRepo)}...`));
   const mainResolution = resolveTaskFileFn(slug, mainRepo);
-  if (!mainResolution.ok) {
+  if (!mainResolution.ok || !mainResolution.taskFile) {
     reportTaskResolutionFn(mainResolution, slug, errorFn);
     return false;
   }
-
-  // @ts-expect-error mainResolution.taskFile may be undefined
   const relativePath = path.relative(mainRepo, mainResolution.taskFile);
   const targetPath = path.join(targetWorktree || '', relativePath);
 
   fs.mkdirSync(path.dirname(targetPath), { recursive: true });
-  // @ts-expect-error mainResolution.taskFile may be undefined
   fs.copyFileSync(mainResolution.taskFile, targetPath);
 
   logFn(fmt.status('PASS', `Bootstrapped ${fmt.path(relativePath)} from main repo.`));
@@ -353,15 +342,13 @@ function bootstrapBacklogTask(targetWorktree, mainRepo, slug, {
     gitFn(['-C', targetWorktree, 'commit', '-m', `backlog(${slug}): bootstrap task from ${getPrimaryBranch()}`]);
     logFn(fmt.status('PASS', 'Committed bootstrapped task in worktree.'));
   } catch (error) {
-    errorFn(fmt.status('FAIL', `Could not commit bootstrapped task: ${/** @type {any} */ (error).message}`));
+    errorFn(fmt.status('FAIL', `Could not commit bootstrapped task: ${(error instanceof Error ? error.message : String(error))}`));
     return false;
   }
 
   return true;
 }
-
-// @ts-expect-error implicit any on mainRepo
-function ensureRepoExists(mainRepo, exitFn = process.exit, errorFn = fmt.log.fail) {
+function ensureRepoExists(mainRepo: string, exitFn: (_code?: number) => void = process.exit, errorFn: Log = fmt.log.fail) {
   if (!fs.existsSync(mainRepo)) {
     errorFn(`Main repository not found at ${mainRepo}. Please ensure it exists or set PRIMARY_WORKTREE.`);
     exitFn(1);
@@ -369,7 +356,5 @@ function ensureRepoExists(mainRepo, exitFn = process.exit, errorFn = fmt.log.fai
   }
   return true;
 }
-
-
 
 export { SYNTHETIC_SLUG_PREFIX, slugifyDraftIntent, syntheticTaskId, resolveDraftTarget, ensureMissionBranch, ensureWorktree, ensureGraphifyWorkspace, ensureGraphifyIgnore, ensureMissionFile, ensureDraftRepoConfigCommitted, ensureRepoExists, bootstrapBacklogTask };

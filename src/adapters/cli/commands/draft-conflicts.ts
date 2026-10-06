@@ -1,15 +1,27 @@
-// @ts-nocheck
 import * as fmt from '../../../application/presentation/cli-format.js';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { git, getWorktreeStatus } from '../../git/git.js';
 import { findMissionArea, findMissionDir, missionDirForSlug } from '../../filesystem/mission-utils.js';
 import { formatVerificationCommand } from '../../verification/verification.js';
-import { unquoteGitStatusPath } from './active.js';
+import { unquoteGitStatusPath } from '../../git/porcelain-path.js';
 import { fallbackDraftCommitMessage } from './draft-prompts.js';
 
-// @ts-expect-error implicit any on entry
-function parseDirtyEntry(entry) {
+interface DirtyEntry {
+  status: string;
+  filePath: string;
+  sourcePath: string | null;
+}
+
+interface DraftConflictOptions {
+  slug: string;
+  worktree: string;
+  conflictEntries: readonly DirtyEntry[];
+  gitImpl?: typeof git;
+  logFn?: (_message: string) => void;
+}
+
+function parseDirtyEntry(entry: string): DirtyEntry {
   const match = entry.match(/^(.{1,2})\s+(.*)$/);
   const status = (match ? match[1] : entry.slice(0, 2)).padEnd(2, ' ');
   const rawPath = (match ? match[2] : entry.slice(2)).trim();
@@ -26,25 +38,21 @@ function parseDirtyEntry(entry) {
   return { status, filePath, sourcePath };
 }
 
-// @ts-expect-error implicit any on status
-function isUnmergedStatus(status) {
+function isUnmergedStatus(status: string): boolean {
   return ['DD', 'AU', 'UD', 'UA', 'DU', 'AA', 'UU'].includes(status);
 }
 
-// @ts-expect-error implicit any on status
-function isDeletedStatus(status) {
+function isDeletedStatus(status: string): boolean {
   return status.includes('D') && !isUnmergedStatus(status);
 }
 
-// @ts-expect-error implicit any on filePath/slug
-function isMissionTaskPath(filePath, slug) {
+function isMissionTaskPath(filePath: string, slug: string): boolean {
   if (!filePath) {return false;}
   const taskPattern = new RegExp(`^backlog/(?:tasks|completed)/[^/]*${slug}(?:\\b|[^/]*$)`);
   return taskPattern.test(filePath);
 }
 
-// @ts-expect-error implicit any on filePath/slug/worktree
-function isExpectedDraftPath(filePath, slug, worktree) {
+function isExpectedDraftPath(filePath: string, slug: string, worktree: string): boolean {
   const missionDir = findMissionDir(slug, worktree);
   const missionPrefix = missionDir
     ? `${path.relative(worktree, missionDir)}/`
@@ -59,23 +67,21 @@ function isExpectedDraftPath(filePath, slug, worktree) {
     || isMissionTaskPath(filePath, slug);
 }
 
-// @ts-expect-error implicit any on dirtyEntries/slug/worktree
-function classifyDraftEntries(dirtyEntries, slug, worktree) {
+function classifyDraftEntries(dirtyEntries: readonly string[], slug: string, worktree: string) {
   const parsedEntries = dirtyEntries.map(parseDirtyEntry);
-  const conflictEntries = parsedEntries.filter((/** @type {any} */ entry) => isUnmergedStatus(entry.status));
-  const stagedEntries = parsedEntries.filter((/** @type {any} */ entry) => !isUnmergedStatus(entry.status));
-  const expectedEntries = stagedEntries.filter((/** @type {any} */ entry) => isExpectedDraftPath(entry.filePath, slug, worktree));
-  const unexpectedEntries = stagedEntries.filter((/** @type {any} */ entry) => !isExpectedDraftPath(entry.filePath, slug, worktree));
+  const conflictEntries = parsedEntries.filter(entry => isUnmergedStatus(entry.status));
+  const stagedEntries = parsedEntries.filter(entry => !isUnmergedStatus(entry.status));
+  const expectedEntries = stagedEntries.filter(entry => isExpectedDraftPath(entry.filePath, slug, worktree));
+  const unexpectedEntries = stagedEntries.filter(entry => !isExpectedDraftPath(entry.filePath, slug, worktree));
 
   return { conflictEntries, expectedEntries, unexpectedEntries };
 }
 
-// @ts-expect-error implicit any on slug/worktree/conflictEntries
-function resolveMissionSpecificDraftConflicts({ slug, worktree, conflictEntries, gitImpl = git, logFn = fmt.log.plain }) {
-  const sharedConflicts = conflictEntries.filter((/** @type {any} */ entry) => !isExpectedDraftPath(entry.filePath, slug, worktree));
+function resolveMissionSpecificDraftConflicts({ slug, worktree, conflictEntries, gitImpl = git, logFn = fmt.log.plain }: DraftConflictOptions): void {
+  const sharedConflicts = conflictEntries.filter(entry => !isExpectedDraftPath(entry.filePath, slug, worktree));
   if (sharedConflicts.length > 0) {
     const area = findMissionArea(findMissionDir(slug, worktree) || missionDirForSlug(worktree, slug));
-    const sharedFiles = sharedConflicts.map((/** @type {any} */ entry) => entry.filePath);
+    const sharedFiles = sharedConflicts.map(entry => entry.filePath);
     throw new Error(
       `Draft safety harness found shared-file conflicts: ${sharedFiles.join(', ')}. ` +
       `Run "px resolve-conflict ${slug}" from ${worktree}, then re-run ${formatVerificationCommand(area, worktree)}.`
@@ -94,8 +100,16 @@ function resolveMissionSpecificDraftConflicts({ slug, worktree, conflictEntries,
   }
 }
 
-// @ts-expect-error implicit any on slug/worktree/dirtyEntries
-function enforceDraftCommitSafety({ slug, worktree, dirtyEntries = getWorktreeStatus(worktree), gitImpl = git, logFn = fmt.log.plain, plumbingLogFn = logFn, errorFn = fmt.log.plainError }) {
+interface DraftCommitSafetyOptions {
+  slug: string;
+  worktree: string;
+  dirtyEntries?: readonly string[];
+  gitImpl?: typeof git;
+  logFn?: (_message: string) => void;
+  plumbingLogFn?: (_message: string) => void;
+}
+
+function enforceDraftCommitSafety({ slug, worktree, dirtyEntries = getWorktreeStatus(worktree), gitImpl = git, logFn = fmt.log.plain, plumbingLogFn = logFn }: DraftCommitSafetyOptions): boolean {
   if (dirtyEntries.length === 0) {
     plumbingLogFn(fmt.status('PASS', 'Draft safety harness: no uncommitted changes left behind.'));
     return false;
@@ -126,8 +140,7 @@ function enforceDraftCommitSafety({ slug, worktree, dirtyEntries = getWorktreeSt
   }
 
   const { conflictEntries, expectedEntries, unexpectedEntries } = classifyDraftEntries(dirtyEntries, slug, worktree);
-  // @ts-expect-error errorFn not in type
-  resolveMissionSpecificDraftConflicts({ slug, worktree, conflictEntries, gitImpl, logFn, errorFn });
+  resolveMissionSpecificDraftConflicts({ slug, worktree, conflictEntries, gitImpl, logFn });
 
   const deletedTaskEntries = [...expectedEntries, ...unexpectedEntries].filter(entry =>
     isMissionTaskPath(entry.filePath, slug) && isDeletedStatus(entry.status)

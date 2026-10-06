@@ -1,0 +1,122 @@
+{
+  "task": "TASK-2668.02",
+  "date": "2026-10-07",
+  "measurement": "integration-cpu-hook: own CPU plus waited-child CPU, including case teardown",
+  "command": "PARALLIX_TEST_COVERAGE=1 PARALLIX_TEST_CPU_PROFILE_DIR=<profile-dir> npm run test:integration:ci:prebuilt -- test/integration/cli/px-runner.test.ts test/integration/forgejo/forgejo.test.ts test/integration/integrate/integrate-variant-b-landing-contract.test.ts test/integration/integrate/integrate.test.ts",
+  "focusedRuns": 2,
+  "margin": 0.5,
+  "roundUpMs": 50,
+  "basis": "Maximum of supplied full-suite failure and two current focused covered profiles",
+  "entries": [
+    {
+      "file": "integration/cli/px-runner.test.ts",
+      "previousCoveredBudgetMs": 2550,
+      "reportedFullSuiteCpuMs": 2669,
+      "focusedCoveredMaxCpuMs": [
+        2897.523,
+        2728.624
+      ],
+      "newCoveredBudgetMs": 4350,
+      "focusedCoveredPeakRecords": [
+        {
+          "file": "integration/cli/px-runner.test.ts",
+          "name": "px --version reports package version and executing runtime path",
+          "profile": "covered",
+          "cpuMs": 2897.523,
+          "limitMs": 2550
+        },
+        {
+          "file": "integration/cli/px-runner.test.ts",
+          "name": "px --version reports package version and executing runtime path",
+          "profile": "covered",
+          "cpuMs": 2728.624,
+          "limitMs": 2550
+        }
+      ]
+    },
+    {
+      "file": "integration/forgejo/forgejo.test.ts",
+      "previousCoveredBudgetMs": 200,
+      "reportedFullSuiteCpuMs": 253,
+      "focusedCoveredMaxCpuMs": [
+        174.448,
+        168.591
+      ],
+      "newCoveredBudgetMs": 400,
+      "focusedCoveredPeakRecords": [
+        {
+          "file": "integration/forgejo/forgejo.test.ts",
+          "name": "createPr falls back to the repo-owner token for PR lookup when the implementer token cannot read PRs",
+          "profile": "covered",
+          "cpuMs": 174.448,
+          "limitMs": 200
+        },
+        {
+          "file": "integration/forgejo/forgejo.test.ts",
+          "name": "createPr falls back to the repo-owner token for PR lookup when the implementer token cannot read PRs",
+          "profile": "covered",
+          "cpuMs": 168.591,
+          "limitMs": 200
+        }
+      ]
+    },
+    {
+      "file": "integration/integrate/integrate-variant-b-landing-contract.test.ts",
+      "previousCoveredBudgetMs": 200,
+      "reportedFullSuiteCpuMs": 201,
+      "focusedCoveredMaxCpuMs": [
+        186.166,
+        165.066
+      ],
+      "newCoveredBudgetMs": 350,
+      "focusedCoveredPeakRecords": [
+        {
+          "file": "integration/integrate/integrate-variant-b-landing-contract.test.ts",
+          "name": "Variant B landing > integrate full squash-merge (Variant B) success path",
+          "profile": "covered",
+          "cpuMs": 186.166,
+          "limitMs": 200
+        },
+        {
+          "file": "integration/integrate/integrate-variant-b-landing-contract.test.ts",
+          "name": "Variant B landing > integrate full squash-merge (Variant B) success path",
+          "profile": "covered",
+          "cpuMs": 165.066,
+          "limitMs": 200
+        }
+      ]
+    },
+    {
+      "file": "integration/integrate/integrate.test.ts",
+      "previousCoveredBudgetMs": 200,
+      "reportedFullSuiteCpuMs": 213,
+      "focusedCoveredMaxCpuMs": [
+        205.039,
+        167.548
+      ],
+      "newCoveredBudgetMs": 350,
+      "focusedCoveredPeakRecords": [
+        {
+          "file": "integration/integrate/integrate.test.ts",
+          "name": "px integrate --dry-run never invokes the post-integrate hook (SC4)",
+          "profile": "covered",
+          "cpuMs": 205.039,
+          "limitMs": 200
+        },
+        {
+          "file": "integration/integrate/integrate.test.ts",
+          "name": "px integrate --dry-run never invokes the post-integrate hook (SC4)",
+          "profile": "covered",
+          "cpuMs": 167.548,
+          "limitMs": 200
+        }
+      ]
+    }
+  ],
+  "verification": {
+    "command": "PARALLIX_TEST_COVERAGE=1 PARALLIX_TEST_CPU_PROFILE_DIR=<profile-dir> npm run test:integration:ci:prebuilt -- test/integration/cli/px-runner.test.ts test/integration/forgejo/forgejo.test.ts test/integration/integrate/integrate-variant-b-landing-contract.test.ts test/integration/integrate/integrate.test.ts",
+    "passed": true,
+    "tests": 186,
+    "failures": 0
+  }
+}

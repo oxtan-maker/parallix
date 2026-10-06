@@ -1,5 +1,3 @@
-// @ts-nocheck
-
 /**
  * Extracted report-rendering slice from stats.ts (task-2217).
  * Contains formatStatsTable, renderWeeklyStatsReport, renderRangeStatsReport,
@@ -22,6 +20,20 @@ import {
 import { statisticsMissionKey } from '../../../application/services/statistics-service.js';
 import { selectStatsReport } from '../../../application/services/statistics-report-selection.js';
 import { compareCodeUnits } from '../../../domain/comparators.js';
+import type { StatsRow } from '../../../application/services/statistics-row.js';
+
+interface StatsReportOptions {
+  rootDir?: string;
+  repo?: string;
+  repos?: readonly string[];
+  selection?: ReturnType<typeof selectStatsReport>;
+  missionFlow?: Parameters<typeof selectStatsReport>[1];
+  today?: string;
+  from?: string;
+  to?: string;
+}
+
+type StatsField = keyof StatsRow;
 
 // ---------------------------------------------------------------------------
 // Mission flow
@@ -31,7 +43,7 @@ import { compareCodeUnits } from '../../../domain/comparators.js';
 // caller as `MissionOutcome[]`.
 // ---------------------------------------------------------------------------
 
-function missionFlowSection(heading, selected) {
+function missionFlowSection(heading: string, selected: ReturnType<typeof selectStatsReport>['current']) {
   const lines = [fmt.bold(`${heading} (${selected.window.label})`)];
   if (selected.flow === null) {
     lines.push('Mission flow unavailable: lifecycle history was not read.');
@@ -45,17 +57,13 @@ function missionFlowSection(heading, selected) {
   return lines;
 }
 
-function selectedAgentStats(selected, rootDir) {
+function selectedAgentStats(selected: ReturnType<typeof selectStatsReport>['current'], rootDir: string | null) {
   return selected.flow === null ? [] : summarizeAgentWindow(selected.completedRows, selected.window, {
     rootDir, completedMissionKeys: new Set(selected.completedMissions.map(statisticsMissionKey)), completedMissionOwners: selected.completedMissionOwners,
   });
 }
 
-/**
- * @param {string[]} headers
- * @param {string[][]} rows
- */
-function formatStatsTable(headers, rows) {
+function formatStatsTable(headers: string[], rows: string[][]) {
   const headerRow = headers.map(header => fmt.bold(header));
   const renderedRows = rows.map(row => row.map((cell, index) => {
     if (index === 0 && headers[0] === 'Agent family' && cell !== 'none') {
@@ -70,17 +78,15 @@ function formatStatsTable(headers, rows) {
   });
 }
 
-/**
- * @param {import('./stats.js').StatsRow[]} rows
- * @param {object} options
- */
-function renderWeeklyStatsReport(rows, options = {}) {
+function renderWeeklyStatsReport(rows: readonly StatsRow[], options: StatsReportOptions = {}) {
   const rootDir = options.rootDir || null;
   const selection = options.selection ?? selectStatsReport(rows, options.missionFlow ?? null, { mode: 'weekly', today: options.today });
-  const windows = { current: selection.current.window, previous: selection.previous.window };
+  const previous = selection.previous;
+  if (!previous) { throw new Error('Weekly statistics selection requires a previous window.'); }
+  const windows = { current: selection.current.window, previous: previous.window };
   const missionFlow = selection.current.flow;
   const currentAgentStats = selectedAgentStats(selection.current, rootDir);
-  const previousAgentStats = selectedAgentStats(selection.previous, rootDir);
+  const previousAgentStats = selectedAgentStats(previous, rootDir);
   const currentMissionColors = colorMissionCounts(currentAgentStats);
   const currentAgentColors = colorAverageFixRounds(currentAgentStats);
   const previousMissionColors = colorMissionCounts(previousAgentStats);
@@ -122,11 +128,7 @@ function renderWeeklyStatsReport(rows, options = {}) {
   return lines.join('\n');
 }
 
-/**
- * @param {import('./stats.js').StatsRow[]} rows
- * @param {object} options
- */
-function renderRangeStatsReport(rows, options = {}) {
+function renderRangeStatsReport(rows: readonly StatsRow[], options: StatsReportOptions = {}) {
   const rootDir = options.rootDir || null;
   const selection = options.selection ?? selectStatsReport(rows, options.missionFlow ?? null, { mode: 'range', from: options.from, to: options.to });
   const window = selection.current.window;
@@ -151,11 +153,8 @@ function renderRangeStatsReport(rows, options = {}) {
 /**
  * Render a single-mission, per-phase telemetry breakdown.
  *
- * @param {import('./stats.js').StatsRow[]} rows
- * @param {string} slug
- * @param {object} options
  */
-function renderMissionPhaseReport(rows, slug, options = {}) {
+function renderMissionPhaseReport(rows: readonly StatsRow[], slug: string, options: StatsReportOptions = {}) {
   const wanted = String(slug || '').trim().toLowerCase();
   const opts = options;
   // The canonical identity, plus any explicitly declared legacy alias this
@@ -172,11 +171,12 @@ function renderMissionPhaseReport(rows, slug, options = {}) {
     wantedRepos.has(String(row.repo || '').trim())
   );
 
-  const byStage = new Map();
+  const byStage = new Map<string, StatsRow[]>();
   for (const row of missionRows) {
     const stage = String(row.stage || 'default').trim().toLowerCase() || 'default';
-    if (!byStage.has(stage)) {byStage.set(stage, []);}
-    byStage.get(stage).push(row);
+    const stageRows = byStage.get(stage) ?? [];
+    stageRows.push(row);
+    byStage.set(stage, stageRows);
   }
 
   for (const stageRows of byStage.values()) {
@@ -209,13 +209,13 @@ function renderMissionPhaseReport(rows, slug, options = {}) {
     return lines.join('\n');
   }
 
-  const num = (row, key) => String(Number.parseInt(String(row[key]), 10) || 0);
-  const cost = (value) => {
+  const num = (row: StatsRow, key: StatsField) => String(Number.parseInt(String(row[key]), 10) || 0);
+  const cost = (value: unknown) => {
     const n = Number.parseFloat(String(value));
     if (!Number.isFinite(n) || n === 0) {return '0';}
     return String(Math.round(n * 100) / 100);
   };
-  const tableRows = [];
+  const tableRows: string[][] = [];
   for (const { stage, label } of phases) {
     const stageRows = byStage.get(stage) || [];
     if (stageRows.length === 0) {
@@ -251,7 +251,8 @@ function renderMissionPhaseReport(rows, slug, options = {}) {
     }
   }
 
-  const totals = ['input_tokens', 'output_tokens', 'cached_tokens', 'tool_calls', 'duration_minutes']
+  const totals: number[] = ['input_tokens', 'output_tokens', 'cached_tokens', 'tool_calls', 'duration_minutes']
+    .map(key => key as StatsField)
     .map(key => missionRows.reduce((sum, row) => sum + (Number.parseInt(String(row[key]), 10) || 0), 0));
   const totalCost = tableRows
     .filter(r => r[0] !== 'total')

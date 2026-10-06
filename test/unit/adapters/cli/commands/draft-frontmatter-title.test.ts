@@ -36,7 +36,7 @@ test('TASK-2612: draft intake records a folded frontmatter title', async () => {
       } },
     });
   const workflow = createDraftWorkflowAdapter({
-    resolveTaskFileFn: () => ({ ok: true, taskFile }),
+    resolveTaskFileFn: () => ({ ok: true, taskFile, matches: [taskFile] }),
   });
 
   try {
