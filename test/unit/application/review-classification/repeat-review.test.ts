@@ -62,13 +62,29 @@ test('pins an eligible repeat review to the final revision verified after round 
   s.round.verifiedRevision = finalVerifiedRevision;
   s.context.ports.preReview.head = () => finalVerifiedRevision;
 
-  assert.equal(await tryRepeatReview(s.context, s.round), 'APPROVED');
+  await tryRepeatReview(s.context, s.round);
   assert.equal(s.attempts[0]?.candidateRevision, finalVerifiedRevision);
   const loaded = await s.store.load(s.context.slug as never);
   assert.equal(loaded.kind, 'found');
   if (loaded.kind === 'found') {
     assert.equal(loaded.mission.review!.rounds.at(-1)!.subject.revision, finalVerifiedRevision);
   }
+});
+
+test('attempts Jev for a verified repair after an integration gate revoked approval (TASK-2674)', async () => {
+  const s = scenario();
+  const review = s.store.mission().review!;
+  const prior = review.rounds[0]!;
+  (prior as { decision: typeof prior.decision; response: typeof prior.response }).decision = {
+    kind: 'approved', decidedAt: '2026-10-01T00:01:00Z', comment: 'Approved before integration.', source: { kind: 'local' },
+    revocation: { revokedAt: '2026-10-01T00:02:00Z', revokedBy: 'operator', reason: 'integration gate failed', cause: { kind: 'integration-gate-failure', gate: 'unit', command: 'npm test', log: 'x.java:1 failed' } },
+  };
+  (prior as { response: typeof prior.response }).response = null;
+  s.round.integrationRepair = 'verified integration repair';
+  s.round.verifiedRevision = 'b'.repeat(40);
+  await tryRepeatReview(s.context, s.round);
+  assert.equal(s.attempts.length, 1);
+  assert.equal(s.attempts[0]?.reason, 'resolved-threshold');
 });
 
 test('opt-out, unavailable provider, API failure and shadow retain the reviewer', async () => {

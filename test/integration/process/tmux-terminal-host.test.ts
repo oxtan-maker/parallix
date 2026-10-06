@@ -552,6 +552,37 @@ test('px active and attach from the retained console reuse the original mission 
   }
 });
 
+test('a retained-console px command resolves an operator Jev credential without placing it in tmux (TASK-2674)', { timeout: 20000 }, () => {
+  const fx = fixture();
+  const previousHome = process.env.HOME;
+  const previousPath = process.env.PATH;
+  try {
+    const home = path.join(fx.root, 'operator-home');
+    const bin = path.join(fx.root, 'bin');
+    const resolved = path.join(fx.root, 'resolved');
+    fs.mkdirSync(home, { recursive: true });
+    fs.mkdirSync(bin, { recursive: true });
+    fs.writeFileSync(path.join(home, '.bashrc'), 'export OPENROUTER_API_KEY=operator-authorized-secret\n');
+    fs.writeFileSync(path.join(bin, 'px'), `#!/bin/sh\nprintf '%s' "${'$'}{OPENROUTER_API_KEY:-}" > ${shellQuote(resolved)}\n`, { mode: 0o700 });
+    process.env.HOME = home;
+    process.env.PATH = `${bin}:${previousPath ?? ''}`;
+    const worktree = fx.worktree('task-jev-console');
+    const identity = agentRunIdentity({ repositoryKey: 'itrepo', missionId: 'task-jev-console', role: 'execute', family: 'codex', attempt: 1, startedAtMs: Date.now() });
+    const launch = prepareTmuxLaunch({ identity, spawnIndex: 0, command: 'sh', args: ['-c', 'exit 0'], cwd: worktree, env: { ...fx.env, HOME: home, PATH: process.env.PATH } });
+    try { assert.equal(childProcess.spawnSync(launch.command, launch.args, { timeout: 5000 }).status, 0); } finally { launch.cleanup(); }
+    childProcess.spawnSync('tmux', ['-S', launch.socketPath, 'send-keys', '-t', '=task-jev-console:console', '-l', 'px']);
+    childProcess.spawnSync('tmux', ['-S', launch.socketPath, 'send-keys', '-t', '=task-jev-console:console', 'Enter']);
+    waitFor(() => fs.existsSync(resolved), 5000);
+    assert.equal(fs.readFileSync(resolved, 'utf8'), 'operator-authorized-secret');
+    assert.notEqual(childProcess.spawnSync('tmux', ['-S', launch.socketPath, 'show-environment', '-g', 'OPENROUTER_API_KEY']).status, 0);
+    assert.doesNotMatch(childProcess.spawnSync('tmux', ['-S', launch.socketPath, 'capture-pane', '-p', '-t', '=task-jev-console:console'], { encoding: 'utf8' }).stdout, /operator-authorized-secret/);
+  } finally {
+    if (previousHome === undefined) { delete process.env.HOME; } else { process.env.HOME = previousHome; }
+    if (previousPath === undefined) { delete process.env.PATH; } else { process.env.PATH = previousPath; }
+    fx.cleanup();
+  }
+});
+
 test('a host whose harness pipe is gone still stops its command when the terminal hangs up', { timeout: 20000 }, async () => {
   // Terminal teardown HUPs the host's background jobs as well as the host.
   // dash reports a HUP-killed job ("Hangup") on stderr, which by then is a

@@ -111,7 +111,15 @@ function paneScript(socketPath: string, windowName: string, scratch: string): st
   ].join('\n');
 }
 
-function hostScript(socketPath: string, sessionName: string, windowName: string, scratch: string, cwd: string, supervisorPid: number): string {
+function consolePxScript(command: string | undefined): string {
+  if (!command) { return '#!/bin/sh\nexit 127\n'; }
+  // The retained shell remains credential-free.  Only a px child starts an
+  // interactive Bash, which reads the operator's authorized .bashrc before
+  // immediately execing the real CLI command.
+  return ['#!/bin/sh', `exec /bin/bash -ic 'exec "$@"' bash ${shellQuote(command)} "$@"`, ''].join('\n');
+}
+
+function hostScript(socketPath: string, sessionName: string, windowName: string, scratch: string, cwd: string, supervisorPid: number, consoleBin: string): string {
   // The server and retained console must not inherit operation credentials.
   const cleanEnv = ['PATH', 'HOME', 'TERM', 'SHELL', 'LANG', 'USER', 'LOGNAME', 'PARALLIX_HOME', 'XDG_CONFIG_HOME', 'XDG_STATE_HOME', 'XDG_DATA_HOME'].filter(key => process.env[key])
     .map(key => `${key}=${shellQuote(process.env[key]!)}`).join(' ');
@@ -145,7 +153,7 @@ function hostScript(socketPath: string, sessionName: string, windowName: string,
     `mkfifo ${fifo} || exit 70`,
     // -A would attach when the session exists and require a caller TTY.
     // Concurrent creators may lose new-session; recheck the exact session.
-    `${t} has-session -t ${shellQuote(`=${sessionName}`)} 2>/dev/null || ${t} -f /dev/null new-session -d -s ${name} -n console -x 200 -y 50 -c ${shellQuote(cwd)} '/bin/sh -i' 2>/dev/null || ${t} has-session -t ${shellQuote(`=${sessionName}`)} || exit 70`,
+    `${t} has-session -t ${shellQuote(`=${sessionName}`)} 2>/dev/null || ${t} -f /dev/null new-session -d -s ${name} -n console -x 200 -y 50 -c ${shellQuote(cwd)} ${shellQuote(`PATH=${consoleBin}:$PATH exec /bin/sh -i`)} 2>/dev/null || ${t} has-session -t ${shellQuote(`=${sessionName}`)} || exit 70`,
     `${t} new-window -d -t ${name} -n ${shellQuote(windowName)} -c ${shellQuote(cwd)} ${shellQuote(`sh ${shellQuote(path.join(scratch, 'pane.sh'))}`)} || exit 70`,
     `${t} set-option -w -t ${target} @px_host_pid "$$" >/dev/null`,
     `${t} set-option -w -t ${target} @px_supervisor_pid ${supervisorPid} >/dev/null`,
@@ -190,10 +198,16 @@ export function prepareTmuxLaunch(input: TmuxLaunchInput, options: { env?: NodeJ
   const scratch = path.join(path.dirname(socketPath), input.identity.missionId, windowName);
   ensurePrivateDir(path.dirname(socketPath));
   ensurePrivateDir(scratch);
+  const consoleBin = path.join(path.dirname(socketPath), input.identity.missionId, 'console-bin');
+  ensurePrivateDir(consoleBin);
+  const commandPath = process.env.PATH?.split(path.delimiter).map(dir => path.join(dir, 'px')).find(candidate => {
+    try { return fs.statSync(candidate).isFile(); } catch { return false; }
+  });
+  fs.writeFileSync(path.join(consoleBin, 'px'), consolePxScript(commandPath), { mode: 0o700 });
   writeEnvFile(path.join(scratch, 'pane.env'), { ...input.env, PWD: input.cwd, PARALLIX_MISSION_TERMINAL: input.identity.missionId, PARALLIX_MISSION_SOCKET: socketPath });
   fs.writeFileSync(path.join(scratch, 'command.sh'), commandScript(socketPath, scratch, input.command, input.args), { mode: 0o700 });
   fs.writeFileSync(path.join(scratch, 'pane.sh'), paneScript(socketPath, windowName, scratch), { mode: 0o700 });
-  fs.writeFileSync(path.join(scratch, 'host.sh'), hostScript(socketPath, sessionName, windowName, scratch, input.cwd, input.supervisorPid ?? process.pid), { mode: 0o700 });
+  fs.writeFileSync(path.join(scratch, 'host.sh'), hostScript(socketPath, sessionName, windowName, scratch, input.cwd, input.supervisorPid ?? process.pid, consoleBin), { mode: 0o700 });
   const spawnSyncFn = options.spawnSyncFn ?? childProcess.spawnSync;
   let started = false;
   return {

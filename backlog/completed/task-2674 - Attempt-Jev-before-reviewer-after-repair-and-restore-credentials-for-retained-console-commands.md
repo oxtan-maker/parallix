@@ -3,8 +3,8 @@ id: TASK-2674
 title: >-
   Attempt Jev before reviewer after repair and restore credentials for
   retained-console commands
-status: backlog
-assignee: []
+status: done
+assignee: [codex]
 created_date: '2026-10-06 18:52'
 labels:
   - bug

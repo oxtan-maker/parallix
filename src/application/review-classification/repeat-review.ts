@@ -5,29 +5,47 @@ import { buildEvidencePacket, PACKET_VERSION, PROMPT_VERSION } from './evidence-
 import { classifyRepeatFindings, hasBroaderReviewObligations, ROUTING_POLICY_VERSION } from './routing-policy.js';
 import type { LoopContext, ReviewRound } from '../review-loop/round.js';
 import type { ClassifierCallMeasurement } from '../ports/review-classification-telemetry.js';
+import { reviewFindingId, type ReviewFinding } from '../../domain/review.js';
 
 /** Application policy at the verified re-review boundary; failures retain normal review. */
 export async function tryRepeatReview(context: LoopContext, round: ReviewRound, cycleStarted?: number): Promise<'APPROVED' | 'REQUEST_CHANGES' | 'stop' | null> {
   const { classification: ports, missionStore: store, lifecycle } = context.ports;
   const humanSources = context.state.metadata.humanFeedbackSources;
+  const reason = (value: string) => context.emit({ kind: 'reviewer-classification', reason: value });
   if (!ports || ports.mode === 'disabled' || !store || !lifecycle || !context.ports.provider
-    || round.integrationRepair || round.humanFeedback || (Array.isArray(humanSources) ? humanSources.length > 0 : Boolean(humanSources))) { return null; }
+    || round.humanFeedback || (Array.isArray(humanSources) ? humanSources.length > 0 : Boolean(humanSources))) {
+    reason(!ports || ports.mode === 'disabled' ? 'unavailable or disabled' : 'ineligible due to review context'); return null;
+  }
   const loaded = await store.load(missionId(context.slug));
-  if (loaded.kind !== 'found' || !loaded.mission.review) { return null; }
+  if (loaded.kind !== 'found' || !loaded.mission.review) { reason('ineligible because review evidence is unavailable'); return null; }
   const review = loaded.mission.review;
   const current = review.rounds.at(-1)!;
   const prior = review.rounds.at(-2);
   const candidateRevision = round.verifiedRevision ?? String(current.subject.revision);
-  if (current.decision || current.number !== context.state.round || !prior || prior.decision?.kind !== 'changes-requested'
-    || !prior.response || prior.response.resultingRevision !== current.subject.revision
-    || context.ports.preReview.head() !== candidateRevision || review.intervention) { return null; }
-  const response = prior.implementerResponseContent || review.reviewEvents.filter(e =>
-    e.roundNumber === prior.number && e.eventType === 'implementer_round_summary').at(-1)?.content || '';
-  const original = prior.decision;
-  const reviewComment = original.comment && !['REQUEST_CHANGES', 'request-changes'].includes(original.comment.trim())
-    ? original.comment : review.reviewEvents.filter(e => e.roundNumber === prior.number && e.eventType === 'reviewer_outcome').at(-1)?.content || '';
+  const repairCause = prior?.decision?.kind === 'approved' && prior.decision.revocation?.cause?.kind === 'integration-gate-failure'
+    ? prior.decision.revocation.cause : null;
+  const changesRequested = prior?.decision?.kind === 'changes-requested' ? prior.decision : null;
+  const ordinaryRepeat = Boolean(changesRequested && prior?.response?.resultingRevision === current.subject.revision);
+  const verifiedRepair = Boolean(repairCause && round.integrationRepair && round.verifiedRevision === candidateRevision);
+  if (current.decision || current.number !== context.state.round || !prior || (!ordinaryRepeat && !verifiedRepair)
+    || context.ports.preReview.head() !== candidateRevision || review.intervention) {
+    reason(repairCause && !verifiedRepair ? 'ineligible integration repair lacks verified revision evidence' : 'ineligible for repeat classification'); return null;
+  }
+  const response = ordinaryRepeat ? (prior.implementerResponseContent || review.reviewEvents.filter(e =>
+    e.roundNumber === prior.number && e.eventType === 'implementer_round_summary').at(-1)?.content || '') : '';
+  const repairFinding: readonly ReviewFinding[] = repairCause ? [{ id: reviewFindingId('integration-gate-repair'),
+    summary: `${repairCause.gate}: ${repairCause.log ?? 'integration gate failure'}`,
+    location: repairCause.log?.match(/([A-Za-z0-9_./-]+):\d+/)?.[1] ? `${repairCause.log.match(/([A-Za-z0-9_./-]+):\d+/)![1]}:1` : null }] : [];
+  const original = prior.decision!;
+  const findings: readonly ReviewFinding[] = changesRequested?.findings ?? repairFinding;
+  const reviewComment = changesRequested?.comment && !['REQUEST_CHANGES', 'request-changes'].includes(changesRequested.comment.trim())
+    ? changesRequested.comment : review.reviewEvents.filter(e => e.roundNumber === prior.number && e.eventType === 'reviewer_outcome').at(-1)?.content || '';
+  const evidenceComment = verifiedRepair
+    ? `Integration approval was revoked because ${repairCause!.gate} failed: ${repairCause!.log ?? 'no retained gate output'}.`
+    : reviewComment;
+  const evidenceResponse = verifiedRepair ? 'The repaired revision passed the declared pre-review verification.' : response;
   const decisionId = ports.hash(JSON.stringify([loaded.mission.repositoryId, context.slug, current.number,
-    prior.subject.revision, candidateRevision, original.findings.map(f => f.id).sort((left, right) => left.localeCompare(right)), ROUTING_POLICY_VERSION]));
+    prior.subject.revision, candidateRevision, findings.map(f => f.id).sort((left, right) => left.localeCompare(right)), ROUTING_POLICY_VERSION]));
   const fingerprint = ports.fingerprint();
   const started = cycleStarted ?? ports.clock();
   let telemetry;
@@ -35,7 +53,7 @@ export async function tryRepeatReview(context: LoopContext, round: ReviewRound, 
   const base = {
     decisionId, fingerprint, repository: String(loaded.mission.repositoryId), mission: context.slug, round: current.number,
     observedAt: ports.now(), priorRevision: String(prior.subject.revision), candidateRevision,
-    findingIds: original.findings.map(f => String(f.id)), packetVersion: PACKET_VERSION, promptVersion: PROMPT_VERSION, policyVersion: ROUTING_POLICY_VERSION,
+    findingIds: findings.map(f => String(f.id)), packetVersion: PACKET_VERSION, promptVersion: PROMPT_VERSION, policyVersion: ROUTING_POLICY_VERSION,
     implementer: context.identities.implementer, reviewer: context.identities.reviewer, shadow: ports.mode === 'shadow',
   };
   let attempt: ClassifierCallMeasurement = { ...base, packetHash: null, provider: null, model: null,
@@ -43,31 +61,32 @@ export async function tryRepeatReview(context: LoopContext, round: ReviewRound, 
   let published = false;
   let committed: 'APPROVED' | 'REQUEST_CHANGES' | null = null;
   const fallback = async (reason: string) => {
-    await telemetry.recordCall({ ...attempt, route: 'reviewer', reason }); return null;
+    await telemetry.recordCall({ ...attempt, route: 'reviewer', reason });
+    context.emit({ kind: 'reviewer-classification', reason }); return null;
   };
   // Classifier output is never evidence for another classifier decision: the
   // next round must return to the general reviewer and regain human rationale.
-  if (prior.decision.classifier) { return await fallback('prior-classifier-review'); }
+  if (original.classifier) { return await fallback('prior-classifier-review'); }
   try {
     const availability = await ports.decision.available();
     if (availability.status !== 'available') {
-      await telemetry.recordCall(attempt); return null;
+      await telemetry.recordCall(attempt); reason('provider unavailable'); return null;
     }
     attempt = { ...attempt, provider: availability.provider, model: availability.model };
     const packet = await buildEvidencePacket({
       priorRevision: String(prior.subject.revision), candidateRevision,
-      findings: original.findings, priorReviewComment: reviewComment, implementerResponse: response,
-      resolvedFindingIds: prior.response.resolutions.map(r => String(r.findingId)),
+      findings, priorReviewComment: evidenceComment, implementerResponse: evidenceResponse,
+      resolvedFindingIds: findings.map(f => String(f.id)),
     }, ports.evidence);
     attempt = { ...attempt, preparationMs: ports.clock() - started };
     if ('fallback' in packet) {
-      await telemetry.recordCall({ ...attempt, reason: packet.fallback }); return null;
+      await telemetry.recordCall({ ...attempt, reason: packet.fallback }); reason(packet.fallback); return null;
     }
     // New or broader obligations cannot be cleared using the previous scope.
     const allChanged = await ports.evidence.diff(String(prior.subject.revision), candidateRevision, []);
     attempt = { ...attempt, preparationMs: ports.clock() - started };
     if (hasBroaderReviewObligations(allChanged, packet.paths, context.ports.task.task.taskFile?.replace(`${context.ports.worktree}/`, ''))) {
-      await telemetry.recordCall({ ...attempt, reason: 'broader-review-obligations' }); return null;
+      await telemetry.recordCall({ ...attempt, reason: 'broader-review-obligations' }); reason('broader-review-obligations'); return null;
     }
     attempt = { ...attempt, packetHash: ports.hash(JSON.stringify(packet.request)) };
     const classifyStart = ports.clock();
@@ -75,17 +94,18 @@ export async function tryRepeatReview(context: LoopContext, round: ReviewRound, 
     try { result = await ports.decision.decide(packet.request); }
     catch {
       await telemetry.recordCall({ ...attempt, reason: 'classifier-failure', classificationMs: ports.clock() - classifyStart });
+      reason('classifier-failure');
       return null;
     }
     const selected = classifyRepeatFindings(result);
     attempt = { ...attempt, ...selected, provider: result.provider, model: result.model, classificationMs: ports.clock() - classifyStart };
     await telemetry.recordCall(attempt);
-    if (selected.route === 'reviewer' || ports.mode === 'shadow') { return null; }
+    if (selected.route === 'reviewer' || ports.mode === 'shadow') { reason(selected.route === 'reviewer' ? selected.reason : 'shadow fallback'); return null; }
     if (context.ports.preReview.head() !== candidateRevision) { return await fallback('candidate-revision-drift'); }
     const source: ClassifierReviewSource = {
       kind: 'classifier', identity: 'jev', decisionId, provider: result.provider, model: result.model,
       packetHash: attempt.packetHash!, priorRevision: String(prior.subject.revision), candidateRevision,
-      responseRevision: String(prior.response!.resultingRevision),
+      responseRevision: String(prior.response?.resultingRevision ?? candidateRevision),
       findingIds: base.findingIds, policyVersion: ROUTING_POLICY_VERSION, label: selected.label!, score: selected.score!,
     };
     const at = ports.now();
@@ -114,7 +134,7 @@ export async function tryRepeatReview(context: LoopContext, round: ReviewRound, 
       await context.escalateToHumanReview('CLASSIFIER_REVIEW_PERSIST_FAILURE'); return 'stop';
     }
     committed = selected.route === 'clear' ? 'APPROVED' : 'REQUEST_CHANGES';
-    round.blockingFindings = selected.route === 'implementer' ? original.findings.map(f => ({ id: String(f.id), summary: f.summary })) : [];
+    round.blockingFindings = selected.route === 'implementer' ? findings.map(f => ({ id: String(f.id), summary: f.summary })) : [];
     await telemetry.recordObservation({ decisionId, revision: source.candidateRevision, findingIds: source.findingIds,
       observedAt: ports.now(), originalFindings: 'unobserved', newFindings: null,
       cycleMs: ports.clock() - started, ordinaryReviewMs: null });
@@ -125,6 +145,6 @@ export async function tryRepeatReview(context: LoopContext, round: ReviewRound, 
     if (published) {
       await context.escalateToHumanReview('CLASSIFIER_REVIEW_PERSIST_FAILURE'); return 'stop';
     }
-    return null;
+    reason('classifier exception; using general reviewer'); return null;
   }
 }

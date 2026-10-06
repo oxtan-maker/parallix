@@ -81,7 +81,9 @@ launcher and supervisor.
 
 The retained console is an unconfined operator shell with a minimal operator
 environment; completed operation windows and their exported credentials are
-removed. Console commands can still access the operator's files and credentials.
+removed. A `px` command starts a short-lived operator Bash child to resolve
+operator-authorized provider settings before it execs, so those settings are
+not retained in the console or tmux-server environment.
 Owner-only sockets restrict attachment; evidence redaction does not confine the
 shell. The console uses `/bin/sh -i` and the private tmux server ignores the
 operator's tmux configuration.

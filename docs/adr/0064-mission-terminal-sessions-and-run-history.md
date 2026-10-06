@@ -115,8 +115,9 @@ Persistent shells consume resources until explicitly cleaned up. Worktree
 removal must account for the retained terminal. Multiple simultaneous commands
 need isolated windows and per-operation status, cancellation and ownership.
 The idle console is an unconfined operator shell. It starts from a minimal
-operator environment rather than the operation's exported credentials. Its
-commands can still access the operator's files and credentials. Owner-only
+operator environment rather than the operation's exported credentials. A `px`
+command uses a short-lived operator Bash child to resolve provider settings, so
+credentials never become console or tmux-server environment values. Owner-only
 sockets limit who can attach; evidence redaction does not confine this shell.
 The console uses `/bin/sh -i`; its private tmux server starts with an empty
 configuration rather than loading the operator's tmux configuration.
