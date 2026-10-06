@@ -4,7 +4,7 @@ title: Keep mission terminal open through integration and show final stats
 status: backlog
 assignee: []
 created_date: '2026-10-06 13:57'
-updated_date: '2026-10-06 14:03'
+updated_date: '2026-10-06 14:04'
 labels:
   - bug
   - user_value
@@ -47,6 +47,8 @@ Create a focused reproduction in the owning terminal/workflow suite: the prior b
 
 <!-- SECTION:NOTES:BEGIN -->
 Second operator report (2026-10-06): the tmux session terminated again during integration, hiding failing unit tests and at least one integration test. Treat terminal termination at normal review completion and loss of the integration failure/output view as separate P0 candidates requiring reproduction and diagnosis. Repair the real tmux flow, including child exit, failed gates, detach/reattach and output retention; successful mocked host tests alone are insufficient. Keep this follow-up on main rather than rebouncing TASK-2658 for terminal work.
+
+Bounce-back diagnosis: TASK-2658 was already moved to active by the integration attempt. The lifecycle transition therefore appears to have succeeded before terminal loss. Reproduce the sequence failing gate -> integration-to-active transition -> repair handoff/child/session exit, and determine which process terminates the operator terminal. Keep the failure evidence accessible across that transition.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done
