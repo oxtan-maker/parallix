@@ -456,6 +456,46 @@ test('snapshot validation accepts real command actions with and without a label'
   assert.equal(validateWebBoardSnapshot(snapshot).ok, true, 'production snapshot with real actions must validate');
 });
 
+// SC3 — the checkpoint evidence field validates, and an omission reads as
+// "no evidence" rather than a malformed card.
+test('a card carries its checkpoint evidence through the wire unchanged', () => {
+  const card = makeFullCard({
+    checkpoint: 'CP-2.md',
+    checkpointDescription: 'CP-2: components extracted',
+    checkpointEvidence: [
+      { name: 'CP-1', description: 'CP-1: plan', goalCheck: [{ criterion: 'a', evidence: 'b' }] },
+      { name: 'CP-2', description: 'CP-2: components extracted', goalCheck: [{ criterion: 'c', evidence: 'd' }, { criterion: 'e', evidence: 'f' }] },
+    ],
+  });
+  const snapshot = toWebBoardSnapshot(makeProjection({ review: [card] }));
+  const wireCard = snapshot.stages.flatMap((stage) => stage.cards)[0];
+  assert.deepStrictEqual(wireCard.checkpointEvidence, [
+    { name: 'CP-1', description: 'CP-1: plan', goalCheck: [{ criterion: 'a', evidence: 'b' }] },
+    { name: 'CP-2', description: 'CP-2: components extracted', goalCheck: [{ criterion: 'c', evidence: 'd' }, { criterion: 'e', evidence: 'f' }] },
+  ]);
+  assert.equal(validateWebBoardSnapshot(JSON.parse(JSON.stringify(snapshot))).ok, true);
+});
+
+test('an omitted checkpoint evidence field reads as no evidence, never malformed', () => {
+  const card = makeFullCard({ checkpointEvidence: [] });
+  const snapshot = toWebBoardSnapshot(makeProjection({ review: [card] }));
+  const parsed = JSON.parse(JSON.stringify(snapshot));
+  for (const stage of parsed.stages) {
+    for (const wireCard of stage.cards) { delete wireCard.checkpointEvidence; }
+  }
+  assert.equal(validateWebBoardSnapshot(parsed).ok, true, 'an omission is valid, not a malformed card');
+});
+
+test('a malformed checkpoint evidence field is rejected', () => {
+  const snapshot = toWebBoardSnapshot(makeProjection({ review: [makeFullCard({ checkpointEvidence: [] })] }));
+  const parsed = JSON.parse(JSON.stringify(snapshot));
+  const card = parsed.stages.flatMap((stage) => stage.cards).find((wireCard) => 'checkpointEvidence' in wireCard);
+  card!.checkpointEvidence = 'not-an-array';
+  const validation = validateWebBoardSnapshot(parsed);
+  assert.equal(validation.ok, false);
+  if (!validation.ok && validation.code === 'invalid-payload') { assert.ok(validation.problems.some((problem) => problem.includes('.checkpointEvidence'))); }
+});
+
 test('unsupported transport version is rejected as an incompatible client', () => {
   const snapshot = toWebBoardSnapshot(projectionWith({}));
   const snapshotValidation = validateWebBoardSnapshot({ ...snapshot, transportVersion: 99 });

@@ -167,6 +167,22 @@ export interface WebReviewRoundSummary {
   readonly fixes: readonly string[];
 }
 
+export interface WebGoalCheckRow {
+  readonly criterion: string;
+  readonly evidence: string;
+}
+
+/**
+ * Wire mirror of one checkpoint's evidence: its name, first-line description, and
+ * Goal Check rows. Optional on the wire — a snapshot built before this field exists
+ * omits it and the client reads it as "no evidence", never malformed.
+ */
+export interface WebCheckpointEvidence {
+  readonly name: string;
+  readonly description: string;
+  readonly goalCheck: readonly WebGoalCheckRow[];
+}
+
 export interface WebMissionCard {
   readonly id: string;
   readonly title: string;
@@ -176,6 +192,12 @@ export interface WebMissionCard {
   readonly agent: string | null;
   readonly checkpoint: string | null;
   readonly checkpointDescription: string | null;
+  /**
+   * Per-checkpoint evidence for the mission, oldest first. Optional-and-nullable:
+   * the server always sends it, but an omitted field on an older snapshot reads as
+   * "no evidence" rather than a malformed card.
+   */
+  readonly checkpointEvidence?: readonly WebCheckpointEvidence[];
   readonly nextActionText: string | null;
   readonly gate: WebGateState;
   readonly pullRequest: WebPullRequestReference | null;
@@ -493,6 +515,7 @@ function toWebMissionCard(card: MissionCard): WebMissionCard {
     agent: card.agent,
     checkpoint: card.checkpoint,
     checkpointDescription: card.checkpointDescription,
+    checkpointEvidence: card.checkpointEvidence,
     nextActionText: card.nextActionText,
     gate: card.gate,
     pullRequest: card.pullRequest === null ? null : {
@@ -930,6 +953,29 @@ function checkPullRequest(object: unknown, path: string, problems: string[]): vo
   checkString(object, 'targetBranch', path, problems);
 }
 
+function checkCheckpointEvidence(object: unknown, path: string, problems: string[]): void {
+  if (!Array.isArray(object)) {
+    problems.push(`${path}.checkpointEvidence must be an array`);
+    return;
+  }
+  object.forEach((checkpoint, index) => {
+    const checkpointPath = `${path}.checkpointEvidence[${index}]`;
+    if (!isPlainObject(checkpoint)) { problems.push(`${checkpointPath} must be an object`); return; }
+    checkKeys(checkpoint, ['name', 'description', 'goalCheck'], ['name', 'description', 'goalCheck'], checkpointPath, problems);
+    checkString(checkpoint, 'name', checkpointPath, problems);
+    checkString(checkpoint, 'description', checkpointPath, problems);
+    const rows = checkpoint.goalCheck as unknown;
+    if (!Array.isArray(rows)) { problems.push(`${checkpointPath}.goalCheck must be an array`); return; }
+    rows.forEach((row, rowIndex) => {
+      const rowPath = `${checkpointPath}.goalCheck[${rowIndex}]`;
+      if (!isPlainObject(row)) { problems.push(`${rowPath} must be an object`); return; }
+      checkKeys(row, ['criterion', 'evidence'], ['criterion', 'evidence'], rowPath, problems);
+      checkString(row, 'criterion', rowPath, problems);
+      checkString(row, 'evidence', rowPath, problems);
+    });
+  });
+}
+
 function checkReviewRound(object: unknown, path: string, problems: string[]): void {
   if (!isPlainObject(object)) { problems.push(`${path} must be an object`); return; }
   checkKeys(object,
@@ -952,7 +998,7 @@ function checkMissionCard(object: unknown, path: string, problems: string[]): vo
   if (!isPlainObject(object)) { problems.push(`${path} must be an object`); return; }
   checkKeys(object,
     ['id', 'title', 'lane', 'status', 'closed', 'agent', 'checkpoint', 'checkpointDescription',
-      'nextActionText', 'gate', 'pullRequest', 'reviewApproved', 'reviewRound', 'reviewPhase',
+      'checkpointEvidence', 'nextActionText', 'gate', 'pullRequest', 'reviewApproved', 'reviewRound', 'reviewPhase',
       'reviewDisposition', 'reviewHistory', 'blockingReason', 'flags', 'activity', 'actions'],
     ['id', 'title', 'lane', 'status', 'closed', 'agent', 'checkpoint', 'checkpointDescription',
       'nextActionText', 'gate', 'pullRequest', 'reviewApproved', 'reviewRound', 'reviewPhase',
@@ -965,6 +1011,11 @@ function checkMissionCard(object: unknown, path: string, problems: string[]): vo
   checkNullableString(object, 'agent', path, problems);
   checkNullableString(object, 'checkpoint', path, problems);
   checkNullableString(object, 'checkpointDescription', path, problems);
+  // checkpointEvidence is optional-and-nullable: an omitted field means "no
+  // evidence" and is never malformed, so it is not in the required list above.
+  if (Object.prototype.hasOwnProperty.call(object, 'checkpointEvidence')) {
+    checkCheckpointEvidence(object.checkpointEvidence, `${path}.checkpointEvidence`, problems);
+  }
   checkNullableString(object, 'nextActionText', path, problems);
   checkEnum(object, 'gate', GATES, path, problems);
   checkPullRequest(object.pullRequest, `${path}.pullRequest`, problems);

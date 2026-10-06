@@ -82,6 +82,18 @@ test('mission card contains the board decision inputs without changing lifecycle
   assert.equal(card.closed, false);
   assert.equal(card.lane, 'integration');
   assert.equal(card.nextActionText, 'integrate');
+  // The card carries per-mission checkpoint evidence for the board detail view.
+  assert.deepEqual(card.checkpointEvidence, [
+    { name: 'CP-2', description: 'CP-2: Domain model', goalCheck: [{ criterion: 'x', evidence: 'y' }] },
+  ]);
+  // A mission with no checkpoints carries an empty evidence list, so the board
+  // renders no evidence panel and keeps its original layout.
+  const bare = projectMissionCard({
+    id, repositoryId: repo, title: 'x', labels: missionLabels(['unknown']),
+    status: 'active' as const, rawStatus: 'active', closedAt: null, assignee: null,
+    checkpoints: [], review: null, netEngineeringLines: null,
+  }, { latestGate: 'unknown', reviewApproval: null, currentWork: null, blockingReason: null, flags: [] });
+  assert.deepEqual(bare.checkpointEvidence, []);
   assert.equal(card.pullRequest?.id, '152');
   assert.equal(card.currentWork?.phase, 'gates');
   assert.deepEqual(card.labels, ['ai_sdlc', 'bug']);
@@ -98,7 +110,7 @@ test('board lanes are mission statuses, never a vocabulary of their own', () => 
 });
 
 test('attention and WIP projections reflect blockers, gates, and lanes', () => {
-  const base = { id, repositoryId: repo, title: 'x', labels: missionLabels(['user_value']), lane: 'active' as const, status: 'active' as const, rawStatus: 'active', closed: false, agent: null, checkpoint: null, checkpointDescription: null, nextActionText: null, gate: 'passed' as const, pullRequest: null, reviewApproved: false, reviewRound: null, reviewPhase: null, reviewDisposition: null, reviewHistory: [], currentWork: null, blockingReason: null, flags: [], commands: [] };
+  const base = { id, repositoryId: repo, title: 'x', labels: missionLabels(['user_value']), lane: 'active' as const, status: 'active' as const, rawStatus: 'active', closed: false, agent: null, checkpoint: null, checkpointDescription: null, checkpointEvidence: [], nextActionText: null, gate: 'passed' as const, pullRequest: null, reviewApproved: false, reviewRound: null, reviewPhase: null, reviewDisposition: null, reviewHistory: [], currentWork: null, blockingReason: null, flags: [], commands: [] };
   const blocked = { ...base, blockingReason: 'human decision' };
   const failed = { ...base, gate: 'failed' as const };
   assert.deepEqual(attentionQueue([failed, blocked]).map((card) => card.blockingReason), ['human decision', null]);

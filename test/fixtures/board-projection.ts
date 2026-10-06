@@ -63,6 +63,7 @@ export function makeCard(overrides: Partial<MissionCard> = {}): MissionCard {
     agent: null,
     checkpoint: null,
     checkpointDescription: null,
+    checkpointEvidence: [],
     nextActionText: null,
     gate: 'unknown',
     pullRequest: null,

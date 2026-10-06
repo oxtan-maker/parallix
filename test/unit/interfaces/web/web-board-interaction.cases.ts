@@ -183,6 +183,89 @@ test('cancellation confirmation stays open when the refreshed projection removes
   } finally { await page.close(); }
 });
 
+test('clicking the checkpoint label toggles the evidence panel open and closed (TASK-2660)', async () => {
+  const card = makeCard({
+    id: missionId('task-2660-detail'),
+    status: 'review',
+    lane: 'review',
+    checkpoint: 'CP-2.md',
+    checkpointDescription: 'CP-2: components extracted',
+    checkpointEvidence: [
+      { name: 'CP-2', description: 'CP-2: components extracted', goalCheck: [{ criterion: 'runs the gate', evidence: 'npm test' }] },
+    ],
+  });
+  const page = await renderBoard({ board: toWebBoardSnapshot(makeProjection({ review: [card] })) });
+  try {
+    const label = page.mount.querySelector<DomHtmlElement>('[role="button"][aria-label^="View checkpoint evidence for"]')!;
+    assert.equal(page.mount.querySelector('[role="dialog"]'), null, 'no panel before the first click');
+    // A real click event, dispatched at the label, must reach it even while the
+    // backdrop is open: the label sits above the backdrop (zIndex 60 > 50), so
+    // the required same-label click-to-close toggle is reachable.
+    await act(async () => { label.dispatchEvent(new page.window.MouseEvent('click', { bubbles: true, detail: 0 })); });
+    const dialog = page.mount.querySelector('[role="dialog"]');
+    assert.ok(dialog !== null, 'the panel opens on click');
+    assert.match(dialog?.textContent ?? '', /CP-2: components extracted/, 'the panel renders the checkpoint description');
+    assert.match(dialog?.textContent ?? '', /runs the gate/, 'the panel renders the Goal Check evidence row');
+    // The same label click closes the view; the label stays above the backdrop.
+    await act(async () => { label.dispatchEvent(new page.window.MouseEvent('click', { bubbles: true, detail: 0 })); });
+    assert.equal(page.mount.querySelector('[role="dialog"]'), null, 'the same label click closes the panel');
+  } finally { await page.close(); }
+});
+
+test('the checkpoint evidence panel closes on Escape (TASK-2660)', async () => {
+  const card = makeCard({
+    id: missionId('task-2660-escape'),
+    status: 'review',
+    lane: 'review',
+    checkpoint: 'CP-1.md',
+    checkpointDescription: 'CP-1: plan',
+    checkpointEvidence: [
+      { name: 'CP-1', description: 'CP-1: plan', goalCheck: [{ criterion: 'runs the gate', evidence: 'npm test' }] },
+    ],
+  });
+  const page = await renderBoard({ board: toWebBoardSnapshot(makeProjection({ review: [card] })) });
+  try {
+    const label = page.mount.querySelector<DomHtmlElement>('[role="button"][aria-label^="View checkpoint evidence for"]')!;
+    await act(async () => { label.dispatchEvent(new page.window.MouseEvent('click', { bubbles: true, detail: 0 })); });
+    assert.ok(page.mount.querySelector('[role="dialog"]'), 'the panel opens on click');
+    await act(async () => { page.window.dispatchEvent(new page.window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); });
+    assert.equal(page.mount.querySelector('[role="dialog"]'), null, 'Escape closes the panel');
+  } finally { await page.close(); }
+});
+
+test('selecting a different checkpoint keeps the dialog open and shows its rows (TASK-2660)', async () => {
+  const card = makeCard({
+    id: missionId('task-2660-select'),
+    status: 'review',
+    lane: 'review',
+    checkpoint: 'CP-1.md',
+    checkpointDescription: 'CP-1: plan',
+    checkpointEvidence: [
+      { name: 'CP-1', description: 'CP-1: plan', goalCheck: [{ criterion: 'first gate', evidence: 'npm test' }] },
+      { name: 'CP-2', description: 'CP-2: components extracted', goalCheck: [{ criterion: 'second gate', evidence: 'npm run build' }] },
+    ],
+  });
+  const page = await renderBoard({ board: toWebBoardSnapshot(makeProjection({ review: [card] })) });
+  try {
+    const label = page.mount.querySelector<DomHtmlElement>('[role="button"][aria-label^="View checkpoint evidence for"]')!;
+    await act(async () => { label.dispatchEvent(new page.window.MouseEvent('click', { bubbles: true, detail: 0 })); });
+    const dialog = page.mount.querySelector('[role="dialog"]');
+    assert.ok(dialog !== null, 'the panel opens on click');
+    assert.match(dialog?.textContent ?? '', /CP-1: plan/, 'the panel opens on the first active checkpoint');
+    // The CP-2 selector button click bubbles up to the backdrop; only a direct
+    // backdrop click dismisses the panel, so selecting a checkpoint keeps it open.
+    const selectors = page.mount.querySelectorAll('nav[aria-label="Checkpoints"] button');
+    const cp2 = [...selectors].find((button) => (button.textContent ?? '').trim() === 'CP-2');
+    assert.ok(cp2, 'the CP-2 selector button is present');
+    await act(async () => { cp2.dispatchEvent(new page.window.MouseEvent('click', { bubbles: true, detail: 0 })); });
+    assert.ok(page.mount.querySelector('[role="dialog"]'), 'selecting a checkpoint keeps the dialog open');
+    const reopened = page.mount.querySelector('[role="dialog"]');
+    assert.match(reopened?.textContent ?? '', /CP-2: components extracted/, 'the dialog shows the selected checkpoint description');
+    assert.match(reopened?.textContent ?? '', /second gate/, 'the dialog shows the selected checkpoint evidence rows');
+    assert.doesNotMatch(reopened?.textContent ?? '', /first gate/, 'the dialog dropped the previous checkpoint rows');
+  } finally { await page.close(); }
+});
+
 test('board unavailable action is visibly disabled and ignores pointer and keyboard activation', async () => {
   const page = await renderBoard({ board: snapshot([makeCard({ id: missionId('task-2436-interaction'), status: 'active', lane: 'active', commands: [{ ...action, enabled: false, reason: 'not eligible' }] })]) });
   try {

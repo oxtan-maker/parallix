@@ -176,7 +176,7 @@ describe("Attention queue ranking and sources —", () => {
     return {
       id: missionId(id), repositoryId: repo, title: id, labels: missionLabels(['user_value']),
       lane, status: lane, rawStatus: lane, closed: lane === 'done', agent: agentFamily('codex'),
-      checkpoint: null, checkpointDescription: null, nextActionText: null,
+      checkpoint: null, checkpointDescription: null, checkpointEvidence: [], nextActionText: null,
       gate: opts.gate ?? 'passed', pullRequest: null, reviewApproved: false,
       reviewRound: null, reviewPhase: null, reviewDisposition: null, reviewHistory: [],
       currentWork: opts.currentWork ?? null, blockingReason: opts.blockingReason ?? null,

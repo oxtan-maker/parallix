@@ -16,6 +16,7 @@ import { fileURLToPath } from 'node:url';
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { Board } from '../../../../web/src/board.js';
+import { CheckpointDetail } from '../../../../web/src/flight-column.js';
 import { FlowPanel } from '../../../../web/src/flow-panel.js';
 import { EMPTY_LIVE_PROGRESS, OPERATION_LOG_LIMIT, recordProgress } from '../../../../web/src/operation-log.js';
 import { Shell } from '../../../../web/src/shell.js';
@@ -201,6 +202,63 @@ test('card facts render from the server without substitution', () => {
   assert.match(html, /review round 2/);
   assert.match(html, /CP-2\.md<\/span>/, 'the checkpoint is a visible marker');
   assert.match(html, /review_blocking/);
+});
+
+test('a checkpoint with evidence renders a clickable label that opens its detail', () => {
+  const snapshot = snapshotOf({
+    stages: makeProjection({
+      review: [makeCard({
+        id: 'task-0100' as MissionCard['id'],
+        lane: 'review',
+        status: 'review',
+        checkpoint: 'CP-2.md',
+        checkpointDescription: 'CP-2: components extracted',
+        checkpointEvidence: [
+          { name: 'CP-1', description: 'CP-1: plan', goalCheck: [{ criterion: 'runs the gate', evidence: 'npm test' }] },
+          { name: 'CP-2', description: 'CP-2: components extracted', goalCheck: [{ criterion: 'adds rows', evidence: 'test/unit/x' }, { criterion: 'wires the wire', evidence: 'src/interfaces/web/transport.ts' }] },
+        ],
+      })],
+    }).stages,
+  });
+  const html = render(snapshot);
+  // The label is a clickable affordance only when evidence exists.
+  assert.match(html, /role="button"[^>]*aria-label="View checkpoint evidence for CP-2\.md"/);
+  assert.match(html, /CP-2\.md<\/span>/, 'the checkpoint label is a visible marker');
+});
+
+test('the checkpoint detail renders the description and every evidence row', () => {
+  const snapshot = snapshotOf({
+    stages: makeProjection({
+      review: [makeCard({
+        id: 'task-0100' as MissionCard['id'],
+        checkpoint: 'CP-2.md',
+        checkpointDescription: 'CP-2: components extracted',
+        checkpointEvidence: [
+          { name: 'CP-1', description: 'CP-1: plan', goalCheck: [{ criterion: 'runs the gate', evidence: 'npm test' }] },
+          { name: 'CP-2', description: 'CP-2: components extracted', goalCheck: [{ criterion: 'adds rows', evidence: 'test/unit/x' }, { criterion: 'wires the wire', evidence: 'src/interfaces/web/transport.ts' }] },
+        ],
+      })],
+    }).stages,
+  });
+  const card = snapshot.stages.flatMap((stage) => stage.cards).find((wireCard) => wireCard.checkpoint !== null);
+  const html = renderToStaticMarkup(React.createElement(CheckpointDetail, { card, initial: 'CP-2.md', onClose: () => {} }));
+  // The opened checkpoint is CP-2, so its description and every one of its
+  // Goal Check rows render; the unopened CP-1 rows do not.
+  assert.match(html, /CP-2: components extracted/, 'the checkpoint description renders');
+  assert.match(html, /adds rows/);
+  assert.match(html, /wires the wire/);
+  assert.match(html, /test\/unit\/x/);
+  assert.match(html, /src\/interfaces\/web\/transport\.ts/);
+  assert.doesNotMatch(html, /runs the gate/, 'an unopened checkpoint keeps its rows hidden');
+});
+
+test('the checkpoint detail renders nothing when the card carries no evidence rows', () => {
+  const snapshot = snapshotOf({
+    stages: makeProjection({ review: [makeCard({ checkpoint: 'CP-1.md', checkpointEvidence: [] })] }).stages,
+  });
+  const card = snapshot.stages.flatMap((stage) => stage.cards).find((wireCard) => wireCard.checkpoint !== null);
+  const html = renderToStaticMarkup(React.createElement(CheckpointDetail, { card, initial: 'CP-1.md', onClose: () => {} }));
+  assert.equal(html, '', 'an empty mission keeps its layout with no panel');
 });
 
 test('the operation log renders the server entry rather than a reconstructed one', () => {

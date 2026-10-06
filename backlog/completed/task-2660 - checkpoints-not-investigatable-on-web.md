@@ -1,8 +1,8 @@
 ---
 id: TASK-2660
 title: checkpoints not investigatable on web
-status: backlog
-assignee: []
+status: done
+assignee: [custom]
 created_date: '2026-10-06 10:23'
 labels: []
 dependencies: []

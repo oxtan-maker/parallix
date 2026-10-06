@@ -69,6 +69,7 @@ describe('BoardShell component renders with mocked BoardProjection', () => {
     agent: 'custom' as AgentFamily,
     checkpoint: null,
     checkpointDescription: null,
+    checkpointEvidence: [],
     nextActionText: null,
     gate: null,
     pullRequest: null,

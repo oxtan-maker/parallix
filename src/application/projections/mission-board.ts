@@ -1,6 +1,7 @@
 import type { AgentFamily } from '../../domain/agents.js';
-import { latestEvidencedCheckpoint } from '../../domain/checkpoint.js';
+import { latestEvidencedCheckpoint, type GoalCheckRow } from '../../domain/checkpoint.js';
 import { isClosedMission, type Mission, type MissionId, type MissionLabel, type MissionStatus } from '../../domain/mission.js';
+import type { CheckpointData } from '../../domain/checkpoint.js';
 import type { RepositoryId } from '../../domain/repository.js';
 import type { RunningAgentSession } from './agent-status.js';
 import type { ApprovalCoverage } from '../../domain/approval-coverage.js';
@@ -112,6 +113,14 @@ export interface MissionCard {
   readonly checkpoint: string | null;
   /** First line of checkpoint file (e.g. "CP-2: Status Command Re-implemented"). */
   readonly checkpointDescription: string | null;
+  /**
+   * Every checkpoint for the mission, oldest first, each carrying its first-line
+   * description and Goal Check evidence rows. Populated from `mission.checkpoints`
+   * so the web board can render what a checkpoint is about and the evidence for it
+   * from the GET /api/board snapshot alone, without a second request. Empty when
+   * the mission has no checkpoints at all.
+   */
+  readonly checkpointEvidence: readonly CheckpointEvidence[];
   readonly nextActionText: string | null;
   readonly gate: MissionOperationalFacts['latestGate'];
   readonly pullRequest: PullRequestReference | null;
@@ -279,6 +288,31 @@ export function projectReviewHistory(review: Review | null): readonly ReviewRoun
   });
 }
 
+/**
+ * One checkpoint as the board wire sees it: a name, its first-line description,
+ * and the Goal Check evidence rows recorded against it. A planned checkpoint
+ * (no evidence yet) still appears with its description and an empty row list.
+ */
+export interface CheckpointEvidence {
+  readonly name: string;
+  readonly description: string;
+  readonly goalCheck: readonly GoalCheckRow[];
+}
+
+/**
+ * Mirror `mission.checkpoints` onto the card. The board projects every checkpoint,
+ * not just the latest evidenced one, so a client can walk the mission's checkpoint
+ * history and its evidence in one snapshot. Planned checkpoints carry their
+ * description with an empty Goal Check list; recorded checkpoints carry their rows.
+ */
+function checkpointEvidence(checkpoints: readonly CheckpointData[]): CheckpointEvidence[] {
+  return checkpoints.map((checkpoint) => ({
+    name: checkpoint.name,
+    description: checkpoint.firstLine ?? '',
+    goalCheck: checkpoint.goalCheck,
+  }));
+}
+
 export function boardLane(mission: Mission): BoardLane {
   return mission.status;
 }
@@ -380,6 +414,7 @@ export function projectMissionCard(mission: Mission, facts: MissionOperationalFa
     agent: mission.assignee,
     checkpoint: checkpoint?.rawFilename ?? checkpoint?.name ?? null,
     checkpointDescription: checkpoint?.firstLine ?? null,
+    checkpointEvidence: checkpointEvidence(mission.checkpoints),
     nextActionText: checkpoint?.nextActionText ?? null,
     gate: facts.latestGate,
     pullRequest: reviewedChange?.kind === 'pull-request' ? reviewedChange : null,

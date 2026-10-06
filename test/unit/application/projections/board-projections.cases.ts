@@ -44,6 +44,7 @@ function makeCard(
     agent: agentFamily('codex'),
     checkpoint: null,
     checkpointDescription: null,
+    checkpointEvidence: [],
     nextActionText: null,
     gate: opts.gate ?? 'passed',
     pullRequest: null,

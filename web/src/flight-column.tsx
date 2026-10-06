@@ -4,7 +4,8 @@
  * carrying checkpoint, gate, actor and next action; and a footer of the
  * server's actions.
  */
-import type { CSSProperties, DragEvent } from 'react';
+import { useEffect, useState } from 'react';
+import type { CSSProperties, DragEvent, KeyboardEvent as ReactKeyboardEvent } from 'react';
 import type { WebMissionCard, WebStage } from '../../src/interfaces/web/transport.js';
 import { ActionButton } from './action-button.js';
 import { Fan } from './fan.js';
@@ -41,6 +42,104 @@ function ReviewPips({ card }: { card: WebMissionCard }) {
   );
 }
 
+/**
+ * The per-checkpoint evidence panel. Opens when a user clicks a checkpoint
+ * label on the mission card and closes on the same click, the Escape key, or a
+ * click on the backdrop. It renders the selected checkpoint's first-line
+ * description and every recorded Goal Check row for it. Missions whose wire
+ * card carries no evidence rows render nothing, so an empty mission keeps its
+ * original layout with no panel.
+ */
+export function CheckpointDetail({ card, initial, onClose }: {
+  card: WebMissionCard;
+  initial: string;
+  onClose: () => void;
+}) {
+  const evidence = card.checkpointEvidence ?? [];
+  const hasRows = evidence.some((checkpoint) => checkpoint.goalCheck.length > 0);
+  if (!hasRows) { return null; }
+  const [selected, setSelected] = useState(initial);
+  // `initial` is the card's checkpoint filename ("CP-2.md"); evidence entries
+  // are keyed by checkpoint name ("CP-2"), so match on either form.
+  const active = evidence.find((checkpoint) => checkpoint.name === selected || selected === `${checkpoint.name}.md`) ?? evidence[0];
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => { if (event.key === 'Escape') { onClose(); } };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onClose]);
+  const onBackdrop = (event: React.MouseEvent<HTMLDivElement>) => {
+    // The backdrop closes only on a direct click. Clicks inside the dialog
+    // (checkpoint selector buttons, the close button, evidence text) bubble up
+    // to the backdrop and must not dismiss the panel.
+    if (event.target !== event.currentTarget) { return; }
+    onClose();
+  };
+  return (
+    <div
+      role="presentation"
+      style={{ position: 'fixed', inset: 0, zIndex: 50, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,.55)' }}
+      onClick={onBackdrop}
+    >
+      <section
+        role="dialog"
+        aria-label={`Checkpoint evidence for ${card.id}`}
+        aria-modal="true"
+        style={{
+          width: 480,
+          maxWidth: '92vw', maxHeight: '80vh', overflow: 'auto',
+          background: '#101c16', border: '1px solid #2f5a3f', borderRadius: 6,
+          color: '#cbd9cf', padding: 16, fontFamily: 'inherit', fontSize: 12,
+          boxShadow: '0 12px 36px rgba(0,0,0,.6)',
+        }}
+      >
+        <header style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 8, marginBottom: 10 }}>
+          <h2 style={{ margin: 0, fontSize: 14, color: C.cyan }}>{card.id} — checkpoints</h2>
+          <button
+            type="button"
+            onClick={onClose}
+            style={{ background: 'none', border: '1px solid #3a4550', borderRadius: 4, color: '#aab4bf', cursor: 'pointer', fontFamily: 'inherit', fontSize: 10.5, padding: '2px 8px' }}
+          >
+            close
+          </button>
+        </header>
+        <nav aria-label="Checkpoints" style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 12 }}>
+          {evidence.map((checkpoint) => {
+            const chosen = checkpoint.name === active?.name;
+            return (
+              <button
+                key={checkpoint.name}
+                type="button"
+                aria-pressed={chosen}
+                onClick={() => setSelected(checkpoint.name)}
+                style={{
+                  background: chosen ? '#1f4a31' : '#16241c',
+                  border: `1px solid ${chosen ? '#43e891' : '#2f4a3a'}`,
+                  borderRadius: 4, color: chosen ? '#68f6a7' : '#aab4bf',
+                  cursor: 'pointer', fontFamily: 'inherit', fontSize: 11,
+                  padding: '3px 9px',
+                }}
+              >
+                {checkpoint.name}
+              </button>
+            );
+          })}
+        </nav>
+        <p style={{ margin: '0 0 10px', color: C.dim, fontStyle: 'italic' }}>
+          {active?.description ?? 'No description recorded for this checkpoint.'}
+        </p>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          {(active?.goalCheck ?? []).map((row, index) => (
+            <div key={index} style={{ border: '1px solid #264030', borderRadius: 4, padding: '8px 10px', background: '#0c1712' }}>
+              <div style={{ color: '#68f6a7', marginBottom: 4 }}>{row.criterion}</div>
+              <div style={{ color: '#cbd9cf' }}>evidence: {row.evidence}</div>
+            </div>
+          ))}
+        </div>
+      </section>
+    </div>
+  );
+}
+
 function CheckpointPips({ checkpoint }: { checkpoint: string }) {
   const current = Number(/^CP-(\d+)/i.exec(checkpoint)?.[1] ?? 0);
   return (
@@ -64,6 +163,10 @@ function cancelAction(actions: readonly WebMissionCard['actions'][number][]) {
 }
 
 function FlightCard({ card, onAction, onSelect, onDragStart, selected, pendingCommands }: { card: WebMissionCard; onAction: (card: WebMissionCard, action: WebMissionCard['actions'][number], control: HTMLButtonElement) => void; onSelect: (id: string) => void; onDragStart: (card: WebMissionCard, event: DragEvent<HTMLElement>) => void; selected: boolean; pendingCommands: PendingCommands }) {
+  const [openCheckpoint, setOpenCheckpoint] = useState<string | null>(null);
+  const checkpointEvidence = card.checkpointEvidence ?? [];
+  const hasCheckpointEvidence = checkpointEvidence.some((entry) => entry.goalCheck.length > 0);
+  const openCheckpointDetail = () => setOpenCheckpoint(openCheckpoint === card.checkpoint ? null : (card.checkpoint ?? null));
   const spinning = isSpinning(card);
   // The work publication names the worker; a px process alone does not.
   const working = card.activity.work.kind === 'working';
@@ -154,13 +257,26 @@ function FlightCard({ card, onAction, onSelect, onDragStart, selected, pendingCo
           </div>
         )}
         {card.checkpoint !== null && (
-          <div style={{ display: 'flex', alignItems: 'baseline', gap: 7, marginBottom: 8, fontSize: 11 }}>
+          <div
+            role="button"
+            tabIndex={hasCheckpointEvidence ? 0 : undefined}
+            aria-label={hasCheckpointEvidence ? `View checkpoint evidence for ${card.checkpoint}` : undefined}
+            onClick={openCheckpointDetail}
+            onKeyDown={(event: ReactKeyboardEvent<HTMLElement>) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); openCheckpointDetail(); } }}
+            // Keep the label clickable above the modal backdrop (zIndex 50) so the
+            // same-label click closes the panel; the backdrop still closes on a
+            // backdrop click or Escape.
+            style={{ display: 'flex', alignItems: 'baseline', gap: 7, marginBottom: 8, fontSize: 11, cursor: hasCheckpointEvidence ? 'pointer' : 'default', position: 'relative', zIndex: 60 }}
+          >
             <CheckpointPips checkpoint={card.checkpoint} />
             <span style={{ color: C.dim }} title={card.checkpointDescription ?? undefined}>{card.checkpoint}</span>
             <span style={{ color: GATE_COLOR[card.gate], fontWeight: card.gate === 'failed' ? 700 : 400 }}>
               {GATE_TEXT[card.gate]}
             </span>
           </div>
+        )}
+        {openCheckpoint !== null && (
+          <CheckpointDetail card={card} initial={openCheckpoint} onClose={() => setOpenCheckpoint(null)} />
         )}
         <div style={{ display: 'flex', alignItems: 'baseline', gap: 6, minWidth: 0 }}>
           <span aria-hidden="true" style={{ color: actor.color, fontSize: 8, flexShrink: 0 }}>●</span>
