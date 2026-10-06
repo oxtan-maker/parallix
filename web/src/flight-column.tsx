@@ -10,6 +10,7 @@ import { ActionButton } from './action-button.js';
 import { Fan } from './fan.js';
 import { LaneHeader, laneEmpty } from './lane-header.js';
 import { C } from './palette.js';
+import type { PendingCommands } from './pending-command.js';
 import { actorLine, coordinatorText, familyAccent, GATE_COLOR, GATE_TEXT, isSpinning, workText } from './format.js';
 
 function edgeColor(card: WebMissionCard): string {
@@ -53,14 +54,16 @@ function CheckpointPips({ checkpoint }: { checkpoint: string }) {
 
 function primaryAction(actions: readonly WebMissionCard['actions'][number][]) {
   // The destructive action never becomes the card's default button.
-  return actions.find((action) => action.state === 'enabled' && action.kind !== 'mission:cancel') ?? null;
+  return actions.find((action) => action.state === 'enabled' && action.kind !== 'mission:cancel')
+    ?? actions.find((action) => action.kind !== 'mission:cancel') ?? null;
 }
 
 function cancelAction(actions: readonly WebMissionCard['actions'][number][]) {
-  return actions.find((action) => action.state === 'enabled' && action.kind === 'mission:cancel') ?? null;
+  return actions.find((action) => action.state === 'enabled' && action.kind === 'mission:cancel')
+    ?? actions.find((action) => action.kind === 'mission:cancel') ?? null;
 }
 
-function FlightCard({ card, onAction, onSelect, onDragStart, selected, pendingAction }: { card: WebMissionCard; onAction: (card: WebMissionCard, action: WebMissionCard['actions'][number], control: HTMLButtonElement) => void; onSelect: (id: string) => void; onDragStart: (card: WebMissionCard, event: DragEvent<HTMLElement>) => void; selected: boolean; pendingAction: { missionId: string; kind: WebMissionCard['actions'][number]['kind'] } | null }) {
+function FlightCard({ card, onAction, onSelect, onDragStart, selected, pendingCommands }: { card: WebMissionCard; onAction: (card: WebMissionCard, action: WebMissionCard['actions'][number], control: HTMLButtonElement) => void; onSelect: (id: string) => void; onDragStart: (card: WebMissionCard, event: DragEvent<HTMLElement>) => void; selected: boolean; pendingCommands: PendingCommands }) {
   const spinning = isSpinning(card);
   // The work publication names the worker; a px process alone does not.
   const working = card.activity.work.kind === 'working';
@@ -186,10 +189,10 @@ function FlightCard({ card, onAction, onSelect, onDragStart, selected, pendingAc
           }}
         >
           {cancel !== null && (
-            <ActionButton action={cancel} label={cancel.label} style={{ color: C.red, border: `1px solid ${C.red}` }} pending={pendingAction?.missionId === card.id && pendingAction.kind === cancel.kind} onInvoke={(next, control) => onAction(card, next, control)} />
+            <ActionButton action={cancel} label={cancel.label} style={{ color: C.red, border: `1px solid ${C.red}` }} pending={pendingCommands.get(card.id)} onInvoke={(next, control) => onAction(card, next, control)} />
           )}
           {primary !== null && (
-            <ActionButton action={primary} label={primary.label} pending={pendingAction?.missionId === card.id && pendingAction.kind === primary.kind} working={spinning} onInvoke={(next, control) => onAction(card, next, control)} />
+            <ActionButton action={primary} label={primary.label} pending={pendingCommands.get(card.id)} working={spinning} onInvoke={(next, control) => onAction(card, next, control)} />
           )}
         </div>
       )}
@@ -233,7 +236,7 @@ function runNote(stage: WebStage): { readonly text: string; readonly color: stri
   };
 }
 
-export function FlightColumn({ stage, style, onAction, onSelect, onDragStart, onDrop, selectedId, pendingAction, draggable }: { stage: WebStage; style: CSSProperties; onAction: (card: WebMissionCard, action: WebMissionCard['actions'][number], control: HTMLButtonElement) => void; onSelect: (id: string) => void; onDragStart: (card: WebMissionCard, event: DragEvent<HTMLElement>) => void; onDrop: (lane: WebStage['lane']) => void; selectedId: string | null; pendingAction: { missionId: string; kind: WebMissionCard['actions'][number]['kind'] } | null; draggable: boolean }) {
+export function FlightColumn({ stage, style, onAction, onSelect, onDragStart, onDrop, selectedId, pendingCommands, draggable }: { stage: WebStage; style: CSSProperties; onAction: (card: WebMissionCard, action: WebMissionCard['actions'][number], control: HTMLButtonElement) => void; onSelect: (id: string) => void; onDragStart: (card: WebMissionCard, event: DragEvent<HTMLElement>) => void; onDrop: (lane: WebStage['lane']) => void; selectedId: string | null; pendingCommands: PendingCommands; draggable: boolean }) {
   const note = runNote(stage);
   return (
     <section aria-label={`${stage.lane} stage`} style={{ display: 'flex', flexDirection: 'column', ...style }}>
@@ -247,7 +250,7 @@ export function FlightColumn({ stage, style, onAction, onSelect, onDragStart, on
       />
       <div onDragOver={(event: DragEvent<HTMLDivElement>) => { if (draggable) { event.preventDefault(); } }} onDrop={() => onDrop(stage.lane)} style={{ flex: 1, overflowY: 'auto', paddingTop: 10, minHeight: 0 }}>
         {stage.cards.length === 0 && <p style={laneEmpty}>no missions in this stage</p>}
-        {stage.cards.map((card) => <FlightCard key={card.id} card={card} onAction={onAction} onSelect={onSelect} onDragStart={onDragStart} selected={selectedId === card.id} pendingAction={pendingAction} />)}
+        {stage.cards.map((card) => <FlightCard key={card.id} card={card} onAction={onAction} onSelect={onSelect} onDragStart={onDragStart} selected={selectedId === card.id} pendingCommands={pendingCommands} />)}
       </div>
     </section>
   );

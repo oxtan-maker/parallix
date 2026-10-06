@@ -8,6 +8,7 @@ import type {
 } from '../../src/interfaces/web/transport.js';
 import { ActionButton } from './action-button.js';
 import { C, DISPLAY } from './palette.js';
+import type { PendingCommands } from './pending-command.js';
 
 /**
  * The reference tints each queue entry by why it is queued. This is an accent
@@ -29,7 +30,7 @@ const headingStyle = {
   fontSize: 14, margin: 0, display: 'inline',
 } as const;
 
-function AttentionEntry({ item, onAction, onSelect, selected }: { item: WebAttentionItem; onAction: (item: WebAttentionItem, control: HTMLButtonElement) => void; onSelect: (id: string) => void; selected: boolean }) {
+function AttentionEntry({ item, onAction, onSelect, selected, pendingCommands }: { item: WebAttentionItem; onAction: (item: WebAttentionItem, control: HTMLButtonElement) => void; onSelect: (id: string) => void; selected: boolean; pendingCommands: PendingCommands }) {
   const accent = REASON_ACCENT[item.reason.kind];
   return (
     <article
@@ -68,13 +69,13 @@ function AttentionEntry({ item, onAction, onSelect, selected }: { item: WebAtten
         >
           $ {item.action.display}
         </span>
-        <ActionButton action={item.action} label="run ▸" onInvoke={(_action, control) => onAction(item, control)} />
+        <ActionButton action={item.action} label="run ▸" pending={pendingCommands.get(item.missionId)} onInvoke={(_action, control) => onAction(item, control)} />
       </div>
     </article>
   );
 }
 
-export function AttentionRail({ snapshot, onAction, onSelect, selectedId }: { snapshot: WebBoardSnapshot; onAction: (item: WebAttentionItem, control: HTMLButtonElement) => void; onSelect: (id: string) => void; selectedId: string | null }) {
+export function AttentionRail({ snapshot, onAction, onSelect, selectedId, pendingCommands }: { snapshot: WebBoardSnapshot; onAction: (item: WebAttentionItem, control: HTMLButtonElement) => void; onSelect: (id: string) => void; selectedId: string | null; pendingCommands: PendingCommands }) {
   return (
     <section
       aria-labelledby="attention-heading"
@@ -96,7 +97,7 @@ export function AttentionRail({ snapshot, onAction, onSelect, selectedId }: { sn
         {snapshot.attentionQueue.length === 0 && (
           <p style={{ color: C.faint, fontSize: 11, padding: 2 }}>nothing in the attention queue</p>
         )}
-        {snapshot.attentionQueue.map((item) => <AttentionEntry key={item.missionId} item={item} onAction={onAction} onSelect={onSelect} selected={selectedId === item.missionId} />)}
+        {snapshot.attentionQueue.map((item) => <AttentionEntry key={item.missionId} item={item} onAction={onAction} onSelect={onSelect} selected={selectedId === item.missionId} pendingCommands={pendingCommands} />)}
       </div>
     </section>
   );

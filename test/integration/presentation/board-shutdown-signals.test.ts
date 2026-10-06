@@ -464,6 +464,12 @@ async function assertInflightTermination(fixture: InflightBoardFixture, key: str
   );
   assert.equal(await session.terminalRestored(), true, `${description}: terminal raw-mode state must be restored`);
 
+  // `launchPtySmoke` deliberately keeps its PTY master open after the board
+  // exits so the terminal postcondition can be inspected. The in-flight child
+  // receives its terminal-level SIGHUP only when that verified session is then
+  // torn down; waiting for the signal before closing the master races forever.
+  await session.cleanup();
+
   const reapDeadline = Date.now() + REAP_BUDGET_MS;
   while (fixture.childPid !== null && pidAlive(fixture.childPid) && Date.now() < reapDeadline) {
     await new Promise((resolve) => setTimeout(resolve, 50));

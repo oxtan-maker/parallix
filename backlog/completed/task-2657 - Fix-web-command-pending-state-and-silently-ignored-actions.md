@@ -1,8 +1,8 @@
 ---
 id: TASK-2657
 title: Fix web command pending state and silently ignored actions
-status: backlog
-assignee: []
+status: done
+assignee: [codex]
 created_date: '2026-10-06 08:24'
 labels: []
 dependencies: []

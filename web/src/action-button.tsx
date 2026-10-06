@@ -5,6 +5,7 @@
 import type { CSSProperties } from 'react';
 import type { WebCommandAction } from '../../src/interfaces/web/transport.js';
 import { C } from './palette.js';
+import { unavailableReason, type PendingCommand } from './pending-command.js';
 
 export const UNAVAILABLE_HINT = 'action is not available in the current server projection';
 
@@ -14,23 +15,30 @@ function look(state: WebCommandAction['state']): CSSProperties {
     : { background: 'none', border: `1px solid ${C.cardEdge}`, color: C.faint };
 }
 
-export function ActionButton({ action, style, label, pending = false, working = false, onInvoke }: {
+export function ActionButton({ action, style, label, pending, working = false, onInvoke }: {
   action: WebCommandAction;
   style?: CSSProperties;
   /** A short face for the same action; the full display stays the accessible name. */
   label?: string;
-  pending?: boolean;
+  /** Boolean remains supported for isolated presentation callers. */
+  pending?: PendingCommand | boolean;
   /** Current-work from the refreshed server projection while this request is pending. */
   working?: boolean;
   onInvoke?: (action: WebCommandAction, control: HTMLButtonElement) => void;
 }) {
-  const enabled = action.state === 'enabled' && !pending;
+  const pendingCommand = pending === true ? { id: -1, kind: action.kind } : pending || undefined;
+  const reason = unavailableReason(action, pendingCommand);
+  const enabled = reason === null;
+  const ownPending = pendingCommand?.kind === action.kind;
   return (
     <button
       type="button"
       aria-disabled={!enabled}
       onMouseDown={(event) => event.preventDefault()}
-      onClick={(event) => { if (enabled) { onInvoke?.(action, event.currentTarget); } }}
+      // Keep the projected unavailable appearance, but still let the board
+      // explain a rejected interaction. A disabled-looking control must not
+      // turn a click from another surface into a silent no-op.
+      onClick={(event) => { onInvoke?.(action, event.currentTarget); }}
       style={{
         ...look(action.state),
         borderRadius: 4,
@@ -42,10 +50,10 @@ export function ActionButton({ action, style, label, pending = false, working = 
         whiteSpace: 'nowrap',
         ...style,
       }}
-      title={pending ? `${working ? 'Working' : 'Starting'} ${action.display}` : action.reason ?? (enabled ? action.display : UNAVAILABLE_HINT)}
-      aria-label={`${action.display} — ${pending ? (working ? 'working' : 'starting') : action.state}${action.reason === null ? '' : `: ${action.reason}`}`}
+      title={ownPending ? `${working ? 'Working' : 'Starting'} ${action.display}` : reason ?? action.display}
+      aria-label={`${action.display} — ${ownPending ? (working ? 'working' : 'starting') : enabled ? 'enabled' : `unavailable: ${reason ?? UNAVAILABLE_HINT}`}`}
     >
-      {pending ? `${label ?? action.display} · ${working ? 'working…' : 'starting…'}` : label ?? action.display}
+      {ownPending ? `${label ?? action.display} · ${working ? 'working…' : 'starting…'}` : label ?? action.display}
     </button>
   );
 }

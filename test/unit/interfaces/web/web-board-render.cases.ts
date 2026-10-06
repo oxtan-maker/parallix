@@ -139,7 +139,7 @@ test('a card action renders the server\'s verb for the mission\'s state', () => 
   assert.match(html, /aria-label="px active task-0009 — enabled"/);
 });
 
-test('a card with no runnable action omits its disabled lifecycle controls', () => {
+test('a card with no runnable action exposes its disabled projected control and reason', () => {
   const html = render(snapshotOf({
     stages: [{
       lane: 'review',
@@ -155,8 +155,24 @@ test('a card with no runnable action omits its disabled lifecycle controls', () 
       })],
     }],
   }));
-  assert.doesNotMatch(html, /px active task-0010/);
+  assert.match(html, /px active task-0010 — unavailable: Resuming a review mission requires reviewer findings to act on/);
+  assert.match(html, /aria-disabled="true"/);
   assert.doesNotMatch(html, /px review task-0010/);
+});
+
+test('a card prefers its enabled projected action over an earlier unavailable action', () => {
+  const html = render(snapshotOf({
+    stages: [{
+      lane: 'active', count: 1, cards: [makeCard({
+        id: 'task-2657-mixed' as MissionCard['id'], lane: 'active', status: 'active', commands: [
+          { command: 'active', enabled: false, reason: 'not eligible', targetLane: 'active' },
+          { command: 'handoff', enabled: true, reason: null, targetLane: 'review', label: 'record handoff' },
+        ],
+      })],
+    }],
+  }));
+  assert.match(html, /px handoff task-2657-mixed — enabled/);
+  assert.doesNotMatch(html, /px active task-2657-mixed/);
 });
 
 test('every received card renders in its stage, including the collapsible done history', () => {
@@ -404,7 +420,7 @@ test('agent-block durations use human-sized units', () => {
 // Read-only boundary and reference-preserving overflow (SC4, SC5)
 // ---------------------------------------------------------------------------
 
-test('each card renders at most one enabled projected action', () => {
+test('each card renders projected action availability without inventing a runnable fallback', () => {
   const html = render(populated());
   const buttons: string[] = Array.from(html.match(/<button[^>]*>/g) ?? []).filter((button) => !button.includes('aria-controls="flow-metrics"'));
   assert.ok(buttons.length > 0, 'the fixture renders at least one action');
@@ -412,7 +428,7 @@ test('each card renders at most one enabled projected action', () => {
     assert.match(button, /aria-disabled="(?:true|false)"/, `action states availability: ${button}`);
   }
   assert.match(html, /px active task-0001/, "the server's display string is rendered verbatim");
-  assert.doesNotMatch(html, /aria-label="px integrate task-0001/, 'a card does not fall back to an unavailable lifecycle control');
+  assert.match(html, /aria-label="px active task-0001 — unavailable: command is not eligible for this mission"/, 'the unavailable projected control retains the server reason');
 });
 
 test('advertised actions dispatch directly without a confirmation dialog', () => {

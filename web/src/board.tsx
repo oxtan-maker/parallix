@@ -7,7 +7,7 @@
  * Layout, spacing, palette and typography follow the design authority
  * (`Parallix Board GPU.dc.html` in the reference acceptance artifact).
  */
-import { useRef, useState, type KeyboardEvent } from 'react';
+import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
 import type { DragEvent } from 'react';
 import type { WebBoardSnapshot, WebCommandAction, WebMissionCard } from '../../src/interfaces/web/transport.js';
 import { AttentionRail } from './attention-rail.js';
@@ -18,6 +18,7 @@ import { IntakeColumn } from './intake-column.js';
 import { OperationLog } from './operation-log.js';
 import { TopBar } from './top-bar.js';
 import { sendCommand } from './board-data.js';
+import { unavailableReason, type PendingCommands } from './pending-command.js';
 
 // Presentation-only grouping: which reference region a received stage sits in.
 // These are layout buckets, not lifecycle rules.
@@ -61,9 +62,8 @@ function isRequestKind(kind: WebCommandAction['kind']): kind is 'active:execute'
 
 export function Board({ snapshot, onRefresh }: { snapshot: WebBoardSnapshot; onRefresh: () => Promise<void> }) {
   const [flowOpen, setFlowOpen] = useState(false);
-  const [sending, setSending] = useState(false);
-  const [outcome, setOutcome] = useState<string | null>(null);
-  const [pendingAction, setPendingAction] = useState<{ missionId: string; kind: WebCommandAction['kind'] } | null>(null);
+  const [pendingCommands, setPendingCommands] = useState<PendingCommands>(new Map());
+  const [outcomes, setOutcomes] = useState<ReadonlyMap<string, string>>(new Map());
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [dragged, setDragged] = useState<WebMissionCard | null>(null);
   /**
@@ -73,6 +73,22 @@ export function Board({ snapshot, onRefresh }: { snapshot: WebBoardSnapshot; onR
    */
   const [cancelPrompt, setCancelPrompt] = useState<{ card: WebMissionCard; action: WebCommandAction } | null>(null);
   const root = useRef<HTMLDivElement>(null);
+  const pendingRef = useRef<Map<string, { id: number; kind: WebCommandAction['kind'] }>>(new Map());
+  const requestSequence = useRef(0);
+  const latestInteraction = useRef(0);
+  const mounted = useRef(true);
+  useEffect(() => () => { mounted.current = false; }, []);
+  const publishPending = () => { if (mounted.current) { setPendingCommands(new Map(pendingRef.current)); } };
+  const publishOutcome = (missionId: string, text: string) => {
+    if (mounted.current) { setOutcomes((current) => new Map(current).set(missionId, text)); }
+  };
+  const clearOutcome = (missionId: string) => {
+    if (mounted.current) { setOutcomes((current) => { const next = new Map(current); next.delete(missionId); return next; }); }
+  };
+  useEffect(() => {
+    const present = new Set(snapshot.stages.flatMap((stage) => stage.cards).map((card) => card.id));
+    setOutcomes((current) => new Map([...current].filter(([missionId]) => present.has(missionId))));
+  }, [snapshot]);
   const moveSelection = (event: KeyboardEvent<HTMLDivElement>) => {
     if (event.key !== 'ArrowUp' && event.key !== 'ArrowDown') { return; }
     const cards = [...(root.current?.querySelectorAll<HTMLElement>('[data-board-card]') ?? [])];
@@ -85,18 +101,22 @@ export function Board({ snapshot, onRefresh }: { snapshot: WebBoardSnapshot; onR
     setSelectedId(next.dataset.boardCard ?? null);
   };
   const startDrag = (card: WebMissionCard, event: DragEvent<HTMLElement>) => {
+    if (pendingRef.current.has(card.id)) { publishOutcome(card.id, 'Drag unavailable while a command is running for this mission.'); return; }
     setDragPreview(event, card);
     setDragged(card);
   };
   const dispatch = async (card: WebMissionCard, action: WebCommandAction, control?: HTMLButtonElement) => {
-    if (sending) { return; }
+    const unavailable = unavailableReason(action, pendingRef.current.get(card.id));
+    if (unavailable !== null) { publishOutcome(card.id, unavailable); return; }
     if (!isRequestKind(action.kind)) {
-      setOutcome('This projected action is not supported by the browser controller.');
+      publishOutcome(card.id, 'This projected action is not supported by the browser controller.');
       return;
     }
-    setSending(true);
-    setPendingAction({ missionId: card.id, kind: action.kind });
-    setOutcome(`Starting ${action.display}…`);
+    const id = ++requestSequence.current;
+    latestInteraction.current = id;
+    pendingRef.current.set(card.id, { id, kind: action.kind });
+    publishPending();
+    publishOutcome(card.id, `Starting ${action.display}…`);
     try {
       const result = await sendCommand({
         missionId: card.id,
@@ -105,42 +125,43 @@ export function Board({ snapshot, onRefresh }: { snapshot: WebBoardSnapshot; onR
       });
       if (result.error?.kind === 'conflict') {
         await onRefresh();
-        setOutcome(`${result.error.message} Select the refreshed action to try again.`);
+        publishOutcome(card.id, `${result.error.message} Select the refreshed action to try again.`);
         return;
       }
-      if (result.status !== 'completed') { setOutcome(result.error?.message ?? result.status); return; }
+      if (result.status !== 'completed') { publishOutcome(card.id, result.error?.message ?? result.status); return; }
       await onRefresh();
-      setOutcome(action.kind === 'mission:cancel'
+      publishOutcome(card.id, action.kind === 'mission:cancel'
         ? `Cancelled ${card.id}: its lifecycle rows are gone and its card has left the board.`
         : `${action.display} started.`);
     } catch (error) {
-      setOutcome(error instanceof Error ? error.message : String(error));
+      publishOutcome(card.id, error instanceof Error ? error.message : String(error));
     } finally {
-      setSending(false);
-      setPendingAction(null);
-      if (control !== undefined) { restoreActionFocus(control, root.current); }
+      if (pendingRef.current.get(card.id)?.id === id) { pendingRef.current.delete(card.id); publishPending(); }
+      if (control !== undefined && mounted.current && latestInteraction.current === id) { restoreActionFocus(control, root.current); }
     }
   };
   const open = (card: WebMissionCard, action: WebCommandAction, control: HTMLButtonElement) => {
-    if (action.state !== 'enabled') { return; }
+    const unavailable = unavailableReason(action, pendingRef.current.get(card.id));
+    if (unavailable !== null) { publishOutcome(card.id, unavailable); return; }
     setSelectedId(card.id);
-    setOutcome(null);
+    clearOutcome(card.id);
     if (action.kind === 'mission:cancel') { setCancelPrompt({ card, action }); return; }
     void dispatch(card, action, control);
   };
   const dropAction = (lane: WebMissionCard['lane']) => {
-    if (dragged === null || sending) { return; }
+    if (dragged === null) { return; }
+    if (pendingRef.current.has(dragged.id)) { publishOutcome(dragged.id, 'Drop unavailable while a command is running for this mission.'); return; }
     const matches = dragged.actions.filter((action) => action.state === 'enabled' && action.targetLane === lane);
     setDragged(null);
     const action = dragActionForTarget(dragged.actions, lane);
     if (action === null) {
-      setOutcome(`Drop unavailable: ${matches.length === 0 ? 'no enabled projected action targets this lane' : 'more than one projected action targets this lane'}.`);
+      publishOutcome(dragged.id, `Drop unavailable: ${matches.length === 0 ? 'no enabled projected action targets this lane' : 'more than one projected action targets this lane'}.`);
       return;
     }
     setSelectedId(dragged.id);
     void dispatch(dragged, action);
   };
-  const canDrop = (lane: WebMissionCard['lane']) => dragged !== null && dragActionForTarget(dragged.actions, lane) !== null;
+  const canDrop = (lane: WebMissionCard['lane']) => dragged !== null && !pendingRef.current.has(dragged.id) && dragActionForTarget(dragged.actions, lane) !== null;
   // The intake bucket stacks in the reference's order; every other lane keeps
   // the order the server sent.
   const intake = snapshot.stages
@@ -154,9 +175,9 @@ export function Board({ snapshot, onRefresh }: { snapshot: WebBoardSnapshot; onR
       <TopBar snapshot={snapshot} flowOpen={flowOpen} onFlowToggle={() => setFlowOpen((open) => !open)} />
       {flowOpen && <FlowPanel metrics={snapshot.metrics} />}
       <div style={{ flex: 1, display: 'flex', minHeight: 0 }}>
-        <AttentionRail snapshot={snapshot} selectedId={selectedId} onSelect={setSelectedId} onAction={(item, control) => {
+        <AttentionRail snapshot={snapshot} selectedId={selectedId} pendingCommands={pendingCommands} onSelect={setSelectedId} onAction={(item, control) => {
           const card = snapshot.stages.flatMap((stage) => stage.cards).find((candidate) => candidate.id === item.missionId);
-          if (card !== undefined) { open(card, item.action, control); } else { setOutcome(`Mission ${item.missionId} is no longer in the current projection.`); }
+          if (card !== undefined) { open(card, item.action, control); } else { publishOutcome(item.missionId, `Mission ${item.missionId} is no longer in the current projection.`); }
         }} />
         <div style={{ flex: 1, display: 'flex', minWidth: 0, minHeight: 0, gap: 14, padding: 14, overflowX: 'auto' }}>
           {intake.length > 0 && (
@@ -170,7 +191,7 @@ export function Board({ snapshot, onRefresh }: { snapshot: WebBoardSnapshot; onR
                   onDragStart={startDrag}
                   onDrop={dropAction}
                   selectedId={selectedId}
-                  pendingAction={pendingAction}
+                  pendingCommands={pendingCommands}
                   draggable={canDrop(stage.lane) === true}
                   style={index === 0
                     ? { minHeight: 80, maxHeight: '44%', flexShrink: 0 }
@@ -181,7 +202,7 @@ export function Board({ snapshot, onRefresh }: { snapshot: WebBoardSnapshot; onR
           )}
           {flight.map((stage) => (
             <div key={stage.lane} aria-dropeffect={canDrop(stage.lane) ? 'move' : undefined} style={{ flex: 1, minWidth: 318, minHeight: 0 }}>
-              <FlightColumn stage={stage} onAction={open} onSelect={setSelectedId} onDragStart={startDrag} onDrop={dropAction} selectedId={selectedId} pendingAction={pendingAction} draggable={canDrop(stage.lane) === true} style={{ height: '100%' }} />
+              <FlightColumn stage={stage} onAction={open} onSelect={setSelectedId} onDragStart={startDrag} onDrop={dropAction} selectedId={selectedId} pendingCommands={pendingCommands} draggable={canDrop(stage.lane) === true} style={{ height: '100%' }} />
             </div>
           ))}
           {shipped.map((stage) => <DoneRail key={stage.lane} stage={stage} />)}
@@ -200,8 +221,14 @@ export function Board({ snapshot, onRefresh }: { snapshot: WebBoardSnapshot; onR
               type="button"
               onClick={() => {
                 const pending = cancelPrompt;
+                const card = snapshot.stages.flatMap((stage) => stage.cards).find((candidate) => candidate.id === pending.card.id);
+                const action = card?.actions.find((candidate) => candidate.kind === pending.action.kind);
+                const unavailable = card === undefined ? 'mission is no longer in the current projection' : action === undefined
+                  ? 'cancellation is no longer available in the current server projection'
+                  : unavailableReason(action, pendingRef.current.get(card.id));
+                if (card === undefined || action === undefined || unavailable !== null) { publishOutcome(pending.card.id, `Cancellation was not sent: ${unavailable}`); return; }
                 setCancelPrompt(null);
-                void dispatch(pending.card, pending.action);
+                void dispatch(card, action);
               }}
               style={{ background: '#3a1618', border: '1px solid #a83c3c', borderRadius: 4, color: '#f0a0a0', cursor: 'pointer', fontFamily: 'inherit', fontSize: 10.5, letterSpacing: 0.5, padding: '4px 10px' }}
             >
@@ -209,7 +236,7 @@ export function Board({ snapshot, onRefresh }: { snapshot: WebBoardSnapshot; onR
             </button>
             <button
               type="button"
-              onClick={() => { setCancelPrompt(null); setOutcome(`Kept ${cancelPrompt.card.id}. Nothing was deleted.`); }}
+              onClick={() => { setCancelPrompt(null); publishOutcome(cancelPrompt.card.id, `Kept ${cancelPrompt.card.id}. Nothing was deleted.`); }}
               style={{ background: 'none', border: '1px solid #3a4550', borderRadius: 4, color: '#aab4bf', cursor: 'pointer', fontFamily: 'inherit', fontSize: 10.5, letterSpacing: 0.5, padding: '4px 10px' }}
             >
               keep mission
@@ -217,7 +244,7 @@ export function Board({ snapshot, onRefresh }: { snapshot: WebBoardSnapshot; onR
           </div>
         </section>
       )}
-      {outcome !== null && <p role="status" aria-live="polite" style={{ margin: '0 14px 10px', color: '#aab4bf' }}>{outcome}</p>}
+      {[...outcomes.entries()].map(([missionId, outcome]) => <p key={missionId} role="status" aria-live="polite" style={{ margin: '0 14px 10px', color: '#aab4bf' }}>{outcome}</p>)}
       <OperationLog snapshot={snapshot} />
     </div>
   );
