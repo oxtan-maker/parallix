@@ -6,6 +6,7 @@
 // task-2455.01-target-user-repro and task-2455.02-task-provider-config-repro
 // suites (TASK-2622.14).
 import { describe, test } from 'node:test';
+import { terminalHostConfig } from '../../../../src/adapters/config/terminal-host-config.js';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -242,5 +243,13 @@ describe("adapters.tasks.provider validation", () => {
       assert.equal(resolveTaskProvider(root), 'backlog-md');
       assert.equal(resolveTaskStorage(root).tasksDir, path.join(root, 'backlog', 'tasks'));
     });
+  });
+  test('adapters.terminal defaults to automatic tmux hosting and rejects unknown values (TASK-2643)', () => {
+    assert.deepEqual(validateWorkflowConfig({ adapters: { terminal: { host: 'tmux', whenUnavailable: 'fail' } } }), []);
+    assert.deepEqual(validateWorkflowConfig({ adapters: { terminal: { host: 'screen' } } }), ['adapters.terminal.host must be one of "auto", "pipe", "tmux"']);
+    assert.deepEqual(validateWorkflowConfig({ adapters: { terminal: { whenUnavailable: 'ignore' } } }), ['adapters.terminal.whenUnavailable must be one of "fallback", "fail"']);
+    assert.equal(validateWorkflowConfig({ adapters: { terminal: { attach: true } } }).length, 1);
+    assert.deepEqual(terminalHostConfig({}), { host: 'auto', whenUnavailable: 'fallback' });
+    assert.deepEqual(terminalHostConfig({ terminal: { host: 'tmux' } }), { host: 'tmux', whenUnavailable: 'fallback' });
   });
 });

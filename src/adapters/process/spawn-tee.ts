@@ -41,7 +41,24 @@ interface SpawnTeeOptions {
    */
   unrefChild?: boolean;
   onSpawn?: (_child: ChildProcess) => void;
+  /**
+   * Optional terminal host (TASK-2643). Receives the already-confined launch and
+   * returns the command that hosts it, for example a tmux session host script.
+   * The hosted command is the one supervised child, so signals, the watchdog
+   * and exit status keep this function's semantics. `cleanup` runs once.
+   */
+  terminalHost?: TerminalHost;
+  /** Optional durable sink that receives every output chunk, before any tail bound. */
+  capture?: OutputCapture;
   [key: string]: unknown;
+}
+
+export interface TerminalHost {
+  host(_launch: { command: string; args: string[] }, _context: { cwd: string; env: Record<string, string> }): { command: string; args: string[]; cleanup(): void };
+}
+
+export interface OutputCapture {
+  write(_stream: 'stdout' | 'stderr', _chunk: Buffer): void;
 }
 
 export class TailBuffer {
@@ -100,6 +117,8 @@ export function spawnAndTee(command: string, args: string[], options: SpawnTeeOp
       noOutputWatchdog = null,
       unrefChild = false,
       onSpawn,
+      terminalHost,
+      capture,
     ...spawnOptions
   } = options;
 
@@ -116,7 +135,16 @@ export function spawnAndTee(command: string, args: string[], options: SpawnTeeOp
     };
     // Guard construction errors deliberately reject this launch. An available
     // but broken Bubblewrap guard must never retry the child unsandboxed.
-    const launch = wrapWithBubblewrap(command, args, resolvedCwd);
+    const confined = wrapWithBubblewrap(command, args, resolvedCwd);
+    let hosted: ReturnType<TerminalHost['host']> | null = null;
+    try {
+      hosted = terminalHost ? terminalHost.host(confined, { cwd: resolvedCwd, env }) : null;
+    } catch (err) {
+      const now = new Date().toISOString();
+      resolve({ status: null, signal: null, stdout: '', stderr: '', error: err, startedAt: now, endedAt: now });
+      return;
+    }
+    const launch = hosted ?? confined;
 
     const hasNoOutputDeadline = Number.isFinite(noOutputWatchdog?.maxNoOutputMs) && (noOutputWatchdog?.maxNoOutputMs ?? 0) > 0;
     let child: ChildProcess;
@@ -136,6 +164,7 @@ export function spawnAndTee(command: string, args: string[], options: SpawnTeeOp
         (child.stderr as { unref?: () => void } | null)?.unref?.();
       }
     } catch (err) {
+      hosted?.cleanup();
       resolve({
         status: null, signal: null, stdout: '', stderr: '', error: err,
         startedAt: new Date(startTime).toISOString(), endedAt: new Date().toISOString()
@@ -184,6 +213,7 @@ export function spawnAndTee(command: string, args: string[], options: SpawnTeeOp
     const finish = (payload: FinishPayload): void => {
       if (settled) {return;}
       settled = true;
+      try { hosted?.cleanup(); } catch { /* a failed host cleanup must not mask the launch result */ }
       watchdog.clear();
       clearDeadlineTimer();
       clearEscalationTimer();
@@ -199,6 +229,7 @@ export function spawnAndTee(command: string, args: string[], options: SpawnTeeOp
     child.stdout?.on('data', (chunk: Buffer) => {
       if (!noOutputTimedOut) { clearDeadlineTimer(); }
       watchdog.noteOutput();
+      capture?.write('stdout', chunk);
       stdoutTail.push(chunk);
       if (stdoutSink && typeof stdoutSink.write === 'function') {
         stdoutSink.write(chunk);
@@ -207,6 +238,7 @@ export function spawnAndTee(command: string, args: string[], options: SpawnTeeOp
     child.stderr?.on('data', (chunk: Buffer) => {
       if (!noOutputTimedOut) { clearDeadlineTimer(); }
       watchdog.noteOutput();
+      capture?.write('stderr', chunk);
       stderrTail.push(chunk);
       if (stderrSink && typeof stderrSink.write === 'function') {
         stderrSink.write(chunk);

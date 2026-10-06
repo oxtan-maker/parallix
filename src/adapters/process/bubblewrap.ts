@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import * as fmt from '../../application/presentation/cli-format.js';
 import { resolveCustomRunner } from '../config/product-config.js';
+import { existingTerminalStateRoots } from './terminal-state-root.js';
 import {
   claudeConfigCellDir,
   claudeConfigDir,
@@ -249,6 +250,12 @@ export function buildBubblewrapArgs(profile: SandboxProfile, cwd: string): strin
   if (cell) { args.push(...configCellArgs(cell, cellWritable)); }
   args.push(profile.worktreeWritable ? '--bind' : '--ro-bind', worktree, worktree);
   for (const dir of writable.filter(dir => dir !== worktree && isWithin(worktree, dir))) { args.push('--bind', dir, dir); }
+  // Mask the tmux terminal state (sockets, pane launch environment) last, so no
+  // writable ancestor bind re-exposes it: a confined agent must not reach any
+  // run's tmux server, its own included (TASK-2643).
+  for (const root of existingTerminalStateRoots()) {
+    if (!isWithin(root, worktree)) { args.push('--tmpfs', root); }
+  }
   return [...args, '--chdir', path.resolve(cwd), '--'];
 }
 

@@ -168,6 +168,8 @@ Both are optional integrations, and each one is wired independently of the other
 ## Use cases
 
 The durable capability guide and confidence boundaries are in [`docs/use-cases.md`](docs/use-cases.md).
+For automatic interactive mission terminals and bounded retained agent-run output,
+see [agent-run history](docs/agent-run-history.md).
 
 ## What Parallix is not
 

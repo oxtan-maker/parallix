@@ -97,7 +97,7 @@ function requireFileSystem(): RecoveryFileSystem {
  * are unique to one mission and one repository, so original and retry evidence
  * cannot overwrite or be confused with another concurrent mission.
  */
-function incidentDirName(missionId: string | undefined, cwd: string): string {
+export function incidentDirName(missionId: string | undefined, cwd: string): string {
   const chosen = (missionId && missionId.trim()) ? missionId.trim() : path.basename(path.resolve(cwd));
   return chosen.replace(/[^\w.-]/g, '_') || '_';
 }

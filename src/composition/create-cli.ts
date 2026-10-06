@@ -1,6 +1,8 @@
 #!/usr/bin/env node
 
 import fs from 'node:fs';
+import { hostMissionCommand } from './mission-terminal.js';
+import { cliInvocation, type CliInvocation } from '../adapters/process/cli-invocation.js';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import * as fmt from '../application/presentation/cli-format.js';
@@ -21,6 +23,8 @@ import configWorkflow from '../adapters/cli/commands/config.js';
 import { createConfigCommand } from '../interfaces/cli/config.js';
 import diffWorkflow from '../adapters/cli/commands/diff.js';
 import { createDiffCommand } from '../interfaces/cli/diff.js';
+import { createRunHistoryPort } from '../adapters/cli/commands/run-history.js';
+import { createAttachCommand, createHistoryCommand } from '../interfaces/cli/run-history.js';
 import { createDraftWorkflowAdapter } from '../adapters/cli/commands/draft.js';
 import { createHandoffPorts, validateDeclaredGates } from '../adapters/cli/commands/handoff.js';
 import integrate from '../adapters/cli/commands/integrate.js';
@@ -153,6 +157,7 @@ interface ReviewEventParsed {
 }
 
 interface RunOptions {
+  cliInvocation?: CliInvocation;
   log?: typeof fmt.log.plain;
   error?: typeof fmt.log.plainError;
   baseCwd?: string;
@@ -162,6 +167,7 @@ function createCommandRegistry(rootDir: string): Record<string, Command> {
   const active = createActiveCommand((request, options) => activeWorkflow([...request.args], options));
   const config = createConfigCommand((request, options) => configWorkflow([...request.args], options));
   const diff = createDiffCommand((request, options) => diffWorkflow([...request.args], options));
+  const runHistory = createRunHistoryPort();
   const resolveConflict = createResolveConflictCommand((request, options) => resolveConflictWorkflow([...request.args], options));
   const setup = createSetupCommand((request, options) => setupWizard([...request.args], options));
   const verify = createVerifyCommand((request, options) => verifyWorkflow([...request.args], options));
@@ -325,6 +331,8 @@ function createCommandRegistry(rootDir: string): Record<string, Command> {
     revoke: revokeReview,
     unassign: (args) => withGraph(services => createAssignCommand(missionWrites(services), true)(args)),
     diff,
+    history: createHistoryCommand(runHistory),
+    attach: createAttachCommand(runHistory),
     draft: (args, options) => withMissionAndGraph((missionServicesFn, services) => {
       // Create adapter with missionServicesFn injected via withMissionFactories
         const adapter = createDraftWorkflowAdapter({ missionServicesFn });
@@ -898,7 +906,7 @@ function ensureWorkflowAgentConfig(command: string, target: string) {
   try { ensureFirstRunAgentConfig({ rootDir: target, worktree: target }); } catch { /* Best-effort first-run detection. */ }
 }
 
-async function runTargetCommand(parsed: ParsedArgs, log: typeof fmt.log.plain, error: typeof fmt.log.plainError): Promise<number> {
+async function runTargetCommand(parsed: ParsedArgs, log: typeof fmt.log.plain, error: typeof fmt.log.plainError, cli?: CliInvocation): Promise<number> {
   const previousCwd = process.cwd();
   try {
     const [startupPreflightModule, workflow] = await Promise.all([
@@ -906,6 +914,8 @@ async function runTargetCommand(parsed: ParsedArgs, log: typeof fmt.log.plain, e
       import('../interfaces/cli/runtime.js'),
     ]);
     process.chdir(parsed.target);
+    const hosted = cli ? await hostMissionCommand(parsed.command, parsed.args, parsed.target, log, cli) : null;
+    if (hosted !== null) { return hosted; }
     if (parsed.command === 'review-event') { return await runReviewEventCommand(parsed, log, error); }
     if (parsed.command === 'verify-env') {
       return startupPreflightModule.default([], { command: 'verify-env', returnResult: true, log, error })?.pass ? 0 : 1;
@@ -972,7 +982,7 @@ export async function run(argv = process.argv.slice(2), options: RunOptions = {}
     return 0;
   }
 
-  return await runTargetCommand(parsed, log, error);
+  return await runTargetCommand(parsed, log, error, options.cliInvocation);
 }
 
 const _arg1 = typeof process.argv[1] === 'string' && process.argv[1] ? process.argv[1] : undefined;
@@ -980,7 +990,7 @@ const _arg1 = typeof process.argv[1] === 'string' && process.argv[1] ? process.a
 // root source file is directly executable; the canonical entry owns startup.
 const _esmMain = _arg1 && _arg1.endsWith('/px.ts') && !_arg1.endsWith('/src/entry/px.ts');
 if (_esmMain) {
-  run().then(code => {
+  run(process.argv.slice(2), { cliInvocation: cliInvocation(_arg1) }).then(code => {
     if (code !== 0) { process.exit(code); }
     process.exitCode ||= code;
   }, error => {

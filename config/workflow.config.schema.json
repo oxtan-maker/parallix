@@ -80,6 +80,15 @@
             "completedMissionRetentionDays": { "type": "integer", "minimum": 0, "description": "Number of days completed missions remain visible on the web board. Defaults to 7; 0 shows only missions closed at the current instant." }
           }
         },
+        "terminal": {
+          "type": "object",
+          "description": "Interactive mission terminal hosting. Automatically uses installed tmux for TTY callers; headless callers and unavailable terminals use pipes. Terminal hosting never holds gate or lifecycle authority.",
+          "additionalProperties": false,
+          "properties": {
+            "host": { "type": "string", "enum": ["auto", "pipe", "tmux"], "description": "auto (default) uses tmux for interactive mission operations when available; pipe disables terminal hosting; tmux explicitly requests a persistent mission terminal." },
+            "whenUnavailable": { "type": "string", "enum": ["fallback", "fail"], "description": "For host tmux only: fallback (default) uses pipes when a terminal cannot start; fail refuses the launch. Auto always falls back." }
+          }
+        },
         "gates": {
           "type": "object",
           "description": "Ordered, per-phase lifecycle gate commands. Disabled by default: omit this section (or a phase key) to run no lifecycle gate for that phase. Each phase is an ordered array of gate objects; the array order is the execution order. A gate object has a required string `key`, a required string `command` (a runnable shell command, no trailing prose), an optional numeric `order` (default 0, ascending), and optional `after` gate keys. Each configured command runs in the phase checkout and receives PARALLIX_MISSION_SLUG, PARALLIX_CHECKOUT_PATH, and PARALLIX_PHASE in its environment; a non-zero exit blocks that phase's state transition or merge.",

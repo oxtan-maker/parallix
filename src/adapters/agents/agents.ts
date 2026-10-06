@@ -43,6 +43,7 @@ import { warmPiSdk } from './pi.js';
 import { resolveSandboxProfile, withSandboxProfile } from '../process/bubblewrap.js';
 import { selectConfinement, supportsNativeSandbox, ConfinementBlockedError, isBubblewrapDisabled, isBubblewrapAvailable, BUBBLEWRAP_COMMAND } from '../process/confinement.js';
 import { waitForCustomCapacity } from './custom-capacity.js';
+import { openRunSession } from './run-session.js';
 import { FRESH_SESSION_MARKER_PORT } from '../../application/fresh-session-marker-port.js';
 import type { SessionMarkerPort } from '../../application/domain-ports.js';
 import type { AgentFamily } from '../../domain/agents.js';
@@ -708,7 +709,7 @@ async function stopLaunchedChild(child: { pid?: number } | null): Promise<void> 
 }
 
 /** Run the launcher, announce the invocation, and await the result. */
-async function launchPrepared(prepared: PreparedLaunch, deps: StartAgentLoopDeps, chosen: string): Promise<{ invocation: any; result: any }> {
+async function launchPrepared(prepared: PreparedLaunch, deps: StartAgentLoopDeps, chosen: string, attempt: number): Promise<{ invocation: any; result: any }> {
   const { step, log, slug, unrefChild } = deps;
   const { launcher, agentEnv, resume, sessionId, model, watchdogConfig, customReservation, effectiveProfile, nativeSandbox, launchSessionMarkerPort, sessionRole, actualPrompt } = prepared;
   let invocation;
@@ -725,6 +726,8 @@ async function launchPrepared(prepared: PreparedLaunch, deps: StartAgentLoopDeps
   // spawn, keeping the deadline conservative there rather than resetting it at
   // onLaunch.
   let startedAtMs = monotonicNowMs();
+  // Durable run history and the optional tmux terminal host (TASK-2643).
+  const runSession = openRunSession({ worktree: deps.worktree, slug, role: sessionRole ?? deps.role ?? step, family: chosen, attempt, log: (line) => log(line) });
   try {
     const launchResult = withSandboxProfile(effectiveProfile, () => launcher({
       prompt: actualPrompt,
@@ -738,6 +741,7 @@ async function launchPrepared(prepared: PreparedLaunch, deps: StartAgentLoopDeps
       role: sessionRole,
       sessionMarkerPort: launchSessionMarkerPort,
       teeOptions: {
+        ...runSession?.teeOptions,
         onSpawn: (child: {pid?: number}) => {
           // The child is spawned now: destination work has started, so the
           // lifecycle persistence deadline starts here (not pre-spawn).
@@ -818,6 +822,7 @@ async function launchPrepared(prepared: PreparedLaunch, deps: StartAgentLoopDeps
     result = resultPromise ? await resultPromise : launchResult.result;
   } finally {
     customReservation?.release();
+    runSession?.finish(result);
   }
   return { invocation, result };
 }
@@ -1066,7 +1071,7 @@ async function startAgent(step: string, opts: StartAgentOptions = { prompt: '' }
     const prepared = await prepareLaunch(state, deps);
     if (!prepared) { continue; }
     const chosen = state.chosen || '';
-    const { invocation, result } = await launchPrepared(prepared, deps, chosen);
+    const { invocation, result } = await launchPrepared(prepared, deps, chosen, state.iteration);
     const verdict = await classifyLaunchOutcome(state, deps, chosen, invocation, result);
     if (verdict.kind === 'continue') { continue; }
     await recordSessionMarker(deps, prepared, chosen, verdict.result);

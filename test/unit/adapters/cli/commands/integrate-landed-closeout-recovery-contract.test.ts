@@ -576,10 +576,15 @@ describe("interrupted landed integration", () => {
       if (args.includes('-D')) branchExists = false;
       return { status: 0, stdout: '', stderr: '' };
     };
-    const options = { rootDir, gitRunner, existsSync: target => target === worktree && worktreeExists, removeDir: () => { worktreeExists = false; } };
+    const retired: string[] = [];
+    const options = { retireTerminal: (slug: string) => { retired.push(slug); }, rootDir, gitRunner, existsSync: target => target === worktree && worktreeExists, removeDir: () => { worktreeExists = false; } };
 
     assert.equal(cleanupMissionWorktree('task-2508', options), true);
     assert.equal(cleanupMissionWorktree('task-2508', options), true);
+    assert.deepEqual(retired, ['task-2508', 'task-2508']);
+    assert.equal(cleanupMissionWorktree('task-2508', { ...options,
+      retireTerminal: () => { throw new Error('tmux set-option failed'); },
+    }), true, 'terminal retirement must not block landed closeout');
   });
 
   test('px status reports the authoritative done lifecycle', async () => {

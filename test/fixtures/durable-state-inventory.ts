@@ -1029,6 +1029,49 @@ export const ADR0053_PERSISTENCE_INVENTORY: readonly ADR0053BoundaryEntry[] = [
     classification: 'generated-artifact',
     cutoverTask: null,
   },
+  {
+    // TASK-2643: durable agent-run history. Reuses the TASK-2642 recovery store
+    // contract (gitignored worktree .workflow/ tree, Mission directory naming,
+    // byte cap, retention, redaction) for each run's output segments and record;
+    // it owns no Mission persistence.
+    id: 'mission-outcome-run-history-write',
+    concept: 'MissionOutcome',
+    pathType: 'default',
+    fileLocation: 'src/adapters/filesystem/run-history-store.ts',
+    operation: 'write',
+    classification: 'generated-artifact',
+    cutoverTask: null,
+  },
+  {
+    id: 'mission-outcome-run-history-read',
+    concept: 'MissionOutcome',
+    pathType: 'default',
+    fileLocation: 'src/adapters/filesystem/run-history-store.ts',
+    operation: 'read',
+    classification: 'generated-artifact',
+    cutoverTask: null,
+  },
+  {
+    // TASK-2643: owner-only tmux terminal state (per-Mission sockets, per-run
+    // host/pane scripts and the pane's one-shot launch environment). Scratch
+    // removed when the run ends; never Mission persistence.
+    id: 'large-artifacts-tmux-terminal-state-write',
+    concept: 'LargeArtifacts',
+    pathType: 'default',
+    fileLocation: 'src/adapters/process/tmux-host.ts',
+    operation: 'write',
+    classification: 'generated-artifact',
+    cutoverTask: null,
+  },
+  {
+    id: 'large-artifacts-tmux-terminal-state-root-write',
+    concept: 'LargeArtifacts',
+    pathType: 'default',
+    fileLocation: 'src/adapters/process/terminal-state-root.ts',
+    operation: 'write',
+    classification: 'generated-artifact',
+    cutoverTask: null,
+  },
 ] as const;
 
 // ---------------------------------------------------------------------------

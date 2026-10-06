@@ -19,6 +19,8 @@ import * as postIntegrateHook from '../../process/post-integrate-hook.js';
 import { missionId } from '../../../domain/mission.js';
 import { classifyHookFailure } from '../../../application/hook-failure-workflow.js';
 import { bookkeepingCommitMessage } from '../../../domain/approval-coverage.js';
+import { missionRepositoryKey } from '../../filesystem/mission-repository-key.js';
+import { missionSocketPath, retireMissionTerminal } from '../../process/tmux-host.js';
 
 export { classifyHookFailure };
 
@@ -381,9 +383,14 @@ export function cleanupMissionWorktree(
       }
       return fs.rmSync(target, { recursive: true, force: true });
     },
-    existsSync = fs.existsSync
-  }: {rootDir?: string, gitRunner?: Function, removeDir?: Function, existsSync?: Function} = {}
+    existsSync = fs.existsSync,
+    retireTerminal = (mission: string, root: string) => retireMissionTerminal(missionSocketPath({ repositoryKey: missionRepositoryKey(root), missionId: mission }), mission),
+  }: {rootDir?: string, gitRunner?: Function, removeDir?: Function, existsSync?: Function, retireTerminal?: (_slug: string, _root: string) => void} = {}
 ) {
+  const retire = () => {
+    try { retireTerminal(slug, rootDir); }
+    catch (error) { fmt.log.warn(`Mission terminal cleanup warning: ${(error as Error).message}`); }
+  };
   const branch = missionBranchName(slug, rootDir);
   const worktreePath = `${conventionalWorktreePath(slug, rootDir)}`;
   const currentBranch = gitRunner(['-C', rootDir, 'branch', '--show-current']).stdout.trim();
@@ -395,7 +402,9 @@ export function cleanupMissionWorktree(
   if (branchExists.status !== 0) {
     // A retry after cleanup but before administrative closure must still be
     // able to finish closeout. Absence of both branch and worktree is success.
-    return !existsSync(worktreePath);
+    if (existsSync(worktreePath)) { return false; }
+    retire();
+    return true;
   }
 
   const worktreeList = gitRunner(['-C', rootDir, 'worktree', 'list', '--porcelain']).stdout;
@@ -414,6 +423,8 @@ export function cleanupMissionWorktree(
   if (existsSync(worktreePath)) {
     removeDir(worktreePath);
   }
+  if (existsSync(worktreePath)) { return false; }
+  retire();
 
   // Prune stale prunable worktrees — e.g. leftover registrations at near-match
   // paths like ${getPrimaryWorktree()}-<n> for the same mission branch —

@@ -465,3 +465,50 @@ test('spawnAndTee installs parent signal forwarding only for detached deadline l
   await withMockSpawn({ status: 0, closeDelayMs: 1 }, async () => spawnAndTee('mock-node', [], { stdoutSink: noopSink(), stderrSink: noopSink() }));
   assert.equal(process.listenerCount('SIGINT'), before);
 });
+
+test('spawnAndTee hands every chunk to the durable capture before the tail bound (TASK-2643)', async () => {
+  const captured = { stdout: [], stderr: [] };
+  const result = await withMockSpawn({
+    stdoutChunks: ['first ', 'x'.repeat(2048), ' last'],
+    stderrChunks: ['warn'],
+    status: 0
+  }, async () => spawnAndTee('mock-node', [], {
+    stdoutSink: noopSink(),
+    stderrSink: noopSink(),
+    maxTailBytes: 64,
+    capture: { write: (stream, chunk) => captured[stream].push(Buffer.from(chunk)) }
+  }));
+  assert.equal(result.stdout.includes('first'), false, 'the in-memory tail is still bounded');
+  assert.equal(Buffer.concat(captured.stdout).toString(), `first ${'x'.repeat(2048)} last`);
+  assert.equal(Buffer.concat(captured.stderr).toString(), 'warn');
+});
+
+test('spawnAndTee spawns the terminal host command and cleans it up once (TASK-2643)', async () => {
+  const hosted = [];
+  let cleanups = 0;
+  const terminalHost = {
+    host: (launch, context) => {
+      hosted.push({ launch, cwd: context.cwd });
+      return { command: 'sh', args: ['/state/host.sh'], cleanup: () => { cleanups += 1; } };
+    }
+  };
+  await withMockSpawn({ stdoutChunks: ['ok'], status: 3 }, async (observed) => {
+    const result = await spawnAndTee('agent-cli', ['--flag'], { stdoutSink: noopSink(), stderrSink: noopSink(), terminalHost });
+    assert.equal(result.status, 3, 'the hosted command exit status is the launch status');
+    assert.equal(observed[0].command, 'sh');
+    assert.deepEqual(observed[0].args, ['/state/host.sh']);
+  });
+  assert.equal(hosted.length, 1);
+  assert.ok(hosted[0].launch.args.includes('--flag') || hosted[0].launch.command === 'agent-cli', 'the host receives the (possibly confined) agent command');
+  assert.equal(cleanups, 1);
+});
+
+test('spawnAndTee reports a terminal host that cannot prepare as a launch error (TASK-2643)', async () => {
+  const terminalHost = { host: () => { throw Object.assign(new Error('mkfifo failed'), { code: 'EACCES' }); } };
+  await withMockSpawn({ stdoutChunks: ['never'], status: 0 }, async (observed) => {
+    const result = await spawnAndTee('agent-cli', [], { stdoutSink: noopSink(), stderrSink: noopSink(), terminalHost });
+    assert.equal(result.status, null);
+    assert.equal(result.error.message, 'mkfifo failed');
+    assert.equal(observed.length, 0, 'nothing is spawned when the host cannot prepare');
+  });
+});

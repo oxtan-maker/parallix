@@ -3,6 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { validateRepositoryGates } from './repository-gates.js';
+import { validateTerminalSection } from './terminal-host-config.js';
 import {
   DEFAULT_INTEGRATION_MODE, integrationModeIssue, isIntegrationMode, parseIntegrationMode,
   type IntegrationMode,
@@ -231,6 +232,7 @@ function validateAdapterSections(adapters: PlainObject, issues: string[]): void 
   validateReviewSection(adapters.review, issues);
   validateAgentsSection(adapters.agents, issues);
   validateWebSection(adapters.web, issues);
+  validateTerminalSection(adapters.terminal, issues);
 }
 
 function validateTasksSection(section: unknown, issues: string[]): void {

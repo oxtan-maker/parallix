@@ -530,6 +530,26 @@ describe("Bubblewrap guard", () => {
     } finally { fs.rmSync(worktree, { recursive: true, force: true }); fs.rmSync(artifactDir, { recursive: true, force: true }); }
   });
 
+  test('buildBubblewrapArgs masks the tmux terminal state so an agent cannot reach any run session (TASK-2643)', () => {
+    const worktree = makeWorktree();
+    const stateRoot = path.join(makeWorktree(), 'terminal-state');
+    const previous = process.env.PARALLIX_TERMINAL_STATE_DIR;
+    process.env.PARALLIX_TERMINAL_STATE_DIR = stateRoot;
+    try {
+      const before = buildBubblewrapArgs(resolveSandboxProfile('active', worktree), worktree);
+      assert.equal(before.includes('--tmpfs'), false, 'nothing to mask before any tmux launch');
+      fs.mkdirSync(stateRoot, { recursive: true });
+      const args = buildBubblewrapArgs(resolveSandboxProfile('active', worktree), worktree);
+      const at = args.indexOf('--tmpfs');
+      assert.equal(args[at + 1], stateRoot);
+      assert.ok(at > args.lastIndexOf('--bind'), 'the mask is mounted after every writable bind');
+    } finally {
+      if (previous === undefined) { delete process.env.PARALLIX_TERMINAL_STATE_DIR; } else { process.env.PARALLIX_TERMINAL_STATE_DIR = previous; }
+      fs.rmSync(worktree, { recursive: true, force: true });
+      fs.rmSync(path.dirname(stateRoot), { recursive: true, force: true });
+    }
+  });
+
   test('buildBubblewrapArgs binds the worktree read-write for implementer steps', () => {
     const worktree = makeWorktree();
     try {

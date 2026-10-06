@@ -14,6 +14,7 @@
   "integrationCases": {
     "defaultMs": 500,
     "plain": {
+      "integration/process/tmux-terminal-host.test.ts": 2000,
       "integration/cli/active-invocation-contract.test.ts": 400,
       "integration/cli/active.test.ts": 100,
       "integration/agents/agent-block-authority.test.ts": 150,
@@ -193,6 +194,7 @@
       "integration/test-harness/runner-focused-selection.test.ts": 1000
     },
     "covered": {
+      "integration/process/tmux-terminal-host.test.ts": 2500,
       "integration/cli/active-invocation-contract.test.ts": 700,
       "integration/cli/active.test.ts": 100,
       "integration/agents/agent-block-authority.test.ts": 150,
@@ -201,7 +203,7 @@
       "integration/test-harness/agent-smoke-capture-cleanup.test.ts": 300,
       "integration/agents/agents-limit-hit.test.ts": 150,
       "integration/agents/agents.test.ts": 2200,
-      "integration/composition/application-boundaries.test.ts": 100,
+      "integration/composition/application-boundaries.test.ts": 130,
       "integration/integrate/approval-bookkeeping-coverage.test.ts": 300,
       "integration/backlog/backlog.test.ts": 500,
       "integration/presentation/board-draft-composition.test.ts": 150,

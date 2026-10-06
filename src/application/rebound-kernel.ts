@@ -525,6 +525,9 @@ export function buildFreshDiagnosticRepairPrompt(slots: FixPromptSlots): string 
  * record is missing, truncated, expired, or access-denied, the route states it
  * and points at related incidents rather than claiming completeness.
  */
+/** Earlier agent runs (TASK-2643): one compact pointer, never transcript text. */
+const RUN_HISTORY_ROUTE = 'Earlier agent runs of this mission are searchable with `px history search <pattern>` and `px history show <ref>` (bounded; cite the run: references).';
+
 function recoveryEvidenceRoute(slots: Pick<FixPromptSlots, 'recoveryEvidence' | 'recoveryEvidenceRecent' | 'recoveryEvidenceError'>): string[] {
   if (slots.recoveryEvidence) {
     const e = slots.recoveryEvidence;
@@ -539,10 +542,11 @@ function recoveryEvidenceRoute(slots: Pick<FixPromptSlots, 'recoveryEvidence' | 
       `  stderr: ${e.stderrPath}${e.truncatedFrom === 'stderr' ? ' (truncated — see capture-completeness note)' : ''}`,
       `  capture complete: ${e.captureComplete ? 'yes' : 'no'}${e.redacted ? '; redacted per configured credential redaction' : ''}`,
       `Retrieve or search more retained output for this mission with: listRecoveryEvidence({ cwd }) or lookupRecoveryEvidence({ cwd, incidentId: "${e.incidentId}" }).`,
+      RUN_HISTORY_ROUTE,
     ];
     return ['', ...route, ''];
   }
-  const lines: string[] = ['', 'No retained evidence for this failure is available yet', ''];
+  const lines: string[] = ['', 'No retained evidence for this failure is available yet', RUN_HISTORY_ROUTE, ''];
   if (slots.recoveryEvidenceError) { lines.push(`Reason: ${slots.recoveryEvidenceError}.`); }
   if (slots.recoveryEvidenceRecent && slots.recoveryEvidenceRecent.length > 0) {
     lines.push('Related retained failures (act on these):');

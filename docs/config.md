@@ -184,6 +184,20 @@ any other key is a configuration error.
 }
 ```
 
+## Terminal sessions
+
+Interactive mission operations automatically use tmux when it is installed
+and runnable; headless callers and unavailable terminals use pipes. No configuration is needed. A mission keeps one terminal
+across commands, agent roles and retries, including after work stops.
+
+Explicit host and unavailable-tool overrides remain available through
+`px config` and the workflow configuration schema. `whenUnavailable: "fail"`
+applies only to `host: "tmux"`; automatic hosting always falls back if a terminal
+cannot start, and never retries an operation that already started. Terminal hosting changes
+observability, not lifecycle, verification, retry or security authority. See
+[agent-run history](agent-run-history.md) for attaching, idle-terminal cleanup
+and retained-output retrieval.
+
 ## Prompts
 
 Each shipped stage prompt (draft, execute, review, act-on-review, portfolio) is

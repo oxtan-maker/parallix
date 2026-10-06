@@ -338,10 +338,13 @@ export const INTEGRATION_LOCAL_TESTS: readonly string[] = [
   'integration/sandbox/claude-sandbox-credential-persistence.test.ts',
   'integration/agents/codex-approval-policy-config.test.ts',
   'integration/test-harness/unit-test-timeout-guard.test.ts',
+  'integration/process/tmux-terminal-host.test.ts',
 ];
 
 /** Why each local-only entry cannot run on a clean GitHub-hosted runner. */
 export const INTEGRATION_LOCAL_REASONS: Readonly<Record<string, string>> = {
+  'integration/process/tmux-terminal-host.test.ts':
+    'Spawns the real `tmux` binary (and `bwrap` for the socket-mask case) to certify the optional terminal host; neither is part of the GitHub-hosted runner image.',
   'integration/sandbox/bubblewrap-worktree-git.test.ts':
     'Spawns the real `bwrap` binary to certify sandbox profiles; bubblewrap is not part of the GitHub-hosted runner image.',
   'integration/agents/graphify-mission-document-exclusion.test.ts':
@@ -373,6 +376,10 @@ export const AGENT_E2E_TESTS: readonly string[] = [
   // retrieves the hidden failure from durable recovery evidence and names the
   // repair target, reporting retrieval success, repair outcome and context cost.
   'e2e/agents/recovery-retrieval.test.ts',
+  // TASK-2643 criterion 8: bounded real-agent evaluation that a fresh agent
+  // retrieves an omitted earlier-run failure from the correct run through
+  // px history, against a headless tail baseline.
+  'e2e/agents/run-history-retrieval.test.ts',
 ];
 
 /**

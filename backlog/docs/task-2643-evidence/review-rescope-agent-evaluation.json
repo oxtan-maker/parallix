@@ -1,0 +1,103 @@
+{
+  "evaluatedAtUtc": "2026-10-05T19:31:05.141590+00:00",
+  "command": "PARALLIX_RUN_HISTORY_EVAL_TRIALS=1 node --import tsx --test test/e2e/agents/run-history-retrieval.test.ts",
+  "agent": "codex",
+  "model": "gpt-6.1-sol (configured default)",
+  "headRevision": "11162257379e4f2a353141c9ad496a11d01da331",
+  "workingTreeDirty": true,
+  "productionSourceAndConfigSha256": "fa33547d51c54c9673e2cfe3c1edf1f8f5bed7f7d26a5ff9a5ae986fe5e9eda2",
+  "cliBundleSha256": "d9359eabb369e5c8410f7b036e0e9d48771e796eb5a0c63cd8ee7bffca9cc1dd",
+  "suiteSha256": "408d2a80ffba94b12f4bec8858354a03a734d8b1093e5e27e5534bc707ed5225",
+  "passed": true,
+  "limitations": [
+    "One baseline trial and one treatment trial; this is a focused contract evaluation, not an efficacy estimate.",
+    "The agent did not report monetary cost. Unknown cost is null, not zero.",
+    "The existing evaluator sums input_tokens and cached_input_tokens. Those sums are retained as reported metrics, not independent total-token measurements."
+  ],
+  "baseline": {
+    "trials": 1,
+    "retrievalAccuracy": "0/1",
+    "correctRunReference": "0/1",
+    "wrongRunAnswers": 0,
+    "usefulRepair": "0/1",
+    "meanPromptBytes": 65949,
+    "meanOutputTokens": 624,
+    "totalCostUsd": null,
+    "historyCalls": [
+      0
+    ],
+    "meanReportedInputPlusCachedTokens": 562391
+  },
+  "baselineTrials": [
+    {
+      "retrieved": false,
+      "correctRun": false,
+      "wrongRun": false,
+      "usefulRepair": false,
+      "answer": {
+        "runRef": null,
+        "failure": "Unknown: retained output reports 4199 passed, 1 xfailed and contains no failing command, test ID, or error",
+        "repair": "Undetermined: obtain the latest run's failure details before choosing a file and change"
+      },
+      "tools": [
+        "/bin/bash -lc 'cat /home/magnus/.agents/skills/graphify/SKILL.md'",
+        "/bin/bash -lc \"rg --files -g '\"'!*lock*'\"' -g '\"'!node_modules'\"' -g '\"'!.git'\"' -g 'AGENTS.md' -g '*' \"",
+        "/bin/bash -lc 'cat src/billing.py src/report.py tests/test_billing.py'",
+        "/bin/bash -lc 'ls -la /tmp/px-run-history-eval-ss6aOF'",
+        "/bin/bash -lc 'git log -3 --format=fuller && git status --short'",
+        "/bin/bash -lc 'ls -la /tmp/px-run-history-eval-ss6aOF/bin; command -v px; px --help'",
+        "/bin/bash -lc 'cat /tmp/px-run-history-eval-ss6aOF/bin/px; px status --json'"
+      ],
+      "historyCalls": 0,
+      "promptBytes": 65949,
+      "outputTokens": 624,
+      "costUsd": null,
+      "reportedInputPlusCachedTokens": 562391
+    }
+  ],
+  "treatment": {
+    "trials": 1,
+    "retrievalAccuracy": "1/1",
+    "correctRunReference": "1/1",
+    "wrongRunAnswers": 0,
+    "usefulRepair": "1/1",
+    "meanPromptBytes": 500,
+    "meanOutputTokens": 968,
+    "totalCostUsd": null,
+    "historyCalls": [
+      3
+    ],
+    "meanReportedInputPlusCachedTokens": 522704
+  },
+  "treatmentTrials": [
+    {
+      "retrieved": true,
+      "correctRun": true,
+      "wrongRun": false,
+      "usefulRepair": true,
+      "answer": {
+        "runRef": "run:execute-qwen-a2-muvn6gqq:stdout@81390+400",
+        "failure": "tests/test_billing.py::test_rounding[case-7193] - AssertionError: expected Decimal('10.05') got Decimal('10.04') (ROUND_HALF_DOWN in src/billing.py; invoices require ROUND_HALF_EVEN)",
+        "repair": "src/billing.py: replace the ROUND_HALF_DOWN import and ROUNDING assignment with ROUND_HALF_EVEN"
+      },
+      "tools": [
+        "/bin/bash -lc 'cat /home/magnus/.agents/skills/graphify/SKILL.md'",
+        "/bin/bash -lc 'px history search \"billing\"'",
+        "/bin/bash -lc \"pwd; rg --files -g 'AGENTS.md' -g '*history*' -g '*run*' -g '*test*' -g 'graph.json' -g 'package.json' -g '*.log' -g '*.jsonl'\"",
+        "/bin/bash -lc 'px status --json'",
+        "/bin/bash -lc \"ls -la; rg --files --hidden -g '\"'!.git/**'\"'; command -v px; printenv PARALLIX_HOME\"",
+        "/bin/bash -lc 'ls -laR .workflow; cat src/billing.py src/report.py tests/test_billing.py; ls -la /tmp/px-run-history-eval-ss6aOF'",
+        "/bin/bash -lc \"cat .workflow/run-history/task-9998/*/run.json; rg -n 'FAILED|Error|Assertion|pytest|command|round|run:' .workflow/run-history/task-9998/execute-",
+        "/bin/bash -lc 'ls -la /tmp/px-run-history-eval-ss6aOF/bin'",
+        "/bin/bash -lc \"rg -n -C 3 'FAILED|AssertionError|\"'^E |ERROR|expected|Expected'\"' .workflow/run-history/task-9998/execute-qwen-a2-muvn6gqq/stdout/000000000000.l",
+        "/bin/bash -lc \"/tmp/px-run-history-eval-ss6aOF/bin/px history search 'FAILED'\"",
+        "/bin/bash -lc \"/tmp/px-run-history-eval-ss6aOF/bin/px history show 'run:execute-qwen-a2-muvn6gqq:stdout@81390+400'\""
+      ],
+      "historyCalls": 3,
+      "promptBytes": 500,
+      "outputTokens": 968,
+      "costUsd": null,
+      "reportedInputPlusCachedTokens": 522704
+    }
+  ]
+}

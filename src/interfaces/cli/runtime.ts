@@ -51,12 +51,15 @@ export const KNOWN_COMMANDS: string[] = [
   'aliases',
   'config',
   'diff',
+  'history',
+  'attach',
   'github-publish-status',
   'ui',
   'web',
 ];
 
-const READ_ONLY_COMMANDS = new Set(['config', 'ui', 'web', 'github-publish-status', 'audit-legacy']);
+const READ_ONLY_COMMANDS = new Set(['config', 'ui', 'web', 'github-publish-status', 'audit-legacy', 'history', 'attach']);
+export const MISSION_TERMINAL_COMMANDS = new Set(['active', 'review', 'integrate', 'recover', 'verify']);
 
 export type Command = (..._args: any[]) => unknown;
 
@@ -301,6 +304,8 @@ ${fmt.bold('Advanced Commands:')}
   resolve-conflict [<slug>]       Detect merge conflicts in the mission worktree and emit resolution guidance.
   rebase [<slug>] [--push]          Rebase mission branch onto the primary integration branch (main) with auto-resolution of mission-specific conflicts.
   diff [<slug>]                Launch the primary local diff tool for branch-vs-main review.
+  history [<slug>] list|search <pattern>|show <ref>  Bounded search of the Mission's retained agent-run history; results cite run:<id>:<stream>@<offset>+<length> references with coverage and omissions.
+  attach [<slug>] [--read-only] [--list] [--close]  Attach to the persistent mission terminal (automatically available when tmux is installed); detach with Ctrl-b d.
   stats [<csv_file>|--csv-file <path>] [--today YYYY-MM-DD|--from YYYY-MM-DD --to YYYY-MM-DD] [--output <file>]  Print parallix weekly or range tables from the measurement database (<PARALLIX_HOME>/parallix.db); a named CSV is read-only legacy analysis.
   config                Print the effective configuration (built-in defaults merged with workflow.config.json). Read-only.
   ui                    Render the static Ink TUI board shell. Read-only; press q or Ctrl+C to exit.
