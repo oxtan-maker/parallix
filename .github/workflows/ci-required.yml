@@ -197,7 +197,7 @@ jobs:
       # mandatory quality gate can invoke `npm run sonar`. Same immutable-SHA +
       # release-version contract as every other action here (TASK-2549).
       - name: Set up Java 21 (SonarQube Cloud scanner floor)
-        uses: actions/setup-java@7a6d8a8234af8eb26422e24e3006232cccaa061b  # v4.6.0
+        uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6  # v6.0.1
         with:
           java-version: '21'
           distribution: temurin
