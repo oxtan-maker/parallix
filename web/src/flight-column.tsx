@@ -30,11 +30,18 @@ function ReviewPips({ card }: { card: WebMissionCard }) {
       {Array.from({ length: 5 }, (_unused, index) => {
         const round = rounds.get(index + 1);
         const completed = index + 1 < currentRound;
+        const running = index + 1 === currentRound;
+        const background = running
+          ? C.green
+          : completed
+            ? round?.disposition === 'APPROVED' ? C.green : C.amber
+            : C.headEdge;
         return (
         <span
           key={index}
+          className={running ? 'review-pip--running' : undefined}
           title={round === undefined ? undefined : `round ${round.number}: ${round.disposition ?? round.phase}`}
-          style={{ width: 16, height: 8, borderRadius: 2, background: completed ? C.green : round?.number === currentRound ? C.amber : C.headEdge }}
+          style={{ width: 16, height: 8, borderRadius: 2, background }}
         />
         );
       })}

@@ -1,8 +1,8 @@
 ---
 id: TASK-2666
 title: minor ux issues web
-status: backlog
-assignee: []
+status: done
+assignee: [codex]
 created_date: '2026-10-06 11:30'
 labels: []
 dependencies: []
