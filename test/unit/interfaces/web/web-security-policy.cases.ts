@@ -18,6 +18,7 @@ import {
   isLoopbackHost,
   isReadOnlyMethod,
   resolveAssetPath,
+  sessionCookieName,
   type AssetManifest,
 } from '../../../../src/interfaces/web/security.js';
 
@@ -118,6 +119,14 @@ test('web security: cookie extraction reads the session cookie from a raw header
   assert.equal(cookieValue('other=1', 'px_session'), undefined);
   assert.equal(cookieValue(undefined, 'px_session'), undefined);
   assert.equal(cookieValue('', 'px_session'), undefined);
+});
+
+test('web security: session cookie identity is a deterministic safe namespace for each actual loopback endpoint (TASK-2656)', () => {
+  assert.equal(sessionCookieName({ host: '127.0.0.1', port: 41723 }), 'px_session_v4_41723');
+  assert.equal(sessionCookieName({ host: '127.0.0.1', port: 41724 }), 'px_session_v4_41724',
+    'different actual ports must never share a browser cookie name');
+  assert.equal(sessionCookieName({ host: '::1', port: 41723 }), 'px_session_v6_41723',
+    'the supported IPv6 endpoint has its own token-safe namespace');
 });
 
 const MANIFEST: AssetManifest = {

@@ -43,6 +43,17 @@ export function actualOrigin(binding: LoopbackBinding): string {
 }
 
 /**
+ * A browser cookie is scoped by host and path, not port. Namespace the
+ * per-launch capability by the endpoint's actual bound port so two local
+ * hosts on 127.0.0.1 can coexist without replacing each other's cookie.
+ * The fixed v4/v6 labels keep the name an RFC cookie token and preserve the
+ * explicit loopback binding distinction.
+ */
+export function sessionCookieName(binding: LoopbackBinding): string {
+  return `px_session_${binding.host === '::1' ? 'v6' : 'v4'}_${binding.port}`;
+}
+
+/**
  * Extract one cookie value from a raw Cookie header (first occurrence
  * wins). Parsing is deliberately explicit instead of delegating to a
  * framework hook, so the policy and its tests own the exact behavior.

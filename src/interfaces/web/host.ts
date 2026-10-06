@@ -56,14 +56,16 @@ import {
   isLoopbackHost,
   isReadOnlyMethod,
   resolveAssetPath,
+  sessionCookieName,
   LOOPBACK_LITERALS,
   type LoopbackBinding,
   type LoopbackLiteral,
 } from './security.js';
+import { createShellBootstrap } from './shell-bootstrap.js';
+import { errorMessage, sendCommandResult, singleHeader, transportStatusCode } from './host-support.js';
 
-export const WEB_SESSION_COOKIE = 'px_session';
 export const WEB_CSRF_HEADER = 'x-px-csrf';
-export const WEB_CSRF_META_NAME = 'px-csrf';
+export { WEB_CSRF_META_NAME } from './shell-bootstrap.js';
 export const DEFAULT_BODY_LIMIT_BYTES = 64 * 1024;
 
 /** Read-only route paths. Both outrank the `/*` asset catch-all. */
@@ -161,36 +163,6 @@ export interface WebHost {
   clientCount(): number;
 }
 
-/** A single-value view of a header that the type system allows to repeat. */
-function singleHeader(value: string | string[] | undefined): string | undefined {
-  return Array.isArray(value) ? value[0] : value;
-}
-
-function injectCsrfMeta(shellHtml: string, launchValue: string): string {
-  if (!shellHtml.includes('</head>')) {
-    throw new Error('web shell HTML is malformed: missing </head>');
-  }
-  return shellHtml.replace('</head>', `<meta name="${WEB_CSRF_META_NAME}" content="${launchValue}"></head>`);
-}
-
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
-}
-
-/** Every body this host answers with for a command is the safe wire envelope. */
-function sendCommandResult(reply: FastifyReply, status: number, outcome: ApplicationOutcome<unknown>): void {
-  reply.code(status).type('application/json; charset=utf-8').send(toWebCommandResult(outcome));
-}
-
-/** The transport status Fastify attached to a lifecycle error, if any. */
-function transportStatusCode(error: unknown): number {
-  if (typeof error === 'object' && error !== null
-    && typeof (error as { statusCode?: unknown }).statusCode === 'number') {
-    return (error as { statusCode: number }).statusCode;
-  }
-  return 500;
-}
-
 function snapshotError(kind: WebCommandError['kind'], message: string): WebBoardSnapshotError {
   return { kind: 'board-snapshot-error', transportVersion: WEB_TRANSPORT_VERSION, error: { kind, message } };
 }
@@ -214,7 +186,7 @@ export function createWebHost(options: WebHostOptions): WebHost {
   // One unguessable value per launch: the double-submit capability shared by
   // the session cookie, the CSRF meta tag, and the mutation checks.
   const launchValue = crypto.randomBytes(32).toString('base64url');
-  const shellHtml = injectCsrfMeta(options.assets.shellHtml, launchValue);
+  const shell = createShellBootstrap(options.assets.shellHtml, launchValue);
   let app: FastifyInstance | null = null;
   let binding: LoopbackBinding | null = null;
   let closed = false;
@@ -258,7 +230,7 @@ export function createWebHost(options: WebHostOptions): WebHost {
           if (lengthCheck.result === 'reject') { return reply.code(lengthCheck.status).send(); }
           const decision = evaluateMutationAuthorization({
             origin: singleHeader(request.headers.origin),
-            sessionCookie: cookieValue(request.headers.cookie, WEB_SESSION_COOKIE),
+            sessionCookie: cookieValue(request.headers.cookie, sessionCookieName(current)),
             csrfHeader: singleHeader(request.headers[WEB_CSRF_HEADER]),
           }, origin, launchValue);
           if (decision.result === 'reject') {
@@ -434,19 +406,24 @@ export function createWebHost(options: WebHostOptions): WebHost {
       });
 
       app.get('/', async (_request, reply) => {
-        reply.header('set-cookie', `${WEB_SESSION_COOKIE}=${launchValue}; HttpOnly; SameSite=Strict; Path=/`);
-        reply.header('cache-control', 'no-store');
-        return reply.type('text/html; charset=utf-8').send(shellHtml);
+        const current = binding;
+        if (current === null) { return reply.code(503).send(); }
+        return shell.serve(reply, sessionCookieName(current));
       });
 
       app.get('/*', async (request, reply) => {
         const rawPath = (request.raw.url ?? '/').split('?')[0] ?? '/';
         const resolution = resolveAssetPath(rawPath, manifest);
         if (resolution.result === 'reject') { return reply.code(resolution.status).send(); }
+        if (resolution.relativePath === 'index.html') {
+          const current = binding;
+          if (current === null) { return reply.code(503).send(); }
+          return shell.serve(reply, sessionCookieName(current));
+        }
         const asset = assets.get(resolution.relativePath);
         if (asset === undefined) { return reply.code(500).send(); }
         // Hashed build assets are immutable; the shell page is not.
-        reply.header('cache-control', resolution.relativePath === 'index.html' ? 'no-store' : 'public, max-age=31536000, immutable');
+        reply.header('cache-control', 'public, max-age=31536000, immutable');
         return reply.type(asset.contentType).send(asset.body);
       });
 

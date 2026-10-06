@@ -65,7 +65,6 @@ const EXCEPTIONS: readonly string[] = [
   'src/composition/create-cli.ts',
   'src/domain/review.ts',
   'src/interfaces/tui/shell.tsx',
-  'src/interfaces/web/host.ts',
   'src/interfaces/web/transport.ts',
 ];
 

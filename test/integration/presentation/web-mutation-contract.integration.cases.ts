@@ -28,6 +28,7 @@ import {
   type WebHostInfo,
   type WebHostOptions,
 } from '../../../src/interfaces/web/host.js';
+import { sessionCookieName } from '../../../src/interfaces/web/security.js';
 import {
   validateWebCommandResult,
   validateWebProgressEvent,
@@ -126,8 +127,8 @@ async function launchValue(info: WebHostInfo): Promise<string> {
   const res = await fetch(`${info.origin}/`);
   assert.equal(res.status, 200);
   const cookie = res.headers.get('set-cookie') ?? '';
-  const match = cookie.match(/px_session=([^;]+)/);
-  assert.ok(match, `expected a px_session cookie in: ${cookie}`);
+  const match = cookie.match(new RegExp(`${sessionCookieName(info)}=([^;]+)`));
+  assert.ok(match, `expected a ${sessionCookieName(info)} cookie in: ${cookie}`);
   return match[1];
 }
 
@@ -140,7 +141,7 @@ async function postCommand(
 ): Promise<Response> {
   const headers: Record<string, string> = {
     origin: info.origin,
-    cookie: `px_session=${value}`,
+    cookie: `${sessionCookieName(info)}=${value}`,
     'x-px-csrf': value,
     'content-type': 'application/json',
   };
@@ -449,7 +450,7 @@ test('web mutation: a wrong Origin, session, or CSRF is 403 with a command-resul
       { name: 'absent origin', mutate: (h) => { delete h.origin; } },
       { name: 'wrong origin', mutate: (h) => { h.origin = 'http://evil.example'; } },
       { name: 'absent session', mutate: (h) => { delete h.cookie; } },
-      { name: 'wrong session', mutate: (h) => { h.cookie = 'px_session=forged-0123456789abcdef'; } },
+      { name: 'wrong session', mutate: (h) => { h.cookie = `${sessionCookieName(info)}=forged-0123456789abcdef`; } },
       { name: 'absent csrf', mutate: (h) => { delete h['x-px-csrf']; } },
       { name: 'wrong csrf', mutate: (h) => { h['x-px-csrf'] = 'forged-0123456789abcdef'; } },
     ];
@@ -501,7 +502,7 @@ test('web mutation: the 405 catch-all and the read routes are unchanged around t
     const value = await launchValue(info);
     const headers = {
       origin: info.origin,
-      cookie: `px_session=${value}`,
+      cookie: `${sessionCookieName(info)}=${value}`,
       'x-px-csrf': value,
       'content-type': 'application/json',
     };

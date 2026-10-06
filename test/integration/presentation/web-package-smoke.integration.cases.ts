@@ -169,7 +169,7 @@ test('web package smoke: the per-launch session is unavailable after the process
   const origin = host.origin;
   const res = await fetch(`${origin}/`);
   assert.equal(res.status, 200);
-  assert.match(res.headers.get('set-cookie') ?? '', /px_session=[A-Za-z0-9_-]+/);
+  assert.match(res.headers.get('set-cookie') ?? '', /px_session_v4_\d+=[A-Za-z0-9_-]+/);
   await stopHost(host);
   await assert.rejects(() => fetch(`${origin}/`), 'the host must be unreachable once the px process has exited');
 });

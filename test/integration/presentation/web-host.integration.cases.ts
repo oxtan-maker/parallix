@@ -16,9 +16,10 @@ import * as net from 'node:net';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { loadWebAssets } from '../../../src/adapters/web/asset-store.js';
-import { createWebHost, PROTECTION_HEADERS, WEB_EVENTS_PATH, WEB_SNAPSHOT_PATH, type WebAssets, type WebHostInfo, type WebHostOptions } from '../../../src/interfaces/web/host.js';
+import { createWebHost, PROTECTION_HEADERS, WEB_COMMANDS_PATH, WEB_EVENTS_PATH, WEB_SNAPSHOT_PATH, type WebAssets, type WebHostInfo, type WebHostOptions } from '../../../src/interfaces/web/host.js';
 import { validateWebBoardSnapshot, validateWebProgressEvent, WEB_TRANSPORT_VERSION } from '../../../src/interfaces/web/transport.js';
 import { WEB_EVENT_BUFFER_LIMIT } from '../../../src/interfaces/web/stream.js';
+import { sessionCookieName } from '../../../src/interfaces/web/security.js';
 import type { WebHost } from '../../../src/interfaces/web/host.js';
 import type { BoardProjection } from '../../../src/application/projections/board.js';
 import type { BoardProgressSink } from '../../../src/application/controller/board-command.js';
@@ -172,9 +173,56 @@ async function launchValue(info: WebHostInfo): Promise<string> {
   const res = await fetch(`${info.origin}/`);
   assert.equal(res.status, 200);
   const cookie = res.headers.get('set-cookie') ?? '';
-  const match = cookie.match(/px_session=([^;]+)/);
-  assert.ok(match, `expected a px_session cookie in: ${cookie}`);
+  const match = cookie.match(new RegExp(`${sessionCookieName(info)}=([^;]+)`));
+  assert.ok(match, `expected a ${sessionCookieName(info)} cookie in: ${cookie}`);
   return match[1];
+}
+
+function sessionCookie(info: WebHostInfo, value: string): string {
+  return `${sessionCookieName(info)}=${value}`;
+}
+
+interface ShellCredentials {
+  readonly name: string;
+  readonly value: string;
+}
+
+/** A browser-style store: cookies share host/path/name scope across ports. */
+function sharedCookieStore() {
+  const values = new Map<string, string>();
+  return {
+    accept(response: Response): ShellCredentials {
+      const setCookie = response.headers.get('set-cookie') ?? '';
+      const match = setCookie.match(/^([^=;]+)=([^;]+)/);
+      assert.ok(match, `expected a shell Set-Cookie header, got: ${setCookie}`);
+      values.set(match[1], match[2]);
+      return { name: match[1], value: match[2] };
+    },
+    header(): string { return [...values].map(([name, value]) => `${name}=${value}`).join('; '); },
+  };
+}
+
+async function bootstrapShell(
+  info: WebHostInfo,
+  store: ReturnType<typeof sharedCookieStore>,
+  route = '/',
+): Promise<{ response: Response; credentials: ShellCredentials }> {
+  const response = await fetch(`${info.origin}${route}`);
+  assert.equal(response.status, 200, `${route} must resolve to the shell`);
+  return { response, credentials: store.accept(response) };
+}
+
+async function authorizedMutationProbe(info: WebHostInfo, store: ReturnType<typeof sharedCookieStore>, value: string): Promise<Response> {
+  return fetch(`${info.origin}/`, {
+    method: 'POST',
+    body: '{}',
+    headers: {
+      origin: info.origin,
+      cookie: store.header(),
+      'x-px-csrf': value,
+      'content-type': 'application/json',
+    },
+  });
 }
 
 /** Raw HTTP/1.1 request, so the Host header can be forged (fetch cannot). */
@@ -264,7 +312,7 @@ test('web host: serves the shell on the actual origin with the full protection h
     assert.match(cookie, /HttpOnly/);
     assert.match(cookie, /SameSite=Strict/);
     assert.match(cookie, /Path=\//);
-    const value = cookie.match(/px_session=([^;]+)/)?.[1];
+    const value = cookie.match(new RegExp(`${sessionCookieName(info)}=([^;]+)`))?.[1];
     assert.ok(value && value.length >= 32, 'the session value must be unguessable-length');
     const meta = html.match(/<meta name="px-csrf" content="([^"]+)"/);
     assert.ok(meta, 'the shell must carry the CSRF meta tag');
@@ -297,7 +345,7 @@ test('web host: rejects a state-changing request with an absent or wrong Origin'
   await withHost({}, async info => {
     const value = await launchValue(info);
     const base = {
-      cookie: `px_session=${value}`,
+      cookie: sessionCookie(info, value),
       'x-px-csrf': value,
       'content-type': 'application/json',
     };
@@ -320,7 +368,7 @@ test('web host: rejects a state-changing request with a missing or wrong session
     const wrong = await fetch(`${info.origin}/`, {
       method: 'POST',
       body: '{}',
-      headers: { origin: info.origin, cookie: 'px_session=forged-value-0123456789abcdef', 'x-px-csrf': value, 'content-type': 'application/json' },
+      headers: { origin: info.origin, cookie: sessionCookie(info, 'forged-value-0123456789abcdef'), 'x-px-csrf': value, 'content-type': 'application/json' },
     });
     assert.equal(wrong.status, 403, 'a wrong session value must be rejected');
   });
@@ -332,13 +380,13 @@ test('web host: rejects a state-changing request with a missing or wrong CSRF', 
     const absent = await fetch(`${info.origin}/`, {
       method: 'POST',
       body: '{}',
-      headers: { origin: info.origin, cookie: `px_session=${value}`, 'content-type': 'application/json' },
+      headers: { origin: info.origin, cookie: sessionCookie(info, value), 'content-type': 'application/json' },
     });
     assert.equal(absent.status, 403, 'a missing CSRF header must be rejected');
     const wrong = await fetch(`${info.origin}/`, {
       method: 'POST',
       body: '{}',
-      headers: { origin: info.origin, cookie: `px_session=${value}`, 'x-px-csrf': 'forged-csrf-0123456789abcdef', 'content-type': 'application/json' },
+      headers: { origin: info.origin, cookie: sessionCookie(info, value), 'x-px-csrf': 'forged-csrf-0123456789abcdef', 'content-type': 'application/json' },
     });
     assert.equal(wrong.status, 403, 'a wrong CSRF value must be rejected');
   });
@@ -349,7 +397,7 @@ test('web host: rejects unsupported methods even with valid Origin, session, and
     const value = await launchValue(info);
     const headers = {
       origin: info.origin,
-      cookie: `px_session=${value}`,
+      cookie: sessionCookie(info, value),
       'x-px-csrf': value,
       'content-type': 'application/json',
     };
@@ -366,7 +414,7 @@ test('web host: rejects a body over the configured limit', async () => {
     const value = await launchValue(info);
     const headers = {
       origin: info.origin,
-      cookie: `px_session=${value}`,
+      cookie: sessionCookie(info, value),
       'x-px-csrf': value,
       'content-type': 'application/json',
     };
@@ -388,7 +436,7 @@ test('web host: rejects an invalid JSON body with 400', async () => {
       body: 'not-json',
       headers: {
         origin: info.origin,
-        cookie: `px_session=${value}`,
+        cookie: sessionCookie(info, value),
         'x-px-csrf': value,
         'content-type': 'application/json',
       },
@@ -405,7 +453,7 @@ test('web host: rejects a non-JSON content type for state-changing requests', as
       body: 'a=b',
       headers: {
         origin: info.origin,
-        cookie: `px_session=${value}`,
+        cookie: sessionCookie(info, value),
         'x-px-csrf': value,
         'content-type': 'application/x-www-form-urlencoded',
       },
@@ -435,13 +483,94 @@ test('web host: session value differs per launch and is unavailable after close'
   const firstInfo = await first.start();
   const firstValue = await launchValue(firstInfo);
   await first.close();
+  await assert.rejects(() => fetch(`${firstInfo.origin}/`), 'the closed launch must be unreachable before relaunch');
 
-  const second = createWebHost({ assets });
+  const second = createWebHost({ assets, port: firstInfo.port });
   const secondInfo = await second.start();
   const secondValue = await launchValue(secondInfo);
   assert.notEqual(firstValue, secondValue, 'each launch must mint its own unguessable value');
-  await assert.rejects(() => fetch(`${firstInfo.origin}/`), 'the first launch must be unreachable after close');
+  assert.equal(secondInfo.port, firstInfo.port, 'the relaunch reuses the endpoint cookie namespace');
+  const stale = await fetch(`${secondInfo.origin}/`, {
+    method: 'POST', body: '{}', headers: {
+      origin: secondInfo.origin,
+      cookie: sessionCookie(secondInfo, firstValue),
+      'x-px-csrf': firstValue,
+      'content-type': 'application/json',
+    },
+  });
+  assert.equal(stale.status, 403, 'a stale relaunch capability must reject before routing');
+  const fresh = await fetch(`${secondInfo.origin}/`, {
+    method: 'POST', body: '{}', headers: {
+      origin: secondInfo.origin,
+      cookie: sessionCookie(secondInfo, secondValue),
+      'x-px-csrf': secondValue,
+      'content-type': 'application/json',
+    },
+  });
+  assert.equal(fresh.status, 405, 'fresh relaunch credentials must pass authorization');
   await second.close();
+});
+
+test('web host: independent bound ports retain their own shared-browser session and reject foreign or legacy cookies before routing (TASK-2656)', async () => {
+  const first = createWebHost({ assets });
+  const second = createWebHost({ assets });
+  const firstInfo = await first.start();
+  const secondInfo = await second.start();
+  try {
+    const store = sharedCookieStore();
+    const firstShell = await bootstrapShell(firstInfo, store);
+    const secondShell = await bootstrapShell(secondInfo, store);
+    assert.notEqual(firstShell.credentials.name, secondShell.credentials.name,
+      'actual port 0 bindings must issue distinct cookie names in one browser store');
+    assert.match(firstShell.credentials.name, /^px_session_v4_\d+$/);
+    assert.match(secondShell.credentials.name, /^px_session_v4_\d+$/);
+
+    assert.equal((await authorizedMutationProbe(firstInfo, store, firstShell.credentials.value)).status, 405,
+      'host A credentials must reach routing after host B bootstraps');
+    assert.equal((await authorizedMutationProbe(secondInfo, store, secondShell.credentials.value)).status, 405,
+      'host B credentials must reach routing after host A bootstraps');
+
+    const foreign = await fetch(`${secondInfo.origin}/`, {
+      method: 'POST', body: '{}', headers: {
+        origin: secondInfo.origin,
+        cookie: `${firstShell.credentials.name}=${firstShell.credentials.value}`,
+        'x-px-csrf': firstShell.credentials.value,
+        'content-type': 'application/json',
+      },
+    });
+    assert.equal(foreign.status, 403, 'host A credentials must reject before routing on host B');
+    const legacy = await fetch(`${firstInfo.origin}/`, {
+      method: 'POST', body: '{}', headers: {
+        origin: firstInfo.origin,
+        cookie: `px_session=${firstShell.credentials.value}; unrelated=value`,
+        'x-px-csrf': firstShell.credentials.value,
+        'content-type': 'application/json',
+      },
+    });
+    assert.equal(legacy.status, 403, 'legacy or unrelated cookie names must not authenticate');
+  } finally {
+    await first.close();
+    await second.close();
+  }
+});
+
+test('web host: every accepted index spelling returns the canonical bootstrapped shell (TASK-2656)', async () => {
+  await withHost({}, async info => {
+    for (const route of ['/index.html', '/%69ndex.html', '/index.html/', '/index.html?from=direct']) {
+      const store = sharedCookieStore();
+      const { response, credentials } = await bootstrapShell(info, store, route);
+      const html = await response.text();
+      assert.equal(credentials.name, sessionCookieName(info), `${route} must issue this host's session name`);
+      assert.match(response.headers.get('cache-control') ?? '', /no-store/, `${route} must not cache the shell`);
+      assert.equal(response.headers.get('content-security-policy'), PROTECTION_HEADERS['content-security-policy']);
+      assert.match(response.headers.get('set-cookie') ?? '', /HttpOnly/);
+      assert.match(response.headers.get('set-cookie') ?? '', /SameSite=Strict/);
+      assert.match(html, new RegExp(`<meta name="px-csrf" content="${credentials.value}"`),
+        `${route} must carry the cookie-matching non-executable CSRF value`);
+      assert.equal((await authorizedMutationProbe(info, store, credentials.value)).status, 405,
+        `${route} bootstrap credentials must pass mutation authorization`);
+    }
+  });
 });
 
 test('web host: GET routes do not mutate launch state', async () => {

@@ -1,8 +1,8 @@
 ---
 id: TASK-2656
 title: Fix multi-host web sessions and canonical shell bootstrap
-status: backlog
-assignee: []
+status: done
+assignee: [codex]
 created_date: '2026-10-06 08:24'
 labels: []
 dependencies: []
