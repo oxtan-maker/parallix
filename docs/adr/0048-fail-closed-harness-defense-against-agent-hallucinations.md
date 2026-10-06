@@ -173,6 +173,10 @@ This backs the `px rebase` shared-file conflict path: when a pinned implementer 
 
 The `AgentCapacity` class is an additive entry in the dispatch table; the eight original classes and their mappings are unchanged.
 
+### Passing test output is not human-only evidence (task-2663)
+
+A gate or hook failure escalates to `HumanOnly` only when its failure evidence names an infrastructure or state-machine marker. Gate output echoes every passing test title, and a title such as "direct review → done forbidden" reports a contract that held. The explicit human-only rule therefore ignores passing test-result lines (`✔`, `✓`, TAP `ok N`) before matching its markers; the marker set itself is unchanged, so a genuine Forgejo, authentication, connection, or state-machine failure still dispatches `HumanOnly`, while a repairable gate failure that merely prints such a title is sent back to the implementer.
+
 ## Consequences
 
 ### Positive

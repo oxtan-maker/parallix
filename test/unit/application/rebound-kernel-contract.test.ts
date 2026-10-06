@@ -147,6 +147,53 @@ test('task-2377.03: an unrecognized gate diagnostic still bounces instead of str
   assert.equal(classification.isRelaunchable, true);
 });
 
+/** Observed px integrate output (TASK-2663): a passing title containing `forbidden`, then a CPU-budget failure. */
+const passingForbiddenTitleCpuStdout = [
+  '✔ R8: direct review → done forbidden — integrate requires integration status (12.4ms)',
+  'integration-test-cpu:exceeded test/integration/cli/headless-cli.test.ts used 2.043s CPU (budget 2.000s)',
+].join('\n');
+
+test('TASK-2663: a passing test title containing a human-only keyword does not strand a repairable CPU-budget gate failure', () => {
+  const classification = classifyReboundReason({
+    kind: 'gate-failure',
+    area: 'integration-local',
+    command: './scripts/verify-local.sh integration-local',
+    exitCode: 1,
+    stdout: passingForbiddenTitleCpuStdout,
+    stderr: '',
+  });
+  assert.equal(classification.failureClass, 'GateFailure');
+  assert.equal(classification.dispatchAction, 'AutoSendBack');
+  assert.equal(classification.isRelaunchable, true);
+});
+
+test('TASK-2663: passing TAP and spec titles naming unauthorized access in stderr do not escalate a verification-gate failure', () => {
+  const classification = classifyReboundReason({
+    ...(gateReason as { kind: 'gate-failure' } & typeof gateReason),
+    stdout: 'ok 14 - rejects unauthorized access to the review queue',
+    stderr: '  ✓ maps forgejo authentication failed to a typed error\nnot ok 15 - preserves diagnostic',
+    error: undefined,
+  });
+  assert.equal(classification.failureClass, 'GateFailure');
+  assert.equal(classification.dispatchAction, 'AutoSendBack');
+  assert.equal(classification.isRelaunchable, true);
+});
+
+test('TASK-2663: genuine infrastructure evidence beside passing output still dispatches HumanOnly', () => {
+  const classification = classifyReboundReason({
+    kind: 'gate-failure',
+    area: 'integration-local',
+    command: './scripts/verify-local.sh integration-local',
+    exitCode: 1,
+    stdout: passingForbiddenTitleCpuStdout,
+    stderr: '',
+    error: 'forgejo authentication failed: token expired',
+  });
+  assert.equal(classification.failureClass, 'InfraBlocker');
+  assert.equal(classification.dispatchAction, 'HumanOnly');
+  assert.equal(classification.isRelaunchable, false);
+});
+
 test('task-2377.03: reboundDiagnostic flattens structured reasons without regex on combined text', () => {
   assert.match(reboundDiagnostic(gateReason), /failing test: preserves diagnostic/);
   assert.equal(reboundDiagnostic(hookReason), 'pre-commit hook failed: lint error');
@@ -831,6 +878,24 @@ describe("Integration gate rebound —", () => {
     assert.equal(route.route, 'fixed');
     assert.equal(h.launches, 1, 'exactly one implementer relaunch');
     assert.deepEqual(h.transitions, [SLUG], 'the task is transitioned back to the implementer exactly once');
+  });
+
+  test('TASK-2663: a CPU-budget failure echoing a passing forbidden title reaches the implementer repair instead of human-only', async () => {
+    const h = harness();
+    const route = await routeIntegrationGateFailure(routeArgs({
+      failedGate: failedGate({
+        key: 'integration-local',
+        stdout: [
+          '✔ R8: direct review → done forbidden — integrate requires integration status (12.4ms)',
+          'integration-test-cpu:exceeded test/integration/cli/headless-cli.test.ts used 2.043s CPU (budget 2.000s)',
+        ].join('\n'),
+        stderr: '',
+      }),
+      gateError: 'Repository gate "integration-local" exited with code 1 for integration.',
+    }, h));
+    assert.equal(route.route, 'fixed');
+    assert.equal(h.launches, 1, 'the injected startAgent launched one implementer repair');
+    assert.doesNotMatch(h.messages.join('\n'), /Human intervention required/);
   });
 
   test('TASK-2492: a bounce whose re-run stays red reports exhausted after the per-invocation budget', async () => {

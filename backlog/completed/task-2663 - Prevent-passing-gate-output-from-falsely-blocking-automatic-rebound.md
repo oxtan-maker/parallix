@@ -1,8 +1,8 @@
 ---
 id: TASK-2663
 title: Prevent passing gate output from falsely blocking automatic rebound
-status: backlog
-assignee: []
+status: done
+assignee: [claude]
 created_date: '2026-10-06 10:35'
 labels:
   - bug

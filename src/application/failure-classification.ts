@@ -81,16 +81,26 @@ export type GitBlockerReason = 'dirty' | 'behind' | 'other';
 const EXPLICIT_HUMAN_ONLY_DIAGNOSTIC_RE = /state\s+violation|invalid\s+state|transition\s+not\s+allowed|cannot\s+(move|transition)\s+(from|to)\s+\w+\s+(to|from)|forgejo|infrastructure|authentication\s+failed|token\s+(expired|invalid|missing)|forbidden|unauthorized\s+(access|request)|connection\s+(refused|timed?\s*out)|network\s+error/i;
 
 /**
+ * A passing test-result line (node:test spec `✔`, mocha/vitest `✓`, TAP `ok N`).
+ * Gate output echoes every passing title; a title that merely mentions
+ * `forbidden` or `forgejo` reports a contract that held, not a blocker
+ * (TASK-2663).
+ */
+const PASSING_TEST_RESULT_LINE_RE = /^\s*(?:[✔✓]\s|ok\s+\d+\b)/;
+
+/**
  * True when the diagnostic names a recognized infrastructure or state-machine
  * blocker, as opposed to landing on the classifier's human-only default.
+ * Only failure evidence counts: passing test-result lines are ignored.
  */
 export function hasExplicitHumanOnlyDiagnostic(diagnostic: string): boolean {
   if (!diagnostic || typeof diagnostic !== 'string') {
     return false;
   }
-  const { dispatchAction } = classifyError(diagnostic);
+  const evidence = diagnostic.split('\n').filter((line) => !PASSING_TEST_RESULT_LINE_RE.test(line)).join('\n');
+  const { dispatchAction } = classifyError(evidence);
   return dispatchAction === DispatchAction.HumanOnly
-    && EXPLICIT_HUMAN_ONLY_DIAGNOSTIC_RE.test(diagnostic);
+    && EXPLICIT_HUMAN_ONLY_DIAGNOSTIC_RE.test(evidence);
 }
 
 /**
