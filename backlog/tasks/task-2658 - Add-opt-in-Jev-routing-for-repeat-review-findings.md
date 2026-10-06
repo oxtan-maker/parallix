@@ -11,6 +11,7 @@ dependencies: []
 references:
   - docs/adr/0065-local-review-classification-evidence.md
   - backlog/docs/task-2650-evidence/final-validation.md
+  - ../parallix-artice-data/task-2650/
 priority: medium
 ordinal: 164008
 ---
