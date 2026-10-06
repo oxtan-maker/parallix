@@ -4,6 +4,7 @@ title: Keep mission terminal open through integration and show final stats
 status: backlog
 assignee: []
 created_date: '2026-10-06 13:57'
+updated_date: '2026-10-06 14:03'
 labels:
   - bug
   - user_value
@@ -12,7 +13,7 @@ references:
   - TASK-2658
   - src/composition/mission-terminal.ts
   - src/adapters/process/tmux-host.ts
-priority: medium
+priority: high
 ordinal: 185008
 ---
 
@@ -39,7 +40,14 @@ Create a focused reproduction in the owning terminal/workflow suite: the prior b
 - [ ] #5 Failed or interrupted integration leaves its actual state and diagnostic visible without claiming that main was updated. Existing detach/reattach controls and operator integration choices remain available.
 - [ ] #6 A focused red-to-green reproduction is retained in the owning terminal/workflow suite, with isolated fixtures, finite CPU/wall budgets and checks covering normal review completion, integration completion and retained stats.
 - [ ] #7 Preserve typed application ports, composition authority, existing review/gate/merge semantics and local statistics authority; update relevant live operator documentation and run focused docs checks.
+- [ ] #8 Real tmux reproductions cover both premature exit after review and terminal loss during failing integration gates; gate names, exit codes and captured output remain accessible after process/session exit. Demonstrate the repaired operator flow with the real terminal adapter.
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Second operator report (2026-10-06): the tmux session terminated again during integration, hiding failing unit tests and at least one integration test. Treat terminal termination at normal review completion and loss of the integration failure/output view as separate P0 candidates requiring reproduction and diagnosis. Repair the real tmux flow, including child exit, failed gates, detach/reattach and output retention; successful mocked host tests alone are insufficient. Keep this follow-up on main rather than rebouncing TASK-2658 for terminal work.
+<!-- SECTION:NOTES:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
