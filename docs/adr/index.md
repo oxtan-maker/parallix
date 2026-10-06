@@ -32,6 +32,7 @@ ADR 0023 remains in WrGroceries and is cross-referenced here instead of copied.
 - `docs/adr/0062-native-test-coverage-replaces-c8.md` — Measured comparison of the historical c8 contract and Node 26.7+ native coverage on integration-ci: `--test-coverage-include-all` with source maps and the `src/**/*.ts` patterns reproduces c8's file set, speed is equivalent on the same Node, and c8's only extra behavior (whole-file credit for the minified bundle) is inflation, so no c8 machinery is retained
 - `docs/adr/0063-self-hosted-verification-performance.md` — Keep calibrated CPU guards and direct test gates; adopt the screened local unit hybrid while retaining isolation for other files; the tested coarse Nx targets are not adopted and feature-scoped reuse remains pending sound runtime and coverage inputs
 - `docs/adr/0064-mission-terminal-sessions-and-run-history.md` — Automatic persistent mission-keyed terminal hosting for the whole Parallix command, with per-run durable evidence and terminals available after work stops
+- `docs/adr/0065-local-review-classification-evidence.md` — Proposed: an opt-in finding-resolution routing pilot with general-review fallback and fixed thresholds; compare cheaper deterministic verification-report rules while retaining executable checks and review authority
 
 ## Cross-reference
 - `docs/adr/0023-ai-sdlc-configuration.md` remains in WrGroceries at `/home/magnus/code/visualBoard-task-1302/docs/adr/0023-ai-sdlc-configuration.md`.

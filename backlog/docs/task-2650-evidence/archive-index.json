@@ -1,0 +1,10 @@
+{
+  "archiveAbsolutePath": "/mnt/data/code/parallix-artice-data/task-2650",
+  "archiveAccess": "host-local external research archive; it is intentionally outside this Git repository and is not a public release",
+  "inventory": "file-inventory.json",
+  "inventorySha256": "d11b6196c5d6c8430416cac688c2a5f447cd7df2c46c907c7f607c729ef1daa6",
+  "archiveFiles": 918,
+  "archiveBytesExcludingInventory": 4057385350,
+  "finalProtocolSha256": "bf9280cfec9622eacf9b3947ce5a0cdd92ecc5507d0468959e1f32ec18ff0229",
+  "finalSummarySha256": "ec3616c0b1906432b876442bfa7e2c0e692df6990de367a748eef3ea91180a75"
+}

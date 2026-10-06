@@ -229,9 +229,22 @@ export async function launchPtySmoke(
       afterStateFailure = String(error);
     }
   };
-  /** End the wrapper's PTY hold once the after-state has been captured. */
+  /**
+   * End the wrapper's PTY hold once the after-state has been captured.
+   *
+   * A terminal hangup is the lifecycle event the in-flight board-dispatch
+   * contract exercises. Killing `script` outright can race its PTY cleanup and
+   * leave a foreground child alive until the kernel later reaps the session.
+   * Ask the session host to hang up first; retain a short hard-stop fallback
+   * so a broken host cannot leak a fixture indefinitely.
+   */
   const release = () => {
-    if (!hasExited) { child.kill('SIGKILL'); }
+    if (hasExited) { return; }
+    try { child.kill('SIGHUP'); } catch { return; }
+    const fallback = setTimeout(() => {
+      if (!hasExited) { child.kill('SIGKILL'); }
+    }, 250);
+    fallback.unref?.();
   };
 
   const readExitStatus = async (): Promise<number> => {
