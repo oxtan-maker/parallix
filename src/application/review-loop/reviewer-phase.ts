@@ -240,6 +240,9 @@ export async function runReviewerPhase(context: LoopContext, round: ReviewRound)
     if (round.attempt > 1) {
       context.emit({ kind: 'revision-verified', attempt: round.attempt });
     }
+    // The graph is reviewer context, not a correctness gate: refresh it once
+    // only after the final rebase and declared verification have succeeded.
+    await context.ports.preReview.refreshKnowledgeGraph();
     if (await launchReviewer(context, round)) { return { outcome: 'stop' }; }
     const consumed = await consumeReviewerOutput(context, round);
     if (consumed.step) { return { outcome: 'stop' }; }

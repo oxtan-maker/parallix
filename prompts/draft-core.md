@@ -59,7 +59,7 @@ Bug-labeled missions (regression-test-first / "lock the bug"):
 - record the reproduction test's path with `px repro set --test <path>` (for example, `px repro set --test test/task-1354-repro.test.ts`); the table above makes it required for a bug mission. `px status {{slug}}` reports it back for the reviewer to check against the diff.
 - do not author the fix during draft — the reproduction test and its recorded path are the only bug-specific drafting outputs.
 
-Graphify-first: before drafting, check if `graphify-out/graph.json` exists. If it does, run `graphify query "{{slug}} mission scope and dependencies"` to understand the codebase context before filling in the mission contract. After drafting, run `graphify update .` if you modified any code files.
+Graphify-first: before drafting, check if `graphify-out/graph.json` exists. If it does, run `graphify query "{{slug}} mission scope and dependencies"` to understand the codebase context before filling in the mission contract. Do not refresh Graphify after drafting; freshness is maintained at the autonomous-review boundary on the final verified tree.
 
 Finishing:
 - verify the draft with `{{verifyCmd}}` before stopping

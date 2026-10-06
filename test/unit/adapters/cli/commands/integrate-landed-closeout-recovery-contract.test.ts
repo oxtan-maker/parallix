@@ -357,7 +357,7 @@ describe("rebounded landing guard", () => {
         productConfig: { isForgejoReviewEnabled: () => false },
         fileSystem: { existsSync: () => false },
         git: { git: () => ({ status: 0, stdout: '', stderr: '' }) },
-        checkout: { maybeUpdateGraphifyOnPrimary: () => {} },
+        checkout: { maybeUpdateGraphifyOnPrimary: () => { effects.push('graphify'); } },
         landing: {
           createAbort: () => abort,
           persistLandedIntegrationOrAbort: async () => { effects.push('decide'); },
@@ -379,7 +379,7 @@ describe("rebounded landing guard", () => {
       assert.deepEqual(effects, failedStep === 'stats' ? ['decide', 'stats']
         : failedStep === 'cleanup' ? ['decide', 'stats', 'hook', 'cleanup']
         : failedStep === 'hook' ? ['decide', 'stats', 'hook']
-          : ['decide', 'stats', 'hook', 'cleanup', 'close']);
+          : ['decide', 'stats', 'hook', 'cleanup', 'close'], 'successful closeout preserves its lifecycle effects without refreshing Graphify');
     });
   }
 

@@ -1,8 +1,8 @@
 ---
 id: TASK-2654
 title: Make Graphify refresh boundary-driven instead of edit-driven
-status: backlog
-assignee: []
+status: done
+assignee: [codex]
 created_date: '2026-10-06 04:37'
 labels: []
 dependencies: []

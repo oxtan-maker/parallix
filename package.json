@@ -1,6 +1,6 @@
 {
   "name": "@magnusekdahl/parallix",
-  "version": "1.5.271",
+  "version": "1.5.272",
   "description": "Local-first workflow and trust layer for AI coding agents — isolated Git worktree missions, separate code review, repository-owned verification, Linux confinement, and human-owned merges",
   "license": "AGPL-3.0-or-later",
   "private": false,
@@ -89,6 +89,9 @@
     "@earendil-works/pi-coding-agent": {
       "optional": true
     }
+  },
+  "overrides": {
+    "source-map-js": "1.2.2"
   },
   "devDependencies": {
     "@earendil-works/pi-coding-agent": "^1.0.2",

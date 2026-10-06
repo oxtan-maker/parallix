@@ -79,7 +79,6 @@ export function createSquashLanding(ports: IntegrateWorkflowPorts, { promoteTask
     }
     await completeLandedCloseout({
       slug, landedCommit: mergedCommit, missionServices, baseWorktree, baseBranch, variant, landing,
-      afterCleanup: () => { checkout.maybeUpdateGraphifyOnPrimary(baseWorktree, { log: fmt.log.debug }); },
     });
   }
 

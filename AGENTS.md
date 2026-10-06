@@ -2,7 +2,7 @@
 
 ## graphify
 
-If `graphify-out/graph.json` exists, start codebase questions with `graphify query "<question>" --graph "$(pwd)/graphify-out/graph.json"`. Use `graphify path` for relationships and `graphify explain` for a focused concept, with the same `--graph` argument. Use `graphify-out/wiki/index.md` for broad navigation when present. Read `GRAPH_REPORT.md` only for architecture review or when a query is insufficient. If the graph is absent, say to run `/graphify .` to build it, then read source directly. Dirty graph output is usable. After code edits, run `graphify update .`.
+If `graphify-out/graph.json` exists, start codebase questions with `graphify query "<question>" --graph "$(pwd)/graphify-out/graph.json"`. Use `graphify path` for relationships and `graphify explain` for a focused concept, with the same `--graph` argument. Use `graphify-out/wiki/index.md` for broad navigation when present. Read `GRAPH_REPORT.md` only for architecture review or when a query is insufficient. If the graph is absent, say to run `/graphify .` to build it, then read source directly. Dirty graph output is usable. Graph freshness is maintained at lifecycle boundaries: autonomous review refreshes the final verified tree immediately before reviewer launch; do not refresh after ordinary edits.
 
 ## Documentation
 

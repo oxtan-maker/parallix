@@ -36,13 +36,32 @@ const PARENT_FIXTURE = JSON.parse(
 function parentPrompt(stage: string): string {
   const parent = PARENT_FIXTURE[stage];
   assert.ok(parent, `parent-commit fixture missing for stage ${stage}`);
-  return stage === 'review'
+  const normalized = stage === 'review'
     ? `${parent.replace(
       'Do not run any large test gates, thats run automatically by parallix at suitable steps and is not your job. Specific test to validate a code finding is ok.',
       REVIEW_COVERAGE_GUIDANCE,
     )}\n`
     : parent;
+  return normalized
+    .replace('After drafting, run `graphify update .` if you modified any code files.', 'Do not refresh Graphify after drafting; freshness is maintained at the autonomous-review boundary on the final verified tree.')
+    .replace('Read `graphify-out/GRAPH_REPORT.md` only for broad architecture review. Run `graphify update .` after modifying code. If `graphify-out/wiki/index.md` exists, use it for broad navigation.', 'Read `graphify-out/GRAPH_REPORT.md` only for broad architecture review. Graph freshness is handled at the autonomous-review boundary, after its final verification and immediately before reviewer launch; do not refresh after ordinary edits. If `graphify-out/wiki/index.md` exists, use it for broad navigation.')
+    .replace('Graphify-first: before acting on findings, check if `graphify-out/graph.json` exists. If it does, use `graphify query` and `graphify path` to understand affected code areas before making changes. Run `graphify update .` after modifying code.', 'Graphify-first: before acting on findings, check if `graphify-out/graph.json` exists. If it does, use `graphify query` and `graphify path` to understand affected code areas before making changes. Do not refresh Graphify after ordinary edits: the next autonomous-review boundary refreshes the final verified tree immediately before reviewer launch.');
 }
+
+test('Graphify guidance makes freshness an autonomous-review boundary concern (TASK-2654)', () => {
+  const files = [
+    'AGENTS.md',
+    'templates/AGENTS.md.template',
+    'prompts/execute-core.md',
+    'prompts/act-on-review.md',
+    'prompts/draft-core.md',
+  ];
+  for (const file of files) {
+    const source = fs.readFileSync(path.join(realRepoRoot(), file), 'utf8');
+    assert.doesNotMatch(source, /After (?:code edits|modifying code|drafting), run `graphify update \.`/, `${file} must not prescribe edit-triggered Graphify refreshes`);
+    assert.match(source, /(?:lifecycle-boundary|autonomous-review boundary|autonomous review refreshes)/i, `${file} must describe the lifecycle-boundary policy`);
+  }
+});
 function nonBlank(s: string): string[] { return s.split('\n').filter(l => l.trim().length > 0); }
 function counts(lines: string[]): Map<string, number> {
   const m = new Map<string, number>();

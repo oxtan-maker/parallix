@@ -210,7 +210,6 @@ async function runOwnedReviewLoop(request: ReviewLoopRequest, ports: ReviewLoopP
   const out: Output = { emit: event => ports.output.emit(event), exit: code => ports.output.exit(code) };
   const start: Start = { slug, dryRun: request.dryRun ?? false, isContinue: request.isContinue ?? false, verbose: request.verbose ?? false };
   const maxAttempts = request.maxAttempts ?? DEFAULT_MAX_ATTEMPTS;
-  if (!start.dryRun) { await ports.preReview.refreshKnowledgeGraph(); }
   if (request.reset && await ports.state.reset()) { out.emit({ kind: 'review-reset', slug: slug }); }
   let persisted = await ports.state.read();
   const implementer = resolveImplementer(slug, request.implementer, persisted, ports, out);
