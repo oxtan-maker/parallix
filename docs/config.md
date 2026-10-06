@@ -20,6 +20,24 @@ Sections not marked as closed below accept extra keys, matching the schema.
 An extra key is not an override: only the fields documented here have an
 effect.
 
+## Decision provider setup
+
+The generic decision capability reuses compatible Jev provider settings from
+the operator's environment. For example, export `OPENROUTER_API_KEY` in the
+shell running Parallix. A single compatible route is available without another
+setup prompt. If several providers are configured, select the intended account
+with `JEV_CODE_PROVIDER`; SDK base and model overrides remain operator-owned.
+Harness-only credentials must be exported explicitly rather than recovered
+from agent configuration. Repository configuration cannot supply decision
+credentials or redirect their destination.
+
+Configured availability does not guarantee funded access. Decision calls
+report budget, credit or quota exhaustion as `usage-blocked`, separately from
+authentication and transient rate limits. They do not automatically retry or
+switch accounts. This capability introduces no automatic workflow decisions.
+The boundary and rationale are recorded in
+[ADR 0065](adr/0065-generic-decision-capability-and-operator-provider-discovery.md).
+
 ## Web board
 
 The local web board shows open missions and, by default, completed missions

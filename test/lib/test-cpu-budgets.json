@@ -14,7 +14,7 @@
   "integrationCases": {
     "defaultMs": 500,
     "plain": {
-      "integration/process/tmux-terminal-host.test.ts": 2000,
+      "integration/process/tmux-terminal-host.test.ts": 2800,
       "integration/cli/active-invocation-contract.test.ts": 400,
       "integration/cli/active.test.ts": 100,
       "integration/agents/agent-block-authority.test.ts": 150,

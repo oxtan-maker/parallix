@@ -1,8 +1,8 @@
 ---
 id: TASK-2664
 title: Add a generic decision-model port with zero-friction Jev discovery
-status: backlog
-assignee: []
+status: done
+assignee: [codex]
 created_date: '2026-10-06 10:55'
 labels: []
 dependencies: []
@@ -200,10 +200,32 @@ export OPENROUTER
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Verification gate ran and passed on the final tree with captured proof rather than an unverified claim
-- [ ] #2 Lint and static analysis report clean on every changed file
-- [ ] #3 No focused or unannotated skipped tests were introduced (no .only and no bare .skip)
-- [ ] #4 Final checkpoint Goal Check table cites real evidence using file:line references and test names
-- [ ] #5 Docs updated to reflect any workflow or user-facing behavior change
+- [x] #1 Verification gate ran and passed on the final tree with captured proof rather than an unverified claim
+- [x] #2 Lint and static analysis report clean on every changed file
+- [x] #3 No focused or unannotated skipped tests were introduced (no .only and no bare .skip)
+- [x] #4 Final checkpoint Goal Check table cites real evidence using file:line references and test names
+- [x] #5 Docs updated to reflect any workflow or user-facing behavior change
 - [ ] #6 Bug-labeled missions include a red-to-green reproduction test that fails before the fix and passes after
 <!-- DOD:END -->
+
+## Final checkpoint
+
+### Goal Check
+
+| Goal | Evidence | Result |
+|---|---|---|
+| Generic application capability and composition-owned binding | `src/application/ports/decision.ts:29`; `src/composition/decision.ts:7`; test `composition normalizes mixed questions, probabilities, model and usage` at `test/unit/adapters/decision/decision-contract.test.ts:61` | PASS |
+| Automatic unambiguous discovery, explicit selection, setup guidance and operator-only routing | `src/adapters/decision/provider.ts:20`; tests `discovers each sole conventional provider without prompting (TASK-2664)` at `test/unit/adapters/decision/decision-contract.test.ts:21` and `explicit routes disambiguate and generic SDK credentials follow operator routing` at line 47 | PASS |
+| Typed results, bounded HTTP, no harness launch, secret-safe failures or implicit fallback | `src/adapters/decision/system-one.ts:119`; tests `rejects partial, malformed, mismatched and nonfinite provider answers` at `test/unit/adapters/decision/decision-contract.test.ts:114` and `HTTP and transport failures redact remote bodies and do not retry or fallback` at line 166 | PASS |
+| Provider-independent budget/credit/quota block exception | `src/application/ports/decision.ts:34`; `src/adapters/decision/provider-errors.ts:20`; test `usage blocks have a provider-independent exception distinct from transient limits (TASK-2664)` at `test/unit/adapters/decision/decision-contract.test.ts:139` | PASS |
+| Architecture rationale and operator guidance | `docs/adr/0065-generic-decision-capability-and-operator-provider-discovery.md:1`; `docs/config.md:24` | PASS |
+
+Verification on the final source tree:
+
+- `npm test -- --unit-test-headroom test/unit/adapters/decision/decision-contract.test.ts test/unit/adapters/architecture/dependency-graph.test.ts test/unit/domain/domain-architecture-guards.test.ts test/unit/repository/file-size-cap.test.ts`: 85 passed, zero failed/skipped; all cases within the 500 ms headroom cap.
+- `./scripts/verify-local.sh static-analysis`: all four stages passed; ESLint zero errors/warnings, production and test typechecks clean, hygiene and layout registrations clean.
+- Explicit ESLint on every changed TypeScript file, including the new test suite: zero errors/warnings.
+- `./scripts/verify-local.sh docs` and `git diff --check`: passed.
+- Three manual live OpenRouter Jev calls passed, returning `typesafe/jev-1.13-20260917` and normalized answers/usage. The two final-tree calls validated the default OpenRouter model with a negative boolean, blue choice and lowest score, then a generic SDK key routed through `TYPESAFE_BASE_URL` with a pinned model, apple choice and positive boolean criteria. Combined usage: 1121 input tokens, 181 output tokens, cost 0.000047082 USD. Credentials were loaded directly from `/tmp/open.txt` and never printed. No automated test calls Jev; the new suite uses injected HTTP doubles only. Other hosted providers were not live-tested.
+
+The new contract suite owns generic decision discovery and transport because no existing decision-service suite or workflow consumer existed. Bug reproduction is not applicable: this mission has no bug label. No classifier policy, workflow integration, credential store or agent family was added.

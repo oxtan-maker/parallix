@@ -34,5 +34,7 @@ ADR 0023 remains in WrGroceries and is cross-referenced here instead of copied.
 - `docs/adr/0064-mission-terminal-sessions-and-run-history.md` — Automatic persistent mission-keyed terminal hosting for the whole Parallix command, with per-run durable evidence and terminals available after work stops
 - `docs/adr/0065-local-review-classification-evidence.md` — Proposed: an opt-in finding-resolution routing pilot with general-review fallback and fixed thresholds; compare cheaper deterministic verification-report rules while retaining executable checks and review authority
 
+- `docs/adr/0065-generic-decision-capability-and-operator-provider-discovery.md` — Generic typed decision port with direct System One transport, operator-owned provider discovery, and normalized usage-block failures
+
 ## Cross-reference
 - `docs/adr/0023-ai-sdlc-configuration.md` remains in WrGroceries at `/home/magnus/code/visualBoard-task-1302/docs/adr/0023-ai-sdlc-configuration.md`.

@@ -60,6 +60,8 @@ export const adapterPackageDependencies: Readonly<Record<string, readonly string
   // mechanism: state-map configuration reads packaged runtime assets; the
   // sandbox state-home catalog resolves Parallix state via durable storage paths.
   config: ['assets', 'storage'],
+  // mechanism: operator environment and direct decision HTTP own no sibling dependency.
+  decision: [],
   // mechanism: mission-path resolution needs configuration and Git repository facts.
   filesystem: ['config', 'git'],
   // mechanism: Forgejo transport resolves task, configuration, filesystem, Git, and verification facts.
