@@ -117,7 +117,7 @@ for (const [name, load] of [
   test(`directory-free handoff refuses ${name}`, async () => {
     const recorder = makeRecorder();
     const base = makePorts(recorder);
-    const services = await base.missionServices!('/root', {});
+    const services = await base.missionServices!('/root', { missionDir: '/root' });
     const ports = makePorts(recorder, {
       missionUtils: { ...base.missionUtils, findMissionDir: () => null },
       missionServices: async () => ({ ...services, store: { load: async () => load } }),

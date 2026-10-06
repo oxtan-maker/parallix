@@ -7,12 +7,14 @@
  */
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
 import { HandoffCommandUseCase } from '../../../src/application/handoff-command-use-case.js';
 import {
   SLUG, ROOT, BRANCH, MISSION_DIR, RECORDED_MISSION_LOAD, LEGACY_MISSION_LOAD,
   makeRecorder, makePorts, runOptions,
 } from '../../helpers/handoff-ports.js';
 import { classifyError } from '../../../src/application/failure-classification.js';
+import type { HandoffWorkflowPorts } from '../../../src/application/ports/handoff-workflow.js';
 
 // --- SC5a: successful handoff over mocked ports ---
 
@@ -677,4 +679,56 @@ test('a typed-verb Mission whose recorded evidence cites nothing verifiable is s
   assert.match(result.error ?? '', /cites no verifiable reference/);
   assert.equal(classifyError(result.error ?? '').dispatchAction, 'AutoSendBack', 'weak evidence is repaired by the implementer, as for a CP-N.md table');
   assert.deepEqual(recorder.transitions, []);
+});
+
+// --- TASK-2668.01: the compiler checks the use case against its ports ---
+test('handoff fails closed when no mission services are configured (TASK-2668.01)', async () => {
+  const recorder = makeRecorder();
+  const ports = makePorts(recorder, { missionServices: undefined });
+  const result = await new HandoffCommandUseCase(ports).performHandoff(SLUG, runOptions(recorder));
+  assert.equal(result.ok, false);
+  assert.match(result.error ?? '', /mission services are not configured\. Handoff fails closed\./);
+  assert.deepEqual(recorder.transitions, []);
+});
+
+test('a failing declared gate returns its process evidence and blocks review (TASK-2668.01)', async () => {
+  const recorder = makeRecorder();
+  const ports = makePorts(recorder, {
+    process: {
+      spawnSync: (_cmd: string, args: string[]) => {
+        recorder.spawned.push(args[1]);
+        return { status: 2, stdout: ' gate stdout ', stderr: ' gate stderr ' };
+      },
+    },
+  });
+  const result = await new HandoffCommandUseCase(ports).performHandoff(SLUG, runOptions(recorder));
+  assert.equal(result.ok, false);
+  assert.equal(result.reason, 'gate-failed');
+  assert.deepEqual(result.gateOutput, { stdout: 'gate stdout', stderr: 'gate stderr' });
+  assert.deepEqual(result.gateFailure, {
+    area: 'declared gate', command: recorder.spawned[0], cwd: ROOT, exitCode: 2,
+    stdout: 'gate stdout', stderr: 'gate stderr',
+  });
+  assert.deepEqual(recorder.transitions, []);
+});
+
+
+test('handoff use case source carries no TypeScript suppression directive (TASK-2668.01)', () => {
+  const source = fs.readFileSync(new URL('../../../src/application/handoff-command-use-case.ts', import.meta.url), 'utf8');
+  assert.doesNotMatch(source, /@ts-(?:nocheck|ignore|expect-error)/);
+});
+
+test('a port implementation with a mismatched signature fails compilation (TASK-2668.01)', () => {
+  // The static-analysis test typecheck owns this assertion: if the port were
+  // loosened back to an untyped shape, the directive below would be unused and
+  // `tsc --project tsconfig.test.json` would fail.
+  const mismatched: HandoffWorkflowPorts['forgejo'] = {
+    readToken: () => null,
+    resolveForgejoSettings: () => ({}),
+    // @ts-expect-error a PR result whose `ok` is not a boolean breaks the port contract
+    createPr: () => ({ ok: 'created' }),
+    authenticatedReviewUrl: () => '',
+    resolveTrackingBranchSha: () => ({ ok: true }),
+  };
+  assert.equal(typeof mismatched.createPr, 'function');
 });

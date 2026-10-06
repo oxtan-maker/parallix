@@ -545,7 +545,7 @@ export function currentReviewRound(review: Review): ReviewRound {
   return review.rounds[review.rounds.length - 1];
 }
 
-function replaceCurrentRound(review: Review, round: ReviewRound): Review['rounds'] {
+export function replaceCurrentRound(review: Review, round: ReviewRound): Review['rounds'] {
   const [first, ...rest] = review.rounds;
   if (rest.length === 0) { return [round]; }
   return [first, ...rest.slice(0, -1), round];

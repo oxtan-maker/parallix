@@ -1,4 +1,3 @@
-// @ts-nocheck
 /**
  * Handoff command adapter (TASK-2332.09).
  *
@@ -37,7 +36,7 @@ import {
   evidenceCellHasVerifiableReference as evidenceCellHasVerifiableReferenceWithPort,
   findUnverifiableGoalCheckRow as findUnverifiableGoalCheckRowWithPort,
 } from '../../review/review-static-evidence.js';
-import type { HandoffWorkflowPorts } from '../../../application/ports/handoff-workflow.js';
+import type { CaptureNelOptions, HandoffWorkflowPorts, PerformHandoffOptions } from '../../../application/ports/handoff-workflow.js';
 
 /**
  * Bind the concrete infrastructure modules to the handoff workflow ports.
@@ -83,7 +82,7 @@ export function createHandoffPorts(): HandoffWorkflowPorts {
       resolveTrackingBranchSha: (branch, rootDir) => forgejo.resolveTrackingBranchSha(branch, rootDir),
     },
     reviewIdentity: {
-      resolveReviewIdentity: (slug, rootDir, options) => resolveReviewIdentity(slug, rootDir, options),
+      resolveReviewIdentity: (slug, rootDir) => resolveReviewIdentity(slug, rootDir),
     },
     setupReview: {
       bootstrapReviewSurface: (rootDir, setup, options) => setupReview.bootstrapReviewSurface(rootDir, setup, options),
@@ -119,7 +118,7 @@ export function createHandoffPorts(): HandoffWorkflowPorts {
       isForgejoReviewEnabled: (rootDir) => isForgejoReviewEnabled(rootDir),
     },
     agents: {
-      startAgent: (step, options) => startAgent(step, options),
+      startAgent: (step, options) => startAgent(step, options as unknown as Parameters<typeof startAgent>[1]),
     },
     agentSelection: {
       eligibleAgentsForStep: (step, options) => eligibleAgentsForStep(step, options),
@@ -138,41 +137,48 @@ export function createHandoffPorts(): HandoffWorkflowPorts {
 const ports = createHandoffPorts();
 const useCase = new HandoffCommandUseCase(ports);
 
+type UseCaseArgs<K extends keyof HandoffCommandUseCase> = HandoffCommandUseCase[K] extends (..._args: infer A) => unknown ? A : never;
+
 /** @see HandoffCommandUseCase.verifyHandoff */
-function verifyHandoff(slug, options = {}) {
-  return useCase.verifyHandoff(slug, options);
+function verifyHandoff(...args: UseCaseArgs<'verifyHandoff'>) {
+  return useCase.verifyHandoff(...args);
 }
 
-/** @see HandoffCommandUseCase.performHandoff */
-function performHandoff(slug, options = {}) {
-  return useCase.performHandoff(slug, options);
+/**
+ * @see HandoffCommandUseCase.performHandoff
+ *
+ * Legacy callers hand this seam a loose option bag (some still pass identity
+ * hints the workflow never reads); the use case reads only its typed options.
+ */
+function performHandoff(slug: string, options: Record<string, unknown> = {}) {
+  return useCase.performHandoff(slug, options as PerformHandoffOptions);
 }
 
 /** @see HandoffCommandUseCase.resolveHandoffReviewAssignment */
-function resolveHandoffReviewAssignment(implementerName, options = {}) {
-  return useCase.resolveHandoffReviewAssignment(implementerName, options);
+function resolveHandoffReviewAssignment(...args: UseCaseArgs<'resolveHandoffReviewAssignment'>) {
+  return useCase.resolveHandoffReviewAssignment(...args);
 }
 
 /** @see HandoffCommandUseCase.runDeclaredGates */
-function runDeclaredGates(missionDir, rootDir, options = {}) {
-  return useCase.runDeclaredGates(missionDir, rootDir, options);
+function runDeclaredGates(...args: UseCaseArgs<'runDeclaredGates'>) {
+  return useCase.runDeclaredGates(...args);
 }
 
 /** @see HandoffCommandUseCase.validateDeclaredGates */
-function validateDeclaredGates(commands, rootDir, options) {
-  return useCase.validateDeclaredGates(commands, rootDir, options);
+function validateDeclaredGates(...args: UseCaseArgs<'validateDeclaredGates'>) {
+  return useCase.validateDeclaredGates(...args);
 }
 
 /** @see HandoffCommandUseCase.captureNelAtHandoff */
-function captureNelAtHandoff(slug, options) {
-  return useCase.captureNelAtHandoff(slug, options);
+function captureNelAtHandoff(slug: string, options: Record<string, unknown>) {
+  return useCase.captureNelAtHandoff(slug, options as unknown as CaptureNelOptions);
 }
 
-function evidenceCellHasVerifiableReference(cell, rootDir, knownTestNames) {
+function evidenceCellHasVerifiableReference(cell: string, rootDir: string, knownTestNames: Set<string>) {
   return evidenceCellHasVerifiableReferenceWithPort(ports.fileSystem, cell, rootDir, knownTestNames);
 }
 
-function findUnverifiableGoalCheckRow(evidenceRows, rootDir) {
+function findUnverifiableGoalCheckRow(evidenceRows: string[], rootDir: string) {
   return findUnverifiableGoalCheckRowWithPort(ports.fileSystem, evidenceRows, rootDir);
 }
 

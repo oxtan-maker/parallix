@@ -1,0 +1,18 @@
+{
+  "_comment": "Current CPU evidence for the eight integration-ci suites the test: retune integration-ci CPU budgets (444793df0d) raised. The retune changed the COVERED profile block of test/lib/test-cpu-budgets.json (never the plain block, never tightening any budget). Every margin here is computed as retunedCoveredBudget / observedCoveredCpuMs - 1, pairing the observed covered-profile CPU with the retuned covered budget. AGENTS.md / ADR 0063 requires retuning from current CPU evidence with explicit margin; no budget was tightened. Observed CPU is the max inclusive CPU of the heaviest case in each suite, measured under the repository CPU accounting (test/lib/integration-cpu-hook.mjs).",
+  "measurement": {
+    "profile": "covered",
+    "method": "max inclusive CPU (user+system+waited children) of the heaviest case per suite, via integration-cpu-hook.mjs",
+    "baselineSource": "test/lib/test-cpu-budgets.json covered block at diff baseline (parent of 444793df0d)"
+  },
+  "suites": [
+    { "file": "integration/lifecycle/lifecycle-approval-dwell.test.ts", "baselineCoveredBudget": 150, "retunedCoveredBudget": 210, "observedCoveredCpuMs": 131.1, "margin_pct": 60 },
+    { "file": "integration/sqlite/sqlite-recovery-cp5.test.ts", "baselineCoveredBudget": 1650, "retunedCoveredBudget": 2005, "observedCoveredCpuMs": 1470.0, "margin_pct": 36 },
+    { "file": "integration/sqlite/sqlite-schema-and-migrations.integration.test.ts", "baselineCoveredBudget": 100, "retunedCoveredBudget": 135, "observedCoveredCpuMs": 89.6, "margin_pct": 51 },
+    { "file": "integration/stats/metrics-review-fix-observations.test.ts", "baselineCoveredBudget": 100, "retunedCoveredBudget": 125, "observedCoveredCpuMs": 70.4, "margin_pct": 78 },
+    { "file": "integration/storage/storage-bootstrap-isolation.test.ts", "baselineCoveredBudget": 350, "retunedCoveredBudget": 465, "observedCoveredCpuMs": 302.6, "margin_pct": 54 },
+    { "file": "integration/test-harness/operator-database-pollution-guard.test.ts", "baselineCoveredBudget": 650, "retunedCoveredBudget": 805, "observedCoveredCpuMs": 588.4, "margin_pct": 37 },
+    { "file": "integration/test-harness/runner-focused-selection.test.ts", "baselineCoveredBudget": 1100, "retunedCoveredBudget": 1510, "observedCoveredCpuMs": 984.5, "margin_pct": 53 },
+    { "file": "integration/verification/verification-proof-reuse.test.ts", "baselineCoveredBudget": 200, "retunedCoveredBudget": 240, "observedCoveredCpuMs": 181.6, "margin_pct": 32 }
+  ]
+}

@@ -1,4 +1,3 @@
-// @ts-nocheck
 /**
  * HandoffCommandUseCase — the complete handoff workflow, re-homed from
  * `src/adapters/cli/commands/handoff.ts` (TASK-2332.09).
@@ -23,14 +22,25 @@ import {
   changeRevision,
   reviewStatus,
   currentReviewRound,
+  replaceCurrentRound,
 } from '../domain/review.js';
 import { agentFamily } from '../domain/agents.js';
 import type { AgentFamily } from '../domain/agents.js';
 import { artifactReference } from '../domain/net-engineering-lines.js';
 import { isDbAdhocIdentity, missionId } from '../domain/mission.js';
-import type { HandoffWorkflowPorts, HandoffResult } from './ports/handoff-workflow.js';
-import type { MissionStore } from './domain-ports.js';
+import type {
+  CaptureNelOptions,
+  CaptureNelResult,
+  CommandResult,
+  GatekeeperOutcome,
+  HandoffLog,
+  HandoffMissionServicesPort,
+  HandoffResult,
+  HandoffWorkflowPorts,
+  PerformHandoffOptions,
+} from './ports/handoff-workflow.js';
 import type { CheckpointData } from '../domain/checkpoint.js';
+import type { NelBucketLabel } from '../domain/net-engineering-lines.js';
 import { rebound } from './rebound-kernel.js';
 import { transitionReviewRepair } from './review-repair-lifecycle.js';
 
@@ -64,7 +74,7 @@ import { bookkeepingCommitMessage } from '../domain/approval-coverage.js';
  * `px goal set`; only a Mission without one may still use its documents.
  */
 async function loadRecordedContract(
-  missionServicesFn: (_rootDir: string, _opts: { missionDir: string }) => Promise<{ store: MissionStore }>,
+  missionServicesFn: HandoffMissionServicesPort,
   rootDir: string,
   missionDirPath: string,
   slug: string,
@@ -99,9 +109,71 @@ async function loadRecordedContract(
  * optional `error`/`gate` markers (typed `undefined`) so callers can read
  * `result.error`/`result.gate` across the union without narrowing.
  */
+type GateValidationFailure = { ok: false; reason: 'validation-failed'; error: string; gate: string };
 type GateValidationResult =
-  | { ok: false; reason: 'validation-failed'; error: string; gate: string }
+  | GateValidationFailure
   | { ok: true; reason: 'all-gates-valid'; error?: undefined; gate?: undefined };
+
+/** Outcome of running a mission's declared gates, from either gate source. */
+type DeclaredGatesResult =
+  | { ok: true; skipped: true; reason: 'no-mission-file' | 'no-gates-section' | 'no-gates-declared' }
+  | { ok: true; skipped: false; count: number; reason: 'all-gates-passed' }
+  | GateValidationFailure
+  | { ok: false; reason: 'gate-failed'; gate: string; error: string; stdout: string; stderr: string; exitCode: number | null };
+
+/** Location facts `verifyHandoff` establishes for an on-branch mission. */
+type HandoffLocation =
+  | { ok: false; error: string }
+  | { ok: true; missionDir: string; area: string | null; branch: string; rootDir: string };
+
+/** The legacy Markdown checkpoint a document-path handoff verified. */
+interface VerifiedCheckpointDocument {
+  finalCheckpoint: string;
+  checkpointContent: string;
+  evidenceRows: string[];
+}
+
+/** Credentials the Forgejo PR push uses after bootstrap and owner fallback. */
+interface HandoffForgejoCredentials {
+  token: string;
+  fallbackUser: string | null;
+}
+
+/** Facts the Backlog transition push needs from the completed handoff. */
+interface BacklogPushContext {
+  rootDir: string;
+  branch: string;
+  token: string;
+  fallbackUser: string | null;
+  forgejoUser: string;
+  force: boolean;
+  log: HandoffLog;
+  error: HandoffLog;
+  gatekeeperPushedBack: boolean;
+}
+
+/** Collaborators and recursion state carried into gatekeeper remediation. */
+interface GatekeeperRemediationContext {
+  gatekeeperResult: GatekeeperOutcome;
+  rootDir: string;
+  forgejoUser: string;
+  retriesLeft: number;
+  currentAttempt: number;
+  log: HandoffLog;
+  error: HandoffLog;
+  startAgentFn: NonNullable<PerformHandoffOptions['startAgentFn']>;
+  worktree: string | null;
+  skipGate: boolean;
+  forceWithLease: boolean;
+  isForgejoReviewEnabledFn: NonNullable<PerformHandoffOptions['isForgejoReviewEnabledFn']>;
+  rebaseFn: NonNullable<PerformHandoffOptions['rebaseFn']>;
+  runVerificationGateFn: NonNullable<PerformHandoffOptions['runVerificationGateFn']>;
+  runGatekeeperFn: NonNullable<PerformHandoffOptions['runGatekeeperFn']>;
+  missionServicesFn: HandoffMissionServicesPort;
+  occurredAt: string;
+}
+
+const NEL_BUCKET_LABELS: readonly NelBucketLabel[] = ['Small', 'Medium', 'Large'];
 
 /**
  * CLI-independent application entry point for the handoff workflow.
@@ -114,7 +186,7 @@ type GateValidationResult =
  * keep the task active for repair; missing artifacts it could not post block the
  * handoff outright, because nothing would tell the implementer what to fix.
  */
-function gatekeeperOutcome(gatekeeperResult: any, slug: string, log: (_msg: string) => void, error: (_msg: string) => void): { pushedBack: boolean; blocked?: HandoffResult } {
+function gatekeeperOutcome(gatekeeperResult: GatekeeperOutcome, slug: string, log: HandoffLog, error: HandoffLog): { pushedBack: boolean; blocked?: HandoffResult } {
   if (gatekeeperResult.ok) { return { pushedBack: false }; }
   if (gatekeeperResult.posted) {
     fmt.log.warn(`Gatekeeper posted pushback for ${fmt.slug(slug)}: missing ${gatekeeperResult.missing.join(', ')}.`);
@@ -139,7 +211,7 @@ export class HandoffCommandUseCase {
   /**
    * Verifies that the current environment is ready for handoff.
    */
-  verifyHandoff(slug: string, options: { worktree?: string; recordedContract?: boolean } = {}) {
+  verifyHandoff(slug: string, options: { worktree?: string; recordedContract?: boolean } = {}): HandoffLocation {
     const { git, missionUtils } = this.ports;
     const launchRoot = process.cwd();
     const rootDir = options.worktree || missionUtils.resolveWorktree(slug, { cwd: launchRoot }) || launchRoot;
@@ -163,8 +235,8 @@ export class HandoffCommandUseCase {
     implementerName: string,
     options: {
       worktree?: string;
-      eligibleAgentsForStepFn?: Function;
-      selectAgentFn?: Function;
+      eligibleAgentsForStepFn?: HandoffWorkflowPorts['agentSelection']['eligibleAgentsForStep'];
+      selectAgentFn?: HandoffWorkflowPorts['agentSelection']['selectAgent'];
       preparedSelection?: { select(_step: string, _opts: Record<string, unknown>): string } | null;
       log?: (_msg: string) => void;
     } = {},
@@ -216,7 +288,7 @@ export class HandoffCommandUseCase {
   /**
    * Write a fallback summary (`## Fallback:` heading) into the backlog task file.
    */
-  writeFallbackSummary(slug: string, summary: string, options: { rootDir?: string; log?: Function } = {}): boolean {
+  writeFallbackSummary(slug: string, summary: string, options: { rootDir?: string; log?: HandoffLog } = {}): boolean {
     const { fileSystem, git, backlog, missionUtils } = this.ports;
     const launchRoot = process.cwd();
     const rootDir = options.rootDir || missionUtils.resolveWorktree(slug, { cwd: launchRoot }) || launchRoot;
@@ -307,7 +379,7 @@ export class HandoffCommandUseCase {
   }
 
   /** Shared error payload for the "prose attached to a gate command" failure. */
-  private proseError(cmd: string) {
+  private proseError(cmd: string): GateValidationFailure {
     return {
       ok: false,
       reason: 'validation-failed',
@@ -433,7 +505,7 @@ export class HandoffCommandUseCase {
   }
 
   /** Shared error payload for an unclosed-quote failure. */
-  private quoteError(cmd: string, quoteType: 'single' | 'double') {
+  private quoteError(cmd: string, quoteType: 'single' | 'double'): GateValidationFailure {
     return {
       ok: false,
       reason: 'validation-failed',
@@ -443,7 +515,7 @@ export class HandoffCommandUseCase {
   }
 
   /** Shared error payload for an unmatched-delimiter failure. */
-  private delimiterError(cmd: string, imbalance: 'parentheses' | 'braces' | 'brackets') {
+  private delimiterError(cmd: string, imbalance: 'parentheses' | 'braces' | 'brackets'): GateValidationFailure {
     return {
       ok: false,
       reason: 'validation-failed',
@@ -453,7 +525,7 @@ export class HandoffCommandUseCase {
   }
 
   /** Shared error payload for a missing file-reference failure. */
-  private missingFileError(cmd: string, missingToken: string) {
+  private missingFileError(cmd: string, missingToken: string): GateValidationFailure {
     return {
       ok: false,
       reason: 'validation-failed',
@@ -470,8 +542,8 @@ export class HandoffCommandUseCase {
   runDeclaredGates(
     missionDir: string,
     rootDir: string,
-    options: { log?: Function; error?: Function; recordedGates?: readonly string[] } = {},
-  ) {
+    options: { log?: HandoffLog; error?: HandoffLog; recordedGates?: readonly string[] } = {},
+  ): DeclaredGatesResult {
     const { fileSystem } = this.ports;
     const { log = fmt.log.plain } = options;
 
@@ -502,23 +574,22 @@ export class HandoffCommandUseCase {
       .filter(line => line.startsWith('- [ ]') || line.startsWith('- [x]') || line.startsWith('- '));
 
     // Strip the checkbox prefix to get the command
-    const commands = gateLines.map(line => {
+    const commands = gateLines.map((line): { cmd: string; reject: boolean } => {
       // Remove "- [ ] ", "- [x] ", or "- " prefix
-      let cmd = line.replace(/^- \[[ x]\]\s*/, '').replace(/^- \s*/, '');
+      const cmd = line.replace(/^- \[[ x]\]\s*/, '').replace(/^- \s*/, '');
       // Reject gate entries that contain an explanatory dash separator
       // (em-dash, en-dash, or hyphen+en-dash followed by prose) before any
       // further processing, so validateDeclaredGates never sees a silently
       // sanitized command.
       if (/\s+(—|–|-–)\s+\S/.test(cmd)) {
-        return { _reject: true, cmd };
+        return { cmd, reject: true };
       }
       // Strip surrounding backticks (e.g., "`npm run typecheck`")
-      cmd = cmd.replace(/^`(.+)`$/, '$1').trim();
-      return cmd;
-    }).filter(cmd => cmd && (!cmd._reject || cmd.cmd.length > 0));
+      return { cmd: cmd.replace(/^`(.+)`$/, '$1').trim(), reject: false };
+    }).filter(entry => entry.cmd.length > 0);
 
     // Check for any rejected entries (dash-suffix gates)
-    const rejected = commands.find(cmd => cmd && cmd._reject);
+    const rejected = commands.find(entry => entry.reject);
     if (rejected) {
       return {
         ok: false,
@@ -528,7 +599,7 @@ export class HandoffCommandUseCase {
       };
     }
 
-    return this.executeGateCommands(commands.map(cmd => cmd.cmd || cmd), rootDir, { log, source: 'document' });
+    return this.executeGateCommands(commands.map(entry => entry.cmd), rootDir, { log, source: 'document' });
   }
 
   /**
@@ -541,8 +612,8 @@ export class HandoffCommandUseCase {
   executeGateCommands(
     cleanCommands: string[],
     rootDir: string,
-    options: { log?: Function; source?: string } = {},
-  ) {
+    options: { log?: HandoffLog; source?: string } = {},
+  ): DeclaredGatesResult {
     const { verification, process: processPort } = this.ports;
     const { log = fmt.log.plain } = options;
 
@@ -552,7 +623,7 @@ export class HandoffCommandUseCase {
 
     // Pre-validate all gate commands before execution
     const validationResult = this.validateDeclaredGates(cleanCommands, rootDir);
-    if (!validationResult.ok) {
+    if (validationResult.ok === false) {
       return validationResult;
     }
 
@@ -603,7 +674,7 @@ export class HandoffCommandUseCase {
    * boundary. NEL values remain observational; failure to durably persist a
    * computed value is fatal to handoff.
    */
-  async captureNelAtHandoff(slug: string, options) {
+  async captureNelAtHandoff(slug: string, options: CaptureNelOptions): Promise<CaptureNelResult> {
     const { fileSystem, missionUtils, nel, documentWriter } = this.ports;
     const { rootDir, missionDir, error } = options;
     const documentWriterFn = options.documentWriterFn || documentWriter.write;
@@ -621,7 +692,7 @@ export class HandoffCommandUseCase {
     }
 
     // 2. Compute actual NEL from primary..HEAD
-    let nelRecord;
+    let nelRecord: ReturnType<typeof nel.computeNELRecord>;
     try {
       nelRecord = nel.computeNELRecord(`${primaryBranch}..HEAD`, { cwd: rootDir });
     } catch (_) {
@@ -644,7 +715,7 @@ export class HandoffCommandUseCase {
     // 4. Read review rounds from the Mission store (not review-state.json).
     // architecture invariant: the SQLite store is the sole authority for Mission domain state.
     let reviewRounds = 1;
-    const missionLoad = await missionServices.store.load(slug);
+    const missionLoad = await missionServices.store.load(missionId(slug));
     if (missionLoad.kind === 'found' && missionLoad.mission.review) {
       reviewRounds = missionLoad.mission.review.rounds.length;
     }
@@ -652,18 +723,19 @@ export class HandoffCommandUseCase {
     // 3. The predicted bucket is recorded with `px nel set`. A Mission drafted
     //    before it was Mission state still carries it in its document's
     //    Refinement Signals, which is the only place it exists for that Mission.
-    let predictedBucket: string = (missionLoad.kind === 'found' ? missionLoad.mission.predictedNelBucket : null) ?? 'Unknown';
+    let predictedBucket: NelBucketLabel | 'Unknown' = (missionLoad.kind === 'found' ? missionLoad.mission.predictedNelBucket : null) ?? 'Unknown';
     const missionMdPath = path.join(missionDir, 'MISSION.md');
     if (predictedBucket === 'Unknown' && !(missionLoad.kind === 'found' && missionLoad.mission.brief) && fileSystem.existsSync(missionMdPath)) {
       const predictedMatch = fileSystem.readText(missionMdPath).match(/Predicted NEL bucket:\s*(Small|Medium|Large)/i);
-      if (predictedMatch) { predictedBucket = predictedMatch[1] as string; }
+      const documented = predictedMatch?.[1]?.toLowerCase();
+      predictedBucket = NEL_BUCKET_LABELS.find((label) => label.toLowerCase() === documented) ?? predictedBucket;
     }
     const artifacts = [
       artifactReference('git-range', `${primaryBranch}..HEAD`),
     ];
     const outcome = await missionServices.handoff.recordNel({
       operationId: `handoff-nel-${slug}`,
-      missionId: slug,
+      missionId: missionId(slug),
       capabilities: new Set(['handoff:record']),
       netEngineeringLines: actualNel,
       predictedBucket,
@@ -697,16 +769,14 @@ export class HandoffCommandUseCase {
    */
   private async deriveImplementerFromMissionStore(
     slug: string,
-    missionServicesFn: (_rootDir: string, _options: Record<string, unknown>) => Promise<{ store: MissionStore }>,
+    missionServicesFn: HandoffMissionServicesPort,
     rootDir: string,
     missionDirPath: string,
   ): Promise<AgentFamily | null> {
     try {
       const missionServices = await missionServicesFn(rootDir, { missionDir: missionDirPath });
-      // The port types the store load loosely; the adapter resolves the full
-      // Mission aggregate, so read the assignee through a typed cast.
-      const missionLoad = /** @type {any} */ (await missionServices.store.load(slug));
-      if (missionLoad?.kind === 'found' && missionLoad.mission?.assignee) {
+      const missionLoad = await missionServices.store.load(missionId(slug));
+      if (missionLoad.kind === 'found' && missionLoad.mission.assignee) {
         return missionLoad.mission.assignee;
       }
     } catch (_) {
@@ -723,8 +793,8 @@ export class HandoffCommandUseCase {
    * verified checkpoint, or the failure the caller returns unchanged.
    */
   private verifyHandoffEvidence(slug: string, context: {
-    rootDir: string; missionDirPath: string; log: (_msg: string) => void; error: (_msg: string) => void;
-  }): HandoffResult | { finalCheckpoint: string; checkpointContent: string; evidenceRows: string[] } {
+    rootDir: string; missionDirPath: string; log: HandoffLog; error: HandoffLog;
+  }): HandoffResult | VerifiedCheckpointDocument {
     const ports = this.ports;
     const { rootDir, missionDirPath, error } = context;
     const fail = (msg: string): HandoffResult => { error(msg); return { ok: false, error: msg }; };
@@ -775,8 +845,8 @@ export class HandoffCommandUseCase {
    * has no token either does handoff stop for manual action.
    */
   private async resolveHandoffForgejoToken(slug: string, forgejoUser: string, context: {
-    rootDir: string; log: (_msg: string) => void; error: (_msg: string) => void; internalLog: (_msg: string) => void;
-  }): Promise<HandoffResult | { token: string; fallbackUser: string | null }> {
+    rootDir: string; log: HandoffLog; error: HandoffLog; internalLog: HandoffLog;
+  }): Promise<HandoffResult | HandoffForgejoCredentials> {
     const ports = this.ports;
     const { rootDir, log, error, internalLog } = context;
     const existing = ports.forgejo.readToken(forgejoUser);
@@ -824,7 +894,7 @@ export class HandoffCommandUseCase {
     return { token, fallbackUser: 'human' };
   }
 
-  async performHandoff(slug: string, options = {}): Promise<HandoffResult> {
+  async performHandoff(slug: string, options: PerformHandoffOptions = {}): Promise<HandoffResult> {
     const ports = this.ports;
     const opts = options;
     const {
@@ -851,7 +921,7 @@ export class HandoffCommandUseCase {
       selectAgentFn = ports.agentSelection.selectAgent
       ,recoverGateFailure = false
     } = opts;
-    const captureNel = captureNelFn || ((nelSlug, nelOptions) => this.captureNelAtHandoff(nelSlug, nelOptions));
+    const captureNel = captureNelFn || ((nelSlug: string, nelOptions: CaptureNelOptions) => this.captureNelAtHandoff(nelSlug, nelOptions));
     const internalLog = (message: string) => {
       if (/\[(WARN|FAIL)\]|failed|failure|conflict|missing|blocked|fallback|degraded/i.test(message)) { log(message); }
     };
@@ -874,13 +944,18 @@ export class HandoffCommandUseCase {
     const launchRoot = process.cwd();
     const contractRoot = worktree || ports.missionUtils.resolveWorktree(slug, { cwd: launchRoot }) || launchRoot;
     const contractDir = ports.missionUtils.findMissionDir(slug, contractRoot) || contractRoot;
+    if (!missionServicesFn) {
+      const msg = `Could not read Mission ${slug} from the operator database: mission services are not configured. Handoff fails closed.`;
+      error(msg);
+      return { ok: false, error: msg };
+    }
     const contract = await loadRecordedContract(missionServicesFn, contractRoot, contractDir, slug);
-    if (!contract.ok) {
+    if (contract.ok === false) {
       error(contract.error);
       return { ok: false, error: contract.error };
     }
     const verification = this.verifyHandoff(slug, { worktree: contractRoot, recordedContract: contract.draftedInDb });
-    if (!verification.ok) {
+    if (verification.ok === false) {
       error(verification.error);
       return { ok: false, error: verification.error };
     }
@@ -978,14 +1053,14 @@ export class HandoffCommandUseCase {
       return { ok: false, error: msg };
     } else {
       const evidence = this.verifyHandoffEvidence(slug, { rootDir, missionDirPath, log, error });
-      if ('error' in evidence) { return evidence; }
+      if (!('finalCheckpoint' in evidence)) { return evidence; }
       ({ finalCheckpoint, checkpointContent, evidenceRows } = evidence);
     }
 
     const isForgejoReviewEnabledFn = opts.isForgejoReviewEnabledFn || ports.productConfig.isForgejoReviewEnabled;
     const forgejoEnabled = isForgejoReviewEnabledFn(rootDir);
 
-    const { forgejoUser: reviewStateUser } = await ports.reviewIdentity.resolveReviewIdentity(slug, rootDir, {});
+    const { forgejoUser: reviewStateUser } = await ports.reviewIdentity.resolveReviewIdentity(slug, rootDir);
     // Implementer derivation: prefer the review state, then the Backlog mirror
     // (Backlog-backed missions), then the DB-authoritative mission store's
     // assignee (DB-owned adhoc identities whose mirror was deleted).
@@ -1050,7 +1125,7 @@ export class HandoffCommandUseCase {
           startAgent: startAgentFn,
           readHead: () => {
             const result = ports.git.git(['-C', rootDir, 'rev-parse', 'HEAD']);
-            return result.status === 0 ? result.stdout.trim() : null;
+            return result.status === 0 ? (result.stdout ?? '').trim() : null;
           },
           verify: async () => {
             retried = await this.performHandoff(slug, {
@@ -1120,23 +1195,23 @@ export class HandoffCommandUseCase {
     // use case; nel-record.json is no longer staged or committed because the SQLite
     // database is the sole durable authority for Mission state.
     const nelResult = await captureNel(slug, { rootDir, missionDir: missionDirPath, log: internalLog, error, missionServicesFn });
-    if (!nelResult.ok && nelResult.persistenceFailed) {
+    if (nelResult.ok === false && nelResult.persistenceFailed) {
       const msg = `NEL persistence failed; handoff stopped before review state advanced: ${nelResult.error}`;
       error(msg);
       return { ok: false, error: msg };
-    } else if (!nelResult.ok) {
+    } else if (nelResult.ok === false) {
       log(fmt.status('WARN', `NEL capture skipped: ${nelResult.error}`));
     }
 
     // Step 2: Forgejo PR Update/Create (optional mirror when Forgejo is enabled)
-    let token = null;
-    let fallbackUser = null;
+    let token: string | null = null;
+    let fallbackUser: string | null = null;
     /** The pull request this handoff hands to the reviewer, when there is one. */
     let submittedPr: { id: string; url: string | null } | null = null;
     if (forgejoEnabled) {
       internalLog(`Updating/Creating Forgejo PR as user ${fmt.agent(forgejoUser)}...`);
       const credentials = await this.resolveHandoffForgejoToken(slug, forgejoUser, { rootDir, log, error, internalLog });
-      if ('error' in credentials) { return credentials; }
+      if (!('token' in credentials)) { return credentials; }
       token = credentials.token;
       fallbackUser = credentials.fallbackUser;
 
@@ -1199,18 +1274,19 @@ export class HandoffCommandUseCase {
       return { ok: false, error: msg };
     }
     const gatesResult = this.runDeclaredGates(verification.missionDir || '', rootDir, { log: internalLog, error, recordedGates });
-    if (!gatesResult.ok) {
+    if (gatesResult.ok === false) {
       const msg = `Declared gate "${gatesResult.gate}" failed for ${fmt.slug(slug)}: ${gatesResult.error || gatesResult.reason}. Blocking handoff — task remains in active.`;
       error(msg);
+      const processFailure = gatesResult.reason === 'gate-failed' ? gatesResult : null;
       const failure: HandoffResult = {
         ok: false,
         error: msg,
         reason: gatesResult.reason,
-        gateOutput: { stdout: (gatesResult.stdout || ''), stderr: (gatesResult.stderr || '') },
-        ...(gatesResult.reason === 'gate-failed' ? {
+        gateOutput: { stdout: (processFailure?.stdout || ''), stderr: (processFailure?.stderr || '') },
+        ...(processFailure ? {
           gateFailure: {
-            area: 'declared gate', command: gatesResult.gate, cwd: rootDir, exitCode: gatesResult.exitCode,
-            stdout: gatesResult.stdout || '', stderr: gatesResult.stderr || gatesResult.error || '',
+            area: 'declared gate', command: processFailure.gate, cwd: rootDir, exitCode: processFailure.exitCode,
+            stdout: processFailure.stdout || '', stderr: processFailure.stderr || processFailure.error || '',
           },
         } : {}),
       };
@@ -1226,7 +1302,7 @@ export class HandoffCommandUseCase {
         startAgent: startAgentFn,
         readHead: () => {
           const result = this.ports.git.git(['-C', rootDir, 'rev-parse', 'HEAD']);
-          return result.status === 0 ? result.stdout.trim() : null;
+          return result.status === 0 ? (result.stdout ?? '').trim() : null;
         },
         transitionToImplementer: async (missionSlug) => {
           const services = await missionServicesFn(rootDir, { missionDir: missionDirPath });
@@ -1266,10 +1342,10 @@ export class HandoffCommandUseCase {
     const nextActionMatch = checkpointContent.match(/^\s*(?:\*\*)?Next action(?:\*\*)?:\s*(.+)$/mi);
     const checkpointOutcome = await missionServices.checkpoints.record({
       operationId: `handoff-checkpoint-${slug}`,
-      missionId: slug,
+      missionId: missionId(slug),
       capabilities: new Set(['checkpoint:record']),
       checkpoint: {
-        missionId: slug,
+        missionId: missionId(slug),
         name: checkpointName,
         rawFilename: path.basename(finalCheckpoint),
         firstLine: (checkpointContent.split('\n')[0] || '').replace(/^#+\s*/, ''),
@@ -1322,7 +1398,7 @@ export class HandoffCommandUseCase {
     // handoff ("A new review round must advance the same pull request or local
     // branch"); the change identity (pull request or branch) is preserved by
     // advancing the existing aggregate instead.
-    const existing = await missionServices.store.load(slug);
+    const existing = await missionServices.store.load(missionId(slug));
     const loadedReview = existing.kind === 'found' && 'review' in existing.mission
       ? existing.mission.review
       : null;
@@ -1366,22 +1442,23 @@ export class HandoffCommandUseCase {
     // Repair invalidation has already opened an undecided round. Bind it to
     // the committed repair only when handoff's gates have passed, retaining
     // the revoked decision and its original subject in the preceding round.
-    if (priorReview && existing.mission.status === 'active'
+    if (priorReview && existing.kind === 'found' && existing.mission.status === 'active'
       && reviewStatus(priorReview) === 'awaiting-review'
       && priorReview.rounds.length > 1) {
       const head = ports.git.git(['-C', rootDir, 'rev-parse', 'HEAD']);
-      if (head.status !== 0 || !head.stdout.trim()) {
+      const repairedHead = (head.stdout ?? '').trim();
+      if (head.status !== 0 || !repairedHead) {
         return { ok: false, error: `Cannot read the committed repair revision for ${slug}.` };
       }
       const current = currentReviewRound(review);
-      review = { ...review, rounds: [...review.rounds.slice(0, -1), {
-        ...current, subject: { ...current.subject, revision: changeRevision(head.stdout.trim()) },
+      review = { ...review, rounds: replaceCurrentRound(review, {
+        ...current, subject: { ...current.subject, revision: changeRevision(repairedHead) },
         reviewer, implementer, startedAt,
-      }] };
+      }) };
     }
     const transitionResult = await missionServices.lifecycle.transition({
       operationId: `handoff-transition-${slug}`,
-      missionId: slug,
+      missionId: missionId(slug),
       capabilities: new Set(['mission:transition']),
       command: {
         type: 'submit-for-review',
@@ -1439,7 +1516,7 @@ export class HandoffCommandUseCase {
    * plain-force success path that historically returned early), or `null` when the
    * push succeeded and the caller should continue to the success message.
    */
-  private pushBacklogTransition(slug: string, context): HandoffResult | null {
+  private pushBacklogTransition(slug: string, context: BacklogPushContext): HandoffResult | null {
     const ports = this.ports;
     const { rootDir, branch, token, fallbackUser, forgejoUser, force, log, error, gatekeeperPushedBack } = context;
     log('Pushing state change to Forgejo...');
@@ -1473,7 +1550,7 @@ export class HandoffCommandUseCase {
     return `--force-with-lease=refs/heads/${branch}:${String(tracking.sha || '')}`;
   }
 
-  private handleBacklogPushResult(slug: string, result: any, context): HandoffResult | null {
+  private handleBacklogPushResult(slug: string, result: CommandResult, context: Pick<BacklogPushContext, 'rootDir' | 'branch' | 'force' | 'error' | 'gatekeeperPushedBack'> & { remoteUrl: string }): HandoffResult | null {
     if (result.status === 0) { return null; }
     const pushError = [result.stderr, result.stdout].filter(Boolean).join('\n');
     if (context.force && /non-fast-forward|stale info|fetch first/i.test(pushError)) {
@@ -1499,7 +1576,7 @@ export class HandoffCommandUseCase {
    * with a decremented retry budget and an incremented attempt counter, so the
    * recursion guard (3 attempts) and the global retry budget both hold.
    */
-  private async remediateGatekeeperPushback(slug: string, context): Promise<HandoffResult> {
+  private async remediateGatekeeperPushback(slug: string, context: GatekeeperRemediationContext): Promise<HandoffResult> {
     const {
       gatekeeperResult, rootDir, forgejoUser, currentAttempt, log, error,
       startAgentFn, worktree, skipGate, forceWithLease,
@@ -1568,7 +1645,7 @@ export class HandoffCommandUseCase {
         startAgent: startAgentFn,
         readHead: () => {
           const result = this.ports.git.git(['-C', rootDir, 'rev-parse', 'HEAD']);
-          return result.status === 0 ? result.stdout.trim() : null;
+          return result.status === 0 ? (result.stdout ?? '').trim() : null;
         },
         verify: async (attempt: number) => {
           const retryResult = await this.performHandoff(slug, {
@@ -1614,7 +1691,7 @@ export class HandoffCommandUseCase {
    * Application entry point for an already translated CLI request. Argument
    * parsing, exit-code mapping, and usage rendering belong to the CLI interface.
    */
-  async execute(request: { slug?: string; skipGate: boolean; force: boolean }, options: Record<string, unknown> = {}): Promise<HandoffResult> {
+  async execute(request: { slug?: string; skipGate: boolean; force: boolean }, options: PerformHandoffOptions = {}): Promise<HandoffResult> {
     const slug = this.ports.missionUtils.inferSlug(request.slug);
 
     if (!slug) {

@@ -33,6 +33,13 @@
  */
 
 import type { PreReviewRebaseOutcome } from './rebase-workflow.js';
+import type { MissionStore } from '../domain-ports.js';
+import type { MissionLifecycleService } from '../mission-lifecycle-service.js';
+import type { MissionCheckpointService } from '../mission-checkpoint-service.js';
+import type { MissionHandoffService } from '../mission-handoff-service.js';
+
+/** Line-oriented progress or failure output the workflow hands to a collaborator. */
+export type HandoffLog = (_message: string) => void;
 
 export interface CommandResult {
   readonly status: number | null;
@@ -54,15 +61,23 @@ export interface HandoffFileSystemPort {
   listEntries(_target: string): DirectoryEntry[];
 }
 
+/** Process options the workflow passes to a Git invocation. */
+export type HandoffGitOptions = {
+  readonly stdio?: 'pipe' | 'ignore' | 'inherit' | Array<'pipe' | 'ignore' | 'inherit'>;
+};
+
+/** Runs one executable with arguments; the verification gate's process runner. */
+export type HandoffCommandRunner = (_command: string, _args: string[], _options?: HandoffGitOptions) => CommandResult;
+
 export interface HandoffGitPort {
-  git(_args: string[], _options?: Record<string, unknown>): CommandResult;
-  run: Function;
+  git(_args: string[], _options?: HandoffGitOptions): CommandResult;
+  readonly run: HandoffCommandRunner;
   getCurrentBranch(_rootDir: string): string;
   getWorktreeStatus(_rootDir: string): string[];
 }
 
 export interface HandoffMissionUtilsPort {
-  inferSlug(_explicitSlug?: string): string | undefined;
+  inferSlug(_explicitSlug?: string): string | null | undefined;
   resolveWorktree(_slug: string, _options?: { cwd?: string }): string | null;
   findMissionDir(_slug: string, _rootDir: string): string | null;
   findMissionArea(_missionDir: string): string | null;
@@ -71,27 +86,75 @@ export interface HandoffMissionUtilsPort {
   getPrimaryBranch(_rootDir: string): string | null;
 }
 
+export interface HandoffTaskTransitionOptions {
+  readonly rootDir: string;
+  readonly implementer?: string;
+  readonly log?: HandoffLog;
+}
+
 export interface HandoffBacklogPort {
   resolveTaskFile(_slug: string, _rootDir: string): { ok: boolean; taskFile?: string; reason?: string };
   getTaskImplementer(_taskFile: string): string | null;
-  transitionTask(_slug: string, _status: string, _options: Record<string, unknown>): Promise<boolean> | boolean;
+  transitionTask(_slug: string, _status: string, _options: HandoffTaskTransitionOptions): Promise<boolean> | boolean;
+}
+
+export interface HandoffPrOptions {
+  readonly rootDir: string;
+  readonly log: HandoffLog;
+  readonly forceWithLease: boolean;
+  readonly verificationArea: string;
+}
+
+export interface HandoffPrResult {
+  readonly ok: boolean;
+  readonly error?: string | null;
+  readonly prNumber?: number;
+  readonly url?: string | null;
+  readonly gateFailure?: HandoffResult['gateFailure'];
 }
 
 export interface HandoffForgejoPort {
   readToken(_user: string): string | null;
   resolveForgejoSettings(_rootDir: string): { url?: string; repo?: string };
-  createPr(_branch: string, _user: string, _token: string, _options: Record<string, unknown>): { ok: boolean; error?: string; gateFailure?: HandoffResult['gateFailure'] };
+  createPr(_branch: string, _user: string, _token: string, _options: HandoffPrOptions): HandoffPrResult;
   authenticatedReviewUrl(_user: string, _token: string, _rootDir: string): string;
   resolveTrackingBranchSha(_branch: string, _rootDir: string): { ok: boolean; sha?: string; error?: string };
 }
 
 export interface HandoffReviewIdentityPort {
-  resolveReviewIdentity(_slug: string, _rootDir: string, _options?: Record<string, unknown>): Promise<{ forgejoUser?: string | null }>;
+  resolveReviewIdentity(_slug: string, _rootDir: string): Promise<{ forgejoUser?: string | null }>;
+}
+
+/** Forgejo API request primitive the review-surface bootstrap authenticates with. */
+export type HandoffApiRequest = (
+  _method: string,
+  _requestUrl: string,
+  _options?: { basicAuth?: { user: string; password: string }; token?: string; body?: unknown },
+) => { ok: boolean; statusCode: number | null; data: unknown; error: string | null };
+
+/** The non-interactive bootstrap request for a missing agent token. */
+export interface HandoffReviewSurfaceSetup {
+  readonly baseUrl?: string;
+  readonly repo?: string;
+  readonly ownerLogin: string;
+  readonly ownerPassword: string;
+  readonly agentPasswords: ReadonlyArray<{ user: string; password: string }>;
 }
 
 export interface HandoffSetupReviewPort {
-  bootstrapReviewSurface(_rootDir: string, _setup: Record<string, unknown>, _options: Record<string, unknown>): Promise<{ ok: boolean; error?: string }>;
-  apiRequest: Function;
+  bootstrapReviewSurface(
+    _rootDir: string,
+    _setup: HandoffReviewSurfaceSetup,
+    _options: { interactive: false; requestFn: HandoffApiRequest; log: HandoffLog },
+  ): Promise<{ ok: boolean; error?: string }>;
+  readonly apiRequest: HandoffApiRequest;
+}
+
+export interface HandoffRebaseOptions {
+  readonly worktree?: string;
+  readonly log: HandoffLog;
+  readonly error: HandoffLog;
+  readonly isForgejoReviewEnabledFn: (_rootDir: string) => boolean;
 }
 
 export interface HandoffRebasePort {
@@ -100,18 +163,18 @@ export interface HandoffRebasePort {
    * (TASK-2377.02). `ok` and `sharedFileConflicts` keep their meaning for
    * existing consumers; `failure` carries the gate or hook discriminant.
    */
-  rebaseBeforeReviewRound(_slug: string, _options: Record<string, unknown>): Promise<PreReviewRebaseOutcome>;
+  rebaseBeforeReviewRound(_slug: string, _options: HandoffRebaseOptions): Promise<PreReviewRebaseOutcome>;
 }
 
 export interface GatekeeperOutcome {
   readonly ok: boolean;
   readonly posted?: boolean;
   readonly skipped?: boolean;
-  readonly missing?: string[];
+  readonly missing: string[];
 }
 
 export interface HandoffGatekeeperPort {
-  runGatekeeper(_slug: string, _options: Record<string, unknown>): GatekeeperOutcome;
+  runGatekeeper(_slug: string, _options: { rootDir: string; log: HandoffLog; checkpointsRecorded: boolean }): GatekeeperOutcome;
 }
 
 export interface ProofResult {
@@ -120,12 +183,18 @@ export interface ProofResult {
   readonly error?: string;
 }
 
+export interface HandoffVerificationGateOptions {
+  readonly rootDir: string;
+  readonly stdio: 'pipe';
+  readonly runFn: HandoffCommandRunner;
+}
+
 export interface HandoffVerificationPort {
   formatVerificationCommand(_area: string, _rootDir: string): string;
   createVerificationProofIdentity(_command: string, _rootDir: string): ProofResult;
   readReusableVerificationProof(_command: string, _rootDir: string): ProofResult;
-  writeReusableVerificationProof(_command: string, _rootDir: string, _options?: Record<string, unknown>): ProofResult;
-  runVerificationGate(_area: string, _options: Record<string, unknown>): CommandResult;
+  writeReusableVerificationProof(_command: string, _rootDir: string, _options?: { expectedIdentity?: string }): ProofResult;
+  runVerificationGate(_area: string, _options: HandoffVerificationGateOptions): CommandResult;
   isTransientVerificationFailure(_output: { stdout?: unknown; stderr?: unknown }): boolean;
 }
 
@@ -137,8 +206,8 @@ export interface HandoffRepositoryGatesPort {
       slug: string;
       checkoutPath: string;
       gates?: Array<{ key: string; command: string; order: number }>;
-      log?: Function;
-      error?: Function;
+      log?: HandoffLog;
+      error?: HandoffLog;
     },
   ): Promise<{
     ok: boolean;
@@ -153,8 +222,11 @@ export interface HandoffNelComputationPort {
   computeNELRecord(_range: string, _options: { cwd: string }): { nel: number; bucket: { label: string } };
 }
 
+/** Atomic JSON document writer: a path (or path thunk) and the value to serialize. */
+export type HandoffDocumentWriter = (_filePath: string | (() => string), _data: unknown) => string;
+
 export interface HandoffDocumentWriterPort {
-  write: Function;
+  readonly write: HandoffDocumentWriter;
 }
 
 export interface HandoffProductConfigPort {
@@ -179,7 +251,24 @@ export interface HandoffAgentSelectionPort {
 }
 
 export interface HandoffProcessPort {
-  spawnSync(_command: string, _args: string[], _options: Record<string, unknown>): CommandResult;
+  spawnSync(_command: string, _args: string[], _options: { cwd: string; encoding: 'utf8'; stdio: 'pipe' }): CommandResult;
+}
+
+/** Options the workflow opens a mission service bundle with. */
+export interface HandoffMissionServicesOptions {
+  readonly missionDir: string;
+  readonly documentWriter?: HandoffDocumentWriter;
+}
+
+/**
+ * The checked Mission use cases handoff drives: store reads, the lifecycle
+ * transition to review, checkpoint recording, and NEL handoff recording.
+ */
+export interface HandoffMissionServices {
+  readonly store: MissionStore;
+  readonly lifecycle: MissionLifecycleService;
+  readonly checkpoints: Pick<MissionCheckpointService, 'record'>;
+  readonly handoff: Pick<MissionHandoffService, 'recordNel'>;
 }
 
 /**
@@ -189,13 +278,8 @@ export interface HandoffProcessPort {
  */
 export type HandoffMissionServicesPort = (
   _rootDir: string,
-  _options: Record<string, unknown>,
-) => Promise<{
-  checkpoints: { record(_request: Record<string, unknown>): Promise<{ status: string; error?: { message?: string } }> };
-  lifecycle: { transition(_request: Record<string, unknown>): Promise<{ status: string; error?: { message?: string }; value?: { version?: number } }> };
-  store: { load(_slug: string): Promise<Record<string, unknown>> };
-  handoff: { recordNel(_request: Record<string, unknown>): Promise<{ status: string; error?: { message?: string } }> };
-}>;
+  _options: HandoffMissionServicesOptions,
+) => Promise<HandoffMissionServices>;
 
 /**
  * The complete port bag injected into `HandoffCommandUseCase`. Every collaborator
@@ -220,6 +304,47 @@ export interface HandoffWorkflowPorts {
   readonly agentSelection: HandoffAgentSelectionPort;
   readonly process: HandoffProcessPort;
   readonly missionServices?: HandoffMissionServicesPort;
+}
+
+/** NEL capture options; `captureNelFn` callers receive the same bag. */
+export interface CaptureNelOptions {
+  readonly rootDir: string;
+  readonly missionDir: string;
+  readonly log?: HandoffLog;
+  readonly error: HandoffLog;
+  readonly missionServicesFn?: HandoffMissionServicesPort;
+  readonly documentWriterFn?: HandoffDocumentWriter;
+}
+
+export type CaptureNelResult =
+  | { readonly ok: true; readonly nel: number; readonly bucket: string }
+  | { readonly ok: false; readonly error: string; readonly persistenceFailed?: boolean };
+
+/**
+ * Per-invocation overrides for `performHandoff`. Each collaborator override
+ * defaults to the matching port; the rest steer the bounded recovery recursion.
+ */
+export interface PerformHandoffOptions {
+  readonly skipGate?: boolean;
+  readonly worktree?: string | null;
+  readonly force?: boolean;
+  readonly forceWithLease?: boolean;
+  readonly log?: HandoffLog;
+  readonly error?: HandoffLog;
+  readonly rebaseFn?: HandoffRebasePort['rebaseBeforeReviewRound'];
+  readonly runVerificationGateFn?: HandoffVerificationPort['runVerificationGate'];
+  readonly maxAttempts?: number;
+  readonly startAgentFn?: HandoffAgentLaunchPort['startAgent'];
+  readonly remainingRetries?: number;
+  readonly runGatekeeperFn?: HandoffGatekeeperPort['runGatekeeper'];
+  readonly captureNelFn?: (_slug: string, _options: CaptureNelOptions) => Promise<CaptureNelResult>;
+  /** Authoritative review-entry timestamp when lifecycle recovery re-invokes handoff. */
+  readonly occurredAt?: string;
+  readonly missionServicesFn?: HandoffMissionServicesPort;
+  readonly eligibleAgentsForStepFn?: HandoffAgentSelectionPort['eligibleAgentsForStep'];
+  readonly selectAgentFn?: HandoffAgentSelectionPort['selectAgent'];
+  readonly recoverGateFailure?: boolean;
+  readonly isForgejoReviewEnabledFn?: HandoffProductConfigPort['isForgejoReviewEnabled'];
 }
 
 export interface HandoffResult {
