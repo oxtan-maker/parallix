@@ -72,9 +72,8 @@ export function createStatsCommand(useCase: Pick<StatsCommandUseCase<StatsRow>, 
         report = range
           ? presentation.renderRange(result.rows, { rootDir, selection: result.selection })
           : presentation.renderWeekly(result.rows, { rootDir, selection: result.selection });
-        report += `\n\n${renderClassifierStatistics(result.classifierStatistics ?? null, result.selection.current.window)}`;
         if (result.selection.previous) {
-          report += `\n\n${renderClassifierStatistics(result.classifierStatistics ?? null, result.selection.previous.window)}`;
+          report += `\n\n${renderClassifierStatistics(result.classifierStatistics ?? null, [result.selection.current.window, result.selection.previous.window])}`;
         }
       }
     } catch (failure) {

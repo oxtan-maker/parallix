@@ -46,6 +46,8 @@ export class ReviewRound {
   reviewBaseline: string | undefined;
   /** True when a repair's verification already re-ran the rebase and gate this round. */
   preReviewSetupVerified = false;
+  /** Revision captured only after the rebase, declared gate, and task mirror. */
+  verifiedRevision: string | undefined;
   blockingFindings: { id: string; summary: string }[] = [];
   /** The integration repair the reviewer is told about (TASK-2620); empty otherwise. */
   integrationRepair = '';

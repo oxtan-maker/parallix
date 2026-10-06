@@ -53,6 +53,24 @@ test('available default records a real classifier clear and moves through existi
   assert.equal(s.observations[0].originalFindings, 'unobserved');
 });
 
+test('pins an eligible repeat review to the final revision verified after round opening (TASK-2671)', async () => {
+  const s = scenario();
+  const finalVerifiedRevision = 'c'.repeat(40);
+  // Round opening records the implementer's submitted revision. The rebase,
+  // declared verification, and Backlog mirror then complete before routing.
+  // Their final verified revision is the only candidate Jev may assess.
+  s.round.verifiedRevision = finalVerifiedRevision;
+  s.context.ports.preReview.head = () => finalVerifiedRevision;
+
+  assert.equal(await tryRepeatReview(s.context, s.round), 'APPROVED');
+  assert.equal(s.attempts[0]?.candidateRevision, finalVerifiedRevision);
+  const loaded = await s.store.load(s.context.slug as never);
+  assert.equal(loaded.kind, 'found');
+  if (loaded.kind === 'found') {
+    assert.equal(loaded.mission.review!.rounds.at(-1)!.subject.revision, finalVerifiedRevision);
+  }
+});
+
 test('opt-out, unavailable provider, API failure and shadow retain the reviewer', async () => {
   for (const mode of ['disabled', 'shadow'] as const) {
     const s = scenario(mode);

@@ -1,8 +1,8 @@
 ---
 id: TASK-2671
 title: Fix Jev repeat-review revision pinning and show truthful weekly PR statistics
-status: backlog
-assignee: []
+status: done
+assignee: [codex]
 created_date: '2026-10-06 16:52'
 labels:
   - bug

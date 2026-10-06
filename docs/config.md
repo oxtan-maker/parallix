@@ -467,9 +467,10 @@ The default is enabled when the decision adapter and review identity are
 available. Invalid mode values disable routing. Missing Jev credentials or
 review tokens leave ordinary review usable.
 
-`px stats` reports total applied PR decisions, classifier decisions and their
-percentage for its existing rolling seven-day UTC windows, including open
-missions. Calls, retries, reviewer fallbacks and shadow judgments are separate
-from applied decisions. An automatic clear without an independent observation
-has unobserved correctness; a zero decision total has no percentage. Statistics
-read local operational state and do not query Forgejo.
+`px stats` shows one UTC PR table with comparable This week and Last week rows,
+including open missions. Applied decisions, distinct eligible decisions, Jev
+calls, reviewer fallbacks, and observed correctness are separate measures.
+Unavailable or partial historical coverage stays labelled as such rather than
+becoming a zero; an automatic clear without an independent observation remains
+unavailable correctness. Statistics read local operational state and do not
+query Forgejo.

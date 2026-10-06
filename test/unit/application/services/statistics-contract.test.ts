@@ -308,6 +308,21 @@ test('weekly classifier share counts applied PR decisions including open mission
   assert.equal(classifierStatistics({ ...input, decisions: [] }, window).percentage, null);
 });
 
+test('weekly PR table is a single truthful two-row UTC comparison (TASK-2671)', async () => {
+  const { renderClassifierStatistics } = await import('../../../../src/application/presentation/classifier-statistics.js');
+  const { weeklyDecisionWindows } = await import('../../../../src/application/services/decision-window.js');
+  const windows = weeklyDecisionWindows('2026-10-06');
+  const input = { decisions: [], applied: [], attempts: [], observations: [], coverage: 'complete' as const };
+  const report = renderClassifierStatistics(input, [windows.current, windows.previous]);
+  assert.equal(report.split('\n').filter(line => line === 'PR').length, 1);
+  assert.match(report, /This week \(2026-09-30 to 2026-10-06 UTC\).*\| 0 \| 0 \| 0 \| 0 \| unavailable \(0\/0 observed\)/);
+  assert.match(report, /Last week \(2026-09-23 to 2026-09-29 UTC\)/);
+  const unavailable = renderClassifierStatistics(null, [windows.current, windows.previous]);
+  assert.match(unavailable, /\| unavailable \| unavailable \| unavailable \| unavailable \| unavailable \|/);
+  const partial = renderClassifierStatistics({ ...input, coverage: 'partial' }, [windows.current, windows.previous]);
+  assert.match(partial, /0 \(partial\)/);
+});
+
 test('completed classifier cohorts include old calls and same-scope shadow disagreements (TASK-2658)', async () => {
   const { classifierGroups, classifierStatistics } = await import('../../../../src/application/review-classification/statistics.js');
   const { classificationAttempt } = await import('../../../fixtures/repeat-review.js');

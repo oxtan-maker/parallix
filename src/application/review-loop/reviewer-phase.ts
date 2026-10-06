@@ -242,6 +242,9 @@ export async function runReviewerPhase(context: LoopContext, round: ReviewRound)
     if (round.attempt > 1) {
       context.emit({ kind: 'revision-verified', attempt: round.attempt });
     }
+    // The task mirror can commit Backlog bookkeeping after the round was
+    // opened. Pin routing to the revision that passed the complete setup.
+    round.verifiedRevision = context.ports.preReview.head() ?? undefined;
     // The graph is reviewer context, not a correctness gate: refresh it once
     // only after the final rebase and declared verification have succeeded.
     const cycleStarted = context.ports.classification?.clock();

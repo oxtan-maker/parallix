@@ -21,6 +21,8 @@ export interface ClassifierReviewSource {
   readonly packetHash: string;
   readonly priorRevision: string;
   readonly candidateRevision: string;
+  /** Implementer revision which resolved the findings before verified setup advanced HEAD. */
+  readonly responseRevision?: string;
   readonly findingIds: readonly string[];
   readonly policyVersion: string;
   readonly label: string;
@@ -34,7 +36,7 @@ export function assertClassifierReviewSource(value: unknown): asserts value is C
   if (source.kind !== 'classifier' || source.identity !== 'jev'
     || ![source.decisionId, source.provider, source.model, source.policyVersion].every(v => typeof v === 'string' && v.trim().length)
     || !/^[a-f0-9]{64}$/.test(source.packetHash) || !/^[a-f0-9]{40,64}$/.test(source.priorRevision)
-    || !/^[a-f0-9]{40,64}$/.test(source.candidateRevision) || !Array.isArray(source.findingIds) || !source.findingIds.length
+    || !/^[a-f0-9]{40,64}$/.test(source.candidateRevision) || (source.responseRevision !== undefined && !/^[a-f0-9]{40,64}$/.test(source.responseRevision)) || !Array.isArray(source.findingIds) || !source.findingIds.length
     || !source.findingIds.every(v => typeof v === 'string' && v.length) || new Set(source.findingIds).size !== source.findingIds.length
     || !Number.isFinite(source.score) || source.score > 1
     || (source.label === 'addresses' ? source.score < thresholds.clear : source.label !== 'does_not_address' || source.score < thresholds.unresolved)) {
@@ -52,7 +54,7 @@ export function applyClassifierReview(review: Review, source: ClassifierReviewSo
   if (!prior || prior.decision?.kind !== 'changes-requested' || !prior.response
     || current.decision || current.phase !== 'reviewing' || review.intervention
     || prior.subject.revision !== source.priorRevision || current.subject.revision !== source.candidateRevision
-    || prior.response.resultingRevision !== source.candidateRevision) { throw new Error('Classifier review scope or revision is stale'); }
+    || prior.response.resultingRevision !== (source.responseRevision ?? source.candidateRevision)) { throw new Error('Classifier review scope or revision is stale'); }
   const ids = prior.decision.findings.map(f => f.id).sort((left, right) => left.localeCompare(right));
   if (JSON.stringify(ids) !== JSON.stringify([...new Set(source.findingIds)].sort((left, right) => left.localeCompare(right)))
     || JSON.stringify(ids) !== JSON.stringify(prior.response.resolutions.map(r => r.findingId).sort((left, right) => left.localeCompare(right)))) {
