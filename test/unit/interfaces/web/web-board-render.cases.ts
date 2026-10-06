@@ -17,7 +17,7 @@ import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { Board } from '../../../../web/src/board.js';
 import { FlowPanel } from '../../../../web/src/flow-panel.js';
-import { appendProgress, OPERATION_LOG_LIMIT } from '../../../../web/src/operation-log.js';
+import { EMPTY_LIVE_PROGRESS, OPERATION_LOG_LIMIT, recordProgress } from '../../../../web/src/operation-log.js';
 import { Shell } from '../../../../web/src/shell.js';
 import { durationText, isSpinning } from '../../../../web/src/format.js';
 import { toWebBoardSnapshot, validateWebBoardSnapshot } from '../../../../src/interfaces/web/transport.js';
@@ -210,14 +210,13 @@ test('the operation log renders the server entry rather than a reconstructed one
 });
 
 test('operation progress deduplicates reconnects and evicts oldest entries', () => {
-  const snapshot = populated();
   const progress = { kind: 'progress' as const, transportVersion: 2 as const, operationId: 'op-reconnect', sequence: 1, phase: 'run', message: 'one', timestamp: '2026-08-30T11:00:00.000Z' };
-  const once = appendProgress(snapshot, progress);
-  assert.equal(appendProgress(once, progress).operationLog.length, once.operationLog.length);
+  const once = recordProgress(EMPTY_LIVE_PROGRESS, progress);
+  assert.equal(recordProgress(once, progress).entries.length, once.entries.length);
   let bounded = once;
-  for (let sequence = 2; sequence <= OPERATION_LOG_LIMIT + 2; sequence += 1) bounded = appendProgress(bounded, { ...progress, sequence });
-  assert.equal(bounded.operationLog.length, OPERATION_LOG_LIMIT);
-  assert.equal(bounded.operationLog.at(-1)?.sequence, OPERATION_LOG_LIMIT + 2);
+  for (let sequence = 2; sequence <= OPERATION_LOG_LIMIT + 2; sequence += 1) bounded = recordProgress(bounded, { ...progress, sequence });
+  assert.equal(bounded.entries.length, OPERATION_LOG_LIMIT);
+  assert.equal(bounded.entries.at(-1)?.sequence, OPERATION_LOG_LIMIT + 2);
 });
 
 test('FLOW keeps the reference two-panel layout when projected history is unavailable', () => {

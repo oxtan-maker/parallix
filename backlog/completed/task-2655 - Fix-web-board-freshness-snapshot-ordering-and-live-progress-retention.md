@@ -1,8 +1,8 @@
 ---
 id: TASK-2655
 title: 'Fix web-board freshness, snapshot ordering, and live-progress retention'
-status: backlog
-assignee: []
+status: done
+assignee: [claude]
 created_date: '2026-10-06 08:23'
 labels: []
 dependencies: []

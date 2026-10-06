@@ -31,8 +31,10 @@ or another browser state framework without a demonstrated need.
 Run Fastify inside the canonical Node process as an inbound adapter. It serves
 assets, returns projections, validates JSON-Schema command requests, and
 invokes application use cases. SSE carries progress and invalidation; clients
-re-query after reconnect or invalidation. Browser memory and events never
-prove a lifecycle transition.
+re-query after every connection open or invalidation through one serial
+refresh path, so an older response never replaces a newer one, and mark the
+shown snapshot stale while disconnected or after a failed refresh. Browser
+memory and events never prove a lifecycle transition.
 
 Bind an ephemeral loopback port. Serve one origin and require a per-launch
 capability plus strict Origin validation for mutations. The browser never

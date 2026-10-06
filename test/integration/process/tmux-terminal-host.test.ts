@@ -551,3 +551,33 @@ test('px active and attach from the retained console reuse the original mission 
     fx.cleanup();
   }
 });
+
+test('a host whose harness pipe is gone still stops its command when the terminal hangs up', { timeout: 20000 }, async () => {
+  // Terminal teardown HUPs the host's background jobs as well as the host.
+  // dash reports a HUP-killed job ("Hangup") on stderr, which by then is a
+  // pipe to a dead harness; that write must not kill the host before its HUP
+  // cleanup stops the command (TASK-2655 integration repair).
+  const fx = fixture();
+  try {
+    const worktree = fx.worktree('task-h');
+    const pidFile = path.join(fx.root, 'agent.pid');
+    const identity = agentRunIdentity({ repositoryKey: 'itrepo', missionId: 'task-h', role: 'execute', family: 'codex', attempt: 1, startedAtMs: Date.now() });
+    const launch = prepareTmuxLaunch({ identity, spawnIndex: 0, command: 'sh', args: ['-c', `echo $$ > ${pidFile}; exec sleep 30`], cwd: worktree, env: {} }, { env: fx.env });
+    const host = childProcess.spawn(launch.command, launch.args, { cwd: worktree, env: fx.env, stdio: ['ignore', 'ignore', 'pipe'], detached: true });
+    fx.own(host);
+    const exited = new Promise<NodeJS.Signals | null>((resolve) => { host.once('exit', (_code, signal) => resolve(signal)); });
+    waitFor(() => fs.existsSync(pidFile) && fs.readFileSync(pidFile, 'utf8').trim() !== '');
+    const agentPid = Number(fs.readFileSync(pidFile, 'utf8'));
+    host.stderr!.destroy();
+    const jobs = String(childProcess.spawnSync('pgrep', ['-P', String(host.pid)], { encoding: 'utf8' }).stdout).split('\n').filter(Boolean).map(Number);
+    const completion = jobs.find(pid => String(childProcess.spawnSync('ps', ['-o', 'args=', '-p', String(pid)], { encoding: 'utf8' }).stdout).includes('host.sh'));
+    assert.ok(completion, `the host runs its completion loop as a background job (children: ${jobs.join(', ')})`);
+    process.kill(completion, 'SIGHUP');
+    waitFor(() => { try { process.kill(completion, 0); return false; } catch { return true; } });
+    childProcess.spawnSync('sleep', ['0.2']);
+    try { process.kill(host.pid!, 'SIGHUP'); } catch { /* the host already exited */ }
+    assert.notEqual(await exited, 'SIGPIPE', 'the host survives reporting the hung-up job to its closed stderr');
+    waitFor(() => { try { process.kill(agentPid, 0); return false; } catch { return true; } });
+    launch.cleanup();
+  } finally { fx.cleanup(); }
+});

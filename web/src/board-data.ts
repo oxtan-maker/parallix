@@ -5,7 +5,8 @@
  * a transport-rejected payload never degrades into "no data", and a previously
  * fetched snapshot is never shown as current (ADR 0054, ADR 0055).
  *
- * No caching, no retry, no polling: each page load performs exactly one read.
+ * No caching, no retry, no polling: `board-sync.ts` decides when to read, and
+ * each call performs exactly one read.
  */
 import { validateWebBoardSnapshot, validateWebCommandResult, type WebBoardSnapshot, type WebCommandRequest, type WebCommandResult } from '../../src/interfaces/web/transport.js';
 

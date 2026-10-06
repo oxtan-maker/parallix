@@ -30,6 +30,10 @@ at the current instant. The board never hides a completed mission whose closure
 timestamp is unavailable or malformed, so incomplete historical data remains
 visible rather than being silently omitted.
 
+The board follows the host's event stream without page reloads. While that
+connection is lost, or when a refresh fails, it keeps showing the last validated
+board under an explicit stale notice until a fresh snapshot arrives.
+
 ```json
 {
   "adapters": {

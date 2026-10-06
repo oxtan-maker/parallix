@@ -3,6 +3,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import './web-board-drag.cases.js';
 import './web-board-interaction.cases.js';
+import './web-board-refresh-coordination.cases.js';
 import './web-board-render.cases.js';
 import './web-client-snapshot.cases.js';
 import './web-command-request.cases.js';

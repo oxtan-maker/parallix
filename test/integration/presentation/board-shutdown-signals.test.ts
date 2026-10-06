@@ -15,7 +15,7 @@ import * as path from 'node:path';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { existsSync, readFileSync } from 'node:fs';
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { launchPtySmoke, type PtySmokeSession } from '../../helpers/pty-smoke-harness.js';
 import { createMissionApplicationServices } from '../../../src/composition/application-services.js';
@@ -270,6 +270,11 @@ const DISPATCH_START_BUDGET_MS = 30_000;
 const REAP_BUDGET_MS = 3_000;
 const SC3_SLUG = 'task-2375shut';
 
+async function listSockets(dir: string): Promise<string[]> {
+  const entries = await readdir(dir, { recursive: true, withFileTypes: true }).catch(() => []);
+  return entries.filter(entry => entry.isSocket()).map(entry => path.join(entry.parentPath, entry.name));
+}
+
 function pidAlive(pid: number): boolean {
   try {
     process.kill(pid, 0);
@@ -349,6 +354,8 @@ async function launchInflightBoard(): Promise<InflightBoardFixture> {
   const stubDir = path.join(baseRoot, 'stubs');
   const markerPath = path.join(baseRoot, 'claude-started');
   const signalPath = `${markerPath}.signal`;
+  // Unix sockets need a short path; the coverage TMPDIR can be deeply nested.
+  const terminalRoot = await mkdtemp('/tmp/px-2375-term-');
   await mkdir(fixtureRoot, { recursive: true });
   await mkdir(stateRoot, { recursive: true });
   await mkdir(stubDir, { recursive: true });
@@ -390,6 +397,9 @@ async function launchInflightBoard(): Promise<InflightBoardFixture> {
       PRIMARY_WORKTREE: fixtureRoot,
       WORKFLOW_AGENT: 'claude',
       PARALLIX_NO_BUBBLEWRAP: '1',
+      // The dispatched agent runs in a mission tmux server; keep its socket
+      // inside this case's root so dispose can stop it.
+      PARALLIX_TERMINAL_STATE_DIR: terminalRoot,
       PATH: `${stubDir}:${process.env.PATH}`,
     },
   });
@@ -406,7 +416,11 @@ async function launchInflightBoard(): Promise<InflightBoardFixture> {
         try { process.kill(fixture.childPid, 'SIGKILL'); } catch { /* already gone */ }
       }
       await session.cleanup();
+      for (const socket of await listSockets(terminalRoot)) {
+        await execFileP('tmux', ['-S', socket, 'kill-server']).catch(() => { /* server already gone */ });
+      }
       await rm(baseRoot, { recursive: true, force: true });
+      await rm(terminalRoot, { recursive: true, force: true });
     },
   };
   await waitForOutput(session, /px board/, LAUNCH_TIMEOUT_MS, 'the real board must render before dispatch is exercised');

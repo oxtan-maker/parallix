@@ -136,6 +136,11 @@ function hostScript(socketPath: string, sessionName: string, windowName: string,
     "trap 'cleanup INT; exit 130' INT",
     "trap 'cleanup TERM; exit 143' TERM",
     "trap 'cleanup HUP; exit 129' HUP",
+    // On terminal teardown dash reports a HUP-killed background job ("Hangup")
+    // on stderr, a pipe to the harness that is already gone. Catching PIPE
+    // turns that write into EPIPE so the HUP cleanup above still stops the
+    // command; a caught signal resets to default in the children it execs.
+    "trap ':' PIPE",
     `rm -f ${fifo} ${status}`,
     `mkfifo ${fifo} || exit 70`,
     // -A would attach when the session exists and require a caller TTY.

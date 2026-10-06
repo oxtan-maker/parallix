@@ -1,15 +1,13 @@
 /**
- * The read-only browser board (ADR 0054 / ADR 0055). It performs one snapshot
- * read per page load and renders only a successfully validated response; the
- * loading, request-failure, malformed and incompatible-version states are
- * distinct screens so a rejected payload is never presented as a board.
+ * The browser board (ADR 0054 / ADR 0055). It renders only a successfully
+ * validated snapshot, kept current by `useBoardSync`; the loading,
+ * request-failure, malformed and incompatible-version states are distinct
+ * screens so a rejected payload is never presented as a board, and a board
+ * that may be behind the host carries an explicit freshness notice.
  */
-import { useEffect, useState } from 'react';
-import { loadSnapshot, type SnapshotState } from './board-data.js';
 import { Board } from './board.js';
+import { useBoardSync, type BoardFreshness } from './board-sync.js';
 import { C, MONO } from './palette.js';
-import { validateWebProgressEvent } from '../../src/interfaces/web/transport.js';
-import { appendProgress } from './operation-log.js';
 
 const page: React.CSSProperties = {
   height: '100vh',
@@ -49,37 +47,29 @@ function Notice({ title, tone, children }: {
   );
 }
 
+/** What, if anything, makes the shown board less than current. Null when live and revalidated. */
+export function freshnessNotice(freshness: BoardFreshness): { readonly title: string; readonly detail: string } | null {
+  const held = 'showing the last validated snapshot; it may be out of date';
+  if (freshness.connection === 'closed') { return { title: '▲ LIVE UPDATES STOPPED', detail: `${held}. Reload the page to reconnect.` }; }
+  if (freshness.connection === 'reconnecting') { return { title: '▲ CONNECTION LOST · RECONNECTING', detail: held }; }
+  if (freshness.refreshError !== null) { return { title: '▲ SNAPSHOT REFRESH FAILED', detail: `${held} · ${freshness.refreshError}` }; }
+  if (!freshness.revalidated) { return { title: 'RECONNECTED · REVALIDATING', detail: held }; }
+  return null;
+}
+
+function FreshnessBanner({ freshness }: { freshness: BoardFreshness }) {
+  const notice = freshnessNotice(freshness);
+  if (notice === null) { return null; }
+  return (
+    <div role="status" aria-live="polite" data-board-freshness="stale" style={{ flexShrink: 0, padding: '6px 18px', borderBottom: `1px solid ${C.rule}`, color: C.amber }}>
+      <strong style={{ fontWeight: 700, letterSpacing: 1 }}>{notice.title}</strong>
+      <span style={{ color: C.dim }}>  {notice.detail}</span>
+    </div>
+  );
+}
+
 export function Shell() {
-  const [state, setState] = useState<SnapshotState>({ kind: 'loading' });
-
-  useEffect(() => {
-    let live = true;
-    let events: EventSource | null = null;
-    let refreshTimer: ReturnType<typeof setTimeout> | undefined;
-    void loadSnapshot().then((settled) => {
-      if (!live) { return; }
-      setState(settled);
-      if (settled.kind !== 'ready') { return; }
-      events = new EventSource('/api/events');
-      events.addEventListener('progress', (event) => {
-        let payload: unknown;
-        try { payload = JSON.parse((event as MessageEvent<string>).data); } catch { return; }
-        const result = validateWebProgressEvent(payload);
-        if (!result.ok) { return; }
-        setState((current) => current.kind !== 'ready' ? current : { kind: 'ready', snapshot: appendProgress(current.snapshot, result.value) });
-        clearTimeout(refreshTimer);
-        refreshTimer = setTimeout(() => {
-          void loadSnapshot().then((next) => { if (live) { setState(next); } });
-        }, 150);
-      });
-    });
-    return () => { live = false; events?.close(); clearTimeout(refreshTimer); };
-  }, []);
-
-  const refresh = async () => {
-    const settled = await loadSnapshot();
-    setState(settled);
-  };
+  const { state, freshness, refresh } = useBoardSync();
 
   return (
     <main style={page} aria-busy={state.kind === 'loading'}>
@@ -112,6 +102,7 @@ export function Shell() {
           </p>
         </Notice>
       )}
+      {state.kind === 'ready' && <FreshnessBanner freshness={freshness} />}
       {state.kind === 'ready' && <Board snapshot={state.snapshot} onRefresh={refresh} />}
     </main>
   );
