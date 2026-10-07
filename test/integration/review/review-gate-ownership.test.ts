@@ -22,12 +22,12 @@ import { stubMissionServices } from '../../helpers/stub-mission-services.js';
 
 test('task-2273 baseline: handoff owns two commit-equivalent general-gate invocations', () => {
   // TASK-2332.09 re-homed the handoff workflow into the application use case;
-  // the gate-ownership boundaries live there now, not in the CLI adapter.
-  const handoff = fs.readFileSync(path.join(SOURCE_ROOT, 'application', 'handoff-command-use-case.ts'), 'utf8');
+  // the gate-ownership boundaries live in its gate-recovery module now, not in the CLI adapter.
+  const handoff = fs.readFileSync(path.join(SOURCE_ROOT, 'application', 'handoff-gate-recovery.ts'), 'utf8');
 
   const owners = [
     { boundary: 'handoff-final', invocation: handoff.indexOf('runVerificationGateFn(area || \'docs\'') },
-    { boundary: 'declared-gates', invocation: handoff.indexOf('runDeclaredGates(verification.missionDir') },
+    { boundary: 'declared-gates', invocation: handoff.indexOf('gates.runDeclaredGates(missionDir') },
   ];
 
   assert.ok(owners.every(({ invocation }) => invocation >= 0), 'the handoff and declared-gate owners must be explicit');

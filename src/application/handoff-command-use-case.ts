@@ -15,165 +15,22 @@
 import * as path from 'node:path';
 import * as fmt from './presentation/cli-format.js';
 import { AGENT_COMMAND_COMPLETION_CONTRACT } from './agent-completion-contract.js';
-import {
-  beginNextReviewRound,
-  startReview,
-  ConfiguredReviewerEligibility,
-  changeRevision,
-  reviewStatus,
-  currentReviewRound,
-  replaceCurrentRound,
-} from '../domain/review.js';
-import { agentFamily } from '../domain/agents.js';
-import type { AgentFamily } from '../domain/agents.js';
-import { artifactReference } from '../domain/net-engineering-lines.js';
-import { isDbAdhocIdentity, missionId } from '../domain/mission.js';
-import type {
-  CaptureNelOptions,
-  CaptureNelResult,
-  CommandResult,
-  GatekeeperOutcome,
-  HandoffLog,
-  HandoffMissionServicesPort,
-  HandoffResult,
-  HandoffWorkflowPorts,
-  PerformHandoffOptions,
-} from './ports/handoff-workflow.js';
-import type { CheckpointData } from '../domain/checkpoint.js';
-import type { NelBucketLabel } from '../domain/net-engineering-lines.js';
-import { rebound } from './rebound-kernel.js';
-import { transitionReviewRepair } from './review-repair-lifecycle.js';
-
-/**
- * A selection failure that means "no other family is available right now",
- * as opposed to a broken configuration or an unreadable agent policy.
- *
- * Only exhaustion may fall back to self-review. Every other failure — an
- * unreadable agent config, no eligible agents at all, no working launcher —
- * must propagate: silently reviewing your own work is not the right answer to
- * a machine that is misconfigured.
- */
-export function isReviewerPoolExhausted(error: unknown): boolean {
-  const message = (error instanceof Error ? error.message : String(error)) || '';
-  return message.includes('exhausted') || message.includes('No agents available');
-}
-
-import {
-  collectGoalCheckEvidenceRows,
-  findUnverifiableGoalCheckRow,
-} from './static-evidence.js';
+import { isDbAdhocIdentity } from '../domain/mission.js';
 import { bookkeepingCommitMessage } from '../domain/approval-coverage.js';
-
-/**
- * Read the recorded Mission contract handoff verifies: checkpoint evidence and
- * declared gates.
- *
- * Fails closed. An unreachable operator database or a Mission it does not hold
- * is a handoff failure, never an empty list: an empty list would send handoff
- * down a legacy document path without a verified recorded contract. `draftedInDb` marks a Mission whose contract was recorded with
- * `px goal set`; only a Mission without one may still use its documents.
- */
-async function loadRecordedContract(
-  missionServicesFn: HandoffMissionServicesPort,
-  rootDir: string,
-  missionDirPath: string,
-  slug: string,
-): Promise<
-  | { ok: true; draftedInDb: boolean; checkpoints: readonly CheckpointData[]; successCriteria: readonly string[]; completedSuccessCriteria: readonly number[]; gates: readonly string[] }
-  | { ok: false; error: string }
-> {
-  try {
-    const { store } = await missionServicesFn(rootDir, { missionDir: missionDirPath });
-    const loaded = await store.load(missionId(slug));
-    if (loaded.kind !== 'found') {
-      return { ok: false, error: `The operator database holds no Mission ${slug}; handoff cannot verify its recorded contract.` };
-    }
-    const { mission } = loaded;
-    // Only evidenced checkpoints are evidence; planned ones are checked by the
-    // pre-handoff checkpoint validation, which names the next one to resume.
-    return {
-      ok: true,
-      draftedInDb: Boolean(mission.brief),
-      checkpoints: mission.checkpoints.filter(({ goalCheck }) => goalCheck.length > 0),
-      successCriteria: mission.successCriteria ?? [],
-      completedSuccessCriteria: mission.completedSuccessCriteria ?? [],
-      gates: mission.declaredGates ?? [],
-    };
-  } catch (cause) {
-    return { ok: false, error: `Could not read Mission ${slug} from the operator database: ${(cause as Error).message}. Handoff fails closed.` };
-  }
-}
-
-/**
- * Result of validating a declared gate command. The success variant carries
- * optional `error`/`gate` markers (typed `undefined`) so callers can read
- * `result.error`/`result.gate` across the union without narrowing.
- */
-type GateValidationFailure = { ok: false; reason: 'validation-failed'; error: string; gate: string };
-type GateValidationResult =
-  | GateValidationFailure
-  | { ok: true; reason: 'all-gates-valid'; error?: undefined; gate?: undefined };
-
-/** Outcome of running a mission's declared gates, from either gate source. */
-type DeclaredGatesResult =
-  | { ok: true; skipped: true; reason: 'no-mission-file' | 'no-gates-section' | 'no-gates-declared' }
-  | { ok: true; skipped: false; count: number; reason: 'all-gates-passed' }
-  | GateValidationFailure
-  | { ok: false; reason: 'gate-failed'; gate: string; error: string; stdout: string; stderr: string; exitCode: number | null };
+import type { CaptureNelOptions, HandoffLog, HandoffResult, HandoffWorkflowPorts, PerformHandoffOptions } from './ports/handoff-workflow.js';
+import { HandoffContractVerifier, loadRecordedContract } from './handoff-contract.js';
+import { DeclaredGateRunner } from './handoff-declared-gates.js';
+import { HandoffForgejoPublisher } from './handoff-forgejo-publication.js';
+import { GatekeeperRemediation, gatekeeperOutcome } from './handoff-gatekeeper-remediation.js';
+import { HandoffGateRecovery } from './handoff-gate-recovery.js';
+import { HandoffNelCapture } from './handoff-nel-capture.js';
+export { isReviewerPoolExhausted } from './handoff-review-submission.js';
+import { HandoffReviewSubmission } from './handoff-review-submission.js';
 
 /** Location facts `verifyHandoff` establishes for an on-branch mission. */
 type HandoffLocation =
   | { ok: false; error: string }
   | { ok: true; missionDir: string; area: string | null; branch: string; rootDir: string };
-
-/** The legacy Markdown checkpoint a document-path handoff verified. */
-interface VerifiedCheckpointDocument {
-  finalCheckpoint: string;
-  checkpointContent: string;
-  evidenceRows: string[];
-}
-
-/** Credentials the Forgejo PR push uses after bootstrap and owner fallback. */
-interface HandoffForgejoCredentials {
-  token: string;
-  fallbackUser: string | null;
-}
-
-/** Facts the Backlog transition push needs from the completed handoff. */
-interface BacklogPushContext {
-  rootDir: string;
-  branch: string;
-  token: string;
-  fallbackUser: string | null;
-  forgejoUser: string;
-  force: boolean;
-  log: HandoffLog;
-  error: HandoffLog;
-  gatekeeperPushedBack: boolean;
-}
-
-/** Collaborators and recursion state carried into gatekeeper remediation. */
-interface GatekeeperRemediationContext {
-  gatekeeperResult: GatekeeperOutcome;
-  rootDir: string;
-  forgejoUser: string;
-  retriesLeft: number;
-  currentAttempt: number;
-  log: HandoffLog;
-  error: HandoffLog;
-  startAgentFn: NonNullable<PerformHandoffOptions['startAgentFn']>;
-  worktree: string | null;
-  skipGate: boolean;
-  forceWithLease: boolean;
-  isForgejoReviewEnabledFn: NonNullable<PerformHandoffOptions['isForgejoReviewEnabledFn']>;
-  rebaseFn: NonNullable<PerformHandoffOptions['rebaseFn']>;
-  runVerificationGateFn: NonNullable<PerformHandoffOptions['runVerificationGateFn']>;
-  runGatekeeperFn: NonNullable<PerformHandoffOptions['runGatekeeperFn']>;
-  missionServicesFn: HandoffMissionServicesPort;
-  occurredAt: string;
-}
-
-const NEL_BUCKET_LABELS: readonly NelBucketLabel[] = ['Small', 'Medium', 'Large'];
 
 /**
  * CLI-independent application entry point for the handoff workflow.
@@ -181,108 +38,25 @@ const NEL_BUCKET_LABELS: readonly NelBucketLabel[] = ['Small', 'Medium', 'Large'
  * Every collaborator arrives through the injected port bag; the composition
  * root is the only place that knows which concrete adapters implement them.
  */
-/**
- * Gatekeeper pre-review validation. Missing artifacts with a posted pushback
- * keep the task active for repair; missing artifacts it could not post block the
- * handoff outright, because nothing would tell the implementer what to fix.
- */
-function gatekeeperOutcome(gatekeeperResult: GatekeeperOutcome, slug: string, log: HandoffLog, error: HandoffLog): { pushedBack: boolean; blocked?: HandoffResult } {
-  if (gatekeeperResult.ok) { return { pushedBack: false }; }
-  if (gatekeeperResult.posted) {
-    fmt.log.warn(`Gatekeeper posted pushback for ${fmt.slug(slug)}: missing ${gatekeeperResult.missing.join(', ')}.`);
-    log(`Keeping task ${fmt.slug(slug)} active while required artifacts are missing.`);
-    return { pushedBack: true };
-  }
-  fmt.log.fail(`Gatekeeper detected missing artifacts for ${fmt.slug(slug)} but could not post pushback: skipped=${gatekeeperResult.skipped}, posted=${gatekeeperResult.posted}. Blocking handoff — task remains in active until artifacts are present.`);
-  error(`Missing mandatory artifacts: ${gatekeeperResult.missing.join(', ')}.`);
-  return {
-    pushedBack: false,
-    blocked: { ok: false, error: `Gatekeeper detected missing artifacts but could not post pushback (skipped=${gatekeeperResult.skipped}, posted=${gatekeeperResult.posted}). Fix missing artifacts before handoff: ${gatekeeperResult.missing.join(', ')}.` },
-  };
-}
-
 export class HandoffCommandUseCase {
   private readonly ports: HandoffWorkflowPorts;
+  private readonly gates: DeclaredGateRunner;
+  private readonly nel: HandoffNelCapture;
+  private readonly contract: HandoffContractVerifier;
+  private readonly forgejo: HandoffForgejoPublisher;
+  private readonly gatekeeper: GatekeeperRemediation;
+  private readonly gateRecovery: HandoffGateRecovery;
+  private readonly submission: HandoffReviewSubmission;
 
   constructor(ports: HandoffWorkflowPorts) {
     this.ports = ports;
-  }
-
-  /**
-   * Verifies that the current environment is ready for handoff.
-   */
-  verifyHandoff(slug: string, options: { worktree?: string; recordedContract?: boolean } = {}): HandoffLocation {
-    const { git, missionUtils } = this.ports;
-    const launchRoot = process.cwd();
-    const rootDir = options.worktree || missionUtils.resolveWorktree(slug, { cwd: launchRoot }) || launchRoot;
-    const missionDir = missionUtils.findMissionDir(slug, rootDir);
-    if (!missionDir && !options.recordedContract) {
-      return { ok: false, error: `Mission directory not found for slug: ${slug}` };
-    }
-
-    const area = missionDir ? missionUtils.findMissionArea(missionDir) : null;
-    const branch = missionUtils.missionBranchName(slug, rootDir);
-    const current = git.getCurrentBranch(rootDir);
-
-    if (current !== branch) {
-      return { ok: false, error: `Not on mission branch. Current: ${current}, Expected: ${branch}` };
-    }
-
-    return { ok: true, missionDir: missionDir || rootDir, area, branch, rootDir };
-  }
-
-  resolveHandoffReviewAssignment(
-    implementerName: string,
-    options: {
-      worktree?: string;
-      eligibleAgentsForStepFn?: HandoffWorkflowPorts['agentSelection']['eligibleAgentsForStep'];
-      selectAgentFn?: HandoffWorkflowPorts['agentSelection']['selectAgent'];
-      preparedSelection?: { select(_step: string, _opts: Record<string, unknown>): string } | null;
-      log?: (_msg: string) => void;
-    } = {},
-  ) {
-    const implementer = agentFamily(implementerName);
-    const eligibleFn = options.eligibleAgentsForStepFn || this.ports.agentSelection.eligibleAgentsForStep;
-    const selectFn = options.selectAgentFn || this.ports.agentSelection.selectAgent;
-    const log = options.log || fmt.log.plain;
-    const configured = eligibleFn('review', { worktree: options.worktree });
-    const configuredFamilies = configured.map((candidate: string) => agentFamily(candidate));
-
-    try {
-      const reviewer = agentFamily(options.preparedSelection
-        ? options.preparedSelection.select('review', { excluded: new Set([implementer]) })
-        : selectFn('review', {
-          exclude: new Set([implementerName]),
-          worktree: options.worktree,
-        }));
-      return {
-        reviewer,
-        implementer,
-        reviewerEligibility: ConfiguredReviewerEligibility.fromReviewStep({
-          eligible: configuredFamilies,
-          strategy: 'random',
-        }),
-      };
-    } catch (error) {
-      if (!isReviewerPoolExhausted(error)) { throw error; }
-      // The documented single-family escape hatch: this workstation has no other
-      // runnable reviewer at this moment. Record the eligibility that actually
-      // applied — the implementer's own family — so the round states plainly that
-      // it was self-reviewed instead of claiming a reviewer pool it never had.
-      log(fmt.status(
-        'WARN',
-        `No reviewer available besides ${fmt.agent(implementer)}; falling back to self-review for this handoff. `
-        + `${(error as Error).message}`,
-      ));
-      return {
-        reviewer: implementer,
-        implementer,
-        reviewerEligibility: ConfiguredReviewerEligibility.fromReviewStep({
-          eligible: [implementer],
-          strategy: 'random',
-        }),
-      };
-    }
+    this.gates = new DeclaredGateRunner(ports);
+    this.nel = new HandoffNelCapture(ports);
+    this.contract = new HandoffContractVerifier(ports);
+    this.forgejo = new HandoffForgejoPublisher(ports, (fallbackSlug, summary, options) => this.writeFallbackSummary(fallbackSlug, summary, options));
+    this.gatekeeper = new GatekeeperRemediation(ports);
+    this.gateRecovery = new HandoffGateRecovery(ports, this.gates);
+    this.submission = new HandoffReviewSubmission(ports);
   }
 
   /**
@@ -344,554 +118,47 @@ export class HandoffCommandUseCase {
     return true;
   }
 
-/**
- * Result of validating a declared gate command. The success variant carries
- * optional `error`/`gate` markers (typed `undefined`) so callers can read
- * `result.error`/`result.gate` across both variants.
- */
-  validateDeclaredGates(commands: string[], rootDir: string, options: { checkFiles?: boolean } = {}): GateValidationResult {
-    const { fileSystem } = this.ports;
-    for (const cmd of commands) {
-      // Each guard isolates one failure mode. Splitting the original inline
-      // scan into these helpers keeps per-function cognitive complexity bounded
-      // and makes each branch independently testable. Order, messages, and
-      // return shape are unchanged from the original implementation.
-      if (this.gateCommandHasProse(cmd)) {
-        return this.proseError(cmd);
-      }
-      const quoteType = this.gateUnclosedQuoteType(cmd);
-      if (quoteType) {
-        return this.quoteError(cmd, quoteType);
-      }
-      const imbalance = this.firstUnbalancedDelimiter(cmd);
-      if (imbalance) {
-        return this.delimiterError(cmd, imbalance);
-      }
-      // A gate recorded at draft may run a script the mission itself adds, so
-      // only handoff, on the finished tree, requires its files to exist.
-      const missingToken = options.checkFiles === false ? null : this.gateCommandMissingFile(cmd, rootDir, fileSystem);
-      if (missingToken !== null) {
-        return this.missingFileError(cmd, missingToken);
-      }
-    }
-
-    return { ok: true, reason: 'all-gates-valid' };
+  validateDeclaredGates(...args: Parameters<DeclaredGateRunner['validateDeclaredGates']>) {
+    return this.gates.validateDeclaredGates(...args);
   }
 
-  /** Shared error payload for the "prose attached to a gate command" failure. */
-  private proseError(cmd: string): GateValidationFailure {
-    return {
-      ok: false,
-      reason: 'validation-failed',
-      error: `Gate declaration must contain an exact runnable command only. Replace "${cmd}" with the command and move trailing prose or outcome expectations to Success Criteria or checkpoint documentation.`,
-      gate: cmd
-    };
+  runDeclaredGates(...args: Parameters<DeclaredGateRunner['runDeclaredGates']>) {
+    return this.gates.runDeclaredGates(...args);
+  }
+
+  executeGateCommands(...args: Parameters<DeclaredGateRunner['executeGateCommands']>) {
+    return this.gates.executeGateCommands(...args);
+  }
+
+  captureNelAtHandoff(...args: Parameters<HandoffNelCapture['captureNelAtHandoff']>) {
+    return this.nel.captureNelAtHandoff(...args);
   }
 
   /**
-   * Collapse a gate command to its unquoted form for prose inspection: quoted
-   * runs become a single space, backslash escapes inside double quotes are
-   * preserved as space padding, and the rest passes through unchanged. The
-   * original inline scan did this before running the prose regexes.
+   * Verifies that the current environment is ready for handoff.
    */
-  private unquoteForProseScan(cmd: string): string {
-    let unquoted = '';
-    let inSingle = false;
-    let inDouble = false;
-    for (let ci = 0; ci < cmd.length; ci++) {
-      const ch = cmd[ci];
-      if (ch === '\\' && inDouble) {
-        unquoted += '  ';
-        ci++;
-        continue;
-      }
-      if (ch === '\'' && !inDouble) {
-        inSingle = !inSingle;
-        unquoted += ' ';
-        continue;
-      }
-      if (ch === '"' && !inSingle) {
-        inDouble = !inDouble;
-        unquoted += ' ';
-        continue;
-      }
-      unquoted += inSingle || inDouble ? ' ' : ch;
+  verifyHandoff(slug: string, options: { worktree?: string; recordedContract?: boolean } = {}): HandoffLocation {
+    const { git, missionUtils } = this.ports;
+    const launchRoot = process.cwd();
+    const rootDir = options.worktree || missionUtils.resolveWorktree(slug, { cwd: launchRoot }) || launchRoot;
+    const missionDir = missionUtils.findMissionDir(slug, rootDir);
+    if (!missionDir && !options.recordedContract) {
+      return { ok: false, error: `Mission directory not found for slug: ${slug}` };
     }
-    return unquoted;
+
+    const area = missionDir ? missionUtils.findMissionArea(missionDir) : null;
+    const branch = missionUtils.missionBranchName(slug, rootDir);
+    const current = git.getCurrentBranch(rootDir);
+
+    if (current !== branch) {
+      return { ok: false, error: `Not on mission branch. Current: ${current}, Expected: ${branch}` };
+    }
+
+    return { ok: true, missionDir: missionDir || rootDir, area, branch, rootDir };
   }
 
-  /**
-   * A gate declaration carries prose when, after unquoting, it embeds an
-   * en/em-dash description separator, an outcome-language suffix, or a trailing
-   * parenthesised description. Markdown code spans are detected on the raw
-   * command before unquoting.
-   */
-  private gateCommandHasProse(cmd: string): boolean {
-    const unquoted = this.unquoteForProseScan(cmd);
-    return (
-      /^`[^`\r\n]+`\s+\S/.test(cmd) ||
-      /\s(?:—|–|-–)\s+\S/.test(unquoted) ||
-      /\s(?:passes?|passed|succeeds?|succeeded|completes?|completed)(?:\s+(?:on|in|with|without|after|before|for|the|a|an|successfully|cleanly)\b[^;&|]*)?[.!]?\s*$/i.test(unquoted) ||
-      /(?<![&|;])\s+\([^()]*\)\s*$/.test(unquoted) ||
-      // An unquoted shell comment is prose too: bash ignores it, so it states
-      // an expectation that nothing checks.
-      /(?:^|\s)#/.test(unquoted)
-    );
-  }
-
-  /**
-   * Return the quote type left open by a command, or null when balanced.
-   * Respects quote context so apostrophes inside double quotes (and vice-versa)
-   * are not flagged; only genuinely unmatched quotes are reported.
-   */
-  private gateUnclosedQuoteType(cmd: string): 'single' | 'double' | null {
-    let inSingle = false;
-    let inDouble = false;
-    for (let ci = 0; ci < cmd.length; ci++) {
-      const ch = cmd[ci];
-      if (ch === '\\' && inDouble) {
-        ci++;
-        continue;
-      }
-      if (ch === '\'' && !inDouble) {
-        inSingle = !inSingle;
-        continue;
-      }
-      if (ch === '"' && !inSingle) {
-        inDouble = !inDouble;
-        continue;
-      }
-    }
-    return inSingle ? 'single' : inDouble ? 'double' : null;
-  }
-
-  /**
-   * Report the first delimiter type whose parentheses, braces, or brackets do
-   * not balance, or null when all three balance. Collapses the three original
-   * independent balance checks into a single shared counter helper.
-   */
-  private firstUnbalancedDelimiter(cmd: string): 'parentheses' | 'braces' | 'brackets' | null {
-    const balanced = (open: string, close: string) => cmd.split(open).length === cmd.split(close).length;
-    if (!balanced('(', ')')) {return 'parentheses';}
-    if (!balanced('{', '}')) {return 'braces';}
-    if (!balanced('[', ']')) {return 'brackets';}
-    return null;
-  }
-
-  /**
-   * Return the first literal file-path token that does not exist under rootDir,
-   * or null when every path token resolves. URLs, flags, globs, and quoted
-   * tokens are skipped exactly as in the original inline scan.
-   */
-  private gateCommandMissingFile(
-    cmd: string,
-    rootDir: string,
-    fileSystem: HandoffWorkflowPorts['fileSystem']
-  ): string | null {
-    for (const token of cmd.split(/\s+/)) {
-      if (/^https?:\/\//i.test(token) || token.includes('://')) {continue;}
-      if (token.startsWith('-')) {continue;}
-      const cleaned = token.replace(/^['"`]|['"`]$/g, '');
-      if (/[?*[\]]/.test(cleaned)) {continue;}
-      const looksLikePath =
-        cleaned.startsWith('./') ||
-        cleaned.startsWith('../') ||
-        cleaned.startsWith('/') ||
-        cleaned.includes('/');
-      if (!looksLikePath) {continue;}
-      if (!fileSystem.existsSync(path.resolve(rootDir, cleaned))) {return token;}
-    }
-    return null;
-  }
-
-  /** Shared error payload for an unclosed-quote failure. */
-  private quoteError(cmd: string, quoteType: 'single' | 'double'): GateValidationFailure {
-    return {
-      ok: false,
-      reason: 'validation-failed',
-      error: `Gate command has unclosed ${quoteType} quotes: "${cmd}"`,
-      gate: cmd
-    };
-  }
-
-  /** Shared error payload for an unmatched-delimiter failure. */
-  private delimiterError(cmd: string, imbalance: 'parentheses' | 'braces' | 'brackets'): GateValidationFailure {
-    return {
-      ok: false,
-      reason: 'validation-failed',
-      error: `Gate command has unmatched ${imbalance}: "${cmd}"`,
-      gate: cmd
-    };
-  }
-
-  /** Shared error payload for a missing file-reference failure. */
-  private missingFileError(cmd: string, missingToken: string): GateValidationFailure {
-    return {
-      ok: false,
-      reason: 'validation-failed',
-      error: `Gate command references non-existent file: "${missingToken}" in command "${cmd}"`,
-      gate: cmd
-    };
-  }
-
-
-  /**
-   * Parse and execute declared gates from a mission's MISSION.md `## Gates` section.
-   * Each gate line is treated as a shell command executed through the process port.
-   */
-  runDeclaredGates(
-    missionDir: string,
-    rootDir: string,
-    options: { log?: HandoffLog; error?: HandoffLog; recordedGates?: readonly string[] } = {},
-  ): DeclaredGatesResult {
-    const { fileSystem } = this.ports;
-    const { log = fmt.log.plain } = options;
-
-    // Gates recorded through `px gate add` are Mission state and are the
-    // authority. Parsing the mission document's `## Gates` section is the
-    // fallback for missions drafted before the gates were recorded.
-    const recorded = options.recordedGates ?? [];
-    if (recorded.length > 0) {
-      return this.executeGateCommands([...recorded], rootDir, { log, source: 'recorded' });
-    }
-
-    const missionPath = path.join(missionDir, 'MISSION.md');
-    if (!fileSystem.existsSync(missionPath)) {
-      return { ok: true, skipped: true, reason: 'no-mission-file' };
-    }
-
-    const content = fileSystem.readText(missionPath);
-
-    // Extract the ## Gates section
-    const gatesSectionMatch = content.match(/^## Gates\s*\n([\s\S]*?)(?=\n## |\n$)/m);
-    if (!gatesSectionMatch) {
-      return { ok: true, skipped: true, reason: 'no-gates-section' };
-    }
-
-    const gatesBlock = gatesSectionMatch[1];
-    const gateLines = gatesBlock.split('\n')
-      .map(line => line.trim())
-      .filter(line => line.startsWith('- [ ]') || line.startsWith('- [x]') || line.startsWith('- '));
-
-    // Strip the checkbox prefix to get the command
-    const commands = gateLines.map((line): { cmd: string; reject: boolean } => {
-      // Remove "- [ ] ", "- [x] ", or "- " prefix
-      const cmd = line.replace(/^- \[[ x]\]\s*/, '').replace(/^- \s*/, '');
-      // Reject gate entries that contain an explanatory dash separator
-      // (em-dash, en-dash, or hyphen+en-dash followed by prose) before any
-      // further processing, so validateDeclaredGates never sees a silently
-      // sanitized command.
-      if (/\s+(—|–|-–)\s+\S/.test(cmd)) {
-        return { cmd, reject: true };
-      }
-      // Strip surrounding backticks (e.g., "`npm run typecheck`")
-      return { cmd: cmd.replace(/^`(.+)`$/, '$1').trim(), reject: false };
-    }).filter(entry => entry.cmd.length > 0);
-
-    // Check for any rejected entries (dash-suffix gates)
-    const rejected = commands.find(entry => entry.reject);
-    if (rejected) {
-      return {
-        ok: false,
-        reason: 'validation-failed',
-        error: `Gate declaration must contain an exact runnable command only. Replace "${rejected.cmd}" with the command and move trailing prose or outcome expectations to Success Criteria or checkpoint documentation.`,
-        gate: rejected.cmd
-      };
-    }
-
-    return this.executeGateCommands(commands.map(entry => entry.cmd), rootDir, { log, source: 'document' });
-  }
-
-  /**
-   * Validate and run a list of gate commands.
-   *
-   * Shared by both gate sources so a gate recorded through `px gate add` is
-   * validated, proof-reused and executed exactly like one parsed from a
-   * mission document.
-   */
-  executeGateCommands(
-    cleanCommands: string[],
-    rootDir: string,
-    options: { log?: HandoffLog; source?: string } = {},
-  ): DeclaredGatesResult {
-    const { verification, process: processPort } = this.ports;
-    const { log = fmt.log.plain } = options;
-
-    if (cleanCommands.length === 0) {
-      return { ok: true, skipped: true, reason: 'no-gates-declared' };
-    }
-
-    // Pre-validate all gate commands before execution
-    const validationResult = this.validateDeclaredGates(cleanCommands, rootDir);
-    if (validationResult.ok === false) {
-      return validationResult;
-    }
-
-    // Execute each gate command
-    for (const cmd of cleanCommands) {
-      const reusableProof = verification.readReusableVerificationProof(cmd, rootDir);
-      if (reusableProof.ok) {
-        log(`  Gate reused proof ${reusableProof.identity}: ${cmd}`);
-        continue;
-      }
-      log(`  Gate: ${cmd}`);
-      const result = processPort.spawnSync('bash', ['-c', cmd], {
-        cwd: rootDir,
-        encoding: 'utf8',
-        stdio: 'pipe'
-      });
-
-      if (result.status !== 0) {
-        const stdout = (result.stdout || '').trim();
-        const stderr = (result.stderr || '').trim();
-        return {
-          ok: false,
-          gate: cmd,
-          reason: 'gate-failed',
-          error: stderr || `Gate exited with status ${result.status}`,
-          stdout,
-          stderr,
-          exitCode: result.status,
-        };
-      }
-      const proofResult = verification.writeReusableVerificationProof(cmd, rootDir);
-      if (proofResult.ok) {
-        log(`  Gate executed; stored proof ${proofResult.identity}: ${cmd}`);
-      } else {
-        log(`  Gate executed; proof unavailable (${proofResult.error}): ${cmd}`);
-      }
-    }
-
-    return { ok: true, skipped: false, count: cleanCommands.length, reason: 'all-gates-passed' };
-  }
-
-  /**
-   * Capture NEL (Net Engineering Lines) at handoff time.
-   *
-   * Computes actual NEL from the merge diff (primary..HEAD), reads the predicted
-   * bucket from the mission's Refinement Signals, resolves review rounds from
-   * the Mission store, and records the result through the checked Mission
-   * boundary. NEL values remain observational; failure to durably persist a
-   * computed value is fatal to handoff.
-   */
-  async captureNelAtHandoff(slug: string, options: CaptureNelOptions): Promise<CaptureNelResult> {
-    const { fileSystem, missionUtils, nel, documentWriter } = this.ports;
-    const { rootDir, missionDir, error } = options;
-    const documentWriterFn = options.documentWriterFn || documentWriter.write;
-
-    // 1. Determine primary branch for diff range
-    let primaryBranch;
-    try {
-      primaryBranch = missionUtils.getPrimaryBranch(rootDir);
-    } catch (_) {
-      return { ok: false, error: 'could not detect primary branch for NEL diff range' };
-    }
-
-    if (!primaryBranch) {
-      return { ok: false, error: 'primary branch is empty' };
-    }
-
-    // 2. Compute actual NEL from primary..HEAD
-    let nelRecord: ReturnType<typeof nel.computeNELRecord>;
-    try {
-      nelRecord = nel.computeNELRecord(`${primaryBranch}..HEAD`, { cwd: rootDir });
-    } catch (_) {
-      return { ok: false, error: 'NEL computation failed' };
-    }
-
-    const actualNel = nelRecord.nel;
-    const actualBucket = nelRecord.bucket.label;
-
-    // 5. Record through the checked Mission boundary. The use case decides and the
-    //    selected SQLite authority writes; this workflow supplies only
-    //    domain values and the artifact *references* it observed.
-    const missionServicesFn = options.missionServicesFn || this.ports.missionServices;
-    if (typeof missionServicesFn !== 'function') { return { ok: false, error: 'mission services are not configured' }; }
-    const missionServices = await missionServicesFn(rootDir, {
-      missionDir,
-      documentWriter: documentWriterFn,
-    });
-
-    // 4. Read review rounds from the Mission store (not review-state.json).
-    // architecture invariant: the SQLite store is the sole authority for Mission domain state.
-    let reviewRounds = 1;
-    const missionLoad = await missionServices.store.load(missionId(slug));
-    if (missionLoad.kind === 'found' && missionLoad.mission.review) {
-      reviewRounds = missionLoad.mission.review.rounds.length;
-    }
-
-    // 3. The predicted bucket is recorded with `px nel set`. A Mission drafted
-    //    before it was Mission state still carries it in its document's
-    //    Refinement Signals, which is the only place it exists for that Mission.
-    let predictedBucket: NelBucketLabel | 'Unknown' = (missionLoad.kind === 'found' ? missionLoad.mission.predictedNelBucket : null) ?? 'Unknown';
-    const missionMdPath = path.join(missionDir, 'MISSION.md');
-    if (predictedBucket === 'Unknown' && !(missionLoad.kind === 'found' && missionLoad.mission.brief) && fileSystem.existsSync(missionMdPath)) {
-      const predictedMatch = fileSystem.readText(missionMdPath).match(/Predicted NEL bucket:\s*(Small|Medium|Large)/i);
-      const documented = predictedMatch?.[1]?.toLowerCase();
-      predictedBucket = NEL_BUCKET_LABELS.find((label) => label.toLowerCase() === documented) ?? predictedBucket;
-    }
-    const artifacts = [
-      artifactReference('git-range', `${primaryBranch}..HEAD`),
-    ];
-    const outcome = await missionServices.handoff.recordNel({
-      operationId: `handoff-nel-${slug}`,
-      missionId: missionId(slug),
-      capabilities: new Set(['handoff:record']),
-      netEngineeringLines: actualNel,
-      predictedBucket,
-      reviewRounds,
-      capturedAt: new Date().toISOString(),
-      artifacts,
-    });
-
-    if (outcome.status !== 'completed') {
-      const message = outcome.error?.message || 'NEL record was not persisted';
-      error(`Failed to write NEL record: ${message}`);
-      return { ok: false, persistenceFailed: true, error: `failed to write NEL record: ${message}` };
-    }
-
-    return { ok: true, nel: actualNel, bucket: actualBucket };
-  }
-
-  /**
-   * Performs the handoff process for a mission:
-   * 1. Runs the verification gate.
-   * 2. Syncs primary branch and pushes the mission branch to Forgejo, creating or updating the PR.
-   * 3. Transitions Backlog task to 'review'.
-   * 4. Commits and pushes the Backlog state change to Forgejo.
-   */
-  /**
-   * Derive the implementer agent family for a DB-owned adhoc identity from the
-   * operator database. The Backlog task file is a best-effort one-way mirror
-   * only; a deleted mirror must not strand handoff. The mission store's
-   * `assignee` is set to the active-launch agent by the authoritative lifecycle
-   * transition (decideMission), so this resolves once `px active` has run.
-   */
-  private async deriveImplementerFromMissionStore(
-    slug: string,
-    missionServicesFn: HandoffMissionServicesPort,
-    rootDir: string,
-    missionDirPath: string,
-  ): Promise<AgentFamily | null> {
-    try {
-      const missionServices = await missionServicesFn(rootDir, { missionDir: missionDirPath });
-      const missionLoad = await missionServices.store.load(missionId(slug));
-      if (missionLoad.kind === 'found' && missionLoad.mission.assignee) {
-        return missionLoad.mission.assignee;
-      }
-    } catch (_) {
-      // A store read failure must not strand handoff; the caller's later
-      // identity checks remain authoritative.
-    }
-    return null;
-  }
-
-  /**
-   * Pre-handoff content integrity: the mission contract and its final checkpoint
-   * must be committed, and that checkpoint must carry a Goal Check table whose
-   * evidence rows cite something Parallix can actually verify. Returns the
-   * verified checkpoint, or the failure the caller returns unchanged.
-   */
-  private verifyHandoffEvidence(slug: string, context: {
-    rootDir: string; missionDirPath: string; log: HandoffLog; error: HandoffLog;
-  }): HandoffResult | VerifiedCheckpointDocument {
-    const ports = this.ports;
-    const { rootDir, missionDirPath, error } = context;
-    const fail = (msg: string): HandoffResult => { error(msg); return { ok: false, error: msg }; };
-
-    const relativeMissionPath = path.relative(rootDir, path.join(missionDirPath, 'MISSION.md'));
-    const dirtyFiles = ports.git.getWorktreeStatus(rootDir);
-    if (dirtyFiles.some(line => line.endsWith(relativeMissionPath))) {
-      return fail(`${fmt.path('MISSION.md')} is modified but uncommitted at ${fmt.path(relativeMissionPath)}. Commit the mission contract before handoff.`);
-    }
-
-    const checkpoints = ports.missionUtils.findCheckpoints(missionDirPath);
-    if (checkpoints.length === 0) {
-      return fail(`No checkpoint documents found in ${fmt.path(missionDirPath)}. Import historical evidence or record it with px checkpoint record; handoff never generates evidence.`);
-    }
-
-    const finalCheckpoint = checkpoints[checkpoints.length - 1];
-    const relativeCheckpointPath = path.relative(rootDir, finalCheckpoint);
-    if (dirtyFiles.some(line => line.endsWith(relativeCheckpointPath))) {
-      return fail(`The latest checkpoint document is modified but uncommitted at ${fmt.path(relativeCheckpointPath)}. Commit the implementation evidence before handoff.`);
-    }
-
-    // Per review.md step 5, a missing or empty goal-check table means the
-    // checkpoint has not satisfied the mission's evidence requirement. Both the
-    // `## Goal Check` and `## Goal Check Table` headings are accepted.
-    const checkpointContent = ports.fileSystem.readText(finalCheckpoint);
-    const goalCheckMatch = checkpointContent.match(/^## Goal Check(?: Table)?\s*$/m);
-    if (!goalCheckMatch) {
-      return fail(`The final checkpoint at ${fmt.path(relativeCheckpointPath)} is missing a "## Goal Check" section. Review requires a goal-check table with real evidence before handoff.`);
-    }
-
-    // Only real evidence rows count: separator rows (|---|---|) and the header
-    // row itself are excluded by collectGoalCheckEvidenceRows.
-    const afterHeader = checkpointContent.slice((goalCheckMatch.index ?? 0) + goalCheckMatch[0].length);
-    const evidenceRows = collectGoalCheckEvidenceRows(afterHeader);
-    if (evidenceRows.length === 0) {
-      return fail(`The final checkpoint at ${fmt.path(relativeCheckpointPath)} has a "## Goal Check" section but no evidence rows. A goal-check table with real evidence is required before handoff.`);
-    }
-    const unverifiableRow = findUnverifiableGoalCheckRow(ports.fileSystem, evidenceRows, rootDir);
-    if (unverifiableRow) {
-      return fail(`The final checkpoint at ${fmt.path(relativeCheckpointPath)} has a "## Goal Check" section but no evidence rows that cite a verifiable reference such as a recognized repo command/path, exact test name, test-file path, or ADR reference (or, when necessary, file:line). A goal-check table with real evidence is required before handoff. Offending row: ${unverifiableRow}`);
-    }
-    return { finalCheckpoint, checkpointContent, evidenceRows };
-  }
-
-  /**
-   * The token the PR is pushed with. A missing agent token is bootstrapped
-   * non-interactively, then falls back to the repo owner; only when the owner
-   * has no token either does handoff stop for manual action.
-   */
-  private async resolveHandoffForgejoToken(slug: string, forgejoUser: string, context: {
-    rootDir: string; log: HandoffLog; error: HandoffLog; internalLog: HandoffLog;
-  }): Promise<HandoffResult | HandoffForgejoCredentials> {
-    const ports = this.ports;
-    const { rootDir, log, error, internalLog } = context;
-    const existing = ports.forgejo.readToken(forgejoUser);
-    if (existing) { return { token: existing, fallbackUser: null }; }
-
-    error(`Token not found for ${fmt.agent(forgejoUser)}. Attempting non-interactive bootstrap...`);
-    const reviewSettings = ports.forgejo.resolveForgejoSettings(rootDir);
-    const bootstrapResult = await ports.setupReview.bootstrapReviewSurface(rootDir, {
-      baseUrl: reviewSettings.url,
-      repo: reviewSettings.repo,
-      ownerLogin: 'human',
-      ownerPassword: '',
-      agentPasswords: [{ user: forgejoUser, password: '' }],
-    }, { interactive: false, requestFn: ports.setupReview.apiRequest, log: internalLog });
-
-    let bootstrapFailureReason: string | null = null;
-    let token: string | null = null;
-    if (bootstrapResult.ok) {
-      log(fmt.status('PASS', `Bootstrap succeeded for ${fmt.agent(forgejoUser)}.`));
-      token = ports.forgejo.readToken(forgejoUser);
-      if (!token) {
-        bootstrapFailureReason = 'bootstrap completed but token file for the agent user was not found';
-        error('Bootstrap completed but token file for the agent user was not found. Falling back to default user.');
-      }
-    } else {
-      bootstrapFailureReason = bootstrapResult.error || 'unknown';
-      error(`Bootstrap for ${fmt.agent(forgejoUser)} failed: ${bootstrapFailureReason}. Falling back to default user.`);
-    }
-    if (token) { return { token, fallbackUser: null }; }
-
-    token = ports.forgejo.readToken('human');
-    if (!token) {
-      const msg = `No Forgejo token found for user "${fmt.agent(forgejoUser)}", bootstrap failed (${bootstrapResult.error || 'unknown'}), and no fallback token available for "${fmt.agent('human')}". Manual action required: create a token manually or run \`node parallix setup-review\` first.`;
-      error(msg);
-      return { ok: false, error: msg };
-    }
-    log(`Review submission fell back from ${fmt.agent(forgejoUser)} to ${fmt.agent('human')}.`);
-    // Durable record of why the PR carries the owner's identity rather than the
-    // implementer's, so a reviewer is not left guessing.
-    const reason = bootstrapFailureReason || 'agent token was missing and bootstrap did not provide a replacement token';
-    const fallbackSummary = `## Fallback: PR submitted as ${fmt.agent('human')}\n\nOriginal user: ${fmt.agent(forgejoUser)}\nBootstrap failure reason: ${reason}`;
-    if (!this.writeFallbackSummary(slug, fallbackSummary, { rootDir, log: internalLog })) {
-      log(fmt.status('WARN', `Could not persist fallback summary for ${fmt.slug(slug)}`));
-    }
-    return { token, fallbackUser: 'human' };
+  resolveHandoffReviewAssignment(...args: Parameters<HandoffReviewSubmission['resolveHandoffReviewAssignment']>) {
+    return this.submission.resolveHandoffReviewAssignment(...args);
   }
 
   async performHandoff(slug: string, options: PerformHandoffOptions = {}): Promise<HandoffResult> {
@@ -921,7 +188,7 @@ export class HandoffCommandUseCase {
       selectAgentFn = ports.agentSelection.selectAgent
       ,recoverGateFailure = false
     } = opts;
-    const captureNel = captureNelFn || ((nelSlug: string, nelOptions: CaptureNelOptions) => this.captureNelAtHandoff(nelSlug, nelOptions));
+    const captureNel = captureNelFn || ((nelSlug: string, nelOptions: CaptureNelOptions) => this.nel.captureNelAtHandoff(nelSlug, nelOptions));
     const internalLog = (message: string) => {
       if (/\[(WARN|FAIL)\]|failed|failure|conflict|missing|blocked|fallback|degraded/i.test(message)) { log(message); }
     };
@@ -1014,48 +281,9 @@ export class HandoffCommandUseCase {
         return { ok: false, error: msg };
       }
     }
-    const recorded = contract.checkpoints;
-    let finalCheckpoint: string | null = null;
-    let checkpointContent = '';
-    let evidenceRows: string[] = [];
-    if (recorded.length > 0) {
-      const latest = recorded[recorded.length - 1];
-      const rows = latest.goalCheck.map((row) => `| ${row.criterion} | ${row.evidence} |`);
-      const unverifiable = findUnverifiableGoalCheckRow(ports.fileSystem, rows, rootDir);
-      if (unverifiable) {
-        const msg = `The recorded evidence for ${latest.name} has a Goal Check row that cites no verifiable reference such as a recognized repo command/path, exact test name, test-file path, or ADR reference. Re-record it with \`px checkpoint record\`. Offending row: ${unverifiable}`;
-        error(msg);
-        return { ok: false, error: msg };
-      }
-      const incomplete = contract.successCriteria.flatMap((_, index) => (
-        contract.completedSuccessCriteria.includes(index) ? [] : [index + 1]
-      ));
-      if (incomplete.length > 0) {
-        const msg = `Success criteria ${incomplete.join(', ')} are incomplete before handoff. Mark every criterion complete with \`px mission mark-complete --criterion <index> --expected-version <n>\` (or \`--all\`) before handoff.`;
-        error(msg);
-        return { ok: false, error: msg };
-      }
-      // Completion is deliberately addressed by the stored criterion index,
-      // rather than prose copied into a checkpoint row. A completed criterion
-      // still needs its own evidence row, but the row's descriptive label is
-      // not another identity field to match.
-      if (latest.goalCheck.length < contract.successCriteria.length) {
-        const msg = `Success-criterion evidence is missing before handoff in ${latest.name}: ${contract.successCriteria.length} completed criteria require ${contract.successCriteria.length} Goal Check row(s), but only ${latest.goalCheck.length} were recorded. Re-record ${latest.name} with \`px checkpoint record\` and verifiable evidence for every completed criterion.`;
-        error(msg);
-        return { ok: false, error: msg };
-      }
-      log(fmt.status('PASS', `Recorded checkpoint evidence verified: ${latest.name} (${latest.goalCheck.length} Goal Check row(s)).`));
-    } else if (contract.draftedInDb) {
-      // A Mission drafted through the typed verbs records its evidence the same
-      // way. Handoff never writes evidence on the implementer's behalf.
-      const msg = `${fmt.slug(slug)} has no recorded checkpoint evidence. Record it with \`px checkpoint record\` before handoff; handoff never generates evidence.`;
-      error(msg);
-      return { ok: false, error: msg };
-    } else {
-      const evidence = this.verifyHandoffEvidence(slug, { rootDir, missionDirPath, log, error });
-      if (!('finalCheckpoint' in evidence)) { return evidence; }
-      ({ finalCheckpoint, checkpointContent, evidenceRows } = evidence);
-    }
+    const evidence = this.contract.verifyCheckpointEvidence(slug, contract, { rootDir, missionDirPath, log, error });
+    if (!('finalCheckpoint' in evidence)) { return evidence; }
+    const { finalCheckpoint, checkpointContent, evidenceRows } = evidence;
 
     const isForgejoReviewEnabledFn = opts.isForgejoReviewEnabledFn || ports.productConfig.isForgejoReviewEnabled;
     const forgejoEnabled = isForgejoReviewEnabledFn(rootDir);
@@ -1066,94 +294,19 @@ export class HandoffCommandUseCase {
     // assignee (DB-owned adhoc identities whose mirror was deleted).
     const forgejoUser = reviewStateUser
       || (taskResolution.taskFile ? ports.backlog.getTaskImplementer(taskResolution.taskFile) : null)
-      || (await this.deriveImplementerFromMissionStore(slug, missionServicesFn, rootDir, missionDirPath));
+      || (await this.contract.deriveImplementerFromMissionStore(slug, missionServicesFn, rootDir, missionDirPath));
 
     if (!forgejoUser) {
       error('forgejoUser is required for performHandoff. Ensure the mission Review or the Backlog task has an agent family assigned.');
       return { ok: false, error: 'forgejoUser is required' };
     }
 
-    if (skipGate) {
-      log(fmt.status('WARN', 'Repository verification skipped (--no-gate).'));
-    } else {
-      const verificationCommand = ports.verification.formatVerificationCommand(area || 'docs', rootDir);
-      const reusableProof = ports.verification.readReusableVerificationProof(verificationCommand, rootDir);
-      if (reusableProof.ok) {
-        log(fmt.status('PASS', 'Repository verification passed by reuse of an exact clean-tree proof.'));
-      } else {
-      // Bind a reusable proof to the inputs that existed before execution. A
-      // successful process exit alone must not certify a tree changed mid-gate.
-      const beforeGateProof = ports.verification.createVerificationProofIdentity(verificationCommand, rootDir);
-      log(`Verifying the repository: ${verificationCommand}`);
-      const verifyResult = runVerificationGateFn(area || 'docs', {
-        rootDir,
-        stdio: 'pipe',
-        runFn: ports.git.run
-      });
-      if (verifyResult.status !== 0) {
-        const stdout = (verifyResult.stdout || '').trim();
-        const stderr = (verifyResult.stderr || '').trim();
-        const msg = 'Final verification gate failed. Fix errors before submitting or use --no-gate if appropriate.';
-        error(msg);
-        const failure: HandoffResult = {
-          ok: false,
-          error: msg,
-          gateOutput: { stdout, stderr },
-          gateFailure: {
-            area: area || 'docs', command: verificationCommand, cwd: rootDir,
-            exitCode: verifyResult.status, stdout, stderr,
-            ...(ports.verification.isTransientVerificationFailure({ stdout, stderr }) ? { transient: true } : {}),
-          },
-        };
-        // `px handoff` used to print this result and exit, unlike the active
-        // command which routed it through rebound.  Keep one kernel policy for
-        // both entry points and re-run the complete handoff only after a real
-        // agent repair succeeds.  The recursive run disables this boundary so
-        // it returns fresh process evidence to the kernel instead of nesting
-        // another recovery budget.
-        if (!recoverGateFailure) { return failure; }
-        let retried: HandoffResult | null = null;
-        const outcome = await rebound(failure.gateFailure ? {
-          kind: 'gate-failure',
-          ...failure.gateFailure,
-        } : {
-          kind: 'handoff-verification', error: msg, gateOutput: `${stdout}\n${stderr}`.trim(),
-        }, {
-          slug,
-          worktree: rootDir,
-          implementer: forgejoUser,
-          startAgent: startAgentFn,
-          readHead: () => {
-            const result = ports.git.git(['-C', rootDir, 'rev-parse', 'HEAD']);
-            return result.status === 0 ? (result.stdout ?? '').trim() : null;
-          },
-          verify: async () => {
-            retried = await this.performHandoff(slug, {
-              ...opts, worktree: rootDir, force: true, recoverGateFailure: false,
-            });
-            return {
-              ok: Boolean(retried.ok),
-              diagnostic: retried.error || '',
-              reason: retried.gateFailure ? { kind: 'gate-failure', ...retried.gateFailure } : undefined,
-            };
-          },
-          log,
-          error,
-        });
-        return outcome.outcome === 'fixed' && retried
-          ? retried
-          : { ...failure, error: outcome.dossier || outcome.diagnostic || failure.error };
-      }
-      const proofResult = beforeGateProof.ok
-        ? ports.verification.writeReusableVerificationProof(verificationCommand, rootDir, { expectedIdentity: beforeGateProof.identity })
-        : beforeGateProof;
-      if (proofResult.ok) {
-        log(fmt.status('PASS', 'Repository verification passed.'));
-      } else {
-        log(fmt.status('WARN', `Repository verification passed, but its reusable proof is unavailable (${proofResult.error}).`));
-      }
-      }
-    }
+    const gateStage = {
+      rootDir, forgejoUser, log, error, startAgentFn, recoverGateFailure, options: opts,
+      retryHandoff: (retrySlug: string, retryOptions: PerformHandoffOptions) => this.performHandoff(retrySlug, retryOptions),
+    };
+    const verificationOutcome = await this.gateRecovery.verifyRepository(slug, { ...gateStage, skipGate, area, runVerificationGateFn });
+    if (verificationOutcome) { return verificationOutcome; }
 
     const rebaseResult = await rebaseFn(slug, {
       worktree: worktree || undefined,
@@ -1210,7 +363,7 @@ export class HandoffCommandUseCase {
     let submittedPr: { id: string; url: string | null } | null = null;
     if (forgejoEnabled) {
       internalLog(`Updating/Creating Forgejo PR as user ${fmt.agent(forgejoUser)}...`);
-      const credentials = await this.resolveHandoffForgejoToken(slug, forgejoUser, { rootDir, log, error, internalLog });
+      const credentials = await this.forgejo.resolveHandoffForgejoToken(slug, forgejoUser, { rootDir, log, error, internalLog });
       if (!('token' in credentials)) { return credentials; }
       token = credentials.token;
       fallbackUser = credentials.fallbackUser;
@@ -1243,7 +396,7 @@ export class HandoffCommandUseCase {
     // carried into the result so callers read one shape either way.
     const gatekeeperPushedBack = false;
     if (gatekeeperVerdict.pushedBack) {
-      return await this.remediateGatekeeperPushback(slug, {
+      return await this.gatekeeper.remediateGatekeeperPushback(slug, {
         gatekeeperResult,
         rootDir,
         forgejoUser,
@@ -1261,222 +414,24 @@ export class HandoffCommandUseCase {
         runGatekeeperFn,
         missionServicesFn,
         occurredAt,
+        retryHandoff: (retrySlug, retryOptions) => this.performHandoff(retrySlug, retryOptions),
       });
     }
 
-    // Step 2.6: Generic ## Gates runner — execute any gates declared in MISSION.md
-    const recordedGates = contract.gates;
-    if (contract.draftedInDb && recordedGates.length === 0) {
-      // Activation requires a declared gate, so none here means the recorded
-      // contract lost it. Running nothing would pass handoff unverified.
-      const msg = `${fmt.slug(slug)} has no recorded verification gate. Declare one with \`px gate add\` before handoff.`;
-      error(msg);
-      return { ok: false, error: msg };
-    }
-    const gatesResult = this.runDeclaredGates(verification.missionDir || '', rootDir, { log: internalLog, error, recordedGates });
-    if (gatesResult.ok === false) {
-      const msg = `Declared gate "${gatesResult.gate}" failed for ${fmt.slug(slug)}: ${gatesResult.error || gatesResult.reason}. Blocking handoff — task remains in active.`;
-      error(msg);
-      const processFailure = gatesResult.reason === 'gate-failed' ? gatesResult : null;
-      const failure: HandoffResult = {
-        ok: false,
-        error: msg,
-        reason: gatesResult.reason,
-        gateOutput: { stdout: (processFailure?.stdout || ''), stderr: (processFailure?.stderr || '') },
-        ...(processFailure ? {
-          gateFailure: {
-            area: 'declared gate', command: processFailure.gate, cwd: rootDir, exitCode: processFailure.exitCode,
-            stdout: processFailure.stdout || '', stderr: processFailure.stderr || processFailure.error || '',
-          },
-        } : {}),
-      };
-      if (!recoverGateFailure) { return failure; }
-      const reason = gatesResult.reason === 'validation-failed'
-        ? { kind: 'declared-gate-validation' as const, command: gatesResult.gate, diagnostic: gatesResult.error || msg }
-        : { kind: 'gate-failure' as const, ...failure.gateFailure! };
-      let retried: HandoffResult | null = null;
-      const outcome = await rebound(reason, {
-        slug,
-        worktree: rootDir,
-        implementer: forgejoUser,
-        startAgent: startAgentFn,
-        readHead: () => {
-          const result = this.ports.git.git(['-C', rootDir, 'rev-parse', 'HEAD']);
-          return result.status === 0 ? (result.stdout ?? '').trim() : null;
-        },
-        transitionToImplementer: async (missionSlug) => {
-          const services = await missionServicesFn(rootDir, { missionDir: missionDirPath });
-          await transitionReviewRepair(missionSlug, 'active', forgejoUser, services.store, services.lifecycle);
-          return ports.backlog.transitionTask(missionSlug, 'active', { rootDir, log });
-        },
-        verify: async () => {
-          retried = await this.performHandoff(slug, { ...opts, worktree: rootDir, force: true, recoverGateFailure: false });
-          return {
-            ok: Boolean(retried.ok),
-            diagnostic: retried.error || '',
-            reason: retried.reason === 'validation-failed'
-              ? { kind: 'declared-gate-validation', command: gatesResult.gate, diagnostic: retried.error || '' }
-              : retried.gateFailure ? { kind: 'gate-failure', ...retried.gateFailure } : undefined,
-          };
-        },
-        log,
-        error,
-      });
-      return outcome.outcome === 'fixed' && retried
-        ? retried
-        : { ...failure, recoveryAttempted: true, error: outcome.dossier || outcome.diagnostic || failure.error };
-    }
+    const declaredGateOutcome = await this.gateRecovery.runDeclaredGates(slug, {
+      ...gateStage, contract, missionDir: verification.missionDir || '', missionDirPath, internalLog, missionServicesFn,
+    });
+    if (declaredGateOutcome) { return declaredGateOutcome; }
 
     // architecture invariant: Transition Mission state through SqliteMissionStore FIRST.
     // The durable Mission state must commit before any external Backlog effect.
     // Database unavailability fails the operation (architecture invariant: fail-closed).
-    const missionServices = await missionServicesFn(rootDir, { missionDir: missionDirPath });
-
-    // architecture invariant: the checkpoint this handoff verified becomes durable Mission evidence
-    // in SQLite. CP-N.md stays an operator-authored input; it is never the
-    // authority the review transition reads.
-    // Evidence recorded through `px checkpoint record` is already durable, so
-    // handoff re-records only when it verified a legacy checkpoint document.
-    if (finalCheckpoint) {
-    const checkpointName = path.basename(finalCheckpoint).replace(/\.md$/, '');
-    const nextActionMatch = checkpointContent.match(/^\s*(?:\*\*)?Next action(?:\*\*)?:\s*(.+)$/mi);
-    const checkpointOutcome = await missionServices.checkpoints.record({
-      operationId: `handoff-checkpoint-${slug}`,
-      missionId: missionId(slug),
-      capabilities: new Set(['checkpoint:record']),
-      checkpoint: {
-        missionId: missionId(slug),
-        name: checkpointName,
-        rawFilename: path.basename(finalCheckpoint),
-        firstLine: (checkpointContent.split('\n')[0] || '').replace(/^#+\s*/, ''),
-        goalCheck: evidenceRows.map((row) => {
-          const cells = row.split('|').slice(1, -1).map((cell) => cell.trim());
-          return { criterion: cells[0] || '', evidence: cells[1] || '' };
-        }),
-        nextActionText: nextActionMatch ? nextActionMatch[1].trim() : 'Review the handed-off change.',
-      },
+    const reviewOutcome = await this.submission.submit(slug, {
+      rootDir, branch, missionDirPath, forgejoUser, submittedPr, occurredAt, missionServicesFn,
+      eligibleAgentsForStepFn, selectAgentFn, log, error,
+      checkpoint: finalCheckpoint ? { finalCheckpoint, checkpointContent, evidenceRows } : null,
     });
-    if (checkpointOutcome.status !== 'completed') {
-      const msg = `Recording checkpoint ${checkpointName} failed: ${checkpointOutcome.error?.message || 'unknown'}.`;
-      error(msg);
-      return { ok: false, error: msg };
-    }
-    }
-
-    // The review subject records where the branch is headed. A repository without
-    // a detectable primary branch still hands off; the target is nominal here.
-    let targetBranch = 'main';
-    try {
-      targetBranch = ports.missionUtils.getPrimaryBranch(rootDir) || 'main';
-    } catch {
-      targetBranch = 'main';
-    }
-    const { reviewer, implementer, reviewerEligibility } = this.resolveHandoffReviewAssignment(forgejoUser, {
-      worktree: rootDir,
-      eligibleAgentsForStepFn,
-      selectAgentFn,
-      log,
-    });
-    // AC11: capture the commit hash the branch is headed to. A review subject
-    // is a git commit hash, never a placeholder, so an approval of A covers A
-    // (plus whitelisted bookkeeping) and a moved branch is provably stale.
-    const reviewHeadSha = (() => {
-      try {
-        const head = ports.git.git(['-C', rootDir, 'rev-parse', 'HEAD']);
-        if (head.status === 0 && head.stdout?.trim()) { return head.stdout.trim(); }
-      } catch { /* Report a failed revision capture below. */ }
-      return null;
-    })();
-    if (!reviewHeadSha) {
-      const msg = `Cannot capture the HEAD commit for ${slug}; repair the Git checkout and retry handoff before starting review.`;
-      error(msg);
-      return { ok: false, error: msg };
-    }
-    // A mission that already carries a Review is handing back a later round of
-    // the same change, not starting a new review. Restarting it would submit
-    // round 1 against a recorded round N and the workflow would reject the
-    // handoff ("A new review round must advance the same pull request or local
-    // branch"); the change identity (pull request or branch) is preserved by
-    // advancing the existing aggregate instead.
-    const existing = await missionServices.store.load(missionId(slug));
-    const loadedReview = existing.kind === 'found' && 'review' in existing.mission
-      ? existing.mission.review
-      : null;
-    // A review with no round carries no change identity to advance, so it is
-    // treated as no review at all rather than read for a current round.
-    const priorReview = loadedReview && loadedReview.rounds?.length > 0 ? loadedReview : null;
-    // AC11: the review subject records the git commit hash the branch is headed
-    // to, never a placeholder. Capture it once here so a fresh review round and
-    // any later correction bind to the same commit identity.
-    const startedAt = occurredAt;
-    let reviewForHandoff = priorReview;
-    if (reviewForHandoff && reviewStatus(reviewForHandoff) === 'awaiting-implementation') {
-      const msg = `Review findings for ${slug} are awaiting an implementer resolution; record the actual finding dispositions before starting the next round.`;
-      error(msg);
-      return { ok: false, error: msg };
-    }
-    let review = reviewForHandoff
-      ? (reviewStatus(reviewForHandoff) === 'ready-for-next-round'
-        ? beginNextReviewRound(reviewForHandoff, reviewer, implementer, startedAt, reviewerEligibility)
-        // Undecided round: this handoff is a resubmission of the round already
-        // recorded (a relaunch, a retried CLI invocation), so it is submitted
-        // unchanged rather than rewritten.
-        : reviewForHandoff)
-      : startReview({
-        change: submittedPr
-          ? {
-            kind: 'pull-request' as const,
-            provider: 'forgejo',
-            id: submittedPr.id,
-            url: submittedPr.url,
-            sourceBranch: branch,
-            targetBranch,
-          }
-          : {
-            kind: 'local-branch' as const,
-            sourceBranch: branch,
-            targetBranch,
-          },
-        revision: changeRevision(reviewHeadSha),
-      }, reviewer, implementer, startedAt, reviewerEligibility);
-    // Repair invalidation has already opened an undecided round. Bind it to
-    // the committed repair only when handoff's gates have passed, retaining
-    // the revoked decision and its original subject in the preceding round.
-    if (priorReview && existing.kind === 'found' && existing.mission.status === 'active'
-      && reviewStatus(priorReview) === 'awaiting-review'
-      && priorReview.rounds.length > 1) {
-      const head = ports.git.git(['-C', rootDir, 'rev-parse', 'HEAD']);
-      const repairedHead = (head.stdout ?? '').trim();
-      if (head.status !== 0 || !repairedHead) {
-        return { ok: false, error: `Cannot read the committed repair revision for ${slug}.` };
-      }
-      const current = currentReviewRound(review);
-      review = { ...review, rounds: replaceCurrentRound(review, {
-        ...current, subject: { ...current.subject, revision: changeRevision(repairedHead) },
-        reviewer, implementer, startedAt,
-      }) };
-    }
-    const transitionResult = await missionServices.lifecycle.transition({
-      operationId: `handoff-transition-${slug}`,
-      missionId: missionId(slug),
-      capabilities: new Set(['mission:transition']),
-      command: {
-        type: 'submit-for-review',
-        gatesPassed: true,
-        review,
-        reviewerEligibility,
-      },
-      actor: reviewer,
-      occurredAt,
-      // Stable across relaunches so the lane-event UNIQUE constraint deduplicates
-      // a retried handoff instead of recording a second entry per attempt.
-      idempotencyKey: priorReview ? `handoff-${slug}:round-${currentReviewRound(review).number}` : `handoff-${slug}`,
-    });
-    if (transitionResult.status !== 'completed') {
-      const msg = `Mission state transition failed: ${transitionResult.error?.message || 'unknown'}.`;
-      error(msg);
-      return { ok: false, error: msg };
-    }
+    if (reviewOutcome) { return reviewOutcome; }
     const taskImplementer = forgejoUser;
     if (!await ports.backlog.transitionTask(slug, 'review', { implementer: taskImplementer, rootDir, log: internalLog })) {
       // A DB-owned adhoc identity has no Backlog mirror to transition; the
@@ -1491,7 +446,7 @@ export class HandoffCommandUseCase {
     }
 
     if (forgejoEnabled && token) {
-      const pushOutcome = this.pushBacklogTransition(slug, {
+      const pushOutcome = this.forgejo.pushBacklogTransition(slug, {
         rootDir,
         branch,
         token,
@@ -1507,184 +462,6 @@ export class HandoffCommandUseCase {
 
     log(fmt.status('PASS', 'Implementation is ready for independent review.'));
     return { ok: true, gatekeeperPushedBack };
-  }
-
-  /**
-   * Push the Backlog transition commit to Forgejo under a lease.
-   *
-   * Returns a terminal `HandoffResult` when the caller must stop (failure, or the
-   * plain-force success path that historically returned early), or `null` when the
-   * push succeeded and the caller should continue to the success message.
-   */
-  private pushBacklogTransition(slug: string, context: BacklogPushContext): HandoffResult | null {
-    const ports = this.ports;
-    const { rootDir, branch, token, fallbackUser, forgejoUser, force, log, error, gatekeeperPushedBack } = context;
-    log('Pushing state change to Forgejo...');
-    const reviewSettings = ports.forgejo.resolveForgejoSettings(rootDir);
-    const repoOwner = (reviewSettings.repo && reviewSettings.repo.split('/')[0]) || null;
-    const ownerToken = repoOwner ? ports.forgejo.readToken(repoOwner) : null;
-    const pushUser = ownerToken && repoOwner ? repoOwner : (fallbackUser || forgejoUser);
-    const pushToken = ownerToken || token;
-    const remoteUrl = ports.forgejo.authenticatedReviewUrl(pushUser, pushToken, rootDir);
-    const pushLease = this.backlogPushLease(slug, rootDir, branch, remoteUrl, error);
-    if (typeof pushLease !== 'string') { return pushLease; }
-    const pushResult = ports.git.git(['-C', rootDir, 'push', pushLease, String(remoteUrl || ''), branch || '']);
-    return this.handleBacklogPushResult(slug, pushResult, { rootDir, branch, remoteUrl, force, error, gatekeeperPushedBack });
-  }
-
-  private backlogPushLease(slug: string, rootDir: string, branch: string, remoteUrl: string, error: (_: string) => void): string | HandoffResult {
-    const fetchArgs = ['-C', rootDir, 'fetch', remoteUrl, `+refs/heads/${branch}:refs/remotes/review/${branch}`];
-    const fetchResult = this.ports.git.git(fetchArgs, { stdio: ['ignore', 'pipe', 'pipe'] });
-    if (fetchResult.status !== 0) {
-      const fetchError = (fetchResult.stderr || fetchResult.stdout || '').trim();
-      const msg = `Failed to refresh Backlog transition lease for ${fmt.slug(slug)} before Forgejo push.`;
-      error(`${msg}${fetchError ? ` ${fetchError}` : ''}`);
-      return { ok: false, error: msg };
-    }
-    const tracking = this.ports.forgejo.resolveTrackingBranchSha(branch || '', rootDir);
-    if (!tracking.ok) {
-      const msg = `Failed to resolve Backlog transition lease for ${fmt.slug(slug)} before Forgejo push.`;
-      error(msg);
-      return { ok: false, error: `${msg} ${tracking.error || ''}`.trim() };
-    }
-    return `--force-with-lease=refs/heads/${branch}:${String(tracking.sha || '')}`;
-  }
-
-  private handleBacklogPushResult(slug: string, result: CommandResult, context: Pick<BacklogPushContext, 'rootDir' | 'branch' | 'force' | 'error' | 'gatekeeperPushedBack'> & { remoteUrl: string }): HandoffResult | null {
-    if (result.status === 0) { return null; }
-    const pushError = [result.stderr, result.stdout].filter(Boolean).join('\n');
-    if (context.force && /non-fast-forward|stale info|fetch first/i.test(pushError)) {
-      const forced = this.ports.git.git(['-C', context.rootDir, 'push', '--force', String(context.remoteUrl || ''), context.branch || '']);
-      if (forced.status === 0) {
-        fmt.log.info(`Backlog transition for ${fmt.slug(slug)} required plain force after stale lease.`);
-        return { ok: true, gatekeeperPushedBack: context.gatekeeperPushedBack };
-      }
-      const forceError = (forced.stderr || forced.stdout || '').trim();
-      return this.backlogPushFailure(slug, forceError, context.error);
-    }
-    return this.backlogPushFailure(slug, pushError.trim(), context.error);
-  }
-
-  private backlogPushFailure(slug: string, detail: string, error: (_: string) => void): HandoffResult {
-    const msg = `Failed to push Backlog transition for ${fmt.slug(slug)} to Forgejo.`;
-    error(msg);
-    return { ok: false, error: detail ? `${msg} ${detail}` : msg };
-  }
-
-  /**
-   * Bounded agent relaunch after gatekeeper pushback. Re-enters `performHandoff`
-   * with a decremented retry budget and an incremented attempt counter, so the
-   * recursion guard (3 attempts) and the global retry budget both hold.
-   */
-  private async remediateGatekeeperPushback(slug: string, context: GatekeeperRemediationContext): Promise<HandoffResult> {
-    const {
-      gatekeeperResult, rootDir, forgejoUser, currentAttempt, log, error,
-      startAgentFn, worktree, skipGate, forceWithLease,
-      isForgejoReviewEnabledFn, rebaseFn, runVerificationGateFn, runGatekeeperFn, missionServicesFn,
-      occurredAt,
-    } = context;
-    let retriesLeft = context.retriesLeft;
-
-    log(`Gatekeeper pushback posted for ${fmt.slug(slug)} — attempting automated artifact remediation...`);
-    // Build a prompt listing every missing artifact with explicit creation instructions
-    const missingItems = gatekeeperResult.missing;
-    const relaunchPrompt = [
-      `Gatekeeper pushback: missing mandatory artifacts for \`${slug}\`.`,
-      '',
-      'The following files are required before a reviewer engages:',
-      '',
-      ...missingItems.map(item => `- ${item}`),
-      '',
-      '**Action: create the missing artifacts so the handoff can proceed.**',
-      '',
-      ...missingItems
-        .filter(item => item.includes('MISSION.md'))
-        .map(() => '- **create** `MISSION.md` with the standard mission contract template (title, goal, scope, checkpoints, gates).'),
-      ...missingItems
-        .filter(item => item.includes('CP-'))
-        .map(() => '- **create** at least one checkpoint document (e.g. `CP-1.md`) with a `## Goal Check` table containing real evidence such as a backticked command, test name, ADR reference, or test file path.'),
-      ...missingItems
-        .filter(item => item.includes('backlog/tasks') || item.includes('backlog/task'))
-        .map(() => '- **create** a backlog task file at `backlog/tasks/<slug> - <title>.md` with YAML frontmatter (id, title, status, labels) and a description section.'),
-      '',
-      `After creating the missing artifacts, re-run the review start (\`px review ${slug} --start\`).`,
-    ].join('\n');
-
-    // TASK-2377.05 (SC7): gatekeeper pushback bounces through the one rebound
-    // kernel like every other agent-fixable failure. The kernel owns the launch,
-    // the budget, and the verified fix; `verify` re-runs the handoff itself, so
-    // this is reported repaired only when the handoff actually completes.
-    //
-    // The budget is clamped to the caller's remaining global retry budget so the
-    // recursion guard (`maxAttempts` / `remainingRetries`) still holds: the
-    // verify re-enters `performHandoff` with both decremented exactly as before.
-    const initialBudget = retriesLeft;
-    if (retriesLeft <= 0) {
-      // Budget already spent by an outer attempt — strand without launching.
-      const spent = `Gatekeeper pushback persisted after ${currentAttempt - 1} relaunch attempts (${currentAttempt - 1}/2 budget). Manual intervention required to create: ${missingItems.join(', ')}.`;
-      error(spent);
-      return { ok: false, gatekeeperPushedBack: true, error: spent };
-    }
-    let repairedResult: HandoffResult | null = null;
-    const outcome = await rebound(
-      {
-        kind: 'artifact-incomplete',
-        role: 'implementer',
-        diagnostic: relaunchPrompt,
-      },
-      {
-        slug,
-        worktree: rootDir,
-        implementer: forgejoUser,
-        // One launch per level: the retry budget is spent by the recursion into
-        // `performHandoff` below (which decrements `remainingRetries`), not by
-        // the kernel looping here. Two nested levels give the same two total
-        // launches the pre-kernel loop made.
-        maxAttempts: 1,
-        maxLaunchRetries: 0,
-        startAgent: startAgentFn,
-        readHead: () => {
-          const result = this.ports.git.git(['-C', rootDir, 'rev-parse', 'HEAD']);
-          return result.status === 0 ? (result.stdout ?? '').trim() : null;
-        },
-        verify: async (attempt: number) => {
-          const retryResult = await this.performHandoff(slug, {
-            worktree,
-            skipGate,
-            force: true,
-            forceWithLease,
-            isForgejoReviewEnabledFn: isForgejoReviewEnabledFn,
-            rebaseFn: rebaseFn,
-            runVerificationGateFn: runVerificationGateFn,
-            runGatekeeperFn: runGatekeeperFn,
-            startAgentFn: startAgentFn,
-            missionServicesFn: missionServicesFn,
-            log,
-            error,
-            maxAttempts: currentAttempt + 1,
-            remainingRetries: Math.max(0, initialBudget - attempt),
-            occurredAt,
-          });
-          repairedResult = retryResult;
-          return { ok: Boolean(retryResult.ok), diagnostic: retryResult.error || '' };
-        },
-        log,
-        error,
-      },
-    );
-
-    if (outcome.outcome === 'fixed' && repairedResult) {
-      log('Handoff succeeded after agent relaunch.');
-      return { ...(repairedResult as HandoffResult), gatekeeperPushedBack: true };
-    }
-
-    // Budget spent, or the classifier ruled the pushback human-only.
-    // Only the outer handoff returns the dossier. Recursive verification levels
-    // return their last diagnostic so the outer dossier retains the evidence
-    // once instead of nesting copies of itself on every bounded retry.
-    const msg = `Manual intervention required. ${currentAttempt === 1 ? outcome.dossier || outcome.diagnostic : outcome.diagnostic}`;
-    error(msg);
-    return { ok: false, gatekeeperPushedBack: true, error: msg };
   }
 
   /**

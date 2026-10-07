@@ -586,6 +586,42 @@ export const ADR0053_PERSISTENCE_INVENTORY: readonly ADR0053BoundaryEntry[] = [
     cutoverTask: null,
   },
   {
+    // Responsibility module of the same explicit, read-only legacy import
+    // (task-intake-import-legacy-missions); it reads legacy material and
+    // writes only through the Mission store port.
+    id: 'task-intake-import-legacy-record-source',
+    concept: 'TaskIntake',
+    pathType: 'default',
+    fileLocation: 'src/adapters/backlog/legacy-record-source.ts',
+    operation: 'read',
+    classification: 'external-fact-or-intake',
+    cutoverTask: null,
+  },
+  {
+    // Responsibility module of the same explicit, read-only legacy import
+    // (task-intake-import-legacy-missions); it reads legacy material and
+    // writes only through the Mission store port.
+    id: 'task-intake-import-legacy-companions',
+    concept: 'TaskIntake',
+    pathType: 'default',
+    fileLocation: 'src/adapters/backlog/legacy-import-companions.ts',
+    operation: 'read',
+    classification: 'external-fact-or-intake',
+    cutoverTask: null,
+  },
+  {
+    // Responsibility module of the same explicit, read-only legacy import
+    // (task-intake-import-legacy-missions); it reads legacy material and
+    // writes only through the Mission store port.
+    id: 'task-intake-import-legacy-checkpoints',
+    concept: 'TaskIntake',
+    pathType: 'default',
+    fileLocation: 'src/adapters/backlog/legacy-import-checkpoints.ts',
+    operation: 'read',
+    classification: 'external-fact-or-intake',
+    cutoverTask: null,
+  },
+  {
     id: 'task-intake-audit-legacy-missions',
     concept: 'TaskIntake',
     pathType: 'default',
@@ -889,7 +925,7 @@ export const ADR0053_PERSISTENCE_INVENTORY: readonly ADR0053BoundaryEntry[] = [
     id: 'artifacts-review-reading',
     concept: 'LargeArtifacts',
     pathType: 'default',
-    fileLocation: 'src/adapters/review/review-artifacts.ts',
+    fileLocation: 'src/adapters/review/review-artifact-files.ts',
     operation: 'read',
     classification: 'generated-artifact',
     cutoverTask: null,
@@ -1237,6 +1273,34 @@ export const MISSION_DOCUMENT_CALL_SITES: readonly MissionDocumentCallSiteEntry[
     fileLocation: 'src/application/handoff-command-use-case.ts',
     purpose: 'verify MISSION.md exists and read Refinement Signals / Gates as the mission contract evidence before handoff',
     pathPatterns: ['MISSION.md', 'findMissionDir', 'backlog/tasks'],
+    classification: 'mission-document-evidence',
+  },
+  {
+    id: 'mission-doc-call-handoff-contract',
+    fileLocation: 'src/application/handoff-contract.ts',
+    purpose: 'verify the legacy checkpoint document path and refuse an uncommitted MISSION.md before handoff',
+    pathPatterns: ['MISSION.md'],
+    classification: 'mission-document-evidence',
+  },
+  {
+    id: 'mission-doc-call-handoff-declared-gates',
+    fileLocation: 'src/application/handoff-declared-gates.ts',
+    purpose: 'read the MISSION.md `## Gates` section for a Mission with no recorded gates',
+    pathPatterns: ['MISSION.md'],
+    classification: 'mission-document-evidence',
+  },
+  {
+    id: 'mission-doc-call-handoff-gatekeeper',
+    fileLocation: 'src/application/handoff-gatekeeper-remediation.ts',
+    purpose: 'name the missing MISSION.md and backlog task artifacts in the gatekeeper relaunch prompt',
+    pathPatterns: ['MISSION.md', 'backlog/tasks'],
+    classification: 'mission-document-evidence',
+  },
+  {
+    id: 'mission-doc-call-handoff-nel',
+    fileLocation: 'src/application/handoff-nel-capture.ts',
+    purpose: 'read the predicted NEL bucket from a legacy MISSION.md',
+    pathPatterns: ['MISSION.md'],
     classification: 'mission-document-evidence',
   },
   {

@@ -714,8 +714,12 @@ test('a failing declared gate returns its process evidence and blocks review (TA
 
 
 test('handoff use case source carries no TypeScript suppression directive (TASK-2668.01)', () => {
-  const source = fs.readFileSync(new URL('../../../src/application/handoff-command-use-case.ts', import.meta.url), 'utf8');
-  assert.doesNotMatch(source, /@ts-(?:nocheck|ignore|expect-error)/);
+  const applicationDir = new URL('../../../src/application/', import.meta.url);
+  const sources = fs.readdirSync(applicationDir).filter((name) => /^handoff-.+\.ts$/.test(name));
+  assert.ok(sources.includes('handoff-command-use-case.ts'));
+  for (const name of sources) {
+    assert.doesNotMatch(fs.readFileSync(new URL(name, applicationDir), 'utf8'), /@ts-(?:nocheck|ignore|expect-error)/, name);
+  }
 });
 
 test('a port implementation with a mismatched signature fails compilation (TASK-2668.01)', () => {
