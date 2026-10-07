@@ -1,8 +1,8 @@
 ---
 id: TASK-2667
 title: Release pipeline failure
-status: backlog
-assignee: []
+status: done
+assignee: [codex]
 created_date: '2026-10-06 11:36'
 labels: []
 dependencies: []

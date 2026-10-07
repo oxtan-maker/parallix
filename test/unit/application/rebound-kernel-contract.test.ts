@@ -51,7 +51,9 @@ const hookReason: ReboundReason = {
 function contextFor(overrides: Partial<ReboundContext> = {}): ReboundContext {
   return {
     slug: 'task-2377.03-fixture',
-    worktree: '/tmp/task-2377.03-fixture',
+    // An empty worktree keeps ordinary kernel-contract cases in-memory. Cases
+    // that assert recovery-evidence persistence supply an isolated temp dir.
+    worktree: '',
     implementer: 'codex',
     verify: () => ({ ok: true }),
     startAgent: async () => ({ agent: 'codex', result: { status: 0 } }),
