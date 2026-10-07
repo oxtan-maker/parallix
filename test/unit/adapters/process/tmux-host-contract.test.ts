@@ -1,7 +1,8 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { PassThrough } from 'node:stream';
 import childProcess from 'node:child_process';
+import { EventEmitter } from 'node:events';
+import { PassThrough } from 'node:stream';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtemp } from '../../../helpers/temp-dir.js';
@@ -152,6 +153,49 @@ test('interactive supervision retries an attach that loses the server/window rac
   assert.equal(await result, 6);
   assert.deepEqual(spawned, ['px', 'tmux', 'tmux']);
 });
+
+for (const clientEvent of ['exit', 'error', 'early-exit', 'early-detach']) {
+  test(`supervisor settles after retained interactive client ${clientEvent} (TASK-2670)`, async context => {
+    const host = Object.assign(new EventEmitter(), { stdout: new PassThrough(), stderr: new PassThrough(), kill: () => true });
+    const clientKills: string[] = [];
+    const client = Object.assign(new EventEmitter(), { kill: (signal?: string) => { clientKills.push(signal || ''); return true; } });
+    const readiness = Object.assign(new EventEmitter(), { kill: () => true });
+    let spawnedClient = false;
+    const spawn = context.mock.method(childProcess, 'spawn', (command: string) => {
+      if (command === 'tmux') { spawnedClient = true; return client as never; }
+      return host as never;
+    });
+    const execFile = context.mock.method(childProcess, 'execFile', (_command: string, _args: readonly string[], _options: object, callback: (error: Error | null) => void) => {
+      setImmediate(() => callback(null));
+      return readiness as never;
+    });
+    const stdinTTY = Object.getOwnPropertyDescriptor(process.stdin, 'isTTY');
+    const stdoutTTY = Object.getOwnPropertyDescriptor(process.stdout, 'isTTY');
+    Object.defineProperty(process.stdin, 'isTTY', { configurable: true, value: true });
+    Object.defineProperty(process.stdout, 'isTTY', { configurable: true, value: true });
+    let cleaned = 0;
+    try {
+      const result = superviseTmuxLaunch({ command: 'px', args: [], socketPath: '/tmp/task.sock', sessionName: 'task', windowName: 'console', started: () => true, cleanup: () => { cleaned += 1; } });
+      if (clientEvent === 'early-exit') { host.emit('close', 0); }
+      await new Promise<void>(resolve => {
+        const wait = () => { if (spawnedClient) { resolve(); } else { setImmediate(wait); } };
+        wait();
+      });
+      if (clientEvent === 'early-detach') { client.emit('exit', 0); }
+      if (clientEvent !== 'early-exit') { host.emit('close', 0); }
+      if (clientEvent !== 'early-detach') { client.emit(clientEvent === 'early-exit' ? 'exit' : clientEvent, clientEvent === 'error' ? new Error('attach failed') : 0); }
+      assert.equal(spawn.mock.callCount(), 2, 'an explicit detach must not attach again at command completion');
+      assert.equal(await result, 0);
+      assert.equal(cleaned, 1);
+      assert.deepEqual(clientKills, []);
+    } finally {
+      spawn.mock.restore();
+      execFile.mock.restore();
+      if (stdinTTY) { Object.defineProperty(process.stdin, 'isTTY', stdinTTY); } else { delete (process.stdin as { isTTY?: boolean }).isTTY; }
+      if (stdoutTTY) { Object.defineProperty(process.stdout, 'isTTY', stdoutTTY); } else { delete (process.stdout as { isTTY?: boolean }).isTTY; }
+    }
+  });
+}
 
 test('retired-session cleanup tolerates a concurrent closer and removes transport (TASK-2643)', context => {
   const warnings: string[] = [];

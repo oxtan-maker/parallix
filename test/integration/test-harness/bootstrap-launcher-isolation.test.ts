@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
-import { spawn } from 'child_process';
+import { spawn, spawnSync } from 'child_process';
 'use strict';
 
 // Regression test for task-2231: unit tests sometimes hang around the draft
@@ -27,6 +27,28 @@ function writeLauncher(filePath, body) {
   fs.writeFileSync(filePath, `#!${process.execPath}\n${body}\n`);
   fs.chmodSync(filePath, 0o755);
 }
+
+test('bootstrap preserves nvm discovery while isolating HOME', () => {
+  const operatorHome = fs.mkdtempSync(path.join(os.tmpdir(), 'px-nvm-home-'));
+  try {
+    for (const explicit of [undefined, path.join(operatorHome, 'custom-nvm')]) {
+      const env = { ...process.env, HOME: operatorHome };
+      delete env.NVM_DIR;
+      if (explicit) { env.NVM_DIR = explicit; }
+      const result = spawnSync(process.execPath, [
+        '--import', 'tsx', '--import', '../../bootstrap-parallix-home.ts',
+        '--input-type=module', '-e',
+        'process.stdout.write(JSON.stringify({ home: process.env.HOME, nvm: process.env.NVM_DIR }))',
+      ], { cwd: import.meta.dirname, env, encoding: 'utf8', timeout: 10000 });
+      assert.equal(result.status, 0, result.stderr);
+      const observed = JSON.parse(result.stdout);
+      assert.notEqual(observed.home, operatorHome);
+      assert.equal(observed.nvm, explicit ?? path.join(operatorHome, '.nvm'));
+    }
+  } finally {
+    fs.rmSync(operatorHome, { recursive: true, force: true });
+  }
+});
 
 test('unit bootstrap ignores the operator OPENCODE_BIN override when resolving the custom launcher', async () => {
   const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'task-2231-repro-'));

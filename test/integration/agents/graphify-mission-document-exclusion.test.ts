@@ -14,7 +14,7 @@ function graphifyPython(): string {
   const executable = childProcess.spawnSync('which', ['graphify'], { encoding: 'utf8' });
   assert.equal(executable.status, 0, executable.stderr);
   const launcher = fs.readFileSync(executable.stdout.trim(), 'utf8');
-  const interpreter = /^#!(.+python)\r?$/m.exec(launcher)?.[1];
+  const interpreter = /^#!(\S*python(?:\d+(?:\.\d+)*)?)\r?$/m.exec(launcher)?.[1];
   assert.ok(interpreter, 'graphify launcher must name its Python interpreter');
   return interpreter;
 }

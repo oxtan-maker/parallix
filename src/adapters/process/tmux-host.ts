@@ -40,6 +40,11 @@ export function missionSocketPath(identity: Pick<AgentRunIdentity, 'repositoryKe
   return path.join(terminalSocketFallbackRoot(env), `${name}.sock`);
 }
 
+/** Durable operator transcript, retained when the live tmux server is closed. */
+export function missionTerminalCapturePath(identity: Pick<AgentRunIdentity, 'repositoryKey' | 'missionId'>, env: NodeJS.ProcessEnv = process.env): string {
+  return `${missionSocketPath(identity, env)}.log`;
+}
+
 /** Single-quote one value for POSIX `sh`. */
 export function shellQuote(value: string): string {
   return `'${String(value).replace(/'/g, `'\\''`)}'`;
@@ -119,7 +124,7 @@ function consolePxScript(command: string | undefined): string {
   return ['#!/bin/sh', `exec /bin/bash -ic 'exec "$@"' bash ${shellQuote(command)} "$@"`, ''].join('\n');
 }
 
-function hostScript(socketPath: string, sessionName: string, windowName: string, scratch: string, cwd: string, supervisorPid: number, consoleBin: string): string {
+function hostScript(socketPath: string, sessionName: string, windowName: string, scratch: string, cwd: string, supervisorPid: number, consoleBin: string, capturePath: string): string {
   // The server and retained console must not inherit operation credentials.
   const cleanEnv = ['PATH', 'HOME', 'TERM', 'SHELL', 'LANG', 'USER', 'LOGNAME', 'PARALLIX_HOME', 'XDG_CONFIG_HOME', 'XDG_STATE_HOME', 'XDG_DATA_HOME'].filter(key => process.env[key])
     .map(key => `${key}=${shellQuote(process.env[key]!)}`).join(' ');
@@ -127,7 +132,9 @@ function hostScript(socketPath: string, sessionName: string, windowName: string,
   const t = `env -i ${cleanEnv} PARALLIX_TERMINAL_STATE_DIR=${shellQuote(stateRoot)} tmux -S ${shellQuote(socketPath)}`;
   const fifo = shellQuote(path.join(scratch, 'out'));
   const status = shellQuote(path.join(scratch, 'status'));
+  const capture = shellQuote(capturePath);
   const name = shellQuote(sessionName);
+  const consoleTarget = shellQuote(`=${sessionName}:console`);
   const target = shellQuote(`=${sessionName}:${windowName}`);
   return [
     '#!/bin/sh',
@@ -154,11 +161,12 @@ function hostScript(socketPath: string, sessionName: string, windowName: string,
     // -A would attach when the session exists and require a caller TTY.
     // Concurrent creators may lose new-session; recheck the exact session.
     `${t} has-session -t ${shellQuote(`=${sessionName}`)} 2>/dev/null || ${t} -f /dev/null new-session -d -s ${name} -n console -x 200 -y 50 -c ${shellQuote(cwd)} ${shellQuote(`PATH=${consoleBin}:$PATH exec /bin/sh -i`)} 2>/dev/null || ${t} has-session -t ${shellQuote(`=${sessionName}`)} || exit 70`,
+    `${t} pipe-pane -t ${consoleTarget} -o ${shellQuote(`cat >> ${capture}`)} || exit 70`,
     `${t} new-window -d -t ${name} -n ${shellQuote(windowName)} -c ${shellQuote(cwd)} ${shellQuote(`sh ${shellQuote(path.join(scratch, 'pane.sh'))}`)} || exit 70`,
     `${t} set-option -w -t ${target} @px_host_pid "$$" >/dev/null`,
     `${t} set-option -w -t ${target} @px_supervisor_pid ${supervisorPid} >/dev/null`,
     `${t} pipe-pane -t ${target} -o ${shellQuote(`cat > ${fifo}`)} || { cleanup; exit 70; }`,
-    `cat ${fifo} &`,
+    `cat ${fifo} | tee -a ${capture} &`,
     'relay=$!',
     `${t} select-window -t ${target}`,
     `${t} wait-for -S ${shellQuote(`${windowName}-go`)}`,
@@ -169,6 +177,13 @@ function hostScript(socketPath: string, sessionName: string, windowName: string,
     'wait "$relay"',
     `if [ -s ${status} ]; then`,
     `  result=$(cat ${status})`,
+    `  printf '\n[mission terminal command exit code: %s]\n' "$result" >> ${capture}`,
+    // Show the completed command in the surviving operator shell before the
+    // operation window disappears. Console commands (including integration)
+    // also stream into the durable transcript.
+    `  ${t} send-keys -t ${consoleTarget} -l ${shellQuote(`tail -n 50 ${capture}`)}`,
+    `  ${t} send-keys -t ${consoleTarget} Enter`,
+    `  ${t} select-window -t ${consoleTarget}`,
     `  ${t} wait-for -S ${shellQuote(`${windowName}-done`)}`,
     `  ${t} kill-window -t ${target} 2>/dev/null`,
     '  exit "$result"',
@@ -207,7 +222,7 @@ export function prepareTmuxLaunch(input: TmuxLaunchInput, options: { env?: NodeJ
   writeEnvFile(path.join(scratch, 'pane.env'), { ...input.env, PWD: input.cwd, PARALLIX_MISSION_TERMINAL: input.identity.missionId, PARALLIX_MISSION_SOCKET: socketPath });
   fs.writeFileSync(path.join(scratch, 'command.sh'), commandScript(socketPath, scratch, input.command, input.args), { mode: 0o700 });
   fs.writeFileSync(path.join(scratch, 'pane.sh'), paneScript(socketPath, windowName, scratch), { mode: 0o700 });
-  fs.writeFileSync(path.join(scratch, 'host.sh'), hostScript(socketPath, sessionName, windowName, scratch, input.cwd, input.supervisorPid ?? process.pid, consoleBin), { mode: 0o700 });
+  fs.writeFileSync(path.join(scratch, 'host.sh'), hostScript(socketPath, sessionName, windowName, scratch, input.cwd, input.supervisorPid ?? process.pid, consoleBin, missionTerminalCapturePath(input.identity, env)), { mode: 0o700 });
   const spawnSyncFn = options.spawnSyncFn ?? childProcess.spawnSync;
   let started = false;
   return {
@@ -304,38 +319,46 @@ export function superviseTmuxLaunch(launch: TmuxLaunch): Promise<number> {
     const child = childProcess.spawn(launch.command, launch.args, { stdio: ['inherit', 'pipe', 'pipe'], detached: true });
     let client: childProcess.ChildProcess | null = null;
     let finished = false;
+    let commandClosed = false;
+    let commandExitCode = 1;
+    let attachedOnce = false;
     let attaching: ReturnType<typeof setTimeout> | null = null;
     let readiness: childProcess.ChildProcess | null = null;
     child.stdout?.on('data', chunk => { if (!client) { process.stdout.write(chunk); } });
     child.stderr?.pipe(process.stderr, { end: false });
     const scheduleAttach = () => {
-      if (!finished && !client && !attaching) { attaching = setTimeout(attach, 50); }
+      if (!finished && !commandClosed && !client && !attaching) { attaching = setTimeout(attach, 50); }
     };
     const attach = () => {
       attaching = null;
       if (finished) { return; }
-      readiness = childProcess.execFile('tmux', ['-S', launch.socketPath, 'display-message', '-p', '-t', `=${launch.sessionName}:${launch.windowName}`, '#{pane_id}'], { timeout: 500 }, error => {
+      readiness = childProcess.execFile('tmux', commandClosed
+        ? ['-S', launch.socketPath, 'has-session', '-t', `=${launch.sessionName}`]
+        : ['-S', launch.socketPath, 'display-message', '-p', '-t', `=${launch.sessionName}:${launch.windowName}`, '#{pane_id}'], { timeout: 500 }, error => {
         readiness = null;
         if (finished) { return; }
-        if (error) { scheduleAttach(); return; }
-        client = childProcess.spawn('tmux', ['-S', launch.socketPath, 'attach-session', '-t', `=${launch.sessionName}:${launch.windowName}`], { stdio: 'inherit' });
+        if (error) { if (commandClosed) { settle(commandExitCode); } else { scheduleAttach(); } return; }
+        client = childProcess.spawn('tmux', ['-S', launch.socketPath, 'attach-session', '-t', `=${launch.sessionName}`], { stdio: 'inherit' });
+        attachedOnce = true;
         const attached = client;
         attached.once('error', () => {
-          if (client === attached) { client = null; scheduleAttach(); }
+          if (client === attached) { client = null; }
+          if (commandClosed) { settle(commandExitCode); } else { scheduleAttach(); }
         });
         attached.once('exit', code => {
           if (client !== attached) { return; }
           client = null;
+          if (commandClosed) { settle(commandExitCode); }
           // A non-zero attach can race the just-created server/window. Retry
           // while the supervised command is still alive; a clean detach must
           // remain detached and therefore does not trigger a new attachment.
-          if (code !== 0) { scheduleAttach(); }
+          else if (code !== 0) { scheduleAttach(); }
         });
       });
     };
     if (interactive) { scheduleAttach(); }
-    const interrupt = () => { child.kill('SIGINT'); };
-    const terminate = () => { child.kill('SIGTERM'); };
+    const interrupt = () => { if (commandClosed) { client?.kill('SIGINT'); } else { child.kill('SIGINT'); } };
+    const terminate = () => { if (commandClosed) { client?.kill('SIGTERM'); } else { child.kill('SIGTERM'); } };
     process.on('SIGINT', interrupt);
     process.on('SIGTERM', terminate);
     const cleanup = () => {
@@ -347,8 +370,20 @@ export function superviseTmuxLaunch(launch: TmuxLaunch): Promise<number> {
       process.removeListener('SIGTERM', terminate);
       launch.cleanup();
     };
+    const settle = (code: number) => { if (finished) { return; } cleanup(); resolve(code); };
     child.once('error', err => { cleanup(); reject(err); });
-    child.once('close', code => { cleanup(); resolve(code ?? 1); });
+    child.once('close', code => {
+      commandClosed = true;
+      commandExitCode = code ?? 1;
+      if (attaching) { clearTimeout(attaching); attaching = null; }
+      // An attached client is part of this interactive command's lifecycle.
+      // Keep px alive while the operator reads the retained console, then
+      // return only after an explicit tmux detach.  This avoids leaving an
+      // inherited-stdio tmux child orphaned after the entry process exits.
+      if (client) { return; }
+      if (interactive && !attachedOnce) { if (!readiness) { attach(); } return; }
+      settle(code ?? 1);
+    });
   });
 }
 
@@ -376,6 +411,7 @@ export function retireMissionTerminal(socketPath: string, sessionName: string, s
 function finishRetiredTerminal(socketPath: string, sessionName: string, spawnSyncFn: SpawnSyncFn): void {
   const retired = spawnSyncFn('tmux', ['-S', socketPath, 'show-option', '-v', '-t', sessionName, '@px_retired'], { encoding: 'utf8', timeout: 5000 });
   if (retired.status !== 0 || String(retired.stdout).trim() !== '1') { return; }
+  if (listTmuxSessions(socketPath, spawnSyncFn).some(session => session.name === sessionName && session.attached)) { return; }
   const windows = spawnSyncFn('tmux', ['-S', socketPath, 'list-windows', '-t', `=${sessionName}`, '-F', '#{@px_host_pid}'], { encoding: 'utf8', timeout: 5000 });
   if (windows.status === 0 && !String(windows.stdout).split('\n').some(pid => positivePid(pid) !== null)) {
     closeMissionTerminal(socketPath, sessionName, spawnSyncFn);

@@ -1,8 +1,8 @@
 ---
 id: TASK-2670
 title: Keep mission terminal open through integration and show final stats
-status: backlog
-assignee: []
+status: done
+assignee: [codex]
 created_date: '2026-10-06 13:57'
 updated_date: '2026-10-06 14:08'
 labels:

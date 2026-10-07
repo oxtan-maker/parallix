@@ -19,13 +19,19 @@ px attach task-1234
 
 Use `Ctrl-b d` to detach; it does not stop work. `--read-only` opens a watching
 client. When work finishes, its operation window closes and one console shell remains
-for inspection and later commands. Removing the mission worktree retires the
-terminal after any owned operation drains. Attach does not require a live agent or retained
+for inspection and later commands, showing the last 50 lines of command output
+and its exit code. Commands started from that console also retain their output.
+Removing the mission worktree retires the terminal after any owned operation
+drains and the operator detaches; an attached result view remains available. Attach does not require a live agent or retained
 run record. Concurrent operations use separate windows in the same mission
 session. Different repositories and missions have separate private sockets.
 Use `px attach <slug> --close` to remove an idle terminal when finished; it
 refuses to close a terminal with an owned operation. Terminal cleanup does not
-remove retained agent history.
+remove retained agent history. It also leaves a private command transcript for
+the mission terminal. After landing has retired the live terminal, `px attach
+<slug> --list` reports the transcript location so an operator can recover the
+final integration result, gate diagnostics, and statistics from the surviving
+repository checkout.
 Retirement failures warn without blocking integration closeout. The console
 retains the resolved terminal-state location so commands and attachment from
 inside it reuse the same mission socket. If a configured state path is too long
@@ -92,6 +98,12 @@ Restart cleanup signals the recorded command before removing its window.
 This is best effort when the recorded process identity is stale or a child
 has escaped its supervisor: removing a tmux window alone does not prove that
 all detached descendants have exited.
+
+The terminal-command transcript is separate from agent-run history: it records
+the operator-visible command output and its exit code, including integration
+gate and closeout messages. It is retained for terminal recovery; an absent
+live terminal or unavailable observation is reported as such rather than being
+inferred from scrollback.
 
 Terminal separation is not a security sandbox. On Linux, the existing
 Bubblewrap confinement boundary remains responsible for agent filesystem

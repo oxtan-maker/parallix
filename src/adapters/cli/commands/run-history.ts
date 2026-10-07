@@ -1,4 +1,5 @@
 import childProcess from 'node:child_process';
+import fs from 'node:fs';
 import { missionRepositoryKey } from '../../filesystem/mission-repository-key.js';
 import * as fmt from '../../../application/presentation/cli-format.js';
 import { listRuns, searchRuns, showRun } from '../../../application/run-history.js';
@@ -6,7 +7,7 @@ import type { RunHistoryScope, RunSearchQuery } from '../../../application/run-h
 import { parseRunHistoryRef } from '../../../application/run-history-types.js';
 import { inferSlug, resolveWorktree } from '../../filesystem/mission-utils.js';
 import { missionRunsDir, runHistoryFileSystem } from '../../filesystem/run-history-store.js';
-import { listTmuxSessions, tmuxAttachArgs, missionSocketPath, closeMissionTerminal } from '../../process/tmux-host.js';
+import { listTmuxSessions, tmuxAttachArgs, missionSocketPath, missionTerminalCapturePath, closeMissionTerminal } from '../../process/tmux-host.js';
 
 /**
  * `px history` / `px attach` workflows (TASK-2643).
@@ -69,15 +70,26 @@ export interface AttachRequest {
 export function attachRun(request: AttachRequest, deps: RunHistoryCommandDeps = {}): void {
   const log = deps.log ?? fmt.log.plain;
   const spawnSyncFn = deps.spawnSyncFn ?? childProcess.spawnSync;
-  const { slug, worktree } = resolveRunHistoryScope(request.slug, deps);
+  const infer = deps.inferSlugFn ?? inferSlug;
+  const current = infer(undefined);
+  const slug = request.slug ? request.slug.toLowerCase() : current;
+  if (!slug) { throw new Error('Mission slug is required outside a Mission worktree: px attach <slug>'); }
+  if (current && request.slug && current !== slug) {
+    throw new Error(`Mission terminal is scoped to this worktree's Mission (${current}); ${slug} is another Mission terminal.`);
+  }
+  // Integration removes its mission worktree after landing.  Its terminal
+  // transcript remains under the repository-keyed state root, so attachment
+  // discovery must fall back to the operator's surviving checkout.
+  const worktree = (deps.resolveWorktreeFn ?? ((s: string) => resolveWorktree(s)))(slug) ?? process.cwd();
   const repositoryKey = (deps.repositoryKeyFn ?? missionRepositoryKey)(worktree);
   const socket = missionSocketPath({ repositoryKey, missionId: slug }, deps.env);
+  const capture = missionTerminalCapturePath({ repositoryKey, missionId: slug }, deps.env);
   const session = listTmuxSessions(socket, spawnSyncFn).find(entry => entry.name === slug);
   if (request.list) {
-    log(session ? `${slug}  session=${session.name}` : `No mission terminal for ${slug}.`);
+    log(session ? `${slug}  session=${session.name}` : fs.existsSync(capture) ? `${slug}  no live terminal; captured output=${capture}` : `${slug}  no live terminal; captured output=unavailable`);
     return;
   }
-  if (!session) { throw new Error(`Nothing to attach: no mission terminal for ${slug}. Search retained output with \`px history ${slug} list\`.`); }
+  if (!session) { throw new Error(`Nothing to attach: no mission terminal is live for ${slug}.${fs.existsSync(capture) ? ` Captured terminal output: ${capture}` : ' Captured terminal output is unavailable.'}`); }
   if (request.close) { closeMissionTerminal(socket, session.name, spawnSyncFn); log(`Closed mission terminal ${slug}.`); return; }
   if (!(deps.isTTY ?? (process.stdin.isTTY && process.stdout.isTTY))) { throw new Error('px attach needs an interactive terminal.'); }
   const attached = spawnSyncFn('tmux', tmuxAttachArgs(socket, session.name, request.readOnly), { stdio: 'inherit' });

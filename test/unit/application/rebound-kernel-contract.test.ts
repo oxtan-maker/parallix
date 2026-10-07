@@ -379,27 +379,27 @@ test('task-2377.03: a throwing launch is a failed attempt, not a fix', async () 
   assert.match(outcome.diagnostic, /Could not launch implementer \(codex\): no eligible agent/);
 });
 
-test('task-2377.03: the budget is per occurrence — a second invocation after an exhausted one starts fresh', async t => {
-  await t.test('an exhausted occurrence leaves no retry state behind', async () => {
-    const failing = contextFor({ verify: () => ({ ok: false, diagnostic: 'still failing' }) });
-    const first = await rebound(gateReason, failing);
-    assert.equal(first.outcome, 'exhausted');
-  });
+test('task-2377.03: the budget is per occurrence — a second invocation after an exhausted one starts fresh', async () => {
+  // This budget-only contract does not exercise durable evidence capture; keep
+  // its retries in-memory so filesystem work belongs to that owning contract.
+  const failing = contextFor({ worktree: '', verify: () => ({ ok: false, diagnostic: 'still failing' }) });
+  const first = await rebound(gateReason, failing);
+  assert.equal(first.outcome, 'exhausted');
 
-  await t.test('the next occurrence receives its full budget', async () => {
-    let secondLaunches = 0;
-    const second = await rebound(gateReason, contextFor({
-      startAgent: async () => { secondLaunches++; return { agent: 'codex', result: { status: 0 } }; },
-      verify: () => (secondLaunches < 2 ? { ok: false, diagnostic: 'still failing' } : { ok: true }),
-    }));
-    assert.equal(second.outcome, 'fixed');
-    assert.equal(second.attempts, 2, 'the next occurrence of the same failure class gets a full budget of 2');
-  });
+  let secondLaunches = 0;
+  const second = await rebound(gateReason, contextFor({
+    worktree: '',
+    startAgent: async () => { secondLaunches++; return { agent: 'codex', result: { status: 0 } }; },
+    verify: () => (secondLaunches < 2 ? { ok: false, diagnostic: 'still failing' } : { ok: true }),
+  }));
+  assert.equal(second.outcome, 'fixed');
+  assert.equal(second.attempts, 2, 'the next occurrence of the same failure class gets a full budget of 2');
 });
 
 test('task-2377.03: the budget is configurable per occurrence and never read from persisted state', async () => {
   let launches = 0;
   const outcome = await rebound(gateReason, contextFor({
+    worktree: '',
     maxAttempts: 1,
     startAgent: async () => { launches++; return { agent: 'codex', result: { status: 0 } }; },
     verify: () => ({ ok: false, diagnostic: 'still failing' }),

@@ -28,6 +28,8 @@ function makeTempDir(prefix) {
 
 // Tests must never touch the operator's real persistent state, even when the
 // caller already exported PARALLIX_HOME/HOME in their shell.
+// Preserve executable discovery before HOME isolation hides default nvm installs.
+process.env.NVM_DIR ||= path.join(os.homedir(), '.nvm');
 process.env.PARALLIX_HOME = makeTempDir('parallix-test-home-');
 process.env.HOME = makeTempDir('parallix-test-user-home-');
 process.env.NPM_CONFIG_CACHE = makeTempDir('parallix-test-npm-cache-');
