@@ -4,6 +4,7 @@
  * and renderMissionPhaseReport — the four core report generators.
  */
 
+import { localReportingTimeZone } from '../../../domain/decision-window.js';
 import * as fmt from '../../../application/presentation/cli-format.js';
 
 import {
@@ -58,20 +59,16 @@ function missionFlowSection(heading: string, selected: ReturnType<typeof selectS
 }
 
 function bugTrendSection(selection: ReturnType<typeof selectStatsReport>) {
-  const lines = [fmt.bold('Bug-labeled mission trend — full UTC ISO weeks')];
+  const lines = [fmt.bold(`Bug-labeled mission share — local calendar days (${selection.current.window.timeZone ?? localReportingTimeZone()})`)];
   if (selection.bugTrend === null) {
     return [...lines, 'Bug trend unavailable: lifecycle history was not read.'];
   }
-  if (!selection.bugTrend.length) {
-    return [...lines, 'No full UTC ISO weeks in the reporting window.'];
-  }
-  const percent = (value: number | null) => value === null ? '—' : `${(value * 100).toFixed(1)}%`;
   lines.push(formatStatsTable(
-    ['UTC week (Mon → Sun)', '# bug missions', '# completed', 'Bug share', 'Trailing average (3 weeks)', 'Direction'],
-    selection.bugTrend.map(week => [
-      `${week.start} → ${week.end}`, String(week.bugs), String(week.completed),
-      week.share === null ? '— (no completions)' : percent(week.share),
-      percent(week.trailingAverage), week.direction ?? '—',
+    ['Period', 'Local days', '# bug missions', '# completed', 'Bug share'],
+    selection.bugTrend.map((period, index) => [
+      selection.previous ? (index === 0 ? 'Current rolling 7 days' : 'Previous rolling 7 days') : 'Selected range',
+      `${period.start} → ${period.end}`, String(period.bugs), String(period.completed),
+      period.share === null ? '— (no completions)' : `${(period.share * 100).toFixed(1)}%`,
     ]),
   ));
   return lines;
@@ -112,7 +109,7 @@ function renderWeeklyStatsReport(rows: readonly StatsRow[], options: StatsReport
   const previousMissionColors = colorMissionCounts(previousAgentStats);
   const previousAgentColors = colorAverageFixRounds(previousAgentStats);
 
-  const lines = [];
+  const lines = [`Reporting timezone: ${selection.current.window.timeZone ?? localReportingTimeZone()}; current period updates with new completions.`];
   lines.push(...missionFlowSection('Mission flow — current week', selection.current));
   lines.push('');
   lines.push(...missionFlowSection('Mission flow — previous week', selection.previous));
@@ -159,7 +156,7 @@ function renderRangeStatsReport(rows: readonly StatsRow[], options: StatsReportO
   const missionColors = colorMissionCounts(agentStats);
   const agentColors = colorAverageFixRounds(agentStats);
 
-  const lines = [];
+  const lines = [`Reporting timezone: ${selection.current.window.timeZone ?? localReportingTimeZone()}; inclusive local calendar dates.`];
   lines.push(...missionFlowSection('Mission flow', selection.current));
   lines.push('');
   lines.push(...bugTrendSection(selection));

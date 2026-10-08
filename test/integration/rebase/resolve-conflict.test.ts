@@ -307,6 +307,8 @@ test('buildConflictResolutionPrompt includes agent-assisted resolve-conflict ent
   const primaryBranch = getPrimaryBranch();
   const prompt = buildConflictResolutionPrompt('task-097', 'docs').join('\n');
   assert.match(prompt, /Copy\/paste from the mission worktree:/);
+  assert.match(prompt, /stage every resolved file before each git rebase --continue/);
+  assert.match(prompt, /Repeat through successive conflict pauses/);
   assert.match(prompt, /px resolve-conflict task-097/);
   assert.match(prompt, /Agent-assisted/i);
   assert.match(prompt, /Manual/i);
@@ -379,7 +381,7 @@ test('buildAgentResolutionPrompt contains deterministic --theirs commands for ea
   assert.match(prompt, /px integrate task-108 --dry-run/);
   // Must instruct agent to stop on unexpected files, not guess
   assert.match(prompt, /NOT in the list/i);
-  assert.match(prompt, /stop immediately/i);
+  assert.match(prompt, /no authorized resolution is available/i);
 });
 
 test('buildAgentResolutionPrompt states the execute-verify-report completion contract', () => {
@@ -396,6 +398,10 @@ test('buildAgentResolutionPrompt states the execute-verify-report completion con
   assert.match(prompt, /do not only describe or plan them/i);
   assert.match(prompt, /Report completion only after/i);
   assert.match(prompt, /report the failure and stop/i);
+  assert.match(prompt, /ordinary Git rebase conflict pause is expected/i);
+  assert.match(prompt, /stage every resolved file before each git rebase --continue/i);
+  assert.match(prompt, /Repeat through successive conflict pauses/i);
+  assert.match(prompt, /no rebase in progress or unmerged files/i);
   // The pre-existing per-file stop rule must survive the shared contract.
   assert.match(prompt, /NOT in the list/i);
 });

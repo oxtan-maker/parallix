@@ -1,6 +1,6 @@
 /**
  * The in-flight stages, rendered as the reference's three-band card: a
- * gradient head carrying the fans, id, work state and implementer; a body
+ * gradient head carrying the fans, id and implementer; a body
  * carrying checkpoint, gate, actor and next action; and a footer of the
  * server's actions.
  */
@@ -12,7 +12,7 @@ import { Fan } from './fan.js';
 import { LaneHeader, laneEmpty } from './lane-header.js';
 import { C } from './palette.js';
 import type { PendingCommands } from './pending-command.js';
-import { actorLine, coordinatorText, familyAccent, GATE_COLOR, GATE_TEXT, isSpinning, workText } from './format.js';
+import { actorLine, coordinatorText, familyAccent, GATE_COLOR, GATE_TEXT, isSpinning } from './format.js';
 
 function edgeColor(card: WebMissionCard): string {
   if (card.blockingReason !== null) { return C.red; }
@@ -24,6 +24,10 @@ function edgeColor(card: WebMissionCard): string {
 function ReviewPips({ card }: { card: WebMissionCard }) {
   if (card.reviewRound === null) { return null; }
   const currentRound = card.reviewRound;
+  const work = card.activity.work;
+  const active = isSpinning(card) && work.kind === 'working'
+    && ((work.phase === 'review' && card.reviewPhase === 'reviewing')
+      || (work.phase === 'review-response' && card.reviewPhase === 'fixing'));
   const rounds = new Map(card.reviewHistory.map((round) => [round.number, round]));
   return (
     <span aria-label={`review round ${currentRound}`} style={{ display: 'flex', gap: 4 }}>
@@ -39,7 +43,7 @@ function ReviewPips({ card }: { card: WebMissionCard }) {
         return (
         <span
           key={index}
-          className={running ? 'review-pip--running' : undefined}
+          className={running && active ? 'review-pip--running' : undefined}
           title={round === undefined ? undefined : `round ${round.number}: ${round.disposition ?? round.phase}`}
           style={{ width: 16, height: 8, borderRadius: 2, background }}
         />
@@ -225,17 +229,8 @@ function FlightCard({ card, onAction, onSelect, onDragStart, selected, pendingCo
         <div style={{ minWidth: 0, flex: 1 }}>
           <div style={{ display: 'flex', alignItems: 'baseline', gap: 7, minWidth: 0 }}>
             <span style={{ color: C.cyan, fontWeight: 500, flexShrink: 0 }}>{card.id}</span>
-            <span
-              style={{
-                border: `1px solid ${C.headEdge}`, borderRadius: 2, color: C.dim,
-                fontSize: 10, padding: '0 4px', flexShrink: 0,
-              }}
-            >
-              {workText(card)}
-            </span>
             <div style={{ flex: 1, minWidth: 4 }} />
-            {agent !== null && <>
-            <span aria-hidden="true" className={spinning ? 'live-indicator' : undefined} style={{ color: spinning ? C.green : C.faint, fontSize: 8, flexShrink: 0 }}>●</span>
+            {agent !== null && (
             <span
               title={agent === null ? undefined : `${liveAgent === null ? 'implementer' : 'active worker'} family: ${agent}`}
               style={{
@@ -246,7 +241,7 @@ function FlightCard({ card, onAction, onSelect, onDragStart, selected, pendingCo
             >
               {agent}
             </span>
-            </>}
+            )}
           </div>
           <p style={{ margin: '5px 0 0', lineHeight: 1.35, color: C.text, fontSize: 13 }}>{card.title}</p>
         </div>

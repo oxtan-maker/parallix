@@ -1,3 +1,5 @@
+import { decisionRetentionBoundary, decisionWindowDay, localReportingTimeZone } from '../../domain/decision-window.js';
+import type { MissionOutcome } from '../../domain/usage.js';
 import type { AgentAvailability, AgentFamily } from '../../domain/agents.js';
 import { isClosedMission, type Mission, type MissionId, type MissionStatus } from '../../domain/mission.js';
 import { missionApprovalCoverage, recordedApprovalCoverage, type ChangeIdentityPort } from '../approval-coverage.js';
@@ -128,19 +130,23 @@ const NO_CURRENT_WORK: CurrentWorkFacts = { currentWork: null, blockingReason: n
 
 /**
  * Keep every open mission and only the completed missions within the configured
- * retention window. A missing or malformed historical closure timestamp stays
- * visible: hiding it would turn incomplete authority data into an omission.
+ * local calendar-day retention window, anchored on canonical delivery history.
+ * Missing or malformed delivery evidence stays visible; closure is never a
+ * substitute for delivery. Unclosed DONE missions also stay visible.
  */
 export function filterCompletedMissions(
   missions: readonly Mission[],
   retentionDays: number,
   nowMs: number,
+  deliveries: ReadonlyMap<MissionId, string> = new Map(),
+  timeZone = localReportingTimeZone(),
 ): readonly Mission[] {
-  const cutoffMs = nowMs - retentionDays * 24 * 60 * 60 * 1_000;
+  const oldestDay = decisionRetentionBoundary(new Date(nowMs), retentionDays, timeZone);
   return missions.filter((mission) => {
     if (!isClosedMission(mission)) { return true; }
-    const closedAtMs = Date.parse(mission.closedAt);
-    return Number.isNaN(closedAtMs) || closedAtMs >= cutoffMs;
+    const deliveredAt = deliveries.get(mission.id);
+    const day = deliveredAt === undefined ? '' : decisionWindowDay(deliveredAt, timeZone);
+    return day === '' || day >= oldestDay;
   });
 }
 
@@ -163,6 +169,7 @@ export class BoardProjectionBuilder {
   /** Build the full BoardProjection from all authority adapters. */
   async build(): Promise<BoardProjection> {
     this._options?.prepareReads?.();
+    const nowMs = (this._options?.now ?? Date.now)();
     const [repositoryId, missions, operationLog, agentAvailability, runningSessions, currentWorkEvents] = await Promise.all([
       this._git.loadRepositoryId(),
       this._missions.loadAllMissions(),
@@ -173,17 +180,22 @@ export class BoardProjectionBuilder {
     ]);
 
     const sourceFacts = this._missions.getSourceFacts();
+    // Failed history is unknown evidence too. Metrics separately report its
+    // unavailable state; retention must not hide cards or break the board.
+    const outcomes = await this._options?.metricsAdapter?.readOutcomes?.().catch((): readonly MissionOutcome[] => []) ?? [];
+    const deliveries = new Map<MissionId, string>(outcomes.map(outcome => [outcome.missionId, outcome.closedAt] as const));
     const visibleMissions = filterCompletedMissions(
       missions,
       this._options?.completedMissionRetentionDays ?? 7,
-      (this._options?.now ?? Date.now)(),
+      nowMs,
+      deliveries,
     );
     const reviews = await this._reviews.loadReviews(visibleMissions.map((mission) => mission.id));
 
     // The authoritative answer to "what is being worked on right now?". It is
     // reconciled once per build so every card sees the same clock reading.
     const currentWorkByMission = reconcileCurrentWork(currentWorkEvents, {
-      nowMs: (this._options?.now ?? Date.now)(),
+      nowMs,
       ttlMs: this._options?.currentWorkTtlMs ?? CURRENT_WORK_TTL_MS,
       isProcessAlive: this._options?.isProcessAlive,
     });
@@ -212,7 +224,9 @@ export class BoardProjectionBuilder {
       ...await this.buildMetrics(
         repositoryId,
         missions,
-        projectAgentAvailability(agentAvailability, Date.now(), runningSessions),
+        projectAgentAvailability(agentAvailability, nowMs, runningSessions),
+        nowMs,
+        deliveries,
       ),
       unattributedRunningSessions: countUnattributedSessions(runningSessions),
     };
@@ -308,14 +322,18 @@ export class BoardProjectionBuilder {
     repositoryId: RepositoryId,
     missions: readonly Mission[],
     agentAvailability: BoardMetrics['agentAvailability'],
+    nowMs: number,
+    deliveries: ReadonlyMap<MissionId, string>,
   ): Promise<BoardMetrics> {
     // Cache key depends only on facts that actually change slow metrics.
     // agentAvailability carries volatile fields (blockedForMs) that change
     // every refresh while an AgentBlock is active — those must not invalidate
     // expensive historical cycle-time/throughput computation (TASK-2375 AC #23).
-    const key = JSON.stringify(
-      missions.map((mission) => [mission.id, mission.status]),
-    );
+    const timeZone = localReportingTimeZone();
+    const key = JSON.stringify([
+      timeZone, decisionWindowDay(new Date(nowMs), timeZone),
+      missions.map((mission) => [mission.id, mission.status, mission.labels, mission.assignee, deliveries.get(mission.id)]),
+    ]);
     if (this.metricsCache?.key === key) {
       // Cache hit: reuse slow metrics, swap in fresh agent availability
       return { ...this.metricsCache.metrics, agentAvailability };

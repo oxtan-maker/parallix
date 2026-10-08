@@ -223,7 +223,7 @@ export class SqliteMissionStore implements MissionStore, MissionNelRecorder {
           params,
         ),
         this.db.query<MissionGoalCheckRecord>(
-          `SELECT mission_id, checkpoint_position, position, criterion, evidence
+          `SELECT mission_id, checkpoint_position, position, criterion, evidence, recorded_round, repaired_gate, repaired_gates
            FROM mission_checkpoint_goal_checks
            WHERE ${scope.children} ORDER BY mission_id, checkpoint_position, position`,
           params,
@@ -655,9 +655,9 @@ export class SqliteMissionStore implements MissionStore, MissionNelRecorder {
       for (const [position, row] of checkpoint.goalCheck.entries()) {
         await this.db.execute(
           `INSERT INTO mission_checkpoint_goal_checks
-             (mission_id, checkpoint_position, position, criterion, evidence)
-           VALUES (?, ?, ?, ?, ?)`,
-          [mission.id, checkpointPosition, position, row.criterion, row.evidence],
+             (mission_id, checkpoint_position, position, criterion, evidence, recorded_round, repaired_gate, repaired_gates)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+          [mission.id, checkpointPosition, position, row.criterion, row.evidence, row.recordedRound ?? null, row.repairedGate ?? null, row.repairedGates ? JSON.stringify(row.repairedGates) : null],
         );
       }
     }

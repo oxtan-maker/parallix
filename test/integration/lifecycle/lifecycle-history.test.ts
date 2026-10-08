@@ -187,7 +187,7 @@ describe("full lifecycle lane history", () => {
           name: 'CP-4',
           rawFilename: 'CP-4.md',
           firstLine: 'CP-4: Full lifecycle lane history',
-          goalCheck: [{ criterion: 'History is gap-free', evidence: 'test/task-2347.02-lifecycle-history.test.ts' }],
+          goalCheck: [{ criterion: 'The fixture mission is done', evidence: 'test/integration/lifecycle/lifecycle-history.test.ts' }],
           nextActionText: 'Run the mission gate.',
         },
       });

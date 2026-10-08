@@ -52,6 +52,7 @@ Check:
   - `px verdict approve --slug {{slug}} --actor {{reviewer}} --expected-version <n> --comment "<review summary>"`
   - `px verdict request-changes --slug {{slug}} --actor {{reviewer}} --expected-version <n> --finding <finding-id> --summary "<issue>" [--location "<path>"] ... --comment "<review summary>"`
 - Every request-change finding needs a distinct stable `F<number>` id and non-empty summary. `px verdict` persists the decision and publishes through the established workflow; do not post to Forgejo directly.
+- When a finding concerns specific success criteria, name them in its summary as `Success criterion N` (or `criteria N, M`, 1-based as `px status` lists them). Checkpoint recording and handoff read these references to require fresh fix evidence for exactly those criteria in the repair round.
 - Do not edit repo files; do not switch into implementer behavior.
 - Graphify-first: before reviewing, check if `graphify-out/graph.json` exists. If it does, run `graphify query "review {{slug}} for correctness and completeness"` to get a graph-based view of the mission scope before examining the diff.
 

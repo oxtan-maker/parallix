@@ -53,6 +53,7 @@ export function FlowPanel({ metrics }: { readonly metrics: WebBoardMetrics }) {
   return <section id="flow-metrics" aria-label="FLOW metrics" style={{ display: 'flex', gap: 26, padding: '14px 18px', borderBottom: `1px solid ${C.rule}`, background: C.panel, flexShrink: 0, alignItems: 'flex-start', overflowX: 'auto' }}>
     <div style={{ flexShrink: 0 }}>
       <h2 style={{ color: C.dim, fontFamily: DISPLAY, fontSize: 10, fontWeight: 400, letterSpacing: 2, margin: '0 0 7px' }}>CUMULATIVE FLOW · {metrics.weeklyCumulativeFlow?.window.label ?? 'RECORDED HISTORY'}</h2>
+      {metrics.weeklyCumulativeFlow && <div style={{ color: C.faint, fontSize: 10, marginBottom: 6 }}>Local calendar days · current period live</div>}
       <CumulativeFlow metrics={metrics} />
     </div>
     <div style={{ minWidth: 270, flexShrink: 0 }}>

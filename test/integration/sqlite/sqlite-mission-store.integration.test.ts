@@ -153,7 +153,7 @@ function completeMission(overrides: Partial<Mission> = {}): Mission {
       firstLine: '# CP-1: Persistence',
       goalCheck: [
         { criterion: 'Mission round trips', evidence: 'named adapter test' },
-        { criterion: 'Writes are checked', evidence: 'same-status stale-writer test' },
+        { criterion: 'Writes are checked', evidence: 'same-status stale-writer test', recordedRound: 2, repairedGate: 'unit', repairedGates: ['unit', 'docs'] },
       ],
       nextActionText: 'Run the integration suite.',
     }],

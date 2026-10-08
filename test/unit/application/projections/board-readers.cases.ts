@@ -97,18 +97,18 @@ test('BoardProjectionBuilder builds projection with repository identity and stag
   assert.equal(projection.stages.find((s) => s.lane === 'backlog')?.count, 1);
 });
 
-test('completed-mission retention keeps the preceding seven days and preserves unknown closure timestamps (TASK-2645)', () => {
+test('completed-mission retention keeps inclusive UTC days and preserves missing delivery evidence (TASK-2645)', () => {
   const now = Date.parse('2026-10-04T12:00:00.000Z');
   const done = (id: string, closedAt: string) => ({
     id: missionId(id), repositoryId: repo, title: id, labels: missionLabels([]),
     status: 'done' as const, closedAt, assignee: null, checkpoints: [], review: null, netEngineeringLines: null,
   });
   const visible = filterCompletedMissions([
-    done('task-recent', '2026-09-27T12:00:00.000Z'),
-    done('task-old', '2026-09-27T11:59:59.999Z'),
+    done('task-recent', '2026-09-28T00:00:00.000Z'),
+    done('task-old', '2026-09-27T23:59:59.999Z'),
     done('task-unknown-date', 'not-a-date'),
     { id: missionId('task-active'), repositoryId: repo, title: 'active', labels: missionLabels([]), status: 'active' as const, closedAt: null, assignee: null, checkpoints: [], review: null, netEngineeringLines: null },
-  ], 7, now);
+  ], 7, now, new Map([[missionId('task-recent'), '2026-09-28T00:00:00Z'], [missionId('task-old'), '2026-09-27T23:59:59.999Z']]), 'UTC');
   assert.deepEqual(visible.map(mission => mission.id), [missionId('task-recent'), missionId('task-unknown-date'), missionId('task-active')]);
 });
 
@@ -124,6 +124,7 @@ test('BoardProjectionBuilder applies its configured completed-mission retention 
       completedMissionRetentionDays: 7,
       now: () => Date.parse('2026-10-04T12:00:00.000Z'),
       metricsAdapter: {
+        async readOutcomes() { return [{ missionId: recent.id, closedAt: '2026-09-28T00:00:00Z' }, { missionId: old.id, closedAt: '2026-09-20T00:00:00Z' }]; },
         async buildMetrics(states) {
           metricStates = [...states.keys()];
           return buildBoardMetrics({
@@ -744,4 +745,28 @@ describe("Slow metrics cache reuse — SC4", () => {
       `blockedForMs updated (${blockedFor2} < ${blockedFor1}) — fresh availability on cache hit`,
     );
   });
+});
+
+test('DONE retention uses delivery calendar days despite delayed administrative closure (TASK-2685)', () => {
+  const done = (id: string, closedAt: string | null) => ({ id: missionId(id), repositoryId: repo, title: id, labels: missionLabels([]), status: 'done', closedAt, assignee: null, checkpoints: [], review: null, netEngineeringLines: null });
+  const missions = [done('task-first', '2026-10-09T12:00:00Z'), done('task-old', '2026-10-08T12:00:00Z'), done('task-unclosed', null), done('task-unknown', '2026-01-01'), done('task-invalid', '2026-01-01')];
+  const deliveries = new Map([[missionId('task-first'), '2026-10-02T00:00:00Z'], [missionId('task-old'), '2026-10-01T23:59:59Z'], [missionId('task-unclosed'), '2026-01-01'], [missionId('task-invalid'), 'task-invalid']]);
+  for (const instant of ['2026-10-08T00:00:00Z', '2026-10-08T23:59:59Z']) {
+    assert.deepEqual(filterCompletedMissions(missions, 7, Date.parse(instant), deliveries, 'UTC').map(m => m.id), ['task-first', 'task-unclosed', 'task-unknown', 'task-invalid']);
+  }
+  assert.deepEqual(filterCompletedMissions(missions, 8, Date.parse('2026-10-08'), deliveries, 'UTC').map(m => m.id), missions.map(m => m.id));
+});
+
+test('DONE cards remain visible when canonical delivery history is unavailable (TASK-2685)', async () => {
+  const mission = { id: missionId('task-unknown-delivery'), repositoryId: repo, title: 'unknown', labels: missionLabels([]), status: 'done', closedAt: '2025-01-01T00:00:00Z', assignee: null, checkpoints: [], review: null, netEngineeringLines: null };
+  const builder = new BoardProjectionBuilder(
+    makeMissionAdapter([mission]), makeReviewAdapter(), makeGateAdapter(), makeAgentAdapter(), makeGitAdapter(), makeOperationLogAdapter(),
+    {
+      now: () => Date.parse('2026-10-08'), completedMissionRetentionDays: 0,
+      metricsAdapter: { readOutcomes: async () => { throw new Error('history unavailable'); }, buildMetrics: async () => { throw new Error('history unavailable'); } },
+    },
+  );
+  const board = await builder.build();
+  assert.deepEqual(board.stages.find(stage => stage.lane === 'done')?.cards.map(card => card.id), [mission.id]);
+  assert.equal(board.metrics.health.state, 'unavailable');
 });

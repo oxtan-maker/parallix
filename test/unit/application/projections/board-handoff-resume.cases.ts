@@ -39,6 +39,7 @@ import {
   startReview,
   type Review,
 } from '../../../../src/domain/review.js';
+import { resolveConfiguration } from '../../../../src/composition/config.js';
 
 const SLUG = 'task-2436-resume';
 const MISSION = missionId(SLUG);
@@ -157,6 +158,7 @@ function composeWithRecordedLoop(store: FakeMissionStore) {
     undefined,
     null,
     {
+      configuration: resolveConfiguration({}),
       handoffReviewLoop: (async (request: { slug: string }) => {
         launches.push({ slug: request.slug, options: request as Record<string, unknown> });
       }) as never,

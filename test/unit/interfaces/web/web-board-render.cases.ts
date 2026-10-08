@@ -431,19 +431,17 @@ test('activity, coordinator recovery evidence, and reduced motion stay truthful'
   const blocked = makeCard({ id: 'task-1114' as MissionCard['id'], blockingReason: 'waiting' });
   const idle = makeCard({ id: 'task-1115' as MissionCard['id'] });
   const html = render(snapshotOf({ stages: makeProjection({ active: [live, uncertain, stale, blocked, idle] }).stages }));
-  assert.match(html, /working · live/);
-  assert.match(html, /working · unknown/);
-  assert.match(html, /working · stale/);
-  assert.match(html, /blocked/);
-  assert.match(html, /idle/);
+  assert.doesNotMatch(html, /working · (?:live|unknown|stale)/);
+  assert.match(html, /waiting/);
+  assert.match(html, /no work observed/);
   assert.match(html, /recovery evidence: coordinator live \(codex\)/);
   assert.match(html, /active worker family: codex/, 'the live worker is the header agent, not a stale assignee');
   assert.ok(!html.includes('undefined'), 'a missing assignee never leaks as header text');
-  assert.match(html, /class="live-indicator"/, 'live work has the reference-style blinking indicator');
+  assert.doesNotMatch(html, /class="live-indicator"/);
   assert.equal((html.match(/fan spin/g) ?? []).length, 4, 'live and unverified current work spin; stale, blocked and idle work do not');
   const css = browserSources.find((file) => file.name === 'style.css')?.text ?? '';
   assert.match(css, /@media \(prefers-reduced-motion: reduce\)[\s\S]*\.fan\.spin[\s\S]*animation: none/);
-  assert.match(css, /\.live-indicator[\s\S]*animation: blink/);
+  assert.doesNotMatch(css, /\.live-indicator/);
 });
 
 test('fans retain the pre-TASK-2576 work behavior independently of agent identity and coordinator scans', () => {
@@ -457,20 +455,19 @@ test('fans retain the pre-TASK-2576 work behavior independently of agent identit
         assert.equal(isSpinning(webCard), freshness !== 'stale');
         assert.equal((html.match(/fan spin/g) ?? []).length, freshness === 'stale' ? 0 : 2);
         assert.doesNotMatch(html, /no implementer/);
-        // The live-indicator span only renders when a worker is present, so the
-        // blink class tracks `spinning && agent !== null`, never a non-spinning card.
-        const carriesBlink = isSpinning(webCard) && agent !== null;
-        if (carriesBlink) {
-          assert.match(html, /class="live-indicator"/, 'a spinning card with a worker carries the live-indicator blink class');
+        assert.doesNotMatch(html, /class="live-indicator"/,
+          'worker identity does not introduce an activity blink (TASK-2687)');
+        if (freshness !== 'stale' && agent !== null) {
+          assert.match(html, /title="active worker family: codex"/);
         } else {
-          assert.doesNotMatch(html, /class="live-indicator"/, 'a non-spinning or worker-less card never carries the live-indicator blink class');
+          assert.doesNotMatch(html, /active worker family:/);
         }
       }
     }
   }
 });
 
-test('a blocked or idle card never blinks and holds a fixed stopped-dot color', () => {
+test('a blocked or idle card keeps its implementer tooltip without an activity dot (TASK-2687)', () => {
   const blocked = makeCard({ id: 'task-blocked' as MissionCard['id'], agent: agentFamily('codex'), blockingReason: 'waiting' });
   const idle = makeCard({ id: 'task-idle' as MissionCard['id'], agent: agentFamily('codex') });
   for (const card of [blocked, idle]) {
@@ -478,15 +475,50 @@ test('a blocked or idle card never blinks and holds a fixed stopped-dot color', 
     const webCard = snapshot.stages.flatMap(stage => stage.cards)[0];
     const html = render(snapshot);
     assert.equal(isSpinning(webCard), false, 'a blocked or idle card never spins');
-    // Scope color/class checks to the header activity-dot span itself (the
-    // <span aria-hidden> that renders the dot), not the whole board: each card
-    // also renders coordinatorText in C.faint, so a board-wide color search
-    // passes even if the dot changed color or vanished.
+    assert.doesNotMatch(html, /class="live-indicator"/);
+    assert.match(html, /title="implementer family: codex"/);
+  }
+});
+
+test('flight headers omit work badges and agent dots in every flight lane (TASK-2687)', () => {
+  for (const lane of ['active', 'review', 'integration'] as const) {
+    for (const state of ['live', 'unverified', 'stale', 'idle', 'blocked'] as const) {
+      for (const agent of [null, agentFamily('codex')]) {
+        const card = makeCard({
+          lane, status: lane, agent,
+          blockingReason: state === 'blocked' ? 'waiting' : null,
+          currentWork: state === 'idle' || state === 'blocked' ? null : {
+            operationId: 'op', phase: 'integrate', summary: 'work in progress',
+            agent, updatedAt: '2026-08-30T00:00:00.000Z', freshness: state,
+          },
+        });
+        const html = render(snapshotOf({ stages: makeProjection({ [lane]: [card] }).stages }));
+        const header = html.slice(html.indexOf('<article'), html.indexOf('<p', html.indexOf('<article')));
+        assert.doesNotMatch(header, /working ·|>idle<|>blocked<|●|live-indicator/);
+        assert.equal((header.match(/title="(?:active worker|implementer) family: codex"/g) ?? []).length,
+          agent !== null && state !== 'stale' ? 1 : 0);
+      }
+    }
+  }
+});
+
+test('blocked and idle body activity dots stay static and distinguish blocked work (TASK-2687)', () => {
+  const blocked = makeCard({ id: 'task-blocked' as MissionCard['id'], agent: agentFamily('codex'), blockingReason: 'waiting' });
+  const idle = makeCard({ id: 'task-idle' as MissionCard['id'], agent: agentFamily('codex') });
+  for (const card of [blocked, idle]) {
+    const snapshot = snapshotOf({ stages: makeProjection({ active: [card] }).stages });
+    const webCard = snapshot.stages.flatMap(stage => stage.cards)[0];
+    const html = render(snapshot);
+    assert.equal(isSpinning(webCard), false, 'a blocked or idle card never spins');
+    // The body activity dot conveys the actor state; the header has no dot.
+    const header = html.slice(html.indexOf('<article'), html.indexOf('<p', html.indexOf('<article')));
+    assert.doesNotMatch(header, /●|live-indicator/);
     const dotSpan = html.match(/<span aria-hidden="true"[^>]*>●/);
-    assert.ok(dotSpan, `a ${card.id} card renders the header activity dot`);
+    assert.ok(dotSpan, `a ${card.id} card renders the body activity dot`);
     const dotColor = dotSpan[0].match(/color:([^";]+)/);
     assert.ok(dotColor, `a ${card.id} dot has a color`);
-    assert.equal(dotColor[1], C.faint, `a ${card.id} dot holds the fixed stopped-dot color ${C.faint}`);
+    assert.equal(dotColor[1], card.blockingReason !== null ? C.red : C.faint,
+      `a ${card.id} body dot distinguishes blocked work from idle work`);
     assert.doesNotMatch(dotSpan[0], /live-indicator/, `a ${card.id} dot carries no blink class`);
   }
 });
@@ -670,18 +702,42 @@ test('production browser code contains no mock mission data or invented metric',
   }
 });
 
-test('production browser code maps no lane to a lifecycle rule or command', () => {
+const layoutLaneLines = new Set([
+  "const INTAKE_LANES: readonly string[] = ['refined', 'backlog'];",
+  "const SHIPPED_LANE = 'done';",
+]);
+
+function laneRuleLines(text: string): string[] {
   const laneLiteral = /'(?:backlog|refined|active|review|integration|done)'/;
-  const allowed = new Set([
-    "const INTAKE_LANES: readonly string[] = ['refined', 'backlog'];",
-    "const SHIPPED_LANE = 'done';",
-  ]);
-  for (const file of browserSources) {
-    for (const line of file.text.split('\n')) {
-      if (laneLiteral.test(line)) {
-        assert.ok(allowed.has(line.trim()), `${file.name} maps a lane outside the layout buckets: ${line.trim()}`);
-      }
+  return text.split('\n').filter((line) => {
+    // The transport's work phase shares the word "review" with a board lane.
+    // Mask only that comparison, never the whole line: a lane condition beside
+    // it must still fail the boundary check (TASK-2686).
+    const laneText = line.replace(/\bwork\.phase\s*===\s*'review'/g, 'work.phase === "work-phase"');
+    return laneLiteral.test(laneText) && !layoutLaneLines.has(line.trim());
+  });
+}
+
+test('lane boundary scanner distinguishes review work from lane rules (TASK-2686)', () => {
+  assert.deepEqual(laneRuleLines("work.phase === 'review' && card.reviewPhase === 'reviewing'"), []);
+  for (const lane of ['backlog', 'refined', 'active', 'review', 'integration', 'done']) {
+    for (const condition of [
+      `card.lane === '${lane}'`,
+      `work.phase === 'review' && card.lane === '${lane}'`,
+      `card.lane === '${lane}' && work.phase === 'review'`,
+      `const targetLane = '${lane}';`,
+    ]) {
+      assert.deepEqual(laneRuleLines(condition), [condition]);
     }
+  }
+  assert.deepEqual(laneRuleLines("work.phase === 'active'"), ["work.phase === 'active'"]);
+  assert.deepEqual(laneRuleLines("const lane = 'review';"), ["const lane = 'review';"]);
+  for (const line of layoutLaneLines) { assert.deepEqual(laneRuleLines(line), []); }
+});
+
+test('production browser code maps no lane to a lifecycle rule or command', () => {
+  for (const file of browserSources) {
+    assert.deepEqual(laneRuleLines(file.text), [], `${file.name} maps a lane outside the layout buckets`);
     assert.ok(!/'px /.test(file.text), `${file.name} must not embed a px command string`);
   }
 });

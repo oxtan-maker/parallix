@@ -1,5 +1,7 @@
 #!/usr/bin/env node
 import { createReviewClassification } from './review-classification.js';
+import { resolveConfiguration, resolveProcessConfiguration } from './config.js';
+import type { ParallixConfiguration } from '../application/ports/configuration.js';
 
 import fs from 'node:fs';
 import { hostMissionCommand } from './mission-terminal.js';
@@ -112,7 +114,7 @@ import { createVerifyCommand } from '../interfaces/cli/verify.js';
 import { runWebCommand } from '../interfaces/cli/web.js';
 import { loadWebAssets, resolveWebAssetRoot } from '../adapters/web/asset-store.js';
 import { deriveAliases, type Command, type MainOptions } from '../interfaces/cli/runtime.js';
-import { createProductionApplicationServices } from './application-services.js';
+import { createProductionApplicationServices, type ProductionApplicationServiceOptions } from './application-services.js';
 import { createStatusBoardFor, statusMissionTitle } from './status-board.js';
 import { bindReviewPersistence, reviewLoopBindings } from './review-persistence.js';
 import { SqliteSessionMarkerAdapter } from '../adapters/sqlite/session-marker-adapter.js';
@@ -167,9 +169,13 @@ interface RunOptions {
   log?: typeof fmt.log.plain;
   error?: typeof fmt.log.plainError;
   baseCwd?: string;
+  /** Host environment to resolve configuration from; defaults to the process environment. */
+  environment?: NodeJS.ProcessEnv;
 }
 
-function createCommandRegistry(rootDir: string): Record<string, Command> {
+function createCommandRegistry(rootDir: string, configuration: ParallixConfiguration): Record<string, Command> {
+  const openServices = (root: string, progress?: Parameters<typeof createProductionApplicationServices>[1], options: Omit<ProductionApplicationServiceOptions, 'configuration'> = {}) =>
+    createProductionApplicationServices(root, progress, { ...options, configuration });
   const active = createActiveCommand((request, options) => activeWorkflow([...request.args], options));
   const config = createConfigCommand((request, options) => configWorkflow([...request.args], options));
   const diff = createDiffCommand((request, options) => diffWorkflow([...request.args], options));
@@ -179,15 +185,15 @@ function createCommandRegistry(rootDir: string): Record<string, Command> {
   const verify = createVerifyCommand((request, options) => verifyWorkflow([...request.args], options));
   const withGraph = async (
     invoke: (_services: Awaited<ReturnType<typeof createProductionApplicationServices>>) => unknown,
-    options: Parameters<typeof createProductionApplicationServices>[2] = {},
+    options: Omit<ProductionApplicationServiceOptions, 'configuration'> = {},
   ) => {
-    const services = await createProductionApplicationServices(rootDir, undefined, options);
+    const services = await openServices(rootDir, undefined, options);
     try { return await invoke(services); } finally { await services.operatorState.close(); }
   };
   const withMissionFactories = async (invoke: (_missionServicesFn: Function) => unknown) => {
     const opened: Awaited<ReturnType<typeof createProductionApplicationServices>>[] = [];
     const missionServicesFn = async (requestedRoot: string) => {
-      const services = await createProductionApplicationServices(requestedRoot);
+      const services = await openServices(requestedRoot);
       opened.push(services);
       if (!services.mission) { throw new Error('mission services are unavailable'); }
       return services.mission;
@@ -265,7 +271,7 @@ function createCommandRegistry(rootDir: string): Record<string, Command> {
         // The headline names the Mission exactly as `px status` does.
         missionTitleFn: (s: string) => withGraph(services => statusMissionTitle(services, s, rootDir)),
         controllerFactory: async (requestedRoot: string, progress: BoardProgressSink) => {
-          activeServices.value = await createProductionApplicationServices(requestedRoot, progress);
+          activeServices.value = await openServices(requestedRoot, progress);
           const controller = activeServices.value.presentationCapabilities?.commandController;
           if (!controller) { throw new Error('active command requires BoardCommandController from presentation capabilities'); }
           return controller;
@@ -419,7 +425,7 @@ function createCommandRegistry(rootDir: string): Record<string, Command> {
           // application review loop decides how they are sequenced.
           reviewLoopMechanisms: (request: StartReviewRound, observers: ReviewLoopObservers) => createReviewLoopPorts(request.slug, request, {
             ...observers,
-            classification: createReviewClassification(request.slug, resolveWorktree(request.slug) ?? rootDir),
+            classification: createReviewClassification(request.slug, resolveWorktree(request.slug) ?? rootDir, configuration.decision),
             performHandoffFn: performHandoffWithMissionServices(missionServicesFn as HandoffMissionServicesPort),
             ...reviewLoopBindings(services.mission!.store, services.mission!.lifecycle, reviewerSessionPort),
           }),
@@ -469,14 +475,14 @@ function createCommandRegistry(rootDir: string): Record<string, Command> {
       // becomes the host's injected build port. The command stays read-only:
       // nothing here dispatches a mutation.
       createBoardSource: async (progress) => {
-        const services = await createProductionApplicationServices(rootDir, progress);
+        const services = await openServices(rootDir, progress);
         const capabilities = services.presentationCapabilities;
         const builder = capabilities?.boardProjection;
         if (!builder) {
           await services.operatorState.close();
           throw new Error('board projection is unavailable for px web');
         }
-        const terminalReader = createTmuxTerminalReader({ resolveMissionWorktree, repositoryKey: missionRepositoryKey });
+        const terminalReader = createTmuxTerminalReader({ resolveMissionWorktree, repositoryKey: missionRepositoryKey, env: configuration.forwardedEnvironment });
         const recordedOutputRenderer = createRecordedOutputRenderer();
         return {
           buildProjection: () => builder.build(),
@@ -498,7 +504,7 @@ function createCommandRegistry(rootDir: string): Record<string, Command> {
     }),
     ui: async (...args: any[]) => {
       const { runUiCommand } = await import('../interfaces/tui/ui-command.js');
-      const services = await createProductionApplicationServices(rootDir);
+      const services = await openServices(rootDir);
       const capabilities = services.presentationCapabilities?.tui;
       if (!capabilities) { throw new Error('operator-state capabilities are unavailable'); }
       return runUiCommand(capabilities, ...args);
@@ -623,7 +629,7 @@ function createCommandRegistry(rootDir: string): Record<string, Command> {
         if (invocation.command === 'active') {
           const missionWorktree = resolveWorktree(mission, {});
           if (!missionWorktree) { throw new Error(`No worktree resolved for ${mission}`); }
-          const targetServices = await createProductionApplicationServices(missionWorktree);
+          const targetServices = await openServices(missionWorktree);
           const controller = targetServices.presentationCapabilities?.commandController;
           if (!controller) { throw new Error(`No active controller available for ${mission}`); }
           await startForward(mission, action, () => active(invocation.args, {
@@ -747,9 +753,10 @@ function missionWrites(services: { mission?: Omit<MissionWriteServices, 'resolve
   return { ...services.mission, resolveSlug: (explicit) => inferSlug(explicit) };
 }
 
-function createRuntimeOptions(rootDir: string): Pick<MainOptions, 'commandFns' | 'ensureStandaloneGitRepoFn' | 'loadAliasesFn' | 'product'> {
+function createRuntimeOptions(rootDir: string, configuration: ParallixConfiguration): Pick<MainOptions, 'commandFns' | 'ensureStandaloneGitRepoFn' | 'loadAliasesFn' | 'product' | 'runtime'> {
   return {
-    commandFns: createCommandRegistry(rootDir),
+    commandFns: createCommandRegistry(rootDir, configuration),
+    runtime: configuration.runtime,
     ensureStandaloneGitRepoFn: ensureStandaloneGitRepo,
     loadAliasesFn: options => deriveAliases(loadStateMap(options as any)),
     product: { name: packageJson.name, version: packageJson.version },
@@ -885,11 +892,11 @@ export function parseReviewEventArgs(args: string[]): ReviewEventParsed {
   return parsed;
 }
 
-async function runBareCommand(parsed: ParsedArgs, log: typeof fmt.log.plain, error: typeof fmt.log.plainError): Promise<number> {
+async function runBareCommand(parsed: ParsedArgs, configuration: ParallixConfiguration, log: typeof fmt.log.plain, error: typeof fmt.log.plainError): Promise<number> {
   const { main } = await import('../interfaces/cli/runtime.js');
   let exitCode = 0;
   await main([], {
-    ...createRuntimeOptions(parsed.target),
+    ...createRuntimeOptions(parsed.target, configuration),
     cwdFn: () => parsed.target,
     exitFn: ((code?: number) => { exitCode = typeof code === 'number' ? code : 0; }) as (_code?: number) => never,
     logFn: log,
@@ -898,9 +905,9 @@ async function runBareCommand(parsed: ParsedArgs, log: typeof fmt.log.plain, err
   return exitCode;
 }
 
-async function runReviewEventCommand(parsed: ParsedArgs, log: typeof fmt.log.plain, error: typeof fmt.log.plainError): Promise<number> {
+async function runReviewEventCommand(parsed: ParsedArgs, configuration: ParallixConfiguration, log: typeof fmt.log.plain, error: typeof fmt.log.plainError): Promise<number> {
   const eventArgs = parseReviewEventArgs(parsed.args);
-  const services = await createProductionApplicationServices(parsed.target);
+  const services = await createProductionApplicationServices(parsed.target, undefined, { configuration });
   try {
     if (!services.mission) { throw new Error('mission services are unavailable'); }
     const result = await bindReviewPersistence(services.mission.store, services.mission.lifecycle).createEvent(
@@ -921,7 +928,7 @@ function ensureWorkflowAgentConfig(command: string, target: string) {
   try { ensureFirstRunAgentConfig({ rootDir: target, worktree: target }); } catch { /* Best-effort first-run detection. */ }
 }
 
-async function runTargetCommand(parsed: ParsedArgs, log: typeof fmt.log.plain, error: typeof fmt.log.plainError, cli?: CliInvocation): Promise<number> {
+async function runTargetCommand(parsed: ParsedArgs, configuration: ParallixConfiguration, log: typeof fmt.log.plain, error: typeof fmt.log.plainError, cli?: CliInvocation): Promise<number> {
   const previousCwd = process.cwd();
   try {
     const [startupPreflightModule, workflow] = await Promise.all([
@@ -931,14 +938,14 @@ async function runTargetCommand(parsed: ParsedArgs, log: typeof fmt.log.plain, e
     process.chdir(parsed.target);
     const hosted = cli ? await hostMissionCommand(parsed.command, parsed.args, parsed.target, log, cli) : null;
     if (hosted !== null) { return hosted; }
-    if (parsed.command === 'review-event') { return await runReviewEventCommand(parsed, log, error); }
+    if (parsed.command === 'review-event') { return await runReviewEventCommand(parsed, configuration, log, error); }
     if (parsed.command === 'verify-env') {
       return startupPreflightModule.default([], { command: 'verify-env', returnResult: true, log, error })?.pass ? 0 : 1;
     }
     ensureWorkflowAgentConfig(parsed.command || '', parsed.target);
     let exitCode = 0;
     await workflow.main([parsed.command, ...parsed.args], {
-      ...createRuntimeOptions(parsed.target),
+      ...createRuntimeOptions(parsed.target, configuration),
       cwdFn: () => parsed.target,
       exitFn: ((code?: number) => { exitCode = typeof code === 'number' ? code : 0; }) as (_code?: number) => never,
       logFn: log,
@@ -956,6 +963,7 @@ async function runTargetCommand(parsed: ParsedArgs, log: typeof fmt.log.plain, e
 }
 
 export async function run(argv = process.argv.slice(2), options: RunOptions = {}): Promise<number> {
+  const configuration = options.environment ? resolveConfiguration(options.environment) : resolveProcessConfiguration();
   const log = options.log || fmt.log.plain;
   const error = options.error || fmt.log.plainError;
   const baseCwd = options.baseCwd || process.cwd();
@@ -984,7 +992,7 @@ export async function run(argv = process.argv.slice(2), options: RunOptions = {}
   // output for non-TTY/CI/opt-out paths and selects the same lazy `ui` entry
   // point as explicit `px ui` for an interactive terminal.
   if (!parsed.command) {
-    return await runBareCommand(parsed, log, error);
+    return await runBareCommand(parsed, configuration, log, error);
   }
 
   if (!fs.existsSync(parsed.target) || !fs.statSync(parsed.target).isDirectory()) {
@@ -997,7 +1005,7 @@ export async function run(argv = process.argv.slice(2), options: RunOptions = {}
     return 0;
   }
 
-  return await runTargetCommand(parsed, log, error, options.cliInvocation);
+  return await runTargetCommand(parsed, configuration, log, error, options.cliInvocation);
 }
 
 const _arg1 = typeof process.argv[1] === 'string' && process.argv[1] ? process.argv[1] : undefined;

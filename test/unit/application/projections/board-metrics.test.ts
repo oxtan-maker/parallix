@@ -364,7 +364,7 @@ test('wip fallback: null returns initial state counts when transitions are empty
 // weeks, and only recorded transitions move a mission inside it.
 // ---------------------------------------------------------------------------
 
-const weekly = weeklyDecisionWindows('2026-08-31T12:00:00Z').current;
+const weekly = weeklyDecisionWindows('2026-08-31T12:00:00Z', 'UTC').current;
 
 /** `mission` transitioned to `to` on `day` at 09:00 UTC. */
 const move = (mission: typeof id1, from: 'backlog' | 'refined' | 'active' | 'review' | 'integration' | null, to: 'backlog' | 'refined' | 'active' | 'review' | 'integration' | 'done', day: string) => (
@@ -416,7 +416,7 @@ test('weeklyCumulativeFlowByStateSeries reports missing lifecycle history as est
 });
 
 test('buildMetrics publishes the weekly series on the same window as the decision metrics', () => {
-  const windows = weeklyDecisionWindows('2026-08-31T12:00:00Z');
+  const windows = weeklyDecisionWindows('2026-08-31T12:00:00Z', 'UTC');
   const metrics = buildMetrics({
     initialStates: new Map([[id1, 'active']]),
     transitions: [move(id1, null, 'backlog', '2026-08-26'), move(id1, 'backlog', 'active', '2026-08-27')],
@@ -443,7 +443,7 @@ test('buildMetrics omits the weekly series when no decision window was injected'
 test('px stats and the weekly FLOW series read the same injected-clock window authority', () => {
   const repoRoot = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..', '..', '..');
   const statsSelectionSource = fs.readFileSync(path.join(repoRoot, 'src', 'application', 'services', 'statistics-report-selection.ts'), 'utf8');
-  assert.match(statsSelectionSource, /weeklyDecisionWindows\(request\.today \?\? new Date\(\)\)/);
+  assert.match(statsSelectionSource, /weeklyDecisionWindows\(request\.today \?\? new Date\(\), request\.timeZone\)/);
 
   const today = '2026-08-31T12:00:00Z';
   const statsWindow = weeklyDecisionWindows(today).current;
@@ -776,7 +776,7 @@ test('lifecycle completion survives absent telemetry and ignores later close (ta
 
   const outcomes = await adapter.readOutcomes();
   assert.deepEqual(outcomes.map((outcome) => ({ closedAt: outcome.closedAt, cycleTimeMinutes: outcome.cycleTimeMinutes })), [
-    { closedAt: '2026-07-06T23:30:00-02:00', cycleTimeMinutes: 8250 },
+    { closedAt: '2026-07-07T01:30:00.000Z', cycleTimeMinutes: 8250 },
   ]);
   const metrics = await adapter.buildMetrics(new Map([['task-lifecycle-only' as never, 'done' as never]]));
   assert.equal(metrics.decisionWindow?.current.completedMissions, 0);
@@ -800,4 +800,22 @@ test('cohort labels and implementer come from canonical Mission metadata, not te
   const [outcome] = await adapter.readOutcomes();
   assert.deepEqual(outcome?.labels, ['ai_sdlc']);
   assert.equal(outcome?.implementer, 'codex');
+});
+
+test('mixed timestamp formats select the earliest delivery instant despite textual order (TASK-2685)', async () => {
+  const laneEventRepo = {
+    findByRepositoryId: async () => [
+      { repositoryId: 'parallix', missionId: 'task-offset', fromStatus: null, toStatus: 'active', trigger: 'activate', agent: 'codex', occurredAt: '2026-10-01T00:00:00Z', idempotencyKey: 'intake' },
+      // Text ordering puts this later delivery before the offset-formatted one.
+      { repositoryId: 'parallix', missionId: 'task-offset', fromStatus: 'integration', toStatus: 'done', trigger: 'integrate', agent: 'codex', occurredAt: '2026-10-01T23:00:00Z', idempotencyKey: 'later' },
+      { repositoryId: 'parallix', missionId: 'task-offset', fromStatus: 'integration', toStatus: 'done', trigger: 'integrate', agent: 'codex', occurredAt: '2026-10-02T00:30:00+02:00', idempotencyKey: 'first' },
+    ],
+  } as unknown as BoardLaneEventRepository;
+  const adapter = new ConcreteMetricsReadAdapter({
+    laneEventRepo, usageRepo: new ThroughputInMemoryUsageRepository([]), repositoryId: 'parallix' as never,
+  });
+  const outcomes = await adapter.readOutcomes();
+  assert.equal(outcomes.length, 1);
+  assert.equal(outcomes[0].closedAt, '2026-10-01T22:30:00.000Z');
+  assert.equal(outcomes[0].cycleTimeMinutes, 1350);
 });

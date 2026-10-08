@@ -10,10 +10,10 @@ export interface MissionTerminalReader { read(_missionId: string): MissionTermin
 type SpawnSync = typeof childProcess.spawnSync;
 
 /** Captures only; it never attaches, sends keys, or invokes a tmux mutation. */
-export function createTmuxTerminalReader(options: { resolveMissionWorktree: (_missionId: string) => string | null; repositoryKey: (_worktree: string) => string; spawnSyncFn?: SpawnSync; env?: NodeJS.ProcessEnv }): MissionTerminalReader {
+export function createTmuxTerminalReader(options: { resolveMissionWorktree: (_missionId: string) => string | null; repositoryKey: (_worktree: string) => string; env: NodeJS.ProcessEnv; spawnSyncFn?: SpawnSync }): MissionTerminalReader {
   const { resolveMissionWorktree: findWorktree, repositoryKey } = options;
   const spawnSyncFn = options.spawnSyncFn ?? childProcess.spawnSync;
-  const env = options.env ?? process.env;
+  const { env } = options;
   return { read(missionId) {
     const worktree = findWorktree(missionId);
     if (worktree === null) { return { kind: 'unavailable', message: 'No live tmux session is available for this mission.' }; }

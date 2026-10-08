@@ -21,13 +21,16 @@ import {
 } from './mission-command-support.js';
 import {
   assertGoalCheckRows,
-  finalGoalCheckShortfall,
+  uncoveredCriteria,
+  staleRepairCriteria,
   isHandoffReadyCheckpoint,
   planCheckpoint,
   recordCheckpoint,
+  retainPriorGoalCheckRows,
   type CheckpointData,
   type GoalCheckRow,
 } from '../domain/checkpoint.js';
+import { currentReviewRound, openRepairFromReview } from '../domain/review.js';
 import type { Mission } from '../domain/mission.js';
 import { findUnverifiableRecordedRow, type EvidenceFileSystemPort } from './static-evidence.js';
 
@@ -157,10 +160,33 @@ export class MissionCheckpointService {
     );
 
     let updated: Mission;
+    let merged: CheckpointData;
     try {
+      // A repair records only its affected criteria: retain prior rows for the
+      // other criteria so the final Goal Check table is not rewritten. Fresh
+      // evidence has no prior rows to retain, so this is a no-op then.
+      const prior = mission.checkpoints.find((checkpoint) => checkpoint.name === request.checkpoint.name);
+      // Rows are stamped with the review round they are recorded in, so a
+      // repair's fresh proof is distinguishable from rows kept from earlier rounds.
+      const round = mission.review ? currentReviewRound(mission.review).number : undefined;
+      const gate = openRepairFromReview(mission.review, mission.successCriteria ?? [], mission.checkpoints.flatMap((checkpoint) => checkpoint.goalCheck))?.gate;
+      const stamped = round === undefined
+        ? request.checkpoint
+        : { ...request.checkpoint, goalCheck: request.checkpoint.goalCheck.map((row) => {
+          const priorRows = mission.checkpoints.flatMap((checkpoint) => checkpoint.goalCheck)
+            .filter((priorRow) => priorRow.criterion === row.criterion);
+          const repairedGates = [...new Set(priorRows.flatMap((priorRow) => [
+            ...(priorRow.repairedGates ?? []), ...(priorRow.repairedGate ? [priorRow.repairedGate] : []),
+          ]).concat(gate ? [gate] : []))];
+          return { ...row, recordedRound: round, ...(gate ? { repairedGate: gate } : {}),
+            ...(repairedGates.length ? { repairedGates } : {}) };
+        }) };
+      merged = prior
+        ? { ...stamped, goalCheck: retainPriorGoalCheckRows(prior.goalCheck, stamped.goalCheck) }
+        : stamped;
       updated = {
         ...mission,
-        checkpoints: recordCheckpoint(mission.checkpoints, request.checkpoint),
+        checkpoints: recordCheckpoint(mission.checkpoints, merged),
       } as Mission;
     } catch (error) {
       return failure(
@@ -169,7 +195,7 @@ export class MissionCheckpointService {
       );
     }
 
-    const evidenceFailure = await this.assertRecordableEvidence({ request, rootDir, mission, updated });
+    const evidenceFailure = await this.assertRecordableEvidence({ request, rootDir, mission, updated, merged });
     if (evidenceFailure) {
       return evidenceFailure;
     }
@@ -187,8 +213,8 @@ export class MissionCheckpointService {
           storeEvidence(
             mission.id,
             `checkpoint:${request.checkpoint.name}`,
-            `${request.checkpoint.goalCheck.length} Goal Check row(s) recorded`
-            + `${replaced ? ' (replaced earlier evidence)' : ''}`,
+            `${updated.checkpoints.find((checkpoint) => checkpoint.name === request.checkpoint.name)?.goalCheck.length ?? request.checkpoint.goalCheck.length} Goal Check row(s) recorded`
+            + `${replaced ? ' (retained earlier evidence, updated affected criteria)' : ''}`,
           ),
         ],
       );
@@ -200,36 +226,61 @@ export class MissionCheckpointService {
   /**
    * Record-time evidence checks that mirror the reference semantics handoff
    * applies: an evidence row handoff would refuse is refused when it is written,
-   * and a final checkpoint must carry one Goal Check row per success criterion.
-   * Returns a validation failure when either check fails, or `null` when the
-   * checkpoint may be recorded.
+   * and the recorded checkpoints taken together must cover every success
+   * criterion. A repair checkpoint may carry only its affected criteria while
+   * valid earlier evidence is retained, so the shortfall is measured across all
+   * recorded checkpoints, not this one alone. Returns a validation failure when
+   * either check fails, or `null` when the checkpoint may be recorded.
    */
   private async assertRecordableEvidence(params: {
     request: RecordCheckpointRequest;
     rootDir: string | null;
     mission: Mission;
     updated: Mission;
+    merged: CheckpointData;
   }): Promise<ApplicationOutcome<RecordCheckpointResult> | null> {
-    const { request, rootDir, mission, updated } = params;
+    const { request, rootDir, mission, updated, merged } = params;
     if (rootDir && this._evidence) {
+      // Validate the rows that will actually be retained (prior rows kept for a
+      // repair plus the new rows), not just the submitted rows: a retained row
+      // is proof the handoff later stands on, so an invalid reference must be
+      // refused at record time exactly as it would be at handoff.
       const unverifiable = findUnverifiableRecordedRow(
         this._evidence.fileSystem,
-        request.checkpoint.goalCheck,
+        merged.goalCheck,
         rootDir,
       );
       if (unverifiable) {
         return failure('validation', `checkpoint ${request.checkpoint.name} rejected. ${unverifiable.message}`);
       }
     }
-    const criteria = mission.successCriteria?.length ?? 0;
-    const shortfall = finalGoalCheckShortfall(request.checkpoint.goalCheck, criteria);
-    if (shortfall > 0 && updated.checkpoints.at(-1)?.name === request.checkpoint.name) {
-      return failure(
-        'validation',
-        `checkpoint ${request.checkpoint.name} is the final planned checkpoint, and handoff requires one Goal Check row per success criterion: `
-        + `${criteria} criteria need ${criteria} row(s), but ${request.checkpoint.goalCheck.length} were given. `
-        + 'Pass one --criterion/--evidence pair per success criterion listed by `px status`.',
-      );
+    // A repair checkpoint may carry only its affected criteria: refuse it only
+    // when the recorded checkpoints taken together still leave a criterion
+    // uncovered, not because this one checkpoint alone has fewer rows. Coverage
+    // is distinct success-criterion identities, so a repair row for one criterion
+    // does not count as evidence for another.
+    if (updated.checkpoints.at(-1)?.name === request.checkpoint.name) {
+      // An open repair (reviewer-requested changes or a bounceback) owes fresh
+      // proof recorded in its own round; rows kept from earlier rounds are stale.
+      const repair = openRepairFromReview(mission.review, mission.successCriteria ?? [], mission.checkpoints.flatMap((checkpoint) => checkpoint.goalCheck));
+      const stale = repair ? staleRepairCriteria(updated.checkpoints, repair) : [];
+      if (stale.length > 0) {
+        return failure(
+          'validation',
+          `checkpoint ${request.checkpoint.name} rejected: the open repair needs fresh fix evidence recorded in this review round for ${stale.join(', ')}; only stale rows from earlier rounds remain. `
+          + `Run px checkpoint record --name ${request.checkpoint.name} --criterion <affected> --evidence <verifiable> for the criteria the failure touches, then handoff.`,
+        );
+      }
+      const uncovered = uncoveredCriteria(updated.checkpoints, mission.successCriteria ?? []);
+      if (uncovered.length > 0) {
+        const recordedRows = updated.checkpoints.reduce((total, cp) => total + cp.goalCheck.length, 0);
+        const criteria = mission.successCriteria?.length ?? 0;
+        return failure(
+          'validation',
+          `checkpoint ${request.checkpoint.name} is the final planned checkpoint, and handoff requires every success criterion to have a row across all recorded checkpoints: ${criteria} criteria need ${criteria} row(s), but ${recordedRows} were recorded. Uncovered criteria: ${uncovered.join(', ')}. `
+          + 'Record the affected criteria; valid earlier evidence for the others is retained, and add rows for any criterion left uncovered.',
+        );
+      }
     }
     return null;
   }

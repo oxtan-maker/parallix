@@ -8,14 +8,15 @@ import { createProductionApplicationServices } from '../../../src/composition/ap
 import { clearOperatorStateCache } from '../../../src/adapters/sqlite/adapter-factory.js';
 import { intakeMission, missionId, missionLabels } from '../../../src/domain/mission.js';
 import { agentFamily } from '../../../src/domain/agents.js';
+import { resolveConfiguration } from '../../../src/composition/config.js';
 
 test('review scope cleanup leaves the enclosing integration store usable', async () => {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'parallix-scope-'));
   const previousHome = process.env.PARALLIX_HOME;
   process.env.PARALLIX_HOME = home;
   try {
-    const integration = await createProductionApplicationServices(process.cwd());
-    const review = await createProductionApplicationServices(process.cwd());
+    const integration = await createProductionApplicationServices(process.cwd(), undefined, { configuration: resolveConfiguration(process.env) });
+    const review = await createProductionApplicationServices(process.cwd(), undefined, { configuration: resolveConfiguration(process.env) });
     assert.ok(integration.mission);
     assert.equal(integration.executeMission.constructor.name, 'ExecuteMissionService');
     assert.equal(integration.statsBackfill.constructor.name, 'StatsBackfillService');
@@ -40,7 +41,7 @@ test('review scope cleanup leaves the enclosing integration store usable', async
     await integration.mission.store.save({ ...approved.mission, title: 'Integration resumed' }, approved.version);
     await integration.operatorState.close();
     // Later commands in the same process also reuse the live handle.
-    const later = await createProductionApplicationServices(process.cwd());
+    const later = await createProductionApplicationServices(process.cwd(), undefined, { configuration: resolveConfiguration(process.env) });
     assert.ok(later.mission);
     assert.strictEqual(later.operatorState.db, integration.operatorState.db);
     const resumed = await later.mission.store.load(mission.id);

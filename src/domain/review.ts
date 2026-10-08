@@ -528,6 +528,88 @@ export function currentReviewRound(review: Review): ReviewRound {
   return review.rounds[review.rounds.length - 1];
 }
 
+const CRITERION_REFERENCE = /(?:success[- ])?criteri(?:on|a)\s+((?:#?\d+(?:\s*(?:,|and|&)\s*)?)+)/gi;
+
+/**
+ * 1-based success-criterion numbers a finding names: the classifier id
+ * `success-criterion-N`, or reviewer text such as "Success criterion 2" /
+ * "criteria 1, 3" in the finding summary or location. Reviewers are instructed
+ * to name the criterion this way, so the finding itself is the authoritative
+ * mapping to the criteria a repair must re-evidence.
+ */
+function criterionNumbersNamedBy(finding: ReviewFinding): readonly number[] {
+  const numbers: number[] = [];
+  const id = /^success-criterion-(\d+)$/.exec(finding.id);
+  if (id) { numbers.push(Number(id[1])); }
+  for (const match of `${finding.summary} ${finding.location ?? ''}`.matchAll(CRITERION_REFERENCE)) {
+    for (const digits of match[1].matchAll(/\d+/g)) { numbers.push(Number(digits[0])); }
+  }
+  return numbers;
+}
+
+type RecordedRow = { readonly criterion: string; readonly evidence: string; readonly recordedRound?: number; readonly repairedGate?: string; readonly repairedGates?: readonly string[] };
+
+/** The failed integration gate or command a revocation names, when it is a gate failure. */
+function failedGateNames(revocation: ReviewDecisionRevocation): readonly string[] {
+  const cause = revocation.cause;
+  if (cause?.kind !== 'integration-gate-failure') { return []; }
+  return [cause.command, cause.gate].map((name) => name?.trim() ?? '').filter((name) => name.length > 0);
+}
+
+/**
+ * A failed integration gate invalidates the proof that depends on it: criteria
+ * whose recorded rows name the failed gate or command, and criteria whose row
+ * was recorded to repair that same gate earlier. The latter keeps the obligation
+ * across repeated bouncebacks when the repair replaced the gate-citing reference.
+ */
+function criteriaCitingFailedGate(
+  names: readonly string[],
+  successCriteria: readonly string[],
+  recordedRows: readonly RecordedRow[],
+): readonly string[] {
+  return successCriteria.filter((criterion) => recordedRows.some(
+    (row) => row.criterion === criterion
+      && names.some((name) => row.evidence.includes(name) || row.repairedGate === name || row.repairedGates?.includes(name)),
+  ));
+}
+
+/**
+ * The open repair the implementer owes evidence for, from authoritative review
+ * facts: the latest `changes-requested` round (reviewer-requested changes; the
+ * repair is recorded in it, and handoff begins the next round), or
+ * a pending round that follows a revoked approval (automatic bounceback or
+ * operator repair). `affected` lists the criteria the findings name (see
+ * `criterionNumbersNamedBy`); a finding naming none leaves it empty. For a bounceback it is the
+ * criteria whose recorded rows cite the failed gate or command, or were
+ * recorded to repair it before (`gate` names it); when none do,
+ * the repair owes fresh proof in `round` without a criterion mapping. Null when no repair is open.
+ */
+export function openRepairFromReview(
+  review: Review | null,
+  successCriteria: readonly string[],
+  recordedRows: readonly RecordedRow[] = [],
+): { readonly round: number; readonly affected: readonly string[]; readonly gate?: string } | null {
+  if (!review) { return null; }
+  const round = currentReviewRound(review);
+  if (!round) { return null; }
+  if (round.decision?.kind === 'changes-requested') {
+    const affected: string[] = [];
+    for (const finding of round.decision.findings) {
+      for (const index of criterionNumbersNamedBy(finding)) {
+        const criterion = successCriteria[index - 1];
+        if (criterion && !affected.includes(criterion)) { affected.push(criterion); }
+      }
+    }
+    return { round: round.number, affected };
+  }
+  const previous = review.rounds[review.rounds.length - 2];
+  if (round.decision === null && previous?.decision?.kind === 'approved' && previous.decision.revocation) {
+    const names = failedGateNames(previous.decision.revocation);
+    return { round: round.number, affected: criteriaCitingFailedGate(names, successCriteria, recordedRows), gate: names[0] };
+  }
+  return null;
+}
+
 export function replaceCurrentRound(review: Review, round: ReviewRound): Review['rounds'] {
   const [first, ...rest] = review.rounds;
   if (rest.length === 0) { return [round]; }

@@ -178,11 +178,11 @@ export function buildRebasePrompt({
     'Step 2 — Resolve shared-file conflicts:',
     sharedFileList,
     '',
-    'Step 3 — After resolving each shared file:',
-    '  git add "<file>"',
-    '  git rebase --continue',
+    'Step 3 — Resolve and stage every current conflict before continuing:',
+    '  Resolve the conflict, then git add "<file>" for EVERY resolved file.',
+    '  Stage all resolved conflicts, then git rebase --continue.',
     '',
-    'Step 4 — Repeat Steps 1-3 until rebase completes.',
+    'Step 4 — Repeat Steps 1-4 until the rebase completes.',
     '',
     'Step 5 — Verify:',
     `  ${formatVerificationCommand(area, worktreePath)}`,
@@ -195,7 +195,9 @@ export function buildRebasePrompt({
     AGENT_COMMAND_COMPLETION_CONTRACT,
     '- Take --theirs for every mission-specific file listed above.',
     '- For shared files, inspect the conflict markers and resolve sensibly.',
-    '- If rebase pauses again, repeat the process.',
+    '- Stage every resolved file with git add before each git rebase --continue.',
+    '- A rebase pause on a new conflict is an expected stop: resolve and stage it, then continue. This is not a command failure.',
+    '- Only a failed command (hook, verification, infrastructure) is a stop-and-report failure.',
   ].join('\n');
 }
 
@@ -639,8 +641,12 @@ async function driveRebaseToCompletion(ctx: RebaseContext, driver: ContinueDrive
       return post.action;
     }
     if (pre.action === 'recursed') {
-      // Recurse once more for chained conflicts, preserving flags and ports.
-      await runRebaseWorkflow(ctx.args, ctx.port);
+      // Chained conflict: a `--continue` surfaced a new conflict, so the rebase
+      // is already paused. Re-enter the workflow in place to re-classify and
+      // resolve the new conflicts rather than starting a fresh `git rebase`
+      // (which fails while one is in progress) or bailing on the in-progress
+      // check (TASK-2668.02 / TASK-2672).
+      await runRebaseWorkflow(ctx.args, ctx.port, { resumeInPlace: true });
       return 'recursed';
     }
     return pre.action;
@@ -774,17 +780,22 @@ async function resolveSharedConflicts(ctx: RebaseContext, conflictResult: Missio
   }
 
   // Verify rebase is actually complete before pushing.
-  if (port.detectRebaseState(executionRoot).inProgress || rebaseInProgressBranch(ctx)) {
-    fmt.log.pass(`Agent (${fmt.agent(agent)}) completed their round.`);
-    fmt.log.warn('Rebase is still in progress. Skipping automatic push.');
-    fmt.log.info('Next: Resolve remaining conflicts or continue rebase.');
+  const remaining = port.detectRebaseState(executionRoot);
+  if (remaining.inProgress || remaining.unmergedFiles.length > 0 || rebaseInProgressBranch(ctx)) {
+    fmt.log.warn('Rebase is still in progress or has unmerged files. Skipping automatic push.');
+    remaining.unmergedFiles.forEach(file => fmt.log.warn(`Unmerged: ${file}`));
+    fmt.log.info('Next: Resolve and stage every remaining conflict, then git rebase --continue; inspect git status.');
     port.exit(1);
     return;
   }
   await finishRebase(ctx, `Agent (${fmt.agent(agent)}) completed conflict resolution.`);
 }
 
-export async function runRebaseWorkflow(args: string[], port: RebaseWorkflowPort): Promise<void> {
+export async function runRebaseWorkflow(
+  args: string[],
+  port: RebaseWorkflowPort,
+  opts?: { resumeInPlace?: boolean },
+): Promise<void> {
   const gitFn: GitRunner = port.git;
   const flags = args.filter(a => a.startsWith('--'));
   const params = args.filter(a => !a.startsWith('--'));
@@ -804,7 +815,10 @@ export async function runRebaseWorkflow(args: string[], port: RebaseWorkflowPort
   const branch = port.missionBranchName(slug, executionRoot);
 
   const existingRebase = port.detectRebaseState(executionRoot);
-  if (existingRebase.inProgress) {
+  // A rebase already in progress is a blocker only on the initial entry: a
+  // re-entrant `resumeInPlace` call is resuming the rebase this command started,
+  // so it re-classifies the new conflicts instead of bailing (TASK-2668.02).
+  if (!opts?.resumeInPlace && existingRebase.inProgress) {
     reportRebaseAlreadyInProgress(existingRebase, branch, port);
     return;
   }
@@ -835,8 +849,18 @@ export async function runRebaseWorkflow(args: string[], port: RebaseWorkflowPort
     movedFrom: port.recordBranchMove ? (gitFn(['-C', executionRoot, 'rev-parse', 'HEAD']).stdout || '').trim() || null : null,
   };
 
-  fmt.log.info(`Rebasing ${fmt.branch(branch)} onto local ${fmt.branch(ctx.baseBranch)}...`);
-  const rebaseResult = gitFn(['-C', executionRoot, '-c', 'core.editor=true', '-c', 'merge.autoedit=no', 'rebase', ctx.baseBranch]);
+  let rebaseResult: GitCommandResult;
+  if (opts?.resumeInPlace) {
+    // The rebase is already paused on a conflict discovered by a prior
+    // `--continue`. Re-classify the current state; a fresh `git rebase` would
+    // fail with "rebase in progress" (TASK-2668.02).
+    fmt.log.warn('Rebase already paused on conflicts. Re-classifying...');
+    rebaseResult = { status: 1, stdout: '', stderr: existingRebase.unmergedFiles
+      .map(file => `CONFLICT (content): Merge conflict in ${file}`).join('\n') };
+  } else {
+    fmt.log.info(`Rebasing ${fmt.branch(branch)} onto local ${fmt.branch(ctx.baseBranch)}...`);
+    rebaseResult = gitFn(['-C', executionRoot, '-c', 'core.editor=true', '-c', 'merge.autoedit=no', 'rebase', ctx.baseBranch]);
+  }
 
   // Rebase succeeded (status 0) or was already up to date.
   if (continueSucceeded(rebaseResult)) {

@@ -1,9 +1,10 @@
+import { localReportingTimeZone, type ReportingWindow } from '../../domain/decision-window.js';
 import { reviewRounds, type ClassifierStatisticsInput, type RoundKind } from '../review-classification/statistics.js';
 
-type Window = { start: Date; end: Date; label: string };
+type Window = ReportingWindow & { label: string };
 
-function utcRange(window: Window): string {
-  return `${window.start.toISOString().slice(0, 10)} to ${window.end.toISOString().slice(0, 10)} UTC`;
+function reportingRange(window: Window): string {
+  return `${window.start.toISOString().slice(0, 10)} to ${window.end.toISOString().slice(0, 10)} ${window.timeZone ?? localReportingTimeZone()}`;
 }
 
 /** Pads every column to its widest cell so the table reads the same in a terminal and as Markdown. */
@@ -29,7 +30,7 @@ export function renderClassifierStatistics(input: ClassifierStatisticsInput | nu
     return of === 0 ? `${value} (n/a${label})` : `${value} (${Math.round(100 * value / of)}%${label})`;
   };
   const rows = cells.map(({ label, window, kind, stats: s }) => {
-    const name = `${label} (${utcRange(window)})`;
+    const name = `${label} (${reportingRange(window)})`;
     if (!s) { return [name, kind, ...Array<string>(9).fill('unavailable')]; }
     const known = (value: number) => text(value, s.rounds, s.coverage);
     const share = (value: number) => s.coverage === 'unavailable' || s.rounds === 0 ? 'n/a'

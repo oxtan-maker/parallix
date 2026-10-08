@@ -40,13 +40,15 @@ The boundary and rationale are recorded in
 
 ## Web board
 
-The local web board shows open missions and, by default, completed missions
-closed during the preceding seven days. Set
-`adapters.web.completedMissionRetentionDays` to a non-negative integer to
-change that completed-mission visibility window; `0` keeps only missions closed
-at the current instant. The board never hides a completed mission whose closure
-timestamp is unavailable or malformed, so incomplete historical data remains
-visible rather than being silently omitted.
+The local web board shows open missions and, by default, closed DONE missions
+whose canonical delivery completion falls on or after local midnight six days
+before today. This counts seven calendar days including today, and uses the
+same boundary as the rolling statistics window. Administrative closure does
+not extend retention. Set `adapters.web.completedMissionRetentionDays` to a
+non-negative integer to change the day count; `0` retains no closed missions
+with delivery evidence through today. Unclosed DONE missions stay visible.
+Missing or malformed delivery evidence, including unavailable history, also
+keeps the mission visible rather than silently omitting it.
 
 The board follows the host's event stream without page reloads. While that
 connection is lost, or when a refresh fails, it keeps showing the last validated
@@ -488,7 +490,7 @@ The default is enabled when the decision adapter and review identity are
 available. Invalid mode values disable routing. Missing classifier credentials or
 review tokens leave ordinary review usable.
 
-`px stats` shows one UTC PR Classification analysis table with comparable This week and Last week rows,
+`px stats` shows one local-time PR Classification analysis table with comparable This week and Last week rows,
 including open missions. It counts review rounds overall and split into first review and re-review rows, each round with exactly one
 recorded reason: rounds where the classifier was not attempted, attempted but fell back,
 called, cleared or returned, as counts and percentages of rounds, plus the classifier's
@@ -500,6 +502,96 @@ historical coverage stays labelled as such rather than becoming a zero.
 Statistics read local operational state and do not query Forgejo.
 
 Weekly and range reports also show the [bug-labeled mission trend](metric-contract.md#bug-labeled-mission-trend):
-counts and shares for full Monday–Sunday UTC weeks, a three-week trailing average,
-and falling/rising/flat direction. Empty weeks show “no completions”. Mission state
-supplies bug labels, independently of the classification flow counts and Backlog labels.
+counts and shares for the current and previous rolling seven-day local-time delivery
+populations, or the whole explicitly selected range including partial weeks.
+Empty populations show “no completions”; unavailable history stays unavailable.
+Mission state supplies bug labels, independently of classification flow counts
+and Backlog labels.
+
+## Environment variables
+
+`src/composition/config.ts` resolves the supported host environment into one frozen typed configuration at startup, which composition passes inward; flags and numeric controls such as the review polling and watchdog values are parsed there, and invalid numeric values behave as unset. The migration is not finished: several adapters still read some variables directly from the process environment, and the Default and Accepted values columns describe the effective behavior of whichever owner interprets each variable today. In particular `XDG_CONFIG_HOME`, `XDG_CACHE_HOME` and `XDG_DATA_HOME` are interpreted by the OpenCode state-home lookup in `src/adapters/config/state-homes.ts`, the `GIT_*` identity variables by `gitIdentityEnv` in `src/adapters/config/product-config.ts`, and the agent watchdog values by `resolveNoOutputWatchdogConfig` in `src/adapters/agents/launcher-selection.ts`. `PARALLIX_CLI_ENTRYPOINT` and `PARALLIX_TERMINAL_RETURN_DIR` are set for child processes, not read as configuration.
+
+| Name | Type | Default | Accepted values | Effect |
+| --- | --- | --- | --- | --- |
+| `AI_GATEWAY_API_KEY` | string | unset | any | Credential for the Vercel AI Gateway decision provider. |
+| `AUTONOMOUS_REVIEW_POLL_INTERVAL_MS` | integer ms | built-in interval | positive integer; invalid falls back | Delay between autonomous review polls. |
+| `AUTONOMOUS_REVIEW_POLL_TIMEOUT_MS` | integer ms | built-in maximum wait | positive integer; invalid falls back | Longest wait for a reviewer verdict. |
+| `CI` | flag | unset | any non-empty value | Marks a non-interactive CI run. |
+| `CODEX_HOME` | path | `~/.codex` | directory | Source of Codex state and auth. |
+| `DEBUG` | flag | unset | any non-empty value | Prints debug detail and full agent prompts. |
+| `FORCE_COLOR` | flag | unset | standard | Forces colored output. |
+| `FORGEJO_AUTHORIZED_APPROVER` | string | unset | Forgejo login | Only this login's approval counts. |
+| `FORGEJO_GATEKEEPER_USER` | string | built-in gatekeeper user | Forgejo login | Account used by the gatekeeper. |
+| `FORGEJO_HOME` | path | state-home default | directory | Forgejo credential and token home. |
+| `FORGEJO_REPO` | string | derived from git remote or config | `owner/repo` | Review repository. |
+| `FORGEJO_TOKEN` | secret | unset | any | API token for the current Forgejo user. |
+| `FORGEJO_TOKEN_FILE` | path | per-user token file | file path | Token file for the current Forgejo user. |
+| `FORGEJO_URL` | URL | config `baseUrl`, else `http://localhost:3300` | URL | Forgejo base URL. |
+| `FORGEJO_USER` | string | built-in user | Forgejo login | Acting Forgejo identity. |
+| `GIT_AUTHOR_EMAIL` | string | `workflow@example.invalid` | email | Author email for commits Parallix makes; falls back to this value when unset. |
+| `GIT_AUTHOR_NAME` | string | `Workflow Setup` | any | Author name for commits Parallix makes; falls back to this value when unset. |
+| `GIT_COMMITTER_EMAIL` | string | resolved author email | email | Committer email for commits Parallix makes. |
+| `GIT_COMMITTER_NAME` | string | resolved author name | any | Committer name for commits Parallix makes. |
+| `GRAPHIFY_BIN` | path | `PATH` lookup | executable | Graphify binary override. |
+| `HOME` | path | OS home | directory | Home for state and credential lookup. |
+| `JEV_CODE_PROVIDER` | enum | auto-detected from keys | `typesafe`, `openrouter`, `vercel` | Selects the decision provider. |
+| `JEV_CODE_TIMEOUT_MS` | integer ms | `30000` | 1 to 120000 | Decision request timeout. |
+| `LANG` | string | unset | locale | Locale forwarded to tools. |
+| `LOCALAPPDATA` | path | unset | directory | Windows state-home base. |
+| `LOGNAME` | string | unset | any | Login name for host identity. |
+| `MISSION_YEAR_OVERRIDE` | string | current year | year | Overrides the year used in mission paths. |
+| `NODE_TEST_CONTEXT` | flag | unset | set by `node --test` | Isolates Forgejo home during tests. |
+| `NO_COLOR` | flag | unset | standard | Disables colored output. |
+| `NVM_BIN` | path | unset | directory | Extra location when finding `pi`. |
+| `OPENCODE_BIN` | path | `PATH` lookup | executable | OpenCode binary override. |
+| `OPENROUTER_API_KEY` | secret | unset | any | Credential for the OpenRouter decision provider. |
+| `PARALLIX_CLAUDE_RAW_STREAM` | flag | unset | any non-empty value other than `0` | Forwards Claude stream output unmodified. |
+| `PARALLIX_CREDENTIAL_REDACTOR` | command | built-in redactor | command | Credential redactor for recovery evidence. |
+| `PARALLIX_CLI_COMMAND` | command | unset | shell command | Command used to launch `px` in agents. |
+| `PARALLIX_CLI_ENTRYPOINT` | path | unset | path | Entrypoint recorded for child CLI runs. |
+| `PARALLIX_DEBUG_SQL` | flag | unset | any non-empty value | Logs SQLite statements. |
+| `PARALLIX_HOME` | path | per-user state dir | directory | Operator state directory. |
+| `PARALLIX_JEV_REVIEW` | enum | `on` | `on`, `shadow` (case-insensitive); any other value disables | Repeat-review classification mode. |
+| `PARALLIX_KEEP_TEMP_ARTIFACTS` | flag | unset | `1` | Keeps OpenCode export temp files. |
+| `PARALLIX_MISSION_SOCKET` | path | unset | socket path | Set for nested mission terminals. |
+| `PARALLIX_MISSION_TERMINAL` | string | unset | slug | Set for nested mission terminals. |
+| `PARALLIX_NO_BUBBLEWRAP` | flag | unset | any non-empty value other than `0` | Opts out of bubblewrap sandboxing. |
+| `PARALLIX_NO_TUI` | flag | unset | `1` | Disables the interactive board. |
+| `PARALLIX_TERMINAL_RETURN_DIR` | path | unset | directory | Repository root to return to from a mission terminal. |
+| `PARALLIX_TERMINAL_STATE_DIR` | path | derived | directory | Terminal state root override. |
+| `PARALLIX_TEST_ALLOW_INTEGRATION_GATE_BYPASS` | flag | unset | `1` | Test-only: permits `--no-integration-gates`. |
+| `PARALLIX_TEST_NO_FORGEJO` | flag | unset | `1` | Test-only: Forgejo reported unavailable. |
+| `PATH` | path list | OS | standard | Executable lookup. |
+| `PI_BIN` | path | `PATH` lookup | executable | Pi binary override. |
+| `PRIMARY_WORKTREE` | path | derived from git | directory | Primary checkout override. |
+| `SHELL` | path | OS | executable | User shell for terminals. |
+| `TERM` | string | OS | terminal type | Terminal capabilities. |
+| `TMUX` | string | unset | set by tmux | Detects a surrounding tmux session. |
+| `TYPESAFE_API_KEY` | secret | unset | any | Credential for the Typesafe decision provider. |
+| `TYPESAFE_BASE_URL` | URL | provider default | absolute HTTPS URL without credentials, query or fragment | Decision endpoint override. |
+| `TYPESAFE_DEFAULT_MODEL` | string | provider default | model id | Decision model override. |
+| `USER` | string | OS | any | User name for host identity. |
+| `VERIFY_AREA` | string | default area | area name | Default `px verify` area. |
+| `WORKFLOW_AGENT` | enum | config | agent family | Overrides the selected agent. |
+| `WORKFLOW_AGENT_NO_OUTPUT_INITIAL_MS` | number ms | `60000` | non-negative number | Initial no-output watchdog delay. |
+| `WORKFLOW_AGENT_NO_OUTPUT_INTERVAL_MS` | number ms | `60000` | non-negative number | No-output watchdog interval. |
+| `WORKFLOW_AGENT_NO_OUTPUT_WATCHDOG` | flag | enabled | `0` disables | No-output watchdog switch. |
+| `WORKFLOW_DRAFT_AGENT_NO_OUTPUT_INITIAL_MS` | number ms | `15000` | non-negative number | Draft-step initial delay; independent of the general value. |
+| `WORKFLOW_DRAFT_AGENT_NO_OUTPUT_INTERVAL_MS` | number ms | `30000` | non-negative number | Draft-step interval; independent of the general value. |
+| `WORKFLOW_REVIEW_AGENT_NO_OUTPUT_MAX_MS` | number ms | unset (no maximum) | non-negative number | Review-step maximum silence. |
+| `WORKFLOW_SETUP_AGENT_PASSWORD` | secret | unset | any | Setup: agent account password. |
+| `WORKFLOW_SETUP_AGENT_USERS` | string | unset | comma list | Setup: agent accounts. |
+| `WORKFLOW_SETUP_FORGEJO_REPO` | string | unset | `owner/repo` | Setup: review repository. |
+| `WORKFLOW_SETUP_FORGEJO_URL` | URL | unset | URL | Setup: Forgejo base URL. |
+| `WORKFLOW_SETUP_NON_INTERACTIVE` | flag | unset | `1` | Setup: skip prompts. |
+| `WORKFLOW_SETUP_OWNER_LOGIN` | string | unset | login | Setup: owner account. |
+| `WORKFLOW_SETUP_OWNER_PASSWORD` | secret | unset | any | Setup: owner password. |
+| `WORKFLOW_SETUP_PRODUCT_NAME` | string | directory name | any | Setup: product name. |
+| `WORKFLOW_SETUP_REVIEW_PROVIDER` | enum | `none` | provider name | Setup: review provider. |
+| `WORKFLOW_SETUP_REVIEW_REMOTE` | string | unset | remote name | Setup: review git remote. |
+| `WORKFLOW_TMP_DIR` | path | OS temp dir | directory | Temporary files location. |
+| `XDG_CACHE_HOME` | path | `~/.cache` | absolute directory; relative values are ignored | Base of the OpenCode cache state home. |
+| `XDG_CONFIG_HOME` | path | `~/.config` | absolute directory; relative values are ignored | Base of the OpenCode config state home. |
+| `XDG_DATA_HOME` | path | `~/.local/share` | absolute directory; relative values are ignored | Base of the OpenCode data state home. |
+| `XDG_RUNTIME_DIR` | path | unset | directory | Runtime and socket base. |

@@ -1,29 +1,42 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { trailingBugShare, selectBugTrend } from '../../../../src/application/services/statistics-bug-trend.js';
+import { selectBugTrend } from '../../../../src/application/services/statistics-bug-trend.js';
+import { selectStatsReport } from '../../../../src/application/services/statistics-report-selection.js';
 
-test('trailing bug share averages observed shares in three calendar weeks', () => {
-  assert.deepEqual(trailingBugShare([1, 0.5, null, 0, null, null, null]), [1, 0.75, 0.75, 0.25, 0, 0, null]);
-});
+const outcomes = [
+  { repo: 'r', mission: 'previous', closedAt: '2026-10-01T23:59:59Z', labels: ['bug', 'ai_sdlc'] },
+  { repo: 'r', mission: 'first', closedAt: '2026-10-02T00:00:00Z', labels: ['user_value'] },
+  { repo: 'r', mission: 'delivery', closedAt: '2026-10-07T12:00:00Z', labels: ['bug', 'user_value'] },
+  { repo: 'r', mission: 'last', closedAt: '2026-10-08T23:59:59.999Z', labels: [] },
+];
 
-test('bug trend direction compares consecutive trailing averages', () => {
-  const weeks = selectBugTrend([
-    { repo: 'r', mission: 'a', closedAt: '2026-09-07T00:00:00Z', labels: ['bug'] },
-    { repo: 'r', mission: 'b', closedAt: '2026-09-14T00:00:00Z', labels: [] },
-    { repo: 'r', mission: 'c', closedAt: '2026-09-21T00:00:00Z', labels: ['bug'] },
-  ], new Date('2026-09-07'), new Date('2026-09-27'));
-  assert.deepEqual(weeks?.map(week => week.direction), [null, 'falling', 'rising']);
-});
-
-test('full UTC weeks cross year boundaries and include Sunday instants only in their week', () => {
-  const weeks = selectBugTrend([
-    { repo: 'r', mission: 'a', closedAt: '2026-01-05T00:30:00+01:00', labels: ['bug'] },
-    { repo: 'r', mission: 'b', closedAt: '2026-01-05T00:00:00Z', labels: [] },
-    { repo: 'r', mission: 'invalid', closedAt: 'invalid', labels: ['bug'] },
-  ], new Date('2025-12-29'), new Date('2026-01-11'));
-  assert.deepEqual(weeks?.map(week => [week.start, week.bugs, week.completed, week.share]), [
-    ['2025-12-29', 1, 1, 1], ['2026-01-05', 0, 1, 0],
+test('rolling bug populations include midnight and late last-day deliveries with previous separation (TASK-2685)', () => {
+  const selection = selectStatsReport([], outcomes, { mode: 'weekly', timeZone: 'UTC', today: '2026-10-08' });
+  assert.deepEqual(selection.bugTrend?.map(row => [row.start, row.end, row.completed, row.bugs, row.share]), [
+    ['2026-10-02', '2026-10-08', 3, 1, 1 / 3], ['2026-09-25', '2026-10-01', 1, 1, 1],
   ]);
-  assert.deepEqual(selectBugTrend([], new Date('2026-01-06'), new Date('2026-01-11')), []);
-  assert.equal(selectBugTrend(null, new Date('2026-01-05'), new Date('2026-01-11')), null);
+  assert.equal(selection.current.flow?.userValue, 2);
+  assert.equal(selection.previous?.flow?.aiSdlc, 1);
+});
+
+test('same-day clock changes preserve populations and new deliveries shift bug share (TASK-2685)', () => {
+  const select = (today: string, source = outcomes) => selectStatsReport([], source, { mode: 'weekly', timeZone: 'UTC', today });
+  assert.deepEqual(select('2026-10-08T00:00:00Z'), select('2026-10-08T23:59:59Z'));
+  assert.equal(select('2026-10-08', [...outcomes, { repo: 'r', mission: 'new', closedAt: '2026-10-08T15:00:00Z', labels: ['bug'] }]).bugTrend?.[0].share, 0.5);
+});
+
+test('explicit partial weeks retain all deliveries and normalize offset timestamps (TASK-2685)', () => {
+  const rows = selectBugTrend([
+    { repo: 'r', mission: 'offset', closedAt: '2026-01-05T00:30:00+01:00', labels: ['bug'] },
+    { repo: 'r', mission: 'next', closedAt: '2026-01-05T00:00:00Z', labels: [] },
+    { repo: 'r', mission: 'bad', closedAt: 'invalid', labels: ['bug'] },
+  ], new Date('2026-01-04'), new Date('2026-01-04'), 'UTC');
+  assert.deepEqual(rows?.map(row => [row.start, row.end, row.bugs, row.completed, row.share]), [['2026-01-04', '2026-01-04', 1, 1, 1]]);
+});
+
+test('empty and unavailable bug populations differ from observed zero (TASK-2685)', () => {
+  const start = new Date('2026-10-02'); const end = new Date('2026-10-08');
+  assert.equal(selectBugTrend(null, start, end), null);
+  assert.equal(selectBugTrend([], start, end)?.[0].share, null);
+  assert.equal(selectBugTrend([outcomes[1]!], start, end)?.[0].share, 0);
 });

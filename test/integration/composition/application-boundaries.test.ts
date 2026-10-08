@@ -6,6 +6,7 @@ import * as path from 'node:path';
 
 import { findForbiddenApplicationDependencies, findCompositionViolations, findWorkflowOwnershipViolations } from '../../../src/adapters/architecture/boundary-guards.js';
 import { createProductionApplicationServices } from '../../../src/composition/application-services.js';
+import { resolveConfiguration } from '../../../src/composition/config.js';
 const root = process.cwd();
 const fixture = (name: string) => path.join(root, 'test', 'fixtures', 'application-boundary', name);
 const APPLICATION_DIR = path.join(root, 'src', 'application');
@@ -103,7 +104,7 @@ test('composition guard accepts the sole production composition root', async () 
   assert.deepEqual(findCompositionViolations(path.join(root, 'src', 'composition')), []);
   // The ownership assertion is static. Keep the construction smoke test
   // in-process by opting out of the real operator database and Git identity.
-  const graph = await createProductionApplicationServices(root, undefined, { includeOperatorState: false });
+  const graph = await createProductionApplicationServices(root, undefined, { includeOperatorState: false, configuration: resolveConfiguration(process.env) });
   assert.equal(graph.executeMission.constructor.name, 'ExecuteMissionService');
   assert.equal(graph.statsBackfill.constructor.name, 'StatsBackfillService');
   assert.equal(graph.mission, null);

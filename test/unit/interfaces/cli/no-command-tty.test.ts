@@ -1,10 +1,13 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { main, printUsage, shouldLaunchDefaultUi } from '../../../../src/interfaces/cli/runtime.js';
+import { resolveConfiguration } from '../../../../src/composition/config.js';
 
-type MainOverrides = Parameters<typeof main>[1];
+const runtimeOf = (env: Record<string, string | undefined> = {}) => resolveConfiguration(env).runtime;
 
-function captureBareInvocation(overrides: MainOverrides = {}) {
+type MainOverrides = Partial<Parameters<typeof main>[1]> & Pick<Parameters<typeof main>[1], 'runtime'>;
+
+function captureBareInvocation(overrides: MainOverrides) {
   const calls: Array<string | [string, number | undefined]> = [];
   return {
     calls,
@@ -26,11 +29,11 @@ test('no-command TTY dispatches the same ui command as explicit px ui', async ()
   await main([], {
     commandFns,
     isInteractiveTTYFn: () => true,
-    environment: {},
+    runtime: runtimeOf(),
     printUsageFn: () => assert.fail('TTY default must not print usage'),
     exitFn: (() => assert.fail('TTY default must not exit through usage')) as never,
   });
-  await main(['ui'], { commandFns });
+  await main(['ui'], { commandFns, runtime: runtimeOf() });
 
   assert.deepEqual(calls, [
     ['ui', [], { command: 'ui' }],
@@ -39,7 +42,7 @@ test('no-command TTY dispatches the same ui command as explicit px ui', async ()
 });
 
 test('no-command non-TTY scenarios preserve legacy usage bytes, exit code, and UI isolation', async () => {
-  const baseline = captureBareInvocation({ isInteractiveTTYFn: () => false, environment: {} });
+  const baseline = captureBareInvocation({ isInteractiveTTYFn: () => false, runtime: runtimeOf() });
   await main([], baseline.options);
 
   const scenarios = [
@@ -51,7 +54,7 @@ test('no-command non-TTY scenarios preserve legacy usage bytes, exit code, and U
   for (const [name, isInteractiveTTY, environment] of scenarios) {
     const scenario = captureBareInvocation({
       isInteractiveTTYFn: () => isInteractiveTTY,
-      environment,
+      runtime: runtimeOf(environment),
       commandFns: {
         ui: async () => assert.fail(`${name} must not import or initialize the UI command`),
       },
@@ -62,12 +65,12 @@ test('no-command non-TTY scenarios preserve legacy usage bytes, exit code, and U
 });
 
 test('PARALLIX_NO_TUI=1 restores legacy bare-command behavior on a TTY', async () => {
-  const baseline = captureBareInvocation({ isInteractiveTTYFn: () => false, environment: {} });
+  const baseline = captureBareInvocation({ isInteractiveTTYFn: () => false, runtime: runtimeOf() });
   await main([], baseline.options);
 
   const optedOut = captureBareInvocation({
     isInteractiveTTYFn: () => true,
-    environment: { PARALLIX_NO_TUI: '1' },
+    runtime: runtimeOf({ PARALLIX_NO_TUI: '1' }),
     commandFns: {
       ui: async () => assert.fail('PARALLIX_NO_TUI=1 must prevent UI dispatch'),
     },
@@ -78,11 +81,11 @@ test('PARALLIX_NO_TUI=1 restores legacy bare-command behavior on a TTY', async (
 });
 
 test('TTY default policy requires both terminal streams, no CI marker, and no opt-out', () => {
-  assert.equal(shouldLaunchDefaultUi({ stdinIsTTY: true, stdoutIsTTY: true, environment: {} }), true);
-  assert.equal(shouldLaunchDefaultUi({ stdinIsTTY: false, stdoutIsTTY: true, environment: {} }), false);
-  assert.equal(shouldLaunchDefaultUi({ stdinIsTTY: true, stdoutIsTTY: false, environment: {} }), false);
-  assert.equal(shouldLaunchDefaultUi({ stdinIsTTY: true, stdoutIsTTY: true, environment: { CI: 'true' } }), false);
-  assert.equal(shouldLaunchDefaultUi({ stdinIsTTY: true, stdoutIsTTY: true, environment: { PARALLIX_NO_TUI: '1' } }), false);
+  assert.equal(shouldLaunchDefaultUi({ stdinIsTTY: true, stdoutIsTTY: true, runtime: runtimeOf() }), true);
+  assert.equal(shouldLaunchDefaultUi({ stdinIsTTY: false, stdoutIsTTY: true, runtime: runtimeOf() }), false);
+  assert.equal(shouldLaunchDefaultUi({ stdinIsTTY: true, stdoutIsTTY: false, runtime: runtimeOf() }), false);
+  assert.equal(shouldLaunchDefaultUi({ stdinIsTTY: true, stdoutIsTTY: true, runtime: runtimeOf({ CI: 'true' }) }), false);
+  assert.equal(shouldLaunchDefaultUi({ stdinIsTTY: true, stdoutIsTTY: true, runtime: runtimeOf({ PARALLIX_NO_TUI: '1' }) }), false);
 });
 
 test('help documents the TTY default, explicit ui command, and opt-out', () => {

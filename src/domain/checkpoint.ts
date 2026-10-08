@@ -5,6 +5,16 @@ import type { MissionId } from './mission.js';
 export interface GoalCheckRow {
   readonly criterion: string;
   readonly evidence: string;
+  /**
+   * Review round current when the row was recorded; absent when the Mission had
+   * no review yet. A repair round owes fresh rows stamped with its own number, so
+   * a row kept from an earlier round is distinguishable from a repair's fix.
+   */
+  readonly recordedRound?: number;
+  /** Integration gate (or command) this row was recorded to repair; keeps the criterion owed when that gate fails again. */
+  readonly repairedGate?: string;
+  /** All integration gates previously repaired by this criterion; retained across later updates. */
+  readonly repairedGates?: readonly string[];
 }
 
 export interface CheckpointData {
@@ -98,11 +108,66 @@ export function latestEvidencedCheckpoint(checkpoints: readonly CheckpointData[]
 }
 
 /**
- * Goal Check rows the final checkpoint still lacks. Handoff requires the latest
- * recorded checkpoint to carry one row per success criterion; zero when covered.
+ * Success-criterion identities with no evidence row in any recorded checkpoint.
+ * A row covers the criterion whose identity its `criterion` field equals, so
+ * repeated rows for one criterion do not count as coverage for another: coverage
+ * is the union of the identities the rows name, not a sum of row counts. Returns
+ * the uncovered identities in `requiredCriteria` order; empty when every required
+ * criterion is covered. Because coverage is the union across every recorded
+ * checkpoint, a repair checkpoint that carries only its affected criteria does
+ * not read as a shortfall while earlier evidence for the others is retained.
  */
-export function finalGoalCheckShortfall(rows: readonly GoalCheckRow[], successCriteriaCount: number): number {
-  return Math.max(0, successCriteriaCount - rows.length);
+export function uncoveredCriteria(
+  checkpoints: readonly { readonly goalCheck: readonly GoalCheckRow[] }[],
+  requiredCriteria: readonly string[],
+): readonly string[] {
+  const covered = new Set<string>();
+  for (const checkpoint of checkpoints) {
+    for (const row of checkpoint.goalCheck) {
+      if (typeof row.criterion === 'string' && row.criterion.length > 0) {
+        covered.add(row.criterion);
+      }
+    }
+  }
+  return requiredCriteria.filter((criterion) => !covered.has(criterion));
+}
+
+/**
+ * When re-recording a checkpoint, retain prior rows for criteria the new record
+ * does not touch so a repair records only its affected criteria without rewriting
+ * the whole Goal Check table. New rows take precedence for a criterion they share
+ * with earlier evidence; criteria introduced by the new record are appended.
+ */
+export function retainPriorGoalCheckRows(
+  priorRows: readonly GoalCheckRow[],
+  newRows: readonly GoalCheckRow[],
+): GoalCheckRow[] {
+  if (priorRows.length === 0) {
+    return [...newRows];
+  }
+  const priorByCriterion = new Map(priorRows.map((row) => [row.criterion, row] as const));
+  // New rows overwrite a shared criterion in place and append criteria the
+  // earlier evidence did not cover, preserving order.
+  for (const row of newRows) {
+    priorByCriterion.set(row.criterion, row);
+  }
+  return [...priorByCriterion.values()];
+}
+
+/**
+ * Success-criterion identities with no evidence row in any recorded checkpoint.
+ * Handoff requires every completed criterion to be named by a row across the
+ * recorded checkpoints; empty when all are covered. A row covers the criterion
+ * whose identity its `criterion` field equals, so a repair row for one criterion
+ * does not count as evidence for another.
+ */
+export function uncoveredCompletedCriteria(
+  checkpoints: readonly { readonly goalCheck: readonly GoalCheckRow[] }[],
+  successCriteria: readonly string[],
+  completedSuccessCriteria: readonly number[],
+): readonly string[] {
+  const completed = successCriteria.filter((_, index) => completedSuccessCriteria.includes(index));
+  return uncoveredCriteria(checkpoints, completed);
 }
 
 /** Reject blank Goal Check text before it can reach persistence. */
@@ -111,4 +176,26 @@ export function assertGoalCheckRows(rows: readonly GoalCheckRow[]): void {
     if (row.criterion.trim().length === 0) { throw new Error('Checkpoint goal criterion must not be empty'); }
     if (row.evidence.trim().length === 0) { throw new Error('Checkpoint goal evidence must not be empty'); }
   }
+}
+
+/**
+ * Fresh repair proof the open repair round still owes. `affected` names the
+ * criteria the reviewer's findings pin down; when it is empty the repair context
+ * does not say which criteria are affected, so at least one row must have been
+ * recorded in the repair round. Returns the criteria lacking a fresh row, or
+ * `['(any)']` when no criterion is named and no fresh row exists; empty when the
+ * repair has supplied what it owes.
+ */
+export function staleRepairCriteria(
+  checkpoints: readonly { readonly goalCheck: readonly GoalCheckRow[] }[],
+  repair: { readonly round: number; readonly affected: readonly string[] },
+): readonly string[] {
+  const fresh = new Set<string>();
+  for (const checkpoint of checkpoints) {
+    for (const row of checkpoint.goalCheck) {
+      if (row.recordedRound === repair.round) { fresh.add(row.criterion); }
+    }
+  }
+  if (repair.affected.length === 0) { return fresh.size > 0 ? [] : ['(any)']; }
+  return repair.affected.filter((criterion) => !fresh.has(criterion));
 }

@@ -19,6 +19,7 @@ import { missionId, missionLabels } from '../../../src/domain/mission.js';
 import { repositoryId } from '../../../src/domain/repository.js';
 import { makeExecutePorts } from '../../fixtures/execute-mission-ports.js';
 import { mkdtemp as registeredMkdtemp } from '../../helpers/temp-dir.js';
+import { resolveConfiguration } from '../../../src/composition/config.js';
 
 const directories: string[] = [];
 const repositories = {
@@ -47,6 +48,7 @@ test('wired production controller dispatches mission intake and factory agrees',
     const { ports } = makeExecutePorts();
     const capabilities = composeProductionCapabilities(
       '/fixture-repository', repositoryId('fixture-repository'), repositories, ports, store, NO_CURRENT_WORK_PORT,
+      undefined, undefined, { configuration: resolveConfiguration({}) },
     );
     const result = await capabilities.commandController.dispatch({
       operationId: 'task-2426-intake',
@@ -124,7 +126,7 @@ test('wired production controller drafts through the injected workflow port', as
     const mock = makeMockDraftWorkflow(slug);
     const capabilities = composeProductionCapabilities(
       '/fixture-repository', repositoryId('fixture-repository'), repositories, ports, store, NO_CURRENT_WORK_PORT,
-      undefined, undefined, { draftWorkflow: mock.port },
+      undefined, undefined, { configuration: resolveConfiguration({}), draftWorkflow: mock.port },
     );
     // Draft requires the pre-draft state: materialize a backlog mission first.
     const intake = await capabilities.commandController.dispatch({
@@ -167,6 +169,7 @@ test('production composition builds the trusted draft adapter by default (no ove
     // lazy — no git or database handle is opened until a dispatch runs.
     const capabilities = composeProductionCapabilities(
       '/fixture-repository', repositoryId('fixture-repository'), repositories, ports, store, NO_CURRENT_WORK_PORT,
+      undefined, undefined, { configuration: resolveConfiguration({}) },
     );
     assert.equal(capabilities.commandController.canExecute('draft:create'), true);
     assert.equal(capabilities.tui.commandControllerFactory(() => {}).canExecute('draft:create'), true);
@@ -183,6 +186,7 @@ test('production draft adapter maps worktree creation abort to typed failure wit
     const capabilities = composeProductionCapabilities(
       '/fixture-repository', repositoryId('fixture-repository'), repositories, ports, store, NO_CURRENT_WORK_PORT,
       undefined, undefined, {
+        configuration: resolveConfiguration({}),
         draftAdapterDeps: {
           resolveMainRepoFn: () => '/definitely-not-a-git-repository',
           ensureRepoExistsFn: () => true,
@@ -220,6 +224,7 @@ test('read-only production controller does not advertise Mission commands', asyn
   const { ports } = makeExecutePorts();
   const capabilities = composeProductionCapabilities(
     '/fixture-repository', repositoryId('fixture-repository'), repositories, ports, null, NO_CURRENT_WORK_PORT,
+    undefined, undefined, { configuration: resolveConfiguration({}) },
   );
   const factoryController = capabilities.tui.commandControllerFactory(() => {});
   for (const controller of [capabilities.commandController, factoryController]) {
@@ -252,7 +257,7 @@ test('production application services wire Mission commands through their shared
   await clearOperatorStateCache();
   let services: Awaited<ReturnType<typeof createProductionApplicationServices>> | undefined;
   try {
-    services = await createProductionApplicationServices(process.cwd());
+    services = await createProductionApplicationServices(process.cwd(), undefined, { configuration: resolveConfiguration(process.env) });
     const controller = services.presentationCapabilities!.commandController;
     for (const kind of ['active:execute', 'mission:intake', 'checkpoint:record', 'handoff:record'] as const) {
       assert.equal(controller.canExecute(kind), true);

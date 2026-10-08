@@ -1,8 +1,8 @@
 ---
 id: TASK-2672
 title: Continue rebase conflict resolution through successive normal conflict stops
-status: backlog
-assignee: []
+status: done
+assignee: [codex]
 created_date: '2026-10-06 18:41'
 labels:
   - bug

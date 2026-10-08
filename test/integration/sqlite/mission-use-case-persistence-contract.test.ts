@@ -124,7 +124,7 @@ describe('Mission use cases', () => {
       rawFilename: 'CP-2.md',
       firstLine: 'CP-2: Application boundary defined',
       goalCheck: [
-        { criterion: 'Use cases exist', evidence: 'src/application/mission-intake-service.ts:44' },
+        { criterion: 'The mission is done', evidence: 'src/application/mission-intake-service.ts:44' },
       ],
       nextActionText: 'Reroute the CLI and controller paths.',
       ...overrides,
@@ -382,7 +382,7 @@ describe('Mission use cases', () => {
   // ---------------------------------------------------------------------------
 
   test('SC3: checkpoint data round-trips through the boundary with GoalCheckRow semantics', async () => {
-    const store = new FakeMissionStore(activeMission(), 1);
+    const store = new FakeMissionStore(activeMission({ successCriteria: ['Boundary exists', 'Gate ran'] }), 1);
     const service = new MissionCheckpointService(store);
     const recorded = await service.record({
       operationId: 'op-cp',
@@ -501,7 +501,7 @@ describe('Mission use cases', () => {
     const service = new MissionCheckpointService(store);
     const outcome = await service.record({
       operationId: 'op-nonblank', missionId: MISSION, capabilities: ALL_CAPABILITIES,
-      checkpoint: checkpoint({ goalCheck: [{ criterion: 'Fine', evidence: '`npm test`' }] }),
+      checkpoint: checkpoint({ goalCheck: [{ criterion: 'The mission is done', evidence: '`npm test`' }] }),
     });
     assert.equal(outcome.status, 'completed');
   });

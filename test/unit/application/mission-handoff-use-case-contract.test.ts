@@ -637,8 +637,8 @@ describe('Handoff command use case', () => {
   });
 
 
-  test('a typed-verb Mission requires completion and one verifiable row per criterion without matching criterion prose (TASK-2631)', async () => {
-    const load = (criteria: readonly string[], goalCheck = [{ criterion: 'The  greeting is  fixed', evidence: '`test/unit/application/handoff-use-case.test.ts`' }]) => async () => ({
+  test('a typed-verb Mission requires completion and one verifiable row per distinct success criterion (TASK-2631)', async () => {
+    const load = (criteria: readonly string[], goalCheck = [{ criterion: 'The greeting is fixed', evidence: '`test/unit/application/handoff-use-case.test.ts`' }]) => async () => ({
       kind: 'found',
       mission: {
         checkpoints: [{ name: 'CP-1', goalCheck, nextAction: 'review' }],
@@ -659,12 +659,12 @@ describe('Handoff command use case', () => {
     assert.match(missing.error ?? '', /2 completed criteria require 2 Goal Check row/);
     assert.equal(classifyError(missing.error ?? '').dispatchAction, 'AutoSendBack', 'the gap is sent back to the implementer');
 
-    // Completion indexes provide the criterion identity, so checkpoint labels do
-    // not have to reproduce criterion text.
+    // A row covers the completed criterion whose identity its `criterion` field
+    // equals; distinct coverage across recorded checkpoints is what handoff checks.
     const coveredRecorder = makeRecorder();
     const covered = await new HandoffCommandUseCase(makePorts(coveredRecorder, contractServices(load(
       ['the greeting is fixed'],
-      [{ criterion: 'browser behavior', evidence: '`test/unit/application/handoff-use-case.test.ts`' }],
+      [{ criterion: 'the greeting is fixed', evidence: '`test/unit/application/handoff-use-case.test.ts`' }],
     ))))
       .performHandoff(SLUG, runOptions(coveredRecorder));
     assert.match(covered.error ?? '', /no recorded verification gate/, 'every criterion was evidenced, so handoff moved on to the gates');

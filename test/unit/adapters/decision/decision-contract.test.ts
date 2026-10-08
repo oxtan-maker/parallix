@@ -4,6 +4,11 @@ import { createDecisionPort } from '../../../../src/composition/decision.js';
 import { resolveDecisionProvider } from '../../../../src/adapters/decision/provider.js';
 import type { DecisionRequest } from '../../../../src/application/ports/decision.js';
 import { DecisionError } from '../../../../src/application/ports/decision.js';
+import { resolveConfiguration } from '../../../../src/composition/config.js';
+
+const resolveFromEnvironment = (env: Record<string, string | undefined>) => resolveDecisionProvider(resolveConfiguration(env).decision);
+const portFromEnvironment = ({ env, transport }: { env: Record<string, string | undefined>; transport?: typeof fetch }) =>
+  createDecisionPort(resolveConfiguration(env).decision, transport);
 
 // New owner: generic provider discovery and normalized decision transport; no workflow consumer exists.
 const request: DecisionRequest = { state: { text: 'All tests passed.' }, questions: {
@@ -20,7 +25,7 @@ function transport(body: unknown): typeof fetch { return async () => new Respons
 
 test('discovers each sole conventional provider without prompting (TASK-2664)', () => {
   for (const [provider, key] of [['typesafe', 'TYPESAFE_API_KEY'], ['openrouter', 'OPENROUTER_API_KEY'], ['vercel', 'AI_GATEWAY_API_KEY']]) {
-    const resolved = resolveDecisionProvider({ [key]: 'opaque-key' });
+    const resolved = resolveFromEnvironment({ [key]: 'opaque-key' });
     assert.equal(resolved.availability.status, 'available');
     assert.equal(resolved.route?.provider, provider);
     assert.equal(resolved.route?.apiKey, 'opaque-key');
@@ -40,37 +45,37 @@ test('requires setup for missing, ambiguous, unsupported, or invalid configurati
     { OPENROUTER_API_KEY: 'b', TYPESAFE_BASE_URL: 'invalid' },
     { OPENROUTER_API_KEY: 'b', JEV_CODE_TIMEOUT_MS: '0' },
     { OPENROUTER_API_KEY: 'b', JEV_CODE_TIMEOUT_MS: 'Infinity' }]) {
-    assert.equal(resolveDecisionProvider(env).availability.status, 'setup-required');
+    assert.equal(resolveFromEnvironment(env).availability.status, 'setup-required');
   }
 });
 
 test('explicit routes disambiguate and generic SDK credentials follow operator routing', () => {
-  const resolved = resolveDecisionProvider({ TYPESAFE_API_KEY: 'generic', OPENROUTER_API_KEY: 'own',
+  const resolved = resolveFromEnvironment({ TYPESAFE_API_KEY: 'generic', OPENROUTER_API_KEY: 'own',
     JEV_CODE_PROVIDER: 'openrouter', TYPESAFE_DEFAULT_MODEL: 'jev-1.13', JEV_CODE_TIMEOUT_MS: '500' });
   assert.equal(resolved.route?.apiKey, 'own');
   assert.equal(resolved.route?.model, 'jev-1.13');
   assert.equal(resolved.route?.timeoutMs, 500);
-  assert.equal(resolveDecisionProvider({ TYPESAFE_API_KEY: 'generic', TYPESAFE_BASE_URL: 'https://openrouter.ai/api' }).route?.provider, 'openrouter');
-  assert.equal(resolveDecisionProvider({ TYPESAFE_API_KEY: 'generic', JEV_CODE_PROVIDER: 'vercel' }).route?.provider, 'vercel');
-  assert.equal(resolveDecisionProvider({ TYPESAFE_API_KEY: 'generic', TYPESAFE_BASE_URL: 'https://proxy.example/' }).route?.endpoint, 'https://proxy.example/v1/systemone');
-  assert.equal(resolveDecisionProvider({ OPENROUTER_API_KEY: 'own', JEV_CODE_PROVIDER: 'openrouter', TYPESAFE_BASE_URL: 'https://proxy.example' }).route?.provider, 'openrouter');
-  assert.equal(resolveDecisionProvider({ OPENROUTER_API_KEY: 'own', JEV_CODE_PROVIDER: 'openrouter', TYPESAFE_BASE_URL: 'https://api.typesafe.ai' }).availability.status, 'setup-required');
-  assert.equal(resolveDecisionProvider({ OPENROUTER_API_KEY: 'own', TYPESAFE_BASE_URL: 'https://api.typesafe.ai' }).availability.status, 'setup-required');
+  assert.equal(resolveFromEnvironment({ TYPESAFE_API_KEY: 'generic', TYPESAFE_BASE_URL: 'https://openrouter.ai/api' }).route?.provider, 'openrouter');
+  assert.equal(resolveFromEnvironment({ TYPESAFE_API_KEY: 'generic', JEV_CODE_PROVIDER: 'vercel' }).route?.provider, 'vercel');
+  assert.equal(resolveFromEnvironment({ TYPESAFE_API_KEY: 'generic', TYPESAFE_BASE_URL: 'https://proxy.example/' }).route?.endpoint, 'https://proxy.example/v1/systemone');
+  assert.equal(resolveFromEnvironment({ OPENROUTER_API_KEY: 'own', JEV_CODE_PROVIDER: 'openrouter', TYPESAFE_BASE_URL: 'https://proxy.example' }).route?.provider, 'openrouter');
+  assert.equal(resolveFromEnvironment({ OPENROUTER_API_KEY: 'own', JEV_CODE_PROVIDER: 'openrouter', TYPESAFE_BASE_URL: 'https://api.typesafe.ai' }).availability.status, 'setup-required');
+  assert.equal(resolveFromEnvironment({ OPENROUTER_API_KEY: 'own', TYPESAFE_BASE_URL: 'https://api.typesafe.ai' }).availability.status, 'setup-required');
 });
 
 test('requestBytes is the exact body size sent for the routed model (TASK-2675)', async () => {
   let sent = 0;
   const env = { OPENROUTER_API_KEY: 'secret', TYPESAFE_DEFAULT_MODEL: 'jev-1.13' };
-  const port = createDecisionPort({ env, transport: async (_url, init) => { sent = Buffer.byteLength(init?.body as string); return new Response(JSON.stringify(response())); } });
+  const port = portFromEnvironment({ env, transport: async (_url, init) => { sent = Buffer.byteLength(init?.body as string); return new Response(JSON.stringify(response())); } });
   await port.decide(request);
   assert.equal(port.requestBytes(request), sent);
-  const longer = createDecisionPort({ env: { ...env, TYPESAFE_DEFAULT_MODEL: 'jev-1.13-with-a-much-longer-routed-name' } });
+  const longer = portFromEnvironment({ env: { ...env, TYPESAFE_DEFAULT_MODEL: 'jev-1.13-with-a-much-longer-routed-name' } });
   assert.ok(longer.requestBytes(request) > sent);
 });
 
 test('composition normalizes mixed questions, probabilities, model and usage', async () => {
   let calls = 0;
-  const port = createDecisionPort({ env: { OPENROUTER_API_KEY: 'secret' }, transport: async (url, init) => {
+  const port = portFromEnvironment({ env: { OPENROUTER_API_KEY: 'secret' }, transport: async (url, init) => {
     calls++;
     assert.equal(url, 'https://openrouter.ai/api/v1/systemone');
     assert.equal(init?.redirect, 'error');
@@ -96,8 +101,8 @@ test('composition normalizes mixed questions, probabilities, model and usage', a
 test('setup-required and malformed requests never reach the transport', async () => {
   let calls = 0;
   const mock: typeof fetch = async () => { calls++; return new Response('{}'); };
-  await assert.rejects(createDecisionPort({ env: {}, transport: mock }).decide(request), /Export/);
-  const port = createDecisionPort({ env: { OPENROUTER_API_KEY: 'secret' }, transport: mock });
+  await assert.rejects(portFromEnvironment({ env: {}, transport: mock }).decide(request), /Export/);
+  const port = portFromEnvironment({ env: { OPENROUTER_API_KEY: 'secret' }, transport: mock });
   for (const input of [
     { state: 'x', questions: {} },
     { state: 'x', questions: { q: { type: 'choice', instructions: 'Pick', criteria: { only: null } } } },
@@ -111,7 +116,7 @@ test('setup-required and malformed requests never reach the transport', async ()
 
 test('composition snapshots operator routing without persisting or rereading credentials', async () => {
   const env = { OPENROUTER_API_KEY: 'initial', TYPESAFE_DEFAULT_MODEL: 'pinned-model' };
-  const port = createDecisionPort({ env, transport: async (_url, init) => {
+  const port = portFromEnvironment({ env, transport: async (_url, init) => {
     assert.equal((init?.headers as Record<string, string>).Authorization, 'Bearer initial');
     assert.equal(JSON.parse(init?.body as string).model, 'pinned-model');
     return new Response(JSON.stringify(response()));
@@ -133,7 +138,7 @@ test('rejects partial, malformed, mismatched and nonfinite provider answers', as
     (body: ReturnType<typeof response>) => { body.usage.cost = -1; },
   ]) { const body = response(); mutate(body); invalidBodies.push(body); }
   for (const body of invalidBodies) {
-    await assert.rejects(createDecisionPort({ env: { OPENROUTER_API_KEY: 'secret' }, transport: transport(body) }).decide(request), /invalid response/);
+    await assert.rejects(portFromEnvironment({ env: { OPENROUTER_API_KEY: 'secret' }, transport: transport(body) }).decide(request), /invalid response/);
   }
 });
 
@@ -141,7 +146,7 @@ test('optional score distributions and usage remain optional', async () => {
   const original = response();
   const { probabilities: _probabilities, ...quality } = original.answers.quality;
   const body = { model: original.model, answers: { ...original.answers, quality } };
-  const result = await createDecisionPort({ env: { OPENROUTER_API_KEY: 'secret' }, transport: transport(body) }).decide(request);
+  const result = await portFromEnvironment({ env: { OPENROUTER_API_KEY: 'secret' }, transport: transport(body) }).decide(request);
   assert.equal(result.usage, undefined);
   assert.equal(result.answers.quality.type, 'score');
 });
@@ -158,7 +163,7 @@ test('usage blocks have a provider-independent exception distinct from transient
       [503, {}, 'unavailable'], [422, {}, 'invalid-request'],
     ] as const) {
       let calls = 0;
-      const port = createDecisionPort({ env: { [key]: 'secret' }, transport: async () => {
+      const port = portFromEnvironment({ env: { [key]: 'secret' }, transport: async () => {
         calls++; return new Response(JSON.stringify(body), { status });
       } });
       await assert.rejects(port.decide(request), error => {
@@ -180,7 +185,7 @@ test('HTTP and transport failures redact remote bodies and do not retry or fallb
     async () => { calls++; throw new Error('secret and private state'); },
     async () => { calls++; return new Response('secret and private state'); },
   ]) {
-    await assert.rejects(createDecisionPort({ env: { OPENROUTER_API_KEY: 'secret' }, transport: mock }).decide(request), error => {
+    await assert.rejects(portFromEnvironment({ env: { OPENROUTER_API_KEY: 'secret' }, transport: mock }).decide(request), error => {
       assert.ok(error instanceof Error);
       assert.ok(!error.message.includes('secret'));
       assert.ok(!error.message.includes('private state'));

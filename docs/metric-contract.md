@@ -9,7 +9,7 @@ This contract defines every production statistic shown by the board FLOW surface
 | Repository identity | `RepositoryId` is resolved from the primary Git worktree. A mission worktree uses that same identity. Every statistics read scopes by this key before it groups or aggregates; rows without it are rejected and counted as partial, never included. |
 | Lifecycle authority | `board_lane_events` is authoritative for mission existence in flow history, transitions, delivery completion, lifecycle cycle time, dwell, WIP, lane age, throughput, and review bounces. `usage_statistics` supplies only execution measurements and cohort runtime dimensions. |
 | Completion | `completedAt` is the first `integration → done` event. A later `done → done` `close` event is `closedAt` administration: it may bound final-state dwell but cannot alter delivery completion, its week, or lifecycle cycle time. |
-| Time | Timestamps are parsed as instants and normalized to UTC before comparison. A historical projection includes only events and outcomes at or before its requested instant. |
+| Time | Full timestamps are parsed as instants, preserving their UTC or explicit offset meaning. Reporting calendar days use the local timezone of the machine running Parallix; date-only measurements retain their recorded calendar date. A historical projection includes only events and outcomes at or before its requested instant. |
 | Weekly decision window | FLOW compares missions delivered in the current rolling seven calendar days (`today-6` through `today`, inclusive) with the preceding non-overlapping seven days. Membership is determined by delivery completion, then each selected mission contributes its complete lifecycle and measured agent data. |
 | Missing data | `null` means unavailable; a numeric `0` means an observed zero. Partial data records its rejected/missing-identity count and every derived figure reports the number of observations used or a numerator/denominator coverage. Explicit legacy imports remain marked legacy/estimated. |
 | Shared calculation | Board projection and `px stats cohorts` use the application projection (`metrics.ts`, `metrics-read-adapter.ts`, and `cohorts.ts`). CLI and presentation adapters format or fetch; they do not redefine identity, completion, windows, or aggregation. |
@@ -31,28 +31,27 @@ This contract defines every production statistic shown by the board FLOW surface
 
 ## Bug-labeled mission trend
 
-`px stats` weekly and range reports include an additive bug series beside mission
-flow. Each row covers a full UTC ISO week (Monday through Sunday), with the
-completed bug-labeled mission count, all completed missions, and bug share
-(`bug missions / completed missions`). A bug mission still contributes to its
-AI SDLC, user value, or unclassified flow count. Labels come from Mission state;
-Backlog task file labels do not determine series membership.
+`px stats` shows bug counts and shares for the same delivery-completion
+populations as mission flow and agent performance: the current rolling seven
+local calendar days (`today-6` through `today`) and the preceding seven
+(`today-13` through `today-7`), both inclusive. On October 8 these are October
+2–8 and September 25–October 1. Explicit `--from` / `--to` reports show the
+whole selected inclusive range, including partial calendar weeks.
 
-The default report includes full weeks contained in the combined current and
-previous rolling seven-day windows (`today-13` through `today`). Range reports
-include full weeks contained in the inclusive `--from` / `--to` span. Partial
-weeks are excluded; a span containing none says so. A week with no completions
-shows a dash and “no completions”, never 0% bug share. Unavailable lifecycle
-history makes the series unavailable rather than zero.
+Reporting dates advance once at local midnight, including across daylight-saving
+changes. New deliveries appear on the next stats read or board refresh during
+the day. For a machine in Stockholm, reporting uses `Europe/Stockholm`; stored
+UTC and explicit-offset timestamps are interpreted in that zone without
+rewriting historical records.
 
-The trailing average is the arithmetic mean of observed weekly shares in the
-current and preceding two calendar weeks within the report. Empty weeks are
-excluded from that mean; fewer than three observed weeks use the available
-observations, and no observations show a dash. Direction compares consecutive
-trailing averages: falling suggests convergence, rising suggests regression,
-and flat means unchanged. The first row, or a comparison missing an average,
-shows a dash. These are descriptive signals of delivery effort, not proof of
-causation or a defect rate per line of code.
+Bug share is `bug missions / completed missions`. The exact `bug` label from
+Mission state is authoritative; Backlog task labels do not determine membership.
+A bug mission still contributes to its AI SDLC, user value, or unclassified flow
+count. A period with no completions shows a dash and “no completions”, while an
+observed population without bugs shows 0%. Unavailable lifecycle history makes
+the report unavailable. Administrative closure never moves a delivery into a
+later period. These shares describe delivery effort, not a defect rate per line
+of code or proof of causation.
 
 ## Implementation inventory
 

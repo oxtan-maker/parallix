@@ -49,17 +49,12 @@ body {
   animation-iteration-count: infinite;
 }
 
-.live-indicator {
-  animation: blink 1s step-end infinite;
-}
-
 .review-pip--running {
   animation: blink 1s step-end infinite;
 }
 
 @media (prefers-reduced-motion: reduce) {
   .fan.spin,
-  .live-indicator,
   .review-pip--running {
     animation: none;
   }

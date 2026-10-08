@@ -715,7 +715,7 @@ describe("Mission outcome and completed statistics ,", () => {
     assert.equal(projected.totalInputAndOutputTokens, 2100);
     assert.equal(projected.totalCostUsd, 0.75);
     assert.equal(projected.totalToolCalls, 17);
-    assert.equal(projected.closedAt, '2026-08-02T12:00:00Z');
+    assert.equal(projected.closedAt, '2026-08-02T12:00:00.000Z');
   });
 
   test('SC2: an unmeasured column leaves the affected total unavailable, not zero', async () => {

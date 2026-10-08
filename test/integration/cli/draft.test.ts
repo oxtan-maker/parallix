@@ -526,9 +526,10 @@ function tempGitRepoOnMain() {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'draft-2396-repo-'));
   const run = (args) => spawnSync('git', args, { cwd: root, encoding: 'utf8', env: process.env });
   run(['init', '-b', 'main']);
-  run(['config', 'user.email', 'test@example.com']);
-  run(['config', 'user.name', 'Test']);
-  run(['config', 'commit.gpgsign', 'false']);
+  // Configure the isolated fixture without three extra Git processes. The
+  // covered integration case charges waited-child CPU to its 150 ms budget.
+  fs.appendFileSync(path.join(root, '.git', 'config'),
+    '\n[user]\n\temail = test@example.com\n\tname = Test\n[commit]\n\tgpgsign = false\n');
   fs.writeFileSync(path.join(root, 'README.md'), '# repo\n');
   run(['add', '.']);
   run(['commit', '-m', 'init']);

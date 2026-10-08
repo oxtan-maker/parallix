@@ -291,7 +291,7 @@ test('stats CLI renders the application-selected population without selecting co
 test('weekly classifier share counts applied PR decisions including open missions (TASK-2658)', async () => {
   const { classifierStatistics } = await import('../../../../src/application/review-classification/statistics.js');
   const { weeklyDecisionWindows } = await import('../../../../src/application/services/decision-window.js');
-  const window = weeklyDecisionWindows('2026-10-06').current;
+  const window = weeklyDecisionWindows('2026-10-06', 'UTC').current;
   const decisions = [
     { id: 'ordinary', decidedAt: '2026-09-30T00:00:00Z', source: 'reviewer' as const, outcome: 'implementer' as const },
     { id: 'classifier', decidedAt: '2026-10-06T23:59:59Z', source: 'classifier' as const, outcome: 'clear' as const },
@@ -311,7 +311,7 @@ test('weekly classifier share counts applied PR decisions including open mission
 test('weekly PR table is a single truthful UTC comparison (TASK-2671)', async () => {
   const { renderClassifierStatistics } = await import('../../../../src/application/presentation/classifier-statistics.js');
   const { weeklyDecisionWindows } = await import('../../../../src/application/services/decision-window.js');
-  const windows = weeklyDecisionWindows('2026-10-06');
+  const windows = weeklyDecisionWindows('2026-10-06', 'UTC');
   const input = { decisions: [], applied: [], attempts: [], observations: [], coverage: 'complete' as const };
   const report = renderClassifierStatistics(input, [windows.current, windows.previous]);
   assert.equal(report.split('\n').filter(line => line === 'PR Classification analysis').length, 1);
@@ -328,7 +328,7 @@ test('PR statistics count review rounds with classifier shares and a separate re
   const { renderClassifierStatistics } = await import('../../../../src/application/presentation/classifier-statistics.js');
   const { weeklyDecisionWindows } = await import('../../../../src/application/services/decision-window.js');
   const { classificationAttempt } = await import('../../../fixtures/repeat-review.js');
-  const windows = weeklyDecisionWindows('2026-10-06');
+  const windows = weeklyDecisionWindows('2026-10-06', 'UTC');
   const at = '2026-10-05T00:00:00Z';
   const row = (round: number, overrides: Parameters<typeof classificationAttempt>[0]) =>
     classificationAttempt({ round, decisionId: `d${round}`, fingerprint: `f${round}`, observedAt: at, ...overrides });
@@ -364,7 +364,7 @@ test('PR statistics split review rounds by kind and keep historical rows as re-r
   const { renderClassifierStatistics } = await import('../../../../src/application/presentation/classifier-statistics.js');
   const { weeklyDecisionWindows } = await import('../../../../src/application/services/decision-window.js');
   const { classificationAttempt } = await import('../../../fixtures/repeat-review.js');
-  const windows = weeklyDecisionWindows('2026-10-06');
+  const windows = weeklyDecisionWindows('2026-10-06', 'UTC');
   const row = (round: number, overrides: Parameters<typeof classificationAttempt>[0]) =>
     classificationAttempt({ round, decisionId: `d${round}`, fingerprint: `f${round}`, observedAt: '2026-10-05T00:00:00Z', ...overrides });
   const attempts = [row(1, { route: 'clear', reason: 'resolved-threshold' }), row(1, { mission: 'other', route: 'reviewer', reason: 'abstention' }),
@@ -381,7 +381,7 @@ test('observed wrong is n/a without classifier decisions and never a vacuous 100
   const { renderClassifierStatistics } = await import('../../../../src/application/presentation/classifier-statistics.js');
   const { weeklyDecisionWindows } = await import('../../../../src/application/services/decision-window.js');
   const { classificationAttempt } = await import('../../../fixtures/repeat-review.js');
-  const windows = weeklyDecisionWindows('2026-10-06');
+  const windows = weeklyDecisionWindows('2026-10-06', 'UTC');
   const reviewerOnly = Array.from({ length: 239 }, (_, i) => ({ id: `r${i}`, decidedAt: '2026-10-05T00:00:00Z',
     source: 'reviewer' as const, outcome: 'clear' as const }));
   const empty = renderClassifierStatistics({ decisions: reviewerOnly, attempts: [classificationAttempt({ route: 'reviewer', reason: 'abstention', observedAt: '2026-10-05T00:00:00Z' })],
@@ -402,7 +402,7 @@ test('completed classifier cohorts include old calls and same-scope shadow disag
   const { classifierGroups, classifierStatistics } = await import('../../../../src/application/review-classification/statistics.js');
   const { classificationAttempt } = await import('../../../fixtures/repeat-review.js');
   const { weeklyDecisionWindows } = await import('../../../../src/application/services/decision-window.js');
-  const window = weeklyDecisionWindows('2026-10-06').current;
+  const window = weeklyDecisionWindows('2026-10-06', 'UTC').current;
   const sample = classificationAttempt({ observedAt: '2026-09-01T00:00:00Z', shadow: true });
   const observation = { decisionId: sample.decisionId, revision: sample.candidateRevision, findingIds: sample.findingIds,
     observedAt: '2026-09-01T00:01:00Z', originalFindings: 'unresolved' as const, newFindings: 2, cycleMs: 100.42, ordinaryReviewMs: 100 };

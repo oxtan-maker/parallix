@@ -1,4 +1,5 @@
 import { createReviewClassification } from './review-classification.js';
+import type { DecisionConfiguration, ParallixConfiguration } from '../application/ports/configuration.js';
 import type { ExecuteMissionPorts } from '../application/ports/execute-mission.js';
 import type { TuiCapabilities } from '../application/tui-capabilities.js';
 import type { BoardCommandDispatcher, BoardProgressSink } from '../application/controller/board-command.js';
@@ -68,6 +69,7 @@ export interface ProductionCapabilities {
  * launches an agent.
  */
 export interface ProductionCompositionOverrides {
+  readonly configuration: ParallixConfiguration;
   readonly draftWorkflow?: DraftWorkflowPort;
   /** Test-only adapter seams; production always supplies the safe exit boundary. */
   readonly draftAdapterDeps?: Record<string, unknown>;
@@ -177,6 +179,7 @@ async function resumeActiveBoardHandoff(existing: any, store: MissionStore & Mis
 /** The browser hands off exactly as the CLI does: it supplies identity only. */
 function createBoardHandoffWorkflow(
   store: MissionStore & MissionTransitionStore & MissionNelRecorder,
+  decision: DecisionConfiguration,
   reviewLoop: typeof runReviewLoop = runReviewLoop,
 ) {
   const lifecycle = new MissionLifecycleService(store);
@@ -200,13 +203,13 @@ function createBoardHandoffWorkflow(
         await resumeActiveBoardHandoff(existing, store, lifecycle, slug);
         await reviewLoop(
           { slug, isContinue: true, maxAttempts: existing.mission.review.rounds.length + 1 },
-          createReviewLoopPorts(slug, {}, { ...reviewLoopBindings(store, lifecycle), classification: createReviewClassification(slug, resolveWorktree(slug) ?? process.cwd()) }),
+          createReviewLoopPorts(slug, {}, { ...reviewLoopBindings(store, lifecycle), classification: createReviewClassification(slug, resolveWorktree(slug) ?? process.cwd(), decision) }),
         );
         return;
       }
       const result = await handoff(slug);
       if (!result.ok) { throw new Error(result.error ?? 'handoff workflow aborted'); }
-      await reviewLoop({ slug }, createReviewLoopPorts(slug, {}, { performHandoffFn: reviewHandoff, ...reviewLoopBindings(store, lifecycle), classification: createReviewClassification(slug, resolveWorktree(slug) ?? process.cwd()) }));
+      await reviewLoop({ slug }, createReviewLoopPorts(slug, {}, { performHandoffFn: reviewHandoff, ...reviewLoopBindings(store, lifecycle), classification: createReviewClassification(slug, resolveWorktree(slug) ?? process.cwd(), decision) }));
     },
   };
 }
@@ -222,9 +225,9 @@ export function composeProductionCapabilities(
   executePorts: ExecuteMissionPorts,
   missionStore: (MissionStore & MissionTransitionStore & MissionNelRecorder) | null,
   currentWork: CurrentWorkPort,
-  progress?: BoardProgressSink,
-  database?: SqliteDatabaseAdapter | null,
-  overrides: ProductionCompositionOverrides = {},
+  progress: BoardProgressSink | undefined,
+  database: SqliteDatabaseAdapter | null | undefined,
+  overrides: ProductionCompositionOverrides,
   integrate?: Pick<IntegrateCommandUseCase, 'executeForSlug'>,
 ): ProductionCapabilities {
   let missionServices: BoardMissionServices = {};
@@ -234,7 +237,7 @@ export function composeProductionCapabilities(
       intake,
       checkpoints: new MissionCheckpointService(missionStore, checkpointEvidenceReferences()),
       handoff: new MissionHandoffService(missionStore, missionStore),
-      handoffWorkflow: createBoardHandoffWorkflow(missionStore, overrides.handoffReviewLoop),
+      handoffWorkflow: createBoardHandoffWorkflow(missionStore, overrides.configuration.decision, overrides.handoffReviewLoop),
       // Only with Mission authority: a null store means no draft service, so
       // draft:create reports a typed unavailable result and the read-only
       // graph opens no database or git handle.

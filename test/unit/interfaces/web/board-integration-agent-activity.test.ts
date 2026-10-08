@@ -29,11 +29,12 @@ test('TASK-2576: deterministic integration work is progress, not running-agent a
   const deterministic = render(null);
   const liveAgent = render('codex', 'execute');
 
-  assert.match(deterministic, /working · live/, 'deterministic current work remains visible');
+  assert.doesNotMatch(deterministic, /working · live/, 'deterministic work omits redundant header signals');
   assert.equal((deterministic.match(/fan spin/g) ?? []).length, 2, 'fans show work even when no agent is identified');
   assert.doesNotMatch(deterministic, /no implementer/, 'an unidentified agent has no implementer label');
   assert.doesNotMatch(deterministic, /class="live-indicator"/, 'a live coordinator does not mean an agent is running');
   assert.doesNotMatch(deterministic, /active worker family: codex/, 'a coordinator family is not a running-agent identity');
-  assert.match(liveAgent, /class="live-indicator"/, 'an observed agent session remains active');
+  assert.doesNotMatch(liveAgent, /class="live-indicator"|working · live/);
+  assert.equal((liveAgent.match(/fan spin/g) ?? []).length, 2);
   assert.match(liveAgent, /active worker family: codex/, 'an observed agent session supplies the running-agent identity');
 });

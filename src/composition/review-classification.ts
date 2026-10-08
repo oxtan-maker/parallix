@@ -1,3 +1,4 @@
+import type { DecisionConfiguration } from '../application/ports/configuration.js';
 import { createHash, randomUUID } from 'node:crypto';
 import { performance } from 'node:perf_hooks';
 import type { ReviewClassificationPorts } from '../application/ports/review-classification.js';
@@ -11,11 +12,11 @@ import { missionBranchName } from '../adapters/filesystem/mission-utils.js';
 
 /** Operator environment controls classifier opt-out independently of repository configuration. */
 export function createReviewClassification(slug: string, worktree: string,
-  env: Readonly<Record<string, string | undefined>> = process.env): ReviewClassificationPorts {
-  const raw = env.PARALLIX_JEV_REVIEW?.trim().toLowerCase();
+  settings: DecisionConfiguration): ReviewClassificationPorts {
+  const raw = settings.reviewMode;
   const mode = raw === undefined || raw === '' || raw === 'on' ? 'enabled' : raw === 'shadow' ? 'shadow' : 'disabled';
   return {
-    mode, decision: createDecisionPort({ env }), evidence: new GitReviewEvidence(worktree),
+    mode, decision: createDecisionPort(settings), evidence: new GitReviewEvidence(worktree),
     telemetry: async () => new SqliteReviewClassificationStore((await initOperatorState()).db),
     hash: text => createHash('sha256').update(text).digest('hex'), fingerprint: randomUUID,
     now: () => new Date().toISOString(), clock: () => performance.now(),

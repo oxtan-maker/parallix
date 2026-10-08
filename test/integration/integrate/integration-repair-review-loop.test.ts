@@ -59,6 +59,14 @@ test('task-2620: a red integration gate repairs once, re-reviews, and stops in t
         fs.writeFileSync(path.join(fixture.worktree, 'repaired.txt'), 'ok\n');
         fixture.git(fixture.worktree, ['add', 'repaired.txt']);
         fixture.git(fixture.worktree, ['commit', '-m', 'repair']);
+        // TASK-2665: a committed fix also needs fresh repair-round proof before
+        // the real handoff can resume independent review.
+        const recorded = await run(['checkpoint', 'record', '--slug', fixture.slug,
+          '--name', 'CP-1', '--expected-version', String(await fixture.version()),
+          '--criterion', 'feature ships', '--evidence', 'fix: repaired.txt; focused verification: test -f repaired.txt',
+          '--next', 'Hand off for independent re-review'],
+        { baseCwd: fixture.worktree, log: () => '', error: () => '' });
+        assert.equal(recorded, 0, 'the repair agent records fresh proof through the CLI');
       }
       return { status: 0, stdout: '', stderr: '' };
     })(),

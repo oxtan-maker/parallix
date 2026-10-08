@@ -104,7 +104,9 @@ remain unavailable rather than becoming zero.
 
 FLOW separates completed-mission decisions from the board's current operational
 state. Its decision section shows the current rolling seven calendar days and
-the preceding non-overlapping seven days. A mission belongs to a comparison by
+the preceding non-overlapping seven days in the machine local timezone. Dates
+advance at local midnight; new deliveries appear on refresh throughout the day.
+A mission belongs to a comparison by
 its delivery-completion day, even when it started earlier; once selected, its
 whole lifecycle and recorded agent work are included. Each decision figure
 shows its observation count, so an unavailable or partly measured statistic is

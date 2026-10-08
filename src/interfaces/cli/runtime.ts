@@ -5,6 +5,7 @@
  * Canonical inbound CLI dispatcher.
  */
 
+import type { RuntimeConfiguration } from '../../application/ports/configuration.js';
 import * as fmt from '../../application/presentation/cli-format.js';
 import { levenshteinDistance } from '../../application/presentation/cli-flags.js';
 
@@ -106,7 +107,7 @@ export interface MainOptions {
   logFn?: typeof fmt.log.plain;
   loadAliasesFn?: typeof deriveAliases;
   isInteractiveTTYFn?: () => boolean;
-  environment?: NodeJS.ProcessEnv;
+  runtime: Pick<RuntimeConfiguration, 'ci' | 'noTui'>;
   product?: { name: string; version: string };
 }
 
@@ -119,15 +120,15 @@ export function shouldLaunchDefaultUi({
   isInteractiveTTY,
   stdinIsTTY = Boolean(process.stdin.isTTY),
   stdoutIsTTY = Boolean(process.stdout.isTTY),
-  environment = process.env,
+  runtime,
 }: {
   isInteractiveTTY?: boolean;
   stdinIsTTY?: boolean;
   stdoutIsTTY?: boolean;
-  environment?: NodeJS.ProcessEnv;
-} = {}): boolean {
+  runtime: Pick<RuntimeConfiguration, 'ci' | 'noTui'>;
+}): boolean {
   const terminalIsInteractive = isInteractiveTTY ?? (stdinIsTTY && stdoutIsTTY);
-  return terminalIsInteractive && !environment.CI && environment.PARALLIX_NO_TUI !== '1';
+  return terminalIsInteractive && !runtime.ci && !runtime.noTui;
 }
 
 async function launchDefaultUi(commandFns: MainOptions['commandFns']) {
@@ -177,7 +178,7 @@ function reportUnknownCommand(command: string, printUsageFn: NonNullable<MainOpt
   exitFn(1);
 }
 
-async function main(args = process.argv.slice(2), options: MainOptions = {}) {
+async function main(args: string[], options: MainOptions) {
   const {
     cwdFn = () => process.cwd(),
     ensureStandaloneGitRepoFn = (): { failed?: boolean; initialized?: boolean; message?: string; branch?: string } => ({}),
@@ -187,7 +188,7 @@ async function main(args = process.argv.slice(2), options: MainOptions = {}) {
     logFn = fmt.log.plain,
     loadAliasesFn = deriveAliases,
     isInteractiveTTYFn = () => Boolean(process.stdin.isTTY && process.stdout.isTTY),
-    environment = process.env,
+    runtime,
     product = { name: 'parallix', version: 'development' },
   } = options;
 
@@ -199,7 +200,7 @@ async function main(args = process.argv.slice(2), options: MainOptions = {}) {
     return;
   }
 
-  if (!command && shouldLaunchDefaultUi({ isInteractiveTTY: isInteractiveTTYFn(), environment })) {
+  if (!command && shouldLaunchDefaultUi({ isInteractiveTTY: isInteractiveTTYFn(), runtime })) {
     await launchDefaultUi(options.commandFns);
     return;
   }
@@ -229,7 +230,7 @@ async function main(args = process.argv.slice(2), options: MainOptions = {}) {
     const canonical = resolveAlias(command, aliases);
     if (canonical) {
       logFn(fmt.status('INFO', `Resolving alias ${command} → ${canonical}`));
-      await main([canonical, ...args.slice(1)], { cwdFn, ensureStandaloneGitRepoFn, commandFns: options.commandFns, printUsageFn, exitFn, errorFn, logFn, loadAliasesFn, product });
+      await main([canonical, ...args.slice(1)], { cwdFn, ensureStandaloneGitRepoFn, commandFns: options.commandFns, printUsageFn, exitFn, errorFn, logFn, loadAliasesFn, product, runtime });
       return;
     }
 

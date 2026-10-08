@@ -42,6 +42,7 @@ import { missionId } from '../../../../src/domain/mission.js';
 import { repositoryId } from '../../../../src/domain/repository.js';
 import { makeCard } from '../../../fixtures/board-projection.js';
 import { inMemoryOperationalHistory } from '../../../fixtures/operational-history.js';
+import { resolveConfiguration } from '../../../../src/composition/config.js';
 
 // ── Current-work publication ──
 
@@ -771,6 +772,9 @@ describe("Board-launched current work —", () => {
       ports,
       missionStore as never,
       recorder,
+      undefined,
+      undefined,
+      { configuration: resolveConfiguration({}) },
     );
 
     // The factory delivered by the production composition forwards the same

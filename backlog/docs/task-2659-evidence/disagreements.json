@@ -1,0 +1,291 @@
+{
+ "schema": "task-2659.disagreements.v1",
+ "rule": "report-outcome/1",
+ "note": "Row refs are mission/checkpoint/position in the operator database; reproduce with tools/report-feedback/replay.ts. Text is not committed. Label key: S success reported, F failure, D deferral, M missing outcome, A mixed/ambiguous, N no check outcome expected, E expected failure. Only rule/label disagreements and unsupported favorable readings are listed.",
+ "fresh": [
+  {
+   "row": "task-2377.04/4/2",
+   "rule": "ambiguous:weak_failure_word",
+   "label": "D",
+   "kind": "silent_missed"
+  },
+  {
+   "row": "task-1375/6/3",
+   "rule": "missing_outcome:command_without_outcome",
+   "label": "S",
+   "kind": "false_warning"
+  },
+  {
+   "row": "task-1431/1/4",
+   "rule": "missing_outcome:command_without_outcome",
+   "label": "S",
+   "kind": "false_warning"
+  },
+  {
+   "row": "task-2347.05/3/6",
+   "rule": "missing_outcome:command_without_outcome",
+   "label": "S",
+   "kind": "false_warning"
+  },
+  {
+   "row": "task-2347.05/4/7",
+   "rule": "missing_outcome:command_without_outcome",
+   "label": "S",
+   "kind": "false_warning"
+  },
+  {
+   "row": "task-2295/0/3",
+   "rule": "ambiguous:quoted_signal_only",
+   "label": "M",
+   "kind": "silent_missed"
+  },
+  {
+   "row": "task-1373/1/1",
+   "rule": "ambiguous:weak_failure_word",
+   "label": "M",
+   "kind": "silent_missed"
+  },
+  {
+   "row": "task-1373/5/1",
+   "rule": "ambiguous:weak_failure_word",
+   "label": "M",
+   "kind": "silent_missed"
+  },
+  {
+   "row": "task-1373/3/1",
+   "rule": "ambiguous:weak_signal_conflict",
+   "label": "M",
+   "kind": "silent_missed"
+  },
+  {
+   "row": "task-1417/2/3",
+   "rule": "ambiguous:quoted_signal_only",
+   "label": "M",
+   "kind": "silent_missed"
+  },
+  {
+   "row": "task-2287/1/1",
+   "rule": "ambiguous:quoted_signal_only",
+   "label": "M",
+   "kind": "silent_missed"
+  },
+  {
+   "row": "task-1427/2/3",
+   "rule": "ambiguous:weak_failure_word",
+   "label": "M",
+   "kind": "silent_missed"
+  },
+  {
+   "row": "task-2517/4/2",
+   "rule": "ambiguous:weak_failure_word",
+   "label": "M",
+   "kind": "silent_missed"
+  },
+  {
+   "row": "task-1359/0/7",
+   "rule": "ambiguous:weak_failure_word",
+   "label": "F",
+   "kind": "silent_missed"
+  },
+  {
+   "row": "task-2511/2/5",
+   "rule": "ambiguous:weak_failure_word",
+   "label": "F",
+   "kind": "silent_missed"
+  },
+  {
+   "row": "task-1327/3/8",
+   "rule": "ambiguous:weak_signal_conflict",
+   "label": "F",
+   "kind": "silent_missed"
+  },
+  {
+   "row": "task-2269/3/7",
+   "rule": "ambiguous:weak_failure_word",
+   "label": "F",
+   "kind": "silent_missed"
+  },
+  {
+   "row": "task-2519/2/10",
+   "rule": "ambiguous:weak_failure_word",
+   "label": "F",
+   "kind": "silent_missed"
+  },
+  {
+   "row": "task-2207/5/7",
+   "rule": "ambiguous:quoted_signal_only",
+   "label": "F",
+   "kind": "silent_missed"
+  },
+  {
+   "row": "task-2303/3/8",
+   "rule": "reported_success:success_word",
+   "label": "A",
+   "kind": "false_favorable"
+  },
+  {
+   "row": "task-2643/9/0",
+   "rule": "reported_success:success_word",
+   "label": "N",
+   "kind": "unsupported_favorable"
+  },
+  {
+   "row": "task-2649/2/4",
+   "rule": "reported_success:success_word",
+   "label": "N",
+   "kind": "unsupported_favorable"
+  },
+  {
+   "row": "task-2643/9/8",
+   "rule": "reported_success:success_word",
+   "label": "N",
+   "kind": "unsupported_favorable"
+  },
+  {
+   "row": "task-2229/2/3",
+   "rule": "missing_outcome:command_without_outcome",
+   "label": "N",
+   "kind": "false_warning"
+  },
+  {
+   "row": "task-2683/2/2",
+   "rule": "reported_success:zero_exit",
+   "label": "N",
+   "kind": "unsupported_favorable"
+  },
+  {
+   "row": "task-2607/1/0",
+   "rule": "reported_success:passed_count",
+   "label": "N",
+   "kind": "unsupported_favorable"
+  },
+  {
+   "row": "task-2287/3/3",
+   "rule": "missing_outcome:command_without_outcome",
+   "label": "N",
+   "kind": "false_warning"
+  },
+  {
+   "row": "task-2587/3/0",
+   "rule": "reported_success:success_word",
+   "label": "N",
+   "kind": "unsupported_favorable"
+  },
+  {
+   "row": "task-2619/2/0",
+   "rule": "reported_success:passed_count",
+   "label": "N",
+   "kind": "unsupported_favorable"
+  },
+  {
+   "row": "task-2615/7/0",
+   "rule": "reported_failure:failed_count",
+   "label": "N",
+   "kind": "false_warning"
+  },
+  {
+   "row": "task-2615/11/5",
+   "rule": "reported_success:passed_count",
+   "label": "N",
+   "kind": "unsupported_favorable"
+  },
+  {
+   "row": "task-2595/1/2",
+   "rule": "reported_success:zero_exit",
+   "label": "N",
+   "kind": "unsupported_favorable"
+  },
+  {
+   "row": "task-2649/1/0",
+   "rule": "reported_success:passed_count",
+   "label": "N",
+   "kind": "unsupported_favorable"
+  },
+  {
+   "row": "task-2643/8/7",
+   "rule": "reported_success:success_word",
+   "label": "N",
+   "kind": "unsupported_favorable"
+  },
+  {
+   "row": "task-1385/4/11",
+   "rule": "reported_success:success_word",
+   "label": "N",
+   "kind": "unsupported_favorable"
+  },
+  {
+   "row": "task-2643/4/0",
+   "rule": "reported_success:success_word",
+   "label": "N",
+   "kind": "unsupported_favorable"
+  },
+  {
+   "row": "task-2307/0/3",
+   "rule": "missing_outcome:command_without_outcome",
+   "label": "N",
+   "kind": "false_warning"
+  },
+  {
+   "row": "task-2625/5/0",
+   "rule": "reported_success:success_word",
+   "label": "N",
+   "kind": "unsupported_favorable"
+  },
+  {
+   "row": "task-2573/4/6",
+   "rule": "reported_success:success_word",
+   "label": "N",
+   "kind": "unsupported_favorable"
+  },
+  {
+   "row": "task-2373/2/7",
+   "rule": "missing_outcome:command_without_outcome",
+   "label": "N",
+   "kind": "false_warning"
+  }
+ ],
+ "recordedPackets": [
+  {
+   "id": "case-003",
+   "split": "development",
+   "label": "supported",
+   "rule": "missing_outcome:command_without_outcome",
+   "jev": "supported"
+  },
+  {
+   "id": "case-009",
+   "split": "development",
+   "label": "unsupported",
+   "rule": "ambiguous:weak_failure_word",
+   "jev": "unsupported"
+  },
+  {
+   "id": "case-011",
+   "split": "development",
+   "label": "unsupported",
+   "rule": "reported_success:passed_count",
+   "jev": "unsupported"
+  },
+  {
+   "id": "case-017",
+   "split": "development",
+   "label": "insufficient_evidence",
+   "rule": "not_applicable:no_outcome_expected",
+   "jev": "insufficient_evidence"
+  },
+  {
+   "id": "case-033",
+   "split": "final",
+   "label": "insufficient_evidence",
+   "rule": "not_applicable:no_outcome_expected",
+   "jev": "insufficient_evidence"
+  },
+  {
+   "id": "case-035",
+   "split": "final",
+   "label": "insufficient_evidence",
+   "rule": "not_applicable:no_outcome_expected",
+   "jev": "insufficient_evidence"
+  }
+ ]
+}

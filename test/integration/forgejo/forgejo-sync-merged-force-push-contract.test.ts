@@ -266,6 +266,9 @@ describe("review ref force push", () => {
     let createPrOptions = null;
     let rebaseAttempts = 0;
     let firstRebaseStarted = false;
+    let unmergedFiles: string[] = [];
+    const stagedSets: string[][] = [];
+    let staged: string[] = [];
 
     const options = {
       inferSlugFn: (s) => s || 'task-1049',
@@ -278,6 +281,7 @@ describe("review ref force push", () => {
           if (args.includes('main')) {
             if (!firstRebaseStarted) {
               firstRebaseStarted = true;
+              unmergedFiles = ['file.md'];
               // First call starts rebase and hits conflict
               return { status: 1, stdout: 'CONFLICT (content): Merge conflict in file.md', stderr: '' };
             }
@@ -289,8 +293,11 @@ describe("review ref force push", () => {
              return { status: 0, stdout: rebaseAttempts < 2 ? 'mission/task-1049' : '', stderr: '' };
           }
           if (args.includes('--continue')) {
+             stagedSets.push([...staged]); staged = [];
+             assert.deepEqual(unmergedFiles, [], 'stage the entire conflict set before continuing');
              rebaseAttempts++;
              if (rebaseAttempts === 1) {
+               unmergedFiles = ['some-file.js'];
                // First continue: report another conflict to trigger recursion
                return { status: 1, stdout: 'CONFLICT (content): Merge conflict in some-file.js', stderr: '' };
              }
@@ -301,10 +308,11 @@ describe("review ref force push", () => {
         }
         if (args.includes('fetch')) return { status: 0, stdout: '', stderr: '' };
         if (args.includes('checkout')) return { status: 0, stdout: '', stderr: '' };
-        if (args.includes('add')) return { status: 0, stdout: '', stderr: '' };
+        if (args.includes('add')) { staged.push(...args.slice(args.indexOf('add') + 1)); unmergedFiles = unmergedFiles.filter(file => !staged.includes(file)); return { status: 0, stdout: '', stderr: '' }; }
         return { status: 0, stdout: '', stderr: '' };
       },
-      resolveConflictsFn: () => ({ ok: true, conflictFiles: ['file.md'], missionSpecificFiles: ['file.md'], sharedFiles: [] }),
+      detectRebaseStateFn: () => ({ inProgress: firstRebaseStarted && rebaseAttempts < 2, unmergedFiles: [...unmergedFiles] }),
+      resolveConflictsFn: () => ({ ok: true, conflictFiles: [...unmergedFiles], missionSpecificFiles: [...unmergedFiles], sharedFiles: [] }),
       createPrFn: (branch, user, token, opts) => {
         createPrOptions = opts;
         return { ok: true, url: 'http://pr/1049' };
@@ -322,6 +330,7 @@ describe("review ref force push", () => {
     await rebase(['task-1049', '--push'], options);
 
     assert.strictEqual(rebaseAttempts, 2, 'Should have attempted rebase continue twice');
+    assert.deepEqual(stagedSets, [['file.md'], ['some-file.js']]);
     assert.ok(createPrOptions, 'createPrFn should have been called');
     assert.strictEqual(createPrOptions.forceWithLease, true, 'Should have preserved forceWithLease');
   });

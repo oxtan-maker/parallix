@@ -58,7 +58,7 @@ the estimated saving into a measured whole-workflow improvement.
 
 | Option | Use | Measured evidence | Position |
 |---|---|---|---|
-| A: Verification-content feedback | Active → code checks → Jev → general LLM review | On four historical reports, code accepts all references; Jev agrees on success, rejects failure/deferral and abstains on a missing result. Code takes 0.013–0.381 ms; Jev 229–264 ms. | Shift-left candidate, retaining general review. Compare and implement cheaper deterministic report rules through TASK-2659. |
+| A: Verification-content feedback | Active → code checks → Jev → general LLM review | On four historical reports, code accepts all references; Jev agrees on success, rejects failure/deferral and abstains on a missing result. Code takes 0.013–0.381 ms; Jev 229–264 ms. | Deterministic report rules compared and not implemented (see Deterministic report rules). Jev content feedback remains the candidate, retaining general review. |
 | B: Delegate a bounded judgment | Narrow a specific part of general review | All 17 final reporting labels match for Kev, Jev and focused Claude. Kev median 0.150 s versus Claude 3.47 s; Jev median 0.271 s across 35 packets. Five final abstentions are correct report labels. | Fast classification observed; this does not prove execution or end-to-end savings. |
 | C: Additional review guidance | Direct the normal reviewer toward suspicious source | Ornith and Qwen both miss the reproduced original defect guided and unguided. Qwen guidance avoids one source-contradicted control finding. | No demonstrated additional catch; retain as research. |
 | D: Executable checks | Compilation, linting, tests and revision validation | No replacement experiment conducted. A citation-pattern recognizer matches only 8/17 report labels; that is not a compiler/test comparison. | Retain deterministic checks. |
@@ -119,6 +119,26 @@ development; broader review remains necessary for new findings.
   labor and actual lifecycle savings remain unmeasured.
 - Neither mission labeling, NEL prediction nor extra bug-review guidance has
   demonstrated an advantage sufficient for adoption.
+
+## Deterministic report rules (option A)
+
+A frozen deterministic rule reading Goal Check row text for reported failure,
+deferral and missing outcomes was compared with the reference checker, recorded Jev
+answers and independent labels (TASK-2659; evidence in
+`backlog/docs/task-2659-evidence/`). On 276 stratified rows from 6,284 fresh
+historical rows, deferral readings were appropriate 5 of 5 and failure readings 5 of
+6, but missing-outcome readings only 17 of 25, and 15 of 39 sampled failure,
+deferral or missing-outcome rows were silently missed. Mixed, quoted, negated and
+contradictory text could not be warned on, since those warnings were mostly false.
+Over the 35 recorded packets the rule matched 29 labels, the reference checker 13
+and Jev 35, though the packets were contrast-selected. The rule cost microseconds
+per row; Jev took about 10 s over the 35 packets.
+
+Decision: the rule is not implemented. Its coverage is narrow, its advisory notes
+gate nothing, and no end-to-end saving was shown, so it does not justify a new
+reading path, persistence and statistics. Reference checks, executable gates and
+general review are unchanged. Jev report-content feedback remains the candidate,
+to be tested next on fresh rows with a configured provider.
 
 ## TASK-2658 threshold follow-up
 

@@ -34,6 +34,8 @@ function renderPips(card: WebMissionCard): string {
 
 test('review pips use completed-round disposition colors and a blinking current round (TASK-2666)', () => {
   const card = wireCard(makeFullCard({
+    blockingReason: null,
+    currentWork: { operationId: 'review-op', phase: 'review', summary: 'reviewing', agent: agentFamily('codex'), updatedAt: '2026-10-08T00:00:00Z', freshness: 'live' },
     reviewRound: 3,
     reviewPhase: 'reviewing',
     reviewHistory: [
@@ -55,3 +57,47 @@ test('review pips remain absent without a review round (TASK-2666)', () => {
 
   assert.doesNotMatch(html, /aria-label="review round/);
 });
+
+function activityCard(phase: string, freshness: 'live' | 'unverified' | 'stale' = 'live', reviewPhase: MissionCard['reviewPhase'] = 'reviewing'): WebMissionCard {
+  return wireCard(makeFullCard({
+    blockingReason: null,
+    reviewRound: 3,
+    reviewPhase,
+    currentWork: { operationId: 'review-op', phase, summary: 'current work', agent: null, updatedAt: '2026-10-08T00:00:00Z', freshness },
+  }));
+}
+
+for (const [phase, reviewPhase] of [['review', 'reviewing'], ['review-response', 'fixing']] as const) {
+  for (const freshness of ['live', 'unverified'] as const) {
+    test(`only current review pip blinks for ${freshness} ${phase} work (TASK-2686)`, () => {
+      const html = renderPips(activityCard(phase, freshness, reviewPhase));
+      const pips = /aria-label="review round 3"[^>]*>(.*?)<\/span><\/div>/.exec(html)?.[1];
+      assert.ok(pips);
+      const spans = pips.match(/<span[^>]*>/g) ?? [];
+      assert.equal(spans.length, 5);
+      assert.deepEqual(spans.map((span) => span.includes('review-pip--running')), [false, false, true, false, false]);
+    });
+  }
+}
+
+const inactive: readonly [string, WebMissionCard][] = [
+  ['absent work', wireCard(makeFullCard({ reviewRound: 3, reviewPhase: 'reviewing' }))],
+  ['idle work with a live coordinator', wireCard(makeFullCard({ reviewRound: 3, reviewPhase: 'reviewing', blockingReason: null, liveSession: { missionId: makeFullCard().id, family: agentFamily('codex') } }))],
+  ['blocked work with a live coordinator', wireCard(makeFullCard({ reviewRound: 3, reviewPhase: 'fixing', liveSession: { missionId: makeFullCard().id, family: agentFamily('codex') } }))],
+  ['stale reviewing', activityCard('review', 'stale')],
+  ['stale fixing', activityCard('review-response', 'stale', 'fixing')],
+  ['unrelated execute work', activityCard('execute')],
+  ['unrelated integration work', activityCard('integrate')],
+  ['review work while round is fixing', activityCard('review', 'live', 'fixing')],
+  ['fixing work while round is reviewing', activityCard('review-response')],
+  ['review work after round approval', activityCard('review', 'live', 'approved')],
+  ['review work while awaiting approval', activityCard('review', 'live', 'pending-approval')],
+  ['review work without a recorded phase', { ...activityCard('review'), reviewPhase: null }],
+];
+for (const [state, card] of inactive) {
+  test(`review pips stay static for ${state} (TASK-2686)`, () => {
+    const html = renderPips(card);
+    assert.doesNotMatch(html, /review-pip--running/);
+    assert.match(html, /aria-label="review round 3"/);
+  });
+}

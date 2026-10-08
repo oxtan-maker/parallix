@@ -144,6 +144,7 @@ export function FlowPanel({ metrics, columns }: { readonly metrics: BoardMetrics
   return (
     <Box flexDirection="column" marginTop={1}>
       <Text bold color="cyan">{`FLOW${narrow ? ' · textual' : ''}${windowLabel ? ` · decision window ${windowLabel}` : ''}`}</Text>
+      {windowLabel && <Text dimColor>Local calendar days · current period updates with new completions</Text>}
       <Text color={healthState === 'unavailable' ? 'red' : healthState === 'partial' ? 'yellow' : 'gray'}>{`Statistics: ${healthState} · population n=${sampleSize} (all recorded history, not the decision sample)`}</Text>
       <Box flexDirection={narrow ? 'column' : 'row'}>
         <Box flexDirection="column" marginRight={narrow ? 0 : 4}>

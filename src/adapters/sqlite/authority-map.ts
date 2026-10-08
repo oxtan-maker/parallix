@@ -220,6 +220,9 @@ export const MISSION_CHECKPOINT_GOAL_CHECKS_AUTHORITY = {
   position: MISSION_VALUE_AUTHORITY,
   criterion: MISSION_VALUE_AUTHORITY,
   evidence: MISSION_VALUE_AUTHORITY,
+  recorded_round: MISSION_VALUE_AUTHORITY,
+  repaired_gate: MISSION_VALUE_AUTHORITY,
+  repaired_gates: MISSION_VALUE_AUTHORITY,
 } as const satisfies Readonly<Record<string, FieldAuthority>>;
 
 export const MISSION_REVIEWS_AUTHORITY = {

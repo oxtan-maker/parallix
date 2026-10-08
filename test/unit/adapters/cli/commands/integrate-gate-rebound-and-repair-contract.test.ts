@@ -654,7 +654,7 @@ describe("integration repair", () => {
       id: missionId(slug), repositoryId: repositoryId('parallix'), title: 'repair',
       labels: missionLabels([]), status, assignee: implementer, review,
       checkpoints: [{ missionId: missionId(slug), name: 'CP-1', rawFilename: null, firstLine: '',
-        goalCheck: [{ criterion: 'repair', evidence: 'src/application/handoff-command-use-case.ts' }], nextActionText: 'review' }],
+        goalCheck: [{ criterion: 'repair', evidence: 'src/application/handoff-command-use-case.ts', recordedRound: 2 }], nextActionText: 'review' }],
       closedAt: null, netEngineeringLines: null,
     };
     let version = 1;

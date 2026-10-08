@@ -35,6 +35,7 @@ import type { OperationalHistoryEntry } from '../../../src/application/ports/ope
 import { agentFamily } from '../../../src/domain/agents.js';
 import { repositoryId } from '../../../src/domain/repository.js';
 import { buildSuccessCriteriaRecoveryAdvice } from '../../../src/application/typed-mission-recovery-advice.js';
+import { reviewFindingId, type Review } from '../../../src/domain/review.js';
 
 // no task ID in the legacy file (was test/checkpoint-document.test.ts)
 describe('Checkpoint document', () => {
@@ -332,8 +333,8 @@ describe('Prompt authority', () => {
     assert.match(source, /px checkpoint record --name CP-2 --expected-version 7 --criterion/, 'one concrete recording example');
     assert.match(source, /repository-relative path[^\n]*bare basename[^\n]*does not resolve/);
     assert.match(source, /`\.test`, `\.spec` or `\.cases` module under `test\/`/);
-    assert.match(source, /counts rows and does not compare their text/);
-    assert.doesNotMatch(source, /refuses a criterion with no row/, 'handoff does not match criterion text');
+    assert.match(source, /Handoff checks every recorded checkpoint/, 'handoff checks all recorded checkpoints');
+    assert.match(source, /matches each row to the success criterion its `criterion` text names/, 'handoff matches criterion identity');
     // An executing agent must not be able to rewrite the contract it is judged
     // against: goal, scope and gates are settled at draft.
     for (const write of [/px goal set/, /px scope set/, /px gate add/, /px gate remove/]) {
@@ -748,11 +749,14 @@ describe('Checkpoint evidence recording', () => {
       fileSystem: { existsSync: (target) => existing.has(target), readText: () => '', listEntries: () => [], listNames: () => [] },
       rootFor: () => rootDir,
     });
+    // Rows resolve to the authoritative success-criterion identity so handoff's
+    // distinct-coverage check (TASK-2665) can match a row to the criterion it
+    // evidences; a row for one criterion never counts as evidence for another.
     const record = (name: string, evidence: readonly string[]) => service.record({
       operationId: 'op', missionId: missionId('task-2662'), capabilities: new Set(['checkpoint:record']), expectedVersion: missionVersion(1),
-      checkpoint: { missionId: missionId('task-2662'), name, nextActionText: 'continue', goalCheck: evidence.map((text, index) => ({ criterion: `row ${index + 1}`, evidence: text })) },
+      checkpoint: { missionId: missionId('task-2662'), name, nextActionText: 'continue', goalCheck: evidence.map((text, index) => ({ criterion: mission.successCriteria[index], evidence: text })) },
     } as never);
-    return { record, saves: () => saves };
+    return { record, current: () => mission, saves: () => saves };
   }
 
   test('record rejects an unsupported evidence reference with an actionable diagnostic and writes nothing (TASK-2662)', async () => {
@@ -765,14 +769,49 @@ describe('Checkpoint evidence recording', () => {
     assert.equal((await record('CP-1', ['`test/unit/example.test.ts`'])).status, 'completed');
   });
 
-  test('record rejects a final checkpoint with fewer Goal Check rows than success criteria (TASK-2657)', async () => {
+  test('record rejects a final checkpoint whose recorded checkpoints leave a criterion uncovered (TASK-2657)', async () => {
     const { record, saves } = fixture();
+    // Combined coverage is measured across all recorded checkpoints, not the
+    // final checkpoint alone: CP-1 is still empty so CP-2 with one row leaves
+    // the second criterion uncovered.
     const short = await record('CP-2', ['`test/unit/example.test.ts`']);
     assert.equal(short.status, 'failed');
-    assert.match(short.error?.message ?? '', /CP-2 is the final planned checkpoint.*2 criteria need 2 row\(s\), but 1 were given/);
+    assert.match(short.error?.message ?? '', /CP-2 is the final planned checkpoint.*2 criteria need 2 row\(s\), but 1 were recorded/);
     assert.equal(saves(), 0);
+    // An earlier checkpoint may cover fewer criteria; the combined rows then
+    // cover every success criterion.
     assert.equal((await record('CP-1', ['`test/unit/example.test.ts`'])).status, 'completed', 'an earlier checkpoint may cover fewer criteria');
     assert.equal((await record('CP-2', ['`test/unit/example.test.ts`', 'test/unit/example.test.ts'])).status, 'completed');
+  });
+
+  test('record refuses duplicate rows for one criterion that leave another uncovered (TASK-2665)', async () => {
+    const { record, saves } = fixture();
+    // Two rows both name the first criterion. Coverage counts criterion
+    // identities, not row counts, so the second criterion stays uncovered even
+    // though two rows exist, and the final checkpoint is refused. A row for one
+    // criterion never counts as evidence for another.
+    assert.equal((await record('CP-1', ['`test/unit/example.test.ts`'])).status, 'completed');
+    const dup = await record('CP-2', ['`test/unit/example.test.ts`']);
+    assert.equal(dup.status, 'failed');
+    assert.match(dup.error?.message ?? '', /CP-2 is the final planned checkpoint.*Uncovered criteria: second/);
+    assert.equal(saves(), 1, 'a refused final checkpoint writes nothing');
+  });
+
+  test('record retains earlier rows for criteria a repair does not touch (TASK-2665)', async () => {
+    const { record, current } = fixture();
+    // CP-1 first covers both criteria, then a repair re-records it with only the
+    // first criterion: the second criterion's earlier row is retained, not
+    // rewritten, and combined coverage still covers both criteria.
+    await record('CP-1', ['`test/unit/example.test.ts`', 'test/unit/example.test.ts']);
+    const repaired = await record('CP-1', ['`test/unit/example.test.ts`']);
+    assert.equal(repaired.status, 'completed');
+    const recorded = current().checkpoints.find((checkpoint) => checkpoint.name === 'CP-1')!;
+    assert.equal(recorded.goalCheck.length, 2, 'retains the earlier criterion plus the affected one');
+    assert.deepEqual(
+      recorded.goalCheck.map((row) => row.criterion),
+      ['first', 'second'],
+      'retains the earlier row and records the affected row',
+    );
   });
 
   test('record without a resolvable checkout keeps shape checks and leaves references to handoff', async () => {

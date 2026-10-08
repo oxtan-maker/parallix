@@ -25,7 +25,7 @@ import type { AgentAvailabilityRow } from './agent-status.js';
 import { buildMetrics } from './metrics.js';
 import { compareCohorts, type CohortDimension } from './cohorts.js';
 import { statisticsMissionKey, utcHourBucket } from '../services/statistics-service.js';
-import { weeklyDecisionWindows } from '../services/decision-window.js';
+import { weeklyDecisionWindows } from '../../domain/decision-window.js';
 
 /** Delivery belongs to the recorded final review implementer, never an attempt. */
 export function missionCohortMetadata(missions: readonly Mission[]) {
@@ -48,6 +48,8 @@ export function missionCohortMetadata(missions: readonly Mission[]) {
  * computed from actual data rather than falling back to empty defaults.
  */
 export interface MetricsReadAdapter {
+  /** Canonical first-DONE delivery outcomes; absent means history is unavailable. */
+  readOutcomes?(): Promise<readonly MissionOutcome[]>;
   /**
    * Build metrics from the current event history.
    * @param initialStates — current mission statuses (from MissionReadAdapter)
@@ -472,21 +474,22 @@ function missionLifecycles(
   repositoryId: RepositoryId,
 ): ReadonlyMap<MissionId, MissionLifecycle> {
   const lifecycles = new Map<MissionId, { createdAt: string; completedAt: string | null }>();
-  for (const entry of entries) {
-    if (!entry.missionId || !entry.occurredAt || entry.repositoryId !== repositoryId) {
+  for (const entry of [...entries].sort((a, b) => Date.parse(a.occurredAt) - Date.parse(b.occurredAt))) {
+    if (!entry.missionId || !Number.isFinite(Date.parse(entry.occurredAt)) || entry.repositoryId !== repositoryId) {
       continue;
     }
+    const occurredAt = new Date(entry.occurredAt).toISOString();
     const id = entry.missionId as MissionId;
     const existing = lifecycles.get(id);
     const completedAt = entry.fromStatus !== 'done' && entry.toStatus === 'done'
-      ? entry.occurredAt
+      ? occurredAt
       : null;
     if (!existing) {
-      lifecycles.set(id, { createdAt: entry.occurredAt, completedAt });
+      lifecycles.set(id, { createdAt: occurredAt, completedAt });
       continue;
     }
-    if (entry.occurredAt < existing.createdAt) {
-      existing.createdAt = entry.occurredAt;
+    if (occurredAt < existing.createdAt) {
+      existing.createdAt = occurredAt;
     }
     // Administrative close and a later reopen never move delivery completion.
     if (completedAt !== null && existing.completedAt === null) {
@@ -590,7 +593,7 @@ function usageRecordToRun(record: UsageRecord): AgentRunMeasurement {
 function entryToMissionTransition(
   entry: BoardLaneEventEntry,
 ): MissionTransition | null {
-  if (!entry.missionId || !entry.toStatus || !entry.trigger) {
+  if (!entry.missionId || !entry.toStatus || !entry.trigger || !Number.isFinite(Date.parse(entry.occurredAt))) {
     return null;
   }
   return {
@@ -602,6 +605,6 @@ function entryToMissionTransition(
     to: entry.toStatus as MissionStatus,
     trigger: entry.trigger as MissionTransition['trigger'],
     actor: entry.agent,
-    occurredAt: entry.occurredAt,
+    occurredAt: new Date(entry.occurredAt).toISOString(),
   };
 }

@@ -3,8 +3,8 @@ id: TASK-2665
 title: >-
   Record fix checkpoints after automatic bounceback without rewriting prior
   evidence
-status: backlog
-assignee: []
+status: done
+assignee: [codex]
 created_date: '2026-10-06 11:21'
 labels: []
 dependencies: []

@@ -1,3 +1,4 @@
+import { AGENT_COMMAND_COMPLETION_CONTRACT } from '../../../application/agent-completion-contract.js';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -366,6 +367,7 @@ export function resolveConflictsForMission(slug, area, { getConflictFilesFn, res
   );
   const sharedFiles = conflictFiles.filter((f: string) => !missionSpecificFiles.includes(f));
   const quotedWorktreePath = shellQuote(worktreePath);
+  fmt.log.info(AGENT_COMMAND_COMPLETION_CONTRACT);
 
   if (sharedFiles.length > 0) {
     fmt.log.warn(`Conflicts in ${sharedFiles.length} shared file(s) require manual resolution:`);
@@ -407,6 +409,7 @@ export function buildConflictResolutionPrompt(slug: string = '<slug>', area: str
   }
   return [
     'Conflict resolution options:',
+    AGENT_COMMAND_COMPLETION_CONTRACT,
     '',
     'Option A — Agent-assisted (recommended):',
     '  Copy/paste from the mission worktree:',

@@ -531,13 +531,12 @@ describe("completed controls", { concurrency: false }, () => {
     }
   });
 
-  test('the controls block scopes the handoff evidence claim to the final checkpoint (TASK-2662)', () => {
+  test('the controls block reports handoff checked every recorded checkpoint (TASK-2662)', () => {
     const { repoRoot, missionPath } = makeFixture({ missionBody: MISSION_WITH_GATES });
     try {
       const block = buildCompletedControlsBlock(missionPath, repoRoot);
-      assert.match(block, /Handoff checked only the final checkpoint/);
-      assert.match(block, /at least one row per success criterion/);
-      assert.doesNotMatch(block, /validated every checkpoint/, 'handoff never checks earlier checkpoints');
+      assert.match(block, /Handoff checked every recorded checkpoint/);
+      assert.match(block, /name each completed success criterion by its `criterion` text/);
       assertWithinBudget(block);
     } finally {
       fs.rmSync(repoRoot, { recursive: true, force: true });

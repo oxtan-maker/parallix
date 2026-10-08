@@ -429,6 +429,28 @@ describe('Repair handoff', () => {
     assert.ok(prompt.includes('the same verification rerun confirm the repair'));
   });
 
+  // TASK-2665: the automatic bounceback repair advice names a concrete
+  // `px checkpoint record` example citing an existing repository-relative
+  // reference, retains prior proof, and agrees with handoff enforcement: the
+  // final planned checkpoint carries only its affected criteria while earlier
+  // evidence is retained, and the recorded checkpoints taken together still
+  // cover every success criterion.
+  test('buildRelaunchPrompt repair advice names a concrete example, retains prior proof, and agrees with the combined-checkpoint row requirement', () => {
+    const { buildRelaunchPrompt } = repairHandoff;
+    const errorMsg = 'Planned checkpoint evidence is missing before handoff: CP-4';
+    const prompt = buildRelaunchPrompt(errorMsg, 'task-1124', '/tmp/worktree');
+
+    assert.ok(prompt.includes('px checkpoint record --name CP-4'), 'names the affected checkpoint');
+    assert.ok(prompt.toLowerCase().includes('concrete example:'), 'gives a concrete recording example');
+    // Real, resolving repository-relative test path (not a fabricated one).
+    assert.ok(prompt.includes('test/unit/domain/mission-brief-and-mutation-contract.test.ts'), 'cites an existing repository-relative reference');
+    assert.ok(prompt.includes('retained across the recorded checkpoints'), 'retains prior proof instead of restating it');
+    assert.ok(prompt.includes('through repeated repair rounds'), 'keeps earlier proof available across repeated repairs');
+    // Guidance must not tell the implementer to rewrite the whole Goal Check table.
+    assert.ok(prompt.includes('it needs only the rows for the criteria the repair affects'), 'final checkpoint carries only affected criteria');
+    assert.ok(prompt.includes('Taken together the recorded checkpoints must still cover every success criterion'), 'advice agrees with validation, it does not lead to rejection');
+  });
+
   // ── CP-1 tests: FailureClass, DispatchAction, getDispatchAction (SC2) ─────────
 
   test('getDispatchAction returns AutoRepair for GitBlockers', () => {

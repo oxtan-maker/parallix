@@ -2,7 +2,7 @@ import type { MissionId } from '../../domain/mission.js';
 import type { MissionTransition } from '../../domain/mission-workflow.js';
 import type { MissionOutcome } from '../../domain/usage.js';
 import { agentRuntimeMinutes, deriveLaneIntervals, outcomesCompletedInWindow } from './metrics.js';
-import type { DecisionWindow } from '../services/decision-window.js';
+import type { DecisionWindow } from '../../domain/decision-window.js';
 
 // ---------------------------------------------------------------------------
 // Cohort comparison — "did this workflow change improve delivery?"

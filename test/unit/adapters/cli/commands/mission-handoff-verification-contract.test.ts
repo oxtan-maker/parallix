@@ -219,7 +219,7 @@ test('performHandoff fails when git push fails', async (t) => {
   cleanup();
 });
 
-test('performHandoff accepts completed criteria with paraphrased verifiable evidence rows (TASK-2631)', async () => {
+test('performHandoff accepts completed criteria whose rows name each criterion identity (TASK-2631)', async () => {
   setupMocks();
   const result = await performHandoff(TEST_SLUG, {
     worktree: WORKTREE,
@@ -229,8 +229,8 @@ test('performHandoff accepts completed criteria with paraphrased verifiable evid
     missionServicesFn: recordedMissionServices({
       criteria: ['the long stored criterion', 'another stored criterion'],
       goalCheck: [
-        { criterion: 'database behavior', evidence: '`npm run typecheck`' },
-        { criterion: 'user-visible result', evidence: '`npm test -- test/unit/adapters/cli/commands/mission-handoff-verification-contract.test.ts`' },
+        { criterion: 'the long stored criterion', evidence: '`npm run typecheck`' },
+        { criterion: 'another stored criterion', evidence: '`npm test -- test/unit/adapters/cli/commands/mission-handoff-verification-contract.test.ts`' },
       ],
     }),
   });

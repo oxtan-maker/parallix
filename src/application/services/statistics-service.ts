@@ -1,3 +1,6 @@
+import { reportingWindowContains, type ReportingWindow } from '../../domain/decision-window.js';
+export type { ReportingWindow } from '../../domain/decision-window.js';
+
 /**
  * Canonical statistics semantics shared by presentation adapters.
  *
@@ -9,11 +12,6 @@ export interface StatisticsRow {
   readonly mission?: string;
   readonly date?: string;
   readonly classification?: string | null;
-}
-
-export interface ReportingWindow {
-  readonly start: Date;
-  readonly end: Date;
 }
 
 export interface MissionWindowSummary<Row extends StatisticsRow> {
@@ -29,8 +27,7 @@ export function statisticsMissionKey(row: Pick<StatisticsRow, 'repo' | 'mission'
 /** Reporting windows compare date-only telemetry as UTC calendar instants. */
 export function statisticsRowInWindow(row: Pick<StatisticsRow, 'date'>, window: ReportingWindow): boolean {
   if (!row.date) { return false; }
-  const at = new Date(`${row.date}T00:00:00Z`);
-  return at >= window.start && at <= window.end;
+  return reportingWindowContains(window, row.date);
 }
 
 /** Completed records in a window, deduplicated by canonical statistics identity. */

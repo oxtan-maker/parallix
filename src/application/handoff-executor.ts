@@ -16,7 +16,8 @@ import * as fmt from './presentation/cli-format.js';
 import { AGENT_COMMAND_COMPLETION_CONTRACT } from './agent-completion-contract.js';
 import { isDbAdhocIdentity } from '../domain/mission.js';
 import { findUnverifiableRecordedRow } from './static-evidence.js';
-import { finalGoalCheckShortfall } from '../domain/checkpoint.js';
+import { staleRepairCriteria, uncoveredCompletedCriteria } from '../domain/checkpoint.js';
+import { openRepairFromReview } from '../domain/review.js';
 import { DeclaredGateRunner } from './handoff-declared-gates.js';
 import { HandoffContractVerifier, loadRecordedContract } from './handoff-contract.js';
 import { GatekeeperRemediation, gatekeeperOutcome } from './handoff-gatekeeper-remediation.js';
@@ -184,9 +185,21 @@ export class HandoffExecutor {
     let evidenceRows: string[] = [];
     if (recorded.length > 0) {
       const latest = recorded[recorded.length - 1];
-      const unverifiable = findUnverifiableRecordedRow(ports.fileSystem, latest.goalCheck, rootDir);
+      // Validate every recorded checkpoint's rows, not just the final one: a
+      // retained row in an earlier checkpoint is proof the handoff stands on and
+      // must cite a verifiable reference too. An invalid retained row blocks the
+      // partial-repair handoff with the offending checkpoint named.
+      let unverifiableCheckpoint: (typeof recorded)[number] | null = null;
+      let unverifiable: { readonly row: string; readonly message: string } | null = null;
+      for (const checkpoint of recorded) {
+        unverifiable = findUnverifiableRecordedRow(ports.fileSystem, checkpoint.goalCheck, rootDir);
+        if (unverifiable) {
+          unverifiableCheckpoint = checkpoint;
+          break;
+        }
+      }
       if (unverifiable) {
-        const msg = `The recorded evidence for ${latest.name} is not verifiable; re-record it with \`px checkpoint record\`. ${unverifiable.message}`;
+        const msg = `The recorded evidence for ${unverifiableCheckpoint?.name ?? latest.name} is not verifiable; re-record it with \`px checkpoint record\`. ${unverifiable.message}`;
         error(msg);
         return { ok: false, error: msg };
       }
@@ -198,12 +211,28 @@ export class HandoffExecutor {
         error(msg);
         return { ok: false, error: msg };
       }
-      // Completion is deliberately addressed by the stored criterion index,
-      // rather than prose copied into a checkpoint row. A completed criterion
-      // still needs its own evidence row, but the row's descriptive label is
-      // not another identity field to match.
-      if (finalGoalCheckShortfall(latest.goalCheck, contract.successCriteria.length) > 0) {
-        const msg = `Success-criterion evidence is missing before handoff in ${latest.name}: ${contract.successCriteria.length} completed criteria require ${contract.successCriteria.length} Goal Check row(s), but only ${latest.goalCheck.length} were recorded. Re-record ${latest.name} with \`px checkpoint record\` and verifiable evidence for every completed criterion.`;
+      // Completion is addressed by the stored criterion index, and a completed
+      // criterion still needs its own evidence row whose identity (the row's
+      // `criterion` text) matches the criterion text. Coverage is the union of
+      // identities across every recorded checkpoint, so a repair checkpoint that
+      // carries only its affected criteria does not read as a shortfall while
+      // earlier evidence for the others is retained; a row for one criterion does
+      // not count as evidence for another.
+      const uncovered = uncoveredCompletedCriteria(recorded, contract.successCriteria, contract.completedSuccessCriteria);
+      if (uncovered.length > 0) {
+        const recordedRows = recorded.reduce((total, checkpoint) => total + checkpoint.goalCheck.length, 0);
+        const msg = `Success-criterion evidence is missing before handoff: ${contract.successCriteria.length} completed criteria require ${contract.successCriteria.length} Goal Check row(s), but only ${recordedRows} were recorded across ${recorded.length} recorded checkpoint(s), and ${uncovered.length} criterion have no row: ${uncovered.join(', ')}. Re-record with \`px checkpoint record\` and verifiable evidence for every completed criterion; prior evidence is retained.`;
+        error(msg);
+        return { ok: false, error: msg };
+      }
+      // An open repair (reviewer-requested changes or an integration bounceback)
+      // owes fresh fix evidence recorded in its own review round: rows kept from
+      // earlier rounds are stale, so unchanged retained proof cannot pass a repair
+      // that wrote nothing. This mirrors the record-time check.
+      const repair = openRepairFromReview(contract.review, contract.successCriteria, recorded.flatMap((checkpoint) => checkpoint.goalCheck));
+      const stale = repair ? staleRepairCriteria(recorded, repair) : [];
+      if (stale.length > 0) {
+        const msg = `The open repair has no fresh fix evidence recorded in this review round for ${stale.join(', ')}; only stale rows from earlier rounds remain (latest checkpoint ${latest.name}). Run \`px checkpoint record --name ${latest.name} --criterion <affected> --evidence <verifiable>\` for the criteria the failure touches, then handoff.`;
         error(msg);
         return { ok: false, error: msg };
       }

@@ -2,7 +2,7 @@
 // command and report rendering. This module deliberately never imports either
 // consumer, preventing a command-module import cycle.
 
-import { decisionWindowEndingOn, weeklyDecisionWindows } from './decision-window.js';
+import { decisionWindowEndingOn, weeklyDecisionWindows, localReportingTimeZone } from '../../domain/decision-window.js';
 import { statisticsMissionKey, statisticsRowInWindow } from './statistics-service.js';
 
 export interface StatsRow {
@@ -105,11 +105,11 @@ function parseToday(today: Date | string = new Date()) {
 }
 
 function createWindow(endDate: Date | string, days: number) {
-  return decisionWindowEndingOn(parseToday(endDate), days);
+  return decisionWindowEndingOn(endDate, days);
 }
 
 function createRangeWindow(range = {}) {
-  const { from, to } = range as {from?: string, to?: string};
+  const { from, to, timeZone } = range as {from?: string, to?: string, timeZone?: string};
   if (!from) { throw new Error('Invalid date range argument --from: value is required when using range mode.'); }
   if (!to) { throw new Error('Invalid date range argument --to: value is required when using range mode.'); }
   const start = parseDateOnlyStrict(from, '--from');
@@ -117,11 +117,11 @@ function createRangeWindow(range = {}) {
   if (start > end) {
     throw new Error(`Invalid date range argument --from/--to: start date ${formatDateOnly(start)} is after end date ${formatDateOnly(end)}.`);
   }
-  return { start, end, label: `${formatDateOnly(start)} → ${formatDateOnly(end)}` };
+  return { start, end, timeZone: timeZone ?? localReportingTimeZone(), label: `${formatDateOnly(start)} → ${formatDateOnly(end)}` };
 }
 
 function buildWeeklyWindows(today = new Date()) {
-  return weeklyDecisionWindows(parseToday(today));
+  return weeklyDecisionWindows(today);
 }
 
 function parseBooleanish(value: unknown) {

@@ -14,8 +14,8 @@ import type {
   WeeklyStateFlowSeries,
 } from './board.js';
 import { buildBoardMetrics } from './board.js';
-import type { DecisionWindow, DecisionWindows } from '../services/decision-window.js';
-import { decisionWindowContains, decisionWindowDays } from '../services/decision-window.js';
+import type { DecisionWindow, DecisionWindows } from '../../domain/decision-window.js';
+import { decisionWindowContains, decisionWindowDays, decisionWindowDay, decisionWindowDayEnd } from '../../domain/decision-window.js';
 
 // ---------------------------------------------------------------------------
 // Time-based metrics — derived from recorded events
@@ -135,10 +135,10 @@ export function wipAtTime(
   transitions: readonly MissionTransition[],
   at: string,
 ): WipSnapshot {
-  const ordered = [...transitions].sort((left, right) => left.occurredAt.localeCompare(right.occurredAt));
+  const ordered = [...transitions].sort((left, right) => Date.parse(left.occurredAt) - Date.parse(right.occurredAt));
   const state = new Map(initial);
   for (const transition of ordered) {
-    if (transition.occurredAt <= at) { state.set(transition.missionId, transition.to); }
+    if (Date.parse(transition.occurredAt) <= Date.parse(at)) { state.set(transition.missionId, transition.to); }
   }
 
   const statusList = ['backlog', 'refined', 'active', 'review', 'integration', 'done'] as const;
@@ -269,7 +269,7 @@ export function cumulativeFlowSeries(
   transitions: readonly MissionTransition[],
   instants: readonly string[],
 ): MetricSeries {
-  const ordered = [...transitions].sort((left, right) => left.occurredAt.localeCompare(right.occurredAt));
+  const ordered = [...transitions].sort((left, right) => Date.parse(left.occurredAt) - Date.parse(right.occurredAt));
   const state = new Map(initial);
   let completed = [...state.values()].filter((status) => status === 'done').length;
   let index = 0;
@@ -295,12 +295,12 @@ export function cumulativeFlowByStateSeries(
   transitions: readonly MissionTransition[],
   instants: readonly string[],
 ): StateFlowSeries {
-  const ordered = [...transitions].sort((left, right) => left.occurredAt.localeCompare(right.occurredAt));
+  const ordered = [...transitions].sort((left, right) => Date.parse(left.occurredAt) - Date.parse(right.occurredAt));
   return {
     series: instants.map((at) => {
       const state = new Map(initial);
       for (const transition of ordered) {
-        if (transition.occurredAt <= at) { state.set(transition.missionId, transition.to); }
+        if (Date.parse(transition.occurredAt) <= Date.parse(at)) { state.set(transition.missionId, transition.to); }
       }
       const counts = emptyCounts();
       for (const lane of state.values()) { counts[lane] += 1; }
@@ -311,7 +311,7 @@ export function cumulativeFlowByStateSeries(
 }
 
 /**
- * Cumulative flow by lane across the reporting window's UTC calendar days.
+ * Cumulative flow by lane across the reporting window's local calendar days.
  *
  * The all-history series above answers "what does the board hold now"; this one
  * answers "what moved during the week the operator is reading". The difference
@@ -336,22 +336,22 @@ export function weeklyCumulativeFlowByStateSeries(
   if (transitions.length === 0 && initial.size === 0) {
     return { series: [], missingHistoryFallback: 'skip', window: scopedWindow };
   }
-  const ordered = [...transitions].sort((left, right) => left.occurredAt.localeCompare(right.occurredAt));
+  const ordered = [...transitions].sort((left, right) => Date.parse(left.occurredAt) - Date.parse(right.occurredAt));
   // State as the window opened: every transition recorded before its first day.
   const boundary = new Map(initial);
   for (const transition of ordered) {
-    if (transition.occurredAt.slice(0, 10) < window.startDate) { boundary.set(transition.missionId, transition.to); }
+    if (decisionWindowDay(transition.occurredAt, window.timeZone) < window.startDate) { boundary.set(transition.missionId, transition.to); }
   }
   const carried = new Map([...boundary].filter(([, lane]) => lane !== 'done'));
   const inWindow = ordered.filter((transition) => decisionWindowContains(window, transition.occurredAt));
   return {
     series: decisionWindowDays(window).map((day) => {
-      const at = `${day}T23:59:59.999Z`;
+      const at = decisionWindowDayEnd(day, window.timeZone);
       const state = new Map(carried);
       for (const transition of inWindow) {
         // A mission that opened inside the window has no boundary lane; its
         // intake transition is what puts it on the board.
-        if (transition.occurredAt <= at) { state.set(transition.missionId, transition.to); }
+        if (Date.parse(transition.occurredAt) <= Date.parse(at)) { state.set(transition.missionId, transition.to); }
       }
       const counts = emptyCounts();
       for (const lane of state.values()) { counts[lane] += 1; }
@@ -443,7 +443,7 @@ export function deriveLaneIntervals(
 ): LaneInterval[] {
   // Sort by time, then missionId for deterministic ordering
   const sorted = [...transitions].sort(
-    (left, right) => left.occurredAt.localeCompare(right.occurredAt)
+    (left, right) => Date.parse(left.occurredAt) - Date.parse(right.occurredAt)
     || left.missionId.localeCompare(right.missionId),
   );
 
@@ -671,7 +671,7 @@ function decisionWindowMetrics(
   const dwell = medianCycleTimeByStateSeries(transitions, missions);
   // Every selected mission completed on or before the window's last day, so its
   // whole review passage is recorded by the end of that day.
-  const bounce = reviewBounceRateSeries(transitions, [`${window.endDate}T23:59:59.999Z`], missions)
+  const bounce = reviewBounceRateSeries(transitions, [decisionWindowDayEnd(window.endDate, window.timeZone)], missions)
     .series.at(-1);
   return {
     label: window.label,

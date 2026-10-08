@@ -39,8 +39,11 @@ function buildAgentResolutionPrompt({ slug, area, worktreePath, missionSpecificF
     'Rules:',
     AGENT_COMMAND_COMPLETION_CONTRACT,
     '- Take --theirs for every file listed above. Do not inspect or edit conflict content.',
-    '- If the rebase pauses on a file NOT in the list above, stop immediately and',
-    '  report the unexpected file. Do not guess the resolution.',
+    '- Rediscover every current conflict after each ordinary pause, including files NOT in the list above.',
+    '- Resolve and stage every current conflict before each continue; repeat until Git has finished.',
+    '- The --theirs policy is authorized only for the mission-specific files listed above.',
+    '- For an unlisted file, report the current conflict set and request classification via px rebase; do not guess or apply --theirs to shared files.',
+    '- If no authorized resolution is available, stop with the file names and recovery diagnostics.',
   ].join('\n');
 }
 

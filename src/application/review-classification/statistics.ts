@@ -1,3 +1,4 @@
+import { reportingWindowContains, type ReportingWindow } from '../../domain/decision-window.js';
 import type { AppliedClassifierDecision, ClassifierObservation, ClassifierCallMeasurement } from '../ports/review-classification-telemetry.js';
 
 export interface PrDecisionFact {
@@ -16,12 +17,9 @@ export interface ClassifierStatisticsInput {
   readonly agentModels?: readonly { mission: string; role: 'implementer' | 'reviewer'; family: string; provider: string | null; model: string | null }[];
 }
 
-/** Count applied verdicts, not calls or completed missions, within existing UTC day windows. */
-export function classifierStatistics(input: ClassifierStatisticsInput, window: { start: Date; end: Date }) {
-  const start = window.start.toISOString().slice(0, 10);
-  const end = window.end.toISOString().slice(0, 10);
-  const inside = (at: string): boolean => Number.isFinite(Date.parse(at))
-    && new Date(at).toISOString().slice(0, 10) >= start && new Date(at).toISOString().slice(0, 10) <= end;
+/** Count applied verdicts, not calls or completed missions, within the shared reporting-day windows. */
+export function classifierStatistics(input: ClassifierStatisticsInput, window: ReportingWindow) {
+  const inside = (at: string): boolean => reportingWindowContains(window, at);
   const unique = new Map(input.decisions.map(d => [d.id, d]));
   const decisions = [...unique.values()].filter(d => inside(d.decidedAt));
   const classifiers = decisions.filter(d => d.source === 'classifier');
@@ -84,10 +82,8 @@ export const roundKindOf = (round: number): Exclude<RoundKind, 'all'> => round =
  * Review rounds of one kind, not call samples: a retried round keeps one entry (its latest
  * sample decides the outcome) while any of its samples may show the classifier ran.
  */
-export function reviewRounds(input: ClassifierStatisticsInput, window: { start: Date; end: Date }, kind: RoundKind = 'all') {
-  const start = window.start.toISOString().slice(0, 10), end = window.end.toISOString().slice(0, 10);
-  const inside = (at: string) => Number.isFinite(Date.parse(at)) && new Date(at).toISOString().slice(0, 10) >= start
-    && new Date(at).toISOString().slice(0, 10) <= end;
+export function reviewRounds(input: ClassifierStatisticsInput, window: ReportingWindow, kind: RoundKind = 'all') {
+  const inside = (at: string): boolean => reportingWindowContains(window, at);
   const ofKind = (round: number) => kind === 'all' || roundKindOf(round) === kind;
   const byRound = new Map<string, ClassifierCallMeasurement[]>();
   for (const sample of input.attempts) {
@@ -127,10 +123,9 @@ export function reviewRounds(input: ClassifierStatisticsInput, window: { start: 
 }
 
 /** Agent-family/model comparison uses the same decisions and full-history samples. */
-export function classifierGroups(input: ClassifierStatisticsInput, window: { start: Date; end: Date }) {
+export function classifierGroups(input: ClassifierStatisticsInput, window: ReportingWindow) {
   if (!input.missions) { return null; }
-  const start = window.start.toISOString().slice(0, 10), end = window.end.toISOString().slice(0, 10);
-  const cohort = input.missions.filter(m => m.closedAt !== null && m.closedAt.slice(0, 10) >= start && m.closedAt.slice(0, 10) <= end);
+  const cohort = input.missions.filter(m => m.closedAt !== null && reportingWindowContains(window, m.closedAt));
   const missionIds = new Set(cohort.map(m => m.mission));
   const history = input.attempts.filter(s => missionIds.has(s.mission));
   const keys = [...new Set(history.map(s => JSON.stringify([s.implementer, s.reviewer, s.provider, s.model])))];

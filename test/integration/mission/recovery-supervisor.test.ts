@@ -701,7 +701,7 @@ test('lead starts long forward workflows without blocking fleet supervision', ()
   const runAction = composition.slice(composition.indexOf('runAction: async'));
   assert.match(
     runAction,
-    /createProductionApplicationServices\(missionWorktree\)[\s\S]*?startForward\(mission, action, \(\) => active\(invocation\.args, \{[\s\S]*?controller,/,
+    /openServices\(missionWorktree\)[\s\S]*?startForward\(mission, action, \(\) => active\(invocation\.args, \{[\s\S]*?controller,/,
     'lead active recovery must use a controller rooted in the mission worktree',
   );
   assert.match(

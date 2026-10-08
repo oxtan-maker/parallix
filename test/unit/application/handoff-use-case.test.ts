@@ -8,12 +8,14 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import path from 'node:path';
 import { HandoffCommandUseCase } from '../../../src/application/handoff-command-use-case.js';
 import {
   SLUG, ROOT, BRANCH, MISSION_DIR, RECORDED_MISSION_LOAD, LEGACY_MISSION_LOAD,
   makeRecorder, makePorts, runOptions,
 } from '../../helpers/handoff-ports.js';
 import { classifyError } from '../../../src/application/failure-classification.js';
+import { reviewFindingId, type Review } from '../../../src/domain/review.js';
 import type { HandoffWorkflowPorts } from '../../../src/application/ports/handoff-workflow.js';
 
 // --- SC5a: successful handoff over mocked ports ---
@@ -628,8 +630,8 @@ test('a Mission drafted through the typed verbs with no recorded gate fails hand
 });
 
 
-test('a typed-verb Mission requires completion and one verifiable row per criterion without matching criterion prose (TASK-2631)', async () => {
-  const load = (criteria: readonly string[], goalCheck = [{ criterion: 'The  greeting is  fixed', evidence: '`test/unit/application/handoff-use-case.test.ts`' }]) => async () => ({
+test('a typed-verb Mission requires completion and one verifiable row per distinct success criterion (TASK-2631)', async () => {
+  const load = (criteria: readonly string[], goalCheck = [{ criterion: 'The greeting is fixed', evidence: '`test/unit/application/handoff-use-case.test.ts`' }]) => async () => ({
     kind: 'found',
     mission: {
       checkpoints: [{ name: 'CP-1', goalCheck, nextAction: 'review' }],
@@ -650,12 +652,12 @@ test('a typed-verb Mission requires completion and one verifiable row per criter
   assert.match(missing.error ?? '', /2 completed criteria require 2 Goal Check row/);
   assert.equal(classifyError(missing.error ?? '').dispatchAction, 'AutoSendBack', 'the gap is sent back to the implementer');
 
-  // Completion indexes provide the criterion identity, so checkpoint labels do
-  // not have to reproduce criterion text.
+  // A row covers the completed criterion whose identity its `criterion` field
+  // equals; distinct coverage across recorded checkpoints is what handoff checks.
   const coveredRecorder = makeRecorder();
   const covered = await new HandoffCommandUseCase(makePorts(coveredRecorder, contractServices(load(
     ['the greeting is fixed'],
-    [{ criterion: 'browser behavior', evidence: '`test/unit/application/handoff-use-case.test.ts`' }],
+    [{ criterion: 'the greeting is fixed', evidence: '`test/unit/application/handoff-use-case.test.ts`' }],
   ))))
     .performHandoff(SLUG, runOptions(coveredRecorder));
   assert.match(covered.error ?? '', /no recorded verification gate/, 'every criterion was evidenced, so handoff moved on to the gates');
@@ -758,6 +760,70 @@ test('handoff rejects basename-only recorded evidence with the recording diagnos
   assert.equal(result.ok, false);
   assert.match(result.error ?? '', /CP-5 is not verifiable; re-record it with `px checkpoint record`/);
   assert.match(result.error ?? '', /`web-board-interaction\.cases\.ts` does not exist relative to the repository root/);
+  assert.equal(classifyError(result.error ?? '').dispatchAction, 'AutoSendBack');
+  assert.deepEqual(recorder.transitions, []);
+});
+
+test('handoff rejects an invalid retained row in an earlier checkpoint even when a later checkpoint covers the gap (TASK-2665)', async () => {
+  // Coverage is satisfied across the two checkpoints (A by CP-1, B by CP-2), so
+  // a check that only validated the final checkpoint would let the invalid
+  // earlier proof through. Handoff must validate every recorded checkpoint's
+  // rows and block on CP-1's non-verifiable reference with its corrective command.
+  const validRef = 'test/unit/application/handoff-use-case.test.ts';
+  const validTarget = path.join(ROOT, validRef);
+  const recorder = makeRecorder();
+  const ports = makePorts(recorder, {
+    ...contractServices(async () => ({
+      kind: 'found',
+      mission: {
+        checkpoints: [
+          { name: 'CP-1', goalCheck: [{ criterion: 'board interaction', evidence: 'handoff-use-case.test.ts' }], nextAction: 'review' },
+          { name: 'CP-2', goalCheck: [{ criterion: 'mission handoff', evidence: validRef }] },
+        ],
+        brief: DRAFTED_BRIEF,
+        successCriteria: ['board interaction', 'mission handoff'],
+        completedSuccessCriteria: [0, 1],
+        declaredGates: ['npm test'],
+      },
+      version: 4,
+    })),
+    fileSystem: { existsSync: (target: string) => target === validTarget, readText: () => '', writeText: () => {}, listNames: () => [], listEntries: () => [] },
+  });
+  const result = await new HandoffCommandUseCase(ports).performHandoff(SLUG, runOptions(recorder));
+  assert.equal(result.ok, false);
+  assert.match(result.error ?? '', /CP-1 is not verifiable; re-record it with `px checkpoint record`/);
+  assert.match(result.error ?? '', /`handoff-use-case\.test\.ts` does not exist relative to the repository root/);
+  assert.equal(classifyError(result.error ?? '').dispatchAction, 'AutoSendBack');
+  assert.deepEqual(recorder.transitions, []);
+});
+
+test('handoff rejects a repair that leaves a completed criterion without a row (TASK-2665)', async () => {
+  // A repair (CP-2) that targets the wrong criterion leaves the affected
+  // criterion without any row. Handoff measures coverage across every recorded
+  // checkpoint by criterion identity and refuses, naming the uncovered criterion.
+  const ref = 'test/unit/application/handoff-use-case.test.ts';
+  const targetRef = path.join(ROOT, ref);
+  const recorder = makeRecorder();
+  const ports = makePorts(recorder, {
+    ...contractServices(async () => ({
+      kind: 'found',
+      mission: {
+        checkpoints: [
+          { name: 'CP-1', goalCheck: [{ criterion: 'board interaction', evidence: ref }] },
+          { name: 'CP-2', goalCheck: [{ criterion: 'board interaction', evidence: ref }] },
+        ],
+        brief: DRAFTED_BRIEF,
+        successCriteria: ['board interaction', 'mission handoff'],
+        completedSuccessCriteria: [0, 1],
+        declaredGates: ['npm test'],
+      },
+      version: 4,
+    })),
+    fileSystem: { existsSync: (target: string) => target === targetRef, readText: () => '', writeText: () => {}, listNames: () => [], listEntries: () => [] },
+  });
+  const result = await new HandoffCommandUseCase(ports).performHandoff(SLUG, runOptions(recorder));
+  assert.equal(result.ok, false);
+  assert.match(result.error ?? '', /criterion have no row: mission handoff/);
   assert.equal(classifyError(result.error ?? '').dispatchAction, 'AutoSendBack');
   assert.deepEqual(recorder.transitions, []);
 });

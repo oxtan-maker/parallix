@@ -326,9 +326,18 @@ lapsed countdown, no past block reason.
 `N px cmd live` counts missions with a live agent-launching `px` process
 (`detectRunningMissionSessions`, `src/adapters/agents/running-sessions.ts`).
 On the web board, fans spin while current work is live or unverified, including
-integration gates. Stale or absent work stops the fans. The agent label and its
-activity dot are omitted when no agent is identified; fan rotation does not
-depend on identifying an agent or finding a live `px` session.
+integration gates. Stale or absent work stops the fans. Flight-card headers show
+the fans and identified agent family without a work-state badge or a dot before
+the family name. When no agent is identified, the family label is omitted; fan
+rotation does not depend on identifying an agent or finding a live `px` session.
+The card body retains work details and coordinator recovery evidence.
+
+The current review-round pip blinks while non-stale published work matches the
+round's activity: reviewing or answering review findings during fixing. Live and
+unverified work both animate. Completed and future rounds stay static. Idle,
+blocked, stale or unrelated work leaves all review pips static, even when a
+review phase or live coordinator remains recorded.
+
 Live processes come from `ps`, and each one is placed like this:
 
 - the mission is the slug on the command line (`px draft task-2217`) — that
@@ -568,6 +577,19 @@ The index is one-based and the version comes from current status; reload it afte
 each write. Completion flags and final checkpoint evidence are both required.
 The same handoff check must pass after repair.
 
+A repair checkpoint records only the criteria it fixes; earlier valid rows for the
+other criteria are retained, not rewritten. Handoff then measures coverage across
+every recorded checkpoint by criterion identity, so a repair that covers its
+affected criteria is accepted while a repair that leaves any completed criterion
+without a row is refused, naming the uncovered criterion and the record command.
+Rows remember the review round they were recorded in. After reviewer-requested
+changes or an integration bounceback, the repair round needs fresh fix evidence
+recorded in that round: criteria that findings name (reviewers write `Success
+criterion N` in the summary; the classifier uses `success-criterion-N` ids) each
+need a fresh row, as do the criteria whose recorded proof cites a failed integration gate
+or command, or that were recorded to repair that same gate before, and otherwise at least one fresh row, so a handoff that leaves
+only rows kept from earlier rounds is refused.
+
 ### Pre-review bounce policy — verified fixes and a per-failure budget
 
 When the pre-review verification gate fails, when a Git hook rejects the
@@ -714,6 +736,15 @@ Every other agent launch on a failure path goes through the kernel — including
 the gatekeeper-pushback artifact remediation, whose relaunch is a verified bounce
 that re-runs the handoff rather than trusting that the agent wrote the files.
 That invariant is enforced by an allow-list test rather than by convention.
+
+During agent-assisted rebase resolution, an ordinary Git conflict pause is
+expected. Rediscover the current conflict set, resolve within the authorized
+policy, stage every resolved file, and continue through successive pauses.
+Completion requires no active rebase, no unmerged files, and passing required
+checks. Genuine command, hook, verification, and infrastructure failures stop
+with diagnostics. The mission-specific resolver must request classification
+for unlisted files; it must never apply its `--theirs` policy to shared files
+without authorization.
 
 ### Manual override is still supported
 

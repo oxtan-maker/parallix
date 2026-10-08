@@ -19,6 +19,7 @@ import { NO_CURRENT_WORK_PORT } from '../../../src/application/recording/current
 import { BoardCommandController } from '../../../src/application/controller/board-controller.js';
 import type { ExecuteMissionPorts } from '../../../src/application/ports/execute-mission.js';
 import { missionVersion } from '../../../src/application/domain-ports.js';
+import { resolveConfiguration } from '../../../src/composition/config.js';
 
 describe('Application outcomes and view data', () => {
   test('application outcomes have one terminal status and typed error variants', () => {
@@ -51,7 +52,7 @@ describe('Production capability composition', () => {
   test('production composition gives CLI and TUI identical board and active capability instances', () => {
     const { ports } = makeExecutePorts();
 
-    const capabilities = composeProductionCapabilities('/fixture-repository', repositoryId('fixture-repository'), repositories, ports, null, NO_CURRENT_WORK_PORT);
+    const capabilities = composeProductionCapabilities('/fixture-repository', repositoryId('fixture-repository'), repositories, ports, null, NO_CURRENT_WORK_PORT, undefined, undefined, { configuration: resolveConfiguration({}) });
 
     assert.strictEqual(capabilities.boardProjection, capabilities.tui.boardProjection);
     assert.strictEqual(capabilities.missionDetails, capabilities.tui.missionDetails);

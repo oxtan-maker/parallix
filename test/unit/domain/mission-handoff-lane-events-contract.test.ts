@@ -712,10 +712,24 @@ describe('Active lane projection', () => {
 
 test('handoff evidence and self-review eligibility are pure decisions (TASK-2668.07)', () => {
   const contract = { checkpoints: [], successCriteria: ['one', 'two'], completedSuccessCriteria: [0], draftedInDb: true };
+  // Coverage is distinct success-criterion identities, not a sum of row counts:
+  // a row covers the criterion whose identity its `criterion` field equals.
   assert.deepEqual(handoffEvidencePolicy(contract), { source: 'missing', incomplete: [2], insufficientRows: false });
   assert.equal(handoffEvidencePolicy({ ...contract, draftedInDb: false }).source, 'historical');
-  assert.deepEqual(handoffEvidencePolicy({ ...contract, checkpoints: [{ goalCheck: ['proof'] }] }), { source: 'recorded', incomplete: [2], insufficientRows: true });
-  assert.equal(handoffEvidencePolicy({ ...contract, checkpoints: [{ goalCheck: ['a', 'b'] }], completedSuccessCriteria: [0, 1] }).insufficientRows, false);
+  assert.deepEqual(handoffEvidencePolicy({ ...contract, checkpoints: [{ goalCheck: [{ criterion: 'two' }] }] }), { source: 'recorded', incomplete: [2], insufficientRows: true });
+  assert.equal(handoffEvidencePolicy({ ...contract, checkpoints: [{ goalCheck: [{ criterion: 'one' }, { criterion: 'two' }] }], completedSuccessCriteria: [0, 1] }).insufficientRows, false);
+  // Two rows across checkpoints that both name the first criterion do not count
+  // as coverage for the second: coverage is distinct criterion identities, not a
+  // sum of row counts. The old count-based check wrongly returned false here.
+  assert.equal(
+    handoffEvidencePolicy({
+      ...contract,
+      checkpoints: [{ goalCheck: [{ criterion: 'one' }] }, { goalCheck: [{ criterion: 'one' }] }],
+      completedSuccessCriteria: [0, 1],
+    }).insufficientRows,
+    true,
+    'repeated rows for one criterion leave another criterion uncovered',
+  );
   assert.equal(handoffBudgetExceeded(3), false);
   assert.equal(handoffBudgetExceeded(4), true);
   assert.equal(isReviewerPoolExhausted(new AgentPoolExhaustedError('review', 'pool unavailable')), true);

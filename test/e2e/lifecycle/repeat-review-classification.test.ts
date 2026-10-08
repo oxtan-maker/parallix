@@ -9,6 +9,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { run } from '../../../src/composition/create-cli.js';
 import { createDecisionPort } from '../../../src/composition/decision.js';
+import { resolveConfiguration } from '../../../src/composition/config.js';
 import { clearOperatorStateCache } from '../../../src/adapters/sqlite/adapter-factory.js';
 import { setCommandPathProbe, setLauncherHealthProbe, setWorkflowLaunchPort } from '../../../src/adapters/agents/agents.js';
 import { fakeLifecycleAgent } from '../../fixtures/e2e-lifecycle-fake-agent.js';
@@ -20,7 +21,7 @@ import { childCpuUsageModule } from '../../lib/child-cpu-usage.js';
 // publication and Jev model. Deterministic drafting/implementation use the same
 // fake-agent boundary as mission-lifecycle; no model result is fabricated.
 test('live Jev applies an integration-repair verdict and the standard lifecycle lands it (TASK-2667 regression)', { timeout: 240_000 }, async t => {
-  assert.equal((await createDecisionPort().available()).status, 'available', 'A configured live Jev provider is required');
+  assert.equal((await createDecisionPort(resolveConfiguration(process.env).decision).available()).status, 'available', 'A configured live Jev provider is required');
   const sourceRoot = fileURLToPath(new URL('../../../', import.meta.url));
   const { waitedChildCpuUs } = createRequire(import.meta.url)(childCpuUsageModule(sourceRoot, process.execPath)) as { waitedChildCpuUs(): number };
   const cpuUs = () => {
@@ -164,7 +165,8 @@ test('live Jev applies an integration-repair verdict and the standard lifecycle 
     const localRevision = git(worktree, 'rev-parse', 'HEAD');
     assert.notEqual(localRevision, pushedHead);
     const { createReviewClassification } = await import('../../../src/composition/review-classification.js');
-    assert.equal(await createReviewClassification(slug, worktree).publish({ ...source, candidateRevision: localRevision }, 'clear', 'Classifier cleared the prior findings. [TASK-2675]'), true,
+    const { resolveConfiguration } = await import('../../../src/composition/config.js');
+    assert.equal(await createReviewClassification(slug, worktree, resolveConfiguration(process.env).decision).publish({ ...source, candidateRevision: localRevision }, 'clear', 'Classifier cleared the prior findings. [TASK-2675]'), true,
       'Jev publication must not depend on the PR head matching a later local revision');
     git(worktree, 'reset', '--hard', pushedHead);
     assert.equal(readDb('SELECT status FROM missions')[0].status, 'integration');

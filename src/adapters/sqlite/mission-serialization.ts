@@ -78,6 +78,9 @@ export interface MissionGoalCheckRecord {
   readonly position: number;
   readonly criterion: string;
   readonly evidence: string;
+  readonly recorded_round?: number | null;
+  readonly repaired_gate?: string | null;
+  readonly repaired_gates?: string | null;
 }
 
 export interface MissionReviewRecord {
@@ -278,6 +281,9 @@ function checkpointsFrom(records: MissionAggregateRecords): readonly CheckpointD
       .map((row) => ({
         criterion: requiredText(row.criterion, 'goal criterion'),
         evidence: requiredText(row.evidence, 'goal evidence'),
+        ...(typeof row.recorded_round === 'number' ? { recordedRound: row.recorded_round } : {}),
+        ...(typeof row.repaired_gate === 'string' ? { repairedGate: row.repaired_gate } : {}),
+        ...(typeof row.repaired_gates === 'string' ? { repairedGates: JSON.parse(row.repaired_gates) as string[] } : {}),
       }));
     return {
       missionId: missionId(checkpoint.checkpoint_mission_id),

@@ -8,8 +8,10 @@ import * as path from 'node:path';
 import * as fmt from './presentation/cli-format.js';
 import type { AgentFamily } from '../domain/agents.js';
 import { missionId } from '../domain/mission.js';
+import type { Review } from '../domain/review.js';
 import type { HandoffLog, HandoffMissionServicesPort, HandoffResult, HandoffWorkflowPorts } from './ports/handoff-workflow.js';
 import type { CheckpointData } from '../domain/checkpoint.js';
+import { uncoveredCompletedCriteria } from '../domain/checkpoint.js';
 import { collectGoalCheckEvidenceRows, findUnverifiableGoalCheckRow } from './static-evidence.js';
 
 /**
@@ -27,7 +29,7 @@ export async function loadRecordedContract(
   missionDirPath: string,
   slug: string,
 ): Promise<
-  | { ok: true; draftedInDb: boolean; checkpoints: readonly CheckpointData[]; successCriteria: readonly string[]; completedSuccessCriteria: readonly number[]; gates: readonly string[] }
+  | { ok: true; draftedInDb: boolean; checkpoints: readonly CheckpointData[]; successCriteria: readonly string[]; completedSuccessCriteria: readonly number[]; gates: readonly string[]; review: Review | null }
   | { ok: false; error: string }
 > {
   try {
@@ -46,6 +48,8 @@ export async function loadRecordedContract(
       successCriteria: mission.successCriteria ?? [],
       completedSuccessCriteria: mission.completedSuccessCriteria ?? [],
       gates: mission.declaredGates ?? [],
+      // The open review round names the affected criteria a repair must re-evidence.
+      review: mission.review ?? null,
     };
   } catch (cause) {
     return { ok: false, error: `Could not read Mission ${slug} from the operator database: ${(cause as Error).message}. Handoff fails closed.` };
@@ -176,13 +180,16 @@ export class HandoffContractVerifier {
     let evidenceRows: string[] = [];
     const policy = handoffEvidencePolicy(contract);
     if (policy.source === 'recorded') {
-      const latest = recorded[recorded.length - 1];
-      const rows = latest.goalCheck.map((row) => `| ${row.criterion} | ${row.evidence} |`);
-      const unverifiable = findUnverifiableGoalCheckRow(ports.fileSystem, rows, rootDir);
-      if (unverifiable) {
-        const msg = `The recorded evidence for ${latest.name} has a Goal Check row that cites no verifiable reference such as a recognized repo command/path, exact test name, test-file path, or ADR reference. Re-record it with \`px checkpoint record\`. Offending row: ${unverifiable}`;
-        error(msg);
-        return { ok: false, error: msg };
+      // Validate every recorded checkpoint's rows, not only the last: retained
+      // evidence from earlier checkpoints must cite a verifiable reference too.
+      for (const checkpoint of recorded) {
+        const rows = checkpoint.goalCheck.map((row) => `| ${row.criterion} | ${row.evidence} |`);
+        const unverifiable = findUnverifiableGoalCheckRow(ports.fileSystem, rows, rootDir);
+        if (unverifiable) {
+          const msg = `The recorded evidence for ${checkpoint.name} has a Goal Check row that cites no verifiable reference such as a recognized repo command/path, exact test name, test-file path, or ADR reference. Re-record it with \`px checkpoint record\`. Offending row: ${unverifiable}`;
+          error(msg);
+          return { ok: false, error: msg };
+        }
       }
       const incomplete = policy.incomplete;
       if (incomplete.length > 0) {
@@ -190,16 +197,21 @@ export class HandoffContractVerifier {
         error(msg);
         return { ok: false, error: msg };
       }
-      // Completion is deliberately addressed by the stored criterion index,
-      // rather than prose copied into a checkpoint row. A completed criterion
-      // still needs its own evidence row, but the row's descriptive label is
-      // not another identity field to match.
+      // Completion is addressed by the stored criterion index, and a completed
+      // criterion still needs its own evidence row whose identity (the row's
+      // `criterion` text) matches the criterion text. Coverage is the union of
+      // identities across all recorded checkpoints: a repair checkpoint may carry
+      // only its affected criteria while earlier evidence is retained, and a row
+      // for one criterion does not count as evidence for another.
       if (policy.insufficientRows) {
-        const msg = `Success-criterion evidence is missing before handoff in ${latest.name}: ${contract.successCriteria.length} completed criteria require ${contract.successCriteria.length} Goal Check row(s), but only ${latest.goalCheck.length} were recorded. Re-record ${latest.name} with \`px checkpoint record\` and verifiable evidence for every completed criterion.`;
+        const uncovered = uncoveredCompletedCriteria(recorded, contract.successCriteria, contract.completedSuccessCriteria);
+        const combinedRows = recorded.reduce((total, checkpoint) => total + checkpoint.goalCheck.length, 0);
+        const msg = `Success-criterion evidence is missing before handoff: ${contract.successCriteria.length} completed criteria require ${contract.successCriteria.length} Goal Check row(s), but only ${combinedRows} were recorded across ${recorded.length} recorded checkpoint(s), and ${uncovered.length} criterion have no row: ${uncovered.join(', ')}. Re-record with \`px checkpoint record\` and verifiable evidence for every completed criterion; prior evidence is retained.`;
         error(msg);
         return { ok: false, error: msg };
       }
-      log(fmt.status('PASS', `Recorded checkpoint evidence verified: ${latest.name} (${latest.goalCheck.length} Goal Check row(s)).`));
+      const combinedRows = recorded.reduce((total, checkpoint) => total + checkpoint.goalCheck.length, 0);
+      log(fmt.status('PASS', `Recorded checkpoint evidence verified: ${recorded.length} recorded checkpoint(s), ${combinedRows} Goal Check row(s).`));
     } else if (policy.source === 'missing') {
       // A Mission drafted through the typed verbs records its evidence the same
       // way. Handoff never writes evidence on the implementer's behalf.

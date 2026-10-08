@@ -1,29 +1,18 @@
 ---
-id: TASK-2677
-title: lifecycle update
-status: backlog
-assignee: []
-created_date: '2026-10-07 06:41'
+id: TASK-2686
+title: ensure review rounds are not blinking when they are not worked on
+status: done
+assignee: [codex]
+created_date: '2026-10-08 05:36'
 labels: []
 dependencies: []
-ordinal: 189008
+ordinal: 191008
 ---
 
 ## Description
 
 <!-- SECTION:DESCRIPTION:BEGIN -->
-Bumps esbuild and tsx. These dependencies needed to be updated together.
-Updates esbuild from 0.27.7 to 0.28.2
-
-Release notes
-Changelog
-Commits
-
-Updates tsx from 4.20.6 to 4.23.15
-
-Release notes
-Commits
-Maintainer changes
+currently in web the blinking indicator for review rounds are blinking even when the rounds are not being worked on, sometimes even when the whole mission is not being worked on. Ensure the review rounds are only blinking when a review round is actually worked on.
 <!-- SECTION:DESCRIPTION:END -->
 
 ## Definition of Done

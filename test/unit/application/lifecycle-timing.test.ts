@@ -369,8 +369,8 @@ test('SC1: cycle time reflects the lifecycle wall clock, not the summed agent ru
     `cycle time must be the ${LIFECYCLE_MINUTES}-minute lifecycle, not the ${RUNTIME_MINUTES}-minute agent runtime`,
   );
   assert.notEqual(outcome.cycleTimeMinutes, RUNTIME_MINUTES);
-  assert.equal(outcome.createdAt, '2026-08-01T10:00:00Z');
-  assert.equal(outcome.closedAt, '2026-08-02T12:00:00Z');
+  assert.equal(outcome.createdAt, '2026-08-01T10:00:00.000Z');
+  assert.equal(outcome.closedAt, '2026-08-02T12:00:00.000Z');
 });
 
 test('SC2/SC3: every outcome carries one AgentRunMeasurement per usage record (task-2347.05)', async () => {
@@ -490,9 +490,9 @@ test('SC6: CompletedMissionStatistics still sums runtime from outcome.runs (task
 // TASK-2363 — the one application-owned rolling-window definition.
 // ---------------------------------------------------------------------------
 
-describe("weekly decision windows", () => {
+describe("weekly decision windows in UTC", () => {
   it('returns current and previous non-overlapping 7-day ranges', () => {
-    const windows = weeklyDecisionWindows('2026-08-11');
+    const windows = weeklyDecisionWindows('2026-08-11', 'UTC');
     assert.equal(windows.current.startDate, '2026-08-05');
     assert.equal(windows.current.endDate, '2026-08-11');
     assert.equal(windows.previous.startDate, '2026-07-29');
@@ -500,25 +500,25 @@ describe("weekly decision windows", () => {
   });
 
   it('labels each window with its inclusive date range', () => {
-    const windows = weeklyDecisionWindows('2026-08-11');
+    const windows = weeklyDecisionWindows('2026-08-11', 'UTC');
     assert.equal(windows.current.label, '2026-08-05 → 2026-08-11');
     assert.equal(windows.previous.label, '2026-07-29 → 2026-08-04');
   });
 
   it('reads the day from an injected full-instant clock', () => {
-    const windows = weeklyDecisionWindows('2026-08-11T23:59:59.999Z');
+    const windows = weeklyDecisionWindows('2026-08-11T23:59:59.999Z', 'UTC');
     assert.equal(windows.current.label, '2026-08-05 → 2026-08-11');
   });
 
   it('crosses a month boundary without shifting the window length', () => {
-    const windows = weeklyDecisionWindows('2026-03-02');
+    const windows = weeklyDecisionWindows('2026-03-02', 'UTC');
     assert.equal(windows.current.startDate, '2026-02-24');
     assert.equal(windows.previous.startDate, '2026-02-17');
     assert.equal(windows.previous.endDate, '2026-02-23');
   });
 
   it('contains a completion at any time on the last day', () => {
-    const windows = weeklyDecisionWindows('2026-08-11');
+    const windows = weeklyDecisionWindows('2026-08-11', 'UTC');
     assert.equal(decisionWindowContains(windows.current, '2026-08-11T23:30:00.000Z'), true);
     assert.equal(decisionWindowContains(windows.current, '2026-08-05T00:00:00.000Z'), true);
     assert.equal(decisionWindowContains(windows.current, '2026-08-04T23:59:59.999Z'), false);
@@ -526,7 +526,7 @@ describe("weekly decision windows", () => {
   });
 
   it('stays compatible with the date-only telemetry comparison px stats uses', () => {
-    const window = decisionWindowEndingOn('2026-06-20', 7);
+    const window = decisionWindowEndingOn('2026-06-20', 7, 'UTC');
     assert.equal(statisticsRowInWindow({ date: '2026-06-14' }, window), true);
     assert.equal(statisticsRowInWindow({ date: '2026-06-20' }, window), true);
     assert.equal(statisticsRowInWindow({ date: '2026-06-13' }, window), false);

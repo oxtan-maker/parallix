@@ -17,20 +17,9 @@ import { classifyError, hasExplicitHumanOnlyDiagnostic, FailureClass, DispatchAc
 
 // ---- task-2294.01 pinned conflict agent (consolidated from test/task-2294.01-repro.test.ts, TASK-2622.09) ----
 describe("pinned conflict agent", () => {
-  /**
-   * TASK-2294.01 reproduction test.
-   *
-   * Bug: both conflict entry points (`px resolve-conflict` and the `px rebase`
-   * shared-file conflict path) launched the `conflict-resolution` step without
-   * pinning the mission's recorded implementer. `startAgent` therefore fell
-   * through to pool selection driven by the `conflict-resolution` eligibility
-   * list in `config/agents.json`, so conflict work — which is implementation
-   * work owned by the mission implementer — could be handed to an unrelated
-   * agent family.
-   *
-   * These assertions fail on the parent commit (no `agent` option is passed on
-   * either launch) and pass once the implementer is pinned.
-   */
+  // Pinned conflict-agent contract: both entrypoints use the recorded implementer;
+  // never select a pool family or substitute a fallback for an unavailable owner.
+
 
 
   const OK: GitCommandResult = { status: 0, stdout: '', stderr: '' };
@@ -853,6 +842,140 @@ describe("usage-blocked implementer", () => {
     assert.equal(dispatchAction, DispatchAction.HumanOnly);
     assert.equal(hasExplicitHumanOnlyDiagnostic(infra), true);
   });
+});
+
+// ---- successive normal conflict stops (TASK-2668.02 / TASK-2672 follow-up) ----
+describe("rebase through successive conflict stops", () => {
+  const OK: GitCommandResult = { status: 0, stdout: '', stderr: '' };
+  const HANDOFF = 'missions/task-2672/handoff.ts';
+  const PKG = 'package.json';
+  const PKGLCK = 'package-lock.json';
+  function subcommand(args: string[]): string[] {
+    let index = 0;
+    while (index + 1 < args.length && (args[index] === '-C' || args[index] === '-c')) { index += 2; }
+    return args.slice(index);
+  }
+  // Explicit Git state: conflicts remain until every path is resolved and staged.
+  function successiveConflictHarness() {
+    const lines: string[] = [];
+    const exitCodes: number[] = [];
+    const agentLaunches: Array<{ step: string; options: Record<string, unknown> }> = [];
+    const state = { inProgress: false, unmerged: [] as string[], staged: [] as string[],
+      continueSets: [] as string[][], rebaseCall: 0, continueCall: 0, classifyCall: 0,
+      incomplete: false, pushes: 0, versions: { main: '1.5.283', mission: '1.5.282' }, resolvedVersions: {} as Record<string, string> };
+    const port: RebaseWorkflowPort = {
+      git: (args: string[]) => {
+        const tail = subcommand(args);
+        if (tail[0] === 'rebase' && tail[1] === 'main') {
+          state.rebaseCall += 1;
+          assert.equal(state.rebaseCall, 1, 'never restart a paused rebase');
+          state.inProgress = true;
+          state.unmerged = [HANDOFF];
+          return { status: 1, stdout: '', stderr: `CONFLICT (content): Merge conflict in ${HANDOFF}\n` };
+        }
+        if (tail[0] === 'rebase' && tail[1] === '--continue') {
+          state.continueSets.push([...state.staged]);
+          assert.equal(state.unmerged.length, 0, 'all current conflicts must be staged before continue');
+          state.continueCall += 1;
+          state.staged = [];
+          if (state.continueCall === 1) {
+            state.unmerged = [PKG, PKGLCK];
+            return { status: 1, stdout: '', stderr: `CONFLICT (content): Merge conflict in ${PKG}\nCONFLICT (content): Merge conflict in ${PKGLCK}\n` };
+          }
+          state.inProgress = false;
+          return OK;
+        }
+        if (tail[0] === 'rebase' && tail[1] === '--show-current') { return { ...OK, stdout: state.inProgress ? 'mission/task-2672' : '' }; }
+        if (tail[0] === 'status' && tail[1] === '--porcelain') { return { ...OK, stdout: state.unmerged.map(file => `UU ${file}`).join('\n') }; }
+        if (tail[0] === 'add') { state.staged.push(...tail.slice(1)); state.unmerged = state.unmerged.filter(file => !state.staged.includes(file)); }
+        if (tail[0] === 'push') { state.pushes += 1; }
+        return OK;
+      },
+      detectRebaseState: () => ({ inProgress: state.inProgress, unmergedFiles: [...state.unmerged] }),
+      getCurrentBranch: () => 'mission/task-2672',
+      cwd: () => '/repo', inferSlug: (explicitSlug?: string) => explicitSlug ?? 'task-2672',
+      findMissionDir: () => '/worktree/missions/task-2672', findMissionArea: () => 'docs',
+      resolveWorktree: () => '/worktree', conventionalWorktreePath: () => '/worktrees/task-2672',
+      missionBranchName: () => 'mission/task-2672', resolveMissionBaseBranch: () => 'main',
+      missionConflictPathPrefix: () => 'missions/task-2672/', resolvePromptBaseBranch: () => 'main',
+      startAgent: async (step: string, options: Record<string, unknown>) => {
+        agentLaunches.push({ step, options });
+        const prompt = String(options.prompt);
+        assert.match(prompt, /stage every resolved file before each git rebase --continue/);
+        assert.match(prompt, /Repeat through successive conflict pauses/);
+        if (!state.incomplete) {
+          for (const file of state.unmerged) { state.resolvedVersions[file] = state.versions.main; } port.git(['add', ...state.unmerged]);
+          port.git(['rebase', '--continue']);
+        }
+        return { agent: String(options.agent ?? 'pool-selected'), result: { status: 0 } };
+      },
+      selectAgent: () => 'pool-selected', workflowLauncherStatus: (_agent: string) => ({ supported: true, agent: _agent }),
+      applyAgentFallback: async () => 'codex', createPr: () => { state.pushes += 1; return { ok: true }; }, readToken: () => 'token',
+      resolveForgejoUser: (user: string | null) => user ?? 'tester', fetchReviewBranch: () => OK,
+      resolveTaskFile: () => ({ ok: true, taskFile: '/worktree/backlog/tasks/task-2672.md', task: {} }),
+      getTaskImplementer: () => 'codex', transitionTask: async () => undefined,
+      resolveReviewIdentity: () => ({ forgejoUser: 'tester' }),
+      readReviewState: () => ({ implementer: 'codex', status: 'active', metadata: {} }),
+      writeReviewState: () => undefined, persistReviewState: async () => undefined,
+      isForgejoReviewEnabled: () => true, formatVerificationCommand: () => 'npm test',
+      resolveConflictsForMission: () => {
+        state.classifyCall += 1;
+        const files = [...state.unmerged];
+        return { ok: true, conflictFiles: files, missionSpecificFiles: files.filter(f => f === HANDOFF), sharedFiles: files.filter(f => f !== HANDOFF) };
+      },
+      missionServices: () => Promise.resolve({ store: {} }),
+      exit: (code: number) => { exitCodes.push(code); },
+    };
+    return { port, lines, exitCodes, agentLaunches, state };
+  }
+  async function runSuccessive(h: ReturnType<typeof successiveConflictHarness>): Promise<void> {
+    const previous = setLogger({ log: (...parts: unknown[]) => h.lines.push(parts.join(' ')) });
+    try { await new RebaseCommandUseCase(h.port).execute(['task-2672', '--push']); } finally { setLogger(previous); }
+  }
+  test('TASK-2672: a second conflict after a mission conflict is rediscovered and resolved, not stopped (TASK-2668.02)', async () => {
+    const h = successiveConflictHarness();
+    await runSuccessive(h);
+    assert.deepEqual(h.exitCodes, [0], 'rebase completes after resolving every successive conflict');
+    const resolutionLaunches = h.agentLaunches.filter((l) => l.step === 'conflict-resolution');
+    assert.ok(resolutionLaunches.length >= 1,
+      'the resolver must launch for the rediscovered package.json/package-lock.json conflicts');
+    assert.deepEqual(h.state.continueSets, [[HANDOFF], [PKG, PKGLCK]], 'each full conflict set staged before continue');
+    assert.deepEqual(h.port.detectRebaseState('/worktree'), { inProgress: false, unmergedFiles: [] });
+    assert.deepEqual(h.state.versions, { main: '1.5.283', mission: '1.5.282' }); assert.deepEqual(h.state.resolvedVersions, { [PKG]: '1.5.283', [PKGLCK]: '1.5.283' }); assert.equal(h.state.pushes, 1);
+  });
+  test('TASK-2672: successive-conflict recovery still fails closed when the continue budget is exhausted (TASK-2668.02)', async () => {
+    const h = successiveConflictHarness();
+    let continueCalls = 0;
+    h.port.git = (args: string[]) => {
+      const tail = subcommand(args);
+      if (tail[0] === 'rebase' && tail[1] === 'main') { h.state.inProgress = true; return { status: 1, stdout: '', stderr: `CONFLICT (content): Merge conflict in ${HANDOFF}\n` }; }
+      if (tail[0] === 'rebase' && tail[1] === '--continue') { continueCalls += 1; return { status: 1, stdout: '', stderr: 'pre-commit hook failed' }; }
+      if (tail[0] === 'rebase' && tail[1] === '--show-current') { return { status: 0, stdout: 'mission/task-2672', stderr: '' }; }
+      if (tail[0] === 'checkout' || tail[0] === 'add') { return OK; }
+      if (tail[0] === 'status' && tail[1] === '--porcelain') { return { status: 0, stdout: '', stderr: '' }; }
+      return OK;
+    };
+    h.port.missionServices = null;
+    h.port.detectRebaseState = () => ({ inProgress: h.state.inProgress, unmergedFiles: [] });
+    h.port.resolveConflictsForMission = () => ({ ok: true, conflictFiles: [HANDOFF], missionSpecificFiles: [HANDOFF], sharedFiles: [] });
+    await runSuccessive(h);
+    assert.equal(continueCalls, 3, 'the finite continue budget is preserved across successive conflicts');
+    assert.ok(h.exitCodes.some((c) => c !== 0), 'budget exhaustion fails closed');
+    assert.match(h.lines.join('\n'), /after 3 failed --continue attempt/, 'reports the exhausted continue budget');
+  });
+  for (const filesRemain of [true, false]) { test(`TASK-2672: zero resolver exit with unfinished re-entry cannot publish (unmerged=${filesRemain})`, async () => {
+    const h = successiveConflictHarness();
+    h.state.incomplete = true;
+    if (!filesRemain) { const launch = h.port.startAgent; h.port.startAgent = async (step, options) => { const result = await launch(step, options); h.state.unmerged = []; return result; }; }
+    await runSuccessive(h);
+    assert.deepEqual(h.exitCodes, [1]);
+    assert.deepEqual(h.state.unmerged, filesRemain ? [PKG, PKGLCK] : []);
+    assert.equal(h.state.inProgress, true);
+    assert.equal(h.state.pushes, 0);
+    if (filesRemain) { assert.match(h.lines.join('\n'), /Unmerged: package-lock.json/); }
+    assert.match(h.lines.join('\n'), /git rebase --continue/);
+    assert.doesNotMatch(h.lines.join('\n'), /completed conflict resolution/);
+  }); }
 });
 
 test('rebase continuation and recovery policy need only observed facts (TASK-2668.07)', () => {

@@ -1,18 +1,18 @@
 ---
-id: TASK-2686
-title: ensure review rounds are not blinking when they are not worked on
+id: TASK-2693
+title: add possibility to add missions in backlog state directly in parallix
 status: backlog
 assignee: []
-created_date: '2026-10-08 05:36'
+created_date: '2026-10-08 16:49'
 labels: []
 dependencies: []
-ordinal: 191008
+ordinal: 197008
 ---
 
 ## Description
 
 <!-- SECTION:DESCRIPTION:BEGIN -->
-currently in web the blinking indicator for review rounds are blinking even when the rounds are not being worked on, sometimes even when the whole mission is not being worked on. Ensure the review rounds are only blinking when a review round is actually worked on.
+ensure there is a create new mission button and the dialog holds the same quality as backlog.md on the functionality parallix supports. Dependencies should be a dropdown though on missions not yet done (so its easier than backlog.md)
 <!-- SECTION:DESCRIPTION:END -->
 
 ## Definition of Done

@@ -342,7 +342,10 @@ test('unit-test CPU guard: suite budget enforcement fails when exceeded', () => 
 // Integration CPU limits include waited command trees, unlike process.cpuUsage().
 function runIntegrationCpuFixture(source: string, extraEnv: Record<string, string> = {}) {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'integration-cpu-proof-'));
-  const file = path.join(directory, 'probe.test.ts');
+  // These probes contain only JavaScript. Loading tsx adds background loader
+  // CPU during the timed wait and can make an idle probe exceed its budget
+  // (TASK-2677); exercise the real CPU hook without that unrelated work.
+  const file = path.join(directory, 'probe.test.mjs');
   fs.writeFileSync(file, `import test from 'node:test';\nimport { spawnSync } from 'node:child_process';\n${source}\n`);
   const env: NodeJS.ProcessEnv = {
     ...process.env, NODE_NO_WARNINGS: '1',
@@ -354,7 +357,7 @@ function runIntegrationCpuFixture(source: string, extraEnv: Record<string, strin
   delete env.PARALLIX_TEST_CPU_PROFILE_DIR;
   try {
     return spawnSync(process.execPath, [
-      '--import', 'tsx', '--import', path.join(ROOT, 'test/lib/integration-cpu-hook.mjs'), '--test', file,
+      '--import', path.join(ROOT, 'test/lib/integration-cpu-hook.mjs'), '--test', file,
     ], { encoding: 'utf8', timeout: 20_000, env });
   } finally {
     fs.rmSync(directory, { recursive: true, force: true });

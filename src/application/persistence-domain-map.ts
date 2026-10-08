@@ -58,7 +58,7 @@ export const DOMAIN_CONCEPT_INVARIANTS: Readonly<
     invariant:
       'Checkpoint evidence from another mission is rejected, and a checkpoint that is not handoff-ready cannot be recorded; a same-named checkpoint replaces rather than accumulates.',
     fileLocation: 'src/domain/checkpoint.ts',
-    line: 45,
+    line: 55,
     anchor: 'export function recordCheckpoint',
   },
   Review: {
@@ -66,7 +66,7 @@ export const DOMAIN_CONCEPT_INVARIANTS: Readonly<
     invariant:
       'A reviewer decision is rejected unless the review is awaiting one, and request-changes is rejected without at least one identified finding carrying an id and summary.',
     fileLocation: 'src/domain/review.ts',
-    line: 670,
+    line: 752,
     anchor: 'export function applyReviewerCommand',
   },
   MissionOutcome: {

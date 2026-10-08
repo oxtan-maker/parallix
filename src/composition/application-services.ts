@@ -1,4 +1,5 @@
 import { createReviewClassification } from './review-classification.js';
+import type { ParallixConfiguration } from '../application/ports/configuration.js';
 import * as path from 'node:path';
 
 import { ExecuteMissionService } from '../application/execute-mission-service.js';
@@ -171,6 +172,8 @@ export interface OperatorApplicationServices {
 
 export interface ProductionApplicationServiceOptions {
   readonly includeOperatorState?: boolean;
+  /** Typed operator configuration resolved once at the composition root. */
+  readonly configuration: ParallixConfiguration;
 }
 
 function performHandoffWithMissionServices(mission: MissionApplicationServices) {
@@ -193,8 +196,8 @@ function performHandoffWithMissionServices(mission: MissionApplicationServices) 
  */
 export async function createProductionApplicationServices(
   rootDir: string,
-  activeProgress?: ProgressPort,
-  options: ProductionApplicationServiceOptions = {},
+  activeProgress: ProgressPort | undefined,
+  options: ProductionApplicationServiceOptions,
 ): Promise<ProductionApplicationServices> {
   const operatorState = options.includeOperatorState === false
     ? { db: null, migrations: null, blocklist: null, repositories: null, close: async () => {} }
@@ -254,7 +257,7 @@ export async function createProductionApplicationServices(
       }),
     reviewLoopMechanisms: (reviewSlug: string, target: ReviewLoopTarget, bindings: ReviewLoopBindings = {}) => createReviewLoopPorts(reviewSlug, target, {
       ...bindings,
-      classification: createReviewClassification(reviewSlug, target.worktree ?? rootDir),
+      classification: createReviewClassification(reviewSlug, target.worktree ?? rootDir, options.configuration.decision),
       performHandoffFn: handoffWithMissionServices!,
       ...reviewLoopBindings(mission.store, mission.lifecycle, sessionMarkerPort),
     }),
@@ -288,7 +291,7 @@ export async function createProductionApplicationServices(
       currentWork,
       activeProgress,
       operatorState.db as SqliteDatabaseAdapter,
-      {},
+      { configuration: options.configuration },
       mission ? createBoardIntegrateService(mission, currentWork) : undefined,
     )
     : null;

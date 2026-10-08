@@ -14,6 +14,7 @@ import { missionId } from '../../../src/domain/mission.js';
 import { repositoryId } from '../../../src/domain/repository.js';
 import { makeExecutePorts } from '../../fixtures/execute-mission-ports.js';
 import { mkdtemp as registeredMkdtemp } from '../../helpers/temp-dir.js';
+import { resolveConfiguration } from '../../../src/composition/config.js';
 
 // ---------------------------------------------------------------------------
 // TASK-2454 — the board's Draft button fails when the backlog card it targets
@@ -98,7 +99,7 @@ async function dispatchBoardDraft(launchedFrom: string, slug: string) {
     const { ports } = makeExecutePorts();
     const capabilities = composeProductionCapabilities(
       launchedFrom, REPOSITORY, repositories, ports, store, NO_CURRENT_WORK_PORT,
-      undefined, undefined, { draftAdapterDeps: deps },
+      undefined, undefined, { configuration: resolveConfiguration({}), draftAdapterDeps: deps },
     );
     // No intake first: this is a plain backlog card straight off the board.
     assert.equal((await store.load(missionId(slug))).kind, 'missing', 'the card is pre-draft');
@@ -203,7 +204,7 @@ test('board Draft on a pre-draft backlog card completes and runs the whole draft
     const { ports } = makeExecutePorts();
     const capabilities = composeProductionCapabilities(
       MISSION_WORKTREE, REPOSITORY, repositories, ports, store, NO_CURRENT_WORK_PORT,
-      undefined, undefined, { draftWorkflow },
+      undefined, undefined, { configuration: resolveConfiguration({}), draftWorkflow },
     );
     const result = await capabilities.commandController.dispatch({
       operationId: 'task-2454-outcome',

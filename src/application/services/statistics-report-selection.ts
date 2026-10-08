@@ -1,11 +1,11 @@
-import { selectBugTrend, type BugTrendWeek } from './statistics-bug-trend.js';
+import { selectBugTrend, type BugTrendPeriod } from './statistics-bug-trend.js';
 import type { StatsMissionFlow } from '../ports/cli-workflows.js';
-import { weeklyDecisionWindows } from './decision-window.js';
+import { weeklyDecisionWindows, reportingWindowContains, type ReportingWindow } from '../../domain/decision-window.js';
 import { createRangeWindow } from './statistics-row.js';
 import { statisticsMissionKey, statisticsRowInWindow, type StatisticsRow } from './statistics-service.js';
 
 export interface StatsReportWindow<Row extends StatisticsRow = StatisticsRow> {
-  readonly window: { readonly start: Date; readonly end: Date; readonly label: string };
+  readonly window: ReportingWindow & { readonly label: string };
   readonly windowedRows: readonly Row[];
   readonly completedRows: readonly Row[];
   readonly completedMissions: readonly Row[];
@@ -14,27 +14,22 @@ export interface StatsReportWindow<Row extends StatisticsRow = StatisticsRow> {
 }
 
 export interface StatsReportSelection<Row extends StatisticsRow = StatisticsRow> {
-  readonly bugTrend: readonly BugTrendWeek[] | null;
+  readonly bugTrend: readonly BugTrendPeriod[] | null;
   readonly current: StatsReportWindow<Row>;
   readonly previous?: StatsReportWindow<Row>;
 }
 
-/** Select lifecycle completions by closure day, telemetry spend by measurement day. */
+/** Select lifecycle completions by canonical delivery day, telemetry spend by measurement day. */
 export function selectStatsReport<Row extends StatisticsRow>(
   rows: readonly Row[],
   missionFlow: readonly StatsMissionFlow[] | null,
-  request: { readonly mode: 'weekly' | 'range'; readonly today?: string | Date; readonly from?: string; readonly to?: string },
+  request: { readonly mode: 'weekly' | 'range'; readonly today?: string | Date; readonly from?: string; readonly to?: string; readonly timeZone?: string },
 ): StatsReportSelection<Row> {
   const windows = request.mode === 'weekly'
-    ? weeklyDecisionWindows(request.today ?? new Date())
-    : { current: createRangeWindow({ from: request.from, to: request.to }), previous: undefined };
+    ? weeklyDecisionWindows(request.today ?? new Date(), request.timeZone)
+    : { current: createRangeWindow({ from: request.from, to: request.to, timeZone: request.timeZone }), previous: undefined };
   const select = (window: StatsReportWindow<Row>['window']): StatsReportWindow<Row> => {
-    const start = window.start.toISOString().slice(0, 10);
-    const end = window.end.toISOString().slice(0, 10);
-    const outcomes = (missionFlow ?? []).filter(outcome => {
-      const day = outcome.closedAt.slice(0, 10);
-      return Number.isFinite(Date.parse(outcome.closedAt)) && day >= start && day <= end;
-    });
+    const outcomes = (missionFlow ?? []).filter(outcome => reportingWindowContains(window, outcome.closedAt));
     const completedMissionKeys = new Set(outcomes.map(statisticsMissionKey));
     const completedMissionOwners = new Map((missionFlow ?? []).map(outcome => [
       statisticsMissionKey(outcome), outcome.implementer ?? null,
@@ -58,5 +53,9 @@ export function selectStatsReport<Row extends StatisticsRow>(
       },
     };
   };
-  return { bugTrend: selectBugTrend(missionFlow, windows.previous?.start ?? windows.current.start, windows.current.end), current: select(windows.current), previous: windows.previous ? select(windows.previous) : undefined };
+  const periods = [windows.current, ...(windows.previous ? [windows.previous] : [])];
+  return {
+    bugTrend: missionFlow === null ? null : periods.flatMap(window => selectBugTrend(missionFlow, window.start, window.end, window.timeZone) ?? []),
+    current: select(windows.current), previous: windows.previous ? select(windows.previous) : undefined,
+  };
 }
