@@ -45,6 +45,18 @@ export interface LaneTransitionEvent {
   readonly idempotencyKey: string;
 }
 
+/** A transition store refused an already-recorded lane-event identity. */
+export class DuplicateLaneEventError extends Error {
+  readonly kind = 'duplicate-lane-event';
+  readonly idempotencyKey: string;
+
+  constructor(idempotencyKey: string) {
+    super(`Duplicate idempotency key: ${idempotencyKey}`);
+    this.name = 'DuplicateLaneEventError';
+    this.idempotencyKey = idempotencyKey;
+  }
+}
+
 /**
  * Derive the `trigger` (MissionCommand type) from a from→to transition.
  *

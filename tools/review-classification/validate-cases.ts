@@ -6,11 +6,11 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { performance } from 'node:perf_hooks';
 import { buildEvidencePacket, PACKET_VERSION, PROMPT_VERSION } from '../../src/application/review-classification/evidence-packet.js';
-import { classifyRepeatFindings, ROUTING_POLICY_VERSION } from '../../src/application/review-classification/routing-policy.js';
+import { classifyFindings, ROUTING_POLICY_VERSION } from '../../src/application/review-classification/routing-policy.js';
 import { LEGACY_CLASSIFIER_POLICY_VERSION } from '../../src/domain/classifier-review.js';
 import { GitReviewEvidence } from '../../src/adapters/review/review-evidence.js';
 import { createDecisionPort } from '../../src/composition/decision.js';
-import type { RepeatFindingEvidence } from '../../src/application/ports/review-evidence.js';
+import type { ReviewFindingEvidence } from '../../src/application/ports/review-evidence.js';
 
 const args = process.argv.slice(2);
 const argument = (name: string) => args.includes(name) ? args[args.indexOf(name) + 1] : undefined;
@@ -23,7 +23,7 @@ if (path.resolve(outputPath).startsWith(`${process.cwd()}${path.sep}`)) {
   throw new Error('Experiment output must stay outside the repository');
 }
 const inputText = await fs.readFile(inputPath, 'utf8');
-const input = JSON.parse(inputText) as { selection: string; cases: { id: string; expected: string; input: RepeatFindingEvidence }[] };
+const input = JSON.parse(inputText) as { selection: string; cases: { id: string; expected: string; input: ReviewFindingEvidence }[] };
 const hash = (text: string) => createHash('sha256').update(text).digest('hex');
 const execute = promisify(execFile);
 const resolve = async (revision: string) => (await execute('git', ['rev-parse', '--verify', `${revision}^{commit}`],
@@ -53,8 +53,8 @@ for (const item of input.cases) {
         (row.calls as Record<string, unknown>[]).push(call);
         try {
           const response = await decision.decide(packet.request);
-          const selected = classifyRepeatFindings(response);
-          const legacy = classifyRepeatFindings(response, LEGACY_CLASSIFIER_POLICY_VERSION);
+          const selected = classifyFindings(response);
+          const legacy = classifyFindings(response, LEGACY_CLASSIFIER_POLICY_VERSION);
           call.response = response; call.route = selected.route; call.legacyRoute = legacy.route;
           call.agrees = selected.route === 'reviewer' ? null
             : selected.route === 'clear' ? item.expected === 'approved' : item.expected === 'changes-requested';

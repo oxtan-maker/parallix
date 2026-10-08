@@ -1,3 +1,4 @@
+import { REVIEW_PHASES as VALID_PHASES, normalizeReviewPhase, reviewPhaseTransition } from '../../domain/review-phase-policy.js';
 /**
  * Reviewer-family persistence for the autonomous review loop.
  *
@@ -593,63 +594,7 @@ export async function backfillReviewFromLegacyState(
  * Manager class for mission review state.
  * Expanded to include phase, disposition, and metadata for canonical state ownership.
  */
-export const VALID_PHASES = ['reviewing', 'fixing', 'pending-approval', 'approved'] as const;
-const PHASE_ALIASES = new Map<string, string>([
-  ['review', 'reviewing'],
-  ['rewiewing', 'reviewing'],
-  ['fix', 'fixing'],
-  ['pending_approval', 'pending-approval'],
-  ['pending approval', 'pending-approval']
-]);
-
-const PHASE_TRANSITIONS: Record<string, string[]> = {
-  'reviewing': ['fixing', 'approved'],
-  'fixing': ['reviewing', 'pending-approval'],
-  'pending-approval': ['reviewing'],
-  'approved': []
-};
-
-/** @param {string} disposition */
-function inferPhaseFromDisposition(disposition: string): string {
-  switch (String(disposition || '').trim().toUpperCase()) {
-  case 'APPROVED':
-    return 'approved';
-  case 'REQUEST_CHANGES':
-  case 'COMMENT':
-  case 'PUSHBACK_ALL':
-  case 'BLOCKED':
-  case 'PARKED':
-    return 'fixing';
-  case 'CHANGES_MADE':
-    return 'reviewing';
-  default:
-    return 'reviewing';
-  }
-}
-
-/** @param {string} phase @param {string} disposition */
-export function normalizeReviewPhase(phase: string, disposition: string): { phase: string; original: string | null; normalized: boolean } {
-  if (!phase) {
-    return { phase: 'reviewing', original: null, normalized: false };
-  }
-
-  const raw = String(phase).trim();
-  const canonical = raw.toLowerCase().replace(/[_\s]+/g, '-');
-  if ((VALID_PHASES as readonly string[]).includes(canonical)) {
-    return { phase: canonical, original: raw, normalized: canonical !== raw };
-  }
-
-  const alias = PHASE_ALIASES.get(raw.toLowerCase()) || PHASE_ALIASES.get(canonical);
-  if (alias) {
-    return { phase: alias, original: raw, normalized: true };
-  }
-
-  return {
-    phase: inferPhaseFromDisposition(disposition),
-    original: raw,
-    normalized: true
-  };
-}
+export { REVIEW_PHASES as VALID_PHASES, normalizeReviewPhase } from '../../domain/review-phase-policy.js';
 
 /** @typedef {{reviewer?: string, implementer?: string, round?: number, startedAt?: string, phase?: string, disposition?: string | null, metadata?: {[key: string]: unknown}}} ReviewStateData */
 export interface ReviewStateData {
@@ -722,11 +667,12 @@ export class ReviewState {
    * @returns {ReviewState}
    */
   transitionTo(nextPhase: string): ReviewState {
-    if (!(VALID_PHASES as readonly string[]).includes(nextPhase)) {
+    const transition = reviewPhaseTransition(this.phase, nextPhase);
+    if (!transition.valid) {
       throw new Error(`Invalid phase: "${nextPhase}". Valid: ${(VALID_PHASES as readonly string[]).join(', ')}`);
     }
-    const allowedArr = PHASE_TRANSITIONS[this.phase];
-    if (!allowedArr || !allowedArr.includes(nextPhase)) {
+    const allowedArr = transition.allowed;
+    if (!transition.permitted) {
       throw new Error(`Cannot transition from "${this.phase}" to "${nextPhase}". Allowed: ${(allowedArr || []).join(', ') || 'none'}`);
     }
     this.phase = nextPhase;

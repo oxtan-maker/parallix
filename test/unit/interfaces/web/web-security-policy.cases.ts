@@ -179,3 +179,21 @@ test('web security: asset path resolution rejects traversal and non-allowlisted 
   // Not a path at all.
   assert.equal(resolveAssetPath('assets/app.js', MANIFEST).result, 'reject');
 });
+
+test('terminal route fails closed when projection or reader is unavailable (TASK-2661)', async () => {
+  const { registerTerminalRoute } = await import('../../../../src/interfaces/web/terminal-route.js');
+  async function invoke(options: Parameters<typeof registerTerminalRoute>[1], params = { missionId: 'task-1' }) {
+    let handler: any;
+    registerTerminalRoute({ get: (_path: string, fn: any) => { handler = fn; } } as never, options);
+    let status = 0;
+    let body: any;
+    const reply = { code: (value: number) => { status = value; return reply; }, type: () => reply, send: (value: any) => { body = value; return reply; } };
+    await handler({ params }, reply);
+    return { status, body };
+  }
+  assert.equal((await invoke({})).status, 503);
+  assert.equal((await invoke({ buildProjection: async () => { throw new Error('offline'); } })).status, 503);
+  const buildProjection = async () => ({ stages: [{ cards: [{ id: 'task-1' }] }] }) as never;
+  assert.equal((await invoke({ buildProjection })).status, 404);
+  assert.equal((await invoke({ buildProjection }, {} as never)).status, 503);
+});

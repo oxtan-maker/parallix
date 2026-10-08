@@ -3,7 +3,7 @@
 import test, { describe } from 'node:test';
 import assert from 'node:assert/strict';
 import { runReviewLoop } from '../../../../src/application/review-loop/review-loop.js';
-import { renderReviewVerdict } from '../../../../src/adapters/review/review-loop-presentation.js';
+import { renderReviewLoopEvent, renderReviewVerdict } from '../../../../src/adapters/review/review-loop-presentation.js';
 import { reviewIndependence } from '../../../../src/adapters/review/review-loop-presentation.js';
 import type { ReviewLoopEvent } from '../../../../src/application/ports/review-loop-output.js';
 import type { ReviewerArtifactFacts } from '../../../../src/application/ports/review-round.js';
@@ -108,6 +108,17 @@ describe("review presentation", { concurrency: false }, () => {
 
 // Regression provenance: TASK-2351.
 describe('review independence and verdict output', () => {
+  test('classifier fallbacks say whether the classifier abstained, failed or was not used (TASK-2675)', () => {
+    const lines: string[] = [];
+    const output = { log: (line: string) => { lines.push(line); }, error: (line: string) => { lines.push(line); } };
+    for (const reason of ['abstention', 'classifier-publication-failed', 'opted-out']) {
+      renderReviewLoopEvent({ kind: 'reviewer-classification', reason }, output as never);
+    }
+    assert.match(lines[0], /Reviewer classifier abstained, continuing with general reviewer/);
+    assert.match(lines[1], /Reviewer classifier failed \(classifier-publication-failed\), continuing with general reviewer/);
+    assert.match(lines[2], /Reviewer classifier not used \(opted-out\), continuing with general reviewer/);
+  });
+
   test('review presentation classifies different-family and same-family fallback from agent-family identity', () => {
     assert.equal(reviewIndependence('claude', 'custom'), 'different-family review');
     assert.equal(reviewIndependence('claude', 'claude'), 'same-family fallback / self-review');

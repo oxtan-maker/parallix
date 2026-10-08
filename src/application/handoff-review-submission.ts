@@ -1,3 +1,4 @@
+import { isReviewerPoolExhausted } from '../domain/reviewer-assignment-policy.js';
 /**
  * Review submission for handoff: choose the reviewer, record legacy checkpoint
  * evidence, bind the review subject to the committed revision, and transition
@@ -21,10 +22,7 @@ import type { VerifiedCheckpointDocument } from './handoff-contract.js';
  * must propagate: silently reviewing your own work is not the right answer to
  * a machine that is misconfigured.
  */
-export function isReviewerPoolExhausted(error: unknown): boolean {
-  const message = (error instanceof Error ? error.message : String(error)) || '';
-  return message.includes('exhausted') || message.includes('No agents available');
-}
+export { isReviewerPoolExhausted } from '../domain/reviewer-assignment-policy.js';
 
 export class HandoffReviewSubmission {
   private readonly ports: HandoffWorkflowPorts;
@@ -115,7 +113,7 @@ export class HandoffReviewSubmission {
     // handoff re-records only when it verified a legacy checkpoint document.
     if (finalCheckpoint) {
     const checkpointName = path.basename(finalCheckpoint).replace(/\.md$/, '');
-    const nextActionMatch = checkpointContent.match(/^\s*(?:\*\*)?Next action(?:\*\*)?:\s*(.+)$/mi);
+    const nextActionMatch = checkpointContent.match(/^[ \t]*(?:\*\*)?Next action(?:\*\*)?:[ \t]*(.+)$/mi);
     const checkpointOutcome = await missionServices.checkpoints.record({
       operationId: `handoff-checkpoint-${slug}`,
       missionId: missionId(slug),

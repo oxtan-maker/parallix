@@ -6,7 +6,7 @@ import type {
   MissionVersion,
 } from '../../application/domain-ports.js';
 import { missionVersion } from '../../application/domain-ports.js';
-import type { LaneTransitionEvent } from '../../domain/board-event.js';
+import { DuplicateLaneEventError, type LaneTransitionEvent } from '../../domain/board-event.js';
 import type { MissionNelRecord } from '../../domain/net-engineering-lines.js';
 import { missionTitle, type Mission, type MissionId } from '../../domain/mission.js';
 import { missionBrief } from '../../domain/mission-brief.js';
@@ -59,6 +59,9 @@ export interface KnownRepositoryObservation {
   readonly lastAccessed: string;
 }
 
+/** Aggregates rehydrated per query batch; keeps the bound-parameter count well under SQLite's limit. */
+const LOAD_CHUNK = 400;
+
 /**
  * Relational SQLite adapter for the checked Mission aggregate.
  *
@@ -81,6 +84,8 @@ export class SqliteMissionStore implements MissionStore, MissionNelRecorder {
   private readonly eventRepo: SqliteBoardLaneEventRepository;
   /** Tail of the serialized aggregate-operation chain. */
   private aggregateQueue: Promise<unknown> = Promise.resolve();
+  /** Hydrated aggregates by repository and the `version` they were read at. */
+  private readonly missionsByRepository = new Map<string, Map<string, { readonly version: number; readonly mission: Mission }>>();
 
   constructor(private readonly db: SqliteDatabaseAdapter) {
     this.eventRepo = new SqliteBoardLaneEventRepository(db);
@@ -109,13 +114,36 @@ export class SqliteMissionStore implements MissionStore, MissionNelRecorder {
 
   async loadByRepository(repositoryId: RepositoryId): Promise<readonly Mission[]> {
     return this.enqueue(async () => {
-      const rows = await this.db.query<{ id: MissionId }>(
-        'SELECT id FROM missions WHERE repository_id = ? ORDER BY id',
+      // The board asks for every mission of the repository on every refresh. A
+      // mission's `version` moves on every aggregate write (any process), so
+      // one cheap id/version read decides which aggregates need rehydrating.
+      const current = await this.db.query<{ id: MissionId; version: number }>(
+        'SELECT id, version FROM missions WHERE repository_id = ? ORDER BY id',
         [repositoryId],
       );
-      const loaded = await Promise.all(rows.map(({ id }) => this.loadAggregate(id)));
-      return loaded.flatMap((result) => result.kind === 'found' ? [result.mission] : []);
+      const cache = this.repositoryCache(repositoryId);
+      const stale = current.filter(({ id, version }) => cache.get(id)?.version !== version);
+      const ids = new Set<string>(current.map(({ id }) => id));
+      for (const id of [...cache.keys()]) { if (!ids.has(id)) { cache.delete(id); } }
+      for (let start = 0; start < stale.length; start += LOAD_CHUNK) {
+        const chunk = stale.slice(start, start + LOAD_CHUNK).map(({ id }) => id);
+        const marks = chunk.map(() => '?').join(', ');
+        const loaded = await this.loadAggregates({ missions: `id IN (${marks})`, children: `mission_id IN (${marks})`, params: chunk });
+        for (const result of loaded) {
+          if (result.kind === 'found') { cache.set(result.mission.id, { version: result.version, mission: result.mission }); }
+        }
+      }
+      return current.flatMap(({ id }) => {
+        const entry = cache.get(id);
+        return entry === undefined ? [] : [entry.mission];
+      });
     });
+  }
+
+  private repositoryCache(repositoryId: RepositoryId): Map<string, { readonly version: number; readonly mission: Mission }> {
+    let cache = this.missionsByRepository.get(repositoryId);
+    if (cache === undefined) { cache = new Map(); this.missionsByRepository.set(repositoryId, cache); }
+    return cache;
   }
 
   async save(
@@ -142,15 +170,24 @@ export class SqliteMissionStore implements MissionStore, MissionNelRecorder {
   }
 
   private async loadAggregate(id: MissionId): Promise<MissionLoadResult> {
+    const [loaded] = await this.loadAggregates({ missions: 'id = ?', children: 'mission_id = ?', params: [id] });
+    return loaded ?? { kind: 'missing' };
+  }
+
+  /**
+   * Load every aggregate a scope selects with one query per table instead of
+   * one per table per mission. `missions` filters the `missions` table and
+   * `children` the child tables; both bind the same `params`.
+   */
+  private async loadAggregates(scope: { readonly missions: string; readonly children: string; readonly params: readonly string[] }): Promise<MissionLoadResult[]> {
+    const params = [...scope.params];
     const missionRows = await this.db.query<MissionRecord>(
       `SELECT id, repository_id, title, status, raw_status, assignee,
               net_engineering_lines, reproduction_test, predicted_nel_bucket, closed_at, version
-       FROM missions WHERE id = ?`,
-      [id],
+       FROM missions WHERE ${scope.missions} ORDER BY id`,
+      params,
     );
-    if (missionRows.length === 0) {
-      return { kind: 'missing' };
-    }
+    if (missionRows.length === 0) { return []; }
 
     const [
       labels,
@@ -171,31 +208,31 @@ export class SqliteMissionStore implements MissionStore, MissionNelRecorder {
     ] =
       await Promise.all([
         this.db.query<MissionLabelRecord>(
-          'SELECT mission_id, position, label FROM mission_labels WHERE mission_id = ? ORDER BY position',
-          [id],
+          `SELECT mission_id, position, label FROM mission_labels WHERE ${scope.children} ORDER BY mission_id, position`,
+          params,
         ),
-        this.db.query<MissionBriefRecord>('SELECT mission_id, goal, why_text, scope_text FROM mission_briefs WHERE mission_id = ?', [id]),
-        this.db.query<MissionBriefOutOfScopeRecord>('SELECT mission_id, position, entry FROM mission_brief_out_of_scope WHERE mission_id = ? ORDER BY position', [id]),
-        this.db.query<MissionDeclaredGateRecord>('SELECT mission_id, position, command FROM mission_declared_gates WHERE mission_id = ? ORDER BY position', [id]),
-        this.db.query<MissionSuccessCriterionRecord>('SELECT mission_id, position, criterion, completed FROM mission_success_criteria WHERE mission_id = ? ORDER BY position', [id]),
-        this.db.query<MissionDependencyRecord>('SELECT mission_id, position, depends_on_mission_id FROM mission_dependencies WHERE mission_id = ? ORDER BY position', [id]),
+        this.db.query<MissionBriefRecord>(`SELECT mission_id, goal, why_text, scope_text FROM mission_briefs WHERE ${scope.children}`, params),
+        this.db.query<MissionBriefOutOfScopeRecord>(`SELECT mission_id, position, entry FROM mission_brief_out_of_scope WHERE ${scope.children} ORDER BY mission_id, position`, params),
+        this.db.query<MissionDeclaredGateRecord>(`SELECT mission_id, position, command FROM mission_declared_gates WHERE ${scope.children} ORDER BY mission_id, position`, params),
+        this.db.query<MissionSuccessCriterionRecord>(`SELECT mission_id, position, criterion, completed FROM mission_success_criteria WHERE ${scope.children} ORDER BY mission_id, position`, params),
+        this.db.query<MissionDependencyRecord>(`SELECT mission_id, position, depends_on_mission_id FROM mission_dependencies WHERE ${scope.children} ORDER BY mission_id, position`, params),
         this.db.query<MissionCheckpointRecord>(
           `SELECT mission_id, position, checkpoint_mission_id, name, raw_filename,
                   first_line, next_action_text
-           FROM mission_checkpoints WHERE mission_id = ? ORDER BY position`,
-          [id],
+           FROM mission_checkpoints WHERE ${scope.children} ORDER BY mission_id, position`,
+          params,
         ),
         this.db.query<MissionGoalCheckRecord>(
           `SELECT mission_id, checkpoint_position, position, criterion, evidence
            FROM mission_checkpoint_goal_checks
-           WHERE mission_id = ? ORDER BY checkpoint_position, position`,
-          [id],
+           WHERE ${scope.children} ORDER BY mission_id, checkpoint_position, position`,
+          params,
         ),
         this.db.query<MissionReviewRecord>(
           `SELECT mission_id, intervention_requested_at, intervention_requested_by,
                   intervention_reason
-           FROM mission_reviews WHERE mission_id = ?`,
-          [id],
+           FROM mission_reviews WHERE ${scope.children}`,
+          params,
         ),
         this.db.query<MissionReviewRoundRecord>(
           `SELECT mission_id, position, round_number, change_kind, provider,
@@ -206,60 +243,86 @@ export class SqliteMissionStore implements MissionStore, MissionNelRecorder {
                   superseded_at, superseding_revision, superseded_by, responded_at, resulting_revision,
                   phase, disposition, reviewer_retry_count, implementer_retry_count,
                   implementer_response_content, item_dispositions, blocked_reason
-           FROM mission_review_rounds WHERE mission_id = ? ORDER BY position`,
-          [id],
+           FROM mission_review_rounds WHERE ${scope.children} ORDER BY mission_id, position`,
+          params,
         ),
         this.db.query<MissionReviewFindingRecord>(
           `SELECT mission_id, round_position, position, finding_id, summary, location
            FROM mission_review_findings
-           WHERE mission_id = ? ORDER BY round_position, position`,
-          [id],
+           WHERE ${scope.children} ORDER BY mission_id, round_position, position`,
+          params,
         ),
         this.db.query<MissionReviewResolutionRecord>(
           `SELECT mission_id, round_position, position, finding_id, kind, explanation
            FROM mission_review_resolutions
-           WHERE mission_id = ? ORDER BY round_position, position`,
-          [id],
+           WHERE ${scope.children} ORDER BY mission_id, round_position, position`,
+          params,
         ),
         this.db.query<MissionExternalTaskRefRecord>(
           `SELECT mission_id, source, external_id, url
-           FROM mission_external_task_refs WHERE mission_id = ?`,
-          [id],
+           FROM mission_external_task_refs WHERE ${scope.children}`,
+          params,
         ),
         this.db.query<MissionReviewStageLaunchRecord>(
           `SELECT mission_id, stage_key, position, fingerprint
            FROM mission_review_stage_launches
-           WHERE mission_id = ? ORDER BY stage_key, position`,
-          [id],
+           WHERE ${scope.children} ORDER BY mission_id, stage_key, position`,
+          params,
         ),
         this.db.query<MissionReviewEventRecord>(
           `SELECT mission_id, position, event_type, round_number, phase, actor,
                   content, disposition, verdict, item_dispositions, blocked_reason, followup_reference, created_at
            FROM mission_review_events
-           WHERE mission_id = ? ORDER BY position`,
-          [id],
+           WHERE ${scope.children} ORDER BY mission_id, position`,
+          params,
         ),
       ]);
 
-    const hydrated = hydrateMission({
-      mission: missionRows[0],
-      externalTaskRef: externalRefs[0] ?? null,
-      labels,
-      brief: briefs[0] ?? null,
-      briefOutOfScope,
-      declaredGates: gateRows,
-      successCriteria: criterionRows,
-      dependencies: dependencyRows,
-      checkpoints,
-      goalChecks,
-      review: reviews[0] ?? null,
-      reviewRounds,
-      findings,
-      resolutions,
-      stageLaunches,
-      reviewEvents,
-    });
-    return { kind: 'found', ...hydrated };
+    const byMission = <T extends { readonly mission_id: string }>(rows: readonly T[]) => {
+      const grouped = new Map<string, T[]>();
+      for (const row of rows) {
+        const group = grouped.get(row.mission_id);
+        if (group === undefined) { grouped.set(row.mission_id, [row]); } else { group.push(row); }
+      }
+      return (id: string): T[] => grouped.get(id) ?? [];
+    };
+    const labelsOf = byMission(labels);
+    const briefsOf = byMission(briefs);
+    const briefOutOfScopeOf = byMission(briefOutOfScope);
+    const gatesOf = byMission(gateRows);
+    const criteriaOf = byMission(criterionRows);
+    const dependenciesOf = byMission(dependencyRows);
+    const checkpointsOf = byMission(checkpoints);
+    const goalChecksOf = byMission(goalChecks);
+    const reviewsOf = byMission(reviews);
+    const roundsOf = byMission(reviewRounds);
+    const findingsOf = byMission(findings);
+    const resolutionsOf = byMission(resolutions);
+    const externalRefsOf = byMission(externalRefs);
+    const stageLaunchesOf = byMission(stageLaunches);
+    const reviewEventsOf = byMission(reviewEvents);
+
+    return missionRows.map((mission): MissionLoadResult => ({
+      kind: 'found',
+      ...hydrateMission({
+        mission,
+        externalTaskRef: externalRefsOf(mission.id)[0] ?? null,
+        labels: labelsOf(mission.id),
+        brief: briefsOf(mission.id)[0] ?? null,
+        briefOutOfScope: briefOutOfScopeOf(mission.id),
+        declaredGates: gatesOf(mission.id),
+        successCriteria: criteriaOf(mission.id),
+        dependencies: dependenciesOf(mission.id),
+        checkpoints: checkpointsOf(mission.id),
+        goalChecks: goalChecksOf(mission.id),
+        review: reviewsOf(mission.id)[0] ?? null,
+        reviewRounds: roundsOf(mission.id),
+        findings: findingsOf(mission.id),
+        resolutions: resolutionsOf(mission.id),
+        stageLaunches: stageLaunchesOf(mission.id),
+        reviewEvents: reviewEventsOf(mission.id),
+      }),
+    }));
   }
 
   /**
@@ -335,7 +398,7 @@ export class SqliteMissionStore implements MissionStore, MissionNelRecorder {
         idempotencyKey: event.idempotencyKey,
       });
       if (!appended) {
-        throw new Error(`Duplicate idempotency key: ${event.idempotencyKey}`);
+        throw new DuplicateLaneEventError(event.idempotencyKey);
       }
       await this.db.commitTransaction();
       return version;

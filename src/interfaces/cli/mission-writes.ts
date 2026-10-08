@@ -172,9 +172,11 @@ one with no evidence yet; \`unplan\` drops one that still has none. \`record\`
 writes a checkpoint's Goal Check evidence as durable Mission state, replacing
 the planned entry of the same --name (or earlier evidence for it) and keeping
 what it was planned to deliver. --criterion and --evidence are repeatable and
-pair up in the order given, so the counts must match. \`px status\` shows which
-checkpoints have evidence; the first without is where a relaunched agent
-resumes.
+pair up in the order given, so the counts must match. Each row must cite a
+repository-relative path, a quoted test name, a recognized command or an ADR,
+and the final planned checkpoint needs one row per success criterion; handoff
+applies the same checks. \`px status\` shows which checkpoints have evidence;
+the first without is where a relaunched agent resumes.
 `.trimStart();
 
 export const REPRO_HELP = `

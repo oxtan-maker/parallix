@@ -11,7 +11,7 @@
 
 import test, { describe } from 'node:test';
 import assert from 'node:assert/strict';
-import { blockedForMs, selectAgent, selectableAgents, type AgentSelectionSnapshot, agentFamily } from '../../../../src/domain/agents.js';
+import { AgentPoolExhaustedError, blockedForMs, selectAgent, selectableAgents, type AgentSelectionSnapshot, agentFamily } from '../../../../src/domain/agents.js';
 import { startAgent } from '../../../../src/adapters/agents/agents.js';
 import { resolveBlockContext } from '../../../../src/adapters/agents/agent-block-selection.js';
 import { PreparedAgentSelection } from '../../../../src/application/services/agent-selection.js';
@@ -51,6 +51,19 @@ describe('Domain agent selection', () => {
     assert.deepEqual(eligible, [codex]);
     assert.equal(chosen, codex);
     assert.equal((chosen as unknown as object) instanceof Promise, false);
+  });
+
+  test('empty pools report a typed exhaustion signal regardless of diagnostics (TASK-2668.04)', () => {
+    const unavailable = {
+      ...snapshot(),
+      agents: snapshot().agents.map((candidate) => ({ ...candidate, launcherAvailable: false })),
+    };
+    assert.throws(
+      () => selectAgent(unavailable, 'review'),
+      (error: unknown) => error instanceof AgentPoolExhaustedError
+        && error.step === 'review'
+        && error.message === 'No available agent for step review',
+    );
   });
 
   test('preferred family and configured future families are supported', () => {
@@ -130,7 +143,7 @@ describe("Workflow selection excludes runtime-blocked families", () => {
             excludeSets.push(new Set(exclude));
             const pool = eligible.filter((candidate) => !exclude.includes(candidate));
             if (pool.length === 0) {
-              throw new Error(`All eligible agents for step "draft" are exhausted (limit-hit or excluded).`);
+              throw new AgentPoolExhaustedError(step, 'pool unavailable');
             }
             return pool[0];
           },
@@ -197,7 +210,7 @@ describe("Workflow selection excludes runtime-blocked families", () => {
             const exclude = options.exclude instanceof Set ? [...options.exclude] : [...options.exclude];
             const pool = ['qwen', 'claude'].filter((c) => !exclude.includes(c));
             if (pool.length === 0) {
-              throw new Error(`All eligible agents for step "draft" are exhausted (limit-hit or excluded).`);
+              throw new AgentPoolExhaustedError(step, 'pool unavailable');
             }
             return pool[0];
           },
@@ -237,7 +250,7 @@ describe("Workflow selection excludes runtime-blocked families", () => {
           prompt: 'x',
           exclude: ['vibe', 'claude'],
           selectAgentFn: () => {
-            throw new Error(`All eligible agents for step "draft" are exhausted (limit-hit or excluded).`);
+            throw new AgentPoolExhaustedError('draft', 'pool unavailable');
           },
           launchAgentFn: async (launchDeps: any) => {
             realLoop.launched.push(launchDeps.env.FORGEJO_USER);

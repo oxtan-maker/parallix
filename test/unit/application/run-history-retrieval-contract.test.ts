@@ -139,3 +139,27 @@ test('retention keeps at most the TASK-2642 record budget per Mission, oldest re
   assert.equal(remaining.length, MAX_RUNS_PER_MISSION);
   assert.equal(remaining.includes('execute-codex-a1-old0'), false, 'the oldest run is retired');
 });
+
+test('recorded mission progress is scoped, bounded, rendered and explicitly non-live (TASK-2661)', async () => {
+  const { readRetainedMissionOutput } = await import('../../../src/adapters/filesystem/retained-mission-output.js');
+  const worktree = mkdtemp('px-retained-web-');
+  const rendered: string[] = [];
+  const renderer = { render: (_family: string, text: string) => { rendered.push(text); return 'readable Claude progress'; } };
+  try {
+    assert.equal(readRetainedMissionOutput(worktree, 'task-9', renderer), null);
+    const capture = open(worktree, { identity: agentRunIdentity({ repositoryKey: 'abc123', missionId: 'task-9', role: 'review', family: 'claude', attempt: 1, startedAtMs: clock + 1000 }) });
+    capture.write('stdout', Buffer.from('x'.repeat(MAX_RUN_SHOW_BYTES) + '\n{"message":"final progress"}\n'));
+    capture.write('stderr', Buffer.from('diagnostic\n'));
+    capture.finish({ exitCode: 0, signal: null });
+    const output = readRetainedMissionOutput(worktree, 'task-9', renderer);
+    assert.equal(output?.kind, 'captured');
+    assert.match(output!.message, /review \/ claude.*ended.*not a live terminal/);
+    assert.match(output!.output, /stdout \(run:.*readable Claude progress/s);
+    assert.match(output!.output, /stderr \(run:.*diagnostic/s);
+    assert.deepEqual(rendered, ['{"message":"final progress"}\n']);
+    assert.equal(readRetainedMissionOutput(worktree, 'task-10', renderer), null);
+    const empty = open(worktree);
+    empty.finish({ exitCode: 0, signal: null });
+    assert.equal(readRetainedMissionOutput(worktree, 'task-9', renderer)?.kind, 'captured', 'empty newest run falls back to output-bearing history');
+  } finally { fs.rmSync(worktree, { recursive: true, force: true }); }
+});

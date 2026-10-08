@@ -105,7 +105,10 @@ function candidateNodeExecutables(): string[] {
   for (const dir of String(process.env.PATH || '').split(path.delimiter)) {
     if (dir) { candidates.push(path.join(dir, process.platform === 'win32' ? 'node.exe' : 'node')); }
   }
-  const nvmRoot = path.join(process.env.NVM_DIR || path.join(os.homedir(), '.nvm'), 'versions', 'node');
+  // Use the OS user's real home (from /etc/passwd), not os.homedir(): the
+  // HOME env var is clobbered to a throwaway temp dir by sandboxed test
+  // fixtures, which would hide a real nvm install under the user's true home.
+  const nvmRoot = path.join(process.env.NVM_DIR || path.join(os.userInfo().homedir, '.nvm'), 'versions', 'node');
   try {
     // Newest first: v26 must win over v25 when both are installed.
     for (const version of fs.readdirSync(nvmRoot).sort().reverse()) {

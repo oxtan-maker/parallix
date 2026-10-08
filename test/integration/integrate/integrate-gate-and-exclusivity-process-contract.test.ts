@@ -18,26 +18,14 @@ describe("verify-local integrate gate", () => {
   const scriptPath = path.join(repoRoot, 'scripts', 'verify-local.sh');
 
   function runScript(args, env = {}) {
-    const stdoutPath = path.join(os.tmpdir(), `verify-local-stdout-${process.pid}-${Date.now()}.log`);
-    const stderrPath = path.join(os.tmpdir(), `verify-local-stderr-${process.pid}-${Date.now()}.log`);
-    const stdoutFd = fs.openSync(stdoutPath, 'w');
-    const stderrFd = fs.openSync(stderrPath, 'w');
-    let result;
-    try {
-      result = childProcess.spawnSync(scriptPath, args, {
-        cwd: repoRoot,
-        env: { ...process.env, ...env },
-        encoding: 'utf8',
-        stdio: ['ignore', stdoutFd, stderrFd]
-      });
-    } finally {
-      fs.closeSync(stdoutFd);
-      fs.closeSync(stderrFd);
-    }
-    result.stdout = fs.existsSync(stdoutPath) ? fs.readFileSync(stdoutPath, 'utf8') : '';
-    result.stderr = fs.existsSync(stderrPath) ? fs.readFileSync(stderrPath, 'utf8') : '';
-    fs.rmSync(stdoutPath, { force: true });
-    fs.rmSync(stderrPath, { force: true });
+    // These dry-run and stubbed-gate contracts keep output small. Capture it
+    // directly instead of writing, reopening, reading, and deleting two files
+    // for every invoked gate plan.
+    const result = childProcess.spawnSync(scriptPath, args, {
+      cwd: repoRoot,
+      env: { ...process.env, ...env },
+      encoding: 'utf8',
+    });
     if (result.error && result.status === null) {
       throw result.error;
     }
@@ -47,9 +35,13 @@ describe("verify-local integrate gate", () => {
   function staticAnalysisStubEnv(tmpDir, npxStatus = 0) {
     const binDir = path.join(tmpDir, 'bin');
     const nodePath = path.join(binDir, 'node');
+    const eslintJsonPath = path.join(tmpDir, 'eslint.json');
+    const baseline = JSON.parse(fs.readFileSync(path.join(repoRoot, 'config', 'lint-baseline.json'), 'utf8')) as Record<string, number>;
+    const messages = Object.entries(baseline).flatMap(([ruleId, count]) => Array.from({ length: count }, () => ({ ruleId })));
     fs.mkdirSync(binDir);
+    fs.writeFileSync(eslintJsonPath, JSON.stringify([{ messages }]));
     fs.writeFileSync(nodePath, `#!/bin/sh\nexec ${process.execPath} "$@"\n`);
-    fs.writeFileSync(path.join(binDir, 'npx'), `#!/bin/sh\nexit ${npxStatus}\n`);
+    fs.writeFileSync(path.join(binDir, 'npx'), `#!/bin/sh\ncat ${eslintJsonPath}\nexit ${npxStatus}\n`);
     fs.writeFileSync(path.join(binDir, 'npm'), '#!/bin/sh\nexit 0\n');
     fs.chmodSync(nodePath, 0o755);
     fs.chmodSync(path.join(binDir, 'npx'), 0o755);

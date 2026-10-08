@@ -41,12 +41,16 @@ import { CONTINUE_SKIP_CHECK_TIMEOUT_MS, runPreReviewGate, gateFailureReason, ho
 import { persistNormalizedPhaseRepair, recordStageStatsSafe, stageLaunchSinceMs, maybeUpdateGraphifyBeforeReview } from './review-agent-fallback.js';
 import { openReviewRound } from './review-round-open.js';
 import { createEvent, VALID_EVENT_TYPES } from './review-events.js';
+import { RevokeReviewDecisionUseCase } from '../../application/revoke-review-decision-use-case.js';
+import { createGitChangeIdentity } from '../git/change-identity.js';
+import { missionId } from '../../domain/mission.js';
+import { dismissProviderApproval } from './review-adapter.js';
 
 const MODULE_DIR = path.dirname(fileURLToPath(import.meta.url));
 
 /** The production review authority a composition root binds for one loop. */
 export interface ReviewLoopBindings {
-  readonly classification?: import('../../application/ports/review-classification.js').RepeatReviewClassificationPorts;
+  readonly classification?: import('../../application/ports/review-classification.js').ReviewClassificationPorts;
   readonly readReviewState?: (_slug: string, _worktree?: string, _store?: MissionStore | null) => Promise<ReviewState | null> | ReviewState | null;
   readonly writeReviewState?: typeof writeReviewState;
   readonly resetReviewState?: typeof resetReviewState;
@@ -319,6 +323,26 @@ export function createReviewLoopPorts(slug: string, target: ReviewLoopTarget, bi
       ? { handoff: async implementer => await bindings.performHandoffFn!(slug, { forgejoUser: implementer, worktree, recoverGateFailure: true }) as HandoffFacts }
       : null,
     provider: providerEnabled ? providerPort(slug, branch, worktree, target, log, error) : null,
+    approvalRevocation: missionStore && lifecycleService ? {
+      async revoke({ round, operator, reason }) {
+        const loaded = await missionStore.load(missionId(slug));
+        if (loaded.kind !== 'found') { return { ok: false, diagnostic: `mission ${slug} has no recorded review` }; }
+        // The human already dismissed or superseded the approval on the
+        // provider; a failed provider update is reported, not fatal.
+        const useCase = new RevokeReviewDecisionUseCase(missionStore, lifecycleService, {
+          async dismissApproval(mission, approvedRound, why) {
+            const decision = mission.review?.rounds.find(entry => entry.number === approvedRound)?.decision;
+            if (decision?.kind !== 'approved') { throw new Error('matching approval is not recorded'); }
+            dismissProviderApproval(branch, decision.decidedAt, why, { rootDir: worktree });
+          },
+        }, createGitChangeIdentity(worktree));
+        const outcome = await useCase.execute({
+          slug, round, reason, operator, occurredAt: new Date().toISOString(),
+          expectedVersion: loaded.version as unknown as number,
+        });
+        return outcome.status === 'completed' ? { ok: true } : { ok: false, diagnostic: outcome.error?.message ?? 'revocation was not recorded' };
+      },
+    } : null,
     humanFeedback: {
       async reconcile(state) {
         if (!providerEnabled) { return null; }
@@ -345,7 +369,12 @@ export function createReviewLoopPorts(slug: string, target: ReviewLoopTarget, bi
               findings: requested ? [{ id: `human-${comment.id || index + 1}`, summary: comment.body || 'Operator requested changes' }] : [],
             };
           });
-        const newFeedback = feedback.filter(item => !seen.has(item.source));
+        const unseen = feedback.filter(item => !seen.has(item.source));
+        // A current correction on an approved round is not handled yet (the
+        // loop stops for `px revoke-review`), so neither its audit note nor its
+        // source is recorded: both are durable and would hide it from a retry.
+        const deferred = (item: typeof feedback[number]) => state.phase === 'approved' && item.disposition === 'REQUEST_CHANGES' && item.state === 'current';
+        const newFeedback = unseen.filter(item => !deferred(item));
         const consumedSources = new Set([...seen, ...newFeedback.map(item => item.source)]);
         state.metadata.humanFeedbackSources = [...consumedSources];
         state.metadata.humanFeedbackHistory = feedback.map(item => ({ source: item.source, author: item.author, state: item.state, disposition: item.disposition, reason: item.reason }));
@@ -355,9 +384,9 @@ export function createReviewLoopPorts(slug: string, target: ReviewLoopTarget, bi
             followUpReference: `${item.source}; state=${item.state}`,
           }, { worktree, skipGit: true, missionStore, log, error });
         }
-        const currentRequest = [...newFeedback].reverse().find(item => item.disposition === 'REQUEST_CHANGES' && item.state === 'current');
+        const currentRequest = [...unseen].reverse().find(item => item.disposition === 'REQUEST_CHANGES' && item.state === 'current');
         if (currentRequest) {
-          const related = newFeedback.filter(item => item.disposition === 'REQUEST_CHANGES' && item.state === 'current' && item.reviewId === currentRequest.reviewId);
+          const related = unseen.filter(item => item.disposition === 'REQUEST_CHANGES' && item.state === 'current' && item.reviewId === currentRequest.reviewId);
           return { ...currentRequest, reason: related.map(item => item.reason).filter(Boolean).join('\n'), findings: related.flatMap(item => item.findings) };
         }
         // A dismissal is relevant only when the newest review decision is the

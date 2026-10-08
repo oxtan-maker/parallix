@@ -56,7 +56,7 @@ export class ReviewWorkflowAdapter implements ReviewWorkflowPort {
     if (await options.payloadLandedFn?.(slug)) { (options.error || fmt.log.plainError)(fmt.status('FAIL', `Mission ${slug} payload already landed on the base branch. Close it out with: px integrate ${slug} --recover-landed`)); (options.exit || process.exit)(1); return null; }
     return { slug, args, options };
   }
-  async verify(context: ReviewWorkflowContext): Promise<void> { const o = context.options as typeof this._defaults; (o.verifyReviewFn || verifyReview)(context.slug, context.args.includes('--no-gate'), { ...o, missionPath: flagValue(context.args, '--mission') || undefined }); }
+  async verify(context: ReviewWorkflowContext): Promise<void> { const o = context.options as typeof this._defaults; await (o.verifyReviewFn || verifyReview)(context.slug, context.args.includes('--no-gate'), { ...o, missionPath: flagValue(context.args, '--mission') || undefined }); }
   async submit(context: ReviewWorkflowContext): Promise<void> { const o = context.options as typeof this._defaults; await (o.submitForReviewFn || submitForReview)(context.slug, context.args.includes('--no-gate'), o); }
   async push(context: ReviewWorkflowContext): Promise<void> { const o = context.options as typeof this._defaults; await (o.pushRoundFn || pushRound)(context.slug, { ...o, force: context.args.includes('--force') }); }
   async start(context: ReviewWorkflowContext): Promise<void> {
@@ -93,7 +93,7 @@ export class ReviewWorkflowAdapter implements ReviewWorkflowPort {
   async readComments(context: ReviewWorkflowContext): Promise<void> { const o = context.options as typeof this._defaults; await (o.readCommentsFn || readComments)(context.slug, o); }
   async submitReview(context: ReviewWorkflowContext): Promise<void> { const o = context.options as typeof this._defaults; const outcome = flagValue(context.args, '--submit-review'); if (!outcome) { (o.error || fmt.log.plainError)(fmt.status('FAIL', '--submit-review requires an outcome: px review <slug> --submit-review <approve|request-changes|comment> [--message "<summary>"|--message-file <path>]')); (o.exit || process.exit)(1); return; } await (o.submitReviewRoundFn || submitReviewRound)(context.slug, outcome, readTextFlag(context.args, '--message', '--message-file', 'review message', o) || '', o); }
   async close(context: ReviewWorkflowContext): Promise<void> { const o = context.options as typeof this._defaults; await (o.closeMissionPrFn || closeMissionPr)(context.slug, o); }
-  async createEvent(context: ReviewWorkflowContext): Promise<void> { createEventHandler(context.slug, context.args, context.options); }
+  async createEvent(context: ReviewWorkflowContext): Promise<void> { await createEventHandler(context.slug, context.args, context.options); }
   async importLegacy(context: ReviewWorkflowContext): Promise<void> { importLegacyHandler(context.slug, context.args, context.options); }
   async backfillReview(context: ReviewWorkflowContext): Promise<void> { await backfillReviewHandler(context.slug, context.args, context.options); }
   async reconcileReview(context: ReviewWorkflowContext): Promise<void> { await reconcileInterruptedHandoffHandler(context.slug, context.args, context.options); }

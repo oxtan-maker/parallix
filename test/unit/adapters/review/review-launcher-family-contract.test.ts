@@ -16,6 +16,7 @@ import {
 import { selectReviewer } from '../../../../src/application/review-loop/reviewer-selection.js';
 import type { ReviewerRoutingPort } from '../../../../src/application/ports/review-round.js';
 import { resolveHandoffReviewAssignment } from '../../../../src/adapters/cli/commands/handoff.js';
+import { AgentPoolExhaustedError } from '../../../../src/domain/agents.js';
 import { mkdtemp as registeredMkdtemp } from '../../../helpers/temp-dir.js';
 
 // Regression provenance: TASK-2335.
@@ -94,7 +95,7 @@ test('handoff uses same-family reviewer only when cross-family selection is exha
   const assignment = resolveHandoffReviewAssignment('codex', {
     eligibleAgentsForStepFn: () => ['codex'],
     selectAgentFn: () => {
-      throw new Error('All eligible agents for step "review" are exhausted');
+      throw new AgentPoolExhaustedError('review', 'cross-family reviewer pool exhausted');
     }
   });
 

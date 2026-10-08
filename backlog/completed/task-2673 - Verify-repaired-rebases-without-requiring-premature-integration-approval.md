@@ -1,8 +1,8 @@
 ---
 id: TASK-2673
 title: Verify repaired rebases without requiring premature integration approval
-status: backlog
-assignee: []
+status: done
+assignee: [codex]
 created_date: '2026-10-06 18:41'
 labels:
   - bug

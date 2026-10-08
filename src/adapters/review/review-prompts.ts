@@ -178,7 +178,7 @@ export function buildCompletedControlsBlock(missionPath: string, repoRoot?: stri
   if (configured.preReview.length > 0) {
     lines.push(`  - Configured preReview gates NOT yet run (they run on approve, after this review): ${renderGates(configured.preReview)}.`);
   }
-  lines.push('  - Handoff already validated every checkpoint Goal Check table for structure and for a verifiable evidence reference per row.');
+  lines.push('  - Handoff checked only the final checkpoint: every Goal Check row cites a resolvable reference (repository-relative path, quoted test name, recognized command, or ADR), and recorded evidence has at least one row per success criterion with every criterion marked complete. It did not check that the evidence proves its criterion.');
   // TASK-2521.03: this block reports controls the workflow actually executed.
   // It used to claim the red-to-green reproduction gate "already ran" whenever a
   // `Reproduction-Test:` line existed in the mission document — a claim derived

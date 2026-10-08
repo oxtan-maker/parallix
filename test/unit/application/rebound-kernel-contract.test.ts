@@ -1,3 +1,4 @@
+import { transientRetryAllowed, reboundRequiresHuman, repairStrategy, launchRecoveryAction, repairBudgetAllows, reboundExhaustion } from '../../../src/domain/rebound-policy.js';
 // Historical regression provenance: TASK-2413, TASK-2369.13, TASK-2492.
 // Rebound kernel contract: the single repair loop (classification, per-occurrence budget, fix prompts,
 // root-failure dossier, output elision) shared by every automatic bounce.
@@ -928,4 +929,26 @@ describe("Integration gate rebound —", () => {
     // and a later resume starts with the full budget again.
     assert.equal(INTEGRATION_GATE_REBOUND_ATTEMPTS_PER_INVOCATION, 2);
   });
+});
+
+test('rebound domain preserves transient and launch budgets without doubles (TASK-2668.07)', () => {
+  const reason = { ...gateReason, transient: true, environment: true };
+  const classification = classifyReboundReason(reason);
+  assert.equal(reboundRequiresHuman(reason, classification), false);
+  assert.equal(transientRetryAllowed(reason, 1, 1), true);
+  assert.equal(transientRetryAllowed(reason, 2, 1), false);
+  assert.equal(reboundRequiresHuman(reason, classification, true), true);
+  assert.equal(reboundRequiresHuman({ ...reason, environment: false }, classification, true), false);
+  assert.deepEqual([repairStrategy(1), repairStrategy(2)], ['targeted', 'fresh-diagnostic']);
+  assert.equal(repairBudgetAllows(2, 2), true);
+  assert.equal(repairBudgetAllows(3, 2), false);
+  assert.equal(reboundExhaustion(classification, 2, 2), 'repair-budget');
+  assert.equal(reboundExhaustion(classification, 1, 2), 'launcher-budget');
+  assert.equal(reboundExhaustion({ ...classification, isRelaunchable: false }, 0, 2), 'human');
+  assert.equal(reboundRequiresHuman({ ...reason, environment: false }, { ...classification, isRelaunchable: false }, true), false);
+  assert.equal(launchRecoveryAction(true, false, 0, 0, 1), 'verify');
+  assert.equal(launchRecoveryAction(false, true, 0, 0, 1), 'skip');
+  assert.equal(launchRecoveryAction(false, false, 0, 0, 1), 'retry');
+  assert.equal(launchRecoveryAction(false, false, 0, 1, 1), 'stop');
+  assert.equal(launchRecoveryAction(false, false, 1, 0, 1), 'stop');
 });

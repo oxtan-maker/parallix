@@ -44,6 +44,9 @@ Notes:
     cohort with too few completed missions is marked low-sample rather than
     presented as a comparable result. Run "px stats cohorts --help" for detail.
   - Workflow-owned stats datasets print the current/previous-week summary tables by default.
+  - Weekly and range reports include full UTC ISO weeks of bug-labeled Mission
+    counts and shares, a 3-week trailing average, and falling/rising/flat direction.
+    Empty weeks show no completions. Labels come from Mission state.
   - Use --from and --to together to print one inclusive arbitrary-range report.`);
 }
 

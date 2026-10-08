@@ -66,7 +66,7 @@ export const DOMAIN_CONCEPT_INVARIANTS: Readonly<
     invariant:
       'A reviewer decision is rejected unless the review is awaiting one, and request-changes is rejected without at least one identified finding carrying an id and summary.',
     fileLocation: 'src/domain/review.ts',
-    line: 687,
+    line: 670,
     anchor: 'export function applyReviewerCommand',
   },
   MissionOutcome: {
@@ -106,7 +106,7 @@ export const DOMAIN_CONCEPT_INVARIANTS: Readonly<
     invariant:
       'A lane transition is only recorded for a status pair the mission state machine owns; an unmodelled pair yields no trigger rather than a synthesised one.',
     fileLocation: 'src/domain/board-event.ts',
-    line: 65,
+    line: 77,
     anchor: 'export function triggerFromTransition',
   },
   AgentBlock: {
@@ -114,7 +114,7 @@ export const DOMAIN_CONCEPT_INVARIANTS: Readonly<
     invariant:
       'A block is time-bounded, indefinite, or absent; an expired `until` block yields zero remaining time and therefore stops excluding its family from selection.',
     fileLocation: 'src/domain/agents.ts',
-    line: 48,
+    line: 60,
     anchor: 'export function blockedForMs',
   },
 } as const;

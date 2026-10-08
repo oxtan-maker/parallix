@@ -207,7 +207,7 @@ export function buildTestRunPlan(options: TestRunPlanOptions): TestRunPlan {
   // silently inheriting GitHub-CI membership. Membership comes from the shared
   // selectTierFiles() authority (test/lib/test-tier-selection.ts, extracted
   // from here), never a glob.
-  const SUITE_FLAGS = new Set(['--integration', '--integration-ci', '--integration-local', '--unit-test-headroom']);
+  const SUITE_FLAGS = new Set(['--integration', '--integration-ci', '--integration-ci-all', '--integration-local', '--unit-test-headroom']);
   const requestedTestFiles = requestedArgs.filter(arg => !SUITE_FLAGS.has(arg));
   const requestedPaths = requestedTestFiles.map(file => path.resolve(executionRoot, file));
   // A focused selector must name a discovered suite exactly once (TASK-2638):
@@ -226,7 +226,11 @@ export function buildTestRunPlan(options: TestRunPlanOptions): TestRunPlan {
       throw new Error(`requested test file is selected twice: ${file}`);
     }
   }
-  const explicitCi = requestedArgs.includes('--integration-ci');
+  // `--integration-ci` is the early lane (suites at or under the declared CPU
+  // cutoff); `--integration-ci-all` is the full CI-safe population the GitHub
+  // push gate runs. Focused files may name any CI-safe suite in either.
+  const explicitCiAll = requestedArgs.includes('--integration-ci-all');
+  const explicitCi = requestedArgs.includes('--integration-ci') || explicitCiAll;
   const explicitLocal = requestedArgs.includes('--integration-local');
   const explicitIntegration = requestedArgs.includes('--integration') || explicitCi || explicitLocal;
   // Focused adapter contracts retain their actual CPU/timing profile, even
@@ -238,7 +242,7 @@ export function buildTestRunPlan(options: TestRunPlanOptions): TestRunPlan {
     && requestedPaths.every(file => tierFiles.integrationLocal.includes(file)));
   const runsIntegrationSuite = explicitIntegration || focusedIntegration;
   const enforcesUnitTestHeadroom = requestedArgs.includes('--unit-test-headroom');
-  const population = runsIntegrationCiSuite ? tierFiles.integrationCi
+  const population = runsIntegrationCiSuite ? (explicitCi && !explicitCiAll && requestedPaths.length === 0 ? tierFiles.integrationCiEarly : tierFiles.integrationCi)
     : runsIntegrationLocalSuite ? tierFiles.integrationLocal
       : runsIntegrationSuite ? tierFiles.allIntegration : tierFiles.unit;
   if (explicitIntegration && requestedPaths.some(file => !population.includes(file))) {

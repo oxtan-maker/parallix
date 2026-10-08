@@ -26,7 +26,7 @@ import type {
 } from '../../../../src/application/domain-ports.js';
 import { composeProductionCapabilities } from '../../../../src/composition/production-capabilities.js';
 import { agentFamily } from '../../../../src/domain/agents.js';
-import type { LaneTransitionEvent } from '../../../../src/domain/board-event.js';
+import { DuplicateLaneEventError, type LaneTransitionEvent } from '../../../../src/domain/board-event.js';
 import { intakeMission, missionId, missionLabels, type Mission } from '../../../../src/domain/mission.js';
 import { repositoryId } from '../../../../src/domain/repository.js';
 import {
@@ -86,7 +86,7 @@ class FakeMissionStore implements MissionTransitionStore {
     const key = (event as { idempotencyKey?: string }).idempotencyKey;
     if (key !== undefined) {
       if (this.idempotencyKeys.includes(key)) {
-        throw new Error(`Duplicate idempotency key: ${key}`);
+        throw new DuplicateLaneEventError(key);
       }
       this.idempotencyKeys.push(key);
     }

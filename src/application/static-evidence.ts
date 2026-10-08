@@ -1,4 +1,5 @@
 import * as path from 'node:path';
+import type { GoalCheckRow } from '../domain/checkpoint.js';
 
 /**
  * File-system shape the evidence helpers consume. Kept free of node:fs so this
@@ -67,7 +68,8 @@ export function collectRepoTestNames(fileSystem: EvidenceFileSystemPort, rootDir
     for (const entry of entries) {
       const fullPath = path.join(current, entry.name);
       if (entry.isDirectory()) { queue.push(fullPath); continue; }
-      if (!entry.isFile() || !/\.(?:test|spec)\.[cm]?[jt]sx?$/i.test(entry.name)) { continue; }
+      // Case modules (`*.cases.ts`) own test cases that a suite file imports.
+      if (!entry.isFile() || !/\.(?:test|spec|cases)\.[cm]?[jt]sx?$/i.test(entry.name)) { continue; }
       const testNamePattern = /\b(?:test|it)(?:\.\w+)?\s*\(\s*(['"`])([^'"`]+)\1/g;
       let match: RegExpExecArray | null;
       while ((match = testNamePattern.exec(fsReadText(fileSystem, fullPath) as string)) !== null) { names.add(match[2]); }
@@ -99,15 +101,46 @@ export function evidenceCellHasVerifiableReference(fileSystem: EvidenceFileSyste
     || hasCommandReference(fileSystem, cell, rootDir);
 }
 
+/**
+ * True when a candidate path walks above the repository root. A `..` segment
+ * that drops below the root escapes even if later segments re-enter the
+ * repository, so both the escape and the re-entrant escape are rejected.
+ */
+function pathEscapesRoot(candidatePath: string): boolean {
+  let depth = 0;
+  for (const segment of candidatePath.split(/[\\/]/)) {
+    if (segment === '..') { depth -= 1; if (depth < 0) { return true; } }
+    else if (segment !== '.' && segment !== '') { depth += 1; }
+  }
+  return false;
+}
+
+/**
+ * The repository file a cited path names, or null when it is absolute or
+ * escapes the repository: evidence must be reproducible from the checkout.
+ */
+function repositoryPath(rootDir: string, candidatePath: string): string | null {
+  if (path.isAbsolute(candidatePath) || pathEscapesRoot(candidatePath)) { return null; }
+  return path.resolve(rootDir, candidatePath);
+}
+
+function existsInRepository(fileSystem: EvidenceFileSystemPort, rootDir: string, candidatePath: string): boolean {
+  const resolved = repositoryPath(rootDir, candidatePath);
+  return resolved !== null && fsExistsSync(fileSystem, resolved);
+}
+
 function hasFileLineReference(fileSystem: EvidenceFileSystemPort, normalized: string, rootDir: string): boolean {
   const fileLinePattern = /(?:^|[\s(`])((?:\/|\.\/)?[\w./-]+\.[\w-]+):(\d+)(?:-\d+)?/g;
   let fileLineMatch: RegExpExecArray | null;
   while ((fileLineMatch = fileLinePattern.exec(normalized)) !== null) {
     const candidatePath = fileLineMatch[1];
-    const resolved = path.isAbsolute(candidatePath) ? candidatePath : path.join(rootDir, candidatePath.replace(/^\.\//, ''));
-    const canonicalSourceExists = !path.isAbsolute(candidatePath) && candidatePath.startsWith('lib/')
+    // The legacy lib/ alias maps a compiled path to its src/ basename, but it
+    // must still stay inside the checkout: apply the root-escape predicate
+    // before the fallback so lib/../../static-evidence.ts:1 cannot resolve.
+    const canonicalSourceExists = !path.isAbsolute(candidatePath) && !pathEscapesRoot(candidatePath)
+      && candidatePath.startsWith('lib/')
       ? canonicalSourceContainsFile(fileSystem, rootDir, path.basename(candidatePath)) : false;
-    if (fsExistsSync(fileSystem, resolved) || canonicalSourceExists) { return true; }
+    if (existsInRepository(fileSystem, rootDir, candidatePath) || canonicalSourceExists) { return true; }
   }
   return false;
 }
@@ -119,8 +152,7 @@ function hasBarePathReference(fileSystem: EvidenceFileSystemPort, normalized: st
     const words = barePathMatch[1].trim().split(' ');
     for (let start = 0; start < words.length; start += 1) {
       const candidatePath = words.slice(start).join(' ');
-      const resolved = path.isAbsolute(candidatePath) ? candidatePath : path.join(rootDir, candidatePath.replace(/^\.\//, ''));
-      if (fsExistsSync(fileSystem, resolved)) { return true; }
+      if (existsInRepository(fileSystem, rootDir, candidatePath)) { return true; }
     }
   }
   return false;
@@ -140,7 +172,6 @@ function hasQuotedTestReference(normalized: string, knownTestNames: Set<string>)
   const quotedPattern = /(['"`])([^'"`]+)\1/g;
   let quotedMatch: RegExpExecArray | null;
   while ((quotedMatch = quotedPattern.exec(normalized)) !== null) { if (knownTestNames.has(quotedMatch[2])) { return true; } }
-  if (/(?:^|[\s(`])((?:\/|\.\/)?[\w./-]+\.(?:test|spec)\.[cm]?[jt]sx?)(?=$|[\s),`])/.test(normalized)) { return true; }
   return false;
 }
 
@@ -161,7 +192,44 @@ function isVerifiableCommand(fileSystem: EvidenceFileSystemPort, command: string
 }
 
 function commandReferencesFile(fileSystem: EvidenceFileSystemPort, value: string, rootDir: string): boolean {
-  return fsExistsSync(fileSystem, path.join(rootDir, value.replace(/^\.\//, '')));
+  return existsInRepository(fileSystem, rootDir, value);
+}
+
+/** A recorded Goal Check row in the table form handoff reads: either cell may carry the reference. */
+export function goalCheckTableRow(row: GoalCheckRow): string {
+  return `| ${row.criterion} | ${row.evidence} |`;
+}
+
+/**
+ * Path-like tokens in a row that do not resolve from the repository root, such
+ * as a basename (`web-board-interaction.cases.ts`) cited without its directory.
+ */
+export function unresolvedPathReferences(fileSystem: EvidenceFileSystemPort, row: string, rootDir: string): string[] {
+  const tokens = row.replace(/\[[^\]]+\]\(([^)]+)\)/g, '$1').match(/(?:\.\/)?[\w./-]*[\w-]\.[A-Za-z][\w-]*(?::\d+(?:-\d+)?)?/g) ?? [];
+  const unresolved = tokens.map(token => token.replace(/:\d+(?:-\d+)?$/, ''))
+    .filter(token => /[\w-]\.(?:[cm]?[jt]sx?|md|json|sh|ya?ml)$/i.test(token))
+    .filter(token => !existsInRepository(fileSystem, rootDir, token));
+  return [...new Set(unresolved)];
+}
+
+/**
+ * The actionable diagnostic recording and handoff both report for a Goal Check
+ * row that cites no verifiable reference.
+ */
+export function describeUnverifiableGoalCheckRow(fileSystem: EvidenceFileSystemPort, row: string, rootDir: string): string {
+  const unresolved = unresolvedPathReferences(fileSystem, row, rootDir);
+  const hint = unresolved.length > 0
+    ? ` ${unresolved.map(token => `\`${token}\``).join(', ')} does not exist relative to the repository root; cite the repository-relative path (for example \`test/unit/example.test.ts\`).`
+    : '';
+  return `Goal Check row cites no verifiable reference: an existing repository-relative path, a quoted exact test name from a test/ .test, .spec or .cases module, a recognized command such as \`npm test\`, or an ADR reference.${hint} Offending row: ${row}`;
+}
+
+/** The first recorded row that cites no verifiable reference, with its diagnostic. */
+export function findUnverifiableRecordedRow(
+  fileSystem: EvidenceFileSystemPort, rows: readonly GoalCheckRow[], rootDir: string,
+): { row: string; message: string } | null {
+  const row = findUnverifiableGoalCheckRow(fileSystem, rows.map(goalCheckTableRow), rootDir);
+  return row === null ? null : { row, message: describeUnverifiableGoalCheckRow(fileSystem, row, rootDir) };
 }
 
 export function findUnverifiableGoalCheckRow(fileSystem: EvidenceFileSystemPort, evidenceRows: string[], rootDir: string): string | null {

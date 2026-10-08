@@ -59,6 +59,8 @@ export type ReviewLoopEvent =
   | { readonly kind: 'round-started'; readonly attempt: number; readonly maxAttempts: number }
   | { readonly kind: 'review-reset'; readonly slug: string }
   | { readonly kind: 'reviewer-escalated'; readonly reason: string }
+  | { readonly kind: 'approved-round-correction'; readonly slug: string; readonly round: number; readonly diagnostic?: string }
+  | { readonly kind: 'approved-round-revoked'; readonly slug: string; readonly round: number; readonly operator: string }
   | { readonly kind: 'attempts-exhausted'; readonly maxAttempts: number }
   | { readonly kind: 'controller-active'; readonly slug: string }
   | { readonly kind: 'local-review'; readonly attempt: number }

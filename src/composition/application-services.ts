@@ -1,10 +1,10 @@
-import { createRepeatReviewClassification } from './review-classification.js';
+import { createReviewClassification } from './review-classification.js';
 import * as path from 'node:path';
 
 import { ExecuteMissionService } from '../application/execute-mission-service.js';
 import { IntegrateCommandUseCase } from '../application/integrate-command-use-case.js';
 import { StatsBackfillService } from '../application/stats-backfill-service.js';
-import { MissionCheckpointService } from '../application/mission-checkpoint-service.js';
+import { MissionCheckpointService, type CheckpointEvidenceReferences } from '../application/mission-checkpoint-service.js';
 import { MissionBriefService } from '../application/mission-brief-service.js';
 import { MissionAssignmentService } from '../application/mission-assignment-service.js';
 import { MissionHandoffService } from '../application/mission-handoff-service.js';
@@ -23,9 +23,11 @@ import type { SessionMarkerRepository } from '../application/ports/mission-store
 import { repositoryId, type RepositoryId } from '../domain/repository.js';
 import { createStatsMissionFlowReader } from './stats.js';
 import { missionId } from '../domain/mission.js';
+import { configureReboundTelemetry } from '../application/rebound-telemetry.js';
 import { resolveCanonicalRepositoryId } from '../adapters/git/repository-identity.js';
 import { createDefaultExecuteMissionRuntime, createExecuteMissionPorts } from '../adapters/mission/execute-mission-adapters.js';
-import { performHandoff } from '../adapters/cli/commands/handoff.js';
+import { createHandoffPorts, performHandoff } from '../adapters/cli/commands/handoff.js';
+import { resolveWorktree } from '../adapters/git/worktree.js';
 import integrate from '../adapters/cli/commands/integrate.js';
 import { createReviewLoopPorts, type ReviewLoopBindings, type ReviewLoopTarget } from '../adapters/review/review-loop.js';
 import { reviewLoopBindings } from './review-persistence.js';
@@ -252,7 +254,7 @@ export async function createProductionApplicationServices(
       }),
     reviewLoopMechanisms: (reviewSlug: string, target: ReviewLoopTarget, bindings: ReviewLoopBindings = {}) => createReviewLoopPorts(reviewSlug, target, {
       ...bindings,
-      classification: createRepeatReviewClassification(reviewSlug, target.worktree ?? rootDir),
+      classification: createReviewClassification(reviewSlug, target.worktree ?? rootDir),
       performHandoffFn: handoffWithMissionServices!,
       ...reviewLoopBindings(mission.store, mission.lifecycle, sessionMarkerPort),
     }),
@@ -275,7 +277,7 @@ export async function createProductionApplicationServices(
   // Bind the one production filesystem for the recovery store. The application
   // layer cannot import `node:fs`, so composition binds the `filesystem`
   // adapter here for every process (TASK-2642 boundary decision).
-  setRecoveryEvidenceFileSystem(recoveryEvidenceFileSystem);
+  bindRecoveryPorts(operatorState.repositories, mission, rootDir);
   const presentationCapabilities = operatorState.repositories
     ? (await import('./production-capabilities.js')).composeProductionCapabilities(
       rootDir,
@@ -339,6 +341,11 @@ export interface MissionApplicationServiceOverrides {
   readonly databasePath?: string;
 }
 
+/** Recording resolves evidence references in the Mission's checkout, as handoff does. */
+export function checkpointEvidenceReferences(): CheckpointEvidenceReferences {
+  return { fileSystem: createHandoffPorts().fileSystem, rootFor: (id) => resolveWorktree(id) };
+}
+
 export async function createMissionApplicationServices(
   rootDir: string,
   overrides: MissionApplicationServiceOverrides = {},
@@ -385,7 +392,7 @@ export async function createMissionApplicationServices(
     intake: new MissionIntakeService(store),
     lifecycle,
     integration: new MissionIntegrationService(store),
-    checkpoints: new MissionCheckpointService(store),
+    checkpoints: new MissionCheckpointService(store, checkpointEvidenceReferences()),
     brief: new MissionBriefService(store, new SqliteOperationalHistoryRepository(db)),
     assignment: new MissionAssignmentService(store),
     handoff: new MissionHandoffService(store, store),
@@ -437,4 +444,18 @@ async function materializeOperatorState(): Promise<OperatorStateServices> {
   } catch {
     return { db: null, migrations: null, blocklist: null, repositories: null, close: async () => {} };
   }
+}
+
+/**
+ * Process-wide recovery ports: the evidence filesystem, and one durable sink
+ * for every rebound consumer so each completed repair attempt lands in the
+ * operational history the board already reads (TASK-2653).
+ */
+function bindRecoveryPorts(
+  repositories: { operationalHistory: OperationalHistoryRepository } | null | undefined,
+  mission: { repositoryId: string } | null | undefined,
+  rootDir: string,
+): void {
+  setRecoveryEvidenceFileSystem(recoveryEvidenceFileSystem);
+  configureReboundTelemetry(repositories ? { repositoryId: mission?.repositoryId ?? resolveCanonicalRepositoryId(rootDir), history: repositories.operationalHistory } : null);
 }

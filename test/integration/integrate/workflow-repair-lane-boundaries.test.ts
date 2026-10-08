@@ -406,6 +406,7 @@ test('production CLI autonomous re-review and child verdict/resolve keep authori
 });
 
 const tempDirs: string[] = [];
+let fixtureDatabaseTemplate: string;
 
 function makeTempRoot(): string {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), `parallix-task-2582-repro-`));
@@ -417,6 +418,18 @@ test.after(() => {
   for (const dir of tempDirs) {
     fs.rmSync(dir, { recursive: true, force: true });
   }
+});
+
+test.before(async () => {
+  // Every case needs an isolated database, but they all start from the same
+  // migrated schema. Build that schema once and copy the closed database for
+  // each fixture instead of replaying migrations for every contract case.
+  const templateRoot = makeTempRoot();
+  fixtureDatabaseTemplate = path.join(templateRoot, 'template.db');
+  const database = new SqliteDatabaseAdapter();
+  await database.open({ path: fixtureDatabaseTemplate });
+  await new SqliteMigrationRunner(database).applyPending(loadDefaultMigrations());
+  await database.close();
 });
 
 interface Fixture {
@@ -461,8 +474,9 @@ function seedMission(status: 'refined' | 'active' | 'review' | 'integration', re
 async function openFixture(mission: Mission): Promise<Fixture> {
   const root = makeTempRoot();
   const database = new SqliteDatabaseAdapter();
-  await database.open({ path: path.join(root, 'parallix.db') });
-  await new SqliteMigrationRunner(database).applyPending(loadDefaultMigrations());
+  const databasePath = path.join(root, 'parallix.db');
+  fs.copyFileSync(fixtureDatabaseTemplate, databasePath);
+  await database.open({ path: databasePath });
   const store = new SqliteMissionStore(database);
   await store.save(mission, null);
   return { root, database, store, lifecycle: new MissionLifecycleService(store) };

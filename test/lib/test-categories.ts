@@ -124,6 +124,7 @@ export const INTEGRATION_CI_TESTS: readonly string[] = [
   'integration/cli/startup-preflight.test.ts',
   'integration/stats/stats-backfill.test.ts',
   'integration/stats/stats.test.ts',
+  'integration/stats/stats-bug-labeled-trend.test.ts',
   'integration/review/standalone-review-cycle.test.ts',
   'integration/stats/stats-current-week-completion.test.ts',
   'integration/agents/agent-exit-telemetry-classification.test.ts',

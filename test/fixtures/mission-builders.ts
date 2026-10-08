@@ -1,6 +1,6 @@
 import type { MissionVersion } from '../../src/application/domain-ports.js';
 import { agentFamily } from '../../src/domain/agents.js';
-import type { LaneTransitionEvent } from '../../src/domain/board-event.js';
+import { DuplicateLaneEventError, type LaneTransitionEvent } from '../../src/domain/board-event.js';
 import { missionId, missionLabels, type Mission, type MissionId } from '../../src/domain/mission.js';
 import { repositoryId } from '../../src/domain/repository.js';
 import type { Review } from '../../src/domain/review.js';
@@ -119,7 +119,7 @@ export function inMemoryTransitionStore(
     async saveWithTransition(next, _expectedVersion, event) {
       if (persist) {
         if (event.idempotencyKey && keys.has(event.idempotencyKey)) {
-          throw new Error(`Duplicate idempotency key ${event.idempotencyKey}`);
+          throw new DuplicateLaneEventError(event.idempotencyKey);
         }
         if (event.idempotencyKey) { keys.add(event.idempotencyKey); }
         events.push(event);

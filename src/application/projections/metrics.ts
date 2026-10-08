@@ -486,6 +486,7 @@ export function deriveLaneIntervals(
  * Dwell time is attributed to the state the mission *occupied* during the
  * interval (interval.state), not the state it entered. Open intervals
  * (missions still in a lane) are excluded from dwell calculations.
+ * Each mission contributes one observation per lane: its summed closed dwell.
  *
  * `missions` restricts the calculation to a decision cohort. The restriction is
  * applied to whole missions before the intervals are derived, so a selected
@@ -498,7 +499,7 @@ export function medianCycleTimeByStateSeries(
   missions?: ReadonlySet<MissionId>,
 ): LaneMetricSeries {
   const intervals = deriveLaneIntervals(transitionsOf(transitions, missions));
-  const byLane = new Map<BoardLane, number[]>();
+  const byLane = new Map<BoardLane, Map<MissionId, number>>();
 
   for (const interval of intervals) {
     // Closed intervals only — open intervals (current lane) excluded from dwell
@@ -507,13 +508,15 @@ export function medianCycleTimeByStateSeries(
     }
     const minutes = (Date.parse(interval.exitedAt) - Date.parse(interval.enteredAt)) / 60_000;
     if (Number.isFinite(minutes) && minutes >= 0) {
-      byLane.set(interval.state, [...(byLane.get(interval.state) ?? []), minutes]);
+      const byMission = byLane.get(interval.state) ?? new Map<MissionId, number>();
+      byMission.set(interval.missionId, (byMission.get(interval.missionId) ?? 0) + minutes);
+      byLane.set(interval.state, byMission);
     }
   }
 
   return {
     series: BOARD_LANES.map((lane) => {
-      const observations = byLane.get(lane) ?? [];
+      const observations = [...(byLane.get(lane)?.values() ?? [])];
       return { lane, value: median(observations), observationCount: observations.length };
     }),
     missingHistoryFallback: 'null',

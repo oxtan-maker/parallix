@@ -1,18 +1,18 @@
 ---
-id: TASK-2661
-title: hook up tmux on web
-status: backlog
-assignee: []
-created_date: '2026-10-06 10:26'
+id: TASK-2678
+title: improve integration testing speed
+status: done
+assignee: [codex]
+created_date: '2026-10-07 08:50'
 labels: []
 dependencies: []
-ordinal: 170008
+ordinal: 190008
 ---
 
 ## Description
 
 <!-- SECTION:DESCRIPTION:BEGIN -->
-when tmux session exist for a mission, ensure you can click on a card on web and see mission progress
+Improve the speed of the 10 largest CPU consuming integration tests (check the CPU limits), do not reduce the checks on what the test should actually check but its integration tests not e2e tests.
 <!-- SECTION:DESCRIPTION:END -->
 
 ## Definition of Done

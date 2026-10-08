@@ -21,6 +21,7 @@ import {
 } from './mission-command-support.js';
 import {
   assertGoalCheckRows,
+  finalGoalCheckShortfall,
   isHandoffReadyCheckpoint,
   planCheckpoint,
   recordCheckpoint,
@@ -28,6 +29,7 @@ import {
   type GoalCheckRow,
 } from '../domain/checkpoint.js';
 import type { Mission } from '../domain/mission.js';
+import { findUnverifiableRecordedRow, type EvidenceFileSystemPort } from './static-evidence.js';
 
 const REQUIRED_CAPABILITY: Capability = 'checkpoint:record';
 
@@ -65,8 +67,23 @@ export interface ReadCheckpointsResult {
   readonly goalCheck: readonly GoalCheckRow[];
 }
 
+/**
+ * Evidence references resolve against the Mission's repository checkout.
+ * Recording applies the reference semantics handoff applies, so an evidence
+ * row handoff would refuse is refused when it is written. Without it (or
+ * without a resolvable checkout) recording checks only the row shape and
+ * handoff remains the check.
+ */
+export interface CheckpointEvidenceReferences {
+  readonly fileSystem: EvidenceFileSystemPort;
+  rootFor(_missionId: Mission['id']): string | null;
+}
+
 export class MissionCheckpointService {
-  constructor(private readonly _store: MissionStore) {}
+  constructor(
+    private readonly _store: MissionStore,
+    private readonly _evidence?: CheckpointEvidenceReferences,
+  ) {}
 
   /** Plan a checkpoint: a name and what it delivers, with no evidence yet. */
   async plan(request: PlanCheckpointRequest): Promise<ApplicationOutcome<PlanCheckpointResult>> {
@@ -128,6 +145,7 @@ export class MissionCheckpointService {
     try { assertGoalCheckRows(request.checkpoint.goalCheck); } catch (error) {
       return failure('validation', error instanceof Error ? error.message : 'checkpoint evidence rejected');
     }
+    const rootDir = this._evidence?.rootFor(request.missionId) ?? null;
 
     const loaded = await loadForCommand<RecordCheckpointResult>(this._store, request);
     if (!isLoaded(loaded)) {
@@ -151,6 +169,11 @@ export class MissionCheckpointService {
       );
     }
 
+    const evidenceFailure = await this.assertRecordableEvidence({ request, rootDir, mission, updated });
+    if (evidenceFailure) {
+      return evidenceFailure;
+    }
+
     try {
       const nextVersion = await this._store.save(updated, version);
       return completed(
@@ -172,6 +195,43 @@ export class MissionCheckpointService {
     } catch (error) {
       return writeFailure<RecordCheckpointResult>(error);
     }
+  }
+
+  /**
+   * Record-time evidence checks that mirror the reference semantics handoff
+   * applies: an evidence row handoff would refuse is refused when it is written,
+   * and a final checkpoint must carry one Goal Check row per success criterion.
+   * Returns a validation failure when either check fails, or `null` when the
+   * checkpoint may be recorded.
+   */
+  private async assertRecordableEvidence(params: {
+    request: RecordCheckpointRequest;
+    rootDir: string | null;
+    mission: Mission;
+    updated: Mission;
+  }): Promise<ApplicationOutcome<RecordCheckpointResult> | null> {
+    const { request, rootDir, mission, updated } = params;
+    if (rootDir && this._evidence) {
+      const unverifiable = findUnverifiableRecordedRow(
+        this._evidence.fileSystem,
+        request.checkpoint.goalCheck,
+        rootDir,
+      );
+      if (unverifiable) {
+        return failure('validation', `checkpoint ${request.checkpoint.name} rejected. ${unverifiable.message}`);
+      }
+    }
+    const criteria = mission.successCriteria?.length ?? 0;
+    const shortfall = finalGoalCheckShortfall(request.checkpoint.goalCheck, criteria);
+    if (shortfall > 0 && updated.checkpoints.at(-1)?.name === request.checkpoint.name) {
+      return failure(
+        'validation',
+        `checkpoint ${request.checkpoint.name} is the final planned checkpoint, and handoff requires one Goal Check row per success criterion: `
+        + `${criteria} criteria need ${criteria} row(s), but ${request.checkpoint.goalCheck.length} were given. `
+        + 'Pass one --criterion/--evidence pair per success criterion listed by `px status`.',
+      );
+    }
+    return null;
   }
 
   async read(

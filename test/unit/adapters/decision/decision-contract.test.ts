@@ -58,6 +58,16 @@ test('explicit routes disambiguate and generic SDK credentials follow operator r
   assert.equal(resolveDecisionProvider({ OPENROUTER_API_KEY: 'own', TYPESAFE_BASE_URL: 'https://api.typesafe.ai' }).availability.status, 'setup-required');
 });
 
+test('requestBytes is the exact body size sent for the routed model (TASK-2675)', async () => {
+  let sent = 0;
+  const env = { OPENROUTER_API_KEY: 'secret', TYPESAFE_DEFAULT_MODEL: 'jev-1.13' };
+  const port = createDecisionPort({ env, transport: async (_url, init) => { sent = Buffer.byteLength(init?.body as string); return new Response(JSON.stringify(response())); } });
+  await port.decide(request);
+  assert.equal(port.requestBytes(request), sent);
+  const longer = createDecisionPort({ env: { ...env, TYPESAFE_DEFAULT_MODEL: 'jev-1.13-with-a-much-longer-routed-name' } });
+  assert.ok(longer.requestBytes(request) > sent);
+});
+
 test('composition normalizes mixed questions, probabilities, model and usage', async () => {
   let calls = 0;
   const port = createDecisionPort({ env: { OPENROUTER_API_KEY: 'secret' }, transport: async (url, init) => {

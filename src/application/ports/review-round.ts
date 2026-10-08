@@ -182,6 +182,15 @@ export interface HumanFeedbackPort {
   reconcile(_state: ReviewLoopState): Promise<HumanReviewFeedback | null>;
 }
 
+/**
+ * Stands down the effective approval of a round when a human's current change
+ * request on the provider supersedes it.  The provider author is the operator
+ * of record; a failed revocation leaves the correction unconsumed.
+ */
+export interface ApprovalRevocationPort {
+  revoke(_request: { readonly round: number; readonly operator: string; readonly reason: string }): Promise<{ readonly ok: true } | { readonly ok: false; readonly diagnostic: string }>;
+}
+
 /* ------------------------------------------------------------------ *
  * Reviewer routing and agent launches
  * ------------------------------------------------------------------ */
@@ -336,13 +345,15 @@ export interface ReviewLoopPorts {
   readonly handoff: ReviewHandoffPort | null;
   readonly provider: ReviewProviderPort | null;
   readonly humanFeedback: HumanFeedbackPort;
+  /** Null when no mission authority is bound; the loop then stops with `px revoke-review` guidance. */
+  readonly approvalRevocation?: ApprovalRevocationPort | null;
   readonly routing: ReviewerRoutingPort;
   readonly agents: ReviewAgentPort;
   readonly artifacts: ReviewArtifactPort;
   readonly preReview: PreReviewPort;
   readonly output: ReviewLoopOutput;
   readonly lock: ReviewControllerLock;
-  readonly classification?: import('./review-classification.js').RepeatReviewClassificationPorts;
+  readonly classification?: import('./review-classification.js').ReviewClassificationPorts;
   readonly missionStore: MissionStore | null;
   readonly lifecycle: MissionLifecycleService | null;
 }

@@ -1,4 +1,4 @@
-import { spawnSync } from 'node:child_process';
+import { execFile, spawnSync } from 'node:child_process';
 import { readlinkSync } from 'node:fs';
 import type { MissionId } from '../../domain/mission.js';
 import type { SessionRole } from '../../domain/session.js';
@@ -76,12 +76,31 @@ export interface DetectRunningSessionsOptions {
   readonly now?: () => number;
 }
 
+const PS_ARGS = ['-eo', 'pid=,etimes=,args='] as const;
+
 /** Read the process table. Returns null when it cannot be read. */
 function defaultListProcesses(): readonly ProcessEntry[] | null {
-  const result = spawnSync('ps', ['-eo', 'pid=,etimes=,args='], { encoding: 'utf8', maxBuffer: 8 * 1024 * 1024 });
+  const result = spawnSync('ps', [...PS_ARGS], { encoding: 'utf8', maxBuffer: 8 * 1024 * 1024 });
   if (result.error || result.status !== 0 || typeof result.stdout !== 'string') { return null; }
+  return parseProcessTable(result.stdout);
+}
+
+/**
+ * Start reading the process table without blocking the event loop, so the
+ * `ps` child runs while the caller does other work. Resolves to null when the
+ * table cannot be read, exactly as the synchronous default does.
+ */
+export function startProcessTableRead(): Promise<readonly ProcessEntry[] | null> {
+  return new Promise((resolve) => {
+    execFile('ps', [...PS_ARGS], { encoding: 'utf8', maxBuffer: 8 * 1024 * 1024 }, (error, stdout) => {
+      resolve(error || typeof stdout !== 'string' ? null : parseProcessTable(stdout));
+    });
+  });
+}
+
+function parseProcessTable(output: string): readonly ProcessEntry[] {
   const entries: ProcessEntry[] = [];
-  for (const line of result.stdout.split('\n')) {
+  for (const line of output.split('\n')) {
     const match = /^\s*(\d+)\s+(\d+)\s+(.*)$/.exec(line);
     if (!match) { continue; }
     entries.push({ pid: Number(match[1]), elapsedSeconds: Number(match[2]), args: match[3] as string });

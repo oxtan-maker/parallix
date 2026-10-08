@@ -92,7 +92,9 @@ test('buildRebasePrompt contains mission-specific and shared file sections', () 
   assert.match(prompt, /git rebase --continue/);
   assert.match(prompt, /Execute the listed commands now/);
   assert.match(prompt, /no verification gate configured/);
-  assert.match(prompt, /px integrate task-1018 --dry-run/);
+  assert.doesNotMatch(prompt, /px integrate .*--dry-run/);
+  assert.match(prompt, /no rebase in progress and no unmerged files/);
+  assert.match(prompt, /repository verification above against the final repaired tree/);
   assert.match(prompt, /git checkout --theirs "docs\/missions\/2026\/task-1018\/CP-1\.md"/);
   assert.match(prompt, /workflow\/lib\/core\/git\.js/);
 });
@@ -465,6 +467,9 @@ test('rebase task-1057 flow: sharedFiles and prompt contain only workflow/docs/a
   let exitCode = null;
 
   await rebase(['task-1057'], {
+    // Git is injected below; completion probes must use the same isolated state.
+    // TASK-2673: a real detector spawned Git twelve times under coverage.
+    detectRebaseStateFn: () => ({ inProgress: false, detached: false, unmergedFiles: [] }),
     isForgejoReviewEnabledFn: () => false,
     inferSlugFn: () => 'task-1057',
     findMissionDirFn: () => '/tmp/missions/docs/missions/2026/task-1057',
@@ -545,6 +550,8 @@ test('rebase detects staged-no-conflict continuation after failed git rebase --c
   console.log = (...args) => { capturedStdout.push(args.join(' ')); };
 
   await rebase(['task-1035'], {
+    // This fixture finishes on the second --continue; do not probe the host repo.
+    detectRebaseStateFn: () => ({ inProgress: continueCalls === 1, detached: false, unmergedFiles: [] }),
     isForgejoReviewEnabledFn: () => false,
     inferSlugFn: () => 'task-1035',
     findMissionDirFn: () => '/tmp/docs/missions/2026/task-1035',
@@ -606,6 +613,8 @@ test('rebase detects empty/no-op pick and guides operator', async () => {
   console.log = (...args) => { capturedStdout.push(args.join(' ')); };
 
   await rebase(['task-1035'], {
+    // This fixture finishes on the second --continue; do not probe the host repo.
+    detectRebaseStateFn: () => ({ inProgress: continueCalls === 1, detached: false, unmergedFiles: [] }),
     isForgejoReviewEnabledFn: () => false,
     inferSlugFn: () => 'task-1035',
     findMissionDirFn: () => '/tmp/docs/missions/2026/task-1035',
@@ -662,6 +671,8 @@ test('rebase caps failed continue retries when rebase remains active', async () 
   console.error = (...args) => { capturedStderr.push(args.join(' ')); };
 
   await rebase(['task-1035'], {
+    // Failed continuations leave this injected rebase active.
+    detectRebaseStateFn: () => ({ inProgress: continueCalls > 0, detached: false, unmergedFiles: [] }),
     isForgejoReviewEnabledFn: () => false,
     inferSlugFn: () => 'task-1035',
     findMissionDirFn: () => '/tmp/docs/missions/2026/task-1035',
@@ -719,6 +730,8 @@ test('rebase distinguishes hook failure from genuine conflict after --continue',
   console.log = (...args) => { capturedStdout.push(args.join(' ')); };
 
   await rebase(['task-1035'], {
+    // This fixture finishes on the second --continue; do not probe the host repo.
+    detectRebaseStateFn: () => ({ inProgress: continueCalls === 1, detached: false, unmergedFiles: [] }),
     isForgejoReviewEnabledFn: () => false,
     inferSlugFn: () => 'task-1035',
     findMissionDirFn: () => '/tmp/docs/missions/2026/task-1035',

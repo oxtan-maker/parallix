@@ -1,3 +1,5 @@
+import { handoffEvidencePolicy, handoffBudgetExceeded } from '../../../src/domain/mission-handoff-policy.js';
+import { isReviewerPoolExhausted } from '../../../src/domain/reviewer-assignment-policy.js';
 // Mission handoff lane-event contract: bounce/relaunch ordering, retry without a duplicate lane event,
 // and active-lane projection.
 //
@@ -12,7 +14,7 @@ import assert from 'node:assert/strict';
 import { ExecuteHandoffService } from '../../../src/application/execute-handoff-service.js';
 import { classifyError, FailureClass, DispatchAction } from '../../../src/application/failure-classification.js';
 import { isRelaunchableError } from '../../../src/adapters/cli/commands/repair-handoff.js';
-import { agentFamily } from '../../../src/domain/agents.js';
+import { AgentPoolExhaustedError, agentFamily } from '../../../src/domain/agents.js';
 import { missionId } from '../../../src/domain/mission.js';
 import { ConfiguredReviewerEligibility, applyImplementerCommand, applyReviewerCommand, beginNextReviewRound, changeRevision, reviewFindingId, startReview, type Review, type ReviewedChange } from '../../../src/domain/review.js';
 import { MissionVersion } from '../../../src/application/domain-ports.js';
@@ -706,4 +708,20 @@ describe('Active lane projection', () => {
       fs.rmSync(root, { recursive: true, force: true });
     }
   });
+});
+
+test('handoff evidence and self-review eligibility are pure decisions (TASK-2668.07)', () => {
+  const contract = { checkpoints: [], successCriteria: ['one', 'two'], completedSuccessCriteria: [0], draftedInDb: true };
+  assert.deepEqual(handoffEvidencePolicy(contract), { source: 'missing', incomplete: [2], insufficientRows: false });
+  assert.equal(handoffEvidencePolicy({ ...contract, draftedInDb: false }).source, 'historical');
+  assert.deepEqual(handoffEvidencePolicy({ ...contract, checkpoints: [{ goalCheck: ['proof'] }] }), { source: 'recorded', incomplete: [2], insufficientRows: true });
+  assert.equal(handoffEvidencePolicy({ ...contract, checkpoints: [{ goalCheck: ['a', 'b'] }], completedSuccessCriteria: [0, 1] }).insufficientRows, false);
+  assert.equal(handoffBudgetExceeded(3), false);
+  assert.equal(handoffBudgetExceeded(4), true);
+  assert.equal(isReviewerPoolExhausted(new AgentPoolExhaustedError('review', 'pool unavailable')), true);
+  assert.equal(isReviewerPoolExhausted(new AgentPoolExhaustedError('active', 'exhausted')), false);
+  for (const message of ['exhausted', 'No agents available', 'No eligible agents', 'unreadable configuration', 'no working launcher']) {
+    assert.equal(isReviewerPoolExhausted(new Error(message)), false);
+    assert.equal(isReviewerPoolExhausted(message), false);
+  }
 });

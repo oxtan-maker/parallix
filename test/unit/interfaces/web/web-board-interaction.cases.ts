@@ -212,6 +212,120 @@ test('clicking the checkpoint label toggles the evidence panel open and closed (
   } finally { await page.close(); }
 });
 
+test('selecting a mission card opens a read-only terminal view and renders unavailable state (TASK-2661)', async () => {
+  const page = await renderBoard({ respond: async () => new Response(JSON.stringify({ kind: 'unavailable', message: 'No live tmux session is available for this mission.' }), { status: 404, headers: { 'content-type': 'application/json' } }) });
+  try {
+    const card = page.mount.querySelector<DomHtmlElement>('[data-board-card]')!;
+    await act(async () => { card.dispatchEvent(new page.window.MouseEvent('click', { bubbles: true })); await new Promise<void>(resolve => queueMicrotask(resolve)); });
+    const dialog = page.mount.querySelector('[role="dialog"]');
+    assert.ok(dialog, 'card selection opens the progress view');
+    assert.match(dialog.textContent ?? '', /No live tmux session is available/);
+    assert.equal(page.calls[0]?.method, undefined, 'terminal reads never send a mutation method');
+    assert.equal(page.mount.querySelectorAll('button').length > 0, true, 'the dialog has a close control only');
+  } finally { await page.close(); }
+});
+
+test('the selected mission progress view renders terminal output from its GET read (TASK-2661)', async () => {
+  const page = await renderBoard({ respond: async () => new Response(JSON.stringify({ kind: 'live', output: 'working through checkpoint two\\n' }), { headers: { 'content-type': 'application/json' } }) });
+  try {
+    const card = page.mount.querySelector<DomHtmlElement>('[data-board-card]')!;
+    await act(async () => { card.dispatchEvent(new page.window.MouseEvent('click', { bubbles: true })); await new Promise<void>(resolve => queueMicrotask(resolve)); });
+    const dialog = page.mount.querySelector('[role="dialog"]');
+    assert.match(dialog?.textContent ?? '', /working through checkpoint two/);
+    assert.ok(page.calls[0]?.headers instanceof Headers || page.calls[0]?.headers !== undefined, 'the terminal request carries read headers only');
+  } finally { await page.close(); }
+});
+
+test('a pipe-hosted mission shows recorded output without claiming a live terminal (TASK-2661)', async () => {
+  const page = await renderBoard({ respond: async () => new Response(JSON.stringify({
+    kind: 'captured', output: 'review completed', message: 'No live tmux session. Recorded output from review / claude.',
+  })) });
+  try {
+    await act(async () => { page.mount.querySelector<DomHtmlElement>('[data-board-card]')!.click(); });
+    const dialog = page.mount.querySelector('[role="dialog"]');
+    assert.match(dialog?.querySelector('pre')?.textContent ?? '', /review completed/);
+    assert.match(dialog?.querySelector('h2')?.textContent ?? '', /recorded output/);
+    assert.doesNotMatch(dialog?.querySelector('h2')?.textContent ?? '', /live terminal/);
+    assert.match(dialog?.textContent ?? '', /No live tmux session/);
+  } finally { await page.close(); }
+});
+
+test('terminal refresh failures retain captured output and recover (TASK-2661)', async (context) => {
+  let fail = false;
+  const page = await renderBoard({ respond: async () => {
+    if (fail) { throw new Error('timeout'); }
+    return new Response(JSON.stringify({ kind: 'live', output: 'real progress' }));
+  } });
+  let poll: (() => void) | undefined;
+  context.mock.method(page.window, 'setInterval', (callback: () => void) => { poll = callback; return 1; });
+  try {
+    await act(async () => { page.mount.querySelector<DomHtmlElement>('[data-board-card]')!.click(); });
+    fail = true;
+    await act(async () => { poll!(); });
+    assert.match(page.mount.querySelector('pre')?.textContent ?? '', /real progress/);
+    assert.match(page.mount.querySelector('[role="dialog"]')?.textContent ?? '', /refresh interrupted/);
+    fail = false;
+    await act(async () => { poll!(); });
+    assert.doesNotMatch(page.mount.querySelector('[role="dialog"]')?.textContent ?? '', /refresh interrupted/);
+  } finally { await page.close(); }
+});
+
+test('terminal response survives board updates while its read is pending (TASK-2661)', async () => {
+  let resolveRead: ((response: Response) => void) | undefined;
+  const page = await renderBoard({ respond: () => new Promise<Response>(resolve => { resolveRead = resolve; }) });
+  try {
+    const card = page.mount.querySelector<DomHtmlElement>('[data-board-card]')!;
+    await act(async () => { card.click(); });
+    await page.rerender(snapshot());
+    assert.equal(page.calls.length, 1, 'board updates must preserve the pending terminal read');
+    await act(async () => {
+      resolveRead!(new Response(JSON.stringify({ kind: 'live', output: 'checkpoint progress' })));
+    });
+    assert.match(page.mount.querySelector('[role="dialog"]')?.textContent ?? '', /checkpoint progress/);
+  } finally { await page.close(); }
+});
+
+test('terminal polling skips pending reads and closing cancels them (TASK-2661)', async (context) => {
+  const page = await renderBoard({ respond: () => new Promise<Response>((_resolve, reject) => {
+    queueMicrotask(() => {
+      page.calls[0].signal!.addEventListener('abort', () => reject(new Error('closed')), { once: true });
+    });
+  }) });
+  let poll: (() => void) | undefined;
+  context.mock.method(page.window, 'setInterval', (callback: () => void) => { poll = callback; return 1; });
+  try {
+    await act(async () => { page.mount.querySelector<DomHtmlElement>('[data-board-card]')!.click(); });
+    await act(async () => { poll!(); poll!(); });
+    assert.equal(page.calls.length, 1, 'a slow read must not accumulate requests');
+    const signal = page.calls[0].signal!;
+    assert.equal(signal.aborted, false);
+    await act(async () => {
+      page.mount.querySelector('[role="dialog"]')!.querySelector<DomButton>('button')!.click();
+    });
+    assert.equal(signal.aborted, true, 'closing cancels the outstanding request');
+  } finally { await page.close(); }
+});
+
+test('a stalled terminal request leaves loading when its deadline expires (TASK-2661)', async (context) => {
+  const deadline = new AbortController();
+  context.mock.method(AbortSignal, 'timeout', (milliseconds: number) => {
+    assert.equal(milliseconds, 30000);
+    return deadline.signal;
+  });
+  const page = await renderBoard({ respond: () => new Promise<Response>((_resolve, reject) => {
+    // Fetch rejects when the supplied signal aborts; no real network or wait.
+    queueMicrotask(() => {
+      page.calls[0].signal!.addEventListener('abort', () => reject(new Error('timeout')), { once: true });
+    });
+  }) });
+  try {
+    await act(async () => { page.mount.querySelector<DomHtmlElement>('[data-board-card]')!.click(); });
+    assert.match(page.mount.querySelector('[role="dialog"]')?.textContent ?? '', /Loading/);
+    await act(async () => { deadline.abort(); });
+    assert.match(page.mount.querySelector('[role="dialog"]')?.textContent ?? '', /Mission terminal is unavailable/);
+  } finally { await page.close(); }
+});
+
 test('the checkpoint evidence panel closes on Escape (TASK-2660)', async () => {
   const card = makeCard({
     id: missionId('task-2660-escape'),

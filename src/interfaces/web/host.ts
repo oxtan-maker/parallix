@@ -13,6 +13,7 @@
 
 import * as crypto from 'node:crypto';
 import Fastify, { type FastifyInstance, type FastifyReply } from 'fastify';
+import { shareBuilds } from './shared-build.js';
 import type { BoardProjection } from '../../application/projections/board.js';
 import {
   subscribeToBoardProjection,
@@ -63,6 +64,8 @@ import {
 } from './security.js';
 import { createShellBootstrap } from './shell-bootstrap.js';
 import { errorMessage, sendCommandResult, singleHeader, transportStatusCode } from './host-support.js';
+import { registerTerminalRoute, type WebTerminalReader } from './terminal-route.js';
+export { WEB_TERMINAL_PATH, type WebTerminalOutput, type WebTerminalReader } from './terminal-route.js';
 
 export const WEB_CSRF_HEADER = 'x-px-csrf';
 export { WEB_CSRF_META_NAME } from './shell-bootstrap.js';
@@ -144,6 +147,7 @@ export interface WebHostOptions {
    * default `BOARD_REFRESH_INTERVAL_MS` poll.
    */
   subscription?: BoardSubscriptionOptions;
+  terminalReader?: WebTerminalReader;
 }
 
 export interface WebHostInfo extends LoopbackBinding {
@@ -179,6 +183,7 @@ export function createWebHost(options: WebHostOptions): WebHost {
     throw new Error('web host requires loaded web assets');
   }
   const bodyLimitBytes = options.bodyLimitBytes ?? DEFAULT_BODY_LIMIT_BYTES;
+  const sharedBuild = options.buildProjection === undefined ? undefined : shareBuilds(options.buildProjection);
   const { manifest, assets } = options.assets;
   if (manifest['index.html'] === undefined) {
     throw new Error('web asset manifest has no index.html entry');
@@ -197,7 +202,7 @@ export function createWebHost(options: WebHostOptions): WebHost {
   // response. `close()` runs them all, so no stream outlives the host.
   const clients = new Set<() => void>();
   let unsubscribeProjection: (() => void) | null = null;
-
+  let displayedProjection: BoardProjection | null = null;
   return {
     progress(event) { stream.publishProgress(toWebProgressEvent(event)); },
     clientCount: () => clients.size,
@@ -306,7 +311,7 @@ export function createWebHost(options: WebHostOptions): WebHost {
       });
 
       app.get(WEB_SNAPSHOT_PATH, async (_request, reply) => {
-        const build = options.buildProjection;
+        const build = sharedBuild;
         if (build === undefined) {
           return reply.code(503).send(snapshotError('unavailable', 'board projection port is not wired'));
         }
@@ -317,14 +322,17 @@ export function createWebHost(options: WebHostOptions): WebHost {
           return reply.code(503).send(snapshotError('unavailable', errorMessage(error)));
         }
         try {
-          return reply.type('application/json; charset=utf-8').send(toWebBoardSnapshot(projection));
+          const snapshot = toWebBoardSnapshot(projection);
+          displayedProjection = projection;
+          return reply.type('application/json; charset=utf-8').send(snapshot);
         } catch (error) {
-          // A projection the transport refuses to project is a contract
-          // failure, not a transient one.
+          // A transport-rejected projection is a contract failure.
           return reply.code(500).send(snapshotError('execution', errorMessage(error)));
         }
       });
-
+      // Terminal polls reuse the displayed board; commands still rebuild below.
+      registerTerminalRoute(app, { ...options, buildProjection: sharedBuild === undefined
+        ? undefined : async () => displayedProjection ?? sharedBuild() });
       // The only mutation route (TASK-2433). It outranks the 405 catch-all
       // registered below; the onRequest hook above has already enforced the
       // Host/Origin/session/CSRF boundary before this handler runs.
@@ -337,7 +345,7 @@ export function createWebHost(options: WebHostOptions): WebHost {
         if (isInvalidWebCommandRequest(validation)) {
           return sendCommandResult(reply, 400, rejected('validation', validation.problems.join('; ')));
         }
-        const build = options.buildProjection;
+        const build = sharedBuild;
         if (build === undefined) {
           return sendCommandResult(reply, 503, failure('unavailable', 'board projection port is not wired'));
         }
@@ -453,7 +461,7 @@ export function createWebHost(options: WebHostOptions): WebHost {
         });
       });
       binding = { host: bindHost, port: address.port };
-      const build = options.buildProjection;
+      const build = sharedBuild;
       if (build !== undefined) {
         // The only board-change detector in web code. No SQLite, no Git, no
         // process scan, no watcher: one shared subscription that publishes a

@@ -28,6 +28,7 @@ import { StatusMissionData, StatusResult } from '../../../src/application/ports/
 import { materializeBacklogMission, missionStatusFromBacklog, type BacklogMissionRecord, type BacklogMissionSnapshot } from '../../../src/adapters/backlog/mission-materialization.js';
 import { carryCompletion, completedCriteria, MissionSuccessCriteriaViolation } from '../../../src/domain/mission-success-criteria.js';
 import { MissionBriefService, SUCCESS_CRITERIA_COMPLETED_EVENT } from '../../../src/application/mission-brief-service.js';
+import { MissionCheckpointService } from '../../../src/application/mission-checkpoint-service.js';
 import { missionVersion, type MissionStore } from '../../../src/application/domain-ports.js';
 import type { Mission } from '../../../src/domain/mission.js';
 import type { OperationalHistoryEntry } from '../../../src/application/ports/operation-history.js';
@@ -327,6 +328,12 @@ describe('Prompt authority', () => {
     assert.match(source, /px checkpoint record --name/);
     assert.match(source, /px mission mark-complete --slug \{\{slug\}\} --criterion <index> --expected-version <n>/);
     assert.match(source, /Recording checkpoint evidence does not mark criteria complete/);
+    // Evidence guidance matches the shared reference check (TASK-2662).
+    assert.match(source, /px checkpoint record --name CP-2 --expected-version 7 --criterion/, 'one concrete recording example');
+    assert.match(source, /repository-relative path[^\n]*bare basename[^\n]*does not resolve/);
+    assert.match(source, /`\.test`, `\.spec` or `\.cases` module under `test\/`/);
+    assert.match(source, /counts rows and does not compare their text/);
+    assert.doesNotMatch(source, /refuses a criterion with no row/, 'handoff does not match criterion text');
     // An executing agent must not be able to rewrite the contract it is judged
     // against: goal, scope and gates are settled at draft.
     for (const write of [/px goal set/, /px scope set/, /px gate add/, /px gate remove/]) {
@@ -719,6 +726,59 @@ describe('Backlog Mission materialization', () => {
     for (const [label, input, reason] of cases) {
       assert.deepEqual(materializeBacklogMission(input), { kind: 'unavailable', reason }, label);
     }
+  });
+});
+
+describe('Checkpoint evidence recording', () => {
+  // Recording applies handoff's reference semantics (TASK-2662) so a row handoff
+  // would refuse is refused when it is written.
+  function fixture(rootDir: string | null = '/repo') {
+    let mission = {
+      id: missionId('task-2662'), repositoryId: repositoryId('repo'), status: 'active',
+      successCriteria: ['first', 'second'], completedSuccessCriteria: [],
+      checkpoints: [1, 2].map((n) => ({ missionId: missionId('task-2662'), name: `CP-${n}`, firstLine: 'planned', goalCheck: [], nextActionText: '' })),
+    } as unknown as Mission;
+    let saves = 0;
+    const store: MissionStore = {
+      load: async () => ({ kind: 'found', mission, version: missionVersion(1) }) as never,
+      save: async (next) => { mission = next; saves += 1; return missionVersion(2); },
+    };
+    const existing = new Set(['/repo/test/unit/example.test.ts']);
+    const service = new MissionCheckpointService(store, {
+      fileSystem: { existsSync: (target) => existing.has(target), readText: () => '', listEntries: () => [], listNames: () => [] },
+      rootFor: () => rootDir,
+    });
+    const record = (name: string, evidence: readonly string[]) => service.record({
+      operationId: 'op', missionId: missionId('task-2662'), capabilities: new Set(['checkpoint:record']), expectedVersion: missionVersion(1),
+      checkpoint: { missionId: missionId('task-2662'), name, nextActionText: 'continue', goalCheck: evidence.map((text, index) => ({ criterion: `row ${index + 1}`, evidence: text })) },
+    } as never);
+    return { record, saves: () => saves };
+  }
+
+  test('record rejects an unsupported evidence reference with an actionable diagnostic and writes nothing (TASK-2662)', async () => {
+    const { record, saves } = fixture();
+    const outcome = await record('CP-1', ['example.test.ts']);
+    assert.equal(outcome.status, 'failed');
+    assert.match(outcome.error?.message ?? '', /checkpoint CP-1 rejected\. Goal Check row cites no verifiable reference/);
+    assert.match(outcome.error?.message ?? '', /`example\.test\.ts` does not exist relative to the repository root/);
+    assert.equal(saves(), 0);
+    assert.equal((await record('CP-1', ['`test/unit/example.test.ts`'])).status, 'completed');
+  });
+
+  test('record rejects a final checkpoint with fewer Goal Check rows than success criteria (TASK-2657)', async () => {
+    const { record, saves } = fixture();
+    const short = await record('CP-2', ['`test/unit/example.test.ts`']);
+    assert.equal(short.status, 'failed');
+    assert.match(short.error?.message ?? '', /CP-2 is the final planned checkpoint.*2 criteria need 2 row\(s\), but 1 were given/);
+    assert.equal(saves(), 0);
+    assert.equal((await record('CP-1', ['`test/unit/example.test.ts`'])).status, 'completed', 'an earlier checkpoint may cover fewer criteria');
+    assert.equal((await record('CP-2', ['`test/unit/example.test.ts`', 'test/unit/example.test.ts'])).status, 'completed');
+  });
+
+  test('record without a resolvable checkout keeps shape checks and leaves references to handoff', async () => {
+    const { record } = fixture(null);
+    assert.equal((await record('CP-1', ['prose only'])).status, 'completed');
+    assert.match((await record('CP-1', ['  '])).error?.message ?? '', /evidence must not be empty/);
   });
 });
 

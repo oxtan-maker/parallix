@@ -230,6 +230,7 @@ function processResult(result: any, rootDir: string, invocationStart: string) {
  * run. Mirrors isStaleSessionResult()/staleSessionHandler() in codex.ts.
  */
 function isStaleQwenSessionResult(result: any) {
+  // Adapter-owned parsing of Qwen CLI diagnostics; never exposed as a workflow signal.
   if (!result || result.status === 0) { return false; }
   const text = `${result.stderr || ''}${result.stdout || ''}`;
   return /session not found|no session|invalid session/i.test(text);

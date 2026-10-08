@@ -1,4 +1,4 @@
-import { createRepeatReviewClassification } from './review-classification.js';
+import { createReviewClassification } from './review-classification.js';
 import type { ExecuteMissionPorts } from '../application/ports/execute-mission.js';
 import type { TuiCapabilities } from '../application/tui-capabilities.js';
 import type { BoardCommandDispatcher, BoardProgressSink } from '../application/controller/board-command.js';
@@ -15,6 +15,7 @@ import type { SessionMarkerRepository } from '../application/ports/mission-store
 import type { UsageRepository } from '../application/ports/mission-measurements.js';
 import type { MissionNelRecorder, MissionStore, MissionTransitionStore } from '../application/domain-ports.js';
 import { MissionCheckpointService } from '../application/mission-checkpoint-service.js';
+import { checkpointEvidenceReferences } from './application-services.js';
 import { MissionHandoffService } from '../application/mission-handoff-service.js';
 import { MissionIntakeService } from '../application/mission-intake-service.js';
 import { MissionLifecycleService } from '../application/mission-lifecycle-service.js';
@@ -182,7 +183,7 @@ function createBoardHandoffWorkflow(
   const missionServices = {
     store,
     lifecycle,
-    checkpoints: new MissionCheckpointService(store),
+    checkpoints: new MissionCheckpointService(store, checkpointEvidenceReferences()),
     handoff: new MissionHandoffService(store, store),
   };
   const handoff = (slug: string, options: Record<string, unknown> = {}) =>
@@ -199,13 +200,13 @@ function createBoardHandoffWorkflow(
         await resumeActiveBoardHandoff(existing, store, lifecycle, slug);
         await reviewLoop(
           { slug, isContinue: true, maxAttempts: existing.mission.review.rounds.length + 1 },
-          createReviewLoopPorts(slug, {}, { ...reviewLoopBindings(store, lifecycle), classification: createRepeatReviewClassification(slug, resolveWorktree(slug) ?? process.cwd()) }),
+          createReviewLoopPorts(slug, {}, { ...reviewLoopBindings(store, lifecycle), classification: createReviewClassification(slug, resolveWorktree(slug) ?? process.cwd()) }),
         );
         return;
       }
       const result = await handoff(slug);
       if (!result.ok) { throw new Error(result.error ?? 'handoff workflow aborted'); }
-      await reviewLoop({ slug }, createReviewLoopPorts(slug, {}, { performHandoffFn: reviewHandoff, ...reviewLoopBindings(store, lifecycle), classification: createRepeatReviewClassification(slug, resolveWorktree(slug) ?? process.cwd()) }));
+      await reviewLoop({ slug }, createReviewLoopPorts(slug, {}, { performHandoffFn: reviewHandoff, ...reviewLoopBindings(store, lifecycle), classification: createReviewClassification(slug, resolveWorktree(slug) ?? process.cwd()) }));
     },
   };
 }
@@ -231,7 +232,7 @@ export function composeProductionCapabilities(
     const intake = new MissionIntakeService(missionStore);
     missionServices = {
       intake,
-      checkpoints: new MissionCheckpointService(missionStore),
+      checkpoints: new MissionCheckpointService(missionStore, checkpointEvidenceReferences()),
       handoff: new MissionHandoffService(missionStore, missionStore),
       handoffWorkflow: createBoardHandoffWorkflow(missionStore, overrides.handoffReviewLoop),
       // Only with Mission authority: a null store means no draft service, so

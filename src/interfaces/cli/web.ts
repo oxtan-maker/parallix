@@ -12,7 +12,7 @@ import type {
   BoardCommandDispatcher,
   BoardProgressSink,
 } from '../../application/controller/board-command.js';
-import { createWebHost, type WebAssets, type WebHostInfo } from '../web/host.js';
+import { createWebHost, type WebAssets, type WebHostInfo, type WebTerminalReader } from '../web/host.js';
 import type { LoopbackLiteral } from '../web/security.js';
 
 /**
@@ -28,6 +28,7 @@ export interface WebBoardSource {
    * the host stays read-only.
    */
   readonly commandDispatcher?: BoardCommandDispatcher | null;
+  readonly terminalReader?: WebTerminalReader;
   /** Releases the services behind the source; runs when the host shuts down. */
   readonly close: () => Promise<void>;
 }
@@ -89,6 +90,9 @@ export async function runWebCommand(args: string[] = [], cli: WebCliOptions = {}
       : undefined,
     commandDispatcher: cli.createBoardSource
       ? () => (source === null ? null : source.commandDispatcher ?? null)
+      : undefined,
+    terminalReader: cli.createBoardSource
+      ? { read: missionId => source?.terminalReader?.read(missionId) ?? { kind: 'unavailable', message: 'Mission terminal is unavailable.' } }
       : undefined,
   });
   let info: WebHostInfo;

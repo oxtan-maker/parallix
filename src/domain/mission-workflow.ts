@@ -139,13 +139,12 @@ function requireSameReviewedRevision(mission: OpenMission, review: Review): void
   const recorded = currentReviewRound(mission.review);
   const proposed = currentReviewRound(review);
   if (sameReviewedRevision(recorded.subject, proposed.subject)) { return; }
-  // The repeat-review classifier runs only after rebase, verification, and
-  // Backlog mirroring. Its source binds the implementer's resolved revision
-  // to the final verified candidate, so this narrowly admits that persisted
-  // pin while rejecting every ordinary revision replacement.
+  // The reviewer classifier runs only after rebase, verification, and Backlog
+  // mirroring. Its source binds the final verified candidate, so this narrowly
+  // admits that persisted pin on an undecided round while rejecting every
+  // ordinary revision replacement.
   const source = proposed.decision?.classifier;
-  if (recorded.decision === null && source?.responseRevision === recorded.subject.revision
-    && source.candidateRevision === proposed.subject.revision) { return; }
+  if (recorded.decision === null && source?.candidateRevision === proposed.subject.revision) { return; }
   {
     throw new MissionRuleViolation('Review decision must preserve the exact reviewed revision');
   }

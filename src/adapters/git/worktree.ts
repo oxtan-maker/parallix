@@ -332,6 +332,9 @@ export function resolveBaseWorktree(slug: string, options: { rootDir?: string; g
 function workTreeRootFor(candidate: string, runGit: Function): string {
   const isWorkTree = (dir: string) => {
     try {
+      // A directory holding `.git` (a directory, or the file a linked worktree
+      // has) is a work tree root; only the unusual layouts need git to answer.
+      if (fs.existsSync(path.join(dir, '.git'))) { return true; }
       const result = runGit(['-C', dir, 'rev-parse', '--is-inside-work-tree']);
       return result.status === 0 && String(result.stdout || '').trim() === 'true';
     } catch (_) {

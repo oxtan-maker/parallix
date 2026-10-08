@@ -64,6 +64,12 @@ overlap. Every local-only entry must state the unavailable dependency. An
 unclassified boundary test fails verification and runs in neither integration
 sub-lane until classified.
 
+`integration-ci` has an early and a full lane. The early lane (the
+pre-integration gate and its coverage run) omits suites whose largest declared
+CPU limit exceeds `EARLY_CI_CPU_CUTOFF_MS`; the full lane (`--integration-ci-all`,
+run by `npm run test:ci` on the GitHub push gate) runs every member. Existing CPU
+limits are never changed by the cutoff, and coverage must come from the early lane.
+
 ### Test layout decision
 
 Keep suites under `test/unit/`, `test/integration/`, and `test/e2e/`.

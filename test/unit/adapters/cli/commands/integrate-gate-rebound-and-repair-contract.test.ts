@@ -92,7 +92,7 @@ describe("rebound active mission context", () => {
     assert.equal(options.role, 'implementer');
     assert.equal(options.slug, slug);
     assert.equal(options.worktree, worktree);
-    assert.equal(options.state, reviewState);
+    assert.strictEqual(options.state, reviewState, 'without a live review aggregate, fallback receives the original snapshot unchanged');
     assert.equal(options.missionStore, missionStore);
     assert.equal(options.taskResolution, taskResolution);
     assert.equal(options.original, 'claude');
@@ -100,7 +100,7 @@ describe("rebound active mission context", () => {
     return 'codex';
   }
 
-  test('TASK-2603: integration-gate rebound binds active mission context before persisting a fallback implementer', async () => {
+  test('TASK-2603/TASK-2651: integration-gate rebound binds active mission context and preserves its snapshot when no live review aggregate exists', async () => {
     const { runRequiredLocalGates } = createIntegrationGateStep({
       gates: {
         resolveIntegrationVerificationWorktree: () => '/mission-worktree',
@@ -128,14 +128,17 @@ describe("rebound active mission context", () => {
     } as never);
   });
 
-  test('TASK-2642: rebound fallback persists the live current round, not a stale snapshot round', async () => {
-    // The repair advanced the live aggregate to round 5, but the integration
-    // context snapshot still carries round 2. Persisting the stale round below
+  test('TASK-2651: rebound fallback persists the live current round, not a stale snapshot round', async () => {
+    // The integration context was built from round 7. The rebound advances the
+    // live aggregate to round 8 before the custom-to-claude fallback persists.
+    // Persisting the stale round below
     // the current round trips the TASK-2385 stale-flattened-write guard and
     // drops the fallback identity write. The snapshot must be aligned to the
     // live current round before it is handed to the fallback.
-    const liveReview = { kind: 'found', status: 'integration', repositoryId: 'repo', mission: { status: 'integration', repositoryId: 'repo', review: { rounds: [{ number: 5, phase: 'fixing', disposition: null, implementer: 'claude', reviewer: 'codex' }] } } };
-    const staleSnapshot = { implementer: 'claude', reviewer: 'codex', phase: 'approved', round: 2 };
+    const contextReview = { kind: 'found', status: 'integration', repositoryId: 'repo', mission: { status: 'integration', repositoryId: 'repo', review: { rounds: [{ number: 7, phase: 'approved', disposition: null, implementer: 'custom', reviewer: 'codex' }] } } };
+    const liveReview = { kind: 'found', status: 'integration', repositoryId: 'repo', mission: { status: 'integration', repositoryId: 'repo', review: { rounds: [{ number: 7, phase: 'approved', disposition: null, implementer: 'custom', reviewer: 'codex' }, { number: 8, phase: 'fixing', disposition: null, implementer: 'custom', reviewer: 'codex' }] } } };
+    const staleSnapshot = { implementer: 'custom', reviewer: 'codex', phase: 'approved', round: 7 };
+    let persistedImplementer = '';
 
     const { runRequiredLocalGates } = createIntegrationGateStep({
       gates: {
@@ -151,22 +154,46 @@ describe("rebound active mission context", () => {
 
     await runRequiredLocalGates({
       slug, context: { baseWorktree: '/base', taskAssignee: 'claude', branch: `mission/${slug}`, approval: {}, configuredReviewer: null, task: taskResolution, reviewState: staleSnapshot },
-      missionLoad: liveReview, missionServices: { store: missionStore, lifecycle: { transition: async () => ({ status: 'completed' }) } },
+      missionLoad: contextReview, missionServices: { store: { load: async () => liveReview }, lifecycle: { transition: async () => ({ status: 'completed' }) } },
       dryRun: false, noIntegrationGates: false, realAgent: null, realAgentModel: null,
       seams: {
-        startAgentFn: async () => ({ agent: 'codex', result: { status: 0 } }), transitionTaskFn: () => true,
+        startAgentFn: async () => ({ agent: 'claude', result: { status: 0 } }), transitionTaskFn: () => true,
         applyAgentFallbackFn: (options: Record<string, unknown>) => {
           const state = options.state as { round: number; implementer: string };
           assert.notEqual(state, staleSnapshot, 'a aligned copy is passed, not the stale snapshot');
-          assert.equal(state.round, 5, 'the fallback persists the live current round');
-          assert.equal(state.implementer, 'claude', 'the snapshot identity is preserved for the fallback to override');
-          return 'codex';
+          assert.equal(state.round, 8, 'the fallback persists the live current round');
+          assert.equal(state.implementer, 'custom', 'the snapshot identity is preserved for the fallback to override');
+          persistedImplementer = 'claude';
+          return 'claude';
         },
         routeIntegrationGateFailureFn: async (options: Record<string, any>) => {
-          await options.applyAgentFallbackFn({ original: 'claude', launchResult: { agent: 'codex' } });
+          await options.applyAgentFallbackFn({ original: 'custom', launchResult: { agent: 'claude' } });
           return { route: 'fixed', rebounds: 1 };
         },
       },
+    } as never);
+    assert.equal(persistedImplementer, 'claude', 'the fallback identity is persisted against live round 8');
+  });
+
+  test('TASK-2651: unavailable live aggregate keeps the fallback snapshot', async () => {
+    let reads = 0;
+    const snapshot = { implementer: 'claude', reviewer: 'codex', phase: 'approved', round: 7 };
+    const store = { load: async () => {
+      reads += 1;
+      if (reads === 1) throw new Error('temporary review aggregate read failure');
+      return { kind: 'found', mission: { status: 'integration' }, version: 1 };
+    } };
+    const { runRequiredLocalGates } = createIntegrationGateStep({
+      gates: { resolveIntegrationVerificationWorktree: () => '/mission-worktree', captureFinalIntegrationTree: () => ({ ok: true, rootDir: '/mission-worktree', commit: 'c', tree: 't' }), loadPhaseGates: () => [{ key: 'required', command: 'false', order: 1 }], loadRequirePreIntegration: () => false, runPhaseGates: async () => ({ ok: false, skipped: false, cancelled: false, failedGate: { key: 'required' }, error: 'red' }) },
+      landing: { createAbort: () => new Error('abort') }, verification: { formatVerificationCommand: () => 'npm test' },
+    } as never);
+    await runRequiredLocalGates({
+      slug, context: { baseWorktree: '/base', taskAssignee: 'claude', branch: `mission/${slug}`, approval: {}, configuredReviewer: null, task: taskResolution, reviewState: snapshot },
+      missionLoad: { kind: 'found', mission: { repositoryId: 'repo' } }, missionServices: { store, lifecycle: { transition: async () => ({ status: 'completed' }) } },
+      dryRun: false, noIntegrationGates: false, realAgent: null, realAgentModel: null,
+      seams: { startAgentFn: async () => ({ agent: 'codex', result: { status: 0 } }), transitionTaskFn: () => true,
+        applyAgentFallbackFn: (options: Record<string, unknown>) => { assert.strictEqual(options.state, snapshot); return 'codex'; },
+        routeIntegrationGateFailureFn: async (options: Record<string, any>) => { await options.applyAgentFallbackFn({ original: 'claude', launchResult: { agent: 'codex' } }); return { route: 'fixed', rebounds: 1 }; } },
     } as never);
   });
 

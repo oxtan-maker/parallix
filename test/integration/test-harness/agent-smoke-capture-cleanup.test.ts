@@ -14,8 +14,37 @@ process.env.PARALLIX_E2E_SMOKE_TEST_HELPERS = '1';
 const smokeHelpers = await import('../../e2e/agents/real-agent-smoke.test.js');
 
 function loadSmokeHelpers() {
-  return smokeHelpers;
+  return {
+    ...smokeHelpers,
+    runWorkflowAllowFail: (root: string, env: NodeJS.ProcessEnv, args: string[], timeout: number,
+      options: { directCommand?: boolean; keepCaptureArtifacts?: boolean } = {}) => {
+      const childEnv = { ...env };
+      // These direct commands are synthetic capture/timeout fixtures. Keep
+      // coverage on this worker and the real helper, but never let a 30 ms
+      // timeout interrupt a fixture's V8 write into the suite collector.
+      if (options.directCommand) { delete childEnv.NODE_V8_COVERAGE; }
+      return smokeHelpers.runWorkflowAllowFail(root, childEnv, args, timeout, options);
+    },
+  };
 }
+
+test('synthetic smoke-capture children leave the suite coverage directory untouched (TASK-2681)', () => {
+  const tempRoot = fs.mkdtempSync(path.join(originalTmpdir(), 'smoke-capture-coverage-'));
+  const coverageRoot = path.join(tempRoot, 'coverage');
+  fs.mkdirSync(coverageRoot);
+  try {
+    const { runWorkflowAllowFail } = loadSmokeHelpers();
+    const result = runWorkflowAllowFail(tempRoot, { ...process.env, NODE_V8_COVERAGE: coverageRoot },
+      [process.execPath, '-e', 'process.stdout.write("synthetic capture fixture")'], 1000,
+      { directCommand: true });
+    assert.equal(result.status, 0);
+    assert.equal(result.stdout, 'synthetic capture fixture');
+    assert.deepEqual(fs.readdirSync(coverageRoot), [],
+      'synthetic scripts must not contribute raw payloads that timeout can truncate');
+  } finally {
+    fs.rmSync(tempRoot, { recursive: true, force: true });
+  }
+});
 
 test('real-agent smoke capture removes its first stdout file when stderr capture setup fails', () => {
   const tempRoot = fs.mkdtempSync(path.join(originalTmpdir(), 'task-2241-repro-'));

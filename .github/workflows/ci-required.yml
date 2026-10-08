@@ -136,6 +136,14 @@ jobs:
         env:
           CI: 'true'
 
+      # Keep the hosted proof aligned with the repository's local static gate:
+      # type-aware ESLint, its committed debt ratchet, typechecking, and test
+      # hygiene run through the one project-owned entry point.
+      - name: Run static analysis gate
+        run: ./scripts/verify-local.sh static-analysis
+        env:
+          CI: 'true'
+
       - name: Run GitHub-safe verification (npm run test:ci)
         run: npm run test:ci
         env:

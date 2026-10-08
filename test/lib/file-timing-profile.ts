@@ -21,7 +21,7 @@ export interface FileTimingProfile {
 }
 
 export function profileTierOf(requestedArgs: readonly string[]): string {
-  if (requestedArgs.includes('--integration-ci')) { return 'integration-ci'; }
+  if (requestedArgs.includes('--integration-ci') || requestedArgs.includes('--integration-ci-all')) { return 'integration-ci'; }
   if (requestedArgs.includes('--integration-local')) { return 'integration-local'; }
   if (requestedArgs.includes('--integration')) { return 'integration'; }
   return 'unit';

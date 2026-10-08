@@ -10,6 +10,8 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { buildTestRunPlan } from '../../../lib/test-run-plan.js';
+import { EARLY_CI_CPU_CUTOFF_MS, declaredSuiteCpuLimitMs } from '../../../lib/test-tier-selection.js';
+import { readCpuBudgetPolicy } from '../../../lib/test-cpu-policy.mjs';
 import {
   AGENT_E2E_TESTS,
   INTEGRATION_CI_TESTS,
@@ -64,7 +66,7 @@ test('an unclassified integration test cannot enter the GitHub-safe lane', () =>
 
 test('the CI and local integration lanes partition the integration layer', () => {
   const all = selected(['--integration']);
-  const ci = selected(['--integration-ci']);
+  const ci = selected(['--integration-ci-all']);
   const local = selected(['--integration-local']);
   assert.deepEqual([...ci, ...local].sort(), all, 'every integration file runs in exactly one tier');
   assert.deepEqual(ci.filter(file => local.includes(file)), [], 'the tiers must not overlap');
@@ -90,7 +92,7 @@ test('every local-only integration test records why a clean runner cannot run it
 
 test('prohibited workstation dependencies cannot enter the GitHub-safe lane', () => {
   const violations: string[] = [];
-  for (const file of selected(['--integration-ci'])) {
+  for (const file of selected(['--integration-ci-all'])) {
     const source = fs.readFileSync(path.join(testRoot, file), 'utf8');
     for (const { pattern, reason } of PROHIBITED_CI_DEPENDENCY_MARKERS) {
       if (pattern.test(source)) { violations.push(`${file}: ${reason}`); }
@@ -122,6 +124,7 @@ test('the verification tiers have stable npm commands', () => {
   const pkg = JSON.parse(fs.readFileSync(path.join(executionRoot, 'package.json'), 'utf8'));
   assert.equal(pkg.scripts['test:integration:ci'], 'npm run build && npm run test:integration:ci:prebuilt');
   assert.equal(pkg.scripts['test:integration:ci:prebuilt'], 'PARALLIX_PREBUILT_PACK=1 FORCE_COLOR=0 tsx test/run-default-tests.ts --integration-ci');
+  assert.equal(pkg.scripts['test:integration:ci:all:prebuilt'], 'PARALLIX_PREBUILT_PACK=1 FORCE_COLOR=0 tsx test/run-default-tests.ts --integration-ci-all');
   assert.equal(pkg.scripts['test:integration:local'], 'FORCE_COLOR=0 tsx test/run-default-tests.ts --integration-local');
   assert.equal(pkg.scripts['test:integration:local:prebuilt'], 'PARALLIX_PREBUILT_PACK=1 FORCE_COLOR=0 tsx test/run-default-tests.ts --integration-local');
   assert.equal(pkg.scripts['test:agent-e2e'], 'node --import tsx --import ./test/bootstrap-e2e-parallix-home.ts test/e2e/agents/real-agent-smoke.test.ts');
@@ -129,10 +132,33 @@ test('the verification tiers have stable npm commands', () => {
   // The GitHub-safe aggregate covers build, typecheck, hermetic unit tests, the
   // deterministic integration subset, and portable package/bundle validation.
   const ciAggregate = String(pkg.scripts['test:ci']);
-  for (const step of ['npm run typecheck', 'npm run build', 'npm test', 'npm run test:integration:ci:prebuilt', 'npm run test:bundle', 'npm run test:package-content:prebuilt']) {
+  for (const step of ['npm run typecheck', 'npm run build', 'npm test', 'npm run test:integration:ci:all:prebuilt', 'npm run test:bundle', 'npm run test:package-content:prebuilt']) {
     assert.ok(ciAggregate.includes(step), `test:ci must run ${step}`);
   }
   // The local integration gate keeps running the whole integration layer.
   assert.equal(pkg.scripts['test:integration'], 'npm run build && npm run test:integration:prebuilt');
   assert.equal(pkg.scripts['test:integration:prebuilt'], 'PARALLIX_PREBUILT_PACK=1 FORCE_COLOR=0 tsx test/run-default-tests.ts --integration');
+});
+
+test('early integration-ci excludes suites above the declared CPU cutoff while the full lane keeps them (TASK-2684)', () => {
+  const cases = readCpuBudgetPolicy(executionRoot).integrationCases;
+  const limits = { defaultMs: cases.defaultMs, plain: cases.plain, covered: cases.covered };
+  const early = selected(['--integration-ci']);
+  const full = selected(['--integration-ci-all']);
+  const shifted = full.filter(file => !early.includes(file));
+  assert.ok(shifted.length > 0, 'the cutoff must shift at least one heavy suite');
+  assert.deepEqual(early.filter(file => !full.includes(file)), [], 'early lane is a subset of the full lane');
+  for (const file of early) { assert.ok(declaredSuiteCpuLimitMs(limits, file) <= EARLY_CI_CPU_CUTOFF_MS, `${file} exceeds the cutoff`); }
+  for (const file of shifted) { assert.ok(declaredSuiteCpuLimitMs(limits, file) > EARLY_CI_CPU_CUTOFF_MS, `${file} was shifted below the cutoff`); }
+  const focused = shifted[0];
+  assert.deepEqual(selected(['--integration-ci', `test/${focused}`]), [focused], 'a focused shifted suite still runs');
+});
+
+test('the GitHub push gate runs the full integration-ci lane before origin/main acceptance (TASK-2684)', () => {
+  const pkg = JSON.parse(fs.readFileSync(path.join(executionRoot, 'package.json'), 'utf8'));
+  assert.match(pkg.scripts['test:ci'], /npm run test:integration:ci:all:prebuilt/);
+  assert.doesNotMatch(pkg.scripts['test:ci'], /test:integration:ci:prebuilt/);
+  const workflow = fs.readFileSync(path.join(executionRoot, '.github', 'workflows', 'ci-required.yml'), 'utf8');
+  assert.match(workflow, /'github-publish\/\*\*'/);
+  assert.match(workflow, /run: npm run test:ci/);
 });

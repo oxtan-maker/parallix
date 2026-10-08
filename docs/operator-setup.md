@@ -5,14 +5,14 @@
 The `graphify` CLI is a pinned pip package. Bootstrap it on your workstation:
 
 ```sh
-pip3 install --user graphifyy==0.8.30
+pip3 install --user graphifyy==0.9.78
 ```
 
 This installs the `graphify` entry-point script to `~/.local/bin/graphify` (on Linux/macOS). Verify:
 
 ```sh
 ~/.local/bin/graphify --version
-# → graphify 0.8.30
+# → graphify 0.9.78
 ```
 
 The CLI resolves in this order: `$GRAPHIFY_BIN` → `graphify` on `$PATH` → `~/.local/bin/graphify`.
@@ -222,6 +222,14 @@ obtain. Use `px revoke-review --help` for the current invocation. This is a
 human judgement call, not a retry mechanism and not an implementer escape
 hatch.
 
+When a human requests changes on the review provider for a round that is
+already approved, `px review <slug> --continue` treats that human as the
+operator: it revokes the approval with the provider author and the change
+request as the recorded operator and reason, then acts on the correction. The
+loop never launches an implementer under an effective approval. If the
+revocation fails, it stops with the `px revoke-review` guidance and keeps the
+change request pending for a retry.
+
 Revocation preserves the original decision, its reviewed revision, the named
 operator, and the stated reason in the review history. It returns the mission
 to review and opens a new round. When the review provider is available,
@@ -248,6 +256,14 @@ a stale approval as soon as the branch moves. `px rebase` also records the move
 against the approval, naming the revision that superseded it. If an integration
 gate later refuses the merge, the refusal names the staleness already reported.
 
+When a rebase pauses on shared conflicts, the implementer completes the Git
+rebase and runs the repository's verification against the final repaired tree.
+A failed check or unfinished rebase stops completion and automatic push.
+Repair verification can succeed while the mission is active and awaiting review.
+Integration preflight, including a dry run, still requires the appropriate lane
+and current approval; it is not a required check for completing conflict repair.
+A changed repair returns through the lifecycle's independent review process.
+
 A stale approval does not request changes and raises no finding, so the
 implementer owes nothing. It is not re-approved automatically, and no agent or
 review loop can withdraw it. An operator stands it down with the same
@@ -267,10 +283,13 @@ recorded brief still require their mission document.
 
 An integration-gate failure follows a separate, automatic repair path. Before
 launching the implementer, Parallix withdraws the old approval and preserves it
-in review history. Once the repair passes its gates, a fresh round reviews the
-repaired commit. Change requests return to implementation until review approves
-the new revision; integration then restarts with fresh review and gate state.
-An older mission stranded by a gate rebound is recovered through the same path.
+in review history. If the launcher falls back to another agent family during
+that repair, its identity is persisted against the live current review round,
+not the integration context's earlier snapshot. Once the repair passes its
+gates, a fresh round reviews the repaired commit. Change requests return to
+implementation until review approves the new revision; integration then
+restarts with fresh review and gate state. An older mission stranded by a gate
+rebound is recovered through the same path.
 
 If the review loop escalates to a human, run `px review <slug> --continue` to
 resume it. This clears the recorded stop and grants another review attempt,

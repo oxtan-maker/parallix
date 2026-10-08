@@ -40,6 +40,7 @@ let workspace: string;
 let repo: string;
 let home: string;
 let bundleDigestBeforeBuild: string;
+let cachedNativeVersion: RunResult | undefined;
 
 function sha256(file: string): string {
   return crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex');
@@ -88,6 +89,13 @@ function run(argv: readonly string[], options: { cwd?: string; env?: NodeJS.Proc
 /** Argv prefix for the native executable and for the npm fallback (SC8). */
 const nativeArgv = (...args: string[]) => [EXECUTABLE, ...args];
 const npmArgv = (...args: string[]) => [process.execPath, BUNDLE, ...args];
+
+// The artifact is immutable until the rollback case. Several contract sections
+// inspect the same default-environment version output, so one real invocation
+// is sufficient while retaining the executable boundary under test.
+function nativeVersion(): RunResult {
+  return cachedNativeVersion ??= run(nativeArgv('--version'));
+}
 
 /**
  * The headless smoke set both distribution surfaces must pass (SC8).
@@ -158,7 +166,7 @@ test('native SEA smoke: the build pins and records an ESM-SEA-capable Node and r
   assert.equal(evaluateSeaRuntime(metadata.pinnedNode.version).supported, true);
 
   // The executable reports the runtime it actually embeds, and it is the pinned one.
-  const version = run(nativeArgv('--version'));
+  const version = nativeVersion();
   assert.equal(version.status, 0);
   // js/incomplete-sanitization: escapes the version's dots for the RegExp; the
   // pattern feeds an assert.match, not a shell or browser. Test-only, no sink.
@@ -195,7 +203,7 @@ test('native SEA smoke: SEA input is the byte-identical canonical bundle with sn
 });
 
 test('native SEA smoke: --version and --help run from the executable (SC3)', () => {
-  const version = run(nativeArgv('--version'));
+  const version = nativeVersion();
   assert.equal(version.status, 0, version.stderr);
   assert.match(version.stdout, /@magnusekdahl\/parallix \d+\.\d+\.\d+/);
   assert.equal(version.stdout.split('\n')[1], `px: ${EXECUTABLE}`);
@@ -309,7 +317,7 @@ test('native SEA smoke: SQLite create, write, and read round-trip through the ex
 test('native SEA smoke: every asset-manifest key resolves from the executable payload (SC3, ADR 0044 assets surface)', () => {
   // The executable reports the package root it resolved at runtime; assets are
   // only proven if that root is the payload directory beside the binary.
-  const version = run(nativeArgv('--version'));
+  const version = nativeVersion();
   const packageLine = version.stdout.split('\n').find(line => line.startsWith('package: '));
   assertSurface('assets', packageLine === `package: ${SEA_DIR}`,
     `the executable resolved its package root to ${String(packageLine)} instead of the payload directory ${SEA_DIR}`);
@@ -481,7 +489,7 @@ test('native SEA smoke: license, notices, SBOM, checksum, runtime, commit, and s
   assert.match(metadata.crossPlatformClaim, /^none/, 'DOD #3: one native proof makes no cross-platform claim');
 
   // The executing runtime version is inspectable from the executable itself.
-  const version = run(nativeArgv('--version'));
+  const version = nativeVersion();
   assert.equal(version.stdout.trim().split('\n').pop(), `node: ${metadata.pinnedNode.version}`);
 });
 

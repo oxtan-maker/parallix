@@ -13,8 +13,24 @@ const { buildCodexDraftInvocation, codexConfigPath, ensureCodexHome } = codexMod
 const CODEX_VERSION = '0.156.1';
 const CODEX_PACKAGE = `@openai/codex@${CODEX_VERSION}`;
 
-function runPinnedCodex(args: string[], env: NodeJS.ProcessEnv) {
-  return childProcess.spawnSync('npx', ['--yes', '--package', CODEX_PACKAGE, 'codex', ...args], {
+function cachedCodexBinary(npmCache: string): string | null {
+  const npxRoot = path.join(npmCache, '_npx');
+  try {
+    for (const entry of fs.readdirSync(npxRoot)) {
+      const binary = path.join(npxRoot, entry, 'node_modules', '.bin', 'codex');
+      if (fs.existsSync(binary)) { return binary; }
+    }
+  } catch {
+    // The first invocation populates the cache through npx.
+  }
+  return null;
+}
+
+function runPinnedCodex(args: string[], env: NodeJS.ProcessEnv, npmCache: string) {
+  const binary = cachedCodexBinary(npmCache);
+  const command = binary ?? 'npx';
+  const commandArgs = binary ? args : ['--yes', '--package', CODEX_PACKAGE, 'codex', ...args];
+  return childProcess.spawnSync(command, commandArgs, {
     encoding: 'utf8',
     env,
     timeout: 30_000,
@@ -47,7 +63,10 @@ test('task-2570: generated Codex v0.156.1 mission config has supported approval 
     assert.equal(invocation.args.some((arg: string) => arg.includes('.approval_policy=')), false);
 
     const env = { ...process.env, CODEX_HOME: invocation.options.env.CODEX_HOME, npm_config_cache: npmCache };
-    const version = runPinnedCodex(['--version'], env);
+    // The initial npx invocation populates this case's isolated cache.  The
+    // two strict-config probes below still execute the exact pinned CLI, but
+    // bypass npx's repeated package-resolution process.
+    const version = runPinnedCodex(['--version'], env, npmCache);
     assert.equal(version.status, 0, version.stderr);
     assert.match(version.stdout, new RegExp(`codex-cli ${CODEX_VERSION.replaceAll('.', '\\.')}`));
 
@@ -62,7 +81,7 @@ test('task-2570: generated Codex v0.156.1 mission config has supported approval 
       path.join(root, 'missing-output-schema.json'),
       invocation.args.at(-1)!,
     ];
-    const launch = runPinnedCodex(launchArgs, env);
+    const launch = runPinnedCodex(launchArgs, env, npmCache);
     assert.notEqual((launch.error as NodeJS.ErrnoException | undefined)?.code, 'ETIMEDOUT', 'Codex did not reach config validation before timing out');
     assert.match(`${launch.stdout}\n${launch.stderr}`, /Failed to read output schema file/i);
     assert.doesNotMatch(`${launch.stdout}\n${launch.stderr}`, /unrecognized.*setting/i);
@@ -71,7 +90,7 @@ test('task-2570: generated Codex v0.156.1 mission config has supported approval 
       .replace(/^approval_policy = "never"\n\n/m, '')
       .replace(/^trust_level = "trusted"$/m, 'trust_level = "trusted"\napproval_policy = "never"');
     fs.writeFileSync(path.join(operatorCodexHome, 'config.toml'), unsupportedParentConfig);
-    const unsupportedLaunch = runPinnedCodex(launchArgs, env);
+    const unsupportedLaunch = runPinnedCodex(launchArgs, env, npmCache);
     assert.notEqual((unsupportedLaunch.error as NodeJS.ErrnoException | undefined)?.code, 'ETIMEDOUT', 'Codex did not reach config validation before timing out');
     assert.match(`${unsupportedLaunch.stdout}\n${unsupportedLaunch.stderr}`, /approval_policy/i);
   } finally {

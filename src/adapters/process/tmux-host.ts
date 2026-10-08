@@ -118,14 +118,19 @@ function paneScript(socketPath: string, windowName: string, scratch: string): st
 
 function consolePxScript(command: string | undefined): string {
   if (!command) { return '#!/bin/sh\nexit 127\n'; }
-  // The retained shell remains credential-free.  Only a px child starts an
-  // interactive Bash, which reads the operator's authorized .bashrc before
-  // immediately execing the real CLI command.
-  return ['#!/bin/sh', `exec /bin/bash -ic 'exec "$@"' bash ${shellQuote(command)} "$@"`, ''].join('\n');
+  // A px child starts an interactive Bash that reads the operator's rc files
+  // before exec. Those files may run px themselves (`eval "$(px shell-init)"`),
+  // which would re-enter this wrapper without end: the marker makes the nested
+  // call exec the CLI directly, and is dropped before the real command runs.
+  const quoted = shellQuote(command);
+  return ['#!/bin/sh',
+    `if [ -n "$PARALLIX_CONSOLE_PX" ]; then exec ${quoted} "$@"; fi`,
+    `PARALLIX_CONSOLE_PX=1 exec /bin/bash -ic 'unset PARALLIX_CONSOLE_PX; exec "$@"' bash ${quoted} "$@"`, ''].join('\n');
 }
 
-function hostScript(socketPath: string, sessionName: string, windowName: string, scratch: string, cwd: string, supervisorPid: number, consoleBin: string, capturePath: string): string {
-  // The server and retained console must not inherit operation credentials.
+function hostScript(socketPath: string, sessionName: string, windowName: string, scratch: string, cwd: string, supervisorPid: number, consoleBin: string, capturePath: string, terminalStateDir: string): string {
+  // The tmux server, and every window it later launches, must not inherit operation credentials.
+  // The retained console is the operator's own interactive shell and reads their rc files like any terminal.
   const cleanEnv = ['PATH', 'HOME', 'TERM', 'SHELL', 'LANG', 'USER', 'LOGNAME', 'PARALLIX_HOME', 'XDG_CONFIG_HOME', 'XDG_STATE_HOME', 'XDG_DATA_HOME'].filter(key => process.env[key])
     .map(key => `${key}=${shellQuote(process.env[key]!)}`).join(' ');
   const stateRoot = path.dirname(path.dirname(socketPath));
@@ -160,7 +165,7 @@ function hostScript(socketPath: string, sessionName: string, windowName: string,
     `mkfifo ${fifo} || exit 70`,
     // -A would attach when the session exists and require a caller TTY.
     // Concurrent creators may lose new-session; recheck the exact session.
-    `${t} has-session -t ${shellQuote(`=${sessionName}`)} 2>/dev/null || ${t} -f /dev/null new-session -d -s ${name} -n console -x 200 -y 50 -c ${shellQuote(cwd)} ${shellQuote(`PATH=${consoleBin}:$PATH exec /bin/sh -i`)} 2>/dev/null || ${t} has-session -t ${shellQuote(`=${sessionName}`)} || exit 70`,
+    `${t} has-session -t ${shellQuote(`=${sessionName}`)} 2>/dev/null || ${t} -f /dev/null new-session -d -s ${name} -n console -x 200 -y 50 -c ${shellQuote(cwd)} ${shellQuote(`PARALLIX_TERMINAL_STATE_DIR=${shellQuote(terminalStateDir)} PATH=${consoleBin}:$PATH exec "\${SHELL:-/bin/sh}" -i`)} 2>/dev/null || ${t} has-session -t ${shellQuote(`=${sessionName}`)} || exit 70`,
     `${t} pipe-pane -t ${consoleTarget} -o ${shellQuote(`cat >> ${capture}`)} || exit 70`,
     `${t} new-window -d -t ${name} -n ${shellQuote(windowName)} -c ${shellQuote(cwd)} ${shellQuote(`sh ${shellQuote(path.join(scratch, 'pane.sh'))}`)} || exit 70`,
     `${t} set-option -w -t ${target} @px_host_pid "$$" >/dev/null`,
@@ -222,7 +227,7 @@ export function prepareTmuxLaunch(input: TmuxLaunchInput, options: { env?: NodeJ
   writeEnvFile(path.join(scratch, 'pane.env'), { ...input.env, PWD: input.cwd, PARALLIX_MISSION_TERMINAL: input.identity.missionId, PARALLIX_MISSION_SOCKET: socketPath });
   fs.writeFileSync(path.join(scratch, 'command.sh'), commandScript(socketPath, scratch, input.command, input.args), { mode: 0o700 });
   fs.writeFileSync(path.join(scratch, 'pane.sh'), paneScript(socketPath, windowName, scratch), { mode: 0o700 });
-  fs.writeFileSync(path.join(scratch, 'host.sh'), hostScript(socketPath, sessionName, windowName, scratch, input.cwd, input.supervisorPid ?? process.pid, consoleBin, missionTerminalCapturePath(input.identity, env)), { mode: 0o700 });
+  fs.writeFileSync(path.join(scratch, 'host.sh'), hostScript(socketPath, sessionName, windowName, scratch, input.cwd, input.supervisorPid ?? process.pid, consoleBin, missionTerminalCapturePath(input.identity, env), terminalStateRoot(env)), { mode: 0o700 });
   const spawnSyncFn = options.spawnSyncFn ?? childProcess.spawnSync;
   let started = false;
   return {
@@ -279,6 +284,10 @@ function pidAlive(pid: number): boolean {
   try { process.kill(pid, 0); return true; } catch (err) { return (err as NodeJS.ErrnoException).code === 'EPERM'; }
 }
 
+function isReconciledOperationWindow(name: string, host: string | undefined, supervisor: string | undefined, role: string, allRoles: boolean): boolean {
+  return (allRoles || name.startsWith(`${role}-`)) && Boolean(host || supervisor);
+}
+
 /** Stop unsupervised operation windows; idle shells and other roles survive. */
 export function reconcileOrphanSessions(
   identity: Pick<AgentRunIdentity, 'repositoryKey' | 'missionId' | 'role'>,
@@ -293,7 +302,7 @@ export function reconcileOrphanSessions(
   const killed: string[] = [];
   for (const line of String(listed.stdout).split('\n').filter(Boolean)) {
     const [name, host, supervisor, command] = line.split('\t');
-    if ((!options.allRoles && !name.startsWith(`${identity.role}-`)) || (!host && !supervisor)) { continue; }
+    if (!isReconciledOperationWindow(name, host, supervisor, identity.role, Boolean(options.allRoles))) { continue; }
     const hostPid = positivePid(host);
     const supervisorPid = positivePid(supervisor);
     if (hostPid !== null && isAlive(hostPid) && supervisorPid !== null && isAlive(supervisorPid)) { continue; }

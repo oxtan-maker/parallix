@@ -16,7 +16,7 @@ import * as net from 'node:net';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { loadWebAssets } from '../../../src/adapters/web/asset-store.js';
-import { createWebHost, PROTECTION_HEADERS, WEB_COMMANDS_PATH, WEB_EVENTS_PATH, WEB_SNAPSHOT_PATH, type WebAssets, type WebHostInfo, type WebHostOptions } from '../../../src/interfaces/web/host.js';
+import { createWebHost, PROTECTION_HEADERS, WEB_COMMANDS_PATH, WEB_EVENTS_PATH, WEB_SNAPSHOT_PATH, WEB_TERMINAL_PATH, type WebAssets, type WebHostInfo, type WebHostOptions } from '../../../src/interfaces/web/host.js';
 import { validateWebBoardSnapshot, validateWebProgressEvent, WEB_TRANSPORT_VERSION } from '../../../src/interfaces/web/transport.js';
 import { WEB_EVENT_BUFFER_LIMIT } from '../../../src/interfaces/web/stream.js';
 import { sessionCookieName } from '../../../src/interfaces/web/security.js';
@@ -603,6 +603,73 @@ test('web host: snapshot route returns a valid versioned board snapshot', async 
     assert.equal(validation.value.transportVersion, WEB_TRANSPORT_VERSION);
     assert.equal(validation.value.projectionVersion, projection.version);
     assert.equal(validation.value.stages.find(stage => stage.lane === 'active')?.count, 2);
+  });
+});
+
+test('web host: overlapping snapshot reads share builds and never take a build that began before them (TASK-2681)', async () => {
+  const gates: Array<() => void> = [];
+  const log: string[] = [];
+  let builds = 0;
+  const build = async () => {
+    const id = ++builds;
+    log.push(`start-${id}`);
+    await new Promise<void>(resolve => { gates.push(resolve); });
+    return makeProjection({ active: makeCards(id, 'active') });
+  };
+  const timers = manualTimers();
+  await withHost({ buildProjection: build, subscription: timers.options }, async info => {
+    const read = async (label: string) => {
+      log.push(`ask-${label}`);
+      const res = await fetch(`${info.origin}${WEB_SNAPSHOT_PATH}`);
+      const validation = validateWebBoardSnapshot(await res.json());
+      assert.ok(validation.ok);
+      return validation.value.stages.find(stage => stage.lane === 'active')?.count;
+    };
+    const first = read('first');
+    while (gates.length < 1) { await new Promise(resolve => setTimeout(resolve, 5)); }
+    const late = ['a', 'b', 'c', 'd'].map(read);
+    // Let the late requests reach the host while build 1 is still running.
+    await new Promise(resolve => setTimeout(resolve, 100));
+    assert.equal(builds, 1, 'a running build is not restarted per request');
+    gates[0]();
+    while (gates.length < 2) { await new Promise(resolve => setTimeout(resolve, 5)); }
+    gates[1]();
+    assert.equal(await first, 1, 'the first caller gets the build it started');
+    assert.deepEqual(await Promise.all(late), [2, 2, 2, 2], 'late callers share one later build');
+    assert.equal(builds, 2);
+    assert.ok(log.indexOf('start-2') > log.lastIndexOf('ask-d'), 'the shared build began after every caller it serves asked');
+  });
+});
+
+test('web host: terminal route is GET-only, captures only a projected mission, and reports absence', async () => {
+  const projection = makeProjection({ active: makeCards(1, 'active') });
+  const missionId = projection.stages.find(stage => stage.lane === 'active')!.cards[0]!.id;
+  const reads: string[] = [];
+  let builds = 0;
+  let captured = false;
+  await withHost({ buildProjection: async () => { builds++; return projection; }, terminalReader: { read: id => {
+    reads.push(id);
+    if (captured) { return { kind: 'captured', output: 'retained review output', message: 'No live tmux session. Recorded output.' }; }
+    return id === missionId ? { kind: 'live', output: 'agent output\\n' } : { kind: 'unavailable', message: 'missing' };
+  } } }, async info => {
+    const board = await fetch(`${info.origin}/api/board`);
+    assert.equal(board.status, 200);
+    await board.json();
+    const buildsBeforeTerminal = builds;
+    const live = await fetch(`${info.origin}/api/terminal/${missionId}`);
+    assert.equal(live.status, 200);
+    assert.deepEqual(await live.json(), { kind: 'live', output: 'agent output\\n' });
+    assert.deepEqual(reads, [missionId]);
+    assert.equal(builds, buildsBeforeTerminal, 'terminal polling uses the displayed board without another expensive rebuild (TASK-2661)');
+    const absent = await fetch(`${info.origin}/api/terminal/not-on-board`);
+    assert.equal(absent.status, 404);
+    assert.deepEqual(reads, [missionId], 'unknown cards never reach the terminal port');
+    captured = true;
+    const recorded = await fetch(`${info.origin}/api/terminal/${missionId}`);
+    assert.equal(recorded.status, 200, 'recorded output remains readable for pipe-hosted missions (TASK-2661)');
+    assert.deepEqual(await recorded.json(), { kind: 'captured', output: 'retained review output', message: 'No live tmux session. Recorded output.' });
+    const mutation = await fetch(`${info.origin}/api/terminal/${missionId}`, { method: 'POST' });
+    assert.equal(mutation.status, 403, 'the existing mutation guard runs before the catch-all 405');
   });
 });
 

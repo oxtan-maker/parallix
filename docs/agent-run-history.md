@@ -85,14 +85,14 @@ other supervised work. Normal exit,
 cancellation, timeout, and signal handling still flow through the existing
 launcher and supervisor.
 
-The retained console is an unconfined operator shell with a minimal operator
-environment; completed operation windows and their exported credentials are
-removed. A `px` command starts a short-lived operator Bash child to resolve
-operator-authorized provider settings before it execs, so those settings are
-not retained in the console or tmux-server environment.
-Owner-only sockets restrict attachment; evidence redaction does not confine the
-shell. The console uses `/bin/sh -i` and the private tmux server ignores the
-operator's tmux configuration.
+The retained console is an unconfined operator shell: the operator's own
+interactive shell (`$SHELL -i`, `/bin/sh` when unset), so it reads their rc files
+like any terminal and the environment they expect returns. Completed operation
+windows and their exported credentials are removed. The private tmux server and
+every operation window it launches start from a minimal environment and ignore the
+operator's tmux configuration, so operation credentials are not inherited from the
+console. Owner-only sockets restrict attachment; evidence redaction does not
+confine the shell.
 
 Restart cleanup signals the recorded command before removing its window.
 This is best effort when the recorded process identity is stale or a child

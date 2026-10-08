@@ -1,8 +1,8 @@
 ---
 id: TASK-2669
 title: Show bug-labeled mission trend in px stats
-status: backlog
-assignee: []
+status: done
+assignee: [codex]
 created_date: '2026-10-06 13:52'
 labels:
   - ai_sdlc

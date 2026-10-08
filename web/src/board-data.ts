@@ -13,6 +13,34 @@ import { validateWebBoardSnapshot, validateWebCommandResult, type WebBoardSnapsh
 /** The snapshot read path. This client has no mutation route. */
 export const SNAPSHOT_PATH = '/api/board';
 export const COMMANDS_PATH = '/api/commands';
+export const terminalPath = (missionId: string) => `/api/terminal/${encodeURIComponent(missionId)}`;
+
+export type TerminalState =
+  | { readonly kind: 'live'; readonly output: string }
+  | { readonly kind: 'captured'; readonly output: string; readonly message: string }
+  | { readonly kind: 'unavailable'; readonly message: string };
+
+/** The terminal endpoint is a GET-only, same-origin read. */
+export async function loadTerminal(missionId: string, signal?: AbortSignal): Promise<TerminalState> {
+  try {
+    const deadline = AbortSignal.timeout(30000);
+    const response = await fetch(terminalPath(missionId), { headers: { accept: 'application/json' }, signal: signal === undefined ? deadline : AbortSignal.any([signal, deadline]) });
+    const body: unknown = await response.json();
+    if (typeof body === 'object' && body !== null && (body as { kind?: unknown }).kind === 'captured'
+      && typeof (body as { output?: unknown }).output === 'string' && typeof (body as { message?: unknown }).message === 'string') {
+      return { kind: 'captured', output: (body as { output: string }).output, message: (body as { message: string }).message };
+    }
+    if (typeof body === 'object' && body !== null && (body as { kind?: unknown }).kind === 'live' && typeof (body as { output?: unknown }).output === 'string') {
+      return { kind: 'live', output: (body as { output: string }).output };
+    }
+    if (typeof body === 'object' && body !== null && typeof (body as { message?: unknown }).message === 'string') {
+      return { kind: 'unavailable', message: (body as { message: string }).message };
+    }
+    return { kind: 'unavailable', message: `Mission terminal is unavailable (HTTP ${response.status}).` };
+  } catch {
+    return { kind: 'unavailable', message: 'Mission terminal is unavailable.' };
+  }
+}
 
 /** The four presentation states the board contract distinguishes, plus loading. */
 export type SnapshotState =

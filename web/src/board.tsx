@@ -7,7 +7,7 @@
  * Layout, spacing, palette and typography follow the design authority
  * (`Parallix Board GPU.dc.html` in the reference acceptance artifact).
  */
-import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
+import { useCallback, useEffect, useRef, useState, type KeyboardEvent, type MouseEvent } from 'react';
 import type { DragEvent } from 'react';
 import type { WebBoardSnapshot, WebCommandAction, WebMissionCard } from '../../src/interfaces/web/transport.js';
 import { AttentionRail } from './attention-rail.js';
@@ -17,7 +17,7 @@ import { FlowPanel } from './flow-panel.js';
 import { IntakeColumn } from './intake-column.js';
 import { OperationLog } from './operation-log.js';
 import { TopBar } from './top-bar.js';
-import { sendCommand } from './board-data.js';
+import { loadTerminal, sendCommand, type TerminalState } from './board-data.js';
 import { unavailableReason, type PendingCommands } from './pending-command.js';
 
 // Presentation-only grouping: which reference region a received stage sits in.
@@ -66,6 +66,8 @@ export function Board({ snapshot, onRefresh }: { snapshot: WebBoardSnapshot; onR
   const [outcomes, setOutcomes] = useState<ReadonlyMap<string, string>>(new Map());
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [dragged, setDragged] = useState<WebMissionCard | null>(null);
+  const [terminalMission, setTerminalMission] = useState<string | null>(null);
+  const closeTerminal = useCallback(() => setTerminalMission(null), []);
   /**
    * The pending destructive confirmation. Every other action dispatches on the
    * click that invoked it; cancellation deletes rows, so it takes a second,
@@ -162,6 +164,11 @@ export function Board({ snapshot, onRefresh }: { snapshot: WebBoardSnapshot; onR
     void dispatch(dragged, action);
   };
   const canDrop = (lane: WebMissionCard['lane']) => dragged !== null && !pendingRef.current.has(dragged.id) && dragActionForTarget(dragged.actions, lane) !== null;
+  const selectTerminal = (event: MouseEvent<HTMLDivElement>) => {
+    if ((event.target as HTMLElement).closest('button,a,[role="button"]') !== null) { return; }
+    const card = (event.target as HTMLElement).closest<HTMLElement>('[data-board-card]');
+    if (card !== null) { setSelectedId(card.dataset.boardCard ?? null); setTerminalMission(card.dataset.boardCard ?? null); }
+  };
   // The intake bucket stacks in the reference's order; every other lane keeps
   // the order the server sent.
   const intake = snapshot.stages
@@ -171,7 +178,7 @@ export function Board({ snapshot, onRefresh }: { snapshot: WebBoardSnapshot; onR
   const shipped = snapshot.stages.filter((stage) => stage.lane === SHIPPED_LANE);
 
   return (
-    <div ref={root} tabIndex={-1} onKeyDown={moveSelection}>
+    <div ref={root} tabIndex={-1} onKeyDown={moveSelection} onClick={selectTerminal}>
       <TopBar snapshot={snapshot} flowOpen={flowOpen} onFlowToggle={() => setFlowOpen((open) => !open)} />
       {flowOpen && <FlowPanel metrics={snapshot.metrics} />}
       <div style={{ flex: 1, display: 'flex', minHeight: 0 }}>
@@ -244,8 +251,47 @@ export function Board({ snapshot, onRefresh }: { snapshot: WebBoardSnapshot; onR
           </div>
         </section>
       )}
+      {terminalMission !== null && <TerminalProgress missionId={terminalMission} onClose={closeTerminal} />}
       {[...outcomes.entries()].map(([missionId, outcome]) => <p key={missionId} role="status" aria-live="polite" style={{ margin: '0 14px 10px', color: '#aab4bf' }}>{outcome}</p>)}
       <OperationLog snapshot={snapshot} />
+    </div>
+  );
+}
+
+function TerminalProgress({ missionId, onClose }: { missionId: string; onClose: () => void }) {
+  const [terminal, setTerminal] = useState<TerminalState>({ kind: 'unavailable', message: 'Loading terminal output…' });
+  const [readError, setReadError] = useState(false);
+  useEffect(() => {
+    let live = true;
+    let pending = false;
+    const controller = new AbortController();
+    const refresh = () => {
+      if (pending) { return; }
+      pending = true;
+      void loadTerminal(missionId, controller.signal).then(result => {
+        if (live) {
+          const interrupted = result.kind === 'unavailable' && result.message === 'Mission terminal is unavailable.';
+          setReadError(interrupted);
+          setTerminal(previous => interrupted && previous.kind !== 'unavailable' ? previous : result);
+        }
+      }).finally(() => { pending = false; });
+    };
+    refresh();
+    const interval = window.setInterval(refresh, 1000);
+    const escape = (event: globalThis.KeyboardEvent) => { if (event.key === 'Escape') { onClose(); } };
+    window.addEventListener('keydown', escape);
+    return () => { live = false; controller.abort(); window.clearInterval(interval); window.removeEventListener('keydown', escape); };
+  }, [missionId, onClose]);
+  return (
+    <div role="presentation" onClick={event => { if (event.target === event.currentTarget) { onClose(); } }} style={{ position: 'fixed', inset: 0, zIndex: 70, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,.55)' }}>
+      <section role="dialog" aria-modal="true" aria-label={`Mission progress for ${missionId}`} style={{ width: 720, maxWidth: '92vw', maxHeight: '80vh', overflow: 'auto', padding: 16, background: '#101c16', border: '1px solid #2f5a3f', borderRadius: 6, color: '#cbd9cf', fontFamily: 'inherit' }}>
+        <header style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}><h2 style={{ margin: 0, fontSize: 14 }}>{missionId} — {terminal.kind === 'captured' ? 'recorded output' : 'live terminal'}</h2><button type="button" onClick={onClose}>close</button></header>
+        {terminal.kind === 'captured' && <p role="status">{terminal.message}</p>}
+        {readError && terminal.kind !== 'unavailable' && <p role="status">Terminal refresh interrupted; showing last captured output. Retrying…</p>}
+        {terminal.kind !== 'unavailable'
+          ? <pre aria-live="polite" style={{ margin: '12px 0 0', whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>{terminal.output}</pre>
+          : <p role="status">{terminal.message}</p>}
+      </section>
     </div>
   );
 }

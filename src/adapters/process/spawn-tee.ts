@@ -3,6 +3,7 @@ import type { SpawnOptions, ChildProcess } from 'node:child_process';
 import path from 'node:path';
 import { createOutputWatchdog, type NoOutputWatchdog } from './output-watchdog.js';
 import { wrapWithBubblewrap } from './bubblewrap.js';
+import { DECISION_CREDENTIAL_ENV } from '../../domain/decision-credentials.js';
 
 export const DEFAULT_MAX_TAIL_BYTES = 64 * 1024;
 
@@ -133,6 +134,8 @@ export function spawnAndTee(command: string, args: string[], options: SpawnTeeOp
       ...(spawnOptions.env || {}),
       PWD: resolvedCwd
     };
+    // Decision-provider keys belong to Parallix alone; no launched child (agent or tool shell) inherits them.
+    for (const name of DECISION_CREDENTIAL_ENV) { delete env[name]; }
     // Guard construction errors deliberately reject this launch. An available
     // but broken Bubblewrap guard must never retry the child unsandboxed.
     const confined = wrapWithBubblewrap(command, args, resolvedCwd);

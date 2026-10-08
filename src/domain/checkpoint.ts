@@ -97,6 +97,14 @@ export function latestEvidencedCheckpoint(checkpoints: readonly CheckpointData[]
   return [...checkpoints].reverse().find((checkpoint) => !isPlannedCheckpoint(checkpoint)) ?? null;
 }
 
+/**
+ * Goal Check rows the final checkpoint still lacks. Handoff requires the latest
+ * recorded checkpoint to carry one row per success criterion; zero when covered.
+ */
+export function finalGoalCheckShortfall(rows: readonly GoalCheckRow[], successCriteriaCount: number): number {
+  return Math.max(0, successCriteriaCount - rows.length);
+}
+
 /** Reject blank Goal Check text before it can reach persistence. */
 export function assertGoalCheckRows(rows: readonly GoalCheckRow[]): void {
   for (const row of rows) {

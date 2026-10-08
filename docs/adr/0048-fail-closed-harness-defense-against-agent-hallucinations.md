@@ -149,7 +149,7 @@ Seven candidate controls are evaluated and prioritized. The classification colum
 | C4 | Declared-gate pre-validation | ⏳ Next wave | task-1386 | Static validation of gate commands before execution |
 | C5 | Gatekeeper auto-send-back with agent relaunch | ⏳ Next wave | task-1388 | Missing mandatory artifacts auto-send-back |
 | C6 | Infrastructure blocker classification and operator handoff | ✅ Implemented | task-1392 | `classifyGateFailure` now delegates to the shared classifier, HumanOnly failures strand instead of relaunching, and `repairHandoff()` returns a deterministic infrastructure blocker message |
-| C7 | Evidence-reference validation | ✅ Implemented | task-1393 | `handoff.ts` and `review-commands.ts` require Goal Check rows to cite verifiable file:line refs, ADR refs, or real test names / test-file paths instead of placeholder prose |
+| C7 | Evidence-reference validation | ✅ Implemented | task-1393 | `px checkpoint record`, handoff and static review share one check (`static-evidence.ts`): Goal Check rows must cite an existing repository-relative path, a quoted test name from a test/spec/cases module, a recognized command, or an ADR instead of placeholder prose |
 
 ## Implementation Order
 

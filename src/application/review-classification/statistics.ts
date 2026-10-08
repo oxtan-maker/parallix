@@ -76,6 +76,56 @@ export function classifierStatistics(input: ClassifierStatisticsInput, window: {
   };
 }
 
+export type RoundKind = 'all' | 'first review' | 're-review';
+/** Round 1 has no earlier round; every historical telemetry row is round 2 or later, so it stays a re-review. */
+export const roundKindOf = (round: number): Exclude<RoundKind, 'all'> => round === 1 ? 'first review' : 're-review';
+
+/**
+ * Review rounds of one kind, not call samples: a retried round keeps one entry (its latest
+ * sample decides the outcome) while any of its samples may show the classifier ran.
+ */
+export function reviewRounds(input: ClassifierStatisticsInput, window: { start: Date; end: Date }, kind: RoundKind = 'all') {
+  const start = window.start.toISOString().slice(0, 10), end = window.end.toISOString().slice(0, 10);
+  const inside = (at: string) => Number.isFinite(Date.parse(at)) && new Date(at).toISOString().slice(0, 10) >= start
+    && new Date(at).toISOString().slice(0, 10) <= end;
+  const ofKind = (round: number) => kind === 'all' || roundKindOf(round) === kind;
+  const byRound = new Map<string, ClassifierCallMeasurement[]>();
+  for (const sample of input.attempts) {
+    const key = JSON.stringify([sample.repository, sample.mission, sample.round]);
+    byRound.set(key, [...(byRound.get(key) ?? []), sample]);
+  }
+  const rounds = [...byRound.values()].map(samples => ({
+    latest: samples.reduce((a, b) => Date.parse(b.observedAt) >= Date.parse(a.observedAt) ? b : a, samples[0]),
+    called: samples.some(sample => sample.classificationMs !== null),
+  })).filter(round => inside(round.latest.observedAt) && ofKind(round.latest.round));
+  const decided = (round: { latest: ClassifierCallMeasurement }, route: ClassifierCallMeasurement['route']) =>
+    !round.latest.shadow && round.latest.route === route;
+  const reviewerRounds = rounds.filter(round => round.latest.route === 'reviewer' || round.latest.shadow);
+  const applied = input.applied.filter(decision => inside(decision.decidedAt)
+    && ofKind(input.attempts.find(a => a.decisionId === decision.decisionId)?.round ?? 0));
+  const unobserved = applied.filter(decision => {
+    const sample = input.attempts.find(a => a.decisionId === decision.decisionId);
+    const observation = input.observations.find(o => o.decisionId === decision.decisionId);
+    return !sample || !observation || observation.revision !== sample.candidateRevision || observation.originalFindings === 'unobserved';
+  }).length;
+  const wrong = applied.filter(decision => {
+    const observation = input.observations.find(o => o.decisionId === decision.decisionId);
+    return (decision.route === 'clear' && observation?.originalFindings === 'unresolved')
+      || (decision.route === 'implementer' && observation?.originalFindings === 'resolved');
+  }).length;
+  const cleared = rounds.filter(round => decided(round, 'clear')).length;
+  const returned = rounds.filter(round => decided(round, 'implementer')).length;
+  return {
+    coverage: input.coverage, rounds: rounds.length,
+    notAttempted: rounds.filter(round => round.latest.provider === null).length,
+    fellBack: reviewerRounds.filter(round => round.latest.provider !== null).length,
+    called: rounds.filter(round => round.called).length, cleared, returned, jevDecisions: cleared + returned,
+    appliedDecisions: applied.length, observedDecisions: applied.length - unobserved, wrong,
+    reasons: Object.fromEntries([...new Set(reviewerRounds.map(round => round.latest.reason))].sort((a, b) => a.localeCompare(b))
+      .map(reason => [reason, reviewerRounds.filter(round => round.latest.reason === reason).length])),
+  };
+}
+
 /** Agent-family/model comparison uses the same decisions and full-history samples. */
 export function classifierGroups(input: ClassifierStatisticsInput, window: { start: Date; end: Date }) {
   if (!input.missions) { return null; }

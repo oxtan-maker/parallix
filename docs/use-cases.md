@@ -151,7 +151,9 @@ and a concrete next action, so that whoever continues this mission — including
 different agent family — starts from committed facts instead of guessing.
 
 **Confidence:** Confirmed. Re-recording a checkpoint replaces its evidence and
-leaves the others untouched.
+leaves the others untouched. Recording refuses evidence that handoff would
+refuse: a row citing no resolvable reference, or a final planned checkpoint with
+fewer rows than success criteria.
 
 ### UC-16 — Answer a review without losing the thread
 

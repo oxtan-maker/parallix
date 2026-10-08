@@ -1,5 +1,5 @@
 import type { SqliteDatabaseAdapter } from './database-adapter.js';
-import type { OperationalHistoryEntry, OperationalHistoryRepository } from '../../application/ports/operation-history.js';
+import type { OperationLogSummary, OperationalHistoryEntry, OperationalHistoryRepository } from '../../application/ports/operation-history.js';
 
 /**
  * SQLite-backed operational history repository.
@@ -29,6 +29,37 @@ export class SqliteOperationalHistoryRepository implements OperationalHistoryRep
       eventType: String(row.event_type),
       eventData: String(row.event_data),
       createdAt: String(row.created_at),
+    }));
+  }
+
+  async findRecentLogEntries(limit: number): Promise<readonly OperationLogSummary[]> {
+    const rows = await this.db.query<{
+      id: unknown;
+      event_type: unknown;
+      created_at: unknown;
+      message: unknown;
+      agent: unknown;
+      raw_data: unknown;
+    }>(
+      `SELECT id, event_type, created_at,
+              CASE WHEN is_object THEN json_extract(event_data, '$.message') END AS message,
+              CASE WHEN is_object THEN json_extract(event_data, '$.agent') END AS agent,
+              CASE WHEN is_object THEN NULL ELSE event_data END AS raw_data
+       FROM (
+         SELECT id, event_type, created_at, event_data,
+                CASE WHEN json_valid(event_data) THEN json_type(event_data) = 'object' ELSE 0 END AS is_object
+         FROM (SELECT id, event_type, event_data, created_at FROM operational_history ORDER BY id DESC LIMIT ?)
+       ) ORDER BY id ASC`,
+      [limit],
+    );
+
+    return rows.map((row) => ({
+      id: Number(row.id),
+      eventType: String(row.event_type),
+      createdAt: String(row.created_at),
+      message: typeof row.message === 'string' ? row.message : null,
+      agent: typeof row.agent === 'string' ? row.agent : null,
+      rawData: row.raw_data === null || row.raw_data === undefined ? null : String(row.raw_data),
     }));
   }
 

@@ -119,22 +119,28 @@ describe("publish and reinstall", () => {
   function run(command: string, args: string[], options: RunOptions = {}) {
     const runOptions = options as RunOptions;
     const callerProvided = runOptions.tempHome !== undefined;
-    const tempHome = runOptions.tempHome || fs.mkdtempSync(path.join(os.tmpdir(), 'parallix-npm-home-'));
+    // Only npm needs an isolated npm home. The installed CLI does not consult
+    // npm, so allocating and deleting one for its read-only probes is needless.
+    const tempHome = runOptions.tempHome || (command === 'npm'
+      ? fs.mkdtempSync(path.join(os.tmpdir(), 'parallix-npm-home-'))
+      : undefined);
     const { env: extraEnv, ...spawnOptions } = runOptions;
     const result = spawnSync(command, args, {
       encoding: 'utf8',
       timeout: 120000,
       env: {
         ...process.env,
-        HOME: tempHome,
-        npm_config_cache: path.join(tempHome, '.npm-cache'),
-        npm_config_userconfig: path.join(tempHome, '.npmrc'),
+        ...(tempHome ? {
+          HOME: tempHome,
+          npm_config_cache: path.join(tempHome, '.npm-cache'),
+          npm_config_userconfig: path.join(tempHome, '.npmrc'),
+        } : {}),
         ...(extraEnv || {})
       },
       ...spawnOptions
     });
     // Clean up auto-created tempHome; preserve caller-provided directories.
-    if (!callerProvided) {
+    if (!callerProvided && tempHome) {
       try { fs.rmSync(tempHome, { recursive: true, force: true }); } catch (_) {}
     }
     return result;

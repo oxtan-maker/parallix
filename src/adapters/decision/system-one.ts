@@ -74,7 +74,7 @@ function decode(body: unknown, request: DecisionRequest, provider: string): Deci
   return { provider, model: body.model, answers, ...(usage ? { usage } : {}) };
 }
 
-function encode(request: DecisionRequest, model: string): string {
+function serialize(request: DecisionRequest, model: string): string {
   if (!record(request.questions) || !Object.keys(request.questions).length) { throw new Error('Decision request requires named questions.'); }
   const questions = Object.fromEntries(Object.entries(request.questions).map(([id, question]) => {
     if (!id.trim() || !record(question) || !['boolean', 'choice', 'score'].includes(question.type)
@@ -101,6 +101,11 @@ function encode(request: DecisionRequest, model: string): string {
       return value;
     });
   } catch { throw new Error('Decision request must contain JSON data.'); }
+  return body;
+}
+
+function encode(request: DecisionRequest, model: string): string {
+  const body = serialize(request, model);
   if (Buffer.byteLength(body) > 1_000_000) { throw new Error('Decision request exceeds the one megabyte limit.'); }
   return body;
 }
@@ -115,6 +120,10 @@ export class SystemOneDecisionAdapter implements DecisionPort {
   }
 
   available() { return this.resolution.availability; }
+
+  requestBytes(request: DecisionRequest): number {
+    return Buffer.byteLength(serialize(request, this.resolution.route?.model ?? ''));
+  }
 
   async decide(request: DecisionRequest): Promise<DecisionResult> {
     const route = this.resolution.route;

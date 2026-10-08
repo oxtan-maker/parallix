@@ -33,7 +33,6 @@ import {
 } from '../../../application/handoff-command-use-case.js';
 import {
   collectGoalCheckEvidenceRows,
-  evidenceCellHasVerifiableReference as evidenceCellHasVerifiableReferenceWithPort,
   findUnverifiableGoalCheckRow as findUnverifiableGoalCheckRowWithPort,
 } from '../../review/review-static-evidence.js';
 import type { CaptureNelOptions, HandoffWorkflowPorts, PerformHandoffOptions } from '../../../application/ports/handoff-workflow.js';
@@ -174,16 +173,9 @@ function captureNelAtHandoff(slug: string, options: Record<string, unknown>) {
   return useCase.captureNelAtHandoff(slug, options as unknown as CaptureNelOptions);
 }
 
-function evidenceCellHasVerifiableReference(cell: string, rootDir: string, knownTestNames: Set<string>) {
-  return evidenceCellHasVerifiableReferenceWithPort(ports.fileSystem, cell, rootDir, knownTestNames);
-}
-
 function findUnverifiableGoalCheckRow(evidenceRows: string[], rootDir: string) {
   return findUnverifiableGoalCheckRowWithPort(ports.fileSystem, evidenceRows, rootDir);
 }
-
-// Export for testing
-export { evidenceCellHasVerifiableReference as _evidenceCellHasVerifiableReference };
 
 // CLI request parsing and process exit handling belong to the interfaces layer.
 // The composition root binds this adapter's ports to `createHandoffCommand`.

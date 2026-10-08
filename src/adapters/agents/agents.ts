@@ -46,7 +46,7 @@ import { waitForCustomCapacity } from './custom-capacity.js';
 import { openRunSession } from './run-session.js';
 import { FRESH_SESSION_MARKER_PORT } from '../../application/fresh-session-marker-port.js';
 import type { SessionMarkerPort } from '../../application/domain-ports.js';
-import type { AgentFamily } from '../../domain/agents.js';
+import { AgentPoolExhaustedError, type AgentFamily } from '../../domain/agents.js';
 import type { MissionId } from '../../domain/mission.js';
 import type { SessionLaunchPolicy, SessionRole } from '../../domain/session.js';
 
@@ -349,7 +349,7 @@ function formatElapsed(elapsedMs: number) {
 }
 
 /** One line per family that actually launched, naming how it ended. */
-function agentPoolExhaustedError(step: string, launched: Set<unknown>, agentErrors: Map<any, any>): Error {
+function agentPoolExhaustedError(step: string, launched: Set<unknown>, agentErrors: Map<any, any>): AgentPoolExhaustedError {
   const errorDetails = [...agentErrors.entries()].map(([agent, details]) => {
     const status = details.exitInfo === 'stalled'
       ? 'stalled (no output)'
@@ -359,7 +359,7 @@ function agentPoolExhaustedError(step: string, launched: Set<unknown>, agentErro
     const stderrSnippet = details.stderr ? ` (${details.stderr.trim().split('\n')[0]})` : '';
     return `${agent}: ${status}${stderrSnippet}`;
   }).join('; ');
-  return new Error(
+  return new AgentPoolExhaustedError(step,
     `All eligible agents exhausted for step "${step}". ` +
     `Tried: ${[...launched].join(', ')}. Errors: ${errorDetails}.`
   );
@@ -406,8 +406,7 @@ async function persistLaunchFailureBlock(agent: string, result: any, updateAgent
 
 /** Recognized agent-pool exhaustion signals (real selectAgent and test mocks). */
 function isAgentPoolExhaustionError(err: unknown): boolean {
-  const message = (err as any)?.message || '';
-  return message.includes('exhausted') || message.includes('No agents available');
+  return err instanceof AgentPoolExhaustedError;
 }
 
 type StartAgentLoopDeps = {

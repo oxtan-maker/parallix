@@ -1,3 +1,4 @@
+import { rebaseHookRecoveryEligible, replacementImplementer, preContinueAction, postContinueAction, continueBudgetExceeded } from '../domain/rebase-policy.js';
 /**
  * Rebase workflow policy (TASK-2332.12).
  *
@@ -185,7 +186,10 @@ export function buildRebasePrompt({
     '',
     'Step 5 — Verify:',
     `  ${formatVerificationCommand(area, worktreePath)}`,
-    `  px integrate ${slug} --dry-run`,
+    '  Confirm git status reports no rebase in progress and no unmerged files.',
+    '  Run the repository verification above against the final repaired tree.',
+    '  If any required check fails, report the failure and stop; do not report completion until it passes.',
+    '  Integration eligibility is checked later, after the required independent review.',
     '',
     'Rules:',
     AGENT_COMMAND_COMPLETION_CONTRACT,
@@ -310,6 +314,12 @@ function verifyBaseAncestry(ctx: RebaseContext): boolean {
 
 /** The one success tail: verify ancestry, announce, push, then name what is next. */
 async function finishRebase(ctx: RebaseContext, message: string): Promise<void> {
+  const state = ctx.port.detectRebaseState(ctx.executionRoot);
+  if (state.inProgress || state.unmergedFiles.length > 0) {
+    fmt.log.fail('Rebase is unfinished. Skipping automatic push.');
+    ctx.port.exit(1);
+    return;
+  }
   if (!verifyBaseAncestry(ctx)) { return; }
   // The branch just moved: record, at this moment, an approval it no longer
   // covers (TASK-2555). Recording is an audit fact; standing the approval down
@@ -322,7 +332,7 @@ async function finishRebase(ctx: RebaseContext, message: string): Promise<void> 
   fmt.log.pass(message);
   await performPush(ctx);
   fmt.log.info(`Next: ${fmt.command(ctx.port.formatVerificationCommand(ctx.area, ctx.executionRoot))}`);
-  fmt.log.info(`Next: ${fmt.command(`px integrate ${ctx.slug} --dry-run`)}`);
+  fmt.log.info('Integration eligibility requires the lifecycle-authorized lane and current independent approval.');
   ctx.port.exit(0);
 }
 
@@ -339,7 +349,7 @@ function resolveBounceImplementer(ctx: RebaseContext): string | null {
   const selected = ctx.port.selectAgent?.('active', {}) ?? null;
   if (!selected) { return null; }
   const status = ctx.port.workflowLauncherStatus?.(selected) ?? { supported: false, agent: selected };
-  return status.supported ? (status.agent ?? selected) : null;
+  return replacementImplementer(selected, ctx.recordedImplementer ?? '', status.supported, status.agent);
 }
 
 type HookBounce = { outcome: 'declined' | 'fixed' | 'stranded'; result: GitCommandResult | null };
@@ -536,10 +546,9 @@ async function recoverHookFailureFromContinue(ctx: RebaseContext, driver: Contin
   if (result.status === 0) { return { result, stranded: false }; }
   const output = combineOutput(result);
   const classification = classifyHookFailure(output);
-  if (!classification.isHookFailure) { return { result, stranded: false }; }
+  if (!rebaseHookRecoveryEligible(result.status, classification.isHookFailure, typeof ctx.port.missionServices === 'function')) { return { result, stranded: false }; }
   // Direct callers without composed mission services retain the legacy
   // hint-and-exit path; the production CLI always supplies this seam.
-  if (typeof ctx.port.missionServices !== 'function') { return { result, stranded: false }; }
   const bounce = await reboundHookFailure(ctx, output, classification, () => driver.run());
   if (bounce.outcome === 'fixed' && bounce.result) { return { result: bounce.result, stranded: false }; }
   return { result: bounce.result ?? result, stranded: true };
@@ -549,7 +558,7 @@ type ContinueOutcome = 'completed' | 'exited' | 'recursed' | 'unfinished';
 
 /** Spend one budgeted `--continue`, bouncing a hook failure once. */
 async function attemptContinue(ctx: RebaseContext, driver: ContinueDriver): Promise<{ result: GitCommandResult } | { outcome: 'exited' }> {
-  if (driver.attempts >= driver.max) {
+  if (continueBudgetExceeded(driver.attempts, driver.max)) {
     failContinueBudget(ctx, driver, rebaseInProgressBranch(ctx));
     return { outcome: 'exited' };
   }
@@ -570,23 +579,23 @@ type DriveClassification =
  * output, shows which of editor/hook/empty-pick caused the stop.
  */
 function classifyPreContinue(ctx: RebaseContext, result: GitCommandResult): DriveClassification {
-  if (result.status === 0) { return { action: 'completed' }; }
-  if (hasConflictMarkers(combineOutput(result))) {
+  // Preserve observation order: terminal results never query staged/rebase state.
+  let action = preContinueAction(result.status, hasConflictMarkers(combineOutput(result)), false, true);
+  if (action === 'completed') { return { action }; }
+  if (action === 'recursed') {
     fmt.log.info('More conflicts found. Re-running classification...');
-    return { action: 'recursed' };
+    return { action };
   }
   const staged = Boolean(ctx.gitFn(['-C', ctx.executionRoot, 'status', '--porcelain']).stdout.trim());
+  action = preContinueAction(result.status, false, staged, staged ? true : Boolean(rebaseInProgressBranch(ctx)));
+  if (action === 'completed') { return { action }; }
   if (staged) {
     fmt.log.info('More changes detected. Continuing rebase...');
     ctx.gitFn(['-C', ctx.executionRoot, 'add', '-A']);
-    return { action: 'retry', staged: true };
+  } else {
+    fmt.log.info('No unresolved conflicts; rebase still in progress. Retrying --continue (hook/empty-pick)...');
   }
-  if (!rebaseInProgressBranch(ctx)) {
-    // Nothing staged and no rebase left: the earlier --continue finished it.
-    return { action: 'completed' };
-  }
-  fmt.log.info('No unresolved conflicts; rebase still in progress. Retrying --continue (hook/empty-pick)...');
-  return { action: 'retry', staged: false };
+  return { action: 'retry', staged };
 }
 
 /**
@@ -595,21 +604,21 @@ function classifyPreContinue(ctx: RebaseContext, result: GitCommandResult): Driv
  * an empty pick is not, so only the latter walks on to the next commit.
  */
 function classifyPostContinue(ctx: RebaseContext, driver: ContinueDriver, result: GitCommandResult, staged: boolean): DriveClassification {
-  if (result.status === 0) { return { action: 'completed' }; }
-  if (hasConflictMarkers(combineOutput(result))) { return { action: 'retry', staged }; }
-  const stillRebasing = rebaseInProgressBranch(ctx);
-  if (!stillRebasing) { return { action: 'completed' }; }
-  if (driver.attempts >= driver.max) {
+  const conflicts = hasConflictMarkers(combineOutput(result));
+  const stillRebasing = result.status === 0 || conflicts ? '' : rebaseInProgressBranch(ctx);
+  const action = postContinueAction(result.status, conflicts, Boolean(stillRebasing), driver.attempts, driver.max, staged);
+  if (action === 'completed') { return { action }; }
+  if (action === 'budget-exhausted') {
     failContinueBudget(ctx, driver, stillRebasing);
     return { action: 'exited' };
   }
-  if (staged) {
+  if (action === 'staged-failure') {
     reportContinueFailure(result);
     ctx.port.exit(1);
     return { action: 'exited' };
   }
-  fmt.log.info('Empty pick detected; continuing to next commit...');
-  return { action: 'retry', staged: false };
+  if (!conflicts) { fmt.log.info('Empty pick detected; continuing to next commit...'); }
+  return { action: 'retry', staged };
 }
 
 /**
@@ -681,9 +690,10 @@ function selectReplacementFamily(ctx: RebaseContext, implementer: string): strin
   } catch {
     selected = null;
   }
-  if (!selected || selected === implementer) { return null; }
-  const status = ctx.port.workflowLauncherStatus?.(selected) ?? { supported: false, agent: selected };
-  return status.supported ? (status.agent ?? selected) : null;
+  const candidate = replacementImplementer(selected, implementer, true);
+  if (!candidate) { return null; }
+  const status = ctx.port.workflowLauncherStatus?.(candidate) ?? { supported: false, agent: candidate };
+  return replacementImplementer(candidate, implementer, status.supported, status.agent);
 }
 
 /**
@@ -764,11 +774,11 @@ async function resolveSharedConflicts(ctx: RebaseContext, conflictResult: Missio
   }
 
   // Verify rebase is actually complete before pushing.
-  if (rebaseInProgressBranch(ctx)) {
+  if (port.detectRebaseState(executionRoot).inProgress || rebaseInProgressBranch(ctx)) {
     fmt.log.pass(`Agent (${fmt.agent(agent)}) completed their round.`);
     fmt.log.warn('Rebase is still in progress. Skipping automatic push.');
     fmt.log.info('Next: Resolve remaining conflicts or continue rebase.');
-    port.exit(0);
+    port.exit(1);
     return;
   }
   await finishRebase(ctx, `Agent (${fmt.agent(agent)}) completed conflict resolution.`);

@@ -15,6 +15,7 @@ import path from 'node:path';
 import childProcess from 'node:child_process';
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { DatabaseSync } from 'node:sqlite';
 import { buildBubblewrapArgs, resolveSandboxProfile } from '../../../src/adapters/process/bubblewrap.js';
 import { pxNodeArgs, resolvePxEntryLoader } from '../../lib/px-entry.js';
 
@@ -232,21 +233,12 @@ test('sandboxed codex profile writes Parallix mission state through px under bwr
 
     // Host-side read of the pinned database: the mission row must have been
     // written from inside the sandbox.
-    const status = childProcess.spawnSync(
-      process.execPath,
-      pxNodeArgs(PX, ['status', SLUG, '--json']),
-      {
-        cwd: fixture.repo,
-        encoding: 'utf8',
-        timeout: 60_000,
-        env: { ...process.env, ...pxEnv(fixture.repo, fixture.stateHome, fixture.binDir) }
-      }
-    );
-    if (status.error) { throw status.error; }
-    assert.equal(status.status, 0, `px status after sandbox write failed:\n${status.stdout}\n${status.stderr}`);
-    const recorded = JSON.parse(status.stdout ?? '{}') as { slug?: string; version?: number };
-    assert.equal(recorded.slug, SLUG);
-    assert.ok(recorded.version !== undefined, 'sandboxed px write must persist a versioned mission row');
+    const database = new DatabaseSync(path.join(fixture.stateHome, 'parallix.db'), { readOnly: true });
+    try {
+      const recorded = database.prepare('SELECT id, version FROM missions WHERE id = ?').get(SLUG) as { id?: string; version?: number } | undefined;
+      assert.equal(recorded?.id, SLUG);
+      assert.ok(recorded?.version !== undefined, 'sandboxed px write must persist a versioned mission row');
+    } finally { database.close(); }
     assert.equal(fs.existsSync(path.join(fixture.repo, 'worktrees', SLUG, 'missions', SLUG, 'MISSION.md')), false);
   } finally {
     if (previousParallixHome === undefined) { delete process.env.PARALLIX_HOME; } else { process.env.PARALLIX_HOME = previousParallixHome; }

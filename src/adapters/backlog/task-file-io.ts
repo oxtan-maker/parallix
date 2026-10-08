@@ -39,8 +39,20 @@ function resolveStableRepositoryId(rootDir: string): string {
 }
 
 /** @param {string} [rootDir] @returns {{tasksDir: string, completedDir: string, archiveTasksDir: string}} */
-function getTaskStorage(rootDir = process.cwd()) {
-  return resolveTaskStorage(rootDir);
+function getTaskStorage(rootDir = process.cwd(), cache?: TaskScanCache) {
+  const cached = cache?.storage.get(rootDir);
+  if (cached !== undefined) { return cached; }
+  const storage = resolveTaskStorage(rootDir);
+  cache?.storage.set(rootDir, storage);
+  return storage;
+}
+
+function listDirectory(dir: string, cache?: TaskScanCache): string[] {
+  const cached = cache?.listings.get(dir);
+  if (cached !== undefined) { return cached; }
+  const names = fs.existsSync(dir) ? fs.readdirSync(dir) : [];
+  cache?.listings.set(dir, names);
+  return names;
 }
 
 /**
@@ -48,8 +60,8 @@ function getTaskStorage(rootDir = process.cwd()) {
  * @param {string} [rootDir]
  * @returns {string[]}
  */
-function findTaskFiles(slug: string, rootDir: string = process.cwd()): string[] {
-  const { tasksDir, completedDir, archiveTasksDir: archivedDir } = getTaskStorage(rootDir);
+function findTaskFiles(slug: string, rootDir: string = process.cwd(), cache?: TaskScanCache): string[] {
+  const { tasksDir, completedDir, archiveTasksDir: archivedDir } = getTaskStorage(rootDir, cache);
   const sortByBacklogState = (filePath: string) => {
     if (filePath.startsWith(tasksDir + path.sep)) {return 0;}
     if (filePath.startsWith(completedDir + path.sep)) {return 1;}
@@ -59,8 +71,7 @@ function findTaskFiles(slug: string, rootDir: string = process.cwd()): string[] 
 
   /** @param {string} dir */
   const scan = (dir: string) => {
-    if (!fs.existsSync(dir)) {return [];}
-    const files = fs.readdirSync(dir);
+    const files = listDirectory(dir, cache);
     const normalizedSlug = slug.toLowerCase();
     return files
       .filter((f: string) => f.toLowerCase().startsWith(normalizedSlug))
@@ -77,15 +88,37 @@ function preferSameTaskInHigherPriorityDir(candidateMatches: string[]): string |
   return rest.every((match: string) => path.basename(match) === path.basename(preferred)) ? preferred : null;
 }
 
-function findTaskFilesById(candidateFiles: string[], targetId: string): string[] {
-  return candidateFiles.filter((file: string) => {
-    try {
-      const idMatch = fs.readFileSync(file, 'utf8').match(/^id:\s*([^\r\n]+)/m);
-      return idMatch && idMatch[1].trim().toUpperCase() === targetId;
-    } catch (_) {
-      return false;
-    }
-  });
+/**
+ * Memo for a batch of task resolutions that observe one filesystem state
+ * (one board build). Without it every unresolved slug re-lists the Backlog
+ * directories and re-reads every task file for its frontmatter id.
+ */
+interface TaskScanCache {
+  readonly listings: Map<string, string[]>;
+  readonly ids: Map<string, string | null>;
+  readonly storage: Map<string, ReturnType<typeof resolveTaskStorage>>;
+}
+
+function createTaskScanCache(): TaskScanCache {
+  return { listings: new Map(), ids: new Map(), storage: new Map() };
+}
+
+function frontmatterTaskId(file: string, cache?: TaskScanCache): string | null {
+  const cached = cache?.ids.get(file);
+  if (cached !== undefined) { return cached; }
+  let id: string | null;
+  try {
+    const idMatch = fs.readFileSync(file, 'utf8').match(/^id:\s*([^\r\n]+)/m);
+    id = idMatch ? idMatch[1].trim().toUpperCase() : null;
+  } catch (_) {
+    id = null;
+  }
+  cache?.ids.set(file, id);
+  return id;
+}
+
+function findTaskFilesById(candidateFiles: string[], targetId: string, cache?: TaskScanCache): string[] {
+  return candidateFiles.filter((file: string) => frontmatterTaskId(file, cache) === targetId);
 }
 
 function uniqueOrPreferredTask(matches: string[]) {
@@ -96,24 +129,29 @@ function uniqueOrPreferredTask(matches: string[]) {
     : { ok: false, reason: 'ambiguous', matches };
 }
 
-function allTaskFiles(tasksDir: string, completedDir: string, archivedDir: string): string[] {
-  return [tasksDir, completedDir, archivedDir]
-    .flatMap((dir) => fs.existsSync(dir) ? fs.readdirSync(dir).map((file) => path.join(dir, file)) : [])
+function allTaskFiles(tasksDir: string, completedDir: string, archivedDir: string, cache?: TaskScanCache): string[] {
+  const key = `all\0${tasksDir}\0${completedDir}\0${archivedDir}`;
+  const cached = cache?.listings.get(key);
+  if (cached !== undefined) { return cached; }
+  const files = [tasksDir, completedDir, archivedDir]
+    .flatMap((dir) => listDirectory(dir, cache).map((file) => path.join(dir, file)))
     .filter((file) => file.endsWith('.md'));
+  cache?.listings.set(key, files);
+  return files;
 }
 
-function resolveMissingPrefixTask(slug: string, normalizedId: string, files: string[]) {
+function resolveMissingPrefixTask(slug: string, normalizedId: string, files: string[], cache?: TaskScanCache) {
   // Only a single exact-id hit resolves here. Several files claiming one id is
   // not authority to pick one, so the base-task-id fallback still runs and the
   // unresolved answer stays `missing` — the reason this seam reported before the
   // id lookup was factored out. The base id keeps a dotted subtask number: an
   // explicit `task-2623.04` names that exact task, so it never falls back to
   // TASK-2623 (task-2624); `task-115-modernized` still falls back to TASK-115.
-  const idMatches = findTaskFilesById(files, normalizedId);
+  const idMatches = findTaskFilesById(files, normalizedId, cache);
   if (idMatches.length === 1) { return { ok: true, taskFile: idMatches[0], matches: idMatches }; }
   const baseId = slug.match(/^(task-\d+(?:\.\d+)?)/i)?.[1]?.toUpperCase();
   if (!baseId) { return { ok: false, reason: 'missing', matches: idMatches }; }
-  const baseMatches = findTaskFilesById(files, baseId);
+  const baseMatches = findTaskFilesById(files, baseId, cache);
   return baseMatches.length > 0
     ? uniqueOrPreferredTask(baseMatches)
     : { ok: false, reason: 'missing', matches: idMatches };
@@ -122,15 +160,16 @@ function resolveMissingPrefixTask(slug: string, normalizedId: string, files: str
 /**
  * @param {string} slug
  * @param {string} [rootDir]
+ * @param {TaskScanCache} [cache] share across resolutions that observe one filesystem state
  * @returns {{ok: boolean, taskFile?: string, matches: string[], reason?: string}}
  */
-function resolveTaskFile(slug: string, rootDir: string = process.cwd()) {
-  const matches = findTaskFiles(slug, rootDir);
+function resolveTaskFile(slug: string, rootDir: string = process.cwd(), cache?: TaskScanCache) {
+  const matches = findTaskFiles(slug, rootDir, cache);
   const normalizedId = slug.toUpperCase();
-  const { tasksDir, completedDir, archiveTasksDir: archivedDir } = getTaskStorage(rootDir);
+  const { tasksDir, completedDir, archiveTasksDir: archivedDir } = getTaskStorage(rootDir, cache);
 
   if (matches.length === 0) {
-    return resolveMissingPrefixTask(slug, normalizedId, allTaskFiles(tasksDir, completedDir, archivedDir));
+    return resolveMissingPrefixTask(slug, normalizedId, allTaskFiles(tasksDir, completedDir, archivedDir, cache), cache);
   }
 
   if (matches.length === 1) {
@@ -397,9 +436,11 @@ function getTaskFrontmatterValue(taskFilePath: string, field: string) {
 }
 
 
+export type { TaskScanCache };
 export {
   checkBacklogIntegrity,
   commitTaskFileUpdate,
+  createTaskScanCache,
   findTaskFile,
   findTaskFiles,
   getAcceptanceCriteria,

@@ -10,6 +10,7 @@ import { startPiAgent, resolvePiCommand } from './pi.js';
 import { startQwenAgent, resolveQwenCommand } from './qwen.js';
 import { CONFIG_PATH, readAgentConfig, isAgentBlocked, type AgentConfig, type ReadAgentConfigOptions } from './agent-config.js';
 import { resolveCustomRunner } from '../config/product-config.js';
+import { AgentPoolExhaustedError } from '../../domain/agents.js';
 
 interface LauncherStatus {
   agent: string;
@@ -148,7 +149,7 @@ function selectAgent(step: string, options: AgentSelectionOptions = {}) {
     throw new Error(`No agents are eligible for workflow step: ${step}`);
   }
   if (pool.length === 0) {
-    throw new Error(
+    throw new AgentPoolExhaustedError(step,
       `All eligible agents for step "${step}" are exhausted (limit-hit or excluded). ` +
       `Tried: ${[...excluded].join(', ')}.`
     );

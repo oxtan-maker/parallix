@@ -158,6 +158,15 @@ test('live Jev applies an integration-repair verdict and the standard lifecycle 
     assert.ok(measurements.some(row => row.model && row.classificationMs !== null && row.route === 'clear'), 'live Jev call must clear the packet');
     const reviews = await provider.api('GET', `/repos/human/probe/pulls/${prs[0].number}/reviews`);
     assert.ok(reviews.some((review: any) => review.user.login === 'jev' && review.state === 'APPROVED' && review.commit_id === source.candidateRevision));
+    // A lane transition commits locally after the last push, so the PR head trails the revision Jev judged (TASK-2675).
+    const pushedHead = git(worktree, 'rev-parse', 'HEAD');
+    git(worktree, 'commit', '--allow-empty', '-m', 'backlog: local lane transition');
+    const localRevision = git(worktree, 'rev-parse', 'HEAD');
+    assert.notEqual(localRevision, pushedHead);
+    const { createReviewClassification } = await import('../../../src/composition/review-classification.js');
+    assert.equal(await createReviewClassification(slug, worktree).publish({ ...source, candidateRevision: localRevision }, 'clear', 'Classifier cleared the prior findings. [TASK-2675]'), true,
+      'Jev publication must not depend on the PR head matching a later local revision');
+    git(worktree, 'reset', '--hard', pushedHead);
     assert.equal(readDb('SELECT status FROM missions')[0].status, 'integration');
     await provider.api('POST', `/repos/human/probe/pulls/${prs[0].number}/reviews`, { event: 'APPROVED', body: 'Integrate repaired fixture', commit_id: source.candidateRevision });
     await px(worktree, ['integrate', slug]);

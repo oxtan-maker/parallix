@@ -292,6 +292,26 @@ test('FLOW projection derives lane rows, agent availability, and a deterministic
   assert.equal(metrics.bottleneck.sentence, 'review is the oldest lane at 2.0h median age; review bounce 0.5.');
 });
 
+test('lane dwell sums repeated visits per mission (TASK-2682)', () => {
+  const transitions: MetricsInput['transitions'] = [
+    { missionId: id1, from: 'backlog', to: 'active', trigger: 'activate', actor: 'codex', occurredAt: '2026-07-22T08:00:00Z' },
+    { missionId: id1, from: 'active', to: 'review', trigger: 'submit-for-review', actor: 'codex', occurredAt: '2026-07-22T09:00:00Z' },
+    { missionId: id1, from: 'review', to: 'active', trigger: 'request-changes', actor: 'codex', occurredAt: '2026-07-22T09:30:00Z' },
+    { missionId: id1, from: 'active', to: 'review', trigger: 'submit-for-review', actor: 'codex', occurredAt: '2026-07-22T11:30:00Z' },
+    { missionId: id1, from: 'review', to: 'active', trigger: 'request-changes', actor: 'codex', occurredAt: '2026-07-22T12:30:00Z' },
+    { missionId: id1, from: 'active', to: 'integration', trigger: 'submit-for-review', actor: 'codex', occurredAt: '2026-07-22T15:30:00Z' },
+  ];
+
+  const dwell = medianCycleTimeByStateSeries(transitions);
+  assert.deepEqual(dwell.series.filter(({ lane }) => lane === 'active' || lane === 'review'), [
+    { lane: 'active', value: 60 + 120 + 180, observationCount: 1 },
+    { lane: 'review', value: 30 + 60, observationCount: 1 },
+  ]);
+  assert.deepEqual(dwell.series.find(({ lane }) => lane === 'integration'), {
+    lane: 'integration', value: null, observationCount: 0,
+  });
+});
+
 test('FLOW projection reports explicit missing history without fabricated values', () => {
   const metrics = buildMetrics({ initialStates: new Map(), transitions: [], outcomes: [], instants: [now], asOf: now });
   assert.equal(metrics.medianCycleTimeByState.missingHistoryFallback, 'null');

@@ -36,17 +36,21 @@ telemetry and weekly comparisons by agent family, with unobserved outcomes kept
 separate from confirmed correct decisions.
 
 A clear concerns the complete original finding set, not unseen changes or whole
-PR correctness. Broader/new obligations and partial clears still need general
-review. Unresolved returns supply a likely-unresolved signal; the implementer
+PR correctness. Partial clears and new findings are decided by the general reviewer
+when Jev abstains. Unresolved returns supply a likely-unresolved signal; the implementer
 can make changes or request reviewer investigation. Jev supplies no repair
 instructions. Its selected-choice scores are not correctness probabilities.
 
 For TASK-2658, the operator subsequently chose availability-dependent opt-out
-routing instead of the proposed opt-in rollout. Eligible autonomous decisions
+routing instead of the proposed opt-in rollout. Jev is called on every
+review round, first review or re-review, while the provider is available, with thin evidence sent bounded
+and its omissions declared; only opt-out, an unavailable provider or a prior
+classifier decision skip the call, and each records a reason. Autonomous decisions
 are attributed to the dedicated Jev review identity; Parallix applies them
 through its existing checked review authority. A finding-resolution signal
-cannot approve a PR with broader obligations. Classifier measurements remain
-local statistics inputs, and Forgejo remains the review publication adapter.
+concerns only the prior findings, and Jev abstains through insufficient_evidence
+when the supplied evidence cannot support a judgment. Classifier measurements remain
+local statistics inputs, recorded once per review round and reported per round, split by first review and re-review, and Forgejo remains the review publication adapter.
 This follow-up choice does not change the historical research results or turn
 the estimated saving into a measured whole-workflow improvement.
 

@@ -7,7 +7,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 
-import { resolveTaskFile } from '../../../../../src/adapters/backlog/task-file-io.js';
+import { createTaskScanCache, resolveTaskFile } from '../../../../../src/adapters/backlog/task-file-io.js';
 import { createDraftWorkflowAdapter } from '../../../../../src/adapters/cli/commands/draft-stats.js';
 import { resolveDraftTarget } from '../../../../../src/adapters/cli/commands/draft-setup.js';
 import { mkdtemp } from '../../../../helpers/temp-dir.js';
@@ -116,4 +116,20 @@ test('ad hoc drafts still allocate a DB-owned identity and resume by that identi
   assert.equal(resumed.ctx.exited, false);
   assert.equal(resumed.ctx.slug, 'parallix-adhoc-0007');
   assert.deepEqual(resumed.sideEffects, [], 'resuming reuses the minted identity');
+});
+
+test('a shared scan cache resolves every slug exactly as an uncached resolution does (TASK-2681)', () => {
+  const root = seedBacklog({
+    'task-2623 - Base task.md': 'TASK-2623',
+    'renamed-file.md': 'TASK-2700',
+    'dup-a.md': 'TASK-2800',
+    'dup-b.md': 'TASK-2800',
+  });
+  const cache = createTaskScanCache();
+  const slugs = ['task-2623', 'task-2623.04', 'task-2623-modernized', 'task-2700', 'task-2800', 'task-9999'];
+  for (const pass of [1, 2]) {
+    for (const slug of slugs) {
+      assert.deepEqual(resolveTaskFile(slug, root, cache), resolveTaskFile(slug, root), `${slug} (pass ${pass})`);
+    }
+  }
 });

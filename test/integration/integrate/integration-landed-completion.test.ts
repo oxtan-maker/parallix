@@ -278,13 +278,12 @@ test('R4: decision-window membership follows the landed timestamp', async () => 
   const result = await runIntegrate({ taskStatus: 'approved', missionStatus: 'integration', resume: true });
   const [event] = doneEvents(result.store);
 
-  const checkout = createPrimaryAndWorktree('task-2369-window');
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'parallix-task-2369-window-'));
   const db = new SqliteDatabaseAdapter();
   try {
     await db.open({ path: path.join(directory, 'parallix.db') });
     await new SqliteMigrationRunner(db).applyPending(loadDefaultMigrations());
-    const repo = repositoryId(path.basename(checkout.primary));
+    const repo = repositoryId('task-2369-window');
     const events = new SqliteBoardLaneEventRepository(db);
     await events.append(laneEvent({ repositoryId: repo, missionId: SLUG, from: null, to: 'backlog', at: '2026-08-01T09:00:00.000Z' }));
     await events.append(laneEvent({ repositoryId: repo, missionId: SLUG, from: 'integration', to: 'done', at: event.occurredAt }));
@@ -300,7 +299,6 @@ test('R4: decision-window membership follows the landed timestamp', async () => 
     assert.equal(metrics.decisionWindow?.previous.completedMissions, 1, 'the mission belongs to the window containing T1');
   } finally {
     await db.close();
-    checkout.cleanup();
     fs.rmSync(directory, { recursive: true, force: true });
   }
 });

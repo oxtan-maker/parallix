@@ -2,7 +2,7 @@ import type { DecisionPort } from './decision.js';
 import type { ReviewEvidencePort } from './review-evidence.js';
 import type { ReviewClassificationTelemetryPort } from './review-classification-telemetry.js';
 import type { ClassifierReviewSource } from '../../domain/classifier-review.js';
-export interface RepeatReviewClassificationPorts {
+export interface ReviewClassificationPorts {
   readonly decision: DecisionPort;
   readonly evidence: ReviewEvidencePort;
   telemetry(): Promise<ReviewClassificationTelemetryPort>;

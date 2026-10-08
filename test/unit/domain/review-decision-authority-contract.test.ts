@@ -411,6 +411,25 @@ it('classifier decision preserves review authority and rejects stale/partial sco
   assert.throws(() => applyClassifierReview(review, { ...source, score: 0.50 }, 'clear', '2026-10-06T00:00:00Z'), /provenance/);
 });
 
+it('classifier provenance is validated once and the candidate round is pinned by a typed helper (TASK-2675)', async () => {
+  const { applyClassifierReview, reviewAtCandidateRevision } = await import('../../../src/domain/classifier-review.js');
+  const { repeatReview } = await import('../../fixtures/repeat-review.js');
+  const review = repeatReview();
+  const source = { kind: 'classifier' as const, identity: 'jev' as const, decisionId: 'd', provider: 'typesafe', model: 'jev',
+    packetHash: 'c'.repeat(64), priorRevision: 'a'.repeat(40), candidateRevision: 'b'.repeat(40), findingIds: ['F1'],
+    policyVersion: 'repeat-findings-52-89-v2', label: 'addresses', score: 0.52 };
+  // Malformed provenance is rejected by the single assertion before any scope check.
+  for (const broken of [{ ...source, identity: 'other' }, { ...source, packetHash: 'short' }, { ...source, score: 1.2 }, { ...source, label: 'insufficient_evidence' }]) {
+    assert.throws(() => applyClassifierReview(review, broken as never, 'clear', '2026-10-06T00:00:00Z'), /provenance/);
+  }
+  assert.throws(() => applyClassifierReview(review, source, 'clear', 'not a date'), /provenance/);
+  assert.equal(reviewAtCandidateRevision(review, String(currentReviewRound(review).subject.revision)), review);
+  const advanced = reviewAtCandidateRevision(review, 'c'.repeat(40));
+  assert.equal(String(currentReviewRound(advanced).subject.revision), 'c'.repeat(40));
+  assert.equal(advanced.rounds.length, review.rounds.length);
+  assert.equal(String(currentReviewRound(review).subject.revision), 'b'.repeat(40), 'the stored review is not mutated');
+});
+
 it('classifier integration repairs bind the withdrawn gate and retain its complete obligation', async () => {
   const { applyClassifierReview } = await import('../../../src/domain/classifier-review.js');
   const { repeatReview } = await import('../../fixtures/repeat-review.js');

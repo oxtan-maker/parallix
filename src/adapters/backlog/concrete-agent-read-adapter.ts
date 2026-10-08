@@ -82,7 +82,7 @@ export interface ConcreteAgentReadAdapterOptions {
   /** Bounded liveness evidence used while reconciling current-work. */
   readonly isProcessAlive?: ProcessLivenessProbe;
   /** Running-session detection seam; defaults to the live process scan. */
-  readonly detectRunningSessions?: () => readonly RunningMissionSession[] | null;
+  readonly detectRunningSessions?: () => readonly RunningMissionSession[] | null | Promise<readonly RunningMissionSession[] | null>;
 }
 
 /**
@@ -101,7 +101,7 @@ export class ConcreteAgentReadAdapter implements AgentReadAdapter {
   private readonly sessionMarkers: SessionMarkerRepository | null;
   private readonly currentWork: CurrentWorkReadAdapter | null;
   private readonly isProcessAlive: ProcessLivenessProbe | undefined;
-  private readonly detectRunningSessions: () => readonly RunningMissionSession[] | null;
+  private readonly detectRunningSessions: () => readonly RunningMissionSession[] | null | Promise<readonly RunningMissionSession[] | null>;
 
   constructor(options: ConcreteAgentReadAdapterOptions) {
     this.rootDir = options.rootDir;
@@ -174,7 +174,7 @@ export class ConcreteAgentReadAdapter implements AgentReadAdapter {
    * unknown rather than a fabricated zero.
    */
   async loadRunningSessions(): Promise<readonly RunningAgentSession[] | null> {
-    const running = this.detectRunningSessions();
+    const running = await this.detectRunningSessions();
     if (running === null) { return null; }
     if (running.length === 0) { return []; }
 

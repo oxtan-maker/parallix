@@ -5,9 +5,11 @@
  * queued, never discarded — the queue runs one more read that starts after
  * it, so the newest projection is always fetched.
  *
- * Stream signals (`schedule`) coalesce into one request per window. The
- * window opens on the first signal and is never postponed by later ones, so a
- * continuous event burst still refreshes once per window instead of starving.
+ * Stream signals (`schedule`) start a read at once and open a coalescing
+ * window; signals inside the window collapse into one trailing read when it
+ * closes. A change therefore never waits out the window before the board
+ * starts refreshing, the window is never postponed by later signals, and a
+ * continuous event burst still costs at most one read per window.
  */
 
 export interface RefreshCoordinator {
@@ -16,7 +18,7 @@ export interface RefreshCoordinator {
    * been applied, or immediately when the coordinator is disposed.
    */
   request(): Promise<void>;
-  /** Coalesce a stream signal into at most one request per window. */
+  /** Read now, and coalesce further signals into at most one read per window. */
   schedule(): void;
   /** Cancel the window and release every waiter; nothing is applied after this. */
   dispose(): void;
@@ -39,6 +41,7 @@ export function createRefreshCoordinator<T>(options: RefreshCoordinatorOptions<T
   let waiting: (() => void)[] = [];
   let inFlight: (() => void)[] = [];
   let timer: ReturnType<typeof setTimeout> | undefined;
+  let trailing = false;
 
   const release = (batch: readonly (() => void)[]) => { for (const settle of batch) { settle(); } };
 
@@ -62,16 +65,26 @@ export function createRefreshCoordinator<T>(options: RefreshCoordinatorOptions<T
     if (!running) { void run(); }
   });
 
+  function schedule() {
+    if (disposed) { return; }
+    if (timer !== undefined) { trailing = true; return; }
+    void request();
+    timer = setTimeout(() => {
+      timer = undefined;
+      if (!trailing) { return; }
+      trailing = false;
+      schedule();
+    }, options.coalesceMs);
+  }
+
   return {
     request,
-    schedule() {
-      if (disposed || timer !== undefined) { return; }
-      timer = setTimeout(() => { timer = undefined; void request(); }, options.coalesceMs);
-    },
+    schedule,
     dispose() {
       disposed = true;
       clearTimeout(timer);
       timer = undefined;
+      trailing = false;
       const pending = [...inFlight, ...waiting];
       inFlight = [];
       waiting = [];

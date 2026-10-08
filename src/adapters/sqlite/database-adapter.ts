@@ -98,7 +98,7 @@ export class SqliteDatabaseAdapter {
     return () => {
       release();
       if (SqliteDatabaseAdapter.immediateWriterTurns.get(key) === queued) {
-        queued.then(() => SqliteDatabaseAdapter.immediateWriterTurns.delete(key));
+        void queued.then(() => SqliteDatabaseAdapter.immediateWriterTurns.delete(key));
       }
     };
   }

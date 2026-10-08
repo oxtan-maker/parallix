@@ -9,6 +9,7 @@ import {
   changeRevision,
   startReview,
 } from '../../../../src/domain/review.js';
+import { AgentPoolExhaustedError } from '../../../../src/domain/agents.js';
 import { resolveHandoffReviewAssignment } from '../../../../src/adapters/cli/commands/handoff.js';
 import { selectReviewer } from '../../../../src/application/review-loop/reviewer-selection.js';
 import { postWorkflowReview } from '../../../../src/adapters/review/review-artifacts.js';
@@ -96,10 +97,10 @@ describe("self review forbidden", { concurrency: false }, () => {
     assert.deepEqual(logged, []);
   });
 
-  test('handoff falls back to self-review only on an exhausted pool, and records that eligibility', () => {
+  test('handoff falls back to self-review only on typed reviewer-pool exhaustion regardless of diagnostic wording, and records that eligibility (TASK-2668.04)', () => {
     const { result, logged } = assignment({
       selectAgentFn: () => {
-        throw new Error('All eligible agents for step "review" are exhausted (limit-hit or excluded). Tried: claude.');
+        throw new AgentPoolExhaustedError('review', 'routing diagnostics were revised');
       },
     });
 

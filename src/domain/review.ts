@@ -1,3 +1,4 @@
+import { REVIEW_PHASES, REVIEW_PHASE_TRANSITIONS, type ReviewPhase } from './review-phase-policy.js';
 import type { AgentFamily, StepSelectionPolicy } from './agents.js';
 
 export type ReviewFindingId = string & { readonly __brand: 'ReviewFindingId' };
@@ -167,26 +168,8 @@ export const REVIEW_DISPOSITIONS: readonly ReviewDisposition[] =
  * `ready-for-next-round` describe the same decision history but drive different
  * loop behavior, and the phase survives a restart that has no decision to replay.
  */
-export type ReviewPhase = 'reviewing' | 'fixing' | 'pending-approval' | 'approved';
-
-export const REVIEW_PHASES: readonly ReviewPhase[] =
-  ['reviewing', 'fixing', 'pending-approval', 'approved'];
-
-const REVIEW_PHASE_TRANSITIONS: Record<ReviewPhase, readonly ReviewPhase[]> = {
-  'reviewing': ['fixing', 'approved'],
-  'fixing': ['reviewing', 'pending-approval'],
-  'pending-approval': ['reviewing'],
-  'approved': [],
-};
-
-/** Coerce untrusted text to a phase, or null when it names none. */
-export function parseReviewPhase(value: string | null | undefined): ReviewPhase | null {
-  const candidate = String(value ?? '').trim().toLowerCase();
-  return (REVIEW_PHASES as readonly string[]).includes(candidate)
-    ? candidate as ReviewPhase
-    : null;
-}
-
+export { REVIEW_PHASES, parseReviewPhase } from './review-phase-policy.js';
+export type { ReviewPhase } from './review-phase-policy.js';
 /** Coerce untrusted text to a disposition, or null when it names none. */
 export function parseReviewDisposition(
   value: string | null | undefined,

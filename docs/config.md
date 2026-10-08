@@ -22,7 +22,7 @@ effect.
 
 ## Decision provider setup
 
-The generic decision capability reuses compatible Jev provider settings from
+The generic decision capability reuses compatible classifier provider settings from
 the operator's environment. For example, export `OPENROUTER_API_KEY` in the
 shell running Parallix. A single compatible route is available without another
 setup prompt. If several providers are configured, select the intended account
@@ -134,6 +134,9 @@ is unset, Parallix detects `main` or `master`.
 
 ## Verification
 
+This repository's type-aware lint baseline and its one-way debt-ratchet
+procedure are described in [Lint baseline ratchet](lint-baseline.md).
+
 `adapters.verification.command` is an optional string. When present, it is run
 through the shell and every `{{area}}` token is replaced with the selected
 verification area. When absent, verification is a successful no-op.
@@ -211,6 +214,16 @@ any other key is a configuration error.
 Interactive mission operations automatically use tmux when it is installed
 and runnable; headless callers and unavailable terminals use pipes. No configuration is needed. A mission keeps one terminal
 across commands, agent roles and retries, including after work stops.
+
+In `px web`, click a mission card to view its live tmux output. The view
+keeps updating while open, including when the board changes. A stalled read
+shows an unavailable message after thirty seconds and retries while the view
+remains open.
+If a refresh is interrupted after output has loaded, the view keeps the last
+capture visible with a retry notice until the connection recovers.
+For missions without a live tmux session, the view shows the latest retained
+agent-run output when available, labeled as recorded output with its run dates.
+Agents started outside Parallix are not captured by this view.
 
 Explicit host and unavailable-tool overrides remain available through
 `px config` and the workflow configuration schema. `whenUnavailable: "fail"`
@@ -444,33 +457,49 @@ Integration requires a recorded reviewer approval, reruns the repository's
 resulting tree. These built-in lifecycle controls remain in force alongside the
 configurable gates above.
 
-## Repeat review classification
+## Review classification
 
-Jev can handle eligible repeat findings after the configured verification passes.
-It uses the previous review, the implementer response and mechanically collected
-source at exact revisions. Incomplete evidence, broader changes, unavailable
-configuration and failed calls retain the general reviewer.
+The classifier can decide any review round after the configured verification passes. A
+re-review is judged against the previous round's findings, using the previous review, the
+implementer response, any human feedback and mechanically collected source at exact
+revisions; a repaired integration failure is judged against the withdrawn gate. A first
+review is judged against the mission success criteria, with the mission brief as context
+and the diff from the target branch. The classifier is called on every round
+while the decision provider is available; thin or oversized evidence is
+sent bounded with its omissions declared, and the classifier abstains when that evidence
+cannot support a judgment. Abstentions, unavailable configuration, failed
+calls and rounds lacking required data (for example an unanswered prior finding set or a
+first review of a mission without success criteria, each with its own recorded reason)
+retain the general reviewer.
 
 The selected-choice routing thresholds are 52% for a resolved finding set and
 89% for unresolved findings; other judgments go to the general reviewer. These
 scores are routing signals, not probabilities that the PR is correct.
 
-Configure Jev through the operator environment used by the decision adapter.
+Configure the classifier through the operator environment used by the decision adapter.
 Run `px setup` or `px setup-review` to provision its dedicated `jev` Forgejo
-review identity and token alongside the review users. Jev is a classifier, not
+review identity and token alongside the review users. It is a classifier, not
 an eligible coding-agent family. Its formal review and local decision record
 identify the same candidate revision and original findings.
 
 Set `PARALLIX_JEV_REVIEW=off` in the operator environment to opt out, or `shadow`
 to collect classifier judgments while the general reviewer makes the decision.
 The default is enabled when the decision adapter and review identity are
-available. Invalid mode values disable routing. Missing Jev credentials or
+available. Invalid mode values disable routing. Missing classifier credentials or
 review tokens leave ordinary review usable.
 
-`px stats` shows one UTC PR table with comparable This week and Last week rows,
-including open missions. Applied decisions, distinct eligible decisions, Jev
-calls, reviewer fallbacks, and observed correctness are separate measures.
-Unavailable or partial historical coverage stays labelled as such rather than
-becoming a zero; an automatic clear without an independent observation remains
-unavailable correctness. Statistics read local operational state and do not
-query Forgejo.
+`px stats` shows one UTC PR Classification analysis table with comparable This week and Last week rows,
+including open missions. It counts review rounds overall and split into first review and re-review rows, each round with exactly one
+recorded reason: rounds where the classifier was not attempted, attempted but fell back,
+called, cleared or returned, as counts and percentages of rounds, plus the classifier's
+share of decisions and the share of rounds where the classifier was called. Observed wrong
+is n/a while the classifier has made no decision, and an automatic decision without an
+independent observation stays unobserved rather than correct. A separate table
+lists the reasons the general reviewer decided. Unavailable or partial
+historical coverage stays labelled as such rather than becoming a zero.
+Statistics read local operational state and do not query Forgejo.
+
+Weekly and range reports also show the [bug-labeled mission trend](metric-contract.md#bug-labeled-mission-trend):
+counts and shares for full Monday–Sunday UTC weeks, a three-week trailing average,
+and falling/rising/flat direction. Empty weeks show “no completions”. Mission state
+supplies bug labels, independently of the classification flow counts and Backlog labels.

@@ -1,6 +1,14 @@
 import type { OperationLogReadAdapter } from '../../application/projections/board-readers.js';
 import type { OperationalHistoryRepository } from '../../application/ports/operation-history.js';
 
+/**
+ * How many of the newest operations the board carries. Every consumer shows
+ * only a recent tail (the terminal board four entries, the browser at most this
+ * many), so reading the whole, ever-growing history on each refresh was pure
+ * cost.
+ */
+export const BOARD_OPERATION_LOG_LIMIT = 256;
+
 // ---------------------------------------------------------------------------
 // Concrete OperationLogReadAdapter
 // ---------------------------------------------------------------------------
@@ -34,7 +42,16 @@ export class ConcreteOperationLogReadAdapter implements OperationLogReadAdapter 
     readonly timestamp: string;
     readonly agent?: string;
   }[]> {
-    const entries = await this.historyRepo.findAll();
+    if (this.historyRepo.findRecentLogEntries) {
+      return (await this.historyRepo.findRecentLogEntries(BOARD_OPERATION_LOG_LIMIT)).map((entry) => ({
+        operationId: entry.id ? String(entry.id) : `op-${entry.createdAt}`,
+        phase: entry.eventType,
+        message: entry.message ?? (entry.rawData !== null && entry.rawData !== '{}' ? `${entry.eventType}: ${entry.rawData}` : entry.eventType),
+        timestamp: entry.createdAt,
+        agent: entry.agent ?? undefined,
+      }));
+    }
+    const entries = (await this.historyRepo.findAll()).slice(-BOARD_OPERATION_LOG_LIMIT);
 
     return entries.map((entry) => {
       let message = entry.eventType;

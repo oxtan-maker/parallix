@@ -1,3 +1,4 @@
+import { rebaseHookRecoveryEligible, replacementImplementer, preContinueAction, postContinueAction, continueBudgetExceeded } from '../../../src/domain/rebase-policy.js';
 // Historical regression provenance: TASK-2294.01, TASK-2503, TASK-2506, TASK-2494.
 // Behavior-owned suite (TASK-2622.09): `px rebase`/`px resolve-conflict` conflict recovery over injected
 // workflow ports — pinned implementer dispatch (task-2294.01, task-2503), usage-blocked implementer
@@ -287,6 +288,106 @@ describe("recorded implementer dispatch", () => {
     } finally {
       setLogger(previous);
     }
+  }
+
+  test('verifies active repaired rebase without APPROVED review (TASK-2673)', async () => {
+    let repositoryChecks = 0;
+    let integrationChecks = 0;
+    const h = sharedConflictHarness({
+      readReviewState: () => ({ implementer: 'codex', status: 'active', metadata: {} }),
+      startAgent: async (_step, options) => {
+        const prompt = String(options.prompt);
+        assert.match(prompt, /npm test/);
+        repositoryChecks += 1; // Injected repository verifier succeeds on the repaired tree.
+        if (/px integrate .*--dry-run/.test(prompt)) {
+          integrationChecks += 1;
+          return { agent: 'codex', result: { status: 1 } }; // Active, unapproved mission.
+        }
+        return { agent: 'codex', result: { status: 0 } };
+      },
+    });
+    await run(h);
+    assert.equal(repositoryChecks, 1);
+    assert.equal(integrationChecks, 0, 'repair verification must not require integration eligibility');
+    assert.deepEqual(h.exitCodes, [0]);
+  });
+
+  test('failed repository verification prevents repair completion and push (TASK-2673)', async () => {
+    let pushes = 0;
+    let resumes = 0;
+    const h = sharedConflictHarness({
+      readReviewState: () => ({ implementer: 'codex', status: 'active' }),
+      startAgent: async (_step, options) => {
+        assert.match(String(options.prompt), /do not report completion until it passes/);
+        return { agent: 'codex', result: { status: 1 } };
+      },
+      isForgejoReviewEnabled: () => true,
+      createPr: () => { pushes += 1; return { ok: true }; },
+      resumeReviewAfterRepair: async () => { resumes += 1; },
+    });
+    await run(h, ['task-2503', '--push']);
+    assert.deepEqual(h.exitCodes, [1]);
+    assert.equal(pushes, 0);
+    assert.equal(resumes, 0);
+    assert.doesNotMatch(h.lines.join('\n'), /completed conflict resolution/);
+  });
+
+  test('unfinished Git rebase prevents repair completion and push (TASK-2673)', async () => {
+    let launched = false;
+    let pushes = 0;
+    let resumes = 0;
+    const h = sharedConflictHarness({
+      readReviewState: () => ({ implementer: 'codex', status: 'active' }),
+      startAgent: async () => {
+        launched = true;
+        return { agent: 'codex', result: { status: 0 } };
+      },
+      // No unmerged paths remain, but Git is still replaying an empty pick.
+      detectRebaseState: () => ({ inProgress: launched, unmergedFiles: [] }),
+      isForgejoReviewEnabled: () => true,
+      createPr: () => { pushes += 1; return { ok: true }; },
+      resumeReviewAfterRepair: async () => { resumes += 1; },
+    });
+    await run(h, ['task-2503', '--push']);
+    assert.deepEqual(h.exitCodes, [1]);
+    assert.equal(pushes, 0);
+    assert.equal(resumes, 0);
+    assert.doesNotMatch(h.lines.join('\n'), /completed conflict resolution/);
+  });
+
+  for (const remaining of [
+    { name: 'an active rebase', inProgress: true, unmergedFiles: [] },
+    { name: 'unmerged files', inProgress: false, unmergedFiles: [SHARED_FILE] },
+  ]) {
+    test(`successful Git command with ${remaining.name} cannot finalize or publish repair (TASK-2673)`, async () => {
+      let rebased = false;
+      let pushes = 0;
+      let branchMoves = 0;
+      let resumes = 0;
+      const h = sharedConflictHarness({
+        git: (args) => {
+          const tail = subcommand(args);
+          if (tail[0] === 'rebase' && tail[1] === 'main') { rebased = true; }
+          return OK;
+        },
+        // The command reports success and --show-current is empty, but the
+        // authoritative final Git-state probe still rejects completion.
+        detectRebaseState: () => rebased ? remaining : { inProgress: false, unmergedFiles: [] },
+        isForgejoReviewEnabled: () => true,
+        createPr: () => { pushes += 1; return { ok: true }; },
+        recordBranchMove: async () => { branchMoves += 1; return null; },
+        resumeReviewAfterRepair: async () => { resumes += 1; },
+      });
+      await run(h, ['task-2503', '--push']);
+      assert.equal(rebased, true);
+      assert.deepEqual(h.exitCodes, [1]);
+      assert.equal(pushes, 0);
+      assert.equal(branchMoves, 0);
+      assert.equal(resumes, 0);
+      assert.equal(h.agentLaunches.length, 0);
+      assert.match(h.lines.join('\n'), /Rebase is unfinished\. Skipping automatic push/);
+      assert.doesNotMatch(h.lines.join('\n'), /Rebase completed cleanly/);
+    });
   }
 
   test('shared-file rebase recovery dispatches the implementer recorded before commit replay', async () => {
@@ -752,4 +853,25 @@ describe("usage-blocked implementer", () => {
     assert.equal(dispatchAction, DispatchAction.HumanOnly);
     assert.equal(hasExplicitHumanOnlyDiagnostic(infra), true);
   });
+});
+
+test('rebase continuation and recovery policy need only observed facts (TASK-2668.07)', () => {
+  assert.equal(rebaseHookRecoveryEligible(1, true, true), true);
+  for (const facts of [[0, true, true], [1, false, true], [1, true, false]] as const) { assert.equal(rebaseHookRecoveryEligible(facts[0], facts[1], facts[2]), false); }
+  assert.equal(replacementImplementer('codex', 'claude', true), 'codex');
+  assert.equal(replacementImplementer('codex', 'claude', true, 'custom'), 'custom');
+  assert.equal(replacementImplementer('codex', 'codex', true), null);
+  assert.equal(replacementImplementer(null, 'claude', true), null);
+  assert.equal(replacementImplementer('codex', 'claude', false), null);
+  assert.equal(continueBudgetExceeded(2, 2), true);
+  assert.equal(preContinueAction(0, true, true, true), 'completed');
+  assert.equal(preContinueAction(1, true, true, true), 'recursed');
+  assert.equal(preContinueAction(1, false, false, false), 'completed');
+  assert.equal(preContinueAction(1, false, true, false), 'retry');
+  assert.equal(postContinueAction(0, true, true, 2, 2, true), 'completed');
+  assert.equal(postContinueAction(1, true, true, 2, 2, true), 'retry');
+  assert.equal(postContinueAction(1, false, false, 2, 2, true), 'completed');
+  assert.equal(postContinueAction(1, false, true, 2, 2, true), 'budget-exhausted');
+  assert.equal(postContinueAction(1, false, true, 1, 2, true), 'staged-failure');
+  assert.equal(postContinueAction(1, false, true, 1, 2, false), 'retry');
 });

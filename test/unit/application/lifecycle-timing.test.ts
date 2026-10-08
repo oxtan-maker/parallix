@@ -584,9 +584,9 @@ describe("completed-mission decision metrics use the rolling 7-day window", () =
   it('reports active lane dwell from the full lifecycle of current-window missions', () => {
     const metrics = metricsOverContaminatedHistory();
     const active = metrics.medianCycleTimeByState.series.find((entry) => entry.lane === 'active');
-    // 31 missions each with one active interval, plus one extra interval for
-    // each of the 5 that bounced back from review: 36 intervals of 9 minutes.
-    assert.equal(active?.observationCount, 36);
+    // One summed observation per mission (TASK-2682): 26 total 9 minutes;
+    // the 5 that bounced total 18 minutes each. The median remains 9 minutes.
+    assert.equal(active?.observationCount, 31);
     assert.equal(active?.value, 9);
   });
 
@@ -677,4 +677,3 @@ describe("completed-mission decision metrics use the rolling 7-day window", () =
     assert.equal(done?.observationCount, 299);
   });
 });
-

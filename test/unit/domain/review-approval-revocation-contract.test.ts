@@ -214,7 +214,11 @@ describe("stand down", { concurrency: false }, () => {
     ];
     for (const file of automated) {
       const text = fs.readFileSync(path.join(root, file), 'utf8');
-      assert.ok(!/RevokeReviewDecisionUseCase|revokeApprovedDecision|type: 'revoke-approval'/.test(text), `${file} must not stand an approval down`);
+      // The review-loop binding alone may reach the use case, and only to apply
+      // a current human REQUEST_CHANGES (the human's own authority, TASK-2679).
+      const humanCorrectionBinding = file === 'src/adapters/review/review-loop.ts';
+      const forbidden = humanCorrectionBinding ? /revokeApprovedDecision|type: 'revoke-approval'/ : /RevokeReviewDecisionUseCase|revokeApprovedDecision|type: 'revoke-approval'/;
+      assert.ok(!forbidden.test(text), `${file} must not stand an approval down`);
       if (file.startsWith('prompts')) { assert.ok(!/revoke-review/.test(text), `${file} must not offer the stand-down to an agent`); }
     }
   });

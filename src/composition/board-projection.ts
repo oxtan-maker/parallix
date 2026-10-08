@@ -8,11 +8,12 @@ import type { BoardLaneEventRepository, OperationalHistoryRepository } from '../
 import type { SessionMarkerRepository } from '../application/ports/mission-store.js';
 import type { UsageRepository } from '../application/ports/mission-measurements.js';
 import { createLauncherProbe, type LauncherProbeResult } from '../adapters/agents/launcher-availability.js';
+import { detectRunningMissionSessions, startProcessTableRead, type ProcessEntry, type RunningMissionSession } from '../adapters/agents/running-sessions.js';
 import { ConcreteAgentReadAdapter } from '../adapters/backlog/concrete-agent-read-adapter.js';
 import { ConcreteGateReadAdapter } from '../adapters/backlog/concrete-gate-read-adapter.js';
 import { ConcreteGitReadAdapter } from '../adapters/backlog/concrete-git-read-adapter.js';
 import { readBacklogInputs } from '../adapters/backlog/backlog-input-reader.js';
-import { resolveTaskFile, getTaskFrontmatterValue } from '../adapters/backlog/task-file-io.js';
+import { createTaskScanCache, resolveTaskFile, getTaskFrontmatterValue, type TaskScanCache } from '../adapters/backlog/task-file-io.js';
 import { ConcreteOperationLogReadAdapter } from '../adapters/backlog/concrete-operation-log-read-adapter.js';
 import { ConcreteReviewReadAdapter } from '../adapters/backlog/concrete-review-read-adapter.js';
 import { ConcreteCurrentWorkReadAdapter } from '../adapters/backlog/concrete-current-work-read-adapter.js';
@@ -59,6 +60,30 @@ export interface BoardProjectionCompositionDeps {
   readonly detectRunningSessions?: () => readonly import('../adapters/agents/running-sessions.js').RunningMissionSession[] | null;
 }
 
+/**
+ * The process table is read by a child that starts with the build, so it runs
+ * beside the build's synchronous reads; one read answers every reader within
+ * the build, and the next build starts from a fresh one.
+ */
+function createRunningSessionScan(deps: Pick<BoardProjectionCompositionDeps, 'rootDir' | 'detectRunningSessions'>) {
+  let processTable: Promise<readonly ProcessEntry[] | null> | undefined;
+  let scan: Promise<readonly RunningMissionSession[] | null> | undefined;
+  return {
+    detect: () => {
+      scan ??= (async () => {
+        if (deps.detectRunningSessions) { return deps.detectRunningSessions(); }
+        const table = await (processTable ??= startProcessTableRead());
+        return detectRunningMissionSessions({ rootDir: deps.rootDir, listProcesses: () => table });
+      })();
+      return scan;
+    },
+    beginRead: () => {
+      scan = undefined;
+      processTable = deps.detectRunningSessions ? undefined : startProcessTableRead();
+    },
+  };
+}
+
 /** The sole production constructor for board reads and mission details. */
 export function composeBoardProjection(deps: BoardProjectionCompositionDeps) {
   let cachedMissions: Promise<readonly import('../domain/mission.js').Mission[]> | null = null;
@@ -87,17 +112,20 @@ export function composeBoardProjection(deps: BoardProjectionCompositionDeps) {
       throw new Error('Mission store cannot enumerate repository records');
     }
     const recorded = await deps.missionStore?.loadByRepository?.(deps.repositoryId) ?? [];
+    const scan = createTaskScanCache();
     const inputs = readBacklogInputs(deps.rootDir, deps.repositoryId, new Set(recorded.map(mission => mission.id)));
-    return [...recorded.map(withRepositoryTitle), ...inputs];
+    return [...recorded.map(mission => withRepositoryTitle(mission, scan)), ...inputs];
   }
 
   // Backlog owns its descriptive title; the aggregate owns all operational fields.
-  function withRepositoryTitle(mission: import('../domain/mission.js').Mission) {
-    const task = resolveTaskFile(mission.id, deps.rootDir);
+  function withRepositoryTitle(mission: import('../domain/mission.js').Mission, scan?: TaskScanCache) {
+    const task = resolveTaskFile(mission.id, deps.rootDir, scan);
     const title = task.ok && task.taskFile ? getTaskFrontmatterValue(task.taskFile, 'title') : null;
     return title ? { ...mission, title } : mission;
   }
   const currentWork = new ConcreteCurrentWorkReadAdapter(deps.historyRepo);
+  const runningSessions = createRunningSessionScan(deps);
+  const changeIdentity = createGitChangeIdentity(deps.rootDir, deps.gitFn ?? undefined, { snapshotBranchHeads: true });
   const completedMissionRetentionDays = loadEffectiveConfig(deps.rootDir).adapters.web.completedMissionRetentionDays;
   const gates = new ConcreteGateReadAdapter({ rootDir: deps.rootDir });
   const builder = new BoardProjectionBuilder(
@@ -121,7 +149,7 @@ export function composeBoardProjection(deps: BoardProjectionCompositionDeps) {
       currentWork,
       isProcessAlive: processLivenessProbe,
       readAgentConfig: deps.readAgentConfig,
-      detectRunningSessions: deps.detectRunningSessions,
+      detectRunningSessions: runningSessions.detect,
     }),
     new ConcreteGitReadAdapter({ rootDir: deps.rootDir, repositoryId: deps.repositoryId, gitRunner: deps.gitFn ?? undefined }),
     new ConcreteOperationLogReadAdapter({ historyRepo: deps.historyRepo }),
@@ -133,6 +161,8 @@ export function composeBoardProjection(deps: BoardProjectionCompositionDeps) {
           currentBranch: deps.gitFn ? () => '' : undefined,
         });
         cachedMissions = null;
+        changeIdentity.beginRead();
+        runningSessions.beginRead();
         gates.useWorktreeTopology(topology);
       },
       // The authoritative answer to "which mission is being worked on right
@@ -140,7 +170,7 @@ export function composeBoardProjection(deps: BoardProjectionCompositionDeps) {
       // the agent adapter above is left in place only as bounded recovery.
       currentWork,
       isProcessAlive: processLivenessProbe,
-      changeIdentity: createGitChangeIdentity(deps.rootDir, deps.gitFn ?? undefined),
+      changeIdentity,
       completedMissionRetentionDays,
       metricsAdapter: new ConcreteMetricsReadAdapter({
         laneEventRepo: deps.laneEventRepo,

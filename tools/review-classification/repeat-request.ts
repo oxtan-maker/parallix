@@ -4,7 +4,7 @@ import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { performance } from 'node:perf_hooks';
 import { createDecisionPort } from '../../src/composition/decision.js';
-import { classifyRepeatFindings, ROUTING_POLICY_VERSION } from '../../src/application/review-classification/routing-policy.js';
+import { classifyFindings, ROUTING_POLICY_VERSION } from '../../src/application/review-classification/routing-policy.js';
 import type { DecisionRequest } from '../../src/application/ports/decision.js';
 
 const args = process.argv.slice(2);
@@ -30,7 +30,7 @@ for (let repeat = 1; repeat <= repeats; repeat++) {
   report.calls.push(call);
   try {
     const response = await port.decide(request);
-    call.response = response; call.routing = classifyRepeatFindings(response);
+    call.response = response; call.routing = classifyFindings(response);
   } catch (error) { call.failure = error instanceof Error ? error.message : String(error); }
   call.classificationMs = performance.now() - start;
   await fs.writeFile(output, JSON.stringify(report, null, 2) + '\n');

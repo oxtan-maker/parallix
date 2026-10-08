@@ -66,7 +66,7 @@ test('task-2273 review submission runs the handoff plan once and reuses it at th
     fs.mkdirSync(missionDir, { recursive: true });
     fs.writeFileSync(path.join(root, 'workflow.config.json'), JSON.stringify({ adapters: { verification: { command, defaultArea: 'workflow' } } }));
     fs.writeFileSync(path.join(missionDir, 'MISSION.md'), `# Mission\n\n## Gates\n- [ ] ${command}\n`);
-    fs.writeFileSync(path.join(missionDir, 'CP-1.md'), '# CP-1\n\n## Goal Check\n\n| Criterion | Evidence | Status |\n|---|---|---|\n| fixture | test/review-gate-ownership.test.js | PASS |\n');
+    fs.writeFileSync(path.join(missionDir, 'CP-1.md'), '# CP-1\n\n## Goal Check\n\n| Criterion | Evidence | Status |\n|---|---|---|\n| fixture | `npm test -- test/review-gate-ownership.test.js` | PASS |\n');
     fs.writeFileSync(taskFile, '---\nstatus: active\nassignee: [codex]\n---\n');
     childProcess.execFileSync('git', ['add', '.'], { cwd: root });
     childProcess.execFileSync('git', ['commit', '-m', 'declare gate'], { cwd: root, stdio: 'pipe' });

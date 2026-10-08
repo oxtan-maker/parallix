@@ -10,6 +10,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
+import { evaluateTaskStatusForIntegration } from '../../../src/application/integrate/approval.js';
 import { runRebaseWorkflow } from '../../../src/application/rebase-workflow.js';
 import { MissionLifecycleService } from '../../../src/application/mission-lifecycle-service.js';
 import { RevokeReviewDecisionUseCase } from '../../../src/application/revoke-review-decision-use-case.js';
@@ -180,5 +181,81 @@ test('a refused stand-down leaves the mission, its review rows and its Backlog s
     assert.equal(git(root, 'status', '--porcelain'), '');
   } finally {
     await database.close();
+  }
+});
+
+test('isolated active conflict repair verifies its tree while integration stays approval-gated (TASK-2673)', async () => {
+  const { root, approved } = repository('active-repair');
+  const { database, store } = await approvedMission(root, approved);
+  try {
+    const loaded = await store.load(missionId(slug));
+    assert.equal(loaded.kind, 'found');
+    await store.save({ ...loaded.mission, status: 'active', closedAt: null, review: null }, loaded.version);
+    const taskFile = path.join(root, 'backlog', 'tasks', 'task-2555 - Repair.md');
+    fs.mkdirSync(path.dirname(taskFile), { recursive: true });
+    fs.writeFileSync(taskFile, '---\nid: TASK-2555\ntitle: Repair\nstatus: active\nassignee: [codex]\n---\n');
+    fs.writeFileSync(path.join(root, 'workflow.config.json'), JSON.stringify({
+      adapters: { verification: { command: 'node --check repaired.cjs' } },
+    }));
+    git(root, 'add', '.');
+    git(root, 'commit', '-qm', 'active fixture');
+    git(root, 'checkout', '-q', 'main');
+    fs.mkdirSync(path.dirname(taskFile), { recursive: true });
+    fs.writeFileSync(taskFile, '---\nid: TASK-2555\ntitle: Repair\nstatus: active\nassignee: [codex]\n---\n');
+    fs.writeFileSync(path.join(root, 'workflow.config.json'), JSON.stringify({
+      adapters: { verification: { command: 'node --check repaired.cjs' } },
+    }));
+    git(root, 'add', '.');
+    fs.writeFileSync(path.join(root, 'contract.txt'), 'base advanced\n');
+    git(root, 'commit', '-qam', 'conflicting main');
+    git(root, 'checkout', '-q', branch);
+    let code = -1;
+    let verified = false;
+    const port = createRebaseWorkflowPort({
+      inferSlugFn: () => slug, resolveWorktreeFn: () => root,
+      findMissionDirFn: () => root, findMissionAreaFn: () => 'workflow',
+      resolveMissionBaseBranchFn: () => 'main',
+      resolveTaskFileFn: () => ({ ok: true, taskFile }), getTaskImplementerFn: () => 'codex',
+      resolveConflictsFn: () => ({ ok: true, conflictFiles: ['contract.txt'], missionSpecificFiles: [], sharedFiles: ['contract.txt'] }),
+      isForgejoReviewEnabledFn: () => false,
+      missionServicesFn: async () => ({ store, lifecycle: new MissionLifecycleService(store) }),
+      startAgentFn: async (_step: string, options: { prompt: string }) => {
+        const during = await store.load(missionId(slug));
+        if (during.kind !== 'found') { assert.fail('active mission must be recorded'); }
+        assert.equal(during.mission.status, 'active');
+        assert.equal(during.mission.review, null);
+        assert.doesNotMatch(options.prompt, /px integrate .*--dry-run/);
+        assert.match(options.prompt, /node --check repaired.cjs/);
+        fs.writeFileSync(path.join(root, 'contract.txt'), 'base advanced with repaired mission\n');
+        fs.writeFileSync(path.join(root, 'repaired.cjs'), 'module.exports = 42;\n');
+        git(root, 'add', '.');
+        const continued = spawnSync('git', ['-C', root, '-c', 'core.editor=true', 'rebase', '--continue'], { encoding: 'utf8' });
+        assert.equal(continued.status, 0, continued.stderr);
+        const check = spawnSync('node', ['--check', 'repaired.cjs'], { cwd: root, encoding: 'utf8' });
+        assert.equal(check.status, 0, check.stderr);
+        verified = true;
+        return { agent: 'codex', result: { status: check.status } };
+      },
+      exitFn: (exitCode: number) => { code = exitCode; },
+    });
+    port.readReviewState = () => ({ implementer: 'codex' });
+    await runRebaseWorkflow([slug], port);
+    assert.equal(code, 0);
+    assert.equal(verified, true);
+    assert.equal(port.detectRebaseState(root).inProgress, false);
+    const after = await store.load(missionId(slug));
+    if (after.kind !== 'found') { assert.fail('repaired mission must be recorded'); }
+    assert.equal(after.mission.status, 'active');
+    assert.equal(after.mission.review, null);
+    const eligibility = evaluateTaskStatusForIntegration({
+      missionStatus: after.mission.status, missionReview: after.mission.review,
+      approval: { ok: true, reviewState: null }, baseWorktree: root,
+    }, { toVirtual: (status: string) => status } as any);
+    assert.equal(eligibility.ok, false, 'green repair must not grant integration eligibility');
+    console.log('Isolated repair: Git complete; node --check green; Mission active with no review; integration refused.');
+  } finally {
+    await database.close();
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(path.join(tmp, 'active-repair.db'), { force: true });
   }
 });

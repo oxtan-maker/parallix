@@ -57,6 +57,26 @@ function missionFlowSection(heading: string, selected: ReturnType<typeof selectS
   return lines;
 }
 
+function bugTrendSection(selection: ReturnType<typeof selectStatsReport>) {
+  const lines = [fmt.bold('Bug-labeled mission trend — full UTC ISO weeks')];
+  if (selection.bugTrend === null) {
+    return [...lines, 'Bug trend unavailable: lifecycle history was not read.'];
+  }
+  if (!selection.bugTrend.length) {
+    return [...lines, 'No full UTC ISO weeks in the reporting window.'];
+  }
+  const percent = (value: number | null) => value === null ? '—' : `${(value * 100).toFixed(1)}%`;
+  lines.push(formatStatsTable(
+    ['UTC week (Mon → Sun)', '# bug missions', '# completed', 'Bug share', 'Trailing average (3 weeks)', 'Direction'],
+    selection.bugTrend.map(week => [
+      `${week.start} → ${week.end}`, String(week.bugs), String(week.completed),
+      week.share === null ? '— (no completions)' : percent(week.share),
+      percent(week.trailingAverage), week.direction ?? '—',
+    ]),
+  ));
+  return lines;
+}
+
 function selectedAgentStats(selected: ReturnType<typeof selectStatsReport>['current'], rootDir: string | null) {
   return selected.flow === null ? [] : summarizeAgentWindow(selected.completedRows, selected.window, {
     rootDir, completedMissionKeys: new Set(selected.completedMissions.map(statisticsMissionKey)), completedMissionOwners: selected.completedMissionOwners,
@@ -96,6 +116,8 @@ function renderWeeklyStatsReport(rows: readonly StatsRow[], options: StatsReport
   lines.push(...missionFlowSection('Mission flow — current week', selection.current));
   lines.push('');
   lines.push(...missionFlowSection('Mission flow — previous week', selection.previous));
+  lines.push('');
+  lines.push(...bugTrendSection(selection));
   lines.push('');
   lines.push(fmt.bold(`Agent performance this week (${windows.current.label}) — completed Missions`));
   lines.push(missionFlow === null ? 'Agent performance unavailable: lifecycle history was not read.' : formatStatsTable(
@@ -139,6 +161,8 @@ function renderRangeStatsReport(rows: readonly StatsRow[], options: StatsReportO
 
   const lines = [];
   lines.push(...missionFlowSection('Mission flow', selection.current));
+  lines.push('');
+  lines.push(...bugTrendSection(selection));
   lines.push('');
   lines.push(fmt.bold(`Agent performance (${window.label}) — completed Missions`));
   lines.push(missionFlow === null ? 'Agent performance unavailable: lifecycle history was not read.' : formatStatsTable(

@@ -230,7 +230,7 @@ test('performHandoff accepts completed criteria with paraphrased verifiable evid
       criteria: ['the long stored criterion', 'another stored criterion'],
       goalCheck: [
         { criterion: 'database behavior', evidence: '`npm run typecheck`' },
-        { criterion: 'user-visible result', evidence: 'test/unit/adapters/cli/commands/mission-handoff-verification-contract.test.ts' },
+        { criterion: 'user-visible result', evidence: '`npm test -- test/unit/adapters/cli/commands/mission-handoff-verification-contract.test.ts`' },
       ],
     }),
   });

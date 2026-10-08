@@ -19,6 +19,10 @@ import { ReviewState } from '../../../../src/adapters/review/review-state.js';
 import { reviewStateDataFrom } from '../../../../src/adapters/review/review-state-mapping.js';
 import { fakeReviewLoopPorts } from '../../../helpers/review-loop-ports.js';
 import { rebound } from '../../../../src/application/rebound-kernel.js';
+import { agentFamily } from '../../../../src/domain/agents.js';
+import { missionId, missionLabels, type Mission } from '../../../../src/domain/mission.js';
+import { repositoryId } from '../../../../src/domain/repository.js';
+import { applyReviewerCommand, changeRevision, ConfiguredReviewerEligibility, startReview } from '../../../../src/domain/review.js';
 import { mkdtemp as registeredMkdtemp } from '../../../helpers/temp-dir.js';
 
 // Regression provenance: TASK-2317.
@@ -230,6 +234,68 @@ describe('human review reconciliation', { concurrency: false }, () => {
     const edited = await ports.humanFeedback.reconcile(state);
     assert.equal(edited?.reason, 'Preserve the corrected implementation.');
     assert.equal(events.length, 3, 'an edited review has a new provider revision identity and is retained');
+  });
+
+  test('a current human correction on an approved round stays unrecorded and unconsumed until handled (TASK-2679)', async () => {
+    const events: Array<{ reference?: string }> = [];
+    const comments = [{ kind: 'review', id: 'late-request', user: 'operator', created: '2026-10-05T10:03:00Z', updated: '2026-10-05T10:03:00Z', state: 'REQUEST_CHANGES', body: 'Late correction.' }];
+    const ports = createReviewLoopPorts('task-2679', { worktree: repoRoot }, {
+      isProviderEnabled: () => true,
+      readToken: () => 'test-token',
+      getComments: async () => comments,
+      createEvent: async (_slug, _type, event) => { events.push({ reference: event.followUpReference }); return { ok: true, path: null }; },
+      log: () => {}, error: () => {},
+    });
+    const approved = new ReviewState('task-2679', { reviewer: 'claude', implementer: 'codex', phase: 'approved', round: 1 });
+
+    assert.equal((await ports.humanFeedback.reconcile(approved))?.reason, 'Late correction.');
+    assert.equal((await ports.humanFeedback.reconcile(approved))?.reason, 'Late correction.', 'a retry re-observes the same correction');
+    assert.equal(events.length, 0, 'no durable audit event may consume the source while the approval is effective');
+    assert.deepEqual(approved.metadata.humanFeedbackSources ?? [], []);
+
+    const revoked = new ReviewState('task-2679', { reviewer: 'claude', implementer: 'codex', phase: 'reviewing', round: 2 });
+    assert.equal((await ports.humanFeedback.reconcile(revoked))?.reason, 'Late correction.');
+    assert.equal(events.length, 1, 'once the approval no longer covers the round the correction is recorded');
+    assert.equal(await ports.humanFeedback.reconcile(revoked), null);
+  });
+
+  // Regression provenance: TASK-2679.
+  describe('approval revocation binding', () => {
+    const approvedReview = applyReviewerCommand(startReview(
+      { change: { kind: 'local-branch', sourceBranch: 'mission/task-2679', targetBranch: 'main' }, revision: changeRevision('abc') },
+      agentFamily('custom'), agentFamily('codex'), '2026-01-01T00:00:00Z',
+      ConfiguredReviewerEligibility.fromReviewStep({ eligible: [agentFamily('custom')], strategy: 'random' }),
+    ), { type: 'approve', decidedAt: '2026-01-01T00:01:00Z', comment: null, source: { kind: 'local' } });
+    const mission: Mission = { id: missionId('task-2679'), repositoryId: repositoryId('repo'), title: 'revoke', labels: missionLabels([]), assignee: null, checkpoints: [], review: approvedReview, netEngineeringLines: null, status: 'integration', closedAt: null };
+    const bind = (store: unknown, lifecycle: unknown) => createReviewLoopPorts('task-2679', { worktree: repoRoot }, {
+      missionStore: store as never, lifecycleService: lifecycle as never, isProviderEnabled: () => false, log: () => {}, error: () => {},
+    }).approvalRevocation!;
+
+    test('revokes the recorded approval through the operator use case and tolerates an unreachable provider', async () => {
+      const commands: unknown[] = [];
+      const revocation = bind(
+        { async load() { return { kind: 'found' as const, mission, version: 3 as never }; } },
+        { async transition(request: any) { commands.push(request.command.type); return { status: 'completed', value: { mission: { ...mission, status: 'review', review: request.command.review } } }; } },
+      );
+      const outcome = await revocation.revoke({ round: 1, operator: 'operator', reason: 'human change request' });
+      assert.deepEqual(outcome, { ok: true });
+      assert.deepEqual(commands, ['revoke-approval']);
+    });
+
+    test('reports a diagnostic when no review is recorded or the revocation is refused', async () => {
+      const missing = bind({ async load() { return { kind: 'missing' as const }; } }, {});
+      assert.deepEqual(await missing.revoke({ round: 1, operator: 'operator', reason: 'r' }), { ok: false, diagnostic: 'mission task-2679 has no recorded review' });
+      const refused = bind(
+        { async load() { return { kind: 'found' as const, mission, version: 3 as never }; } },
+        { async transition() { return { status: 'failed', error: { message: 'stale version' } }; } },
+      );
+      assert.deepEqual(await refused.revoke({ round: 1, operator: 'operator', reason: 'r' }), { ok: false, diagnostic: 'stale version' });
+    });
+
+    test('is unbound without a mission store, so the loop stops with guidance', () => {
+      const ports = createReviewLoopPorts('task-2679', { worktree: repoRoot }, { isProviderEnabled: () => false, log: () => {}, error: () => {} });
+      assert.equal(ports.approvalRevocation, null);
+    });
   });
 
   test('task-2641: a consumed dismissed human approval still stops the real adapter path', async () => {
@@ -459,6 +525,19 @@ describe("completed controls", { concurrency: false }, () => {
       assert.match(block, /preReview gates NOT yet run[^\n]*lint `npm run lint`/);
       // preIntegration has not run at review time; claiming it would be a lie.
       assert.doesNotMatch(block, /npm run e2e/);
+      assertWithinBudget(block);
+    } finally {
+      fs.rmSync(repoRoot, { recursive: true, force: true });
+    }
+  });
+
+  test('the controls block scopes the handoff evidence claim to the final checkpoint (TASK-2662)', () => {
+    const { repoRoot, missionPath } = makeFixture({ missionBody: MISSION_WITH_GATES });
+    try {
+      const block = buildCompletedControlsBlock(missionPath, repoRoot);
+      assert.match(block, /Handoff checked only the final checkpoint/);
+      assert.match(block, /at least one row per success criterion/);
+      assert.doesNotMatch(block, /validated every checkpoint/, 'handoff never checks earlier checkpoints');
       assertWithinBudget(block);
     } finally {
       fs.rmSync(repoRoot, { recursive: true, force: true });

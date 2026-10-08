@@ -101,37 +101,16 @@ describe('Ad hoc lifecycle', () => {
   const fs = require('node:fs');
   const path = require('node:path');
 
-  // TASK-2521.03: activation refuses a mission whose contract draft never
-  // finished, so a drafting agent records it through \`px\` — the same commands the
-  // draft prompt names. The harness passes the CLI entry in the environment
-  // because this stub runs as a bare executable on the fixture PATH.
-  function px(args) {
-    const entry = process.env.PARALLIX_E2E_PX_ENTRY;
-    const loader = process.env.PARALLIX_E2E_PX_LOADER;
-    if (!entry) { return null; }
-    const run = require('node:child_process').spawnSync(
-      process.execPath, (loader ? ['--import', loader] : []).concat([entry], args),
-      { cwd: process.cwd(), encoding: 'utf8' }
-    );
-    return run.status === 0 ? (run.stdout || '') : null;
-  }
-
-  // Each write prints the Mission's new version, so the stub chains writes from
-  // that instead of re-reading \`px status\` between them: every \`px\` spawn
-  // costs a full CLI start-up.
-  function missionVersion(missionSlug) {
-    const out = px(['status', missionSlug, '--json']);
-    if (!out) { return null; }
-    try { return String(JSON.parse(out).version); } catch (_) { return null; }
-  }
-
+  // Activation requires a recorded contract. Agent setup applies the same
+  // typed commands through the production command graph in one child.
   function writeChain(missionSlug, writes) {
-    let v = missionVersion(missionSlug);
-    for (const args of writes) {
-      if (v === null) { return; }
-      const out = px(args.concat(['--slug', missionSlug, '--expected-version', v]));
-      try { v = out ? String(JSON.parse(out).version) : null; } catch (_) { v = null; }
-    }
+    // Contract setup is agent fixture work. Run the same production command
+    // graph once for the chain instead of starting a CLI per setup mutation.
+    const result = require('node:child_process').spawnSync(process.execPath,
+      ['--import', ${JSON.stringify(path.resolve('node_modules/tsx/dist/loader.mjs'))},
+       ${JSON.stringify(path.resolve('test/fixtures/mission-contract-agent-writes.ts'))},
+       missionSlug, JSON.stringify(writes)], { cwd: process.cwd(), env: process.env, encoding: 'utf8' });
+    if (result.status !== 0) { throw new Error(result.stdout + result.stderr); }
   }
 
   function recordMissionContract(missionSlug) {
@@ -319,12 +298,6 @@ describe('Ad hoc lifecycle', () => {
       FORGEJO_USER: 'custom',
       PRIMARY_WORKTREE: repoRoot,
       PARALLIX_HOME: stateHome,
-      // The agent stub records the mission contract with `px`, the same commands
-      // the draft prompt names, because activation now refuses an incomplete one.
-      // It runs as a bare executable on the fixture PATH, so it cannot resolve
-      // the CLI entry itself.
-      PARALLIX_E2E_PX_ENTRY: PX.entry,
-      PARALLIX_E2E_PX_LOADER: PX.loader,
       PATH: binDir
     };
   }
@@ -334,26 +307,14 @@ describe('Ad hoc lifecycle', () => {
   // though the fixture remains healthy, so keep the boundary bounded but give it
   // the same two-minute allowance used by the end-to-end workflow lane.
   function runWorkflow(repoRoot, env, args, timeout = 120000, { allowFailure = false } = {}) {
-    const stdoutPath = path.join(os.tmpdir(), `parallix-e2e-stdout-${process.pid}-${Date.now()}.log`);
-    const stderrPath = path.join(os.tmpdir(), `parallix-e2e-stderr-${process.pid}-${Date.now()}.log`);
-    const stdoutFd = fs.openSync(stdoutPath, 'w');
-    const stderrFd = fs.openSync(stderrPath, 'w');
-    let result;
-    try {
-      result = childProcess.spawnSync(process.execPath, pxNodeArgs(PX, args), {
-        cwd: repoRoot,
-        env,
-        timeout,
-        stdio: ['ignore', stdoutFd, stderrFd]
-      });
-    } finally {
-      fs.closeSync(stdoutFd);
-      fs.closeSync(stderrFd);
-    }
-    result.stdout = fs.existsSync(stdoutPath) ? fs.readFileSync(stdoutPath, 'utf8') : '';
-    result.stderr = fs.existsSync(stderrPath) ? fs.readFileSync(stderrPath, 'utf8') : '';
-    fs.rmSync(stdoutPath, { force: true });
-    fs.rmSync(stderrPath, { force: true });
+    // The CLI contract output is small. Capturing it directly keeps the same
+    // subprocess boundary while avoiding four file operations per invocation.
+    const result = childProcess.spawnSync(process.execPath, pxNodeArgs(PX, args), {
+      cwd: repoRoot,
+      env,
+      timeout,
+      encoding: 'utf8'
+    });
     if (result.error && result.status === null) {
       throw result.error;
     }
@@ -396,16 +357,9 @@ describe('Ad hoc lifecycle', () => {
     return null;
   }
 
-  let sharedFixture: ReturnType<typeof setupRepository> | undefined;
-  after(() => {
-    if (sharedFixture) {
-      fs.rmSync(sharedFixture.tmpRoot, { recursive: true, force: true });
-    }
-  });
-
-  test('a free-text adhoc mission reaches active on a DB-owned adhoc identity in a Backlog-less repo', () => {
+  test('a free-text adhoc mission reaches active on a DB-owned adhoc identity in a Backlog-less repo', (t) => {
     const repo = setupRepository({ slug: 'fix-hello-world-greeting', title: 'fix hello world greeting' });
-    sharedFixture = repo;
+    t.after(() => fs.rmSync(repo.tmpRoot, { recursive: true, force: true }));
     const env = workflowEnv(repo.binDir, repo.stateHome, repo.repoRoot);
 
     runWorkflow(repo.repoRoot, env, ['draft', 'fix hello world greeting', '--agent', 'custom']);
@@ -429,9 +383,9 @@ describe('Ad hoc lifecycle', () => {
   // test — a different command. This test runs the real `px draft` against a
   // Backlog-less repo with a missing `task-<N>` argument and asserts the
   // draft command itself rejects it (exit 1), not a sibling command.
-  test('px draft task-<missing> rejects a missing task file at the draft boundary', () => {
-    assert.ok(sharedFixture, 'the lifecycle fixture must be available for the draft rejection proof');
-    const repo = sharedFixture;
+  test('px draft task-<missing> rejects a missing task file at the draft boundary', (t) => {
+    const repo = setupRepository({ slug: 'missing-task-proof', title: 'Missing task proof' });
+    t.after(() => fs.rmSync(repo.tmpRoot, { recursive: true, force: true }));
     const env = workflowEnv(repo.binDir, repo.stateHome, repo.repoRoot);
 
     const result = runWorkflow(

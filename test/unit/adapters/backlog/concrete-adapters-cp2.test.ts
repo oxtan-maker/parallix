@@ -7,7 +7,7 @@ import os from 'node:os';
 import { ConcreteReviewReadAdapter } from '../../../../src/adapters/backlog/concrete-review-read-adapter.js';
 import { ConcreteGateReadAdapter } from '../../../../src/adapters/backlog/concrete-gate-read-adapter.js';
 import { ConcreteAgentReadAdapter } from '../../../../src/adapters/backlog/concrete-agent-read-adapter.js';
-import { ConcreteOperationLogReadAdapter } from '../../../../src/adapters/backlog/concrete-operation-log-read-adapter.js';
+import { BOARD_OPERATION_LOG_LIMIT, ConcreteOperationLogReadAdapter } from '../../../../src/adapters/backlog/concrete-operation-log-read-adapter.js';
 import { ConcreteGitReadAdapter } from '../../../../src/adapters/backlog/concrete-git-read-adapter.js';
 import { agentFamily } from '../../../../src/domain/agents.js';
 import { missionId } from '../../../../src/domain/mission.js';
@@ -406,6 +406,34 @@ test('OperationLogReadAdapter loadOperationLog handles non-JSON eventData', asyn
   assert.equal(log.length, 1);
   assert.equal(log[0].phase, 'adapter-initialized');
   assert.ok(log[0].message.includes('adapter-initialized'));
+});
+
+test('OperationLogReadAdapter loadOperationLog carries only the newest 256 entries, read without the full history (TASK-2681)', async () => {
+  const history = new MockHistoryRepo();
+  for (let index = 1; index <= BOARD_OPERATION_LOG_LIMIT + 5; index += 1) {
+    await history.append({ eventType: 'step', eventData: JSON.stringify({ message: `m${index}` }), createdAt: '2026-07-20T10:00:00Z' });
+  }
+  const adapter = new ConcreteOperationLogReadAdapter({ historyRepo: history });
+  const viaFindAll = await adapter.loadOperationLog();
+  assert.equal(viaFindAll.length, BOARD_OPERATION_LOG_LIMIT);
+  assert.equal(viaFindAll[0].message, 'm6');
+  assert.equal(viaFindAll.at(-1)?.message, `m${BOARD_OPERATION_LOG_LIMIT + 5}`);
+
+  let findAllCalls = 0;
+  const bounded = Object.assign(Object.create(history), {
+    findAll: async () => { findAllCalls += 1; return []; },
+    findRecentLogEntries: async (limit: number) => (await history.findAll()).slice(-limit).map((entry) => ({
+      id: entry.id ?? 0,
+      eventType: entry.eventType,
+      createdAt: entry.createdAt,
+      message: (JSON.parse(entry.eventData) as { message: string }).message,
+      agent: null,
+      rawData: null,
+    })),
+  }) as OperationalHistoryRepository;
+  const viaRecent = await new ConcreteOperationLogReadAdapter({ historyRepo: bounded }).loadOperationLog();
+  assert.deepEqual(viaRecent.map((entry) => entry.message), viaFindAll.map((entry) => entry.message));
+  assert.equal(findAllCalls, 0, 'a repository that can answer the newest entries is never asked for all of them');
 });
 
 // ---------------------------------------------------------------------------

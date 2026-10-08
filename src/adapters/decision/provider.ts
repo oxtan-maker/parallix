@@ -1,10 +1,11 @@
 import type { DecisionAvailability } from '../../application/ports/decision.js';
+import type { DECISION_CREDENTIAL_ENV } from '../../domain/decision-credentials.js';
 
 const PROVIDERS = {
   typesafe: { key: 'TYPESAFE_API_KEY', base: 'https://api.typesafe.ai', model: 'jev-latest' },
   openrouter: { key: 'OPENROUTER_API_KEY', base: 'https://openrouter.ai/api', model: 'jev-latest' },
   vercel: { key: 'AI_GATEWAY_API_KEY', base: 'https://ai-gateway.vercel.sh/typesafe', model: 'typesafe-ai/jev' },
-} as const;
+} as const satisfies Record<string, { key: typeof DECISION_CREDENTIAL_ENV[number]; base: string; model: string }>;
 type Provider = keyof typeof PROVIDERS;
 export interface DecisionRoute {
   readonly provider: Provider;

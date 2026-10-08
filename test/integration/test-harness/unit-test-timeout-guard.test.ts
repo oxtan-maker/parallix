@@ -282,14 +282,17 @@ test('unit-test timeout guard: fast test passes within the bound', () => {
 
 test('unit-test CPU guard: suite budget enforcement fails when exceeded', () => {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'budget-guard-proof-'));
-  const budgetMs = 1_500;
+  // This is a suite-budget proof, not a throughput benchmark.  A narrow
+  // ceiling makes the runner's normal startup cost sufficient evidence and
+  // avoids burning 1.55 CPU seconds just to cross an arbitrary large limit.
+  const budgetMs = 20;
 
   // Write a test file that deliberately uses more CPU than the budget.
   const testFile = path.join(tmpDir, 'slow-suite.test.ts');
   fs.writeFileSync(
     testFile,
     `import test from 'node:test';\n` +
-    `test('CPU burner', () => { ${burnCpuSource(1_550_000)} });\n`,
+    `test('CPU burner', () => { ${burnCpuSource(50_000)} });\n`,
   );
 
   // Spawn the runner with the tight budget and this single test file.

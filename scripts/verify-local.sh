@@ -97,18 +97,23 @@ gate_all() {
 gate_static_analysis() {
   echo "=== Static Analysis Gate ==="
 
-  # Stage 1: ESLint on all sources with flat config (no --ext, ignores handled by config).
-  # Report the error and warning counts separately (budget stays 300) so output
-  # distinguishes "no errors" from "zero warnings" rather than a single clean line.
+  # Stage 1: type-aware ESLint on production sources. Its committed ratchet
+  # owns the permitted warning population; errors (including promise rules)
+  # remain immediately blocking.
   echo "[1/4] Running ESLint..."
-  ESLINT_JSON=$(npx --yes eslint --max-warnings 300 --format json src/ 2>&1)
+  # eslint's JSON report is several megabytes. Keep it in a file rather than
+  # streaming a shell variable through Node: under constrained runners that
+  # large pipe has intermittently crashed the reader before the ratchet can
+  # inspect an otherwise valid report.
+  ESLINT_JSON_FILE=$(mktemp "${TMPDIR:-/tmp}/parallix-eslint.XXXXXX") || return 1
+  npx --yes eslint --format json src/ web/ > "$ESLINT_JSON_FILE" 2>&1
   ESLINT_STATUS=$?
   # eslint exits non-zero on any error or on warnings over --max-warnings. A
   # non-zero status fails the gate before any parsing, so a real ESLint failure
   # can never be reported as a pass. Only a zero exit needs the JSON to split
   # errors from warnings and confirm the warning budget.
   if [ "$ESLINT_STATUS" -ne 0 ]; then
-    ESLINT_SUMMARY=$(printf '%s' "$ESLINT_JSON" | node --input-type=module -e 'let s="";for await (const c of process.stdin){s+=c}try{let a=JSON.parse(s);let e=0,w=0;for(const f of a){e+=(f.errorCount||0);w+=(f.warningCount||0)}process.stdout.write(e+" "+w)}catch{process.exit(0)}')
+    ESLINT_SUMMARY=$(node --input-type=module -e 'let s="";for await (const c of process.stdin){s+=c}try{let a=JSON.parse(s);let e=0,w=0;for(const f of a){e+=(f.errorCount||0);w+=(f.warningCount||0)}process.stdout.write(e+" "+w)}catch{process.exit(0)}' < "$ESLINT_JSON_FILE")
     if [ -n "$ESLINT_SUMMARY" ] && printf '%s' "$ESLINT_SUMMARY" | grep -Eq '^[0-9]+ [0-9]+$'; then
       ESLINT_ERR=${ESLINT_SUMMARY% *}
       ESLINT_WARN=${ESLINT_SUMMARY#* }
@@ -117,17 +122,20 @@ gate_static_analysis() {
       echo "FAIL: ESLint failed (exit ${ESLINT_STATUS})"
     fi
     echo "--- ESLint diagnostics ---"
-    npx --yes eslint --max-warnings 300 src/ || true
+    npx --yes eslint src/ web/ || true
+    rm -f "$ESLINT_JSON_FILE"
     return 1
   fi
-  ESLINT_SUMMARY=$(printf '%s' "$ESLINT_JSON" | node --input-type=module -e 'let s="";for await (const c of process.stdin){s+=c}try{let a=JSON.parse(s);let e=0,w=0;for(const f of a){e+=(f.errorCount||0);w+=(f.warningCount||0)}process.stdout.write(e+" "+w)}catch{process.exit(0)}')
+  ESLINT_SUMMARY=$(node --input-type=module -e 'let s="";for await (const c of process.stdin){s+=c}try{let a=JSON.parse(s);let e=0,w=0;for(const f of a){e+=(f.errorCount||0);w+=(f.warningCount||0)}process.stdout.write(e+" "+w)}catch{process.exit(0)}' < "$ESLINT_JSON_FILE")
   ESLINT_ERRORS=${ESLINT_SUMMARY% *}
   ESLINT_WARNINGS=${ESLINT_SUMMARY#* }
-  if [ "$ESLINT_WARNINGS" -gt 300 ]; then
-    echo "FAIL: ESLint reported ${ESLINT_ERRORS} errors and ${ESLINT_WARNINGS} warnings over budget 300"
+  if ! node scripts/lint-baseline.mjs config/lint-baseline.json < "$ESLINT_JSON_FILE"; then
+    echo "FAIL: ESLint lint-baseline ratchet rejected the current warning population"
+    rm -f "$ESLINT_JSON_FILE"
     return 1
   fi
-  echo "PASS: ESLint — ${ESLINT_ERRORS} errors, ${ESLINT_WARNINGS} warnings (budget 300)"
+  rm -f "$ESLINT_JSON_FILE"
+  echo "PASS: ESLint — ${ESLINT_ERRORS} errors, ${ESLINT_WARNINGS} baseline-tracked warnings"
 
   # Stage 2: TypeScript typecheck (emission mode)
   echo "[2/4] Running npm run typecheck..."

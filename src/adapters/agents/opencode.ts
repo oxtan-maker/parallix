@@ -317,6 +317,7 @@ function startOpencodeAgent({
   const injectedPrompt = subagentPrefix + prompt;
 
   function isStaleSessionResult(result: any) {
+    // Adapter-owned parsing of OpenCode CLI diagnostics; never exposed as a workflow signal.
     if (!result) {return false;}
     const stderr = result.stderr || '';
     const stdout = result.stdout || '';

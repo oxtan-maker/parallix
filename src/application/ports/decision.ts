@@ -29,6 +29,8 @@ export interface DecisionResult {
 export interface DecisionPort {
   available(): DecisionAvailability | Promise<DecisionAvailability>;
   decide(_request: DecisionRequest): Promise<DecisionResult>;
+  /** Bytes the routed model would receive for this request; used to bound evidence before the call. */
+  requestBytes(_request: DecisionRequest): number;
 }
 
 export type DecisionErrorKind = 'setup-required' | 'invalid-request' | 'usage-blocked'

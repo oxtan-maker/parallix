@@ -5,8 +5,25 @@ export interface OperationalHistoryEntry {
   readonly createdAt: string;
 }
 
+export interface OperationLogSummary {
+  readonly id: number;
+  readonly eventType: string;
+  readonly createdAt: string;
+  readonly message: string | null;
+  readonly agent: string | null;
+  /** The whole payload, present only when it is not a JSON object. */
+  readonly rawData: string | null;
+}
+
 export interface OperationalHistoryRepository {
   findAll(): Promise<readonly OperationalHistoryEntry[]>;
+  /**
+   * The newest `limit` entries in ascending id order, reduced to what the board
+   * log shows: the JSON payload's `message` and `agent`, or the raw text when
+   * the payload is not a JSON object. Payloads can be megabytes (repair
+   * transcripts), so they are never carried whole.
+   */
+  findRecentLogEntries?(_limit: number): Promise<readonly OperationLogSummary[]>;
   findByType(_type: string): Promise<readonly OperationalHistoryEntry[]>;
   findByTypeForMission?(_type: string, _missionId: string): Promise<readonly OperationalHistoryEntry[]>;
   /** Latest facts per mission for the board's bounded current-work read. */

@@ -19,6 +19,7 @@ import { fileURLToPath } from 'node:url';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 import { startAgent } from '../../../../src/adapters/agents/agents.js';
+import { AgentPoolExhaustedError } from '../../../../src/domain/agents.js';
 // @ts-expect-error -- TASK-2328: partial test double after ESM seam migration
 import { fakeLauncher } from '../../../lib/agent-mock.js';
 import { mkdtemp as registeredMkdtemp } from '../../../helpers/temp-dir.js';
@@ -41,7 +42,7 @@ test('startAgent tries excluded agents after non-excluded pool exhausts (TASK-23
       if (callCount === 1) return 'codex';
       if (callCount === 2) return 'qwen';
       // Third call: no more non-excluded agents
-      throw new Error('All eligible agents for step "review" are exhausted (limit-hit or excluded). Tried: claude, codex, qwen.');
+      throw new AgentPoolExhaustedError(step, 'pool unavailable');
     };
 
     const launcherResults = [
@@ -88,7 +89,7 @@ test('startAgent throws exhaustion after both non-excluded and excluded agents f
       callCount++;
       if (callCount === 1) return 'codex';
       if (callCount === 2) return 'qwen';
-      throw new Error('All eligible agents for step "review" are exhausted (limit-hit or excluded). Tried: claude, codex, qwen.');
+      throw new AgentPoolExhaustedError(step, 'pool unavailable');
     };
 
     // All agents fail, including the excluded one

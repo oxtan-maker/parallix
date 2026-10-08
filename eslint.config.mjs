@@ -17,6 +17,28 @@ const generatedOutputIgnores = [
   '.workflow/',
 ];
 
+const sourceFiles = ['src/**/*.{ts,tsx}', 'web/**/*.{ts,tsx}'];
+
+const sourceRules = {
+  'no-undef': 'error',
+  'no-unused-vars': ['error', { argsIgnorePattern, varsIgnorePattern, caughtErrorsIgnorePattern }],
+  'valid-typeof': 'error',
+  'no-unreachable': 'error',
+  'no-async-promise-executor': 'error',
+  'eqeqeq': 'error',
+  'curly': 'error',
+  'no-var': 'error',
+  '@typescript-eslint/no-require-imports': 'off',
+  // Promise handling is never baselined: source must be clean.
+  '@typescript-eslint/no-floating-promises': 'error',
+  '@typescript-eslint/no-misused-promises': 'error',
+  // These debt-bearing rules are ratcheted by the static-analysis gate.
+  '@typescript-eslint/no-explicit-any': 'warn',
+  '@typescript-eslint/no-unsafe-assignment': 'warn',
+  complexity: ['warn', 15],
+  'max-lines-per-function': ['warn', { max: 100, skipBlankLines: true, skipComments: true }],
+};
+
 export default [
   // Top-level ignores for directories only (no per-dir *.js globs)
   {
@@ -28,57 +50,17 @@ export default [
       '.workflow/',
     ],
   },
-  // Lint all .ts source files while excluding generated distribution output.
+  // Type-aware rules apply only to production source. projectService discovers
+  // the owning tsconfig without pulling test files into the type-aware program.
   {
-    files: ['**/*.ts'],
+    files: sourceFiles,
     ignores: generatedOutputIgnores,
     languageOptions: {
       parser: tsParser,
       parserOptions: {
         ecmaVersion: 2024,
         sourceType: 'module',
-      },
-      globals: {
-        console: 'readonly',
-        process: 'readonly',
-        Buffer: 'readonly',
-        BufferEncoding: 'readonly',
-        NodeJS: 'readonly',
-        setTimeout: 'readonly',
-        clearTimeout: 'readonly',
-        setInterval: 'readonly',
-        clearInterval: 'readonly',
-        URL: 'readonly',
-        Headers: 'readonly',
-        Request: 'readonly',
-        Response: 'readonly',
-        fetch: 'readonly',
-      },
-    },
-    plugins: {
-      '@typescript-eslint': tsPlugin,
-    },
-    rules: {
-      'no-undef': 'error',
-      'no-unused-vars': ['error', { argsIgnorePattern, varsIgnorePattern, caughtErrorsIgnorePattern }],
-      'valid-typeof': 'error',
-      'no-unreachable': 'error',
-      'no-async-promise-executor': 'error',
-      'eqeqeq': 'error',
-      'curly': 'error',
-      'no-var': 'error',
-      '@typescript-eslint/no-require-imports': 'off',
-    },
-  },
-  // Lint TypeScript JSX files (.tsx) with the TypeScript parser and JSX support.
-  {
-    files: ['**/*.tsx'],
-    ignores: generatedOutputIgnores,
-    languageOptions: {
-      parser: tsParser,
-      parserOptions: {
-        ecmaVersion: 2024,
-        sourceType: 'module',
+        projectService: true,
         ecmaFeatures: {
           jsx: true,
         },
@@ -103,16 +85,25 @@ export default [
     plugins: {
       '@typescript-eslint': tsPlugin,
     },
+    rules: sourceRules,
+  },
+  // Browser globals and callback-shape declarations belong to the web adapter.
+  // TypeScript owns unused declarations there; the core ESLint rule does not
+  // understand its type-only positions.
+  {
+    files: ['web/**/*.{ts,tsx}'],
+    languageOptions: {
+      globals: {
+        document: 'readonly',
+        window: 'readonly',
+        queueMicrotask: 'readonly',
+        requestAnimationFrame: 'readonly',
+        React: 'readonly',
+      },
+    },
     rules: {
-      'no-undef': 'error',
-      'no-unused-vars': ['error', { argsIgnorePattern, varsIgnorePattern, caughtErrorsIgnorePattern }],
-      'valid-typeof': 'error',
-      'no-unreachable': 'error',
-      'no-async-promise-executor': 'error',
-      'eqeqeq': 'error',
-      'curly': 'error',
-      'no-var': 'error',
-      '@typescript-eslint/no-require-imports': 'off',
+      'no-unused-vars': 'off',
+      'no-undef': 'off',
     },
   },
   // Lint remaining JavaScript while excluding generated distribution output.

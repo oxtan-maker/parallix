@@ -308,19 +308,94 @@ test('weekly classifier share counts applied PR decisions including open mission
   assert.equal(classifierStatistics({ ...input, decisions: [] }, window).percentage, null);
 });
 
-test('weekly PR table is a single truthful two-row UTC comparison (TASK-2671)', async () => {
+test('weekly PR table is a single truthful UTC comparison (TASK-2671)', async () => {
   const { renderClassifierStatistics } = await import('../../../../src/application/presentation/classifier-statistics.js');
   const { weeklyDecisionWindows } = await import('../../../../src/application/services/decision-window.js');
   const windows = weeklyDecisionWindows('2026-10-06');
   const input = { decisions: [], applied: [], attempts: [], observations: [], coverage: 'complete' as const };
   const report = renderClassifierStatistics(input, [windows.current, windows.previous]);
-  assert.equal(report.split('\n').filter(line => line === 'PR').length, 1);
-  assert.match(report, /This week \(2026-09-30 to 2026-10-06 UTC\).*\| 0 \| 0 \| 0 \| 0 \| unavailable \(0\/0 observed\)/);
+  assert.equal(report.split('\n').filter(line => line === 'PR Classification analysis').length, 1);
+  assert.match(report, /This week \(2026-09-30 to 2026-10-06 UTC\) \| all\s+\|\s+0 \|\s+0 \(n\/a\)/);
   assert.match(report, /Last week \(2026-09-23 to 2026-09-29 UTC\)/);
   const unavailable = renderClassifierStatistics(null, [windows.current, windows.previous]);
-  assert.match(unavailable, /\| unavailable \| unavailable \| unavailable \| unavailable \| unavailable \|/);
+  assert.match(unavailable, /\| re-review\s+\|\s+unavailable \|\s+unavailable \|/);
   const partial = renderClassifierStatistics({ ...input, coverage: 'partial' }, [windows.current, windows.previous]);
   assert.match(partial, /0 \(partial\)/);
+  assert.match(partial, /none\s+\|\s+0 \(partial\)/);
+});
+
+test('PR statistics count review rounds with classifier shares and a separate reason table (TASK-2675)', async () => {
+  const { renderClassifierStatistics } = await import('../../../../src/application/presentation/classifier-statistics.js');
+  const { weeklyDecisionWindows } = await import('../../../../src/application/services/decision-window.js');
+  const { classificationAttempt } = await import('../../../fixtures/repeat-review.js');
+  const windows = weeklyDecisionWindows('2026-10-06');
+  const at = '2026-10-05T00:00:00Z';
+  const row = (round: number, overrides: Parameters<typeof classificationAttempt>[0]) =>
+    classificationAttempt({ round, decisionId: `d${round}`, fingerprint: `f${round}`, observedAt: at, ...overrides });
+  const attempts = [
+    row(2, { route: 'clear', reason: 'resolved-threshold' }),
+    row(3, { route: 'implementer', reason: 'unresolved-threshold' }),
+    row(4, { route: 'reviewer', reason: 'abstention' }),
+    row(5, { route: 'reviewer', reason: 'opted-out', provider: null, model: null, packetHash: null, classificationMs: null }),
+    row(6, { route: 'reviewer', reason: 'provider-unavailable', provider: null, model: null, packetHash: null, classificationMs: null }),
+    // A retried round: the failed first sample and the later success are one round.
+    row(7, { route: 'reviewer', reason: 'classifier-failure', fingerprint: 'first', observedAt: '2026-10-04T00:00:00Z' }),
+    row(7, { route: 'clear', reason: 'resolved-threshold', fingerprint: 'second' }),
+  ];
+  const report = renderClassifierStatistics({ decisions: [], attempts, applied: [], observations: [], coverage: 'complete' },
+    [windows.current, windows.previous]);
+  const lines = report.split('\n');
+  const week = lines.find(line => line.startsWith('| This week'))!;
+  // 6 rounds; 2 not attempted; 1 attempted-then-fell-back; 4 called; 2 cleared; 1 returned; 3 of 6 decided by the classifier.
+  assert.match(week, /\| all\s+\|\s+6 \|\s+2 \(33%\) \|\s+1 \(17%\) \|\s+4 \(67%\) \|\s+2 \(33%\) \|\s+1 \(17%\) \|\s+50% \|\s+67% \|/);
+  assert.match(week, /n\/a \(no classifier decisions\)/);
+  assert.doesNotMatch(report, /100%/);
+  assert.doesNotMatch(report, /Re-review rounds/);
+  const widths = new Set(lines.slice(1, lines.indexOf('')).map(line => line.length));
+  assert.equal(widths.size, 1, 'PR table columns are aligned');
+  const reasons = lines.slice(lines.indexOf('') + 2);
+  assert.equal(new Set(reasons.map(line => line.length)).size, 1, 'reason table columns are aligned');
+  assert.match(reasons.join('\n'), /abstention\s+\|\s+1 \|\s+0 \|/);
+  assert.match(reasons.join('\n'), /opted-out\s+\|\s+1 \|/);
+  assert.doesNotMatch(reasons.join('\n'), /classifier-failure/);
+});
+
+test('PR statistics split review rounds by kind and keep historical rows as re-reviews (TASK-2680)', async () => {
+  const { renderClassifierStatistics } = await import('../../../../src/application/presentation/classifier-statistics.js');
+  const { weeklyDecisionWindows } = await import('../../../../src/application/services/decision-window.js');
+  const { classificationAttempt } = await import('../../../fixtures/repeat-review.js');
+  const windows = weeklyDecisionWindows('2026-10-06');
+  const row = (round: number, overrides: Parameters<typeof classificationAttempt>[0]) =>
+    classificationAttempt({ round, decisionId: `d${round}`, fingerprint: `f${round}`, observedAt: '2026-10-05T00:00:00Z', ...overrides });
+  const attempts = [row(1, { route: 'clear', reason: 'resolved-threshold' }), row(1, { mission: 'other', route: 'reviewer', reason: 'abstention' }),
+    row(2, { route: 'implementer', reason: 'unresolved-threshold' })];
+  const lines = renderClassifierStatistics({ decisions: [], attempts, applied: [], observations: [], coverage: 'complete' },
+    [windows.current, windows.previous]).split('\n');
+  const kind = (name: string) => lines.find(line => line.startsWith('| This week') && line.includes(`| ${name}`))!;
+  assert.match(kind('all'), /\|\s+3 \|/);
+  assert.match(kind('first review'), /\|\s+2 \|\s+0 \(0%\) \|\s+1 \(50%\) \|\s+2 \(100%\) \|\s+1 \(50%\) \|\s+0 \(0%\) \|/);
+  assert.match(kind('re-review'), /\|\s+1 \|\s+0 \(0%\) \|\s+0 \(0%\) \|\s+1 \(100%\) \|\s+0 \(0%\) \|\s+1 \(100%\) \|/);
+});
+
+test('observed wrong is n/a without classifier decisions and never a vacuous 100% correct (TASK-2675)', async () => {
+  const { renderClassifierStatistics } = await import('../../../../src/application/presentation/classifier-statistics.js');
+  const { weeklyDecisionWindows } = await import('../../../../src/application/services/decision-window.js');
+  const { classificationAttempt } = await import('../../../fixtures/repeat-review.js');
+  const windows = weeklyDecisionWindows('2026-10-06');
+  const reviewerOnly = Array.from({ length: 239 }, (_, i) => ({ id: `r${i}`, decidedAt: '2026-10-05T00:00:00Z',
+    source: 'reviewer' as const, outcome: 'clear' as const }));
+  const empty = renderClassifierStatistics({ decisions: reviewerOnly, attempts: [classificationAttempt({ route: 'reviewer', reason: 'abstention', observedAt: '2026-10-05T00:00:00Z' })],
+    applied: [], observations: [], coverage: 'complete' }, [windows.current, windows.previous]);
+  assert.match(empty, /n\/a \(no classifier decisions\)/);
+  assert.doesNotMatch(empty, /239|correct/);
+  const applied = [{ decisionId: 'decision', decidedAt: '2026-10-05T00:00:00Z', route: 'clear' as const }];
+  const attempt = classificationAttempt({ observedAt: '2026-10-05T00:00:00Z' });
+  const unobserved = renderClassifierStatistics({ decisions: [], attempts: [attempt], applied, observations: [], coverage: 'complete' }, [windows.current, windows.previous]);
+  assert.match(unobserved, /n\/a \(0\/1 observed\)/);
+  const wrong = renderClassifierStatistics({ decisions: [], attempts: [attempt], applied, coverage: 'complete', observations: [{ decisionId: 'decision',
+    revision: attempt.candidateRevision, findingIds: attempt.findingIds, observedAt: '2026-10-05T01:00:00Z', originalFindings: 'unresolved', newFindings: 0, cycleMs: 1, ordinaryReviewMs: 1 }] },
+  [windows.current, windows.previous]);
+  assert.match(wrong, /1\/1 observed; 0\/1 unobserved/);
 });
 
 test('completed classifier cohorts include old calls and same-scope shadow disagreements (TASK-2658)', async () => {

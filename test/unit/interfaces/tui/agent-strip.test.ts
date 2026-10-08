@@ -370,7 +370,7 @@ test('resolveKnownAgentFamilies returns the steps.*.eligible union for the shipp
     );
     assert.deepEqual(
       [...families],
-      ['claude', 'codex', 'custom', 'qwen', 'vibe'],
+      ['claude', 'codex', 'custom'],
       'known agent families must equal the sorted union of steps.*.eligible',
     );
   } finally {
@@ -400,7 +400,7 @@ test('AgentStrip does not render "agents: unavailable" for the shipped config fa
       !frame.includes('agents: unavailable'),
       `AgentStrip must not fall back to the unavailable placeholder. Got: ${frame}`,
     );
-    for (const expected of ['claude', 'codex', 'custom', 'qwen', 'vibe']) {
+    for (const expected of ['claude', 'codex', 'custom']) {
       assert.ok(frame.includes(expected), `AgentStrip must list ${expected}. Got: ${frame}`);
     }
   } finally {

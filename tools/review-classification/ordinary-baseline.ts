@@ -8,7 +8,7 @@ import { resolveAgentModel } from '../../src/adapters/config/product-config.js';
 import { buildEvidencePacket } from '../../src/application/review-classification/evidence-packet.js';
 import { GitReviewEvidence } from '../../src/adapters/review/review-evidence.js';
 import { createDecisionPort } from '../../src/composition/decision.js';
-import { classifyRepeatFindings, hasBroaderReviewObligations } from '../../src/application/review-classification/routing-policy.js';
+import { classifyFindings, hasBroaderReviewObligations } from '../../src/application/review-classification/routing-policy.js';
 
 const [inputPath, outputDirectory] = process.argv.slice(2);
 if (!inputPath || !outputDirectory || path.resolve(outputDirectory).startsWith(`${process.cwd()}${path.sep}`)) {
@@ -39,7 +39,7 @@ for (const item of cases) {
       reason = 'broader-review-obligations'; preparationMs = performance.now() - cycleStarted;
     } else {
       const callStarted = performance.now();
-      try { const selected = classifyRepeatFindings(await decision.decide(packet.request)); route = selected.route; reason = selected.reason; }
+      try { const selected = classifyFindings(await decision.decide(packet.request)); route = selected.route; reason = selected.reason; }
       catch { reason = 'classifier-failure'; }
       classificationMs = performance.now() - callStarted;
     }

@@ -1,3 +1,4 @@
+import { reviewPushIdentity } from '../../domain/review-command-policy.js';
 /**
  * Review Commands Module
  * Implements the current review command dispatch and CLI behavior.
@@ -284,14 +285,13 @@ async function resolvePushReviewIdentity(slug: string, rootDir: string, provider
   const { identityUser } = await resolveReviewIdentity(slug, rootDir, { readReviewStateFn: readState });
   const task = identityUser ? null : resolveTask(slug, rootDir);
   const taskImplementer = task?.ok ? getImplementer(task.taskFile!) : null;
-  const fallback = providerEnabled ? null : 'autonomous';
-  const identity = identityUser || taskImplementer || fallback;
-  if (!identity || (providerEnabled && identity === 'autonomous')) {
+  const { identity, defaulted } = reviewPushIdentity(identityUser, taskImplementer, providerEnabled);
+  if (!identity) {
     error(fmt.status('FAIL', providerEnabled ? `No review identity resolved for --push on ${slug}. Start the review with px review ${slug} --start, or set the task implementer.` : 'No review identity resolved for push.'));
     exit(1);
     return null;
   }
-  if (!identityUser && !taskImplementer && fallback) { log(fmt.status('WARN', 'No reviewer/implementer identity resolved for --push; defaulting to "autonomous"')); }
+  if (defaulted) { log(fmt.status('WARN', 'No reviewer/implementer identity resolved for --push; defaulting to "autonomous"')); }
   return identity;
 }
 

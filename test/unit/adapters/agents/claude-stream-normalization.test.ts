@@ -505,3 +505,13 @@ test('startClaudeAgent attaches the renderer sink without changing the telemetry
     __setSpawnAndTeeForTest(null);
   }
 });
+
+test('recorded provider output renders readable color-free text and preserves plain output (TASK-2661)', async () => {
+  const { createRecordedOutputRenderer } = await import('../../../../src/adapters/agents/recorded-output-renderer.js');
+  const renderer = createRecordedOutputRenderer();
+  assert.equal(renderer.render('codex', 'plain output'), 'plain output');
+  const rendered = renderer.render('claude', CLAUDE_STREAM_FIXTURE);
+  assert.match(rendered, /ENOENT/);
+  assert.doesNotMatch(rendered, /\x1b|"type":"stream_event"/);
+  assert.equal(renderer.render('claude', ''), '');
+});

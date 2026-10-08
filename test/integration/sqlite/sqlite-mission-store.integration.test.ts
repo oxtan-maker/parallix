@@ -429,6 +429,44 @@ describe('SQLite Mission aggregate integration', () => {
     } finally { await database.close(); }
   });
 
+  it('loadByRepository returns each mission of the repository exactly as load does and follows later writes and removals (TASK-2681)', async () => {
+    const databasePath = tempDatabasePath();
+    const database = await migratedDatabase(databasePath);
+    try {
+      const store = new SqliteMissionStore(database);
+      const first = completeMission();
+      const second = completeMission({ id: missionId('task-mission-store-two'), review: null, checkpoints: [] });
+      const foreign = completeMission({ id: missionId('task-mission-store-other'), repositoryId: repositoryId('repo-other'), review: null, checkpoints: [] });
+      await store.save(first, null);
+      await store.save(second, null);
+      await store.save(foreign, null);
+
+      const listed = await store.loadByRepository(testRepositoryId);
+      assert.deepEqual(listed.map((mission) => mission.id), [first.id, second.id].sort());
+      for (const mission of listed) {
+        const loaded = await store.load(mission.id);
+        assert.equal(loaded.kind, 'found');
+        assert.deepEqual(mission, loaded.mission);
+      }
+
+      const version = await store.save({ ...second, title: 'Renamed after the first list' }, missionVersion(1));
+      assert.ok(version > 1);
+      const refreshed = await store.loadByRepository(testRepositoryId);
+      assert.equal(refreshed.find((mission) => mission.id === second.id)?.title, 'Renamed after the first list');
+
+      // A write from another connection (another px process) is seen as well.
+      const otherDatabase = await openDatabase(databasePath);
+      try {
+        await new SqliteMissionStore(otherDatabase).save({ ...second, title: 'Renamed elsewhere' }, version);
+      } finally { await otherDatabase.close(); }
+      const seen = await store.loadByRepository(testRepositoryId);
+      assert.equal(seen.find((mission) => mission.id === second.id)?.title, 'Renamed elsewhere');
+
+      await store.cancel(second.id);
+      assert.deepEqual((await store.loadByRepository(testRepositoryId)).map((mission) => mission.id), [first.id]);
+    } finally { await database.close(); }
+  });
+
   it('loads legacy requested-changes rounds that have no persisted findings', async () => {
     const database = await migratedDatabase();
     try {

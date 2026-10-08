@@ -14,7 +14,7 @@
  */
 
 import type { MissionTransitionStore } from './domain-ports.js';
-import type { LaneTransitionEvent } from '../domain/board-event.js';
+import { DuplicateLaneEventError, type LaneTransitionEvent } from '../domain/board-event.js';
 import type { Mission, MissionId, MissionStatus } from '../domain/mission.js';
 import type { MissionCommand } from '../domain/mission-workflow.js';
 
@@ -82,7 +82,7 @@ export function lifecycleLaneEvent(input: LifecycleLaneEventInput): LaneTransiti
 
 /** True for a store refusal caused by a lane event that was already recorded. */
 export function isDuplicateLaneEvent(error: unknown): boolean {
-  return error instanceof Error && /Duplicate idempotency key/.test(error.message);
+  return error instanceof DuplicateLaneEventError;
 }
 
 /**

@@ -11,7 +11,7 @@
 import { isDbAdhocIdentity, missionId } from '../../domain/mission.js';
 import { reviewStatus, type PullRequestReference } from '../../domain/review.js';
 import { transitionReviewRepair } from '../review-repair-lifecycle.js';
-import type { HandoffFacts, ReviewLoopPorts, ReviewLoopRequest, ReviewLoopState } from '../ports/review-round.js';
+import type { HandoffFacts, HumanReviewFeedback, ReviewLoopPorts, ReviewLoopRequest, ReviewLoopState } from '../ports/review-round.js';
 import { selectReviewer } from './reviewer-selection.js';
 import { runReviewerPhase } from './reviewer-phase.js';
 import { runImplementerPhase } from './implementer-phase.js';
@@ -176,8 +176,29 @@ async function startState(persisted: ReviewLoopState | null, identity: { reviewe
   return state;
 }
 
+/**
+ * An approval is terminal in the round state machine.  The human who requested
+ * changes is the operator of record for revoking it; on success the Review
+ * reopens and the loop restarts to open the next round, which finds the
+ * correction unconsumed.  Otherwise stop with guidance; reconciliation left
+ * the correction unconsumed for a retry.
+ */
+async function handleApprovedRoundCorrection(context: LoopContext, feedback: HumanReviewFeedback): Promise<'stop' | 'revoked'> {
+  const revoked = await context.ports.approvalRevocation?.revoke({
+    round: context.state.round, operator: feedback.author,
+    reason: `Human change request ${feedback.source}: ${feedback.reason || 'changes requested'}`,
+  });
+  if (revoked?.ok) {
+    context.emit({ kind: 'approved-round-revoked', slug: context.slug, round: context.state.round, operator: feedback.author });
+    return 'revoked';
+  }
+  context.emit({ kind: 'approved-round-correction', slug: context.slug, round: context.state.round, ...(revoked?.ok === false ? { diagnostic: revoked.diagnostic } : {}) });
+  await context.escalateToHumanReview('APPROVED_ROUND_HUMAN_CORRECTION');
+  return 'stop';
+}
+
 /** One round: the reviewing half, then the implementer's answer to it. */
-async function runRound(context: LoopContext, attempt: number): Promise<'stop' | 'next-round'> {
+async function runRound(context: LoopContext, attempt: number): Promise<'stop' | 'next-round' | 'revoked'> {
   if (await stopIfControllerSuperseded(context, `round ${attempt}`)) { return 'stop'; }
   context.emit({ kind: 'round-started', attempt: attempt, maxAttempts: context.maxAttempts });
   if (attempt > context.state.round) { context.state.advanceRound(); }
@@ -194,9 +215,11 @@ async function runRound(context: LoopContext, attempt: number): Promise<'stop' |
     // An explicit human correction is newer authority than a stored provider
     // approval.  Enter the existing fixing path directly, rather than launch a
     // reviewer which could repeat the stale no-findings approval.
+    if (context.state.phase === 'approved') { return await handleApprovedRoundCorrection(context, humanFeedback); }
     round.blockingFindings = [...humanFeedback.findings];
     round.humanFeedback = `${humanFeedback.author} (${humanFeedback.source}): ${humanFeedback.reason}`;
-    context.state.transitionTo('fixing');
+    // A resumed round may already be fixing; only a reviewing round enters it.
+    if (context.state.phase !== 'fixing') { context.state.transitionTo('fixing'); }
     context.state.disposition = 'REQUEST_CHANGES';
     return await runImplementerPhase(context, round, 'REQUEST_CHANGES');
   }
@@ -205,7 +228,7 @@ async function runRound(context: LoopContext, attempt: number): Promise<'stop' |
   return await runImplementerPhase(context, round, reviewed.reviewState);
 }
 
-async function runOwnedReviewLoop(request: ReviewLoopRequest, ports: ReviewLoopPorts): Promise<void> {
+async function runOwnedReviewLoop(request: ReviewLoopRequest, ports: ReviewLoopPorts, restarted = false): Promise<void> {
   const { slug } = request;
   const out: Output = { emit: event => ports.output.emit(event), exit: code => ports.output.exit(code) };
   const start: Start = { slug, dryRun: request.dryRun ?? false, isContinue: request.isContinue ?? false, verbose: request.verbose ?? false };
@@ -245,7 +268,18 @@ async function runOwnedReviewLoop(request: ReviewLoopRequest, ports: ReviewLoopP
   };
   context.emit({ kind: 'review-started', slug, implementer, reviewer: identities.reviewer, branch: ports.branch, focus: context.focus, maxAttempts, intervalMs: ports.polling.intervalMs, timeoutMs: ports.polling.timeoutMs, verbose: start.verbose, dryRun: start.dryRun });
   for (let attempt = context.initialRound; attempt <= maxAttempts; attempt++) {
-    if (await runRound(context, attempt) === 'stop') { return; }
+    const outcome = await runRound(context, attempt);
+    if (outcome === 'stop') { return; }
+    // A revoked approval reopened the Review: start again as a continuation
+    // so the handoff opens the next round.  One restart per run bounds it.
+    if (outcome === 'revoked') {
+      if (restarted) {
+        await context.escalateToHumanReview('APPROVED_ROUND_HUMAN_CORRECTION');
+        return;
+      }
+      await runOwnedReviewLoop({ ...request, isContinue: true, reset: false }, ports, true);
+      return;
+    }
   }
   state.disposition = 'MAX_ATTEMPTS';
   state.metadata = { ...state.metadata, humanEscalationReason: 'MAX_ATTEMPTS', humanEscalatedAt: new Date().toISOString() };

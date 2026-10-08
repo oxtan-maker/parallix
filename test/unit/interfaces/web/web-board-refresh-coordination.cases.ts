@@ -232,6 +232,31 @@ test('a live progress entry survives a snapshot replacement that lacks it (TASK-
   }
 });
 
+test('concurrent invalidations and progress show the newest snapshot within 200 ms and keep live progress (TASK-2681)', async (t) => {
+  const page = await mountLive(t);
+  try {
+    let elapsed = 0;
+    const advance = async (ms: number) => { elapsed += ms; await page.tick(ms); };
+    page.server.truth = 'task-b';
+    await page.emit('progress', { data: progressData('op-live', 1, 'live step in flight'), lastEventId: '1' });
+    // The first signal starts its read without waiting out the coalescing window.
+    assert.equal(page.pending().length, 1, 'the read starts at the signal, not after the window');
+    await advance(50);
+    page.server.truth = 'task-c';
+    await page.emit('invalidate', { data: invalidateData, lastEventId: '2' });
+    await page.emit('invalidate', { data: invalidateData, lastEventId: '3' });
+    await page.settle(page.pending()[0]);
+    assert.match(page.text(), /task-b/, 'the first read is displayed as soon as it settles');
+    await advance(COALESCE_MS - 50);
+    await page.drain();
+    assert.match(page.text(), /task-c/, 'the newest authoritative snapshot is displayed');
+    assert.match(page.text(), /live step in flight/, 'live progress survives the replacement');
+    assert.ok(elapsed <= 200, `the newest snapshot is displayed within the 200 ms contract: ${elapsed} ms`);
+  } finally {
+    await page.close();
+  }
+});
+
 // ---------------------------------------------------------------------------
 // One coordinator: queued reads, coalescing, awaited callers
 // ---------------------------------------------------------------------------
@@ -257,27 +282,28 @@ test('an invalidate arriving during an active read causes one later authoritativ
 });
 
 test('a burst of invalidate and progress events coalesces into a bounded number of reads without starving refresh (TASK-2655)', async (t) => {
-  const page = await mountLive(t);
-  try {
-    const before = page.reads.length;
-    // 24 frames, 25 ms apart (600 ms): a debounce that restarts on every frame would never fire.
-    const FRAMES = 24;
-    for (let frame = 0; frame < FRAMES; frame += 1) {
-      page.server.truth = `task-${String(frame).padStart(4, '0')}`;
-      const name = frame % 2 === 0 ? 'invalidate' : 'progress';
-      await page.emit(name, { data: name === 'invalidate' ? invalidateData : progressData('op-burst', frame, `step ${frame}`), lastEventId: String(frame + 1) });
-      await page.tick(25);
-      if (frame === 8) { assert.ok(page.reads.length > before, 'a read starts during the burst, not only after it'); }
-      if (page.pending().length > 0) { await page.settle(page.pending()[0]); }
-    }
-    await page.tick();
-    await page.drain();
-    const started = page.reads.length - before;
-    assert.ok(started >= 1 && started <= Math.ceil(600 / COALESCE_MS) + 2, `reads stay bounded by the window: ${started}`);
-    assert.match(page.text(), /task-0023/, 'the final read carries the last projection');
-  } finally {
-    await page.close();
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  let loads = 0;
+  const coordinator = createRefreshCoordinator<number>({
+    load: async () => ++loads,
+    apply: () => true,
+    coalesceMs: COALESCE_MS,
+  });
+  // 24 frames, 25 ms apart (600 ms): a debounce that restarts on every frame
+  // would never fire. This is a coordinator contract, so it need not spend the
+  // unit-test CPU budget rendering the complete browser shell for each frame.
+  const FRAMES = 24;
+  for (let frame = 0; frame < FRAMES; frame += 1) {
+    coordinator.schedule();
+    t.mock.timers.tick(25);
+    await Promise.resolve();
+    if (frame === 8) { assert.ok(loads > 0, 'a read starts during the burst, not only after it'); }
   }
+  t.mock.timers.tick(COALESCE_MS);
+  await Promise.resolve();
+  const maximumReads = Math.ceil((FRAMES * 25) / COALESCE_MS) + 2;
+  assert.ok(loads >= 1 && loads <= maximumReads, `reads stay bounded by the window: ${loads}`);
+  coordinator.dispose();
 });
 
 test('an awaited Board onRefresh settles only after its own revalidation commits, not with an earlier active read (TASK-2655)', async (t) => {

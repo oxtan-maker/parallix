@@ -22,9 +22,7 @@ export function buildTypedMissionRecoveryAdvice(slug: string, checkpoint: string
   ].join(' ');
 }
 
-export function isIncompleteSuccessCriteriaFailure(errorMsg: string): boolean {
-  return /Success criteria [\d, ]+ are incomplete before handoff\./i.test(errorMsg);
-}
+export { isIncompleteSuccessCriteriaFailure } from '../domain/mission-handoff-policy.js';
 
 export function buildSuccessCriteriaRecoveryAdvice(slug: string): string {
   return [

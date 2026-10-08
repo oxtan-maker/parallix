@@ -71,3 +71,34 @@ test('an unknown bookkeeping kind is not whitelisted', () => {
   git(root, 'commit', '-qam', 'sneaky\n\nParallix-Bookkeeping: anything');
   assert.equal(missionApprovalCoverage(approval(approved), createGitChangeIdentity(root))?.kind, 'stale');
 });
+
+test('repeated change-identity reads spawn no git for immutable commit answers and track a moved branch head per read (TASK-2681)', () => {
+  const { root, approved } = approvedBranch('memo');
+  const calls: string[][] = [];
+  const countingGit = (args: string[], options?: Record<string, unknown>) => {
+    calls.push(args.slice(2));
+    return spawnSync('git', args, { encoding: 'utf8', ...options }) as { status: number | null; stdout: string };
+  };
+  const identity = createGitChangeIdentity(root, countingGit, { snapshotBranchHeads: true });
+  const first = identity.changeIdentity(approved, 'main');
+  assert.ok(first);
+  assert.equal(identity.onlyBookkeepingSince(approved, approved), true);
+  identity.beginRead();
+  assert.equal(identity.branchHead(branch), approved);
+  const spawnedAfterFirstRead = calls.length;
+
+  identity.beginRead();
+  assert.equal(identity.changeIdentity(approved, 'main'), first);
+  assert.equal(identity.onlyBookkeepingSince(approved, approved), true);
+  assert.equal(identity.branchHead(branch), approved);
+  const secondRead = calls.slice(spawnedAfterFirstRead).map((args) => args[0]);
+  assert.deepEqual(secondRead, ['for-each-ref'], 'only the one branch-head listing is read again');
+
+  fs.writeFileSync(path.join(root, 'feature.ts'), 'export const v = 3;\n');
+  git(root, 'commit', '-qam', 'later change');
+  const moved = git(root, 'rev-parse', 'HEAD');
+  assert.equal(identity.branchHead(branch), approved, 'a read keeps answering from its own snapshot');
+  identity.beginRead();
+  assert.equal(identity.branchHead(branch), moved, 'the next read sees the moved head');
+  assert.notEqual(identity.changeIdentity(moved, 'main'), first, 'a different change is a different identity');
+});

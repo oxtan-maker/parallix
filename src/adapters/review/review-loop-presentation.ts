@@ -5,6 +5,16 @@ import { recordAgentSelectionOutcome } from '../../application/services/agent-se
 
 export interface ReviewLoopTextOutput { log(_message: string): void; error(_message: string): void }
 
+/** Fallback reasons after the classifier was called and did not decide; every other reason means it was not used. */
+const CLASSIFIER_FAILURES = new Set(['classifier-failure', 'classifier-exception', 'classifier-publication-failed']);
+
+/** Says plainly whether the classifier ran, so a fallback is never mistaken for a classifier that never started. */
+function classifierFallbackMessage(reason: string): string {
+  if (reason === 'abstention') { return 'Reviewer classifier abstained, continuing with general reviewer.'; }
+  const outcome = CLASSIFIER_FAILURES.has(reason) ? 'failed' : 'not used';
+  return `Reviewer classifier ${outcome} (${reason}), continuing with general reviewer.`;
+}
+
 export function renderReviewLoopEvent(event: ReviewLoopEvent, output: ReviewLoopTextOutput): void {
   const log = (message: string) => output.log(message);
   const error = (message: string) => output.error(message);
@@ -186,6 +196,13 @@ export function renderReviewLoopEvent(event: ReviewLoopEvent, output: ReviewLoop
     case 'reviewer-escalated':
       log(fmt.status('INFO', `Autonomous review stopped: human review required after reviewer ${event.reason}.`));
       return;
+    case 'approved-round-revoked':
+      log(fmt.status('INFO', `${event.operator} requested changes on ${event.slug}; round ${event.round} approval revoked on their authority. Continuing with their correction.`));
+      return;
+    case 'approved-round-correction':
+      if (event.diagnostic) { log(fmt.status('INFO', `Approval revocation failed: ${event.diagnostic}`)); }
+      log(fmt.status('INFO', `A human requested changes on ${event.slug} while its round ${event.round} approval is still effective. Run: px revoke-review --slug ${event.slug} --decision ${event.round} --reason <text> --operator <name> --expected-version <n>, then px review ${event.slug} --continue.`));
+      return;
     case 'attempts-exhausted':
       log(fmt.status('INFO', `Autonomous review stopped: reached ${event.maxAttempts} attempts. Hand off to human review.`));
       return;
@@ -214,7 +231,7 @@ export function renderReviewLoopEvent(event: ReviewLoopEvent, output: ReviewLoop
       log(fmt.status('INFO', `Round ${event.attempt}: launching reviewer (${event.reviewer})...`));
       return;
     case 'reviewer-classification':
-      log(fmt.status('INFO', `Using general reviewer: ${event.reason}.`));
+      log(fmt.status('INFO', classifierFallbackMessage(event.reason)));
       return;
     case 'reviewer-launch-failed':
       error(fmt.status('FAIL', `Could not launch reviewer agent (${event.reviewer}): ${event.message}`));

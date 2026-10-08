@@ -1,5 +1,17 @@
 export type AgentFamily = string & { readonly __brand: 'AgentFamily' };
 
+/** A selector exhausted the eligible pool after applying its exclusions. */
+export class AgentPoolExhaustedError extends Error {
+  readonly kind = 'agent-pool-exhausted';
+  readonly step: string;
+
+  constructor(step: string, message: string) {
+    super(message);
+    this.step = step;
+    this.name = 'AgentPoolExhaustedError';
+  }
+}
+
 export function agentFamily(value: string): AgentFamily {
   const normalized = value.trim();
   if (!/^[a-z][a-z0-9-]*$/.test(normalized)) {
@@ -89,7 +101,7 @@ export function selectAgent(
 ): AgentFamily {
   const pool = selectableAgents(snapshot, step, request.excluded);
   if (request.preferred && pool.includes(request.preferred)) { return request.preferred; }
-  if (pool.length === 0) { throw new Error(`No available agent for step ${step}`); }
+  if (pool.length === 0) { throw new AgentPoolExhaustedError(step, `No available agent for step ${step}`); }
   const policy = snapshot.steps[step] ?? snapshot.defaultPolicy;
   const random = request.random ?? Math.random;
   if (policy.strategy === 'weighted') {

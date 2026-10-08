@@ -33,19 +33,6 @@ const OLD_CLOSED = '2026-06-01T10:00:00.000Z';
 const ESC = String.fromCharCode(27);
 const ANSI = new RegExp(`${ESC}\\[[0-9;?]*[ -/]*[@-~]`, 'g');
 
-function writeCompletedTask(root: string, id: string, closedAt: string): void {
-  const dir = path.join(root, 'backlog', 'completed');
-  fs.mkdirSync(dir, { recursive: true });
-  fs.writeFileSync(path.join(dir, `${id} - fixture.md`), `---
-id: ${id.toUpperCase()}
-title: Certification ${id}
-status: done
-closedAt: '${closedAt}'
-labels: [ai_sdlc]
----
-`);
-}
-
 function writeOpenTask(root: string): void {
   const dir = path.join(root, 'backlog', 'tasks');
   fs.mkdirSync(dir, { recursive: true });
@@ -87,7 +74,6 @@ describe("production certification: persisted weekly FLOW decision surface", () 
         try {
           for (let index = 0; index < 240; index += 1) {
             const id = `task-old-${index}`;
-            writeCompletedTask(checkouts.primary, id, OLD_CLOSED);
             await persistMission(laneEventRepo, db, {
               repositoryId: REPO, missionId: id, closedAt: OLD_CLOSED,
               cycleTimeMinutes: 1_000, shape: OLD_SHAPE, bounced: false, classification: 'ai_sdlc',
@@ -96,7 +82,6 @@ describe("production certification: persisted weekly FLOW decision surface", () 
           }
           for (let index = 0; index < 28; index += 1) {
             const id = `task-previous-${index}`;
-            writeCompletedTask(checkouts.primary, id, PREVIOUS_CLOSED);
             await persistMission(laneEventRepo, db, {
               repositoryId: REPO, missionId: id, closedAt: PREVIOUS_CLOSED,
               cycleTimeMinutes: 140, shape: PREVIOUS_SHAPE, bounced: true, classification: 'ai_sdlc',
@@ -105,7 +90,6 @@ describe("production certification: persisted weekly FLOW decision surface", () 
           }
           for (let index = 0; index < 31; index += 1) {
             const id = `task-current-${index}`;
-            writeCompletedTask(checkouts.primary, id, CURRENT_CLOSED);
             await persistMission(laneEventRepo, db, {
               repositoryId: REPO, missionId: id, closedAt: CURRENT_CLOSED,
               cycleTimeMinutes: 40, shape: CURRENT_SHAPE, bounced: index < 5, classification: 'ai_sdlc',
@@ -144,8 +128,10 @@ describe("production certification: persisted weekly FLOW decision surface", () 
         assert.deepEqual(projection.metrics.decisionWindow?.current.cycleTime, { value: 40, observationCount: 31 });
         assert.deepEqual(projection.metrics.decisionWindow?.previous.cycleTime, { value: 140, observationCount: 28 });
         assert.deepEqual(projection.metrics.decisionWindow?.current.agentRuntime, { value: 15, observationCount: 31 });
-        assert.deepEqual(projection.metrics.decisionWindow?.current.activeDwell, { value: 9, observationCount: 36 });
-        assert.deepEqual(projection.metrics.decisionWindow?.current.reviewDwell, { value: 4, observationCount: 36 });
+        // TASK-2682: 26 missions have single visits; five bounced missions sum
+        // to active 18 / review 8 minutes. Each lane has 31 mission observations.
+        assert.deepEqual(projection.metrics.decisionWindow?.current.activeDwell, { value: 9, observationCount: 31 });
+        assert.deepEqual(projection.metrics.decisionWindow?.current.reviewDwell, { value: 4, observationCount: 31 });
         assert.deepEqual(projection.metrics.decisionWindow?.current.integrationDwell, { value: 3, observationCount: 31 });
         assert.deepEqual(projection.metrics.decisionWindow?.current.reviewBounce, { value: 5 / 31, observationCount: 31 });
         assert.equal(projection.metrics.cohorts?.cohorts[0]?.n, 31);

@@ -1,3 +1,4 @@
+import { handoffEvidencePolicy } from '../domain/mission-handoff-policy.js';
 /**
  * Recorded Mission contract inputs handoff verifies: the recorded contract,
  * the implementer identity, and legacy checkpoint document evidence.
@@ -173,7 +174,8 @@ export class HandoffContractVerifier {
     let finalCheckpoint: string | null = null;
     let checkpointContent = '';
     let evidenceRows: string[] = [];
-    if (recorded.length > 0) {
+    const policy = handoffEvidencePolicy(contract);
+    if (policy.source === 'recorded') {
       const latest = recorded[recorded.length - 1];
       const rows = latest.goalCheck.map((row) => `| ${row.criterion} | ${row.evidence} |`);
       const unverifiable = findUnverifiableGoalCheckRow(ports.fileSystem, rows, rootDir);
@@ -182,9 +184,7 @@ export class HandoffContractVerifier {
         error(msg);
         return { ok: false, error: msg };
       }
-      const incomplete = contract.successCriteria.flatMap((_, index) => (
-        contract.completedSuccessCriteria.includes(index) ? [] : [index + 1]
-      ));
+      const incomplete = policy.incomplete;
       if (incomplete.length > 0) {
         const msg = `Success criteria ${incomplete.join(', ')} are incomplete before handoff. Mark every criterion complete with \`px mission mark-complete --criterion <index> --expected-version <n>\` (or \`--all\`) before handoff.`;
         error(msg);
@@ -194,13 +194,13 @@ export class HandoffContractVerifier {
       // rather than prose copied into a checkpoint row. A completed criterion
       // still needs its own evidence row, but the row's descriptive label is
       // not another identity field to match.
-      if (latest.goalCheck.length < contract.successCriteria.length) {
+      if (policy.insufficientRows) {
         const msg = `Success-criterion evidence is missing before handoff in ${latest.name}: ${contract.successCriteria.length} completed criteria require ${contract.successCriteria.length} Goal Check row(s), but only ${latest.goalCheck.length} were recorded. Re-record ${latest.name} with \`px checkpoint record\` and verifiable evidence for every completed criterion.`;
         error(msg);
         return { ok: false, error: msg };
       }
       log(fmt.status('PASS', `Recorded checkpoint evidence verified: ${latest.name} (${latest.goalCheck.length} Goal Check row(s)).`));
-    } else if (contract.draftedInDb) {
+    } else if (policy.source === 'missing') {
       // A Mission drafted through the typed verbs records its evidence the same
       // way. Handoff never writes evidence on the implementer's behalf.
       const msg = `${fmt.slug(slug)} has no recorded checkpoint evidence. Record it with \`px checkpoint record\` before handoff; handoff never generates evidence.`;

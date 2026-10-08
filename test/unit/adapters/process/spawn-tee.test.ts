@@ -512,3 +512,22 @@ test('spawnAndTee reports a terminal host that cannot prepare as a launch error 
     assert.equal(observed.length, 0, 'nothing is spawned when the host cannot prepare');
   });
 });
+
+test('spawnAndTee never passes decision-provider credentials to a launched child (TASK-2675)', async () => {
+  const tmpRoot = registeredMkdtemp('spawn-tee-credentials-');
+  const names = ['TYPESAFE_API_KEY', 'OPENROUTER_API_KEY', 'AI_GATEWAY_API_KEY'];
+  const saved = names.map(name => process.env[name]);
+  try {
+    for (const name of names) { process.env[name] = 'sentinel'; }
+    await withMockSpawn({ stdoutChunks: [], status: 0 }, async (observed) => spawnAndTee('mock-node', [], {
+      cwd: tmpRoot, env: { OPENROUTER_API_KEY: 'sentinel', KEEP_ME: '1' }, stdoutSink: noopSink(), stderrSink: noopSink()
+    }).then(res => {
+      for (const name of names) { assert.equal(name in observed[0].options.env, false, `${name} leaked to the child`); }
+      assert.equal(observed[0].options.env.KEEP_ME, '1');
+      return res;
+    }));
+  } finally {
+    names.forEach((name, i) => { if (saved[i] === undefined) { delete process.env[name]; } else { process.env[name] = saved[i]; } });
+    fs.rmSync(tmpRoot, { recursive: true, force: true });
+  }
+});

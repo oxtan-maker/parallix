@@ -1,3 +1,4 @@
+import { normalizeReviewPhase, reviewPhaseTransition } from '../../../src/domain/review-phase-policy.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
@@ -494,4 +495,17 @@ test('a findings document title is not projected as a finding', () => {
     ['a real one, which must still be reported'],
     'the document title must not become a finding, and a real finding must survive',
   );
+});
+
+test('phase compatibility normalization shares domain transition facts (TASK-2668.07)', () => {
+  assert.deepEqual(normalizeReviewPhase('', 'APPROVED'), { phase: 'reviewing', original: null, normalized: false });
+  for (const alias of ['pending_approval', 'pending approval', 'PENDING-APPROVAL']) { assert.equal(normalizeReviewPhase(alias, '').phase, 'pending-approval'); }
+  assert.equal(normalizeReviewPhase('rewiewing', '').phase, 'reviewing');
+  for (const disposition of ['REQUEST_CHANGES', 'COMMENT', 'PUSHBACK_ALL', 'BLOCKED', 'PARKED']) { assert.equal(normalizeReviewPhase('unknown', disposition).phase, 'fixing'); }
+  assert.equal(normalizeReviewPhase('unknown', 'APPROVED').phase, 'approved');
+  assert.equal(reviewPhaseTransition('reviewing', 'approved').permitted, true);
+  assert.equal(reviewPhaseTransition('approved', 'reviewing').permitted, false);
+  assert.equal(reviewPhaseTransition('pending-approval', 'approved').permitted, false);
+  assert.equal(reviewPhaseTransition('unknown', 'fixing').permitted, false);
+  assert.equal(reviewPhaseTransition('reviewing', 'unknown').valid, false);
 });

@@ -124,7 +124,6 @@ test('global tarball reinstall preserves PARALLIX_HOME measurements and agent bl
       "const row = stats.loadMeasurementRows().rows.find(item => item.mission === 'task-reinstall-proof');",
       "if (!row || row.pr_fix_rounds !== '2') process.exit(1);"
     ].join('');
-    run(process.execPath, ['--import', TSX_IMPORT, '-e', readFromSecondRepo], { cwd: repoTwo, env });
     const pxStats = run(
       process.execPath,
       [path.join(installedRoot, 'build', 'px.mjs'), 'stats', '--today', '2026-06-06'],

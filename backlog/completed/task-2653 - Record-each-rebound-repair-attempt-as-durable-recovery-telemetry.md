@@ -1,8 +1,8 @@
 ---
 id: TASK-2653
 title: Record each rebound repair attempt as durable recovery telemetry
-status: backlog
-assignee: []
+status: done
+assignee: [claude]
 created_date: '2026-10-05 19:18'
 labels:
   - observability

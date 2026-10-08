@@ -1,8 +1,13 @@
 #!/usr/bin/env node
-import { createRepeatReviewClassification } from './review-classification.js';
+import { createReviewClassification } from './review-classification.js';
 
 import fs from 'node:fs';
 import { hostMissionCommand } from './mission-terminal.js';
+import { createTmuxTerminalReader } from '../adapters/process/tmux-terminal-reader.js';
+import { readRetainedMissionOutput } from '../adapters/filesystem/retained-mission-output.js';
+import { createRecordedOutputRenderer } from '../adapters/agents/recorded-output-renderer.js';
+import { resolveWorktree as resolveMissionWorktree } from '../adapters/filesystem/mission-utils.js';
+import { missionRepositoryKey } from '../adapters/filesystem/mission-repository-key.js';
 import { cliInvocation, type CliInvocation } from '../adapters/process/cli-invocation.js';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -414,7 +419,7 @@ function createCommandRegistry(rootDir: string): Record<string, Command> {
           // application review loop decides how they are sequenced.
           reviewLoopMechanisms: (request: StartReviewRound, observers: ReviewLoopObservers) => createReviewLoopPorts(request.slug, request, {
             ...observers,
-            classification: createRepeatReviewClassification(request.slug, resolveWorktree(request.slug) ?? rootDir),
+            classification: createReviewClassification(request.slug, resolveWorktree(request.slug) ?? rootDir),
             performHandoffFn: performHandoffWithMissionServices(missionServicesFn as HandoffMissionServicesPort),
             ...reviewLoopBindings(services.mission!.store, services.mission!.lifecycle, reviewerSessionPort),
           }),
@@ -471,6 +476,8 @@ function createCommandRegistry(rootDir: string): Record<string, Command> {
           await services.operatorState.close();
           throw new Error('board projection is unavailable for px web');
         }
+        const terminalReader = createTmuxTerminalReader({ resolveMissionWorktree, repositoryKey: missionRepositoryKey });
+        const recordedOutputRenderer = createRecordedOutputRenderer();
         return {
           buildProjection: () => builder.build(),
           // The same guarded BoardCommandController instance the TUI dispatches
@@ -479,6 +486,12 @@ function createCommandRegistry(rootDir: string): Record<string, Command> {
           // endpoint adds a route, never a second dispatch path; the controller's
           // progress sink is this host's SSE sink.
           commandDispatcher: capabilities.commandController,
+          terminalReader: { read: (missionId: string) => {
+            const terminal = terminalReader.read(missionId);
+            if (terminal.kind === 'live') { return terminal; }
+            const worktree = resolveMissionWorktree(missionId);
+            return worktree === null ? terminal : readRetainedMissionOutput(worktree, missionId, recordedOutputRenderer) ?? terminal;
+          } },
           close: () => services.operatorState.close(),
         };
       },

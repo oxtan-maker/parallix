@@ -162,7 +162,7 @@ test('performHandoff skips commit in Step 4 when Backlog transition already comm
   const missionMdPath = path.join(missionDir, 'MISSION.md');
   writeReviewState(missionDir, 'codex', 'codex');
   fs.writeFileSync(missionMdPath, '# MISSION.md\n\nTest mission.\n');
-  fs.writeFileSync(cpPath, '# CP-1\n\n## Goal Check\n\n| Criterion | Evidence | Status |\n|---|---|---|\n| test | test/example.test.ts | PASS |\n');
+  fs.writeFileSync(cpPath, '# CP-1\n\n## Goal Check\n\n| Criterion | Evidence | Status |\n|---|---|---|\n| test | `npm test -- test/example.test.ts` | PASS |\n');
 
   const result = await performHandoff(slug, { worktree, skipGate: true, missionServicesFn: stubMissionServices() });
   assert.strictEqual(result.ok, true);
@@ -210,7 +210,7 @@ test('performHandoff refreshes the review tracking ref and lease-updates the reb
   // mocks, which `mock.restoreAll()` clears between tests.
   writeReviewState(missionDir, 'codex', 'codex');
   fs.writeFileSync(missionMdPath, '# MISSION.md\n\nTest mission.\n');
-  fs.writeFileSync(cpPath, '# CP-1\n\n## Goal Check\n\n| Criterion | Evidence | Status |\n|---|---|---|\n| test | test/example.test.ts | PASS |\n');
+  fs.writeFileSync(cpPath, '# CP-1\n\n## Goal Check\n\n| Criterion | Evidence | Status |\n|---|---|---|\n| test | `npm test -- test/example.test.ts` | PASS |\n');
 
   const mockRebase = async () => ({ ok: true, sharedFileConflicts: false });
   const result = await performHandoff(slug, {
@@ -240,7 +240,7 @@ test('performHandoff falls back to magnus and persists bootstrap failure summary
   fs.mkdirSync(missionDir, { recursive: true });
   fs.mkdirSync(path.dirname(taskFile), { recursive: true });
   fs.writeFileSync(path.join(missionDir, 'MISSION.md'), '# MISSION.md\n\nTest mission.\n');
-  fs.writeFileSync(cpPath, '# CP-1\n\n## Goal Check\n\n| Criterion | Evidence | Status |\n|---|---|---|\n| test | test/example.test.ts | PASS |\n');
+  fs.writeFileSync(cpPath, '# CP-1\n\n## Goal Check\n\n| Criterion | Evidence | Status |\n|---|---|---|\n| test | `npm test -- test/example.test.ts` | PASS |\n');
   fs.writeFileSync(taskFile, '---\nstatus: active\n---\n\n# token fallback\n');
 
   mock.method(missionUtils, 'findMissionDir', () => missionDir);
@@ -339,7 +339,7 @@ test('performHandoff fails hard when git commit fails in Step 4', async (t) => {
     fs.mkdirSync(missionDir, { recursive: true });
     writeReviewState(missionDir, 'claude', 'claude');
     fs.writeFileSync(missionMdPath, '# MISSION.md\n\nTest mission.\n');
-    fs.writeFileSync(cpPath, '# CP-1\n\n## Goal Check\n\n| Criterion | Evidence | Status |\n|---|---|---|\n| test | test/example.test.ts | PASS |\n');
+    fs.writeFileSync(cpPath, '# CP-1\n\n## Goal Check\n\n| Criterion | Evidence | Status |\n|---|---|---|\n| test | `npm test -- test/example.test.ts` | PASS |\n');
 
     const result = await performHandoff(slug, { worktree, skipGate: true, missionServicesFn: stubMissionServices() });
     assert.strictEqual(result.ok, false);
@@ -408,7 +408,7 @@ test('performHandoff succeeds with ## Goal Check Table heading variant', async (
   fs.mkdirSync(missionDir, { recursive: true });
   writeReviewState(missionDir, 'claude', 'claude');
   fs.writeFileSync(missionMdPath, '# MISSION.md\n\nTest mission.\n');
-  fs.writeFileSync(cpPath, '# CP-1\n\n## Goal Check Table\n\n| Criteria | Evidence | Status |\n|----------|----------|--------|\n| test | test/example.test.ts | PASS |\n');
+  fs.writeFileSync(cpPath, '# CP-1\n\n## Goal Check Table\n\n| Criteria | Evidence | Status |\n|----------|----------|--------|\n| test | `npm test -- test/example.test.ts` | PASS |\n');
 
   const result = await performHandoff(slug, { worktree, skipGate: true, missionServicesFn: stubMissionServices() });
   assert.strictEqual(result.ok, true);
@@ -433,7 +433,7 @@ test('performHandoff fails when MISSION.md is uncommitted', async () => {
 
   fs.mkdirSync(missionDir, { recursive: true });
   fs.writeFileSync(missionMdPath, '# MISSION.md\n\nTest mission.\n');
-  fs.writeFileSync(cpPath, '# CP-1\n\n## Goal Check\n\n| Criterion | Evidence | Status |\n|---|---|---|\n| test | test/example.test.ts | PASS |\n');
+  fs.writeFileSync(cpPath, '# CP-1\n\n## Goal Check\n\n| Criterion | Evidence | Status |\n|---|---|---|\n| test | `npm test -- test/example.test.ts` | PASS |\n');
   writeReviewState(missionDir, 'claude', 'claude');
 
   const result = await performHandoff(slug, { worktree, skipGate: true, missionServicesFn: stubMissionServices() });
@@ -535,8 +535,8 @@ test('performHandoff fails when the latest checkpoint document is uncommitted', 
 
   fs.mkdirSync(missionDir, { recursive: true });
   fs.writeFileSync(missionMdPath, '# MISSION.md\n\nTest mission.\n');
-  fs.writeFileSync(cp1Path, '# CP-1\n\n## Goal Check\n\n| Criterion | Evidence | Status |\n|---|---|---|\n| test | test/example.test.ts | PASS |\n');
-  fs.writeFileSync(cp2Path, '# CP-2\n\n## Goal Check\n\n| Criterion | Evidence | Status |\n|---|---|---|\n| test | test/example.test.ts | PASS |\n');
+  fs.writeFileSync(cp1Path, '# CP-1\n\n## Goal Check\n\n| Criterion | Evidence | Status |\n|---|---|---|\n| test | `npm test -- test/example.test.ts` | PASS |\n');
+  fs.writeFileSync(cp2Path, '# CP-2\n\n## Goal Check\n\n| Criterion | Evidence | Status |\n|---|---|---|\n| test | `npm test -- test/example.test.ts` | PASS |\n');
   writeReviewState(missionDir, 'claude', 'claude');
 
   const result = await performHandoff(slug, { worktree, skipGate: true, missionServicesFn: stubMissionServices() });
@@ -807,7 +807,7 @@ test('performHandoff calls rebaseBeforeReviewRound before Forgejo PR creation', 
   fs.mkdirSync(missionDir, { recursive: true });
   fs.mkdirSync(path.dirname(taskFile), { recursive: true });
   fs.writeFileSync(path.join(missionDir, 'MISSION.md'), '# MISSION.md\n\nTest mission.\n');
-  fs.writeFileSync(cpPath, '# CP-1\n\n## Goal Check\n\n| Criterion | Evidence | Status |\n|---|---|---|\n| test | test/example.test.ts | PASS |\n');
+  fs.writeFileSync(cpPath, '# CP-1\n\n## Goal Check\n\n| Criterion | Evidence | Status |\n|---|---|---|\n| test | `npm test -- test/example.test.ts` | PASS |\n');
   fs.writeFileSync(taskFile, '---\nstatus: active\n---\n\n# rebase order\n');
 
   let rebaseCalled = false;
@@ -870,7 +870,7 @@ test('performHandoff fails when rebase returns ok=false with no shared-file conf
   fs.mkdirSync(missionDir, { recursive: true });
   fs.mkdirSync(path.dirname(taskFile), { recursive: true });
   fs.writeFileSync(path.join(missionDir, 'MISSION.md'), '# MISSION.md\n\nTest mission.\n');
-  fs.writeFileSync(cpPath, '# CP-1\n\n## Goal Check\n\n| Criterion | Evidence | Status |\n|---|---|---|\n| test | test/example.test.ts | PASS |\n');
+  fs.writeFileSync(cpPath, '# CP-1\n\n## Goal Check\n\n| Criterion | Evidence | Status |\n|---|---|---|\n| test | `npm test -- test/example.test.ts` | PASS |\n');
   fs.writeFileSync(taskFile, '---\nstatus: active\n---\n\n# rebase fail\n');
 
   const mockRebase = async () => ({ ok: false, sharedFileConflicts: false });
@@ -921,7 +921,7 @@ test('performHandoff fails when rebase returns sharedFileConflicts=true', async 
   fs.mkdirSync(missionDir, { recursive: true });
   fs.mkdirSync(path.dirname(taskFile), { recursive: true });
   fs.writeFileSync(path.join(missionDir, 'MISSION.md'), '# MISSION.md\n\nTest mission.\n');
-  fs.writeFileSync(cpPath, '# CP-1\n\n## Goal Check\n\n| Criterion | Evidence | Status |\n|---|---|---|\n| test | test/example.test.ts | PASS |\n');
+  fs.writeFileSync(cpPath, '# CP-1\n\n## Goal Check\n\n| Criterion | Evidence | Status |\n|---|---|---|\n| test | `npm test -- test/example.test.ts` | PASS |\n');
   fs.writeFileSync(taskFile, '---\nstatus: active\n---\n\n# shared conflict\n');
 
   const mockRebase = async () => ({ ok: false, sharedFileConflicts: true });
@@ -975,7 +975,7 @@ test('performHandoff proceeds normally when rebase is a no-op (branch already up
   fs.mkdirSync(missionDir, { recursive: true });
   fs.mkdirSync(path.dirname(taskFile), { recursive: true });
   fs.writeFileSync(path.join(missionDir, 'MISSION.md'), '# MISSION.md\n\nTest mission.\n');
-  fs.writeFileSync(cpPath, '# CP-1\n\n## Goal Check\n\n| Criterion | Evidence | Status |\n|---|---|---|\n| test | test/example.test.ts | PASS |\n');
+  fs.writeFileSync(cpPath, '# CP-1\n\n## Goal Check\n\n| Criterion | Evidence | Status |\n|---|---|---|\n| test | `npm test -- test/example.test.ts` | PASS |\n');
   fs.writeFileSync(taskFile, '---\nstatus: active\n---\n\n# rebase uptodate\n');
 
   const mockRebase = async () => ({ ok: true, sharedFileConflicts: false });
@@ -1311,7 +1311,7 @@ test('performHandoff stops before review transitions when NEL persistence fails'
   fs.mkdirSync(path.dirname(taskFile), { recursive: true });
   fs.mkdirSync(missionDir, { recursive: true });
   fs.writeFileSync(path.join(missionDir, 'MISSION.md'), '# Mission\n');
-  fs.writeFileSync(checkpoint, '# CP-1\n\n## Goal Check\n\n| Criterion | Evidence | Status |\n|---|---|---|\n| proof | test/handoff.test.js | PASS |\n');
+  fs.writeFileSync(checkpoint, '# CP-1\n\n## Goal Check\n\n| Criterion | Evidence | Status |\n|---|---|---|\n| proof | `npm test -- test/handoff.test.js` | PASS |\n');
   fs.writeFileSync(taskFile, '---\nstatus: active\n---\n');
   writeReviewState(missionDir, 'codex', 'codex');
   let transitions = 0;
@@ -1350,7 +1350,7 @@ test('performHandoff no longer stages or commits a legacy NEL record before tran
   fs.mkdirSync(path.dirname(taskFile), { recursive: true });
   fs.mkdirSync(missionDir, { recursive: true });
   fs.writeFileSync(path.join(missionDir, 'MISSION.md'), '# Mission\n');
-  fs.writeFileSync(checkpoint, '# CP-1\n\n## Goal Check\n\n| Criterion | Evidence | Status |\n|---|---|---|\n| proof | test/handoff.test.js | PASS |\n');
+  fs.writeFileSync(checkpoint, '# CP-1\n\n## Goal Check\n\n| Criterion | Evidence | Status |\n|---|---|---|\n| proof | `npm test -- test/handoff.test.js` | PASS |\n');
   fs.writeFileSync(taskFile, '---\nstatus: active\n---\n');
   writeReviewState(missionDir, 'codex', 'codex');
   const gitCalls = [];
@@ -1460,7 +1460,7 @@ test('performHandoff captures verification gate stdout/stderr on non-zero exit (
   fs.mkdirSync(missionDir, { recursive: true });
   fs.mkdirSync(path.dirname(taskFile), { recursive: true });
   fs.writeFileSync(path.join(missionDir, 'MISSION.md'), '# MISSION.md\n\nTest mission.\n');
-  fs.writeFileSync(cpPath, '# CP-1\n\n## Goal Check\n\n| Criterion | Evidence | Status |\n|---|---|---|\n| test | test/example.test.ts | PASS |\n');
+  fs.writeFileSync(cpPath, '# CP-1\n\n## Goal Check\n\n| Criterion | Evidence | Status |\n|---|---|---|\n| test | `npm test -- test/example.test.ts` | PASS |\n');
   fs.writeFileSync(taskFile, '---\nstatus: active\n---\n\n# sc1\n');
 
   const mockRebase = async () => ({ ok: true, sharedFileConflicts: false });
@@ -1850,7 +1850,7 @@ test('performHandoff attempts agent relaunch when gatekeeper posts pushback', as
   fs.mkdirSync(missionDir, { recursive: true });
   fs.mkdirSync(path.dirname(taskFile), { recursive: true });
   fs.writeFileSync(path.join(missionDir, 'MISSION.md'), '# MISSION.md\n\nTest mission.\n');
-  fs.writeFileSync(cpPath, '# CP-1\n\n## Goal Check\n\n| Criterion | Evidence | Status |\n|---|---|---|\n| test | test/example.test.ts | PASS |\n');
+  fs.writeFileSync(cpPath, '# CP-1\n\n## Goal Check\n\n| Criterion | Evidence | Status |\n|---|---|---|\n| test | `npm test -- test/example.test.ts` | PASS |\n');
   fs.writeFileSync(taskFile, '---\nstatus: active\n---\n\n# gk pushback\n');
 
   const mockRebase = async () => ({ ok: true, sharedFileConflicts: false });
@@ -1919,7 +1919,7 @@ test('performHandoff respects bounded retry limit of 2 for gatekeeper pushback',
   fs.mkdirSync(missionDir, { recursive: true });
   fs.mkdirSync(path.dirname(taskFile), { recursive: true });
   fs.writeFileSync(path.join(missionDir, 'MISSION.md'), '# MISSION.md\n\nTest mission.\n');
-  fs.writeFileSync(cpPath, '# CP-1\n\n## Goal Check\n\n| Criterion | Evidence | Status |\n|---|---|---|\n| test | test/example.test.ts | PASS |\n');
+  fs.writeFileSync(cpPath, '# CP-1\n\n## Goal Check\n\n| Criterion | Evidence | Status |\n|---|---|---|\n| test | `npm test -- test/example.test.ts` | PASS |\n');
   fs.writeFileSync(taskFile, '---\nstatus: active\n---\n\n# retry limit\n');
 
   const mockRebase = async () => ({ ok: true, sharedFileConflicts: false });
@@ -1984,7 +1984,7 @@ test('performHandoff consumes full retry budget when relaunch succeeds but pushb
   fs.mkdirSync(missionDir, { recursive: true });
   fs.mkdirSync(path.dirname(taskFile), { recursive: true });
   fs.writeFileSync(path.join(missionDir, 'MISSION.md'), '# MISSION.md\n\nTest mission.\n');
-  fs.writeFileSync(cpPath, '# CP-1\n\n## Goal Check\n\n| Criterion | Evidence | Status |\n|---|---|---|\n| test | test/example.test.ts | PASS |\n');
+  fs.writeFileSync(cpPath, '# CP-1\n\n## Goal Check\n\n| Criterion | Evidence | Status |\n|---|---|---|\n| test | `npm test -- test/example.test.ts` | PASS |\n');
   fs.writeFileSync(taskFile, '---\nstatus: active\n---\n\n# retry persists\n');
 
   const mockRebase = async () => ({ ok: true, sharedFileConflicts: false });
@@ -2048,7 +2048,7 @@ test('performHandoff succeeds after successful agent relaunch', async (t) => {
   fs.mkdirSync(missionDir, { recursive: true });
   fs.mkdirSync(path.dirname(taskFile), { recursive: true });
   fs.writeFileSync(path.join(missionDir, 'MISSION.md'), '# MISSION.md\n\nTest mission.\n');
-  fs.writeFileSync(cpPath, '# CP-1\n\n## Goal Check\n\n| Criterion | Evidence | Status |\n|---|---|---|\n| test | test/example.test.ts | PASS |\n');
+  fs.writeFileSync(cpPath, '# CP-1\n\n## Goal Check\n\n| Criterion | Evidence | Status |\n|---|---|---|\n| test | `npm test -- test/example.test.ts` | PASS |\n');
   fs.writeFileSync(taskFile, '---\nstatus: active\n---\n\n# relaunch success\n');
 
   const mockRebase = async () => ({ ok: true, sharedFileConflicts: false });
@@ -2110,7 +2110,7 @@ test('performHandoff relaunch prompt lists all missing artifact types', async (t
   fs.mkdirSync(missionDir, { recursive: true });
   fs.mkdirSync(path.dirname(taskFile), { recursive: true });
   fs.writeFileSync(path.join(missionDir, 'MISSION.md'), '# MISSION.md\n\nTest mission.\n');
-  fs.writeFileSync(cpPath, '# CP-1\n\n## Goal Check\n\n| Criterion | Evidence | Status |\n|---|---|---|\n| test | test/example.test.ts | PASS |\n');
+  fs.writeFileSync(cpPath, '# CP-1\n\n## Goal Check\n\n| Criterion | Evidence | Status |\n|---|---|---|\n| test | `npm test -- test/example.test.ts` | PASS |\n');
   fs.writeFileSync(taskFile, '---\nstatus: active\n---\n\n# prompt content\n');
 
   const mockRebase = async () => ({ ok: true, sharedFileConflicts: false });

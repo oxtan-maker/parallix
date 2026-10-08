@@ -736,3 +736,28 @@ test('a port implementation with a mismatched signature fails compilation (TASK-
   };
   assert.equal(typeof mismatched.createPr, 'function');
 });
+
+test('handoff rejects basename-only recorded evidence with the recording diagnostic (TASK-2657)', async () => {
+  const recorder = makeRecorder();
+  const caseModule = `${ROOT}/test/unit/interfaces/web/web-board-interaction.cases.ts`;
+  const ports = makePorts(recorder, {
+    ...contractServices(async () => ({
+      kind: 'found',
+      mission: {
+        checkpoints: [{ name: 'CP-5', goalCheck: [{ criterion: 'board interaction', evidence: 'web-board-interaction.cases.ts' }], nextAction: 'review' }],
+        brief: DRAFTED_BRIEF,
+        successCriteria: ['board interaction'],
+        completedSuccessCriteria: [0],
+        declaredGates: ['npm test'],
+      },
+      version: 4,
+    })),
+    fileSystem: { existsSync: (target: string) => target === caseModule, readText: () => '', writeText: () => {}, listNames: () => [], listEntries: () => [] },
+  });
+  const result = await new HandoffCommandUseCase(ports).performHandoff(SLUG, runOptions(recorder));
+  assert.equal(result.ok, false);
+  assert.match(result.error ?? '', /CP-5 is not verifiable; re-record it with `px checkpoint record`/);
+  assert.match(result.error ?? '', /`web-board-interaction\.cases\.ts` does not exist relative to the repository root/);
+  assert.equal(classifyError(result.error ?? '').dispatchAction, 'AutoSendBack');
+  assert.deepEqual(recorder.transitions, []);
+});

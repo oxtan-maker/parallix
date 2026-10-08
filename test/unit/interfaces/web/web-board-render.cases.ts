@@ -21,6 +21,7 @@ import { FlowPanel } from '../../../../web/src/flow-panel.js';
 import { EMPTY_LIVE_PROGRESS, OPERATION_LOG_LIMIT, recordProgress } from '../../../../web/src/operation-log.js';
 import { Shell } from '../../../../web/src/shell.js';
 import { durationText, isSpinning } from '../../../../web/src/format.js';
+import { C } from '../../../../web/src/palette.js';
 import { toWebBoardSnapshot, validateWebBoardSnapshot } from '../../../../src/interfaces/web/transport.js';
 import type { WebBoardSnapshot } from '../../../../src/interfaces/web/transport.js';
 import type { BoardProjection } from '../../../../src/application/projections/board.js';
@@ -456,9 +457,37 @@ test('fans retain the pre-TASK-2576 work behavior independently of agent identit
         assert.equal(isSpinning(webCard), freshness !== 'stale');
         assert.equal((html.match(/fan spin/g) ?? []).length, freshness === 'stale' ? 0 : 2);
         assert.doesNotMatch(html, /no implementer/);
-        if (agent === null) { assert.doesNotMatch(html, /class="live-indicator"/); }
+        // The live-indicator span only renders when a worker is present, so the
+        // blink class tracks `spinning && agent !== null`, never a non-spinning card.
+        const carriesBlink = isSpinning(webCard) && agent !== null;
+        if (carriesBlink) {
+          assert.match(html, /class="live-indicator"/, 'a spinning card with a worker carries the live-indicator blink class');
+        } else {
+          assert.doesNotMatch(html, /class="live-indicator"/, 'a non-spinning or worker-less card never carries the live-indicator blink class');
+        }
       }
     }
+  }
+});
+
+test('a blocked or idle card never blinks and holds a fixed stopped-dot color', () => {
+  const blocked = makeCard({ id: 'task-blocked' as MissionCard['id'], agent: agentFamily('codex'), blockingReason: 'waiting' });
+  const idle = makeCard({ id: 'task-idle' as MissionCard['id'], agent: agentFamily('codex') });
+  for (const card of [blocked, idle]) {
+    const snapshot = snapshotOf({ stages: makeProjection({ active: [card] }).stages });
+    const webCard = snapshot.stages.flatMap(stage => stage.cards)[0];
+    const html = render(snapshot);
+    assert.equal(isSpinning(webCard), false, 'a blocked or idle card never spins');
+    // Scope color/class checks to the header activity-dot span itself (the
+    // <span aria-hidden> that renders the dot), not the whole board: each card
+    // also renders coordinatorText in C.faint, so a board-wide color search
+    // passes even if the dot changed color or vanished.
+    const dotSpan = html.match(/<span aria-hidden="true"[^>]*>●/);
+    assert.ok(dotSpan, `a ${card.id} card renders the header activity dot`);
+    const dotColor = dotSpan[0].match(/color:([^";]+)/);
+    assert.ok(dotColor, `a ${card.id} dot has a color`);
+    assert.equal(dotColor[1], C.faint, `a ${card.id} dot holds the fixed stopped-dot color ${C.faint}`);
+    assert.doesNotMatch(dotSpan[0], /live-indicator/, `a ${card.id} dot carries no blink class`);
   }
 });
 
@@ -607,19 +636,22 @@ test('production browser code imports no Node built-in, concrete adapter, or ser
   assert.ok(transportImports.length > 0, 'the client reuses the shared transport contract');
 });
 
-test('production browser code uses no browser persistence or cached snapshot', () => {
+test('production browser code uses no browser persistence; terminal polling is confined to the read-only board', () => {
   for (const file of browserSources) {
-    for (const forbidden of ['localStorage', 'sessionStorage', 'indexedDB', 'document.cookie', 'caches.', 'setInterval']) {
+    for (const forbidden of ['localStorage', 'sessionStorage', 'indexedDB', 'document.cookie', 'caches.']) {
       assert.ok(!file.text.includes(forbidden), `${file.name} must not use ${forbidden}`);
     }
   }
+  assert.match(browserSources.find((file) => file.name === 'board.tsx')?.text ?? '', /setInterval\(refresh, 1000\)/,
+    'only the selected terminal view polls its GET-only read');
 });
 
-test('production browser code reads snapshots and uses the single guarded mutation route', () => {
+test('production browser code reads snapshots and terminals while keeping one guarded mutation route', () => {
   const fetches = browserSources.flatMap((file) => (file.text.match(/\bfetch\(/g) ?? []).map(() => file.name));
-  assert.deepEqual(fetches, ['board-data.ts', 'board-data.ts'], 'snapshot and command requests stay in the typed client');
+  assert.deepEqual(fetches, ['board-data.ts', 'board-data.ts', 'board-data.ts'], 'snapshot, terminal, and command requests stay in the typed client');
   const data = browserSources.find((file) => file.name === 'board-data.ts')?.text ?? '';
   assert.match(data, /COMMANDS_PATH = '\/api\/commands'/);
+  assert.match(data, /terminalPath/);
   assert.match(data, /method: 'POST'/);
   for (const file of browserSources.filter((file) => file.name !== 'board-data.ts')) {
     for (const verb of ["'POST'", "'PUT'", "'PATCH'", "'DELETE'", 'method:']) {

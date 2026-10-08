@@ -1,5 +1,7 @@
 // @ts-nocheck -- TASK-2328: partial test doubles from ESM seam migration; resolve in follow-up
 
+import { reviewOperation, reviewOperationPhase, reviewPushIdentity } from '../../../../src/domain/review-command-policy.js';
+
 import test, { mock } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'fs';
@@ -576,4 +578,17 @@ test('review rejects a non-numeric --max-attempts', async () => {
     errors.some(e => /--max-attempts requires a positive integer/.test(e)),
     `expected a positive-integer error; got: ${errors.join(' | ')}`
   );
+});
+
+test('review operation precedence and push identity are pure policies (TASK-2668.07)', () => {
+  assert.equal(reviewOperation(['--continue', '--status=true']), 'status');
+  assert.equal(reviewOperation(['--comment-file=x']), 'comment');
+  assert.equal(reviewOperation(['task-x', '--unknown']), 'status');
+  assert.equal(reviewOperationPhase('continue'), 'review');
+  assert.equal(reviewOperationPhase('status'), undefined);
+  assert.deepEqual(reviewPushIdentity(null, null, false), { identity: 'autonomous', defaulted: true });
+  assert.deepEqual(reviewPushIdentity(null, null, true), { identity: null, defaulted: false });
+  assert.equal(reviewPushIdentity('autonomous', 'codex', true).identity, null);
+  assert.equal(reviewPushIdentity('claude', 'codex', true).identity, 'claude');
+  assert.equal(reviewPushIdentity(null, 'codex', true).identity, 'codex');
 });

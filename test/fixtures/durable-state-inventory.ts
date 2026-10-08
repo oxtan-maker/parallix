@@ -1270,7 +1270,7 @@ export const MISSION_DOCUMENT_CALL_SITES: readonly MissionDocumentCallSiteEntry[
   },
   {
     id: 'mission-doc-call-handoff',
-    fileLocation: 'src/application/handoff-command-use-case.ts',
+    fileLocation: 'src/application/handoff-executor.ts',
     purpose: 'verify MISSION.md exists and read Refinement Signals / Gates as the mission contract evidence before handoff',
     pathPatterns: ['MISSION.md', 'findMissionDir', 'backlog/tasks'],
     classification: 'mission-document-evidence',

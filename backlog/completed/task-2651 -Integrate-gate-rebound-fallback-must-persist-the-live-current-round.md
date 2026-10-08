@@ -1,8 +1,8 @@
 ---
 id: TASK-2651
 title: Integrate-gate rebound fallback must persist the live current round, not a stale snapshot round
-status: backlog
-assignee: []
+status: done
+assignee: [codex]
 created_date: '2026-10-05 06:10'
 labels:
   - bug

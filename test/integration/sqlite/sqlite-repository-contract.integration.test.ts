@@ -400,6 +400,29 @@ describe("SQLite repository contract", () => {
     }
   });
 
+  it('operational-history: findRecentLogEntries keeps the newest entries and never carries a large payload (TASK-2681)', async () => {
+    const { db, dir } = await createDbWithSchema();
+    try {
+      const repo = new SqliteOperationalHistoryRepository(db);
+      const at = '2026-07-23T10:00:00Z';
+      await repo.append({ eventType: 'old', eventData: JSON.stringify({ message: 'dropped' }), createdAt: at });
+      await repo.append({ eventType: 'rebound.repair', eventData: JSON.stringify({ transcript: 'x'.repeat(500_000), agent: 'codex' }), createdAt: at });
+      await repo.append({ eventType: 'said', eventData: JSON.stringify({ message: 'hello', agent: 'claude' }), createdAt: at });
+      await repo.append({ eventType: 'array', eventData: '[1]', createdAt: at });
+      await repo.append({ eventType: 'scalar', eventData: '7', createdAt: at });
+
+      const recent = await repo.findRecentLogEntries(4);
+      assert.deepEqual(recent.map((entry) => entry.eventType), ['rebound.repair', 'said', 'array', 'scalar']);
+      assert.deepEqual(recent.map((entry) => entry.message), [null, 'hello', null, null]);
+      assert.deepEqual(recent.map((entry) => entry.agent), ['codex', 'claude', null, null]);
+      assert.deepEqual(recent.map((entry) => entry.rawData), [null, null, '[1]', '7']);
+      assert.ok(recent.every((entry) => (entry.rawData ?? '').length < 100), 'the megabyte payload is not carried');
+    } finally {
+      await db.close();
+      cleanupTempDir(dir);
+    }
+  });
+
   // --- Migration ledger repository ---
 
   it('migration-ledger: findAll returns applied migrations', async () => {

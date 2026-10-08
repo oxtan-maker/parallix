@@ -111,6 +111,7 @@ function startCodexDraftAgent({ prompt, worktree, env = {}, resume = false, sess
   const invocationStartMs = Date.now();
 
   function isStaleSessionResult(result: any) {
+    // Adapter-owned parsing of Codex CLI diagnostics; never exposed as a workflow signal.
     if (!result) {return false;}
     const stderr = result.stderr || '';
     const stdout = result.stdout || '';

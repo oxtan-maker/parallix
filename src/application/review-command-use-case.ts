@@ -1,3 +1,4 @@
+import { reviewOperation, reviewOperationPhase } from '../domain/review-command-policy.js';
 import { randomUUID } from 'node:crypto';
 import { missionId } from '../domain/mission.js';
 import type { ReviewWorkflowContext, ReviewWorkflowPort } from './ports/review-workflow.js';
@@ -5,28 +6,10 @@ import {
   NO_CURRENT_WORK_PORT,
   isNestedWorkPublisher,
   reviewLoopPublisher,
-  type CurrentWorkPhase,
   type CurrentWorkPort,
 } from './recording/current-work-recorder.js';
 
-/**
- * Review operations that keep the board busy, and the phase each publishes.
- *
- * Only the long-running ones appear here. `--status`, `--comments`, and the
- * one-shot maintenance flags finish in milliseconds; publishing current work
- * for them would flicker the board without telling an operator anything.
- */
-const PUBLISHED_PHASES: Readonly<Record<string, CurrentWorkPhase>> = {
-  start: 'review',
-  continue: 'review',
-  submit: 'review',
-  submitReview: 'review',
-};
-const REVIEW_FLAG_OPERATIONS: ReadonlyArray<readonly [string, keyof Omit<ReviewWorkflowPort, 'preflight'>]> = [
-  ['--status', 'status'], ['--verify', 'verify'], ['--submit', 'submit'], ['--push', 'push'], ['--comments', 'readComments'], ['--comment', 'comment'], ['--comment-file', 'comment'], ['--submit-review', 'submitReview'], ['--close', 'close'], ['--create-event', 'createEvent'], ['--import-legacy', 'importLegacy'], ['--backfill-review', 'backfillReview'], ['--reconcile-review', 'reconcileReview'], ['--start', 'start'], ['--continue', 'continue'], ['--resume', 'resume'],
-];
-
-/** CLI-independent policy for choosing a review lifecycle operation. */
+/** CLI-independent orchestration of the domain-selected review lifecycle operation. */
 export class ReviewCommandUseCase {
   constructor(
     private readonly _workflow: ReviewWorkflowPort,
@@ -40,8 +23,7 @@ export class ReviewCommandUseCase {
   }
 
   private async dispatch(context: ReviewWorkflowContext): Promise<void> {
-    const flags = new Set(context.args.filter(arg => arg.startsWith('--')).map(arg => arg.split('=', 1)[0]));
-    const operation = REVIEW_FLAG_OPERATIONS.find(([flag]) => flags.has(flag))?.[1] || 'status';
+    const operation = reviewOperation(context.args);
     return this.run(context, operation);
   }
 
@@ -63,7 +45,7 @@ export class ReviewCommandUseCase {
     context: ReviewWorkflowContext,
     operation: keyof Omit<ReviewWorkflowPort, 'preflight'>,
   ): Promise<void> {
-    const phase = PUBLISHED_PHASES[operation];
+    const phase = reviewOperationPhase(operation);
     if (!phase) { await this._workflow[operation](context); return; }
 
     // A review run inside an outer operation (`px integrate`'s re-review)

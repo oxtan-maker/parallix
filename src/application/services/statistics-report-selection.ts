@@ -1,3 +1,4 @@
+import { selectBugTrend, type BugTrendWeek } from './statistics-bug-trend.js';
 import type { StatsMissionFlow } from '../ports/cli-workflows.js';
 import { weeklyDecisionWindows } from './decision-window.js';
 import { createRangeWindow } from './statistics-row.js';
@@ -13,6 +14,7 @@ export interface StatsReportWindow<Row extends StatisticsRow = StatisticsRow> {
 }
 
 export interface StatsReportSelection<Row extends StatisticsRow = StatisticsRow> {
+  readonly bugTrend: readonly BugTrendWeek[] | null;
   readonly current: StatsReportWindow<Row>;
   readonly previous?: StatsReportWindow<Row>;
 }
@@ -56,5 +58,5 @@ export function selectStatsReport<Row extends StatisticsRow>(
       },
     };
   };
-  return { current: select(windows.current), previous: windows.previous ? select(windows.previous) : undefined };
+  return { bugTrend: selectBugTrend(missionFlow, windows.previous?.start ?? windows.current.start, windows.current.end), current: select(windows.current), previous: windows.previous ? select(windows.previous) : undefined };
 }

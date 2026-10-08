@@ -1,5 +1,7 @@
 // Regression provenance: TASK-2582.
 import fs from 'node:fs';
+import path from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
 import { execFile } from 'node:child_process';
 import { setCommandPathProbe, setLauncherHealthProbe, setWorkflowLaunchPort } from '../../src/adapters/agents/agents.js';
 
@@ -18,7 +20,16 @@ setWorkflowLaunchPort(({ prompt, worktree }: { prompt: string; worktree?: string
         else { resolve(stdout); }
       });
     });
-    const status = JSON.parse(await command(['status', slug, '--json']));
+    // Observe the real persisted state without launching a full source CLI
+    // for each read. Verdict and resolve still cross the pinned child CLI.
+    const readStatus = () => {
+      const database = new DatabaseSync(path.join(process.env.PARALLIX_HOME!, 'parallix.db'), { readOnly: true });
+      try {
+        const row = database.prepare('SELECT status, version FROM missions WHERE id = ?').get(slug) as { status: string; version: number };
+        return { missionStatus: row.status, version: row.version };
+      } finally { database.close(); }
+    };
+    const status = readStatus();
     const isReviewer = /^Mode: review\./m.test(prompt);
     const phase = isReviewer ? 'review' : 'repair';
     if (status.missionStatus !== (isReviewer ? 'review' : 'active')) { throw new Error(`${phase} started in ${status.missionStatus}`); }
@@ -32,7 +43,7 @@ setWorkflowLaunchPort(({ prompt, worktree }: { prompt: string; worktree?: string
     } else {
       await command(['resolve', '--slug', slug, '--actor', 'custom', '--expected-version', String(status.version), '--finding', 'F1', '--fixed', 'Fixture repair recorded']);
     }
-    const after = JSON.parse(await command(['status', slug, '--json']));
+    const after = readStatus();
     fs.appendFileSync(process.env.TASK_2582_TRACE!, JSON.stringify({ phase: `${phase}-complete`, status: after.missionStatus }) + '\n');
     return { status: 0, stdout: '', stderr: '' };
   })(),

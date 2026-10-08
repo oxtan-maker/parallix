@@ -104,6 +104,7 @@ function buildClaudeInvocation({ prompt, worktree, env, resume = false, sessionI
 
 function startClaudeAgent({ prompt, worktree, env, resume = false, sessionId = null, model = null, teeOptions = {}, slug = null, role = null, sessionMarkerPort }: StartClaudeAgentOptions) {
   function isStaleSessionResult(result: any) {
+    // Adapter-owned parsing of Claude CLI diagnostics; never exposed as a workflow signal.
     if (!result) {return false;}
     const stderr = result.stderr || '';
     const stdout = result.stdout || '';

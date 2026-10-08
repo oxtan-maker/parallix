@@ -13,6 +13,7 @@ import { mockModule, installModuleMocks } from '../../lib/module-mock.js';
 // count from the selectAgent path (task-2431 integration gate).
 import { activeCustomCapacityCount, resetCustomCapacity, tryAcquireCustomCapacity } from '../../../src/adapters/agents/custom-capacity.js';
 import { FRESH_SESSION_MARKER_PORT } from '../../../src/application/recovery-supervisor.js';
+import { AgentPoolExhaustedError } from '../../../src/domain/agents.js';
 const buildClaudeInvocationModule = mockModule<typeof import('../../../src/adapters/agents/claude.js')>('../../../src/adapters/agents/claude.js', import.meta.url);
 const buildCodexDraftInvocationModule = mockModule<typeof import('../../../src/adapters/agents/codex.js')>('../../../src/adapters/agents/codex.js', import.meta.url);
 const buildVibeInvocationModule = mockModule<typeof import('../../../src/adapters/agents/vibe.js')>('../../../src/adapters/agents/vibe.js', import.meta.url);
@@ -112,9 +113,8 @@ for (const name of ['codex', 'claude', 'opencode', 'pi', 'vibe']) {
 
 test.before(() => {
   process.env.PATH = `${sharedLauncherBin}${path.delimiter}${originalPath}`;
-  // Per-test launchers control custom->opencode/pi dispatch through PATH.
-  // The global bootstrap's PI_BIN safety pin would bypass those fixtures.
-  delete process.env.PI_BIN;
+  // Pi checks global installs before PATH, so keep it pinned to our fixture.
+  process.env.PI_BIN = path.join(sharedLauncherBin, 'pi');
   setCommandPathProbe(name => fs.existsSync(path.join(sharedLauncherBin, name)));
 });
 
@@ -231,9 +231,9 @@ function withPathLaunchers(entries, run) {
   // These fixtures exercise the mock CLI directly; bwrap's own exit status
   // would otherwise mask a mocked child signal.
   process.env.PARALLIX_NO_BUBBLEWRAP = '1';
-  // The global bootstrap pins PI_BIN to a safety launcher. These tests supply
-  // their own PATH mock for custom->pi dispatch, so it must take precedence.
-  delete process.env.PI_BIN;
+  // Pin Pi to this fixture: deleting the override allows a global install to
+  // win over PATH and launch a real agent outside the E2E lane.
+  process.env.PI_BIN = path.join(launchers.pi ? binDir : sharedLauncherBin, 'pi');
   const cleanup = () => {
     process.env.PATH = previousPath;
     if (previousLaunchers === undefined) delete process.env.PARALLIX_TEST_LAUNCHERS;
@@ -944,6 +944,9 @@ test('workflowLauncherStatus probes Pi with its side-effect-free version command
   // the argument under test (TASK-2622.04 integration-gate repair).
   const probes: string[][] = [];
   setLauncherHealthProbe((command, args) => {
+    // Fail before spawning if launcher resolution escapes the test fixture.
+    assert.equal(command, process.env.PI_BIN, 'Pi must use the pinned test launcher');
+    assert.equal(fs.realpathSync(command), fs.realpathSync(sharedLauncherRunner));
     probes.push(args);
     const result = spawnSync(command, args, { stdio: 'ignore' });
     return result.status === 0 ? { ok: true } : { ok: false, reason: `exit ${result.status}` };
@@ -2093,14 +2096,14 @@ test('startAgent attempts at least 3 eligible agents before giving up (SC 3)', a
           if (!opts.exclude.has('custom')) return 'custom';
           if (!opts.exclude.has('vibe')) return 'vibe';
           if (!opts.exclude.has('codex')) return 'codex';
-          throw new Error('No agents available');
+          throw new AgentPoolExhaustedError(step, 'No agents available');
         },
         detectLimitHitFn: () => null,
         log: msg => log.push(msg)
       }).catch(err => err));
 
       assert.ok(error instanceof Error);
-      assert.ok(error.message.includes('All eligible agents exhausted'));
+      assert.ok(error.message.includes('All eligible agents exhausted'), error.message);
       assert.ok(error.message.includes('custom'));
       assert.ok(error.message.includes('vibe'));
       assert.ok(error.message.includes('codex'));
@@ -2405,14 +2408,14 @@ test('startAgent throws with clear error when all agents exhausted', async () =>
         selectAgentFn: (step, opts) => {
           if (!opts.exclude.has('custom')) return 'custom';
           if (!opts.exclude.has('vibe')) return 'vibe';
-          throw new Error('No agents available');
+          throw new AgentPoolExhaustedError(step, 'No agents available');
         },
         detectLimitHitFn: () => null,
         log: msg => log.push(msg)
       }).catch(err => err));
 
       assert.ok(error instanceof Error);
-      assert.ok(error.message.includes('All eligible agents exhausted'));
+      assert.ok(error.message.includes('All eligible agents exhausted'), error.message);
       assert.ok(error.message.includes('custom'));
       assert.ok(error.message.includes('vibe'));
       assert.ok(error.message.includes('exit 1'));

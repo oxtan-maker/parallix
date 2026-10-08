@@ -91,6 +91,9 @@ test('prepared host runs the confined command in the pane and keeps credentials 
   assert.ok(pane.includes(shellQuote("it's")));
   assert.match(host, /trap 'cleanup TERM; exit 143' TERM/);
   assert.match(host, /pipe-pane/);
+  assert.ok(host.includes('exec "${SHELL:-/bin/sh}" -i'), 'the retained console is the operator\'s interactive shell so their rc environment returns (TASK-2675)');
+  assert.equal(host.includes('exec /bin/sh -i'), false);
+  assert.match(host, /env -i /, 'the tmux server itself stays credential-free');
   assert.equal(host.includes('hunter2') || launch.args.join(' ').includes('hunter2'), false, 'credentials never reach argv or the host script');
   assert.match(paneEnv, /export SECRET_TOKEN='hunter2'/);
   assert.doesNotMatch(paneEnv, /bad-name/);
@@ -98,6 +101,23 @@ test('prepared host runs the confined command in the pane and keeps credentials 
   launch.cleanup();
   assert.equal(fs.existsSync(scratch), false);
   assert.ok(calls.some(call => call.includes('kill-window') && call.includes(`=${launch.sessionName}:${launch.windowName}`)));
+});
+
+test('the console px wrapper cannot re-enter itself from an operator rc file (TASK-2675)', () => {
+  const env = { PARALLIX_TERMINAL_STATE_DIR: path.join(mkdtemp('px-tmux-wrap-'), 'state') };
+  const bin = mkdtemp('px-tmux-bin-');
+  fs.writeFileSync(path.join(bin, 'px'), '#!/bin/sh\nexit 0\n', { mode: 0o755 });
+  const previousPath = process.env.PATH;
+  process.env.PATH = `${bin}${path.delimiter}${previousPath}`;
+  try {
+    const { fn } = fakeSpawnSync('');
+    const launch = prepareTmuxLaunch({ identity: identity(), spawnIndex: 1, command: 'sh', args: [], cwd: '/work', env: {} }, { env, spawnSyncFn: fn });
+    const wrapper = fs.readFileSync(path.join(path.dirname(missionSocketPath(identity(), env)), 'task-1', 'console-bin', 'px'), 'utf8');
+    // `eval "$(px shell-init bash)"` in an rc file runs this wrapper again from inside its own Bash child.
+    assert.match(wrapper, /if \[ -n "\$PARALLIX_CONSOLE_PX" \]; then exec '[^']*px' "\$@"; fi/);
+    assert.match(wrapper, /PARALLIX_CONSOLE_PX=1 exec \/bin\/bash -ic 'unset PARALLIX_CONSOLE_PX; exec "\$@"'/);
+    launch.cleanup();
+  } finally { process.env.PATH = previousPath; }
 });
 
 test('restart adoption kills sessions whose host or harness died, only for the same role (TASK-2643)', () => {
@@ -233,4 +253,37 @@ test('mission restart sweeps dead operations across roles and preserves live wor
   const { fn, calls } = fakeSpawnSync('active-parallix-a1-dead\t111\t900\nreview-codex-a1-live\t222\t900\nconsole\t\t');
   assert.deepEqual(reconcileOrphanSessions(identity(), { env, spawnSyncFn: fn, allRoles: true, isAlive: pid => pid === 222 || pid === 900 }), ['active-parallix-a1-dead']);
   assert.equal(calls.some(call => call.includes('=task-1:review-codex-a1-live')), false);
+});
+
+test('read-only terminal capture selects command panes and fails closed (TASK-2661)', async () => {
+  const { createTmuxTerminalReader } = await import('../../../../src/adapters/process/tmux-terminal-reader.js');
+  const calls: string[][] = [];
+  let listing = 'console\t\nexecute\t42\n';
+  let status = 0;
+  let captureStatus = 0;
+  const reader = createTmuxTerminalReader({
+    resolveMissionWorktree: id => id === 'task-1' ? '/isolated' : null,
+    repositoryKey: () => 'abc123', env: { PARALLIX_TERMINAL_STATE_DIR: '/tmp/px-reader-double' },
+    spawnSyncFn: ((_cmd: string, args: string[]) => {
+      calls.push(args);
+      return args.includes('list-windows') ? { status, stdout: listing } : { status: captureStatus, stdout: 'progress marker\n' };
+    }) as never,
+  });
+  assert.equal(reader.read('absent').kind, 'unavailable');
+  assert.equal(calls.length, 0);
+  assert.deepEqual(reader.read('task-1'), { kind: 'live', output: 'progress marker\n' });
+  assert.equal(calls.at(-1)?.at(-1), '=task-1:execute');
+  listing = 'console\t\nreview\t\n';
+  assert.equal(reader.read('task-1').kind, 'live');
+  assert.equal(calls.at(-1)?.at(-1), '=task-1:review');
+  listing = 'console\t\n';
+  assert.equal(reader.read('task-1').kind, 'live');
+  assert.equal(calls.at(-1)?.at(-1), '=task-1:console');
+  listing = '';
+  assert.equal(reader.read('task-1').kind, 'unavailable');
+  listing = 'execute\t42\n'; captureStatus = 1;
+  assert.equal(reader.read('task-1').kind, 'unavailable');
+  status = 1;
+  assert.equal(reader.read('task-1').kind, 'unavailable');
+  assert.ok(calls.every(args => args.includes('list-windows') || args.includes('capture-pane')));
 });

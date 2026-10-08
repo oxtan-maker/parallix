@@ -7,7 +7,7 @@ import { performance } from 'node:perf_hooks';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { buildEvidencePacket, PACKET_VERSION, PROMPT_VERSION } from '../../src/application/review-classification/evidence-packet.js';
-import { classifyRepeatFindings, hasBroaderReviewObligations, ROUTING_POLICY_VERSION } from '../../src/application/review-classification/routing-policy.js';
+import { classifyFindings, hasBroaderReviewObligations, ROUTING_POLICY_VERSION } from '../../src/application/review-classification/routing-policy.js';
 import { GitReviewEvidence } from '../../src/adapters/review/review-evidence.js';
 import { createDecisionPort } from '../../src/composition/decision.js';
 import { LEGACY_CLASSIFIER_POLICY_VERSION } from '../../src/domain/classifier-review.js';
@@ -52,7 +52,7 @@ for (const [cohort, recorded, inputs, folder] of [
       const a = row.response.answers.resolution;
       const replay: DecisionResult = { provider: row.response.provider || 'archive', model: row.response.model,
         answers: { resolution: { type: 'choice', selected: a.choice, probabilities: a.probabilities, confidence: a.confidence } } };
-      result.recordedReplayRoute = classifyRepeatFindings(replay, LEGACY_CLASSIFIER_POLICY_VERSION).route;
+      result.recordedReplayRoute = classifyFindings(replay, LEGACY_CLASSIFIER_POLICY_VERSION).route;
     } else { result.recordedReplayRoute = 'reviewer'; result.frozenLiveRoute = 'reviewer'; }
     let frozenRequest: DecisionRequest | null = null;
     if (row.requestSha256 && row.response) {
@@ -67,7 +67,7 @@ for (const [cohort, recorded, inputs, folder] of [
         try {
           const response = await port.decide(frozenRequest!);
           result.frozenLiveResponse = response;
-          result.frozenLiveRoute = classifyRepeatFindings(response).route;
+          result.frozenLiveRoute = classifyFindings(response).route;
         } catch (error) { result.frozenLiveRoute = 'reviewer'; result.frozenLiveFailure = error instanceof Error ? error.message : 'classifier failure'; }
         result.frozenLiveMs = performance.now() - started;
       }
@@ -115,7 +115,7 @@ for (const [cohort, recorded, inputs, folder] of [
       const callStart = performance.now();
       try {
         const response = await port.decide(packet.request as DecisionRequest);
-        result.response = response; result.classifierRoute = classifyRepeatFindings(response).route;
+        result.response = response; result.classifierRoute = classifyFindings(response).route;
         result.productionRoute = result.broaderReviewObligations ? 'reviewer' : result.classifierRoute;
       } catch (error) { result.productionRoute = 'reviewer'; result.failure = error instanceof Error ? error.message : 'classifier failure'; }
       result.classificationMs = performance.now() - callStart;

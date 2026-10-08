@@ -27,6 +27,8 @@ export interface TierFileSelection {
   integrationCi: string[];
   /** Suites selected positively from INTEGRATION_LOCAL_TESTS. */
   integrationLocal: string[];
+  /** The cheap subset of `integrationCi` that runs in the early gates (see {@link EARLY_CI_CPU_CUTOFF_MS}). */
+  integrationCiEarly: string[];
   /** The full integration command population (integration-ci + integration-local). */
   allIntegration: string[];
   /** Real-agent and lifecycle suites with dedicated commands and gates. */
@@ -65,6 +67,34 @@ export function suiteIdentity(testRoot: string, file: string): string {
   return path.relative(testRoot, path.resolve(testRoot, file)).split(path.sep).join('/');
 }
 
+/**
+ * Early-versus-later cutoff for integration-ci suites (CPU milliseconds). A
+ * suite whose largest declared per-case CPU limit in test/lib/test-cpu-budgets.json
+ * (plain or covered profile; the integration case default when undeclared)
+ * exceeds this value is excluded from the early `--integration-ci` lane and
+ * coverage run. It still runs, unchanged and with its limits intact, in the
+ * full lane (`--integration-ci-all`) that the GitHub push gate executes.
+ */
+export const EARLY_CI_CPU_CUTOFF_MS = 3500;
+
+/** Largest existing declared CPU limit for a test-root-relative suite. */
+export function declaredSuiteCpuLimitMs(
+  policy: ReturnType<typeof readCpuBudgetProfiles>, suite: string,
+): number {
+  return Math.max(policy.defaultMs, policy.plain[suite] ?? 0, policy.covered[suite] ?? 0);
+}
+
+function readCpuBudgetProfiles(executionRoot: string) {
+  // Stand-in checkouts without a budget policy declare no limits, so nothing shifts.
+  if (!fs.existsSync(path.join(executionRoot, 'test', 'lib', 'test-cpu-budgets.json'))) {
+    return { defaultMs: 0, plain: {}, covered: {} };
+  }
+  const { integrationCases: cases } = JSON.parse(fs.readFileSync(path.join(executionRoot, 'test', 'lib', 'test-cpu-budgets.json'), 'utf8')) as {
+    integrationCases: { defaultMs: number; plain: Record<string, number>; covered: Record<string, number> };
+  };
+  return { defaultMs: cases.defaultMs, plain: cases.plain, covered: cases.covered };
+}
+
 /** The lane lists selection reads; tests substitute synthetic registries. */
 export interface LaneRegistry {
   readonly ci: readonly string[];
@@ -89,9 +119,12 @@ export function selectTierFiles(executionRoot: string, registry: LaneRegistry = 
   const declared = (lane: readonly string[]) => suites.filter(file => levelOf(file) !== 'unit' && lane.includes(file));
   const integrationCi = declared(registry.ci);
   const integrationLocal = declared(registry.local);
+  const cpuLimits = readCpuBudgetProfiles(executionRoot);
+  const integrationCiEarly = integrationCi.filter(file => declaredSuiteCpuLimitMs(cpuLimits, file) <= EARLY_CI_CPU_CUTOFF_MS);
   return {
     unit: absolute(suites.filter(file => levelOf(file) === 'unit')),
     integrationCi: absolute(integrationCi),
+    integrationCiEarly: absolute(integrationCiEarly),
     integrationLocal: absolute(integrationLocal),
     allIntegration: absolute(suites.filter(file => integrationCi.includes(file) || integrationLocal.includes(file))),
     agentE2e: absolute(declared(registry.agentE2e)),

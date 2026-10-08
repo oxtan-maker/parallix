@@ -1,3 +1,4 @@
+import { integrationGateDisposition, integrationRepairRoute, integrationRepairMustReactivate, repairedRevisionReviewEligible, repairCanResumeIntegration } from '../../domain/integration-gate-policy.js';
 /**
  * The required local integration gates: run the repository's configured
  * pre-integration gates against the finalized mission tree and route a red
@@ -17,6 +18,7 @@ import {
   type ValidatedCommitDiff,
 } from './validation-marker.js';
 import type { IntegrateGatesPort, IntegrateWorkflowPorts } from '../ports/integrate-workflow.js';
+import type { MissionStore } from '../domain-ports.js';
 import type { OperationalHistoryService } from '../services/operational-history-service.js';
 
 /**
@@ -75,11 +77,17 @@ function approvedRevisionOf(missionLoad: any): string | null {
  * lands on the round the repair is actually on. When no live aggregate is
  * available the snapshot is returned unchanged.
  */
-function currentRepairState(missionLoad: any, snapshot: Record<string, unknown> | null | undefined): Record<string, unknown> {
-  const review = missionLoad?.kind === 'found' ? missionLoad.mission?.review : null;
-  const currentNumber = typeof review?.rounds?.at(-1)?.number === 'number' ? review.rounds.at(-1).number : null;
-  const snapshotRound = typeof snapshot?.round === 'number' ? snapshot.round : null;
-  if (currentNumber !== null && (snapshotRound === null || snapshotRound < currentNumber)) {
+async function currentRepairState(missionStore: MissionStore | null | undefined, slug: string, snapshot: Record<string, unknown> | null | undefined): Promise<Record<string, unknown>> {
+  // The rebound changes the aggregate after the integration context was built.
+  // Load it at the persistence boundary rather than reusing that stale read.
+  let missionLoad;
+  try {
+    missionLoad = missionStore ? await missionStore.load(missionId(slug)) : null;
+  } catch {
+    return snapshot ?? {};
+  }
+  const currentNumber = missionLoad?.kind === 'found' ? missionLoad.mission.review?.rounds.at(-1)?.number : undefined;
+  if (currentNumber !== undefined) {
     return { ...snapshot, round: currentNumber };
   }
   return snapshot ?? {};
@@ -230,7 +238,8 @@ export function createIntegrationGateStep({ gates, landing, verification }: Inte
       realAgentModel,
     });
 
-    if (dryRun) {
+    const disposition = integrationGateDisposition({ dryRun, skippedAll: gatesToRun.skippedAll, skipped: result.skipped, required: requirePreIntegration, ok: result.ok, cancelled: result.cancelled });
+    if (disposition === 'plan') {
       fmt.log.info(`Integration gate plan resolved for ${slug}: ${gatesToRun.gates.length} gate(s) configured; nothing executed.`);
       return 'no gate ran';
     }
@@ -238,11 +247,11 @@ export function createIntegrationGateStep({ gates, landing, verification }: Inte
     // TASK-2625: every configured hook was already validated green, so nothing
     // ran. This is a deliberate skip, not the "none configured" case, so it
     // must not trip the mandatory-gate fail-closed path below.
-    if (gatesToRun.skippedAll) {
+    if (disposition === 'validated') {
       return 'all validated integration hooks skipped';
     }
-    if (result.skipped) {
-      if (requirePreIntegration) {
+    if (disposition === 'mandatory-missing' || disposition === 'unconfigured') {
+      if (disposition === 'mandatory-missing') {
         // An unconfigured or self-edited branch that removes
         // adapters.gates.preIntegration must fail closed here rather than
         // merge with "All integration gates passed." (TASK-2300 / F1).
@@ -255,11 +264,11 @@ export function createIntegrationGateStep({ gates, landing, verification }: Inte
       fmt.log.info(`Integration gates for ${slug}: none configured and adapters.gates.requirePreIntegration is not set — proceeding without a lifecycle gate.`);
       return 'no pre-integration gate configured';
     }
-    if (result.ok) {
+    if (disposition === 'passed') {
       fmt.log.pass('All integration gates passed.');
       return `${gatesToRun.gates.length} integration gate(s) passed`;
     }
-    if (result.cancelled) {
+    if (disposition === 'cancelled') {
       throw abortWith(landing, `Integration gates cancelled for ${slug}. Aborting before merge.`);
     }
 
@@ -317,13 +326,13 @@ export function createIntegrationGateStep({ gates, landing, verification }: Inte
       startAgentFn: seams.startAgentFn,
       transitionTaskFn: (bounceSlug: string) => seams.transitionTaskFn(bounceSlug, 'active'),
       reactivateMissionFn: reactivateMission,
-      applyAgentFallbackFn: ({ launchResult, original }: { launchResult: unknown; original: string }) => seams.applyAgentFallbackFn({
+      applyAgentFallbackFn: async ({ launchResult, original }: { launchResult: unknown; original: string }) => seams.applyAgentFallbackFn({
         launchResult,
         original,
         role: 'implementer',
         slug,
         worktree: checkout,
-        state: currentRepairState(missionLoad, context.reviewState),
+        state: await currentRepairState(missionServices.store, slug, context.reviewState),
         taskResolution: context.task,
         missionStore: missionServices.store,
       }),
@@ -346,20 +355,21 @@ export function createIntegrationGateStep({ gates, landing, verification }: Inte
     // `transitionToImplementer`; retain the same fail-closed outcome for
     // exhausted transient retries and injected routing boundaries that did
     // not launch a repair.
-    if (route.route !== 'fixed' && missionServices?.store) {
+    const repairRoute = integrationRepairRoute(route.route, Boolean(seams.reReviewFn));
+    if (repairRoute !== 'resume' && missionServices?.store) {
       const failedMission = await missionServices.store.load(missionId(slug));
-      if (failedMission.kind === 'found' && failedMission.mission.status === 'integration') {
+      if (failedMission.kind === 'found' && integrationRepairMustReactivate(route.route, failedMission.mission.status)) {
         await reactivateMission(slug);
       }
     }
-    if (route.route === 'revision-changed' && seams.reReviewFn) {
+    if (repairRoute === 're-review' && seams.reReviewFn) {
       // The repair changed what the reviewer approved, so the standing approval
       // was retracted on the PR. Re-review the repaired revision through the
       // single live `px review --continue` route. On approval the mission sits
       // in the integration lane for the human to read the fresh PR and
       // integrate; no path auto-restarts integration or merges (TASK-2620 AC2).
       const current = route.invalidation?.ok ? null : await missionServices?.store?.load(missionId(slug));
-      if (route.invalidation?.ok || (current?.kind === 'found' && integrationRepairNeedsReview(current.mission))) {
+      if (repairedRevisionReviewEligible(Boolean(route.invalidation?.ok), current?.kind === 'found' && integrationRepairNeedsReview(current.mission))) {
         const approved = await reReviewRepairedRevision(slug, checkout, route.repairedRevision ?? 'unknown', seams.reReviewFn);
         if (approved) {
           throw new IntegrationStopsForHuman(`${configured.length} integration gate(s) passed after ${route.rebounds} integration-gate rebound(s); the repaired revision was re-reviewed and approved. Read the fresh PR and run px integrate ${slug} to land.`);
@@ -368,7 +378,7 @@ export function createIntegrationGateStep({ gates, landing, verification }: Inte
       }
       throw abortWith(landing, `The approval for ${slug}'s superseded revision could not be retracted. Aborting before merge.`);
     }
-    if (route.route !== 'fixed') {
+    if (repairRoute === 'stop') {
       throw abortWith(landing, `Aborting before merge. Resume the repair review with px review ${slug} --continue; an approval returns the mission to the integration lane for you to integrate.`);
     }
     // A route may report `fixed` only if the repair left the approved diff
@@ -378,7 +388,7 @@ export function createIntegrationGateStep({ gates, landing, verification }: Inte
     // still in its active repair lane.
     const repaired = await missionServices.store.load(missionId(slug));
     if (repaired.kind !== 'found') { throw abortWith(landing, `Mission ${slug} is unavailable after integration repair.`); }
-    if (repaired.mission.status !== 'integration') {
+    if (!repairCanResumeIntegration(repaired.mission.status)) {
       throw abortWith(landing, `Mission ${slug} cannot resume integration from ${repaired.mission.status}.`);
     }
     await seams.transitionTaskFn(slug, 'ready-for-integration');

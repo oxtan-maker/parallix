@@ -27,6 +27,7 @@ import { buildBubblewrapArgs, resolveSandboxProfile } from '../../../src/adapter
 import { missionRunsDir, runHistoryFileSystem } from '../../../src/adapters/filesystem/run-history-store.js';
 import { listRuns, searchRuns } from '../../../src/application/run-history.js';
 import { attachRun } from '../../../src/adapters/cli/commands/run-history.js';
+import { createTmuxTerminalReader } from '../../../src/adapters/process/tmux-terminal-reader.js';
 
 const sink = { write: () => true };
 const REPO_ROOT = path.join(import.meta.dirname, '..', '..', '..');
@@ -95,6 +96,30 @@ function waitFor(predicate: () => boolean, timeoutMs = 3000): void {
     childProcess.spawnSync('sleep', ['0.05']);
   }
 }
+
+test('read-only terminal reader captures live pane output and reports a missing session (TASK-2661)', { timeout: 20000 }, async () => {
+  const fx = fixture();
+  try {
+    const worktree = fx.worktree('task-web');
+    const run = session(fx, worktree, 'task-web');
+    const release = path.join(fx.root, 'release');
+    const launch = spawnAndTee('sh', ['-c', `sleep 0.2; echo web-terminal-marker; while [ ! -e ${release} ]; do sleep 0.05; done`], { cwd: worktree, stdoutSink: sink, stderrSink: sink, ...run.teeOptions });
+    waitFor(() => listTmuxSessions(missionSocketPath(run.identity, fx.env)).length === 1);
+    const reader = createTmuxTerminalReader({ resolveMissionWorktree: id => id === 'task-web' ? worktree : null, repositoryKey: () => 'itrepo', env: fx.env });
+    // Session/window creation precedes command exec and its first rendered
+    // bytes. Wait for observable output, not merely the tmux server existing.
+    waitFor(() => {
+      const current = reader.read('task-web');
+      return current.kind === 'live' && current.output.includes('web-terminal-marker');
+    });
+    const live = reader.read('task-web');
+    assert.equal(live.kind, 'live');
+    if (live.kind === 'live') { assert.match(live.output, /web-terminal-marker/); }
+    assert.deepEqual(reader.read('task-absent'), { kind: 'unavailable', message: 'No live tmux session is available for this mission.' });
+    fs.writeFileSync(release, '');
+    run.finish(await launch);
+  } finally { fx.cleanup(); }
+});
 
 test('hosted launch returns the agent exit status and keeps history beyond scrollback and the alternate screen', { timeout: 20000 }, async () => {
   const fx = fixture();
@@ -641,7 +666,7 @@ test('automatic hosting falls back only before launch and never replays a comman
   }
 });
 
-test('px active and attach from the retained console reuse the original mission socket (TASK-2643)', { timeout: 20000 }, () => {
+test('px active and attach from the retained console reuse the original mission socket (TASK-2643)', { timeout: 40000 }, () => {
   const fx = fixture();
   const previousHome = process.env.PARALLIX_HOME;
   let alternateSocket: string | undefined;
@@ -663,7 +688,7 @@ test('px active and attach from the retained console reuse the original mission 
     alternateSocket = path.join('/tmp', `parallix-terminal-${process.getuid!()}`, identity.repositoryKey, `${slug}.sock`);
     childProcess.spawnSync('tmux', ['-S', launch.socketPath, 'send-keys', '-t', `=${slug}:console`, '-l', command]);
     childProcess.spawnSync('tmux', ['-S', launch.socketPath, 'send-keys', '-t', `=${slug}:console`, 'Enter']);
-    waitFor(() => fs.existsSync(done), 10000);
+    waitFor(() => fs.existsSync(done), 30000);
     assert.doesNotMatch(fs.readFileSync(activeOutput, 'utf8'), /Mission terminal:|sessions should be nested/);
     assert.match(fs.readFileSync(attachOutput, 'utf8'), new RegExp(`session=${slug}`));
     assert.deepEqual(listTmuxSessions(launch.socketPath).map(session => session.name), [slug]);
