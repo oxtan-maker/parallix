@@ -1,6 +1,6 @@
 {
-  "@typescript-eslint/no-explicit-any": 591,
-  "@typescript-eslint/no-unsafe-assignment": 1243,
+  "@typescript-eslint/no-explicit-any": 590,
+  "@typescript-eslint/no-unsafe-assignment": 1230,
   "complexity": 198,
   "max-lines-per-function": 31
 }

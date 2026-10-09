@@ -81,6 +81,8 @@ export interface MissionTransitionStore extends MissionStore {
   ): Promise<MissionVersion>;
   /** Durable lane history, used only to refuse recovery after integration. */
   findTransitions?(_missionId: MissionId): Promise<readonly MissionTransitionHistoryEntry[]>;
+  /** The mission of this repository whose recorded lane event carries the idempotency key, or null. */
+  findMissionByIdempotencyKey?(_repositoryId: import('../domain/repository.js').RepositoryId, _key: string): Promise<MissionId | null>;
 }
 
 /**

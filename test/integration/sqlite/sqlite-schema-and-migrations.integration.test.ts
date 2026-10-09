@@ -282,29 +282,32 @@ describe("SQLite schema and migration runner", () => {
     }
   });
 
-  it('accepts the recorded pre-Sonar checksum for migration 0007 without rewriting it', async () => {
-    const { db, dir } = createTempDb();
-    try {
-      const runner = new SqliteMigrationRunner(db);
-      const migrations = loadDefaultMigrations();
-      const migration = migrations.find((entry) => entry.id === '0007-usage-statistics-identity');
-      assert.ok(migration, '0007 migration must be present');
-      await runner.applyPending(migrations);
-      await db.execute(
-        'UPDATE schema_migrations SET checksum = ? WHERE id = ?',
-        ['0bba52d7101501a2a2bc95d20abed97f52bae10670bdf15e55c5d09c391315b3', migration.id],
-      );
+  for (const [label, id, legacyChecksum] of [
+    ['the recorded pre-Sonar checksum for migration 0007', '0007-usage-statistics-identity', '0bba52d7101501a2a2bc95d20abed97f52bae10670bdf15e55c5d09c391315b3'],
+    // TASK-2701: the 0018 comment renamed the adhoc identity prefix to `px-`.
+    ['the pre-rename checksum for migration 0018', '0018-adhoc-mission-counter', '3560376d8e31e0b8fc527509211378a839ba24ef5e5e5fac9ee6dadc06c172c2'],
+  ] as const) {
+    it(`accepts ${label} without rewriting it`, async () => {
+      const { db, dir } = createTempDb();
+      try {
+        const runner = new SqliteMigrationRunner(db);
+        const migrations = loadDefaultMigrations();
+        const migration = migrations.find((entry) => entry.id === id);
+        assert.ok(migration, `${id} migration must be present`);
+        await runner.applyPending(migrations);
+        await db.execute('UPDATE schema_migrations SET checksum = ? WHERE id = ?', [legacyChecksum, migration.id]);
 
-      await runner.applyPending(migrations);
-      const [entry] = await db.query<{ checksum: string }>(
-        'SELECT checksum FROM schema_migrations WHERE id = ?', [migration.id],
-      );
-      assert.equal(entry.checksum, '0bba52d7101501a2a2bc95d20abed97f52bae10670bdf15e55c5d09c391315b3', 'the legacy ledger entry remains compatible with older px builds');
-    } finally {
-      await db.close();
-      cleanupTempDir(dir);
-    }
-  });
+        await runner.applyPending(migrations);
+        const [entry] = await db.query<{ checksum: string }>(
+          'SELECT checksum FROM schema_migrations WHERE id = ?', [migration.id],
+        );
+        assert.equal(entry.checksum, legacyChecksum, 'the legacy ledger entry remains compatible with older px builds');
+      } finally {
+        await db.close();
+        cleanupTempDir(dir);
+      }
+    });
+  }
 
   it('previous-schema upgrade applies pending migrations only', async () => {
     const { db, dir } = createTempDb();

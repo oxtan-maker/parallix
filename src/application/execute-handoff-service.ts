@@ -118,7 +118,11 @@ export class ExecuteHandoffService {
       : reason;
     const result = await rebound(reboundReason, {
       slug: request.slug, worktree: request.worktree, implementer: request.agent,
-      readHead: () => this._ports.repairLaunch.readHead(request.worktree), verify,
+      readHead: () => this._ports.repairLaunch.readHead(request.worktree),
+      verify: async () => {
+        const result = await verify();
+        return { ...result, command: result.command ?? (reboundReason.kind === 'gate-failure' ? reboundReason.command : undefined) };
+      },
       startAgent: async (_step, options) => this._ports.repairLaunch.launch({
         slug: request.slug, worktree: request.worktree, agent: request.agent,
         prompt: typeof options.prompt === 'function' ? options.prompt(request.agent) : String(options.prompt ?? ''),

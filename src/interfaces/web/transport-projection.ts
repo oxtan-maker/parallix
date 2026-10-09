@@ -185,6 +185,8 @@ function toSourceFact(fact: SourceFact<string>): WebSourceFact {
 
 function toWebMetrics(metrics: BoardMetrics): WebBoardMetrics {
   return {
+    ...(metrics.decisionWindow === undefined || ['unavailable', 'pre-lifecycle'].includes(metrics.health.state)
+      ? {} : { weeklyCompletedMissions: metrics.decisionWindow.current.completedMissions }),
     health: { state: metrics.health.state },
     provenance: { sampleSize: metrics.provenance.sampleSize, newestEventTimestamp: metrics.provenance.newestEventTimestamp },
     ...(metrics.decisionWindow === undefined ? {} : { flowWindow: {
@@ -216,7 +218,7 @@ export function toWebBoardSnapshot(projection: BoardProjection): WebBoardSnapsho
   }
   const cardsById = new Map<string, MissionCard>();
   for (const stage of projection.stages) {
-    for (const card of stage.cards) { cardsById.set(card.id, card); }
+    for (const card of [...stage.cards, ...stage.historyCards ?? []]) { cardsById.set(card.id, card); }
   }
   return {
     kind: 'board-snapshot',
@@ -227,6 +229,7 @@ export function toWebBoardSnapshot(projection: BoardProjection): WebBoardSnapsho
       lane: stage.lane,
       count: stage.count,
       cards: stage.cards.map(toWebMissionCard),
+      ...(stage.historyCards === undefined ? {} : { historyCards: stage.historyCards.map(toWebMissionCard) }),
     })),
     attentionQueue: projection.attentionQueue.map((item) =>
       toWebAttentionItem(item, cardsById.get(item.missionId))),

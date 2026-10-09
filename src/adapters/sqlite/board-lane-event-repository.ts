@@ -1,8 +1,14 @@
 import type { SqliteDatabaseAdapter } from './database-adapter.js';
+import { parseInstantMs, toCanonicalUtcInstant } from '../../domain/instant.js';
 import type { BoardLaneEventEntry, BoardLaneEventRepository } from '../../application/ports/operation-history.js';
 
 /**
  * SQLite-backed board lane-event repository.
+ *
+ * Stores `occurred_at` as the canonical UTC ISO-8601 instant (TASK-2688): a
+ * single storage-boundary normalization keeps the column on one fixed-width
+ * spelling, so `ORDER BY occurred_at` stays lexically == temporally ordered
+ * regardless of the spelling a writer supplied.
  *
  * Implements `BoardLaneEventRepository` using parameterized SQL over the
  * dedicated `board_lane_events` table (migration 0003). Follows the same
@@ -32,7 +38,7 @@ export class SqliteBoardLaneEventRepository implements BoardLaneEventRepository 
           entry.toStatus,
           entry.trigger,
           entry.agent,
-          entry.occurredAt,
+          toCanonicalUtcInstant(entry.occurredAt),
           entry.idempotencyKey,
         ],
       );
@@ -46,6 +52,14 @@ export class SqliteBoardLaneEventRepository implements BoardLaneEventRepository 
       }
       throw error;
     }
+  }
+
+  async findMissionIdByIdempotencyKey(repositoryId: string, key: string): Promise<string | null> {
+    const rows = await this.db.query<{ mission_id: unknown }>(
+      'SELECT mission_id FROM board_lane_events WHERE repository_id = ? AND idempotency_key = ? LIMIT 1;',
+      [repositoryId, key],
+    );
+    return rows.length === 0 ? null : String(rows[0].mission_id);
   }
 
   async findByMissionId(missionId: string): Promise<readonly BoardLaneEventEntry[]> {
@@ -67,7 +81,7 @@ export class SqliteBoardLaneEventRepository implements BoardLaneEventRepository 
       [missionId],
     );
 
-    return rows.map((row) => rowToEntry(row));
+    return rows.map((row) => rowToEntry(row)).sort(compareEntries);
   }
 
   async findAll(): Promise<readonly BoardLaneEventEntry[]> {
@@ -87,7 +101,7 @@ export class SqliteBoardLaneEventRepository implements BoardLaneEventRepository 
        ORDER BY occurred_at ASC;`,
     );
 
-    return rows.map((row) => rowToEntry(row));
+    return rows.map((row) => rowToEntry(row)).sort(compareEntries);
   }
 
   async findByRepositoryId(repositoryId: string): Promise<readonly BoardLaneEventEntry[]> {
@@ -109,7 +123,7 @@ export class SqliteBoardLaneEventRepository implements BoardLaneEventRepository 
       [repositoryId],
     );
 
-    return rows.map((row) => rowToEntry(row));
+    return rows.map((row) => rowToEntry(row)).sort(compareEntries);
   }
 
   async clear(): Promise<void> {
@@ -131,4 +145,11 @@ function rowToEntry(row: Record<string, unknown>): BoardLaneEventEntry {
     occurredAt: String(row.occurred_at),
     idempotencyKey: String(row.idempotency_key),
   };
+}
+
+function compareEntries(left: BoardLaneEventEntry, right: BoardLaneEventEntry): number {
+  const a = parseInstantMs(left.occurredAt);
+  const b = parseInstantMs(right.occurredAt);
+  return (Number.isFinite(a) ? a : Infinity) - (Number.isFinite(b) ? b : Infinity)
+    || (left.id ?? 0) - (right.id ?? 0);
 }

@@ -1,3 +1,5 @@
+import { repairCheckpointCases } from './rebound-repair-checkpoint.cases.js';
+repairCheckpointCases();
 import { transientRetryAllowed, reboundRequiresHuman, repairStrategy, launchRecoveryAction, repairBudgetAllows, reboundExhaustion } from '../../../src/domain/rebound-policy.js';
 // Historical regression provenance: TASK-2413, TASK-2369.13, TASK-2492.
 // Rebound kernel contract: the single repair loop (classification, per-occurrence budget, fix prompts,
@@ -47,6 +49,34 @@ const hookReason: ReboundReason = {
   operation: 'pre-review safety commit',
   output: 'pre-commit hook failed: lint error',
 };
+
+test('escalates an agent-reported invalid locked contract before repair (TASK-2695)', async () => {
+  let launches = 0;
+  let verifications = 0;
+  const command = 'npm test -- test/integration/support/gate-fixture.cases.ts';
+  // A report on an already-failed gate is distinct from declaration validation.
+  // Keep this fixture structurally assignable on the parent to reproduce the
+  // missing report handling without depending on a not-yet-added public type.
+  const reason = {
+    ...gateReason,
+    command,
+    stdout: 'Explicit test selection rejected: support module is not executable',
+    invalidContract: {
+      command,
+      diagnostic: 'Test discovery rejects support modules; the runnable owner is gate-contract.test.ts',
+      authorityReason: 'The gate is locked; changing its selection requires operator approval',
+      proposedCorrection: 'Operator should select the owning gate-contract.test.ts suite',
+    },
+  };
+  const outcome = await rebound(reason, contextFor({
+    startAgent: async () => { launches++; return { result: { status: 0 } }; },
+    verify: () => { verifications++; return { ok: true }; },
+  }));
+  assert.equal(outcome.outcome, 'human-only');
+  assert.equal(outcome.attempts, 0);
+  assert.equal(launches, 0);
+  assert.equal(verifications, 0);
+});
 
 /** Context with silent logging and an injected launch/verify pair. */
 function contextFor(overrides: Partial<ReboundContext> = {}): ReboundContext {
@@ -453,7 +483,7 @@ test('task-2377.03: the context-compaction boilerplate exists in exactly one sou
     .filter(file => readFileSync(file, 'utf8').includes('compact the aborted working context'));
   assert.deepEqual(
     holders.map(file => file.replace(/\\/g, '/')),
-    ['src/application/rebound-kernel.ts'],
+    ['src/application/rebound-prompts.ts'],
     'the compaction boilerplate belongs to the single rebound fix-prompt builder',
   );
 });

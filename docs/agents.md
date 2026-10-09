@@ -29,6 +29,15 @@ state directories of its configured runner (opencode or pi), which do not
 override `HOME`. This keeps a round-1 claude session resumable in a later round
 while the reviewed worktree itself stays read-only.
 
+Bind sources and destinations that are symlinks are canonicalized to their real
+targets before `bwrap` mounts them. Without this, `bwrap` 0.12 refuses to mount
+onto a symlink destination with `Can't mount on symlink destination`, which
+blocks every launch when the Parallix state or home paths (for example
+`/home/magnus/.local/state/parallix`) are symlinks. Only the on-disk
+representation of each bind changes: the permitted host-path set and confinement
+policy are unchanged, and only symlinked destinations are resolved, never to an
+unrelated host path.
+
 For every claude launch, `~/.claude` inside the sandbox is a shared
 Parallix-owned directory that shows the host entries read-only. Only the
 credential file, `session-env`, and the mission's transcript directory are
@@ -577,6 +586,10 @@ The index is one-based and the version comes from current status; reload it afte
 each write. Completion flags and final checkpoint evidence are both required.
 The same handoff check must pass after repair.
 
+Before a dedicated repair launch, Parallix persists an incident-associated repair
+checkpoint and names it in the prompt. The agent records fresh evidence there
+with `px checkpoint record`; a relaunch requires another fresh write.
+Every planned checkpoint must have evidence before handoff.
 A repair checkpoint records only the criteria it fixes; earlier valid rows for the
 other criteria are retained, not rewritten. Handoff then measures coverage across
 every recorded checkpoint by criterion identity, so a repair that covers its
@@ -606,7 +619,12 @@ without breaking the repository. It does not presume the cause or where the
 repair belongs: the implementer diagnoses the actual cause and may repair it in
 repository code, tests, configuration, the local environment, or runner
 configuration, but must keep the mission deliverables and safeguards and never
-weaken, skip, or delete a check. A repair that changes tracked files must be
+weaken, skip, delete, or replace a locked check. A mechanically invalid declaration
+stops for human review. If the agent discovers an invalid locked contract, it
+uses `px checkpoint report-invalid-contract` (see `px checkpoint --help`) to
+record the exact command, diagnostic, authority reason, and proposed correction,
+then stops. The first report ends automatic retries; an unrelated passing check
+cannot establish repair success. A repair that changes tracked files must be
 committed before the automatic re-run; a repair outside the repository needs
 no commit. When the cause is external and the implementer cannot repair it,
 such as a model service that is down, the prompt tells it to report the exact

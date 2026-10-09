@@ -1,3 +1,4 @@
+import { repairCheckpointFailure } from './repair-checkpoint-service.js';
 import { handoffEvidencePolicy } from '../domain/mission-handoff-policy.js';
 /**
  * Recorded Mission contract inputs handoff verifies: the recorded contract,
@@ -44,7 +45,7 @@ export async function loadRecordedContract(
     return {
       ok: true,
       draftedInDb: Boolean(mission.brief),
-      checkpoints: mission.checkpoints.filter(({ goalCheck }) => goalCheck.length > 0),
+      checkpoints: mission.checkpoints,
       successCriteria: mission.successCriteria ?? [],
       completedSuccessCriteria: mission.completedSuccessCriteria ?? [],
       gates: mission.declaredGates ?? [],
@@ -174,6 +175,8 @@ export class HandoffContractVerifier {
   ): HandoffResult | VerifiedCheckpointDocument {
     const ports = this.ports;
     const { rootDir, missionDirPath, log, error } = context;
+    const checkpointFailure = contract.draftedInDb ? repairCheckpointFailure(contract.checkpoints, contract.gates, contract.successCriteria) : null;
+    if (checkpointFailure) { context.error(checkpointFailure); return { ok: false, error: checkpointFailure }; }
     const recorded = contract.checkpoints;
     let finalCheckpoint: string | null = null;
     let checkpointContent = '';

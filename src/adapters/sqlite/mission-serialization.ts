@@ -45,6 +45,7 @@ export interface MissionRecord {
   readonly raw_status: string | null;
   readonly reproduction_test?: string | null;
   readonly predicted_nel_bucket?: string | null;
+  readonly description?: string | null;
   readonly assignee: string | null;
   readonly net_engineering_lines: number | null;
   readonly closed_at: string | null;
@@ -70,6 +71,7 @@ export interface MissionCheckpointRecord {
   readonly raw_filename: string | null;
   readonly first_line: string | null;
   readonly next_action_text: string;
+  readonly repair_json?: string | null;
 }
 
 export interface MissionGoalCheckRecord {
@@ -292,6 +294,7 @@ function checkpointsFrom(records: MissionAggregateRecords): readonly CheckpointD
       firstLine: checkpoint.first_line ?? undefined,
       goalCheck,
       nextActionText: checkpoint.next_action_text,
+      ...(checkpoint.repair_json ? { repair: JSON.parse(checkpoint.repair_json) as CheckpointData['repair'] } : {}),
     };
   });
 }
@@ -629,6 +632,7 @@ export function hydrateMission(records: MissionAggregateRecords): HydratedMissio
     title: requiredText(row.title, 'title'),
     labels: missionLabels(records.labels.map(({ label }) => label)),
     assignee: row.assignee === null ? null : agentFamily(row.assignee),
+    ...(row.description ? { description: row.description } : {}),
     checkpoints: checkpointsFrom(records),
     brief: briefFrom(records),
     declaredGates: declaredGatesFrom(records),

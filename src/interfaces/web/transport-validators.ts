@@ -54,9 +54,13 @@ export function validateWebBoardSnapshot(payload: unknown): WebTransportValidati
       p.stages.forEach((stage, index) => {
         const path = `snapshot.stages[${index}]`;
         if (!isPlainObject(stage)) { problems.push(`${path} must be an object`); return; }
-        checkKeys(stage, ['lane', 'count', 'cards'], ['lane', 'count', 'cards'], path, problems);
+        checkKeys(stage, ['lane', 'count', 'cards', 'historyCards'], ['lane', 'count', 'cards'], path, problems);
         checkEnum(stage, 'lane', LANES, path, problems);
         checkFiniteNumber(stage, 'count', path, problems);
+        if (stage.historyCards !== undefined) {
+          if (!Array.isArray(stage.historyCards)) { problems.push(`${path}.historyCards must be an array`); }
+          else { stage.historyCards.forEach((card, i) => checkMissionCard(card, `${path}.historyCards[${i}]`, problems)); }
+        }
         if (Array.isArray(stage.cards)) {
           stage.cards.forEach((card, cardIndex) => checkMissionCard(card, `${path}.cards[${cardIndex}]`, problems));
         } else {

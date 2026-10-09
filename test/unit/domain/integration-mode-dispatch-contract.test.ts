@@ -390,7 +390,9 @@ describe("Mission integration service", () => {
         integration: fresh({ completed: true }),
       });
       assert.equal(outcome.status, 'completed');
-      assert.equal(outcome.value!.mission.closedAt, '2026-07-30T07:00:00Z');
+      // close() routes through closeMission, which canonicalizes the closure
+      // instant to UTC ISO-8601 with millisecond precision (TASK-2688).
+      assert.equal(outcome.value!.mission.closedAt, '2026-07-30T07:00:00.000Z');
       assert.deepEqual(events, [], 'closing a done Mission must not emit a done-to-done lane event');
     });
   });

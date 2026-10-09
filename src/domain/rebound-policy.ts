@@ -1,7 +1,21 @@
+export interface InvalidContractBlocker {
+  readonly command: string;
+  readonly diagnostic: string;
+  readonly authorityReason: string;
+  readonly proposedCorrection: string;
+}
+
+export function assertInvalidContractBlocker(value: InvalidContractBlocker): void {
+  for (const key of ['command', 'diagnostic', 'authorityReason', 'proposedCorrection'] as const) {
+    if (typeof value?.[key] !== 'string' || !value[key].trim()) { throw new Error(`Invalid-contract blocker requires ${key}`); }
+  }
+}
 import { classifyError, hasExplicitHumanOnlyDiagnostic, DispatchAction, FailureClass, type DispatchActionType, type FailureClassType } from './failure-classification.js';
 /** A declared verification gate ran and exited non-zero. */
 export interface GateFailureReason {
   kind: 'gate-failure';
+  /** Agent-discovered locked contract problem, distinct from declaration validation. */
+  invalidContract?: InvalidContractBlocker;
   area: string;
   command: string;
   exitCode: number | null;
@@ -93,7 +107,7 @@ export interface ReboundClassification {
 export function reboundDiagnostic(reason: ReboundReason): string {
   switch (reason.kind) {
     case 'gate-failure':
-      return [reason.stdout, reason.stderr, reason.error].filter(Boolean).join('\n');
+      return [reason.stdout, reason.stderr, reason.error, ...(reason.invalidContract ? [reason.invalidContract.command, reason.invalidContract.diagnostic, reason.invalidContract.authorityReason, reason.invalidContract.proposedCorrection] : [])].filter(Boolean).join('\n');
     case 'hook-failure':
       return reason.output || '';
     case 'artifact-incomplete':
@@ -148,6 +162,10 @@ export function classifyReboundReason(reason: ReboundReason): ReboundClassificat
     label,
   });
 
+  if (reason.kind === 'gate-failure' && reason.invalidContract) {
+    return classified(FailureClass.MalformedGates, DispatchAction.HumanOnly);
+  }
+
   if (reason.kind === 'gate-failure' || reason.kind === 'hook-failure') {
     if (hasExplicitHumanOnlyDiagnostic(diagnostic)) {
       const { failureClass, dispatchAction } = classifyError(diagnostic);
@@ -175,7 +193,7 @@ export function classifyReboundReason(reason: ReboundReason): ReboundClassificat
   }
 
   if (reason.kind === 'declared-gate-validation') {
-    return classified(FailureClass.MalformedGates, DispatchAction.AutoRepair);
+    return classified(FailureClass.MalformedGates, DispatchAction.HumanOnly);
   }
 
   const { failureClass, dispatchAction } = classifyError(diagnostic);

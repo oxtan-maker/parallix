@@ -70,6 +70,9 @@ test('TASK-2578: px integrate renders parallel gate progress after rebase and pr
   mock.method(git, 'getCurrentBranch', () => `mission/${slug}`);
   mock.method(git, 'git', (args: string[]) => {
     const joined = args.join(' ');
+    if (args.includes('show') && args.includes('--format=%cI')) {
+      return { status: 0, stdout: '2026-10-09T09:07:00+02:00\n', stderr: '' };
+    }
     if (args.includes('rebase')) {
       if (args.includes('--show-current') || args.includes('--continue')) return { status: 0, stdout: '', stderr: '' };
       rebased.value = true;
@@ -138,7 +141,7 @@ test('TASK-2578: px integrate renders parallel gate progress after rebase and pr
       assert.match(rendered, new RegExp(`${key} started`));
       assert.match(rendered, new RegExp(`${key} passed`));
     }
-    assert.equal(status, 'done');
+    assert.equal(status, 'done', rendered);
   } finally {
     mock.reset();
     fs.rmSync(root, { recursive: true, force: true });

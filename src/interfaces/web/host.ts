@@ -36,6 +36,7 @@ import {
   type WebEventStream,
 } from './stream.js';
 import {
+  isCreateMissionBody,
   isInvalidWebCommandRequest,
   toWebBoardSnapshot,
   toWebCommandResult,
@@ -63,7 +64,7 @@ import {
   type LoopbackLiteral,
 } from './security.js';
 import { createShellBootstrap } from './shell-bootstrap.js';
-import { errorMessage, sendCommandResult, singleHeader, transportStatusCode } from './host-support.js';
+import { dispatchCreateMission, errorMessage, sendCommandResult, singleHeader, transportStatusCode } from './host-support.js';
 import { registerTerminalRoute, type WebTerminalReader } from './terminal-route.js';
 export { WEB_TERMINAL_PATH, type WebTerminalOutput, type WebTerminalReader } from './terminal-route.js';
 
@@ -74,7 +75,7 @@ export const DEFAULT_BODY_LIMIT_BYTES = 64 * 1024;
 /** Read-only route paths. Both outrank the `/*` asset catch-all. */
 export const WEB_SNAPSHOT_PATH = '/api/board';
 export const WEB_EVENTS_PATH = '/api/events';
-/** The only mutation route on this host. Outranks the 405 catch-all. */
+/** The only mutation route (card commands and mission creation). Outranks the 405 catch-all. */
 export const WEB_COMMANDS_PATH = '/api/commands';
 
 /**
@@ -333,14 +334,14 @@ export function createWebHost(options: WebHostOptions): WebHost {
       // Terminal polls reuse the displayed board; commands still rebuild below.
       registerTerminalRoute(app, { ...options, buildProjection: sharedBuild === undefined
         ? undefined : async () => displayedProjection ?? sharedBuild() });
-      // The only mutation route (TASK-2433). It outranks the 405 catch-all
-      // registered below; the onRequest hook above has already enforced the
-      // Host/Origin/session/CSRF boundary before this handler runs.
+      // The only mutation route (TASK-2433), outranking the 405 catch-all below;
+      // the onRequest hook has already enforced Host/Origin/session/CSRF.
       app.post(WEB_COMMANDS_PATH, async (request, reply) => {
         const dispatcher = options.commandDispatcher?.();
         if (dispatcher === undefined || dispatcher === null) {
           return sendCommandResult(reply, 503, failure('unavailable', 'command dispatcher port is not wired'));
         }
+        if (isCreateMissionBody(request.body)) { return dispatchCreateMission(reply, dispatcher, request.body); }
         const validation = validateWebCommandRequest(request.body);
         if (isInvalidWebCommandRequest(validation)) {
           return sendCommandResult(reply, 400, rejected('validation', validation.problems.join('; ')));
@@ -379,8 +380,7 @@ export function createWebHost(options: WebHostOptions): WebHost {
           return sendCommandResult(reply, 409, failure('conflict',
             `action ${command.kind} is not enabled for mission ${command.missionId}${detail}`));
         }
-        // Identity is host-owned: a fresh operation ID and the single-kind
-        // capability set, mirroring the TUI. The wire has no key for either.
+        // Identity is host-owned (fresh operation ID, single-kind capability set).
         const boardRequest: BoardCommandRequest = {
           operationId: crypto.randomUUID(),
           kind: command.kind,

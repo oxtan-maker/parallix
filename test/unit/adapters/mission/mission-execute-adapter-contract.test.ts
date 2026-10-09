@@ -585,7 +585,7 @@ describe('Execute Mission characterization', () => {
   test('execute workflow: a DB-owned adhoc identity is accepted, not refused by a task- prefix assumption', async () => {
     const { runtime, calls, transitionStore } = executeFixture();
     const outcome = await buildExecuteWorkflow(runtime, transitionStore)
-      .execute(executeRequest({ slug: 'parallix-adhoc-0001' }));
+      .execute(executeRequest({ slug: 'px-0001' }));
     assert.equal(outcome.status, 'completed');
     assert.ok(calls.includes('preflight'), 'adhoc identity must reach preflight via the shared validator');
   });

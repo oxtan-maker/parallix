@@ -11,7 +11,7 @@ import type { ApplicationOutcome, Capability, DurableEvidence } from './contract
 import { completed, failure, rejected } from './contracts.js';
 import type { MissionTransitionStore, MissionVersion } from './domain-ports.js';
 import { isDuplicateLaneEvent, lifecycleLaneEvent } from './lifecycle-lane-event.js';
-import { storeEvidence, writeFailure } from './mission-command-support.js';
+import { decisionFailure, storeEvidence, writeFailure } from './mission-command-support.js';
 import type { AgentFamily } from '../domain/agents.js';
 import type { ExternalTaskRef } from '../domain/external-task.js';
 import {
@@ -20,6 +20,9 @@ import {
   type MissionId,
   type MissionLabel,
 } from '../domain/mission.js';
+import { missionBrief, type MissionBrief } from '../domain/mission-brief.js';
+import { missionDependencies } from '../domain/mission-dependencies.js';
+import { successCriteria } from '../domain/mission-success-criteria.js';
 import type { RepositoryId } from '../domain/repository.js';
 
 const REQUIRED_CAPABILITY: Capability = 'mission:intake';
@@ -32,6 +35,16 @@ export interface MissionIntakeRequest {
   readonly labels?: readonly MissionLabel[];
   readonly assignee?: AgentFamily | null;
   readonly rawStatus?: string;
+  readonly description?: string | null;
+  /**
+   * Planning fields recorded with the insert, so a mission captured with them
+   * is never observable half-written. Each goes through the same domain rule
+   * as its dedicated write (`px goal set`, `px criterion add`, `px depends add`);
+   * the caller is responsible for checking that dependencies exist.
+   */
+  readonly brief?: MissionBrief;
+  readonly successCriteria?: readonly string[];
+  readonly dependencies?: readonly string[];
   /** Traceability only; the external system keeps owning the material. */
   readonly externalTaskRef?: ExternalTaskRef | null;
   /** Occurrence time recorded on the entry lane event; defaults to now. */
@@ -44,6 +57,15 @@ export interface MissionIntakeRequest {
 export interface MissionIntakeResult {
   readonly mission: Mission;
   readonly version: MissionVersion;
+}
+
+function withPlanning(request: MissionIntakeRequest, mission: Mission): Mission {
+  return {
+    ...mission,
+    ...(request.brief ? { brief: missionBrief(request.brief) } : {}),
+    ...(request.successCriteria ? { successCriteria: successCriteria(request.successCriteria) } : {}),
+    ...(request.dependencies ? { dependencies: missionDependencies(request.dependencies, request.missionId) } : {}),
+  };
 }
 
 export class MissionIntakeService {
@@ -61,20 +83,21 @@ export class MissionIntakeService {
 
     let mission: Mission;
     try {
-      mission = intakeMission({
+      mission = withPlanning(request, intakeMission({
         id: request.missionId,
         repositoryId: request.repositoryId,
         title: request.title,
         labels: request.labels,
         assignee: request.assignee ?? null,
+        description: request.description ?? null,
         rawStatus: request.rawStatus,
         externalTaskRef: request.externalTaskRef ?? null,
-      });
+      }));
       if (request.externalTaskRef && !mission.externalTaskRef) {
         throw new Error('intake dropped the supplied external task reference');
       }
     } catch (error) {
-      return writeFailure<MissionIntakeResult>(error);
+      return decisionFailure<MissionIntakeResult>(error);
     }
 
     const existing = await this.readExisting(request.missionId);

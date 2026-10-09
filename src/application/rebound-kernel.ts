@@ -1,7 +1,12 @@
+import { prepareRepairPrompt } from './rebound-checkpoints.js';
+import { elideBounceOutput } from './output-elision.js';
+import { type RepairCheckpointPort } from './ports/repair-checkpoint.js';
+import type { InvalidContractBlocker } from '../domain/rebound-policy.js';
 import { DEFAULT_REBOUND_ATTEMPTS, classifyReboundReason, reboundDiagnostic, transientRetryAllowed, reboundRequiresHuman, repairStrategy, launchRecoveryAction, repairBudgetAllows, reboundExhaustion, type ReboundReason, type ReboundClassification } from '../domain/rebound-policy.js';
 export { classifyReboundReason, reboundDiagnostic, isTransientVerifierFailure } from '../domain/rebound-policy.js';
 export type { ReboundReason, ReboundClassification, GateFailureReason, HookFailureReason, ArtifactIncompleteReason, AgentTimeoutReason, HandoffVerificationReason, DeclaredGateValidationReason } from '../domain/rebound-policy.js';
-import { isIncompleteSuccessCriteriaFailure, buildSuccessCriteriaRecoveryAdvice } from './typed-mission-recovery-advice.js';
+import { recoveryEvidenceRoute } from './rebound-prompts.js';
+export { buildReboundFixPrompt, buildFreshDiagnosticRepairPrompt } from './rebound-prompts.js';
 /**
  * Rebound kernel (TASK-2377.03).
  *
@@ -26,24 +31,18 @@ import { isIncompleteSuccessCriteriaFailure, buildSuccessCriteriaRecoveryAdvice 
  *    re-runs and passes.
  *
  * Budget is per local failure: every `rebound()` invocation starts a fresh
- * in-memory budget (default 2 attempts). Nothing is persisted — no review-state
- * metadata, no SQLite retry columns, no cross-process shared counter — so two
- * processes can never consume one counter (the task-2369.13 split-brain bug).
+ * in-memory budget (default 2 attempts). Incident checkpoints persist repair
+ * evidence, never a shared retry counter, so concurrent processes cannot
+ * consume one attempt budget (the task-2369.13 split-brain bug).
  *
  * Application layer: imports `cli-format`, `output-elision`, and
  * `failure-classification` only; all I/O arrives through the context callbacks.
  */
 
 import * as fmt from './presentation/cli-format.js';
-import { elideBounceOutput } from './output-elision.js';
 
-import {
-  captureRecoveryEvidence,
-  failureIncidentFingerprint,
-  listRecoveryEvidence,
-  resolveConfiguredCredentialRedactor,
-  type RecoveryEvidenceRef,
-} from './recovery-evidence.js';
+import type { RecoveryEvidenceRef } from './recovery-evidence.js';
+import { captureGateFailureEvidence, captureRetryEvidence } from './rebound-evidence.js';
 import { recordReboundRepair, type ReboundRepairOutcome } from './rebound-telemetry.js';
 
 /** Default per-occurrence attempt budget. */
@@ -57,6 +56,8 @@ export type RepairStrategy = 'targeted' | 'fresh-diagnostic';
 /** Result of re-running the failing check after a fix attempt. */
 export interface VerifyResult {
   ok: boolean;
+  /** Exact check identity supplied by the verification adapter. */
+  command?: string;
   /** Fresh diagnostic from the re-run; empty when the check passed. */
   diagnostic?: string;
   /**
@@ -71,9 +72,10 @@ export interface VerifyResult {
 export type ReboundStartAgent = (
   _step: string,
   _options: Record<string, unknown>,
-) => Promise<{ agent?: string | null; result?: { status?: number | null } | null } | null | undefined>;
+) => Promise<{ agent?: string | null; result?: { status?: number | null; invalidContract?: InvalidContractBlocker } | null } | null | undefined>;
 
 export interface ReboundContext {
+  repairCheckpoints?: RepairCheckpointPort;
   slug: string;
   worktree: string;
   implementer: string;
@@ -204,349 +206,6 @@ function recoveryDossier(reason: ReboundReason, context: ReboundContext, history
 
 // ── Fix prompt ───────────────────────────────────────────────────────────────
 
-export interface FixPromptSlots {
-  /** Failure banner (`PRE-REVIEW GATE FAILURE`, …). */
-  label: string;
-  slug: string;
-  worktree?: string;
-  /** Verification area, hook identity, or agent role — whatever names the failure. */
-  area: string;
-  /** Structured facts printed above the diagnostic. */
-  facts: Array<[string, string]>;
-  diagnostic: string;
-  /** First diagnostic for this recovery occurrence, retained across retries. */
-  originalDiagnostic?: string;
-  classification: ReboundClassification;
-  attempt: number;
-  maxAttempts: number;
-  /** What passing looks like, in the implementer's terms. */
-  remedy: string;
-  /**
-   * Retained evidence of the original failed command, when present. Attached so
-   * the prompt names what was captured rather than restating a truncated inline
-   * diagnostic. The current failure's own record is included when already on
-   * disk; prior original/retry records are the actionable fallback.
-   */
-  recoveryEvidence?: RecoveryEvidenceRef | null;
-  /** Related retained incidents when the requested record is unavailable. */
-  recoveryEvidenceRecent?: readonly RecoveryEvidenceRef[] | null;
-  /** Honest reason the current failure is not itself retrievable yet. */
-  recoveryEvidenceError?: string | null;
-}
-
-/**
- * The one fix-prompt builder. Every rebound prompt — gate, hook, and the kinds
- * TASK-2377.04/.05 migrate — is built here, so the context-compaction
- * boilerplate and the automatic re-verify statement exist in one location.
- */
-export function buildReboundFixPrompt(slots: FixPromptSlots): string {
-  const { label, slug, worktree, facts, diagnostic, originalDiagnostic, classification, attempt, maxAttempts, remedy } = slots;
-  return [
-    `${label} — FIX REQUIRED`,
-    ``,
-    `Mission: ${slug}`,
-    ...(worktree ? [`Working directory: ${worktree}`] : []),
-    ...facts.map(([name, value]) => `${name}: ${value}`),
-    ``,
-    `Failure output (use this to diagnose and fix):`,
-    `---`,
-    elideBounceOutput(diagnostic || '(no output)'),
-    `---`,
-    ...(originalDiagnostic && originalDiagnostic !== diagnostic ? [
-      `Original failure output (retain this evidence while repairing the later failure):`,
-      `---`,
-      elideBounceOutput(originalDiagnostic),
-      `---`,
-    ] : []),
-    ``,
-    `Classification: ${classification.failureClass} — ${classification.dispatchAction}`,
-    `Retry attempt: ${attempt}/${maxAttempts}`,
-    ``,
-    ...recoveryEvidenceRoute(slots),
-    ``,
-    `Before repair work, compact the aborted working context. Reload the locked mission goal and scope; committed checkpoint or gate evidence when present; this exact gate diagnostic and classification; retry attempt ${attempt}/${maxAttempts}; current review round and disposition; unresolved findings and implementer resolutions; and the current branch revision.`,
-    ``,
-    remedy,
-    `Perform this stage-specific repair now; do not only describe or plan it. Verify the required result and report any remaining exact failure.`,
-    `The failing check re-runs automatically after your fix; this bounce is only reported as fixed when that re-run passes.`,
-  ].join('\n');
-}
-
-/**
- * Repair authority for a gate or hook rebound (TASK-2575). The failed check and
- * its logs are evidence, not a verdict: the prompt names no cause, repair
- * location, or commit, so an implementer who traces the failure to the
- * environment or runner configuration repairs it there, and one who finds an
- * external blocker reports it instead of spending the budget on guesses.
- */
-const REPAIR_AUTHORITY = 'Diagnose the actual cause from the failed check and its logs; do not assume it is a test or code path inside the original mission scope. Repair the cause wherever it lies within your authority (repository code, tests, configuration, the local environment, or runner configuration) and fix the mission without breaking the repository: preserve the mission deliverables and safety boundaries, and never weaken, skip, or delete a check to make it pass. If the repair changes tracked files, commit it before the automatic re-verification: the re-run verifies the committed mission tree, so an uncommitted repair cannot be verified and is reported as still failing. A repair outside the repository needs no commit. If the cause is external and you cannot repair it (for example a model service or network dependency that is down), make no speculative changes: report the exact blocker with its evidence and stop, because another repair attempt cannot fix it.';
-
-function missionOutcomeFact(slug: string): [string, string] {
-  return ['Mission outcome', `the locked goal and success criteria of ${slug} (px status ${slug}), delivered with this check passing`];
-}
-
-/**
- * The second and final repair gets a fresh context rather than another version
- * of the targeted prompt.  The failure output is evidence, not a diagnosis:
- * the worker must be free to investigate the actual cause in the worktree.
- */
-export function buildFreshDiagnosticRepairPrompt(slots: FixPromptSlots): string {
-  const { label, slug, worktree, facts, diagnostic, originalDiagnostic, classification, attempt, maxAttempts, remedy } = slots;
-  return [
-    `${label} — FRESH-CONTEXT DIAGNOSTIC REPAIR REQUIRED`,
-    '',
-    `Mission: ${slug}`,
-    ...(worktree ? [`Working directory: ${worktree}`] : []),
-    ...facts.map(([name, value]) => `${name}: ${value}`),
-    '',
-    'Original failure evidence (this is not necessarily the root cause):',
-    '---',
-    elideBounceOutput(originalDiagnostic || '(no output)'),
-    '---',
-    'Latest failure evidence (this is not necessarily the root cause):',
-    '---',
-    elideBounceOutput(diagnostic || '(no output)'),
-    '---',
-    '',
-    `Classification: ${classification.failureClass} — ${classification.dispatchAction}`,
-    `Recovery strategy: fresh-diagnostic (${attempt}/${maxAttempts})`,
-    `Retry attempt: ${attempt}/${maxAttempts}`,
-    '',
-    ...recoveryEvidenceRoute(slots),
-    '',
-    'You have a fresh context. Re-diagnose the failure from the repository and exact evidence; do not assume either diagnostic identifies the root cause.',
-    'The locked mission goal and scope remain binding. Preserve all gate and test invariants: do not weaken, bypass, replace, or claim to satisfy any check.',
-    remedy,
-    'Perform the repair, preserve valid committed work already in the mission worktree, and commit your repair. Only the harness rerunning this exact failing check can establish success.',
-  ].join('\n');
-}
-
-/**
- * A bounded, honest retrieval route for retained command evidence.
- *
- * The retained output is unabridged on disk (only the inline diagnostic is
- * truncated), so the omitted middle is retrievable. A fresh-context agent
- * receives evidence references — absolute paths in the mission worktree — not
- * the previous model's assumptions, and a process restart does not invalidate
- * them: the paths and incident fingerprint are stable across processes. When a
- * record is missing, truncated, expired, or access-denied, the route states it
- * and points at related incidents rather than claiming completeness.
- */
-/** Earlier agent runs (TASK-2643): one compact pointer, never transcript text. */
-const RUN_HISTORY_ROUTE = 'Earlier agent runs of this mission are searchable with `px history search <pattern>` and `px history show <ref>` (bounded; cite the run: references).';
-
-function recoveryEvidenceRoute(slots: Pick<FixPromptSlots, 'recoveryEvidence' | 'recoveryEvidenceRecent' | 'recoveryEvidenceError'>): string[] {
-  if (slots.recoveryEvidence) {
-    const e = slots.recoveryEvidence;
-    const route = [
-      `Retained evidence for this failure (unabridged; retrieve the omitted middle from these):`,
-      `  command: ${e.command}`,
-      `  worked from: ${e.cwd}`,
-      `  captured revision: ${e.capturedRevision ?? 'not resolved'}`,
-      `  exit code: ${e.exitCode ?? 'none'}${e.signal ? ` (signal ${e.signal})` : ''}`,
-      `  attempt ${e.attempt} of the retained series; incident ${e.incidentId.slice(0, 12)}…`,
-      `  stdout: ${e.stdoutPath}${e.truncatedFrom === 'stdout' ? ' (truncated — see capture-completeness note)' : ''}`,
-      `  stderr: ${e.stderrPath}${e.truncatedFrom === 'stderr' ? ' (truncated — see capture-completeness note)' : ''}`,
-      `  capture complete: ${e.captureComplete ? 'yes' : 'no'}${e.redacted ? '; redacted per configured credential redaction' : ''}`,
-      `Retrieve or search more retained output for this mission with: listRecoveryEvidence({ cwd }) or lookupRecoveryEvidence({ cwd, incidentId: "${e.incidentId}" }).`,
-      RUN_HISTORY_ROUTE,
-    ];
-    return ['', ...route, ''];
-  }
-  const lines: string[] = ['', 'No retained evidence for this failure is available yet', RUN_HISTORY_ROUTE, ''];
-  if (slots.recoveryEvidenceError) { lines.push(`Reason: ${slots.recoveryEvidenceError}.`); }
-  if (slots.recoveryEvidenceRecent && slots.recoveryEvidenceRecent.length > 0) {
-    lines.push('Related retained failures (act on these):');
-    for (const r of slots.recoveryEvidenceRecent) {
-      lines.push(`  incident ${r.incidentId.slice(0, 12)}… attempt ${r.attempt}: ${r.command} (exit ${r.exitCode ?? 'none'})`);
-    }
-  }
-  return lines;
-}
-
-/**
- * Attach a retrieval route to a repair prompt from evidence already on disk.
- *
- * The current failure's own record is captured by the caller before the kernel
- * runs; here we read what is durable at prompt-build time (the original and any
- * prior retries) so a fresh-context or restarted agent still sees the series. */
-function recoveryEvidenceForPrompt(worktree: string): Pick<FixPromptSlots, 'recoveryEvidence' | 'recoveryEvidenceRecent' | 'recoveryEvidenceError'> {
-  // Key by the worktree (not the slug) so the route resolves to exactly the
-  // store the capture step wrote into, regardless of which identity each side
-  // happened to know. The worktree is unique to one mission and one repository.
-  const recent = listRecoveryEvidence({ cwd: worktree });
-  return {
-    recoveryEvidence: recent[0] ?? null,
-    recoveryEvidenceRecent: recent.length > 1 ? recent.slice(1) : null,
-    recoveryEvidenceError: recent.length === 0 ? 'no retained evidence for this mission' : null,
-  };
-}
-
-/**
- * Persist attributable, retrievable evidence of the original failed gate before
- * any repair launches. Some repair paths (notably the handoff gate path, which
- * runs the gate through `runVerificationGateFn` and never calls
- * `captureVerifiedTreeProof`) reach the kernel without having written evidence;
- * capturing here makes evidence delivery uniform across every launch path. Only
- * a verification gate is captured: a `gate-failure` reason names the exact
- * command, working directory, exit/signal, and captured stdout/stderr that the
- * process produced. The record is written to the worktree store, so a
- * fresh-context or restarted agent can read it even though it never saw the
- * failed command. A write failure reports `undefined` rather than hiding the
- * failure or inventing a complete-evidence claim.
- */
-async function captureGateFailureEvidence(
-  reason: ReboundReason,
-  worktree: string,
-  context: ReboundContext,
-): Promise<RecoveryEvidenceRef | undefined> {
-  if (reason.kind !== 'gate-failure') { return undefined; }
-  const capturedRevision = context.readHead ? (await context.readHead()) : context.head ?? null;
-  // Obtain and pass the operator-configured credential redactor so the retained
-  // streams are scrubbed before write when one is configured, and `redacted`
-  // honestly reflects whether it ran (mission success criterion).
-  const redactor = resolveConfiguredCredentialRedactor();
-  const result = captureRecoveryEvidence({
-    command: reason.command,
-    cwd: worktree,
-    capturedRevision,
-    exitCode: reason.exitCode,
-    signal: null,
-    stdout: reason.stdout ?? '',
-    stderr: reason.stderr ?? '',
-    diagnostic: reason.error ?? reboundDiagnostic(reason),
-    missionId: context.slug,
-    ...(redactor ? { redactor } : {}),
-  });
-  return result.ok ? result.ref : undefined;
-}
-
-/**
- * Persist a failed repair retry as the next evidence attempt in the same
- * incident as the original failure, so a restarted agent can see the whole
- * recovery series (original plus every relaunch) rather than only the latest.
- *
- * The kernel captures the original failure once up front; each subsequent
- * `verify()` failure reaches this point. The fingerprint is the failing gate's
- * identity (command, working directory, exit) and is stable across the repair
- * loop: the implementer commits between relaunches, so the revision moves and
- * the diagnostic text changes, but the gate still fails. Grouping on the gate
- * identity keeps every relaunch in the original incident instead of opening a
- * new incident per relaunch and stranding the series behind only the latest
- * failure. The attempt number advances within the incident so each failure
- * keeps its own record instead of overwriting the original.
- */
-async function captureRetryEvidence(
-  state: ReboundState,
-  worktree: string,
-  context: ReboundContext,
-): Promise<RecoveryEvidenceRef | undefined> {
-  if (!worktree || state.reason.kind !== 'gate-failure') { return undefined; }
-  const reason = state.reason;
-  const capturedRevision = context.readHead ? (await context.readHead()) : context.head ?? null;
-  const diagnostic = reason.error ?? reboundDiagnostic(reason);
-  // Fingerprint omits exit status (F7): the same gate legitimately fails with a
-  // different or signalled exit on a retry, and grouping on it would split the
-  // recovery series. Command plus cwd uniquely identify the gate.
-  const fingerprint = failureIncidentFingerprint({
-    command: reason.command,
-    cwd: worktree,
-  });
-  // `lookupRecoveryEvidence` resolves only a named incident; without an id it
-  // returns `{ ok: false }`. Match the retry to its incident by fingerprint.
-  // Among the matching records, advance from the highest attempt, not the most
-  // recently captured: two captures in the same millisecond share a
-  // `capturedAt`, so ordering by recency is unreliable and selecting the newest
-  // would re-advance from the oldest record and overwrite the prior attempt.
-  const sameIncidentRef = listRecoveryEvidence({ cwd: worktree, missionId: context.slug })
-    .filter((record) => record.incidentId === fingerprint)
-    .reduce<RecoveryEvidenceRef | undefined>((best, record) =>
-      best === undefined || record.attempt > best.attempt ? record : best, undefined);
-  const sameIncident = sameIncidentRef !== undefined;
-  const attempt = sameIncident ? sameIncidentRef.attempt + 1 : 1;
-  // Re-resolve the configured redactor for this attempt too: a retry is a fresh
-  // capture of the same gate, so it honours the same credential-redaction
-  // policy. The resolver is a pure function of configuration, so it returns the
-  // same redactor (or `null`) as the original capture, keeping the series
-  // consistent. `redacted` then honestly reflects redaction across the series.
-  const redactor = resolveConfiguredCredentialRedactor();
-  const result = captureRecoveryEvidence({
-    command: reason.command,
-    cwd: worktree,
-    capturedRevision,
-    exitCode: reason.exitCode,
-    signal: null,
-    stdout: reason.stdout ?? '',
-    stderr: reason.stderr ?? '',
-    diagnostic,
-    missionId: context.slug,
-    ...(sameIncident ? { incidentId: fingerprint } : {}),
-    ...(attempt > 1 ? { attempt } : {}),
-    ...(redactor ? { redactor } : {}),
-  });
-  return result.ok ? result.ref : undefined;
-}
-
-/** Prompt slots derived from a structured reason. */
-function promptSlotsFor(reason: ReboundReason, slug: string): Pick<FixPromptSlots, 'area' | 'facts' | 'remedy'> {
-  switch (reason.kind) {
-    case 'gate-failure':
-      return {
-        area: reason.area,
-        facts: [
-          ['Area', reason.area],
-          ['Gate command', reason.command],
-          missionOutcomeFact(slug),
-          ['Exit code', String(reason.exitCode)],
-          ...(reason.approvedRevision
-            ? [['Approved revision', reason.approvedRevision] as [string, string]]
-            : []),
-          ['Cause', 'The integration gate (not the review gate) failed: the mission was reviewed and approved, then a red pre-integration gate rejected the finalized tree on the way to a human integration. Repair the integration failure, not a review finding.'],
-          ...(reason.coverageNote ? [['Coverage', reason.coverageNote] as [string, string]] : []),
-        ],
-        remedy: `Start with the listed gate command in the listed worktree and the captured failure output. Do not substitute a broader verification command or integration suite to rediscover the failure. ${REPAIR_AUTHORITY}`,
-      };
-    case 'hook-failure':
-      return {
-        area: reason.hook || 'hook',
-        facts: [
-          ['Hook type', reason.hook || 'unknown'],
-          ...(reason.operation ? [['Git operation', reason.operation] as [string, string]] : []),
-          ['Failed check', `${reason.hook || 'Git'} hook on ${reason.operation || 'a workflow Git operation'}`],
-          missionOutcomeFact(slug),
-        ],
-        remedy: `Make the Git hook pass when Parallix commits or rebases this mission. ${REPAIR_AUTHORITY}`,
-      };
-    case 'artifact-incomplete':
-      return {
-        area: reason.role,
-        facts: [['Role', reason.role]],
-        remedy: `Produce the complete ${reason.role} artifacts the workflow requires.`,
-      };
-    case 'agent-timeout':
-      return {
-        area: reason.role,
-        facts: [['Role', reason.role], ...(reason.expectedOutput ? [['Required output', reason.expectedOutput] as [string, string]] : [])],
-        remedy: `Produce ${reason.expectedOutput || `the missing ${reason.role} output`} and report it through the normal review artifact or provider path.`,
-      };
-    case 'handoff-verification':
-      return {
-        area: 'handoff',
-        facts: [['Handoff error', reason.error]],
-        remedy: isIncompleteSuccessCriteriaFailure(reason.error)
-          ? buildSuccessCriteriaRecoveryAdvice(slug)
-          : `Fix the underlying issue so handoff verification passes.`,
-      };
-    case 'declared-gate-validation':
-      return {
-        area: 'declared gate',
-        facts: [['Gate command', reason.command]],
-        remedy: 'Replace the declaration with the exact runnable command and move outcome prose to Success Criteria or checkpoint documentation.',
-      };
-  }
-  // Unreachable for the closed union; kept out of the switch for exhaustiveness.
-}
-
 // ── Kernel ───────────────────────────────────────────────────────────────────
 
 /**
@@ -576,7 +235,7 @@ async function reboundImpl(reason: ReboundReason, context: ReboundContext): Prom
   // here, before the transient-verifier loop can refresh `diagnostic`, so the fix
   // prompt can still show what originally failed alongside the latest output.
   const firstDiagnostic = reboundDiagnostic(reason);
-  const state: ReboundState = { implementer: context.implementer, reason, classification: classifyReboundReason(reason), diagnostic: firstDiagnostic, originalDiagnostic: firstDiagnostic, history: [failureFingerprint(reason)], launchFailures: 0, attempts: 0, attemptsDetail: [], occurrenceId: globalThis.crypto.randomUUID(), slug };
+  const state: ReboundState = { implementer: context.implementer, reason, originalReason: reason, classification: classifyReboundReason(reason), diagnostic: firstDiagnostic, originalDiagnostic: firstDiagnostic, history: [failureFingerprint(reason)], launchFailures: 0, attempts: 0, attemptsDetail: [], occurrenceId: globalThis.crypto.randomUUID(), slug };
   if (reboundRequiresHuman(state.reason, state.classification)) { return humanOnlyOutcome(state, context, error); }
   const transientOutcome = await retryTransientVerification(state, verify, maxTransientRetries, log);
   if (transientOutcome) { return transientOutcome; }
@@ -606,14 +265,14 @@ export async function rebound(reason: ReboundReason, context: ReboundContext): P
   return await reboundImpl(reason, context);
 }
 
-interface ReboundState { occurrenceId: string; slug: string; implementer: string; reason: ReboundReason; classification: ReboundClassification; diagnostic: string; originalDiagnostic: string; history: string[]; launchFailures: number; attempts: number; attemptsDetail: RepairEvidence[]; /** Retained evidence of the original failed command, persisted before the first repair launch. */ capturedEvidence?: RecoveryEvidenceRef | null; }
+interface ReboundState { occurrenceId: string; slug: string; implementer: string; reason: ReboundReason; originalReason: ReboundReason; classification: ReboundClassification; diagnostic: string; originalDiagnostic: string; history: string[]; launchFailures: number; attempts: number; attemptsDetail: RepairEvidence[]; /** Retained evidence of the original failed command, persisted before the first repair launch. */ capturedEvidence?: RecoveryEvidenceRef | null; }
 
 function humanOnlyOutcome(state: ReboundState, context: ReboundContext, error: ReboundContext['error']): ReboundOutcome {
   error?.(fmt.status('FAIL', `${state.classification.label}: ${state.classification.failureClass} (${state.classification.dispatchAction}). Human intervention required — not bouncing.`));
   error?.(fmt.status('FAIL', `Failure output:\n${state.diagnostic || '(no output)'}\n`));
   const dossier = recoveryDossier(state.reason, context, state.history, state.diagnostic, 'the structured failure requires human action', state.attemptsDetail);
   error?.(fmt.status('FAIL', dossier));
-  return { outcome: 'human-only', attempts: 0, diagnostic: state.diagnostic, classification: state.classification, implementer: state.implementer, dossier, attemptsDetail: state.attemptsDetail };
+  return { outcome: 'human-only', attempts: state.attempts, diagnostic: state.diagnostic, classification: state.classification, implementer: state.implementer, dossier, attemptsDetail: state.attemptsDetail };
 }
 
 async function retryTransientVerification(state: ReboundState, verify: ReboundContext['verify'], retries: number, log: ReboundContext['log']): Promise<ReboundOutcome | null> {
@@ -636,27 +295,32 @@ function refreshReboundState(state: ReboundState, result: VerifyResult, log: Reb
   if (fingerprint !== previous) { log?.(fmt.status('INFO', `Recovery incident changed; reclassified as ${state.classification.failureClass}.`)); }
 }
 
-async function runRepairAttempts(state: ReboundState, options: any): Promise<ReboundOutcome | null> {
+type RepairOptions = Pick<ReboundContext, 'slug' | 'worktree' | 'verify' | 'startAgent' | 'transitionToImplementer' | 'applyAgentFallback'> & { context: ReboundContext; maxAttempts: number; maxLaunchRetries: number; log: NonNullable<ReboundContext['log']>; error: NonNullable<ReboundContext['error']> };
+
+async function runRepairAttempts(state: ReboundState, options: RepairOptions): Promise<ReboundOutcome | null> {
   const { context, slug, worktree, verify, startAgent, maxAttempts, maxLaunchRetries, transitionToImplementer, applyAgentFallback, log, error } = options;
-  const originalDiagnostic = state.originalDiagnostic;
   // Persist evidence of the original failed command before the first repair
   // launches, so a fresh-context or restarted agent can retrieve it even when
   // the launch path never ran captureVerifiedTreeProof. Captured once, from the
   // original failure, so the prompt names what originally failed rather than a
   // later retry's output.
   if (!state.capturedEvidence && worktree) {
-    state.capturedEvidence = await captureGateFailureEvidence(state.reason, worktree, context);
+    // Best-effort: a missing or unwritable worktree must not abort the launch.
+    // captureGateFailureEvidence reports a write failure as `undefined`, not an
+    // error, so an absent worktree store simply skips retention here.
+    try {
+      state.capturedEvidence = await captureGateFailureEvidence(state.reason, worktree, context);
+    } catch (cause) {
+      log(fmt.status('WARN', `Could not persist original gate failure evidence (${worktree}): ${String(cause)}`));
+      state.capturedEvidence = undefined;
+    }
   }
   for (let attempt = 1; repairBudgetAllows(attempt, maxAttempts); attempt++) {
     const strategy: RepairStrategy = repairStrategy(attempt);
-    const promptSlots = { label: state.classification.label, slug, worktree, diagnostic: state.diagnostic, originalDiagnostic, classification: state.classification, attempt, maxAttempts, ...promptSlotsFor(state.reason, slug) };
-    // Prefer the record this kernel just captured; fall back to any other
-    // evidence already on disk so a related prior failure still surfaces.
-    const lookup = worktree ? recoveryEvidenceForPrompt(worktree) : {};
-    const recovery = { ...lookup, recoveryEvidence: state.capturedEvidence ?? lookup.recoveryEvidence };
-    const fixPrompt = strategy === 'targeted'
-      ? buildReboundFixPrompt({ ...promptSlots, ...recovery })
-      : buildFreshDiagnosticRepairPrompt({ ...promptSlots, ...recovery });
+    let prepared: Awaited<ReturnType<typeof prepareRepairPrompt>>;
+    try { prepared = await prepareRepairPrompt(state, context, attempt, maxAttempts); }
+    catch (cause) { return stopRepair(state, context, `Repair checkpoint persistence failed before launch: ${String(cause)}`); }
+    const { fixPrompt, repairPort, repairCheckpoint } = prepared;
     if (transitionToImplementer) { await transitionToImplementer(slug); }
     log(fmt.status('INFO', `Bouncing to implementer (${state.implementer}) with ${strategy} ${state.classification.failureClass} repair. Attempt ${attempt}/${maxAttempts}.`));
     const startedAt = Date.now();
@@ -664,11 +328,32 @@ async function runRepairAttempts(state: ReboundState, options: any): Promise<Reb
     const fingerprintBefore = failureFingerprint(state.reason);
     const launch = await launchFixAttempt({ startAgent, applyAgentFallback, implementer: state.implementer, fixPrompt, slug, worktree, step: context.step, role: context.role, exclude: context.exclude, sessionPolicy: strategy === 'fresh-diagnostic' ? 'fresh-ephemeral' : 'resume' });
     state.implementer = launch.implementer;
+    let blocker: InvalidContractBlocker | undefined;
+    try { blocker = launch.invalidContract ?? (repairCheckpoint ? await repairPort!.readBlocker(slug, repairCheckpoint.name) : undefined); }
+    catch (cause) { return stopRepair(state, context, `Cannot read repair blocker: ${String(cause)}`); }
+    if (blocker) {
+      if (launch.repairAttempted) { state.attempts++; }
+      return stopRepair(state, context, JSON.stringify(blocker));
+    }
     const launchResult = handleLaunchResult(state, launch, maxLaunchRetries, error);
     if (launchResult === 'retry') { attempt--; continue; }
     if (launchResult === 'skip') { await recordSpentLaunch(state, context, [attempt, maxAttempts], { strategy, headBefore, fingerprintBefore }, startedAt, launch); continue; }
     if (launchResult === 'stop') { break; }
     const verified = await verify(attempt);
+    if (verified.ok && state.originalReason.kind === 'gate-failure' && (repairCheckpoint || verified.command) && verified.command !== state.originalReason.command) {
+      return stopRepair(state, context, `Unrelated check ${verified.command} cannot certify ${state.originalReason.command}`);
+    }
+    // Contract escalation is immediate; other fresh human-only failures retain
+    // the existing exhaustion path and its attempted-repair evidence.
+    if (verified.reason && (verified.reason.kind === 'declared-gate-validation'
+      || (verified.reason.kind === 'gate-failure' && verified.reason.invalidContract))) {
+      refreshReboundState(state, verified, log);
+      return humanOnlyOutcome(state, context, error);
+    }
+    if (verified.ok && repairCheckpoint) {
+      try { await repairPort!.verify(slug, repairCheckpoint.name); }
+      catch (cause) { return stopRepair(state, context, String(cause)); }
+    }
     const detail: RepairEvidence = { strategy, agent: state.implementer, context: strategy === 'fresh-diagnostic' ? 'fresh' : 'resumed', headBefore, headAfter: await currentHead(context), fingerprintBefore, fingerprintAfter: verified.ok ? fingerprintBefore : failureFingerprint(refreshedReason(state.reason, verified)) };
     state.attemptsDetail.push(detail);
     await recordAttemptTelemetry(state, context, [attempt, maxAttempts], detail, startedAt, launch, verified);
@@ -754,7 +439,7 @@ async function launchFixAttempt(options: {
   role?: string;
   exclude?: string[];
   sessionPolicy: 'resume' | 'fresh-ephemeral';
-}): Promise<{ ok: boolean; implementer: string; diagnostic: string; repairAttempted: boolean; provider: string | null; model: string | null }> {
+}): Promise<{ ok: boolean; implementer: string; diagnostic: string; repairAttempted: boolean; provider: string | null; model: string | null; invalidContract?: InvalidContractBlocker }> {
   const { startAgent, applyAgentFallback, fixPrompt, slug, worktree, step = 'act-on-review', role = 'implementer', exclude = [], sessionPolicy } = options;
   let implementer = options.implementer;
   const none = { provider: null, model: null };
@@ -777,16 +462,28 @@ async function launchFixAttempt(options: {
     implementer = await applyAgentFallback({ launchResult, original: implementer }) || implementer;
   }
 
+  return launchStatus(launchResult, implementer);
+}
+
+function launchStatus(launchResult: Awaited<ReturnType<ReboundStartAgent>>, implementer: string) {
+  const invalidContract = launchResult?.result?.invalidContract;
+  if (invalidContract) { return { ok: false, implementer, diagnostic: JSON.stringify(invalidContract), repairAttempted: true, invalidContract, provider: null, model: null }; }
   const status = launchResult?.result?.status;
-  if (status === null || status === undefined) {
+  if (typeof status !== 'number') {
     return {
       ok: false,
       implementer,
-      diagnostic: `Implementer (${implementer}) returned an ambiguous exit status (null); treating the launch as failed — a null-exit fix is no evidence of a fix.`, repairAttempted: false, ...none,
+      diagnostic: `Implementer (${implementer}) returned an ambiguous exit status (null); treating the launch as failed — a null-exit fix is no evidence of a fix.`, repairAttempted: false, provider: null, model: null,
     };
   }
   if (status !== 0) {
     return { ok: false, implementer, diagnostic: `Implementer (${implementer}) exited with status ${status}.`, repairAttempted: true, ...reportedRun(launchResult?.result) };
   }
   return { ok: true, implementer, diagnostic: '', repairAttempted: true, ...reportedRun(launchResult?.result) };
+}
+
+function stopRepair(state: ReboundState, context: ReboundContext, diagnostic: string): ReboundOutcome {
+  state.diagnostic = diagnostic;
+  state.classification = { ...state.classification, dispatchAction: 'HumanOnly', isRelaunchable: false };
+  return humanOnlyOutcome(state, context, context.error);
 }

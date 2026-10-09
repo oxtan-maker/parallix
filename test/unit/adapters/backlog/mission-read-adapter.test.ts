@@ -109,7 +109,10 @@ test('ConcreteMissionReadAdapter loadAllMissions returns missions from completed
     assert.equal(missions.length, 1);
     assert.equal(missions[0].id, 'task-2001');
     assert.equal(missions[0].status, 'done');
-    assert.equal(missions[0].closedAt, '2026-07-01T00:00:00Z');
+    // Materializing a completed task closes it through closeMission, which
+    // canonicalizes the closure instant to UTC ISO-8601 with millisecond
+    // precision (TASK-2688).
+    assert.equal(missions[0].closedAt, '2026-07-01T00:00:00.000Z');
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
   }
@@ -417,7 +420,7 @@ test('Materialization: completed task with closedAt becomes ClosedMission', asyn
     const missions = await adapter.loadAllMissions();
     assert.equal(missions.length, 1);
     assert.equal(missions[0].status, 'done');
-    assert.equal(missions[0].closedAt, '2026-07-15T12:00:00Z');
+    assert.equal(missions[0].closedAt, '2026-07-15T12:00:00.000Z');
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
   }

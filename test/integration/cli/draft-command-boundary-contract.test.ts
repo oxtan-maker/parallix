@@ -491,14 +491,14 @@ describe('Draft command', () => {
       ensureDraftRepoConfigCommittedFn: () => true,
       resolveTaskFileFn: () => ({ ok: false, reason: 'missing' }),
       // Free-text intent now synthesizes a DB-owned, repository-scoped
-      // `parallix-adhoc-<NNNN>` identity (task-2468). Pin the counter here so the
+      // `px-<NNNN>` identity (task-2468). Pin the counter here so the
       // allocation stays deterministic regardless of the shared operator DB.
-      allocateAdhocIdentityFn: () => ({ slug: 'parallix-adhoc-0001', missionId: 'parallix-adhoc-0001', taskId: 'PARALLIX-ADHOC-0001' }),
+      allocateAdhocIdentityFn: () => ({ slug: 'px-0001', missionId: 'px-0001', taskId: 'PX-0001' }),
       ensureMissionBranchFn: () => {},
       ensureWorktreeFn: () => {},
       ensureGraphifyWorkspaceFn: () => {},
       ensureGraphifyIgnoreFn: () => {},
-      ensureMissionFileFn: () => '/tmp/parallix-adhoc-0001/MISSION.md',
+      ensureMissionFileFn: () => '/tmp/px-0001/MISSION.md',
       bootstrapBacklogTaskFn: (_wt, _repo, slug, options) => {
         calls.push({ slug, syntheticTask: options.syntheticTask });
         return true;
@@ -518,14 +518,14 @@ describe('Draft command', () => {
     });
 
     assert.equal(calls.length, 1);
-    assert.equal(calls[0].slug, 'parallix-adhoc-0001');
+    assert.equal(calls[0].slug, 'px-0001');
     assert.equal(calls[0].syntheticTask.source, 'adhoc-db-identity');
   });
 
   test('runDraftCommand announces the allocated adhoc identity, not the free-text placeholder', async () => {
     // The header names the mission the operator will live with. Announcing it
     // before allocation printed `adhoc-create-a-hello-world-program` above a
-    // branch called `mission/parallix-adhoc-0001`.
+    // branch called `mission/px-0001`.
     const logs = [];
     await runDraftCommand(['create a hello world program'], {
       detectLaunchBaseBranchFn: () => null,
@@ -535,12 +535,12 @@ describe('Draft command', () => {
       ensureStandaloneMissionBaselineFn: () => ({ committed: false }),
       ensureDraftRepoConfigCommittedFn: () => true,
       resolveTaskFileFn: () => ({ ok: false, reason: 'missing' }),
-      allocateAdhocIdentityFn: () => ({ slug: 'parallix-adhoc-0001', missionId: 'parallix-adhoc-0001', taskId: 'PARALLIX-ADHOC-0001' }),
+      allocateAdhocIdentityFn: () => ({ slug: 'px-0001', missionId: 'px-0001', taskId: 'PX-0001' }),
       ensureMissionBranchFn: () => {},
       ensureWorktreeFn: () => {},
       ensureGraphifyWorkspaceFn: () => {},
       ensureGraphifyIgnoreFn: () => {},
-      ensureMissionFileFn: () => '/tmp/parallix-adhoc-0001/MISSION.md',
+      ensureMissionFileFn: () => '/tmp/px-0001/MISSION.md',
       bootstrapBacklogTaskFn: () => true,
       validateDraftClassificationFn: () => ({ ok: true, classification: 'unknown' }),
       transitionTaskFn: () => true,
@@ -558,7 +558,7 @@ describe('Draft command', () => {
 
     const header = logs.find(line => line.includes('Drafting mission'));
     assert.ok(header, `expected a draft header in output: ${logs.join(' | ')}`);
-    assert.ok(header.includes('parallix-adhoc-0001'), header);
+    assert.ok(header.includes('px-0001'), header);
     assert.ok(!header.includes('hello world program'), header);
   });
 

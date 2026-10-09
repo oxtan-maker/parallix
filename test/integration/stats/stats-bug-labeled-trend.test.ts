@@ -141,8 +141,15 @@ test('stats and DONE rail share persisted delivery days despite later closure (T
         { now: () => Date.parse(instant), metricsAdapter: new ConcreteMetricsReadAdapter({ laneEventRepo, usageRepo, repositoryId: repo, clock: () => instant }) },
       );
       const board = await builder.build();
-      assert.deepEqual(board.stages.find(s => s.lane === 'done')!.cards.map(c => c.id).sort(),
+      const done = board.stages.find(s => s.lane === 'done')!;
+      assert.deepEqual(done.cards.map(c => c.id).sort(), ['task-delivery', 'task-first', 'task-last']);
+      assert.deepEqual(done.historyCards?.map(c => c.id).sort(), ['task-unclosed', 'task-unknown']);
+      // Keep the original visibility invariant across both rendered groups.
+      assert.deepEqual([...done.cards, ...done.historyCards ?? []].map(c => c.id).sort(),
         ['task-delivery', 'task-first', 'task-last', 'task-unclosed', 'task-unknown']);
+      assert.equal(done.count, selection.current.flow.total);
+      assert.equal(done.count, board.metrics.decisionWindow?.current.completedMissions);
+      assert.equal(done.count, board.metrics.weeklyCumulativeFlow?.series.at(-1)?.counts.done);
     }
   });
 });

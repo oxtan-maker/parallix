@@ -1,3 +1,4 @@
+import { RepairCheckpointService } from './repair-checkpoint-service.js';
 /**
  * Checkpoint use case.
  *
@@ -88,6 +89,10 @@ export class MissionCheckpointService {
     private readonly _evidence?: CheckpointEvidenceReferences,
   ) {}
 
+  reportInvalidContract(request: Parameters<RepairCheckpointService['report']>[0]) {
+    return new RepairCheckpointService(this._store).report(request);
+  }
+
   /** Plan a checkpoint: a name and what it delivers, with no evidence yet. */
   async plan(request: PlanCheckpointRequest): Promise<ApplicationOutcome<PlanCheckpointResult>> {
     return this.replan(request, (checkpoints, missionId) => planCheckpoint(checkpoints, {
@@ -100,6 +105,7 @@ export class MissionCheckpointService {
     return this.replan(request, (checkpoints) => {
       const target = checkpoints.find((checkpoint) => checkpoint.name === request.name);
       if (!target) { throw new Error(`Checkpoint ${request.name} is not planned`); }
+      if (target.repair) { throw new Error('Harness-created repair checkpoints cannot be removed by the implementer'); }
       if (target.goalCheck.length > 0) { throw new Error(`Checkpoint ${request.name} already has recorded evidence`); }
       return checkpoints.filter((checkpoint) => checkpoint !== target);
     });
@@ -184,6 +190,13 @@ export class MissionCheckpointService {
       merged = prior
         ? { ...stamped, goalCheck: retainPriorGoalCheckRows(prior.goalCheck, stamped.goalCheck) }
         : stamped;
+      if (prior?.repair) {
+        if (stamped.goalCheck.some(row => !(mission.successCriteria ?? []).includes(row.criterion))) {
+          return failure('validation', 'Repair evidence must name an exact recorded success criterion');
+        }
+        if (prior.repair.blocker) { return failure('validation', 'Invalid locked contract awaits operator decision; evidence cannot clear a blocker'); }
+        merged = { ...merged, repair: { ...prior.repair, evidenceRecorded: true, verified: false } };
+      }
       updated = {
         ...mission,
         checkpoints: recordCheckpoint(mission.checkpoints, merged),

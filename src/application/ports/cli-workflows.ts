@@ -107,6 +107,8 @@ export interface StatusMissionData {
    * must see rather than an error.
    */
   readonly brief?: StatusBrief | null;
+  /** Text captured at creation with no brief yet; the refining agent turns it into one. */
+  readonly description?: string | null;
   /** The exact commands handoff runs for this Mission. */
   readonly declaredGates?: readonly string[];
   /** What must be true for the Mission to be done. */
@@ -147,6 +149,7 @@ export interface StatusMissionData {
 /** One Goal Check evidence row as `px status` reports it. */
 /** One planned or recorded checkpoint as `px status` presents it. */
 export interface StatusCheckpoint {
+  readonly repair?: import('../../domain/checkpoint.js').CheckpointData['repair'];
   readonly name: string;
   /** What the checkpoint was planned to deliver. */
   readonly description: string;

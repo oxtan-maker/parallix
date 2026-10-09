@@ -142,7 +142,7 @@ describe('Ad hoc lifecycle', () => {
   }
 
   const prompt = process.argv[process.argv.length - 1] || '';
-  const slug = match(prompt, /(parallix-adhoc-[0-9]+|task-[a-z0-9-]+)/im)
+  const slug = match(prompt, /(px-[0-9]+|task-[a-z0-9-]+)/im)
     || match(prompt, /^Mode: act-on-review\\. Branch:\\s*mission\\/(task-[a-z0-9-]+)/im)
     || match(prompt, /^Mode: review\\. .*?Mission:\\s+.*?(task-[a-z0-9-]+)/im)
     || 'task-unknown';
@@ -222,7 +222,7 @@ describe('Ad hoc lifecycle', () => {
     const reviewTmpDir = path.join(tmpRoot, 'review-artifacts');
 
     // Adhoc-only fixture: no backlog/ directory at all. The mission identity is
-    // DB-owned (parallix-adhoc-<NNNN>), so this draft must reach `active` with no
+    // DB-owned (px-<NNNN>), so this draft must reach `active` with no
     // Backlog task file — the red->green anchor for the free-text first-value
     // path (task-2468). Any backlog/ creation here would contradict the fixture.
     fs.mkdirSync(path.join(repoRoot, 'config'), { recursive: true });
@@ -366,7 +366,7 @@ describe('Ad hoc lifecycle', () => {
 
     const slug = discoverAdhocSlug(repo.repoRoot);
     assert.ok(slug, 'draft must materialize an adhoc mission under missions/');
-    assert.match(slug, /^(parallix-adhoc|adhoc)-/i, 'materialized identity must be adhoc-owned');
+    assert.match(slug, /^(px|adhoc)-/i, 'materialized identity must be adhoc-owned');
 
     const worktree = worktreePathFor(repo.repoRoot, slug);
     assert.ok(fs.existsSync(worktree), `expected mission worktree at ${worktree}`);

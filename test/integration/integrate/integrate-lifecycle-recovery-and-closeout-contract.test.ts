@@ -162,9 +162,9 @@ describe("active+approved recovery", async () => {
       const reviewEnter = events.find((e) => e.from_status === 'active' && e.to_status === 'review');
       const integrateEvent = events.find((e) => e.from_status === 'review' && e.to_status === 'integration');
       assert.ok(reviewEnter, 'an active → review lane move exists');
-      assert.equal(reviewEnter.occurred_at, submittedAt, 'active → review rides the authoritative review-entry time');
+      assert.equal(reviewEnter.occurred_at, new Date(submittedAt).toISOString(), 'active → review rides the authoritative review-entry time');
       assert.ok(integrateEvent, 'a review → integration lane move exists');
-      assert.equal(integrateEvent.occurred_at, decidedAt, 'approve runs at the stored decidedAt');
+      assert.equal(integrateEvent.occurred_at, new Date(decidedAt).toISOString(), 'approve runs at the stored decidedAt');
     } finally {
       await database.close();
       if (previousHome === undefined) { delete process.env.PARALLIX_HOME; }

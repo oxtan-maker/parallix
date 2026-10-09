@@ -118,6 +118,11 @@ export const INTEGRATION_CI_TESTS: readonly string[] = [
   'integration/sqlite/sqlite-operator-state.integration.test.ts',
   'integration/sqlite/sqlite-import-and-audit.integration.test.ts',
   'integration/sqlite/sqlite-mission-store.integration.test.ts',
+  // TASK-2688: seeds a temporary migrated SQLite operator database with mixed
+  // UTC/offset/ambiguous/malformed timestamps and exercises the audited
+  // normalization write, idempotence, lexical==temporal ordering, and backup
+  // restore. Real SQLite is a clean-runner dependency, so CI-safe.
+  'integration/sqlite/mission-timestamp-migration.integration.test.ts',
   'integration/sqlite/operator-state-scope.integration.test.ts',
   'integration/sqlite/sqlite-repository-contract.integration.test.ts',
   'integration/sqlite/sqlite-recovery-cp5.test.ts',
@@ -331,6 +336,7 @@ export const INTEGRATION_CI_TESTS: readonly string[] = [
  */
 export const INTEGRATION_LOCAL_TESTS: readonly string[] = [
   'integration/sandbox/bubblewrap-worktree-git.test.ts',
+  'integration/sandbox/bubblewrap-symlink-mount.test.ts',
   'integration/agents/graphify-mission-document-exclusion.test.ts',
   'integration/packaging/native-sea-executable-smoke.test.ts',
   'integration/lifecycle/lifecycle-timing-local.test.ts',
@@ -348,6 +354,8 @@ export const INTEGRATION_LOCAL_REASONS: Readonly<Record<string, string>> = {
     'Spawns the real `tmux` binary (and `bwrap` for the socket-mask case) to certify the optional terminal host; neither is part of the GitHub-hosted runner image.',
   'integration/sandbox/bubblewrap-worktree-git.test.ts':
     'Spawns the real `bwrap` binary to certify sandbox profiles; bubblewrap is not part of the GitHub-hosted runner image.',
+  'integration/sandbox/bubblewrap-symlink-mount.test.ts':
+    'Spawns the real `bwrap` binary to certify symlinked destination mounts; bubblewrap is not part of the GitHub-hosted runner image.',
   'integration/agents/graphify-mission-document-exclusion.test.ts':
     'Spawns the uv-installed `graphify` CLI; neither uv nor graphify exists on a clean GitHub-hosted runner.',
   'integration/packaging/native-sea-executable-smoke.test.ts':

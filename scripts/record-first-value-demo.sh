@@ -25,7 +25,7 @@ mkdir -p "$(dirname "$cast")" "$(dirname "$transcript")"
 
 parent=$(mktemp -d "${TMPDIR:-/tmp}/parallix-demo-XXXXXX")
 repo="$parent/hello-parallix"
-slug=parallix-adhoc-0001   # first adhoc mission in a fresh repo (db-owned counter)
+slug=px-0001   # first adhoc mission in a fresh repo (db-owned counter)
 [[ -n ${PARALLIX_DEMO_KEEP:-} ]] || trap 'rm -rf "$parent"' EXIT
 
 # Disposable Parallix state: never touch the operator's real home.

@@ -1,4 +1,5 @@
 import path from 'node:path';
+import fs from 'node:fs';
 import { SqliteDatabaseAdapter } from '../../src/adapters/sqlite/database-adapter.js';
 import { SqliteMigrationRunner, loadDefaultMigrations } from '../../src/adapters/sqlite/migration-runner.js';
 import { SqliteMissionStore } from '../../src/adapters/sqlite/mission-store.js';
@@ -28,11 +29,18 @@ export interface MigratedMissionStore {
  * Open a migrated SQLite operator database in a fresh case root and insert
  * `missions` through the real Mission store (TASK-2622.04).
  */
-export async function openMigratedMissionStore(missions: readonly Mission[] = []): Promise<MigratedMissionStore> {
+export async function openMigratedMissionStore(
+  missions: readonly Mission[] = [],
+  schemaTemplate?: string,
+): Promise<MigratedMissionStore> {
   const owned = caseRoot('parallix-mission-store-');
   const database = new SqliteDatabaseAdapter();
   try {
-    await database.open({ path: path.join(owned.root, 'parallix.db') });
+    const databasePath = path.join(owned.root, 'parallix.db');
+    // A suite may supply an immutable, SQLite-consistent empty-schema backup.
+    // Each case still owns a separate file, connection and Mission population.
+    if (schemaTemplate) { fs.copyFileSync(schemaTemplate, databasePath); }
+    await database.open({ path: databasePath });
     await new SqliteMigrationRunner(database).applyPending(loadDefaultMigrations());
     const store = new SqliteMissionStore(database);
     for (const mission of missions) { await store.save(mission, null); }

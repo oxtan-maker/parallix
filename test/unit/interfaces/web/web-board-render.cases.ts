@@ -27,6 +27,7 @@ import type { WebBoardSnapshot } from '../../../../src/interfaces/web/transport.
 import type { BoardProjection } from '../../../../src/application/projections/board.js';
 import type { AgentAvailabilityMetric } from '../../../../src/application/projections/board.js';
 import type { MissionCard } from '../../../../src/application/projections/mission-board.js';
+import { missionId } from '../../../../src/domain/mission.js';
 import { agentFamily } from '../../../../src/domain/agents.js';
 import { emptyMetrics, makeAttentionItem, makeCard, makeCards, makeProjection } from '../../../fixtures/board-projection.js';
 
@@ -410,7 +411,7 @@ test('running-agent summaries retain observed counts without command-session wor
 
 test('the top bar renders the server-owned decision-window completion count between WIP and attention', () => {
   const html = renderToStaticMarkup(React.createElement(Board, {
-    snapshot: { ...populated(), inFlightWip: 5 }, onRefresh: async () => {},
+    snapshot: { ...populated(), inFlightWip: 5, metrics: { ...populated().metrics, weeklyCompletedMissions: 21 } }, onRefresh: async () => {},
   }));
   assert.match(html, /wip <span[^>]*>5<\/span> · 21 missions\/wk · attention <span[^>]*>1<\/span>/);
 });
@@ -540,7 +541,7 @@ test('agent-block durations use human-sized units', () => {
 
 test('each card renders projected action availability without inventing a runnable fallback', () => {
   const html = render(populated());
-  const buttons: string[] = Array.from(html.match(/<button[^>]*>/g) ?? []).filter((button) => !button.includes('aria-controls="flow-metrics"'));
+  const buttons: string[] = Array.from(html.match(/<button[^>]*>/g) ?? []).filter((button) => !button.includes('aria-controls="flow-metrics"') && !button.includes('aria-haspopup="dialog"'));
   assert.ok(buttons.length > 0, 'the fixture renders at least one action');
   for (const button of buttons) {
     assert.match(button, /aria-disabled="(?:true|false)"/, `action states availability: ${button}`);
@@ -751,4 +752,24 @@ test('the client adds no router, browser state framework, server-rendering layer
   const imports = browserSources.flatMap((file) => [...file.text.matchAll(/from '([^']+)'/g)].map((match) => match[1]));
   const external = imports.filter((specifier) => specifier !== undefined && !specifier.startsWith('.'));
   assert.deepEqual([...new Set(external)].sort(), ['react', 'react-dom/client'], 'the client depends on React and React DOM only');
+});
+
+test('weekly missions use the delivery cohort instead of current DONE stock (TASK-2688)', () => {
+  const snapshot = populated();
+  const html = render({ ...snapshot, metrics: { ...snapshot.metrics, weeklyCompletedMissions: 3 } });
+  assert.match(html, /3 missions\/wk/);
+  assert.doesNotMatch(html, /21 missions\/wk/);
+});
+
+
+test('DONE exposes other retained history without adding it to the weekly count (TASK-2688)', () => {
+  const projection = makeProjection({ done: [makeCard({ id: missionId('task-weekly'), lane: 'done' })] });
+  const snapshot = toWebBoardSnapshot({ ...projection, stages: projection.stages.map(stage => stage.lane === 'done'
+    ? { ...stage, historyCards: [makeCard({ id: missionId('task-unknown'), lane: 'done' })] } : stage) });
+  const html = render(snapshot);
+  assert.match(html, /DONE · 1/);
+  assert.match(html, /Other completed history · 1/);
+  assert.match(html, /task-weekly/);
+  assert.match(html, /task-unknown/);
+  assert.match(html, /<details aria-label="Other completed history">/);
 });

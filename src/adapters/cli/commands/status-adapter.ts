@@ -150,12 +150,14 @@ export function createStatusBoardAdapter(options: {
           brief: brief
             ? { goal: brief.goal, why: brief.why, scope: brief.scope, outOfScope: [...brief.outOfScope] }
             : null,
+          description: recorded?.mission.description ?? null,
           declaredGates: [...(recorded?.mission.declaredGates ?? [])],
           successCriteria: [...(recorded?.mission.successCriteria ?? [])],
           completedSuccessCriteria: [...(recorded?.mission.completedSuccessCriteria ?? [])],
           dependencies: [...(recorded?.mission.dependencies ?? [])],
           checkpoints: (recorded?.mission.checkpoints ?? []).map((checkpoint) => ({
             name: checkpoint.name,
+            repair: checkpoint.repair,
             description: checkpoint.firstLine ?? '',
             recorded: checkpoint.goalCheck.length > 0,
             goalCheck: checkpoint.goalCheck.map((r) => ({ criterion: r.criterion, evidence: r.evidence })),

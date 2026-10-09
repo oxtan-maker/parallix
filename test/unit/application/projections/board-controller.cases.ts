@@ -247,8 +247,8 @@ test('isIntegratedCapability covers the Mission commands extracted so far', () =
 });
 
 test('INTEGRATED_CAPABILITIES contains active:execute and the Mission commands', () => {
-  assert.equal(INTEGRATED_CAPABILITIES.size, 7);
-  for (const kind of ['active:execute', 'mission:intake', 'draft:create', 'checkpoint:record', 'handoff:record', 'integrate:merge', 'mission:cancel'] as const) {
+  assert.equal(INTEGRATED_CAPABILITIES.size, 8);
+  for (const kind of ['active:execute', 'mission:intake', 'mission:create', 'draft:create', 'checkpoint:record', 'handoff:record', 'integrate:merge', 'mission:cancel'] as const) {
     assert.ok(INTEGRATED_CAPABILITIES.has(kind), `${kind} should be integrated`);
   }
 });
@@ -283,4 +283,36 @@ test('controller does not import ink, react, or node:react', () => {
       );
     }
   }
+});
+
+test('mission:create dispatches the creation payload without a stored mission and returns only the identity (TASK-2693)', async () => {
+  const { ports } = makeExecutePorts();
+  const requests: unknown[] = [];
+  const creation = {
+    async execute(request: unknown) {
+      requests.push(request);
+      return { status: 'completed', value: { mission: { id: 'px-0001', title: 'secret' }, version: 1 }, durableEvidence: [] };
+    },
+  };
+  const controller = new BoardCommandController(ports, undefined, { creation: creation as never }, undefined, { load: async () => ({ kind: 'missing' }) } as never);
+  const result = await controller.dispatch(makeRequest({
+    kind: 'mission:create', missionId: '', missionStatusAtRequest: undefined, capabilities: new Set(['mission:intake']),
+    payload: { kind: 'mission:create', requestKey: 'k', title: 'Idea', labels: ['ux'] },
+  }));
+  assert.equal(result.status, 'completed');
+  assert.deepEqual(result.value, { missionId: 'px-0001' });
+  assert.equal((requests[0] as { requestKey: string }).requestKey, 'k');
+});
+
+test('mission:create is unavailable without Mission authority and rejects a mismatched payload (TASK-2693)', async () => {
+  const { ports } = makeExecutePorts();
+  const bare = new BoardCommandController(ports);
+  assert.equal(bare.canExecute('mission:create'), false);
+  const request = makeRequest({
+    kind: 'mission:create', missionId: '', capabilities: new Set(['mission:intake']),
+    payload: { kind: 'mission:create', requestKey: 'k', title: 'Idea' },
+  });
+  assert.equal((await bare.dispatch(request)).status, 'rejected');
+  const wired = new BoardCommandController(ports, undefined, { creation: { execute: async () => ({ status: 'completed' }) } as never }, undefined, { load: async () => ({ kind: 'missing' }) } as never);
+  assert.equal((await wired.dispatch({ ...request, payload: undefined })).status, 'rejected');
 });

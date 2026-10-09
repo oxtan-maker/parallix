@@ -94,8 +94,8 @@ function recordContract(slug) {
 }
 const prompt = process.argv[process.argv.length - 1] || '';
 const match = (re) => { const m = prompt.match(re); return m && m[1] ? m[1].trim() : null; };
-const slug = match(/^(?:Mission s|S)lug:\\s*((?:task-[a-z0-9-]+|parallix-adhoc-\\d+))/im)
-  || match(/^Mission:\\s*((?:task-[a-z0-9-]+|parallix-adhoc-\\d+))/im)
+const slug = match(/^(?:Mission s|S)lug:\\s*((?:task-[a-z0-9-]+|px-\\d+))/im)
+  || match(/^Mission:\\s*((?:task-[a-z0-9-]+|px-\\d+))/im)
   || 'task-unknown';
 const missionDir = match(/^Mission dir:\\s*(.+)$/m)
   || path.join(process.cwd(), 'missions', slug);

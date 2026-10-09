@@ -688,8 +688,11 @@ describe('Backlog Mission materialization', () => {
     }));
     assert.equal(result.kind, 'found');
     if (result.kind !== 'found') { return; }
+    // Materializing a completed mission closes it through closeMission, which
+    // canonicalizes the closure instant to UTC ISO-8601 with millisecond
+    // precision (TASK-2688).
     assert.equal(result.mission.status, 'done');
-    assert.equal(result.mission.closedAt, '2026-07-23T10:00:00Z');
+    assert.equal(result.mission.closedAt, '2026-07-23T10:00:00.000Z');
   });
 
   test('task-authority disagreements never materialize a mission', () => {

@@ -19,6 +19,10 @@ import { MissionCheckpointService } from '../application/mission-checkpoint-serv
 import { checkpointEvidenceReferences } from './application-services.js';
 import { MissionHandoffService } from '../application/mission-handoff-service.js';
 import { MissionIntakeService } from '../application/mission-intake-service.js';
+import { MissionCreationService } from '../application/mission-creation-service.js';
+import { allocateAdhocIdentity } from '../adapters/sqlite/adhoc-counter.js';
+import { createRepositoryMissionCatalog } from './board-projection.js';
+import { missionId } from '../domain/mission.js';
 import { MissionLifecycleService } from '../application/mission-lifecycle-service.js';
 import { DraftCommandUseCase } from '../application/draft-command-use-case.js';
 import { MissionCancelService } from '../application/mission-cancel-service.js';
@@ -235,6 +239,13 @@ export function composeProductionCapabilities(
     const intake = new MissionIntakeService(missionStore);
     missionServices = {
       intake,
+      creation: new MissionCreationService(
+        intake,
+        createRepositoryMissionCatalog({ rootDir, missionStore, repositoryId: owningRepositoryId }),
+        { allocate: (repository) => missionId(allocateAdhocIdentity(repository, { dbPath: database?.getPath() }).slug) },
+        owningRepositoryId,
+        missionStore,
+      ),
       checkpoints: new MissionCheckpointService(missionStore, checkpointEvidenceReferences()),
       handoff: new MissionHandoffService(missionStore, missionStore),
       handoffWorkflow: createBoardHandoffWorkflow(missionStore, overrides.configuration.decision, overrides.handoffReviewLoop),

@@ -108,6 +108,14 @@ validated shape in this contract.
   `artifacts` (`{ kind: file|git-range|url, location, byteSize: finite
   number|null }`), and optional `reviewRounds` (finite integer ≥ 0). Identity
   kinds carrying a `payload` key are rejected.
+- The same endpoint also accepts one non-card envelope, `kind: "mission:create"`
+  ("Create new mission"), recognised by that `kind` before card validation. Its
+  keys are exactly `requestKey`, `title`, `labels`, `successCriteria`,
+  `dependencies` and optional `description`/`context`; it has no mission id,
+  status, repository or capability key. The application allocates the identity,
+  persists a backlog Mission, and refuses dependencies that are not unfinished
+  missions of the repository. `requestKey` is chosen once per form; repeating it
+  returns the first created mission, recovered from its recorded entry event.
 - Operation identity is host-owned: the host generates the operation ID and
   the single-kind capability set itself, mirroring the TUI, and dispatches
   through the shared controller. No retry is performed server-side on any

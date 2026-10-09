@@ -53,7 +53,7 @@ describe('Slug namespace', () => {
   // TASK-2468 namespace coverage. The reviewer (round 1, F3) flagged that
   // `px integrate` — the highest-risk lifecycle command — had zero adhoc coverage:
   // its slug/task handling had not been shown to tolerate the new
-  // `parallix-adhoc-<NNNN>` namespace.
+  // `px-<NNNN>` namespace.
   //
   // integrate resolves its target through `inferSlug` (the single shared validator
   // now owned by the domain layer, task-2468 F7) and then loads the mission record
@@ -65,8 +65,8 @@ describe('Slug namespace', () => {
   test('adhoc-lifecycle: the shared validator recognizes the DB-owned adhoc namespace at the integrate entry', () => {
     // integrate's first line: inferSlug(explicitSlug). It must return the adhoc
     // identity unchanged so the mission-store load downstream resolves it.
-    assert.equal(inferSlug('parallix-adhoc-0001'), 'parallix-adhoc-0001');
-    assert.equal(inferSlug('parallix-adhoc-12345'), 'parallix-adhoc-12345');
+    assert.equal(inferSlug('px-0001'), 'px-0001');
+    assert.equal(inferSlug('px-12345'), 'px-12345');
 
     // The other recognized backings still validate — one shared validator, no
     // second classifier (Restricted Area honored).

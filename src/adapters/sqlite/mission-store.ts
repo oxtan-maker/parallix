@@ -14,6 +14,7 @@ import { declaredGates } from '../../domain/mission-gates.js';
 import { completedCriteria, successCriteria } from '../../domain/mission-success-criteria.js';
 import { missionDependencies } from '../../domain/mission-dependencies.js';
 import type { KnownRepository, RepositoryId } from '../../domain/repository.js';
+import { toCanonicalUtcInstant } from '../../domain/instant.js';
 import type { ReviewerDecision } from '../../domain/review.js';
 import type { SqliteDatabaseAdapter } from './database-adapter.js';
 import { SqliteBoardLaneEventRepository } from './board-lane-event-repository.js';
@@ -165,6 +166,10 @@ export class SqliteMissionStore implements MissionStore, MissionNelRecorder {
     return this.eventRepo.findByMissionId(missionId);
   }
 
+  async findMissionByIdempotencyKey(repositoryId: RepositoryId, key: string): Promise<MissionId | null> {
+    return (await this.eventRepo.findMissionIdByIdempotencyKey(repositoryId, key)) as MissionId | null;
+  }
+
   async cancel(id: MissionId): Promise<void> {
     return this.enqueue(() => this.cancelAggregate(id));
   }
@@ -183,7 +188,7 @@ export class SqliteMissionStore implements MissionStore, MissionNelRecorder {
     const params = [...scope.params];
     const missionRows = await this.db.query<MissionRecord>(
       `SELECT id, repository_id, title, status, raw_status, assignee,
-              net_engineering_lines, reproduction_test, predicted_nel_bucket, closed_at, version
+              net_engineering_lines, reproduction_test, predicted_nel_bucket, description, closed_at, version
        FROM missions WHERE ${scope.missions} ORDER BY id`,
       params,
     );
@@ -218,7 +223,7 @@ export class SqliteMissionStore implements MissionStore, MissionNelRecorder {
         this.db.query<MissionDependencyRecord>(`SELECT mission_id, position, depends_on_mission_id FROM mission_dependencies WHERE ${scope.children} ORDER BY mission_id, position`, params),
         this.db.query<MissionCheckpointRecord>(
           `SELECT mission_id, position, checkpoint_mission_id, name, raw_filename,
-                  first_line, next_action_text
+                  first_line, next_action_text, repair_json
            FROM mission_checkpoints WHERE ${scope.children} ORDER BY mission_id, position`,
           params,
         ),
@@ -495,6 +500,20 @@ export class SqliteMissionStore implements MissionStore, MissionNelRecorder {
     if (mission.dependencies && mission.dependencies.length > 0) {
       mission = { ...mission, dependencies: missionDependencies(mission.dependencies, mission.id) };
     }
+    // New/changed closure instants must be canonical. Historical values that
+    // migration deliberately preserved may survive an unrelated aggregate edit.
+    let closedAt: string | null = mission.closedAt ?? null;
+    if (closedAt !== null) {
+      try {
+        closedAt = toCanonicalUtcInstant(closedAt);
+      } catch (error) {
+        const existing = expectedVersion === null ? [] : await this.db.query<{ closed_at: string | null }>(
+          'SELECT closed_at FROM missions WHERE id = ? AND version = ?',
+          [mission.id, expectedVersion],
+        );
+        if (existing.length !== 1 || existing[0]!.closed_at !== closedAt) { throw error; }
+      }
+    }
     const params = [
       mission.repositoryId,
       mission.title,
@@ -504,7 +523,8 @@ export class SqliteMissionStore implements MissionStore, MissionNelRecorder {
       mission.netEngineeringLines,
       mission.reproductionTest ?? null,
       mission.predictedNelBucket ?? null,
-      mission.closedAt,
+      mission.description ?? null,
+      closedAt,
     ] as const;
 
     let nextVersion: MissionVersion;
@@ -513,8 +533,8 @@ export class SqliteMissionStore implements MissionStore, MissionNelRecorder {
         await this.db.execute(
           `INSERT INTO missions
              (id, repository_id, title, status, raw_status, assignee,
-              net_engineering_lines, reproduction_test, predicted_nel_bucket, closed_at, version)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)`,
+              net_engineering_lines, reproduction_test, predicted_nel_bucket, description, closed_at, version)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)`,
           [mission.id, ...params],
         );
       } catch (error) {
@@ -529,7 +549,7 @@ export class SqliteMissionStore implements MissionStore, MissionNelRecorder {
       const changed = await this.db.execute(
         `UPDATE missions SET
            repository_id = ?, title = ?, status = ?, raw_status = ?, assignee = ?,
-           net_engineering_lines = ?, reproduction_test = ?, predicted_nel_bucket = ?, closed_at = ?, version = version + 1
+           net_engineering_lines = ?, reproduction_test = ?, predicted_nel_bucket = ?, description = ?, closed_at = ?, version = version + 1
          WHERE id = ? AND version = ?`,
         [...params, mission.id, expectedVersion],
       );
@@ -640,8 +660,8 @@ export class SqliteMissionStore implements MissionStore, MissionNelRecorder {
       await this.db.execute(
         `INSERT INTO mission_checkpoints
            (mission_id, position, checkpoint_mission_id, name, raw_filename,
-            first_line, next_action_text)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+            first_line, next_action_text, repair_json)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           mission.id,
           checkpointPosition,
@@ -650,6 +670,7 @@ export class SqliteMissionStore implements MissionStore, MissionNelRecorder {
           checkpoint.rawFilename ?? null,
           checkpoint.firstLine ?? null,
           checkpoint.nextActionText,
+          checkpoint.repair ? JSON.stringify(checkpoint.repair) : null,
         ],
       );
       for (const [position, row] of checkpoint.goalCheck.entries()) {

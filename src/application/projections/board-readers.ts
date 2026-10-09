@@ -1,3 +1,4 @@
+import { alignDoneCohort } from './done-cohort.js';
 import { decisionRetentionBoundary, decisionWindowDay, localReportingTimeZone } from '../../domain/decision-window.js';
 import type { MissionOutcome } from '../../domain/usage.js';
 import type { AgentAvailability, AgentFamily } from '../../domain/agents.js';
@@ -231,14 +232,14 @@ export class BoardProjectionBuilder {
       unattributedRunningSessions: countUnattributedSessions(runningSessions),
     };
 
-    return buildBoardProjection(
+    return alignDoneCohort(buildBoardProjection(
       repositoryId,
       cards,
       availableActions,
       operationLog,
       metrics,
       sourceFacts,
-    );
+    ), deliveries);
   }
 
   /**

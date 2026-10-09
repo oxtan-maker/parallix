@@ -1,6 +1,7 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
 import childProcess from 'node:child_process';
 import fs from 'node:fs';
+import { canonicalizeSymlink } from './canonicalize-symlink.js';
 import path from 'node:path';
 import * as fmt from '../../application/presentation/cli-format.js';
 import { resolveCustomRunner } from '../config/product-config.js';
@@ -203,15 +204,16 @@ function dedupeMounts(dirs: string[]): string[] {
  * specifically permitted by the workflow profile are rebound writable.
  */
 export function buildBubblewrapArgs(profile: SandboxProfile, cwd: string): string[] {
-  const worktree = path.resolve(profile.worktree);
+  const canonicalize = (dir: string) => canonicalizeSymlink(path.resolve(dir));
+  const worktree = canonicalize(profile.worktree);
   requireDirectory(worktree, 'sandbox worktree');
-  const required = profile.writable.map(dir => path.resolve(dir));
+  const required = profile.writable.map(canonicalize);
   required.forEach(ensureWritableDirectory);
   const optional = (profile.optionalWritable || [])
-    .map(dir => path.resolve(dir))
+    .map(canonicalize)
     .filter(dir => fs.existsSync(dir) && fs.statSync(dir).isDirectory());
   const optionalDirectories = (profile.optionalWritableDirectories || [])
-    .map(dir => path.resolve(dir))
+    .map(canonicalize)
     .filter(dir => {
       try { ensureWritableDirectory(dir); return true; }
       catch (err) {
@@ -220,7 +222,7 @@ export function buildBubblewrapArgs(profile: SandboxProfile, cwd: string): strin
       }
     });
   const optionalFiles = (profile.optionalWritableFiles || [])
-    .map(file => path.resolve(file))
+    .map(canonicalize)
     .filter(file => fs.existsSync(file) && fs.statSync(file).isFile());
   const permitted = [...(profile.worktreeWritable ? [worktree] : []), ...required, ...optional, ...optionalDirectories, ...optionalFiles];
   // Binds beneath a config cell are mounted over the cell, after the host
@@ -240,7 +242,7 @@ export function buildBubblewrapArgs(profile: SandboxProfile, cwd: string): strin
   // its per-worktree dir are both Git-resolved authorization boundaries, so
   // retain a nested explicit bind after its common-dir bind.
   const nestedGitMetadata = [...new Set((profile.gitMetadata || [])
-    .map(dir => path.resolve(dir)))]
+    .map(canonicalize))]
     .filter(dir => !writable.includes(dir) && required.includes(dir));
   const args = ['--ro-bind', '/', '/', '--dev', '/dev', '--proc', '/proc', '--die-with-parent'];
   // Mount order is security-relevant: reapply a readonly worktree after a
@@ -273,7 +275,7 @@ function resolveConfigCell(configCell: ConfigCell | undefined): ConfigCell | nul
     fmt.log.warn(`launcher config cell is unavailable: ${(err as Error).message}`);
     return null;
   }
-  return { ...configCell, target, cell: path.resolve(configCell.cell) };
+  return { ...configCell, target: canonicalizeSymlink(target), cell: canonicalizeSymlink(path.resolve(configCell.cell)) };
 }
 
 interface LauncherStateHomes { directories: string[], files: string[], configCell?: ConfigCell }

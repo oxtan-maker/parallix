@@ -1,8 +1,8 @@
 ---
 id: TASK-2688
 title: Normalize persisted mission timestamps to canonical UTC instants
-status: backlog
-assignee: []
+status: done
+assignee: [codex]
 created_date: '2026-10-08 07:28'
 labels:
   - ai_sdlc

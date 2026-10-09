@@ -38,7 +38,8 @@ async function integrate(slug: string, worktree: string): Promise<number> {
 test('task-2620: a red integration gate repairs once, re-reviews, and stops in the integration lane', async (t) => {
   const fixture = await openRepairFixture({ slug: 'task-2620' });
   t.after(() => fixture.close());
-  const approvedRounds = (await fixture.load()).review!.rounds.length;
+  const originalMission = await fixture.load();
+  const approvedRounds = originalMission.review!.rounds.length;
 
   setCommandPathProbe(() => '/fixture-agent');
   setLauncherHealthProbe(() => ({ ok: true }));
@@ -61,8 +62,10 @@ test('task-2620: a red integration gate repairs once, re-reviews, and stops in t
         fixture.git(fixture.worktree, ['commit', '-m', 'repair']);
         // TASK-2665: a committed fix also needs fresh repair-round proof before
         // the real handoff can resume independent review.
+        const checkpointName = /Harness-created repair checkpoint: (CP-\d+);/.exec(prompt)?.[1];
+        assert.ok(checkpointName, 'the repair prompt identifies its durable checkpoint');
         const recorded = await run(['checkpoint', 'record', '--slug', fixture.slug,
-          '--name', 'CP-1', '--expected-version', String(await fixture.version()),
+          '--name', checkpointName, '--expected-version', String(await fixture.version()),
           '--criterion', 'feature ships', '--evidence', 'fix: repaired.txt; focused verification: test -f repaired.txt',
           '--next', 'Hand off for independent re-review'],
         { baseCwd: fixture.worktree, log: () => '', error: () => '' });
@@ -79,6 +82,11 @@ test('task-2620: a red integration gate repairs once, re-reviews, and stops in t
   // The gate ran red and the bounded implementer budget attempted one repair.
   assert.equal(mission.review!.rounds.length, approvedRounds + 1, 'the repaired revision opened and was re-reviewed through one fresh round');
   assert.ok(fs.existsSync(path.join(fixture.worktree, 'repaired.txt')), 'the bounded repair budget attempted one repair');
+  assert.deepEqual(mission.checkpoints.find(cp => cp.name === 'CP-1'),
+    originalMission.checkpoints.find(cp => cp.name === 'CP-1'),
+    'the repair leaves the earlier implementation checkpoint intact (TASK-2695)');
+  assert.ok(mission.checkpoints.some(cp => cp.repair?.verified),
+    'the authorized gate rerun verifies the incident checkpoint (TASK-2695)');
   // The repaired revision was re-reviewed and approved through the live route.
   assert.equal(reviewStatus(mission.review!), 'approved', 'the repaired revision was re-reviewed and approved');
   // The run stops cleanly in the integration lane: no auto-merge, no `done`.

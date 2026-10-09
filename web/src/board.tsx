@@ -11,6 +11,7 @@ import { useCallback, useEffect, useRef, useState, type KeyboardEvent, type Mous
 import type { DragEvent } from 'react';
 import type { WebBoardSnapshot, WebCommandAction, WebMissionCard } from '../../src/interfaces/web/transport.js';
 import { AttentionRail } from './attention-rail.js';
+import { CreateMissionDialog } from './create-mission-dialog.js';
 import { DoneRail } from './done-rail.js';
 import { FlightColumn } from './flight-column.js';
 import { FlowPanel } from './flow-panel.js';
@@ -68,6 +69,13 @@ export function Board({ snapshot, onRefresh }: { snapshot: WebBoardSnapshot; onR
   const [dragged, setDragged] = useState<WebMissionCard | null>(null);
   const [terminalMission, setTerminalMission] = useState<string | null>(null);
   const closeTerminal = useCallback(() => setTerminalMission(null), []);
+  /** The opener of the creation dialog, so dismissing it returns focus there. */
+  const [createFrom, setCreateFrom] = useState<HTMLButtonElement | null>(null);
+  const closeCreate = () => {
+    const opener = createFrom;
+    setCreateFrom(null);
+    queueMicrotask(() => { if (opener?.isConnected) { opener.focus(); } });
+  };
   /**
    * The pending destructive confirmation. Every other action dispatches on the
    * click that invoked it; cancellation deletes rows, so it takes a second,
@@ -179,7 +187,7 @@ export function Board({ snapshot, onRefresh }: { snapshot: WebBoardSnapshot; onR
 
   return (
     <div ref={root} tabIndex={-1} onKeyDown={moveSelection} onClick={selectTerminal}>
-      <TopBar snapshot={snapshot} flowOpen={flowOpen} onFlowToggle={() => setFlowOpen((open) => !open)} />
+      <TopBar snapshot={snapshot} flowOpen={flowOpen} onFlowToggle={() => setFlowOpen((open) => !open)} onCreate={setCreateFrom} />
       {flowOpen && <FlowPanel metrics={snapshot.metrics} />}
       <div style={{ flex: 1, display: 'flex', minHeight: 0 }}>
         <AttentionRail snapshot={snapshot} selectedId={selectedId} pendingCommands={pendingCommands} onSelect={setSelectedId} onAction={(item, control) => {
@@ -250,6 +258,18 @@ export function Board({ snapshot, onRefresh }: { snapshot: WebBoardSnapshot; onR
             </button>
           </div>
         </section>
+      )}
+      {createFrom !== null && (
+        <CreateMissionDialog
+          // Unfinished missions only, exactly the cards the board shows outside done.
+          options={snapshot.stages.filter((stage) => stage.lane !== SHIPPED_LANE).flatMap((stage) => stage.cards).filter((card) => !card.closed).map((card) => ({ id: card.id, title: card.title }))}
+          onClose={closeCreate}
+          onCreated={(missionId) => {
+            closeCreate();
+            publishOutcome(missionId, `Created ${missionId} in backlog.`);
+            void onRefresh().catch(() => publishOutcome(missionId, `Created ${missionId} in backlog. The board could not refresh yet; it will update on the next change.`));
+          }}
+        />
       )}
       {terminalMission !== null && <TerminalProgress missionId={terminalMission} onClose={closeTerminal} />}
       {[...outcomes.entries()].map(([missionId, outcome]) => <p key={missionId} role="status" aria-live="polite" style={{ margin: '0 14px 10px', color: '#aab4bf' }}>{outcome}</p>)}

@@ -32,7 +32,7 @@ export async function verifyPreReviewSetup(context: LoopContext): Promise<Verify
     return { ok: false, diagnostic: rebase.diagnostic || 'pre-review rebase still fails after the repair attempt', reason: rebase.verifyReason };
   }
   const gate = await context.ports.preReview.runGate();
-  if (gate.ok !== false) { return { ok: true, diagnostic: '' }; }
+  if (gate.ok !== false) { return { ok: true, command: gate.command, diagnostic: '' }; }
   return { ok: false, diagnostic: gate.diagnostic, reason: gate.reason };
 }
 

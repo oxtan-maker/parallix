@@ -6,6 +6,7 @@ import { git, getWorktreeStatus } from '../../git/git.js';
 import { resolveTaskFile, reportTaskResolution, getTaskStorage } from '../../backlog/backlog.js';
 import { getPrimaryBranch, squashTrailingBacklogNoiseIntoPreviousMission } from '../../filesystem/mission-utils.js';
 import { parseDirtyEntry } from './draft-conflicts.js';
+import { isDbAdhocIdentity } from '../../../domain/mission.js';
 
 export interface SyntheticDraftTask { title: string; intent: string; id: string; source: string }
 export interface DraftTarget { slug: string; syntheticTask: SyntheticDraftTask | null; existingAdhocIdentity?: boolean }
@@ -32,7 +33,7 @@ function syntheticTaskId(slug: string, seed: string) {
   // src/adapters/backlog/task-file-io.ts). A legacy `adhoc-*` free-text slug
   // keeps its historical hashed identity so existing missions stay resolvable.
   const trimmed = String(slug || '').trim();
-  if (/^parallix-adhoc-\d{4,}$/i.test(trimmed)) {
+  if (isDbAdhocIdentity(trimmed)) {
     return trimmed.toUpperCase();
   }
   const hash = crypto.createHash('sha1').update(String(seed || slug)).digest('hex').slice(0, 8).toUpperCase();
@@ -49,11 +50,11 @@ function resolveDraftTarget(rawInput: string | undefined, cwd = process.cwd()): 
   if (!explicit) {return null;}
 
   // Re-entering an existing DB-owned adhoc identity (task-2468, F6): the
-  // `parallix-adhoc-<NNNN>` counter is repository-scoped and monotonic, so a
+  // `px-<NNNN>` counter is repository-scoped and monotonic, so a
   // fresh draft of the same identity must reuse the minted identity rather than
   // minting a second one. Recognize the explicit input as an existing identity
   // reference; the preflight step skips allocation for it.
-  if (/^parallix-adhoc-\d{4,}$/i.test(explicit)) {
+  if (isDbAdhocIdentity(explicit)) {
     return {
       slug: explicit.toLowerCase(),
       syntheticTask: null,

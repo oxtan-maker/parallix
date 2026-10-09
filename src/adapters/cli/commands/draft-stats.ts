@@ -402,7 +402,7 @@ function createDraftWorkflowAdapter(deps: DraftAdapterDependencies = {}): DraftW
       }
 
       // Free-text adhoc intake gets a DB-owned, repository-scoped identity
-      // (task-2468): the `adhoc-<text>` slug is replaced by `parallix-adhoc-<NNNN>`
+      // (task-2468): the `adhoc-<text>` slug is replaced by `px-<NNNN>`
       // minted from a per-repository counter, so slug, mission id, branch, and
       // worktree suffix stay one derivable identity with no content hash.
       // Re-entering an existing DB-owned identity (F6) skips allocation: the

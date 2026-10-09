@@ -846,6 +846,9 @@ describe("behind-primary integrate", () => {
     mock.method(git, 'getCurrentBranch', () => `mission/${SLUG}`);
     mock.method(git, 'git', (args: string[]) => {
       const joined = args.join(' ');
+      if (args.includes('show') && args.includes('--format=%cI')) {
+        return { status: 0, stdout: '2026-10-09T09:07:00+02:00\n', stderr: '' };
+      }
       if (args.includes('rebase') && !args.includes('--show-current')) { state.rebaseRuns++; return { status: 0, stdout: '', stderr: '' }; }
       if (args.includes('rebase')) { return { status: 0, stdout: '', stderr: '' }; }
       if (joined.includes('merge-base') && joined.includes('--is-ancestor')) { return { status: 0, stdout: '', stderr: '' }; }
@@ -857,7 +860,7 @@ describe("behind-primary integrate", () => {
     });
     fs.mkdirSync(path.join(ROOT, 'backlog', 'tasks'), { recursive: true });
     fs.writeFileSync(path.join(ROOT, 'workflow.config.json'), JSON.stringify({ adapters: { verification: { command: 'true' }, gates: { preIntegration: [{ key: 'gate', order: 0, command: 'true' }] } } }));
-    const { getStatus } = installHarness();
+    const { getStatus, logs } = installHarness();
     mock.method(repositoryGates, 'runPhaseGates', async () => {
       state.gateRuns++;
       if (state.gateRuns === 1) { state.baseAdvanced = true; }
@@ -867,7 +870,7 @@ describe("behind-primary integrate", () => {
       await integrate([SLUG], { missionServicesFn: composition.createMissionApplicationServices });
       assert.equal(state.rebaseRuns, 2, 'main movement after gates triggers a second rebase');
       assert.equal(state.gateRuns, 2, 'gates rerun against the rebased candidate');
-      assert.equal(getStatus(), 'done');
+      assert.equal(getStatus(), 'done', logs.join('\n'));
     } finally {
       mock.reset();
       fs.rmSync(ROOT, { recursive: true, force: true });

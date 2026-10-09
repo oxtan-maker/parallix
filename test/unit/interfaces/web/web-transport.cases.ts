@@ -842,3 +842,32 @@ test('conversion is pure: the source projection is not mutated and the output is
   assert.deepStrictEqual(first, second);
   assert.doesNotThrow(() => JSON.stringify(first));
 });
+
+test('weekly delivery count survives transport and rejects malformed values (TASK-2688)', () => {
+  const snapshot = toWebBoardSnapshot(projectionWith({}));
+  for (const value of [0, 3]) {
+    const wire = { ...snapshot, metrics: { ...snapshot.metrics, weeklyCompletedMissions: value } };
+    assert.equal(validateWebBoardSnapshot(JSON.parse(JSON.stringify(wire))).ok, true);
+  }
+  for (const value of ['3', Number.NaN, Number.POSITIVE_INFINITY]) {
+    assert.equal(validateWebBoardSnapshot({ ...snapshot, metrics: { ...snapshot.metrics, weeklyCompletedMissions: value } }).ok, false);
+  }
+});
+
+
+test('other completed history round-trips separately from the weekly DONE count (TASK-2688)', () => {
+  const projection = makeProjection({ done: [makeCard({ id: tid('task-weekly'), lane: 'done' })] });
+  const withHistory = { ...projection, stages: projection.stages.map(stage => stage.lane === 'done'
+    ? { ...stage, historyCards: [makeCard({ id: tid('task-unknown'), lane: 'done' })] } : stage) };
+  const snapshot = JSON.parse(JSON.stringify(toWebBoardSnapshot(withHistory)));
+  assert.equal(validateWebBoardSnapshot(snapshot).ok, true);
+  const done = snapshot.stages.find(stage => stage.lane === 'done');
+  assert.equal(done.count, 1);
+  assert.deepEqual(done.cards.map(card => card.id), ['task-weekly']);
+  assert.deepEqual(done.historyCards.map(card => card.id), ['task-unknown']);
+  for (const historyCards of [null, 'unknown', [{}]]) {
+    const malformed = { ...snapshot, stages: snapshot.stages.map(stage => stage.lane === 'done'
+      ? { ...stage, historyCards } : stage) };
+    assert.equal(validateWebBoardSnapshot(malformed).ok, false);
+  }
+});

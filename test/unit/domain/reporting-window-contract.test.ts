@@ -1,3 +1,4 @@
+import { toCanonicalUtcInstant } from '../../../src/domain/instant.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { decisionWindowContains, decisionWindowDayEnd, decisionWindowDay, decisionRetentionBoundary, weeklyDecisionWindows } from '../../../src/domain/decision-window.js';
@@ -62,4 +63,22 @@ test('reporting day endpoints follow DST offsets rather than fixed 24-hour arith
   assert.equal(decisionWindowDayEnd('2026-03-29', 'Europe/Stockholm'), '2026-03-29T21:59:59.999Z');
   assert.equal(decisionWindowDayEnd('2026-10-25', 'Europe/Stockholm'), '2026-10-25T22:59:59.999Z');
   assert.equal(decisionWindowDayEnd('2026-10-08', 'America/Los_Angeles'), '2026-10-09T06:59:59.999Z');
+});
+
+test('canonical migration keeps local membership at midnight DST and year boundaries (TASK-2688)', () => {
+  for (const [today, values] of [
+    ['2026-10-08', ['2026-10-01T23:59:59.999+02:00', '2026-10-02T00:00:00+02:00', '2026-10-08T23:59:59.999+02:00', '2026-10-09T00:00:00+02:00']],
+    ['2026-03-29', ['2026-03-29T01:59:59.999+01:00', '2026-03-29T03:00:00+02:00', '2026-03-30T00:00:00+02:00']],
+    ['2026-10-25', ['2026-10-25T02:30:00+02:00', '2026-10-25T02:30:00+01:00', '2026-10-26T00:00:00+01:00']],
+    ['2026-01-01', ['2025-12-31T23:59:59.999+01:00', '2026-01-01T00:00:00+01:00', '2026-01-02T00:00:00+01:00']],
+  ] as const) {
+    const windows = weeklyDecisionWindows(today, 'Europe/Stockholm');
+    for (const raw of values) {
+      const canonical = toCanonicalUtcInstant(raw);
+      for (const window of [windows.current, windows.previous]) {
+        assert.equal(decisionWindowContains(window, canonical), decisionWindowContains(window, raw));
+      }
+      assert.equal(decisionWindowDay(canonical, 'Europe/Stockholm'), decisionWindowDay(raw, 'Europe/Stockholm'));
+    }
+  }
 });

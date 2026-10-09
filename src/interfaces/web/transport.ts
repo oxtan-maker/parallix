@@ -60,3 +60,5 @@ export { validateWebBoardSnapshot, validateWebCommandResult, validateWebCommandR
 // Version
 // ---------------------------------------------------------------------------
 
+export { isCreateMissionBody, validateWebCreateMissionRequest } from './transport-create-mission.js';
+export type { WebCreateMissionRequest, WebCreateMissionValidation } from './transport-create-mission.js';

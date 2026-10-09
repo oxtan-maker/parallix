@@ -261,7 +261,7 @@ export function preReviewRebaseFacts(result: Awaited<ReturnType<typeof rebaseBef
 
 function gateFacts(result: Awaited<ReturnType<typeof runPreReviewGate>>): PreReviewGateFacts {
   return result.ok
-    ? { ok: true }
+    ? { ok: true, command: result.command }
     : { ok: false, area: result.area, exitCode: result.exitCode, diagnostic: [result.stdout, result.stderr, result.error].filter(Boolean).join('\n'), reason: gateFailureReason(result) };
 }
 

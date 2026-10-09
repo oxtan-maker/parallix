@@ -1,6 +1,7 @@
 import { MISSION_STATUSES, type ClosedMission, type MissionId, type MissionStatus } from '../../domain/mission.js';
 import type { MissionTransition } from '../../domain/mission-workflow.js';
 import type { MissionOutcome } from '../../domain/usage.js';
+import { parseInstantMs } from '../../domain/instant.js';
 
 export interface FlowPoint {
   readonly at: string;
@@ -12,11 +13,13 @@ export function cumulativeFlow(
   transitions: readonly MissionTransition[],
   instants: readonly string[],
 ): FlowPoint[] {
-  const ordered = [...transitions].sort((left, right) => left.occurredAt.localeCompare(right.occurredAt));
+  // Compare parsed instants, not raw text: mixed UTC `Z` / offset spellings
+  // make lexical `<=` disagree with temporal order (TASK-2688).
+  const ordered = [...transitions].sort((left, right) => parseInstantMs(left.occurredAt) - parseInstantMs(right.occurredAt));
   return instants.map((at) => {
     const state = new Map(initial);
     for (const transition of ordered) {
-      if (transition.occurredAt <= at) { state.set(transition.missionId, transition.to); }
+      if (parseInstantMs(transition.occurredAt) <= parseInstantMs(at)) { state.set(transition.missionId, transition.to); }
     }
     const counts = Object.fromEntries(MISSION_STATUSES.map((status) => [status, 0])) as Record<MissionStatus, number>;
     for (const status of state.values()) { counts[status] += 1; }

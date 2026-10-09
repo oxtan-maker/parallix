@@ -526,3 +526,162 @@ test('board focus fallback lands on the selected card after refresh removes the 
     await window.happyDOM.close();
   }
 });
+
+// ---- Create new mission (TASK-2693) ----------------------------------------------------
+
+function createBoard() {
+  const cards = [
+    makeCard({ id: missionId('task-open-one'), title: 'First open mission', status: 'active', lane: 'active' }),
+    makeCard({ id: missionId('task-open-two'), title: 'Second open mission', status: 'backlog', lane: 'backlog' }),
+    makeCard({ id: missionId('task-shipped'), title: 'Shipped mission', status: 'done', lane: 'done' }),
+    makeCard({ id: missionId('task-closed'), title: 'Closed mission', status: 'review', lane: 'review', closed: true }),
+  ];
+  return toWebBoardSnapshot(makeProjection({ active: [cards[0]], backlog: [cards[1]], done: [cards[2]], review: [cards[3]] }));
+}
+
+/** The dialog's text fields are uncontrolled, so typing is assigning the DOM value. */
+async function enter(_page: Awaited<ReturnType<typeof renderBoard>>, element: unknown, value: string) {
+  (element as unknown as { value: string }).value = value;
+}
+
+const opener = (page: Awaited<ReturnType<typeof renderBoard>>) => [...page.mount.querySelectorAll<DomButton>('button')].find((button) => button.textContent?.includes('Create new mission'))!;
+const dialogOf = (page: Awaited<ReturnType<typeof renderBoard>>) => page.mount.querySelector<DomHtmlElement>('[role="dialog"][aria-label], [role="dialog"][aria-labelledby]');
+const fieldByLabel = (page: Awaited<ReturnType<typeof renderBoard>>, text: string) => {
+  const label = [...page.mount.querySelectorAll('label')].find((candidate) => candidate.textContent?.startsWith(text))!;
+  return page.mount.querySelector<DomHtmlElement & { value: string }>(`#${CSS_ESCAPE(label.getAttribute('for')!)}`)!;
+};
+const CSS_ESCAPE = (id: string) => id.replace(/[^a-zA-Z0-9_-]/g, '\\$&');
+const submitButton = (page: Awaited<ReturnType<typeof renderBoard>>) => [...page.mount.querySelectorAll<DomButton>('button[type="submit"]')][0];
+const createdResult = (id = 'px-0001') => ({ ...commandResult(), value: { missionId: id } });
+
+test('Create new mission opens a labelled modal dialog focused on the title and Escape cancels without sending anything', async () => {
+  const page = await renderBoard({ board: createBoard() });
+  try {
+    assert.equal(dialogOf(page), null);
+    const trigger = opener(page);
+    await act(async () => { trigger.focus(); trigger.click(); });
+    const dialog = dialogOf(page)!;
+    assert.equal(dialog.getAttribute('aria-modal'), 'true');
+    assert.match(page.mount.querySelector(`#${CSS_ESCAPE(dialog.getAttribute('aria-labelledby')!)}`)?.textContent ?? '', /Create new mission/);
+    assert.ok(isSameNode(page.window.document.activeElement, fieldByLabel(page, 'Title')));
+    for (const label of ['Title', 'Description', 'Context', 'Labels', 'Success criteria']) { assert.ok(fieldByLabel(page, label), label); }
+    await enter(page, fieldByLabel(page, 'Title'), 'Typed but abandoned');
+    await act(async () => { dialog.dispatchEvent(new page.window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); });
+    assert.equal(dialogOf(page), null);
+    await act(async () => { await new Promise<void>((resolve) => queueMicrotask(resolve)); });
+    assert.ok(isSameNode(page.window.document.activeElement, trigger), 'focus returns to the opener');
+    assert.equal(page.calls.length, 0);
+  } finally { await page.close(); }
+});
+
+test('Create new mission Cancel and backdrop dismissal create no mission, and Tab stays inside the dialog', async () => {
+  const page = await renderBoard({ board: createBoard() });
+  try {
+    await act(async () => { opener(page).click(); });
+    const cancel = [...page.mount.querySelectorAll<DomButton>('button')].find((button) => button.textContent === 'Cancel')!;
+    cancel.focus();
+    const tab = new page.window.KeyboardEvent('keydown', { key: 'Tab', bubbles: true, cancelable: true });
+    submitButton(page).focus();
+    await act(async () => { submitButton(page).dispatchEvent(tab); });
+    assert.equal(tab.defaultPrevented, true, 'Tab from the last control wraps');
+    assert.ok(isSameNode(page.window.document.activeElement, fieldByLabel(page, 'Title') ?? null) || page.window.document.activeElement !== submitButton(page));
+    await act(async () => { cancel.click(); });
+    assert.equal(dialogOf(page), null);
+    await act(async () => { opener(page).click(); });
+    await act(async () => { page.mount.querySelector<DomHtmlElement>('[role="presentation"]')!.click(); });
+    assert.equal(dialogOf(page), null);
+    assert.equal(page.calls.length, 0);
+  } finally { await page.close(); }
+});
+
+test('Create new mission rejects a blank title with actionable feedback and sends nothing', async () => {
+  const page = await renderBoard({ board: createBoard() });
+  try {
+    await act(async () => { opener(page).click(); });
+    await enter(page, fieldByLabel(page, 'Title'), '   ');
+    await act(async () => { submitButton(page).click(); });
+    assert.match(page.mount.querySelector('[role="alert"]')?.textContent ?? '', /Title is required/);
+    assert.ok(isSameNode(page.window.document.activeElement, fieldByLabel(page, 'Title')));
+    await enter(page, fieldByLabel(page, 'Title'), 'Titled');
+    await enter(page, fieldByLabel(page, 'Context'), 'Only a context');
+    await act(async () => { submitButton(page).click(); });
+    assert.match(page.mount.querySelector('[role="alert"]')?.textContent ?? '', /context/i);
+    assert.equal(page.calls.length, 0);
+  } finally { await page.close(); }
+});
+
+test('Create new mission offers only unfinished missions as dependencies and sends every field once, then refreshes', async () => {
+  let refreshed = 0;
+  const page = await renderBoard({ board: createBoard(), result: createdResult(), refresh: async () => { refreshed += 1; } });
+  try {
+    await act(async () => { opener(page).click(); });
+    await enter(page, fieldByLabel(page, 'Title'), '  Capture the idea  ');
+    await enter(page, fieldByLabel(page, 'Description'), 'What we want');
+    await enter(page, fieldByLabel(page, 'Context'), 'Why we want it');
+    await enter(page, fieldByLabel(page, 'Labels'), 'UX, api,, ');
+    await enter(page, fieldByLabel(page, 'Success criteria'), 'It works\n\n It is documented ');
+    const picker = [...page.mount.querySelectorAll<DomButton>('button')].find((button) => button.getAttribute('aria-haspopup') === 'true')!;
+    await act(async () => { picker.click(); });
+    const offered = [...page.mount.querySelectorAll('fieldset label')].map((label) => label.textContent);
+    assert.deepEqual(offered, ['task-open-twoSecond open mission', 'task-open-oneFirst open mission']);
+    const boxes = [...page.mount.querySelectorAll<DomHtmlElement>('fieldset input[type="checkbox"]')];
+    await act(async () => { boxes[0].click(); });
+    await act(async () => { boxes[1].click(); });
+    assert.match(picker.textContent ?? '', /2 selected: task-open-two, task-open-one/);
+    await act(async () => { submitButton(page).click(); await new Promise<void>((resolve) => setTimeout(resolve, 0)); });
+    assert.equal(page.calls.length, 1);
+    const body = payload(page.calls);
+    assert.match(body.requestKey, /\S/);
+    assert.deepEqual({ ...body, requestKey: 'k' }, {
+      kind: 'mission:create', requestKey: 'k', title: 'Capture the idea', description: 'What we want', context: 'Why we want it',
+      labels: ['UX', 'api'], successCriteria: ['It works', 'It is documented'], dependencies: ['task-open-two', 'task-open-one'],
+    });
+    assert.equal(refreshed, 1);
+    assert.equal(dialogOf(page), null);
+    assert.match(page.mount.querySelector('[role="status"]')?.textContent ?? '', /Created px-0001 in backlog/);
+  } finally { await page.close(); }
+});
+
+test('Create new mission blocks duplicate submits while pending', async () => {
+  let release: ((response: Response) => void) | undefined;
+  const page = await renderBoard({ board: createBoard(), respond: () => new Promise<Response>((resolve) => { release = resolve; }) });
+  try {
+    await act(async () => { opener(page).click(); });
+    await enter(page, fieldByLabel(page, 'Title'), 'Only once');
+    await act(async () => { submitButton(page).click(); submitButton(page).click(); });
+    await act(async () => { submitButton(page).click(); });
+    assert.equal(page.calls.length, 1);
+    assert.equal(submitButton(page).getAttribute('aria-disabled'), 'true');
+    assert.match(submitButton(page).textContent ?? '', /Creating/);
+    await act(async () => { page.mount.querySelector<DomHtmlElement>('[role="dialog"]')!.dispatchEvent(new page.window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); });
+    assert.notEqual(dialogOf(page), null, 'a pending creation cannot be dismissed out from under itself');
+    await act(async () => { release!(new Response(JSON.stringify(createdResult()), { headers: { 'content-type': 'application/json' } })); await new Promise<void>((resolve) => setTimeout(resolve, 0)); });
+    assert.equal(dialogOf(page), null);
+  } finally { await page.close(); }
+});
+
+test('Create new mission keeps entries after a failure and retries with the same request key', async () => {
+  const answers = [
+    () => new Response(JSON.stringify(commandResult('failed', { kind: 'validation', message: 'dependency task-open-one is already finished and cannot be depended on' })), { headers: { 'content-type': 'application/json' } }),
+    () => { throw new Error('connection reset'); },
+    () => new Response(JSON.stringify(createdResult()), { headers: { 'content-type': 'application/json' } }),
+  ];
+  const page = await renderBoard({ board: createBoard(), respond: async () => answers.shift()!() });
+  try {
+    await act(async () => { opener(page).click(); });
+    await enter(page, fieldByLabel(page, 'Title'), 'Keep me');
+    await enter(page, fieldByLabel(page, 'Labels'), 'ux');
+    const settle = async () => { await act(async () => { submitButton(page).click(); await new Promise<void>((resolve) => setTimeout(resolve, 0)); }); };
+    await settle();
+    assert.match(page.mount.querySelector('[role="alert"]')?.textContent ?? '', /already finished.*entries are kept/);
+    assert.equal(fieldByLabel(page, 'Title').value, 'Keep me');
+    assert.equal(fieldByLabel(page, 'Labels').value, 'ux');
+    await settle();
+    assert.match(page.mount.querySelector('[role="alert"]')?.textContent ?? '', /connection reset.*entries are kept/);
+    assert.notEqual(dialogOf(page), null);
+    await settle();
+    assert.equal(page.calls.length, 3);
+    assert.equal(new Set(page.calls.map((call) => JSON.parse(String(call.body)).requestKey)).size, 1, 'every retry reuses one request key');
+    assert.equal(dialogOf(page), null);
+  } finally { await page.close(); }
+});

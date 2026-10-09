@@ -554,7 +554,7 @@ describe("rebounce review submit repro", { concurrency: false }, () => {
     assert.equal(handoffOptions?.recoverGateFailure, true);
   });
 
-  test('task-2439 review-submit recovery uses ADR 0048 classification and the kernel retry budget', async () => {
+  test('malformed locked gates escalate without launches or verification (TASK-2695)', async () => {
     const prompts: string[] = [];
     const transitions: string[] = [];
     let verifies = 0;
@@ -575,12 +575,12 @@ describe("rebounce review submit repro", { concurrency: false }, () => {
       log: () => {}, error: () => {},
     });
 
-    assert.equal(outcome.outcome, 'fixed');
+    assert.equal(outcome.outcome, 'human-only');
     assert.equal(outcome.classification.failureClass, 'MalformedGates');
-    assert.equal(outcome.classification.dispatchAction, 'AutoRepair');
-    assert.equal(prompts.length, 2);
-    assert.deepEqual(transitions, ['active', 'active']);
-    assert.match(prompts[0], /Gate command: \.\/scripts\/verify-local\.sh all/);
+    assert.equal(outcome.classification.dispatchAction, 'HumanOnly');
+    assert.equal(prompts.length, 0);
+    assert.deepEqual(transitions, []);
+    assert.equal(verifies, 0);
   });
 
   test('task-2439 real declared-gate process failure remains GateFailure', async () => {
@@ -604,8 +604,8 @@ describe("rebounce review submit repro", { concurrency: false }, () => {
     }));
 
     assert.deepEqual(classifications.map(result => [result.failureClass, result.dispatchAction]), [
-      ['MalformedGates', 'AutoRepair'],
-      ['MalformedGates', 'AutoRepair'],
+      ['MalformedGates', 'HumanOnly'],
+      ['MalformedGates', 'HumanOnly'],
     ]);
   });
 });

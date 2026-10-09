@@ -9,7 +9,7 @@ import { SqliteDatabaseAdapter } from './database-adapter.js';
  * Backlog-backed missions keep their identity in a Backlog task file. An adhoc
  * mission has no such file in an adhoc-only repository, so its identity is
  * minted here: a monotonic counter owned per repository, allocated atomically,
- * producing `parallix-adhoc-<NNNN>`. No content hash: slug, mission id, branch,
+ * producing `px-<NNNN>`. No content hash: slug, mission id, branch,
  * and worktree suffix all derive from this counter, exactly like the original
  * pre-Parallix derivation rule for Backlog missions.
  *
@@ -20,7 +20,7 @@ import { SqliteDatabaseAdapter } from './database-adapter.js';
  * `node:sqlite` driver import stays confined to that one module (SC2).
  */
 
-const ADHOC_PREFIX = 'parallix-adhoc-';
+const ADHOC_PREFIX = 'px-';
 
 /** @param {number} counter */
 function formatCounter(counter: number): string {
@@ -83,8 +83,9 @@ export function allocateAdhocIdentity(
 
     const slug = `${ADHOC_PREFIX}${formatCounter(counter)}`;
     return { slug, missionId: slug, taskId: slug.toUpperCase() };
-  } catch (error) {
+  } finally {
+    // Close on success as well: a long-lived host (the web board) allocates
+    // repeatedly and must not accumulate open handles.
     db.closeSync();
-    throw error;
   }
 }

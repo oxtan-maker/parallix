@@ -18,6 +18,8 @@ export const BOARD_PROJECTION_VERSION = 1 as const;
 export const IN_FLIGHT_WIP_LANES: ReadonlySet<BoardLane> = new Set(['refined', 'active', 'review', 'integration']);
 
 export interface BoardStage {
+  /** Retained DONE records outside the verified weekly delivery cohort. */
+  readonly historyCards?: readonly MissionCard[];
   readonly lane: BoardLane;
   readonly cards: readonly MissionCard[];
   readonly count: number;

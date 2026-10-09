@@ -369,8 +369,11 @@ describe("Mission lifecycle and review invariants , ,", () => {
   test('done remains open until closeout records closure', () => {
     const integrated = mission('done');
     assert.throws(() => requireClosedMission(integrated), /not closed/);
+    // closeMission canonicalizes the closure instant to UTC ISO-8601 with
+    // millisecond precision (TASK-2688), so the stored and returned value carry
+    // the `.000Z` spelling regardless of the input spelling.
     const closed = closeMission(integrated, '2026-07-22T10:00:00Z');
-    assert.equal(requireClosedMission(closed).closedAt, '2026-07-22T10:00:00Z');
+    assert.equal(requireClosedMission(closed).closedAt, '2026-07-22T10:00:00.000Z');
     assert.throws(() => closeMission(mission('active'), 'now'), /before integration is done/);
     assert.throws(() => closeMission(integrated, '  '), /closure time/);
     assert.throws(() => closeMission(closed, 'later'), /already closed/);
@@ -496,7 +499,7 @@ describe("Mission field and legacy-path authority", () => {
   const repositoryMission: Mission = {
     id: missionId('task-2294'), repositoryId: repositoryId('parallix'), title: 'authoritative',
     labels: missionLabels(['user_value', 'bug']), status: 'active', rawStatus: 'active', closedAt: null, assignee: agentFamily('codex'),
-    checkpoints: [], brief: null, declaredGates: [], successCriteria: [], completedSuccessCriteria: [], dependencies: [], predictedNelBucket: null, reproductionTest: null, review: null, netEngineeringLines: 10,
+    checkpoints: [], brief: null, declaredGates: [], successCriteria: [], completedSuccessCriteria: [], dependencies: [], description: null, predictedNelBucket: null, reproductionTest: null, review: null, netEngineeringLines: 10,
     externalTaskRef: externalTaskRef('backlog', 'TASK-2294', 'backlog/tasks/task-2294.md'),
   };
 

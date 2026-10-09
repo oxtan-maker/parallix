@@ -15,6 +15,7 @@ import type { RepositoryId } from '../../domain/repository.js';
 export type BoardCommandKind =
   | 'active:execute'
   | 'mission:intake'
+  | 'mission:create'
   | 'draft:create'
   | 'checkpoint:record'
   | 'handoff:record'
@@ -45,6 +46,16 @@ export type BoardCommandPayload =
     readonly assignee?: AgentFamily | null;
     readonly rawStatus?: string;
     readonly externalTaskRef?: ExternalTaskRef | null;
+  }
+  | {
+    readonly kind: 'mission:create';
+    readonly requestKey: string;
+    readonly title: string;
+    readonly description?: string;
+    readonly context?: string;
+    readonly labels?: readonly string[];
+    readonly successCriteria?: readonly string[];
+    readonly dependencies?: readonly string[];
   }
   | {
     readonly kind: 'checkpoint:record';
@@ -143,6 +154,7 @@ export interface BoardCommandDispatcher {
 export const INTEGRATED_CAPABILITIES = new Set<BoardCommandKind>([
   'active:execute',
   'mission:intake',
+  'mission:create',
   'draft:create',
   'checkpoint:record',
   'handoff:record',

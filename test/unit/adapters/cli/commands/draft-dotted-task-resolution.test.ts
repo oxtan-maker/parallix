@@ -45,7 +45,7 @@ function draftPreflight(root: string, input: string) {
     detectLaunchBaseBranchFn: () => null,
     allocateAdhocIdentityFn: () => {
       sideEffects.push('allocate');
-      return { slug: 'parallix-adhoc-0042', taskId: 'PARALLIX-ADHOC-0042' };
+      return { slug: 'px-0042', taskId: 'PX-0042' };
     },
   });
   const ctx = adapter.preflight([input], {});
@@ -97,7 +97,7 @@ test('draft preflight rejects a nonexistent dotted task id before setup and name
 test('ad hoc drafts still allocate a DB-owned identity and resume by that identity', () => {
   const freeText = draftPreflight(seedBacklog({}), 'Fix the flaky board refresh');
   assert.equal(freeText.ctx.exited, false);
-  assert.equal(freeText.ctx.slug, 'parallix-adhoc-0042');
+  assert.equal(freeText.ctx.slug, 'px-0042');
   assert.deepEqual(freeText.sideEffects, ['allocate']);
 
   const dirRoot = seedBacklog({});
@@ -111,10 +111,10 @@ test('ad hoc drafts still allocate a DB-owned identity and resume by that identi
   assert.equal(explicitAdhoc.ctx.exited, false);
   assert.deepEqual(explicitAdhoc.sideEffects, ['allocate']);
 
-  const resumeRoot = seedBacklog({ 'parallix-adhoc-0007 - Existing.md': 'PARALLIX-ADHOC-0007' });
-  const resumed = draftPreflight(resumeRoot, 'parallix-adhoc-0007');
+  const resumeRoot = seedBacklog({ 'px-0007 - Existing.md': 'PX-0007' });
+  const resumed = draftPreflight(resumeRoot, 'px-0007');
   assert.equal(resumed.ctx.exited, false);
-  assert.equal(resumed.ctx.slug, 'parallix-adhoc-0007');
+  assert.equal(resumed.ctx.slug, 'px-0007');
   assert.deepEqual(resumed.sideEffects, [], 'resuming reuses the minted identity');
 });
 

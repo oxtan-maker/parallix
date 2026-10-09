@@ -260,8 +260,11 @@ describe('SqliteBoardLaneEventRepository — typed queries', () => {
 
       const rows = await repo.findByMissionId('task-1');
       assert.equal(rows.length, 2);
-      assert.equal(rows[0].occurredAt, '2026-07-24T08:00:00Z');
-      assert.equal(rows[1].occurredAt, '2026-07-24T10:00:00Z');
+      // The repository stores occurred_at as the canonical UTC ISO-8601 instant
+      // (TASK-2688): a single fixed-width spelling keeps lexical order equal to
+      // temporal order, so the round-tripped value carries millisecond precision.
+      assert.equal(rows[0].occurredAt, '2026-07-24T08:00:00.000Z');
+      assert.equal(rows[1].occurredAt, '2026-07-24T10:00:00.000Z');
     });
   });
 

@@ -11,6 +11,7 @@
 import test, { describe } from 'node:test';
 import assert from 'node:assert/strict';
 import { DraftCommandUseCase } from '../../../src/application/draft-command-use-case.js';
+import { MissionCreationService } from '../../../src/application/mission-creation-service.js';
 import { main, KNOWN_COMMANDS, suggestCommand } from '../../../src/interfaces/cli/runtime.js';
 
 // no task ID in the legacy file (was test/draft-command-use-case.test.ts)
@@ -439,5 +440,118 @@ describe('Mission start removal', () => {
 
     assert.equal(exitedWith, 1);
     assert.ok(errors.some((line) => /Unknown command: mission-startx/.test(line)));
+  });
+});
+
+// Create new mission (TASK-2693) from the web board — identity, validation, dependency
+// eligibility and retry safety, against doubles for the intake write and the catalog.
+describe('Mission creation use case', () => {
+  const REPO = 'parallix' as never;
+  const CAPABILITIES = new Set(['mission:intake'] as const);
+
+  function fixture(missions: unknown[] = []) {
+    const writes: Record<string, unknown>[] = [];
+    let counter = 0;
+    let failNext: unknown = null;
+    const intake = {
+      async execute(request: Record<string, unknown>) {
+        writes.push(request);
+        if (failNext) { const outcome = failNext; failNext = null; return outcome; }
+        return { status: 'completed', value: { mission: { id: request.missionId }, version: 1 }, durableEvidence: [] };
+      },
+    };
+    const service = new MissionCreationService(
+      intake as never,
+      { loadAllMissions: async () => missions as never },
+      { allocate: () => `px-${String(++counter).padStart(4, '0')}` as never },
+      REPO,
+    );
+    const create = (overrides: Record<string, unknown> = {}) => service.execute({
+      operationId: 'op', requestKey: 'form-1', title: 'Capture it', capabilities: CAPABILITIES, ...overrides,
+    } as never);
+    return { writes, create, failWith: (outcome: unknown) => { failNext = outcome; }, allocated: () => counter };
+  }
+  const open = (id: string, overrides: Record<string, unknown> = {}) => ({ id, repositoryId: REPO, status: 'backlog', closedAt: null, ...overrides });
+
+  test('creates one backlog intake carrying every submitted field under an allocated identity', async () => {
+    const { create, writes } = fixture([open('task-1')]);
+    const outcome = await create({
+      title: '  Capture it  ', description: 'Goal text', context: 'Because', labels: ['UX', 'ux', 'api'],
+      successCriteria: ['It works'], dependencies: ['task-1'],
+    });
+    assert.equal(outcome.status, 'completed');
+    assert.equal(writes.length, 1);
+    assert.equal(writes[0].missionId, 'px-0001');
+    assert.equal(writes[0].repositoryId, REPO);
+    assert.equal(writes[0].title, 'Capture it');
+    assert.deepEqual(writes[0].labels, ['ux', 'api']);
+    assert.deepEqual(writes[0].brief, { goal: 'Goal text', why: 'Because', scope: null, outOfScope: [] });
+    assert.deepEqual(writes[0].successCriteria, ['It works']);
+    assert.deepEqual(writes[0].dependencies, ['task-1']);
+  });
+
+  test('keeps a description with no context as the description and records no brief (TASK-2693)', async () => {
+    const { create, writes } = fixture();
+    const outcome = await create({ description: '  Needs a reason later  ' });
+    assert.equal(outcome.status, 'completed');
+    assert.equal(writes[0].description, 'Needs a reason later');
+    assert.equal(writes[0].brief, undefined);
+  });
+
+  test('rejects blank titles and incomplete or oversized input before allocating an identity or writing', async () => {
+    const { create, writes, allocated } = fixture();
+    for (const overrides of [
+      { title: '   ' },
+      { title: 'x'.repeat(201) },
+      { title: 'ok', context: 'only a context' },
+      { title: 'ok', labels: ['a', ' '] },
+      { title: 'ok', successCriteria: ['same', 'same'] },
+      { title: 'ok', dependencies: ['task-1', 'task-1'] },
+    ]) {
+      const outcome = await create(overrides);
+      assert.equal(outcome.status, 'rejected', JSON.stringify(overrides));
+      assert.equal(outcome.error.kind, 'validation');
+    }
+    assert.equal(writes.length, 0);
+    assert.equal(allocated(), 0);
+  });
+
+  test('refuses finished, closed, foreign and nonexistent dependencies', async () => {
+    const { create, writes } = fixture([
+      open('task-open'), open('task-done', { status: 'done' }), open('task-closed', { closedAt: '2026-01-01T00:00:00Z' }),
+      open('task-foreign', { repositoryId: 'other' }),
+    ]);
+    for (const dependency of ['task-done', 'task-closed', 'task-foreign', 'task-missing']) {
+      const outcome = await create({ requestKey: dependency, dependencies: ['task-open', dependency] });
+      assert.equal(outcome.status, 'rejected', dependency);
+      assert.match(outcome.error.message, new RegExp(dependency));
+    }
+    assert.equal(writes.length, 0);
+    assert.equal((await create({ requestKey: 'ok', dependencies: ['task-open'] })).status, 'completed');
+  });
+
+  test('requires the intake capability', async () => {
+    const { create, writes } = fixture();
+    const outcome = await create({ capabilities: new Set() });
+    assert.equal(outcome.error.kind, 'capability');
+    assert.equal(writes.length, 0);
+  });
+
+  test('a repeated request key returns the persisted mission instead of creating another', async () => {
+    const { create, writes } = fixture();
+    const [first, concurrent] = await Promise.all([create(), create()]);
+    const retried = await create();
+    assert.equal(writes.length, 1);
+    assert.equal(first.value.mission.id, concurrent.value.mission.id);
+    assert.equal(retried.value.mission.id, first.value.mission.id);
+    assert.equal((await create({ requestKey: 'form-2' })).value.mission.id, 'px-0002');
+  });
+
+  test('a failed write is not remembered, so the same request key can retry', async () => {
+    const { create, writes, failWith } = fixture();
+    failWith({ status: 'failed', error: { kind: 'unavailable', message: 'database is locked' }, durableEvidence: [] });
+    assert.equal((await create()).status, 'failed');
+    assert.equal((await create()).status, 'completed');
+    assert.equal(writes.length, 2);
   });
 });

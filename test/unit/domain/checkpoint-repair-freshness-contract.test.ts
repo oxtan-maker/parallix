@@ -103,3 +103,90 @@ describe('Checkpoint repair freshness', () => {
     assert.deepEqual(rows.map((row) => [row.criterion, row.recordedRound]), [['first', undefined], ['second', 2]]);
   });
 });
+
+// Harness-created incident checkpoints share the existing record-time evidence authority.
+import { RepairCheckpointService, repairCheckpointFailure } from '../../../src/application/repair-checkpoint-service.js';
+import { fixtureMission, inMemoryTransitionStore } from '../../fixtures/mission-builders.js';
+
+function incidentFixture() {
+  const mission = fixtureMission('repair-checkpoint', {
+    brief: {} as never, successCriteria: ['first', 'second'], completedSuccessCriteria: [0, 1],
+    checkpoints: [{ missionId: missionId('repair-checkpoint'), name: 'CP-1', nextActionText: 'continue', goalCheck: [
+      { criterion: 'first', evidence: 'npm test', recordedRound: 1 },
+      { criterion: 'second', evidence: 'npm test', recordedRound: 1 },
+    ] }],
+  });
+  const store = inMemoryTransitionStore(mission);
+  const repair = new RepairCheckpointService(store);
+  const checkpoints = new MissionCheckpointService(store);
+  const record = async (name: string) => checkpoints.record({
+    operationId: 'record', missionId: mission.id, expectedVersion: (await store.load()).version,
+    capabilities: new Set(['checkpoint:record']), checkpoint: { missionId: mission.id, name,
+      goalCheck: [{ criterion: 'first', evidence: 'npm test' }], nextActionText: 'handoff' },
+  });
+  return { mission, store, repair, record };
+}
+
+test('incident repair records only its affected criterion and preserves original proof through relaunch (TASK-2695)', async () => {
+  const { mission, store, repair, record } = incidentFixture();
+  const original = structuredClone(mission.checkpoints);
+  const request = { slug: mission.id, incidentId: 'incident-1', command: 'npm test', attempt: 1 };
+  const opened = await repair.open(request);
+  assert.equal(opened?.name, 'CP-2');
+  assert.match(repairCheckpointFailure(store.mission().checkpoints) ?? '', /CP-2/);
+  await assert.rejects(repair.verify(mission.id, 'CP-2'), /fresh authorized evidence/);
+  assert.equal((await record('CP-2')).status, 'completed');
+  assert.equal(repairCheckpointFailure(store.mission().checkpoints), null);
+  await repair.verify(mission.id, 'CP-2');
+  assert.equal(store.mission().checkpoints[1].repair?.verified, true);
+  await repair.open({ ...request, attempt: 2 });
+  assert.match(repairCheckpointFailure(store.mission().checkpoints) ?? '', /CP-2/);
+  await assert.rejects(repair.verify(mission.id, 'CP-2'), /fresh authorized evidence/);
+  assert.equal((await record('CP-2')).status, 'completed');
+  await repair.verify(mission.id, 'CP-2');
+  assert.deepEqual(store.mission().checkpoints[0], original[0]);
+  assert.equal(store.mission().checkpoints[1].goalCheck.length, 1);
+  const nextRound = await repair.open({ ...request, incidentId: 'incident-2' });
+  assert.equal(nextRound?.name, 'CP-3');
+  assert.equal(store.mission().checkpoints[1].repair?.verified, true);
+});
+
+test('structured blocker validates exact command, survives evidence writes and blocks handoff (TASK-2695)', async () => {
+  const { mission, store, repair, record } = incidentFixture();
+  await repair.open({ slug: mission.id, incidentId: 'incident', command: 'npm test', attempt: 1 });
+  const blocker = { command: 'npm test', diagnostic: 'support module rejected', authorityReason: 'locked check', proposedCorrection: 'operator selects owner' };
+  const request = { operationId: 'blocker', missionId: mission.id, capabilities: new Set(['checkpoint:record'] as const), name: 'CP-2', blocker };
+  assert.equal((await repair.report({ ...request, expectedVersion: (await store.load()).version, blocker: { ...blocker, command: 'unrelated' } })).status, 'failed');
+  assert.equal((await repair.report({ ...request, expectedVersion: (await store.load()).version, blocker: { ...blocker, authorityReason: '' } })).status, 'failed');
+  assert.equal((await repair.report({ ...request, expectedVersion: (await store.load()).version })).status, 'completed');
+  assert.deepEqual(await repair.readBlocker(mission.id, 'CP-2'), blocker);
+  const checkpoints = new MissionCheckpointService(store);
+  assert.equal((await checkpoints.unplan({ ...request, expectedVersion: (await store.load()).version, capabilities: new Set(['mission:context']) })).status, 'failed');
+  assert.match(repairCheckpointFailure(store.mission().checkpoints) ?? '', /human review/);
+  assert.equal((await record('CP-2')).status, 'failed');
+  await assert.rejects(repair.open({ slug: mission.id, incidentId: 'new-incident', command: 'npm test', attempt: 1 }), /operator decision/);
+});
+
+test('repair checkpoint planning leaves earlier missing checkpoints missing (TASK-2695)', async () => {
+  const { mission, store, repair, record } = incidentFixture();
+  await store.save({ ...store.mission(), checkpoints: [...store.mission().checkpoints,
+    { missionId: mission.id, name: 'CP-2', firstLine: 'remaining implementation', goalCheck: [], nextActionText: '' }] } as Mission);
+  const opened = await repair.open({ slug: mission.id, incidentId: 'incident', command: 'npm test', attempt: 1 });
+  assert.equal(opened?.name, 'CP-3');
+  assert.equal((await record('CP-3')).status, 'completed');
+  assert.match(repairCheckpointFailure(store.mission().checkpoints) ?? '', /CP-2/);
+  assert.equal((await record('CP-2')).status, 'completed');
+  assert.equal(repairCheckpointFailure(store.mission().checkpoints), null);
+});
+
+test('changed locked gates cannot be certified by an unrelated green rerun (TASK-2695)', async () => {
+  const { mission, store, repair, record } = incidentFixture();
+  await store.save({ ...store.mission(), declaredGates: ['npm test'] } as Mission);
+  await repair.open({ slug: mission.id, incidentId: 'incident', command: 'npm test', attempt: 1 });
+  assert.equal((await record('CP-2')).status, 'completed');
+  await store.save({ ...store.mission(), declaredGates: ['npm run typecheck'] } as Mission);
+  assert.match(repairCheckpointFailure(store.mission().checkpoints, ['npm run typecheck']) ?? '', /required checks changed/);
+  await assert.rejects(repair.verify(mission.id, 'CP-2'), /unrelated success/);
+  await assert.rejects(repair.open({ slug: mission.id, incidentId: 'incident', command: 'npm test', attempt: 2 }), /operator decision/);
+  assert.equal(store.mission().checkpoints[1].repair?.verified, false);
+});

@@ -1404,10 +1404,10 @@ test('printIntegrationPreflight reads an adhoc mission from the Mission store in
 
   try {
     const result = withDebug(() => printIntegrationPreflight({
-      slug: 'parallix-adhoc-0001',
-      branch: 'mission/parallix-adhoc-0001',
-      currentBranch: 'mission/parallix-adhoc-0001',
-      missionDir: '/tmp/project-parallix-adhoc-0001/missions/parallix-adhoc-0001',
+      slug: 'px-0001',
+      branch: 'mission/px-0001',
+      currentBranch: 'mission/px-0001',
+      missionDir: '/tmp/project-px-0001/missions/px-0001',
       task: { ok: false, reason: 'missing' },
       taskStatus: null,
       taskAssignee: null,
@@ -2097,8 +2097,8 @@ test('R5: stale active recovery with human override persists a real ReviewerDeci
     const approveEvents = events.filter((e) => e.from_status === 'review' && e.to_status === 'integration');
     assert.equal(submitEvents.length, 1, 'exactly one active → review event');
     assert.equal(approveEvents.length, 1, 'exactly one review → integration event');
-    assert.equal(approveEvents[0].occurred_at, decidedAt, 'approve transition uses the stored decidedAt');
-    assert.equal(submitEvents[0].occurred_at, submittedAt, 'recovered active → review uses the authoritative review-entry timestamp, not the recovery wall clock');
+    assert.equal(approveEvents[0].occurred_at, new Date(decidedAt).toISOString(), 'approve transition uses the stored decidedAt');
+    assert.equal(submitEvents[0].occurred_at, new Date(submittedAt).toISOString(), 'recovered active → review uses the authoritative review-entry timestamp, not the recovery wall clock');
     assert.ok(submitEvents[0].occurred_at <= approveEvents[0].occurred_at, 'lane events stay ordered: review entry does not postdate review exit');
   } finally {
     await database.close();

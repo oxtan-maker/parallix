@@ -17,6 +17,7 @@ export const MISSION_FIELD_AUTHORITY = {
   id: targetSource,
   repositoryId: targetSource,
   title: targetSource,
+  description: targetSource,
   labels: targetSource,
   status: targetSource,
   rawStatus: targetSource,

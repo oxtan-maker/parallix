@@ -1,3 +1,5 @@
+import { repairCheckpointFlowCases } from './repair-checkpoint-flow.cases.js';
+repairCheckpointFlowCases();
 // Mission use-case persistence contract: Mission use cases over SQLite and lifecycle write ordering.
 //
 // Behavior-owned suite (TASK-2622.07). Legacy case names are unchanged; each section keeps its

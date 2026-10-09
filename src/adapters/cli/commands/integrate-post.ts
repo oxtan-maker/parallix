@@ -17,6 +17,7 @@ export {
 } from './stats.js';
 import * as postIntegrateHook from '../../process/post-integrate-hook.js';
 import { missionId } from '../../../domain/mission.js';
+import { toCanonicalUtcInstant } from '../../../domain/instant.js';
 import { classifyHookFailure } from '../../../application/hook-failure-workflow.js';
 import { bookkeepingCommitMessage } from '../../../domain/approval-coverage.js';
 import { missionRepositoryKey } from '../../filesystem/mission-repository-key.js';
@@ -201,7 +202,12 @@ function resolveLandedCommitTimestamp(landedCommit: string, rootDir: string) {
     fmt.log.warn(`Could not read the landed commit timestamp for ${landedCommit}; recording completion at the current time.`);
     return null;
   }
-  return timestamp;
+  // `git show --format=%cI` emits an explicit-offset instant (e.g.
+  // `2026-10-09T09:07:00+02:00`). Normalize to the canonical UTC spelling so the
+  // persisted `occurred_at` matches `closed_at` and stays lexically ordered with
+  // every other mission timestamp (TASK-2688). A value that does not parse
+  // throws, which aborts closeout rather than storing a malformed instant.
+  return toCanonicalUtcInstant(timestamp);
 }
 
 /**
@@ -273,8 +279,9 @@ export async function closeLandedIntegrationOrAbort(slug: string, landedCommit: 
     actor: loaded.mission.assignee ?? 'custom',
     // Administrative closure time, deliberately the closeout/retry time rather
     // than the landed commit time: it records when the operator ended the last
-    // lane dwell, not when the change was delivered.
-    closedAt: new Date().toISOString(),
+    // lane dwell, not when the change was delivered. Canonicalized so the
+    // stored form matches every other mission timestamp (TASK-2688).
+    closedAt: toCanonicalUtcInstant(new Date().toISOString()),
     integration: { source: 'git', status: 'fresh', value: { completed: true } },
   });
   if (result.status !== 'completed') {

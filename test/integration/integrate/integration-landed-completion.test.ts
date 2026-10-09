@@ -268,10 +268,10 @@ test('R4: a resumed integration is stamped with the landed commit time, not the 
   const result = await runIntegrate({ taskStatus: 'approved', missionStatus: 'integration', resume: true });
 
   assert.equal(result.mission.status, 'done');
-  assert.deepEqual(result.occurredAt, [LANDED_AT], 'the CLI must resolve and pass the landed commit timestamp');
+  assert.deepEqual(result.occurredAt, [new Date(LANDED_AT).toISOString()], 'the CLI must resolve and pass the landed commit timestamp');
   const [event] = doneEvents(result.store);
-  assert.equal(event.occurredAt, LANDED_AT);
-  assert.notEqual(event.occurredAt, RETRY_AT);
+  assert.equal(event.occurredAt, new Date(LANDED_AT).toISOString());
+  assert.notEqual(event.occurredAt, new Date(RETRY_AT).toISOString());
 });
 
 test('R4: decision-window membership follows the landed timestamp', async () => {

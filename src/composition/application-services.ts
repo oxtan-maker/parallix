@@ -1,3 +1,5 @@
+import { configureRepairCheckpoints } from '../application/ports/repair-checkpoint.js';
+import { RepairCheckpointService } from '../application/repair-checkpoint-service.js';
 import { createReviewClassification } from './review-classification.js';
 import type { ParallixConfiguration } from '../application/ports/configuration.js';
 import * as path from 'node:path';
@@ -251,7 +253,7 @@ export async function createProductionApplicationServices(
           if (loaded.kind !== 'found' || !loaded.mission.brief) { return null; }
           return {
             planned: loaded.mission.checkpoints.map(({ name }) => name),
-            recorded: loaded.mission.checkpoints.filter(({ goalCheck }) => goalCheck.length > 0).map(({ name }) => name),
+            recorded: loaded.mission.checkpoints.filter(({ goalCheck, repair }) => goalCheck.length > 0 && (!repair || repair.evidenceRecorded)).map(({ name }) => name),
           };
         },
       }),
@@ -456,9 +458,10 @@ async function materializeOperatorState(): Promise<OperatorStateServices> {
  */
 function bindRecoveryPorts(
   repositories: { operationalHistory: OperationalHistoryRepository } | null | undefined,
-  mission: { repositoryId: string } | null | undefined,
+  mission: { repositoryId: string; store: MissionStore } | null | undefined,
   rootDir: string,
 ): void {
   setRecoveryEvidenceFileSystem(recoveryEvidenceFileSystem);
+  configureRepairCheckpoints(new RepairCheckpointService(mission?.store ?? unavailableMissionTransitionStore()));
   configureReboundTelemetry(repositories ? { repositoryId: mission?.repositoryId ?? resolveCanonicalRepositoryId(rootDir), history: repositories.operationalHistory } : null);
 }

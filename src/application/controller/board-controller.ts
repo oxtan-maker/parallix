@@ -7,6 +7,7 @@ import {
 import { completed, failure, rejected } from '../contracts.js';
 import type { MissionCheckpointService } from '../mission-checkpoint-service.js';
 import type { MissionHandoffService } from '../mission-handoff-service.js';
+import type { MissionCreationService } from '../mission-creation-service.js';
 import type { MissionIntakeService } from '../mission-intake-service.js';
 import type { DraftCommandUseCase } from '../draft-command-use-case.js';
 import type { IntegrateCommandUseCase } from '../integrate-command-use-case.js';
@@ -43,6 +44,8 @@ import {
  */
 export interface BoardMissionServices {
   readonly intake?: MissionIntakeService;
+  /** Creates a backlog mission with an allocated identity; the web board's "Create new mission". */
+  readonly creation?: Pick<MissionCreationService, 'execute'>;
   readonly checkpoints?: MissionCheckpointService;
   readonly handoff?: MissionHandoffService;
   /** The CLI-equivalent handoff workflow derives its own evidence and starts review. */
@@ -91,6 +94,7 @@ export class BoardCommandController implements BoardCommandDispatcher {
   canExecute(kind: BoardCommandRequest['kind']): boolean {
     if (!isIntegratedCapability(kind)) { return false; }
     if (kind === 'mission:intake') { return Boolean(this.missionServices.intake); }
+    if (kind === 'mission:create') { return Boolean(this.missionServices.creation); }
     if (kind === 'checkpoint:record') { return Boolean(this.missionServices.checkpoints); }
     if (kind === 'handoff:record') { return Boolean(this.missionServices.handoffWorkflow); }
     if (kind === 'draft:create') { return Boolean(this.missionServices.draft); }
@@ -127,6 +131,9 @@ export class BoardCommandController implements BoardCommandDispatcher {
     }
     if (kind === 'mission:intake') {
       return (await this.dispatchIntake(request)) as BoardCommandResult<T>;
+    }
+    if (kind === 'mission:create') {
+      return (await this.dispatchCreate(request)) as BoardCommandResult<T>;
     }
     if (kind === 'draft:create') {
       return (await this.dispatchDraft(request)) as BoardCommandResult<T>;
@@ -188,6 +195,31 @@ export class BoardCommandController implements BoardCommandDispatcher {
       externalTaskRef: payload.externalTaskRef ?? null,
       capabilities: request.capabilities,
     });
+  }
+
+  private async dispatchCreate(request: BoardCommandRequest): Promise<BoardCommandResult<unknown>> {
+    const payload = request.payload;
+    if (payload?.kind !== 'mission:create') {
+      return rejected('validation', 'mission:create requires a creation payload');
+    }
+    if (!this.missionServices.creation) {
+      return unavailableCapability('mission:create', 'no Mission authority is configured for this interface');
+    }
+    this.emit(request.operationId, 1, 'create', 'creating a backlog mission');
+    const outcome = await this.missionServices.creation.execute({
+      operationId: request.operationId,
+      requestKey: payload.requestKey,
+      title: payload.title,
+      description: payload.description,
+      context: payload.context,
+      labels: payload.labels,
+      successCriteria: payload.successCriteria,
+      dependencies: payload.dependencies,
+      capabilities: request.capabilities,
+    });
+    if (outcome.status !== 'completed' || !outcome.value) { return outcome; }
+    // The wire result carries the identity and nothing else of the aggregate.
+    return completed({ missionId: outcome.value.mission.id }, outcome.durableEvidence);
   }
 
   private async dispatchCheckpoint(request: BoardCommandRequest): Promise<BoardCommandResult<unknown>> {
@@ -324,7 +356,7 @@ export class BoardCommandController implements BoardCommandDispatcher {
   private async checkStaleCommand(request: BoardCommandRequest): Promise<BoardCommandResult<unknown> | null> {
     // Intake creates the mission being recorded, so there is no existing status
     // precondition to resolve. Every command against an existing card is guarded.
-    if (request.kind === 'mission:intake') { return null; }
+    if (request.kind === 'mission:intake' || request.kind === 'mission:create') { return null; }
     // Cancellation has no status precondition to resolve: it deletes whatever
     // lifecycle rows exist and archives the task file. A pre-draft card has no
     // aggregate at all, and a stale lane is no reason to keep an abandoned

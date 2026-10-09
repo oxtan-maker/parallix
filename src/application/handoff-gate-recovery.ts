@@ -95,11 +95,15 @@ export class HandoffGateRecovery {
             return result.status === 0 ? (result.stdout ?? '').trim() : null;
           },
           verify: async () => {
+            if (ports.verification.formatVerificationCommand(area || 'docs', rootDir) !== verificationCommand) {
+              return { ok: false, diagnostic: 'Authorized required check changed during repair; operator decision required', reason: { kind: 'declared-gate-validation', command: verificationCommand, diagnostic: 'Locked repository verification command changed' } };
+            }
             retried = await retryHandoff(slug, {
               ...options, worktree: rootDir, force: true, recoverGateFailure: false,
             });
             return {
               ok: Boolean(retried.ok),
+              command: verificationCommand,
               diagnostic: retried.error || '',
               reason: retried.gateFailure ? { kind: 'gate-failure', ...retried.gateFailure } : undefined,
             };
@@ -184,6 +188,7 @@ export class HandoffGateRecovery {
           retried = await retryHandoff(slug, { ...options, worktree: rootDir, force: true, recoverGateFailure: false });
           return {
             ok: Boolean(retried.ok),
+            command: gatesResult.gate,
             diagnostic: retried.error || '',
             reason: retried.reason === 'validation-failed'
               ? { kind: 'declared-gate-validation', command: gatesResult.gate, diagnostic: retried.error || '' }

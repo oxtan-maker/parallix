@@ -28,6 +28,7 @@ import { BoardCommandController, type BoardMissionServices } from '../applicatio
 import type { ExecuteMissionPorts } from '../application/ports/execute-mission.js';
 import type { TuiCapabilities } from '../application/tui-capabilities.js';
 import type { MissionStore } from '../application/domain-ports.js';
+import type { Mission } from '../domain/mission.js';
 import type { CurrentWorkPort } from '../application/recording/current-work-recorder.js';
 import type { SqliteDatabaseAdapter } from '../adapters/sqlite/database-adapter.js';
 import { SqliteReviewProjectionReader } from '../adapters/sqlite/review-projection-reader.js';
@@ -84,9 +85,37 @@ function createRunningSessionScan(deps: Pick<BoardProjectionCompositionDeps, 'ro
   };
 }
 
+/**
+ * Every Mission the repository's board shows: recorded aggregates plus Backlog
+ * inputs not yet ingested. Uncached; the board adds its own per-build cache and
+ * mission creation reads it fresh to validate dependencies.
+ */
+export function createRepositoryMissionCatalog(
+  deps: Pick<BoardProjectionCompositionDeps, 'rootDir' | 'missionStore' | 'repositoryId'>,
+) {
+  // Backlog owns its descriptive title; the aggregate owns all operational fields.
+  function withRepositoryTitle(mission: Mission, scan?: TaskScanCache): Mission {
+    const task = resolveTaskFile(mission.id, deps.rootDir, scan);
+    const title = task.ok && task.taskFile ? getTaskFrontmatterValue(task.taskFile, 'title') : null;
+    return title ? { ...mission, title } : mission;
+  }
+  return {
+    withRepositoryTitle,
+    async loadAllMissions(): Promise<readonly Mission[]> {
+      if (deps.missionStore && !deps.missionStore.loadByRepository) {
+        throw new Error('Mission store cannot enumerate repository records');
+      }
+      const recorded = await deps.missionStore?.loadByRepository?.(deps.repositoryId) ?? [];
+      const scan = createTaskScanCache();
+      const inputs = readBacklogInputs(deps.rootDir, deps.repositoryId, new Set(recorded.map(mission => mission.id)));
+      return [...recorded.map(mission => withRepositoryTitle(mission, scan)), ...inputs];
+    },
+  };
+}
+
 /** The sole production constructor for board reads and mission details. */
 export function composeBoardProjection(deps: BoardProjectionCompositionDeps) {
-  let cachedMissions: Promise<readonly import('../domain/mission.js').Mission[]> | null = null;
+  let cachedMissions: Promise<readonly Mission[]> | null = null;
   const missions: MissionReadAdapter = {
     async loadAllMissions() {
       cachedMissions ??= loadBoardMissions();
@@ -107,22 +136,9 @@ export function composeBoardProjection(deps: BoardProjectionCompositionDeps) {
     ],
   };
 
-  async function loadBoardMissions(): Promise<readonly import('../domain/mission.js').Mission[]> {
-    if (deps.missionStore && !deps.missionStore.loadByRepository) {
-      throw new Error('Mission store cannot enumerate repository records');
-    }
-    const recorded = await deps.missionStore?.loadByRepository?.(deps.repositoryId) ?? [];
-    const scan = createTaskScanCache();
-    const inputs = readBacklogInputs(deps.rootDir, deps.repositoryId, new Set(recorded.map(mission => mission.id)));
-    return [...recorded.map(mission => withRepositoryTitle(mission, scan)), ...inputs];
-  }
-
-  // Backlog owns its descriptive title; the aggregate owns all operational fields.
-  function withRepositoryTitle(mission: import('../domain/mission.js').Mission, scan?: TaskScanCache) {
-    const task = resolveTaskFile(mission.id, deps.rootDir, scan);
-    const title = task.ok && task.taskFile ? getTaskFrontmatterValue(task.taskFile, 'title') : null;
-    return title ? { ...mission, title } : mission;
-  }
+  const catalog = createRepositoryMissionCatalog(deps);
+  const loadBoardMissions = () => catalog.loadAllMissions();
+  const withRepositoryTitle = catalog.withRepositoryTitle;
   const currentWork = new ConcreteCurrentWorkReadAdapter(deps.historyRepo);
   const runningSessions = createRunningSessionScan(deps);
   const changeIdentity = createGitChangeIdentity(deps.rootDir, deps.gitFn ?? undefined, { snapshotBranchHeads: true });

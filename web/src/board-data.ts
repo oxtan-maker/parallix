@@ -8,7 +8,7 @@
  * No caching, no retry, no polling: `board-sync.ts` decides when to read, and
  * each call performs exactly one read.
  */
-import { validateWebBoardSnapshot, validateWebCommandResult, type WebBoardSnapshot, type WebCommandRequest, type WebCommandResult } from '../../src/interfaces/web/transport.js';
+import { validateWebBoardSnapshot, validateWebCommandResult, type WebBoardSnapshot, type WebCommandRequest, type WebCommandResult, type WebCreateMissionRequest } from '../../src/interfaces/web/transport.js';
 
 /** The snapshot read path. This client has no mutation route. */
 export const SNAPSHOT_PATH = '/api/board';
@@ -87,8 +87,7 @@ export async function loadSnapshot(): Promise<SettledSnapshotState> {
   return { kind: 'ready', snapshot: validation.value };
 }
 
-/** Dispatch only the typed request selected from the current projection. */
-export async function sendCommand(request: WebCommandRequest): Promise<WebCommandResult> {
+async function postCommand(request: WebCommandRequest | WebCreateMissionRequest): Promise<WebCommandResult> {
   const csrf = globalThis.document?.querySelector('meta[name="px-csrf"]')?.getAttribute('content');
   const response = await fetch(COMMANDS_PATH, {
     method: 'POST',
@@ -100,4 +99,14 @@ export async function sendCommand(request: WebCommandRequest): Promise<WebComman
   const result = validateWebCommandResult(payload);
   if (!result.ok) { throw new Error(`invalid command result: ${'problems' in result ? result.problems.join('; ') : 'unsupported transport version'}`); }
   return result.value;
+}
+
+/** Dispatch only the typed request selected from the current projection. */
+export function sendCommand(request: WebCommandRequest): Promise<WebCommandResult> {
+  return postCommand(request);
+}
+
+/** Create a backlog mission; the host allocates the identity and returns it in `value.missionId`. */
+export function sendCreateMission(request: WebCreateMissionRequest): Promise<WebCommandResult> {
+  return postCommand(request);
 }

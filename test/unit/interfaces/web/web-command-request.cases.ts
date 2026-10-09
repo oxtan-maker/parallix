@@ -4,7 +4,7 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { validateWebCommandRequest } from '../../../../src/interfaces/web/transport.js';
+import { isCreateMissionBody, validateWebCommandRequest, validateWebCreateMissionRequest } from '../../../../src/interfaces/web/transport.js';
 import type { WebCommandRequest } from '../../../../src/interfaces/web/transport.js';
 
 function identityRequest(kind: string, overrides: Record<string, unknown> = {}): Record<string, unknown> {
@@ -156,4 +156,25 @@ test('web command request: accepts a zero-line handoff payload with null byteSiz
     payload: handoffPayload({ netEngineeringLines: 0, artifacts: [{ kind: 'url', location: 'u', byteSize: null }] }),
   }));
   assert.equal(result.ok, true, JSON.stringify(result));
+});
+
+test('web create-mission request: accepts the planning fields only and recognises its own kind (TASK-2693)', () => {
+  const body = { kind: 'mission:create', requestKey: 'k', title: 'T', description: 'D', context: 'C', labels: [], successCriteria: ['x'], dependencies: ['task-1'] };
+  assert.equal(isCreateMissionBody(body), true);
+  assert.equal(isCreateMissionBody(identityRequest('active:execute')), false);
+  const accepted = validateWebCreateMissionRequest(body);
+  assert.ok(accepted.ok);
+  assert.deepEqual(accepted.value, body);
+  const { description: _d, context: _c, ...minimal } = body;
+  assert.ok(validateWebCreateMissionRequest(minimal).ok);
+});
+
+test('web create-mission request: rejects identity, repository and status keys and mistyped fields (TASK-2693)', () => {
+  const base = { kind: 'mission:create', requestKey: 'k', title: 'T', labels: [], successCriteria: [], dependencies: [] };
+  for (const extra of [{ missionId: 'x' }, { repositoryId: 'r' }, { status: 'active' }, { capabilities: [] }, { title: 3 }, { labels: 'ux' }, { dependencies: [1] }, { requestKey: 'k'.repeat(129) }]) {
+    assert.equal(validateWebCreateMissionRequest({ ...base, ...extra }).ok, false, JSON.stringify(extra));
+  }
+  assert.equal(validateWebCreateMissionRequest([]).ok, false);
+  const { title: _t, ...untitled } = base;
+  assert.equal(validateWebCreateMissionRequest(untitled).ok, false);
 });

@@ -7,13 +7,14 @@ import type { WebBoardSnapshot } from '../../src/interfaces/web/transport.js';
 import { C, DISPLAY } from './palette.js';
 import { familyAccent, sessionsText } from './format.js';
 
-export function TopBar({ snapshot, flowOpen, onFlowToggle }: {
+export function TopBar({ snapshot, flowOpen, onFlowToggle, onCreate }: {
   snapshot: WebBoardSnapshot;
   flowOpen: boolean;
   onFlowToggle: () => void;
+  onCreate: (opener: HTMLButtonElement) => void;
 }) {
   const wip = snapshot.inFlightWip;
-  const throughput = snapshot.metrics.weeklyCumulativeFlow?.series.at(-1)?.counts.done;
+  const throughput = snapshot.metrics.weeklyCompletedMissions;
   const unattributed = 'unattributedRunningSessions' in snapshot
     ? snapshot.unattributedRunningSessions === null
       ? 'unattributed sessions unknown'
@@ -44,6 +45,18 @@ export function TopBar({ snapshot, flowOpen, onFlowToggle }: {
         attention <span style={{ color: C.amber }}>{snapshot.attentionQueue.length}</span>
       </div>
       <div style={{ flex: 1, minWidth: 12 }} />
+      <button
+        type="button"
+        aria-haspopup="dialog"
+        onClick={(event) => onCreate(event.currentTarget)}
+        style={{
+          background: C.greenFill, border: `1px solid ${C.greenEdge}`, borderRadius: 20, color: C.green,
+          fontFamily: 'inherit', fontSize: 10.5, letterSpacing: 1, padding: '4px 11px', cursor: 'pointer',
+          flexShrink: 0, whiteSpace: 'nowrap',
+        }}
+      >
+        + Create new mission
+      </button>
       <button
         type="button"
         aria-expanded={flowOpen}

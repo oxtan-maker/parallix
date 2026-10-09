@@ -220,6 +220,28 @@ integration closeout resumes through `px integrate <slug> --recover-landed` so
 the remaining statistics, cleanup and post-integration hook finish without
 another gate run or merge.
 
+## Creating a mission (web board)
+
+`px web` has a **Create new mission** button in the top bar. It opens a dialog
+that adds a mission to the backlog of the repository the board is serving:
+nothing is drafted, no agent starts and no worktree is created. Use
+`px draft` or `px active` when you want that work to begin.
+
+| Field | Notes |
+|---|---|
+| Title | Required. |
+| Description and context | Description is free text. Context (why the mission exists) is optional; with both, they are recorded as the mission's goal and why. A description alone is kept as the description, and refinement still requires a goal and why, which the refining agent fills in from it. Context without a description is rejected. |
+| Labels | Comma separated. |
+| Success criteria | One per line. |
+| Dependencies | Pick any number of unfinished missions from the dropdown. Finished, closed and unknown missions are refused. Dependencies are recorded for operators and agents; nothing enforces them. |
+
+Parallix assigns the mission its identity (`px-NNNN`) and the new card
+appears in the backlog lane. Fields that fail validation keep what you typed and
+say what to fix. Retrying a submission that did reach the host returns the
+mission it already created, rather than creating a second one. `Escape` or **Cancel** closes the dialog without creating anything.
+The terminal and TUI have no equivalent button; they create missions through
+`px draft`.
+
 ## Leaving
 
 Press `q` or `Ctrl+C`.

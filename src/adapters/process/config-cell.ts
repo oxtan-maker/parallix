@@ -1,4 +1,5 @@
 import fs from 'node:fs';
+import { canonicalizeSymlink } from './canonicalize-symlink.js';
 import path from 'node:path';
 
 /**
@@ -73,8 +74,9 @@ function pruneCell(cell: string, expected: Map<string, EntryKind>, keep: RegExp[
  * is the host entry even after the cell covers `target`.
  */
 export function configCellArgs(configCell: ConfigCell, writable: string[]): string[] {
-  const target = path.resolve(configCell.target);
-  const cell = path.resolve(configCell.cell);
+  const canonicalize = (dir: string) => canonicalizeSymlink(path.resolve(dir));
+  const target = canonicalize(configCell.target);
+  const cell = canonicalize(configCell.cell);
   const host = hostEntries(target);
   const guarded = configCell.guarded || { files: [], directories: [] };
   const placeholders = new Map<string, EntryKind>([
@@ -84,7 +86,7 @@ export function configCellArgs(configCell: ConfigCell, writable: string[]): stri
   pruneCell(cell, new Map([...host, ...placeholders]), configCell.keep || []);
   const args = ['--bind', cell, target];
   for (const name of [...host.keys()].sort((left, right) => left.localeCompare(right))) {
-    const entry = path.join(target, name);
+    const entry = canonicalize(path.join(target, name));
     args.push('--ro-bind', entry, entry);
   }
   for (const [name, kind] of [...placeholders].sort(([left], [right]) => left.localeCompare(right))) {
@@ -92,7 +94,7 @@ export function configCellArgs(configCell: ConfigCell, writable: string[]): stri
     args.push(...(kind === 'file' ? ['--ro-bind', '/dev/null', entry] : ['--tmpfs', entry, '--remount-ro', entry]));
   }
   for (const dir of writable) { args.push('--bind', dir, dir); }
-  for (const dir of (configCell.readOnly || []).map(entry => path.resolve(entry))) {
+  for (const dir of [...(configCell.readOnly || [])].map(canonicalize)) {
     fs.mkdirSync(dir, { recursive: true });
     args.push('--ro-bind', dir, dir);
   }

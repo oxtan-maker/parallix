@@ -1,3 +1,4 @@
+import type { InvalidContractBlocker } from './rebound-policy.js';
 import type { MissionId } from './mission.js';
 
 /** One Goal Check evidence row. Handoff requires each row to cite a verifiable
@@ -27,6 +28,17 @@ export interface CheckpointData {
   /** First line of the checkpoint file (e.g. "CP-2: Status Command Re-implemented"). Preserves legacy output contract.
    * Optional for backward compatibility; defaults to empty string when absent. */
   readonly firstLine?: string;
+  /** Harness-owned incident identity; agent recording preserves this metadata. */
+  readonly repair?: {
+    readonly incidentId: string;
+    readonly command: string;
+    readonly authorizedGates: readonly string[];
+    readonly authorizedCriteria: readonly string[];
+    readonly attempt: number;
+    readonly evidenceRecorded: boolean;
+    readonly verified: boolean;
+    readonly blocker?: InvalidContractBlocker;
+  };
   readonly goalCheck: readonly GoalCheckRow[];
   /** Operator guidance rendered in checkpoint and board views; never executed. */
   readonly nextActionText: string;

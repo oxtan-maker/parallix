@@ -6,11 +6,13 @@ import path from 'node:path';
 
 import { ConcreteGateReadAdapter } from '../../../src/adapters/backlog/concrete-gate-read-adapter.js';
 import { ConcreteGitReadAdapter } from '../../../src/adapters/backlog/concrete-git-read-adapter.js';
-import { ConcreteMissionReadAdapter } from '../../../src/adapters/backlog/concrete-mission-read-adapter.js';
+import { createRepositoryMissionCatalog } from '../../../src/composition/board-projection.js';
+import { SqliteMissionStore } from '../../../src/adapters/sqlite/mission-store.js';
 import { ConcreteOperationLogReadAdapter } from '../../../src/adapters/backlog/concrete-operation-log-read-adapter.js';
 import { ConcreteReviewReadAdapter } from '../../../src/adapters/backlog/concrete-review-read-adapter.js';
 import { BoardProjectionBuilder } from '../../../src/application/projections/board-readers.js';
 import { ConcreteMetricsReadAdapter } from '../../../src/application/projections/metrics-read-adapter.js';
+import { toWebBoardSnapshot } from '../../../src/interfaces/web/transport.js';
 import { repositoryId } from '../../../src/domain/repository.js';
 import {
   createPrimaryAndWorktree,
@@ -70,10 +72,15 @@ describe("production certification: persisted weekly FLOW decision surface", () 
         // All rows still traverse the production repositories. One outer
         // transaction removes only repeated SQLite fsync/lock churn while
         // keeping the real migrated database, worktree and projection proof.
+        const recordDone = async (id: string, closedAt: string | null) => db.execute(
+          'INSERT INTO missions(id, repository_id, title, status, closed_at) VALUES (?, ?, ?, ?, ?)',
+          [id, REPO, id, 'done', closedAt],
+        );
         await db.beginTransaction();
         try {
           for (let index = 0; index < 240; index += 1) {
             const id = `task-old-${index}`;
+            await recordDone(id, OLD_CLOSED);
             await persistMission(laneEventRepo, db, {
               repositoryId: REPO, missionId: id, closedAt: OLD_CLOSED,
               cycleTimeMinutes: 1_000, shape: OLD_SHAPE, bounced: false, classification: 'ai_sdlc',
@@ -82,6 +89,7 @@ describe("production certification: persisted weekly FLOW decision surface", () 
           }
           for (let index = 0; index < 28; index += 1) {
             const id = `task-previous-${index}`;
+            await recordDone(id, PREVIOUS_CLOSED);
             await persistMission(laneEventRepo, db, {
               repositoryId: REPO, missionId: id, closedAt: PREVIOUS_CLOSED,
               cycleTimeMinutes: 140, shape: PREVIOUS_SHAPE, bounced: true, classification: 'ai_sdlc',
@@ -90,12 +98,19 @@ describe("production certification: persisted weekly FLOW decision surface", () 
           }
           for (let index = 0; index < 31; index += 1) {
             const id = `task-current-${index}`;
+            await recordDone(id, CURRENT_CLOSED);
             await persistMission(laneEventRepo, db, {
               repositoryId: REPO, missionId: id, closedAt: CURRENT_CLOSED,
               cycleTimeMinutes: 40, shape: CURRENT_SHAPE, bounced: index < 5, classification: 'ai_sdlc',
               telemetry: { durationMinutes: 15, prFixRounds: index === 0 ? 0 : index === 1 ? undefined : 1 },
             });
           }
+          await recordDone('task-old-unclosed', null);
+          await persistMission(laneEventRepo, db, {
+            repositoryId: REPO, missionId: 'task-old-unclosed', closedAt: OLD_CLOSED,
+            cycleTimeMinutes: 1000, shape: OLD_SHAPE, bounced: false, classification: 'ai_sdlc',
+          });
+          await recordDone('task-unknown-delivery', OLD_CLOSED);
           await persistOpenMission(laneEventRepo, REPO, 'task-open', '2026-08-10T08:00:00.000Z');
           await db.commitTransaction();
         } catch (error) {
@@ -103,7 +118,18 @@ describe("production certification: persisted weekly FLOW decision surface", () 
           throw error;
         }
 
-        const missionReader = new ConcreteMissionReadAdapter({ rootDir: checkouts.primary, repositoryId: REPO });
+        // An old delivery is administratively closed this week. Its closure
+        // event must not move the delivery into the weekly DONE population.
+        await laneEventRepo.append({ repositoryId: REPO, missionId: 'task-old-0',
+          fromStatus: 'done', toStatus: 'done', trigger: 'close', agent: 'codex',
+          occurredAt: '2026-08-11T12:00:00+02:00', idempotencyKey: 'old-admin-close' });
+
+        const catalog = createRepositoryMissionCatalog({ rootDir: checkouts.primary,
+          repositoryId: REPO, missionStore: new SqliteMissionStore(db) });
+        const missionReader = { ...catalog,
+          loadMission: async (id: string) => (await catalog.loadAllMissions()).find(mission => mission.id === id) ?? null,
+          getSourceFacts: () => [],
+        };
         const metricsAdapter = new ConcreteMetricsReadAdapter({
           laneEventRepo, usageRepo, historyRepo, repositoryId: REPO, clock: fixedClock(NOW),
         });
@@ -119,8 +145,18 @@ describe("production certification: persisted weekly FLOW decision surface", () 
           },
           new ConcreteGitReadAdapter({ rootDir: checkouts.primary, repositoryId: REPO }),
           new ConcreteOperationLogReadAdapter({ historyRepo }),
-          { metricsAdapter },
+          { metricsAdapter, now: () => Date.parse(NOW) },
         ).build();
+        const done = projection.stages.find(stage => stage.lane === 'done')!;
+        assert.equal(done.count, 31, 'DONE uses the same verified delivery week as missions/wk');
+        assert.deepEqual(new Set(done.cards.map(card => card.id)),
+          new Set(Array.from({ length: 31 }, (_, index) => `task-current-${index}`)));
+        assert.deepEqual(new Set(done.historyCards?.map(card => card.id)),
+          new Set(['task-old-unclosed', 'task-unknown-delivery']));
+        const snapshot = toWebBoardSnapshot(projection);
+        assert.equal(snapshot.stages.find(stage => stage.lane === 'done')!.count, snapshot.metrics.weeklyCompletedMissions);
+        assert.equal(projection.metrics.weeklyCumulativeFlow?.series.at(-1)?.counts.done, 31);
+        assert.equal(toWebBoardSnapshot(projection).metrics.weeklyCompletedMissions, 31);
 
         // Hand-computed oracle: 31 current missions × 40 min; old 240 × 1000
         // min and the 28 previous missions are deliberately outside Aug 5–11.
@@ -145,7 +181,7 @@ describe("production certification: persisted weekly FLOW decision surface", () 
         assert.match(flow, /Completed missions\s+n=31\s+n=28/);
         assert.match(flow, /Lifecycle cycle median\s+40 min \(n=31\)\s+140 min/);
         assert.match(flow, /\(n=28\)/);
-        assert.match(flow, /population n=299 \(all recorded history, not the decision sample\)/);
+        assert.match(flow, /population n=300 \(all recorded history, not the decision sample\)/);
       });
     } finally {
       checkouts.cleanup();

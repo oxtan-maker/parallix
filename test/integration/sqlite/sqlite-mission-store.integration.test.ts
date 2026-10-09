@@ -1,3 +1,5 @@
+import { auditMissionTimestamps, applyMissionTimestampMigration } from '../../../scripts/mission-timestamp-migration.js';
+import { decisionWindowContains, weeklyDecisionWindows } from '../../../src/domain/decision-window.js';
 import { afterEach, describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -263,6 +265,7 @@ describe('SQLite Mission aggregate integration', () => {
           'version',
           'reproduction_test',
           'predicted_nel_bucket',
+          'description',
         ],
       );
       assert.ok(!columns.some(({ name }) => ['labels', 'checkpoints', 'review'].includes(name)));
@@ -501,7 +504,10 @@ describe('SQLite Mission aggregate integration', () => {
         checkpoints: [],
         review: null,
         netEngineeringLines: null,
-        closedAt: '2026-07-29T11:00:00Z',
+        // Canonical UTC ISO-8601 instant (TASK-2688): the store persists this
+        // fixed-width spelling, so the round-tripped value keeps millisecond
+        // precision and lexical order equals temporal order.
+        closedAt: '2026-07-29T11:00:00.000Z',
       });
       await store.save(closed, null);
       const loaded = await store.load(closed.id);
@@ -773,4 +779,74 @@ describe('SQLite Mission aggregate integration', () => {
     assert.match(authority, /target-repository/);
     assert.doesNotMatch(authority, /SqliteMissionStore/);
   });
+});
+
+it('retains persisted report membership through migration and recovery at local boundaries (TASK-2688)', async () => {
+  const database = await migratedDatabase();
+  try {
+    const values = ['2026-10-01T23:59:59.999+02:00', '2026-10-02T00:00:00+02:00',
+      '2026-03-29T01:59:59.999+01:00', '2026-03-29T03:00:00+02:00',
+      '2026-10-25T02:30:00+02:00', '2026-10-25T02:30:00+01:00',
+      '2025-12-31T23:59:59.999+01:00', '2026-01-01T00:00:00+01:00'];
+    for (const [index, raw] of values.entries()) {
+      await database.execute(`INSERT INTO missions (id, repository_id, title, status, closed_at, version)
+        VALUES (?, 'repo', 'boundary', 'done', ?, 1)`, [`task-boundary-${index}`, raw]);
+    }
+    const read = () => database.query<{ id: string; closed_at: string }>('SELECT id, closed_at FROM missions ORDER BY id');
+    const report = (rows: readonly { id: string; closed_at: string }[]) =>
+      ['2026-10-08', '2026-03-29', '2026-10-25', '2026-01-01'].map(today => {
+        const windows = weeklyDecisionWindows(today, 'Europe/Stockholm');
+        return [windows.current, windows.previous].map(window =>
+          rows.filter(row => decisionWindowContains(window, row.closed_at)).map(row => row.id));
+      });
+    const before = await read();
+    const expected = report(before);
+    assert.ok(expected.flat(2).length > 0);
+    assert.equal((await applyMissionTimestampMigration(database, await auditMissionTimestamps(database), () => database.backup())).converted, values.length);
+    assert.deepEqual(report(await read()), expected);
+    assert.equal(await database.recoverFromBackup(), true);
+    assert.deepEqual(await read(), before);
+    assert.deepEqual(report(await read()), expected);
+  } finally { await database.close(); }
+});
+
+it('re-saves migrated historical closures without rewriting preserved values (TASK-2688)', async () => {
+  const database = await migratedDatabase();
+  try {
+    const store = new SqliteMissionStore(database);
+    const values = ['malformed', '2026-10-09T07:00:00', '2026-10-09T07:00:00.123456Z'];
+    for (const [index, raw] of values.entries()) {
+      const mission = completeMission({ id: missionId(`task-preserved-${index}`), status: 'done', checkpoints: [], review: null, closedAt: '2026-10-09T07:00:00.000Z' });
+      await store.save(mission, null);
+      await database.execute('UPDATE missions SET closed_at = ? WHERE id = ?', [raw, mission.id]);
+    }
+    const audit = await auditMissionTimestamps(database);
+    assert.equal(audit.ambiguous, 1);
+    assert.equal(audit.malformed, 2);
+    await applyMissionTimestampMigration(database, audit, () => database.backup());
+    for (const [index, raw] of values.entries()) {
+      const id = missionId(`task-preserved-${index}`);
+      const loaded = await store.load(id);
+      assert.equal(loaded.kind, 'found');
+      const next = await store.save({ ...loaded.mission, title: 'Edited historical mission' }, loaded.version);
+      assert.equal(next, missionVersion(2));
+      const reloaded = await store.load(id);
+      assert.equal(reloaded.kind, 'found');
+      assert.equal(reloaded.mission.closedAt, raw);
+      assert.equal(reloaded.mission.title, 'Edited historical mission');
+      await assert.rejects(store.save({ ...reloaded.mission, title: 'Stale edit' }, loaded.version));
+      await assert.rejects(store.save({ ...reloaded.mission, id: missionId(`task-copy-${index}`) }, null), /parseable ISO-8601 instant/);
+      await assert.rejects(store.save({ ...reloaded.mission, status: 'done', closedAt: 'new-invalid-value' }, reloaded.version), /parseable ISO-8601 instant/);
+      const unchanged = await store.load(id);
+      assert.equal(unchanged.kind, 'found');
+      assert.equal(unchanged.version, reloaded.version);
+      assert.equal(unchanged.mission.closedAt, raw);
+      await store.save({ ...reloaded.mission, status: 'done', closedAt: '2026-10-09T09:07:00+02:00' }, reloaded.version);
+      const repaired = await store.load(id);
+      assert.equal(repaired.kind, 'found');
+      assert.equal(repaired.mission.closedAt, '2026-10-09T07:07:00.000Z');
+    }
+    await assert.rejects(store.save(completeMission({ id: missionId('task-new-invalid'), status: 'done', checkpoints: [], review: null, closedAt: 'new-invalid-value' }), null), /parseable ISO-8601 instant/);
+    assert.equal((await store.load(missionId('task-new-invalid'))).kind, 'missing');
+  } finally { await database.close(); }
 });

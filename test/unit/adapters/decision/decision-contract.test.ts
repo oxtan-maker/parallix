@@ -1,4 +1,4 @@
-import { test } from 'node:test';
+import { before, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createDecisionPort } from '../../../../src/composition/decision.js';
 import { resolveDecisionProvider } from '../../../../src/adapters/decision/provider.js';
@@ -22,6 +22,9 @@ const response = () => ({ model: 'jev-1.13', answers: {
   quality: { type: 'score', score: 0.98, legend: { '0': 'Failed', '1': 'Passed' }, probabilities: { '0': 0.02, '1': 0.98 }, confidence: 0.96 },
 }, usage: { input_tokens: 42, output_tokens: 0, cost: 0.00001 } });
 function transport(body: unknown): typeof fetch { return async () => new Response(JSON.stringify(body)); }
+// The jev-1.13 tokenizer loads lazily on the first token count (~0.4 s CPU,
+// cached per process); warm it once so no test's CPU budget carries the load.
+before(async () => { await portFromEnvironment({ env: { OPENROUTER_API_KEY: 'secret' }, transport: transport(response()) }).decide(request); });
 
 test('discovers each sole conventional provider without prompting (TASK-2664)', () => {
   for (const [provider, key] of [['typesafe', 'TYPESAFE_API_KEY'], ['openrouter', 'OPENROUTER_API_KEY'], ['vercel', 'AI_GATEWAY_API_KEY']]) {

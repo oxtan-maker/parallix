@@ -360,7 +360,7 @@ export async function routeIntegrationGateFailure(opts: IntegrationGateRouteOpti
               log(`Could not record integration-validation marker for ${slug}: ${(recordError as Error)?.message ?? String(recordError)}. The full suite runs next time.`);
             }
           }
-          return { ok: true, diagnostic: '' };
+          return { ok: true, command: failedGate.command, diagnostic: '' };
         }
         return {
           ok: false,

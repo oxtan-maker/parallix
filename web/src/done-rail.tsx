@@ -43,6 +43,13 @@ export function DoneRail({ stage }: { stage: WebStage }) {
       <div className="shipped-cards">
         {stage.cards.length === 0 && <p style={laneEmpty}>no missions in this stage</p>}
         {stage.cards.map((card) => <ShippedCard key={card.id} card={card} />)}
+        {(stage.historyCards?.length ?? 0) > 0 && (
+          <details aria-label="Other completed history">
+            <summary>Other completed history · {stage.historyCards!.length}</summary>
+            <p style={laneEmpty}>Outside this week or delivery date unavailable</p>
+            {stage.historyCards!.map(card => <ShippedCard key={card.id} card={card} />)}
+          </details>
+        )}
       </div>
     </details>
   );

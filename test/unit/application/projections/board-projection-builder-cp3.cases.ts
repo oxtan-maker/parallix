@@ -293,7 +293,10 @@ test('Integration-base vs worktree reconciliation: done + worktree absent + clos
     const missions = await adapter.loadAllMissions();
     assert.equal(missions.length, 1);
     assert.equal(missions[0].status, 'done');
-    assert.equal(missions[0].closedAt, '2026-07-15T12:00:00Z'); // closed
+    // Materializing a completed task closes it through closeMission, which
+    // canonicalizes the closure instant to UTC ISO-8601 with millisecond
+    // precision (TASK-2688).
+    assert.equal(missions[0].closedAt, '2026-07-15T12:00:00.000Z'); // closed
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
   }

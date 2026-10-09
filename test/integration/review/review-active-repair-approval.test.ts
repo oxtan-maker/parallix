@@ -58,6 +58,17 @@ const RESOLVED_AT = '2026-09-20T12:00:00.000Z';
 const ROUND_2_AT = '2026-09-20T13:00:00.000Z';
 const APPROVED_AT = '2026-09-20T14:00:00.000Z';
 
+// Bootstrap the immutable schema once; approval cases exercise real writes on
+// private copied files rather than paying for every migration and backup again.
+let schemaFixture: MigratedMissionStore;
+let schemaTemplate: string;
+test.before(async () => {
+  schemaFixture = await openMigratedMissionStore();
+  schemaTemplate = await schemaFixture.database.backup();
+  await schemaFixture.database.close();
+});
+test.after(async () => { await schemaFixture?.close(); });
+
 const tempDirs: string[] = [];
 
 test.after(() => {
@@ -77,7 +88,7 @@ interface Fixture extends MigratedMissionStore {
 }
 
 async function openFixture(review: Review, status: 'active' | 'integration' = 'active'): Promise<Fixture> {
-  const migrated = await openMigratedMissionStore([fixtureMission(SLUG, { status, review, assignee: IMPLEMENTER })]);
+  const migrated = await openMigratedMissionStore([fixtureMission(SLUG, { status, review, assignee: IMPLEMENTER })], schemaTemplate);
   return { ...migrated, lifecycle: new MissionLifecycleService(migrated.store) };
 }
 

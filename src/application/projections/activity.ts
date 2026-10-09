@@ -1,4 +1,5 @@
 import type { MissionId } from '../../domain/mission.js';
+import { parseInstantMs } from '../../domain/instant.js';
 import type { MissionTransition } from '../../domain/mission-workflow.js';
 
 export interface ActivityEntry {
@@ -10,8 +11,10 @@ export interface ActivityEntry {
 }
 
 export function projectActivityLog(transitions: readonly MissionTransition[]): ActivityEntry[] {
+  // Compare parsed instants, not raw text: a mix of UTC `Z` and explicit-offset
+  // spellings makes lexical order disagree with temporal order (TASK-2688).
   return [...transitions]
-    .sort((left, right) => right.occurredAt.localeCompare(left.occurredAt))
+    .sort((left, right) => parseInstantMs(right.occurredAt) - parseInstantMs(left.occurredAt))
     .map((transition) => ({
       missionId: transition.missionId,
       occurredAt: transition.occurredAt,

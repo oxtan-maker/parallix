@@ -337,6 +337,12 @@ export function weeklyCumulativeFlowByStateSeries(
     return { series: [], missingHistoryFallback: 'skip', window: scopedWindow };
   }
   const ordered = [...transitions].sort((left, right) => Date.parse(left.occurredAt) - Date.parse(right.occurredAt));
+  const firstDeliveries = new Map<MissionId, string>();
+  for (const transition of ordered) {
+    if (transition.to === 'done' && transition.from !== 'done' && !firstDeliveries.has(transition.missionId)) {
+      firstDeliveries.set(transition.missionId, transition.occurredAt);
+    }
+  }
   // State as the window opened: every transition recorded before its first day.
   const boundary = new Map(initial);
   for (const transition of ordered) {
@@ -351,7 +357,12 @@ export function weeklyCumulativeFlowByStateSeries(
       for (const transition of inWindow) {
         // A mission that opened inside the window has no boundary lane; its
         // intake transition is what puts it on the board.
-        if (Date.parse(transition.occurredAt) <= Date.parse(at)) { state.set(transition.missionId, transition.to); }
+        if (Date.parse(transition.occurredAt) <= Date.parse(at)) {
+          const deliveredAt = firstDeliveries.get(transition.missionId);
+          if (transition.to === 'done' && (deliveredAt === undefined || !decisionWindowContains(window, deliveredAt))) {
+            state.delete(transition.missionId);
+          } else { state.set(transition.missionId, transition.to); }
+        }
       }
       const counts = emptyCounts();
       for (const lane of state.values()) { counts[lane] += 1; }

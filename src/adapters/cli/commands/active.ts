@@ -70,7 +70,7 @@ async function active(args: string[], options: ActiveOptions = {}) {
 
   // Strip a trailing mission id from the title so the headline never repeats
   // the slug (SC4/Why Now: repeated identity is a defect). Works for any id
-  // shape, not just `task-NNNN` (e.g. `parallix-adhoc-<NNNN>` adhoc slugs).
+  // shape, not just `task-NNNN` (e.g. `px-<NNNN>` adhoc slugs).
   // The `<Title>` draft scaffold is not a title, so it is never shown.
   const stripTrailingId = (t: string) => t.replace(/\s*\([\w.-]+\)\s*$/i, '');
   const recordedTitle = stripTrailingId((await missionTitleFn(normalizedSlug)) ?? '');

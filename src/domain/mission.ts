@@ -5,6 +5,7 @@ import type { RepositoryId } from './repository.js';
 import type { Review } from './review.js';
 import type { MissionBrief } from './mission-brief.js';
 import type { NelBucketLabel } from './net-engineering-lines.js';
+import { toCanonicalUtcInstant } from './instant.js';
 
 export type MissionId = string & { readonly __brand: 'MissionId' };
 export type MissionSlug = MissionId;
@@ -21,7 +22,7 @@ export function missionId(value: string): MissionId {
 export const missionSlug = missionId;
 
 /**
- * A DB-owned adhoc identity is `parallix-adhoc-<NNNN>` (task-2468): its slug,
+ * A DB-owned adhoc identity is `px-<NNNN>` (task-2468): its slug,
  * mission id, branch, and worktree suffix all derive from a repository-scoped
  * counter, so it needs no Backlog task file. Unlike `isMissionSlugCandidate`,
  * this recognizes only the DB-owned namespace — the `task-` and legacy
@@ -31,13 +32,13 @@ export const missionSlug = missionId;
  * @param {unknown} value
  */
 export function isDbAdhocIdentity(value: unknown): boolean {
-  return typeof value === 'string' && /^parallix-adhoc-\d{4,}$/i.test(value.trim());
+  return typeof value === 'string' && /^px-\d{4,}$/i.test(value.trim());
 }
 
 /**
  * A mission slug candidate is one of three backings: `task-<…>` (a Backlog
  * task), `adhoc-<…>` (the legacy free-text identity, still accepted so an
- * existing `adhoc-*` mission stays resolvable), or `parallix-adhoc-<NNNN>` (the
+ * existing `adhoc-*` mission stays resolvable), or `px-<NNNN>` (the
  * DB-owned, repository-scoped identity minted by `allocateAdhocIdentity`). No
  * content hash: the counter is the sole origin, so slug, mission id, branch,
  * and worktree suffix stay one derivable identity.
@@ -52,7 +53,7 @@ export function isDbAdhocIdentity(value: unknown): boolean {
 export function isMissionSlugCandidate(value: unknown): boolean {
   return (
     typeof value === 'string' &&
-    /^(?:(?:task|adhoc)-[a-z0-9][a-z0-9.-]*|parallix-adhoc-\d{4,})$/i.test(value.trim())
+    /^(?:(?:task|adhoc)-[a-z0-9][a-z0-9.-]*|px-\d{4,})$/i.test(value.trim())
   );
 }
 
@@ -84,6 +85,12 @@ export interface MissionData {
   readonly id: MissionId;
   readonly repositoryId: RepositoryId;
   readonly title: string;
+  /**
+   * Free text captured at creation before any brief exists. The brief stays the
+   * contract: refinement still requires goal and why, and a refining agent
+   * derives them from this text. Null when none was captured.
+   */
+  readonly description?: string | null;
   /** Open-ended Backlog labels; hypotheses and bug status are independent dimensions. */
   readonly labels: readonly MissionLabel[];
   readonly assignee: AgentFamily | null;
@@ -157,6 +164,7 @@ export interface MissionIntake {
   readonly title: string;
   readonly labels?: readonly MissionLabel[];
   readonly assignee?: AgentFamily | null;
+  readonly description?: string | null;
   /** Raw vocabulary from the intake source; retained for output compatibility. */
   readonly rawStatus?: string;
   /** Optional trace back to accepted external material (never an aggregate). */
@@ -192,6 +200,7 @@ export function intakeMission(intake: MissionIntake): OpenMission {
     title: missionTitle(intake.title, intake.id),
     labels: intake.labels === undefined ? [] : [...new Set(intake.labels)],
     assignee: intake.assignee ?? null,
+    ...(intake.description ? { description: intake.description } : {}),
     checkpoints: [],
     brief: null,
     declaredGates: [],
@@ -232,7 +241,10 @@ export function closeMission(mission: Mission, closedAt: string): ClosedMission 
   if (!closedAt.trim()) {
     throw new MissionRuleViolation(`Mission ${mission.id} requires an actual closure time`);
   }
-  return { ...mission, status: 'done', closedAt };
+  // Canonicalize at the domain boundary (TASK-2688): a closed Mission carries
+  // the UTC ISO-8601 instant in memory and on disk, so no writer can persist an
+  // explicit-offset spelling and no reader must guess a timezone.
+  return { ...mission, status: 'done', closedAt: toCanonicalUtcInstant(closedAt) };
 }
 
 export function requireClosedMission(mission: Mission): ClosedMission {

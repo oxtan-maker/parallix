@@ -355,7 +355,7 @@ describe("focused Mission status reads only the selected Mission", () => {
   });
 
   test('focused mission status reports a recorded ad-hoc Mission without a Backlog card', async () => {
-    const adHocId = missionId('parallix-adhoc-1');
+    const adHocId = missionId('px-1');
     const board = createStatusBoardAdapter({
       buildProjectionFn: async () => ({
         async buildMissionCard() { return null; },
@@ -433,7 +433,7 @@ describe("status lists all checkpoints and evidence", () => {
     cp('CP-4', 'Run the gate'),
   ];
 
-  async function statusResult(): Promise<StatusResult> {
+  async function statusResult(repair?: CheckpointData['repair']): Promise<StatusResult> {
     const mission = {
       id,
       repositoryId: repositoryId('parallix'),
@@ -443,7 +443,7 @@ describe("status lists all checkpoints and evidence", () => {
       rawStatus: 'active',
       closedAt: null,
       assignee: agentFamily('claude'),
-      checkpoints,
+      checkpoints: repair ? checkpoints.map(cp => cp.name === 'CP-4' ? { ...cp, repair } : cp) : checkpoints,
       review: null,
       netEngineeringLines: null,
     } as Mission;
@@ -511,4 +511,19 @@ describe("status lists all checkpoints and evidence", () => {
       { name: 'CP-4', description: 'Run the gate', recorded: false, goalCheck: [] },
     ]);
   });
+  test('status exposes durable invalid-contract blocker and harness repair state (TASK-2695)', async () => {
+    const repair: NonNullable<CheckpointData['repair']> = {
+      incidentId: 'incident', command: 'npm test', authorizedGates: ['npm test'], authorizedCriteria: [], attempt: 1,
+      evidenceRecorded: false, verified: false, blocker: {
+        command: 'npm test', diagnostic: 'support module rejected', authorityReason: 'operator owns checks', proposedCorrection: 'select owner',
+      },
+    };
+    const result = await statusResult(repair);
+    const lines: string[] = [];
+    renderStatus(result, line => lines.push(line));
+    assert.match(lines.join('\n'), /Repair incident: incident; attempt 1; harness verified: false/);
+    assert.match(lines.join('\n'), /Human review required:.*support module rejected/);
+    assert.deepEqual(JSON.parse(statusJson(result)).checkpoints.at(-1).repair, repair);
+  });
+
 });

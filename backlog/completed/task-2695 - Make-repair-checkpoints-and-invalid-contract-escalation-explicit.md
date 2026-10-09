@@ -1,8 +1,8 @@
 ---
 id: TASK-2695
 title: Make repair checkpoints and invalid-contract escalation explicit
-status: backlog
-assignee: []
+status: done
+assignee: [codex]
 created_date: '2026-10-09 05:49'
 labels:
   - bug
@@ -15,7 +15,7 @@ ordinal: 199008
 ## Description
 
 <!-- SECTION:DESCRIPTION:BEGIN -->
-TASK-2694 exposed a shared recovery-authority conflict. Its locked gate selected test/unit/interfaces/web/web-transport.cases.ts, a support module rejected by test discovery; the runnable owner is presentation-web-contract.test.ts. Operator-authorized correction executes all 170 cases. Mechanical invalidity is verified; why the drafting agent chose that path is not established. A discovered invalid locked contract must route to human review rather than authorizing the implementer to rewrite its own checks.
+TASK-2694 exposed a shared recovery-authority conflict. Its locked gate selected test/unit/interfaces/web/web-transport.cases.ts, a support module rejected by test discovery; the runnable owner is presentation-web-contract.test.ts. Operator-authorized correction executes all 170 cases. Mechanical invalidity is verified; why the drafting agent chose that path is not established. A discovered invalid locked contract must route to human review rather than authorizing the implementer to rewrite its own checks. And a drafting agents mission that is mechanically disprovable later must rebounce to drafter agent before drafting is complete.
 
 Conflicts: prompts/execute-core.md:18 forbids changing the mission and requires stopping; src/application/rebound-kernel.ts REPAIR_AUTHORITY permits configuration repair; buildFreshDiagnosticRepairPrompt prohibits replacing checks; the declared-gate-validation remedy explicitly requests replacing the declaration and refers to checkpoint documentation despite the retired document flow.
 

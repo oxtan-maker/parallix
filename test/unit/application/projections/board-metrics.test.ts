@@ -819,3 +819,10 @@ test('mixed timestamp formats select the earliest delivery instant despite textu
   assert.equal(outcomes[0].closedAt, '2026-10-01T22:30:00.000Z');
   assert.equal(outcomes[0].cycleTimeMinutes, 1350);
 });
+
+test('weekly DONE uses delivery time rather than a later administrative close (TASK-2688)', () => {
+  const old = move(id1, 'integration', 'done', '2026-08-24');
+  const close = { ...old, from: 'done' as const, occurredAt: '2026-08-28T09:00:00+02:00' };
+  const series = weeklyCumulativeFlowByStateSeries(new Map([[id1, 'done']]), [old, close], weekly);
+  assert.deepEqual(series.series.map(point => point.counts.done), [0, 0, 0, 0, 0, 0, 0]);
+});

@@ -17,6 +17,9 @@ import { missionVersion } from '../../../src/application/domain-ports.js';
 import { MissionCheckpointService } from '../../../src/application/mission-checkpoint-service.js';
 import { MissionHandoffService } from '../../../src/application/mission-handoff-service.js';
 import { MissionBriefService } from '../../../src/application/mission-brief-service.js';
+import { MissionCreationService } from '../../../src/application/mission-creation-service.js';
+import { allocateAdhocIdentity } from '../../../src/adapters/sqlite/adhoc-counter.js';
+import { createRepositoryMissionCatalog } from '../../../src/composition/board-projection.js';
 import { MissionIntakeService } from '../../../src/application/mission-intake-service.js';
 import { MissionLifecycleService } from '../../../src/application/mission-lifecycle-service.js';
 import { SqliteDatabaseAdapter } from '../../../src/adapters/sqlite/database-adapter.js';
@@ -384,5 +387,144 @@ describe('Mission application boundary over isolated SQLite adapters', () => {
     assert.equal(services.integration.constructor.name, 'MissionIntegrationService');
     assert.equal(services.checkpoints.constructor.name, 'MissionCheckpointService');
     assert.equal(services.handoff.constructor.name, 'MissionHandoffService');
+  });
+});
+
+describe('Mission creation over isolated SQLite', () => {
+  async function creation() {
+    const { store, db, databasePath } = await isolatedStore();
+    const rootDir = path.dirname(databasePath);
+    const service = new MissionCreationService(
+      new MissionIntakeService(store),
+      createRepositoryMissionCatalog({ rootDir, missionStore: store, repositoryId: REPOSITORY }),
+      { allocate: (repository) => missionId(allocateAdhocIdentity(repository, { dbPath: databasePath }).slug) },
+      REPOSITORY,
+      store,
+    );
+    const create = (overrides: Record<string, unknown> = {}) => service.execute({
+      operationId: 'op-create', requestKey: 'form-1', title: 'Capture the idea', capabilities: CAPABILITIES, ...overrides,
+    } as never);
+    return { store, db, create };
+  }
+
+  it('persists a uniquely identified backlog Mission with every planning field and its entry event', async () => {
+    const { store, db, create } = await creation();
+    try {
+      const dependency = await intake(store);
+      assert.equal(dependency.status, 'completed');
+      const first = await create({
+        description: 'Goal text', context: 'Because', labels: ['UX'], successCriteria: ['It works'], dependencies: [MISSION],
+      });
+      const second = await create({ requestKey: 'form-2' });
+      assert.equal(first.status, 'completed');
+      assert.equal(first.value.mission.id, 'px-0001');
+      assert.equal(second.value.mission.id, 'px-0002');
+
+      const read = await store.load(first.value.mission.id);
+      assert.equal(read.kind, 'found');
+      assert.equal(read.mission.repositoryId, REPOSITORY);
+      assert.equal(read.mission.status, 'backlog');
+      assert.equal(read.mission.title, 'Capture the idea');
+      assert.deepEqual(read.mission.labels, ['ux']);
+      assert.deepEqual(read.mission.brief, { goal: 'Goal text', why: 'Because', scope: null, outOfScope: [] });
+      assert.deepEqual(read.mission.successCriteria, ['It works']);
+      assert.deepEqual(read.mission.dependencies, [MISSION]);
+      const events = await db.query<{ n: number }>('SELECT COUNT(*) AS n FROM board_lane_events WHERE mission_id = ?', [first.value.mission.id]);
+      assert.equal(events[0].n, 1);
+    } finally {
+      await db.close();
+    }
+  });
+
+  it('persists a description with no context on the mission and leaves the brief empty (TASK-2693)', async () => {
+    const { store, db, create } = await creation();
+    try {
+      const created = await create({ description: 'Needs a reason later' });
+      assert.equal(created.status, 'completed');
+      const read = await store.load(created.value.mission.id);
+      assert.equal(read.kind, 'found');
+      assert.equal(read.mission.description, 'Needs a reason later');
+      assert.equal(read.mission.brief, null);
+    } finally {
+      await db.close();
+    }
+  });
+
+  it('refuses dependencies on finished, foreign and nonexistent missions and never records a half-written mission', async () => {
+    const { store, db, create } = await creation();
+    try {
+      await intake(store);
+      const finished = missionId('task-finished');
+      await store.save({ ...(await store.load(MISSION) as never as { mission: object }).mission, id: finished, status: 'done', closedAt: '2026-07-01T00:00:00Z' } as never, null);
+      const foreign = missionId('task-foreign');
+      await store.save({ ...(await store.load(MISSION) as never as { mission: object }).mission, id: foreign, repositoryId: repositoryId('other') } as never, null);
+      for (const dependency of [finished, foreign, 'task-nonexistent']) {
+        const outcome = await create({ requestKey: dependency, dependencies: [MISSION, dependency] });
+        assert.equal(outcome.status, 'rejected', dependency);
+      }
+      const rows = await db.query<{ n: number }>("SELECT COUNT(*) AS n FROM missions WHERE id LIKE 'px-%'");
+      assert.equal(rows[0].n, 0);
+    } finally {
+      await db.close();
+    }
+  });
+
+  it('a retried request key leaves exactly one persisted mission', async () => {
+    const { db, create } = await creation();
+    try {
+      const first = await create();
+      const retry = await create();
+      assert.equal(retry.value.mission.id, first.value.mission.id);
+      const rows = await db.query<{ n: number }>("SELECT COUNT(*) AS n FROM missions WHERE id LIKE 'px-%'");
+      assert.equal(rows[0].n, 1);
+    } finally {
+      await db.close();
+    }
+  });
+
+  it('a retry after the in-memory request cache evicted it still returns the persisted mission', async () => {
+    const { db, create } = await creation();
+    try {
+      const first = await create({ requestKey: 'original' });
+      for (let i = 0; i < 257; i += 1) { await create({ requestKey: `other-${i}` }); }
+      const retry = await create({ requestKey: 'original' });
+      assert.equal(retry.status, 'completed');
+      assert.equal(retry.value.mission.id, first.value.mission.id);
+      const rows = await db.query<{ n: number }>("SELECT COUNT(*) AS n FROM missions WHERE id LIKE 'px-%'");
+      assert.equal(rows[0].n, 258);
+    } finally {
+      await db.close();
+    }
+  });
+
+  it('equal request keys in different repositories create and recover their own missions', async () => {
+    const { store, db } = await isolatedStore();
+    try {
+      // Mission ids are global, so the fixture mints ids that cannot collide across repositories.
+      const serviceFor = (repository: ReturnType<typeof repositoryId>, dbPath: string) => new MissionCreationService(
+        new MissionIntakeService(store),
+        createRepositoryMissionCatalog({ rootDir: path.dirname(dbPath), missionStore: store, repositoryId: repository }),
+        { allocate: (owner) => missionId(`${owner}-mission.${++allocated}`) },
+        repository,
+        store,
+      );
+      let allocated = 0;
+      const dbPath = db.getPath()!;
+      const request = (title: string) => ({ operationId: 'op', requestKey: 'same-form-key', title, capabilities: CAPABILITIES }) as never;
+      const a = serviceFor(repositoryId('repo-a'), dbPath);
+      const b = serviceFor(repositoryId('repo-b'), dbPath);
+      const first = await a.execute(request('In A'));
+      const second = await b.execute(request('In B'));
+      assert.equal(second.status, 'completed');
+      assert.notEqual(second.value.mission.id, first.value.mission.id);
+      assert.equal(second.value.mission.repositoryId, 'repo-b');
+      // Fresh services have no memory: recovery must stay inside each repository.
+      const recoveredB = await serviceFor(repositoryId('repo-b'), dbPath).execute(request('In B'));
+      const recoveredA = await serviceFor(repositoryId('repo-a'), dbPath).execute(request('In A'));
+      assert.equal(recoveredB.value.mission.id, second.value.mission.id);
+      assert.equal(recoveredA.value.mission.id, first.value.mission.id);
+    } finally {
+      await db.close();
+    }
   });
 });

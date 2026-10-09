@@ -498,3 +498,48 @@ describe("Typed checkpoint recovery advice —", () => {
     assert.match(prompt, /px import-legacy/, 'historical documents retain their explicit import command');
   });
 });
+
+import { fixtureMission, inMemoryTransitionStore } from '../../../../fixtures/mission-builders.js';
+import { MissionCheckpointService } from '../../../../../src/application/mission-checkpoint-service.js';
+import { RepairCheckpointService, repairCheckpointFailure } from '../../../../../src/application/repair-checkpoint-service.js';
+import { configureRepairCheckpoints } from '../../../../../src/application/ports/repair-checkpoint.js';
+import { missionId } from '../../../../../src/domain/mission.js';
+
+test('missing planned checkpoint repair creates durable incident evidence and completes the original plan before handoff (TASK-2695)', async (t) => {
+  const slug = 'typed-checkpoint-gap';
+  const id = missionId(slug);
+  const store = inMemoryTransitionStore(fixtureMission(slug, { brief: {} as never, successCriteria: ['implemented'], completedSuccessCriteria: [0],
+    checkpoints: ['CP-1', 'CP-2'].map(name => ({ missionId: id, name, firstLine: 'original plan', goalCheck: [], nextActionText: '' })),
+  }));
+  configureRepairCheckpoints(new RepairCheckpointService(store));
+  t.after(() => configureRepairCheckpoints(undefined));
+  const service = new MissionCheckpointService(store);
+  let launches = 0;
+  let handoffs = 0;
+  let reviews = 0;
+  const result = await runHandoffAndReview(slug, '', 'codex', {
+    validateCheckpointsBeforeHandoffFn: () => {
+      const missing = store.mission().checkpoints.filter(cp => !cp.goalCheck.length || (cp.repair && !cp.repair.evidenceRecorded));
+      return missing.length ? { ok: false, error: `Planned checkpoint evidence is missing before handoff: ${missing.map(cp => cp.name).join(', ')}.`, nextCheckpoint: missing[0].name } : { ok: true };
+    },
+    startAgentFn: async (_step: string, options: { prompt: string }) => {
+      launches++;
+      assert.match(options.prompt, /Harness-created repair checkpoint: CP-3/);
+      assert.match(options.prompt, /Complete every remaining planned checkpoint before handoff/);
+      assert.equal(store.mission().checkpoints[2].repair?.command, 'px handoff');
+      assert.equal(store.mission().checkpoints[0].goalCheck.length, 0, 'harness must not invent implementation proof');
+      for (const name of ['CP-1', 'CP-2', 'CP-3']) {
+        const recorded = await service.record({ operationId: name, missionId: id, expectedVersion: (await store.load()).version,
+          capabilities: new Set(['checkpoint:record']), checkpoint: { missionId: id, name, nextActionText: 'handoff',
+            goalCheck: [{ criterion: 'implemented', evidence: 'npm test -- test/unit/adapters/cli/commands/mission-checkpoint-gate-bounce-contract.test.ts' }] } });
+        assert.equal(recorded.status, 'completed');
+      }
+      return { result: { status: 0 } };
+    },
+    performHandoff: async () => { handoffs++; assert.equal(repairCheckpointFailure(store.mission().checkpoints), null); return { ok: true }; },
+    startReviewLoop: async () => { reviews++; },
+  });
+  assert.equal(result, true);
+  assert.equal(launches, 1); assert.equal(handoffs, 1); assert.equal(reviews, 1);
+  assert.equal(store.mission().checkpoints[2].repair?.verified, true);
+});

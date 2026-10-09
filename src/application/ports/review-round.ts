@@ -298,7 +298,7 @@ export type PreReviewRebaseFacts =
   };
 
 export type PreReviewGateFacts =
-  | { readonly ok: true }
+  | { readonly ok: true; readonly command?: string }
   | { readonly ok: false; readonly area: string; readonly exitCode: number | null; readonly diagnostic: string; readonly reason: GateFailureReason };
 
 /** The mission worktree's pre-review Git and verification mechanisms. */

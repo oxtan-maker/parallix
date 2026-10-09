@@ -52,6 +52,7 @@ export function statusJson(result: StatusResult): string {
     legacyReviewStateError: md?.legacyReviewStateError ?? null,
     version: md?.version ?? null,
     brief: md?.brief ?? null,
+    description: md?.description ?? null,
     declaredGates: md?.declaredGates ?? [],
     successCriteria: md?.successCriteria ?? [],
     completedSuccessCriteria: md?.completedSuccessCriteria ?? [],
@@ -114,6 +115,10 @@ function logReviewRounds(missionData: StatusMissionData, log: (_msg: string) => 
   }
 }
 
+function logDescription(description: string | null | undefined, log: (_msg: string) => void): void {
+  if (description) { log(`Description: ${description}`); }
+}
+
 /**
  * The recorded brief and declared gates, so an agent never opens a mission
  * document to learn what the mission is for or what verifies it.
@@ -127,6 +132,7 @@ function logBriefAndGates(missionData: StatusMissionData, log: (_msg: string) =>
     if (brief.outOfScope.length > 0) { log(`Out of scope: ${brief.outOfScope.join('; ')}`); }
   } else {
     log('Brief: none recorded');
+    logDescription(missionData.description, log);
   }
   const criteria = missionData.successCriteria ?? [];
   if (criteria.length > 0) {
@@ -143,6 +149,10 @@ function logBriefAndGates(missionData: StatusMissionData, log: (_msg: string) =>
     log('Checkpoints:');
     for (const checkpoint of checkpoints) {
       log(`  ${checkpoint.recorded ? '[x]' : '[ ]'} ${checkpoint.name}: ${checkpoint.description}`.trimEnd());
+      if (checkpoint.repair) {
+        log(`      Repair incident: ${checkpoint.repair.incidentId}; attempt ${checkpoint.repair.attempt}; harness verified: ${checkpoint.repair.verified}`);
+        if (checkpoint.repair.blocker) { log(`      Human review required: ${JSON.stringify(checkpoint.repair.blocker)}`); }
+      }
       for (const row of checkpoint.goalCheck) {
         log(`      Goal Check: ${row.criterion}`);
         log(`        Evidence: ${row.evidence}`);

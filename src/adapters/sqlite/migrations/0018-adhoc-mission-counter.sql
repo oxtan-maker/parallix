@@ -4,7 +4,7 @@
 -- Backlog-backed missions keep their identity in a Backlog task file. Adhoc
 -- missions have no such file in an adhoc-only repository, so their identity is
 -- minted here instead: a monotonic counter owned per repository, allocated
--- atomically, so `parallix-adhoc-<NNNN>` can never collide with, or be confused
+-- atomically, so `px-<NNNN>` can never collide with, or be confused
 -- for, Backlog.md task numbering. No content hash in the identity: slug,
 -- mission id, branch, and worktree suffix all derive from this counter.
 --

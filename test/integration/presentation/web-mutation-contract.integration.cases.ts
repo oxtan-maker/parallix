@@ -535,3 +535,100 @@ test('web mutation: a read-only host without a dispatcher answers 503 and dispat
     assert.equal(validation.value.error?.kind, 'unavailable');
   });
 });
+
+function createBody(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    kind: 'mission:create',
+    requestKey: 'form-1',
+    title: 'Capture the idea',
+    labels: ['ux'],
+    successCriteria: ['It works'],
+    dependencies: ['task-2433'],
+    ...overrides,
+  };
+}
+
+test('web mutation: Create new mission dispatches once with host-owned identity and no card precondition (TASK-2693)', async () => {
+  const spy = makeDispatcherSpy();
+  spy.setOutcome(completed({ missionId: 'px-0001' }));
+  await withHost({
+    // No card in the projection: creation must not depend on one.
+    buildProjection: async () => makeProjection({}),
+    commandDispatcher: () => spy.dispatcher,
+  }, async info => {
+    const res = await postCommand(info, await launchValue(info), createBody({ description: 'Why', context: 'Because' }));
+    assert.equal(res.status, 200);
+    const validation = validateWebCommandResult(await res.json());
+    assert.ok(validation.ok);
+    assert.equal(validation.value.status, 'completed');
+    assert.deepEqual(validation.value.value, { missionId: 'px-0001' });
+    assert.equal(spy.requests.length, 1);
+    const [request] = spy.requests;
+    assert.equal(request.kind, 'mission:create');
+    assert.match(request.operationId, /^[0-9a-f-]{36}$/);
+    assert.deepEqual([...request.capabilities], ['mission:intake']);
+    assert.deepEqual(request.payload, {
+      kind: 'mission:create', requestKey: 'form-1', title: 'Capture the idea', description: 'Why', context: 'Because',
+      labels: ['ux'], successCriteria: ['It works'], dependencies: ['task-2433'],
+    });
+  });
+});
+
+test('web mutation: Create new mission keeps the Origin, session and CSRF boundary (TASK-2693)', async () => {
+  const spy = makeDispatcherSpy();
+  await withHost({ buildProjection: async () => makeProjection({}), commandDispatcher: () => spy.dispatcher }, async info => {
+    const value = await launchValue(info);
+    for (const mutate of [
+      (h: Record<string, string>) => { delete h.origin; },
+      (h: Record<string, string>) => { h.origin = 'http://evil.example'; },
+      (h: Record<string, string>) => { delete h.cookie; },
+      (h: Record<string, string>) => { h['x-px-csrf'] = 'forged-0123456789abcdef'; },
+    ]) {
+      assert.equal((await postCommand(info, value, createBody(), mutate)).status, 403);
+    }
+    assert.equal(spy.requests.length, 0);
+  });
+});
+
+test('web mutation: Create new mission rejects forged fields with 400 and zero dispatch (TASK-2693)', async () => {
+  const spy = makeDispatcherSpy();
+  await withHost({ buildProjection: async () => makeProjection({}), commandDispatcher: () => spy.dispatcher }, async info => {
+    const value = await launchValue(info);
+    const forged = [
+      createBody({ missionId: 'task-1' }),
+      createBody({ repositoryId: 'other' }),
+      createBody({ status: 'active' }),
+      createBody({ title: 7 }),
+      createBody({ dependencies: 'task-1' }),
+      createBody({ labels: [1] }),
+      createBody({ requestKey: '' }),
+      createBody({ description: null }),
+    ];
+    for (const body of forged) {
+      const res = await postCommand(info, value, body);
+      assert.equal(res.status, 400, JSON.stringify(body));
+      const validation = validateWebCommandResult(await res.json());
+      assert.ok(validation.ok);
+      assert.equal(validation.value.error?.kind, 'validation');
+    }
+    assert.equal(spy.requests.length, 0);
+  });
+});
+
+test('web mutation: Create new mission surfaces a dispatcher failure as a safe envelope (TASK-2693)', async () => {
+  const spy = makeDispatcherSpy();
+  spy.setOutcome(failure('validation', 'Title is required.'));
+  await withHost({ buildProjection: async () => makeProjection({}), commandDispatcher: () => spy.dispatcher }, async info => {
+    const res = await postCommand(info, await launchValue(info), createBody({ title: '   ' }));
+    const validation = validateWebCommandResult(await res.json());
+    assert.ok(validation.ok);
+    assert.equal(validation.value.status, 'failed');
+    assert.equal(validation.value.error?.message, 'Title is required.');
+  });
+});
+
+test('web mutation: Create new mission on a read-only host answers 503 (TASK-2693)', async () => {
+  await withHost({ buildProjection: async () => makeProjection({}) }, async info => {
+    assert.equal((await postCommand(info, await launchValue(info), createBody())).status, 503);
+  });
+});

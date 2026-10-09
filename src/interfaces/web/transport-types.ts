@@ -17,6 +17,7 @@ export type WebBoardLane = 'backlog' | 'refined' | 'active' | 'review' | 'integr
 export type WebBoardCommandKind =
   | 'active:execute'
   | 'mission:intake'
+  | 'mission:create'
   | 'draft:create'
   | 'checkpoint:record'
   | 'handoff:record'
@@ -162,6 +163,7 @@ export interface WebMissionCard {
 }
 
 export interface WebStage {
+  readonly historyCards?: readonly WebMissionCard[];
   readonly lane: WebBoardLane;
   readonly count: number;
   readonly cards: readonly WebMissionCard[];
@@ -208,6 +210,8 @@ export interface WebSourceFact {
 }
 
 export interface WebBoardMetrics {
+  /** Deliveries in the server-selected local reporting week; absent when unavailable. */
+  readonly weeklyCompletedMissions?: number;
   readonly health: { readonly state: string };
   readonly provenance: { readonly sampleSize: number; readonly newestEventTimestamp: string | null };
   /** The rolling week that FLOW uses, shared with the board's decision metrics. */

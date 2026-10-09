@@ -1,3 +1,4 @@
+import { repairCheckpointFailure } from './repair-checkpoint-service.js';
 /**
  * HandoffExecutor — sequences a single handoff invocation (TASK-2332.09).
  *
@@ -149,7 +150,7 @@ export class HandoffExecutor {
     }
 
     // Step 0: Resolve Backlog task for identity derivation.
-    // A DB-owned adhoc identity (`parallix-adhoc-<NNNN>`) is authoritative in the
+    // A DB-owned adhoc identity (`px-<NNNN>`) is authoritative in the
     // operator database; its Backlog task file is a best-effort one-way mirror
     // only. A missing or deleted mirror must not block handoff — the identity
     // and lifecycle are DB-authoritative. Backlog-backed missions keep the strict
@@ -179,6 +180,8 @@ export class HandoffExecutor {
         return { ok: false, error: msg };
       }
     }
+    const checkpointFailure = contract.draftedInDb ? repairCheckpointFailure(contract.checkpoints, contract.gates, contract.successCriteria) : null;
+    if (checkpointFailure) { error(checkpointFailure); return { ok: false, error: checkpointFailure }; }
     const recorded = contract.checkpoints;
     let finalCheckpoint: string | null = null;
     let checkpointContent = '';

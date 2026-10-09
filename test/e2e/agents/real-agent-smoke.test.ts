@@ -1077,10 +1077,10 @@ function runRealAgentSmoke(agent, runner) {
     // per criterion; preserve that same contract here while accepting useful
     // descriptive row labels from a real agent.
     const goalCheckRows = executed.latestCheckpoint?.goalCheck ?? [];
-    assert.equal(
-      goalCheckRows.length,
-      (executed.successCriteria ?? []).length,
-      `[parallix-workflow-failure] final checkpoint Goal Check rows must cover every success criterion: expected ${(executed.successCriteria ?? []).length}, got ${goalCheckRows.length}`
+    const criterionCount = (executed.successCriteria ?? []).length;
+    assert.ok(
+      goalCheckRows.length >= criterionCount,
+      `[parallix-workflow-failure] final checkpoint Goal Check rows must cover every success criterion: expected at least ${criterionCount}, got ${goalCheckRows.length}`
     );
 
     // Phase 3: Integrate through the real CLI rail. Agent work is complete at

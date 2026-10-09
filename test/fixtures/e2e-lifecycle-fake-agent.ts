@@ -34,9 +34,9 @@ async function recordContract(slug: string, root: string): Promise<void> {
 }
 
 async function runFakeLifecycleAgent(prompt: string, worktree?: string) {
-  const slug = value(prompt, /^(?:Mission s|S)lug:\s*((?:task-[a-z0-9-]+|parallix-adhoc-\d+))/im)
-    ?? value(prompt, /^Mission:\s*((?:task-[a-z0-9-]+|parallix-adhoc-\d+))/im)
-    ?? value(prompt, /^Mode: act-on-review\. Branch:\s*mission\/((?:task-[a-z0-9-]+|parallix-adhoc-\d+))/im)
+  const slug = value(prompt, /^(?:Mission s|S)lug:\s*((?:task-[a-z0-9-]+|px-\d+))/im)
+    ?? value(prompt, /^Mission:\s*((?:task-[a-z0-9-]+|px-\d+))/im)
+    ?? value(prompt, /^Mode: act-on-review\. Branch:\s*mission\/((?:task-[a-z0-9-]+|px-\d+))/im)
     ?? 'task-unknown';
   const root = worktree ?? process.cwd();
   const missionDir = value(prompt, /^Mission dir:\s*(.+)$/m) ?? path.join(root, 'missions', slug);

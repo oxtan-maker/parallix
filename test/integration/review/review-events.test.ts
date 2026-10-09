@@ -27,7 +27,7 @@ import {
 import { seedMissionDatabase } from '../../fixtures/review-state-db.js';
 import { agentFamily } from '../../../src/domain/agents.js';
 import { classifyComment, hasWorkflowFooter } from '../../../src/adapters/review/review-events.js';
-import { readReviewState } from '../../../src/adapters/review/review-state.js';
+import { readReviewState, writeReviewState } from '../../../src/adapters/review/review-state.js';
 
 // Test slug that is guaranteed not to exist
 const NONEXISTENT_SLUG = 'task-test-review-events-nonexistent';
@@ -443,63 +443,67 @@ test('consumeHumanNotes creates human_note events and skips workflow comments', 
     { number: 3, reviewer: agentFamily('claude'), implementer: agentFamily('mistral'), phase: 'reviewing' },
   );
   const missionStore = restoreHome.store;
+  try {
 
-  const seen = { branch: null, token: null };
-  const result = await consumeHumanNotes(TEST_SLUG, 'claude', {
-    worktree: tempDir,
-    forgejoUser: 'claude',
-    readTokenFn: () => 'token-123',
-    readReviewStateFn: (slug, rootDir) => readReviewState(slug, rootDir, missionStore),
-    createEventFn: (slug, eventType, params, options) => createEvent(slug, eventType, params, { ...options, missionStore }),
-    getCommentsFn: async (branch, token) => {
-      seen.branch = branch;
-      seen.token = token;
-      return [
-        {
-          body: 'Human reviewer note',
-          user: 'magnus',
-          created: '2026-05-25T19:00:00Z'
-        },
-        {
-          body: 'Workflow note\n\n---\n`[workflow-round:3, workflow-phase:reviewing]`',
-          user: 'claude',
-          created: '2026-05-25T19:01:00Z'
-        }
-      ];
+    const seen = { branch: null, token: null };
+    const result = await consumeHumanNotes(TEST_SLUG, 'claude', {
+      worktree: tempDir,
+      forgejoUser: 'claude',
+      readTokenFn: () => 'token-123',
+      readReviewStateFn: (slug, rootDir) => readReviewState(slug, rootDir, missionStore),
+      writeReviewStateFn: (slug, state, rootDir) => writeReviewState(slug, state, rootDir, missionStore),
+      createEventFn: (slug, eventType, params, options) => createEvent(slug, eventType, params, { ...options, missionStore }),
+      getCommentsFn: async (branch, token) => {
+        seen.branch = branch;
+        seen.token = token;
+        return [
+          {
+            body: 'Human reviewer note',
+            user: 'magnus',
+            created: '2026-05-25T19:00:00Z'
+          },
+          {
+            body: 'Workflow note\n\n---\n`[workflow-round:3, workflow-phase:reviewing]`',
+            user: 'claude',
+            created: '2026-05-25T19:01:00Z'
+          }
+        ];
+      }
+    });
+
+    assert.ok(result.ok);
+    assert.equal(seen.branch, 'mission/task-test-events');
+    assert.equal(seen.token, 'token-123');
+    assert.equal(result.created.length, 1);
+    assert.equal(result.skipped.length, 1);
+
+    const eventPath = result.created[0].path;
+    // After TASK-2322.12 cutover, events are stored in SQLite (path starts with 'sqlite:').
+    // The .md file path remains as a compatibility fallback.
+    if (typeof eventPath === 'string' && eventPath.startsWith('sqlite:')) {
+      // Verify the event was persisted in the Review aggregate
+      const events = await readAllEvents(TEST_SLUG, { rootDir: tempDir, missionStore });
+      assert.ok(Array.isArray(events) && events.length > 0);
+      const lastEvent = events[events.length - 1];
+      assert.equal(lastEvent.event_type, 'human_note');
+      assert.equal(lastEvent.round, 3);
+      assert.equal(lastEvent.phase, 'reviewing');
+      assert.equal(lastEvent.actor, 'claude');
+      assert.ok(lastEvent.content.includes('Human reviewer note'));
+    } else {
+      assert.ok(fs.existsSync(eventPath));
+      const content = fs.readFileSync(eventPath, 'utf8');
+      assert.ok(content.includes('event_type: human_note'));
+      assert.ok(content.includes('round: 3'));
+      assert.ok(content.includes('phase: reviewing'));
+      assert.ok(content.includes('actor: claude'));
+      assert.ok(content.includes('Human reviewer note'));
+
+      try { fs.unlinkSync(eventPath); } catch (_) {}
     }
-  });
-
-  assert.ok(result.ok);
-  assert.equal(seen.branch, 'mission/task-test-events');
-  assert.equal(seen.token, 'token-123');
-  assert.equal(result.created.length, 1);
-  assert.equal(result.skipped.length, 1);
-
-  const eventPath = result.created[0].path;
-  // After TASK-2322.12 cutover, events are stored in SQLite (path starts with 'sqlite:').
-  // The .md file path remains as a compatibility fallback.
-  if (typeof eventPath === 'string' && eventPath.startsWith('sqlite:')) {
-    // Verify the event was persisted in the Review aggregate
-    const events = await readAllEvents(TEST_SLUG, { rootDir: tempDir, missionStore });
-    assert.ok(Array.isArray(events) && events.length > 0);
-    const lastEvent = events[events.length - 1];
-    assert.equal(lastEvent.event_type, 'human_note');
-    assert.equal(lastEvent.round, 3);
-    assert.equal(lastEvent.phase, 'reviewing');
-    assert.equal(lastEvent.actor, 'claude');
-    assert.ok(lastEvent.content.includes('Human reviewer note'));
-  } else {
-    assert.ok(fs.existsSync(eventPath));
-    const content = fs.readFileSync(eventPath, 'utf8');
-    assert.ok(content.includes('event_type: human_note'));
-    assert.ok(content.includes('round: 3'));
-    assert.ok(content.includes('phase: reviewing'));
-    assert.ok(content.includes('actor: claude'));
-    assert.ok(content.includes('Human reviewer note'));
-
-    try { fs.unlinkSync(eventPath); } catch (_) {}
+  } finally {
+    await restoreHome();
   }
-  await restoreHome();
 });
 
 // Run with cleanup

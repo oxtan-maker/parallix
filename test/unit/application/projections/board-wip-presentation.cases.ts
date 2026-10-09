@@ -32,7 +32,7 @@ test('TUI and web top bars share the in-flight WIP total', async () => {
   const { renderToString } = await import('ink');
   const tuiWip = renderedWip(renderToString(React.createElement(BoardShell, { projection, columns: 120, rows: 30 })));
   const webWip = renderedWip(renderToStaticMarkup(React.createElement(TopBar, {
-    snapshot: toWebBoardSnapshot(projection), flowOpen: false, onFlowToggle: () => {},
+    snapshot: toWebBoardSnapshot(projection), flowOpen: false, onFlowToggle: () => {}, onCreate: () => {},
   })));
 
   assert.equal(tuiWip, 4, 'the eight-card board has four in-flight missions');

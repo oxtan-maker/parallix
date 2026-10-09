@@ -167,6 +167,10 @@ Usage: px checkpoint plan   [--slug <slug>] --name <CP-N> --text <what it delive
                             --criterion <text> --evidence <text> [--criterion ... --evidence ...]
                             --expected-version <n>
 
+Report an invalid locked contract: px checkpoint report-invalid-contract --name <CP-N>
+  --command <exact failing command> --diagnostic <text> --authority-reason <text>
+  --proposed-correction <text> --expected-version <n>
+
 A checkpoint is planned at draft and evidenced during execution. \`plan\` adds
 one with no evidence yet; \`unplan\` drops one that still has none. \`record\`
 writes a checkpoint's Goal Check evidence as durable Mission state, replacing
@@ -330,6 +334,14 @@ export function createCheckpointCommand(services: MissionCheckpointService, reso
         ? await services.plan({ ...req, name, description: required(args, '--text') })
         : await services.unplan({ ...req, name });
       output(unwrap(outcome, `checkpoint ${args[0]}`));
+      return;
+    }
+    if (args[0] === 'report-invalid-contract') {
+      const req = request(args, 'checkpoint-invalid-contract', resolveSlug, 'checkpoint:record');
+      output(unwrap(await services.reportInvalidContract({ ...req, name: required(args, '--name'), blocker: {
+        command: required(args, '--command'), diagnostic: required(args, '--diagnostic'),
+        authorityReason: required(args, '--authority-reason'), proposedCorrection: required(args, '--proposed-correction'),
+      } }), 'checkpoint report-invalid-contract'));
       return;
     }
     if (args[0] !== 'record') { fail(CHECKPOINT_HELP); }

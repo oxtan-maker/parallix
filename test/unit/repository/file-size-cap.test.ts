@@ -54,7 +54,6 @@ const EXCEPTIONS: readonly string[] = [
   'src/application/projections/metrics-read-adapter.ts',
   'src/application/projections/metrics.ts',
   'src/application/rebase-workflow.ts',
-  'src/application/rebound-kernel.ts',
   'src/application/recovery-supervisor.ts',
   'src/composition/create-cli.ts',
   'src/domain/review.ts',

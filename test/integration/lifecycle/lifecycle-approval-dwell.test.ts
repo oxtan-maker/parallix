@@ -196,12 +196,12 @@ test('delayed integration: review dwell is 30m and integration dwell is 225m (R2
     assert.equal(approveEvents.length, 1, 'exactly one review → integration event');
     assert.equal(
       approveEvents[0].occurred_at,
-      APPROVED_AT,
+      new Date(APPROVED_AT).toISOString(),
       `review → integration occurredAt is decidedAt (10:30), not the 14:00 integration start (got ${approveEvents[0]?.occurred_at})`,
     );
     const doneEvents = events.filter((e) => e.to_status === 'done' && e.trigger === 'integrate');
     assert.equal(doneEvents.length, 1, 'exactly one integration → done event');
-    assert.equal(doneEvents[0].occurred_at, LANDED_AT, 'integration → done is the landed commit time');
+    assert.equal(doneEvents[0].occurred_at, new Date(LANDED_AT).toISOString(), 'integration → done is the landed commit time');
 
     // The same projection Board/FLOW consumes: review dwell = 30m,
     // integration dwell = 225m.

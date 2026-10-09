@@ -166,7 +166,7 @@ export function inferSlug(slugCandidate: string | undefined): string | null {
   // 3. Check directory name
   const cwd = process.cwd();
   const dirName = path.basename(cwd);
-  const dirSlugMatch = dirName.match(/((?:task|adhoc)-[a-z0-9][a-z0-9.-]*|parallix-adhoc-\d{4,})$/i);
+  const dirSlugMatch = dirName.match(/((?:task|adhoc)-[a-z0-9][a-z0-9.-]*|px-\d{4,})$/i);
   if (dirSlugMatch) {
     return dirSlugMatch[1].toLowerCase();
   }

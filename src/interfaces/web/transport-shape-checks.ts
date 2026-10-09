@@ -238,9 +238,10 @@ function checkMetricSeries(key: MetricSeriesKey, series: unknown, path: string, 
 
 export function checkMetrics(object: unknown, path: string, problems: string[]): void {
   if (!isPlainObject(object)) { problems.push(`${path} must be an object`); return; }
-  checkKeys(object, ['health', 'provenance', 'flowWindow', 'cumulativeFlowByState', 'weeklyCumulativeFlow', 'medianCycleTimeByState', 'bottleneck'], ['health', 'provenance', 'cumulativeFlowByState', 'medianCycleTimeByState', 'bottleneck'], path, problems);
+  checkKeys(object, ['weeklyCompletedMissions', 'health', 'provenance', 'flowWindow', 'cumulativeFlowByState', 'weeklyCumulativeFlow', 'medianCycleTimeByState', 'bottleneck'], ['health', 'provenance', 'cumulativeFlowByState', 'medianCycleTimeByState', 'bottleneck'], path, problems);
   if (!isPlainObject(object.health)) { problems.push(`${path}.health must be an object`); } else { checkKeys(object.health, ['state'], ['state'], `${path}.health`, problems); checkString(object.health, 'state', `${path}.health`, problems); }
   if (!isPlainObject(object.provenance)) { problems.push(`${path}.provenance must be an object`); } else { checkKeys(object.provenance, ['sampleSize', 'newestEventTimestamp'], ['sampleSize', 'newestEventTimestamp'], `${path}.provenance`, problems); checkFiniteNumber(object.provenance, 'sampleSize', `${path}.provenance`, problems); checkNullableString(object.provenance, 'newestEventTimestamp', `${path}.provenance`, problems); }
+  if (object.weeklyCompletedMissions !== undefined) { checkFiniteNumber(object, 'weeklyCompletedMissions', path, problems); }
   if (object.flowWindow !== undefined) { checkMetricWindow(object.flowWindow, `${path}.flowWindow`, problems); }
   for (const key of ['cumulativeFlowByState', 'weeklyCumulativeFlow', 'medianCycleTimeByState'] as MetricSeriesKey[]) {
     const series = object[key]; const seriesPath = `${path}.${key}`;
