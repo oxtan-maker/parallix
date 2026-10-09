@@ -29,6 +29,20 @@ import { mkdtemp as registeredMkdtemp } from '../../../helpers/temp-dir.js';
 describe("context compaction", { concurrency: false }, () => {
   const repoRoot = path.resolve(import.meta.dirname, '..', '..', '..', '..');
 
+  // TASK-2700 supersedes aborted-context compaction for automatic repairs.
+  // Retain the durable reload and retry contract in the fresh conversation.
+  function assertFreshRepairAuthority(prompt: string): void {
+    assert.match(prompt, /You have a fresh context/);
+    assert.match(prompt, /Recovery strategy: fresh-diagnostic \(1\/2\)/);
+    assert.match(prompt, /Before repair, reload .*status .* --json/);
+    assert.match(prompt, /locked goal, scope, success criteria, gates, review disposition and authorized repair\/checkpoint obligations/);
+    assert.match(prompt, /Read applicable AGENTS\.md repository rules/);
+    assert.match(prompt, /inspect the current branch revision and working-tree edits/);
+    assert.match(prompt, /do not inherit prior execute\/review conversation instructions or review-approval authority/);
+    assert.match(prompt, /preserve valid commits and working-tree edits/);
+    assert.doesNotMatch(prompt, /compact the aborted working context/);
+  }
+
   test('task-2317: successful declared-gate instruction compacts only after success and retains failed-gate diagnostics', () => {
     // The compaction requirement is a lifecycle mechanic, so it lives in the
     // mandatory core half of the split execute prompt (task-2465).
@@ -68,7 +82,7 @@ describe("context compaction", { concurrency: false }, () => {
     assert.match(prompt, /independent of the mission.s declared gates/i);
   });
 
-  test('task-2317: repairable gate-error bounce compacts before repair and retains diagnostic plus retry state', async () => {
+  test('repairable gate-error bounce reloads fresh authority and retains diagnostic plus retry state (TASK-2700)', async () => {
     let repairPrompt = '';
     const result = await rebound(gateFailureReason({
       ok: false,
@@ -82,6 +96,7 @@ describe("context compaction", { concurrency: false }, () => {
       slug: 'task-2317-bounce', worktree: repoRoot, implementer: 'codex',
       verify: () => ({ ok: true }),
       startAgent: async (_step, options) => {
+        assert.equal(options.sessionPolicy, 'fresh-ephemeral');
         repairPrompt = (options.prompt as (agent: string) => string)('codex');
         return { agent: 'codex', result: { status: 0 } };
       },
@@ -91,13 +106,14 @@ describe("context compaction", { concurrency: false }, () => {
     // TASK-2377.03: the bounce is reported fixed only after the kernel's verify
     // callback re-runs the failing check and passes.
     assert.equal(result.outcome, 'fixed');
-    assert.match(repairPrompt, /Before repair work, compact the aborted working context/i);
+    assertFreshRepairAuthority(repairPrompt);
     assert.match(repairPrompt, /failing test: preserves diagnostic/);
     assert.match(repairPrompt, /Retry attempt: 1\/2/);
-    assert.match(repairPrompt, /current review round and disposition; unresolved findings and implementer resolutions/i);
+    assert.match(repairPrompt, /Original failure evidence/);
+    assert.match(repairPrompt, /Latest failure evidence/);
   });
 
-  test('task-2317: reviewer and implementer recovery relaunches compact before work with their retry state', async () => {
+  test('reviewer and implementer recovery relaunches reload fresh authority with retry state (TASK-2700)', async () => {
     for (const [role, expectedOutput] of [
       ['reviewer', 'a formal review outcome'],
       ['implementer', 'a disposition'],
@@ -106,13 +122,14 @@ describe("context compaction", { concurrency: false }, () => {
       await rebound({ kind: 'agent-timeout', role, diagnostic: `${role} timed out`, expectedOutput }, {
         slug: 'task-2317-timeout', worktree: repoRoot, implementer: 'codex',
         startAgent: async (_step, options) => {
+          assert.equal(options.sessionPolicy, 'fresh-ephemeral');
           repairPrompt = (options.prompt as (agent: string) => string)('codex');
           return { result: { status: 0 } };
         },
         verify: () => ({ ok: true }), log: () => {}, error: () => {},
       });
 
-      assert.match(repairPrompt, /Before repair work, compact the aborted working context/i);
+      assertFreshRepairAuthority(repairPrompt);
       assert.match(repairPrompt, new RegExp(`Required output: ${expectedOutput}`));
       assert.match(repairPrompt, /Retry attempt: 1\/2/);
     }

@@ -8,14 +8,12 @@ import { captureRecoveryEvidence, failureIncidentFingerprint, listRecoveryEviden
  * The current failure's own record is captured by the caller before the kernel
  * runs; here we read what is durable at prompt-build time (the original and any
  * prior retries) so a fresh-context or restarted agent still sees the series. */
-export function recoveryEvidenceForPrompt(worktree: string): Pick<FixPromptSlots, 'recoveryEvidence' | 'recoveryEvidenceRecent' | 'recoveryEvidenceError'> {
-  // Key by the worktree (not the slug) so the route resolves to exactly the
-  // store the capture step wrote into, regardless of which identity each side
-  // happened to know. The worktree is unique to one mission and one repository.
-  const recent = listRecoveryEvidence({ cwd: worktree });
+export function recoveryEvidenceForPrompt(worktree: string, missionId: string): Pick<FixPromptSlots, 'recoveryEvidence' | 'recoveryEvidenceRecent' | 'recoveryEvidenceError'> {
+  // Use the same mission identity as capture, including custom worktree names.
+  const recent = listRecoveryEvidence({ cwd: worktree, missionId });
   return {
     recoveryEvidence: recent[0] ?? null,
-    recoveryEvidenceRecent: recent.length > 1 ? recent.slice(1) : null,
+    recoveryEvidenceRecent: recent,
     recoveryEvidenceError: recent.length === 0 ? 'no retained evidence for this mission' : null,
   };
 }

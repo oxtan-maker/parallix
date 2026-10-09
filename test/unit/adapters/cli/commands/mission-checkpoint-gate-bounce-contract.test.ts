@@ -105,22 +105,6 @@ test('missing checkpoint: classifyError recognizes missing-checkpoint message as
     'Missing checkpoint should dispatch AutoSendBack for agent relaunch');
 });
 
-test('missing checkpoint: compatibility prompt preserves the actual checkpoint failure', () => {
-  const { buildRelaunchPrompt } = repairHandoff;
-  const errorMsg = 'No checkpoint documents found in /tmp/worktree/missions/task-2261. The execute agent must create checkpoint documents (CP-N.md) with a Goal Check table before handoff.';
-
-  const prompt = buildRelaunchPrompt(errorMsg, 'task-2261', '/tmp/worktree');
-
-  assert.ok(typeof prompt === 'string', 'Prompt should be a string');
-  assert.ok(prompt.includes('CP-'), 'Prompt should name the required checkpoint artifact (CP-N.md)');
-  assert.ok(/## Goal Check/.test(prompt), 'Prompt should require the exact ## Goal Check heading');
-  assert.ok(/Criterion\s*\|\s*Evidence\s*\|\s*Status/.test(prompt), 'Prompt should specify the exact table columns');
-  assert.ok(prompt.includes('px review task-2261 --submit'), 'Prompt should supply the retry command');
-  assert.ok(prompt.includes(errorMsg));
-  assert.ok(prompt.includes('Working directory: /tmp/worktree'));
-  assert.ok(prompt.includes('Classification: IncompleteEvidence — AutoSendBack'));
-});
-
 // ── CP-2: Checkpoint missing Goal Check table → repairable relaunch ──
 
 test('checkpoint missing Goal Check: classifyError recognizes as IncompleteEvidence', () => {
@@ -133,19 +117,6 @@ test('checkpoint missing Goal Check: classifyError recognizes as IncompleteEvide
     'Missing Goal Check section should be classified as IncompleteEvidence');
   assert.equal(result.dispatchAction, 'AutoSendBack',
     'Missing Goal Check should dispatch AutoSendBack for agent relaunch');
-});
-
-test('checkpoint missing Goal Check: compatibility prompt retains the failed check evidence', () => {
-  const { buildRelaunchPrompt } = repairHandoff;
-  const errorMsg = 'The final checkpoint at missions/task-2261/CP-1.md is missing a "## Goal Check" section. Review requires a goal-check table with real evidence before handoff.';
-
-  const prompt = buildRelaunchPrompt(errorMsg, 'task-2261', '/tmp/worktree');
-
-  assert.ok(/## Goal Check/.test(prompt), 'Prompt should require the ## Goal Check heading');
-  assert.ok(/Criterion\s*\|\s*Evidence\s*\|\s*Status/.test(prompt), 'Prompt should specify table columns');
-  assert.ok(prompt.includes('px review task-2261 --submit'), 'Prompt should supply the retry command');
-  assert.ok(prompt.includes(errorMsg));
-  assert.ok(prompt.includes('Classification: IncompleteEvidence — AutoSendBack'));
 });
 
 // ── CP-3: Retry lifecycle outcomes ──
@@ -266,7 +237,7 @@ Checkpoint created after targeted repair relaunch.
 |---|---|---|
 | Deterministic regression test reproduces execute-complete mission with no checkpoint | test/task-2261-checkpoint-gates-repro.test.ts:20 — "missing checkpoint: runHandoffAndReview classifies as repairable and relaunches agent" | PASS |
 | Handoff classifies missing CP-N.md and missing Goal Check as IncompleteEvidence | test/task-2261-checkpoint-gates-repro.test.ts:58 — classifyError test; test/task-2261-checkpoint-gates-repro.test.ts:89 — Goal Check classifyError test | PASS |
-| Targeted relaunch names CP-N.md, requires ## Goal Check and table columns, supplies px review --submit | test/task-2261-checkpoint-gates-repro.test.ts:72 — buildRelaunchPrompt test | PASS |
+| Targeted relaunch names CP-N.md, requires ## Goal Check and table columns, supplies px review --submit | test/task-2261-checkpoint-gates-repro.test.ts:72 — captured repair prompt | PASS |
 | Valid checkpoint with one evidence row per criterion unblocks automated handoff retry | test/task-2261-checkpoint-gates-repro.test.ts:178 — "missing checkpoint: valid CP after relaunch unblocks handoff" | PASS |
 | Repeated absent evidence reaches configured retry/exhaustion boundary without review submission | test/task-2261-checkpoint-gates-repro.test.ts:258 — "missing checkpoint: still absent after relaunch returns false" (asserts relaunchCount === 2) | PASS |
 | Focused tests and verify-local.sh all pass | npm test -- test/task-2261-checkpoint-gates-repro.test.ts (12 tests); ./scripts/verify-local.sh all (1330 tests) | PASS |
@@ -450,7 +421,6 @@ describe("Missing checkpoint error classification —", () => {
 // injected boundaries: no agent process, network service, or Mission write is
 // involved.
 describe("Typed checkpoint recovery advice —", () => {
-  const { buildRelaunchPrompt } = repairHandoff;
   const slug = 'task-2581';
   const worktree = '/tmp/worktree-task-2581';
   const typedCheckpointFailure = 'Planned checkpoint evidence is missing before handoff: CP-2. Record each with `px checkpoint record --name <CP-N>` before handoff.';
@@ -488,14 +458,6 @@ describe("Typed checkpoint recovery advice —", () => {
     assert.equal(result, false, 'the mocked validation remains unresolved after the bounded recovery attempts');
     assert.ok(prompts.length > 0, 'the typed failure is sent to the mocked recovery launcher');
     assertRecordedCheckpointRecoveryAdvice(prompts[0]);
-  });
-
-  test('typed repair-handoff recovery uses recorded checkpoint commands without legacy templates', () => {
-    const prompt = buildRelaunchPrompt(typedCheckpointFailure, slug, worktree);
-
-    assertRecordedCheckpointRecoveryAdvice(prompt);
-    assert.match(prompt, /historical[- ]import/i, 'legacy document import remains an explicit, separate compatibility path');
-    assert.match(prompt, /px import-legacy/, 'historical documents retain their explicit import command');
   });
 });
 

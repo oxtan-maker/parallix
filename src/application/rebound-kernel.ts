@@ -6,7 +6,7 @@ import { DEFAULT_REBOUND_ATTEMPTS, classifyReboundReason, reboundDiagnostic, tra
 export { classifyReboundReason, reboundDiagnostic, isTransientVerifierFailure } from '../domain/rebound-policy.js';
 export type { ReboundReason, ReboundClassification, GateFailureReason, HookFailureReason, ArtifactIncompleteReason, AgentTimeoutReason, HandoffVerificationReason, DeclaredGateValidationReason } from '../domain/rebound-policy.js';
 import { recoveryEvidenceRoute } from './rebound-prompts.js';
-export { buildReboundFixPrompt, buildFreshDiagnosticRepairPrompt } from './rebound-prompts.js';
+export { buildFreshDiagnosticRepairPrompt } from './rebound-prompts.js';
 /**
  * Rebound kernel (TASK-2377.03).
  *
@@ -257,7 +257,7 @@ async function reboundImpl(reason: ReboundReason, context: ReboundContext): Prom
       : `launcher budget spent (${maxLaunchRetries} session retries; ${state.launchFailures} failed launches)`;
   const dossier = recoveryDossier(state.reason, context, state.history, state.diagnostic, why, state.attemptsDetail, state.capturedEvidence);
   error(fmt.status('FAIL', dossier));
-  recordRepairTelemetry(context, { strategy: state.attemptsDetail.at(-1)?.strategy || 'targeted', outcome: 'escalate' });
+  recordRepairTelemetry(context, { strategy: state.attemptsDetail.at(-1)?.strategy || 'fresh-diagnostic', outcome: 'escalate' });
   return { outcome: 'exhausted', attempts: state.attempts, diagnostic: state.diagnostic, classification: state.classification, implementer: state.implementer, dossier, attemptsDetail: state.attemptsDetail };
 }
 
@@ -326,7 +326,7 @@ async function runRepairAttempts(state: ReboundState, options: RepairOptions): P
     const startedAt = Date.now();
     const headBefore = await currentHead(context);
     const fingerprintBefore = failureFingerprint(state.reason);
-    const launch = await launchFixAttempt({ startAgent, applyAgentFallback, implementer: state.implementer, fixPrompt, slug, worktree, step: context.step, role: context.role, exclude: context.exclude, sessionPolicy: strategy === 'fresh-diagnostic' ? 'fresh-ephemeral' : 'resume' });
+    const launch = await launchFixAttempt({ startAgent, applyAgentFallback, implementer: state.implementer, fixPrompt, slug, worktree, step: context.step, role: context.role, exclude: context.exclude, sessionPolicy: 'fresh-ephemeral' });
     state.implementer = launch.implementer;
     let blocker: InvalidContractBlocker | undefined;
     try { blocker = launch.invalidContract ?? (repairCheckpoint ? await repairPort!.readBlocker(slug, repairCheckpoint.name) : undefined); }
@@ -354,12 +354,12 @@ async function runRepairAttempts(state: ReboundState, options: RepairOptions): P
       try { await repairPort!.verify(slug, repairCheckpoint.name); }
       catch (cause) { return stopRepair(state, context, String(cause)); }
     }
-    const detail: RepairEvidence = { strategy, agent: state.implementer, context: strategy === 'fresh-diagnostic' ? 'fresh' : 'resumed', headBefore, headAfter: await currentHead(context), fingerprintBefore, fingerprintAfter: verified.ok ? fingerprintBefore : failureFingerprint(refreshedReason(state.reason, verified)) };
+    const detail: RepairEvidence = { strategy, agent: state.implementer, context: 'fresh', headBefore, headAfter: await currentHead(context), fingerprintBefore, fingerprintAfter: verified.ok ? fingerprintBefore : failureFingerprint(refreshedReason(state.reason, verified)) };
     state.attemptsDetail.push(detail);
     await recordAttemptTelemetry(state, context, [attempt, maxAttempts], detail, startedAt, launch, verified);
     if (verified.ok) {
       log(fmt.status('PASS', `${state.classification.label} repaired: the failing check re-ran and passed (attempt ${attempt}/${maxAttempts}).`));
-      recordRepairTelemetry(context, { strategy, outcome: strategy === 'targeted' ? 'pass' : 'rescue' });
+      recordRepairTelemetry(context, { strategy, outcome: 'rescue' });
       return { outcome: 'fixed', attempts: state.attempts, diagnostic: verified.diagnostic || '', classification: state.classification, implementer: state.implementer, attemptsDetail: state.attemptsDetail };
     }
     refreshReboundState(state, verified, log);
@@ -368,7 +368,7 @@ async function runRepairAttempts(state: ReboundState, options: RepairOptions): P
     // Do not overwrite state.capturedEvidence: the prompt must still name the
     // original failure, while the retry surfaces via the recent-incident route.
     await captureRetryEvidence(state, worktree, context);
-    if (strategy === 'targeted') { recordRepairTelemetry(context, { strategy, outcome: 'advance' }); }
+    if (attempt < maxAttempts && state.classification.isRelaunchable) { recordRepairTelemetry(context, { strategy, outcome: 'advance' }); }
     if (reboundRequiresHuman(state.reason, state.classification)) { break; }
     error(fmt.status('WARN', `${state.classification.label}: the check still fails after attempt ${attempt}/${maxAttempts}.`));
   }

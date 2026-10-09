@@ -644,7 +644,6 @@ test('repair-handoff ESM namespace exposes callable default and named exports', 
   assert.equal(typeof repairHandoffModule.repairHandoff, 'function', 'named export repairHandoff must be callable');
   assert.equal(repairHandoffModule.default, repairHandoffModule.repairHandoff, 'default and named repairHandoff must be same function');
   assert.equal(typeof repairHandoffModule.isRelaunchableError, 'function', 'isRelaunchableError must be exported');
-  assert.equal(typeof repairHandoffModule.buildRelaunchPrompt, 'function', 'buildRelaunchPrompt must be exported');
 });
 
 test('runHandoffAndReview passes worktree and implementer to startReviewLoop', async () => {

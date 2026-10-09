@@ -65,6 +65,7 @@ test('startAgent sessionPolicy keeps the normal marker while fresh recovery bypa
   await startAgent('act-on-review', { configuration: resolveConfiguration(process.env), ...common, sessionPolicy: 'resume' });
   const callsAfterResume = { ...markerCalls };
   await startAgent('act-on-review', { configuration: resolveConfiguration(process.env), ...common, sessionPolicy: 'fresh-ephemeral' });
+  await startAgent('act-on-review', { configuration: resolveConfiguration(process.env), ...common, sessionPolicy: 'fresh-ephemeral' });
   assert.deepEqual(markerCalls, callsAfterResume, 'fresh recovery must neither read nor mutate the durable marker');
   await startAgent('act-on-review', { configuration: resolveConfiguration(process.env), ...(common) });
 
@@ -72,8 +73,10 @@ test('startAgent sessionPolicy keeps the normal marker while fresh recovery bypa
   assert.equal(launches[0].sessionId, 'durable-normal-session');
   assert.equal(launches[1].resume, false);
   assert.equal(launches[1].sessionId, null);
-  assert.equal(launches[2].resume, true, 'ordinary launch still resumes the original normal session');
-  assert.equal(launches[2].sessionId, 'durable-normal-session');
+  assert.equal(launches[2].resume, false, 'later repair also starts fresh');
+  assert.equal(launches[2].sessionId, null);
+  assert.equal(launches[3].resume, true, 'ordinary launch still resumes the original normal session');
+  assert.equal(launches[3].sessionId, 'durable-normal-session');
 });
 
 if (process.env.PARALLIX_HOME) {
@@ -2708,4 +2711,14 @@ test('mistral without a non-interactive tool-approval bypass gets re-blocklisted
 
   assert.equal(result.agent, 'vibe', 'vibe should complete successfully once it can approve its own tool calls non-interactively');
   assert.deepEqual(blockCalls, [], `mistral should not be blocklisted for a genuine non-interactive tool-approval gap; got ${JSON.stringify(blockCalls)}`);
+});
+
+
+test('Vibe fresh repairs ignore historical conversation markers (TASK-2700)', () => {
+  for (const attempt of [1, 2]) {
+    const invocation = buildVibeInvocation({ prompt: `repair ${attempt}`, worktree: '/tmp/fresh-repair', resume: false, sessionId: 'prior-marker' });
+    assert.ok(!invocation.args.includes('prior-marker'));
+    assert.ok(!invocation.args.includes('--resume'));
+    assert.ok(!invocation.args.includes('--continue'));
+  }
 });

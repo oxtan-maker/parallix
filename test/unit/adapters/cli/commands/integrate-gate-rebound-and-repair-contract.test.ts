@@ -321,25 +321,14 @@ describe("relaunchable repair", () => {
   // CP-4 integration tests for task-1124
 
   const isRelaunchableErrorModule = mockModule<typeof import('../../../../../src/adapters/cli/commands/repair-handoff.js')>('../../../../../src/adapters/cli/commands/repair-handoff.js', import.meta.url);
-  const buildRelaunchPromptModule = mockModule<typeof import('../../../../../src/adapters/cli/commands/repair-handoff.js')>('../../../../../src/adapters/cli/commands/repair-handoff.js', import.meta.url);
   const runtimeMatrix = mockModule<typeof import('../../../../../src/adapters/agents/runtime-matrix.js')>('../../../../../src/adapters/agents/runtime-matrix.js', import.meta.url);
 
   test.afterEach(() => mock.restoreAll());
   const { isRelaunchableError } = isRelaunchableErrorModule;
-  const { buildRelaunchPrompt } = buildRelaunchPromptModule;
 
   test('SC 1: isRelaunchableError returns true for goal-check missing evidence rows', () => {
     const errorMsg = 'The final checkpoint at docs/missions/2026/task-1121/CP-3.md has a "## Goal Check" section but no evidence rows. A goal-check table with real evidence is required before handoff.';
     assert.equal(isRelaunchableError(errorMsg), true);
-  });
-
-  test('SC 2: buildRelaunchPrompt delegates to the kernel and keeps the mission evidence', () => {
-    const errorMsg = 'The final checkpoint at docs/missions/2026/task-1121/CP-3.md has a "## Goal Check" section but no evidence rows. A goal-check table with real evidence is required before handoff.';
-    const prompt = buildRelaunchPrompt(errorMsg, 'task-1124', '/tmp/worktree');
-    assert.ok(prompt.includes('Goal Check table'));
-    assert.ok(prompt.includes('task-1124'));
-    assert.ok(prompt.includes(errorMsg));
-    assert.ok(prompt.includes('Retry attempt: 1/2'));
   });
 
   test('SC 3: ExecuteHandoffService bounces through the kernel when repair fails and error is relaunchable', () => {

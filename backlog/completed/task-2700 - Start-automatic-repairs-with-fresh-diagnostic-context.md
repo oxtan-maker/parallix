@@ -1,8 +1,8 @@
 ---
 id: TASK-2700
 title: Start automatic repairs with fresh diagnostic context
-status: backlog
-assignee: []
+status: done
+assignee: [codex]
 created_date: '2026-10-09 13:44'
 labels:
   - workflow

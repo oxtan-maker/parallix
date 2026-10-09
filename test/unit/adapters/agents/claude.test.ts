@@ -382,3 +382,17 @@ test('startClaudeAgent healthy resume still uses --resume flag', async () => {
 
   claude.__setSpawnAndTeeForTest(null);
 });
+
+
+test('first and later fresh repair ignore historical session IDs (TASK-2700)', () => {
+  for (const attempt of [1, 2]) {
+    const invocation = buildClaudeInvocation({
+      prompt: `repair ${attempt}`, worktree: '/tmp/fresh-repair',
+      resume: false, sessionId: 'prior-conversation-marker', interactive: false,
+    });
+    assert.ok(!invocation.args.includes('prior-conversation-marker'));
+    for (const flag of ['resume', '--resume', '--continue', '--last', '-r', '-c', '-s']) {
+      assert.ok(!invocation.args.includes(flag), `unexpected history flag ${flag}`);
+    }
+  }
+});

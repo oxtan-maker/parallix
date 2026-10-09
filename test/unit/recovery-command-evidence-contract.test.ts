@@ -14,7 +14,7 @@ import {
   RECOVERY_EVIDENCE_VERSION,
   type RecoveryEvidenceRef,
 } from '../../src/application/recovery-evidence.js';
-import { buildReboundFixPrompt, buildFreshDiagnosticRepairPrompt, rebound } from '../../src/application/rebound-kernel.js';
+import { buildFreshDiagnosticRepairPrompt, rebound } from '../../src/application/rebound-kernel.js';
 
 /**
  * CONTRACT (TASK-2642 / CP-1): a failed verification command whose actionable
@@ -340,13 +340,11 @@ test('CP-1 repaired fix prompt carries the evidence and a working retrieval rout
       maxAttempts: 2,
       remedy: 'fix it',
     };
-    const targeted = buildReboundFixPrompt({ ...slots, recoveryEvidence: captured.ref });
     const fresh = buildFreshDiagnosticRepairPrompt({ ...slots, recoveryEvidence: captured.ref });
-    assert.match(targeted, /Retained evidence/, 'targeted prompt exposes the retained evidence');
-    assert.match(targeted, /unit-test-budget: exceeded/, 'the prompt names the retained command output');
-    assert.match(targeted, /\.stdout\.txt/, 'the prompt gives a retrievable stdout path');
-    assert.match(targeted, /lookupRecoveryEvidence/, 'the prompt gives a working retrieval route');
-    assert.match(fresh, /Retained evidence/, 'fresh-context prompt also carries the evidence references');
+    assert.match(fresh, /Retained evidence/, 'fresh prompt exposes the retained evidence');
+    assert.match(fresh, /unit-test-budget: exceeded/, 'the prompt names the retained command output');
+    assert.match(fresh, /\.stdout\.txt/, 'the prompt gives a retrievable stdout path');
+    assert.match(fresh, /lookupRecoveryEvidence/, 'the prompt gives a working retrieval route');
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
@@ -374,14 +372,14 @@ test('CP-1 missing evidence is reported honestly with a fallback, not a complete
       recoveryEvidence: null,
       recoveryEvidenceError: 'no retained evidence for this mission',
     };
-    const prompt = buildReboundFixPrompt(slots);
+    const prompt = buildFreshDiagnosticRepairPrompt(slots);
     assert.match(prompt, /No retained evidence/, 'a prompt with no evidence states it honestly');
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
 });
 
-test('CP-3 both resumed-targeted and fresh-context repair receive the bounded route with omitted-middle retrieval after a restart', () => {
+test('CP-3 fresh-context repair receives the bounded route with omitted-middle retrieval after a restart', () => {
   const root = mkdtemp('task-2642-recovery-both-');
   try {
     initCommittedRepository(root);
@@ -416,16 +414,13 @@ test('CP-3 both resumed-targeted and fresh-context repair receive the bounded ro
       maxAttempts: 2,
       remedy: 'fix it',
     };
-    // Both repair entry points get the same bounded route: the retained command
+    // Fresh repairs get the bounded route: the retained command
     // and the retrieval route, not the previous model's assumptions.
-    const targeted = buildReboundFixPrompt({ ...slots, recoveryEvidence: readBack.evidence ?? null });
     const fresh = buildFreshDiagnosticRepairPrompt({ ...slots, recoveryEvidence: readBack.evidence ?? null });
-    for (const [label, prompt] of [['targeted', targeted], ['fresh', fresh]] as const) {
-      assert.match(prompt, /Retained evidence for this failure/, `${label} prompt exposes retained evidence`);
-      assert.match(prompt, /retrieve the omitted middle/, `${label} prompt includes omitted-middle retrieval`);
-      assert.match(prompt, /bash .*verify\.sh docs/, `${label} prompt names the retained command`);
-      assert.match(prompt, new RegExp(`lookupRecoveryEvidence\\(\\{ cwd, incidentId: "${captured.ref.incidentId}" \\}\\)`), `${label} prompt gives a working retrieval route`);
-    }
+    assert.match(fresh, /Retained evidence for this failure/, `fresh prompt exposes retained evidence`);
+    assert.match(fresh, /retrieve the omitted middle/, `fresh prompt includes omitted-middle retrieval`);
+    assert.match(fresh, /bash .*verify\.sh docs/, `fresh prompt names the retained command`);
+    assert.match(fresh, new RegExp(`lookupRecoveryEvidence\\(\\{ cwd, incidentId: "${captured.ref.incidentId}" \\}\\)`), `fresh prompt gives a working retrieval route`);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
@@ -468,7 +463,7 @@ test('CP-4 truncated, expired, and redacted evidence are reported explicitly wit
     assert.equal(truncated.ref.captureComplete, false, 'a record past the byte cap reports capture incomplete');
     assert.equal(truncated.ref.truncatedFrom, 'stdout');
     assert.match(truncated.ref.stdoutPath, /\.stdout\.txt$/);
-    const truncatedPrompt = buildReboundFixPrompt(slots(truncated.ref));
+    const truncatedPrompt = buildFreshDiagnosticRepairPrompt(slots(truncated.ref));
     assert.match(truncatedPrompt, /capture complete: no/, 'the prompt states capture is not complete');
     assert.match(truncatedPrompt, /truncated — see capture-completeness note/, 'the prompt points at the omitted middle');
 
@@ -488,7 +483,7 @@ test('CP-4 truncated, expired, and redacted evidence are reported explicitly wit
     });
     assert.equal(redacted.ok, true);
     assert.equal(redacted.ref.redacted, true);
-    const redactedPrompt = buildReboundFixPrompt(slots(redacted.ref));
+    const redactedPrompt = buildFreshDiagnosticRepairPrompt(slots(redacted.ref));
     assert.match(redactedPrompt, /redacted per configured credential redaction/, 'the prompt discloses redaction');
 
     // Configured credential redaction is applied to the retained streams before

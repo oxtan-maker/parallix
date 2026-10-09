@@ -1,8 +1,8 @@
 # Recovery evidence contract
 
 This contract describes the failure evidence the repair lifecycle captures before
-it launches a repair agent, and the bounded interface both resumed-targeted and
-fresh-context repairs use to retrieve it. It exists so a genuine failure that
+it launches a repair agent, and the bounded interface fresh-context diagnostic
+repairs use to retrieve it. It exists so a genuine failure that
 sits behind a large passing prefix and a later passing-looking summary is never
 lost to the terminal tail, to truncation, to a fresh agent context, or to a
 process restart.
@@ -14,7 +14,7 @@ looks like success. The terminal tail and a generic final error hide the
 actionable failure, so the next repair budget is spent rediscovering a failure
 that already happened. The capture step records the failed command and the
 structured outcome before any repair launches, and the retrieval interface hands
-that evidence to whichever agent repairs the mission, in either launch context.
+that evidence to whichever agent repairs the mission, in each fresh launch.
 
 ## What is captured
 
@@ -61,13 +61,19 @@ record is missing, truncated, expired, oversized, interrupted, or
 access-denied, the route states it and points at related incidents rather than
 claiming completeness.
 
-The two repair contexts use the same interface within their actual launch
-environment:
+Every agent-fixable automatic repair, including the first, starts a new ephemeral
+conversation with the exact diagnostic and retained evidence. It reloads the
+locked mission authority, applicable repository rules, current revision and
+available repair obligations. Valid commits and working-tree edits survive
+between attempts; the normal session marker remains available for ordinary work.
+The repair budget and launcher retry budget remain separate. A successful agent
+exit alone is insufficient: the authorized verifier must rerun successfully,
+with committed-tree proof wherever the workflow requires it.
 
-- resumed-targeted repair carries the retained evidence with the failed command
-  and the retrieval route
-- fresh-context diagnostic repair receives the same references and the working
-  retrieval call, and a process restart does not silently invalidate them
+Selected paired first-repair replays favored fresh context in token use. They did
+not validate full-cascade success or production savings. Automatic recovery keeps
+production verification authority; an exploratory green probe cannot establish
+success.
 
 When automatic recovery exhausts its budget, the report still names the failed
 check, the attempts spent, and the retrieval route so the retained output remains

@@ -1,20 +1,7 @@
 import { git, getCurrentBranch } from '../../git/git.js';
-import * as missionUtils from '../../filesystem/mission-utils.js';
 import rebase from './rebase.js';
 import * as fmt from '../../../application/presentation/cli-format.js';
 import { FailureClass, DispatchAction, classifyError, getDispatchAction } from '../../../application/failure-classification.js';
-import {
-  buildReboundFixPrompt,
-  classifyReboundReason,
-  type HandoffVerificationReason,
-} from '../../../application/rebound-kernel.js';
-import {
-  buildTypedMissionRecoveryAdvice,
-  isIncompleteSuccessCriteriaFailure,
-  buildSuccessCriteriaRecoveryAdvice,
-  isTypedCheckpointEvidenceFailure,
-  namedCheckpointFromTypedFailure,
-} from '../../../application/typed-mission-recovery-advice.js';
 
 // ── ADR 0048 classification (single table, owned by the application layer) ───
 // The eight failure classes, the three dispatch actions, and `classifyError`
@@ -42,59 +29,6 @@ function isRelaunchableError(errorMsg: string): boolean {
   // IncompleteEvidence and GateFailure are the only classes that were relaunchable under the old logic
   return failureClass === FailureClass.IncompleteEvidence
     || failureClass === FailureClass.GateFailure;
-}
-
-/**
- * Build a relaunch prompt for an agent to fix a relaunchable error.
- *
- * @param {string} errorMsg - The error message from the failed handoff
- * @param {string} slug - Mission slug
- * @param {string} worktree - Path to the mission worktree
- * @returns {string} The relaunch prompt
-  */
-function buildRelaunchPrompt(errorMsg: string, slug: string, worktree: string, gateOutput?: { stdout: string; stderr: string }) {
-  const reason: HandoffVerificationReason = {
-    kind: 'handoff-verification',
-    error: errorMsg,
-    gateOutput: [gateOutput?.stdout, gateOutput?.stderr].filter(Boolean).join('\n'),
-  };
-  const classification = classifyReboundReason(reason);
-  const missionDir = missionUtils.findMissionDir(slug, worktree) || missionUtils.missionDirForSlug(worktree, slug);
-  const offendingRow = errorMsg.match(/Offending row:\s*(.+)$/m)?.[1]?.trim();
-  const remedy = classification.failureClass === FailureClass.GateFailure
-    ? [
-      'This is a verification/test failure, not missing checkpoint evidence. Do not edit checkpoint evidence to work around it.',
-      `Fix the specific handoff verification failure shown above: fix the failing verification or test named in the captured output in ${worktree}, rerun that verification, and commit the fix.`,
-      `Post-return action: px review ${slug} --submit.`,
-    ].join('\n')
-    : isIncompleteSuccessCriteriaFailure(errorMsg)
-      ? buildSuccessCriteriaRecoveryAdvice(slug)
-      : isTypedCheckpointEvidenceFailure(errorMsg)
-      ? buildTypedMissionRecoveryAdvice(slug, namedCheckpointFromTypedFailure(errorMsg) || 'CP-N')
-      : [
-      `${errorMsg.includes('No checkpoint documents found') ? 'Create CP-1.md' : 'Fix the final checkpoint document (CP-N.md)'} in ${missionDir} with a Goal Check table.`,
-      'Use one canonical heading: ## Goal Check',
-      'Use this exact table shape:',
-      '| Criterion | Evidence | Status |',
-      '|---|---|---|',
-      'Accepted evidence includes exact test names, test file paths, ADR references, recognized repo commands or paths, and file:line references when necessary.',
-      'For an integration handoff, ./scripts/verify-local.sh integrate is mandatory; ./scripts/verify-local.sh all alone is not sufficient.',
-      ...(offendingRow ? [`Rejected row: ${offendingRow}`, 'Do not retry with only shell output or file metadata; replace it with a test file path, ADR reference, or recognized repo command/path.'] : []),
-      `Post-return action: px review ${slug} --submit.`,
-    ].join('\n');
-  const stageRemedy = `${remedy}\nLet the same verification rerun confirm the repair.`;
-  return buildReboundFixPrompt({
-    label: classification.label,
-    slug,
-    worktree,
-    area: 'handoff',
-    facts: [['Handoff error', errorMsg]],
-    diagnostic: [reason.error, reason.gateOutput].filter(Boolean).join('\n'),
-    classification,
-    attempt: 1,
-    maxAttempts: 2,
-    remedy: stageRemedy,
-  });
 }
 
 function parsePorcelainPath(line: string) {
@@ -217,11 +151,10 @@ async function repairHandoff(slug: string, worktree: string, errorMsg: string, o
 }
 
 (repairHandoff as any).isRelaunchableError = isRelaunchableError;
-(repairHandoff as any).buildRelaunchPrompt = buildRelaunchPrompt;
 (repairHandoff as any).classifyError = classifyError;
 (repairHandoff as any).getDispatchAction = getDispatchAction;
 (repairHandoff as any).FailureClass = FailureClass;
 (repairHandoff as any).DispatchAction = DispatchAction;
 
 export default repairHandoff;
-export { repairHandoff, isRelaunchableError, buildRelaunchPrompt };
+export { repairHandoff, isRelaunchableError };

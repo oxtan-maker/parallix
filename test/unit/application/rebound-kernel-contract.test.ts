@@ -21,7 +21,7 @@ import { INTEGRATION_GATE_REBOUND_ATTEMPTS_PER_INVOCATION, integrationGateFailur
 import type { GateRunOutcome } from '../../../src/adapters/config/repository-gates.js';
 import { gateFailureReason } from '../../../src/adapters/review/review-gate-handling.js';
 import { elideBounceOutput, BOUNCE_OUTPUT_MAX_CHARS } from '../../../src/application/output-elision.js';
-import { rebound, classifyReboundReason, buildReboundFixPrompt, reboundDiagnostic, DEFAULT_REBOUND_ATTEMPTS, type ReboundContext, type ReboundReason } from '../../../src/application/rebound-kernel.js';
+import { rebound, classifyReboundReason, buildFreshDiagnosticRepairPrompt, reboundDiagnostic, DEFAULT_REBOUND_ATTEMPTS, type ReboundContext, type ReboundReason } from '../../../src/application/rebound-kernel.js';
 import { listRecoveryEvidence } from '../../../src/application/recovery-evidence.js';
 
 // ── Rebound kernel — TASK-2377.03 (was task-2377.03-rebound-kernel.test.ts) ──
@@ -31,7 +31,6 @@ import { listRecoveryEvidence } from '../../../src/application/recovery-evidence
  * Mock-only: `startAgent` and `verify` are injected; no real agents, no git,
  * no Forgejo.
  */
-
 
 const gateReason: ReboundReason = {
   kind: 'gate-failure',
@@ -248,7 +247,7 @@ test('task-2377.03: an agent timeout uses the shared rebound launch and verify l
 
 // ── Fix prompt (single builder) ──────────────────────────────────────────────
 
-test('task-2377.03: the single fix-prompt builder carries the compaction boilerplate and the automatic re-verify statement', async () => {
+test('task-2377.03: fresh repair reloads authority and delegates exact verification', async () => {
   const prompts: string[] = [];
   await rebound(gateReason, contextFor({
     startAgent: async (_step, options: any) => {
@@ -257,18 +256,18 @@ test('task-2377.03: the single fix-prompt builder carries the compaction boilerp
     },
   }));
   assert.equal(prompts.length, 1);
-  assert.match(prompts[0], /PRE-REVIEW GATE FAILURE — FIX REQUIRED/);
+  assert.match(prompts[0], /PRE-REVIEW GATE FAILURE — FRESH-CONTEXT DIAGNOSTIC REPAIR REQUIRED/);
   assert.match(prompts[0], /Gate command: \.\/scripts\/verify-local\.sh static-analysis/);
   assert.match(prompts[0], /Classification: GateFailure — AutoSendBack/);
   assert.match(prompts[0], /Retry attempt: 1\/2/);
-  assert.match(prompts[0], /Before repair work, compact the aborted working context/i);
-  assert.match(prompts[0], /current review round and disposition; unresolved findings and implementer resolutions/i);
-  assert.match(prompts[0], /The failing check re-runs automatically after your fix/);
+  assert.match(prompts[0], /Before repair, reload px status .* --json/i);
+  assert.match(prompts[0], /review disposition and authorized repair\/checkpoint obligations/i);
+  assert.match(prompts[0], /Only the harness rerunning this exact failing check can establish success/);
 });
 
 test('task-2377.03: the hook fix prompt uses the same builder with hook slots', () => {
   const classification = classifyReboundReason(hookReason);
-  const prompt = buildReboundFixPrompt({
+  const prompt = buildFreshDiagnosticRepairPrompt({
     label: classification.label,
     slug: 'task-2377.03-fixture',
     area: 'pre-commit',
@@ -279,8 +278,8 @@ test('task-2377.03: the hook fix prompt uses the same builder with hook slots', 
     maxAttempts: DEFAULT_REBOUND_ATTEMPTS,
     remedy: 'Fix the underlying issue so the Git hook passes.',
   });
-  assert.match(prompt, /GIT HOOK FAILURE — FIX REQUIRED/);
-  assert.match(prompt, /Before repair work, compact the aborted working context/i);
+  assert.match(prompt, /GIT HOOK FAILURE — FRESH-CONTEXT DIAGNOSTIC REPAIR REQUIRED/);
+  assert.match(prompt, /Before repair, reload px status/i);
   assert.match(prompt, /The failing check re-runs automatically after your fix/);
 });
 
@@ -304,7 +303,7 @@ test('task-2620 AC3: the gate fix prompt names the approved revision and states 
 
 test('task-2386: the rebound fix prompt states a stage-specific execute-verify-report contract', () => {
   const classification = classifyReboundReason(hookReason);
-  const prompt = buildReboundFixPrompt({
+  const prompt = buildFreshDiagnosticRepairPrompt({
     label: classification.label,
     slug: 'task-2386',
     area: 'workflow',
@@ -315,8 +314,8 @@ test('task-2386: the rebound fix prompt states a stage-specific execute-verify-r
     maxAttempts: DEFAULT_REBOUND_ATTEMPTS,
     remedy: 'Fix the underlying issue so the Git hook passes.',
   });
-  assert.match(prompt, /Perform this stage-specific repair now/);
-  assert.match(prompt, /Verify the required result/i);
+  assert.match(prompt, /Perform the repair and preserve valid commits/);
+  assert.match(prompt, /Only the harness rerunning this exact failing check can establish success/);
   assert.doesNotMatch(prompt, /listed commands|rebase/i);
 });
 
@@ -470,24 +469,6 @@ test('task-2377.03: the kernel returns the fallback-resolved implementer and mov
   assert.deepEqual(transitions, ['task-2377.03-fixture']);
 });
 
-// ── SC6: exactly one prompt-construction site for the incident path ──────────
-
-test('task-2377.03: the context-compaction boilerplate exists in exactly one source location', async () => {
-  const { readdirSync, readFileSync, statSync } = await import('node:fs');
-  const { join } = await import('node:path');
-  const walk = (dir: string): string[] => readdirSync(dir).flatMap(entry => {
-    const full = join(dir, entry);
-    return statSync(full).isDirectory() ? walk(full) : (full.endsWith('.ts') ? [full] : []);
-  });
-  const holders = walk('src')
-    .filter(file => readFileSync(file, 'utf8').includes('compact the aborted working context'));
-  assert.deepEqual(
-    holders.map(file => file.replace(/\\/g, '/')),
-    ['src/application/rebound-prompts.ts'],
-    'the compaction boilerplate belongs to the single rebound fix-prompt builder',
-  );
-});
-
 test('task-2377.03: the pre-review gate and hook paths build no prompt of their own', async () => {
   const { readFileSync } = await import('node:fs');
   for (const file of ['src/adapters/review/review-gate-handling.ts', 'src/adapters/review/review-loop.ts', 'src/application/review-loop/pre-review.ts']) {
@@ -523,7 +504,7 @@ test('task-2525.05: a transient gate rerun preserves the original diagnostic in 
   assert.match(capturedPrompt, /ORIGINAL_GATE_OUTPUT/);
 });
 
-test('task-2588: targeted failure then fresh diagnostic success keeps both verifier passes and strategies', async () => {
+test('task-2588: fresh diagnostic failure then independent fresh success keeps both verifier passes and strategies', async () => {
   const launches: any[] = []; const logs: string[] = []; let verifies = 0;
   const outcome = await rebound(gateReason, contextFor({
     verify: () => ({ ok: ++verifies === 2, diagnostic: verifies === 1 ? 'LATEST_FAILURE' : '' }),
@@ -531,30 +512,30 @@ test('task-2588: targeted failure then fresh diagnostic success keeps both verif
     log: message => logs.push(message),
   }));
   assert.equal(outcome.outcome, 'fixed'); assert.equal(launches.length, 2); assert.equal(verifies, 2);
-  assert.equal(launches[0].sessionPolicy, 'resume'); assert.equal(launches[1].sessionPolicy, 'fresh-ephemeral');
+  assert.equal(launches[0].sessionPolicy, 'fresh-ephemeral'); assert.equal(launches[1].sessionPolicy, 'fresh-ephemeral');
   const freshPrompt = launches[1].prompt('codex'); assert.match(freshPrompt, /LATEST_FAILURE/); assert.match(freshPrompt, /failing test: preserves diagnostic/);
-  assert.deepEqual(outcome.attemptsDetail?.map(a => a.strategy), ['targeted', 'fresh-diagnostic']);
-  assert.ok(logs.some(line => line.includes('RECOVERY_TELEMETRY strategy=targeted outcome=advance')));
+  assert.deepEqual(outcome.attemptsDetail?.map(a => a.strategy), ['fresh-diagnostic', 'fresh-diagnostic']);
+  assert.ok(logs.some(line => line.includes('RECOVERY_TELEMETRY strategy=fresh-diagnostic outcome=advance')));
   assert.ok(logs.some(line => line.includes('RECOVERY_TELEMETRY strategy=fresh-diagnostic outcome=rescue')));
 });
 
-test('task-2588: fresh failure escalates after two strategies with no false pass', async () => {
+test('task-2588: fresh failure escalates after two independent attempts with no false pass', async () => {
   let launches = 0; const logs: string[] = [];
   const outcome = await rebound(gateReason, contextFor({ verify: () => ({ ok: false, diagnostic: 'STILL_RED' }), startAgent: async () => ({ result: { status: 0, }, agent: (++launches, 'codex') }), log: message => logs.push(message) }));
   assert.equal(outcome.outcome, 'exhausted'); assert.equal(launches, 2); assert.match(outcome.dossier || '', /fresh-diagnostic/); assert.ok(!/PASS|APPROVED/.test(outcome.dossier || ''));
-  assert.ok(logs.some(line => line.includes('RECOVERY_TELEMETRY strategy=targeted outcome=advance')));
+  assert.ok(logs.some(line => line.includes('RECOVERY_TELEMETRY strategy=fresh-diagnostic outcome=advance')));
   assert.ok(logs.some(line => line.includes('RECOVERY_TELEMETRY strategy=fresh-diagnostic outcome=escalate')));
 });
 
-test('task-2588: targeted success launches once and emits stable pass telemetry', async () => {
+test('task-2588: first fresh success launches once and emits strategy telemetry', async () => {
   const launches: any[] = []; const logs: string[] = [];
   const outcome = await rebound(gateReason, contextFor({
     startAgent: async (_step, options: any) => (launches.push(options), { agent: 'codex', result: { status: 0 } }),
     log: message => logs.push(message),
   }));
   assert.equal(outcome.outcome, 'fixed');
-  assert.equal(launches.length, 1); assert.equal(launches[0].sessionPolicy, 'resume');
-  assert.ok(logs.some(line => line.includes('RECOVERY_TELEMETRY strategy=targeted outcome=pass')));
+  assert.equal(launches.length, 1); assert.equal(launches[0].sessionPolicy, 'fresh-ephemeral');
+  assert.ok(logs.some(line => line.includes('RECOVERY_TELEMETRY strategy=fresh-diagnostic outcome=rescue')));
 });
 
 test('task-2588: no HEAD change and same failure escalate with per-attempt evidence', async () => {
@@ -589,7 +570,7 @@ test('task-2588: a changed failure after attempt one remains bounded at two laun
   assert.notEqual(outcome.attemptsDetail?.[0].fingerprintBefore, outcome.attemptsDetail?.[0].fingerprintAfter);
 });
 
-test('task-2588: fresh repair observes the commit created by targeted repair', async () => {
+test('task-2588: fresh repair observes the commit created by the first fresh repair', async () => {
   let head = 'base'; const headsAtLaunch: string[] = []; let verifies = 0;
   const outcome = await rebound(gateReason, contextFor({
     readHead: () => head,
@@ -824,7 +805,6 @@ describe("Integration gate rebound —", () => {
     ...over,
   });
 
-
   // ── Classification and integration-only coverage wording ────────────────────
 
   test('TASK-2492: a gate command that is not the ordinary verification command is reported as integration-only', () => {
@@ -848,7 +828,7 @@ describe("Integration gate rebound —", () => {
   test('TASK-2492: the bounced prompt names the failed gate command and the integration-only coverage fact', () => {
     const reason = integrationGateFailureReason(failedGate(), { verificationCommand: VERIFY_COMMAND });
     const classification = classifyReboundReason(reason);
-    const prompt = buildReboundFixPrompt({
+    const prompt = buildFreshDiagnosticRepairPrompt({
       label: classification.label,
       slug: SLUG,
       worktree: '/tmp/wt',
@@ -969,7 +949,7 @@ test('rebound domain preserves transient and launch budgets without doubles (TAS
   assert.equal(transientRetryAllowed(reason, 2, 1), false);
   assert.equal(reboundRequiresHuman(reason, classification, true), true);
   assert.equal(reboundRequiresHuman({ ...reason, environment: false }, classification, true), false);
-  assert.deepEqual([repairStrategy(1), repairStrategy(2)], ['targeted', 'fresh-diagnostic']);
+  assert.deepEqual([repairStrategy(1), repairStrategy(2)], ['fresh-diagnostic', 'fresh-diagnostic']);
   assert.equal(repairBudgetAllows(2, 2), true);
   assert.equal(repairBudgetAllows(3, 2), false);
   assert.equal(reboundExhaustion(classification, 2, 2), 'repair-budget');
@@ -981,4 +961,21 @@ test('rebound domain preserves transient and launch budgets without doubles (TAS
   assert.equal(launchRecoveryAction(false, false, 0, 0, 1), 'retry');
   assert.equal(launchRecoveryAction(false, false, 0, 1, 1), 'stop');
   assert.equal(launchRecoveryAction(false, false, 1, 0, 1), 'stop');
+});
+
+test('first agent-fixable repair uses independent diagnostic context (TASK-2700)', async () => {
+  const launches: any[] = [];
+  const outcome = await rebound(gateReason, contextFor({
+    startAgent: async (_step, options: any) => {
+      launches.push(options);
+      return { agent: 'codex', result: { status: 0 } };
+    },
+  }));
+  assert.equal(outcome.outcome, 'fixed');
+  assert.equal(launches[0].sessionPolicy, 'fresh-ephemeral');
+  const prompt = launches[0].prompt('codex');
+  assert.match(prompt, /FRESH-CONTEXT DIAGNOSTIC REPAIR REQUIRED/);
+  assert.match(prompt, /Original failure evidence/);
+  assert.match(prompt, /Latest failure evidence/);
+  assert.doesNotMatch(prompt, /compact the aborted working context/);
 });

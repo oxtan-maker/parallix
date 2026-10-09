@@ -218,8 +218,8 @@ export function reboundRequiresHuman(reason: ReboundReason, classification: Rebo
     : !classification.isRelaunchable;
 }
 
-export function repairStrategy(attempt: number): 'targeted' | 'fresh-diagnostic' {
-  return attempt === 1 ? 'targeted' : 'fresh-diagnostic';
+export function repairStrategy(_attempt: number): 'fresh-diagnostic' {
+  return 'fresh-diagnostic';
 }
 
 export function launchRecoveryAction(ok: boolean, repairAttempted: boolean, attempts: number, launchFailures: number, maxRetries: number): 'verify' | 'skip' | 'stop' | 'retry' {

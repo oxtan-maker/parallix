@@ -805,3 +805,32 @@ test('startPiAgent fails when the session settles on a provider error instead of
   assert.notEqual(result.status, 0, 'an unanswered session must not report success');
   assert.match(result.stderr, /Connection error/);
 });
+
+test('first and later fresh SDK repairs create independent sessions (TASK-2700)', async () => {
+  const managers: object[] = [];
+  pi.__setSdkForTest({ SessionManager: {
+    create: () => { const manager = {}; managers.push(manager); return manager; },
+    list: () => { throw new Error('fresh repair must not list historical sessions'); },
+    open: () => { throw new Error('fresh repair must not open historical sessions'); },
+    continueRecent: () => { throw new Error('fresh repair must not continue historical sessions'); },
+  } } as any);
+  pi.__setCreateAgentSessionForTest(async () => ({
+    session: {
+      sessionId: `fresh-${managers.length}`, prompt: async () => {}, subscribe: () => () => {},
+      waitForIdle: async () => {}, dispose: () => {}, getLastAssistantText: () => 'fresh repair',
+      getSessionStats: () => ({ tokens: { input: 1, output: 1 }, cost: 0 }),
+    },
+    extensionsResult: { extensions: [], diagnostics: [] },
+  }));
+  try {
+    for (const attempt of [1, 2]) {
+      const launch = pi.startPiAgent({ prompt: `repair ${attempt}`, worktree: '/tmp/fresh-sdk-repair', resume: false, sessionId: 'prior-conversation' });
+      assert.equal((await launch.resultPromise).status, 0);
+    }
+    assert.equal(managers.length, 2);
+    assert.notEqual(managers[0], managers[1]);
+  } finally {
+    pi.__setSdkForTest(null);
+    pi.__setCreateAgentSessionForTest(null);
+  }
+});

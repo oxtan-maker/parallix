@@ -796,3 +796,17 @@ describe('OpenCode provider-failure retry', () => {
     assert.equal(opencode.isSpuriousOpencodeExit({ status: 1, stdout: '', stderr: ndjson }), true);
   });
 });
+
+
+test('first and later fresh repair ignore historical session IDs (TASK-2700)', () => {
+  for (const attempt of [1, 2]) {
+    const invocation = opencodeModule.buildOpencodeInvocation({
+      prompt: `repair ${attempt}`, worktree: '/tmp/fresh-repair',
+      resume: false, sessionId: 'prior-conversation-marker', interactive: false,
+    });
+    assert.ok(!invocation.args.includes('prior-conversation-marker'));
+    for (const flag of ['resume', '--resume', '--continue', '--last', '-r', '-c', '-s']) {
+      assert.ok(!invocation.args.includes(flag), `unexpected history flag ${flag}`);
+    }
+  }
+});

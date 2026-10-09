@@ -15,6 +15,9 @@
  */
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import path from 'node:path';
+import { mkdtemp } from '../../helpers/temp-dir.js';
 
 import { rebound, type ReboundReason } from '../../../src/application/rebound-kernel.js';
 
@@ -123,4 +126,55 @@ test('task-2575: a declared environment healthcheck failure is reported to the h
   assert.equal(launches, 0, 'no implementer repair is spent on an external blocker');
   assert.match(outcome.dossier ?? '', /empty assistant turn from vLLM/, 'the blocker is reported with its exact evidence');
   assert.match(failures.join('\n'), /empty assistant turn from vLLM/);
+});
+
+
+test('fresh repair reloads authority without inherited role instructions (TASK-2700)', async () => {
+  const prompt = await promptFor(repairableGate);
+  assert.match(prompt, /px status .* --json/);
+  assert.match(prompt, /AGENTS.md repository rules/);
+  assert.match(prompt, /current branch revision and working-tree edits/);
+  assert.match(prompt, /authorized repair\/checkpoint obligations/);
+  assert.match(prompt, /missing, incomplete or stale/);
+  assert.match(prompt, /do not inherit prior execute\/review conversation instructions/);
+  assert.match(prompt, /preserve valid commits and working-tree edits/);
+  assert.doesNotMatch(prompt, /compact the aborted working context/);
+});
+
+
+test('independent repair two receives durable original and latest evidence (TASK-2700)', async () => {
+  const worktree = mkdtemp('fresh-repair-evidence-');
+  const prompts: string[] = [];
+  let head = 'original-revision';
+  try {
+    const outcome = await rebound(repairableGate, {
+      slug: SLUG, worktree, implementer: 'codex', readHead: () => head,
+      startAgent: async (_step, options: any) => {
+        assert.equal(options.sessionPolicy, 'fresh-ephemeral');
+        const prompt = options.prompt('codex');
+        prompts.push(prompt);
+        if (prompts.length === 2) {
+          assert.equal(head, 'valid-first-repair');
+          assert.match(prompt, /LATEST_EXACT_FAILURE/);
+          assert.match(prompt, /no-unused-vars: total is assigned/);
+          assert.match(prompt, /captured revision original-revision|captured revision: original-revision/);
+          assert.match(prompt, /captured revision valid-first-repair/);
+          const stdoutPaths = [...prompt.matchAll(/stdout: ([^;\n]+)/g)].map(match => match[1]);
+          assert.ok(stdoutPaths.some(file => fs.readFileSync(file, 'utf8').includes('LATEST_EXACT_FAILURE')));
+          assert.ok(stdoutPaths.some(file => fs.readFileSync(file, 'utf8').includes('no-unused-vars')));
+          assert.equal(fs.readFileSync(path.join(worktree, 'pending.txt'), 'utf8'), 'preserve pending work');
+        } else {
+          fs.writeFileSync(path.join(worktree, 'pending.txt'), 'preserve pending work');
+          head = 'valid-first-repair';
+        }
+        return { agent: 'codex', result: { status: 0 } };
+      },
+      verify: attempt => attempt === 1
+        ? { ok: false, reason: { ...repairableGate, stdout: 'LATEST_EXACT_FAILURE', stderr: '' } }
+        : { ok: true },
+      log: () => {}, error: () => {},
+    });
+    assert.equal(outcome.outcome, 'fixed');
+    assert.equal(outcome.attempts, 2);
+  } finally { fs.rmSync(worktree, { recursive: true, force: true }); }
 });

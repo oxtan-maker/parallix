@@ -32,7 +32,7 @@ function contextFor(verify: ReboundContext['verify'], overrides: Partial<Rebound
 
 afterEach(() => configureReboundTelemetry(null));
 
-test('TASK-2653: a first-attempt pass records one targeted pass row with agent, provider and model', async () => {
+test('TASK-2653: a first-attempt pass records one fresh rescue row with agent, provider and model', async () => {
   const rows: OperationalHistoryEntry[] = [];
   bind(async (entry) => { rows.push(entry); });
   await rebound(gateReason, contextFor(() => ({ ok: true }), { readHead: () => 'abc' }));
@@ -43,14 +43,14 @@ test('TASK-2653: a first-attempt pass records one targeted pass row with agent, 
     { ...data, occurrenceId: typeof data.occurrenceId, durationMs: typeof data.durationMs },
     {
       occurrenceId: 'string', missionId: 'task-2653', repositoryId: 'repo-1', reasonKind: 'gate-failure', area: 'static-analysis',
-      attempt: 1, maxAttempts: 2, strategy: 'targeted', context: 'resumed', agent: 'codex', provider: 'openai', model: 'gpt-x',
+      attempt: 1, maxAttempts: 2, strategy: 'fresh-diagnostic', context: 'fresh', agent: 'codex', provider: 'openai', model: 'gpt-x',
       fingerprintBefore: data.fingerprintBefore, fingerprintAfter: data.fingerprintBefore, headBefore: 'abc', headAfter: 'abc',
-      outcome: 'pass', durationMs: 'number',
+      outcome: 'rescue', durationMs: 'number',
     },
   );
 });
 
-test('TASK-2653: targeted advance then fresh rescue share one occurrence and differ by attempt, strategy and context', async () => {
+test('TASK-2653: fresh advance then fresh rescue share one occurrence with fresh strategy and context on both attempts', async () => {
   const rows: OperationalHistoryEntry[] = [];
   bind(async (entry) => { rows.push(entry); });
   const results = [{ ok: false, diagnostic: 'still failing' }, { ok: true }];
@@ -58,7 +58,7 @@ test('TASK-2653: targeted advance then fresh rescue share one occurrence and dif
   const [first, second] = rows.map((row) => JSON.parse(row.eventData));
   assert.equal(rows.length, 2);
   assert.equal(first.occurrenceId, second.occurrenceId);
-  assert.deepEqual([first.attempt, first.strategy, first.context, first.outcome], [1, 'targeted', 'resumed', 'advance']);
+  assert.deepEqual([first.attempt, first.strategy, first.context, first.outcome], [1, 'fresh-diagnostic', 'fresh', 'advance']);
   assert.deepEqual([second.attempt, second.strategy, second.context, second.outcome], [2, 'fresh-diagnostic', 'fresh', 'rescue']);
   assert.notEqual(first.fingerprintBefore, first.fingerprintAfter, 'a failed attempt records the fingerprint it ended on');
 });
@@ -87,7 +87,7 @@ test('TASK-2653: a launch that exits non-zero still spends an attempt and record
   }));
   assert.equal(outcome.outcome, 'exhausted');
   const data = rows.map((row) => JSON.parse(row.eventData));
-  assert.deepEqual(data.map((row) => [row.attempt, row.strategy, row.outcome]), [[1, 'targeted', 'advance'], [2, 'fresh-diagnostic', 'escalate']]);
+  assert.deepEqual(data.map((row) => [row.attempt, row.strategy, row.outcome]), [[1, 'fresh-diagnostic', 'advance'], [2, 'fresh-diagnostic', 'escalate']]);
   assert.equal(data[0].fingerprintBefore, data[0].fingerprintAfter);
   assert.deepEqual(data.map((row) => [row.provider, row.model]), [['openai', 'gpt-x'], ['openai', 'gpt-x']], 'a completed non-zero run keeps its reported provider and model');
 });

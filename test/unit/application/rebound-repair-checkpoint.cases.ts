@@ -17,7 +17,7 @@ export function repairCheckpointCases(): void {
     open: async () => ({ name: 'CP-2', version: 2 }), readBlocker: async () => undefined, verify: async () => {}, ...overrides,
   });
 
-  test('repair checkpoint persists before both resumed and fresh launches with identical authority (TASK-2695)', async () => {
+  test('repair checkpoint persists before first and later fresh launches with identical authority (TASK-2695)', async () => {
     const order: string[] = [];
     const incidents: string[] = [];
     const prompts: string[] = [];
@@ -34,8 +34,10 @@ export function repairCheckpointCases(): void {
     assert.equal(result.outcome, 'fixed');
     assert.deepEqual(order, ['persist-1', 'launch', 'harness', 'persist-2', 'launch', 'harness', 'checkpoint-verified']);
     assert.equal(incidents[0], incidents[1]);
-    assert.deepEqual(sessions, ['resume', 'fresh-ephemeral']);
+    assert.deepEqual(sessions, ['fresh-ephemeral', 'fresh-ephemeral']);
     for (const prompt of prompts) {
+      assert.match(prompt, /FRESH-CONTEXT DIAGNOSTIC REPAIR REQUIRED/);
+      assert.doesNotMatch(prompt, /compact the aborted working context/);
       assert.match(prompt, /REPAIR AUTHORITY:.*resumed execute or act-on-review context/);
       assert.match(prompt, /px checkpoint record --name CP-2/);
       assert.match(prompt, /px checkpoint report-invalid-contract --name CP-2/);

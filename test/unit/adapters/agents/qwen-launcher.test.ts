@@ -276,3 +276,17 @@ test('qwen resume: stale session id is detected so the launch falls back to a fr
   assert.equal(isStaleQwenSessionResult({ status: 1, stderr: 'rate limit exceeded', stdout: '' }), false,
     'unrelated failures do not trigger a relaunch');
 });
+
+
+test('first and later fresh repair ignore historical session IDs (TASK-2700)', () => {
+  for (const attempt of [1, 2]) {
+    const invocation = buildQwenInvocation({
+      prompt: `repair ${attempt}`, worktree: '/tmp/fresh-repair',
+      resume: false, sessionId: 'prior-conversation-marker',
+    });
+    assert.ok(!invocation.args.includes('prior-conversation-marker'));
+    for (const flag of ['resume', '--resume', '--continue', '--last', '-r', '-c', '-s']) {
+      assert.ok(!invocation.args.includes(flag), `unexpected history flag ${flag}`);
+    }
+  }
+});

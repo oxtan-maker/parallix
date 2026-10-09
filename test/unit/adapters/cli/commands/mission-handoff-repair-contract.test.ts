@@ -358,7 +358,7 @@ describe('Repair handoff', () => {
     assert.equal(repaired, false);
   });
 
-  // CP-1 tests for isRelaunchableError and buildRelaunchPrompt
+  // CP-1 tests for isRelaunchableError
 
   test('isRelaunchableError returns true for goal-check table missing evidence rows error', () => {
     const { isRelaunchableError } = repairHandoff;
@@ -386,69 +386,6 @@ describe('Repair handoff', () => {
     assert.equal(isRelaunchableError('has a "## Goal Check" section but no evidence rows'), false);
     // Missing the first part
     assert.equal(isRelaunchableError('A goal-check table with real evidence is required before handoff'), false);
-  });
-
-  test('buildRelaunchPrompt is a compatibility delegate to the evidence-preserving rebound prompt', () => {
-    const { buildRelaunchPrompt } = repairHandoff;
-    const errorMsg = 'The final checkpoint at docs/missions/2026/task-1121/CP-3.md has a "## Goal Check" section but no evidence rows. A goal-check table with real evidence is required before handoff.';
-    const prompt = buildRelaunchPrompt(errorMsg, 'task-1124', '/tmp/worktree');
-
-    assert.ok(typeof prompt === 'string', 'Prompt should be a string');
-    assert.ok(prompt.includes('task-1124'), 'Prompt should contain the mission slug');
-    assert.ok(prompt.includes('Working directory: /tmp/worktree'));
-    assert.ok(prompt.includes(errorMsg), 'Prompt should retain the actual verification evidence');
-    assert.ok(prompt.includes('Retry attempt: 1/2'));
-    assert.ok(prompt.includes('failing check re-runs automatically'));
-  });
-
-  test('buildRelaunchPrompt does not invent an unavailable gate command', () => {
-    const { buildRelaunchPrompt } = repairHandoff;
-    const prompt = buildRelaunchPrompt('Final verification gate failed. Fix errors before submitting.', 'task-1124', '/tmp/worktree');
-
-    assert.ok(prompt.includes('Final verification gate failed. Fix errors before submitting.'));
-    assert.ok(!prompt.includes('Gate command:'));
-  });
-
-  test('buildRelaunchPrompt keeps the central recovery contract', () => {
-    const { buildRelaunchPrompt } = repairHandoff;
-    const errorMsg = 'The final checkpoint at docs/missions/2026/task-1121/CP-3.md has a "## Goal Check" section but no evidence rows. A goal-check table with real evidence is required before handoff.';
-    const prompt = buildRelaunchPrompt(errorMsg, 'task-1124', '/tmp/worktree');
-
-    assert.ok(prompt.includes('Classification: IncompleteEvidence — AutoSendBack'));
-    assert.ok(prompt.includes('the same verification rerun confirm the repair'));
-  });
-
-  test('buildRelaunchPrompt preserves offending-row evidence verbatim', () => {
-    const { buildRelaunchPrompt } = repairHandoff;
-    const errorMsg = 'The final checkpoint at docs/missions/2026/task-1121/CP-3.md has a "## Goal Check" section but no evidence rows that cite a verifiable reference such as a recognized repo command/path, exact test name, test-file path, or ADR reference (or, when necessary, file:line). A goal-check table with real evidence is required before handoff. Offending row: | `bin/hello.sh` exists as regular file with execute permissions | `stat -c \'%A\' bin/hello.sh` → `-rwxrwxr-x` | PASS |';
-    const prompt = buildRelaunchPrompt(errorMsg, 'task-1124', '/tmp/worktree');
-
-    assert.ok(prompt.includes('Offending row:'), 'Prompt should surface the offending row context');
-    assert.ok(prompt.includes("`stat -c '%A' bin/hello.sh`"), 'Prompt should include the rejected shell-only evidence');
-    assert.ok(prompt.includes('Failure output (use this to diagnose and fix):'));
-    assert.ok(prompt.includes('the same verification rerun confirm the repair'));
-  });
-
-  // TASK-2665: the automatic bounceback repair advice names a concrete
-  // `px checkpoint record` example citing an existing repository-relative
-  // reference, retains prior proof, and agrees with handoff enforcement: the
-  // final planned checkpoint carries only its affected criteria while earlier
-  // evidence is retained, and the recorded checkpoints taken together still
-  // cover every success criterion.
-  test('buildRelaunchPrompt repair advice names a concrete example, retains prior proof, and agrees with the combined-checkpoint row requirement', () => {
-    const { buildRelaunchPrompt } = repairHandoff;
-    const errorMsg = 'Planned checkpoint evidence is missing before handoff: CP-4';
-    const prompt = buildRelaunchPrompt(errorMsg, 'task-1124', '/tmp/worktree');
-
-    assert.ok(prompt.includes('px checkpoint record --name CP-4'), 'names the affected checkpoint');
-    assert.ok(prompt.toLowerCase().includes('concrete example:'), 'gives a concrete recording example');
-    // Real, resolving repository-relative test path (not a fabricated one).
-    assert.ok(prompt.includes('test/unit/domain/mission-brief-and-mutation-contract.test.ts'), 'cites an existing repository-relative reference');
-    assert.ok(prompt.includes('retained across the recorded checkpoints'), 'retains prior proof instead of restating it');
-    assert.ok(prompt.includes('through repeated repair rounds'), 'keeps earlier proof available across repeated repairs');
-    // Guidance must not tell the implementer to rewrite the whole Goal Check table.
-    assert.ok(prompt.includes('it needs only the rows for the criteria the repair affects'), 'final checkpoint carries only affected criteria');
-    assert.ok(prompt.includes('Taken together the recorded checkpoints must still cover every success criterion'), 'advice agrees with validation, it does not lead to rejection');
   });
 
   // ── CP-1 tests: FailureClass, DispatchAction, getDispatchAction (SC2) ─────────

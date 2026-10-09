@@ -63,3 +63,42 @@ test('TASK-2504: an uncommitted repair is still rejected by the finalized-tree g
   assert.notEqual(route.route, 'fixed', 'a dirty tree is never reported as a verified repair');
   assert.match(messages.join('\n'), /The repair is not committed/);
 });
+
+test('failed, timed-out and unsupported fresh launches cannot accept a green probe (TASK-2700)', async () => {
+  for (const status of [1, null, 'unsupported'] as const) {
+    let gateRuns = 0;
+    const messages: string[] = [];
+    const args = routeArgs([], messages, true);
+    args.startAgentFn = (async (_step: string, options: any) => {
+      assert.equal(options.sessionPolicy, 'fresh-ephemeral');
+      if (status === 'unsupported') { throw new Error('Unsupported launcher'); }
+      return { agent: 'codex', result: { status } };
+    }) as never;
+    args.runPhaseGatesFn = (async () => {
+      gateRuns++;
+      return { ok: true };
+    }) as never;
+    const route = await routeIntegrationGateFailure(args);
+    assert.notEqual(route.route, 'fixed');
+    assert.equal(gateRuns, 0, 'a potentially green verifier cannot certify an unacceptable launch');
+    assert.match(messages.join('\n'), status === 'unsupported' ? /Unsupported launcher/ : status === null ? /ambiguous exit status/ : /exited with status 1/);
+  }
+});
+
+test('fresh repair reruns the authorized integration gates on the committed tree (TASK-2700)', async () => {
+  const args = routeArgs([], [], true);
+  let runs = 0;
+  args.startAgentFn = (async (_step: string, options: any) => {
+    assert.equal(options.sessionPolicy, 'fresh-ephemeral');
+    return { agent: 'codex', result: { status: 0 } };
+  }) as never;
+  args.runPhaseGatesFn = (async (phase: string, options: any) => {
+    runs++;
+    assert.equal(phase, 'integration');
+    assert.deepEqual(options.gates, args.gates);
+    assert.equal(options.checkoutPath, args.missionWorktree);
+    return { ok: true };
+  }) as never;
+  assert.equal((await routeIntegrationGateFailure(args)).route, 'fixed');
+  assert.equal(runs, 1);
+});

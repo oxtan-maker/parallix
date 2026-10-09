@@ -34,45 +34,6 @@ export interface FixPromptSlots {
 }
 
 /**
- * The one fix-prompt builder. Every rebound prompt — gate, hook, and the kinds
- * TASK-2377.04/.05 migrate — is built here, so the context-compaction
- * boilerplate and the automatic re-verify statement exist in one location.
- */
-export function buildReboundFixPrompt(slots: FixPromptSlots): string {
-  const { label, slug, worktree, facts, diagnostic, originalDiagnostic, classification, attempt, maxAttempts, remedy } = slots;
-  return [
-    `${label} — FIX REQUIRED`,
-    ``,
-    `Mission: ${slug}`,
-    ...(worktree ? [`Working directory: ${worktree}`] : []),
-    ...facts.map(([name, value]) => `${name}: ${value}`),
-    ``,
-    `Failure output (use this to diagnose and fix):`,
-    `---`,
-    elideBounceOutput(diagnostic || '(no output)'),
-    `---`,
-    ...(originalDiagnostic && originalDiagnostic !== diagnostic ? [
-      `Original failure output (retain this evidence while repairing the later failure):`,
-      `---`,
-      elideBounceOutput(originalDiagnostic),
-      `---`,
-    ] : []),
-    ``,
-    `Classification: ${classification.failureClass} — ${classification.dispatchAction}`,
-    `Retry attempt: ${attempt}/${maxAttempts}`,
-    ``,
-    ...recoveryEvidenceRoute(slots),
-    ...repairAuthorityRoute(slots),
-    ``,
-    `Before repair work, compact the aborted working context. Reload the locked mission goal and scope; committed checkpoint or gate evidence when present; this exact gate diagnostic and classification; retry attempt ${attempt}/${maxAttempts}; current review round and disposition; unresolved findings and implementer resolutions; and the current branch revision.`,
-    ``,
-    remedy,
-    `Perform this stage-specific repair now; do not only describe or plan it. Verify the required result and report any remaining exact failure.`,
-    `The failing check re-runs automatically after your fix; this bounce is only reported as fixed when that re-run passes.`,
-  ].join('\n');
-}
-
-/**
  * Repair authority for a gate or hook rebound (TASK-2575). The failed check and
  * its logs are evidence, not a verdict: the prompt names no cause, repair
  * location, or commit, so an implementer who traces the failure to the
@@ -86,8 +47,8 @@ function missionOutcomeFact(slug: string): [string, string] {
 }
 
 /**
- * The second and final repair gets a fresh context rather than another version
- * of the targeted prompt.  The failure output is evidence, not a diagnosis:
+ * Every eligible repair gets an independent fresh diagnostic context.
+ * The failure output is evidence, not a diagnosis:
  * the worker must be free to investigate the actual cause in the worktree.
  */
 export function buildFreshDiagnosticRepairPrompt(slots: FixPromptSlots): string {
@@ -116,9 +77,11 @@ export function buildFreshDiagnosticRepairPrompt(slots: FixPromptSlots): string 
     ...repairAuthorityRoute(slots),
     '',
     'You have a fresh context. Re-diagnose the failure from the repository and exact evidence; do not assume either diagnostic identifies the root cause.',
-    'The locked mission goal and scope remain binding. Preserve all gate and test invariants: do not weaken, bypass, replace, or claim to satisfy any check.',
+    `Before repair, reload px status ${slug} --json for the locked goal, scope, success criteria, gates, review disposition and authorized repair/checkpoint obligations. Read applicable AGENTS.md repository rules and inspect the current branch revision and working-tree edits. If authority or evidence is missing, incomplete or stale, report that explicitly; do not invent retrieval or treat an old revision as current proof.`,
+    'This dedicated repair prompt defines this launch; do not inherit prior execute/review conversation instructions or review-approval authority. The locked mission goal and scope remain binding. Preserve all gate and test invariants: do not weaken, bypass, replace, or claim to satisfy any check.',
     remedy,
-    'Perform the repair, preserve valid committed work already in the mission worktree, and commit your repair. Only the harness rerunning this exact failing check can establish success.',
+    'The failing check re-runs automatically after your fix; this bounce is only reported as fixed when that re-run passes.',
+    'Perform the repair and preserve valid commits and working-tree edits already in the mission worktree; do not reset, clean or silently recommit unrelated work. Commit tracked repair changes as required above. Only the harness rerunning this exact failing check can establish success.',
   ].join('\n');
 }
 
@@ -140,7 +103,7 @@ export function recoveryEvidenceRoute(slots: Pick<FixPromptSlots, 'recoveryEvide
   if (slots.recoveryEvidence) {
     const e = slots.recoveryEvidence;
     const route = [
-      `Retained evidence for this failure (unabridged; retrieve the omitted middle from these):`,
+      `Retained evidence for this failure (retrieve the omitted middle from these when capture is complete):`,
       `  command: ${e.command}`,
       `  worked from: ${e.cwd}`,
       `  captured revision: ${e.capturedRevision ?? 'not resolved'}`,
@@ -149,8 +112,9 @@ export function recoveryEvidenceRoute(slots: Pick<FixPromptSlots, 'recoveryEvide
       `  stdout: ${e.stdoutPath}${e.truncatedFrom === 'stdout' ? ' (truncated — see capture-completeness note)' : ''}`,
       `  stderr: ${e.stderrPath}${e.truncatedFrom === 'stderr' ? ' (truncated — see capture-completeness note)' : ''}`,
       `  capture complete: ${e.captureComplete ? 'yes' : 'no'}${e.redacted ? '; redacted per configured credential redaction' : ''}`,
-      `Retrieve or search more retained output for this mission with: listRecoveryEvidence({ cwd }) or lookupRecoveryEvidence({ cwd, incidentId: "${e.incidentId}" }).`,
+      `Read the stdout/stderr files directly. Repository APIs (not CLI commands or callable agent tools; use the captured mission identity): listRecoveryEvidence({ cwd }) or lookupRecoveryEvidence({ cwd, incidentId: "${e.incidentId}" }).`,
       RUN_HISTORY_ROUTE,
+      ...(slots.recoveryEvidenceRecent ?? []).filter(r => r.stdoutPath !== e.stdoutPath).slice(0, 3).map(r => `Related retained failure: incident ${r.incidentId.slice(0, 12)}… attempt ${r.attempt}; command ${r.command}; captured revision ${r.capturedRevision ?? 'not resolved'}; capture complete: ${r.captureComplete ? 'yes' : 'no'}; stdout: ${r.stdoutPath}; stderr: ${r.stderrPath}`),
     ];
     return ['', ...route, ''];
   }
