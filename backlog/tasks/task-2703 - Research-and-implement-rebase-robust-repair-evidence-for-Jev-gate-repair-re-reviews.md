@@ -1,11 +1,12 @@
 ---
 id: TASK-2703
 title: >-
-  Research and implement rebase-robust repair evidence for Jev gate-repair
-  re-reviews
+  Research and implement first-review evidence for Jev success-criteria
+  judgments
 status: backlog
 assignee: []
 created_date: '2026-10-09 16:09'
+updated_date: '2026-10-09 16:11'
 labels:
   - ai_sdlc
 dependencies: []
@@ -16,30 +17,27 @@ ordinal: 206008
 ## Description
 
 <!-- SECTION:DESCRIPTION:BEGIN -->
-Research, develop and implement rebase-robust repair evidence for Jev gate-repair re-reviews, so the classifier judges the repair the implementer actually made rather than everything main gained during a rebase.
+Research, develop and, once value is demonstrated, implement first-review evidence for Jev: what a bounded packet must contain for Jev to judge a mission's success criteria against its change on a first review.
 
 Problem (live evidence, 2026-10-09)
-Since TASK-2692 landed (e38bec80, 2026-10-09T06:39:21Z), 5 of 7 live gate-repair re-reviews were rebased: the approved revision is not an ancestor of the candidate. buildRepairEvidencePacket (src/application/review-classification/repair-evidence-packet.ts) uses `git diff approved..candidate`, so the mandatory "complete repair diff" includes main's changes. Effects:
-- 3 of 7 rounds (task-2693 r5, task-2688 r7, task-2668.08 r2) fell back as classifier-exception with no call: diffs of 58–81 files / 140–161 KB exceeded the 30k state-plus-longest-question budget. The implementer's own repair commits were 15–26 KB for task-2693 and task-2688 (task-2668.08 also had a 423 KB own commit).
-- task-2695 r2 returned at 0.81 on a 43-file diff whose own repair touched 11 files; task-2698 r2 abstained on 12 files versus 9.
-- All 11 TASK-2692 tuned-replay cases were non-rebased (1–16 files). Rebased repairs were never in development or validation, so the replay result does not describe the live case mix.
-Evidence and extraction scripts: ../parallix-research/jev-live-investigation-2026-10-09/ (FINDINGS.md, telemetry.json, rebuild.mts). Prior research: backlog/docs/task-2692-research-summary.json and ../parallix-research/task-2692/.
+Since TASK-2692 landed (e38bec80, 2026-10-09T06:39:21Z), 10 of 18 classified rounds were first reviews; all 10 returned insufficient_evidence (7 at score >= 0.93). Over the week: 24 first-review calls, 0 decisions. The scope was enabled by TASK-2680 without any evaluation. classify-review.ts sends success criteria as "findings" and the mission brief as the prior review comment into the finding-resolution builder and prompt (evidence-packet.ts, finding-resolution-preservation-v1). Source is selected only from file paths literally cited in that text: in an offline rebuild with the production builder, 6 of 10 packets had zero source files and no diff and were told "Select insufficient_evidence" (exactly the six score-1.0 rows); the other 4 carried 2-4 of the 7-140 files the mission changed. The question wording ("does the candidate source address the entire specific review finding") was written for repair verification, not for judging a success criterion.
+Evidence: ../parallix-research/jev-live-investigation-2026-10-09/ (FINDINGS.md, telemetry.json, rebuild.mts). Related prior research: ADR 0065, backlog/docs/task-2650-evidence/, backlog/docs/task-2658-evidence/, backlog/docs/task-2692-research-summary.json.
 
-Research phase (keep large artifacts outside the repository, under ../parallix-research/<dated dir>)
-1. Survey how established review tools present "what changed since the last review" when the author rebases or force-pushes, and how they separate rebase noise from author changes: e.g. Gerrit patch-set comparison and rebase-edit handling, GitHub "changes since last review" / force-push compare, Phabricator interdiffs, git range-diff, PR-Agent incremental review, and any published AI-review harness behaviour. Cite primary docs or source; mark vendor claims; do not launder search snippets. Record each mechanism, what it shows the reviewer, what it hides, and failure modes (conflict resolutions, dropped or squashed commits, rebases that change repair semantics).
-2. Define candidate repair-evidence constructions, at minimum: current two-dot diff (baseline); diff from the approved revision rebased onto the candidate's base (or equivalent interdiff); range-diff/patch-id based own-commit diff; three-dot or merge-base-relative variants. State for each what counts as "the repair", how conflict-resolution edits and main-induced semantic changes are surfaced (they may be material), and what is declared as omitted.
+Research phase (large artifacts outside the repository, under ../parallix-research/<dated dir>)
+1. Survey how AI review harnesses and benchmarks assemble first-review context for a whole change and its stated intent: e.g. PR-Agent (dynamic context, compression), Claude Code review command (discovery vs per-issue validation), CodeRabbit, Greptile, ContextCRBench/AACR-Bench style intent-plus-context findings, and Jev's own limitations guidance (64k total / 32k state-plus-longest-question). Cite primary docs, papers or source; mark vendor claims. Record what each includes (intent, full diff, changed files, callers, tests, checkpoint evidence), how it prioritises under a budget, and how it states omissions.
+2. Decide the question shape: one call per criterion versus all criteria; which criteria are judgeable from source at all (process criteria such as "gate ran" or "docs updated" may need recorded evidence or must route to the general reviewer). Define what a clear means on a first review and what it never covers.
+3. Define candidate packet constructions using token-only budgets (DecisionPort.requestBudget): at minimum merge-base..candidate diff, changed-file pairs prioritised by criterion relevance, recorded checkpoint Goal Check evidence as labelled claims, explicit omissions. Packet construction must not use labels or later review outcomes.
 
 Development and holdout
-3. Build a case set of gate-repair re-reviews from parallix history, including rebased and non-rebased repairs, with exact approved/candidate revisions. Before designing, freeze a holdout set of families withheld from all design choices (packet construction, prompt wording, thresholds); record selection rules and seed. Development set includes the live rounds above.
-4. Run at least two development rounds: measure per construction packet correctness against a labelled "true repair" (files/hunks), token size versus budget, exception/fallback rate, Jev labels/scores and routes, and agreement with historical reviewer decisions. Keep provider failures and fallbacks in denominators; repeats are not independent cases. Jev calls are allowed for this research (about $0.001 per call); record cost.
-5. Evaluate the selected construction once on the frozen holdout. Report it separately from development results, with numerators/denominators and the policy unchanged. Do not retune on holdout outcomes; if the result fails the adoption bar, record the negative result.
+4. Build a case set of first reviews from parallix history with exact base/candidate revisions, criteria and the historical general-review outcome. Before any design, freeze a holdout of mission families withheld from all design choices (construction, prompt wording, thresholds); record selection rules and seed. The 10 live rounds above belong to development.
+5. Run at least two development rounds: per construction, measure packet content and token size, fallback rate, Jev labels/scores/routes, and agreement with historical first-review decisions; adjudicate disagreements rather than assuming either side is right. Keep failures and fallbacks in denominators; repeated calls are not independent cases. Jev calls are allowed (about $0.001 per call); record cost.
+6. Evaluate the selected construction once on the frozen holdout, reported separately, with no retuning on holdout outcomes.
 
-Adoption bar and implementation
-6. Adopt only if holdout shows: no increase in observed wrong routes against comparators, lower exception/oversize fallback for rebased repairs, and packets that contain the own repair with any rebase-induced material changes declared rather than silently mixed. Otherwise keep current behaviour and retain the research.
-7. If adopted, implement inside existing ports (ReviewEvidencePort / DecisionPort.requestBudget, token-only budgeting); no byte caps reintroduced. Record the construction version in packet/policy telemetry. Extend owning suites (repair-evidence-packet and classify-review tests) with rebased-repair fixtures, including a reproduction that fails on the current two-dot diff. Manually exercise a real rebased gate repair end to end in an isolated fixture without real statistics or Forgejo writes. Update docs/config.md and ADR 0065 in place.
-8. Ports-and-adapters changes follow AGENTS.md: stop and present evidence and alternatives before implementing any boundary change.
+Adoption and implementation
+7. Implement only when the holdout shows a positive decision rate with no observed wrong routes against comparators, and the operator accepts the tradeoff. Otherwise record the negative result and recommend whether the first-review scope should stay enabled.
+8. If adopted: implement inside existing ports, version prompt/packet/policy in telemetry, extend owning suites (evidence-packet, classify-review), manually exercise a real first review end to end in an isolated fixture without real statistics or Forgejo writes, update docs/config.md and ADR 0065 in place. Boundary changes follow the AGENTS.md stop-and-present rule.
 
-Out of scope: first-review packets, ordinary finding packets, byte-limit removal outside the repair path, provider-key environment handling (separate mission); changing the 52/67/81 thresholds unless the holdout protocol explicitly includes it before calls.
+Out of scope: gate-repair and finding re-review packets; mechanical bugs tracked in TASK-2704 (rebased repair diffs, remaining byte limits, exception subtypes, lost provider keys). The diff base for first reviews must use a merge base, but the mechanical base fix itself lands in TASK-2704.
 <!-- SECTION:DESCRIPTION:END -->
 
 ## Definition of Done
