@@ -17,7 +17,8 @@ export type DecisionAnswer =
 
 export type DecisionAvailability =
   | { readonly status: 'available'; readonly provider: string; readonly model: string }
-  | { readonly status: 'setup-required'; readonly reason: string };
+  /** `credentials-missing` marks an absent provider key, as opposed to invalid configuration. */
+  | { readonly status: 'setup-required'; readonly reason: string; readonly cause?: 'credentials-missing' };
 
 export interface DecisionResult {
   readonly answers: Readonly<Record<string, DecisionAnswer>>;

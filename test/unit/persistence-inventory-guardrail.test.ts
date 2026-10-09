@@ -574,6 +574,10 @@ test('SC1 reverse: all durable-IO files under src/ are present in the inventory'
     // (TASK-2483). Same category as `verification.ts` and `redgreen.ts`: gate
     // metadata and mission markers, read-only, owning no ADR 0053 concept.
     'src/adapters/review/review-prompts.ts',
+    // Review evidence (TASK-2704): the mission interdiff diffs two normalized patches
+    // through short-lived scratch files in the temporary directory, removed before the
+    // read returns. It owns no ADR 0053 durable-state concept.
+    'src/adapters/review/review-evidence.ts',
     // Local Forgejo setup writes credentials and product configuration, not
     // domain state owned by the operator database.
     'src/adapters/review/setup-review-auth.ts',

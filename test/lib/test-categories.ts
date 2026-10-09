@@ -97,6 +97,8 @@ export const INTEGRATION_CI_TESTS: readonly string[] = [
   // a clean hosted runner provides Git and the injected command runner.
   'integration/verification/repository-gates.test.ts',
   'integration/rebase/resolve-conflict.test.ts',
+  // TASK-2704: real git in a temporary repository; git is present on clean hosted runners.
+  'integration/review/review-evidence-git.integration.test.ts',
   'integration/review/review-artifacts.test.ts',
   'integration/review/review-autoderive.test.ts',
   'integration/review/review-backfill.test.ts',

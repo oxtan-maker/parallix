@@ -103,6 +103,7 @@ export interface MissionReviewRoundRecord {
   readonly source_branch: string;
   readonly target_branch: string;
   readonly revision: string;
+  readonly review_baseline?: string | null;
   readonly reviewer: string;
   readonly implementer: string;
   readonly started_at: string;
@@ -456,7 +457,7 @@ function reviewRoundFrom(
 
   return {
     number: requiredInteger(row.round_number, 'review round number', 1),
-    subject: { change, revision: changeRevision(row.revision) },
+    subject: { change, revision: changeRevision(row.revision), ...(row.review_baseline ? { baseline: changeRevision(row.review_baseline) } : {}) },
     reviewer: agentFamily(row.reviewer),
     implementer: agentFamily(row.implementer),
     startedAt: requiredText(row.started_at, 'review start time'),

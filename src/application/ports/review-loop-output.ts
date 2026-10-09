@@ -71,6 +71,7 @@ export type ReviewLoopEvent =
   | { readonly kind: 'autonomous-reviewer'; readonly attempt: number }
   | { readonly kind: 'reviewer-launching'; readonly attempt: number; readonly reviewer: string }
   | { readonly kind: 'reviewer-classification'; readonly reason: string }
+  | { readonly kind: 'decision-key-missing' }
   | { readonly kind: 'reviewer-launch-failed'; readonly reviewer: string; readonly message: string }
   | { readonly kind: 'reviewer-artifact-infra'; readonly diagnostic: string }
   | { readonly kind: 'reviewer-recovery-human'; readonly slug: string }

@@ -32,6 +32,10 @@ export interface IntegrationRepairFacts {
   readonly command: string | null;
   readonly log: string | null;
   readonly approvedRevision: string;
+  /** Baseline the approved revision's mission diff was measured from; null when that round recorded none. */
+  readonly approvedBaseline: string | null;
+  /** Baseline of the repaired revision's round; null while unrecorded. */
+  readonly repairedBaseline: string | null;
   /** The revision under re-review; null while it still names A (repair not handed off yet). */
   readonly repairedRevision: string | null;
   readonly withdrawnAt: string;
@@ -50,6 +54,8 @@ export function latestIntegrationRepair(mission: Mission): IntegrationRepairFact
     command: cause.command ?? null,
     log: cause.log ?? null,
     approvedRevision,
+    approvedBaseline: withdrawn.subject.baseline ? String(withdrawn.subject.baseline) : null,
+    repairedBaseline: current.subject.baseline ? String(current.subject.baseline) : null,
     repairedRevision: latest === approvedRevision ? null : latest,
     withdrawnAt: withdrawn.decision.revocation!.revokedAt,
     reReview: current.decision?.kind === 'approved' && !current.decision.revocation ? 'approved'

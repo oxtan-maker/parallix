@@ -423,3 +423,19 @@ test('completed classifier cohorts include old calls and same-scope shadow disag
   assert.equal(classifierGroups(drifted, window)![0].statistics.shadowFalseClears, 0);
   assert.equal(classifierGroups(drifted, window)![0].statistics.shadowUnobserved, 1);
 });
+
+test('px stats fallback-reasons table renders each distinguishable classifier failure cause (TASK-2704)', async () => {
+  const { renderClassifierStatistics } = await import('../../../../src/application/presentation/classifier-statistics.js');
+  const { weeklyDecisionWindows } = await import('../../../../src/application/services/decision-window.js');
+  const { classificationAttempt } = await import('../../../fixtures/repeat-review.js');
+  const windows = weeklyDecisionWindows('2026-10-06', 'UTC');
+  const row = (round: number, reason: string, unreached = false) => classificationAttempt({ round, decisionId: `d${round}`, fingerprint: `f${round}`,
+    observedAt: '2026-10-05T00:00:00Z', route: 'reviewer', reason, classificationMs: null,
+    ...(unreached ? { provider: null, model: null, packetHash: null } : {}) });
+  const attempts = [row(2, 'evidence-over-budget'), row(3, 'evidence-read-failed'), row(4, 'classifier-exception'),
+    row(5, 'provider-key-missing', true), row(6, 'provider-unavailable', true)];
+  const report = renderClassifierStatistics({ decisions: [], attempts, applied: [], observations: [], coverage: 'complete' }, [windows.current, windows.previous]);
+  for (const reason of ['evidence-over-budget', 'evidence-read-failed', 'classifier-exception', 'provider-key-missing', 'provider-unavailable']) {
+    assert.match(report, new RegExp(`\\| ${reason}\\s+\\|\\s+1 \\|`), reason);
+  }
+});

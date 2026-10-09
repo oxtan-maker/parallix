@@ -56,6 +56,8 @@ export type ReviewedChange = PullRequestReference | LocalBranchReference;
 export interface ReviewedRevision {
   readonly change: ReviewedChange;
   readonly revision: ChangeRevision;
+  /** Primary-branch revision the round's mission diff is measured from; absent on rounds recorded before it was kept. */
+  readonly baseline?: ChangeRevision;
 }
 
 export type ReviewApprovalSource =

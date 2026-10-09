@@ -105,6 +105,26 @@ test('prepared host runs the confined command in the pane and keeps credentials 
   assert.ok(calls.some(call => call.includes('kill-window') && call.includes(`=${launch.sessionName}:${launch.windowName}`)));
 });
 
+// TASK-2704 launch-path measurement: a whole `px` command hosted in the mission terminal is the owning
+// process and keeps the operator's decision keys; the tmux server and every argv stay credential-free.
+test('a hosted px command keeps decision keys in its private pane environment only (TASK-2704)', () => {
+  const env = { PARALLIX_TERMINAL_STATE_DIR: path.join(mkdtemp('px-tmux-keys-'), 'state') };
+  const keys = { TYPESAFE_API_KEY: 'sentinel-typesafe', OPENROUTER_API_KEY: 'sentinel-openrouter', AI_GATEWAY_API_KEY: 'sentinel-gateway' };
+  const { fn } = fakeSpawnSync('');
+  const launch = prepareTmuxLaunch({ identity: identity('task-1', 'review'), spawnIndex: 0, command: 'px', args: ['review', 'task-1'], cwd: '/work',
+    env: { ...keys, PARALLIX_MISSION_TERMINAL: 'task-1' } }, { configuration: resolveConfiguration({ ...environment, ...env }), spawnSyncFn: fn });
+  const scratch = path.dirname(launch.args[0]);
+  const paneEnv = fs.readFileSync(path.join(scratch, 'pane.env'), 'utf8');
+  for (const [name, value] of Object.entries(keys)) {
+    assert.ok(paneEnv.includes(`export ${name}='${value}'`), `${name} reaches the owning px process`);
+    for (const file of ['host.sh', 'pane.sh', 'command.sh']) {
+      assert.equal(fs.readFileSync(path.join(scratch, file), 'utf8').includes(value), false, `${file} must not embed ${name}`);
+    }
+    assert.equal(launch.args.join(' ').includes(value), false);
+  }
+  launch.cleanup();
+});
+
 test('the console px wrapper cannot re-enter itself from an operator rc file (TASK-2675)', () => {
   const env = { PARALLIX_TERMINAL_STATE_DIR: path.join(mkdtemp('px-tmux-wrap-'), 'state') };
   const bin = mkdtemp('px-tmux-bin-');

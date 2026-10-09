@@ -109,6 +109,8 @@ function completeReview(): Review {
           targetBranch: 'main',
         },
         revision: changeRevision('def456'),
+        // TASK-2704: the baseline a round's mission diff was measured from survives reload; round 1 keeps none.
+        baseline: changeRevision('0ldba5e'),
       },
       reviewer: agentFamily('codex'),
       implementer: agentFamily('custom'),

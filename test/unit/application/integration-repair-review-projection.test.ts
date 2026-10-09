@@ -154,3 +154,30 @@ test('task-2620: no integration repair, no repair facts', () => {
   assert.equal(latestIntegrationRepair(mission('active', operatorRevokedWithIntegrationWording())), null);
   assert.equal(integrationRepairReviewBrief(null), '');
 });
+
+// TASK-2704: the agent brief, the PR comment and px status show one repair range which excludes main.
+test('task-2704: a rebased repair shows the same mission interdiff to the agent, the PR comment and the summary', () => {
+  let review = reviewWithRepairHistory();
+  const [withdrawn, current] = review.rounds;
+  review = { ...review, rounds: [{ ...withdrawn, subject: { ...withdrawn.subject, baseline: changeRevision('0ld0ba5e') } },
+    { ...current, subject: { ...current.subject, revision: changeRevision('d4e5f6'), baseline: changeRevision('4ewba5e') } }] as unknown as Review['rounds'] };
+  const facts = latestIntegrationRepair(mission('review', review))!;
+  assert.deepEqual([facts.approvedBaseline, facts.repairedBaseline], ['0ld0ba5e', '4ewba5e']);
+  const brief = integrationRepairReviewBrief(facts);
+  const comment = integrationRepairPrComment(facts);
+  const summary = integrationRepairSummary(facts);
+  const interdiff = 'diff <(git diff 0ld0ba5e a1b2c3) <(git diff 4ewba5e d4e5f6)';
+  for (const text of [brief, comment]) {
+    assert.ok(text.includes(interdiff), text);
+    assert.doesNotMatch(text, /git diff a1b2c3\.\.d4e5f6/, 'the polluted two-dot range is never offered');
+    assert.match(text, /Changes landed on main are excluded/);
+    assert.match(text, /rebase-induced and conflict-resolution changes appear in this range/);
+  }
+  assert.match(summary, /mission interdiff 0ld0ba5e\.\.a1b2c3 -> 4ewba5e\.\.d4e5f6/);
+});
+
+test('task-2704: a repair with no recorded baseline declares that its range may include main', () => {
+  const facts = latestIntegrationRepair(mission('review', reviewWithRepairHistory()))!;
+  assert.match(integrationRepairReviewBrief(facts), /may include changes landed on main/);
+  assert.match(integrationRepairPrComment(facts), /may include changes landed on main/);
+});

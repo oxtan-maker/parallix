@@ -5,9 +5,11 @@ import { tryClassifyReview } from '../../../../src/application/review-classifica
 import { observeGeneralReview } from '../../../../src/application/review-classification/observe-review.js';
 import { fakeLoopContext, fakeReviewLoopPorts } from '../../../helpers/review-loop-ports.js';
 import { ReviewRound } from '../../../../src/application/review-loop/round.js';
+import { pinReviewBaseline } from '../../../../src/application/review-loop/pin-baseline.js';
 import { fixtureMission, inMemoryTransitionStore } from '../../../fixtures/mission-builders.js';
 import { repeatReview } from '../../../fixtures/repeat-review.js';
 import { MissionLifecycleService } from '../../../../src/application/mission-lifecycle-service.js';
+import { EvidenceReadError } from '../../../../src/application/ports/review-evidence.js';
 import type { ReviewClassificationPorts } from '../../../../src/application/ports/review-classification.js';
 import type { ClassifierCallMeasurement, ClassifierObservation } from '../../../../src/application/ports/review-classification-telemetry.js';
 
@@ -26,17 +28,19 @@ function scenario(mode: ReviewClassificationPorts['mode'] = 'enabled') {
         type: 'choice', selected: 'addresses', probabilities: { addresses: 0.52 }, confidence: 0.1,
       } } }) },
     evidence: { tree: async () => ['x.java'], source: async () => 'return output;\n',
-      diff: async () => '+++ b/x.java\n@@ -1 +1 @@\n-return null;\n+return output;\n' },
+      diff: async () => '+++ b/x.java\n@@ -1 +1 @@\n-return null;\n+return output;\n',
+      missionInterdiff: async () => ({ diff: '-return null;\n+return output;\n', paths: ['x.java'] }) },
     telemetry: async () => ({ recordCall: async a => { attempts.push(a); }, 
       recordObservation: async o => { observations.push(o); }, calls: async () => attempts, observations: async () => observations }),
     publish: async (_source, route) => { published.push(route); return true; },
   };
-  const context = fakeLoopContext(fakeReviewLoopPorts({ slug: 'task-2658', provider: {}, missionStore: store, lifecycle: new MissionLifecycleService(store),
-    preReview: { head: () => 'b'.repeat(40) } }), { slug: 'task-2658' });
+  const fake = fakeReviewLoopPorts({ slug: 'task-2658', provider: {}, missionStore: store, lifecycle: new MissionLifecycleService(store),
+    preReview: { head: () => 'b'.repeat(40) } });
+  const context = fakeLoopContext(fake, { slug: 'task-2658' });
   context.state.round = 2;
   const ports = { ...context.ports, classification: classifier };
   const classified = { ...context, ports };
-  return { context: classified, classifier, store, attempts, observations, published, round: new ReviewRound(2, classified) };
+  return { context: classified, classifier, store, attempts, observations, published, logs: fake.logs, round: new ReviewRound(2, classified) };
 }
 
 test('available default records a real classifier clear and moves through existing approval authority', async () => {
@@ -322,11 +326,11 @@ test('a first review round reaches the classifier on its candidate revision agai
   assert.equal(await tryClassifyReview(s.context, round), 'APPROVED');
   assert.deepEqual(s.published, ['clear']);
   assert.deepEqual(s.attempts[0].findingIds, ['success-criterion-1']);
-  assert.equal(s.attempts[0].priorRevision, 'main');
+  assert.equal(s.attempts[0].priorRevision, 'baseline', 'the round review baseline, not the moving target branch');
   assert.match(JSON.stringify(requests[0]), /Success criterion 1: Output is preserved/);
   const loaded = await s.store.load(s.context.slug as never);
   if (loaded.kind !== 'found') { throw new Error('mission missing'); }
-  assert.equal(loaded.mission.review!.rounds.at(-1)!.decision!.classifier!.successCriteria?.baseRef, 'main');
+  assert.equal(loaded.mission.review!.rounds.at(-1)!.decision!.classifier!.successCriteria?.baseRef, 'baseline');
 });
 
 test('a first review of a mission without success criteria names the missing data (TASK-2680)', async () => {
@@ -466,5 +470,96 @@ test('oversized mandatory repair evidence retains general review without calling
   assert.equal(calls, 0);
   assert.deepEqual(s.published, []);
   assert.equal(s.store.mission().review!.rounds.at(-1)!.decision, null);
-  assert.equal(s.attempts[0].reason, 'classifier-exception');
+  assert.equal(s.attempts[0].reason, 'evidence-over-budget');
+});
+
+test('first-review evidence is measured from the immutable round baseline while main advances (TASK-2704)', async () => {
+  const s = scenario();
+  const { mission, rounds } = reshape(s);
+  mission.review = { ...mission.review, rounds: [{ ...mission.review.rounds[1], number: 1, subject: { ...rounds[1].subject } }] } as never;
+  mission.successCriteria = ['Output is preserved in x.java'];
+  s.context.state.round = 1;
+  const pinned = 'e'.repeat(40);
+  s.context.ports.preReview.reviewBaseline = () => pinned;
+  const round = new ReviewRound(1, s.context);
+  // Main moves after the pre-review rebase; the round must not follow it.
+  s.context.ports.preReview.reviewBaseline = () => 'f'.repeat(40);
+  const ranges: string[] = [];
+  const diff = s.classifier.evidence.diff;
+  s.classifier.evidence.diff = async (prior, candidate, paths) => { ranges.push(`${prior}..${candidate}`); return diff(prior, candidate, paths); };
+  assert.equal(await tryClassifyReview(s.context, round), 'APPROVED');
+  assert.ok(ranges.length > 0 && ranges.every(range => range.startsWith(`${pinned}..`)), ranges.join(','));
+  assert.equal(s.attempts[0].priorRevision, pinned);
+});
+
+test('a rebased gate repair is judged on the baseline-relative mission interdiff (TASK-2704)', async () => {
+  const s = gateRepairScenario();
+  const prior = s.store.mission().review!.rounds[0]!;
+  (prior as { subject: unknown }).subject = { ...prior.subject, baseline: 'c'.repeat(40) };
+  s.round.reviewBaseline = 'd'.repeat(40);
+  const polluted = Array.from({ length: 600 }, (_, i) => `--- a/main-only-${i}.ts\n+++ b/main-only-${i}.ts\n@@ -1 +1 @@\n-a\n+b\n`).join('');
+  s.classifier.evidence.diff = async () => polluted;
+  const budget = s.classifier.decision.requestBudget;
+  s.classifier.decision.requestBudget = request => {
+    const base = budget(request);
+    return JSON.stringify(request).includes('main-only-599') ? { ...base, inputTokens: 64001 } : base;
+  };
+  const seen: unknown[] = [];
+  s.classifier.evidence.missionInterdiff = async (before, after) => {
+    seen.push([before, after]);
+    return { diff: '-return null;\n+return output;\n', paths: ['x.java'] };
+  };
+  const decide = s.classifier.decision.decide;
+  let sent = '';
+  s.classifier.decision.decide = async request => { sent = JSON.stringify(request.state); return decide(request); };
+  assert.equal(await tryClassifyReview(s.context, s.round), 'APPROVED');
+  assert.deepEqual(seen, [[{ baseline: 'c'.repeat(40), revision: 'a'.repeat(40) }, { baseline: 'd'.repeat(40), revision: 'b'.repeat(40) }]]);
+  assert.doesNotMatch(sent, /main-only/);
+  assert.match(sent, /rebase-induced and conflict-resolution changes/);
+});
+
+test('classifier failures persist a distinguishable cause (TASK-2704)', async () => {
+  const over = gateRepairScenario();
+  const budget = over.classifier.decision.requestBudget;
+  over.classifier.decision.requestBudget = request => ({ ...budget(request), contextTokens: 30001 });
+  const read = gateRepairScenario();
+  read.classifier.evidence.diff = async () => { throw new EvidenceReadError('git diff output exceeds the read limit', true); };
+  const other = gateRepairScenario();
+  other.classifier.decision.requestBudget = () => { throw new Error('tokenizer unavailable'); };
+  for (const run of [over, read, other]) { assert.equal(await tryClassifyReview(run.context, run.round), null); }
+  assert.deepEqual([over, read, other].map(run => run.attempts[0].reason), ['evidence-over-budget', 'evidence-read-failed', 'classifier-exception']);
+  assert.match(over.logs.join('\n'), /Reviewer classifier failed \(evidence-over-budget\)/);
+});
+
+test('a missing provider key is its own cause and is announced to the operator once without credentials (TASK-2704)', async () => {
+  const s = scenario();
+  s.classifier.decision.available = () => ({ status: 'setup-required', reason: 'Export TYPESAFE_API_KEY to enable decisions.', cause: 'credentials-missing' });
+  assert.equal(await tryClassifyReview(s.context, s.round), null);
+  assert.equal(await tryClassifyReview(s.context, new ReviewRound(2, s.context)), null);
+  assert.deepEqual(s.attempts.map(a => a.reason), ['provider-key-missing', 'provider-key-missing']);
+  const notices = s.logs.filter(line => /no decision provider key/.test(line));
+  assert.equal(notices.length, 1);
+  assert.match(notices[0], /TYPESAFE_API_KEY, OPENROUTER_API_KEY or AI_GATEWAY_API_KEY/);
+  assert.match(notices[0], /launched agents never receive these keys/);
+  const misconfigured = scenario();
+  misconfigured.classifier.decision.available = () => ({ status: 'setup-required', reason: 'JEV_CODE_PROVIDER conflicts with TYPESAFE_BASE_URL.' });
+  await tryClassifyReview(misconfigured.context, misconfigured.round);
+  assert.equal(misconfigured.attempts[0].reason, 'provider-unavailable');
+  assert.equal(misconfigured.logs.filter(line => /no decision provider key/.test(line)).length, 0);
+});
+
+test('a round keeps its review baseline with its reviewed subject across reload (TASK-2704)', async () => {
+  const s = scenario();
+  s.round.reviewBaseline = 'e'.repeat(40);
+  await pinReviewBaseline(s.context, s.round);
+  const loaded = await s.store.load(s.context.slug as never);
+  if (loaded.kind !== 'found') { throw new Error('mission missing'); }
+  const rounds = loaded.mission.review!.rounds;
+  assert.equal(rounds.at(-1)!.subject.baseline, 'e'.repeat(40));
+  assert.equal(rounds[0].subject.baseline, undefined, 'a decided round is never rewritten');
+  s.round.reviewBaseline = 'f'.repeat(40);
+  assert.equal(await tryClassifyReview(s.context, s.round), 'APPROVED');
+  const decided = await s.store.load(s.context.slug as never);
+  if (decided.kind !== 'found') { throw new Error('mission missing'); }
+  assert.equal(decided.mission.review!.rounds.at(-1)!.subject.baseline, 'e'.repeat(40), 'the baseline recorded for the round survives its decision');
 });

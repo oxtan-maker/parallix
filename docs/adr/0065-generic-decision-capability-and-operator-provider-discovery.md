@@ -79,6 +79,15 @@ in-flight budget limit is transient rather than exhausted account/key credit.
 No provider body, credential or request state appears in an exception.
 Callers own recovery; failures never synthesize a successful decision.
 
+Availability distinguishes an absent provider key (`credentials-missing`) from
+invalid configuration, so a consumer can tell an unconfigured process from a
+misconfigured one. The key is read from the environment of the px process that owns
+the work: Parallix passes it to a px command it hosts, and never to a launched agent
+or the terminal server (ADR 0064). A px process started from inside an agent therefore
+has no key by design. Operators must export keys where non-interactive shells read
+them. The classifier records `provider-key-missing` for each affected round and tells
+the operator once per process, naming the variables but never a value.
+
 ## Relationship to existing decisions
 
 - ADR 0051 retains application ports, dependency direction and composition

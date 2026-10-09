@@ -242,7 +242,7 @@ export class SqliteMissionStore implements MissionStore, MissionNelRecorder {
         this.db.query<MissionReviewRoundRecord>(
           `SELECT mission_id, position, round_number, change_kind, provider,
                   provider_change_id, provider_url, source_branch, target_branch,
-                  revision, reviewer, implementer, started_at, decision_kind,
+                  revision, review_baseline, reviewer, implementer, started_at, decision_kind,
                   decided_at, decision_comment, classifier_source, approval_source_kind,
                   approval_source_provider, revoked_at, revoked_by, revoked_reason, revoked_cause, revoked_gate, revoked_gate_command, revoked_gate_log,
                   superseded_at, superseding_revision, superseded_by, responded_at, resulting_revision,
@@ -749,13 +749,13 @@ export class SqliteMissionStore implements MissionStore, MissionNelRecorder {
         `INSERT INTO mission_review_rounds
            (mission_id, position, round_number, change_kind, provider,
             provider_change_id, provider_url, source_branch, target_branch,
-            revision, reviewer, implementer, started_at, decision_kind,
+            revision, review_baseline, reviewer, implementer, started_at, decision_kind,
             decided_at, decision_comment, classifier_source, approval_source_kind,
             approval_source_provider, revoked_at, revoked_by, revoked_reason, revoked_cause, revoked_gate, revoked_gate_command, revoked_gate_log,
                   superseded_at, superseding_revision, superseded_by, responded_at, resulting_revision,
             phase, disposition, reviewer_retry_count, implementer_retry_count,
             implementer_response_content, item_dispositions, blocked_reason)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           missionId,
           roundPosition,
@@ -767,6 +767,7 @@ export class SqliteMissionStore implements MissionStore, MissionNelRecorder {
           change.sourceBranch,
           change.targetBranch,
           round.subject.revision,
+          round.subject.baseline ?? null,
           round.reviewer,
           round.implementer,
           round.startedAt,

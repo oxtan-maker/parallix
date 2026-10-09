@@ -1,12 +1,10 @@
-import { buildRepairEvidencePacket, type MeasureBudget } from './repair-evidence-packet.js';
+import { buildRepairEvidencePacket, fitsBudget, type MeasureBudget } from './repair-evidence-packet.js';
 export { REPAIR_PROMPT_VERSION, REPAIR_RESOLUTION_QUESTION } from './repair-evidence-packet.js';
-import { TextEncoder } from 'node:util';
 import type { DecisionData, DecisionRequest } from '../ports/decision.js';
 import type { ReviewFindingEvidence, ReviewEvidencePort } from '../ports/review-evidence.js';
 
 export const PACKET_VERSION = 'mechanical-repeat-findings-v2';
 export const PROMPT_VERSION = 'finding-resolution-preservation-v1';
-export const MAX_PACKET_BYTES = 90_000;
 export const RESOLUTION_QUESTION = {
   type: 'choice' as const,
   instructions: 'Assess whether candidate source addresses the entire specific review finding. Trace executable behavior and relevant dependencies. Comments and implementer claims are not proof. Do not approve the whole mission, demand unrelated improvements, or infer runtime tests passed. Select insufficient_evidence when omitted dependencies or ambiguous contracts prevent a reliable judgment. A repair must preserve required behavior on the repaired path: removing a symptom by preventing normal completion, suppressing required output, or introducing another failure does not resolve the finding. Treat implementer explanations as claims to check against source. If preservation cannot be established from supplied evidence, select insufficient_evidence.',
@@ -18,9 +16,6 @@ export const RESOLUTION_QUESTION = {
 };
 interface Excerpt { startLine: number; endLine: number; text: string; boundary?: string }
 export interface EvidencePacket { readonly request: DecisionRequest; readonly paths: readonly string[] }
-/** Encoded request size in bytes for the routed model, owned by the decision adapter. */
-export type MeasureRequest = (_request: DecisionRequest) => number;
-const MAX_TEXT_CHARS = 12_000;
 /** Explicit basename references must have exactly one match; no extension substitution. */
 export function resolveEvidencePath(token: string, tree: readonly string[]): string | null {
   if (tree.includes(token)) { return token; }
@@ -34,9 +29,6 @@ export function sourceWindows(source: string, hints: readonly number[], changed:
 } {
   const lines = source ? source.split('\n').map((line, index, all) =>
     index < all.length - 1 ? `${line}\n` : line).filter(Boolean) : [];
-  if (new TextEncoder().encode(source).length <= 6000) {
-    return { excerpts: [{ startLine: 1, endLine: lines.length, text: source }], omissions: [] };
-  }
   const anchors = [...new Set([...hints, ...changed])].slice(0, 32);
   for (const symbol of symbols) {
     const escaped = symbol.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -73,12 +65,10 @@ export function trimTrailingSlashes(value: string): string {
   return value.slice(0, end);
 }
 
-/** Free text kept whole when small; otherwise cut with a declared omission. */
-function boundedText(label: string, text: string, omissions: string[]): string {
-  if (!text.trim()) { omissions.push(`${label}: none retained`); return ''; }
-  if (text.length <= MAX_TEXT_CHARS) { return text; }
-  omissions.push(`${label}: truncated to ${MAX_TEXT_CHARS} of ${text.length} characters`);
-  return text.slice(0, MAX_TEXT_CHARS);
+/** Free text is kept whole; only the decision budget may later cut it, with a declared omission. */
+function retainedText(label: string, text: string, omissions: string[]): string {
+  if (!text.trim()) { omissions.push(`${label}: none retained`); }
+  return text.trim() ? text : '';
 }
 
 /** A repository read that may fail: the packet is still sent with the loss declared. */
@@ -105,22 +95,19 @@ function changedLines(diff: string): Record<string, number[]> {
  * packet degrades in steps and declares every omission so the classifier can abstain.
  */
 export async function buildEvidencePacket(input: ReviewFindingEvidence, repository: ReviewEvidencePort,
-  worktree: string | undefined, measure: MeasureRequest, repair = false, verification?: DecisionData, budget?: MeasureBudget): Promise<EvidencePacket> {
-  if (repair) {
-    if (!budget) { throw new Error('Repair evidence requires adapter token-budget measurement'); }
-    return buildRepairEvidencePacket(input, repository, budget, verification);
-  }
-  return buildFindingEvidencePacket(input, repository, worktree, measure, verification);
+  worktree: string | undefined, budget: MeasureBudget, repair = false, verification?: DecisionData): Promise<EvidencePacket> {
+  if (repair) { return buildRepairEvidencePacket(input, repository, budget, verification); }
+  return buildFindingEvidencePacket(input, repository, worktree, budget, verification);
 }
 
-/** Legacy finding packets retain their original bounded-window behavior. */
+/** Finding packets degrade stepwise only as far as the adapter-owned decision budget requires. */
 async function buildFindingEvidencePacket(input: ReviewFindingEvidence, repository: ReviewEvidencePort,
-  worktree: string | undefined, measure: MeasureRequest, verification?: DecisionData): Promise<EvidencePacket> {
+  worktree: string | undefined, budget: MeasureBudget, verification?: DecisionData): Promise<EvidencePacket> {
   const omissions: string[] = [];
-  const priorReviewComment = boundedText('Prior review comment', input.priorReviewComment, omissions);
-  const implementerResponse = boundedText('Implementer response', input.implementerResponse, omissions);
-  const humanFeedback = input.humanFeedback?.trim() ? boundedText('Human feedback', input.humanFeedback, omissions) : '';
-  const findings = input.findings.map(f => ({ ...f, summary: boundedText(`Finding ${f.id}`, f.summary, omissions) }));
+  const priorReviewComment = retainedText('Prior review comment', input.priorReviewComment, omissions);
+  const implementerResponse = retainedText('Implementer response', input.implementerResponse, omissions);
+  const humanFeedback = input.humanFeedback?.trim() ? retainedText('Human feedback', input.humanFeedback, omissions) : '';
+  const findings = input.findings.map(f => ({ ...f, summary: retainedText(`Finding ${f.id}`, f.summary, omissions) }));
   const findingText = findings.map(f => `${f.id}: ${f.summary}`).join('\n\n');
   const text = [priorReviewComment, implementerResponse, humanFeedback,
     ...findings.map(f => `${f.summary} ${f.location === null ? 'None' : f.location}`)].join('\n');
@@ -167,7 +154,7 @@ async function buildFindingEvidencePacket(input: ReviewFindingEvidence, reposito
       .filter(m => roots.includes(path) ? relative(m[1]) === path : resolveEvidencePath(relative(m[1]), tree) === path).map(m => Number(m[2]));
     const extracted = sourceWindows(source, hints, roots.includes(path) ? changed[path] ?? [] : [], symbols);
     if (extracted.excerpts.length) { windows[path] = extracted.excerpts; }
-    const evidence = new TextEncoder().encode(source).length <= 6000 ? 'Complete file; dependencies still not established'
+    const evidence = extracted.omissions.length === 0 ? 'Complete file; dependencies still not established'
       : 'Line windows only. Symbol occurrences are lexical matches, not resolved dependencies. Missing code, callers, macro expansion and dynamic wiring must not be assumed.';
     fileOmissions.push(`${path}: ${evidence}`, ...extracted.omissions.map(o => `${path}: ${o}`));
   }
@@ -175,13 +162,12 @@ async function buildFindingEvidencePacket(input: ReviewFindingEvidence, reposito
   if (additions.length && Object.keys(windows).length) {
     const expandedDiff = await attempt(() => repository.diff(input.priorRevision, input.candidateRevision, Object.keys(windows)), diff,
       'Expanded diff unavailable', omissions);
-    if (new TextEncoder().encode(expandedDiff).length <= 15000) { packetDiff = expandedDiff; }
+    packetDiff = expandedDiff;
   }
   const packet = (excerpts: Record<string, Excerpt[]>, contextOmissions: string[], coverage: string, selectedDiff = packetDiff): DecisionRequest => ({
     state: { finding: findingText, priorReviewComment, implementerResponse, ...(humanFeedback ? { humanFeedback } : {}),
       candidateSourceExcerpts: excerpts as unknown as DecisionData, contextOmissions: [...omissions, ...contextOmissions], coverage,
-      diff: !selectedDiff ? 'No diff supplied for the cited paths.' : new TextEncoder().encode(selectedDiff).length <= 15000 ? selectedDiff
-        : 'Diff exceeds bounded allowance; changed declarations supplied, complete diff omitted.',
+      diff: selectedDiff || 'No diff supplied for the cited paths.',
       validation: verification ?? 'No runtime execution proof supplied. Comments and implementer responses are unverified claims.' },
     questions: { resolution: RESOLUTION_QUESTION },
   });
@@ -189,10 +175,11 @@ async function buildFindingEvidencePacket(input: ReviewFindingEvidence, reposito
   const PARTIAL = 'Exact line windows may cut declarations or control flow; no complete-function or execution-path claim. Callers, indirect callbacks, macros, closure state, external libraries and dependencies may be missing. No global symbol expansion. Do not assume omitted code. Select insufficient_evidence if material.';
   const NONE = 'No source excerpts supplied. Nothing in this packet shows the candidate source. Select insufficient_evidence unless the supplied text alone settles the finding.';
   const selected = Object.keys(windows);
-  const withinBudget = (request: DecisionRequest) => measure(request) <= MAX_PACKET_BYTES;
+  const withinBudget = (request: DecisionRequest) => fitsBudget(request, budget);
   const fileNotes = (keep: readonly string[]) => fileOmissions.filter(o => keep.some(path => o.startsWith(`${path}: `)));
-  const full = packet(Object.fromEntries(selected.map(path => [path, whole[path]])), [], COMPLETE);
-  if (selected.length && withinBudget(full)) { return { request: full, paths: selected }; }
+  const wholePaths = Object.keys(whole);
+  const full = packet(Object.fromEntries(wholePaths.map(path => [path, whole[path]])), [], COMPLETE);
+  if (wholePaths.length && withinBudget(full)) { return { request: full, paths: wholePaths }; }
   const bounded = packet(windows, fileOmissions, PARTIAL);
   if (selected.length && withinBudget(bounded)) { return { request: bounded, paths: selected }; }
   const rootPaths = selected.filter(path => roots.includes(path));
@@ -202,7 +189,7 @@ async function buildFindingEvidencePacket(input: ReviewFindingEvidence, reposito
   // Last resort: no source, and every free-text field is cut until the measured size fits.
   const notes = [...fileOmissions, 'Source excerpts and diff omitted: no selectable window within the packet budget'];
   const cut = (text: string, limit: number) => text.length <= limit ? text : `${text.slice(0, limit)}...`;
-  let limit = MAX_TEXT_CHARS;
+  let limit = Math.max(findingText.length, priorReviewComment.length, implementerResponse.length, humanFeedback.length, 128);
   for (;;) {
     const base = packet({}, notes, NONE, '');
     const state = base.state as Record<string, DecisionData>;

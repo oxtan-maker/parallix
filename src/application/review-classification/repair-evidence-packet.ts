@@ -1,5 +1,5 @@
 import type { DecisionData, DecisionRequest, DecisionRequestBudget } from '../ports/decision.js';
-import type { ReviewFindingEvidence, ReviewEvidencePort } from '../ports/review-evidence.js';
+import { EvidenceOverBudgetError, EvidenceReadError, type ReviewFindingEvidence, type ReviewEvidencePort } from '../ports/review-evidence.js';
 import type { EvidencePacket } from './evidence-packet.js';
 
 export const REPAIR_PROMPT_VERSION = 'gate-repair-preservation-v1';
@@ -24,20 +24,44 @@ function changedPaths(diff: string): string[] {
   }
   return [...paths].sort((a, b) => a.localeCompare(b));
 }
-function fits(request: DecisionRequest, measure: MeasureBudget): boolean {
+/** Whether the adapter's token accounting admits the request. */
+export function fitsBudget(request: DecisionRequest, measure: MeasureBudget): boolean {
   const b = measure(request);
   return b.requestBytes <= b.maxRequestBytes && b.inputTokens <= b.maxInputTokens && b.contextTokens <= b.maxContextTokens;
 }
+/** Mission-only interdiff when both subjects kept a baseline; otherwise the plain revision range. */
+async function readRepairDiff(input: ReviewFindingEvidence, repository: ReviewEvidencePort) {
+  try {
+    const [beforeTree, afterTree] = await Promise.all([repository.tree(input.priorRevision), repository.tree(input.candidateRevision)]);
+    if (input.missionRange) {
+      const interdiff = await repository.missionInterdiff(input.missionRange.approved, input.missionRange.candidate);
+      return { beforeTree, afterTree, diff: interdiff.diff, paths: [...interdiff.paths] };
+    }
+    const diff = await repository.diff(input.priorRevision, input.candidateRevision, []);
+    return { beforeTree, afterTree, diff, paths: changedPaths(diff) };
+  } catch (error) {
+    throw error instanceof EvidenceReadError ? error : new EvidenceReadError('Repair diff could not be read');
+  }
+}
+
+/** What the repair diff compares, so rebase-induced and conflict-resolution changes are declared rather than hidden. */
+function repairComparison(input: ReviewFindingEvidence): string {
+  const range = input.missionRange;
+  if (!range) {
+    return 'No review baseline was recorded for the approved revision: the diff is the plain revision range and may include changes landed on main by a rebase.';
+  }
+  const rebased = range.approved.baseline !== range.candidate.baseline;
+  return `The repair diff compares the mission diff of the approved revision (${range.approved.baseline}..${range.approved.revision}) with the mission diff of the candidate (${range.candidate.baseline}..${range.candidate.revision}); changes made only on main are excluded.`
+    + (rebased ? ' The candidate was rebased onto a newer baseline: rebase-induced and conflict-resolution changes appear in this diff and are not the implementer\'s repair of the failure.' : '');
+}
+
 interface SourcePair { path: string; before: string | null; after: string | null; coverage: string }
 
 /** Complete repair diff is mandatory; optional context never displaces or truncates it. */
 export async function buildRepairEvidencePacket(input: ReviewFindingEvidence, repository: ReviewEvidencePort,
   measure: MeasureBudget, verification?: DecisionData): Promise<EvidencePacket> {
-  const [beforeTree, afterTree, diff] = await Promise.all([
-    repository.tree(input.priorRevision), repository.tree(input.candidateRevision),
-    repository.diff(input.priorRevision, input.candidateRevision, []),
-  ]);
-  const paths = changedPaths(diff);
+  const { beforeTree, afterTree, diff, paths } = await readRepairDiff(input, repository);
+  const comparison = repairComparison(input);
   const pairs: SourcePair[] = [];
   const omitted = new Set(paths);
   const losses: string[] = [];
@@ -45,13 +69,13 @@ export async function buildRepairEvidencePacket(input: ReviewFindingEvidence, re
     finding: input.findings.map(f => `${f.id}: ${f.summary}`).join('\n\n'),
     priorReviewComment: input.priorReviewComment, implementerResponse: input.implementerResponse,
     ...(input.humanFeedback ? { humanFeedback: input.humanFeedback } : {}),
-    repairRange: { before: input.priorRevision, after: input.candidateRevision },
+    repairRange: { before: input.priorRevision, after: input.candidateRevision }, repairComparison: comparison,
     repairDiff: diff, changedPaths: paths, sourcePairs: pairs as unknown as DecisionData,
     contextOmissions: [...omitted].map(p => `${p}: complete source pair omitted; complete repair diff retained`).concat(losses),
     coverage: 'Complete repair diff. Individual source coverage is labelled; unreferenced dependencies are not established. Omitted material contracts require insufficient_evidence.',
     validation: verification ?? { status: 'unknown', specificTestResult: 'unknown', failedIntegrationGateRerun: 'unknown' },
   }, questions: { resolution: REPAIR_RESOLUTION_QUESTION } });
-  if (!fits(packet(), measure)) { throw new Error('Complete repair diff and failure evidence exceed the decision budget'); }
+  if (!fitsBudget(packet(), measure)) { throw new EvidenceOverBudgetError('Complete repair diff and failure evidence exceed the decision budget'); }
   const cited = input.findings.map(f => `${f.summary}\n${f.location ?? ''}`).join('\n');
   const tree = [...new Set([...beforeTree, ...afterTree])];
   const basenames = new Map<string, number>();
@@ -73,13 +97,13 @@ export async function buildRepairEvidencePacket(input: ReviewFindingEvidence, re
     } catch { losses.push(`${path}: pinned source read unavailable`); continue; }
     const pair = { path, before, after, coverage: 'Complete pinned before/after files; null means absent at that revision.' };
     pairs.push(pair); omitted.delete(path);
-    if (!fits(packet(), measure)) {
+    if (!fitsBudget(packet(), measure)) {
       pairs.pop();
       pairs.push({ path, before: null, after, coverage: 'Complete candidate file; prior whole file omitted, not absent. All before-change hunks remain in the complete repair diff.' });
-      if (!fits(packet(), measure)) { pairs.pop(); omitted.add(path); }
+      if (!fitsBudget(packet(), measure)) { pairs.pop(); omitted.add(path); }
     }
   }
   const request = packet();
-  if (!fits(request, measure)) { throw new Error('Repair evidence omissions exceed the decision budget'); }
+  if (!fitsBudget(request, measure)) { throw new EvidenceOverBudgetError('Repair evidence omissions exceed the decision budget'); }
   return { request, paths };
 }

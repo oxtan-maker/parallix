@@ -10,6 +10,7 @@ import { integrationRepairReviewBrief, latestIntegrationRepair } from '../integr
 import { missionId } from '../../domain/mission.js';
 import { DEFAULT_REBOUND_ATTEMPTS, rebound } from '../rebound-kernel.js';
 import { isArtifactInfraDiagnostic, isPollTimeout, POLL_TIMEOUT, type ReviewerArtifactFacts } from '../ports/review-round.js';
+import { pinReviewBaseline } from './pin-baseline.js';
 import { runDeclaredPreReviewGate, runPreReviewRebase } from './pre-review.js';
 import { adoptLaunchedAgent, elapsedSince, reboundCollaborators, stopIfControllerSuperseded, type LoopContext, type ReviewRound, type RoundStep } from './round.js';
 
@@ -245,6 +246,7 @@ export async function runReviewerPhase(context: LoopContext, round: ReviewRound)
     // The task mirror can commit Backlog bookkeeping after the round was
     // opened. Pin routing to the revision that passed the complete setup.
     round.verifiedRevision = context.ports.preReview.head() ?? undefined;
+    await pinReviewBaseline(context, round);
     // The graph is reviewer context, not a correctness gate: refresh it once
     // only after the final rebase and declared verification have succeeded.
     const cycleStarted = context.ports.classification?.clock();

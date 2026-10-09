@@ -3,8 +3,8 @@ id: TASK-2704
 title: >-
   Fix Jev review base, remaining byte limits, untyped exceptions and lost
   provider keys
-status: backlog
-assignee: []
+status: done
+assignee: [claude]
 created_date: '2026-10-09 16:09'
 updated_date: '2026-10-09 16:15'
 labels:

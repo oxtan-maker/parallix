@@ -505,6 +505,17 @@ test('spawnAndTee spawns the terminal host command and cleans it up once (TASK-2
   assert.equal(cleanups, 1);
 });
 
+test('a launched agent is hosted without decision-provider credentials (TASK-2704)', async () => {
+  const names = ['TYPESAFE_API_KEY', 'OPENROUTER_API_KEY', 'AI_GATEWAY_API_KEY'];
+  const hostedEnv = [];
+  const terminalHost = { host: (_launch, context) => { hostedEnv.push(context.env); return { command: 'sh', args: ['/state/host.sh'], cleanup: () => {} }; } };
+  const env = { KEEP_ME: '1', ...Object.fromEntries(names.map(name => [name, 'sentinel'])) };
+  await withMockSpawn({ stdoutChunks: [], status: 0 }, async () => spawnAndTee('agent-cli', [], { env, stdoutSink: noopSink(), stderrSink: noopSink(), terminalHost }));
+  assert.equal(hostedEnv.length, 1);
+  for (const name of names) { assert.equal(name in hostedEnv[0], false, `${name} reaches the agent's terminal pane`); }
+  assert.equal(hostedEnv[0].KEEP_ME, '1');
+});
+
 test('spawnAndTee reports a terminal host that cannot prepare as a launch error (TASK-2643)', async () => {
   const terminalHost = { host: () => { throw Object.assign(new Error('mkfifo failed'), { code: 'EACCES' }); } };
   await withMockSpawn({ stdoutChunks: ['never'], status: 0 }, async (observed) => {

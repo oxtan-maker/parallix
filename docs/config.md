@@ -27,6 +27,13 @@ the operator's environment. For example, export `OPENROUTER_API_KEY` in the
 shell running Parallix. A single compatible route is available without another
 setup prompt. If several providers are configured, select the intended account
 with `JEV_CODE_PROVIDER`; SDK base and model overrides remain operator-owned.
+Export the key where non-interactive shells read it, for example before the
+interactive-shell guard in `~/.bashrc` or in `~/.profile`; a key set after that
+guard is invisible to cron, `ssh host cmd` and agent shells. Parallix passes the
+key to the px commands it hosts but never to launched agents, so run px review
+and integration commands from your own terminal rather than from an agent. A
+process without a key keeps the general reviewer, records `provider-key-missing`
+and prints one notice naming the variables, never their values.
 Harness-only credentials must be exported explicitly rather than recovered
 from agent configuration. Repository configuration cannot supply decision
 credentials or redirect their destination.
@@ -466,22 +473,28 @@ re-review is judged against the previous round's findings, using the previous re
 implementer response, any human feedback and mechanically collected source at exact
 revisions; a repaired integration failure is judged against the withdrawn gate. A first
 review is judged against the mission success criteria, with the mission brief as context
-and the diff from the target branch. The classifier is called on every round
-while the decision provider is available; thin or oversized evidence is
-sent bounded with its omissions declared, and the classifier abstains when that evidence
+and the diff from the review baseline, the same revision the agent reviewer uses. The classifier is called on every round
+while the decision provider is available; thin evidence is sent with its omissions
+declared, packets shrink only to the Jev token budget, and the classifier abstains when that evidence
 cannot support a judgment. Abstentions, unavailable configuration, failed
 calls and rounds lacking required data (for example an unanswered prior finding set or a
 first review of a mission without success criteria, each with its own recorded reason)
 retain the general reviewer.
 
-Gate-failure repair packets retain the complete diff from the previously reviewed
-revision and add pinned before/after source, prioritizing files cited by the
+Gate-failure repair packets retain the complete repair diff. When both rounds kept a
+review baseline, that diff compares the approved and candidate mission diffs, each from
+its own baseline, so changes landed on main are excluded and rebase or
+conflict-resolution changes are declared; the repair brief and pull-request comment show
+the same range. Packets then add pinned before/after source, prioritizing files cited by the
 failure. If both files cannot fit, a complete candidate file may be retained with
 the missing prior file explicitly labelled. Optional source context can be omitted;
 the repair diff is never truncated. Jev token accounting checks the structured
-request before sending it, alongside the transport byte limit. If mandatory
-repair evidence cannot fit or its tokenizer is unsupported, the general reviewer
-handles the round.
+request before sending it, alongside the transport byte limit; finding packets use the
+same token budget rather than packet, file, diff or character limits. If mandatory
+repair evidence cannot be read, cannot fit or its tokenizer is unsupported, the general
+reviewer handles the round. `px stats` lists each fallback cause in its fallback-reasons
+table, including `evidence-over-budget`, `evidence-read-failed`, `classifier-exception`,
+`provider-key-missing` and `provider-unavailable`.
 
 The selected-choice routing thresholds are 52% for a resolved finding set and
 89% for unresolved findings. Gate-failure repair re-reviews use 67% for unresolved

@@ -54,6 +54,27 @@ local statistics inputs, recorded once per review round and reported per round, 
 This follow-up choice does not change the historical research results or turn
 the estimated saving into a measured whole-workflow improvement.
 
+Jev judges the mission surface the agent reviewer sees. Both resolve the round's
+review baseline, the primary-branch revision the mission was rebased onto, through
+one function; a first review compares that baseline with the candidate, never a
+moving branch name. Each review subject keeps its baseline, so a repair rebased onto
+newer main is compared as the interdiff of the approved and candidate mission diffs,
+each measured from its own baseline. Changes landed only on main are excluded;
+rebase-induced and conflict-resolution changes remain in the interdiff and are
+declared as such. Jev, the agent repair brief and the pull-request comment show the
+same range, and a subject without a recorded baseline is labelled as a plain revision
+range which may include main.
+
+Finding and repair packets are sized by the decision adapter's token budget
+(`DecisionPort.requestBudget`, measured with the pinned Jev tokenizer), not by
+packet, file, diff or character limits. Evidence degrades only as far as that budget
+requires, with every omission declared. An unreadable or oversized Git read is a
+declared loss for optional material; mandatory repair evidence which cannot be read
+or cannot fit leaves the round with the general reviewer. Each fallback records a
+typed reason (`evidence-over-budget`, `evidence-read-failed`, `classifier-exception`
+for anything else, `provider-key-missing`, `provider-unavailable`), which `px stats`
+lists in its fallback-reasons table.
+
 ## Decision matrix
 
 | Option | Use | Measured evidence | Position |

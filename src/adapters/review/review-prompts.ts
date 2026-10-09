@@ -10,6 +10,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { getMissionYear, getPrimaryBranch, missionPathForSlug } from '../filesystem/mission-utils.js';
+import { resolveReviewBaseline } from '../../application/review-baseline.js';
 import { assembleStagePrompt } from '../assets/runtime-assets.js';
 import { resolvePromptOverride } from '../config/product-config.js';
 import { loadRepositoryGates } from '../config/repository-gates.js';
@@ -239,7 +240,7 @@ export function buildCompactReviewPrompt({ reviewer, branch, implementer, focus 
     .replaceAll('{{missionPath}}',      missionPath)
     .replaceAll('{{artifactDir}}',      artifactDir)
     .replaceAll('{{primaryBranch}}',    primaryBranch)
-    .replaceAll('{{reviewBaseline}}',   reviewBaseline || primaryBranch)
+    .replaceAll('{{reviewBaseline}}',   resolveReviewBaseline(reviewBaseline, primaryBranch))
     .replaceAll('{{completedControls}}', buildCompletedControlsBlock(missionPath, repoRoot))
     .replaceAll('{{integrationRepair}}', integrationRepair)
     .replaceAll('YYYY',                year)
@@ -269,7 +270,7 @@ export function buildCompactActOnReviewPrompt({ implementer, branch, attempt, re
     .replaceAll('{{missionPath}}',             missionPath)
     .replaceAll('{{artifactDir}}',             artifactDir)
     .replaceAll('{{primaryBranch}}',           primaryBranch)
-    .replaceAll('{{reviewBaseline}}',          reviewBaseline || primaryBranch)
+    .replaceAll('{{reviewBaseline}}',          resolveReviewBaseline(reviewBaseline, primaryBranch))
     .replaceAll('{{review_outcome}}',          reviewOutcome)
     .replaceAll('YYYY',                       year)
     .replaceAll('{{act_on_review_entrypoint}}', actOnReviewEntrypoint(finalImplementer));

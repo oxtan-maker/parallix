@@ -20,7 +20,8 @@ export type DecisionResolution = { readonly route: DecisionRoute; readonly avail
 
 /** Only operator configuration is an authority; never accepts repository configuration. */
 export function resolveDecisionProvider(settings: DecisionConfiguration): DecisionResolution {
-  const unavailable = (reason: string): DecisionResolution => ({ availability: { status: 'setup-required', reason } });
+  const unavailable = (reason: string, cause?: 'credentials-missing'): DecisionResolution =>
+    ({ availability: { status: 'setup-required', reason, ...(cause ? { cause } : {}) } });
   const explicit = settings.provider;
   if (explicit && !Object.hasOwn(PROVIDERS, explicit)) {
     return unavailable('JEV_CODE_PROVIDER must select typesafe, openrouter, or vercel for this adapter.');
@@ -42,13 +43,14 @@ export function resolveDecisionProvider(settings: DecisionConfiguration): Decisi
   const target = (explicit as Provider | undefined) || urlProvider;
   if (!target && configured.length !== 1) {
     return unavailable(configured.length ? 'Multiple decision providers configured; select JEV_CODE_PROVIDER.'
-      : 'Export TYPESAFE_API_KEY, OPENROUTER_API_KEY, or AI_GATEWAY_API_KEY to enable decisions.');
+      : 'Export TYPESAFE_API_KEY, OPENROUTER_API_KEY, or AI_GATEWAY_API_KEY to enable decisions.',
+      configured.length ? undefined : 'credentials-missing');
   }
   const provider = target || configured[0];
   const config = PROVIDERS[provider];
   const ownKey = settings.apiKeys[config.key];
   const apiKey = ownKey || settings.apiKeys.TYPESAFE_API_KEY;
-  if (!apiKey) { return unavailable('The selected decision provider has no compatible API key.'); }
+  if (!apiKey) { return unavailable('The selected decision provider has no compatible API key.', 'credentials-missing'); }
   if (url && !urlProvider && ownKey && config.key !== 'TYPESAFE_API_KEY' && !explicit) {
     return unavailable('A host-specific key requires JEV_CODE_PROVIDER before following a custom proxy.');
   }

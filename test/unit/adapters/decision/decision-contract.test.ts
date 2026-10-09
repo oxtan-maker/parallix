@@ -226,3 +226,19 @@ test('unknown routed tokenizers cannot supply repair-budget authority (TASK-2692
   const port = portFromEnvironment({ env: { OPENROUTER_API_KEY: 'dummy', TYPESAFE_DEFAULT_MODEL: 'future-jev' } });
   assert.throws(() => port.requestBudget(request), /token budget cannot be measured/);
 });
+
+test('an absent provider key is distinguishable from an invalid provider configuration (TASK-2704)', () => {
+  const cause = (env: Record<string, string>) => {
+    const { availability } = resolveFromEnvironment(env);
+    return availability.status === 'setup-required' ? availability.cause ?? 'configuration' : 'available';
+  };
+  assert.equal(cause({}), 'credentials-missing');
+  assert.equal(cause({ JEV_CODE_PROVIDER: 'openrouter' }), 'credentials-missing');
+  assert.equal(cause({ OPENAI_API_KEY: 'ignored' }), 'credentials-missing');
+  assert.equal(cause({ TYPESAFE_API_KEY: 'a', OPENROUTER_API_KEY: 'b' }), 'configuration');
+  assert.equal(cause({ JEV_CODE_PROVIDER: 'unknown', OPENROUTER_API_KEY: 'b' }), 'configuration');
+  assert.equal(cause({ OPENROUTER_API_KEY: 'b', JEV_CODE_TIMEOUT_MS: '0' }), 'configuration');
+  assert.equal(cause({ OPENROUTER_API_KEY: 'b' }), 'available');
+  const message = JSON.stringify(resolveFromEnvironment({}).availability);
+  assert.doesNotMatch(message, /sentinel/);
+});

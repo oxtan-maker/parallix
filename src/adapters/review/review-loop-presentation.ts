@@ -6,7 +6,7 @@ import { recordAgentSelectionOutcome } from '../../application/services/agent-se
 export interface ReviewLoopTextOutput { log(_message: string): void; error(_message: string): void }
 
 /** Fallback reasons after the classifier was called and did not decide; every other reason means it was not used. */
-const CLASSIFIER_FAILURES = new Set(['classifier-failure', 'classifier-exception', 'classifier-publication-failed']);
+const CLASSIFIER_FAILURES = new Set(['classifier-failure', 'classifier-exception', 'classifier-publication-failed', 'evidence-over-budget', 'evidence-read-failed']);
 
 /** Says plainly whether the classifier ran, so a fallback is never mistaken for a classifier that never started. */
 function classifierFallbackMessage(reason: string): string {
@@ -232,6 +232,10 @@ export function renderReviewLoopEvent(event: ReviewLoopEvent, output: ReviewLoop
       return;
     case 'reviewer-classification':
       log(fmt.status('INFO', classifierFallbackMessage(event.reason)));
+      return;
+    case 'decision-key-missing':
+      log(fmt.status('WARN', 'Reviewer classifier not used: this px process has no decision provider key (TYPESAFE_API_KEY, OPENROUTER_API_KEY or AI_GATEWAY_API_KEY). '
+        + 'Export one where non-interactive shells read it, before the interactive guard in ~/.bashrc or in ~/.profile, and run px from your own terminal: launched agents never receive these keys. Continuing with the general reviewer.'));
       return;
     case 'reviewer-launch-failed':
       error(fmt.status('FAIL', `Could not launch reviewer agent (${event.reviewer}): ${event.message}`));

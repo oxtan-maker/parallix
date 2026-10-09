@@ -1,5 +1,6 @@
 import { missionId } from '../../domain/mission.js';
 import { applyClassifierReview, classifierPolicyForReview, CLASSIFIER_POLICY_VERSION, integrationRepairFinding, reviewAtCandidateRevision, successCriteriaFindings, type ClassifierReviewSource } from '../../domain/classifier-review.js';
+import { resolveReviewBaseline } from '../review-baseline.js';
 import { buildEvidencePacket, REPAIR_PROMPT_VERSION } from './evidence-packet.js';
 import { REPAIR_PACKET_VERSION } from './repair-evidence-packet.js';
 import { RoundTelemetry } from './round-telemetry.js';
@@ -7,6 +8,7 @@ import { classifyFindings, ROUTING_POLICY_VERSION, type ClassificationRoute } fr
 import type { LoopContext, ReviewRound } from '../review-loop/round.js';
 import type { ReviewClassificationTelemetryPort } from '../ports/review-classification-telemetry.js';
 import type { ReviewClassificationPorts } from '../ports/review-classification.js';
+import { EvidenceOverBudgetError, EvidenceReadError, type MissionRevision } from '../ports/review-evidence.js';
 import type { Review, ReviewFinding, ReviewRevocationCause, ReviewRound as DomainReviewRound } from '../../domain/review.js';
 import type { Mission } from '../../domain/mission.js';
 import type { MissionStore, MissionVersion } from '../domain-ports.js';
@@ -24,6 +26,8 @@ interface ReviewScope {
   /** Revision the evidence diff starts from: the prior round's, or the target branch for a success-criteria round. */
   readonly baseRevision: string;
   readonly candidateRevision: string;
+  /** Baseline-relative mission subjects of an answered round; absent when either side kept no baseline. */
+  readonly missionRange: { readonly approved: MissionRevision; readonly candidate: MissionRevision } | null;
   readonly policyVersion: string;
   readonly original: DomainReviewRound['decision'];
   readonly repairCause: Extract<ReviewRevocationCause, { kind: 'integration-gate-failure' }> | null;
@@ -36,6 +40,26 @@ interface ReviewScope {
 /** `reason` is the telemetry row reason; `message` is what the operator sees. */
 type Eligibility = ReviewScope | { readonly skip: { readonly reason: string; readonly message: string } };
 type Loaded = Awaited<ReturnType<MissionStore['load']>>;
+
+/** Operators are told once per process that decision keys are absent; later attempts only add telemetry rows. */
+const keyNoticeGiven = new WeakSet<object>();
+
+/** Typed cause of a failure which escaped evidence preparation, so telemetry can tell them apart. */
+function failureReason(error: unknown): string {
+  if (error instanceof EvidenceOverBudgetError) { return 'evidence-over-budget'; }
+  return error instanceof EvidenceReadError ? 'evidence-read-failed' : 'classifier-exception';
+}
+
+const failureMessage = (reason: string) => reason === 'classifier-exception' ? 'classifier exception; using general reviewer' : reason;
+
+/** What the classifier is shown about the scope: its revisions or mission range, findings and human context. */
+function evidenceInput(scope: ReviewScope) {
+  return {
+    priorRevision: scope.baseRevision, candidateRevision: scope.candidateRevision, ...(scope.missionRange ? { missionRange: scope.missionRange } : {}),
+    findings: scope.findings, priorReviewComment: scope.evidenceComment, implementerResponse: scope.evidenceResponse,
+    ...(scope.humanFeedback ? { humanFeedback: scope.humanFeedback } : {}),
+  };
+}
 
 const decisionIdFor = (ports: ReviewClassificationPorts, parts: readonly unknown[]) => ports.hash(JSON.stringify([...parts, ROUTING_POLICY_VERSION]));
 
@@ -149,6 +173,13 @@ function obligations(shape: ReturnType<typeof reviewShape>, mission: Mission): r
   return shape.repairCause ? [integrationRepairFinding(shape.repairCause)] : successCriteriaFindings(mission.successCriteria ?? []);
 }
 
+/** Both subjects' mission diffs, each from its own baseline; null when the earlier round kept none. */
+function missionRangeOf(prior: DomainReviewRound, candidateBaseline: string | undefined, candidateRevision: string): ReviewScope['missionRange'] {
+  const baseline = prior.subject.baseline;
+  return baseline && candidateBaseline
+    ? { approved: { baseline: String(baseline), revision: String(prior.subject.revision) }, candidate: { baseline: candidateBaseline, revision: candidateRevision } } : null;
+}
+
 /** Pure scope derivation: the prior findings, withdrawn gate or success criteria this round is judged against. */
 function assessEligibility(context: LoopContext, round: ReviewRound, loaded: Loaded | null): Eligibility {
   const unavailable = unavailableReason(context);
@@ -170,7 +201,8 @@ function assessEligibility(context: LoopContext, round: ReviewRound, loaded: Loa
   const text = evidenceText(review, prior, mission, { verifiedRepair, repairCause });
   return {
     mission, version, review, current, policyVersion: classifierPolicyForReview(review), prior: answered ? prior! : null, candidateRevision, original: prior?.decision ?? null,
-    baseRevision: answered ? String(prior!.subject.revision) : current.subject.change.targetBranch,
+    baseRevision: answered ? String(prior!.subject.revision) : resolveReviewBaseline(round.reviewBaseline, current.subject.change.targetBranch),
+    missionRange: answered ? missionRangeOf(prior!, round.reviewBaseline, candidateRevision) : null,
     repairCause, verifiedRepair, findings, evidenceComment: text.comment, evidenceResponse: text.response, humanFeedback: humanFeedbackText(context, round),
   };
 }
@@ -182,11 +214,22 @@ interface Decision {
   readonly packetHash: string;
 }
 
+/** An absent key is its own cause and is announced once per process; any other setup problem keeps its reason. */
+async function unavailableProvider(context: LoopContext, ports: ReviewClassificationPorts, availability: { cause?: 'credentials-missing' },
+  rows: RoundTelemetry): Promise<null> {
+  if (availability.cause !== 'credentials-missing') {
+    await rows.finish('provider-unavailable'); context.emit({ kind: 'reviewer-classification', reason: 'provider unavailable' }); return null;
+  }
+  await rows.finish('provider-key-missing');
+  if (!keyNoticeGiven.has(ports)) { keyNoticeGiven.add(ports); context.emit({ kind: 'decision-key-missing' }); }
+  return null;
+}
+
 /** Calls the classifier for the scope; a null decision means the general reviewer decides. */
 async function decideAndCommit(context: LoopContext, round: ReviewRound, scope: ReviewScope, rows: RoundTelemetry,
   telemetry: ReviewClassificationTelemetryPort, cycleStarted?: number): Promise<Outcome> {
   const ports = context.ports.classification!;
-  const { baseRevision, candidateRevision, findings, original } = scope;
+  const { candidateRevision, original } = scope;
   const emit = (value: string) => context.emit({ kind: 'reviewer-classification', reason: value });
   const fallback = async (why: string, message = why) => { await rows.finish(why); emit(message); return null; };
   const started = cycleStarted ?? ports.clock();
@@ -197,19 +240,15 @@ async function decideAndCommit(context: LoopContext, round: ReviewRound, scope: 
   let decision: Decision;
   try {
     const availability = await ports.decision.available();
-    if (availability.status !== 'available') { return await fallback('provider-unavailable', 'provider unavailable'); }
+    if (availability.status !== 'available') { return await unavailableProvider(context, ports, availability, rows); }
     rows.note({ provider: availability.provider, model: availability.model });
-    const packet = await buildEvidencePacket({
-      priorRevision: baseRevision, candidateRevision,
-      findings, priorReviewComment: scope.evidenceComment, implementerResponse: scope.evidenceResponse,
-      ...(scope.humanFeedback ? { humanFeedback: scope.humanFeedback } : {}),
-    }, ports.evidence, context.ports.worktree, request => ports.decision.requestBytes(request), repair,
+    const packet = await buildEvidencePacket(evidenceInput(scope), ports.evidence, context.ports.worktree, request => ports.decision.requestBudget(request), repair,
     repair && round.verifiedRevision === candidateRevision ? {
       status: 'passed', candidateRevision, scope: 'Configured pre-review verification',
       provenance: 'Parallix recorded successful pre-review verification at this exact candidate revision.',
       specificTestResult: 'unknown', failedIntegrationGateRerun: 'unknown',
       caveat: 'This does not establish that the failed integration gate or an individual test executed. Implementer comments remain unverified claims.',
-    } : undefined, request => ports.decision.requestBudget(request));
+    } : undefined);
     const packetHash = ports.hash(JSON.stringify(packet.request));
     rows.note({ preparationMs: ports.clock() - started, packetHash });
     const classifyStart = ports.clock();
@@ -226,8 +265,9 @@ async function decideAndCommit(context: LoopContext, round: ReviewRound, scope: 
       emit(selected.route === 'reviewer' ? selected.reason : 'shadow fallback'); return null;
     }
     decision = { selected: { ...selected, route: selected.route }, provider: result.provider, model: result.model, packetHash };
-  } catch {
-    return await fallback('classifier-exception', 'classifier exception; using general reviewer');
+  } catch (error) {
+    const reason = failureReason(error);
+    return await fallback(reason, failureMessage(reason));
   }
   return await commitDecision(context, round, scope, decision, rows, telemetry, started);
 }
