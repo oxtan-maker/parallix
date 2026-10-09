@@ -1,12 +1,12 @@
 ---
 id: TASK-2704
 title: >-
-  Fix Jev rebased repair diffs, first-review base, remaining byte limits and
-  lost provider keys
+  Fix Jev review base, remaining byte limits, untyped exceptions and lost
+  provider keys
 status: backlog
 assignee: []
 created_date: '2026-10-09 16:09'
-updated_date: '2026-10-09 16:11'
+updated_date: '2026-10-09 16:15'
 labels:
   - ai_sdlc
   - bug
@@ -18,15 +18,18 @@ ordinal: 207008
 ## Description
 
 <!-- SECTION:DESCRIPTION:BEGIN -->
-Fix mechanical defects in Jev review classification found in the 2026-10-09 live investigation: rebase-polluted repair diffs, a moving first-review diff base, byte limits left outside the repair path, untyped classifier exceptions and decision-provider keys missing from px processes. First-review packet content and question design are researched separately in TASK-2703.
+Fix mechanical defects in Jev review classification found in the 2026-10-09 live investigation: repair and first-review diffs that ignore the stable review baseline the agent reviewer uses, byte limits left outside the repair path, untyped classifier exceptions and decision-provider keys missing from px processes. First-review packet content and question design are researched separately in TASK-2703.
 
 Evidence: ../parallix-research/jev-live-investigation-2026-10-09/ (FINDINGS.md; telemetry.json is a read-only extract of review_classifier_measurements; rebuild.mts rebuilds packets offline with the production builder).
 
-1. Repair diff includes main's changes after a rebase (bug)
-buildRepairEvidencePacket (src/application/review-classification/repair-evidence-packet.ts) uses `git diff approved..candidate`. Integrate rebases the mission onto main, so 5 of 7 live gate repairs since 2026-10-09T06:39Z had an approved revision that is not an ancestor of the candidate. task-2693 r5 and task-2688 r7 fell back as classifier-exception (diffs 58-66 files / 140-150 KB, own repair commits 15-26 KB); task-2668.08 r2 likewise (81 files, plus its own 423 KB commit); task-2695 r2 returned at 0.81 on a 43-file diff whose own repair touched 11 files; task-2698 r2 used 12 files versus 9. Fix: derive the repair from the mission's own changes since the approved revision (e.g. approved revision rebased onto the candidate's base, range-diff or patch-id based), and declare conflict-resolution or rebase-induced changes explicitly rather than mixing them in or hiding them. Reproduction test: a rebased repair fixture whose two-dot diff exceeds the budget while the own repair fits (red today).
+1. One stable review base for the agent and Jev (bug)
+The general reviewer already reviews against a stable base: after the pre-review rebase, round.reviewBaseline = preReview.reviewBaseline() (review-loop.ts), the primary-branch SHA the mission was actually rebased onto, and the agent prompt diffs  (prompts/review-core.md). Later rebases happen at later rounds/integration. tryClassifyReview runs at the same verified boundary (reviewer-phase.ts, after runPreReviewRebase and the declared gate) but ignores that value and computes its own base:
+- first review: classify-review.ts sets baseRevision to the target branch name () resolved at call time, so commits landed on main after the rebase leak in, reversed;
+- gate repairs: buildRepairEvidencePacket (repair-evidence-packet.ts) uses . Integrate rebases onto main, so 5 of 7 live gate repairs since 2026-10-09T06:39Z had an approved revision that is not an ancestor of the candidate. task-2693 r5 and task-2688 r7 fell back as classifier-exception (diffs 58-66 files / 140-150 KB, own repair commits 15-26 KB); task-2668.08 r2 likewise (81 files, plus its own 423 KB commit); task-2695 r2 returned at 0.81 on a 43-file diff whose own repair touched 11 files; task-2698 r2 used 12 files versus 9.
+The same polluted  range is also given to the agent reviewer and the human: integrationRepairReviewBrief and integrationRepairPrComment (src/application/integration-repair-review.ts).
+Fix: one path. The classifier takes its base from the round's reviewBaseline via the same function the agent prompt uses, never a branch name and never its own git computation. Mission evidence is , identical to the agent's review surface. For the repair delta, persist the reviewBaseline with each review round's subject, so the approved round's mission diff (its baseline..approved) can be compared with the current one (reviewBaseline..candidate) — an interdiff/range-diff of the mission, not of main — and show that same repair range in the agent prompt and the PR comment. Rebase-induced or conflict-resolution changes are declared, not mixed in or hidden. Reproduction tests (red today): main advances after the rebase and the first-review packet must not contain main's commits; a rebased repair whose two-dot diff exceeds the budget while the mission interdiff fits; the agent repair brief must not cite a range containing main's commits.
 
-2. First-review diff base is the branch name (bug)
-classify-review.ts sets baseRevision to the target branch name (`main`) resolved at call time, so commits landed on main after the mission branched leak into the diff, reversed. Pin the merge base at the reviewed revision and record it in telemetry. Reproduction test: main advances between branch and review; the first-review diff must not contain main's new commits.
+2. (merged into 1)
 
 3. Byte limits remain in non-repair packets (bug)
 TASK-2692 moved only gate repairs to token budgets. buildFindingEvidencePacket (evidence-packet.ts) still uses MAX_PACKET_BYTES 90,000, a 6,000-byte complete-file threshold, 15,000-byte diff caps and 12,000-character truncation; classify-review.ts passes requestBytes as the measure. Replace with the adapter-owned token budget (DecisionPort.requestBudget, jevtok-ts) with unchanged declared-omission behaviour. GitReviewEvidence (src/adapters/review/review-evidence.ts) reads git with maxBuffer 2,000,000: an oversize read must become a declared loss, not an exception. Reproduction tests: a packet within the token budget but over 90,000 bytes is degraded today (red); an oversize diff read throws today (red).
