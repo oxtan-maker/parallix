@@ -100,7 +100,11 @@ function toWebMissionCard(card: MissionCard): WebMissionCard {
     agent: card.agent,
     checkpoint: card.checkpoint,
     checkpointDescription: card.checkpointDescription,
-    checkpointEvidence: card.checkpointEvidence,
+    checkpointEvidence: card.checkpointEvidence.map(({ name, description, goalCheck }) => ({
+      name,
+      description,
+      goalCheck: goalCheck.map(({ criterion, evidence }) => ({ criterion, evidence })),
+    })),
     nextActionText: card.nextActionText,
     gate: card.gate,
     pullRequest: card.pullRequest === null ? null : {

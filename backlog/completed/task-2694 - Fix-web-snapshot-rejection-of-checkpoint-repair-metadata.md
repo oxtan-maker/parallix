@@ -1,8 +1,8 @@
 ---
 id: TASK-2694
 title: Fix web snapshot rejection of checkpoint repair metadata
-status: backlog
-assignee: []
+status: done
+assignee: [codex]
 created_date: '2026-10-09 05:29'
 updated_date: '2026-10-09 05:30'
 labels:

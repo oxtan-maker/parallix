@@ -788,6 +788,34 @@ test('transport version 2 rejects v1 payloads as incompatible clients, not inval
   }
 });
 
+test('stamped checkpoint repair evidence validates after web projection (TASK-2694)', () => {
+  const card = makeFullCard({ checkpointEvidence: [{
+    name: 'CP-3', description: 'repair', goalCheck: [{
+      criterion: 'repair verified', evidence: 'src/domain/checkpoint.ts',
+      recordedRound: 3, repairedGate: 'static-analysis', repairedGates: ['transport', 'static-analysis'],
+    }],
+  }] });
+  const snapshot = toWebBoardSnapshot(makeProjection({ active: [card] }));
+  assert.equal(validateWebBoardSnapshot(snapshot).ok, true);
+  const wireCard = snapshot.stages.flatMap((stage) => stage.cards).find((item) => item.id === card.id)!;
+  assert.deepStrictEqual(wireCard.checkpointEvidence, [{
+    name: 'CP-3', description: 'repair', goalCheck: [{
+      criterion: 'repair verified', evidence: 'src/domain/checkpoint.ts',
+    }],
+  }]);
+  assert.equal(card.checkpointEvidence[0].goalCheck[0].recordedRound, 3);
+  assert.equal(card.checkpointEvidence[0].goalCheck[0].repairedGate, 'static-analysis');
+  assert.deepStrictEqual(card.checkpointEvidence[0].goalCheck[0].repairedGates, ['transport', 'static-analysis']);
+  const malformed = JSON.parse(JSON.stringify(snapshot));
+  const malformedCard = malformed.stages.flatMap((stage: { cards: typeof snapshot.stages[number]['cards'] }) => stage.cards)
+    .find((item: { id: string }) => item.id === card.id)!;
+  malformedCard.checkpointEvidence[0].goalCheck[0].unrelatedKey = true;
+  assert.equal(validateWebBoardSnapshot(malformed).ok, false);
+  const empty = toWebBoardSnapshot(makeProjection({ active: [makeFullCard({ checkpointEvidence: [] })] }));
+  assert.deepStrictEqual(empty.stages.flatMap((stage) => stage.cards)[0].checkpointEvidence, []);
+  assert.equal(validateWebBoardSnapshot(empty).ok, true);
+});
+
 test('snapshot metrics are projected and malformed metrics fail closed', () => {
   const snapshot = toWebBoardSnapshot(projectionWith({ metrics: { ...emptyMetrics, health: { state: 'healthy' }, provenance: { ...emptyMetrics.provenance, sampleSize: 3 } } }));
   assert.equal(snapshot.metrics.health.state, 'healthy');
