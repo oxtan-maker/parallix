@@ -604,11 +604,15 @@ describe('Context CLI', () => {
       current = afterCheckpoint.version;
       assert.equal(await invoke([
         'checkpoint', 'record', '--slug', SLUG, '--name', 'CP-1',
-        '--criterion', 'CLI round trip replaced', '--evidence', 'test/task-2521-03-review-verbs.test.ts',
+        '--criterion', 'CLI round trip', '--evidence', 'test/task-2521-03-review-verbs.test.ts',
         '--next', 'Replaced evidence.', '--expected-version', String(current),
       ]), 0, errors.join('\n'));
       const replaced = await statusJson();
-      assert.equal(replaced.latestCheckpoint.goalCheck[0].criterion, 'CLI round trip replaced');
+      assert.deepEqual(replaced.latestCheckpoint.goalCheck, [
+        { criterion: 'CLI round trip', evidence: 'test/task-2521-03-review-verbs.test.ts' },
+      ]);
+      assert.equal(replaced.latestCheckpoint.nextAction, 'Replaced evidence.');
+      assert.deepEqual(replaced.checkpoints, afterCheckpoint.checkpoints);
 
       // --- malformed evidence fails closed ----------------------------------
       current = replaced.version;
