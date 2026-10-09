@@ -1,3 +1,4 @@
+import type { ParallixConfiguration } from '../ports/configuration.js';
 /**
  * The squash step of a local landing: squash-merge with trailing backlog noise
  * preserved, stage the Backlog closeout, create the landed commit (bouncing a
@@ -19,6 +20,7 @@ export interface IntegrateRunState {
 }
 
 export interface LandingRun {
+  configuration?: ParallixConfiguration;
   slug: string;
   context: any;
   missionServices: any;
@@ -60,7 +62,7 @@ export function createSquashLanding(ports: IntegrateWorkflowPorts, { promoteTask
       throw abortWith(landing, `Mission ${missionId(slug)} is ${status}; integration requires the integration lane. Aborting before any landing effect.`);
     }
     if (ports.productConfig.isForgejoReviewEnabled(baseWorktree)) {
-      fmt.log.debug(`${stepLabel}: Syncing merged state to Forgejo...`);
+      fmt.log.debug(`${stepLabel}: Syncing merged state to Forgejo...`, run.configuration?.runtime.debug);
       const syncResult = ports.forgejo.syncMerged(branch, mergedCommit, {
         rootDir: baseWorktree,
         forgejoUser: context.forgejoUser,
@@ -72,7 +74,7 @@ export function createSquashLanding(ports: IntegrateWorkflowPorts, { promoteTask
         throw landing.createAbort();
       }
     } else {
-      fmt.log.debug(`${stepLabel}: Skipping Forgejo sync (review provider is not forgejo).`);
+      fmt.log.debug(`${stepLabel}: Skipping Forgejo sync (review provider is not forgejo).`, run.configuration?.runtime.debug);
     }
     if (ports.fileSystem.existsSync(baseWorktree)) {
       state.nextActionMessage = `Next: cd ${baseWorktree}`;
@@ -83,8 +85,8 @@ export function createSquashLanding(ports: IntegrateWorkflowPorts, { promoteTask
   }
 
   /** `git merge --squash`, preserving trailing backlog noise across the merge. */
-  function squashMerge({ baseWorktree }: LandingRun, branch: string) {
-    fmt.log.debug('Step 3: Squash-merging the mission branch...');
+  function squashMerge({ baseWorktree, configuration }: LandingRun, branch: string) {
+    fmt.log.debug('Step 3: Squash-merging the mission branch...', configuration?.runtime.debug);
     let noisePatchState: ReturnType<typeof checkout.prepareNoisePatchForSquash> | null = null;
     if (ports.missionPaths.softResetTrailingBacklogNoise(baseWorktree, git)) {
       noisePatchState = checkout.prepareNoisePatchForSquash(baseWorktree, { gitRunner: git });
@@ -134,7 +136,7 @@ export function createSquashLanding(ports: IntegrateWorkflowPorts, { promoteTask
   /** Complete the Backlog task in the checkout and add its moved paths to the payload. */
   async function stageCloseout(run: LandingRun, mainTaskFile: string, intendedPayloadPaths: Set<string>) {
     const { slug, context, baseWorktree } = run;
-    fmt.log.debug('Step 4: Final closeout checks in the local integration checkout...');
+    fmt.log.debug('Step 4: Final closeout checks in the local integration checkout...', run.configuration?.runtime.debug);
     // Do not dirty the primary checkout before the probe merge and squash have
     // completed. The task file is commonly part of the mission branch, so an
     // early promotion can make `merge --abort` fail and leave index conflicts.
@@ -163,7 +165,7 @@ export function createSquashLanding(ports: IntegrateWorkflowPorts, { promoteTask
     // file lands its removal.
     if (!isLivePathspec(baseWorktree, originalTaskPath)) {
       intendedPayloadPaths.delete(originalTaskPath);
-      fmt.log.debug(`Closeout moved ${originalTaskPath} and the base branch never tracked it; it is in neither the index nor HEAD, so it carries no change to land.`);
+      fmt.log.debug(`Closeout moved ${originalTaskPath} and the base branch never tracked it; it is in neither the index nor HEAD, so it carries no change to land.`, run.configuration?.runtime.debug);
     }
   }
 
@@ -193,7 +195,7 @@ export function createSquashLanding(ports: IntegrateWorkflowPorts, { promoteTask
   /** Create the landed squash commit; a hook failure bounces through the rebound kernel. */
   async function commitLandedSquash(run: LandingRun, commitArgs: string[], intendedPayloadPaths: Set<string>) {
     const { slug, context, baseWorktree, seams, missionServices } = run;
-    fmt.log.debug('Step 5: Creating the landed squash commit in the local integration checkout...');
+    fmt.log.debug('Step 5: Creating the landed squash commit in the local integration checkout...', run.configuration?.runtime.debug);
     const commitResult = git(commitArgs);
     if (commitResult.status === 0) { return; }
     const output = [commitResult.stdout, commitResult.stderr].filter(Boolean).join('\n').trim();

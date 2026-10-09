@@ -1,3 +1,4 @@
+import type { ParallixConfiguration } from '../../application/ports/configuration.js';
 import fs from 'node:fs';
 import path from 'node:path';
 import { resolveDatabasePath } from './database-path-resolver.js';
@@ -48,9 +49,9 @@ export interface AdhocIdentity {
  */
 export function allocateAdhocIdentity(
   repositoryId: string,
-  opts: { dbPath?: string } = {},
+  opts: { configuration?: ParallixConfiguration; dbPath?: string } = {},
 ): AdhocIdentity {
-  const dbPath = opts.dbPath ?? resolveDatabasePath();
+  const dbPath = opts.dbPath ?? resolveDatabasePath({ configuration: opts.configuration });
 
   fs.mkdirSync(path.dirname(dbPath), { recursive: true });
   const db = new SqliteDatabaseAdapter();

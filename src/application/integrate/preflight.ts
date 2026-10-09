@@ -1,3 +1,4 @@
+import type { ParallixConfiguration } from "../ports/configuration.js";
 /**
  * Integration preflight: every blocking fact is checked and printed loudly;
  * successful facts move behind DEBUG so the default happy path carries the
@@ -21,6 +22,7 @@ import type {
 } from '../ports/integrate-workflow.js';
 
 export interface PreflightOptions {
+  configuration?: ParallixConfiguration;
   readTokenFn?: IntegrateForgejoPort['readToken'];
   resolveTokenFileFn?: IntegrateForgejoPort['resolveTokenFile'];
   detectRebaseStateFn?: IntegrateGitPort['detectRebaseState'];
@@ -159,7 +161,7 @@ export function createIntegrationPreflight(ports: IntegrateWorkflowPorts) {
       failures: [],
       warnings: [],
       log,
-      detail: (text: string) => { if (process.env.DEBUG) { log(fmt.status('DEBUG', text)); } },
+      detail: (text: string) => { if (options.configuration?.runtime.debug) { log(fmt.status('DEBUG', text)); } },
     };
 
     // The integration "checkout" is the mission's base worktree on its base branch.

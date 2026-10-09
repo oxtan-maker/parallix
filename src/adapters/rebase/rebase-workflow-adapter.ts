@@ -1,3 +1,4 @@
+import type { ParallixConfiguration } from '../../application/ports/configuration.js';
 /**
  * Concrete `RebaseWorkflowPort` implementation (TASK-2332.12).
  *
@@ -36,6 +37,7 @@ import { CONFIG_PATH } from '../agents/agent-config.js';
 
 /** Legacy `*Fn` seam accepted by `px rebase` and by its tests. */
 export interface RebaseCommandOptions {
+  configuration?: ParallixConfiguration;
   inferSlugFn?: Function;
   findMissionDirFn?: Function;
   findMissionAreaFn?: Function;
@@ -111,10 +113,10 @@ export function createRebaseWorkflowPort(options: RebaseCommandOptions = {}): Re
     findMissionAreaFn = findMissionArea,
     getCurrentBranchFn = getCurrentBranch,
     resolveConflictsFn = (integrate as any).resolveConflictsForMission,
-    startAgentFn = startAgent,
-    createPrFn = createPr,
-    readTokenFn = readToken,
-    resolveForgejoUserFn = resolveForgejoUser,
+    startAgentFn = (step: string, launch: NonNullable<Parameters<typeof startAgent>[1]>) => startAgent(step, { ...launch, configuration: options.configuration }),
+    createPrFn = (branch: string, user: string, token: string, opts: Record<string, unknown> = {}) => createPr(branch, user, token, { ...opts, configuration: options.configuration }),
+    readTokenFn = (user: string) => readToken(user, undefined, options.configuration),
+    resolveForgejoUserFn = (user?: string) => resolveForgejoUser(user, options.configuration),
     resolveTaskFileFn = resolveTaskFile,
     getTaskImplementerFn = getTaskImplementer,
     resolveReviewIdentityFn = resolveReviewIdentity,
@@ -145,8 +147,8 @@ export function createRebaseWorkflowPort(options: RebaseCommandOptions = {}): Re
     resolvePromptBaseBranch,
 
     startAgent: startAgentFn as RebaseWorkflowPort['startAgent'],
-    selectAgent: selectAgent as unknown as RebaseWorkflowPort['selectAgent'],
-    workflowLauncherStatus: workflowLauncherStatus as unknown as RebaseWorkflowPort['workflowLauncherStatus'],
+    selectAgent: ((step: string, opts: Parameters<typeof selectAgent>[1]) => selectAgent(step, { ...opts, configuration: options.configuration })) as unknown as RebaseWorkflowPort['selectAgent'],
+    workflowLauncherStatus: ((agent: string, worktree?: string) => workflowLauncherStatus(agent, worktree, options.configuration)) as unknown as RebaseWorkflowPort['workflowLauncherStatus'],
     applyAgentFallback: applyAgentFallback as unknown as RebaseWorkflowPort['applyAgentFallback'],
 
     createPr: createPrFn as unknown as RebaseWorkflowPort['createPr'],

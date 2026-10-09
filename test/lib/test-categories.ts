@@ -37,6 +37,7 @@ export type TestCategory = 'unit' | 'integration-ci' | 'integration-local' | 'ag
  * private local services, and any binary outside the clean runner image.
  */
 export const INTEGRATION_CI_TESTS: readonly string[] = [
+  'integration/agents/pi-worker-process-contract.test.ts',
   // Review contracts exercising SQLite backfill and durable CLI recovery.
   'integration/review/review-status-backfill.integration.test.ts',
   'integration/review/review-intervention-resume.integration.test.ts',

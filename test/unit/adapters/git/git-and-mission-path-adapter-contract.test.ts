@@ -1,4 +1,6 @@
 // @ts-nocheck -- TASK-2328: partial test doubles from ESM seam migration; resolve in follow-up
+import { resolveConfiguration } from '../../../../src/composition/config.js';
+const environment: NodeJS.ProcessEnv = { ...process.env };
 // Behavior-owned suite (TASK-2622.09): the Git and mission-path adapter contract — porcelain/plumbing
 // wrappers, pure helpers, diff target resolution, and mission path/worktree resolution. Sections keep
 // their legacy case names and name their source files. Unit tier: Git and the filesystem are recorded
@@ -740,16 +742,16 @@ describe("mission path resolution", () => {
       fs.writeFileSync(path.join(priorYearDir, 'MISSION.md'), '# Mission: Prior Year\n');
 
       // Should find the mission in the prior year
-      assert.equal(getMissionYear('task-prior'), priorYear);
+      assert.equal(getMissionYear('task-prior', undefined, resolveConfiguration(environment)), priorYear);
       assert.equal(findMissionDir('task-prior'), priorYearDir);
 
       // New mission should default to current year
-      assert.equal(getMissionYear('task-new'), currentYear);
+      assert.equal(getMissionYear('task-new', undefined, resolveConfiguration(environment)), currentYear);
 
       // Override should be respected
-      process.env.MISSION_YEAR_OVERRIDE = '2025';
-      assert.equal(getMissionYear('task-any'), '2025');
-      delete process.env.MISSION_YEAR_OVERRIDE;
+      environment.MISSION_YEAR_OVERRIDE = '2025';
+      assert.equal(getMissionYear('task-any', undefined, resolveConfiguration(environment)), '2025');
+      delete environment.MISSION_YEAR_OVERRIDE;
     });
   });
 
@@ -809,7 +811,7 @@ describe("mission path resolution", () => {
 
       // The hardcoded `docs/missions` traversal would never find the mission and
       // would fall back to the current year; baseDir-aware resolution returns 2026.
-      assert.equal(getMissionYear('task-xyz', root), '2026');
+      assert.equal(getMissionYear('task-xyz', root, resolveConfiguration(environment)), '2026');
     });
   });
 
@@ -823,7 +825,7 @@ describe("mission path resolution", () => {
       fs.mkdirSync(path.join(root, 'docs', 'missions', '2024', 'task-xyz'), { recursive: true });
       fs.mkdirSync(path.join(root, 'missions', '2026', 'task-xyz'), { recursive: true });
 
-      assert.equal(getMissionYear('task-xyz', root), '2026');
+      assert.equal(getMissionYear('task-xyz', root, resolveConfiguration(environment)), '2026');
     });
   });
 
@@ -836,7 +838,7 @@ describe("mission path resolution", () => {
 
       // With the bug, fs.readdirSync throws ENOTDIR when baseDir is a file
       // After fix, it should return current year string
-      const year = getMissionYear('task-any', root);
+      const year = getMissionYear('task-any', root, resolveConfiguration(environment));
       assert.equal(typeof year, 'string', 'getMissionYear should return a string year');
       assert.ok(/^\d{4}$/.test(year), 'year should be a 4-digit number');
     });

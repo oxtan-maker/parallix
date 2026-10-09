@@ -1,4 +1,6 @@
 // @ts-nocheck -- TASK-2328: partial test doubles from ESM seam migration; resolve in follow-up
+import { resolveConfiguration } from '../../../../src/composition/config.js';
+const environment: NodeJS.ProcessEnv = { ...process.env };
 
 
 import fs from 'fs';
@@ -384,9 +386,9 @@ test('spawnAndTee clears no-output watchdog on signal exit', async () => {
 
 test('spawnAndTee rewrites PWD to the spawned cwd so child CLIs see the mission worktree', async () => {
   const tmpRoot = registeredMkdtemp('spawn-tee-pwd-');
-  const parentPwd = process.env.PWD;
+  const parentPwd = environment.PWD;
   try {
-    process.env.PWD = '/tmp/not-the-child-worktree';
+    environment.PWD = '/tmp/not-the-child-worktree';
 
     const result = await withMockSpawn({
       stdoutChunks: [JSON.stringify({ cwd: tmpRoot, pwd: tmpRoot })],
@@ -407,8 +409,8 @@ test('spawnAndTee rewrites PWD to the spawned cwd so child CLIs see the mission 
     assert.equal(parsed.cwd, tmpRoot);
     assert.equal(parsed.pwd, tmpRoot);
   } finally {
-    if (parentPwd === undefined) delete process.env.PWD;
-    else process.env.PWD = parentPwd;
+    if (parentPwd === undefined) delete environment.PWD;
+    else environment.PWD = parentPwd;
     fs.rmSync(tmpRoot, { recursive: true, force: true });
   }
 });
@@ -516,9 +518,9 @@ test('spawnAndTee reports a terminal host that cannot prepare as a launch error 
 test('spawnAndTee never passes decision-provider credentials to a launched child (TASK-2675)', async () => {
   const tmpRoot = registeredMkdtemp('spawn-tee-credentials-');
   const names = ['TYPESAFE_API_KEY', 'OPENROUTER_API_KEY', 'AI_GATEWAY_API_KEY'];
-  const saved = names.map(name => process.env[name]);
+  const saved = names.map(name => environment[name]);
   try {
-    for (const name of names) { process.env[name] = 'sentinel'; }
+    for (const name of names) { environment[name] = 'sentinel'; }
     await withMockSpawn({ stdoutChunks: [], status: 0 }, async (observed) => spawnAndTee('mock-node', [], {
       cwd: tmpRoot, env: { OPENROUTER_API_KEY: 'sentinel', KEEP_ME: '1' }, stdoutSink: noopSink(), stderrSink: noopSink()
     }).then(res => {
@@ -527,7 +529,7 @@ test('spawnAndTee never passes decision-provider credentials to a launched child
       return res;
     }));
   } finally {
-    names.forEach((name, i) => { if (saved[i] === undefined) { delete process.env[name]; } else { process.env[name] = saved[i]; } });
+    names.forEach((name, i) => { if (saved[i] === undefined) { delete environment[name]; } else { environment[name] = saved[i]; } });
     fs.rmSync(tmpRoot, { recursive: true, force: true });
   }
 });

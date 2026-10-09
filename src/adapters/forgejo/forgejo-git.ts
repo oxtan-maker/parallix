@@ -1,3 +1,4 @@
+import type { ParallixConfiguration } from '../../application/ports/configuration.js';
 import { git } from '../git/git.js';
 import { getPrimaryBranch } from '../filesystem/mission-utils.js';
 import * as verification from '../verification/verification.js';
@@ -96,7 +97,7 @@ function ensureRemoteBaseBranch(baseBranch: string, user: string, token: string,
  * @param {{force?: boolean, forceWithLease?: boolean, user?: string, token?: string}} [opts]
  * @returns {*}
  */
-function pushReviewRef(sourceRef: string, destinationRef: string, rootDir: string = process.cwd(), options?: { force?: boolean, forceWithLease?: boolean, forceWithLeaseRef?: string, user?: string, token?: string }) {
+function pushReviewRef(sourceRef: string, destinationRef: string, rootDir: string = process.cwd(), options?: { configuration?: ParallixConfiguration; force?: boolean, forceWithLease?: boolean, forceWithLeaseRef?: string, user?: string, token?: string }) {
   const {
     force = false,
     forceWithLease = false,
@@ -105,7 +106,7 @@ function pushReviewRef(sourceRef: string, destinationRef: string, rootDir: strin
     token
   } = options || {};
   const remote = token
-    ? authenticatedReviewUrl(user || resolveForgejoUser(), token, rootDir)
+    ? authenticatedReviewUrl(user || resolveForgejoUser(undefined, options?.configuration), token, rootDir, options?.configuration)
     : 'review';
   const pushArgs = /** @type {string[]} */ (['-C', rootDir, 'push', remote]);
   if (forceWithLease) {
@@ -133,7 +134,7 @@ function pushReviewRef(sourceRef: string, destinationRef: string, rootDir: strin
 function fetchReviewBranch(branch: string, rootDir: string = process.cwd(), options: any = {}) {
    const { user, token } = options || {};
   const source = token
-    ? authenticatedReviewUrl(user || resolveForgejoUser(), token, rootDir)
+    ? authenticatedReviewUrl(user || resolveForgejoUser(undefined, options?.configuration), token, rootDir, options?.configuration)
     : 'review';
   return git(['-C', rootDir, 'fetch', source, `+refs/heads/${branch}:refs/remotes/review/${branch}`], {
     stdio: ['ignore', 'pipe', 'pipe'],
@@ -223,10 +224,10 @@ function buildCreatePrPushArgs(branch: string, remoteUrl: string, rootDir: strin
  * @param {{user?: string, token?: string}} [opts]
  * @returns {*}
  */
-function deleteReviewRef(branch: string, rootDir: string = process.cwd(), options?: { user?: string, token?: string }) {
+function deleteReviewRef(branch: string, rootDir: string = process.cwd(), options?: { configuration?: ParallixConfiguration; user?: string, token?: string }) {
    const { user, token } = options || {};
    const remote = token
-     ? authenticatedReviewUrl(user || resolveForgejoUser(), token, rootDir)
+     ? authenticatedReviewUrl(user || resolveForgejoUser(undefined, options?.configuration), token, rootDir, options?.configuration)
      : 'review';
    const result = git(['-C', rootDir, 'push', remote, '--delete', branch], {
     stdio: ['ignore', 'pipe', 'pipe']
@@ -394,7 +395,7 @@ function syncMerged(branch: string, mergedCommit: string, options: any = {}) {
     return { ok: false, error: 'missing-merged-commit' };
   }
 
-  const { token } = resolveForgejoAuth({ forgejoUser, token: providedToken || undefined, rootDir });
+  const { token } = resolveForgejoAuth({ forgejoUser, token: providedToken || undefined, rootDir, configuration: options.configuration });
   if (!token) {
     return { ok: false, error: 'missing-token' };
   }

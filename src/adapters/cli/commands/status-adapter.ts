@@ -1,3 +1,4 @@
+import type { ParallixConfiguration } from "../../../application/ports/configuration.js";
 /** Concrete implementations of the focused status ports.
  * Wires existing git, backlog, forgejo, agents, and board-projection adapters
  * into the focused status ports owned by the application layer. */
@@ -295,6 +296,7 @@ export function createStatusPrAdapter(options: {
  * launcher. Whether a family's CLI answers is decided when it is launched.
  */
 export function createStatusAgentAdapter(options: {
+  configuration?: ParallixConfiguration;
   readonly rootDir: string;
   /** Null when the operator database is unavailable; status then says so. */
   readonly blocklistRepo: AgentBlocklistRepository | null;
@@ -302,10 +304,11 @@ export function createStatusAgentAdapter(options: {
 }): StatusAgentPort {
   const agents = options.blocklistRepo && new ConcreteAgentReadAdapter({
     rootDir: options.rootDir,
+    readAgentConfig: () => readAgentConfig(undefined, { configuration: options.configuration }),
     blocklistRepo: options.blocklistRepo,
     // The effective agent config (the working-tree copy, else the bundled
     // one), so a repository without its own config still reports families.
-    knownAgentFamilies: options.knownAgentFamilies ?? knownAgentFamiliesFromConfig(readAgentConfig()),
+    knownAgentFamilies: options.knownAgentFamilies ?? knownAgentFamiliesFromConfig(readAgentConfig(undefined, { configuration: options.configuration })),
   });
   return {
     async getAgents(): Promise<readonly StatusAgentEntry[] | null> {
@@ -315,7 +318,7 @@ export function createStatusAgentAdapter(options: {
     },
 
     getAgentOverride(): string | undefined {
-      return process.env.WORKFLOW_AGENT;
+      return options.configuration?.agents.override;
     },
   };
 }

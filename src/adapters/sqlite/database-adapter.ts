@@ -1,3 +1,5 @@
+import type { ParallixConfiguration } from "../../application/ports/configuration.js";
+import { DEFAULT_CONFIGURATION } from "../../application/ports/configuration.js";
 import { DatabaseSync } from 'node:sqlite';
 import fs from 'node:fs';
 import { compareCodeUnits } from '../../domain/comparators.js';
@@ -65,6 +67,7 @@ export const MAX_RETAINED_BACKUPS = 3;
  * - Explicit transactions for multi-statement writes
  */
 export class SqliteDatabaseAdapter {
+  constructor(private readonly _configuration: ParallixConfiguration = DEFAULT_CONFIGURATION) {}
   /** Serialize immediate writers from this Node process; SQLite handles other processes. */
   private static readonly immediateWriterTurns = new Map<string, Promise<void>>();
   private db: DatabaseSync | null = null;
@@ -121,7 +124,7 @@ export class SqliteDatabaseAdapter {
     }
 
     this.db = new DatabaseSync(config.path);
-    const debug = process.env.PARALLIX_DEBUG_SQL;
+    const debug = this._configuration.storage.debugSql;
     if (debug) {
       process.stderr.write(`[sql-open] ${config.path} (busyTimeout=${busyTimeout}ms, wal=${enableWal}, pid=${process.pid})\n`);
     }
@@ -261,7 +264,7 @@ export class SqliteDatabaseAdapter {
    */
   async execute(sql: string, params?: readonly unknown[]): Promise<number> {
     this.assertOpen();
-    const debug = process.env.PARALLIX_DEBUG_SQL;
+    const debug = this._configuration.storage.debugSql;
     if (debug) {
       process.stderr.write(`[sql-exec] ${this.config?.path ?? 'unknown'} | ${sql.trim().replace(/\s+/g, ' ').slice(0, 120)}\n`);
     }

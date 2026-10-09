@@ -1,3 +1,4 @@
+import { resolveConfiguration } from '../../../../src/composition/config.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -37,10 +38,11 @@ test('buildQwenInvocation: QWEN_HOME set to worktree .workflow/qwen-home', () =>
 });
 
 test('buildQwenInvocation: HOME and PATH untouched in env', () => {
-  const inv = buildQwenInvocation({ prompt: 'test', worktree: '/tmp/wt' });
-  // QWEN_HOME is set, but HOME and PATH should be inherited from process.env
-  assert.equal((inv.options.env as NodeJS.ProcessEnv).HOME, process.env.HOME);
-  assert.equal((inv.options.env as NodeJS.ProcessEnv).PATH, process.env.PATH);
+  const source = { HOME: '/test/qwen-home', PATH: '/test/qwen-bin' };
+  const configuration = resolveConfiguration(source);
+  const inv = buildQwenInvocation({ configuration, prompt: 'test', worktree: '/tmp/wt' });
+  assert.equal((inv.options.env as NodeJS.ProcessEnv).HOME, source.HOME);
+  assert.equal((inv.options.env as NodeJS.ProcessEnv).PATH, source.PATH);
 });
 
 test('buildQwenInvocation: model only passed when configured', () => {

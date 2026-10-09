@@ -1,3 +1,5 @@
+import type { ParallixConfiguration } from "../../application/ports/configuration.js";
+import { DEFAULT_CONFIGURATION } from "../../application/ports/configuration.js";
 import childProcess from 'node:child_process';
 import type { SpawnOptions, ChildProcess } from 'node:child_process';
 import path from 'node:path';
@@ -29,6 +31,7 @@ export interface TeeSink {
 }
 
 interface SpawnTeeOptions {
+  configuration?: ParallixConfiguration;
   stdoutSink?: TeeSink;
   stderrSink?: TeeSink;
   maxTailBytes?: number;
@@ -112,6 +115,7 @@ interface FinishPayload {
 
 export function spawnAndTee(command: string, args: string[], options: SpawnTeeOptions = {}): Promise<SpawnTeeResult> {
   const {
+    configuration = DEFAULT_CONFIGURATION,
     stdoutSink = process.stdout,
     stderrSink = process.stderr,
     maxTailBytes = DEFAULT_MAX_TAIL_BYTES,
@@ -138,7 +142,7 @@ export function spawnAndTee(command: string, args: string[], options: SpawnTeeOp
     for (const name of DECISION_CREDENTIAL_ENV) { delete env[name]; }
     // Guard construction errors deliberately reject this launch. An available
     // but broken Bubblewrap guard must never retry the child unsandboxed.
-    const confined = wrapWithBubblewrap(command, args, resolvedCwd);
+    const confined = wrapWithBubblewrap(command, args, resolvedCwd, configuration);
     let hosted: ReturnType<TerminalHost['host']> | null = null;
     try {
       hosted = terminalHost ? terminalHost.host(confined, { cwd: resolvedCwd, env }) : null;

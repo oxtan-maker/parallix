@@ -1,3 +1,4 @@
+import type { ParallixConfiguration } from "../../application/ports/configuration.js";
 /**
  * Reviewer-side round submission: record the decision, apply local and
  * provider review state, and close the mission PR.
@@ -20,6 +21,7 @@ import { runPhaseGates } from '../config/repository-gates.js';
 import { repairStaleActiveTaskAfterReview } from './review-intervention-commands.js';
 
 type SubmitReviewOptions = {
+  configuration?: ParallixConfiguration;
   log?: (_msg: string) => void;
   error?: (_msg: string) => void;
   exit?: (_code: number) => never;
@@ -116,6 +118,8 @@ async function recordApprovalDecision(slug: string, outcome: string, message: st
  * transition the Backlog task, and announce the local recording.
  * Returns true when the outcome must stop.
  */
+function fallbackImplementer(configuration?: ParallixConfiguration) { return configuration?.agents.override || 'autonomous'; }
+
 async function applyLocalReviewState(slug: string, outcome: string, message: string, worktree: string, options: SubmitReviewOptions, log: (_msg: string) => void, error: (_msg: string) => void): Promise<boolean> {
   const readReviewStateFn = options.readReviewStateFn || readReviewState;
   const writeReviewStateFn = options.writeReviewStateFn || writeReviewState;
@@ -138,7 +142,7 @@ async function applyLocalReviewState(slug: string, outcome: string, message: str
     stateToWrite = new ReviewState(slug, {
       disposition: outcome === 'approve' ? 'APPROVED' : outcome === 'request-changes' ? 'REQUEST_CHANGES' : undefined,
       reviewer: 'autonomous',
-      implementer: process.env.WORKFLOW_AGENT || 'autonomous',
+      implementer: fallbackImplementer(options.configuration),
       round: 1,
       phase: phaseForOutcome,
     });

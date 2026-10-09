@@ -1,3 +1,5 @@
+import type { ParallixConfiguration } from "../../application/ports/configuration.js";
+import { DEFAULT_CONFIGURATION } from "../../application/ports/configuration.js";
 import { spawnAndTee } from '../process/spawn-tee.js';
 import { extractOpencodeTelemetryFromExport } from './opencode-telemetry.js';
 import { captureOpencodeExport } from './opencode-export.js';
@@ -12,6 +14,7 @@ import type { SessionRole } from '../../domain/session.js';
 import { buildSubagentLimitPrefix } from './subagent-limit.js';
 
 interface BuildOpencodeInvocationOptions {
+  configuration?: ParallixConfiguration;
   prompt: string;
   worktree: string;
   env?: object;
@@ -22,6 +25,7 @@ interface BuildOpencodeInvocationOptions {
 }
 
 interface StartOpencodeAgentOptions {
+  configuration?: ParallixConfiguration;
   prompt: string;
   worktree: string;
   env?: object;
@@ -92,11 +96,11 @@ function extractOpencodeSessionId(stdout: string) {
 // Tests can inject a canned result via __setJsonFormatSupportForTest.
 let _jsonFormatSupported: boolean | null = null;
 
-// Injectable feature-detect function for tests.  When set, checkJsonFormatSupport()
+// Injectable feature-detect function for tests.  When set, checkJsonFormatSupport(configuration)
 // calls this function instead of shelling out, making tests hermetic.
 let _jsonFormatDetectFn: (() => any) | null = null;
 
-function opencodeCommandCandidates() {
+function opencodeCommandCandidates(configuration: ParallixConfiguration) {
   const candidates: string[] = [];
   const seen = new Set<string>();
   const pushCandidate = (candidate?: string | null) => {
@@ -105,15 +109,15 @@ function opencodeCommandCandidates() {
     candidates.push(candidate);
   };
 
-  pushCandidate(process.env.OPENCODE_BIN);
+  pushCandidate(configuration.agents.opencodeBin);
   pushCandidate('opencode');
-  pushCandidate(path.join(os.homedir(), '.opencode', 'bin', 'opencode'));
-  pushCandidate(path.join(os.homedir(), '.local', 'bin', 'opencode'));
+  pushCandidate(path.join(configuration.storage.homeDirectory || os.homedir(), '.opencode', 'bin', 'opencode'));
+  pushCandidate(path.join(configuration.storage.homeDirectory || os.homedir(), '.local', 'bin', 'opencode'));
 
   return candidates;
 }
 
-function resolveExistingCommand(candidate: string) {
+function resolveExistingCommand(candidate: string, configuration: ParallixConfiguration) {
   if (!candidate) {return null;}
   if (candidate.includes(path.sep)) {
     try {
@@ -124,7 +128,7 @@ function resolveExistingCommand(candidate: string) {
     }
   }
 
-  const dirs = (process.env.PATH || '').split(path.delimiter);
+  const dirs = configuration.agents.searchPath.split(path.delimiter);
   for (const dir of dirs) {
     if (!dir) {continue;}
     const commandPath = path.join(dir, candidate);
@@ -136,9 +140,9 @@ function resolveExistingCommand(candidate: string) {
   return null;
 }
 
-function resolveOpencodeCommand() {
-  for (const candidate of opencodeCommandCandidates()) {
-    const resolved = resolveExistingCommand(candidate);
+function resolveOpencodeCommand(configuration: ParallixConfiguration = DEFAULT_CONFIGURATION) {
+  for (const candidate of opencodeCommandCandidates(configuration)) {
+    const resolved = resolveExistingCommand(candidate, configuration);
     if (resolved) {return resolved;}
   }
   return 'opencode';
@@ -149,14 +153,14 @@ function resolveOpencodeCommand() {
 // false if the flag itself is rejected ("unrecognized" / "unknown option").
 // Results are cached so the check runs at most once in production.
 // Tests can inject a canned result via __setJsonFormatSupportForTest.
-function checkJsonFormatSupport() {
+function checkJsonFormatSupport(configuration: ParallixConfiguration) {
   if (_jsonFormatSupported !== null) {return _jsonFormatSupported;}
   if (_jsonFormatDetectFn) {
     _jsonFormatSupported = _jsonFormatDetectFn();
     return _jsonFormatSupported;
   }
   try {
-    const result = spawnSync(resolveOpencodeCommand(), ['--format', 'json', '--help'], {
+    const result = spawnSync(resolveOpencodeCommand(configuration), ['--format', 'json', '--help'], {
       timeout: 3000,
       stdio: ['ignore', 'pipe', 'pipe'],
     });
@@ -176,7 +180,7 @@ function checkJsonFormatSupport() {
   }
 }
 
-function buildOpencodeInvocation({ prompt, worktree, env, resume = false, sessionId = null, model = null, preferJson = true }: BuildOpencodeInvocationOptions) {
+function buildOpencodeInvocation({ configuration = DEFAULT_CONFIGURATION, prompt, worktree, env, resume = false, sessionId = null, model = null, preferJson = true }: BuildOpencodeInvocationOptions) {
   // `--format json` makes opencode stream NDJSON events that each carry a
   // "sessionID":"ses_..." field. opencode v2.0.0's default `run` output no
   // longer prints the "Continue  opencode -s ses_..." footer, so JSON is the
@@ -186,7 +190,7 @@ function buildOpencodeInvocation({ prompt, worktree, env, resume = false, sessio
   // Compatibility guard: feature-detect the flag on first call; older opencode
   // versions that reject `--format json` will silently fall back to the legacy
   // invocation, preserving launch behaviour at the cost of telemetry.
-  const useJson = preferJson && checkJsonFormatSupport();
+  const useJson = preferJson && checkJsonFormatSupport(configuration);
   const args = ['run', '--pure', '--dangerously-skip-permissions'];
   if (useJson) {args.push('--format', 'json');}
   if (model) {args.push('-m', model);}
@@ -199,12 +203,12 @@ function buildOpencodeInvocation({ prompt, worktree, env, resume = false, sessio
   }
   args.push(prompt);
   return {
-    command: resolveOpencodeCommand(),
+    command: resolveOpencodeCommand(configuration),
     args,
     options: {
       stdio: 'inherit',
       cwd: worktree,
-      env: { ...process.env, ...env }
+      env: { ...configuration.forwardedEnvironment, ...env }
     }
   };
 }
@@ -298,7 +302,7 @@ function shouldRetryOpencodeFailure(result: any) {
   return isTransientOpencodeFailure(result);
 }
 
-function startOpencodeAgent({
+function startOpencodeAgent({ configuration = DEFAULT_CONFIGURATION,
   prompt,
   worktree,
   env,
@@ -325,7 +329,7 @@ function startOpencodeAgent({
   }
 
   function runInvocation(invocation: any) {
-    const spawnOptions = { ...invocation.options, ...teeOptions };
+    const spawnOptions = { ...invocation.options, ...teeOptions, configuration };
     return _spawnAndTee(invocation.command, invocation.args, spawnOptions);
   }
 
@@ -360,7 +364,7 @@ function startOpencodeAgent({
   async function addOpencodeTelemetry(result: any): Promise<void> {
     if (!result.sessionId) { return; }
     try {
-      const exportJson = await _captureExport(result.sessionId, { worktree, env });
+      const exportJson = await _captureExport(result.sessionId, { configuration, worktree, env });
       const telemetry = exportJson && extractOpencodeTelemetryFromExport(exportJson, model || undefined);
       if (!telemetry) { return; }
       result.telemetry = telemetry;
@@ -374,7 +378,7 @@ function startOpencodeAgent({
     // Runtime fallback: if the first invocation used --format json but the
     // binary rejected it, retry without the flag so the prompt still executes.
     if (isJsonFlagError(result) && invocation.args.includes('--format')) {
-      const legacyInv = buildOpencodeInvocation({
+      const legacyInv = buildOpencodeInvocation({ configuration,
         prompt: injectedPrompt, worktree, env, resume, sessionId, model, preferJson: false,
       });
       result = await runInvocationWithRetry(legacyInv);
@@ -394,13 +398,13 @@ function startOpencodeAgent({
         }
         await port.delete(slug, role);
       } catch (error) { throw error; }
-      const freshInv = buildOpencodeInvocation({ prompt: injectedPrompt, worktree, env, resume: false, sessionId: null, model });
+      const freshInv = buildOpencodeInvocation({ configuration, prompt: injectedPrompt, worktree, env, resume: false, sessionId: null, model });
       result = await runWithJsonFallback(freshInv);
     }
     return processResult(result);
   }
 
-  const invocation = buildOpencodeInvocation({ prompt: injectedPrompt, worktree, env, resume, sessionId, model });
+  const invocation = buildOpencodeInvocation({ configuration, prompt: injectedPrompt, worktree, env, resume, sessionId, model });
   const resultPromise = staleSessionHandler(invocation);
 
   return { invocation, resultPromise };

@@ -1,6 +1,7 @@
 // @ts-nocheck -- TASK-2328: partial test doubles from ESM seam migration; resolve in follow-up
 
 
+import { resolveConfiguration } from '../../../src/composition/config.js';
 import test, { mock } from 'node:test';
 import assert from 'node:assert/strict';
 import { childProcessDouble } from '../../fixtures/child-process-double.js';
@@ -21,14 +22,14 @@ test('captureOpencodeExport returns the full stdout JSON on clean exit', async (
   const spawn = (cmd, args, opts) => {
     return realSpawn('node', ['-e', 'process.stdout.write(Buffer.from(process.argv[1], "base64"))', encoded], opts);
   };
-  const result = await captureOpencodeExport('ses_x', { spawn });
+  const result = await captureOpencodeExport('ses_x', { configuration: resolveConfiguration(process.env), spawn });
   assert.equal(result, expected);
 });
 
 test('captureOpencodeExport times out and kills a non-exiting export child', async () => {
   const child = childProcessDouble();
   const spawn = () => child;
-  const result = await captureOpencodeExport('ses_hang', { spawn, timeoutMs: 50 });
+  const result = await captureOpencodeExport('ses_hang', { configuration: resolveConfiguration(process.env), spawn, timeoutMs: 50 });
   assert.equal(result, null, 'must degrade to null, not hang');
   assert.equal(child.killed, true, 'hung export child must be killed');
 });
@@ -37,22 +38,22 @@ test('captureOpencodeExport fails explicitly when output exceeds maxBytes', asyn
   const spawn = (cmd, args, opts) => {
     return realSpawn('node', ['-e', 'process.stdout.write(Buffer.alloc(200, "{").toString())'], opts);
   };
-  const result = await captureOpencodeExport('ses_big', { spawn, maxBytes: 100, timeoutMs: 1000 });
+  const result = await captureOpencodeExport('ses_big', { configuration: resolveConfiguration(process.env), spawn, maxBytes: 100, timeoutMs: 1000 });
   assert.equal(result, null, 'oversize export must fail explicitly, not truncate');
 });
 
 test('captureOpencodeExport resolves null when spawn throws', async () => {
   const spawn = () => { throw new Error('opencode not found'); };
-  assert.equal(await captureOpencodeExport('ses_x', { spawn }), null);
+  assert.equal(await captureOpencodeExport('ses_x', { configuration: resolveConfiguration(process.env), spawn }), null);
 });
 
 test('captureOpencodeExport removes its owned temporary directory after launch error and timeout', async () => {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'opencode-export-cleanup-'));
   try {
-    assert.equal(await captureOpencodeExport('ses_launch', { tmpDir, spawn: () => { throw new Error('ENOENT'); } }), null);
+    assert.equal(await captureOpencodeExport('ses_launch', { configuration: resolveConfiguration(process.env), tmpDir, spawn: () => { throw new Error('ENOENT'); } }), null);
     assert.deepEqual(fs.readdirSync(tmpDir), []);
     const child = childProcessDouble();
-    assert.equal(await captureOpencodeExport('ses_timeout', { tmpDir, timeoutMs: 20, spawn: () => child }), null);
+    assert.equal(await captureOpencodeExport('ses_timeout', { configuration: resolveConfiguration(process.env), tmpDir, timeoutMs: 20, spawn: () => child }), null);
     assert.deepEqual(fs.readdirSync(tmpDir), []);
   } finally {
     fs.rmSync(tmpDir, { recursive: true, force: true });
@@ -64,7 +65,7 @@ test('captureOpencodeExport retains only its owned temporary directory when opte
   const operatorFile = path.join(tmpDir, 'operator.log');
   fs.writeFileSync(operatorFile, 'keep');
   try {
-    const result = await captureOpencodeExport('ses_keep', {
+    const result = await captureOpencodeExport('ses_keep', { configuration: resolveConfiguration(process.env),
       tmpDir,
       retainTemp: true,
       spawn: (cmd, args, opts) => realSpawn('node', ['-e', 'process.stdout.write("{}")'], opts)
@@ -82,13 +83,13 @@ test('captureOpencodeExport retains only its owned temporary directory when opte
 test('captureOpencodeExport resolves null on child error event', async () => {
   const child = childProcessDouble();
   const spawn = () => child;
-  const p = captureOpencodeExport('ses_x', { spawn });
+  const p = captureOpencodeExport('ses_x', { configuration: resolveConfiguration(process.env), spawn });
   child.emit('error', new Error('spawn ENOENT'));
   assert.equal(await p, null);
 });
 
 test('captureOpencodeExport returns null for missing session id', async () => {
-  assert.equal(await captureOpencodeExport('', { spawn: () => childProcessDouble() }), null);
+  assert.equal(await captureOpencodeExport('', { configuration: resolveConfiguration(process.env), spawn: () => childProcessDouble() }), null);
 });
 
 test('captureOpencodeExport captures full output with large payloads (regression for pipe-buffer truncation)', async () => {
@@ -112,7 +113,7 @@ test('captureOpencodeExport captures full output with large payloads (regression
     return realSpawn('node', ['-e', spawnCode], opts);
   };
 
-  const result = await captureOpencodeExport('ses_large', { spawn, timeoutMs: 30000 });
+  const result = await captureOpencodeExport('ses_large', { configuration: resolveConfiguration(process.env), spawn, timeoutMs: 30000 });
   assert.equal(result, largePayload, 'full large payload must be captured without truncation');
   assert.equal(result.length, largePayload.length, 'byte count must match original');
   assert.doesNotThrow(() => JSON.parse(result), 'captured output must be valid JSON');

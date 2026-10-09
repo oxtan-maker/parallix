@@ -25,13 +25,13 @@ export function createStatsMissionFlowReader(options: StatsCompositionOptions): 
     try {
       const repos = options.laneEventRepo && options.usageRepo
         ? { laneEventRepo: options.laneEventRepo, usageRepo: options.usageRepo }
-        : await resolveOperatorRepositories();
+        : await resolveOperatorRepositories(options.configuration);
       const repo = options.repositoryId ?? resolveCanonicalRepositoryId(options.rootDir ?? process.cwd());
       const cohortMetadata = options.cohortMetadata ?? (async () => {
         if (options.missionStore?.loadByRepository) { return missionCohortMetadata(await options.missionStore.loadByRepository(repo)); }
         const { initOperatorState } = await import('../adapters/sqlite/adapter-factory.js');
         const { SqliteMissionStore } = await import('../adapters/sqlite/mission-store.js');
-        const { db } = await initOperatorState();
+        const { db } = await initOperatorState({ configuration: options.configuration });
         return missionCohortMetadata(await new SqliteMissionStore(db).loadByRepository(repo));
       });
       const reader = new ConcreteMetricsReadAdapter({ ...repos, repositoryId: repositoryId(String(repo)), cohortMetadata });
@@ -47,10 +47,10 @@ export function createStatsMissionFlowReader(options: StatsCompositionOptions): 
 /** CLI arguments/presentation and bound storage capabilities are assembled here. */
 export function createStatisticsCommand(options: StatsCompositionOptions = {}) {
   const useCase = new StatsCommandUseCase({ ...createStatsWorkflowAdapter({
-    rootDir: options.rootDir, store: options.store, dbPath: options.dbPath,
+    configuration: options.configuration, rootDir: options.rootDir, store: options.store, dbPath: options.dbPath,
     readMissionFlow: options.readMissionFlow ?? createStatsMissionFlowReader(options),
   }), loadClassifierStatistics: async () => {
-    try { return await (await createClassifierStatisticsReader(options.rootDir ?? process.cwd())).read(); }
+    try { return await (await createClassifierStatisticsReader(options.rootDir ?? process.cwd(), options.configuration)).read(); }
     catch { return null; }
   } });
   return createStatsCommand(useCase, {

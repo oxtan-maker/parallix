@@ -1,3 +1,4 @@
+import { resolveConfiguration } from '../../../../src/composition/config.js';
 // Regression provenance: TASK-2461.
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -241,7 +242,7 @@ test('a silent sub-agent reports progress; a relayed one is not narrated twice',
 test('the progress indicator names the current activity', () => {
   let clock = 0;
   const sink = captureSink(true);
-  const view = new ClaudeStreamView(sink, { idleMs: 10, now: () => clock, clearWidth: 8 }, { NO_COLOR: '1' });
+  const view = new ClaudeStreamView(sink, { idleMs: 10, now: () => clock, clearWidth: 8 }, resolveConfiguration({ NO_COLOR: '1' }));
 
   view.render(normalizeAll(JSON.stringify({ type: 'system', subtype: 'thinking_tokens', estimated_tokens: 148 }) + '\n'));
   clock = 1000;
@@ -344,7 +345,7 @@ function renderFixture(
   { isTTY = false, env = { NO_COLOR: '1' } as NodeJS.ProcessEnv } = {},
 ): string {
   const sink = captureSink(isTTY);
-  const view = new ClaudeStreamView(sink, {}, env);
+  const view = new ClaudeStreamView(sink, {}, resolveConfiguration(env));
   view.render(normalizeAll(stream));
   view.end();
   return sink.text;
@@ -390,14 +391,14 @@ test('NO_COLOR suppresses ANSI escapes even on a TTY sink', () => {
   assert.ok(colored.includes('\x1b['), 'a TTY sink is coloured by default');
   const plain = renderFixture(CLAUDE_STREAM_FIXTURE, { isTTY: true, env: { NO_COLOR: '1' } });
   assert.ok(!plain.includes('\x1b['), 'NO_COLOR wins over the TTY sink');
-  assert.equal(colorEnabled({ write: () => {}, isTTY: true }, { FORCE_COLOR: '0' }), false);
-  assert.equal(colorEnabled({ write: () => {}, isTTY: false }, { FORCE_COLOR: '1' }), true);
+  assert.equal(colorEnabled({ write: () => {}, isTTY: true }, resolveConfiguration({ FORCE_COLOR: '0' })), false);
+  assert.equal(colorEnabled({ write: () => {}, isTTY: false }, resolveConfiguration({ FORCE_COLOR: '1' })), true);
 });
 
 test('idle progress indicator is emitted on a TTY and cleared before the next line', () => {
   const sink = captureSink(true);
   let clock = 0;
-  const view = new ClaudeStreamView(sink, { idleMs: 100, now: () => clock, clearWidth: 8 }, { NO_COLOR: '1' });
+  const view = new ClaudeStreamView(sink, { idleMs: 100, now: () => clock, clearWidth: 8 }, resolveConfiguration({ NO_COLOR: '1' }));
 
   view.tick();
   assert.equal(sink.text, '', 'no indicator before the idle threshold');
@@ -418,10 +419,10 @@ test('idle progress indicator is emitted on a TTY and cleared before the next li
 test('renderer output is identical for one-chunk and byte-split fixture streams', () => {
   const whole = captureSink();
   const split = captureSink();
-  const wholeView = new ClaudeStreamView(whole, {}, { NO_COLOR: '1' });
+  const wholeView = new ClaudeStreamView(whole, {}, resolveConfiguration({ NO_COLOR: '1' }));
   wholeView.render(normalizeAll(CLAUDE_STREAM_FIXTURE));
   wholeView.end();
-  const splitView = new ClaudeStreamView(split, {}, { NO_COLOR: '1' });
+  const splitView = new ClaudeStreamView(split, {}, resolveConfiguration({ NO_COLOR: '1' }));
   splitView.render(normalizeAll(CLAUDE_STREAM_FIXTURE, 1));
   splitView.end();
   assert.equal(split.text, whole.text);
@@ -446,7 +447,7 @@ function teeThrough(stream: string, sink: { write(_chunk: Buffer): unknown } | n
 
 test('telemetry from the fixture is identical with and without the renderer sink', () => {
   const terminal = captureSink();
-  const rendered = createClaudeRenderSink(terminal, {}, { NO_COLOR: '1' });
+  const rendered = createClaudeRenderSink(terminal, {}, resolveConfiguration({ NO_COLOR: '1' }));
   const withRenderer = teeThrough(CLAUDE_STREAM_FIXTURE, rendered);
   rendered.close();
   const withoutRenderer = teeThrough(CLAUDE_STREAM_FIXTURE, null);
@@ -466,19 +467,19 @@ test('telemetry from the fixture is identical with and without the renderer sink
 
 test('the raw-stream escape hatch writes the unmodified stream to the terminal sink', () => {
   const terminal = captureSink();
-  const raw = createClaudeRenderSink(terminal, {}, { [RAW_STREAM_ENV]: '1' });
+  const raw = createClaudeRenderSink(terminal, {}, resolveConfiguration({ [RAW_STREAM_ENV]: '1' }));
   teeThrough(CLAUDE_STREAM_FIXTURE, raw, 17);
   raw.close();
   assert.equal(terminal.text, CLAUDE_STREAM_FIXTURE, 'raw mode is a verbatim passthrough');
 
-  assert.equal(rawStreamRequested({ [RAW_STREAM_ENV]: '1' }), true);
-  assert.equal(rawStreamRequested({ [RAW_STREAM_ENV]: '0' }), false);
-  assert.equal(rawStreamRequested({}), false);
+  assert.equal(rawStreamRequested(resolveConfiguration({ [RAW_STREAM_ENV]: '1' })), true);
+  assert.equal(rawStreamRequested(resolveConfiguration({ [RAW_STREAM_ENV]: '0' })), false);
+  assert.equal(rawStreamRequested(resolveConfiguration({})), false);
 });
 
 test('the render sink renders a chunk-split stream exactly once', () => {
   const perByte = captureSink();
-  const sink = createClaudeRenderSink(perByte, {}, { NO_COLOR: '1' });
+  const sink = createClaudeRenderSink(perByte, {}, resolveConfiguration({ NO_COLOR: '1' }));
   teeThrough(CLAUDE_STREAM_FIXTURE, sink, 1);
   sink.close();
   assert.equal(perByte.text, renderFixture(), 'byte-split input renders like a single write');

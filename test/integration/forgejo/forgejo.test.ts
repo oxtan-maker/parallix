@@ -2,6 +2,7 @@
 
 
 
+import { resolveConfiguration } from '../../../src/composition/config.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import EventEmitter from 'events';
@@ -100,9 +101,9 @@ test('resolveTokenFile discovers Forgejo tokens from sibling feature-branch work
 
     process.chdir(sandboxRoot);
 
-    assert.equal(resolveForgejoHome(missionRoot), path.join(featureRoot, '.forgejo-local'));
-    assert.equal(resolveTokenFile('custom', missionRoot), tokenPath);
-    assert.equal(readToken('custom', missionRoot), 'feature-token');
+    assert.equal(resolveForgejoHome(missionRoot, resolveConfiguration(process.env)), path.join(featureRoot, '.forgejo-local'));
+    assert.equal(resolveTokenFile('custom', missionRoot, resolveConfiguration(process.env)), tokenPath);
+    assert.equal(readToken('custom', missionRoot, resolveConfiguration(process.env)), 'feature-token');
   } finally {
     process.chdir(previousCwd);
     if (previousTestContext !== undefined) process.env.NODE_TEST_CONTEXT = previousTestContext;
@@ -129,7 +130,7 @@ test('authenticatedReviewUrl uses the configured standalone review repo', () => 
 
     const baseUrl = process.env.FORGEJO_URL || 'http://localhost:3300';
     assert.equal(
-      authenticatedReviewUrl('claude', 'token-123', root),
+      authenticatedReviewUrl('claude', 'token-123', root, resolveConfiguration(process.env)),
       `http://claude:token-123@${baseUrl.replace(/^https?:\/\//, '')}/magnus/testproj.git`
     );
   } finally {
@@ -171,7 +172,7 @@ test('createPr uses configured primaryBranch and configured Forgejo repo', () =>
       return { ok: false, data: null };
     });
 
-    const result = createPr('mission/task-200', 'claude', 'token-123', { rootDir: root, apiCall, log: () => {}, forceWithLease: true });
+    const result = createPr('mission/task-200', 'claude', 'token-123', { configuration: resolveConfiguration(process.env), rootDir: root, apiCall, log: () => {}, forceWithLease: true });
     assert.equal(result.ok, true);
     const baseUrl = process.env.FORGEJO_URL || 'http://localhost:3300';
     assert.ok(gitCalls.some(args => args.includes(`http://claude:token-123@${baseUrl.replace(/^https?:\/\//, '')}/magnus/testproj.git`)));
@@ -209,7 +210,7 @@ test('createPr rejects a verification proof from a different checkout before syn
       return { ok: false, data: null };
     });
 
-    const result = createPr('mission/task-200', 'claude', 'token-123', {
+    const result = createPr('mission/task-200', 'claude', 'token-123', { configuration: resolveConfiguration(process.env),
       rootDir: root,
       apiCall,
       log: () => {},
@@ -243,7 +244,7 @@ test('createPr rejects a verification proof for a different branch before any pu
       if (args.includes('push')) { pushed = true; }
       return { status: 0, stdout: '', stderr: '' };
     });
-    const result = createPr('mission/task-200', 'claude', 'token-123', {
+    const result = createPr('mission/task-200', 'claude', 'token-123', { configuration: resolveConfiguration(process.env),
       rootDir: root,
       log: () => {},
       captureVerifiedTreeProofFn: () => ({ ok: true, proof: { rootDir: path.resolve(root), branch: 'mission/task-201', commit: 'abc', tree: 'tree' } })
@@ -283,7 +284,7 @@ test('standalone createPr refuses to publish when the configured verification ga
       throw new Error('Forgejo API should not be called when verification gate fails');
     });
 
-    const result = createPr('mission/task-200', 'claude', 'token-123', {
+    const result = createPr('mission/task-200', 'claude', 'token-123', { configuration: resolveConfiguration(process.env),
       rootDir: root,
       apiCall,
       log: () => {},
@@ -341,7 +342,7 @@ test('createPr uses the implementer token for PR APIs and the repo-owner token f
       return { ok: false, data: { message: 'The target could not be found.' }, statusCode: 404 };
     });
 
-    const result = createPr('mission/task-200', 'claude', 'reviewer-token', { rootDir: root, apiCall, log: () => {}, forceWithLease: true });
+    const result = createPr('mission/task-200', 'claude', 'reviewer-token', { configuration: resolveConfiguration(process.env), rootDir: root, apiCall, log: () => {}, forceWithLease: true });
     assert.equal(result.ok, true);
     assert.ok(apiCalls.some(call => call.token === 'reviewer-token' && call.method === 'GET' && call.apiPath.includes('/pulls?state=open')));
     assert.ok(apiCalls.some(call => call.token === 'reviewer-token' && call.method === 'POST' && call.apiPath === '/pulls'));
@@ -391,7 +392,7 @@ test('createPr falls back to the repo-owner token for PR lookup when the impleme
       return { ok: false, data: { message: 'unexpected' }, statusCode: 404 };
     });
 
-    const result = createPr('mission/task-200', 'claude', 'reviewer-token', { rootDir: root, apiCall, log: () => {}, forceWithLease: true });
+    const result = createPr('mission/task-200', 'claude', 'reviewer-token', { configuration: resolveConfiguration(process.env), rootDir: root, apiCall, log: () => {}, forceWithLease: true });
     assert.equal(result.ok, true);
     assert.equal(result.prNumber, 9);
     assert.ok(apiCalls.some(call => call.token === 'reviewer-token' && call.method === 'GET' && call.apiPath.includes('/pulls?state=open')));
@@ -433,7 +434,7 @@ test('createPr always calls syncPrimaryBaseline even when PR already exists', (t
     return { ok: false };
   });
 
-  const result = createPr(branch, user, token, { rootDir, apiCall, log: () => {} });
+  const result = createPr(branch, user, token, { configuration: resolveConfiguration(process.env), rootDir, apiCall, log: () => {} });
   assert.strictEqual(result.ok, true);
   assert.strictEqual(result.prNumber, 32);
   assert.strictEqual(syncCalled, true, 'syncPrimaryBaseline should be called');
@@ -468,7 +469,7 @@ test('createPr calls syncPrimaryBaseline when PR does not exist', (t) => {
     return { ok: false };
   });
 
-  const result = createPr(branch, user, token, { rootDir, apiCall, log: () => {} });
+  const result = createPr(branch, user, token, { configuration: resolveConfiguration(process.env), rootDir, apiCall, log: () => {} });
   assert.strictEqual(result.ok, true);
   assert.strictEqual(result.prNumber, 33);
   assert.strictEqual(syncCalled, true);
@@ -500,7 +501,7 @@ test('createPr uses --force-with-lease flag when force: true is specified', (t) 
     return { ok: false };
   });
 
-  const result = createPr(branch, user, token, { rootDir, apiCall, log: () => {}, force: true });
+  const result = createPr(branch, user, token, { configuration: resolveConfiguration(process.env), rootDir, apiCall, log: () => {}, force: true });
   assert.strictEqual(result.ok, true);
   assert.strictEqual(forceFlagUsed, true, 'git push should include --force-with-lease flag');
 });
@@ -532,7 +533,7 @@ test('createPr uses explicit force-with-lease sha when forceWithLease is true', 
     return { ok: false };
   });
 
-  const result = createPr(branch, user, token, { rootDir, apiCall, log: () => {}, forceWithLease: true });
+  const result = createPr(branch, user, token, { configuration: resolveConfiguration(process.env), rootDir, apiCall, log: () => {}, forceWithLease: true });
   assert.strictEqual(result.ok, true);
   assert.ok(
     pushArgs.includes(`--force-with-lease=refs/heads/${branch}:abc123`),
@@ -567,7 +568,7 @@ test('createPr fails when review tracking ref is unavailable and origin is no lo
     return { ok: false };
   });
 
-  const result = createPr(branch, user, token, { rootDir, apiCall, log: () => {}, forceWithLease: true });
+  const result = createPr(branch, user, token, { configuration: resolveConfiguration(process.env), rootDir, apiCall, log: () => {}, forceWithLease: true });
   assert.strictEqual(result.ok, false, 'createPr should fail when no tracking ref is available');
   assert.ok(result.error.includes('could not resolve tracking ref'), 'error should mention unresolved tracking ref');
 });
@@ -608,7 +609,7 @@ test('createPr uses a plain push when the branch is absent from the review remot
     return { ok: false };
   });
 
-  const result = createPr(branch, user, token, { rootDir, apiCall, log: () => {}, forceWithLease: true });
+  const result = createPr(branch, user, token, { configuration: resolveConfiguration(process.env), rootDir, apiCall, log: () => {}, forceWithLease: true });
   assert.strictEqual(result.ok, true);
   assert.ok(pushArgs, 'a git push should be attempted');
   assert.ok(pushArgs.includes(branch), 'push should target the mission branch');
@@ -646,7 +647,7 @@ test('createPr aborts without pushing when the tracking-ref fetch fails for a no
 
   const apiCall = mock.fn(() => ({ ok: false }));
 
-  const result = createPr(branch, user, token, { rootDir, apiCall, log: () => {}, forceWithLease: true });
+  const result = createPr(branch, user, token, { configuration: resolveConfiguration(process.env), rootDir, apiCall, log: () => {}, forceWithLease: true });
   assert.strictEqual(result.ok, false);
   assert.ok(result.error && /fetch tracking ref/.test(result.error), 'error should explain the failed tracking-ref fetch');
   assert.strictEqual(pushAttempted, false, 'a non-not-found fetch failure must abort before pushing');
@@ -672,7 +673,7 @@ test('getPrStatus returns PR details when PR exists', () => {
     return { ok: false };
   });
 
-  const pr = getPrStatus('mission/task-081', '/tmp', { token: 'fake-token', apiCall });
+  const pr = getPrStatus('mission/task-081', '/tmp', { configuration: resolveConfiguration(process.env), token: 'fake-token', apiCall });
   assert.equal(pr.exists, true);
   assert.equal(pr.number, 41);
   assert.equal(pr.state, 'open');
@@ -694,7 +695,7 @@ test('getComments returns null when the comment APIs fail', async () => {
     return { ok: false, data: null };
   });
 
-  const comments = await getComments('mission/task-121', 'fake-token', {
+  const comments = await getComments('mission/task-121', 'fake-token', { configuration: resolveConfiguration(process.env),
     apiCall,
     log: message => logs.push(message)
   });
@@ -718,7 +719,7 @@ test('getComments failure path works with the production default logger', async 
     return { ok: false, data: null };
   });
 
-  const comments = await getComments('mission/task-121', 'fake-token', { apiCall });
+  const comments = await getComments('mission/task-121', 'fake-token', { configuration: resolveConfiguration(process.env), apiCall });
 
   assert.equal(comments, null);
 });
@@ -744,7 +745,7 @@ assignee: [custom]
 
   try {
     const calls = [];
-    const comments = await getComments('mission/task-204', 'codex-token', {
+    const comments = await getComments('mission/task-204', 'codex-token', { configuration: resolveConfiguration(process.env),
       apiCall(method, apiPath, token) {
         calls.push({ method, apiPath, token });
         if (method === 'GET' && apiPath.includes('/pulls?state=open')) {
@@ -784,7 +785,7 @@ assignee: [custom]
 });
 
 test('getComments preserves provider identities and review context for reconciliation', async () => {
-  const comments = await getComments('mission/task-2641', 'token', {
+  const comments = await getComments('mission/task-2641', 'token', { configuration: resolveConfiguration(process.env),
     apiCall(method, apiPath) {
       if (method === 'GET' && apiPath.includes('/pulls?state=open')) {
         return { ok: true, data: [{ number: 2641, head: { ref: 'mission/task-2641' } }] };
@@ -813,8 +814,8 @@ test('resolveForgejoUser defaults to human when FORGEJO_USER is unset', () => {
   const previous = process.env.FORGEJO_USER;
   delete process.env.FORGEJO_USER;
   try {
-    assert.equal(resolveForgejoUser(), 'human');
-    assert.equal(resolveForgejoUser('codex'), 'codex');
+    assert.equal(resolveForgejoUser(undefined, resolveConfiguration(process.env)), 'human');
+    assert.equal(resolveForgejoUser('codex', resolveConfiguration(process.env)), 'codex');
   } finally {
     if (previous === undefined) delete process.env.FORGEJO_USER;
     else process.env.FORGEJO_USER = previous;
@@ -842,7 +843,7 @@ assignee: [custom]
 
   try {
     const calls = [];
-    const decision = getLatestReviewDecision('mission/task-205', {
+    const decision = getLatestReviewDecision('mission/task-205', { configuration: resolveConfiguration(process.env),
       token: 'codex-token',
       apiCall(method, apiPath, token) {
         calls.push({ method, apiPath, token });
@@ -893,7 +894,7 @@ test('getPrStatus and syncMerged share the same FORGEJO_USER fallback contract',
 
   try {
     const statusCalls = [];
-    const pr = getPrStatus('mission/task-081', '/tmp', {
+    const pr = getPrStatus('mission/task-081', '/tmp', { configuration: resolveConfiguration(process.env),
       apiCall(method, apiPath, token) {
         statusCalls.push({ method, apiPath, token });
         if (method === 'GET' && apiPath.includes('/pulls?state=all')) {
@@ -912,7 +913,7 @@ test('getPrStatus and syncMerged share the same FORGEJO_USER fallback contract',
     assert.ok(statusCalls.every(call => call.token === 'fallback-token'));
 
     const mergeCalls = [];
-    const merged = syncMerged('mission/task-081', 'abc123', {
+    const merged = syncMerged('mission/task-081', 'abc123', { configuration: resolveConfiguration(process.env),
       resolvePrNumber(branch, token) {
         mergeCalls.push({ type: 'resolve-pr', token });
         return 41;
@@ -956,7 +957,7 @@ test('getPrStatus and syncMerged share the same FORGEJO_USER fallback contract',
 test('getPrStatus reports missing PRs without throwing', () => {
   const apiCall = mock.fn(() => ({ ok: true, data: [] }));
 
-  const pr = getPrStatus('mission/task-081', '/tmp', { token: 'fake-token', apiCall });
+  const pr = getPrStatus('mission/task-081', '/tmp', { configuration: resolveConfiguration(process.env), token: 'fake-token', apiCall });
   assert.equal(pr.exists, false);
   assert.match(pr.raw, /no PR found/i);
 });
@@ -972,7 +973,7 @@ test('getPrStatus surfaces sandbox guidance when PR detail API is unavailable', 
     return { ok: false };
   });
 
-  const pr = getPrStatus('mission/task-104', '/tmp', {
+  const pr = getPrStatus('mission/task-104', '/tmp', { configuration: resolveConfiguration(process.env),
     token: 'fake-token',
     apiCall
   });
@@ -990,7 +991,7 @@ test('getPrStatus surfaces Forgejo authentication failures clearly', () => {
     statusCode: 401,
   }));
 
-  const pr = getPrStatus('mission/task-104', '/tmp', {
+  const pr = getPrStatus('mission/task-104', '/tmp', { configuration: resolveConfiguration(process.env),
     token: 'fake-token',
     apiCall,
   });
@@ -1002,7 +1003,7 @@ test('getPrStatus surfaces Forgejo authentication failures clearly', () => {
 
 test('syncMerged pushes landed commit, marks PR merged, and deletes the remote branch', () => {
   const calls = [];
-  const result = syncMerged('mission/task-097', 'abc123', {
+  const result = syncMerged('mission/task-097', 'abc123', { configuration: resolveConfiguration(process.env),
     token: 'test-token',
     resolvePrNumber(branch, token) {
       calls.push({ type: 'resolve-pr', branch, token });
@@ -1063,7 +1064,7 @@ test('syncMerged pushes landed commit, marks PR merged, and deletes the remote b
 
 test('syncMerged pushes the landed commit to the recorded base branch for feature-branch missions', () => {
   const calls = [];
-  const result = syncMerged('mission/task-097', 'abc123', {
+  const result = syncMerged('mission/task-097', 'abc123', { configuration: resolveConfiguration(process.env),
     token: 'test-token',
     baseBranch: 'skunkworks',
     resolvePrNumber() {
@@ -1107,7 +1108,7 @@ test('syncMerged pushes the landed commit to the recorded base branch for featur
 
 test('syncMerged continues when main push fails but review main already contains landed commit', () => {
   const calls = [];
-  const result = syncMerged('mission/task-1062', 'abc123', {
+  const result = syncMerged('mission/task-1062', 'abc123', { configuration: resolveConfiguration(process.env),
     token: 'test-token',
     resolvePrNumber(branch, token) {
       calls.push({ type: 'resolve-pr', branch, token });
@@ -1177,7 +1178,7 @@ test('syncMerged continues when main push fails but review main already contains
 test('syncMerged recovers from stale-info branch push rejection by fetching and retrying', () => {
   const calls = [];
   let branchPushAttempts = 0;
-  const result = syncMerged('mission/task-1062', 'abc123', {
+  const result = syncMerged('mission/task-1062', 'abc123', { configuration: resolveConfiguration(process.env),
     token: 'test-token',
     resolvePrNumber(branch, token) {
       calls.push({ type: 'resolve-pr', branch, token });
@@ -1246,7 +1247,7 @@ test('syncMerged recovers from stale-info branch push rejection by fetching and 
 
 test('syncMerged falls back to force push when stale-info persists after fetch retry', () => {
   const calls = [];
-  const result = syncMerged('mission/task-1062', 'abc123', {
+  const result = syncMerged('mission/task-1062', 'abc123', { configuration: resolveConfiguration(process.env),
     token: 'test-token',
     resolvePrNumber() {
       return 1062;
@@ -1298,7 +1299,7 @@ test('syncMerged falls back to force push when stale-info persists after fetch r
 
 test('syncMerged does not treat unrelated stale output as stale-info branch rejection', () => {
   const calls = [];
-  const result = syncMerged('mission/task-1062', 'abc123', {
+  const result = syncMerged('mission/task-1062', 'abc123', { configuration: resolveConfiguration(process.env),
     token: 'test-token',
     resolvePrNumber() {
       return 1062;
@@ -1346,7 +1347,7 @@ test('syncMerged does not treat unrelated stale output as stale-info branch reje
 });
 
 test('syncMerged fails cleanly when the landed commit does not exist locally', () => {
-  const result = syncMerged('mission/task-097', 'deadbeef', {
+  const result = syncMerged('mission/task-097', 'deadbeef', { configuration: resolveConfiguration(process.env),
     token: 'test-token',
     resolvePrNumber() {
       return 97;
@@ -1371,7 +1372,7 @@ test('syncMerged fails cleanly when the landed commit does not exist locally', (
 
 test('getPrNumber follows pagination until it finds the matching branch', () => {
   const calls = [];
-  const prNumber = getPrNumber('mission/task-097', 'test-token', {
+  const prNumber = getPrNumber('mission/task-097', 'test-token', { configuration: resolveConfiguration(process.env),
     apiCall(method, apiPath, token) {
       calls.push({ method, apiPath, token });
       if (apiPath.includes('state=open')) {
@@ -1446,7 +1447,7 @@ test('getLatestReviewDecision returns the latest formal review state for the bra
   const previousUser = process.env.FORGEJO_USER;
   process.env.FORGEJO_USER = 'human';
   try {
-    const decision = getLatestReviewDecision('mission/task-097', {
+    const decision = getLatestReviewDecision('mission/task-097', { configuration: resolveConfiguration(process.env),
       token: 'test-token',
       apiCall(method, apiPath, token) {
         if (apiPath.includes('/pulls?state=')) {
@@ -1492,7 +1493,7 @@ test('getLatestReviewDecision rejects an older default-user approval after a lat
   const previousUser = process.env.FORGEJO_USER;
   process.env.FORGEJO_USER = 'human';
   try {
-    const decision = getLatestReviewDecision('mission/task-097', {
+    const decision = getLatestReviewDecision('mission/task-097', { configuration: resolveConfiguration(process.env),
       token: 'test-token',
       apiCall(method, apiPath, token) {
         if (apiPath.includes('/pulls?state=')) {
@@ -1537,7 +1538,7 @@ test('getLatestReviewDecision returns defaultUserApproved false when default use
   const previousUser = process.env.FORGEJO_USER;
   process.env.FORGEJO_USER = 'human';
   try {
-    const decision = getLatestReviewDecision('mission/task-097', {
+    const decision = getLatestReviewDecision('mission/task-097', { configuration: resolveConfiguration(process.env),
       token: 'test-token',
       apiCall(method, apiPath, token) {
         if (apiPath.includes('/pulls?state=')) {
@@ -1586,7 +1587,7 @@ test('getLatestReviewDecision ignores a default-user approval superseded by the 
   const previousUser = process.env.FORGEJO_USER;
   process.env.FORGEJO_USER = 'human';
   try {
-    const decision = getLatestReviewDecision('mission/task-097', {
+    const decision = getLatestReviewDecision('mission/task-097', { configuration: resolveConfiguration(process.env),
       token: 'test-token',
       apiCall(method, apiPath, token) {
         if (apiPath.includes('/pulls?state=')) {
@@ -1629,7 +1630,7 @@ test('getLatestReviewDecision ignores a default-user approval superseded by the 
 
 test('syncMerged treats 409 Conflict as success if commits match (already merged)', () => {
   const calls = [];
-  const result = syncMerged('mission/task-101', 'abc123', {
+  const result = syncMerged('mission/task-101', 'abc123', { configuration: resolveConfiguration(process.env),
     token: 'test-token',
     resolvePrNumber(branch, token) {
       return 101;
@@ -1671,7 +1672,7 @@ test('syncMerged treats 409 Conflict as success if commits match (already merged
 
 test('syncMerged treats 405 Method Not Allowed as success if commits match (already merged)', () => {
   const calls = [];
-  const result = syncMerged('mission/task-101', 'abc123', {
+  const result = syncMerged('mission/task-101', 'abc123', { configuration: resolveConfiguration(process.env),
     token: 'test-token',
     resolvePrNumber(branch, token) {
       return 101;
@@ -1712,7 +1713,7 @@ test('syncMerged treats 405 Method Not Allowed as success if commits match (alre
 });
 
 test('syncMerged fails on 409 Conflict if commits do NOT match', () => {
-  const result = syncMerged('mission/task-101', 'abc123', {
+  const result = syncMerged('mission/task-101', 'abc123', { configuration: resolveConfiguration(process.env),
     token: 'test-token',
     resolvePrNumber(branch, token) {
       return 101;
@@ -1756,7 +1757,7 @@ test('forgejoAvailable returns true when Forgejo is reachable', async () => {
     process.nextTick(() => req._onResponse({ statusCode: 200 }));
   });
 
-  const result = await forgejoAvailable('http://localhost:3300', {
+  const result = await forgejoAvailable('http://localhost:3300', { configuration: resolveConfiguration(process.env),
     request(url, options, onResponse) {
       assert.equal(String(url), 'http://localhost:3300/');
       assert.equal(options.method, 'GET');
@@ -1777,7 +1778,7 @@ test('forgejoAvailable returns false when Forgejo is unreachable', async () => {
     process.nextTick(() => req.emit('error', new Error('ECONNREFUSED')));
   });
 
-  const result = await forgejoAvailable('http://127.0.0.1:3301', {
+  const result = await forgejoAvailable('http://127.0.0.1:3301', { configuration: resolveConfiguration(process.env),
     request(url, options, onResponse) {
       assert.equal(String(url), 'http://127.0.0.1:3301/');
       assert.equal(options.timeout, 5000);
@@ -1803,7 +1804,7 @@ test('postReview includes commit_id', () => {
     return { ok: true };
   });
 
-  postReview('mission/task-001', 'fake-token', 'approve', 'LGTM', { apiCall });
+  postReview('mission/task-001', 'fake-token', 'approve', 'LGTM', { configuration: resolveConfiguration(process.env), apiCall });
 
   const postCall = calls.find(c => c.method === 'POST');
   assert.ok(postCall, 'Should have made a POST call');
@@ -1819,7 +1820,7 @@ test('classifier publication uses its own identity and rejects a different PR re
       if (method === 'POST') { posts.push(body); }
       return { ok: true, data: { head: { sha: head } } };
     };
-    const result = postReview('mission/task-2658', 'jev-token', 'approve', 'Scope F1', {
+    const result = postReview('mission/task-2658', 'jev-token', 'approve', 'Scope F1', { configuration: resolveConfiguration(process.env),
       apiCall, rootDir: '/classifier-worktree', forgejoUser: 'jev', expectedRevision: 'candidate',
       resolvePrNumber: (_branch, _token, options) => { assert.equal(options.forgejoUser, 'jev'); return 1; },
     });
@@ -1839,7 +1840,7 @@ test('postComment resolves PR via default token fallback while posting as codex'
 
   try {
     const calls = [];
-    const result = postComment('mission/task-111', 'codex-token', 'review comment', {
+    const result = postComment('mission/task-111', 'codex-token', 'review comment', { configuration: resolveConfiguration(process.env),
       apiCall(method, apiPath, token, body) {
         calls.push({ method, apiPath, token, body });
         if (method === 'GET' && apiPath.includes('/pulls?state=open')) {
@@ -1872,7 +1873,7 @@ test('postReview resolves PR via default token fallback while posting as codex',
 
   try {
     const calls = [];
-    const result = postReview('mission/task-111', 'codex-token', 'request-changes', 'needs fixes', {
+    const result = postReview('mission/task-111', 'codex-token', 'request-changes', 'needs fixes', { configuration: resolveConfiguration(process.env),
       apiCall(method, apiPath, token, body) {
         calls.push({ method, apiPath, token, body });
         if (method === 'GET' && apiPath.includes('/pulls?state=open')) {
@@ -1913,7 +1914,7 @@ test('FORGEJO_USER defaults to human', () => {
       }
       return { ok: true, data: { number: 1, title: 'test', state: 'open', html_url: 'http://test' } };
     };
-    const pr = getPrStatus('mission/task-001', '/tmp', { apiCall });
+    const pr = getPrStatus('mission/task-001', '/tmp', { configuration: resolveConfiguration(process.env), apiCall });
     assert.ok(pr.exists);
   } finally {
     if (oldUser === undefined) delete process.env.FORGEJO_USER; else process.env.FORGEJO_USER = oldUser;
@@ -1949,7 +1950,7 @@ assignee: [codex]
     // Current user (magnus) has no matching PR — both open and all return empty
     // Implementer (codex) has the matching PR
     const calls = [];
-    const prNumber = getPrNumber('mission/task-999', 'magnus-token', {
+    const prNumber = getPrNumber('mission/task-999', 'magnus-token', { configuration: resolveConfiguration(process.env),
       apiCall(method, apiPath, token) {
         calls.push({ method, apiPath, token });
         if (apiPath.includes('state=open')) {
@@ -1984,7 +1985,7 @@ assignee: [codex]
 });
 
 test('getPrNumber API failure returns structured error with _apiError and _notFound', () => {
-  const result = getPrNumber('mission/task-100', 'fake-token', {
+  const result = getPrNumber('mission/task-100', 'fake-token', { configuration: resolveConfiguration(process.env),
     apiCall(method, apiPath) {
       if (apiPath.includes('state=open') || apiPath.includes('state=all')) {
         return { ok: false, data: null, status: 7, error: 'connection refused' };
@@ -2009,7 +2010,7 @@ test('getPrStatus surfaces sandbox hint when API returns status 7', () => {
     return { ok: false, data: null };
   });
 
-  const pr = getPrStatus('mission/task-100', '/tmp', {
+  const pr = getPrStatus('mission/task-100', '/tmp', { configuration: resolveConfiguration(process.env),
     token: 'fake-token',
     apiCall
   });
@@ -2044,7 +2045,7 @@ assignee: [codex]
 `);
 
   try {
-    const prNumber = getPrNumber('mission/task-1100', 'magnus-token', {
+    const prNumber = getPrNumber('mission/task-1100', 'magnus-token', { configuration: resolveConfiguration(process.env),
       apiCall(method, apiPath, token) {
         if (apiPath.includes('state=open')) {
           return { ok: false, data: null, status: 7, error: 'connection refused' };
@@ -2081,7 +2082,7 @@ test('getLatestReviewDecision returns api-failed when getPrNumber returns _apiEr
     return { ok: false, data: null };
   });
 
-  const result = getLatestReviewDecision('mission/task-200', {
+  const result = getLatestReviewDecision('mission/task-200', { configuration: resolveConfiguration(process.env),
     forgejoUser: 'custom',
     token: 'fake-token',
     apiCall
@@ -2102,7 +2103,7 @@ test('postComment returns api-failed when getPrNumber returns _apiError', () => 
     return { ok: false, data: null };
   });
 
-  const result = postComment('mission/task-201', 'fake-token', 'review comment', { apiCall });
+  const result = postComment('mission/task-201', 'fake-token', 'review comment', { configuration: resolveConfiguration(process.env), apiCall });
 
   assert.equal(result.ok, false);
   assert.equal(result.error, 'api-failed');
@@ -2117,7 +2118,7 @@ test('postReview returns api-failed when getPrNumber returns _apiError', () => {
     return { ok: false, data: null };
   });
 
-  const result = postReview('mission/task-202', 'fake-token', 'approve', 'looks good', { apiCall });
+  const result = postReview('mission/task-202', 'fake-token', 'approve', 'looks good', { configuration: resolveConfiguration(process.env), apiCall });
 
   assert.equal(result.ok, false);
   assert.equal(result.error, 'api-failed');
@@ -2132,7 +2133,7 @@ test('getComments returns null when getPrNumber returns _apiError', async () => 
     return { ok: false, data: null };
   });
 
-  const result = await getComments('mission/task-203', 'fake-token', { apiCall });
+  const result = await getComments('mission/task-203', 'fake-token', { configuration: resolveConfiguration(process.env), apiCall });
 
   assert.equal(result, null);
 });
@@ -2178,7 +2179,7 @@ test('createPr retries push after stale-info rejection when forceWithLease is tr
     return { ok: false };
   });
 
-  const result = createPr(branch, user, token, { rootDir, apiCall, log: () => {}, forceWithLease: true });
+  const result = createPr(branch, user, token, { configuration: resolveConfiguration(process.env), rootDir, apiCall, log: () => {}, forceWithLease: true });
   assert.strictEqual(result.ok, true, 'createPr should succeed after stale-info retry');
   assert.strictEqual(pushAttempts, 2, 'should attempt push twice');
   assert.strictEqual(fetchCalled, true, 'should fetch before retrying');
@@ -2214,7 +2215,7 @@ test('createPr does not retry push on non-stale push failure', (t) => {
 
   const apiCall = mock.fn(() => ({ ok: false }));
 
-  const result = createPr(branch, user, token, { rootDir, apiCall, log: () => {}, forceWithLease: true });
+  const result = createPr(branch, user, token, { configuration: resolveConfiguration(process.env), rootDir, apiCall, log: () => {}, forceWithLease: true });
   assert.strictEqual(result.ok, false, 'createPr should fail on non-stale push failure');
   assert.strictEqual(pushAttempts, 1, 'should attempt push only once for non-stale failure');
 });
@@ -2242,7 +2243,7 @@ test('createPr fails cleanly on second consecutive stale rejection', (t) => {
 
   const apiCall = mock.fn(() => ({ ok: false }));
 
-  const result = createPr(branch, user, token, { rootDir, apiCall, log: () => {}, forceWithLease: true });
+  const result = createPr(branch, user, token, { configuration: resolveConfiguration(process.env), rootDir, apiCall, log: () => {}, forceWithLease: true });
   assert.strictEqual(result.ok, false, 'createPr should fail cleanly after second consecutive stale rejection');
   assert.strictEqual(pushAttempts, 2, 'should attempt push exactly twice before giving up');
 });
@@ -2285,7 +2286,7 @@ test('createPr fetches tracking ref before first push when local review ref is m
     return { ok: false };
   });
 
-  const result = createPr(branch, user, token, { rootDir, apiCall, log: () => {}, forceWithLease: true });
+  const result = createPr(branch, user, token, { configuration: resolveConfiguration(process.env), rootDir, apiCall, log: () => {}, forceWithLease: true });
   assert.strictEqual(result.ok, true, 'createPr should fetch tracking ref before first push');
   assert.strictEqual(fetchCalls, 1, 'should fetch exactly once before first push');
   assert.ok(
@@ -2320,7 +2321,7 @@ test('createPr fails cleanly when tracking ref remains missing after fetch', (t)
 
   const apiCall = mock.fn(() => ({ ok: false }));
 
-  const result = createPr(branch, user, token, { rootDir, apiCall, log: () => {}, forceWithLease: true });
+  const result = createPr(branch, user, token, { configuration: resolveConfiguration(process.env), rootDir, apiCall, log: () => {}, forceWithLease: true });
   assert.strictEqual(result.ok, false, 'createPr should fail when no tracking ref is available after fetch');
   assert.strictEqual(fetchCalls, 1, 'should fetch once before failing');
   assert.strictEqual(pushAttempts, 0, 'should not push without an explicit lease sha');
@@ -2355,7 +2356,7 @@ test('createPr fails without retrying push when stale-info refresh fetch fails',
 
   const apiCall = mock.fn(() => ({ ok: false }));
 
-  const result = createPr(branch, user, token, { rootDir, apiCall, log: () => {}, forceWithLease: true });
+  const result = createPr(branch, user, token, { configuration: resolveConfiguration(process.env), rootDir, apiCall, log: () => {}, forceWithLease: true });
   assert.strictEqual(result.ok, false, 'createPr should fail when retry refresh cannot fetch');
   assert.strictEqual(pushAttempts, 1, 'should not attempt a second push after refresh fetch failure');
   assert.strictEqual(fetchCalls, 1, 'should attempt the retry refresh once');
@@ -2372,7 +2373,7 @@ test('resolveForgejoHome returns a private missing fallback in test context when
   process.env.NODE_TEST_CONTEXT = '1';
 
   try {
-    const resolved = resolveForgejoHome();
+    const resolved = resolveForgejoHome(undefined, resolveConfiguration(process.env));
     assert.ok(resolved.startsWith(path.join(os.tmpdir(), 'forgejo-test-home-')), 'Should return a private test fallback');
     assert.equal(fs.existsSync(resolved), false, 'Fallback remains missing so test discovery cannot find local credentials');
   } finally {
@@ -2389,9 +2390,9 @@ test('isForgejoPath matches forgejo home descendants after path normalization', 
   process.env.FORGEJO_HOME = tmpRoot;
 
   try {
-    assert.equal(isForgejoPath(tmpRoot), true);
-    assert.equal(isForgejoPath(path.join(tmpRoot, 'tokens', '..', 'tokens', 'codex')), true);
-    assert.equal(isForgejoPath(path.join(os.tmpdir(), 'not-forgejo')), false);
+    assert.equal(isForgejoPath(tmpRoot, { configuration: resolveConfiguration(process.env) }), true);
+    assert.equal(isForgejoPath(path.join(tmpRoot, 'tokens', '..', 'tokens', 'codex'), { configuration: resolveConfiguration(process.env) }), true);
+    assert.equal(isForgejoPath(path.join(os.tmpdir(), 'not-forgejo'), { configuration: resolveConfiguration(process.env) }), false);
   } finally {
     fs.rmSync(tmpRoot, { recursive: true, force: true });
     if (previousHome === undefined) delete process.env.FORGEJO_HOME;
@@ -2408,7 +2409,7 @@ test('fetchReviewBranch uses force-update refspec to handle rebased branches', (
     return { status: 0, stdout: '', stderr: '' };
   });
 
-  fetchReviewBranch('mission/task-regression', '/tmp/fake-root');
+  fetchReviewBranch('mission/task-regression', '/tmp/fake-root', { configuration: resolveConfiguration(process.env) });
 
   assert.ok(capturedArgs, 'git should have been called');
   const refspec = capturedArgs.find(a => a.includes('refs/heads/'));
@@ -2431,7 +2432,7 @@ test('fetchReviewBranch forces a C locale so git diagnostics are English', (t) =
     return { status: 0, stdout: '', stderr: '' };
   });
 
-  fetchReviewBranch('mission/task-1317', '/tmp/fake-root');
+  fetchReviewBranch('mission/task-1317', '/tmp/fake-root', { configuration: resolveConfiguration(process.env) });
 
   assert.ok(capturedOptions, 'git should have been called with options');
   assert.ok(capturedOptions.env, 'fetch should pass an env override');
@@ -2459,7 +2460,7 @@ test('fetchReviewBranch uses authenticated review url when a token is available'
       return { status: 0, stdout: '', stderr: '' };
     });
 
-    fetchReviewBranch('main', root, { user: 'codex', token: 'token-123' });
+    fetchReviewBranch('main', root, { configuration: resolveConfiguration(process.env), user: 'codex', token: 'token-123' });
 
     assert.ok(capturedArgs, 'git should have been called');
     const baseUrl = process.env.FORGEJO_URL || 'http://localhost:3300';
@@ -2512,7 +2513,7 @@ test('createPr targets the recorded feature-branch base when MISSION.md has Base
       return { ok: false, data: null };
     });
 
-    const result = createPr('mission/task-300', 'mistral', 'token-456', { rootDir: root, apiCall, log: () => {} });
+    const result = createPr('mission/task-300', 'mistral', 'token-456', { configuration: resolveConfiguration(process.env), rootDir: root, apiCall, log: () => {} });
     assert.equal(result.ok, true);
     // The PR base should be the recorded feature-branch, not 'main'
     assert.ok(apiCalls.some(call => call.method === 'POST' && call.body && call.body.base === 'feat/x'), `Expected PR base 'feat/x', found: ${JSON.stringify(apiCalls.find(c => c.method === 'POST' && c.body)?.body)}`);

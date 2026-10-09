@@ -7,6 +7,7 @@
 //   Draft command: no task ID in the legacy file
 //   Draft preflight: no task ID in the legacy file
 
+import { resolveConfiguration } from '../../../src/composition/config.js';
 import test, { describe, mock } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -66,7 +67,7 @@ describe('Draft command', () => {
 
     try {
       process.chdir(root);
-      await runDraftCommand([slug], {
+      await runDraftCommand([slug], { configuration: resolveConfiguration(process.env),
         inferSlugFn: () => slug,
         resolveMainRepoFn: () => root,
         cwdFn: () => root,
@@ -104,7 +105,7 @@ describe('Draft command', () => {
       let exitCode = null;
       const errors = [];
 
-      await runDraftCommand([], {
+      await runDraftCommand([], { configuration: resolveConfiguration(process.env),
         inferSlugFn: () => null,
         validateDraftClassificationFn: () => ({ ok: true }),
         exitFn: (code) => { exitCode = code; },
@@ -125,7 +126,7 @@ describe('Draft command', () => {
       fs.writeFileSync(taskFile, ['---', 'id: TASK-1038', 'labels: [ai_sdlc]', 'status: backlog', '---'].join('\n'));
 
       try {
-        await runDraftCommand(['task-1038'], {
+        await runDraftCommand(['task-1038'], { configuration: resolveConfiguration(process.env),
           inferSlugFn: (slug) => slug,
           detectLaunchBaseBranchFn: () => null,
           resolveMainRepoFn: () => path.join(tmpRoot, 'main'),
@@ -197,7 +198,7 @@ describe('Draft command', () => {
       let exitCode = null;
       const errors = [];
 
-      await runDraftCommand(['task-config'], {
+      await runDraftCommand(['task-config'], { configuration: resolveConfiguration(process.env),
         inferSlugFn: (slug) => slug,
         resolveMainRepoFn: () => '/tmp/main',
         detectLaunchBaseBranchFn: () => null,
@@ -221,7 +222,7 @@ describe('Draft command', () => {
       let exitCode = null;
       const errors = [];
 
-      await runDraftCommand(['task-fail'], {
+      await runDraftCommand(['task-fail'], { configuration: resolveConfiguration(process.env),
         resolveTaskFileFn: () => ({ ok: true, taskFile: '/tmp/task.md' }),
         checkBacklogIntegrityFn: () => [],
         inferSlugFn: (slug) => slug,
@@ -248,7 +249,7 @@ describe('Draft command', () => {
       let exitCode = null;
       const errors = [];
 
-      await runDraftCommand(['task-fail'], {
+      await runDraftCommand(['task-fail'], { configuration: resolveConfiguration(process.env),
         resolveTaskFileFn: () => ({ ok: false, reason: 'missing' }),
         checkBacklogIntegrityFn: () => [],
         inferSlugFn: (slug) => slug,
@@ -275,7 +276,7 @@ describe('Draft command', () => {
       let exitCode = null;
       const errors = [];
 
-      await runDraftCommand(['task-fail'], {
+      await runDraftCommand(['task-fail'], { configuration: resolveConfiguration(process.env),
         resolveTaskFileFn: () => ({ ok: true, taskFile: '/tmp/task.md' }),
         checkBacklogIntegrityFn: () => [],
         inferSlugFn: (slug) => slug,
@@ -307,7 +308,7 @@ describe('Draft command', () => {
       let exitCode = null;
       const errors = [];
 
-      await runDraftCommand(['task-fail'], {
+      await runDraftCommand(['task-fail'], { configuration: resolveConfiguration(process.env),
         resolveTaskFileFn: () => ({ ok: true, taskFile: '/tmp/task.md' }),
         checkBacklogIntegrityFn: () => [],
         inferSlugFn: (slug) => slug,
@@ -339,7 +340,7 @@ describe('Draft command', () => {
       let exitCode = null;
       const errors = [];
 
-      await runDraftCommand(['task-fail'], {
+      await runDraftCommand(['task-fail'], { configuration: resolveConfiguration(process.env),
         resolveTaskFileFn: () => ({ ok: true, taskFile: '/tmp/task.md' }),
         checkBacklogIntegrityFn: () => [],
         inferSlugFn: (slug) => slug,
@@ -377,7 +378,7 @@ describe('Draft command', () => {
       let exitCode = null;
       let restartCount = 0;
 
-      await runDraftCommand(['task-fix'], {
+      await runDraftCommand(['task-fix'], { configuration: resolveConfiguration(process.env),
         resolveTaskFileFn: () => ({ ok: true, taskFile: '/tmp/task.md' }),
         checkBacklogIntegrityFn: () => [],
         inferSlugFn: (slug) => slug,
@@ -425,7 +426,7 @@ describe('Draft command', () => {
       let exitCode = null;
       const errors = [];
 
-      await runDraftCommand(['task-fix'], {
+      await runDraftCommand(['task-fix'], { configuration: resolveConfiguration(process.env),
         resolveTaskFileFn: () => ({ ok: true, taskFile: '/tmp/task.md' }),
         checkBacklogIntegrityFn: () => [],
         inferSlugFn: (slug) => slug,
@@ -462,7 +463,7 @@ describe('Draft command', () => {
       let exitCode = null;
       const errors = [];
 
-      await runDraftCommand(['task-fail'], {
+      await runDraftCommand(['task-fail'], { configuration: resolveConfiguration(process.env),
         resolveTaskFileFn: () => ({ ok: true, taskFile: '/tmp/task.md' }),
         checkBacklogIntegrityFn: () => [],
         inferSlugFn: (slug) => slug,
@@ -482,7 +483,7 @@ describe('Draft command', () => {
 
   test('runDraftCommand accepts free-text intent and synthesizes a task slug', async () => {
     const calls = [];
-    await runDraftCommand(['create a hello world program'], {
+    await runDraftCommand(['create a hello world program'], { configuration: resolveConfiguration(process.env),
       detectLaunchBaseBranchFn: () => null,
       resolveMainRepoFn: () => '/tmp/main',
       conventionalWorktreePathFn: (slug) => `/tmp/${slug}`,
@@ -527,7 +528,7 @@ describe('Draft command', () => {
     // before allocation printed `adhoc-create-a-hello-world-program` above a
     // branch called `mission/px-0001`.
     const logs = [];
-    await runDraftCommand(['create a hello world program'], {
+    await runDraftCommand(['create a hello world program'], { configuration: resolveConfiguration(process.env),
       detectLaunchBaseBranchFn: () => null,
       resolveMainRepoFn: () => '/tmp/main',
       conventionalWorktreePathFn: (slug) => `/tmp/${slug}`,
@@ -574,7 +575,7 @@ describe('Draft command', () => {
     delete process.env.WORKFLOW_AGENT;
 
     try {
-      await runDraftCommand(['task-1038', '--agent', 'claude'], {
+      await runDraftCommand(['task-1038', '--agent', 'claude'], { configuration: resolveConfiguration(process.env),
         inferSlugFn: (slug) => slug,
         detectLaunchBaseBranchFn: () => null,
         resolveMainRepoFn: () => path.join(tmpRoot, 'main'),
@@ -619,7 +620,7 @@ describe('Draft command', () => {
     let exitCode = null;
     const errors = [];
 
-    await runDraftCommand(['task-1038', '--agent'], {
+    await runDraftCommand(['task-1038', '--agent'], { configuration: resolveConfiguration(process.env),
       inferSlugFn: (slug) => slug,
       selectAgentFn: () => { throw new Error('must not select an agent when --agent parsing fails'); },
       startDraftAgentFn: async () => { throw new Error('must not launch when --agent parsing fails'); },
@@ -664,7 +665,7 @@ describe('Draft preflight', () => {
     let exitCode = null;
     let ensureMissionBranchCalled = false;
 
-    await runDraftCommand(['task-999'], {
+    await runDraftCommand(['task-999'], { configuration: resolveConfiguration(process.env),
       inferSlugFn: (s) => s,
       resolveMainRepoFn: () => '/tmp/main-repo',
       ensureRepoExistsFn: () => true,
@@ -693,7 +694,7 @@ describe('Draft preflight', () => {
     let exitCode = null;
     let ensureMissionBranchCalled = false;
 
-    await runDraftCommand(['task-093'], {
+    await runDraftCommand(['task-093'], { configuration: resolveConfiguration(process.env),
       inferSlugFn: (s) => s,
       resolveMainRepoFn: () => '/tmp/main-repo',
       ensureRepoExistsFn: () => true,

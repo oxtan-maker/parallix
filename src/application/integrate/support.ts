@@ -1,3 +1,5 @@
+import type { ParallixConfiguration } from "../ports/configuration.js";
+import { DEFAULT_CONFIGURATION } from "../ports/configuration.js";
 /**
  * Small, effect-free rules shared by the integrate workflow modules: the public
  * flag contract, task-path containment, bounce implementer resolution, and the
@@ -39,7 +41,7 @@ function parseIntegrateValueOption(arg: string, value: string | undefined, state
 }
 
 /** Parse only the public integrate flags before any preflight or gate work. */
-export function parseIntegrateArgs(args: string[], environment: Record<string, string | undefined> = process.env): IntegrateRequest {
+export function parseIntegrateArgs(args: string[], configuration: ParallixConfiguration = DEFAULT_CONFIGURATION): IntegrateRequest {
   const params: string[] = [];
   const state = { dryRun: false, noIntegrationGates: false, noGate: false, recoverLanded: false, realAgent: null as string | null, realAgentModel: null as string | null };
 
@@ -64,7 +66,7 @@ export function parseIntegrateArgs(args: string[], environment: Record<string, s
   if (state.realAgent === 'codex' && state.realAgentModel !== CODEX_REAL_AGENT_MODEL) {
     throw new Error(`Unsupported Codex real-agent model "${state.realAgentModel}". Supported value: ${CODEX_REAL_AGENT_MODEL}.`);
   }
-  if (state.noIntegrationGates && environment.PARALLIX_TEST_ALLOW_INTEGRATION_GATE_BYPASS !== '1') {
+  if (state.noIntegrationGates && !configuration.runtime.integrationGateBypass) {
     throw new Error('--no-integration-gates is rejected: final integration gates are mandatory.');
   }
   return { explicitSlug: params[0], ...state };

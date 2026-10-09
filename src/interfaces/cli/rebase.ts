@@ -1,3 +1,4 @@
+import type { ParallixConfiguration } from '../../application/ports/configuration.js';
 import * as fmt from '../../application/presentation/cli-format.js';
 import type { RebaseCommandUseCase } from '../../application/rebase-command-use-case.js';
 
@@ -51,12 +52,12 @@ export type RebaseCliRunner = (_args: string[], _options: Record<string, unknown
  * process exit code.
  */
 export function createRebaseCommand(runner: RebaseCliRunner) {
-  return async (args: string[], options: Record<string, unknown> = {}): Promise<number> => {
+  return async (args: string[], options: Record<string, unknown> & { configuration?: ParallixConfiguration } = {}): Promise<number> => {
     const request = parseRebaseCliRequest(args);
     // Debug-only: the pre-extraction command ignored unrecognized options
     // silently, so the default output stays byte-identical (SC7).
     const advisory = renderUnknownRebaseOptions(request);
-    if (advisory) { fmt.log.debug(advisory); }
+    if (advisory) { fmt.log.debug(advisory, options.configuration?.runtime.debug); }
     let exitCode = 0;
     const exitFn = typeof options.exitFn === 'function'
       ? options.exitFn as (_code: number) => void

@@ -1,3 +1,4 @@
+import type { ParallixConfiguration } from "../../application/ports/configuration.js";
 // Repository-configured lifecycle gates.
 //
 // Generic, language-neutral gate execution for the pre-handoff, pre-review,
@@ -280,7 +281,7 @@ export function loadPhaseGateParallelism(rootDir: string, phase: 'preHandoff' | 
  * `PARALLIX_REAL_AGENT=codex` from an earlier session.
  */
 /** @param {GatePhase} phase @param {string} slug @param {string} checkoutPath */
-export function buildGateEnv(phase: GatePhase, slug: string, checkoutPath: string, inheritEnv: NodeJS.ProcessEnv = process.env, extraEnv: { realAgent?: string | null, realAgentModel?: string | null } = {}): NodeJS.ProcessEnv {
+export function buildGateEnv(phase: GatePhase, slug: string, checkoutPath: string, inheritEnv: NodeJS.ProcessEnv = { ...process.env }, extraEnv: { realAgent?: string | null, realAgentModel?: string | null } = {}): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = {
     ...inheritEnv,
     [GATE_ENV.SLUG]: slug,
@@ -310,6 +311,7 @@ export function buildGateEnv(phase: GatePhase, slug: string, checkoutPath: strin
 export async function runPhaseGates(
   phase: GatePhase,
   opts: {
+    configuration?: ParallixConfiguration;
     slug: string;
     checkoutPath: string;
     gates?: RepositoryGate[];
@@ -341,7 +343,7 @@ export async function runPhaseGates(
   // runner captures each gate's streams so concurrent output can later be
   // rendered as distinct sections instead of interleaving byte-by-byte.
   const runner = opts.commandRunner || runGateCommand;
-  const env = buildGateEnv(phase, slug, checkoutPath, process.env, { realAgent: opts.realAgent, realAgentModel: opts.realAgentModel });
+  const env = buildGateEnv(phase, slug, checkoutPath, opts.configuration?.forwardedEnvironment ?? { ...process.env }, { realAgent: opts.realAgent, realAgentModel: opts.realAgentModel });
   const maxParallel = opts.maxParallel ?? loadPhaseGateParallelism(checkoutPath, toConfigPhase(phase));
   const phaseStarted = Date.now();
   const controller = new globalThis.AbortController();

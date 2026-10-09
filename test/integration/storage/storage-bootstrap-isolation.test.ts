@@ -1,3 +1,4 @@
+import { resolveConfiguration } from '../../../src/composition/config.js';
 // TASK-2554 red-to-green reproduction: the standalone e2e test entries
 // (`test:agent-e2e`, `test:lifecycle-e2e`) used to launch their test process
 // with only `--import tsx`, so the process inherited the operator's
@@ -87,7 +88,7 @@ for (const scriptName of ['test:lifecycle-e2e', 'test:agent-e2e']) {
     );
     const childEnv = { ...process.env, PARALLIX_HOME: undefined, HOME: process.env.HOME };
     const operatorDefault = resolveParallixHome({
-      env: childEnv as Record<string, string>,
+      configuration: resolveConfiguration(childEnv as Record<string, string>),
       platform: process.platform,
       homedir: () => String(process.env.HOME)
     });

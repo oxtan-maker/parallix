@@ -1,3 +1,5 @@
+import type { ParallixConfiguration } from "../../application/ports/configuration.js";
+import { DEFAULT_CONFIGURATION } from "../../application/ports/configuration.js";
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -5,7 +7,7 @@ import path from 'node:path';
 export interface ResolveParallixHomeOptions {
   ensureDir?: boolean;
   platform?: string;
-  env?: Record<string, string>;
+  configuration?: ParallixConfiguration;
   homedir?: () => string;
 }
 
@@ -57,21 +59,21 @@ export function resolveParallixHome(
   const {
     ensureDir = false,
     platform = process.platform,
-    env = process.env,
-    homedir = os.homedir
+    configuration = DEFAULT_CONFIGURATION,
+    homedir = () => opts.configuration?.storage.homeDirectory || os.homedir()
   } = opts;
 
   let home: string;
 
   // --- env override (highest precedence) ---
-  if (env.PARALLIX_HOME && typeof env.PARALLIX_HOME === 'string' && env.PARALLIX_HOME.trim().length > 0) {
-    home = path.resolve(env.PARALLIX_HOME);
+  if (configuration.storage.parallixHome && typeof configuration.storage.parallixHome === 'string' && configuration.storage.parallixHome.trim().length > 0) {
+    home = path.resolve(configuration.storage.parallixHome);
   } else if (platform === 'linux') {
     home = path.join(homedir(), '.local', 'state', 'parallix');
   } else if (platform === 'darwin') {
     home = path.join(homedir(), 'Library', 'Application Support', 'parallix');
   } else if (platform === 'win32') {
-    const localAppData = env.LOCALAPPDATA;
+    const localAppData = configuration.storage.localAppData;
     if (localAppData && typeof localAppData === 'string' && localAppData.trim().length > 0) {
       home = path.join(localAppData.trim(), 'parallix');
     } else {
@@ -107,7 +109,7 @@ export function resolveAgentsLocalPath(options?: ResolveParallixHomeOptions | st
     return path.resolve(options);
   }
   const opts = options as ResolveParallixHomeOptions | undefined;
-  const home = resolveParallixHome({ ensureDir: opts?.ensureDir !== false });
+  const home = resolveParallixHome({ ...opts, ensureDir: opts?.ensureDir !== false });
   return path.join(home, 'agents.local.json');
 }
 
@@ -183,8 +185,8 @@ export function writeFileAtomic(
  * Check whether PARALLIX_HOME has been initialized (directory exists).
  * Does NOT create the directory.
  */
-export function isInitialized(): boolean {
-  const home = resolveParallixHome({ ensureDir: false });
+export function isInitialized(configuration: ParallixConfiguration = DEFAULT_CONFIGURATION): boolean {
+  const home = resolveParallixHome({ ensureDir: false, configuration });
   try {
     return fs.statSync(home).isDirectory();
   } catch {

@@ -4,6 +4,7 @@
 
 import test, { mock } from 'node:test';
 import assert from 'node:assert/strict';
+import { resolveConfiguration } from '../../../../src/composition/config.js';
 import { mockModule, installModuleMocks } from '../../../lib/module-mock.js';
 const resolveClaudeCommandModule = mockModule<typeof import('../../../../src/adapters/agents/claude.js')>('../../../../src/adapters/agents/claude.js', import.meta.url);
 const extractClaudeSessionIdModule = mockModule<typeof import('../../../../src/adapters/agents/claude.js')>('../../../../src/adapters/agents/claude.js', import.meta.url);
@@ -234,6 +235,20 @@ test('extractClaudeTelemetryFromStdout handles raw (non-wrapped) stream-json eve
   assert.equal(tel.inputTokens, 3000);
   assert.equal(tel.outputTokens, 500);
   assert.equal(tel.cachedTokens, 2000);
+});
+
+test('startClaudeAgent forwards configured confinement to the spawn seam (TASK-2668.08)', async () => {
+  const configuration = resolveConfiguration({ PARALLIX_NO_BUBBLEWRAP: '1' });
+  claude.__setSpawnAndTeeForTest((_command, _args, options) => {
+    assert.equal(options.configuration, configuration);
+    assert.equal(options.configuration.agents.bubblewrapDisabled, true);
+    return Promise.resolve({ status: 0, stdout: '', stderr: '' });
+  });
+  try {
+    await claude.startClaudeAgent({ configuration, prompt: 'fixture', worktree: '/tmp' }).resultPromise;
+  } finally {
+    claude.__setSpawnAndTeeForTest(null);
+  }
 });
 
 // ---------- startClaudeAgent stale session detection (task-1322) ----------

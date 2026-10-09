@@ -1,3 +1,4 @@
+import type { ParallixConfiguration } from '../../../application/ports/configuration.js';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as fmt from '../../../application/presentation/cli-format.js';
@@ -57,12 +58,13 @@ function resolveMissionClassificationResolver(resolveMissionClassificationFn?: t
   throw new TypeError('resolveMissionClassificationFn is not a function');
 }
 function validateDraftClassification(slug: string, worktree: string, {
+  configuration,
   resolveMissionClassificationFn = stats.resolveMissionClassification,
   errorFn = fmt.log.plainError
-}: { resolveMissionClassificationFn?: typeof stats.resolveMissionClassification; errorFn?: (_message: string) => void } = {}) {
+}: { configuration?: ParallixConfiguration; resolveMissionClassificationFn?: typeof stats.resolveMissionClassification; errorFn?: (_message: string) => void } = {}) {
   try {
     const resolveClassification = resolveMissionClassificationResolver(resolveMissionClassificationFn);
-    const { classification, error: classificationError } = resolveClassification(slug, worktree);
+    const { classification, error: classificationError } = resolveClassification(slug, worktree, undefined, configuration);
     if (!classification) {
       if (classificationError) {errorFn(fmt.status('FAIL', classificationError));}
       return { ok: true, classification: null };
@@ -77,12 +79,13 @@ function validateDraftClassification(slug: string, worktree: string, {
   }
 }
 function normalizeDraftClassification(slug: string, worktree: string, {
+  configuration,
   resolveMissionClassificationFn = stats.resolveMissionClassification,
   errorFn = fmt.log.plainError
-}: { resolveMissionClassificationFn?: typeof stats.resolveMissionClassification; errorFn?: (_message: string) => void } = {}) {
+}: { configuration?: ParallixConfiguration; resolveMissionClassificationFn?: typeof stats.resolveMissionClassification; errorFn?: (_message: string) => void } = {}) {
   try {
     const resolveClassification = resolveMissionClassificationResolver(resolveMissionClassificationFn);
-    const { classification, error: classificationError } = resolveClassification(slug, worktree);
+    const { classification, error: classificationError } = resolveClassification(slug, worktree, undefined, configuration);
     if (!classification) {
       if (classificationError) {errorFn(fmt.status('FAIL', classificationError));}
       return { ok: false, reason: 'missing-classification' };

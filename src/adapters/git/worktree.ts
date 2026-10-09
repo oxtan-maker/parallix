@@ -1,3 +1,5 @@
+import type { ParallixConfiguration } from "../../application/ports/configuration.js";
+import { DEFAULT_CONFIGURATION } from "../../application/ports/configuration.js";
 import * as fs from 'node:fs';
 import path from 'node:path';
 import { loadAdapterConfig, isStandaloneWorkflowLayout } from '../config/product-config.js';
@@ -50,8 +52,8 @@ export function getPrimaryBranch(rootDirOrGitFn: string | Function = process.cwd
   );
 }
 
-export function resolveMainRepo(): string {
-  if (process.env.PRIMARY_WORKTREE) {return process.env.PRIMARY_WORKTREE;}
+export function resolveMainRepo(configuration: ParallixConfiguration = DEFAULT_CONFIGURATION): string {
+  if (configuration.runtime.primaryWorktree) {return configuration.runtime.primaryWorktree;}
 
   const cwd = process.cwd();
   const primaryBranch = getPrimaryBranch(process.cwd(), gitModule.git);
@@ -119,8 +121,8 @@ function primaryWorktreeFromPorcelain(lines: string[], primaryBranch: string): s
     return primaryWorktree?.path ?? null;
 }
 
-export function getPrimaryWorktree(): string {
-  return resolveMainRepo();
+export function getPrimaryWorktree(configuration: ParallixConfiguration = DEFAULT_CONFIGURATION): string {
+  return resolveMainRepo(configuration);
 }
 
 /** @param {string} slug @param {string} [mainRepo] */
@@ -282,7 +284,7 @@ function findWorktreeForBranch(branchRef: string, runner: Function, mainRepo: st
  * error when the recorded base does not exist locally.
  */
 /** @param {string} slug @param {{rootDir?: string, gitFn?: Function}} [options] */
-export function resolveBaseWorktree(slug: string, options: { rootDir?: string; gitFn?: Function | null } = {}): string {
+export function resolveBaseWorktree(slug: string, options: { rootDir?: string; gitFn?: Function | null; configuration?: ParallixConfiguration } = {}): string {
   const rootDir = options.rootDir || process.cwd();
   /** @type {Function | null} */
   const gitFn = options.gitFn ?? null;
@@ -290,10 +292,10 @@ export function resolveBaseWorktree(slug: string, options: { rootDir?: string; g
   const base = resolveMissionBaseBranch(slug, rootDir, { gitFn: gitFn as Function | undefined });
   const primary = gitFn ? getPrimaryBranch(rootDir, gitFn as Function) : getPrimaryBranch(rootDir);
   if (base === primary) {
-    return getPrimaryWorktree();
+    return getPrimaryWorktree(options.configuration);
   }
 
-  const mainRepo = getPrimaryWorktree();
+  const mainRepo = getPrimaryWorktree(options.configuration);
   const baseRef = `refs/heads/${base}`;
 
   const existing = findWorktreeForBranch(baseRef, runner, mainRepo);

@@ -1,11 +1,12 @@
 import { SqliteDatabaseAdapter } from '../../src/adapters/sqlite/database-adapter.js';
+import { resolveConfiguration } from '../../src/composition/config.js';
 import { resolveDatabasePath } from '../../src/adapters/sqlite/database-path-resolver.js';
 import { loadDefaultMigrations, SqliteMigrationRunner } from '../../src/adapters/sqlite/migration-runner.js';
 
 /** Give a stats fixture the same classified Mission state as a live workflow. */
 export async function seedStoredMissionClassification(slug: string, classification = 'ai_sdlc'): Promise<void> {
   const db = new SqliteDatabaseAdapter();
-  await db.open({ path: resolveDatabasePath() });
+  await db.open({ path: resolveDatabasePath({ configuration: resolveConfiguration(process.env) }) });
   try {
     await new SqliteMigrationRunner(db).applyPending(loadDefaultMigrations());
     await db.execute(

@@ -27,6 +27,9 @@ export interface StorageConfiguration {
   readonly localAppData: OptionalString;
   readonly homeDirectory: OptionalString;
   readonly debugSql: OptionalString;
+  readonly xdgDataHome: OptionalString;
+  readonly xdgConfigHome: OptionalString;
+  readonly xdgCacheHome: OptionalString;
 }
 
 export interface AgentConfiguration {
@@ -50,6 +53,7 @@ export interface AgentConfiguration {
 }
 
 export interface TerminalConfiguration {
+  readonly hostEnvironment: Readonly<Record<string, string | undefined>>;
   readonly missionTerminal: OptionalString;
   readonly missionSocket: OptionalString;
   readonly tmux: OptionalString;
@@ -68,6 +72,7 @@ export interface DecisionConfiguration {
 }
 
 export interface RuntimeConfiguration {
+  readonly gitIdentity: { readonly authorName: string; readonly authorEmail: string; readonly committerName: string; readonly committerEmail: string };
   readonly ci: boolean;
   readonly noTui: boolean;
   readonly debug: boolean;
@@ -108,3 +113,116 @@ export interface ParallixConfiguration {
   /** Opaque host environment for child processes; never interpret keys from it. */
   readonly forwardedEnvironment: Readonly<Record<string, string | undefined>>;
 }
+
+
+/** Pure defaults for explicitly unconfigured callers; production composition supplies resolved configuration. */
+export const DEFAULT_CONFIGURATION: ParallixConfiguration = {
+  forgejo: {
+    url: undefined,
+    repo: undefined,
+    user: undefined,
+    authorizedApprover: undefined,
+    gatekeeperUser: undefined,
+    home: undefined,
+    token: undefined,
+    tokenFile: undefined,
+    unavailableForTests: false,
+    nodeTestContext: false
+  },
+  storage: {
+    parallixHome: undefined,
+    localAppData: undefined,
+    homeDirectory: undefined,
+    debugSql: undefined,
+    xdgDataHome: undefined,
+    xdgConfigHome: undefined,
+    xdgCacheHome: undefined
+  },
+  agents: {
+    override: undefined,
+    watchdogEnabled: true,
+    noOutputInitialMs: null,
+    noOutputIntervalMs: null,
+    draftNoOutputInitialMs: null,
+    draftNoOutputIntervalMs: null,
+    reviewNoOutputMaxMs: null,
+    opencodeBin: undefined,
+    piBin: undefined,
+    nvmBin: undefined,
+    graphifyBin: undefined,
+    codexHome: undefined,
+    searchPath: '',
+    cliCommand: undefined,
+    keepTempArtifacts: false,
+    bubblewrapDisabled: false,
+    claudeRawStream: false
+  },
+  terminal: {
+    hostEnvironment: {
+      PATH: undefined,
+      HOME: undefined,
+      TERM: undefined,
+      SHELL: undefined,
+      LANG: undefined,
+      USER: undefined,
+      LOGNAME: undefined,
+      PARALLIX_HOME: undefined,
+      XDG_CONFIG_HOME: undefined,
+      XDG_STATE_HOME: undefined,
+      XDG_DATA_HOME: undefined
+    },
+    missionTerminal: undefined,
+    missionSocket: undefined,
+    tmux: undefined,
+    stateDir: undefined,
+    runtimeDir: undefined,
+    xdgDataHome: undefined
+  },
+  decision: {
+    provider: undefined,
+    baseUrl: undefined,
+    apiKeys: {
+      TYPESAFE_API_KEY: undefined,
+      OPENROUTER_API_KEY: undefined,
+      AI_GATEWAY_API_KEY: undefined
+    },
+    timeoutMs: undefined,
+    model: undefined,
+    reviewMode: undefined
+  },
+  runtime: {
+    gitIdentity: {
+      authorName: 'Workflow Setup',
+      authorEmail: 'workflow@example.invalid',
+      committerName: 'Workflow Setup',
+      committerEmail: 'workflow@example.invalid'
+    },
+    ci: false,
+    noTui: false,
+    debug: false,
+    noColor: undefined,
+    forceColor: undefined,
+    term: undefined,
+    integrationGateBypass: false,
+    credentialRedactor: undefined,
+    verifyArea: undefined,
+    primaryWorktree: undefined,
+    missionYearOverride: undefined,
+    tmpDir: undefined,
+    reviewPollIntervalMs: null,
+    reviewPollTimeoutMs: null
+  },
+  setup: {
+    nonInteractive: undefined,
+    productName: undefined,
+    reviewProvider: undefined,
+    ownerLogin: undefined,
+    forgejoUrl: undefined,
+    forgejoRepo: undefined,
+    agentUsers: undefined,
+    ownerPassword: undefined,
+    agentPassword: undefined,
+    reviewRemote: undefined
+  },
+  forwardedEnvironment: {}
+};

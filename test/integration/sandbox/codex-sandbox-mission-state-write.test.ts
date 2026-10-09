@@ -16,6 +16,7 @@ import childProcess from 'node:child_process';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { DatabaseSync } from 'node:sqlite';
+import { resolveConfiguration } from '../../../src/composition/config.js';
 import { buildBubblewrapArgs, resolveSandboxProfile } from '../../../src/adapters/process/bubblewrap.js';
 import { pxNodeArgs, resolvePxEntryLoader } from '../../lib/px-entry.js';
 
@@ -203,12 +204,12 @@ function pxEnv(cwd: string, stateHome: string, binDir: string): NodeJS.ProcessEn
 test('sandboxed codex profile writes Parallix mission state through px under bwrap', () => {
   const bwrapPath = commandDir('bwrap');
   const fixture = setupFixture(SLUG, 'Sandbox px write probe');
-  const previousParallixHome = process.env.PARALLIX_HOME;
-  // Pin the state home in this process too so the resolved profile binds the
-  // same Parallix database the sandboxed px will write.
-  process.env.PARALLIX_HOME = fixture.stateHome;
   try {
-    const profile = resolveSandboxProfile('active', fixture.repo, null, 'codex');
+    // Resolve the profile from the same explicit environment as the child CLI;
+    // adapter configuration is injected rather than read from ambient state.
+    const env = { ...process.env, ...pxEnv(fixture.repo, fixture.stateHome, fixture.binDir) };
+    const configuration = resolveConfiguration(env);
+    const profile = resolveSandboxProfile('active', fixture.repo, null, 'codex', configuration);
     // The fixture lives under /tmp, but the production profile grants /tmp as a
     // convenience. Remove that unrelated permission so it cannot mask a missing
     // Parallix state-home bind: with the mission worktree inside the repo, the
@@ -225,7 +226,7 @@ test('sandboxed codex profile writes Parallix mission state through px under bwr
         cwd: fixture.repo,
         encoding: 'utf8',
         timeout: 120_000,
-        env: { ...process.env, ...pxEnv(fixture.repo, fixture.stateHome, fixture.binDir) }
+        env
       }
     );
     if (confined.error) { throw confined.error; }
@@ -241,7 +242,6 @@ test('sandboxed codex profile writes Parallix mission state through px under bwr
     } finally { database.close(); }
     assert.equal(fs.existsSync(path.join(fixture.repo, 'worktrees', SLUG, 'missions', SLUG, 'MISSION.md')), false);
   } finally {
-    if (previousParallixHome === undefined) { delete process.env.PARALLIX_HOME; } else { process.env.PARALLIX_HOME = previousParallixHome; }
     fs.rmSync(fixture.tmpRoot, { recursive: true, force: true });
   }
 });

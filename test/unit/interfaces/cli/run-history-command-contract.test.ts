@@ -1,3 +1,4 @@
+import { resolveConfiguration } from '../../../../src/composition/config.js';
 import path from 'node:path';
 import fs from 'node:fs';
 import test from 'node:test';
@@ -48,14 +49,14 @@ test('attach finds a stopped mission terminal without any agent history (TASK-26
   const worktree = mkdtemp('px-idle-attach-');
   const state = path.join(worktree, 'state');
   const env = { PARALLIX_TERMINAL_STATE_DIR: state };
-  const socket = missionSocketPath({ repositoryKey: 'repo', missionId: 'task-1' }, env);
+  const socket = missionSocketPath({ repositoryKey: 'repo', missionId: 'task-1' }, resolveConfiguration(env));
   fs.mkdirSync(path.dirname(socket), { recursive: true });
   fs.writeFileSync(socket, '');
   const calls: string[][] = [];
   const lines: string[] = [];
   const deps = {
     inferSlugFn: () => 'task-1', resolveWorktreeFn: () => worktree, repositoryKeyFn: () => 'repo',
-    env, isTTY: true, log: (line: string) => lines.push(line),
+    configuration: resolveConfiguration(env), isTTY: true, log: (line: string) => lines.push(line),
     spawnSyncFn: ((_command: string, args: string[]) => {
       calls.push(args);
       return { status: 0, stdout: 'task-1\t\t\t0\n' };

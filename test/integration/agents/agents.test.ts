@@ -1,5 +1,6 @@
 // @ts-nocheck -- TASK-2328: partial test doubles from ESM seam migration; resolve in follow-up
 
+import { resolveConfiguration } from '../../../src/composition/config.js';
 import test, { mock } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'fs';
@@ -33,7 +34,7 @@ const originalPiBin = process.env.PI_BIN;
 
 test('a recovery launch uses the fresh-session marker port', async () => {
   let launched;
-  await startAgent('execute', {
+  await startAgent('execute', { configuration: resolveConfiguration(process.env),
     prompt: 'Recover this mission.', worktree: '/tmp/task-2489-recovery', agent: 'claude',
     slug: 'task-2489-stuck', role: 'implementer', sessionMarkerPort: FRESH_SESSION_MARKER_PORT,
     isAgentBlockedFn: () => false, resolveAgentModelFn: () => null, assertAgentSupportedFn: () => {}, log: () => {},
@@ -61,11 +62,11 @@ test('startAgent sessionPolicy keeps the normal marker while fresh recovery bypa
   };
   const common = { prompt: 'repair', worktree: '/tmp/task-2588-session-policy', agent: 'claude', slug: 'task-2588', role: 'implementer', sessionMarkerPort, isAgentBlockedFn: () => false, resolveAgentModelFn: () => null, assertAgentSupportedFn: () => {}, log: () => {}, launchAgentFn };
 
-  await startAgent('act-on-review', { ...common, sessionPolicy: 'resume' });
+  await startAgent('act-on-review', { configuration: resolveConfiguration(process.env), ...common, sessionPolicy: 'resume' });
   const callsAfterResume = { ...markerCalls };
-  await startAgent('act-on-review', { ...common, sessionPolicy: 'fresh-ephemeral' });
+  await startAgent('act-on-review', { configuration: resolveConfiguration(process.env), ...common, sessionPolicy: 'fresh-ephemeral' });
   assert.deepEqual(markerCalls, callsAfterResume, 'fresh recovery must neither read nor mutate the durable marker');
-  await startAgent('act-on-review', common);
+  await startAgent('act-on-review', { configuration: resolveConfiguration(process.env), ...(common) });
 
   assert.equal(launches[0].resume, true);
   assert.equal(launches[0].sessionId, 'durable-normal-session');
@@ -147,8 +148,8 @@ test('custom capacity saturation reports at launch while selection remains eligi
   const reservation = await tryAcquireCustomCapacity(worktree);
   assert.ok(reservation, 'the first custom reservation should acquire the default capacity');
   try {
-    assert.equal(selectAgent('draft', { config, worktree }), 'custom');
-    assert.equal(selectAgent('review', { config, worktree }), 'custom');
+    assert.equal(selectAgent('draft', { configuration: resolveConfiguration(process.env), config, worktree }), 'custom');
+    assert.equal(selectAgent('review', { configuration: resolveConfiguration(process.env), config, worktree }), 'custom');
   } finally {
     reservation.release();
     fs.rmSync(worktree, { recursive: true, force: true });
@@ -185,7 +186,7 @@ test('custom capacity releases after clean completion, launch failure, signal ca
     };
     const run = async resultPromise => {
       try {
-        await startAgent('draft', {
+        await startAgent('draft', { configuration: resolveConfiguration(process.env),
           ...base,
           launchAgentFn: () => ({ invocation, resultPromise })
         });
@@ -369,7 +370,7 @@ test('readAgentConfig migrates blocklist from workflow/config/agents.local.json'
     const localPath = path.join(configDir, 'agents.local.json');
     fs.writeFileSync(localPath, JSON.stringify({ blocklist: { gemini: true } }));
 
-    const config = readAgentConfig(configPath, { mergeLocal: true, mainWorktreePath, targetPath });
+    const config = readAgentConfig(configPath, { configuration: resolveConfiguration(process.env), mergeLocal: true, mainWorktreePath, targetPath });
     assert.ok(config);
     assert.ok(config.blocklist);
     assert.equal(config.blocklist.gemini, true);
@@ -381,7 +382,7 @@ test('readAgentConfig migrates blocklist from project root agents.local.json', (
     const rootPath = path.join(projectRoot, 'agents.local.json');
     fs.writeFileSync(rootPath, JSON.stringify({ blocklist: { claude: true } }));
 
-    const config = readAgentConfig(configPath, { mergeLocal: true, mainWorktreePath, targetPath });
+    const config = readAgentConfig(configPath, { configuration: resolveConfiguration(process.env), mergeLocal: true, mainWorktreePath, targetPath });
     assert.ok(config);
     assert.ok(config.blocklist);
     assert.equal(config.blocklist.claude, true);
@@ -396,7 +397,7 @@ test('readAgentConfig migrates blocklist from multiple legacy locations', () => 
     fs.writeFileSync(rootPath, JSON.stringify({ blocklist: { claude: true } }));
     fs.writeFileSync(legacyPath, JSON.stringify({ blocklist: { gemini: true } }));
 
-    const config = readAgentConfig(configPath, { mergeLocal: true, mainWorktreePath, targetPath });
+    const config = readAgentConfig(configPath, { configuration: resolveConfiguration(process.env), mergeLocal: true, mainWorktreePath, targetPath });
     assert.ok(config);
     assert.ok(config.blocklist);
     assert.equal(config.blocklist.claude, true);
@@ -451,7 +452,7 @@ test('readAgentConfig migrates blocklist from main worktree path', () => {
     const mainLocalPath = path.join(mainWorktreePath, 'agents.local.json');
     fs.writeFileSync(mainLocalPath, JSON.stringify({ blocklist: { codex: true } }));
 
-    const config = readAgentConfig(configPath, { mergeLocal: true, mainWorktreePath, targetPath });
+    const config = readAgentConfig(configPath, { configuration: resolveConfiguration(process.env), mergeLocal: true, mainWorktreePath, targetPath });
     assert.ok(config);
     assert.ok(config.blocklist);
     assert.equal(config.blocklist.codex, true);
@@ -469,7 +470,7 @@ test('readAgentConfig reports legacy conflicts and applies precedence in lookup 
     fs.writeFileSync(mainLocalPath, JSON.stringify({ blocklist: { gemini: { blocked: true } } }));
 
     const warnings = [];
-    const config = readAgentConfig(configPath, {
+    const config = readAgentConfig(configPath, { configuration: resolveConfiguration(process.env),
       mergeLocal: true,
       mainWorktreePath,
       targetPath,
@@ -487,7 +488,7 @@ test('readAgentConfig reports and skips malformed workflow/config/agents.local.j
     fs.writeFileSync(localPath, '{ "blocklist": { "gemini": true, } }\n');
 
     const warnings = [];
-    const config = readAgentConfig(configPath, {
+    const config = readAgentConfig(configPath, { configuration: resolveConfiguration(process.env),
       mergeLocal: true, mainWorktreePath, targetPath, warn: message => warnings.push(message)
     });
     assert.deepEqual(config.blocklist, {});
@@ -501,7 +502,7 @@ test('readAgentConfig reports and skips malformed project-root agents.local.json
     fs.writeFileSync(rootPath, '{ "blocklist": { "claude": { "until": "2026-05-01 12" }, } }\n');
 
     const warnings = [];
-    readAgentConfig(configPath, {
+    readAgentConfig(configPath, { configuration: resolveConfiguration(process.env),
       mergeLocal: true, mainWorktreePath, targetPath, warn: message => warnings.push(message)
     });
     assert.match(warnings[0], /Skipping malformed legacy agent blocklist/);
@@ -514,7 +515,7 @@ test('readAgentConfig reports and skips malformed main-worktree agents.local.jso
     fs.writeFileSync(mainLocalPath, '{ "blocklist": { "codex": true, } }\n');
 
     const warnings = [];
-    readAgentConfig(configPath, {
+    readAgentConfig(configPath, { configuration: resolveConfiguration(process.env),
       mergeLocal: true, mainWorktreePath, targetPath, warn: message => warnings.push(message)
     });
     assert.match(warnings[0], /Skipping malformed legacy agent blocklist/);
@@ -525,7 +526,7 @@ test('readAgentConfig does not warn when main-worktree lookup runs outside a git
   withTempAgentConfigTree(({ configPath, targetPath }) => {
     const warnings = [];
 
-    const config = readAgentConfig(configPath, {
+    const config = readAgentConfig(configPath, { configuration: resolveConfiguration(process.env),
       mergeLocal: true,
       targetPath,
       warn: message => warnings.push(message)
@@ -542,7 +543,7 @@ test('readAgentConfig can merge local blocklists when caller passes the default 
     const targetPath = path.join(tmpRoot, 'agents.local.json');
     fs.writeFileSync(targetPath, JSON.stringify({ blocklist: { custom: true } }));
     const explicitPath = path.join(import.meta.dirname, '..', '..', '..', 'config', 'agents.json');
-    const config = readAgentConfig(explicitPath, { mainWorktreePath: null, targetPath });
+    const config = readAgentConfig(explicitPath, { configuration: resolveConfiguration(process.env), mainWorktreePath: null, targetPath });
     assert.ok(config);
     assert.ok(config.blocklist);
     assert.equal(config.blocklist.custom, true);
@@ -559,7 +560,7 @@ test('eligibleAgentsForStep returns config list for a known step', () => {
       draft: { eligible: ['codex', 'gemini'], selection: 'random' }
     }
   };
-  assert.deepEqual(eligibleAgentsForStep('draft', { config }), ['codex', 'gemini']);
+  assert.deepEqual(eligibleAgentsForStep('draft', { configuration: resolveConfiguration(process.env), config }), ['codex', 'gemini']);
 });
 
 test('eligibleAgentsForStep filters out blocked agents', () => {
@@ -571,7 +572,7 @@ test('eligibleAgentsForStep filters out blocked agents', () => {
       claude: true
     }
   };
-  assert.deepEqual(eligibleAgentsForStep('draft', { config }), ['gemini', 'codex']);
+  assert.deepEqual(eligibleAgentsForStep('draft', { configuration: resolveConfiguration(process.env), config }), ['gemini', 'codex']);
 });
 
 test('eligibleAgentsForStep honors migrated local blocklists', () => {
@@ -580,14 +581,14 @@ test('eligibleAgentsForStep honors migrated local blocklists', () => {
     fs.writeFileSync(localPath, JSON.stringify({ blocklist: { gemini: true } }));
 
     assert.deepEqual(
-      eligibleAgentsForStep('draft', { configPath, mergeLocal: true, mainWorktreePath, targetPath }),
+      eligibleAgentsForStep('draft', { configuration: resolveConfiguration(process.env), configPath, mergeLocal: true, mainWorktreePath, targetPath }),
       ['codex']
     );
   });
 });
 
 test('eligibleAgentsForStep falls back to all supported agents when config is absent', () => {
-  const eligible = eligibleAgentsForStep('draft', { config: null });
+  const eligible = eligibleAgentsForStep('draft', { configuration: resolveConfiguration(process.env), config: null });
   assert.ok(eligible.includes('codex'));
   assert.ok(eligible.includes('claude'));
   assert.ok(eligible.includes('vibe'));
@@ -595,7 +596,7 @@ test('eligibleAgentsForStep falls back to all supported agents when config is ab
 
 test('eligibleAgentsForStep falls back when step is not in config', () => {
   const config = { steps: {} };
-  const eligible = eligibleAgentsForStep('active', { config });
+  const eligible = eligibleAgentsForStep('active', { configuration: resolveConfiguration(process.env), config });
   assert.ok(Array.isArray(eligible));
   assert.ok(eligible.length > 0);
 });
@@ -620,7 +621,7 @@ test('eligibleAgentsForStep reads a changed eligible list from the working-tree 
     );
     process.chdir(tmpRoot);
     // No config passed in: the default CONFIG_PATH must resolve from cwd.
-    const eligible = eligibleAgentsForStep('draft', { mergeLocal: false });
+    const eligible = eligibleAgentsForStep('draft', { configuration: resolveConfiguration(process.env), mergeLocal: false });
     assert.deepEqual(eligible, distinct);
   } finally {
     process.chdir(previousCwd);
@@ -644,7 +645,7 @@ test('selectAgent honors a changed eligible list from the working-tree config/ag
     );
     process.chdir(tmpRoot);
     withPathLaunchers({ vibe: 'process.exit(0);' }, () => {
-      const agent = selectAgent('draft', { mergeLocal: false });
+      const agent = selectAgent('draft', { configuration: resolveConfiguration(process.env), mergeLocal: false });
       assert.equal(agent, 'vibe', 'a changed working-tree eligible list must govern selection');
     });
   } finally {
@@ -661,7 +662,7 @@ test('selectAgent respects WORKFLOW_AGENT env override', () => {
   const previous = process.env.WORKFLOW_AGENT;
   process.env.WORKFLOW_AGENT = 'codex';
   try {
-    const agent = selectAgent('draft', { config: {} });
+    const agent = selectAgent('draft', { configuration: resolveConfiguration(process.env), config: {} });
     assert.equal(agent, 'codex');
   } finally {
     if (previous === undefined) delete process.env.WORKFLOW_AGENT;
@@ -687,9 +688,9 @@ test('selectAgent bypasses WORKFLOW_AGENT override when it is in the exclude set
           }
         };
         // First call: no exclude → returns the pinned override.
-        assert.equal(selectAgent('review', { config }), 'claude');
+        assert.equal(selectAgent('review', { configuration: resolveConfiguration(process.env), config }), 'claude');
         // Second call: claude in exclude (post-limit-hit) → must NOT return claude.
-        const next = selectAgent('review', { config, exclude: new Set(['claude']) });
+        const next = selectAgent('review', { configuration: resolveConfiguration(process.env), config, exclude: new Set(['claude']) });
         assert.equal(next, 'codex');
       });
     });
@@ -720,7 +721,7 @@ test('selectAgent ignores WORKFLOW_AGENT override when the pinned agent is not i
             review: { eligible: ['codex'], selection: 'random' }
           }
         };
-        const agent = selectAgent('review', { config });
+        const agent = selectAgent('review', { configuration: resolveConfiguration(process.env), config });
         assert.equal(agent, 'codex', 'override outside the eligible pool must fall through to normal selection');
 
         // Override is eligible but blocked → still must fall through.
@@ -730,7 +731,7 @@ test('selectAgent ignores WORKFLOW_AGENT override when the pinned agent is not i
           },
           blocklist: { claude: { until: '2099-12-31 23' } }
         };
-        const fallback = selectAgent('review', { config: blockedConfig });
+        const fallback = selectAgent('review', { configuration: resolveConfiguration(process.env), config: blockedConfig });
         assert.equal(fallback, 'codex', 'override that is hard-blocked must fall through');
       });
     });
@@ -752,7 +753,7 @@ test('selectAgent throws when WORKFLOW_AGENT override is excluded and pool is em
       }
     };
     assert.throws(
-      () => selectAgent('review', { config, exclude: new Set(['claude']) }),
+      () => selectAgent('review', { configuration: resolveConfiguration(process.env), config, exclude: new Set(['claude']) }),
       /exhausted/i
     );
   } finally {
@@ -774,7 +775,7 @@ test('selectAgent picks from eligible list when no env override', () => {
             draft: { eligible: ['codex'], selection: 'random' }
           }
         };
-        const agent = selectAgent('draft', { config });
+        const agent = selectAgent('draft', { configuration: resolveConfiguration(process.env), config });
         assert.equal(agent, 'codex');
       });
     });
@@ -795,7 +796,7 @@ test('selectAgent excludes a draft agent blocked by workflow/config/agents.local
           const localPath = path.join(configDir, 'agents.local.json');
           fs.writeFileSync(localPath, JSON.stringify({ blocklist: { gemini: true } }));
 
-          const agent = selectAgent('draft', { configPath, mergeLocal: true, mainWorktreePath, targetPath });
+          const agent = selectAgent('draft', { configuration: resolveConfiguration(process.env), configPath, mergeLocal: true, mainWorktreePath, targetPath });
           assert.equal(agent, 'codex');
         });
       });
@@ -814,7 +815,7 @@ test('selectAgent fails fast when effective agent config is malformed', () => {
       fs.writeFileSync(targetPath, '{ "blocklist": { "gemini": { "until": "2026-04-25 16" }, } }\n');
 
       assert.throws(
-        () => selectAgent('draft', { configPath, mergeLocal: true, mainWorktreePath, targetPath }),
+        () => selectAgent('draft', { configuration: resolveConfiguration(process.env), configPath, mergeLocal: true, mainWorktreePath, targetPath }),
         /Fix or remove the malformed file before running workflow commands/
       );
     });
@@ -832,7 +833,7 @@ test('selectAgent throws when eligible list is empty', () => {
         draft: { eligible: [], selection: 'random' }
       }
     };
-    assert.throws(() => selectAgent('draft', { config }), /No agents are eligible/);
+    assert.throws(() => selectAgent('draft', { configuration: resolveConfiguration(process.env), config }), /No agents are eligible/);
   } finally {
     if (previous !== undefined) process.env.WORKFLOW_AGENT = previous;
   }
@@ -849,7 +850,7 @@ test('selectAgent throws with a clear message when all eligible agents are unsup
         }
       };
       assert.throws(
-        () => selectAgent('draft', { config }),
+        () => selectAgent('draft', { configuration: resolveConfiguration(process.env), config }),
         /No eligible agents have a working launcher/
       );
     });
@@ -870,7 +871,7 @@ test('selectAgent random result is always within the eligible-and-supported set'
         }
       };
       for (let i = 0; i < 10; i++) {
-        const agent = selectAgent('draft', { config });
+        const agent = selectAgent('draft', { configuration: resolveConfiguration(process.env), config });
         assert.equal(agent, 'claude', `Expected only claude (codex blocked), got: ${agent}`);
       }
     });
@@ -893,7 +894,7 @@ test('selectAgent weighted result always stays within the available set', () => 
       }
     };
     for (let i = 0; i < 30; i++) {
-      const agent = selectAgent('active', { config });
+      const agent = selectAgent('active', { configuration: resolveConfiguration(process.env), config });
       assert.ok(
         ['codex', 'claude', 'gemini'].includes(agent),
         `Weighted result out of eligible set: ${agent}`
@@ -917,10 +918,10 @@ test('a help probe timeout keeps the present launcher eligible for a real launch
   setLauncherHealthProbe(() => ({ ok: false, reason: 'ETIMEDOUT' }));
   try {
     withPathLaunchers({ pi: 'process.exit(0);' }, () => {
-      const status = workflowLauncherStatus('pi');
+      const status = workflowLauncherStatus('pi', undefined, resolveConfiguration(process.env));
       assert.equal(status.supported, true);
       assert.equal(status.health, 'probe-timeout');
-      assert.doesNotThrow(() => assertAgentSupported('custom'));
+      assert.doesNotThrow(() => assertAgentSupported('custom', undefined, resolveConfiguration(process.env)));
     });
   } finally { setLauncherHealthProbe(() => ({ ok: true })); }
 });
@@ -931,7 +932,7 @@ test('workflowLauncherStatus rejects a launcher that exists but fails its health
   await withPathLaunchers({
     codex: 'process.exit(process.argv.includes("--help") ? 1 : 0);'
   }, () => withRealHealthProbe(() => {
-    const status = workflowLauncherStatus('codex');
+    const status = workflowLauncherStatus('codex', undefined, resolveConfiguration(process.env));
     assert.equal(status.supported, false);
     assert.equal(status.health, 'probe-failed');
     // We don't assert on the exact reason (exit 1 vs EACCES) to remain platform-agnostic
@@ -955,7 +956,7 @@ test('workflowLauncherStatus probes Pi with its side-effect-free version command
     withPathLaunchers({
       pi: 'process.exit(process.argv.includes("--version") ? 0 : 1);'
     }, () => {
-      const status = workflowLauncherStatus('pi');
+      const status = workflowLauncherStatus('pi', undefined, resolveConfiguration(process.env));
       assert.deepEqual(probes, [['--version']]);
       assert.equal(status.supported, true);
       assert.equal(status.health, 'ok');
@@ -975,7 +976,7 @@ test('selectAgent bypasses a broken launcher even when the binary exists', async
           review: { eligible: ['codex', 'claude'], selection: 'random' }
         }
       };
-      const agent = selectAgent('review', { config });
+      const agent = selectAgent('review', { configuration: resolveConfiguration(process.env), config });
       assert.equal(agent, 'claude');
     }));
   } finally {
@@ -988,7 +989,7 @@ test('selectAgent bypasses a broken launcher even when the binary exists', async
 
 test('assertAgentSupported throws loudly for an unknown agent name', () => {
   assert.throws(
-    () => assertAgentSupported('unknown-agent'),
+    () => assertAgentSupported('unknown-agent', undefined, resolveConfiguration(process.env)),
     /Unknown agent: "unknown-agent"/
   );
 });
@@ -996,7 +997,7 @@ test('assertAgentSupported throws loudly for an unknown agent name', () => {
 // ---------- Claude launcher ----------
 
 test('buildClaudeInvocation uses --dangerously-skip-permissions -p in the worktree', () => {
-  const invocation = buildClaudeInvocation({
+  const invocation = buildClaudeInvocation({ configuration: resolveConfiguration(process.env),
     prompt: 'Execute the mission.',
     worktree: '/tmp/mission-task-088'
   });
@@ -1015,7 +1016,7 @@ test('buildClaudeInvocation uses --dangerously-skip-permissions -p in the worktr
 });
 
 test('buildClaudeInvocation inserts --continue before -p when resume is true', () => {
-  const invocation = buildClaudeInvocation({
+  const invocation = buildClaudeInvocation({ configuration: resolveConfiguration(process.env),
     prompt: 'Continue the mission.',
     worktree: '/tmp/mission-task-1025',
     resume: true
@@ -1034,7 +1035,7 @@ test('buildClaudeInvocation inserts --continue before -p when resume is true', (
 });
 
 test('buildClaudeInvocation uses --resume <id> when resume is true and sessionId is provided', () => {
-  const invocation = buildClaudeInvocation({
+  const invocation = buildClaudeInvocation({ configuration: resolveConfiguration(process.env),
     prompt: 'Resume the mission.',
     worktree: '/tmp/mission-task-1025',
     resume: true,
@@ -1055,7 +1056,7 @@ test('buildClaudeInvocation uses --resume <id> when resume is true and sessionId
 });
 
 test('buildClaudeInvocation ignores sessionId when resume is false (cross-family isolation)', () => {
-  const invocation = buildClaudeInvocation({
+  const invocation = buildClaudeInvocation({ configuration: resolveConfiguration(process.env),
     prompt: 'Fresh launch.',
     worktree: '/tmp/mission-task-1025',
     resume: false,
@@ -1074,13 +1075,13 @@ test('buildClaudeInvocation ignores sessionId when resume is false (cross-family
 });
 
 test('resolveClaudeCommand returns bare claude', () => {
-  assert.equal(resolveClaudeCommand(), 'claude');
+  assert.equal(resolveClaudeCommand(resolveConfiguration(process.env)), 'claude');
 });
 
 test('startAgent calls onLaunch callback immediately after process launch', async () => {
   const launches = [];
   let launchLoggedAtMs = Number.POSITIVE_INFINITY;
-  const result = await startAgent('review', {
+  const result = await startAgent('review', { configuration: resolveConfiguration(process.env),
     prompt: 'test',
     selectAgentFn: () => 'claude',
     log: (message) => {
@@ -1109,7 +1110,7 @@ test('a rejecting onLaunch stops the already-spawned agent child (TASK-2582 F4)'
     }, async () => {
       let childPid: number | null = null;
       await assert.rejects(
-        startAgent('active', {
+        startAgent('active', { configuration: resolveConfiguration(process.env),
           agent: 'custom',
           prompt: 'Execute.',
           worktree: tmpRoot,
@@ -1149,7 +1150,7 @@ test('the active deadline starts at the real spawn, excluding slow pre-spawn lau
     let boundaryStartMs: number | null = null;
     const preLaunchMs = performance.now();
     await assert.rejects(
-      startAgent('active', {
+      startAgent('active', { configuration: resolveConfiguration(process.env),
         agent: 'custom',
         prompt: 'Execute.',
         worktree: tmpRoot,
@@ -1198,7 +1199,7 @@ test('startAgent logs no-output diagnostics with agent, step, and child pid', as
       opencode: 'if (process.argv.includes("--help")) process.exit(0); setTimeout(() => process.exit(0), 75);'
     }, async () => {
       const log = [];
-      const result = await startAgent('active', {
+      const result = await startAgent('active', { configuration: resolveConfiguration(process.env),
         agent: 'custom',
         prompt: 'Execute.',
         worktree: tmpRoot,
@@ -1229,7 +1230,7 @@ test('startAgent summarizes the prompt in the launch echo and restores it under 
   delete process.env.DEBUG;
   try {
     const log = [];
-    await startAgent('review', {
+    await startAgent('review', { configuration: resolveConfiguration(process.env),
       prompt: 'Mode: review.\nSecret harness paragraph nobody reads.',
       selectAgentFn: () => 'claude',
       log: msg => log.push(msg)
@@ -1241,7 +1242,7 @@ test('startAgent summarizes the prompt in the launch echo and restores it under 
 
     process.env.DEBUG = '1';
     const debugLog = [];
-    await startAgent('review', {
+    await startAgent('review', { configuration: resolveConfiguration(process.env),
       prompt: 'Mode: review.\nSecret harness paragraph nobody reads.',
       selectAgentFn: () => 'claude',
       log: msg => debugLog.push(msg)
@@ -1262,7 +1263,7 @@ test('startAgent stays quiet while the agent is still streaming output', async (
       opencode: 'if (process.argv.includes("--help")) process.exit(0); const t = setInterval(() => process.stdout.write("working\\n"), 10); setTimeout(() => { clearInterval(t); process.exit(0); }, 200);'
     }, async () => {
       const log = [];
-      const result = await startAgent('active', {
+      const result = await startAgent('active', { configuration: resolveConfiguration(process.env),
         agent: 'custom',
         prompt: 'Execute.',
         worktree: tmpRoot,
@@ -1288,7 +1289,7 @@ test('startAgent stays quiet while the agent is still streaming output', async (
 // ---------- Mistral launcher ----------
 test('buildVibeInvocation uses --prompt --trust --output text in the worktree', () => {
 
-  const invocation = buildVibeInvocation({
+  const invocation = buildVibeInvocation({ configuration: resolveConfiguration(process.env),
     prompt: 'Execute the mission.',
     worktree: '/tmp/mission-task-1117'
   });
@@ -1315,7 +1316,7 @@ test('extractVibeSessionId returns null (vibe has no stdout resume hint)', () =>
 
 // ---------- startAgent FORGEJO_USER propagation ----------
 test('startAgent injects FORGEJO_USER into subprocess env', async () => {
-  const result = await startAgent('review', {
+  const result = await startAgent('review', { configuration: resolveConfiguration(process.env),
     prompt: 'Execute the mission.',
     worktree: '/tmp/mission-task-095',
     agent: 'codex',
@@ -1330,7 +1331,7 @@ test('startAgent injects FORGEJO_USER into subprocess env', async () => {
 });
 
 test('startDraftAgent injects FORGEJO_USER into subprocess env', async () => {
-  const result = await startDraftAgent({
+  const result = await startDraftAgent({ configuration: resolveConfiguration(process.env),
     prompt: 'Execute the mission.',
     worktree: '/tmp/mission-task-095',
     agent: 'claude',
@@ -1344,7 +1345,7 @@ test('startDraftAgent injects FORGEJO_USER into subprocess env', async () => {
 });
 
 test('startAgent merges caller-supplied env with FORGEJO_USER', async () => {
-  const result = await startAgent('review', {
+  const result = await startAgent('review', { configuration: resolveConfiguration(process.env),
     prompt: 'Execute the mission.',
     worktree: '/tmp/mission-task-095',
     agent: 'codex',
@@ -1364,7 +1365,7 @@ test('startAgent merges caller-supplied env with FORGEJO_USER', async () => {
 test('startAgent harness identity wins over caller-supplied FORGEJO_USER', async () => {
   // Regression: merge order must be { ...env, FORGEJO_USER: agent } so a
   // conflicting caller-supplied FORGEJO_USER cannot override the harness selection.
-  const result = await startAgent('review', {
+  const result = await startAgent('review', { configuration: resolveConfiguration(process.env),
     prompt: 'Execute the mission.',
     worktree: '/tmp/mission-task-095',
     agent: 'codex',
@@ -1377,7 +1378,7 @@ test('startAgent harness identity wins over caller-supplied FORGEJO_USER', async
 });
 
 test('startAgent supports a function for prompt and calls it with chosen agent', async () => {
-  const result = await startAgent('review', {
+  const result = await startAgent('review', { configuration: resolveConfiguration(process.env),
     prompt: (chosen) => `You are ${chosen}.`,
     worktree: '/tmp/mission-task-1051',
     agent: 'codex',
@@ -1394,7 +1395,7 @@ test('startAgent reroutes when the selected agent has no launcher (missing binar
   const worktree = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-reroute-missing-'));
   try {
     const log = [];
-    const result = await withCommandPathProbe(['claude'], () => startAgent('draft', {
+    const result = await withCommandPathProbe(['claude'], () => startAgent('draft', { configuration: resolveConfiguration(process.env),
       prompt: 'Execute',
       worktree,
       selectAgentFn: (step, opts) => {
@@ -1420,7 +1421,7 @@ test('startAgent reroutes when the selected agent fails its health probe', async
       codex: 'process.exit(process.argv.includes("--help") ? 1 : 0);'
     }, async () => {
       const log = [];
-      const launchResult = await startAgent('draft', {
+      const launchResult = await startAgent('draft', { configuration: resolveConfiguration(process.env),
         prompt: 'Execute',
         worktree,
         selectAgentFn: (step, opts) => {
@@ -1449,7 +1450,7 @@ test('startAgent with pinnedAgent fails instead of rerouting when the launcher i
     let reselected = false;
     await withCommandPathProbe(['claude'], async () => {
       await assert.rejects(
-        () => startAgent('conflict-resolution', {
+        () => startAgent('conflict-resolution', { configuration: resolveConfiguration(process.env),
           prompt: 'Execute',
           worktree,
           agent: 'codex',
@@ -1475,7 +1476,7 @@ test('startAgent with pinnedAgent fails instead of rerouting when the launcher i
 test('startAgent with pinnedAgent fails instead of rerouting when the agent is blocked', async () => {
   let reselected = false;
   await assert.rejects(
-    () => startAgent('conflict-resolution', {
+    () => startAgent('conflict-resolution', { configuration: resolveConfiguration(process.env),
       prompt: 'Execute',
       worktree: '/tmp/mission-task-2294',
       agent: 'codex',
@@ -1497,7 +1498,7 @@ test('startAgent with pinnedAgent fails instead of rerouting when the agent is b
 test('startAgent with pinnedAgent returns the pinned agent failure instead of retrying another family', async () => {
   const log = [];
   let reselected = false;
-  const result = await startAgent('conflict-resolution', {
+  const result = await startAgent('conflict-resolution', { configuration: resolveConfiguration(process.env),
     prompt: 'Execute',
     worktree: '/tmp/mission-task-2294',
     agent: 'codex',
@@ -1521,7 +1522,7 @@ test('startAgent without pinnedAgent keeps rerouting a pinned-by-override agent'
   // elsewhere still get their one fallback retry.
   const worktree = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-unpinned-missing-'));
   try {
-    const result = await withCommandPathProbe(['claude'], () => startAgent('draft', {
+    const result = await withCommandPathProbe(['claude'], () => startAgent('draft', { configuration: resolveConfiguration(process.env),
       prompt: 'Execute',
       worktree,
       agent: 'codex',
@@ -1537,7 +1538,7 @@ test('startAgent without pinnedAgent keeps rerouting a pinned-by-override agent'
 
 test('startAgent fails loudly when an unknown agent is requested', async () => {
   try {
-    await startAgent('draft', {
+    await startAgent('draft', { configuration: resolveConfiguration(process.env),
       agent: 'unknown-agent-typo',
       isAgentBlockedFn: () => false
     });
@@ -1549,7 +1550,7 @@ test('startAgent fails loudly when an unknown agent is requested', async () => {
 });
 
 test('startDraftAgent harness identity wins over caller-supplied FORGEJO_USER', async () => {
-  const result = await startDraftAgent({
+  const result = await startDraftAgent({ configuration: resolveConfiguration(process.env),
     prompt: 'Execute the mission.',
     worktree: '/tmp/mission-task-095',
     agent: 'claude',
@@ -1563,7 +1564,7 @@ test('startDraftAgent harness identity wins over caller-supplied FORGEJO_USER', 
 // ---------- Codex launcher ----------
 
 test('buildCodexDraftInvocation uses the native sandbox only when requested', () => {
-  const invocation = buildCodexDraftInvocation({
+  const invocation = buildCodexDraftInvocation({ configuration: resolveConfiguration(process.env),
     prompt: 'Execute the mission.',
     worktree: '/tmp/mission-task-088',
     interactive: false,
@@ -1591,14 +1592,14 @@ test('buildCodexDraftInvocation uses the native sandbox only when requested', ()
 });
 
 test('resolveCodexCommand returns bare codex', () => {
-  assert.equal(resolveCodexCommand(), 'codex');
+  assert.equal(resolveCodexCommand(resolveConfiguration(process.env)), 'codex');
 });
 
 // ---------- Opencode (custom) launcher ----------
 
 test('buildOpencodeInvocation omits --continue when resume is false', () => {
   __setJsonFormatSupportForTest(true);
-  const invocation = buildOpencodeInvocation({
+  const invocation = buildOpencodeInvocation({ configuration: resolveConfiguration(process.env),
     prompt: 'Execute the mission.',
     worktree: '/tmp/visualBoard-task-1010'
   });
@@ -1617,7 +1618,7 @@ test('buildOpencodeInvocation omits --continue when resume is false', () => {
 
 test('buildOpencodeInvocation uses --continue when resume is true and no sessionId', () => {
   __setJsonFormatSupportForTest(true);
-  const invocation = buildOpencodeInvocation({
+  const invocation = buildOpencodeInvocation({ configuration: resolveConfiguration(process.env),
     prompt: 'Continue the mission.',
     worktree: '/tmp/visualBoard-task-1010',
     resume: true
@@ -1636,7 +1637,7 @@ test('buildOpencodeInvocation uses --continue when resume is true and no session
 
 test('buildOpencodeInvocation uses -s <sessionId> when resume is true and sessionId is provided', () => {
   __setJsonFormatSupportForTest(true);
-  const invocation = buildOpencodeInvocation({
+  const invocation = buildOpencodeInvocation({ configuration: resolveConfiguration(process.env),
     prompt: 'Resume the mission.',
     worktree: '/tmp/visualBoard-task-1010',
     resume: true,
@@ -1657,7 +1658,7 @@ test('buildOpencodeInvocation uses -s <sessionId> when resume is true and sessio
 
 test('buildOpencodeInvocation ignores sessionId when resume is false (cross-family isolation)', () => {
   __setJsonFormatSupportForTest(true);
-  const invocation = buildOpencodeInvocation({
+  const invocation = buildOpencodeInvocation({ configuration: resolveConfiguration(process.env),
     prompt: 'Fresh launch.',
     worktree: '/tmp/visualBoard-task-1010',
     resume: false,
@@ -1696,7 +1697,7 @@ test('startAgent passes resume:false to claude on the first launch and writes a 
       delete: () => {}
     };
 
-    const result = await startAgent('active', {
+    const result = await startAgent('active', { configuration: resolveConfiguration(process.env),
       prompt: 'Execute the mission.',
       worktree: tmpRoot,
       agent: 'claude',
@@ -1731,7 +1732,7 @@ test('startAgent rejects instead of reporting launch success when session persis
     delete: () => {}
   };
   await assert.rejects(
-    () => startAgent('active', {
+    () => startAgent('active', { configuration: resolveConfiguration(process.env),
       prompt: 'Execute the mission.',
       worktree: '/tmp/task-2222-session-failure',
       agent: 'claude',
@@ -1765,7 +1766,7 @@ test('startAgent passes resume:true to claude when a matching marker exists', as
       delete: () => {}
     };
 
-    const result = await startAgent('act-on-review', {
+    const result = await startAgent('act-on-review', { configuration: resolveConfiguration(process.env),
       prompt: 'Address review.',
       worktree: tmpRoot,
       agent: 'claude',
@@ -1809,7 +1810,7 @@ test('startAgent does not pass --continue to non-resume-capable launchers even w
       delete: () => {}
     };
 
-    const result = await startAgent('act-on-review', {
+    const result = await startAgent('act-on-review', { configuration: resolveConfiguration(process.env),
       prompt: 'Address review.',
       worktree: tmpRoot,
       agent: 'codex',
@@ -1844,7 +1845,7 @@ test('startAgent maps reviewer to review and forwards the checked port to the la
   };
   let launcherOptions;
 
-  await startAgent('review', {
+  await startAgent('review', { configuration: resolveConfiguration(process.env),
     prompt: 'Review the mission.',
     worktree: '/tmp/task-2322-review-role',
     agent: 'claude',
@@ -1870,7 +1871,7 @@ test('startAgent maps reviewer to review and forwards the checked port to the la
 test('startAgent rejects unsupported session marker roles before launching', async () => {
   let launched = false;
   await assert.rejects(
-    () => startAgent('review', {
+    () => startAgent('review', { configuration: resolveConfiguration(process.env),
       prompt: 'Review the mission.',
       worktree: '/tmp/task-2322-unknown-role',
       agent: 'claude',
@@ -1904,14 +1905,14 @@ test('custom is registered in LAUNCHERS and RESOLVERS', () => {
   // workflowLauncherStatus resolves "custom" to its configured runner (opencode/pi)
   // even without a worktree (resolveCustomRunner defaults to process.cwd()), so
   // the reported agent is the effective runner, not the literal family name.
-  const status = agents.workflowLauncherStatus('custom');
+  const status = agents.workflowLauncherStatus('custom', undefined, resolveConfiguration(process.env));
   assert.ok(['opencode', 'pi'].includes(status.agent), `expected custom to resolve to a real runner, got: ${status.agent}`);
 });
 
 // ---------- Codex resume threading with specific session ID ----------
 
 test('buildCodexDraftInvocation uses specific session ID when provided with resume', () => {
-  const inv = buildCodexDraftInvocation({
+  const inv = buildCodexDraftInvocation({ configuration: resolveConfiguration(process.env),
     prompt: 'test prompt',
     worktree: '/tmp/test',
     resume: true,
@@ -1924,7 +1925,7 @@ test('buildCodexDraftInvocation uses specific session ID when provided with resu
 });
 
 test('buildCodexDraftInvocation falls back to --last when sessionId is null', () => {
-  const inv = buildCodexDraftInvocation({
+  const inv = buildCodexDraftInvocation({ configuration: resolveConfiguration(process.env),
     prompt: 'test prompt',
     worktree: '/tmp/test',
     resume: true,
@@ -1936,7 +1937,7 @@ test('buildCodexDraftInvocation falls back to --last when sessionId is null', ()
 });
 
 test('buildCodexDraftInvocation does not use resume path when resume is false', () => {
-  const inv = buildCodexDraftInvocation({
+  const inv = buildCodexDraftInvocation({ configuration: resolveConfiguration(process.env),
     prompt: 'test prompt',
     worktree: '/tmp/test',
     resume: false,
@@ -1978,7 +1979,7 @@ test('selectAgent active-step excludes claude blocked with a future local-hour t
       blocklist: { claude: { until: future } }
     };
     for (let i = 0; i < 10; i++) {
-      const agent = selectAgent('active', { config });
+      const agent = selectAgent('active', { configuration: resolveConfiguration(process.env), config });
       assert.equal(agent, 'codex', `Expected codex (claude timed-blocked until ${future}), got: ${agent}`);
     }
   } finally {
@@ -1995,7 +1996,7 @@ test('selectAgent active-step excludes claude when permanently blocked', () => {
       blocklist: { claude: true }
     };
     for (let i = 0; i < 10; i++) {
-      const agent = selectAgent('active', { config });
+      const agent = selectAgent('active', { configuration: resolveConfiguration(process.env), config });
       assert.equal(agent, 'codex', `Expected codex when claude is permanently blocked, got: ${agent}`);
     }
   } finally {
@@ -2017,7 +2018,7 @@ test('selectAgent active-step applies main-worktree agents.local.json block befo
       fs.writeFileSync(mainLocalPath, JSON.stringify({ blocklist: { claude: { until: future } } }));
 
       // Read config the same way active.js does: readAgentConfig with mergeLocal
-      const agentConfig = readAgentConfig(configPath, { mergeLocal: true, mainWorktreePath, targetPath });
+      const agentConfig = readAgentConfig(configPath, { configuration: resolveConfiguration(process.env), mergeLocal: true, mainWorktreePath, targetPath });
       assert.ok(
         agentConfig.blocklist && agentConfig.blocklist.claude,
         'main-worktree agents.local.json block for claude must be merged into agentConfig'
@@ -2029,7 +2030,7 @@ test('selectAgent active-step applies main-worktree agents.local.json block befo
         blocklist: agentConfig.blocklist
       };
       for (let i = 0; i < 5; i++) {
-        const agent = selectAgent('active', { config: activeConfig });
+        const agent = selectAgent('active', { configuration: resolveConfiguration(process.env), config: activeConfig });
         assert.equal(
           agent, 'codex',
           `selectAgent must not return claude when blocked via main-worktree agents.local.json; got: ${agent}`
@@ -2054,7 +2055,7 @@ test('startAgent retries with next agent when first agent exits non-zero (launch
 
       const result = await withPathLaunchers({
         opencode: 'if (process.argv.includes("--help")) process.exit(0); console.error("Error: Model not found"); process.exit(1);'
-      }, () => startAgent('draft', {
+      }, () => startAgent('draft', { configuration: resolveConfiguration(process.env),
         prompt: 'Execute the mission.',
         worktree: tmpRoot,
         selectAgentFn: (step, opts) => {
@@ -2089,7 +2090,7 @@ test('startAgent attempts at least 3 eligible agents before giving up (SC 3)', a
         opencode: 'if (process.argv.includes("--help")) process.exit(0); process.exit(1);',
         vibe: 'if (process.argv.includes("--help")) process.exit(0); process.exit(1);',
         codex: 'if (process.argv.includes("--help")) process.exit(0); process.exit(1);'
-      }, () => startAgent('draft', {
+      }, () => startAgent('draft', { configuration: resolveConfiguration(process.env),
         prompt: 'Execute.',
         worktree: tmpRoot,
         selectAgentFn: (step, opts) => {
@@ -2134,7 +2135,7 @@ test('startAgent retries when first agent fails with non-zero exit code', async 
       const result = await withPathLaunchers({
         opencode: 'if (process.argv.includes("--help")) process.exit(0); process.exit(1);',
         vibe: 'if (process.argv.includes("--help")) process.exit(0); process.exit(0);'
-      }, () => startAgent('draft', {
+      }, () => startAgent('draft', { configuration: resolveConfiguration(process.env),
         prompt: 'Execute.',
         worktree: tmpRoot,
         selectAgentFn: (step, opts) => {
@@ -2171,7 +2172,7 @@ test('startAgent launch failure includes stderr snippet in log', async () => {
       const result = await withPathLaunchers({
         opencode: 'if (process.argv.includes("--help")) process.exit(0); process.stderr.write("Error: Model not found\\n"); process.exit(1);',
         vibe: 'if (process.argv.includes("--help")) process.exit(0); process.exit(0);'
-      }, () => startAgent('draft', {
+      }, () => startAgent('draft', { configuration: resolveConfiguration(process.env),
         prompt: 'Execute.',
         worktree: tmpRoot,
         selectAgentFn: (step, opts) => {
@@ -2202,7 +2203,7 @@ test('startAgent launch failure does not retry when limit-hit is detected', asyn
       const log = [];
       let limitHitCount = 0;
 
-      const result = await startAgent('draft', {
+      const result = await startAgent('draft', { configuration: resolveConfiguration(process.env),
         prompt: 'Execute.',
         worktree: tmpRoot,
         selectAgentFn: (step, opts) => {
@@ -2241,7 +2242,7 @@ test('startAgent launch failure with signal retries next agent', async () => {
       const result = await withPathLaunchers({
         opencode: 'if (process.argv.includes("--help")) process.exit(0); setTimeout(() => process.kill(process.pid, "SIGKILL"), 20);',
         vibe: 'if (process.argv.includes("--help")) process.exit(0); process.exit(0);'
-      }, () => startAgent('draft', {
+      }, () => startAgent('draft', { configuration: resolveConfiguration(process.env),
         prompt: 'Execute.',
         worktree: tmpRoot,
         selectAgentFn: (step, opts) => {
@@ -2267,16 +2268,16 @@ test('startAgent launch failure with signal retries next agent', async () => {
 test('resolveNoOutputWatchdogConfig returns draft-specific defaults when step is draft', () => {
 
   // Draft step defaults must be 15s initial / 30s interval.
-  const draftConfig = resolveNoOutputWatchdogConfig({}, 'draft');
+  const draftConfig = resolveNoOutputWatchdogConfig({}, 'draft', resolveConfiguration(process.env));
   assert.equal(draftConfig.initialDelayMs, 15_000, 'draft initial delay must be 15000ms');
   assert.equal(draftConfig.intervalMs, 30_000, 'draft interval must be 30000ms');
 
   // Non-draft step defaults must remain 60s initial / 60s interval.
-  const nullConfig = resolveNoOutputWatchdogConfig({}, null);
+  const nullConfig = resolveNoOutputWatchdogConfig({}, null, resolveConfiguration(process.env));
   assert.equal(nullConfig.initialDelayMs, 60_000, 'null step initial delay defaults to 60000ms');
   assert.equal(nullConfig.intervalMs, 60_000, 'null step interval defaults to 60000ms');
 
-  const activeConfig = resolveNoOutputWatchdogConfig({}, 'active');
+  const activeConfig = resolveNoOutputWatchdogConfig({}, 'active', resolveConfiguration(process.env));
   assert.equal(activeConfig.initialDelayMs, 60_000, 'active initial delay must be 60000ms');
   assert.equal(activeConfig.intervalMs, 60_000, 'active interval must be 60000ms');
 });
@@ -2296,7 +2297,7 @@ test('draft launch shows agent-stage in no-output watchdog messages', async () =
         opencode: 'if (process.argv.includes("--help")) process.exit(0); setTimeout(() => process.exit(0), 200);'
       }, async () => {
       const log = [];
-      const result = await startAgent('draft', {
+      const result = await startAgent('draft', { configuration: resolveConfiguration(process.env),
         agent: 'custom',
         prompt: 'Execute.',
         worktree: tmpRoot,
@@ -2328,7 +2329,7 @@ test('draft launch preserves the mission worktree in cwd and PWD for child CLIs'
     await withPathLaunchers({
       opencode: 'if (process.argv.includes("--help")) process.exit(0); process.stdout.write(JSON.stringify({ cwd: process.cwd(), pwd: process.env.PWD })); process.exit(0);'
     }, async () => {
-      const result = await startAgent('draft', {
+      const result = await startAgent('draft', { configuration: resolveConfiguration(process.env),
         agent: 'custom',
         prompt: 'Execute.',
         worktree: tmpRoot,
@@ -2363,7 +2364,7 @@ test('non-draft launch uses generic no-output watchdog', async () => {
         vibe: 'if (process.argv.includes("--help")) process.exit(0); setTimeout(() => process.exit(0), 200);'
       }, async () => {
       const log = [];
-      const result = await startAgent('active', {
+      const result = await startAgent('active', { configuration: resolveConfiguration(process.env),
         agent: 'vibe',
         prompt: 'Execute.',
         worktree: tmpRoot,
@@ -2402,7 +2403,7 @@ test('startAgent throws with clear error when all agents exhausted', async () =>
       const error = await withPathLaunchers({
         opencode: 'if (process.argv.includes("--help")) process.exit(0); process.exit(1);',
         vibe: 'if (process.argv.includes("--help")) process.exit(0); process.exit(1);'
-      }, () => startAgent('draft', {
+      }, () => startAgent('draft', { configuration: resolveConfiguration(process.env),
         prompt: 'Execute.',
         worktree: tmpRoot,
         selectAgentFn: (step, opts) => {
@@ -2434,7 +2435,7 @@ test('startAgent passes the resolved model to the launcher invocation', async (t
   t.after(() => fs.rmSync(worktree, { recursive: true, force: true }));
   const log = [];
   let launcherModel;
-  const result = await startAgent('review', {
+  const result = await startAgent('review', { configuration: resolveConfiguration(process.env),
     prompt: 'test',
     worktree,
     selectAgentFn: () => 'custom',
@@ -2461,7 +2462,7 @@ test('startAgent omits the model flag when resolveAgentModel returns null', asyn
   const worktree = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-model-'));
   t.after(() => fs.rmSync(worktree, { recursive: true, force: true }));
   let launcherModel;
-  const result = await startAgent('review', {
+  const result = await startAgent('review', { configuration: resolveConfiguration(process.env),
     prompt: 'test',
     worktree,
     selectAgentFn: () => 'custom',
@@ -2496,7 +2497,7 @@ test('non-limit launch failure with transient error retries without persisting a
     const error = await withPathLaunchers({
       opencode: 'if (process.argv.includes("--help")) process.exit(0); process.exit(1);',
       vibe: 'if (process.argv.includes("--help")) process.exit(0); process.exit(1);'
-    }, () => startAgent('draft', {
+    }, () => startAgent('draft', { configuration: resolveConfiguration(process.env),
       prompt: 'Execute.',
       worktree: tmpRoot,
       selectAgentFn: (step, opts) => {
@@ -2531,7 +2532,7 @@ test('invalid-model launch failure retries without persisting a blocklist entry'
     const result = await withPathLaunchers({
       codex: 'if (process.argv.includes("--help")) process.exit(0); process.stderr.write("Error: invalid model \\"typo-model\\"\\n"); process.exit(1);',
       vibe: 'if (process.argv.includes("--help")) process.exit(0); process.exit(0);'
-    }, () => startAgent('draft', {
+    }, () => startAgent('draft', { configuration: resolveConfiguration(process.env),
       prompt: 'Execute.',
       worktree: tmpRoot,
       selectAgentFn: (step, opts) => {
@@ -2565,7 +2566,7 @@ test('transient non-limit failures do not blocklist any family', async () => {
     const error = await withPathLaunchers({
       opencode: 'if (process.argv.includes("--help")) process.exit(0); process.exit(1);',
       vibe: 'if (process.argv.includes("--help")) process.exit(0); process.exit(1);'
-    }, () => startAgent('draft', {
+    }, () => startAgent('draft', { configuration: resolveConfiguration(process.env),
       prompt: 'Execute.',
       worktree: tmpRoot,
       selectAgentFn: (step, opts) => {
@@ -2600,7 +2601,7 @@ test('hard launch failure (model not found) does not blocklist agent family', as
     const error = await withPathLaunchers({
       opencode: 'if (process.argv.includes("--help")) process.exit(0); console.error("Error: model not found"); process.exit(1);',
       vibe: 'if (process.argv.includes("--help")) process.exit(0); console.error("Error: model not found"); process.exit(1);'
-    }, () => startAgent('draft', {
+    }, () => startAgent('draft', { configuration: resolveConfiguration(process.env),
       prompt: 'Execute.',
       worktree: tmpRoot,
       selectAgentFn: (step, opts) => {
@@ -2626,7 +2627,7 @@ test('auth launch failure names the family and asks the operator to refresh cred
   const logs: string[] = [];
   let calls = 0;
   try {
-    const result = await startAgent('draft', {
+    const result = await startAgent('draft', { configuration: resolveConfiguration(process.env),
       prompt: 'Execute.', worktree,
       selectAgentFn: () => calls++ === 0 ? 'claude' : 'vibe',
       detectLimitHitFn: () => null,
@@ -2645,7 +2646,7 @@ test('non-auth launch failure does not emit a credential-refresh diagnostic', as
   const logs: string[] = [];
   let calls = 0;
   try {
-    await startAgent('draft', {
+    await startAgent('draft', { configuration: resolveConfiguration(process.env),
       prompt: 'Execute.', worktree,
       selectAgentFn: () => calls++ === 0 ? 'claude' : 'vibe',
       detectLimitHitFn: () => null,
@@ -2694,7 +2695,7 @@ test('mistral without a non-interactive tool-approval bypass gets re-blocklisted
     process.exit(0);
   `;
 
-  const result = await withPathLaunchers({ vibe: vibeBody }, () => startAgent('active', {
+  const result = await withPathLaunchers({ vibe: vibeBody }, () => startAgent('active', { configuration: resolveConfiguration(process.env),
     prompt: 'Execute.',
     selectAgentFn: (step, opts) => {
       if (!opts.exclude.has('vibe')) return 'vibe';

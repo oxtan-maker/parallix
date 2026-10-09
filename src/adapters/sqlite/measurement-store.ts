@@ -1,3 +1,4 @@
+import type { ParallixConfiguration } from '../../application/ports/configuration.js';
 import fs from 'node:fs';
 
 import type {
@@ -344,8 +345,8 @@ const openStores = new Map<string, SqliteMeasurementStore>();
  * Throws `MeasurementStoreUnavailableError` when the database cannot be
  * opened — there is no CSV fallback.
  */
-export function resolveMeasurementStore(options: { readonly dbPath?: string; readonly home?: string } = {}): SqliteMeasurementStore {
-  const dbPath = options.dbPath ?? resolveDatabasePath({ home: options.home });
+export function resolveMeasurementStore(options: { readonly configuration?: ParallixConfiguration; readonly dbPath?: string; readonly home?: string } = {}): SqliteMeasurementStore {
+  const dbPath = options.dbPath ?? resolveDatabasePath({ home: options.home, configuration: options.configuration });
   const cached = openStores.get(dbPath);
   if (cached) {
     return cached;

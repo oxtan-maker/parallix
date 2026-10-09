@@ -2,6 +2,7 @@
 
 
 
+import { resolveConfiguration } from '../../../src/composition/config.js';
 import test, { mock } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'fs';
@@ -118,8 +119,8 @@ test('resolveMainRepo finds the master worktree', () => {
       }
       return { stdout: '' };
     };
-    assert.equal(resolveMainRepo(), '/tmp/main');
-    assert.equal(getPrimaryWorktree(), '/tmp/main');
+    assert.equal(resolveMainRepo(resolveConfiguration(process.env)), '/tmp/main');
+    assert.equal(getPrimaryWorktree(resolveConfiguration(process.env)), '/tmp/main');
   } finally {
     git.git = originalGit;
   }
@@ -129,8 +130,8 @@ test('resolveMainRepo honors PRIMARY_WORKTREE override', () => {
   const previous = process.env.PRIMARY_WORKTREE;
   process.env.PRIMARY_WORKTREE = `/tmp/override-${process.pid}`;
   try {
-    assert.equal(resolveMainRepo(), `/tmp/override-${process.pid}`);
-    assert.equal(getPrimaryWorktree(), `/tmp/override-${process.pid}`);
+    assert.equal(resolveMainRepo(resolveConfiguration(process.env)), `/tmp/override-${process.pid}`);
+    assert.equal(getPrimaryWorktree(resolveConfiguration(process.env)), `/tmp/override-${process.pid}`);
   } finally {
     if (previous === undefined) delete process.env.PRIMARY_WORKTREE;
     else process.env.PRIMARY_WORKTREE = previous;
@@ -162,7 +163,7 @@ test('resolveMainRepo falls back to the current checkout when it is already on t
     };
     git.getCurrentBranch = () => 'main';
 
-    assert.equal(resolveMainRepo(), '/tmp/testproj');
+    assert.equal(resolveMainRepo(resolveConfiguration(process.env)), '/tmp/testproj');
   } finally {
     git.git = originalGit;
     git.getCurrentBranch = originalGetCurrentBranch;
@@ -200,7 +201,7 @@ test('resolveMainRepo falls back to the standalone repo root when branch metadat
       };
       git.getCurrentBranch = () => '';
 
-      assert.equal(resolveMainRepo(), root);
+      assert.equal(resolveMainRepo(resolveConfiguration(process.env)), root);
     } finally {
       git.git = originalGit;
       git.getCurrentBranch = originalGetCurrentBranch;
@@ -227,7 +228,7 @@ test('resolveMainRepo (regression) throws when primary branch worktree is missin
       }
       return { stdout: '' };
     };
-    assert.throws(() => resolveMainRepo(), /Could not resolve primary repository/);
+    assert.throws(() => resolveMainRepo(resolveConfiguration(process.env)), /Could not resolve primary repository/);
   } finally {
     git.git = originalGit;
     if (previousPrimary !== undefined) process.env.PRIMARY_WORKTREE = previousPrimary;
@@ -373,7 +374,7 @@ test('resolveBaseWorktree delegates to the primary worktree when base equals pri
     fs.writeFileSync(path.join(missionDir, 'MISSION.md'), '# Mission: Primary path\n');
 
     try {
-      const worktree = resolveBaseWorktree('task-203', {
+      const worktree = resolveBaseWorktree('task-203', { configuration: resolveConfiguration(process.env),
         rootDir: root,
         gitFn: args => {
           if (args.includes('branch') && args.includes('--list')) {
@@ -401,7 +402,7 @@ test('resolveBaseWorktree auto-creates a worktree on the base branch when none i
 
     const calls = [];
     try {
-      const worktree = resolveBaseWorktree('task-204', {
+      const worktree = resolveBaseWorktree('task-204', { configuration: resolveConfiguration(process.env),
         rootDir: root,
         gitFn: args => {
           calls.push(args.join(' '));
@@ -441,7 +442,7 @@ test('resolveBaseWorktree returns an existing worktree already checked out on th
     fs.writeFileSync(path.join(missionDir, 'MISSION.md'), '# Mission: Feature branch\n\nBase-Branch: feat/y\n');
 
     try {
-      const worktree = resolveBaseWorktree('task-205', {
+      const worktree = resolveBaseWorktree('task-205', { configuration: resolveConfiguration(process.env),
         rootDir: root,
         gitFn: args => {
           if (args.includes('branch') && args.includes('--list')) {
@@ -476,7 +477,7 @@ test('resolveBaseWorktree fails fast with a base-branch message when the base do
 
     try {
       assert.throws(
-        () => resolveBaseWorktree('task-206', {
+        () => resolveBaseWorktree('task-206', { configuration: resolveConfiguration(process.env),
           rootDir: root,
           gitFn: args => {
             if (args.includes('branch') && args.includes('--list')) {

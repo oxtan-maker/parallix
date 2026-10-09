@@ -1,3 +1,4 @@
+import type { ParallixConfiguration } from '../../application/ports/configuration.js';
 import fs from 'node:fs';
 
 import { SqliteDatabaseAdapter } from './database-adapter.js';
@@ -24,8 +25,8 @@ export type StoredMissionLabels =
  * `DatabaseSync` handle on the operator database instead of the queued async
  * `SqliteMissionStore`. It never creates or migrates the database.
  */
-export function readStoredMissionLabels(slug: string, options: { readonly dbPath?: string } = {}): StoredMissionLabels {
-  const dbPath = options.dbPath ?? resolveDatabasePath();
+export function readStoredMissionLabels(slug: string, options: { readonly configuration?: ParallixConfiguration; readonly dbPath?: string } = {}): StoredMissionLabels {
+  const dbPath = options.dbPath ?? resolveDatabasePath({ configuration: options.configuration });
   if (!fs.existsSync(dbPath)) {
     return { kind: 'unavailable', reason: `no Mission database at ${dbPath}` };
   }

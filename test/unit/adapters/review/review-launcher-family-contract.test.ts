@@ -1,5 +1,7 @@
-import { reviewLoopReporter } from '../../../../src/adapters/review/review-loop-presentation.js';
 // @ts-nocheck -- Retained legacy partial request doubles (TASK-2328).
+import { resolveConfiguration } from '../../../../src/composition/config.js';
+const environment: NodeJS.ProcessEnv = { ...process.env };
+import { reviewLoopReporter } from '../../../../src/adapters/review/review-loop-presentation.js';
 // review launcher family contract.
 // Related scenarios share imports; each contract keeps its own hooks and mutable fixtures.
 import test from 'node:test';
@@ -41,9 +43,9 @@ import { mkdtemp as registeredMkdtemp } from '../../../helpers/temp-dir.js';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 const originalRandom = Math.random;
-const originalPath = process.env.PATH;
-const originalWorkflowAgent = process.env.WORKFLOW_AGENT;
-const originalCodexHome = process.env.CODEX_HOME;
+const originalPath = environment.PATH;
+const originalWorkflowAgent = environment.WORKFLOW_AGENT;
+const originalCodexHome = environment.CODEX_HOME;
 
 // Exercise the real configured selector with injected external launcher boundaries.
 // Each case owns its availability policy; no child process or PATH fixture is needed.
@@ -54,11 +56,11 @@ function availableLaunchers(_tmpRoot: string) {
 }
 
 test.afterEach(() => {
-  process.env.PATH = originalPath;
-  if (originalCodexHome === undefined) delete process.env.CODEX_HOME;
-  else process.env.CODEX_HOME = originalCodexHome;
-  if (originalWorkflowAgent === undefined) delete process.env.WORKFLOW_AGENT;
-  else process.env.WORKFLOW_AGENT = originalWorkflowAgent;
+  environment.PATH = originalPath;
+  if (originalCodexHome === undefined) delete environment.CODEX_HOME;
+  else environment.CODEX_HOME = originalCodexHome;
+  if (originalWorkflowAgent === undefined) delete environment.WORKFLOW_AGENT;
+  else environment.WORKFLOW_AGENT = originalWorkflowAgent;
   setCommandPathProbe((name: string) => name);
   setLauncherHealthProbe(() => ({ ok: true }));
   Math.random = originalRandom;
@@ -116,7 +118,7 @@ test('selectAgent review selection excludes the author family and picks a cross-
   const tmpRoot = registeredMkdtemp('task-2335-repro-');
   try {
     availableLaunchers(tmpRoot);
-    delete process.env.WORKFLOW_AGENT;
+    delete environment.WORKFLOW_AGENT;
 
     // Author/implementer is in family 'codex'.
     // selectAgent('review', { exclude: new Set(['codex']) }) is called WITHOUT
@@ -124,7 +126,7 @@ test('selectAgent review selection excludes the author family and picks a cross-
     // review eligible: ['codex', 'claude', 'custom', 'vibe'].
     // The pool after exclusion should be ['claude', 'custom', 'vibe'].
     const implementer = 'codex';
-    const selected = selectAgent('review', {
+    const selected = selectAgent('review', { configuration: resolveConfiguration(environment),
       exclude: new Set([implementer]),
       // Skip the git main-worktree lookup in config scoping (subprocess per call).
       mainWorktreePath: null
@@ -148,14 +150,14 @@ test('selectAgent review selection with multiple runs always excludes the author
   const tmpRoot = registeredMkdtemp('task-2335-repro-multi-');
   try {
     availableLaunchers(tmpRoot);
-    delete process.env.WORKFLOW_AGENT;
+    delete environment.WORKFLOW_AGENT;
 
     const implementer = 'claude';
     // Run multiple times to verify randomness does not accidentally return the implementer.
     // Calls real selectAgent WITHOUT config parameter (production path).
     const iterations = 3;
     for (let i = 0; i < iterations; i++) {
-      const selected = selectAgent('review', {
+      const selected = selectAgent('review', { configuration: resolveConfiguration(environment),
         exclude: new Set([implementer]),
         // Skip the git main-worktree lookup in config scoping (subprocess per call).
         mainWorktreePath: null
@@ -179,7 +181,7 @@ test('selectAgent uses configured random selection over the eligible cross-famil
   const tmpRoot = registeredMkdtemp('task-2335-repro-random-');
   try {
     availableLaunchers(tmpRoot);
-    delete process.env.WORKFLOW_AGENT;
+    delete environment.WORKFLOW_AGENT;
 
     // Stub Math.random to control which index is selected.
     // With pool = ['codex', 'custom', 'vibe'] (claude excluded),
@@ -188,7 +190,7 @@ test('selectAgent uses configured random selection over the eligible cross-famil
 
     // Force index 0 selection
     Math.random = () => 0.1;
-    const selected0 = selectAgent('review', {
+    const selected0 = selectAgent('review', { configuration: resolveConfiguration(environment),
       exclude: new Set(['claude']),
       mainWorktreePath: null
     });
@@ -196,7 +198,7 @@ test('selectAgent uses configured random selection over the eligible cross-famil
 
     // Force index 1 selection
     Math.random = () => 0.6;
-    const selected1 = selectAgent('review', {
+    const selected1 = selectAgent('review', { configuration: resolveConfiguration(environment),
       exclude: new Set(['claude']),
       mainWorktreePath: null
     });
@@ -216,12 +218,12 @@ test('selectAgent throws when all eligible agents are excluded (no-cross-family 
   const tmpRoot = registeredMkdtemp('task-2335-repro-fallback-');
   try {
     availableLaunchers(tmpRoot);
-    delete process.env.WORKFLOW_AGENT;
+    delete environment.WORKFLOW_AGENT;
 
     // config/agents.json has review eligible: ['codex', 'claude', 'custom', 'qwen', 'vibe'].
     // Excluding all five should throw "All eligible agents ... are exhausted".
     assert.throws(
-      () => selectAgent('review', {
+      () => selectAgent('review', { configuration: resolveConfiguration(environment),
         exclude: new Set(['codex', 'claude', 'custom', 'qwen', 'vibe']),
         mainWorktreePath: null
       }),
@@ -253,7 +255,7 @@ test('review-loop reviewer selection excludes the author family (review-loop pat
   const originalRandom = Math.random;
   try {
     availableLaunchers(tmpRoot);
-    delete process.env.WORKFLOW_AGENT;
+    delete environment.WORKFLOW_AGENT;
     const logs: string[] = [];
     let selectAgentCallArgs: { step: string; exclude: string[] } | null = null;
     // Stub Math.random so selectAgent returns a deterministic agent.
@@ -261,7 +263,7 @@ test('review-loop reviewer selection excludes the author family (review-loop pat
     const selected = selectFor('codex', routingOver(excluded => {
       selectAgentCallArgs = { step: 'review', exclude: [...excluded] };
       // Real selectAgent — reads config/agents.json from disk.
-      return selectAgent('review', { exclude: new Set(excluded), mainWorktreePath: null });
+      return selectAgent('review', { configuration: resolveConfiguration(environment), exclude: new Set(excluded), mainWorktreePath: null });
     }, agent => ({ supported: true, detail: agent })), logs);
 
     assert.ok(selectAgentCallArgs, 'the selector should have been asked during reviewer selection');
@@ -286,18 +288,18 @@ test('review-loop single-family fallback when no cross-family reviewer is runnab
   try {
     setCommandPathProbe((name: string) => name === 'codex' ? name : null);
     setLauncherHealthProbe(() => ({ ok: true }));
-    delete process.env.WORKFLOW_AGENT;
+    delete environment.WORKFLOW_AGENT;
     const logs: string[] = [];
     let selectAgentThrew = false;
     const selected = selectFor('codex', routingOver(excluded => {
       try {
         // Real selectAgent: every cross-family launcher is unavailable.
-        return selectAgent('review', { exclude: new Set(excluded), worktree: tmpRoot, mainWorktreePath: null });
+        return selectAgent('review', { configuration: resolveConfiguration(environment), exclude: new Set(excluded), worktree: tmpRoot, mainWorktreePath: null });
       } catch (err) {
         selectAgentThrew = true;
         throw err;
       }
-    }, agent => workflowLauncherStatus(agent, tmpRoot)), logs);
+    }, agent => workflowLauncherStatus(agent, tmpRoot, resolveConfiguration(environment))), logs);
 
     assert.ok(selectAgentThrew, 'selectAgent should throw when no cross-family agent has a working launcher');
     assert.equal(selected?.reviewerSource, 'single-family-fallback');

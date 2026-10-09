@@ -1,3 +1,5 @@
+import type { ParallixConfiguration } from "../../application/ports/configuration.js";
+import { DEFAULT_CONFIGURATION } from "../../application/ports/configuration.js";
 /**
  * Review Adapter
  *
@@ -64,9 +66,9 @@ export function getPrStatus(branch: string, rootDir = process.cwd(), options: { 
  * @param {{rootDir?: string}} [options]
  * @returns {string|null}
  */
-export function readToken(user: string, options: { rootDir?: string } = {}): string | null {
+export function readToken(user: string, options: { rootDir?: string; configuration?: ParallixConfiguration } = {}): string | null {
   const rootDir = options.rootDir || process.cwd();
-  return isEnabled(rootDir) ? forgejo.readToken(user, rootDir) : null;
+  return isEnabled(rootDir) ? forgejo.readToken(user, rootDir, options.configuration) : null;
 }
 
 /**
@@ -143,7 +145,7 @@ export function createPr(branch: string, user: string, token: string, options: {
  * @param {{rootDir?: string, [key: string]: any}} [options]
  * @returns {*}
  */
-export function forgejoAvailable(url = process.env.FORGEJO_URL || 'http://localhost:3300', /** @type {{rootDir?: string, [key: string]: any}} */ options: { rootDir?: string; [key: string]: any } = {}) {
+export function forgejoAvailable(url: string | undefined = undefined, /** @type {{rootDir?: string, [key: string]: any}} */ options: { rootDir?: string; [key: string]: any } = {}) {
   return withForgejo(options.rootDir || process.cwd(), () => forgejo.forgejoAvailable(url, options as { request?: Function; timeout?: number }), false);
 }
 
@@ -152,7 +154,7 @@ export function forgejoAvailable(url = process.env.FORGEJO_URL || 'http://localh
  * @param {{rootDir?: string, [key: string]: any}} [options]
  * @returns {*}
  */
-export function providerAvailable(url = process.env.FORGEJO_URL || 'http://localhost:3300', options: { rootDir?: string; [key: string]: any } = {}) {
+export function providerAvailable(url: string | undefined = undefined, options: { rootDir?: string; [key: string]: any } = {}) {
   return forgejoAvailable(url, options);
 }
 
@@ -178,13 +180,13 @@ export function closePr(branch: string, token: string, user: string, /** @type {
 }
 
 /** @param {string} explicitUser */
-export function resolveForgejoUser(explicitUser: string): string | null {
-  return explicitUser || process.env.FORGEJO_USER || null;
+export function resolveForgejoUser(explicitUser: string, configuration: ParallixConfiguration = DEFAULT_CONFIGURATION): string | null {
+  return explicitUser || configuration.forgejo.user || null;
 }
 
 /** @param {string} explicitUser */
-export function resolveReviewUser(explicitUser: string): string | null {
-  return resolveForgejoUser(explicitUser);
+export function resolveReviewUser(explicitUser: string, configuration: ParallixConfiguration = DEFAULT_CONFIGURATION): string | null {
+  return resolveForgejoUser(explicitUser, configuration);
 }
 
 /**

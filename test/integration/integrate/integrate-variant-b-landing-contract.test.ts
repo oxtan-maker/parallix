@@ -2,6 +2,7 @@
 // Behavior-owned suite (TASK-2622.09, integration-ci): `px integrate` Variant B landing — the full
 // squash-merge path and its guards (task-1109) and the completion persistence order before statistics
 // (task-2367). Legacy case names unchanged.
+import { resolveConfiguration } from '../../../src/composition/config.js';
 import test, { mock, describe } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -192,7 +193,7 @@ describe("Variant B landing", () => {
     process.env.DEBUG = '1';
 
     try {
-      await integrate([TEST_SLUG, '--no-integration-gates'], { missionServicesFn: composition.createMissionApplicationServices });
+      await integrate([TEST_SLUG, '--no-integration-gates'], { configuration: resolveConfiguration(process.env), missionServicesFn: composition.createMissionApplicationServices });
     } catch { /* expected */ }
 
     assert.ok(logs.some(l => l.includes('Selecting integration variant: Variant B')));
@@ -243,7 +244,7 @@ describe("Variant B landing", () => {
     const integrate = loadIntegrate();
 
     try {
-      await integrate([TEST_SLUG, '--no-integration-gates'], { missionServicesFn: composition.createMissionApplicationServices });
+      await integrate([TEST_SLUG, '--no-integration-gates'], { configuration: resolveConfiguration(process.env), missionServicesFn: composition.createMissionApplicationServices });
     } catch { /* expected */ }
 
     assert.deepEqual(events, ['abort', 'squash', 'promote', 'complete', 'commit']);
@@ -272,7 +273,7 @@ describe("Variant B landing", () => {
     const integrate = loadIntegrate();
 
     try {
-      await integrate([TEST_SLUG, '--no-integration-gates'], { missionServicesFn: composition.createMissionApplicationServices });
+      await integrate([TEST_SLUG, '--no-integration-gates'], { configuration: resolveConfiguration(process.env), missionServicesFn: composition.createMissionApplicationServices });
     } catch { /* expected */ }
 
     const diffIndex = gitCalls.findIndex(call => call.includes('diff --cached --binary'));
@@ -331,7 +332,7 @@ describe("Variant B landing", () => {
     mock.method(process, 'exit', (code) => exitCodes.push(code));
 
     try {
-      await withDebug(() => integrate([TEST_SLUG, '--dry-run', '--no-integration-gates'], { missionServicesFn: composition.createMissionApplicationServices }));
+      await withDebug(() => integrate([TEST_SLUG, '--dry-run', '--no-integration-gates'], { configuration: resolveConfiguration(process.env), missionServicesFn: composition.createMissionApplicationServices }));
 
       assert.equal(captured.prForgejoUser, 'gemini');
       assert.equal(captured.approvalForgejoUser, 'gemini');
@@ -376,7 +377,7 @@ describe("Variant B landing", () => {
     console.log = (msg) => logs.push(msg);
 
     try {
-      await integrate([TEST_SLUG, '--no-integration-gates'], { missionServicesFn: composition.createMissionApplicationServices });
+      await integrate([TEST_SLUG, '--no-integration-gates'], { configuration: resolveConfiguration(process.env), missionServicesFn: composition.createMissionApplicationServices });
 
       assert.equal(captured.prToken, 'preflight-token');
       assert.equal(captured.approvalToken, 'preflight-token');
@@ -402,7 +403,7 @@ describe("Variant B landing", () => {
     mock.method(process, 'exit', (code) => exitCodes.push(code));
 
     try {
-      await integrate([TEST_SLUG, '--dry-run', '--no-integration-gates'], { missionServicesFn: composition.createMissionApplicationServices });
+      await integrate([TEST_SLUG, '--dry-run', '--no-integration-gates'], { configuration: resolveConfiguration(process.env), missionServicesFn: composition.createMissionApplicationServices });
     } catch { /* expected */ }
     
     const output = [...logs, ...errors].join('\n');
@@ -425,7 +426,7 @@ describe("Variant B landing", () => {
     console.log = (msg) => logs.push(msg);
 
     try {
-      await integrate([TEST_SLUG, '--dry-run', '--no-gate', '--no-integration-gates'], { missionServicesFn: composition.createMissionApplicationServices });
+      await integrate([TEST_SLUG, '--dry-run', '--no-gate', '--no-integration-gates'], { configuration: resolveConfiguration(process.env), missionServicesFn: composition.createMissionApplicationServices });
     } catch { /* expected */ }
 
     assert.ok(logs.some(l => l.includes('integrate ignores --no-gate')));
@@ -450,7 +451,7 @@ describe("Variant B landing", () => {
     mock.method(process, 'exit', (code) => exitCodes.push(code));
 
     try {
-      await integrate([TEST_SLUG, '--no-integration-gates'], { missionServicesFn: composition.createMissionApplicationServices });
+      await integrate([TEST_SLUG, '--no-integration-gates'], { configuration: resolveConfiguration(process.env), missionServicesFn: composition.createMissionApplicationServices });
     } catch { /* expected */ }
 
     assert.equal(statsCalls.length, 1);
@@ -476,7 +477,7 @@ describe("Variant B landing", () => {
     mock.method(process, 'exit', (code) => exitCodes.push(code));
 
     try {
-      await integrate([TEST_SLUG, '--dry-run', '--no-integration-gates'], { missionServicesFn: composition.createMissionApplicationServices });
+      await integrate([TEST_SLUG, '--dry-run', '--no-integration-gates'], { configuration: resolveConfiguration(process.env), missionServicesFn: composition.createMissionApplicationServices });
     } catch { /* expected */ }
 
     const output = [...logs, ...errors].join('\n');
@@ -518,7 +519,7 @@ describe("Variant B landing", () => {
     mock.method(process, 'exit', (code) => exitCodes.push(code));
 
     try {
-      await integrate([TEST_SLUG, '--no-integration-gates'], { missionServicesFn: composition.createMissionApplicationServices });
+      await integrate([TEST_SLUG, '--no-integration-gates'], { configuration: resolveConfiguration(process.env), missionServicesFn: composition.createMissionApplicationServices });
     } catch { /* expected */ }
 
     assert.ok(errors.some(l => l.includes('Dry-run merge could not be aborted cleanly')));
@@ -554,7 +555,7 @@ describe("Variant B landing", () => {
     mock.method(process, 'exit', (code) => exitCodes.push(code));
 
     try {
-      await integrate([TEST_SLUG, '--no-integration-gates'], { missionServicesFn: composition.createMissionApplicationServices });
+      await integrate([TEST_SLUG, '--no-integration-gates'], { configuration: resolveConfiguration(process.env), missionServicesFn: composition.createMissionApplicationServices });
     } catch { /* expected */ }
 
     assert.ok(logs.some(l => l.includes('Resuming from sync-merged step')));
@@ -635,7 +636,7 @@ describe("Variant B landing", () => {
 
     try {
       const { recordPostIntegrationStats } = loadIntegrate();
-      const outcome = await recordPostIntegrationStats('task-1109', {
+      const outcome = await recordPostIntegrationStats('task-1109', { configuration: resolveConfiguration(process.env),
         rootDir: FAKE_ROOT,
   // @ts-expect-error -- TASK-2328: partial test double after ESM seam migration
         gitRunner(args) {
@@ -740,7 +741,7 @@ describe("integration completion order", () => {
       handoff: { recordNel: async () => ({}) },
     };
     try {
-      await integrate.default([SLUG, '--no-integration-gates'], { missionServicesFn: async () => services });
+      await integrate.default([SLUG, '--no-integration-gates'], { configuration: resolveConfiguration(process.env), missionServicesFn: async () => services });
       assert.equal(status, 'done');
       assert.equal(doneEvents, 1);
       assert.deepEqual(calls, ['landed', 'done', 'stats']);

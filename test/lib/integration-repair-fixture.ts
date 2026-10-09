@@ -7,6 +7,7 @@
 // HTTP is reachable). Gates run through the real gate runner with cheap shell
 // commands whose outcome the fixture controls through files in the worktree.
 import assert from 'node:assert/strict';
+import { resolveConfiguration } from '../../src/composition/config.js';
 import { spawnSync } from 'node:child_process';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
@@ -111,7 +112,7 @@ export async function openRepairFixture(options: {
   const previousHome = process.env.PARALLIX_HOME;
   process.env.PARALLIX_HOME = path.join(root, 'parallix-home');
   const database = new SqliteDatabaseAdapter();
-  await database.open({ path: resolveDatabasePath() });
+  await database.open({ path: resolveDatabasePath({ configuration: resolveConfiguration(process.env) }) });
   await new SqliteMigrationRunner(database).applyPending(loadDefaultMigrations());
   const store = new SqliteMissionStore(database);
   const undecided = options.state === 'undecided-review';

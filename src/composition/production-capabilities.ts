@@ -1,5 +1,5 @@
 import { createReviewClassification } from './review-classification.js';
-import type { DecisionConfiguration, ParallixConfiguration } from '../application/ports/configuration.js';
+import type { ParallixConfiguration } from '../application/ports/configuration.js';
 import type { ExecuteMissionPorts } from '../application/ports/execute-mission.js';
 import type { TuiCapabilities } from '../application/tui-capabilities.js';
 import type { BoardCommandDispatcher, BoardProgressSink } from '../application/controller/board-command.js';
@@ -100,6 +100,7 @@ function createBoardDraftService(deps: {
   readonly progress?: BoardProgressSink;
   readonly workflow?: DraftWorkflowPort;
   readonly workflowDeps?: Record<string, unknown>;
+  readonly configuration?: ParallixConfiguration;
 }): DraftCommandUseCase {
   let sequence = 0;
   const emit = (phase: 'draft-log' | 'draft-error', message: string): void => {
@@ -127,7 +128,7 @@ function createBoardDraftService(deps: {
     // but route the board adapter through its throwing boundary instead.
     ensureWorktreeFn: (mainRepo: string, targetWorktree: string, branchName: string, options: Record<string, unknown> = {}) =>
       ensureWorktree(mainRepo, targetWorktree, branchName, { ...options, ...(gitFn ? { gitFn: gitFn as never } : {}), exitFn }),
-    readAgentConfigOrExitFn: () => readAgentConfig(),
+    readAgentConfigOrExitFn: () => readAgentConfig(undefined, { configuration: deps.configuration }),
     missionServicesFn: async (_root: string) => ({
       intake: deps.intake,
       repositoryId: deps.repositoryId,
@@ -183,7 +184,7 @@ async function resumeActiveBoardHandoff(existing: any, store: MissionStore & Mis
 /** The browser hands off exactly as the CLI does: it supplies identity only. */
 function createBoardHandoffWorkflow(
   store: MissionStore & MissionTransitionStore & MissionNelRecorder,
-  decision: DecisionConfiguration,
+  configuration: ParallixConfiguration,
   reviewLoop: typeof runReviewLoop = runReviewLoop,
 ) {
   const lifecycle = new MissionLifecycleService(store);
@@ -194,7 +195,7 @@ function createBoardHandoffWorkflow(
     handoff: new MissionHandoffService(store, store),
   };
   const handoff = (slug: string, options: Record<string, unknown> = {}) =>
-    performHandoff(slug, { recoverGateFailure: true, ...options, missionServicesFn: async () => missionServices });
+    performHandoff(slug, { recoverGateFailure: true, ...options, configuration, missionServicesFn: async () => missionServices });
   const reviewHandoff = async (slug: string, options: Record<string, unknown> = {}): Promise<Record<string, unknown>> =>
     await handoff(slug, options) as unknown as Record<string, unknown>;
   return {
@@ -207,13 +208,13 @@ function createBoardHandoffWorkflow(
         await resumeActiveBoardHandoff(existing, store, lifecycle, slug);
         await reviewLoop(
           { slug, isContinue: true, maxAttempts: existing.mission.review.rounds.length + 1 },
-          createReviewLoopPorts(slug, {}, { ...reviewLoopBindings(store, lifecycle), classification: createReviewClassification(slug, resolveWorktree(slug) ?? process.cwd(), decision) }),
+          createReviewLoopPorts(slug, {}, { configuration, ...reviewLoopBindings(store, lifecycle), classification: createReviewClassification(slug, resolveWorktree(slug) ?? process.cwd(), configuration.decision, configuration) }),
         );
         return;
       }
       const result = await handoff(slug);
       if (!result.ok) { throw new Error(result.error ?? 'handoff workflow aborted'); }
-      await reviewLoop({ slug }, createReviewLoopPorts(slug, {}, { performHandoffFn: reviewHandoff, ...reviewLoopBindings(store, lifecycle), classification: createReviewClassification(slug, resolveWorktree(slug) ?? process.cwd(), decision) }));
+      await reviewLoop({ slug }, createReviewLoopPorts(slug, {}, { configuration, performHandoffFn: reviewHandoff, ...reviewLoopBindings(store, lifecycle), classification: createReviewClassification(slug, resolveWorktree(slug) ?? process.cwd(), configuration.decision, configuration) }));
     },
   };
 }
@@ -248,17 +249,18 @@ export function composeProductionCapabilities(
       ),
       checkpoints: new MissionCheckpointService(missionStore, checkpointEvidenceReferences()),
       handoff: new MissionHandoffService(missionStore, missionStore),
-      handoffWorkflow: createBoardHandoffWorkflow(missionStore, overrides.configuration.decision, overrides.handoffReviewLoop),
+      handoffWorkflow: createBoardHandoffWorkflow(missionStore, overrides.configuration, overrides.handoffReviewLoop),
       // Only with Mission authority: a null store means no draft service, so
       // draft:create reports a typed unavailable result and the read-only
       // graph opens no database or git handle.
       draft: createBoardDraftService({
+        configuration: overrides.configuration,
         intake,
         repositoryId: owningRepositoryId,
         currentWork,
         progress,
         workflow: overrides.draftWorkflow,
-        workflowDeps: overrides.draftAdapterDeps,
+        workflowDeps: { ...overrides.draftAdapterDeps, configuration: overrides.configuration },
       }),
       integrate,
       // Only with Mission authority, and only when the store can actually

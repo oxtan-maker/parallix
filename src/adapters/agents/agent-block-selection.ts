@@ -1,3 +1,4 @@
+import type { ParallixConfiguration } from '../../application/ports/configuration.js';
 /**
  * Cohesive runtime-block selection logic for the workflow launch loop.
  *
@@ -66,9 +67,10 @@ export function filterBlockedFallback(
 export async function defaultBlockContext(
   step: string,
   tried: ReadonlySet<string>,
+  configuration?: ParallixConfiguration,
 ): Promise<BlockContext> {
-  const eligible = defaultStepEligibleFamilies(step);
-  const blocked = await defaultRuntimeBlockedFamilies();
+  const eligible = defaultStepEligibleFamilies(step, configuration);
+  const blocked = await defaultRuntimeBlockedFamilies(configuration);
   return resolveBlockContext(eligible, tried, blocked);
 }
 
@@ -78,8 +80,8 @@ export async function defaultBlockContext(
  * step. Reads the config blocklist; a missing config yields the full workflow
  * family set so selection degrades rather than crashing.
  */
-export function defaultStepEligibleFamilies(step: string): readonly string[] {
-  const config = readAgentConfig(CONFIG_PATH, {});
+export function defaultStepEligibleFamilies(step: string, configuration?: ParallixConfiguration): readonly string[] {
+  const config = readAgentConfig(CONFIG_PATH, { configuration });
   if (!config || !config.steps || !config.steps[step]) { return [...WORKFLOW_AGENT_NAMES]; }
   return config.steps[step].eligible ?? [...WORKFLOW_AGENT_NAMES];
 }
@@ -91,11 +93,11 @@ export function defaultStepEligibleFamilies(step: string): readonly string[] {
  * soft so a missing database never poisons selection — the per-agent
  * `isAgentBlockedFn` remains the launch-time backstop.
  */
-export async function defaultRuntimeBlockedFamilies(): Promise<ReadonlySet<string>> {
+export async function defaultRuntimeBlockedFamilies(configuration?: ParallixConfiguration): Promise<ReadonlySet<string>> {
   try {
     const { initOperatorState } = await import('../sqlite/adapter-factory.js');
     const { SqliteBlocklistRepository } = await import('../sqlite/blocklist-repository.js');
-    const state = await initOperatorState();
+    const state = await initOperatorState({ configuration });
     const now = Date.now();
     const results = await new AgentBlockService(new SqliteBlocklistRepository(state.db)).queryAll(WORKFLOW_AGENT_NAMES, now);
     return new Set(results.filter((result) => result.blocked).map((result) => result.agent));

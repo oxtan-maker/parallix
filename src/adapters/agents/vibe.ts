@@ -1,3 +1,5 @@
+import type { ParallixConfiguration } from "../../application/ports/configuration.js";
+import { DEFAULT_CONFIGURATION } from "../../application/ports/configuration.js";
 import { spawnAndTee } from '../process/spawn-tee.js';
 import { compareCodeUnits } from '../../domain/comparators.js';
 import { parseVibeMeta, getVibeProviderModel, DEFAULT_VIBE_LOG_DIR } from './vibe-telemetry.js';
@@ -14,6 +16,7 @@ import { vibeHomeRoot as vibeStateHome } from '../config/state-homes.js';
 const MAX_SESSION_AGE_MINUTES = 120;
 
 interface VibeInvocationOptions {
+  configuration?: ParallixConfiguration;
   prompt: string;
   worktree: string;
   env?: Record<string, string>;
@@ -249,7 +252,7 @@ function resolveVibeCommand() {
   return 'vibe';
 }
 
-function buildVibeInvocation({ prompt, worktree, env, resume: _resume, sessionId: _sessionId, model = null }: VibeInvocationOptions) {
+function buildVibeInvocation({ configuration = DEFAULT_CONFIGURATION, prompt, worktree, env, resume: _resume, sessionId: _sessionId, model = null }: VibeInvocationOptions) {
   const rootDir = resolveVibeWorktree(worktree);
   // --trust only bypasses the working-directory trust prompt; tool-call
   // approval is a separate gate that vibe --help documents as controlled by
@@ -276,17 +279,17 @@ function buildVibeInvocation({ prompt, worktree, env, resume: _resume, sessionId
     options: {
       stdio: 'inherit',
       cwd: rootDir,
-      env: { ...process.env, ...env, ...modelEnv, VIBE_HOME: vibeHomeRoot(rootDir) }
+      env: { ...configuration.forwardedEnvironment, ...env, ...modelEnv, VIBE_HOME: vibeHomeRoot(rootDir) }
     }
   };
 }
 
-function startVibeAgent({ prompt, worktree, env, resume = false, sessionId = null, model = null, teeOptions = {} }: StartVibeAgentOptions) {
+function startVibeAgent({ configuration = DEFAULT_CONFIGURATION, prompt, worktree, env, resume = false, sessionId = null, model = null, teeOptions = {} }: StartVibeAgentOptions) {
   const rootDir = resolveVibeWorktree(worktree);
   ensureVibeHome(rootDir);
-  const invocation = buildVibeInvocation({ prompt, worktree: rootDir, env, resume, sessionId, model });
+  const invocation = buildVibeInvocation({ configuration, prompt, worktree: rootDir, env, resume, sessionId, model });
   const invocationStart = new Date().toISOString();
-  const resultPromise = spawnAndTee(invocation.command, invocation.args, { ...invocation.options, ...teeOptions } as any).then((result: any) => {
+  const resultPromise = spawnAndTee(invocation.command, invocation.args, { ...invocation.options, ...teeOptions, configuration } as any).then((result: any) => {
     if (result && result.stdout) {
       result.sessionId = extractVibeSessionId(result.stdout);
     }

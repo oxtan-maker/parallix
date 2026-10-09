@@ -1,3 +1,4 @@
+import type { ParallixConfiguration } from '../ports/configuration.js';
 import { integrationGateDisposition, integrationRepairRoute, integrationRepairMustReactivate, repairedRevisionReviewEligible, repairCanResumeIntegration } from '../../domain/integration-gate-policy.js';
 /**
  * The required local integration gates: run the repository's configured
@@ -108,6 +109,7 @@ export function integrationGateFailureCause(failedGate: { key: string; command: 
 }
 
 export interface GateStepRequest {
+  configuration?: ParallixConfiguration;
   slug: string;
   context: any;
   missionLoad: any;
@@ -185,7 +187,7 @@ export function createIntegrationGateStep({ gates, landing, verification }: Inte
    * Returns the Verification evidence the readiness view reports: exactly what
    * ran, never "passed" without a gate result behind it.
    */
-  async function runRequiredLocalGates({ slug, context, missionLoad, missionServices, dryRun, noIntegrationGates, realAgent, realAgentModel, seams }: GateStepRequest): Promise<string> {
+  async function runRequiredLocalGates({ slug, context, missionLoad, missionServices, dryRun, noIntegrationGates, realAgent, realAgentModel, seams, configuration }: GateStepRequest): Promise<string> {
     if (noIntegrationGates) {
       fmt.log.info('Integration gates skipped via --no-integration-gates flag');
       return 'skipped via --no-integration-gates';
@@ -209,7 +211,7 @@ export function createIntegrationGateStep({ gates, landing, verification }: Inte
     // no lifecycle gate. --no-integration-gates is rejected outside the test
     // bypass, so the message below never points at it (task-2457 F12).
     const requirePreIntegration = gates.loadRequirePreIntegration(checkout);
-    fmt.log.debug(`Integration gate target: slug=${slug} root=${finalTree.rootDir} commit=${finalTree.commit} tree=${finalTree.tree} requirePreIntegration=${requirePreIntegration}`);
+    fmt.log.debug(`Integration gate target: slug=${slug} root=${finalTree.rootDir} commit=${finalTree.commit} tree=${finalTree.tree} requirePreIntegration=${requirePreIntegration}`, configuration?.runtime.debug);
 
     // TASK-2625/TASK-2646: skip the high-level hooks this mission already ran
     // green on a tree that differs from the finalized one at most in backlog

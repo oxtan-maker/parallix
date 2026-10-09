@@ -1,6 +1,7 @@
 // @ts-nocheck -- TASK-2328: partial test doubles from ESM seam migration; resolve in follow-up
 
 
+import { resolveConfiguration } from '../../../src/composition/config.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'fs';
@@ -430,7 +431,7 @@ test('printIntegrationPreflight reads classification from the selected task file
     mainBranch: 'main',
     mainDirty: false,
     mainDirtyEntries: []
-  }, {
+  }, { configuration: resolveConfiguration(process.env),
     readTokenFn: () => 'token',
     resolveTokenFileFn: () => '/tmp/token',
     detectRebaseStateFn: () => ({ inProgress: false, rebaseHead: null, unmergedFiles: [] }),
@@ -450,7 +451,7 @@ test('cleanupMissionWorktree removes the mission worktree and deletes the branch
   const removed = [];
   let worktreeExists = true;
   const wt = conventionalWorktreePath('task-082', FAKE_ROOT);
-  const result = cleanupMissionWorktree('task-082', {
+  const result = cleanupMissionWorktree('task-082', { configuration: resolveConfiguration(process.env),
     rootDir: FAKE_ROOT,
     existsSync(target) {
       return target === wt ? worktreeExists : false;
@@ -496,7 +497,7 @@ test('cleanupMissionWorktree prunes stale prunable worktrees before deleting the
   // fails because git still thinks the branch is checked out.
   const gitCalls = [];
   let branchDeleteAttempts = 0;
-  const result = cleanupMissionWorktree('task-118', {
+  const result = cleanupMissionWorktree('task-118', { configuration: resolveConfiguration(process.env),
     rootDir: FAKE_ROOT,
     existsSync: () => false,
     removeDir: () => {},
@@ -547,7 +548,7 @@ test('cleanupMissionWorktree blocks deletion when the mission worktree resolves 
   try {
     let thrown = null;
     try {
-      cleanupMissionWorktree('task-082', {
+      cleanupMissionWorktree('task-082', { configuration: resolveConfiguration(process.env),
         rootDir,
         existsSync(target) {
           return target === worktreePath;
@@ -703,7 +704,7 @@ test('recordPostIntegrationStats logs the persisted stats row including pr_fix_r
   const originalLog = console.log;
   console.log = message => logs.push(message);
   try {
-    const outcome = await recordPostIntegrationStats('task-2000', {
+    const outcome = await recordPostIntegrationStats('task-2000', { configuration: resolveConfiguration(process.env),
       rootDir: FAKE_ROOT,
       recordIntegrationStatsFn() {
         return {
@@ -739,7 +740,7 @@ test('recordPostIntegrationStats records an unknown classification row for a mis
   const originalLog = console.log;
   console.log = message => logs.push(message);
   try {
-    const outcome = await recordPostIntegrationStats('task-unknown', {
+    const outcome = await recordPostIntegrationStats('task-unknown', { configuration: resolveConfiguration(process.env),
       rootDir: FAKE_ROOT,
       recordIntegrationStatsFn({ slug, rootDir, filePath, date }) {
         assert.equal(slug, 'task-unknown');
@@ -783,7 +784,7 @@ test('recordPostIntegrationStats passes no file path and stays anchored to PARAL
   process.env.PARALLIX_HOME = parallixHome;
   try {
     const capturedOptions = [];
-    const runOnce = () => recordPostIntegrationStats('task-2046', {
+    const runOnce = () => recordPostIntegrationStats('task-2046', { configuration: resolveConfiguration(process.env),
       rootDir: runtimeRoot,
       recordIntegrationStatsFn(options) {
         capturedOptions.push(options);
@@ -819,7 +820,7 @@ test('recordPostIntegrationStats passes no file path and stays anchored to PARAL
     assert.deepEqual(fs.readdirSync(parallixHome).filter(name => name.endsWith('.csv')), []);
     assert.equal(fs.existsSync(path.join(runtimeRoot, 'stats.csv')), false);
     // The measurement database resolves under PARALLIX_HOME, not the repo root.
-    assert.equal(resolveDatabasePath({}), path.join(parallixHome, 'parallix.db'));
+    assert.equal(resolveDatabasePath({ configuration: resolveConfiguration(process.env) }), path.join(parallixHome, 'parallix.db'));
   } finally {
     if (previousHome === undefined) delete process.env.PARALLIX_HOME;
     else process.env.PARALLIX_HOME = previousHome;
@@ -837,7 +838,7 @@ test('recordPostIntegrationStats prints the weekly report but not mission teleme
       { mission: 'task-3000', stage: 'draft', provider: 'openai', model: 'gpt-4', implementer: 'claude', input_tokens: '1000', output_tokens: '500', cached_tokens: '100', tool_calls: '50', duration_minutes: '10', cost_usd: '1.50' },
       { mission: 'task-3000', stage: 'execute', provider: 'openai', model: 'gpt-4', implementer: 'claude', input_tokens: '2000', output_tokens: '1000', cached_tokens: '200', tool_calls: '100', duration_minutes: '20', cost_usd: '3.00' },
     ];
-    await recordPostIntegrationStats('task-3000', {
+    await recordPostIntegrationStats('task-3000', { configuration: resolveConfiguration(process.env),
       rootDir: FAKE_ROOT,
       recordIntegrationStatsFn() {
         return {
@@ -873,7 +874,7 @@ test('recordPostIntegrationStats prints only the recorded row and weekly report 
   const originalLog = console.log;
   console.log = message => logs.push(message);
   try {
-    await recordPostIntegrationStats('task-4000', {
+    await recordPostIntegrationStats('task-4000', { configuration: resolveConfiguration(process.env),
       rootDir: FAKE_ROOT,
       recordIntegrationStatsFn() {
         return {
@@ -913,7 +914,7 @@ test('recordPostIntegrationStats contains a weekly report read or render failure
   console.error = message => logs.push(message);
   try {
     for (const failure of [{ report: null, reportError: 'database locked' }, { report: undefined }]) {
-      const outcome = await recordPostIntegrationStats('task-5000', {
+      const outcome = await recordPostIntegrationStats('task-5000', { configuration: resolveConfiguration(process.env),
         rootDir: FAKE_ROOT,
         recordIntegrationStatsFn() {
           return {
@@ -1107,7 +1108,7 @@ test('px integrate --dry-run never invokes the post-integrate hook (SC4)', async
   console.log = () => {};
   try {
     try {
-      await integrateCommand(['task-integrate-hook-dry-run-does-not-exist', '--dry-run'], { missionServicesFn: stubMissionServices() });
+      await integrateCommand(['task-integrate-hook-dry-run-does-not-exist', '--dry-run'], { configuration: resolveConfiguration(process.env), missionServicesFn: stubMissionServices() });
     } catch (err) {
       if (err.message !== 'process.exit called') throw err;
     }
@@ -1131,7 +1132,7 @@ test('px integrate never invokes the post-integrate hook when preflight fails (S
   console.log = () => {};
   try {
     try {
-      await integrateCommand(['task-integrate-hook-preflight-fails-does-not-exist'], { missionServicesFn: stubMissionServices() });
+      await integrateCommand(['task-integrate-hook-preflight-fails-does-not-exist'], { configuration: resolveConfiguration(process.env), missionServicesFn: stubMissionServices() });
     } catch (err) {
       if (err.message !== 'process.exit called') throw err;
     }
@@ -1201,7 +1202,7 @@ test('provider-backed approval repair leaves integration preflight with review i
     runGitOrThrow(['add', '.'], { cwd: root });
     runGitOrThrow(['commit', '-m', 'fixture'], { cwd: root });
 
-    await submitReviewRound('task-2199', 'approve', 'LGTM', {
+    await submitReviewRound('task-2199', 'approve', 'LGTM', { configuration: resolveConfiguration(process.env),
       isForgejoReviewEnabledFn: () => true,
       readTokenFn: () => 'token',
       postReviewFn: () => ({ ok: true }),
@@ -1342,7 +1343,7 @@ test('printIntegrationPreflight reports token resolution and detached-head recov
       mainBranch: '',
       mainDirty: false,
       mainDirtyEntries: []
-    }, {
+    }, { configuration: resolveConfiguration(process.env),
       readTokenFn: () => 'secret-token',
       resolveTokenFileFn: () => '/tmp/tokens/codex',
       isForgejoReviewEnabledFn: () => true,
@@ -1382,7 +1383,7 @@ test('printIntegrationPreflight fails when no Forgejo token is available', () =>
       mainAheadCount: 0,
       mainDirty: false,
       mainDirtyEntries: []
-    }, {
+    }, { configuration: resolveConfiguration(process.env),
       readTokenFn: () => null,
       resolveTokenFileFn: () => null,
       isForgejoReviewEnabledFn: () => true,
@@ -1421,7 +1422,7 @@ test('printIntegrationPreflight reads an adhoc mission from the Mission store in
       mainBranch: 'main',
       mainDirty: false,
       mainDirtyEntries: []
-    }, {
+    }, { configuration: resolveConfiguration(process.env),
       readTokenFn: () => 'token',
       resolveTokenFileFn: () => '/tmp/token',
       isForgejoReviewEnabledFn: () => false,
@@ -1461,7 +1462,7 @@ test('printIntegrationPreflight tolerates a missing task file and reports unknow
       mainBranch: 'main',
       mainDirty: false,
       mainDirtyEntries: []
-    }, {
+    }, { configuration: resolveConfiguration(process.env),
       readTokenFn: () => 'secret-token',
       resolveTokenFileFn: () => '/tmp/tokens/codex',
       isForgejoReviewEnabledFn: () => false,
@@ -1522,7 +1523,7 @@ test('printIntegrationPreflight reports unresolved index conflicts with recovery
       mainAheadCount: 0,
       mainDirty: false,
       mainDirtyEntries: []
-    }, {
+    }, { configuration: resolveConfiguration(process.env),
       readTokenFn: () => 'secret-token',
       resolveTokenFileFn: () => '/tmp/tokens/codex',
       isForgejoReviewEnabledFn: () => true,
@@ -1567,7 +1568,7 @@ test('printIntegrationPreflight fails fast on an in-progress rebase in the integ
       mainAheadCount: 0,
       mainDirty: false,
       mainDirtyEntries: []
-    }, {
+    }, { configuration: resolveConfiguration(process.env),
       readTokenFn: () => 'secret-token',
       resolveTokenFileFn: () => '/tmp/tokens/codex',
       isForgejoReviewEnabledFn: () => true,
@@ -2204,7 +2205,7 @@ test('F3: dry-run preflight accepts the override case the real run accepts', () 
 
   const { failures } = withDebug(() => printIntegrationPreflight(
     makeContext({ ok: true, reviewState: 'REQUEST_CHANGES', defaultUserApproved: true, defaultUserApprovedAt: '2026-01-01T10:30:00Z' }),
-    options,
+    { configuration: resolveConfiguration(process.env), ...(options) },
   ));
   assert.ok(!failures.includes('task-status'), `dry-run must not fail task-status for the override case: ${failures.join(', ')}`);
   assert.ok(!failures.includes('pr-approval'), `dry-run must not fail pr-approval for the override case: ${failures.join(', ')}`);
@@ -2213,7 +2214,7 @@ test('F3: dry-run preflight accepts the override case the real run accepts', () 
   logs.length = 0;
   const control = printIntegrationPreflight(
     makeContext({ ok: true, reviewState: 'REQUEST_CHANGES', defaultUserApproved: false }),
-    options,
+    { configuration: resolveConfiguration(process.env), ...(options) },
   );
   assert.ok(control.failures.includes('task-status'), 'control: without override task-status still fails');
   assert.ok(control.failures.includes('pr-approval'), 'control: without override pr-approval still fails');
@@ -2511,7 +2512,7 @@ test(`printIntegrationPreflight ${recordedContract ? 'accepts a recorded contrac
       mainAheadCount: 0,
       mainDirty: false,
       mainDirtyEntries: []
-    }, {
+    }, { configuration: resolveConfiguration(process.env),
       readTokenFn: () => 'secret-token',
       resolveTokenFileFn: () => '/tmp/tokens/codex',
       isForgejoReviewEnabledFn: () => true,
@@ -2557,7 +2558,7 @@ test('printIntegrationPreflight warns when multiple PRs exist for the same task'
       mainAheadCount: 0,
       mainDirty: false,
       mainDirtyEntries: []
-    }, {
+    }, { configuration: resolveConfiguration(process.env),
       readTokenFn: () => 'secret-token',
       resolveTokenFileFn: () => '/tmp/tokens/codex',
       isForgejoReviewEnabledFn: () => true,
@@ -2596,7 +2597,7 @@ test('printIntegrationPreflight provides recovery commands when mission doc is m
       mainAheadCount: 0,
       mainDirty: false,
       mainDirtyEntries: []
-    }, {
+    }, { configuration: resolveConfiguration(process.env),
       readTokenFn: () => 'secret-token',
       resolveTokenFileFn: () => '/tmp/tokens/codex',
       isForgejoReviewEnabledFn: () => true,

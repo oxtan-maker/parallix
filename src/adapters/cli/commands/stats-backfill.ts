@@ -1,3 +1,4 @@
+import type { ParallixConfiguration } from '../../../application/ports/configuration.js';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 
@@ -14,9 +15,9 @@ import { findMissionDir } from '../../filesystem/mission-utils.js';
 import type { StatsBackfillService } from '../../../application/stats-backfill-service.js';
 
 interface StatsAugmented {
-  resolveMissionClassification: (_slug: string, _rootDir?: string) => { classification?: string | null; source?: string };
+  resolveMissionClassification: (_slug: string, _rootDir?: string, _readLabels?: undefined, _configuration?: ParallixConfiguration) => { classification?: string | null; source?: string };
   resolveStatsRepoName: (_rootDir: string) => string;
-  loadMeasurementRows: (_options?: { rootDir?: string; dbPath?: string; store?: unknown }) => { rows: Record<string, string>[] };
+  loadMeasurementRows: (_options?: { configuration?: ParallixConfiguration; rootDir?: string; dbPath?: string; store?: unknown }) => { rows: Record<string, string>[] };
   deriveImplementerAndFixRounds: (_slug: string, _rootDir?: string, _missionStore?: unknown) => { implementer: string; prFixRounds: number | null; source: string };
   upsertMeasurementRow: (_row: Record<string, string>, _options?: { rootDir?: string; dbPath?: string; store?: unknown }) => { changed: boolean };
 }
@@ -100,9 +101,9 @@ function deriveDateFromGitHistory(slug: string, taskFile: string, rootDir = proc
   return extractDateOnly(result.stdout.trim());
 }
 
-function resolveHistoricalClassification(slug: string, rootDir = process.cwd()) {
+function resolveHistoricalClassification(slug: string, rootDir = process.cwd(), configuration?: ParallixConfiguration) {
   const s = getStats();
-  const resolution = s.resolveMissionClassification(slug, rootDir);
+  const resolution = s.resolveMissionClassification(slug, rootDir, undefined, configuration);
   return { value: resolution.classification || null, source: 'mission-state' };
 }
 
@@ -111,7 +112,7 @@ type HistoricalMissionOutcome =
   | { kind: 'unresolved'; unresolved: any }
   | { kind: 'skipped'; skipped: any };
 
-async function collectHistoricalMission(slug: string, rootDir: string, repoName: string, missionStore: unknown, stats: ReturnType<typeof getStats>): Promise<HistoricalMissionOutcome> {
+async function collectHistoricalMission(slug: string, rootDir: string, repoName: string, missionStore: unknown, stats: ReturnType<typeof getStats>, configuration?: ParallixConfiguration): Promise<HistoricalMissionOutcome> {
   const taskResolution = resolveTaskFile(slug, rootDir);
   if (!taskResolution.ok) {
     return { kind: 'unresolved', unresolved: { slug, reason: 'task-resolution', detail: taskResolution.reason } };
@@ -122,7 +123,7 @@ async function collectHistoricalMission(slug: string, rootDir: string, repoName:
     return { kind: 'skipped', skipped: { slug, reason: `status=${status || 'unknown'}` } };
   }
   const date = extractDateOnly(getTaskFrontmatterValue(taskFile, 'updated_date') ?? '') || deriveDateFromGitHistory(slug, taskFile, rootDir);
-  const classification = resolveHistoricalClassification(slug, rootDir);
+  const classification = resolveHistoricalClassification(slug, rootDir, configuration);
   let implementerInfo: { implementer: string; prFixRounds: number | null; source: string } | null = null;
   let implementerError: string | null = null;
   try {
@@ -175,7 +176,7 @@ async function collectHistoricalMission(slug: string, rootDir: string, repoName:
  */
 async function collectHistoricalStatsBackfill(
   rootDir = process.cwd(),
-  options: { dbPath?: string; store?: unknown } = {},
+  options: { configuration?: ParallixConfiguration; dbPath?: string; store?: unknown } = {},
   missionStore?: unknown,
 ) {
   const s = getStats();
@@ -183,7 +184,7 @@ async function collectHistoricalStatsBackfill(
   // database, not from a resolved stats.csv.
   const repoName = s.resolveStatsRepoName(rootDir);
   const existingMissions = new Set(
-    s.loadMeasurementRows({ rootDir, dbPath: options.dbPath, store: options.store }).rows
+    s.loadMeasurementRows({ configuration: options.configuration, rootDir, dbPath: options.dbPath, store: options.store }).rows
       .filter((row: Record<string, string>) => String(row.repo || '').trim() === repoName)
       .map((row: Record<string, string>) => row.mission)
   );
@@ -193,7 +194,7 @@ async function collectHistoricalStatsBackfill(
 
   for (const slug of listHistoricalMissionSlugs(rootDir)) {
     if (existingMissions.has(slug)) {continue;}
-    const outcome = await collectHistoricalMission(slug, rootDir, repoName, missionStore, s);
+    const outcome = await collectHistoricalMission(slug, rootDir, repoName, missionStore, s, options.configuration);
     if (outcome.kind === 'row') { rows.push(outcome.row); }
     if (outcome.kind === 'unresolved') { unresolved.push(outcome.unresolved); }
     if (outcome.kind === 'skipped') { skipped.push(outcome.skipped); }

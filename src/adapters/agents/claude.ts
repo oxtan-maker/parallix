@@ -1,3 +1,5 @@
+import type { ParallixConfiguration } from "../../application/ports/configuration.js";
+import { DEFAULT_CONFIGURATION } from "../../application/ports/configuration.js";
 import { spawnAndTee } from '../process/spawn-tee.js';
 import { extractClaudeTelemetryFromStdout } from './claude-telemetry.js';
 import { createClaudeRenderSink } from './claude-stream-view.js';
@@ -6,6 +8,7 @@ import type { MissionId } from '../../domain/mission.js';
 import type { SessionRole } from '../../domain/session.js';
 
 interface ClaudeInvocationOptions {
+  configuration?: ParallixConfiguration;
   prompt: string;
   worktree: string;
   env?: object;
@@ -73,7 +76,7 @@ function resolveClaudeCommand() {
   return 'claude';
 }
 
-function buildClaudeInvocation({ prompt, worktree, env, resume = false, sessionId = null, model = null }: ClaudeInvocationOptions) {
+function buildClaudeInvocation({ configuration = DEFAULT_CONFIGURATION, prompt, worktree, env, resume = false, sessionId = null, model = null }: ClaudeInvocationOptions) {
   const args = ['--dangerously-skip-permissions'];
   if (model) {args.push('--model', model);}
   // Only resume when the marker explicitly says so (resume=true).
@@ -97,12 +100,12 @@ function buildClaudeInvocation({ prompt, worktree, env, resume = false, sessionI
     options: {
       stdio: 'inherit',
       cwd: worktree,
-      env: { ...process.env, ...env }
+      env: { ...configuration.forwardedEnvironment, ...env }
     }
   };
 }
 
-function startClaudeAgent({ prompt, worktree, env, resume = false, sessionId = null, model = null, teeOptions = {}, slug = null, role = null, sessionMarkerPort }: StartClaudeAgentOptions) {
+function startClaudeAgent({ configuration = DEFAULT_CONFIGURATION, prompt, worktree, env, resume = false, sessionId = null, model = null, teeOptions = {}, slug = null, role = null, sessionMarkerPort }: StartClaudeAgentOptions) {
   function isStaleSessionResult(result: any) {
     // Adapter-owned parsing of Claude CLI diagnostics; never exposed as a workflow signal.
     if (!result) {return false;}
@@ -140,12 +143,13 @@ function startClaudeAgent({ prompt, worktree, env, resume = false, sessionId = n
   // and `extractClaudeSessionId` still see the byte-identical raw JSONL.
   // `PARALLIX_CLAUDE_RAW_STREAM=1` restores the verbatim passthrough.
   function launch(invocation: any) {
-    const sink = createClaudeRenderSink(process.stdout, {}, invocation.options.env);
+    const sink = createClaudeRenderSink(process.stdout, {}, configuration);
     const teeWithTail = {
       maxTailBytes: CLAUDE_TELEMETRY_TAIL_BYTES,
       stdoutSink: sink,
       ...invocation.options,
-      ...teeOptions
+      ...teeOptions,
+      configuration
     };
     return Promise.resolve(_spawnAndTee(invocation.command, invocation.args, teeWithTail))
       .finally(() => sink.close());
@@ -162,7 +166,7 @@ function startClaudeAgent({ prompt, worktree, env, resume = false, sessionId = n
             }
             await port.delete(slug, role);
           } catch (error) { throw error; }
-          const freshInv = buildClaudeInvocation({ prompt, worktree, env, resume: false, sessionId: null, model });
+          const freshInv = buildClaudeInvocation({ configuration, prompt, worktree, env, resume: false, sessionId: null, model });
           return launch(freshInv);
         }
         return result;
@@ -170,7 +174,7 @@ function startClaudeAgent({ prompt, worktree, env, resume = false, sessionId = n
       .then(processResult);
   }
 
-  const invocation = buildClaudeInvocation({ prompt, worktree, env, resume, sessionId, model });
+  const invocation = buildClaudeInvocation({ configuration, prompt, worktree, env, resume, sessionId, model });
   const resultPromise = staleSessionHandler(invocation);
 
   return { invocation, resultPromise };

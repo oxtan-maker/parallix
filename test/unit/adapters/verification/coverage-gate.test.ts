@@ -1,3 +1,5 @@
+import { resolveConfiguration } from '../../../../src/composition/config.js';
+const environment: NodeJS.ProcessEnv = { ...process.env };
 // TASK-2591 (ADR 0062): coverage-gate.ts keeps only the coverage population
 // and the LCOV union; the native Node coverage contract that replaced c8 is
 // asserted through the runner's argv here.
@@ -40,8 +42,8 @@ test('native coverage keeps the historical c8 contract: src denominator, unloade
 
 test('coverage runs require Node 26.7+ for --test-coverage-include-all', () => {
   const options = { executionRoot: REPO_ROOT, requestedArgs: [], coverage: true };
-  const previous = process.env.PARALLIX_TEST_NODE;
-  delete process.env.PARALLIX_TEST_NODE;
+  const previous = environment.PARALLIX_TEST_NODE;
+  delete environment.PARALLIX_TEST_NODE;
   try {
     assert.throws(
       () => buildTestRunPlan({ ...options, probeNodeVersion: () => 'v26.6.0' }),
@@ -50,7 +52,7 @@ test('coverage runs require Node 26.7+ for --test-coverage-include-all', () => {
     assert.doesNotThrow(() => buildTestRunPlan({ ...options, probeNodeVersion: () => 'v26.7.0' }));
     assert.doesNotThrow(() => buildTestRunPlan({ ...options, coverage: false, probeNodeVersion: () => 'v24.15.0' }));
   } finally {
-    if (previous !== undefined) { process.env.PARALLIX_TEST_NODE = previous; }
+    if (previous !== undefined) { environment.PARALLIX_TEST_NODE = previous; }
   }
 });
 

@@ -1,3 +1,5 @@
+import { resolveConfiguration } from '../../../../src/composition/config.js';
+const environment: NodeJS.ProcessEnv = { ...process.env };
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
@@ -82,8 +84,8 @@ test('task-2429: stale integrate:merge is rejected before the integration workfl
 });
 
 test('task-2429: integration authorization exit returns a board failure, not completed', async () => {
-  const prior = process.env.WORKFLOW_AGENT;
-  process.env.WORKFLOW_AGENT = 'gemini';
+  const prior = environment.WORKFLOW_AGENT;
+  environment.WORKFLOW_AGENT = 'gemini';
   try {
     const controller = new BoardCommandController(makeExecutePorts().ports, undefined, {
       integrate: createBoardIntegrateService({} as never, NO_CURRENT_WORK_PORT),
@@ -97,7 +99,7 @@ test('task-2429: integration authorization exit returns a board failure, not com
     assert.equal(result.error?.kind, 'execution');
     assert.notEqual(result.status, 'completed');
   } finally {
-    if (prior === undefined) { delete process.env.WORKFLOW_AGENT; }
-    else { process.env.WORKFLOW_AGENT = prior; }
+    if (prior === undefined) { delete environment.WORKFLOW_AGENT; }
+    else { environment.WORKFLOW_AGENT = prior; }
   }
 });

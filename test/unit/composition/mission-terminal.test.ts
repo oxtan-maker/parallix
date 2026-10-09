@@ -1,3 +1,4 @@
+import { resolveConfiguration } from '../../../src/composition/config.js';
 import fs from 'node:fs';
 import path from 'node:path';
 import test from 'node:test';
@@ -11,8 +12,8 @@ test('mission terminal host leaves headless and ineligible commands to the pipe 
   const root = mkdtemp('px-mission-terminal-host-');
   const log: string[] = [];
 
-  assert.equal(await hostMissionCommand('active', ['task-2643'], root, line => log.push(line), cli, { interactive: false }), null);
-  assert.equal(await hostMissionCommand('stats', ['task-2643'], root, line => log.push(line), cli, { interactive: true }), null);
+  assert.equal(await hostMissionCommand('active', ['task-2643'], root, line => log.push(line), cli, { configuration: resolveConfiguration({}), interactive: false }), null);
+  assert.equal(await hostMissionCommand('stats', ['task-2643'], root, line => log.push(line), cli, { configuration: resolveConfiguration({}), interactive: true }), null);
   assert.deepEqual(log, []);
 });
 
@@ -21,7 +22,7 @@ test('mission terminal host honours the configured pipe override before probing 
   fs.writeFileSync(path.join(root, 'workflow.config.json'), JSON.stringify({ adapters: { terminal: { host: 'pipe' } } }));
   const log: string[] = [];
 
-  const result = await hostMissionCommand('active', ['task-999999'], root, line => log.push(line), cli, { interactive: true });
+  const result = await hostMissionCommand('active', ['task-999999'], root, line => log.push(line), cli, { configuration: resolveConfiguration({}), interactive: true });
 
   assert.equal(result, null);
   assert.deepEqual(log, []);

@@ -1,3 +1,5 @@
+import { resolveConfiguration } from '../../../../src/composition/config.js';
+const environment: NodeJS.ProcessEnv = { ...process.env };
 import test, { mock } from 'node:test';
 import assert from 'node:assert/strict';
 import * as fmt from '../../../../src/application/presentation/cli-format.js';
@@ -166,13 +168,13 @@ test('log.fail and log.error route through the logger error channel', () => {
 test('log.debug is a no-op when DEBUG is unset and renders when set', () => {
   const cap = capture();
   try {
-    const saved = process.env.DEBUG;
-    delete process.env.DEBUG;
+    const saved = environment.DEBUG;
+    delete environment.DEBUG;
     assert.equal(fmt.log.debug('silent'), null);
-    process.env.DEBUG = '1';
-    const shown = fmt.log.debug('loud');
+    environment.DEBUG = '1';
+    const shown = fmt.log.debug('loud', resolveConfiguration(environment).runtime.debug);
     assert.ok(shown.includes('[DEBUG] loud'));
-    if (saved === undefined) { delete process.env.DEBUG; } else { process.env.DEBUG = saved; }
+    if (saved === undefined) { delete environment.DEBUG; } else { environment.DEBUG = saved; }
   } finally { cap.restore(); }
 });
 

@@ -1,3 +1,4 @@
+import type { ParallixConfiguration } from '../../../application/ports/configuration.js';
 import { readStoredMissionLabels } from '../../sqlite/mission-classification-reader.js';
 import { normalizeClassification } from './stats-normalization.js';
 
@@ -13,8 +14,9 @@ export function resolveMissionClassification(
   slug: string,
   _rootDir = process.cwd(),
   readLabels: typeof readStoredMissionLabels = readStoredMissionLabels,
+  configuration?: ParallixConfiguration,
 ): MissionClassificationResolution {
-  const stored = readLabels(slug);
+  const stored = readLabels(slug, { configuration });
   if (stored.kind === 'found') {
     const found = new Set(stored.labels.map(normalizeClassification).filter(Boolean));
     const classification = found.size === 1 ? String([...found][0]) : null;

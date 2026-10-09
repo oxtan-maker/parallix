@@ -1,3 +1,5 @@
+import { resolveConfiguration } from '../../../../src/composition/config.js';
+const environment: NodeJS.ProcessEnv = { ...process.env };
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -68,22 +70,22 @@ test('guarded review entry points return their noop values when forgejo is disab
 
 test('forgejoAvailable and providerAvailable are false when the provider is disabled', async () => {
   await withDisabledReview(rootDir => {
-    assert.equal(forgejoAvailable('http://localhost:3300', { rootDir }), false);
-    assert.equal(providerAvailable('http://localhost:3300', { rootDir }), false);
+    assert.equal(forgejoAvailable('http://localhost:3300', { configuration: resolveConfiguration(environment), rootDir }), false);
+    assert.equal(providerAvailable('http://localhost:3300', { configuration: resolveConfiguration(environment), rootDir }), false);
   });
 });
 
 test('resolveForgejoUser and resolveReviewUser fall back to env then null', () => {
-  const saved = process.env.FORGEJO_USER;
-  delete process.env.FORGEJO_USER;
+  const saved = environment.FORGEJO_USER;
+  delete environment.FORGEJO_USER;
   try {
-    assert.equal(resolveForgejoUser('reviewer'), 'reviewer');
-    assert.equal(resolveReviewUser('reviewer'), 'reviewer');
-    process.env.FORGEJO_USER = 'env-reviewer';
-    assert.equal(resolveForgejoUser(''), 'env-reviewer');
-    assert.equal(resolveReviewUser(''), 'env-reviewer');
-    assert.equal(resolveForgejoUser(''), 'env-reviewer');
+    assert.equal(resolveForgejoUser('reviewer', resolveConfiguration(environment)), 'reviewer');
+    assert.equal(resolveReviewUser('reviewer', resolveConfiguration(environment)), 'reviewer');
+    environment.FORGEJO_USER = 'env-reviewer';
+    assert.equal(resolveForgejoUser('', resolveConfiguration(environment)), 'env-reviewer');
+    assert.equal(resolveReviewUser('', resolveConfiguration(environment)), 'env-reviewer');
+    assert.equal(resolveForgejoUser('', resolveConfiguration(environment)), 'env-reviewer');
   } finally {
-    if (saved === undefined) { delete process.env.FORGEJO_USER; } else { process.env.FORGEJO_USER = saved; }
+    if (saved === undefined) { delete environment.FORGEJO_USER; } else { environment.FORGEJO_USER = saved; }
   }
 });

@@ -1,3 +1,4 @@
+import type { ParallixConfiguration } from "../../application/ports/configuration.js";
 /** Read-only capture of a Mission's live tmux terminal for the local web host. */
 import childProcess from 'node:child_process';
 import { missionSocketPath } from './tmux-host.js';
@@ -10,14 +11,14 @@ export interface MissionTerminalReader { read(_missionId: string): MissionTermin
 type SpawnSync = typeof childProcess.spawnSync;
 
 /** Captures only; it never attaches, sends keys, or invokes a tmux mutation. */
-export function createTmuxTerminalReader(options: { resolveMissionWorktree: (_missionId: string) => string | null; repositoryKey: (_worktree: string) => string; env: NodeJS.ProcessEnv; spawnSyncFn?: SpawnSync }): MissionTerminalReader {
+export function createTmuxTerminalReader(options: { resolveMissionWorktree: (_missionId: string) => string | null; repositoryKey: (_worktree: string) => string; configuration: ParallixConfiguration; spawnSyncFn?: SpawnSync }): MissionTerminalReader {
   const { resolveMissionWorktree: findWorktree, repositoryKey } = options;
   const spawnSyncFn = options.spawnSyncFn ?? childProcess.spawnSync;
-  const { env } = options;
+  const { configuration } = options;
   return { read(missionId) {
     const worktree = findWorktree(missionId);
     if (worktree === null) { return { kind: 'unavailable', message: 'No live tmux session is available for this mission.' }; }
-    const socket = missionSocketPath({ repositoryKey: repositoryKey(worktree), missionId }, env);
+    const socket = missionSocketPath({ repositoryKey: repositoryKey(worktree), missionId }, configuration);
     const windows = spawnSyncFn('tmux', ['-S', socket, 'list-windows', '-t', `=${missionId}`, '-F', '#{window_name}\t#{@px_command_pid}'], { encoding: 'utf8', timeout: 1000 });
     if (windows.status !== 0) { return { kind: 'unavailable', message: 'No live tmux session is available for this mission.' }; }
     const entries = String(windows.stdout).split('\n').filter(Boolean).map(line => line.split('\t'));

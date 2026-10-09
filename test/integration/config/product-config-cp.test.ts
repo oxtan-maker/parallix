@@ -1,5 +1,6 @@
 // @ts-nocheck -- TASK-2535: inline doubles for product-config seams; mirrors the
 // mockModule/@ts-nocheck pattern in test/integration/stats/stats-backfill.test.ts.
+import { resolveConfiguration } from '../../../src/composition/config.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -278,7 +279,7 @@ test('gitIdentityEnv fills missing author/committer identity', () => {
   const saved = { ...process.env };
   try {
     for (const key of ['GIT_AUTHOR_NAME', 'GIT_AUTHOR_EMAIL', 'GIT_COMMITTER_NAME', 'GIT_COMMITTER_EMAIL']) { delete process.env[key]; }
-    const env = pc.gitIdentityEnv();
+    const env = pc.gitIdentityEnv(resolveConfiguration(process.env));
     assert.equal(env.GIT_AUTHOR_NAME, 'Workflow Setup');
     assert.equal(env.GIT_AUTHOR_EMAIL, 'workflow@example.invalid');
     assert.equal(env.GIT_COMMITTER_NAME, 'Workflow Setup');
@@ -293,7 +294,7 @@ test('gitIdentityEnv preserves a configured author name for the committer', () =
   try {
     delete process.env.GIT_AUTHOR_EMAIL; delete process.env.GIT_COMMITTER_NAME; delete process.env.GIT_COMMITTER_EMAIL;
     process.env.GIT_AUTHOR_NAME = 'Alice';
-    const env = pc.gitIdentityEnv();
+    const env = pc.gitIdentityEnv(resolveConfiguration(process.env));
     assert.equal(env.GIT_COMMITTER_NAME, 'Alice');
   } finally {
     for (const [k, v] of Object.entries(saved)) { process.env[k] = v; }

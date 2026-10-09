@@ -1,3 +1,5 @@
+import { resolveConfiguration } from '../../../../src/composition/config.js';
+const environment: NodeJS.ProcessEnv = { ...process.env };
 import fs from 'node:fs';
 import path from 'node:path';
 import childProcess from 'node:child_process';
@@ -45,11 +47,11 @@ test('tmux probe reports an actionable unavailable result (TASK-2643)', () => {
 
 test('each repository and Mission gets its own socket under the owner-only state root (TASK-2643)', () => {
   const env = { PARALLIX_TERMINAL_STATE_DIR: path.join(mkdtemp('px-tmux-root-'), 'state') };
-  const a = missionSocketPath(identity('task-1'), env);
-  const b = missionSocketPath(identity('task-2'), env);
-  const otherRepo = missionSocketPath({ ...identity('task-1'), repositoryKey: 'def456' }, env);
+  const a = missionSocketPath(identity('task-1'), resolveConfiguration(env));
+  const b = missionSocketPath(identity('task-2'), resolveConfiguration(env));
+  const otherRepo = missionSocketPath({ ...identity('task-1'), repositoryKey: 'def456' }, resolveConfiguration(env));
   assert.equal(new Set([a, b, otherRepo]).size, 3);
-  assert.ok(a.startsWith(terminalStateRoot(env)) || Buffer.byteLength(path.join(terminalStateRoot(env), 'abc123', 'task-1.sock')) > 100);
+  assert.ok(a.startsWith(terminalStateRoot(resolveConfiguration(env))) || Buffer.byteLength(path.join(terminalStateRoot(resolveConfiguration(env)), 'abc123', 'task-1.sock')) > 100);
   ensurePrivateDir(path.dirname(a));
   assert.equal(fs.statSync(path.dirname(a)).mode & 0o777, 0o700);
 });
@@ -57,9 +59,9 @@ test('each repository and Mission gets its own socket under the owner-only state
 test('an overlong configured state root uses a stable private compact socket name (TASK-2643)', () => {
   const root = path.join(mkdtemp('px-tmux-long-root-'), 'x'.repeat(120));
   const env = { PARALLIX_TERMINAL_STATE_DIR: root };
-  const first = missionSocketPath(identity(), env);
-  const same = missionSocketPath(identity(), env);
-  const otherMission = missionSocketPath(identity('task-2'), env);
+  const first = missionSocketPath(identity(), resolveConfiguration(env));
+  const same = missionSocketPath(identity(), resolveConfiguration(env));
+  const otherMission = missionSocketPath(identity('task-2'), resolveConfiguration(env));
   assert.equal(first, same);
   assert.notEqual(first, otherMission);
   assert.ok(Buffer.byteLength(first) <= 100);
@@ -79,7 +81,7 @@ test('prepared host runs the confined command in the pane and keeps credentials 
   const launch = prepareTmuxLaunch({
     identity: identity(), spawnIndex: 1, command: 'bwrap', args: ['--ro-bind', '/', '/', '--', 'claude', "it's"],
     cwd: '/work tree', env: { SECRET_TOKEN: 'hunter2', 'bad-name': 'x' },
-  }, { env, spawnSyncFn: fn });
+  }, { configuration: resolveConfiguration({ ...environment, ...env }), spawnSyncFn: fn });
   assert.equal(launch.command, 'sh');
   assert.equal(launch.sessionName, 'task-1');
   assert.match(launch.windowName, /^execute-claude-a1-[a-z0-9]+-s1-/);
@@ -107,22 +109,22 @@ test('the console px wrapper cannot re-enter itself from an operator rc file (TA
   const env = { PARALLIX_TERMINAL_STATE_DIR: path.join(mkdtemp('px-tmux-wrap-'), 'state') };
   const bin = mkdtemp('px-tmux-bin-');
   fs.writeFileSync(path.join(bin, 'px'), '#!/bin/sh\nexit 0\n', { mode: 0o755 });
-  const previousPath = process.env.PATH;
-  process.env.PATH = `${bin}${path.delimiter}${previousPath}`;
+  const previousPath = environment.PATH;
+  environment.PATH = `${bin}${path.delimiter}${previousPath}`;
   try {
     const { fn } = fakeSpawnSync('');
-    const launch = prepareTmuxLaunch({ identity: identity(), spawnIndex: 1, command: 'sh', args: [], cwd: '/work', env: {} }, { env, spawnSyncFn: fn });
-    const wrapper = fs.readFileSync(path.join(path.dirname(missionSocketPath(identity(), env)), 'task-1', 'console-bin', 'px'), 'utf8');
+    const launch = prepareTmuxLaunch({ identity: identity(), spawnIndex: 1, command: 'sh', args: [], cwd: '/work', env: {} }, { configuration: resolveConfiguration({ ...environment, ...env }), spawnSyncFn: fn });
+    const wrapper = fs.readFileSync(path.join(path.dirname(missionSocketPath(identity(), resolveConfiguration(env))), 'task-1', 'console-bin', 'px'), 'utf8');
     // `eval "$(px shell-init bash)"` in an rc file runs this wrapper again from inside its own Bash child.
     assert.match(wrapper, /if \[ -n "\$PARALLIX_CONSOLE_PX" \]; then exec '[^']*px' "\$@"; fi/);
     assert.match(wrapper, /PARALLIX_CONSOLE_PX=1 exec \/bin\/bash -ic 'unset PARALLIX_CONSOLE_PX; exec "\$@"'/);
     launch.cleanup();
-  } finally { process.env.PATH = previousPath; }
+  } finally { environment.PATH = previousPath; }
 });
 
 test('restart adoption kills sessions whose host or harness died, only for the same role (TASK-2643)', () => {
   const env = { PARALLIX_TERMINAL_STATE_DIR: path.join(mkdtemp('px-tmux-adopt-'), 'state') };
-  const socket = missionSocketPath(identity(), env);
+  const socket = missionSocketPath(identity(), resolveConfiguration(env));
   ensurePrivateDir(path.dirname(socket));
   fs.writeFileSync(socket, '');
   const { fn, calls } = fakeSpawnSync([
@@ -133,7 +135,7 @@ test('restart adoption kills sessions whose host or harness died, only for the s
     'execute-claude-a1-idle\t\t',
     'console\t\t',
   ].join('\n'));
-  const killed = reconcileOrphanSessions(identity(), { env, spawnSyncFn: fn, isAlive: (pid) => pid === 222 || pid === 900 });
+  const killed = reconcileOrphanSessions(identity(), { configuration: resolveConfiguration({ ...environment, ...env }), spawnSyncFn: fn, isAlive: (pid) => pid === 222 || pid === 900 });
   assert.deepEqual(killed, ['execute-claude-a1-old', 'execute-codex-a3-harness_gone']);
   assert.equal(calls.some(call => call.includes('review-codex-a1-other')), false, 'another role is never touched');
 });
@@ -227,7 +229,7 @@ test('retired-session cleanup tolerates a concurrent closer and removes transpor
     return { status: 0, stdout: '' };
   }) as never;
   const env = { PARALLIX_TERMINAL_STATE_DIR: path.join(mkdtemp('px-tmux-race-'), 'state') };
-  const launch = prepareTmuxLaunch({ identity: identity(), spawnIndex: 0, command: 'sh', args: [], cwd: '/tmp', env: {} }, { env, spawnSyncFn });
+  const launch = prepareTmuxLaunch({ identity: identity(), spawnIndex: 0, command: 'sh', args: [], cwd: '/tmp', env: {} }, { configuration: resolveConfiguration(env), spawnSyncFn });
   const scratch = path.dirname(launch.args[0]);
   assert.doesNotThrow(() => launch.cleanup());
   assert.equal(fs.existsSync(scratch), false);
@@ -247,11 +249,11 @@ test('explicit cleanup refuses an owned operation and closes only an idle missio
 
 test('mission restart sweeps dead operations across roles and preserves live work and idle shells (TASK-2643)', () => {
   const env = { PARALLIX_TERMINAL_STATE_DIR: path.join(mkdtemp('px-mission-sweep-'), 'state') };
-  const socket = missionSocketPath(identity(), env);
+  const socket = missionSocketPath(identity(), resolveConfiguration(env));
   ensurePrivateDir(path.dirname(socket));
   fs.writeFileSync(socket, '');
   const { fn, calls } = fakeSpawnSync('active-parallix-a1-dead\t111\t900\nreview-codex-a1-live\t222\t900\nconsole\t\t');
-  assert.deepEqual(reconcileOrphanSessions(identity(), { env, spawnSyncFn: fn, allRoles: true, isAlive: pid => pid === 222 || pid === 900 }), ['active-parallix-a1-dead']);
+  assert.deepEqual(reconcileOrphanSessions(identity(), { configuration: resolveConfiguration({ ...environment, ...env }), spawnSyncFn: fn, allRoles: true, isAlive: pid => pid === 222 || pid === 900 }), ['active-parallix-a1-dead']);
   assert.equal(calls.some(call => call.includes('=task-1:review-codex-a1-live')), false);
 });
 
@@ -261,9 +263,9 @@ test('read-only terminal capture selects command panes and fails closed (TASK-26
   let listing = 'console\t\nexecute\t42\n';
   let status = 0;
   let captureStatus = 0;
-  const reader = createTmuxTerminalReader({
+  const reader = createTmuxTerminalReader({ configuration: resolveConfiguration({ PARALLIX_TERMINAL_STATE_DIR: '/tmp/px-reader-double' }),
     resolveMissionWorktree: id => id === 'task-1' ? '/isolated' : null,
-    repositoryKey: () => 'abc123', env: { PARALLIX_TERMINAL_STATE_DIR: '/tmp/px-reader-double' },
+    repositoryKey: () => 'abc123',
     spawnSyncFn: ((_cmd: string, args: string[]) => {
       calls.push(args);
       return args.includes('list-windows') ? { status, stdout: listing } : { status: captureStatus, stdout: 'progress marker\n' };

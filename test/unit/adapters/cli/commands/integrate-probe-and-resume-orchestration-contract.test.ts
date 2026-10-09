@@ -1,3 +1,4 @@
+import { resolveConfiguration } from '../../../../../src/composition/config.js';
 // Historical regression provenance: TASK-1039, TASK-2243, TASK-2520, TASK-2506.
 // Behavior-owned suite (TASK-2622.09): `px integrate` orchestration over injected Git, Backlog, Forgejo,
 // verification and stats ports — argument/preflight/gate stops (task-1039), probe-merge abort without
@@ -165,7 +166,7 @@ describe("integrate orchestration and gates", () => {
     console.error = (msg) => { if (msg && msg.includes('Integration preflight failed')) errorLogged = true; };
 
     try {
-      await integrate([TEST_SLUG, '--no-integration-gates'], { missionServicesFn: composition.createMissionApplicationServices });
+      await integrate([TEST_SLUG, '--no-integration-gates'], { configuration: resolveConfiguration({ PARALLIX_TEST_ALLOW_INTEGRATION_GATE_BYPASS: '1' }), missionServicesFn: composition.createMissionApplicationServices });
     } catch {
       // Expected to throw
     }
@@ -183,7 +184,7 @@ describe("integrate orchestration and gates", () => {
     console.log = (msg) => { if (msg && msg.includes('Dry run complete')) logLogged = true; };
 
     try {
-      await integrate([TEST_SLUG, '--dry-run', '--no-integration-gates'], { missionServicesFn: composition.createMissionApplicationServices });
+      await integrate([TEST_SLUG, '--dry-run', '--no-integration-gates'], { configuration: resolveConfiguration({ PARALLIX_TEST_ALLOW_INTEGRATION_GATE_BYPASS: '1' }), missionServicesFn: composition.createMissionApplicationServices });
     } catch {
       // Expected to throw
     }
@@ -549,7 +550,7 @@ describe("probe abort without promotion", () => {
       }));
 
       const integrate = loadIntegrate();
-      await integrate([TEST_SLUG, '--no-integration-gates'], { missionServicesFn: composition.createMissionApplicationServices });
+      await integrate([TEST_SLUG, '--no-integration-gates'], { configuration: resolveConfiguration({ PARALLIX_TEST_ALLOW_INTEGRATION_GATE_BYPASS: '1' }), missionServicesFn: composition.createMissionApplicationServices });
 
       assert.deepEqual(exitCodes, [1], 'integration must reject the unsafe checkout with a nonzero result');
       assert.ok(errors.some((message) => message.includes('Dry-run merge could not be aborted cleanly')));

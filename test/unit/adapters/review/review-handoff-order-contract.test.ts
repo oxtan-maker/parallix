@@ -1,3 +1,5 @@
+import { resolveConfiguration } from '../../../../src/composition/config.js';
+const environment: NodeJS.ProcessEnv = { ...process.env };
 // review handoff order contract.
 // Related scenarios share imports; each contract keeps its own hooks and mutable fixtures.
 import test from 'node:test';
@@ -32,12 +34,12 @@ let _prevParallixHome;
 let _tmpHome;
 test.beforeEach(() => {
   _tmpHome = registeredMkdtemp('task-1104-home-');
-  _prevParallixHome = process.env.PARALLIX_HOME;
-  process.env.PARALLIX_HOME = _tmpHome;
+  _prevParallixHome = environment.PARALLIX_HOME;
+  environment.PARALLIX_HOME = _tmpHome;
 });
 test.afterEach(() => {
-  if (_prevParallixHome === undefined) delete process.env.PARALLIX_HOME;
-  else process.env.PARALLIX_HOME = _prevParallixHome;
+  if (_prevParallixHome === undefined) delete environment.PARALLIX_HOME;
+  else environment.PARALLIX_HOME = _prevParallixHome;
   fs.rmSync(_tmpHome, { recursive: true, force: true });
 });
 

@@ -1,10 +1,12 @@
 #!/usr/bin/env node
+import type { ParallixConfiguration } from '../../../application/ports/configuration.js';
 
 type StatisticsMeasurementStore = Pick<MeasurementStorePort, 'listMeasurements' | 'upsertMeasurement'>
   & Partial<Pick<MeasurementStorePort, 'findByMission'>>;
 type ReviewReadStore = Pick<MissionStore, 'load'>;
 
 interface StatsOptions {
+  configuration?: ParallixConfiguration;
   rootDir?: string;
   ensureDir?: boolean;
   /** Inject a `MeasurementStorePort` (fast isolated tests use a temp database). */
@@ -90,7 +92,7 @@ function resolveStatsRepoName(rootDir = process.cwd()) {
  */
 function getMeasurementStore(options: StatsOptions = {}): StatisticsMeasurementStore {
   if (options.store) {return options.store;}
-  return resolveMeasurementStore(options.dbPath ? { dbPath: options.dbPath } : {});
+  return resolveMeasurementStore({ dbPath: options.dbPath, configuration: options.configuration });
 }
 
 /**
@@ -309,7 +311,7 @@ export function createStatsRecordingUseCase(options: StatsRecordingOptions): Sta
   const rootDir = options.rootDir || process.cwd();
   const port: StatisticsRecordingPort = {
     get repositoryName() { return resolveStatsRepoName(rootDir); },
-    readClassification: slug => resolveMissionClassification(slug, rootDir),
+    readClassification: slug => resolveMissionClassification(slug, rootDir, undefined, options.configuration),
     readStoredClassification: slug => resolveStoredMissionClassification(slug, options.missionStore!),
     readReview: slug => loadMissionReview(slug, rootDir, options.missionStore!),
     readMeasurements: () => loadMeasurementRows(options).rows,

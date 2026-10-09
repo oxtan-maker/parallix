@@ -1,3 +1,4 @@
+import type { ParallixConfiguration } from "../../application/ports/configuration.js";
 import fs from 'node:fs';
 import path from 'node:path';
 import * as fmt from '../../application/presentation/cli-format.js';
@@ -9,6 +10,7 @@ import { runtimeAssetStore } from '../assets/runtime-assets.js';
 type AgentConfig = { blocklist?: {[key: string]: any}, steps?: {[key: string]: any} };
 
 type ReadAgentConfigOptions = {
+  configuration?: ParallixConfiguration;
   mergeLocal?: boolean;
   mainWorktreePath?: string | null;
   warn?: Function;
@@ -81,7 +83,7 @@ function readAgentConfig(configPath: string = CONFIG_PATH, options: ReadAgentCon
   }
 
   if (mergeLocal) {
-    config = mergeLocalAgentConfig(config, configPath, mainWorktreePath, options.targetPath, warn);
+    config = mergeLocalAgentConfig(config, configPath, mainWorktreePath, options.targetPath, warn, options.configuration);
   }
 
   return config;
@@ -93,6 +95,7 @@ function mergeLocalAgentConfig(
   mainWorktreePath: string | null | undefined,
   targetPathOption: string | undefined,
   warn: Function,
+  configuration?: ParallixConfiguration,
 ): AgentConfig {
   const projectRoot = configPath === CONFIG_PATH ? process.cwd() : path.resolve(path.dirname(configPath), '..', '..');
   const mainWorktree = mainWorktreePath ?? getMainWorktreePath({ cwd: projectRoot, warn });
@@ -101,7 +104,7 @@ function mergeLocalAgentConfig(
     path.join(projectRoot, 'agents.local.json'),
     mainWorktree ? path.join(mainWorktree, 'agents.local.json') : '',
   ].filter((candidate): candidate is string => Boolean(candidate));
-  const targetPath = targetPathOption || storage.resolveAgentsLocalPath({ ensureDir: true });
+  const targetPath = targetPathOption || storage.resolveAgentsLocalPath({ ensureDir: true, configuration });
   migrateLocalBlocklist(sourcePaths, targetPath, warn);
   if (!fs.existsSync(targetPath)) { return config; }
   const localConfig = parseAgentConfigFile(targetPath, 'local');
@@ -167,9 +170,9 @@ function isAgentBlocked(agent: string, config: AgentConfig | null) {
   return false;
 }
 
-function resolveBlocklistTargetPath(options: {targetPath?: string} = {}) {
+function resolveBlocklistTargetPath(options: {targetPath?: string; configuration?: ParallixConfiguration} = {}) {
   if (options.targetPath) {return options.targetPath;}
-  return storage.resolveAgentsLocalPath({ ensureDir: true });
+  return storage.resolveAgentsLocalPath({ ensureDir: true, configuration: options.configuration });
 }
 
 function updateAgentBlock(agent: string, until: string, options: {targetPath?: string, reason?: string} = {}) {

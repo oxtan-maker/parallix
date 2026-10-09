@@ -1,3 +1,4 @@
+import type { ParallixConfiguration } from '../../../application/ports/configuration.js';
 /**
  * Integrate command adapter (TASK-2512).
  *
@@ -45,14 +46,14 @@ const asGitFn = (runner: IntegrateGitRunner) => runner as unknown as NonNullable
  * dependency of this module (see `test/lib/module-mock.ts`) is observed by the
  * workflow — the `createHandoffPorts` pattern.
  */
-export function createIntegratePorts(): IntegrateWorkflowPorts {
+export function createIntegratePorts(configuration?: ParallixConfiguration): IntegrateWorkflowPorts {
   return {
     process: {
       terminate: code => process.exit(code),
       cwd: () => process.cwd(),
       chdir: directory => process.chdir(directory),
       claimIntegration: async slug => {
-        const rootKey = crypto.createHash('sha256').update(getPrimaryWorktree()).digest('hex').slice(0, 16);
+        const rootKey = crypto.createHash('sha256').update(getPrimaryWorktree(configuration)).digest('hex').slice(0, 16);
         return claimRecoveryLock(`integrate-${rootKey}-${slug}`);
       },
     },
@@ -81,11 +82,11 @@ export function createIntegratePorts(): IntegrateWorkflowPorts {
       toActual: (state, map) => stateMap.toActual(state, map),
     },
     forgejo: {
-      getPrStatus: (branch, rootDir, options) => forgejo.getPrStatus(branch, rootDir, options),
-      getLatestReviewDecision: (branch, options) => forgejo.getLatestReviewDecision(branch, options),
-      syncMerged: (branch, commit, options) => forgejo.syncMerged(branch, commit, options),
-      readToken: user => forgejo.readToken(user),
-      resolveTokenFile: user => forgejo.resolveTokenFile(user),
+      getPrStatus: (branch, rootDir, options) => forgejo.getPrStatus(branch, rootDir, { ...options, configuration }),
+      getLatestReviewDecision: (branch, options) => forgejo.getLatestReviewDecision(branch, { ...options, configuration }),
+      syncMerged: (branch, commit, options) => forgejo.syncMerged(branch, commit, { ...options, configuration }),
+      readToken: user => forgejo.readToken(user, undefined, configuration),
+      resolveTokenFile: user => forgejo.resolveTokenFile(user, undefined, configuration),
       listOpenPrsForSlug: (baseSlug, token) => forgejo.listOpenPrsForSlug(baseSlug, token),
     },
     github: {
@@ -98,11 +99,11 @@ export function createIntegratePorts(): IntegrateWorkflowPorts {
       missionTitle: slug => missionUtils.missionTitle(slug),
       missionBranchName: (slug, rootDir) => missionUtils.missionBranchName(slug, rootDir ?? undefined),
       missionDirForSlug: (rootDir, slug) => missionUtils.missionDirForSlug(rootDir, slug),
-      getPrimaryWorktree: () => missionUtils.getPrimaryWorktree(),
+      getPrimaryWorktree: () => missionUtils.getPrimaryWorktree(configuration),
       getPrimaryBranch: () => missionUtils.getPrimaryBranch(),
-      conventionalWorktreePath: slug => missionUtils.conventionalWorktreePath(slug),
+      conventionalWorktreePath: slug => missionUtils.conventionalWorktreePath(slug, missionUtils.getPrimaryWorktree(configuration)),
       resolveMissionBaseBranch: (slug, rootDir) => missionUtils.resolveMissionBaseBranch(slug, rootDir),
-      resolveBaseWorktree: (slug, options) => missionUtils.resolveBaseWorktree(slug, options),
+      resolveBaseWorktree: (slug, options) => missionUtils.resolveBaseWorktree(slug, { ...options, configuration }),
       resolveWorktree: (slug, options) => missionUtils.resolveWorktree(slug, options),
       findMissionDocInBranches: (slug, rootDir) => missionUtils.findMissionDocInBranches(slug, rootDir),
       parseConflictFilesFromMergeOutput: output => missionUtils.parseConflictFilesFromMergeOutput(output),
@@ -114,9 +115,9 @@ export function createIntegratePorts(): IntegrateWorkflowPorts {
       assertVerifiedTreeProof: (proof, rootDir, gitRunner) => verification.assertVerifiedTreeProof(proof, rootDir, { gitRunner: asGitFn(gitRunner) }),
     },
     agents: {
-      startAgent: (step, options) => agents.startAgent(step, options as unknown as Parameters<typeof agents.startAgent>[1]),
-      selectAgent: step => agents.selectAgent(step),
-      workflowLauncherStatus: (agent, rootDir) => agents.workflowLauncherStatus(agent, rootDir),
+      startAgent: (step, options) => agents.startAgent(step, { ...options, configuration } as unknown as Parameters<typeof agents.startAgent>[1]),
+      selectAgent: step => agents.selectAgent(step, { configuration }),
+      workflowLauncherStatus: (agent, rootDir) => agents.workflowLauncherStatus(agent, rootDir, configuration),
       applyAgentFallback: options => applyAgentFallback(options as Parameters<typeof applyAgentFallback>[0]),
       describeReviewMatrix: () => runtimeMatrix.formatMatrixSummary(runtimeMatrix.buildAutonomousReviewMatrix()),
     },
@@ -174,11 +175,11 @@ export function createIntegratePorts(): IntegrateWorkflowPorts {
       isNoMergeToAbortResult: result => post.isNoMergeToAbortResult(result),
       persistLandedIntegrationOrAbort: (slug, commit, missionServices, options) => post.persistLandedIntegrationOrAbort(slug, commit, missionServices, options),
       closeLandedIntegrationOrAbort: (slug, commit, missionServices) => post.closeLandedIntegrationOrAbort(slug, commit, missionServices),
-      recordPostIntegrationStatsOrAbort: (slug, options) => post.recordPostIntegrationStatsOrAbort(slug, options),
+      recordPostIntegrationStatsOrAbort: (slug, options) => post.recordPostIntegrationStatsOrAbort(slug, { ...options, configuration }),
       hasIntegrationMeasurement: (slug, rootDir) => post.hasIntegrationMeasurement(slug, rootDir),
       runPreCommitHookOrAbort: (slug, options) => post.runPreCommitHookOrAbort(slug, options),
       runPostIntegrateHookOrAbort: (slug, options) => post.runPostIntegrateHookOrAbort(slug, options),
-      cleanupMissionWorktree: slug => post.cleanupMissionWorktree(slug),
+      cleanupMissionWorktree: slug => post.cleanupMissionWorktree(slug, { rootDir: missionUtils.getPrimaryWorktree(configuration), configuration }),
     },
   };
 }
@@ -189,7 +190,6 @@ export type { IntegrateOptions as IntegrateCommandOptions } from '../../../appli
 const workflow = createIntegrateWorkflow(createIntegratePorts());
 
 const {
-  integrate,
   buildIntegrationContext,
   evaluateTaskStatusForIntegration,
   promoteTaskForIntegrationIfNeeded,
@@ -201,6 +201,10 @@ const {
   parseIntegrateArgs,
   VARIANT_B_AUTOMATION_SUMMARY,
 } = workflow;
+
+async function integrate(args: string[], options: import('../../../application/integrate-workflow.js').IntegrateOptions = {}) {
+  return createIntegrateWorkflow(createIntegratePorts(options.configuration)).integrate(args, options);
+}
 
 export {
   maybeUpdateGraphifyOnPrimary,
@@ -261,6 +265,7 @@ export {
  * than silently accepted through the port's structural types.
  */
 function printIntegrationPreflight(context: any, options: {
+  configuration?: ParallixConfiguration;
   readTokenFn?: typeof forgejo.readToken,
   resolveTokenFileFn?: typeof forgejo.resolveTokenFile,
   detectRebaseStateFn?: typeof git.detectRebaseState,

@@ -1,3 +1,4 @@
+import { resolveConfiguration } from '../../src/composition/config.js';
 // default-db-guard.ts — runner-level isolation guard for TASK-2554.
 //
 // A test process must never write into the operator's default database
@@ -86,7 +87,7 @@ function isSharedDefaultOperatorDatabase(dbPath: string): boolean {
     const cleanEnv = { ...process.env };
     delete cleanEnv.PARALLIX_HOME;
     const defaultHome = resolveParallixHome({
-      env: cleanEnv as Record<string, string>,
+      configuration: resolveConfiguration(cleanEnv as Record<string, string>),
       platform: process.platform,
       homedir: os.homedir,
     });
@@ -109,7 +110,7 @@ function isSharedDefaultOperatorDatabase(dbPath: string): boolean {
  * the gain cannot be attributed to the test (task-2554 gate fix).
  */
 export function startDefaultDbGuard(label: string): string {
-  const dbPath = resolveDatabasePath();
+  const dbPath = resolveDatabasePath({ configuration: resolveConfiguration(process.env) });
   const sharedDefault = isSharedDefaultOperatorDatabase(dbPath);
   const before = readGuardFingerprints(dbPath);
   let reported = false;

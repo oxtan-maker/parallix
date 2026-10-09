@@ -1,3 +1,4 @@
+import { resolveConfiguration } from '../../../../src/composition/config.js';
 import fs from 'node:fs';
 import path from 'node:path';
 import test from 'node:test';
@@ -116,18 +117,18 @@ test('Claude output is recorded as the provider stream that carries tool results
 
 test('agent attempts inherit the whole mission terminal without creating another host (TASK-2643)', () => {
   const { worktree, deps, input } = setup('tmux', 'fail', false);
-  const session = openRunSession({ ...input, family: 'pi' }, { ...deps, env: {
+  const session = openRunSession({ ...input, family: 'pi' }, { ...deps, configuration: resolveConfiguration({
     ...deps.env, PARALLIX_MISSION_TERMINAL: 'task-7', PARALLIX_MISSION_SOCKET: '/private/task-7.sock',
-  } })!;
+  }) })!;
   assert.equal(session.teeOptions.terminalHost, undefined);
   assert.equal(record(worktree, session.runId).terminalHost, 'tmux');
   assert.deepEqual(record(worktree, session.runId).tmux.sessions, ['task-7']);
   assert.ok(session.teeOptions.stdoutSink);
   session.finish({ status: 0 });
   assert.doesNotMatch(record(worktree, session.runId).sources[0].covers, /pane bytes|stderr merged/);
-  const piped = openRunSession({ ...input, family: 'codex' }, { ...deps, env: {
+  const piped = openRunSession({ ...input, family: 'codex' }, { ...deps, configuration: resolveConfiguration({
     ...deps.env, PARALLIX_MISSION_TERMINAL: 'task-7', PARALLIX_MISSION_SOCKET: '/private/task-7.sock',
-  } })!;
+  }) })!;
   piped.finish({ status: 0 });
   assert.match(record(worktree, piped.runId).sources[0].covers, /stdout and stderr/);
   assert.doesNotMatch(record(worktree, piped.runId).sources[0].covers, /pane bytes|stderr merged/);

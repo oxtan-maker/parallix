@@ -1,3 +1,4 @@
+import type { ParallixConfiguration } from "../../application/ports/configuration.js";
 import type { Migration } from './database-adapter.js';
 import { SqliteDatabaseAdapter } from './database-adapter.js';
 import { SqliteMigrationRunner, loadDefaultMigrations } from './migration-runner.js';
@@ -28,6 +29,7 @@ export interface AdapterInitOptions {
    * PARALLIX_HOME directory. If not provided, uses process.env.PARALLIX_HOME.
    */
   homeDir?: string;
+  configuration?: ParallixConfiguration;
 
   /**
    * Custom busy timeout in milliseconds (default 5000).
@@ -75,10 +77,10 @@ export interface OperatorStateAdapter {
 export async function initOperatorState(
   options: AdapterInitOptions = {},
 ): Promise<OperatorStateAdapter> {
-  const dbPath = resolveDatabasePath({ home: options.homeDir });
+  const dbPath = resolveDatabasePath({ home: options.homeDir, configuration: options.configuration });
 
   let adapter = operatorStateCache.get(dbPath);
-  const debug = process.env.PARALLIX_DEBUG_SQL;
+  const debug = options.configuration?.storage.debugSql;
   if (!adapter) {
     adapter = createOperatorState(dbPath, options);
     operatorStateCache.set(dbPath, adapter);
@@ -108,7 +110,7 @@ async function createOperatorState(
   options: AdapterInitOptions,
 ): Promise<OperatorStateAdapter> {
   // Open database with configured settings
-  const db = new SqliteDatabaseAdapter();
+  const db = new SqliteDatabaseAdapter(options.configuration);
   await db.open({
     path: dbPath,
     busyTimeoutMs: options.busyTimeoutMs ?? 5000,

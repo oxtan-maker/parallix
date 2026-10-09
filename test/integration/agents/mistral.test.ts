@@ -1,6 +1,7 @@
 
 
 
+import { resolveConfiguration } from '../../../src/composition/config.js';
 import test, { mock } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'fs';
@@ -73,33 +74,33 @@ test('extractVibeSessionId returns null (vibe has no stdout resume hint)', () =>
 // ---------- buildVibeInvocation ----------
 
 test('buildVibeInvocation includes --prompt flag', () => {
-  const inv = buildVibeInvocation({ prompt: 'test', worktree: '/tmp' });
+  const inv = buildVibeInvocation({ configuration: resolveConfiguration(process.env), prompt: 'test', worktree: '/tmp' });
   assert.equal(inv.command, 'vibe');
   assert.ok(inv.args.includes('--prompt'));
   assert.ok(inv.args.includes('test'));
 });
 
 test('buildVibeInvocation includes --trust flag', () => {
-  const inv = buildVibeInvocation({ prompt: 'test', worktree: '/tmp' });
+  const inv = buildVibeInvocation({ configuration: resolveConfiguration(process.env), prompt: 'test', worktree: '/tmp' });
   assert.equal(inv.command, 'vibe');
   assert.ok(inv.args.includes('--trust'));
 });
 
 test('buildVibeInvocation includes --yolo flag for non-interactive tool-call approval', () => {
-  const inv = buildVibeInvocation({ prompt: 'test', worktree: '/tmp' });
+  const inv = buildVibeInvocation({ configuration: resolveConfiguration(process.env), prompt: 'test', worktree: '/tmp' });
   assert.equal(inv.command, 'vibe');
   assert.ok(inv.args.includes('--yolo'), `expected --yolo in args: ${inv.args.join(' ')}`);
 });
 
 test('buildVibeInvocation includes --output text flag', () => {
-  const inv = buildVibeInvocation({ prompt: 'test', worktree: '/tmp' });
+  const inv = buildVibeInvocation({ configuration: resolveConfiguration(process.env), prompt: 'test', worktree: '/tmp' });
   assert.equal(inv.command, 'vibe');
   assert.ok(inv.args.includes('--output'));
   assert.ok(inv.args.includes('text'));
 });
 
 test('buildVibeInvocation includes explicit workdir and temp-dir access', () => {
-  const inv = buildVibeInvocation({ prompt: 'test', worktree: '/tmp/worktree' });
+  const inv = buildVibeInvocation({ configuration: resolveConfiguration(process.env), prompt: 'test', worktree: '/tmp/worktree' });
   assert.ok(inv.args.includes('--workdir'));
   assert.ok(inv.args.includes('/tmp/worktree'));
   assert.ok(inv.args.includes('--add-dir'));
@@ -107,7 +108,7 @@ test('buildVibeInvocation includes explicit workdir and temp-dir access', () => 
 });
 
 test('buildVibeInvocation does not include resume flags', () => {
-  const inv = buildVibeInvocation({ prompt: 'test', worktree: '/tmp', resume: true, sessionId: 'abc123' });
+  const inv = buildVibeInvocation({ configuration: resolveConfiguration(process.env), prompt: 'test', worktree: '/tmp', resume: true, sessionId: 'abc123' });
   assert.equal(inv.command, 'vibe');
   assert.ok(!inv.args.includes('--resume'));
   assert.ok(!inv.args.includes('--continue'));
@@ -115,13 +116,13 @@ test('buildVibeInvocation does not include resume flags', () => {
 });
 
 test('buildVibeInvocation sets cwd to worktree', () => {
-  const inv = buildVibeInvocation({ prompt: 'test', worktree: '/custom/worktree' });
+  const inv = buildVibeInvocation({ configuration: resolveConfiguration(process.env), prompt: 'test', worktree: '/custom/worktree' });
   assert.equal(inv.command, 'vibe');
   assert.equal(inv.options.cwd, '/custom/worktree');
 });
 
 test('buildVibeInvocation merges env', () => {
-  const inv = buildVibeInvocation({ prompt: 'test', worktree: '/tmp', env: { CUSTOM: 'value' } });
+  const inv = buildVibeInvocation({ configuration: resolveConfiguration(process.env), prompt: 'test', worktree: '/tmp', env: { CUSTOM: 'value' } });
   assert.equal(inv.command, 'vibe');
 // @ts-expect-error -- TASK-2328: partial test double after ESM seam migration
   assert.equal(inv.options.env.CUSTOM, 'value');
@@ -133,7 +134,7 @@ test('buildVibeInvocation merges env', () => {
 // ---------- startVibeAgent ----------
 
 test('startVibeAgent returns invocation and resultPromise with bare name', async () => {
-  const result = withVibeLauncher(() => startVibeAgent({ prompt: 'test', worktree: '/tmp' }));
+  const result = withVibeLauncher(() => startVibeAgent({ configuration: resolveConfiguration(process.env), prompt: 'test', worktree: '/tmp' }));
   assert.ok(result.invocation);
   assert.ok(result.invocation.command);
   assert.ok(result.invocation.args);
@@ -181,15 +182,15 @@ test('mistral module exports expected functions', () => {
 // ---------- model override ----------
 
 test('buildVibeInvocation sets VIBE_ACTIVE_MODEL env when model is provided', () => {
-  const inv = buildVibeInvocation({ prompt: 'test', worktree: '/tmp', env: {}, model: 'mistral-large' });
+  const inv = buildVibeInvocation({ configuration: resolveConfiguration(process.env), prompt: 'test', worktree: '/tmp', env: {}, model: 'mistral-large' });
   assert.equal(inv.options.env.VIBE_ACTIVE_MODEL, 'mistral-large');
   assert.ok(!inv.args.includes('-m'));
   assert.ok(!inv.args.includes('--model'));
 });
 
 test('buildVibeInvocation omits VIBE_ACTIVE_MODEL env when model is null/undefined', () => {
-  assert.equal(buildVibeInvocation({ prompt: 't', worktree: '/tmp', env: {} }).options.env.VIBE_ACTIVE_MODEL, undefined);
-  assert.equal(buildVibeInvocation({ prompt: 't', worktree: '/tmp', env: {}, model: null }).options.env.VIBE_ACTIVE_MODEL, undefined);
+  assert.equal(buildVibeInvocation({ configuration: resolveConfiguration(process.env), prompt: 't', worktree: '/tmp', env: {} }).options.env.VIBE_ACTIVE_MODEL, undefined);
+  assert.equal(buildVibeInvocation({ configuration: resolveConfiguration(process.env), prompt: 't', worktree: '/tmp', env: {}, model: null }).options.env.VIBE_ACTIVE_MODEL, undefined);
 });
 
 // ---------- processResult ----------

@@ -1,3 +1,5 @@
+import type { ParallixConfiguration } from "../../application/ports/configuration.js";
+import { DEFAULT_CONFIGURATION } from "../../application/ports/configuration.js";
 /**
  * Review Polling Module
  * Polls the configured review provider for outcomes and disposition comments.
@@ -27,22 +29,13 @@ export function delay(ms: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
-function resolvePollIntervalMs(): number {
-  const raw = process.env.AUTONOMOUS_REVIEW_POLL_INTERVAL_MS;
-  const parsed = raw ? parseInt(raw, 10) : NaN;
-  if (!Number.isFinite(parsed) || parsed <= 0) { return DEFAULT_POLL_INTERVAL_MS; }
-  return parsed;
+function resolvePollIntervalMs(configuration: ParallixConfiguration = DEFAULT_CONFIGURATION): number {
+  return configuration.runtime.reviewPollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS;
 }
 
-/** @param {number} [explicitSeconds] */
-function resolvePollTimeoutMs(explicitSeconds?: number): number {
-  if (typeof explicitSeconds === 'number' && Number.isFinite(explicitSeconds) && explicitSeconds > 0) {
-    return explicitSeconds * 1000;
-  }
-  const raw = process.env.AUTONOMOUS_REVIEW_POLL_TIMEOUT_MS;
-  const parsed = raw ? parseInt(raw, 10) : NaN;
-  if (!Number.isFinite(parsed) || parsed <= 0) { return DEFAULT_POLL_MAX_WAIT_MS; }
-  return parsed;
+function resolvePollTimeoutMs(explicitSeconds?: number, configuration: ParallixConfiguration = DEFAULT_CONFIGURATION): number {
+  if (typeof explicitSeconds === 'number' && Number.isFinite(explicitSeconds) && explicitSeconds > 0) { return explicitSeconds * 1000; }
+  return configuration.runtime.reviewPollTimeoutMs ?? DEFAULT_POLL_MAX_WAIT_MS;
 }
 
 /**
@@ -59,6 +52,7 @@ async function pollForReview(
   sinceIso: string,
   token: string,
   options: {
+    configuration?: ParallixConfiguration;
     getLatestReviewForPrFn?: (_prNumber: number, _reviewerUser: string, _sinceIso: string, _token: string) => Promise<unknown>;
     sleepFn?: (_ms: number) => Promise<void>;
     intervalMs?: number;
@@ -72,8 +66,8 @@ async function pollForReview(
   const {
     getLatestReviewForPrFn = getLatestReviewForPr,
     sleepFn = delay,
-    intervalMs = resolvePollIntervalMs(),
-    timeoutMs = resolvePollTimeoutMs(),
+    intervalMs = resolvePollIntervalMs(options.configuration),
+    timeoutMs = resolvePollTimeoutMs(undefined, options.configuration),
     verbose = false,
     label = 'review',
     retryCount = 0,
@@ -126,6 +120,7 @@ async function pollForDisposition(
   sinceIso: string,
   token: string,
   options: {
+    configuration?: ParallixConfiguration;
     getLatestDispositionForPrFn?: (_prNumber: number, _implementerUser: string, _sinceIso: string, _token: string) => Promise<unknown>;
     sleepFn?: (_ms: number) => Promise<void>;
     intervalMs?: number;
@@ -139,8 +134,8 @@ async function pollForDisposition(
   const {
     getLatestDispositionForPrFn = getLatestDispositionForPr,
     sleepFn = delay,
-    intervalMs = resolvePollIntervalMs(),
-    timeoutMs = resolvePollTimeoutMs(),
+    intervalMs = resolvePollIntervalMs(options.configuration),
+    timeoutMs = resolvePollTimeoutMs(undefined, options.configuration),
     verbose = false,
     label = 'disposition',
     retryCount = 0,

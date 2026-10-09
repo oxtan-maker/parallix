@@ -2,6 +2,7 @@
 
 
 
+import { resolveConfiguration } from '../../../src/composition/config.js';
 import test, { mock } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'fs';
@@ -154,7 +155,7 @@ test('collectHistoricalStatsBackfill resolves done missions, skips non-done miss
     commitAll(root, 'fixture');
     await seedMissionClassifications(root, [['task-2000', 'ai_sdlc'], ['task-2002', 'ai_sdlc']]);
 
-    const report = await collectHistoricalStatsBackfill(root, { dbPath: path.join(root, 'parallix.db') });
+    const report = await collectHistoricalStatsBackfill(root, { configuration: resolveConfiguration(process.env), dbPath: path.join(root, 'parallix.db') });
     const repoName = stats.resolveStatsRepoName(root);
 
     assert.equal(report.rows.length, 2);
@@ -214,7 +215,7 @@ test('collectHistoricalStatsBackfill falls back to git history for date and huma
     commitAll(root, 'task-2003 fixture');
     await seedMissionClassifications(root, [['task-2003', 'ai_sdlc']]);
 
-    const report = await collectHistoricalStatsBackfill(root, { dbPath: path.join(root, 'parallix.db') });
+    const report = await collectHistoricalStatsBackfill(root, { configuration: resolveConfiguration(process.env), dbPath: path.join(root, 'parallix.db') });
     const row = report.rows.find(item => item.mission === 'task-2003');
 
     assert.ok(row);
@@ -255,7 +256,7 @@ test('collectHistoricalStatsBackfill requires stored classification for historic
     commitAll(root, 'task-2006 task-2007 fixture');
     await seedMissionClassifications(root, [['task-2007', 'user_value']]);
 
-    const report = await collectHistoricalStatsBackfill(root, { dbPath: path.join(root, 'parallix.db') });
+    const report = await collectHistoricalStatsBackfill(root, { configuration: resolveConfiguration(process.env), dbPath: path.join(root, 'parallix.db') });
     const resolved = report.rows.find(item => item.mission === 'task-2007');
 
     assert.ok(resolved);
@@ -314,7 +315,7 @@ test('statsBackfill supports help, json output, summary output, and apply mode',
     const previousHome = process.env.PARALLIX_HOME;
     process.env.PARALLIX_HOME = parallixHome;
     try {
-      const service = new StatsBackfillService(new LegacyStatsBackfillAdapter(root));
+      const service = new StatsBackfillService(new LegacyStatsBackfillAdapter(root, { configuration: resolveConfiguration(process.env) }));
       const logs = [];
       await statsBackfillCommand(['--help'], {
         rootDir: root,
@@ -360,7 +361,7 @@ test('statsBackfill supports help, json output, summary output, and apply mode',
       assert.match(applyLogs.join('\n'), /Applied 1 stats rows to the measurement database/);
 
       // The row landed in the database, and no stats.csv was written anywhere.
-      const stored = stats.loadMeasurementRows({ dbPath: path.join(parallixHome, 'parallix.db') }).rows;
+      const stored = stats.loadMeasurementRows({ configuration: resolveConfiguration(process.env), dbPath: path.join(parallixHome, 'parallix.db') }).rows;
       const row = stored.find(candidate => candidate.mission === 'task-2008');
       assert.ok(row, 'expected the backfilled mission in the measurement database');
       assert.equal(row.date, '2026-05-05');
@@ -379,7 +380,7 @@ test('statsBackfill supports help, json output, summary output, and apply mode',
         error: () => {},
         exit: code => { throw new Error(`unexpected exit ${code}`); },
       });
-      const afterSecond = stats.loadMeasurementRows({ dbPath: path.join(parallixHome, 'parallix.db') }).rows;
+      const afterSecond = stats.loadMeasurementRows({ configuration: resolveConfiguration(process.env), dbPath: path.join(parallixHome, 'parallix.db') }).rows;
       assert.equal(afterSecond.filter(candidate => candidate.mission === 'task-2008').length, 1);
     } finally {
       if (previousHome === undefined) delete process.env.PARALLIX_HOME;

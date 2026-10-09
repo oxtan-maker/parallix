@@ -3,6 +3,7 @@ import childProcess from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { resolveConfiguration } from '../../../src/composition/config.js';
 import test from 'node:test';
 import { mockModule, installModuleMocks } from '../../lib/module-mock.js';
 
@@ -54,7 +55,7 @@ test('task-2570: generated Codex v0.156.1 mission config has supported approval 
     assert.doesNotMatch(projectTable, /approval_policy/);
 
     fs.writeFileSync(path.join(operatorCodexHome, 'config.toml'), template);
-    ensureCodexHome(worktree, { CODEX_HOME: operatorCodexHome });
+    ensureCodexHome(worktree, resolveConfiguration({ CODEX_HOME: operatorCodexHome }));
     assert.equal(fs.readlinkSync(codexConfigPath(worktree)), path.join(operatorCodexHome, 'config.toml'));
 
     const invocation = buildCodexDraftInvocation({ prompt: 'config check', worktree, interactive: false });

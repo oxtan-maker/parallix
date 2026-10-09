@@ -1,3 +1,4 @@
+import type { ParallixConfiguration } from "../../application/ports/configuration.js";
 import fs from 'fs';
 import path from 'path';
 import * as fmt from '../../application/presentation/cli-format.js';
@@ -98,11 +99,11 @@ function buildPushbackBody(slug: string, missing: string[]): string {
  * @param {{rootDir?: string, branch?: string, user?: string, log?: Function, readTokenFn?: Function, postReviewFn?: Function, checkFn?: Function}} [options]
  * @returns {{ok: boolean, missing: string[], skipped: boolean, posted: boolean}}
  */
-function runGatekeeper(slug: string, options: { rootDir?: string, checkpointsRecorded?: boolean, branch?: string, user?: string, log?: Function, readTokenFn?: Function, postReviewFn?: Function, checkFn?: Function } = {} as any) {
+function runGatekeeper(slug: string, options: { configuration?: ParallixConfiguration, rootDir?: string, checkpointsRecorded?: boolean, branch?: string, user?: string, log?: Function, readTokenFn?: Function, postReviewFn?: Function, checkFn?: Function } = {} as any) {
   const {
     rootDir = process.cwd(),
     checkpointsRecorded = false,
-    user = process.env.FORGEJO_GATEKEEPER_USER || DEFAULT_GATEKEEPER_USER,
+    user = options.configuration?.forgejo.gatekeeperUser || DEFAULT_GATEKEEPER_USER,
     log = fmt.log.plain,
     readTokenFn = readToken,
     postReviewFn = postReview,
@@ -116,7 +117,7 @@ function runGatekeeper(slug: string, options: { rootDir?: string, checkpointsRec
     return { ok: true, missing: [], skipped: false, posted: false };
   }
 
-  const token = readTokenFn(user);
+  const token = readTokenFn(user, rootDir, options.configuration);
   if (!token) {
     log(fmt.status('WARN', `Gatekeeper: no Forgejo token for "${fmt.agent(user)}"; skipping pushback for ${fmt.slug(slug)}. Missing: ${check.missing.join(', ')}.`));
     return { ok: false, missing: check.missing, skipped: true, posted: false };

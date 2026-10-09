@@ -1,3 +1,4 @@
+import type { ParallixConfiguration } from "../../../application/ports/configuration.js";
 /** Concrete injection seams for the draft CLI adapter. */
 import type { CommandAgentLaunch } from './agent-result.js';
 import type { DraftWorkflowContext } from '../../../application/ports/cli-workflows.js';
@@ -26,6 +27,7 @@ export interface DraftMissionServices {
   lifecycle: Pick<MissionLifecycleService, 'transition'>;
 }
 export interface DraftAdapterDependencies extends Record<string, unknown> {
+  readonly configuration?: ParallixConfiguration;
   exitFn?: DraftExit; logFn?: DraftLog; errorFn?: DraftLog;
   missionServicesFn?: DraftWorkflowContext['missionServicesFn'];
   inferSlugFn?: typeof missionUtils.inferSlug;

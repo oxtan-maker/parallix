@@ -1,5 +1,6 @@
 import { configureRepairCheckpoints } from '../application/ports/repair-checkpoint.js';
 import { RepairCheckpointService } from '../application/repair-checkpoint-service.js';
+import { resolveProcessConfiguration } from './config.js';
 import { createReviewClassification } from './review-classification.js';
 import type { ParallixConfiguration } from '../application/ports/configuration.js';
 import * as path from 'node:path';
@@ -178,9 +179,9 @@ export interface ProductionApplicationServiceOptions {
   readonly configuration: ParallixConfiguration;
 }
 
-function performHandoffWithMissionServices(mission: MissionApplicationServices) {
+function performHandoffWithMissionServices(mission: MissionApplicationServices, configuration: ParallixConfiguration) {
   return (slug: string, options: Record<string, unknown>) => performHandoff(slug, {
-    ...options,
+    ...options, configuration,
     missionServicesFn: async () => mission,
   });
 }
@@ -196,6 +197,15 @@ function performHandoffWithMissionServices(mission: MissionApplicationServices) 
  * SQLite module, or any open/migration error — the snapshot is `null` and
  * consumers fall back to the untouched file-based readers.
  */
+function bindOperatorServices(repositories: OperatorStateRepositories | null) {
+  if (!repositories) { return null; }
+  return {
+    knownRepositories: new KnownRepositoryService(repositories.knownRepositories),
+    uiPreferences: new UIPreferencesService(repositories.uiPreferences),
+    operationalHistory: new OperationalHistoryService(repositories.operationalHistory),
+  };
+}
+
 export async function createProductionApplicationServices(
   rootDir: string,
   activeProgress: ProgressPort | undefined,
@@ -203,17 +213,9 @@ export async function createProductionApplicationServices(
 ): Promise<ProductionApplicationServices> {
   const operatorState = options.includeOperatorState === false
     ? { db: null, migrations: null, blocklist: null, repositories: null, close: async () => {} }
-    : await materializeOperatorState();
+    : await materializeOperatorState(options.configuration);
 
-  const operatorServices = options.includeOperatorState === false
-    ? null
-    : operatorState.repositories
-      ? {
-          knownRepositories: new KnownRepositoryService(operatorState.repositories.knownRepositories),
-          uiPreferences: new UIPreferencesService(operatorState.repositories.uiPreferences),
-          operationalHistory: new OperationalHistoryService(operatorState.repositories.operationalHistory),
-        }
-      : null;
+  const operatorServices = bindOperatorServices(operatorState.repositories);
 
   // Build a SessionMarkerPort from the shared database connection so that
   // startAgent reuses the composition root's SQLite handle instead of opening
@@ -237,10 +239,10 @@ export async function createProductionApplicationServices(
 
   const mission = options.includeOperatorState === false
     ? null
-    : await createMissionApplicationServices(rootDir);
+    : await createMissionApplicationServices(rootDir, { configuration: options.configuration });
   // Shared Mission-authority injection used by both the handoff and the review
-  const defaultExecuteRuntime = createDefaultExecuteMissionRuntime();
-  const handoffWithMissionServices = mission && performHandoffWithMissionServices(mission);
+  const defaultExecuteRuntime = createDefaultExecuteMissionRuntime(options.configuration);
+  const handoffWithMissionServices = mission && performHandoffWithMissionServices(mission, options.configuration);
   const executeRuntime = mission ? {
     ...defaultExecuteRuntime,
     performHandoff: (slug: string, handoffOptions: Record<string, unknown> = {}) =>
@@ -259,12 +261,14 @@ export async function createProductionApplicationServices(
       }),
     reviewLoopMechanisms: (reviewSlug: string, target: ReviewLoopTarget, bindings: ReviewLoopBindings = {}) => createReviewLoopPorts(reviewSlug, target, {
       ...bindings,
-      classification: createReviewClassification(reviewSlug, target.worktree ?? rootDir, options.configuration.decision),
+      configuration: options.configuration,
+      classification: createReviewClassification(reviewSlug, target.worktree ?? rootDir, options.configuration.decision, options.configuration),
       performHandoffFn: handoffWithMissionServices!,
       ...reviewLoopBindings(mission.store, mission.lifecycle, sessionMarkerPort),
     }),
   } : defaultExecuteRuntime;
   const executePorts = createExecuteMissionPorts(rootDir, {
+    configuration: options.configuration,
     missionTransitionStore: mission?.store ?? unavailableMissionTransitionStore(),
     operatorBlocklist: operatorState.blocklist,
     sessionMarkerPort,
@@ -306,7 +310,7 @@ export async function createProductionApplicationServices(
     // aggregate through the operator store when the mission services are
     // available; pre-cutover missions without a Review keep the historical
     // git-history fallback.
-    statsBackfill: new StatsBackfillService(new LegacyStatsBackfillAdapter(rootDir, {}, mission?.store ?? null)),
+    statsBackfill: new StatsBackfillService(new LegacyStatsBackfillAdapter(rootDir, { configuration: options.configuration }, mission?.store ?? null)),
     // A nested review command can finish while integration still uses another
     // service graph backed by the same process-lifetime handle. Drain this
     // scope's accepted operations without invoking the process shutdown closer;
@@ -340,6 +344,7 @@ function unavailableMissionTransitionStore(): import('../application/domain-port
  * returned store will fail on operations rather than falling back to files.
  */
 export interface MissionApplicationServiceOverrides {
+  readonly configuration?: ParallixConfiguration;
   /** Repository ID override (for test fixtures). */
   readonly repositoryId?: string;
   /** Database path override (for test fixtures). */
@@ -372,8 +377,10 @@ export async function createMissionApplicationServices(
   // mission store, session markers, and blocklist all converge on the same
   // DatabaseSync handle. This avoids "database is locked" contention between
   // independent connections on the same file.
-  const dbPath = overrides.databasePath ?? resolveDatabasePath();
+  const configuration = overrides.configuration ?? resolveProcessConfiguration();
+  const dbPath = overrides.databasePath ?? resolveDatabasePath({ configuration });
   const { db } = await initOperatorState({
+    configuration,
     homeDir: overrides.databasePath
       ? path.dirname(dbPath)
       : undefined,
@@ -404,7 +411,7 @@ export async function createMissionApplicationServices(
   };
 }
 
-async function materializeOperatorState(): Promise<OperatorStateServices> {
+async function materializeOperatorState(configuration: ParallixConfiguration): Promise<OperatorStateServices> {
   try {
     // Dynamic imports keep the built-in SQLite module out of the statically
     // loaded runtime graph so the CJS rollback bundle (which lacks these
@@ -424,7 +431,7 @@ async function materializeOperatorState(): Promise<OperatorStateServices> {
     // composition root, session markers, and blocklist all converge on the
     // same DatabaseSync handle. This avoids "database is locked" contention
     // between independent connections on the same file.
-    const { db, migrations } = await initOperatorState();
+    const { db, migrations } = await initOperatorState({ configuration });
 
     // Materialize the operator-local blocklist ONCE (single async read).
     const entries = await new SqliteBlocklistRepository(db).findAll();

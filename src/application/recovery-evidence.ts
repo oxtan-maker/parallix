@@ -196,8 +196,7 @@ function redact(value: string): string {
  * the streams as-is, and `redacted` stays `false` — an honest unredacted
  * claim, never a completeness claim for a scrubbed record.
  */
-export function resolveConfiguredCredentialRedactor(): ((_: string) => string) | null {
-  const configured = process.env.PARALLIX_CREDENTIAL_REDACTOR;
+export function resolveConfiguredCredentialRedactor(configured?: string): ((_: string) => string) | null {
   if (configured && configured !== '0' && configured !== 'false') {
     return scrubCredentials;
   }

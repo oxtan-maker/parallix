@@ -1,3 +1,5 @@
+import { resolveConfiguration } from '../../../src/composition/config.js';
+const environment: NodeJS.ProcessEnv = { ...process.env };
 // Historical regression provenance: TASK-2478.
 // review round revision contract.
 // Related scenarios share imports; each contract keeps its own hooks and mutable fixtures.
@@ -385,14 +387,14 @@ describe("continue invalidates a BLOCKED/PARKED stop —", () => {
   }
 
   async function withHome<T>(root: string, fn: () => Promise<T>): Promise<T> {
-    const previous = process.env.PARALLIX_HOME;
-    process.env.PARALLIX_HOME = path.join(root, 'parallix-home');
+    const previous = environment.PARALLIX_HOME;
+    environment.PARALLIX_HOME = path.join(root, 'parallix-home');
     await clearOperatorStateCache();
     try {
       return await fn();
     } finally {
-      if (previous === undefined) { delete process.env.PARALLIX_HOME; }
-      else { process.env.PARALLIX_HOME = previous; }
+      if (previous === undefined) { delete environment.PARALLIX_HOME; }
+      else { environment.PARALLIX_HOME = previous; }
       await clearOperatorStateCache();
     }
   }

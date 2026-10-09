@@ -1,5 +1,7 @@
-// Historical regression provenance: TASK-1322, TASK-2328, TASK-2209, TASK-2211, TASK-2266.
 // @ts-nocheck -- TASK-2328: partial test doubles from ESM seam migration; resolve in follow-up
+import { resolveConfiguration } from '../../../../src/composition/config.js';
+const environment: NodeJS.ProcessEnv = { ...process.env };
+// Historical regression provenance: TASK-1322, TASK-2328, TASK-2209, TASK-2211, TASK-2266.
 // Codex launcher contract: command/session parsing, draft invocation, CODEX_HOME isolation
 // and operator config/auth/MCP linking.
 //
@@ -75,7 +77,7 @@ describe("Codex launcher basics ,", () => {
   test('headless Codex launches and resumes use top-level approval and project trust overrides', () => {
     const worktree = '/tmp/codex-config-regression/mission';
     for (const options of [{}, { resume: true }, { resume: true, sessionId: 'session-1' }]) {
-      const invocation = buildCodexDraftInvocation({ prompt: 'config check', worktree, interactive: false, ...options });
+      const invocation = buildCodexDraftInvocation({ configuration: resolveConfiguration(environment), prompt: 'config check', worktree, interactive: false, ...options });
       const overrides = invocation.args.filter((_, index) => invocation.args[index - 1] === '--config');
       assert.equal(overrides.filter(arg => arg === 'approval_policy="never"').length, 1);
       assert.ok(overrides.includes('projects."/tmp/codex-config-regression".trust_level="trusted"'));
@@ -85,45 +87,45 @@ describe("Codex launcher basics ,", () => {
   });
 
   test('buildCodexDraftInvocation leaves native sandboxing to Bubblewrap by default', () => {
-    const inv = buildCodexDraftInvocation({ prompt: 'test', worktree: '/tmp', interactive: false });
+    const inv = buildCodexDraftInvocation({ configuration: resolveConfiguration(environment), prompt: 'test', worktree: '/tmp', interactive: false });
     assert.equal(inv.command, 'codex');
     assert.ok(inv.args.includes('exec'));
     assert.equal(inv.args.includes('--sandbox'), false);
   });
 
   test('buildCodexDraftInvocation enables the native sandbox only as a fallback', () => {
-    const inv = buildCodexDraftInvocation({ prompt: 'test', worktree: '/tmp', interactive: false, sandbox: true });
+    const inv = buildCodexDraftInvocation({ configuration: resolveConfiguration(environment), prompt: 'test', worktree: '/tmp', interactive: false, sandbox: true });
     assert.ok(inv.args.includes('--sandbox'));
     assert.ok(inv.args.includes('workspace-write'));
   });
 
   test('buildCodexDraftInvocation uses full-auto path when interactive is true', () => {
-    const inv = buildCodexDraftInvocation({ prompt: 'test', worktree: '/tmp', interactive: true });
+    const inv = buildCodexDraftInvocation({ configuration: resolveConfiguration(environment), prompt: 'test', worktree: '/tmp', interactive: true });
     assert.equal(inv.command, 'codex');
     assert.ok(inv.args.includes('--full-auto'));
     assert.ok(inv.args.includes('--cd'));
   });
 
   test('buildCodexDraftInvocation uses resume with sessionId', () => {
-    const inv = buildCodexDraftInvocation({ prompt: 'test', worktree: '/tmp', resume: true, sessionId: 'abc123' });
+    const inv = buildCodexDraftInvocation({ configuration: resolveConfiguration(environment), prompt: 'test', worktree: '/tmp', resume: true, sessionId: 'abc123' });
     assert.ok(inv.args.includes('resume'));
     assert.ok(inv.args.includes('abc123'));
   });
 
   test('buildCodexDraftInvocation uses --last when resume is true but no sessionId', () => {
-    const inv = buildCodexDraftInvocation({ prompt: 'test', worktree: '/tmp', resume: true, sessionId: null });
+    const inv = buildCodexDraftInvocation({ configuration: resolveConfiguration(environment), prompt: 'test', worktree: '/tmp', resume: true, sessionId: null });
     assert.ok(inv.args.includes('--last'));
   });
 
   test('buildCodexDraftInvocation isolates CODEX_HOME for non-interactive launches', () => {
-    const originalCodexHome = process.env.CODEX_HOME;
+    const originalCodexHome = environment.CODEX_HOME;
     try {
-      process.env.CODEX_HOME = '/tmp/originating-codex-home';
-      const inv = buildCodexDraftInvocation({ prompt: 'test', worktree: '/tmp', interactive: false });
+      environment.CODEX_HOME = '/tmp/originating-codex-home';
+      const inv = buildCodexDraftInvocation({ configuration: resolveConfiguration(environment), prompt: 'test', worktree: '/tmp', interactive: false });
       assert.equal(inv.options.env.CODEX_HOME, codexStateRoot('/tmp'));
     } finally {
-      if (originalCodexHome === undefined) delete process.env.CODEX_HOME;
-      else process.env.CODEX_HOME = originalCodexHome;
+      if (originalCodexHome === undefined) delete environment.CODEX_HOME;
+      else environment.CODEX_HOME = originalCodexHome;
     }
   });
 
@@ -142,7 +144,7 @@ describe("Codex launcher basics ,", () => {
   });
 
   test('buildCodexDraftInvocation applies headless multi-agent and trust overrides', () => {
-    const inv = buildCodexDraftInvocation({ prompt: 'test', worktree: '/tmp/work"tree', interactive: false });
+    const inv = buildCodexDraftInvocation({ configuration: resolveConfiguration(environment), prompt: 'test', worktree: '/tmp/work"tree', interactive: false });
     assert.ok(inv.args.includes('features.multi_agent=true'));
     assert.ok(inv.args.includes('approval_policy="never"'));
     assert.ok(inv.args.some(arg => arg.includes('trust_level="trusted"')));
@@ -152,13 +154,13 @@ describe("Codex launcher basics ,", () => {
   test('ensureCodexHome completes without optional source config', () => {
     const fakeHome = registeredMkdtemp('codex-nohome-');
     const worktree = registeredMkdtemp('codex-wt2-');
-    const origHome = process.env.HOME;
+    const origHome = environment.HOME;
     try {
-      process.env.HOME = fakeHome;
-      ensureCodexHome(worktree, { CODEX_HOME: path.join(fakeHome, '.codex') });
+      environment.HOME = fakeHome;
+      ensureCodexHome(worktree, resolveConfiguration({ HOME: fakeHome }));
       assert.ok(!fs.existsSync(codexConfigPath(worktree)), 'mission setup must not write a Codex config');
     } finally {
-      process.env.HOME = origHome;
+      environment.HOME = origHome;
       fs.rmSync(fakeHome, { recursive: true, force: true });
       fs.rmSync(worktree, { recursive: true, force: true });
     }
@@ -167,19 +169,19 @@ describe("Codex launcher basics ,", () => {
   // ---------- model override ----------
 
   test('buildCodexDraftInvocation adds -m flag when model is provided', () => {
-    const inv = buildCodexDraftInvocation({ prompt: 'test', worktree: '/tmp', interactive: false, model: 'gpt-5.4-mini' });
+    const inv = buildCodexDraftInvocation({ configuration: resolveConfiguration(environment), prompt: 'test', worktree: '/tmp', interactive: false, model: 'gpt-5.4-mini' });
     const i = inv.args.indexOf('-m');
     assert.ok(i !== -1);
     assert.equal(inv.args[i + 1], 'gpt-5.4-mini');
   });
 
   test('buildCodexDraftInvocation omits -m flag when model is null/undefined', () => {
-    assert.ok(!buildCodexDraftInvocation({ prompt: 't', worktree: '/tmp', interactive: false }).args.includes('-m'));
-    assert.ok(!buildCodexDraftInvocation({ prompt: 't', worktree: '/tmp', interactive: false, model: null }).args.includes('-m'));
+    assert.ok(!buildCodexDraftInvocation({ configuration: resolveConfiguration(environment), prompt: 't', worktree: '/tmp', interactive: false }).args.includes('-m'));
+    assert.ok(!buildCodexDraftInvocation({ configuration: resolveConfiguration(environment), prompt: 't', worktree: '/tmp', interactive: false, model: null }).args.includes('-m'));
   });
 
   test('buildCodexDraftInvocation adds -m flag on the resume path too', () => {
-    const inv = buildCodexDraftInvocation({ prompt: 't', worktree: '/tmp', resume: true, sessionId: 'abc', model: 'gpt-5.4-mini' });
+    const inv = buildCodexDraftInvocation({ configuration: resolveConfiguration(environment), prompt: 't', worktree: '/tmp', resume: true, sessionId: 'abc', model: 'gpt-5.4-mini' });
     assert.ok(inv.args.includes('-m'));
     assert.ok(inv.args.includes('gpt-5.4-mini'));
   });
@@ -200,7 +202,7 @@ describe("Codex launcher basics ,", () => {
     codex.__setSpawnAndTeeForTest(mockSpawn);
     codex.__setSessionPortForTest(mockSessionPort);
 
-    const { invocation, resultPromise } = codex.startCodexDraftAgent({
+    const { invocation, resultPromise } = codex.startCodexDraftAgent({ configuration: resolveConfiguration(environment),
       prompt: 'review task', worktree: '/tmp/wt', env: {}, resume: true, sessionId: 'ses_stale', slug: 'task-1322', role: 'reviewer'
     });
     const result = await resultPromise;
@@ -223,7 +225,7 @@ describe("Codex launcher basics ,", () => {
 
     codex.__setSpawnAndTeeForTest(mockSpawn);
 
-    const { resultPromise } = codex.startCodexDraftAgent({
+    const { resultPromise } = codex.startCodexDraftAgent({ configuration: resolveConfiguration(environment),
       prompt: 'test', worktree: '/tmp/wt', env: {}, resume: false, sessionId: null
     });
     const result = await resultPromise;
@@ -245,7 +247,7 @@ describe("Codex launcher basics ,", () => {
 
     codex.__setSpawnAndTeeForTest(mockSpawn);
 
-    const { invocation, resultPromise } = codex.startCodexDraftAgent({
+    const { invocation, resultPromise } = codex.startCodexDraftAgent({ configuration: resolveConfiguration(environment),
       prompt: 'test', worktree: '/tmp/wt', env: {}, resume: true, sessionId: 'ses_valid', sandbox: true
     });
     const result = await resultPromise;
@@ -271,7 +273,7 @@ describe("Codex MCP config linked into worktree CODEX_HOME", () => {
 
     const fakeHome = registeredMkdtemp('codex-mcp-repro-');
     const worktree = registeredMkdtemp('codex-mcp-wt-');
-    const origHome = process.env.HOME;
+    const origHome = environment.HOME;
 
     try {
       // Simulate an operator's config without placing it in the worktree.
@@ -295,13 +297,13 @@ describe("Codex MCP config linked into worktree CODEX_HOME", () => {
         'utf8'
       );
 
-      process.env.HOME = fakeHome;
-      ensureCodexHome(worktree, { CODEX_HOME: codexDir });
+      environment.HOME = fakeHome;
+      ensureCodexHome(worktree, resolveConfiguration({ HOME: fakeHome }));
 
       assert.ok(fs.lstatSync(codexConfigPath(worktree)).isSymbolicLink(), 'mission setup must link, not copy, Codex config');
       assert.equal(fs.readlinkSync(codexConfigPath(worktree)), path.join(codexDir, 'config.toml'));
     } finally {
-      process.env.HOME = origHome;
+      environment.HOME = origHome;
       fs.rmSync(fakeHome, { recursive: true, force: true });
       fs.rmSync(worktree, { recursive: true, force: true });
     }
@@ -317,23 +319,23 @@ describe("Codex operator-state isolation", () => {
   test('codex launcher keeps operator-home nested tool resolution while isolating Codex state', () => {
     const operatorHome = registeredMkdtemp('task-2211-operator-home-');
     const worktree = registeredMkdtemp('task-2211-worktree-');
-    const originalHome = process.env.HOME;
+    const originalHome = environment.HOME;
 
     try {
       const nestedTool = path.join(operatorHome, '.local', 'bin', 'opencode');
       fs.mkdirSync(path.dirname(nestedTool), { recursive: true });
       fs.writeFileSync(nestedTool, '#!/bin/sh\n', { mode: 0o755 });
-      process.env.HOME = operatorHome;
+      environment.HOME = operatorHome;
 
-      const invocation = buildCodexDraftInvocation({ prompt: 'Execute.', worktree, interactive: false });
+      const invocation = buildCodexDraftInvocation({ configuration: resolveConfiguration(environment), prompt: 'Execute.', worktree, interactive: false });
   // @ts-expect-error -- TASK-2328: partial test double after ESM seam migration
       const resolvedNestedTool = path.join(invocation.options.env.HOME, '.local', 'bin', 'opencode');
 
       assert.ok(fs.existsSync(resolvedNestedTool), 'a nested command must retain the operator HOME used to resolve its installation');
       assert.equal(invocation.options.env.CODEX_HOME, codexStateRoot(worktree), 'Codex-owned state must use the worktree-local Codex state directory');
     } finally {
-      if (originalHome === undefined) delete process.env.HOME;
-      else process.env.HOME = originalHome;
+      if (originalHome === undefined) delete environment.HOME;
+      else environment.HOME = originalHome;
       fs.rmSync(operatorHome, { recursive: true, force: true });
       fs.rmSync(worktree, { recursive: true, force: true });
     }
@@ -342,28 +344,28 @@ describe("Codex operator-state isolation", () => {
   test('Codex setup links operator config and auth without copying their contents', () => {
     const operatorHome = registeredMkdtemp('task-2211-state-operator-home-');
     const worktree = registeredMkdtemp('task-2211-state-worktree-');
-    const originalHome = process.env.HOME;
-    const originalCodexHome = process.env.CODEX_HOME;
+    const originalHome = environment.HOME;
+    const originalCodexHome = environment.CODEX_HOME;
 
     try {
-      process.env.HOME = operatorHome;
+      environment.HOME = operatorHome;
       const operatorCodexHome = path.join(operatorHome, '.codex');
       fs.mkdirSync(operatorCodexHome, { recursive: true });
       fs.writeFileSync(path.join(operatorCodexHome, 'config.toml'), '[mcp_servers.slack]\n');
       fs.writeFileSync(path.join(operatorCodexHome, 'auth.json'), '{"token":"test"}\n');
-      process.env.CODEX_HOME = operatorCodexHome;
+      environment.CODEX_HOME = operatorCodexHome;
 
-      codex.ensureCodexHome(worktree);
+      codex.ensureCodexHome(worktree, resolveConfiguration(environment));
 
       assert.ok(fs.lstatSync(codex.codexConfigPath(worktree)).isSymbolicLink(), 'config must be linked, not copied into the worktree');
       assert.ok(fs.lstatSync(codex.codexAuthPath(worktree)).isSymbolicLink(), 'auth must be linked, not copied into the worktree');
       assert.equal(fs.readlinkSync(codex.codexConfigPath(worktree)), path.join(operatorCodexHome, 'config.toml'));
       assert.equal(fs.readlinkSync(codex.codexAuthPath(worktree)), path.join(operatorCodexHome, 'auth.json'));
     } finally {
-      if (originalHome === undefined) delete process.env.HOME;
-      else process.env.HOME = originalHome;
-      if (originalCodexHome === undefined) delete process.env.CODEX_HOME;
-      else process.env.CODEX_HOME = originalCodexHome;
+      if (originalHome === undefined) delete environment.HOME;
+      else environment.HOME = originalHome;
+      if (originalCodexHome === undefined) delete environment.CODEX_HOME;
+      else environment.CODEX_HOME = originalCodexHome;
       fs.rmSync(operatorHome, { recursive: true, force: true });
       fs.rmSync(worktree, { recursive: true, force: true });
     }
@@ -377,16 +379,16 @@ describe("Codex operator HOME retention", () => {
     const operatorHome = registeredMkdtemp('task-2266-operator-home-');
     const callerHome = registeredMkdtemp('task-2266-caller-home-');
     const worktree = registeredMkdtemp('task-2266-worktree-');
-    const originalHome = process.env.HOME;
+    const originalHome = environment.HOME;
 
     try {
       const nestedTool = path.join(operatorHome, '.local', 'bin', 'opencode');
       fs.mkdirSync(path.dirname(nestedTool), { recursive: true });
       fs.writeFileSync(nestedTool, '#!/bin/sh\n', { mode: 0o755 });
-      process.env.HOME = operatorHome;
+      environment.HOME = operatorHome;
 
       for (const resume of [false, true]) {
-        const invocation = codexModule.buildCodexDraftInvocation({
+        const invocation = codexModule.buildCodexDraftInvocation({ configuration: resolveConfiguration(environment),
           prompt: 'Execute.',
           worktree,
           interactive: false,
@@ -403,8 +405,8 @@ describe("Codex operator HOME retention", () => {
         assert.equal(invocation.options.env.CODEX_HOME, codexModule.codexStateRoot(worktree));
       }
     } finally {
-      if (originalHome === undefined) delete process.env.HOME;
-      else process.env.HOME = originalHome;
+      if (originalHome === undefined) delete environment.HOME;
+      else environment.HOME = originalHome;
       fs.rmSync(operatorHome, { recursive: true, force: true });
       fs.rmSync(callerHome, { recursive: true, force: true });
       fs.rmSync(worktree, { recursive: true, force: true });
@@ -415,24 +417,24 @@ describe("Codex operator HOME retention", () => {
     const operatorHome = registeredMkdtemp('task-2266-bootstrap-operator-home-');
     const callerHome = registeredMkdtemp('task-2266-bootstrap-caller-home-');
     const worktree = registeredMkdtemp('task-2266-bootstrap-worktree-');
-    const originalHome = process.env.HOME;
-    const originalCodexHome = process.env.CODEX_HOME;
+    const originalHome = environment.HOME;
+    const originalCodexHome = environment.CODEX_HOME;
 
     try {
       const operatorConfig = path.join(operatorHome, '.codex', 'config.toml');
       fs.mkdirSync(path.dirname(operatorConfig), { recursive: true });
       fs.writeFileSync(operatorConfig, '[features]\nmulti_agent = true\n', 'utf8');
-      process.env.HOME = operatorHome;
-      delete process.env.CODEX_HOME;
+      environment.HOME = operatorHome;
+      delete environment.CODEX_HOME;
 
-      codexModule.ensureCodexHome(worktree, { HOME: callerHome });
+      codexModule.ensureCodexHome(worktree, resolveConfiguration(environment));
 
       assert.equal(fs.readlinkSync(codexModule.codexConfigPath(worktree)), operatorConfig);
     } finally {
-      if (originalHome === undefined) delete process.env.HOME;
-      else process.env.HOME = originalHome;
-      if (originalCodexHome === undefined) delete process.env.CODEX_HOME;
-      else process.env.CODEX_HOME = originalCodexHome;
+      if (originalHome === undefined) delete environment.HOME;
+      else environment.HOME = originalHome;
+      if (originalCodexHome === undefined) delete environment.CODEX_HOME;
+      else environment.CODEX_HOME = originalCodexHome;
       fs.rmSync(operatorHome, { recursive: true, force: true });
       fs.rmSync(callerHome, { recursive: true, force: true });
       fs.rmSync(worktree, { recursive: true, force: true });

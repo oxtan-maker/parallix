@@ -192,7 +192,8 @@
       "integration/verification/verification-proof-reuse.test.ts": 250,
       "integration/verification/verification.test.ts": 350,
       "integration/integrate/workflow-repair-lane-boundaries.test.ts": 7950,
-      "integration/test-harness/runner-focused-selection.test.ts": 1000
+      "integration/test-harness/runner-focused-selection.test.ts": 1000,
+      "integration/agents/pi-worker-process-contract.test.ts": 800
     },
     "covered": {
       "integration/process/tmux-terminal-host.test.ts": 2500,
@@ -364,7 +365,8 @@
       "integration/verification/verification-proof-reuse.test.ts": 240,
       "integration/verification/verification.test.ts": 450,
       "integration/integrate/workflow-repair-lane-boundaries.test.ts": 11282,
-      "integration/test-harness/runner-focused-selection.test.ts": 1510
+      "integration/test-harness/runner-focused-selection.test.ts": 1510,
+      "integration/agents/pi-worker-process-contract.test.ts": 800
     }
   }
 }

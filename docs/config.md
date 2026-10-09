@@ -523,7 +523,9 @@ and Backlog labels.
 
 ## Environment variables
 
-`src/composition/config.ts` resolves the supported host environment into one frozen typed configuration at startup, which composition passes inward; flags and numeric controls such as the review polling and watchdog values are parsed there, and invalid numeric values behave as unset. The migration is not finished: several adapters still read some variables directly from the process environment, and the Default and Accepted values columns describe the effective behavior of whichever owner interprets each variable today. In particular `XDG_CONFIG_HOME`, `XDG_CACHE_HOME` and `XDG_DATA_HOME` are interpreted by the OpenCode state-home lookup in `src/adapters/config/state-homes.ts`, the `GIT_*` identity variables by `gitIdentityEnv` in `src/adapters/config/product-config.ts`, and the agent watchdog values by `resolveNoOutputWatchdogConfig` in `src/adapters/agents/launcher-selection.ts`. `PARALLIX_CLI_ENTRYPOINT` and `PARALLIX_TERMINAL_RETURN_DIR` are set for child processes, not read as configuration.
+`src/composition/config.ts` resolves the supported host environment into frozen typed configuration at startup. Composition passes this configuration to adapters and use cases through arguments; they do not interpret individual environment variables. Numeric controls such as review polling and watchdog values are parsed there, and invalid values behave as unset. Child processes receive their launch environment separately. Pi runs its SDK and tools in an isolated child process so concurrent sessions do not change the orchestrator's environment.
+
+`PARALLIX_CLI_ENTRYPOINT` and `PARALLIX_TERMINAL_RETURN_DIR` are set for child processes, not read as configuration.
 
 | Name | Type | Default | Accepted values | Effect |
 | --- | --- | --- | --- | --- |

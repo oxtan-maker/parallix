@@ -1,3 +1,5 @@
+import type { ParallixConfiguration } from "../../application/ports/configuration.js";
+import { DEFAULT_CONFIGURATION } from "../../application/ports/configuration.js";
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -5,14 +7,14 @@ import * as fmt from '../../application/presentation/cli-format.js';
 import * as gitModule from '../git/git.js';
 
 /** @param {{commandRunner?: Function}} [options] */
-export function graphifyAvailable(options: { commandRunner?: Function | null } = {}): boolean {
+export function graphifyAvailable(options: { commandRunner?: Function | null; configuration?: ParallixConfiguration } = {}): boolean {
   const commandRunner = options.commandRunner ?? null;
   const cmdRunner = commandRunner || gitModule.run;
-  return probeGraphifyAvailability({ commandRunner: cmdRunner }).available;
+  return probeGraphifyAvailability({ commandRunner: cmdRunner, configuration: options.configuration }).available;
 }
 
 /** @returns {string[]} */
-export function graphifyCommandCandidates(): string[] {
+export function graphifyCommandCandidates(configuration: ParallixConfiguration = DEFAULT_CONFIGURATION): string[] {
   const candidates: string[] = [];
   const seen = new Set<string>();
 
@@ -22,7 +24,7 @@ export function graphifyCommandCandidates(): string[] {
     candidates.push(candidate);
   };
 
-  if (process.env.GRAPHIFY_BIN) {pushCandidate(process.env.GRAPHIFY_BIN);}
+  if (configuration.agents.graphifyBin) {pushCandidate(configuration.agents.graphifyBin);}
   pushCandidate('graphify');
   pushCandidate(path.join(os.homedir(), '.local', 'bin', 'graphify'));
 
@@ -30,10 +32,10 @@ export function graphifyCommandCandidates(): string[] {
 }
 
 /** @param {{commandRunner?: Function}} [options] */
-export function probeGraphifyAvailability(options: { commandRunner?: Function | null } = {}): { available: boolean; command?: string; status?: number | null; reason?: string; error?: unknown } {
+export function probeGraphifyAvailability(options: { commandRunner?: Function | null; configuration?: ParallixConfiguration } = {}): { available: boolean; command?: string; status?: number | null; reason?: string; error?: unknown } {
   const commandRunner = options.commandRunner ?? null;
   const cmdRunner = commandRunner || gitModule.run;
-  for (const command of graphifyCommandCandidates()) {
+  for (const command of graphifyCommandCandidates(options.configuration)) {
     try {
       const result = cmdRunner(command, ['--help']);
       return {
@@ -62,7 +64,7 @@ export function probeGraphifyAvailability(options: { commandRunner?: Function | 
  * @param {{rootDir?: string, commandRunner?: Function, log?: Function, startMessage?: string, failureHint?: string}} [options]
  */
 /** @param {{rootDir?: string, commandRunner?: Function, log?: Function, startMessage?: string, failureHint?: string}} [options] */
-export function updateGraphifyKnowledgeGraph(options: { rootDir?: string; commandRunner?: Function; log?: Function; startMessage?: string; failureHint?: string } = {}): { updated: boolean; skipped: boolean; reason?: string; status?: number } {
+export function updateGraphifyKnowledgeGraph(options: { configuration?: ParallixConfiguration; rootDir?: string; commandRunner?: Function; log?: Function; startMessage?: string; failureHint?: string } = {}): { updated: boolean; skipped: boolean; reason?: string; status?: number } {
   const rootDir = options.rootDir || process.cwd();
   const commandRunner = options.commandRunner;
   const logFn = options.log || fmt.log.plain;
@@ -74,7 +76,7 @@ export function updateGraphifyKnowledgeGraph(options: { rootDir?: string; comman
     logFn(fmt.status('INFO', 'No existing graphify graph found. Skipping knowledge graph update.'));
     return { updated: false, skipped: true, reason: 'missing-graph' };
   }
-  const probe = probeGraphifyAvailability({ commandRunner: cmdRunner });
+  const probe = probeGraphifyAvailability({ commandRunner: cmdRunner, configuration: options.configuration });
   if (!probe.available) {
     if (probe.reason === 'missing-command') {
       logFn(fmt.status('WARN', 'graphify not found in PATH. Skipping knowledge graph update.'));
@@ -111,7 +113,7 @@ export function updateGraphifyKnowledgeGraph(options: { rootDir?: string; comman
  * @param {{rootDir?: string}} [options]
  * @returns {{graphPath: string} | null}
  */
-export function resolveGraphPath(options: { rootDir?: string } = {}): { graphPath: string } | null {
+export function resolveGraphPath(options: { configuration?: ParallixConfiguration; rootDir?: string } = {}): { graphPath: string } | null {
   const rootDir = options.rootDir || process.cwd();
   const graphPath = path.join(rootDir, 'graphify-out', 'graph.json');
   if (fs.existsSync(graphPath)) {
@@ -128,7 +130,7 @@ export function resolveGraphPath(options: { rootDir?: string } = {}): { graphPat
  * @param {{question: string, rootDir?: string, commandRunner?: Function, log?: Function}} options
  * @returns {{success: boolean; output?: string; reason?: string; status?: number}}
  */
-export function queryGraph(options: { question: string; rootDir?: string; commandRunner?: Function; log?: Function }): { success: boolean; output?: string; reason?: string; status?: number } {
+export function queryGraph(options: { configuration?: ParallixConfiguration; question: string; rootDir?: string; commandRunner?: Function; log?: Function }): { success: boolean; output?: string; reason?: string; status?: number } {
   const rootDir = options.rootDir || process.cwd();
   const logFn = options.log || fmt.log.plain;
   const cmdRunner = options.commandRunner || gitModule.run;
@@ -139,7 +141,7 @@ export function queryGraph(options: { question: string; rootDir?: string; comman
     return { success: false, reason: 'missing-graph' };
   }
 
-  const probe = probeGraphifyAvailability({ commandRunner: cmdRunner });
+  const probe = probeGraphifyAvailability({ commandRunner: cmdRunner, configuration: options.configuration });
   if (!probe.available) {
     return { success: false, reason: probe.reason || 'missing-command' };
   }

@@ -1,3 +1,5 @@
+import { resolveConfiguration } from '../../../../../src/composition/config.js';
+const environment: NodeJS.ProcessEnv = { ...process.env };
 // Historical regression provenance: TASK-2242, TASK-2411.
 // Behavior-owned suite (TASK-2622.09): backlog-only conflict drift retry (task-2242), the integrate
 // guard, the exclusive per-mission claim, and integrate work detection (task-2411).
@@ -452,7 +454,7 @@ describe("backlog drift retry", () => {
     mock.method(process, 'exit', () => {});
     const integrate = loadIntegrate();
 
-    await integrate([TEST_SLUG, '--no-integration-gates'], { missionServicesFn: compositionCjs.createMissionApplicationServices });
+    await integrate([TEST_SLUG, '--no-integration-gates'], { configuration: resolveConfiguration({ ...environment, PARALLIX_TEST_ALLOW_INTEGRATION_GATE_BYPASS: '1' }), missionServicesFn: compositionCjs.createMissionApplicationServices });
 
     console.log = originalLog;
     mock.reset();
@@ -483,7 +485,7 @@ describe("backlog drift retry", () => {
     mock.method(process, 'exit', () => {});
     const integrate = loadIntegrate();
 
-    await integrate([TEST_SLUG, '--no-integration-gates'], { missionServicesFn: compositionCjs.createMissionApplicationServices });
+    await integrate([TEST_SLUG, '--no-integration-gates'], { configuration: resolveConfiguration({ ...environment, PARALLIX_TEST_ALLOW_INTEGRATION_GATE_BYPASS: '1' }), missionServicesFn: compositionCjs.createMissionApplicationServices });
 
     console.log = originalLog;
     mock.reset();
@@ -523,7 +525,7 @@ describe("backlog drift retry", () => {
     mock.method(process, 'exit', () => {});
     const integrate = loadIntegrate();
 
-    await integrate([TEST_SLUG, '--no-integration-gates'], { missionServicesFn: compositionCjs.createMissionApplicationServices });
+    await integrate([TEST_SLUG, '--no-integration-gates'], { configuration: resolveConfiguration({ ...environment, PARALLIX_TEST_ALLOW_INTEGRATION_GATE_BYPASS: '1' }), missionServicesFn: compositionCjs.createMissionApplicationServices });
 
     console.log = originalLog;
     mock.reset();
@@ -566,7 +568,7 @@ describe("backlog drift retry", () => {
     mock.method(process, 'exit', () => {});
     const integrate = loadIntegrate();
 
-    await integrate([TEST_SLUG, '--no-integration-gates'], { missionServicesFn: compositionCjs.createMissionApplicationServices });
+    await integrate([TEST_SLUG, '--no-integration-gates'], { configuration: resolveConfiguration({ ...environment, PARALLIX_TEST_ALLOW_INTEGRATION_GATE_BYPASS: '1' }), missionServicesFn: compositionCjs.createMissionApplicationServices });
 
     console.log = originalLog;
     console.error = originalError;
@@ -588,14 +590,14 @@ describe("integrate guard", () => {
   const integrate = mockModule<typeof import('../../../../../src/adapters/cli/commands/integrate.js')>('../../../../../src/adapters/cli/commands/integrate.js', import.meta.url);
 
   test.afterEach(() => mock.restoreAll());
-  const previousPrimaryWorktree = process.env.PRIMARY_WORKTREE;
+  const previousPrimaryWorktree = environment.PRIMARY_WORKTREE;
   if (previousPrimaryWorktree === undefined) {
-    process.env.PRIMARY_WORKTREE = `/tmp/visualBoard-${process.pid}`;
+    environment.PRIMARY_WORKTREE = `/tmp/visualBoard-${process.pid}`;
   }
   if (previousPrimaryWorktree === undefined) {
-    delete process.env.PRIMARY_WORKTREE;
+    delete environment.PRIMARY_WORKTREE;
   } else {
-    process.env.PRIMARY_WORKTREE = previousPrimaryWorktree;
+    environment.PRIMARY_WORKTREE = previousPrimaryWorktree;
   }
 
   test('integrate guard', async (t) => {
@@ -628,21 +630,21 @@ describe("integrate guard", () => {
       console.error = stubError;
       console.log = stubLog;
 
-      const oldUser = process.env.FORGEJO_USER;
-      const oldAgent = process.env.WORKFLOW_AGENT;
-      process.env.FORGEJO_USER = 'gemini';
-      delete process.env.WORKFLOW_AGENT;
+      const oldUser = environment.FORGEJO_USER;
+      const oldAgent = environment.WORKFLOW_AGENT;
+      environment.FORGEJO_USER = 'gemini';
+      delete environment.WORKFLOW_AGENT;
 
       exitCode = null;
       errorOutput = '';
 
       try {
-        await integrate.default(['task-1086']);
+        await integrate.default(['task-1086'], { configuration: resolveConfiguration(environment) });
       } catch (err) {
         if (err.message !== 'process.exit called') throw err;
       } finally {
-        process.env.FORGEJO_USER = oldUser;
-        process.env.WORKFLOW_AGENT = oldAgent;
+        environment.FORGEJO_USER = oldUser;
+        environment.WORKFLOW_AGENT = oldAgent;
         process.exit = originalExit;
         console.error = originalError;
         console.log = originalLog;
@@ -657,21 +659,21 @@ describe("integrate guard", () => {
       console.error = stubError;
       console.log = stubLog;
 
-      const oldUser = process.env.FORGEJO_USER;
-      const oldAgent = process.env.WORKFLOW_AGENT;
-      delete process.env.FORGEJO_USER;
-      process.env.WORKFLOW_AGENT = 'gemini';
+      const oldUser = environment.FORGEJO_USER;
+      const oldAgent = environment.WORKFLOW_AGENT;
+      delete environment.FORGEJO_USER;
+      environment.WORKFLOW_AGENT = 'gemini';
 
       exitCode = null;
       errorOutput = '';
 
       try {
-        await integrate.default(['task-1086']);
+        await integrate.default(['task-1086'], { configuration: resolveConfiguration(environment) });
       } catch (err) {
         if (err.message !== 'process.exit called') throw err;
       } finally {
-        process.env.FORGEJO_USER = oldUser;
-        process.env.WORKFLOW_AGENT = oldAgent;
+        environment.FORGEJO_USER = oldUser;
+        environment.WORKFLOW_AGENT = oldAgent;
         process.exit = originalExit;
         console.error = originalError;
         console.log = originalLog;
@@ -687,10 +689,10 @@ describe("integrate guard", () => {
       console.error = stubError;
       console.log = stubLog;
 
-      const oldUser = process.env.FORGEJO_USER;
-      const oldAgent = process.env.WORKFLOW_AGENT;
-      process.env.FORGEJO_USER = 'codex';
-      delete process.env.WORKFLOW_AGENT;
+      const oldUser = environment.FORGEJO_USER;
+      const oldAgent = environment.WORKFLOW_AGENT;
+      environment.FORGEJO_USER = 'codex';
+      delete environment.WORKFLOW_AGENT;
 
       exitCode = null;
       errorOutput = '';
@@ -699,12 +701,12 @@ describe("integrate guard", () => {
         // A missing slug reaches the usage guard immediately after the agent
         // authorization check. This test covers authorization only and must not
         // proceed into integration preflight or Forgejo discovery.
-        await integrate.default([]);
+        await integrate.default([], { configuration: resolveConfiguration(environment) });
       } catch (err) {
         // It might call process.exit for other reasons (preflight fail), which is fine
       } finally {
-        process.env.FORGEJO_USER = oldUser;
-        process.env.WORKFLOW_AGENT = oldAgent;
+        environment.FORGEJO_USER = oldUser;
+        environment.WORKFLOW_AGENT = oldAgent;
         process.exit = originalExit;
         console.error = originalError;
         console.log = originalLog;

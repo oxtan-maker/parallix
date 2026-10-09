@@ -27,7 +27,7 @@ function forgejoApi(
   options: any = {}
 ): { ok: boolean, data: any, status: number | null, statusCode: number | null, stderr: string | null, error: string | null } {
   const { rootDir = process.cwd() } = options;
-  const { url: forgejoUrl, repo: forgejoRepo } = resolveForgejoSettings(rootDir);
+  const { url: forgejoUrl, repo: forgejoRepo } = resolveForgejoSettings(rootDir, options.configuration);
   const url = `${forgejoUrl}/api/v1/repos/${forgejoRepo}${apiPath}`;
   const args = ['-s', '-X', method,
     '-H', `Authorization: token ${token}`,
@@ -103,7 +103,7 @@ async function forgejoApiAsync(
     rootDir = process.cwd(),
     timeout = HTTP_REQUEST_TIMEOUT
   } = options;
-  const { url: forgejoUrl, repo: forgejoRepo } = resolveForgejoSettings(rootDir);
+  const { url: forgejoUrl, repo: forgejoRepo } = resolveForgejoSettings(rootDir, options.configuration);
 
   const url = new URL(`${forgejoUrl}/api/v1/repos/${forgejoRepo}${apiPath}`);
   const transport = url.protocol === 'https:' ? https : http;

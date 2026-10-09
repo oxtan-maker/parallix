@@ -1,3 +1,4 @@
+import type { ParallixConfiguration } from "../../../application/ports/configuration.js";
 import { draftMissionServices, type DraftAdapterDependencies, type DraftLog, type DraftExit } from './draft-adapter-types.js';
 import type { SyntheticDraftTask, DraftTarget } from './draft-setup.js';
 import type { MissionIntakeService } from '../../../application/mission-intake-service.js';
@@ -284,7 +285,7 @@ async function repairDraftContract(slug: string, worktree: string, agent: string
  * families record honest zeros with provider/model set to the family name.
  * Best-effort: a failure here must never fail the draft.
  */
-function recordDraftStats({ slug, rootDir, agentFamily, result, log = fmt.log.plain }: { slug: string; rootDir: string; agentFamily: string; result?: { startedAt?: string; endedAt?: string; telemetry?: StageStatsRequest['telemetry'] } | null; log?: DraftLog; error?: DraftLog }) {
+function recordDraftStats({ configuration, slug, rootDir, agentFamily, result, log = fmt.log.plain }: { configuration?: ParallixConfiguration; slug: string; rootDir: string; agentFamily: string; result?: { startedAt?: string; endedAt?: string; telemetry?: StageStatsRequest['telemetry'] } | null; log?: DraftLog; error?: DraftLog }) {
   if (!result) {return;}
   let durationMinutes = 0;
   if (result.startedAt && result.endedAt) {
@@ -292,7 +293,7 @@ function recordDraftStats({ slug, rootDir, agentFamily, result, log = fmt.log.pl
   }
   try {
     const { row } = stats.recordStageStats({
-      slug,
+      configuration, slug,
       stage: 'draft',
       rootDir,
       implementer: agentFamily,
@@ -322,7 +323,7 @@ function createDraftWorkflowAdapter(deps: DraftAdapterDependencies = {}): DraftW
   // it is demoted behind the existing DEBUG env gate that `fmt.log.debug` uses.
   // The message text and call order are unchanged; only the transport is gated,
   // so `DEBUG=1` reproduces the pre-change default output verbatim.
-  const debugFn = (msg: string): void => { if (process.env.DEBUG) { logFn(msg); } };
+  const debugFn = (msg: string): void => { if ((deps.configuration as ParallixConfiguration | undefined)?.runtime.debug) { logFn(msg); } };
   // Wall-clock for the whole draft, reported in the closing summary: a draft is
   // a minutes-long agent run, and how long it took is the first thing an
   // operator asks once it lands.
@@ -379,7 +380,7 @@ function createDraftWorkflowAdapter(deps: DraftAdapterDependencies = {}): DraftW
       const resolveTaskFileFn = merged.resolveTaskFileFn || resolveTaskFile;
       const reportTaskResolutionFn = merged.reportTaskResolutionFn || reportTaskResolution;
       const checkBacklogIntegrityFn = merged.checkBacklogIntegrityFn || checkBacklogIntegrity;
-      const allocateAdhocIdentityFn = merged.allocateAdhocIdentityFn || allocateAdhocIdentity;
+      const allocateAdhocIdentityFn = merged.allocateAdhocIdentityFn || ((repositoryId: string) => allocateAdhocIdentity(repositoryId, { configuration: merged.configuration }));
 
       const explicitInput = args[0];
       const draftTarget = resolveDraftTarget(explicitInput) || { slug: inferSlugFn(explicitInput), syntheticTask: null };
@@ -396,7 +397,7 @@ function createDraftWorkflowAdapter(deps: DraftAdapterDependencies = {}): DraftW
       const preselectedAgent = flagValue(args, '--agent', 'agent', errorFn, exitFn);
       startedAtMs = Date.now();
 
-      const mainRepo = resolveMainRepoFn();
+      const mainRepo = resolveMainRepoFn(merged.configuration);
       if (ensureRepoExistsFn(mainRepo, exitFn, errorFn) === false) {
         return exitedContext({ slug: normalizedSlug, mainRepo, options });
       }
@@ -569,6 +570,7 @@ function createDraftWorkflowAdapter(deps: DraftAdapterDependencies = {}): DraftW
       };
       const validateDraftClassificationFn = merged.validateDraftClassificationFn || validateDraftClassification;
       const classificationCheck = validateDraftClassificationFn(ctx.slug, ctx.targetWorktree, {
+        configuration: merged.configuration,
         errorFn: suppressDraftStartClassificationFail
       });
       if (!classificationCheck.ok) {
@@ -668,12 +670,13 @@ function createDraftWorkflowAdapter(deps: DraftAdapterDependencies = {}): DraftW
       const recordDraftImplementerFn = merged.recordDraftImplementerFn || recordDraftImplementer;
       const recordDraftStatsFn = merged.recordDraftStatsFn || recordDraftStats;
 
-      const agentConfig = readAgentConfigOrExitFn();
-      const agent = ctx.agent || selectAgentFn('draft', { config: agentConfig });
+      const agentConfig = readAgentConfigOrExitFn(undefined, { configuration: merged.configuration });
+      const agent = ctx.agent || selectAgentFn('draft', { config: agentConfig, configuration: merged.configuration });
       const prompt = buildDraftPrompt(ctx.slug, { rootDir: ctx.mainRepo, worktree: ctx.targetWorktree || '' });
       logFn('');
       logFn(fmt.bold(`Running ${fmt.agent(agent)} to write the mission contract...`));
       const { agent: actualAgent, result } = await startDraftAgentFn({
+        configuration: merged.configuration,
         prompt,
         worktree: ctx.targetWorktree,
         agent
@@ -706,6 +709,7 @@ function createDraftWorkflowAdapter(deps: DraftAdapterDependencies = {}): DraftW
       });
 
       recordDraftStatsFn({
+        configuration: merged.configuration,
         slug: ctx.slug,
         rootDir: ctx.targetWorktree,
         agentFamily: actualAgent,
@@ -725,6 +729,7 @@ function createDraftWorkflowAdapter(deps: DraftAdapterDependencies = {}): DraftW
       const readAgentConfigOrExitFn = merged.readAgentConfigOrExitFn || readAgentConfigOrExit;
 
       const normalizationResult = await validateStoredDraftClassification(ctx) ?? normalizeDraftClassificationFn(ctx.slug, ctx.targetWorktree, {
+        configuration: merged.configuration,
         errorFn
       });
       if (!normalizationResult.ok) {
@@ -740,6 +745,7 @@ function createDraftWorkflowAdapter(deps: DraftAdapterDependencies = {}): DraftW
           return exitedContext({ ...ctx });
         }
         const postRestartNorm = await validateStoredDraftClassification(ctx) ?? normalizeDraftClassificationFn(ctx.slug, ctx.targetWorktree, {
+          configuration: merged.configuration,
           errorFn
         });
         if (!postRestartNorm.ok) {
@@ -827,18 +833,19 @@ function createDraftWorkflowAdapter(deps: DraftAdapterDependencies = {}): DraftW
   };
 }
 async function restartDraftAgent(slug: string, worktree: string, {
+  configuration,
   selectAgentFn = selectAgent,
   startDraftAgentFn = startDraftAgent,
   readAgentConfigOrExitFn = readAgentConfigOrExit,
   logFn = fmt.log.plain,
   errorFn = fmt.log.plainError
-}: Pick<DraftAdapterDependencies, "selectAgentFn" | "startDraftAgentFn" | "readAgentConfigOrExitFn" | "logFn" | "errorFn" | "exitFn"> = {}) {
-  const agentConfig = readAgentConfigOrExitFn();
-  const agent = selectAgentFn('draft', { config: agentConfig });
+}: Pick<DraftAdapterDependencies, "selectAgentFn" | "startDraftAgentFn" | "readAgentConfigOrExitFn" | "logFn" | "errorFn" | "exitFn" | "configuration"> = {}) {
+  const agentConfig = readAgentConfigOrExitFn(undefined, { configuration: configuration });
+  const agent = selectAgentFn('draft', { config: agentConfig, configuration: configuration });
 
   const prompt = buildRestartPrompt(slug, { rootDir: worktree, worktree });
   logFn('Relaunching draft agent to repair mission type labels...');
-  const { agent: actualAgent, result } = await startDraftAgentFn({ prompt, worktree, agent });
+  const { agent: actualAgent, result } = await startDraftAgentFn({ configuration, prompt, worktree, agent });
   logFn(`Restart draft agent family: ${fmt.agent(actualAgent)}`);
 
   if (result.error) {

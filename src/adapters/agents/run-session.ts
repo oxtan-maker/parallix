@@ -1,3 +1,5 @@
+import type { ParallixConfiguration } from "../../application/ports/configuration.js";
+import { DEFAULT_CONFIGURATION } from "../../application/ports/configuration.js";
 import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -43,7 +45,7 @@ export interface RunSessionDeps {
   readonly probe?: () => TmuxProbe;
   readonly config?: (_worktree: string) => TerminalHostConfig;
   readonly repositoryKey?: (_worktree: string) => string;
-  readonly env?: NodeJS.ProcessEnv;
+  readonly configuration?: ParallixConfiguration;
   /** tmux command seam; unit tests pass a double so they never run tmux. */
   readonly spawnSyncFn?: typeof spawnSync;
 }
@@ -115,7 +117,7 @@ function providerSources(capture: RunCapture, family: string, worktree: string, 
 export function openRunSession(input: RunSessionInput, deps: RunSessionDeps = {}): RunSession | null {
   if (!input.worktree || !input.slug) { return null; }
   const worktree = input.worktree;
-  const env = deps.env ?? process.env;
+  const configuration = deps.configuration ?? DEFAULT_CONFIGURATION;
   const now = deps.now ?? (() => new Date());
   const identity = agentRunIdentity({
     repositoryKey: (deps.repositoryKey ?? missionRepositoryKey)(worktree),
@@ -129,10 +131,10 @@ export function openRunSession(input: RunSessionInput, deps: RunSessionDeps = {}
   const config = (deps.config ?? ((root: string) => terminalHostConfig(loadAdapterConfig(root))))(worktree);
   let fallbackReason: string | null = null;
   let useTmux = false;
-  const inheritedTerminal = env.PARALLIX_MISSION_TERMINAL === input.slug && Boolean(env.PARALLIX_MISSION_SOCKET);
+  const inheritedTerminal = configuration.terminal.missionTerminal === input.slug && Boolean(configuration.terminal.missionSocket);
   if (inheritedTerminal) { useTmux = true; }
   else if (config.host !== 'pipe' && (deps.interactive ?? Boolean(process.stdin.isTTY && process.stdout.isTTY))) {
-    const probe = Buffer.byteLength(missionSocketPath(identity, env)) > 100
+    const probe = Buffer.byteLength(missionSocketPath(identity, configuration)) > 100
       ? { available: false, version: null, reason: 'Mission terminal socket path exceeds the portable Unix socket limit' }
       : IN_PROCESS_FAMILIES.has(input.family)
       ? { available: false, version: null, reason: `${input.family} needs an outer mission command terminal` }
@@ -147,7 +149,7 @@ export function openRunSession(input: RunSessionInput, deps: RunSessionDeps = {}
     }
   }
   if (useTmux && !inheritedTerminal) {
-    const killed = reconcileOrphanSessions(identity, { env, allRoles: true, ...(deps.spawnSyncFn ? { spawnSyncFn: deps.spawnSyncFn } : {}) });
+    const killed = reconcileOrphanSessions(identity, { configuration, allRoles: true, ...(deps.spawnSyncFn ? { spawnSyncFn: deps.spawnSyncFn } : {}) });
     if (killed.length > 0) { input.log(fmt.status('INFO', `Stopped unsupervised tmux session(s) from an earlier launch: ${killed.join(', ')}.`)); }
   }
   let capture: RunCapture | null = null;
@@ -156,8 +158,8 @@ export function openRunSession(input: RunSessionInput, deps: RunSessionDeps = {}
       worktree, identity, runId,
       terminalHost: useTmux ? 'tmux' : 'pipe',
       hostFallbackReason: fallbackReason,
-      tmuxSocketPath: inheritedTerminal ? env.PARALLIX_MISSION_SOCKET! : useTmux ? missionSocketPath(identity, env) : null,
-      redactor: resolveConfiguredCredentialRedactor(),
+      tmuxSocketPath: inheritedTerminal ? configuration.terminal.missionSocket! : useTmux ? missionSocketPath(identity, configuration) : null,
+      redactor: resolveConfiguredCredentialRedactor(configuration.runtime.credentialRedactor),
       now,
     });
   } catch (err) {
@@ -167,7 +169,7 @@ export function openRunSession(input: RunSessionInput, deps: RunSessionDeps = {}
   let spawnIndex = 0;
   const terminalHost: TerminalHost | undefined = useTmux && !inheritedTerminal ? {
     host: (launch, context) => {
-      const hosted = prepareTmuxLaunch({ identity, spawnIndex: spawnIndex++, command: launch.command, args: launch.args, cwd: context.cwd, env: context.env }, { env, ...(deps.spawnSyncFn ? { spawnSyncFn: deps.spawnSyncFn } : {}) });
+      const hosted = prepareTmuxLaunch({ identity, spawnIndex: spawnIndex++, command: launch.command, args: launch.args, cwd: context.cwd, env: context.env }, { configuration, ...(deps.spawnSyncFn ? { spawnSyncFn: deps.spawnSyncFn } : {}) });
       capture?.addTmuxSession(hosted.sessionName);
       input.log(fmt.status('INFO', `Agent terminal: attach with ${fmt.command(`px attach ${input.slug}`)} (detach with Ctrl-b d).`));
       return hosted;

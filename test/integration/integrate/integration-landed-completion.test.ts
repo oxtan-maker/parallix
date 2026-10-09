@@ -16,6 +16,7 @@
 // the services. Only the Git/Forgejo/worktree boundaries are doubled. No agent,
 // LLM, mission runner, or network is involved.
 // ---------------------------------------------------------------------------
+import { resolveConfiguration } from '../../../src/composition/config.js';
 import test, { mock } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -182,7 +183,7 @@ async function runIntegrate(scenario: Scenario) {
 
   let error: Error | undefined;
   try {
-    await integrate.default([SLUG, '--no-integration-gates'], { missionServicesFn: async () => services });
+    await integrate.default([SLUG, '--no-integration-gates'], { configuration: resolveConfiguration(process.env), missionServicesFn: async () => services });
   } catch (e) {
     error = e as Error;
   } finally {
@@ -343,10 +344,10 @@ test('R5: the live review-fix writers keep known zero and unknown apart', async 
     await seedStoredMissionClassification('task-2369-known');
     await seedStoredMissionClassification('task-2369-unknown');
 
-    stats.recordActiveStats({ slug: 'task-2369-known', rootDir: root, dbPath, implementer: 'claude', prFixRounds: '0', date: '2026-08-04' } as never);
-    stats.recordReviewStats({ slug: 'task-2369-unknown', rootDir: root, dbPath, reviewer: 'claude', implementer: 'claude', date: '2026-08-04' } as never);
+    stats.recordActiveStats({ configuration: resolveConfiguration(process.env), slug: 'task-2369-known', rootDir: root, dbPath, implementer: 'claude', prFixRounds: '0', date: '2026-08-04' } as never);
+    stats.recordReviewStats({ configuration: resolveConfiguration(process.env), slug: 'task-2369-unknown', rootDir: root, dbPath, reviewer: 'claude', implementer: 'claude', date: '2026-08-04' } as never);
 
-    const rows = stats.loadMeasurementRows({ dbPath }).rows;
+    const rows = stats.loadMeasurementRows({ configuration: resolveConfiguration(process.env), dbPath }).rows;
     const known = rows.find(row => row.mission === 'task-2369-known');
     const unknown = rows.find(row => row.mission === 'task-2369-unknown');
     assert.equal(known?.pr_fix_rounds, '0', 'a known zero stays a real observed zero');
@@ -364,7 +365,7 @@ test('R5: the live review-fix writers keep known zero and unknown apart', async 
       assert.equal(stats.statsRowToMeasurement(known as never).pr_fix_rounds, 0, 'a known zero writes back as a genuine 0');
 
       // Rewriting the row read back from the store must not manufacture a zero.
-      stats.upsertMeasurementRow(unknown as never, { rootDir: root, store });
+      stats.upsertMeasurementRow(unknown as never, { configuration: resolveConfiguration(process.env), rootDir: root, store });
       const rewritten = store.listMeasurements().find(record => record.mission === 'task-2369-unknown');
       assert.equal(rewritten?.pr_fix_rounds, undefined, 'the round trip is stable — unknown stays unknown');
     } finally {
@@ -391,14 +392,14 @@ test('R5: carrying a prior count forward skips NULL rows, and a read failure sta
     }
 
     // [NULL, NULL] -> unknown.
-    stats.recordActiveStats({ slug: 'task-2369-nulls', rootDir: root, store, implementer: 'claude', date: '2026-08-04' } as never);
-    const nulls = stats.recordReviewStats({ slug: 'task-2369-nulls', rootDir: root, store, reviewer: 'claude', implementer: 'claude', date: '2026-08-04' } as never);
+    stats.recordActiveStats({ configuration: resolveConfiguration(process.env), slug: 'task-2369-nulls', rootDir: root, store, implementer: 'claude', date: '2026-08-04' } as never);
+    const nulls = stats.recordReviewStats({ configuration: resolveConfiguration(process.env), slug: 'task-2369-nulls', rootDir: root, store, reviewer: 'claude', implementer: 'claude', date: '2026-08-04' } as never);
     assert.equal(nulls.row.pr_fix_rounds, undefined, '[NULL, NULL] stays unknown');
 
     // [NULL, 2] -> the known 2 is carried forward past the NULL row.
-    stats.recordActiveStats({ slug: 'task-2369-carry', rootDir: root, store, implementer: 'claude', date: '2026-08-04' } as never);
-    stats.recordStageStats({ slug: 'task-2369-carry', stage: 'handoff', rootDir: root, store, implementer: 'claude', prFixRounds: '2', date: '2026-08-04' } as never);
-    const carried = stats.recordReviewStats({ slug: 'task-2369-carry', rootDir: root, store, reviewer: 'claude', implementer: 'claude', date: '2026-08-04' } as never);
+    stats.recordActiveStats({ configuration: resolveConfiguration(process.env), slug: 'task-2369-carry', rootDir: root, store, implementer: 'claude', date: '2026-08-04' } as never);
+    stats.recordStageStats({ configuration: resolveConfiguration(process.env), slug: 'task-2369-carry', stage: 'handoff', rootDir: root, store, implementer: 'claude', prFixRounds: '2', date: '2026-08-04' } as never);
+    const carried = stats.recordReviewStats({ configuration: resolveConfiguration(process.env), slug: 'task-2369-carry', rootDir: root, store, reviewer: 'claude', implementer: 'claude', date: '2026-08-04' } as never);
     assert.equal(carried.row.pr_fix_rounds, '2', 'a real known prior count is carried forward');
 
     // A measurement-store read failure yields unknown, never a manufactured zero.
@@ -408,7 +409,7 @@ test('R5: carrying a prior count forward skips NULL rows, and a read failure sta
         return Reflect.get(target, property, receiver);
       },
     });
-    const broken = stats.recordActiveStats({ slug: 'task-2369-broken', rootDir: root, store: unreadable, implementer: 'claude', date: '2026-08-04' } as never);
+    const broken = stats.recordActiveStats({ configuration: resolveConfiguration(process.env), slug: 'task-2369-broken', rootDir: root, store: unreadable, implementer: 'claude', date: '2026-08-04' } as never);
     assert.equal(broken.row.pr_fix_rounds, undefined, 'a read failure never manufactures zero');
   } finally {
     store.close();
@@ -439,7 +440,7 @@ test('R6: [0, 2, unknown, unknown] reports exactly two review-fix observations',
         writeTask(checkout.primary, mission.slug);
         await seedStoredMissionClassification(mission.slug);
         // The LIVE convenience writer, not a direct repository insert.
-        stats.recordActiveStats({
+        stats.recordActiveStats({ configuration: resolveConfiguration(process.env),
           slug: mission.slug, rootDir: checkout.primary, store,
           implementer: 'claude', prFixRounds: mission.rounds, date: '2026-08-04',
         } as never);
@@ -488,7 +489,7 @@ test('the integration-time report, px stats, and BoardMetrics agree on the compl
       for (const [slug, completed] of [['task-2369-landed', true], ['task-2369-open', false]] as const) {
         writeTask(checkout.primary, slug);
         await seedStoredMissionClassification(slug);
-        stats.recordActiveStats({ slug, rootDir: checkout.primary, store, implementer: 'claude', prFixRounds: '1', date: '2026-08-04' } as never);
+        stats.recordActiveStats({ configuration: resolveConfiguration(process.env), slug, rootDir: checkout.primary, store, implementer: 'claude', prFixRounds: '1', date: '2026-08-04' } as never);
         await events.append(laneEvent({ repositoryId: repo, missionId: slug, from: null, to: 'backlog', at: '2026-08-01T09:00:00.000Z' }));
         if (completed) {
           await events.append(laneEvent({ repositoryId: repo, missionId: slug, from: 'integration', to: 'done', at: '2026-08-04T21:30:00.000Z' }));
@@ -507,7 +508,7 @@ test('the integration-time report, px stats, and BoardMetrics agree on the compl
       [missionId('task-2369-landed'), 'done' as MissionStatus],
       [missionId('task-2369-open'), 'integration' as MissionStatus],
     ]));
-    const report = stats.renderWeeklyStatsReport(stats.loadMeasurementRows({ dbPath }).rows, {
+    const report = stats.renderWeeklyStatsReport(stats.loadMeasurementRows({ configuration: resolveConfiguration(process.env), dbPath }).rows, {
       today: '2026-08-05',
       missionFlow: outcomes.map(outcome => ({ repo: String(repo), mission: outcome.missionId, closedAt: outcome.closedAt, labels: outcome.labels })),
     } as never);

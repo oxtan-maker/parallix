@@ -1,3 +1,5 @@
+import type { ParallixConfiguration } from "../../application/ports/configuration.js";
+import { DEFAULT_CONFIGURATION } from "../../application/ports/configuration.js";
 // Terminal formatting for the normalized agent events (ADR 0056).
 //
 // Colour is produced only through `util.styleText` per ADR 0042 — this file
@@ -33,13 +35,13 @@ const DEFAULT_IDLE_MS = 2000;
  * FORCE_COLOR / TTY rules are applied to the sink explicitly and the escape
  * codes themselves still come from `styleText`.
  */
-export function colorEnabled(sink: RenderSink, env: NodeJS.ProcessEnv = process.env): boolean {
-  if (env.NO_COLOR !== undefined && env.NO_COLOR !== '') {return false;}
+export function colorEnabled(sink: RenderSink, configuration: ParallixConfiguration = DEFAULT_CONFIGURATION): boolean {
+  if (configuration.runtime.noColor !== undefined && configuration.runtime.noColor !== '') {return false;}
   // FORCE_COLOR=0 is the conventional force-disable, as `supports-color` and
   // the repo's own `FORCE_COLOR=0` test invocation use it.
-  if (env.FORCE_COLOR === '0') {return false;}
-  if (env.FORCE_COLOR !== undefined && env.FORCE_COLOR !== '') {return true;}
-  if (env.TERM === 'dumb') {return false;}
+  if (configuration.runtime.forceColor === '0') {return false;}
+  if (configuration.runtime.forceColor !== undefined && configuration.runtime.forceColor !== '') {return true;}
+  if (configuration.runtime.term === 'dumb') {return false;}
   return sink.isTTY === true;
 }
 
@@ -76,11 +78,11 @@ export class AgentStreamView {
   private activityStartedAt: number;
   private activityGroup: string | null = null;
 
-  constructor(sink: RenderSink, options: AgentStreamViewOptions = {}, env: NodeJS.ProcessEnv = process.env) {
+  constructor(sink: RenderSink, options: AgentStreamViewOptions = {}, configuration: ParallixConfiguration = DEFAULT_CONFIGURATION) {
     this.sink = sink;
-    this.useColor = colorEnabled(sink, env);
+    this.useColor = colorEnabled(sink, configuration);
     // No spinner animation off a TTY: captured logs must stay residue-free.
-    this.showSpinner = sink.isTTY === true && env.TERM !== 'dumb';
+    this.showSpinner = sink.isTTY === true && configuration.runtime.term !== 'dumb';
     this.idleMs = options.idleMs ?? DEFAULT_IDLE_MS;
     this.now = options.now ?? Date.now;
     this.clearWidth = options.clearWidth ?? 48;
@@ -279,9 +281,9 @@ export interface AgentStreamRenderer {
 export function createAgentStreamRenderer(
   target: RenderSink = process.stdout,
   options: AgentStreamViewOptions & { spinnerIntervalMs?: number } = {},
-  env: NodeJS.ProcessEnv = process.env,
+  configuration: ParallixConfiguration = DEFAULT_CONFIGURATION,
 ): AgentStreamRenderer {
-  const view = new AgentStreamView(target, options, env);
+  const view = new AgentStreamView(target, options, configuration);
   let closed = false;
   const timer = target.isTTY === true ? setInterval(() => {
     try { view.tick(); } catch { /* Presentation must never fail the agent. */ }

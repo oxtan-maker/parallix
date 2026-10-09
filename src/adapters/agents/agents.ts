@@ -1,3 +1,5 @@
+import type { ParallixConfiguration } from "../../application/ports/configuration.js";
+import { DEFAULT_CONFIGURATION } from "../../application/ports/configuration.js";
 import { monotonicNowMs } from '../../application/lifecycle-timing.js';
 import * as fmt from '../../application/presentation/cli-format.js';
 import { isSpuriousCodexExit } from './codex.js';
@@ -39,10 +41,9 @@ import {
   filterBlockedFallback,
   type BlockContext,
 } from './agent-block-selection.js';
-import { warmPiSdk } from './pi.js';
 import { resolveSandboxProfile, withSandboxProfile } from '../process/bubblewrap.js';
 import { selectConfinement, supportsNativeSandbox, ConfinementBlockedError, isBubblewrapDisabled, isBubblewrapAvailable, BUBBLEWRAP_COMMAND } from '../process/confinement.js';
-import { waitForCustomCapacity } from './custom-capacity.js';
+import { tryAcquireCustomCapacity, waitForCustomCapacity } from './custom-capacity.js';
 import { openRunSession } from './run-session.js';
 import { FRESH_SESSION_MARKER_PORT } from '../../application/fresh-session-marker-port.js';
 import type { SessionMarkerPort } from '../../application/domain-ports.js';
@@ -59,6 +60,7 @@ interface LaunchResultLike {
 }
 
 interface StartAgentOptions {
+  configuration?: ParallixConfiguration;
   prompt: string | Function;
   worktree?: string;
   agent?: string;
@@ -213,23 +215,24 @@ const defaultSessionMarkerPorts = new Map<string, Promise<SessionMarkerPort>>();
  * SQLite out of the launcher module's static graph while making an unavailable
  * database an explicit launch failure instead of falling back to worktree files.
  */
-async function defaultSessionMarkerPort(worktree: string): Promise<SessionMarkerPort> {
+async function defaultSessionMarkerPort(worktree: string, configuration: ParallixConfiguration): Promise<SessionMarkerPort> {
   const { ConcreteGitReadAdapter } = await import('../backlog/concrete-git-read-adapter.js');
   const repositoryId = await new ConcreteGitReadAdapter({ rootDir: worktree }).loadRepositoryId();
-  let port = defaultSessionMarkerPorts.get(repositoryId);
+  const key = `${configuration.storage.parallixHome ?? ''}:${repositoryId}`;
+  let port = defaultSessionMarkerPorts.get(key);
   if (!port) {
     port = (async () => {
       const { initOperatorState } = await import('../sqlite/adapter-factory.js');
       const { SqliteSessionMarkerAdapter } = await import('../sqlite/session-marker-adapter.js');
-      const { db } = await initOperatorState();
+      const { db } = await initOperatorState({ configuration });
       return new SqliteSessionMarkerAdapter(db, repositoryId);
     })();
-    defaultSessionMarkerPorts.set(repositoryId, port);
+    defaultSessionMarkerPorts.set(key, port);
   }
   try {
     return await port;
   } catch (error) {
-    defaultSessionMarkerPorts.delete(repositoryId);
+    defaultSessionMarkerPorts.delete(key);
     throw error;
   }
 }
@@ -311,13 +314,13 @@ function needsCredentialRefresh(result: LaunchResultLike): boolean {
   ].join('\n')));
 }
 
-async function defaultIsAgentBlockedNow(agent: string) {
+async function defaultIsAgentBlockedNow(agent: string, configuration: ParallixConfiguration = DEFAULT_CONFIGURATION) {
   try {
     const { initOperatorState } = await import('../sqlite/adapter-factory.js');
     const { SqliteBlocklistRepository } = await import('../sqlite/blocklist-repository.js');
     const { AgentBlockService } = await import('../../application/services/agent-block-service.js');
-    const config = readAgentConfig(CONFIG_PATH, {});
-    const state = await initOperatorState();
+    const config = readAgentConfig(CONFIG_PATH, { configuration });
+    const state = await initOperatorState({ configuration });
     const runtimeBlock = await new AgentBlockService(new SqliteBlocklistRepository(state.db)).query(agent);
     return resolveAgentBlockAuthority(agent, runtimeBlock, config).blocked;
   } catch (_err) {
@@ -329,11 +332,11 @@ async function defaultIsAgentBlockedNow(agent: string) {
 }
 
 /** Persist runtime blocks through the checked authority without changing the synchronous config seam. */
-async function updateAgentBlockChecked(agent: string, until: string, options: {reason?: string} = {}) {
+async function updateAgentBlockChecked(agent: string, until: string, options: {reason?: string; configuration?: ParallixConfiguration} = {}) {
   const { initOperatorState } = await import('../sqlite/adapter-factory.js');
   const { SqliteBlocklistRepository } = await import('../sqlite/blocklist-repository.js');
   const { AgentBlockService } = await import('../../application/services/agent-block-service.js');
-  const state = await initOperatorState();
+  const state = await initOperatorState({ configuration: options.configuration });
   return new AgentBlockService(new SqliteBlocklistRepository(state.db)).block(agent, until, options.reason ?? null);
 }
 
@@ -410,6 +413,7 @@ function isAgentPoolExhaustionError(err: unknown): boolean {
 }
 
 type StartAgentLoopDeps = {
+  configuration: ParallixConfiguration;
   step: string;
   opts: StartAgentOptions;
   exclude: string[] | Set<string>;
@@ -476,7 +480,7 @@ async function selectAndGateAgent(state: StartAgentLoopState, deps: StartAgentLo
     const blockedPool = await deps.runtimeBlockContext(deps.step, state.tried);
     const selectExclude = blockedPool.exclude;
     try {
-      state.chosen = deps.selectAgentFn(deps.step, { exclude: selectExclude, worktree: deps.worktree });
+      state.chosen = deps.selectAgentFn(deps.step, { exclude: selectExclude, worktree: deps.worktree, configuration: deps.configuration });
     } catch (err) {
       // Only catch pool exhaustion errors from selectAgent.
       // Configuration errors (no eligible agents, no working launcher) must
@@ -520,7 +524,7 @@ async function selectAndGateAgent(state: StartAgentLoopState, deps: StartAgentLo
     return true;
   }
   try {
-    deps.assertAgentSupportedFn(state.chosen || '', deps.worktree);
+    deps.assertAgentSupportedFn(state.chosen || '', deps.worktree, deps.configuration);
   } catch (err) {
     /** @type {Error & {code?: string}} */
     const e = (err as any);
@@ -564,15 +568,6 @@ async function prepareLaunch(state: StartAgentLoopState, deps: StartAgentLoopDep
   if (deps.launchAgentFn) {
     launcher = deps.launchAgentFn;
   }
-  // The pi runner loads its SDK lazily inside the launcher, and that dynamic
-  // import blocks the event loop synchronously for ~1 s on a cold host.
-  // Warm the cache here, in the non-deadline prepare phase, so the
-  // launch-confirmed boundary and its lifecycle persistence deadline never
-  // inherit that cost (TASK-2582 agent-smoke). Skipped for injected
-  // launchers (test doubles) to keep them hermetic.
-  if (customRunner === 'pi' && !deps.launchAgentFn) {
-    await warmPiSdk();
-  }
   log(fmt.status('INFO', `Selected agent for step "${step}": ${fmt.agent(chosen, chosen, customRunner)}${state.iteration > 1 ? ` (attempt ${state.iteration})` : ''}`));
 
   // Enforce the agent family as the Forgejo identity (ADR 0029 / architecture migration).
@@ -592,7 +587,7 @@ async function prepareLaunch(state: StartAgentLoopState, deps: StartAgentLoopDep
     sessionRole = normalizeSessionRole(role);
     launchSessionMarkerPort = opts.sessionPolicy === 'fresh-ephemeral'
       ? FRESH_SESSION_MARKER_PORT
-      : deps.sessionMarkerPort || await defaultSessionMarkerPort(worktree);
+      : deps.sessionMarkerPort || await defaultSessionMarkerPort(worktree, deps.configuration);
     resume = RESUME_CAPABLE.has(chosen) &&
       await launchSessionMarkerPort.shouldResume(
         sessionMissionId(slug),
@@ -615,8 +610,8 @@ async function prepareLaunch(state: StartAgentLoopState, deps: StartAgentLoopDep
   // falls back to a different family after a limit hit, the fallback agent
   // receives a prompt tailored to its own identity.
   let actualPrompt = typeof opts.prompt === 'function' ? opts.prompt(chosen) : opts.prompt;
-  if (process.env.PARALLIX_CLI_COMMAND) {
-    const cli = "'" + process.env.PARALLIX_CLI_COMMAND.replaceAll("'", "'\\''") + "'";
+  if (deps.configuration.agents.cliCommand) {
+    const cli = "'" + deps.configuration.agents.cliCommand.replaceAll("'", "'\\''") + "'";
     actualPrompt = actualPrompt.replace(/\bpx (?=[a-z-])/g, `${cli} `);
   }
 
@@ -628,12 +623,12 @@ async function prepareLaunch(state: StartAgentLoopState, deps: StartAgentLoopDep
     log(fmt.status('INFO', `Using configured model for ${fmt.agent(chosen)}: ${model}`));
   }
 
-  const watchdogConfig = resolveNoOutputWatchdogConfig(deps.noOutputWatchdog, step);
+  const watchdogConfig = resolveNoOutputWatchdogConfig(deps.noOutputWatchdog, step, deps.configuration);
 
   // This is the sole production policy decision. The AsyncLocalStorage
   // context reaches the shared process seam through every family launcher.
   const sandboxProfile = worktree
-    ? resolveSandboxProfile(step, worktree, step === 'review' ? resolveReviewArtifactDir(worktree) : null, state.chosen || null)
+    ? resolveSandboxProfile(step, worktree, step === 'review' ? resolveReviewArtifactDir(worktree) : null, state.chosen || null, deps.configuration)
     : null;
   // Task-2513: a mutating launch must never silently fall back to
   // unsandboxed execution. Read-only (review) profiles skip the gate and
@@ -647,7 +642,7 @@ async function prepareLaunch(state: StartAgentLoopState, deps: StartAgentLoopDep
   // families ignore the flag and rely on Bubblewrap, which is present here.
   let nativeSandbox = false;
   if (sandboxProfile?.worktreeWritable) {
-    const bubblewrapMissing = !isBubblewrapDisabled() && !isBubblewrapAvailable(); // opt-out lives in process.env, as at the spawn seam
+    const bubblewrapMissing = !isBubblewrapDisabled(deps.configuration) && !isBubblewrapAvailable(); // opt-out lives in process.env, as at the spawn seam
     if (bubblewrapMissing) {
       const confinement = selectConfinement({
         mutating: true,
@@ -679,7 +674,7 @@ async function prepareLaunch(state: StartAgentLoopState, deps: StartAgentLoopDep
   const customReservation = chosen === 'custom'
     ? await waitForCustomCapacity(worktree, () => {
       log(fmt.status('INFO', 'Custom-agent capacity is saturated; waiting for an available slot.'));
-    })
+    }, root => tryAcquireCustomCapacity(root, deps.configuration))
     : null;
   return { launcher, agentEnv, resume, sessionId, launchSessionMarkerPort, sessionRole, actualPrompt, model, watchdogConfig, customReservation, effectiveProfile, nativeSandbox };
 }
@@ -726,9 +721,10 @@ async function launchPrepared(prepared: PreparedLaunch, deps: StartAgentLoopDeps
   // onLaunch.
   let startedAtMs = monotonicNowMs();
   // Durable run history and the optional tmux terminal host (TASK-2643).
-  const runSession = openRunSession({ worktree: deps.worktree, slug, role: sessionRole ?? deps.role ?? step, family: chosen, attempt, log: (line) => log(line) });
+  const runSession = openRunSession({ worktree: deps.worktree, slug, role: sessionRole ?? deps.role ?? step, family: chosen, attempt, log: (line) => log(line) }, { configuration: deps.configuration });
   try {
     const launchResult = withSandboxProfile(effectiveProfile, () => launcher({
+      configuration: deps.configuration,
       prompt: actualPrompt,
       worktree: deps.worktree,
       env: agentEnv,
@@ -796,7 +792,7 @@ async function launchPrepared(prepared: PreparedLaunch, deps: StartAgentLoopDeps
       // buries the launch line (and the rest of the run) in harness text nobody
       // reads, so summarize it by default and keep the verbatim command on DEBUG.
       const echoedArgs = invocation.args
-        .map((arg: string) => (!process.env.DEBUG && String(arg).includes('\n') ? `<prompt: ${String(arg).length} chars>` : arg))
+        .map((arg: string) => (!deps.configuration.runtime.debug && String(arg).includes('\n') ? `<prompt: ${String(arg).length} chars>` : arg))
         .join(' ');
       log(fmt.status('INFO', `Launching: ${fmt.command(`${invocation.command} ${echoedArgs}`)}`));
       if (invocation.options && invocation.options.cwd) {
@@ -987,7 +983,7 @@ async function recordSessionMarker(deps: StartAgentLoopDeps, prepared: PreparedL
     });
   } catch (err) {
     // Diagnostic: log full error details and database state
-    if (process.env.PARALLIX_DEBUG_SQL) {
+    if (deps.configuration.storage.debugSql) {
       const { getOperatorStateCacheSize } = await import('../sqlite/adapter-factory.js');
       const e = err as Error & { code?: string };
       process.stderr.write(`[sql-error] save failed: code=${e.code ?? 'n/a'} message="${e.message}\n`);
@@ -1003,14 +999,14 @@ async function startAgent(step: string, opts: StartAgentOptions = { prompt: '' }
     agent: agentOverride,
     exclude = [],
     detectLimitHitFn = detectLimitHit,
-    updateAgentBlockFn = updateAgentBlockChecked,
+    updateAgentBlockFn = (agent: string, until: string, options: { reason?: string } = {}) => updateAgentBlockChecked(agent, until, { ...options, configuration: opts.configuration }),
     selectAgentFn = selectAgent,
     resolveAgentModelFn = resolveAgentModel,
-    isAgentBlockedFn = defaultIsAgentBlockedNow,
+    isAgentBlockedFn = (agent: string) => defaultIsAgentBlockedNow(agent, opts.configuration),
     sessionMarkerPort,
     log = fmt.log.plain,
     pinnedAgent = false,
-    runtimeBlockContextFn = defaultBlockContext,
+    runtimeBlockContextFn = (step, tried) => defaultBlockContext(step, tried, opts.configuration),
   } = opts;
 
   // `exclude` seeds the tried-set so callers can reserve agents (e.g. exclude
@@ -1037,6 +1033,7 @@ async function startAgent(step: string, opts: StartAgentOptions = { prompt: '' }
   };
 
   const deps: StartAgentLoopDeps = {
+    configuration: opts.configuration ?? DEFAULT_CONFIGURATION,
     step,
     opts,
     exclude: excludeIterable,

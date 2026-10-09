@@ -1,3 +1,4 @@
+import type { ParallixConfiguration } from '../../../application/ports/configuration.js';
 /**
  * Handoff command adapter (TASK-2332.09).
  *
@@ -44,7 +45,7 @@ import type { CaptureNelOptions, HandoffWorkflowPorts, PerformHandoffOptions } f
  * time*, so a test that swaps a dependency module (see `test/lib/module-mock.ts`)
  * is still observed by the use case.
  */
-export function createHandoffPorts(): HandoffWorkflowPorts {
+export function createHandoffPorts(configuration?: ParallixConfiguration): HandoffWorkflowPorts {
   return {
     fileSystem: {
       existsSync: (target) => fs.existsSync(target),
@@ -74,10 +75,10 @@ export function createHandoffPorts(): HandoffWorkflowPorts {
       transitionTask: (slug, status, options) => backlog.transitionTask(slug, status, options),
     },
     forgejo: {
-      readToken: (user) => forgejo.readToken(user),
-      resolveForgejoSettings: (rootDir) => forgejo.resolveForgejoSettings(rootDir),
-      createPr: (branch, user, token, options) => forgejo.createPr(branch, user, token, options),
-      authenticatedReviewUrl: (user, token, rootDir) => forgejo.authenticatedReviewUrl(user, token, rootDir),
+      readToken: (user) => forgejo.readToken(user, undefined, configuration),
+      resolveForgejoSettings: (rootDir) => forgejo.resolveForgejoSettings(rootDir, configuration),
+      createPr: (branch, user, token, options) => forgejo.createPr(branch, user, token, { ...options, configuration }),
+      authenticatedReviewUrl: (user, token, rootDir) => forgejo.authenticatedReviewUrl(user, token, rootDir, configuration),
       resolveTrackingBranchSha: (branch, rootDir) => forgejo.resolveTrackingBranchSha(branch, rootDir),
     },
     reviewIdentity: {
@@ -91,19 +92,17 @@ export function createHandoffPorts(): HandoffWorkflowPorts {
       rebaseBeforeReviewRound: (slug, options) => rebaseBeforeReviewRound(slug, options),
     },
     gatekeeper: {
-      runGatekeeper: (slug, options) => gatekeeper.runGatekeeper(slug, options),
+      runGatekeeper: (slug, options) => gatekeeper.runGatekeeper(slug, { ...options, configuration }),
     },
     repositoryGates: {
       loadPhaseGates: (rootDir, phase) => loadPhaseGates(rootDir, phase),
-      runPhaseGates: (phase, options) => runPhaseGates(phase, options),
+      runPhaseGates: (phase, options) => runPhaseGates(phase, { ...options, configuration }),
     },
     verification: {
       formatVerificationCommand: (area, rootDir) => formatVerificationCommand(area, rootDir),
       createVerificationProofIdentity: (command, rootDir) => createVerificationProofIdentity(command, rootDir),
-      readReusableVerificationProof: (command, rootDir) => readReusableVerificationProof(command, rootDir),
-      writeReusableVerificationProof: (command, rootDir, options) => (options === undefined
-        ? writeReusableVerificationProof(command, rootDir)
-        : writeReusableVerificationProof(command, rootDir, options)),
+      readReusableVerificationProof: (command, rootDir) => readReusableVerificationProof(command, rootDir, { configuration }),
+      writeReusableVerificationProof: (command, rootDir, options) => writeReusableVerificationProof(command, rootDir, { ...options, configuration }),
       runVerificationGate: (area, options) => runVerificationGate(area, options),
       isTransientVerificationFailure: (output) => isTransientVerificationFailure(output),
     },
@@ -117,11 +116,11 @@ export function createHandoffPorts(): HandoffWorkflowPorts {
       isForgejoReviewEnabled: (rootDir) => isForgejoReviewEnabled(rootDir),
     },
     agents: {
-      startAgent: (step, options) => startAgent(step, options as unknown as Parameters<typeof startAgent>[1]),
+      startAgent: (step, options) => startAgent(step, { ...options, configuration } as unknown as Parameters<typeof startAgent>[1]),
     },
     agentSelection: {
-      eligibleAgentsForStep: (step, options) => eligibleAgentsForStep(step, options),
-      selectAgent: (step, options) => selectAgent(step, options),
+      eligibleAgentsForStep: (step, options) => eligibleAgentsForStep(step, { ...options, configuration }),
+      selectAgent: (step, options) => selectAgent(step, { ...options, configuration }),
     },
     process: {
       spawnSync: (command, args, options) => spawnSync(command, args, options),
@@ -149,8 +148,8 @@ function verifyHandoff(...args: UseCaseArgs<'verifyHandoff'>) {
  * Legacy callers hand this seam a loose option bag (some still pass identity
  * hints the workflow never reads); the use case reads only its typed options.
  */
-function performHandoff(slug: string, options: Record<string, unknown> = {}) {
-  return useCase.performHandoff(slug, options as PerformHandoffOptions);
+function performHandoff(slug: string, options: Record<string, unknown> & { configuration?: ParallixConfiguration } = {}) {
+  return new HandoffCommandUseCase(createHandoffPorts(options.configuration)).performHandoff(slug, options as PerformHandoffOptions);
 }
 
 /** @see HandoffCommandUseCase.resolveHandoffReviewAssignment */

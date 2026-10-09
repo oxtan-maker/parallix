@@ -1,3 +1,4 @@
+import type { ParallixConfiguration } from "../../../application/ports/configuration.js";
 /** Concrete injection seams for the active CLI adapter. */
 import type { CommandAgentLaunch } from './agent-result.js';
 import type { BoardCommandDispatcher } from '../../../application/controller/board-command.js';
@@ -25,6 +26,7 @@ export interface ActiveExecution extends Pick<ActiveOptions, 'controller' | 'con
   rootDir: string; renderProgress: (_event: Pick<ProgressEvent, 'phase' | 'agent'>) => void; operationId: string; slug: string; agent: string | null;
 }
 export interface LaunchOptions {
+  configuration?: ParallixConfiguration;
   slug: string; worktree: string; prompt: string; preselectedAgent?: string | null;
   agentConfig: AgentConfig;
   taskResolution?: { ok: boolean; taskFile?: string };
@@ -36,4 +38,3 @@ export interface LaunchOptions {
   onActivated?: ((_agent: string, _startedAtMs?: number) => Promise<void>) | null;
   authorityAlreadyActive?: boolean; unrefChild?: boolean;
 }
-

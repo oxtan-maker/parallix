@@ -17,6 +17,7 @@
 // The test.beforeEach hook cleans up these artifacts. If you ever need to manually
 // inspect what an agent left behind, temporarily comment out the cleanup below.
 
+import { resolveConfiguration } from '../../../src/composition/config.js';
 import test, { mock } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -416,12 +417,12 @@ test('review helper functions and error paths', async () => {
   try {
     console.log = (m) => logs.push(m);
     logs.length = 0;
-    const reviewResult = await pollForReview(41, 'user', 'since', null);
+    const reviewResult = await pollForReview(41, 'user', 'since', null, { configuration: resolveConfiguration(process.env) });
     assert.equal(reviewResult, null);
     assert.ok(logs.some(l => l.includes('No Forgejo token — skipping review-outcome poll')), 'Should log review token warning');
 
     logs.length = 0;
-    const dispResult = await pollForDisposition(41, 'user', 'since', null);
+    const dispResult = await pollForDisposition(41, 'user', 'since', null, { configuration: resolveConfiguration(process.env) });
     assert.equal(dispResult, null);
     assert.ok(logs.some(l => l.includes('No Forgejo token — skipping disposition poll')), 'Should log disposition token warning');
   } finally {
@@ -557,7 +558,7 @@ test('rebaseBeforeReviewRound derives sharedFileConflicts from sharedFiles when 
         // The workflow launches the resolver through the unwrapped port method.
         assert.equal(workflowPort.startAgent, startAgent, 'startAgent must reach the workflow unwrapped');
         workflowPort.resolveConflictsForMission('task-1087', 'lib', {});
-        await workflowPort.startAgent('conflict-resolution', {});
+        await workflowPort.startAgent('conflict-resolution', { configuration: resolveConfiguration(process.env),});
       },
     }),
     log: () => {},
@@ -598,7 +599,7 @@ test('pollForReview waits asynchronously between retries', async () => {
   const sleeps = [];
   let attempts = 0;
 
-  const state = await pollForReview(41, 'claude', '2026-04-18T10:00:00Z', 'fake-token', {
+  const state = await pollForReview(41, 'claude', '2026-04-18T10:00:00Z', 'fake-token', { configuration: resolveConfiguration(process.env),
     async getLatestReviewForPrFn() {
       attempts += 1;
       return attempts === 2 ? { state: 'APPROVED' } : null;
@@ -617,7 +618,7 @@ test('pollForDisposition waits asynchronously between retries', async () => {
   const sleeps = [];
   let attempts = 0;
 
-  const disposition = await pollForDisposition(41, 'codex', '2026-04-18T10:00:00Z', 'fake-token', {
+  const disposition = await pollForDisposition(41, 'codex', '2026-04-18T10:00:00Z', 'fake-token', { configuration: resolveConfiguration(process.env),
     async getLatestDispositionForPrFn() {
       attempts += 1;
       return attempts === 2 ? 'CHANGES_MADE' : null;
@@ -641,7 +642,7 @@ test('pollForReview honours caller intervalMs and timeoutMs and returns timeout 
   Date.now = () => fakeNow;
 
   try {
-    const state = await pollForReview(99, 'claude', '2026-04-18T10:00:00Z', 'fake-token', {
+    const state = await pollForReview(99, 'claude', '2026-04-18T10:00:00Z', 'fake-token', { configuration: resolveConfiguration(process.env),
       intervalMs: 250,
       timeoutMs: 1000,
       async getLatestReviewForPrFn() {
@@ -667,7 +668,7 @@ test('pollForReview emits a progress line on every tick when verbose=true', asyn
 
   let attempts = 0;
   try {
-    const state = await pollForReview(42, 'claude', '2026-04-18T10:00:00Z', 'fake-token', {
+    const state = await pollForReview(42, 'claude', '2026-04-18T10:00:00Z', 'fake-token', { configuration: resolveConfiguration(process.env),
       intervalMs: 5,
       timeoutMs: 10_000,
       verbose: true,
@@ -696,7 +697,7 @@ test('resolvePollTimeoutMs honours AUTONOMOUS_REVIEW_POLL_TIMEOUT_MS env overrid
   Date.now = () => fakeNow;
 
   try {
-    const state = await pollForReview(43, 'claude', '2026-04-18T10:00:00Z', 'fake-token', {
+    const state = await pollForReview(43, 'claude', '2026-04-18T10:00:00Z', 'fake-token', { configuration: resolveConfiguration(process.env),
       intervalMs: 100,
       // timeoutMs intentionally omitted so the env override resolves the default.
       async getLatestReviewForPrFn() { return null; },
@@ -806,7 +807,7 @@ test('pollForDisposition misses comment if created_at is slightly before sinceIs
     return eligible.length > 0 ? 'CHANGES_MADE' : null;
   };
 
-  const disposition = await pollForDisposition(prNumber, implementerUser, sinceIso, token, {
+  const disposition = await pollForDisposition(prNumber, implementerUser, sinceIso, token, { configuration: resolveConfiguration(process.env),
     getLatestDispositionForPrFn,
     timeoutMs: 100,
     intervalMs: 10,
@@ -843,7 +844,7 @@ test('pollForDisposition finds comment with stable round start time despite cloc
   };
 
   // Using roundStartedAt instead of agent launch time
-  const disposition = await pollForDisposition(prNumber, implementerUser, roundStartedAt, token, {
+  const disposition = await pollForDisposition(prNumber, implementerUser, roundStartedAt, token, { configuration: resolveConfiguration(process.env),
     getLatestDispositionForPrFn,
     timeoutMs: 100,
     intervalMs: 10,
@@ -882,7 +883,7 @@ test('pollForDisposition finds already-posted comment when resuming a round', as
 
   // WRONG: If we used resumeTime as sinceIso, we would miss it (old code behavior)
   // Now returns POLL_TIMEOUT instead of null on timeout
-  const missed = await pollForDisposition(prNumber, implementerUser, resumeTime, token, {
+  const missed = await pollForDisposition(prNumber, implementerUser, resumeTime, token, { configuration: resolveConfiguration(process.env),
     getLatestDispositionForPrFn,
     timeoutMs: 50,
     intervalMs: 10,
@@ -891,7 +892,7 @@ test('pollForDisposition finds already-posted comment when resuming a round', as
   assert.ok(isPollTimeout(missed), 'expected timeout sentinel when comment missed due to wrong sinceIso');
 
   // CORRECT: Using the original startedAt from persisted state
-  const found = await pollForDisposition(prNumber, implementerUser, originalStartedAt, token, {
+  const found = await pollForDisposition(prNumber, implementerUser, originalStartedAt, token, { configuration: resolveConfiguration(process.env),
     getLatestDispositionForPrFn,
     timeoutMs: 50,
     intervalMs: 10,
@@ -1485,7 +1486,7 @@ test('commentRound and submitReviewRound fail loudly on API errors', async () =>
     error: line => errors.push(line),
     exit: code => exits.push(code)
   });
-  await submitReviewRound('task-1031', 'approve', 'ship it', {
+  await submitReviewRound('task-1031', 'approve', 'ship it', { configuration: resolveConfiguration(process.env),
     readTokenFn: () => 'token',
     getPrAuthorFn: () => 'claude',
     postReviewFn: () => ({ ok: false, error: 'nope' }),
@@ -1624,7 +1625,7 @@ test('commentRound appends metadata footer to message', async () => {
 test('submitReviewRound appends metadata footer to review message', async () => {
   const { submitReviewRound } = createEventHandlerModule;
   let posted = null;
-  await submitReviewRound('task-meta-3', 'approve', 'Looks good', {
+  await submitReviewRound('task-meta-3', 'approve', 'Looks good', { configuration: resolveConfiguration(process.env),
     readTokenFn: () => 'token',
     postReviewFn: (branch, token, outcome, message) => { posted = message; return { ok: true }; },
     readReviewStateFn: () => ({ reviewer: 'codex', implementer: 'codex' }),
@@ -1743,7 +1744,7 @@ test('submitReviewRound persists state with REQUEST_CHANGES disposition after re
   process.env.FORGEJO_USER = 'codex';
 
   try {
-    await submitReviewRound('task-persist-3', 'request-changes', 'Needs work', {
+    await submitReviewRound('task-persist-3', 'request-changes', 'Needs work', { configuration: resolveConfiguration(process.env),
       readTokenFn: () => 'token',
       postReviewFn: () => ({ ok: true }),
       buildMetadataFooterFn: () => '',
@@ -1780,7 +1781,7 @@ test('submitReviewRound persists state with APPROVED disposition after approve',
   process.env.FORGEJO_USER = 'codex';
 
   try {
-    await submitReviewRound('task-persist-4', 'approve', 'LGTM', {
+    await submitReviewRound('task-persist-4', 'approve', 'LGTM', { configuration: resolveConfiguration(process.env),
       readTokenFn: () => 'token',
       postReviewFn: () => ({ ok: true }),
       buildMetadataFooterFn: () => '',
@@ -1816,7 +1817,7 @@ test('submitReviewRound promotes an active backlog task to review after provider
   process.env.FORGEJO_USER = 'codex';
 
   try {
-    await submitReviewRound('task-2197', 'approve', 'LGTM', {
+    await submitReviewRound('task-2197', 'approve', 'LGTM', { configuration: resolveConfiguration(process.env),
       isForgejoReviewEnabledFn: () => true,
       readTokenFn: () => 'token',
       postReviewFn: () => ({ ok: true }),
@@ -1877,7 +1878,7 @@ test('submitReviewRound keeps YAML and rendered task status aligned when provide
     runGitOrThrow(['add', '.'], { cwd: root });
     runGitOrThrow(['commit', '-m', 'fixture'], { cwd: root });
 
-    await submitReviewRound('task-2198', 'approve', 'LGTM', {
+    await submitReviewRound('task-2198', 'approve', 'LGTM', { configuration: resolveConfiguration(process.env),
       isForgejoReviewEnabledFn: () => true,
       readTokenFn: () => 'token',
       postReviewFn: () => ({ ok: true }),
@@ -1931,7 +1932,7 @@ test('submitReviewRound skips Forgejo and updates review-state only when provide
   process.env.WORKFLOW_AGENT = 'custom';
 
   try {
-    await submitReviewRound('task-test', 'approve', 'Test approval', {
+    await submitReviewRound('task-test', 'approve', 'Test approval', { configuration: resolveConfiguration(process.env),
       isForgejoReviewEnabledFn: () => false, // Simulate provider=none
       readReviewStateFn: () => null, // No existing state
       writeReviewStateFn: (slug, state) => {
@@ -1986,7 +1987,7 @@ test('submitReviewRound updates existing state when provider=none', async () => 
   const prevAgent = process.env.WORKFLOW_AGENT;
 
   try {
-    await submitReviewRound('task-exist', 'request-changes', 'Needs work', {
+    await submitReviewRound('task-exist', 'request-changes', 'Needs work', { configuration: resolveConfiguration(process.env),
       isForgejoReviewEnabledFn: () => false, // Simulate provider=none
       readReviewStateFn: () => existingState,
       writeReviewStateFn: (slug, state) => {

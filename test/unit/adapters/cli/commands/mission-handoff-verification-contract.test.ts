@@ -1,3 +1,5 @@
+import { resolveConfiguration } from '../../../../../src/composition/config.js';
+const environment: NodeJS.ProcessEnv = { ...process.env };
 // Mission handoff verification contract: verifyHandoff and performHandoff failure paths.
 //
 // Behavior-owned suite (TASK-2622.07). Legacy case names are unchanged; provenance TASK-1039
@@ -148,12 +150,12 @@ test('performHandoff handles gatekeeper block', async (t) => {
 test('performHandoff fails when forgejoUser is missing', async (t) => {
   setupMocks();
   mock.method(backlog, 'getTaskImplementer', () => null);
-  const originalEnv = process.env.FORGEJO_USER;
-  delete process.env.FORGEJO_USER;
+  const originalEnv = environment.FORGEJO_USER;
+  delete environment.FORGEJO_USER;
   const result = await performHandoff(TEST_SLUG, { worktree: WORKTREE, skipGate: true, error: () => {}, rebaseFn: mockRebase, missionServicesFn: stubRecordedMissionServices() });
   assert.strictEqual(result.ok, false);
   assert.strictEqual(result.error, 'forgejoUser is required');
-  process.env.FORGEJO_USER = originalEnv;
+  environment.FORGEJO_USER = originalEnv;
   cleanup();
 });
 

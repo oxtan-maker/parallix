@@ -1,4 +1,6 @@
 // @ts-nocheck -- TASK-2328: partial test doubles from ESM seam migration; resolve in follow-up
+import { resolveConfiguration } from '../../../../../src/composition/config.js';
+const environment: NodeJS.ProcessEnv = { ...process.env };
 
 
 import test, { mock } from 'node:test';
@@ -12,7 +14,7 @@ test.afterEach(() => mock.restoreAll());
 const status = statusModule.default;
 const { stripAnsi } = stripAnsiModule;
 const { parseWorktreeList, findStaleMissionWorktrees } = parseWorktreeListModule;
-process.env.NO_COLOR = '1';
+environment.NO_COLOR = '1';
 
 // ---------- parseWorktreeList edge cases ----------
 

@@ -1,3 +1,4 @@
+import { resolveConfiguration } from '../../../src/composition/config.js';
 /**
  * Real tmux terminal-host contract (TASK-2643).
  *
@@ -81,7 +82,7 @@ function fixture(): Fixture {
 function session(fx: Fixture, worktree: string, slug: string, family = 'codex', role = 'execute') {
   return openRunSession(
     { worktree, slug, role, family, attempt: 1, log: () => {} },
-    { interactive: true, config: () => ({ host: 'tmux', whenUnavailable: 'fail' }), repositoryKey: () => 'itrepo', env: fx.env },
+    { interactive: true, config: () => ({ host: 'tmux', whenUnavailable: 'fail' }), repositoryKey: () => 'itrepo', configuration: resolveConfiguration(fx.env) },
   )!;
 }
 
@@ -104,8 +105,8 @@ test('read-only terminal reader captures live pane output and reports a missing 
     const run = session(fx, worktree, 'task-web');
     const release = path.join(fx.root, 'release');
     const launch = spawnAndTee('sh', ['-c', `sleep 0.2; echo web-terminal-marker; while [ ! -e ${release} ]; do sleep 0.05; done`], { cwd: worktree, stdoutSink: sink, stderrSink: sink, ...run.teeOptions });
-    waitFor(() => listTmuxSessions(missionSocketPath(run.identity, fx.env)).length === 1);
-    const reader = createTmuxTerminalReader({ resolveMissionWorktree: id => id === 'task-web' ? worktree : null, repositoryKey: () => 'itrepo', env: fx.env });
+    waitFor(() => listTmuxSessions(missionSocketPath(run.identity, resolveConfiguration(fx.env))).length === 1);
+    const reader = createTmuxTerminalReader({ resolveMissionWorktree: id => id === 'task-web' ? worktree : null, repositoryKey: () => 'itrepo', configuration: resolveConfiguration(fx.env) });
     // Session/window creation precedes command exec and its first rendered
     // bytes. Wait for observable output, not merely the tmux server existing.
     waitFor(() => {
@@ -134,8 +135,8 @@ test('hosted launch returns the agent exit status and keeps history beyond scrol
     const found = searchRuns(scope(worktree, 'task-a'), { pattern: 'first-line' });
     assert.equal(found.totalHits, 1, 'durable capture kept output tmux scrollback (history-limit 2000) drops');
     assert.equal(searchRuns(scope(worktree, 'task-a'), { pattern: 'ALT-SCREEN-FAILURE' }).totalHits, 1);
-    assert.deepEqual(listTmuxSessions(missionSocketPath(run.identity, fx.env)).map(s => s.name), ['task-a'], 'the mission terminal persists after exit');
-    assert.equal(fs.existsSync(missionSocketPath(run.identity, fx.env)), true);
+    assert.deepEqual(listTmuxSessions(missionSocketPath(run.identity, resolveConfiguration(fx.env))).map(s => s.name), ['task-a'], 'the mission terminal persists after exit');
+    assert.equal(fs.existsSync(missionSocketPath(run.identity, resolveConfiguration(fx.env))), true);
   } finally { fx.cleanup(); }
 });
 
@@ -147,8 +148,8 @@ test('concurrent Missions get separate servers and separate searchable history',
     const runB = session(fx, b, 'task-b');
     const launchA = spawnAndTee('sh', ['-c', 'echo MARK-A; sleep 0.4'], { cwd: a, stdoutSink: sink, stderrSink: sink, ...runA.teeOptions });
     const launchB = spawnAndTee('sh', ['-c', 'echo MARK-B; sleep 0.4'], { cwd: b, stdoutSink: sink, stderrSink: sink, ...runB.teeOptions });
-    const socketA = missionSocketPath(runA.identity, fx.env);
-    const socketB = missionSocketPath(runB.identity, fx.env);
+    const socketA = missionSocketPath(runA.identity, resolveConfiguration(fx.env));
+    const socketB = missionSocketPath(runB.identity, resolveConfiguration(fx.env));
     waitFor(() => listTmuxSessions(socketA).length === 1 && listTmuxSessions(socketB).length === 1);
     assert.notEqual(socketA, socketB);
     assert.deepEqual(listTmuxSessions(socketA).map(s => s.name), ['task-a']);
@@ -178,7 +179,7 @@ test('cancellation by signal kills the owned agent and preserves the mission ter
     run.finish(result);
     assert.equal(result.status, 143);
     waitFor(() => { try { process.kill(agentPid, 0); return false; } catch { return true; } });
-    assert.deepEqual(listTmuxSessions(missionSocketPath(run.identity, fx.env)).map(s => s.name), [run.identity.missionId]);
+    assert.deepEqual(listTmuxSessions(missionSocketPath(run.identity, resolveConfiguration(fx.env))).map(s => s.name), [run.identity.missionId]);
   } finally { fx.cleanup(); }
 });
 
@@ -190,7 +191,7 @@ test('a launch the pane cannot start reports the failure and cleans up', { timeo
     const result = await spawnAndTee('/nonexistent/agent-cli', ['--x'], { cwd: worktree, stdoutSink: sink, stderrSink: sink, ...run.teeOptions });
     run.finish(result);
     assert.equal(result.status, 127, 'command-not-found propagates as the launch status');
-    assert.deepEqual(listTmuxSessions(missionSocketPath(run.identity, fx.env)).map(s => s.name), [run.identity.missionId]);
+    assert.deepEqual(listTmuxSessions(missionSocketPath(run.identity, resolveConfiguration(fx.env))).map(s => s.name), [run.identity.missionId]);
     assert.equal(listRuns(scope(worktree, 'task-f'))[0].record.exitCode, 127);
   } finally { fx.cleanup(); }
 });
@@ -201,16 +202,17 @@ test('after a harness crash the orphaned session is adopted, stopped, and its hi
     const worktree = fx.worktree('task-r');
     // A child "harness" opens the run session and launches, then is SIGKILLed.
     const harness = `
+      import { resolveConfiguration } from ${JSON.stringify(path.join(REPO_ROOT, 'src/composition/config.ts'))};
       import { openRunSession } from ${JSON.stringify(path.join(REPO_ROOT, 'src/adapters/agents/run-session.ts'))};
       import { spawnAndTee } from ${JSON.stringify(path.join(REPO_ROOT, 'src/adapters/process/spawn-tee.ts'))};
       const run = openRunSession({ worktree: ${JSON.stringify(worktree)}, slug: 'task-r', role: 'execute', family: 'codex', attempt: 1, log: () => {} },
-        { interactive: true, config: () => ({ host: 'tmux', whenUnavailable: 'fail' }), repositoryKey: () => 'itrepo' });
+        { configuration: resolveConfiguration(process.env), interactive: true, config: () => ({ host: 'tmux', whenUnavailable: 'fail' }), repositoryKey: () => 'itrepo' });
       spawnAndTee('sh', ['-c', 'echo crash-marker; sleep 30'], { cwd: ${JSON.stringify(worktree)}, stdoutSink: { write: () => true }, stderrSink: { write: () => true }, ...run.teeOptions });
       setInterval(() => {}, 1000);
     `;
     const child = childProcess.spawn(process.execPath, ['--import', 'tsx', '--input-type=module', '-e', harness], { env: fx.env, stdio: 'ignore', cwd: REPO_ROOT });
     fx.own(child);
-    const socket = missionSocketPath({ repositoryKey: 'itrepo', missionId: 'task-r' }, fx.env);
+    const socket = missionSocketPath({ repositoryKey: 'itrepo', missionId: 'task-r' }, resolveConfiguration(fx.env));
     waitFor(() => listTmuxSessions(socket).length === 1, 10000);
     waitFor(() => searchRuns(scope(worktree, 'task-r'), { pattern: 'crash-marker' }).totalHits === 1, 5000);
     // Only the harness dies; its host script and the pane keep running.
@@ -219,7 +221,7 @@ test('after a harness crash the orphaned session is adopted, stopped, and its hi
     await exited;
     const orphan = listTmuxSessions(socket);
     assert.equal(orphan.length, 1, 'the session outlived its supervisor');
-    const killed = reconcileOrphanSessions({ repositoryKey: 'itrepo', missionId: 'task-r', role: 'execute' }, { env: fx.env });
+    const killed = reconcileOrphanSessions({ repositoryKey: 'itrepo', missionId: 'task-r', role: 'execute' }, { configuration: resolveConfiguration(fx.env) });
     assert.equal(killed.length, 1);
     assert.match(killed[0], /^execute-codex-/);
     assert.deepEqual(listTmuxSessions(socket).map(s => s.name), ['task-r']);
@@ -236,7 +238,7 @@ test('an operator can attach, detach without stopping the run, and reconnect', {
     const run = session(fx, worktree, 'task-t');
     const release = path.join(fx.root, 'release');
     const launch = spawnAndTee('sh', ['-c', `echo attach-me; while [ ! -e ${release} ]; do sleep 0.05; done; echo released`], { cwd: worktree, stdoutSink: sink, stderrSink: sink, ...run.teeOptions });
-    const socket = missionSocketPath(run.identity, fx.env);
+    const socket = missionSocketPath(run.identity, resolveConfiguration(fx.env));
     waitFor(() => listTmuxSessions(socket).length === 1);
     const name = listTmuxSessions(socket)[0].name;
     for (const round of [1, 2]) {
@@ -262,9 +264,9 @@ test('a Bubblewrap-confined agent cannot reach the Mission tmux socket', { timeo
     const worktree = fx.worktree('task-s');
     const run = session(fx, worktree, 'task-s');
     const launch = spawnAndTee('sh', ['-c', 'sleep 1'], { cwd: worktree, stdoutSink: sink, stderrSink: sink, ...run.teeOptions });
-    const socket = missionSocketPath(run.identity, fx.env);
+    const socket = missionSocketPath(run.identity, resolveConfiguration(fx.env));
     waitFor(() => listTmuxSessions(socket).length === 1);
-    const args = buildBubblewrapArgs(resolveSandboxProfile('active', worktree), worktree);
+    const args = buildBubblewrapArgs(resolveSandboxProfile('active', worktree, null, null, resolveConfiguration(fx.env)), worktree);
     const probe = childProcess.spawnSync('bwrap', [...args, 'tmux', '-S', socket, 'list-sessions'], { encoding: 'utf8' });
     assert.notEqual(probe.status, 0, 'the confined process must not list sessions');
     assert.match(probe.stderr, /No such file|error connecting/);
@@ -284,10 +286,11 @@ test('automatic command hosting includes harness and agent output in one persist
     const script = path.join(fx.root, 'command.mjs');
     fs.writeFileSync(script, `
       import fs from 'node:fs';
+      import { resolveConfiguration } from ${JSON.stringify(path.join(REPO_ROOT, 'src/composition/config.ts'))};
       import { openRunSession } from ${JSON.stringify(path.join(REPO_ROOT, 'src/adapters/agents/run-session.ts'))};
       import { spawnAndTee } from ${JSON.stringify(path.join(REPO_ROOT, 'src/adapters/process/spawn-tee.ts'))};
       console.log('HARNESS-PREFLIGHT');
-      const run = openRunSession({ worktree: process.cwd(), slug: 'task-whole', role: 'execute', family: 'codex', attempt: 1, log: console.log });
+      const run = openRunSession({ worktree: process.cwd(), slug: 'task-whole', role: 'execute', family: 'codex', attempt: 1, log: console.log }, { configuration: resolveConfiguration(process.env) });
       fs.writeFileSync(${JSON.stringify(output)}, JSON.stringify({ identity: run.identity, nested: Boolean(run.teeOptions.terminalHost), terminal: process.env.PARALLIX_MISSION_TERMINAL }));
       const result = await spawnAndTee('sh', ['-c', 'echo AGENT-COMMAND; test -t 0 || exit 91; echo GATE-OUTPUT; exit 4'], { cwd: process.cwd(), ...run.teeOptions });
       run.finish(result);
@@ -297,12 +300,12 @@ test('automatic command hosting includes harness and agent output in one persist
     const wrapper = path.join(fx.root, 'px');
     fs.writeFileSync(wrapper, `#!/bin/sh\nexec ${shellQuote(process.execPath)} --import ${shellQuote(path.join(REPO_ROOT, 'node_modules/tsx/dist/loader.mjs'))} ${shellQuote(script)} "$@"\n`, { mode: 0o700 });
     assert.equal(fs.existsSync(path.join(worktree, 'workflow.config.json')), false, 'no user configuration');
-    const status = await hostMissionCommand('active', ['task-whole'], worktree, () => {}, { command: wrapper, args: [] }, { interactive: true });
+    const status = await hostMissionCommand('active', ['task-whole'], worktree, () => {}, { command: wrapper, args: [] }, { configuration: resolveConfiguration(process.env), interactive: true });
     assert.equal(status, 4, 'whole-command status reaches the caller');
     const observed = JSON.parse(fs.readFileSync(output, 'utf8'));
     assert.equal(observed.nested, false, 'the agent inherits the command terminal');
     assert.equal(observed.terminal, 'task-whole');
-    const socket = missionSocketPath(observed.identity, fx.env);
+    const socket = missionSocketPath(observed.identity, resolveConfiguration(fx.env));
     assert.deepEqual(listTmuxSessions(socket).map(s => s.name), ['task-whole']);
     const windows = childProcess.spawnSync('tmux', ['-S', socket, 'list-windows', '-F', '#{window_name}'], { encoding: 'utf8' });
     assert.deepEqual(windows.stdout.trim().split('\n'), ['console'], 'completed operations leave one console');
@@ -324,7 +327,7 @@ test('roles and fallback attempts share a mission session and keep independent o
     const review = session(fx, worktree, 'adhoc-roles', 'claude', 'review');
     const release = path.join(fx.root, 'release');
     const launches = [execute, review].map(run => spawnAndTee('sh', ['-c', `echo ${run.identity.role}; while [ ! -e ${shellQuote(release)} ]; do sleep 0.05; done`], { cwd: worktree, stdoutSink: sink, stderrSink: sink, ...run.teeOptions }));
-    const socket = missionSocketPath(execute.identity, fx.env);
+    const socket = missionSocketPath(execute.identity, resolveConfiguration(fx.env));
     waitFor(() => childProcess.spawnSync('tmux', ['-S', socket, 'list-windows', '-F', '#{window_name}'], { encoding: 'utf8' }).stdout.trim().split('\n').length === 3);
     assert.deepEqual(listTmuxSessions(socket).map(s => s.name), ['adhoc-roles']);
     assert.throws(() => closeMissionTerminal(socket, 'adhoc-roles'), /owned operation/);
@@ -336,7 +339,7 @@ test('roles and fallback attempts share a mission session and keep independent o
     fallback.finish(result);
     assert.equal(result.status, 0);
     assert.deepEqual(listTmuxSessions(socket).map(s => s.name), ['adhoc-roles']);
-    assert.deepEqual(reconcileOrphanSessions(execute.identity, { env: fx.env }), [], 'idle windows survive reconciliation');
+    assert.deepEqual(reconcileOrphanSessions(execute.identity, { configuration: resolveConfiguration(fx.env) }), [], 'idle windows survive reconciliation');
     closeMissionTerminal(socket, 'adhoc-roles');
   } finally { fx.cleanup(); }
 });
@@ -347,11 +350,11 @@ test('automatic command hosting returns the pipe path when tmux is missing (TASK
   try {
     const worktree = fx.worktree('missing');
     childProcess.spawnSync('git', ['init', '-q', worktree]);
-    assert.equal(await hostMissionCommand('goal', ['set', '--slug', 'task-missing'], worktree, () => {}, { command: '/unused/px', args: [] }, { interactive: true }), null, 'structured Mission writes keep their caller-side JSON contract');
+    assert.equal(await hostMissionCommand('goal', ['set', '--slug', 'task-missing'], worktree, () => {}, { command: '/unused/px', args: [] }, { configuration: resolveConfiguration(process.env), interactive: true }), null, 'structured Mission writes keep their caller-side JSON contract');
     assert.equal(fs.existsSync(fx.env.PARALLIX_TERMINAL_STATE_DIR!), false);
     process.env.PATH = '/nonexistent';
     const logs: string[] = [];
-    assert.equal(await hostMissionCommand('active', ['task-missing'], worktree, line => logs.push(line), { command: '/unused/px', args: [] }, { interactive: true }), null);
+    assert.equal(await hostMissionCommand('active', ['task-missing'], worktree, line => logs.push(line), { command: '/unused/px', args: [] }, { configuration: resolveConfiguration(process.env), interactive: true }), null);
     assert.deepEqual(logs, [], 'an absent optional tool needs no user action');
   } finally {
     if (previousPath === undefined) { delete process.env.PATH; } else { process.env.PATH = previousPath; }
@@ -379,9 +382,10 @@ test('an interactive caller types directly into the whole-command mission termin
     const harness = path.join(fx.root, 'interactive.mjs');
     fs.writeFileSync(harness, `
       import { agentRunIdentity } from ${JSON.stringify(path.join(REPO_ROOT, 'src/domain/agent-run.ts'))};
+      import { resolveConfiguration } from ${JSON.stringify(path.join(REPO_ROOT, 'src/composition/config.ts'))};
       import { prepareTmuxLaunch, superviseTmuxLaunch } from ${JSON.stringify(path.join(REPO_ROOT, 'src/adapters/process/tmux-host.ts'))};
       const identity = agentRunIdentity({ repositoryKey: 'itrepo', missionId: 'task-input', role: 'active', family: 'parallix', attempt: 1, startedAtMs: Date.now() });
-      const launch = prepareTmuxLaunch({ identity, spawnIndex: 0, command: 'sh', args: ['-c', ${JSON.stringify(`touch ${shellQuote(readyFile)}; read answer; printf '%s' "$answer" > ${shellQuote(answerFile)}; exit 6`)}], cwd: ${JSON.stringify(worktree)}, env: process.env });
+      const launch = prepareTmuxLaunch({ identity, spawnIndex: 0, command: 'sh', args: ['-c', ${JSON.stringify(`touch ${shellQuote(readyFile)}; read answer; printf '%s' "$answer" > ${shellQuote(answerFile)}; exit 6`)}], cwd: ${JSON.stringify(worktree)}, env: process.env }, { configuration: resolveConfiguration(process.env) });
       const status = await superviseTmuxLaunch(launch);
       process.exit(status);
     `);
@@ -390,7 +394,7 @@ test('an interactive caller types directly into the whole-command mission termin
     const client = childProcess.spawn('script', ['-qefc', command, '/dev/null'], { env: { ...fx.env, TERM: 'xterm' }, stdio: ['pipe', 'ignore', 'ignore'] });
     fx.own(client);
     const exited = new Promise<number | null>(resolve => client.once('exit', resolve));
-    const socket = missionSocketPath({ repositoryKey: 'itrepo', missionId: 'task-input' }, fx.env);
+    const socket = missionSocketPath({ repositoryKey: 'itrepo', missionId: 'task-input' }, resolveConfiguration(fx.env));
     await waitForInput(() => listTmuxSessions(socket).some(session => session.attached), 10000);
     // The operation pane exists before the host selects it and releases the
     // command. Raw caller mode alone could send input to the console window.
@@ -424,8 +428,9 @@ test('successful review completion leaves the operator attached to the retained 
     const completed = path.join(fx.root, 'review-completed');
     fs.writeFileSync(harness, `
       import fs from 'node:fs';
+      import { resolveConfiguration } from ${JSON.stringify(path.join(REPO_ROOT, 'src/composition/config.ts'))};
       import { prepareTmuxLaunch, superviseTmuxLaunch } from ${JSON.stringify(path.join(REPO_ROOT, 'src/adapters/process/tmux-host.ts'))};
-      const launch = prepareTmuxLaunch({ identity: ${JSON.stringify(identity)}, spawnIndex: 0, command: 'sh', args: ['-c', 'echo REVIEW-APPROVED; exit 0'], cwd: ${JSON.stringify(worktree)}, env: process.env });
+      const launch = prepareTmuxLaunch({ identity: ${JSON.stringify(identity)}, spawnIndex: 0, command: 'sh', args: ['-c', 'echo REVIEW-APPROVED; exit 0'], cwd: ${JSON.stringify(worktree)}, env: process.env }, { configuration: resolveConfiguration(process.env) });
       const status = await superviseTmuxLaunch(launch);
       fs.writeFileSync(${JSON.stringify(completed)}, String(status));
       setTimeout(() => process.exit(status), 1000);
@@ -433,7 +438,7 @@ test('successful review completion leaves the operator attached to the retained 
     const child = childProcess.spawn('script', ['-qefc', [process.execPath, '--import', path.join(REPO_ROOT, 'node_modules/tsx/dist/loader.mjs'), harness].map(shellQuote).join(' '), '/dev/null'], { env: { ...fx.env, TERM: 'xterm' }, stdio: 'ignore' });
     fx.own(child);
     const exited = new Promise<number | null>(resolve => child.once('exit', resolve));
-    const socket = missionSocketPath(identity, fx.env);
+    const socket = missionSocketPath(identity, resolveConfiguration(fx.env));
     waitFor(() => listTmuxSessions(socket)[0]?.attached === true, 10000);
     childProcess.spawnSync('sleep', ['0.2']);
     assert.equal(fs.existsSync(completed), false, 'the px-equivalent parent remains alive while it owns the attached client');
@@ -446,7 +451,7 @@ test('successful review completion leaves the operator attached to the retained 
     waitFor(() => fs.existsSync(integrationStarted));
     assert.equal(fs.readFileSync(integrationStarted, 'utf8').trim(), 'integration-started', 'the retained console accepts the operator-triggered integration command');
     childProcess.spawnSync('tmux', ['-S', socket, 'send-keys', '-t', '=task-review-retained:console', 'echo INTEGRATION-FINAL-STATS', 'Enter']);
-    const capturePath = missionTerminalCapturePath(identity, fx.env);
+    const capturePath = missionTerminalCapturePath(identity, resolveConfiguration(fx.env));
     waitFor(() => fs.readFileSync(capturePath, 'utf8').includes('INTEGRATION-FINAL-STATS'));
     retireMissionTerminal(socket, identity.missionId);
     assert.equal(listTmuxSessions(socket)[0]?.attached, true, 'landing retains the attached result view');
@@ -462,19 +467,19 @@ test('a failed integration gate remains recoverable with its output and exit cod
   try {
     const worktree = fx.worktree('integration-gate-retained');
     const identity = agentRunIdentity({ repositoryKey: 'itrepo', missionId: 'task-integration-gate-retained', role: 'integrate', family: 'parallix', attempt: 1, startedAtMs: Date.now() });
-    const launch = prepareTmuxLaunch({ identity, spawnIndex: 0, command: 'sh', args: ['-c', 'echo "Integration gate static-analysis failed"; echo GATE-OUTPUT >&2; exit 42'], cwd: worktree, env: fx.env });
+    const launch = prepareTmuxLaunch({ identity, spawnIndex: 0, command: 'sh', args: ['-c', 'echo "Integration gate static-analysis failed"; echo GATE-OUTPUT >&2; exit 42'], cwd: worktree, env: fx.env }, { configuration: resolveConfiguration(fx.env) });
     try {
       assert.equal(await superviseTmuxLaunch(launch), 42);
     } finally { launch.cleanup(); }
     closeMissionTerminal(launch.socketPath, identity.missionId);
-    const capture = fs.readFileSync(missionTerminalCapturePath(identity, fx.env), 'utf8');
+    const capture = fs.readFileSync(missionTerminalCapturePath(identity, resolveConfiguration(fx.env)), 'utf8');
     assert.match(capture, /Integration gate static-analysis failed/);
     assert.match(capture, /GATE-OUTPUT/);
     assert.match(capture, /exit code: 42/);
     const output: string[] = [];
     attachRun({ slug: identity.missionId, list: true, readOnly: false }, {
       inferSlugFn: () => null, resolveWorktreeFn: () => null, repositoryKeyFn: () => identity.repositoryKey,
-      env: fx.env, log: line => output.push(line),
+      configuration: resolveConfiguration(fx.env), log: line => output.push(line),
     });
     assert.match(output.join('\n'), /no live terminal; captured output=/, 'operator discovery survives mission-worktree cleanup');
   } finally { fx.cleanup(); }
@@ -494,12 +499,12 @@ test('a landed integration retains its final result and application statistics a
       }) });
       console.log('Integration complete: local main updated');
     `);
-    const launch = prepareTmuxLaunch({ identity, spawnIndex: 0, command: process.execPath, args: ['--import', path.join(REPO_ROOT, 'node_modules/tsx/dist/loader.mjs'), closeout], cwd: worktree, env: fx.env });
+    const launch = prepareTmuxLaunch({ identity, spawnIndex: 0, command: process.execPath, args: ['--import', path.join(REPO_ROOT, 'node_modules/tsx/dist/loader.mjs'), closeout], cwd: worktree, env: fx.env }, { configuration: resolveConfiguration(fx.env) });
     try {
       assert.equal(await superviseTmuxLaunch(launch), 0);
       retireMissionTerminal(launch.socketPath, identity.missionId);
     } finally { launch.cleanup(); }
-    const capture = fs.readFileSync(missionTerminalCapturePath(identity, fx.env), 'utf8');
+    const capture = fs.readFileSync(missionTerminalCapturePath(identity, resolveConfiguration(fx.env)), 'utf8');
     assert.match(capture, /Integration complete: local main updated/);
     assert.match(capture, /Workflow stats recorded: task-result: implementer=codex, pr_fix_rounds=2, classification=ai_sdlc/);
     assert.match(capture, /PR decisions unavailable/);
@@ -526,7 +531,7 @@ test('whole-command cancellation reaches the existing supervisor and its detache
     `);
     const identity = agentRunIdentity({ repositoryKey: 'itrepo', missionId: 'task-supervised', role: 'active', family: 'parallix', attempt: 1, startedAtMs: Date.now() });
     launch = prepareTmuxLaunch({ identity, spawnIndex: 0, command: process.execPath,
-      args: ['--import', path.join(REPO_ROOT, 'node_modules/tsx/dist/loader.mjs'), harness], cwd: worktree, env: fx.env });
+      args: ['--import', path.join(REPO_ROOT, 'node_modules/tsx/dist/loader.mjs'), harness], cwd: worktree, env: fx.env }, { configuration: resolveConfiguration(fx.env) });
     const host = childProcess.spawn(launch.command, launch.args, { env: fx.env, stdio: 'ignore' });
     fx.own(host);
     const exited = new Promise<number | null>(resolve => host.once('exit', resolve));
@@ -580,11 +585,12 @@ test('headless mission calls preserve piped input and separate byte-exact output
     const script = path.join(fx.root, 'headless.mjs');
     fs.writeFileSync(script, `
       import { hostMissionCommand } from ${JSON.stringify(path.join(REPO_ROOT, 'src/composition/mission-terminal.ts'))};
+      import { resolveConfiguration } from ${JSON.stringify(path.join(REPO_ROOT, 'src/composition/config.ts'))};
       import { openRunSession } from ${JSON.stringify(path.join(REPO_ROOT, 'src/adapters/agents/run-session.ts'))};
       import { spawnAndTee } from ${JSON.stringify(path.join(REPO_ROOT, 'src/adapters/process/spawn-tee.ts'))};
-      const hosted = await hostMissionCommand('active', ['task-headless'], process.cwd(), console.log, { command: '/must-not-run', args: [] });
+      const hosted = await hostMissionCommand('active', ['task-headless'], process.cwd(), console.log, { command: '/must-not-run', args: [] }, { configuration: resolveConfiguration(process.env) });
       if (hosted !== null) throw new Error('headless call entered tmux');
-      const run = openRunSession({ worktree: process.cwd(), slug: 'task-headless', role: 'execute', family: 'custom', attempt: 1, log: console.log }, { repositoryKey: () => 'itrepo' });
+      const run = openRunSession({ worktree: process.cwd(), slug: 'task-headless', role: 'execute', family: 'custom', attempt: 1, log: console.log }, { repositoryKey: () => 'itrepo', configuration: resolveConfiguration(process.env) });
       const result = await spawnAndTee('sh', ['-c', 'read answer; printf "out:%s\\n" "$answer"; printf "err\\n" >&2; exit 7'], { cwd: process.cwd(), ...run.teeOptions });
       run.finish(result);
       process.exit(result.status);
@@ -610,15 +616,15 @@ test('completed operations keep one credential-free console and retired missions
   try {
     const worktree = fx.worktree('bounded');
     const identity = agentRunIdentity({ repositoryKey: 'itrepo', missionId: 'task-bounded', role: 'active', family: 'parallix', attempt: 1, startedAtMs: Date.now() });
-    const socket = missionSocketPath(identity, fx.env);
+    const socket = missionSocketPath(identity, resolveConfiguration(fx.env));
     for (let index = 0; index < 3; index += 1) {
-      const launch = prepareTmuxLaunch({ identity, spawnIndex: index, command: 'sh', args: ['-c', 'test "$TEST_PROVIDER_CREDENTIAL" = private; exit 0'], cwd: worktree, env: { ...fx.env, TEST_PROVIDER_CREDENTIAL: 'private' } });
+      const launch = prepareTmuxLaunch({ identity, spawnIndex: index, command: 'sh', args: ['-c', 'test "$TEST_PROVIDER_CREDENTIAL" = private; exit 0'], cwd: worktree, env: { ...fx.env, TEST_PROVIDER_CREDENTIAL: 'private' } }, { configuration: resolveConfiguration({ ...fx.env, TEST_PROVIDER_CREDENTIAL: 'private' }) });
       try { assert.equal(childProcess.spawnSync(launch.command, launch.args, { timeout: 5000 }).status, 0); } finally { launch.cleanup(); }
       assert.equal(childProcess.spawnSync('tmux', ['-S', socket, 'list-windows', '-F', '#{window_name}'], { encoding: 'utf8' }).stdout, 'console\n');
       assert.notEqual(childProcess.spawnSync('tmux', ['-S', socket, 'show-environment', '-g', 'TEST_PROVIDER_CREDENTIAL']).status, 0);
     }
     const started = path.join(fx.root, 'started');
-    const launch = prepareTmuxLaunch({ identity, spawnIndex: 3, command: 'sh', args: ['-c', `touch ${shellQuote(started)}; sleep 0.5; exit 9`], cwd: worktree, env: fx.env });
+    const launch = prepareTmuxLaunch({ identity, spawnIndex: 3, command: 'sh', args: ['-c', `touch ${shellQuote(started)}; sleep 0.5; exit 9`], cwd: worktree, env: fx.env }, { configuration: resolveConfiguration(fx.env) });
     const child = childProcess.spawn(launch.command, launch.args, { stdio: 'ignore' });
     fx.own(child);
     const exited = new Promise<number | null>(resolve => child.once('exit', resolve));
@@ -630,7 +636,7 @@ test('completed operations keep one credential-free console and retired missions
     } finally { launch.cleanup(); }
     assert.equal(listTmuxSessions(socket).length, 0);
     assert.equal(fs.existsSync(socket), false);
-    const idle = prepareTmuxLaunch({ identity, spawnIndex: 4, command: 'sh', args: ['-c', 'exit 0'], cwd: worktree, env: fx.env });
+    const idle = prepareTmuxLaunch({ identity, spawnIndex: 4, command: 'sh', args: ['-c', 'exit 0'], cwd: worktree, env: fx.env }, { configuration: resolveConfiguration(fx.env) });
     try { assert.equal(childProcess.spawnSync(idle.command, idle.args, { timeout: 5000 }).status, 0); } finally { idle.cleanup(); }
     retireMissionTerminal(socket, identity.missionId);
     assert.equal(fs.existsSync(socket), false, 'an idle terminal retires immediately');
@@ -652,14 +658,14 @@ test('automatic hosting falls back only before launch and never replays a comman
     const blockedState = path.join(fx.root, 'blocked-state');
     fs.writeFileSync(blockedState, 'not a directory');
     process.env.PARALLIX_TERMINAL_STATE_DIR = blockedState;
-    assert.equal(await hostMissionCommand('active', ['task-fallback'], worktree, () => {}, command, { interactive: true }), null);
+    assert.equal(await hostMissionCommand('active', ['task-fallback'], worktree, () => {}, command, { configuration: resolveConfiguration(process.env), interactive: true }), null);
     process.env.PARALLIX_TERMINAL_STATE_DIR = fx.env.PARALLIX_TERMINAL_STATE_DIR;
     const bin = path.join(fx.root, 'bin'); fs.mkdirSync(bin);
     fs.writeFileSync(path.join(bin, 'tmux'), '#!/bin/sh\nif [ "$1" = -V ]; then echo "tmux test"; exit 0; fi\nexit 1\n', { mode: 0o700 });
     process.env.PATH = `${bin}:${previousPath}`;
-    assert.equal(await hostMissionCommand('active', ['task-fallback'], worktree, () => {}, command, { interactive: true }), null);
+    assert.equal(await hostMissionCommand('active', ['task-fallback'], worktree, () => {}, command, { configuration: resolveConfiguration(process.env), interactive: true }), null);
     process.env.PATH = previousPath;
-    assert.equal(await hostMissionCommand('active', ['task-fallback'], worktree, () => {}, command, { interactive: true }), 70, 'a real command exit must not trigger fallback');
+    assert.equal(await hostMissionCommand('active', ['task-fallback'], worktree, () => {}, command, { configuration: resolveConfiguration(process.env), interactive: true }), 70, 'a real command exit must not trigger fallback');
   } finally {
     if (previousPath === undefined) { delete process.env.PATH; } else { process.env.PATH = previousPath; }
     fx.cleanup();
@@ -677,7 +683,7 @@ test('px active and attach from the retained console reuse the original mission 
     assert.equal(childProcess.spawnSync('git', ['init', '-q', '-b', `mission/${slug}`, worktree]).status, 0);
     fs.writeFileSync(path.join(worktree, 'workflow.config.json'), '{}\n');
     const identity = agentRunIdentity({ repositoryKey: missionRepositoryKey(worktree), missionId: slug, role: 'active', family: 'parallix', attempt: 1, startedAtMs: Date.now() });
-    const launch = prepareTmuxLaunch({ identity, spawnIndex: 0, command: 'sh', args: ['-c', 'exit 0'], cwd: worktree, env: fx.env });
+    const launch = prepareTmuxLaunch({ identity, spawnIndex: 0, command: 'sh', args: ['-c', 'exit 0'], cwd: worktree, env: fx.env }, { configuration: resolveConfiguration(fx.env) });
     try { assert.equal(childProcess.spawnSync(launch.command, launch.args, { timeout: 5000 }).status, 0); } finally { launch.cleanup(); }
     const px = [process.execPath, '--import', path.join(REPO_ROOT, 'node_modules/tsx/dist/loader.mjs'), path.join(REPO_ROOT, 'src/entry/px.ts')].map(shellQuote).join(' ');
     const activeOutput = path.join(fx.root, 'active.out');
@@ -718,7 +724,7 @@ test('a retained-console px command resolves an operator Jev credential without 
     process.env.PATH = `${bin}:${previousPath ?? ''}`;
     const worktree = fx.worktree('task-jev-console');
     const identity = agentRunIdentity({ repositoryKey: 'itrepo', missionId: 'task-jev-console', role: 'execute', family: 'codex', attempt: 1, startedAtMs: Date.now() });
-    const launch = prepareTmuxLaunch({ identity, spawnIndex: 0, command: 'sh', args: ['-c', 'exit 0'], cwd: worktree, env: { ...fx.env, HOME: home, PATH: process.env.PATH } });
+    const launch = prepareTmuxLaunch({ identity, spawnIndex: 0, command: 'sh', args: ['-c', 'exit 0'], cwd: worktree, env: { ...fx.env, HOME: home, PATH: process.env.PATH } }, { configuration: resolveConfiguration({ ...fx.env, HOME: home, PATH: process.env.PATH }) });
     try { assert.equal(childProcess.spawnSync(launch.command, launch.args, { timeout: 5000 }).status, 0); } finally { launch.cleanup(); }
     childProcess.spawnSync('tmux', ['-S', launch.socketPath, 'send-keys', '-t', '=task-jev-console:console', '-l', 'px']);
     childProcess.spawnSync('tmux', ['-S', launch.socketPath, 'send-keys', '-t', '=task-jev-console:console', 'Enter']);
@@ -743,7 +749,7 @@ test('a host whose harness pipe is gone still stops its command when the termina
     const worktree = fx.worktree('task-h');
     const pidFile = path.join(fx.root, 'agent.pid');
     const identity = agentRunIdentity({ repositoryKey: 'itrepo', missionId: 'task-h', role: 'execute', family: 'codex', attempt: 1, startedAtMs: Date.now() });
-    const launch = prepareTmuxLaunch({ identity, spawnIndex: 0, command: 'sh', args: ['-c', `echo $$ > ${pidFile}; exec sleep 30`], cwd: worktree, env: {} }, { env: fx.env });
+    const launch = prepareTmuxLaunch({ identity, spawnIndex: 0, command: 'sh', args: ['-c', `echo $$ > ${pidFile}; exec sleep 30`], cwd: worktree, env: {} }, { configuration: resolveConfiguration(fx.env) });
     const host = childProcess.spawn(launch.command, launch.args, { cwd: worktree, env: fx.env, stdio: ['ignore', 'ignore', 'pipe'], detached: true });
     fx.own(host);
     const exited = new Promise<NodeJS.Signals | null>((resolve) => { host.once('exit', (_code, signal) => resolve(signal)); });

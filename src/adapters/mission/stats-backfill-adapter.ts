@@ -1,3 +1,4 @@
+import type { ParallixConfiguration } from '../../application/ports/configuration.js';
 import { collectHistoricalStatsBackfill } from '../cli/commands/stats-backfill.js';
 import * as stats from '../cli/commands/stats.js';
 import type { DurableEvidence } from '../../application/contracts.js';
@@ -14,7 +15,7 @@ export class LegacyStatsBackfillAdapter implements StatsBackfillPort {
    */
   constructor(
     private readonly _rootDir: string,
-    private readonly _measurementStore: { dbPath?: string; store?: import('../../application/measurement-ports.js').MeasurementStorePort } = {},
+    private readonly _measurementStore: { configuration?: ParallixConfiguration; dbPath?: string; store?: import('../../application/measurement-ports.js').MeasurementStorePort } = {},
     private readonly _missionStore: unknown = null,
   ) {}
 

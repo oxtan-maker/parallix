@@ -1,3 +1,5 @@
+import { resolveConfiguration } from '../../../../src/composition/config.js';
+const environment: NodeJS.ProcessEnv = { ...process.env };
 
 
 
@@ -29,15 +31,15 @@ test('resolvePiCommand prefers PI_BIN when it points to an executable', () => {
   const customBin = path.join(tmpDir, 'pi');
   fs.writeFileSync(customBin, '#!/usr/bin/env bash\nexit 0\n', 'utf8');
   fs.chmodSync(customBin, 0o755);
-  const original = process.env.PI_BIN;
-  process.env.PI_BIN = customBin;
+  const original = environment.PI_BIN;
+  environment.PI_BIN = customBin;
   try {
-    assert.equal(resolvePiCommand(), customBin);
+    assert.equal(resolvePiCommand(resolveConfiguration(environment)), customBin);
   } finally {
     if (original === undefined) {
-      delete process.env.PI_BIN;
+      delete environment.PI_BIN;
     } else {
-      process.env.PI_BIN = original;
+      environment.PI_BIN = original;
     }
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }
@@ -49,26 +51,26 @@ test('resolvePiCommand finds Pi through NVM_BIN when PATH is isolated', () => {
   const nvmPi = path.join(tmpDir, 'pi');
   fs.writeFileSync(nvmPi, '#!/usr/bin/env bash\nexit 0\n', 'utf8');
   fs.chmodSync(nvmPi, 0o755);
-  const originalPiBin = process.env.PI_BIN;
-  const originalNvmBin = process.env.NVM_BIN;
-  const originalPath = process.env.PATH;
-  delete process.env.PI_BIN;
-  process.env.NVM_BIN = tmpDir;
-  process.env.PATH = '';
+  const originalPiBin = environment.PI_BIN;
+  const originalNvmBin = environment.NVM_BIN;
+  const originalPath = environment.PATH;
+  delete environment.PI_BIN;
+  environment.NVM_BIN = tmpDir;
+  environment.PATH = '';
   try {
-    assert.equal(resolvePiCommand(), nvmPi);
+    assert.equal(resolvePiCommand(resolveConfiguration(environment)), nvmPi);
   } finally {
     if (originalPiBin === undefined) {
-      delete process.env.PI_BIN;
+      delete environment.PI_BIN;
     } else {
-      process.env.PI_BIN = originalPiBin;
+      environment.PI_BIN = originalPiBin;
     }
     if (originalNvmBin === undefined) {
-      delete process.env.NVM_BIN;
+      delete environment.NVM_BIN;
     } else {
-      process.env.NVM_BIN = originalNvmBin;
+      environment.NVM_BIN = originalNvmBin;
     }
-    process.env.PATH = originalPath;
+    environment.PATH = originalPath;
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }
 });
@@ -76,31 +78,31 @@ test('resolvePiCommand finds Pi through NVM_BIN when PATH is isolated', () => {
 test('resolvePiCommand falls back to bare "pi" when no candidate exists', () => {
   const { resolvePiCommand } = pi;
   const tmpHome = registeredMkdtemp('pi-home-');
-  const originalHome = process.env.HOME;
-  const originalPath = process.env.PATH;
-  const originalBin = process.env.PI_BIN;
-  const originalNvmBin = process.env.NVM_BIN;
+  const originalHome = environment.HOME;
+  const originalPath = environment.PATH;
+  const originalBin = environment.PI_BIN;
+  const originalNvmBin = environment.NVM_BIN;
   const originalExecPath = process.execPath;
-  delete process.env.PI_BIN;
-  delete process.env.NVM_BIN;
-  process.env.HOME = tmpHome;
-  process.env.PATH = '';
+  delete environment.PI_BIN;
+  delete environment.NVM_BIN;
+  environment.HOME = tmpHome;
+  environment.PATH = '';
   Object.defineProperty(process, 'execPath', { value: path.join(tmpHome, 'node'), configurable: true });
   try {
-    assert.equal(resolvePiCommand(), 'pi');
+    assert.equal(resolvePiCommand(resolveConfiguration(environment)), 'pi');
   } finally {
     if (originalBin === undefined) {
-      delete process.env.PI_BIN;
+      delete environment.PI_BIN;
     } else {
-      process.env.PI_BIN = originalBin;
+      environment.PI_BIN = originalBin;
     }
     if (originalNvmBin === undefined) {
-      delete process.env.NVM_BIN;
+      delete environment.NVM_BIN;
     } else {
-      process.env.NVM_BIN = originalNvmBin;
+      environment.NVM_BIN = originalNvmBin;
     }
-    process.env.HOME = originalHome;
-    process.env.PATH = originalPath;
+    environment.HOME = originalHome;
+    environment.PATH = originalPath;
     Object.defineProperty(process, 'execPath', { value: originalExecPath, configurable: true });
     fs.rmSync(tmpHome, { recursive: true, force: true });
   }
@@ -239,7 +241,7 @@ test('startPiAgent renders thinking and tool progress without polluting the fina
   }) as typeof process.stdout.write;
 
   try {
-    const { resultPromise } = pi.startPiAgent({ prompt: 'Say hello', worktree: '/tmp/test' });
+    const { resultPromise } = pi.startPiAgent({ configuration: resolveConfiguration(environment), prompt: 'Say hello', worktree: '/tmp/test' });
     const result = await resultPromise;
 
     assert.equal(result.stdout, 'Hello world', 'final result contains assistant text only');
@@ -274,7 +276,7 @@ test('startPiAgent SDK execution returns session ID and telemetry from session s
     return { session, extensionsResult: { extensions: [], diagnostics: [] } };
   });
 
-  const { resultPromise } = pi.startPiAgent({ prompt: 'Test', worktree: '/tmp/test' });
+  const { resultPromise } = pi.startPiAgent({ configuration: resolveConfiguration(environment), prompt: 'Test', worktree: '/tmp/test' });
   const result = await resultPromise;
 
   assert.equal(result.sessionId, 'sdk-session-abc-123', 'sessionId from session state');
@@ -303,7 +305,7 @@ test('startPiAgent completes when prompt resolves without a second idle wait', a
   }));
 
   const result: any = await Promise.race([
-    pi.startPiAgent({ prompt: 'Test', worktree: '/tmp/test' }).resultPromise,
+    pi.startPiAgent({ configuration: resolveConfiguration(environment), prompt: 'Test', worktree: '/tmp/test' }).resultPromise,
     new Promise((_, reject) => setTimeout(() => reject(new Error('launcher did not settle')), 100)),
   ]);
 
@@ -340,7 +342,7 @@ test('startPiAgent supports legacy and current Pi SDK model APIs', async () => {
     legacyOptions = options;
     return { session, extensionsResult: { extensions: [], diagnostics: [] } };
   });
-  await pi.startPiAgent({ prompt: 'test', worktree: '/tmp/test', model: 'provider/model-id' }).resultPromise;
+  await pi.startPiAgent({ configuration: resolveConfiguration(environment), prompt: 'test', worktree: '/tmp/test', model: 'provider/model-id' }).resultPromise;
   assert.equal(legacyOptions.authStorage, legacyAuthStorage);
   assert.equal(legacyOptions.modelRegistry, legacyRegistry);
   assert.equal(legacyOptions.model, model);
@@ -363,7 +365,7 @@ test('startPiAgent supports legacy and current Pi SDK model APIs', async () => {
     currentOptions = options;
     return { session, extensionsResult: { extensions: [], diagnostics: [] } };
   });
-  await pi.startPiAgent({ prompt: 'test', worktree: '/tmp/test', model: 'provider/model-id' }).resultPromise;
+  await pi.startPiAgent({ configuration: resolveConfiguration(environment), prompt: 'test', worktree: '/tmp/test', model: 'provider/model-id' }).resultPromise;
   assert.equal(runtimeCreated, 1);
   assert.equal(currentOptions.modelRuntime, currentRuntime);
   assert.equal(currentOptions.model, model);
@@ -385,7 +387,7 @@ test('startPiAgent SDK handles errors and maps them to result shape', async () =
     return { session, extensionsResult: { extensions: [], diagnostics: [] } };
   });
 
-  const { resultPromise } = pi.startPiAgent({ prompt: 'Test', worktree: '/tmp/test' });
+  const { resultPromise } = pi.startPiAgent({ configuration: resolveConfiguration(environment), prompt: 'Test', worktree: '/tmp/test' });
   const result = await resultPromise;
 
   assert.notEqual(result.status, 0, 'status should be non-zero on error');
@@ -430,7 +432,7 @@ test('startPiAgent resume with sessionId opens the matching session via SessionM
   }));
 
   try {
-    const { resultPromise } = pi.startPiAgent({
+    const { resultPromise } = pi.startPiAgent({ configuration: resolveConfiguration(environment),
       prompt: 'Continue',
       worktree: '/tmp/test',
       resume: true,
@@ -476,7 +478,7 @@ test('startPiAgent resume without sessionId uses SessionManager.continueRecent',
   }));
 
   try {
-    const { resultPromise } = pi.startPiAgent({
+    const { resultPromise } = pi.startPiAgent({ configuration: resolveConfiguration(environment),
       prompt: 'Continue',
       worktree: '/tmp/test',
       resume: true,
@@ -524,7 +526,7 @@ test('startPiAgent propagates caller model to SDK createAgentSession', async () 
   try {
     // The SDK adapter resolves the model string through ModelRegistry.find().
     // With the real SDK, the model object is resolved and passed through.
-    const { resultPromise } = pi.startPiAgent({
+    const { resultPromise } = pi.startPiAgent({ configuration: resolveConfiguration(environment),
       prompt: 'Test',
       worktree: '/tmp/test',
       model: 'anthropic/claude-sonnet-4-20250514',
@@ -537,15 +539,15 @@ test('startPiAgent propagates caller model to SDK createAgentSession', async () 
   }
 });
 
-test('startPiAgent propagates caller environment to subprocess context', async () => {
+test('startPiAgent forwards caller environment without mutating the parent (TASK-2668.08)', async () => {
   const sdk = { SessionManager: { create: () => ({}) } };
   let envWasSet = false;
   // Ensure the test key doesn't already exist.
-  const origTestVar = process.env.TASK_2238_TEST_VAR;
-  delete process.env.TASK_2238_TEST_VAR;
+  const origTestVar = environment.TASK_2238_TEST_VAR;
+  delete environment.TASK_2238_TEST_VAR;
 
   pi.__setCreateAgentSessionForTest(async () => {
-    // During SDK execution, the caller's env vars should be in process.env.
+    // Injected SDK doubles run in-process and must never receive ambient mutation.
     envWasSet = process.env.TASK_2238_TEST_VAR === 'test-value';
     return {
       session: {
@@ -565,21 +567,22 @@ test('startPiAgent propagates caller environment to subprocess context', async (
   pi.__setSdkForTest(sdk);
 
   try {
-    const { resultPromise } = pi.startPiAgent({
+    const { resultPromise, invocation } = pi.startPiAgent({ configuration: resolveConfiguration(environment),
       prompt: 'Test',
       worktree: '/tmp/test',
       env: { TASK_2238_TEST_VAR: 'test-value' },
     });
     await resultPromise;
 
-    // Verify env was set during SDK execution.
-    assert.ok(envWasSet, 'Caller env was merged into process.env during SDK execution');
+    assert.equal(invocation.options.env.TASK_2238_TEST_VAR, 'test-value');
+    // The isolated worker, rather than the parent, receives this environment.
+    assert.equal(envWasSet, false, 'The parent environment must remain unchanged');
 
     // Verify env is restored after execution.
     if (origTestVar === undefined) {
-      assert.equal(process.env.TASK_2238_TEST_VAR, undefined, 'process.env restored after execution');
+      assert.equal(environment.TASK_2238_TEST_VAR, undefined, 'environment restored after execution');
     } else {
-      assert.equal(process.env.TASK_2238_TEST_VAR, origTestVar, 'process.env restored after execution');
+      assert.equal(environment.TASK_2238_TEST_VAR, origTestVar, 'environment restored after execution');
     }
   } finally {
     pi.__setSdkForTest(null);
@@ -620,7 +623,7 @@ test('startPiAgent writes text_delta to process.stdout during SDK execution', as
       return { session, extensionsResult: { extensions: [], diagnostics: [] } };
     });
 
-    const { resultPromise } = pi.startPiAgent({ prompt: 'Say hello', worktree: '/tmp/test' });
+    const { resultPromise } = pi.startPiAgent({ configuration: resolveConfiguration(environment), prompt: 'Say hello', worktree: '/tmp/test' });
     const result = await resultPromise;
 
     assert.ok(stdoutWrites.length > 0, `process.stdout.write should be called during SDK execution (got ${stdoutWrites.length} writes)`);
@@ -669,7 +672,7 @@ test('startPiAgent invokes teeOptions.noOutputWatchdog.onNoOutput when no text a
     return { session, extensionsResult: { extensions: [], diagnostics: [] } };
   });
 
-  const { resultPromise } = pi.startPiAgent({ prompt: 'Test', worktree: '/tmp/test', teeOptions });
+  const { resultPromise } = pi.startPiAgent({ configuration: resolveConfiguration(environment), prompt: 'Test', worktree: '/tmp/test', teeOptions });
   const result = await resultPromise;
 
   assert.ok(watchdogCalled, 'onNoOutput should be invoked when no text_delta arrives');
@@ -710,7 +713,7 @@ test('startPiAgent result includes session.model.id in result.model and result.t
   pi.__setSdkForTest(sdk);
 
   try {
-    const { resultPromise } = pi.startPiAgent({
+    const { resultPromise } = pi.startPiAgent({ configuration: resolveConfiguration(environment),
       prompt: 'Test',
       worktree: '/tmp/test',
     });
@@ -760,7 +763,7 @@ test('startPiAgent result.model is undefined when session.model is absent (task-
   pi.__setSdkForTest(sdk);
 
   try {
-    const { resultPromise } = pi.startPiAgent({
+    const { resultPromise } = pi.startPiAgent({ configuration: resolveConfiguration(environment),
       prompt: 'Test',
       worktree: '/tmp/test',
     });
@@ -796,7 +799,7 @@ test('startPiAgent fails when the session settles on a provider error instead of
     return { session, extensionsResult: { extensions: [], diagnostics: [] } };
   });
 
-  const { resultPromise } = pi.startPiAgent({ prompt: 'Say hello', worktree: '/tmp/test', maxTransientRetries: 0 });
+  const { resultPromise } = pi.startPiAgent({ configuration: resolveConfiguration(environment), prompt: 'Say hello', worktree: '/tmp/test', maxTransientRetries: 0 });
   const result = await resultPromise;
 
   assert.notEqual(result.status, 0, 'an unanswered session must not report success');

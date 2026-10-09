@@ -1,3 +1,5 @@
+import type { ParallixConfiguration } from "../../application/ports/configuration.js";
+import { DEFAULT_CONFIGURATION } from "../../application/ports/configuration.js";
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -12,8 +14,8 @@ import { createHash } from 'node:crypto';
  * launch environment written for its own pane. The root is preferably under
  * `$XDG_RUNTIME_DIR`, which is per-user and short enough for socket paths.
  */
-export function terminalStateRoot(env: NodeJS.ProcessEnv = process.env): string {
-  const [preferred, fallback] = terminalStateRootCandidates(env);
+export function terminalStateRoot(configuration: ParallixConfiguration = DEFAULT_CONFIGURATION): string {
+  const [preferred, fallback] = terminalStateRootCandidates(configuration);
   if (!fallback) { return preferred; }
   try { fs.accessSync(path.dirname(preferred), fs.constants.W_OK); return preferred; } catch { return fallback; }
 }
@@ -24,21 +26,21 @@ export function terminalStateRoot(env: NodeJS.ProcessEnv = process.env): string 
  * caller, but host scripts and retained state continue to use the configured
  * root whenever its socket path is portable.
  */
-export function terminalSocketFallbackRoot(env: NodeJS.ProcessEnv = process.env): string {
+export function terminalSocketFallbackRoot(configuration: ParallixConfiguration = DEFAULT_CONFIGURATION): string {
   const uid = typeof process.getuid === 'function' ? process.getuid() : 'user';
-  const root = terminalStateRoot(env);
+  const root = terminalStateRoot(configuration);
   const scope = createHash('sha256').update(root).digest('hex').slice(0, 12);
   return path.join(process.platform === 'win32' ? os.tmpdir() : '/tmp', `px-t-${uid}`, scope);
 }
 
 /** The configured root, or `$XDG_RUNTIME_DIR` with the per-user temp dir as its fallback. */
-function terminalStateRootCandidates(env: NodeJS.ProcessEnv): string[] {
-  if (env.PARALLIX_TERMINAL_STATE_DIR) { return [path.resolve(env.PARALLIX_TERMINAL_STATE_DIR)]; }
+function terminalStateRootCandidates(configuration: ParallixConfiguration): string[] {
+  if (configuration.terminal.stateDir) { return [path.resolve(configuration.terminal.stateDir)]; }
   const uid = typeof process.getuid === 'function' ? process.getuid() : 'user';
   // macOS TMPDIR (and coverage fixtures) can exceed Unix socket path limits.
   const tempBase = Buffer.byteLength(os.tmpdir()) > 40 && process.platform !== 'win32' ? '/tmp' : os.tmpdir();
   const temp = path.join(tempBase, `parallix-terminal-${uid}`);
-  const runtime = env.XDG_RUNTIME_DIR;
+  const runtime = configuration.terminal.runtimeDir;
   return runtime && path.isAbsolute(runtime) ? [path.join(runtime, 'parallix-terminal'), temp] : [temp];
 }
 
@@ -60,8 +62,8 @@ export function ensurePrivateDir(dir: string): void {
 }
 
 /** Every existing state root to mask inside the sandbox; empty when none was created. */
-export function existingTerminalStateRoots(env: NodeJS.ProcessEnv = process.env): string[] {
-  return [...new Set([...terminalStateRootCandidates(env), terminalSocketFallbackRoot(env)])].filter(root => {
+export function existingTerminalStateRoots(configuration: ParallixConfiguration = DEFAULT_CONFIGURATION): string[] {
+  return [...new Set([...terminalStateRootCandidates(configuration), terminalSocketFallbackRoot(configuration)])].filter(root => {
     try { return fs.statSync(root).isDirectory(); } catch { return false; }
   });
 }

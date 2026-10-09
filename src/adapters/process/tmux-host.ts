@@ -1,3 +1,5 @@
+import type { ParallixConfiguration } from "../../application/ports/configuration.js";
+import { DEFAULT_CONFIGURATION } from "../../application/ports/configuration.js";
 import childProcess from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
 import fs from 'node:fs';
@@ -30,19 +32,19 @@ export function probeTmux(spawnSyncFn: SpawnSyncFn = childProcess.spawnSync, pla
 }
 
 /** The Mission's tmux socket: one server per repository and Mission. */
-export function missionSocketPath(identity: Pick<AgentRunIdentity, 'repositoryKey' | 'missionId'>, env: NodeJS.ProcessEnv = process.env): string {
-  const root = terminalStateRoot(env);
+export function missionSocketPath(identity: Pick<AgentRunIdentity, 'repositoryKey' | 'missionId'>, configuration: ParallixConfiguration = DEFAULT_CONFIGURATION): string {
+  const root = terminalStateRoot(configuration);
   const socket = path.join(root, identity.repositoryKey, `${identity.missionId}.sock`);
   if (Buffer.byteLength(socket) <= 100) { return socket; }
   // sockaddr_un pathnames have a small portable limit. Include the resolved
   // root in the digest so independent configured state roots cannot collide.
   const name = createHash('sha256').update(`${root}\0${identity.repositoryKey}\0${identity.missionId}`).digest('hex').slice(0, 32);
-  return path.join(terminalSocketFallbackRoot(env), `${name}.sock`);
+  return path.join(terminalSocketFallbackRoot(configuration), `${name}.sock`);
 }
 
 /** Durable operator transcript, retained when the live tmux server is closed. */
-export function missionTerminalCapturePath(identity: Pick<AgentRunIdentity, 'repositoryKey' | 'missionId'>, env: NodeJS.ProcessEnv = process.env): string {
-  return `${missionSocketPath(identity, env)}.log`;
+export function missionTerminalCapturePath(identity: Pick<AgentRunIdentity, 'repositoryKey' | 'missionId'>, configuration: ParallixConfiguration = DEFAULT_CONFIGURATION): string {
+  return `${missionSocketPath(identity, configuration)}.log`;
 }
 
 /** Single-quote one value for POSIX `sh`. */
@@ -128,11 +130,11 @@ function consolePxScript(command: string | undefined): string {
     `PARALLIX_CONSOLE_PX=1 exec /bin/bash -ic 'unset PARALLIX_CONSOLE_PX; exec "$@"' bash ${quoted} "$@"`, ''].join('\n');
 }
 
-function hostScript(socketPath: string, sessionName: string, windowName: string, scratch: string, cwd: string, supervisorPid: number, consoleBin: string, capturePath: string, terminalStateDir: string): string {
+function hostScript(socketPath: string, sessionName: string, windowName: string, scratch: string, cwd: string, supervisorPid: number, consoleBin: string, capturePath: string, terminalStateDir: string, configuration: ParallixConfiguration): string {
   // The tmux server, and every window it later launches, must not inherit operation credentials.
   // The retained console is the operator's own interactive shell and reads their rc files like any terminal.
-  const cleanEnv = ['PATH', 'HOME', 'TERM', 'SHELL', 'LANG', 'USER', 'LOGNAME', 'PARALLIX_HOME', 'XDG_CONFIG_HOME', 'XDG_STATE_HOME', 'XDG_DATA_HOME'].filter(key => process.env[key])
-    .map(key => `${key}=${shellQuote(process.env[key]!)}`).join(' ');
+  const cleanEnv = Object.entries(configuration.terminal.hostEnvironment).filter(([, value]) => value !== undefined && value !== '')
+    .map(([key, value]) => `${key}=${shellQuote(value!)}`).join(' ');
   const stateRoot = path.dirname(path.dirname(socketPath));
   const t = `env -i ${cleanEnv} PARALLIX_TERMINAL_STATE_DIR=${shellQuote(stateRoot)} tmux -S ${shellQuote(socketPath)}`;
   const fifo = shellQuote(path.join(scratch, 'out'));
@@ -210,9 +212,9 @@ function writeEnvFile(file: string, env: Readonly<Record<string, string | undefi
  * Prepare an operation window in the persistent mission terminal.
  * Whole CLI commands and already-confined direct launches use the same host.
  */
-export function prepareTmuxLaunch(input: TmuxLaunchInput, options: { env?: NodeJS.ProcessEnv; spawnSyncFn?: SpawnSyncFn } = {}): TmuxLaunch {
-  const env = options.env ?? process.env;
-  const socketPath = missionSocketPath(input.identity, env);
+export function prepareTmuxLaunch(input: TmuxLaunchInput, options: { configuration?: ParallixConfiguration; spawnSyncFn?: SpawnSyncFn } = {}): TmuxLaunch {
+  const configuration = options.configuration ?? DEFAULT_CONFIGURATION;
+  const socketPath = missionSocketPath(input.identity, configuration);
   const sessionName = tmuxSessionName(input.identity, input.spawnIndex);
   const windowName = operationWindowName(input.identity, input.spawnIndex);
   const scratch = path.join(path.dirname(socketPath), input.identity.missionId, windowName);
@@ -220,14 +222,14 @@ export function prepareTmuxLaunch(input: TmuxLaunchInput, options: { env?: NodeJ
   ensurePrivateDir(scratch);
   const consoleBin = path.join(path.dirname(socketPath), input.identity.missionId, 'console-bin');
   ensurePrivateDir(consoleBin);
-  const commandPath = process.env.PATH?.split(path.delimiter).map(dir => path.join(dir, 'px')).find(candidate => {
+  const commandPath = configuration.agents.searchPath.split(path.delimiter).map(dir => path.join(dir, 'px')).find(candidate => {
     try { return fs.statSync(candidate).isFile(); } catch { return false; }
   });
   fs.writeFileSync(path.join(consoleBin, 'px'), consolePxScript(commandPath), { mode: 0o700 });
   writeEnvFile(path.join(scratch, 'pane.env'), { ...input.env, PWD: input.cwd, PARALLIX_MISSION_TERMINAL: input.identity.missionId, PARALLIX_MISSION_SOCKET: socketPath });
   fs.writeFileSync(path.join(scratch, 'command.sh'), commandScript(socketPath, scratch, input.command, input.args), { mode: 0o700 });
   fs.writeFileSync(path.join(scratch, 'pane.sh'), paneScript(socketPath, windowName, scratch), { mode: 0o700 });
-  fs.writeFileSync(path.join(scratch, 'host.sh'), hostScript(socketPath, sessionName, windowName, scratch, input.cwd, input.supervisorPid ?? process.pid, consoleBin, missionTerminalCapturePath(input.identity, env), terminalStateRoot(env)), { mode: 0o700 });
+  fs.writeFileSync(path.join(scratch, 'host.sh'), hostScript(socketPath, sessionName, windowName, scratch, input.cwd, input.supervisorPid ?? process.pid, consoleBin, missionTerminalCapturePath(input.identity, configuration), terminalStateRoot(configuration), configuration), { mode: 0o700 });
   const spawnSyncFn = options.spawnSyncFn ?? childProcess.spawnSync;
   let started = false;
   return {
@@ -291,9 +293,9 @@ function isReconciledOperationWindow(name: string, host: string | undefined, sup
 /** Stop unsupervised operation windows; idle shells and other roles survive. */
 export function reconcileOrphanSessions(
   identity: Pick<AgentRunIdentity, 'repositoryKey' | 'missionId' | 'role'>,
-  options: { env?: NodeJS.ProcessEnv; spawnSyncFn?: SpawnSyncFn; isAlive?: (_pid: number) => boolean; allRoles?: boolean } = {},
+  options: { configuration?: ParallixConfiguration; spawnSyncFn?: SpawnSyncFn; isAlive?: (_pid: number) => boolean; allRoles?: boolean } = {},
 ): string[] {
-  const socketPath = missionSocketPath(identity, options.env ?? process.env);
+  const socketPath = missionSocketPath(identity, options.configuration ?? DEFAULT_CONFIGURATION);
   const spawnSyncFn = options.spawnSyncFn ?? childProcess.spawnSync;
   const isAlive = options.isAlive ?? pidAlive;
   if (!fs.existsSync(socketPath)) { return []; }

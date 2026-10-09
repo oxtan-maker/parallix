@@ -1,3 +1,5 @@
+import type { ParallixConfiguration } from "../../application/ports/configuration.js";
+import { DEFAULT_CONFIGURATION } from "../../application/ports/configuration.js";
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -9,6 +11,7 @@ import type { MissionId } from '../../domain/mission.js';
 import type { SessionRole } from '../../domain/session.js';
 
 interface CodexInvocationOptions {
+  configuration?: ParallixConfiguration;
   prompt: string;
   worktree: string;
   interactive?: boolean;
@@ -60,9 +63,11 @@ function hasLiveTty() {
   return Boolean(process.stdin.isTTY && process.stdout.isTTY);
 }
 
-function buildCodexDraftInvocation({ prompt, worktree, interactive = hasLiveTty(), env = {}, resume = false, sessionId = null, model = null, sandbox = false }: CodexInvocationOptions) {
+function codexModelArgs(model: string | null) { return model ? ['-m', model] : []; }
+
+function buildCodexDraftInvocation({ configuration = DEFAULT_CONFIGURATION, prompt, worktree, interactive = hasLiveTty(), env = {}, resume = false, sessionId = null, model = null, sandbox = false }: CodexInvocationOptions) {
   const configArgs = headlessCodexOverrides(worktree);
-  const baseEnv = { ...process.env };
+  const baseEnv = configuration.forwardedEnvironment;
   if (resume) {
     const args = [...configArgs, 'exec'];
     if (sandbox) {args.push('--sandbox', 'workspace-write');}
@@ -80,12 +85,12 @@ function buildCodexDraftInvocation({ prompt, worktree, interactive = hasLiveTty(
       options: {
         stdio: 'inherit',
         cwd: worktree,
-        env: { ...baseEnv, ...env, ...({ HOME: baseEnv.HOME } as NodeJS.ProcessEnv), CODEX_HOME: codexStateRoot(worktree) }
+        env: { ...baseEnv, ...env, ...({ HOME: configuration.storage.homeDirectory } as NodeJS.ProcessEnv), CODEX_HOME: codexStateRoot(worktree) }
       }
     };
   }
 
-  const modelArgs = model ? ['-m', model] : [];
+  const modelArgs = codexModelArgs(model);
   const args = interactive
     ? [...configArgs, '--full-auto', ...modelArgs, '--cd', worktree, prompt]
     : [...configArgs, 'exec', ...(sandbox ? ['--sandbox', 'workspace-write'] : []), ...modelArgs, '--cd', worktree, prompt];
@@ -96,17 +101,17 @@ function buildCodexDraftInvocation({ prompt, worktree, interactive = hasLiveTty(
     options: {
       stdio: 'inherit',
       cwd: worktree,
-      env: { ...baseEnv, ...env, ...({ HOME: baseEnv.HOME } as NodeJS.ProcessEnv), ...(!interactive ? { CODEX_HOME: codexStateRoot(worktree) } : {}) }
+      env: { ...baseEnv, ...env, ...({ HOME: configuration.storage.homeDirectory } as NodeJS.ProcessEnv), ...(!interactive ? { CODEX_HOME: codexStateRoot(worktree) } : {}) }
     }
   };
 }
 
-function startCodexDraftAgent({ prompt, worktree, env = {}, resume = false, sessionId = null, model = null, sandbox = false, teeOptions = {}, slug = null, role = null, sessionMarkerPort }: StartCodexAgentOptions) {
+function startCodexDraftAgent({ configuration = DEFAULT_CONFIGURATION, prompt, worktree, env = {}, resume = false, sessionId = null, model = null, sandbox = false, teeOptions = {}, slug = null, role = null, sessionMarkerPort }: StartCodexAgentOptions) {
   // The launcher always tees through spawnAndTee for limit-hit detection, which
   // forces child stdio to ['inherit', 'pipe', 'pipe']. Codex's `--full-auto`
   // interactive UI requires a TTY on stdout, so we always use the headless
   // `exec` path here regardless of whether the parent has a TTY.
-  ensureCodexHome(worktree, env);
+  ensureCodexHome(worktree, configuration);
 
   const invocationStartMs = Date.now();
 
@@ -140,7 +145,7 @@ function startCodexDraftAgent({ prompt, worktree, env = {}, resume = false, sess
   }
 
   function staleSessionHandler(invocation: any) {
-    return _spawnAndTee(invocation.command, invocation.args, { ...invocation.options, ...teeOptions })
+    return _spawnAndTee(invocation.command, invocation.args, { ...invocation.options, ...teeOptions, configuration })
       .then(async (result: any) => {
         if (isStaleSessionResult(result) && worktree && resume) {
           try {
@@ -150,15 +155,15 @@ function startCodexDraftAgent({ prompt, worktree, env = {}, resume = false, sess
             }
             await port.delete(slug, role);
           } catch (error) { throw error; }
-          const freshInv = buildCodexDraftInvocation({ prompt, worktree, interactive: false, env, resume: false, sessionId: null, model, sandbox });
-          return _spawnAndTee(freshInv.command, freshInv.args, { ...freshInv.options, ...teeOptions });
+          const freshInv = buildCodexDraftInvocation({ configuration, prompt, worktree, interactive: false, env, resume: false, sessionId: null, model, sandbox });
+          return _spawnAndTee(freshInv.command, freshInv.args, { ...freshInv.options, ...teeOptions, configuration });
         }
         return result;
       })
       .then(processResult);
   }
 
-  const invocation = buildCodexDraftInvocation({ prompt, worktree, interactive: false, env, resume, sessionId, model, sandbox });
+  const invocation = buildCodexDraftInvocation({ configuration, prompt, worktree, interactive: false, env, resume, sessionId, model, sandbox });
   const resultPromise = staleSessionHandler(invocation);
 
   return { invocation, resultPromise };
@@ -202,10 +207,10 @@ function headlessCodexOverrides(worktree: string) {
   ];
 }
 
-function ensureCodexHome(worktree: string, env: {[key: string]: string} = {}) {
+function ensureCodexHome(worktree: string, configuration: ParallixConfiguration = DEFAULT_CONFIGURATION) {
   const stateRoot = codexStateRoot(worktree);
   fs.mkdirSync(stateRoot, { recursive: true });
-  const sourceStateRoot = originatingCodexStateRoot(env);
+  const sourceStateRoot = originatingCodexStateRoot(configuration);
 
   // Retain the operator's configuration and file-based auth without copying
   // their contents into the mission. Sessions, logs, and cache remain under
@@ -216,7 +221,7 @@ function ensureCodexHome(worktree: string, env: {[key: string]: string} = {}) {
   // Preserve the existing mission-local Graphify skill seed. Unlike config and
   // auth, this is installed instruction content rather than operator state or
   // credentials, so it remains a copy within the isolated mission workspace.
-  const sourceSkillPath = path.join(os.homedir(), '.agents', 'skills', 'graphify');
+  const sourceSkillPath = path.join(configuration.storage.homeDirectory || os.homedir(), '.agents', 'skills', 'graphify');
   if (fs.existsSync(sourceSkillPath)) {
     fs.cpSync(sourceSkillPath, path.join(codexHomeRoot(worktree), '.agents', 'skills', 'graphify'), { recursive: true });
   }

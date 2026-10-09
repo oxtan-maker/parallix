@@ -1,3 +1,4 @@
+import type { RuntimeConfiguration } from "../ports/configuration.js";
 /**
  * Shared formatting and palette layer for workflow-owned output.
  * Uses Node.js built-in util.styleText for color rendering (ADR 0042).
@@ -34,8 +35,11 @@ const agentMap: Record<string, string> = {
   custom: 'yellow',
 };
 
-export function colorize(format: string, text: string): string {
-  return styleText(format as import('node:util').InspectColor, String(text ?? ''));
+export function colorize(format: string, text: string, runtime?: RuntimeConfiguration): string {
+  const value = String(text ?? '');
+  if (!runtime) { return styleText(format as import('node:util').InspectColor, value); }
+  if (runtime.noColor || runtime.forceColor === '0' || runtime.term === 'dumb') { return value; }
+  return styleText(format as import('node:util').InspectColor, value, { validateStream: !runtime.forceColor });
 }
 
 // The SGR pattern is built from the ESC code point rather than written as a
@@ -56,13 +60,13 @@ export function padVisibleEnd(text: string, width: number): string {
   return stringValue + ' '.repeat(padLength);
 }
 
-export function status(type: string, text: string): string {
+export function status(type: string, text: string, runtime?: RuntimeConfiguration): string {
   const format = statusMap[type];
   if (!format) {return `[${type}] ${text}`;}
-  return `${colorize(format, `[${type}]`)} ${text}`;
+  return `${colorize(format, `[${type}]`, runtime)} ${text}`;
 }
 
-export function agent(family: string, text: string = family, runner?: string): string {
+export function agent(family: string, text: string = family, runner?: string, runtime?: RuntimeConfiguration): string {
   let label = text;
   if (family === 'custom' && text === 'custom' && runner) {
     label = `custom (${runner})`;
@@ -71,15 +75,15 @@ export function agent(family: string, text: string = family, runner?: string): s
   }
   const format = agentMap[family];
   if (!format) {return label;}
-  return colorize(format, label);
+  return colorize(format, label, runtime);
 }
 
-export function bold(text: string): string {
-  return colorize('bold', text);
+export function bold(text: string, runtime?: RuntimeConfiguration): string {
+  return colorize('bold', text, runtime);
 }
 
-export function dim(text: string): string {
-  return colorize('gray', text);
+export function dim(text: string, runtime?: RuntimeConfiguration): string {
+  return colorize('gray', text, runtime);
 }
 
 export function kv(key: string, value: string, width: number = 30): string {
@@ -98,11 +102,11 @@ export function list(items: string[], { bullet = '-', indent = 2 }: { bullet?: s
   return items.map(item => `${padding}${bullet} ${item}`).join('\n');
 }
 
-export function path(text: string): string { return colorize('blue', text); }
-export function slug(text: string): string { return colorize('cyan', bold(text)); }
-export function branch(text: string): string { return colorize('magenta', text); }
-export function sha(text: string): string { return colorize('yellow', text); }
-export function command(text: string): string { return colorize('green', text); }
+export function path(text: string, runtime?: RuntimeConfiguration): string { return colorize('blue', text, runtime); }
+export function slug(text: string, runtime?: RuntimeConfiguration): string { return colorize('cyan', bold(text, runtime), runtime); }
+export function branch(text: string, runtime?: RuntimeConfiguration): string { return colorize('magenta', text, runtime); }
+export function sha(text: string, runtime?: RuntimeConfiguration): string { return colorize('yellow', text, runtime); }
+export function command(text: string, runtime?: RuntimeConfiguration): string { return colorize('green', text, runtime); }
 
 type LogFn = (..._args: unknown[]) => void;
 type LogFunc = (_text: string) => string | null;
@@ -129,7 +133,7 @@ export const log: {
   fail: LogFunc;
   warn: LogFunc;
   error: LogFunc;
-  debug: LogFunc;
+  debug: (_text: string, _enabled?: boolean) => string | null;
   plain: LogFunc;
   plainError: LogFunc;
 } = {
@@ -172,8 +176,8 @@ export const log: {
       return s;
     }).join('\n');
   },
-  debug: (text: string): string | null => {
-    if (!process.env.DEBUG) {return null;}
+  debug: (text: string, enabled = false): string | null => {
+    if (!enabled) {return null;}
     return text.toString().split('\n').map(line => {
       const s = status('DEBUG', line);
       currentLogger.log(s);
@@ -201,3 +205,16 @@ export function setLogger(newLogger: LoggerInput): Logger {
 }
 
 export { colors };
+
+/** Bind terminal presentation explicitly for an injected host configuration. */
+export function createFormatter(runtime: RuntimeConfiguration) {
+  return {
+    colorize: (format: string, text: string) => colorize(format, text, runtime),
+    status: (type: string, text: string) => status(type, text, runtime),
+    agent: (family: string, text = family, runner?: string) => agent(family, text, runner, runtime),
+    bold: (text: string) => bold(text, runtime), dim: (text: string) => dim(text, runtime),
+    path: (text: string) => path(text, runtime), slug: (text: string) => slug(text, runtime),
+    branch: (text: string) => branch(text, runtime), sha: (text: string) => sha(text, runtime),
+    command: (text: string) => command(text, runtime),
+  };
+}

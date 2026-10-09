@@ -1,3 +1,4 @@
+import type { ParallixConfiguration } from '../../application/ports/configuration.js';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as fmt from '../../application/presentation/cli-format.js';
@@ -6,7 +7,7 @@ import { resolveTaskFile, getTaskStatus, reportTaskResolution } from '../backlog
 import { adapterChecklist, evaluateRepositoryReadiness } from '../config/product-config.js';
 import { evaluateReviewSetup } from '../review/setup-review.js';
 import { toVirtual } from '../config/state-map.js';
-import { findMissionDir, findCheckpoints, getFirstLine, inferSlug, getMissionYear, conventionalWorktreePath, resolveMissionBaseBranch, getPrimaryBranch, resolveWorktree } from '../filesystem/mission-utils.js';
+import { findMissionDir, findCheckpoints, getFirstLine, inferSlug, getMissionYear, conventionalWorktreePath, resolveMissionBaseBranch, getPrimaryBranch, getPrimaryWorktree, resolveWorktree } from '../filesystem/mission-utils.js';
 import { getPrStatus } from '../forgejo/forgejo.js';
 import { isForgejoReviewEnabled } from '../config/product-config.js';
 import stats from './commands/stats.js';
@@ -173,7 +174,7 @@ function reportForgejoPr(pr: any, log: Function): void {
   log(fmt.status('PASS', `Forgejo PR: found ${pr.state ? pr.state.toUpperCase() : 'UNKNOWN'} PR (#${pr.number})`));
 }
 
-function startupPreflight(args: string[], opts: { log?: Function, error?: Function, cwdFn?: Function, getCurrentBranchFn?: Function, resolveTaskFileFn?: Function, getTaskStatusFn?: Function, toVirtualFn?: Function, findMissionDirFn?: Function, findCheckpointsFn?: Function, getFirstLineFn?: Function, inferSlugFn?: Function, getMissionYearFn?: Function, conventionalWorktreePathFn?: Function, getLastCommitFn?: Function, getPrStatusFn?: Function, evaluateRepositoryReadinessFn?: Function, evaluateReviewSetupFn?: Function, adapterChecklistFn?: Function, resolveMissionClassificationFn?: Function, isForgejoReviewEnabledFn?: Function, fsExistsSync?: Function, resolveMissionBaseBranchFn?: Function, getPrimaryBranchFn?: Function, gitFn?: Function, command?: string, returnResult?: boolean, quiet?: boolean } = {}) {
+function startupPreflight(args: string[], opts: { configuration?: ParallixConfiguration, log?: Function, error?: Function, cwdFn?: Function, getCurrentBranchFn?: Function, resolveTaskFileFn?: Function, getTaskStatusFn?: Function, toVirtualFn?: Function, findMissionDirFn?: Function, findCheckpointsFn?: Function, getFirstLineFn?: Function, inferSlugFn?: Function, getMissionYearFn?: Function, conventionalWorktreePathFn?: Function, getLastCommitFn?: Function, getPrStatusFn?: Function, evaluateRepositoryReadinessFn?: Function, evaluateReviewSetupFn?: Function, adapterChecklistFn?: Function, resolveMissionClassificationFn?: Function, isForgejoReviewEnabledFn?: Function, fsExistsSync?: Function, resolveMissionBaseBranchFn?: Function, getPrimaryBranchFn?: Function, gitFn?: Function, command?: string, returnResult?: boolean, quiet?: boolean } = {}) {
   const baseLog = opts.log || fmt.log.plain;
   // `quiet` suppresses routine PASS diagnostics and the preflight header while
   // keeping every FAIL/WARN line. The NOT-USABLE verdict survives (it is a
@@ -218,13 +219,13 @@ function startupPreflight(args: string[], opts: { log?: Function, error?: Functi
   const getFirstLineFn = opts.getFirstLineFn || getFirstLine;
   const inferSlugFn = opts.inferSlugFn || inferSlug;
   const getMissionYearFn = opts.getMissionYearFn || getMissionYear;
-  const conventionalWorktreePathFn = opts.conventionalWorktreePathFn || conventionalWorktreePath;
+  const conventionalWorktreePathFn = opts.conventionalWorktreePathFn || ((slug: string) => conventionalWorktreePath(slug, getPrimaryWorktree(opts.configuration)));
   const getLastCommitFn = opts.getLastCommitFn || getLastCommit;
   const getPrStatusFn = opts.getPrStatusFn || getPrStatus;
   const evaluateRepositoryReadinessFn = opts.evaluateRepositoryReadinessFn || evaluateRepositoryReadiness;
   const evaluateReviewSetupFn = opts.evaluateReviewSetupFn || evaluateReviewSetup;
   const adapterChecklistFn = opts.adapterChecklistFn || adapterChecklist;
-  const resolveMissionClassificationFn = opts.resolveMissionClassificationFn || (stats as any).resolveMissionClassification;
+  const resolveMissionClassificationFn = opts.resolveMissionClassificationFn || ((slug: string, rootDir: string) => stats.resolveMissionClassification(slug, rootDir, undefined, opts.configuration));
   const isForgejoReviewEnabledFn = opts.isForgejoReviewEnabledFn || isForgejoReviewEnabled;
   const fsExistsSync = opts.fsExistsSync || fs.existsSync;
   const resolveMissionBaseBranchFn = opts.resolveMissionBaseBranchFn || resolveMissionBaseBranch;

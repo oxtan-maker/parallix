@@ -1,5 +1,7 @@
-// Historical regression provenance: TASK-1322, TASK-1339, TASK-1316.
 // @ts-nocheck -- TASK-2328: partial test doubles from ESM seam migration; resolve in follow-up
+import { resolveConfiguration } from '../../../../src/composition/config.js';
+const environment: NodeJS.ProcessEnv = { ...process.env };
+// Historical regression provenance: TASK-1322, TASK-1339, TASK-1316.
 // OpenCode launcher contract: command/invocation building, stale-session detection, launcher
 // telemetry capture, and bounded in-family retry on provider failures.
 //
@@ -46,15 +48,15 @@ describe("OpenCode launcher ,", () => {
     const customBin = path.join(tmpDir, 'opencode');
     fs.writeFileSync(customBin, '#!/usr/bin/env bash\nexit 0\n', 'utf8');
     fs.chmodSync(customBin, 0o755);
-    const original = process.env.OPENCODE_BIN;
-    process.env.OPENCODE_BIN = customBin;
+    const original = environment.OPENCODE_BIN;
+    environment.OPENCODE_BIN = customBin;
     try {
-      assert.equal(resolveOpencodeCommand(), customBin);
+      assert.equal(resolveOpencodeCommand(resolveConfiguration(environment)), customBin);
     } finally {
       if (original === undefined) {
-        delete process.env.OPENCODE_BIN;
+        delete environment.OPENCODE_BIN;
       } else {
-        process.env.OPENCODE_BIN = original;
+        environment.OPENCODE_BIN = original;
       }
       fs.rmSync(tmpDir, { recursive: true, force: true });
     }
@@ -63,29 +65,29 @@ describe("OpenCode launcher ,", () => {
   test('resolveOpencodeCommand falls back to bare "opencode" when no candidate exists', () => {
     const { resolveOpencodeCommand } = opencode;
     const tmpHome = registeredMkdtemp('opencode-home-');
-    const originalHome = process.env.HOME;
-    const originalPath = process.env.PATH;
-    const originalBin = process.env.OPENCODE_BIN;
-    delete process.env.OPENCODE_BIN;
-    process.env.HOME = tmpHome;
-    process.env.PATH = '';
+    const originalHome = environment.HOME;
+    const originalPath = environment.PATH;
+    const originalBin = environment.OPENCODE_BIN;
+    delete environment.OPENCODE_BIN;
+    environment.HOME = tmpHome;
+    environment.PATH = '';
     try {
-      assert.equal(resolveOpencodeCommand(), 'opencode');
+      assert.equal(resolveOpencodeCommand(resolveConfiguration(environment)), 'opencode');
     } finally {
       if (originalHome === undefined) {
-        delete process.env.HOME;
+        delete environment.HOME;
       } else {
-        process.env.HOME = originalHome;
+        environment.HOME = originalHome;
       }
       if (originalPath === undefined) {
-        delete process.env.PATH;
+        delete environment.PATH;
       } else {
-        process.env.PATH = originalPath;
+        environment.PATH = originalPath;
       }
       if (originalBin === undefined) {
-        delete process.env.OPENCODE_BIN;
+        delete environment.OPENCODE_BIN;
       } else {
-        process.env.OPENCODE_BIN = originalBin;
+        environment.OPENCODE_BIN = originalBin;
       }
       fs.rmSync(tmpHome, { recursive: true, force: true });
     }
@@ -117,8 +119,8 @@ describe("OpenCode launcher ,", () => {
   test('buildOpencodeInvocation includes run --pure --dangerously-skip-permissions flags', () => {
     opencode.__setJsonFormatSupportForTest(true);
     const { buildOpencodeInvocation, resolveOpencodeCommand } = opencode;
-    const inv = buildOpencodeInvocation({ prompt: 'test', worktree: '/tmp' });
-    assert.equal(inv.command, resolveOpencodeCommand());
+    const inv = buildOpencodeInvocation({ configuration: resolveConfiguration(environment), prompt: 'test', worktree: '/tmp' });
+    assert.equal(inv.command, resolveOpencodeCommand(resolveConfiguration(environment)));
     assert.ok(inv.args.includes('run'));
     assert.ok(inv.args.includes('--pure'));
     assert.ok(inv.args.includes('--dangerously-skip-permissions'));
@@ -127,7 +129,7 @@ describe("OpenCode launcher ,", () => {
   test('buildOpencodeInvocation requests JSON output so the session id is recoverable (task-1339)', () => {
     opencode.__setJsonFormatSupportForTest(true);
     const { buildOpencodeInvocation } = opencode;
-    const inv = buildOpencodeInvocation({ prompt: 'test', worktree: '/tmp' });
+    const inv = buildOpencodeInvocation({ configuration: resolveConfiguration(environment), prompt: 'test', worktree: '/tmp' });
     const i = inv.args.indexOf('--format');
     assert.ok(i >= 0, 'invocation must pass --format');
     assert.equal(inv.args[i + 1], 'json');
@@ -136,8 +138,8 @@ describe("OpenCode launcher ,", () => {
   test('buildOpencodeInvocation includes -s sessionId when resume and sessionId provided', () => {
     opencode.__setJsonFormatSupportForTest(true);
     const { buildOpencodeInvocation, resolveOpencodeCommand } = opencode;
-    const inv = buildOpencodeInvocation({ prompt: 'test', worktree: '/tmp', resume: true, sessionId: 'ses_abc' });
-    assert.equal(inv.command, resolveOpencodeCommand());
+    const inv = buildOpencodeInvocation({ configuration: resolveConfiguration(environment), prompt: 'test', worktree: '/tmp', resume: true, sessionId: 'ses_abc' });
+    assert.equal(inv.command, resolveOpencodeCommand(resolveConfiguration(environment)));
     assert.ok(inv.args.includes('-s'));
     assert.ok(inv.args.includes('ses_abc'));
   });
@@ -145,8 +147,8 @@ describe("OpenCode launcher ,", () => {
   test('buildOpencodeInvocation includes --continue when resume but no sessionId', () => {
     opencode.__setJsonFormatSupportForTest(true);
     const { buildOpencodeInvocation, resolveOpencodeCommand } = opencode;
-    const inv = buildOpencodeInvocation({ prompt: 'test', worktree: '/tmp', resume: true, sessionId: null });
-    assert.equal(inv.command, resolveOpencodeCommand());
+    const inv = buildOpencodeInvocation({ configuration: resolveConfiguration(environment), prompt: 'test', worktree: '/tmp', resume: true, sessionId: null });
+    assert.equal(inv.command, resolveOpencodeCommand(resolveConfiguration(environment)));
     assert.ok(inv.args.includes('--continue'));
     assert.ok(!inv.args.includes('-s'));
   });
@@ -154,8 +156,8 @@ describe("OpenCode launcher ,", () => {
   test('buildOpencodeInvocation omits resume flags when resume is false', () => {
     opencode.__setJsonFormatSupportForTest(true);
     const { buildOpencodeInvocation, resolveOpencodeCommand } = opencode;
-    const inv = buildOpencodeInvocation({ prompt: 'test', worktree: '/tmp', resume: false });
-    assert.equal(inv.command, resolveOpencodeCommand());
+    const inv = buildOpencodeInvocation({ configuration: resolveConfiguration(environment), prompt: 'test', worktree: '/tmp', resume: false });
+    assert.equal(inv.command, resolveOpencodeCommand(resolveConfiguration(environment)));
     assert.ok(!inv.args.includes('--continue'));
     assert.ok(!inv.args.includes('-s'));
   });
@@ -163,16 +165,16 @@ describe("OpenCode launcher ,", () => {
   test('buildOpencodeInvocation passes prompt as last arg', () => {
     opencode.__setJsonFormatSupportForTest(true);
     const { buildOpencodeInvocation, resolveOpencodeCommand } = opencode;
-    const inv = buildOpencodeInvocation({ prompt: 'hello world', worktree: '/tmp' });
-    assert.equal(inv.command, resolveOpencodeCommand());
+    const inv = buildOpencodeInvocation({ configuration: resolveConfiguration(environment), prompt: 'hello world', worktree: '/tmp' });
+    assert.equal(inv.command, resolveOpencodeCommand(resolveConfiguration(environment)));
     assert.ok(inv.args.includes('hello world'));
   });
 
   test('buildOpencodeInvocation sets cwd to worktree', () => {
     opencode.__setJsonFormatSupportForTest(true);
     const { buildOpencodeInvocation, resolveOpencodeCommand } = opencode;
-    const inv = buildOpencodeInvocation({ prompt: 'test', worktree: '/custom/worktree' });
-    assert.equal(inv.command, resolveOpencodeCommand());
+    const inv = buildOpencodeInvocation({ configuration: resolveConfiguration(environment), prompt: 'test', worktree: '/custom/worktree' });
+    assert.equal(inv.command, resolveOpencodeCommand(resolveConfiguration(environment)));
     assert.equal(inv.options.cwd, '/custom/worktree');
   });
 
@@ -181,7 +183,7 @@ describe("OpenCode launcher ,", () => {
   test('buildOpencodeInvocation adds -m flag when model is provided', () => {
     opencode.__setJsonFormatSupportForTest(true);
     const { buildOpencodeInvocation } = opencode;
-    const inv = buildOpencodeInvocation({ prompt: 'test', worktree: '/tmp', env: {}, model: 'qwen3-coder' });
+    const inv = buildOpencodeInvocation({ configuration: resolveConfiguration(environment), prompt: 'test', worktree: '/tmp', env: {}, model: 'qwen3-coder' });
     const i = inv.args.indexOf('-m');
     assert.ok(i !== -1);
     assert.equal(inv.args[i + 1], 'qwen3-coder');
@@ -190,13 +192,13 @@ describe("OpenCode launcher ,", () => {
   test('buildOpencodeInvocation omits -m flag when model is null/undefined', () => {
     opencode.__setJsonFormatSupportForTest(true);
     const { buildOpencodeInvocation } = opencode;
-    assert.ok(!buildOpencodeInvocation({ prompt: 't', worktree: '/tmp', env: {} }).args.includes('-m'));
-    assert.ok(!buildOpencodeInvocation({ prompt: 't', worktree: '/tmp', env: {}, model: null }).args.includes('-m'));
+    assert.ok(!buildOpencodeInvocation({ configuration: resolveConfiguration(environment), prompt: 't', worktree: '/tmp', env: {} }).args.includes('-m'));
+    assert.ok(!buildOpencodeInvocation({ configuration: resolveConfiguration(environment), prompt: 't', worktree: '/tmp', env: {}, model: null }).args.includes('-m'));
   });
 
   test('buildOpencodeInvocation accepts preferJson:false to omit --format json (task-1339 compat)', () => {
     const { buildOpencodeInvocation } = opencode;
-    const inv = buildOpencodeInvocation({ prompt: 'test', worktree: '/tmp', preferJson: false });
+    const inv = buildOpencodeInvocation({ configuration: resolveConfiguration(environment), prompt: 'test', worktree: '/tmp', preferJson: false });
     assert.ok(!inv.args.includes('--format'), 'must not include --format when preferJson=false');
   });
 
@@ -221,7 +223,7 @@ describe("OpenCode launcher ,", () => {
   // @ts-expect-error -- TASK-2328: partial test double after ESM seam migration
     opencode.__setSessionPortForTest(mockSessionPort);
 
-    const { invocation, resultPromise } = opencode.startOpencodeAgent({
+    const { invocation, resultPromise } = opencode.startOpencodeAgent({ configuration: resolveConfiguration(environment),
       prompt: 'review task',
       worktree: '/tmp/wt',
       env: {},
@@ -259,7 +261,7 @@ describe("OpenCode launcher ,", () => {
     opencode.__setSpawnAndTeeForTest(mockSpawn);
     opencode.__setExportCaptureForTest(mockExport);
 
-    const { resultPromise } = opencode.startOpencodeAgent({
+    const { resultPromise } = opencode.startOpencodeAgent({ configuration: resolveConfiguration(environment),
       prompt: 'test', worktree: '/tmp/wt', env: {}, resume: false, sessionId: null
     });
     const result = await resultPromise;
@@ -286,7 +288,7 @@ describe("OpenCode launcher ,", () => {
     opencode.__setSpawnAndTeeForTest(mockSpawn);
     opencode.__setExportCaptureForTest(mockExport);
 
-    const { invocation, resultPromise } = opencode.startOpencodeAgent({
+    const { invocation, resultPromise } = opencode.startOpencodeAgent({ configuration: resolveConfiguration(environment),
       prompt: 'test', worktree: '/tmp/wt', env: {}, resume: true, sessionId: 'ses_valid'
     });
     const result = await resultPromise;
@@ -327,7 +329,7 @@ describe("OpenCode launcher ,", () => {
     opencode.__setSpawnAndTeeForTest(mockSpawn);
     opencode.__setExportCaptureForTest(mockExport);
 
-    const { resultPromise } = opencode.startOpencodeAgent({
+    const { resultPromise } = opencode.startOpencodeAgent({ configuration: resolveConfiguration(environment),
       prompt: 'test', worktree: '/tmp/wt', env: {}, resume: false
     });
     const result = await resultPromise;
@@ -376,7 +378,7 @@ describe("OpenCode launcher telemetry ,", () => {
     }));
     opencode.__setExportCaptureForTest(async () => exportJson);
 
-    const { resultPromise } = opencode.startOpencodeAgent({ prompt: 'p', worktree: '/tmp' });
+    const { resultPromise } = opencode.startOpencodeAgent({ configuration: resolveConfiguration(environment), prompt: 'p', worktree: '/tmp' });
     const result = await resultPromise;
 
     assert.ok(result.telemetry, 'telemetry must be attached');
@@ -403,7 +405,7 @@ describe("OpenCode launcher telemetry ,", () => {
     opencode.__setSpawnAndTeeForTest(async () => ({ status: 0, stdout: jsonStdout, stderr: '' }));
     opencode.__setExportCaptureForTest(async (sessionId) => { exportedSessionId = sessionId; return exportJson; });
 
-    const { resultPromise } = opencode.startOpencodeAgent({ prompt: 'p', worktree: '/tmp' });
+    const { resultPromise } = opencode.startOpencodeAgent({ configuration: resolveConfiguration(environment), prompt: 'p', worktree: '/tmp' });
     const result = await resultPromise;
 
     assert.equal(result.sessionId, 'ses_132f470d8ffexge85esdX0nzCs');
@@ -418,7 +420,7 @@ describe("OpenCode launcher telemetry ,", () => {
     let exportCalled = false;
     opencode.__setExportCaptureForTest(async () => { exportCalled = true; return null; });
 
-    const { resultPromise } = opencode.startOpencodeAgent({ prompt: 'p', worktree: '/tmp' });
+    const { resultPromise } = opencode.startOpencodeAgent({ configuration: resolveConfiguration(environment), prompt: 'p', worktree: '/tmp' });
     const result = await resultPromise;
 
     assert.equal(result.telemetry, undefined);
@@ -437,7 +439,7 @@ describe("OpenCode launcher telemetry ,", () => {
     opencode.__setExportCaptureForTest((sessionId, opts) =>
       captureOpencodeExport(sessionId, { ...opts, timeoutMs: 50, spawn: () => hangingChild }));
 
-    const { resultPromise } = opencode.startOpencodeAgent({ prompt: 'p', worktree: '/tmp' });
+    const { resultPromise } = opencode.startOpencodeAgent({ configuration: resolveConfiguration(environment), prompt: 'p', worktree: '/tmp' });
     const result = await resultPromise;
 
     assert.equal(result.sessionId, 'ses_neverexits');
@@ -456,7 +458,7 @@ describe("OpenCode launcher telemetry ,", () => {
     }));
     opencode.__setExportCaptureForTest(async () => exportJson);
 
-    const { resultPromise } = opencode.startOpencodeAgent({ prompt: 'p', worktree: '/tmp' });
+    const { resultPromise } = opencode.startOpencodeAgent({ configuration: resolveConfiguration(environment), prompt: 'p', worktree: '/tmp' });
     const result = await resultPromise;
 
     const dir = registeredMkdtemp('opencode-stats-');
@@ -596,7 +598,7 @@ describe('OpenCode provider-failure retry', () => {
       return { status: 1, stdout: '', stderr: '429 Too Many Requests' };
     });
 
-    const { resultPromise } = opencode.startOpencodeAgent({ prompt: 'p', worktree: '/tmp' });
+    const { resultPromise } = opencode.startOpencodeAgent({ configuration: resolveConfiguration(environment), prompt: 'p', worktree: '/tmp' });
     const result = await resultPromise;
 
     assert.equal(calls, 1, 'no retry on 429 limit-hit');
@@ -611,7 +613,7 @@ describe('OpenCode provider-failure retry', () => {
       return { status: 1, stdout: '', stderr: '429 Too Many Requests' };
     });
 
-    const { resultPromise } = opencode.startOpencodeAgent({ prompt: 'p', worktree: '/tmp' });
+    const { resultPromise } = opencode.startOpencodeAgent({ configuration: resolveConfiguration(environment), prompt: 'p', worktree: '/tmp' });
     const result = await resultPromise;
 
     assert.equal(result.status, 1, '429 status surfaces for agents.js launchFailed boundary');
@@ -669,7 +671,7 @@ describe('OpenCode provider-failure retry', () => {
     });
     opencode.__setExportCaptureForTest(async () => null);
 
-    const { resultPromise } = opencode.startOpencodeAgent({ prompt: 'p', worktree: '/tmp' });
+    const { resultPromise } = opencode.startOpencodeAgent({ configuration: resolveConfiguration(environment), prompt: 'p', worktree: '/tmp' });
     const result = await resultPromise;
 
     assert.equal(calls, 2, 'must spawn exactly twice (one retry)');
@@ -684,7 +686,7 @@ describe('OpenCode provider-failure retry', () => {
       return { status: 1, stdout: '', stderr: 'Error: ECONNRESET' };
     });
 
-    const { resultPromise } = opencode.startOpencodeAgent({ prompt: 'p', worktree: '/tmp' });
+    const { resultPromise } = opencode.startOpencodeAgent({ configuration: resolveConfiguration(environment), prompt: 'p', worktree: '/tmp' });
     const result = await resultPromise;
 
     assert.equal(calls, 2, 'one initial + one bounded retry, no infinite loop');
@@ -699,7 +701,7 @@ describe('OpenCode provider-failure retry', () => {
       return { status: 1, stdout: '', stderr: 'Error: model not found: qwen3-coder' };
     });
 
-    const { resultPromise } = opencode.startOpencodeAgent({ prompt: 'p', worktree: '/tmp' });
+    const { resultPromise } = opencode.startOpencodeAgent({ configuration: resolveConfiguration(environment), prompt: 'p', worktree: '/tmp' });
     const result = await resultPromise;
 
     assert.equal(calls, 1, 'hard failure must not be retried');
@@ -713,7 +715,7 @@ describe('OpenCode provider-failure retry', () => {
     opencode.__setSpawnAndTeeForTest(async () => ({ status: 0, stdout: 'opencode -s ses_x\n', stderr: '' }));
     opencode.__setExportCaptureForTest(() => { throw new Error('export blew up'); });
 
-    const { resultPromise } = opencode.startOpencodeAgent({ prompt: 'p', worktree: '/tmp' });
+    const { resultPromise } = opencode.startOpencodeAgent({ configuration: resolveConfiguration(environment), prompt: 'p', worktree: '/tmp' });
     const result = await resultPromise;
 
     assert.equal(result.status, 0, 'export throwing must not change launch status');
@@ -724,7 +726,7 @@ describe('OpenCode provider-failure retry', () => {
     opencode.__setSpawnAndTeeForTest(async () => ({ status: 0, stdout: 'opencode -s ses_y\n', stderr: '' }));
     opencode.__setExportCaptureForTest(async () => { throw new Error('export rejected'); });
 
-    const { resultPromise } = opencode.startOpencodeAgent({ prompt: 'p', worktree: '/tmp' });
+    const { resultPromise } = opencode.startOpencodeAgent({ configuration: resolveConfiguration(environment), prompt: 'p', worktree: '/tmp' });
     const result = await resultPromise;
 
     assert.equal(result.status, 0, 'export rejection must not change launch status');
@@ -740,7 +742,7 @@ describe('OpenCode provider-failure retry', () => {
       return { status: 1, stdout: '', stderr: '429 Too Many Requests' };
     });
 
-    const { resultPromise } = opencode.startOpencodeAgent({ prompt: 'p', worktree: '/tmp' });
+    const { resultPromise } = opencode.startOpencodeAgent({ configuration: resolveConfiguration(environment), prompt: 'p', worktree: '/tmp' });
     const result = await resultPromise;
 
     assert.equal(result.status, 1, '429 status surfaces for agents.js launchFailed boundary');
@@ -755,7 +757,7 @@ describe('OpenCode provider-failure retry', () => {
       return { status: 1, stdout: '', stderr: '429 Too Many Requests' };
     });
 
-    const { resultPromise } = opencode.startOpencodeAgent({ prompt: 'p', worktree: '/tmp' });
+    const { resultPromise } = opencode.startOpencodeAgent({ configuration: resolveConfiguration(environment), prompt: 'p', worktree: '/tmp' });
     const result = await resultPromise;
 
     assert.equal(result.status, 1, 'persistent 429 must surface for agents.js launchFailed');

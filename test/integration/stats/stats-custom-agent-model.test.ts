@@ -1,4 +1,5 @@
 // @ts-nocheck -- TASK-2328: partial test doubles from ESM seam migration; resolve in follow-up
+import { resolveConfiguration } from '../../../src/composition/config.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -80,7 +81,7 @@ test('task-2337: recordStageStats records model for custom agent', async () => {
   const root = createRepoFixture();
   try {
     await withStoredClassification(async () => {
-      const { row } = stats.recordStageStats({
+      const { row } = stats.recordStageStats({ configuration: resolveConfiguration(process.env),
         slug: 'task-2337',
         stage: 'active',
         rootDir: root,
@@ -129,9 +130,9 @@ test('task-2337: accumulateStageStats preserves model for custom agent', async (
   const dbPath = path.join(root, 'parallix.db');
   try {
     await withStoredClassification(async () => {
-      stats.accumulateStageStats({ slug: 'task-2337', stage: 'active', rootDir: root, implementer: 'custom', model: 'qwen3.6-27b-q8', telemetry: { inputTokens: 100, outputTokens: 50, cachedTokens: 0, totalTokens: 150, toolCalls: 3, usagePercent: 10 }, durationMinutes: 5, dbPath });
-      stats.accumulateStageStats({ slug: 'task-2337', stage: 'active', rootDir: root, implementer: 'custom', model: 'qwen3.6-27b-q8', telemetry: { inputTokens: 200, outputTokens: 100, cachedTokens: 0, totalTokens: 300, toolCalls: 5, usagePercent: 20 }, durationMinutes: 8, dbPath });
-      const data = stats.loadMeasurementRows({ rootDir: root, dbPath });
+      stats.accumulateStageStats({ configuration: resolveConfiguration(process.env), slug: 'task-2337', stage: 'active', rootDir: root, implementer: 'custom', model: 'qwen3.6-27b-q8', telemetry: { inputTokens: 100, outputTokens: 50, cachedTokens: 0, totalTokens: 150, toolCalls: 3, usagePercent: 10 }, durationMinutes: 5, dbPath });
+      stats.accumulateStageStats({ configuration: resolveConfiguration(process.env), slug: 'task-2337', stage: 'active', rootDir: root, implementer: 'custom', model: 'qwen3.6-27b-q8', telemetry: { inputTokens: 200, outputTokens: 100, cachedTokens: 0, totalTokens: 300, toolCalls: 5, usagePercent: 20 }, durationMinutes: 8, dbPath });
+      const data = stats.loadMeasurementRows({ configuration: resolveConfiguration(process.env), rootDir: root, dbPath });
       assert.equal(data.rows.length, 1, 'should have exactly one accumulated row');
       assert.equal(data.rows[0].model, 'qwen3.6-27b-q8', 'accumulated row should preserve model name');
       assert.equal(data.rows[0].implementer, 'custom');

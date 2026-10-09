@@ -156,7 +156,7 @@ async function selectLaunchAndRecord(opts: LaunchOptions) {
     // exit on q/Ctrl+C while the action runs on (CP-4 ownership rule).
     unrefChild = false,
   } = opts;
-  const preselected = preselectedAgent || selectAgentFn('active', { config: agentConfig });
+  const preselected = preselectedAgent || selectAgentFn('active', { config: agentConfig, configuration: opts.configuration });
   const taskResolutionTyped = taskResolution;
   const taskFile = taskResolutionTyped && taskResolutionTyped.ok && taskResolutionTyped.taskFile
     ? taskResolutionTyped.taskFile
@@ -198,6 +198,7 @@ async function selectLaunchAndRecord(opts: LaunchOptions) {
   let result;
   try {
    ({ agent: actual, result } = await startAgentFn('active', {
+      configuration: opts.configuration,
       prompt,
       worktree,
       agent: preselected,

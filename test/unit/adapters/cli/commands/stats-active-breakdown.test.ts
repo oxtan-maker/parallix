@@ -1,3 +1,5 @@
+import { resolveConfiguration } from '../../../../../src/composition/config.js';
+const environment: NodeJS.ProcessEnv = { ...process.env };
 
 
 import test, { mock } from 'node:test';
@@ -148,8 +150,8 @@ test('task-2213: weekly agent performance table excludes active-stage agents', (
 });
 
 test('task-2213: range agent performance table excludes active-stage agents', () => {
-  const previousDebug = process.env.DEBUG;
-  process.env.DEBUG = '1';
+  const previousDebug = environment.DEBUG;
+  environment.DEBUG = '1';
   const rows = [
     {
       date: '2026-06-15',
@@ -197,7 +199,7 @@ test('task-2213: range agent performance table excludes active-stage agents', ()
   assert.ok(!performance.includes('claude-sonnet-5'),
     'active-stage agent must NOT appear in agent performance table');
 
-  if (previousDebug === undefined) { delete process.env.DEBUG; } else { process.env.DEBUG = previousDebug; }
+  if (previousDebug === undefined) { delete environment.DEBUG; } else { environment.DEBUG = previousDebug; }
 });
 
 test('task-2213: completed missions use recorded-family credit and averages', () => {
@@ -241,8 +243,8 @@ test('task-2213: completed missions use recorded-family credit and averages', ()
 });
 
 test('task-1409: active and closed rows coexist without double-counting', () => {
-  const previousDebug = process.env.DEBUG;
-  process.env.DEBUG = '1';
+  const previousDebug = environment.DEBUG;
+  environment.DEBUG = '1';
   // Same mission with both active and closed rows should not double-count
   const rows = [
     {
@@ -286,7 +288,7 @@ test('task-1409: active and closed rows coexist without double-counting', () => 
   // Active rows must NOT inflate agent performance counts
   assert.match(plain, /codex\s+1\s+2\.00/);
 
-  if (previousDebug === undefined) { delete process.env.DEBUG; } else { process.env.DEBUG = previousDebug; }
+  if (previousDebug === undefined) { delete environment.DEBUG; } else { environment.DEBUG = previousDebug; }
 });
 
 test('task-2213: a blank-model rollup supplies the recorded family', () => {

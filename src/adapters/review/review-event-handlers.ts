@@ -1,3 +1,4 @@
+import type { ParallixConfiguration } from "../../application/ports/configuration.js";
 /**
  * Review event and maintenance handlers: create events, import legacy
  * state, backfill reviews, and reconcile interrupted handoffs.
@@ -89,6 +90,7 @@ export async function createEventHandler(
   slug: string,
   args: string[],
   options: {
+    configuration?: ParallixConfiguration;
     log?: (_msg: string) => void;
     error?: (_msg: string) => void;
     exit?: (_code: number) => never;
@@ -144,6 +146,7 @@ export function importLegacyHandler(
   slug: string,
   args: string[],
   options: {
+    configuration?: ParallixConfiguration;
     log?: (_msg: string) => void;
     error?: (_msg: string) => void;
     exit?: (_code: number) => never;
@@ -155,7 +158,7 @@ export function importLegacyHandler(
   const _exit = options.exit || process.exit;
   const resolveWorktreeFn = options.resolveWorktreeFn || resolveWorktree;
 
-  const _tmpDir = flagValue(args, '--tmp-dir') || process.env.WORKFLOW_TMP_DIR || os.tmpdir();
+  const _tmpDir = flagValue(args, '--tmp-dir') || options.configuration?.runtime.tmpDir || os.tmpdir();
   const _worktree = resolveWorktreeFn(slug) || process.cwd();
 
   // architecture migration: the legacy /tmp/ artifact import path is removed. Review
@@ -176,6 +179,7 @@ export async function backfillReviewHandler(
   slug: string,
   args: string[],
   options: {
+    configuration?: ParallixConfiguration;
     log?: (_msg: string) => void;
     error?: (_msg: string) => void;
     exit?: (_code: number) => never;
@@ -226,6 +230,7 @@ export async function reconcileInterruptedHandoffHandler(
   slug: string,
   args: string[],
   options: {
+    configuration?: ParallixConfiguration;
     log?: (_msg: string) => void;
     error?: (_msg: string) => void;
     exit?: (_code: number) => never;
@@ -293,4 +298,3 @@ async function isReconcilableMission(slug: string, store: MissionStore | null | 
     return false;
   }
 }
-

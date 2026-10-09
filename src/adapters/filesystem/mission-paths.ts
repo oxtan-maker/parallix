@@ -1,3 +1,5 @@
+import type { ParallixConfiguration } from "../../application/ports/configuration.js";
+import { DEFAULT_CONFIGURATION } from "../../application/ports/configuration.js";
 import * as fs from 'node:fs';
 import path from 'node:path';
 import { loadAdapterConfig } from '../config/product-config.js';
@@ -75,9 +77,9 @@ export function extractSlugFromBranch(branch: string, rootDir: string = process.
 }
 
 /** @param {string|undefined} [slug] @param {string} [rootDir] */
-export function getMissionYear(slug: string | undefined = undefined, rootDir: string = process.cwd()): string {
-  if (process.env.MISSION_YEAR_OVERRIDE) {
-    return process.env.MISSION_YEAR_OVERRIDE;
+export function getMissionYear(slug: string | undefined = undefined, rootDir: string = process.cwd(), configuration: ParallixConfiguration = DEFAULT_CONFIGURATION): string {
+  if (configuration.runtime.missionYearOverride) {
+    return configuration.runtime.missionYearOverride;
   }
 
   return findMissionYear(slug, rootDir) || new Date().getFullYear().toString();

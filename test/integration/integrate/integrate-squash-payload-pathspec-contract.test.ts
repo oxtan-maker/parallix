@@ -3,6 +3,7 @@
 // disposable Git topologies — quoted/special-character pathspecs (task-2533), stale Backlog copies
 // (task-2534), task files absent from the base branch (task-2537), the stage/commit race (task-2349),
 // and soft-reset backlog noise. Legacy case names unchanged; every case builds its own mutable repository.
+import { resolveConfiguration } from '../../../src/composition/config.js';
 import test, { mock, describe } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -609,7 +610,7 @@ describe("stage/commit race", () => {
     });
 
     try {
-      await integrateModule.default([TEST_SLUG, '--no-integration-gates'], { missionServicesFn: composition.createMissionApplicationServices });
+      await integrateModule.default([TEST_SLUG, '--no-integration-gates'], { configuration: resolveConfiguration(process.env), missionServicesFn: composition.createMissionApplicationServices });
       assert.deepEqual(boardCommitPaths, [], 'Reorder tasks in review must not carry mission payload files');
       assert.ok(squashCommitArgs.includes('--only'));
       assert.ok(squashCommitArgs.includes(MISSION_PAYLOAD));
@@ -638,7 +639,7 @@ describe("stage/commit race", () => {
       return { status: 0, stdout: '', stderr: '' };
     });
     try {
-      await integrateModule.default([TEST_SLUG, '--no-integration-gates'], { missionServicesFn: composition.createMissionApplicationServices });
+      await integrateModule.default([TEST_SLUG, '--no-integration-gates'], { configuration: resolveConfiguration(process.env), missionServicesFn: composition.createMissionApplicationServices });
       return [...logs, ...errors].join('\n');
     } finally {
       console.log = originalLog;

@@ -128,9 +128,9 @@ function resolveRuntimePath(): string {
   return fileURLToPath(import.meta.url);
 }
 
-function performHandoffWithMissionServices(missionServicesFn: HandoffMissionServicesPort) {
+function performHandoffWithMissionServices(missionServicesFn: HandoffMissionServicesPort, configuration: ParallixConfiguration) {
   return (slug: string, options: Record<string, unknown>) => new HandoffCommandUseCase({
-    ...createHandoffPorts(), missionServices: missionServicesFn,
+    ...createHandoffPorts(configuration), missionServices: missionServicesFn,
   }).performHandoff(slug, { ...options, missionServicesFn });
 }
 
@@ -179,7 +179,7 @@ function createCommandRegistry(rootDir: string, configuration: ParallixConfigura
   const active = createActiveCommand((request, options) => activeWorkflow([...request.args], options));
   const config = createConfigCommand((request, options) => configWorkflow([...request.args], options));
   const diff = createDiffCommand((request, options) => diffWorkflow([...request.args], options));
-  const runHistory = createRunHistoryPort();
+  const runHistory = createRunHistoryPort({ configuration });
   const resolveConflict = createResolveConflictCommand((request, options) => resolveConflictWorkflow([...request.args], options));
   const setup = createSetupCommand((request, options) => setupWizard([...request.args], options));
   const verify = createVerifyCommand((request, options) => verifyWorkflow([...request.args], options));
@@ -347,7 +347,7 @@ function createCommandRegistry(rootDir: string, configuration: ParallixConfigura
     attach: createAttachCommand(runHistory),
     draft: (args, options) => withMissionAndGraph((missionServicesFn, services) => {
       // Create adapter with missionServicesFn injected via withMissionFactories
-        const adapter = createDraftWorkflowAdapter({ missionServicesFn });
+        const adapter = createDraftWorkflowAdapter({ missionServicesFn, configuration });
         const useCase = new DraftCommandUseCase(adapter, services.currentWork);
         const cmd = createDraftCommand(useCase);
         return cmd(args, { ...options, missionServicesFn });
@@ -405,6 +405,7 @@ function createCommandRegistry(rootDir: string, configuration: ParallixConfigura
           reviewerSessionPort,
         );
         const adapter = createReviewWorkflowAdapter({
+          configuration,
           ...options,
           // SC4: refuse to review a mission whose payload already landed.
           payloadLandedFn: (s: string) => findLandedSquashOnBaseBranch(rootDir, s) !== null,
@@ -425,8 +426,9 @@ function createCommandRegistry(rootDir: string, configuration: ParallixConfigura
           // application review loop decides how they are sequenced.
           reviewLoopMechanisms: (request: StartReviewRound, observers: ReviewLoopObservers) => createReviewLoopPorts(request.slug, request, {
             ...observers,
-            classification: createReviewClassification(request.slug, resolveWorktree(request.slug) ?? rootDir, configuration.decision),
-            performHandoffFn: performHandoffWithMissionServices(missionServicesFn as HandoffMissionServicesPort),
+            configuration,
+            classification: createReviewClassification(request.slug, resolveWorktree(request.slug) ?? rootDir, configuration.decision, configuration),
+            performHandoffFn: performHandoffWithMissionServices(missionServicesFn as HandoffMissionServicesPort, configuration),
             ...reviewLoopBindings(services.mission!.store, services.mission!.lifecycle, reviewerSessionPort),
           }),
         } as any);
@@ -457,6 +459,7 @@ function createCommandRegistry(rootDir: string, configuration: ParallixConfigura
       const gitPort = createStatusGitAdapter();
       const prPort = createStatusPrAdapter({ rootDir });
       const agentPort = createStatusAgentAdapter({
+        configuration,
         rootDir,
         blocklistRepo: services.operatorState.repositories?.agentBlocklist ?? null,
       });
@@ -482,7 +485,7 @@ function createCommandRegistry(rootDir: string, configuration: ParallixConfigura
           await services.operatorState.close();
           throw new Error('board projection is unavailable for px web');
         }
-        const terminalReader = createTmuxTerminalReader({ resolveMissionWorktree, repositoryKey: missionRepositoryKey, env: configuration.forwardedEnvironment });
+        const terminalReader = createTmuxTerminalReader({ resolveMissionWorktree, repositoryKey: missionRepositoryKey, configuration });
         const recordedOutputRenderer = createRecordedOutputRenderer();
         return {
           buildProjection: () => builder.build(),
@@ -684,7 +687,7 @@ function createCommandRegistry(rootDir: string, configuration: ParallixConfigura
             summary: `recovery agent working ${request.missionId} after ${request.attemptedOperation}`,
           });
           if (publication) { await currentWork.running(publication); }
-          const launched = await agents.startAgent('execute', {
+          const launched = await agents.startAgent('execute', { configuration,
             prompt,
             worktree,
             agent: assignedAgent,
@@ -755,7 +758,7 @@ function missionWrites(services: { mission?: Omit<MissionWriteServices, 'resolve
 
 function createRuntimeOptions(rootDir: string, configuration: ParallixConfiguration): Pick<MainOptions, 'commandFns' | 'ensureStandaloneGitRepoFn' | 'loadAliasesFn' | 'product' | 'runtime'> {
   return {
-    commandFns: createCommandRegistry(rootDir, configuration),
+    commandFns: Object.fromEntries(Object.entries(createCommandRegistry(rootDir, configuration)).map(([name, command]) => [name, (args: string[], options: Record<string, unknown> = {}) => command(args, { ...options, configuration })])),
     runtime: configuration.runtime,
     ensureStandaloneGitRepoFn: ensureStandaloneGitRepo,
     loadAliasesFn: options => deriveAliases(loadStateMap(options as any)),
@@ -936,7 +939,7 @@ async function runTargetCommand(parsed: ParsedArgs, configuration: ParallixConfi
       import('../interfaces/cli/runtime.js'),
     ]);
     process.chdir(parsed.target);
-    const hosted = cli ? await hostMissionCommand(parsed.command, parsed.args, parsed.target, log, cli) : null;
+    const hosted = cli ? await hostMissionCommand(parsed.command, parsed.args, parsed.target, log, cli, { configuration }) : null;
     if (hosted !== null) { return hosted; }
     if (parsed.command === 'review-event') { return await runReviewEventCommand(parsed, configuration, log, error); }
     if (parsed.command === 'verify-env') {

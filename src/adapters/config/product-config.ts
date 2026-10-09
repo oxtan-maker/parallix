@@ -1,3 +1,5 @@
+import type { ParallixConfiguration } from "../../application/ports/configuration.js";
+import { DEFAULT_CONFIGURATION } from "../../application/ports/configuration.js";
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -456,16 +458,14 @@ export function initializeGitRepository(rootDir: string = process.cwd(), options
   return { ok: true, branch: 'main', mode: 'init-fallback' };
 }
 
-export function gitIdentityEnv(): NodeJS.ProcessEnv {
-  const env = { ...process.env };
-  if (!env.GIT_AUTHOR_NAME) {env.GIT_AUTHOR_NAME = 'Workflow Setup';}
-  if (!env.GIT_AUTHOR_EMAIL) {env.GIT_AUTHOR_EMAIL = 'workflow@example.invalid';}
-  if (!env.GIT_COMMITTER_NAME) {env.GIT_COMMITTER_NAME = env.GIT_AUTHOR_NAME!;}
-  if (!env.GIT_COMMITTER_EMAIL) {env.GIT_COMMITTER_EMAIL = env.GIT_AUTHOR_EMAIL!;}
-  return env;
+export function gitIdentityEnv(configuration: ParallixConfiguration = DEFAULT_CONFIGURATION): NodeJS.ProcessEnv {
+  const identity = configuration.runtime.gitIdentity;
+  return { ...configuration.forwardedEnvironment, GIT_AUTHOR_NAME: identity.authorName, GIT_AUTHOR_EMAIL: identity.authorEmail,
+    GIT_COMMITTER_NAME: identity.committerName, GIT_COMMITTER_EMAIL: identity.committerEmail };
 }
 
 interface CommitWorkflowOptions {
+  configuration?: ParallixConfiguration;
   spawnSyncFn?: typeof spawnSync;
   existsSyncFn?: typeof fs.existsSync;
 }
@@ -494,7 +494,7 @@ export function commitWorkflowBaseline(rootDir: string, options: CommitWorkflowO
   const commitResult = spawnSyncFn(
     'git',
     ['commit', '-m', 'workflow: initial setup'],
-    { cwd: rootDir, encoding: 'utf8', env: gitIdentityEnv() },
+    { cwd: rootDir, encoding: 'utf8', env: gitIdentityEnv(options.configuration) },
   );
   if (commitResult.status !== 0) {
     return {
@@ -508,10 +508,11 @@ export function commitWorkflowBaseline(rootDir: string, options: CommitWorkflowO
 }
 
 interface StandaloneBaselineOptions {
+  configuration?: ParallixConfiguration;
   spawnSyncFn?: typeof spawnSync;
 }
 
-export function ensureStandaloneMissionBaseline(rootDir: string = process.cwd(), { spawnSyncFn = spawnSync }: StandaloneBaselineOptions = {}): { changed: boolean; committed: boolean; skipped?: boolean; failed?: boolean; message?: string; entries?: string[] } {
+export function ensureStandaloneMissionBaseline(rootDir: string = process.cwd(), { spawnSyncFn = spawnSync, configuration = DEFAULT_CONFIGURATION }: StandaloneBaselineOptions = {}): { changed: boolean; committed: boolean; skipped?: boolean; failed?: boolean; message?: string; entries?: string[] } {
   if (!isStandaloneWorkflowLayout(rootDir) || !hasGitRepository(rootDir)) {
     return { changed: false, committed: false, skipped: true };
   }
@@ -571,7 +572,7 @@ export function ensureStandaloneMissionBaseline(rootDir: string = process.cwd(),
   const commitResult = spawnSyncFn('git', ['commit', '-m', 'workflow: prepare standalone mission baseline'], {
     cwd: rootDir,
     encoding: 'utf8',
-    env: gitIdentityEnv(),
+    env: gitIdentityEnv(configuration),
   });
   if (commitResult.status !== 0) {
     return {

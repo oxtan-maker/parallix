@@ -1,9 +1,12 @@
+import type { ParallixConfiguration } from "../../application/ports/configuration.js";
+import { DEFAULT_CONFIGURATION } from "../../application/ports/configuration.js";
 import childProcess from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
 interface CaptureOpencodeExportOptions {
+  configuration?: ParallixConfiguration;
   worktree?: string;
   env?: Record<string, string>;
   timeoutMs?: number;
@@ -15,7 +18,7 @@ interface CaptureOpencodeExportOptions {
   spawn?: typeof childProcess.spawn;
 }
 
-function opencodeCommandCandidates() {
+function opencodeCommandCandidates(configuration: ParallixConfiguration) {
   const candidates: string[] = [];
   const seen = new Set<string>();
   const pushCandidate = (candidate?: string | null) => {
@@ -24,15 +27,15 @@ function opencodeCommandCandidates() {
     candidates.push(candidate);
   };
 
-  pushCandidate(process.env.OPENCODE_BIN);
+  pushCandidate(configuration.agents.opencodeBin);
   pushCandidate('opencode');
-  pushCandidate(path.join(os.homedir(), '.opencode', 'bin', 'opencode'));
-  pushCandidate(path.join(os.homedir(), '.local', 'bin', 'opencode'));
+  pushCandidate(path.join(configuration.storage.homeDirectory || os.homedir(), '.opencode', 'bin', 'opencode'));
+  pushCandidate(path.join(configuration.storage.homeDirectory || os.homedir(), '.local', 'bin', 'opencode'));
 
   return candidates;
 }
 
-function resolveExistingCommand(candidate: string) {
+function resolveExistingCommand(candidate: string, configuration: ParallixConfiguration) {
   if (!candidate) {return null;}
   if (candidate.includes(path.sep)) {
     try {
@@ -43,7 +46,7 @@ function resolveExistingCommand(candidate: string) {
     }
   }
 
-  const dirs = (process.env.PATH || '').split(path.delimiter);
+  const dirs = configuration.agents.searchPath.split(path.delimiter);
   for (const dir of dirs) {
     if (!dir) {continue;}
     const commandPath = path.join(dir, candidate);
@@ -55,9 +58,9 @@ function resolveExistingCommand(candidate: string) {
   return null;
 }
 
-function resolveOpencodeCommand() {
-  for (const candidate of opencodeCommandCandidates()) {
-    const resolved = resolveExistingCommand(candidate);
+function resolveOpencodeCommand(configuration: ParallixConfiguration = DEFAULT_CONFIGURATION) {
+  for (const candidate of opencodeCommandCandidates(configuration)) {
+    const resolved = resolveExistingCommand(candidate, configuration);
     if (resolved) {return resolved;}
   }
   return 'opencode';
@@ -94,11 +97,12 @@ function resolveOpencodeCommand() {
  */
 function captureOpencodeExport(sessionId: string, opts: CaptureOpencodeExportOptions = {}) {
   const {
+    configuration = DEFAULT_CONFIGURATION,
     worktree,
     env,
     timeoutMs = 30000,
     maxBytes = 32 * 1024 * 1024,
-    retainTemp = process.env.PARALLIX_KEEP_TEMP_ARTIFACTS === '1',
+    retainTemp = configuration.agents.keepTempArtifacts,
     tmpDir = os.tmpdir(),
     spawn = childProcess.spawn,
   } = opts;
@@ -148,9 +152,9 @@ function captureOpencodeExport(sessionId: string, opts: CaptureOpencodeExportOpt
 
     let child;
     try {
-      child = spawn(resolveOpencodeCommand(), ['export', sessionId], {
+      child = spawn(resolveOpencodeCommand(configuration), ['export', sessionId], {
         cwd: worktree,
-        env: { ...process.env, ...(env || {}) },
+        env: { ...configuration.forwardedEnvironment, ...(env || {}) },
         stdio: ['ignore', tmpFd !== null ? tmpFd : 'pipe', 'pipe'],
       });
     } catch (_) {

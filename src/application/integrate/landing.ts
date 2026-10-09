@@ -105,7 +105,7 @@ export function createMissionLanding(ports: IntegrateWorkflowPorts, collaborator
    */
   async function probeMerge(run: LandingRun, branch: string, landedFromSha: string): Promise<boolean> {
     const { slug, baseWorktree } = run;
-    fmt.log.debug(`Step 2: Checking merge conflicts against local ${run.baseBranch} in the base worktree...`);
+    fmt.log.debug(`Step 2: Checking merge conflicts against local ${run.baseBranch} in the base worktree...`, run.configuration?.runtime.debug);
     // SC5 / AC6: a retry after a failed sync-merged has the mission squash already
     // on the local base branch. Detect it before the probe merge and resume the
     // landing closeout (finishLanding / sync-merged) instead of squashing again
@@ -176,8 +176,8 @@ export function createMissionLanding(ports: IntegrateWorkflowPorts, collaborator
         ? 'Mission task file is outside the integration checkout; refusing to stage an unsafe closeout path.'
         : 'Integration base worktree is unavailable; refusing to stage backlog closeout.');
     }
-    fmt.log.debug(`Selecting integration variant: Variant B (local squash-merge)`);
-    fmt.log.debug(`\nStep 1: Using base worktree ${baseWorktree} on ${baseBranch} as the squash-merge target...`);
+    fmt.log.debug(`Selecting integration variant: Variant B (local squash-merge)`, run.configuration?.runtime.debug);
+    fmt.log.debug(`\nStep 1: Using base worktree ${baseWorktree} on ${baseBranch} as the squash-merge target...`, run.configuration?.runtime.debug);
 
     if (await probeMerge(run, branch, landedFromSha)) {
       await squashAndLand(run, { branch, summary, landedFromSha, mainTaskFile });

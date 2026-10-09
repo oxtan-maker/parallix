@@ -1,5 +1,6 @@
 // @ts-nocheck -- TASK-2328: partial test doubles from ESM seam migration; resolve in follow-up
 
+import { resolveConfiguration } from '../../../src/composition/config.js';
 import test, { mock } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'fs';
@@ -14,7 +15,7 @@ import { clearOperatorStateCache } from '../../../src/adapters/sqlite/adapter-fa
 // Bind each invocation through composition so its repository and database
 // options reach the statistics workflow adapter.
 const statsCommand = (args: string[], options: StatsCompositionOptions = {}) =>
-  createStatisticsCommand(options)(args, options);
+  createStatisticsCommand({ configuration: resolveConfiguration(process.env), ...(options) })(args, options);
 const _require = createRequire(import.meta.url);
 const stats = mockModule<typeof import('../../../src/adapters/cli/commands/stats.js')>('../../../src/adapters/cli/commands/stats.js', import.meta.url);
 const forgejo = mockModule<typeof import('../../../src/adapters/forgejo/forgejo.js')>('../../../src/adapters/forgejo/forgejo.js', import.meta.url);
@@ -76,7 +77,7 @@ test('upsertMeasurementRow persists the workflow stats schema and updates existi
     classification: 'ai_sdlc',
     implementer: 'codex',
     pr_fix_rounds: 2,
-  }, { dbPath: dbFile });
+  }, { configuration: resolveConfiguration(process.env), dbPath: dbFile });
 
   assert.equal(first.changed, true);
   assert.equal(first.data.rows.length, 1);
@@ -93,7 +94,7 @@ test('upsertMeasurementRow persists the workflow stats schema and updates existi
     classification: 'ai_sdlc',
     implementer: 'codex',
     pr_fix_rounds: 2,
-  }, { dbPath: dbFile });
+  }, { configuration: resolveConfiguration(process.env), dbPath: dbFile });
   assert.equal(second.changed, false);
   assert.equal(second.data.rows.length, 1);
 
@@ -104,7 +105,7 @@ test('upsertMeasurementRow persists the workflow stats schema and updates existi
     classification: 'ai_sdlc',
     implementer: 'codex',
     pr_fix_rounds: 3,
-  }, { dbPath: dbFile });
+  }, { configuration: resolveConfiguration(process.env), dbPath: dbFile });
   assert.equal(third.changed, true);
   assert.equal(third.data.rows[0].pr_fix_rounds, '3');
   } finally {
@@ -123,7 +124,7 @@ test('task-1314: upsertMeasurementRow keys on (repo, mission, stage) so same mis
     implementer: 'codex',
     stage: 'draft',
     input_tokens: '100',
-  }, { dbPath: dbFile });
+  }, { configuration: resolveConfiguration(process.env), dbPath: dbFile });
   stats.upsertMeasurementRow({
     date: '2026-06-07',
     repo: 'parallix',
@@ -132,9 +133,9 @@ test('task-1314: upsertMeasurementRow keys on (repo, mission, stage) so same mis
     implementer: 'codex',
     stage: 'draft',
     input_tokens: '200',
-  }, { dbPath: dbFile });
+  }, { configuration: resolveConfiguration(process.env), dbPath: dbFile });
 
-  let data = stats.loadMeasurementRows({ dbPath: dbFile });
+  let data = stats.loadMeasurementRows({ configuration: resolveConfiguration(process.env), dbPath: dbFile });
   assert.equal(data.rows.length, 2);
 
   stats.upsertMeasurementRow({
@@ -145,8 +146,8 @@ test('task-1314: upsertMeasurementRow keys on (repo, mission, stage) so same mis
     implementer: 'codex',
     stage: 'draft',
     input_tokens: '999',
-  }, { dbPath: dbFile });
-  data = stats.loadMeasurementRows({ dbPath: dbFile });
+  }, { configuration: resolveConfiguration(process.env), dbPath: dbFile });
+  data = stats.loadMeasurementRows({ configuration: resolveConfiguration(process.env), dbPath: dbFile });
   assert.equal(data.rows.length, 2);
   const visualboardRow = data.rows.find(r => r.repo === 'visualboard');
   const parallixRow = data.rows.find(r => r.repo === 'parallix');
@@ -169,7 +170,7 @@ test('task-1342: upsertMeasurementRow keeps same mission/stage separate by actin
     implementer_agent: 'codex',
     stage: 'follow-up',
     input_tokens: '100',
-  }, { dbPath: dbFile });
+  }, { configuration: resolveConfiguration(process.env), dbPath: dbFile });
   stats.upsertMeasurementRow({
     date: '2026-06-24',
     repo: 'parallix',
@@ -179,9 +180,9 @@ test('task-1342: upsertMeasurementRow keeps same mission/stage separate by actin
     implementer_agent: 'custom',
     stage: 'follow-up',
     input_tokens: '200',
-  }, { dbPath: dbFile });
+  }, { configuration: resolveConfiguration(process.env), dbPath: dbFile });
 
-  const data = stats.loadMeasurementRows({ dbPath: dbFile });
+  const data = stats.loadMeasurementRows({ configuration: resolveConfiguration(process.env), dbPath: dbFile });
   assert.equal(data.rows.length, 2);
   assert.ok(data.rows.some(r => r.stage === 'follow-up' && r.implementer_agent === 'codex' && r.input_tokens === '100'));
   assert.ok(data.rows.some(r => r.stage === 'follow-up' && r.implementer_agent === 'custom' && r.input_tokens === '200'));
@@ -207,7 +208,7 @@ test('task-1342: accumulateStageStats sums repeated launches for the same missio
     restoreHome = await seedMissionDatabase(path.join(root, 'parallix-home'), 'task-2000', root);
     const dbFile = path.join(root, 'workflow', 'data', 'parallix.db');
 
-    stats.accumulateStageStats({
+    stats.accumulateStageStats({ configuration: resolveConfiguration(process.env),
       slug: 'task-2000',
       stage: 'follow-up',
       rootDir: root,
@@ -217,7 +218,7 @@ test('task-1342: accumulateStageStats sums repeated launches for the same missio
       durationMinutes: 3,
       date: '2026-06-24',
     });
-    const result = stats.accumulateStageStats({
+    const result = stats.accumulateStageStats({ configuration: resolveConfiguration(process.env),
       slug: 'task-2000',
       stage: 'follow-up',
       rootDir: root,
@@ -246,7 +247,7 @@ test('task-1342: accumulateStageStats sums repeated launches for the same missio
 test('resolveMissionClassification requires a stored px Mission', () => {
   const root = createRepoFixture();
   try {
-    const result = stats.resolveMissionClassification('task-missing', root);
+    const result = stats.resolveMissionClassification('task-missing', root, undefined, resolveConfiguration(process.env));
     assert.equal(result.classification, null);
     assert.equal(result.taskFile, null);
     assert.equal(result.source, 'mission');
@@ -267,9 +268,9 @@ test('upsertMeasurementRow accepts unknown classification rows and weekly report
       implementer: 'unknown',
       pr_fix_rounds: 0,
       completedForTest: 'yes',
-    }, { dbPath: dbFile });
+    }, { configuration: resolveConfiguration(process.env), dbPath: dbFile });
 
-    const rows = stats.loadMeasurementRows({ dbPath: dbFile }).rows;
+    const rows = stats.loadMeasurementRows({ configuration: resolveConfiguration(process.env), dbPath: dbFile }).rows;
     const report = renderWeeklyStatsReport(rows, {
       today: '2026-06-23',
       missionFlow: [{ repo: 'parallix', mission: 'task-unknown', closedAt: '2026-06-23T00:00:00Z', labels: ['unknown'], implementer: null }],
@@ -318,14 +319,14 @@ test('recording a measurement with no explicit path writes no CSV under PARALLIX
     const dbFile = path.join(home, 'parallix.db');
     stats.upsertMeasurementRow(
       { date: '2026-05-18', mission: 'task-a', classification: 'ai_sdlc', implementer: 'codex', pr_fix_rounds: '1' },
-      { dbPath: dbFile, rootDir: repoA }
+      { configuration: resolveConfiguration(process.env), dbPath: dbFile, rootDir: repoA }
     );
     stats.upsertMeasurementRow(
       { date: '2026-05-19', mission: 'task-b', classification: 'user_value', implementer: 'gemini', pr_fix_rounds: '2' },
-      { dbPath: dbFile, rootDir: repoB }
+      { configuration: resolveConfiguration(process.env), dbPath: dbFile, rootDir: repoB }
     );
 
-    const loaded = stats.loadMeasurementRows({ dbPath: dbFile });
+    const loaded = stats.loadMeasurementRows({ configuration: resolveConfiguration(process.env), dbPath: dbFile });
     assert.equal(loaded.rows.length, 2);
     // TASK-2363: the configured `product.name` is a display alias, not an
     // identity. Each row is written under its checkout's canonical repository
@@ -360,7 +361,7 @@ test('stats command defaults to the shared PARALLIX_HOME database across target 
   const dbFile = path.join(home, 'parallix.db');
   stats.upsertMeasurementRow(
     { date: '2026-05-18', mission: 'task-shared', classification: 'user_value', implementer: 'codex', pr_fix_rounds: '1', completedForTest: 'yes' },
-    { dbPath: dbFile, rootDir: repoOne }
+    { configuration: resolveConfiguration(process.env), dbPath: dbFile, rootDir: repoOne }
   );
   const logs = [];
   const previousHome = process.env.PARALLIX_HOME;
@@ -371,7 +372,7 @@ test('stats command defaults to the shared PARALLIX_HOME database across target 
     // database after the synchronous log lines. Left floating, it resolves
     // PARALLIX_HOME later, under whichever test owns it by then, and races that
     // test's own migration into "database is locked".
-    await statsCommand(['--today', '2026-05-18'], {
+    await statsCommand(['--today', '2026-05-18'], { configuration: resolveConfiguration(process.env),
       rootDir: repoOne,
       log: line => logs.push(line),
       error: line => logs.push(`ERR:${line}`),
@@ -386,7 +387,7 @@ test('stats command defaults to the shared PARALLIX_HOME database across target 
     assert.doesNotMatch(output, /Loading CSV/);
 
     const secondLogs = [];
-    await statsCommand(['--today', '2026-05-18'], {
+    await statsCommand(['--today', '2026-05-18'], { configuration: resolveConfiguration(process.env),
       rootDir: repoTwo,
       log: line => secondLogs.push(line),
       error: line => secondLogs.push(`ERR:${line}`),
@@ -602,13 +603,13 @@ test('stats command exits non-zero and prints date-range diagnostics for invalid
   const logs = [];
   const exits = [];
 
-  await statsCommand(['--from', '2026-05-01'] , {
+  await statsCommand(['--from', '2026-05-01'] , { configuration: resolveConfiguration(process.env),
     log: line => logs.push(line),
     error: line => logs.push(`ERR:${line}`),
     exit: code => exits.push(code),
   });
 
-  await statsCommand(['--from', '2026-06-01', '--to', '2026-05-31'], {
+  await statsCommand(['--from', '2026-06-01', '--to', '2026-05-31'], { configuration: resolveConfiguration(process.env),
     log: line => logs.push(line),
     error: line => logs.push(`ERR:${line}`),
     exit: code => exits.push(code),
@@ -623,7 +624,7 @@ test('stats command exits non-zero and prints date-range diagnostics for invalid
 test('stats command help documents the pre-integration preview workflow', async () => {
   const logs = [];
 
-  await statsCommand(['--help'], {
+  await statsCommand(['--help'], { configuration: resolveConfiguration(process.env),
     log: line => logs.push(line),
     error: line => logs.push(`ERR:${line}`),
     exit: code => {
@@ -693,13 +694,13 @@ test('recordIntegrationStats reads Mission classification and Review aggregate f
     );
 
     const dbFile = path.join(root, 'workflow', 'data', 'parallix.db');
-    const result = await stats.recordIntegrationStats({
+    const result = await stats.recordIntegrationStats({ configuration: resolveConfiguration(process.env),
       slug: 'task-2000',
       rootDir: root,
       dbPath: dbFile,
       date: '2026-05-18',
       missionStore: restoreHome.store,
-      readMissionFlow: createStatsMissionFlowReader({ rootDir: root, missionStore: restoreHome.store }),
+      readMissionFlow: createStatsMissionFlowReader({ configuration: resolveConfiguration(process.env), rootDir: root, missionStore: restoreHome.store }),
     });
     const repoName = stats.resolveStatsRepoName(root);
 
@@ -709,7 +710,7 @@ test('recordIntegrationStats reads Mission classification and Review aggregate f
     assert.equal(result.row.repo, repoName);
     assert.equal(result.metadataSource.implementer, 'review-aggregate');
     // The completed-mission row is readable from the database, not a CSV.
-    const stored = stats.loadMeasurementRows({ dbPath: dbFile }).rows
+    const stored = stats.loadMeasurementRows({ configuration: resolveConfiguration(process.env), dbPath: dbFile }).rows
       .find(candidate => candidate.mission === 'task-2000');
     assert.equal(stored.date, '2026-05-18');
     assert.equal(stored.repo, repoName);
@@ -748,16 +749,16 @@ test('recordIntegrationStats returns the unchanged weekly report labels for inte
       { date: '2026-05-12', mission: 'task-1000', classification: 'user_value', implementer: 'gemini', pr_fix_rounds: '1' },
       { date: '2026-05-11', mission: 'task-0999', classification: 'ai_sdlc', implementer: 'claude', pr_fix_rounds: '2' },
     ]) {
-      stats.upsertMeasurementRow(seed, { dbPath: dbFile, rootDir: root });
+      stats.upsertMeasurementRow(seed, { configuration: resolveConfiguration(process.env), dbPath: dbFile, rootDir: root });
     }
 
-    const result = await stats.recordIntegrationStats({
+    const result = await stats.recordIntegrationStats({ configuration: resolveConfiguration(process.env),
       slug: 'task-2000',
       rootDir: root,
       dbPath: dbFile,
       date: '2026-05-18',
       missionStore: restoreHome.store,
-      readMissionFlow: createStatsMissionFlowReader({ rootDir: root, missionStore: restoreHome.store }),
+      readMissionFlow: createStatsMissionFlowReader({ configuration: resolveConfiguration(process.env), rootDir: root, missionStore: restoreHome.store }),
     });
 
     const report = __mm2.stripAnsi(result.report);
@@ -801,16 +802,16 @@ test('task-1314: stats mission reports filter to the active repo', async () => {
       implementer: 'codex', pr_fix_rounds: '1', provider: 'openai', model: 'gpt-5.4-mini',
       implementer_agent: 'codex', stage: 'draft', input_tokens: '11', output_tokens: '12',
       cached_tokens: '13', context_tokens: '14', tool_calls: '15', openai_usage_after: '1', duration_minutes: '2',
-    }, { dbPath });
+    }, { configuration: resolveConfiguration(process.env), dbPath });
     stats.upsertMeasurementRow({
       date: '2026-06-10', repo: 'parallix', mission: 'task-alpha', classification: 'user_value',
       implementer: 'gemini', pr_fix_rounds: '2', provider: 'google', model: 'gemini-2.5-pro',
       implementer_agent: 'gemini', stage: 'review', input_tokens: '21', output_tokens: '22',
       cached_tokens: '23', context_tokens: '24', tool_calls: '25', openai_usage_after: '2', duration_minutes: '3',
-    }, { dbPath });
+    }, { configuration: resolveConfiguration(process.env), dbPath });
 
     const logs = [];
-    await statsCommand(['--mission', 'task-alpha'], {
+    await statsCommand(['--mission', 'task-alpha'], { configuration: resolveConfiguration(process.env),
       rootDir: root,
       dbPath,
       log: line => logs.push(line),
@@ -832,15 +833,15 @@ test('task-1314: stats mission reports filter to the active repo', async () => {
 test('task-1251: upsertMeasurementRow keys on (mission, stage) so stages do not collide', () => {
   const dbFile = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'workflow-stats-stage-')), 'parallix.db');
   try {
-    stats.upsertMeasurementRow({ date: '2026-06-07', mission: 'task-3000', classification: 'ai_sdlc', implementer: 'codex', stage: 'draft', input_tokens: '100' }, { dbPath: dbFile });
-    stats.upsertMeasurementRow({ date: '2026-06-07', mission: 'task-3000', classification: 'ai_sdlc', implementer: 'codex', stage: 'active', input_tokens: '200' }, { dbPath: dbFile });
+    stats.upsertMeasurementRow({ date: '2026-06-07', mission: 'task-3000', classification: 'ai_sdlc', implementer: 'codex', stage: 'draft', input_tokens: '100' }, { configuration: resolveConfiguration(process.env), dbPath: dbFile });
+    stats.upsertMeasurementRow({ date: '2026-06-07', mission: 'task-3000', classification: 'ai_sdlc', implementer: 'codex', stage: 'active', input_tokens: '200' }, { configuration: resolveConfiguration(process.env), dbPath: dbFile });
 
-    let data = stats.loadMeasurementRows({ dbPath: dbFile });
+    let data = stats.loadMeasurementRows({ configuration: resolveConfiguration(process.env), dbPath: dbFile });
     assert.equal(data.rows.length, 2); // distinct stages -> distinct rows
 
     // Re-upserting the same (mission, stage) updates in place, not append.
-    stats.upsertMeasurementRow({ date: '2026-06-07', mission: 'task-3000', classification: 'ai_sdlc', implementer: 'codex', stage: 'draft', input_tokens: '999' }, { dbPath: dbFile });
-    data = stats.loadMeasurementRows({ dbPath: dbFile });
+    stats.upsertMeasurementRow({ date: '2026-06-07', mission: 'task-3000', classification: 'ai_sdlc', implementer: 'codex', stage: 'draft', input_tokens: '999' }, { configuration: resolveConfiguration(process.env), dbPath: dbFile });
+    data = stats.loadMeasurementRows({ configuration: resolveConfiguration(process.env), dbPath: dbFile });
     assert.equal(data.rows.length, 2);
     const draftRow = data.rows.find(r => r.stage === 'draft');
     assert.equal(draftRow.input_tokens, '999');
@@ -923,7 +924,7 @@ test('recordReviewStats keeps the mission implementer for grouping and records t
     restoreHome = await seedMissionDatabase(path.join(root, 'parallix-home'), 'task-2000', root);
 
     const dbFile = path.join(root, 'workflow', 'data', 'parallix.db');
-    const result = stats.recordReviewStats({
+    const result = stats.recordReviewStats({ configuration: resolveConfiguration(process.env),
       slug: 'task-2000',
       rootDir: root,
       dbPath: dbFile,
@@ -961,7 +962,7 @@ test('recordReviewStats records the reviewer-session telemetry on the review row
     restoreHome = await seedMissionDatabase(path.join(root, 'parallix-home'), 'task-2000', root);
 
     const dbFile = path.join(root, 'workflow', 'data', 'parallix.db');
-    const result = stats.recordReviewStats({
+    const result = stats.recordReviewStats({ configuration: resolveConfiguration(process.env),
       slug: 'task-2000',
       rootDir: root,
       dbPath: dbFile,
@@ -1316,7 +1317,7 @@ test('task-2362: thoughts_tokens survives telemetryToStatsFields and the measure
       implementer: 'qwen',
       stage: 'active',
       ...fields,
-    }, { dbPath: dbFile });
+    }, { configuration: resolveConfiguration(process.env), dbPath: dbFile });
     assert.equal(written.data.rows[0].thoughts_tokens, '150', 'column persists through the sqlite store');
   } finally {
     fs.rmSync(path.dirname(dbFile), { recursive: true, force: true });

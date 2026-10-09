@@ -1,3 +1,5 @@
+import { resolveConfiguration } from '../../../../src/composition/config.js';
+const environment: NodeJS.ProcessEnv = { ...process.env };
 // Historical regression provenance: TASK-2513, TASK-2383.
 // Confinement contract: selectConfinement decisions, launch gating on missing Bubblewrap and
 // operator consent, and the Bubblewrap argv/guard profile.
@@ -119,12 +121,12 @@ describe("Confinement launch gating", () => {
 
   // The CI job sets PARALLIX_NO_BUBBLEWRAP=1; these tests exercise the gate itself.
   test.beforeEach(() => {
-    delete process.env.PARALLIX_NO_BUBBLEWRAP;
+    delete environment.PARALLIX_NO_BUBBLEWRAP;
   });
 
   test.afterEach(() => {
     setBubblewrapProbeForTest(null);
-    delete process.env.PARALLIX_NO_BUBBLEWRAP;
+    delete environment.PARALLIX_NO_BUBBLEWRAP;
   });
 
   // SC 3 (blocked): a mutating launch with no Bubblewrap and no native sandbox is
@@ -136,7 +138,7 @@ describe("Confinement launch gating", () => {
       const startAgent = await startAgentForTest();
       await assert.rejects(
         () =>
-          startAgent('active', {
+          startAgent('active', { configuration: resolveConfiguration(environment),
             prompt: 'Execute',
             worktree,
             agent: 'claude',
@@ -163,7 +165,7 @@ describe("Confinement launch gating", () => {
     setBubblewrapProbeForTest(() => false);
     try {
       const startAgent = await startAgentForTest();
-      const result = await startAgent('active', {
+      const result = await startAgent('active', { configuration: resolveConfiguration(environment),
         prompt: 'Execute',
         worktree,
         agent: 'claude',
@@ -190,7 +192,7 @@ describe("Confinement launch gating", () => {
     setBubblewrapProbeForTest(() => false);
     try {
       const startAgent = await startAgentForTest();
-      const result = await startAgent('active', {
+      const result = await startAgent('active', { configuration: resolveConfiguration(environment),
         prompt: 'Execute',
         worktree,
         agent: 'codex',
@@ -221,7 +223,7 @@ describe("Confinement launch gating", () => {
     });
     try {
       const startAgent = await startAgentForTest();
-      const result = await startAgent('active', {
+      const result = await startAgent('active', { configuration: resolveConfiguration(environment),
         prompt: 'Execute',
         worktree,
         agent: 'qwen',
@@ -235,7 +237,7 @@ describe("Confinement launch gating", () => {
       assert.ok(captured.args!.includes('-s'), 'qwen launch must carry its native -s sandbox flag');
     } finally {
       __setSpawnAndTeeForTest(null);
-      delete process.env.PARALLIX_NO_BUBBLEWRAP;
+      delete environment.PARALLIX_NO_BUBBLEWRAP;
       fs.rmSync(worktree, { recursive: true, force: true });
     }
   });
@@ -247,7 +249,7 @@ describe("Confinement launch gating", () => {
     setBubblewrapProbeForTest(() => false);
     try {
       const startAgent = await startAgentForTest();
-      const result = await startAgent('review', {
+      const result = await startAgent('review', { configuration: resolveConfiguration(environment),
         prompt: 'Review',
         worktree,
         agent: 'claude',
@@ -276,7 +278,7 @@ describe("Confinement launch gating", () => {
     });
     try {
       const startAgent = await startAgentForTest();
-      const result = await startAgent('active', {
+      const result = await startAgent('active', { configuration: resolveConfiguration(environment),
         prompt: 'Execute',
         worktree,
         agent: 'claude',
@@ -294,7 +296,7 @@ describe("Confinement launch gating", () => {
       );
     } finally {
       fmt.setLogger(previous);
-      delete process.env.PARALLIX_NO_BUBBLEWRAP;
+      delete environment.PARALLIX_NO_BUBBLEWRAP;
       fs.rmSync(worktree, { recursive: true, force: true });
     }
   });
@@ -311,7 +313,7 @@ describe("Confinement launch gating", () => {
     });
     try {
       const startAgent = await startAgentForTest();
-      const result = await startAgent('active', {
+      const result = await startAgent('active', { configuration: resolveConfiguration(environment),
         prompt: 'Execute',
         worktree,
         agent: 'qwen',
@@ -328,20 +330,20 @@ describe("Confinement launch gating", () => {
       );
     } finally {
       fmt.setLogger(previous);
-      delete process.env.PARALLIX_NO_BUBBLEWRAP;
+      delete environment.PARALLIX_NO_BUBBLEWRAP;
       fs.rmSync(worktree, { recursive: true, force: true });
     }
   });
 
-  // The PARALLIX_NO_BUBBLEWRAP opt-out is read from process.env by both the gate
+  // The PARALLIX_NO_BUBBLEWRAP opt-out is read from environment by both the gate
   // and the spawn seam; the gate must not only consult the caller-supplied child env.
-  test('startAgent honors PARALLIX_NO_BUBBLEWRAP from process.env when Bubblewrap is missing', async () => {
+  test('startAgent honors PARALLIX_NO_BUBBLEWRAP from environment when Bubblewrap is missing', async () => {
     const worktree = makeWorktree();
     setBubblewrapProbeForTest(() => false);
-    process.env.PARALLIX_NO_BUBBLEWRAP = '1';
+    environment.PARALLIX_NO_BUBBLEWRAP = '1';
     try {
       const startAgent = await startAgentForTest();
-      const result = await startAgent('active', {
+      const result = await startAgent('active', { configuration: resolveConfiguration(environment),
         prompt: 'Execute',
         worktree,
         agent: 'claude',
@@ -361,7 +363,7 @@ describe("Confinement launch gating", () => {
 describe("Bubblewrap guard", () => {
   test.afterEach(() => {
     setBubblewrapProbeForTest(null);
-    delete process.env.PARALLIX_NO_BUBBLEWRAP;
+    delete environment.PARALLIX_NO_BUBBLEWRAP;
   });
 
   function captureLogs<T>(fn: () => T): { result: T; lines: string[] } {
@@ -406,22 +408,22 @@ describe("Bubblewrap guard", () => {
     assert.equal(warnings.length, 0, 'the probe must not emit an UNSANDBOXED warning');
   });
 
-  test('isBubblewrapDisabled honors PARALLIX_NO_BUBBLEWRAP', () => {
-    assert.equal(isBubblewrapDisabled({}), false);
-    assert.equal(isBubblewrapDisabled({ PARALLIX_NO_BUBBLEWRAP: '' }), false);
-    assert.equal(isBubblewrapDisabled({ PARALLIX_NO_BUBBLEWRAP: '0' }), false);
-    assert.equal(isBubblewrapDisabled({ PARALLIX_NO_BUBBLEWRAP: '1' }), true);
+  test('isBubblewrapDisabled honors explicit configuration (TASK-2668.08)', () => {
+    assert.equal(isBubblewrapDisabled(resolveConfiguration({})), false);
+    assert.equal(isBubblewrapDisabled(resolveConfiguration({ PARALLIX_NO_BUBBLEWRAP: '' })), false);
+    assert.equal(isBubblewrapDisabled(resolveConfiguration({ PARALLIX_NO_BUBBLEWRAP: '0' })), false);
+    assert.equal(isBubblewrapDisabled(resolveConfiguration({ PARALLIX_NO_BUBBLEWRAP: '1' })), true);
   });
 
   test('resolveSandboxProfile gives review a read-only worktree plus artifact dir and /tmp', () => {
-    const profile = resolveSandboxProfile('review', '/work/tree', '/var/artifacts');
+    const profile = resolveSandboxProfile('review', '/work/tree', '/var/artifacts', undefined, resolveConfiguration(environment));
     assert.equal(profile.worktreeWritable, false);
     assert.deepEqual(profile.writable, ['/var/artifacts']);
     assert.deepEqual(profile.optionalWritable, ['/tmp']);
   });
 
   test('resolveSandboxProfile gives non-review steps a writable /tmp', () => {
-    assert.deepEqual(resolveSandboxProfile('active', '/work/tree').optionalWritable, ['/tmp']);
+    assert.deepEqual(resolveSandboxProfile('active', '/work/tree', undefined, undefined, resolveConfiguration(environment)).optionalWritable, ['/tmp']);
   });
 
   test('resolveSandboxProfile fails closed when Git metadata resolution times out', () => {
@@ -433,7 +435,7 @@ describe("Bubblewrap guard", () => {
       throw new Error(`unexpected command: ${command}`);
     });
     try {
-      assert.throws(() => resolveSandboxProfile('active', worktree), BubblewrapGuardError);
+      assert.throws(() => resolveSandboxProfile('active', worktree, undefined, undefined, resolveConfiguration(environment)), BubblewrapGuardError);
     } finally { mocked.mock.restore(); fs.rmSync(worktree, { recursive: true, force: true }); }
   });
 
@@ -450,14 +452,14 @@ describe("Bubblewrap guard", () => {
    * without exercising the bind at all.
    */
   function withTempHome<T>(fn: (_home: string) => T): T {
-    const previous = process.env.HOME;
+    const previous = environment.HOME;
     const root = path.join(process.cwd(), '.workflow');
     fs.mkdirSync(root, { recursive: true });
     const home = mkdtempAt(root, 'bwrap-home-');
-    process.env.HOME = home;
+    environment.HOME = home;
     try { return fn(home); }
     finally {
-      if (previous === undefined) { delete process.env.HOME; } else { process.env.HOME = previous; }
+      if (previous === undefined) { delete environment.HOME; } else { environment.HOME = previous; }
       fs.rmSync(home, { recursive: true, force: true });
     }
   }
@@ -467,7 +469,7 @@ describe("Bubblewrap guard", () => {
     const artifactDir = makeWorktree();
     try {
       for (const family of ['codex', 'qwen', 'vibe'] as const) {
-        const profile = resolveSandboxProfile('review', worktree, artifactDir, family);
+        const profile = resolveSandboxProfile('review', worktree, artifactDir, family, resolveConfiguration(environment));
         assert.equal(profile.worktreeWritable, false);
         const home = path.join(worktree, '.workflow', `${family}-home`);
         assert.ok(profile.optionalWritableDirectories?.includes(home), `${family} state home ${home} must be writable`);
@@ -482,7 +484,7 @@ describe("Bubblewrap guard", () => {
     const artifactDir = makeWorktree();
     try {
       withTempHome(home => {
-        const profile = resolveSandboxProfile('review', worktree, artifactDir, 'claude');
+        const profile = resolveSandboxProfile('review', worktree, artifactDir, 'claude', resolveConfiguration(environment));
         // Claude names the directory after the working directory, not the slug:
         // /home/u/code/p -> -home-u-code-p.
         const mangled = path.resolve(worktree).replace(/[^A-Za-z0-9]/g, '-');
@@ -498,7 +500,7 @@ describe("Bubblewrap guard", () => {
     const artifactDir = makeWorktree();
     try {
       withTempHome(home => {
-        const profile = resolveSandboxProfile('review', worktree, artifactDir, 'custom');
+        const profile = resolveSandboxProfile('review', worktree, artifactDir, 'custom', resolveConfiguration(environment));
         // The default custom runner is opencode, which is host-home based.
         assert.ok(
           profile.optionalWritableDirectories?.includes(path.join(home, '.local', 'share', 'opencode')),
@@ -518,7 +520,7 @@ describe("Bubblewrap guard", () => {
     const reviewedSource = path.join(worktree, 'reviewed-source.md');
     fs.writeFileSync(reviewedSource, '# under review');
     try {
-      const profile = resolveSandboxProfile('review', worktree, artifactDir, 'codex');
+      const profile = resolveSandboxProfile('review', worktree, artifactDir, 'codex', resolveConfiguration(environment));
       const args = buildBubblewrapArgs(profile, worktree).join(' ');
       // Worktree stays read-only so no reviewed source/config/test/doc/mission
       // file inside it can be written.
@@ -533,18 +535,18 @@ describe("Bubblewrap guard", () => {
   test('buildBubblewrapArgs masks the tmux terminal state so an agent cannot reach any run session (TASK-2643)', () => {
     const worktree = makeWorktree();
     const stateRoot = path.join(makeWorktree(), 'terminal-state');
-    const previous = process.env.PARALLIX_TERMINAL_STATE_DIR;
-    process.env.PARALLIX_TERMINAL_STATE_DIR = stateRoot;
+    const previous = environment.PARALLIX_TERMINAL_STATE_DIR;
+    environment.PARALLIX_TERMINAL_STATE_DIR = stateRoot;
     try {
-      const before = buildBubblewrapArgs(resolveSandboxProfile('active', worktree), worktree);
+      const before = buildBubblewrapArgs(resolveSandboxProfile('active', worktree, undefined, undefined, resolveConfiguration(environment)), worktree);
       assert.equal(before.includes('--tmpfs'), false, 'nothing to mask before any tmux launch');
       fs.mkdirSync(stateRoot, { recursive: true });
-      const args = buildBubblewrapArgs(resolveSandboxProfile('active', worktree), worktree);
+      const args = buildBubblewrapArgs(resolveSandboxProfile('active', worktree, undefined, undefined, resolveConfiguration(environment)), worktree);
       const at = args.indexOf('--tmpfs');
       assert.equal(args[at + 1], stateRoot);
       assert.ok(at > args.lastIndexOf('--bind'), 'the mask is mounted after every writable bind');
     } finally {
-      if (previous === undefined) { delete process.env.PARALLIX_TERMINAL_STATE_DIR; } else { process.env.PARALLIX_TERMINAL_STATE_DIR = previous; }
+      if (previous === undefined) { delete environment.PARALLIX_TERMINAL_STATE_DIR; } else { environment.PARALLIX_TERMINAL_STATE_DIR = previous; }
       fs.rmSync(worktree, { recursive: true, force: true });
       fs.rmSync(path.dirname(stateRoot), { recursive: true, force: true });
     }
@@ -553,7 +555,7 @@ describe("Bubblewrap guard", () => {
   test('buildBubblewrapArgs binds the worktree read-write for implementer steps', () => {
     const worktree = makeWorktree();
     try {
-      const args = buildBubblewrapArgs(resolveSandboxProfile('active', worktree), worktree);
+      const args = buildBubblewrapArgs(resolveSandboxProfile('active', worktree, undefined, undefined, resolveConfiguration(environment)), worktree);
       assert.deepEqual(args.slice(0, 3), ['--ro-bind', '/', '/']);
       assert.ok(args.includes('--die-with-parent'));
       assert.ok(args.join(' ').includes(`--bind ${worktree} ${worktree}`));
@@ -566,7 +568,7 @@ describe("Bubblewrap guard", () => {
     const artifactDir = makeWorktree();
     try {
       withTempHome(home => {
-        const profile = resolveSandboxProfile('review', worktree, artifactDir, 'claude');
+        const profile = resolveSandboxProfile('review', worktree, artifactDir, 'claude', resolveConfiguration(environment));
         const args = buildBubblewrapArgs(profile, worktree).join(' ');
         const transcript = path.join(home, '.claude', 'projects', path.resolve(worktree).replace(/[^A-Za-z0-9]/g, '-'));
         assert.ok(args.includes(`--ro-bind ${worktree} ${worktree}`), 'worktree stays read-only');
@@ -582,7 +584,7 @@ describe("Bubblewrap guard", () => {
     const artifactRoot = mkdtempAt('/tmp', 'bwrap-guard-');
     const artifactDir = path.join(artifactRoot, 'review-artifacts');
     try {
-      const args = buildBubblewrapArgs(resolveSandboxProfile('review', worktree, artifactDir), worktree);
+      const args = buildBubblewrapArgs(resolveSandboxProfile('review', worktree, artifactDir, undefined, resolveConfiguration(environment)), worktree);
       assert.ok(args.join(' ').includes(`--ro-bind ${worktree} ${worktree}`));
       // This fixture lives under /tmp; the explicit /tmp permission already
       // authorizes it, so the builder correctly avoids a redundant nested bind.
@@ -622,7 +624,7 @@ describe("Bubblewrap guard", () => {
     const worktree = makeWorktree();
     try {
       const wrapped = withSandboxProfile(
-        resolveSandboxProfile('active', worktree),
+        resolveSandboxProfile('active', worktree, undefined, undefined, resolveConfiguration(environment)),
         () => wrapWithBubblewrap('codex', ['exec', '--sandbox', 'danger-full-access'], worktree)
       );
       assert.equal(wrapped.command, BUBBLEWRAP_COMMAND);
@@ -641,7 +643,7 @@ describe("Bubblewrap guard", () => {
     });
     try {
       const result = await withSandboxProfile(
-        resolveSandboxProfile('active', worktree),
+        resolveSandboxProfile('active', worktree, undefined, undefined, resolveConfiguration(environment)),
         () => spawnAndTee('codex', ['exec'], { cwd: worktree, stdoutSink: nullSink(), stderrSink: nullSink() })
       );
       assert.equal(observed[0].command, BUBBLEWRAP_COMMAND);
@@ -662,7 +664,7 @@ describe("Bubblewrap guard", () => {
     try {
       await assert.rejects(
         () => withSandboxProfile(
-          resolveSandboxProfile('active', '/nonexistent/worktree'),
+          resolveSandboxProfile('active', '/nonexistent/worktree', undefined, undefined, resolveConfiguration(environment)),
           () => spawnAndTee('codex', ['exec'], { cwd: '/nonexistent/worktree' })
         ),
         BubblewrapGuardError

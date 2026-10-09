@@ -1,5 +1,6 @@
 // @ts-nocheck -- TASK-2328: partial test doubles from ESM seam migration; resolve in follow-up
 
+import { resolveConfiguration } from '../../../src/composition/config.js';
 import test, { mock } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'fs';
@@ -172,7 +173,7 @@ test('startAgent persists a block via updateAgentBlock when limit-hit detector f
     delete process.env.WORKFLOW_AGENT;
 
     try {
-      const result = await startAgent('review', {
+      const result = await startAgent('review', { configuration: resolveConfiguration(process.env),
         prompt: 'test',
         worktree: tmpRoot,
         agent: 'claude',
@@ -209,7 +210,7 @@ test('startAgent does not loop forever when WORKFLOW_AGENT is pinned and that ag
       const config = {
         steps: { review: { eligible: ['claude', 'codex'], selection: 'random' } }
       };
-      const selectAgentFn = (step, opts: { exclude?: Set<string> } = {}) => selectAgent(step, { ...opts, config });
+      const selectAgentFn = (step, opts: { exclude?: Set<string> } = {}) => selectAgent(step, { configuration: resolveConfiguration(process.env), ...opts, config });
 
       const detectLimitHitFn = ({ agent }) => {
         if (agent === 'claude') return { until: '2026-05-01 18', source: 'parsed' };
@@ -221,7 +222,7 @@ test('startAgent does not loop forever when WORKFLOW_AGENT is pinned and that ag
         return { path: path.join(tmpRoot, 'agents.local.json') };
       };
 
-      const result = await startAgent('review', {
+      const result = await startAgent('review', { configuration: resolveConfiguration(process.env),
         prompt: 'test',
         worktree: tmpRoot,
         // No opts.agent — simulates a path where only WORKFLOW_AGENT pins the choice.
@@ -264,7 +265,7 @@ test('startAgent throws when every eligible agent hits the limit', async () => {
 
     try {
       await assert.rejects(
-        () => startAgent('review', {
+        () => startAgent('review', { configuration: resolveConfiguration(process.env),
           prompt: 'test',
           worktree: tmpRoot,
           agent: 'claude',
@@ -424,7 +425,7 @@ test('readAgentConfig in a sibling worktree migrates blocks from the primary wor
       blocklist: { custom: { until: '2030-01-02 03' } }
     }, null, 2));
 
-    const config = readAgentConfig(missionConfigPath, { mergeLocal: true, targetPath });
+    const config = readAgentConfig(missionConfigPath, { configuration: resolveConfiguration(process.env), mergeLocal: true, targetPath });
 
     assert.deepEqual(config.blocklist.custom, { until: '2030-01-02 03' });
     assert.equal(isAgentBlocked('custom', config), true);
@@ -442,8 +443,8 @@ test('selectAgent excludes a family migrated from primary worktree agents.local.
     }, null, 2));
 
     try {
-      const config = readAgentConfig(missionConfigPath, { mergeLocal: true, targetPath });
-      assert.equal(selectAgent('active', { config }), 'codex');
+      const config = readAgentConfig(missionConfigPath, { configuration: resolveConfiguration(process.env), mergeLocal: true, targetPath });
+      assert.equal(selectAgent('active', { configuration: resolveConfiguration(process.env), config }), 'codex');
     } finally {
       if (previousAgent !== undefined) process.env.WORKFLOW_AGENT = previousAgent;
       else delete process.env.WORKFLOW_AGENT;
@@ -484,7 +485,7 @@ test('existing PARALLIX_HOME blocklist is authoritative and legacy sources remai
       blocklist: { custom: true }
     }, null, 2));
 
-    const config = readAgentConfig(missionConfigPath, {
+    const config = readAgentConfig(missionConfigPath, { configuration: resolveConfiguration(process.env),
       mergeLocal: true, targetPath
     });
 
@@ -522,7 +523,7 @@ test('startAgent forwards launcher exit metadata to the limit-hit detector', asy
         return { path: path.join(tmpRoot, 'agents.local.json') };
       };
 
-      await startAgent('review', {
+      await startAgent('review', { configuration: resolveConfiguration(process.env),
         prompt: 'test',
         worktree: tmpRoot,
         agent: 'claude',
@@ -580,7 +581,7 @@ test('startAgent reroutes an explicit agent override that is already in the bloc
       const detectLimitHitFn = () => null;
       const updateAgentBlockFn = () => ({ path: path.join(tmpRoot, 'agents.local.json') });
 
-      const result = await startAgent('review', {
+      const result = await startAgent('review', { configuration: resolveConfiguration(process.env),
         prompt: 'test',
         worktree: tmpRoot,
         // Pinned to the blocked family. The harness must reroute to selectAgent
@@ -635,7 +636,7 @@ test('startAgent honours opts.exclude as a seed for the tried set (family-separa
       };
       const updateAgentBlockFn = () => ({ path: path.join(tmpRoot, 'agents.local.json') });
 
-      const result = await startAgent('review', {
+      const result = await startAgent('review', { configuration: resolveConfiguration(process.env),
         prompt: 'test',
         worktree: tmpRoot,
         agent: 'codex',

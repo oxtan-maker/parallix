@@ -1,3 +1,4 @@
+import type { ParallixConfiguration } from '../../../application/ports/configuration.js';
 import fs from 'node:fs';
 import { git } from '../../git/git.js';
 import * as fmt from '../../../application/presentation/cli-format.js';
@@ -108,11 +109,13 @@ export function isNoMergeToAbortResult(result: any) {
 export async function recordPostIntegrationStats(
   slug: string,
   {
-    rootDir = getPrimaryWorktree(),
+    configuration,
+    rootDir = getPrimaryWorktree(configuration),
     recordIntegrationStatsFn = (stats as any).recordIntegrationStats,
     missionStore,
     readMissionFlow,
   }: {
+    configuration?: ParallixConfiguration;
     rootDir?: string;
     recordIntegrationStatsFn?: Function;
     readMissionFlow?: () => Promise<readonly import('../../../application/ports/cli-workflows.js').StatsMissionFlow[] | null>;
@@ -136,7 +139,7 @@ export async function recordPostIntegrationStats(
   // measurement store (<PARALLIX_HOME>/parallix.db). Integration no longer
   // resolves a stats CSV path.
   const outcome = await recordIntegrationStatsFn({
-    slug,
+    configuration, slug,
     rootDir,
     missionStore,
     ...(readMissionFlow ? { readMissionFlow } : {}),
@@ -166,7 +169,7 @@ function printWeeklyStatsReport(outcome: any): void {
 }
 
 /** @param {string} slug @param{{rootDir?: string, missionStore?: import('../../../application/domain-ports.js').MissionStore|null}} options */
-export async function recordPostIntegrationStatsOrAbort(slug: string, options: {rootDir?: string, missionStore?: import('../../../application/domain-ports.js').MissionStore|null, readMissionFlow?: () => Promise<readonly import('../../../application/ports/cli-workflows.js').StatsMissionFlow[] | null>} = {}) {
+export async function recordPostIntegrationStatsOrAbort(slug: string, options: {configuration?: ParallixConfiguration, rootDir?: string, missionStore?: import('../../../application/domain-ports.js').MissionStore|null, readMissionFlow?: () => Promise<readonly import('../../../application/ports/cli-workflows.js').StatsMissionFlow[] | null>} = {}) {
   try {
     return await recordPostIntegrationStats(slug, options);
   } catch (error: any) {
@@ -382,17 +385,18 @@ export function runPostIntegrateHookOrAbort(slug: string, {
 export function cleanupMissionWorktree(
   slug: string,
   {
-    rootDir = getPrimaryWorktree(),
+    configuration,
+    rootDir = getPrimaryWorktree(configuration),
     gitRunner = git,
     removeDir = (target: string) => {
-      if (isForgejoPath(target, { forgejoHome: resolveForgejoHome() })) {
+      if (isForgejoPath(target, { forgejoHome: resolveForgejoHome(rootDir, configuration), configuration })) {
         throw new Error(`CRITICAL SAFETY VIOLATION: cleanupMissionWorktree attempted to delete Forgejo home: ${target}`);
       }
       return fs.rmSync(target, { recursive: true, force: true });
     },
     existsSync = fs.existsSync,
-    retireTerminal = (mission: string, root: string) => retireMissionTerminal(missionSocketPath({ repositoryKey: missionRepositoryKey(root), missionId: mission }), mission),
-  }: {rootDir?: string, gitRunner?: Function, removeDir?: Function, existsSync?: Function, retireTerminal?: (_slug: string, _root: string) => void} = {}
+    retireTerminal = (mission: string, root: string) => retireMissionTerminal(missionSocketPath({ repositoryKey: missionRepositoryKey(root), missionId: mission }, configuration), mission),
+  }: {configuration?: ParallixConfiguration, rootDir?: string, gitRunner?: Function, removeDir?: Function, existsSync?: Function, retireTerminal?: (_slug: string, _root: string) => void} = {}
 ) {
   const retire = () => {
     try { retireTerminal(slug, rootDir); }

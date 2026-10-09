@@ -1,3 +1,5 @@
+import { resolveConfiguration } from '../../../../src/composition/config.js';
+const environment: NodeJS.ProcessEnv = { ...process.env };
 // review launch fallback contract.
 // Related scenarios share imports; each contract keeps its own hooks and mutable fixtures.
 import test from 'node:test';
@@ -90,8 +92,8 @@ test('startAgent review fallback selects vibe when claude hits limit and review 
       return { path: path.join(tmpRoot, 'agents.local.json') };
     };
 
-    const previousAgent = process.env.WORKFLOW_AGENT;
-    delete process.env.WORKFLOW_AGENT;
+    const previousAgent = environment.WORKFLOW_AGENT;
+    delete environment.WORKFLOW_AGENT;
 
     try {
       // Config without review step — gemini is in the fallback pool
@@ -102,7 +104,7 @@ test('startAgent review fallback selects vibe when claude hits limit and review 
         }
       };
 
-      const result = await startAgent('review', {
+      const result = await startAgent('review', { configuration: resolveConfiguration(environment),
         prompt: 'Execute the mission.',
         worktree: tmpRoot,
         agent: 'claude',
@@ -126,7 +128,7 @@ test('startAgent review fallback selects vibe when claude hits limit and review 
         assert.deepEqual(blocks[0], { agent: 'claude', until: '2026-05-01 18' });
       }
     } finally {
-      if (previousAgent !== undefined) process.env.WORKFLOW_AGENT = previousAgent;
+      if (previousAgent !== undefined) environment.WORKFLOW_AGENT = previousAgent;
       fs.rmSync(tmpRoot, { recursive: true, force: true });
     }
   } finally {
@@ -155,8 +157,8 @@ test('startAgent act-on-review fallback selects vibe when implementer hits limit
       return { path: path.join(tmpRoot, 'agents.local.json') };
     };
 
-    const previousAgent = process.env.WORKFLOW_AGENT;
-    delete process.env.WORKFLOW_AGENT;
+    const previousAgent = environment.WORKFLOW_AGENT;
+    delete environment.WORKFLOW_AGENT;
     // act-on-review is a mutating launch, so the task-2513 confinement gate
     // blocks `custom`/`vibe` on hosts without bwrap (e.g. GitHub runners).
     // Pin the probe so this fallback test does not depend on the host.
@@ -170,7 +172,7 @@ test('startAgent act-on-review fallback selects vibe when implementer hits limit
         }
       };
 
-      const result = await startAgent('act-on-review', {
+      const result = await startAgent('act-on-review', { configuration: resolveConfiguration(environment),
         prompt: 'Address review.',
         worktree: tmpRoot,
         agent: 'custom',
@@ -192,7 +194,7 @@ test('startAgent act-on-review fallback selects vibe when implementer hits limit
       assert.equal(blocks.length, 1);
     } finally {
       setBubblewrapProbeForTest(null);
-      if (previousAgent !== undefined) process.env.WORKFLOW_AGENT = previousAgent;
+      if (previousAgent !== undefined) environment.WORKFLOW_AGENT = previousAgent;
       fs.rmSync(tmpRoot, { recursive: true, force: true });
     }
   } finally {

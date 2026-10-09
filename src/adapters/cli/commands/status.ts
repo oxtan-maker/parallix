@@ -1,3 +1,4 @@
+import type { ParallixConfiguration } from "../../../application/ports/configuration.js";
 import { detectRebaseState, getCurrentBranch, getUncommittedCount, getLastThreeCommits, run } from '../../git/git.js';
 import { compareCodeUnits } from '../../../domain/comparators.js';
 import { findTaskFile, getTaskStatus } from '../../backlog/backlog.js';
@@ -263,7 +264,7 @@ function logAgentMatrix(deps: any, log: Function): void {
     const activeMark = activeEligible.includes(agent) ? 'active' : '-';
     log(`  ${fmt.agent(agent)}: ${support} | eligible: ${draftMark},${activeMark}`);
   }
-  const envOverride = process.env.WORKFLOW_AGENT;
+  const envOverride = (deps.configuration as ParallixConfiguration | undefined)?.agents.override;
   if (envOverride) { log(`  (WORKFLOW_AGENT override: ${fmt.agent(envOverride)})`); }
 }
 

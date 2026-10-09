@@ -1,8 +1,10 @@
 // @ts-nocheck -- TASK-2277: preserve legacy CommonJS mock behavior while mock-shape typings are hardened separately.
+import { resolveConfiguration } from '../../../../src/composition/config.js';
+const environment: NodeJS.ProcessEnv = { ...process.env };
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-process.env.NO_COLOR = '1';
+environment.NO_COLOR = '1';
 
 import {
   KNOWN_COMMANDS,

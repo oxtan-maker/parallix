@@ -1,3 +1,4 @@
+import type { ParallixConfiguration } from "../../application/ports/configuration.js";
 import path from 'node:path';
 import { resolveParallixHome } from '../storage/storage.js';
 
@@ -8,10 +9,10 @@ import { resolveParallixHome } from '../storage/storage.js';
  * a target repository, mission worktree, executable directory, or package
  * directory.
  */
-export function resolveDatabasePath(options?: { home?: string }): string {
+export function resolveDatabasePath(options?: { home?: string; configuration?: ParallixConfiguration }): string {
   const home = options?.home
     ? path.resolve(options.home)
-    : resolveParallixHome({ ensureDir: true });
+    : resolveParallixHome({ ensureDir: true, configuration: options?.configuration });
   return path.join(home, 'parallix.db');
 }
 

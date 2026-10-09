@@ -1,3 +1,5 @@
+import type { ParallixConfiguration } from "../../application/ports/configuration.js";
+import { DEFAULT_CONFIGURATION } from "../../application/ports/configuration.js";
 import { CLASSIFIER_FORGEJO_USER } from './setup-review-repository.js';
 /**
  * Review loop mechanisms.
@@ -50,6 +52,7 @@ const MODULE_DIR = path.dirname(fileURLToPath(import.meta.url));
 
 /** The production review authority a composition root binds for one loop. */
 export interface ReviewLoopBindings {
+  readonly configuration?: ParallixConfiguration;
   readonly classification?: import('../../application/ports/review-classification.js').ReviewClassificationPorts;
   readonly readReviewState?: (_slug: string, _worktree?: string, _store?: MissionStore | null) => Promise<ReviewState | null> | ReviewState | null;
   readonly writeReviewState?: typeof writeReviewState;
@@ -141,12 +144,12 @@ function primaryBranch(worktree: string): string {
 }
 
 /** The configured review provider for this mission branch. */
-function providerPort(slug: string, branch: string, worktree: string, target: ReviewLoopTarget, log: (_msg: string) => void, error: (_msg: string) => void): ReviewProviderPort {
-  const intervalMs = resolvePollIntervalMs();
-  const timeoutMs = resolvePollTimeoutMs(target.pollTimeoutSeconds || 0);
+function providerPort(slug: string, branch: string, worktree: string, target: ReviewLoopTarget, log: (_msg: string) => void, error: (_msg: string) => void, configuration: ParallixConfiguration): ReviewProviderPort {
+  const intervalMs = resolvePollIntervalMs(configuration);
+  const timeoutMs = resolvePollTimeoutMs(target.pollTimeoutSeconds || 0, configuration);
   let prNumber: number | null = null;
   let token: string | null | undefined;
-  const credentials = () => (token === undefined ? (token = readToken(resolveReviewUser('') as string, { rootDir: worktree }) as string | null) : token);
+  const credentials = () => (token === undefined ? (token = readToken(resolveReviewUser('', configuration) as string, { rootDir: worktree, configuration }) as string | null) : token);
   const poll = (request: ProviderPollRequest, quickTimeoutMs: number) => ({
     intervalMs: request.quick ? 1000 : intervalMs,
     timeoutMs: request.quick ? quickTimeoutMs : timeoutMs,
@@ -156,9 +159,9 @@ function providerPort(slug: string, branch: string, worktree: string, target: Re
   const push = (options: Record<string, unknown>) => pushReviewRef(branch, branch, worktree, { ...options, token: credentials() } as never);
   return {
     async ensureReachable() {
-      const url = process.env.FORGEJO_URL || 'http://localhost:3300';
+      const url = configuration.forgejo.url || 'http://localhost:3300';
       log(fmt.status('INFO', `Checking review-provider availability at ${url}...`));
-      if (await providerAvailable(url)) {
+      if (await providerAvailable(url, { configuration, rootDir: worktree })) {
         log(fmt.status('INFO', `Review provider is running and reachable at ${url}.`));
         return true;
       }
@@ -211,7 +214,7 @@ function agentPort(slug: string, branch: string, worktree: string, missionPath: 
   return {
     async launch({ role, agent, exclude, prompt, recovery }) {
       const phase = role === 'reviewer' ? 'review' : 'review-response';
-      return await startAgent(role === 'reviewer' ? 'review' : 'act-on-review', {
+      return await startAgent(role === 'reviewer' ? 'review' : 'act-on-review', { configuration: bindings.configuration,
         agent,
         prompt: (actual: string) => [prompt ? rolePrompt(role, prompt, actual) : null, recovery ? String(recovery.prompt(actual)) : null].filter(part => part !== null).join('\n\n'),
         worktree, slug, role, exclude: [...exclude],
@@ -227,7 +230,7 @@ function agentPort(slug: string, branch: string, worktree: string, missionPath: 
     },
     async recordStage(role, state, identity, launch) {
       const reviewer = role === 'reviewer';
-      await recordStageStatsSafe(reviewer ? 'review' : 'active', {
+      await recordStageStatsSafe(reviewer ? 'review' : 'active', { configuration: bindings.configuration,
         stage: reviewer ? 'review' : 'follow-up', slug, rootDir: worktree, worktree, reviewer: identity.reviewer, implementer: identity.implementer,
         result: launch?.result ?? undefined, sinceMs: stageLaunchSinceMs(launch?.result) || 0, log, error,
         state: state as never, writeReviewStateFn: writeState,
@@ -294,7 +297,7 @@ export function createReviewLoopPorts(slug: string, target: ReviewLoopTarget, bi
     branch,
     worktree,
     classification: bindings.classification,
-    polling: { intervalMs: resolvePollIntervalMs(), timeoutMs: resolvePollTimeoutMs(target.pollTimeoutSeconds || 0) },
+    polling: { intervalMs: resolvePollIntervalMs(bindings.configuration), timeoutMs: resolvePollTimeoutMs(target.pollTimeoutSeconds || 0, bindings.configuration) },
     missionStore,
     lifecycle: lifecycleService,
     state: {
@@ -322,7 +325,7 @@ export function createReviewLoopPorts(slug: string, target: ReviewLoopTarget, bi
     handoff: bindings.performHandoffFn
       ? { handoff: async implementer => await bindings.performHandoffFn!(slug, { forgejoUser: implementer, worktree, recoverGateFailure: true }) as HandoffFacts }
       : null,
-    provider: providerEnabled ? providerPort(slug, branch, worktree, target, log, error) : null,
+    provider: providerEnabled ? providerPort(slug, branch, worktree, target, log, error, bindings.configuration ?? DEFAULT_CONFIGURATION) : null,
     approvalRevocation: missionStore && lifecycleService ? {
       async revoke({ round, operator, reason }) {
         const loaded = await missionStore.load(missionId(slug));
@@ -407,8 +410,8 @@ export function createReviewLoopPorts(slug: string, target: ReviewLoopTarget, bi
     },
     routing: {
       eligibleFamilies: () => eligibleAgentsForStep('review'),
-      launcherStatus: agent => workflowLauncherStatus(agent),
-      nominate: excluded => selectAgent('review', { exclude: new Set(excluded) }),
+      launcherStatus: agent => workflowLauncherStatus(agent, worktree, bindings.configuration),
+      nominate: excluded => selectAgent('review', { exclude: new Set(excluded), configuration: bindings.configuration }),
       runtimeMatrix: () => formatMatrixSummary(buildAutonomousReviewMatrix()),
     },
     agents: agentPort(slug, branch, worktree, missionPath, target, bindings, writeState, log, error),

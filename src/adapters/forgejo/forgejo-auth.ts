@@ -1,3 +1,5 @@
+import type { ParallixConfiguration } from "../../application/ports/configuration.js";
+import { DEFAULT_CONFIGURATION } from "../../application/ports/configuration.js";
 import * as fs from 'fs';
 import * as http from 'http';
 import * as os from 'os';
@@ -30,15 +32,15 @@ function deriveRepoFromGitRemote(rootDir: string, remoteName: string): string | 
 }
 
 /** @param {string} [explicitUser] @returns {string} */
-function resolveForgejoUser(explicitUser?: string): string { return explicitUser || process.env.FORGEJO_USER || DEFAULT_FORGEJO_USER; }
+function resolveForgejoUser(explicitUser?: string, configuration: ParallixConfiguration = DEFAULT_CONFIGURATION): string { return explicitUser || configuration.forgejo.user || DEFAULT_FORGEJO_USER; }
 
 /**
  * The provider login authorized to make the human integration decision.
  * Deliberately do not derive this from FORGEJO_USER: that variable selects an
  * API credential, while authority still requires an actual provider APPROVED.
  */
-function resolveAuthorizedApproverUser(explicitUser?: string): string | undefined {
-  return explicitUser || process.env.FORGEJO_AUTHORIZED_APPROVER || undefined;
+function resolveAuthorizedApproverUser(explicitUser?: string, configuration: ParallixConfiguration = DEFAULT_CONFIGURATION): string | undefined {
+  return explicitUser || configuration.forgejo.authorizedApprover || undefined;
 }
 
 function listGitWorktrees(rootDir: string = process.cwd()): string[] {
@@ -49,10 +51,10 @@ function listGitWorktrees(rootDir: string = process.cwd()): string[] {
   } catch (_) { return []; }
 }
 
-function resolveForgejoHome(rootDir: string = process.cwd()) {
-  if (process.env.FORGEJO_HOME) { return process.env.FORGEJO_HOME; }
+function resolveForgejoHome(rootDir: string = process.cwd(), configuration: ParallixConfiguration = DEFAULT_CONFIGURATION) {
+  if (configuration.forgejo.home) { return configuration.forgejo.home; }
   const directLocal = path.join(rootDir, '.forgejo-local');
-  if (process.env.NODE_TEST_CONTEXT) {
+  if (configuration.forgejo.nodeTestContext) {
     testForgejoHome ||= path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'forgejo-test-home-')), 'missing');
     return testForgejoHome;
   }
@@ -67,7 +69,7 @@ function resolveForgejoHome(rootDir: string = process.cwd()) {
     candidates.push(resolved);
   };
   try {
-    const main = getPrimaryWorktree();
+    const main = getPrimaryWorktree(configuration);
     pushCandidate(path.join(main, '.forgejo-local'));
     pushCandidate(path.join(path.dirname(main), `${path.basename(main).toLowerCase()}-forgejo`));
     try {
@@ -103,50 +105,50 @@ function normalizePathForComparison(targetPath: string): string | null {
 
 /** @param {string} targetPath @param {{forgejoHome?: string}} [options] @returns {boolean} */
 function isForgejoPath(targetPath: string, options: any = {}): boolean {
-  const forgejoHome = options.forgejoHome || resolveForgejoHome(options.rootDir || process.cwd());
+  const forgejoHome = options.forgejoHome || resolveForgejoHome(options.rootDir || process.cwd(), options.configuration);
   const normalizedTarget = normalizePathForComparison(targetPath);
   const normalizedForgejoHome = normalizePathForComparison(forgejoHome);
   if (!normalizedTarget || !normalizedForgejoHome) { return false; }
   return normalizedTarget === normalizedForgejoHome || normalizedTarget.startsWith(normalizedForgejoHome + path.sep);
 }
 
-function resolveForgejoSettings(rootDir = process.cwd()) {
+function resolveForgejoSettings(rootDir = process.cwd(), configuration: ParallixConfiguration = DEFAULT_CONFIGURATION) {
   const review = resolveReviewAdapter(rootDir);
   const reviewRemote = review.remote || 'review';
-  return { url: process.env.FORGEJO_URL || review.baseUrl || 'http://localhost:3300', repo: process.env.FORGEJO_REPO || review.repo || deriveRepoFromGitRemote(rootDir, reviewRemote) || deriveRepoFromGitRemote(rootDir, 'origin') || '' };
+  return { url: configuration.forgejo.url || review.baseUrl || 'http://localhost:3300', repo: configuration.forgejo.repo || review.repo || deriveRepoFromGitRemote(rootDir, reviewRemote) || deriveRepoFromGitRemote(rootDir, 'origin') || '' };
 }
 
 /** @param {{forgejoUser?: string, token?: string}} options @returns {{forgejoUser: string, token: string|null}} */
-function resolveForgejoAuth(options: { forgejoUser?: string, token?: string, rootDir?: string } = {} as { forgejoUser?: string, token?: string, rootDir?: string }): { forgejoUser: string, token: string | null } {
-  const forgejoUser = resolveForgejoUser(options.forgejoUser);
-  const token = options.token || readToken(forgejoUser, options.rootDir);
+function resolveForgejoAuth(options: { forgejoUser?: string, token?: string, rootDir?: string; configuration?: ParallixConfiguration } = {} as { forgejoUser?: string, token?: string, rootDir?: string; configuration?: ParallixConfiguration }): { forgejoUser: string, token: string | null } {
+  const forgejoUser = resolveForgejoUser(options.forgejoUser, options.configuration);
+  const token = options.token || readToken(forgejoUser, options.rootDir, options.configuration);
   return { forgejoUser, token };
 }
 
 /** @param {string} user @returns {string|null} */
-function resolveTokenFile(user: string, rootDir: string = process.cwd()): string | null {
-  const resolvedUser = resolveForgejoUser(user);
-  const isCurrentUser = resolvedUser === resolveForgejoUser();
+function resolveTokenFile(user: string, rootDir: string = process.cwd(), configuration: ParallixConfiguration = DEFAULT_CONFIGURATION): string | null {
+  const resolvedUser = resolveForgejoUser(user, configuration);
+  const isCurrentUser = resolvedUser === resolveForgejoUser(undefined, configuration);
   const canUseDefaultTokenFile = isCurrentUser || resolvedUser === DEFAULT_FORGEJO_USER;
-  const candidates = [isCurrentUser ? process.env.FORGEJO_TOKEN_FILE : null, path.join(resolveForgejoHome(rootDir), 'tokens', resolvedUser), canUseDefaultTokenFile ? path.join(resolveForgejoHome(rootDir), 'token') : null];
+  const candidates = [isCurrentUser ? configuration.forgejo.tokenFile : null, path.join(resolveForgejoHome(rootDir, configuration), 'tokens', resolvedUser), canUseDefaultTokenFile ? path.join(resolveForgejoHome(rootDir, configuration), 'token') : null];
   for (const candidate of candidates) { if (candidate && fs.existsSync(candidate)) { return candidate; } }
   return null;
 }
 
 /** @param {string} user @returns {string|null} */
-function readToken(user: string, rootDir: string = process.cwd()): string | null {
-  const resolvedUser = resolveForgejoUser(user);
-  if (resolvedUser === resolveForgejoUser() && process.env.FORGEJO_TOKEN) { return process.env.FORGEJO_TOKEN; }
-  const tokenFile = resolveTokenFile(resolvedUser, rootDir);
+function readToken(user: string, rootDir: string = process.cwd(), configuration: ParallixConfiguration = DEFAULT_CONFIGURATION): string | null {
+  const resolvedUser = resolveForgejoUser(user, configuration);
+  if (resolvedUser === resolveForgejoUser(undefined, configuration) && configuration.forgejo.token) { return configuration.forgejo.token; }
+  const tokenFile = resolveTokenFile(resolvedUser, rootDir, configuration);
   if (!tokenFile) { return null; }
   return fs.readFileSync(tokenFile, 'utf8').trim();
 }
 
 /** @param {string} [url='http://localhost:3300'] @param {{request?: Function, timeout?: number}} [options] @returns {Promise<boolean>} */
-function forgejoAvailable(url = process.env.FORGEJO_URL || 'http://localhost:3300', options: { request?: Function, timeout?: number } = {} as { request?: Function, timeout?: number }): Promise<boolean> {
-  if (process.env.PARALLIX_TEST_NO_FORGEJO === '1' && !options.request) { return Promise.resolve(false); }
+function forgejoAvailable(url: string | undefined = undefined, options: { request?: Function; timeout?: number; configuration?: ParallixConfiguration } = {}): Promise<boolean> {
+  if (options.configuration?.forgejo.unavailableForTests && !options.request) { return Promise.resolve(false); }
   const { request = http.request, timeout = HTTP_REQUEST_TIMEOUT } = options;
-  const targetUrl = new URL(url);
+  const targetUrl = new URL(url ?? options.configuration?.forgejo.url ?? 'http://localhost:3300');
   return new Promise((resolve) => {
     const req = request(targetUrl, { method: 'GET', timeout }, (/** @type {import('http').IncomingMessage} */ res: any) => {
       req.destroy();

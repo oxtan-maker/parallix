@@ -74,7 +74,7 @@ The `custom` agent family supports multiple backends through the `adapters.agent
 
 **Supported runners:**
 - `"opencode"` (default): Uses the opencode binary with built-in vLLM support
-- `"pi"`: Uses the Pi coding agent with external vLLM/Ollama configuration. Execution goes through the Pi SDK (`@earendil-works/pi-coding-agent`): assistant text, thinking deltas, and tool start/result activity stream to the terminal in SDK event order, while the final launch result remains assistant text only.
+- `"pi"`: Uses the Pi coding agent with external vLLM/Ollama configuration. Execution goes through the Pi SDK (`@earendil-works/pi-coding-agent`) in an isolated child process. Each session and its tools inherit that launch’s environment without changing the orchestrator’s environment; interruption stops the session’s process group. Assistant text, thinking deltas, and tool start/result activity stream to the terminal in SDK event order, while the final launch result remains assistant text only.
 
 **Model selection:** `adapters.agents.models.custom` is an optional override, not a requirement — when unset, `opencode` reuses its own remembered default local model and `pi` reads `defaultProvider`/`defaultModel` from `~/.pi/agent/settings.json`. Pinning a specific model string in `workflow.config.json` is a footgun: it goes stale the moment the operator repoints the locally-served model, and silently breaks the launcher until someone edits the repo config. Only set it when you need to force a specific model for a specific run.
 

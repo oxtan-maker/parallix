@@ -1,3 +1,4 @@
+import type { ParallixConfiguration } from '../../../application/ports/configuration.js';
 import type { BoardLaneEventRepository } from '../../../application/ports/operation-history.js';
 import type { UsageRepository } from '../../../application/ports/mission-measurements.js';
 import {
@@ -28,6 +29,7 @@ import * as fmt from '../../../application/presentation/cli-format.js';
 const DIMENSIONS: readonly CohortDimension[] = ['label', 'implementer', 'model', 'provider'];
 
 export interface StatsCohortsOptions {
+  configuration?: ParallixConfiguration;
   readonly log?: (_message: string) => unknown;
   readonly error?: (_message: string) => unknown;
   readonly exit?: (_code?: number) => unknown;
@@ -111,14 +113,14 @@ function parseCohortOption(arg: string | undefined, next: string | undefined): P
  * Imported dynamically for the same reason the composition root does it: the
  * rollback bundle has no SQLite driver and must fail here, not at load time.
  */
-export async function resolveOperatorRepositories(): Promise<{
+export async function resolveOperatorRepositories(configuration?: ParallixConfiguration): Promise<{
   laneEventRepo: BoardLaneEventRepository;
   usageRepo: UsageRepository;
 }> {
   const { initOperatorState } = await import('../../sqlite/adapter-factory.js');
   const { SqliteBoardLaneEventRepository } = await import('../../sqlite/board-lane-event-repository.js');
   const { SqliteUsageRepository } = await import('../../sqlite/usage-repository.js');
-  const { db } = await initOperatorState();
+  const { db } = await initOperatorState({ configuration });
   return {
     laneEventRepo: new SqliteBoardLaneEventRepository(db),
     usageRepo: new SqliteUsageRepository(db),
@@ -198,7 +200,7 @@ export async function statsCohorts(
   try {
     const repositories = options.laneEventRepo && options.usageRepo
       ? { laneEventRepo: options.laneEventRepo, usageRepo: options.usageRepo }
-      : await resolveOperatorRepositories();
+      : await resolveOperatorRepositories(options.configuration);
     // `--repo` is an explicit operator choice. With no override the identity
     // comes from the canonical owner, never from `rootDir`: run from a mission
     // worktree, the path itself matches no persisted row.
@@ -209,7 +211,7 @@ export async function statsCohorts(
     const cohortMetadata = options.cohortMetadata ?? (async () => {
       const { initOperatorState } = await import('../../sqlite/adapter-factory.js');
       const { SqliteMissionStore } = await import('../../sqlite/mission-store.js');
-      const { db } = await initOperatorState();
+      const { db } = await initOperatorState({ configuration: options.configuration });
       const loaded = await new SqliteMissionStore(db).loadByRepository(repositoryId);
       return missionCohortMetadata(loaded);
     });

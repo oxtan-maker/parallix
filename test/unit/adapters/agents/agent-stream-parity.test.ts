@@ -1,3 +1,4 @@
+import { resolveConfiguration } from '../../../../src/composition/config.js';
 import test, { mock } from 'node:test';
 import assert from 'node:assert/strict';
 import { ClaudeStreamNormalizer } from '../../../../src/adapters/agents/claude-stream-render.js';
@@ -30,7 +31,7 @@ test('Claude and Pi events produce identical text, reasoning, command, and resul
   ].flatMap(e => pi.push(e));
   const output = (events: NormalizedEvent[]) => {
     const target = sink();
-    const view = new AgentStreamView(target, {}, { FORCE_COLOR: '0' });
+    const view = new AgentStreamView(target, {}, resolveConfiguration({ FORCE_COLOR: '0' }));
     view.render(events);
     view.end();
     return target.text;
@@ -43,7 +44,7 @@ test('shell names never appear in command entries, completion entries, or idle i
   for (const name of ['Bash', 'bash']) {
     const target = sink(true);
     let clock = 0;
-    const view = new AgentStreamView(target, { now: () => clock, idleMs: 1 }, { FORCE_COLOR: '0' });
+    const view = new AgentStreamView(target, { now: () => clock, idleMs: 1 }, resolveConfiguration({ FORCE_COLOR: '0' }));
     view.render([{ kind: 'tool_start', id: 'one', name, input: 'git status', agent: null, isSubagent: false }]);
     clock = 100;
     view.tick();
@@ -77,7 +78,7 @@ test('the common result summary retains Pi length and summarizes every content b
 test('Pi reports sub-agent progress with distinct call labels and no repeated long prompt', () => {
   const pi = new PiStreamNormalizer();
   const target = sink();
-  const view = new AgentStreamView(target, {}, { FORCE_COLOR: '0' });
+  const view = new AgentStreamView(target, {}, resolveConfiguration({ FORCE_COLOR: '0' }));
   for (const id of ['one', 'two']) {
     view.render(pi.push({ type: 'tool_execution_start', toolCallId: id, toolName: 'subagent', args: { agent: 'scout', task: 'map code', prompt: 'hidden long prompt' } }));
     view.render(pi.push({ type: 'tool_execution_update', toolCallId: id, toolName: 'subagent', partialResult: { content: [{ type: 'text', text: 'scanning files' }] } }));
@@ -92,7 +93,7 @@ test('Pi retries and compaction set and clear the common activity indicator', ()
   const pi = new PiStreamNormalizer();
   const target = sink(true);
   let clock = 0;
-  const view = new AgentStreamView(target, { idleMs: 1, now: () => clock }, { FORCE_COLOR: '0' });
+  const view = new AgentStreamView(target, { idleMs: 1, now: () => clock }, resolveConfiguration({ FORCE_COLOR: '0' }));
   for (const start of [
     { type: 'auto_retry_start', attempt: 1, maxAttempts: 3, delayMs: 500, errorMessage: 'overloaded' },
     { type: 'compaction_start', reason: 'threshold' },
@@ -126,7 +127,7 @@ test('renderer timers close idempotently and sink faults cannot fail a launch', 
 
 test('dumb terminals do not receive spinner control sequences', () => {
   const target = sink(true);
-  const view = new AgentStreamView(target, { idleMs: 0 }, { TERM: 'dumb' });
+  const view = new AgentStreamView(target, { idleMs: 0 }, resolveConfiguration({ TERM: 'dumb' }));
   view.tick();
   view.end();
   assert.equal(target.text, '');

@@ -1,3 +1,5 @@
+import type { ParallixConfiguration } from "../../application/ports/configuration.js";
+import { DEFAULT_CONFIGURATION } from "../../application/ports/configuration.js";
 // Claude JSONL framing and raw-stream escape hatch; presentation is shared.
 import { ClaudeStreamNormalizer } from './claude-stream-render.js';
 import { createAgentStreamRenderer, type RenderSink, type AgentStreamViewOptions } from './agent-stream-view.js';
@@ -6,9 +8,8 @@ export { AgentStreamView as ClaudeStreamView, colorEnabled, type RenderSink, typ
 /** Escape hatch: restore the previous verbatim JSONL passthrough (ADR 0056). */
 export const RAW_STREAM_ENV = 'PARALLIX_CLAUDE_RAW_STREAM';
 
-export function rawStreamRequested(env: NodeJS.ProcessEnv = process.env): boolean {
-  const value = env[RAW_STREAM_ENV];
-  return value !== undefined && value !== '' && value !== '0';
+export function rawStreamRequested(configuration: ParallixConfiguration = DEFAULT_CONFIGURATION): boolean {
+  return configuration.agents.claudeRawStream;
 }
 
 export interface ClaudeRenderSink {
@@ -27,14 +28,14 @@ export interface ClaudeRenderSink {
 export function createClaudeRenderSink(
   target: RenderSink = process.stdout,
   options: AgentStreamViewOptions & { spinnerIntervalMs?: number } = {},
-  env: NodeJS.ProcessEnv = process.env,
+  configuration: ParallixConfiguration = DEFAULT_CONFIGURATION,
 ): ClaudeRenderSink {
-  if (rawStreamRequested(env)) {
+  if (rawStreamRequested(configuration)) {
     return { write: (chunk) => target.write(chunk as string), close: () => {} };
   }
 
   const normalizer = new ClaudeStreamNormalizer();
-  const renderer = createAgentStreamRenderer(target, options, env);
+  const renderer = createAgentStreamRenderer(target, options, configuration);
   let closed = false;
   return {
     write(chunk) {

@@ -4,6 +4,7 @@
 // draft stage-stat row warned about the missing Backlog label and `px active`
 // startup preflight refused to launch the implementer. Classification is
 // Mission state after TASK-2521.03; the Backlog label must not gate it.
+import { resolveConfiguration } from '../../../src/composition/config.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -61,7 +62,7 @@ async function withStoredMission(labels: readonly string[] | null, taskLabels: s
 
 function runStartupPreflight(root: string) {
   const lines: string[] = [];
-  const result = startupPreflight([slug], {
+  const result = startupPreflight([slug], { configuration: resolveConfiguration(process.env),
     returnResult: true,
     cwdFn: () => root,
     getCurrentBranchFn: () => `mission/${slug}`,
@@ -79,16 +80,16 @@ function runStartupPreflight(root: string) {
 
 test('TASK-2601: stored user_value classification with empty Backlog labels completes draft and passes px active startup preflight', async () => {
   await withStoredMission(['bug', 'user_value'], '[]', async (root) => {
-    const draftCheck = normalizeDraftClassification(slug, root, { errorFn: () => null });
+    const draftCheck = normalizeDraftClassification(slug, root, { configuration: resolveConfiguration(process.env), errorFn: () => null });
     assert.deepEqual(draftCheck, { ok: true, classification: 'user_value' });
 
     const draftLog: string[] = [];
-    recordDraftStats({ slug, rootDir: root, agentFamily: 'claude', result: { telemetry: null }, log: (line: string) => { draftLog.push(line); return null; } });
+    recordDraftStats({ configuration: resolveConfiguration(process.env), slug, rootDir: root, agentFamily: 'claude', result: { telemetry: null }, log: (line: string) => { draftLog.push(line); return null; } });
     const draftOutput = draftLog.join('\n');
     assert.doesNotMatch(draftOutput, /Could not record draft stats/, draftOutput);
     assert.match(draftOutput, /Draft stats recorded: task-2599 stage=draft/);
 
-    const draftRow = stats.loadMeasurementRows({ rootDir: root }).rows.find(row => row.mission === slug && row.stage === 'draft');
+    const draftRow = stats.loadMeasurementRows({ configuration: resolveConfiguration(process.env), rootDir: root }).rows.find(row => row.mission === slug && row.stage === 'draft');
     assert.equal(draftRow?.classification, 'user_value');
 
     const { result, output } = runStartupPreflight(root);
@@ -100,12 +101,12 @@ test('TASK-2601: stored user_value classification with empty Backlog labels comp
 
 test('TASK-2601: later stage-stat rows use the stored classification when the Backlog label conflicts', async () => {
   await withStoredMission(['user_value'], '[ai_sdlc]', async (root) => {
-    assert.deepEqual(stats.resolveMissionClassification(slug, root), { classification: 'user_value', taskFile: null, source: 'mission' });
+    assert.deepEqual(stats.resolveMissionClassification(slug, root, undefined, resolveConfiguration(process.env)), { classification: 'user_value', taskFile: null, source: 'mission' });
 
-    stats.recordActiveStats({ slug, rootDir: root, implementer: 'codex' });
-    stats.recordReviewStats({ slug, rootDir: root, reviewer: 'claude', implementer: 'codex' });
-    stats.accumulateStageStats({ slug, stage: 'active', rootDir: root, implementer: 'codex' });
-    const rows = stats.loadMeasurementRows({ rootDir: root }).rows.filter(row => row.mission === slug);
+    stats.recordActiveStats({ configuration: resolveConfiguration(process.env), slug, rootDir: root, implementer: 'codex' });
+    stats.recordReviewStats({ configuration: resolveConfiguration(process.env), slug, rootDir: root, reviewer: 'claude', implementer: 'codex' });
+    stats.accumulateStageStats({ configuration: resolveConfiguration(process.env), slug, stage: 'active', rootDir: root, implementer: 'codex' });
+    const rows = stats.loadMeasurementRows({ configuration: resolveConfiguration(process.env), rootDir: root }).rows.filter(row => row.mission === slug);
     assert.deepEqual([...new Set(rows.map(row => row.stage))].sort(), ['active', 'review']);
     assert.ok(rows.every(row => row.classification === 'user_value'), JSON.stringify(rows));
 
@@ -118,16 +119,16 @@ test('TASK-2601: later stage-stat rows use the stored classification when the Ba
 for (const [name, labels] of [['no', ['bug']], ['two', ['ai_sdlc', 'user_value']]] as const) {
   test(`TASK-2601: a stored Mission with ${name} classification fails clearly even when the Backlog label is valid`, async () => {
     await withStoredMission(labels, '[ai_sdlc]', async (root) => {
-      const resolution = stats.resolveMissionClassification(slug, root);
+      const resolution = stats.resolveMissionClassification(slug, root, undefined, resolveConfiguration(process.env));
       assert.equal(resolution.classification, null);
       assert.equal(resolution.source, 'mission');
       assert.match(resolution.error ?? '', /authoritative Mission state.*px classification set/);
 
       assert.throws(
-        () => stats.recordStageStats({ slug, stage: 'active', rootDir: root, implementer: 'codex' }),
+        () => stats.recordStageStats({ configuration: resolveConfiguration(process.env), slug, stage: 'active', rootDir: root, implementer: 'codex' }),
         /Cannot record stage stats for task-2599: Missing or invalid classification .* authoritative Mission state/,
       );
-      assert.deepEqual(normalizeDraftClassification(slug, root, { errorFn: () => null }), { ok: false, reason: 'missing-classification' });
+      assert.deepEqual(normalizeDraftClassification(slug, root, { configuration: resolveConfiguration(process.env), errorFn: () => null }), { ok: false, reason: 'missing-classification' });
 
       const { result, output } = runStartupPreflight(root);
       assert.match(output, /\[FAIL\] Mission classification: Missing or invalid classification for task-2599 in authoritative Mission state/);
@@ -138,13 +139,13 @@ for (const [name, labels] of [['no', ['bug']], ['two', ['ai_sdlc', 'user_value']
 
 test('TASK-2604: a task label cannot classify a Mission absent from px state', async () => {
   await withStoredMission(null, '[ai_sdlc]', async (root) => {
-    const resolution = stats.resolveMissionClassification(slug, root);
+    const resolution = stats.resolveMissionClassification(slug, root, undefined, resolveConfiguration(process.env));
     assert.equal(resolution.classification, null);
     assert.equal(resolution.source, 'mission');
     assert.equal(resolution.taskFile, null);
     assert.match(resolution.error ?? '', /absent from the px database/);
     assert.throws(
-      () => stats.recordStageStats({ slug, stage: 'active', rootDir: root, implementer: 'codex' }),
+      () => stats.recordStageStats({ configuration: resolveConfiguration(process.env), slug, stage: 'active', rootDir: root, implementer: 'codex' }),
       /absent from the px database/,
     );
 
@@ -153,7 +154,7 @@ test('TASK-2604: a task label cannot classify a Mission absent from px state', a
     assert.deepEqual(result, { pass: false });
   });
   await withStoredMission(null, '[]', async (root) => {
-    const resolution = stats.resolveMissionClassification(slug, root);
+    const resolution = stats.resolveMissionClassification(slug, root, undefined, resolveConfiguration(process.env));
     assert.equal(resolution.classification, null);
     assert.match(resolution.error ?? '', /absent from the px database/);
   });
@@ -162,7 +163,7 @@ test('TASK-2604: a task label cannot classify a Mission absent from px state', a
 test('TASK-2604: an unreadable px database cannot be rescued by a task label', async () => {
   await withStoredMission(null, '[ai_sdlc]', async (root) => {
     const absent = path.join(root, 'missing.db');
-    const resolution = stats.resolveMissionClassification(slug, root, () => ({ kind: 'unavailable', reason: `no Mission database at ${absent}` }));
+    const resolution = stats.resolveMissionClassification(slug, root, () => ({ kind: 'unavailable', reason: `no Mission database at ${absent}` }), resolveConfiguration(process.env));
     assert.equal(resolution.classification, null);
     assert.equal(resolution.source, 'mission');
     assert.equal(resolution.taskFile, null);
@@ -173,20 +174,20 @@ test('TASK-2604: an unreadable px database cannot be rescued by a task label', a
 test('TASK-2604: integration statistics reject absent and unreadable Mission state', async () => {
   await withStoredMission(null, '[ai_sdlc]', async (root) => {
     await assert.rejects(
-      stats.recordIntegrationStats({
+      stats.recordIntegrationStats({ configuration: resolveConfiguration(process.env),
         slug, rootDir: root,
         missionStore: { load: async () => ({ kind: 'missing' }) },
       }),
       /absent from the px database/,
     );
     await assert.rejects(
-      stats.recordIntegrationStats({
+      stats.recordIntegrationStats({ configuration: resolveConfiguration(process.env),
         slug, rootDir: root,
         missionStore: { load: async () => { throw new Error('database locked'); } },
       }),
       /Cannot read Mission .*database locked/,
     );
-    assert.deepEqual(stats.loadMeasurementRows({ rootDir: root }).rows, []);
+    assert.deepEqual(stats.loadMeasurementRows({ configuration: resolveConfiguration(process.env), rootDir: root }).rows, []);
   });
 });
 
@@ -201,7 +202,7 @@ test('TASK-2601: stats backfill keeps stored Mission classification authoritativ
       fs.writeFileSync(path.join(missionDir, 'MISSION.md'), '# Mission: workflow review checkpoint cli stats\n');
       fs.writeFileSync(path.join(missionDir, 'CP-1.md'), '# checkpoint\n');
 
-      const report = await collectHistoricalStatsBackfill(root, { dbPath: path.join(root, 'measurements.db') });
+      const report = await collectHistoricalStatsBackfill(root, { configuration: resolveConfiguration(process.env), dbPath: path.join(root, 'measurements.db') });
       const entry = [...report.rows, ...report.unresolved].find(item => (item.mission ?? item.slug) === slug);
       assert.ok(entry, JSON.stringify(report));
       assert.equal(entry.classification, expected);
@@ -220,7 +221,7 @@ test('TASK-2604: historical backfill leaves a labelled task unresolved without a
     fs.writeFileSync(path.join(missionDir, 'MISSION.md'), '# Mission: workflow statistics\n');
     fs.writeFileSync(path.join(missionDir, 'CP-1.md'), '# checkpoint\n');
 
-    const report = await collectHistoricalStatsBackfill(root, { dbPath: path.join(root, 'measurements.db') });
+    const report = await collectHistoricalStatsBackfill(root, { configuration: resolveConfiguration(process.env), dbPath: path.join(root, 'measurements.db') });
     assert.equal(report.rows.length, 0);
     const unresolved = report.unresolved.find(item => item.slug === slug);
     assert.ok(unresolved, JSON.stringify(report));
@@ -271,7 +272,7 @@ test('TASK-2601: integration preflight never lets a Backlog label classify a sto
     const report = createIntegrationPreflight(ports).printIntegrationPreflight({
       ...context, missionLabels, missionStatus: 'integration',
       missionBrief: { goal: 'g', why: 'w', scope: null, outOfScope: [] },
-    }, { log: (line: string) => lines.push(line) });
+    }, { configuration: resolveConfiguration(process.env), log: (line: string) => lines.push(line) });
     assert.equal(report.failures.includes('classification'), failed, `${JSON.stringify(missionLabels)}: ${lines.join('\n')}`);
     if (failed) { assert.match(lines.join('\n'), /authoritative Mission state for task-2599/); }
   }

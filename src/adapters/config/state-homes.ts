@@ -1,3 +1,5 @@
+import type { ParallixConfiguration } from "../../application/ports/configuration.js";
+import { DEFAULT_CONFIGURATION } from "../../application/ports/configuration.js";
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -17,8 +19,8 @@ export function codexHomeRoot(worktree: string): string {
 }
 
 /** Parallix's operator state, needed by agents invoking `px` from a sandbox. */
-export function parallixStateHome(): string {
-  return resolveParallixHome({ ensureDir: true });
+export function parallixStateHome(configuration: ParallixConfiguration = DEFAULT_CONFIGURATION): string {
+  return resolveParallixHome({ ensureDir: true, configuration });
 }
 
 export function qwenHomeRoot(worktree: string): string {
@@ -34,17 +36,17 @@ export function vibeHomeRoot(worktree: string): string {
  * working directory with every non-alphanumeric character replaced by `-`
  * (`/home/u/code/p` → `-home-u-code-p`), not after the mission slug.
  */
-export function claudeProjectDir(worktree: string): string {
+export function claudeProjectDir(worktree: string, configuration: ParallixConfiguration = DEFAULT_CONFIGURATION): string {
   const mangled = path.resolve(worktree).replace(/[^A-Za-z0-9]/g, '-');
-  return path.join(os.homedir(), '.claude', 'projects', mangled);
+  return path.join(configuration.storage.homeDirectory || os.homedir(), '.claude', 'projects', mangled);
 }
 
-export function claudeConfigDir(): string {
-  return path.join(os.homedir(), '.claude');
+export function claudeConfigDir(configuration: ParallixConfiguration = DEFAULT_CONFIGURATION): string {
+  return path.join(configuration.storage.homeDirectory || os.homedir(), '.claude');
 }
 
-export function claudeCredentialsPath(): string {
-  return path.join(claudeConfigDir(), '.credentials.json');
+export function claudeCredentialsPath(configuration: ParallixConfiguration = DEFAULT_CONFIGURATION): string {
+  return path.join(claudeConfigDir(configuration), '.credentials.json');
 }
 
 /**
@@ -52,33 +54,32 @@ export function claudeCredentialsPath(): string {
  * by every sandboxed Claude launch so the CLI's OAuth refresh lock, created
  * there, serialises token rotations across concurrent missions.
  */
-export function claudeConfigCellDir(): string {
-  return path.join(parallixStateHome(), 'claude-config-cell');
+export function claudeConfigCellDir(configuration: ParallixConfiguration = DEFAULT_CONFIGURATION): string {
+  return path.join(parallixStateHome(configuration), 'claude-config-cell');
 }
 
 /** Claude's auto-memory for one worktree; stays read-only in the sandbox. */
-export function claudeProjectMemoryDir(worktree: string): string {
-  return path.join(claudeProjectDir(worktree), 'memory');
+export function claudeProjectMemoryDir(worktree: string, configuration: ParallixConfiguration = DEFAULT_CONFIGURATION): string {
+  return path.join(claudeProjectDir(worktree, configuration), 'memory');
 }
 
-export function claudeSessionEnvDir(): string {
-  return path.join(os.homedir(), '.claude', 'session-env');
+export function claudeSessionEnvDir(configuration: ParallixConfiguration = DEFAULT_CONFIGURATION): string {
+  return path.join(configuration.storage.homeDirectory || os.homedir(), '.claude', 'session-env');
 }
 
 /** The operator state root that Codex links into a worktree-local CODEX_HOME. */
-export function originatingCodexStateRoot(env: NodeJS.ProcessEnv = process.env): string {
-  return env.CODEX_HOME || process.env.CODEX_HOME || path.join(process.env.HOME || os.homedir(), '.codex');
+export function originatingCodexStateRoot(configuration: ParallixConfiguration = DEFAULT_CONFIGURATION): string {
+  return configuration.agents.codexHome || path.join(configuration.storage.homeDirectory || os.homedir(), '.codex');
 }
 
-export function codexAuthPath(env: NodeJS.ProcessEnv = process.env): string {
-  const authPath = path.join(originatingCodexStateRoot(env), 'auth.json');
+export function codexAuthPath(configuration: ParallixConfiguration = DEFAULT_CONFIGURATION): string {
+  const authPath = path.join(originatingCodexStateRoot(configuration), 'auth.json');
   try { return fs.realpathSync(authPath); }
   catch { return authPath; }
 }
 
-function xdgDir(envVar: string, fallback: string, leaf: string): string {
-  const configured = process.env[envVar];
-  const base = configured && path.isAbsolute(configured) ? configured : path.join(os.homedir(), fallback);
+function xdgDir(configured: string | undefined, fallback: string, leaf: string, configuration: ParallixConfiguration): string {
+  const base = configured && path.isAbsolute(configured) ? configured : path.join(configuration.storage.homeDirectory || os.homedir(), fallback);
   return path.join(base, leaf);
 }
 
@@ -87,14 +88,14 @@ function xdgDir(envVar: string, fallback: string, leaf: string): string {
  * neither launcher overrides `HOME` or a state-dir variable, so their state
  * lives in the operator's home rather than under the worktree.
  */
-export function opencodeStateHomes(): string[] {
+export function opencodeStateHomes(configuration: ParallixConfiguration = DEFAULT_CONFIGURATION): string[] {
   return [
-    xdgDir('XDG_DATA_HOME', '.local/share', 'opencode'),
-    xdgDir('XDG_CONFIG_HOME', '.config', 'opencode'),
-    xdgDir('XDG_CACHE_HOME', '.cache', 'opencode'),
+    xdgDir(configuration.storage.xdgDataHome, '.local/share', 'opencode', configuration),
+    xdgDir(configuration.storage.xdgConfigHome, '.config', 'opencode', configuration),
+    xdgDir(configuration.storage.xdgCacheHome, '.cache', 'opencode', configuration),
   ];
 }
 
-export function piStateHomes(): string[] {
-  return [path.join(os.homedir(), '.pi')];
+export function piStateHomes(configuration: ParallixConfiguration = DEFAULT_CONFIGURATION): string[] {
+  return [path.join(configuration.storage.homeDirectory || os.homedir(), '.pi')];
 }

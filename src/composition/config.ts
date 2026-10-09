@@ -40,6 +40,7 @@ export function resolveConfiguration(source: Source): ParallixConfiguration {
     storage: Object.freeze({
       parallixHome: e('PARALLIX_HOME'), localAppData: e('LOCALAPPDATA'),
       homeDirectory: e('HOME'), debugSql: e('PARALLIX_DEBUG_SQL'),
+      xdgDataHome: e('XDG_DATA_HOME'), xdgConfigHome: e('XDG_CONFIG_HOME'), xdgCacheHome: e('XDG_CACHE_HOME'),
     }),
     agents: Object.freeze({
       override: e('WORKFLOW_AGENT'),
@@ -57,6 +58,9 @@ export function resolveConfiguration(source: Source): ParallixConfiguration {
       claudeRawStream: e('PARALLIX_CLAUDE_RAW_STREAM') !== undefined && e('PARALLIX_CLAUDE_RAW_STREAM') !== '' && e('PARALLIX_CLAUDE_RAW_STREAM') !== '0',
     }),
     terminal: Object.freeze({
+      hostEnvironment: Object.freeze(Object.fromEntries([
+        'PATH', 'HOME', 'TERM', 'SHELL', 'LANG', 'USER', 'LOGNAME', 'PARALLIX_HOME', 'XDG_CONFIG_HOME', 'XDG_STATE_HOME', 'XDG_DATA_HOME',
+      ].map(name => [name, e(name)]))),
       missionTerminal: e('PARALLIX_MISSION_TERMINAL'), missionSocket: e('PARALLIX_MISSION_SOCKET'),
       tmux: e('TMUX'),
       stateDir: e('PARALLIX_TERMINAL_STATE_DIR') ? path.resolve(e('PARALLIX_TERMINAL_STATE_DIR')!) : undefined,
@@ -73,6 +77,7 @@ export function resolveConfiguration(source: Source): ParallixConfiguration {
       reviewMode: e('PARALLIX_JEV_REVIEW')?.trim().toLowerCase(),
     }),
     runtime: Object.freeze({
+      gitIdentity: resolveGitIdentity(source),
       ci: Boolean(e('CI')), noTui: e('PARALLIX_NO_TUI') === '1', debug: Boolean(e('DEBUG')),
       noColor: e('NO_COLOR'), forceColor: e('FORCE_COLOR'), term: e('TERM'),
       integrationGateBypass: e('PARALLIX_TEST_ALLOW_INTEGRATION_GATE_BYPASS') === '1',
@@ -96,4 +101,13 @@ export function resolveConfiguration(source: Source): ParallixConfiguration {
 /** Resolve from the live process environment; the single ambient read of the application. */
 export function resolveProcessConfiguration(): ParallixConfiguration {
   return resolveConfiguration(process.env);
+}
+
+function resolveGitIdentity(source: Source) {
+  const e = (name: string) => source[name];
+  return Object.freeze({
+        authorName: e('GIT_AUTHOR_NAME') || 'Workflow Setup', authorEmail: e('GIT_AUTHOR_EMAIL') || 'workflow@example.invalid',
+        committerName: e('GIT_COMMITTER_NAME') || e('GIT_AUTHOR_NAME') || 'Workflow Setup',
+        committerEmail: e('GIT_COMMITTER_EMAIL') || e('GIT_AUTHOR_EMAIL') || 'workflow@example.invalid',
+  });
 }

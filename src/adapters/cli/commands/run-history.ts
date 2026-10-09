@@ -1,3 +1,4 @@
+import type { ParallixConfiguration } from "../../../application/ports/configuration.js";
 import childProcess from 'node:child_process';
 import fs from 'node:fs';
 import { missionRepositoryKey } from '../../filesystem/mission-repository-key.js';
@@ -25,7 +26,7 @@ export interface RunHistoryCommandDeps {
   readonly spawnSyncFn?: typeof childProcess.spawnSync;
   readonly isTTY?: boolean;
   readonly repositoryKeyFn?: (_worktree: string) => string;
-  readonly env?: NodeJS.ProcessEnv;
+  readonly configuration?: ParallixConfiguration;
 }
 
 function isAlive(pid: number): boolean {
@@ -82,8 +83,8 @@ export function attachRun(request: AttachRequest, deps: RunHistoryCommandDeps = 
   // discovery must fall back to the operator's surviving checkout.
   const worktree = (deps.resolveWorktreeFn ?? ((s: string) => resolveWorktree(s)))(slug) ?? process.cwd();
   const repositoryKey = (deps.repositoryKeyFn ?? missionRepositoryKey)(worktree);
-  const socket = missionSocketPath({ repositoryKey, missionId: slug }, deps.env);
-  const capture = missionTerminalCapturePath({ repositoryKey, missionId: slug }, deps.env);
+  const socket = missionSocketPath({ repositoryKey, missionId: slug }, deps.configuration);
+  const capture = missionTerminalCapturePath({ repositoryKey, missionId: slug }, deps.configuration);
   const session = listTmuxSessions(socket, spawnSyncFn).find(entry => entry.name === slug);
   if (request.list) {
     log(session ? `${slug}  session=${session.name}` : fs.existsSync(capture) ? `${slug}  no live terminal; captured output=${capture}` : `${slug}  no live terminal; captured output=unavailable`);

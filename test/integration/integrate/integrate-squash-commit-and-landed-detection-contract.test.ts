@@ -2,6 +2,7 @@
 // Behavior-owned suite (TASK-2622.09, integration-ci): the landed squash commit and its detection —
 // commit subject/body (task-2595), hook-failure bounce (task-2377.05), base-branch landed scan
 // (task-2517 F1), and already-merged detection and recovery refusal (task-2492). Legacy case names unchanged.
+import { resolveConfiguration } from '../../../src/composition/config.js';
 import test, { mock, describe } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -354,7 +355,7 @@ describe("squash hook bounce", () => {
 
     let error: Error | undefined;
     try {
-      await integrate.default([SLUG, '--no-integration-gates'], {
+      await integrate.default([SLUG, '--no-integration-gates'], { configuration: resolveConfiguration(process.env),
         missionServicesFn: async () => services,
         startAgentFn: async () => { launches.push('launched'); return { agent: 'codex', result: { status: 0 } } as never; },
         transitionTaskFn: async () => true,

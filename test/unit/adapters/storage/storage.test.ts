@@ -1,3 +1,5 @@
+import { resolveConfiguration } from '../../../../src/composition/config.js';
+const environment: NodeJS.ProcessEnv = { ...process.env };
 
 
 // ---------- resolveParallixHome ----------
@@ -14,70 +16,70 @@ await installModuleMocks();
 test.afterEach(() => mock.restoreAll());
 
 test('resolveParallixHome honors PARALLIX_HOME env var', () => {
-  const original = process.env.PARALLIX_HOME;
+  const original = environment.PARALLIX_HOME;
   try {
-    process.env.PARALLIX_HOME = '/tmp/parallix-test-override';
-    assert.equal(storage.resolveParallixHome(), '/tmp/parallix-test-override');
+    environment.PARALLIX_HOME = '/tmp/parallix-test-override';
+    assert.equal(storage.resolveParallixHome({ configuration: resolveConfiguration(environment) }), '/tmp/parallix-test-override');
   } finally {
-    process.env.PARALLIX_HOME = original;
+    environment.PARALLIX_HOME = original;
   }
 });
 
 test('resolveParallixHome creates directory when ensureDir is true', () => {
   const tmpDir = registeredMkdtemp('storage-test-');
   const testHome = path.join(tmpDir, 'new-dir', 'parallix');
-  const savedHome = process.env.PARALLIX_HOME;
+  const savedHome = environment.PARALLIX_HOME;
   try {
-    process.env.PARALLIX_HOME = testHome;
-    const resolved = storage.resolveParallixHome(true);
+    environment.PARALLIX_HOME = testHome;
+    const resolved = storage.resolveParallixHome({ ensureDir: true, configuration: resolveConfiguration(environment) });
     assert.equal(resolved, testHome);
     assert.ok(fs.statSync(testHome).isDirectory());
   } finally {
-    process.env.PARALLIX_HOME = savedHome;
+    environment.PARALLIX_HOME = savedHome;
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }
 });
 
 test('resolveParallixHome returns existing directory when ensureDir is false', () => {
   const tmpDir = registeredMkdtemp('storage-test-');
-  const savedHome = process.env.PARALLIX_HOME;
+  const savedHome = environment.PARALLIX_HOME;
   try {
-    process.env.PARALLIX_HOME = tmpDir;
-    const resolved = storage.resolveParallixHome({ ensureDir: false });
+    environment.PARALLIX_HOME = tmpDir;
+    const resolved = storage.resolveParallixHome({ configuration: resolveConfiguration(environment), ensureDir: false });
     assert.equal(resolved, path.resolve(tmpDir));
   } finally {
-    process.env.PARALLIX_HOME = savedHome;
+    environment.PARALLIX_HOME = savedHome;
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }
 });
 
 test('resolveParallixHome normalizes path (resolves symlinks, cleans segments)', () => {
-  const savedHome = process.env.PARALLIX_HOME;
+  const savedHome = environment.PARALLIX_HOME;
   try {
-    process.env.PARALLIX_HOME = '/tmp/../tmp/./parallix-normalize';
-    assert.equal(storage.resolveParallixHome(), '/tmp/parallix-normalize');
+    environment.PARALLIX_HOME = '/tmp/../tmp/./parallix-normalize';
+    assert.equal(storage.resolveParallixHome({ configuration: resolveConfiguration(environment) }), '/tmp/parallix-normalize');
   } finally {
-    process.env.PARALLIX_HOME = savedHome;
+    environment.PARALLIX_HOME = savedHome;
   }
 });
 
 test('resolveParallixHome rejects empty PARALLIX_HOME env var (falls through to platform path)', () => {
-  const savedHome = process.env.PARALLIX_HOME;
+  const savedHome = environment.PARALLIX_HOME;
   try {
-    process.env.PARALLIX_HOME = '';
-    const result = storage.resolveParallixHome();
+    environment.PARALLIX_HOME = '';
+    const result = storage.resolveParallixHome({ configuration: resolveConfiguration(environment) });
     // Empty string should not override — should use platform fallback (linux path includes /)
     assert.ok(result.includes('parallix'));
   } finally {
-    process.env.PARALLIX_HOME = savedHome;
+    environment.PARALLIX_HOME = savedHome;
   }
 });
 
 test('resolveParallixHome selects documented Linux default', () => {
   assert.equal(
-    storage.resolveParallixHome({
+    storage.resolveParallixHome({ configuration: resolveConfiguration({}),
       platform: 'linux',
-      env: {},
+
       homedir: () => '/tmp/home'
     }),
     '/tmp/home/.local/state/parallix'
@@ -86,9 +88,9 @@ test('resolveParallixHome selects documented Linux default', () => {
 
 test('resolveParallixHome selects documented macOS default', () => {
   assert.equal(
-    storage.resolveParallixHome({
+    storage.resolveParallixHome({ configuration: resolveConfiguration({}),
       platform: 'darwin',
-      env: {},
+
       homedir: () => '/Users/operator'
     }),
     '/Users/operator/Library/Application Support/parallix'
@@ -97,17 +99,17 @@ test('resolveParallixHome selects documented macOS default', () => {
 
 test('resolveParallixHome selects documented Windows default and fallback', () => {
   assert.equal(
-    storage.resolveParallixHome({
+    storage.resolveParallixHome({ configuration: resolveConfiguration({ LOCALAPPDATA: '/tmp/local-app-data' }),
       platform: 'win32',
-      env: { LOCALAPPDATA: '/tmp/local-app-data' },
+
       homedir: () => '/tmp/home'
     }),
     '/tmp/local-app-data/parallix'
   );
   assert.equal(
-    storage.resolveParallixHome({
+    storage.resolveParallixHome({ configuration: resolveConfiguration({}),
       platform: 'win32',
-      env: {},
+
       homedir: () => '/tmp/home'
     }),
     '/tmp/home/.parallix'
@@ -116,9 +118,9 @@ test('resolveParallixHome selects documented Windows default and fallback', () =
 
 test('resolveParallixHome uses ~/.parallix for unsupported platforms', () => {
   assert.equal(
-    storage.resolveParallixHome({
+    storage.resolveParallixHome({ configuration: resolveConfiguration({}),
       platform: 'freebsd',
-      env: {},
+
       homedir: () => '/tmp/home'
     }),
     '/tmp/home/.parallix'
@@ -136,12 +138,12 @@ test('storage exposes no stats.csv resolver after the measurement cut-over', () 
 
 test('resolveAgentsLocalPath returns <PARALLIX_HOME>/agents.local.json', () => {
   const tmpDir = registeredMkdtemp('storage-agents-');
-  const savedHome = process.env.PARALLIX_HOME;
+  const savedHome = environment.PARALLIX_HOME;
   try {
-    process.env.PARALLIX_HOME = tmpDir;
-    assert.equal(storage.resolveAgentsLocalPath(), path.join(tmpDir, 'agents.local.json'));
+    environment.PARALLIX_HOME = tmpDir;
+    assert.equal(storage.resolveAgentsLocalPath({ configuration: resolveConfiguration(environment) }), path.join(tmpDir, 'agents.local.json'));
   } finally {
-    process.env.PARALLIX_HOME = savedHome;
+    environment.PARALLIX_HOME = savedHome;
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }
 });
@@ -154,9 +156,9 @@ test('resolveAgentsLocalPath accepts an explicit string path', () => {
 
 test('readJson returns { ok: true } for valid JSON', () => {
   const tmpDir = registeredMkdtemp('storage-json-');
-  const savedHome = process.env.PARALLIX_HOME;
+  const savedHome = environment.PARALLIX_HOME;
   try {
-    process.env.PARALLIX_HOME = tmpDir;
+    environment.PARALLIX_HOME = tmpDir;
     const file = path.join(tmpDir, 'test.json');
     fs.writeFileSync(file, JSON.stringify({ blocklist: { gemini: true } }), 'utf8');
     const result = storage.readJson(file);
@@ -164,7 +166,7 @@ test('readJson returns { ok: true } for valid JSON', () => {
 // @ts-expect-error -- TASK-2328: partial test double after ESM seam migration
     assert.equal(result.data.blocklist.gemini, true);
   } finally {
-    process.env.PARALLIX_HOME = savedHome;
+    environment.PARALLIX_HOME = savedHome;
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }
 });
@@ -191,9 +193,9 @@ test('readJson returns { ok: false, error } for malformed JSON', () => {
 
 test('readJson accepts a resolver function instead of a path', () => {
   const tmpDir = registeredMkdtemp('storage-json-');
-  const savedHome = process.env.PARALLIX_HOME;
+  const savedHome = environment.PARALLIX_HOME;
   try {
-    process.env.PARALLIX_HOME = tmpDir;
+    environment.PARALLIX_HOME = tmpDir;
     const file = path.join(tmpDir, 'test.json');
     fs.writeFileSync(file, JSON.stringify({ key: 'val' }), 'utf8');
     const result = storage.readJson(() => file);
@@ -201,7 +203,7 @@ test('readJson accepts a resolver function instead of a path', () => {
 // @ts-expect-error -- TASK-2328: partial test double after ESM seam migration
     assert.equal(result.data.key, 'val');
   } finally {
-    process.env.PARALLIX_HOME = savedHome;
+    environment.PARALLIX_HOME = savedHome;
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }
 });
@@ -210,30 +212,30 @@ test('readJson accepts a resolver function instead of a path', () => {
 
 test('writeJson writes JSON and creates parent dirs', () => {
   const tmpDir = registeredMkdtemp('storage-write-');
-  const savedHome = process.env.PARALLIX_HOME;
+  const savedHome = environment.PARALLIX_HOME;
   try {
-    process.env.PARALLIX_HOME = tmpDir;
+    environment.PARALLIX_HOME = tmpDir;
     const nested = path.join(tmpDir, 'sub', 'deep');
     storage.writeJson(path.join(nested, 'data.json'), { hello: 'world' });
     const result = JSON.parse(fs.readFileSync(path.join(nested, 'data.json'), 'utf8'));
     assert.deepEqual(result, { hello: 'world' });
   } finally {
-    process.env.PARALLIX_HOME = savedHome;
+    environment.PARALLIX_HOME = savedHome;
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }
 });
 
 test('writeJson accepts a resolver function instead of a path', () => {
   const tmpDir = registeredMkdtemp('storage-write-');
-  const savedHome = process.env.PARALLIX_HOME;
+  const savedHome = environment.PARALLIX_HOME;
   try {
-    process.env.PARALLIX_HOME = tmpDir;
+    environment.PARALLIX_HOME = tmpDir;
     const file = path.join(tmpDir, 'resolved.json');
     storage.writeJson(() => file, { resolved: true });
     const result = JSON.parse(fs.readFileSync(file, 'utf8'));
     assert.deepEqual(result, { resolved: true });
   } finally {
-    process.env.PARALLIX_HOME = savedHome;
+    environment.PARALLIX_HOME = savedHome;
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }
 });
@@ -319,24 +321,24 @@ test('writeFileAtomic applies a restrictive requested mode to new sensitive stat
 test('isInitialized returns false for non-existent directory', () => {
   const tmpPath = path.join(os.tmpdir(), 'px-noexist-' + Date.now());
   try {
-    const savedHome = process.env.PARALLIX_HOME;
-    process.env.PARALLIX_HOME = tmpPath;
-    assert.equal(storage.isInitialized(), false);
+    const savedHome = environment.PARALLIX_HOME;
+    environment.PARALLIX_HOME = tmpPath;
+    assert.equal(storage.isInitialized(resolveConfiguration(environment)), false);
   } finally {
-    process.env.PARALLIX_HOME = undefined;
+    environment.PARALLIX_HOME = undefined;
   }
 });
 
 test('isInitialized returns true after ensureDir', () => {
   const tmpPath = path.join(os.tmpdir(), 'px-init-' + Date.now());
   try {
-    const savedHome = process.env.PARALLIX_HOME;
-    process.env.PARALLIX_HOME = tmpPath;
-    assert.equal(storage.isInitialized(), false);
-    storage.resolveParallixHome(true);
-    assert.equal(storage.isInitialized(), true);
+    const savedHome = environment.PARALLIX_HOME;
+    environment.PARALLIX_HOME = tmpPath;
+    assert.equal(storage.isInitialized(resolveConfiguration(environment)), false);
+    storage.resolveParallixHome({ ensureDir: true, configuration: resolveConfiguration(environment) });
+    assert.equal(storage.isInitialized(resolveConfiguration(environment)), true);
   } finally {
-    process.env.PARALLIX_HOME = undefined;
+    environment.PARALLIX_HOME = undefined;
     try { fs.rmSync(tmpPath, { recursive: true, force: true }); } catch {}
   }
 });
@@ -345,23 +347,23 @@ test('isInitialized returns false when PARALLIX_HOME points to a file', () => {
   const tmpPath = path.join(os.tmpdir(), 'px-file-' + Date.now());
   try {
     fs.writeFileSync(tmpPath, 'not a dir');
-    const savedHome = process.env.PARALLIX_HOME;
-    process.env.PARALLIX_HOME = tmpPath;
-    assert.equal(storage.isInitialized(), false);
+    const savedHome = environment.PARALLIX_HOME;
+    environment.PARALLIX_HOME = tmpPath;
+    assert.equal(storage.isInitialized(resolveConfiguration(environment)), false);
   } finally {
-    process.env.PARALLIX_HOME = undefined;
+    environment.PARALLIX_HOME = undefined;
     try { fs.unlinkSync(tmpPath); } catch {}
   }
 });
 
 test('isInitialized uses default platform path when PARALLIX_HOME is unset', () => {
-  const savedHome = process.env.PARALLIX_HOME;
+  const savedHome = environment.PARALLIX_HOME;
   try {
-    delete process.env.PARALLIX_HOME;
+    delete environment.PARALLIX_HOME;
     // Should use platform-specific path; always returns a boolean
-    const result = storage.isInitialized();
+    const result = storage.isInitialized(resolveConfiguration(environment));
     assert.equal(typeof result, 'boolean');
   } finally {
-    process.env.PARALLIX_HOME = savedHome;
+    environment.PARALLIX_HOME = savedHome;
   }
 });

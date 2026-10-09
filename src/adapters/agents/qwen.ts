@@ -1,3 +1,5 @@
+import type { ParallixConfiguration } from "../../application/ports/configuration.js";
+import { DEFAULT_CONFIGURATION } from "../../application/ports/configuration.js";
 import { spawnAndTee } from '../process/spawn-tee.js';
 import { extractQwenTelemetry } from './qwen-telemetry.js';
 import fs from 'node:fs';
@@ -13,6 +15,7 @@ import { qwenHomeRoot as qwenStateHome } from '../config/state-homes.js';
 const MAX_SESSION_AGE_MINUTES = 120;
 
 interface QwenInvocationOptions {
+  configuration?: ParallixConfiguration;
   prompt: string;
   worktree: string;
   env?: Record<string, string>;
@@ -158,7 +161,7 @@ function resolveQwenCommand() {
   return 'qwen';
 }
 
-function buildQwenInvocation({ prompt, worktree, env, resume = false, sessionId = null, model = null, sandbox = false }: QwenInvocationOptions) {
+function buildQwenInvocation({ configuration = DEFAULT_CONFIGURATION, prompt, worktree, env, resume = false, sessionId = null, model = null, sandbox = false }: QwenInvocationOptions) {
   const rootDir = resolveQwenWorktree(worktree);
   const args: string[] = ['-p', prompt, '--output-format', 'text'];
   // Native sandbox fallback (task-2513): qwen ships a real `-s/--sandbox`
@@ -186,7 +189,7 @@ function buildQwenInvocation({ prompt, worktree, env, resume = false, sessionId 
     options: {
       stdio: 'inherit',
       cwd: rootDir,
-      env: { ...process.env, ...env, QWEN_HOME: qwenHomeRoot(rootDir) }
+      env: { ...configuration.forwardedEnvironment, ...env, QWEN_HOME: qwenHomeRoot(rootDir) }
     }
   };
 }
@@ -240,17 +243,17 @@ let _spawnAndTee: any = spawnAndTee;
 /** Test hook: replace the launcher's spawn seam to capture argv. */
 function __setSpawnAndTeeForTest(fn: any) { _spawnAndTee = fn || spawnAndTee; }
 
-function startQwenAgent({ prompt, worktree, env, resume = false, sessionId = null, model = null, sandbox = false, teeOptions = {} }: StartQwenAgentOptions) {
+function startQwenAgent({ configuration = DEFAULT_CONFIGURATION, prompt, worktree, env, resume = false, sessionId = null, model = null, sandbox = false, teeOptions = {} }: StartQwenAgentOptions) {
   const rootDir = resolveQwenWorktree(worktree);
   ensureQwenHome(rootDir);
-  const invocation = buildQwenInvocation({ prompt, worktree: rootDir, env, resume, sessionId, model, sandbox });
+  const invocation = buildQwenInvocation({ configuration, prompt, worktree: rootDir, env, resume, sessionId, model, sandbox });
   const invocationStart = new Date().toISOString();
 
-  const spawn = (inv: any) => _spawnAndTee(inv.command, inv.args, { ...inv.options, ...teeOptions } as any);
+  const spawn = (inv: any) => _spawnAndTee(inv.command, inv.args, { ...inv.options, ...teeOptions, configuration } as any);
 
   const resultPromise = spawn(invocation).then((result: any) => {
     if (resume && sessionId && isStaleQwenSessionResult(result)) {
-      const fresh = buildQwenInvocation({ prompt, worktree: rootDir, env, resume: false, sessionId: null, model, sandbox });
+      const fresh = buildQwenInvocation({ configuration, prompt, worktree: rootDir, env, resume: false, sessionId: null, model, sandbox });
       return spawn(fresh).then((freshResult: any) => processResult(freshResult, rootDir, invocationStart));
     }
     return processResult(result, rootDir, invocationStart);

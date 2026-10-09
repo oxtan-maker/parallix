@@ -1,3 +1,5 @@
+import type { ParallixConfiguration } from "../../application/ports/configuration.js";
+import { DEFAULT_CONFIGURATION } from "../../application/ports/configuration.js";
 import { readAgentConfigOrExit } from '../agents/agents.js';
 import { selectAgent } from '../agents/agents.js';
 import { resolveWorktree } from '../filesystem/mission-utils.js';
@@ -82,6 +84,7 @@ export interface ExecuteMissionRuntime {
 }
 
 export interface ExecuteMissionAdapterOptions {
+  readonly configuration?: ParallixConfiguration;
   /** Application-owned Mission transition authority supplied by composition. */
   readonly missionTransitionStore: MissionTransitionStore;
   readonly operatorBlocklist?: OperatorBlocklistOverlay | null;
@@ -138,6 +141,7 @@ export class AgentExecutionAdapter implements AgentExecutionPort {
     private readonly _runtime: ExecuteMissionRuntime,
     private readonly _operatorBlocklist: OperatorBlocklistOverlay | null = null,
     private readonly _sessionMarkerPort: SessionMarkerPort | null = null,
+    private readonly _configuration: ParallixConfiguration = DEFAULT_CONFIGURATION,
   ) {}
 
   async prepare(request: { readonly slug: string; readonly worktree: string }): Promise<AgentLaunchPlan> {
@@ -156,7 +160,7 @@ export class AgentExecutionAdapter implements AgentExecutionPort {
       agentConfig,
       // `startAgent` checks the selected launcher's health after the Mission
       // transition; do not block the active lifecycle on a CLI probe here.
-      agent: selectAgent('active', { config: agentConfig, checkAvailability: false }),
+      agent: selectAgent('active', { config: agentConfig, checkAvailability: false, configuration: this._configuration }),
       prompt: this._runtime.buildExecutePrompt(request.slug, launchContext, { rootDir: request.worktree }),
     };
   }
@@ -269,7 +273,8 @@ class AutonomousReviewAdapter implements AutonomousReviewPort {
 }
 
 class RepairLaunchAdapter implements ExecuteRepairLaunchPort {
-  available(agent: string) { return agents.workflowLauncherStatus(agent); }
+  constructor(private readonly _configuration: ParallixConfiguration = DEFAULT_CONFIGURATION) {}
+  available(agent: string) { return agents.workflowLauncherStatus(agent, undefined, this._configuration); }
   readHead(worktree: string) {
     const result = (awaitableGit as any)(['-C', worktree, 'rev-parse', 'HEAD']);
     return result.status === 0 ? result.stdout.trim() : null;
@@ -277,7 +282,7 @@ class RepairLaunchAdapter implements ExecuteRepairLaunchPort {
   async launch(request: { slug: string; worktree: string; agent: string; prompt: string; sessionPolicy?: unknown }): Promise<unknown> {
     const status = this.available(request.agent);
     if (!status.supported) { throw new Error(`Agent ${request.agent} is not available for relaunch: ${status.detail || status.reason || 'unknown'}`); }
-    return agents.startAgent('active', {
+    return agents.startAgent('active', { configuration: this._configuration,
       prompt: request.prompt, worktree: request.worktree, agent: request.agent, slug: request.slug, role: 'implementer', sessionPolicy: request.sessionPolicy as any,
       onLaunch: ({ agent }: { agent: string }) => fmt.log.plain(`Relaunched ${fmt.agent(agent)} for repair. Session persistence will be used if available.`),
     });
@@ -306,36 +311,37 @@ export function createExecuteMissionPorts(
   if (!options?.missionTransitionStore) {
     throw new Error('composition must supply a mission transition store');
   }
-  const resolved = runtime || createDefaultExecuteMissionRuntime();
+  const resolved = runtime || createDefaultExecuteMissionRuntime(options.configuration);
   return {
     workspace: new MissionWorkspaceAdapter(rootDir, resolved),
     agentExecution: new AgentExecutionAdapter(
       resolved,
       options.operatorBlocklist ?? null,
       options.sessionMarkerPort ?? null,
+      options.configuration,
     ),
     missionTransitions: options.missionTransitionStore,
     telemetry: new ExecuteTelemetryAdapter(resolved),
     checkpointValidation: new CheckpointValidationAdapter(resolved),
     handoffExecution: new HandoffExecutionAdapter(resolved),
     autonomousReview: new AutonomousReviewAdapter(resolved),
-    repairLaunch: new RepairLaunchAdapter(),
+    repairLaunch: new RepairLaunchAdapter(options.configuration),
     output: new CliOutputAdapter(),
   };
 }
 
-export function createDefaultExecuteMissionRuntime(): ExecuteMissionRuntime {
+export function createDefaultExecuteMissionRuntime(configuration: ParallixConfiguration = DEFAULT_CONFIGURATION): ExecuteMissionRuntime {
   return {
-    preflight: startupPreflight,
+    preflight: (args, options) => startupPreflight(args, { ...options, configuration }),
     resolveWorktree,
     resolveTaskFile,
     buildCheckpointContext,
-    readAgentConfig: readAgentConfigOrExit,
+    readAgentConfig: (file, options) => readAgentConfigOrExit(file, { ...options, configuration }),
     buildExecutePrompt,
-    selectLaunchAndRecord,
+    selectLaunchAndRecord: options => selectLaunchAndRecord({ ...options, configuration }),
     enforceExecuteCommitSafety,
     getTaskStatus,
-    recordActiveStats: stats.recordActiveStats,
+    recordActiveStats: options => stats.recordActiveStats({ ...options, configuration }),
     resolveAgentModel,
     resolveStageTelemetry,
     performHandoff,

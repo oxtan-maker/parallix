@@ -1,3 +1,4 @@
+import type { ParallixConfiguration } from '../../application/ports/configuration.js';
 /**
  * Review Agent Fallback Module
  *
@@ -74,6 +75,7 @@ export async function markStageLaunchRecorded(
 export async function recordStageStatsSafe(
   kind: 'review' | 'active',
   opts: {
+    configuration?: ParallixConfiguration;
     stage: string;
     slug: string;
     rootDir?: string;
@@ -110,7 +112,7 @@ export async function recordStageStatsSafe(
     }))) {
       return;
     }
-    try { getStats().accumulateStageStats({ stage, slug, rootDir, implementer, reviewer, telemetry, durationMinutes, model }); } catch { /* best-effort */ }
+    try { getStats().accumulateStageStats({ configuration: opts.configuration, stage, slug, rootDir, implementer, reviewer, telemetry, durationMinutes, model }); } catch { /* best-effort */ }
   } catch (err: unknown) {
     log?.(fmt.status('WARN', `Could not record ${kind} stats for ${slug}: ${(err as Error).message}`));
   }

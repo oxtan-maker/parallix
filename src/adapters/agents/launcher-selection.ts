@@ -1,3 +1,5 @@
+import type { ParallixConfiguration } from "../../application/ports/configuration.js";
+import { DEFAULT_CONFIGURATION } from "../../application/ports/configuration.js";
 import fs from 'node:fs';
 import { KNOWN_AGENT_NAMES, WORKFLOW_AGENT_NAMES } from './agent-family-names.js';
 import { commandInPath, probeLauncherHealth, setCommandPathProbe, setLauncherHealthProbe } from './launcher-probes.js';
@@ -21,6 +23,7 @@ interface LauncherStatus {
 }
 
 type AgentSelectionOptions = ReadAgentConfigOptions & {
+  configuration?: ParallixConfiguration;
   config?: AgentConfig | null;
   configPath?: string;
   exclude?: any;
@@ -37,7 +40,7 @@ const LAUNCHERS: {[key: string]: Function} = {
   qwen: startQwenAgent
 };
 
-const RESOLVERS: {[key: string]: () => string} = {
+const RESOLVERS: {[key: string]: (_configuration?: ParallixConfiguration) => string} = {
   codex: resolveCodexCommand,
   claude: resolveClaudeCommand,
   vibe: resolveVibeCommand,
@@ -71,7 +74,7 @@ const DRAFT_NO_OUTPUT_INTERVAL_MS = 30_000;
 
 
 
-function workflowLauncherStatus(agent: string, worktree?: string): LauncherStatus {
+function workflowLauncherStatus(agent: string, worktree?: string, configuration: ParallixConfiguration = DEFAULT_CONFIGURATION): LauncherStatus {
   // For custom agent, resolve to the actual runner. resolveCustomRunner
   // defaults to process.cwd() when worktree is undefined, so this must not
   // be gated behind worktree truthiness — callers like review-loop.ts and
@@ -85,14 +88,14 @@ function workflowLauncherStatus(agent: string, worktree?: string): LauncherStatu
   // a built-in adapter can still be a usable reviewer when its CLI is on PATH;
   // probe its family name rather than silently removing it from the pool.
   const resolver = RESOLVERS[effectiveAgent] || (() => effectiveAgent);
-  const command = resolver();
-  const exists = command.includes('/') ? fs.existsSync(command) : commandInPath(command);
+  const command = resolver(configuration);
+  const exists = command.includes('/') ? fs.existsSync(command) : commandInPath(command, configuration);
   if (!exists) {
     return { agent: effectiveAgent, supported: false, detail: command, health: 'missing' };
   }
 
   const probeArgs = HEALTH_PROBE_ARGS[effectiveAgent] || ['--help'];
-  const health = probeLauncherHealth(command, probeArgs);
+  const health = probeLauncherHealth(command, probeArgs, configuration);
   const detail = `${command} ${probeArgs.join(' ')}`.trim();
   // A loaded workstation can delay even --help. The executable is present;
   // let the actual launch report failures rather than exhausting the pool on
@@ -137,7 +140,7 @@ function weightedRandom(agents: string[], weights: {[key: string]: number}) {
 }
 
 function selectAgent(step: string, options: AgentSelectionOptions = {}) {
-  const envOverride = process.env.WORKFLOW_AGENT;
+  const envOverride = options.configuration?.agents.override;
   const excluded = options.exclude instanceof Set ? options.exclude : new Set();
   const eligible = eligibleAgentsForStep(step, options);
   if (envOverride && !excluded.has(envOverride) && eligible.includes(envOverride)) {
@@ -160,7 +163,7 @@ function selectAgent(step: string, options: AgentSelectionOptions = {}) {
     const { worktree } = options;
     const statuses = new Map(
       pool
-        .map((agent) => [agent, workflowLauncherStatus(agent, worktree)] as [string, LauncherStatus])
+        .map((agent) => [agent, workflowLauncherStatus(agent, worktree, options.configuration)] as [string, LauncherStatus])
     );
     available = pool.filter((agent) => {
       const status = statuses.get(agent);
@@ -198,7 +201,7 @@ function selectAgent(step: string, options: AgentSelectionOptions = {}) {
   return available[0];
 }
 
-function assertAgentSupported(agent: string, worktree?: string) {
+function assertAgentSupported(agent: string, worktree?: string, configuration: ParallixConfiguration = DEFAULT_CONFIGURATION) {
   if (!LAUNCHERS[agent]) {
     // Special case: custom is valid but dispatches to a real runner
     if (agent === 'custom') {
@@ -219,7 +222,7 @@ function assertAgentSupported(agent: string, worktree?: string) {
     }
   }
 
-  const status = workflowLauncherStatus(agent, worktree);
+  const status = workflowLauncherStatus(agent, worktree, configuration);
   if (!status.supported) {
     const health = status.health ? ` (${status.health})` : '';
     const reason = status.reason ? `; reason: ${status.reason}` : '';
@@ -234,15 +237,8 @@ function assertAgentSupported(agent: string, worktree?: string) {
   }
 }
 
-function readPositiveMsEnv(name: string) {
-  const raw = process.env[name];
-  if (raw === undefined || raw === '') {return null;}
-  const value = Number(raw);
-  return Number.isFinite(value) && value >= 0 ? value : null;
-}
-
-function resolveNoOutputWatchdogConfig(config: {initialDelayMs?: number, intervalMs?: number, maxNoOutputMs?: number} | boolean, step: string | null = null) {
-  if (config === false || process.env.WORKFLOW_AGENT_NO_OUTPUT_WATCHDOG === '0') {
+function resolveNoOutputWatchdogConfig(config: {initialDelayMs?: number, intervalMs?: number, maxNoOutputMs?: number} | boolean, step: string | null = null, configuration: ParallixConfiguration = DEFAULT_CONFIGURATION) {
+  if (config === false || !configuration.agents.watchdogEnabled) {
     return null;
   }
   const explicit: {initialDelayMs?: number, intervalMs?: number, maxNoOutputMs?: number} = config && typeof config === 'object' ? config : {};
@@ -250,21 +246,21 @@ function resolveNoOutputWatchdogConfig(config: {initialDelayMs?: number, interva
   let intervalMs;
   if (step === 'draft') {
     initialDelayMs = explicit.initialDelayMs ??
-      readPositiveMsEnv('WORKFLOW_DRAFT_AGENT_NO_OUTPUT_INITIAL_MS') ??
+      configuration.agents.draftNoOutputInitialMs ??
       DRAFT_NO_OUTPUT_INITIAL_DELAY_MS;
     intervalMs = explicit.intervalMs ??
-      readPositiveMsEnv('WORKFLOW_DRAFT_AGENT_NO_OUTPUT_INTERVAL_MS') ??
+      configuration.agents.draftNoOutputIntervalMs ??
       DRAFT_NO_OUTPUT_INTERVAL_MS;
   } else {
     initialDelayMs = explicit.initialDelayMs ??
-      readPositiveMsEnv('WORKFLOW_AGENT_NO_OUTPUT_INITIAL_MS') ??
+      configuration.agents.noOutputInitialMs ??
       DEFAULT_NO_OUTPUT_INITIAL_DELAY_MS;
     intervalMs = explicit.intervalMs ??
-      readPositiveMsEnv('WORKFLOW_AGENT_NO_OUTPUT_INTERVAL_MS') ??
+      configuration.agents.noOutputIntervalMs ??
       DEFAULT_NO_OUTPUT_INTERVAL_MS;
   }
   const maxNoOutputMs = step === 'review'
-    ? explicit.maxNoOutputMs ?? readPositiveMsEnv('WORKFLOW_REVIEW_AGENT_NO_OUTPUT_MAX_MS')
+    ? explicit.maxNoOutputMs ?? configuration.agents.reviewNoOutputMaxMs
     : explicit.maxNoOutputMs;
   return { initialDelayMs, intervalMs, maxNoOutputMs };
 }

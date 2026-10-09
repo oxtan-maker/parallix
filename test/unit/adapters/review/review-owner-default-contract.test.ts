@@ -1,4 +1,6 @@
 // @ts-nocheck -- Retained legacy partial request doubles (TASK-2328).
+import { resolveConfiguration } from '../../../../src/composition/config.js';
+const environment: NodeJS.ProcessEnv = { ...process.env };
 // review owner default contract.
 // Related scenarios share imports; each contract keeps its own hooks and mutable fixtures.
 import test from 'node:test';
@@ -111,18 +113,18 @@ test('setup-review buildNonInteractiveAnswers defaults owner to human without en
   const path = await import('node:path');
   const root = registeredMkdtemp('task-2364-');
   try {
-    const oldEnv = process.env.WORKFLOW_SETUP_OWNER_LOGIN;
-    const oldProvider = process.env.WORKFLOW_SETUP_REVIEW_PROVIDER;
-    delete process.env.WORKFLOW_SETUP_OWNER_LOGIN;
-    process.env.WORKFLOW_SETUP_REVIEW_PROVIDER = 'forgejo';
+    const oldEnv = environment.WORKFLOW_SETUP_OWNER_LOGIN;
+    const oldProvider = environment.WORKFLOW_SETUP_REVIEW_PROVIDER;
+    delete environment.WORKFLOW_SETUP_OWNER_LOGIN;
+    environment.WORKFLOW_SETUP_REVIEW_PROVIDER = 'forgejo';
     try {
-      const answers = buildNonInteractiveAnswers(root, { log: () => {} });
+      const answers = buildNonInteractiveAnswers(root, { configuration: resolveConfiguration(environment), log: () => {} });
       assert.equal(answers.ownerLogin, 'human', 'non-interactive ownerLogin should default to human');
     } finally {
-      if (oldEnv === undefined) delete process.env.WORKFLOW_SETUP_OWNER_LOGIN;
-      else process.env.WORKFLOW_SETUP_OWNER_LOGIN = oldEnv;
-      if (oldProvider === undefined) delete process.env.WORKFLOW_SETUP_REVIEW_PROVIDER;
-      else process.env.WORKFLOW_SETUP_REVIEW_PROVIDER = oldProvider;
+      if (oldEnv === undefined) delete environment.WORKFLOW_SETUP_OWNER_LOGIN;
+      else environment.WORKFLOW_SETUP_OWNER_LOGIN = oldEnv;
+      if (oldProvider === undefined) delete environment.WORKFLOW_SETUP_REVIEW_PROVIDER;
+      else environment.WORKFLOW_SETUP_REVIEW_PROVIDER = oldProvider;
     }
   } finally {
     fs.rmSync(root, { recursive: true, force: true });

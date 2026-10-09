@@ -1,6 +1,7 @@
 // @ts-nocheck -- TASK-2328: partial test doubles from ESM seam migration; resolve in follow-up
 
 
+import { resolveConfiguration } from '../../../src/composition/config.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'fs';
@@ -546,7 +547,7 @@ test('runDraftCommand clears a stale feature Base-Branch when re-drafted from th
   const missionFile = path.join(missionDirForSlug(root, 'task-stale'), 'MISSION.md');
 
   try {
-    await runDraftCommand(['task-stale'], {
+    await runDraftCommand(['task-stale'], { configuration: resolveConfiguration(process.env),
       inferSlugFn: () => 'task-stale',
       resolveMainRepoFn: () => root,
       conventionalWorktreePathFn: () => path.join(root, 'task-stale'),
@@ -604,7 +605,7 @@ test('runDraftCommand records a non-primary launch branch over a previous base o
   const missionFile = path.join(missionDirForSlug(root, 'task-relaunch'), 'MISSION.md');
 
   try {
-    await runDraftCommand(['task-relaunch'], {
+    await runDraftCommand(['task-relaunch'], { configuration: resolveConfiguration(process.env),
       inferSlugFn: () => 'task-relaunch',
       resolveMainRepoFn: () => root,
       conventionalWorktreePathFn: () => path.join(root, 'task-relaunch'),
@@ -673,7 +674,7 @@ test('runDraftCommand scaffold does not emit a classification FAIL for an unset 
 
   const errors = [];
   try {
-    await runDraftCommand(['task-noclass'], {
+    await runDraftCommand(['task-noclass'], { configuration: resolveConfiguration(process.env),
       inferSlugFn: () => 'task-noclass',
       resolveMainRepoFn: () => root,
       conventionalWorktreePathFn: () => worktree,
@@ -730,7 +731,7 @@ test('runDraftCommand reuses the existing mission branch and clears the stale ba
   const ensured = [];
 
   try {
-    await runDraftCommand(['task-reuse'], {
+    await runDraftCommand(['task-reuse'], { configuration: resolveConfiguration(process.env),
       inferSlugFn: () => 'task-reuse',
       resolveMainRepoFn: () => root,
       conventionalWorktreePathFn: () => path.join(root, 'task-reuse'),
@@ -1353,7 +1354,7 @@ test('runDraftCommand transitions task to backlog after setup completes', async 
   fs.writeFileSync(taskFile, ['---', 'id: TASK-TST', 'labels: [ai_sdlc]', 'status: backlog', '---'].join('\n'));
 
   try {
-    await runDraftCommand(['task-tst'], {
+    await runDraftCommand(['task-tst'], { configuration: resolveConfiguration(process.env),
       inferSlugFn: () => 'task-tst',
       resolveMainRepoFn: () => tmpRoot,
       conventionalWorktreePathFn: () => '/wt-tst',
@@ -1401,7 +1402,7 @@ test('runDraftCommand transitions task to refined after draft agent succeeds and
   fs.writeFileSync(taskFile, ['---', 'id: TASK-TST', 'labels: [ai_sdlc]', 'status: backlog', '---'].join('\n'));
 
   try {
-    await runDraftCommand(['task-tst'], {
+    await runDraftCommand(['task-tst'], { configuration: resolveConfiguration(process.env),
       inferSlugFn: () => 'task-tst',
       resolveMainRepoFn: () => tmpRoot,
       conventionalWorktreePathFn: () => '/wt-tst',
@@ -1450,7 +1451,7 @@ test('runDraftCommand does not transition to refined when draft agent exits non-
   const transitions = [];
   let exitCode = null;
 
-  await runDraftCommand(['task-tst'], {
+  await runDraftCommand(['task-tst'], { configuration: resolveConfiguration(process.env),
     inferSlugFn: () => 'task-tst',
     resolveMainRepoFn: () => '/main',
     conventionalWorktreePathFn: () => '/wt-tst',
@@ -1487,7 +1488,7 @@ test('runDraftCommand does not transition to refined when safety harness throws'
   const transitions = [];
   let exitCode = null;
 
-  await runDraftCommand(['task-tst'], {
+  await runDraftCommand(['task-tst'], { configuration: resolveConfiguration(process.env),
     inferSlugFn: () => 'task-tst',
     resolveMainRepoFn: () => '/main',
     conventionalWorktreePathFn: () => '/wt-tst',
@@ -1579,12 +1580,12 @@ test('runDraftCommand materializes the Mission in SQLite before transitioning th
   });
 
   try {
-    await runDraftCommand(['task-tst'], draftDepsForIntake({
+    await runDraftCommand(['task-tst'], { configuration: resolveConfiguration(process.env), ...(draftDepsForIntake({
       transitionTaskFn: (slug, status) => { calls.push(`transition:${status}`); return true; },
       missionServicesFn,
       exitFn: (code) => { throw new Error(`unexpected exit ${code}`); },
       errorFn: (msg) => { throw new Error(`unexpected error: ${msg}`); },
-    }));
+    })) });
   } finally {
     // The injected capability is local to this test; no global composition mock to restore.
   }
@@ -1619,12 +1620,12 @@ test('runDraftCommand keys the intake request to the identity the composition ro
   };
 
   try {
-    await runDraftCommand(['task-tst'], draftDepsForIntake({
+    await runDraftCommand(['task-tst'], { configuration: resolveConfiguration(process.env), ...(draftDepsForIntake({
       transitionTaskFn: () => true,
       missionServicesFn,
       exitFn: (code) => { throw new Error(`unexpected exit ${code}`); },
       errorFn: (msg) => { throw new Error(`unexpected error: ${msg}`); },
-    }));
+    })) });
   } finally {
     // The injected capability is local to this test; no global composition mock to restore.
   }
@@ -1648,12 +1649,12 @@ test('runDraftCommand fails closed and leaves the Backlog task untouched when Mi
   });
 
   try {
-    await runDraftCommand(['task-tst'], draftDepsForIntake({
+    await runDraftCommand(['task-tst'], { configuration: resolveConfiguration(process.env), ...(draftDepsForIntake({
       transitionTaskFn: (slug, status) => { transitions.push(status); return true; },
       missionServicesFn,
       exitFn: (code) => { exitCodes.push(code); },
       errorFn: (msg) => { errors.push(String(msg)); },
-    }));
+    })) });
   } finally {
     // The injected capability is local to this test; no global composition mock to restore.
   }
@@ -1672,12 +1673,12 @@ test('runDraftCommand fails closed when the Mission store cannot be constructed'
   };
 
   try {
-    await runDraftCommand(['task-tst'], draftDepsForIntake({
+    await runDraftCommand(['task-tst'], { configuration: resolveConfiguration(process.env), ...(draftDepsForIntake({
       transitionTaskFn: (slug, status) => { transitions.push(status); return true; },
       missionServicesFn,
       exitFn: (code) => { exitCodes.push(code); },
       errorFn: (msg) => { errors.push(String(msg)); },
-    }));
+    })) });
   } finally {
     // The injected capability is local to this test; no global composition mock to restore.
   }
@@ -1703,12 +1704,12 @@ test('runDraftCommand treats an already-recorded Mission as idempotent and conti
   });
 
   try {
-    await runDraftCommand(['task-tst'], draftDepsForIntake({
+    await runDraftCommand(['task-tst'], { configuration: resolveConfiguration(process.env), ...(draftDepsForIntake({
       transitionTaskFn: (slug, status) => { transitions.push(status); return true; },
       missionServicesFn,
       exitFn: (code) => { throw new Error(`unexpected exit ${code}`); },
       errorFn: (msg) => { throw new Error(`unexpected error: ${msg}`); },
-    }));
+    })) });
   } finally {
     // The injected capability is local to this test; no global composition mock to restore.
   }
@@ -1724,7 +1725,7 @@ test('runDraftCommand treats an already-recorded Mission as idempotent and conti
 test('runDraftCommand records the refine transition before the Backlog task reaches ready', async () => {
   const calls = [];
 
-  await runDraftCommand(['task-tst'], draftDepsForIntake({
+  await runDraftCommand(['task-tst'], { configuration: resolveConfiguration(process.env), ...(draftDepsForIntake({
     transitionTaskFn: (slug, status) => { calls.push(`transition:${status}`); return true; },
     missionServicesFn: async () => ({
       repositoryId: 'main',
@@ -1738,7 +1739,7 @@ test('runDraftCommand records the refine transition before the Backlog task reac
     }),
     exitFn: (code) => { throw new Error(`unexpected exit ${code}`); },
     errorFn: (msg) => { throw new Error(`unexpected error: ${msg}`); },
-  }));
+  })) });
 
   assert.ok(calls.includes('lifecycle:refine'), 'the draft records the refine transition on the Mission aggregate');
   assert.ok(
@@ -1752,7 +1753,7 @@ test('runDraftCommand leaves the Backlog task alone when refinement cannot be re
   const exitCodes = [];
   const errors = [];
 
-  await runDraftCommand(['task-tst'], draftDepsForIntake({
+  await runDraftCommand(['task-tst'], { configuration: resolveConfiguration(process.env), ...(draftDepsForIntake({
     transitionTaskFn: (slug, status) => { calls.push(`transition:${status}`); return true; },
     missionServicesFn: async () => ({
       repositoryId: 'main',
@@ -1767,7 +1768,7 @@ test('runDraftCommand leaves the Backlog task alone when refinement cannot be re
     }),
     exitFn: (code) => { exitCodes.push(code); },
     errorFn: (msg) => { errors.push(String(msg)); },
-  }));
+  })) });
 
   assert.deepEqual(exitCodes, [1]);
   assert.ok(errors.some(msg => msg.includes('database is locked')), 'the refusal names the underlying failure');
@@ -1838,9 +1839,9 @@ async function runDraftCapturingOutput({ debug = false, overrides = {} } = {}) {
   const previousDebug = process.env.DEBUG;
   if (debug) { process.env.DEBUG = '1'; } else { delete process.env.DEBUG; }
   try {
-    await runDraftCommand(['task-tst'], task2471DraftDeps(Object.assign({
+    await runDraftCommand(['task-tst'], { configuration: resolveConfiguration(process.env), ...(task2471DraftDeps(Object.assign({
       logFn: (msg) => logs.push(String(msg)),
-    }, overrides)));
+    }, overrides))) });
   } finally {
     if (previousDebug === undefined) { delete process.env.DEBUG; } else { process.env.DEBUG = previousDebug; }
   }
@@ -1950,12 +1951,12 @@ test('px draft failure path keeps the FAIL line, the repair hint and a non-zero 
   const previousDebug = process.env.DEBUG;
   delete process.env.DEBUG;
   try {
-    await runDraftCommand(['task-tst'], task2471DraftDeps({
+    await runDraftCommand(['task-tst'], { configuration: resolveConfiguration(process.env), ...(task2471DraftDeps({
       logFn: (msg) => logs.push(String(msg)),
       errorFn: (msg) => errors.push(String(msg)),
       exitFn: (code) => { exits.push(code); },
       missionServicesFn: async () => { throw new Error('database is locked'); },
-    }));
+    })) });
   } finally {
     if (previousDebug === undefined) { delete process.env.DEBUG; } else { process.env.DEBUG = previousDebug; }
   }

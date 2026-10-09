@@ -1,3 +1,4 @@
+import type { ParallixConfiguration } from '../../application/ports/configuration.js';
 import { git, run } from '../git/git.js';
 import type { SpawnSyncOptions } from 'node:child_process';
 import { loadAdapterConfig } from '../config/product-config.js';
@@ -8,7 +9,6 @@ import { createHash } from 'node:crypto';
 import { getPrimaryBranch } from '../filesystem/mission-utils.js';
 import { resolveParallixHome, readJson, writeJson } from '../storage/storage.js';
 import { captureRecoveryEvidence, resolveConfiguredCredentialRedactor } from '../../application/recovery-evidence.js';
-
 interface GitOptions {
   encoding?: BufferEncoding;
   stdio?: SpawnSyncOptions['stdio'];
@@ -292,10 +292,10 @@ export function verificationProofPath(identity: string, homeDir: string = resolv
   return pathMod.join(homeDir, 'verification-proofs', `${identity}.json`);
 }
 
-export function readReusableVerificationProof(command: string, rootDir: string = process.cwd(), options: { gitRunner?: GitFn; proofPath?: string; context?: string } = {}): { ok: boolean; proof?: ReusableVerificationProof; identity?: string; error?: string } {
+export function readReusableVerificationProof(command: string, rootDir: string = process.cwd(), options: { configuration?: ParallixConfiguration; gitRunner?: GitFn; proofPath?: string; context?: string } = {}): { ok: boolean; proof?: ReusableVerificationProof; identity?: string; error?: string } {
   const identityResult = createVerificationProofIdentity(command, rootDir, options);
   if (!identityResult.ok) { return identityResult; }
-  const filePath = options.proofPath || verificationProofPath(identityResult.identity!);
+  const filePath = options.proofPath || verificationProofPath(identityResult.identity!, resolveParallixHome({ configuration: options.configuration, ensureDir: false }));
   const result = readJson<ReusableVerificationProof>(filePath);
   const proof = result.data;
   if (!result.ok || !proof || proof.version !== 3 || proof.status !== 'passed'
@@ -307,7 +307,7 @@ export function readReusableVerificationProof(command: string, rootDir: string =
   return { ok: true, proof, identity: identityResult.identity };
 }
 
-export function writeReusableVerificationProof(command: string, rootDir: string = process.cwd(), options: { gitRunner?: GitFn; proofPath?: string; expectedIdentity?: string; context?: string } = {}): { ok: boolean; proof?: ReusableVerificationProof; identity?: string; error?: string } {
+export function writeReusableVerificationProof(command: string, rootDir: string = process.cwd(), options: { configuration?: ParallixConfiguration; gitRunner?: GitFn; proofPath?: string; expectedIdentity?: string; context?: string } = {}): { ok: boolean; proof?: ReusableVerificationProof; identity?: string; error?: string } {
   const identityResult = createVerificationProofIdentity(command, rootDir, options);
   if (!identityResult.ok) { return identityResult; }
   if (options.expectedIdentity && identityResult.identity !== options.expectedIdentity) {
@@ -326,7 +326,7 @@ export function writeReusableVerificationProof(command: string, rootDir: string 
     status: 'passed',
   };
   try {
-    writeJson(options.proofPath || verificationProofPath(proof.identity, resolveParallixHome({ ensureDir: true })), proof, { mode: 0o600 });
+    writeJson(options.proofPath || verificationProofPath(proof.identity, resolveParallixHome({ ensureDir: true, configuration: options.configuration })), proof, { mode: 0o600 });
   } catch {
     return { ok: false, identity: proof.identity, error: 'verification proof could not be written' };
   }
@@ -491,10 +491,10 @@ export function assertVerifiedTreeProof(proof: { rootDir?: string; branch?: stri
 }
 
 /** @param {string[]} args @param {{log?: Function}} [options] */
-export default function runWorkflow(args: string[], options: { log?: Function } = {}): import('child_process').SpawnSyncReturns<string> {
+export default function runWorkflow(args: string[], options: { log?: Function; configuration?: ParallixConfiguration } = {}): import('child_process').SpawnSyncReturns<string> {
   const opts = options;
   const logFn = opts.log || log.plain;
-  const area = args[0] || process.env.VERIFY_AREA || DEFAULT_AREA;
+  const area = args[0] || options.configuration?.runtime.verifyArea || DEFAULT_AREA;
   logFn(`Running verification gate for area: ${area}...`);
   return runVerificationGate(area, { stdio: 'inherit' });
 }

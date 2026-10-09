@@ -1,3 +1,4 @@
+import type { ParallixConfiguration } from "./ports/configuration.js";
 /**
  * Integrate workflow use case — the `px integrate` sequence (TASK-2512).
  *
@@ -38,6 +39,7 @@ import { isNestedWorkPublisher, publishedAgentLaunch } from './recording/current
 
 /** The injection seams `px integrate` callers and the characterization suites bind. */
 export interface IntegrateOptions extends Partial<IntegrateSeams> {
+  configuration?: ParallixConfiguration;
   missionServicesFn?: Function;
   /** Board composition receives the terminal status without terminating the UI process. */
   exitFn?: (_code: number) => void;
@@ -270,7 +272,7 @@ export function createIntegrateWorkflow(ports: IntegrateWorkflowPorts) {
       await recoverMissionForIntegration(context, { missionServices });
     }
 
-    if (printIntegrationPreflight(context, { gitFn: ports.git.git }).failures.length > 0) {
+    if (printIntegrationPreflight(context, { gitFn: ports.git.git, configuration: options.configuration }).failures.length > 0) {
       throw abortWith(landing, '\nIntegration preflight failed. Resolve the blockers above before running integrate.');
     }
 
@@ -294,7 +296,7 @@ export function createIntegrateWorkflow(ports: IntegrateWorkflowPorts) {
     // silently performing them (SC4 / SC6).
     const strategy = createIntegrationStrategy(ports.productConfig.resolveIntegrationMode(context.baseWorktree ?? ports.process.cwd()));
     let verificationEvidence = await strategy.run('run-required-local-gates', () =>
-      runRequiredLocalGates({ slug, context, missionLoad, missionServices, ...request, seams }));
+      runRequiredLocalGates({ slug, context, missionLoad, missionServices, ...request, seams, configuration: options.configuration }));
     // Gates certify a particular landing candidate.  If the primary advanced
     // while they ran, rebase again and run the complete configured set against
     // that new candidate; never squash a comparison tree the gates did not see.
@@ -329,7 +331,7 @@ export function createIntegrateWorkflow(ports: IntegrateWorkflowPorts) {
     }
     await strategy.run('publish', () => publishMission({
       slug, context, missionServices, missionServicesFn,
-      baseWorktree: context.baseWorktree, baseBranch: context.baseBranch, seams, state,
+      baseWorktree: context.baseWorktree, baseBranch: context.baseBranch, seams, state, configuration: options.configuration,
     }));
     return 0;
   }
@@ -339,7 +341,7 @@ export function createIntegrateWorkflow(ports: IntegrateWorkflowPorts) {
     let request: IntegrateRequest;
     let exitCode = 0;
     try {
-      request = parseIntegrateArgs(args);
+      request = parseIntegrateArgs(args, options.configuration);
     } catch (error) {
       fmt.log.fail((error as Error).message);
       exitFn(1);
@@ -347,7 +349,7 @@ export function createIntegrateWorkflow(ports: IntegrateWorkflowPorts) {
     }
     const slug = missionPaths.inferSlug(request.explicitSlug);
 
-    if (process.env.FORGEJO_USER === 'gemini' || process.env.WORKFLOW_AGENT === 'gemini') {
+    if (options.configuration?.forgejo.user === 'gemini' || options.configuration?.agents.override === 'gemini') {
       fmt.log.fail('Gemini is not authorized to run integrate. Post a handoff comment on the PR and stop.');
       exitFn(1);
       return;

@@ -1,3 +1,5 @@
+import type { ParallixConfiguration } from "../../application/ports/configuration.js";
+import { DEFAULT_CONFIGURATION } from "../../application/ports/configuration.js";
 import { AsyncLocalStorage } from 'node:async_hooks';
 import childProcess from 'node:child_process';
 import fs from 'node:fs';
@@ -44,6 +46,7 @@ export const DISABLE_ENV_VAR = 'PARALLIX_NO_BUBBLEWRAP';
 
 /** Resolved filesystem permissions for one workflow-agent launch. */
 export interface SandboxProfile {
+  terminalStateRoots?: string[];
   worktree: string;
   worktreeWritable: boolean;
   writable: string[];
@@ -104,9 +107,8 @@ export function isBubblewrapAvailable(): boolean {
 }
 
 /** True when the operator opted out via `PARALLIX_NO_BUBBLEWRAP`. */
-export function isBubblewrapDisabled(env: NodeJS.ProcessEnv = process.env): boolean {
-  const raw = env[DISABLE_ENV_VAR];
-  return typeof raw === 'string' && raw.trim() !== '' && raw.trim() !== '0';
+export function isBubblewrapDisabled(configuration: ParallixConfiguration = DEFAULT_CONFIGURATION): boolean {
+  return configuration.agents.bubblewrapDisabled;
 }
 
 function requireDirectory(dir: string, label: string): string {
@@ -255,7 +257,7 @@ export function buildBubblewrapArgs(profile: SandboxProfile, cwd: string): strin
   // Mask the tmux terminal state (sockets, pane launch environment) last, so no
   // writable ancestor bind re-exposes it: a confined agent must not reach any
   // run's tmux server, its own included (TASK-2643).
-  for (const root of existingTerminalStateRoots()) {
+  for (const root of (profile.terminalStateRoots ?? existingTerminalStateRoots())) {
     if (!isWithin(root, worktree)) { args.push('--tmpfs', root); }
   }
   return [...args, '--chdir', path.resolve(cwd), '--'];
@@ -291,14 +293,14 @@ const CLAUDE_GUARDED = {
   directories: ['agents', 'commands', 'hooks', 'output-styles', 'plugins', 'projects', 'rules', 'skills'],
 };
 
-function claudeStateHomes(worktree: string): LauncherStateHomes {
+function claudeStateHomes(worktree: string, configuration: ParallixConfiguration): LauncherStateHomes {
   return {
-    directories: [parallixStateHome(), claudeSessionEnvDir(), claudeProjectDir(worktree)],
-    files: [claudeCredentialsPath()],
+    directories: [parallixStateHome(configuration), claudeSessionEnvDir(configuration), claudeProjectDir(worktree, configuration)],
+    files: [claudeCredentialsPath(configuration)],
     configCell: {
-      target: claudeConfigDir(),
-      cell: claudeConfigCellDir(),
-      readOnly: [claudeProjectMemoryDir(worktree)],
+      target: claudeConfigDir(configuration),
+      cell: claudeConfigCellDir(configuration),
+      readOnly: [claudeProjectMemoryDir(worktree, configuration)],
       keep: CLAUDE_CELL_STATE,
       guarded: CLAUDE_GUARDED,
     },
@@ -314,16 +316,16 @@ function claudeStateHomes(worktree: string): LauncherStateHomes {
  * list for families the guard does not scope, so the caller keeps the plain
  * artifact-dir-only profile.
  */
-function resolveLauncherStateHomes(family: string | null | undefined, worktree: string): LauncherStateHomes {
-  const directories = (...homes: string[]) => [parallixStateHome(), ...homes];
+function resolveLauncherStateHomes(family: string | null | undefined, worktree: string, configuration: ParallixConfiguration): LauncherStateHomes {
+  const directories = (...homes: string[]) => [parallixStateHome(configuration), ...homes];
   switch (family) {
-    case 'codex': return { directories: directories(codexHomeRoot(worktree)), files: [codexAuthPath()] };
+    case 'codex': return { directories: directories(codexHomeRoot(worktree)), files: [codexAuthPath(configuration)] };
     case 'qwen': return { directories: directories(qwenHomeRoot(worktree)), files: [] };
     case 'vibe': return { directories: directories(vibeHomeRoot(worktree)), files: [] };
-    case 'claude': return claudeStateHomes(worktree);
-    case 'opencode': return { directories: directories(...opencodeStateHomes()), files: [] };
-    case 'pi': return { directories: directories(...piStateHomes()), files: [] };
-    case 'custom': return resolveLauncherStateHomes(resolveCustomRunner(worktree), worktree);
+    case 'claude': return claudeStateHomes(worktree, configuration);
+    case 'opencode': return { directories: directories(...opencodeStateHomes(configuration)), files: [] };
+    case 'pi': return { directories: directories(...piStateHomes(configuration)), files: [] };
+    case 'custom': return resolveLauncherStateHomes(resolveCustomRunner(worktree), worktree, configuration);
     default: return { directories: [], files: [] };
   }
 }
@@ -334,11 +336,13 @@ export function resolveSandboxProfile(
   worktree: string,
   artifactDir?: string | null,
   family?: string | null,
+  configuration: ParallixConfiguration = DEFAULT_CONFIGURATION,
 ): SandboxProfile {
   if (step === 'review') {
     if (!artifactDir) { throw new BubblewrapGuardError('review step requires a resolved artifact directory'); }
-    const stateHomes = resolveLauncherStateHomes(family, worktree);
+    const stateHomes = resolveLauncherStateHomes(family, worktree, configuration);
     return {
+      terminalStateRoots: existingTerminalStateRoots(configuration),
       worktree, worktreeWritable: false, writable: [artifactDir],
       optionalWritable: ['/tmp'], optionalWritableDirectories: stateHomes.directories, optionalWritableFiles: stateHomes.files,
       ...(stateHomes.configCell ? { configCell: stateHomes.configCell } : {})
@@ -350,8 +354,9 @@ export function resolveSandboxProfile(
   // Git-resolved paths only — never the checkout parent or an unrelated host
   // path. Reviewer steps return above and keep Git state read-only.
   const gitMounts = resolveGitMetadataMounts(worktree);
-  const stateHomes = resolveLauncherStateHomes(family, worktree);
+  const stateHomes = resolveLauncherStateHomes(family, worktree, configuration);
   return {
+    terminalStateRoots: existingTerminalStateRoots(configuration),
     worktree,
     worktreeWritable: true,
     writable: gitMounts,
@@ -370,8 +375,8 @@ export function withSandboxProfile<T>(profile: SandboxProfile | null, fn: () => 
 }
 
 /** Wrap a command without shell interpolation, preserving its original argv. */
-export function wrapWithBubblewrap(command: string, args: string[], cwd: string): { command: string; args: string[] } {
+export function wrapWithBubblewrap(command: string, args: string[], cwd: string, configuration: ParallixConfiguration = DEFAULT_CONFIGURATION): { command: string; args: string[] } {
   const profile = profileStorage.getStore();
-  if (!profile || isBubblewrapDisabled() || !isBubblewrapAvailable()) { return { command, args }; }
+  if (!profile || isBubblewrapDisabled(configuration) || !isBubblewrapAvailable()) { return { command, args }; }
   return { command: BUBBLEWRAP_COMMAND, args: [...buildBubblewrapArgs(profile, cwd), command, ...args] };
 }
