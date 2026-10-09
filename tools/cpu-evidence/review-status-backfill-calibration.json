@@ -1,0 +1,133 @@
+{
+  "task": "task-2692",
+  "date": "2026-10-09",
+  "measurement": "integration-cpu-hook.mjs: process user + system CPU plus waited-child CPU, including teardown",
+  "file": "integration/review/review-status-backfill.integration.test.ts",
+  "previousCoveredBudgetMs": 100,
+  "newCoveredBudgetMs": 175,
+  "plainBudgetMs": 100,
+  "capturedGateFailure": {
+    "cpuMsRounded": 110,
+    "limitMs": 100,
+    "source": "Operator-supplied latest integration-ci gate failure; case backfills the events into SQLite and renders them under the round in px status",
+    "precision": "Diagnostic rounds CPU seconds to three decimal places; original case counter unavailable"
+  },
+  "focusedCommand": "PARALLIX_TEST_CPU_PROFILE_DIR=<dir> PARALLIX_TEST_COVERAGE=1 PARALLIX_PREBUILT_PACK=1 npx tsx test/run-default-tests.ts --integration-ci test/integration/review/review-status-backfill.integration.test.ts",
+  "fullCommand": "PARALLIX_TEST_CPU_PROFILE_DIR=<dir> PARALLIX_TEST_COVERAGE=1 npm run test:integration:ci:prebuilt",
+  "focusedRecords": [
+    {
+      "file": "integration/review/review-status-backfill.integration.test.ts",
+      "name": "px status reports the review conversation from persisted events > reads the exported events in chronological order with their frontmatter",
+      "profile": "covered",
+      "cpuMs": 3.603,
+      "limitMs": 100
+    },
+    {
+      "file": "integration/review/review-status-backfill.integration.test.ts",
+      "name": "px status reports the review conversation from persisted events > backfills the events into SQLite and renders them under the round in px status",
+      "profile": "covered",
+      "cpuMs": 52.062,
+      "limitMs": 100
+    },
+    {
+      "file": "integration/review/review-status-backfill.integration.test.ts",
+      "name": "px status reports the review conversation from persisted events > restores the conversation for a post-cutover mission that has no review-state.json",
+      "profile": "covered",
+      "cpuMs": 44.557,
+      "limitMs": 100
+    },
+    {
+      "file": "integration/review/review-status-backfill.integration.test.ts",
+      "name": "px status reports the review conversation from persisted events > reports the pending write under --dry-run without touching the database",
+      "profile": "covered",
+      "cpuMs": 37.313,
+      "limitMs": 100
+    },
+    {
+      "file": "integration/review/review-status-backfill.integration.test.ts",
+      "name": "px status reports the review conversation from persisted events > reads the exported events in chronological order with their frontmatter",
+      "profile": "covered",
+      "cpuMs": 3.466,
+      "limitMs": 100
+    },
+    {
+      "file": "integration/review/review-status-backfill.integration.test.ts",
+      "name": "px status reports the review conversation from persisted events > backfills the events into SQLite and renders them under the round in px status",
+      "profile": "covered",
+      "cpuMs": 46.095,
+      "limitMs": 100
+    },
+    {
+      "file": "integration/review/review-status-backfill.integration.test.ts",
+      "name": "px status reports the review conversation from persisted events > restores the conversation for a post-cutover mission that has no review-state.json",
+      "profile": "covered",
+      "cpuMs": 37.393,
+      "limitMs": 100
+    },
+    {
+      "file": "integration/review/review-status-backfill.integration.test.ts",
+      "name": "px status reports the review conversation from persisted events > reports the pending write under --dry-run without touching the database",
+      "profile": "covered",
+      "cpuMs": 37.157,
+      "limitMs": 100
+    }
+  ],
+  "fullWorkloadRecords": [
+    {
+      "file": "integration/review/review-status-backfill.integration.test.ts",
+      "name": "px status reports the review conversation from persisted events > reads the exported events in chronological order with their frontmatter",
+      "profile": "covered",
+      "cpuMs": 3.416,
+      "limitMs": 100
+    },
+    {
+      "file": "integration/review/review-status-backfill.integration.test.ts",
+      "name": "px status reports the review conversation from persisted events > backfills the events into SQLite and renders them under the round in px status",
+      "profile": "covered",
+      "cpuMs": 75.839,
+      "limitMs": 100
+    },
+    {
+      "file": "integration/review/review-status-backfill.integration.test.ts",
+      "name": "px status reports the review conversation from persisted events > restores the conversation for a post-cutover mission that has no review-state.json",
+      "profile": "covered",
+      "cpuMs": 38.165,
+      "limitMs": 100
+    },
+    {
+      "file": "integration/review/review-status-backfill.integration.test.ts",
+      "name": "px status reports the review conversation from persisted events > reports the pending write under --dry-run without touching the database",
+      "profile": "covered",
+      "cpuMs": 37.158,
+      "limitMs": 100
+    }
+  ],
+  "calibration": {
+    "basis": "Maximum of captured failed gate measurement and current covered profiles",
+    "peakCpuMs": 110,
+    "minimumMargin": 0.5,
+    "roundUpMs": 25,
+    "actualMargin": 0.5909090909090908
+  },
+  "diagnosis": "CPU guard only: all behavioral assertions passed. Unchanged exact gate passed locally before repair; two isolated covered profiles and full-workload profile show variable CPU cost. Calibrate covered case allowance using the observed gate peak, not only isolated runs. No runtime repair inferred from these observations.",
+  "preserved": "Finite case/suite CPU guards, plain budget, wall deadlines, CPU accounting, assertions, fixtures, coverage and test selection unchanged.",
+  "validation": {
+    "beforeRepairExactGate": {
+      "exitCode": 0,
+      "suiteCpuMs": 186808,
+      "elapsedMs": 49822
+    },
+    "beforeRepairProfiledExactGate": {
+      "exitCode": 0,
+      "suiteCpuMs": 184238,
+      "elapsedMs": 49770
+    },
+    "afterRepairFocusedCoveredContract": {
+      "tests": 4,
+      "passed": 4,
+      "failed": 0,
+      "skipped": 0
+    },
+    "scope": "Real isolated filesystem and migrated SQLite backfill through persisted-event read adapter, review projection and status rendering; includes repeat backfill, post-cutover state and dry-run. Local diagnostics do not establish harness gate success."
+  }
+}

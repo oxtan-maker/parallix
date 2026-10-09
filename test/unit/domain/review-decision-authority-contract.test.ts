@@ -443,7 +443,7 @@ it('classifier integration repairs bind the withdrawn gate and retain its comple
   const source = { kind: 'classifier' as const, identity: 'jev' as const, decisionId: 'd', provider: 'typesafe', model: 'jev',
     packetHash: 'c'.repeat(64), priorRevision: 'a'.repeat(40), candidateRevision: 'b'.repeat(40), responseRevision: 'b'.repeat(40),
     findingIds: ['integration-gate-repair'], integrationRepair: { revokedAt, gate: 'output' },
-    policyVersion: 'repeat-findings-52-89-v2', label: 'addresses', score: 0.52 };
+    policyVersion: 'integration-repair-52-67-v1', label: 'addresses', score: 0.52 };
   const at = '2026-10-06T00:00:00Z';
   const approved = applyClassifierReview(review, source, 'clear', at);
   assert.equal(currentReviewRound(approved).phase, 'approved');
@@ -458,8 +458,10 @@ it('classifier integration repairs bind the withdrawn gate and retain its comple
   const operatorRevoked = { ...review, rounds: [{ ...review.rounds[0], decision: {
     ...review.rounds[0].decision!, revocation: { ...revocation, cause: { kind: 'operator' as const } },
   } }, review.rounds[1]] } as typeof review;
-  assert.throws(() => applyClassifierReview(operatorRevoked, source, 'clear', at), /stale/);
-  const unresolved = applyClassifierReview(review, { ...source, label: 'does_not_address', score: 0.89 }, 'implementer', at);
+  assert.throws(() => applyClassifierReview(operatorRevoked, source, 'clear', at), /current policy/);
+  assert.throws(() => applyClassifierReview(review, { ...source, policyVersion: 'integration-repair-52-81-v1' }, 'clear', at), /current policy/);
+  assert.throws(() => applyClassifierReview(review, { ...source, label: 'does_not_address', score: 0.669 }, 'implementer', at), /provenance/);
+  const unresolved = applyClassifierReview(review, { ...source, label: 'does_not_address', score: 0.67 }, 'implementer', at);
   const decision = currentReviewRound(unresolved).decision;
   assert.equal(decision?.kind, 'changes-requested');
   if (decision?.kind === 'changes-requested') {

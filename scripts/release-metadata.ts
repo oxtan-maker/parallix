@@ -33,7 +33,7 @@ const ALLOWED_LICENSES = new Set([
   'AGPL-3.0-or-later',
 ]);
 
-const LICENSE_FILE_PATTERN = /^(LICENSE|LICENCE|COPYING|NOTICE)(\.\w+)?$/i;
+const LICENSE_FILE_PATTERN = /^(LICENSE|LICENCE|COPYING|NOTICE|THIRD_PARTY_NOTICES)(\.\w+)?$/i;
 
 /**
  * Owning package directory for a bundle input path, or null for first-party source.

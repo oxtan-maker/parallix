@@ -1,6 +1,7 @@
 import type { DecisionAnswer, DecisionPort, DecisionRequest, DecisionResult } from '../../application/ports/decision.js';
 import { DecisionError } from '../../application/ports/decision.js';
 import type { DecisionResolution } from './provider.js';
+import { measureDecisionBudget, supportsDecisionBudget } from './token-budget.js';
 import { decisionHttpError } from './provider-errors.js';
 
 function record(value: unknown): value is Record<string, unknown> {
@@ -125,12 +126,23 @@ export class SystemOneDecisionAdapter implements DecisionPort {
     return Buffer.byteLength(serialize(request, this.resolution.route?.model ?? ''));
   }
 
+  requestBudget(request: DecisionRequest) {
+    try { return measureDecisionBudget(serialize(request, this.resolution.route?.model ?? ''), this.resolution.route?.model ?? ''); }
+    catch { throw new DecisionError('invalid-request', 'Decision request token budget cannot be measured.'); }
+  }
+
   async decide(request: DecisionRequest): Promise<DecisionResult> {
     const route = this.resolution.route;
     if (!route) { throw new DecisionError('setup-required', this.resolution.availability.status === 'setup-required'
       ? this.resolution.availability.reason : 'Decision setup required.'); }
     let body: string;
-    try { body = encode(request, route.model); }
+    try {
+      body = encode(request, route.model);
+      const budget = supportsDecisionBudget(route.model) ? this.requestBudget(request) : null;
+      if (budget && (budget.inputTokens > budget.maxInputTokens || budget.contextTokens > budget.maxContextTokens)) {
+        throw new Error('Decision request exceeds model token limits');
+      }
+    }
     catch { throw new DecisionError('invalid-request', 'Decision request is invalid.'); }
     let response: Response;
     try {

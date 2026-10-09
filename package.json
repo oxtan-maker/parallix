@@ -1,6 +1,6 @@
 {
   "name": "@magnusekdahl/parallix",
-  "version": "1.5.316",
+  "version": "1.5.317",
   "description": "Local-first workflow and trust layer for AI coding agents — isolated Git worktree missions, separate code review, repository-owned verification, Linux confinement, and human-owned merges",
   "license": "AGPL-3.0-or-later",
   "private": false,
@@ -107,6 +107,7 @@
     "fastify": "^5.12.1",
     "happy-dom": "^20.14.5",
     "ink": "^6.8.0",
+    "jevtok-ts": "0.2.0",
     "postject": "^1.0.0-alpha.6",
     "react": "^19.3.0",
     "react-dom": "^19.3.0",

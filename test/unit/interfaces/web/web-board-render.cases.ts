@@ -455,7 +455,7 @@ test('fans retain the pre-TASK-2576 work behavior independently of agent identit
         assert.equal(isSpinning(webCard), freshness !== 'stale');
         assert.equal((html.match(/fan spin/g) ?? []).length, freshness === 'stale' ? 0 : 2);
         assert.doesNotMatch(html, /no implementer/);
-        assert.doesNotMatch(html, /class="live-indicator"/,
+        assert.doesNotMatch(html, /class="live-indicator"|working · (?:live|unknown|stale)/,
           'worker identity does not introduce an activity blink (TASK-2687)');
         if (freshness !== 'stale' && agent !== null) {
           assert.match(html, /title="active worker family: codex"/);

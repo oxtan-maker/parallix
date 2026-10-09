@@ -1,0 +1,18 @@
+{
+  "mission": "task-2692",
+  "reviewRound": 4,
+  "finding": "quality-gate",
+  "command": "npm run sonar",
+  "cwd": "/mnt/data/code/parallix-task-2692",
+  "revision": "f3e9f98f8cdc0e1ba559a0a3578e2a49d741fe6b",
+  "exitCode": 0,
+  "qualityGateStatus": "PASSED",
+  "executionStatus": "EXECUTION SUCCESS",
+  "scannerTotalTime": "1:54.241s",
+  "analysisBranch": "candidate/mission/task-2692",
+  "ceTaskId": "AaEfXLIPuoMz_oCERMwR",
+  "dashboardUrl": "https://sonarcloud.io/dashboard?id=parallix&branch=candidate%2Fmission%2Ftask-2692&resolved=false",
+  "credentialOwnership": "Operator environment (ADR 0060); current runner now supplies SONAR_TOKEN. No credentials copied or committed.",
+  "changes": "Verification evidence only; gate and test configuration unchanged.",
+  "authorityLimit": "Local exact-command result on cited revision; integration harness must rerun its gate on the finalized committed tree."
+}

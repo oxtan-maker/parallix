@@ -1,3 +1,5 @@
+import { buildRepairEvidencePacket, type MeasureBudget } from './repair-evidence-packet.js';
+export { REPAIR_PROMPT_VERSION, REPAIR_RESOLUTION_QUESTION } from './repair-evidence-packet.js';
 import { TextEncoder } from 'node:util';
 import type { DecisionData, DecisionRequest } from '../ports/decision.js';
 import type { ReviewFindingEvidence, ReviewEvidencePort } from '../ports/review-evidence.js';
@@ -103,7 +105,17 @@ function changedLines(diff: string): Record<string, number[]> {
  * packet degrades in steps and declares every omission so the classifier can abstain.
  */
 export async function buildEvidencePacket(input: ReviewFindingEvidence, repository: ReviewEvidencePort,
-  worktree: string | undefined, measure: MeasureRequest): Promise<EvidencePacket> {
+  worktree: string | undefined, measure: MeasureRequest, repair = false, verification?: DecisionData, budget?: MeasureBudget): Promise<EvidencePacket> {
+  if (repair) {
+    if (!budget) { throw new Error('Repair evidence requires adapter token-budget measurement'); }
+    return buildRepairEvidencePacket(input, repository, budget, verification);
+  }
+  return buildFindingEvidencePacket(input, repository, worktree, measure, verification);
+}
+
+/** Legacy finding packets retain their original bounded-window behavior. */
+async function buildFindingEvidencePacket(input: ReviewFindingEvidence, repository: ReviewEvidencePort,
+  worktree: string | undefined, measure: MeasureRequest, verification?: DecisionData): Promise<EvidencePacket> {
   const omissions: string[] = [];
   const priorReviewComment = boundedText('Prior review comment', input.priorReviewComment, omissions);
   const implementerResponse = boundedText('Implementer response', input.implementerResponse, omissions);
@@ -170,7 +182,7 @@ export async function buildEvidencePacket(input: ReviewFindingEvidence, reposito
       candidateSourceExcerpts: excerpts as unknown as DecisionData, contextOmissions: [...omissions, ...contextOmissions], coverage,
       diff: !selectedDiff ? 'No diff supplied for the cited paths.' : new TextEncoder().encode(selectedDiff).length <= 15000 ? selectedDiff
         : 'Diff exceeds bounded allowance; changed declarations supplied, complete diff omitted.',
-      validation: 'No runtime execution proof supplied. Comments and implementer responses are unverified claims.' },
+      validation: verification ?? 'No runtime execution proof supplied. Comments and implementer responses are unverified claims.' },
     questions: { resolution: RESOLUTION_QUESTION },
   });
   const COMPLETE = 'Complete referenced files supplied. Unreferenced dependencies, external contracts and runtime evidence may be missing. Do not assume missing evidence. Select insufficient_evidence if material.';

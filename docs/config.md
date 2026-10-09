@@ -474,9 +474,22 @@ calls and rounds lacking required data (for example an unanswered prior finding 
 first review of a mission without success criteria, each with its own recorded reason)
 retain the general reviewer.
 
+Gate-failure repair packets retain the complete diff from the previously reviewed
+revision and add pinned before/after source, prioritizing files cited by the
+failure. If both files cannot fit, a complete candidate file may be retained with
+the missing prior file explicitly labelled. Optional source context can be omitted;
+the repair diff is never truncated. Jev token accounting checks the structured
+request before sending it, alongside the transport byte limit. If mandatory
+repair evidence cannot fit or its tokenizer is unsupported, the general reviewer
+handles the round.
+
 The selected-choice routing thresholds are 52% for a resolved finding set and
-89% for unresolved findings; other judgments go to the general reviewer. These
-scores are routing signals, not probabilities that the PR is correct.
+89% for unresolved findings. Gate-failure repair re-reviews use 67% for unresolved
+findings, rising to 81% when Jev decided the immediately preceding round. Clear
+remains 52%. The tuned policy also applies when the implementer answers Jev’s
+retained gate-failure finding; it does not apply to first reviews or ordinary
+finding re-reviews. Other judgments go to the general reviewer. These scores
+are routing signals, not probabilities that the PR is correct.
 
 Configure the classifier through the operator environment used by the decision adapter.
 Run `px setup` or `px setup-review` to provision its dedicated `jev` Forgejo

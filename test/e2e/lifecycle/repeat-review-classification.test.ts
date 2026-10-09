@@ -126,9 +126,13 @@ test('live Jev applies an integration-repair verdict and the standard lifecycle 
       if (executing) { executeLaunches++; }
       if (repairing) { repairLaunches++; }
       const launch = fakeLifecycleAgent(options);
-      return { ...launch, resultPromise: launch.resultPromise.then(result => {
+      return { ...launch, resultPromise: launch.resultPromise.then(async result => {
         if (repairing) {
           write(path.join(options.worktree!, 'answer.mjs'), `const output = 'Hello';\nif (output !== 'Hello') { throw new Error('required Hello output is missing'); }\nconsole.log(output);\n`);
+          await px(options.worktree!, ['checkpoint', 'record', '--slug', slug, '--name', 'CP-2',
+            '--expected-version', String(readDb('SELECT version FROM missions')[0].version),
+            '--criterion', 'The lifecycle reaches integration through the real CLI', '--evidence', 'answer.mjs:1',
+            '--next', 'Review the repaired gate obligation.']);
           git(options.worktree!, 'add', 'answer.mjs'); git(options.worktree!, 'commit', '-m', 'preserve required Hello output');
         }
         return result;
@@ -142,6 +146,7 @@ test('live Jev applies an integration-repair verdict and the standard lifecycle 
     await provider.api('POST', `/repos/human/probe/pulls/${prs[0].number}/reviews`, { event: 'APPROVED', body: 'Initial fixture approval', commit_id: prs[0].head.sha });
     const failedIntegration = await px(worktree, ['integrate', slug], true);
     assert.match(failedIntegration.output, /required-output/);
+    transcript.push('Classifier measurements: ' + JSON.stringify(readDb('SELECT samples FROM review_classifier_measurements')));
     const rounds = readDb('SELECT * FROM mission_review_rounds ORDER BY position');
     assert.equal(rounds[0].revoked_cause, 'integration-gate-failure');
     assert.match(rounds[0].revoked_gate_log, new RegExp(`${worktree}/answer.mjs`));
@@ -153,6 +158,7 @@ test('live Jev applies an integration-repair verdict and the standard lifecycle 
     assert.equal(classified[0].decision_kind, 'approved');
     const source = JSON.parse(classified[0].classifier_source);
     assert.equal(source.identity, 'jev');
+    assert.equal(source.policyVersion, 'integration-repair-52-67-v1');
     assert.equal(source.integrationRepair.revokedAt, rounds[0].revoked_at);
     assert.equal(source.candidateRevision, classified[0].revision);
     const measurements = readDb('SELECT samples FROM review_classifier_measurements').flatMap(row => JSON.parse(row.samples));

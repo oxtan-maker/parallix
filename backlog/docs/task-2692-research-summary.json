@@ -1,0 +1,565 @@
+{
+  "mission": "task-2692",
+  "decision": "Original frozen capture experiment: no adoption. Subsequent operator-authorized follow-up: implement the tested gate-repair prompt, complete repair-diff packing, adapter-owned jevtok-ts token budgets and scoped 52/67 routing, rising to 52/81 after a prior Jev decision.",
+  "archive": "/home/magnus/.local/state/parallix/research/task-2692",
+  "provenance": {
+    "historicalCohort": "October 6-8 snapshot, reconstructed packets distinguished from original process output.",
+    "independentAdjudicator": "primary-root-codex",
+    "labelsBeforeCalls": true,
+    "payloadsContainLabels": false,
+    "modelRequested": "openrouter/jev-latest",
+    "modelReturned": [
+      "typesafe/jev-1.13-20260917"
+    ],
+    "currentAlgorithmHeldoutFamilies": 10,
+    "priorExperimentOverlap": "Disclosed in heldout-manifest.json; independent from this prototype development, not claimed never studied for another classifier task."
+  },
+  "lossAudit": {
+    "allRounds": 69,
+    "gateRepairRounds": 39,
+    "gateRepairMissions": 22,
+    "originalFindingRounds": 29,
+    "emptyFindingRounds": 1,
+    "saturatedTails": 35,
+    "fullOutputAvailable": 0,
+    "sourceLessPackets": 7,
+    "medianPacketBytes": 34178,
+    "runnerOrCoverageSelections": 8,
+    "withIndependentGateRepairLabel": 0,
+    "withActualImplementerExplanation": 0,
+    "gateCounts": {
+      "agent-smoke": 4,
+      "quality-gate": 7,
+      "integration-ci": 11,
+      "integration-local": 10,
+      "verification": 2,
+      "unit": 5
+    }
+  },
+  "protocol": {
+    "v1SupersededBeforeAnyCalls": true,
+    "v2Sha256": "d3c36ced0262f4636ee23b970bc2164dbb46d859694cd3625bee10cef77081c0",
+    "fourArms": [
+      "tail-only",
+      "capture-only",
+      "repair-source-only",
+      "combined"
+    ],
+    "primaryContrast": "repair-source-only minus tail-only",
+    "repeats": 3,
+    "requestCapBytes": 90000,
+    "captureCapBytes": 16000,
+    "randomizedPairedSeed": 269208,
+    "policy": "52% clear / 89% return unchanged"
+  },
+  "controls": {
+    "realProcessControls": 11,
+    "allPassed": true,
+    "maximumCaptureBytes": 9380,
+    "largeSourceExcerpts": "Changed before/after behavior beyond line 1000 copied with exact line ranges and explicit omitted ranges.",
+    "developmentRegression": "Unbounded order metadata exceeded cap; repaired before calls; negative record retained."
+  },
+  "validation": {
+    "families": 10,
+    "pairedCallRows": 120,
+    "independentLabels": {
+      "insufficient_evidence": 8,
+      "addresses": 1,
+      "does_not_address": 1
+    },
+    "strata": {
+      "assertion": 2,
+      "static-analysis": 1,
+      "coverage-quality": 2,
+      "resource": 3,
+      "harness": 2
+    },
+    "perArm": {
+      "tail-only": {
+        "rows": 30,
+        "reviewerRoutes": 30,
+        "providerFailures": 0,
+        "correctUsefulRoutes": 0,
+        "correctRequiredAbstentions": 24,
+        "falseClears": 0,
+        "falseReturns": 0,
+        "medianProviderBytes": 40818.5,
+        "apiElapsedMs": 11890.880378,
+        "localSizeFallbacks": 0
+      },
+      "capture-only": {
+        "rows": 30,
+        "reviewerRoutes": 30,
+        "providerFailures": 0,
+        "correctUsefulRoutes": 0,
+        "correctRequiredAbstentions": 24,
+        "falseClears": 0,
+        "falseReturns": 0,
+        "medianProviderBytes": 40906.5,
+        "apiElapsedMs": 11367.652931999999,
+        "localSizeFallbacks": 0
+      },
+      "repair-source-only": {
+        "rows": 30,
+        "reviewerRoutes": 30,
+        "providerFailures": 9,
+        "correctUsefulRoutes": 0,
+        "correctRequiredAbstentions": 24,
+        "falseClears": 0,
+        "falseReturns": 0,
+        "medianProviderBytes": 83041.0,
+        "apiElapsedMs": 7442.768722000001,
+        "localSizeFallbacks": 9
+      },
+      "combined": {
+        "rows": 30,
+        "reviewerRoutes": 30,
+        "providerFailures": 12,
+        "correctUsefulRoutes": 0,
+        "correctRequiredAbstentions": 24,
+        "falseClears": 0,
+        "falseReturns": 0,
+        "medianProviderBytes": 79049.0,
+        "apiElapsedMs": 9550.317216999985,
+        "localSizeFallbacks": 3
+      }
+    },
+    "pairedUsefulGain": 0,
+    "falseClears": 0,
+    "falseReturns": 0,
+    "appliedVerdicts": 0,
+    "statisticsWrites": 0,
+    "forgejoWrites": 0,
+    "perStratum": {
+      "assertion": {
+        "familyCount": 2,
+        "callsPerArm": 6,
+        "correctUsefulPerArm": 0,
+        "correctRequiredAbstentionsPerArm": 6,
+        "falseClearsPerArm": 0,
+        "falseReturnsPerArm": 0,
+        "abstentionsPerArm": 6,
+        "unavailableRowsByArm": {
+          "tail-only": 0,
+          "capture-only": 0,
+          "repair-source-only": 6,
+          "combined": 6
+        }
+      },
+      "static-analysis": {
+        "familyCount": 1,
+        "callsPerArm": 3,
+        "correctUsefulPerArm": 0,
+        "correctRequiredAbstentionsPerArm": 0,
+        "falseClearsPerArm": 0,
+        "falseReturnsPerArm": 0,
+        "abstentionsPerArm": 3,
+        "unavailableRowsByArm": {
+          "tail-only": 0,
+          "capture-only": 0,
+          "repair-source-only": 3,
+          "combined": 3
+        }
+      },
+      "coverage-quality": {
+        "familyCount": 2,
+        "callsPerArm": 6,
+        "correctUsefulPerArm": 0,
+        "correctRequiredAbstentionsPerArm": 6,
+        "falseClearsPerArm": 0,
+        "falseReturnsPerArm": 0,
+        "abstentionsPerArm": 6,
+        "unavailableRowsByArm": {
+          "tail-only": 0,
+          "capture-only": 0,
+          "repair-source-only": 3,
+          "combined": 0
+        }
+      },
+      "resource": {
+        "familyCount": 3,
+        "callsPerArm": 9,
+        "correctUsefulPerArm": 0,
+        "correctRequiredAbstentionsPerArm": 9,
+        "falseClearsPerArm": 0,
+        "falseReturnsPerArm": 0,
+        "abstentionsPerArm": 9,
+        "unavailableRowsByArm": {
+          "tail-only": 0,
+          "capture-only": 0,
+          "repair-source-only": 6,
+          "combined": 6
+        }
+      },
+      "harness": {
+        "familyCount": 2,
+        "callsPerArm": 6,
+        "correctUsefulPerArm": 0,
+        "correctRequiredAbstentionsPerArm": 3,
+        "falseClearsPerArm": 0,
+        "falseReturnsPerArm": 0,
+        "abstentionsPerArm": 6,
+        "unavailableRowsByArm": {
+          "tail-only": 0,
+          "capture-only": 0,
+          "repair-source-only": 0,
+          "combined": 0
+        }
+      }
+    },
+    "transportCounts": {
+      "evaluationRows": 120,
+      "apiAttempts": 108,
+      "modelResponses": 87,
+      "providerRejections": 21,
+      "localSizeFallbacks": 12
+    }
+  },
+  "costs": {
+    "elapsedMs": 40251.61924899999,
+    "reportedCostSum": 0.0542304,
+    "rowsWithReportedCost": 87,
+    "rowsWithoutReportedCost": 33,
+    "inputTokens": 1291200,
+    "tokenUsageUnknownRows": 33,
+    "returnedModels": [
+      "typesafe/jev-1.13-20260917"
+    ],
+    "modelDriftObserved": false
+  },
+  "fallbackWork": {
+    "reviewRouteRows": 120,
+    "avoidedReviewRoutes": 0,
+    "observedHistoricalReviewIntervalMs": 523202,
+    "counterfactualMatchedReviewWorkMs": null,
+    "historicalIntervalCaveat": "Recorded whole-PR review intervals include waits and broader work; not counterfactual matched gate-only cost. Unknown cost is not zero.",
+    "netWorkflowBenefit": "Not demonstrated; no avoided review and additional preparation/classification burden."
+  },
+  "uncertainty": [
+    "Ten mission families, not 120 independent cases; eight independently require insufficient-evidence abstention.",
+    "Zero empirical gain yields a degenerate bootstrap resample, not a population error/gain bound.",
+    "No low error bound inferred from zero false routes in a small abstention-heavy sample.",
+    "Full original capture unavailable in heldout families; capture arms test absence, not recovery.",
+    "Attribution, prior-experiment overlap, unavailable/larger packets and provider errors retained.",
+    "Provider reports usage on only 87/120 rows; cost sum is reported partial usage, not complete total."
+  ],
+  "adoptionBar": "Fails positive correct-route gain; source-only has 9 provider rejections and combined has 12; no measured net workflow benefit. Capture increment unproven. No threshold/policy/boundary changes.",
+  "artifactHashes": {
+    "loss-audit.json": "bb712fec28e70d61ca27b11942bbb6c8eac0280d856ae5feb5eea226826a50b9",
+    "archive-search.json": "a0f685465f0685837ba0a95ce362d24920b2bb630a732afff809e36fbde30a21",
+    "protocol-v1-superseded-zero-calls.json": "3142cfabf042a2873042d30d471eb5e64903fdd96bfedbf8bc384266a273adef",
+    "protocol-v2.json": "d3c36ced0262f4636ee23b970bc2164dbb46d859694cd3625bee10cef77081c0",
+    "heldout-manifest.json": "07c825a7b12855b516a921d4e4015532773156b99ecc0181598d35375ffdad77",
+    "heldout-label-blind-review.json": "d7878e59436074726cf01f201cc78174d0dfba34c86a0916b60eb466f7356295",
+    "independent-labels.json": "bff4b1c08f7f3c53bae6c23d778d5a963954686e01841fb3dc5a46076385d272",
+    "development-results.json": "be47a5e5b28ae87af881382404ea0980cc4f57387efdf630f0a7607771d586b4",
+    "development-failures.json": "63fc0de961e318f430b6d5dc7353ed5cb95bb7e725d45bd3cacdece032e878b8",
+    "paired-results.json": "a48028c10a1277bbc7d4c385ac4e2521b18a4b800753c46a858f49a70ccd85c2",
+    "evaluation-summary.json": "f7001eb5e5d2a626ad2407705b998983ceff18d72b932ab40026267398b27f58",
+    "fallback-measurements.json": "81d998a93514282abfadd0e9e6eb39340a41fb1ab53eb30630283a9bfb62f8b0"
+  },
+  "verification": {
+    "focusedPacketSuite": "npm test -- test/unit/application/review-classification/evidence-packet.test.ts",
+    "focusedPacketSuiteResult": "11 pass, 0 fail, 0 skipped",
+    "unitHeadroom": "npm test -- --unit-test-headroom test/unit/application/review-classification/evidence-packet.test.ts; 11 pass, largest observed case 10.80 ms",
+    "staticAnalysis": "./scripts/verify-local.sh static-analysis; all four stages pass",
+    "docs": "./scripts/verify-local.sh docs; pass",
+    "artifactHashes": "Frozen code, all 40 heldout payloads, independent label hash and retained summary artifact hashes verified",
+    "manualClassifier": "120 evaluation rows: 108 real DecisionPort API attempts, 87 responses, 21 provider rejections, 12 local size fallbacks; 0 applied verdicts/statistics/Forgejo writes. Separate diagnostic replay is excluded from frozen counts.",
+    "newTestsOrSkips": "No executable repository tests added or changed; no focused/unannotated skips introduced",
+    "missionFiles": "git ls-files missions/ empty",
+    "declaredFullGate": "Owned by Parallix handoff; not rerun as lifecycle ritual by execute agent"
+  },
+  "providerRejectionDiagnostic": {
+    "purpose": "User-requested diagnostic after frozen evaluation; excluded from paired metrics.",
+    "case": "task-2514-gate-r3",
+    "arm": "repair-source-only",
+    "httpStatus": 400,
+    "errorType": "max_tokens_exceeded",
+    "providerBodyBytes": 84878,
+    "causeScope": "Confirmed for one replayed rejected request; frozen trial recorded generic errors for all 21. Byte caps are not token caps.",
+    "artifact": "/home/magnus/.local/state/parallix/research/task-2692/provider-rejection-diagnostic.json",
+    "sha256": "73ef526f6ff1d112d173b3492d44b9fd3f362421fae083b62c4a58c0027f1338"
+  },
+  "tokenBudgetFollowup": {
+    "purpose": "Operator-requested post-trial investigation; frozen routing results unchanged.",
+    "tokenizer": "https://github.com/LabGuy94/jevtok",
+    "sourceCommit": "698c53b778ce901be82c166d809e4b1f7948a465",
+    "reportedInputTokenCounts": 87,
+    "exactMatches": 87,
+    "distinctRejectedPackets": 7,
+    "predictedOverLimitPackets": 7,
+    "rejectedAttemptsRepresented": 21,
+    "artifact": "/home/magnus/.local/state/parallix/research/task-2692/tokenizer-validation.json",
+    "sha256": "709ac660b3e319046c482993a70b6119fead77a7490de32da4352af45add872e",
+    "officialLimits": "https://docs.typesafe.ai/models: 32000 tokens state plus longest question; 64000 total. Community tokenizer models measured internal limit; use conservative headroom.",
+    "recommendation": "Token counting fixes oversized research requests. Final packer selects pinned source pairs below 30000 state-plus-longest-question tokens. The former 90000-byte research cap is replaced by the existing adapter 1000000-byte transport bound; maximum measured body 105561 bytes. No production behavior changed.",
+    "implementationStatus": "Historical external-packer stage: no adoption under the original frozen experiment. Superseded for production by the operator-authorized successful repair-context follow-up documented in productionImplementation; original trial result is preserved.",
+    "boundaryDecision": "Historical proposal is resolved by operator acceptance followed by the request to use an existing TypeScript tokenizer library. Production uses a typed DecisionPort.requestBudget capability; provider-specific token accounting remains adapter-owned.",
+    "limitations": [
+      "Community reconstruction pinned to typesafe/jev-1.13-20260917, not an official counting API or guarantee for later aliases.",
+      "87 rows include repeats: 29 distinct accepted packets, not 87 independent formats.",
+      "Over-limit predictions agree with seven rejected packets; one HTTP replay directly confirmed max_tokens_exceeded.",
+      "No new classifier calls, operational writes, threshold changes or answer-driven modifications to frozen evaluation."
+    ]
+  },
+  "tokenBudgetRerun": {
+    "originalDatasetPreserved": true,
+    "finalRerunCalls": 33,
+    "finalRerunResponses": 33,
+    "finalRerunErrors": 0,
+    "distinctRepackedSamples": 11,
+    "exactTokenPredictions": 33,
+    "returnedModel": "typesafe/jev-1.13-20260917",
+    "tokenBudgetStateAndLongestQuestion": 30000,
+    "transportByteBound": 1000000,
+    "maximumActualProviderBytes": 105561,
+    "maximumStateAndLongestQuestionTokens": 29967,
+    "rerunUsageInputTokens": 988299,
+    "rerunReportedCost": 0.041508558,
+    "rerunElapsedMs": 17784.210852,
+    "uniquePacketPreparationMs": 9580.95851354301,
+    "preparationCostNote": "Measured final packet packing/alignment separately per unique packet; reused across three calls. Original baseline/manifest preparation retained in original artifacts, not claimed newly repeated. Cached tokenization included; shared process startup excluded.",
+    "completedResponses": 120,
+    "completedRows": 120,
+    "perArm": {
+      "tail-only": {
+        "responses": 30,
+        "routes": {
+          "reviewer": 30
+        },
+        "correctUsefulRoutes": 0,
+        "reportedInputTokens": 353379
+      },
+      "capture-only": {
+        "responses": 30,
+        "routes": {
+          "reviewer": 30
+        },
+        "correctUsefulRoutes": 0,
+        "reportedInputTokens": 354279
+      },
+      "repair-source-only": {
+        "responses": 30,
+        "routes": {
+          "reviewer": 30
+        },
+        "correctUsefulRoutes": 0,
+        "reportedInputTokens": 788091
+      },
+      "combined": {
+        "responses": 30,
+        "routes": {
+          "reviewer": 30
+        },
+        "correctUsefulRoutes": 0,
+        "reportedInputTokens": 783750
+      }
+    },
+    "adoptionDecision": "No adoption: all routes still reviewer; no useful-route gain after successful repacking.",
+    "datasetCaveat": "87 unchanged original successful rows plus 33 revised-packet follow-up responses, not a fresh randomized whole-cohort trial. Original failures retained on replacement rows and in original trial. Prior answers known; follow-up is exploratory.",
+    "priorRun": "33 successful v1 calls retained separately before correcting coverage metadata; not included in final complete dataset or final rerun metrics.",
+    "operationalWrites": {
+      "appliedVerdicts": 0,
+      "statisticsWrites": 0,
+      "forgejoWrites": 0
+    }
+  },
+  "tokenBudgetArtifacts": {
+    "tokenizer-validation.json": "709ac660b3e319046c482993a70b6119fead77a7490de32da4352af45add872e",
+    "token-budget-pack.py": "fc777048c824210bc72d865ce1c880f6f1fb31146f60f513085d5d28d5e458ed",
+    "token-budget-evaluate.mts": "4f204bc70b7707aa0925105e71fb93ff93947460e71489dc4f2362d834a4e97d",
+    "token-budget-protocol.json": "d94ef72cc73b53535154abde054e5a41bbfd28a60b9eee591e0f7be7baab2ea2",
+    "token-budget-preparation.json": "32e5c9dcbe5454c8da6e22f3fcb3bc94cee500c6ca434c9974ea944a7be100df",
+    "token-budget-results.json": "4aa568d68c2fd359a647923cf03d291ff9344694f0ed81646706b7206db143d0",
+    "token-budget-summary.json": "6fb39835ffbb06bc8bad6ebd9ae62c796bb0c6e56a34a6b443f52e430e1bf310",
+    "token-budget-complete-dataset.json": "ec4336d9d8581d70673a942b1b2769c5aa462ee08b55c648ca93eedfb686497b",
+    "token-budget-summarize.py": "eb789b343892b5e96ef617b14bc8e2326250f02a09014780f4bd6b45e0884dab"
+  },
+  "originalDecision": "Do not adopt; no production changes.",
+  "operatorAuthorizedFollowup": {
+    "authorization": "2026-10-09 operator explicitly chose 67% for tuned re-reviews and 81% when Jev decided the immediately preceding round. This supersedes the original 52/89 constraint for this scope only; original experiment conclusions remain unchanged.",
+    "scope": "Gate-failure repair re-reviews and consecutive Jev returns retaining the complete synthetic gate obligation. First reviews and ordinary finding re-reviews retain 52/89 and the existing prior-classifier fallback.",
+    "promptComparison": {
+      "historicalCases": 5,
+      "realProcessControls": 3,
+      "variants": 3,
+      "repeats": 3,
+      "calls": 72,
+      "exactHistoricalApprovalMatches": 4,
+      "refinedClearsAtMatchedApprovedRevisions": 9,
+      "matchedApprovedCalls": 12,
+      "unmatchedRevisionCases": 1
+    },
+    "rejectedValidation": {
+      "cases": 6,
+      "variants": 2,
+      "repeats": 3,
+      "calls": 36,
+      "failures": 0,
+      "refinedClears": 0,
+      "refinedReviewerFallbacks": 18,
+      "limitations": "Four labels concern broader reviewer obligations; TASK-2662 overlaps prompt development; TASK-2637 siblings correlated. Repeats are not independent examples. No proof of statistical non-inferiority or net workflow benefit."
+    },
+    "thresholdSelection": "Using per-case observed confidence spread, with at least a 2 percentage-point margin, 67% projects returns on four historical rejections without contradicting historical decisions in this dataset. Selecting thresholds makes this set tuning data; no fresh validation of the selected thresholds is claimed.",
+    "implementation": {
+      "clear": 0.52,
+      "repairReturn": 0.67,
+      "consecutiveJevReturn": 0.81,
+      "otherReturn": 0.89,
+      "policies": [
+        "integration-repair-52-67-v1",
+        "integration-repair-52-81-v1"
+      ],
+      "source": "src/domain/classifier-review.ts",
+      "orchestration": "src/application/review-classification/classify-review.ts",
+      "prompt": "src/application/review-classification/evidence-packet.ts",
+      "verification": "Historical prompt/threshold-only stage: exact-revision pre-review facts at configured scope; no specific-test or integration-gate rerun inference. Production packing and the subsequent typed budget capability are documented in productionImplementation."
+    },
+    "verification": {
+      "focusedTests": 52,
+      "focusedFailures": 0,
+      "focusedSkips": 0,
+      "staticAnalysis": "all four stages passed",
+      "docs": "passed",
+      "testTypecheck": "passed after final unit-test assertions",
+      "manualE2E": "npm run test:jev-lifecycle-e2e passed with actual Jev, isolated Git/SQLite/Forgejo, publication and integration closeout. Initial review and repair review make two model calls; successful repair uses 52/67. 52/81 boundaries are covered with doubles. Existing fixture updated to record fresh repair checkpoint evidence with expected version.",
+      "declaredFullGate": "./scripts/verify-local.sh all remains Parallix handoff responsibility; not rerun on the final implementation tree by the execute agent. Prior full-gate result does not verify these later changes.",
+      "logs": {
+        "focused-tests.log": "bdcd6bb50eac37e6ce26b6ece5439dea176d981fc4a90464b36c0e0cd176e02e",
+        "static-analysis.log": "613be3f6892ec12a63b109594f65fbd7f2af98764454a29b3659ee556ef077c7",
+        "docs.log": "08538e8066d2a9aee165741d52747e22247bec2b5855e383a61f0ecf5d83b6be",
+        "live-jev-lifecycle.log": "ac45b2e2388067c508ef1b80d41a1dfd9117203647ccb1f69b8f1307cafbb505",
+        "final-test-typecheck.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      }
+    },
+    "artifacts": {
+      "prompt-comparison/protocol.json": "9688a1a5700cf8938753c57b2838881ba4df890f9d086f6182ae34e2caaa0f61",
+      "prompt-comparison/results.json": "ad3ab5843d6bbd51dbafcea11d216756d55bc26169ddfa0854e01271bfe3524f",
+      "prompt-comparison/historical-review-comparison.json": "319b17417b464ebea3f573b25fd5e718ad9e3241a8cfe7a2406d213b78d0a1b1",
+      "rejected-validation/protocol.json": "4eac260f4bb99225097eec37ccb9700b6be7821938f5563b23e59c037c491048",
+      "rejected-validation/results.json": "73eb9e01dcb626661c7f88a88053072fe3d938c8762afda50421a304124e94e5",
+      "rejected-validation/summary.json": "902c12051ae3e8ae0f5e6526d9d8c3ea951f34b016941e263f47123c052441e7",
+      "rejected-validation/scope-audit.json": "1c7c2f8e2628416a302dbce18ad868cb76071cef0fea6ca0d3b60db9ae54d8bf"
+    },
+    "missionRevision": {
+      "updatedAt": "2026-10-09",
+      "goalAndScopeUpdated": true,
+      "affectedSuccessCriterionUpdated": true,
+      "completeCriteria": 6,
+      "recordedCheckpoints": 4,
+      "finalCurrentCriterionCoverage": 6,
+      "historicalSupersededRowsRetained": true,
+      "finalStatusVersion": 61
+    }
+  },
+  "productionImplementation": {
+    "packetVersion": "complete-repair-token-budget-v1",
+    "promptVersion": "gate-repair-preservation-v1",
+    "tokenizer": {
+      "package": "jevtok-ts",
+      "version": "0.2.0",
+      "importedByAdapter": true,
+      "bundled": true,
+      "runtimeInstallClosure": false,
+      "retainedUsageMatches": 108,
+      "retainedUsageMismatches": 0
+    },
+    "budgets": {
+      "maxRequestBytes": 1000000,
+      "maxInputTokens": 64000,
+      "maxStatePlusLongestQuestionTokens": 30000
+    },
+    "packing": "Mandatory full repair diff and failure evidence; pinned before/after context by changed and cited paths. Prefer complete pairs, then explicitly labelled complete candidate-only files; otherwise declare omissions. Oversized mandatory evidence and unsupported accounting retain general review without a provider call. Ordinary review packet selection stays unchanged.",
+    "architectureDecision": "After the measured typed DecisionPort.requestBudget proposal, the operator accepted the approach and requested an existing TypeScript library if available; jevtok-ts is imported solely by the decision adapter. No Python subprocess, provider imports in application packing or byte/token unit overloading.",
+    "replay": {
+      "archive": "production-packing-replay-v2",
+      "cases": 11,
+      "calls": 33,
+      "errors": 0,
+      "inputTokenMismatches": 0,
+      "matchedApproved": {
+        "calls": 12,
+        "clear": 7,
+        "return": 0,
+        "reviewer": 5
+      },
+      "historicallyRejected": {
+        "calls": 18,
+        "clear": 0,
+        "return": 12,
+        "reviewer": 6
+      },
+      "noExactComparator": {
+        "calls": 3,
+        "return": 3,
+        "excludedFromConflictCount": true
+      },
+      "observedHistoricalConflicts": 0,
+      "finalPacketParity": "All 11 final prepared request hashes equal the replayed v2 packets. No new calls for the preparation-only equivalence check.",
+      "limitations": [
+        "Studied sample replay, not fresh independent validation or a population error guarantee.",
+        "Four rejection labels concern broader obligations; one family overlaps development and sibling cases are correlated.",
+        "Scores vary between calls; selected thresholds remain operator chosen.",
+        "Original negative capture trial, earlier complete rerun and v1 production replay are preserved."
+      ]
+    },
+    "verification": {
+      "focusedUnitTests": 101,
+      "failures": 0,
+      "skips": 0,
+      "headroomMs": 500,
+      "staticAnalysis": "all four stages passed",
+      "docs": "passed",
+      "canonicalBundleBytes": 5113478,
+      "bundleSizeStopBytes": 5242880,
+      "packageContent": "59 files; checksums verified",
+      "manualLiveE2E": "1 pass, no skips; actual Jev and isolated Git/SQLite/Forgejo, repair verdict publication and integration closeout; 7621ms CPU within unchanged finite 15000ms case/suite budget",
+      "declaredFullGate": "Parallix handoff responsibility; not claimed executed on this tree. Operator starts review."
+    },
+    "artifacts": {
+      "production-packing-replay-v2/protocol.json": "5c163bbc2396c0461342270c740c3021ac91f3e56e9a7d686b4346484dd989e1",
+      "production-packing-replay-v2/prepared.json": "6db3970d40937bbea0a5cffe59947ddf39e3fa2933731ba3d8de54e01d1fe569",
+      "production-packing-replay-v2/results.json": "2c83cc632f0a62aa49086b9cbad5eae9586917cf00acc9f9f859a3a6caa942c8",
+      "production-packing-final-parity/prepared.json": "a99ff6e7249ba40078a9e21e3101c7939f1d4e9a96462bd6ab60383666464a1f",
+      "production-port-proposal/library-validation.json": "1c16799fdc1547785dc74feec0941981b7b13ab6cb441b0a3f408901c22d9f25"
+    },
+    "logs": {
+      "headroom-tests.log": "2d51c92f9f1064c700a8432dcc42bcbd0fe18d97aedfddc433a356d0384587fc",
+      "static-analysis.log": "613be3f6892ec12a63b109594f65fbd7f2af98764454a29b3659ee556ef077c7",
+      "docs.log": "08538e8066d2a9aee165741d52747e22247bec2b5855e383a61f0ecf5d83b6be",
+      "build.log": "ea16a4f3a640d5070655dcaeb26abd4f50cbfd0e91dedf6cfe56c0dfbf19a786",
+      "package-content.log": "9e9750c58f81980ef2ea88d6304b29241dfc5482285ec9bd668e41d57c595a9f",
+      "live-jev-lifecycle.log": "ae658bad33b503f3e946bdab1d17b52ebdea2c47e809cf1958c92414ba181798",
+      "packet-parity.log": "a706c9dc6183910ab0dcf3dee16061e1a3d03b1452f422c8f5e44f2d37397494"
+    },
+    "verifiedSourceHashes": {
+      "package-lock.json": "df53840a9fadf558c02d32ade2a551a30c176390afe076de14a28aea756e30ac",
+      "package.json": "760bc7d72ec1123a62db13a422a3d34d6f51783723fb93e6d28f918d468302f3",
+      "scripts/release-metadata.ts": "4f1c23d014ca883cf8b357768b280cff37431d669609da2a834bf667e97065c0",
+      "src/adapters/decision/system-one.ts": "b7337bf9366e08ddcd51efe114921e40df7f27e47557b19afac4613797d76433",
+      "src/application/ports/decision.ts": "63636dee69d33d4f96f594f77802c4511d1129ca2e86a8d8a69c014f5c8e55e9",
+      "src/application/review-classification/classify-review.ts": "6005ed442dada062a8c7d0d350381e1869091c8fdccfd00e3a4763be14f50bbc",
+      "src/application/review-classification/evidence-packet.ts": "80881f51b3a5a2c7503bb1b637038b7b932d5fce28d32ab3e9fd63c7b73f8a96",
+      "test/unit/adapters/decision/decision-contract.test.ts": "b243eba105679e05cdb1d6e226209a1ebb517fcc6504d154b39fd2da76c8e2aa",
+      "test/unit/application/review-classification/evidence-packet.test.ts": "6f0af66de74a2cd8ddaf6de7dc6286b28f2c97fb96a9a77c54119161ff897211",
+      "test/unit/application/review-classification/repeat-review.test.ts": "8f21206e1f110aa1e89d069993b276d1f28fb4d4737231e2222802c49a54d98e",
+      "test/unit/scripts/npm-package-bundle-and-release-contract.test.ts": "60b1a9b733ff41fb0fab5a0c4e478e3035cef91febad3af48983da1e3ad2b43c",
+      "src/adapters/decision/token-budget.ts": "0f92792052960aa1a40719298e6bfd95aea43717c27d65ea987ee35705494158",
+      "src/application/review-classification/repair-evidence-packet.ts": "8e2b92d09c4c1739abf1a9fa2e42c9a7ac158ca15df9f594a2188e0933589998"
+    },
+    "summaryArchive": "/home/magnus/.local/state/parallix/research/task-2692/final-production-implementation/summary.json",
+    "summarySha256": "3a1e5728d6d1b64ab7b58c8c48984b059c72194b436c2471952627095ddffcc2",
+    "missionRevision": {
+      "goalAndScopeUpdated": true,
+      "affectedSuccessCriterionUpdated": true,
+      "completeCriteria": 6,
+      "recordedCheckpoints": 4,
+      "finalCurrentCriterionCoverage": 6,
+      "historicalSupersededRowsRetained": true,
+      "finalStatusVersion": 79,
+      "missionStatus": "active",
+      "reviewLaunched": false
+    }
+  }
+}

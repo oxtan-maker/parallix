@@ -1,0 +1,74 @@
+{
+  "task": "TASK-2692",
+  "date": "2026-10-09",
+  "measurement": "integration-cpu-hook: own CPU plus waited-child CPU, including case teardown",
+  "basis": "Maximum of retained full-suite failure and three current covered measurements; 50% margin rounded up to 50 ms",
+  "reportedFullSuiteCpuMs": 221,
+  "retainedIncident": "a0821f96298a3be430e76accb4f966e540567d5504ee3eac38ffaa4dafbe4b45",
+  "commands": [
+    "PARALLIX_TEST_COVERAGE=1 PARALLIX_TEST_CPU_PROFILE_DIR=<profile-dir> npm run test:integration:ci:prebuilt -- test/integration/lifecycle/lifecycle-completion-persistence.test.ts",
+    "PARALLIX_TEST_COVERAGE=1 PARALLIX_TEST_CPU_PROFILE_DIR=<profile-dir> npm run test:integration:ci:prebuilt"
+  ],
+  "margin": 0.5,
+  "roundUpMs": 50,
+  "previousCoveredBudgetMs": 200,
+  "newCoveredBudgetMs": 350,
+  "plainBudgetMs": 200,
+  "currentCoveredRecords": [
+    {
+      "file": "integration/lifecycle/lifecycle-completion-persistence.test.ts",
+      "name": "TASK-2367 certification: persisted lifecycle owns success, failure, retry, telemetry, BoardMetrics, and report",
+      "profile": "covered",
+      "cpuMs": 134.857,
+      "limitMs": 200
+    },
+    {
+      "file": "integration/lifecycle/lifecycle-completion-persistence.test.ts",
+      "name": "TASK-2367 certification: persisted lifecycle owns success, failure, retry, telemetry, BoardMetrics, and report",
+      "profile": "covered",
+      "cpuMs": 138.948,
+      "limitMs": 200
+    },
+    {
+      "file": "integration/lifecycle/lifecycle-completion-persistence.test.ts",
+      "name": "TASK-2367 certification: persisted lifecycle owns success, failure, retry, telemetry, BoardMetrics, and report",
+      "profile": "covered",
+      "cpuMs": 133.881,
+      "limitMs": 200
+    }
+  ],
+  "verification": {
+    "coveredIntegration": {
+      "command": "PARALLIX_TEST_COVERAGE=1 npm run test:integration:ci:prebuilt",
+      "exitCode": 0,
+      "tests": 2515,
+      "passed": 2489,
+      "skipped": 26,
+      "failed": 0,
+      "suiteCpuMs": 215843
+    },
+    "staticAnalysis": {
+      "command": "./scripts/verify-local.sh static-analysis",
+      "exitCode": 0
+    },
+    "limitations": "Existing annotated skips retained. npm run sonar was not rerun; this does not clear the recorded SONAR_TOKEN failure. No production behavior or research conclusion changed.",
+    "retainedLogs": [
+      {
+        "path": "/home/magnus/.local/state/parallix/research/task-2692/lifecycle-cpu-repair/lifecycle-gate-before.log",
+        "sha256": "0bdc7c7e7ff53b66d4c347e5a443af7d7b0dfbe3cfdfddb9f722011ecd20dca9"
+      },
+      {
+        "path": "/home/magnus/.local/state/parallix/research/task-2692/lifecycle-cpu-repair/lifecycle-gate-after.log",
+        "sha256": "4776cb74222da2d72b86c5b48f374fd3a088891085e4bec7b2d8a1fe5973e209"
+      },
+      {
+        "path": "/home/magnus/.local/state/parallix/research/task-2692/lifecycle-cpu-repair/lifecycle-static-analysis.log",
+        "sha256": "613be3f6892ec12a63b109594f65fbd7f2af98764454a29b3659ee556ef077c7"
+      },
+      {
+        "path": "/home/magnus/.local/state/parallix/research/task-2692/lifecycle-cpu-repair/lifecycle-focused-second.log",
+        "sha256": "3ab9a9d9adaae0d5208b5454d3331c059f1d40f9a071b693998a63ec484b6594"
+      }
+    ]
+  }
+}

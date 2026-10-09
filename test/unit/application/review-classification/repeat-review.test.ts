@@ -21,7 +21,7 @@ function scenario(mode: ReviewClassificationPorts['mode'] = 'enabled') {
   const classifier: ReviewClassificationPorts = {
     mode, hash: text => createHash('sha256').update(text).digest('hex'), fingerprint: () => 'attempt',
     now: () => '2026-10-06T00:00:00Z', clock: () => 1,
-    decision: { available: () => ({ status: 'available', provider: 'typesafe', model: 'jev' }), requestBytes: request => JSON.stringify(request).length,
+    decision: { requestBudget: request => ({ requestBytes: JSON.stringify(request).length, inputTokens: 1, contextTokens: 1, maxRequestBytes: 1_000_000, maxInputTokens: 64000, maxContextTokens: 30000, tokenizerModel: 'stub' }), available: () => ({ status: 'available', provider: 'typesafe', model: 'jev' }), requestBytes: request => JSON.stringify(request).length,
       decide: async () => ({ provider: 'typesafe', model: 'jev', answers: { resolution: {
         type: 'choice', selected: 'addresses', probabilities: { addresses: 0.52 }, confidence: 0.1,
       } } }) },
@@ -345,4 +345,126 @@ test('an unverified integration repair keeps its specific reason (TASK-2680)', a
     revocation: { revokedAt: '2026-10-01T00:02:00Z', revokedBy: 'operator', reason: 'x', cause: { kind: 'integration-gate-failure', gate: 'unit', command: 'npm test', log: null } } };
   assert.equal(await tryClassifyReview(s.context, s.round), null);
   assert.deepEqual(s.attempts.map(a => a.reason), ['integration-repair-unverified']);
+});
+
+/** Gate repair rounds retain the original obligation even after Jev requested changes. */
+function gateRepairScenario(consecutive = false) {
+  const s = scenario();
+  const prior = s.store.mission().review!.rounds[0]!;
+  const classifier = {
+    kind: 'classifier' as const, identity: 'jev' as const, decisionId: 'prior-decision', provider: 'typesafe', model: 'jev',
+    packetHash: 'c'.repeat(64), priorRevision: 'd'.repeat(40), candidateRevision: 'a'.repeat(40),
+    findingIds: ['integration-gate-repair'], policyVersion: 'integration-repair-52-67-v1', label: 'does_not_address', score: 0.67,
+    integrationRepair: { revokedAt: '2026-10-01T00:02:00Z', gate: 'unit' },
+  };
+  if (consecutive) {
+    const finding = { id: 'integration-gate-repair' as never, summary: 'x.java:1 drops output', location: 'x.java:1' };
+    (prior as { decision: typeof prior.decision }).decision = {
+      kind: 'changes-requested', decidedAt: '2026-10-01T00:01:00Z', comment: 'Gate repair remains unresolved.', findings: [finding], classifier,
+    };
+    (prior as { response: typeof prior.response }).response = { ...prior.response!,
+      resolutions: [{ findingId: finding.id, kind: 'fixed', evidence: 'Preserve output' }] };
+  } else {
+    (prior as { decision: typeof prior.decision }).decision = {
+      kind: 'approved', decidedAt: '2026-10-01T00:01:00Z', comment: 'Approved before integration.', source: { kind: 'local' },
+      revocation: { revokedAt: '2026-10-01T00:02:00Z', revokedBy: 'operator', reason: 'integration gate failed',
+        cause: { kind: 'integration-gate-failure', gate: 'unit', command: 'npm test', log: 'x.java:1 drops output' } },
+    };
+    (prior as { response: typeof prior.response }).response = null;
+    s.round.integrationRepair = 'verified repair';
+    s.round.verifiedRevision = 'b'.repeat(40);
+  }
+  return s;
+}
+
+test('tuned gate repairs return at 67%, preserve 52% clear, and retain fallback below the boundary (TASK-2692)', async () => {
+  for (const [label, score, expected] of [
+    ['does_not_address', 0.67, 'REQUEST_CHANGES'], ['does_not_address', 0.669, null],
+    ['addresses', 0.52, 'APPROVED'], ['addresses', 0.519, null], ['insufficient_evidence', 1, null],
+  ] as const) {
+    const s = gateRepairScenario();
+    s.classifier.decision.decide = async request => {
+      assert.match(String(request.questions.resolution.instructions), /preserving the checked obligation/);
+      assert.match(JSON.stringify(request.state), /Configured pre-review verification/);
+      assert.match(JSON.stringify(request.state), /failedIntegrationGateRerun.*unknown/);
+      return { provider: 'typesafe', model: 'jev', answers: { resolution: {
+        type: 'choice', selected: label, probabilities: { [label]: score }, confidence: 0.1 } } };
+    };
+    assert.equal(await tryClassifyReview(s.context, s.round), expected);
+    assert.equal(s.attempts[0].policyVersion, 'integration-repair-52-67-v1');
+    if (expected) {
+      const source = s.store.mission().review!.rounds.at(-1)!.decision!.classifier!;
+      assert.equal(source.policyVersion, s.attempts[0].policyVersion);
+      assert.deepEqual(source.findingIds, ['integration-gate-repair']);
+    }
+  }
+});
+
+test('a consecutive Jev gate-repair decision needs 81% to return while clear remains 52% (TASK-2692)', async () => {
+  for (const [label, score, expected] of [
+    ['does_not_address', 0.67, null], ['does_not_address', 0.809, null],
+    ['does_not_address', 0.81, 'REQUEST_CHANGES'], ['addresses', 0.52, 'APPROVED'],
+  ] as const) {
+    const s = gateRepairScenario(true);
+    s.classifier.decision.decide = async () => ({ provider: 'typesafe', model: 'jev', answers: { resolution: {
+      type: 'choice', selected: label, probabilities: { [label]: score }, confidence: 0.1 } } });
+    assert.equal(await tryClassifyReview(s.context, s.round), expected);
+    assert.equal(s.attempts[0].policyVersion, 'integration-repair-52-81-v1');
+    assert.equal(s.published.length, expected ? 1 : 0);
+  }
+});
+
+test('ordinary finding re-reviews retain the 89% return threshold (TASK-2692)', async () => {
+  const s = scenario();
+  s.classifier.decision.decide = async () => ({ provider: 'typesafe', model: 'jev', answers: { resolution: {
+    type: 'choice', selected: 'does_not_address', probabilities: { does_not_address: 0.67 }, confidence: 0.1 } } });
+  assert.equal(await tryClassifyReview(s.context, s.round), null);
+  assert.equal(s.attempts[0].policyVersion, 'repeat-findings-52-89-v2');
+  assert.deepEqual(s.published, []);
+});
+
+test('a revoked Jev approval uses 81%, and further Jev repair rounds keep that threshold (TASK-2692)', async () => {
+  for (const previous of ['approved', 'continued-return'] as const) {
+    const s = gateRepairScenario(previous === 'continued-return');
+    const prior = s.store.mission().review!.rounds[0]!;
+    if (previous === 'approved') {
+      (prior as { decision: typeof prior.decision }).decision = { ...prior.decision!, classifier: {
+        kind: 'classifier', identity: 'jev', decisionId: 'prior-clear', provider: 'typesafe', model: 'jev',
+        packetHash: 'c'.repeat(64), priorRevision: 'd'.repeat(40), candidateRevision: 'a'.repeat(40),
+        findingIds: ['F1'], policyVersion: 'repeat-findings-52-89-v2', label: 'addresses', score: 0.52,
+      } };
+    } else {
+      (prior.decision!.classifier as { policyVersion: string }).policyVersion = 'integration-repair-52-81-v1';
+    }
+    s.classifier.decision.decide = async () => ({ provider: 'typesafe', model: 'jev', answers: { resolution: {
+      type: 'choice', selected: 'does_not_address', probabilities: { does_not_address: 0.81 }, confidence: 0.1 } } });
+    assert.equal(await tryClassifyReview(s.context, s.round), 'REQUEST_CHANGES');
+    assert.equal(s.attempts[0].policyVersion, 'integration-repair-52-81-v1');
+  }
+});
+
+
+test('an additional obligation prevents a consecutive gate-only Jev decision (TASK-2692)', async () => {
+  const s = gateRepairScenario(true);
+  const prior = s.store.mission().review!.rounds[0]!;
+  if (prior.decision?.kind !== 'changes-requested') { throw new Error('missing prior return'); }
+  (prior.decision as { findings: typeof prior.decision.findings }).findings = [...prior.decision.findings,
+    { id: 'F2' as never, summary: 'New obligation: preserve logging', location: null }];
+  assert.equal(await tryClassifyReview(s.context, s.round), null);
+  assert.equal(s.attempts[0].reason, 'prior-classifier-review');
+  assert.deepEqual(s.published, []);
+});
+
+
+test('oversized mandatory repair evidence retains general review without calling Jev (TASK-2692)', async () => {
+  const s = gateRepairScenario();
+  const budget = s.classifier.decision.requestBudget;
+  s.classifier.decision.requestBudget = request => ({ ...budget(request), contextTokens: 30001 });
+  let calls = 0;
+  s.classifier.decision.decide = async () => { calls++; throw new Error('must not send an incomplete packet'); };
+  assert.equal(await tryClassifyReview(s.context, s.round), null);
+  assert.equal(calls, 0);
+  assert.deepEqual(s.published, []);
+  assert.equal(s.store.mission().review!.rounds.at(-1)!.decision, null);
+  assert.equal(s.attempts[0].reason, 'classifier-exception');
 });

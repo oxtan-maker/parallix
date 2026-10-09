@@ -188,6 +188,15 @@ describe("release metadata for the canonical ESM bundle", () => {
     assert.throws(() => bundledPackages(ROOT, {}), /requires the esbuild metafile/);
   });
 
+  test('bundled tokenizer retains upstream vocabulary and Unicode notices (TASK-2692)', () => {
+    const notices = renderNotices([{ name: 'jevtok-ts', version: '0.2.0', license: 'MIT',
+      packageDir: path.join(ROOT, 'node_modules', 'jevtok-ts'), homepage: null,
+      location: 'node_modules/jevtok-ts', resolved: null, integrity: null }], packageJson);
+    assert.match(notices, /Copyright \(c\) 2026 LabGuy94/);
+    assert.match(notices, /Copyright \(c\) 2022 OpenAI, Shantanu Jain/);
+    assert.match(notices, /UNICODE LICENSE V3/);
+  });
+
   test('task-2285 notices deduplicate a shared license text across packages', () => {
     const fixture = registeredMkdtemp('px-notices-');
     const packages = ['alpha', 'beta'].map(name => {

@@ -194,3 +194,32 @@ test('HTTP and transport failures redact remote bodies and do not retry or fallb
   }
   assert.equal(calls, 3);
 });
+
+test('Jev budget counts structured state and wire-normalized questions (TASK-2692)', () => {
+  const port = portFromEnvironment({ env: { OPENROUTER_API_KEY: 'dummy' } });
+  const budget = port.requestBudget({ state: '', questions: { q: { type: 'boolean', instructions: 'x' } } });
+  assert.equal(budget.inputTokens, 267, 'retained jevtok empty-state oracle');
+  assert.equal(budget.tokenizerModel, 'jev-1.13-20260917');
+  assert.equal(budget.maxContextTokens, 30000);
+  assert.equal(budget.maxInputTokens, 64000);
+  assert.equal(budget.maxRequestBytes, 1000000);
+  assert.equal(port.requestBudget(request).requestBytes, port.requestBytes(request));
+});
+
+test('byte-small requests exceeding Jev token limits never reach transport (TASK-2692)', async () => {
+  let calls = 0;
+  const port = portFromEnvironment({ env: { OPENROUTER_API_KEY: 'dummy' }, transport: async () => {
+    calls++; return new Response(JSON.stringify(response()));
+  } });
+  const oversized = { state: '1'.repeat(31000), questions: { q: { type: 'boolean' as const, instructions: 'x' } } };
+  const budget = port.requestBudget(oversized);
+  assert.ok(budget.requestBytes < budget.maxRequestBytes);
+  assert.ok(budget.contextTokens > budget.maxContextTokens);
+  await assert.rejects(port.decide(oversized), error => error instanceof DecisionError && error.kind === 'invalid-request');
+  assert.equal(calls, 0);
+});
+
+test('unknown routed tokenizers cannot supply repair-budget authority (TASK-2692)', () => {
+  const port = portFromEnvironment({ env: { OPENROUTER_API_KEY: 'dummy', TYPESAFE_DEFAULT_MODEL: 'future-jev' } });
+  assert.throws(() => port.requestBudget(request), /token budget cannot be measured/);
+});

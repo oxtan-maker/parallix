@@ -1,6 +1,7 @@
 import { missionId } from '../../domain/mission.js';
-import { applyClassifierReview, integrationRepairFinding, reviewAtCandidateRevision, successCriteriaFindings, type ClassifierReviewSource } from '../../domain/classifier-review.js';
-import { buildEvidencePacket } from './evidence-packet.js';
+import { applyClassifierReview, classifierPolicyForReview, CLASSIFIER_POLICY_VERSION, integrationRepairFinding, reviewAtCandidateRevision, successCriteriaFindings, type ClassifierReviewSource } from '../../domain/classifier-review.js';
+import { buildEvidencePacket, REPAIR_PROMPT_VERSION } from './evidence-packet.js';
+import { REPAIR_PACKET_VERSION } from './repair-evidence-packet.js';
 import { RoundTelemetry } from './round-telemetry.js';
 import { classifyFindings, ROUTING_POLICY_VERSION, type ClassificationRoute } from './routing-policy.js';
 import type { LoopContext, ReviewRound } from '../review-loop/round.js';
@@ -23,6 +24,7 @@ interface ReviewScope {
   /** Revision the evidence diff starts from: the prior round's, or the target branch for a success-criteria round. */
   readonly baseRevision: string;
   readonly candidateRevision: string;
+  readonly policyVersion: string;
   readonly original: DomainReviewRound['decision'];
   readonly repairCause: Extract<ReviewRevocationCause, { kind: 'integration-gate-failure' }> | null;
   readonly verifiedRepair: boolean;
@@ -76,7 +78,7 @@ function scopeIdentity(context: LoopContext, ports: ReviewClassificationPorts, s
   return { repository: String(scope.mission.repositoryId), round: current.number, priorRevision: baseRevision,
     candidateRevision, findingIds: findings.map(f => String(f.id)),
     decisionId: decisionIdFor(ports, [scope.mission.repositoryId, context.slug, current.number,
-      baseRevision, candidateRevision, findings.map(f => f.id).sort((left, right) => left.localeCompare(right))]) };
+      scope.policyVersion, baseRevision, candidateRevision, findings.map(f => f.id).sort((left, right) => left.localeCompare(right))]) };
 }
 
 /** Human corrections for this round, sent to the classifier as evidence rather than used to skip it. */
@@ -167,7 +169,7 @@ function assessEligibility(context: LoopContext, round: ReviewRound, loaded: Loa
   const findings = obligations(shape, mission);
   const text = evidenceText(review, prior, mission, { verifiedRepair, repairCause });
   return {
-    mission, version, review, current, prior: answered ? prior! : null, candidateRevision, original: prior?.decision ?? null,
+    mission, version, review, current, policyVersion: classifierPolicyForReview(review), prior: answered ? prior! : null, candidateRevision, original: prior?.decision ?? null,
     baseRevision: answered ? String(prior!.subject.revision) : current.subject.change.targetBranch,
     repairCause, verifiedRepair, findings, evidenceComment: text.comment, evidenceResponse: text.response, humanFeedback: humanFeedbackText(context, round),
   };
@@ -188,9 +190,10 @@ async function decideAndCommit(context: LoopContext, round: ReviewRound, scope: 
   const emit = (value: string) => context.emit({ kind: 'reviewer-classification', reason: value });
   const fallback = async (why: string, message = why) => { await rows.finish(why); emit(message); return null; };
   const started = cycleStarted ?? ports.clock();
-  // Classifier output is never evidence for another classifier decision: the
-  // next round must return to the general reviewer and regain human rationale.
-  if (original?.classifier) { return await fallback('prior-classifier-review'); }
+  // Only the tuned gate-repair scope permits consecutive classifier decisions.
+  const repair = scope.policyVersion !== CLASSIFIER_POLICY_VERSION;
+  rows.note({ policyVersion: scope.policyVersion, ...(repair ? { promptVersion: REPAIR_PROMPT_VERSION, packetVersion: REPAIR_PACKET_VERSION } : {}) });
+  if (original?.classifier && !repair) { return await fallback('prior-classifier-review'); }
   let decision: Decision;
   try {
     const availability = await ports.decision.available();
@@ -200,7 +203,13 @@ async function decideAndCommit(context: LoopContext, round: ReviewRound, scope: 
       priorRevision: baseRevision, candidateRevision,
       findings, priorReviewComment: scope.evidenceComment, implementerResponse: scope.evidenceResponse,
       ...(scope.humanFeedback ? { humanFeedback: scope.humanFeedback } : {}),
-    }, ports.evidence, context.ports.worktree, request => ports.decision.requestBytes(request));
+    }, ports.evidence, context.ports.worktree, request => ports.decision.requestBytes(request), repair,
+    repair && round.verifiedRevision === candidateRevision ? {
+      status: 'passed', candidateRevision, scope: 'Configured pre-review verification',
+      provenance: 'Parallix recorded successful pre-review verification at this exact candidate revision.',
+      specificTestResult: 'unknown', failedIntegrationGateRerun: 'unknown',
+      caveat: 'This does not establish that the failed integration gate or an individual test executed. Implementer comments remain unverified claims.',
+    } : undefined, request => ports.decision.requestBudget(request));
     const packetHash = ports.hash(JSON.stringify(packet.request));
     rows.note({ preparationMs: ports.clock() - started, packetHash });
     const classifyStart = ports.clock();
@@ -210,7 +219,7 @@ async function decideAndCommit(context: LoopContext, round: ReviewRound, scope: 
       rows.note({ classificationMs: ports.clock() - classifyStart });
       return await fallback('classifier-failure');
     }
-    const selected = classifyFindings(result);
+    const selected = classifyFindings(result, scope.policyVersion);
     rows.note({ label: selected.label, score: selected.score, provider: result.provider, model: result.model, classificationMs: ports.clock() - classifyStart });
     if (selected.route === 'reviewer' || ports.mode === 'shadow') {
       await rows.finish(selected.reason, { route: selected.route });
@@ -233,7 +242,7 @@ function classifierSource(scope: ReviewScope, decision: Decision, decisionId: st
       : { successCriteria: { baseRef: scope.baseRevision } }),
     ...(scope.verifiedRepair && original?.kind === 'approved'
       ? { integrationRepair: { revokedAt: original.revocation!.revokedAt, gate: scope.repairCause!.gate } } : {}),
-    findingIds: [...findingIds], policyVersion: ROUTING_POLICY_VERSION, label: decision.selected.label!, score: decision.selected.score!,
+    findingIds: [...findingIds], policyVersion: scope.policyVersion, label: decision.selected.label!, score: decision.selected.score!,
   };
 }
 

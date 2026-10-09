@@ -156,3 +156,71 @@ test('both known TASK-2599 safety failures retain reviewer escalation at frozen 
     } }).route, 'reviewer');
   }
 });
+
+// Adapter tests own token-accounting correctness; this suite owns packing against its typed budget.
+const repairBudget = (request: DecisionRequest) => {
+  const bytes = Buffer.byteLength(JSON.stringify(request));
+  return { requestBytes: bytes, inputTokens: bytes, contextTokens: bytes,
+    maxRequestBytes: 1_000_000, maxInputTokens: 8000, maxContextTokens: 8000, tokenizerModel: 'packing-contract-double' };
+};
+
+test('repair packing preserves every hunk and includes changed files absent from the log (TASK-2692)', async () => {
+  const diff = '--- a/lib/x.java\n+++ b/lib/x.java\n@@ -1 +1 @@\n-old\n+fixed\n'
+    + '--- a/lib/uncited.rs\n+++ b/lib/uncited.rs\n@@ -1800 +1800 @@\n-broken\n+repaired\n';
+  const reads: string[] = [];
+  const packet = await buildPacket(input, {
+    tree: async () => ['lib/x.java', 'lib/uncited.rs'],
+    diff: async (_before, _after, paths) => { assert.deepEqual(paths, [], 'full repair range, not just cited paths'); return diff; },
+    source: async (revision, path) => { reads.push(`${revision}:${path}`); return `${path} at ${revision}\n`; },
+  }, undefined, encodedBytes, true, undefined, repairBudget);
+  const state = packet.request.state as Record<string, unknown>;
+  assert.equal(state.repairDiff, diff);
+  assert.deepEqual(state.changedPaths, ['lib/uncited.rs', 'lib/x.java']);
+  assert.equal(reads.length, 4, 'both pinned revisions of each changed file');
+  assert.match(JSON.stringify(state.sourcePairs), /uncited\.rs/);
+  assert.deepEqual(state.contextOmissions, []);
+});
+
+test('token pressure drops optional source pairs without truncating the repair diff (TASK-2692)', async () => {
+  const diff = '--- a/lib/x.java\n+++ b/lib/x.java\n@@ -1900 +1900 @@\n-old\n+fixed-last-hunk\n';
+  const packet = await buildPacket(input, { ...repository, diff: async () => diff,
+    source: async () => 'huge optional context\n'.repeat(1000) }, undefined, encodedBytes, true, undefined, repairBudget);
+  const state = packet.request.state as Record<string, unknown>;
+  assert.equal(state.repairDiff, diff);
+  assert.deepEqual(state.sourcePairs, []);
+  assert.match(omissionsOf(packet.request), /complete source pair omitted; complete repair diff retained/);
+  assert.ok(repairBudget(packet.request).contextTokens <= 8000);
+});
+
+test('mandatory repair evidence that cannot fit refuses a partial decision packet (TASK-2692)', async () => {
+  await assert.rejects(buildPacket(input, { ...repository,
+    diff: async () => '--- a/lib/x.java\n+++ b/lib/x.java\n+' + 'large mandatory change'.repeat(1000),
+  }, undefined, encodedBytes, true, undefined, repairBudget), /Complete repair diff.*exceed/);
+});
+
+test('repair packing retains deletions, additions and explicitly cited unchanged context (TASK-2692)', async () => {
+  const diff = '--- a/deleted.py\n+++ /dev/null\n@@ -1 +0,0 @@\n-deleted\n'
+    + '--- /dev/null\n+++ b/added.rb\n@@ -0,0 +1 @@\n+added\n';
+  const packet = await buildPacket({ ...input, findings: [{ ...input.findings[0], summary: 'x.java fails through lib/helper.c' }] }, {
+    tree: async revision => revision === input.priorRevision ? ['deleted.py', 'lib/helper.c'] : ['added.rb', 'lib/helper.c'],
+    source: async (_revision, path) => path, diff: async () => diff,
+  }, undefined, encodedBytes, true, undefined, repairBudget);
+  const pairs = (packet.request.state as { sourcePairs: { path: string; before: string | null; after: string | null }[] }).sourcePairs;
+  assert.equal(pairs.find(p => p.path === 'deleted.py')?.after, null);
+  assert.equal(pairs.find(p => p.path === 'added.rb')?.before, null);
+  assert.ok(pairs.some(p => p.path === 'lib/helper.c'));
+  assert.equal(pairs.length, 3);
+});
+
+
+test('repair packing keeps a complete candidate file under pressure from the prior revision (TASK-2692)', async () => {
+  const packet = await buildPacket(input, { ...repository,
+    source: async revision => revision === input.priorRevision ? 'large old file'.repeat(1000) : 'complete repaired file',
+  }, undefined, encodedBytes, true, undefined, repairBudget);
+  const pairs = (packet.request.state as { sourcePairs: { before: string | null; after: string; coverage: string }[] }).sourcePairs;
+  assert.equal(pairs.length, 1);
+  assert.equal(pairs[0].before, null);
+  assert.equal(pairs[0].after, 'complete repaired file');
+  assert.match(pairs[0].coverage, /prior whole file omitted, not absent/);
+  assert.deepEqual((packet.request.state as { contextOmissions: string[] }).contextOmissions, []);
+});

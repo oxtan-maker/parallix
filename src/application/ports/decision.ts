@@ -26,11 +26,23 @@ export interface DecisionResult {
   readonly usage?: { readonly inputTokens?: number; readonly outputTokens?: number; readonly cost?: number };
 }
 
+/** Adapter-owned model accounting and admission limits; bytes remain transport bytes. */
+export interface DecisionRequestBudget {
+  readonly requestBytes: number;
+  readonly inputTokens: number;
+  readonly contextTokens: number;
+  readonly maxRequestBytes: number;
+  readonly maxInputTokens: number;
+  readonly maxContextTokens: number;
+  readonly tokenizerModel: string;
+}
+
 export interface DecisionPort {
   available(): DecisionAvailability | Promise<DecisionAvailability>;
   decide(_request: DecisionRequest): Promise<DecisionResult>;
   /** Bytes the routed model would receive for this request; used to bound evidence before the call. */
   requestBytes(_request: DecisionRequest): number;
+  requestBudget(_request: DecisionRequest): DecisionRequestBudget;
 }
 
 export type DecisionErrorKind = 'setup-required' | 'invalid-request' | 'usage-blocked'
