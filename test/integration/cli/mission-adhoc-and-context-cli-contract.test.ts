@@ -29,6 +29,7 @@ import { renderToString } from 'ink';
 import { SqliteDatabaseAdapter } from '../../../src/adapters/sqlite/database-adapter.js';
 import { SqliteMigrationRunner, loadDefaultMigrations } from '../../../src/adapters/sqlite/migration-runner.js';
 import { composeBoardProjection } from '../../../src/composition/board-projection.js';
+import { MissionEditService } from '../../../src/application/mission-edit-service.js';
 import { MissionCard } from '../../../src/interfaces/tui/mission-card.js';
 
 // TASK-2468 (was test/task-2468-adhoc-lifecycle-repro.test.ts)
@@ -826,24 +827,10 @@ describe('Mission dependencies CLI', () => {
 
 // TASK-2441 (was test/task-2441-mission-title-repro.test.ts)
 describe('Mission title', () => {
-  /**
-   * task-2441 — the Ink board must show a mission's real title on every lane.
-   *
-   * The board catalog comes from the Backlog Markdown, which owns the title
-   * (`MISSION_FIELD_AUTHORITY.title` is `target-repository`). The SQLite mission
-   * aggregate owns lifecycle state only, but it is seeded at `px draft` intake
-   * time from the still-unfilled mission scaffold, so its stored title is the
-   * literal `<Title> (task-NNNN)` placeholder from `templates/mission-scaffold.md`.
-   *
-   * Before the repair `composeBoardProjection` replaced the whole Markdown
-   * mission with the stored aggregate, so every persisted mission card rendered
-   * the placeholder instead of its title.
-   */
-
-
-
+  // TASK-2702: recorded Mission titles remain authoritative after an edit,
+  // even when a historical Backlog input has a different title.
   const TITLE = 'Restore title visibility';
-  const PLACEHOLDER = '<Title>';
+  const STORED_TITLE = 'Saved mission title';
   const CLOSED_AT = '2026-08-29T12:00:00.000Z';
 
   /** One mission per board lane the regression was reported on. */
@@ -854,12 +841,12 @@ describe('Mission title', () => {
     { id: 'task-4404', backlogStatus: 'done', domainStatus: 'done', lane: 'done', completed: true },
   ] as const;
 
-  /** The mission aggregate as `px draft` intake records it: scaffold title, real lifecycle. */
+  /** Recorded planning state and lifecycle are preserved together. */
   function persistedMission(id: string, status: MissionStatus, repository: ReturnType<typeof repositoryId>): Mission {
     return {
       id: missionId(id),
       repositoryId: repository,
-      title: `${PLACEHOLDER} (${id})`,
+      title: STORED_TITLE,
       labels: [],
       assignee: null,
       checkpoints: [],
@@ -885,7 +872,7 @@ describe('Mission title', () => {
     return { database, store: new SqliteMissionStore(database) };
   }
 
-  test('board cards render the backlog title, not the mission scaffold placeholder, on every lane', async () => {
+  test('board cards retain saved Mission titles across reload on every lane (TASK-2702)', async () => {
     const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'task-2441-repository-')));
     const home = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'task-2441-home-')));
     const oldHome = process.env.PARALLIX_HOME;
@@ -898,12 +885,22 @@ describe('Mission title', () => {
       childProcess.spawnSync('git', ['config', 'user.name', 'Task 2441'], { cwd: root, encoding: 'utf8' });
       childProcess.spawnSync('git', ['config', 'user.email', 'task-2441@example.test'], { cwd: root, encoding: 'utf8' });
       for (const lane of LANES) { writeTask(root, lane.id, lane.backlogStatus, lane.completed); }
+      writeTask(root, 'task-4405', 'backlog', false);
       childProcess.spawnSync('git', ['add', '.'], { cwd: root, encoding: 'utf8' });
       childProcess.spawnSync('git', ['commit', '-m', 'seed tasks'], { cwd: root, encoding: 'utf8' });
 
       const seeded = await openStore(databasePath);
       for (const lane of LANES) {
-        await seeded.store.save(persistedMission(lane.id, lane.domainStatus, repository), null);
+        const mission = persistedMission(lane.id, lane.domainStatus, repository);
+        const version = await seeded.store.save({ ...mission, title: lane.domainStatus === 'done' ? STORED_TITLE : 'Before edit' }, null);
+        if (lane.domainStatus !== 'done') {
+          const result = await new MissionEditService(seeded.store).save({
+            operationId: `edit-${lane.id}`, missionId: mission.id, expectedVersion: version,
+            capabilities: new Set(['mission:context']), title: STORED_TITLE,
+            description: '', context: '', labels: [], successCriteria: [], dependencies: [],
+          });
+          assert.equal(result.status, 'completed');
+        }
       }
       await seeded.database.close();
 
@@ -922,18 +919,19 @@ describe('Mission title', () => {
         const projection = await board.builder.build();
         const cards = new Map(projection.stages.flatMap((stage) => stage.cards.map((card) => [String(card.id), card])));
 
+        assert.equal(cards.get('task-4405')?.title, TITLE, 'unimported inputs retain their Backlog title');
         for (const lane of LANES) {
           const card = cards.get(lane.id);
           assert.ok(card, `${lane.id} must be on the board (${lane.lane} lane)`);
           assert.equal(card.lane, lane.lane, `${lane.id} lane`);
-          assert.equal(card.title, TITLE, `${lane.id} card title comes from the Backlog task`);
+          assert.equal(card.title, STORED_TITLE, `${lane.id} card title comes from the recorded Mission`);
 
           const output = await renderToString(
             React.createElement(MissionCard, { card, width: 60 } as never),
             { columns: 80 },
           );
-          assert.ok(output.includes(TITLE), `${lane.lane} card must render "${TITLE}"; got:\n${output}`);
-          assert.ok(!output.includes(PLACEHOLDER), `${lane.lane} card must not render "${PLACEHOLDER}"; got:\n${output}`);
+          assert.ok(output.includes(STORED_TITLE), `${lane.lane} card must render "${STORED_TITLE}"; got:\n${output}`);
+          assert.ok(!output.includes(TITLE), `${lane.lane} card must not render "${TITLE}"; got:\n${output}`);
           assert.ok(output.includes(lane.id), `${lane.lane} card must still render its slug`);
         }
       } finally {
@@ -945,4 +943,51 @@ describe('Mission title', () => {
       fs.rmSync(home, { recursive: true, force: true });
     }
   });
+});
+
+test('CLI mutations preserve invalid-contract blockers, evidence and optimistic versions (TASK-2702)', async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'parallix-restart-'));
+  const previousHome = process.env.PARALLIX_HOME;
+  const home = path.join(root, 'state');
+  process.env.PARALLIX_HOME = home;
+  const id = missionId('task-restart');
+  try {
+    fs.writeFileSync(path.join(root, 'workflow.config.json'), JSON.stringify({ adapters: { review: { provider: 'none' } } }));
+    const { db } = await initOperatorState({ homeDir: home });
+    const store = new SqliteMissionStore(db);
+    const blocker = { command: 'npm test', diagnostic: 'obsolete assertion', authorityReason: 'locked', proposedCorrection: 'correct assertion' };
+    await store.save({ ...intakeMission({ id, repositoryId: repositoryId('parallix'), title: 'Restart fixture' }),
+      brief: missionBrief({ goal: 'before', why: 'fixture', scope: null, outOfScope: [] }),
+      checkpoints: [{ missionId: id, name: 'CP-1', goalCheck: [{ criterion: 'existing proof', evidence: 'test/unit/domain/checkpoint-repair-freshness-contract.test.ts' }], nextActionText: 'repair', repair: {
+        incidentId: 'restart', command: 'npm test', authorizedGates: [], authorizedCriteria: [], attempt: 1,
+        evidenceRecorded: false, verified: false, blocker,
+      } }],
+    } as Mission, null);
+    const invoke = (args: string[]) => run(args, { baseCwd: root, log: () => '', error: () => '' });
+    const before = await store.load(id); assert.equal(before.kind, 'found');
+    if (before.kind !== 'found') { throw new Error('missing fixture'); }
+    await clearOperatorStateCache();
+    assert.equal(await invoke(['checkpoint', '--help', '--slug', id]), 0);
+    const read = async () => new SqliteMissionStore((await initOperatorState({ homeDir: home })).db).load(id);
+    const untouched = await read(); assert.equal(untouched.kind, 'found');
+    if (untouched.kind !== 'found') { throw new Error('missing fixture'); }
+    assert.deepEqual(untouched.mission.checkpoints[0].repair?.blocker, blocker);
+    await clearOperatorStateCache();
+    assert.equal(await invoke(['goal', 'set', '--slug', id, '--goal', 'after', '--why', 'retry', '--expected-version', String(before.version)]), 0);
+    const restarted = await read(); assert.equal(restarted.kind, 'found');
+    if (restarted.kind !== 'found') { throw new Error('missing fixture'); }
+    assert.equal(restarted.mission.brief?.goal, 'after');
+    assert.deepEqual(restarted.mission.checkpoints, before.mission.checkpoints);
+    assert.equal(restarted.version, before.version + 1);
+    assert.equal(restarted.mission.checkpoints[0].repair?.verified, false);
+    await clearOperatorStateCache();
+    assert.equal(await invoke(['goal', 'set', '--slug', id, '--goal', 'stale', '--why', 'stale', '--expected-version', String(before.version)]), 1);
+    const unchanged = await read();
+    assert.equal(unchanged.kind === 'found' && unchanged.mission.brief?.goal, 'after');
+    assert.deepEqual(unchanged, restarted);
+  } finally {
+    await clearOperatorStateCache();
+    if (previousHome === undefined) { delete process.env.PARALLIX_HOME; } else { process.env.PARALLIX_HOME = previousHome; }
+    fs.rmSync(root, { recursive: true, force: true });
+  }
 });

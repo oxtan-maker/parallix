@@ -1,3 +1,4 @@
+import { MissionEditService } from '../application/mission-edit-service.js';
 import { createReviewClassification } from './review-classification.js';
 import type { ParallixConfiguration } from '../application/ports/configuration.js';
 import type { ExecuteMissionPorts } from '../application/ports/execute-mission.js';
@@ -240,6 +241,7 @@ export function composeProductionCapabilities(
     const intake = new MissionIntakeService(missionStore);
     missionServices = {
       intake,
+      editing: new MissionEditService(missionStore),
       creation: new MissionCreationService(
         intake,
         createRepositoryMissionCatalog({ rootDir, missionStore, repositoryId: owningRepositoryId }),

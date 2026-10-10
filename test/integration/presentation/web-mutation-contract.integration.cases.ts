@@ -632,3 +632,21 @@ test('web mutation: Create new mission on a read-only host answers 503 (TASK-269
     assert.equal((await postCommand(info, await launchValue(info), createBody())).status, 503);
   });
 });
+
+test('web mutation: edit read and replacement dispatch host capability and version, refusing untyped lifecycle fields (TASK-2702)', async () => {
+  const spy = makeDispatcherSpy();
+  await withHost({ commandDispatcher: () => spy.dispatcher }, async info => {
+    const launch = await launchValue(info);
+    const body = { kind: 'mission:edit', missionId: 'supplied-id-1', expectedVersion: 3, title: 'Revised', description: '', context: '', labels: [], successCriteria: [], dependencies: [] };
+    for (const request of [{ kind: 'mission:edit-read', missionId: 'supplied-id-1' }, body]) {
+      const response = await postCommand(info, launch, request);
+      assert.equal(response.status, 200);
+    }
+    assert.equal(spy.requests.length, 2);
+    assert.deepEqual([...spy.requests[1].capabilities], ['mission:context']);
+    assert.equal(spy.requests[1].missionId, 'supplied-id-1');
+    assert.equal((spy.requests[1].payload as { expectedVersion: number }).expectedVersion, 3);
+    assert.equal((await postCommand(info, launch, { ...body, status: 'done' })).status, 400);
+    assert.equal(spy.requests.length, 2);
+  });
+});

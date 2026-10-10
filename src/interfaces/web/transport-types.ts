@@ -18,6 +18,8 @@ export type WebBoardCommandKind =
   | 'active:execute'
   | 'mission:intake'
   | 'mission:create'
+  | 'mission:edit-read'
+  | 'mission:edit'
   | 'draft:create'
   | 'checkpoint:record'
   | 'handoff:record'

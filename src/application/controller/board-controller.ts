@@ -1,3 +1,4 @@
+import type { MissionEditService } from '../mission-edit-service.js';
 import type { ExecuteMissionPorts } from '../ports/execute-mission.js';
 import {
   ExecuteMissionService,
@@ -43,6 +44,7 @@ import {
  * of reaching for a store the interface is not allowed to open.
  */
 export interface BoardMissionServices {
+  readonly editing?: Pick<MissionEditService, 'read' | 'save'>;
   readonly intake?: MissionIntakeService;
   /** Creates a backlog mission with an allocated identity; the web board's "Create new mission". */
   readonly creation?: Pick<MissionCreationService, 'execute'>;
@@ -94,6 +96,7 @@ export class BoardCommandController implements BoardCommandDispatcher {
   canExecute(kind: BoardCommandRequest['kind']): boolean {
     if (!isIntegratedCapability(kind)) { return false; }
     if (kind === 'mission:intake') { return Boolean(this.missionServices.intake); }
+    if (kind === 'mission:edit' || kind === 'mission:edit-read') { return Boolean(this.missionServices.editing); }
     if (kind === 'mission:create') { return Boolean(this.missionServices.creation); }
     if (kind === 'checkpoint:record') { return Boolean(this.missionServices.checkpoints); }
     if (kind === 'handoff:record') { return Boolean(this.missionServices.handoffWorkflow); }
@@ -125,6 +128,7 @@ export class BoardCommandController implements BoardCommandDispatcher {
       return cancelledOutcome<T>('cancelled before launch');
     }
 
+    if (kind === 'mission:edit' || kind === 'mission:edit-read') { return await this.dispatchEdit(request) as BoardCommandResult<T>; }
     // Dispatch to the integrated use cases.
     if (kind === 'active:execute') {
       return (await this.dispatchActive(request)) as BoardCommandResult<T>;
@@ -153,6 +157,16 @@ export class BoardCommandController implements BoardCommandDispatcher {
     // Unreachable: isIntegratedCapability guard above catches all non-integrated kinds
     return unavailableCapability(kind, 'unexpected integrated capability') as BoardCommandResult<T>;
   }
+
+  private async dispatchEdit(request: BoardCommandRequest): Promise<BoardCommandResult> {
+      const { operationId, kind } = request;
+      const service = this.missionServices.editing;
+      if (!service) { return unavailableCapability(kind, 'Mission editing is not configured'); }
+      const base = { operationId, missionId: request.missionId as MissionId, capabilities: request.capabilities };
+      if (kind === 'mission:edit-read') { return await service.read(base); }
+      if (request.payload?.kind !== 'mission:edit') { return rejected('validation', 'Editing requires planning fields'); }
+      return await service.save({ ...base, ...request.payload });
+    }
 
   private unavailableDispatch(request: BoardCommandRequest): BoardCommandResult | null {
     const { operationId, kind } = request;

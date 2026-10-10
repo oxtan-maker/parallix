@@ -164,8 +164,8 @@ function CheckpointPips({ checkpoint }: { checkpoint: string }) {
 
 function primaryAction(actions: readonly WebMissionCard['actions'][number][]) {
   // The destructive action never becomes the card's default button.
-  return actions.find((action) => action.state === 'enabled' && action.kind !== 'mission:cancel')
-    ?? actions.find((action) => action.kind !== 'mission:cancel') ?? null;
+  return actions.find((action) => action.state === 'enabled' && action.kind !== 'mission:cancel' && action.kind !== 'mission:edit')
+    ?? actions.find((action) => action.kind !== 'mission:cancel' && action.kind !== 'mission:edit') ?? null;
 }
 
 function cancelAction(actions: readonly WebMissionCard['actions'][number][]) {
@@ -187,6 +187,7 @@ function FlightCard({ card, onAction, onSelect, onDragStart, selected, pendingCo
   const actor = actorLine(card);
   const primary = primaryAction(card.actions);
   const cancel = cancelAction(card.actions);
+  const edit = card.actions.find(action => action.kind === 'mission:edit') ?? null;
   // The footer carries the actions the server marked runnable for this card.
   // Which ones those are is the server's lifecycle decision, not a lane rule
   // evaluated here — the client only reads `state`.
@@ -298,7 +299,7 @@ function FlightCard({ card, onAction, onSelect, onDragStart, selected, pendingCo
         )}
       </div>
 
-      {(primary !== null || cancel !== null) && (
+      {(primary !== null || cancel !== null || edit !== null) && (
         <div
           style={{
             display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 7,
@@ -312,6 +313,7 @@ function FlightCard({ card, onAction, onSelect, onDragStart, selected, pendingCo
           {primary !== null && (
             <ActionButton action={primary} label={primary.label} pending={pendingCommands.get(card.id)} working={spinning} onInvoke={(next, control) => onAction(card, next, control)} />
           )}
+          {edit !== null && <ActionButton action={edit} label="Edit" pending={pendingCommands.get(card.id)} working={false} onInvoke={(next, control) => onAction(card, next, control)} />}
         </div>
       )}
       <Grille />

@@ -1,3 +1,4 @@
+import type { MissionEditSnapshot } from '../../src/application/mission-edit-service.js';
 /**
  * The "Create new mission" dialog. It collects the planning fields Parallix
  * owns (title, description and context, labels, success criteria, dependencies)
@@ -10,7 +11,7 @@
  */
 import { useEffect, useId, useRef, useState, type CSSProperties, type FormEvent, type KeyboardEvent, type RefObject } from 'react';
 import type { WebCreateMissionRequest } from '../../src/interfaces/web/transport.js';
-import { sendCreateMission } from './board-data.js';
+import { sendEditMission, sendCreateMission } from './board-data.js';
 import { C } from './palette.js';
 
 export interface DependencyOption { readonly id: string; readonly title: string }
@@ -23,10 +24,6 @@ const LABEL: CSSProperties = { display: 'block', color: C.muted, fontSize: 10.5,
 const BUTTON: CSSProperties = { borderRadius: 4, cursor: 'pointer', fontFamily: 'inherit', fontSize: 10.5, letterSpacing: 0.5, padding: '5px 12px' };
 
 const FOCUSABLE = 'button:not([disabled]),input:not([disabled]),textarea:not([disabled])';
-
-function lines(text: string): string[] {
-  return text.split('\n').map((line) => line.trim()).filter(Boolean);
-}
 
 function newRequestKey(): string {
   return globalThis.crypto?.randomUUID?.() ?? `form-${Date.now()}-${Math.random().toString(36).slice(2)}`;
@@ -62,7 +59,7 @@ function DependencyPicker({ options, selected, disabled, onChange }: {
           {options.length === 0 && <p style={{ margin: 0, color: C.dim }}>No unfinished missions to depend on.</p>}
           {options.map((option) => (
             <label key={option.id} style={{ display: 'flex', gap: 7, alignItems: 'baseline', padding: '2px 0', cursor: 'pointer' }}>
-              <input type="checkbox" checked={selected.includes(option.id)} onChange={() => toggle(option.id)} />
+              <input type="checkbox" disabled={disabled} checked={selected.includes(option.id)} onChange={() => toggle(option.id)} />
               <span style={{ color: C.cyan }}>{option.id}</span>
               <span style={{ color: C.muted }}>{option.title}</span>
             </label>
@@ -92,31 +89,72 @@ function buildRequest(form: HTMLFormElement, requestKey: string, dependencies: r
       kind: 'mission:create', requestKey, title,
       ...(description === '' ? {} : { description, ...(context === '' ? {} : { context }) }),
       labels: read('labels').split(',').map((label) => label.trim()).filter(Boolean),
-      successCriteria: lines(read('criteria')),
+      successCriteria: [...form.querySelectorAll<HTMLTextAreaElement>('textarea[name="criteria"]')].map(field => field.value.trim()).filter(Boolean),
       dependencies,
     },
   };
 }
 
-function Fields({ id, pending, invalidTitle, titleField }: { id: string; pending: boolean; invalidTitle: boolean; titleField: RefObject<HTMLInputElement | null> }) {
+function Fields({ id, pending, invalidTitle, titleField, initial }: { id: string; pending: boolean; invalidTitle: boolean; titleField: RefObject<HTMLInputElement | null>; initial?: MissionEditSnapshot }) {
   return (
     <>
       <label style={LABEL} htmlFor={`${id}-title`}>Title (required)</label>
-      <input id={`${id}-title`} name="title" ref={titleField} style={FIELD} disabled={pending} aria-invalid={invalidTitle} />
+      <input id={`${id}-title`} name="title" defaultValue={initial?.title} ref={titleField} style={FIELD} disabled={pending} aria-invalid={invalidTitle} />
       <label style={LABEL} htmlFor={`${id}-description`}>Description</label>
-      <textarea id={`${id}-description`} name="description" rows={3} style={FIELD} disabled={pending} />
+      <textarea id={`${id}-description`} name="description" defaultValue={initial?.description} rows={3} style={FIELD} disabled={pending} />
       <label style={LABEL} htmlFor={`${id}-context`}>Context (why it matters, optional)</label>
-      <textarea id={`${id}-context`} name="context" rows={2} style={FIELD} disabled={pending} />
+      <textarea id={`${id}-context`} name="context" defaultValue={initial?.context} rows={2} style={FIELD} disabled={pending} />
       <label style={LABEL} htmlFor={`${id}-labels`}>Labels (comma separated)</label>
-      <input id={`${id}-labels`} name="labels" style={FIELD} disabled={pending} />
-      <label style={LABEL} htmlFor={`${id}-criteria`}>Success criteria (one per line)</label>
-      <textarea id={`${id}-criteria`} name="criteria" rows={3} style={FIELD} disabled={pending} />
+      <input id={`${id}-labels`} name="labels" defaultValue={initial?.labels.join(', ')} style={FIELD} disabled={pending} />
+      <CriteriaEditor id={id} initial={initial?.successCriteria ?? []} pending={pending} />
     </>
   );
 }
 
-export function CreateMissionDialog({ options, onClose, onCreated }: {
+/** Stable row keys keep unsaved neighboring entries intact when one is removed. */
+function CriteriaEditor({ id, initial, pending }: { id: string; initial: readonly string[]; pending: boolean }) {
+  const [rows, setRows] = useState(() => (initial.length ? initial : ['']).map((value, key) => ({ key, value })));
+  const nextKey = useRef(rows.length);
+  const focusAfterChange = useRef<number | 'add' | null>(null);
+  const controls = useRef<HTMLFieldSetElement>(null);
+  const addButton = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    const target = focusAfterChange.current;
+    if (target === null) { return; }
+    if (target === 'add') { addButton.current?.focus(); }
+    else { controls.current?.querySelector<HTMLTextAreaElement>(`[data-criterion-key="${target}"]`)?.focus(); }
+    focusAfterChange.current = null;
+  }, [rows]);
+  const add = () => {
+    const key = nextKey.current++;
+    focusAfterChange.current = key;
+    setRows(current => [...current, { key, value: '' }]);
+  };
+  const remove = (key: number) => {
+    const index = rows.findIndex(row => row.key === key);
+    const remaining = rows.filter(row => row.key !== key);
+    focusAfterChange.current = remaining[Math.min(index, remaining.length - 1)]?.key ?? 'add';
+    setRows(remaining);
+  };
+  return <fieldset ref={controls} disabled={pending} style={{ border: 0, padding: 0, margin: '10px 0 0', minWidth: 0 }}>
+    <legend style={LABEL}>Success criteria</legend>
+    {rows.length === 0 && <p style={{ color: C.dim, fontSize: 11 }}>No success criteria. Add one when you need it.</p>}
+    {rows.map((row, index) => <div key={row.key} style={{ marginBottom: 8 }}>
+      <label style={LABEL} htmlFor={`${id}-criterion-${row.key}`}>Success criterion {index + 1}</label>
+      <div style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>
+        <textarea id={`${id}-criterion-${row.key}`} data-criterion-key={row.key} name="criteria" defaultValue={row.value} rows={2} style={FIELD} disabled={pending} />
+        <button type="button" disabled={pending} aria-label={`Remove criterion ${index + 1}`} onClick={() => remove(row.key)}
+          style={{ ...BUTTON, background: 'none', border: `1px solid ${C.cardEdge}`, color: C.muted }}>Remove</button>
+      </div>
+    </div>)}
+    <button ref={addButton} type="button" disabled={pending || rows.length >= 32} onClick={add}
+      style={{ ...BUTTON, background: 'none', border: `1px solid ${C.cardEdge}`, color: C.cyan }}>Add criterion</button>
+  </fieldset>;
+}
+
+export function CreateMissionDialog({ options, onClose, onCreated, initial }: {
   options: readonly DependencyOption[];
+  initial?: MissionEditSnapshot;
   /** Dismissal without creating; focus returns to the opener. */
   onClose: () => void;
   /** The host created the mission; the parent refreshes the board. */
@@ -129,7 +167,7 @@ export function CreateMissionDialog({ options, onClose, onCreated }: {
   const submitting = useRef(false);
   const requestKey = useRef(newRequestKey());
   const mounted = useRef(true);
-  const [dependencies, setDependencies] = useState<string[]>([]);
+  const [dependencies, setDependencies] = useState<string[]>([...(initial?.dependencies ?? [])]);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [invalidTitle, setInvalidTitle] = useState(false);
@@ -153,13 +191,13 @@ export function CreateMissionDialog({ options, onClose, onCreated }: {
     setError(null);
     setInvalidTitle(false);
     try {
-      const result = await sendCreateMission(built.request);
+      const result = await savePlanning(built.request, initial);
       const created = (result.value as { missionId?: unknown } | null | undefined)?.missionId;
       if (result.status === 'completed' && typeof created === 'string') {
         if (mounted.current) { onCreated(created); }
         return;
       }
-      if (mounted.current) { fail(`${result.error?.message ?? `Creation ${result.status}.`} Your entries are kept — fix them or try again.`); }
+      if (mounted.current) { fail(`${result.error?.message ?? `${initial ? 'Save' : 'Creation'} ${result.status}.`} Your entries are kept — fix them or try again. If the mission changed, Cancel and reopen Edit to load the latest values.`); }
     } catch (failure) {
       if (mounted.current) { fail(`Could not reach the board host (${failure instanceof Error ? failure.message : String(failure)}). Your entries are kept — try again.`); }
     } finally {
@@ -195,21 +233,29 @@ export function CreateMissionDialog({ options, onClose, onCreated }: {
         onKeyDown={keys}
         style={{ width: 520, maxWidth: '94vw', maxHeight: '90vh', overflowY: 'auto', padding: 18, background: C.panel, border: `1px solid ${C.headEdge}`, borderRadius: 8, color: C.text, fontFamily: 'inherit' }}
       >
-        <h2 id={heading} style={{ margin: 0, fontSize: 15, letterSpacing: 1 }}>Create new mission</h2>
-        <p style={{ margin: '4px 0 0', color: C.dim, fontSize: 11 }}>The mission is added to the backlog. Nothing is drafted or started.</p>
+        <h2 id={heading} style={{ margin: 0, fontSize: 15, letterSpacing: 1 }}>{initial ? 'Edit mission' : 'Create new mission'}</h2>
+        <p style={{ margin: '4px 0 0', color: C.dim, fontSize: 11 }}>{initial ? `Planning fields for ${initial.missionId}. Saving preserves its identity and lifecycle.` : 'The mission is added to the backlog. Nothing is drafted or started.'}</p>
         <form onSubmit={(event) => { void submit(event); }} noValidate aria-describedby={error === null ? undefined : errorId}>
-          <Fields id={heading} pending={pending} invalidTitle={invalidTitle} titleField={titleField} />
+          <Fields initial={initial} id={heading} pending={pending} invalidTitle={invalidTitle} titleField={titleField} />
           <span style={LABEL}>Dependencies</span>
           <DependencyPicker options={options} selected={dependencies} disabled={pending} onChange={setDependencies} />
           {error !== null && <p id={errorId} role="alert" style={{ margin: '12px 0 0', color: C.red, fontSize: 11.5 }}>{error}</p>}
           <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 16 }}>
             <button type="button" onClick={onClose} disabled={pending} style={{ ...BUTTON, background: 'none', border: `1px solid ${C.cardEdge}`, color: C.muted }}>Cancel</button>
             <button type="submit" aria-disabled={pending} style={{ ...BUTTON, background: C.greenFill, border: `1px solid ${C.greenEdge}`, color: C.green, cursor: pending ? 'progress' : 'pointer' }}>
-              {pending ? 'Creating…' : 'Create mission'}
+              {pending ? (initial ? 'Saving…' : 'Creating…') : (initial ? 'Save changes' : 'Create mission')}
             </button>
           </div>
         </form>
       </section>
     </div>
   );
+}
+
+async function savePlanning(request: WebCreateMissionRequest, initial?: MissionEditSnapshot) {
+  return initial === undefined ? await sendCreateMission(request) : await sendEditMission({
+        kind: 'mission:edit', missionId: initial.missionId, expectedVersion: initial.version,
+        title: request.title, description: request.description ?? '', context: request.context ?? '',
+        labels: request.labels, successCriteria: request.successCriteria, dependencies: request.dependencies,
+      });
 }

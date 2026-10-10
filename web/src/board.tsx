@@ -1,3 +1,4 @@
+import { MissionEditor } from './mission-editor.js';
 /**
  * The board composition: it groups the received stages into the reference's
  * three regions and renders nothing itself. Grouping is presentation only —
@@ -62,6 +63,7 @@ function isRequestKind(kind: WebCommandAction['kind']): kind is 'active:execute'
 }
 
 export function Board({ snapshot, onRefresh }: { snapshot: WebBoardSnapshot; onRefresh: () => Promise<void> }) {
+  const [editRequest, setEditRequest] = useState<{ id: string; control: HTMLButtonElement } | null>(null);
   const [flowOpen, setFlowOpen] = useState(false);
   const [pendingCommands, setPendingCommands] = useState<PendingCommands>(new Map());
   const [outcomes, setOutcomes] = useState<ReadonlyMap<string, string>>(new Map());
@@ -116,6 +118,7 @@ export function Board({ snapshot, onRefresh }: { snapshot: WebBoardSnapshot; onR
     setDragged(card);
   };
   const dispatch = async (card: WebMissionCard, action: WebCommandAction, control?: HTMLButtonElement) => {
+    if (action.kind === 'mission:edit' && action.state === 'enabled' && control) { setEditRequest({ id: card.id, control }); return; }
     const unavailable = unavailableReason(action, pendingRef.current.get(card.id));
     if (unavailable !== null) { publishOutcome(card.id, unavailable); return; }
     if (!isRequestKind(action.kind)) {
@@ -259,6 +262,7 @@ export function Board({ snapshot, onRefresh }: { snapshot: WebBoardSnapshot; onR
           </div>
         </section>
       )}
+      <MissionEditor snapshot={snapshot} onRefresh={onRefresh} request={editRequest} onClose={() => setEditRequest(null)} />
       {createFrom !== null && (
         <CreateMissionDialog
           // Unfinished missions only, exactly the cards the board shows outside done.

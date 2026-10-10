@@ -232,7 +232,7 @@ nothing is drafted, no agent starts and no worktree is created. Use
 | Title | Required. |
 | Description and context | Description is free text. Context (why the mission exists) is optional; with both, they are recorded as the mission's goal and why. A description alone is kept as the description, and refinement still requires a goal and why, which the refining agent fills in from it. Context without a description is rejected. |
 | Labels | Comma separated. |
-| Success criteria | One per line. |
+| Success criteria | Edit each criterion in its own row. **Add criterion** adds a focused blank row; **Remove** deletes only that criterion. Remove every row to clear the list. Line breaks within a row stay part of that criterion. |
 | Dependencies | Pick any number of unfinished missions from the dropdown. Finished, closed and unknown missions are refused. Dependencies are recorded for operators and agents; nothing enforces them. |
 
 Parallix assigns the mission its identity (`px-NNNN`) and the new card
@@ -241,6 +241,20 @@ say what to fix. Retrying a submission that did reach the host returns the
 mission it already created, rather than creating a second one. `Escape` or **Cancel** closes the dialog without creating anything.
 The terminal and TUI have no equivalent button; they create missions through
 `px draft`.
+
+Each unfinished card has an **Edit** action. It loads the mission's current
+planning values into the same keyboard-accessible form. **Save changes** replaces
+the fields listed above; clearing optional text, labels, criteria or dependencies
+removes those values. Saving keeps the mission's identity, ownership, lane and
+execution/review evidence. Saved titles remain visible after refresh and reload;
+editing an old Backlog input does not rename an already-recorded mission.
+Finished missions cannot be edited.
+
+**Cancel** or `Escape` discards the form. A failed save keeps your entries and
+shows the reason. If another writer changed the mission, cancel and reopen
+**Edit** to load the latest values before reapplying your changes; a stale form
+cannot overwrite newer data. Saving disables a second submission until the
+first completes. Reload the board if its refresh fails after a successful save.
 
 ## Leaving
 

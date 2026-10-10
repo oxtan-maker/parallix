@@ -146,7 +146,7 @@ test('every board lane produces only wire-accepted action kinds', () => {
     ...validation.value.stages.flatMap((stage) => stage.cards.flatMap((c) => c.actions.map((a) => a.kind))),
     ...validation.value.attentionQueue.map((item) => item.action.kind),
   ]);
-  assert.deepEqual([...emitted].sort(), [...new Set(Object.values(BOARD_COMMAND_KINDS))].sort());
+  assert.deepEqual([...emitted].sort(), [...new Set([...Object.values(BOARD_COMMAND_KINDS), 'mission:edit'])].sort());
 
   // The attention queue exercises the three attention-borne kinds.
   const byMission = new Map(validation.value.attentionQueue.map((item) => [item.missionId, item.action.kind]));

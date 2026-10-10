@@ -83,10 +83,11 @@ function toWebCoordinatorEvidence(evidence: CoordinatorEvidence): WebCoordinator
 }
 
 function toCardActions(card: MissionCard): WebCommandAction[] {
-  return card.commands.map((command) => {
+  const editing: WebCommandAction = { kind: 'mission:edit', display: 'Edit', state: card.closed || card.status === 'done' ? 'ineligible' : 'enabled', reason: card.closed || card.status === 'done' ? 'Finished missions cannot be edited.' : null, targetLane: null };
+  return [...card.commands.map((command) => {
     const kind = BOARD_COMMAND_KINDS[command.command];
     return toCommandAction(kind, `px ${command.command} ${card.id}`, command);
-  });
+  }), editing];
 }
 
 function toWebMissionCard(card: MissionCard): WebMissionCard {

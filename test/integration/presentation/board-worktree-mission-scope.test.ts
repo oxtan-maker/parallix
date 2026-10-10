@@ -22,7 +22,7 @@ function mission(id: string, status: MissionStatus, repositoryId = repository, t
 }
 
 const persisted = [
-  mission('task-2438-active', 'active'),
+  mission('task-2438-active', 'active', repository, 'Recorded active title'),
   mission('task-2438-review', 'review'),
   mission('task-2438-integration', 'integration'),
   mission('task-2438-archived', 'active'),
@@ -72,7 +72,7 @@ function writeTask(root: string, directory: string, id: string, status: string, 
 }
 
 function writeCatalog(root: string, statuses: readonly string[]): void {
-  writeTask(root, 'tasks', 'task-2438-backlog', 'backlog');
+  writeTask(root, 'tasks', 'task-2438-backlog', 'backlog', 'Backlog Markdown title');
   writeTask(root, 'tasks', 'task-2438-active', statuses[0], 'Active Markdown title');
   writeTask(root, 'tasks', 'task-2438-review', statuses[1]);
   writeTask(root, 'tasks', 'task-2438-integration', statuses[2]);
@@ -113,9 +113,13 @@ test('task-2438 board reads persisted repository missions from every worktree', 
     assert.equal(lanes.has(missionId('task-2438-done')), true);
     const titles = new Map(projection.stages.flatMap((stage) => stage.cards.map((card) => [card.id, card.title])));
     const secondTitles = new Map(secondProjection.stages.flatMap((stage) => stage.cards.map((card) => [card.id, card.title])));
-    assert.equal(titles.get(missionId('task-2438-active')), 'Active Markdown title');
+    // Saved planning fields are authoritative even when a worktree has stale intake.
+    assert.equal(titles.get(missionId('task-2438-active')), 'Recorded active title');
+    assert.equal(secondTitles.get(missionId('task-2438-active')), 'Recorded active title');
     assert.equal(titles.get(missionId('task-2438-sibling')), 'Recorded sibling title');
-    assert.equal(secondTitles.get(missionId('task-2438-sibling')), 'Sibling Markdown title');
+    assert.equal(secondTitles.get(missionId('task-2438-sibling')), 'Recorded sibling title');
+    assert.equal(titles.get(missionId('task-2438-backlog')), 'Backlog Markdown title');
+    assert.equal(secondTitles.get(missionId('task-2438-backlog')), 'Backlog Markdown title');
     assert.equal((await firstBoard.missionQuery.detail(missionId('task-2438-backlog')))?.id, missionId('task-2438-backlog'));
     const active = await firstBoard.missionQuery.detail(missionId('task-2438-active'));
     assert.deepEqual(active?.checkpoints, []);

@@ -1,3 +1,4 @@
+import './mission-edit.cases.js';
 // Mission brief and typed mutation contract: checkpoint documents, prompt authority and parity, typed
 // Mission mutations, dependencies as a domain value, and Backlog materialization.
 //

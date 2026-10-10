@@ -29,7 +29,7 @@ export const TERMINAL_STATUSES: readonly string[] = ['completed', 'rejected', 'f
 export const ERROR_KINDS: readonly string[] = ['validation', 'capability', 'conflict', 'unavailable', 'execution', 'cancelled'];
 export const EVIDENCE_SOURCES: readonly string[] = ['task-markdown', 'git', 'stats', 'mission-store'];
 export const COMMAND_KINDS: readonly string[] = [
-  'active:execute', 'mission:intake', 'mission:create', 'draft:create', 'checkpoint:record',
+  'active:execute', 'mission:intake', 'mission:create', 'mission:edit-read', 'mission:edit', 'draft:create', 'checkpoint:record',
   'handoff:record', 'review:submit', 'review:act-on-findings', 'approve:review',
   'integrate:merge', 'mission:cancel',
 ];

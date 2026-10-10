@@ -1,3 +1,5 @@
+import { validateWebEditMissionRequest } from './transport-edit-mission.js';
+import { missionVersion } from '../../application/domain-ports.js';
 import type { FastifyReply } from 'fastify';
 import * as crypto from 'node:crypto';
 import { failure, rejected, type ApplicationOutcome, type Capability } from '../../application/contracts.js';
@@ -51,4 +53,17 @@ export async function dispatchCreateMission(reply: FastifyReply, dispatcher: Boa
   } catch (error) {
     sendCommandResult(reply, 500, failure('execution', errorMessage(error)));
   }
+}
+
+export async function dispatchEditMission(reply: FastifyReply, dispatcher: BoardCommandDispatcher, body: unknown): Promise<void> {
+  const validation = validateWebEditMissionRequest(body);
+  if ('problems' in validation) { return sendCommandResult(reply, 400, rejected('validation', validation.problems.join('; '))); }
+  const request = validation.value;
+  try {
+    const payload = request.kind === 'mission:edit-read' ? { kind: request.kind } as const
+      : { ...request, expectedVersion: missionVersion(request.expectedVersion) };
+    const outcome = await dispatcher.dispatch({ operationId: crypto.randomUUID(), kind: request.kind,
+      missionId: request.missionId, capabilities: new Set<Capability>(['mission:context']), payload });
+    sendCommandResult(reply, 200, outcome);
+  } catch (error) { sendCommandResult(reply, 500, failure('execution', errorMessage(error))); }
 }

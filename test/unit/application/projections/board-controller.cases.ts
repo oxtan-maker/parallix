@@ -247,8 +247,8 @@ test('isIntegratedCapability covers the Mission commands extracted so far', () =
 });
 
 test('INTEGRATED_CAPABILITIES contains active:execute and the Mission commands', () => {
-  assert.equal(INTEGRATED_CAPABILITIES.size, 8);
-  for (const kind of ['active:execute', 'mission:intake', 'mission:create', 'draft:create', 'checkpoint:record', 'handoff:record', 'integrate:merge', 'mission:cancel'] as const) {
+  assert.equal(INTEGRATED_CAPABILITIES.size, 10);
+  for (const kind of ['active:execute', 'mission:intake', 'mission:create', 'mission:edit-read', 'mission:edit', 'draft:create', 'checkpoint:record', 'handoff:record', 'integrate:merge', 'mission:cancel'] as const) {
     assert.ok(INTEGRATED_CAPABILITIES.has(kind), `${kind} should be integrated`);
   }
 });
@@ -315,4 +315,19 @@ test('mission:create is unavailable without Mission authority and rejects a mism
   assert.equal((await bare.dispatch(request)).status, 'rejected');
   const wired = new BoardCommandController(ports, undefined, { creation: { execute: async () => ({ status: 'completed' }) } as never }, undefined, { load: async () => ({ kind: 'missing' }) } as never);
   assert.equal((await wired.dispatch({ ...request, payload: undefined })).status, 'rejected');
+});
+
+
+test('controller routes edit read and versioned save through the typed planning service (TASK-2702)', async () => {
+  const { ports } = makeExecutePorts();
+  const calls: unknown[] = [];
+  const editing = { read: async (request: unknown) => { calls.push(request); return { status: 'completed', value: { title: 'Read' }, durableEvidence: [] }; },
+    save: async (request: unknown) => { calls.push(request); return { status: 'completed', value: { missionId: 'task-0001' }, durableEvidence: [] }; } };
+  const controller = new BoardCommandController(ports, undefined, { editing } as never);
+  const base = { capabilities: new Set(['mission:context'] as const) };
+  assert.equal((await controller.dispatch(makeRequest({ ...base, kind: 'mission:edit-read', payload: { kind: 'mission:edit-read' } }))).status, 'completed');
+  const payload = { kind: 'mission:edit', expectedVersion: 1, title: 'Revised', description: '', context: '', labels: [], successCriteria: [], dependencies: [] } as const;
+  assert.equal((await controller.dispatch(makeRequest({ ...base, kind: 'mission:edit', payload: payload as never }))).status, 'completed');
+  assert.equal(calls.length, 2);
+  assert.deepEqual(calls[1], { operationId: 'op-1', missionId: 'task-0001', capabilities: base.capabilities, ...payload });
 });

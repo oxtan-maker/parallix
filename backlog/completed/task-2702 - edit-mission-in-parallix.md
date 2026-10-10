@@ -1,8 +1,8 @@
 ---
 id: TASK-2702
 title: edit mission in parallix
-status: backlog
-assignee: []
+status: done
+assignee: [codex]
 created_date: '2026-10-09 13:54'
 labels: []
 dependencies: []

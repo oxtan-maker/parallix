@@ -147,7 +147,7 @@
       "integration/review/review-backfill.test.ts": 200,
       "integration/review/review-commands-additional.test.ts": 100,
       "integration/review/review-commands-supplemental.test.ts": 200,
-      "integration/review/review-events.test.ts": 100,
+      "integration/review/review-events.test.ts": 150,
       "integration/review/review-gate-ownership.test.ts": 300,
       "integration/review/review-identity.test.ts": 100,
       "integration/review/review-intervention-resume.integration.test.ts": 100,
@@ -194,7 +194,7 @@
       "integration/verification/verification.test.ts": 350,
       "integration/integrate/workflow-repair-lane-boundaries.test.ts": 7950,
       "integration/test-harness/runner-focused-selection.test.ts": 1000,
-      "integration/agents/pi-worker-process-contract.test.ts": 800
+      "integration/agents/pi-worker-process-contract.test.ts": 1100
     },
     "covered": {
       "integration/process/tmux-terminal-host.test.ts": 2500,
@@ -322,7 +322,7 @@
       "integration/review/review-backfill.test.ts": 275,
       "integration/review/review-commands-additional.test.ts": 100,
       "integration/review/review-commands-supplemental.test.ts": 250,
-      "integration/review/review-events.test.ts": 135,
+      "integration/review/review-events.test.ts": 150,
       "integration/review/review-gate-ownership.test.ts": 405,
       "integration/review/review-identity.test.ts": 100,
       "integration/review/review-intervention-resume.integration.test.ts": 150,
@@ -368,7 +368,7 @@
       "integration/verification/verification.test.ts": 450,
       "integration/integrate/workflow-repair-lane-boundaries.test.ts": 11282,
       "integration/test-harness/runner-focused-selection.test.ts": 1510,
-      "integration/agents/pi-worker-process-contract.test.ts": 800
+      "integration/agents/pi-worker-process-contract.test.ts": 1100
     }
   }
 }

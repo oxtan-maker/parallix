@@ -1,3 +1,4 @@
+import type { WebEditMissionRequest } from '../../src/interfaces/web/transport-edit-mission.js';
 /**
  * The browser's only network read: `GET /api/board`, validated by the shared
  * transport contract (`src/interfaces/web/transport.ts`) before anything
@@ -87,7 +88,7 @@ export async function loadSnapshot(): Promise<SettledSnapshotState> {
   return { kind: 'ready', snapshot: validation.value };
 }
 
-async function postCommand(request: WebCommandRequest | WebCreateMissionRequest): Promise<WebCommandResult> {
+async function postCommand(request: WebCommandRequest | WebCreateMissionRequest | WebEditMissionRequest): Promise<WebCommandResult> {
   const csrf = globalThis.document?.querySelector('meta[name="px-csrf"]')?.getAttribute('content');
   const response = await fetch(COMMANDS_PATH, {
     method: 'POST',
@@ -110,3 +111,5 @@ export function sendCommand(request: WebCommandRequest): Promise<WebCommandResul
 export function sendCreateMission(request: WebCreateMissionRequest): Promise<WebCommandResult> {
   return postCommand(request);
 }
+
+export function sendEditMission(request: WebEditMissionRequest): Promise<WebCommandResult> { return postCommand(request); }

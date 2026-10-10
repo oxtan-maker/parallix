@@ -16,6 +16,8 @@ export type BoardCommandKind =
   | 'active:execute'
   | 'mission:intake'
   | 'mission:create'
+  | 'mission:edit-read'
+  | 'mission:edit'
   | 'draft:create'
   | 'checkpoint:record'
   | 'handoff:record'
@@ -38,6 +40,8 @@ export type BoardCommandKind =
  * through the boundary.
  */
 export type BoardCommandPayload =
+  | { readonly kind: 'mission:edit-read' }
+  | ({ readonly kind: 'mission:edit'; readonly expectedVersion: MissionVersion } & import('../mission-edit-service.js').MissionPlanningFields)
   | {
     readonly kind: 'mission:intake';
     readonly repositoryId: RepositoryId;
@@ -155,6 +159,8 @@ export const INTEGRATED_CAPABILITIES = new Set<BoardCommandKind>([
   'active:execute',
   'mission:intake',
   'mission:create',
+  'mission:edit-read',
+  'mission:edit',
   'draft:create',
   'checkpoint:record',
   'handoff:record',

@@ -13,7 +13,6 @@ import { ConcreteAgentReadAdapter } from '../adapters/backlog/concrete-agent-rea
 import { ConcreteGateReadAdapter } from '../adapters/backlog/concrete-gate-read-adapter.js';
 import { ConcreteGitReadAdapter } from '../adapters/backlog/concrete-git-read-adapter.js';
 import { readBacklogInputs } from '../adapters/backlog/backlog-input-reader.js';
-import { createTaskScanCache, resolveTaskFile, getTaskFrontmatterValue, type TaskScanCache } from '../adapters/backlog/task-file-io.js';
 import { ConcreteOperationLogReadAdapter } from '../adapters/backlog/concrete-operation-log-read-adapter.js';
 import { ConcreteReviewReadAdapter } from '../adapters/backlog/concrete-review-read-adapter.js';
 import { ConcreteCurrentWorkReadAdapter } from '../adapters/backlog/concrete-current-work-read-adapter.js';
@@ -93,22 +92,15 @@ function createRunningSessionScan(deps: Pick<BoardProjectionCompositionDeps, 'ro
 export function createRepositoryMissionCatalog(
   deps: Pick<BoardProjectionCompositionDeps, 'rootDir' | 'missionStore' | 'repositoryId'>,
 ) {
-  // Backlog owns its descriptive title; the aggregate owns all operational fields.
-  function withRepositoryTitle(mission: Mission, scan?: TaskScanCache): Mission {
-    const task = resolveTaskFile(mission.id, deps.rootDir, scan);
-    const title = task.ok && task.taskFile ? getTaskFrontmatterValue(task.taskFile, 'title') : null;
-    return title ? { ...mission, title } : mission;
-  }
+  // Recorded planning fields belong to the Mission store; Backlog is intake only.
   return {
-    withRepositoryTitle,
     async loadAllMissions(): Promise<readonly Mission[]> {
       if (deps.missionStore && !deps.missionStore.loadByRepository) {
         throw new Error('Mission store cannot enumerate repository records');
       }
       const recorded = await deps.missionStore?.loadByRepository?.(deps.repositoryId) ?? [];
-      const scan = createTaskScanCache();
       const inputs = readBacklogInputs(deps.rootDir, deps.repositoryId, new Set(recorded.map(mission => mission.id)));
-      return [...recorded.map(mission => withRepositoryTitle(mission, scan)), ...inputs];
+      return [...recorded, ...inputs];
     },
   };
 }
@@ -125,7 +117,7 @@ export function composeBoardProjection(deps: BoardProjectionCompositionDeps) {
       if (deps.missionStore) {
         const stored = await deps.missionStore.load(id);
         if (stored.kind === 'found') {
-          return stored.mission.repositoryId === deps.repositoryId ? withRepositoryTitle(stored.mission) : null;
+          return stored.mission.repositoryId === deps.repositoryId ? stored.mission : null;
         }
       }
       return (await missions.loadAllMissions()).find(mission => mission.id === id) ?? null;
@@ -138,7 +130,6 @@ export function composeBoardProjection(deps: BoardProjectionCompositionDeps) {
 
   const catalog = createRepositoryMissionCatalog(deps);
   const loadBoardMissions = () => catalog.loadAllMissions();
-  const withRepositoryTitle = catalog.withRepositoryTitle;
   const currentWork = new ConcreteCurrentWorkReadAdapter(deps.historyRepo);
   const runningSessions = createRunningSessionScan(deps);
   const changeIdentity = createGitChangeIdentity(deps.rootDir, deps.gitFn ?? undefined, { snapshotBranchHeads: true });

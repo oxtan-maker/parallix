@@ -178,3 +178,15 @@ test('web create-mission request: rejects identity, repository and status keys a
   const { title: _t, ...untitled } = base;
   assert.equal(validateWebCreateMissionRequest(untitled).ok, false);
 });
+
+// Complete planning replacement is a separate typed envelope from lifecycle commands.
+import { validateWebEditMissionRequest } from '../../../../src/interfaces/web/transport-edit-mission.js';
+test('web edit request accepts opaque identity and complete removals, rejects lifecycle keys and missing version (TASK-2702)', () => {
+  const body = { kind: 'mission:edit', missionId: 'supplied-identity-1', expectedVersion: 2,
+    title: 'Revised', description: '', context: '', labels: [], successCriteria: [], dependencies: [] };
+  assert.equal(validateWebEditMissionRequest(body).ok, true);
+  assert.equal(validateWebEditMissionRequest({ kind: 'mission:edit-read', missionId: 'px-1234' }).ok, true);
+  for (const patch of [{ expectedVersion: undefined }, { expectedVersion: 0 }, { expectedVersion: 1.5 }, { status: 'active' }, { assignee: 'codex' }, { dependencies: 'x' }, { description: null }]) {
+    assert.equal(validateWebEditMissionRequest({ ...body, ...patch }).ok, false);
+  }
+});

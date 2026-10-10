@@ -63,7 +63,7 @@ function isSameNode(actual: unknown, expected: unknown) {
 test('board click and keyboard activation send one projected typed request', async () => {
   const page = await renderBoard();
   try {
-    const button = page.mount.querySelector<DomButton>('button[aria-label*=" — enabled"]')!;
+    const button = page.mount.querySelector<DomButton>('button[aria-label^="px "][aria-label*=" — enabled"]')!;
     await act(async () => { button.click(); });
     assert.equal(page.calls.length, 1);
     assert.deepEqual(payload(page.calls), request);
@@ -75,7 +75,7 @@ test('board click and keyboard activation send one projected typed request', asy
 test('board keyboard activation sends the same projected typed request', async () => {
   const page = await renderBoard();
   try {
-    const button = page.mount.querySelector<DomButton>('button[aria-label*=" — enabled"]')!;
+    const button = page.mount.querySelector<DomButton>('button[aria-label^="px "][aria-label*=" — enabled"]')!;
     await act(async () => {
       button.dispatchEvent(new page.window.KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
       button.dispatchEvent(new page.window.MouseEvent('click', { bubbles: true, detail: 0 }));
@@ -97,7 +97,7 @@ test('independent missions dispatch concurrently and retain separate pending sta
   const second = makeCard({ id: missionId('task-2657-b'), status: 'active', lane: 'active', commands: [action] });
   const page = await renderBoard({ board: toWebBoardSnapshot(makeProjection({ active: [first, second] })), respond: deferred });
   try {
-    const buttons = [...page.mount.querySelectorAll<DomButton>('button[aria-label*=" — enabled"]')];
+    const buttons = [...page.mount.querySelectorAll<DomButton>('button[aria-label^="px "][aria-label*=" — enabled"]')];
     await act(async () => { buttons[0].click(); });
     await act(async () => { buttons[1].click(); });
     assert.equal(page.calls.length, 2, 'B must cross the sendCommand boundary while A is unresolved');
@@ -114,7 +114,7 @@ test('rapid repeated activation synchronously sends one request (TASK-2657)', as
   let resolveRequest: ((response: Response) => void) | undefined;
   const page = await renderBoard({ respond: () => new Promise<Response>((resolve) => { resolveRequest = resolve; }) });
   try {
-    const button = page.mount.querySelector<DomButton>('button[aria-label*=" — enabled"]')!;
+    const button = page.mount.querySelector<DomButton>('button[aria-label^="px "][aria-label*=" — enabled"]')!;
     await act(async () => { button.click(); button.click(); });
     assert.equal(page.calls.length, 1, 'the ref latch must reject a repeat before React rerenders');
     assert.match(page.mount.querySelector('[role="status"]')?.textContent ?? '', /already running/i);
@@ -147,7 +147,7 @@ test('drag start and drop on a pending mission give feedback without dispatching
       return event;
     };
     await act(async () => { card.dispatchEvent(drag()); });
-    await act(async () => { page.mount.querySelector<DomButton>('button[aria-label*=" — enabled"]')!.click(); });
+    await act(async () => { page.mount.querySelector<DomButton>('button[aria-label^="px "][aria-label*=" — enabled"]')!.click(); });
     await act(async () => { card.dispatchEvent(drag()); page.mount.querySelector<DomHtmlElement>('section[aria-label="review stage"] > div:last-child')!.dispatchEvent(new page.window.Event('drop', { bubbles: true })); });
     assert.equal(page.calls.length, 1);
     assert.match(page.mount.querySelector('[role="status"]')?.textContent ?? '', /Drop unavailable.*command is running/i);
@@ -397,7 +397,7 @@ test('board conflict refreshes without retry and preserves the typed outcome', a
   let refreshed = 0;
   const page = await renderBoard({ result: commandResult('failed', { kind: 'conflict', message: 'stale action' }), refresh: async () => { refreshed += 1; } });
   try {
-    await act(async () => { page.mount.querySelector<DomButton>('button[aria-label*=" — enabled"]')!.click(); });
+    await act(async () => { page.mount.querySelector<DomButton>('button[aria-label^="px "][aria-label*=" — enabled"]')!.click(); });
     assert.equal(page.calls.length, 1);
     assert.equal(refreshed, 1);
     assert.match(page.mount.querySelector('[role="status"]')?.textContent ?? '', /stale action.*refreshed action/i);
@@ -418,7 +418,7 @@ test('a thrown send and rejected refresh release only their own pending ownershi
     refresh: async () => { if (calls === 2) { throw new Error('refresh lost'); } },
   });
   try {
-    const buttons = [...page.mount.querySelectorAll<DomButton>('button[aria-label*=" — enabled"]')];
+    const buttons = [...page.mount.querySelectorAll<DomButton>('button[aria-label^="px "][aria-label*=" — enabled"]')];
     await act(async () => { buttons[0].click(); await new Promise<void>((resolve) => queueMicrotask(resolve)); });
     assert.match(buttons[0].getAttribute('aria-label') ?? '', /enabled/, 'the thrown request must release its mission');
     await act(async () => { buttons[1].click(); await new Promise<void>((resolve) => queueMicrotask(resolve)); });
@@ -436,7 +436,7 @@ test('outcomes replace per mission and are pruned when its card leaves the snaps
     respond: async () => new Response(JSON.stringify(commandResult('failed', { kind: 'execution', message: `failure ${++attempt}` })), { headers: { 'content-type': 'application/json' } }),
   });
   try {
-    const button = page.mount.querySelector<DomButton>('button[aria-label*=" — enabled"]')!;
+    const button = page.mount.querySelector<DomButton>('button[aria-label^="px "][aria-label*=" — enabled"]')!;
     await act(async () => { button.click(); await new Promise<void>((resolve) => queueMicrotask(resolve)); });
     await act(async () => { button.click(); await new Promise<void>((resolve) => queueMicrotask(resolve)); });
     assert.equal(page.mount.querySelectorAll('[role="status"]').length, 1);
@@ -459,7 +459,7 @@ test('unmounting a request and completing an older request cannot restore stale 
   const page = await renderBoard({ board: toWebBoardSnapshot(makeProjection({ active: [first, second] })), respond: deferred });
   let closed = false;
   try {
-    const buttons = [...page.mount.querySelectorAll<DomButton>('button[aria-label*=" — enabled"]')];
+    const buttons = [...page.mount.querySelectorAll<DomButton>('button[aria-label^="px "][aria-label*=" — enabled"]')];
     await act(async () => { buttons[0].click(); buttons[1].focus(); buttons[1].click(); });
     resolveFirst!(new Response(JSON.stringify(commandResult()), { headers: { 'content-type': 'application/json' } }));
     await act(async () => { await new Promise<void>((resolve) => queueMicrotask(resolve)); });
@@ -476,7 +476,7 @@ test('unmounting a request and completing an older request cannot restore stale 
 test('board failure leaves the card in its received lane and restores initiating focus', async () => {
   const page = await renderBoard({ result: commandResult('failed', { kind: 'execution', message: 'handoff failed' }) });
   try {
-    const button = page.mount.querySelector<DomButton>('button[aria-label*=" — enabled"]')!;
+    const button = page.mount.querySelector<DomButton>('button[aria-label^="px "][aria-label*=" — enabled"]')!;
     await act(async () => { button.click(); await new Promise<void>((resolve) => queueMicrotask(resolve)); });
     assert.equal(page.calls.length, 1);
     assert.equal(page.mount.querySelector('[aria-label="active stage"] [data-board-card]')?.getAttribute('data-board-card'), 'task-2436-interaction');
@@ -564,7 +564,7 @@ test('Create new mission opens a labelled modal dialog focused on the title and 
     assert.equal(dialog.getAttribute('aria-modal'), 'true');
     assert.match(page.mount.querySelector(`#${CSS_ESCAPE(dialog.getAttribute('aria-labelledby')!)}`)?.textContent ?? '', /Create new mission/);
     assert.ok(isSameNode(page.window.document.activeElement, fieldByLabel(page, 'Title')));
-    for (const label of ['Title', 'Description', 'Context', 'Labels', 'Success criteria']) { assert.ok(fieldByLabel(page, label), label); }
+    for (const label of ['Title', 'Description', 'Context', 'Labels', 'Success criterion']) { assert.ok(fieldByLabel(page, label), label); }
     await enter(page, fieldByLabel(page, 'Title'), 'Typed but abandoned');
     await act(async () => { dialog.dispatchEvent(new page.window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); });
     assert.equal(dialogOf(page), null);
@@ -619,10 +619,12 @@ test('Create new mission offers only unfinished missions as dependencies and sen
     await enter(page, fieldByLabel(page, 'Description'), 'What we want');
     await enter(page, fieldByLabel(page, 'Context'), 'Why we want it');
     await enter(page, fieldByLabel(page, 'Labels'), 'UX, api,, ');
-    await enter(page, fieldByLabel(page, 'Success criteria'), 'It works\n\n It is documented ');
+    await enter(page, fieldByLabel(page, 'Success criterion 1'), 'It works');
+    await act(async () => { [...page.mount.querySelectorAll<DomButton>('button')].find(button => button.textContent === 'Add criterion')!.click(); });
+    await enter(page, fieldByLabel(page, 'Success criterion 2'), ' It is documented ');
     const picker = [...page.mount.querySelectorAll<DomButton>('button')].find((button) => button.getAttribute('aria-haspopup') === 'true')!;
     await act(async () => { picker.click(); });
-    const offered = [...page.mount.querySelectorAll('fieldset label')].map((label) => label.textContent);
+    const offered = [...page.mount.querySelectorAll('fieldset[aria-label="Unfinished missions"] label')].map((label) => label.textContent);
     assert.deepEqual(offered, ['task-open-twoSecond open mission', 'task-open-oneFirst open mission']);
     const boxes = [...page.mount.querySelectorAll<DomHtmlElement>('fieldset input[type="checkbox"]')];
     await act(async () => { boxes[0].click(); });
@@ -683,5 +685,94 @@ test('Create new mission keeps entries after a failure and retries with the same
     assert.equal(page.calls.length, 3);
     assert.equal(new Set(page.calls.map((call) => JSON.parse(String(call.body)).requestKey)).size, 1, 'every retry reuses one request key');
     assert.equal(dialogOf(page), null);
+  } finally { await page.close(); }
+});
+
+const editFields = { missionId: 'task-open-one', version: 7, title: 'Full title', description: 'Full description', context: 'Full context', labels: ['user_value', 'api'], successCriteria: ['works', 'documented'], dependencies: ['task-open-two'] };
+const editResult = (value = editFields) => ({ ...commandResult(), value });
+const editOpener = (page: Awaited<ReturnType<typeof renderBoard>>) => page.mount.querySelector<DomButton>('[data-board-card="task-open-one"] button[aria-label="Edit — enabled"]')!;
+
+test('Edit opens authoritative prefilled fields, traps keyboard focus and cancels without saving (TASK-2702)', async () => {
+  const page = await renderBoard({ board: createBoard(), result: editResult() });
+  try {
+    const trigger = editOpener(page);
+    await act(async () => { trigger.focus(); trigger.click(); });
+    assert.deepEqual(payload(page.calls), { kind: 'mission:edit-read', missionId: 'task-open-one' });
+    for (const [label, expected] of [['Title', 'Full title'], ['Description', 'Full description'], ['Context', 'Full context'], ['Labels', 'user_value, api']]) {
+      assert.equal(fieldByLabel(page, label).value, expected);
+    }
+    assert.deepEqual([...page.mount.querySelectorAll<DomHtmlElement & { value: string }>('textarea[name="criteria"]')].map(field => field.value), ['works', 'documented']);
+    assert.ok(isSameNode(page.window.document.activeElement, fieldByLabel(page, 'Title')));
+    const dialog = dialogOf(page)!;
+    await act(async () => { dialog.dispatchEvent(new page.window.KeyboardEvent('keydown', { key: 'Tab', shiftKey: true, bubbles: true })); });
+    assert.ok(isSameNode(page.window.document.activeElement, submitButton(page)));
+    await enter(page, fieldByLabel(page, 'Title'), 'Discard this');
+    await act(async () => { dialog.dispatchEvent(new page.window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); });
+    assert.equal(dialogOf(page), null); assert.equal(page.calls.length, 1);
+    assert.ok(isSameNode(page.window.document.activeElement, trigger));
+  } finally { await page.close(); }
+});
+
+test('Edit saves removals with the read version and refreshes the board (TASK-2702)', async () => {
+  let refreshed = 0; let calls = 0;
+  const page = await renderBoard({ board: createBoard(), respond: async () => new Response(JSON.stringify(++calls === 1 ? editResult() : createdResult('task-open-one'))), refresh: async () => { refreshed++; } });
+  try {
+    await act(async () => { editOpener(page).click(); });
+    await enter(page, fieldByLabel(page, 'Title'), 'Revised');
+    for (const label of ['Description', 'Context', 'Labels']) { await enter(page, fieldByLabel(page, label), ''); }
+    while (page.mount.querySelector('button[aria-label="Remove criterion 1"]')) { await act(async () => { page.mount.querySelector<DomButton>('button[aria-label="Remove criterion 1"]')!.click(); }); }
+    const picker = page.mount.querySelector<DomButton>('button[aria-haspopup="true"]')!;
+    await act(async () => { picker.click(); });
+    await act(async () => { const inputs = [...page.mount.querySelectorAll<DomHtmlElement & { checked: boolean }>('fieldset input')]; assert.equal(inputs.length, 1, page.mount.querySelector('fieldset')?.outerHTML); inputs[0].click(); });
+    await act(async () => { submitButton(page).click(); });
+    assert.deepEqual(JSON.parse(String(page.calls[1].body)), { kind: 'mission:edit', missionId: 'task-open-one', expectedVersion: 7, title: 'Revised', description: '', context: '', labels: [], successCriteria: [], dependencies: [] });
+    assert.equal(refreshed, 1); assert.equal(dialogOf(page), null);
+  } finally { await page.close(); }
+});
+
+test('Edit retains entries on validation, conflict and transport failures and blocks pending duplicates (TASK-2702)', async () => {
+  for (const kind of ['validation', 'conflict', 'transport']) {
+    let calls = 0; let release: (() => void) | undefined;
+    const page = await renderBoard({ board: createBoard(), respond: async () => {
+      if (++calls === 1) { return new Response(JSON.stringify(editResult())); }
+      await new Promise<void>(resolve => { release = resolve; });
+      if (kind === 'transport') { throw new Error('offline'); }
+      return new Response(JSON.stringify(commandResult('failed', { kind, message: 'Rejected save' })));
+    } });
+    try {
+      await act(async () => { editOpener(page).click(); });
+      await enter(page, fieldByLabel(page, 'Title'), 'Kept value');
+      await enter(page, fieldByLabel(page, 'Success criterion 2'), 'Kept criterion');
+      await act(async () => { submitButton(page).click(); submitButton(page).click(); });
+      assert.equal(calls, 2);
+      for (const control of page.mount.querySelectorAll<DomButton>('button[aria-label^="Remove criterion"], fieldset button')) { assert.ok(control.disabled, 'row actions are disabled while saving'); }
+      await act(async () => { release!(); });
+      assert.equal(fieldByLabel(page, 'Title').value, 'Kept value');
+      assert.equal(fieldByLabel(page, 'Success criterion 2').value, 'Kept criterion');
+      assert.ok(page.mount.querySelector('[role="alert"]')); assert.ok(dialogOf(page));
+    } finally { release?.(); await page.close(); }
+  }
+});
+
+test('Edit uses individual criterion rows with keyboard Add and Remove, preserving other rows and embedded newlines (TASK-2702)', async () => {
+  let calls = 0;
+  const page = await renderBoard({ board: createBoard(), respond: async () => new Response(JSON.stringify(++calls === 1 ? editResult() : createdResult('task-open-one'))) });
+  try {
+    await act(async () => { editOpener(page).click(); });
+    const rows = () => [...page.mount.querySelectorAll<DomHtmlElement & { value: string }>('textarea[name="criteria"]')];
+    assert.equal(rows().length, 2, 'one independently editable field per criterion');
+    assert.deepEqual(rows().map(row => row.value), ['works', 'documented']);
+    rows()[1].value = 'Kept second row';
+    const add = [...page.mount.querySelectorAll<DomButton>('button')].find(button => button.textContent === 'Add criterion')!;
+    await act(async () => { add.focus(); add.click(); });
+    assert.equal(rows().length, 3);
+    assert.ok(isSameNode(page.window.document.activeElement, rows()[2]), 'keyboard Add moves focus to the new field');
+    rows()[2].value = 'First paragraph\nSecond paragraph';
+    const remove = page.mount.querySelector<DomButton>('button[aria-label="Remove criterion 1"]')!;
+    await act(async () => { remove.focus(); remove.click(); });
+    assert.deepEqual(rows().map(row => row.value), ['Kept second row', 'First paragraph\nSecond paragraph'], 'removing a row preserves neighboring unsaved entries');
+    assert.ok(isSameNode(page.window.document.activeElement, rows()[0]), 'removing a focused row moves focus to the next field');
+    await act(async () => { submitButton(page).click(); });
+    assert.deepEqual(JSON.parse(String(page.calls[1].body)).successCriteria, ['Kept second row', 'First paragraph\nSecond paragraph']);
   } finally { await page.close(); }
 });

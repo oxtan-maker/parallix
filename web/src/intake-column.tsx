@@ -13,8 +13,8 @@ import { familyAccent, isSpinning, workText } from './format.js';
 
 function primaryAction(actions: readonly WebMissionCard['actions'][number][]) {
   // The destructive action never becomes the card's default button.
-  return actions.find((action) => action.state === 'enabled' && action.kind !== 'mission:cancel')
-    ?? actions.find((action) => action.kind !== 'mission:cancel') ?? null;
+  return actions.find((action) => action.state === 'enabled' && action.kind !== 'mission:cancel' && action.kind !== 'mission:edit')
+    ?? actions.find((action) => action.kind !== 'mission:cancel' && action.kind !== 'mission:edit') ?? null;
 }
 
 function cancelAction(actions: readonly WebMissionCard['actions'][number][]) {
@@ -25,6 +25,7 @@ function cancelAction(actions: readonly WebMissionCard['actions'][number][]) {
 function IntakeCard({ card, onAction, onSelect, onDragStart, selected, pendingCommands }: { card: WebMissionCard; onAction: (card: WebMissionCard, action: WebMissionCard['actions'][number], control: HTMLButtonElement) => void; onSelect: (id: string) => void; onDragStart: (card: WebMissionCard, event: DragEvent<HTMLElement>) => void; selected: boolean; pendingCommands: PendingCommands }) {
   const primary = primaryAction(card.actions);
   const cancel = cancelAction(card.actions);
+  const edit = card.actions.find(action => action.kind === 'mission:edit') ?? null;
   return (
     <article
       data-board-card={card.id}
@@ -48,7 +49,7 @@ function IntakeCard({ card, onAction, onSelect, onDragStart, selected, pendingCo
         </span>
       </div>
       <p style={{ margin: '5px 0 0', lineHeight: 1.4, color: C.muted, fontSize: 11 }}>{card.title}</p>
-      {(primary !== null || cancel !== null) && (
+      {(primary !== null || cancel !== null || edit !== null) && (
         <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 5, marginTop: 7, flexWrap: 'wrap' }}>
           {cancel !== null && (
             <ActionButton action={cancel} label={cancel.label} style={{ color: C.red, border: `1px solid ${C.red}` }} pending={pendingCommands.get(card.id)} onInvoke={(next, control) => onAction(card, next, control)} />
@@ -56,6 +57,7 @@ function IntakeCard({ card, onAction, onSelect, onDragStart, selected, pendingCo
           {primary !== null && (
             <ActionButton action={primary} label={primary.label} pending={pendingCommands.get(card.id)} working={isSpinning(card)} onInvoke={(next, control) => onAction(card, next, control)} />
           )}
+          {edit !== null && <ActionButton action={edit} label="Edit" pending={pendingCommands.get(card.id)} working={false} onInvoke={(next, control) => onAction(card, next, control)} />}
         </div>
       )}
     </article>

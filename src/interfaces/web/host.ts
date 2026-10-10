@@ -11,6 +11,7 @@
  * process.
  */
 
+import { isEditMissionBody } from './transport-edit-mission.js';
 import * as crypto from 'node:crypto';
 import Fastify, { type FastifyInstance, type FastifyReply } from 'fastify';
 import { shareBuilds } from './shared-build.js';
@@ -64,7 +65,7 @@ import {
   type LoopbackLiteral,
 } from './security.js';
 import { createShellBootstrap } from './shell-bootstrap.js';
-import { dispatchCreateMission, errorMessage, sendCommandResult, singleHeader, transportStatusCode } from './host-support.js';
+import { dispatchEditMission, dispatchCreateMission, errorMessage, sendCommandResult, singleHeader, transportStatusCode } from './host-support.js';
 import { registerTerminalRoute, type WebTerminalReader } from './terminal-route.js';
 export { WEB_TERMINAL_PATH, type WebTerminalOutput, type WebTerminalReader } from './terminal-route.js';
 
@@ -334,13 +335,12 @@ export function createWebHost(options: WebHostOptions): WebHost {
       // Terminal polls reuse the displayed board; commands still rebuild below.
       registerTerminalRoute(app, { ...options, buildProjection: sharedBuild === undefined
         ? undefined : async () => displayedProjection ?? sharedBuild() });
-      // The only mutation route (TASK-2433), outranking the 405 catch-all below;
-      // the onRequest hook has already enforced Host/Origin/session/CSRF.
       app.post(WEB_COMMANDS_PATH, async (request, reply) => {
         const dispatcher = options.commandDispatcher?.();
         if (dispatcher === undefined || dispatcher === null) {
           return sendCommandResult(reply, 503, failure('unavailable', 'command dispatcher port is not wired'));
         }
+        if (isEditMissionBody(request.body)) { return dispatchEditMission(reply, dispatcher, request.body); }
         if (isCreateMissionBody(request.body)) { return dispatchCreateMission(reply, dispatcher, request.body); }
         const validation = validateWebCommandRequest(request.body);
         if (isInvalidWebCommandRequest(validation)) {
