@@ -1,0 +1,10 @@
+# Development install settings for the Parallix repository (ADR 0063). The
+# published package is still built and installed with npm.
+overrides:
+  source-map-js: 1.2.2
+packageImportMethod: auto
+allowBuilds:
+  '@google/genai': true
+  esbuild: true
+  protobufjs: true
+  sonar-scanner: true

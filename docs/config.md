@@ -337,10 +337,15 @@ failing command stops the draft as an environment failure, before an agent is
 launched; it is not treated as the implementer's failure. Make it idempotent: a
 re-run of the draft runs it again. An empty string is the same as unset.
 
+Each run logs its command, exit code, monotonic duration and whether the package
+store was already populated, and the draft output separates worktree checkout
+time from hook time. A failed hook prints its exit code and the tail of its
+output. Repair the environment or the command and re-run the draft.
+
 ```json
 {
   "adapters": {
-    "draft": { "preDraftCommand": "npm ci" }
+    "draft": { "preDraftCommand": "pnpm install --frozen-lockfile --prefer-offline" }
   }
 }
 ```

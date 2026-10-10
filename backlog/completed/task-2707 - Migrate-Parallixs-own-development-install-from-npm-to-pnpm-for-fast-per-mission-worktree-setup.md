@@ -3,8 +3,8 @@ id: TASK-2707
 title: >-
   Migrate Parallix's own development install from npm to pnpm for fast
   per-mission worktree setup
-status: backlog
-assignee: []
+status: done
+assignee: [claude]
 created_date: '2026-10-10 05:20'
 updated_date: '2026-10-10 05:21'
 labels:

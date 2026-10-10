@@ -89,6 +89,10 @@ Recommend Nx adoption only with:
 
 Below-threshold results mean insufficient benefit; invalid measurements mean inconclusive. A new adoption decision needs evidence beyond the current trial.
 
+## Worktree dependency install
+
+Parallix's own development install uses the pnpm version pinned in `package.json` `packageManager`, with `pnpm-lock.yaml` as the only lockfile and `pnpm install --frozen-lockfile --prefer-offline` as `adapters.draft.preDraftCommand`. Every worktree keeps its own `node_modules`; only the content-addressable store is shared, so one mission's install or dependency change never alters main or another worktree. When the store is on a different filesystem pnpm copies files instead of hard-linking, which is slower but correct. The strict layout is kept: no hoisting setting exists, and a phantom import is fixed by declaring or removing it. Dependency lifecycle scripts run only for the packages approved in `pnpm-workspace.yaml` `allowBuilds` (esbuild, sonar-scanner, protobufjs, @google/genai). The source-map-js override lives in the same file. The hook logs its command, exit code, monotonic duration and cold/warm store state, so install cost is read from run evidence. ADR 0044 and ADR 0046 keep npm for packaging and publication.
+
 ## Consequences
 
 Few hits under conservative inputs are valid negative evidence, not permission to weaken dependencies. Proven CPU-guard improvements can remain independently of Nx.

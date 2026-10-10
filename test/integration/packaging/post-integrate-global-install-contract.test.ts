@@ -78,7 +78,7 @@ describe("refresh-global-px script", () => {
 
   test('scripts/refresh-global-px.sh rebuilds and reinstalls from a packed tarball without allocating a version', () => {
     const content = fs.readFileSync(SCRIPT_PATH, 'utf8');
-    assert.match(content, /npm ci/);
+    assert.match(content, /pnpm install --frozen-lockfile/);
     assert.match(content, /npm run build/);
     assert.match(content, /npm pack/);
     assert.match(content, /npm install -g/);
@@ -255,7 +255,7 @@ describe("post-integrate hook errors", () => {
     fs.mkdirSync(path.join(repoRoot, 'scripts'), { recursive: true });
     fs.copyFileSync(SCRIPT_SOURCE, path.join(repoRoot, 'scripts', 'refresh-global-px.sh'));
     fs.writeFileSync(path.join(repoRoot, 'package.json'), JSON.stringify({ name: 'fixture', version: '1.0.1' }, null, 2));
-    fs.writeFileSync(path.join(repoRoot, 'package-lock.json'), '{}\n');
+    fs.writeFileSync(path.join(repoRoot, 'pnpm-lock.yaml'), 'lockfileVersion: 9.0\n');
 
     writeExecutable(path.join(binDir, 'git'), `#!/usr/bin/env node
 const fs = require('node:fs');
@@ -266,6 +266,10 @@ process.exit(0);
     writeExecutable(path.join(binDir, 'px'), `#!/usr/bin/env node
 const fs = require('node:fs');
 process.stdout.write(fs.readFileSync(${JSON.stringify(path.join(root, 'installed-version'))}, 'utf8'));
+`);
+
+    writeExecutable(path.join(binDir, 'pnpm'), `#!/usr/bin/env node
+require('node:fs').appendFileSync(${JSON.stringify(logPath)}, 'pnpm ' + process.argv.slice(2).join(' ') + '\\n');
 `);
 
     writeExecutable(path.join(binDir, 'npm'), `#!/usr/bin/env node
@@ -344,7 +348,7 @@ process.exit(1);
       assert.deepEqual(fs.readdirSync(fixture.repoRoot).filter(file => file.endsWith('.tgz')), []);
       assert.match(result.stdout, /Global px runner refreshed/);
       assert.match(result.stdout, /1\.0\.1/, 'the reported installed px version equals the landed package version');
-      assert.match(calls, /npm ci\nnpm run build\nnpm pack --pack-destination [^\n]+\nnpm install -g/, 'dependency reconciliation precedes build, pack, and global installation');
+      assert.match(calls, /pnpm install --frozen-lockfile --prefer-offline\nnpm run build\nnpm pack --pack-destination [^\n]+\nnpm install -g/, 'dependency reconciliation precedes build, pack, and global installation');
     } finally {
       fs.rmSync(fixture.root, { recursive: true, force: true });
     }
@@ -561,36 +565,31 @@ describe("refresh reconciles the landed lockfile before pack (consolidated from 
     fs.mkdirSync(path.join(repo, 'scripts'), { recursive: true });
     fs.copyFileSync(REFRESH_SCRIPT, path.join(repo, 'scripts/refresh-global-px.sh'));
     fs.writeFileSync(path.join(repo, 'package.json'), JSON.stringify({ name: 'fixture', version: '1.0.0' }));
-    fs.writeFileSync(path.join(repo, 'package-lock.json'), JSON.stringify({
-      lockfileVersion: 3,
-      packages: {
-        '': { name: 'fixture', version: '1.0.0' },
-        'node_modules/brace-expansion': { version: '5.0.12' },
-        [nested]: { version: '5.0.12' },
-      },
-    }, null, 2));
+    fs.writeFileSync(path.join(repo, 'pnpm-lock.yaml'), 'lockfileVersion: 9.0\n');
     fs.mkdirSync(rootBrace, { recursive: true });
     fs.mkdirSync(nestedBrace, { recursive: true });
     fs.writeFileSync(path.join(rootBrace, 'package.json'), packageJson('5.0.9'));
     fs.writeFileSync(path.join(nestedBrace, 'package.json'), packageJson('5.0.9'));
 
     executable(path.join(bin, 'px'), '#!/usr/bin/env bash\necho 1.0.0\n');
+    executable(path.join(bin, 'pnpm'), `#!/usr/bin/env node
+const fs = require('node:fs');
+const path = require('node:path');
+const args = process.argv.slice(2);
+const root = process.cwd();
+fs.appendFileSync(${JSON.stringify(calls)}, args.join(' ') + '\\n');
+for (const target of ['node_modules/brace-expansion', ${JSON.stringify(nested)}]) {
+  fs.mkdirSync(path.join(root, target), { recursive: true });
+  fs.writeFileSync(path.join(root, target, 'package.json'), JSON.stringify({ name: 'brace-expansion', version: '5.0.12' }));
+}
+`);
     executable(path.join(bin, 'npm'), `#!/usr/bin/env node
 const fs = require('node:fs');
 const path = require('node:path');
 const args = process.argv.slice(2);
 const root = process.cwd();
-const calls = ${JSON.stringify(calls)};
 const nested = ${JSON.stringify(nested)};
-fs.appendFileSync(calls, args.join(' ') + '\\n');
-const packageJson = version => JSON.stringify({ name: 'brace-expansion', version });
-if (args[0] === 'ci') {
-  for (const target of ['node_modules/brace-expansion', nested]) {
-    fs.mkdirSync(path.join(root, target), { recursive: true });
-    fs.writeFileSync(path.join(root, target, 'package.json'), packageJson('5.0.12'));
-  }
-  process.exit(0);
-}
+fs.appendFileSync(${JSON.stringify(calls)}, args.join(' ') + '\\n');
 if (args[0] === 'run' && args[1] === 'build') process.exit(0);
 if (args[0] === 'pack') {
   for (const target of ['node_modules/brace-expansion', nested]) {
@@ -615,7 +614,7 @@ process.exit(1);
         env: { ...process.env, PATH: `${setup.bin}:${process.env.PATH}` },
       });
       assert.equal(result.status, 0, `refresh should reconcile stale dependencies before pack prepare\n${result.stderr}`);
-      assert.match(fs.readFileSync(setup.calls, 'utf8'), /^ci$/m);
+      assert.match(fs.readFileSync(setup.calls, 'utf8'), /^install --frozen-lockfile --prefer-offline$/m);
     } finally {
       fs.rmSync(setup.root, { recursive: true, force: true });
     }

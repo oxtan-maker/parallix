@@ -145,7 +145,7 @@ The same step runs a license audit and fails the build on any dependency license
 outside the approved set (`scripts/release-metadata.js`).
 
 `prepublishOnly` runs `npm run test:package-content` (content + checksum audit)
-and `npm audit --omit=dev` before any publish.
+and `pnpm audit --prod` (against `pnpm-lock.yaml`) before any publish.
 
 ## Module strategy
 

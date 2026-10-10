@@ -46,6 +46,8 @@ test('Pi worker interruption settles and reaps the isolated process (TASK-2668.0
     teeOptions: { stdoutSink: { write() {} }, stderrSink: { write() {} }, onSpawn(spawned) { child = spawned; spawned.kill('SIGTERM'); } },
   }, { command: 'pi', args: [], options: { env: environment } }, async () => {}, worker);
   assert.equal(result.status, 1);
+  // The client can settle from a failed IPC send before the kernel reports the exit.
+  if (child && child.exitCode === null && child.signalCode === null) { await new Promise(resolve => child!.once('exit', resolve)); }
   assert.equal(child?.signalCode, 'SIGTERM');
   assert.equal(child?.connected, false);
 });

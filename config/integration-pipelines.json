@@ -1,7 +1,7 @@
 {
   "gates": {
     "dependency-audit": {
-      "command": "npm audit --audit-level=high",
+      "command": "pnpm audit --audit-level=high",
       "order": 1,
       "run_last": false,
       "always": true

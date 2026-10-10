@@ -24,12 +24,9 @@ export function isNewerNormalVersion(proposed: string, published: string): boole
   return false;
 }
 
-export function validateMetadata(manifest: { version?: unknown }, lockfile: { version?: unknown }): string {
+export function validateMetadata(manifest: { version?: unknown }): string {
   if (!parseNormalVersion(manifest.version)) {
     throw new Error(`package.json version must be a normal SemVer version, got ${String(manifest.version)}`);
-  }
-  if (manifest.version !== lockfile.version) {
-    throw new Error('package.json and package-lock.json versions must match');
   }
   return manifest.version as string;
 }
@@ -59,8 +56,7 @@ export function validateTrustedRelease(root: string, trustedSha: string, run: Co
     throw new Error('release must use npm Trusted Publishing without NPM_TOKEN or NODE_AUTH_TOKEN');
   }
   const manifest = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'));
-  const lockfile = JSON.parse(fs.readFileSync(path.join(root, 'package-lock.json'), 'utf8'));
-  const version = validateMetadata(manifest, lockfile);
+  const version = validateMetadata(manifest);
   const publishedVersion = npmValue(run, `${packageName}@${version}`, 'version');
   const publishedGitHead = publishedVersion === null ? null : npmValue(run, `${packageName}@${version}`, 'gitHead');
   if (publishedVersion !== null && publishedGitHead !== trustedSha) {

@@ -25,6 +25,9 @@ Code trace: src/adapters/review/review-loop.ts builds rebaseWorkflowOptions with
 Related evidence gap: the run manifest and execute session marker report no provider session ID despite stderr containing session id: 01a121fd-ca73-7170-8035-2ea53f0f6815; native transcript is under codex-home/.codex/sessions whereas run-session.ts searches codex-home/sessions. Do not let this obscure launch failures; assess whether separate follow-up is appropriate.
 
 Scope: repair automatic conflict-resolution configuration propagation and retain focused regression coverage in the existing pre-review/rebase and launcher contracts. Do not change lifecycle policy or weaken pinned implementer eligibility.
+Operator requirement (2026-10-10, task-2707): shared-file conflicts must not be treated as an instruction to stop agents or Parallix. Agents normally resolve these conflicts. Automatic rebase must hand conflicts to the recorded implementer and continue through every successive normal conflict stop until the mission is rebased onto main. Audit stop policies and prompts as well as launcher configuration; do not require manual intervention solely because a conflicted file is shared. Genuine unrecoverable failures must remain explicit and recoverable rather than claiming success.
+
+Additional reproduction: task-2707 was left in an interactive rebase with a modify/delete conflict in package-lock.json while migrating development installs to pnpm. Keeping the intended deletion and continuing completed the remaining seven commits; a subsequent rebase onto the latest local main also completed. Retain coverage for shared lockfile modify/delete conflicts and multiple successive conflicts.
 <!-- SECTION:DESCRIPTION:END -->
 
 ## Acceptance Criteria
@@ -34,6 +37,9 @@ Scope: repair automatic conflict-resolution configuration propagation and retain
 - [ ] #3 Audit standalone and integration rebase paths for equivalent configuration loss; preserve ports, adapter boundaries and composition authority.
 - [ ] #4 In a disposable repository, manually demonstrate shared conflicts automatically reaching the recorded implementer, completing rebase and final verification before renewed independent review; do not mutate operator missions or statistics.
 - [ ] #5 Launch failures report the actual unavailable executable or configuration cause and leave recoverable rebase state; never report a successful rebase while conflicts remain.
+- [ ] #6 Shared-file conflicts in standalone, pre-review and integration rebases automatically reach the recorded implementer; neither prompts nor orchestration stop solely because a conflicted path is shared.
+- [ ] #7 Recovery continues through successive normal Git conflict stops, including shared lockfile modify/delete conflicts, preserving upstream changes and mission intent; completion is reported only after Git confirms no rebase or unresolved entries remain and main is an ancestor.
+- [ ] #8 Retain focused red-to-green regressions for premature shared-conflict stops and manually demonstrate multi-stop recovery in an isolated disposable repository.
 <!-- AC:END -->
 
 ## Definition of Done

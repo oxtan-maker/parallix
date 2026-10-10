@@ -19,7 +19,7 @@ REPO_ROOT="$(cd -- "${SCRIPT_DIR}/.." && pwd)"
 cd "$REPO_ROOT"
 
 echo "[refresh-global-px] Reconciling installed dependencies from the landed lockfile..."
-npm ci
+pnpm install --frozen-lockfile --prefer-offline
 
 echo "[refresh-global-px] Building the distributable (esbuild -> build/px.mjs)..."
 npm run build

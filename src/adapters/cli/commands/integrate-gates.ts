@@ -76,6 +76,8 @@ export function parseFilesToAreas(filesOutput: string) {
     'index.js',
     'package.json',
     'package-lock.json',
+    'pnpm-lock.yaml',
+    'pnpm-workspace.yaml',
     'workflow.config.json',
     'tsconfig.json',
     'tsconfig.base.json',

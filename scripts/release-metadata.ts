@@ -56,6 +56,28 @@ function owningPackageLocation(inputPath: string): string | null {
   return location;
 }
 
+/**
+ * Integrity and tarball URL per `name@version` from pnpm-lock.yaml, the single
+ * lockfile of record for development installs. Registry tarball URLs are not
+ * stored by pnpm, so `resolved` is derived from the registry layout.
+ */
+function readPnpmLockPackages(lockPath: string): Map<string, { resolved?: string; integrity?: string; license?: string }> {
+  const entries = new Map<string, { resolved?: string; integrity?: string }>();
+  const text = fs.readFileSync(lockPath, 'utf8');
+  const projectLock = text.split(/^---\n/m).pop() || '';
+  const packages = (projectLock.split(/^packages:\n/m)[1] || '').split(/^snapshots:/m)[0];
+  for (const match of packages.matchAll(/^ {2}'?([^'\n]+?)'?:\n {4}resolution: \{([^}\n]*)\}/gm)) {
+    const identity = match[1];
+    const integrity = /integrity: (\S+?)(?:,|$)/.exec(match[2])?.[1];
+    const at = identity.lastIndexOf('@');
+    const name = identity.slice(0, at);
+    const version = identity.slice(at + 1);
+    const base = name.split('/').pop();
+    entries.set(identity, { integrity, resolved: `https://registry.npmjs.org/${name}/-/${base}-${version}.tgz` });
+  }
+  return entries;
+}
+
 /** A third-party package statically inlined into the canonical bundle. */
 interface BundledPackage {
   name: string;
@@ -80,7 +102,7 @@ function bundledPackages(rootDir: string, metafile: EsbuildMetafile): BundledPac
   if (!metafile || typeof metafile.inputs !== 'object') {
     throw new Error('bundledPackages requires the esbuild metafile from the canonical bundle build');
   }
-  const lock = JSON.parse(fs.readFileSync(path.join(rootDir, 'package-lock.json'), 'utf8'));
+  const lock = readPnpmLockPackages(path.join(rootDir, 'pnpm-lock.yaml'));
 
   // The same name@version can be installed at several paths (npm nests
   // conflicting versions). Notices and SBOM components are per released
@@ -95,7 +117,7 @@ function bundledPackages(rootDir: string, metafile: EsbuildMetafile): BundledPac
     const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
     const identity = `${manifest.name}@${manifest.version}`;
     if (byIdentity.has(identity)) { continue; }
-    const lockEntry = (lock.packages || {})[location] || {};
+    const lockEntry = lock.get(identity) || {};
     byIdentity.set(identity, {
       name: manifest.name || path.basename(location),
       version: manifest.version || '0.0.0',
@@ -270,6 +292,7 @@ export {
   licenseViolations,
   normalizeLicense,
   owningPackageLocation,
+  readPnpmLockPackages,
   renderNotices,
   renderSbom,
 };

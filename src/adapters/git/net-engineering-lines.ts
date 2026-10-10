@@ -13,6 +13,8 @@ export const EXCLUSION_PATTERNS = [
   '**/*.md',
   'docs/**',
   'package-lock.json',
+  'pnpm-lock.yaml',
+  'pnpm-workspace.yaml',
   'coverage/**',
   '*lock*',
   '*.lock',

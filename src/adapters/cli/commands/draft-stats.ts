@@ -1,3 +1,4 @@
+import { performance } from 'node:perf_hooks';
 import type { ParallixConfiguration } from "../../../application/ports/configuration.js";
 import { draftMissionServices, type DraftAdapterDependencies, type DraftLog, type DraftExit, type DraftMissionServices } from './draft-adapter-types.js';
 import type { SyntheticDraftTask, DraftTarget } from './draft-setup.js';
@@ -38,6 +39,16 @@ async function validateStoredDraftClassification(ctx: DraftWorkflowContext) {
       ? { ok: true, classification: labels[0] }
       : { ok: false, reason: 'missing-classification' };
   } catch { return null; }
+}
+
+/** A failed hook prints its bounded tail, never the full install log. */
+function boundedFailureOutput(hook: { output?: string; failureTail?: string }): string {
+  return hook.failureTail ?? hook.output ?? '';
+}
+
+/** Separate checkout time from install-hook time so slow setup is attributable. */
+function describePreparationTiming(worktreeMs: number, hook: { durationMs?: number; storeState?: string }): string {
+  return `Worktree checkout ${worktreeMs}ms; install hook ${hook.durationMs}ms (store ${hook.storeState}).`;
 }
 
 /**
@@ -545,19 +556,24 @@ function createDraftWorkflowAdapter(deps: DraftAdapterDependencies = {}): DraftW
         ['worktree', fmt.path(targetWorktree)],
       ]));
       debugFn(fmt.bold(`Step 2: Ensuring dedicated worktree at ${fmt.path(targetWorktree)}...`));
+      const prepareStartedAt = performance.now();
       ensureWorktreeFn(ctx.mainRepo, targetWorktree, branchName, { logFn: plumbingLogFn, errorFn });
+      const worktreeMs = Math.round(performance.now() - prepareStartedAt);
       // Prepare the worktree before any agent or gate runs in it. A failure is
       // the environment's, not the implementer's: stop here instead of letting
       // every later gate fail on what the checkout never had.
-      const hook = (merged.runPreDraftHookFn || runPreDraftHook)({ slug: ctx.slug, worktree: targetWorktree });
+      const hook = (merged.runPreDraftHookFn || runPreDraftHook)({ slug: ctx.slug, worktree: targetWorktree, logFn });
       if (hook.ran && !hook.ok) {
-        if (hook.output) { errorFn(hook.output); }
+        if (hook.output) { errorFn(boundedFailureOutput(hook)); }
         errorFn(fmt.status('FAIL', `Environment failure: the pre-draft hook \`${hook.command}\` exited with status ${hook.exitCode} in ${fmt.path(targetWorktree)}.`));
         logFn('Repair: fix the worktree environment or adapters.draft.preDraftCommand in workflow.config.json, then re-run the draft. No agent was launched.');
         safeExit(1);
         return exitedContext({ ...ctx, targetWorktree, branchName });
       }
-      if (hook.ran) { debugFn(fmt.status('PASS', `Pre-draft hook \`${hook.command}\` prepared ${fmt.path(targetWorktree)}.`)); }
+      if (hook.ran) {
+        debugFn(fmt.status('PASS', `Pre-draft hook \`${hook.command}\` prepared ${fmt.path(targetWorktree)}.`));
+        logFn(describePreparationTiming(worktreeMs, hook));
+      }
       ensureGraphifyWorkspaceFn(targetWorktree, ctx.mainRepo, { logFn: plumbingLogFn });
       ensureGraphifyIgnoreFn(targetWorktree, { logFn: plumbingLogFn });
 

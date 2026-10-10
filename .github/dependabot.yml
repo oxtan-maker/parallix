@@ -3,7 +3,8 @@
 # or registry configuration.
 #
 # Division of responsibility:
-#   - this file schedules version updates for direct npm packages and the
+#   - this file schedules version updates for direct npm-registry packages (resolved through
+#     pnpm-lock.yaml, the lockfile of record) and the
 #     SHA-pinned GitHub Actions in .github/workflows;
 #   - Dependabot alerts and security updates (repository settings) expose and
 #     remediate vulnerabilities already present on the default branch;

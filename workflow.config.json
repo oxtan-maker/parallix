@@ -17,14 +17,14 @@
     },
     "verification": { "command": "./scripts/verify-local.sh {{area}}", "defaultArea": "all" },
     "review": { "provider": "forgejo", "baseUrl": "http://localhost:3300", "remote": "review", "repo": "magnus/parallix" },
-    "draft": { "preDraftCommand": "npm ci --no-audit --no-fund --prefer-offline" },
+    "draft": { "preDraftCommand": "pnpm install --frozen-lockfile --prefer-offline" },
     "integrate": { "preCommitCommand": "./scripts/bump-version.sh", "postIntegrateCommand": "./scripts/refresh-global-px.sh && npm run sonar:delete-branch" },
     "gates": {
       "requirePreIntegration": true,
       "parallel": { "preIntegration": 6 },
       "preIntegration": [
         { "key": "build", "command": "npm run build", "order": 1 },
-        { "key": "dependency-audit", "command": "npm audit --audit-level=high", "order": 2 },
+        { "key": "dependency-audit", "command": "pnpm audit --audit-level=high", "order": 2 },
         { "key": "verification", "command": "./scripts/verify-local.sh static-analysis", "order": 3, "reuse": "clean-tree" },
         { "key": "unit", "command": "PARALLIX_FAST_UNIT=1 PARALLIX_TEST_COVERAGE=1 npm test -- --unit-test-headroom", "order": 4, "after": ["build"] },
         { "key": "integration-ci", "command": "PARALLIX_TEST_COVERAGE=1 npm run test:integration:ci:prebuilt", "order": 5, "after": ["build"] },

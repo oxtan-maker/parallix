@@ -15,7 +15,7 @@ Actions was manual.
 
 The repository carries known vulnerability debt, and a clean baseline is not
 permanent: advisories are published against versions already in use, with no
-candidate having changed the lockfile. A baseline-wide blocking `npm audit`
+candidate having changed the lockfile. A baseline-wide blocking `pnpm audit`
 gate would fail every candidate for pre-existing or newly published
 vulnerabilities, and it would still not answer the question the publication
 trust boundary actually needs: *does this candidate make the known
@@ -26,7 +26,7 @@ base drift belongs to Dependabot security updates, not to candidate-blocking.
 
 | Option | New vulnerable dependency blocks at candidate time | Unrelated candidates failed by pre-existing debt | Owns comparison and advisory data itself | Decision |
 |---|---|---|---|---|
-| Baseline-wide `npm audit` gate in CI | Only after the debt is remediated | Yes — every candidate fails until the base is clean | Partially — npm advisory data differs from GitHub's dependency graph | Rejected |
+| Baseline-wide `pnpm audit` gate in CI | Only after the debt is remediated | Yes — every candidate fails until the base is clean | Partially — npm advisory data differs from GitHub's dependency graph | Rejected |
 | GitHub Dependency Review step in `ci-required` | Yes — differential by construction | No — only dependencies the candidate adds are evaluated | No — GitHub owns the dependency graph, advisories, and comparison | **Accepted** |
 | Custom local lockfile diff plus advisory check | Yes | No | Yes — comparison, ingestion lag, and advisory data all re-implemented | Rejected |
 | Dependabot alerts and release-time audit only | No — alerts are post-hoc and the audit runs at publication, not on candidates | No | No | Insufficient alone |
@@ -98,9 +98,10 @@ the gate green.
 - A candidate that introduces a High or Critical vulnerable dependency in an
   evaluated scope fails `ci-required` early, before test, coverage, or Sonar
   work consumes runner time.
-- A mission whose own tree carries a High or Critical `npm audit` finding
+- A mission whose own tree carries a High or Critical `pnpm audit` finding
   cannot be integrated; the integration boundary enforces the same severity
   threshold as the candidate gate.
+- The lockfile of record is `pnpm-lock.yaml`; Dependabot's `npm` ecosystem updates it, and the pre-integration `dependency-audit` gate runs `pnpm audit --audit-level=high`.
 - Unrelated candidates are not failed by pre-existing dependency debt; only
   *added* vulnerable dependencies block.
 - Pre-existing debt stays visible through Dependabot alerts and security

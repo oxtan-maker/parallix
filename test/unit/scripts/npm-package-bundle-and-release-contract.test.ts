@@ -18,6 +18,7 @@ import { fileURLToPath } from 'node:url';
 import {
   ALLOWED_LICENSES,
   bundledPackages,
+  readPnpmLockPackages,
   licenseViolations,
   normalizeLicense,
   owningPackageLocation,
@@ -180,6 +181,23 @@ describe("release metadata for the canonical ESM bundle", () => {
       owningPackageLocation('node_modules/ink/node_modules/string-width/index.js'),
       'node_modules/ink/node_modules/string-width',
     );
+  });
+
+  test('SBOM identity comes from pnpm-lock.yaml integrity, scoped names included (TASK-2707)', () => {
+    const dir = registeredMkdtemp('task-2707-pnpm-lock-');
+    try {
+      const lockPath = path.join(dir, 'pnpm-lock.yaml');
+      fs.writeFileSync(lockPath, [
+        '---', 'lockfileVersion: \'9.0\'', 'packages:', "  pnpm@12.9.1:", '    resolution: {integrity: sha512-SELF}', '',
+        '---', 'lockfileVersion: \'9.0\'', '', 'packages:', '',
+        '  \'@scope/pkg@1.2.3\':', '    resolution: {integrity: sha512-AAAA}', '    engines: {node: \'>=22\'}', '',
+        '  ink@6.8.0:', '    resolution: {integrity: sha512-BBBB, tarball: x}', '', 'snapshots:', '', '  ink@6.8.0: {}', '',
+      ].join('\n'));
+      const entries = readPnpmLockPackages(lockPath);
+      assert.deepEqual(entries.get('@scope/pkg@1.2.3'), { integrity: 'sha512-AAAA', resolved: 'https://registry.npmjs.org/@scope/pkg/-/pkg-1.2.3.tgz' });
+      assert.equal(entries.get('ink@6.8.0')?.integrity, 'sha512-BBBB');
+      assert.equal(entries.has('pnpm@12.9.1'), false, 'the packageManager self-resolution document is not a project dependency');
+    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   });
 
   test('task-2285 release metadata requires the bundle metafile', () => {
@@ -424,9 +442,17 @@ describe("release publication trust", () => {
   test('task-2509: release metadata accepts only matching normal SemVer versions', () => {
     assert.deepEqual(parseNormalVersion('1.5.120'), [1, 5, 120]);
     assert.equal(parseNormalVersion('1.5.120-beta.1'), null);
-    assert.equal(validateMetadata({ version: '1.5.120' }, { version: '1.5.120' }), '1.5.120');
-    assert.throws(() => validateMetadata({ version: 'bad' }, { version: 'bad' }), /normal SemVer/);
-    assert.throws(() => validateMetadata({ version: '1.5.120' }, { version: '1.5.119' }), /must match/);
+    assert.equal(validateMetadata({ version: '1.5.120' }), '1.5.120');
+    assert.throws(() => validateMetadata({ version: 'bad' }), /normal SemVer/);
+  });
+
+  test('the release audit reads pnpm-lock.yaml, not a package-lock.json that no longer exists (TASK-2707)', () => {
+    const ROOT = path.resolve(import.meta.dirname, '..', '..', '..');
+    const manifest = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8'));
+    assert.match(manifest.scripts.prepublishOnly, /pnpm audit --prod/);
+    assert.doesNotMatch(manifest.scripts.prepublishOnly, /(^|[^p])npm audit/, 'npm audit fails with ENOLOCK without package-lock.json');
+    assert.equal(fs.existsSync(path.join(ROOT, 'package-lock.json')), false);
+    assert.equal(fs.existsSync(path.join(ROOT, 'pnpm-lock.yaml')), true);
   });
 
   test('task-2509: normal releases must advance the current normal release', () => {
@@ -438,7 +464,6 @@ describe("release publication trust", () => {
   function withReleaseRoot(run: (root: string) => void) {
     const root = registeredMkdtemp('task-2509-release-');
     fs.writeFileSync(path.join(root, 'package.json'), JSON.stringify({ version: '1.5.120' }));
-    fs.writeFileSync(path.join(root, 'package-lock.json'), JSON.stringify({ version: '1.5.120' }));
     try { run(root); } finally { fs.rmSync(root, { recursive: true, force: true }); }
   }
 

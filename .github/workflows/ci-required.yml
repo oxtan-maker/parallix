@@ -118,10 +118,9 @@ jobs:
       # TASK-2591 (ADR 0062): coverage uses Node's native include-all contract
       # (--test-coverage-include-all), which needs Node >= 26.7; the unit suite
       # itself needs >= 24.15.0 because test/lib/module-mock.ts uses
-      # mock.module's exports option. cache: npm is the built-in setup-node npm
-      # cache (no external cache action, so this stays within the checkout +
-      # Node setup only allowance in Restricted Areas); the npm cache is keyed
-      # on package-lock.json by setup-node.
+      # mock.module's exports option. Development installs use pnpm pinned by
+      # package.json packageManager (ADR 0063); no setup-node dependency cache
+      # is used, so the install proves a clean-store checkout.
       # NOTE: package.json engines.node stays >=22.23.1 (its floor is the runtime
       # floor for shipped code, not the test floor).
       - name: Set up Node (>= 26.7 for native coverage)
@@ -129,10 +128,12 @@ jobs:
         with:
           node-version: '26'
           check-latest: true
-          cache: npm
+
+      - name: Install the pinned pnpm
+        run: npm install --global pnpm@12.9.1
 
       - name: Install dependencies (lockfile-respecting, deterministic)
-        run: npm ci
+        run: pnpm install --frozen-lockfile
         env:
           CI: 'true'
 
@@ -225,7 +226,7 @@ jobs:
           PARALLIX_NO_BUBBLEWRAP: '1'
           # Secrets arrive only through the GitHub secrets context, never a
           # literal value. Scoped to the scan step (least privilege): the broad
-          # test:ci and npm ci steps do not inherit SONAR_TOKEN. It is never
+          # test:ci and install steps do not inherit SONAR_TOKEN. It is never
           # committed, emitted to logs, nor made available to untrusted
           # pull-request code.
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
@@ -305,8 +306,11 @@ jobs:
       - name: Install npm with Trusted Publishing support
         run: npm install --global npm@11.5.1
 
+      - name: Install the pinned pnpm for the development install
+        run: npm install --global pnpm@12.9.1
+
       - name: Install the verified source deterministically
-        run: npm ci
+        run: pnpm install --frozen-lockfile
 
       - name: Validate and publish the verified source
         run: npm run release:publish

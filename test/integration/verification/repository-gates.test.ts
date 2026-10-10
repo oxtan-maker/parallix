@@ -392,7 +392,7 @@ test('this repository exposes the full independent gate width and orders Sonar a
   assert.equal(loadPhaseGateParallelism(repoRoot, 'preIntegration'), 6);
   assert.deepEqual(gates.map(({ key, command, order }) => ({ key, command, order })), [
     { key: 'build', command: 'npm run build', order: 1 },
-    { key: 'dependency-audit', command: 'npm audit --audit-level=high', order: 2 },
+    { key: 'dependency-audit', command: 'pnpm audit --audit-level=high', order: 2 },
     { key: 'verification', command: './scripts/verify-local.sh static-analysis', order: 3 },
     { key: 'unit', command: 'PARALLIX_FAST_UNIT=1 PARALLIX_TEST_COVERAGE=1 npm test -- --unit-test-headroom', order: 4 },
     { key: 'integration-ci', command: 'PARALLIX_TEST_COVERAGE=1 npm run test:integration:ci:prebuilt', order: 5 },

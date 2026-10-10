@@ -46,6 +46,11 @@ test('isExcluded filters package-lock.json', () => {
   assert.strictEqual(isExcluded('package-lock.json'), true);
 });
 
+test('isExcluded filters pnpm-lock.yaml and pnpm-workspace.yaml (TASK-2707)', () => {
+  assert.strictEqual(isExcluded('pnpm-lock.yaml'), true);
+  assert.strictEqual(isExcluded('pnpm-workspace.yaml'), true);
+});
+
 test('isExcluded filters coverage/** paths', () => {
   assert.strictEqual(isExcluded('coverage/lcov.info'), true);
   assert.strictEqual(isExcluded('coverage/src/file.js.html'), true);

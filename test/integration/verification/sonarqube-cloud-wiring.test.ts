@@ -104,7 +104,7 @@ test('local verification and GitHub invoke the same pinned sonar entrypoint', ()
   const manifest = JSON.parse(fs.readFileSync(path.join(repoRoot, 'package.json'), 'utf8'));
   const config = JSON.parse(fs.readFileSync(path.join(repoRoot, 'workflow.config.json'), 'utf8'));
   const workflow = fs.readFileSync(path.join(repoRoot, '.github/workflows/ci-required.yml'), 'utf8');
-  const lockfile = JSON.parse(fs.readFileSync(path.join(repoRoot, 'package-lock.json'), 'utf8'));
+  const lockfile = fs.readFileSync(path.join(repoRoot, 'pnpm-lock.yaml'), 'utf8');
 
   assert.equal(manifest.scripts.sonar, 'tsx scripts/sonar-local.ts scan');
   const gates = config.adapters.gates.preIntegration as Array<{ key: string, command: string, after?: string[] }>;
@@ -121,7 +121,7 @@ test('local verification and GitHub invoke the same pinned sonar entrypoint', ()
 
   // The scanner is lockfile-pinned, never fetched at gate time.
   assert.ok(manifest.devDependencies['sonar-scanner'], 'the scanner is a declared dependency');
-  assert.ok(lockfile.packages['node_modules/sonar-scanner'], 'the scanner is pinned in the lockfile');
+  assert.match(lockfile, /^ {2}sonar-scanner@3\.1\.0:/m, 'the scanner is pinned in the lockfile');
   assert.doesNotMatch(workflow, /npx\s+--yes/);
 });
 

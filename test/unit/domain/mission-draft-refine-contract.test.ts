@@ -16,7 +16,7 @@ import { decideMission } from '../../../src/domain/mission-workflow.js';
 import { missionId, missionLabels, type Mission } from '../../../src/domain/mission.js';
 import { repositoryId } from '../../../src/domain/repository.js';
 import { validateWorkflowConfig } from '../../../src/adapters/config/product-config.js';
-import { runPreDraftHook } from '../../../src/adapters/process/pre-draft-hook.js';
+import { runPreDraftHook, storeStateFromOutput } from '../../../src/adapters/process/pre-draft-hook.js';
 import { buildWorkflowConfig } from '../../../src/adapters/review/setup-review-config.js';
 import { HandoffCommandUseCase } from '../../../src/application/handoff-command-use-case.js';
 import { createIntegrationGateStep } from '../../../src/application/integrate/gates.js';
@@ -146,11 +146,18 @@ test('adapters.draft.preDraftCommand is validated as a string', () => {
 test('the pre-draft hook runs its command in the worktree with the mission slug, and is a no-op when unset', () => {
   withWorktree({ adapters: { draft: { preDraftCommand: 'npm ci' } } }, (dir) => {
     const runs: { cmd: string; args: string[]; options: Record<string, any> }[] = [];
+    const ticks = [1000, 3450];
+    const logs: string[] = [];
     const result = runPreDraftHook({
       slug: 'task-x', worktree: dir,
-      runFn: (cmd, args, options) => { runs.push({ cmd, args, options }); return { status: 0, stdout: 'added 1 package', stderr: '' }; },
+      runFn: (cmd, args, options) => { runs.push({ cmd, args, options }); return { status: 0, stdout: 'Progress: resolved 3, reused 3, downloaded 0, added 3, done', stderr: '' }; },
+      nowFn: () => ticks.shift() as number, logFn: (line) => logs.push(line),
     });
-    assert.deepEqual(result, { ran: true, ok: true, command: 'npm ci', output: 'added 1 package', exitCode: 0 });
+    assert.deepEqual(result, { ran: true, ok: true, command: 'npm ci', output: 'Progress: resolved 3, reused 3, downloaded 0, added 3, done', exitCode: 0, durationMs: 2450, storeState: 'warm' });
+    assert.deepEqual(logs, [
+      'pre-draft hook start: slug=task-x command=`npm ci`',
+      'pre-draft hook end: exit=0 duration=2450ms store=warm',
+    ]);
     assert.deepEqual([runs[0].cmd, ...runs[0].args], ['bash', '-lc', 'npm ci']);
     assert.equal(runs[0].options.cwd, dir);
     assert.equal(runs[0].options.env.PRE_DRAFT_HOOK_SLUG, 'task-x');
@@ -158,6 +165,63 @@ test('the pre-draft hook runs its command in the worktree with the mission slug,
   withWorktree({ adapters: { draft: { preDraftCommand: '  ' } } }, (dir) => {
     assert.deepEqual(runPreDraftHook({ slug: 'task-x', worktree: dir }), { ran: false, ok: true });
   });
+});
+
+test('the hook times itself with a monotonic clock and probes the store by default (TASK-2707)', () => {
+  withWorktree({ adapters: { draft: { preDraftCommand: 'true' } } }, (dir) => {
+    const result = runPreDraftHook({ slug: 'task-x', worktree: dir, runFn: () => ({ status: 0, stdout: '', stderr: '' }) });
+    assert.equal(result.ok, true);
+    assert.ok(typeof result.durationMs === 'number' && result.durationMs >= 0);
+    assert.equal(result.storeState, 'unknown');
+  });
+});
+
+test('a failing pre-draft hook reports its exit code and a bounded output tail (TASK-2707)', () => {
+  withWorktree({ adapters: { draft: { preDraftCommand: 'pnpm install' } } }, (dir) => {
+    const logs: string[] = [];
+    const big = `${'x'.repeat(10_000)}\nERR_PNPM_LOCKFILE_MISSING`;
+    const result = runPreDraftHook({
+      slug: 'task-x', worktree: dir, logFn: (line) => logs.push(line),
+      runFn: () => ({ status: 1, stdout: 'Progress: resolved 3, reused 0, downloaded 3, added 1', stderr: big }),
+      nowFn: (() => { let t = 0; return () => (t += 5); })(),
+    });
+    assert.equal(result.ok, false);
+    assert.equal(result.exitCode, 1);
+    assert.equal(result.durationMs, 5);
+    assert.equal(result.storeState, 'cold');
+    assert.ok(result.failureTail && result.failureTail.length <= 2048 && result.failureTail.endsWith('ERR_PNPM_LOCKFILE_MISSING'));
+    assert.equal(logs[1], 'pre-draft hook end: exit=1 duration=5ms store=cold');
+  });
+});
+
+test('the hook reads cold or warm store state from the installer summary (TASK-2707)', () => {
+  assert.equal(storeStateFromOutput('Progress: resolved 326, reused 0, downloaded 326, added 326, done'), 'cold');
+  assert.equal(storeStateFromOutput('Progress: resolved 326, reused 326, downloaded 0, added 326, done'), 'warm');
+  assert.equal(storeStateFromOutput('Progress: resolved 9, reused 1, downloaded 8, added 9\nProgress: resolved 9, reused 9, downloaded 0, added 9, done'), 'warm', 'the final summary decides');
+  assert.equal(storeStateFromOutput('added 1 package'), 'unknown');
+});
+
+test('a successful pre-draft hook reports checkout and install timing in the default draft output (TASK-2707)', () => {
+  const record = { logs: [] as string[], errors: [] as string[], exits: [] as number[] };
+  const adapter = createDraftWorkflowAdapter({
+    exitFn: ((code?: number) => { record.exits.push(code ?? 0); }) as never,
+    logFn: (line: string) => record.logs.push(line),
+    errorFn: (line: string) => record.errors.push(line),
+  } as never);
+  const ctx = {
+    ...draftContext(async () => ({}), async () => true),
+    options: {
+      ensureMissionBranchFn: () => undefined,
+      ensureWorktreeFn: () => undefined,
+      conventionalWorktreePathFn: () => '/repo-task-x',
+      runPreDraftHookFn: () => ({ ran: true, ok: true, command: 'pnpm install', exitCode: 0, durationMs: 812, storeState: 'warm' }),
+      ensureGraphifyWorkspaceFn: () => undefined,
+      ensureGraphifyIgnoreFn: () => undefined,
+    },
+  } as unknown as DraftWorkflowContext;
+  adapter.setup(ctx);
+  assert.deepEqual(record.exits, []);
+  assert.ok(record.logs.some((line) => /^Worktree checkout \d+ms; install hook 812ms \(store warm\)\.$/.test(line)), 'timing is visible with debug off');
 });
 
 test('a failing pre-draft hook stops the draft at setup as an environment failure', () => {
@@ -189,7 +253,7 @@ test('generated config carries the pre-draft hook entry and Parallix installs de
   const generated = buildWorkflowConfig({}) as { adapters: { draft?: { preDraftCommand?: unknown } } };
   assert.equal(generated.adapters.draft?.preDraftCommand, '');
   const own = JSON.parse(fs.readFileSync(path.join(REPO_ROOT, 'workflow.config.json'), 'utf8'));
-  assert.match(own.adapters.draft.preDraftCommand, /^npm ci\b/);
+  assert.match(own.adapters.draft.preDraftCommand, /^pnpm install --frozen-lockfile\b/);
 });
 
 // --- handoff PR step area ----------------------------------------------------------------

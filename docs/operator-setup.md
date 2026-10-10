@@ -17,6 +17,17 @@ This installs the `graphify` entry-point script to `~/.local/bin/graphify` (on L
 
 The CLI resolves in this order: `$GRAPHIFY_BIN` → `graphify` on `$PATH` → `~/.local/bin/graphify`.
 
+## Dependencies for Parallix's own mission worktrees
+
+Missions on the Parallix repository install dependencies with the pnpm version
+pinned in `package.json` (`packageManager`); `pnpm` must be on `PATH` (for
+example through Corepack). All worktrees share pnpm's content-addressable store
+but each keeps its own `node_modules`. Keep the store on the same filesystem as
+the worktrees so pnpm hard-links; on another filesystem pnpm copies, which still
+works but is slower. If `px draft` stops with an environment failure, the printed
+exit code and output tail come from the pre-draft install: fix the cause and
+re-run the draft.
+
 ## Repository Input Exclusions
 
 Graphify reads `.graphifyignore` before it creates graph nodes. The file uses

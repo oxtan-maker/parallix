@@ -1,6 +1,6 @@
 {
   "name": "@magnusekdahl/parallix",
-  "version": "1.5.333",
+  "version": "1.5.334",
   "description": "Local-first workflow and trust layer for AI coding agents — isolated Git worktree missions, separate code review, repository-owned verification, Linux confinement, and human-owned merges",
   "license": "AGPL-3.0-or-later",
   "private": false,
@@ -8,6 +8,7 @@
   "bin": {
     "px": "build/px.mjs"
   },
+  "packageManager": "pnpm@12.9.1",
   "engines": {
     "node": ">=22.23.1"
   },
@@ -54,7 +55,7 @@
     "dev": "tsx src/entry/px.ts",
     "dev:web": "vite --config web/vite.config.ts",
     "prepack": "npm run build",
-    "prepublishOnly": "npm run test:package-content && npm audit --omit=dev",
+    "prepublishOnly": "npm run test:package-content && pnpm audit --prod",
     "test": "FORCE_COLOR=0 tsx test/run-default-tests.ts",
     "test:integration": "npm run build && npm run test:integration:prebuilt",
     "test:integration:prebuilt": "PARALLIX_PREBUILT_PACK=1 FORCE_COLOR=0 tsx test/run-default-tests.ts --integration",

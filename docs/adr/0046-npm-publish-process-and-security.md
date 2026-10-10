@@ -91,6 +91,7 @@ These procedures are operational guidance. They are subject to change as the ope
   build manifest expose bundled third-party code for review. Registry audit
   alone is not sufficient because bundled code may not appear as an installed
   production dependency.
+- **Development install is separate from publication:** The release job installs the verified source with the pnpm version pinned in `package.json` (`pnpm install --frozen-lockfile`), then packs and publishes with npm Trusted Publishing; the SBOM and notices read integrity from `pnpm-lock.yaml`. `npm pack`, `npm install -g` and the package-content audit are unchanged.
 - **Exact-SHA release discipline:** The verified source, package version, npm provenance, tag, and GitHub Release share one trusted SHA.
 - **Rollback awareness:** The ADR documents npm's unpublish constraints (72-hour window for unpublishing; deprecation for older versions) and provides mitigation strategies (conservative semver, version bumping).
 
