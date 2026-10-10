@@ -315,7 +315,7 @@ test('weekly PR table is a single truthful UTC comparison (TASK-2671)', async ()
   const input = { decisions: [], applied: [], attempts: [], observations: [], coverage: 'complete' as const };
   const report = renderClassifierStatistics(input, [windows.current, windows.previous]);
   assert.equal(report.split('\n').filter(line => line === 'PR Classification analysis').length, 1);
-  assert.match(report, /This week \(2026-09-30 to 2026-10-06 UTC\) \| all\s+\|\s+0 \|\s+0 \(n\/a\)/);
+  assert.match(report, /This week \(2026-09-30 to 2026-10-06 UTC\) \| re-review\s+\|\s+0 \|\s+0 \(n\/a\)/);
   assert.match(report, /Last week \(2026-09-23 to 2026-09-29 UTC\)/);
   const unavailable = renderClassifierStatistics(null, [windows.current, windows.previous]);
   assert.match(unavailable, /\| re-review\s+\|\s+unavailable \|\s+unavailable \|/);
@@ -347,7 +347,7 @@ test('PR statistics count review rounds with classifier shares and a separate re
   const lines = report.split('\n');
   const week = lines.find(line => line.startsWith('| This week'))!;
   // 6 rounds; 2 not attempted; 1 attempted-then-fell-back; 4 called; 2 cleared; 1 returned; 3 of 6 decided by the classifier.
-  assert.match(week, /\| all\s+\|\s+6 \|\s+2 \(33%\) \|\s+1 \(17%\) \|\s+4 \(67%\) \|\s+2 \(33%\) \|\s+1 \(17%\) \|\s+50% \|\s+67% \|/);
+  assert.match(week, /\| re-review\s+\|\s+6 \|\s+2 \(33%\) \|\s+1 \(17%\) \|\s+4 \(67%\) \|\s+2 \(33%\) \|\s+1 \(17%\) \|\s+50% \|\s+67% \|/);
   assert.match(week, /n\/a \(no classifier decisions\)/);
   assert.doesNotMatch(report, /100%/);
   assert.doesNotMatch(report, /Re-review rounds/);
@@ -360,20 +360,25 @@ test('PR statistics count review rounds with classifier shares and a separate re
   assert.doesNotMatch(reasons.join('\n'), /classifier-failure/);
 });
 
-test('PR statistics split review rounds by kind and keep historical rows as re-reviews (TASK-2680)', async () => {
+test('PR statistics display only re-reviews and exclude first-review reasons and observations (TASK-2703)', async () => {
   const { renderClassifierStatistics } = await import('../../../../src/application/presentation/classifier-statistics.js');
   const { weeklyDecisionWindows } = await import('../../../../src/application/services/decision-window.js');
   const { classificationAttempt } = await import('../../../fixtures/repeat-review.js');
   const windows = weeklyDecisionWindows('2026-10-06', 'UTC');
   const row = (round: number, overrides: Parameters<typeof classificationAttempt>[0]) =>
     classificationAttempt({ round, decisionId: `d${round}`, fingerprint: `f${round}`, observedAt: '2026-10-05T00:00:00Z', ...overrides });
-  const attempts = [row(1, { route: 'clear', reason: 'resolved-threshold' }), row(1, { mission: 'other', route: 'reviewer', reason: 'abstention' }),
+  const attempts = [row(1, { route: 'clear', reason: 'resolved-threshold' }), row(1, { mission: 'other', route: 'reviewer', reason: 'first-review' }),
     row(2, { route: 'implementer', reason: 'unresolved-threshold' })];
-  const lines = renderClassifierStatistics({ decisions: [], attempts, applied: [], observations: [], coverage: 'complete' },
+  const applied = ['d1', 'missing-history'].map(decisionId => ({ decisionId, decidedAt: '2026-10-05T00:00:00Z', route: 'clear' as const }));
+  const observations = [{ decisionId: 'd1', revision: attempts[0].candidateRevision, findingIds: attempts[0].findingIds,
+    observedAt: '2026-10-05T00:00:00Z', originalFindings: 'unresolved' as const, newFindings: 0, cycleMs: 1, ordinaryReviewMs: 1 }];
+  const lines = renderClassifierStatistics({ decisions: [], attempts, applied, observations, coverage: 'complete' },
     [windows.current, windows.previous]).split('\n');
+  assert.equal(attempts.length, 3, 'display filtering preserves stored measurements');
   const kind = (name: string) => lines.find(line => line.startsWith('| This week') && line.includes(`| ${name}`))!;
-  assert.match(kind('all'), /\|\s+3 \|/);
-  assert.match(kind('first review'), /\|\s+2 \|\s+0 \(0%\) \|\s+1 \(50%\) \|\s+2 \(100%\) \|\s+1 \(50%\) \|\s+0 \(0%\) \|/);
+  assert.match(kind('re-review'), /n\/a \(no classifier decisions\)/);
+  assert.equal(lines.filter(line => line.startsWith('| This week')).length, 1);
+  assert.doesNotMatch(lines.join('\n'), /first review|first-review|\| all\s+\|/);
   assert.match(kind('re-review'), /\|\s+1 \|\s+0 \(0%\) \|\s+0 \(0%\) \|\s+1 \(100%\) \|\s+0 \(0%\) \|\s+1 \(100%\) \|/);
 });
 

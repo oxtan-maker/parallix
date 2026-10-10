@@ -97,8 +97,10 @@ export function reviewRounds(input: ClassifierStatisticsInput, window: Reporting
   const decided = (round: { latest: ClassifierCallMeasurement }, route: ClassifierCallMeasurement['route']) =>
     !round.latest.shadow && round.latest.route === route;
   const reviewerRounds = rounds.filter(round => round.latest.route === 'reviewer' || round.latest.shadow);
-  const applied = input.applied.filter(decision => inside(decision.decidedAt)
-    && ofKind(input.attempts.find(a => a.decisionId === decision.decisionId)?.round ?? 0));
+  const applied = input.applied.filter(decision => {
+    const sample = input.attempts.find(a => a.decisionId === decision.decisionId);
+    return inside(decision.decidedAt) && (kind === 'all' || (sample !== undefined && ofKind(sample.round)));
+  });
   const unobserved = applied.filter(decision => {
     const sample = input.attempts.find(a => a.decisionId === decision.decisionId);
     const observation = input.observations.find(o => o.decisionId === decision.decisionId);

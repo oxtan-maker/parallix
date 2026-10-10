@@ -313,33 +313,22 @@ test('a re-review whose prior findings were never answered falls back with a spe
   assert.deepEqual(s.attempts.map(a => a.reason), ['implementer-response-missing']);
 });
 
-test('a first review round reaches the classifier on its candidate revision against the success criteria (TASK-2680)', async () => {
-  const s = scenario();
-  const { mission, rounds } = reshape(s);
-  mission.review = { ...mission.review, rounds: [{ ...mission.review.rounds[1], number: 1, subject: { ...rounds[1].subject } }] } as never;
-  mission.successCriteria = ['Output is preserved in x.java'];
-  s.context.state.round = 1;
-  const round = new ReviewRound(1, s.context);
-  const requests: unknown[] = [];
-  const decide = s.classifier.decision.decide;
-  s.classifier.decision.decide = async request => { requests.push(request); return decide(request); };
-  assert.equal(await tryClassifyReview(s.context, round), 'APPROVED');
-  assert.deepEqual(s.published, ['clear']);
-  assert.deepEqual(s.attempts[0].findingIds, ['success-criterion-1']);
-  assert.equal(s.attempts[0].priorRevision, 'baseline', 'the round review baseline, not the moving target branch');
-  assert.match(JSON.stringify(requests[0]), /Success criterion 1: Output is preserved/);
-  const loaded = await s.store.load(s.context.slug as never);
-  if (loaded.kind !== 'found') { throw new Error('mission missing'); }
-  assert.equal(loaded.mission.review!.rounds.at(-1)!.decision!.classifier!.successCriteria?.baseRef, 'baseline');
-});
-
-test('a first review of a mission without success criteria names the missing data (TASK-2680)', async () => {
-  const s = scenario();
-  const { mission } = reshape(s);
-  mission.review = { ...mission.review, rounds: [mission.review.rounds[1]] } as never;
-  s.context.state.round = 2;
-  assert.equal(await tryClassifyReview(s.context, s.round), null);
-  assert.deepEqual(s.attempts.map(a => a.reason), ['no-success-criteria']);
+test('first reviews stay with the general reviewer without collecting evidence or calling Jev (TASK-2703)', async () => {
+  for (const [number, mode] of [[1, 'enabled'], [1, 'shadow'], [2, 'enabled']] as const) {
+    const s = scenario(mode);
+    const { mission, rounds } = reshape(s);
+    mission.review = { ...mission.review, rounds: [{ ...mission.review.rounds[1], number, subject: { ...rounds[1].subject } }] } as never;
+    mission.successCriteria = ['Output is preserved in x.java'];
+    s.context.state.round = number;
+    const round = new ReviewRound(number, s.context);
+    s.classifier.evidence.diff = async () => { assert.fail('first review must not collect evidence'); };
+    s.classifier.decision.available = async () => { assert.fail('first review must not reach the decision provider'); };
+    s.classifier.decision.decide = async () => { assert.fail('first review must not call Jev'); };
+    assert.equal(await tryClassifyReview(s.context, round), null);
+    assert.deepEqual(s.published, []);
+    assert.deepEqual(s.attempts.map(a => a.reason), ['first-review']);
+    assert.equal(s.store.mission().review!.rounds.at(-1)!.decision, null);
+  }
 });
 
 test('an unverified integration repair keeps its specific reason (TASK-2680)', async () => {
@@ -473,7 +462,7 @@ test('oversized mandatory repair evidence retains general review without calling
   assert.equal(s.attempts[0].reason, 'evidence-over-budget');
 });
 
-test('first-review evidence is measured from the immutable round baseline while main advances (TASK-2704)', async () => {
+test('first review retains its immutable baseline without classifying while main advances (TASK-2704)', async () => {
   const s = scenario();
   const { mission, rounds } = reshape(s);
   mission.review = { ...mission.review, rounds: [{ ...mission.review.rounds[1], number: 1, subject: { ...rounds[1].subject } }] } as never;
@@ -487,9 +476,10 @@ test('first-review evidence is measured from the immutable round baseline while 
   const ranges: string[] = [];
   const diff = s.classifier.evidence.diff;
   s.classifier.evidence.diff = async (prior, candidate, paths) => { ranges.push(`${prior}..${candidate}`); return diff(prior, candidate, paths); };
-  assert.equal(await tryClassifyReview(s.context, round), 'APPROVED');
-  assert.ok(ranges.length > 0 && ranges.every(range => range.startsWith(`${pinned}..`)), ranges.join(','));
-  assert.equal(s.attempts[0].priorRevision, pinned);
+  assert.equal(await tryClassifyReview(s.context, round), null);
+  assert.equal(round.reviewBaseline, pinned);
+  assert.deepEqual(ranges, []);
+  assert.equal(s.attempts[0].reason, 'first-review');
 });
 
 test('a rebased gate repair is judged on the baseline-relative mission interdiff (TASK-2704)', async () => {

@@ -43,14 +43,14 @@ instructions. Its selected-choice scores are not correctness probabilities.
 
 For TASK-2658, the operator subsequently chose availability-dependent opt-out
 routing instead of the proposed opt-in rollout. Jev is called on every
-review round, first review or re-review, while the provider is available, with thin evidence sent bounded
+re-review round while the provider is available, with thin evidence sent bounded
 and its omissions declared; only opt-out, an unavailable provider or a prior
 classifier decision skip the call, and each records a reason. Autonomous decisions
 are attributed to the dedicated Jev review identity; Parallix applies them
 through its existing checked review authority. A finding-resolution signal
 concerns only the prior findings, and Jev abstains through insufficient_evidence
 when the supplied evidence cannot support a judgment. Classifier measurements remain
-local statistics inputs, recorded once per review round and reported per round, split by first review and re-review, and Forgejo remains the review publication adapter.
+local statistics inputs, recorded once per review round and reported for re-review rounds only, and Forgejo remains the review publication adapter.
 This follow-up choice does not change the historical research results or turn
 the estimated saving into a measured whole-workflow improvement.
 
@@ -172,6 +172,31 @@ agreement with historical judgments when Jev decides; general-reviewer
 variability is excluded. Thresholds alone do not establish correctness or cover
 new findings outside the classified original scope. The original evidence and
 conclusions above remain historical results.
+
+## First-review success-criteria evaluation
+
+TASK-2703 retains its frozen first-review research and older repair-review cohorts
+separately in the [compact conclusion](../../backlog/docs/task-2703-first-review-conclusion.md)
+and [archive index](../../backlog/docs/task-2703-first-review-evidence.json).
+
+Decision: first reviews require the general reviewer, with no Jev call or
+classifier verdict. This restriction applies independently of operator mode.
+Existing finding-resolution and integration-repair re-reviews retain their
+eligibility, thresholds and publication authority. Display only re-review
+statistics; keep historical measurements and their collection intact.
+
+The research found useful first-review decisions alongside unsafe clears.
+Satisfying every mission criterion did not establish complete PR approval:
+a correct historical rejection could concern a broader documentation blocker.
+Focused green tests also concealed fallback and interface-contract defects.
+Limited-context first-review routing therefore lacks sufficient support for
+production approval. This conclusion does not invalidate the narrower evidence
+supporting re-reviews of known findings or withdrawn integration gates.
+
+Future first-review adoption requires a new frozen evaluation with original
+revision-bound criteria, adjudicated historical rejections and explicit operator
+acceptance. False clears are quality failures; false returns belong in aggregate
+repair/review cost. No matched workflow savings are established by this research.
 
 ## Reconsideration triggers
 

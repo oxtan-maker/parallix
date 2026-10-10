@@ -468,18 +468,13 @@ configurable gates above.
 
 ## Review classification
 
-The classifier can decide any review round after the configured verification passes. A
-re-review is judged against the previous round's findings, using the previous review, the
-implementer response, any human feedback and mechanically collected source at exact
-revisions; a repaired integration failure is judged against the withdrawn gate. A first
-review is judged against the mission success criteria, with the mission brief as context
-and the diff from the review baseline, the same revision the agent reviewer uses. The classifier is called on every round
-while the decision provider is available; thin evidence is sent with its omissions
-declared, packets shrink only to the Jev token budget, and the classifier abstains when that evidence
-cannot support a judgment. Abstentions, unavailable configuration, failed
-calls and rounds lacking required data (for example an unanswered prior finding set or a
-first review of a mission without success criteria, each with its own recorded reason)
-retain the general reviewer.
+First reviews always use the general reviewer; Jev is not called, including in
+shadow mode. Jev can decide a re-review after configured verification passes.
+A finding re-review uses the previous review, the implementer response, human
+feedback and mechanically collected source at exact revisions. A repaired
+integration failure is judged against the withdrawn gate. Thin or oversized
+evidence declares its omissions; abstentions, unavailable configuration, failed
+calls and missing required data retain the general reviewer.
 
 Gate-failure repair packets retain the complete repair diff. When both rounds kept a
 review baseline, that diff compares the approved and candidate mission diffs, each from

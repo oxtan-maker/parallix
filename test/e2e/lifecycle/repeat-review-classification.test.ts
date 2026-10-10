@@ -129,7 +129,9 @@ test('live Jev applies an integration-repair verdict and the standard lifecycle 
       return { ...launch, resultPromise: launch.resultPromise.then(async result => {
         if (repairing) {
           write(path.join(options.worktree!, 'answer.mjs'), `const output = 'Hello';\nif (output !== 'Hello') { throw new Error('required Hello output is missing'); }\nconsole.log(output);\n`);
-          await px(options.worktree!, ['checkpoint', 'record', '--slug', slug, '--name', 'CP-2',
+          const repairCheckpoint = /Harness-created repair checkpoint: (CP-\d+)/.exec(options.prompt)?.[1];
+          assert.ok(repairCheckpoint, 'repair implementer records the harness checkpoint');
+          await px(options.worktree!, ['checkpoint', 'record', '--slug', slug, '--name', repairCheckpoint,
             '--expected-version', String(readDb('SELECT version FROM missions')[0].version),
             '--criterion', 'The lifecycle reaches integration through the real CLI', '--evidence', 'answer.mjs:1',
             '--next', 'Review the repaired gate obligation.']);
@@ -141,6 +143,12 @@ test('live Jev applies an integration-repair verdict and the standard lifecycle 
     await px(repo, ['draft', slug, '--agent', 'custom']);
     await px(worktree, ['active', slug, '--implementer', 'custom']);
     assert.equal(readDb('SELECT status FROM missions')[0].status, 'integration');
+    const firstMeasurements = readDb('SELECT samples FROM review_classifier_measurements').flatMap(row => JSON.parse(row.samples));
+    assert.ok(firstMeasurements.some(row => row.round === 1 && row.reason === 'first-review'
+      && row.classificationMs === null && row.provider === null), 'first review records a skip without calling Jev (TASK-2703)');
+    const firstStats = await px(repo, ['stats']);
+    assert.doesNotMatch(firstStats.output, /first-review|first review/);
+    assert.equal(firstStats.output.split('\n').filter(line => /^\| (This|Last) week.*\| re-review\s+\|/.test(line)).length, 2);
     const prs = await provider.api('GET', '/repos/human/probe/pulls?state=open');
     assert.equal(prs.length, 1);
     await provider.api('POST', `/repos/human/probe/pulls/${prs[0].number}/reviews`, { event: 'APPROVED', body: 'Initial fixture approval', commit_id: prs[0].head.sha });

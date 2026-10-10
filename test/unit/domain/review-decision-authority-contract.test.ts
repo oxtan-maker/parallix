@@ -470,3 +470,17 @@ it('classifier integration repairs bind the withdrawn gate and retain its comple
     assert.match(decision.findings[0].summary, /required output missing/);
   }
 });
+
+it('first-review classifier decisions are rejected while historical provenance remains readable (TASK-2703)', async () => {
+  const { applyClassifierReview, assertClassifierReviewSource, successCriteriaFindings } = await import('../../../src/domain/classifier-review.js');
+  const { repeatReview } = await import('../../fixtures/repeat-review.js');
+  const review = repeatReview();
+  const first = { ...review, rounds: [{ ...review.rounds[1], number: 1 }] as const };
+  const source = { kind: 'classifier' as const, identity: 'jev' as const, decisionId: 'd', provider: 'typesafe', model: 'jev',
+    packetHash: 'c'.repeat(64), priorRevision: 'b'.repeat(40), candidateRevision: 'b'.repeat(40),
+    successCriteria: { baseRef: 'main' }, findingIds: ['success-criterion-1'],
+    policyVersion: 'repeat-findings-52-89-v2', label: 'addresses', score: 0.99 };
+  assert.doesNotThrow(() => assertClassifierReviewSource(source));
+  assert.throws(() => applyClassifierReview(first, source, 'clear', '2026-10-06T00:00:00Z', successCriteriaFindings(['Output preserved'])), /First review requires/);
+  assert.equal(currentReviewRound(first).decision, null);
+});

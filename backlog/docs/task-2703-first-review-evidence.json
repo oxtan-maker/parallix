@@ -1,0 +1,68 @@
+{
+  "mission": "TASK-2703",
+  "decision": "Block Jev first reviews; preserve existing finding and integration-repair re-reviews. Display re-review statistics only; retain raw gathering.",
+  "fullEvidenceArchive": "/mnt/data/code/parallix-research/task-2703-conclusion-2026-10-10/complete-first-review-evidence.json",
+  "fullEvidenceSha256": "dd0d0996c8ceab742b0e051658de79cc1621bc0eff6cfabe3e99aad2ba72b61f",
+  "latestEvaluation": {
+    "samples": 30,
+    "distinctParentFamilies": 30,
+    "formalRoundOneSubjects": 30,
+    "apiCalls": 29,
+    "apiFailures": 0,
+    "preparationFallbacks": 1,
+    "routes": {
+      "fallback": 17,
+      "clear": 11,
+      "return": 2
+    },
+    "byStratum": {
+      "original-archive": {
+        "fallback": 14,
+        "clear": 8,
+        "return": 1
+      },
+      "prior-research-extension": {
+        "fallback": 3,
+        "clear": 3,
+        "return": 1
+      }
+    },
+    "priorRepairMembershipFamilies": 17,
+    "adjudication": {
+      "supported-clear": 8,
+      "unsafe-clear-literal-criterion": 2,
+      "invalid-original-criteria-comparator": 1,
+      "criteria-clear-broader-pr-blocked": 1,
+      "supported-return": 1
+    },
+    "focusedSuiteExecutions": 36,
+    "focusedSuitePasses": 35,
+    "focusedSuiteFailures": 1,
+    "reportedUsd": 0.034034658,
+    "inferenceWallMs": 15947.16410799999,
+    "models": [
+      "typesafe/jev-1.13-20260917"
+    ],
+    "adoption": false,
+    "appliedVerdicts": 0,
+    "statisticsWrites": 0,
+    "forgejoWrites": 0,
+    "independentGroundTruth": false,
+    "limitations": [
+      "Original criteria continuity unverified; s19 demonstrably uses a later criterion.",
+      "Conditional mandatory-source budget selection, 23 archived + 7 extension families; not representative all missions.",
+      "17 families have prior repair-research membership; unused first-review revisions do not make families historically pristine.",
+      "Focused historical source with current node_modules; no full gate/static/manual certificate fabricated.",
+      "Whole-PR approval and literal mission criteria differ in s25.",
+      "Root post-call adjudication with historical reviewer comparison, no independent fresh adjudicator.",
+      "No matched review latency/cost baseline; workflow savings unknown."
+    ]
+  },
+  "researchArchive": "/mnt/data/code/parallix-research/task-2703-first-review-30-2026-10-09",
+  "researchReport": "/mnt/data/code/parallix-research/task-2703-first-review-30-2026-10-09/RESULT.md",
+  "lesson": "Literal mission criteria can all pass while a broader PR blocker remains (TASK-2569). A limited evidence packet is not whole-PR approval. Green mocks also missed fallback and interface defects (TASK-2626, TASK-2579).",
+  "historicalComparator": "Major error: Jev clears a correctly rejected historical PR. False returns cost implementer/review work; evaluate those in aggregate economics.",
+  "priorResearch": "Repair-review positives are distinct from first-review approval and must not be disabled by this decision. Full cohort provenance and earlier experiments remain in the complete archive.",
+  "implementationVerificationArchive": "/mnt/data/code/parallix-research/task-2703-conclusion-2026-10-10/implementation-verification.json",
+  "implementationVerificationSha256": "d68e3a958d85377c44716892daf0f9a786dff4798fe55c05083467326a2a693c"
+}

@@ -94,6 +94,7 @@ export function applyClassifierReview(review: Review, source: ClassifierReviewSo
   const thresholds = classifierPolicyThresholds(source.policyVersion);
   const current = currentReviewRound(review);
   const prior = review.rounds.at(-2);
+  if (current.number === 1 || !prior) { throw new Error('First review requires the general reviewer'); }
   if (current.decision || current.phase !== 'reviewing' || current.subject.revision !== source.candidateRevision
     || (source.successCriteria ? source.priorRevision !== source.candidateRevision : prior?.subject.revision !== source.priorRevision)
     || (prior?.decision?.classifier && source.policyVersion === CLASSIFIER_POLICY_VERSION)) { throw new Error('Classifier review scope or revision is stale'); }

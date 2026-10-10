@@ -181,6 +181,10 @@ function missionRangeOf(prior: DomainReviewRound, candidateBaseline: string | un
 }
 
 /** Pure scope derivation: the prior findings, withdrawn gate or success criteria this round is judged against. */
+function isFirstReview(roundNumber: number, prior: unknown): boolean {
+  return roundNumber === 1 || !prior;
+}
+
 function assessEligibility(context: LoopContext, round: ReviewRound, loaded: Loaded | null): Eligibility {
   const unavailable = unavailableReason(context);
   if (unavailable) { return { skip: unavailable }; }
@@ -191,6 +195,9 @@ function assessEligibility(context: LoopContext, round: ReviewRound, loaded: Loa
   const review = mission.review!;
   const current = review.rounds.at(-1)!;
   const prior = review.rounds.at(-2);
+  if (isFirstReview(current.number, prior)) {
+    return { skip: { reason: 'first-review', message: 'first review requires the general reviewer' } };
+  }
   const candidateRevision = round.verifiedRevision ?? String(current.subject.revision);
   const shape = reviewShape(round, prior, candidateRevision);
   const { repairCause, changesRequested, verifiedRepair } = shape;

@@ -1,5 +1,5 @@
 import { localReportingTimeZone, type ReportingWindow } from '../../domain/decision-window.js';
-import { reviewRounds, type ClassifierStatisticsInput, type RoundKind } from '../review-classification/statistics.js';
+import { reviewRounds, type ClassifierStatisticsInput } from '../review-classification/statistics.js';
 
 type Window = ReportingWindow & { label: string };
 
@@ -16,14 +16,12 @@ function table(headers: readonly string[], rows: readonly (readonly string[])[],
   return [line(headers), `| ${rule.join(' | ')} |`, ...rows.map(line)];
 }
 
-const KINDS: readonly RoundKind[] = ['all', 'first review', 're-review'];
-
-/** Counts are review rounds, shown overall and split by round kind; absent or partial history is labelled, never rendered as zero. */
+/** Display re-review rounds only; retain first-review measurements for audit. */
 export function renderClassifierStatistics(input: ClassifierStatisticsInput | null, windows: readonly [Window, Window]): string {
   const periods = [['This week', windows[0]], ['Last week', windows[1]]] as const;
-  const cells = periods.flatMap(([label, window]) => KINDS.map(kind => ({ label, window, kind,
-    stats: input ? reviewRounds(input, window, kind) : null })));
-  const stats = cells.filter(cell => cell.kind === 'all').map(cell => cell.stats);
+  const cells = periods.map(([label, window]) => ({ label, window, kind: 're-review',
+    stats: input ? reviewRounds(input, window, 're-review') : null }));
+  const stats = cells.map(cell => cell.stats);
   const text = (value: number, of: number, coverage: string | undefined) => {
     if (!coverage || coverage === 'unavailable') { return 'unavailable'; }
     const label = coverage === 'partial' ? ', partial' : '';
