@@ -423,7 +423,10 @@ export function createReviewLoopPorts(slug: string, target: ReviewLoopTarget, bi
       refreshKnowledgeGraph: async () => { await maybeUpdateGraphifyBeforeReview(worktree, { commandRunner: run, log }); },
       rebase: async () => preReviewRebaseFacts(await rebaseBeforeReviewRound(slug, {
         worktree, log, error, verbose, taskFile: task.taskFile, gitFn: git, isReviewProviderEnabledFn: isProviderEnabled,
-        ...(missionStore ? { rebaseWorkflowOptions: { missionServicesFn: async () => ({ store: missionStore, lifecycle: lifecycleService }) } as never } : {}),
+        rebaseWorkflowOptions: {
+          configuration: bindings.configuration,
+          ...(missionStore ? { missionServicesFn: async () => ({ store: missionStore, lifecycle: lifecycleService }) } : {}),
+        } as never,
       })),
       runGate: async () => gateFacts(await runPreReviewGate(slug, worktree, { runFn: run, log, error })),
       reviewBaseline() {

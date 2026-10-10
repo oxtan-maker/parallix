@@ -1,8 +1,8 @@
 ---
 id: TASK-2709
 title: Fix automatic rebase losing implementer launcher configuration
-status: backlog
-assignee: []
+status: done
+assignee: [claude]
 created_date: '2026-10-10 05:55'
 labels:
   - bug

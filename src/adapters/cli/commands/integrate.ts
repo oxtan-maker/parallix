@@ -131,7 +131,7 @@ export function createIntegratePorts(configuration?: ParallixConfiguration): Int
       resolveForgejoUser: reviewer => reviewAdapter.resolveForgejoUser(reviewer),
     },
     rebase: {
-      createRebaseWorkflowPort: options => rebaseWorkflow.createRebaseWorkflowPort(options),
+      createRebaseWorkflowPort: options => rebaseWorkflow.createRebaseWorkflowPort({ ...options, configuration }),
     },
     gates: {
       loadPhaseGates: (rootDir, phase) => repositoryGates.loadPhaseGates(rootDir, phase),

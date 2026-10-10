@@ -321,6 +321,7 @@ export const INTEGRATION_CI_TESTS: readonly string[] = [
   'integration/integrate/integrate-lifecycle-recovery-and-closeout-contract.test.ts',
   'integration/integrate/integrate-stale-state-and-stash-safety-contract.test.ts',
   'integration/rebase/rebase-before-review-contract.test.ts',
+  'integration/rebase/pre-review-launcher-configuration.test.ts',
   'integration/forgejo/forgejo-sync-merged-force-push-contract.test.ts',
   'integration/packaging/post-integrate-global-install-contract.test.ts',
   'integration/integrate/integrate-gate-and-exclusivity-process-contract.test.ts',
