@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { commandInvocation } from './command-invocation.js';
 import { createReviewClassification } from './review-classification.js';
 import { resolveConfiguration, resolveProcessConfiguration } from './config.js';
 import type { ParallixConfiguration } from '../application/ports/configuration.js';
@@ -230,13 +231,14 @@ function createCommandRegistry(rootDir: string, configuration: ParallixConfigura
     if (!services.mission) { throw new Error('mission services are unavailable'); }
     const before = await services.mission.store.load(missionId(slug));
     const roundBefore = before.kind === 'found' ? before.mission.review?.rounds.at(-1) : null;
-    await registry.review([slug, '--continue'], {
+    const status = await commandInvocation(exit => registry.review([slug, '--continue'], {
       integrationOwnsReview: true,
       // The re-review runs inside `px integrate`: it publishes under that
       // operation and hands the board back to it when it ends (TASK-2620).
       nestedWork,
-      exit: (code?: number) => { if (code) { throw new Error(`px review ${slug} --continue exited with status ${code}`); } },
-    });
+      exit,
+    }));
+    if (status !== 0) { return false; }
     const after = await services.mission.store.load(missionId(slug));
     if (after.kind !== 'found' || after.mission.status !== 'integration' || !after.mission.review) { return false; }
     const rounds = after.mission.review.rounds;
@@ -897,15 +899,13 @@ export function parseReviewEventArgs(args: string[]): ReviewEventParsed {
 
 async function runBareCommand(parsed: ParsedArgs, configuration: ParallixConfiguration, log: typeof fmt.log.plain, error: typeof fmt.log.plainError): Promise<number> {
   const { main } = await import('../interfaces/cli/runtime.js');
-  let exitCode = 0;
-  await main([], {
+  return commandInvocation(exitFn => main([], {
     ...createRuntimeOptions(parsed.target, configuration),
     cwdFn: () => parsed.target,
-    exitFn: ((code?: number) => { exitCode = typeof code === 'number' ? code : 0; }) as (_code?: number) => never,
+    exitFn,
     logFn: log,
     errorFn: error,
-  });
-  return exitCode;
+  }));
 }
 
 async function runReviewEventCommand(parsed: ParsedArgs, configuration: ParallixConfiguration, log: typeof fmt.log.plain, error: typeof fmt.log.plainError): Promise<number> {
@@ -946,15 +946,13 @@ async function runTargetCommand(parsed: ParsedArgs, configuration: ParallixConfi
       return startupPreflightModule.default([], { command: 'verify-env', returnResult: true, log, error })?.pass ? 0 : 1;
     }
     ensureWorkflowAgentConfig(parsed.command || '', parsed.target);
-    let exitCode = 0;
-    await workflow.main([parsed.command, ...parsed.args], {
+    return await commandInvocation(exitFn => workflow.main([parsed.command, ...parsed.args], {
       ...createRuntimeOptions(parsed.target, configuration),
       cwdFn: () => parsed.target,
-      exitFn: ((code?: number) => { exitCode = typeof code === 'number' ? code : 0; }) as (_code?: number) => never,
+      exitFn,
       logFn: log,
       errorFn: error,
-    });
-    return exitCode;
+    }));
   } catch (err) {
     error(fmt.status('FAIL', (err as Error).message));
     return 1;

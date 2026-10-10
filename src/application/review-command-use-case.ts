@@ -75,6 +75,12 @@ export class ReviewCommandUseCase {
       await this._workflow[operation]({ ...context, options });
     } catch (error) {
       if (nested) { await nested.resume(); throw error; }
+      if (exits.terminatedWith(error)) {
+        const failed = exits.failure();
+        if (failed === null) { await bestEffort(() => this._currentWork.ended(publication)); }
+        else { await bestEffort(() => this._currentWork.blocked(publication, `${summary} exited with status ${failed}`)); }
+        throw error;
+      }
       const reason = error instanceof Error ? error.message : 'review operation cannot continue autonomously';
       await bestEffort(() => this._currentWork.blocked(publication, reason));
       throw error;
@@ -94,16 +100,22 @@ export class ReviewCommandUseCase {
 /** Observe the exit codes an injected, non-terminating exit reports. */
 function exitRecorder(options: Record<string, unknown>) {
   let code: number | null = null;
+  let termination: { error: unknown } | null = null;
   const observed: Record<string, unknown> = {};
   for (const key of ['exit', 'exitFn'] as const) {
     const exit = options[key];
     if (typeof exit !== 'function') { continue; }
     observed[key] = (value?: number) => {
       if (value) { code = value; }
-      return (exit as (_code?: number) => unknown)(value);
+      try {
+        return (exit as (_code?: number) => unknown)(value);
+      } catch (error) {
+        termination = { error };
+        throw error;
+      }
     };
   }
-  return { options: observed, failure: () => code };
+  return { options: observed, failure: () => code, terminatedWith: (error: unknown) => termination !== null && termination.error === error };
 }
 
 async function bestEffort(publish: () => Promise<void>): Promise<void> {

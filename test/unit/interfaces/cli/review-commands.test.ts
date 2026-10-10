@@ -12,6 +12,8 @@ import { createRequire } from 'node:module';
 import { ReviewCommandUseCase } from '../../../../src/application/review-command-use-case.js';
 import { createReviewCommand } from '../../../../src/interfaces/cli/review.js';
 import { mkdtemp as registeredMkdtemp } from '../../../helpers/temp-dir.js';
+import { bindReviewPersistence } from '../../../../src/composition/review-persistence.js';
+import { fixtureMission, inMemoryTransitionStore } from '../../../fixtures/mission-builders.js';
 import { fakeReviewLoopPorts } from '../../../helpers/review-loop-ports.js';
 
 /** Bound loop mechanisms whose held controller fence declines the run. */
@@ -462,6 +464,8 @@ test('review passes an explicit --max-attempts through to the review loop', asyn
   const exit = (code) => { exits.push(code); };
 
   await review(['task-2322', '--continue', '--max-attempts', '7'], {
+    continueReviewClearsInterventionFn: async () => false,
+    readReviewStateFn: async () => ({ round: 1 }),
     inferSlugFn: (s) => s || 'task-2322',
     log: () => {},
     error: () => {},
@@ -480,6 +484,7 @@ test('a manual review continuation renews the five-round budget at the current r
   let received = null;
 
   await review(['task-2436', '--continue'], {
+    continueReviewClearsInterventionFn: async () => false,
     inferSlugFn: (s) => s || 'task-2436',
     log: () => {}, error: () => {}, exit: () => {},
     readReviewStateFn: async () => ({ round: 5 }),
@@ -502,29 +507,32 @@ test('review automation retains its five-round limit', async () => {
   assert.equal(received && received.maxAttempts, 5);
 });
 
-// SC1: a fresh `px review <slug> --start` must reach the handoff transition that
-// creates the Review aggregate. A fresh active mission has no persisted Review
-// yet, so the aggregate guard must be relaxed for `--start`.
-test('a fresh --start requires the DB-native Review aggregate', async () => {
+// An unknown identity may not begin a review; known missions reach handoff
+// readiness even when their first Review has not been created yet.
+test('a --start rejects an unknown mission without the DB-native Review aggregate', async () => {
   let startReviewLoopCalled = 0;
+  const errors = [];
+  const exits = [];
 
   await review(['task-2490', '--start'], {
     inferSlugFn: (s) => s || 'task-2490',
     log: () => {},
-    error: () => {},
-    exit: () => {},
+    error: message => errors.push(message),
+    exit: code => { exits.push(code); },
     requireReviewAggregate: true,
     readReviewStateFn: async () => null,
     reviewLoopMechanisms: () => { startReviewLoopCalled += 1; return declinedLoop(); },
   });
 
   assert.equal(startReviewLoopCalled, 0, '--start must not reintroduce retired file-backed review state when the DB-native aggregate is absent');
+  assert.equal(errors.length, 1);
+  assert.match(errors[0], /--reconcile-review/);
+  assert.deepEqual(exits, [1]);
 });
 
 // The aggregate guard is retained for every non-start operation: a `--continue`
-// on a mission with no persisted Review still exits with the reconcile review
-// diagnostic rather than proceeding.
-test('a --continue with no persisted Review aggregate exits with the reconcile diagnostic', async () => {
+// on a mission with no persisted Review stops with --start guidance.
+test('a --continue with no persisted Review aggregate exits with start guidance', async () => {
   const errors = [];
   let startReviewLoopCalled = 0;
 
@@ -541,7 +549,7 @@ test('a --continue with no persisted Review aggregate exits with the reconcile d
   assert.equal(startReviewLoopCalled, 0, `--continue must not reach the review loop without a persisted Review`);
   assert.ok(
     errors.some(e => /no valid Review aggregate/.test(e)),
-    `expected the reconcile-review diagnostic; got: ${errors.join(' | ')}`
+    `expected the missing-Review diagnostic; got: ${errors.join(' | ')}`
   );
 });
 
@@ -549,6 +557,8 @@ test('review forwards current-work agent publication into the review loop', asyn
   let received = null;
 
   await review(['task-2322', '--continue'], {
+    continueReviewClearsInterventionFn: async () => false,
+    readReviewStateFn: async () => ({ round: 1 }),
     inferSlugFn: (s) => s || 'task-2322',
     log: () => {},
     error: () => {},
@@ -565,6 +575,8 @@ test('review rejects a non-numeric --max-attempts', async () => {
   let startReviewLoopCalled = 0;
 
   await review(['task-2322', '--continue', '--max-attempts', 'lots'], {
+    continueReviewClearsInterventionFn: async () => false,
+    readReviewStateFn: async () => ({ round: 1 }),
     inferSlugFn: (s) => s || 'task-2322',
     log: () => {},
     error: (m) => errors.push(m),
@@ -591,4 +603,82 @@ test('review operation precedence and push identity are pure policies (TASK-2668
   assert.equal(reviewPushIdentity('autonomous', 'codex', true).identity, null);
   assert.equal(reviewPushIdentity('claude', 'codex', true).identity, 'claude');
   assert.equal(reviewPushIdentity(null, 'codex', true).identity, 'codex');
+});
+
+test('composed review continuation rejects a known mission without Review once and stops all downstream work (TASK-2696)', async () => {
+  const slug = 'task-2696-repro';
+  const store = inMemoryTransitionStore(fixtureMission(slug));
+  const persistence = bindReviewPersistence(store, null);
+  const errors = [];
+  const exits = [];
+  const effects = [];
+  mock.method(store, 'save', async () => { effects.push('persist'); });
+  const fake = fakeReviewLoopPorts({
+    provider: { ensureReachable: async () => { effects.push('provider'); return true; } },
+    routing: { nominate: () => { effects.push('reviewer'); return 'claude'; } },
+    agents: { launch: async () => { effects.push('launch'); return {}; } },
+    stateport: { persist: async () => { effects.push('round persistence'); } },
+  });
+  await review([slug, '--continue'], {
+    inferSlugFn: () => slug,
+    resolveWorktreeFn: () => null,
+    log: () => {}, error: message => errors.push(message), exit: code => { exits.push(code); },
+    requireReviewAggregate: true, missionStore: store,
+    readReviewStateFn: persistence.readReviewState,
+    continueReviewClearsInterventionFn: async () => { effects.push('clear intervention'); return false; },
+    reviewLoopMechanisms: () => { effects.push('mechanisms'); return fake.ports; },
+  });
+  assert.deepEqual(effects, []);
+  assert.deepEqual(exits, [1]);
+  assert.equal(errors.length, 1);
+  assert.match(errors[0], /no (?:valid )?Review (?:aggregate|persisted)/i);
+  assert.ok(errors[0].includes(`px review ${slug} --start`));
+});
+
+for (const prerequisite of ['intervention', 'blocker']) {
+  test(`continuation stops after a ${prerequisite} prerequisite failure when exit returns (TASK-2696)`, async () => {
+    const errors = [];
+    const exits = [];
+    const effects = [];
+    const store = inMemoryTransitionStore(fixtureMission('task-2696-failure'));
+    mock.method(store, 'load', async () => { throw new Error('isolated store read failure'); });
+    await review(['task-2696-failure', '--continue'], {
+      inferSlugFn: () => 'task-2696-failure', resolveWorktreeFn: () => null,
+      log: () => {}, error: message => errors.push(message), exit: code => { exits.push(code); },
+      missionStore: store, readReviewStateFn: async () => ({ round: 2 }),
+      ...(prerequisite === 'blocker' ? { continueReviewClearsInterventionFn: async () => false } : {}),
+      reviewLoopMechanisms: () => { effects.push('dispatch'); return declinedLoop(); },
+    });
+    assert.deepEqual(exits, [1]);
+    assert.equal(errors.length, 1);
+    assert.match(errors[0], /isolated store read failure/);
+    assert.deepEqual(effects, []);
+  });
+}
+
+test('resume without a persisted Review returns after one rejection without writes (TASK-2696)', async () => {
+  const errors = [];
+  const exits = [];
+  const store = inMemoryTransitionStore(fixtureMission('task-2696-resume'));
+  mock.method(store, 'save', async () => { assert.fail('resume must not persist a missing review'); });
+  await review(['task-2696-resume', '--resume', '--actor', 'operator'], {
+    inferSlugFn: () => 'task-2696-resume', resolveWorktreeFn: () => null,
+    missionStore: store, log: () => {}, error: message => errors.push(message),
+    exit: code => { exits.push(code); },
+    reviewLoopMechanisms: () => { assert.fail('resume must not dispatch the loop'); },
+  });
+  assert.deepEqual(exits, [1]);
+  assert.equal(errors.length, 1);
+  assert.match(errors[0], /--start begins a review/);
+});
+
+test('continuation preserves unexpected helper errors (TASK-2696)', async () => {
+  const failure = new Error('unexpected prerequisite failure');
+  await assert.rejects(() => review(['task-2696-failure', '--continue'], {
+    inferSlugFn: () => 'task-2696-failure', resolveWorktreeFn: () => null,
+    readReviewStateFn: async () => ({ round: 2 }),
+    continueReviewClearsInterventionFn: async () => { throw failure; },
+    log: () => {}, error: () => {}, exit: () => {},
+    reviewLoopMechanisms: () => { assert.fail('unexpected errors must stop dispatch'); },
+  }), error => error === failure);
 });

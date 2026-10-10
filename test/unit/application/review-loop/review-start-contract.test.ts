@@ -85,3 +85,17 @@ test('refreshes Graphify once after final review preparation and immediately bef
   assert.deepEqual(calls, ['rebase', 'gate', 'refresh', 'launch:reviewer']);
   assert.equal(calls.filter(call => call === 'refresh').length, 1);
 });
+
+
+test('continuation preparation stops after an unreachable provider even when exit returns (TASK-2696)', async () => {
+  const fake = fakeReviewLoopPorts({
+    slug,
+    state: new ReviewState(slug, { implementer: 'claude', reviewer: 'codex', round: 2 }),
+    provider: { ensureReachable: async () => false },
+    routing: { nominate: () => { assert.fail('failed preparation must not select a reviewer'); } },
+  });
+  await runReviewLoop({ slug, isContinue: true }, fake.ports);
+  assert.deepEqual(fake.exits, [1]);
+  assert.deepEqual(fake.launches, []);
+  assert.deepEqual(fake.writes, []);
+});

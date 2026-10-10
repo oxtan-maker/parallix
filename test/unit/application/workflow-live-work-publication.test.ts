@@ -106,3 +106,17 @@ test('a review whose injected exit reports failure is published as blocked, not 
   await review.execute([SLUG, '--continue'], { exit: () => {} });
   assert.match(board()?.blockingReason ?? '', /px review --continue task-2620 exited with status 1/);
 });
+
+for (const status of [0, 23]) {
+  test(`terminating review exit ${status} publishes its outcome and preserves owner termination (TASK-2696)`, async () => {
+    const { port, board } = recorder();
+    const stopped = Object.freeze({});
+    const review = new ReviewCommandUseCase(reviewWorkflow(async context => {
+      (context.options.exit as (_code: number) => never)(status);
+      assert.fail('exit must terminate workflow execution');
+    }), port);
+    await assert.rejects(review.execute([SLUG, '--continue'], { exit: () => { throw stopped; } }), error => error === stopped);
+    assert.equal(board()?.currentWork ?? null, null);
+    assert.equal(board()?.blockingReason ?? null, status === 0 ? null : `px review --continue ${SLUG} exited with status ${status}`);
+  });
+}

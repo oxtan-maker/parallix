@@ -65,27 +65,48 @@ export class ReviewWorkflowAdapter implements ReviewWorkflowPort {
     if (!Number.isInteger(maxAttempts) || maxAttempts < 1) { this.invalidMaxAttempts(raw ?? ''); return; }
     await this.roundUseCase(context).start({ ...this.roundRequest(context), maxAttempts });
   }
-  async continue(context: ReviewWorkflowContext): Promise<void> { await this.roundUseCase(context).continue({ ...this.roundRequest(context), rawMaxAttempts: flagValue(context.args, '--max-attempts') }); }
+  async continue(context: ReviewWorkflowContext): Promise<void> {
+    // Helpers historically relied on process.exit. Fence this invocation even
+    // when a host's exit observer returns; keep cancellation inside the adapter.
+    const stopped = new Error('review continuation stopped');
+    const o = context.options as typeof this._defaults;
+    const helperExit = (code: number): never => {
+      (o.exit || process.exit)(code);
+      throw stopped;
+    };
+    try {
+      await this.roundUseCase(context, helperExit).continue({ ...this.roundRequest(context), rawMaxAttempts: flagValue(context.args, '--max-attempts') });
+    } catch (error) {
+      if (error !== stopped) { throw error; }
+    }
+  }
   async resume(context: ReviewWorkflowContext): Promise<void> { await resumeIntervenedReview(context.slug, context.args, context.options); }
   private roundRequest(context: ReviewWorkflowContext): Omit<StartReviewRound, 'maxAttempts' | 'isContinue'> {
     const poll = flagValue(context.args, '--poll-timeout-seconds');
     return { slug: context.slug, implementer: flagValue(context.args, '--implementer') ?? undefined, reviewer: flagValue(context.args, '--reviewer') ?? undefined, focus: flagValue(context.args, '--focus') ?? 'all', dryRun: context.args.includes('--dry-run'), reset: context.args.includes('--reset'), verbose: context.args.includes('--verbose'), pollTimeoutSeconds: poll ? Number.parseInt(poll, 10) : null, missionPath: flagValue(context.args, '--mission') ?? undefined };
   }
   private invalidMaxAttempts(raw: string): void { const o = this._defaults; (o.error || fmt.log.plainError)(fmt.status('FAIL', `--max-attempts requires a positive integer (got "${raw}").`)); (o.exit || process.exit)(1); }
-  private roundUseCase(context: ReviewWorkflowContext): ReviewRoundUseCase {
+  private roundUseCase(context: ReviewWorkflowContext, helperExit?: (_code: number) => never): ReviewRoundUseCase {
     const o = context.options as typeof this._defaults; const worktree = o.resolveWorktreeFn || resolveWorktree;
+    const helperOptions = { ...o, exit: helperExit ?? o.exit, runFn: o.run };
     const port: ReviewRoundEntryPort = {
       loadRound: async slug => await Promise.resolve((o.readReviewStateFn || readReviewState)(slug, worktree(slug) || process.cwd(), o.missionStore)),
       isKnownMission: async slug => !o.requireReviewAggregate || await isKnownMission(slug, o.missionStore),
-      clearHumanIntervention: async slug => { await (o.continueReviewClearsInterventionFn ?? continueReviewClearsIntervention)(slug, context.args, { log: o.log, error: o.error, exit: o.exit, resolveWorktreeFn: o.resolveWorktreeFn, missionStore: o.missionStore, createEventFn: o.createEventFn, runFn: o.run }); },
-      invalidateResolvedBlocker: async slug => { if (o.missionStore) { await continueReviewInvalidatesBlocker(slug, context.args, { ...o, runFn: o.run }); } },
+      clearHumanIntervention: async slug => { await (o.continueReviewClearsInterventionFn ?? continueReviewClearsIntervention)(slug, context.args, helperOptions); },
+      invalidateResolvedBlocker: async slug => { if (o.missionStore) { await continueReviewInvalidatesBlocker(slug, context.args, helperOptions); } },
       mechanisms: request => {
         if (!o.reviewLoopMechanisms) { throw new Error('review loop mechanisms are not bound by the composition root'); }
         const observers = context.options as ReviewLoopObservers;
         return o.reviewLoopMechanisms(request, { log: observers.log, error: observers.error, exit: observers.exit || process.exit, onAgentLaunched: observers.onAgentLaunched, onAutonomousStop: observers.onAutonomousStop });
       },
       invalidMaxAttempts: raw => this.invalidMaxAttempts(raw),
-      missingReviewAggregate: slug => { (o.error || fmt.log.plainError)(fmt.status('FAIL', `Mission ${slug} has no valid Review aggregate. Stop before reviewer launch and run px review ${slug} --reconcile-review --branch <branch> --target <branch> --reviewer <agent> --implementer <agent> --revision <revision> --eligible-reviewer <agent>.`)); (o.exit || process.exit)(1); },
+      missingReviewAggregate: slug => {
+        const guidance = context.args.includes('--continue')
+          ? `Run px review ${slug} --start to begin a review; handoff readiness still applies.`
+          : `Stop before reviewer launch and run px review ${slug} --reconcile-review --branch <branch> --target <branch> --reviewer <agent> --implementer <agent> --revision <revision> --eligible-reviewer <agent>.`;
+        (o.error || fmt.log.plainError)(fmt.status('FAIL', `Mission ${slug} has no valid Review aggregate. ${guidance}`));
+        (o.exit || process.exit)(1);
+      },
     };
     return new ReviewRoundUseCase(port);
   }

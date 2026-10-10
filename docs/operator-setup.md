@@ -292,10 +292,18 @@ restarts with fresh review and gate state. An older mission stranded by a gate
 rebound is recovered through the same path.
 
 If the review loop escalates to a human, run `px review <slug> --continue` to
-resume it. This clears the recorded stop and grants another review attempt,
-including when the previous round limit was exhausted. A continued integration
-repair resumes integration automatically after approval. Repair budgets and
+resume its persisted review. This clears the recorded stop and grants another
+review attempt, including when the previous round limit was exhausted. After
+approval, run `px integrate <slug>` to continue integration. Repair budgets and
 mandatory gates still apply; a failed gate never counts as approval.
+
+If continuation reports that the mission has no persisted Review, run
+`px review <slug> --start` to begin one. Start performs handoff, creates the
+Review, and runs the autonomous review and repair loop. An existing Review is
+not required. Continuation stops before clearing intervention or blocker state
+or launching an agent. Handoff still checks completed success criteria and
+checkpoint evidence; starting review does not supply approval evidence.
+A missing Review alone does not establish that review state was lost.
 
 If a request-changes review was interrupted and repaired by hand, the mission
 can be left active while its next round awaits review. A human reviewer

@@ -31,6 +31,53 @@ const entry = path.join(repoRoot, 'src', 'entry', 'px.ts');
 const TSX_URL = pathToFileURL(path.join(repoRoot, 'node_modules', 'tsx', 'dist', 'esm', 'index.mjs')).href;
 const slug = 'task-2599';
 
+test('composed command exits preserve status and cleanup without terminating their host (TASK-2696)', () => {
+  const runtime = path.join(repoRoot, 'src/interfaces/cli/runtime.ts');
+  const cli = path.join(repoRoot, 'src/composition/create-cli.ts');
+  const script = `
+    import { mock } from 'node:test';
+    import assert from 'node:assert/strict';
+    const effects = [];
+    let status = 0;
+    let unexpected = false;
+    const runtimeExports = await import(${JSON.stringify(runtime)});
+    mock.module(${JSON.stringify(runtime)}, { namedExports: {
+      ...runtimeExports,
+      deriveAliases: () => ({}),
+      main: async (_args, options) => {
+        try {
+          if (unexpected) throw new Error('unexpected command failure');
+          options.exitFn(status);
+          effects.push('unreachable');
+        } finally { effects.push('cleanup'); }
+      },
+    } });
+    const { run } = await import(${JSON.stringify(cli)});
+    const errors = [];
+    const options = { log: () => {}, error: message => errors.push(message) };
+    const cwd = process.cwd();
+    for (const args of [[], ['aliases']]) {
+      for (status of [0, 1, 23]) {
+        assert.equal(await run(args, options), status);
+        assert.equal(process.cwd(), cwd);
+      }
+    }
+    assert.deepEqual(effects, Array(6).fill('cleanup'));
+    assert.deepEqual(errors, []);
+    unexpected = true;
+    assert.equal(await run(['aliases'], options), 1);
+    assert.equal(errors.length, 1);
+    assert.match(errors[0], /unexpected command failure/);
+    console.log('host survived; exact statuses and cleanup verified');
+  `;
+  const child = spawnSync(process.execPath, ['--experimental-test-module-mocks', '--import', TSX_URL, '--input-type=module', '-e', script], {
+    cwd: repoRoot, encoding: 'utf8', timeout: 8000,
+  });
+  assert.equal(child.error, undefined, child.error?.message);
+  assert.equal(child.status, 0, child.stderr);
+  assert.match(child.stdout, /host survived/);
+});
+
 /**
  * Run the dev entry in a child process that already has a ref'd loop anchor.
  * The child imports the real entry, so the entry's own `run().then(...)` host
