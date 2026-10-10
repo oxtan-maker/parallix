@@ -6,6 +6,7 @@ title: >-
 status: backlog
 assignee: []
 created_date: '2026-10-10 05:20'
+updated_date: '2026-10-10 05:21'
 labels:
   - ai-sdlc
   - performance
@@ -72,7 +73,15 @@ SCOPE NOTE: If, once refined, this exceeds one reviewable PR, split into subtask
 - [ ] #11 Owning ADRs (0046, 0061, 0063 at minimum) and live docs (docs/config.md, operator-setup.md, README install notes) are amended in place to the current decision only, passing `./scripts/verify-local.sh docs`
 - [ ] #12 Failure of the install hook is loud: a failed or partial install blocks draft with a clear repair message and never launches an agent into a half-installed worktree (existing draft-stats repair path covered by a test)
 - [ ] #13 Implementer manually runs a real mission end to end (draft, active, review) on the pnpm setup in a safe sandbox home, without touching the real parallix.db or stats, and records the result
+- [ ] #14 Observability: the pre-draft hook (src/adapters/process/pre-draft-hook.ts and its caller) logs start, command, exit code and monotonic duration for every run, visible to the operator during draft and retained as run evidence; today the hook is not observed at all and slowness is only felt, so the logging lands before the pnpm switch and the baseline (AC 1) is read from it
+- [ ] #15 The hook log separates install time from the rest of worktree preparation, includes cold/warm store state, and stays within the existing output-elision rules; a failed hook prints the exit code and tail of its output; covered by a unit test on the owning pre-draft-hook suite with a faked clock and runner
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Added by operator request 2026-10-10: the operator has never observed the pre-draft hook; they only see that draft/active feels slow. Evidence on 2026-10-10 from the stats DB (read-only): handoff to reviewer start (non-agent gates/rebase/PR/gatekeeper) median 204 s, p75 538 s, p90 1630 s over 128 missions since 2026-09-26; activation itself is under 1 s. Wall time from activate to review minus agent minutes: median 0.6 min but ~98% of total non-agent minutes sit in 27 of 150 missions (>=30 min). No per-step timing exists for the pre-draft hook, which is why the logging is part of this mission.
+<!-- SECTION:NOTES:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
