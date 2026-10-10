@@ -21,6 +21,7 @@ import type { SessionMarkerEntry, SessionMarkerWrite } from '../../../src/applic
 import { agentFamily } from '../../../src/domain/agents.js';
 import { missionId } from '../../../src/domain/mission.js';
 import { repositoryId } from '../../../src/domain/repository.js';
+import { resolveConfiguration } from '../../../src/composition/config.js';
 import { startAgent } from '../../../src/adapters/agents/agents.js';
 
 // ---------------------------------------------------------------------------
@@ -752,6 +753,7 @@ describe('runtime launch role mapping — real SQLite adapter', () => {
       for (const launch of launches) {
         await startAgent(launch.step, {
           prompt: 'Mocked provider launch.',
+          configuration: resolveConfiguration({ PARALLIX_NO_BUBBLEWRAP: '1', PATH: dir, HOME: dir }),
           worktree: dir,
           agent: 'claude',
           slug: launch.missionId,

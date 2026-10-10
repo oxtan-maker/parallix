@@ -175,7 +175,7 @@ function resolveBlocklistTargetPath(options: {targetPath?: string; configuration
   return storage.resolveAgentsLocalPath({ ensureDir: true, configuration: options.configuration });
 }
 
-function updateAgentBlock(agent: string, until: string, options: {targetPath?: string, reason?: string} = {}) {
+function updateAgentBlock(agent: string, until: string, options: {targetPath?: string, reason?: string, configuration?: ParallixConfiguration} = {}) {
   if (!agent || typeof agent !== 'string') {
     throw new Error('updateAgentBlock requires an agent name');
   }

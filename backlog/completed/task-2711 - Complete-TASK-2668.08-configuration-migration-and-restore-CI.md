@@ -1,8 +1,8 @@
 ---
 id: TASK-2711
 title: Complete TASK-2668.08 configuration migration and restore CI
-status: backlog
-assignee: []
+status: done
+assignee: [claude]
 created_date: '2026-10-10 06:39'
 labels: []
 dependencies: []

@@ -6,6 +6,7 @@ import path from 'path';
 import test, { mock } from 'node:test';
 import assert from 'node:assert/strict';
 import { mockModule, installModuleMocks } from '../../lib/module-mock.js';
+import { resolveConfiguration } from '../../../src/composition/config.js';
 const startAgentModule = mockModule<typeof import('../../../src/adapters/agents/agents.js')>('../../../src/adapters/agents/agents.js', import.meta.url);
 await installModuleMocks();
 test.afterEach(() => mock.restoreAll());
@@ -73,6 +74,12 @@ test.after(() => {
   fs.rmSync(tmpHome, { recursive: true, force: true });
 });
 
+// Explicit launch configuration: sandbox opt-out, fake-executable search path and
+// temporary HOME, so launches never depend on ambient env or an installed Bubblewrap.
+function launchConfiguration() {
+  return resolveConfiguration({ PARALLIX_NO_BUBBLEWRAP: '1', PATH: process.env.PATH, HOME: tmpHome });
+}
+
 function withPathLaunchers(entries, run) {
   const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'task-1416-path-'));
   const binDir = path.join(tmpRoot, 'bin');
@@ -127,6 +134,7 @@ test('codex exit 1 with real rollout telemetry is misclassified as a launch fail
 
   let attempts = 0;
   const result = await withSharedLaunchers(() => withPathLaunchers({ codex: codexScript }, () => startAgent('draft', {
+    configuration: launchConfiguration(),
     prompt: 'Execute.',
     worktree,
     assertAgentSupportedFn: () => {},
@@ -198,6 +206,7 @@ test('mistral exit 1 with real session telemetry is misclassified as a launch fa
 
   let attempts = 0;
   const result = await withSharedLaunchers(() => withPathLaunchers({ vibe: vibeScript }, () => startAgent('draft', {
+    configuration: launchConfiguration(),
     prompt: 'Execute.',
     worktree,
     assertAgentSupportedFn: () => {},
@@ -250,6 +259,7 @@ test('codex exit 1 with no telemetry still reroutes (real-failure path unchanged
   `;
 
   const result = await withSharedLaunchers(() => withPathLaunchers({ codex: codexScript }, () => startAgent('draft', {
+    configuration: launchConfiguration(),
     prompt: 'Execute.',
     worktree,
     assertAgentSupportedFn: () => {},
@@ -313,6 +323,7 @@ test('mistral exit 1 with only stale telemetry still reroutes (real-failure path
   `;
 
   const result = await withSharedLaunchers(() => withPathLaunchers({ vibe: vibeScript }, () => startAgent('draft', {
+    configuration: launchConfiguration(),
     prompt: 'Execute.',
     worktree,
     assertAgentSupportedFn: () => {},

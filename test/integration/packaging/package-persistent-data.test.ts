@@ -105,10 +105,12 @@ test('global tarball reinstall preserves PARALLIX_HOME measurements and agent bl
     // The assertions that matter here — where that state lives, that the installed CLI
     // reads it, and that a reinstall preserves it — are unchanged.
     const writeScript = [
+      `const { resolveConfiguration } = require(${JSON.stringify(path.join(PACKAGE_ROOT, 'src', 'composition', 'config.ts'))});`,
+      "const configuration = resolveConfiguration(process.env);",
       `const stats = require(${JSON.stringify(path.join(PACKAGE_ROOT, 'src', 'adapters', 'cli', 'commands', 'stats.ts'))});`,
       `const agents = require(${JSON.stringify(path.join(PACKAGE_ROOT, 'src', 'adapters', 'agents', 'agents.ts'))});`,
-      "stats.upsertMeasurementRow({date:'2026-06-06',mission:'task-reinstall-proof',classification:'ai_sdlc',implementer:'codex',pr_fix_rounds:'2',});",
-      "agents.updateAgentBlock('custom', '2026-07-01 12');"
+      "stats.upsertMeasurementRow({date:'2026-06-06',mission:'task-reinstall-proof',classification:'ai_sdlc',implementer:'codex',pr_fix_rounds:'2',}, {configuration});",
+      "agents.updateAgentBlock('custom', '2026-07-01 12', {configuration});"
     ].join('');
     run(process.execPath, ['--import', TSX_IMPORT, '-e', writeScript], { cwd: repoOne, env });
 
@@ -120,8 +122,10 @@ test('global tarball reinstall preserves PARALLIX_HOME measurements and agent bl
     const measurementsBefore = fs.readFileSync(measurementDbPath);
     const agentsBefore = fs.readFileSync(agentsPath, 'utf8');
     const readFromSecondRepo = [
+      `const { resolveConfiguration } = require(${JSON.stringify(path.join(PACKAGE_ROOT, 'src', 'composition', 'config.ts'))});`,
+      "const configuration = resolveConfiguration(process.env);",
       `const stats = require(${JSON.stringify(path.join(PACKAGE_ROOT, 'src', 'adapters', 'cli', 'commands', 'stats.ts'))});`,
-      "const row = stats.loadMeasurementRows().rows.find(item => item.mission === 'task-reinstall-proof');",
+      "const row = stats.loadMeasurementRows({configuration}).rows.find(item => item.mission === 'task-reinstall-proof');",
       "if (!row || row.pr_fix_rounds !== '2') process.exit(1);"
     ].join('');
     const pxStats = run(
