@@ -115,9 +115,14 @@ export function findLastNonNoiseCommit(rootDir: string, gitRunner?: Function): s
 export function squashTrailingBacklogNoiseIntoPreviousMission(rootDir: string, gitRunner?: Function): boolean {
   const runner = gitRunner || gitModule.git;
 
-  const status = runner(['-C', rootDir, 'status', '--porcelain']).stdout.trim();
-  if (status) {
-    fmt.log.warn(`Skipping noise squash in ${rootDir}: worktree is not clean.`);
+  const statusOutput = runner(['-C', rootDir, 'status', '--porcelain']).stdout;
+  if (statusOutput.trim()) {
+    const entries = (statusOutput as string).trimEnd().split('\n');
+    const paths = entries.slice(0, 5).map(entry => entry.slice(3));
+    const remaining = entries.length > paths.length ? ` (+${entries.length - paths.length} more)` : '';
+    const message = `Skipping noise squash in ${rootDir}: dirty paths: ${paths.join(', ')}${remaining}. Trailing backlog commits remain separate; clean these paths to enable squashing.`;
+    if (entries.every(entry => entry.startsWith('?? '))) { fmt.log.debug(message); }
+    else { fmt.log.warn(message); }
     return false;
   }
 

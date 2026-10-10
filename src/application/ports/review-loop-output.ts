@@ -91,7 +91,7 @@ export type ReviewLoopEvent =
   | { readonly kind: 'reviewer-route-unavailable'; readonly implementer: string }
   | { readonly kind: 'different-family-unavailable'; readonly implementer: string; readonly unavailable: { agent: string; detail: string; }[] }
   | { readonly kind: 'single-family-review'; readonly implementer: string }
-  | { readonly kind: 'reviewer-resumed'; readonly reviewer: string; readonly round: number }
+  | { readonly kind: 'reviewer-resumed'; readonly reviewer: string; readonly round: number; readonly isContinue: boolean }
   | { readonly kind: 'reviewer-defaulted'; readonly detail: string | null }
   | { readonly kind: 'local-review-surfaces' }
   | { readonly kind: 'reviewer-derivation-failed'; readonly detail: string | null }
@@ -103,7 +103,7 @@ export type ReviewLoopEvent =
   | { readonly kind: 'reviewer-fallback-routing'; readonly reviewer: string | undefined; readonly eligible: boolean; readonly fallback: string }
   | { readonly kind: 'autonomous-reviewer-selected' }
   | { readonly kind: 'fixing-reviewer-resumed'; readonly reviewer: string | undefined }
-  | { readonly kind: 'reviewer-selected'; readonly reviewer: string | undefined; readonly source: string }
+  | { readonly kind: 'reviewer-selected'; readonly reviewer: string | undefined; readonly source: string; readonly round: number; readonly isContinue: boolean }
   | { readonly kind: 'round-recovery-exhausted'; readonly slug: string; readonly used: number; readonly reboundsPerRound: number; readonly attempt: number; readonly occurrence: string }
   | { readonly kind: 'agent-fallback'; readonly role: 'reviewer' | 'implementer'; readonly original: string; readonly fallback: string }
   | { readonly kind: 'assignee-failed'; readonly fallback: string }

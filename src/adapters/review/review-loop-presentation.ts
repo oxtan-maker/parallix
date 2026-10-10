@@ -295,7 +295,7 @@ export function renderReviewLoopEvent(event: ReviewLoopEvent, output: ReviewLoop
       log(fmt.status('WARN', `Single-family fallback: reviewer="${event.implementer}" is the PR author family; local review will run, but external formal approval will be required.`));
       return;
     case 'reviewer-resumed':
-      log(fmt.status('INFO', `Resuming persisted reviewer: ${event.reviewer} (round ${event.round})`));
+      log(fmt.status('INFO', `${event.round === 1 && !event.isContinue ? 'Initial reviewer' : 'Resuming persisted reviewer'}: ${event.reviewer} (round ${event.round})`));
       return;
     case 'reviewer-defaulted':
       log(fmt.status('WARN', `No reviewer could be auto-derived${event.detail ? `: ${event.detail}` : ''}; defaulting to "autonomous"`));
@@ -331,7 +331,7 @@ export function renderReviewLoopEvent(event: ReviewLoopEvent, output: ReviewLoop
       log(fmt.status('INFO', `Resuming in fixing phase with reviewer "${event.reviewer}"; skipping launcher availability check until a new review launch is needed.`));
       return;
     case 'reviewer-selected':
-      log(fmt.status('INFO', `Selected reviewer: ${event.reviewer} (${event.source})`));
+      log(fmt.status('INFO', `Selected reviewer: ${event.reviewer} (${event.round === 1 && !event.isContinue && event.source.startsWith('persisted') ? 'initial selection' : event.source})`));
       return;
     case 'round-recovery-exhausted':
       error(fmt.status('FAIL', `Per-round relaunch cap reached for ${event.slug}: ${event.used}/${event.reboundsPerRound} relaunches used in round ${event.attempt}; no further ${event.occurrence} relaunches.`));

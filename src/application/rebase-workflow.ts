@@ -333,7 +333,7 @@ async function finishRebase(ctx: RebaseContext, message: string): Promise<void> 
   if (ctx.repairImplementer) { await ctx.port.resumeReviewAfterRepair?.(ctx.slug, ctx.executionRoot, ctx.repairImplementer); }
   fmt.log.pass(message);
   await performPush(ctx);
-  fmt.log.info(`Next: ${fmt.command(ctx.port.formatVerificationCommand(ctx.area, ctx.executionRoot))}`);
+  fmt.log.info('Verification: the workflow handles integration checks.');
   fmt.log.info('Integration eligibility requires the lifecycle-authorized lane and current independent approval.');
   ctx.port.exit(0);
 }
@@ -868,7 +868,7 @@ export async function runRebaseWorkflow(
       // `rebase --show-current` returned something but status was 0 — incomplete.
       fmt.log.pass('Rebase round completed.');
       fmt.log.warn('Rebase is still in progress (non-empty --show-current). Skipping automatic push.');
-      fmt.log.info(`Next: ${fmt.command(port.formatVerificationCommand(ctx.area, executionRoot))}`);
+      fmt.log.info('Verification: the workflow handles integration checks.');
       fmt.log.info(`Next: ${fmt.command('git rebase --continue')}`);
       port.exit(0);
       return;

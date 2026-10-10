@@ -214,6 +214,16 @@ that token directly, never refreshes, and leaves `.credentials.json` untouched.
 
 Graphify ships no `mistral` or `vibe` platform. The `graphify install --platform mistral` command does not exist and will fail. The parallix harness skips mistral without error during any Graphify-related operations.
 
+## Reading workflow progress
+
+Review output distinguishes an initial reviewer selection from a resumed review.
+Round 1 starts with initial-selection wording; continuing an existing round or
+starting a later round retains resume wording. During integration, `Next:` names
+an operator action, while verification progress describes checks the workflow
+handles. Missing workflow statistics display as `n/a`. If dirty paths prevent
+noise squashing, the message names a bounded set of paths and explains that the
+trailing backlog commits remain separate; untracked-only state uses debug output.
+
 ## Correcting an unfounded review approval
 
 An operator may withdraw the current approval when they determine that it was

@@ -191,7 +191,7 @@ describe("px rebase in-progress", async () => {
       writeReviewState: () => undefined,
       persistReviewState: async () => undefined,
       isForgejoReviewEnabled: () => true,
-      formatVerificationCommand: () => './scripts/verify-local.sh lib',
+      formatVerificationCommand: () => ': # no verification gate configured (set adapters.verification.command)',
       resolveConflictsForMission: () => ({ ok: true, conflictFiles: [], missionSpecificFiles: [], sharedFiles: [] }),
       missionServices: null,
       exit: (code: number) => { exitCodes.value.push(code); },
@@ -210,6 +210,9 @@ describe("px rebase in-progress", async () => {
     await runRebaseWorkflow([SLUG], port);
 
     const joined = logs.join('\n');
+    assert.match(joined, /Verification: the workflow handles integration checks\./);
+    assert.match(joined, /Next: git rebase --continue/);
+    assert.doesNotMatch(joined, /Next: :|Next: \s*$/m);
     assert.match(joined, /still in progress/, 'a mid-rebase rebase must be reported as still in progress');
     assert.doesNotMatch(joined, /Rebase completed cleanly/, 'must not emit the clean-completion result while a rebase is active');
     assert.deepEqual(exitCodes, [0], 'exits 0 to hand the worktree back to the operator to continue the rebase');
@@ -226,6 +229,8 @@ describe("px rebase in-progress", async () => {
     await runRebaseWorkflow([SLUG], port);
 
     const joined = logs.join('\n');
+    assert.match(joined, /Verification: the workflow handles integration checks\./);
+    assert.doesNotMatch(joined, /Next:/);
     assert.match(joined, /Rebase completed cleanly/, 'a finished rebase reports clean completion');
   });
 });

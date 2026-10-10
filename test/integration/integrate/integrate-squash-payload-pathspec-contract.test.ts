@@ -852,7 +852,13 @@ describe("backlog noise reduction", () => {
       fs.writeFileSync('README.md', '# Project updated\n');
 
       // Should skip squash
-      const result = squashTrailingBacklogNoiseIntoPreviousMission(root);
+      const logs = [];
+      const originalLog = console.log;
+      console.log = line => logs.push(line);
+      let result;
+      try { result = squashTrailingBacklogNoiseIntoPreviousMission(root); }
+      finally { console.log = originalLog; }
+      assert.match(logs.join('\n'), /dirty paths: README.md.*Trailing backlog commits remain separate/);
       assert.equal(result, false);
 
       // HEAD should still be the noise commit

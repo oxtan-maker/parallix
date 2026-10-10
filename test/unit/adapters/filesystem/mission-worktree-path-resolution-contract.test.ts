@@ -171,6 +171,30 @@ describe("merge-noise classification of backlog paths", () => {
     assert.equal(findLastNonNoiseCommit('/tmp/worktree', sharedRunner), null);
   });
 
+  test('noise squash caps dirty paths and suppresses warnings for untracked-only trees (TASK-2708)', () => {
+    const logs = [];
+    const originalLog = console.log;
+    console.log = msg => logs.push(msg);
+    try {
+      for (const prefix of [' M', 'M ', '??']) {
+        logs.length = 0;
+        const calls = [];
+        const runner = args => {
+          calls.push(args);
+          return { status: 0, stdout: Array.from({ length: 7 }, (_, i) => `${prefix} file-${i}.txt`).join('\n'), stderr: '' };
+        };
+        assert.equal(squashTrailingBacklogNoiseIntoPreviousMission('/tmp/worktree', runner), false);
+        assert.equal(calls.length, 1, 'dirty trees never execute squash operations');
+        if (prefix === '??') assert.equal(logs.length, 0);
+        else {
+          assert.match(logs.join('\n'), /file-0.txt.*file-4.txt.*2 more/);
+          assert.doesNotMatch(logs.join('\n'), /file-5.txt|file-6.txt/);
+          assert.match(logs.join('\n'), /Trailing backlog commits remain separate/);
+        }
+      }
+    } finally { console.log = originalLog; }
+  });
+
   test('squashTrailingBacklogNoiseIntoPreviousMission and softResetTrailingBacklogNoise refuse dirty trees and run resets on clean ones', () => {
     const dirtyLogs = [];
     const originalLog = console.log;
@@ -182,7 +206,8 @@ describe("merge-noise classification of backlog paths", () => {
     } finally {
       console.log = originalLog;
     }
-    assert.ok(dirtyLogs.some(msg => msg.includes('worktree is not clean')));
+    assert.ok(dirtyLogs.some(msg => msg.includes('[WARN] Skipping noise squash') && msg.includes('backlog/tasks/task.md') && msg.includes('Trailing backlog commits remain separate')));
+    assert.ok(dirtyLogs.some(msg => msg.includes('Skipping noise reset') && msg.includes('worktree is not clean')));
 
     const calls = [];
     const cleanResponses = {

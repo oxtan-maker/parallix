@@ -497,6 +497,9 @@ test('a landed integration retains its final result and application statistics a
         row: { mission: 'task-result', implementer: 'codex', pr_fix_rounds: '2', classification: 'ai_sdlc', date: '2026-10-06' },
         report: 'weekly report: PR decisions unavailable'
       }) });
+      const row = Object.freeze({ mission: 'task-result', implementer: null, classification: null, date: null });
+      const outcome = await recordPostIntegrationStats('task-result', { rootDir: ${JSON.stringify(worktree)}, missionStore: null, recordIntegrationStatsFn: async () => ({ row, report: 'weekly report' }) });
+      if (outcome.row !== row || 'pr_fix_rounds' in row) throw new Error('stored row changed');
       console.log('Integration complete: local main updated');
     `);
     const launch = prepareTmuxLaunch({ identity, spawnIndex: 0, command: process.execPath, args: ['--import', path.join(REPO_ROOT, 'node_modules/tsx/dist/loader.mjs'), closeout], cwd: worktree, env: fx.env }, { configuration: resolveConfiguration(fx.env) });
@@ -507,6 +510,8 @@ test('a landed integration retains its final result and application statistics a
     const capture = fs.readFileSync(missionTerminalCapturePath(identity, resolveConfiguration(fx.env)), 'utf8');
     assert.match(capture, /Integration complete: local main updated/);
     assert.match(capture, /Workflow stats recorded: task-result: implementer=codex, pr_fix_rounds=2, classification=ai_sdlc/);
+    assert.match(capture, /Workflow stats recorded: task-result: implementer=n\/a, pr_fix_rounds=n\/a, classification=n\/a, date=n\/a/);
+    assert.doesNotMatch(capture, /undefined/);
     assert.match(capture, /PR decisions unavailable/);
     assert.match(capture, /exit code: 0/);
   } finally { fx.cleanup(); }

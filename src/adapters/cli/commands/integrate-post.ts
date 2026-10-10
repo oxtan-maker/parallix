@@ -69,7 +69,8 @@ export function reportSyncMergedFailure(syncResult: any) {
 
 /** @param {{mission: string, implementer: string, pr_fix_rounds: string, classification: string, date: string}} row */
 export function formatRecordedStatsRow(row: any) {
-  return `${row.mission}: implementer=${row.implementer}, pr_fix_rounds=${row.pr_fix_rounds}, classification=${row.classification}, date=${row.date}`;
+  const display = (value: unknown) => value === null || value === undefined || value === '' ? 'n/a' : String(value);
+  return `${display(row.mission)}: implementer=${display(row.implementer)}, pr_fix_rounds=${display(row.pr_fix_rounds)}, classification=${display(row.classification)}, date=${display(row.date)}`;
 }
 
 /** @param {string} value */

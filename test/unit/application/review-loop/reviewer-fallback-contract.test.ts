@@ -1,4 +1,4 @@
-import { reviewLoopReporter } from '../../../../src/adapters/review/review-loop-presentation.js';
+import { renderReviewLoopEvent, reviewLoopReporter } from '../../../../src/adapters/review/review-loop-presentation.js';
 // reviewer fallback contract.
 // Reviewer routing policy lives in src/application/review-loop/reviewer-selection.ts;
 // these cases drive it through a fake routing port (eligible families, launcher
@@ -22,6 +22,27 @@ function select(request: Partial<ReviewerSelectionRequest> & { implementer: stri
   const selected = selectReviewer({ isContinue: false, persisted: null, maxAttempts: 5, dryRun: true, providerEnabled: false, slug: 'task-test-fallback', ...request }, port, reviewLoopReporter({ log: line => logs.push(line), error: line => errors.push(line) }));
   return { selected, logs, errors };
 }
+
+test('reviewer presentation distinguishes initial selection from continued and later rounds (TASK-2708)', () => {
+  for (const [round, isContinue] of [[1, false], [1, true], [2, false]] as const) {
+    const lines: string[] = [];
+    const events: unknown[] = [];
+    const selected = selectReviewer({ implementer: 'codex', isContinue, persisted: { reviewer: 'claude', round, phase: 'reviewing' }, maxAttempts: 5, dryRun: false, providerEnabled: false, slug: 'task-test' },
+      routing(['codex', 'claude'], () => true, () => { throw new Error('persisted reviewer must not be nominated again'); }),
+      { emit: event => { events.push(event); renderReviewLoopEvent(event, { log: line => lines.push(line), error: line => lines.push(line) }); } });
+    assert.deepEqual(selected, { reviewer: 'claude', reviewerSource: 'persisted' });
+    assert.deepEqual(events, [
+      { kind: 'reviewer-resumed', reviewer: 'claude', round, isContinue },
+      { kind: 'reviewer-selected', reviewer: 'claude', source: 'persisted', round, isContinue },
+    ]);
+    if (round === 1 && !isContinue) {
+      assert.deepEqual(lines, ['[INFO] Initial reviewer: claude (round 1)', '[INFO] Selected reviewer: claude (initial selection)']);
+      assert.doesNotMatch(lines.join('\n'), /resuming|persisted/i);
+    } else {
+      assert.deepEqual(lines, [`[INFO] Resuming persisted reviewer: claude (round ${round})`, '[INFO] Selected reviewer: claude (persisted)']);
+    }
+  }
+});
 
 // Regression provenance: TASK-1079.
 describe("review blocked fallback", { concurrency: false }, () => {

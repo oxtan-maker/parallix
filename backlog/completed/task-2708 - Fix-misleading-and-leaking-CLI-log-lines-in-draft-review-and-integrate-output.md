@@ -1,8 +1,8 @@
 ---
 id: TASK-2708
 title: 'Fix misleading and leaking CLI log lines in draft, review and integrate output'
-status: backlog
-assignee: []
+status: done
+assignee: [codex]
 created_date: '2026-10-10 05:32'
 labels:
   - ai-sdlc
@@ -58,3 +58,9 @@ RULES FROM THE REPOSITORY: read docs/doc-standards.md before editing Markdown; t
 - [ ] #5 Docs updated to reflect any workflow or user-facing behavior change
 - [ ] #6 Bug-labeled missions include a red-to-green reproduction test that fails before the fix and passes after
 <!-- DOD:END -->
+
+## Operator decision — CP-5 (2026-10-10)
+
+Approved additive `isContinue` and round presentation context on the typed `reviewer-resumed` and `reviewer-selected` events, populated by reviewer selection. Both resumed-reviewer and selected-reviewer presentation lines are in scope, without the former line-range restriction. Event kinds, reviewer identity, source values, selection and routing remain unchanged. Fresh round 1 must avoid resuming/persisted wording; genuine resumes, including round-1 `--continue`, retain resume wording. This is the explicit subsequent approval required for the typed application-port boundary change.
+
+Retain CP-1 through CP-4 evidence. Complete CP-5 and CP-6 repair evidence, declared verification and sandbox lifecycle capture before handoff. Approval resolves the scope blocker; it does not mark implementation complete.

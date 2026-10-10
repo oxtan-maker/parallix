@@ -54,7 +54,7 @@ function deriveInitialReviewer(selection: Selection, context: Context): Error | 
   if (context.persisted?.reviewer) {
     selection.reviewer = context.persisted.reviewer;
     selection.source = 'persisted';
-    context.emit({ kind: 'reviewer-resumed', reviewer: selection.reviewer, round: context.persisted.round });
+    context.emit({ kind: 'reviewer-resumed', reviewer: selection.reviewer, round: context.persisted.round, isContinue: context.isContinue });
     return null;
   }
   selection.source = 'auto-derived';
@@ -214,6 +214,6 @@ export function selectReviewer(
   }
   if (!routed) { return null; }
 
-  context.emit({ kind: 'reviewer-selected', reviewer: selection.reviewer, source: selection.source });
+  context.emit({ kind: 'reviewer-selected', reviewer: selection.reviewer, source: selection.source, round: request.persisted?.round || 1, isContinue: request.isContinue });
   return { reviewer: selection.reviewer!, reviewerSource: selection.source };
 }

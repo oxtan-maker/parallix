@@ -699,6 +699,21 @@ test('formatRecordedStatsRow renders the persisted review-round count', () => {
   );
 });
 
+test('formatRecordedStatsRow renders absent fields without changing the stored row (TASK-2708)', () => {
+  const complete = { mission: 'task-2000', implementer: 'claude', pr_fix_rounds: 0, classification: 'ai_sdlc', date: '2026-05-18' };
+  for (const field of Object.keys(complete)) {
+    for (const absent of [undefined, null, '']) {
+      const row = Object.freeze({ ...complete, [field]: absent });
+      const snapshot = { ...row };
+      const rendered = formatRecordedStatsRow(row);
+      assert.doesNotMatch(rendered, /undefined|null/);
+      assert.ok(rendered.includes(field === 'mission' ? 'n/a:' : `${field}=n/a`), `${field}: ${rendered}`);
+      assert.deepEqual(row, snapshot);
+    }
+  }
+  assert.match(formatRecordedStatsRow(complete), /pr_fix_rounds=0/);
+});
+
 test('recordPostIntegrationStats logs the persisted stats row including pr_fix_rounds', async () => {
   const logs = [];
   const originalLog = console.log;

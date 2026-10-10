@@ -1,6 +1,6 @@
 {
   "name": "@magnusekdahl/parallix",
-  "version": "1.5.330",
+  "version": "1.5.331",
   "description": "Local-first workflow and trust layer for AI coding agents — isolated Git worktree missions, separate code review, repository-owned verification, Linux confinement, and human-owned merges",
   "license": "AGPL-3.0-or-later",
   "private": false,
