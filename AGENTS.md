@@ -37,7 +37,7 @@ Push mission branches only to `review` (Forgejo), never to `origin` (GitHub). On
   before broader required checks; guidance-only changes require focused docs
   checks and `./scripts/verify-local.sh docs`.
 - Preserve ports-and-adapters principles, dependency direction, typed application
-  ports, composition authority, and adapter boundaries. Changes to these require
+  ports, composition authority, and adapter boundaries. Changes to the arcitectural principles require
   stopping dependent implementation, presenting measured evidence, alternatives,
   behavioral risks, and a proposed decision to the user, then obtaining an explicit
   subsequent decision before implementation. This wave grants no exception.
