@@ -1,0 +1,32 @@
+MANUAL_SESSION http://127.0.0.1:37813 /tmp/parallix-task-2706-web-R5MHgz
+PROGRESS {"operationId":"a8820c43-e761-4f07-b032-3d1e5f15076e","sequence":0,"phase":"dispatch","message":"dispatching mission:create for ","timestamp":"2026-10-10T09:24:54.923Z"}
+PROGRESS {"operationId":"a8820c43-e761-4f07-b032-3d1e5f15076e","sequence":1,"phase":"create","message":"creating a backlog mission","timestamp":"2026-10-10T09:24:54.924Z"}
+PROGRESS {"operationId":"8d105558-6c11-4e7b-989e-50b61a1f92d1","sequence":0,"phase":"dispatch","message":"dispatching draft:create for px-0001","timestamp":"2026-10-10T09:25:02.047Z"}
+PROGRESS {"operationId":"8d105558-6c11-4e7b-989e-50b61a1f92d1","sequence":1,"phase":"draft","message":"drafting px-0001","timestamp":"2026-10-10T09:25:02.048Z"}
+PROGRESS {"operationId":"board-draft","sequence":0,"phase":"draft-log","message":"Drafting mission px-0001","timestamp":"2026-10-10T09:25:02.064Z"}
+[WARN] Skipping noise squash in /tmp/parallix-task-2706-web-R5MHgz: worktree is not clean.
+PROGRESS {"operationId":"board-draft","sequence":1,"phase":"draft-log","message":"  branch    mission/px-0001\n  worktree  /tmp/parallix-task-2706-web-R5MHgz-px-0001","timestamp":"2026-10-10T09:25:02.122Z"}
+PROGRESS {"operationId":"board-draft","sequence":2,"phase":"draft-log","message":"[INFO] Mission already recorded in SQLite: mission px-0001 is already recorded","timestamp":"2026-10-10T09:25:02.153Z"}
+PROGRESS {"operationId":"board-draft","sequence":3,"phase":"draft-log","message":"[WARN] Could not transition task px-0001: missing","timestamp":"2026-10-10T09:25:02.154Z"}
+PROGRESS {"operationId":"board-draft","sequence":4,"phase":"draft-log","message":"[WARN] No Backlog task file to transition for px-0001; lifecycle is DB-authoritative.","timestamp":"2026-10-10T09:25:02.154Z"}
+PROGRESS {"operationId":"board-draft","sequence":5,"phase":"draft-log","message":"","timestamp":"2026-10-10T09:25:03.053Z"}
+PROGRESS {"operationId":"board-draft","sequence":6,"phase":"draft-log","message":"Running custom to write the mission contract...","timestamp":"2026-10-10T09:25:03.054Z"}
+DRAFT_AGENT_ENTERED px-0001 backlog
+PROGRESS {"operationId":"board-draft","sequence":7,"phase":"draft-log","message":"[WARN] Could not record draft stats for px-0001: Cannot record stage stats for px-0001: Mission px-0001 is absent from the px database. Import the Mission and run px classification set before recording statistics.","timestamp":"2026-10-10T09:25:03.066Z"}
+PROGRESS {"operationId":"board-draft","sequence":8,"phase":"draft-log","message":"[WARN] Could not transition task px-0001: missing","timestamp":"2026-10-10T09:25:03.098Z"}
+PROGRESS {"operationId":"board-draft","sequence":9,"phase":"draft-log","message":"[WARN] No Backlog task file transition for px-0001; lifecycle is DB-authoritative.","timestamp":"2026-10-10T09:25:03.098Z"}
+PROGRESS {"operationId":"board-draft","sequence":10,"phase":"draft-log","message":"","timestamp":"2026-10-10T09:25:03.099Z"}
+PROGRESS {"operationId":"board-draft","sequence":11,"phase":"draft-log","message":"[PASS] Drafted px-0001 in 1s: TASK-2706 manual browser mission","timestamp":"2026-10-10T09:25:03.099Z"}
+PROGRESS {"operationId":"board-draft","sequence":12,"phase":"draft-log","message":"  contract  px status px-0001\n  branch    mission/px-0001\n  agent     custom","timestamp":"2026-10-10T09:25:03.099Z"}
+PROGRESS {"operationId":"board-draft","sequence":13,"phase":"draft-log","message":"","timestamp":"2026-10-10T09:25:03.099Z"}
+PROGRESS {"operationId":"board-draft","sequence":14,"phase":"draft-log","message":"Goal","timestamp":"2026-10-10T09:25:03.099Z"}
+PROGRESS {"operationId":"board-draft","sequence":15,"phase":"draft-log","message":"  Created in Chromium against isolated SQLite; no Backlog mirror.","timestamp":"2026-10-10T09:25:03.099Z"}
+PROGRESS {"operationId":"board-draft","sequence":16,"phase":"draft-log","message":"","timestamp":"2026-10-10T09:25:03.100Z"}
+PROGRESS {"operationId":"board-draft","sequence":17,"phase":"draft-log","message":"  1 success criterion · 1 checkpoint · 1 gate · NEL Small","timestamp":"2026-10-10T09:25:03.100Z"}
+PROGRESS {"operationId":"board-draft","sequence":18,"phase":"draft-log","message":"","timestamp":"2026-10-10T09:25:03.100Z"}
+PROGRESS {"operationId":"board-draft","sequence":19,"phase":"draft-log","message":"[INFO] Working directory: /tmp/parallix-task-2706-web-R5MHgz-px-0001","timestamp":"2026-10-10T09:25:03.100Z"}
+PROGRESS {"operationId":"board-draft","sequence":20,"phase":"draft-log","message":"[INFO] Next: px active","timestamp":"2026-10-10T09:25:03.100Z"}
+PROGRESS {"operationId":"93abffe8-aebf-4cba-b52e-955f224ef3dd","sequence":0,"phase":"dispatch","message":"dispatching active:execute for px-0001","timestamp":"2026-10-10T09:25:09.343Z"}
+PROGRESS {"operationId":"93abffe8-aebf-4cba-b52e-955f224ef3dd","sequence":1,"phase":"launch","message":"launching execute agent","timestamp":"2026-10-10T09:25:09.344Z"}
+PROGRESS {"operationId":"93abffe8-aebf-4cba-b52e-955f224ef3dd","sequence":2,"phase":"record","message":"recording durable launch evidence","timestamp":"2026-10-10T09:25:09.346Z"}
+PROGRESS {"operationId":"93abffe8-aebf-4cba-b52e-955f224ef3dd","sequence":3,"phase":"handoff","message":"starting handoff","timestamp":"2026-10-10T09:25:09.346Z","agent":"custom"}

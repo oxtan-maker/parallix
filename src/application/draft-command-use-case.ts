@@ -47,7 +47,8 @@ export class DraftCommandUseCase {
     };
 
     // Step 1: Preflight — resolve slug, validate repo, baseline, config, task
-    let ctx = this._workflow.preflight(args, options);
+    // (awaited: it probes the operator store for an existing DB-owned mission)
+    let ctx = await this._workflow.preflight(args, options);
     if (ctx.exited) { abort(ctx); return; }
 
     // A draft agent can work for minutes or hours. Publish after preflight has

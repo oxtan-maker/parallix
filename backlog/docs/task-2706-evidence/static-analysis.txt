@@ -1,0 +1,13 @@
+=== Static Analysis Gate ===
+[1/4] Running ESLint...
+PASS: lint baseline holds (@typescript-eslint/no-explicit-any=564, @typescript-eslint/no-unsafe-assignment=1193, complexity=198, max-lines-per-function=31)
+PASS: ESLint — 0 errors, 1986 baseline-tracked warnings
+[2/4] Running npm run typecheck...
+PASS: tsc typecheck clean
+[3/4] Running test-hygiene check...
+PASS: no test-hygiene violations
+PASS: test layout and registrations are consistent
+PASS: test-hygiene clean
+[4/4] Running test typecheck...
+PASS: test typecheck clean
+=== Static Analysis Gate: ALL STAGES PASSED ===

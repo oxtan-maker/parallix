@@ -47,6 +47,7 @@ export const KNOWN_COMMANDS: string[] = [
   'resolve-conflict',
   'import-legacy',
   'audit-legacy',
+  'migrate-legacy-adhoc-ids',
   'rebase',
   'stats',
   'aliases',
@@ -301,6 +302,7 @@ ${fmt.bold('Advanced Commands:')}
   lead [<slug>...] [--once] [--poll <s>] [--budget <n>] [--dry-run]  Work active, review, and integration missions from the board's needs-attention queue; refined missions stay for operator activation. Press the action each item offers, then give a stuck mission a fresh agent in its worktree. Attempts are per failure; integration items are left for you. Keeps watching until stopped (default poll 60 seconds); --once takes a single pass and exits.
   import-legacy [--dry-run] [--existing-only] [--reconcile-checkpoints]  Explicit one-way import of the legacy Backlog Markdown tree into the existing Mission aggregate. Use --existing-only to refresh imported missions without ingesting native missions or future backlog inputs. Commit any refreshed task-body archive before status or audit. The reconciliation flag uses committed provenance to replace disputed historical checkpoint rows; normal imports never overwrite them.
   audit-legacy [--json]   Classify retired workflow files and report a fail-closed GO/NO-GO migration audit with eight counters.
+  migrate-legacy-adhoc-ids  Rewrite every legacy \`parallix-adhoc-<…>\` mission id to a unique, repository-scoped \`px-<NNNN>\` id owned by the per-repository counter. Atomic, collision-safe, and rerun-safe; leaves no orphan reference.
   cancel <slug> --yes   Delete one mission's lifecycle rows from the operator database. Irreversible; usage statistics are kept and the branch and worktree stay for you to remove.
   resolve-conflict [<slug>]       Detect merge conflicts in the mission worktree and emit resolution guidance.
   rebase [<slug>] [--push]          Rebase mission branch onto the primary integration branch (main) with auto-resolution of mission-specific conflicts.

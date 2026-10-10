@@ -97,6 +97,9 @@ export interface ProductionCompositionOverrides {
 function createBoardDraftService(deps: {
   readonly intake: MissionIntakeService;
   readonly repositoryId: RepositoryId;
+  // A full transition-capable store so the draft service can advance the
+  // aggregate to `ready` (record refinement) the way the CLI draft does.
+  readonly store?: MissionStore & MissionTransitionStore & MissionNelRecorder;
   readonly currentWork: CurrentWorkPort;
   readonly progress?: BoardProgressSink;
   readonly workflow?: DraftWorkflowPort;
@@ -130,9 +133,19 @@ function createBoardDraftService(deps: {
     ensureWorktreeFn: (mainRepo: string, targetWorktree: string, branchName: string, options: Record<string, unknown> = {}) =>
       ensureWorktree(mainRepo, targetWorktree, branchName, { ...options, ...(gitFn ? { gitFn: gitFn as never } : {}), exitFn }),
     readAgentConfigOrExitFn: () => readAgentConfig(undefined, { configuration: deps.configuration }),
+    // The board draft reaches the lifecycle the same way the CLI does: via the
+    // mission services. Advancing the aggregate to `ready` (recording the
+    // refinement) requires a transition-capable lifecycle, so build one from the
+    // same store the CLI uses rather than leaving the board draft stuck at
+    // `backlog`.
     missionServicesFn: async (_root: string) => ({
       intake: deps.intake,
       repositoryId: deps.repositoryId,
+      // Expose the store so draft's preflight can probe for an already-recorded
+      // DB-owned mission (a web-created px-XXXX with no Backlog file) and draft
+      // under its existing identity instead of bailing "no Backlog task file".
+      store: deps.store,
+      lifecycle: deps.store ? new MissionLifecycleService(deps.store) : undefined,
     }),
   });
   return new DraftCommandUseCase(workflow, deps.currentWork);
@@ -258,6 +271,7 @@ export function composeProductionCapabilities(
       draft: createBoardDraftService({
         configuration: overrides.configuration,
         intake,
+        store: missionStore ?? undefined,
         repositoryId: owningRepositoryId,
         currentWork,
         progress,

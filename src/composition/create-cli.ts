@@ -15,6 +15,7 @@ import { cliInvocation, type CliInvocation } from '../adapters/process/cli-invoc
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import * as fmt from '../application/presentation/cli-format.js';
+import { migrateLegacyAdhocIdsMissions } from '../application/legacy-adhoc-migration.js';
 import { packageRoot } from '../adapters/filesystem/package-root.js';
 import packageJson from '../../package.json' with { type: 'json' };
 import { ensureStandaloneGitRepo, hasGitRepository } from '../adapters/config/product-config.js';
@@ -65,6 +66,7 @@ import * as agents from '../adapters/agents/agents.js';
 import { recordStageStatsSafe, stageLaunchSinceMs } from '../adapters/review/review-agent-fallback.js';
 import { resolveAgentModel } from '../adapters/config/product-config.js';
 import { createImportLegacyCommand } from '../interfaces/cli/import-legacy.js';
+import { createMigrateLegacyAdhocIdsCommand } from '../interfaces/cli/migrate-legacy-adhoc-ids.js';
 import { importLegacyMissions } from '../adapters/backlog/legacy-mission-import.js';
 import { auditLegacyFiles } from '../adapters/backlog/legacy-mission-audit.js';
 import { createReviewCommand } from '../interfaces/cli/review.js';
@@ -383,6 +385,14 @@ function createCommandRegistry(rootDir: string, configuration: ParallixConfigura
           { rootDir, dryRun, reconcileCheckpoints, existingOnly },
         ),
       )(args);
+    }),
+    'migrate-legacy-adhoc-ids': (args) => withGraph(async services => {
+      if (args.length > 0) {
+        throw new Error('Usage: px migrate-legacy-adhoc-ids');
+      }
+      if (!services.mission) { throw new Error('mission services are unavailable'); }
+      const mission = services.mission;
+      return createMigrateLegacyAdhocIdsCommand(() => migrateLegacyAdhocIdsMissions(mission.store))(args);
     }),
     'audit-legacy': (args) => withGraph(async services => {
       if (args.length > 1 || (args.length === 1 && args[0] !== '--json')) {

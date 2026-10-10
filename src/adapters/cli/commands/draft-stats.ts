@@ -1,5 +1,5 @@
 import type { ParallixConfiguration } from "../../../application/ports/configuration.js";
-import { draftMissionServices, type DraftAdapterDependencies, type DraftLog, type DraftExit } from './draft-adapter-types.js';
+import { draftMissionServices, type DraftAdapterDependencies, type DraftLog, type DraftExit, type DraftMissionServices } from './draft-adapter-types.js';
 import type { SyntheticDraftTask, DraftTarget } from './draft-setup.js';
 import type { MissionIntakeService } from '../../../application/mission-intake-service.js';
 import type { StageStatsRequest } from '../../../application/stats-recording-use-case.js';
@@ -14,7 +14,7 @@ import { transitionVirtual } from '../../config/state-map.js';
 import * as stats from './stats.js';
 import { ensureStandaloneMissionBaseline, resolveAgentModel } from '../../config/product-config.js';
 import { ensureWorkflowGitignore } from '../../filesystem/gitignore.js';
-import { missionLabels, missionId } from '../../../domain/mission.js';
+import { missionLabels, missionId, isDbAdhocIdentity } from '../../../domain/mission.js';
 import { allocateAdhocIdentity } from '../../sqlite/adhoc-counter.js';
 import { resolveCanonicalRepositoryId } from '../../git/repository-identity.js';
 import { resolveDraftTarget, ensureMissionBranch, ensureWorktree, ensureGraphifyWorkspace, ensureGraphifyIgnore, ensureMissionFile, ensureDraftRepoConfigCommitted, ensureRepoExists, bootstrapBacklogTask } from './draft-setup.js';
@@ -168,6 +168,32 @@ function allocateAdhocDraftTarget(draftTarget: Pick<DraftTarget, "syntheticTask"
   }
 }
 
+/**
+ * Whether a mission with this slug already exists in the operator store with
+ * persisted planning fields (a web/board-created DB-owned mission). Such a
+ * mission has no Backlog task file by design and must draft under its existing
+ * identity without allocation or a Backlog mirror.
+ *
+ * Best-effort: an unavailable store (or any error) is treated as "not
+ * DB-owned" so a store hiccup never silently drops the Backlog task-file
+ * requirement for a real Backlog-backed mission.
+ */
+async function isDbOwnedMission(slug: string, mainRepo: string, merged: DraftAdapterDependencies): Promise<boolean> {
+  try {
+    // Restrict to a DB-owned adhoc identity: a web/board-created `px-<NNNN>`
+    // with no Backlog task file. A Backlog-backed `task-<NNNN>` mission already
+    // in the store (imported or previously drafted) must keep its Backlog
+    // validation, so a bare `store.load` 'found' result is not enough.
+    if (!isDbAdhocIdentity(slug)) { return false; }
+    if (typeof merged.missionServicesFn !== 'function') { return false; }
+    const services = await (merged.missionServicesFn as (_rootDir: string) => Promise<DraftMissionServices>)(mainRepo);
+    const loaded = await services.store.load(missionId(slug));
+    return loaded.kind === 'found';
+  } catch {
+    return false;
+  }
+}
+
 function reportBacklogIntegrityIssues(issues: ReturnType<typeof checkBacklogIntegrity>, normalizedSlug: string, errorFn: DraftLog, logFn: DraftLog) {
   errorFn(fmt.status('FAIL', `Backlog integrity issues detected for ${normalizedSlug}:`));
   for (const issue of issues) {
@@ -180,7 +206,15 @@ function reportBacklogIntegrityIssues(issues: ReturnType<typeof checkBacklogInte
   logFn('Repair: Fix filename/id mismatch, or remove the stale backlog/tasks copy of a completed/archived task, before drafting.');
 }
 
-function validateDraftTask(taskLookupRoot: string, normalizedSlug: string, syntheticTask: SyntheticDraftTask | null, resolveTaskFileFn: typeof resolveTaskFile, reportTaskResolutionFn: typeof reportTaskResolution, checkBacklogIntegrityFn: typeof checkBacklogIntegrity, errorFn: DraftLog, logFn: DraftLog) {
+function validateDraftTask(taskLookupRoot: string, normalizedSlug: string, syntheticTask: SyntheticDraftTask | null, dbOwned: boolean, resolveTaskFileFn: typeof resolveTaskFile, reportTaskResolutionFn: typeof reportTaskResolution, checkBacklogIntegrityFn: typeof checkBacklogIntegrity, errorFn: DraftLog, logFn: DraftLog) {
+  // A DB-owned mission (a web/board-created px-XXXX with persisted planning
+  // fields but no Backlog task file) is DB-authoritative. Like a synthetic
+  // adhoc identity, it never had a Backlog task file, so a missing resolution
+  // is not a failure and there are no stale files to flag. A Backlog-backed
+  // mission still requires its task file.
+  if (dbOwned) {
+    return true;
+  }
   const resolution = resolveTaskFileFn(normalizedSlug, taskLookupRoot);
   if (!resolution.ok && !syntheticTask) {
     reportTaskResolutionFn(resolution, normalizedSlug, errorFn);
@@ -369,7 +403,7 @@ function createDraftWorkflowAdapter(deps: DraftAdapterDependencies = {}): DraftW
 
   return {
     // Preflight: resolve slug, validate repo, baseline, config, task resolution, classification
-    preflight: (args: string[], options: Record<string, unknown> = {}): DraftWorkflowContext => {
+    preflight: async (args: string[], options: Record<string, unknown> = {}): Promise<DraftWorkflowContext> => {
       const merged: DraftAdapterDependencies = { ...deps, ...options };
       const inferSlugFn = merged.inferSlugFn || inferSlug;
       const resolveMainRepoFn = merged.resolveMainRepoFn || resolveMainRepo;
@@ -458,7 +492,12 @@ function createDraftWorkflowAdapter(deps: DraftAdapterDependencies = {}): DraftW
       }
 
       const taskLookupRoot = recordedBase ? launchDir : mainRepo;
-      if (!validateDraftTask(taskLookupRoot, normalizedSlug, syntheticTask, resolveTaskFileFn, reportTaskResolutionFn, checkBacklogIntegrityFn, errorFn, logFn)) {
+      // Probe the operator store for an existing DB-owned mission before the
+      // task-file gate. A web/board-created px-XXXX with persisted planning
+      // fields has no Backlog task file by design; recognizing it here lets the
+      // draft proceed under the same identity instead of bailing "not found".
+      const dbOwned = await isDbOwnedMission(normalizedSlug, mainRepo, merged);
+      if (!validateDraftTask(taskLookupRoot, normalizedSlug, syntheticTask, dbOwned, resolveTaskFileFn, reportTaskResolutionFn, checkBacklogIntegrityFn, errorFn, logFn)) {
         safeExit(1);
         return exitedContext({ slug: normalizedSlug, mainRepo, options });
       }
@@ -471,6 +510,7 @@ function createDraftWorkflowAdapter(deps: DraftAdapterDependencies = {}): DraftW
         missionFile: '',
         recordedBase,
         syntheticTask,
+        dbOwned,
         agent: preselectedAgent || '',
         actualAgent: null,
         agentResult: null,
@@ -543,6 +583,14 @@ function createDraftWorkflowAdapter(deps: DraftAdapterDependencies = {}): DraftW
 
       debugFn(fmt.bold('Step 3: Preparing typed mission contract...'));
       const missionFile = ensureMissionFileFn(ctx.targetWorktree, ctx.slug, { logFn: plumbingLogFn });
+
+      // A DB-owned (web/board-created) mission has no Backlog task file by
+      // design and is DB-authoritative, so skip the Backlog mirror bootstrap
+      // entirely rather than creating or bootstrapping one.
+      if (ctx.dbOwned) {
+        debugFn(fmt.status('PASS', 'DB-owned mission: no Backlog task file; lifecycle is DB-authoritative.'));
+        return { ...ctx, missionFile };
+      }
 
       debugFn(fmt.bold('Step 4: Ensuring Backlog task exists in worktree...'));
       if (!bootstrapBacklogTaskFn(ctx.targetWorktree, ctx.mainRepo, ctx.slug, { logFn: plumbingLogFn, errorFn, syntheticTask: ctx.syntheticTask as SyntheticDraftTask | null })) {
@@ -647,13 +695,15 @@ function createDraftWorkflowAdapter(deps: DraftAdapterDependencies = {}): DraftW
       // Backlog-backed missions keep the strict contract: a task-file transition
       // failure is fatal. A synthetic (adhoc) intake has no Backlog backing in an
       // adhoc-only repository, so its lifecycle is DB-authoritative and the
-      // missing task-file transition is a best-effort no-op, not a failure.
-      if (!transitionOk && !ctx.syntheticTask) {
+      // missing task-file transition is a best-effort no-op, not a failure. A
+      // DB-owned (web/board-created) mission is the same: no Backlog file, DB
+      // authority, best-effort no-op transition.
+      if (!transitionOk && !ctx.syntheticTask && !ctx.dbOwned) {
         errorFn(fmt.status('FAIL', `Could not transition task ${ctx.slug} to backlog status.`));
         safeExit(1);
         return exitedContext({ ...ctx });
       }
-      if (!transitionOk && ctx.syntheticTask) {
+      if (!transitionOk && (ctx.syntheticTask || ctx.dbOwned)) {
         logFn(fmt.status('WARN', `No Backlog task file to transition for ${ctx.slug}; lifecycle is DB-authoritative.`));
       }
 
@@ -816,15 +866,16 @@ function createDraftWorkflowAdapter(deps: DraftAdapterDependencies = {}): DraftW
 
       const transitionOptions = { rootDir: ctx.targetWorktree, log: plumbingLogFn };
       const readyOk = await transitionVirtualFn(transitionTaskFn, ctx.slug, 'ready', transitionOptions);
-      // Best-effort mirror for synthetic (adhoc) intakes: the DB authority
-      // records the refinement above, so a missing Backlog task-file transition
-      // in an adhoc-only repository is a no-op, not a failure.
-      if (!readyOk && !ctx.syntheticTask) {
+      // Best-effort mirror for synthetic (adhoc) intakes and DB-owned
+      // (web/board-created) intakes: the DB authority records the refinement
+      // above, so a missing Backlog task-file transition in an adhoc-only
+      // repository is a no-op, not a failure.
+      if (!readyOk && !ctx.syntheticTask && !ctx.dbOwned) {
         errorFn(fmt.status('FAIL', `Could not transition task ${ctx.slug} to ready status.`));
         safeExit(1);
         return;
       }
-      if (!readyOk && ctx.syntheticTask) {
+      if (!readyOk && (ctx.syntheticTask || ctx.dbOwned)) {
         logFn(fmt.status('WARN', `No Backlog task file transition for ${ctx.slug}; lifecycle is DB-authoritative.`));
       }
 

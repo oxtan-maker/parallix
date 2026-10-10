@@ -1,0 +1,1 @@
+{"kind":"command-result","transportVersion":2,"status":"completed","error":null,"durableEvidence":[{"id":"px-0001:intake","source":"mission-store","detail":"mission recorded for repository web-board-repo (external trace: none)"}],"value":{"missionId":"px-0001"}}

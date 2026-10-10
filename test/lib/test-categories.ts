@@ -121,6 +121,9 @@ export const INTEGRATION_CI_TESTS: readonly string[] = [
   'integration/sqlite/sqlite-operator-state.integration.test.ts',
   'integration/sqlite/sqlite-import-and-audit.integration.test.ts',
   'integration/sqlite/sqlite-mission-store.integration.test.ts',
+  // TASK-2706: exercises the transactional legacy adhoc id rewrite over real
+  // SQLite. Real SQLite is a clean-runner dependency, so CI-safe.
+  'integration/sqlite/legacy-adhoc-migration.integration.test.ts',
   // TASK-2688: seeds a temporary migrated SQLite operator database with mixed
   // UTC/offset/ambiguous/malformed timestamps and exercises the audited
   // normalization write, idempotence, lexical==temporal ordering, and backup
@@ -155,6 +158,10 @@ export const INTEGRATION_CI_TESTS: readonly string[] = [
   'integration/sqlite/mission-store-drain.test.ts',
   'integration/agents/agent-block-authority.test.ts',
   'integration/presentation/board-draft-composition.test.ts',
+  // TASK-2706 criterion 2: isolated end-to-end proof of the web-create -> draft
+  // path over real SQLite and a temporary Git repository. Both are clean-runner
+  // dependencies, so the suite is CI-safe.
+  'integration/presentation/web-create-draft-start-e2e.test.ts',
   'integration/stats/board-metrics-persistence.test.ts',
   'integration/stats/metrics-review-fix-observations.test.ts',
   'integration/presentation/flow-persisted-decision-window.test.ts',

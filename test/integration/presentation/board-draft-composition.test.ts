@@ -105,7 +105,7 @@ function makeMockDraftWorkflow(slug: string) {
     options: {},
   };
   const port: DraftWorkflowPort = {
-    preflight: (args) => { calls.push(`preflight:${args[0]}`); return ctx; },
+    preflight: async (args) => { calls.push(`preflight:${args[0]}`); return ctx; },
     setup: (c) => { calls.push('setup'); return c; },
     scaffold: (c) => { calls.push('scaffold'); return c; },
     intake: async (c) => { calls.push('intake'); return c; },

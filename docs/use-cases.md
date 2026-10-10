@@ -196,6 +196,17 @@ current scope, criteria, evidence, labels, and lifecycle state. The explicit
 migration also copies checkpoint Goal Check rows when the repository document
 adds evidence without contradicting a recorded checkpoint.
 
+Web-board created missions mint a repository-scoped `px-<NNNN>` identity from
+the per-repository `adhoc_mission_counters` row, so they draft, start, handoff,
+review, and integrate with no Backlog task file: the Mission store is the sole
+authority for that identity and its lifecycle. Legacy `parallix-adhoc-<…>`
+records that predate this scheme are rewritten to those counter-owned ids by the
+explicit one-way `px migrate-legacy-adhoc-ids` command. The rewrite is transactional
+and collision-safe: it renames `missions.id` under deferred foreign keys, moves
+every durable `mission_id` reference and `mission_dependencies.depends_on_mission_id`
+together, skips numbers already owned in any repository, and rolls back entirely
+on failure, so a rerun is a no-op and no reference is orphaned.
+
 The migration audit inventories retired workflow files and refuses cleanup
 while any file lacks a verified destination, required Mission context is
 missing, or normal commands still depend on retired paths.

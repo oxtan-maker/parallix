@@ -158,7 +158,7 @@ test('board Draft anchors the draft launch directory to the main checkout when t
 // The CLI keeps its caller-provided context (feature-branch missions)
 // ---------------------------------------------------------------------------
 
-test('px draft keeps the caller working directory as its launch context when the board anchor is absent', () => {
+test('px draft keeps the caller working directory as its launch context when the board anchor is absent', async () => {
   const { deps, trace } = draftAdapterDeps(MISSION_WORKTREE);
   const adapter = createDraftWorkflowAdapter({
     ...deps,
@@ -166,7 +166,7 @@ test('px draft keeps the caller working directory as its launch context when the
     logFn: () => {},
     errorFn: () => {},
   });
-  const ctx = adapter.preflight(['task-2454-cli'], {});
+  const ctx = await adapter.preflight(['task-2454-cli'], {});
 
   assert.equal(ctx.exited, false);
   assert.deepEqual(trace.launchDirs, [MISSION_WORKTREE],
@@ -190,7 +190,7 @@ test('board Draft on a pre-draft backlog card completes and runs the whole draft
     logFn: () => {}, errorFn: () => {}, missionServicesFn: async () => ({}), options: {},
   } as unknown as import('../../../src/application/ports/cli-workflows.js').DraftWorkflowContext;
   const draftWorkflow: import('../../../src/application/ports/cli-workflows.js').DraftWorkflowPort = {
-    preflight: (args) => { steps.push(`preflight:${args[0]}`); return ctx; },
+    preflight: async (args) => { steps.push(`preflight:${args[0]}`); return ctx; },
     setup: (c) => { steps.push('setup'); return c; },
     scaffold: (c) => { steps.push('scaffold'); return c; },
     intake: async (c) => { steps.push('intake'); return c; },

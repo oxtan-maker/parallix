@@ -1,0 +1,54 @@
+{
+  "missions": [
+    {
+      "id": "px-0001",
+      "repository_id": "web-board-repo",
+      "title": "TASK-2706 manual browser mission",
+      "status": "active",
+      "raw_status": null,
+      "assignee": "custom",
+      "net_engineering_lines": null,
+      "closed_at": null,
+      "version": 7,
+      "reproduction_test": null,
+      "predicted_nel_bucket": "Small",
+      "description": null
+    }
+  ],
+  "mission_labels": [
+    {
+      "mission_id": "px-0001",
+      "position": 0,
+      "label": "ai_sdlc"
+    },
+    {
+      "mission_id": "px-0001",
+      "position": 1,
+      "label": "manual-web"
+    }
+  ],
+  "mission_success_criteria": [
+    {
+      "mission_id": "px-0001",
+      "position": 0,
+      "criterion": "The same identity reaches active without another allocation",
+      "completed": 0
+    }
+  ],
+  "mission_dependencies": [],
+  "mission_briefs": [
+    {
+      "mission_id": "px-0001",
+      "goal": "Created in Chromium against isolated SQLite; no Backlog mirror.",
+      "why_text": "Round 6 manual lifecycle verification",
+      "scope_text": "Create, draft and start"
+    }
+  ],
+  "mission_brief_out_of_scope": [],
+  "adhoc_mission_counters": [
+    {
+      "repository_id": "web-board-repo",
+      "counter": 1
+    }
+  ]
+}

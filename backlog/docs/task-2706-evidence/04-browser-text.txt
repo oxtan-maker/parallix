@@ -1,0 +1,57 @@
+PARALLIX
+@ web-board-repo
+wip 1 · 0 missions/wk · attention 1
++ Create new mission
+▤ FLOW
+▲ NEEDS YOU NEXT
+1
+01
+px-0001
+orphaned-active
+
+Active mission has no live work
+
+$ px active px-0001
+run ▸
+REFINED
+0
+
+no missions in this stage
+
+BACKLOG
+0
+
+no missions in this stage
+
+ACTIVE
+1 card
+none spinning · 1 stopped
+px-0001
+custom
+
+TASK-2706 manual browser mission
+
+●
+no work observed
+
+recovery evidence: coordinator unknown
+
+cancel ✕
+restart ▸
+Edit
+REVIEW
+0 cards
+
+no missions in this stage
+
+INTEGRATION
+0 cards
+
+no missions in this stage
+
+◂
+DONE · 0
+
+px active px-0001 started.
+
+no operations recorded

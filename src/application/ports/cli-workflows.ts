@@ -294,6 +294,14 @@ export interface DraftWorkflowContext {
   readonly exited: boolean;
   /** Normalized mission slug. */
   readonly slug: string;
+  /**
+   * True when the mission already exists in the operator store with persisted
+   * planning fields (a web/board-created DB-owned mission with no Backlog task
+   * file). Such missions are DB-authoritative: draft must not require a Backlog
+   * mirror, must not create one, and must not re-allocate or increment the
+   * identity counter.
+   */
+  readonly dbOwned?: boolean;
   /** Primary checkout path. */
   readonly mainRepo: string;
   /** Mission worktree path. */
@@ -325,8 +333,10 @@ export interface DraftWorkflowContext {
 }
 
 export interface DraftWorkflowPort {
-  /** Resolve slug, validate repo, baseline, config, task resolution, classification. */
-  preflight(_args: string[], _options?: Record<string, unknown>): DraftWorkflowContext;
+  /** Resolve slug, validate repo, baseline, config, task resolution, classification.
+   * Async so it can probe the operator store for an existing DB-owned mission
+   * before deciding whether a Backlog task file is required. */
+  preflight(_args: string[], _options?: Record<string, unknown>): Promise<DraftWorkflowContext>;
   /** Create branch, worktree, graphify workspace, gitignore. */
   setup(_context: DraftWorkflowContext): DraftWorkflowContext;
   /** Prepare the typed contract, record base branch, bootstrap backlog task. */

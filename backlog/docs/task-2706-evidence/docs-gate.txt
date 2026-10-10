@@ -1,0 +1,1 @@
+PASS: authored documentation contains no volatile implementation evidence and relative links resolve

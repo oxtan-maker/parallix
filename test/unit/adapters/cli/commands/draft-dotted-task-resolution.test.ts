@@ -29,7 +29,7 @@ function seedBacklog(files: Record<string, string>): string {
   return root;
 }
 
-function draftPreflight(root: string, input: string) {
+async function draftPreflight(root: string, input: string) {
   const errors: string[] = [];
   const exits: number[] = [];
   const sideEffects: string[] = [];
@@ -48,7 +48,7 @@ function draftPreflight(root: string, input: string) {
       return { slug: 'px-0042', taskId: 'PX-0042' };
     },
   });
-  const ctx = adapter.preflight([input], {});
+  const ctx = await adapter.preflight([input], {});
   return { ctx, errors: errors.join('\n'), exits, sideEffects };
 }
 
@@ -83,10 +83,10 @@ test('hyphenated suffixed slug keeps the base-id fallback', () => {
   assert.equal(path.basename(result.taskFile || ''), 'task-2623 - Base task.md');
 });
 
-test('draft preflight rejects a nonexistent dotted task id before setup and names it', () => {
+test('draft preflight rejects a nonexistent dotted task id before setup and names it', async () => {
   const root = seedBacklog({ 'task-2623 - Base task.md': 'TASK-2623' });
 
-  const { ctx, errors, exits, sideEffects } = draftPreflight(root, 'task-2623.04');
+  const { ctx, errors, exits, sideEffects } = await draftPreflight(root, 'task-2623.04');
 
   assert.equal(ctx.exited, true);
   assert.deepEqual(exits, [1]);
@@ -94,8 +94,8 @@ test('draft preflight rejects a nonexistent dotted task id before setup and name
   assert.deepEqual(sideEffects, [], 'an explicit task id never allocates an ad hoc identity');
 });
 
-test('ad hoc drafts still allocate a DB-owned identity and resume by that identity', () => {
-  const freeText = draftPreflight(seedBacklog({}), 'Fix the flaky board refresh');
+test('ad hoc drafts still allocate a DB-owned identity and resume by that identity', async () => {
+  const freeText = await draftPreflight(seedBacklog({}), 'Fix the flaky board refresh');
   assert.equal(freeText.ctx.exited, false);
   assert.equal(freeText.ctx.slug, 'px-0042');
   assert.deepEqual(freeText.sideEffects, ['allocate']);
@@ -103,16 +103,16 @@ test('ad hoc drafts still allocate a DB-owned identity and resume by that identi
   const dirRoot = seedBacklog({});
   fs.mkdirSync(path.join(dirRoot, 'some-project'));
   assert.equal(resolveDraftTarget('some-project', dirRoot)?.syntheticTask?.source, 'synthetic-directory');
-  const directory = draftPreflight(dirRoot, path.join(dirRoot, 'some-project'));
+  const directory = await draftPreflight(dirRoot, path.join(dirRoot, 'some-project'));
   assert.equal(directory.ctx.exited, false);
   assert.deepEqual(directory.sideEffects, ['allocate']);
 
-  const explicitAdhoc = draftPreflight(seedBacklog({}), 'adhoc-cleanup-logs');
+  const explicitAdhoc = await draftPreflight(seedBacklog({}), 'adhoc-cleanup-logs');
   assert.equal(explicitAdhoc.ctx.exited, false);
   assert.deepEqual(explicitAdhoc.sideEffects, ['allocate']);
 
   const resumeRoot = seedBacklog({ 'px-0007 - Existing.md': 'PX-0007' });
-  const resumed = draftPreflight(resumeRoot, 'px-0007');
+  const resumed = await draftPreflight(resumeRoot, 'px-0007');
   assert.equal(resumed.ctx.exited, false);
   assert.equal(resumed.ctx.slug, 'px-0007');
   assert.deepEqual(resumed.sideEffects, [], 'resuming reuses the minted identity');

@@ -47,7 +47,7 @@ interface MockWorkflow {
 type SyncStep = (ctx: DraftWorkflowContext) => DraftWorkflowContext;
 type AsyncStep = (ctx: DraftWorkflowContext) => Promise<DraftWorkflowContext>;
 interface WorkflowOverrides {
-  readonly preflight?: (args: string[], options: Record<string, unknown>) => DraftWorkflowContext;
+  readonly preflight?: (args: string[], options: Record<string, unknown>) => Promise<DraftWorkflowContext>;
   readonly setup?: SyncStep;
   readonly scaffold?: SyncStep;
   readonly intake?: AsyncStep;
@@ -64,7 +64,7 @@ function makeMockWorkflow(overrides: WorkflowOverrides = {}): MockWorkflow {
   const ok = (name: string): SyncStep => (ctx) => { steps.push(name); return ctx; };
   const okAsync = (name: string): AsyncStep => (async (ctx) => { steps.push(name); return ctx; });
   const port: DraftWorkflowPort = {
-    preflight: overrides.preflight ?? ((args, options = {}) => {
+    preflight: overrides.preflight ?? (async (args, options = {}) => {
       preflightArgs.push({ args, options });
       steps.push('preflight');
       return makeCtx({ options: { ...options } });
@@ -229,7 +229,7 @@ test('drift into a non-draftable state between request and dispatch is a stale c
 
 test('preflight abort (unresolvable task) returns failure and publishes nothing', async () => {
   const workflow = makeMockWorkflow({
-    preflight: (_args, _options) => makeCtx({ exited: true }),
+    preflight: async (_args, _options) => makeCtx({ exited: true }),
   });
   const { controller, currentWork } = makeController({ workflow });
   const result = await controller.dispatch(makeRequest());

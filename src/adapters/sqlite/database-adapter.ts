@@ -351,13 +351,29 @@ export class SqliteDatabaseAdapter {
       this.transactionDepth--;
       return;
     }
+    let committed = false;
     try {
       this.db!.exec('COMMIT;');
+      committed = true;
+    } catch (error) {
+      // COMMIT rejected by SQLite (for example a deferred foreign-key
+      // violation). SQLite leaves the transaction open on the connection, so
+      // inTransaction stays true and a caller's rollbackTransaction() reaches
+      // the still-open transaction. Re-throw the original error so the caller
+      // sees the real cause instead of a later "Cannot rollback: no active
+      // transaction" masking it.
+      throw error;
     } finally {
-      this.inTransaction = false;
-      this.transactionDepth = 0;
-      this.releaseImmediateWriter?.();
-      this.releaseImmediateWriter = null;
+      // Clear the in-transaction state only on success. On a failed commit the
+      // transaction is still open, so leaving inTransaction true lets a caller
+      // roll it back instead of hiding the open transaction behind a
+      // "Cannot rollback" error.
+      if (committed) {
+        this.inTransaction = false;
+        this.transactionDepth = 0;
+        this.releaseImmediateWriter?.();
+        this.releaseImmediateWriter = null;
+      }
     }
   }
 

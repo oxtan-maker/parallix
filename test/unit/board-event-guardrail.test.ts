@@ -59,6 +59,8 @@ const OPERATION_HISTORY_PORT_MODULE = 'src/application/ports/operation-history.t
 const COMPOSITION_ROOT_MODULE = 'src/composition/application-services.ts';
 const BOARD_COMPOSITION_MODULE = 'src/composition/board-projection.ts';
 const PRODUCTION_CAPABILITIES_MODULE = 'src/composition/production-capabilities.ts';
+/** Reads the schema of every mission_id table (incl. board_lane_events); never appends. */
+const LEGACY_ADHOC_MIGRATION_MODULE = 'src/adapters/sqlite/legacy-adhoc-migration.ts';
 
 const CONTRACT_MODULES = new Set([
   RECORDER_MODULE,
@@ -76,6 +78,7 @@ const CONTRACT_MODULES = new Set([
   COMPOSITION_ROOT_MODULE,
   BOARD_COMPOSITION_MODULE,
   PRODUCTION_CAPABILITIES_MODULE,
+  LEGACY_ADHOC_MIGRATION_MODULE,
 ]);
 
 function sourceFiles(): string[] {

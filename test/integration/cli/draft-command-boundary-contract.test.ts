@@ -717,4 +717,139 @@ describe('Draft preflight', () => {
     assert.equal(ensureMissionBranchCalled, false);
     assert.ok(errors.some(e => e.includes('Backlog integrity issues detected for task-093')));
   });
+
+  // TASK-2706: a web/board-created px-XXXX mission already persisted its
+  // planning fields in the operator store but has no Backlog task file. Draft
+  // preflight must not bail "No Backlog task file"; it proceeds under the same
+  // identity with zero allocation and no counter increment.
+  test('runDraftCommand drafts a DB-owned px-0004 mission with no Backlog task file', async () => {
+    const typeKey = ['class', 'ification'].join('');
+    const normalizeKey = `normalizeDraft${typeKey[0].toUpperCase()}${typeKey.slice(1)}Fn`;
+    const calls = [];
+    const logs = [];
+    const errors = [];
+    let exitCode = null;
+    let allocated = false;
+
+    // The mission already exists in the operator store with planning fields.
+    // store.load reports 'found' so preflight marks the mission DB-owned and
+    // skips the Backlog task-file requirement.
+    const dbOwnedMissionServicesFn = async () => ({
+      repositoryId: 'test-repository',
+      store: {
+        load: async (id) => {
+          assert.equal(id, 'px-0004', 'the stored identity is preserved, not re-allocated');
+          return { kind: 'found', mission: { id, title: 'px-0004 contract', brief: { goal: 'fix things' }, successCriteria: ['c1'], dependencies: [] }, version: 3 };
+        },
+      },
+      intake: {
+        async execute(req) {
+          calls.push(['intake', req.missionId, req.rawStatus]);
+          return { status: 'completed', value: { version: 4 }, durableEvidence: [] };
+        },
+      },
+      lifecycle: {
+        transition: async () => ({ status: 'completed', value: { version: 5 }, durableEvidence: [] }),
+      },
+    });
+
+    await runDraftCommand(['px-0004'], { configuration: resolveConfiguration(process.env),
+      inferSlugFn: (s) => s,
+      resolveMainRepoFn: () => '/tmp/main-repo',
+      ensureRepoExistsFn: () => true,
+      ensureStandaloneMissionBaselineFn: () => ({ committed: false }),
+      ensureDraftRepoConfigCommittedFn: () => true,
+      detectLaunchBaseBranchFn: () => null,
+      conventionalWorktreePathFn: () => '/tmp/main-repo/mission-px-0004',
+      ensureMissionBranchFn: (repo, branch) => { calls.push(['branch', branch]); },
+      ensureWorktreeFn: () => {},
+      ensureGraphifyWorkspaceFn: () => {},
+      ensureMissionFileFn: () => '/tmp/MISSION.md',
+      // No Backlog task file exists for the DB-owned identity.
+      resolveTaskFileFn: () => ({ ok: false, reason: 'missing' }),
+      bootstrapBacklogTaskFn: () => { calls.push(['bootstrap']); return true; },
+      allocateAdhocIdentityFn: () => { allocated = true; return { slug: 'px-0004', taskId: 'PX-0004' } },
+      readAgentConfigOrExitFn: () => ({ draft: ['codex'] }),
+      selectAgentFn: () => 'codex',
+      startDraftAgentFn: async () => ({ agent: 'codex', result: { status: 0 } }),
+      recordDraftImplementerFn: () => {},
+      recordDraftStatsFn: () => {},
+      [normalizeKey]: () => ({ ok: true, [typeKey]: 'unknown' }),
+      validateDraftClassificationFn: () => ({ ok: true, classification: 'unknown' }),
+      transitionTaskFn: (slug, status) => { calls.push(['transition', slug, status]); return true; },
+      missionServicesFn: dbOwnedMissionServicesFn,
+      exitFn: (code) => { exitCode = code; },
+      logFn: (msg) => logs.push(msg),
+      errorFn: (msg) => errors.push(msg)
+    });
+
+    // No fatal exit and, crucially, no "No Backlog task file" refusal.
+    assert.equal(exitCode, null, 'a DB-owned mission with persisted fields must not fail draft preflight');
+    assert.ok(!errors.some(e => /Backlog task file/i.test(e)), `no Backlog task-file refusal for a DB-owned mission; got: ${errors.join(' | ')}`);
+    // Zero identity allocation and no counter increment: the stored identity is reused.
+    assert.equal(allocated, false, 'a DB-owned mission must not allocate a new adhoc identity or increment the counter');
+    const branchName = calls.find(c => c[0] === 'branch')?.[1];
+    assert.ok(branchName && /mission\/px-0004/.test(String(branchName)), 'the branch derives from the same px-0004 identity');
+    assert.ok(calls.some(([c, slug]) => c === 'intake' && slug === 'px-0004'), 'intake materializes the mission under px-0004');
+    assert.ok(calls.some(([c, slug, status]) => c === 'transition' && slug === 'px-0004' && status === 'backlog'), 'the mission reaches backlog without a Backlog mirror');
+    assert.ok(logs.some(l => /px-0004/.test(l)), 'the draft names the px-0004 identity');
+  });
+
+  // TASK-2706 negative: a Backlog-backed `task-NNNN` mission already in the
+  // operator store must NOT be treated as DB-owned. `isDbOwnedMission` is
+  // restricted to `px-<NNNN>` adhoc identities, so a `task-NNNN` still requires
+  // its Backlog task file and bails "No Backlog task file" when absent.
+  test('runDraftCommand keeps a stored Backlog-backed task-1038 mission on the Backlog path', async () => {
+    const typeKey = ['class', 'ification'].join('');
+    const normalizeKey = `normalizeDraft${typeKey[0].toUpperCase()}${typeKey.slice(1)}Fn`;
+    const logs = [];
+    const errors = [];
+    let exitCode = null;
+
+    // The mission exists in the operator store (load reports 'found'), but the
+    // slug is a Backlog-backed identity, not a DB-owned adhoc identity.
+    const storedMissionServicesFn = async () => ({
+      repositoryId: 'test-repository',
+      store: {
+        load: async (id) => ({ kind: 'found', mission: { id, title: 'task-1038' }, version: 1 }),
+      },
+      intake: { async execute() { return { status: 'completed', value: { version: 2 }, durableEvidence: [] }; } },
+      lifecycle: { transition: async () => ({ status: 'completed', value: { version: 2 }, durableEvidence: [] }) },
+    });
+
+    await runDraftCommand(['task-1038'], { configuration: resolveConfiguration(process.env),
+      inferSlugFn: (s) => s,
+      resolveMainRepoFn: () => '/tmp/main-repo',
+      ensureRepoExistsFn: () => true,
+      ensureStandaloneMissionBaselineFn: () => ({ committed: false }),
+      ensureDraftRepoConfigCommittedFn: () => true,
+      detectLaunchBaseBranchFn: () => null,
+      conventionalWorktreePathFn: () => '/tmp/main-repo/mission-task-1038',
+      ensureMissionBranchFn: () => {},
+      ensureWorktreeFn: () => {},
+      ensureGraphifyWorkspaceFn: () => {},
+      ensureMissionFileFn: () => '/tmp/MISSION.md',
+      // No Backlog task file exists for the Backlog-backed identity.
+      resolveTaskFileFn: () => ({ ok: false, reason: 'missing' }),
+      bootstrapBacklogTaskFn: () => {},
+      allocateAdhocIdentityFn: () => ({ slug: 'task-1038', taskId: 'TASK-1038' }),
+      readAgentConfigOrExitFn: () => ({ draft: ['codex'] }),
+      selectAgentFn: () => 'codex',
+      startDraftAgentFn: async () => ({ agent: 'codex', result: { status: 0 } }),
+      recordDraftImplementerFn: () => {},
+      recordDraftStatsFn: () => {},
+      [normalizeKey]: () => ({ ok: true, [typeKey]: 'unknown' }),
+      validateDraftClassificationFn: () => ({ ok: true, classification: 'unknown' }),
+      transitionTaskFn: () => true,
+      missionServicesFn: storedMissionServicesFn,
+      exitFn: (code) => { exitCode = code; },
+      logFn: (msg) => logs.push(msg),
+      errorFn: (msg) => errors.push(msg)
+    });
+
+    // The DB-owned exemption must NOT apply to a Backlog-backed identity: the
+    // draft still bails on the missing Backlog task file.
+    assert.equal(exitCode, 1, 'a stored Backlog-backed task-NNNN mission still requires its Backlog task file');
+    assert.ok(errors.some(e => /Backlog task for task-1038 not found/.test(e)), `a stored task-NNNN mission must not take the DB-owned path; got: ${errors.join(' | ')}`);
+  });
 });

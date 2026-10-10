@@ -1,0 +1,123 @@
+
+> @magnusekdahl/parallix@1.5.328 test
+> FORCE_COLOR=0 tsx test/run-default-tests.ts test/integration/cli/draft-command-boundary-contract.test.ts test/integration/presentation/board-draft-composition.test.ts test/integration/cli/mission-adhoc-and-context-cli-contract.test.ts test/integration/sqlite/sqlite-schema-and-migrations.integration.test.ts test/integration/presentation/web-create-draft-start-e2e.test.ts
+
+(node:3437448) ExperimentalWarning: Module mocking is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+▶ Draft command
+  ✔ draft accepts a mission-worktree classification without touching the primary task (109.375699ms)
+  ✔ runDraftCommand top-level flows are covered with injected dependencies (61.314958ms)
+  ✔ runDraftCommand accepts free-text intent and synthesizes a task slug (7.807379ms)
+  ✔ runDraftCommand announces the allocated adhoc identity, not the free-text placeholder (7.188589ms)
+  ✔ runDraftCommand honors an explicit --agent override without consulting selectAgentFn or WORKFLOW_AGENT (14.984438ms)
+  ✔ runDraftCommand exits non-zero with usage text when --agent is missing its value (30.24671ms)
+  ✔ ensureDraftRepoConfigCommitted blocks dirty mission-layout config before worktree creation (0.696368ms)
+✔ Draft command (233.198494ms)
+▶ Draft preflight
+  ✔ runDraftCommand bails early if backlog task resolution is not ok (6.500791ms)
+  ✔ runDraftCommand bails early if backlog integrity issues detected for the slug (6.362183ms)
+  ✔ runDraftCommand drafts a DB-owned px-0004 mission with no Backlog task file (6.765426ms)
+  ✔ runDraftCommand keeps a stored Backlog-backed task-1038 mission on the Backlog path (0.937974ms)
+✔ Draft preflight (21.041386ms)
+▶ Ad hoc lifecycle
+  ✔ a free-text adhoc mission reaches active on a DB-owned adhoc identity in a Backlog-less repo (3832.255241ms)
+  ✔ px draft task-<missing> rejects a missing task file at the draft boundary (643.313291ms)
+✔ Ad hoc lifecycle (4476.561445ms)
+▶ Context CLI
+  ✔ the typed write verbs round-trip through the production command graph (639.948957ms)
+✔ Context CLI (640.091055ms)
+▶ Mission dependencies CLI
+  ✔ px depends records Mission-to-Mission dependencies and refuses the rest (196.784387ms)
+✔ Mission dependencies CLI (196.962854ms)
+Usage: px checkpoint plan   [--slug <slug>] --name <CP-N> --text <what it delivers> --expected-version <n>
+       px checkpoint unplan [--slug <slug>] --name <CP-N> --expected-version <n>
+       px checkpoint record [--slug <slug>] --name <CP-N> --next <text>
+                            --criterion <text> --evidence <text> [--criterion ... --evidence ...]
+                            --expected-version <n>
+
+Report an invalid locked contract: px checkpoint report-invalid-contract --name <CP-N>
+  --command <exact failing command> --diagnostic <text> --authority-reason <text>
+  --proposed-correction <text> --expected-version <n>
+
+A checkpoint is planned at draft and evidenced during execution. `plan` adds
+one with no evidence yet; `unplan` drops one that still has none. `record`
+writes a checkpoint's Goal Check evidence as durable Mission state, replacing
+the planned entry of the same --name (or earlier evidence for it) and keeping
+what it was planned to deliver. --criterion and --evidence are repeatable and
+pair up in the order given, so the counts must match. Each row must cite a
+repository-relative path, a quoted test name, a recognized command or an ADR,
+and the final planned checkpoint needs one row per success criterion; handoff
+applies the same checks. `px status` shows which checkpoints have evidence;
+the first without is where a relaunched agent resumes.
+
+{
+  "brief": {
+    "goal": "after",
+    "why": "retry",
+    "scope": null,
+    "outOfScope": []
+  },
+  "version": 2
+}
+▶ Mission title
+  ✔ board cards retain saved Mission titles across reload on every lane (TASK-2702) (269.834198ms)
+✔ Mission title (270.188652ms)
+✔ CLI mutations preserve invalid-contract blockers, evidence and optimistic versions (TASK-2702) (101.284855ms)
+✔ wired production controller dispatches mission intake and factory agrees (45.842948ms)
+✔ wired production controller drafts through the injected workflow port (41.689288ms)
+✔ production composition builds the trusted draft adapter by default (no override needed) (38.122908ms)
+✔ production draft adapter maps worktree creation abort to typed failure without exiting (43.705365ms)
+✔ read-only production controller does not advertise Mission commands (1.065602ms)
+✔ production application services wire Mission commands through their shared controller (88.298034ms)
+[WARN] Skipping noise squash in /tmp/parallix-test-tmp-1ddfc88c0c25/parallix-task-2706-web-rEMhbv: worktree is not clean.
+[INFO] Selected agent for step "draft": custom (opencode)
+[INFO] Launching: opencode run --pure --dangerously-skip-permissions --format json <prompt: 7518 chars>
+[INFO] Agent working directory: /tmp/parallix-test-tmp-1ddfc88c0c25/parallix-task-2706-web-rEMhbv-px-0001
+[INFO] Selected agent for step "draft": custom (opencode)
+[INFO] Launching: opencode run --pure --dangerously-skip-permissions --format json <prompt: 7518 chars>
+[INFO] Agent working directory: /tmp/parallix-test-tmp-1ddfc88c0c25/parallix-task-2706-web-rEMhbv-px-0001
+✔ web create then draft then start in isolated state (no operator DB writes) (495.686746ms)
+▶ SQLite schema and migration runner
+  ✔ enables foreign keys on connection (2.755184ms)
+  ✔ sets bounded busy timeout on connection (0.789186ms)
+  ✔ enables WAL mode on connection (0.724798ms)
+  ✔ uses parameterized SQL for dynamic values (1.059452ms)
+  ✔ wraps multi-statement changes in explicit transactions (0.967154ms)
+  ✔ queues concurrent in-process immediate writers without blocking the owner (1.14822ms)
+  ✔ times out queued immediate writers and releases turns when the owner closes (6.435582ms)
+  ✔ rolls back transaction on failure (1.19662ms)
+  ✔ applies clean-install migrations from scratch (42.867548ms)
+  ✔ idempotent re-run of already-applied migrations (35.107639ms)
+  ✔ detects checksum mismatch for modified migration (36.2296ms)
+  ✔ accepts the recorded pre-Sonar checksum for migration 0007 without rewriting it (37.847644ms)
+  ✔ accepts the pre-rename checksum for migration 0018 without rewriting it (38.138628ms)
+  ✔ previous-schema upgrade applies pending migrations only (38.355645ms)
+  ✔ pre-retirement operator database drops retired provenance and keeps shared import history usable (42.390296ms)
+  ✔ migration ledger records version, checksum, and timestamp (36.713372ms)
+  ✔ getCurrentVersion returns highest applied migration ID (39.452576ms)
+  ✔ schema maps all six operator-local domains (34.130145ms)
+  ✔ schema contains no secret/credential/password/token/api_key columns (36.930248ms)
+  ✔ resolves database path under PARALLIX_HOME (0.399514ms)
+  ✔ database path is never under a target repository directory (0.412853ms)
+  ✔ detects database path inside excluded directory (0.313465ms)
+  ✔ computeChecksum produces deterministic SHA-256 hex (0.250146ms)
+  ✔ computeChecksum differs for different SQL content (0.237517ms)
+  ✔ initOperatorState opens database and applies migrations (35.64611ms)
+  ✔ initOperatorState creates backup before irreversible migration (33.686723ms)
+  ✔ initOperatorState returns the same cached adapter for repeated calls on the same path (37.332292ms)
+  ✔ clearOperatorStateCacheSync closes initialized cached adapters for process exit (41.58874ms)
+  ✔ initOperatorState creates separate cached adapters for different home directories (74.882439ms)
+  ✔ initOperatorState evicts cache entry on initialization failure (35.482532ms)
+  ✔ upgrades the original 0021 brief-boundary schema without changing its ledger checksum (2.152693ms)
+  ✔ node:sqlite import is confined to src/adapters/sqlite/ (1.76761ms)
+  ✔ no production module outside the SQLite adapter imports node:sqlite (19.118399ms)
+✔ SQLite schema and migration runner (719.138315ms)
+ℹ tests 57
+ℹ suites 7
+ℹ pass 57
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 6739.657941
+[integration-test-cpu] suite budget=310000ms CPU, used=12184ms CPU, elapsed=6777ms

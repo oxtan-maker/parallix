@@ -3,6 +3,7 @@ import type {
   MissionNelRecordReceipt,
   MissionNelRecorder,
   MissionStore,
+  MigrateLegacyAdhocIdsResult,
   MissionVersion,
 } from '../../application/domain-ports.js';
 import { missionVersion } from '../../application/domain-ports.js';
@@ -17,6 +18,7 @@ import type { KnownRepository, RepositoryId } from '../../domain/repository.js';
 import { toCanonicalUtcInstant } from '../../domain/instant.js';
 import type { ReviewerDecision } from '../../domain/review.js';
 import type { SqliteDatabaseAdapter } from './database-adapter.js';
+import { migrateLegacyAdhocIds as migrateLegacyAdhocIdsInStore } from './legacy-adhoc-migration.js';
 import { SqliteBoardLaneEventRepository } from './board-lane-event-repository.js';
 import {
   hydrateMission,
@@ -172,6 +174,10 @@ export class SqliteMissionStore implements MissionStore, MissionNelRecorder {
 
   async cancel(id: MissionId): Promise<void> {
     return this.enqueue(() => this.cancelAggregate(id));
+  }
+
+  async migrateLegacyAdhocIds(): Promise<MigrateLegacyAdhocIdsResult> {
+    return migrateLegacyAdhocIdsInStore(this.db);
   }
 
   private async loadAggregate(id: MissionId): Promise<MissionLoadResult> {

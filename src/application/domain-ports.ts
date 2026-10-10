@@ -58,6 +58,26 @@ export interface MissionStore {
    * cost. Stores with no cancellation authority omit it.
    */
   cancel?(_id: MissionId): Promise<void>;
+  /**
+   * Rewrite every legacy `parallix-adhoc-<…>` mission id to a unique,
+   * repository-scoped `px-<NNNN>` id owned by the per-repository counter.
+   *
+   * Runs as a single atomic, collision-safe unit: each reassignment renames
+   * the mission and reassigns every child reference together, so a failure
+   * anywhere rolls back the whole run and leaves no orphan reference. A rerun
+   * over an already-migrated store is a no-op. Stores that cannot perform this
+   * rewrite omit it.
+   */
+  migrateLegacyAdhocIds?(): Promise<MigrateLegacyAdhocIdsResult>;
+}
+
+/**
+ * Outcome of a legacy adhoc id migration: which ids were rewritten, which
+ * targets they took, and which were already on a `px-<NNNN>` id.
+ */
+export interface MigrateLegacyAdhocIdsResult {
+  /** Each rewrite carries the repository that owns both ids. */
+  readonly migrated: readonly { readonly from: string; readonly to: string; readonly repositoryId: string }[];
 }
 
 /**

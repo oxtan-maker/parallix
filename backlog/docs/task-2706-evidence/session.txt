@@ -1,0 +1,70 @@
+TASK-2706 / round 6 / F5 manual browser session
+2026-10-10 09:24-09:25 UTC; source revision 37d922468592740ba796c28731b29a3c1759ffc1.
+Reviewed revision: 3a7f39b967bb352e679072737671efcb9df2b9a1.
+
+Setup (from mission checkout):
+  npm install --prefix /tmp/task2706-browser playwright-core --no-audit --no-fund
+  npx tsx backlog/docs/task-2706-evidence/manual-host.ts > backlog/docs/task-2706-evidence/host.log 2>&1
+  chromium --headless --no-sandbox --disable-dev-shm-usage --remote-debugging-port=19276 --user-data-dir=/tmp/task2706-browser/profile about:blank
+  node backlog/docs/task-2706-evidence/browser-control.mjs '<one browser action>'
+  python3 backlog/docs/task-2706-evidence/capture-state.py <snapshot-name>
+
+Actual origin and temporary repository/DB are recorded in session-location.json.
+The host loads integrity-verified build/web assets and createWebHost, composed
+production board projection/controller, production draft workflow, real Git
+worktrees, SQLite migration runner and SqliteMissionStore. PARALLIX_HOME is
+set to <temporary repository>/isolated-home before composition; the explicit
+DB is <temporary repository>/operator.db. No reproduction touches operator DB.
+
+This was an interactive agent-driven Chromium session: actions were issued
+individually through Playwright/CDP after inspecting the page, rather than
+running the retained node:test suite or directly dispatching a controller.
+Each click uses the rendered React UI and its CSRF-protected /api/commands POST.
+The captured successful HTTP response bodies are retained separately.
+
+Actions and observations:
+1. Navigate to session-location.json origin. Click '+ Create new mission'.
+   Enter title 'TASK-2706 manual browser mission', description
+   'Created in Chromium against isolated SQLite; no Backlog mirror.', context
+   'Round 6 manual lifecycle verification', labels 'ai_sdlc, manual-web', and
+   criterion 'The same identity reaches active without another allocation'.
+   Screenshot 01-create-form.png. Click 'Create mission'. POST completed with
+   missionId px-0001; screenshot 02-backlog.png and 02-created-state.json show
+   status backlog, counter 1, and the entered fields.
+2. Click button with accessible name 'px draft px-0001 — enabled'. The POST
+   completed with slug px-0001. host.log records draft:create and phase draft
+   ('drafting px-0001'), DB-owned preflight, real mission/px-0001 worktree,
+   missing Backlog transition tolerated, and successful draft completion.
+   03-refined-state.json and 03-refined.png show refined, same fields, counter 1.
+   During draft execution the aggregate is backlog; 'drafting' is work phase,
+   not a fabricated persisted lifecycle status.
+3. Click button with accessible name 'px active px-0001 — enabled' (power ▸).
+   The POST completed with agent custom. 04-start-response.json, 04-active-state.json,
+   04-browser-text.txt and 04-active.png show px-0001 active, same fields,
+   and counter still 1. Production ExecuteMissionService synchronized activation
+   through the real store. Both primary and mission checkouts have no Backlog files.
+
+Field comparison across all three snapshots passed: same id/title, ordered
+labels, criterion, empty dependency list, brief goal (the web description),
+brief why (web context), and adhoc counter. Draft adds scope, gate, NEL bucket
+and CP-1 via application services; Start sets assignee custom. No second mint.
+
+Controlled effects and limits:
+The manual host reuses makeExecutePorts for external execution/handoff/review
+mechanisms, with missionTransitions replaced by the real SQLite store and a
+local prepare result selecting custom. The draft agent callback records the
+contract through production application services; it never calls activation.
+No real model, Forgejo publication, execution implementation or later lifecycle
+completion is claimed. Start is clicked through the real browser/HTTP/controller
+path. The board consequently reports active with no live work after the local
+agent returns. This artifact establishes the requested manual web lifecycle
+interaction, complementing the accepted owning contract coverage.
+
+An initial setup attempt failed Start with 'Could not select an execute agent'
+because the fixture prepare result omitted agent. The local host prepare seam
+was corrected, then the entire flow above was repeated in fresh isolated state.
+The final session's response bodies, DB snapshots and host log all belong to
+that successful fresh run. No production source or test rewrite was needed.
+
+Cleanup: SIGTERM sent to the isolated host; Chromium used a disposable profile.
+Temporary checkouts were retained until after state capture, then removed.

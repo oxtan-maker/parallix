@@ -87,7 +87,7 @@ describe('Draft command use case', () => {
     const logs = createLogTracker();
 
     const port = {
-      preflight: (args: string[], options?: Record<string, unknown>) => {
+      preflight: async (args: string[], options?: Record<string, unknown>) => {
         calls.push('preflight');
         return okCtx(exit, logs, { options: options || {} });
       },
@@ -116,7 +116,7 @@ describe('Draft command use case', () => {
     const logs = createLogTracker();
 
     const port = {
-      preflight: (args: string[], options?: Record<string, unknown>) => {
+      preflight: async (args: string[], options?: Record<string, unknown>) => {
         calls.push('preflight');
         exit.exitFn(1); // adapter calls exitFn(1) for missing slug
         return exitedCtx(exit, logs, { options: options || {} });
@@ -144,7 +144,7 @@ describe('Draft command use case', () => {
     const logs = createLogTracker();
 
     const port = {
-      preflight: (args: string[], options?: Record<string, unknown>) => {
+      preflight: async (args: string[], options?: Record<string, unknown>) => {
         calls.push('preflight');
         return okCtx(exit, logs, { options: options || {} });
       },
@@ -176,7 +176,7 @@ describe('Draft command use case', () => {
     const logs = createLogTracker();
 
     const port = {
-      preflight: (args: string[], options?: Record<string, unknown>) => {
+      preflight: async (args: string[], options?: Record<string, unknown>) => {
         calls.push('preflight');
         return okCtx(exit, logs, { options: options || {} });
       },
@@ -208,7 +208,7 @@ describe('Draft command use case', () => {
     const logs = createLogTracker();
 
     const port = {
-      preflight: (args: string[], options?: Record<string, unknown>) => {
+      preflight: async (args: string[], options?: Record<string, unknown>) => {
         calls.push('preflight');
         return okCtx(exit, logs, { options: options || {} });
       },
@@ -248,7 +248,7 @@ describe('Draft command use case', () => {
     });
 
     const port = {
-      preflight: (args: string[], options?: Record<string, unknown>) => {
+      preflight: async (args: string[], options?: Record<string, unknown>) => {
         capturedOptions = options;
         return okCtx(exit, logs, { options: options || {} });
       },
@@ -277,7 +277,7 @@ describe('Draft command use case', () => {
     const logs = createLogTracker();
 
     const port = {
-      preflight: (args: string[], options?: Record<string, unknown>) => {
+      preflight: async (args: string[], options?: Record<string, unknown>) => {
         calls.push('preflight');
         return okCtx(exit, logs, { options: options || {} });
       },
@@ -320,7 +320,7 @@ describe('Draft current-work publication', () => {
 
   function workflow(calls: string[], overrides: Record<string, unknown> = {}) {
     return {
-      preflight: () => { calls.push('preflight'); return context(); },
+      preflight: async () => { calls.push('preflight'); return context(); },
       setup: (ctx: any) => { calls.push('setup'); return context(ctx); },
       scaffold: (ctx: any) => { calls.push('scaffold'); return context(ctx); },
       intake: async (ctx: any) => { calls.push('intake'); return context(ctx); },
@@ -372,7 +372,7 @@ describe('Draft current-work publication', () => {
       blocked: async () => { calls.push('blocked'); },
       ended: async () => { calls.push('ended'); },
     };
-    const draftWorkflow = workflow(calls, { preflight: () => context({ slug: 'not a slug' }) });
+    const draftWorkflow = workflow(calls, { preflight: async () => context({ slug: 'not a slug' }) });
 
     await new DraftCommandUseCase(draftWorkflow, currentWork).execute(['not a slug']);
 

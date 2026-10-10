@@ -36,6 +36,19 @@ export function isDbAdhocIdentity(value: unknown): boolean {
 }
 
 /**
+ * A legacy free-text identity (`parallix-adhoc-<…>`) minted before the
+ * DB-owned `px-<NNNN>` scheme (task-2706). These records carry no
+ * repository-scoped counter, so the migration rewrites them to a counter-owned
+ * `px-<NNNN>` id. Recognized only here so the migration targets the legacy
+ * namespace precisely and never touches a `task-` or existing `px-` id.
+ *
+ * @param {unknown} value
+ */
+export function isLegacyAdhocIdentity(value: unknown): boolean {
+  return typeof value === 'string' && /^parallix-adhoc-.+$/i.test(value.trim());
+}
+
+/**
  * A mission slug candidate is one of three backings: `task-<…>` (a Backlog
  * task), `adhoc-<…>` (the legacy free-text identity, still accepted so an
  * existing `adhoc-*` mission stays resolvable), or `px-<NNNN>` (the

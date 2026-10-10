@@ -1,8 +1,8 @@
 ---
 id: TASK-2706
 title: Fix web-created DB missions failing to start and migrate legacy adhoc IDs
-status: backlog
-assignee: []
+status: done
+assignee: [codex]
 created_date: '2026-10-09 18:41'
 labels:
   - bug
