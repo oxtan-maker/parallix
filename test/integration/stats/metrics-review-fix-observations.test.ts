@@ -172,7 +172,7 @@ it('classifier measurements retain retry cost, precision and unobserved outcomes
 it('local review authority supplies weekly PR totals and completed full-history cohorts (TASK-2658)', async () => {
   await withStatisticsDatabase(async ({ db }) => {
     const telemetry = new SqliteReviewClassificationStore(db), store = new SqliteMissionStore(db);
-    const sample = classificationAttempt({ repository: REPO, observedAt: '2026-09-27T00:00:00Z' });
+    const sample = classificationAttempt({ repository: REPO, observedAt: '2026-09-27T00:00:00Z', policyVersion: 'jev-three-question-51-80-89-v1' });
     const review = applyClassifierReview(repeatReview(), { kind: 'classifier', identity: 'jev', decisionId: sample.decisionId,
       provider: 'typesafe', model: 'jev', priorRevision: sample.priorRevision, candidateRevision: sample.candidateRevision,
       findingIds: sample.findingIds, packetHash: sample.packetHash!, policyVersion: sample.policyVersion, label: 'addresses', score: 0.52 },
@@ -202,5 +202,38 @@ it('local review authority supplies weekly PR totals and completed full-history 
     const historical = await new SqliteClassifierStatisticsReader(db, telemetry, REPO).read();
     assert.equal(historical.coverage, 'complete', 'historical policy provenance remains readable after tightening the cutoff');
     assert.equal(classifierStatistics(historical, window).classifier, 2);
+  });
+});
+
+it('bounded panel telemetry survives persistence without multiplying workflow counts (TASK-2716)', async () => {
+  const { runPanel } = await import('../../../src/application/review-classification/panel.js');
+  await withStatisticsDatabase(async ({ db }) => {
+    const store = new SqliteReviewClassificationStore(db);
+    const outcome = await runPanel({ finding: 'x.java:1 drops output' }, {
+      available: () => ({ status: 'available', provider: 'typesafe', model: 'jev-latest' }), requestBytes: () => 100,
+      requestBudget: () => ({ requestBytes: 100, inputTokens: 500, contextTokens: 200, maxRequestBytes: 1000000,
+        maxInputTokens: 64000, maxContextTokens: 30000, tokenizerModel: 'stub' }),
+      decide: async () => ({ provider: 'typesafe', model: 'actual-jev', answers: { resolution: {
+        type: 'choice', selected: 'addresses', probabilities: { addresses: 0.8, does_not_address: 0.1, insufficient_evidence: 0.1 }, confidence: 0.01,
+      } }, usage: { inputTokens: 500, outputTokens: 1, cost: 0.001 } }),
+    }, { provider: 'typesafe', model: 'jev-latest' }, () => 'a'.repeat(64));
+    const sample = classificationAttempt({ panel: outcome.measurement, policyVersion: outcome.measurement.policyVersion });
+    await store.recordCall(sample);
+    await store.recordCall(sample);
+    const rows = await store.calls('parallix');
+    assert.equal(rows.length, 1);
+    assert.deepEqual(rows[0].panel, outcome.measurement);
+    assert.equal(rows[0].panel!.members[0].model, 'actual-jev');
+    assert.equal(rows[0].panel!.members[0].configuredModel, 'jev-latest');
+    assert.equal(rows[0].panel!.members[0].usage!.inputTokens, 500);
+    const counts = classifierStatistics({ decisions: [], attempts: rows,
+      applied: [{ decisionId: sample.decisionId, decidedAt: sample.observedAt, route: 'clear' }], observations: [], coverage: 'complete' },
+      weeklyDecisionWindows('2026-10-06').current);
+    assert.equal(counts.calls, 1, 'one workflow attempt retains all three provider calls');
+    assert.equal(counts.unobserved, 1);
+    await store.recordCall(classificationAttempt({ decisionId: 'historical', fingerprint: 'old' }));
+    assert.equal((await store.calls('parallix')).find(row => row.decisionId === 'historical')!.panel, undefined);
+    await assert.rejects(store.recordCall({ ...sample, fingerprint: 'oversize', model: 'x'.repeat(17000) }), /bounded allowance/);
+    assert.equal((await store.calls('parallix')).length, 2);
   });
 });

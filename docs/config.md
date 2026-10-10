@@ -473,36 +473,53 @@ configurable gates above.
 
 ## Review classification
 
-First reviews always use the general reviewer; Jev is not called, including in
-shadow mode. Jev can decide a re-review after configured verification passes.
-A finding re-review uses the previous review, the implementer response, human
-feedback and mechanically collected source at exact revisions. A repaired
-integration failure is judged against the withdrawn gate. Thin or oversized
-evidence declares its omissions; abstentions, unavailable configuration, failed
-calls and missing required data retain the general reviewer.
+First reviews and rounds following a classifier decision always use the general
+reviewer, including in shadow mode. Eligible re-reviews run after configured
+verification and use one immutable mechanically packed state from the previous
+findings/comment, implementer response and pinned source. A repaired integration
+failure is judged against the withdrawn gate. Human feedback and recorded
+verification retain their stated authority; implementer claims are not execution
+proof.
 
-Gate-failure repair packets retain the complete repair diff. When both rounds kept a
-review baseline, that diff compares the approved and candidate mission diffs, each from
-its own baseline, so changes landed on main are excluded and rebase or
-conflict-resolution changes are declared; the repair brief and pull-request comment show
-the same range. Packets then add pinned before/after source, prioritizing files cited by the
-failure. If both files cannot fit, a complete candidate file may be retained with
-the missing prior file explicitly labelled. Optional source context can be omitted;
-the repair diff is never truncated. Jev token accounting checks the structured
-request before sending it, alongside the transport byte limit; finding packets use the
-same token budget rather than packet, file, diff or character limits. If mandatory
-repair evidence cannot be read, cannot fit or its tokenizer is unsupported, the general
-reviewer handles the round. `px stats` lists each fallback cause in its fallback-reasons
-table, including `evidence-over-budget`, `evidence-read-failed`, `classifier-exception`,
-`provider-key-missing` and `provider-unavailable`.
+The operator-selected experimental baseline asks three frozen resolution
+questions in separate configured Jev calls. All three must finish successfully:
+V3 votes to approve at a selected `addresses` probability of at least 0.51;
+V1 votes to approve at 0.80 or reject at a selected `does_not_address` probability
+of 0.89; the original question votes only to reject at 0.89. V3 rejection and
+original approval channels are disabled. Confidence is not the routing score.
+Approval votes without rejection clear the prior obligations; rejection votes
+without approval return them to the implementer. Conflicts, no votes, incomplete
+or invalid results, provider failures and stale revision/version results retain
+the general reviewer. No partial panel can approve.
 
-The selected-choice routing thresholds are 52% for a resolved finding set and
-89% for unresolved findings. Gate-failure repair re-reviews use 67% for unresolved
-findings, rising to 81% when Jev decided the immediately preceding round. Clear
-remains 52%. The tuned policy also applies when the implementer answers Jev’s
-retained gate-failure finding; it does not apply to first reviews or ordinary
-finding re-reviews. Other judgments go to the general reviewer. These scores
-are routing signals, not probabilities that the PR is correct.
+Packing uses cited paths, exact-path then unique-basename resolution, archived
+line windows and complete-file promotion. Small files can be supplied whole;
+large files use bounded anchors with declared omissions. The cited-path diff
+has a 15,000-byte allowance and the archived packet has a 90,000-byte ceiling,
+measured with the original question before promotion. This does not expand to
+a complete repair delta or enrich state from later checkpoints. Each final
+request also needs known provider accounting within 32,000 input tokens,
+30,000 state-plus-longest-question tokens and transport/provider limits.
+Unavailable pinned revisions/source or obligations that cannot fit defer the
+whole panel. `px stats` retains fallback reasons, including evidence, provider,
+conflict and stale-result failures.
+
+This baseline produced 17/46 supported decisions on the fitted development
+corpus and one supported approval in a frozen 10-case cohort. Development
+samples include synthetic and correlated repairs; the fresh cohort had only
+historical approvals and three preparation failures. These observations do not
+establish production coverage, rejection recall, zero error or workflow savings.
+Scores are routing signals, not probabilities that the PR is correct.
+
+The operator will collect ten new regular-development samples over 1–2 days
+and evaluate them separately. Keep the questions, thresholds, route and packing
+fixed; retain per-question choices, probabilities, votes, actual models and
+bounded usage/cost with the panel outcome, revisions and evidence identity.
+Replay exported local measurements against the frozen policy, then audit the
+pinned source and original obligations. Report preparation failures, abstentions
+and ambiguous cases separately. Compare relative agreement with the general
+reviewer and source-supported correctness: a shared mistake is still an error.
+This future study is not part of the implementation's completed evidence.
 
 Configure the classifier through the operator environment used by the decision adapter.
 Run `px setup` or `px setup-review` to provision its dedicated `jev` Forgejo

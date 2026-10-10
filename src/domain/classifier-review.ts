@@ -1,6 +1,7 @@
 import type { Review, ReviewFinding, ReviewRevocationCause } from './review.js';
 import { changeRevision, currentReviewRound, replaceCurrentRound, reviewFindingId } from './review.js';
 
+export const PANEL_POLICY_VERSION = 'jev-three-question-51-80-89-v1';
 export const CLASSIFIER_POLICY_VERSION = 'repeat-findings-52-89-v2';
 export const INTEGRATION_REPAIR_POLICY_VERSION = 'integration-repair-52-67-v1';
 export const CONSECUTIVE_REPAIR_POLICY_VERSION = 'integration-repair-52-81-v1';
@@ -8,6 +9,7 @@ export const LEGACY_CLASSIFIER_POLICY_VERSION = 'repeat-findings-51-90-v1';
 
 /** Versions retain the interpretation of historical applied decisions. */
 export function classifierPolicyThresholds(version: string): { clear: number; unresolved: number } {
+  if (version === PANEL_POLICY_VERSION) { return { clear: 0.51, unresolved: 0.89 }; }
   if (version === CLASSIFIER_POLICY_VERSION) { return { clear: 0.52, unresolved: 0.89 }; }
   if (version === INTEGRATION_REPAIR_POLICY_VERSION) { return { clear: 0.52, unresolved: 0.67 }; }
   if (version === CONSECUTIVE_REPAIR_POLICY_VERSION) { return { clear: 0.52, unresolved: 0.81 }; }
@@ -15,20 +17,9 @@ export function classifierPolicyThresholds(version: string): { clear: number; un
   throw new Error('Unknown classifier review policy');
 }
 
-/** A Jev return retains the synthetic gate obligation, never an unrelated finding set. */
-function continuedGateRepair(prior: Review['rounds'][number]['decision']): boolean {
-  if (prior?.kind !== 'changes-requested' || prior.findings.length !== 1
-    || prior.findings[0].id !== 'integration-gate-repair' || !prior.classifier) { return false; }
-  return Boolean(prior.classifier.integrationRepair)
-    || [INTEGRATION_REPAIR_POLICY_VERSION, CONSECUTIVE_REPAIR_POLICY_VERSION].includes(prior.classifier.policyVersion);
-}
-
-/** Only withdrawn gate obligations and their consecutive repairs use the tuned policy. */
-export function classifierPolicyForReview(review: Review): string {
-  const prior = review.rounds.at(-2)?.decision;
-  const gateRepair = prior?.kind === 'approved' && prior.revocation?.cause?.kind === 'integration-gate-failure';
-  if (!gateRepair && !continuedGateRepair(prior ?? null)) { return CLASSIFIER_POLICY_VERSION; }
-  return prior?.classifier ? CONSECUTIVE_REPAIR_POLICY_VERSION : INTEGRATION_REPAIR_POLICY_VERSION;
+/** New decisions use the frozen panel; historical threshold versions remain readable. */
+export function classifierPolicyForReview(_review: Review): string {
+  return PANEL_POLICY_VERSION;
 }
 
 /** Typed provenance within the existing review authority, never an agent family. */
@@ -90,14 +81,14 @@ export function successCriteriaFindings(criteria: readonly string[]): readonly R
 export function applyClassifierReview(review: Review, source: ClassifierReviewSource, route: 'clear' | 'implementer', at: string,
   criteria: readonly ReviewFinding[] = []): Review {
   assertClassifierReviewSource(source);
-  if (source.policyVersion !== classifierPolicyForReview(review)) { throw new Error('Classifier review must use the current policy for this scope'); }
   const thresholds = classifierPolicyThresholds(source.policyVersion);
   const current = currentReviewRound(review);
   const prior = review.rounds.at(-2);
   if (current.number === 1 || !prior) { throw new Error('First review requires the general reviewer'); }
+  if (source.policyVersion !== classifierPolicyForReview(review)) { throw new Error('Classifier review must use the current policy for this scope'); }
   if (current.decision || current.phase !== 'reviewing' || current.subject.revision !== source.candidateRevision
     || (source.successCriteria ? source.priorRevision !== source.candidateRevision : prior?.subject.revision !== source.priorRevision)
-    || (prior?.decision?.classifier && source.policyVersion === CLASSIFIER_POLICY_VERSION)) { throw new Error('Classifier review scope or revision is stale'); }
+    || (prior?.decision?.classifier && source.policyVersion === PANEL_POLICY_VERSION)) { throw new Error('Classifier review scope or revision is stale'); }
   let findings: readonly ReviewFinding[];
   if (source.successCriteria) {
     findings = criteria;

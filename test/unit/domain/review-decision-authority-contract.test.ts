@@ -396,12 +396,12 @@ it('classifier decision preserves review authority and rejects stale/partial sco
   const { applyClassifierReview, assertClassifierReviewSource, LEGACY_CLASSIFIER_POLICY_VERSION } = await import('../../../src/domain/classifier-review.js');
   const { repeatReview } = await import('../../fixtures/repeat-review.js');
   const source = { kind: 'classifier' as const, identity: 'jev' as const, decisionId: 'd', attemptId: 'a', provider: 'typesafe', model: 'jev',
-    packetHash: 'c'.repeat(64), priorRevision: 'a'.repeat(40), candidateRevision: 'b'.repeat(40), findingIds: ['F1'], policyVersion: 'repeat-findings-52-89-v2', label: 'addresses', score: 0.52 };
+    packetHash: 'c'.repeat(64), priorRevision: 'a'.repeat(40), candidateRevision: 'b'.repeat(40), findingIds: ['F1'], policyVersion: 'jev-three-question-51-80-89-v1', label: 'addresses', score: 0.52 };
   const review = repeatReview();
   const legacy = { ...source, policyVersion: LEGACY_CLASSIFIER_POLICY_VERSION, score: 0.51 };
   assert.doesNotThrow(() => assertClassifierReviewSource(legacy), 'historical decisions retain their original threshold');
   assert.throws(() => applyClassifierReview(review, legacy, 'clear', '2026-10-06T00:00:00Z'), /current policy/);
-  assert.throws(() => applyClassifierReview(review, { ...source, score: 0.51 }, 'clear', '2026-10-06T00:00:00Z'), /provenance/);
+  assert.throws(() => applyClassifierReview(review, { ...source, score: 0.509 }, 'clear', '2026-10-06T00:00:00Z'), /provenance/);
   const approved = applyClassifierReview(review, source, 'clear', '2026-10-06T00:00:00Z');
   assert.equal(currentReviewRound(approved).decision?.classifier?.identity, 'jev');
   assert.equal(currentReviewRound(approved).reviewer, 'claude', 'classifier never impersonates or replaces the general reviewer');
@@ -417,7 +417,7 @@ it('classifier provenance is validated once and the candidate round is pinned by
   const review = repeatReview();
   const source = { kind: 'classifier' as const, identity: 'jev' as const, decisionId: 'd', provider: 'typesafe', model: 'jev',
     packetHash: 'c'.repeat(64), priorRevision: 'a'.repeat(40), candidateRevision: 'b'.repeat(40), findingIds: ['F1'],
-    policyVersion: 'repeat-findings-52-89-v2', label: 'addresses', score: 0.52 };
+    policyVersion: 'jev-three-question-51-80-89-v1', label: 'addresses', score: 0.52 };
   // Malformed provenance is rejected by the single assertion before any scope check.
   for (const broken of [{ ...source, identity: 'other' }, { ...source, packetHash: 'short' }, { ...source, score: 1.2 }, { ...source, label: 'insufficient_evidence' }]) {
     assert.throws(() => applyClassifierReview(review, broken as never, 'clear', '2026-10-06T00:00:00Z'), /provenance/);
@@ -443,7 +443,7 @@ it('classifier integration repairs bind the withdrawn gate and retain its comple
   const source = { kind: 'classifier' as const, identity: 'jev' as const, decisionId: 'd', provider: 'typesafe', model: 'jev',
     packetHash: 'c'.repeat(64), priorRevision: 'a'.repeat(40), candidateRevision: 'b'.repeat(40), responseRevision: 'b'.repeat(40),
     findingIds: ['integration-gate-repair'], integrationRepair: { revokedAt, gate: 'output' },
-    policyVersion: 'integration-repair-52-67-v1', label: 'addresses', score: 0.52 };
+    policyVersion: 'jev-three-question-51-80-89-v1', label: 'addresses', score: 0.52 };
   const at = '2026-10-06T00:00:00Z';
   const approved = applyClassifierReview(review, source, 'clear', at);
   assert.equal(currentReviewRound(approved).phase, 'approved');
@@ -458,10 +458,10 @@ it('classifier integration repairs bind the withdrawn gate and retain its comple
   const operatorRevoked = { ...review, rounds: [{ ...review.rounds[0], decision: {
     ...review.rounds[0].decision!, revocation: { ...revocation, cause: { kind: 'operator' as const } },
   } }, review.rounds[1]] } as typeof review;
-  assert.throws(() => applyClassifierReview(operatorRevoked, source, 'clear', at), /current policy/);
+  assert.throws(() => applyClassifierReview(operatorRevoked, source, 'clear', at), /scope is stale/);
   assert.throws(() => applyClassifierReview(review, { ...source, policyVersion: 'integration-repair-52-81-v1' }, 'clear', at), /current policy/);
-  assert.throws(() => applyClassifierReview(review, { ...source, label: 'does_not_address', score: 0.669 }, 'implementer', at), /provenance/);
-  const unresolved = applyClassifierReview(review, { ...source, label: 'does_not_address', score: 0.67 }, 'implementer', at);
+  assert.throws(() => applyClassifierReview(review, { ...source, label: 'does_not_address', score: 0.889 }, 'implementer', at), /provenance/);
+  const unresolved = applyClassifierReview(review, { ...source, label: 'does_not_address', score: 0.89 }, 'implementer', at);
   const decision = currentReviewRound(unresolved).decision;
   assert.equal(decision?.kind, 'changes-requested');
   if (decision?.kind === 'changes-requested') {
@@ -479,7 +479,7 @@ it('first-review classifier decisions are rejected while historical provenance r
   const source = { kind: 'classifier' as const, identity: 'jev' as const, decisionId: 'd', provider: 'typesafe', model: 'jev',
     packetHash: 'c'.repeat(64), priorRevision: 'b'.repeat(40), candidateRevision: 'b'.repeat(40),
     successCriteria: { baseRef: 'main' }, findingIds: ['success-criterion-1'],
-    policyVersion: 'repeat-findings-52-89-v2', label: 'addresses', score: 0.99 };
+    policyVersion: 'jev-three-question-51-80-89-v1', label: 'addresses', score: 0.99 };
   assert.doesNotThrow(() => assertClassifierReviewSource(source));
   assert.throws(() => applyClassifierReview(first, source, 'clear', '2026-10-06T00:00:00Z', successCriteriaFindings(['Output preserved'])), /First review requires/);
   assert.equal(currentReviewRound(first).decision, null);

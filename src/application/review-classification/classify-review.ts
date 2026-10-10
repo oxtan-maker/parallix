@@ -1,10 +1,11 @@
 import { missionId } from '../../domain/mission.js';
-import { applyClassifierReview, classifierPolicyForReview, CLASSIFIER_POLICY_VERSION, integrationRepairFinding, reviewAtCandidateRevision, successCriteriaFindings, type ClassifierReviewSource } from '../../domain/classifier-review.js';
+import { applyClassifierReview, classifierPolicyForReview, integrationRepairFinding, reviewAtCandidateRevision, successCriteriaFindings, type ClassifierReviewSource } from '../../domain/classifier-review.js';
 import { resolveReviewBaseline } from '../review-baseline.js';
-import { buildEvidencePacket, REPAIR_PROMPT_VERSION } from './evidence-packet.js';
-import { REPAIR_PACKET_VERSION } from './repair-evidence-packet.js';
+import { buildArchivedEvidencePacket, ARCHIVED_PACKING_VERSION } from './archived-packing.js';
+import { runPanel } from './panel.js';
+import { PANEL_PROMPT_VERSION } from './panel-questions.js';
 import { RoundTelemetry } from './round-telemetry.js';
-import { classifyFindings, ROUTING_POLICY_VERSION, type ClassificationRoute } from './routing-policy.js';
+import { ROUTING_POLICY_VERSION, type ClassificationRoute } from './routing-policy.js';
 import type { LoopContext, ReviewRound } from '../review-loop/round.js';
 import type { ReviewClassificationTelemetryPort } from '../ports/review-classification-telemetry.js';
 import type { ReviewClassificationPorts } from '../ports/review-classification.js';
@@ -240,33 +241,26 @@ async function decideAndCommit(context: LoopContext, round: ReviewRound, scope: 
   const emit = (value: string) => context.emit({ kind: 'reviewer-classification', reason: value });
   const fallback = async (why: string, message = why) => { await rows.finish(why); emit(message); return null; };
   const started = cycleStarted ?? ports.clock();
-  // Only the tuned gate-repair scope permits consecutive classifier decisions.
-  const repair = scope.policyVersion !== CLASSIFIER_POLICY_VERSION;
-  rows.note({ policyVersion: scope.policyVersion, ...(repair ? { promptVersion: REPAIR_PROMPT_VERSION, packetVersion: REPAIR_PACKET_VERSION } : {}) });
-  if (original?.classifier && !repair) { return await fallback('prior-classifier-review'); }
+  rows.note({ policyVersion: scope.policyVersion, promptVersion: PANEL_PROMPT_VERSION, packetVersion: ARCHIVED_PACKING_VERSION });
+  if (original?.classifier) { return await fallback('prior-classifier-review'); }
   let decision: Decision;
   try {
     const availability = await ports.decision.available();
     if (availability.status !== 'available') { return await unavailableProvider(context, ports, availability, rows); }
     rows.note({ provider: availability.provider, model: availability.model });
-    const packet = await buildEvidencePacket(evidenceInput(scope), ports.evidence, context.ports.worktree, request => ports.decision.requestBudget(request), repair,
-    repair && round.verifiedRevision === candidateRevision ? {
+    const packet = await buildArchivedEvidencePacket(evidenceInput(scope), ports.evidence, request => ports.decision.requestBudget(request),
+    scope.verifiedRepair && round.verifiedRevision === candidateRevision ? {
       status: 'passed', candidateRevision, scope: 'Configured pre-review verification',
       provenance: 'Parallix recorded successful pre-review verification at this exact candidate revision.',
       specificTestResult: 'unknown', failedIntegrationGateRerun: 'unknown',
       caveat: 'This does not establish that the failed integration gate or an individual test executed. Implementer comments remain unverified claims.',
-    } : undefined);
-    const packetHash = ports.hash(JSON.stringify(packet.request));
+    } : undefined, context.ports.worktree);
+    const packetHash = ports.hash(JSON.stringify(packet.request.state));
     rows.note({ preparationMs: ports.clock() - started, packetHash });
     const classifyStart = ports.clock();
-    let result;
-    try { result = await ports.decision.decide(packet.request); }
-    catch {
-      rows.note({ classificationMs: ports.clock() - classifyStart });
-      return await fallback('classifier-failure');
-    }
-    const selected = classifyFindings(result, scope.policyVersion);
-    rows.note({ label: selected.label, score: selected.score, provider: result.provider, model: result.model, classificationMs: ports.clock() - classifyStart });
+    const result = await runPanel(packet.request.state, ports.decision, availability, ports.hash);
+    const selected = result.selected;
+    rows.note({ panel: result.measurement, label: selected.label, score: selected.score, provider: result.provider, model: result.model, classificationMs: ports.clock() - classifyStart });
     if (selected.route === 'reviewer' || ports.mode === 'shadow') {
       await rows.finish(selected.reason, { route: selected.route });
       emit(selected.route === 'reviewer' ? selected.reason : 'shadow fallback'); return null;
@@ -308,9 +302,10 @@ async function commitDecision(context: LoopContext, round: ReviewRound, scope: R
   try {
     const source = classifierSource(scope, decision, decisionId, rows.current.findingIds);
     const at = ports.now();
-    // Mission events move the version while the classifier runs; decide on the latest record rather than discard the decision.
+    // Refuse any version or candidate drift before publishing a result.
     const latest = await store!.load(scope.mission.id);
     if (latest.kind !== 'found' || !latest.mission.review) { return await fallback('review-evidence-unavailable'); }
+    if (latest.version !== scope.version || context.ports.preReview.head() !== candidateRevision) { return await fallback('classifier-stale-result'); }
     const updated = applyClassifierReview(reviewAtCandidateRevision(latest.mission.review, candidateRevision), source, selected.route, at, firstReview ? findings : []);
     const summary = `${updated.rounds.at(-1)!.decision!.comment}\n\nScope: ${source.findingIds.join(', ')}; revision: ${source.candidateRevision}; policy: ${source.policyVersion}; selected score: ${source.score}.\n[classifier-decision:${decisionId}]`;
     if (!(await ports.publish(source, selected.route, summary))) { return await fallback('classifier-publication-failed'); }

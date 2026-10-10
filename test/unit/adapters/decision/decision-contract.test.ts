@@ -242,3 +242,25 @@ test('an absent provider key is distinguishable from an invalid provider configu
   const message = JSON.stringify(resolveFromEnvironment({}).availability);
   assert.doesNotMatch(message, /sentinel/);
 });
+
+test('frozen panel sends three separate configured requests and retains actual model and usage (TASK-2716)', async () => {
+  const { runPanel } = await import('../../../../src/application/review-classification/panel.js');
+  const { PANEL_QUESTIONS } = await import('../../../../src/application/review-classification/panel-questions.js');
+  const bodies: { model: string; state: unknown; questions: unknown }[] = [];
+  const port = portFromEnvironment({ env: { JEV_CODE_PROVIDER: 'vercel', AI_GATEWAY_API_KEY: 'disposable', TYPESAFE_DEFAULT_MODEL: 'typesafe-ai/jev' },
+    transport: async (_url, options) => {
+      bodies.push(JSON.parse(String(options?.body)));
+      return new Response(JSON.stringify({ model: 'typesafe/jev-1.13-20260917', usage: { input_tokens: 500, output_tokens: 1, cost: 0.001 },
+        answers: { resolution: { type: 'choice', choice: 'addresses', probabilities: { addresses: 0.8, does_not_address: 0.1, insufficient_evidence: 0.1 }, confidence: 0.01 } } }));
+    } });
+  const outcome = await runPanel({ finding: 'a.java:1 preserve output' }, port, { provider: 'vercel', model: 'typesafe-ai/jev' }, () => 'hash');
+  assert.equal(outcome.selected.route, 'clear');
+  assert.equal(bodies.length, 3);
+  for (const [index, body] of bodies.entries()) {
+    assert.equal(body.model, 'typesafe-ai/jev');
+    assert.deepEqual(body.questions, { resolution: Object.values(PANEL_QUESTIONS)[index] });
+    assert.deepEqual(body.state, bodies[0].state);
+    assert.equal(outcome.measurement.members[index].model, 'typesafe/jev-1.13-20260917');
+    assert.deepEqual(outcome.measurement.members[index].usage, { inputTokens: 500, outputTokens: 1, cost: 0.001 });
+  }
+});

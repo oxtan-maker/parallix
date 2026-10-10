@@ -1,0 +1,880 @@
+{
+  "provenance": "Saved research responses only. No new provider calls, tuned questions, fabricated production statistics or per-case context selection. Required safety controls and complementary examples from the fitted 46-case corpus plus fresh TASK-2658 r2. Source paths refer to immutable archived inputs and request hashes retained with each response.",
+  "questions": {
+    "v3": {
+      "type": "choice",
+      "instructions": "Decide whether the repair resolves every prior finding and is safe across the directly affected change surface. The scope includes consequences introduced by the repair, not just the previously named failure mode. Evaluate two requirements together: (1) the requested correction is actually implemented; (2) the correction preserves consistency of affected producers, consumers, configuration and descriptions. Complete referenced files are NOT proof of a complete change surface, and a diff restricted to cited paths may hide other repair changes. For changes to user-facing meaning, classifications, quantities, precision, output formats or terminology, verify the affected consumer-facing descriptions/labels as well as the producing code. A corrected producer alone cannot establish that related descriptions remain accurate. For shared runners, verify argument/configuration composition under the supported invocation variants, not only the tested local path. Choose insufficient_evidence if these material counterparts or paths are absent; do not assume they are correct just because the original finding was narrower. Do not demand unrelated context or new runtime proof for self-contained document/test corrections. Choose does_not_address only for an evidenced unresolved obligation or evidenced related regression, never for an unproven possibility. Exclude unrelated pre-existing defects and improvements. Implementer claims and historical approvals are not authoritative proof.",
+      "criteria": {
+        "addresses": "Both requirements are supported: all prior findings resolved AND consistency/preservation established across materially affected paths and content. A local fix with missing material consumer/description evidence is not addresses.",
+        "does_not_address": "Supplied evidence demonstrates an unresolved prior finding or a related regression from the repair.",
+        "insufficient_evidence": "The local correction may work, but missing material change-surface, counterpart, supported-invocation or description evidence prevents establishing safe resolution."
+      }
+    },
+    "v1": {
+      "type": "choice",
+      "instructions": "Assess whether the candidate resolves all prior findings without introducing a related regression. Check the changed behavior and its directly affected callers, configuration, tests and documentation. A locally correct fix is incomplete if it breaks another supported use of that behavior or leaves related content inconsistent. Exclude unrelated pre-existing defects and unrelated new improvements. Do not exclude a defect merely because the previous reviewer did not mention it: regressions introduced by the repair are in scope. Treat implementer claims as claims; check them against supplied evidence. Match evidence to the obligation: document and checkpoint fixes can be established by document or record changes; executable fixes require tracing executable behavior. Do not require fresh test execution where prior findings permit carrying forward evidence. Choose insufficient_evidence for a specific material missing fact, not does_not_address. Judge the repair and its direct consequences, not unrelated whole-mission quality.",
+      "criteria": {
+        "addresses": "Every prior obligation is resolved, and supplied evidence supports preservation of directly affected behavior and content.",
+        "does_not_address": "Evidence demonstrates an unresolved prior obligation or a related regression introduced by the repair.",
+        "insufficient_evidence": "A specific missing fact prevents determining whether the prior obligations are resolved and directly affected behavior/content preserved."
+      }
+    },
+    "original": {
+      "type": "choice",
+      "instructions": "Assess whether candidate source addresses the entire specific review finding. Trace executable behavior and relevant dependencies. Comments and implementer claims are not proof. Do not approve the whole mission, demand unrelated improvements, or infer runtime tests passed. Select insufficient_evidence when omitted dependencies or ambiguous contracts prevent a reliable judgment. A repair must preserve required behavior on the repaired path: removing a symptom by preventing normal completion, suppressing required output, or introducing another failure does not resolve the finding. Treat implementer explanations as claims to check against source. If preservation cannot be established from supplied evidence, select insufficient_evidence.",
+      "criteria": {
+        "addresses": "The supplied executable source removes all failure modes described in the specific finding.",
+        "does_not_address": "The supplied source demonstrates at least one described failure mode still exists, including an incomplete fix.",
+        "insufficient_evidence": "The supplied source does not support a reliable resolution judgment."
+      }
+    }
+  },
+  "cases": [
+    {
+      "id": "dev-2-task-2500.05-r3",
+      "expected": "reviewer",
+      "pinned": {
+        "before": "564c81fe31e2066c0a0cf56e728c6c1cc1ea5f1e",
+        "after": "96209152d2d6d3c673a8c6705770cc8720334c94"
+      },
+      "members": [
+        {
+          "question": "v3",
+          "source": "/mnt/data/code/parallix-research/jev-10-10/question-tuning/v3-change-surface-consistency/results.json",
+          "requestFile": "requests/dev-2-task-2500.05-r3.json",
+          "requestSha256": "aed0327935572224a6acee921d7e6efd2142e07f57fd7ab5affdc9a7a4e97bec",
+          "stateSha256": "972cd839e3b85df79e786b052f04a18051fc03a47762a851e347d1cb8eea5abd",
+          "response": {
+            "provider": "openrouter",
+            "model": "typesafe/jev-1.13-20260917",
+            "answers": {
+              "resolution": {
+                "type": "choice",
+                "selected": "does_not_address",
+                "probabilities": {
+                  "addresses": 0.01,
+                  "does_not_address": 0.92,
+                  "insufficient_evidence": 0.07
+                },
+                "confidence": 0.88
+              }
+            },
+            "usage": {
+              "inputTokens": 2964,
+              "outputTokens": 48,
+              "cost": 0.000124488
+            }
+          }
+        },
+        {
+          "question": "v1",
+          "source": "/mnt/data/code/parallix-research/jev-10-10/question-tuning/v1-repair-consequences/results.json",
+          "requestFile": "requests/dev-2-task-2500.05-r3.json",
+          "requestSha256": "f0d49bcd6793300170b4c557aba6ac23b21c91424aeaad84337e879cd097edd4",
+          "stateSha256": "972cd839e3b85df79e786b052f04a18051fc03a47762a851e347d1cb8eea5abd",
+          "response": {
+            "provider": "openrouter",
+            "model": "typesafe/jev-1.13-20260917",
+            "answers": {
+              "resolution": {
+                "type": "choice",
+                "selected": "does_not_address",
+                "probabilities": {
+                  "addresses": 0.01,
+                  "does_not_address": 0.88,
+                  "insufficient_evidence": 0.11
+                },
+                "confidence": 0.82
+              }
+            },
+            "usage": {
+              "inputTokens": 2858,
+              "outputTokens": 48,
+              "cost": 0.000120036
+            }
+          }
+        },
+        {
+          "question": "original",
+          "source": "/mnt/data/code/parallix-research/jev-10-10/generalization/results.json",
+          "requestFile": "requests/dev-2-task-2500.05-r3--archived-old.json",
+          "requestSha256": "736814c2215281f385bf32377df2f1c58297c56f82349d088c56a966bc2727c2",
+          "stateSha256": "972cd839e3b85df79e786b052f04a18051fc03a47762a851e347d1cb8eea5abd",
+          "response": {
+            "provider": "openrouter",
+            "model": "typesafe/jev-1.13-20260917",
+            "answers": {
+              "resolution": {
+                "type": "choice",
+                "selected": "insufficient_evidence",
+                "probabilities": {
+                  "addresses": 0,
+                  "does_not_address": 0.07,
+                  "insufficient_evidence": 0.93
+                },
+                "confidence": 0.89
+              }
+            },
+            "usage": {
+              "inputTokens": 2796,
+              "outputTokens": 52,
+              "cost": 0.000117432
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "dev-3-task-2598-r2",
+      "expected": "clear",
+      "pinned": {
+        "before": "0db4c403eb1d9206490ffcaf9ed91f92d87a995b",
+        "after": "dac94631d34d9ad6e43cd641c64b016770a872e9"
+      },
+      "members": [
+        {
+          "question": "v3",
+          "source": "/mnt/data/code/parallix-research/jev-10-10/question-tuning/v3-change-surface-consistency/results.json",
+          "requestFile": "requests/dev-3-task-2598-r2.json",
+          "requestSha256": "3ceaea6cb9e445ffe53cb5add8b903bce292ae915b992c48f9ee84ef49c4afe0",
+          "stateSha256": "faaf3ddc5b0b3df0fe0840c432314f647c5c90d11ad2b588867dea865d7395b1",
+          "response": {
+            "provider": "openrouter",
+            "model": "typesafe/jev-1.13-20260917",
+            "answers": {
+              "resolution": {
+                "type": "choice",
+                "selected": "insufficient_evidence",
+                "probabilities": {
+                  "addresses": 0.47,
+                  "does_not_address": 0.03,
+                  "insufficient_evidence": 0.5
+                },
+                "confidence": 0.25
+              }
+            },
+            "usage": {
+              "inputTokens": 12284,
+              "outputTokens": 52,
+              "cost": 0.000515928
+            }
+          }
+        },
+        {
+          "question": "v1",
+          "source": "/mnt/data/code/parallix-research/jev-10-10/question-tuning/v1-repair-consequences/results.json",
+          "requestFile": "requests/dev-3-task-2598-r2.json",
+          "requestSha256": "3cd320c0da055a20e30fb82390627252c5331b83b79af8d631eea8d2096277bb",
+          "stateSha256": "faaf3ddc5b0b3df0fe0840c432314f647c5c90d11ad2b588867dea865d7395b1",
+          "response": {
+            "provider": "openrouter",
+            "model": "typesafe/jev-1.13-20260917",
+            "answers": {
+              "resolution": {
+                "type": "choice",
+                "selected": "addresses",
+                "probabilities": {
+                  "addresses": 0.8,
+                  "does_not_address": 0.03,
+                  "insufficient_evidence": 0.17
+                },
+                "confidence": 0.7
+              }
+            },
+            "usage": {
+              "inputTokens": 12178,
+              "outputTokens": 46,
+              "cost": 0.000511476
+            }
+          }
+        },
+        {
+          "question": "original",
+          "source": "/mnt/data/code/parallix-research/jev-10-10/generalization/results.json",
+          "requestFile": "requests/dev-3-task-2598-r2--archived-old.json",
+          "requestSha256": "8f0edf2bb47a461e90fb1746ef340428097e87bb6e754741da83cee9546ccd6e",
+          "stateSha256": "faaf3ddc5b0b3df0fe0840c432314f647c5c90d11ad2b588867dea865d7395b1",
+          "response": {
+            "provider": "openrouter",
+            "model": "typesafe/jev-1.13-20260917",
+            "answers": {
+              "resolution": {
+                "type": "choice",
+                "selected": "addresses",
+                "probabilities": {
+                  "addresses": 0.63,
+                  "does_not_address": 0.02,
+                  "insufficient_evidence": 0.35
+                },
+                "confidence": 0.45
+              }
+            },
+            "usage": {
+              "inputTokens": 12116,
+              "outputTokens": 46,
+              "cost": 0.000508872
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "dev-4-task-2586-r2",
+      "expected": "reviewer",
+      "pinned": {
+        "before": "4a85ccac33adf0d9b7efde4f6eb761fdead3a414",
+        "after": "33c2ce1d3a2d0fc6b42007bd24faf886c00d17fe"
+      },
+      "members": [
+        {
+          "question": "v3",
+          "source": "/mnt/data/code/parallix-research/jev-10-10/question-tuning/v3-change-surface-consistency/results.json",
+          "requestFile": "requests/dev-4-task-2586-r2.json",
+          "requestSha256": "b737e6f0570bb1458da4cdb9c550408bb09b55e48e08b81a46337704b5f8903e",
+          "stateSha256": "716f57bb1702cd9ff767b02532efbfad33507de5911ce8d9f4a76a342fafb8da",
+          "response": {
+            "provider": "openrouter",
+            "model": "typesafe/jev-1.13-20260917",
+            "answers": {
+              "resolution": {
+                "type": "choice",
+                "selected": "insufficient_evidence",
+                "probabilities": {
+                  "addresses": 0.27,
+                  "does_not_address": 0.17,
+                  "insufficient_evidence": 0.55
+                },
+                "confidence": 0.33
+              }
+            },
+            "usage": {
+              "inputTokens": 20549,
+              "outputTokens": 52,
+              "cost": 0.000863058
+            }
+          }
+        },
+        {
+          "question": "v1",
+          "source": "/mnt/data/code/parallix-research/jev-10-10/question-tuning/v1-repair-consequences/results.json",
+          "requestFile": "requests/dev-4-task-2586-r2.json",
+          "requestSha256": "bbaa84e5ff9a0141485730ef1f0a16e77d95581b790938242d7821091439052e",
+          "stateSha256": "716f57bb1702cd9ff767b02532efbfad33507de5911ce8d9f4a76a342fafb8da",
+          "response": {
+            "provider": "openrouter",
+            "model": "typesafe/jev-1.13-20260917",
+            "answers": {
+              "resolution": {
+                "type": "choice",
+                "selected": "addresses",
+                "probabilities": {
+                  "addresses": 0.53,
+                  "does_not_address": 0.18,
+                  "insufficient_evidence": 0.29
+                },
+                "confidence": 0.3
+              }
+            },
+            "usage": {
+              "inputTokens": 20443,
+              "outputTokens": 46,
+              "cost": 0.000858606
+            }
+          }
+        },
+        {
+          "question": "original",
+          "source": "/mnt/data/code/parallix-research/jev-10-10/generalization/results.json",
+          "requestFile": "requests/dev-4-task-2586-r2--archived-old.json",
+          "requestSha256": "43a5e4beda9fa681faef70918be4f3e8c84e1581251871b0d6fb32771beac740",
+          "stateSha256": "716f57bb1702cd9ff767b02532efbfad33507de5911ce8d9f4a76a342fafb8da",
+          "response": {
+            "provider": "openrouter",
+            "model": "typesafe/jev-1.13-20260917",
+            "answers": {
+              "resolution": {
+                "type": "choice",
+                "selected": "insufficient_evidence",
+                "probabilities": {
+                  "addresses": 0.34,
+                  "does_not_address": 0.23,
+                  "insufficient_evidence": 0.43
+                },
+                "confidence": 0.14
+              }
+            },
+            "usage": {
+              "inputTokens": 20381,
+              "outputTokens": 52,
+              "cost": 0.000856002
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "dev-30-task-2640-r2-F1-correction",
+      "expected": "reviewer",
+      "pinned": {
+        "before": "c54cc30294af7ad9cf03e2f3356e5bcdc6764549",
+        "after": "732414c32193e852a454691d388dd31211ad9783"
+      },
+      "members": [
+        {
+          "question": "v3",
+          "source": "/mnt/data/code/parallix-research/jev-10-10/question-tuning/v3-change-surface-consistency/results.json",
+          "requestFile": "requests/dev-30-task-2640-r2-F1-correction.json",
+          "requestSha256": "89c09cc3f646796520bf10cb43c9bb1755a3346f228b1968700cf6a33d9a9f47",
+          "stateSha256": "21dfa77707239e657dc238592c8b8c79feea42a74215fad84ccef11e91eaf255",
+          "response": {
+            "provider": "openrouter",
+            "model": "typesafe/jev-1.13-20260917",
+            "answers": {
+              "resolution": {
+                "type": "choice",
+                "selected": "insufficient_evidence",
+                "probabilities": {
+                  "addresses": 0.4,
+                  "does_not_address": 0.03,
+                  "insufficient_evidence": 0.57
+                },
+                "confidence": 0.35
+              }
+            },
+            "usage": {
+              "inputTokens": 4048,
+              "outputTokens": 52,
+              "cost": 0.000170016
+            }
+          }
+        },
+        {
+          "question": "v1",
+          "source": "/mnt/data/code/parallix-research/jev-10-10/question-tuning/v1-repair-consequences/results.json",
+          "requestFile": "requests/dev-30-task-2640-r2-F1-correction.json",
+          "requestSha256": "4498995839631e11a4596d9f6b6c65dc57c205d35a2a03912304903febeb01df",
+          "stateSha256": "21dfa77707239e657dc238592c8b8c79feea42a74215fad84ccef11e91eaf255",
+          "response": {
+            "provider": "openrouter",
+            "model": "typesafe/jev-1.13-20260917",
+            "answers": {
+              "resolution": {
+                "type": "choice",
+                "selected": "addresses",
+                "probabilities": {
+                  "addresses": 0.72,
+                  "does_not_address": 0.04,
+                  "insufficient_evidence": 0.24
+                },
+                "confidence": 0.58
+              }
+            },
+            "usage": {
+              "inputTokens": 3942,
+              "outputTokens": 46,
+              "cost": 0.000165564
+            }
+          }
+        },
+        {
+          "question": "original",
+          "source": "/mnt/data/code/parallix-research/jev-10-10/generalization/results.json",
+          "requestFile": "requests/dev-30-task-2640-r2-F1-correction--archived-old.json",
+          "requestSha256": "704d89c94cba506368fab5439e059a805c7ffd84198060557eecbada30daecda",
+          "stateSha256": "21dfa77707239e657dc238592c8b8c79feea42a74215fad84ccef11e91eaf255",
+          "response": {
+            "provider": "openrouter",
+            "model": "typesafe/jev-1.13-20260917",
+            "answers": {
+              "resolution": {
+                "type": "choice",
+                "selected": "addresses",
+                "probabilities": {
+                  "addresses": 0.6,
+                  "does_not_address": 0.03,
+                  "insufficient_evidence": 0.37
+                },
+                "confidence": 0.4
+              }
+            },
+            "usage": {
+              "inputTokens": 3880,
+              "outputTokens": 46,
+              "cost": 0.00016296
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "dev-32-task-2640-r2-F3-correction",
+      "expected": "reviewer",
+      "pinned": {
+        "before": "c54cc30294af7ad9cf03e2f3356e5bcdc6764549",
+        "after": "732414c32193e852a454691d388dd31211ad9783"
+      },
+      "members": [
+        {
+          "question": "v3",
+          "source": "/mnt/data/code/parallix-research/jev-10-10/question-tuning/v3-change-surface-consistency/results.json",
+          "requestFile": "requests/dev-32-task-2640-r2-F3-correction.json",
+          "requestSha256": "674a1b8629baaac858504cd2073c8973aa0404260aaf166df227d2005467b4e1",
+          "stateSha256": "d851be5503c9ca81bbc2be1fe4bd0ce7d3ac8721364b8b17505df247527397fe",
+          "response": {
+            "provider": "openrouter",
+            "model": "typesafe/jev-1.13-20260917",
+            "answers": {
+              "resolution": {
+                "type": "choice",
+                "selected": "insufficient_evidence",
+                "probabilities": {
+                  "addresses": 0.47,
+                  "does_not_address": 0.03,
+                  "insufficient_evidence": 0.5
+                },
+                "confidence": 0.25
+              }
+            },
+            "usage": {
+              "inputTokens": 3739,
+              "outputTokens": 52,
+              "cost": 0.000157038
+            }
+          }
+        },
+        {
+          "question": "v1",
+          "source": "/mnt/data/code/parallix-research/jev-10-10/question-tuning/v1-repair-consequences/results.json",
+          "requestFile": "requests/dev-32-task-2640-r2-F3-correction.json",
+          "requestSha256": "fb1e2eadcd61c29a5f7ee9df7512145a10cbfd6405cb826ab1ba3f824483db3d",
+          "stateSha256": "d851be5503c9ca81bbc2be1fe4bd0ce7d3ac8721364b8b17505df247527397fe",
+          "response": {
+            "provider": "openrouter",
+            "model": "typesafe/jev-1.13-20260917",
+            "answers": {
+              "resolution": {
+                "type": "choice",
+                "selected": "addresses",
+                "probabilities": {
+                  "addresses": 0.79,
+                  "does_not_address": 0.07,
+                  "insufficient_evidence": 0.14
+                },
+                "confidence": 0.69
+              }
+            },
+            "usage": {
+              "inputTokens": 3633,
+              "outputTokens": 46,
+              "cost": 0.000152586
+            }
+          }
+        },
+        {
+          "question": "original",
+          "source": "/mnt/data/code/parallix-research/jev-10-10/generalization/results.json",
+          "requestFile": "requests/dev-32-task-2640-r2-F3-correction--archived-old.json",
+          "requestSha256": "2ff661939cf20612675dfd33dc72771c39bb7b3f40f508b71889be0beceedd6c",
+          "stateSha256": "d851be5503c9ca81bbc2be1fe4bd0ce7d3ac8721364b8b17505df247527397fe",
+          "response": {
+            "provider": "openrouter",
+            "model": "typesafe/jev-1.13-20260917",
+            "answers": {
+              "resolution": {
+                "type": "choice",
+                "selected": "addresses",
+                "probabilities": {
+                  "addresses": 0.92,
+                  "does_not_address": 0.01,
+                  "insufficient_evidence": 0.07
+                },
+                "confidence": 0.88
+              }
+            },
+            "usage": {
+              "inputTokens": 3571,
+              "outputTokens": 46,
+              "cost": 0.000149982
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "dev-41-task-2626-r1-F2-original",
+      "expected": "implementer",
+      "pinned": {
+        "before": "4678bae15fe6ec046c0cf806bb50833ed8788225",
+        "after": "4678bae15fe6ec046c0cf806bb50833ed8788225"
+      },
+      "members": [
+        {
+          "question": "v3",
+          "source": "/mnt/data/code/parallix-research/jev-10-10/question-tuning/v3-change-surface-consistency/results.json",
+          "requestFile": "requests/dev-41-task-2626-r1-F2-original.json",
+          "requestSha256": "4043bcef73ea65710ae82b56ce020964cf0a9f822e4b94d5a33cdc1bd0a96919",
+          "stateSha256": "1a9a8e6e7ef81b1851a559d1b18c638c7371b0afe34643a468d9614eed3d4c38",
+          "response": {
+            "provider": "openrouter",
+            "model": "typesafe/jev-1.13-20260917",
+            "answers": {
+              "resolution": {
+                "type": "choice",
+                "selected": "does_not_address",
+                "probabilities": {
+                  "addresses": 0,
+                  "does_not_address": 0.65,
+                  "insufficient_evidence": 0.35
+                },
+                "confidence": 0.48
+              }
+            },
+            "usage": {
+              "inputTokens": 14674,
+              "outputTokens": 48,
+              "cost": 0.000616308
+            }
+          }
+        },
+        {
+          "question": "v1",
+          "source": "/mnt/data/code/parallix-research/jev-10-10/question-tuning/v1-repair-consequences/results.json",
+          "requestFile": "requests/dev-41-task-2626-r1-F2-original.json",
+          "requestSha256": "df2976e1fd2d484f56f215f13e2a55bf7e18862769b929b8536b17fc254125ea",
+          "stateSha256": "1a9a8e6e7ef81b1851a559d1b18c638c7371b0afe34643a468d9614eed3d4c38",
+          "response": {
+            "provider": "openrouter",
+            "model": "typesafe/jev-1.13-20260917",
+            "answers": {
+              "resolution": {
+                "type": "choice",
+                "selected": "does_not_address",
+                "probabilities": {
+                  "addresses": 0.01,
+                  "does_not_address": 0.75,
+                  "insufficient_evidence": 0.24
+                },
+                "confidence": 0.62
+              }
+            },
+            "usage": {
+              "inputTokens": 14568,
+              "outputTokens": 48,
+              "cost": 0.000611856
+            }
+          }
+        },
+        {
+          "question": "original",
+          "source": "/mnt/data/code/parallix-research/jev-10-10/generalization/results.json",
+          "requestFile": "requests/dev-41-task-2626-r1-F2-original--archived-old.json",
+          "requestSha256": "cc94a1184ca5f72529be0ab201206c8e0a9153fd792cda782794a4937def62a8",
+          "stateSha256": "1a9a8e6e7ef81b1851a559d1b18c638c7371b0afe34643a468d9614eed3d4c38",
+          "response": {
+            "provider": "openrouter",
+            "model": "typesafe/jev-1.13-20260917",
+            "answers": {
+              "resolution": {
+                "type": "choice",
+                "selected": "does_not_address",
+                "probabilities": {
+                  "addresses": 0.01,
+                  "does_not_address": 0.92,
+                  "insufficient_evidence": 0.07
+                },
+                "confidence": 0.88
+              }
+            },
+            "usage": {
+              "inputTokens": 14506,
+              "outputTokens": 48,
+              "cost": 0.000609252
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "dev-45-task-2637.03-r1-F3-original",
+      "expected": "implementer",
+      "pinned": {
+        "before": "34927bf4ce573f9f95806bc807d31718b52f61f7",
+        "after": "34927bf4ce573f9f95806bc807d31718b52f61f7"
+      },
+      "members": [
+        {
+          "question": "v3",
+          "source": "/mnt/data/code/parallix-research/jev-10-10/question-tuning/v3-change-surface-consistency/results.json",
+          "requestFile": "requests/dev-45-task-2637.03-r1-F3-original.json",
+          "requestSha256": "d7e606eea9b361df793912b979d3e59f32ed44d84d2eacee2899c1211cb3eb66",
+          "stateSha256": "47cc0f02617f3c14b59eebf7a28740f938d79e6a1e5cc4b5fc2583a3c603cedc",
+          "response": {
+            "provider": "openrouter",
+            "model": "typesafe/jev-1.13-20260917",
+            "answers": {
+              "resolution": {
+                "type": "choice",
+                "selected": "does_not_address",
+                "probabilities": {
+                  "addresses": 0,
+                  "does_not_address": 0.83,
+                  "insufficient_evidence": 0.17
+                },
+                "confidence": 0.74
+              }
+            },
+            "usage": {
+              "inputTokens": 5134,
+              "outputTokens": 48,
+              "cost": 0.000215628
+            }
+          }
+        },
+        {
+          "question": "v1",
+          "source": "/mnt/data/code/parallix-research/jev-10-10/question-tuning/v1-repair-consequences/results.json",
+          "requestFile": "requests/dev-45-task-2637.03-r1-F3-original.json",
+          "requestSha256": "5bc35b7cdd59cbb4072dab4c68dee4f7fe6d05a312cf9c49bf70df6e3e8671ff",
+          "stateSha256": "47cc0f02617f3c14b59eebf7a28740f938d79e6a1e5cc4b5fc2583a3c603cedc",
+          "response": {
+            "provider": "openrouter",
+            "model": "typesafe/jev-1.13-20260917",
+            "answers": {
+              "resolution": {
+                "type": "choice",
+                "selected": "does_not_address",
+                "probabilities": {
+                  "addresses": 0,
+                  "does_not_address": 0.91,
+                  "insufficient_evidence": 0.09
+                },
+                "confidence": 0.86
+              }
+            },
+            "usage": {
+              "inputTokens": 5028,
+              "outputTokens": 48,
+              "cost": 0.000211176
+            }
+          }
+        },
+        {
+          "question": "original",
+          "source": "/mnt/data/code/parallix-research/jev-10-10/generalization/results.json",
+          "requestFile": "requests/dev-45-task-2637.03-r1-F3-original--archived-old.json",
+          "requestSha256": "891eb4b206f496d5b096b2eea17caf7d592cfe43b21106924086cfd0b51d1092",
+          "stateSha256": "47cc0f02617f3c14b59eebf7a28740f938d79e6a1e5cc4b5fc2583a3c603cedc",
+          "response": {
+            "provider": "openrouter",
+            "model": "typesafe/jev-1.13-20260917",
+            "answers": {
+              "resolution": {
+                "type": "choice",
+                "selected": "does_not_address",
+                "probabilities": {
+                  "addresses": 0,
+                  "does_not_address": 0.81,
+                  "insufficient_evidence": 0.19
+                },
+                "confidence": 0.72
+              }
+            },
+            "usage": {
+              "inputTokens": 4966,
+              "outputTokens": 48,
+              "cost": 0.000208572
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "dev-46-task-2637.03-r1-F3-correction",
+      "expected": "clear",
+      "pinned": {
+        "before": "34927bf4ce573f9f95806bc807d31718b52f61f7",
+        "after": "4ef098d8e56f3d265cc07b1d4152d30ef2225bb8"
+      },
+      "members": [
+        {
+          "question": "v3",
+          "source": "/mnt/data/code/parallix-research/jev-10-10/question-tuning/v3-change-surface-consistency/results.json",
+          "requestFile": "requests/dev-46-task-2637.03-r1-F3-correction.json",
+          "requestSha256": "0fc85d22f52515cc4d4b19f06762167fd56309e3815eaad5d6c85d15300c5c02",
+          "stateSha256": "ce65d0668911c171b1c5efdf41d88c15d393e0e280b80bde49e13ddda18a9258",
+          "response": {
+            "provider": "openrouter",
+            "model": "typesafe/jev-1.13-20260917",
+            "answers": {
+              "resolution": {
+                "type": "choice",
+                "selected": "insufficient_evidence",
+                "probabilities": {
+                  "addresses": 0.41,
+                  "does_not_address": 0.02,
+                  "insufficient_evidence": 0.57
+                },
+                "confidence": 0.35
+              }
+            },
+            "usage": {
+              "inputTokens": 6497,
+              "outputTokens": 52,
+              "cost": 0.000272874
+            }
+          }
+        },
+        {
+          "question": "v1",
+          "source": "/mnt/data/code/parallix-research/jev-10-10/question-tuning/v1-repair-consequences/results.json",
+          "requestFile": "requests/dev-46-task-2637.03-r1-F3-correction.json",
+          "requestSha256": "b7ab1c706882716de09af6e9768ba963e9150ccc597c25f525e3d8d09eece182",
+          "stateSha256": "ce65d0668911c171b1c5efdf41d88c15d393e0e280b80bde49e13ddda18a9258",
+          "response": {
+            "provider": "openrouter",
+            "model": "typesafe/jev-1.13-20260917",
+            "answers": {
+              "resolution": {
+                "type": "choice",
+                "selected": "addresses",
+                "probabilities": {
+                  "addresses": 0.91,
+                  "does_not_address": 0.02,
+                  "insufficient_evidence": 0.07
+                },
+                "confidence": 0.86
+              }
+            },
+            "usage": {
+              "inputTokens": 6391,
+              "outputTokens": 46,
+              "cost": 0.000268422
+            }
+          }
+        },
+        {
+          "question": "original",
+          "source": "/mnt/data/code/parallix-research/jev-10-10/generalization/results.json",
+          "requestFile": "requests/dev-46-task-2637.03-r1-F3-correction--archived-old.json",
+          "requestSha256": "fc73d5b91744715687f7434ad170e1522ac01d28dd40bf72da832f876c37906b",
+          "stateSha256": "ce65d0668911c171b1c5efdf41d88c15d393e0e280b80bde49e13ddda18a9258",
+          "response": {
+            "provider": "openrouter",
+            "model": "typesafe/jev-1.13-20260917",
+            "answers": {
+              "resolution": {
+                "type": "choice",
+                "selected": "addresses",
+                "probabilities": {
+                  "addresses": 0.85,
+                  "does_not_address": 0.01,
+                  "insufficient_evidence": 0.14
+                },
+                "confidence": 0.77
+              }
+            },
+            "usage": {
+              "inputTokens": 6329,
+              "outputTokens": 46,
+              "cost": 0.000265818
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "task-2658-r2",
+      "expected": "clear",
+      "pinned": {
+        "before": "7b9ff189b12cbfbde11f51fb9d1424af9c8542ac",
+        "after": "647110904eafebcd4beb0a20190985003dabfdbd"
+      },
+      "members": [
+        {
+          "question": "v3",
+          "source": "/mnt/data/code/parallix-research/jev-10-10/combination-validation-10/responses/task-2658-r2--v3.json",
+          "requestFile": "requests/task-2658-r2--v3.json",
+          "requestSha256": "f577e07717d2c59064ea65ba8d36d4ae501505ffe4dec8f2ad07a671b58aea9f",
+          "stateSha256": "ad9bdf527f61e704991d80b60afe2ed5391d94a80aee593a534a72dbc2f31eb5",
+          "response": {
+            "provider": "openrouter",
+            "model": "typesafe/jev-1.13-20260917",
+            "answers": {
+              "resolution": {
+                "type": "choice",
+                "selected": "insufficient_evidence",
+                "probabilities": {
+                  "addresses": 0.45,
+                  "does_not_address": 0.02,
+                  "insufficient_evidence": 0.53
+                },
+                "confidence": 0.3
+              }
+            },
+            "usage": {
+              "inputTokens": 6923,
+              "outputTokens": 52,
+              "cost": 0.000290766
+            }
+          }
+        },
+        {
+          "question": "v1",
+          "source": "/mnt/data/code/parallix-research/jev-10-10/combination-validation-10/responses/task-2658-r2--v1.json",
+          "requestFile": "requests/task-2658-r2--v1.json",
+          "requestSha256": "b25ac6d7d10e786714001deec7f1997fc43371ef1f09ca118b771214bbab2fcf",
+          "stateSha256": "ad9bdf527f61e704991d80b60afe2ed5391d94a80aee593a534a72dbc2f31eb5",
+          "response": {
+            "provider": "openrouter",
+            "model": "typesafe/jev-1.13-20260917",
+            "answers": {
+              "resolution": {
+                "type": "choice",
+                "selected": "addresses",
+                "probabilities": {
+                  "addresses": 0.86,
+                  "does_not_address": 0.03,
+                  "insufficient_evidence": 0.11
+                },
+                "confidence": 0.79
+              }
+            },
+            "usage": {
+              "inputTokens": 6817,
+              "outputTokens": 46,
+              "cost": 0.000286314
+            }
+          }
+        },
+        {
+          "question": "original",
+          "source": "/mnt/data/code/parallix-research/jev-10-10/combination-validation-10/responses/task-2658-r2--original.json",
+          "requestFile": "requests/task-2658-r2--original.json",
+          "requestSha256": "85653509c8f5ec9d81c81889dd6e9834bcbcf50fe3fe5238e5a452c28ce6d547",
+          "stateSha256": "ad9bdf527f61e704991d80b60afe2ed5391d94a80aee593a534a72dbc2f31eb5",
+          "response": {
+            "provider": "openrouter",
+            "model": "typesafe/jev-1.13-20260917",
+            "answers": {
+              "resolution": {
+                "type": "choice",
+                "selected": "addresses",
+                "probabilities": {
+                  "addresses": 0.49,
+                  "does_not_address": 0.23,
+                  "insufficient_evidence": 0.28
+                },
+                "confidence": 0.23
+              }
+            },
+            "usage": {
+              "inputTokens": 6755,
+              "outputTokens": 46,
+              "cost": 0.00028371
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

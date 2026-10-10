@@ -2,6 +2,7 @@ import type { ClassifierRoute } from '../review-classification/routing-policy.js
 
 /** Call measurements carry deduplication metadata; no durable launch or retry entity. */
 export interface ClassifierCallMeasurement {
+  readonly panel?: import('../review-classification/panel.js').PanelMeasurement;
   readonly decisionId: string;
   readonly fingerprint: string;
   readonly repository: string;

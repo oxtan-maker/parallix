@@ -3,8 +3,8 @@ id: TASK-2716
 title: >-
   Implement the three-question Jev re-review baseline with archived mechanical
   packing
-status: backlog
-assignee: []
+status: done
+assignee: [codex]
 created_date: '2026-10-10 13:44'
 updated_date: '2026-10-10 13:49'
 labels:
@@ -125,3 +125,40 @@ Sandbox access: Parallix Bubblewrap mounts the host root read-only, so the absol
 - [ ] #5 Docs updated to reflect any workflow or user-facing behavior change
 - [ ] #6 Bug-labeled missions include a red-to-green reproduction test that fails before the fix and passes after
 <!-- DOD:END -->
+
+## Delivery notes
+
+Implemented the operator-chosen experimental frozen three-question baseline
+through the existing decision/evidence/telemetry boundaries. The optional typed
+panel payload extends the existing measurement without changing architectural
+principles, dependency direction, composition authority or publication authority.
+The updated repository instructions reserve approval for changes to those
+principles; the previous pending typed-field proposal is resolved under that rule.
+
+Fitted results remain 17/46 development decisions (10 approvals, 7 rejects), with
+synthetic and correlated repairs; the frozen fresh cohort yielded 1/10 approvals,
+nine deferrals and three preparation failures. These are not production coverage,
+zero-error or rejection-recall claims. No next-ten samples have been generated.
+The operator will collect ten new regular-development samples in 1–2 days and
+adjudicate source-supported correctness separately from historical parity,
+retaining shared mistakes, ambiguity, preparation failures and abstentions.
+
+Local measurement rows retain bounded per-question votes/model/usage, policy and
+question hashes, packing identity, packet hash and pinned revisions. Export the
+selected new sample rows read-only from the operator database as JSON arrays,
+then run `npx tsx tools/review-classification/replay-panel.ts /external/samples.json`.
+For example, SQLite's read-only CLI can export arrays with
+`sqlite3 -readonly /operator/parallix.db "SELECT json_group_array(json(samples)) FROM review_classifier_measurements WHERE decision_id IN ('selected-real-decision-id');" > /external/samples.json`.
+Select the ten real decisions recorded during the cohort; do not write synthetic
+statistics or credentials. Replay checks frozen question/policy/packing identity,
+probabilities, channel votes and applied aggregation; source adjudication still
+requires the original obligations and pinned Git revisions.
+
+`npx tsx tools/review-classification/manual-panel.ts /tmp/task-2716-manual-panel-samples.json`
+runs the public CLI dispatcher/review command in disposable Git/SQLite/home state
+with fixture provider transport, publication and agent launch. It exercises
+approval, return, conflict/failure fallback and HEAD drift without contacting
+operator services. Cleanup removes temporary repositories and databases; the
+optional external measurement export can be replayed by the command above.
+Measurements and verification results are recorded in application-owned
+checkpoints, not retired mission documents.

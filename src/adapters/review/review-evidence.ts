@@ -52,7 +52,7 @@ export class GitReviewEvidence implements ReviewEvidencePort {
     return await this.read(['show', `${revision}:${path}`]);
   }
   async diff(prior: string, candidate: string, paths: readonly string[]): Promise<string> {
-    return await this.read(['diff', '--no-ext-diff', '--no-textconv', '--unified=0', prior, candidate, '--', ...paths]);
+    return await this.read(['-c', 'core.abbrev=9', 'diff', '--no-ext-diff', '--no-textconv', '--unified=0', prior, candidate, '--', ...paths]);
   }
   async missionInterdiff(before: MissionRevision, after: MissionRevision): Promise<MissionInterdiff> {
     const patch = (side: MissionRevision) => this.read(['diff', '--no-ext-diff', '--no-textconv', '--unified=0', side.baseline, side.revision]);

@@ -27,8 +27,7 @@ export function resolveEvidencePath(token: string, tree: readonly string[]): str
 export function sourceWindows(source: string, hints: readonly number[], changed: readonly number[], symbols: readonly string[]): {
   excerpts: Excerpt[]; omissions: string[];
 } {
-  const lines = source ? source.split('\n').map((line, index, all) =>
-    index < all.length - 1 ? `${line}\n` : line).filter(Boolean) : [];
+  const lines = source.match(/[^\r\n\v\f\x1c-\x1e\x85\u2028\u2029]*(?:\r\n|[\r\n\v\f\x1c-\x1e\x85\u2028\u2029]|$)/g)?.filter(Boolean) ?? [];
   const anchors = [...new Set([...hints, ...changed])].slice(0, 32);
   for (const symbol of symbols) {
     const escaped = symbol.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');

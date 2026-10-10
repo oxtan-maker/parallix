@@ -289,3 +289,24 @@ test('a rebased repair is compared as a baseline-relative mission interdiff (TAS
   const sameBase = await buildPacket({ ...input, missionRange: { ...range, candidate: { ...range.candidate, baseline: range.approved.baseline } } }, repo, undefined, repairBudget, true);
   assert.doesNotMatch((sameBase.request.state as { repairComparison: string }).repairComparison, /rebase-induced/);
 });
+
+test('archived packing retains small files, staged basename expansion and mandatory budgets (TASK-2716)', async () => {
+  const { packArchivedState, buildArchivedEvidencePacket } = await import('../../../../src/application/review-classification/archived-packing.js');
+  const source = 'small file without any lexical anchor\n';
+  const packet = await packArchivedState(input, { ...repository, source: async () => source });
+  assert.equal((packet.request.state as { candidateSourceExcerpts: Record<string, { text: string }[]> }).candidateSourceExcerpts['lib/x.java'][0].text, source);
+  await assert.rejects(packArchivedState({ ...input, priorReviewComment: 'Fix x.java' }, repository), /archived-window-preparation-fallback/, 'base window must fit before basename expansion');
+  await assert.rejects(buildArchivedEvidencePacket(input, repository, budgetOf(() => 100, 1)), EvidenceOverBudgetError);
+  await assert.rejects(buildArchivedEvidencePacket(input, { ...repository, tree: async revision => {
+    if (revision === input.priorRevision) { throw new Error('missing'); }
+    return ['lib/x.java'];
+  } }, budgetOf(() => 1)), /Pinned prior revision unavailable/);
+  await assert.rejects(packArchivedState(input, { ...repository, source: async () => { throw new EvidenceReadError('missing source'); } }), EvidenceReadError);
+});
+
+test('archived packing retains the bounded diff fallback and refuses oversized obligations (TASK-2716)', async () => {
+  const { packArchivedState } = await import('../../../../src/application/review-classification/archived-packing.js');
+  const packet = await packArchivedState(input, { ...repository, diff: async () => 'x'.repeat(15001) });
+  assert.match((packet.request.state as { diff: string }).diff, /Diff exceeds bounded allowance/);
+  await assert.rejects(packArchivedState({ ...input, implementerResponse: 'mandatory '.repeat(10000) }, repository), /archived-window-preparation-fallback/);
+});

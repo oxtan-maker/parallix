@@ -10,8 +10,14 @@ import { fixtureMission, inMemoryTransitionStore } from '../../../fixtures/missi
 import { repeatReview } from '../../../fixtures/repeat-review.js';
 import { MissionLifecycleService } from '../../../../src/application/mission-lifecycle-service.js';
 import { EvidenceReadError } from '../../../../src/application/ports/review-evidence.js';
+import { PANEL_QUESTIONS } from '../../../../src/application/review-classification/panel-questions.js';
+import type { DecisionResult } from '../../../../src/application/ports/decision.js';
 import type { ReviewClassificationPorts } from '../../../../src/application/ports/review-classification.js';
 import type { ClassifierCallMeasurement, ClassifierObservation } from '../../../../src/application/ports/review-classification-telemetry.js';
+
+function distribution(selected: string, score: number) {
+  return Object.fromEntries(['addresses', 'does_not_address', 'insufficient_evidence'].map(label => [label, label === selected ? score : (1 - score) / 2]));
+}
 
 // New contract: classifier orchestration at the verified repeat-review boundary.
 function scenario(mode: ReviewClassificationPorts['mode'] = 'enabled') {
@@ -25,7 +31,7 @@ function scenario(mode: ReviewClassificationPorts['mode'] = 'enabled') {
     now: () => '2026-10-06T00:00:00Z', clock: () => 1,
     decision: { requestBudget: request => ({ requestBytes: JSON.stringify(request).length, inputTokens: 1, contextTokens: 1, maxRequestBytes: 1_000_000, maxInputTokens: 64000, maxContextTokens: 30000, tokenizerModel: 'stub' }), available: () => ({ status: 'available', provider: 'typesafe', model: 'jev' }), requestBytes: request => JSON.stringify(request).length,
       decide: async () => ({ provider: 'typesafe', model: 'jev', answers: { resolution: {
-        type: 'choice', selected: 'addresses', probabilities: { addresses: 0.52 }, confidence: 0.1,
+        type: 'choice', selected: 'addresses', probabilities: distribution('addresses', 0.52), confidence: 0.1,
       } } }) },
     evidence: { tree: async () => ['x.java'], source: async () => 'return output;\n',
       diff: async () => '+++ b/x.java\n@@ -1 +1 @@\n-return null;\n+return output;\n',
@@ -187,7 +193,7 @@ test('shadow observations join the same revision and never mutate review authori
 test('unresolved classifier returns preserve original findings without invented repairs (TASK-2658)', async () => {
   const s = scenario();
   s.classifier.decision.decide = async () => ({ provider: 'typesafe', model: 'jev', answers: { resolution: {
-    type: 'choice', selected: 'does_not_address', probabilities: { does_not_address: 0.89 }, confidence: 0.1 } } });
+    type: 'choice', selected: 'does_not_address', probabilities: distribution('does_not_address', 0.89), confidence: 0.1 } } });
   assert.equal(await tryClassifyReview(s.context, s.round), 'REQUEST_CHANGES');
   assert.deepEqual(s.published, ['implementer']);
   assert.deepEqual(s.round.blockingFindings, [{ id: 'F1', summary: 'x.java:1 drops output' }]);
@@ -215,23 +221,23 @@ test('a classifier return cannot become evidence for another classifier review (
   assert.equal(s.attempts[0]?.reason, 'prior-classifier-review');
 });
 
-test('borderline 51% clear is retained as abstention without publishing a verdict (TASK-2658)', async () => {
+test('frozen V3 includes 51% approval boundary (TASK-2716)', async () => {
   const s = scenario();
   s.classifier.decision.decide = async () => ({ provider: 'typesafe', model: 'jev', answers: {
-    resolution: { type: 'choice', selected: 'addresses', probabilities: { addresses: 0.51 }, confidence: 0.26 },
+    resolution: { type: 'choice', selected: 'addresses', probabilities: distribution('addresses', 0.51), confidence: 0.26 },
   } });
-  assert.equal(await tryClassifyReview(s.context, s.round), null);
-  assert.equal(s.published.length, 0);
-  assert.equal(s.attempts[0].reason, 'abstention');
+  assert.equal(await tryClassifyReview(s.context, s.round), 'APPROVED');
+  assert.equal(s.published.length, 1);
+  assert.equal(s.attempts[0].reason, 'resolved-threshold');
   const loaded = await s.store.load(s.context.slug as never);
-  assert.equal(loaded.kind === 'found' ? loaded.mission.review?.rounds.at(-1)?.decision : undefined, null);
+  assert.equal(loaded.kind === 'found' ? loaded.mission.review?.rounds.at(-1)?.decision?.kind : undefined, 'approved');
 });
 
-test('every former pre-call exit now reaches the classifier (TASK-2675)', async () => {
+test('mandatory evidence failures defer while human context remains eligible (TASK-2716)', async () => {
   const exits: Record<string, (s: ReturnType<typeof scenario>) => void> = {
     'uncited path': s => { s.classifier.evidence.tree = async () => ['other/y.java']; },
     'no source excerpts': s => { s.classifier.evidence.source = async () => { throw new Error('gone'); }; },
-    'oversized evidence': s => { s.classifier.decision.requestBytes = () => 10_000_000; },
+    'oversized evidence': s => { const budget = s.classifier.decision.requestBudget; s.classifier.decision.requestBudget = request => ({ ...budget(request), requestBytes: 10_000_000 }); },
     'human feedback': s => { s.round.humanFeedback = 'Please also fix Y.'; },
     'human feedback sources': s => { s.context.state.metadata.humanFeedbackSources = ['c1']; },
     'rebased unrelated diff': s => { s.classifier.evidence.diff = async () => '+++ b/other.java\nnew file mode 100644\n'; },
@@ -242,8 +248,9 @@ test('every former pre-call exit now reaches the classifier (TASK-2675)', async 
     const decide = s.classifier.decision.decide;
     s.classifier.decision.decide = async request => { calls++; return decide(request); };
     arrange(s);
-    assert.equal(await tryClassifyReview(s.context, s.round), 'APPROVED', name);
-    assert.equal(calls, 1, name);
+    const missing = ['uncited path', 'no source excerpts', 'oversized evidence'].includes(name);
+    assert.equal(await tryClassifyReview(s.context, s.round), missing ? null : 'APPROVED', name);
+    assert.equal(calls, missing ? 0 : 3, name);
     assert.equal(s.attempts.length, 1, name);
   }
 });
@@ -266,12 +273,12 @@ test('every re-review round records exactly one row with a reason, including ear
   await reasonOf(s => { s.classifier.publish = async () => false; }, 'classifier-publication-failed');
 });
 
-test('a mission version that moves while the classifier runs does not discard its decision (TASK-2675)', async () => {
+test('a mission version that moves while the panel runs refuses stale publication (TASK-2716)', async () => {
   const s = scenario();
   const decide = s.classifier.decision.decide;
   s.classifier.decision.decide = async request => { const result = await decide(request); await s.store.save(s.store.mission()); return result; };
-  assert.equal(await tryClassifyReview(s.context, s.round), 'APPROVED');
-  assert.deepEqual(s.published, ['clear']);
+  assert.equal(await tryClassifyReview(s.context, s.round), null);
+  assert.deepEqual(s.published, []);
 });
 
 test('a pending human intervention does not stop the classifier from being called (TASK-2675)', async () => {
@@ -370,53 +377,42 @@ function gateRepairScenario(consecutive = false) {
   return s;
 }
 
-test('tuned gate repairs return at 67%, preserve 52% clear, and retain fallback below the boundary (TASK-2692)', async () => {
+test('gate repairs use frozen panel thresholds and authoritative validation (TASK-2716)', async () => {
   for (const [label, score, expected] of [
-    ['does_not_address', 0.67, 'REQUEST_CHANGES'], ['does_not_address', 0.669, null],
-    ['addresses', 0.52, 'APPROVED'], ['addresses', 0.519, null], ['insufficient_evidence', 1, null],
+    ['does_not_address', 0.89, 'REQUEST_CHANGES'], ['does_not_address', 0.889, null],
+    ['addresses', 0.51, 'APPROVED'], ['addresses', 0.509, null], ['insufficient_evidence', 1, null],
   ] as const) {
     const s = gateRepairScenario();
     s.classifier.decision.decide = async request => {
-      assert.match(String(request.questions.resolution.instructions), /preserving the checked obligation/);
       assert.match(JSON.stringify(request.state), /Configured pre-review verification/);
       assert.match(JSON.stringify(request.state), /failedIntegrationGateRerun.*unknown/);
       return { provider: 'typesafe', model: 'jev', answers: { resolution: {
-        type: 'choice', selected: label, probabilities: { [label]: score }, confidence: 0.1 } } };
+        type: 'choice', selected: label, probabilities: distribution(label, score), confidence: 0.1 } } };
     };
     assert.equal(await tryClassifyReview(s.context, s.round), expected);
-    assert.equal(s.attempts[0].policyVersion, 'integration-repair-52-67-v1');
-    if (expected) {
-      const source = s.store.mission().review!.rounds.at(-1)!.decision!.classifier!;
-      assert.equal(source.policyVersion, s.attempts[0].policyVersion);
-      assert.deepEqual(source.findingIds, ['integration-gate-repair']);
-    }
+    assert.equal(s.attempts[0].policyVersion, 'jev-three-question-51-80-89-v1');
+    if (expected) { assert.deepEqual(s.store.mission().review!.rounds.at(-1)!.decision!.classifier!.findingIds, ['integration-gate-repair']); }
   }
 });
 
-test('a consecutive Jev gate-repair decision needs 81% to return while clear remains 52% (TASK-2692)', async () => {
-  for (const [label, score, expected] of [
-    ['does_not_address', 0.67, null], ['does_not_address', 0.809, null],
-    ['does_not_address', 0.81, 'REQUEST_CHANGES'], ['addresses', 0.52, 'APPROVED'],
-  ] as const) {
-    const s = gateRepairScenario(true);
-    s.classifier.decision.decide = async () => ({ provider: 'typesafe', model: 'jev', answers: { resolution: {
-      type: 'choice', selected: label, probabilities: { [label]: score }, confidence: 0.1 } } });
-    assert.equal(await tryClassifyReview(s.context, s.round), expected);
-    assert.equal(s.attempts[0].policyVersion, 'integration-repair-52-81-v1');
-    assert.equal(s.published.length, expected ? 1 : 0);
-  }
+test('consecutive Jev gate-repair decisions always require general review (TASK-2716)', async () => {
+  const s = gateRepairScenario(true);
+  s.classifier.decision.decide = async () => { assert.fail('recursive classifier call'); };
+  assert.equal(await tryClassifyReview(s.context, s.round), null);
+  assert.equal(s.attempts[0].reason, 'prior-classifier-review');
+  assert.deepEqual(s.published, []);
 });
 
 test('ordinary finding re-reviews retain the 89% return threshold (TASK-2692)', async () => {
   const s = scenario();
   s.classifier.decision.decide = async () => ({ provider: 'typesafe', model: 'jev', answers: { resolution: {
-    type: 'choice', selected: 'does_not_address', probabilities: { does_not_address: 0.67 }, confidence: 0.1 } } });
+    type: 'choice', selected: 'does_not_address', probabilities: distribution('does_not_address', 0.67), confidence: 0.1 } } });
   assert.equal(await tryClassifyReview(s.context, s.round), null);
-  assert.equal(s.attempts[0].policyVersion, 'repeat-findings-52-89-v2');
+  assert.equal(s.attempts[0].policyVersion, 'jev-three-question-51-80-89-v1');
   assert.deepEqual(s.published, []);
 });
 
-test('a revoked Jev approval uses 81%, and further Jev repair rounds keep that threshold (TASK-2692)', async () => {
+test('revoked Jev approvals and further returns preserve classifier provenance fallback (TASK-2716)', async () => {
   for (const previous of ['approved', 'continued-return'] as const) {
     const s = gateRepairScenario(previous === 'continued-return');
     const prior = s.store.mission().review!.rounds[0]!;
@@ -431,8 +427,8 @@ test('a revoked Jev approval uses 81%, and further Jev repair rounds keep that t
     }
     s.classifier.decision.decide = async () => ({ provider: 'typesafe', model: 'jev', answers: { resolution: {
       type: 'choice', selected: 'does_not_address', probabilities: { does_not_address: 0.81 }, confidence: 0.1 } } });
-    assert.equal(await tryClassifyReview(s.context, s.round), 'REQUEST_CHANGES');
-    assert.equal(s.attempts[0].policyVersion, 'integration-repair-52-81-v1');
+    assert.equal(await tryClassifyReview(s.context, s.round), null);
+    assert.equal(s.attempts[0].reason, 'prior-classifier-review');
   }
 });
 
@@ -482,30 +478,17 @@ test('first review retains its immutable baseline without classifying while main
   assert.equal(s.attempts[0].reason, 'first-review');
 });
 
-test('a rebased gate repair is judged on the baseline-relative mission interdiff (TASK-2704)', async () => {
+test('a rebased gate repair retains archived cited-path packing instead of full interdiff (TASK-2716)', async () => {
   const s = gateRepairScenario();
-  const prior = s.store.mission().review!.rounds[0]!;
-  (prior as { subject: unknown }).subject = { ...prior.subject, baseline: 'c'.repeat(40) };
-  s.round.reviewBaseline = 'd'.repeat(40);
-  const polluted = Array.from({ length: 600 }, (_, i) => `--- a/main-only-${i}.ts\n+++ b/main-only-${i}.ts\n@@ -1 +1 @@\n-a\n+b\n`).join('');
-  s.classifier.evidence.diff = async () => polluted;
-  const budget = s.classifier.decision.requestBudget;
-  s.classifier.decision.requestBudget = request => {
-    const base = budget(request);
-    return JSON.stringify(request).includes('main-only-599') ? { ...base, inputTokens: 64001 } : base;
+  const seen: readonly string[][] = [];
+  s.classifier.evidence.diff = async (_prior, _candidate, paths) => {
+    (seen as string[][]).push([...paths]);
+    return '-return null;\n+return output;\n';
   };
-  const seen: unknown[] = [];
-  s.classifier.evidence.missionInterdiff = async (before, after) => {
-    seen.push([before, after]);
-    return { diff: '-return null;\n+return output;\n', paths: ['x.java'] };
-  };
-  const decide = s.classifier.decision.decide;
-  let sent = '';
-  s.classifier.decision.decide = async request => { sent = JSON.stringify(request.state); return decide(request); };
+  s.classifier.evidence.missionInterdiff = async () => { assert.fail('full-delta substitution'); };
   assert.equal(await tryClassifyReview(s.context, s.round), 'APPROVED');
-  assert.deepEqual(seen, [[{ baseline: 'c'.repeat(40), revision: 'a'.repeat(40) }, { baseline: 'd'.repeat(40), revision: 'b'.repeat(40) }]]);
-  assert.doesNotMatch(sent, /main-only/);
-  assert.match(sent, /rebase-induced and conflict-resolution changes/);
+  assert.ok(seen.length > 0);
+  assert.ok(seen.every(paths => JSON.stringify(paths) === JSON.stringify(['x.java'])));
 });
 
 test('classifier failures persist a distinguishable cause (TASK-2704)', async () => {
@@ -513,7 +496,7 @@ test('classifier failures persist a distinguishable cause (TASK-2704)', async ()
   const budget = over.classifier.decision.requestBudget;
   over.classifier.decision.requestBudget = request => ({ ...budget(request), contextTokens: 30001 });
   const read = gateRepairScenario();
-  read.classifier.evidence.diff = async () => { throw new EvidenceReadError('git diff output exceeds the read limit', true); };
+  read.classifier.evidence.tree = async () => { throw new EvidenceReadError('git diff output exceeds the read limit', true); };
   const other = gateRepairScenario();
   other.classifier.decision.requestBudget = () => { throw new Error('tokenizer unavailable'); };
   for (const run of [over, read, other]) { assert.equal(await tryClassifyReview(run.context, run.round), null); }
@@ -552,4 +535,149 @@ test('a round keeps its review baseline with its reviewed subject across reload 
   const decided = await s.store.load(s.context.slug as never);
   if (decided.kind !== 'found') { throw new Error('mission missing'); }
   assert.equal(decided.mission.review!.rounds.at(-1)!.subject.baseline, 'e'.repeat(40), 'the baseline recorded for the round survives its decision');
+});
+
+function result(selected: string, score: number): DecisionResult {
+  return { provider: 'typesafe', model: 'actual-jev', answers: { resolution: {
+    type: 'choice', selected, probabilities: distribution(selected, score), confidence: 0.01 } },
+    usage: { inputTokens: 100, outputTokens: 5, cost: 0.001 } };
+}
+
+function panelScenario(answers: readonly (DecisionResult | Error)[]) {
+  const s = scenario();
+  let calls = 0;
+  const states: unknown[] = [];
+  s.classifier.decision.decide = async request => {
+    const index = calls++;
+    states.push(request.state);
+    assert.deepEqual(request.questions, { resolution: Object.values(PANEL_QUESTIONS)[index] });
+    assert.ok(Object.isFrozen(request.state));
+    const answer = answers[index];
+    if (answer instanceof Error) { throw answer; }
+    return answer;
+  };
+  return { ...s, states, calls: () => calls };
+}
+
+const abstain = () => result('insufficient_evidence', 1);
+for (const [id, index, label, threshold, route] of [
+  ['v3 approval', 0, 'addresses', 0.51, 'APPROVED'],
+  ['v1 approval', 1, 'addresses', 0.80, 'APPROVED'],
+  ['v1 rejection', 1, 'does_not_address', 0.89, 'REQUEST_CHANGES'],
+  ['original rejection', 2, 'does_not_address', 0.89, 'REQUEST_CHANGES'],
+] as const) {
+  test(`panel ${id} includes exact threshold and excludes immediately below (TASK-2716)`, async () => {
+    for (const score of [threshold, threshold - 0.000001]) {
+      const answers = [abstain(), abstain(), abstain()];
+      answers[index] = result(label, score);
+      const s = panelScenario(answers);
+      assert.equal(await tryClassifyReview(s.context, s.round), score === threshold ? route : null);
+      assert.equal(s.calls(), 3);
+      assert.ok(s.states.every(state => state === s.states[0]));
+      assert.equal(s.published.length, score === threshold ? 1 : 0);
+      assert.equal(s.attempts.length, 1);
+      assert.equal(s.attempts[0].panel?.calls, 3);
+      assert.equal(s.attempts[0].panel?.members[index].model, 'actual-jev');
+    }
+  });
+}
+
+test('disabled channels, no votes and conflicting directions retain general review (TASK-2716)', async () => {
+  for (const answers of [
+    [result('does_not_address', 1), abstain(), abstain()],
+    [abstain(), abstain(), result('addresses', 1)],
+    [abstain(), abstain(), abstain()],
+    [result('addresses', 0.51), abstain(), result('does_not_address', 0.89)],
+  ]) {
+    const s = panelScenario(answers);
+    assert.equal(await tryClassifyReview(s.context, s.round), null);
+    assert.equal(s.calls(), 3);
+    assert.equal(s.published.length, 0);
+  }
+});
+
+test('every failed or invalid panel member vetoes partial approval (TASK-2716)', async () => {
+  const malformed = { ...result('addresses', 1), answers: {} };
+  for (const index of [0, 1, 2]) {
+    for (const failure of [new Error('timeout'), malformed]) {
+      const answers: (DecisionResult | Error)[] = [result('addresses', 1), result('addresses', 1), abstain()];
+      answers[index] = failure;
+      const s = panelScenario(answers);
+      assert.equal(await tryClassifyReview(s.context, s.round), null);
+      assert.equal(s.calls(), 3);
+      assert.deepEqual(s.published, []);
+      assert.equal(s.attempts[0].reason, 'classifier-failure');
+    }
+  }
+});
+
+test('later panel member budgets are checked before any provider call (TASK-2716)', async () => {
+  for (const patch of [{ inputTokens: 32001 }, { contextTokens: 30001 }, { requestBytes: 1000001 }, { inputTokens: NaN }]) {
+    const s = scenario();
+    const budget = s.classifier.decision.requestBudget;
+    s.classifier.decision.requestBudget = request => ({ ...budget(request),
+      ...(request.questions.resolution.instructions === PANEL_QUESTIONS.v1.instructions ? patch : {}) });
+    s.classifier.decision.decide = async () => { assert.fail('budget failure must prevent all calls'); };
+    assert.equal(await tryClassifyReview(s.context, s.round), null);
+    assert.deepEqual(s.published, []);
+    assert.equal(s.attempts[0].reason, 'evidence-over-budget');
+  }
+});
+
+test('HEAD drift and duplicate panel execution cannot publish a stale or second decision (TASK-2716)', async () => {
+  const drift = scenario();
+  const decide = drift.classifier.decision.decide;
+  drift.classifier.decision.decide = async request => { drift.context.ports.preReview.head = () => 'f'.repeat(40); return decide(request); };
+  assert.equal(await tryClassifyReview(drift.context, drift.round), null);
+  assert.equal(drift.attempts[0].reason, 'classifier-stale-result');
+  assert.deepEqual(drift.published, []);
+  const duplicate = scenario();
+  assert.equal(await tryClassifyReview(duplicate.context, duplicate.round), 'APPROVED');
+  assert.equal(await tryClassifyReview(duplicate.context, duplicate.round), null);
+  assert.deepEqual(duplicate.published, ['clear']);
+});
+
+test('preparation failures retain a zero-call whole-panel fallback record (TASK-2716)', async () => {
+  const s = scenario();
+  s.classifier.evidence.source = async () => { throw new EvidenceReadError('missing pinned source'); };
+  assert.equal(await tryClassifyReview(s.context, s.round), null);
+  assert.equal(s.attempts[0].panel!.calls, 0);
+  assert.equal(s.attempts[0].panel!.outcome, 'reviewer');
+  assert.equal(s.attempts[0].panel!.reason, s.attempts[0].reason);
+  assert.deepEqual(s.attempts[0].panel!.members, []);
+});
+
+test('saved scoped safety and complementary outcomes replay without policy or context tuning (TASK-2716)', async () => {
+  const { default: retained } = await import('../../../fixtures/review-classification/frozen-panel-regressions.json', { with: { type: 'json' } });
+  const { panelVote, aggregatePanel } = await import('../../../../src/application/review-classification/panel.js');
+  assert.deepEqual(retained.questions, PANEL_QUESTIONS, 'independently saved research questions must remain exact');
+  assert.equal(retained.cases.length, 9);
+  for (const sample of retained.cases) {
+    assert.equal(new Set(sample.members.map(m => m.stateSha256)).size, 1, sample.id);
+    const members = sample.members.map(member => {
+      assert.match(member.requestSha256, /^[a-f0-9]{64}$/);
+      const question = member.question as keyof typeof PANEL_QUESTIONS;
+      return { question, questionHash: createHash('sha256').update(JSON.stringify(PANEL_QUESTIONS[question])).digest('hex'),
+        provider: member.response.provider, configuredModel: 'jev-latest', model: member.response.model,
+        usage: member.response.usage, ...panelVote(question, member.response as DecisionResult) };
+    });
+    const outcome = aggregatePanel(members);
+    assert.equal(outcome.route, sample.expected, sample.id);
+    assert.ok(members.every(m => m.failure === null), sample.id);
+    if (/2586|2640/.test(sample.id)) { assert.notEqual(outcome.route, 'clear', sample.id); }
+    if (/2500\.05/.test(sample.id)) {
+      assert.equal(members[0].selected, 'does_not_address');
+      assert.equal(members[0].vote, null, 'V3-only reject channel stays disabled');
+      assert.notEqual(outcome.route, 'implementer');
+    }
+  }
+});
+
+test('invalid oversized returned model retains bounded whole-panel fallback telemetry (TASK-2716)', async () => {
+  const s = panelScenario([result('addresses', 1), { ...result('addresses', 1), model: 'x'.repeat(17000) }, abstain()]);
+  assert.equal(await tryClassifyReview(s.context, s.round), null);
+  assert.equal(s.attempts[0].panel!.members[1].model, null);
+  assert.equal(s.attempts[0].panel!.members[1].failure, 'invalid-answer');
+  assert.ok(Buffer.byteLength(JSON.stringify(s.attempts[0])) < 16384);
+  assert.deepEqual(s.published, []);
 });

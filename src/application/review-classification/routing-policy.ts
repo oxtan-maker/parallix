@@ -1,8 +1,8 @@
 import type { DecisionResult } from '../ports/decision.js';
 
-import { CLASSIFIER_POLICY_VERSION, classifierPolicyThresholds } from '../../domain/classifier-review.js';
+import { PANEL_POLICY_VERSION, CLASSIFIER_POLICY_VERSION, classifierPolicyThresholds } from '../../domain/classifier-review.js';
 
-export const ROUTING_POLICY_VERSION = CLASSIFIER_POLICY_VERSION;
+export const ROUTING_POLICY_VERSION = PANEL_POLICY_VERSION;
 export type ClassifierRoute = 'clear' | 'implementer' | 'reviewer';
 export interface ClassificationRoute {
   readonly route: ClassifierRoute;
@@ -11,7 +11,7 @@ export interface ClassificationRoute {
   readonly reason: string;
 }
 /** Selected-choice scores are routing signals, never correctness probabilities. */
-export function classifyFindings(result: DecisionResult, policyVersion = ROUTING_POLICY_VERSION): ClassificationRoute {
+export function classifyFindings(result: DecisionResult, policyVersion = CLASSIFIER_POLICY_VERSION): ClassificationRoute {
   const thresholds = classifierPolicyThresholds(policyVersion);
   const answer = result.answers.resolution;
   if (!answer || answer.type !== 'choice') {

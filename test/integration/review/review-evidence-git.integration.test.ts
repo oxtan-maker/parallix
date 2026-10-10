@@ -31,3 +31,21 @@ test('mission interdiff excludes main-only commits and reports rebase-shifted mi
     assert.deepEqual(interdiff.paths, ['feature.ts']);
   } finally { rmSync(repo, { recursive: true, force: true }); }
 });
+
+test('archived cited-path diff uses nine-character blob identities and pinned source (TASK-2716)', async () => {
+  const repo = mkdtempSync(join(tmpdir(), 'px-archived-evidence-'));
+  try {
+    const git = (...args: string[]) => execFileSync('git', ['-C', repo, '-c', 'user.name=t', '-c', 'user.email=t@t', ...args], { encoding: 'utf8' }).trim();
+    git('init', '-q', '-b', 'main');
+    writeFileSync(join(repo, 'cited.ts'), 'old\n'); writeFileSync(join(repo, 'unrelated.ts'), 'old\n');
+    git('add', '-A'); git('commit', '-q', '-m', 'before'); const before = git('rev-parse', 'HEAD');
+    writeFileSync(join(repo, 'cited.ts'), 'fixed\n'); writeFileSync(join(repo, 'unrelated.ts'), 'unrelated change\n');
+    git('add', '-A'); git('commit', '-q', '-m', 'after'); const after = git('rev-parse', 'HEAD');
+    const evidence = new GitReviewEvidence(repo);
+    const diff = await evidence.diff(before, after, ['cited.ts']);
+    assert.match(diff, /^index [a-f0-9]{9}\.\.[a-f0-9]{9}/m);
+    assert.doesNotMatch(diff, /unrelated/);
+    writeFileSync(join(repo, 'cited.ts'), 'mutable working tree\n');
+    assert.equal(await evidence.source(after, 'cited.ts'), 'fixed\n');
+  } finally { rmSync(repo, { recursive: true, force: true }); }
+});

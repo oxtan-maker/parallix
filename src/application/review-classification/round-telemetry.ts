@@ -1,4 +1,5 @@
-import { PACKET_VERSION, PROMPT_VERSION } from './evidence-packet.js';
+import { ARCHIVED_PACKING_VERSION } from './archived-packing.js';
+import { PANEL_PROMPT_VERSION } from './panel-questions.js';
 import { ROUTING_POLICY_VERSION } from './routing-policy.js';
 import type { LoopContext } from '../review-loop/round.js';
 import type { ReviewClassificationPorts } from '../ports/review-classification.js';
@@ -28,10 +29,11 @@ export class RoundTelemetry {
     this.measurement = {
       decisionId: identity.decisionId, fingerprint: ports.fingerprint(), repository: identity.repository ?? '', mission: context.slug,
       round: identity.round, observedAt: ports.now(), priorRevision: identity.priorRevision, candidateRevision: identity.candidateRevision,
-      findingIds: [...identity.findingIds], packetHash: null, packetVersion: PACKET_VERSION, promptVersion: PROMPT_VERSION,
+      findingIds: [...identity.findingIds], packetHash: null, packetVersion: ARCHIVED_PACKING_VERSION, promptVersion: PANEL_PROMPT_VERSION,
       policyVersion: ROUTING_POLICY_VERSION, provider: null, model: null, implementer: context.identities.implementer,
       reviewer: context.identities.reviewer, label: null, score: null, route: 'reviewer', reason: 'unrecorded',
       shadow: ports.mode === 'shadow', preparationMs: null, classificationMs: null,
+      panel: { policyVersion: ROUTING_POLICY_VERSION, promptVersion: PANEL_PROMPT_VERSION, calls: 0, members: [], outcome: 'reviewer', reason: 'unrecorded' },
     };
   }
   /** Accumulates measurements gathered before the round ends. */
@@ -42,6 +44,8 @@ export class RoundTelemetry {
     if (this.finished) { return; }
     this.finished = true;
     if (!this._telemetry || !this.measurement.repository) { return; }
-    try { await this._telemetry.recordCall({ ...this.measurement, route: 'reviewer', ...patch, reason }); } catch { /* measurement only */ }
+    const sample = { ...this.measurement, route: 'reviewer' as const, ...patch, reason };
+    if (sample.panel) { sample.panel = { ...sample.panel, outcome: sample.route, reason }; }
+    try { await this._telemetry.recordCall(sample); } catch { /* measurement only */ }
   }
 }

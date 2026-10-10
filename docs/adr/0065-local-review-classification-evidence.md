@@ -41,39 +41,19 @@ when Jev abstains. Unresolved returns supply a likely-unresolved signal; the imp
 can make changes or request reviewer investigation. Jev supplies no repair
 instructions. Its selected-choice scores are not correctness probabilities.
 
-For TASK-2658, the operator subsequently chose availability-dependent opt-out
-routing instead of the proposed opt-in rollout. Jev is called on every
-re-review round while the provider is available, with thin evidence sent bounded
-and its omissions declared; only opt-out, an unavailable provider or a prior
-classifier decision skip the call, and each records a reason. Autonomous decisions
-are attributed to the dedicated Jev review identity; Parallix applies them
-through its existing checked review authority. A finding-resolution signal
-concerns only the prior findings, and Jev abstains through insufficient_evidence
-when the supplied evidence cannot support a judgment. Classifier measurements remain
-local statistics inputs, recorded once per review round and reported for re-review rounds only, and Forgejo remains the review publication adapter.
-This follow-up choice does not change the historical research results or turn
-the estimated saving into a measured whole-workflow improvement.
+For TASK-2658, the operator chose availability-dependent opt-out routing through
+the existing checked review authority. The subsequent frozen panel decision
+below supersedes that rollout's single-question thresholds and degrading packet
+selection. Classifier measurements remain local statistics inputs, with one
+workflow attempt per panel and Forgejo as the publication adapter. Historical
+measurements and policy interpretations remain readable.
 
-Jev judges the mission surface the agent reviewer sees. Both resolve the round's
-review baseline, the primary-branch revision the mission was rebased onto, through
-one function; a first review compares that baseline with the candidate, never a
-moving branch name. Each review subject keeps its baseline, so a repair rebased onto
-newer main is compared as the interdiff of the approved and candidate mission diffs,
-each measured from its own baseline. Changes landed only on main are excluded;
-rebase-induced and conflict-resolution changes remain in the interdiff and are
-declared as such. Jev, the agent repair brief and the pull-request comment show the
-same range, and a subject without a recorded baseline is labelled as a plain revision
-range which may include main.
-
-Finding and repair packets are sized by the decision adapter's token budget
-(`DecisionPort.requestBudget`, measured with the pinned Jev tokenizer), not by
-packet, file, diff or character limits. Evidence degrades only as far as that budget
-requires, with every omission declared. An unreadable or oversized Git read is a
-declared loss for optional material; mandatory repair evidence which cannot be read
-or cannot fit leaves the round with the general reviewer. Each fallback records a
-typed reason (`evidence-over-budget`, `evidence-read-failed`, `classifier-exception`
-for anything else, `provider-key-missing`, `provider-unavailable`), which `px stats`
-lists in its fallback-reasons table.
+Each reviewed subject retains its review baseline. The general review and agent
+repair brief can compare baseline-relative mission diffs across a rebase; the
+experimental classifier instead uses the retained archived cited-path packing
+algorithm. Its omissions do not establish a complete change surface. Mandatory
+source/revision or budget failures leave the round with the general reviewer,
+and local statistics retain their fallback reason.
 
 ## Decision matrix
 
@@ -197,6 +177,33 @@ Future first-review adoption requires a new frozen evaluation with original
 revision-bound criteria, adjudicated historical rejections and explicit operator
 acceptance. False clears are quality failures; false returns belong in aggregate
 repair/review cost. No matched workflow savings are established by this research.
+
+## Frozen three-question re-review baseline
+
+For TASK-2716 the operator selected an experimental panel: separate frozen V3,
+V1 and original questions share one immutable archived-mechanical state.
+V3 is approval-only at 0.51; V1 approves at 0.80 or rejects at 0.89; original
+is rejection-only at 0.89. Selected-choice probabilities drive inclusive votes.
+Both directions, neither direction or any failed member defer to general review.
+First reviews and prior-classifier decisions remain ineligible; revision/version
+guards precede publication through the existing review authority.
+
+The fitted development result was 17/46 supported decisions (10 approvals and
+7 rejects), including synthetic and correlated finding/correction samples.
+The independent frozen ten-case cohort produced one supported approval, nine
+deferrals and no observed relative errors; three packets could not be prepared,
+and all historical comparators were approvals. Neither result establishes zero
+real-world error, production coverage or rejection recall. Historical decisions
+are comparators rather than absolute ground truth.
+
+A separate operator study will collect ten new regular-development samples in
+1–2 days. Keep policy and packing fixed, retain bounded per-question telemetry
+and pinned evidence identity, and replay the votes before source adjudication.
+Report relative agreement/improvement/shared error separately from absolute
+source-supported correctness, retaining ambiguous cases and preparation failures.
+An unsafe clear concerns unresolved prior obligations or repair regressions;
+unrelated new findings do not alone invalidate a scoped clear. Future sample
+collection is not claimed complete and does not block this implementation.
 
 ## Reconsideration triggers
 
