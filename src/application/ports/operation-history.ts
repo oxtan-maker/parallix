@@ -6,6 +6,8 @@ export interface OperationalHistoryEntry {
 }
 
 export interface OperationLogSummary {
+  readonly operationId?: string;
+  readonly sequence?: number;
   readonly id: number;
   readonly eventType: string;
   readonly createdAt: string;

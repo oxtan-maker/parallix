@@ -1,8 +1,8 @@
 ---
 id: TASK-2719
 title: Fix silent board projection errors and operation-log starvation
-status: backlog
-assignee: []
+status: done
+assignee: [codex]
 created_date: '2026-10-10 15:38'
 labels: []
 dependencies: []

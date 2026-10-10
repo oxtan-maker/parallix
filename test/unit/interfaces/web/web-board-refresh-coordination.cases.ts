@@ -439,6 +439,10 @@ test('a failed refresh keeps the last validated board marked stale until a later
     assert.match(page.text(), /SNAPSHOT REFRESH FAILED/);
     assert.match(page.text(), /HTTP 503/);
     assert.match(page.text(), /task-a/);
+    await page.emit('invalidate', { data: invalidateData });
+    await page.tick();
+    await page.settle(page.pending()[0], new Response('{}', { status: 502 }));
+    assert.match(page.text(), /HTTP 502/, 'ordinary refresh errors still show the latest failure');
     page.server.truth = 'task-b';
     await page.emit('invalidate', { data: invalidateData, lastEventId: '2' });
     await page.tick();
@@ -553,4 +557,109 @@ test('unmount and remount leak no connection, listener, timer, or state-committi
     console.error = originalError;
     await page.close();
   }
+});
+
+const projectionErrorData = (message = 'projection unavailable') => JSON.stringify({
+  kind: 'stream-error', transportVersion: WEB_TRANSPORT_VERSION,
+  error: { kind: 'unavailable', message },
+});
+
+test('validated projection failure stays stale until a post-error read succeeds (TASK-2719)', async (t) => {
+  const page = await mountLive(t);
+  try {
+    await page.emit('invalidate', { data: invalidateData });
+    const before = page.pending()[0];
+    await page.emit('error', { data: projectionErrorData() });
+    assert.match(page.text(), /projection unavailable/);
+    assert.match(page.text(), /task-a/);
+    await page.settle(before);
+    assert.match(page.text(), /projection unavailable/, 'a pre-error read cannot clear the failure');
+    await page.tick();
+    await page.drain();
+    assert.doesNotMatch(page.text(), /projection unavailable/);
+    assert.equal(page.mount.querySelector('[data-board-freshness]'), null);
+  } finally { await page.close(); }
+});
+
+test('projection errors coalesce without retry loops and reject malformed frames (TASK-2719)', async (t) => {
+  const page = await mountLive(t);
+  try {
+    for (const data of ['{bad', projectionErrorData().replace('stream-error', 'other'), projectionErrorData().replace('unavailable', 'invented'), projectionErrorData().replace(String(WEB_TRANSPORT_VERSION), '999')]) {
+      await page.emit('error', { data });
+    }
+    assert.equal(page.pending().length, 0);
+    assert.equal(page.mount.querySelector('[data-board-freshness]'), null);
+    for (let i = 0; i < 20; i += 1) { await page.emit('error', { data: projectionErrorData(`failure ${i}`) }); }
+    assert.equal(page.pending().length, 1);
+    await page.settle(page.pending()[0]);
+    assert.match(page.text(), /failure 19/, 'the superseded read does not revalidate');
+    await page.tick();
+    assert.equal(page.pending().length, 1);
+    await page.settle(page.pending()[0], new Response('{}', { status: 503 }));
+    await page.tick(60_000);
+    assert.equal(page.pending().length, 0, 'a failed recovery does not retry itself');
+    assert.ok(page.mount.querySelector('[data-board-freshness]'));
+    await page.emit('invalidate', { data: invalidateData });
+    await page.drain();
+    assert.equal(page.mount.querySelector('[data-board-freshness]'), null);
+  } finally { await page.close(); }
+});
+
+test('older saturated live progress cannot hide newer durable completion (TASK-2719)', () => {
+  let live = EMPTY_LIVE_PROGRESS;
+  for (let i = 1; i <= OPERATION_LOG_LIMIT; i += 1) { live = recordProgress(live, progressEvent('old', i, 'old progress')); }
+  const snapshot = boardOf('task-a', [{ operationId: 'completed', message: 'durable completion' }]);
+  snapshot.operationLog[0].timestamp = '2026-10-06T10:00:02.000Z';
+  const log = withLiveProgress(snapshot, live).operationLog;
+  assert.equal(log.length, OPERATION_LOG_LIMIT);
+  assert.equal(log.at(-1)?.message, 'durable completion');
+  const recent = recordProgress(live, { ...progressEvent('recent', 1, 'recent progress'), timestamp: '2026-10-06T10:00:03.000Z' });
+  assert.equal(withLiveProgress(snapshot, recent).operationLog.at(-1)?.message, 'recent progress');
+});
+
+test('durable progress identity absorbs live and durable replay without text matching (TASK-2719)', () => {
+  let live = recordProgress(EMPTY_LIVE_PROGRESS, progressEvent('op', 1, 'same'));
+  live = recordProgress(live, progressEvent('op', 2, 'same'));
+  const snapshot = boardOf('task-a', [
+    { operationId: 'op', sequence: 1, message: 'same' },
+    { operationId: 'op', sequence: 1, message: 'same' },
+    { operationId: 'other', sequence: 1, message: 'same' },
+  ]);
+  const log = withLiveProgress(snapshot, live).operationLog;
+  assert.deepEqual(log.map(entry => `${entry.operationId}:${entry.sequence}`), ['op:1', 'other:1', 'op:2']);
+  const cursor = observeStreamId(live, '20');
+  assert.deepEqual(observeStreamId(cursor, '20').entries, live.entries, 'equal replay cursor does not imply restart');
+  assert.equal(observeStreamId(cursor, '1').entries.length, 0);
+});
+
+test('equal and unknown log timestamps favor durable tail while retaining live state (TASK-2719)', () => {
+  const live = recordProgress(EMPTY_LIVE_PROGRESS, progressEvent('live', 1, 'live'));
+  const snapshot = boardOf('task-a', [{ operationId: 'durable', message: 'durable' }]);
+  snapshot.operationLog[0].timestamp = live.entries[0].timestamp;
+  assert.equal(withLiveProgress(snapshot, live).operationLog.at(-1)?.message, 'durable');
+  snapshot.operationLog[0].timestamp = 'legacy unknown';
+  assert.equal(withLiveProgress(snapshot, live).operationLog.at(-1)?.message, 'durable');
+  assert.equal(withLiveProgress(boardOf('task-a'), live).operationLog[0].message, 'live');
+});
+
+test('stream demands across many windows retain one queued read behind a slow read (TASK-2719)', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const settles: (() => void)[] = [];
+  const superseded: boolean[] = [];
+  const sync = createRefreshCoordinator({
+    load: () => new Promise<void>(resolve => settles.push(resolve)),
+    apply: (_result, newer) => { superseded.push(newer); return true; }, coalesceMs: COALESCE_MS,
+  });
+  try {
+    for (let i = 0; i < 100; i += 1) { sync.schedule(); t.mock.timers.tick(COALESCE_MS); }
+    assert.equal(settles.length, 1, 'only one in-flight read');
+    settles[0]();
+    await Promise.resolve();
+    assert.equal(settles.length, 2, 'one trailing read covers every queued signal');
+    settles[1]();
+    await Promise.resolve();
+    t.mock.timers.tick(60_000);
+    assert.equal(settles.length, 2, 'nothing retries after the signals stop');
+    assert.deepEqual(superseded, [true, false]);
+  } finally { sync.dispose(); }
 });

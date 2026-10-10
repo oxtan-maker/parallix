@@ -184,7 +184,7 @@ export interface WebOperationLogEntry {
   readonly phase: string;
   readonly message: string;
   readonly timestamp: string;
-  /** SSE progress sequence when this entry came from the live stream. */
+  /** Producer progress sequence when available; paired with operationId. */
   readonly sequence?: number;
   /** Optional: omitted when the entry has no agent, never `null`. */
   readonly agent?: string;

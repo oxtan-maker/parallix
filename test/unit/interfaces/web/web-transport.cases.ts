@@ -871,3 +871,11 @@ test('other completed history round-trips separately from the weekly DONE count 
     assert.equal(validateWebBoardSnapshot(malformed).ok, false);
   }
 });
+
+test('stored progress sequence round-trips and malformed identity is rejected (TASK-2719)', () => {
+  const projection = { ...makeProjection(), operationLog: [{ operationId: 'producer', sequence: 4, phase: 'run', message: 'same', timestamp: '2026-10-06T10:00:00Z' }] };
+  const snapshot = toWebBoardSnapshot(projection);
+  assert.equal(snapshot.operationLog[0].sequence, 4);
+  assert.equal(validateWebBoardSnapshot(snapshot).ok, true);
+  assert.equal(validateWebBoardSnapshot({ ...snapshot, operationLog: [{ ...snapshot.operationLog[0], sequence: '4' }] }).ok, false);
+});

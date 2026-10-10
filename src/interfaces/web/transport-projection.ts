@@ -159,6 +159,7 @@ function toWebAttentionItem(item: AttentionItem, card: MissionCard | undefined):
 function toLogEntry(entry: OperationLogEntry): WebOperationLogEntry {
   return {
     operationId: entry.operationId,
+    ...(entry.sequence === undefined ? {} : { sequence: entry.sequence }),
     phase: entry.phase,
     message: entry.message,
     timestamp: entry.timestamp,

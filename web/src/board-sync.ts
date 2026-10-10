@@ -15,7 +15,7 @@
  * retry is the only reconnect loop.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { validateWebProgressEvent } from '../../src/interfaces/web/transport.js';
+import { validateWebProgressEvent, validateWebStreamError } from '../../src/interfaces/web/transport.js';
 import { loadSnapshot, type SettledSnapshotState, type SnapshotState } from './board-data.js';
 import { EMPTY_LIVE_PROGRESS, observeStreamId, recordProgress, withLiveProgress, type LiveProgress } from './operation-log.js';
 import { createRefreshCoordinator, type RefreshCoordinator } from './refresh-coordinator.js';
@@ -46,19 +46,28 @@ export function useBoardSync() {
   useEffect(() => {
     let shown: SnapshotState['kind'] = 'loading';
     let openEpoch = 0;
-    const apply = (result: SettledSnapshotState, superseded: boolean) => {
+    let failureEpoch = 0;
+    let projectionError: string | null = null;
+    const load = async () => {
+      const started = { open: openEpoch, failure: failureEpoch };
+      return { result: await loadSnapshot(), started };
+    };
+    const apply = ({ result, started }: { result: SettledSnapshotState; started: { open: number; failure: number } }, superseded: boolean) => {
       // A failed read with a newer one already queued is obsolete: decline it.
       if (result.kind !== 'ready' && superseded) { return false; }
       if (result.kind === 'request-failed' && shown === 'ready') {
-        setFreshness(current => ({ ...current, refreshError: result.detail }));
+        setFreshness(current => ({ ...current, refreshError: projectionError ?? result.detail, revalidated: false }));
         return true;
       }
       shown = result.kind;
       setState(result);
-      if (result.kind === 'ready') { setFreshness(current => current.refreshError === null ? current : { ...current, refreshError: null }); }
+      if (result.kind === 'ready' && !superseded && started.failure === failureEpoch && started.open === openEpoch) {
+        projectionError = null;
+        setFreshness(current => ({ ...current, refreshError: null, revalidated: current.connection === 'open' }));
+      }
       return true;
     };
-    const sync = createRefreshCoordinator({ load: loadSnapshot, apply, coalesceMs: REFRESH_COALESCE_MS });
+    const sync = createRefreshCoordinator({ load, apply, coalesceMs: REFRESH_COALESCE_MS });
     coordinator.current = sync;
     void sync.request();
 
@@ -66,17 +75,25 @@ export function useBoardSync() {
     const observe = (event: StreamEvent) => { setLive(current => observeStreamId(current, event.lastEventId)); };
     const onOpen = () => {
       openEpoch += 1;
-      const epoch = openEpoch;
       setFreshness(current => ({ ...current, connection: 'open', revalidated: current.connection === 'connecting' && current.revalidated }));
       // A read after every open closes the gap between the last snapshot and
       // the subscription, and is what makes a reconnect a revalidation.
-      void sync.request().then(() => {
-        if (epoch === openEpoch) { setFreshness(current => current.connection === 'open' ? { ...current, revalidated: true } : current); }
-      });
+      void sync.request();
     };
     const onError = (event: StreamEvent) => {
       // A server `error` frame carries data; the native connection error does not.
-      if (typeof event.data === 'string') { observe(event); return; }
+      if (typeof event.data === 'string') {
+        let payload: unknown;
+        try { payload = JSON.parse(event.data); } catch { return; }
+        const result = validateWebStreamError(payload);
+        if (!result.ok) { return; }
+        observe(event);
+        failureEpoch += 1;
+        projectionError = result.value.error.message;
+        setFreshness(current => ({ ...current, refreshError: result.value.error.message, revalidated: false }));
+        sync.schedule();
+        return;
+      }
       openEpoch += 1;
       const connection = source.readyState === EventSource.CLOSED ? 'closed' : 'reconnecting';
       setFreshness(current => ({ ...current, connection, revalidated: false }));

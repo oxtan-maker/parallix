@@ -270,3 +270,27 @@ Use `px` with no command from an interactive terminal for the default board
 launch. `px ui` continues to launch the same board explicitly. To opt out of the
 default for one invocation, run `PARALLIX_NO_TUI=1 px`; set that environment
 variable in your shell environment to keep usage help as the no-command default.
+
+## Browser freshness and operation history
+
+If a projection refresh fails, the browser keeps the last validated board visible
+with a stale warning and the server's failure message. Stream errors request a
+coordinated refresh; only a successful read begun after the latest failure can
+clear it. Recovery reads are serial and coalesced. A failed recovery waits for
+another stream signal, reconnect or requested refresh rather than retrying in a
+loop.
+
+The browser keeps at most 256 operation log entries. Unmatched live progress is
+merged with durable history using producer timestamps, so older accumulated
+progress cannot crowd a newer durable completion out of the log. Recent progress
+survives a snapshot that has not yet recorded it. Explicit operation and progress
+sequence identities absorb corresponding persisted entries and collapse replay;
+identical message text alone never identifies an event.
+
+Legacy history without a progress identity cannot be correlated reliably with a
+live entry and may show both. Producer clocks can disagree, and equal or missing
+timestamps cannot establish an authoritative order across processes. In those
+ambiguous cases durable entries receive priority at the bounded tail, while live
+entries remain available until their own bounded store evicts them. Durable
+server order is retained; progress sequences order only their own operation.
+Transient live history resets when stream cursors regress after a host restart.

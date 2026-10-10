@@ -85,7 +85,7 @@ export interface GitReadAdapter {
 /** Read adapter for operation log from operator-local event history. */
 export interface OperationLogReadAdapter {
   /** Load recent operation log entries. */
-  loadOperationLog(): Promise<readonly { readonly operationId: string; readonly phase: string; readonly message: string; readonly timestamp: string; readonly agent?: string }[]>;
+  loadOperationLog(): Promise<readonly { readonly operationId: string; readonly sequence?: number; readonly phase: string; readonly message: string; readonly timestamp: string; readonly agent?: string }[]>;
 }
 
 // Re-export MetricsReadAdapter for consumers

@@ -37,6 +37,7 @@ export class ConcreteOperationLogReadAdapter implements OperationLogReadAdapter 
 
   async loadOperationLog(): Promise<readonly {
     readonly operationId: string;
+    readonly sequence?: number;
     readonly phase: string;
     readonly message: string;
     readonly timestamp: string;
@@ -44,7 +45,7 @@ export class ConcreteOperationLogReadAdapter implements OperationLogReadAdapter 
   }[]> {
     if (this.historyRepo.findRecentLogEntries) {
       return (await this.historyRepo.findRecentLogEntries(BOARD_OPERATION_LOG_LIMIT)).map((entry) => ({
-        operationId: entry.id ? String(entry.id) : `op-${entry.createdAt}`,
+        ...logIdentity(entry, entry),
         phase: entry.eventType,
         message: entry.message ?? (entry.rawData !== null && entry.rawData !== '{}' ? `${entry.eventType}: ${entry.rawData}` : entry.eventType),
         timestamp: entry.createdAt,
@@ -56,10 +57,12 @@ export class ConcreteOperationLogReadAdapter implements OperationLogReadAdapter 
     return entries.map((entry) => {
       let message = entry.eventType;
       let agent: string | undefined;
+      let identity: unknown;
 
       // Try to parse eventData as JSON for richer info
       try {
         const data = JSON.parse(entry.eventData);
+        identity = data;
         if (typeof data.message === 'string') {
           message = data.message;
         }
@@ -74,7 +77,7 @@ export class ConcreteOperationLogReadAdapter implements OperationLogReadAdapter 
       }
 
       return {
-        operationId: entry.id ? String(entry.id) : `op-${entry.createdAt}`,
+        ...logIdentity(entry, identity),
         phase: entry.eventType,
         message,
         timestamp: entry.createdAt,
@@ -82,4 +85,15 @@ export class ConcreteOperationLogReadAdapter implements OperationLogReadAdapter 
       };
     });
   }
+}
+
+/** Never infer progress identity from message text or a storage row number. */
+function logIdentity(entry: { id?: number; createdAt: string }, payload: unknown): { operationId: string; sequence?: number } {
+  if (payload !== null && typeof payload === 'object') {
+    const data = payload as Record<string, unknown>;
+    if (typeof data.operationId === 'string' && typeof data.sequence === 'number' && Number.isFinite(data.sequence)) {
+      return { operationId: data.operationId, sequence: data.sequence };
+    }
+  }
+  return { operationId: entry.id ? String(entry.id) : `op-${entry.createdAt}` };
 }

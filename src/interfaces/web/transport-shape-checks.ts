@@ -174,9 +174,10 @@ export function checkAttentionItem(object: unknown, path: string, problems: stri
 
 export function checkLogEntry(object: unknown, path: string, problems: string[]): void {
   if (!isPlainObject(object)) { problems.push(`${path} must be an object`); return; }
-  checkKeys(object, ['operationId', 'phase', 'message', 'timestamp', 'agent'],
+  checkKeys(object, ['operationId', 'sequence', 'phase', 'message', 'timestamp', 'agent'],
     ['operationId', 'phase', 'message', 'timestamp'], path, problems);
   checkString(object, 'operationId', path, problems);
+  if ('sequence' in object) { checkFiniteNumber(object, 'sequence', path, problems); }
   checkString(object, 'phase', path, problems);
   checkString(object, 'message', path, problems);
   checkString(object, 'timestamp', path, problems);

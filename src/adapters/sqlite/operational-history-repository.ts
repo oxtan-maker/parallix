@@ -40,10 +40,14 @@ export class SqliteOperationalHistoryRepository implements OperationalHistoryRep
       message: unknown;
       agent: unknown;
       raw_data: unknown;
+      operation_id: unknown;
+      sequence: unknown;
     }>(
       `SELECT id, event_type, created_at,
               CASE WHEN is_object THEN json_extract(event_data, '$.message') END AS message,
               CASE WHEN is_object THEN json_extract(event_data, '$.agent') END AS agent,
+              CASE WHEN is_object THEN json_extract(event_data, '$.operationId') END AS operation_id,
+              CASE WHEN is_object THEN json_extract(event_data, '$.sequence') END AS sequence,
               CASE WHEN is_object THEN NULL ELSE event_data END AS raw_data
        FROM (
          SELECT id, event_type, created_at, event_data,
@@ -59,6 +63,7 @@ export class SqliteOperationalHistoryRepository implements OperationalHistoryRep
       createdAt: String(row.created_at),
       message: typeof row.message === 'string' ? row.message : null,
       agent: typeof row.agent === 'string' ? row.agent : null,
+      ...(typeof row.operation_id === 'string' && typeof row.sequence === 'number' && Number.isFinite(row.sequence) ? { operationId: row.operation_id, sequence: row.sequence } : {}),
       rawData: row.raw_data === null || row.raw_data === undefined ? null : String(row.raw_data),
     }));
   }

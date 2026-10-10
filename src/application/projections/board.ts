@@ -177,6 +177,8 @@ export interface WipCountMetric {
 }
 
 export interface OperationLogEntry {
+  /** Producer progress sequence, only when stored alongside its operation identity. */
+  readonly sequence?: number;
   readonly operationId: string;
   readonly phase: string;
   readonly message: string;

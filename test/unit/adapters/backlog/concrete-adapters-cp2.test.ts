@@ -510,3 +510,21 @@ test('GateReadAdapter handles missing gate artifacts gracefully (R2)', async () 
   const status = await adapter.loadGateStatus(missionId('task-new'));
   assert.equal(status, 'unknown');
 });
+
+test('OperationLogReadAdapter preserves only explicit producer progress identities (TASK-2719)', async () => {
+  const history = new MockHistoryRepo();
+  await history.append({ eventType: 'run', eventData: JSON.stringify({ operationId: 'producer', sequence: 7, message: 'same' }), createdAt: '2026-10-06T10:00:00Z' });
+  await history.append({ eventType: 'run', eventData: JSON.stringify({ operationId: 'producer', message: 'same' }), createdAt: '2026-10-06T10:00:00Z' });
+  const log = await new ConcreteOperationLogReadAdapter({ historyRepo: history }).loadOperationLog();
+  assert.equal(log[0].operationId, 'producer');
+  assert.equal(log[0].sequence, 7);
+  assert.equal(log[1].sequence, undefined);
+  assert.notEqual(log[1].operationId, 'producer');
+  const bounded: OperationalHistoryRepository = {
+    ...history,
+    findAll: async () => { throw new Error('full read forbidden'); },
+    findByType: async () => [], append: async () => {}, clear: async () => {},
+    findRecentLogEntries: async () => [{ id: 9, eventType: 'run', createdAt: '2026-10-06T10:00:00Z', message: 'same', agent: null, rawData: null, operationId: 'producer', sequence: 7 }],
+  };
+  assert.equal((await new ConcreteOperationLogReadAdapter({ historyRepo: bounded }).loadOperationLog())[0].sequence, 7);
+});

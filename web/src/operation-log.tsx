@@ -2,18 +2,12 @@
  * The operation log strip: the server's own entries, printed in the order
  * received. Nothing is reconstructed, timestamped or reformatted here.
  *
- * Live progress from the event stream is transient and lives beside the
- * replaceable snapshot, never inside it, so a snapshot that does not (yet)
- * carry an entry cannot erase it (TASK-2655). Presentation order is the
- * snapshot's log in server order followed by live-only entries in arrival
- * order. Identity is the progress (operationId, sequence) pair and nothing
- * else: replayed frames collapse, but a snapshot entry without a sequence
- * (the wire carries none today) never matches a live entry, and distinct
- * events with identical text are both kept. The live store holds at
- * most `OPERATION_LOG_LIMIT` entries, evicting the oldest; it is in-memory
- * only, survives reconnects (replayed frames deduplicate by identity), and
- * resets when the stream's event ids regress, which means the host
- * restarted and its progress sequences mean something new.
+ * Live progress is kept beside snapshots. Supported (operationId, sequence)
+ * identities absorb persisted/replayed events. Unmatched live entries are
+ * inserted using producer timestamps, retaining durable server order and
+ * live arrival order on ties. Equal or unparseable times favor durable history
+ * at the bounded tail; they do not establish authoritative cross-process order.
+ * Regressed stream cursors reset transient state after host restart.
  */
 import type { WebBoardSnapshot, WebOperationLogEntry, WebProgressEvent } from '../../src/interfaces/web/transport.js';
 import { C } from './palette.js';
@@ -35,7 +29,7 @@ const sameEvent = (entry: WebOperationLogEntry, operationId: string, sequence: n
 export function observeStreamId(live: LiveProgress, eventId: string | undefined): LiveProgress {
   const id = eventId === undefined || eventId === '' ? Number.NaN : Number(eventId);
   if (!Number.isInteger(id)) { return live; }
-  if (live.lastEventId !== null && id <= live.lastEventId) { return { entries: [], lastEventId: id }; }
+  if (live.lastEventId !== null && id < live.lastEventId) { return { entries: [], lastEventId: id }; }
   return { ...live, lastEventId: id };
 }
 
@@ -45,11 +39,21 @@ export function recordProgress(live: LiveProgress, progress: WebProgressEvent): 
   return { ...live, entries: [...live.entries, entry].slice(-OPERATION_LOG_LIMIT) };
 }
 
-/** The snapshot as presented: its own log followed by live entries it does not carry, bounded. */
+/** Merge by producer time without comparing different operations' sequences. */
 export function withLiveProgress(snapshot: WebBoardSnapshot, live: LiveProgress): WebBoardSnapshot {
-  const pending = live.entries.filter(entry => !snapshot.operationLog.some(persisted => sameEvent(persisted, entry.operationId, entry.sequence)));
-  if (pending.length === 0) { return snapshot; }
-  return { ...snapshot, operationLog: [...snapshot.operationLog, ...pending].slice(-OPERATION_LOG_LIMIT) };
+  const durable = snapshot.operationLog.filter((entry, index, entries) =>
+    entry.sequence === undefined || !entries.slice(0, index).some(previous => sameEvent(previous, entry.operationId, entry.sequence)));
+  const pending = live.entries.filter(entry => !durable.some(persisted => sameEvent(persisted, entry.operationId, entry.sequence)));
+  const merged = [...durable];
+  for (const entry of pending) {
+    const time = Date.parse(entry.timestamp);
+    // Earlier live entries, including equal timestamps, retain arrival order.
+    // For legacy unknown timestamps keep durable history at the recent tail.
+    const index = merged.findIndex(other => durable.includes(other) &&
+      (!Number.isFinite(time) || !Number.isFinite(Date.parse(other.timestamp)) || Date.parse(other.timestamp) >= time));
+    if (index === -1) { merged.push(entry); } else { merged.splice(index, 0, entry); }
+  }
+  return { ...snapshot, operationLog: merged.slice(-OPERATION_LOG_LIMIT) };
 }
 
 export function OperationLog({ snapshot }: { snapshot: WebBoardSnapshot }) {

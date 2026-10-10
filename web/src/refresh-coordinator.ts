@@ -68,7 +68,9 @@ export function createRefreshCoordinator<T>(options: RefreshCoordinatorOptions<T
   function schedule() {
     if (disposed) { return; }
     if (timer !== undefined) { trailing = true; return; }
-    void request();
+    // One queued stream demand is enough even across many windows while a
+    // slow read is in flight. Explicit request callers keep their own waiters.
+    if (waiting.length === 0) { void request(); }
     timer = setTimeout(() => {
       timer = undefined;
       if (!trailing) { return; }

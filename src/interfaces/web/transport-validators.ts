@@ -3,6 +3,7 @@
  * payload into a DTO or an explicit failure state.
  */
 
+import type { WebStreamError } from './stream.js';
 import { SUPPORTED_WEB_TRANSPORT_VERSIONS, type WebBoardSnapshot, type WebCommandResult, type WebProgressEvent, type WebCommandRequestKind, type WebHandoffPayload, type WebCommandRequestValidation } from './transport-types.js';
 import { LANES, TERMINAL_STATUSES, ERROR_KINDS, EVIDENCE_SOURCES, COMMAND_REQUEST_KINDS, BUCKET_LABELS, ARTIFACT_KINDS, isPlainObject, checkKeys, checkString, checkFiniteNumber, checkEnum, checkOptString, checkOptionalNullableNumber, checkJsonValue, type WebTransportValidation } from './transport-validation-primitives.js';
 import { checkCommandAction, checkMissionCard, checkAttentionItem, checkLogEntry, checkAgentAvailability, checkSourceFact, checkMetrics } from './transport-shape-checks.js';
@@ -242,5 +243,16 @@ export function validateWebProgressEvent(payload: unknown): WebTransportValidati
     checkString(p, 'message', 'progress', problems);
     checkString(p, 'timestamp', 'progress', problems);
     checkOptString(p, 'agent', 'progress', problems);
+  });
+}
+
+/** Validate data-bearing SSE errors independently from native connection errors. */
+export function validateWebStreamError(payload: unknown): WebTransportValidation<WebStreamError> {
+  return validateWithVersion<WebStreamError>(payload, 'stream-error', (p, problems) => {
+    checkKeys(p, ['kind', 'transportVersion', 'error'], ['kind', 'transportVersion', 'error'], 'stream', problems);
+    if (!isPlainObject(p.error)) { problems.push('stream.error must be an object'); return; }
+    checkKeys(p.error, ['kind', 'message'], ['kind', 'message'], 'stream.error', problems);
+    checkEnum(p.error, 'kind', ERROR_KINDS, 'stream.error', problems);
+    checkString(p.error, 'message', 'stream.error', problems);
   });
 }

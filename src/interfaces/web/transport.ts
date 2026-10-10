@@ -29,7 +29,7 @@ export { WEB_TRANSPORT_VERSION, SUPPORTED_WEB_TRANSPORT_VERSIONS, isInvalidWebCo
 export type { WebTransportVersion, WebBoardLane, WebBoardCommandKind, WebCommandActionState, WebGateState, WebWorkCertainty, WebAttentionReasonKind, WebTerminalStatus, WebErrorKind, WebEvidenceSource, WebDurationMs, WebMissionWork, WebCoordinatorEvidence, WebMissionActivity, WebCommandAction, WebPullRequestReference, WebReviewRoundSummary, WebGoalCheckRow, WebCheckpointEvidence, WebMissionCard, WebStage, WebAttentionItem, WebOperationLogEntry, WebAgentAvailability, WebSourceFact, WebBoardMetrics, WebBoardSnapshot, WebCommandError, WebCommandResult, WebProgressEvent, WebCommandRequestKind, WebHandoffArtifact, WebHandoffPayload, WebCommandRequest, WebCommandRequestValidation, WebTransportErrorCode } from './transport-types.js';
 export { BOARD_COMMAND_KINDS, toWebBoardSnapshot, toWebCommandResult, toWebProgressEvent } from './transport-projection.js';
 export type { WebTransportValidation } from './transport-validation-primitives.js';
-export { validateWebBoardSnapshot, validateWebCommandResult, validateWebCommandRequest, validateWebProgressEvent } from './transport-validators.js';
+export { validateWebBoardSnapshot, validateWebCommandResult, validateWebCommandRequest, validateWebProgressEvent, validateWebStreamError } from './transport-validators.js';
 /**
  * transport.ts — the versioned, JSON-safe wire contract between the local
  * web host (ADR 0054) and a future browser client (ADR 0055).

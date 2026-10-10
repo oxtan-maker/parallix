@@ -400,6 +400,21 @@ describe("SQLite repository contract", () => {
     }
   });
 
+  it('operational-history: bounded summaries retain producer identity without carrying payloads (TASK-2719)', async () => {
+    const { db, dir } = await createDbWithSchema();
+    try {
+      const repo = new SqliteOperationalHistoryRepository(db);
+      await repo.append({ eventType: 'progress', eventData: JSON.stringify({ operationId: 'producer', sequence: 7, message: 'same', transcript: 'x'.repeat(500_000) }), createdAt: '2026-10-06T10:00:00Z' });
+      await repo.append({ eventType: 'legacy', eventData: JSON.stringify({ operationId: 'producer', sequence: '7', message: 'same' }), createdAt: '2026-10-06T10:00:00Z' });
+      const rows = await repo.findRecentLogEntries(2);
+      assert.equal(rows[0].operationId, 'producer');
+      assert.equal(rows[0].sequence, 7);
+      assert.equal(rows[0].rawData, null);
+      assert.ok(JSON.stringify(rows).length < 1000);
+      assert.equal(rows[1].sequence, undefined);
+    } finally { await db.close(); cleanupTempDir(dir); }
+  });
+
   it('operational-history: findRecentLogEntries keeps the newest entries and never carries a large payload (TASK-2681)', async () => {
     const { db, dir } = await createDbWithSchema();
     try {
