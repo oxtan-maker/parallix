@@ -78,7 +78,7 @@ export function createIntegrationPreflight(ports: IntegrateWorkflowPorts) {
       path.join(missionPaths.missionDirForSlug(baseWorktree, baseTaskSlug(context.slug)), 'MISSION.md'),
     ).split(path.sep).join('/');
     report.log(fmt.status('FAIL', `Mission doc: ${canonicalPath} not found`));
-    report.log(fmt.status('INFO', `Mission ${context.slug} has no recorded brief in the operator database and no historical MISSION.md. Run px status ${context.slug} --json to inspect its contract. Restore the historical document and run px import-legacy --existing-only, or record the brief with px goal set --goal <text> --why <text> --expected-version <version> in the mission worktree.`));
+    report.log(fmt.status('INFO', `Mission ${context.slug} has no recorded brief in the operator database and no historical MISSION.md. Run px status ${context.slug} --json to inspect its contract. Restore the historical document and run px import-legacy --existing-only, or record the brief with px goal set --goal <text> --why <text> in the mission worktree.`));
 
     const candidates = findMissionDocInBranchesFn(context.slug, baseWorktree);
     if (candidates && candidates.length > 0) {

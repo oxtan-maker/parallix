@@ -527,8 +527,8 @@ describe("status projection of Mission brief and checkpoint", () => {
     assert.match(output, /Next action: Record the next checkpoint\./);
   });
 
-  test('AC #10: px status reports the version an agent passes to --expected-version', () => {
-    assert.match(render(missionData()), /Version: 7 \(pass to --expected-version when writing\)/);
+  test('AC #10: px status exposes the version for diagnostics while writes resolve it automatically', () => {
+    assert.match(render(missionData()), /Version: 7 \(diagnostic only; writes resolve it automatically, or pass --expected-version to pin it\)/);
     assert.equal(JSON.parse(statusJson(result(missionData()))).version, 7);
   });
 

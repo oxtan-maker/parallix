@@ -10,6 +10,55 @@ import {
 } from '../../../../src/interfaces/cli/review-verbs.js';
 import { ReviewCommandUseCase } from '../../../../src/application/review-command-use-case.js';
 import { parseReviewCliRequest } from '../../../../src/interfaces/cli/review.js';
+import { createRevokeReviewCommand } from '../../../../src/interfaces/cli/revoke-review.js';
+import type { RevokeReviewDecisionRequest } from '../../../../src/application/revoke-review-decision-use-case.js';
+
+describe('revoke-review CLI version contract', () => {
+  test('resolves an omitted version and forwards an explicit pin (TASK-2710)', async () => {
+    const requests: RevokeReviewDecisionRequest[] = [];
+    const messages: string[] = [];
+    const command = createRevokeReviewCommand({
+      async execute(request: RevokeReviewDecisionRequest) {
+        requests.push(request);
+        return { status: 'completed', value: { providerUpdated: true, providerDiagnostic: null } };
+      },
+    } as never, () => 'task-2710');
+    const args = ['--decision', '2', '--reason', 'approval is stale', '--operator', 'human'];
+    await command(args, { logFn: text => messages.push(text) });
+    await command([...args, '--slug', 'task-explicit', '--expected-version', '42'], { logFn: text => messages.push(text) });
+    assert.equal(requests.length, 2);
+    assert.deepEqual(requests.map(({ occurredAt, ...request }) => {
+      assert.ok(Number.isFinite(Date.parse(occurredAt)));
+      return request;
+    }), [
+      { slug: 'task-2710', round: 2, reason: 'approval is stale', operator: 'human', expectedVersion: undefined },
+      { slug: 'task-explicit', round: 2, reason: 'approval is stale', operator: 'human', expectedVersion: 42 },
+    ]);
+    assert.ok(messages.every(message => message.includes('Matching provider approval dismissed.')));
+  });
+
+  test('rejects malformed version pins before submitting a revocation (TASK-2710)', async () => {
+    let calls = 0;
+    const command = createRevokeReviewCommand({ async execute() { calls++; } } as never, () => 'task-2710');
+    for (const suffix of [[], ['--reason', 'text'], ['nope'], ['0'], ['-1'], ['1.5'], ['9007199254740992']]) {
+      await assert.rejects(() => command(['--decision', '1', '--expected-version', ...suffix]), /--expected-version must be a positive integer/);
+    }
+    assert.equal(calls, 0);
+  });
+
+  test('reports a refused automatic revocation without reporting success (TASK-2710)', async () => {
+    const errors: string[] = [];
+    const command = createRevokeReviewCommand({
+      async execute() { return { status: 'failed', error: { message: 'expected version 1, found 2' } }; },
+    } as never, () => 'task-2710');
+    await assert.rejects(() => command(['--decision', '1', '--reason', 'stale', '--operator', 'human'], {
+      logFn: () => assert.fail('refused revocation must not report success'),
+      errorFn: text => errors.push(text),
+      exitFn: code => { throw new Error(`exit ${code}`); },
+    }), /exit 1/);
+    assert.match(errors.join('\n'), /expected version 1, found 2/);
+  });
+});
 
 // Regression provenance: TASK-2521-03.
 describe("review verbs", { concurrency: false }, () => {
@@ -26,8 +75,8 @@ describe("review verbs", { concurrency: false }, () => {
   type ImplementerOutput = Parameters<ReviewVerbPorts['consumeImplementerOutput']>[2];
 
   interface Recorded {
-    reviewerOutputs: { slug: string; reviewer: string; output: ReviewerOutput; expectedVersion: number }[];
-    implementerOutputs: { slug: string; implementer: string; output: ImplementerOutput; expectedVersion: number }[];
+    reviewerOutputs: { slug: string; reviewer: string; output: ReviewerOutput; expectedVersion?: number }[];
+    implementerOutputs: { slug: string; implementer: string; output: ImplementerOutput; expectedVersion?: number }[];
   }
 
   function ports(overrides: Partial<ReviewVerbPorts> = {}): { ports: ReviewVerbPorts; recorded: Recorded } {
@@ -167,25 +216,38 @@ describe("review verbs", { concurrency: false }, () => {
     assert.equal(recorded.implementerOutputs.length, 0);
   });
 
-  test('both verbs require the version the caller read', async () => {
-    // AC #10: a review decision is a Mission write like any other. Without this
-    // an agent that read version N could land a verdict after another mutation
-    // reached N+1 and never be told.
+  test('both verbs accept a write without the version and still reject an invalid one', async () => {
+    // AC #10: a review decision is a Mission write like any other. The version
+    // is now resolved from stored mission state, so a verb without
+    // --expected-version records its decision and the store's compare-and-swap
+    // save still refuses a competing write. An explicit but invalid value is
+    // still rejected.
     const { ports: p, recorded } = ports();
-    await assert.rejects(
-      () => createVerdictCommand(p)(['approve', '--actor', 'codex']),
-      /--expected-version <n> is required/,
-    );
-    await assert.rejects(
-      () => createResolveCommand(p)(['--actor', 'codex', '--finding', 'F1', '--fixed', 'done']),
-      /--expected-version <n> is required/,
-    );
+    await createVerdictCommand(p)(['approve', '--actor', 'codex']);
+    assert.equal(recorded.reviewerOutputs.length, 1, 'approve without a version is accepted');
+    assert.equal(recorded.reviewerOutputs[0]?.expectedVersion, undefined, 'the version is resolved internally');
+
+    await createResolveCommand(p)(['--actor', 'codex', '--finding', 'F1', '--fixed', 'done']);
+    assert.equal(recorded.implementerOutputs.length, 1, 'resolve without a version is accepted');
+    assert.equal(recorded.implementerOutputs[0]?.expectedVersion, undefined);
+
     await assert.rejects(
       () => createVerdictCommand(p)(['approve', '--actor', 'codex', '--expected-version', 'nope']),
       /--expected-version must be a positive integer/,
     );
-    assert.equal(recorded.reviewerOutputs.length, 0);
-    assert.equal(recorded.implementerOutputs.length, 0);
+    assert.equal(recorded.reviewerOutputs.length, 1, 'an invalid value records nothing');
+
+    // A present flag with no value is a malformed pin, not an automatic write:
+    // it is refused before any mutation, for both the review and resolve verbs.
+    await assert.rejects(
+      () => createVerdictCommand(p)(['approve', '--actor', 'codex', '--expected-version']),
+      /--expected-version must be a positive integer/,
+    );
+    await assert.rejects(
+      () => createResolveCommand(p)(['--actor', 'codex', '--finding', 'F1', '--fixed', 'done', '--expected-version']),
+      /--expected-version must be a positive integer/,
+    );
+    assert.equal(recorded.reviewerOutputs.length, 1, 'a malformed pin records nothing');
   });
 
   test('the version reaches the recorder so a stale decision can be refused', async () => {
@@ -226,7 +288,7 @@ describe("review verbs", { concurrency: false }, () => {
       const [call] = verb === 'verdict' ? recorded.reviewerOutputs : recorded.implementerOutputs;
       assert.ok(call, `${invocation} did not reach its recorder`);
       assert.equal(call.slug, 'task-9', `${invocation} must pass the slug with --slug`);
-      assert.equal(call.expectedVersion, 7, `${invocation} must pass --expected-version`);
+      assert.equal(call.expectedVersion, undefined, `${invocation} resolves the version internally instead of threading --expected-version`);
     }
   });
 });

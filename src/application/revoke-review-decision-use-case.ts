@@ -12,7 +12,7 @@ export interface RevokeReviewDecisionRequest {
   readonly reason: string;
   readonly operator: string;
   readonly occurredAt: string;
-  readonly expectedVersion: number;
+  readonly expectedVersion?: number;
 }
 
 export interface ReviewProviderRevocationPort {
@@ -72,10 +72,14 @@ export class RevokeReviewDecisionUseCase {
     } catch (error) {
       return failure('validation', error instanceof Error ? error.message : 'Review decision cannot be revoked');
     }
+    // Pin the lifecycle transition to the version this use case first loaded
+    // when the caller omits the flag, so a concurrent review write between this
+    // load and the lifecycle's own load/save cannot be silently erased. A
+    // supplied flag keeps the earlier explicit guard.
     const transition = await this._lifecycle.transition({
       operationId: `revoke-review:${request.slug}:${request.round}`,
       missionId: missionId(request.slug),
-      expectedVersion: request.expectedVersion as import('./domain-ports.js').MissionVersion,
+      expectedVersion: (request.expectedVersion ?? loaded.version) as import('./domain-ports.js').MissionVersion,
       capabilities: new Set(['mission:transition']),
       command: { type: 'revoke-approval', review },
       actor: request.operator,

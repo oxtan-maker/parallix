@@ -31,6 +31,16 @@ import { SqliteMigrationRunner, loadDefaultMigrations } from '../../../src/adapt
 import { composeBoardProjection } from '../../../src/composition/board-projection.js';
 import { MissionEditService } from '../../../src/application/mission-edit-service.js';
 import { MissionCard } from '../../../src/interfaces/tui/mission-card.js';
+import {
+  PX,
+  runGit,
+  runWorkflow,
+  worktreePathFor,
+  missionDir,
+  discoverAdhocSlug,
+  setupRepository,
+  workflowEnv,
+} from './mission-adhoc-and-context-cli-contract.fixture.js';
 
 // TASK-2468 (was test/task-2468-adhoc-lifecycle-repro.test.ts)
 describe('Ad hoc lifecycle', () => {
@@ -46,317 +56,6 @@ describe('Ad hoc lifecycle', () => {
   // Both the CLI under test and the stub agent's own `px` writes run from the
   // prebuilt bundle in the prebuilt integration lanes, skipping tsx's
   // multi-second start-up on each spawn.
-  const PX = resolvePxEntryLoader();
-  function runCommand(command, args, options = {}) {
-    const result = childProcess.spawnSync(command, args, {
-      encoding: 'utf8',
-      ...options
-    });
-    if (result.error && result.status === null) {
-      throw result.error;
-    }
-    return result;
-  }
-
-  function runGit(cwd, args, options = {}) {
-    const result = runCommand('git', args, { cwd, ...options });
-    if (result.status !== 0) {
-      throw new Error(`git ${args.join(' ')} failed\nstdout:\n${result.stdout}\nstderr:\n${result.stderr}`);
-    }
-    return (result.stdout || '').trim();
-  }
-
-  function commandDir(command) {
-    const resolved = maybeCommandPath(command);
-    if (!resolved) {
-      throw new Error(`Could not resolve command on PATH: ${command}`);
-    }
-    return resolved;
-  }
-
-  function maybeCommandPath(command) {
-    for (const directory of (process.env.PATH || '').split(path.delimiter)) {
-      if (!directory) {continue;}
-      const candidate = path.join(directory, command);
-      try {
-        fs.accessSync(candidate, fs.constants.X_OK);
-        return candidate;
-      } catch {
-        // Keep searching PATH.
-      }
-    }
-    return null;
-  }
-
-  function writeExecutable(filePath, content) {
-    fs.mkdirSync(path.dirname(filePath), { recursive: true });
-    fs.writeFileSync(filePath, content, 'utf8');
-    fs.chmodSync(filePath, 0o755);
-  }
-
-  function lifecycleStubSource() {
-    // The stub is written to an extensionless file on the fixture PATH, so Node
-    // loads it as CommonJS. Its own `require` calls are part of the generated
-    // script and are unrelated to this file's module system.
-    return `#!${process.execPath}
-  const fs = require('node:fs');
-  const path = require('node:path');
-
-  // Activation requires a recorded contract. Agent setup applies the same
-  // typed commands through the production command graph in one child.
-  function writeChain(missionSlug, writes) {
-    // Contract setup is agent fixture work. Run the same production command
-    // graph once for the chain instead of starting a CLI per setup mutation.
-    const result = require('node:child_process').spawnSync(process.execPath,
-      ['--import', ${JSON.stringify(path.resolve('node_modules/tsx/dist/loader.mjs'))},
-       ${JSON.stringify(path.resolve('test/fixtures/mission-contract-agent-writes.ts'))},
-       missionSlug, JSON.stringify(writes)], { cwd: process.cwd(), env: process.env, encoding: 'utf8' });
-    if (result.status !== 0) { throw new Error(result.stdout + result.stderr); }
-  }
-
-  function recordMissionContract(missionSlug) {
-    writeChain(missionSlug, [
-      ['goal', 'set', '--goal', 'Exercise the real lifecycle with a deterministic stub agent',
-        '--why', 'Protect the workflow surface from regression drift'],
-      ['scope', 'set', '--scope', 'Run draft, active, review and integrate through the real CLI',
-        '--out-of-scope', 'Real model execution'],
-      ['gate', 'add', '--command', 'node -e ""'],
-      ['criterion', 'add', '--text', 'The lifecycle reaches integration through the real CLI'],
-      ['checkpoint', 'plan', '--name', 'CP-1', '--text', 'Execute the stub deliverable'],
-      ['checkpoint', 'plan', '--name', 'CP-2', '--text', 'Ready the mission for review'],
-      ['nel', 'set', '--predicted', 'Small'],
-    ]);
-  }
-
-  function writeFile(filePath, content) {
-    fs.mkdirSync(path.dirname(filePath), { recursive: true });
-    fs.writeFileSync(filePath, content, 'utf8');
-  }
-
-  function read(filePath) {
-    return fs.existsSync(filePath) ? fs.readFileSync(filePath, 'utf8') : '';
-  }
-
-  function match(prompt, regex) {
-    const found = prompt.match(regex);
-    return found ? found[1].trim() : null;
-  }
-
-  const prompt = process.argv[process.argv.length - 1] || '';
-  const slug = match(prompt, /(px-[0-9]+|task-[a-z0-9-]+)/im)
-    || match(prompt, /^Mode: act-on-review\\. Branch:\\s*mission\\/(task-[a-z0-9-]+)/im)
-    || match(prompt, /^Mode: review\\. .*?Mission:\\s+.*?(task-[a-z0-9-]+)/im)
-    || 'task-unknown';
-  // Typed missions record the contract through px; the directory holds only
-  // optional mission-local artifacts.
-  const missionBaseDir = (() => {
-    try {
-      const cfg = JSON.parse(read(path.join(process.cwd(), 'workflow.config.json')) || '{}');
-      return (cfg.adapters && cfg.adapters.missions && cfg.adapters.missions.baseDir) || 'missions';
-    } catch (_) { return 'missions'; }
-  })();
-  const missionDir = match(prompt, /^Mission dir:\\s*(.+)$/m)
-    || path.join(process.cwd(), missionBaseDir, slug);
-  const reviewFindingsPath = match(prompt, /\\\`([^\\\`\\n]+-review-findings\\.md)\\\`/);
-  const reviewOutcomePath = match(prompt, /\\\`([^\\\`\\n]+-review-outcome\\.md)\\\`/);
-  const reviewVerdictPath = match(prompt, /\\\`([^\\\`\\n]+-review-verdict\\.txt)\\\`/);
-  const resolutionPath = match(prompt, /\\\`([^\\\`\\n]+-round-resolution\\.md)\\\`/);
-  const dispositionPath = match(prompt, /\\\`([^\\\`\\n]+-review-disposition\\.txt)\\\`/);
-
-  if (process.argv.includes('--help')) {
-    process.stdout.write('stub opencode help\\n');
-    process.exit(0);
-  }
-
-  if (/^Mode: draft\\./m.test(prompt)) {
-    recordMissionContract(slug);
-    writeFile(path.join(missionDir, 'milestone-1.md'), '# Milestone 1\\n\\nTyped contract recorded.\\n');
-  }
-
-  if (/^Mode: execute after lock\\./m.test(prompt)) {
-    writeFile(path.join(process.cwd(), 'deliverable.txt'), 'stub execute output\\n');
-    writeChain(slug, [
-      ['CP-1', 'Execute artifacts committed', 'Run review.'],
-      ['CP-2', 'The lifecycle reaches integration through the real CLI', 'Approve the mission in review.'],
-    ].map(([name, criterion, next]) => ['checkpoint', 'record', '--name', name,
-      '--criterion', criterion, '--evidence', 'deliverable.txt:1', '--next', next]).concat([
-      ['mission', 'mark-complete', '--all'],
-    ]));
-  }
-
-  if (/^Mode: review\\./m.test(prompt)) {
-    writeFile(reviewFindingsPath, '# Findings\\n\\nNo blocking findings. The lifecycle artifacts are present and consistent.\\n');
-    writeFile(reviewOutcomePath, 'Verdict: approve\\n\\nLifecycle approved for integration.\\n');
-    writeFile(reviewVerdictPath, 'approve\\n');
-  }
-
-  if (/^Mode: act-on-review\\./m.test(prompt)) {
-    writeFile(resolutionPath, 'fixed_items: []\\npushed_back_items: []\\nparked_items: []\\nblocked_reason: ""\\n');
-    writeFile(dispositionPath, 'CHANGES_MADE\\n');
-  }
-
-  process.stdout.write('{"sessionID":"ses_stubbed_opencode"}\\n');
-  `;
-  }
-
-  function postIntegrateHookMarkerPath(repoRoot) {
-    return path.join(repoRoot, 'post-integrate-hook.log');
-  }
-
-  function writePostIntegrateHookScript(repoRoot) {
-    const scriptPath = path.join(repoRoot, 'scripts', 'e2e-post-integrate-hook.sh');
-    const markerPath = postIntegrateHookMarkerPath(repoRoot);
-    writeExecutable(scriptPath, [
-      '#!/usr/bin/env bash',
-      'set -euo pipefail',
-      `printf 'slug=%s base_worktree=%s base_branch=%s variant=%s\\n' "$INTEGRATE_HOOK_SLUG" "$INTEGRATE_HOOK_BASE_WORKTREE" "$INTEGRATE_HOOK_BASE_BRANCH" "$INTEGRATE_HOOK_VARIANT" >> ${JSON.stringify(markerPath)}`,
-      ''
-    ].join('\n'));
-    return scriptPath;
-  }
-
-  function setupRepository({ slug, title, postIntegrateHook = false }) {
-    const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'parallix-e2e-'));
-    const repoRoot = path.join(tmpRoot, 'repo');
-    const binDir = path.join(repoRoot, 'bin');
-    const stateHome = path.join(tmpRoot, 'parallix-home');
-    const reviewTmpDir = path.join(tmpRoot, 'review-artifacts');
-
-    // Adhoc-only fixture: no backlog/ directory at all. The mission identity is
-    // DB-owned (px-<NNNN>), so this draft must reach `active` with no
-    // Backlog task file — the red->green anchor for the free-text first-value
-    // path (task-2468). Any backlog/ creation here would contradict the fixture.
-    fs.mkdirSync(path.join(repoRoot, 'config'), { recursive: true });
-    fs.mkdirSync(reviewTmpDir, { recursive: true });
-
-    const agentStub = lifecycleStubSource();
-    writeExecutable(path.join(binDir, 'opencode'), agentStub);
-    writeExecutable(path.join(binDir, 'codex'), agentStub);
-    fs.symlinkSync(process.execPath, path.join(binDir, 'node'));
-    fs.symlinkSync(commandDir('git'), path.join(binDir, 'git'));
-    fs.symlinkSync(commandDir('bash'), path.join(binDir, 'bash'));
-    fs.symlinkSync(commandDir('id'), path.join(binDir, 'id'));
-    const bwrapPath = maybeCommandPath('bwrap');
-    if (bwrapPath) {
-      fs.symlinkSync(bwrapPath, path.join(binDir, 'bwrap'));
-    }
-    const graphifyPath = maybeCommandPath('graphify');
-    if (graphifyPath) {
-      fs.symlinkSync(graphifyPath, path.join(binDir, 'graphify'));
-    }
-
-    const adapters = {
-      tasks: { provider: 'backlog-md', storage: 'backlog', stateMap: 'config/state-map.json' },
-      agents: { models: { custom: 'stub/custom' } },
-      missions: { baseDir: 'missions', branchPrefix: 'mission/', worktreePattern: '../<repo>-<slug>' },
-      verification: { command: ':', defaultArea: 'all' },
-      review: { provider: 'none', tmpDir: reviewTmpDir }
-    };
-
-    if (postIntegrateHook) {
-      const scriptPath = writePostIntegrateHookScript(repoRoot);
-  // @ts-expect-error -- Legacy fixture intentionally accesses runtime-only `integrate` absent from its inferred mock shape.
-      adapters.integrate = { postIntegrateCommand: `./${path.relative(repoRoot, scriptPath)}` };
-    }
-
-    fs.writeFileSync(path.join(repoRoot, 'workflow.config.json'), JSON.stringify({
-      product: {
-        name: 'e2e-probe',
-        targetUser: 'tests'
-      },
-      adapters
-    }, null, 2));
-
-    fs.writeFileSync(path.join(repoRoot, 'config', 'state-map.json'), JSON.stringify({
-      ready: 'refined',
-      approved: 'ready-for-integration'
-    }, null, 2));
-
-    fs.writeFileSync(path.join(repoRoot, 'README.md'), '# E2E Probe\n', 'utf8');
-
-    // `git init -b` was added in Git 2.28. Keep this real-Git E2E compatible
-    // with older installations by creating the initial branch separately.
-    runGit(repoRoot, ['init']);
-    runGit(repoRoot, ['checkout', '-b', 'main']);
-    runGit(repoRoot, ['config', 'user.email', 'test@example.com']);
-    runGit(repoRoot, ['config', 'user.name', 'Parallix E2E']);
-    runGit(repoRoot, ['add', '.']);
-    runGit(repoRoot, ['commit', '-m', 'initial test repo']);
-
-    return {
-      tmpRoot,
-      repoRoot,
-      binDir,
-      stateHome,
-      reviewTmpDir
-    };
-  }
-
-  function workflowEnv(binDir, stateHome, repoRoot) {
-    return {
-      ...process.env,
-      FORCE_COLOR: '0',
-      FORGEJO_USER: 'custom',
-      PRIMARY_WORKTREE: repoRoot,
-      PARALLIX_HOME: stateHome,
-      PATH: binDir
-    };
-  }
-
-  // This test launches real CLI and agent-stub processes. Coverage instrumentation
-  // and concurrent integration workers can delay startup beyond one minute even
-  // though the fixture remains healthy, so keep the boundary bounded but give it
-  // the same two-minute allowance used by the end-to-end workflow lane.
-  function runWorkflow(repoRoot, env, args, timeout = 120000, { allowFailure = false } = {}) {
-    // The CLI contract output is small. Capturing it directly keeps the same
-    // subprocess boundary while avoiding four file operations per invocation.
-    const result = childProcess.spawnSync(process.execPath, pxNodeArgs(PX, args), {
-      cwd: repoRoot,
-      env,
-      timeout,
-      encoding: 'utf8'
-    });
-    if (result.error && result.status === null) {
-      throw result.error;
-    }
-    if (!allowFailure && result.status !== 0) {
-      throw new Error(
-        `px ${args.join(' ')} failed (status=${result.status}, signal=${result.signal}, error=${result.error ? result.error.message : 'none'})\n` +
-        `stdout:\n${result.stdout}\nstderr:\n${result.stderr}`
-      );
-    }
-    return result;
-  }
-
-  function worktreePathFor(repoRoot, slug) {
-    return path.resolve(repoRoot, '..', `${path.basename(repoRoot)}-${slug}`);
-  }
-
-
-  /**
-   * The draft materializes the mission under the mission worktree's `missions/`
-   * dir, so discover the adhoc slug there. The worktree is the sibling of the
-   * base repo named `<repo>-<slug>` (the configured worktree pattern).
-   */
-  function missionDir(rootDir, slug) {
-    return path.join(rootDir, 'missions', slug);
-  }
-
-  function discoverAdhocSlug(repoRoot) {
-    const parent = path.dirname(repoRoot);
-    const base = path.basename(repoRoot);
-    const siblings = fs.existsSync(parent)
-      ? fs.readdirSync(parent).filter((d) => d.startsWith(base + '-') && d !== base)
-      : [];
-    for (const sibling of siblings) {
-      const missionsDir = path.join(parent, sibling, 'missions');
-      if (!fs.existsSync(missionsDir)) {continue;}
-      const entries = fs.readdirSync(missionsDir).filter((d) => !d.startsWith('.'));
-      const adhoc = entries.find((d) => !d.startsWith('task-'));
-      if (adhoc) {return adhoc;}
-    }
-    return null;
-  }
 
   test('a free-text adhoc mission reaches active on a DB-owned adhoc identity in a Backlog-less repo', (t) => {
     const repo = setupRepository({ slug: 'fix-hello-world-greeting', title: 'fix hello world greeting' });
@@ -516,17 +215,45 @@ describe('Context CLI', () => {
       const version = first.version;
       assert.ok(Number.isSafeInteger(version), 'status --json must expose the write version');
 
-      // --- every write requires the version --------------------------------
-      assert.equal(await invoke(['goal', 'set', '--slug', SLUG, '--goal', 'x', '--why', 'y']), 1);
-      assert.match(errors.join('\n'), /--expected-version <n> is required/);
-      assert.equal((await statusJson()).brief.goal, 'Prove the real CLI reads and writes Mission state');
-
-      // --- change, then re-read --------------------------------------------
+      // --- writes resolve the version without the flag ---------------------
       assert.equal(await invoke([
         'goal', 'set', '--slug', SLUG,
         '--goal', 'Prove the typed verbs write', '--why', 'AC #15 needs a real round trip',
-        '--expected-version', String(version),
       ]), 0, errors.join('\n'));
+      assert.equal((await statusJson()).brief.goal, 'Prove the typed verbs write');
+
+      // --- genuinely sequential flag-free writes need no readback between ---
+      // No statusJson read between writes: each resolves its own stored version
+      // and threads it through the store's compare-and-swap save. A stale
+      // expected-version would fail here; none is supplied.
+      assert.equal(await invoke(['nel', 'set', '--slug', SLUG, '--predicted', 'Large']), 0, errors.join('\n'));
+      assert.equal(await invoke(['assign', '--slug', SLUG, '--agent', 'codex']), 0, errors.join('\n'));
+      assert.equal(await invoke(['nel', 'set', '--slug', SLUG, '--predicted', 'Medium']), 0, errors.join('\n'));
+      assert.equal(await invoke(['assign', '--slug', SLUG, '--agent', 'reviewer']), 0, errors.join('\n'));
+      const sequential = await statusJson();
+      assert.equal(sequential.predictedNelBucket, 'Medium');
+      assert.equal(sequential.assignee, 'reviewer');
+
+      // --- an injected competing write between load and save is refused -----
+      // Two flag-free writes race the same stored revision: SQLite serialises
+      // them and exactly one wins, the other conflicts and changes nothing
+      // (no overwrite, no duplicate effect). The version always advances by one.
+      const before = (await statusJson()).version;
+      const [win, lose] = await Promise.all([
+        run(['nel', 'set', '--slug', SLUG, '--predicted', 'Small'], { baseCwd: repo, error: (m) => m }),
+        run(['nel', 'set', '--slug', SLUG, '--predicted', 'Medium'], { baseCwd: repo, error: (m) => m }),
+      ]);
+      assert.equal([win, lose].filter((c) => c === 0).length, 1, 'exactly one concurrent flag-free write wins');
+      assert.equal([win, lose].filter((c) => c === 1).length, 1, 'the other conflicts');
+      const competing = await statusJson();
+      assert.equal(competing.version, before + 1, 'one competing write advanced the version once');
+      assert.equal(['Small', 'Medium'].includes(competing.predictedNelBucket), true, 'the winner landed, the loser did not');
+
+      // --- a stale write is rejected and changes nothing --------------------
+      assert.equal(await invoke([
+        'goal', 'set', '--slug', SLUG, '--goal', 'stale', '--why', 'stale',
+        '--expected-version', String(version),
+      ]), 1);
       const afterGoal = await statusJson();
       assert.equal(afterGoal.brief.goal, 'Prove the typed verbs write');
       assert.equal(afterGoal.brief.why, 'AC #15 needs a real round trip');
@@ -703,6 +430,76 @@ describe('Context CLI', () => {
       else { process.env.PARALLIX_HOME = previousHome; }
       fs.rmSync(home, { recursive: true, force: true });
       fs.rmSync(repo, { recursive: true, force: true });
+    }
+  });
+
+  // Flag-free writes in inferred-slug mode: run from the mission worktree
+  // branch so the slug is inferred, never passed, with no intervening status
+  // read, and an injected competing write that must conflict.
+  test('flag-free writes resolve the inferred worktree slug and a competing write conflicts', async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'parallix-flagfree-'));
+    const repo = path.join(root, 'repo');
+    const home = path.join(root, 'state');
+    fs.mkdirSync(repo, { recursive: true });
+    fs.writeFileSync(path.join(repo, 'workflow.config.json'), JSON.stringify({
+      product: { name: 'Flagfree Fixture' },
+      adapters: {
+        tasks: { provider: 'backlog-md', storage: 'backlog' },
+        missions: { baseDir: 'docs/missions' },
+        verification: { command: ':' },
+        review: { provider: 'none' },
+        agents: {},
+      },
+    }, null, 2));
+    // A mission worktree branch so the slug is inferred, not passed.
+    for (const args of [
+      ['init', '-q'],
+      ['checkout', '-b', 'mission/task-flagfree'],
+      ['config', 'user.email', 'test@example.com'],
+      ['config', 'user.name', 'Parallix E2E'],
+    ]) { const r = childProcess.spawnSync('git', args, { cwd: repo }); if (r.status !== 0) { throw new Error(`git ${args.join(' ')} failed`); } }
+    const previousHome = process.env.PARALLIX_HOME;
+    process.env.PARALLIX_HOME = home;
+    const id = missionId('task-flagfree');
+    try {
+      const { db } = await initOperatorState({ homeDir: home });
+      const store = new SqliteMissionStore(db);
+      await store.save({
+        ...intakeMission({ id, repositoryId: repositoryId('parallix'), title: 'Flagfree fixture', assignee: agentFamily('codex') }),
+        status: 'active',
+        brief: missionBrief({ goal: 'flag-free goal', why: 'flag-free', scope: 'read one Mission', outOfScope: [] }),
+        declaredGates: [],
+      } as Mission, null);
+      await clearOperatorStateCache();
+
+      // Inferred slug: no --slug, no --expected-version. Genuinely sequential.
+      assert.equal(await run(['goal', 'set', '--goal', 'sequential one', '--why', 'no read'], { baseCwd: repo }), 0);
+      assert.equal(await run(['nel', 'set', '--predicted', 'Large'], { baseCwd: repo }), 0);
+      assert.equal(await run(['assign', '--agent', 'reviewer'], { baseCwd: repo }), 0);
+      const inferred = await new SqliteMissionStore((await initOperatorState({ homeDir: home })).db).load(id);
+      assert.equal(inferred.kind, 'found');
+      if (inferred.kind !== 'found') { throw new Error('missing'); }
+      assert.equal(inferred.mission.brief?.goal, 'sequential one');
+      assert.equal(inferred.mission.predictedNelBucket, 'Large');
+      assert.equal(inferred.mission.assignee, agentFamily('reviewer'));
+
+      // Injected competing write: two flag-free writes race the same revision.
+      const before = inferred.version;
+      const [win, lose] = await Promise.all([
+        run(['nel', 'set', '--predicted', 'Small'], { baseCwd: repo }),
+        run(['nel', 'set', '--predicted', 'Medium'], { baseCwd: repo }),
+      ]);
+      assert.equal([win, lose].filter((c) => c === 0).length, 1, 'exactly one concurrent flag-free write wins');
+      assert.equal([win, lose].filter((c) => c === 1).length, 1, 'the other conflicts');
+      const competing = await new SqliteMissionStore((await initOperatorState({ homeDir: home })).db).load(id);
+      assert.equal(competing.kind, 'found');
+      if (competing.kind !== 'found') { throw new Error('missing'); }
+      assert.equal(competing.version, before + 1, 'one competing write advanced the version once');
+      assert.ok(['Small', 'Medium'].includes(competing.mission.predictedNelBucket ?? null), 'the winner landed');
+    } finally {
+      await clearOperatorStateCache();
+      if (previousHome === undefined) { delete process.env.PARALLIX_HOME; } else { process.env.PARALLIX_HOME = previousHome; }
+      fs.rmSync(root, { recursive: true, force: true });
     }
   });
 });

@@ -127,7 +127,7 @@ export interface StatusMissionData {
   readonly goalCheck?: readonly StatusGoalCheckRow[];
   /** Next action recorded with the latest checkpoint. */
   readonly nextAction?: string | null;
-  /** Optimistic-concurrency version, supplied to `--expected-version` on writes. */
+  /** Optimistic-concurrency version for diagnostics; writes resolve it automatically, so it is not supplied to writes unless pinned. */
   readonly version?: number | null;
   /** Mission title as recorded, so an agent identifies the mission without a file. */
   readonly title?: string | null;

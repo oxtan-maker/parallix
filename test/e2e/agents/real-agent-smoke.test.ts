@@ -24,6 +24,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { SqliteMeasurementStore } from '../../../src/adapters/sqlite/measurement-store.js';
 import { createTempRootRegistry } from '../../../src/adapters/verification/temp-root-registry.js';
+import { uncoveredCriteria } from '../../../src/domain/checkpoint.js';
 
 const tempRootRegistry = createTempRootRegistry();
 process.on('SIGINT', () => { tempRootRegistry.cleanup(); process.exit(130); });
@@ -1071,16 +1072,14 @@ function runRealAgentSmoke(agent, runner) {
     const executed = readMissionStatus(worktree, env, slug);
     const unrecorded = (executed.checkpoints ?? []).filter((checkpoint) => !checkpoint.recorded).map((checkpoint) => checkpoint.name);
     assert.deepEqual(unrecorded, [], `[parallix-workflow-failure] planned checkpoints without recorded evidence after the active phase: ${unrecorded.join(', ')}`);
-    // The typed Mission contract identifies criterion completion by its stored
-    // index, not by requiring a Goal Check label to reproduce its prose. The
-    // handoff already verified those completion indexes and requires one row
-    // per criterion; preserve that same contract here while accepting useful
-    // descriptive row labels from a real agent.
-    const goalCheckRows = executed.latestCheckpoint?.goalCheck ?? [];
-    const criterionCount = (executed.successCriteria ?? []).length;
-    assert.ok(
-      goalCheckRows.length >= criterionCount,
-      `[parallix-workflow-failure] final checkpoint Goal Check rows must cover every success criterion: expected at least ${criterionCount}, got ${goalCheckRows.length}`
+    // Handoff measures distinct criterion identities across all recorded
+    // checkpoints. A final repair may record only the affected criterion while
+    // earlier checkpoints retain the other evidence (TASK-2710).
+    const uncovered = uncoveredCriteria(executed.checkpoints ?? [], executed.successCriteria ?? []);
+    assert.deepEqual(
+      uncovered,
+      [],
+      `[parallix-workflow-failure] recorded checkpoint Goal Check rows must cover every success criterion; uncovered: ${uncovered.join(', ')}`
     );
 
     // Phase 3: Integrate through the real CLI rail. Agent work is complete at

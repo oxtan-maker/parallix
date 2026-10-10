@@ -115,7 +115,7 @@ test('buildDraftPrompt records the mission contract through typed commands, not 
   for (const verb of [/px goal set --goal/, /px scope set --scope/, /px gate add --command/]) {
     assert.match(prompt, verb);
   }
-  assert.match(prompt, /--expected-version/);
+  assert.match(prompt, /resolves its own current version/, 'the draft prompt states writes resolve their own version');
   // TASK-2521.04 gave Mission dependencies a home, so `px depends` is a live
   // command again and the draft prompt offers it.
   assert.match(prompt, /px depends add --on/);

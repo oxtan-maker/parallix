@@ -581,9 +581,9 @@ Automatic repair is refused and the harness stops if:
 Missing checkpoint evidence, incomplete success criteria, and failed verification
 gates bounce to the implementer within the repair budget. For incomplete criteria,
 the implementer reloads `px status <slug>`, verifies the work, and records completion
-with `px mission mark-complete --slug <slug> --criterion <index> --expected-version <n>`.
-The index is one-based and the version comes from current status; reload it after
-each write. Completion flags and final checkpoint evidence are both required.
+with `px mission mark-complete --slug <slug> --criterion <index>`.
+The index is one-based; the write resolves its own current version automatically,
+so no intervening status read is needed between writes. Completion flags and final checkpoint evidence are both required.
 The same handoff check must pass after repair.
 
 Before a dedicated repair launch, Parallix persists an incident-associated repair

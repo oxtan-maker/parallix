@@ -18,7 +18,7 @@ Forbidden actions:
 
 Mission state authority: `px status {{slug}}` is the authority for recorded Mission facts.
 
-Record the mission contract with typed commands. The slug is inferred from this worktree, and every write takes `--expected-version <n>`. Each write prints the new `version`; pass it to the next write instead of re-reading `px status`.
+Record the mission contract with typed commands. The slug is inferred from this worktree, and every write resolves its own current version automatically, so no write takes `--expected-version`. Each write prints the new `version`; pass it to the next write only when you want to pin the version, otherwise keep writing without re-reading `px status`.
 
 The contract, and what the harness requires before this draft can finish:
 

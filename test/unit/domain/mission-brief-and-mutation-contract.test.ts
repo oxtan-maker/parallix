@@ -328,10 +328,10 @@ describe('Prompt authority', () => {
     const source = prompt('execute-core.md');
     assert.match(source, /px status \{\{slug\}\}/);
     assert.match(source, /px checkpoint record --name/);
-    assert.match(source, /px mission mark-complete --slug \{\{slug\}\} --criterion <index> --expected-version <n>/);
+    assert.match(source, /px mission mark-complete --slug \{\{slug\}\} --criterion <index>/);
     assert.match(source, /Recording checkpoint evidence does not mark criteria complete/);
     // Evidence guidance matches the shared reference check (TASK-2662).
-    assert.match(source, /px checkpoint record --name CP-2 --expected-version 7 --criterion/, 'one concrete recording example');
+    assert.match(source, /px checkpoint record --name CP-2 --criterion/, 'one concrete recording example');
     assert.match(source, /repository-relative path[^\n]*bare basename[^\n]*does not resolve/);
     assert.match(source, /`\.test`, `\.spec` or `\.cases` module under `test\/`/);
     assert.match(source, /Handoff checks every recorded checkpoint/, 'handoff checks all recorded checkpoints');
@@ -342,9 +342,9 @@ describe('Prompt authority', () => {
       assert.doesNotMatch(source, write, 'execute must not advertise a mission write');
     }
     assert.doesNotMatch(source, /--data <json>|--data-stdin/, 'no JSON request blob may be advertised');
-    // AC #10: where the version comes from, and that a stale write changes nothing.
-    assert.match(source, /--expected-version/);
-    assert.match(source, /rejected with an explicit conflict and changes nothing/);
+    // AC #10: the write resolves the version itself, and a competing write still fails with an explicit conflict and changes nothing.
+    assert.match(source, /Writes resolve their own current version/);
+    assert.match(source, /A competing write still fails with an explicit conflict and changes nothing/);
     // Lifecycle and review writes stay with the workflow, not the implementer.
     assert.match(source, /do not run .*`px active`.*`px review`/);
   });
@@ -917,6 +917,6 @@ describe('Success criterion completion value', () => {
   test('incomplete-success-criteria recovery advice uses the indexed completion command (TASK-2631)', () => {
     const advice = buildSuccessCriteriaRecoveryAdvice('task-2631');
     assert.match(advice, /px status task-2631/);
-    assert.match(advice, /px mission mark-complete --slug task-2631 --criterion <index> --expected-version <n>/);
+    assert.match(advice, /px mission mark-complete --slug task-2631 --criterion <index>/);
   });
 });

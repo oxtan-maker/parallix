@@ -201,7 +201,7 @@ export function renderReviewLoopEvent(event: ReviewLoopEvent, output: ReviewLoop
       return;
     case 'approved-round-correction':
       if (event.diagnostic) { log(fmt.status('INFO', `Approval revocation failed: ${event.diagnostic}`)); }
-      log(fmt.status('INFO', `A human requested changes on ${event.slug} while its round ${event.round} approval is still effective. Run: px revoke-review --slug ${event.slug} --decision ${event.round} --reason <text> --operator <name> --expected-version <n>, then px review ${event.slug} --continue.`));
+      log(fmt.status('INFO', `A human requested changes on ${event.slug} while its round ${event.round} approval is still effective. Run: px revoke-review --slug ${event.slug} --decision ${event.round} --reason <text> --operator <name>, then px review ${event.slug} --continue.`));
       return;
     case 'attempts-exhausted':
       log(fmt.status('INFO', `Autonomous review stopped: reached ${event.maxAttempts} attempts. Hand off to human review.`));

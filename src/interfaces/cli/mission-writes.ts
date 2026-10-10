@@ -8,12 +8,13 @@
  * own domain rule.
  *
  * The slug is inferred from the branch or worktree; `--slug` is only needed
- * outside the mission worktree. Every write takes `--expected-version`, whose
- * value comes from `px status --json`, so a stale write is rejected instead of
- * silently winning. Classification set is the one exception: it discovers the
- * current version from stored mission state itself, so the caller never threads
- * the flag. The optimistic-concurrency guard still runs — the store rejects a
- * write whose version no longer matches — it just resolves the version internally.
+ * outside the mission worktree. Every write accepts an otherwise valid
+ * invocation without `--expected-version`: when the flag is omitted the command
+ * resolves the current stored version itself and the store's compare-and-swap
+ * save still refuses a competing write, so a stale write changes nothing
+ * without a preceding `px status` read. Supplying `--expected-version` keeps
+ * the earlier explicit guard. Classification set is a second command that
+ * never takes the flag at all.
  */
 
 import * as fmt from '../../application/presentation/cli-format.js';
@@ -78,14 +79,23 @@ function request(
 ) {
   const slug = resolveSlug(flag(args, '--slug') ?? undefined);
   if (!slug) { fail('no mission slug: run inside the mission worktree or pass --slug <slug>'); }
-  const raw = flag(args, '--expected-version');
-  if (raw === null) { fail('--expected-version <n> is required; read it from `px status --json`'); }
-  const parsed = Number(raw);
-  if (!Number.isSafeInteger(parsed) || parsed < 1) { fail('--expected-version must be a positive integer'); }
+  // `--expected-version` is optional. When omitted, `expectedVersion` is left
+  // undefined so `loadForCommand` skips its pre-check and the command writes
+  // against the revision it just loaded; the store's compare-and-swap save then
+  // refuses a competing write, so a stale write still changes nothing. Supplying
+  // the flag keeps the earlier explicit guard and validation. A present flag
+  // with no value is a malformed pin and is refused, never an automatic write.
+  const expectedVersion = (() => {
+    if (!args.includes('--expected-version')) { return undefined; }
+    const raw = flag(args, '--expected-version');
+    const parsed = Number(raw);
+    if (!Number.isSafeInteger(parsed) || parsed < 1) { fail('--expected-version must be a positive integer'); }
+    return missionVersion(parsed);
+  })();
   return {
     operationId: `px-${operation}-${slug}`,
     missionId: missionId(slug),
-    expectedVersion: missionVersion(parsed),
+    expectedVersion,
     capabilities: new Set([capability]),
   };
 }
@@ -98,7 +108,7 @@ function unwrap<T>(outcome: { status: string; error?: { message?: string }; valu
 }
 
 export const GOAL_HELP = `
-Usage: px goal set [--slug <slug>] --goal <text> --why <text> --expected-version <n>
+Usage: px goal set [--slug <slug>] --goal <text> --why <text>
 
 Set the Mission's goal and why. Both are required together: a goal with no
 stated reason is not a brief. This is also the first write for a Mission that
@@ -106,7 +116,7 @@ has no brief yet; \`px scope set\` refines one that exists.
 `.trimStart();
 
 export const SCOPE_HELP = `
-Usage: px scope set [--slug <slug>] --scope <text> [--out-of-scope <text> ...] --expected-version <n>
+Usage: px scope set [--slug <slug>] --scope <text> [--out-of-scope <text> ...]
 
 Bound a Mission that already has a goal: --scope is what it covers and each
 --out-of-scope is something it deliberately leaves alone. Passing no
@@ -115,8 +125,8 @@ Bound a Mission that already has a goal: --scope is what it covers and each
 
 export const GATE_HELP = `
 Usage:
-  px gate add    [--slug <slug>] --command <command> --expected-version <n>
-  px gate remove [--slug <slug>] --command <command> --expected-version <n>
+  px gate add    [--slug <slug>] --command <command>
+  px gate remove [--slug <slug>] --command <command>
 
 Add or remove one declared verification gate. The command must be the exact
 runnable command; read the current gates back with \`px status --json\`.
@@ -124,8 +134,8 @@ runnable command; read the current gates back with \`px status --json\`.
 
 export const CRITERION_HELP = `
 Usage:
-  px criterion add    [--slug <slug>] --text <criterion> --expected-version <n>
-  px criterion remove [--slug <slug>] --text <criterion> --expected-version <n>
+  px criterion add    [--slug <slug>] --text <criterion>
+  px criterion remove [--slug <slug>] --text <criterion>
 
 Add or remove one success criterion: something that must be true for the
 Mission to be done, specific enough to check. Checkpoint Goal Check rows and
@@ -134,7 +144,7 @@ review verify against these; read them back with \`px status\`.
 
 export const MISSION_HELP = `
 Usage:
-  px mission mark-complete [--slug <slug>] (--criterion <n> | --all) --expected-version <n>
+  px mission mark-complete [--slug <slug>] (--criterion <n> | --all)
 
 Mark one success criterion, by the index \`px status\` lists it with, or every
 criterion complete. Handoff requires every criterion complete and evidenced by
@@ -143,8 +153,8 @@ a verifiable Goal Check row in the final checkpoint.
 
 export const DEPENDS_HELP = `
 Usage:
-  px depends add    [--slug <slug>] --on <slug> --expected-version <n>
-  px depends remove [--slug <slug>] --on <slug> --expected-version <n>
+  px depends add    [--slug <slug>] --on <slug>
+  px depends remove [--slug <slug>] --on <slug>
 
 Record or drop one Mission-to-Mission dependency: \`--on\` is the Mission this
 one depends on, and it must already be a Mission. A self-reference and a
@@ -154,22 +164,21 @@ activation or scheduling rule reads it — so it is recorded for whoever reads
 `.trimStart();
 
 export const NEL_HELP = `
-Usage: px nel set [--slug <slug>] --predicted <Small|Medium|Large> --expected-version <n>
+Usage: px nel set [--slug <slug>] --predicted <Small|Medium|Large>
 
 Record the draft's predicted net-engineering-lines bucket: Small (0-80),
 Medium (81-235) or Large (235+). Handoff compares it with the measured bucket.
 `.trimStart();
 
 export const CHECKPOINT_HELP = `
-Usage: px checkpoint plan   [--slug <slug>] --name <CP-N> --text <what it delivers> --expected-version <n>
-       px checkpoint unplan [--slug <slug>] --name <CP-N> --expected-version <n>
+Usage: px checkpoint plan   [--slug <slug>] --name <CP-N> --text <what it delivers>
+       px checkpoint unplan [--slug <slug>] --name <CP-N>
        px checkpoint record [--slug <slug>] --name <CP-N> --next <text>
                             --criterion <text> --evidence <text> [--criterion ... --evidence ...]
-                            --expected-version <n>
 
 Report an invalid locked contract: px checkpoint report-invalid-contract --name <CP-N>
   --command <exact failing command> --diagnostic <text> --authority-reason <text>
-  --proposed-correction <text> --expected-version <n>
+  --proposed-correction <text>
 
 A checkpoint is planned at draft and evidenced during execution. \`plan\` adds
 one with no evidence yet; \`unplan\` drops one that still has none. \`record\`
@@ -184,8 +193,8 @@ the first without is where a relaunched agent resumes.
 `.trimStart();
 
 export const REPRO_HELP = `
-Usage: px repro set [--slug <slug>] --test <path> --expected-version <n>
-       px repro clear [--slug <slug>] --expected-version <n>
+Usage: px repro set [--slug <slug>] --test <path>
+       px repro clear [--slug <slug>]
 
 Record the red-to-green reproduction test a bug mission declares, so a reviewer
 reads it from \`px status\` instead of a line in a mission document. Recording a
@@ -201,8 +210,8 @@ the current version is discovered from stored mission state for the write.
 
 export const ASSIGN_HELP = `
 Usage:
-  px assign   [--slug <slug>] --agent <family> --expected-version <n>
-  px unassign [--slug <slug>] --expected-version <n>
+  px assign   [--slug <slug>] --agent <family>
+  px unassign [--slug <slug>]
 
 Set or clear the Mission's assignee.
 `.trimStart();

@@ -1,8 +1,8 @@
 ---
 id: TASK-2710
 title: remove --expected-version
-status: backlog
-assignee: []
+status: done
+assignee: [custom]
 created_date: '2026-10-10 06:09'
 labels: []
 dependencies: []

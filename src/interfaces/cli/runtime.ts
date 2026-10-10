@@ -295,9 +295,9 @@ ${fmt.bold('Advanced Commands:')}
   unassign                            Clear the Mission's assignee.
   verdict approve|request-changes --actor <f> [--finding <id> --summary <t> ...]  Record this round's review decision.
   resolve --actor <f> --finding <id> --fixed <e>|--disputed <r>  Record the implementer's answer to each finding.
-  revoke-review --decision <round> --reason <text> --operator <name> --expected-version <n>  Operator-only withdrawal of the current approval.
+  revoke-review --decision <round> --reason <text> --operator <name>  Operator-only withdrawal of the current approval.
         The slug is inferred from the branch or worktree; pass --slug <slug> outside it.
-        Every write takes --expected-version <n>, read from \`px status --json\`.
+        Every write resolves its own current version; pass \`--expected-version <n>\` only to pin it.
   github-publish-status  Show github-publish publication engine status (local head, published head, awaiting/verified-blocked/failed). No-op when the mode is disabled.
   lead [<slug>...] [--once] [--poll <s>] [--budget <n>] [--dry-run]  Work active, review, and integration missions from the board's needs-attention queue; refined missions stay for operator activation. Press the action each item offers, then give a stuck mission a fresh agent in its worktree. Attempts are per failure; integration items are left for you. Keeps watching until stopped (default poll 60 seconds); --once takes a single pass and exits.
   import-legacy [--dry-run] [--existing-only] [--reconcile-checkpoints]  Explicit one-way import of the legacy Backlog Markdown tree into the existing Mission aggregate. Use --existing-only to refresh imported missions without ingesting native missions or future backlog inputs. Commit any refreshed task-body archive before status or audit. The reconciliation flag uses committed provenance to replace disputed historical checkpoint rows; normal imports never overwrite them.

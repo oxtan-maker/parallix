@@ -1,7 +1,7 @@
 import * as fmt from '../../application/presentation/cli-format.js';
 import type { RevokeReviewDecisionUseCase } from '../../application/revoke-review-decision-use-case.js';
 
-export const REVOKE_REVIEW_HELP = `Usage: px revoke-review [--slug <slug>] --decision <round-number> --reason <text> --operator <name> --expected-version <n>
+export const REVOKE_REVIEW_HELP = `Usage: px revoke-review [--slug <slug>] --decision <round-number> --reason <text> --operator <name>
 
 Withdraw the current effective approval after an operator's human judgement,
 or because the branch moved away from the change it approved (px status reports
@@ -26,8 +26,20 @@ export function createRevokeReviewCommand(
     if (args.includes('--help') || args.includes('-h')) { log(REVOKE_REVIEW_HELP); return; }
     const slug = value(args, '--slug') ?? inferSlug();
     const rawRound = value(args, '--decision');
+    // `--expected-version` is optional: omitting it resolves the current stored
+    // version, and the use case's compare-and-swap save still refuses a stale
+    // revocation. Supplying it keeps the earlier explicit guard. A present flag
+    // with no value is a malformed pin and is refused.
+    const versionPresent = args.includes('--expected-version');
     const rawVersion = value(args, '--expected-version');
-    if (!slug || !rawRound || !rawVersion) {
+    let expectedVersion: number | undefined;
+    if (versionPresent) {
+      if (rawVersion === null) { throw new Error('--expected-version must be a positive integer'); }
+      const parsed = Number(rawVersion);
+      if (!Number.isSafeInteger(parsed) || parsed < 1) { throw new Error('--expected-version must be a positive integer'); }
+      expectedVersion = parsed;
+    }
+    if (!slug || !rawRound) {
       error(fmt.status('FAIL', REVOKE_REVIEW_HELP.trim())); exit(1); return;
     }
     const result = await useCase.execute({
@@ -35,7 +47,7 @@ export function createRevokeReviewCommand(
       round: Number(rawRound),
       reason: value(args, '--reason') ?? '',
       operator: value(args, '--operator') ?? '',
-      expectedVersion: Number(rawVersion),
+      expectedVersion,
       occurredAt: new Date().toISOString(),
     });
     if (result.status !== 'completed') { error(fmt.status('FAIL', result.error?.message ?? 'Revocation refused')); exit(1); return; }

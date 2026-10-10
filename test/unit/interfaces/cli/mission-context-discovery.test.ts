@@ -62,8 +62,10 @@ test('AC #2: px --help names a typed write command for every mutable domain part
     assert.match(help, pattern, `px --help must describe the ${command} write`);
     assert.ok(KNOWN_COMMANDS.includes(command), `${command} must be dispatchable`);
   }
-  // The version an agent must supply is discoverable from the same help.
-  assert.match(help, /--expected-version/, 'px --help must state that writes take a version');
+  // The version is resolved automatically, so the help states that and must not
+  // ask a caller to thread --expected-version through on every write.
+  assert.match(help, /resolve?s its own current version/, 'px --help must state that writes resolve their own version');
+  assert.doesNotMatch(help, /takes a --expected-version|requires a --expected-version|--expected-version <n> is required/, 'px --help must not ask a caller to pass a version');
 });
 
 test('px --help never points an agent at MISSION.md or CP-N.md as authority', () => {
@@ -74,7 +76,7 @@ test('px --help never points an agent at MISSION.md or CP-N.md as authority', ()
 
 test('AC #11/#13: every write help uses typed flags, never a JSON request blob', () => {
   for (const help of [GOAL_HELP, SCOPE_HELP, GATE_HELP, CHECKPOINT_HELP, ASSIGN_HELP]) {
-    assert.match(help, /--expected-version <n>/, 'every write documents its version flag');
+    assert.doesNotMatch(help, /--expected-version/, 'no write documents a version flag; the version is resolved automatically');
     assert.doesNotMatch(help, /--data\b|--data-stdin|<json>/, 'no write takes a JSON request blob');
     assert.doesNotMatch(help, /MISSION\.md|CP-\d+\.md/, 'no write help names a workflow file');
   }

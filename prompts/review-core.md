@@ -49,8 +49,8 @@ Check:
 - maintainability issues that materially affect future work
 
 - Decision submission is mandatory: your final chat response does **not** submit a review. Before stopping, run exactly one of:
-  - `px verdict approve --slug {{slug}} --actor {{reviewer}} --expected-version <n> --comment "<review summary>"`
-  - `px verdict request-changes --slug {{slug}} --actor {{reviewer}} --expected-version <n> --finding <finding-id> --summary "<issue>" [--location "<path>"] ... --comment "<review summary>"`
+  - `px verdict approve --slug {{slug}} --actor {{reviewer}} --comment "<review summary>"`
+  - `px verdict request-changes --slug {{slug}} --actor {{reviewer}} --finding <finding-id> --summary "<issue>" [--location "<path>"] ... --comment "<review summary>"`
 - Every request-change finding needs a distinct stable `F<number>` id and non-empty summary. `px verdict` persists the decision and publishes through the established workflow; do not post to Forgejo directly.
 - When a finding concerns specific success criteria, name them in its summary as `Success criterion N` (or `criteria N, M`, 1-based as `px status` lists them). Checkpoint recording and handoff read these references to require fresh fix evidence for exactly those criteria in the repair round.
 - Do not edit repo files; do not switch into implementer behavior.

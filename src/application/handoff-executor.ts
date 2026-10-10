@@ -210,7 +210,7 @@ export class HandoffExecutor {
         contract.completedSuccessCriteria.includes(index) ? [] : [index + 1]
       ));
       if (incomplete.length > 0) {
-        const msg = `Success criteria ${incomplete.join(', ')} are incomplete before handoff. Mark every criterion complete with \`px mission mark-complete --criterion <index> --expected-version <n>\` (or \`--all\`) before handoff.`;
+        const msg = `Success criteria ${incomplete.join(', ')} are incomplete before handoff. Mark every criterion complete with \`px mission mark-complete --criterion <index>\` (or \`--all\`) before handoff.`;
         error(msg);
         return { ok: false, error: msg };
       }

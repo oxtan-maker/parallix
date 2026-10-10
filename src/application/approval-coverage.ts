@@ -116,7 +116,7 @@ export async function recordBranchMove(request: {
 export function describeBranchMove(slug: string, recording: BranchMoveRecording): string | null {
   if (recording.outcome === 'recorded') {
     return `${staleApprovalSentence(recording.coverage)} A human operator, never an agent, stands it down for re-review with `
-      + `px revoke-review --slug ${slug} --decision ${recording.coverage.round} --reason <text> --operator <name> --expected-version <n>.`;
+      + `px revoke-review --slug ${slug} --decision ${recording.coverage.round} --reason <text> --operator <name>.`;
   }
   if (recording.outcome === 'unverifiable') {
     return `The rebase moved ${slug} under an approval whose coverage cannot be checked: ${recording.reason}.`;

@@ -203,7 +203,7 @@ describe('Handoff bounce', () => {
       startAgentFn: async (_step: string, opts: { prompt?: unknown }) => {
         launches++;
         const prompt = typeof opts.prompt === 'function' ? opts.prompt('codex') : String(opts.prompt);
-        assert.ok(prompt.includes(`px mission mark-complete --slug ${SLUG} --criterion <index> --expected-version <n>`));
+        assert.ok(prompt.includes(`px mission mark-complete --slug ${SLUG} --criterion <index>`));
         assert.ok(prompt.includes('actually verified'));
         return { agent: 'codex', result: { status: 0 } };
       },

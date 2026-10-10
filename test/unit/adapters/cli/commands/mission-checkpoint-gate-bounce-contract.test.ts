@@ -428,7 +428,7 @@ describe("Typed checkpoint recovery advice —", () => {
   function assertRecordedCheckpointRecoveryAdvice(prompt: string) {
     assert.match(prompt, /px status task-2581/, 'recovery reloads the recorded Mission contract');
     assert.match(prompt, /px checkpoint record --name CP-2/, 'recovery records the named missing checkpoint');
-    assert.match(prompt, /--expected-version <n>/, 'recovery obtains and uses the current expected version');
+    assert.match(prompt, /resolves its own current version/, 'recovery resolves the current version automatically');
     assert.match(prompt, /every declared gate passes/, 'typed recovery retains the mission gate completion requirement');
     assert.match(prompt, /only evidence from work and verification actually performed/, 'recording evidence requires real implementation and verification');
     assert.doesNotMatch(prompt, /(?:Create|Fix|Update) (?:a |the )?(?:final )?checkpoint document/i, 'typed recovery must not create a legacy checkpoint document');

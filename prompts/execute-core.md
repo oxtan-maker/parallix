@@ -12,12 +12,12 @@ Mission context is application-owned. Load it with:
 
 Execution supports evidence and completion writes:
 
-- `px mission mark-complete --slug {{slug}} --criterion <index> --expected-version <n>` — mark a verified success criterion complete using its one-based index and the current status Version.
+- `px mission mark-complete --slug {{slug}} --criterion <index>` — mark a verified success criterion complete using its one-based index. The write resolves its own current version; the status Version is diagnostic.
 - `px checkpoint record --name <CP-N> --criterion <text> --evidence <text> --next <text>` — `--criterion` and `--evidence` repeat and pair up in order.
 
 You do not change the mission here. The goal, scope, out-of-scope, success criteria, checkpoint plan and gates were settled at draft and are what your work is judged against; if you believe one of them is wrong, say so in your response and stop rather than editing it to match what you built.
 
-The slug is inferred from this worktree, so you do not pass it. The write takes `--expected-version <n>`, whose value is the `version` field reported by `px status {{slug}}`. A write against a stale version is rejected with an explicit conflict and changes nothing; re-read the status and retry deliberately. Run the command with `--help` for its exact flags.
+The slug is inferred from this worktree, so you do not pass it. Writes resolve their own current version, so you do not pass `--expected-version`; pass it only to pin a version. A competing write still fails with an explicit conflict and changes nothing. Run the command with `--help` for its exact flags.
 
 Harness preflight already confirmed:
 - branch/worktree shape
@@ -37,13 +37,13 @@ Execution requirements:
   2. an exact test name in quotes, as written in `test(...)` or `it(...)` in a `.test`, `.spec` or `.cases` module under `test/`
   3. a backticked command: `npm`, `npx`, `node`, `git` or `px`, a `./` script that exists, or a shell reader such as `grep` or `cat` with an existing file argument
   4. an ADR reference such as `ADR 0012` whose file exists in `docs/adr/`
-  Raw `stat`/`ls` output and prose claims are context only. Example: `px checkpoint record --name CP-2 --expected-version 7 --criterion "<exact success criterion text>" --evidence "\"rejects a stale write\" in test/store.test.ts passes: \`npm test -- test/store.test.ts\`" --next "CP-3: update the operator guidance"`
+  Raw `stat`/`ls` output and prose claims are context only. Example: `px checkpoint record --name CP-2 --criterion "<exact success criterion text>" --evidence "\"rejects a stale write\" in test/store.test.ts passes: \`npm test -- test/store.test.ts\`" --next "CP-3: update the operator guidance"`
 - run targeted checks needed to develop and validate the change; handoff owns the authoritative execution of mission-declared Gates, so do not rerun a complete declared gate solely as lifecycle ritual (run one when diagnosing a concrete issue)
 - Immediately after **each successful mission-declared Gate**, compact your working context before starting the next gate, checkpoint work, or handoff work. Reload only the locked mission goal and scope plus committed checkpoint or successful-gate evidence that is present, re-reading them with `px status {{slug}}` rather than from repository files. Do not compact for a failed gate: retain its failure diagnostic while repairing it.
 - preserve `{{taskPath}}`: update mission-relevant content as needed but do not delete, rename, or move the file
 - do not change the Backlog task's status, assignee, labels, or lifecycle metadata, and do not run `px active`, `px review`, `px integrate`, `px assign` or `px unassign`; Parallix performs lifecycle transitions and review decisions itself. `px status {{slug}}` and `px history` are the supported reads in this phase, and `px checkpoint record` and `px mission mark-complete` are the supported writes.
 - earlier agent runs of this Mission (before a relaunch, a fallback family or a fresh context) are retained: `px history search <pattern>` and `px history show <ref>` return bounded slices with `run:` references and coverage notes. Cite those references instead of pasting transcripts into your context.
-- After verifying a success criterion, record completion with `px mission mark-complete --slug {{slug}} --criterion <index> --expected-version <n>`, using its one-based index and the current Version from `px status {{slug}}`. Reload status after each write. Use `--all` only when every criterion is verified. Recording checkpoint evidence does not mark criteria complete.
+- After verifying a success criterion, record completion with `px mission mark-complete --slug {{slug}} --criterion <index>`, using its one-based index. The write resolves its own current version; the status Version is diagnostic. Reload status after each write. Use `--all` only when every criterion is verified. Recording checkpoint evidence does not mark criteria complete.
 - do not hand off to review until every success criterion is marked complete, or with uncommitted implementation work, or before the final checkpoint's evidence is recorded
 
 Graphify-first: before executing, check if `graphify-out/graph.json` exists. If it does, use `graphify query "<question>"` for codebase questions, `graphify path "<A>" "<B>"` for relationships, and `graphify explain "<concept>"` for focused concepts. Read `graphify-out/GRAPH_REPORT.md` only for broad architecture review. Graph freshness is handled at the autonomous-review boundary, after its final verification and immediately before reviewer launch; do not refresh after ordinary edits. If `graphify-out/wiki/index.md` exists, use it for broad navigation.

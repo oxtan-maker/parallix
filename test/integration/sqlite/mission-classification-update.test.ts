@@ -146,7 +146,7 @@ test('classification set still rejects a value that is not one of the allowed la
   }
 });
 
-test('other write verbs still require --expected-version', async () => {
+test('other write verbs resolve the version without --expected-version', async () => {
   const home = mkdtemp('parallix-class-');
   const repo = mkdtemp('parallix-class-repo-');
   fs.writeFileSync(path.join(repo, 'workflow.config.json'), JSON.stringify({
@@ -187,8 +187,10 @@ test('other write verbs still require --expected-version', async () => {
       finally { (process.stdout as unknown as { write: typeof write }).write = write; }
     };
 
-    assert.equal(await invoke(['goal', 'set', '--slug', SLUG, '--goal', 'x', '--why', 'y']), 1);
-    assert.match(errors.join('\n'), /--expected-version <n> is required/);
+    // A brief write resolves its own version without the flag and persists.
+    assert.equal(await invoke(['goal', 'set', '--slug', SLUG, '--goal', 'x', '--why', 'y']), 0, errors.join('\n'));
+    const after = await new SqliteMissionStore((await initOperatorState({ homeDir: home })).db).load(missionId(SLUG));
+    assert.equal((after as { mission: Mission }).mission.brief?.goal, 'x');
   } finally {
     process.env.PARALLIX_HOME = previousHome;
   }

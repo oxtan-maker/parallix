@@ -31,7 +31,7 @@ export interface ReviewVerbPorts {
     _reviewer: string,
     _output: { findings: readonly ReviewFinding[]; comment: string | null; verdict: string },
     _worktree: string,
-    _expectedVersion: number,
+    _expectedVersion?: number,
   ) => Promise<{ consumed: boolean; ok?: boolean; diagnostic?: string | null }>;
   readonly consumeImplementerOutput: (
     _slug: string,
@@ -44,21 +44,28 @@ export interface ReviewVerbPorts {
       resultingRevision?: string;
     },
     _worktree: string,
-    _expectedVersion: number,
+    _expectedVersion?: number,
   ) => Promise<{ consumed: boolean; ok?: boolean; diagnostic?: string | null }>;
 }
 
 function fail(message: string): never { throw new Error(message); }
 
 /**
- * The Mission version the caller read, required on every review write.
+ * The Mission version the caller read, optional on every review write.
  *
- * Same rule as the Mission write verbs: an agent that read version N must not
- * land a decision after another mutation reached N+1 without being told.
+ * Same rule as the Mission write verbs: when the flag is omitted the command
+ * resolves the current stored version itself and the review recorder's
+ * compare-and-swap save still refuses a competing write, so a stale decision
+ * changes nothing without a preceding `px status` read. Supplying the flag
+ * keeps the earlier explicit guard. A present flag with no value is a
+ * malformed pin and is refused, never silently treated as automatic.
  */
-function expectedVersion(args: readonly string[]): number {
+function expectedVersion(args: readonly string[]): number | undefined {
+  // Absent flag resolves the current stored version; a present flag with no
+  // value is a malformed pin and refused, so an invalid invocation never
+  // becomes a silent automatic write.
+  if (!args.includes('--expected-version')) { return undefined; }
   const raw = flag(args, '--expected-version');
-  if (raw === null) { fail('--expected-version <n> is required; read it from `px status --json`'); }
   const parsed = Number(raw);
   if (!Number.isSafeInteger(parsed) || parsed < 1) { fail('--expected-version must be a positive integer'); }
   return parsed;
@@ -128,23 +135,23 @@ function dispositions(args: readonly string[]): { items: ReviewItemDisposition[]
 
 export const VERDICT_HELP = `
 Usage:
-  px verdict approve [--slug <slug>] --actor <family> --expected-version <n> [--comment <text>]
-  px verdict request-changes [--slug <slug>] --actor <family> --expected-version <n>
+  px verdict approve [--slug <slug>] --actor <family> [--comment <text>]
+  px verdict request-changes [--slug <slug>] --actor <family>
       --finding <id> --summary <text> [--location <text>]
       [--finding <id> --summary <text> ...] [--comment <text>]
 
 Record this round's review decision. Each --finding owns the --summary and
 optional --location that follow it, so findings are named at the terminal
-instead of being written to a file. --expected-version is the \`version\` field
-of \`px status --json\`; a decision recorded against a stale version is rejected
-and changes nothing. Read the result back with \`px status\`.
+instead of being written to a file. A decision recorded against a stale version
+is rejected and changes nothing; the current version is resolved automatically.
+Read the result back with \`px status\`.
 `.trimStart();
 
 export const RESOLVE_HELP = `
-Usage: px resolve [--slug <slug>] --actor <family> --expected-version <n>
+Usage: px resolve [--slug <slug>] --actor <family>
          --finding <id> (--fixed <evidence> | --disputed <rationale>)
          [--finding <id> ...]
-       px resolve [--slug <slug>] --actor <family> --expected-version <n> --blocked <reason>
+       px resolve [--slug <slug>] --actor <family> --blocked <reason>
 Options: [--revision <sha>]
 
 Record the implementer's answer to every outstanding finding. Each --finding is

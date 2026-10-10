@@ -100,7 +100,7 @@ function logReviewRounds(missionData: StatusMissionData, log: (_msg: string) => 
   const coverage = missionData.approvalCoverage;
   if (coverage?.kind === 'stale') {
     log(`Approval no longer covers the branch: ${staleApprovalSentence(coverage)}`);
-    log(`  A human operator, never an agent, stands it down for re-review: px revoke-review --decision ${coverage.round} --reason <text> --operator <name> --expected-version ${missionData.version ?? '<n>'}`);
+    log(`  A human operator, never an agent, stands it down for re-review: px revoke-review --decision ${coverage.round} --reason <text> --operator <name>`);
   } else if (coverage?.kind === 'unverifiable') {
     log(`Approval coverage unknown: ${coverage.reason}.`);
   }
@@ -198,7 +198,7 @@ function logMissionData(missionData: StatusMissionData | null, log: (_msg: strin
   }
   logBriefAndGates(missionData, log);
   if (missionData.version !== null && missionData.version !== undefined) {
-    log(`Version: ${missionData.version} (pass to --expected-version when writing)`);
+    log(`Version: ${missionData.version} (diagnostic only; writes resolve it automatically, or pass --expected-version to pin it)`);
   }
   if (missionData.checkpoint) {
     log(`Last checkpoint: ${missionData.checkpoint}${missionData.checkpointDescription ? ` - ${missionData.checkpointDescription}` : ''}`);

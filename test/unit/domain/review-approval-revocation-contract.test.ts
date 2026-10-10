@@ -113,6 +113,31 @@ describe("revoke review", { concurrency: false }, () => {
     const resulting = decideMission({ ...mission, status: 'review', review: requested }, { type: 'request-changes', review: requested });
     assert.equal(resulting.status, 'active');
   });
+
+  // Regression for the flag-free lost-update race: with no --expected-version
+  // the revocation must pin the lifecycle transition to the version the use
+  // case first loaded, so a concurrent review write that lands between that
+  // load and the lifecycle's internal load/save is refused, not erased.
+  test('a concurrent review write between the use case load and the lifecycle save is refused', async () => {
+    let loadCount = 0;
+    let saves = 0;
+    const store = {
+      async load() {
+        loadCount++;
+        // First read is the use case's (version 1); a concurrent approval lands
+        // before the lifecycle's internal read, moving the mission to version 2.
+        return { kind: 'found' as const, mission, version: (loadCount === 1 ? 1 : 2) as never };
+      },
+      async save(next: Mission) { saves++; return 2 as never; },
+      async saveWithTransition(next: Mission) { saves++; return 2 as never; },
+    } as unknown as MissionTransitionStore;
+    const result = await new RevokeReviewDecisionUseCase(store, new MissionLifecycleService(store), null).execute({
+      slug: 'task-2543', round: 1, reason: 'unfounded', operator: 'operator', occurredAt: '2026-01-01T00:02:00Z',
+    });
+    assert.equal(result.status, 'failed');
+    assert.match(result.error?.message, /expected version 1, found 2/);
+    assert.equal(saves, 0);
+  });
 });
 
 // Regression provenance: TASK-2555.
