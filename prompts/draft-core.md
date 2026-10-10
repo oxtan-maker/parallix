@@ -52,6 +52,7 @@ Drafting requirements:
 - preserve `{{taskPath}}`: update content as needed but do not delete, rename, or move the file
 - do not edit the backlog `assignee` field; the workflow records ownership itself
 - predict the size of the change as a net engineering lines (NEL) bucket — Small (0–80), Medium (81–235) or Large (235+)
+- Plan a brief check where the implementer exercises the changed behavior through the running application’s public interface and records the observed result, using existing tools without adding E2E tests unless explicitly asked for in the intent.
 
 Bug-labeled missions (regression-test-first / "lock the bug"):
 - this section applies only when the backlog task at `{{taskPath}}` carries a `bug` label (in addition to its `ai_sdlc` or `user_value` classification). If there is no `bug` label, ignore this section entirely.
