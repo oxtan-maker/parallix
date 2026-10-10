@@ -9,6 +9,13 @@ import { unavailableReason, type PendingCommand } from './pending-command.js';
 
 export const UNAVAILABLE_HINT = 'action is not available in the current server projection';
 
+/** Keep runnable commands reachable and one explanation when none can run. */
+export function cardCommands(actions: readonly WebCommandAction[]): WebCommandAction[] {
+  const commands = actions.filter((action) => action.kind !== 'mission:cancel' && action.kind !== 'mission:edit');
+  const enabled = commands.filter((action) => action.state === 'enabled');
+  return [...(enabled.length > 0 ? enabled : commands.slice(0, 1)), ...actions.filter((action) => action.kind === 'mission:edit')];
+}
+
 function look(state: WebCommandAction['state']): CSSProperties {
   return state === 'enabled'
     ? { background: C.greenFill, border: `1px solid ${C.greenEdge}`, color: C.green }
@@ -33,6 +40,8 @@ export function ActionButton({ action, style, label, pending, working = false, o
   return (
     <button
       type="button"
+      data-action-kind={action.kind}
+      onDragStart={(event) => event.preventDefault()}
       aria-disabled={!enabled}
       onMouseDown={(event) => event.preventDefault()}
       // Keep the projected unavailable appearance, but still let the board

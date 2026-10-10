@@ -338,6 +338,7 @@ export const INTEGRATION_CI_TESTS: readonly string[] = [
  * they need workstation tooling. These remain required by local verification.
  */
 export const INTEGRATION_LOCAL_TESTS: readonly string[] = [
+  'integration/presentation/web-board-pointer.test.ts',
   'integration/sandbox/bubblewrap-worktree-git.test.ts',
   'integration/sandbox/bubblewrap-symlink-mount.test.ts',
   'integration/agents/graphify-mission-document-exclusion.test.ts',
@@ -353,6 +354,8 @@ export const INTEGRATION_LOCAL_TESTS: readonly string[] = [
 
 /** Why each local-only entry cannot run on a clean GitHub-hosted runner. */
 export const INTEGRATION_LOCAL_REASONS: Readonly<Record<string, string>> = {
+  'integration/presentation/web-board-pointer.test.ts':
+    'Real coordinate pointer coverage requires a provisioned Chromium executable (PARALLIX_CHROMIUM or /usr/bin/chromium), absent from the clean runner contract.',
   'integration/process/tmux-terminal-host.test.ts':
     'Spawns the real `tmux` binary (and `bwrap` for the socket-mask case) to certify the optional terminal host; neither is part of the GitHub-hosted runner image.',
   'integration/sandbox/bubblewrap-worktree-git.test.ts':

@@ -600,6 +600,20 @@ describe('Cancel surfaces', () => {
       } finally { await page.close(); }
     });
 
+    it('Cancel focuses Keep and Escape preserves the mission (TASK-2705)', async () => {
+      const page = await renderWebBoard();
+      try {
+        await act(async () => { cancelButton(page).click(); });
+        assert.equal(page.mount.ownerDocument.activeElement?.textContent, 'keep mission');
+        const dialog = page.mount.querySelector('[role="dialog"]')!;
+        await act(async () => {
+          dialog.dispatchEvent(new page.window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+        });
+        assert.deepEqual(page.calls, []);
+        assert.equal(page.mount.querySelector('[role="dialog"]'), null);
+      } finally { await page.close(); }
+    });
+
     it('dismissing the confirmation deletes nothing', async () => {
       const page = await renderWebBoard();
       try {

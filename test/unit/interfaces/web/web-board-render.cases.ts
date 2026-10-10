@@ -30,6 +30,8 @@ import type { MissionCard } from '../../../../src/application/projections/missio
 import { missionId } from '../../../../src/domain/mission.js';
 import { agentFamily } from '../../../../src/domain/agents.js';
 import { emptyMetrics, makeAttentionItem, makeCard, makeCards, makeProjection } from '../../../fixtures/board-projection.js';
+import { fixtureMission } from '../../../fixtures/mission-builders.js';
+import { availableBoardCommands } from '../../../../src/application/projections/mission-board.js';
 
 const webSrc = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..', '..', '..', 'web', 'src');
 const browserSources = fs.readdirSync(webSrc)
@@ -163,7 +165,7 @@ test('a card with no runnable action exposes its disabled projected control and 
   assert.doesNotMatch(html, /px review task-0010/);
 });
 
-test('a card prefers its enabled projected action over an earlier unavailable action', () => {
+test('a card shows runnable projected controls without unrelated unavailable buttons (TASK-2705)', () => {
   const html = render(snapshotOf({
     stages: [{
       lane: 'active', count: 1, cards: [makeCard({
@@ -176,6 +178,20 @@ test('a card prefers its enabled projected action over an earlier unavailable ac
   }));
   assert.match(html, /px handoff task-2657-mixed — enabled/);
   assert.doesNotMatch(html, /px active task-2657-mixed/);
+});
+
+test('normal server projections keep compact cards across all unfinished lanes (TASK-2705)', () => {
+  for (const lane of ['backlog', 'refined', 'active', 'review', 'integration'] as const) {
+    const mission = fixtureMission('task-2705-compact', { status: lane, checkpoints: [] });
+    const commands = availableBoardCommands(mission, { reviewApproval: null });
+    const card = makeCard({ id: mission.id, lane, status: lane, commands });
+    const board = toWebBoardSnapshot(makeProjection({ [lane]: [card] }));
+    const html = render(board);
+    assert.equal((html.match(/data-action-kind=/g) ?? []).length, 3, `${lane}: Cancel, Edit and one command or explanatory fallback`);
+    for (const action of board.stages.flatMap((stage) => stage.cards)[0].actions.filter((action) => action.state === 'enabled')) {
+      assert.ok(html.includes(`${action.display} — enabled`), `${lane}: every enabled action remains reachable`);
+    }
+  }
 });
 
 test('every received card renders in its stage, including the collapsible done history', () => {

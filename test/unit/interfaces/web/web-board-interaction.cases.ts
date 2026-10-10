@@ -776,3 +776,59 @@ test('Edit uses individual criterion rows with keyboard Add and Remove, preservi
     assert.deepEqual(JSON.parse(String(page.calls[1].body)).successCriteria, ['Kept second row', 'First paragraph\nSecond paragraph']);
   } finally { await page.close(); }
 });
+
+test('backlog Cancel pointer opens confirmation without selecting the card (TASK-2705)', async () => {
+  const card = makeCard({ id: missionId('task-2705-backlog'), status: 'backlog', lane: 'backlog', commands: [action, { ...action, command: 'active' }, cancel] });
+  const page = await renderBoard({ board: toWebBoardSnapshot(makeProjection({ backlog: [card] })) });
+  try {
+    const button = page.mount.querySelector<DomButton>('button[aria-label^="px cancel"]')!;
+    await act(async () => {
+      button.dispatchEvent(new page.window.MouseEvent('mousedown', { bubbles: true, cancelable: true }));
+      button.click();
+    });
+    assert.ok(page.mount.querySelector('[aria-label="Confirm cancelling task-2705-backlog"]'));
+    assert.equal(page.mount.querySelector('[data-board-card]')?.getAttribute('aria-selected'), 'false');
+    assert.equal(page.calls.length, 0);
+  } finally { await page.close(); }
+});
+
+test('backlog simultaneous projected actions have separate working controls (TASK-2705)', async () => {
+  const card = makeCard({ id: missionId('task-2705-backlog'), status: 'backlog', lane: 'backlog', commands: [action, { ...action, command: 'active' }, cancel] });
+  const page = await renderBoard({ board: toWebBoardSnapshot(makeProjection({ backlog: [card] })) });
+  try {
+    const buttons = [...page.mount.querySelectorAll<DomButton>('[data-board-card] button')].filter((button) => button.getAttribute('aria-label')?.startsWith('px ') && !button.getAttribute('aria-label')?.startsWith('px cancel'));
+    assert.equal(buttons.length, 2);
+    for (const name of ['px handoff', 'px active']) {
+      await act(async () => {
+        page.mount.querySelector<DomButton>(`[data-board-card] button[aria-label^="${name}"]`)!.click();
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      });
+    }
+    assert.deepEqual(page.calls.map((call) => JSON.parse(String(call.body)).kind), ['handoff:record', 'active:execute']);
+    assert.equal(page.mount.querySelector('[data-board-card]')?.getAttribute('aria-selected'), 'false');
+    assert.equal(page.mount.querySelector('[aria-label^="Mission progress"]'), null);
+  } finally { await page.close(); }
+});
+
+test('a refreshed pointer control cannot dispatch its replacement or activate the card (TASK-2705)', async () => {
+  const card = makeCard({ id: missionId('task-2705-refresh'), status: 'active', lane: 'active', commands: [action, cancel] });
+  const page = await renderBoard({ board: snapshot([card]) });
+  try {
+    const cancelButton = page.mount.querySelector<DomButton>('button[aria-label^="px cancel"]')!;
+    await act(async () => { cancelButton.dispatchEvent(new page.window.PointerEvent('pointerdown', { bubbles: true })); });
+    await page.rerender(snapshot([makeCard({ ...card, commands: [action] })]));
+    const replacement = page.mount.querySelector<DomButton>('[data-board-card] button')!;
+    await act(async () => { replacement.dispatchEvent(new page.window.MouseEvent('click', { bubbles: true, detail: 1 })); });
+    assert.equal(page.calls.length, 0);
+    assert.equal(page.mount.querySelector('[data-board-card]')?.getAttribute('aria-selected'), 'false');
+    assert.equal(page.mount.querySelector('[role="dialog"]'), null);
+    assert.match(page.mount.querySelector('[role="status"]')?.textContent ?? '', /control changed during the press/);
+    await act(async () => {
+      replacement.dispatchEvent(new page.window.PointerEvent('pointerdown', { bubbles: true }));
+      replacement.dispatchEvent(new page.window.MouseEvent('click', { bubbles: true, detail: 1 }));
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    assert.equal(page.calls.length, 1);
+    assert.equal(payload(page.calls).kind, 'handoff:record');
+  } finally { await page.close(); }
+});

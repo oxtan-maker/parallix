@@ -11,6 +11,7 @@ import { MissionEditor } from './mission-editor.js';
 import { useCallback, useEffect, useRef, useState, type KeyboardEvent, type MouseEvent } from 'react';
 import type { DragEvent } from 'react';
 import type { WebBoardSnapshot, WebCommandAction, WebMissionCard } from '../../src/interfaces/web/transport.js';
+import { CancelConfirmation } from './cancel-confirmation.js';
 import { AttentionRail } from './attention-rail.js';
 import { CreateMissionDialog } from './create-mission-dialog.js';
 import { DoneRail } from './done-rail.js';
@@ -83,8 +84,9 @@ export function Board({ snapshot, onRefresh }: { snapshot: WebBoardSnapshot; onR
    * click that invoked it; cancellation deletes rows, so it takes a second,
    * separately labelled click that only this panel offers.
    */
-  const [cancelPrompt, setCancelPrompt] = useState<{ card: WebMissionCard; action: WebCommandAction } | null>(null);
+  const [cancelPrompt, setCancelPrompt] = useState<{ card: WebMissionCard; action: WebCommandAction; control: HTMLButtonElement } | null>(null);
   const root = useRef<HTMLDivElement>(null);
+  const pressedAction = useRef<{ missionId: string; kind: string } | null>(null);
   const pendingRef = useRef<Map<string, { id: number; kind: WebCommandAction['kind'] }>>(new Map());
   const requestSequence = useRef(0);
   const latestInteraction = useRef(0);
@@ -113,7 +115,8 @@ export function Board({ snapshot, onRefresh }: { snapshot: WebBoardSnapshot; onR
     setSelectedId(next.dataset.boardCard ?? null);
   };
   const startDrag = (card: WebMissionCard, event: DragEvent<HTMLElement>) => {
-    if (pendingRef.current.has(card.id)) { publishOutcome(card.id, 'Drag unavailable while a command is running for this mission.'); return; }
+    if (pressedAction.current !== null || (event.target as HTMLElement).closest('button') !== null) { event.preventDefault(); return; }
+    if (pendingRef.current.has(card.id)) { event.preventDefault(); publishOutcome(card.id, 'Drag unavailable while a command is running for this mission.'); return; }
     setDragPreview(event, card);
     setDragged(card);
   };
@@ -156,23 +159,23 @@ export function Board({ snapshot, onRefresh }: { snapshot: WebBoardSnapshot; onR
   const open = (card: WebMissionCard, action: WebCommandAction, control: HTMLButtonElement) => {
     const unavailable = unavailableReason(action, pendingRef.current.get(card.id));
     if (unavailable !== null) { publishOutcome(card.id, unavailable); return; }
-    setSelectedId(card.id);
     clearOutcome(card.id);
-    if (action.kind === 'mission:cancel') { setCancelPrompt({ card, action }); return; }
+    if (action.kind === 'mission:cancel') { setCancelPrompt({ card, action, control }); return; }
     void dispatch(card, action, control);
   };
   const dropAction = (lane: WebMissionCard['lane']) => {
     if (dragged === null) { return; }
     if (pendingRef.current.has(dragged.id)) { publishOutcome(dragged.id, 'Drop unavailable while a command is running for this mission.'); return; }
-    const matches = dragged.actions.filter((action) => action.state === 'enabled' && action.targetLane === lane);
+    const current = snapshot.stages.flatMap((stage) => stage.cards).find((card) => card.id === dragged.id);
+    const matches = (current?.actions ?? []).filter((action) => action.state === 'enabled' && action.targetLane === lane);
     setDragged(null);
-    const action = dragActionForTarget(dragged.actions, lane);
+    const action = dragActionForTarget(current?.actions ?? [], lane);
     if (action === null) {
       publishOutcome(dragged.id, `Drop unavailable: ${matches.length === 0 ? 'no enabled projected action targets this lane' : 'more than one projected action targets this lane'}.`);
       return;
     }
     setSelectedId(dragged.id);
-    void dispatch(dragged, action);
+    if (current !== undefined) { void dispatch(current, action); }
   };
   const canDrop = (lane: WebMissionCard['lane']) => dragged !== null && !pendingRef.current.has(dragged.id) && dragActionForTarget(dragged.actions, lane) !== null;
   const selectTerminal = (event: MouseEvent<HTMLDivElement>) => {
@@ -189,7 +192,21 @@ export function Board({ snapshot, onRefresh }: { snapshot: WebBoardSnapshot; onR
   const shipped = snapshot.stages.filter((stage) => stage.lane === SHIPPED_LANE);
 
   return (
-    <div ref={root} tabIndex={-1} onKeyDown={moveSelection} onClick={selectTerminal}>
+    <div ref={root} tabIndex={-1} onKeyDown={moveSelection} onClick={selectTerminal}
+      onPointerDownCapture={(event) => {
+        const button = (event.target as HTMLElement).closest<HTMLButtonElement>('button[data-action-kind]');
+        const card = button?.closest<HTMLElement>('[data-board-card]');
+        pressedAction.current = button && card ? { missionId: card.dataset.boardCard!, kind: button.dataset.actionKind! } : null;
+      }}
+      onClickCapture={(event) => {
+        const pressed = pressedAction.current;
+        pressedAction.current = null;
+        if (pressed === null || event.detail === 0) { return; }
+        const button = (event.target as HTMLElement).closest<HTMLButtonElement>('button[data-action-kind]');
+        if (button?.dataset.actionKind === pressed.kind && button.closest<HTMLElement>('[data-board-card]')?.dataset.boardCard === pressed.missionId) { return; }
+        event.preventDefault(); event.stopPropagation();
+        publishOutcome(pressed.missionId, 'Action was not sent: the control changed during the press. Select the refreshed action to try again.');
+      }}>
       <TopBar snapshot={snapshot} flowOpen={flowOpen} onFlowToggle={() => setFlowOpen((open) => !open)} onCreate={setCreateFrom} />
       {flowOpen && <FlowPanel metrics={snapshot.metrics} />}
       <div style={{ flex: 1, display: 'flex', minHeight: 0 }}>
@@ -227,10 +244,10 @@ export function Board({ snapshot, onRefresh }: { snapshot: WebBoardSnapshot; onR
         </div>
       </div>
       {cancelPrompt !== null && (
-        <section
-          aria-label={`Confirm cancelling ${cancelPrompt.card.id}`}
-          style={{ margin: '0 14px 10px', padding: '9px 11px', border: '1px solid #7a2f2f', borderRadius: 5, background: '#1d1112', color: '#e0b7b7' }}
-        >
+        <CancelConfirmation missionId={cancelPrompt.card.id} opener={cancelPrompt.control}
+          feedback={outcomes.get(cancelPrompt.card.id)}
+          onKeep={() => { setCancelPrompt(null); publishOutcome(cancelPrompt.card.id, `Kept ${cancelPrompt.card.id}. Nothing was deleted.`); }}>
+
           <p style={{ margin: 0, fontSize: 12 }}>
             {`Cancelling ${cancelPrompt.card.id} deletes its lifecycle rows — lanes, checkpoints, review rounds, findings and session markers — and cannot be undone. Usage statistics are kept, and its git branch and worktree stay for you to remove.`}
           </p>
@@ -254,13 +271,14 @@ export function Board({ snapshot, onRefresh }: { snapshot: WebBoardSnapshot; onR
             </button>
             <button
               type="button"
+              data-cancel-keep
               onClick={() => { setCancelPrompt(null); publishOutcome(cancelPrompt.card.id, `Kept ${cancelPrompt.card.id}. Nothing was deleted.`); }}
               style={{ background: 'none', border: '1px solid #3a4550', borderRadius: 4, color: '#aab4bf', cursor: 'pointer', fontFamily: 'inherit', fontSize: 10.5, letterSpacing: 0.5, padding: '4px 10px' }}
             >
               keep mission
             </button>
           </div>
-        </section>
+        </CancelConfirmation>
       )}
       <MissionEditor snapshot={snapshot} onRefresh={onRefresh} request={editRequest} onClose={() => setEditRequest(null)} />
       {createFrom !== null && (

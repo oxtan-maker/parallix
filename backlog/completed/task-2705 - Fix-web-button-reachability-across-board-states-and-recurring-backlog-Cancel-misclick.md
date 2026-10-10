@@ -3,8 +3,8 @@ id: TASK-2705
 title: >-
   Fix web button reachability across board states and recurring backlog Cancel
   misclick
-status: backlog
-assignee: []
+status: done
+assignee: [codex]
 created_date: '2026-10-09 18:36'
 labels:
   - bug

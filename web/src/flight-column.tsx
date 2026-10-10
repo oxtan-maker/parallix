@@ -7,7 +7,7 @@
 import { useEffect, useState } from 'react';
 import type { CSSProperties, DragEvent, KeyboardEvent as ReactKeyboardEvent } from 'react';
 import type { WebMissionCard, WebStage } from '../../src/interfaces/web/transport.js';
-import { ActionButton } from './action-button.js';
+import { ActionButton, cardCommands } from './action-button.js';
 import { Fan } from './fan.js';
 import { LaneHeader, laneEmpty } from './lane-header.js';
 import { C } from './palette.js';
@@ -162,12 +162,6 @@ function CheckpointPips({ checkpoint }: { checkpoint: string }) {
   );
 }
 
-function primaryAction(actions: readonly WebMissionCard['actions'][number][]) {
-  // The destructive action never becomes the card's default button.
-  return actions.find((action) => action.state === 'enabled' && action.kind !== 'mission:cancel' && action.kind !== 'mission:edit')
-    ?? actions.find((action) => action.kind !== 'mission:cancel' && action.kind !== 'mission:edit') ?? null;
-}
-
 function cancelAction(actions: readonly WebMissionCard['actions'][number][]) {
   return actions.find((action) => action.state === 'enabled' && action.kind === 'mission:cancel')
     ?? actions.find((action) => action.kind === 'mission:cancel') ?? null;
@@ -185,9 +179,8 @@ function FlightCard({ card, onAction, onSelect, onDragStart, selected, pendingCo
   const agent = working ? liveAgent : card.agent;
   const accent = card.gate === 'failed' ? C.red : familyAccent(agent);
   const actor = actorLine(card);
-  const primary = primaryAction(card.actions);
+  const actions = cardCommands(card.actions);
   const cancel = cancelAction(card.actions);
-  const edit = card.actions.find(action => action.kind === 'mission:edit') ?? null;
   // The footer carries the actions the server marked runnable for this card.
   // Which ones those are is the server's lifecycle decision, not a lane rule
   // evaluated here — the client only reads `state`.
@@ -209,7 +202,7 @@ function FlightCard({ card, onAction, onSelect, onDragStart, selected, pendingCo
       aria-label={`${card.id}: ${card.title}`}
       aria-selected={selected}
       draggable={card.actions.some((action) => action.state === 'enabled' && action.targetLane !== null)}
-      onFocus={() => onSelect(card.id)}
+      onFocus={(event) => { if (event.target === event.currentTarget) { onSelect(card.id); } }}
       onDragStart={(event) => onDragStart(card, event)}
       style={{
         border: `1px solid ${selected ? C.cyan : C.cardEdge}`, borderTop: `2px solid ${edgeColor(card)}`,
@@ -299,7 +292,7 @@ function FlightCard({ card, onAction, onSelect, onDragStart, selected, pendingCo
         )}
       </div>
 
-      {(primary !== null || cancel !== null || edit !== null) && (
+      {(actions.length > 0 || cancel !== null) && (
         <div
           style={{
             display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 7,
@@ -310,10 +303,9 @@ function FlightCard({ card, onAction, onSelect, onDragStart, selected, pendingCo
           {cancel !== null && (
             <ActionButton action={cancel} label={cancel.label} style={{ color: C.red, border: `1px solid ${C.red}` }} pending={pendingCommands.get(card.id)} onInvoke={(next, control) => onAction(card, next, control)} />
           )}
-          {primary !== null && (
-            <ActionButton action={primary} label={primary.label} pending={pendingCommands.get(card.id)} working={spinning} onInvoke={(next, control) => onAction(card, next, control)} />
-          )}
-          {edit !== null && <ActionButton action={edit} label="Edit" pending={pendingCommands.get(card.id)} working={false} onInvoke={(next, control) => onAction(card, next, control)} />}
+          {actions.map((primary) => (
+            <ActionButton key={primary.kind} action={primary} label={primary.label} pending={pendingCommands.get(card.id)} working={primary.kind === 'mission:edit' ? false : spinning} onInvoke={(next, control) => onAction(card, next, control)} />
+          ))}
         </div>
       )}
       <Grille />

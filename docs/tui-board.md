@@ -80,6 +80,10 @@ A fact the projection does not have reads `unavailable`. That is deliberate: the
 card distinguishes "we know there is nothing" from "we could not read this", and
 it never guesses a value the workflow has not recorded.
 
+Web cards show the available commands alongside Cancel. When no command can
+run, one unavailable control explains why. Commands that can run together remain
+individually accessible.
+
 ## Cycle time and agent runtime are different numbers
 
 FLOW reports both, under labels that do not overlap:
@@ -187,7 +191,7 @@ Three ways to reach it, all running the same command against the database:
 | Surface | How |
 |---|---|
 | TUI board | Select the mission, press `Shift+X`, then press `Shift+X` again to confirm. `Escape` dismisses, and `Enter` — which confirms every other action — does nothing here. |
-| Web board | Click the red `cancel ✕` button on the card, then click `delete <mission> lifecycle rows` in the panel that opens. `keep mission` dismisses it. |
+| Web board | Click the red `cancel ✕` button on the card, then click `delete <mission> lifecycle rows` in the dialog that opens. Focus starts on `keep mission`; Tab stays inside the dialog, and `Escape` keeps the mission. The dialog remains visible above a scrolled board and checks the latest action availability before sending. |
 | Terminal | `px cancel <slug> --yes`. Without `--yes` the command explains what would be deleted and exits without touching anything. |
 
 The confirmation is deliberately different from the ordinary lifecycle

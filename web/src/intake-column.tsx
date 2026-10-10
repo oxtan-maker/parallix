@@ -4,18 +4,12 @@
  */
 import type { CSSProperties, DragEvent } from 'react';
 import type { WebMissionCard, WebStage } from '../../src/interfaces/web/transport.js';
-import { ActionButton } from './action-button.js';
+import { ActionButton, cardCommands } from './action-button.js';
 import { Fan } from './fan.js';
 import { LaneHeader, laneEmpty } from './lane-header.js';
 import { C } from './palette.js';
 import type { PendingCommands } from './pending-command.js';
 import { familyAccent, isSpinning, workText } from './format.js';
-
-function primaryAction(actions: readonly WebMissionCard['actions'][number][]) {
-  // The destructive action never becomes the card's default button.
-  return actions.find((action) => action.state === 'enabled' && action.kind !== 'mission:cancel' && action.kind !== 'mission:edit')
-    ?? actions.find((action) => action.kind !== 'mission:cancel' && action.kind !== 'mission:edit') ?? null;
-}
 
 function cancelAction(actions: readonly WebMissionCard['actions'][number][]) {
   return actions.find((action) => action.state === 'enabled' && action.kind === 'mission:cancel')
@@ -23,9 +17,8 @@ function cancelAction(actions: readonly WebMissionCard['actions'][number][]) {
 }
 
 function IntakeCard({ card, onAction, onSelect, onDragStart, selected, pendingCommands }: { card: WebMissionCard; onAction: (card: WebMissionCard, action: WebMissionCard['actions'][number], control: HTMLButtonElement) => void; onSelect: (id: string) => void; onDragStart: (card: WebMissionCard, event: DragEvent<HTMLElement>) => void; selected: boolean; pendingCommands: PendingCommands }) {
-  const primary = primaryAction(card.actions);
+  const actions = cardCommands(card.actions);
   const cancel = cancelAction(card.actions);
-  const edit = card.actions.find(action => action.kind === 'mission:edit') ?? null;
   return (
     <article
       data-board-card={card.id}
@@ -33,7 +26,7 @@ function IntakeCard({ card, onAction, onSelect, onDragStart, selected, pendingCo
       aria-label={`${card.id}: ${card.title}`}
       aria-selected={selected}
       draggable={card.actions.some((action) => action.state === 'enabled' && action.targetLane !== null)}
-      onFocus={() => onSelect(card.id)}
+      onFocus={(event) => { if (event.target === event.currentTarget) { onSelect(card.id); } }}
       onDragStart={(event) => onDragStart(card, event)}
       style={{
         border: `1px solid ${selected ? C.cyan : C.cardEdge}`, borderRadius: 5, background: C.idleCard,
@@ -49,15 +42,14 @@ function IntakeCard({ card, onAction, onSelect, onDragStart, selected, pendingCo
         </span>
       </div>
       <p style={{ margin: '5px 0 0', lineHeight: 1.4, color: C.muted, fontSize: 11 }}>{card.title}</p>
-      {(primary !== null || cancel !== null || edit !== null) && (
+      {(actions.length > 0 || cancel !== null) && (
         <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 5, marginTop: 7, flexWrap: 'wrap' }}>
           {cancel !== null && (
             <ActionButton action={cancel} label={cancel.label} style={{ color: C.red, border: `1px solid ${C.red}` }} pending={pendingCommands.get(card.id)} onInvoke={(next, control) => onAction(card, next, control)} />
           )}
-          {primary !== null && (
-            <ActionButton action={primary} label={primary.label} pending={pendingCommands.get(card.id)} working={isSpinning(card)} onInvoke={(next, control) => onAction(card, next, control)} />
-          )}
-          {edit !== null && <ActionButton action={edit} label="Edit" pending={pendingCommands.get(card.id)} working={false} onInvoke={(next, control) => onAction(card, next, control)} />}
+          {actions.map((primary) => (
+            <ActionButton key={primary.kind} action={primary} label={primary.label} pending={pendingCommands.get(card.id)} working={primary.kind === 'mission:edit' ? false : isSpinning(card)} onInvoke={(next, control) => onAction(card, next, control)} />
+          ))}
         </div>
       )}
     </article>
