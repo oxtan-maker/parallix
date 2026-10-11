@@ -31,10 +31,11 @@ Research handoff: proposed ADR 0066 and tools/session-boundary-evaluation/contex
 - [ ] #1 After a successfully recorded checkpoint, the next implementer segment uses a new conversation without importing the previous transcript, while preserving the same mission, agent/model selection, working tree and authoritative state.
 - [ ] #2 The new conversation receives enough authoritative context to continue the next checkpoint: locked brief and constraints, success criteria, completed evidence, next action and unresolved failure diagnostics; summaries do not replace application-owned authority.
 - [ ] #3 Partial or failed checkpoint work remains recoverable without falsely advancing completion, duplicating evidence or repeatedly resetting; final handoff still enforces complete criterion coverage and independent review.
-- [ ] #4 The current prompted-compaction mode remains an explicit fallback; rollout/default and operator configuration are documented in the context-management ADR with the measured aggregate savings and reliability limitations.
-- [ ] #5 Focused coverage in the owning lifecycle/session suites and a manual end-to-end disposable-mission exercise demonstrate a genuine fresh session across two checkpoints, correct durable continuation and final handoff; required static analysis passes.
-- [ ] #6 Focused coverage in the owning lifecycle/session suites and a manual end-to-end disposable-mission exercise demonstrate a genuine fresh session across two checkpoints, correct durable continuation and final handoff; required static analysis passes.
+- [ ] #4 Focused coverage in the owning lifecycle/session suites and a manual end-to-end disposable-mission exercise demonstrate a genuine fresh session across two checkpoints, correct durable continuation and final handoff; required static analysis passes.
+- [ ] #5 Fresh continuation replaces the completed-checkpoint compaction path without a legacy fallback or mode switch. Compaction at lifecycle boundaries and other unvalidated sites remains unchanged; the ADR documents the measured savings, reliability limits and exact boundary of the change.
 <!-- AC:END -->
+
+
 
 
 
