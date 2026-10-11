@@ -4,6 +4,7 @@ title: Use fresh implementer context after completed checkpoints
 status: backlog
 assignee: []
 created_date: '2026-10-11 08:18'
+updated_date: '2026-10-11 08:21'
 labels:
   - ai_sdlc
 dependencies: []
@@ -18,7 +19,7 @@ Implement the checkpoint-context result from research mission px-0008: after a c
 
 Observed evidence: eleven historical model-matched Ornith 1.5 comparisons used 216,987,803 reported tokens under the current prompted-compaction baseline versus 103,993,144 with fresh checkpoint sessions (-52.1% relative to baseline). MTP: four missions, -53.7%; non-MTP: seven missions, -47.8%; eight of eleven decreased. Tokens include cached input; historical/replay recovery allowances differ, some validation outcomes remain unresolved, and a harness guard affected some final evidence writes. This is a cost signal, not proof of improved delivery reliability. Preserve these limits in the decision rationale.
 
-Scope: checkpoint continuation only, through the existing application-owned workflow and runner boundaries. Retain current compaction behavior as an explicit fallback and document the selected rollout/default in the context-management ADR. Reconstruct the locked goal, scope, criteria, completed checkpoint evidence, next action and attributable failure diagnostics. Preserve agent/model identity and working-tree/state continuity. A failed or partial checkpoint must remain repair work and must not trigger a false completion/reset loop.
+Scope: checkpoint continuation only, through the existing application-owned workflow and runner boundaries. Replace checkpoint compaction with fresh continuation and remove the superseded checkpoint-specific behavior; do not add a fallback mode, feature flag or parallel legacy path. Preserve compaction at lifecycle boundaries and other sites where research has not yet established a replacement. Document this boundary-specific decision in the context-management ADR. Reconstruct the locked goal, scope, criteria, completed checkpoint evidence, next action and attributable failure diagnostics. Preserve agent/model identity and working-tree/state continuity. A failed or partial checkpoint must remain repair work and must not trigger a false completion/reset loop.
 
 Out of scope: fresh act-on-review (experiment still running), near-window compaction, observation masking, rebase/review/integration policy changes, model-default changes, architecture-principle changes, and rerunning the research cohort. This task does not depend on finishing every experiment in px-0008; verify and use the checkpoint evidence when refining the implementation contract.
 
@@ -32,7 +33,10 @@ Research handoff: proposed ADR 0066 and tools/session-boundary-evaluation/contex
 - [ ] #3 Partial or failed checkpoint work remains recoverable without falsely advancing completion, duplicating evidence or repeatedly resetting; final handoff still enforces complete criterion coverage and independent review.
 - [ ] #4 The current prompted-compaction mode remains an explicit fallback; rollout/default and operator configuration are documented in the context-management ADR with the measured aggregate savings and reliability limitations.
 - [ ] #5 Focused coverage in the owning lifecycle/session suites and a manual end-to-end disposable-mission exercise demonstrate a genuine fresh session across two checkpoints, correct durable continuation and final handoff; required static analysis passes.
+- [ ] #6 Focused coverage in the owning lifecycle/session suites and a manual end-to-end disposable-mission exercise demonstrate a genuine fresh session across two checkpoints, correct durable continuation and final handoff; required static analysis passes.
 <!-- AC:END -->
+
+
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
