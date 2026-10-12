@@ -1,8 +1,8 @@
 ---
 id: TASK-2723
 title: Support explicit reviewer selection in px active
-status: backlog
-assignee: []
+status: done
+assignee: [claude]
 created_date: '2026-10-12 04:21'
 labels:
   - feature

@@ -2,13 +2,16 @@ export interface ActiveCliRequest {
   readonly args: readonly string[];
   readonly explicitSlug?: string;
   readonly implementer?: string;
+  readonly reviewer?: string;
 }
 
 export function parseActiveCliRequest(args: string[]): ActiveCliRequest {
   const positional = args.filter(arg => !arg.startsWith('--'));
   const implementerIndex = args.indexOf('--implementer');
   const implementer = implementerIndex === -1 ? undefined : args[implementerIndex + 1];
-  return { args: [...args], explicitSlug: positional[0], implementer };
+  const reviewerIndex = args.indexOf('--reviewer');
+  const reviewer = reviewerIndex === -1 ? undefined : args[reviewerIndex + 1];
+  return { args: [...args], explicitSlug: positional[0], implementer, reviewer };
 }
 
 export function renderActiveProgress(event: { phase: string; agent?: string }, log: (_message: string) => void): void {

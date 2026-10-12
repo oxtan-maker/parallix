@@ -49,6 +49,7 @@ test('updateGraphifyKnowledgeGraph logs missing graph, missing command, probe-fa
   });
   assert.deepEqual(missingGraph, { updated: false, skipped: true, reason: 'missing-graph' });
   assert.equal(missingGraphRunnerCalled, false);
+  assert.equal(fs.existsSync(path.join(emptyRoot, 'graphify-out')), false);
 
   const missing = updateGraphifyKnowledgeGraph({
     rootDir: graphRoot,
@@ -159,4 +160,24 @@ test('queryGraph passes --graph with absolute path anchored to active worktree',
   assert.ok(path.isAbsolute(capturedArgs.args[3]), '--graph path must be absolute');
   assert.equal(capturedArgs.options.cwd, graphRoot);
   fs.rmSync(graphRoot, { recursive: true, force: true });
+});
+
+test('Graphify update catches thrown commands and rejects nonzero probes (TASK-2725)', t => {
+  const root = registeredMkdtemp('graphify-errors-');
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  fs.mkdirSync(path.join(root, 'graphify-out'));
+  fs.writeFileSync(path.join(root, 'graphify-out', 'graph.json'), '{}');
+  for (const failure of ['probe-exit', 'update-throw']) {
+    const calls: string[][] = [];
+    const result = updateGraphifyKnowledgeGraph({ rootDir: root, log: () => {},
+      commandRunner: (_command, args) => {
+        calls.push(args);
+        if (failure === 'probe-exit') { return { status: 1 }; }
+        if (args[0] === '--help') { return { status: 0 }; }
+        throw new Error('update spawn denied');
+      },
+    });
+    assert.equal(result.reason, failure === 'probe-exit' ? 'probe-failed' : 'update-error');
+    assert.deepEqual(calls, failure === 'probe-exit' ? [['--help']] : [['--help'], ['update', '.']]);
+  }
 });

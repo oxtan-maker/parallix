@@ -541,7 +541,7 @@ function tempGitRepoOnMain() {
 // the primary branch must clear a stale feature Base-Branch so
 // resolveMissionBaseBranch falls back to the primary branch instead of a branch
 // that no longer exists. Runs the real draft-startup writer (ensureMissionBase-
-// BranchRecorded) end to end; only the heavy external steps are stubbed.
+// BranchRecorded) through the draft adapter; only the heavy external steps are stubbed.
 test('runDraftCommand clears a stale feature Base-Branch when re-drafted from the primary branch', async () => {
   const root = tempGitRepoOnMain();
   const missionFile = path.join(missionDirForSlug(root, 'task-stale'), 'MISSION.md');

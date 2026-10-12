@@ -39,7 +39,7 @@ export function probeGraphifyAvailability(options: { commandRunner?: Function | 
     try {
       const result = cmdRunner(command, ['--help']);
       return {
-        available: result.status !== null && result.status !== undefined,
+        available: result.status === 0,
         command,
         status: result.status ?? null
       };
@@ -60,9 +60,6 @@ export function probeGraphifyAvailability(options: { commandRunner?: Function | 
   return { available: false, reason: 'missing-command' };
 }
 
-/**
- * @param {{rootDir?: string, commandRunner?: Function, log?: Function, startMessage?: string, failureHint?: string}} [options]
- */
 /** @param {{rootDir?: string, commandRunner?: Function, log?: Function, startMessage?: string, failureHint?: string}} [options] */
 export function updateGraphifyKnowledgeGraph(options: { configuration?: ParallixConfiguration; rootDir?: string; commandRunner?: Function; log?: Function; startMessage?: string; failureHint?: string } = {}): { updated: boolean; skipped: boolean; reason?: string; status?: number } {
   const rootDir = options.rootDir || process.cwd();
@@ -89,14 +86,24 @@ export function updateGraphifyKnowledgeGraph(options: { configuration?: Parallix
   }
 
   logFn(fmt.status('INFO', startMessage));
-  const result = cmdRunner(probe.command!, ['update', '.'], {
-    cwd: rootDir,
-    stdio: 'inherit'
-  });
+  return runGraphifyUpdate(probe.command!, rootDir, cmdRunner, logFn, failureHint);
+}
 
-  if (result.status !== 0) {
-    logFn(fmt.status('WARN', `graphify update failed with status ${result.status}. ${failureHint}`));
-    return { updated: false, skipped: true, reason: 'update-failed', status: result.status };
+/** Invoke the upstream operation; every process failure is advisory. */
+function runGraphifyUpdate(command: string, rootDir: string, cmdRunner: Function, logFn: Function, failureHint: string): { updated: boolean; skipped: boolean; reason?: string; status?: number } {
+  try {
+    const result = cmdRunner(command, ['update', '.'], {
+      cwd: rootDir,
+      stdio: 'inherit'
+    });
+    if (result.status !== 0) {
+      logFn(fmt.status('WARN', `graphify update failed with status ${result.status}. ${failureHint}`));
+      return { updated: false, skipped: true, reason: 'update-failed', status: result.status };
+    }
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : String(error);
+    logFn(fmt.status('WARN', `graphify update failed (${message}). ${failureHint}`));
+    return { updated: false, skipped: true, reason: 'update-error' };
   }
 
   return { updated: true, skipped: false };

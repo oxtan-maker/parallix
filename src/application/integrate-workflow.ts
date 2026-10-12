@@ -83,6 +83,7 @@ export function createIntegrateWorkflow(ports: IntegrateWorkflowPorts) {
         closeLandedIntegrationOrAbort: ports.landing.closeLandedIntegrationOrAbort,
         cleanupMissionWorktree: ports.landing.cleanupMissionWorktree,
         runPostIntegrateHookOrAbort: ports.landing.runPostIntegrateHookOrAbort,
+        updateGraphifyRepository: ports.landing.updateGraphifyRepository,
         createAbort: landing.createAbort,
         baseBranch,
         hasIntegrationMeasurement: landing.hasIntegrationMeasurement,

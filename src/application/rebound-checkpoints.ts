@@ -9,6 +9,11 @@ export async function prepareRepairPrompt(
   state: { occurrenceId: string; reason: ReboundReason; originalReason: ReboundReason; classification: ReboundClassification; diagnostic: string; originalDiagnostic: string; capturedEvidence?: RecoveryEvidenceRef | null },
   context: ReboundContext, attempt: number, maxAttempts: number,
 ) {
+  // Git completion has a stage-owned instruction and is certified by its Git
+  // verifier. Code-repair checkpoint evidence belongs to the generic path.
+  if (context.repairPrompt !== undefined) {
+    return { fixPrompt: context.repairPrompt, repairPort: undefined, repairCheckpoint: null };
+  }
   const { slug, worktree } = context;
   const repairPort = context.repairCheckpoints ?? repairCheckpointPort();
   const required = state.originalReason;

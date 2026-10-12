@@ -1,0 +1,21 @@
+{
+  "date": "2026-10-12",
+  "reason": "Covered landed-completion case intermittently exceeds its 300 ms cap while driving real integration orchestration and SQLite metrics. Retained gate failure measured 328 ms; all behavioral assertions remain unchanged.",
+  "measurement": "PARALLIX_TEST_COVERAGE=1 PARALLIX_PREBUILT_PACK=1 PARALLIX_TEST_CPU_PROFILE_DIR=<isolated directory> npm test -- --integration-ci test/integration/integrate/integration-landed-completion.test.ts",
+  "file": "integration/integrate/integration-landed-completion.test.ts",
+  "profile": "covered",
+  "case": "R4: decision-window membership follows the landed timestamp",
+  "focusedPeakCpuMs": [
+    172.208,
+    185.485,
+    208.519
+  ],
+  "retainedGateCpuMs": 328,
+  "retainedIncident": "d587c2a830243cd41cfcd6199fa25627fe3523093a5f0b361296bb4071464076",
+  "previousBudgetMs": 300,
+  "budgetMs": 450,
+  "marginOverRetainedGatePercent": 37.2,
+  "plainBudgetMs": 300,
+  "profiledCases": 63,
+  "heaviestCaseInEveryRun": "R4: decision-window membership follows the landed timestamp"
+}

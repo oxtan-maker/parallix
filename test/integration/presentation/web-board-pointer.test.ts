@@ -35,6 +35,18 @@ test('pending current-work commands wait for the response before the next coordi
   } finally { fixture.release(); await fixture.close(); }
 });
 
+async function clickCommand(control: Locator) {
+  const page = control.page();
+  // Observe this request before waiting for React to clear its pending state.
+  // Running-work projections label pending actions "working", not "starting".
+  const response = page.waitForResponse((result) => result.request().method() === 'POST');
+  await clickAt(control);
+  await response;
+  await page.waitForFunction(() => !document.querySelector(
+    '[data-board-card] button[aria-label*="starting"], [data-board-card] button[aria-label*="working"]',
+  ));
+}
+
 test('board coordinate control matrix across lanes and work states (TASK-2705)', { timeout: 45_000 }, async (context) => {
   const fixture = await pointerBoard();
   context.after(fixture.close);
@@ -70,14 +82,15 @@ test('board coordinate control matrix across lanes and work states (TASK-2705)',
         assert.equal(await dialog.count(), 0);
         assert.equal(requests.length, before);
         for (const [command, kind] of [['active', 'active:execute'], ['draft', 'draft:create'], ['handoff', 'handoff:record'], ['integrate', 'integrate:merge']] as const) {
-          await clickAt(card.locator(`button[aria-label^="px ${command}"]`));
-          await waitForCommands(page);
+          await clickCommand(card.locator(`button[aria-label^="px ${command}"]`));
           assert.deepEqual(requests.at(-1), { missionId: 'task-pointer-disposable', kind, missionStatusAtRequest: lane });
           assert.equal(await card.getAttribute('aria-selected'), 'false');
           assert.equal(await page.getByRole('dialog', { name: /Mission progress/ }).count(), 0);
         }
         await clickAt(card.locator('button[aria-label^="px cancel"]'));
-        await clickAt(page.getByRole('button', { name: 'delete task-pointer-disposable lifecycle rows' }));
+        // Confirmation closes the dialog before the POST reaches the server.
+        // Await delivery and pending cleanup before inspecting requests or rerendering.
+        await clickCommand(page.getByRole('button', { name: 'delete task-pointer-disposable lifecycle rows' }));
         await page.waitForFunction(() => !document.querySelector('[role="dialog"]'));
         assert.equal(requests.length, before + 5);
         assert.deepEqual(requests.at(-1), { missionId: 'task-pointer-disposable', kind: 'mission:cancel', missionStatusAtRequest: lane });
@@ -96,8 +109,7 @@ test('board coordinate control matrix across lanes and work states (TASK-2705)',
     await fixture.render(supplied);
     const before = requests.length;
     for (const command of ['active', 'handoff', 'review', 'integrate']) {
-      await clickAt(page.locator(`[data-board-card] button[aria-label^="px ${command}"]`));
-      await waitForCommands(page);
+      await clickCommand(page.locator(`[data-board-card] button[aria-label^="px ${command}"]`));
     }
     assert.deepEqual(requests.slice(before).map((request) => (request as {kind: string}).kind), ['active:execute', 'handoff:record', 'review:submit', 'integrate:merge']);
   } finally { await fixture.close(); }

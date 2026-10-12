@@ -217,6 +217,8 @@ export interface AutonomousReviewRequest {
   readonly slug: string;
   readonly worktree: string;
   readonly implementer: string;
+  /** Explicit reviewer family; absent means automatic selection. */
+  readonly reviewer?: string;
   readonly onAgentLaunched?: (_agent: string, _phase: AgentLaunchPhase) => Promise<void>;
   readonly onAutonomousStop?: (_reason: string) => Promise<void>;
 }

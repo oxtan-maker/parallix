@@ -8,10 +8,14 @@ import fs from 'node:fs';
 // Regression group from test/integration/verification/codeql-suite-options.test.ts
 {
 function run(args: string[]) {
-  return spawnSync('bash', ['scripts/codeql-sast.sh', ...args], {
-    encoding: 'utf8',
-    cwd: process.cwd(),
-  });
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'codeql-options-'));
+  try {
+    return spawnSync('bash', ['scripts/codeql-sast.sh', ...args], {
+      encoding: 'utf8', cwd: process.cwd(), timeout: 10_000,
+      env: { ...process.env, CODEQL_CACHE_DIR: path.join(root, 'cache'), CODEQL_WORK_DIR: path.join(root, 'work') },
+    });
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+
 }
 
 test('--suite <name> (two-argument form) is accepted on --dry-run', () => {
@@ -35,44 +39,24 @@ test('--suite=NAME (equals form) is accepted on --dry-run', () => {
 });
 }
 
-// Regression group from test/codeql-cache-bootstrap.test.ts
-{
-test('clean cache directory bootstraps the CodeQL gate on --dry-run', () => {
-  // A fresh cache dir whose leaf does not yet exist: the runner must mkdir it
-  // before writing the CLI download or cloning the packs.
-  const freshCache = path.join(os.tmpdir(), `task-2502-codeql-cache-${process.pid}`);
-  assert.equal(fs.existsSync(freshCache), false, 'fresh cache leaf must not pre-exist');
-
-  // Provide the pinned codeql on PATH so the CLI bootstrap takes the PATH
-  // branch (no 400 MB download) and the gate can run.
-  const realCodeql = spawnSync('bash', ['-c', 'command -v codeql'], { encoding: 'utf8' }).stdout.trim();
-  if (!realCodeql) {
-    test.skip('no codeql on PATH to exercise the clean-cache gate'); // skip-reason: pinned codeql must be on PATH to bootstrap
-    return;
-  }
-
-  // Pre-populate the packs in the fresh cache so resolve_packs hits the cached
-  // branch (skip the network clone) and the dry-run can complete.
-  const packsSrc = path.join(freshCache, 'codeql-packs-codeql-cli/v2.27.0/javascript/ql/src');
-  fs.mkdirSync(packsSrc, { recursive: true });
-
-  const env = {
-    ...process.env,
-    CODEQL_CACHE_DIR: freshCache,
-    // A valid pinned codeql on PATH satisfies the version check without download.
-    PATH: `${path.dirname(realCodeql)}:${process.env.PATH}`,
-  };
-
+// The dry-run contract does not execute CodeQL; exercise it even on a clean runner.
+test('clean cache dry-run resolves the plan without CodeQL or downloads (TASK-2717)', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'codeql-dry-plan-'));
   try {
+    const freshCache = path.join(root, 'cache');
+    const bin = path.join(root, 'bin');
+    fs.mkdirSync(bin);
+    const marker = path.join(root, 'unexpected-codeql');
+    fs.writeFileSync(path.join(bin, 'codeql'), `#!/bin/sh\necho invoked > '${marker}'\nexit 1\n`, { mode: 0o755 });
     const res = spawnSync('bash', ['scripts/codeql-sast.sh', '--dry-run'], {
-      cwd: process.cwd(),
-      encoding: 'utf8',
-      env,
+      cwd: process.cwd(), encoding: 'utf8', timeout: 10_000,
+      env: { ...process.env, CODEQL_CACHE_DIR: freshCache, CODEQL_WORK_DIR: path.join(root, 'work'), PATH: `${bin}:${process.env.PATH}` },
     });
     assert.equal(res.status, 0, `clean-cache --dry-run failed:\n${res.stdout}\n${res.stderr}`);
-    assert.match(res.stdout, /dry-run: plan resolved/, 'runner should resolve and exit 0');
+    assert.match(res.stdout, /dry-run: plan resolved/);
+    assert.equal(fs.existsSync(marker), false, 'dry-run must not execute even a configured CodeQL');
+    assert.equal(fs.existsSync(freshCache), false, 'dry-run must not download or clone into the cache');
   } finally {
-    fs.rmSync(freshCache, { recursive: true, force: true });
+    fs.rmSync(root, { recursive: true, force: true });
   }
 });
-}

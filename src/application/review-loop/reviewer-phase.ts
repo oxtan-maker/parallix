@@ -247,8 +247,6 @@ export async function runReviewerPhase(context: LoopContext, round: ReviewRound)
     // opened. Pin routing to the revision that passed the complete setup.
     round.verifiedRevision = context.ports.preReview.head() ?? undefined;
     await pinReviewBaseline(context, round);
-    // The graph is reviewer context, not a correctness gate: refresh it once
-    // only after the final rebase and declared verification have succeeded.
     const cycleStarted = context.ports.classification?.clock();
     const classified = await tryClassifyReview(context, round, cycleStarted);
     if (classified === 'stop') { return { outcome: 'stop' }; }
@@ -257,7 +255,6 @@ export async function runReviewerPhase(context: LoopContext, round: ReviewRound)
       return { reviewState: classified };
     }
     const reviewerStarted = context.ports.classification?.clock() ?? 0;
-    await context.ports.preReview.refreshKnowledgeGraph();
     if (await launchReviewer(context, round)) { return { outcome: 'stop' }; }
     const consumed = await consumeReviewerOutput(context, round);
     if (consumed.step) { return { outcome: 'stop' }; }

@@ -36,6 +36,7 @@ export async function recoverLandedIntegration(
     closeLandedIntegrationOrAbort,
     cleanupMissionWorktree,
     runPostIntegrateHookOrAbort,
+    updateGraphifyRepository,
     createAbort,
     baseBranch,
     hasIntegrationMeasurement,
@@ -48,6 +49,7 @@ export async function recoverLandedIntegration(
     closeLandedIntegrationOrAbort: IntegrateLandingPort['closeLandedIntegrationOrAbort'];
     cleanupMissionWorktree: IntegrateLandingPort['cleanupMissionWorktree'];
     runPostIntegrateHookOrAbort: IntegrateLandingPort['runPostIntegrateHookOrAbort'];
+    updateGraphifyRepository: IntegrateLandingPort['updateGraphifyRepository'];
     createAbort: () => Error;
     baseBranch: string;
     hasIntegrationMeasurement?: (_slug: string, _rootDir: string) => boolean;
@@ -86,7 +88,7 @@ export async function recoverLandedIntegration(
     ...(alreadyClosed && artifactsRemain ? { legacyClosedRecovery: { skipStats: alreadyMeasured } } : {}),
     landing: {
       createAbort, persistLandedIntegrationOrAbort, recordPostIntegrationStatsOrAbort,
-      cleanupMissionWorktree, runPostIntegrateHookOrAbort, closeLandedIntegrationOrAbort,
+      cleanupMissionWorktree, runPostIntegrateHookOrAbort, updateGraphifyRepository, closeLandedIntegrationOrAbort,
     },
   });
 }

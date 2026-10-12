@@ -162,7 +162,7 @@ test('resolveSkippableGates runs the full set when the validating sha no longer 
   assert.deepEqual(gates.map(gate => gate.key), ['unit', 'integration-ci']);
 });
 
-// ── SC4 end-to-end: validated hooks skipped on integrate, fallback when absent ─
+// ── SC4 integration adapter: validated hooks skipped on integrate, fallback when absent ─
 
 test('integrate skips validated hooks after a green bounce-verify and falls back when the marker is absent or the branch moved (SC4)', async () => {
   const configured = [{ key: 'unit' }, { key: 'integration-ci' }, { key: 'quality-gate' }];

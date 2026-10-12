@@ -84,7 +84,7 @@ function landMission(root: string, slug: string, taskFile: string): Promise<void
     ...production,
     missionPaths: { softResetTrailingBacklogNoise: () => false },
     productConfig: { ...production.productConfig, isForgejoReviewEnabled: () => false },
-    checkout: { maybeUpdateGraphifyOnPrimary: () => {}, rewriteWorktreePaths: () => {} },
+    checkout: { rewriteWorktreePaths: () => {} },
     gates: { isIntendedPayloadAtHead: () => false },
     landing: {
       createAbort: () => new Error('IntegrationAbort'),
@@ -93,6 +93,7 @@ function landMission(root: string, slug: string, taskFile: string): Promise<void
       closeLandedIntegrationOrAbort: async () => {},
       recordPostIntegrationStatsOrAbort: async () => {},
       cleanupMissionWorktree: () => true,
+      updateGraphifyRepository: () => {},
       runPostIntegrateHookOrAbort: () => {},
     },
     verification: {

@@ -175,6 +175,7 @@ Usage: px checkpoint plan   [--slug <slug>] --name <CP-N> --text <what it delive
        px checkpoint unplan [--slug <slug>] --name <CP-N>
        px checkpoint record [--slug <slug>] --name <CP-N> --next <text>
                             --criterion <text> --evidence <text> [--criterion ... --evidence ...]
+                            [--force]
 
 Report an invalid locked contract: px checkpoint report-invalid-contract --name <CP-N>
   --command <exact failing command> --diagnostic <text> --authority-reason <text>
@@ -189,7 +190,10 @@ pair up in the order given, so the counts must match. Each row must cite a
 repository-relative path, a quoted test name, a recognized command or an ADR,
 and the final planned checkpoint needs one row per success criterion; handoff
 applies the same checks. \`px status\` shows which checkpoints have evidence;
-the first without is where a relaunched agent resumes.
+the first without is where a relaunched agent resumes. An operator may use
+\`record --force\` to clear a reported invalid-contract blocker while recording
+corrected evidence. It retains unrelated proof and still validates evidence and
+the write version; it does not mark the repair verified or skip its required check.
 `.trimStart();
 
 export const REPRO_HELP = `
@@ -366,6 +370,7 @@ export function createCheckpointCommand(services: MissionCheckpointService, reso
     }));
     const outcome = await services.record({
       ...req,
+      force: args.includes('--force'),
       checkpoint: {
         missionId: req.missionId,
         name: required(args, '--name'),

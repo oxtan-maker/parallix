@@ -38,6 +38,7 @@ describe("recovery post-integrate hook", () => {
 
   function baseOptions(overrides: Record<string, unknown> = {}) {
     return {
+      updateGraphifyRepository: () => {},
       findSquashCommit: () => 'abc123',
       recoverMissionForIntegration: async () => ({ status: 'integration' }),
       persistLandedIntegrationOrAbort: async () => {},
@@ -58,12 +59,14 @@ describe("recovery post-integrate hook", () => {
       recordPostIntegrationStatsOrAbort: async () => { calls.push({ stage: 'stats' }); },
       cleanupMissionWorktree: () => { calls.push({ stage: 'cleanup' }); return true; },
       runPostIntegrateHookOrAbort: (slug: string, options: unknown) => { calls.push({ stage: 'hook', slug, options }); },
+      updateGraphifyRepository: (rootDir: string) => { calls.push({ stage: 'graphify', options: { rootDir } }); },
       closeLandedIntegrationOrAbort: async () => { calls.push({ stage: 'close' }); },
     }));
     assert.deepEqual(calls, [
       { stage: 'persist' },
       { stage: 'stats' },
       { stage: 'hook', slug: 'task-2551', options: { baseWorktree: '/work/base', baseBranch: 'main', variant: 'variant-b-resumed' } },
+      { stage: 'graphify', options: { rootDir: '/work/base' } },
       { stage: 'cleanup' },
       { stage: 'close' },
     ]);
@@ -151,6 +154,7 @@ describe("failed closeout resumes", () => {
       store: { load: async () => ({ kind: 'found' as const, mission: { status, closedAt } }) },
     };
     const options = {
+      updateGraphifyRepository: () => {},
       findSquashCommit: () => 'landed-commit',
       recoverMissionForIntegration: async () => ({ status: 'integration' }),
       persistLandedIntegrationOrAbort: async () => { steps.push('delivered'); status = 'done'; },
@@ -189,6 +193,7 @@ describe("failed closeout resumes", () => {
       store: { load: async () => ({ kind: 'found' as const, mission: { status, closedAt } }) },
     };
     const options = {
+      updateGraphifyRepository: () => {},
       findSquashCommit: () => 'landed-commit',
       recoverMissionForIntegration: async () => ({ status: 'integration' }),
       persistLandedIntegrationOrAbort: async () => { steps.push('delivered'); status = 'done'; },
@@ -225,6 +230,7 @@ describe("legacy closed Mission recovery", () => {
     let failHook = true;
     const missionServices = { store: { load: async () => ({ kind: 'found', mission: { status: 'done', closedAt } }) } };
     const options = {
+      updateGraphifyRepository: () => {},
       findSquashCommit: () => 'landed-commit',
       recoverMissionForIntegration: async () => ({ status: 'done' }),
       persistLandedIntegrationOrAbort: async () => { steps.push('redelivered'); },
@@ -261,7 +267,8 @@ describe("legacy closed Mission recovery", () => {
     await assert.rejects(recoverLandedIntegration('task-2595',
       { store: { load: async () => ({ kind: 'found', mission: { status: 'done', closedAt: '2026-09-27' } }) } },
       '/tmp/base', {
-        findSquashCommit: () => null,
+        updateGraphifyRepository: () => {},
+      findSquashCommit: () => null,
         recoverMissionForIntegration: async () => { mutations++; return { status: 'done' }; },
         persistLandedIntegrationOrAbort: async () => { mutations++; },
         recordPostIntegrationStatsOrAbort: async () => { mutations++; },
@@ -281,7 +288,8 @@ describe("legacy closed Mission recovery", () => {
     await assert.rejects(recoverLandedIntegration('task-2595',
       { store: { load: async () => ({ kind: 'found', mission: { status: 'done', closedAt: '2026-09-27' } }) } },
       '/tmp/base', {
-        findSquashCommit: () => 'landed-commit',
+        updateGraphifyRepository: () => {},
+      findSquashCommit: () => 'landed-commit',
         recoverMissionForIntegration: async () => ({ status: 'done' }),
         persistLandedIntegrationOrAbort: async () => { steps.push('redelivered'); },
         recordPostIntegrationStatsOrAbort: async () => { throw new Error('invalid px classification'); },
@@ -357,8 +365,9 @@ describe("rebounded landing guard", () => {
         productConfig: { isForgejoReviewEnabled: () => false },
         fileSystem: { existsSync: () => false },
         git: { git: () => ({ status: 0, stdout: '', stderr: '' }) },
-        checkout: { maybeUpdateGraphifyOnPrimary: () => { effects.push('graphify'); } },
+        checkout: {},
         landing: {
+          updateGraphifyRepository: () => { effects.push('graphify'); },
           createAbort: () => abort,
           persistLandedIntegrationOrAbort: async () => { effects.push('decide'); },
           recordPostIntegrationStatsOrAbort: async () => { effects.push('stats'); if (failedStep === 'stats') { throw abort; } },
@@ -377,9 +386,9 @@ describe("rebounded landing guard", () => {
       if (failedStep === 'none') { await landing; }
       else { await assert.rejects(landing, error => error === abort); }
       assert.deepEqual(effects, failedStep === 'stats' ? ['decide', 'stats']
-        : failedStep === 'cleanup' ? ['decide', 'stats', 'hook', 'cleanup']
+        : failedStep === 'cleanup' ? ['decide', 'stats', 'hook', 'graphify', 'cleanup']
         : failedStep === 'hook' ? ['decide', 'stats', 'hook']
-          : ['decide', 'stats', 'hook', 'cleanup', 'close'], 'successful closeout preserves its lifecycle effects without refreshing Graphify');
+          : ['decide', 'stats', 'hook', 'graphify', 'cleanup', 'close'], 'the graph update follows bookkeeping and precedes cleanup');
     });
   }
 
@@ -877,6 +886,7 @@ describe("landed integration refreshes the local px before cleanup (consolidated
         baseBranch: 'main',
         variant: 'variant-b',
         landing: {
+          updateGraphifyRepository: () => {},
           createAbort: () => cleanupFailure,
           persistLandedIntegrationOrAbort: async () => { effects.push('persist'); },
           recordPostIntegrationStatsOrAbort: async () => { effects.push('stats'); },
@@ -903,6 +913,7 @@ test('landed closeout forwards the composition-bound statistics lifecycle reader
     baseBranch: 'main', variant: 'variant-b',
     missionServices: { store, readStatsMissionFlow: readMissionFlow },
     landing: {
+      updateGraphifyRepository: () => {},
       createAbort: () => new Error('unexpected abort'),
       persistLandedIntegrationOrAbort: async () => { throw new Error('delivery already persisted'); },
       recordPostIntegrationStatsOrAbort: async (slug, options) => {
@@ -918,4 +929,31 @@ test('landed closeout forwards the composition-bound statistics lifecycle reader
     },
   });
   assert.deepEqual(calls, ['statistics', 'hook', 'cleanup', 'close']);
+});
+
+test('landed closeout updates Graphify after bookkeeping and before cleanup (TASK-2725)', async () => {
+  for (const throws of [false, true]) {
+    const effects: string[] = [];
+    await completeLandedCloseout({
+      slug: 'ordinary-fixture', landedCommit: 'landed', baseWorktree: '/repo/feature-base',
+      baseBranch: 'feature/base', variant: 'variant-b',
+      missionServices: { store: { load: async () => ({ kind: 'found', mission: { status: 'integration', closedAt: null } }) } },
+      landing: {
+        createAbort: () => new Error('unexpected abort'),
+        persistLandedIntegrationOrAbort: async () => { effects.push('persist'); },
+        recordPostIntegrationStatsOrAbort: async () => { effects.push('stats'); },
+        runPostIntegrateHookOrAbort: () => { effects.push('hook'); },
+        // Graphify's installed hooks launch detached work and skip linked worktrees.
+        // Their presence cannot prove this final-tree update already completed.
+        updateGraphifyRepository: rootDir => {
+          assert.equal(rootDir, '/repo/feature-base');
+          effects.push('graphify');
+          if (throws) { throw new Error('advisory update failed'); }
+        },
+        cleanupMissionWorktree: () => { effects.push('cleanup'); return true; },
+        closeLandedIntegrationOrAbort: async () => { effects.push('close'); },
+      },
+    });
+    assert.deepEqual(effects, ['persist', 'stats', 'hook', 'graphify', 'cleanup', 'close']);
+  }
 });

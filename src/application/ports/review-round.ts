@@ -303,7 +303,6 @@ export type PreReviewGateFacts =
 
 /** The mission worktree's pre-review Git and verification mechanisms. */
 export interface PreReviewPort {
-  refreshKnowledgeGraph(): Promise<void>;
   rebase(): Promise<PreReviewRebaseFacts>;
   runGate(): Promise<PreReviewGateFacts>;
   /** The primary-branch revision the reviewer compares against. */

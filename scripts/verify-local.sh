@@ -22,6 +22,12 @@ fi
 set -euo pipefail
 
 subcommand="${1:-}"
+# Suppress inherited coverage before even the runtime probe or build can emit
+# raw V8 reports. Integration retains its independently covered commands.
+case "$subcommand" in
+  ""|docs|static-analysis|integrate) ;;
+  *) export PARALLIX_TEST_COVERAGE=0; unset NODE_V8_COVERAGE NODE_OPTIONS ;;
+esac
 SCRIPT_DIR="$(cd -- "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DEFAULT_REPO_ROOT="$(cd -- "${SCRIPT_DIR}/.." && pwd)"
 # The caller may select a mission worktree explicitly. Do not silently verify
@@ -81,16 +87,16 @@ export PARALLIX_REAL_GIT
 export PATH="${SCRIPT_DIR}:$PATH"
 
 gate_all() {
-  node scripts/verify-docs.mjs
+  node scripts/verify-docs.mjs || return 1
   # Release-metadata tests verify the published bundle payload, including every
   # SQLite migration. Build it here so this declared gate never validates a
   # stale ignored build/ tree after a rebase or fresh checkout.
-  npm run build
+  npm run build || return 1
   # The complete unit population has a reviewed fast partition: stateless
   # allowlisted files share one worker and every other unit file remains
   # process-isolated. Keep the per-test headroom guard enabled while avoiding
   # redundant Node worker startup that otherwise exhausts the suite CPU cap.
-  PARALLIX_FAST_UNIT=1 npm test -- --unit-test-headroom
+  env -u NODE_V8_COVERAGE -u NODE_OPTIONS PARALLIX_TEST_COVERAGE=0 node --import tsx scripts/verify-active-units.ts
 }
 
 # Static-analysis gate: runs ESLint, tsc --checkJs, and test-hygiene sequentially

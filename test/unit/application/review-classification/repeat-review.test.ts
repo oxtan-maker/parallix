@@ -35,6 +35,7 @@ function scenario(mode: ReviewClassificationPorts['mode'] = 'enabled') {
       } } }) },
     evidence: { tree: async () => ['x.java'], source: async () => 'return output;\n',
       diff: async () => '+++ b/x.java\n@@ -1 +1 @@\n-return null;\n+return output;\n',
+      mainCommits: async () => [],
       missionInterdiff: async () => ({ diff: '-return null;\n+return output;\n', paths: ['x.java'] }) },
     telemetry: async () => ({ recordCall: async a => { attempts.push(a); }, 
       recordObservation: async o => { observations.push(o); }, calls: async () => attempts, observations: async () => observations }),
@@ -478,17 +479,18 @@ test('first review retains its immutable baseline without classifying while main
   assert.equal(s.attempts[0].reason, 'first-review');
 });
 
-test('a rebased gate repair retains archived cited-path packing instead of full interdiff (TASK-2716)', async () => {
+test('a rebased gate repair uses production mission interdiff (TASK-2716, TASK-2732)', async () => {
   const s = gateRepairScenario();
-  const seen: readonly string[][] = [];
-  s.classifier.evidence.diff = async (_prior, _candidate, paths) => {
-    (seen as string[][]).push([...paths]);
-    return '-return null;\n+return output;\n';
+  for (const round of s.store.mission().review!.rounds) {
+    (round.subject as { baseline?: string }).baseline = 'e'.repeat(40);
+  }
+  let calls = 0;
+  s.classifier.evidence.diff = async () => { assert.fail('plain range substitution'); };
+  s.classifier.evidence.missionInterdiff = async () => {
+    calls++; return { diff: '+repair', paths: ['x.java'] };
   };
-  s.classifier.evidence.missionInterdiff = async () => { assert.fail('full-delta substitution'); };
   assert.equal(await tryClassifyReview(s.context, s.round), 'APPROVED');
-  assert.ok(seen.length > 0);
-  assert.ok(seen.every(paths => JSON.stringify(paths) === JSON.stringify(['x.java'])));
+  assert.equal(calls, 1);
 });
 
 test('classifier failures persist a distinguishable cause (TASK-2704)', async () => {
@@ -680,4 +682,31 @@ test('invalid oversized returned model retains bounded whole-panel fallback tele
   assert.equal(s.attempts[0].panel!.members[1].failure, 'invalid-answer');
   assert.ok(Buffer.byteLength(JSON.stringify(s.attempts[0])) < 16384);
   assert.deepEqual(s.published, []);
+});
+
+test('no selectable excerpt has distinct zero-call preparation fallback (TASK-2732)', async () => {
+  const s = scenario();
+  s.classifier.evidence.tree = async () => [];
+  s.classifier.evidence.diff = async () => '';
+  assert.equal(await tryClassifyReview(s.context, s.round), null);
+  assert.equal(s.attempts[0].reason, 'evidence-preparation-fallback');
+  assert.equal(s.attempts[0].panel!.calls, 0);
+});
+
+test('panel question token pressure omits whole context before refusing re-review (TASK-2732)', async () => {
+  const s = scenario();
+  const measure = s.classifier.decision.requestBudget;
+  s.classifier.decision.requestBudget = request => ({
+    ...measure(request),
+    contextTokens: Object.keys((request.state as { candidateSourceExcerpts?: object }).candidateSourceExcerpts ?? {}).length > 0
+      && request.questions.resolution.instructions === PANEL_QUESTIONS.v3.instructions ? 30001 : 1,
+  });
+  const decide = s.classifier.decision.decide;
+  s.classifier.decision.decide = async request => {
+    assert.deepEqual((request.state as { candidateSourceExcerpts: object }).candidateSourceExcerpts, {});
+    assert.match(JSON.stringify(request.state), /complete candidate file omitted by token budget/);
+    return decide(request);
+  };
+  assert.equal(await tryClassifyReview(s.context, s.round), 'APPROVED');
+  assert.equal(s.attempts[0].panel!.calls, 3);
 });

@@ -23,7 +23,7 @@ export interface ActiveOptions extends Record<string, unknown> {
   payloadLandedFn?: (_slug: string) => boolean | Promise<boolean>;
 }
 export interface ActiveExecution extends Pick<ActiveOptions, 'controller' | 'controllerFactory' | 'service' | 'serviceFactory'> {
-  rootDir: string; renderProgress: (_event: Pick<ProgressEvent, 'phase' | 'agent'>) => void; operationId: string; slug: string; agent: string | null;
+  rootDir: string; renderProgress: (_event: Pick<ProgressEvent, 'phase' | 'agent'>) => void; operationId: string; slug: string; agent: string | null; reviewer: string | null;
 }
 export interface LaunchOptions {
   configuration?: ParallixConfiguration;

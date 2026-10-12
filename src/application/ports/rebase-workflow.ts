@@ -128,7 +128,7 @@ export interface RebaseWorkflowPort {
   applyAgentFallback(_options: Record<string, unknown>): Promise<unknown>;
 
   // --- forgejo adapter ---------------------------------------------------
-  createPr(_branch: string, _user: string, _token: string, _options: Record<string, unknown>): { ok: boolean; error?: string };
+  createPr(_branch: string, _user: string, _token: string, _options: Record<string, unknown>): { ok: boolean; error?: string; gateFailure?: Omit<PreReviewRebaseGateEvidence, 'exitCode'> & { exitCode: number | null } };
   readToken(_user: string): string | null;
   resolveForgejoUser(_user: string | null): string | null;
   fetchReviewBranch(..._args: unknown[]): unknown;

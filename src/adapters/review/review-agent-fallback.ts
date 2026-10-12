@@ -4,17 +4,15 @@ import type { ParallixConfiguration } from '../../application/ports/configuratio
  *
  * Owns agent identity repair after a launcher fallback for the rebase and
  * integrate workflows, stage-launch de-duplication, stage telemetry recording,
- * and the pre-review Graphify knowledge-graph refresh.
+ * and launch fallback handling.
  */
 
 import * as fmt from '../../application/presentation/cli-format.js';
-import { run } from '../git/git.js';
 import { enforceTaskAssignee } from '../backlog/backlog.js';
 import { ReviewState, readReviewState, writeReviewState, VALID_PHASES, persistReviewStateOrThrow } from './review-state.js';
 import type { MissionStore } from '../../application/domain-ports.js';
 import { resolveStageTelemetry } from '../agents/stage-telemetry.js';
 import * as statsModule from '../cli/commands/stats.js';
-import { updateGraphifyKnowledgeGraph } from '../filesystem/mission-utils.js';
 
 /** Lazily loaded stats module — loaded on first use to avoid circular dependency. */
 let _stats: any = null;
@@ -116,24 +114,6 @@ export async function recordStageStatsSafe(
   } catch (err: unknown) {
     log?.(fmt.status('WARN', `Could not record ${kind} stats for ${slug}: ${(err as Error).message}`));
   }
-}
-
-// ============================================================================
-// Pre-review Setup
-// ============================================================================
-
-export function maybeUpdateGraphifyBeforeReview(
-  rootDir: string,
-  { commandRunner = run, log = fmt.log.plain }: { commandRunner?: typeof run; log?: (_msg: string) => void } = {}
-): unknown {
-  // Lazy require to break circular dependency with core/mission-utils
-  return updateGraphifyKnowledgeGraph({
-    rootDir,
-    commandRunner,
-    log,
-    startMessage: 'Updating graphify knowledge graph...',
-    failureHint: 'Continuing without blocking review start.'
-  });
 }
 
 // ============================================================================

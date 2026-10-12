@@ -1,8 +1,8 @@
 ---
 id: TASK-2725
 title: Align parallix to Graphify's documented merge lifecycle
-status: backlog
-assignee: []
+status: done
+assignee: [codex]
 created_date: '2026-10-12 04:41'
 labels: []
 dependencies: []

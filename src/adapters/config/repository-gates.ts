@@ -375,15 +375,15 @@ export async function runPhaseGates(
       const verification = gate.reuse === 'clean-tree'
         ? await import('../verification/' + 'verification.js') : null;
       const proofContext = JSON.stringify({ phase, slug, checkoutPath: path.resolve(checkoutPath), gate: gate.key });
-      const reusable = gate.reuse === 'clean-tree'
-        ? verification!.readReusableVerificationProof(gate.command, checkoutPath, { context: proofContext }) : { ok: false };
+      const reusable: { ok: boolean; identity?: string; error?: string } = gate.reuse === 'clean-tree'
+        ? verification!.readReusableVerificationProof(gate.command, checkoutPath, { context: proofContext, configuration: opts.configuration }) : { ok: false, identity: undefined, error: 'reuse disabled' };
       if (reusable.ok) {
         const outcome = Promise.resolve({ key: gate.key, command: gate.command, exitCode: 0, stdout: 'reused exact clean-tree proof', stderr: '', durationMs: 0 });
         running.add(outcome);
         continue;
       }
-      const beforeProof = gate.reuse === 'clean-tree'
-        ? verification!.createVerificationProofIdentity(gate.command, checkoutPath, { context: proofContext }) : { ok: false };
+      // Reuse the freshly checked identity snapshot returned even on a cache miss.
+      const beforeProof = { ok: Boolean(reusable.identity), identity: reusable.identity, error: reusable.error };
       const run = Promise.resolve().then(() => runner(gate.command, [], { cwd: path.resolve(checkoutPath), env, stdio: 'pipe', signal: controller.signal,
         forwardOutput: liveSerial,
         onOutput: chunk => dashboard?.append(gate.key, chunk) }))
@@ -391,7 +391,7 @@ export async function runPhaseGates(
           const exitCode = typeof result.status === 'number' ? result.status : null;
           if (exitCode === 0 && gate.reuse === 'clean-tree') {
             const persisted = beforeProof.ok
-              ? verification!.writeReusableVerificationProof(gate.command, checkoutPath, { context: proofContext, expectedIdentity: beforeProof.identity })
+              ? verification!.writeReusableVerificationProof(gate.command, checkoutPath, { context: proofContext, configuration: opts.configuration, expectedIdentity: beforeProof.identity })
               : beforeProof;
             return { key: gate.key, command: gate.command, exitCode, stdout: String(result.stdout || ''), stderr: persisted.ok ? String(result.stderr || '') : `${String(result.stderr || '')}\nproof unavailable: ${persisted.error}`, durationMs: Date.now() - started };
           }

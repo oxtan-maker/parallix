@@ -1,0 +1,43 @@
+{
+  "date": "2026-10-10",
+  "reason": "Real Git post-rewrite installation, terminal-conflict completion and persisted cache carry-forward extend the existing owning contracts. CPU includes waited children.",
+  "measurement": "PARALLIX_TEST_CPU_PROFILE_DIR=<isolated directory> PARALLIX_INTEGRATION_TEST_CPU_BUDGET_MS=<finite profiling bound> [PARALLIX_TEST_COVERAGE=1] npm test -- --integration-ci test/integration/verification/verification-proof-reuse.test.ts test/integration/review/review-gate-ownership.test.ts",
+  "profiles": [
+    {
+      "profile": "plain",
+      "file": "integration/review/review-gate-ownership.test.ts",
+      "cases": 2,
+      "peakCase": "handoff, declared gates and pre-review share candidate verification and invalidate repairs (TASK-2715)",
+      "peakCpuMs": 623.819,
+      "budgetMs": 800,
+      "marginPercent": 28.2
+    },
+    {
+      "profile": "plain",
+      "file": "integration/verification/verification-proof-reuse.test.ts",
+      "cases": 21,
+      "peakCase": "terminal-resolved rebase continue has structured cache evidence (TASK-2715)",
+      "peakCpuMs": 546.202,
+      "budgetMs": 700,
+      "marginPercent": 28.2
+    },
+    {
+      "profile": "covered",
+      "file": "integration/review/review-gate-ownership.test.ts",
+      "cases": 2,
+      "peakCase": "handoff, declared gates and pre-review share candidate verification and invalidate repairs (TASK-2715)",
+      "peakCpuMs": 525.297,
+      "budgetMs": 700,
+      "marginPercent": 33.3
+    },
+    {
+      "profile": "covered",
+      "file": "integration/verification/verification-proof-reuse.test.ts",
+      "cases": 21,
+      "peakCase": "terminal-resolved rebase continue has structured cache evidence (TASK-2715)",
+      "peakCpuMs": 472.079,
+      "budgetMs": 600,
+      "marginPercent": 27.1
+    }
+  ]
+}

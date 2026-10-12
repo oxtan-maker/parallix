@@ -15,6 +15,14 @@ import {
 import { createSetupCommand, parseSetupCliRequest, renderSetupMode } from '../../../../src/interfaces/cli/setup.js';
 import { createVerifyCommand, parseVerifyCliRequest, renderVerifyStart } from '../../../../src/interfaces/cli/verify.js';
 
+test('verify forwards failed and interrupted gate statuses to the CLI exit port', () => {
+  const exits: number[] = [];
+  for (const status of [0, 7, null]) {
+    createVerifyCommand(() => ({ status }))(['all'], { exitFn: (code: number) => exits.push(code) });
+  }
+  assert.deepEqual(exits, [7, 1]);
+});
+
 test('CLI interface factories parse requests and delegate through injected workflow runners', async () => {
   const calls: Array<{ command: string; args: readonly string[] }> = [];
   await createActiveCommand(request => { calls.push({ command: 'active', args: request.args }); })(['task-2332.15', '--implementer', 'codex']);

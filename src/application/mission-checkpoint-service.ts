@@ -39,6 +39,8 @@ const REQUIRED_CAPABILITY: Capability = 'checkpoint:record';
 
 export interface RecordCheckpointRequest extends MissionCommandRequest {
   readonly checkpoint: CheckpointData;
+  /** Explicit operator override of a reported blocker; evidence checks still apply. */
+  readonly force?: boolean;
 }
 
 export interface RecordCheckpointResult {
@@ -194,8 +196,8 @@ export class MissionCheckpointService {
         if (stamped.goalCheck.some(row => !(mission.successCriteria ?? []).includes(row.criterion))) {
           return failure('validation', 'Repair evidence must name an exact recorded success criterion');
         }
-        if (prior.repair.blocker) { return failure('validation', 'Invalid locked contract awaits operator decision; evidence cannot clear a blocker'); }
-        merged = { ...merged, repair: { ...prior.repair, evidenceRecorded: true, verified: false } };
+        if (prior.repair.blocker && !request.force) { return failure('validation', 'Invalid locked contract awaits operator decision; an operator can re-record corrected evidence with --force'); }
+        merged = { ...merged, repair: { ...prior.repair, ...(request.force ? { blocker: undefined } : {}), evidenceRecorded: true, verified: false } };
       }
       updated = {
         ...mission,
@@ -227,7 +229,8 @@ export class MissionCheckpointService {
             mission.id,
             `checkpoint:${request.checkpoint.name}`,
             `${updated.checkpoints.find((checkpoint) => checkpoint.name === request.checkpoint.name)?.goalCheck.length ?? request.checkpoint.goalCheck.length} Goal Check row(s) recorded`
-            + `${replaced ? ' (retained earlier evidence, updated affected criteria)' : ''}`,
+            + `${replaced ? ' (retained earlier evidence, updated affected criteria)' : ''}`
+            + `${request.force ? ' (operator forced evidence replacement)' : ''}`,
           ),
         ],
       );

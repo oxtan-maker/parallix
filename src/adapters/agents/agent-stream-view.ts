@@ -7,6 +7,7 @@ import { DEFAULT_CONFIGURATION } from "../../application/ports/configuration.js"
 // written exclusively to a TTY sink.
 
 import { styleText } from 'node:util';
+import { SPINNER_FRAMES } from '../../application/presentation/progress-frames.js';
 import type { NormalizedEvent } from './agent-stream-events.js';
 
 type Format = Parameters<typeof styleText>[0];
@@ -24,7 +25,6 @@ export interface AgentStreamViewOptions {
   clearWidth?: number;
 }
 
-const SPINNER_FRAMES = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
 const DEFAULT_IDLE_MS = 2000;
 
 /**

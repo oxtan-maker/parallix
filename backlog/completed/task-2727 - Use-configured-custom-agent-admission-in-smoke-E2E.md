@@ -1,8 +1,8 @@
 ---
 id: TASK-2727
 title: Use configured custom-agent admission in smoke E2E
-status: backlog
-assignee: []
+status: done
+assignee: [codex]
 created_date: '2026-10-12 05:36'
 labels:
   - ai_sdlc

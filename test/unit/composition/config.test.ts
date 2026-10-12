@@ -54,3 +54,12 @@ test('normalizes decision settings (TASK-2668.05)', () => {
   assert.equal(decision.timeoutMs, '500');
   assert.equal(decision.apiKeys.TYPESAFE_API_KEY, 'k');
 });
+
+
+test('composes explicit shared admission separately from disposable operator storage (TASK-2727)', () => {
+  const config = resolveConfiguration({ PARALLIX_HOME: '/fixture/operator',
+    PARALLIX_CUSTOM_ADMISSION_HOME: '/shared/leases', PARALLIX_CUSTOM_ADMISSION_REPOSITORY: '/canonical/repo' });
+  assert.equal(config.storage.parallixHome, '/fixture/operator');
+  assert.equal(config.agents.customAdmissionHome, '/shared/leases');
+  assert.equal(config.agents.customAdmissionRepository, '/canonical/repo');
+});

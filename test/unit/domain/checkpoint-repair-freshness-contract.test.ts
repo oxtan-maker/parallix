@@ -119,7 +119,8 @@ function incidentFixture() {
   const store = inMemoryTransitionStore(mission);
   const repair = new RepairCheckpointService(store);
   const checkpoints = new MissionCheckpointService(store);
-  const record = async (name: string) => checkpoints.record({
+  const record = async (name: string, force = false) => checkpoints.record({
+    force,
     operationId: 'record', missionId: mission.id, expectedVersion: (await store.load()).version,
     capabilities: new Set(['checkpoint:record']), checkpoint: { missionId: mission.id, name,
       goalCheck: [{ criterion: 'first', evidence: 'npm test' }], nextActionText: 'handoff' },
@@ -189,4 +190,34 @@ test('changed locked gates cannot be certified by an unrelated green rerun (TASK
   await assert.rejects(repair.verify(mission.id, 'CP-2'), /unrelated success/);
   await assert.rejects(repair.open({ slug: mission.id, incidentId: 'incident', command: 'npm test', attempt: 2 }), /operator decision/);
   assert.equal(store.mission().checkpoints[1].repair?.verified, false);
+});
+
+
+test('forced evidence record clears reported blocker but still requires exact gate verification', async () => {
+  const { mission, store, repair, record } = incidentFixture();
+  await repair.open({ slug: mission.id, incidentId: 'incident', command: 'npm test', attempt: 1 });
+  const prior = structuredClone(store.mission().checkpoints[0]);
+  const blocker = { command: 'npm test', diagnostic: 'renamed reference', authorityReason: 'operator decision', proposedCorrection: 'correct reference' };
+  await repair.report({ operationId: 'report', missionId: mission.id, expectedVersion: (await store.load()).version,
+    capabilities: new Set(['checkpoint:record']), name: 'CP-2', blocker });
+  assert.equal((await record('CP-2')).status, 'failed');
+  const checkpoints = new MissionCheckpointService(store);
+  const forced = { operationId: 'force', missionId: mission.id, expectedVersion: (await store.load()).version,
+    capabilities: new Set(['checkpoint:record'] as const), force: true,
+    checkpoint: { missionId: mission.id, name: 'CP-2', nextActionText: 'handoff',
+      goalCheck: [{ criterion: 'first', evidence: '' }] } };
+  assert.equal((await checkpoints.record(forced)).status, 'failed', 'force cannot accept blank evidence');
+  assert.equal((await checkpoints.record({ ...forced, expectedVersion: missionVersion(forced.expectedVersion - 1),
+    checkpoint: { ...forced.checkpoint, goalCheck: [{ criterion: 'first', evidence: 'npm test' }] } })).status,
+    'failed', 'force cannot overwrite a stale version');
+  assert.deepEqual(await repair.readBlocker(mission.id, 'CP-2'), blocker);
+  assert.equal((await record('CP-2', true)).status, 'completed');
+  assert.equal(await repair.readBlocker(mission.id, 'CP-2'), undefined);
+  assert.deepEqual(store.mission().checkpoints[0], prior);
+  const repaired = store.mission().checkpoints[1];
+  assert.equal(repaired.repair?.evidenceRecorded, true);
+  assert.equal(repaired.repair?.verified, false);
+  assert.equal(repaired.repair?.command, 'npm test');
+  await repair.verify(mission.id, 'CP-2');
+  assert.equal(store.mission().checkpoints[1].repair?.verified, true);
 });

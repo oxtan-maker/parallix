@@ -1,5 +1,5 @@
 // Historical regression provenance: TASK-2322.12.
-// TASK-2322.12 CP 5 (SC7) — end-to-end recovery for review-loop state.
+// TASK-2322.12 CP 5 (SC7) — SQLite-backed restart recovery for review-loop state.
 //
 // Review round, phase, disposition, retry counters and stage-launch windows
 // moved onto the Review aggregate, which makes the operator database the only

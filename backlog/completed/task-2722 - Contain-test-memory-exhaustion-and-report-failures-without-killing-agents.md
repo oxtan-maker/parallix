@@ -1,8 +1,8 @@
 ---
 id: TASK-2722
 title: Contain test memory exhaustion and report failures without killing agents
-status: backlog
-assignee: []
+status: done
+assignee: [claude]
 created_date: '2026-10-12 03:30'
 labels:
   - bug

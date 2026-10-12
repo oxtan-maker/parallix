@@ -1,10 +1,11 @@
 import crypto from 'node:crypto';
+import type { CustomAgentLeaseRepository } from '../../application/ports/custom-agent-admission.js';
 import type { SqliteDatabaseAdapter } from './database-adapter.js';
 import { isSameLiveProcess } from '../process/process-liveness.js';
 
 type LeaseRow = { lease_id: string; capacity: number | null; launcher_pid: number; launcher_start_id: string | null; child_pid: number | null; child_start_id: string | null };
 
-export class SqliteCustomAgentLeaseRepository {
+export class SqliteCustomAgentLeaseRepository implements CustomAgentLeaseRepository {
   constructor(private readonly _db: SqliteDatabaseAdapter) {}
 
   async acquire(repositoryRoot: string, capacity: number, launcher: {pid: number; startId: string | null}): Promise<string | null> {

@@ -27,12 +27,12 @@ Verification tools belong to the developed repository. Parallix must not impose 
 
 ## Decision
 
-Keep the CPU-usage guards and direct verification. The local pre-integration unit gate runs a reviewed hybrid: allowlisted stateless files share a process, while other files retain per-file isolation and bounded concurrency. New files default to isolation. The ordinary `npm test` path remains fully isolated. Do not adopt the tested Nx configuration: its useful warm hits require unchanged inputs, while source changes invalidate the whole covered unit target. The trial wiring was removed. TASK-2622.18 rejects the evaluated per-file and grouped Nx layouts: after release-input normalization and small dependency cuts, ten ordinary-development candidates used 4,783 CPU seconds grouped versus 4,423 direct (+8.1%); parent preparation cost another 4,444 seconds separately.
+Keep the CPU-usage guards and direct verification: active/review runs full units once per compatible clean candidate without coverage; integration retains covered units, merged coverage and Sonar. The local pre-integration unit gate runs a reviewed hybrid: allowlisted stateless files share a process, while other files retain per-file isolation and bounded concurrency. New files default to isolation. The ordinary `npm test` path remains fully isolated. Do not adopt the tested Nx configuration: its useful warm hits require unchanged inputs, while source changes invalidate the whole covered unit target. The trial wiring was removed. TASK-2622.18 rejects the evaluated per-file and grouped Nx layouts: after release-input normalization and small dependency cuts, ten ordinary-development candidates used 4,783 CPU seconds grouped versus 4,423 direct (+8.1%); parent preparation cost another 4,444 seconds separately.
 Coverage attribution remains unresolved; retain direct verification. Detailed results, limitations and raw-artifact references are recorded in `px status task-2622.18 --json` checkpoints.
 
 Preserve test frameworks, source layout, product runtimes, and verification obligations. No product cache/scheduler, shipped Nx dependency, Cloud service, or remote worker in this experiment.
 
-Nx task reuse requires matching complete inputs and restored artifacts. It cannot restore another mission's approval or exact-commit proof: the existing workflow still certifies the current clean candidate. Dirty snapshots cannot reuse/publish evidence. Live checks and mandatory side effects remain fresh.
+Nx task reuse requires matching complete inputs and restored artifacts. It cannot restore another mission's approval: active/review reuse remains scoped to its clean mission checkout and compatible inputs, with bookkeeping and completed rebases preserving proof. Dirty snapshots cannot reuse/publish evidence. Live checks and mandatory side effects remain fresh.
 
 ### Performance and liveness are separate contracts
 

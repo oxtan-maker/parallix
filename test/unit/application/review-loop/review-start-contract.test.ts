@@ -53,7 +53,6 @@ test('dry-run never self-heals or launches destination work (TASK-1303, TASK-264
     },
     handoff: { handoff: async () => { assert.fail('dry-run must not hand off'); } },
     preReview: {
-      refreshKnowledgeGraph: async () => { assert.fail('dry-run must not refresh the graph'); },
       rebase: async () => { assert.fail('dry-run must not rebase'); },
       runGate: async () => { assert.fail('dry-run must not run gates'); },
     },
@@ -66,7 +65,7 @@ test('dry-run never self-heals or launches destination work (TASK-1303, TASK-264
   assert.match(fake.logs.join('\n'), /DRY-RUN/);
 });
 
-test('refreshes Graphify once after final review preparation and immediately before reviewer launch (TASK-2654)', async () => {
+test('review preparation launches without a lifecycle Graphify refresh (TASK-2725)', async () => {
   const calls: string[] = [];
   const fake = fakeReviewLoopPorts({
     slug,
@@ -74,7 +73,6 @@ test('refreshes Graphify once after final review preparation and immediately bef
     preReview: {
       rebase: async () => { calls.push('rebase'); return { ok: true }; },
       runGate: async () => { calls.push('gate'); return { ok: true }; },
-      refreshKnowledgeGraph: async () => { calls.push('refresh'); },
     },
     agents: { launch: async launch => { calls.push(`launch:${launch.role}`); return { agent: launch.agent }; } },
     artifacts: { consumeReviewer: async () => ({ consumed: true, ok: true, reviewState: 'APPROVED' }) },
@@ -82,8 +80,7 @@ test('refreshes Graphify once after final review preparation and immediately bef
 
   await runReviewLoop({ slug, implementer: 'claude', reviewer: 'codex' }, fake.ports);
 
-  assert.deepEqual(calls, ['rebase', 'gate', 'refresh', 'launch:reviewer']);
-  assert.equal(calls.filter(call => call === 'refresh').length, 1);
+  assert.deepEqual(calls, ['rebase', 'gate', 'launch:reviewer']);
 });
 
 

@@ -4,7 +4,7 @@
  * The flag is dropped from the command, its help, and its call path, while the
  * optimistic-concurrency guard still runs: the version is discovered from stored
  * mission state and written back through the store's own guard. This test pins
- * that behaviour end to end against a real SQLite operator database, the same
+ * that persistence behaviour against a real SQLite operator database, the same
  * production command graph `px status` reads from.
  */
 

@@ -11,6 +11,8 @@ import { resolveConfiguration } from '../../../src/composition/config.js';
 import { createIntegratePorts } from '../../../src/adapters/cli/commands/integrate.js';
 import { runReviewLoop } from '../../../src/application/review-loop/review-loop.js';
 import { fakeReviewLoopPorts } from '../../helpers/review-loop-ports.js';
+import { createRebaseCommand } from '../../../src/interfaces/cli/rebase.js';
+import { rebase } from '../../../src/adapters/cli/commands/rebase.js';
 import { createReviewLoopPorts } from '../../../src/adapters/review/review-loop.js';
 
 /** Disposable repo with a shared-file conflict, a codex-assigned task and a fake implementer that resolves it. */
@@ -64,17 +66,53 @@ describe("pre-review rebase launcher configuration", () => {
       const logs: string[] = [];
       const ports = createReviewLoopPorts('task-lcfg-iso', { worktree: repo, verbose: true }, {
         configuration, log: line => logs.push(line), error: line => logs.push(line), exit: () => {},
+        rebaseWorkflowOptions: {
+          readTokenFn: () => 'fixture-token',
+          resolveForgejoUserFn: () => 'fixture-user',
+          createPrFn: () => ({ ok: false, error: 'controlled publication rejection (TASK-2717)' }),
+        },
       });
-      await ports.preReview.rebase();
+      const result = await ports.preReview.rebase();
 
       assert.equal(fs.existsSync(launches), true, `implementer was never launched: ${logs.join(' | ')}`);
       assert.equal(git('status', '--porcelain', '--untracked-files=no').stdout.trim(), '', 'rebase must leave a clean tree');
       assert.equal(fs.existsSync(path.join(repo, '.git', 'rebase-merge')), false, 'rebase must be finished');
       assert.equal(fs.readFileSync(path.join(repo, 'shared.txt'), 'utf8'), 'resolved\n');
-      // Publication needs a provider this disposable repository does not have; a conflict failure would not.
+      assert.equal(result.ok, false, 'publication rejection must stop review');
+      assert.match(result.diagnostic ?? '', /controlled publication rejection/, 'actual publication cause must survive');
+      assert.equal(result.gate, undefined, 'publication is not a verification gate failure');
+      // The completed rebase must not leave historical conflict diagnostics on publication failure.
       assert.equal(logs.some(line => /Shared-file rebase conflicts detected/.test(line)), false, logs.join(' | '));
     } finally {
       if (priorHome === undefined) { delete process.env.PARALLIX_HOME; } else { process.env.PARALLIX_HOME = priorHome; }
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  test('resolved rebase reports missing publication credentials instead of historical conflicts (TASK-2717)', async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'px-launcher-token-'));
+    try {
+      const { repo, binDir, git } = conflictRepo(root);
+      const configuration = resolveConfiguration({ PATH: `${binDir}:${process.env.PATH}`, PARALLIX_HOME: path.join(root, 'home') });
+      const logs: string[] = [];
+      let publications = 0;
+      const ports = createReviewLoopPorts('task-lcfg-iso', { worktree: repo }, {
+        configuration, log: line => logs.push(line), error: line => logs.push(line), exit: () => {},
+        rebaseWorkflowOptions: {
+          readTokenFn: () => null,
+          resolveForgejoUserFn: () => 'fixture-user',
+          createPrFn: () => { publications += 1; throw new Error('publication without credentials'); },
+        },
+      });
+      const result = await ports.preReview.rebase();
+      assert.equal(result.ok, false);
+      assert.match(result.diagnostic ?? '', /No Forgejo token found for user "fixture-user"/);
+      assert.equal(result.gate, undefined);
+      assert.equal(publications, 0);
+      assert.equal(git('status', '--porcelain', '--untracked-files=no').stdout.trim(), '');
+      assert.equal(fs.existsSync(path.join(repo, '.git', 'rebase-merge')), false);
+      assert.equal(logs.some(line => /Shared-file rebase conflicts detected/.test(line)), false, logs.join(' | '));
+    } finally {
       fs.rmSync(root, { recursive: true, force: true });
     }
   });
@@ -89,6 +127,7 @@ describe("pre-review rebase launcher configuration", () => {
       const configuration = resolveConfiguration({ PATH: `${binDir}:${process.env.PATH}`, PARALLIX_TEST_NO_FORGEJO: '1', FORGEJO_URL: 'http://127.0.0.1:1', PARALLIX_HOME: path.join(root, 'home') });
       const real = createReviewLoopPorts('task-lcfg-iso', { worktree: repo, verbose: true }, {
         configuration, log: () => {}, error: () => {}, exit: () => {},
+        rebaseWorkflowOptions: { readTokenFn: () => 'fixture-token', resolveForgejoUserFn: () => 'fixture-user', createPrFn: () => ({ ok: true }) },
       });
       const note = (event: string) => fs.appendFileSync(order, `${event}\n`);
       const fake = fakeReviewLoopPorts({
@@ -96,8 +135,8 @@ describe("pre-review rebase launcher configuration", () => {
         worktree: repo,
         routing: { eligibleFamilies: () => ['codex', 'claude'] },
         preReview: {
-          // Real composed rebase (publication is not reachable here) and real verification gate.
-          rebase: async () => { await real.preReview.rebase(); note(fs.existsSync(launches) ? 'rebase-with-implementer' : 'rebase-without-implementer'); return { ok: true }; },
+          // Real composed rebase with controlled publication and real verification gate.
+          rebase: async () => { assert.equal((await real.preReview.rebase()).ok, true); note(fs.existsSync(launches) ? 'rebase-with-implementer' : 'rebase-without-implementer'); return { ok: true }; },
           runGate: real.preReview.runGate,
         },
         agents: { launch: async launch => { note(`launch:${launch.role}`); return { agent: launch.agent, result: { status: 0 } }; } },
@@ -113,6 +152,25 @@ describe("pre-review rebase launcher configuration", () => {
       if (priorHome === undefined) { delete process.env.PARALLIX_HOME; } else { process.env.PARALLIX_HOME = priorHome; }
       fs.rmSync(root, { recursive: true, force: true });
     }
+  });
+
+  test('public rebase CLI preserves publication failure after resolved conflicts (TASK-2717)', async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'px-launcher-cli-'));
+    try {
+      const { repo, binDir, git } = conflictRepo(root);
+      const configuration = resolveConfiguration({ PATH: `${binDir}:${process.env.PATH}`, PARALLIX_HOME: path.join(root, 'home') });
+      const exits: number[] = [];
+      const command = createRebaseCommand((args, options) => rebase(args, {
+        ...options, resolveWorktreeFn: () => repo,
+        readTokenFn: () => 'fixture-token', resolveForgejoUserFn: () => 'fixture-user',
+        createPrFn: () => ({ ok: false, error: 'controlled CLI publication rejection (TASK-2717)' }),
+      }));
+      const code = await command(['task-lcfg-iso', '--push'], { configuration, exitFn: (value: number) => { exits.push(value); } });
+      assert.equal(code, 1, 'public CLI must not overwrite publication failure with success');
+      assert.deepEqual(exits, [1]);
+      assert.equal(fs.existsSync(path.join(repo, '.git', 'rebase-merge')), false);
+      assert.equal(git('status', '--porcelain', '--untracked-files=no').stdout.trim(), '');
+    } finally { fs.rmSync(root, { recursive: true, force: true }); }
   });
 
   test('integration rebase port discovers the implementer through the composed configuration (TASK-2709)', () => {

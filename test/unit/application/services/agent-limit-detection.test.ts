@@ -390,6 +390,26 @@ describe('Limit-hit detection', () => {
     assert.ok(result.reason.includes('SIGINT'));
   });
 
+  test('detectLimitHit does not block on a bare SIGTERM (TASK-2729)', () => {
+    for (const agent of ['claude', 'codex', 'custom', 'mistral']) {
+      assert.equal(detectLimitHit({ agent, stdout: '', stderr: '', status: null, signal: 'SIGTERM', error: null }), null);
+    }
+  });
+
+  test('detectLimitHit keeps genuine quota blocking when SIGTERM accompanies a limit message (TASK-2729)', () => {
+    const result = detectLimitHit({
+      agent: 'claude',
+      stdout: 'Claude usage limit reached',
+      stderr: '',
+      status: null,
+      signal: 'SIGTERM',
+      error: null
+    });
+
+    assert.ok(result);
+    assert.notEqual(result.source, 'sigint');
+  });
+
   test('detectLimitHit returns reason field alongside until and source for limit-hit patterns', () => {
     const result = detectLimitHit({
       agent: 'claude',

@@ -50,7 +50,7 @@ async function active(args: string[], options: ActiveOptions = {}) {
   const explicitSlug = args[0];
   const slug = inferSlugFn(explicitSlug);
   if (!slug) {
-    errorFn('Usage: px active [<slug>] [--implementer <family>]');
+    errorFn('Usage: px active [<slug>] [--implementer <family>] [--reviewer <family>]');
     exitFn(1);
     return;
   }
@@ -91,22 +91,26 @@ async function active(args: string[], options: ActiveOptions = {}) {
   }
   const preselectedImplementer = flagValue(args, '--implementer', 'implementer');
   if (args.includes('--implementer') && !preselectedImplementer) {return;}
+  // The explicit reviewer is handed to automatic review selection unchanged; an
+  // unavailable or blocked family is refused there, never replaced.
+  const requestedReviewer = flagValue(args, '--reviewer', 'reviewer');
+  if (args.includes('--reviewer') && !requestedReviewer) {return;}
 
   const renderProgress = (event: Pick<ProgressEvent, 'phase' | 'agent'>) => renderActiveProgress(event, logFn);
   const operationId = `active:${normalizedSlug}:${randomUUID()}`;
-  const outcome = await executeActiveCommand({ controller, controllerFactory, service, serviceFactory, rootDir, renderProgress, operationId, slug: normalizedSlug, agent: preselectedImplementer });
+  const outcome = await executeActiveCommand({ controller, controllerFactory, service, serviceFactory, rootDir, renderProgress, operationId, slug: normalizedSlug, agent: preselectedImplementer, reviewer: requestedReviewer });
   if (outcome.status !== 'completed' || !outcome.value) {
     reportActiveFailure(outcome, normalizedSlug, errorFn, exitFn);
     return;
   }
 }
 
-async function executeActiveCommand({ controller, controllerFactory, service, serviceFactory, rootDir, renderProgress, operationId, slug, agent }: ActiveExecution) {
+async function executeActiveCommand({ controller, controllerFactory, service, serviceFactory, rootDir, renderProgress, operationId, slug, agent, reviewer }: ActiveExecution) {
   const dispatcher = controller || (typeof controllerFactory === 'function' ? await controllerFactory(rootDir, renderProgress) : null);
-  if (dispatcher) { return dispatcher.dispatch({ kind: 'active:execute', missionId: slug, operationId, agent, capabilities: new Set(['active:execute']), detached: false }); }
+  if (dispatcher) { return dispatcher.dispatch({ kind: 'active:execute', missionId: slug, operationId, agent, reviewer, capabilities: new Set(['active:execute']), detached: false }); }
   const executeService = service || (typeof serviceFactory === 'function' ? await serviceFactory(rootDir, renderProgress) : null);
   if (!executeService) { throw new Error('active command requires an injected execute-mission service'); }
-  return executeService.execute({ operationId, slug, agent, capabilities: new Set(['active:execute']) });
+  return executeService.execute({ operationId, slug, agent, reviewer: reviewer ?? undefined, capabilities: new Set(['active:execute']) });
 }
 
 function reportActiveFailure(outcome: ApplicationOutcome<unknown>, slug: string, errorFn: Log, exitFn: Exit) {

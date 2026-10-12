@@ -1,7 +1,7 @@
 // task-2285 — pack-and-install smoke for the canonical ESM bundle distribution.
 //
 // Builds the real tarball and installs it into two disposable prefixes (global
-// layout and local layout), then exercises the published CLI end to end. This is
+// layout and local layout), then exercises the installed CLI process boundary. This is
 // an integration test: it crosses the process and packaging boundary on purpose.
 //
 // It is the falsifiable evidence for SC3 (install-and-run), SC4 (no runtime

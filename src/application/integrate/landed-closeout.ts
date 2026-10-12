@@ -4,7 +4,7 @@ import type { IntegrateLandingPort } from '../ports/integrate-workflow.js';
 
 type CloseoutPort = Pick<IntegrateLandingPort,
   'createAbort' | 'persistLandedIntegrationOrAbort' | 'recordPostIntegrationStatsOrAbort'
-  | 'cleanupMissionWorktree' | 'runPostIntegrateHookOrAbort' | 'closeLandedIntegrationOrAbort'>;
+  | 'updateGraphifyRepository' | 'cleanupMissionWorktree' | 'runPostIntegrateHookOrAbort' | 'closeLandedIntegrationOrAbort'>;
 
 /** Finish a commit already landed on the base branch, for both normal and resumed runs. */
 export async function completeLandedCloseout(options: {
@@ -41,6 +41,14 @@ export async function completeLandedCloseout(options: {
   // removes delivery artifacts, while an integration that has already landed
   // must still refresh the CLI even if those artifacts cannot be removed.
   await landing.runPostIntegrateHookOrAbort(slug, { baseWorktree, baseBranch, variant });
+  // Installed Graphify hooks are detached and skip linked worktrees; neither
+  // establishes completion against this final landed tree. No hook-presence
+  // heuristic can safely suppress the documented post-merge operation.
+  try {
+    await landing.updateGraphifyRepository(baseWorktree);
+  } catch (error: unknown) {
+    fmt.log.warn(`Graphify update could not complete: ${error instanceof Error ? error.message : String(error)}. Continuing closeout.`);
+  }
   const cleanup = () => {
     if (!landing.cleanupMissionWorktree(slug)) {
       fmt.log.fail(`Mission worktree cleanup failed for ${slug}.`);

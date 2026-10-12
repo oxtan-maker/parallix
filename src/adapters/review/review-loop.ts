@@ -40,7 +40,7 @@ import { resolvePollIntervalMs, resolvePollTimeoutMs, pollForReview, pollForDisp
 import { buildMetadataFooter, resolveArtifactDir, consumeReviewerArtifacts, consumeImplementerArtifacts } from './review-artifacts.js';
 import { pushReviewRef, isStaleInfoPushRejection, fetchReviewBranch } from '../forgejo/forgejo.js';
 import { CONTINUE_SKIP_CHECK_TIMEOUT_MS, runPreReviewGate, gateFailureReason, hookFailureReason } from './review-gate-handling.js';
-import { persistNormalizedPhaseRepair, recordStageStatsSafe, stageLaunchSinceMs, maybeUpdateGraphifyBeforeReview } from './review-agent-fallback.js';
+import { persistNormalizedPhaseRepair, recordStageStatsSafe, stageLaunchSinceMs } from './review-agent-fallback.js';
 import { openReviewRound } from './review-round-open.js';
 import { createEvent, VALID_EVENT_TYPES } from './review-events.js';
 import { RevokeReviewDecisionUseCase } from '../../application/revoke-review-decision-use-case.js';
@@ -53,6 +53,7 @@ const MODULE_DIR = path.dirname(fileURLToPath(import.meta.url));
 /** The production review authority a composition root binds for one loop. */
 export interface ReviewLoopBindings {
   readonly configuration?: ParallixConfiguration;
+  readonly rebaseWorkflowOptions?: Pick<import('../rebase/rebase-workflow-adapter.js').RebaseCommandOptions, 'createPrFn' | 'readTokenFn' | 'resolveForgejoUserFn'>;
   readonly classification?: import('../../application/ports/review-classification.js').ReviewClassificationPorts;
   readonly readReviewState?: (_slug: string, _worktree?: string, _store?: MissionStore | null) => Promise<ReviewState | null> | ReviewState | null;
   readonly writeReviewState?: typeof writeReviewState;
@@ -241,6 +242,14 @@ function agentPort(slug: string, branch: string, worktree: string, missionPath: 
   };
 }
 
+function rebaseDiagnostic(result: Awaited<ReturnType<typeof rebaseBeforeReviewRound>>): string {
+  if (result.hookOutput) { return result.hookOutput; }
+  const failure = result.failure;
+  if (failure?.kind === 'other') { return failure.output; }
+  if (failure?.kind === 'conflict') { return `Unresolved shared-file rebase conflicts: ${failure.sharedFiles.join(', ')}`; }
+  return '';
+}
+
 /** Map the pre-review rebase result onto the facts the review loop interprets. */
 export function preReviewRebaseFacts(result: Awaited<ReturnType<typeof rebaseBeforeReviewRound>>): PreReviewRebaseFacts {
   if (result.ok) { return { ok: true }; }
@@ -257,7 +266,7 @@ export function preReviewRebaseFacts(result: Awaited<ReturnType<typeof rebaseBef
     : undefined;
   return {
     ok: false, gate, hook,
-    diagnostic: result.hookOutput || '',
+    diagnostic: rebaseDiagnostic(result),
     verifyReason: failure?.kind === 'hook' ? hookFailureReason(failure.hook.output, `git ${failure.operation}`) : undefined,
   };
 }
@@ -420,10 +429,10 @@ export function createReviewLoopPorts(slug: string, target: ReviewLoopTarget, bi
       consumeImplementer: async (implementer, state) => await (bindings.consumeImplementerArtifacts ?? consumeImplementerArtifacts)(slug, implementer, artifactOptions(state) as never) as never,
     },
     preReview: {
-      refreshKnowledgeGraph: async () => { await maybeUpdateGraphifyBeforeReview(worktree, { commandRunner: run, log }); },
       rebase: async () => preReviewRebaseFacts(await rebaseBeforeReviewRound(slug, {
         worktree, log, error, verbose, taskFile: task.taskFile, gitFn: git, isReviewProviderEnabledFn: isProviderEnabled,
         rebaseWorkflowOptions: {
+          ...bindings.rebaseWorkflowOptions,
           configuration: bindings.configuration,
           ...(missionStore ? { missionServicesFn: async () => ({ store: missionStore, lifecycle: lifecycleService }) } : {}),
         } as never,

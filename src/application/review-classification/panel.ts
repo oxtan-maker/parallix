@@ -1,8 +1,27 @@
-import type { DecisionAnswer, DecisionData, DecisionPort, DecisionRequest, DecisionResult } from '../ports/decision.js';
+import type { DecisionAnswer, DecisionData, DecisionPort, DecisionRequest, DecisionRequestBudget, DecisionResult } from '../ports/decision.js';
 import { EvidenceOverBudgetError } from '../ports/review-evidence.js';
 import { PANEL_POLICY_VERSION } from '../../domain/classifier-review.js';
 import { PANEL_QUESTIONS, PANEL_PROMPT_VERSION, type PanelQuestionId } from './panel-questions.js';
 import type { ClassificationRoute } from './routing-policy.js';
+
+const INPUT_LIMIT = 32000;
+const CONTEXT_LIMIT = 30000;
+
+/** Packing must fit every frozen question before optional context is retained. */
+export function panelRequestBudget(request: DecisionRequest, port: Pick<DecisionPort, 'requestBudget'>): DecisionRequestBudget {
+  const budgets = Object.values(PANEL_QUESTIONS).map(question => port.requestBudget({
+    ...request, questions: { resolution: question },
+  }));
+  return {
+    requestBytes: Math.max(...budgets.map(b => b.requestBytes)),
+    inputTokens: Math.max(...budgets.map(b => b.inputTokens)),
+    contextTokens: Math.max(...budgets.map(b => b.contextTokens)),
+    maxRequestBytes: Math.min(...budgets.map(b => b.maxRequestBytes)),
+    maxInputTokens: Math.min(INPUT_LIMIT, ...budgets.map(b => b.maxInputTokens)),
+    maxContextTokens: Math.min(CONTEXT_LIMIT, ...budgets.map(b => b.maxContextTokens)),
+    tokenizerModel: budgets[0].tokenizerModel,
+  };
+}
 
 export interface PanelMember {
   readonly question: PanelQuestionId;
@@ -76,8 +95,8 @@ export async function runPanel(state: DecisionData, port: DecisionPort, route: {
   for (const { request } of requests) {
     const b = port.requestBudget(request);
     if (![b.requestBytes, b.inputTokens, b.contextTokens, b.maxRequestBytes, b.maxInputTokens, b.maxContextTokens].every(n => Number.isFinite(n) && n >= 0)
-      || !b.tokenizerModel || b.requestBytes > b.maxRequestBytes || b.inputTokens > Math.min(32000, b.maxInputTokens)
-      || b.contextTokens > Math.min(30000, b.maxContextTokens)) { throw new EvidenceOverBudgetError('Panel request exceeds frozen admission limits'); }
+      || !b.tokenizerModel || b.requestBytes > b.maxRequestBytes || b.inputTokens > Math.min(INPUT_LIMIT, b.maxInputTokens)
+      || b.contextTokens > Math.min(CONTEXT_LIMIT, b.maxContextTokens)) { throw new EvidenceOverBudgetError('Panel request exceeds frozen admission limits'); }
   }
   const members = await Promise.all(requests.map(async ({ question, request }): Promise<PanelMember> => {
     const base = { question, questionHash: hash(JSON.stringify(request.questions.resolution)), provider: route.provider, configuredModel: route.model };

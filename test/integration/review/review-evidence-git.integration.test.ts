@@ -49,3 +49,49 @@ test('archived cited-path diff uses nine-character blob identities and pinned so
     assert.equal(await evidence.source(after, 'cited.ts'), 'fixed\n');
   } finally { rmSync(repo, { recursive: true, force: true }); }
 });
+
+test('mission interdiff attributes spaced paths without preceding-file leakage (TASK-2732)', async () => {
+  const repo = mkdtempSync(join(tmpdir(), 'px-space-evidence-'));
+  try {
+    const git = (...args: string[]) => execFileSync('git', ['-C', repo, '-c', 'user.name=t', '-c', 'user.email=t@t', ...args], { encoding: 'utf8' }).trim();
+    git('init', '-q');
+    writeFileSync(join(repo, 'a.ts'), 'old\n'); writeFileSync(join(repo, 'task with spaces.md'), 'old\n');
+    git('add', '-A'); git('commit', '-qm', 'base'); const base = git('rev-parse', 'HEAD');
+    writeFileSync(join(repo, 'a.ts'), 'mission\n'); writeFileSync(join(repo, 'task with spaces.md'), 'mission\n');
+    git('add', '-A'); git('commit', '-qm', 'prior'); const prior = git('rev-parse', 'HEAD');
+    writeFileSync(join(repo, 'task with spaces.md'), 'repaired\n');
+    git('add', '-A'); git('commit', '-qm', 'repair'); const candidate = git('rev-parse', 'HEAD');
+    const result = await new GitReviewEvidence(repo).missionInterdiff({ baseline: base, revision: prior }, { baseline: base, revision: candidate });
+    assert.deepEqual(result.paths, ['task with spaces.md']);
+    assert.match(result.diff, /task with spaces.md\t\+repaired/);
+  } finally { rmSync(repo, { recursive: true, force: true }); }
+});
+
+test('rebased main fix is retained as failure-path provenance (TASK-2732)', async () => {
+  const repo = mkdtempSync(join(tmpdir(), 'px-main-fix-evidence-'));
+  try {
+    const git = (...args: string[]) => execFileSync('git', ['-C', repo, '-c', 'user.name=t', '-c', 'user.email=t@t', ...args], { encoding: 'utf8' }).trim();
+    git('init', '-q', '-b', 'main');
+    writeFileSync(join(repo, 'failure.ts'), 'broken\n'); writeFileSync(join(repo, 'mission.ts'), 'base\n');
+    git('add', '-A'); git('commit', '-qm', 'base'); const base = git('rev-parse', 'HEAD');
+    git('checkout', '-qb', 'mission');
+    writeFileSync(join(repo, 'mission.ts'), 'mission\n'); git('add', '-A'); git('commit', '-qm', 'prior'); const prior = git('rev-parse', 'HEAD');
+    git('checkout', '-q', 'main');
+    writeFileSync(join(repo, 'failure.ts'), 'fixed-by-main\n'); git('add', '-A'); git('commit', '-qm', 'main fix'); const main = git('rev-parse', 'HEAD');
+    git('checkout', '-q', 'mission'); git('rebase', '-q', 'main'); const candidate = git('rev-parse', 'HEAD');
+    const evidence = new GitReviewEvidence(repo);
+    const { buildArchivedEvidencePacket } = await import('../../../src/application/review-classification/archived-packing.js');
+    const packet = await buildArchivedEvidencePacket({
+      priorRevision: prior, candidateRevision: candidate,
+      missionRange: { approved: { baseline: base, revision: prior }, candidate: { baseline: main, revision: candidate } },
+      findings: [{ id: 'F1', summary: 'failure.ts remains broken', location: 'failure.ts:1' }],
+      priorReviewComment: 'Fix failure.ts', implementerResponse: 'Main fixed it',
+    }, evidence, () => ({ requestBytes: 1, maxRequestBytes: 1, inputTokens: 1, maxInputTokens: 1, contextTokens: 1, maxContextTokens: 1, tokenizerModel: 'stub' }));
+    const state = packet.request.state as { diff: string; mainCommits: { revision: string; paths: string[]; diff: string }[] };
+    assert.doesNotMatch(state.diff, /fixed-by-main/);
+    assert.equal(state.mainCommits.length, 1);
+    assert.equal(state.mainCommits[0].revision, main);
+    assert.deepEqual(state.mainCommits[0].paths, ['failure.ts']);
+    assert.match(state.mainCommits[0].diff, /fixed-by-main/);
+  } finally { rmSync(repo, { recursive: true, force: true }); }
+});

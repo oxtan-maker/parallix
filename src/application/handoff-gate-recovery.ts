@@ -35,7 +35,7 @@ export class HandoffGateRecovery {
   /** Run the final repository verification; null means handoff may continue. */
   async verifyRepository(slug: string, context: GateStageContext & {
     skipGate: boolean;
-    area: string | null;
+    area: string;
     runVerificationGateFn: NonNullable<PerformHandoffOptions['runVerificationGateFn']>;
   }): Promise<HandoffResult | null> {
     const ports = this.ports;
@@ -43,16 +43,16 @@ export class HandoffGateRecovery {
     if (skipGate) {
       log(fmt.status('WARN', 'Repository verification skipped (--no-gate).'));
     } else {
-      const verificationCommand = ports.verification.formatVerificationCommand(area || 'docs', rootDir);
+      const verificationCommand = ports.verification.formatVerificationCommand(area, rootDir);
       const reusableProof = ports.verification.readReusableVerificationProof(verificationCommand, rootDir);
       if (reusableProof.ok) {
-        log(fmt.status('PASS', 'Repository verification passed by reuse of an exact clean-tree proof.'));
+        log(fmt.status('PASS', 'Repository verification passed by reuse of successful active/review proof.'));
       } else {
       // Bind a reusable proof to the inputs that existed before execution. A
       // successful process exit alone must not certify a tree changed mid-gate.
       const beforeGateProof = ports.verification.createVerificationProofIdentity(verificationCommand, rootDir);
       log(`Verifying the repository: ${verificationCommand}`);
-      const verifyResult = runVerificationGateFn(area || 'docs', {
+      const verifyResult = runVerificationGateFn(area, {
         rootDir,
         stdio: 'pipe',
         runFn: ports.git.run
@@ -67,7 +67,7 @@ export class HandoffGateRecovery {
           error: msg,
           gateOutput: { stdout, stderr },
           gateFailure: {
-            area: area || 'docs', command: verificationCommand, cwd: rootDir,
+            area, command: verificationCommand, cwd: rootDir,
             exitCode: verifyResult.status, stdout, stderr,
             ...(ports.verification.isTransientVerificationFailure({ stdout, stderr }) ? { transient: true } : {}),
           },
@@ -95,7 +95,7 @@ export class HandoffGateRecovery {
             return result.status === 0 ? (result.stdout ?? '').trim() : null;
           },
           verify: async () => {
-            if (ports.verification.formatVerificationCommand(area || 'docs', rootDir) !== verificationCommand) {
+            if (ports.verification.formatVerificationCommand(area, rootDir) !== verificationCommand) {
               return { ok: false, diagnostic: 'Authorized required check changed during repair; operator decision required', reason: { kind: 'declared-gate-validation', command: verificationCommand, diagnostic: 'Locked repository verification command changed' } };
             }
             retried = await retryHandoff(slug, {

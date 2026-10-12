@@ -1,5 +1,6 @@
 // @ts-nocheck -- TASK-2328: partial test doubles from ESM seam migration; resolve in follow-up
 
+import { clearCustomAdmissionStateCache } from '../../../src/adapters/sqlite/custom-admission-state.js';
 import { resolveConfiguration } from '../../../src/composition/config.js';
 import test, { mock } from 'node:test';
 import assert from 'node:assert/strict';
@@ -171,6 +172,10 @@ test('custom capacity releases after clean completion, launch failure, signal ca
   // launcher never spawns, so opt out to keep hosts without bwrap unblocked.
   const previousNoBubblewrap = process.env.PARALLIX_NO_BUBBLEWRAP;
   process.env.PARALLIX_NO_BUBBLEWRAP = '1';
+  const configuration = resolveConfiguration({ ...process.env,
+    PARALLIX_HOME: path.join(worktree, 'operator'),
+    PARALLIX_CUSTOM_ADMISSION_HOME: path.join(worktree, 'admission'),
+    PARALLIX_CUSTOM_ADMISSION_REPOSITORY: worktree });
   try {
     const invocation = { command: 'opencode', args: [], options: {} };
     const base = {
@@ -189,15 +194,15 @@ test('custom capacity releases after clean completion, launch failure, signal ca
     };
     const run = async resultPromise => {
       try {
-        await startAgent('draft', { configuration: resolveConfiguration(process.env),
+        await startAgent('draft', { configuration,
           ...base,
           launchAgentFn: () => ({ invocation, resultPromise })
         });
       } catch (_err) {
         // Failed terminal paths reroute through the deliberately exhausted mock.
       }
-      assert.equal(await activeCustomCapacityCount(), 0, 'terminal paths must not retain custom capacity');
-      const next = await tryAcquireCustomCapacity(worktree);
+      assert.equal(await activeCustomCapacityCount(configuration), 0, 'terminal paths must not retain custom capacity');
+      const next = await tryAcquireCustomCapacity(worktree, configuration);
       assert.ok(next, 'a released permit must allow exactly one subsequent launch');
       next.release();
     };
@@ -209,6 +214,7 @@ test('custom capacity releases after clean completion, launch failure, signal ca
   } finally {
     if (previousNoBubblewrap === undefined) delete process.env.PARALLIX_NO_BUBBLEWRAP;
     else process.env.PARALLIX_NO_BUBBLEWRAP = previousNoBubblewrap;
+    await clearCustomAdmissionStateCache();
     fs.rmSync(worktree, { recursive: true, force: true });
   }
 });

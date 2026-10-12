@@ -17,7 +17,7 @@
  * | `forgejo`          | `adapters/forgejo/forgejo` — PR status, review decision, tokens, sync-merged |
  * | `github`           | `adapters/github/github-pr` — GitHub PR submission/observation              |
  * | `missionPaths`     | `adapters/filesystem/mission-utils` — mission dirs, worktrees, branches     |
- * | `verification`     | `adapters/verification/verification` — command naming and tree proofs      |
+ * | `verification`     | `adapters/verification/verification` — command naming      |
  * | `agents`           | `adapters/agents/*`, `review-loop` — launch, selection, fallback, matrix     |
  * | `productConfig`    | `adapters/config/product-config` — review provider, integration mode        |
  * | `review`           | `adapters/review/*` — review state, submit-for-review, reviewer login, review-round start |
@@ -115,8 +115,6 @@ export interface IntegrateMissionPathsPort {
 
 export interface IntegrateVerificationPort {
   formatVerificationCommand(_area: string, _rootDir: string): string;
-  captureVerifiedTreeProof(_area: string, _rootDir: string, _gitRunner: IntegrateGitRunner): { ok: boolean; proof?: any; error?: string };
-  assertVerifiedTreeProof(_proof: any, _rootDir: string, _gitRunner: IntegrateGitRunner): { ok: boolean; error?: string };
 }
 
 export interface IntegrateAgentsPort {
@@ -204,7 +202,6 @@ export interface IntegrateCheckoutPort {
   findLandedSquashOnBaseBranch(_rootDir: string, _slug: string): string | null;
   buildConflictResolutionPrompt(_slug: string, _area: string, _options: { baseBranch: string }): string[];
   rewriteWorktreePaths(_taskFile: string, _slug: string, _options: { rootDir: string }): void;
-  maybeUpdateGraphifyOnPrimary(_rootDir: string, _options: { log: (_text: string) => void }): unknown;
 }
 
 export interface IntegrateLandingPort {
@@ -221,6 +218,8 @@ export interface IntegrateLandingPort {
   hasIntegrationMeasurement?(_slug: string, _rootDir: string): boolean;
   runPreCommitHookOrAbort(_slug: string, _options: { missionWorktree: string; baseWorktree: string; baseBranch: string; variant: string }): unknown;
   runPostIntegrateHookOrAbort(_slug: string, _options: { baseWorktree: string; baseBranch: string; variant: string }): unknown;
+  /** Advisory update of an existing graph in the receiving worktree. */
+  updateGraphifyRepository(_rootDir: string): unknown;
   cleanupMissionWorktree(_slug: string): boolean;
 }
 

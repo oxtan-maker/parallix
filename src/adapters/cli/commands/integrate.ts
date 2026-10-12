@@ -35,10 +35,8 @@ import * as gates from './integrate-gates.js';
 import * as integrationGateRebound from './integrate-gate-rebound.js';
 import * as conflict from './integrate-conflict.js';
 import * as post from './integrate-post.js';
-import type { IntegrateGitRunner, IntegrateWorkflowPorts } from '../../../application/ports/integrate-workflow.js';
+import type { IntegrateWorkflowPorts } from '../../../application/ports/integrate-workflow.js';
 
-/** The verification adapter's runner type also names the spawn `signal`; the port's runner result omits it. */
-const asGitFn = (runner: IntegrateGitRunner) => runner as unknown as NonNullable<Parameters<typeof verification.assertVerifiedTreeProof>[2]>['gitRunner'];
 
 /**
  * Bind the concrete mechanisms to the workflow ports. Every method reaches its
@@ -111,8 +109,6 @@ export function createIntegratePorts(configuration?: ParallixConfiguration): Int
     },
     verification: {
       formatVerificationCommand: (area, rootDir) => verification.formatVerificationCommand(area, rootDir),
-      captureVerifiedTreeProof: (area, rootDir, gitRunner) => verification.captureVerifiedTreeProof(area, rootDir, { gitRunner: asGitFn(gitRunner), runFn: spawnSync }),
-      assertVerifiedTreeProof: (proof, rootDir, gitRunner) => verification.assertVerifiedTreeProof(proof, rootDir, { gitRunner: asGitFn(gitRunner) }),
     },
     agents: {
       startAgent: (step, options) => agents.startAgent(step, { ...options, configuration } as unknown as Parameters<typeof agents.startAgent>[1]),
@@ -164,9 +160,9 @@ export function createIntegratePorts(configuration?: ParallixConfiguration): Int
       findLandedSquashOnBaseBranch: (rootDir, slug) => conflict.findLandedSquashOnBaseBranch(rootDir, slug),
       buildConflictResolutionPrompt: (slug, area, options) => conflict.buildConflictResolutionPrompt(slug, area, options),
       rewriteWorktreePaths: (taskFile, slug, options) => conflict.rewriteWorktreePaths(taskFile, slug, options),
-      maybeUpdateGraphifyOnPrimary: (rootDir, options) => conflict.maybeUpdateGraphifyOnPrimary(rootDir, options),
     },
     landing: {
+      updateGraphifyRepository: rootDir => missionUtils.updateGraphifyKnowledgeGraph({ rootDir, configuration, failureHint: 'Continuing without blocking integration.' }),
       createAbort: () => new post.IntegrationAbort(),
       isAbort: error => error instanceof post.IntegrationAbort,
       classifyHookFailure: output => post.classifyHookFailure(output),
@@ -207,7 +203,6 @@ async function integrate(args: string[], options: import('../../../application/i
 }
 
 export {
-  maybeUpdateGraphifyOnPrimary,
   prepareNoisePatchForSquash,
   restoreNoisePatchAfterSquash,
   getUnresolvedIndexConflicts,
@@ -292,7 +287,6 @@ Object.assign(integrate, {
   getUnresolvedIndexConflicts: conflict.getUnresolvedIndexConflicts,
   parseStashPopCollisionFiles: conflict.parseStashPopCollisionFiles,
   reportStashPopFailure: conflict.reportStashPopFailure,
-  maybeUpdateGraphifyOnPrimary: conflict.maybeUpdateGraphifyOnPrimary,
   prepareNoisePatchForSquash: conflict.prepareNoisePatchForSquash,
   areAllBacklogOnlyConflicts: conflict.areAllBacklogOnlyConflicts,
   cleanupMissionWorktree: post.cleanupMissionWorktree,

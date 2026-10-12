@@ -268,7 +268,7 @@ class AutonomousReviewAdapter implements AutonomousReviewPort {
   constructor(private readonly _runtime: ExecuteMissionRuntime) {}
   async start(request: AutonomousReviewRequest): Promise<void> {
     const mechanisms = this._runtime.reviewLoopMechanisms(request.slug, { worktree: request.worktree }, { onAgentLaunched: request.onAgentLaunched, onAutonomousStop: request.onAutonomousStop });
-    await runReviewLoop({ slug: request.slug, implementer: request.implementer, skipHandoff: true }, mechanisms);
+    await runReviewLoop({ slug: request.slug, implementer: request.implementer, reviewer: request.reviewer, skipHandoff: true }, mechanisms);
   }
 }
 

@@ -33,6 +33,10 @@ export interface StorageConfiguration {
 }
 
 export interface AgentConfiguration {
+  /** Separate lease-only boundary; operator and mission storage stay unchanged. */
+  readonly customAdmissionHome?: string;
+  /** Canonical checkout supplying admission policy for shared disposable clients. */
+  readonly customAdmissionRepository?: string;
   readonly override: OptionalString;
   readonly watchdogEnabled: boolean;
   readonly noOutputInitialMs: number | null;

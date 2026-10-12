@@ -6,7 +6,7 @@
  * This test encodes the DESIRED (green) behaviour: the publication verifier
  * failure must carry the structured root failure — the exact command, the
  * working directory (cwd), the exit status, and the captured stdout/stderr —
- * end to end, so an outer Forgejo wrapper cannot collapse it to an
+ * across the Git/gate adapter boundary, so an outer Forgejo wrapper cannot collapse it to an
  * exit-code-only string and strand the next agent.
  *
  * At the mission parent commit (e31f21549) the assertions that inspect the

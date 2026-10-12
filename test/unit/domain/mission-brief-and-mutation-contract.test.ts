@@ -489,7 +489,7 @@ describe('Mission dependency value', () => {
    * TASK-2521.04 — Mission dependencies as a domain value and a reported field.
    *
    * The end-to-end `px depends` round trip through a real database lives in
-   * `test/integration/cli/mission-adhoc-and-context-cli-contract.test.ts` (Mission dependencies CLI section). This suite
+   * `test/integration/cli/mission-context-cli-contract.test.ts` (Mission dependencies CLI section). This suite
    * covers the rules and the two reads that show them.
    */
 

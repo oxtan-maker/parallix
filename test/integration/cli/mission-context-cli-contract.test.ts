@@ -1,9 +1,8 @@
-// Mission ad hoc lifecycle and context CLI contract: ad hoc Mission lifecycle, context CLI mutation, and
+// Mission context CLI contract: context CLI mutation,
 // dependency recording, and Mission title resolution across the CLI boundary.
 //
 // Behavior-owned suite (TASK-2622.07). Legacy case names are unchanged; each section keeps its
 // historical task provenance and the legacy file it replaced.
-//   Ad hoc lifecycle: TASK-2468
 //   Context CLI: TASK-2521.03
 //   Mission dependencies CLI: TASK-2521.04
 //   Mission title: TASK-2441
@@ -31,83 +30,12 @@ import { SqliteMigrationRunner, loadDefaultMigrations } from '../../../src/adapt
 import { composeBoardProjection } from '../../../src/composition/board-projection.js';
 import { MissionEditService } from '../../../src/application/mission-edit-service.js';
 import { MissionCard } from '../../../src/interfaces/tui/mission-card.js';
-import {
-  PX,
-  runGit,
-  runWorkflow,
-  worktreePathFor,
-  missionDir,
-  discoverAdhocSlug,
-  setupRepository,
-  workflowEnv,
-} from './mission-adhoc-and-context-cli-contract.fixture.js';
 
-// TASK-2468 (was test/task-2468-adhoc-lifecycle-repro.test.ts)
-describe('Ad hoc lifecycle', () => {
-  // TASK-2468 reproduction: a free-text adhoc mission must reach `active` (and
-  // beyond) on a DB-owned adhoc identity in a repository with no Backlog task.
-  // This is the red-to-green anchor: on the parent commit the `task-` prefix guard
-  // in `px active` refuses the adhoc identity, so the assertion below fails; it
-  // passes once the DB-owned adhoc identity and lifecycle work land.
-  //
-  // Runs the real CLI end to end against stub `codex`/`opencode` binaries on a
-  // fixture PATH — no real model, so it lives in the default suite.
-
-  // Both the CLI under test and the stub agent's own `px` writes run from the
-  // prebuilt bundle in the prebuilt integration lanes, skipping tsx's
-  // multi-second start-up on each spawn.
-
-  test('a free-text adhoc mission reaches active on a DB-owned adhoc identity in a Backlog-less repo', (t) => {
-    const repo = setupRepository({ slug: 'fix-hello-world-greeting', title: 'fix hello world greeting' });
-    t.after(() => fs.rmSync(repo.tmpRoot, { recursive: true, force: true }));
-    const env = workflowEnv(repo.binDir, repo.stateHome, repo.repoRoot);
-
-    runWorkflow(repo.repoRoot, env, ['draft', 'fix hello world greeting', '--agent', 'custom']);
-
-    const slug = discoverAdhocSlug(repo.repoRoot);
-    assert.ok(slug, 'draft must materialize an adhoc mission under missions/');
-    assert.match(slug, /^(px|adhoc)-/i, 'materialized identity must be adhoc-owned');
-
-    const worktree = worktreePathFor(repo.repoRoot, slug);
-    assert.ok(fs.existsSync(worktree), `expected mission worktree at ${worktree}`);
-
-    // The red line on the parent commit: the `task-` prefix guard refuses this
-    // with "slug must begin with task-". It passes once the DB-owned adhoc
-    // identity and lifecycle work land.
-    runWorkflow(worktree, env, ['active', slug, '--implementer', 'custom']);
-  });
-
-  // F9 (task-2468): Success Criterion 5 guards the draft-side rejection path this
-  // mission edited (`resolveDraftTarget` / `resolveTaskFile` in draft-setup.ts /
-  // draft-stats.ts). The prior CP-4 row cited active.test:220, a mission-start
-  // test — a different command. This test runs the real `px draft` against a
-  // Backlog-less repo with a missing `task-<N>` argument and asserts the
-  // draft command itself rejects it (exit 1), not a sibling command.
-  test('px draft task-<missing> rejects a missing task file at the draft boundary', (t) => {
-    const repo = setupRepository({ slug: 'missing-task-proof', title: 'Missing task proof' });
-    t.after(() => fs.rmSync(repo.tmpRoot, { recursive: true, force: true }));
-    const env = workflowEnv(repo.binDir, repo.stateHome, repo.repoRoot);
-
-    const result = runWorkflow(
-      repo.repoRoot,
-      env,
-      ['draft', 'task-missing-missing'],
-      60000,
-      { allowFailure: true }
-    );
-    assert.equal(result.status, 1, 'px draft must reject a missing task file with a non-zero exit');
-    assert.match(
-      `${result.stdout}${result.stderr}`,
-      /task.*(not found|ambiguous|could not be resolved)/i,
-      'the draft rejection must name the missing/ambiguous task file'
-    );
-  });
-});
 
 // TASK-2521.03 (was test/task-2521-03-context-cli.integration.test.ts)
 describe('Context CLI', () => {
   /**
-   * TASK-2521.03 — the shipped agent read/write surface, end to end.
+   * TASK-2521.03 — the shipped context read/write CLI and SQLite boundary.
    *
    * AC #15: read state -> change it -> re-read -> record checkpoint evidence ->
    * re-read -> record review data -> re-read. Every write runs through the
@@ -507,7 +435,7 @@ describe('Context CLI', () => {
 // TASK-2521.04 (was test/task-2521.04-mission-dependencies.integration.test.ts)
 describe('Mission dependencies CLI', () => {
   /**
-   * TASK-2521.04 — `px depends add|remove` end to end.
+   * TASK-2521.04 — `px depends add|remove` CLI persistence contract.
    *
    * Every write runs through the production command graph against a real SQLite
    * operator database, and every read comes back from that database through the

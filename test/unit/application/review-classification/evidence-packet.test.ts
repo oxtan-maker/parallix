@@ -25,6 +25,7 @@ const omissionsOf = (request: DecisionRequest) => (request.state as { contextOmi
 const repository: ReviewEvidencePort = {
   tree: async () => ['lib/x.java'], source: async () => 'return output;\n',
   diff: async () => '+++ b/lib/x.java\n@@ -1 +1 @@\n-return null;\n+return output;\n',
+  mainCommits: async () => [],
   missionInterdiff: async () => ({ diff: '', paths: [] }),
 };
 
@@ -295,7 +296,7 @@ test('archived packing retains small files, staged basename expansion and mandat
   const source = 'small file without any lexical anchor\n';
   const packet = await packArchivedState(input, { ...repository, source: async () => source });
   assert.equal((packet.request.state as { candidateSourceExcerpts: Record<string, { text: string }[]> }).candidateSourceExcerpts['lib/x.java'][0].text, source);
-  await assert.rejects(packArchivedState({ ...input, priorReviewComment: 'Fix x.java' }, repository), /archived-window-preparation-fallback/, 'base window must fit before basename expansion');
+  assert.deepEqual((await packArchivedState({ ...input, priorReviewComment: 'Fix x.java' }, repository)).paths, ['lib/x.java']);
   await assert.rejects(buildArchivedEvidencePacket(input, repository, budgetOf(() => 100, 1)), EvidenceOverBudgetError);
   await assert.rejects(buildArchivedEvidencePacket(input, { ...repository, tree: async revision => {
     if (revision === input.priorRevision) { throw new Error('missing'); }
@@ -304,9 +305,77 @@ test('archived packing retains small files, staged basename expansion and mandat
   await assert.rejects(packArchivedState(input, { ...repository, source: async () => { throw new EvidenceReadError('missing source'); } }), EvidenceReadError);
 });
 
-test('archived packing retains the bounded diff fallback and refuses oversized obligations (TASK-2716)', async () => {
-  const { packArchivedState } = await import('../../../../src/application/review-classification/archived-packing.js');
-  const packet = await packArchivedState(input, { ...repository, diff: async () => 'x'.repeat(15001) });
-  assert.match((packet.request.state as { diff: string }).diff, /Diff exceeds bounded allowance/);
-  await assert.rejects(packArchivedState({ ...input, implementerResponse: 'mandatory '.repeat(10000) }, repository), /archived-window-preparation-fallback/);
+test('production retains complete diff and tokenizer refuses oversized obligations (TASK-2716, TASK-2732)', async () => {
+  const { buildArchivedEvidencePacket } = await import('../../../../src/application/review-classification/archived-packing.js');
+  const packet = await buildArchivedEvidencePacket(input, { ...repository, diff: async () => 'x'.repeat(15001) }, budgetOf(() => 1));
+  assert.equal((packet.request.state as { diff: string }).diff, 'x'.repeat(15001));
+  await assert.rejects(buildArchivedEvidencePacket({ ...input, implementerResponse: 'mandatory '.repeat(10000) }, repository, budgetOf(encodedBytes)), EvidenceOverBudgetError);
+});
+
+test('production uses mission interdiff and main-fix provenance (TASK-2732)', async () => {
+  const { buildArchivedEvidencePacket } = await import('../../../../src/application/review-classification/archived-packing.js');
+  let called = false;
+  const range = { approved: { baseline: 'old-base', revision: input.priorRevision }, candidate: { baseline: 'new-base', revision: input.candidateRevision } };
+  const packet = await buildArchivedEvidencePacket({ ...input, missionRange: range }, { ...repository,
+    missionInterdiff: async () => { called = true; return { diff: '+repair', paths: ['lib/x.java'] }; },
+    mainCommits: async () => [{ revision: 'main-fix', paths: ['lib/x.java'], diff: '+fixed-by-main' }],
+    diff: async () => '+main-only',
+  } as ReviewEvidencePort, budgetOf(() => 1));
+  assert.equal(called, true);
+  const state = JSON.stringify(packet.request.state);
+  assert.match(state, /old-base/); assert.match(state, /new-base/);
+  assert.match(state, /fixed-by-main/); assert.equal((packet.request.state as { diff: string }).diff, '+repair');
+});
+
+test('production retains uncited repair paths and hunks (TASK-2732)', async () => {
+  const { buildArchivedEvidencePacket } = await import('../../../../src/application/review-classification/archived-packing.js');
+  const path = 'test/lib/test-cpu-budgets.json';
+  const packet = await buildArchivedEvidencePacket(input, { ...repository,
+    tree: async () => ['lib/x.java', path],
+    diff: async (_a, _b, paths) => paths.length ? '' : '+++ b/' + path + '\n@@ -1 +1 @@\n+uncited-repair',
+  }, budgetOf(() => 1));
+  assert.ok(packet.paths.includes(path)); assert.match(JSON.stringify(packet.request.state), /uncited-repair/);
+  const rebased = await buildArchivedEvidencePacket({ ...input, missionRange: {
+    approved: { baseline: 'old-base', revision: input.priorRevision }, candidate: { baseline: 'new-base', revision: input.candidateRevision },
+  } }, { ...repository, tree: async () => ['lib/x.java', path],
+    missionInterdiff: async () => ({ diff: '+uncited-interdiff-repair', paths: [path] }),
+    diff: async () => { assert.fail('plain range must not replace mission interdiff'); },
+  }, budgetOf(() => 1));
+  assert.ok(rebased.paths.includes(path));
+  assert.match(JSON.stringify(rebased.request.state), /uncited-interdiff-repair/);
+});
+
+test('production admits large packets solely by tokenizer budget (TASK-2732)', async () => {
+  const { buildArchivedEvidencePacket } = await import('../../../../src/application/review-classification/archived-packing.js');
+  const diff = '+++ b/lib/x.java\n@@ -1 +1 @@\n+' + 'repair '.repeat(16000);
+  const packet = await buildArchivedEvidencePacket(input, { ...repository, source: async () => 'source '.repeat(16000), diff: async () => diff }, budgetOf(() => 1));
+  assert.equal((packet.request.state as { diff: string }).diff, diff);
+  assert.match(JSON.stringify(packet.request.state), /source source/);
+});
+
+test('production drops whole files largest-token-first and retains mandatory hunks (TASK-2732)', async () => {
+  const { buildArchivedEvidencePacket } = await import('../../../../src/application/review-classification/archived-packing.js');
+  const port = { ...repository, tree: async () => ['lib/x.java', 'short.rs', 'long.ts'],
+    diff: async () => '+++ b/short.rs\n@@ -1 +1 @@\n+short-repair\n+++ b/long.ts\n@@ -1 +1 @@\n+long-repair',
+    source: async (_revision: string, path: string) => path === 'short.rs' ? 'costly' : path === 'long.ts' ? 'cheap'.repeat(300) : 'cited',
+  };
+  const measure: MeasureBudget = request => {
+    const excerpts = (request.state as { candidateSourceExcerpts: Record<string, unknown> }).candidateSourceExcerpts;
+    const tokens = 10 + (excerpts?.['short.rs'] ? 100 : 0) + (excerpts?.['long.ts'] ? 20 : 0);
+    return { requestBytes: 1, maxRequestBytes: 1, inputTokens: tokens, contextTokens: tokens, maxInputTokens: 40, maxContextTokens: 40, tokenizerModel: 'non-byte-token-double' };
+  };
+  const packet = await buildArchivedEvidencePacket(input, port, measure);
+  assert.deepEqual(packet.paths, ['lib/x.java', 'long.ts']);
+  assert.match(omissionsOf(packet.request), /short.rs: complete candidate file omitted by token budget/);
+  assert.match((packet.request.state as { diff: string }).diff, /short-repair/);
+  assert.match((packet.request.state as { diff: string }).diff, /long-repair/);
+  await assert.rejects(buildArchivedEvidencePacket(input, port, budgetOf(() => 2, 1)), EvidenceOverBudgetError);
+});
+
+test('production labels missing baselines and propagates typed diff read errors (TASK-2732)', async () => {
+  const { buildArchivedEvidencePacket } = await import('../../../../src/application/review-classification/archived-packing.js');
+  const packet = await buildArchivedEvidencePacket(input, repository, budgetOf(() => 1));
+  assert.match((packet.request.state as { repairComparison: string }).repairComparison, /Missing review baselines: plain revision comparison/);
+  const failure = new EvidenceReadError('typed diff read failed');
+  await assert.rejects(buildArchivedEvidencePacket(input, { ...repository, diff: async () => { throw failure; } }, budgetOf(() => 1)), error => error === failure);
 });

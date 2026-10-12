@@ -17,6 +17,21 @@ This installs the `graphify` entry-point script to `~/.local/bin/graphify` (on L
 
 The CLI resolves in this order: `$GRAPHIFY_BIN` → `graphify` on `$PATH` → `~/.local/bin/graphify`.
 
+After a successful squash integration, Parallix runs `graphify update .` in the
+receiving base worktree after required bookkeeping and the repository's
+post-integrate hook, before mission cleanup and closure. This applies to any
+base branch. It runs only when that worktree already contains
+`graphify-out/graph.json`; Parallix does not build a graph or probe Graphify for
+repositories without one. Missing executables and failed updates produce a
+warning and allow closeout to continue without rolling back the landed commit.
+Review start, edits, checkpoints and handoff do not trigger Graphify updates.
+
+Graphify's installed Git hooks are not a substitute for this operation: the
+post-commit hook launches a detached rebuild and skips linked worktrees, so its
+presence does not establish a completed update of the final landed base tree.
+See [Graphify's upstream workflow guidance](https://github.com/Graphify-Labs/graphify)
+and the documentation shipped with your installed version for hook behavior.
+
 ## Dependencies for Parallix's own mission worktrees
 
 Missions on the Parallix repository install dependencies with the pnpm version
@@ -279,7 +294,16 @@ gate later refuses the merge, the refusal names the staleness already reported.
 
 When a rebase pauses on shared conflicts, the implementer completes the Git
 rebase and runs the repository's verification against the final repaired tree.
-A failed check or unfinished rebase stops completion and automatic push.
+A failed repository check stops completion and automatic push. After an agent
+attempt, Parallix checks Git: the rebase must have ended, no unmerged files may
+remain, and the checkout must be on the mission branch captured before launch.
+An unfinished rebase or wrong checkout automatically returns to the implementer
+through bounded recovery. Each completion retry asks only to complete the rebase
+and end on that captured branch. If recovery exhausts its budget, Parallix reports
+the remaining Git state and recovery instructions, then stops without automatic
+push or workflow advancement. Resolve and stage the remaining conflicts, continue
+the rebase, and restore the mission checkout before retrying; use
+`git rebase --abort` to abandon the rebase.
 Repair verification can succeed while the mission is active and awaiting review.
 Integration preflight, including a dry run, still requires the appropriate lane
 and current approval; it is not a required check for completing conflict repair.

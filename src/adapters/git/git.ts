@@ -2,8 +2,10 @@ import { spawnSync } from 'node:child_process';
 import type { SpawnSyncOptions } from 'node:child_process';
 import * as fsMod from 'node:fs';
 import * as pathMod from 'node:path';
+import { withCommandProgress } from './command-progress.js';
 
 interface GitOptions {
+  progressLabel?: string;
   encoding?: BufferEncoding;
   stdio?: import('node:child_process').StdioOptions;
   cwd?: string;
@@ -21,12 +23,19 @@ export interface GitResult {
 }
 
 export function git(args: string[], options: GitOptions = {}): GitResult {
+  const { progressLabel, ...processOptions } = options;
   const spawnOptions: SpawnSyncOptions = {
     encoding: 'utf8',
     stdio: ['ignore', 'pipe', 'pipe'] as const,
-    ...options
+    ...processOptions
   };
-  const result = spawnSync('git', args, spawnOptions);
+  // Never include remote URLs/arguments: authenticated Git URLs contain tokens.
+  const operation = args.find(value => ['push', 'fetch', 'rebase', 'commit', 'merge'].includes(value));
+  const execute = () => spawnSync('git', args, spawnOptions);
+  const result = operation && !args.includes('--show-current')
+    ? withCommandProgress(progressLabel ?? `git ${operation}`, execute, {
+      ...(options.stdio === 'inherit' ? { animate: false as const } : {}),
+    }) : execute();
   if (result.error && result.status === null) {
     throw result.error;
   }
@@ -34,15 +43,21 @@ export function git(args: string[], options: GitOptions = {}): GitResult {
 }
 
 export function run(command: string, args: string[], options: GitOptions = {}): GitResult {
+  const { progressLabel, ...processOptions } = options;
   const spawnOptions: SpawnSyncOptions = {
     encoding: 'utf8',
     stdio: ['ignore', 'pipe', 'pipe'] as const,
-    ...options
+    ...processOptions
   };
   // codeql[js/shell-command-injection-from-environment] -- `command` is the git executable and `args` are internal filesystem paths
   // (repo root, config dirs) resolved from trusted sources, never user input;
   // spawnSync runs with no shell, so there is no command-injection surface.
-  const result = spawnSync(command, args, spawnOptions);
+  const execute = () => spawnSync(command, args, spawnOptions);
+  const result = options.stdio === 'ignore' || args.includes('--help')
+    ? execute()
+    : withCommandProgress(progressLabel ?? `External command: ${pathMod.basename(command)}`, execute, {
+      ...(options.stdio === 'inherit' ? { animate: false as const } : {}),
+    });
   if (result.error && result.status === null) {
     throw result.error;
   }

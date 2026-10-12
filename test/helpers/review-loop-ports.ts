@@ -128,7 +128,6 @@ export function fakeReviewLoopPorts(overrides: ReviewLoopFakeOverrides = {}): Re
       ...overrides.artifacts,
     },
     preReview: {
-      refreshKnowledgeGraph: async () => {},
       rebase: async () => ({ ok: true }),
       runGate: async () => ({ ok: true }),
       reviewBaseline: () => 'baseline',

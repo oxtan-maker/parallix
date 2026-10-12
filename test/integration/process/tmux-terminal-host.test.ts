@@ -448,7 +448,8 @@ test('successful review completion leaves the operator attached to the retained 
     assert.match(consoleOutput(), /REVIEW-APPROVED/, 'completion keeps the review result visible in the console');
     const integrationStarted = path.join(fx.root, 'integration-started');
     childProcess.spawnSync('tmux', ['-S', socket, 'send-keys', '-t', '=task-review-retained:console', `echo integration-started > ${shellQuote(integrationStarted)}`, 'Enter']);
-    waitFor(() => fs.existsSync(integrationStarted));
+    // Shell redirection creates the file before echo writes the command result.
+    waitFor(() => fs.existsSync(integrationStarted) && fs.readFileSync(integrationStarted, 'utf8').trim() === 'integration-started');
     assert.equal(fs.readFileSync(integrationStarted, 'utf8').trim(), 'integration-started', 'the retained console accepts the operator-triggered integration command');
     childProcess.spawnSync('tmux', ['-S', socket, 'send-keys', '-t', '=task-review-retained:console', 'echo INTEGRATION-FINAL-STATS', 'Enter']);
     const capturePath = missionTerminalCapturePath(identity, resolveConfiguration(fx.env));

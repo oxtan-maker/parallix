@@ -270,7 +270,7 @@ Usage: px <command> [args]
 
 ${fmt.bold('Core Commands:')}
   draft [<slug>] [--agent <family>]  Mission setup automation; use --agent to select the draft implementer family.
-  active [<slug>] [--implementer <family>]  Run preflight and launch the execute agent; use --implementer to select its family.
+  active [<slug>] [--implementer <family>] [--reviewer <family>]  Run preflight and launch the execute agent; --implementer selects its family, --reviewer requires that family for automatic review (refused, never replaced, if blocked or unavailable; omitted = automatic selection).
   review [<slug>] [--verify|--submit|--push [--force]|--comment "<msg>"|--comment-file <path>|--submit-review <outcome> [--message "<msg>"|--message-file <path>]|--start|--continue] [--implementer <a>] [--reviewer <a>] [--focus <f>] [--max-attempts <n>] [--dry-run] [--reset] [--no-gate]
   integrate [<slug>] [--dry-run] [--no-integration-gates] [--real-agent codex --real-agent-model gpt-5.6-luna]  Land a reviewed mission into the local integration checkout on main. --no-integration-gates skips integration-time staging/e2e gates; the paired real-agent flags override the Codex integration-gate runner.
 

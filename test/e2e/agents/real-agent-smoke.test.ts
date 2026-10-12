@@ -14,6 +14,8 @@
 // configured custom-family local model reachable. See docs/real-agent-smoke.md
 // for prerequisites, invocation, expected runtime, and failure buckets.
 
+import { smokeProgress } from '../../helpers/smoke-progress.js';
+import { StringDecoder } from 'node:string_decoder';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -71,12 +73,6 @@ const HEALTHCHECK_TIMEOUT_MS = Math.min(
 // incomplete-evidence checkpoint was killed at 600s mid-recovery.
 const ACTIVE_TIMEOUT_MS = RUN_TIMEOUT_MS * 2;
 const MIN_TMP_FREE_BYTES = Number(process.env.PARALLIX_REAL_AGENT_MIN_TMP_BYTES || 512 * 1024 * 1024);
-// The configured custom runner shares one local vLLM server across every
-// worktree. Concurrent full-lifecycle smoke runs can leave it returning empty
-// assistant turns until their probes time out, so serialize only that shared
-// external boundary (not the ordinary hermetic test suite).
-const CUSTOM_MODEL_LOCK_DIR = path.join(os.tmpdir(), 'parallix-real-agent-custom-model.lock');
-const CUSTOM_MODEL_LOCK_WAIT_MS = Number(process.env.PARALLIX_REAL_AGENT_LOCK_WAIT_MS || 30 * 60 * 1000);
 // The fixture seeds this in its base checkout; the pre-draft hook writes a
 // separate copy into each mission worktree. Verification requires it in both.
 const PROVISIONED_MARKER = '.pre-draft-provisioned';
@@ -87,57 +83,6 @@ function runCommand(command, args, options = {}) {
     throw result.error;
   }
   return result;
-}
-
-function sleepSync(milliseconds) {
-  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, milliseconds);
-}
-
-function ownerIsRunning(owner) {
-  if (!Number.isInteger(owner?.pid) || owner.pid <= 0) { return false; }
-  try {
-    process.kill(owner.pid, 0);
-    return true;
-  } catch (error) {
-    return error?.code === 'EPERM';
-  }
-}
-
-function acquireCustomModelLock() {
-  const token = `${process.pid}-${Date.now()}-${Math.random()}`;
-  const deadline = Date.now() + CUSTOM_MODEL_LOCK_WAIT_MS;
-  while (true) {
-    try {
-      fs.mkdirSync(CUSTOM_MODEL_LOCK_DIR);
-      fs.writeFileSync(path.join(CUSTOM_MODEL_LOCK_DIR, 'owner.json'), JSON.stringify({ pid: process.pid, token }), 'utf8');
-      return () => {
-        try {
-          const owner = JSON.parse(fs.readFileSync(path.join(CUSTOM_MODEL_LOCK_DIR, 'owner.json'), 'utf8'));
-          if (owner.token === token) { fs.rmSync(CUSTOM_MODEL_LOCK_DIR, { recursive: true, force: true }); }
-        } catch (_) { /* A stale or already-released lock is safe to leave alone. */ }
-      };
-    } catch (error) {
-      if (error?.code !== 'EEXIST') { throw error; }
-      let owner = null;
-      try { owner = JSON.parse(fs.readFileSync(path.join(CUSTOM_MODEL_LOCK_DIR, 'owner.json'), 'utf8')); } catch (_) { /* retry below */ }
-      if (!ownerIsRunning(owner)) {
-        // Rename is atomic: competing waiters cannot remove a newly acquired
-        // lock after one of them has reclaimed this stale directory.
-        const staleDir = `${CUSTOM_MODEL_LOCK_DIR}.stale-${token}`;
-        try {
-          fs.renameSync(CUSTOM_MODEL_LOCK_DIR, staleDir);
-          fs.rmSync(staleDir, { recursive: true, force: true });
-        } catch (reclaimError) {
-          if (reclaimError?.code !== 'ENOENT' && reclaimError?.code !== 'EEXIST') { throw reclaimError; }
-        }
-        continue;
-      }
-      if (Date.now() >= deadline) {
-        throw new Error(`Timed out waiting for the shared custom-model smoke lock held by pid ${owner.pid}.`);
-      }
-      sleepSync(1000);
-    }
-  }
 }
 
 // Resolve against this process's own PATH first — this is the PATH the real
@@ -424,7 +369,25 @@ function runHealthcheck(agent, runner, repoRoot, env, timeoutMs = HEALTHCHECK_TI
     : runOpencodeHealthcheck(repoRoot, env, timeoutMs);
 }
 
-function setupRepository({ slug, title, agent = 'custom', runner = 'opencode' }) {
+// Materialize links as private files; never retain aliases to operator settings.
+function copyRunnerConfiguration(source, target, ancestors = new Set()) {
+  const realSource = fs.realpathSync(source);
+  if (fs.statSync(realSource).isDirectory()) {
+    assert.ok(!ancestors.has(realSource), `Cyclic runner configuration link: ${source}`);
+    const branch = new Set([...ancestors, realSource]);
+    fs.mkdirSync(target, { recursive: true });
+    for (const entry of fs.readdirSync(realSource)) {
+      copyRunnerConfiguration(path.join(realSource, entry), path.join(target, entry), branch);
+    }
+  } else {
+    fs.copyFileSync(realSource, target);
+  }
+}
+
+function setupRepository({ slug, title, agent = 'custom', runner = 'opencode', runnerCommandPath = '' }) {
+  const toolWaitSeconds = Number(process.env.PARALLIX_REAL_AGENT_TOOL_WAIT_SECONDS || 0);
+  assert.ok(Number.isInteger(toolWaitSeconds) && toolWaitSeconds >= 0 && toolWaitSeconds <= 60,
+    'Manual smoke tool wait must be an integer from 0 to 60 seconds');
   const tmpRoot = tempRootRegistry.register(fs.mkdtempSync(path.join(os.tmpdir(), 'parallix-real-agent-')));
   const repoRoot = path.join(tmpRoot, 'repo');
   const binDir = path.join(repoRoot, 'bin');
@@ -467,6 +430,20 @@ function setupRepository({ slug, title, agent = 'custom', runner = 'opencode' })
       settings.skills = [];
       fs.writeFileSync(piSettingsPath, `${JSON.stringify(settings, null, 2)}\n`, 'utf8');
     }
+  }
+
+  // Copy configuration and credentials, never the operator's mutable session DB.
+  const opencodeConfigHome = path.join(tmpRoot, 'xdg-config');
+  const opencodeDataHome = path.join(tmpRoot, 'xdg-data');
+  if (agent === 'custom' && runner === 'opencode') {
+    const sourceConfig = path.join(process.env.XDG_CONFIG_HOME || path.join(os.homedir(), '.config'), 'opencode');
+    const targetConfig = path.join(opencodeConfigHome, 'opencode');
+    fs.mkdirSync(targetConfig, { recursive: true });
+    if (fs.existsSync(sourceConfig)) copyRunnerConfiguration(sourceConfig, targetConfig);
+    const sourceAuth = path.join(process.env.XDG_DATA_HOME || path.join(os.homedir(), '.local', 'share'), 'opencode', 'auth.json');
+    const targetData = path.join(opencodeDataHome, 'opencode');
+    fs.mkdirSync(targetData, { recursive: true });
+    if (fs.existsSync(sourceAuth)) fs.copyFileSync(sourceAuth, path.join(targetData, 'auth.json'));
   }
 
   // Hand-rolled backlog.md structure: equivalent to `backlog init` +
@@ -549,7 +526,7 @@ function setupRepository({ slug, title, agent = 'custom', runner = 'opencode' })
   } else if (runner === 'pi') {
     fs.symlinkSync(requireCommandPath('pi', maybePiPath), path.join(binDir, 'pi'));
   } else {
-    fs.symlinkSync(requireCommandPath('opencode', maybeOpencodePath), path.join(binDir, 'opencode'));
+    fs.symlinkSync((runnerCommandPath || requireCommandPath('opencode', maybeOpencodePath)), path.join(binDir, 'opencode'));
   }
   fs.symlinkSync(process.execPath, path.join(binDir, 'node'));
   fs.symlinkSync(requireCommandPath('git'), path.join(binDir, 'git'));
@@ -564,7 +541,7 @@ function setupRepository({ slug, title, agent = 'custom', runner = 'opencode' })
     product: { name: 'real-agent-smoke', targetUser: 'tests' },
     adapters: {
       tasks: { provider: 'backlog-md', storage: 'backlog', stateMap: 'config/state-map.json' },
-      agents: { models: SMOKE_MODEL ? { [agent]: SMOKE_MODEL } : {}, runners: agent === 'custom' ? { custom: runner } : {} },
+      agents: { maxConcurrentCustom: workflowConfig?.adapters?.agents?.maxConcurrentCustom, models: SMOKE_MODEL ? { [agent]: SMOKE_MODEL } : {}, runners: agent === 'custom' ? { custom: runner } : {} },
       missions: { baseDir: 'missions', branchPrefix: 'mission/', worktreePattern: '../<repo>-<slug>' },
       verification: { command: './scripts/verify-local.sh {{area}}', defaultArea: 'all' },
       draft: { preDraftCommand: `touch ${PROVISIONED_MARKER}` },
@@ -599,6 +576,7 @@ function setupRepository({ slug, title, agent = 'custom', runner = 'opencode' })
     'utf8',
   );
 
+  fs.writeFileSync(path.join(repoRoot, 'AGENTS.md'), '', 'utf8');
   fs.writeFileSync(path.join(repoRoot, 'README.md'), '# Real Agent Smoke Probe\n', 'utf8');
   fs.writeFileSync(path.join(repoRoot, '.gitignore'), [
     '.workflow/',
@@ -616,7 +594,7 @@ function setupRepository({ slug, title, agent = 'custom', runner = 'opencode' })
   fs.writeFileSync(path.join(repoRoot, PROVISIONED_MARKER), '', 'utf8');
   fs.writeFileSync(path.join(repoRoot, '.graphifyignore'), '.workflow/\n', 'utf8');
   const helloScript = path.join(repoRoot, 'hello.sh');
-  fs.writeFileSync(helloScript, '#!/usr/bin/env bash\necho "Helo, Wrld!"\n', 'utf8');
+  fs.writeFileSync(helloScript, `#!/usr/bin/env bash\n${toolWaitSeconds ? `sleep ${toolWaitSeconds}\n` : ''}echo "Helo, Wrld!"\n`, 'utf8');
   // The smoke mission requires direct `./hello.sh` invocation while limiting
   // the agent's authorized change to the greeting text. Seed the executable
   // mode in the fixture so the task is satisfiable without a scope conflict.
@@ -649,14 +627,16 @@ function setupRepository({ slug, title, agent = 'custom', runner = 'opencode' })
   runGit(repoRoot, ['add', '.']);
   runGit(repoRoot, ['commit', '-m', 'initial smoke repo']);
 
-  return { tmpRoot, repoRoot, binDir, stateHome, piAgentHome };
+  return { tmpRoot, repoRoot, binDir, stateHome, piAgentHome, opencodeConfigHome, opencodeDataHome };
 }
 
-function runWorkflowAllowFail(repoRoot, env, args, timeout, options = {}) {
+async function runWorkflowAllowFail(repoRoot, env, args, timeout, options = {}) {
   const {
 // @ts-expect-error -- Legacy CommonJS assertion exercises a runtime shape not represented by the inferred declaration.
     directCommand = false,
 // @ts-expect-error -- Legacy CommonJS assertion exercises a runtime shape not represented by the inferred declaration.
+    progressWrite = undefined,
+    liveProgress = !directCommand && ['draft', 'active'].includes(args[0]),
     keepCaptureArtifacts = shouldKeepTmp()
   } = options;
   // Own a unique directory, rather than independent predictable files under a
@@ -673,11 +653,36 @@ function runWorkflowAllowFail(repoRoot, env, args, timeout, options = {}) {
     stderrFd = fs.openSync(stderrPath, 'w');
     const command = directCommand ? args[0] : process.execPath;
     const commandArgs = directCommand ? args.slice(1) : [CLI_ENTRY, ...args];
-    result = childProcess.spawnSync(command, commandArgs, {
-      cwd: repoRoot,
-      env,
-      timeout,
-      stdio: ['ignore', stdoutFd, stderrFd]
+    const progress = liveProgress ? smokeProgress(progressWrite) : null;
+    result = await new Promise((resolve) => {
+      const child = childProcess.spawn(command, commandArgs, { cwd: repoRoot, env, detached: process.platform !== 'win32', stdio: ['ignore', 'pipe', 'pipe'] });
+      const killOwnedChild = (signal) => {
+        try {
+          if (process.platform !== 'win32' && child.pid) { process.kill(-child.pid, signal); }
+          else { child.kill(signal); }
+        } catch (error) { if (error?.code !== 'ESRCH') { throw error; } }
+      };
+      const onExit = () => killOwnedChild('SIGKILL');
+      process.once('exit', onExit);
+      const decoder = new StringDecoder('utf8');
+      child.stdout.on('data', chunk => { fs.writeSync(stdoutFd, chunk); progress?.push(decoder.write(chunk)); });
+      child.stderr.on('data', chunk => { fs.writeSync(stderrFd, chunk); });
+      let error;
+      // The existing wall deadline still bounds execution; terminate the owned
+      // process group so a tool cannot keep capture pipes open after timeout.
+      const timer = setTimeout(() => {
+        error = Object.assign(new Error('Workflow timed out'), { code: 'ETIMEDOUT' });
+        killOwnedChild('SIGKILL');
+      }, timeout);
+      child.on('error', value => { error = value; });
+      child.on('close', (status, signal) => {
+        clearTimeout(timer);
+        process.removeListener('exit', onExit);
+        killOwnedChild('SIGKILL');
+        progress?.push(decoder.end());
+        progress?.end();
+        resolve({ status, signal, error });
+      });
     });
     result.stdout = fs.existsSync(stdoutPath) ? fs.readFileSync(stdoutPath, 'utf8') : '';
     result.stderr = fs.existsSync(stderrPath) ? fs.readFileSync(stderrPath, 'utf8') : '';
@@ -692,8 +697,8 @@ function runWorkflowAllowFail(repoRoot, env, args, timeout, options = {}) {
   }
 }
 
-function readMissionStatus(worktree, env, slug) {
-  const result = runWorkflowAllowFail(worktree, env, ['status', slug, '--json'], RUN_TIMEOUT_MS);
+async function readMissionStatus(worktree, env, slug) {
+  const result = await runWorkflowAllowFail(worktree, env, ['status', slug, '--json'], RUN_TIMEOUT_MS);
   assert.equal(result.status, 0, `[parallix-workflow-failure] px status ${slug} --json failed: ${result.stderr || result.stdout}`);
   return JSON.parse(result.stdout);
 }
@@ -707,8 +712,8 @@ function shouldKeepTmp() {
 // The smoke run stays black-box about that: it asks the CLI through
 // `px review <slug> --status`, which reads the same authority the loop writes,
 // so a loop that never persisted its state still fails here.
-function readReviewStateViaCli(worktree, env, slug) {
-  const result = runWorkflowAllowFail(worktree, env, ['review', slug, '--status'], RUN_TIMEOUT_MS);
+async function readReviewStateViaCli(worktree, env, slug) {
+  const result = await runWorkflowAllowFail(worktree, env, ['review', slug, '--status'], RUN_TIMEOUT_MS);
   const output = `${result.stdout || ''}${result.stderr || ''}`.replace(/\x1B\[[0-9;]*m/g, '');
   assert.equal(
     result.status,
@@ -757,7 +762,7 @@ function snapshotDefaultParallixState() {
   return snapshots;
 }
 
-function runRealAgentSmoke(agent, runner) {
+async function runRealAgentSmoke(agent, runner) {
   const preflightError = preflightCheck(agent, runner);
   if (preflightError) {
     assert.fail(
@@ -780,8 +785,6 @@ function runRealAgentSmoke(agent, runner) {
   // for both <PARALLIX_HOME>/parallix.db and the agent blocking file
   // <PARALLIX_HOME>/agents.local.json (lib/core/storage.ts), so temp-scoping it
   // keeps every Parallix write out of the developer's real state root.
-  // opencode's own runtime state (XDG data dir) is deliberately NOT overridden:
-  // the launcher child keeps its normal user configuration.
   // binDir comes FIRST so the `opencode` the launcher resolves is the real
   // binary symlinked by setupRepository (the launcher-boundary guarantee).
   // The rest of the normal PATH is kept: the agent's own tooling must work
@@ -794,6 +797,9 @@ function runRealAgentSmoke(agent, runner) {
     FORCE_COLOR: '0',
     PRIMARY_WORKTREE: repo.repoRoot,
     PARALLIX_HOME: repo.stateHome,
+    PARALLIX_CUSTOM_ADMISSION_HOME: process.env.PARALLIX_CUSTOM_ADMISSION_HOME
+      || path.join(os.tmpdir(), `parallix-smoke-admission-${process.getuid?.() ?? 'user'}`),
+    PARALLIX_CUSTOM_ADMISSION_REPOSITORY: path.resolve(import.meta.dirname, '..', '..', '..'),
     NPM_CONFIG_CACHE: path.join(repo.tmpRoot, 'npm-cache'),
     PATH: `${repo.binDir}${path.delimiter}${process.env.PATH || ''}`,
     // TASK-2471: the draft-stats line this gate parses is operator plumbing and
@@ -807,6 +813,12 @@ function runRealAgentSmoke(agent, runner) {
     // trusting another Codex executable selected by the parent environment.
 // @ts-expect-error -- Legacy fixture intentionally accesses runtime-only `CODEX_BIN` absent from its inferred mock shape.
     env.CODEX_BIN = path.join(repo.binDir, 'codex');
+  }
+  if (agent === 'custom' && runner === 'opencode') {
+    env.XDG_CONFIG_HOME = repo.opencodeConfigHome;
+    env.XDG_DATA_HOME = repo.opencodeDataHome;
+    env.XDG_STATE_HOME = path.join(repo.tmpRoot, 'xdg-state');
+    env.XDG_CACHE_HOME = path.join(repo.tmpRoot, 'xdg-cache');
   }
   if (agent === 'custom' && runner === 'pi') {
     // Pin both Pi's executable and mutable agent state to the disposable
@@ -824,6 +836,7 @@ function runRealAgentSmoke(agent, runner) {
 // @ts-expect-error -- Legacy fixture intentionally accesses runtime-only `PWD` absent from its inferred mock shape.
   delete env.PWD;
 
+  console.log(`[smoke-fixture] time=${new Date().toISOString()} repo=${repo.repoRoot} operator=${repo.stateHome} runner_state=${runner === 'pi' ? repo.piAgentHome : repo.opencodeDataHome} admission=${env.PARALLIX_CUSTOM_ADMISSION_HOME}`);
   try {
     // Verify CLI-under-test provenance: CLI_ENTRY resolves from this file's
     // import.meta.dirname to this checkout's build/px.mjs, so the run exercises the code
@@ -837,9 +850,12 @@ function runRealAgentSmoke(agent, runner) {
       `[parallix-workflow-failure] CLI Entry point ${CLI_ENTRY} does not point to build/px.mjs; may be using stale installed px`
     );
 
+    assert.equal(runGit(repo.repoRoot, ['ls-files', '--error-unmatch', 'AGENTS.md']), 'AGENTS.md');
+    assert.ok(fs.existsSync(path.join(repo.repoRoot, 'AGENTS.md')));
+
     // Phase 1: Draft
     const draftStartedAt = Date.now();
-    let draftResult = runWorkflowAllowFail(repo.repoRoot, env, ['draft', slug, '--agent', agent], RUN_TIMEOUT_MS);
+    let draftResult = await runWorkflowAllowFail(repo.repoRoot, env, ['draft', slug, '--agent', agent], RUN_TIMEOUT_MS);
     const draftDurationMs = Date.now() - draftStartedAt;
 
     // The product sends an incomplete contract back to the drafting agent
@@ -848,7 +864,7 @@ function runRealAgentSmoke(agent, runner) {
     if (draftResult.status !== 0) {
       // Only diagnose the model after the production draft path has failed.
       // This probe is not a separate prerequisite for a healthy workflow.
-      const healthcheckResult = runHealthcheck(agent, runner, repo.repoRoot, env);
+      const healthcheckResult = await runHealthcheck(agent, runner, repo.repoRoot, env);
       if (healthcheckResult.status === 0 && !/OK/.test(`${healthcheckResult.stdout || ''}${healthcheckResult.stderr || ''}`)) {
         healthcheckResult.status = 1;
       }
@@ -888,7 +904,9 @@ function runRealAgentSmoke(agent, runner) {
     const helloWorld = /hello[\s,_-]*world/i;
     // Every part refine requires (requireDraftedContract), read back from the
     // same authority `px active` checks.
-    const recorded = readMissionStatus(worktree, env, slug);
+    assert.ok(fs.existsSync(path.join(worktree, 'AGENTS.md')));
+    assert.equal(runGit(worktree, ['ls-files', '--error-unmatch', 'AGENTS.md']), 'AGENTS.md');
+    const recorded = await readMissionStatus(worktree, env, slug);
     const missing = ['goal', 'why', 'scope'].filter((field) => !recorded.brief?.[field]);
     if ((recorded.successCriteria ?? []).length === 0) { missing.push('success criteria'); }
     if ((recorded.checkpoints ?? []).length === 0) { missing.push('checkpoint plan'); }
@@ -1014,7 +1032,7 @@ function runRealAgentSmoke(agent, runner) {
     // px active's preflight requires running from the mission worktree (PWD
     // and branch checks), matching how a real implementer session operates.
     const activeStartedAt = Date.now();
-    const activeResult = runWorkflowAllowFail(worktree, env, ['active', slug, '--implementer', agent], ACTIVE_TIMEOUT_MS);
+    const activeResult = await runWorkflowAllowFail(worktree, env, ['active', slug, '--implementer', agent], ACTIVE_TIMEOUT_MS);
     const activeDurationMs = Date.now() - activeStartedAt;
     const activeFailure = classifyFailure(activeResult, 'active');
     assert.equal(
@@ -1031,7 +1049,7 @@ function runRealAgentSmoke(agent, runner) {
     console.log(`[benchmark] runner=${runner} phase=active duration_ms=${activeDurationMs}`);
 
     // px active autostarts the autonomous review loop - verify it completed successfully
-    const reviewState = readReviewStateViaCli(worktree, env, slug);
+    const reviewState = await readReviewStateViaCli(worktree, env, slug);
 
     // Reviewer forcing (SC: "force custom as reviewer on its own PR"): the
     // isolated PARALLIX_HOME's agents.local.json blocks every family except
@@ -1063,13 +1081,13 @@ function runRealAgentSmoke(agent, runner) {
     // Verify the review loop recorded its rounds. Review events live only in
     // the operator database (TASK-2521.03 removed the review-events/ export),
     // so read them back through `px status --json`.
-    const reviewHistory = readMissionStatus(worktree, env, slug).review?.history ?? [];
+    const reviewHistory = (await readMissionStatus(worktree, env, slug)).review?.history ?? [];
     assert.ok(reviewHistory.length > 0, `[parallix-workflow-failure] expected at least one recorded review round for ${slug} after active phase`);
 
     // Verify the active phase's checkpoint evidence. A typed-verb mission
     // records it in Mission state through `px checkpoint record`; there is no
     // CP-N.md to find, and handoff and the gatekeeper read this same evidence.
-    const executed = readMissionStatus(worktree, env, slug);
+    const executed = await readMissionStatus(worktree, env, slug);
     const unrecorded = (executed.checkpoints ?? []).filter((checkpoint) => !checkpoint.recorded).map((checkpoint) => checkpoint.name);
     assert.deepEqual(unrecorded, [], `[parallix-workflow-failure] planned checkpoints without recorded evidence after the active phase: ${unrecorded.join(', ')}`);
     // Handoff measures distinct criterion identities across all recorded
@@ -1085,7 +1103,7 @@ function runRealAgentSmoke(agent, runner) {
     // Phase 3: Integrate through the real CLI rail. Agent work is complete at
     // this point, so no further model session is needed; this proves the
     // approved mission can land, close its task, and clean up its worktree.
-    const integrateResult = runWorkflowAllowFail(
+    const integrateResult = await runWorkflowAllowFail(
       worktree,
       // The smoke fixture must not recursively run the final integration
       // gates (which would launch this same real-agent gate again). Keep the
@@ -1171,7 +1189,7 @@ function assertSmokeSelection(agent) {
 
 // The helpers are always exported; the smoke tests themselves only register
 // when this file is not being imported purely for its helpers (task-2241).
-export { runWorkflowAllowFail, temporaryCapacityPreflight, classifyFailure };
+export { runWorkflowAllowFail, temporaryCapacityPreflight, classifyFailure, setupRepository };
 
 if (process.env.PARALLIX_E2E_SMOKE_TEST_HELPERS !== '1') {
   test('real-agent smoke rejects an unsupported Codex override model', {
@@ -1182,20 +1200,15 @@ if (process.env.PARALLIX_E2E_SMOKE_TEST_HELPERS !== '1') {
 
   test('real custom-agent launcher smoke: full lifecycle with hello-world task (SC3/SC4/SC5/SC6/SC7)', {
     skip: SMOKE_AGENT !== 'custom'
-  }, () => {
+  }, async () => {
     assertSmokeSelection('custom');
-    const release = acquireCustomModelLock();
-    try {
-      runRealAgentSmoke('custom', CONFIGURED_RUNNER);
-    } finally {
-      release();
-    }
+    await runRealAgentSmoke('custom', CONFIGURED_RUNNER);
   });
 
   test('real Codex gpt-5.6-luna launcher smoke: full lifecycle with hello-world task (SC3/SC4/SC5/SC6/SC7)', {
     skip: SMOKE_AGENT !== 'codex' || SMOKE_MODEL !== 'gpt-5.6-luna'
-  }, () => {
+  }, async () => {
     assertSmokeSelection('codex');
-    runRealAgentSmoke('codex', 'codex');
+    await runRealAgentSmoke('codex', 'codex');
   });
 }

@@ -1,7 +1,6 @@
 import type { ParallixConfiguration } from '../../application/ports/configuration.js';
 import { git } from '../git/git.js';
 import { getPrimaryBranch } from '../filesystem/mission-utils.js';
-import * as verification from '../verification/verification.js';
 import { resolveForgejoAuth, resolveForgejoUser } from './forgejo-auth.js';
 import { forgejoApi, codexSandboxHint } from './forgejo-api.js';
 import * as fmt from '../../application/presentation/cli-format.js';
@@ -11,12 +10,10 @@ import { authenticatedReviewUrl, getPrNumber, isApiErrorResult } from './forgejo
  * @param {string} user
  * @param {string} token
  * @param {string} rootDir
- * @param {{verificationProof?: object|null, assertVerifiedTreeProofFn?: Function, gitRunner?: Function}} [opts]
+ * @param {{gitRunner?: Function}} [opts]
  * @returns {{ok: boolean, skipped?: boolean, status?: number, stderr?: string, error?: string|null}}
  */
 function syncPrimaryBaseline(user: string, token: string, rootDir: string = process.cwd(), {
-  verificationProof = null,
-  assertVerifiedTreeProofFn = verification.assertVerifiedTreeProof,
   gitRunner = git
 } = {}) {
   let primaryBranchName = 'main';
@@ -24,11 +21,6 @@ function syncPrimaryBaseline(user: string, token: string, rootDir: string = proc
     primaryBranchName = getPrimaryBranch(rootDir);
   } catch (_) {
     primaryBranchName = 'main';
-  }
-
-  const proofCheck = assertVerifiedTreeProofFn(verificationProof as any, rootDir, { gitRunner });
-  if (!proofCheck.ok) {
-    return { ok: false, error: proofCheck.error || 'verification-proof-mismatch' };
   }
 
   const primaryExists = gitRunner(['-C', rootDir, 'show-ref', '--verify', '--quiet', `refs/heads/${primaryBranchName}`]);

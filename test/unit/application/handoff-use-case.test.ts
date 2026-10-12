@@ -827,3 +827,25 @@ test('handoff rejects a repair that leaves a completed criterion without a row (
   assert.equal(classifyError(result.error ?? '').dispatchAction, 'AutoSendBack');
   assert.deepEqual(recorder.transitions, []);
 });
+
+test('handoff final and declared gates consume one successful matching proof (TASK-2715)', async () => {
+  const recorder = makeRecorder();
+  const base = makePorts(recorder);
+  let passed = false;
+  let executions = 0;
+  const ports = makePorts(recorder, {
+    verification: {
+      ...base.verification,
+      readReusableVerificationProof: () => ({ ok: passed, identity: 'candidate-proof' }),
+      writeReusableVerificationProof: () => { passed = true; return { ok: true, identity: 'candidate-proof' }; },
+    },
+  });
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const result = await new HandoffCommandUseCase(ports).performHandoff(SLUG, runOptions(recorder, {
+      runVerificationGateFn: () => { executions++; return { status: 0 }; },
+    }));
+    assert.equal(result.ok, true, recorder.errors.join('\n'));
+  }
+  assert.equal(executions, 1, 'final verification runs successfully once');
+  assert.deepEqual(recorder.spawned, [], 'matching declared gate consumes the successful proof');
+});

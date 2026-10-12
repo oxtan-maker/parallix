@@ -16,6 +16,8 @@
 // the services. Only the Git/Forgejo/worktree boundaries are doubled. No agent,
 // LLM, mission runner, or network is involved.
 // ---------------------------------------------------------------------------
+import { mkdtemp as registeredMkdtemp } from '../../helpers/temp-dir.js';
+import { updateGraphifyKnowledgeGraph } from '../../../src/adapters/filesystem/mission-graphify.js';
 import { resolveConfiguration } from '../../../src/composition/config.js';
 import test, { mock } from 'node:test';
 import assert from 'node:assert/strict';
@@ -92,6 +94,7 @@ interface Scenario {
   resume?: boolean;
   /** Make `git show` for the landed commit fail (metadata-read failure). */
   gitShowFails?: boolean;
+  graphify?: 'success' | 'missing-graph' | 'missing-command' | 'probe-failure' | 'probe-exit' | 'update-error' | 'update-exit';
 }
 
 const ok = (stdout = '') => ({ status: 0, stdout, stderr: '' });
@@ -104,10 +107,24 @@ const ok = (stdout = '') => ({ status: 0, stdout, stderr: '' });
  * statistics — which is what R3 asserts on.
  */
 async function runIntegrate(scenario: Scenario) {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'parallix-task-2369-'));
-  fs.mkdirSync(path.join(root, 'backlog', 'tasks'), { recursive: true });
+  const root = registeredMkdtemp('parallix-task-2369-');
+  const baseRoot = scenario.graphify ? path.join(root, 'feature-base') : root;
+  const missionRoot = path.join(root, 'mission');
+  const graphCalls: Array<{ command: string; args: string[]; cwd?: string }> = [];
+  if (scenario.graphify) {
+    for (const worktree of [root, baseRoot, missionRoot]) {
+      fs.mkdirSync(worktree, { recursive: true });
+      if (worktree === baseRoot && scenario.graphify === 'missing-graph') { continue; }
+      fs.mkdirSync(path.join(worktree, 'graphify-out'));
+      fs.writeFileSync(path.join(worktree, 'graphify-out', 'graph.json'), JSON.stringify({ worktree }));
+    }
+    mock.method(missionUtils, 'resolveMissionBaseBranch', () => 'feature/base');
+    mock.method(missionUtils, 'resolveBaseWorktree', () => baseRoot);
+    mock.method(missionUtils, 'resolveWorktree', () => missionRoot);
+  }
+  fs.mkdirSync(path.join(baseRoot, 'backlog', 'tasks'), { recursive: true });
   fs.writeFileSync(path.join(root, 'workflow.config.json'), JSON.stringify({ adapters: { verification: { command: 'true' } } }));
-  const taskFile = path.join(root, 'backlog', 'tasks', 'task.md');
+  const taskFile = path.join(baseRoot, 'backlog', 'tasks', 'task.md');
   fs.writeFileSync(taskFile, `status: ${scenario.taskStatus}\n`);
   const store = createFakeStore(scenario.missionStatus);
   const services = servicesFor(store);
@@ -122,11 +139,29 @@ async function runIntegrate(scenario: Scenario) {
   mock.method(missionUtils, 'conventionalWorktreePath', () => path.join(root, '..', SLUG));
   mock.method(missionUtils, 'resolveMainRepo', () => root);
   mock.method(missionUtils, 'missionTitle', () => 'fixture');
-  mock.method(missionUtils, 'updateGraphifyKnowledgeGraph', () => false);
+  mock.method(missionUtils, 'updateGraphifyKnowledgeGraph', options => {
+    if (!scenario.graphify) { return false; }
+    assert.equal(options!.rootDir, baseRoot);
+    assert.ok(order.includes('landed') && order.includes('stats'));
+    order.push('graphify');
+    return updateGraphifyKnowledgeGraph({ ...options, log: () => {},
+      commandRunner: (command, args, commandOptions) => {
+        graphCalls.push({ command, args, cwd: commandOptions?.cwd });
+        if (scenario.graphify === 'missing-command') { throw Object.assign(new Error('missing'), { code: 'ENOENT' }); }
+        if (scenario.graphify === 'probe-failure') { throw new Error('probe failed'); }
+        if (scenario.graphify === 'probe-exit') { return { status: 2 }; }
+        if (args[0] === '--help') { return { status: 0 }; }
+        if (scenario.graphify === 'update-error') { throw new Error('spawn failed'); }
+        if (scenario.graphify === 'update-exit') { return { status: 3 }; }
+        fs.writeFileSync(path.join(commandOptions.cwd, 'graphify-out', 'graph.json'), 'updated base');
+        return { status: 0 };
+      },
+    });
+  });
   mock.method(git, 'getCurrentBranch', () => `mission/${SLUG}`);
   mock.method(git, 'git', (args: string[]) => {
     const joined = args.join(' ');
-    if (joined.includes('branch --show-current')) { return ok('main\n'); }
+    if (joined.includes('branch --show-current')) { return ok(scenario.graphify ? 'feature/base\n' : 'main\n'); }
     if (joined.includes('log --format=%x00%H%x00%B')) {
       return ok(scenario.resume ? `\0${LANDED_SHA}\0mission/${SLUG}: fixture\n` : '\0other0\0unrelated subject\n');
     }
@@ -181,16 +216,26 @@ async function runIntegrate(scenario: Scenario) {
     return decide(request);
   };
 
+  const configuration = resolveConfiguration({ ...process.env, ...(scenario.graphify ? { GRAPHIFY_BIN: '/resolved/graphify' } : {}) });
   let error: Error | undefined;
+  let graphs: string[] = [];
+  let baseGraphDirExists = false;
   try {
-    await integrate.default([SLUG, '--no-integration-gates'], { configuration: resolveConfiguration(process.env), missionServicesFn: async () => services });
+    await integrate.default([SLUG, '--no-integration-gates'], { configuration, missionServicesFn: async () => services });
   } catch (e) {
     error = e as Error;
   } finally {
+    if (scenario.graphify) {
+      graphs = [root, baseRoot, missionRoot].map(worktree => {
+        const file = path.join(worktree, 'graphify-out', 'graph.json');
+        return fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : 'absent';
+      });
+      baseGraphDirExists = fs.existsSync(path.join(baseRoot, 'graphify-out'));
+    }
     mock.reset();
     fs.rmSync(root, { recursive: true, force: true });
   }
-  return { store, order, occurredAt, mission: store.mission(), error, exitCode };
+  return { store, order, occurredAt, mission: store.mission(), error, exitCode, graphCalls, graphs, baseGraphDirExists, baseRoot };
 }
 
 // --- R1 --------------------------------------------------------------------
@@ -606,3 +651,32 @@ test('R7/R8: PR-fix averages exclude unknown rounds and retain known zero', asyn
   const unavailable = stats.summarizeAgentWindow(rows.slice(2), window, { completedMissionKeys: new Set(['parallix::task-2371-unknown-a', 'parallix::task-2371-unknown-b']) });
   assert.deepEqual(unavailable.map(row => [(row as unknown as { prFixObservationCount: number }).prFixObservationCount, row.averageFixRounds]), [[0, null]]);
 });
+
+
+for (const graphify of ['success', 'missing-graph', 'missing-command', 'probe-failure', 'probe-exit', 'update-error', 'update-exit'] as const) {
+  test(`integration closes after Graphify ${graphify} on an isolated feature base (TASK-2725)`, async () => {
+    const result = await runIntegrate({ taskStatus: 'approved', missionStatus: 'integration', graphify });
+    assert.equal(result.error, undefined);
+    assert.equal(result.exitCode, 0);
+    assert.equal(result.mission.status, 'done');
+    assert.ok(result.mission.closedAt);
+    assert.equal(doneEvents(result.store).length, 1);
+    assert.deepEqual(result.order, ['landed', 'completed', 'stats', 'graphify']);
+    const primaryRoot = path.dirname(result.baseRoot);
+    assert.equal(result.graphs[0], JSON.stringify({ worktree: primaryRoot }));
+    assert.equal(result.graphs[2], JSON.stringify({ worktree: path.join(primaryRoot, 'mission') }));
+    if (graphify === 'missing-graph') {
+      assert.deepEqual(result.graphCalls, []);
+      assert.equal(result.baseGraphDirExists, false);
+      assert.equal(result.graphs[1], 'absent');
+    } else if (graphify === 'success' || graphify.startsWith('update-')) {
+      assert.deepEqual(result.graphCalls, [
+        { command: '/resolved/graphify', args: ['--help'], cwd: undefined },
+        { command: '/resolved/graphify', args: ['update', '.'], cwd: result.baseRoot },
+      ]);
+      assert.equal(result.graphs[1] === 'updated base', graphify === 'success');
+    } else {
+      assert.ok(result.graphCalls.every(call => call.args.join(' ') === '--help'));
+    }
+  });
+}

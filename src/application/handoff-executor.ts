@@ -339,7 +339,7 @@ export class HandoffExecutor {
         rootDir,
         log: internalLog,
         forceWithLease,
-        verificationArea: area || 'docs',
+        verificationArea: area,
       });
       if (!prResult.ok) {
         const msg = `Forgejo PR creation/update failed: ${prResult.error}`;
@@ -436,7 +436,7 @@ export class HandoffExecutor {
    */
   verifyHandoff(slug: string, options: { worktree?: string; recordedContract?: boolean } = {}):
     | { ok: false; error: string }
-    | { ok: true; missionDir: string; area: string | null; branch: string; rootDir: string } {
+    | { ok: true; missionDir: string; area: string; branch: string; rootDir: string } {
     const { git, missionUtils } = this.ports;
     const launchRoot = process.cwd();
     const rootDir = options.worktree || missionUtils.resolveWorktree(slug, { cwd: launchRoot }) || launchRoot;
@@ -445,7 +445,7 @@ export class HandoffExecutor {
       return { ok: false, error: `Mission directory not found for slug: ${slug}` };
     }
 
-    const area = missionDir ? missionUtils.findMissionArea(missionDir) : null;
+    const area = this.ports.verification.resolveEffectiveArea(undefined, rootDir, missionDir);
     const branch = missionUtils.missionBranchName(slug, rootDir);
     const current = git.getCurrentBranch(rootDir);
 

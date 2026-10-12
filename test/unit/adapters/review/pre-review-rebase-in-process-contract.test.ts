@@ -136,7 +136,7 @@ describe("02 pre-review rebase in-process", () => {
   });
 
   test('push-time gate failure whose output contains pre-push classifies as a gate failure', async () => {
-    const port = stubPort({ createPr: () => ({ ok: false, error: GATE_OUTPUT_WITH_PRE_PUSH }) });
+    const port = stubPort({ createPr: () => ({ ok: false, error: GATE_OUTPUT_WITH_PRE_PUSH, gateFailure: { area: 'lib', command: './scripts/verify-local.sh lib', exitCode: 1, stdout: '', stderr: GATE_OUTPUT_WITH_PRE_PUSH } }) });
     const previousLogger = setLogger({ log: () => {} });
     let result;
     try {
@@ -186,10 +186,12 @@ describe("02 pre-review rebase in-process", () => {
     assert.equal(result.hookOutput, hook!.output, 'raw hook output stays available to prompt builders');
   });
 
-  test('a pre-review rebase hook failure requests the hook bounce at most once', async () => {
+  test('a pre-review rebase hook failure requests the hook bounce at most once (TASK-2728)', async () => {
     const hookOutput = 'pre-commit hook rejected the commit: lint error';
     const continueCalls: string[][] = [];
+    let launches = 0;
     const port = stubPort({
+      startAgent: async () => { launches++; return { agent: 'codex', result: { status: 0 } }; },
       git: (args: string[]) => {
         if (args.includes('--continue')) { continueCalls.push(args); }
         return args.includes('rebase') && !args.includes('--show-current')
@@ -210,6 +212,7 @@ describe("02 pre-review rebase in-process", () => {
     const bounceRequests = result.failure?.kind === 'hook' ? result.failure.bounceRequests : -1;
     assert.equal(bounceRequests, 1, 'the in-process workflow requests the bounce exactly once');
     assert.deepEqual(continueCalls, [], 'no in-child retry: the caller owns the hook-retry budget');
+    assert.equal(launches, 0, 'hook interception starts neither hook nor completion repair agents');
   });
 
   test('genuine pre-commit failure on the pre-review safety commit reports hook evidence', async () => {

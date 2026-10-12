@@ -49,6 +49,7 @@ async function land(
   failCleanup = false,
 ): Promise<void> {
   let stagedTreeRead = false;
+  let hookRuns = 0;
   const { squashAndLand } = createSquashLanding({
     git: {
       git: (args: string[]) => {
@@ -66,7 +67,7 @@ async function land(
     backlog: { checkBacklogIntegrity: () => [] },
     missionPaths: { softResetTrailingBacklogNoise: () => false },
     productConfig: { isForgejoReviewEnabled: () => false },
-    checkout: { maybeUpdateGraphifyOnPrimary: () => {} },
+    checkout: {},
     gates: { isIntendedPayloadAtHead: () => false, runStagedTierGuards: () => tierGuards },
     landing: {
       createAbort: () => new Error('abort'),
@@ -75,15 +76,17 @@ async function land(
       closeLandedIntegrationOrAbort: async () => {},
       recordPostIntegrationStatsOrAbort: async () => {},
       cleanupMissionWorktree: () => true,
-      runPostIntegrateHookOrAbort: () => {},
+      updateGraphifyRepository: () => {},
+      runPostIntegrateHookOrAbort: () => { hookRuns++; },
     },
-    verification: { formatVerificationCommand: () => 'verify', captureVerifiedTreeProof: () => ({ ok: true, proof: {} }), assertVerifiedTreeProof: () => ({ ok: true }) },
+    verification: { formatVerificationCommand: () => 'verify', captureVerifiedTreeProof: () => { throw new Error('Implicit post-squash verification is forbidden'); }, assertVerifiedTreeProof: () => { throw new Error('Obsolete publication proof must not gate local landing'); } },
   } as never, { promoteTaskForIntegrationIfNeeded: async () => {} });
   await squashAndLand({
     slug: 'task-2627', context: { area: 'all' },
     missionServices: { store: { load: async () => ({ kind: 'found', mission: { status: 'integration' } }) } },
     baseWorktree: root, baseBranch: 'main', seams: {}, state: { temporaryStash: null, nextActionMessage: null },
   } as never, { branch: 'mission/task-2627', summary: 'land', landedFromSha: 'base', mainTaskFile: path.join(root, 'absent-task.md') });
+  assert.equal(hookRuns, 1, 'the configured post-squash hook still runs exactly once (TASK-2715)');
 }
 
 for (const withEdit of [false, true]) {

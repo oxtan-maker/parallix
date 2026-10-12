@@ -44,6 +44,8 @@ export function resolveConfiguration(source: Source): ParallixConfiguration {
     }),
     agents: Object.freeze({
       override: e('WORKFLOW_AGENT'),
+      customAdmissionHome: e('PARALLIX_CUSTOM_ADMISSION_HOME'),
+      customAdmissionRepository: e('PARALLIX_CUSTOM_ADMISSION_REPOSITORY'),
       watchdogEnabled: e('WORKFLOW_AGENT_NO_OUTPUT_WATCHDOG') !== '0',
       noOutputInitialMs: milliseconds(e('WORKFLOW_AGENT_NO_OUTPUT_INITIAL_MS')),
       noOutputIntervalMs: milliseconds(e('WORKFLOW_AGENT_NO_OUTPUT_INTERVAL_MS')),

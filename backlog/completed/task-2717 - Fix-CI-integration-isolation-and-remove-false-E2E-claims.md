@@ -1,8 +1,8 @@
 ---
 id: TASK-2717
 title: Fix CI integration isolation and remove false E2E claims
-status: backlog
-assignee: []
+status: done
+assignee: [codex]
 created_date: '2026-10-10 14:15'
 labels:
   - bug
@@ -16,7 +16,7 @@ ordinal: 218008
 ## Description
 
 <!-- SECTION:DESCRIPTION:BEGIN -->
-GitHub CI fails in web-create-draft-start-e2e.test.ts (draft confinement rejection for custom with Bubblewrap unavailable) and pre-review-launcher-configuration.test.ts (shared-conflict diagnostic after fake implementer already resolved the rebase).
+GitHub CI fails in the former web-create-draft-start-e2e.test.ts (now test/integration/presentation/web-create-draft-start-contract.test.ts) (draft confinement rejection for custom with Bubblewrap unavailable) and pre-review-launcher-configuration.test.ts (shared-conflict diagnostic after fake implementer already resolved the rebase).
 
 Investigate and fix the actual causes with focused reproductions. The workflow sets PARALLIX_NO_BUBBLEWRAP=1, which disables Bubblewrap but does not authorize unsandboxed mutation. The web fixture supplies a fake draft launcher yet reaches production confinement; trace all launch paths rather than assume the override covers them. Preserve production confinement.
 
@@ -47,3 +47,7 @@ Follow ADR 0057, existing owning suites, category registration, fixture cleanup 
 - [ ] #5 Docs updated to reflect any workflow or user-facing behavior change
 - [ ] #6 Bug-labeled missions include a red-to-green reproduction test that fails before the fix and passes after
 <!-- DOD:END -->
+
+## Implementation references
+
+Retained draft isolation reproduction: `test/integration/presentation/web-create-draft-start-contract.test.ts`. Retained resolved-rebase publication and credential reproductions: `test/integration/rebase/pre-review-launcher-configuration.test.ts`. The free-text intake/activation CLI journey suite was removed under the authoritative round-2 human review correction to reduce test runtime; its lane registration and CPU-budget entries were removed as well. Bounded context-command coverage remains in `test/integration/cli/mission-context-cli-contract.test.ts`.

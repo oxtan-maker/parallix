@@ -373,6 +373,41 @@ describe('Execute Mission characterization', () => {
     assert.equal(events[2].agent, 'codex');
   });
 
+  // TASK-2723: the explicit reviewer reaches the real review-loop selection.
+  async function reviewWithReviewer(reviewer: string | undefined, routing: Record<string, unknown> = {}) {
+    const fake = fakeReviewLoopPorts({ slug: 'task-1', routing: routing as never });
+    const { runtime, transitionStore } = executeFixture({ reviewLoopMechanisms: () => fake.ports });
+    const outcome = await buildExecuteWorkflow(runtime, transitionStore).execute(executeRequest({ agent: 'claude', reviewer }));
+    return { fake, outcome };
+  }
+
+  test('execute workflow: an explicit reviewer is selected for automatic review without substitution (TASK-2723)', async () => {
+    const { fake } = await reviewWithReviewer('qwen', { eligibleFamilies: () => ['claude', 'codex', 'qwen'] });
+    assert.equal(fake.launches.find(launch => launch.role === 'reviewer')?.agent, 'qwen', 'automatic selection would have nominated claude');
+    assert.deepEqual(fake.exits, []);
+  });
+
+  test('execute workflow: omitting the reviewer keeps automatic reviewer nomination (TASK-2723)', async () => {
+    const { fake } = await reviewWithReviewer(undefined, { eligibleFamilies: () => ['qwen', 'codex', 'claude'] });
+    assert.equal(fake.launches.find(launch => launch.role === 'reviewer')?.agent, 'qwen');
+  });
+
+  test('execute workflow: a blocked or unknown explicit reviewer is refused with a diagnostic, never replaced (TASK-2723)', async () => {
+    for (const reviewer of ['qwen', 'not-a-family']) {
+      const { fake } = await reviewWithReviewer(reviewer, { eligibleFamilies: () => ['claude', 'codex'] });
+      assert.deepEqual(fake.launches, [], `${reviewer} must not be replaced by another family`);
+      assert.deepEqual(fake.exits, [1]);
+      assert.match(fake.errors.join('\n'), new RegExp(`Unsupported reviewer: "${reviewer}" \\(blocked or unsupported\\)`));
+    }
+  });
+
+  test('execute workflow: an eligible explicit reviewer whose launcher is unavailable is refused, never replaced (TASK-2723)', async () => {
+    const { fake } = await reviewWithReviewer('qwen', { eligibleFamilies: () => ['claude', 'codex', 'qwen'], launcherStatus: (agent: string) => ({ supported: agent !== 'qwen', detail: 'qwen launcher missing' }) });
+    assert.deepEqual(fake.launches, []);
+    assert.deepEqual(fake.exits, [1]);
+    assert.match(fake.errors.join('\n'), /Unsupported reviewer: "qwen" \(launcher is not available\)/);
+  });
+
   test('execute workflow: real launch adapter retains the active mirror after a started-agent failure', async () => {
     const { runtime, transitionStore } = executeFixture({
       async selectLaunchAndRecord(opts: { authorityAlreadyActive?: boolean }) {

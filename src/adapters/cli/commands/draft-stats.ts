@@ -306,12 +306,13 @@ async function recordDraftRefinement(ctx: DraftWorkflowContext): Promise<{ ok: t
  * missing instead of starting the contract over.
  */
 async function repairDraftContract(slug: string, worktree: string, agent: string, refusal: string, {
+  configuration,
   startDraftAgentFn = startDraftAgent,
   logFn = fmt.log.plain,
   errorFn = fmt.log.plainError,
-}: Pick<DraftAdapterDependencies, "startDraftAgentFn" | "logFn" | "errorFn"> = {}) {
+}: Pick<DraftAdapterDependencies, "configuration" | "startDraftAgentFn" | "logFn" | "errorFn"> = {}) {
   const prompt = buildContractRepairPrompt(slug, { rootDir: worktree, worktree, refusal });
-  const { agent: actualAgent, result } = await startDraftAgentFn({ prompt, worktree, agent });
+  const { agent: actualAgent, result } = await startDraftAgentFn({ configuration, prompt, worktree, agent });
   if (result.error) {
     errorFn(fmt.status('FAIL', `Could not relaunch draft agent (${fmt.agent(actualAgent)}): ${result.error.message}`));
     return false;
@@ -805,6 +806,9 @@ function createDraftWorkflowAdapter(deps: DraftAdapterDependencies = {}): DraftW
           errorFn,
           exitFn,
           readAgentConfigOrExitFn,
+          configuration: merged.configuration,
+          selectAgentFn: merged.selectAgentFn,
+          startDraftAgentFn: merged.startDraftAgentFn,
         });
         if (!restartOk) {
           safeExit(1);
@@ -860,7 +864,7 @@ function createDraftWorkflowAdapter(deps: DraftAdapterDependencies = {}): DraftW
       let refined = await recordDraftRefinement(ctx);
       for (let attempt = 1; refined.ok === false && refined.contractIncomplete && attempt <= DRAFT_CONTRACT_REPAIR_ATTEMPTS; attempt += 1) {
         logFn(fmt.status('WARN', `${refined.message} Sending it back to the draft agent (attempt ${attempt}/${DRAFT_CONTRACT_REPAIR_ATTEMPTS}).`));
-        const repaired = await repairDraftContractFn(ctx.slug, ctx.targetWorktree, ctx.actualAgent || ctx.agent, refined.message, { logFn, errorFn });
+        const repaired = await repairDraftContractFn(ctx.slug, ctx.targetWorktree, ctx.actualAgent || ctx.agent, refined.message, { configuration: merged.configuration, startDraftAgentFn: merged.startDraftAgentFn, logFn, errorFn });
         if (!repaired) { break; }
         try {
           enforceDraftCommitSafetyFn({ slug: ctx.slug, worktree: ctx.targetWorktree, logFn, plumbingLogFn });

@@ -1,6 +1,7 @@
 // @ts-nocheck -- TASK-2328: partial test doubles from ESM seam migration; resolve in follow-up
 
 import { resolveConfiguration } from '../../../src/composition/config.js';
+import { resolveBlockContext } from '../../../src/adapters/agents/agent-block-selection.js';
 import test, { mock } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'fs';
@@ -163,11 +164,12 @@ test('startAgent persists a block via updateAgentBlock when limit-hit detector f
       return { path: path.join(tmpRoot, 'agents.local.json') };
     };
 
-    // Use a fake launcher table by overriding startAgent through opts.detectLimitHitFn etc.
-    // The actual launcher is invoked by agents.js using LAUNCHERS map; we cannot inject it via opts.
-    // Instead we exercise the retry path by pinning agentOverride; the detector hits once on first launch
-    // and selectAgent picks the second-choice agent (codex).
-    // installPathLaunchers installs bare-name launchers on PATH and configures the command probe.
+    // Keep both block reads on the same injected authority as the recorded
+    // writes. Falling back must not initialize an unrelated SQLite database
+    // (and charge its cold startup to this bounded retry contract).
+    const runtimeBlockContextFn = (_step, tried) => resolveBlockContext(
+      order, tried, new Set(blocks.map(block => block.agent))
+    );
     installPathLaunchers(tmpRoot);
     const previousAgent = process.env.WORKFLOW_AGENT;
     delete process.env.WORKFLOW_AGENT;
@@ -181,6 +183,7 @@ test('startAgent persists a block via updateAgentBlock when limit-hit detector f
         updateAgentBlockFn,
         selectAgentFn,
         isAgentBlockedFn: () => false,
+        runtimeBlockContextFn,
         log: () => {},
         ...fakeStartAgentOptions()
       });
@@ -229,6 +232,9 @@ test('startAgent does not loop forever when WORKFLOW_AGENT is pinned and that ag
         detectLimitHitFn,
         updateAgentBlockFn,
         selectAgentFn,
+        runtimeBlockContextFn: (_step, tried) => resolveBlockContext(
+          config.steps.review.eligible, tried, new Set(blocks.map(block => block.agent))
+        ),
         log: () => {},
         ...fakeStartAgentOptions()
       });
@@ -257,7 +263,11 @@ test('startAgent throws when every eligible agent hits the limit', async () => {
     };
 
     const detectLimitHitFn = () => ({ until: '2026-05-01 23', source: 'fallback' });
-    const updateAgentBlockFn = () => ({ path: 'noop' });
+    const blocks = new Set<string>();
+    const updateAgentBlockFn = (agent: string) => {
+      blocks.add(agent);
+      return { path: 'noop' };
+    };
 
     installPathLaunchers(tmpRoot);
     const previousAgent = process.env.WORKFLOW_AGENT;
@@ -272,6 +282,8 @@ test('startAgent throws when every eligible agent hits the limit', async () => {
           detectLimitHitFn,
           updateAgentBlockFn,
           selectAgentFn,
+          isAgentBlockedFn: (agent: string) => blocks.has(agent),
+          runtimeBlockContextFn: (_step, tried) => resolveBlockContext(order, tried, blocks),
           log: () => {},
           ...fakeStartAgentOptions()
         }),

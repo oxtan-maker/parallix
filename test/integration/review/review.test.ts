@@ -32,9 +32,7 @@ const verifyReviewModule = mockModule<typeof import('../../../src/adapters/revie
 const rebaseBeforeReviewRoundModule = mockModule<typeof import('../../../src/adapters/review/rebase.js')>('../../../src/adapters/review/rebase.js', import.meta.url);
 const pollForReviewModule = mockModule<typeof import('../../../src/adapters/review/review-polling.js')>('../../../src/adapters/review/review-polling.js', import.meta.url);
 const pollForDispositionModule = mockModule<typeof import('../../../src/adapters/review/review-polling.js')>('../../../src/adapters/review/review-polling.js', import.meta.url);
-// applyAgentFallback and maybeUpdateGraphifyBeforeReview live in review-agent-fallback.js
 // (moved there during the review-loop migration); mock that module, not review-loop.js.
-const maybeUpdateGraphifyBeforeReviewModule = mockModule<typeof import('../../../src/adapters/review/review-agent-fallback.js')>('../../../src/adapters/review/review-agent-fallback.js', import.meta.url);
 const getLatestReviewForPrModule = mockModule<typeof import('../../../src/adapters/forgejo/forgejo.js')>('../../../src/adapters/forgejo/forgejo.js', import.meta.url);
 const getLatestDispositionForPrModule = mockModule<typeof import('../../../src/adapters/forgejo/forgejo.js')>('../../../src/adapters/forgejo/forgejo.js', import.meta.url);
 const getLatestDispositionModule = mockModule<typeof import('../../../src/adapters/forgejo/forgejo.js')>('../../../src/adapters/forgejo/forgejo.js', import.meta.url);
@@ -58,7 +56,6 @@ const { rebaseBeforeReviewRound } = rebaseBeforeReviewRoundModule;
 const { pollForReview } = pollForReviewModule;
 const { pollForDisposition } = pollForDispositionModule;
 const { POLL_TIMEOUT, isPollTimeout } = pollForReviewModule;
-const { maybeUpdateGraphifyBeforeReview } = maybeUpdateGraphifyBeforeReviewModule;
 const { getLatestReviewForPr } = getLatestReviewForPrModule;
 const { getLatestDispositionForPr } = getLatestDispositionForPrModule;
 const { getLatestDisposition } = getLatestDispositionModule;
@@ -714,73 +711,6 @@ test('resolvePollTimeoutMs honours AUTONOMOUS_REVIEW_POLL_TIMEOUT_MS env overrid
     if (previous === undefined) delete process.env.AUTONOMOUS_REVIEW_POLL_TIMEOUT_MS;
     else process.env.AUTONOMOUS_REVIEW_POLL_TIMEOUT_MS = previous;
   }
-});
-
-test('maybeUpdateGraphifyBeforeReview skips cleanly when graphify is missing', () => {
-  const logs = [];
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'review-graphify-missing-'));
-  fs.mkdirSync(path.join(root, 'graphify-out'));
-  fs.writeFileSync(path.join(root, 'graphify-out', 'graph.json'), '{}\n');
-
-  const result = maybeUpdateGraphifyBeforeReview(root, {
-    commandRunner() {
-      const error = new Error('missing');
-// @ts-expect-error -- Legacy fixture intentionally accesses runtime-only `code` absent from its inferred mock shape.
-      error.code = 'ENOENT';
-      throw error;
-    },
-    log(message) {
-      logs.push(message);
-    }
-  });
-  fs.rmSync(root, { recursive: true, force: true });
-
-  assert.deepEqual(result, {
-    updated: false,
-    skipped: true,
-    reason: 'missing-command'
-  });
-  assert.ok(logs.some(line => line.includes('graphify not found')));
-});
-
-test('maybeUpdateGraphifyBeforeReview runs graphify update in the mission worktree when available', () => {
-  const calls = [];
-  const logs = [];
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'review-graphify-update-'));
-  fs.mkdirSync(path.join(root, 'graphify-out'));
-  fs.writeFileSync(path.join(root, 'graphify-out', 'graph.json'), '{}\n');
-
-  const result = maybeUpdateGraphifyBeforeReview(root, {
-    commandRunner(command, args, options = {}) {
-      calls.push({ command, args, options });
-      return { status: 0, stdout: '', stderr: '' };
-    },
-    log(message) {
-      logs.push(message);
-    }
-  });
-
-  assert.deepEqual(result, {
-    updated: true,
-    skipped: false
-  });
-  assert.equal(calls.length, 2);
-  const expectedGraphifyCommand = process.env.GRAPHIFY_BIN || 'graphify';
-  assert.deepEqual(calls[0], {
-    command: expectedGraphifyCommand,
-    args: ['--help'],
-    options: {}
-  });
-  assert.deepEqual(calls[1], {
-    command: expectedGraphifyCommand,
-    args: ['update', '.'],
-    options: {
-      cwd: root,
-      stdio: 'inherit'
-    }
-  });
-  assert.ok(logs.some(line => line.includes('Updating graphify knowledge graph...')));
-  fs.rmSync(root, { recursive: true, force: true });
 });
 
 test('pollForDisposition misses comment if created_at is slightly before sinceIso (clock skew)', async () => {

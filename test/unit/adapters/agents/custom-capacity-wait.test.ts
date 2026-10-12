@@ -24,3 +24,16 @@ test('capacity admission immediately returns a free lease and propagates storage
     throw new Error('storage unavailable');
   }), /storage unavailable/);
 });
+
+test('waiting admission preserves the slot until release and propagates a cancelled wait (TASK-2727)', async () => {
+  let occupied = true;
+  let released = 0;
+  const lease = { bindChild() {}, release() { released++; } };
+  const acquired = await waitForCustomCapacity('/mission', () => {}, async () => occupied ? null : lease,
+    async () => { occupied = false; });
+  assert.equal(released, 0, 'waiting does not release the newly admitted session');
+  acquired.release();
+  assert.equal(released, 1);
+  await assert.rejects(waitForCustomCapacity('/mission', () => {}, async () => null,
+    async () => { throw new Error('cancelled'); }), /cancelled/);
+});

@@ -131,6 +131,7 @@ export function makePorts(recorder: Recorder, overrides: Record<string, unknown>
       runPhaseGates: async () => ({ ok: true, skipped: true, executed: 0, failedGate: null, error: null }) as any,
     },
     verification: {
+      resolveEffectiveArea: () => 'workflow',
       formatVerificationCommand: () => 'npm run typecheck',
       createVerificationProofIdentity: () => ({ ok: true, identity: 'proof-1' }),
       readReusableVerificationProof: () => ({ ok: false, error: 'no proof' }),

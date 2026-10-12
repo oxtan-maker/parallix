@@ -62,3 +62,5 @@ If the human who may approve integration uses a Forgejo login other than `human`
 - You can leave an agent password blank to skip that token on this machine.
 - Re-running `px setup` lets you change config and rotate the local token files.
 - `px setup-review` still exists as a narrower Forgejo-only repair path if you only need to refresh token or remote wiring.
+
+When pre-review rebase finishes but publication fails, Parallix reports the publication error or missing token. Repair the reported credentials, remote or provider problem before retrying review. A failed verification gate remains a gate failure; resolved Git conflicts are not reported as still outstanding.

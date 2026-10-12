@@ -278,10 +278,12 @@ function detectLimitHit({
     if (!detected) {return null;}
     if ('reroute' in detected) { return detected; }
     ({ target, source, reason } = detected);
-  } else if (signal !== null && signal !== undefined) {
+  } else if (signal !== null && signal !== undefined && signal !== 'SIGTERM') {
     // Agent was killed by a signal (e.g. SIGINT/Ctrl-C) but no limit-hit
     // pattern matched. Apply a short-term block so the next invocation
-    // selects a different agent instead of re-picking the same one.
+    // selects a different agent instead of re-picking the same one. SIGTERM
+    // is excluded (TASK-2729): an unexpected termination is a per-invocation
+    // failure, so the session falls back and the agent stays selectable.
     target = new Date(now.getTime() + SIGINT_SHORT_BLOCK_MINUTES * 60 * 1000);
     source = 'sigint';
     reason = `sigint: process terminated by ${signal}`;

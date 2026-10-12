@@ -548,6 +548,8 @@ test('SC1 reverse: all durable-IO files under src/ are present in the inventory'
     'src/adapters/git/worktree.ts',
     // Verification proofs — infrastructure metadata, not a domain concept
     'src/adapters/verification/verification.ts',
+    // Exact proof inputs read checkout and runtime metadata, not domain state.
+    'src/adapters/verification/verification-proof-inputs.ts',
     // Temporary-root cleanup manifests are verification infrastructure, not domain state.
     'src/adapters/verification/temp-root-registry.ts',
     // Coverage normalization reads production source to detect erased types;
@@ -556,6 +558,9 @@ test('SC1 reverse: all durable-IO files under src/ are present in the inventory'
     // Process liveness reads one named /proc entry as bounded recovery
     // evidence. It stores nothing and owns no ADR 0053 concept (TASK-2373).
     'src/adapters/process/process-liveness.ts',
+    // The test-runner memory boundary reads cgroup accounting files under
+    // /proc and /sys/fs/cgroup; it stores nothing (TASK-2722).
+    'src/adapters/process/test-memory-cgroup.ts',
     // Red-green reproduction test tracking — reads mission docs for test markers
     'src/adapters/verification/redgreen.ts',
     // Gate planning reads pipeline configuration and observes worktrees; it

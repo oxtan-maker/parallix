@@ -1432,7 +1432,7 @@ test('consumeImplementerArtifacts with invalid JSON in resolution', async () => 
 });
 
 // ============================================================================
-// task-1264 end-to-end regression (AC #5)
+// task-1264 artifact-consumption regression (AC #5)
 // ============================================================================
 
 // Reproduces the original bug scenario: os.tmpdir() != /tmp (TMPDIR set, as in
@@ -1446,7 +1446,7 @@ test('consumeImplementerArtifacts with invalid JSON in resolution', async () => 
 // and that is what this regression still pins — including the TMPDIR
 // divergence that caused the original bug.
 test('REGRESSION task-1264: os.tmpdir() != /tmp + Forgejo off -> reviewer artifacts drive a recorded verdict', { concurrency: false }, async () => {
-  const scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'task-1264-e2e-'));
+  const scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'task-1264-artifacts-'));
   const origTmp = process.env.TMPDIR;
   process.env.TMPDIR = scratch; // make os.tmpdir() diverge from /tmp
   try {

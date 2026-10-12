@@ -60,7 +60,7 @@ function git(args, cwd) {
 // fall back to its own default of "today", which is what "the mission
 // closed" is actually supposed to mean.
 //
-// This test drives the real, unmocked integration path end-to-end against
+// This test drives the real, unmocked statistics persistence boundary against
 // a real git repo whose tip commit is deliberately stamped with a
 // three-week-old committer date (simulating the Variant A no-new-commit
 // fast-forward path) and asserts the resulting closed row still lands in

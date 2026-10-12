@@ -1,0 +1,20 @@
+{
+  "date": "2026-10-10",
+  "reason": "Existing publication contract now proves successful baseline mirroring and PR creation across a real Git fixture; includes waited-child CPU.",
+  "measurement": "PARALLIX_TEST_CPU_PROFILE_DIR=<isolated directory> PARALLIX_INTEGRATION_TEST_CPU_BUDGET_MS=1000 [PARALLIX_TEST_COVERAGE=1] npm test -- --integration-ci test/integration/forgejo/forgejo-publication-gate-failure-contract.test.ts",
+  "profiles": [
+    {
+      "profile": "plain",
+      "profileCpuMs": 149.997,
+      "focusedRunPeakCpuMs": 192,
+      "budgetMs": 250,
+      "marginOverPeakPercent": 30.2
+    },
+    {
+      "profile": "covered",
+      "profileCpuMs": 181.203,
+      "budgetMs": 250,
+      "marginOverPeakPercent": 38.0
+    }
+  ]
+}

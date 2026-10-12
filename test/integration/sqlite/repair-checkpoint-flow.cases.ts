@@ -14,7 +14,7 @@ import { createCheckpointCommand } from '../../../src/interfaces/cli/mission-wri
 import { missionId } from '../../../src/domain/mission.js';
 
 /** Real SQLite, CLI evidence writes and shell gate; agent and external review effects are isolated doubles. */
-export async function runRepairCheckpointFlow(mode: 'repair' | 'blocker' = 'repair') {
+export async function runRepairCheckpointFlow(mode: 'repair' | 'blocker' | 'force' = 'repair') {
   const id = missionId(SLUG);
   const command = 'bash ./repair-gate.sh';
   const evidence = 'test/integration/sqlite/mission-use-case-persistence-contract.test.ts';
@@ -36,10 +36,10 @@ export async function runRepairCheckpointFlow(mode: 'repair' | 'blocker' = 'repa
     const repair = new RepairCheckpointService(store);
     configureRepairCheckpoints(repair);
     const cli = createCheckpointCommand(checkpoints, () => SLUG);
-    const record = async (name: string) => {
+    const record = async (name: string, force = false) => {
       const loaded = await store.load(id); assert.equal(loaded.kind, 'found');
       if (loaded.kind !== 'found') { throw new Error('missing fixture'); }
-      await cli(['record', '--name', name, '--criterion', 'repair works', '--evidence', evidence,
+      await cli(['record', ...(force ? ['--force'] : []), '--name', name, '--criterion', 'repair works', '--evidence', evidence,
         '--next', 'rerun authorized gate and handoff', '--expected-version', String(loaded.version)]);
     };
     const recorder = makeRecorder();
@@ -63,7 +63,7 @@ export async function runRepairCheckpointFlow(mode: 'repair' | 'blocker' = 'repa
         if (loaded.kind !== 'found') { throw new Error('missing fixture'); }
         assert.equal(loaded.mission.checkpoints[2].repair?.command, command);
         assert.deepEqual(loaded.mission.checkpoints[0], retainedPrior);
-        if (mode === 'blocker') {
+        if (mode !== 'repair') {
           await cli(['report-invalid-contract', '--name', name!, '--command', command,
             '--diagnostic', 'fixture contract is invalid', '--authority-reason', 'operator owns locked check',
             '--proposed-correction', 'operator should select corrected owner', '--expected-version', String(loaded.version)]);
@@ -90,14 +90,25 @@ export async function runRepairCheckpointFlow(mode: 'repair' | 'blocker' = 'repa
     assert.equal(after.mission.checkpoints[2].repair?.verified, mode === 'repair');
     assert.equal(gateRuns, mode === 'repair' ? 2 : 1, 'only authorized gate reruns; blocker stops first attempt');
     const reloaded = new RepairCheckpointService(store);
-    if (mode === 'blocker') {
+    if (mode !== 'repair') {
       assert.equal((await reloaded.readBlocker(SLUG, 'CP-3'))?.command, command);
       const blockedAgain = await handoff();
       assert.equal(blockedAgain.ok, false);
       assert.match(blockedAgain.error ?? '', /human review/);
       assert.equal(launches, 1, result.error);
     }
-    return { mode, missingCheckpointRejected: true, launches, gateRuns, handoff: result.ok, priorProofRetained: true, repairCheckpoint: 'CP-3' };
+    let finalHandoff = result.ok;
+    if (mode === 'force') {
+      fs.writeFileSync(path.join(root, 'repaired'), 'fixed\n');
+      await record('CP-3', true);
+      assert.equal(await reloaded.readBlocker(SLUG, 'CP-3'), undefined);
+      const resolved = await handoff();
+      assert.equal(resolved.ok, true, resolved.error);
+      finalHandoff = resolved.ok;
+      assert.equal(gateRuns, 2, 'forced evidence still runs the required gate');
+      assert.equal(launches, 1, 'operator recovery needs no agent relaunch');
+    }
+    return { mode, missingCheckpointRejected: true, launches, gateRuns, handoff: finalHandoff, priorProofRetained: true, repairCheckpoint: 'CP-3' };
   } finally {
     configureRepairCheckpoints(undefined);
     await fixture.close();
@@ -105,6 +116,7 @@ export async function runRepairCheckpointFlow(mode: 'repair' | 'blocker' = 'repa
 }
 
 export function repairCheckpointFlowCases(): void {
+  test('forced CLI evidence clears a persisted blocker and reruns handoff gate', async () => { await runRepairCheckpointFlow('force'); });
   test('isolated repair persists before launch, reruns exact gate and hands off with retained proof (TASK-2695)', async () => { await runRepairCheckpointFlow(); });
   test('isolated first contract report persists across reload and stops retries and handoff (TASK-2695)', async () => { await runRepairCheckpointFlow('blocker'); });
 }

@@ -229,6 +229,65 @@ describe("active invocation overlap", () => {
       await fixture.dispose();
     }
   });
+
+  /** Real `active()` + real `ExecuteMissionService`; the review port records what it is asked to start. */
+  async function runActiveForReview(args: string[]) {
+    const fixture = await recorderFixture();
+    const reviews: Array<{ implementer: string; reviewer?: string }> = [];
+    const errors: string[] = [];
+    const exitCodes: number[] = [];
+    let executes = 0;
+    try {
+      const ports = makePorts(async () => successOutcome());
+      const service = new ExecuteMissionService({
+        ...ports,
+        autonomousReview: { start: async (request) => { reviews.push({ implementer: request.implementer, reviewer: request.reviewer }); } },
+      }, undefined, fixture.recorder);
+      await active(args, {
+        inferSlugFn: () => SLUG,
+        service: { execute: (request: ExecuteMissionRequest) => { executes += 1; return service.execute(request); } },
+        rootDir: '/tmp/project-task-9101',
+        exitFn: (code: number) => { exitCodes.push(code); },
+        logFn: () => {},
+        errorFn: (message: string) => { errors.push(message); },
+      });
+    } finally {
+      await fixture.dispose();
+    }
+    return { reviews, errors, exitCodes, executes };
+  }
+
+  test('TASK-2723: px active --implementer --reviewer carries the explicit reviewer into automatic review', async () => {
+    const run = await runActiveForReview([SLUG, '--implementer', 'claude', '--reviewer', 'codex']);
+    assert.deepEqual(run.reviews, [{ implementer: 'claude', reviewer: 'codex' }]);
+    assert.deepEqual(run.exitCodes, []);
+  });
+
+  test('TASK-2723: px active without --reviewer leaves automatic reviewer selection untouched', async () => {
+    const run = await runActiveForReview([SLUG, '--implementer', 'claude']);
+    assert.deepEqual(run.reviews, [{ implementer: 'claude', reviewer: undefined }]);
+  });
+
+  test('TASK-2723: px active refuses a --reviewer with no value before launching anything', async () => {
+    for (const args of [[SLUG, '--reviewer'], [SLUG, '--reviewer', '--implementer', 'claude']]) {
+      const run = await runActiveForReview(args);
+      assert.equal(run.executes, 0, 'no execution starts without a reviewer value');
+      assert.deepEqual(run.reviews, []);
+      assert.deepEqual(run.exitCodes, [1]);
+      assert.match(run.errors.join('\n'), /Missing value for --reviewer\. Usage: px active <slug> --reviewer <family>/);
+    }
+  });
+
+  test('TASK-2723: controller dispatch carries --reviewer on the active:execute request', async () => {
+    const dispatched: Array<{ agent?: string | null; reviewer?: string | null }> = [];
+    await active([SLUG, '--implementer', 'claude', '--reviewer', 'codex'], {
+      inferSlugFn: () => SLUG,
+      controller: { dispatch: async (request: { agent?: string | null; reviewer?: string | null }) => { dispatched.push(request); return { status: 'completed', value: { agent: 'claude' }, durableEvidence: [] }; } },
+      rootDir: '/tmp/project-task-9101',
+      exitFn: () => {}, logFn: () => {}, errorFn: () => {},
+    } as never);
+    assert.deepEqual(dispatched.map(({ agent, reviewer }) => ({ agent, reviewer })), [{ agent: 'claude', reviewer: 'codex' }]);
+  });
 });
 
 describe("active persisted Mission", () => {

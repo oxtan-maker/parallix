@@ -376,9 +376,10 @@ describe('Draft command', () => {
 
     {
       let exitCode = null;
-      let restartCount = 0;
+      let launchCount = 0;
+      const configuration = resolveConfiguration({ PARALLIX_NO_BUBBLEWRAP: '1' });
 
-      await runDraftCommand(['task-fix'], { configuration: resolveConfiguration(process.env),
+      await runDraftCommand(['task-fix'], { configuration,
         resolveTaskFileFn: () => ({ ok: true, taskFile: '/tmp/task.md' }),
         checkBacklogIntegrityFn: () => [],
         inferSlugFn: (slug) => slug,
@@ -393,7 +394,11 @@ describe('Draft command', () => {
         bootstrapBacklogTaskFn: () => true,
         readAgentConfigOrExitFn: () => ({}),
         selectAgentFn: () => 'codex',
-        startDraftAgentFn: async () => ({ agent: 'codex', result: { status: 0 } }),
+        startDraftAgentFn: async options => {
+          assert.equal(options.configuration, configuration, 'all draft launches keep composed configuration (TASK-2717)');
+          launchCount += 1;
+          return { agent: 'codex', result: { status: 0 } };
+        },
         transitionTaskFn: () => true,
         missionServicesFn,
         recordDraftImplementerFn: () => {},
@@ -408,10 +413,6 @@ describe('Draft command', () => {
               : { ok: true, [typeKey]: 'ai_sdlc' };
           };
         })(),
-        restartDraftAgentFn: async () => {
-          restartCount += 1;
-          return true;
-        },
         enforceDraftCommitSafetyFn: () => {},
         exitFn: (code) => { exitCode = code; },
         logFn: () => {},
@@ -419,7 +420,7 @@ describe('Draft command', () => {
       });
 
       assert.equal(exitCode, null);
-      assert.equal(restartCount, 1);
+      assert.equal(launchCount, 2, 'classification restart must use the same isolated launcher (TASK-2717)');
     }
 
     {

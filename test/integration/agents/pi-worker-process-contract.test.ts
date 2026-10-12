@@ -51,3 +51,33 @@ test('Pi worker interruption settles and reaps the isolated process (TASK-2668.0
   assert.equal(child?.signalCode, 'SIGTERM');
   assert.equal(child?.connected, false);
 });
+
+for (const signal of ['SIGTERM', 'SIGINT'] as const) {
+  test(`parent ${signal} during a Pi worker run re-raises instead of returning a retryable result (TASK-2729)`, { timeout: 15000 }, async t => {
+    const worktree = mkdtemp('pi-worker-cancel-');
+    const environment = { ...process.env, PARALLIX_NO_BUBBLEWRAP: '1' };
+    const before = process.listeners(signal);
+    const realKill = process.kill.bind(process);
+    const selfSignals: Array<string | number | undefined> = [];
+    let child: ChildProcess | undefined;
+    process.kill = ((pid: number, sig?: string | number) => {
+      if (pid === process.pid && sig !== 0) { selfSignals.push(sig); return true; }
+      return realKill(pid, sig as NodeJS.Signals);
+    }) as typeof process.kill;
+    t.after(() => {
+      process.kill = realKill;
+      if (child && child.exitCode === null && child.signalCode === null) { child.kill('SIGKILL'); }
+    });
+    await startPiWorker({ configuration: resolveConfiguration(environment), prompt: 'hang', worktree,
+      teeOptions: { stdoutSink: { write() {} }, stderrSink: { write() {} }, onSpawn(spawned) {
+        child = spawned;
+        // Invoke only the client's own listener; the test runner owns the others.
+        const own = process.listeners(signal).filter(listener => !before.includes(listener));
+        setImmediate(() => own.forEach(listener => (listener as (_s: string) => void)(signal)));
+      } },
+    }, { command: 'pi', args: [], options: { env: environment } }, async () => {}, worker);
+    assert.deepEqual(selfSignals, [signal]);
+    if (child && child.exitCode === null && child.signalCode === null) { await new Promise(resolve => child!.once('exit', resolve)); }
+    assert.equal(child?.connected, false);
+  });
+}

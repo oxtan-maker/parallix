@@ -221,7 +221,9 @@ export async function rebaseBeforeReviewRound(slug: string, {
   let hookEvidence: PreReviewRebaseHookEvidence | null = null;
   let hookBounceRequests = 0;
   let pushFailureOutput: string | null = null;
-  let pushAttempted = false;
+  let publicationAttempted = false;
+  let pushGate: PreReviewRebaseGateEvidence | null = null;
+  let credentialFailure: string | null = null;
   let conflictClassification: MissionConflictClassification | null = null;
 
   const port = createPort({ ...rebaseWorkflowOptions, gitFn });
@@ -245,11 +247,22 @@ export async function rebaseBeforeReviewRound(slug: string, {
   // Present so the workflow routes hook failures into the seam above rather
   // than the legacy hint-and-exit path; the recording seam ignores the store.
   port.missionServices = async () => ({ store: null });
+  const innerReadToken = port.readToken;
+  port.readToken = (user) => {
+    publicationAttempted = true;
+    const token = innerReadToken(user);
+    if (!token) { credentialFailure = `No Forgejo token found for user "${user}". Push failed.`; }
+    return token;
+  };
   const innerCreatePr = port.createPr;
   port.createPr = (branch, user, token, options) => {
-    pushAttempted = true;
+    publicationAttempted = true;
     const pushResult = innerCreatePr(branch, user, token, options);
-    if (!pushResult.ok) { pushFailureOutput = pushResult.error || 'push rejected'; }
+    if (!pushResult.ok) {
+      pushFailureOutput = pushResult.error || 'push rejected';
+      const gate = pushResult.gateFailure;
+      pushGate = gate ? { ...gate, exitCode: gate.exitCode ?? 1 } : null;
+    }
     return pushResult;
   };
   const innerResolveConflicts = port.resolveConflictsForMission;
@@ -276,7 +289,7 @@ export async function rebaseBeforeReviewRound(slug: string, {
     return { ok: true, sharedFileConflicts: false, hookFailure: false };
   }
 
-  const sharedFiles = finalConflicts?.sharedFiles || [];
+  const sharedFiles = publicationAttempted ? [] : finalConflicts?.sharedFiles || [];
   const sharedFileConflicts = sharedFiles.length > 0;
 
   if (finalHook) {
@@ -289,17 +302,24 @@ export async function rebaseBeforeReviewRound(slug: string, {
     };
   }
 
-  if (finalPushOutput !== null) {
+  if (pushGate !== null) {
     // The push-time check is the verification gate the pre-push hook runs. The
     // failure class follows that inner check, never the enclosing hook name —
     // gate output mentioning `pre-push` stays a gate failure (ADR 0048).
-    const gate = buildPushGateEvidence(port, slug, worktree, finalExitCode, finalPushOutput);
+    const gate = pushGate as PreReviewRebaseGateEvidence;
     error(gate.stderr);
     error(fmt.status('FAIL', `Pre-review push gate failed for area "${gate.area}" (exit ${gate.exitCode}).`));
     return {
       ok: false, sharedFileConflicts, hookFailure: false,
       failure: { kind: 'gate', operation: 'push', gate },
     };
+  }
+
+  if (publicationAttempted) {
+    const output = finalPushOutput ?? credentialFailure ?? `publication exited with status ${finalExitCode}`;
+    error(fmt.status('FAIL', `Pre-review publication failed: ${output}`));
+    return { ok: false, sharedFileConflicts: false, hookFailure: false,
+      failure: { kind: 'other', operation: 'push', output } };
   }
 
   if (sharedFileConflicts) {
@@ -317,37 +337,6 @@ export async function rebaseBeforeReviewRound(slug: string, {
   error(fmt.status('FAIL', `Rebase failed before launching reviewer for ${fmt.branch(`mission/${slug}`)}.`));
   return {
     ok: false, sharedFileConflicts: false, hookFailure: false,
-    failure: { kind: 'other', operation: pushAttempted ? 'push' : 'rebase', output: `rebase workflow exited with status ${finalExitCode}` },
-  };
-}
-
-/**
- * Gate evidence for a push-time failure. Area and command are resolved through
- * the same port methods the rebase workflow itself uses, so the reported command
- * is the mission's real verification command.
- */
-function buildPushGateEvidence(
-  port: RebaseWorkflowPort,
-  slug: string,
-  worktree: string,
-  exitCode: number,
-  output: string,
-): PreReviewRebaseGateEvidence {
-  let area = 'docs';
-  let command = `px rebase ${slug} --push`;
-  try {
-    const missionDir = port.findMissionDir(slug, worktree);
-    if (missionDir) { area = port.findMissionArea(missionDir) || area; }
-    command = port.formatVerificationCommand(area, worktree) || command;
-  } catch (_) {
-    // Fall back to the push command itself; evidence must never throw.
-  }
-  return {
-    area,
-    command,
-    exitCode: exitCode || 1,
-    stdout: output,
-    stderr: output,
-    error: `Pre-review push-time verification gate failed for area "${area}"`,
+    failure: { kind: 'other', operation: 'rebase', output: `rebase workflow exited with status ${finalExitCode}` },
   };
 }

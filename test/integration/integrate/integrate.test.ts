@@ -19,14 +19,13 @@ const missionUtils = mockModule<typeof import('../../../src/adapters/filesystem/
 const integrateCommandModule = mockModule<typeof import('../../../src/adapters/cli/commands/integrate.js')>('../../../src/adapters/cli/commands/integrate.js', import.meta.url);
 const submitReviewRoundModule = mockModule<typeof import('../../../src/adapters/review/review-commands.js')>('../../../src/adapters/review/review-commands.js', import.meta.url);
 const ReviewStateModule = mockModule<typeof import('../../../src/adapters/review/review-state.js')>('../../../src/adapters/review/review-state.js', import.meta.url);
-const maybeUpdateGraphifyOnPrimaryModule = mockModule<typeof import('../../../src/adapters/cli/commands/integrate.js')>('../../../src/adapters/cli/commands/integrate.js', import.meta.url);
+const integrateHelpersModule = mockModule<typeof import('../../../src/adapters/cli/commands/integrate.js')>('../../../src/adapters/cli/commands/integrate.js', import.meta.url);
 const __mm1 = mockModule<typeof import('../../../src/adapters/sqlite/database-path-resolver.js')>('../../../src/adapters/sqlite/database-path-resolver.js', import.meta.url);
 const __mm2 = mockModule<typeof import('../../../src/adapters/git/git.js')>('../../../src/adapters/git/git.js', import.meta.url);
 await installModuleMocks();
 const integrateCommand = integrateCommandModule.default;
 const { submitReviewRound } = submitReviewRoundModule;
 const { ReviewState } = ReviewStateModule;
-const { maybeUpdateGraphifyOnPrimary } = maybeUpdateGraphifyOnPrimaryModule;
 const { mock } = test;
 
 const { resolveDatabasePath } = __mm1;
@@ -141,7 +140,7 @@ const {
   runPostIntegrateHookOrAbort,
   runPreCommitHookOrAbort,
   prepareNoisePatchForSquash
-} = maybeUpdateGraphifyOnPrimaryModule;
+} = integrateHelpersModule;
 const { conventionalWorktreePath, getPrimaryBranch } = missionUtils;
 
 const PRIMARY = getPrimaryBranch();
@@ -1615,74 +1614,6 @@ test('printIntegrationPreflight fails fast on an in-progress rebase in the integ
   } finally {
     console.log = originalLog;
   }
-});
-
-test('maybeUpdateGraphifyOnPrimary skips cleanly when graphify is missing', () => {
-  const logs = [];
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'integrate-graphify-missing-'));
-  fs.mkdirSync(path.join(root, 'graphify-out'));
-  fs.writeFileSync(path.join(root, 'graphify-out', 'graph.json'), '{}\n');
-
-  const result = maybeUpdateGraphifyOnPrimary(root, {
-    commandRunner() {
-      const error = new Error('missing');
-// @ts-expect-error -- Legacy fixture intentionally accesses runtime-only `code` absent from its inferred mock shape.
-      error.code = 'ENOENT';
-      throw error;
-    },
-    log(message) {
-      logs.push(message);
-    }
-  });
-  fs.rmSync(root, { recursive: true, force: true });
-
-  assert.deepEqual(result, {
-    updated: false,
-    skipped: true,
-    reason: 'missing-command'
-  });
-  assert.ok(logs.some(line => line.includes('graphify not found')));
-});
-
-test('maybeUpdateGraphifyOnPrimary runs graphify update in the primary worktree when available', () => {
-  const calls = [];
-  const logs = [];
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'integrate-graphify-update-'));
-  fs.mkdirSync(path.join(root, 'graphify-out'));
-  fs.writeFileSync(path.join(root, 'graphify-out', 'graph.json'), '{}\n');
-
-  const result = maybeUpdateGraphifyOnPrimary(root, {
-    commandRunner(command, args, options = {}) {
-      calls.push({ command, args, options });
-      return { status: 0, stdout: '', stderr: '' };
-    },
-    log(message) {
-      logs.push(message);
-    }
-  });
-
-  assert.deepEqual(result, {
-    updated: true,
-    skipped: false
-  });
-  const expectedGraphifyCommand = process.env.GRAPHIFY_BIN || 'graphify';
-  assert.deepEqual(calls, [
-    {
-      command: expectedGraphifyCommand,
-      args: ['--help'],
-      options: {}
-    },
-    {
-      command: expectedGraphifyCommand,
-      args: ['update', '.'],
-      options: {
-        cwd: root,
-        stdio: 'inherit'
-      }
-    }
-  ]);
-  assert.ok(logs.some(line => line.includes(`Updating graphify knowledge graph on ${PRIMARY}...`)));
-  fs.rmSync(root, { recursive: true, force: true });
 });
 
 test('parseStashPopCollisionFiles extracts already-exists paths from stash pop output', () => {

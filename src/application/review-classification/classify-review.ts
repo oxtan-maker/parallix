@@ -2,14 +2,14 @@ import { missionId } from '../../domain/mission.js';
 import { applyClassifierReview, classifierPolicyForReview, integrationRepairFinding, reviewAtCandidateRevision, successCriteriaFindings, type ClassifierReviewSource } from '../../domain/classifier-review.js';
 import { resolveReviewBaseline } from '../review-baseline.js';
 import { buildArchivedEvidencePacket, ARCHIVED_PACKING_VERSION } from './archived-packing.js';
-import { runPanel } from './panel.js';
+import { panelRequestBudget, runPanel } from './panel.js';
 import { PANEL_PROMPT_VERSION } from './panel-questions.js';
 import { RoundTelemetry } from './round-telemetry.js';
 import { ROUTING_POLICY_VERSION, type ClassificationRoute } from './routing-policy.js';
 import type { LoopContext, ReviewRound } from '../review-loop/round.js';
 import type { ReviewClassificationTelemetryPort } from '../ports/review-classification-telemetry.js';
 import type { ReviewClassificationPorts } from '../ports/review-classification.js';
-import { EvidenceOverBudgetError, EvidenceReadError, type MissionRevision } from '../ports/review-evidence.js';
+import { EvidenceOverBudgetError, EvidencePreparationError, EvidenceReadError, type MissionRevision } from '../ports/review-evidence.js';
 import type { Review, ReviewFinding, ReviewRevocationCause, ReviewRound as DomainReviewRound } from '../../domain/review.js';
 import type { Mission } from '../../domain/mission.js';
 import type { MissionStore, MissionVersion } from '../domain-ports.js';
@@ -47,6 +47,7 @@ const keyNoticeGiven = new WeakSet<object>();
 
 /** Typed cause of a failure which escaped evidence preparation, so telemetry can tell them apart. */
 function failureReason(error: unknown): string {
+  if (error instanceof EvidencePreparationError) { return 'evidence-preparation-fallback'; }
   if (error instanceof EvidenceOverBudgetError) { return 'evidence-over-budget'; }
   return error instanceof EvidenceReadError ? 'evidence-read-failed' : 'classifier-exception';
 }
@@ -248,7 +249,7 @@ async function decideAndCommit(context: LoopContext, round: ReviewRound, scope: 
     const availability = await ports.decision.available();
     if (availability.status !== 'available') { return await unavailableProvider(context, ports, availability, rows); }
     rows.note({ provider: availability.provider, model: availability.model });
-    const packet = await buildArchivedEvidencePacket(evidenceInput(scope), ports.evidence, request => ports.decision.requestBudget(request),
+    const packet = await buildArchivedEvidencePacket(evidenceInput(scope), ports.evidence, request => panelRequestBudget(request, ports.decision),
     scope.verifiedRepair && round.verifiedRevision === candidateRevision ? {
       status: 'passed', candidateRevision, scope: 'Configured pre-review verification',
       provenance: 'Parallix recorded successful pre-review verification at this exact candidate revision.',

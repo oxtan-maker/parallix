@@ -1,82 +1,44 @@
-/**
- * TASK-2413 CP-3: end-to-end propagation of the structured gate failure through
- * the Forgejo publication seam.
- *
- * Proves acceptance item 5: when publication runs the verifier and it fails, the
- * handoff caller receives the underlying structured gate failure (captured
- * stdout/stderr, exit code, command) rather than only a generic
- * "Forgejo PR creation/update failed" wrapper.
- *
- * These cross a real Git boundary (temp repo + configured verification command),
- * so they run in the integration layer.
- */
+// Local publication delegates verification to explicit lifecycle gates and CI.
+// Real Git fixture; remote pushes and Forgejo calls remain isolated doubles.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import fs from 'fs';
-import os from 'os';
-import path from 'path';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { spawnSync } from 'node:child_process';
 import { initCommittedRepository } from '../../fixtures/git-repository.js';
-import { createPr } from '../../../src/adapters/forgejo/forgejo-pr.js';
+import { mockModule, installModuleMocks } from '../../lib/module-mock.js';
+const git = mockModule<typeof import('../../../src/adapters/git/git.js')>('../../../src/adapters/git/git.js', import.meta.url);
+const pr = mockModule<typeof import('../../../src/adapters/forgejo/forgejo-pr.js')>('../../../src/adapters/forgejo/forgejo-pr.js', import.meta.url);
+await installModuleMocks();
 
-function withCommittedRepo(fn) {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'workflow-2413-pub-'));
-  try { fn(root); } finally { fs.rmSync(root, { recursive: true, force: true }); }
-}
-
-function writeWorkflowConfig(root, verificationCommand) {
-  fs.writeFileSync(path.join(root, 'workflow.config.json'), JSON.stringify({
-    product: { name: 'Task 2413 Pub' },
-    adapters: {
-      verification: { command: verificationCommand, defaultArea: 'docs' },
-      review: { provider: 'forgejo', baseUrl: 'http://localhost:3300', remote: 'review', repo: 'test-org/test-repo' },
-    },
-  }), 'utf8');
-}
-
-test('task-2413: publication verifier failure carries captured output through createPr', () => {
-  withCommittedRepo(root => {
-    initCommittedRepository(root);
-    // A verifier that emits diagnostic output and fails non-zero, mirroring a
-    // timing/resource-contention gate collapse under host contention.
-    const verificationCommand = "sh -c 'echo captured-stdout-line; echo captured-stderr-line 1>&2; exit 3'";
-    writeWorkflowConfig(root, verificationCommand);
-
-    const result = createPr('mission/task-9999', 'claude', 'token-123', {
-      rootDir: root,
-      log: () => {},
+test('PR publication mirrors baseline without running implicit verification (TASK-2715)', t => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'px-local-publication-'));
+  const marker = path.join(root, 'unexpected-verification');
+  const pushes: string[][] = [];
+  try {
+    initCommittedRepository(root, {
+      'workflow.config.json': JSON.stringify({ adapters: {
+        verification: { command: 'node -e "require(\'fs\').writeFileSync(\'unexpected-verification\',\'ran\');process.exit(7)"' },
+        missions: { primaryBranch: 'main' },
+        review: { provider: 'forgejo', baseUrl: 'http://localhost:3300', remote: 'review', repo: 'test-org/test-repo' },
+      } }),
     });
-
-    assert.equal(result.ok, false, 'a failing verification gate blocks publication');
-    assert.match(result.error || '', /verification gate failed/i);
-    assert.match(result.error || '', /exit code 3/);
-    // The captured diagnostic survives the wrapper — the task-2373.01 loss.
-    assert.match(result.error || '', /captured-stdout-line/);
-    assert.match(result.error || '', /captured-stderr-line/);
-    assert.deepEqual(result.gateFailure, {
-      area: 'docs',
-      command: verificationCommand,
-      cwd: fs.realpathSync(root),
-      exitCode: 3,
-      stdout: 'captured-stdout-line',
-      stderr: 'captured-stderr-line',
+    t.mock.method(git, 'git', (args: string[]) => {
+      if (args.includes('push')) { pushes.push(args); return { status: 0, signal: null, stdout: '', stderr: '' }; }
+      const result = spawnSync('git', args, { encoding: 'utf8' });
+      return { ...result, stdout: result.stdout ?? '', stderr: result.stderr ?? '' };
     });
-  });
-});
-
-test('task-2413: an exit-code-only wrapper string still propagates without crashing createPr', () => {
-  withCommittedRepo(root => {
-    initCommittedRepository(root);
-    // A verifier that fails with no stdout/stderr still yields a structured,
-    // non-empty gate failure (exit code preserved), never a hidden success.
-    const verificationCommand = 'sh -c "exit 2"';
-    writeWorkflowConfig(root, verificationCommand);
-
-    const result = createPr('mission/task-9998', 'claude', 'token-123', {
-      rootDir: root,
-      log: () => {},
+    const result = pr.createPr('mission/task-9999', 'fixture', 'fixture-token', {
+      rootDir: root, log: () => {},
+      apiCall: (method: string) => method === 'GET'
+        ? { ok: true, data: [] }
+        : { ok: true, data: { number: 1, html_url: 'http://localhost:3300/test-org/test-repo/pulls/1' } },
     });
-
-    assert.equal(result.ok, false);
-    assert.match(result.error || '', /exit code 2/);
-  });
+    assert.equal(result.ok, true, result.error ?? 'PR creation failed');
+    assert.equal(fs.existsSync(marker), false, 'publication must not execute the configured verifier');
+    assert.equal(pushes.length, 2, 'mirror primary and push mission without another test gate');
+    assert.ok(pushes.some(args => args.includes('main:main')));
+    assert.ok(pushes.some(args => args.includes('mission/task-9999')));
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });

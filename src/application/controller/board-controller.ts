@@ -353,6 +353,7 @@ export class BoardCommandController implements BoardCommandDispatcher {
       // canonical lowercase so a card such as TASK-2375SHUT can launch.
       slug: request.missionId.toLowerCase(),
       agent: request.agent ?? undefined,
+      reviewer: request.reviewer ?? undefined,
       capabilities: request.capabilities,
       cancellation: request.cancellation,
       // Board dispatch is fire-and-forget (void confirmAction()): the board

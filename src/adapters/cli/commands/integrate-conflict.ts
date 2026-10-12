@@ -2,9 +2,9 @@ import { AGENT_COMMAND_COMPLETION_CONTRACT } from '../../../application/agent-co
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { git, run } from '../../git/git.js';
+import { git } from '../../git/git.js';
 import * as fmt from '../../../application/presentation/cli-format.js';
-import { resolveWorktree, getConflictFiles, updateGraphifyKnowledgeGraph, getPrimaryWorktree, getPrimaryBranch, conventionalWorktreePath, missionBranchName, isMissionArtifact, resolveMissionBaseBranch } from '../../filesystem/mission-utils.js';
+import { resolveWorktree, getConflictFiles, getPrimaryWorktree, getPrimaryBranch, conventionalWorktreePath, missionBranchName, isMissionArtifact, resolveMissionBaseBranch } from '../../filesystem/mission-utils.js';
 import * as verification from '../../verification/verification.js';
 import { IntegrationAbort, shellQuote } from './integrate-post.js';
 import { integrationStashMarker } from '../../../application/integrate/base-worktree-repair.js';
@@ -13,17 +13,6 @@ import { isLandedSquashMessage, parseCommitMessageRecords } from './landed-squas
 export { findExistingSquashCommit, findLandedSquashOnBaseBranch, isLandedSquashMessage, parseCommitMessageRecords } from './landed-squash.js';
 
 const { formatVerificationCommand } = verification;
-
-/** @param {string} rootDir @param {{commandRunner?: Function, log?: Function}} opts */
-export function maybeUpdateGraphifyOnPrimary(rootDir = getPrimaryWorktree(), opts: {commandRunner?: Function, log?: Function} = {}) {
-  return updateGraphifyKnowledgeGraph({
-    rootDir,
-    commandRunner: opts.commandRunner || ((/** @type{string} */ command: string, /** @type{string[]} */ args: string[], /** @type{object} */ options: any) => run(command, args, options)),
-    log: opts.log,
-    startMessage: `Updating graphify knowledge graph on ${getPrimaryBranch(rootDir)}...`,
-    failureHint: 'Continuing without blocking integration.'
-  });
-}
 
 /** @param {string} rootDir @param {{gitRunner?: Function, tmpDir?: string}} opts */
 export function prepareNoisePatchForSquash(rootDir: string, opts: {gitRunner?: Function, tmpDir?: string} = {}) {

@@ -170,11 +170,11 @@ test('node parallix verify-env resolves from a temp dir without reading parallix
 
   try {
     const year = new Date().getFullYear().toString();
-    const slug = 'task-e2e-test';
+    const slug = 'task-external-target-test';
 
     const missionDir = path.join(tempDir, 'docs', 'missions', year, slug);
     fs.mkdirSync(missionDir, { recursive: true });
-    fs.writeFileSync(path.join(missionDir, 'MISSION.md'), '# Mission: E2E test\n\n## Gates\n- [ ] ./scripts/verify-local.sh docs\n');
+    fs.writeFileSync(path.join(missionDir, 'MISSION.md'), '# Mission: external target test\n\n## Gates\n- [ ] ./scripts/verify-local.sh docs\n');
 
     // Initialize git repo in temp dir so ensureStandaloneGitRepo does not create one
     runCommand('git', ['init'], { cwd: tempDir });

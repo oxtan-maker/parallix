@@ -131,7 +131,6 @@ describe("squash landing commit message", () => {
       checkout: {
         stashMainCheckoutIfNeeded: () => null,
         findLandedSquashOnBaseBranch: () => null,
-        maybeUpdateGraphifyOnPrimary: () => {},
       },
       landing: {
         createAbort: () => abort,
@@ -140,6 +139,7 @@ describe("squash landing commit message", () => {
         closeLandedIntegrationOrAbort: async () => {},
         recordPostIntegrationStatsOrAbort: async () => {},
         cleanupMissionWorktree: () => true,
+        updateGraphifyRepository: () => {},
         runPostIntegrateHookOrAbort: () => {},
       },
       gates: { isIntendedPayloadAtHead: () => false },

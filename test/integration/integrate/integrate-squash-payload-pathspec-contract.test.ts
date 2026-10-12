@@ -166,7 +166,7 @@ describe("squash payload pathspec quoting", () => {
       backlog: { checkBacklogIntegrity: () => [] },
       missionPaths: { softResetTrailingBacklogNoise: () => false },
       productConfig: { isForgejoReviewEnabled: () => false },
-      checkout: { maybeUpdateGraphifyOnPrimary: () => {} },
+      checkout: {},
       gates: { isIntendedPayloadAtHead: () => false },
       landing: {
         createAbort: () => abort,
@@ -175,6 +175,7 @@ describe("squash payload pathspec quoting", () => {
         closeLandedIntegrationOrAbort: async () => {},
         recordPostIntegrationStatsOrAbort: async () => {},
         cleanupMissionWorktree: () => true,
+        updateGraphifyRepository: () => {},
         runPostIntegrateHookOrAbort: () => {},
       },
       verification: {
@@ -274,7 +275,7 @@ describe("stale Backlog copy at landing", () => {
       backlog: { checkBacklogIntegrity: (rootDir: string) => checkBacklogIntegrity(rootDir), ...extraBacklog },
       missionPaths: { softResetTrailingBacklogNoise: () => false },
       productConfig: { isForgejoReviewEnabled: () => false },
-      checkout: { maybeUpdateGraphifyOnPrimary: () => {} },
+      checkout: {},
       gates: { isIntendedPayloadAtHead: () => false },
       landing: {
         createAbort: () => abort,
@@ -283,6 +284,7 @@ describe("stale Backlog copy at landing", () => {
         closeLandedIntegrationOrAbort: async () => {},
         recordPostIntegrationStatsOrAbort: async () => {},
         cleanupMissionWorktree: () => true,
+        updateGraphifyRepository: () => {},
         runPostIntegrateHookOrAbort: () => {},
       },
       verification: {
@@ -441,7 +443,7 @@ describe("unstaged task path at closeout", () => {
       },
       missionPaths: { softResetTrailingBacklogNoise: () => false },
       productConfig: { isForgejoReviewEnabled: () => false },
-      checkout: { maybeUpdateGraphifyOnPrimary: () => {}, rewriteWorktreePaths: () => {} },
+      checkout: { rewriteWorktreePaths: () => {} },
       gates: { isIntendedPayloadAtHead: () => false },
       landing: {
         createAbort: () => abort,
@@ -450,6 +452,7 @@ describe("unstaged task path at closeout", () => {
         closeLandedIntegrationOrAbort: async () => {},
         recordPostIntegrationStatsOrAbort: async () => {},
         cleanupMissionWorktree: () => true,
+        updateGraphifyRepository: () => {},
         runPostIntegrateHookOrAbort: () => {},
       },
       verification: {

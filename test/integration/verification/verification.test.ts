@@ -113,7 +113,7 @@ test('runVerificationGate executes the configured command via bash', () => {
     assert.deepEqual(calls, [{
       command: 'bash',
       args: ['-c', 'npm test'],
-      options: { cwd: root, stdio: 'inherit' },
+      options: { cwd: root, stdio: 'inherit', progressLabel: 'Repository verification (docs)' },
     }]);
   });
 });

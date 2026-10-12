@@ -81,6 +81,42 @@ export type ADR0053ConceptName =
  * any new durable file read or write must be registered here or the build fails.
  */
 export const ADR0053_PERSISTENCE_INVENTORY: readonly ADR0053BoundaryEntry[] = [
+  {
+    id: 'active-verification-proof-read',
+    concept: 'LargeArtifacts',
+    pathType: 'default',
+    fileLocation: 'src/adapters/verification/active-verification-proof.ts',
+    operation: 'read',
+    classification: 'generated-artifact',
+    cutoverTask: null,
+  },
+  {
+    id: 'active-verification-proof-write',
+    concept: 'LargeArtifacts',
+    pathType: 'default',
+    fileLocation: 'src/adapters/verification/active-verification-proof.ts',
+    operation: 'write',
+    classification: 'generated-artifact',
+    cutoverTask: null,
+  },
+  {
+    id: 'rebase-completion-recorder-read',
+    concept: 'LargeArtifacts',
+    pathType: 'default',
+    fileLocation: 'src/adapters/git/rebase-completion-recorder.ts',
+    operation: 'read',
+    classification: 'generated-artifact',
+    cutoverTask: null,
+  },
+  {
+    id: 'rebase-completion-recorder-write',
+    concept: 'LargeArtifacts',
+    pathType: 'default',
+    fileLocation: 'src/adapters/git/rebase-completion-recorder.ts',
+    operation: 'write',
+    classification: 'generated-artifact',
+    cutoverTask: null,
+  },
   // -----------------------------------------------------------------------
   // Mission — authoritative domain state, plus explicit legacy readers
   // -----------------------------------------------------------------------

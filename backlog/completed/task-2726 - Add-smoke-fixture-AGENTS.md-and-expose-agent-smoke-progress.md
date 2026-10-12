@@ -1,8 +1,8 @@
 ---
 id: TASK-2726
 title: Add smoke fixture AGENTS.md and expose agent-smoke progress
-status: backlog
-assignee: []
+status: done
+assignee: [codex]
 created_date: '2026-10-12 05:33'
 labels:
   - ai_sdlc

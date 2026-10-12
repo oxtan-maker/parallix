@@ -23,7 +23,7 @@ describe("active+approved recovery", async () => {
   // change/PR untouched.
   //
   // This drives the real MissionLifecycleService + SqliteMissionStore, so the
-  // workflow guard (decideMission) is exercised end to end. Red before the fix:
+  // workflow guard (decideMission) is exercised through the integration adapter. Red before the fix:
   // Branch A calls submitForReviewFn, whose handoff path returns the already
   // approved round unchanged and the workflow guard rejects it with
   // "A submitted review must be awaiting a reviewer decision". The submitForReviewFn

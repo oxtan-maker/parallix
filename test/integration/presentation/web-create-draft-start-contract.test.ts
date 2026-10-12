@@ -1,22 +1,8 @@
-// @ts-nocheck -- TASK-2706: isolated end-to-end proof of the web-create -> draft/start path.
-//
-// Criterion 2 (manual evidence): the fix must be proven by actually running the
-// real production intake path end to end, not by asserting a mocked store. This
-// test performs one real web/board mission creation followed by one real draft
-// against the real production draft adapter and the real SQLite store, all in an
-// isolated SQLite database + isolated git repository (no operator DB writes).
-//
-// It proves the whole contract at once:
-//   * the board mints a DB-owned `px-<NNNN>` identity (no Backlog task file),
-//   * `px draft` drafts that mission under the SAME identity without bailing on
-//     "no Backlog task file" (the pre-fix behaviour) and without minting a
-//     second identity for the same mission,
-//   * the persisted planning fields survive the round trip,
-//   * the draft reaches the contract-recording step (it launches the agent to
-//     record checkpoints/gates/nel bucket), which the pre-fix draft never did.
-//
-// Durable evidence recorded below is the command set + the observed identities,
-// captured as assertions in this rerunnable suite.
+// @ts-nocheck -- Controller/SQLite/Git integration contract (TASK-2706, TASK-2717).
+// Creates through the board controller and drafts through the production adapter.
+// All draft launches are injected; execute ports are controlled doubles with real
+// Mission transitions. Proves identity/contract persistence and Start wiring;
+// browser HTTP, full lifecycle, live agents and models are outside this suite.
 
 import { afterEach, test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -37,6 +23,7 @@ import { MissionCheckpointService } from '../../../src/application/mission-check
 import { MissionLifecycleService } from '../../../src/application/mission-lifecycle-service.js';
 import { makeExecutePorts } from '../../fixtures/execute-mission-ports.js';
 import { mkdtemp as registeredMkdtemp } from '../../helpers/temp-dir.js';
+import { registerTempRoot } from '../../bootstrap-parallix-home.js';
 import { resolveConfiguration } from '../../../src/composition/config.js';
 
 // The board backend starts in the isolated checkout, so the draft's main-repo
@@ -80,17 +67,51 @@ async function isolatedGitRepo() {
 afterEach(() => {
   clearOperatorStateCache();
   for (const directory of directories.splice(0)) {
-    try { childProcess.spawnSync('git', ['worktree', 'remove', '--force', directory], { cwd: previousCwd }); } catch {}
+    const worktrees = childProcess.spawnSync('git', ['worktree', 'list', '--porcelain'], { cwd: directory, encoding: 'utf8' }).stdout || '';
+    for (const line of worktrees.split('\n')) {
+      if (line.startsWith('worktree ') && line.slice(9) !== directory) {
+        const worktree = line.slice(9);
+        childProcess.spawnSync('git', ['worktree', 'remove', '--force', worktree], { cwd: directory });
+        fs.rmSync(worktree, { recursive: true, force: true });
+      }
+    }
     fs.rmSync(directory, { recursive: true, force: true });
   }
   process.chdir(previousCwd);
 });
 
 interface Isolated {
+  readonly launches: string[];
   readonly directory: string;
   readonly db: SqliteDatabaseAdapter;
   readonly store: SqliteMissionStore;
   readonly capabilities: ReturnType<typeof composeProductionCapabilities>;
+}
+
+async function recordContract(store: SqliteMissionStore, createdId: string) {
+  const brief = new MissionBriefService(store);
+  const checkpoints = new MissionCheckpointService(store);
+  const goal = await brief.update({
+    operationId: 'web-brief', missionId: missionId(createdId),
+    capabilities: new Set(['mission:context']),
+    patch: { goal: 'Ship the web board lifecycle', why: 'It is the mission', scope: 'draft then start' },
+  });
+  assert.equal(goal.status, 'completed', `brief must record: ${JSON.stringify(goal.error ?? goal.value)}`);
+  const gate = await brief.setGates({
+    operationId: 'web-gates', missionId: missionId(createdId),
+    capabilities: new Set(['mission:context']), gates: ['npm run verify'],
+  });
+  assert.equal(gate.status, 'completed', `gates must record: ${JSON.stringify(gate.error ?? gate.value)}`);
+  const nel = await brief.setPredictedNelBucket({
+    operationId: 'web-nel', missionId: missionId(createdId),
+    capabilities: new Set(['mission:context']), bucket: 'Medium',
+  });
+  assert.equal(nel.status, 'completed', `nel must record: ${JSON.stringify(nel.error ?? nel.value)}`);
+  const cp = await checkpoints.plan({
+    operationId: 'web-cp', missionId: missionId(createdId),
+    capabilities: new Set(['mission:context']), name: 'CP-1', description: 'record first Goal Check',
+  });
+  assert.equal(cp.status, 'completed', `checkpoint must plan: ${JSON.stringify(cp.error ?? cp.value)}`);
 }
 
 async function build(directory: string): Promise<Isolated> {
@@ -106,8 +127,13 @@ async function build(directory: string): Promise<Isolated> {
   // recording step reads the agent's launch facts, not a live process. This
   // keeps the suite hermetic (no opencode/codex invocation) while still proving
   // the draft advances past the previously-failing preflight.
+  const launches: string[] = [];
   const draftAdapterDeps = {
-    startDraftAgentFn: async () => ({ agent: 'custom', result: { status: 0 } }),
+    startDraftAgentFn: async ({ worktree }) => {
+      launches.push('draft');
+      if (launches.length > 1) { await recordContract(store, path.basename(worktree).match(/px-\d{4}$/)![0]); }
+      return { agent: 'custom', result: { status: 0 } };
+    },
   };
   const capabilities = composeProductionCapabilities(
     directory,
@@ -120,7 +146,7 @@ async function build(directory: string): Promise<Isolated> {
     db,
     { configuration: resolveConfiguration({ primaryWorktree: directory }), draftAdapterDeps },
   );
-  return { directory, db, store, capabilities };
+  return { directory, db, store, capabilities, launches };
 }
 
 // The board create payload the web board sends for a free-text mission.
@@ -141,7 +167,7 @@ function createPayload(requestKey: string, title: string) {
   };
 }
 
-test('web create then draft then start in isolated state (no operator DB writes)', async () => {
+test('web create draft completes through isolated launches without Bubblewrap (TASK-2717)', async () => {
   const directory = await isolatedGitRepo();
   const iso = await build(directory);
   try {
@@ -153,6 +179,7 @@ test('web create then draft then start in isolated state (no operator DB writes)
     const created = await controller.dispatch(createPayload('web-key-1', 'Web board mission'));
     assert.equal(created.status, 'completed', `create failed: ${JSON.stringify(created.error ?? created.value)}`);
     const createdId: string = created.value.missionId;
+    registerTempRoot(`${directory}-${createdId}`);
     assert.match(createdId, /^px-\d{4}$/, `board must mint a px-<NNNN> identity, got ${createdId}`);
 
     // The aggregate is persisted and live in the store (not a missing row).
@@ -176,6 +203,7 @@ test('web create then draft then start in isolated state (no operator DB writes)
       capabilities: new Set(['mission:intake']),
     });
     assert.equal(drafted.status, 'completed', `draft failed: ${JSON.stringify(drafted.error ?? drafted.value)}`);
+    assert.ok(iso.launches.length > 1, 'contract repair must use the injected isolated launcher (TASK-2717)');
     assert.equal(drafted.value.slug, createdId, 'draft must reuse the board-minted identity, not mint a new one');
 
     // The identity is unchanged after the draft: no second identity was minted
@@ -200,41 +228,10 @@ test('web create then draft then start in isolated state (no operator DB writes)
     assert.deepEqual(afterDraft.mission.labels, ['ai_sdlc'], 'labels must survive web create -> draft');
     assert.equal(afterDraft.mission.repositoryId, repositoryId('web-board-repo'), 'repository id must survive web create -> draft');
 
-    // The draft completes the DB-owned preflight the pre-fix code bailed on, but
-    // a real draft only leaves the mission `refined` once its agent has recorded
-    // the mission contract. This isolated run has no live agent, so it records
-    // the same planning fields the draft agent records in production (brief with
-    // scope, declared gates, predicted NEL bucket, one checkpoint) through the
-    // production use cases, then drives the real `refine` transition. Without
-    // the contract the domain refuses `refine`, so this is the same gate a real
-    // draft clears before the mission can leave the backlog.
-    const brief = new MissionBriefService(store);
-    const checkpoints = new MissionCheckpointService(store);
+    // The injected repair records planning through the same production use cases
+    // as an agent; the adapter must refine before returning.
     const refine = new MissionLifecycleService(store);
     const now = new Date().toISOString();
-    {
-      const goal = await brief.update({
-        operationId: 'web-brief', missionId: missionId(createdId),
-        capabilities: new Set(['mission:context']),
-        patch: { goal: 'Ship the web board lifecycle', why: 'It is the mission', scope: 'draft then start' },
-      });
-      assert.equal(goal.status, 'completed', `brief must record: ${JSON.stringify(goal.error ?? goal.value)}`);
-      const gate = await brief.setGates({
-        operationId: 'web-gates', missionId: missionId(createdId),
-        capabilities: new Set(['mission:context']), gates: ['npm run verify'],
-      });
-      assert.equal(gate.status, 'completed', `gates must record: ${JSON.stringify(gate.error ?? gate.value)}`);
-      const nel = await brief.setPredictedNelBucket({
-        operationId: 'web-nel', missionId: missionId(createdId),
-        capabilities: new Set(['mission:context']), bucket: 'Medium',
-      });
-      assert.equal(nel.status, 'completed', `nel must record: ${JSON.stringify(nel.error ?? nel.value)}`);
-      const cp = await checkpoints.plan({
-        operationId: 'web-cp', missionId: missionId(createdId),
-        capabilities: new Set(['mission:context']), name: 'CP-1', description: 'record first Goal Check',
-      });
-      assert.equal(cp.status, 'completed', `checkpoint must plan: ${JSON.stringify(cp.error ?? cp.value)}`);
-    }
     const refined = await refine.transition({
       operationId: 'web-refine', missionId: missionId(createdId),
       capabilities: new Set(['mission:transition']),
@@ -242,7 +239,7 @@ test('web create then draft then start in isolated state (no operator DB writes)
     });
     assert.equal(refined.status, 'completed', `refine must complete: ${JSON.stringify(refined.error ?? refined.value)}`);
     assert.equal(refined.value.to, 'refined', 'the mission must leave the backlog for refined');
-    assert.equal(refined.value.from, 'backlog', 'the refined transition starts from the backlog the board created');
+    assert.equal(afterDraft.mission.status, 'refined', 'the draft repair records the complete contract before refinement');
     assert.equal(refined.value.mission.id, createdId, 'refine must not rename the identity');
     // The persisted planning fields survive into the refined aggregate.
     assert.equal(refined.value.mission.brief?.scope, 'draft then start', 'the recorded scope must survive the refine');
@@ -253,8 +250,7 @@ test('web create then draft then start in isolated state (no operator DB writes)
     // --- Start: launch the drafted mission to active under the same id. ------
     // This drives the production board Start action: the board controller
     // dispatches `active:execute`, which runs the real ExecuteMissionService
-    // pipeline (preflight, workspace resolution, lifecycle synchronisation
-    // through the checked Mission boundary, launch, handoff and review). The
+    // pipeline with controlled execute ports and real lifecycle persistence. The
     // controller wires `active:execute` to the execute service, so this proves
     // the production Start wiring rather than a direct lifecycle transition.
     const launchedResult = await controller.dispatch({

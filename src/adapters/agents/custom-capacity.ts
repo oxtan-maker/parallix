@@ -1,13 +1,12 @@
 import type { ParallixConfiguration } from '../../application/ports/configuration.js';
 import { resolveCanonicalMaxConcurrentCustom, resolveCanonicalRepositoryRoot } from '../config/product-config.js';
 import { processIdentity } from '../process/process-liveness.js';
-import { initOperatorState } from '../sqlite/adapter-factory.js';
+import { initCustomAdmissionState } from '../sqlite/custom-admission-state.js';
+export { initCustomAdmissionState } from '../sqlite/custom-admission-state.js';
 import { SqliteCustomAgentLeaseRepository } from '../sqlite/custom-agent-lease-repository.js';
 
-export interface CustomCapacityReservation {
-  bindChild: (_pid: number | undefined) => void;
-  release: () => void;
-}
+import type { CustomCapacityReservation } from '../../application/ports/custom-agent-admission.js';
+export type { CustomCapacityReservation } from '../../application/ports/custom-agent-admission.js';
 
 /** Wait for admission without changing the selected agent or consuming a retry. */
 export async function waitForCustomCapacity(
@@ -27,12 +26,12 @@ export async function waitForCustomCapacity(
 }
 
 export async function tryAcquireCustomCapacity(rootDir?: string, configuration?: ParallixConfiguration): Promise<CustomCapacityReservation | null> {
-  const repositoryRoot = resolveCanonicalRepositoryRoot(rootDir);
+  const repositoryRoot = resolveCanonicalRepositoryRoot(configuration?.agents.customAdmissionRepository ?? rootDir);
   const capacity = resolveCanonicalMaxConcurrentCustom(repositoryRoot);
   if (!Number.isFinite(capacity)) { return { bindChild() {}, release() {} }; }
   const launcher = processIdentity(process.pid);
   if (!launcher) { throw new Error('Cannot establish launcher process identity for custom-agent admission'); }
-  const { db } = await initOperatorState({ configuration });
+  const { db } = await initCustomAdmissionState(configuration);
   const leases = new SqliteCustomAgentLeaseRepository(db);
   const leaseId = await leases.acquire(repositoryRoot, capacity, launcher);
   if (!leaseId) { return null; }
@@ -58,12 +57,13 @@ export async function tryAcquireCustomCapacity(rootDir?: string, configuration?:
 
 /** Test-only inspection helpers; production admission is the SQLite lease table. */
 export async function resetCustomCapacity(configuration?: ParallixConfiguration): Promise<void> {
-  const { db } = await initOperatorState({ configuration });
+  const { db } = await initCustomAdmissionState(configuration);
   await db.execute('DELETE FROM custom_agent_leases');
 }
 
 export async function activeCustomCapacityCount(configuration?: ParallixConfiguration): Promise<number> {
-  const { db } = await initOperatorState({ configuration });
+  const { db } = await initCustomAdmissionState(configuration);
   const rows = await db.query<{ count: number }>('SELECT COUNT(*) AS count FROM custom_agent_leases');
   return Number(rows[0]?.count || 0);
 }
+

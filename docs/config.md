@@ -152,6 +152,21 @@ verification area. When absent, verification is a successful no-op.
 `defaultArea` is an optional string, default `docs`, used when no explicit or
 diff-derived area is available.
 
+`px verify`, handoff, and autonomous review share successful active/review
+verification. Backlog task bookkeeping does not invalidate it. Completed rebases,
+including conflicts resolved in a terminal before restarting Parallix, advance
+the recorded SHA without repeating the check. Parallix records completion through
+a worktree-local Git `post-rewrite` hook that forwards existing hooks. New
+implementation changes or toolchain changes require fresh verification.
+Integration runs its explicitly configured checks. Local squash landing and
+review-baseline mirroring add no publication verification tests; downstream CI
+owns shared integration validation. The configured post-integration hook still
+runs after the squash, for example to build and install a local package.
+Repositories may choose to run tests in that hook.
+
+Captured external commands show terminal progress and completion marks with
+elapsed time. Redirected logs receive static start and completion lines.
+
 ```json
 {
   "adapters": {
@@ -492,19 +507,27 @@ without approval return them to the implementer. Conflicts, no votes, incomplete
 or invalid results, provider failures and stale revision/version results retain
 the general reviewer. No partial panel can approve.
 
-Packing uses cited paths, exact-path then unique-basename resolution, archived
-line windows and complete-file promotion. Small files can be supplied whole;
-large files use bounded anchors with declared omissions. The cited-path diff
-has a 15,000-byte allowance and the archived packet has a 90,000-byte ceiling,
-measured with the original question before promotion. This does not expand to
-a complete repair delta or enrich state from later checkpoints. Each final
-request also needs known provider accounting within 32,000 input tokens,
-30,000 state-plus-longest-question tokens and transport/provider limits.
-Unavailable pinned revisions/source or obligations that cannot fit defer the
-whole panel. `px stats` retains fallback reasons, including evidence, provider,
-conflict and stale-result failures.
+Re-review packets include the complete repair delta and changed paths even when
+the prior findings and response do not cite them. When both review subjects
+retain baselines, the repair is a comparison of their baseline-relative mission
+changes, excluding changes made only on main. Both baselines and main commits
+touching failure-cited paths are supplied as separate provenance, so a failure
+fixed by main remains visible. Missing baselines are explicitly labelled as a
+plain revision comparison that may include main changes.
 
-This baseline produced 17/46 supported decisions on the fitted development
+Complete selected candidate files provide context. Admission uses the decision
+provider's tokenizer accounting and transport limits, with no fixed diff or
+packet byte ceiling. Under token pressure, whole context files are omitted in
+descending token cost with explicit omissions; repair hunks, findings and other
+mandatory obligations are retained. Obligations that cannot fit defer the
+whole panel. No selectable candidate excerpt defers before any decision call
+and records `evidence-preparation-fallback`; token exhaustion records
+`evidence-over-budget`, while pinned read failures record `evidence-read-failed`.
+Each final panel question also needs known provider accounting within 32,000
+input tokens and 30,000 state-plus-longest-question tokens. `px stats` retains
+fallback reasons for evidence, provider, conflict and stale-result failures.
+
+The earlier archived packing baseline produced 17/46 supported decisions on the fitted development
 corpus and one supported approval in a frozen 10-case cohort. Development
 samples include synthetic and correlated repairs; the fresh cohort had only
 historical approvals and three preparation failures. These observations do not
@@ -512,8 +535,7 @@ establish production coverage, rejection recall, zero error or workflow savings.
 Scores are routing signals, not probabilities that the PR is correct.
 
 The operator will collect ten new regular-development samples over 1–2 days
-and evaluate them separately. Keep the questions, thresholds, route and packing
-fixed; retain per-question choices, probabilities, votes, actual models and
+and evaluate them separately. Keep the questions, thresholds and route fixed; retain per-question choices, probabilities, votes, actual models and
 bounded usage/cost with the panel outcome, revisions and evidence identity.
 Replay exported local measurements against the frozen policy, then audit the
 pinned source and original obligations. Report preparation failures, abstentions

@@ -87,7 +87,7 @@ test('task-2234 repro: runDeclaredGates rejects explanatory en-dash and double-d
 // ============================================================================
 
 async function withTempGitRepo(fn) {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'task-2234-e2e-'));
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'task-2234-rebound-'));
   try {
     childProcess.spawnSync('git', ['init', '-b', 'master'], { cwd: root });
     childProcess.spawnSync('git', ['config', 'user.email', 'test@example.com'], { cwd: root });

@@ -19,6 +19,16 @@ export class EvidenceReadError extends Error {
     this.oversize = oversize;
   }
 }
+/** Main commits touching failure-cited paths between the two review baselines. */
+export interface MainCommitEvidence {
+  readonly revision: string;
+  readonly paths: readonly string[];
+  readonly diff: string;
+}
+/** Selection found no candidate source excerpt, independently of token admission. */
+export class EvidencePreparationError extends Error {
+  readonly name = 'EvidencePreparationError';
+}
 /** Complete mandatory evidence cannot fit the decision budget; nothing is left to declare as a loss. */
 export class EvidenceOverBudgetError extends Error {
   readonly name = 'EvidenceOverBudgetError';
@@ -28,6 +38,8 @@ export interface ReviewEvidencePort {
   tree(_revision: string): Promise<readonly string[]>;
   source(_revision: string, _path: string): Promise<string>;
   diff(_prior: string, _candidate: string, _paths: readonly string[]): Promise<string>;
+  /** Main-side provenance restricted to failure-cited paths between pinned baselines. */
+  mainCommits(_beforeBaseline: string, _afterBaseline: string, _paths: readonly string[]): Promise<readonly MainCommitEvidence[]>;
   /** Mission interdiff of `before` and `after`, each measured against its own baseline. */
   missionInterdiff(_before: MissionRevision, _after: MissionRevision): Promise<MissionInterdiff>;
 }

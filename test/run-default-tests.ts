@@ -13,6 +13,8 @@ import { childCpuUsageModule } from './lib/child-cpu-usage.js';
 import { readCpuBudgetPolicy, suiteCpuBudget } from './lib/test-cpu-policy.mjs';
 import { checkoutTestTmpdir } from './lib/test-tmpdir.js';
 import { assertValidTestLayout } from './lib/test-layout-validation.js';
+import { MEMORY_BOUNDARY_ENV, MEMORY_LIMIT_ENV, classifyWorkload, formatBreachReport, MEMORY_SCOPE_ENV, resolveMemoryBoundaryPolicy } from '../src/adapters/process/test-memory-policy.js';
+import { assertCgroupEnforcement, defaultUserRuntimeDir, forgetScope, scopeCgroupDir, scopeResult, watchScope, wrapInScope } from '../src/adapters/process/test-memory-cgroup.js';
 
 // A verifier may be launched from an operator checkout while it is validating
 // a mission worktree. Capture that selected root once and use it for every
@@ -124,11 +126,46 @@ const childCpuModule = runsIntegrationSuite && !onGitHubActions() ? childCpuUsag
 // acceptable because healthy workers self-clean their temp roots on exit and
 // finish their file, and a worker that would hang is exactly the case the
 // watchdog turns into a loud failure.
-const child = spawn(meter ?? testNode, meter ? ['--cpu-report', cpuReportPath, testNode, ...executedNodeArgs] : executedNodeArgs, {
+// TASK-2722: the aggregate memory boundary is established by launching the
+// suite inside a memory-limited cgroup scope. This runner stays outside it, so
+// it survives a breach to report it. An unenforceable boundary fails here,
+// before any test allocates; only an explicit opt-out runs unbounded.
+const requestedArgs = process.argv.slice(2);
+const memoryPolicy = resolveMemoryBoundaryPolicy({
+  boundaryMode: process.env[MEMORY_BOUNDARY_ENV],
+  limitMiB: process.env[MEMORY_LIMIT_ENV],
+  workload: classifyWorkload({ requestedArgs, integration: runsIntegrationSuite, local: plan.runsIntegrationLocalSuite, coverage: coverageEnabled }),
+  hostedRunner: onGitHubActions(),
+});
+const suiteCommand = meter ?? testNode;
+const suiteArgs = meter ? ['--cpu-report', cpuReportPath, testNode, ...executedNodeArgs] : executedNodeArgs;
+let launch: { command: string; args: string[]; unit: string | null } = { command: suiteCommand, args: suiteArgs, unit: null };
+// A nested runner inside a verified enclosing scope stays in it: a new scope
+// would be a sibling that the enclosing limit neither counts nor kills.
+const enclosingScope = process.env[MEMORY_SCOPE_ENV];
+const insideEnclosingScope = memoryPolicy.mode === 'cgroup' && enclosingScope !== undefined && scopeCgroupDir(process.pid, enclosingScope) !== null;
+if (memoryPolicy.mode === 'cgroup' && !insideEnclosingScope) {
+  try {
+    if (!process.env.XDG_RUNTIME_DIR && !process.env.DBUS_SESSION_BUS_ADDRESS) {
+      const runtimeDir = defaultUserRuntimeDir();
+      if (runtimeDir) { process.env.XDG_RUNTIME_DIR = runtimeDir; }
+    }
+    assertCgroupEnforcement(memoryPolicy.limitMiB);
+  } catch (error) {
+    cleanupRunnerOwnedRoots();
+    console.error(error instanceof Error ? error.message : String(error));
+    process.exit(1);
+  }
+  launch = wrapInScope(memoryPolicy.limitMiB, suiteCommand, suiteArgs, undefined, true);
+} else if (memoryPolicy.mode === 'off') {
+  console.error(`[test-memory-boundary] WARNING: no aggregate memory boundary (${memoryPolicy.reason}); a memory-growing test is not contained.`);
+}
+const child = spawn(launch.command, launch.args, {
   stdio: ['inherit', 'pipe', 'pipe'],
   cwd: executionRoot,
   env: {
     ...process.env,
+    ...(launch.unit !== null ? { [MEMORY_SCOPE_ENV]: launch.unit } : {}),
     // Coverage is a reporting profile for the pre-integration population.
     // Its instrumentation timing is not a hermetic per-test performance
     // measurement; ordinary unit runs retain the explicit 500 ms headroom.
@@ -151,6 +188,9 @@ child.stdout.on('data', (chunk: Buffer) => {
   process.stdout.write(chunk);
 });
 child.stderr.pipe(process.stderr);
+const memoryWatch = launch.unit !== null && child.pid !== undefined
+  ? watchScope(child.pid, launch.unit, () => killSuite('SIGKILL'))
+  : null;
 
 function killSuite(signal: NodeJS.Signals) {
   try {
@@ -195,6 +235,7 @@ process.on('SIGTERM', () => forwardSignal('SIGTERM'));
 // Every exit path (spawn error, watchdog or forwarded signal, normal close)
 // reclaims the worker manifests and the runner-owned fast unit scratch root.
 function cleanupRunnerOwnedRoots() {
+  if (launch.unit !== null) { forgetScope(launch.unit); }
   cleanupRunnerTempRoots(testManifestDir);
   if (fastUnitScratchDir) { fs.rmSync(fastUnitScratchDir, { recursive: true, force: true }); }
   if (coverageScratchDir) { fs.rmSync(coverageScratchDir, { recursive: true, force: true }); }
@@ -214,6 +255,31 @@ child.on('close', (code, signal) => {
   suiteSettled = true;
   clearTimeout(watchdog);
   const suiteElapsedMs = Number(process.hrtime.bigint() - suiteStart) / 1e6;
+
+  // A memory breach outranks every other outcome: the killed tree's exit code
+  // or signal says nothing about the cause, the cgroup evidence does.
+  const memory = memoryWatch?.stop();
+  // Only kernel OOM evidence proves the cause: a sampled OOM kill, or the
+  // retained scope's terminal `oom-kill` Result when the scope vanished between
+  // samples. A failure near the cap without either keeps its own outcome.
+  const terminalResult = launch.unit !== null && memory && !memory.breached ? scopeResult(launch.unit) : null;
+  if ((memory?.breached || terminalResult === 'oom-kill') && memoryPolicy.mode === 'cgroup') {
+    console.error(formatBreachReport({
+      command: process.env.npm_lifecycle_event ? `npm run ${process.env.npm_lifecycle_event}` : 'tsx test/run-default-tests.ts',
+      suite: requestedArgs.filter(arg => !arg.startsWith('-')).join(' ') || memoryPolicy.workload,
+      limitMiB: memoryPolicy.limitMiB,
+      peakBytes: memory?.peakBytes ?? null,
+      oomKills: memory?.oomKills ?? null,
+      scopeResult: terminalResult,
+      elapsedMs: suiteElapsedMs,
+    }));
+    cleanupRunnerOwnedRoots();
+    process.exit(137);
+  }
+  if (memory && memoryPolicy.mode === 'cgroup' && memory.peakBytes !== null) {
+    const peakMiB = memory.peakBytes / 1048576;
+    console.error(`[test-memory-boundary] peak=${peakMiB.toFixed(0)} MiB of limit=${memoryPolicy.limitMiB} MiB (${Math.round(100 * peakMiB / memoryPolicy.limitMiB)}%), workload=${memoryPolicy.workload}`);
+  }
 
   if (signal !== null) {
     // The group was terminated by the watchdog or a forwarded signal; a

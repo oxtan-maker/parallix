@@ -14,7 +14,6 @@ import type { ParallixConfiguration } from '../../../application/ports/configura
  * and the characterization suites keep the signatures they were written against.
  */
 import * as fs from 'node:fs';
-import { spawnSync } from 'node:child_process';
 import * as git from '../../git/git.js';
 import * as missionUtils from '../../filesystem/mission-utils.js';
 import * as backlog from '../../backlog/backlog.js';
@@ -22,7 +21,8 @@ import * as forgejo from '../../forgejo/forgejo.js';
 import { resolveReviewIdentity } from '../../review/review-state.js';
 import * as setupReview from '../../review/setup-review.js';
 import * as gatekeeper from '../../verification/gatekeeper.js';
-import { createVerificationProofIdentity, formatVerificationCommand, isTransientVerificationFailure, readReusableVerificationProof, runVerificationGate, writeReusableVerificationProof } from '../../verification/verification.js';
+import { formatVerificationCommand, isTransientVerificationFailure, resolveEffectiveArea, runVerificationGate } from '../../verification/verification.js';
+import { createActiveVerificationIdentity as createVerificationProofIdentity, readActiveVerificationProof as readReusableVerificationProof, writeActiveVerificationProof as writeReusableVerificationProof } from '../../verification/active-verification-proof.js';
 import { isForgejoReviewEnabled } from '../../config/product-config.js';
 import { loadPhaseGates, runPhaseGates } from '../../config/repository-gates.js';
 import { rebaseBeforeReviewRound } from '../../review/rebase.js';
@@ -99,8 +99,9 @@ export function createHandoffPorts(configuration?: ParallixConfiguration): Hando
       runPhaseGates: (phase, options) => runPhaseGates(phase, { ...options, configuration }),
     },
     verification: {
+      resolveEffectiveArea: (area, rootDir, missionDir) => resolveEffectiveArea(area, rootDir, missionDir),
       formatVerificationCommand: (area, rootDir) => formatVerificationCommand(area, rootDir),
-      createVerificationProofIdentity: (command, rootDir) => createVerificationProofIdentity(command, rootDir),
+      createVerificationProofIdentity: (command, rootDir) => createVerificationProofIdentity(command, rootDir, { configuration }),
       readReusableVerificationProof: (command, rootDir) => readReusableVerificationProof(command, rootDir, { configuration }),
       writeReusableVerificationProof: (command, rootDir, options) => writeReusableVerificationProof(command, rootDir, { ...options, configuration }),
       runVerificationGate: (area, options) => runVerificationGate(area, options),
@@ -123,7 +124,7 @@ export function createHandoffPorts(configuration?: ParallixConfiguration): Hando
       selectAgent: (step, options) => selectAgent(step, { ...options, configuration }),
     },
     process: {
-      spawnSync: (command, args, options) => spawnSync(command, args, options),
+      spawnSync: (command, args, options) => git.run(command, args, options),
     },
   };
 }

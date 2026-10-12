@@ -45,6 +45,62 @@ configured local agent, integration must stop rather than merge silently.
 node --import tsx --import ./test/bootstrap-e2e-parallix-home.ts test/e2e/agents/real-agent-smoke.test.ts
 ```
 
+During the run, `[agent-smoke]` lines appear live in the terminal and inherited
+integration-gate output. Drafting, implementing, and
+reviewing are announced from the corresponding workflow output, including the
+reviewer launched inside `px active`.
+
+`state=tool command=…` shows the current tool's command or input summary, with
+credential patterns scrubbed using the existing redaction conventions. A tool
+completion advances the output to `state=model`; this means no tool remains
+reported as running, rather than proof that the model is generating tokens.
+Model prose and tool results stay in the workflow capture rather than the live
+progress feed. The disposable repository starts with a committed root
+`AGENTS.md`, so agents can find its instructions in the mission worktree.
+
+## Configured admission and concurrent replay
+
+Custom launches use production admission and the canonical checkout's
+`adapters.agents.maxConcurrentCustom`. Separate smoke repositories and mission
+worktrees share a lease-only admission database, while each retains its own
+mission database, blocklist, credentials and runner sessions. There is no
+lifecycle-wide smoke lock or separate smoke concurrency limit. A stalled tool
+occupies its session's slot; other sessions can use the remaining capacity.
+
+Build the CLI before replaying (`npm run build`). Use the configured custom
+runner with a reachable model backend and sufficient temporary storage. For a
+capacity-two replay, confirm the canonical checkout already configures two
+slots; do not change capacity to make a replay pass. Run two copies of the
+smoke invocation in separate terminals. They share admission automatically.
+Give the first a bounded tool wait so overlap can be observed:
+
+```sh
+PARALLIX_REAL_AGENT_TOOL_WAIT_SECONDS=45 PARALLIX_E2E_KEEP_TMP=1 npm run test:agent-e2e
+```
+
+Start the second without the tool delay:
+
+```sh
+PARALLIX_E2E_KEEP_TMP=1 npm run test:agent-e2e
+```
+
+The optional tool delay accepts 0–60 seconds and only changes the disposable
+hello-world fixture. Both runs must pass the existing lifecycle assertions.
+The `[smoke-fixture]` output identifies each disposable repository, operator
+home, runner state and shared admission directory. Observe two live admission
+leases and a second runner making progress while the first has a sleeping tool;
+verify that the operator homes and runner directories differ. Admission at
+capacity waits for a lease to be released rather than changing agent family.
+
+For a replay with its own lease database, give both invocations the same
+absolute `PARALLIX_CUSTOM_ADMISSION_HOME` beneath a disposable directory.
+Capacity still comes from the canonical checkout. Keep the session and active
+wall deadlines finite; `PARALLIX_REAL_AGENT_TIMEOUT_MS` bounds each session,
+with twice that allowance for the active phase. Retained fixtures and captures
+contain copied credentials: remove only the directories belonging to these
+runs after inspection, once their children have exited. Do not remove a shared
+admission database while another run is using it.
+
 ## First-value rehearsal
 
 This is an operator-run recording, not this blocking smoke gate. It invokes
@@ -114,8 +170,8 @@ PARALLIX_REAL_AGENT_RUNNER=pi node --import tsx --import ./test/bootstrap-e2e-pa
 Unlike the stubbed lifecycle harness, this test drives real local-model
 inference calls for the draft, execute, and review agents and is expected to be
 **slower and less deterministic**. Runs using the configured custom local model
-take an exclusive host-level lock so concurrent worktrees do not overload that
-shared model; a queued run may therefore wait for an earlier smoke lifecycle.
+share production admission capacity across worktrees; a queued session waits
+until an occupied slot is released.
 A green full-lifecycle run measured ~4
 minutes (242s) on the reference workstation; failing runs usually fail faster
 (a draft-phase failure is often visible within ~40s). After a draft failure,
@@ -159,9 +215,8 @@ why, scope, success criteria, checkpoint plan, gates and predicted NEL bucket �
 and the mission is activated with the gates the agent recorded, not gates the
 harness substituted.
 
-Note: The test stops at `review` and does not include `integrate`, as the integrate
-phase is not required to catch the target bug classes (TASK-1351, TASK-1273) and
-adding it would increase runtime without proportionally increasing bug coverage.
+The lifecycle continues through integration, verifies the landed greeting, and
+checks that the disposable mission worktree was removed.
 
 ## Failure interpretation (SC6)
 
@@ -233,10 +288,9 @@ test (TASK-2201) adds explicit validation of:
   - Neither `parallix.db` nor `agents.local.json` in the developer's default
     Parallix state roots (`~/.local/state/parallix` on Linux, `~/.parallix`
     fallback) contains any smoke-run data
-  - `opencode`'s own runtime state (`XDG_DATA_HOME`) is deliberately **not**
-    sandboxed: the launcher child keeps the developer's normal `opencode`
-    configuration, avoiding false negatives from hiding its local
-    configuration/database. Parallix-owned state never lives there.
+  - Runner configuration and credentials are copied into disposable directories.
+    Pi sessions and settings, and opencode session databases and XDG state,
+    remain isolated; the operator's session database is never copied into a fixture.
 
 - **Reviewer forcing (and cost containment)**: The harness writes an
   `agents.local.json` blocklist into the isolated `PARALLIX_HOME` that blocks

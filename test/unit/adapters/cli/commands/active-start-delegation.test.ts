@@ -107,3 +107,22 @@ test('active succeeds when missionStartFn is the default export function (task-1
 
   assert.ok(launched, 'active.default() must proceed to launch when missionStartFn is callable');
 });
+
+test('active forwards --implementer and --reviewer to the execute service and refuses a missing reviewer value (TASK-2723)', async () => {
+  const requests: Array<{ agent?: string | null; reviewer?: string }> = [];
+  const service = { execute: async (request: { agent?: string | null; reviewer?: string }) => { requests.push(request); return { status: 'completed' as const, value: { agent: 'claude' }, durableEvidence: [] }; } };
+  const run = async (args: string[]) => {
+    const failures: string[] = [];
+    const exits: number[] = [];
+    await active.default(args, { service, inferSlugFn: () => 'task-2723', exitFn: (code: number) => { exits.push(code); }, logFn: () => {}, errorFn: (message: string) => { failures.push(message); } });
+    return { failures, exits };
+  };
+  assert.deepEqual((await run(['task-2723', '--implementer', 'claude', '--reviewer', 'codex'])).exits, []);
+  assert.deepEqual((await run(['task-2723', '--implementer', 'claude'])).exits, []);
+  assert.deepEqual(requests.map(({ agent, reviewer }) => ({ agent, reviewer })), [{ agent: 'claude', reviewer: 'codex' }, { agent: 'claude', reviewer: undefined }]);
+
+  const missing = await run(['task-2723', '--reviewer']);
+  assert.deepEqual(missing.exits, [1]);
+  assert.match(missing.failures.join('\n'), /Missing value for --reviewer/);
+  assert.equal(requests.length, 2, 'a missing reviewer value launches nothing');
+});

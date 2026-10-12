@@ -75,6 +75,10 @@ export type ReboundStartAgent = (
 ) => Promise<{ agent?: string | null; result?: { status?: number | null; invalidContract?: InvalidContractBlocker } | null } | null | undefined>;
 
 export interface ReboundContext {
+  /** Exact Git-completion instruction, certified by the stage verifier without a code-repair checkpoint. */
+  repairPrompt?: string;
+  /** Inspect artifacts even when a completed repair process exits unsuccessfully. */
+  inspectFailedRepair?: boolean;
   repairCheckpoints?: RepairCheckpointPort;
   slug: string;
   worktree: string;
@@ -337,6 +341,7 @@ async function runRepairAttempts(state: ReboundState, options: RepairOptions): P
     }
     const launchResult = handleLaunchResult(state, launch, maxLaunchRetries, error);
     if (launchResult === 'retry') { attempt--; continue; }
+    if (launchResult === 'skip' && context.inspectFailedRepair) { refreshReboundState(state, await verify(attempt), log); }
     if (launchResult === 'skip') { await recordSpentLaunch(state, context, [attempt, maxAttempts], { strategy, headBefore, fingerprintBefore }, startedAt, launch); continue; }
     if (launchResult === 'stop') { break; }
     const verified = await verify(attempt);

@@ -38,6 +38,8 @@ export type TestCategory = 'unit' | 'integration-ci' | 'integration-local' | 'ag
  */
 export const INTEGRATION_CI_TESTS: readonly string[] = [
   'integration/cli/first-run-configuration.test.ts',
+  // Real SQLite/Git approval timing; no extra workstation dependency.
+  'integration/lifecycle/lifecycle-approval-timing-contract.test.ts',
   'integration/agents/pi-worker-process-contract.test.ts',
   // Review contracts exercising SQLite backfill and durable CLI recovery.
   'integration/review/review-status-backfill.integration.test.ts',
@@ -159,10 +161,9 @@ export const INTEGRATION_CI_TESTS: readonly string[] = [
   'integration/sqlite/mission-store-drain.test.ts',
   'integration/agents/agent-block-authority.test.ts',
   'integration/presentation/board-draft-composition.test.ts',
-  // TASK-2706 criterion 2: isolated end-to-end proof of the web-create -> draft
-  // path over real SQLite and a temporary Git repository. Both are clean-runner
-  // dependencies, so the suite is CI-safe.
-  'integration/presentation/web-create-draft-start-e2e.test.ts',
+  // Controller intake/draft/Start contract over real SQLite and temporary Git;
+  // draft launches and execute ports are controlled, without model dependencies.
+  'integration/presentation/web-create-draft-start-contract.test.ts',
   'integration/stats/board-metrics-persistence.test.ts',
   'integration/stats/metrics-review-fix-observations.test.ts',
   'integration/presentation/flow-persisted-decision-window.test.ts',
@@ -258,9 +259,9 @@ export const INTEGRATION_CI_TESTS: readonly string[] = [
   // TASK-2580: drives the real `px active` command and a loopback web snapshot
   // to measure command-to-rendered-card delivery; both are CI-safe boundaries.
   // TASK-2521.03: seeds an isolated SQLite operator database and drives the
-  // production `px status --json` composition path; the ad hoc lifecycle section
-  // (TASK-2468) runs the real `px` entry against an isolated Parallix home.
-  'integration/cli/mission-adhoc-and-context-cli-contract.test.ts',
+  // production context-write and `px status --json` composition paths.
+  'integration/cli/mission-context-cli-contract.test.ts',
+  // ADR 0057 deterministic public CLI journey; fixture agents, Git and SQLite only.
   'integration/backlog/legacy-import-trace.integration.test.ts',
   'integration/backlog/legacy-persistence-audit.integration.test.ts',
   // Reads and commits artifacts in temporary Git repositories; standard Git is enough for CI.
@@ -352,17 +353,19 @@ export const INTEGRATION_LOCAL_TESTS: readonly string[] = [
   'integration/sandbox/bubblewrap-symlink-mount.test.ts',
   'integration/agents/graphify-mission-document-exclusion.test.ts',
   'integration/packaging/native-sea-executable-smoke.test.ts',
-  'integration/lifecycle/lifecycle-timing-local.test.ts',
   'integration/sandbox/codex-sandbox-mission-state-write.test.ts',
   'integration/sandbox/claude-credential-refresh-isolation.test.ts',
   'integration/sandbox/claude-sandbox-credential-persistence.test.ts',
   'integration/agents/codex-approval-policy-config.test.ts',
   'integration/test-harness/unit-test-timeout-guard.test.ts',
   'integration/process/tmux-terminal-host.test.ts',
+  'integration/test-harness/runner-memory-containment.test.ts',
 ];
 
 /** Why each local-only entry cannot run on a clean GitHub-hosted runner. */
 export const INTEGRATION_LOCAL_REASONS: Readonly<Record<string, string>> = {
+  'integration/test-harness/runner-memory-containment.test.ts':
+    'Creates real memory-limited cgroup scopes through `systemd-run --user`, which needs cgroup v2 with the memory controller delegated to the user systemd manager; a clean GitHub-hosted runner has no such user manager.',
   'integration/presentation/web-board-pointer.test.ts':
     'Real coordinate pointer coverage requires a provisioned Chromium executable (PARALLIX_CHROMIUM or /usr/bin/chromium), absent from the clean runner contract.',
   'integration/process/tmux-terminal-host.test.ts':
@@ -375,8 +378,6 @@ export const INTEGRATION_LOCAL_REASONS: Readonly<Record<string, string>> = {
     'Spawns the uv-installed `graphify` CLI; neither uv nor graphify exists on a clean GitHub-hosted runner.',
   'integration/packaging/native-sea-executable-smoke.test.ts':
     'Builds and runs the native single-executable artifact, which needs a Node >= MINIMUM_SEA_NODE_MAJOR SEA toolchain and per-OS packaging; the portable npm package and bundle checks cover packaging in the CI lane instead.',
-  'integration/lifecycle/lifecycle-timing-local.test.ts':
-    'TASK-2622.13: consolidates task-2376 lifecycle-approval timing over a real migrated SQLite Mission store and the production review-persistence + MissionLifecycleService composition; the SQLite boundary is not visible to the content heuristic, so it stays in required local verification rather than the GitHub CI lane.',
   'integration/sandbox/codex-sandbox-mission-state-write.test.ts':
     'Spawns the real `bwrap` binary to run `px` inside the codex sandbox profile; bubblewrap is not part of the GitHub-hosted runner image.',
   'integration/sandbox/claude-credential-refresh-isolation.test.ts':

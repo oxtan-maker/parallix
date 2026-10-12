@@ -1,5 +1,5 @@
 /**
- * E2E test suite for the SQLite cutover (TASK-2322.07).
+ * SQLite persistence integration contract for the SQLite cutover (TASK-2322.07).
  *
  * Covers SC6 scenarios:
  * (a) cold start after import

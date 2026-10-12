@@ -1,3 +1,4 @@
+import { verificationDigest as digest, readVerificationInputs } from './verification-proof-inputs.js';
 import type { ParallixConfiguration } from '../../application/ports/configuration.js';
 import { git, run } from '../git/git.js';
 import type { SpawnSyncOptions } from 'node:child_process';
@@ -5,10 +6,10 @@ import { loadAdapterConfig } from '../config/product-config.js';
 import { log } from '../../application/presentation/cli-format.js';
 import * as fsMod from 'node:fs';
 import * as pathMod from 'node:path';
-import { createHash } from 'node:crypto';
 import { getPrimaryBranch } from '../filesystem/mission-utils.js';
 import { resolveParallixHome, readJson, writeJson } from '../storage/storage.js';
 import { captureRecoveryEvidence, resolveConfiguredCredentialRedactor } from '../../application/recovery-evidence.js';
+import { createActiveVerificationIdentity, readActiveVerificationProof, writeActiveVerificationProof } from './active-verification-proof.js';
 interface GitOptions {
   encoding?: BufferEncoding;
   stdio?: SpawnSyncOptions['stdio'];
@@ -190,6 +191,7 @@ export function runVerificationGate(area: string | undefined, options: { rootDir
   const stdio = opts.stdio || 'inherit';
   const runFn = opts.runFn || run;
   return runFn('bash', ['-c', command.replaceAll('{{area}}', effectiveArea)], {
+    progressLabel: `Repository verification (${effectiveArea})`,
     cwd: rootDir,
     stdio,
     ...(stdio === 'pipe' ? { encoding: 'utf8', maxBuffer: opts.maxBuffer ?? 10 * 1024 * 1024 } : {}),
@@ -245,36 +247,22 @@ export function recordGateResult(
   }
 }
 
-function digest(value: string): string {
-  return createHash('sha256').update(value).digest('hex');
-}
-
 /**
  * Fingerprint every tracked input for an expensive verifier. This deliberately
  * uses the complete tracked index rather than a guessed changed-file subset:
  * an incomplete manifest must execute, never reuse. Any dirty worktree fails
  * closed before the index fingerprint can be trusted.
  */
-export function createVerificationProofIdentity(command: string, rootDir: string = process.cwd(), options: { gitRunner?: GitFn; context?: string } = {}): { ok: boolean; identity?: string; inputFingerprint?: string; toolchain?: string; commit?: string; tree?: string; context?: string; error?: string } {
+export function createVerificationProofIdentity(command: string, rootDir: string = process.cwd(), options: { configuration?: ParallixConfiguration; gitRunner?: GitFn; context?: string } = {}): { ok: boolean; identity?: string; inputFingerprint?: string; toolchain?: string; commit?: string; tree?: string; context?: string; error?: string } {
   if (typeof command !== 'string' || !command.trim()) {
     return { ok: false, error: 'verification proof requires a non-empty command' };
   }
   const gitRunner = options.gitRunner || git;
-  let resolvedRoot: string;
-  try { resolvedRoot = fsMod.realpathSync(rootDir); } catch { return { ok: false, error: 'verification proof root is unreadable' }; }
-  const dirty = gitRunner(['-C', resolvedRoot, 'status', '--porcelain']);
-  const dirtyOutput = dirty.stdout || '';
-  if (dirty.status !== 0 || dirtyOutput.trim()) {
-    return { ok: false, error: 'verification proof cannot reuse a dirty worktree' };
-  }
-  const tracked = gitRunner(['-C', resolvedRoot, 'ls-files', '-s']);
-  const trackedOutput = tracked.stdout || '';
-  if (tracked.status !== 0 || !trackedOutput.trim()) {
-    return { ok: false, error: 'verification proof input manifest is unreadable' };
-  }
+  const inputs = readVerificationInputs(rootDir, gitRunner, options.configuration?.agents.searchPath ?? '');
+  if (!inputs.ok) { return inputs; }
+  const { root: resolvedRoot, trackedOutput, branch, toolchain } = inputs;
   const state = readPublishedTreeState(resolvedRoot, { gitRunner });
   if (!state.ok) { return state; }
-  const toolchain = JSON.stringify({ node: process.version, modules: process.versions.modules, platform: process.platform, arch: process.arch });
   const inputFingerprint = digest(trackedOutput);
   const context = options.context || '';
   return {
@@ -284,7 +272,7 @@ export function createVerificationProofIdentity(command: string, rootDir: string
     commit: state.commit,
     tree: state.tree,
     context,
-    identity: digest(JSON.stringify({ version: 3, command: command.trim(), inputFingerprint, toolchain, commit: state.commit, tree: state.tree, context })),
+    identity: digest(JSON.stringify({ version: 3, root: resolvedRoot, branch, command: command.trim(), inputFingerprint, toolchain, commit: state.commit, tree: state.tree, context })),
   };
 }
 
@@ -492,9 +480,21 @@ export function assertVerifiedTreeProof(proof: { rootDir?: string; branch?: stri
 
 /** @param {string[]} args @param {{log?: Function}} [options] */
 export default function runWorkflow(args: string[], options: { log?: Function; configuration?: ParallixConfiguration } = {}): import('child_process').SpawnSyncReturns<string> {
-  const opts = options;
-  const logFn = opts.log || log.plain;
-  const area = args[0] || options.configuration?.runtime.verifyArea || DEFAULT_AREA;
+  const logFn = options.log || log.plain;
+  const root = process.cwd();
+  const area = resolveEffectiveArea(args[0] || options.configuration?.runtime.verifyArea, root);
   logFn(`Running verification gate for area: ${area}...`);
-  return runVerificationGate(area, { stdio: 'inherit' });
+  const command = formatVerificationCommand(area, root);
+  const before = createActiveVerificationIdentity(command, root, options);
+  if (before.ok === false && 'blocked' in before) { logFn(before.error); return { status: 1 } as import('child_process').SpawnSyncReturns<string>; }
+  if (readActiveVerificationProof(command, root, options).ok) {
+    logFn('Active/review verification: reused successful proof.');
+    return { status: 0 } as import('child_process').SpawnSyncReturns<string>;
+  }
+  const result = runVerificationGate(area, { stdio: 'inherit' });
+  if (result.status === 0 && before.ok) {
+    const written = writeActiveVerificationProof(command, root, { ...options, expectedIdentity: before.identity });
+    if (written.ok === false) { logFn(`Active verification proof unavailable (${written.error}).`); }
+  }
+  return result;
 }

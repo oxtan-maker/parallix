@@ -95,3 +95,61 @@ test('task-2536: ambiguous launch does not write a global block and leaves the f
     fs.rmSync(tmpRoot, { recursive: true, force: true });
   }
 });
+
+// TASK-2729: an unexpected SIGTERM (startup or execution) is a per-invocation
+// failure, not provider unavailability. The session falls back to the next
+// eligible agent, the terminated agent is excluded only for this session, and no
+// block is written, so a later run can select it again.
+for (const phase of ['startup', 'execution']) {
+  test(`SIGTERM during ${phase} falls back in-session without a block and stays eligible next run (TASK-2729)`, async () => {
+    const tmpRoot = registeredMkdtemp('task-2729-sigterm-');
+    try {
+      const blockCalls: string[] = [];
+      const launched: string[] = [];
+      const prompts: string[] = [];
+      const sigterm = phase === 'startup'
+        ? { status: null, signal: 'SIGTERM', stdout: '', stderr: '' }
+        : { status: null, signal: 'SIGTERM', stdout: 'partial work\n', stderr: 'working...\n' };
+      const selectAgentFn = (_step: string, opts: { exclude?: Set<string> } = {}) => {
+        const exclude = opts.exclude instanceof Set ? opts.exclude : new Set(opts.exclude ?? []);
+        // Next-run eligibility: only a block (or this session's exclusion) hides custom.
+        if (!exclude.has('custom') && !blockCalls.includes('custom')) { return 'custom'; }
+        return 'claude';
+      };
+      const run = (script: Array<Record<string, unknown>>) => {
+        let attempt = 0;
+        return startAgent('review', {
+          prompt: (agent: string) => { launched.push(agent); return 'repro'; },
+          worktree: tmpRoot,
+          isAgentBlockedFn: (agent: string) => blockCalls.includes(agent),
+          updateAgentBlockFn: (agent: string) => { blockCalls.push(agent); return { reason: 'block' }; },
+          selectAgentFn,
+          launchAgentFn: (params: { prompt?: string }) => {
+            prompts.push(params.prompt ?? '');
+            const result = script[Math.min(attempt, script.length - 1)];
+            attempt += 1;
+            return {
+              invocation: { command: 'fake', args: [], options: { cwd: tmpRoot, env: {} } },
+              resultPromise: Promise.resolve(result)
+            };
+          },
+          assertAgentSupportedFn: () => {},
+          log: () => {}
+        });
+      };
+
+      const first = await run([sigterm, { status: 0, stdout: 'ok', stderr: '' }]);
+      assert.equal(first.agent, 'claude', 'SIGTERM falls back to the next eligible agent');
+      assert.deepEqual(launched, ['custom', 'claude'], 'terminated agent is not relaunched within the session');
+      assert.equal(prompts[0], prompts[1], 'fallback continues with the same prompt/context');
+      assert.deepEqual(blockCalls, [], 'SIGTERM alone writes no persistent block');
+
+      launched.length = 0;
+      const second = await run([{ status: 0, stdout: 'ok', stderr: '' }]);
+      assert.equal(second.agent, 'custom', 'next run may select the previously terminated agent');
+      assert.deepEqual(blockCalls, []);
+    } finally {
+      fs.rmSync(tmpRoot, { recursive: true, force: true });
+    }
+  });
+}

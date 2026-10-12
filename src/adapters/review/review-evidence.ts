@@ -3,7 +3,7 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
-import { EvidenceReadError, type MissionInterdiff, type MissionRevision, type ReviewEvidencePort } from '../../application/ports/review-evidence.js';
+import { EvidenceReadError, type MainCommitEvidence, type MissionInterdiff, type MissionRevision, type ReviewEvidencePort } from '../../application/ports/review-evidence.js';
 
 const execute = promisify(execFile);
 type Execute = (_file: string, _args: readonly string[], _options: { encoding: 'utf8'; timeout: number; maxBuffer: number }) => Promise<{ stdout: string }>;
@@ -17,8 +17,10 @@ const OVERSIZE = 'ERR_CHILD_PROCESS_STDIO_MAXBUFFER';
 function stablePatch(patch: string): string {
   let file = '';
   return patch.split('\n').flatMap(line => {
-    const header = line.match(/^diff --git a\/(\S+) b\//);
+    const header = line.match(/^diff --git a\/(.*?) b\//);
     if (header) { file = header[1]; }
+    const pathHeader = line.match(/^(?:--- a\/|\+\+\+ b\/)(.*)$/);
+    if (pathHeader) { file = pathHeader[1].replace(/	$/, ''); }
     if (line.startsWith('index ') || line.startsWith('@@')) { return []; }
     return [/^[+-]/.test(line) && !/^(\+\+\+|---) /.test(line) ? `${file}\t${line}` : line];
   }).join('\n');
@@ -53,6 +55,15 @@ export class GitReviewEvidence implements ReviewEvidencePort {
   }
   async diff(prior: string, candidate: string, paths: readonly string[]): Promise<string> {
     return await this.read(['-c', 'core.abbrev=9', 'diff', '--no-ext-diff', '--no-textconv', '--unified=0', prior, candidate, '--', ...paths]);
+  }
+  async mainCommits(beforeBaseline: string, afterBaseline: string, paths: readonly string[]): Promise<readonly MainCommitEvidence[]> {
+    if (beforeBaseline === afterBaseline || !paths.length) { return []; }
+    const commits = (await this.read(['log', '--format=%H', '--reverse', `${beforeBaseline}..${afterBaseline}`, '--', ...paths])).trim().split('\n').filter(Boolean);
+    return await Promise.all(commits.map(async revision => ({
+      revision,
+      paths: (await this.read(['diff-tree', '--no-commit-id', '--name-only', '-r', revision, '--', ...paths])).trim().split('\n').filter(Boolean),
+      diff: await this.read(['show', '--format=', '--no-ext-diff', '--no-textconv', '--unified=0', revision, '--', ...paths]),
+    })));
   }
   async missionInterdiff(before: MissionRevision, after: MissionRevision): Promise<MissionInterdiff> {
     const patch = (side: MissionRevision) => this.read(['diff', '--no-ext-diff', '--no-textconv', '--unified=0', side.baseline, side.revision]);

@@ -50,7 +50,11 @@ export function startPiWorker(request: PiWorkerRequest, invocation: { command: s
     const parentExit = () => {
       try { process.kill(process.platform === 'win32' ? child.pid! : -child.pid!, 'SIGKILL'); } catch { /* Already exited. */ }
     };
-    const parentSignal = () => stop();
+    // Operator cancellation / shutdown: stop the worker, then let the parent
+    // die by the same signal once it has closed, so no fallback agent launches
+    // (TASK-2729). Re-raised only after our listeners are removed.
+    let cancelSignal: NodeJS.Signals | null = null;
+    const parentSignal = (signal: NodeJS.Signals) => { cancelSignal = signal; stop(); };
     process.once('exit', parentExit);
     process.on('SIGTERM', parentSignal);
     process.on('SIGINT', parentSignal);
@@ -65,6 +69,7 @@ export function startPiWorker(request: PiWorkerRequest, invocation: { command: s
       resolve(result ?? { status: 1, stdout: '', stderr: failure?.message ?? 'Pi worker exited before returning a result',
         error: failure, signal, sessionId: null, telemetry: null, model: undefined, provider: 'pi', transientRetries: 0,
         startedAt, endedAt: new Date().toISOString() });
+      if (cancelSignal) { process.kill(process.pid, cancelSignal); }
     };
     const noteOutput = () => { watchdog.noteOutput(); clearTimeout(deadline); };
     child.stdout!.on('data', (chunk: Buffer) => { noteOutput(); (request.teeOptions?.stdoutSink ?? process.stdout).write(chunk.toString()); });

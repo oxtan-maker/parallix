@@ -264,7 +264,7 @@ test('the handoff Forgejo PR step gates the push on the mission area', async () 
   const base = makePorts(recorder);
   const ports = makePorts(recorder, {
     productConfig: { isForgejoReviewEnabled: () => true },
-    missionUtils: { ...base.missionUtils, findMissionArea: () => 'docs' },
+    verification: { ...base.verification, resolveEffectiveArea: () => 'docs' },
     forgejo: { ...base.forgejo, createPr: (_b: string, _u: string, _t: string, options: Record<string, unknown>) => { areas.push(options.verificationArea); return { ok: true }; } },
   });
   const result = await new HandoffCommandUseCase(ports).performHandoff(SLUG, runOptions(recorder));

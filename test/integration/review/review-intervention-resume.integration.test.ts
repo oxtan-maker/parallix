@@ -200,7 +200,7 @@ async function seedRoot(review: Review): Promise<Harness> {
   return { root, store };
 }
 
-/** Invoke the supported `px review --resume` CLI path end to end. */
+/** Invoke the supported `px review --resume` CLI recovery adapter path. */
 async function invokeResume(store: SqliteMissionStore, root: string, actor: string | null): Promise<{ cleared: boolean; outcome: string | null }> {
   const adapter = createReviewWorkflowAdapter({
     missionStore: store,

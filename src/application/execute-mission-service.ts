@@ -24,6 +24,8 @@ export interface ExecuteMissionRequest {
   readonly operationId: string;
   readonly slug: string;
   readonly agent?: string | null;
+  /** Explicit automatic-review family; omitted lets review selection choose. */
+  readonly reviewer?: string;
   readonly capabilities: ReadonlySet<Capability>;
   readonly cancellation?: Cancellation;
   /**
@@ -120,6 +122,7 @@ export class ExecuteMissionService {
         slug: request.slug,
         worktree: prepared.worktree,
         agent: launch.agent,
+        reviewer: request.reviewer,
         taskFile: prepared.taskResolution.ok ? prepared.taskResolution.taskFile ?? null : null,
         // Autonomous review is real work by other families on this same
         // mission. It publishes through the same seam `px review` uses, so the

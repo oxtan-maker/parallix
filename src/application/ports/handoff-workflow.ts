@@ -190,6 +190,7 @@ export interface HandoffVerificationGateOptions {
 }
 
 export interface HandoffVerificationPort {
+  resolveEffectiveArea(_area: string | undefined, _rootDir: string, _missionDir: string | null): string;
   formatVerificationCommand(_area: string, _rootDir: string): string;
   createVerificationProofIdentity(_command: string, _rootDir: string): ProofResult;
   readReusableVerificationProof(_command: string, _rootDir: string): ProofResult;

@@ -83,6 +83,8 @@ export interface BoardCommandRequest {
   /** Present for board actions, which capture a status before confirmation. */
   readonly missionStatusAtRequest?: string;
   readonly agent?: string | null;
+  /** Explicit automatic-review family for `active:execute`; absent keeps automatic selection. */
+  readonly reviewer?: string | null;
   readonly capabilities: ReadonlySet<Capability>;
   /** Optional cancellation handle for cooperative cancellation. */
   readonly cancellation?: BoardCancellation;

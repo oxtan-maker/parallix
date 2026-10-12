@@ -244,6 +244,8 @@ The `<stage>` field is `"starting up"` before the step-specific initial delay el
 
 This means the launcher process is alive but silent. It is not a launch failure by itself. A launch failure is still reported separately when the process cannot start, exits non-zero, is killed by a signal, or produces a detected usage-limit transcript that triggers fallback.
 
+An unexpected `SIGTERM` of an agent, at startup or mid-run, is a per-invocation failure: the session falls back to the next eligible agent and excludes the terminated one for the rest of that session. It writes no block, so the next run can select that agent again. A `SIGTERM` that accompanies a genuine usage-limit message still blocks as before. Operator cancellation and application shutdown end the session without launching a fallback.
+
 ### Launch echo
 
 Each launch echoes the command it is about to run. The prompt is one of the launcher arguments and runs to hundreds of lines, so it is summarized as `<prompt: <n> chars>` by default; `DEBUG=1` echoes the verbatim command, prompt included, for reproducing a launch by hand.
@@ -268,12 +270,14 @@ In an installed or published build the executable ships with a bundled `config/a
 
 On a fresh checkout with no working-tree copy, Parallix writes one automatically on first use. The generated file lists only the agent families whose launcher is actually available on this workstation for each step, so the board and agent selection surface a self-consistent, availability-filtered set instead of every supported family. Once the working-tree copy exists, subsequent runs leave it untouched — your edits win — and you can regenerate it any time with `px config --write` (run from a repository root). Editing the generated file afterward is the normal way to trim or widen a step's eligible agents.
 
-To restrict a step to a specific agent, edit the `eligible` array. The top-level `px --help` command synopsis shows the current-invocation overrides: `px draft [<slug>] [--agent <family>]` and `px active [<slug>] [--implementer <family>]`. Use those CLI flags to force a specific agent for one command:
+To restrict a step to a specific agent, edit the `eligible` array. The top-level `px --help` command synopsis shows the current-invocation overrides: `px draft [<slug>] [--agent <family>]` and `px active [<slug>] [--implementer <family>] [--reviewer <family>]`. Use those CLI flags to force a specific agent for one command:
 
 ```sh
 px draft task-XXX --agent codex
-px active task-XXX --implementer claude
+px active task-XXX --implementer claude --reviewer codex
 ```
+
+`px active --reviewer <family>` pins the reviewer for the automatic review that follows implementation, using the same explicit-reviewer policy as `px review --reviewer`. A missing value is refused before anything launches. A family that is blocked, ineligible, unknown, or has no available launcher stops the review with a diagnostic naming it; it is never replaced by another family. Without `--reviewer`, reviewer selection is unchanged. The family is only checked when review starts, after implementation and handoff, so confirm it is available first.
 
 CLI flags (`--agent`, `--implementer`) take precedence over both the config and random selection. They are the preferred mechanism for operator override. As a fallback, the `WORKFLOW_AGENT` environment variable is also supported:
 
@@ -628,7 +632,11 @@ weaken, skip, delete, or replace a locked check. A mechanically invalid declarat
 stops for human review. If the agent discovers an invalid locked contract, it
 uses `px checkpoint report-invalid-contract` (see `px checkpoint --help`) to
 record the exact command, diagnostic, authority reason, and proposed correction,
-then stops. The first report ends automatic retries; an unrelated passing check
+then stops. After correcting the reported issue, an operator can re-record the
+affected checkpoint with `px checkpoint record --force` and valid evidence
+(see `px checkpoint --help`). This clears its reported blocker while preserving
+unrelated proof; evidence validation, version checks, and the required harness
+rerun still apply. The first report ends automatic retries; an unrelated passing check
 cannot establish repair success. A repair that changes tracked files must be
 committed before the automatic re-run; a repair outside the repository needs
 no commit. When the cause is external and the implementer cannot repair it,

@@ -1,15 +1,6 @@
-/**
- * Local lifecycle-approval timing for the metrics slice (TASK-2622.13
- * consolidation).
- *
- * integration-local tier provenance tests migrated from
- * `test/task-2376-lifecycle-timing.test.ts` (TASK-2376): the approve boundary
- * timestamps the review → integration lane event with ReviewerDecision.decidedAt
- * (not wall clock), and the review-aggregate fix-round source is authoritative.
- * These exercise the real sqlite + git boundaries under a declared workstation
- * dependency, so they stay in the required-local tier (AC#2). Historical task ID
- * retained in the case names as regression provenance (AC#7).
- */
+// Lifecycle approval timing and persisted metrics contract (TASK-2376, TASK-2622.13).
+// Real disposable SQLite/Git, controlled provider, no workstation dependencies.
+// TASK-2717 audit: ADR 0057 integration-ci; recorded reviewer decidedAt owns dwell.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';

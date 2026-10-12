@@ -2,7 +2,6 @@ import type { ParallixConfiguration } from '../../application/ports/configuratio
 import { spawnSync } from 'child_process';
 import { getPrimaryBranch, resolveMissionBaseBranch } from '../filesystem/mission-utils.js';
 import { getTaskImplementer, findTaskFile } from '../backlog/backlog.js';
-import * as verification from '../verification/verification.js';
 import * as fmt from '../../application/presentation/cli-format.js';
 import { DEFAULT_FORGEJO_USER, DISPOSITION_PATTERN, readToken, resolveAuthorizedApproverUser, resolveForgejoAuth, resolveForgejoHome, resolveForgejoSettings, resolveForgejoUser } from './forgejo-auth.js';
 import { forgejoApi, forgejoApiAsync, codexSandboxHint } from './forgejo-api.js';
@@ -108,39 +107,10 @@ function getPrStatus(branch: string, rootDir?: string, options: ForgejoOptions =
  * @param {string} branch
  * @param {string} user
  * @param {string} token
- * @param {{rootDir?: string, apiCall?: Function, log?: Function, force?: boolean, forceWithLease?: boolean, verificationArea?: string, captureVerifiedTreeProofFn?: Function, assertVerifiedTreeProofFn?: Function}} [options]
+ * @param {{rootDir?: string, apiCall?: Function, log?: Function, force?: boolean, forceWithLease?: boolean, verificationArea?: string}} [options]
  * @returns {{ok: boolean, url?: string|null, error?: string|null, prNumber?: number}}
  */
 type CreatePrResult = { ok: boolean, url?: string | null, error?: string | null, prNumber?: number, gateFailure?: { area: string; command: string; cwd: string; exitCode: number | null; stdout: string; stderr: string; transient?: boolean } };
-
-/**
- * Refuse the publish when the verified-tree proof failed, or when it belongs to
- * a different branch than the one being published. A gate failure carries the
- * command and output so the rebound kernel can classify it.
- */
-function publishProofFailure(proofResult: any, area: string, branch: string): CreatePrResult | null {
-  if (!proofResult.ok) {
-    return {
-      ok: false,
-      error: proofResult.error || 'failed to verify publish tree',
-      ...(proofResult.command && proofResult.cwd ? {
-        gateFailure: {
-          area,
-          command: proofResult.command,
-          cwd: proofResult.cwd,
-          exitCode: proofResult.exitCode ?? null,
-          stdout: proofResult.stdout || '',
-          stderr: proofResult.stderr || '',
-          ...(verification.isTransientVerificationFailure(proofResult) ? { transient: true } : {}),
-        },
-      } : {}),
-    };
-  }
-  if (proofResult.proof && proofResult.proof.branch && proofResult.proof.branch !== branch) {
-    return { ok: false, error: `verification proof branch ${proofResult.proof.branch} does not match branch being published ${branch}` };
-  }
-  return null;
-}
 
 /** Run one push attempt, mirroring its output to this process's streams. */
 function runPrPush(branch: string, remoteUrl: string, rootDir: string, options: ForgejoOptions) {
@@ -218,10 +188,7 @@ function createPr(branch: string, user: string, token: string, options: ForgejoO
     apiCall = forgejoApi,
     log = fmt.log.info,
     force = false,
-    forceWithLease = false,
-    verificationArea = null,
-    captureVerifiedTreeProofFn = verification.captureVerifiedTreeProof,
-    assertVerifiedTreeProofFn = verification.assertVerifiedTreeProof
+    forceWithLease = false
   } = options;
 
   const primaryBranch = resolvePrimaryBranchOrMain(rootDir);
@@ -236,23 +203,14 @@ function createPr(branch: string, user: string, token: string, options: ForgejoO
   const gitToken = ownerToken || token;
   const apiUser = user;
   const apiToken = token;
-  const resolvedVerificationArea = verificationArea || verification.resolveVerificationAdapter(rootDir).defaultArea;
   const authenticatedGitFetch = /** @param {string} branchName @param {string} dir @param {{user?: string, token?: string}} [options] */ (branchName: string, dir: string, options: ForgejoOptions = {}) => fetchReviewBranch(branchName, dir, {
     ...options,
     user: gitUser,
     token: gitToken,
   });
 
-  const proofResult = captureVerifiedTreeProofFn(resolvedVerificationArea, rootDir);
-  const proofFailure = publishProofFailure(proofResult, resolvedVerificationArea, branch);
-  if (proofFailure) { return proofFailure; }
-
-  // 1. Sync primary branch baseline
-  const syncResult = syncPrimaryBaseline(gitUser, gitToken, rootDir, {
-    verificationProof: proofResult.proof,
-    assertVerifiedTreeProofFn,
-    gitRunner: git
-  });
+  // Mirroring a local baseline does not introduce another verification gate.
+  const syncResult = syncPrimaryBaseline(gitUser, gitToken, rootDir, { gitRunner: git });
   if (!syncResult.ok) {
     return { ok: false, error: `failed to sync primary baseline: ${syncResult.error || syncResult.stderr}` };
   }

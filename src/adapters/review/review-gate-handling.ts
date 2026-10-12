@@ -12,6 +12,7 @@ import { classifyHookFailure } from '../../application/hook-failure-workflow.js'
 import { run } from '../git/git.js';
 import { findMissionDir, findMissionArea } from '../filesystem/mission-utils.js';
 import { formatVerificationCommand, isTransientVerificationFailure, resolveEffectiveArea } from '../verification/verification.js';
+import { createActiveVerificationIdentity as createVerificationProofIdentity, readActiveVerificationProof as readReusableVerificationProof, writeActiveVerificationProof as writeReusableVerificationProof } from '../verification/active-verification-proof.js';
 
 /** How long a --continue skip-check waits for an existing disposition. */
 export const CONTINUE_SKIP_CHECK_TIMEOUT_MS = 10_000;
@@ -66,8 +67,16 @@ export async function runPreReviewGate(
 
   log(fmt.status('INFO', `Pre-review gate for area "${area}": ${fmt.command(command)}`));
 
+  const reusable = readReusableVerificationProof(command, worktree);
+  if (reusable.ok) {
+    log(fmt.status('PASS', `Pre-review gate reused successful active/review proof for area "${area}"${reusable.rebased ? ' after completed rebase' : ''}.`));
+    return { ok: true, area, command, exitCode: 0, stdout: '', stderr: '' };
+  }
+  const before = createVerificationProofIdentity(command, worktree);
+
   // Run with pipe mode to capture output for auto-bounce fix prompts.
   const result = runFnOverride('bash', ['-lc', command], {
+    progressLabel: `Pre-review verification (${area})`,
     cwd: worktree,
     stdio: 'pipe',
     maxBuffer: 10 * 1024 * 1024, // 10MB buffer
@@ -93,6 +102,10 @@ export async function runPreReviewGate(
   }
 
   log(fmt.status('PASS', `Pre-review gate passed for area "${area}".`));
+  if (before.ok) {
+    const written = writeReusableVerificationProof(command, worktree, { expectedIdentity: before.identity });
+    if (written.ok === false) { log(fmt.status('WARN', `Pre-review gate proof unavailable (${written.error}).`)); }
+  }
   return { ok: true, area, command, exitCode: 0, stdout, stderr };
 }
 

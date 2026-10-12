@@ -70,6 +70,18 @@ CPU limit exceeds `EARLY_CI_CPU_CUTOFF_MS`; the full lane (`--integration-ci-all
 run by `npm run test:ci` on the GitHub push gate) runs every member. Existing CPU
 limits are never changed by the cutoff, and coverage must come from the early lane.
 
+### Memory boundary
+
+The regular runner (`npm test` and every tier and gate that calls it) launches
+the whole test process tree inside one finite, kernel-enforced memory limit,
+with swap capped, and stays outside it to report a breach. A per-process V8 heap
+cap is not a substitute: it bounds neither native allocations nor descendants.
+The boundary is Linux cgroup v2 through a delegated user manager, so suites that
+create real memory-limited scopes are `integration-local`. When enforcement is
+unavailable the run fails; only an explicit opt-out, or a GitHub-hosted runner
+with a printed notice, runs unbounded. Operator guidance:
+`docs/test-memory-containment.md`.
+
 ### Test layout decision
 
 Keep suites under `test/unit/`, `test/integration/`, and `test/e2e/`.
@@ -101,8 +113,9 @@ that plan; it does not become merge authority.
 - ADRs 0043 and 0045 remain authoritative for branch targets and integration
   modes. Hosted CI evaluates a revision but does not make a hosted branch or
   Forgejo ref an ancestry, rebase, integration, or merge authority.
-- ADR 0048's fail-closed and exact-tree requirements still apply to every proof
-  consumed by the workflow; tier membership does not make stale evidence valid.
+- ADR 0048's fail-closed lifecycle rules apply to declared checks. Its former
+  exact-commit publication requirement is superseded: local landing adds no
+  implicit test run, and downstream CI owns shared integration validation.
 - ADRs 0044 and 0046 continue to govern release verification and manual npm
   publication. A hosted test lane does not introduce CI-driven publication.
 

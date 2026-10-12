@@ -131,6 +131,35 @@ test('execute mission use case sequences typed checkpoint, handoff, and review p
   assert.ok(calls.indexOf('typed-handoff') < calls.indexOf('review'));
 });
 
+test('execute mission use case hands the explicit reviewer to review and to every handoff attempt (TASK-2723)', async () => {
+  const handoffs: Array<{ reviewer?: string; force?: boolean }> = [];
+  const reviews: Array<{ implementer: string; reviewer?: string }> = [];
+  const { ports } = strictPorts({
+    handoffExecution: {
+      async run(handoff: { reviewer?: string; force?: boolean }) {
+        handoffs.push({ reviewer: handoff.reviewer, force: handoff.force });
+        return handoffs.length === 1 ? { ok: false, error: 'dirty worktree' } : { ok: true };
+      },
+      async repairHygiene() { return { repaired: true }; },
+      classifyFailure() { return null; },
+      isRelaunchableFailure() { return false; },
+    },
+    autonomousReview: { async start(review: { implementer: string; reviewer?: string }) { reviews.push(review); } },
+  });
+  const outcome = await new ExecuteMissionService(ports).execute(request({ reviewer: 'claude' }));
+  assert.equal(outcome.status, 'completed');
+  assert.deepEqual(handoffs, [{ reviewer: 'claude', force: undefined }, { reviewer: 'claude', force: true }]);
+  assert.deepEqual(reviews.map(({ implementer, reviewer }) => ({ implementer, reviewer })), [{ implementer: 'codex', reviewer: 'claude' }]);
+});
+
+test('execute mission use case leaves the reviewer unset when none was requested (TASK-2723)', async () => {
+  const reviews: Array<{ reviewer?: string }> = [];
+  const { ports } = strictPorts({ autonomousReview: { async start(review: { reviewer?: string }) { reviews.push(review); } } });
+  const outcome = await new ExecuteMissionService(ports).execute(request());
+  assert.equal(outcome.status, 'completed');
+  assert.deepEqual(reviews.map(review => review.reviewer), [undefined]);
+});
+
 test('execute mission use case rejects invalid or incapable requests before any mechanism port', async () => {
   const incapable = strictPorts();
   const capabilityOutcome = await new ExecuteMissionService(incapable.ports)

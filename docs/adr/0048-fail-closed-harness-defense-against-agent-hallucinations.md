@@ -24,7 +24,7 @@ This decision draws on four prior Parallix artifacts:
 
 1. **Task-1268** (`backlog/tasks/task-1268 - Shift-left.md`): Shift-left verification concept — run the verification gate mechanically before each review round, auto-bounce on failure without consuming a reviewer cycle. Key insight: the machinery exists (`captureVerifiedTreeProof` / `assertVerifiedTreeProof` in `lib/core/verification.js`), but enforcement before review rounds is missing.
 
-2. **Task-1335** (`backlog/completed/task-1335 - Harden-parallix-self-hosting-publish-path...md`): Exact-tree verification proof, implemented and completed. Established the principle that a verification proof must be tied to the exact tree being published — a green run from a different checkout, commit, or pre-squash state cannot satisfy the guard.
+2. **Task-1335** (`backlog/completed/task-1335 - Harden-parallix-self-hosting-publish-path...md`): Exact-tree verification proof, implemented and completed. Its exact-commit publication guard was superseded on 2026-10-10: local landing and review-baseline mirroring add no implicit tests; downstream CI owns shared validation, while explicit gates and configured post-squash hooks remain.
 
 3. **ADR 0041** (`docs/adr/0041-integration-pipeline-gates.md`): Integration-time pipeline gates with per-area dispatch, config-driven gate plan, and `--no-integration-gates` escape hatch. Established the pattern of gate execution before squash-merge.
 
@@ -69,8 +69,8 @@ The following checks are currently implemented across the harness lifecycle. Eac
 |---|-------|----------|---------------|
 | 16 | Integration preflight | Integration lifecycle | Multiple classes |
 | 17 | Integration gates | Integration lifecycle | Gate failure (Class 6) |
-| 18 | Exact-tree proof capture | Integration lifecycle | Unverifiable claims (Class 1) |
-| 19 | Exact-tree proof assertion | Integration lifecycle | Stale proof (Class 1) |
+| 18 | Former exact-tree proof capture | Superseded for local landing | Downstream CI owns shared validation |
+| 19 | Former exact-tree proof assertion | Superseded for local landing | No implicit post-squash test run |
 
 ### Repair Path
 

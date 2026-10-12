@@ -9,10 +9,11 @@ import { HandoffCommandUseCase } from '../../../../../src/application/handoff-co
 import { SLUG, LEGACY_MISSION_LOAD, makePorts, makeRecorder, runOptions } from '../../../../helpers/handoff-ports.js';
 import { mkdtemp as registeredMkdtemp } from '../../../../helpers/temp-dir.js';
 
-function containsFile(directory: string): boolean {
+function containsFile(directory: string, allowedDirectory?: string): boolean {
   for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
     const target = path.join(directory, entry.name);
-    if (entry.isFile() || (entry.isDirectory() && containsFile(target))) { return true; }
+    if (entry.isDirectory() && target === allowedDirectory) { continue; }
+    if (entry.isFile() || (entry.isDirectory() && containsFile(target, allowedDirectory))) { return true; }
   }
   return false;
 }
@@ -30,6 +31,8 @@ test('a new typed draft does not prepare a retired mission directory', () => {
 test('the self-hosted tree contains no retired workflow ledger roots', () => {
   // backlog/completed/ is not retired: landing archives each task file there
   // and the stale-copy guards check later landings against it (TASK-2613).
+  // backlog/archive/tasks/ preserves cancellation history and hides cancelled
+  // cards from the board. Only that task store is allowed (TASK-2725).
   const retiredDirectories = [
     'missions',
     'backlog/archive',
@@ -37,13 +40,35 @@ test('the self-hosted tree contains no retired workflow ledger roots', () => {
   for (const retiredRoot of retiredDirectories) {
     const directory = path.join(process.cwd(), retiredRoot);
     assert.equal(
-      fs.existsSync(directory) && containsFile(directory),
+      fs.existsSync(directory) && containsFile(directory, path.join(process.cwd(), 'backlog/archive/tasks')),
       false,
       `retired workflow metadata must not remain under ${retiredRoot}`,
     );
   }
   assert.equal(fs.existsSync(path.join(process.cwd(), 'backlog.md')), false,
     'retired workflow metadata must not be tracked at backlog.md');
+});
+
+test('the retired archive guard allows task history but rejects ledger files (TASK-2725)', () => {
+  const root = registeredMkdtemp('parallix-archive-guard-');
+  const tasks = path.join(root, 'tasks');
+  try {
+    fs.mkdirSync(tasks);
+    fs.writeFileSync(path.join(tasks, 'task-1 - cancelled.md'), 'Cancelled task history');
+    assert.equal(containsFile(root, tasks), false);
+    for (const relative of ['MISSION.md', 'missions/CP-1.md', 'other/tasks/ledger.md']) {
+      const target = path.join(root, relative);
+      fs.mkdirSync(path.dirname(target), { recursive: true });
+      fs.writeFileSync(target, 'Retired workflow ledger');
+      assert.equal(containsFile(root, tasks), true, relative);
+      fs.rmSync(target);
+    }
+    fs.rmSync(tasks, { recursive: true });
+    fs.writeFileSync(tasks, 'A file named tasks is not the task store');
+    assert.equal(containsFile(root, tasks), true);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
 });
 
 test('a normal typed draft workflow does not recreate the retired mission tree', async () => {

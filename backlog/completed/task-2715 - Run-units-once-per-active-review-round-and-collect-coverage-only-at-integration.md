@@ -3,8 +3,8 @@ id: TASK-2715
 title: >-
   Run units once per active-review round and collect coverage only at
   integration
-status: backlog
-assignee: []
+status: done
+assignee: [codex]
 created_date: '2026-10-10 09:43'
 labels:
   - performance
@@ -42,3 +42,11 @@ Failed runs may retry after repair; changed production/test inputs invalidate ol
 - [ ] #5 Docs updated to reflect any workflow or user-facing behavior change
 - [ ] #6 Bug-labeled missions include a red-to-green reproduction test that fails before the fix and passes after
 <!-- DOD:END -->
+
+## Operator-authorized scope addition — 2026-10-10
+
+Operator-authorized scope addition (2026-10-10): Parallix is a local development workflow for both self-development and enterprise/npm-installed use. Downstream CI owns integration with other developers and final shared validation. Remove the obsolete TASK-1335/TASK-2203 requirement for a fresh exact-commit publication test run after squash or while mirroring the review baseline. Keep explicitly configured repository gates, independent review, and integration rebound validation; do not add implicit publication tests. Active/review evidence survives bookkeeping commits and completed rebases, including terminal conflict resolution and restart. Update live requirements and owning contracts, and verify both review and integration rebounces with the npm-installed CLI.
+
+This explicit subsequent operator decision supersedes the original generic-product exclusion and exact-candidate SHA restrictions only for the behavior named above. Historical publication-proof requirements in TASK-1335 and TASK-2203 no longer govern local Parallix development.
+
+The configured post-squash hook remains intact and runs once. It may package/install locally or run tests chosen explicitly by the repository.

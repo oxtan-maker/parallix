@@ -22,6 +22,8 @@ export interface ExecuteHandoffRequest {
   readonly slug: string;
   readonly worktree: string;
   readonly agent: string;
+  /** Explicit automatic-review family; carried unchanged through handoff retries. */
+  readonly reviewer?: string;
   readonly taskFile: string | null;
   readonly onAgentLaunched?: (_agent: string, _phase: AgentLaunchPhase) => Promise<void>;
   readonly onAutonomousStop?: (_reason: string) => Promise<void>;

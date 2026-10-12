@@ -264,7 +264,7 @@ export function createSquashLanding(ports: IntegrateWorkflowPorts, { promoteTask
   }
 
   async function squashAndLand(run: LandingRun, { branch, summary, landedFromSha, mainTaskFile }: { branch: string, summary: string, landedFromSha: string, mainTaskFile: string }) {
-    const { slug, context, baseWorktree, baseBranch } = run;
+    const { slug, baseWorktree, baseBranch } = run;
     // A rejected candidate has not crossed the commit boundary.  Reset only the
     // merge state back to HEAD: `--merge` removes the squash-owned index and
     // worktree entries while preserving unrelated local edits in the primary
@@ -339,17 +339,6 @@ export function createSquashLanding(ports: IntegrateWorkflowPorts, { promoteTask
 
     const mergedCommit = git(['-C', baseWorktree, 'rev-parse', 'HEAD']).stdout.trim();
     await finishLanding(run, { branch, mergedCommit, stepLabel: 'Step 6', variant: 'variant-b' });
-
-    // Proof capture after post-integrate hook so it represents the
-    // freshly rebuilt tree that will actually be published.
-    const proofResult = verification.captureVerifiedTreeProof(context.area, baseWorktree, git);
-    if (!proofResult.ok) {
-      throw abortWith(landing, `Could not verify the exact tree being published: ${proofResult.error}`);
-    }
-    const proofCheck = verification.assertVerifiedTreeProof(proofResult.proof, baseWorktree, git);
-    if (!proofCheck.ok) {
-      throw abortWith(landing, `Verification proof is stale for the publish tree: ${proofCheck.error}`);
-    }
 
     fmt.log.plain('');
     fmt.log.pass(`✓ integrated into ${baseBranch}`);

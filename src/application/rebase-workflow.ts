@@ -22,6 +22,7 @@ import type {
 import { classifyHookFailure } from './hook-failure-workflow.js';
 export { classifyHookFailure };
 import { rebound } from './rebound-kernel.js';
+import { recoverAgentRebaseCompletion } from './rebase-agent-completion.js';
 
 /**
  * Parse conflict file paths from git status --porcelain output
@@ -267,12 +268,12 @@ function reportRebaseAlreadyInProgress(existingRebase: any, branch: string, port
   port.exit(1);
 }
 
-async function performPush(ctx: RebaseContext): Promise<void> {
+async function performPush(ctx: RebaseContext): Promise<boolean> {
   const { port, slug, branch, area, executionRoot, isPush, recordedImplementer } = ctx;
-  if (!isPush) { return; }
+  if (!isPush) { return true; }
   if (!port.isForgejoReviewEnabled(executionRoot)) {
     fmt.log.info(`Skipping Forgejo push (review provider is not forgejo).`);
-    return;
+    return true;
   }
   fmt.log.info(`--push detected. Updating Forgejo PR for ${fmt.branch(branch)}...`);
   const reviewIdentity = port.resolveReviewIdentity(slug, executionRoot);
@@ -281,7 +282,7 @@ async function performPush(ctx: RebaseContext): Promise<void> {
   if (!token) {
     fmt.log.fail(`No Forgejo token found for user "${fmt.agent(forgejoUser || 'default')}". Push failed.`);
     port.exit(1);
-    return;
+    return false;
   }
   // The push-time gate verifies the mission's area, the same one handoff
   // verification ran and the gate evidence reports — never the configured
@@ -290,9 +291,10 @@ async function performPush(ctx: RebaseContext): Promise<void> {
   if (!result.ok) {
     fmt.log.fail(`Push to Forgejo failed: ${result.error}`);
     port.exit(1);
-    return;
+    return false;
   }
   fmt.log.pass(`Branch pushed and PR updated for ${fmt.branch(branch)}.`);
+  return true;
 }
 
 /**
@@ -332,7 +334,7 @@ async function finishRebase(ctx: RebaseContext, message: string): Promise<void> 
   }
   if (ctx.repairImplementer) { await ctx.port.resumeReviewAfterRepair?.(ctx.slug, ctx.executionRoot, ctx.repairImplementer); }
   fmt.log.pass(message);
-  await performPush(ctx);
+  if (!await performPush(ctx)) { return; }
   fmt.log.info('Verification: the workflow handles integration checks.');
   fmt.log.info('Integration eligibility requires the lifecycle-authorized lane and current independent approval.');
   ctx.port.exit(0);
@@ -772,22 +774,15 @@ async function resolveSharedConflicts(ctx: RebaseContext, conflictResult: Missio
   if (!launch) { return; }
   const { agent, result: agentResult } = launch;
 
+  const completion = await recoverAgentRebaseCompletion(port, slug, executionRoot, ctx.branch, agent);
+  if (!completion) { return; }
   if (agentResult.status !== 0) {
     fmt.log.fail(`Agent (${fmt.agent(agent)}) exited with status ${agentResult.status}.`);
     fmt.log.info(`You may need to abort the rebase: ${fmt.command('git rebase --abort')}`);
     port.exit(agentResult.status || 1);
     return;
   }
-
-  // Verify rebase is actually complete before pushing.
-  const remaining = port.detectRebaseState(executionRoot);
-  if (remaining.inProgress || remaining.unmergedFiles.length > 0 || rebaseInProgressBranch(ctx)) {
-    fmt.log.warn('Rebase is still in progress or has unmerged files. Skipping automatic push.');
-    remaining.unmergedFiles.forEach(file => fmt.log.warn(`Unmerged: ${file}`));
-    fmt.log.info('Next: Resolve and stage every remaining conflict, then git rebase --continue; inspect git status.');
-    port.exit(1);
-    return;
-  }
+  if (completion.repaired || ctx.repairImplementer) { ctx.repairImplementer = completion.implementer; }
   await finishRebase(ctx, `Agent (${fmt.agent(agent)}) completed conflict resolution.`);
 }
 
