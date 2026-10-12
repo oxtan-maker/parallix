@@ -25,6 +25,8 @@ export interface ClassifierCallMeasurement {
   readonly route: ClassifierRoute;
   readonly reason: string;
   readonly shadow: boolean;
+  /** Set when a recorded gate fact was admitted for the weakening question; absent on other rows. */
+  readonly admissibleFact?: boolean;
   readonly preparationMs: number | null;
   readonly classificationMs: number | null;
 }

@@ -205,6 +205,30 @@ it('local review authority supplies weekly PR totals and completed full-history 
   });
 });
 
+it('restored integration approvals are read back with what later happened to their missions (TASK-2736)', async () => {
+  const { WEAKENING_POLICY_VERSION } = await import('../../../src/domain/classifier-review.js');
+  await withStatisticsDatabase(async ({ db }) => {
+    const telemetry = new SqliteReviewClassificationStore(db), store = new SqliteMissionStore(db);
+    const initial = repeatReview();
+    const revokedAt = '2026-10-01T00:02:00Z';
+    const withdrawn = { ...initial.rounds[0], response: null, decision: { kind: 'approved' as const, decidedAt: '2026-10-01T00:01:00Z', comment: 'Prior approval',
+      source: { kind: 'local' as const }, revocation: { revokedAt, revokedBy: 'workflow', reason: 'Gate failed',
+        cause: { kind: 'integration-gate-failure' as const, gate: 'unit', command: 'npm test', log: 'x.java:1 failed' } } } };
+    const source = { kind: 'classifier' as const, identity: 'jev' as const, decisionId: 'restored', provider: 'typesafe', model: 'jev',
+      packetHash: 'c'.repeat(64), priorRevision: 'a'.repeat(40), candidateRevision: 'b'.repeat(40), responseRevision: 'b'.repeat(40),
+      findingIds: ['integration-gate-repair'], integrationRepair: { revokedAt, gate: 'unit' }, policyVersion: WEAKENING_POLICY_VERSION, label: 'preserves', score: 0.7,
+      weakening: { decisionSource: 'integration-repair-weakening' as const, approvedRevision: 'a'.repeat(40), gate: 'unit', validationSha: 'b'.repeat(40),
+        validationRecordedAt: '2026-10-01T00:02:30Z', relation: 'same' as const } };
+    const restored = applyClassifierReview({ ...initial, rounds: [withdrawn, initial.rounds[1]] } as typeof initial, source, 'clear', '2026-10-06T00:00:00Z');
+    await store.save(fixtureMission('landed-repair', { repositoryId: REPO, status: 'done', closedAt: '2026-10-06T00:01:00Z', netEngineeringLines: 1, review: restored }), null);
+    await store.save(fixtureMission('open-repair', { repositoryId: REPO, status: 'integration', review: restored }), null);
+    const read = await new SqliteClassifierStatisticsReader(db, telemetry, REPO).read();
+    assert.deepEqual(read.repairClears?.map(fact => fact.outcome).sort(), ['landed', 'open']);
+    assert.equal(read.repairClears?.[0].decisionId, 'restored');
+    assert.equal(read.coverage, 'complete');
+  });
+});
+
 it('bounded panel telemetry survives persistence without multiplying workflow counts (TASK-2716)', async () => {
   const { runPanel } = await import('../../../src/application/review-classification/panel.js');
   await withStatisticsDatabase(async ({ db }) => {

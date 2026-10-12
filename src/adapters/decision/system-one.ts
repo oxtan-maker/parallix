@@ -105,9 +105,14 @@ function serialize(request: DecisionRequest, model: string): string {
   return body;
 }
 
+/** Models with token accounting are limited by tokens alone; callers which need a byte ceiling check `requestBudget`. */
+export function exceedsTransportBytes(model: string, bytes: number): boolean {
+  return !supportsDecisionBudget(model) && bytes > 1_000_000;
+}
+
 function encode(request: DecisionRequest, model: string): string {
   const body = serialize(request, model);
-  if (Buffer.byteLength(body) > 1_000_000) { throw new Error('Decision request exceeds the one megabyte limit.'); }
+  if (exceedsTransportBytes(model, Buffer.byteLength(body))) { throw new Error('Decision request exceeds the one megabyte limit.'); }
   return body;
 }
 

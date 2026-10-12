@@ -112,7 +112,6 @@ test('setup-required and malformed requests never reach the transport', async ()
     { state: 'x', questions: { q: { type: 'score', instructions: 'Score', criteria: ['only'] } } },
     { state: 'x', questions: { q: { type: 'boolean', instructions: '' } } },
     { ...request, state: NaN }, { ...request, state: undefined },
-    { ...request, state: 'x'.repeat(1_000_001) },
   ]) { await assert.rejects(port.decide(input as DecisionRequest)); }
   assert.equal(calls, 0);
 });
@@ -263,4 +262,15 @@ test('frozen panel sends three separate configured requests and retains actual m
     assert.equal(outcome.measurement.members[index].model, 'typesafe/jev-1.13-20260917');
     assert.deepEqual(outcome.measurement.members[index].usage, { inputTokens: 500, outputTokens: 1, cost: 0.001 });
   }
+});
+
+test('the one megabyte body ceiling applies only to models without token accounting (TASK-2736)', async () => {
+  const { exceedsTransportBytes } = await import('../../../../src/adapters/decision/system-one.js');
+  assert.equal(exceedsTransportBytes('jev-1.13', 1_003_022), false, 'token limits alone admit a Jev request');
+  assert.equal(exceedsTransportBytes('typesafe/jev-latest', 5_000_000), false);
+  assert.equal(exceedsTransportBytes('other-model', 1_000_001), true);
+  assert.equal(exceedsTransportBytes('other-model', 1_000_000), false);
+  const port = portFromEnvironment({ env: { OPENROUTER_API_KEY: 'dummy' }, transport: async () => new Response('{}') });
+  const budget = port.requestBudget(request);
+  assert.equal(budget.maxRequestBytes, 1_000_000, 'application callers keep their own byte check through the budget');
 });

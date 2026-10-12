@@ -10,6 +10,7 @@ import { fixtureMission, inMemoryTransitionStore } from '../../../fixtures/missi
 import { repeatReview } from '../../../fixtures/repeat-review.js';
 import { MissionLifecycleService } from '../../../../src/application/mission-lifecycle-service.js';
 import { EvidenceReadError } from '../../../../src/application/ports/review-evidence.js';
+import { WEAKENING_POLICY_VERSION } from '../../../../src/application/review-classification/weakening-policy.js';
 import { PANEL_QUESTIONS } from '../../../../src/application/review-classification/panel-questions.js';
 import type { DecisionResult } from '../../../../src/application/ports/decision.js';
 import type { ReviewClassificationPorts } from '../../../../src/application/ports/review-classification.js';
@@ -36,7 +37,9 @@ function scenario(mode: ReviewClassificationPorts['mode'] = 'enabled') {
     evidence: { tree: async () => ['x.java'], source: async () => 'return output;\n',
       diff: async () => '+++ b/x.java\n@@ -1 +1 @@\n-return null;\n+return output;\n',
       mainCommits: async () => [],
-      missionInterdiff: async () => ({ diff: '-return null;\n+return output;\n', paths: ['x.java'] }) },
+      missionInterdiff: async () => ({ diff: '-return null;\n+return output;\n', paths: ['x.java'] }),
+      changedPaths: async () => [], mergeBase: async () => 'e'.repeat(40), subjects: async () => ['abc1234 Repair x.java'] },
+    validations: async () => [],
     telemetry: async () => ({ recordCall: async a => { attempts.push(a); }, 
       recordObservation: async o => { observations.push(o); }, calls: async () => attempts, observations: async () => observations }),
     publish: async (_source, route) => { published.push(route); return true; },
@@ -82,34 +85,35 @@ test('pins an eligible repeat review to the final revision verified after round 
   }
 });
 
-test('attempts Jev for a verified repair after an integration gate revoked approval (TASK-2674)', async () => {
-  const s = scenario();
-  const review = s.store.mission().review!;
-  const prior = review.rounds[0]!;
-  (prior as { decision: typeof prior.decision; response: typeof prior.response }).decision = {
-    kind: 'approved', decidedAt: '2026-10-01T00:01:00Z', comment: 'Approved before integration.', source: { kind: 'local' },
-    revocation: { revokedAt: '2026-10-01T00:02:00Z', revokedBy: 'operator', reason: 'integration gate failed', cause: { kind: 'integration-gate-failure', gate: 'unit', command: 'npm test', log: 'x.java:1 failed' } },
-  };
-  (prior as { response: typeof prior.response }).response = null;
-  s.round.integrationRepair = 'verified integration repair';
-  s.round.verifiedRevision = 'b'.repeat(40);
+test('a verified repair with a recorded green gate and a non-weakening answer restores the prior approval (TASK-2736)', async () => {
+  const s = gateRepairScenario();
   assert.equal(await tryClassifyReview(s.context, s.round), 'APPROVED');
+  assert.deepEqual(s.published, ['clear']);
   assert.equal(s.attempts.length, 1);
-  assert.equal(s.attempts[0]?.reason, 'resolved-threshold');
+  assert.equal(s.attempts[0].reason, 'weakening-preserves');
+  assert.equal(s.attempts[0].policyVersion, WEAKENING_POLICY_VERSION);
+  assert.equal(s.attempts[0].admissibleFact, true);
+  assert.equal(s.attempts[0].score, 0.6);
 });
 
-test('verified integration repair supplies source for its absolute stack path (TASK-2667 regression)', async () => {
-  const s = scenario();
+test('the restored approval cites its decision source, gate, validation and probability (TASK-2736)', async () => {
+  const s = gateRepairScenario();
+  assert.equal(await tryClassifyReview(s.context, s.round), 'APPROVED');
+  const decision = s.store.mission().review!.rounds.at(-1)!.decision!;
+  assert.equal(decision.kind, 'approved');
+  assert.deepEqual(decision.classifier!.weakening, { decisionSource: 'integration-repair-weakening', approvedRevision: 'a'.repeat(40), gate: 'unit',
+    validationSha: 'b'.repeat(40), validationRecordedAt: '2026-10-01T00:02:30Z', relation: 'same' });
+  assert.equal(decision.classifier!.policyVersion, WEAKENING_POLICY_VERSION);
+  assert.equal(decision.classifier!.label, 'preserves');
+  assert.equal(decision.classifier!.score, 0.6);
+  assert.match(decision.comment ?? '', /restored.*unit.*preserves/);
+});
+
+test('verified integration repair supplies the failure lines of its absolute stack path (TASK-2667 regression)', async () => {
+  const s = gateRepairScenario();
   const prior = s.store.mission().review!.rounds[0]!;
   const log = `at runSmoke (${s.context.ports.worktree}/x.java:865:14)\n    at Test.run (node:internal/test_runner/test:1402:25)`;
-  (prior as { decision: typeof prior.decision }).decision = {
-    kind: 'approved', decidedAt: '2026-10-01T00:01:00Z', comment: 'Approved before integration.', source: { kind: 'local' },
-    revocation: { revokedAt: '2026-10-01T00:02:00Z', revokedBy: 'operator', reason: 'Integration failed',
-      cause: { kind: 'integration-gate-failure', gate: 'unit', command: 'npm test', log } },
-  };
-  (prior as { response: typeof prior.response }).response = null;
-  s.round.integrationRepair = 'verified integration repair';
-  s.round.verifiedRevision = 'b'.repeat(40);
+  (prior.decision as { revocation: { cause: { log: string } } }).revocation.cause.log = `AssertionError: ${log}`;
   let called = false;
   const decide = s.classifier.decision.decide;
   s.classifier.decision.decide = async request => {
@@ -119,7 +123,6 @@ test('verified integration repair supplies source for its absolute stack path (T
     return decide(request);
   };
   assert.equal(await tryClassifyReview(s.context, s.round), 'APPROVED');
-  assert.equal(s.attempts[0]?.reason, 'resolved-threshold');
   assert.equal(called, true);
 });
 
@@ -374,26 +377,85 @@ function gateRepairScenario(consecutive = false) {
     (prior as { response: typeof prior.response }).response = null;
     s.round.integrationRepair = 'verified repair';
     s.round.verifiedRevision = 'b'.repeat(40);
+    (prior.subject as { baseline?: string }).baseline = 'e'.repeat(40);
+    s.round.reviewBaseline = 'e'.repeat(40);
+    s.classifier.validations = async () => [{ sha: 'b'.repeat(40), hooks: ['unit'], recordedAt: '2026-10-01T00:02:30Z' }];
+    s.classifier.decision.decide = weakeningAnswer('preserves', 0.6);
   }
   return s;
 }
 
-test('gate repairs use frozen panel thresholds and authoritative validation (TASK-2716)', async () => {
-  for (const [label, score, expected] of [
-    ['does_not_address', 0.89, 'REQUEST_CHANGES'], ['does_not_address', 0.889, null],
-    ['addresses', 0.51, 'APPROVED'], ['addresses', 0.509, null], ['insufficient_evidence', 1, null],
+const weakeningAnswer = (selected: string, preserves: number) => async () => ({ provider: 'typesafe', model: 'jev', answers: { resolution: {
+  type: 'choice' as const, selected, confidence: 0.1,
+  probabilities: { preserves, weakens: selected === 'weakens' ? 1 - preserves : 0, insufficient_evidence: selected === 'insufficient_evidence' ? 1 - preserves : 0, ...(selected === 'preserves' ? { weakens: 1 - preserves } : {}) } } } });
+
+test('every weakening outcome other than preserves at the threshold goes to normal review and never returns the mission (TASK-2736)', async () => {
+  for (const [selected, preserves, reason] of [
+    ['preserves', 0.6, 'weakening-preserves'], ['preserves', 0.599, 'weakening-below-threshold'], ['weakens', 0.4, 'weakening-weakens'],
+    ['insufficient_evidence', 0.3, 'weakening-insufficient-evidence'],
+    // A contradictory answer which selects another label never clears, whatever its preserves probability.
+    ['weakens', 0.6, 'weakening-weakens'], ['insufficient_evidence', 0.6, 'weakening-insufficient-evidence'],
   ] as const) {
     const s = gateRepairScenario();
-    s.classifier.decision.decide = async request => {
-      assert.match(JSON.stringify(request.state), /Configured pre-review verification/);
-      assert.match(JSON.stringify(request.state), /failedIntegrationGateRerun.*unknown/);
-      return { provider: 'typesafe', model: 'jev', answers: { resolution: {
-        type: 'choice', selected: label, probabilities: distribution(label, score), confidence: 0.1 } } };
-    };
-    assert.equal(await tryClassifyReview(s.context, s.round), expected);
-    assert.equal(s.attempts[0].policyVersion, 'jev-three-question-51-80-89-v1');
-    if (expected) { assert.deepEqual(s.store.mission().review!.rounds.at(-1)!.decision!.classifier!.findingIds, ['integration-gate-repair']); }
+    s.classifier.decision.decide = weakeningAnswer(selected, preserves);
+    const expected = reason === 'weakening-preserves' ? 'APPROVED' : null;
+    assert.equal(await tryClassifyReview(s.context, s.round), expected, reason);
+    assert.equal(s.attempts[0].reason, reason);
+    assert.equal(s.attempts[0].score, preserves);
+    assert.deepEqual(s.published, expected ? ['clear'] : []);
+    assert.equal(s.store.mission().review!.rounds.at(-1)!.decision?.kind, expected ? 'approved' : undefined);
   }
+});
+
+test('a failed or malformed weakening call goes to normal review (TASK-2736)', async () => {
+  const failing = gateRepairScenario();
+  failing.classifier.decision.decide = async () => { throw new Error('provider down'); };
+  const malformed = gateRepairScenario();
+  malformed.classifier.decision.decide = async () => ({ provider: 'typesafe', model: 'jev', answers: { resolution: {
+    type: 'choice', selected: 'preserves', probabilities: { preserves: 0.9, weakens: 0.9, insufficient_evidence: 0 }, confidence: 0.1 } } });
+  for (const run of [failing, malformed]) {
+    assert.equal(await tryClassifyReview(run.context, run.round), null);
+    assert.equal(run.attempts[0].reason, 'weakening-failure');
+    assert.notEqual(run.attempts[0].classificationMs, null, 'the invocation is recorded even when the answer is unusable');
+    assert.deepEqual(run.published, []);
+  }
+});
+
+test('a missing, late or unrelated gate fact never reaches the classifier (TASK-2736)', async () => {
+  const cases: [string, (_s: ReturnType<typeof gateRepairScenario>) => void, string][] = [
+    ['no validation', s => { s.classifier.validations = async () => []; }, 'weakening-no-fact'],
+    ['recorded after the round started', s => { s.classifier.validations = async () => [{ sha: 'b'.repeat(40), hooks: ['unit'], recordedAt: '2026-10-01T00:03:01Z' }]; }, 'weakening-fact-after-round-start'],
+    ['another gate', s => { s.classifier.validations = async () => [{ sha: 'b'.repeat(40), hooks: ['lint'], recordedAt: '2026-10-01T00:02:30Z' }]; }, 'weakening-gate-not-validated'],
+    ['code after the validated sha', s => {
+      s.classifier.validations = async () => [{ sha: 'f'.repeat(40), hooks: ['unit'], recordedAt: '2026-10-01T00:02:30Z' }];
+      s.classifier.evidence.changedPaths = async () => ['x.java'];
+    }, 'weakening-code-after-validated-sha'],
+  ];
+  for (const [name, arrange, reason] of cases) {
+    const s = gateRepairScenario();
+    arrange(s);
+    s.classifier.decision.decide = async () => { assert.fail('no call without a fact'); };
+    assert.equal(await tryClassifyReview(s.context, s.round), null, name);
+    assert.equal(s.attempts[0].reason, reason, name);
+    assert.equal(s.attempts[0].admissibleFact, undefined, name);
+    assert.deepEqual(s.published, [], name);
+  }
+});
+
+test('a validation at a backlog-only or rebased-only predecessor of the candidate is admissible (TASK-2736)', async () => {
+  const backlog = gateRepairScenario();
+  backlog.classifier.validations = async () => [{ sha: 'f'.repeat(40), hooks: ['unit'], recordedAt: '2026-10-01T00:02:30Z' }];
+  backlog.classifier.evidence.changedPaths = async () => ['backlog/tasks/task-2658 - x.md'];
+  assert.equal(await tryClassifyReview(backlog.context, backlog.round), 'APPROVED');
+  assert.equal(backlog.store.mission().review!.rounds.at(-1)!.decision!.classifier!.weakening!.relation, 'backlog-only');
+  const rebased = gateRepairScenario();
+  rebased.classifier.validations = async () => [{ sha: 'f'.repeat(40), hooks: ['unit'], recordedAt: '2026-10-01T00:02:30Z' }];
+  rebased.classifier.evidence.changedPaths = async () => ['x.java'];
+  for (const round of rebased.store.mission().review!.rounds) { (round.subject as { baseline?: string }).baseline = 'e'.repeat(40); }
+  rebased.round.reviewBaseline = 'd'.repeat(40);
+  rebased.classifier.evidence.missionInterdiff = async before => before.revision === 'f'.repeat(40) ? { diff: '', paths: [] } : { diff: '+repair', paths: ['x.java'] };
+  assert.equal(await tryClassifyReview(rebased.context, rebased.round), 'APPROVED');
+  assert.equal(rebased.store.mission().review!.rounds.at(-1)!.decision!.classifier!.weakening!.relation, 'rebase-only');
 });
 
 test('consecutive Jev gate-repair decisions always require general review (TASK-2716)', async () => {
@@ -456,7 +518,7 @@ test('oversized mandatory repair evidence retains general review without calling
   assert.equal(calls, 0);
   assert.deepEqual(s.published, []);
   assert.equal(s.store.mission().review!.rounds.at(-1)!.decision, null);
-  assert.equal(s.attempts[0].reason, 'evidence-over-budget');
+  assert.equal(s.attempts[0].reason, 'weakening-over-budget');
 });
 
 test('first review retains its immutable baseline without classifying while main advances (TASK-2704)', async () => {
@@ -479,18 +541,20 @@ test('first review retains its immutable baseline without classifying while main
   assert.equal(s.attempts[0].reason, 'first-review');
 });
 
-test('a rebased gate repair uses production mission interdiff (TASK-2716, TASK-2732)', async () => {
+test('a rebased gate repair sends the restricted diff of the mission interdiff files (TASK-2716, TASK-2732, TASK-2736)', async () => {
   const s = gateRepairScenario();
   for (const round of s.store.mission().review!.rounds) {
     (round.subject as { baseline?: string }).baseline = 'e'.repeat(40);
   }
   let calls = 0;
-  s.classifier.evidence.diff = async () => { assert.fail('plain range substitution'); };
+  const seen: (readonly string[])[] = [];
+  s.classifier.evidence.diff = async (_from, _to, paths) => { seen.push(paths); return `+repair in ${paths.join()}`; };
   s.classifier.evidence.missionInterdiff = async () => {
-    calls++; return { diff: '+repair', paths: ['x.java'] };
+    calls++; return { diff: '+repair', paths: ['x.java', 'backlog/tasks/task-2658 - x.md'] };
   };
   assert.equal(await tryClassifyReview(s.context, s.round), 'APPROVED');
   assert.equal(calls, 1);
+  assert.deepEqual(seen, [['x.java']]);
 });
 
 test('classifier failures persist a distinguishable cause (TASK-2704)', async () => {
@@ -498,12 +562,12 @@ test('classifier failures persist a distinguishable cause (TASK-2704)', async ()
   const budget = over.classifier.decision.requestBudget;
   over.classifier.decision.requestBudget = request => ({ ...budget(request), contextTokens: 30001 });
   const read = gateRepairScenario();
-  read.classifier.evidence.tree = async () => { throw new EvidenceReadError('git diff output exceeds the read limit', true); };
+  read.classifier.evidence.diff = async () => { throw new EvidenceReadError('git diff output exceeds the read limit', true); };
   const other = gateRepairScenario();
   other.classifier.decision.requestBudget = () => { throw new Error('tokenizer unavailable'); };
   for (const run of [over, read, other]) { assert.equal(await tryClassifyReview(run.context, run.round), null); }
-  assert.deepEqual([over, read, other].map(run => run.attempts[0].reason), ['evidence-over-budget', 'evidence-read-failed', 'classifier-exception']);
-  assert.match(over.logs.join('\n'), /Reviewer classifier failed \(evidence-over-budget\)/);
+  assert.deepEqual([over, read, other].map(run => run.attempts[0].reason), ['weakening-over-budget', 'weakening-failure', 'weakening-failure']);
+  assert.match(over.logs.join('\n'), /Reviewer classifier not used \(weakening-over-budget\)/);
 });
 
 test('a missing provider key is its own cause and is announced to the operator once without credentials (TASK-2704)', async () => {

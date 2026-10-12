@@ -98,4 +98,13 @@ export class OperationalHistoryService {
     const entries = await findByTypeForMission.call(this.repository, type, missionId);
     return entries.length === 0 ? null : entries[entries.length - 1];
   }
+
+  /** Every row of a single type for one mission, oldest first. Repository errors propagate. */
+  async loadAllByTypeForMission(type: string, missionId: string): Promise<readonly OperationalHistoryEntry[]> {
+    const findByTypeForMission = this.repository.findByTypeForMission;
+    if (!findByTypeForMission) {
+      throw new Error('operational history repository does not support per-mission lookup');
+    }
+    return await findByTypeForMission.call(this.repository, type, missionId);
+  }
 }

@@ -161,8 +161,10 @@ and [archive index](../../backlog/docs/task-2703-first-review-evidence.json).
 
 Decision: first reviews require the general reviewer, with no Jev call or
 classifier verdict. This restriction applies independently of operator mode.
-Existing finding-resolution and integration-repair re-reviews retain their
-eligibility, thresholds and publication authority. Display only re-review
+Finding-resolution re-reviews retain their eligibility, thresholds and
+publication authority. Integration repairs are decided by the recorded green gate
+and one weakening question (restore at `preserves` >= 0.60, otherwise the general
+reviewer) rather than the resolution panel; the question never returns a mission. Display only re-review
 statistics; keep historical measurements and their collection intact.
 
 The research found useful first-review decisions alongside unsafe clears.

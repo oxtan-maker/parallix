@@ -1,4 +1,5 @@
 import { renderClassifierStatistics } from '../../application/presentation/classifier-statistics.js';
+import { renderIntegrationRepairStatistics } from '../../application/presentation/integration-repair-statistics.js';
 import * as fmt from '../../application/presentation/cli-format.js';
 import { createRangeWindow } from '../../application/services/statistics-row.js';
 import type { StatsRow } from '../../application/services/statistics-row.js';
@@ -77,7 +78,8 @@ export function createStatsCommand(useCase: Pick<StatsCommandUseCase<StatsRow>, 
           ? presentation.renderRange(result.rows, { rootDir, selection: result.selection })
           : presentation.renderWeekly(result.rows, { rootDir, selection: result.selection });
         if (result.selection.previous) {
-          report += `\n\n${renderClassifierStatistics(result.classifierStatistics ?? null, [result.selection.current.window, result.selection.previous.window])}`;
+          const windows = [result.selection.current.window, result.selection.previous.window] as const;
+          report += `\n\n${renderClassifierStatistics(result.classifierStatistics ?? null, windows)}\n\n${renderIntegrationRepairStatistics(result.classifierStatistics ?? null, windows)}`;
         }
       }
     } catch (failure) {

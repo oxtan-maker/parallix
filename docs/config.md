@@ -507,6 +507,29 @@ without approval return them to the implementer. Conflicts, no votes, incomplete
 or invalid results, provider failures and stale revision/version results retain
 the general reviewer. No partial panel can approve.
 
+An integration repair is not judged by that panel. Parallix already records the
+authoritative answer to whether the failure is fixed: integration validation
+records the failed gate's hooks green at a revision. The prior approval is
+restored without a reviewer run only when a validation recorded the failed gate
+before the review round started, at the candidate or at a revision whose
+difference from it is Backlog task records only or a rebase that leaves the mission
+patch unchanged (a version bump is ignored). Any other code change after the
+validated revision, or a validation recorded after the round started, is not
+admitted. One classifier call then asks whether the repair weakened or bypassed
+the checked obligation (deleted, skipped or excluded the check, loosened
+assertions, or raised a budget without measurement evidence); the approval is
+restored when the `preserves` probability is at least 0.60. The packet carries the
+failed gate, its extracted failure lines, the plain prior-to-candidate diff
+restricted to the files whose mission change differs (Backlog records excluded),
+the repair commit subjects, both main baselines with the main commits a rebase
+brought in, and the recorded gate fact; only the token budget can refuse it.
+Every other outcome (no admissible fact, below threshold, weakens, insufficient
+evidence, call failure, over-budget packet) leaves the round with the general
+reviewer, and the weakening answer can never return a mission to the implementer.
+The restored approval records its own decision source and policy version with the
+approved revision, candidate, gate, validation revision and `preserves`
+probability.
+
 Re-review packets include the complete repair delta and changed paths even when
 the prior findings and response do not cite them. When both review subjects
 retain baselines, the repair is a comparison of their baseline-relative mission
@@ -565,6 +588,15 @@ independent observation stays unobserved rather than correct. A separate table
 lists the reasons the general reviewer decided. Unavailable or partial
 historical coverage stays labelled as such rather than becoming a zero.
 Statistics read local operational state and do not query Forgejo.
+
+Below it, `px stats` reports integration-repair re-reviews per period: repair rounds,
+rounds with an admissible gate fact, weakening calls, clears and clear share, the
+reasons rounds fell back (no fact, below threshold, weakens, insufficient evidence,
+failure, over budget), and the `preserves` probability of clears and fallbacks in
+the buckets at least 0.60, 0.40 to 0.60 and below 0.40. Observed wrong clears
+count a restored approval later revoked by a human or followed by changes requested
+on the same mission; clears whose mission is still open without either signal are
+shown as unobserved, so a zero always carries its denominator.
 
 Weekly and range reports also show the [bug-labeled mission trend](metric-contract.md#bug-labeled-mission-trend):
 counts and shares for the current and previous rolling seven-day local-time delivery

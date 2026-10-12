@@ -444,3 +444,73 @@ test('px stats fallback-reasons table renders each distinguishable classifier fa
     assert.match(report, new RegExp(`\\| ${reason}\\s+\\|\\s+1 \\|`), reason);
   }
 });
+
+async function repairStatisticsFixture() {
+  const { weeklyDecisionWindows } = await import('../../../../src/application/services/decision-window.js');
+  const { classificationAttempt } = await import('../../../fixtures/repeat-review.js');
+  const { WEAKENING_POLICY_VERSION } = await import('../../../../src/application/review-classification/weakening-policy.js');
+  const windows = weeklyDecisionWindows('2026-10-06', 'UTC');
+  const row = (round: number, overrides: Parameters<typeof classificationAttempt>[0]) => classificationAttempt({
+    round, decisionId: `r${round}`, fingerprint: `f${round}`, observedAt: '2026-10-05T00:00:00Z', policyVersion: WEAKENING_POLICY_VERSION, ...overrides });
+  const fact = { admissibleFact: true };
+  const attempts = [
+    row(2, { ...fact, route: 'clear', reason: 'weakening-preserves', label: 'preserves', score: 0.9 }),
+    row(3, { ...fact, route: 'clear', reason: 'weakening-preserves', label: 'preserves', score: 0.6 }),
+    row(4, { ...fact, route: 'reviewer', reason: 'weakening-below-threshold', label: 'preserves', score: 0.5 }),
+    row(5, { ...fact, route: 'reviewer', reason: 'weakening-weakens', label: 'weakens', score: 0.1 }),
+    row(6, { ...fact, route: 'reviewer', reason: 'weakening-insufficient-evidence', label: 'insufficient_evidence', score: 0.3 }),
+    row(7, { ...fact, route: 'reviewer', reason: 'weakening-over-budget', label: null, score: null, classificationMs: null }),
+    // A thrown or malformed call is still a call: the invocation time is recorded without a label or score.
+    row(8, { ...fact, route: 'reviewer', reason: 'weakening-failure', label: null, score: null, classificationMs: 4 }),
+    row(9, { route: 'reviewer', reason: 'weakening-fact-after-round-start', label: null, score: null, classificationMs: null }),
+    row(10, { route: 'reviewer', reason: 'weakening-no-fact', label: null, score: null, classificationMs: null }),
+    // Panel rows on other rounds are not integration-repair rounds.
+    classificationAttempt({ round: 11, decisionId: 'panel', fingerprint: 'panel', observedAt: '2026-10-05T00:00:00Z' }),
+  ];
+  return { windows, attempts };
+}
+
+test('px stats counts integration-repair rounds, facts, calls, clears and fallback reasons (TASK-2736)', async () => {
+  const { integrationRepairStatistics } = await import('../../../../src/application/review-classification/repair-statistics.js');
+  const { renderIntegrationRepairStatistics } = await import('../../../../src/application/presentation/integration-repair-statistics.js');
+  const { windows, attempts } = await repairStatisticsFixture();
+  const input = { decisions: [], attempts, applied: [], observations: [], coverage: 'complete' as const };
+  const week = integrationRepairStatistics(input, windows.current);
+  assert.deepEqual([week.rounds, week.withFact, week.calls, week.clears], [9, 7, 6, 2]);
+  assert.deepEqual(week.reasons, { 'no fact': 2, 'below threshold': 1, weakens: 1, 'insufficient evidence': 1, failure: 1, 'over budget': 1, other: 0 });
+  const report = renderIntegrationRepairStatistics(input, [windows.current, windows.previous]);
+  assert.match(report.split('\n').find(line => line.startsWith('| This week'))!, /\|\s+9 \|\s+7 \|\s+6 \|\s+2 \|\s+22% \|/);
+  for (const reason of ['no fact', 'below threshold', 'weakens', 'insufficient evidence', 'failure', 'over budget']) {
+    assert.match(report, new RegExp(`\\| ${reason}\\s+\\|\\s+[12] \\|\\s+0 \\|`), reason);
+  }
+});
+
+test('px stats buckets the preserves probability of clears and fallbacks (TASK-2736)', async () => {
+  const { integrationRepairStatistics } = await import('../../../../src/application/review-classification/repair-statistics.js');
+  const { windows, attempts } = await repairStatisticsFixture();
+  const week = integrationRepairStatistics({ decisions: [], attempts, applied: [], observations: [], coverage: 'complete' }, windows.current);
+  assert.deepEqual(week.clearScores, { '>= 0.60': 2, '0.40-0.60': 0, '< 0.40': 0 });
+  assert.deepEqual(week.fallbackScores, { '>= 0.60': 0, '0.40-0.60': 1, '< 0.40': 2 });
+});
+
+test('px stats shows observed wrong clears with observed and unobserved denominators (TASK-2736)', async () => {
+  const { renderIntegrationRepairStatistics } = await import('../../../../src/application/presentation/integration-repair-statistics.js');
+  const { windows } = await repairStatisticsFixture();
+  const at = '2026-10-05T00:00:00Z';
+  const base = { decisions: [], attempts: [], applied: [], observations: [], coverage: 'complete' as const };
+  const line = (repairClears: { decisionId: string; decidedAt: string; outcome: 'revoked-by-human' | 'changes-requested-later' | 'landed' | 'open' }[]) =>
+    renderIntegrationRepairStatistics({ ...base, repairClears }, [windows.current, windows.previous]).split('\n').find(l => l.startsWith('| This week') && l.includes('observed'))!;
+  assert.match(line([]), /\|\s+0 \|\s+0 \|\s+0 \|\s+n\/a \(0\/0 observed\)\s+\|/);
+  assert.match(line([{ decisionId: 'a', decidedAt: at, outcome: 'open' }]), /\|\s+1 \|\s+0 \|\s+1 \|\s+n\/a \(0\/1 observed\)\s+\|/);
+  assert.match(line([
+    { decisionId: 'a', decidedAt: at, outcome: 'landed' }, { decisionId: 'b', decidedAt: at, outcome: 'revoked-by-human' },
+    { decisionId: 'c', decidedAt: at, outcome: 'changes-requested-later' }, { decisionId: 'd', decidedAt: at, outcome: 'open' },
+  ]), /\|\s+4 \|\s+3 \|\s+1 \|\s+2\/3 observed\s+\|/);
+  assert.match(line([{ decisionId: 'e', decidedAt: '2026-01-01T00:00:00Z', outcome: 'landed' }]), /\|\s+0 \|\s+0 \|\s+0 \|\s+n\/a/);
+});
+
+test('px stats reports integration-repair rows as unavailable without telemetry (TASK-2736)', async () => {
+  const { renderIntegrationRepairStatistics } = await import('../../../../src/application/presentation/integration-repair-statistics.js');
+  const { windows } = await repairStatisticsFixture();
+  assert.match(renderIntegrationRepairStatistics(null, [windows.current, windows.previous]), /\| This week[^\n]*unavailable/);
+});

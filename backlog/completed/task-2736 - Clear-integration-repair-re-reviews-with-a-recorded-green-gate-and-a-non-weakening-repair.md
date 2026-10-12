@@ -3,8 +3,8 @@ id: TASK-2736
 title: >-
   Clear integration-repair re-reviews with a recorded green gate and a
   non-weakening repair
-status: backlog
-assignee: []
+status: done
+assignee: [claude]
 created_date: '2026-10-12 16:32'
 labels:
   - ai_sdlc

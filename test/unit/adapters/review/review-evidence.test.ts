@@ -12,3 +12,12 @@ test('an oversized or failed git read is a typed evidence error rather than a ra
   await assert.rejects(broken.source('a', 'x.ts'), (error: unknown) => error instanceof EvidenceReadError && !error.oversize);
   await assert.rejects(broken.tree('a'), EvidenceReadError);
 });
+
+test('an unbounded read lifts the byte ceiling while default reads stay bounded (TASK-2736)', async () => {
+  const ceilings: number[] = [];
+  const evidence = new GitReviewEvidence('/repo', async (_file, _args, options) => { ceilings.push(options.maxBuffer); return { stdout: '' }; });
+  await evidence.diff('a', 'b', []);
+  await evidence.diff('a', 'b', [], { unbounded: true });
+  await evidence.subjects('a', 'b', { unbounded: true });
+  assert.deepEqual(ceilings, [2_000_000, Number.POSITIVE_INFINITY, Number.POSITIVE_INFINITY]);
+});

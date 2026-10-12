@@ -471,6 +471,33 @@ it('classifier integration repairs bind the withdrawn gate and retain its comple
   }
 });
 
+it('a weakening decision restores the withdrawn approval only with its own provenance and threshold (TASK-2736)', async () => {
+  const { applyClassifierReview, WEAKENING_POLICY_VERSION } = await import('../../../src/domain/classifier-review.js');
+  const { repeatReview } = await import('../../fixtures/repeat-review.js');
+  const initial = repeatReview();
+  const revokedAt = '2026-10-01T00:02:00Z';
+  const revocation = { revokedAt, revokedBy: 'workflow', reason: 'Gate failed',
+    cause: { kind: 'integration-gate-failure' as const, gate: 'unit', command: 'npm test', log: 'x.java:1 failed' } };
+  const review = { ...initial, rounds: [{ ...initial.rounds[0], response: null,
+    decision: { kind: 'approved' as const, decidedAt: '2026-10-01T00:01:00Z', comment: 'Prior approval', source: { kind: 'local' as const }, revocation } }, initial.rounds[1]] } as typeof initial;
+  const source = { kind: 'classifier' as const, identity: 'jev' as const, decisionId: 'd', provider: 'typesafe', model: 'jev',
+    packetHash: 'c'.repeat(64), priorRevision: 'a'.repeat(40), candidateRevision: 'b'.repeat(40), responseRevision: 'b'.repeat(40),
+    findingIds: ['integration-gate-repair'], integrationRepair: { revokedAt, gate: 'unit' }, policyVersion: WEAKENING_POLICY_VERSION, label: 'preserves', score: 0.6,
+    weakening: { decisionSource: 'integration-repair-weakening' as const, approvedRevision: 'a'.repeat(40), gate: 'unit', validationSha: 'b'.repeat(40),
+      validationRecordedAt: '2026-10-01T00:02:30Z', relation: 'same' as const } };
+  const at = '2026-10-06T00:00:00Z';
+  const approved = applyClassifierReview(review, source, 'clear', at);
+  assert.equal(currentReviewRound(approved).decision?.kind, 'approved');
+  assert.deepEqual(currentReviewRound(approved).decision?.classifier?.weakening, source.weakening);
+  assert.throws(() => applyClassifierReview(review, { ...source, score: 0.599 }, 'clear', at), /provenance/);
+  assert.throws(() => applyClassifierReview(review, { ...source, weakening: undefined }, 'clear', at), /provenance/);
+  assert.throws(() => applyClassifierReview(review, { ...source, label: 'addresses' }, 'clear', at), /provenance/);
+  assert.throws(() => applyClassifierReview(review, { ...source, weakening: { ...source.weakening, gate: 'other' } }, 'clear', at), /provenance/);
+  assert.throws(() => applyClassifierReview(review, { ...source, weakening: { ...source.weakening, approvedRevision: 'd'.repeat(40) } }, 'clear', at), /provenance/);
+  assert.throws(() => applyClassifierReview(review, { ...source, label: 'does_not_address', score: 1 }, 'implementer', at), /provenance/);
+  assert.throws(() => applyClassifierReview(review, source, 'implementer', at), /provenance/);
+});
+
 it('first-review classifier decisions are rejected while historical provenance remains readable (TASK-2703)', async () => {
   const { applyClassifierReview, assertClassifierReviewSource, successCriteriaFindings } = await import('../../../src/domain/classifier-review.js');
   const { repeatReview } = await import('../../fixtures/repeat-review.js');

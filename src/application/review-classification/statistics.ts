@@ -1,4 +1,5 @@
 import { reportingWindowContains, type ReportingWindow } from '../../domain/decision-window.js';
+import type { RepairClearFact } from './repair-statistics.js';
 import type { AppliedClassifierDecision, ClassifierObservation, ClassifierCallMeasurement } from '../ports/review-classification-telemetry.js';
 
 export interface PrDecisionFact {
@@ -12,6 +13,8 @@ export interface ClassifierStatisticsInput {
   readonly attempts: readonly ClassifierCallMeasurement[];
   readonly observations: readonly ClassifierObservation[];
   readonly applied: readonly AppliedClassifierDecision[];
+  /** Approvals restored by the weakening question, each with what later happened to its mission. */
+  readonly repairClears?: readonly RepairClearFact[];
   readonly coverage: 'complete' | 'partial' | 'unavailable';
   readonly missions?: readonly { mission: string; closedAt: string | null; reviewRounds: number; fixRounds: number }[];
   readonly agentModels?: readonly { mission: string; role: 'implementer' | 'reviewer'; family: string; provider: string | null; model: string | null }[];

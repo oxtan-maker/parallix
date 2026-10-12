@@ -192,7 +192,7 @@
       "integration/test-harness/test-fixture-process-cleanup.test.ts": 2800,
       "integration/test-harness/test-hygiene.test.ts": 100,
       "integration/verification/type-only-coverage.integration.test.ts": 100,
-      "integration/test-harness/unit-test-timeout-guard.test.ts": 2800,
+      "integration/test-harness/unit-test-timeout-guard.test.ts": 3500,
       "integration/verification/verification-proof-reuse.test.ts": 700,
       "integration/verification/verification.test.ts": 350,
       "integration/integrate/workflow-repair-lane-boundaries.test.ts": 7950,

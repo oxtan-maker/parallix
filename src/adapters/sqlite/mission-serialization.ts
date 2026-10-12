@@ -1,5 +1,5 @@
 import { agentFamily } from '../../domain/agents.js';
-import { assertClassifierReviewSource } from '../../domain/classifier-review.js';
+import { assertClassifierReviewSource, clearingLabel } from '../../domain/classifier-review.js';
 import type { CheckpointData, GoalCheckRow } from '../../domain/checkpoint.js';
 import { externalTaskRef, type ExternalTaskRef } from '../../domain/external-task.js';
 import { isCheckpointName } from '../../domain/checkpoint.js';
@@ -412,7 +412,7 @@ function classifierDecisionFor(row: MissionReviewRoundRecord, records: MissionRe
   if (!decision || !row.classifier_source) { return decision; }
   const source = JSON.parse(row.classifier_source) as import('../../domain/classifier-review.js').ClassifierReviewSource;
   assertClassifierReviewSource(source);
-  if (source.candidateRevision !== row.revision || (source.label === 'addresses') !== (decision.kind === 'approved')) {
+  if (source.candidateRevision !== row.revision || clearingLabel(source) !== (decision.kind === 'approved')) {
     throw new Error('Invalid persisted classifier provenance');
   }
   return { ...decision, classifier: source };

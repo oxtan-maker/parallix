@@ -10,6 +10,8 @@ export interface MissionInterdiff {
   /** Files either mission diff touches. */
   readonly paths: readonly string[];
 }
+/** `unbounded` lifts the read's byte ceiling for callers whose only limit is the decision token budget. */
+export interface ReadOptions { readonly unbounded?: boolean }
 /** Why a revision-pinned read produced no usable evidence. */
 export class EvidenceReadError extends Error {
   readonly name = 'EvidenceReadError';
@@ -37,11 +39,17 @@ export class EvidenceOverBudgetError extends Error {
 export interface ReviewEvidencePort {
   tree(_revision: string): Promise<readonly string[]>;
   source(_revision: string, _path: string): Promise<string>;
-  diff(_prior: string, _candidate: string, _paths: readonly string[]): Promise<string>;
+  diff(_prior: string, _candidate: string, _paths: readonly string[], _options?: ReadOptions): Promise<string>;
   /** Main-side provenance restricted to failure-cited paths between pinned baselines. */
   mainCommits(_beforeBaseline: string, _afterBaseline: string, _paths: readonly string[]): Promise<readonly MainCommitEvidence[]>;
   /** Mission interdiff of `before` and `after`, each measured against its own baseline. */
-  missionInterdiff(_before: MissionRevision, _after: MissionRevision): Promise<MissionInterdiff>;
+  missionInterdiff(_before: MissionRevision, _after: MissionRevision, _options?: ReadOptions): Promise<MissionInterdiff>;
+  /** Paths whose content differs between two revisions. */
+  changedPaths(_from: string, _to: string): Promise<readonly string[]>;
+  /** Commit subjects of `from..to`, oldest first. */
+  subjects(_from: string, _to: string, _options?: ReadOptions): Promise<readonly string[]>;
+  /** Common ancestor of a revision and a ref, the main commit a branch is rebased onto. */
+  mergeBase(_revision: string, _ref: string): Promise<string>;
 }
 export interface ReviewFindingEvidence {
   readonly priorRevision: string;

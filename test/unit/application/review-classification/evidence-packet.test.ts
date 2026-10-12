@@ -27,6 +27,7 @@ const repository: ReviewEvidencePort = {
   diff: async () => '+++ b/lib/x.java\n@@ -1 +1 @@\n-return null;\n+return output;\n',
   mainCommits: async () => [],
   missionInterdiff: async () => ({ diff: '', paths: [] }),
+  changedPaths: async () => [], mergeBase: async () => 'base', subjects: async () => [],
 };
 
 test('mechanical evidence resolves unique basenames across languages without substitution (TASK-2658)', () => {

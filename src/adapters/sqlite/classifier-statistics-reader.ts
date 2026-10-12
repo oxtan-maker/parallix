@@ -1,6 +1,7 @@
 import type { ClassifierStatisticsInput, PrDecisionFact } from '../../application/review-classification/statistics.js';
 import type { ClassifierStatisticsReadPort, ReviewClassificationTelemetryPort } from '../../application/ports/review-classification-telemetry.js';
-import { assertClassifierReviewSource, type ClassifierReviewSource } from '../../domain/classifier-review.js';
+import { assertClassifierReviewSource, WEAKENING_DECISION_SOURCE, type ClassifierReviewSource } from '../../domain/classifier-review.js';
+import type { RepairClearFact } from '../../application/review-classification/repair-statistics.js';
 import type { SqliteDatabaseAdapter } from './database-adapter.js';
 import type { UsageRepository } from '../../application/ports/mission-measurements.js';
 
@@ -31,6 +32,7 @@ export class SqliteClassifierStatisticsReader implements ClassifierStatisticsRea
         decidedAt: row.decided_at, source: source ? 'classifier' : 'reviewer',
         outcome: row.decision_kind === 'approved' ? 'clear' : 'implementer' });
     }
+    const repairClears = await this.repairClears(repository);
     const cohorts = await this._db.query<{ mission: string; closedAt: string | null; reviewRounds: number; fixRounds: number }>(
       `SELECT m.id AS mission, m.closed_at AS closedAt,
        COUNT(CASE WHEN r.change_kind = 'pull-request' THEN 1 END) AS reviewRounds,
@@ -45,6 +47,20 @@ export class SqliteClassifierStatisticsReader implements ClassifierStatisticsRea
     }));
     return { decisions, missions: cohorts, agentModels, attempts: await this._telemetry.calls(repository),
       applied: decisions.filter(d => d.source === 'classifier').map(d => ({ decisionId: d.id, decidedAt: d.decidedAt, route: d.outcome })),
-      observations: await this._telemetry.observations(repository), coverage: partial ? 'partial' : 'complete' };
+      repairClears, observations: await this._telemetry.observations(repository), coverage: partial ? 'partial' : 'complete' };
+  }
+
+  /** Restored approvals and whether a human revoked them or changes were requested afterwards; an open mission has not yet shown either. */
+  private async repairClears(repository: string): Promise<RepairClearFact[]> {
+    const rows = await this._db.query<{ decided_at: string; classifier_source: string; revoked_at: string | null; revoked_cause: string | null; status: string; later_changes: number }>(
+      `SELECT r.decided_at, r.classifier_source, r.revoked_at, r.revoked_cause, m.status,
+         EXISTS (SELECT 1 FROM mission_review_rounds l WHERE l.mission_id = r.mission_id AND l.round_number > r.round_number
+           AND l.decision_kind = 'changes-requested') AS later_changes
+       FROM mission_review_rounds r JOIN missions m ON m.id = r.mission_id
+       WHERE m.repository_id = ? AND r.decision_kind = 'approved' AND r.decided_at IS NOT NULL
+         AND json_extract(r.classifier_source, '$.weakening.decisionSource') = ?`, [repository, WEAKENING_DECISION_SOURCE]);
+    return rows.map(row => ({ decisionId: (JSON.parse(row.classifier_source) as { decisionId: string }).decisionId, decidedAt: row.decided_at,
+      outcome: row.revoked_at && row.revoked_cause === 'operator' ? 'revoked-by-human' : row.later_changes ? 'changes-requested-later'
+        : row.status === 'done' ? 'landed' : 'open' }));
   }
 }

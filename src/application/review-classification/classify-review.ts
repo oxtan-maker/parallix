@@ -4,6 +4,8 @@ import { resolveReviewBaseline } from '../review-baseline.js';
 import { buildArchivedEvidencePacket, ARCHIVED_PACKING_VERSION } from './archived-packing.js';
 import { panelRequestBudget, runPanel } from './panel.js';
 import { PANEL_PROMPT_VERSION } from './panel-questions.js';
+import { decideWeakening } from './weakening-review.js';
+import { WEAKENING_POLICY_VERSION } from './weakening-policy.js';
 import { RoundTelemetry } from './round-telemetry.js';
 import { ROUTING_POLICY_VERSION, type ClassificationRoute } from './routing-policy.js';
 import type { LoopContext, ReviewRound } from '../review-loop/round.js';
@@ -17,7 +19,7 @@ import type { MissionStore, MissionVersion } from '../domain-ports.js';
 type Outcome = 'APPROVED' | 'REQUEST_CHANGES' | 'stop' | null;
 
 /** Everything the decide and commit steps need, derived once from the stored review. */
-interface ReviewScope {
+export interface ReviewScope {
   readonly mission: Mission;
   readonly version: MissionVersion;
   readonly review: Review;
@@ -187,6 +189,11 @@ function isFirstReview(roundNumber: number, prior: unknown): boolean {
   return roundNumber === 1 || !prior;
 }
 
+/** An integration repair is judged by the weakening question; every other scope by the frozen panel. */
+function scopePolicy(review: Review, repairCause: ReviewScope['repairCause']): string {
+  return repairCause ? WEAKENING_POLICY_VERSION : classifierPolicyForReview(review);
+}
+
 function assessEligibility(context: LoopContext, round: ReviewRound, loaded: Loaded | null): Eligibility {
   const unavailable = unavailableReason(context);
   if (unavailable) { return { skip: unavailable }; }
@@ -209,18 +216,20 @@ function assessEligibility(context: LoopContext, round: ReviewRound, loaded: Loa
   const findings = obligations(shape, mission);
   const text = evidenceText(review, prior, mission, { verifiedRepair, repairCause });
   return {
-    mission, version, review, current, policyVersion: classifierPolicyForReview(review), prior: answered ? prior! : null, candidateRevision, original: prior?.decision ?? null,
+    mission, version, review, current, policyVersion: scopePolicy(review, repairCause), prior: answered ? prior! : null, candidateRevision, original: prior?.decision ?? null,
     baseRevision: answered ? String(prior!.subject.revision) : resolveReviewBaseline(round.reviewBaseline, current.subject.change.targetBranch),
     missionRange: answered ? missionRangeOf(prior!, round.reviewBaseline, candidateRevision) : null,
     repairCause, verifiedRepair, findings, evidenceComment: text.comment, evidenceResponse: text.response, humanFeedback: humanFeedbackText(context, round),
   };
 }
 
-interface Decision {
+export interface Decision {
   readonly selected: ClassificationRoute & { readonly route: 'clear' | 'implementer' };
   readonly provider: string;
   readonly model: string;
   readonly packetHash: string;
+  /** Present when the decision restores a withdrawn integration approval after the weakening question. */
+  readonly weakening?: ClassifierReviewSource['weakening'];
 }
 
 /** An absent key is its own cause and is announced once per process; any other setup problem keeps its reason. */
@@ -238,24 +247,23 @@ async function unavailableProvider(context: LoopContext, ports: ReviewClassifica
 async function decideAndCommit(context: LoopContext, round: ReviewRound, scope: ReviewScope, rows: RoundTelemetry,
   telemetry: ReviewClassificationTelemetryPort, cycleStarted?: number): Promise<Outcome> {
   const ports = context.ports.classification!;
-  const { candidateRevision, original } = scope;
+  const { original } = scope;
   const emit = (value: string) => context.emit({ kind: 'reviewer-classification', reason: value });
   const fallback = async (why: string, message = why) => { await rows.finish(why); emit(message); return null; };
   const started = cycleStarted ?? ports.clock();
   rows.note({ policyVersion: scope.policyVersion, promptVersion: PANEL_PROMPT_VERSION, packetVersion: ARCHIVED_PACKING_VERSION });
   if (original?.classifier) { return await fallback('prior-classifier-review'); }
+  if (scope.repairCause) {
+    const weakening = await decideWeakening(context, round, scope, rows, started);
+    return weakening ? await commitDecision(context, round, scope, weakening, rows, telemetry, started) : null;
+  }
   let decision: Decision;
   try {
     const availability = await ports.decision.available();
     if (availability.status !== 'available') { return await unavailableProvider(context, ports, availability, rows); }
     rows.note({ provider: availability.provider, model: availability.model });
     const packet = await buildArchivedEvidencePacket(evidenceInput(scope), ports.evidence, request => panelRequestBudget(request, ports.decision),
-    scope.verifiedRepair && round.verifiedRevision === candidateRevision ? {
-      status: 'passed', candidateRevision, scope: 'Configured pre-review verification',
-      provenance: 'Parallix recorded successful pre-review verification at this exact candidate revision.',
-      specificTestResult: 'unknown', failedIntegrationGateRerun: 'unknown',
-      caveat: 'This does not establish that the failed integration gate or an individual test executed. Implementer comments remain unverified claims.',
-    } : undefined, context.ports.worktree);
+      undefined, context.ports.worktree);
     const packetHash = ports.hash(JSON.stringify(packet.request.state));
     rows.note({ preparationMs: ports.clock() - started, packetHash });
     const classifyStart = ports.clock();
@@ -282,6 +290,7 @@ function classifierSource(scope: ReviewScope, decision: Decision, decisionId: st
     packetHash: decision.packetHash, priorRevision: prior ? String(prior.subject.revision) : candidateRevision, candidateRevision,
     ...(prior ? { responseRevision: String(scope.verifiedRepair ? current.subject.revision : prior.response!.resultingRevision) }
       : { successCriteria: { baseRef: scope.baseRevision } }),
+    ...(decision.weakening ? { weakening: decision.weakening } : {}),
     ...(scope.verifiedRepair && original?.kind === 'approved'
       ? { integrationRepair: { revokedAt: original.revocation!.revokedAt, gate: scope.repairCause!.gate } } : {}),
     findingIds: [...findingIds], policyVersion: scope.policyVersion, label: decision.selected.label!, score: decision.selected.score!,

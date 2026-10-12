@@ -11,6 +11,8 @@ export interface ReviewClassificationPorts {
   fingerprint(): string;
   now(): string;
   clock(): number;
+  /** Green integration validations recorded for a mission, oldest first. */
+  validations(_mission: string): Promise<readonly import('../review-classification/gate-fact.js').RecordedValidation[]>;
   /** Formal review by the dedicated classifier identity at the exact candidate revision. */
   publish(_source: ClassifierReviewSource, _route: 'clear' | 'implementer', _summary: string): Promise<boolean>;
 }
