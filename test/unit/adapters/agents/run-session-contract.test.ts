@@ -1,11 +1,13 @@
 import { resolveConfiguration } from '../../../../src/composition/config.js';
 import fs from 'node:fs';
 import path from 'node:path';
-import test from 'node:test';
+import test, { mock } from 'node:test';
+import os from 'node:os';
 import assert from 'node:assert/strict';
 import { mkdtemp } from '../../../helpers/temp-dir.js';
 import { openRunSession, TerminalHostUnavailableError } from '../../../../src/adapters/agents/run-session.js';
 import { missionRunsDir } from '../../../../src/adapters/filesystem/run-history-store.js';
+import { claudeProjectDir } from '../../../../src/adapters/config/state-homes.js';
 
 // Doubles for the tmux probe, config and repository key; no real tmux or git.
 
@@ -112,6 +114,32 @@ test('Claude output is recorded as the provider stream that carries tool results
   const [primary] = record(worktree, session.runId).sources;
   assert.equal(primary.kind, 'provider-stream');
   assert.match(primary.covers, /tool calls and tool results/);
+});
+
+test('Claude native transcript retention uses supplied home instead of process home (TASK-2724)', t => {
+  const { worktree, deps, input } = setup('pipe');
+  t.after(() => fs.rmSync(worktree, { recursive: true, force: true }));
+  const suppliedHome = path.join(worktree, 'supplied-home');
+  const processHome = path.join(worktree, 'process-home');
+  const homeMock = mock.method(os, 'homedir', () => processHome);
+  t.after(() => homeMock.mock.restore());
+  const configuration = resolveConfiguration({ HOME: suppliedHome });
+  assert.notEqual(configuration.storage.homeDirectory, os.homedir());
+  const sessionId = 'isolated-claude-session';
+  const expected = '{"type":"tool_result","content":"configured-home evidence"}\n';
+  for (const [home, content] of [[suppliedHome, expected], [processHome, 'wrong process-home transcript\n']]) {
+    const directory = claudeProjectDir(worktree, resolveConfiguration({ HOME: home }));
+    fs.mkdirSync(directory, { recursive: true });
+    fs.writeFileSync(path.join(directory, `${sessionId}.jsonl`), content);
+  }
+  const session = openRunSession({ ...input, family: 'claude' }, { ...deps, configuration })!;
+  session.finish({ status: 0, sessionId });
+  const rec = record(worktree, session.runId);
+  const transcript = rec.sources.find((source: { kind: string }) => source.kind === 'provider-transcript');
+  assert.ok(transcript);
+  assert.equal(transcript.complete, true);
+  assert.equal(fs.readFileSync(path.join(missionRunsDir(worktree, 'task-7'), session.runId, transcript.path), 'utf8'), expected);
+  assert.equal(rec.omissions.some((line: string) => /No claude provider-native transcript/.test(line)), false);
 });
 
 

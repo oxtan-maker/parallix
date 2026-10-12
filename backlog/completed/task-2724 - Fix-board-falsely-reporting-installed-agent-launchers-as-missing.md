@@ -1,8 +1,8 @@
 ---
 id: TASK-2724
 title: Fix configuration propagation gaps in board and agent discovery
-status: backlog
-assignee: []
+status: done
+assignee: [codex]
 created_date: '2026-10-12 04:23'
 updated_date: '2026-10-12 04:24'
 labels:

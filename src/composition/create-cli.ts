@@ -936,9 +936,9 @@ async function runReviewEventCommand(parsed: ParsedArgs, configuration: Parallix
   }
 }
 
-function ensureWorkflowAgentConfig(command: string, target: string) {
+function ensureWorkflowAgentConfig(command: string, target: string, configuration: ParallixConfiguration) {
   if (!['draft', 'active', 'review'].includes(command) || !hasGitRepository(target)) { return; }
-  try { ensureFirstRunAgentConfig({ rootDir: target, worktree: target }); } catch { /* Best-effort first-run detection. */ }
+  try { ensureFirstRunAgentConfig({ rootDir: target, worktree: target, configuration }); } catch { /* Best-effort first-run detection. */ }
 }
 
 async function runTargetCommand(parsed: ParsedArgs, configuration: ParallixConfiguration, log: typeof fmt.log.plain, error: typeof fmt.log.plainError, cli?: CliInvocation): Promise<number> {
@@ -955,7 +955,7 @@ async function runTargetCommand(parsed: ParsedArgs, configuration: ParallixConfi
     if (parsed.command === 'verify-env') {
       return startupPreflightModule.default([], { command: 'verify-env', returnResult: true, log, error })?.pass ? 0 : 1;
     }
-    ensureWorkflowAgentConfig(parsed.command || '', parsed.target);
+    ensureWorkflowAgentConfig(parsed.command || '', parsed.target, configuration);
     return await commandInvocation(exitFn => workflow.main([parsed.command, ...parsed.args], {
       ...createRuntimeOptions(parsed.target, configuration),
       cwdFn: () => parsed.target,

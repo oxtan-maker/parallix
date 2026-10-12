@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import type { Locator } from 'playwright-core';
+import type { Locator, Page } from 'playwright-core';
 import { compactPointerSnapshot, pointerBoard, pointerSnapshot } from '../../fixtures/web-pointer-board.js';
 
 async function clickAt(control: Locator) {
@@ -9,6 +9,31 @@ async function clickAt(control: Locator) {
   assert.ok(box);
   await control.page().mouse.click(box.x + box.width / 2, box.y + box.height / 2);
 }
+
+async function waitForCommands(page: Page, timeout = 3000) {
+  await page.waitForFunction(() => !document.querySelector('[data-board-card] button[aria-label*="starting"], [data-board-card] button[aria-label*="working"]'), undefined, { timeout });
+}
+
+test('pending current-work commands wait for the response before the next coordinate action (TASK-2724)', { timeout: 10_000 }, async (context) => {
+  const fixture = await pointerBoard();
+  context.after(fixture.close);
+  const { page, requests } = fixture;
+  await fixture.render(pointerSnapshot('refined', undefined, 'running'));
+  fixture.hold();
+  try {
+    await clickAt(page.locator('[data-board-card] button[data-action-kind="handoff:record"]'));
+    await page.waitForFunction(() => !!document.querySelector('[data-board-card] button[aria-label*="working"]'));
+    // A held response must keep the sequential matrix waiting even when the
+    // refreshed card uses the working label instead of the starting label.
+    await assert.rejects(waitForCommands(page, 100), /Timeout/);
+    assert.equal(requests.length, 1);
+    fixture.release();
+    await waitForCommands(page);
+    await clickAt(page.locator('[data-board-card] button[data-action-kind="integrate:merge"]'));
+    await waitForCommands(page);
+    assert.deepEqual(requests.map((request) => (request as { kind: string }).kind), ['handoff:record', 'integrate:merge']);
+  } finally { fixture.release(); await fixture.close(); }
+});
 
 test('board coordinate control matrix across lanes and work states (TASK-2705)', { timeout: 45_000 }, async (context) => {
   const fixture = await pointerBoard();
@@ -46,7 +71,7 @@ test('board coordinate control matrix across lanes and work states (TASK-2705)',
         assert.equal(requests.length, before);
         for (const [command, kind] of [['active', 'active:execute'], ['draft', 'draft:create'], ['handoff', 'handoff:record'], ['integrate', 'integrate:merge']] as const) {
           await clickAt(card.locator(`button[aria-label^="px ${command}"]`));
-          await page.waitForFunction(() => !document.querySelector('[data-board-card] button[aria-label*="starting"]'));
+          await waitForCommands(page);
           assert.deepEqual(requests.at(-1), { missionId: 'task-pointer-disposable', kind, missionStatusAtRequest: lane });
           assert.equal(await card.getAttribute('aria-selected'), 'false');
           assert.equal(await page.getByRole('dialog', { name: /Mission progress/ }).count(), 0);
@@ -72,7 +97,7 @@ test('board coordinate control matrix across lanes and work states (TASK-2705)',
     const before = requests.length;
     for (const command of ['active', 'handoff', 'review', 'integrate']) {
       await clickAt(page.locator(`[data-board-card] button[aria-label^="px ${command}"]`));
-      await page.waitForFunction(() => !document.querySelector('[data-board-card] button[aria-label*="starting"]'));
+      await waitForCommands(page);
     }
     assert.deepEqual(requests.slice(before).map((request) => (request as {kind: string}).kind), ['active:execute', 'handoff:record', 'review:submit', 'integrate:merge']);
   } finally { await fixture.close(); }
@@ -154,6 +179,6 @@ test('tall board modal and pending coordinate presses remain safe (TASK-2705)', 
     assert.equal(await page.getByRole('dialog').count(), 0);
     assert.match(await page.getByRole('status').first().textContent() ?? '', /already running/);
     fixture.release();
-    await page.waitForFunction(() => !document.querySelector('[data-board-card] button[aria-label*="starting"]'));
+    await waitForCommands(page);
   } finally { await fixture.close(); }
 });

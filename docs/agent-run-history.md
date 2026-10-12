@@ -71,6 +71,10 @@ omissions. Provider-native session transcripts and tool results are retained
 only when that provider exposes a supported source; their source label and
 completeness are reported rather than inferred from terminal output.
 
+Claude's native transcript lookup uses the home supplied when Parallix starts.
+If you set `HOME` for the invocation, retention looks in that home's Claude
+project directory.
+
 Output is bounded by the existing recovery-evidence retention and redaction
 contract. Under pressure, the store keeps the start and newest segments and
 reports the omitted middle range. A supervisor crash leaves the written bytes

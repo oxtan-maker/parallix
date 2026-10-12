@@ -1,11 +1,13 @@
 #!/usr/bin/env node
 
 import * as fmt from '../../../application/presentation/cli-format.js';
+import type { ParallixConfiguration } from '../../../application/ports/configuration.js';
 import { loadEffectiveConfig, loadWorkflowConfig, validateWorkflowConfig, hasGitRepository, resolveIntegrationMode } from '../../config/product-config.js';
 import { ensureFirstRunAgentConfig } from '../../agents/first-run-config.js';
 import { CONFIG_PATH } from '../../agents/agent-config.js';
 
 interface ConfigOptions {
+  configuration?: ParallixConfiguration;
   logFn?: (_msg: string) => void;
   errorFn?: (_msg: string) => void;
   exitFn?: (_code: number) => void;
@@ -39,7 +41,7 @@ async function config(_args: string[] = [], opts: ConfigOptions = {}) {
     }
     // force:true so an explicit --write regenerates a stale/empty detection; the
     // implicit first-run hook never sets force, so it stays idempotent.
-    const result = ensureFirstRunAgentConfig({ rootDir, worktree: rootDir, force: true });
+    const result = ensureFirstRunAgentConfig({ rootDir, worktree: rootDir, force: true, configuration: opts.configuration });
     if (result.written) {
       logFn(fmt.status('INFO', `Wrote ${result.configPath} with availability-filtered eligible agents.`));
     } else if (result.emptyDetection) {

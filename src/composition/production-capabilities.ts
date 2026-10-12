@@ -295,6 +295,7 @@ export function composeProductionCapabilities(
   // Single dispatcher instance shared by CLI and TUI (TASK-2332.05)
   const controller = new BoardCommandController(executePorts, progress, missionServices, currentWork, missionStore);
   const tui = composeTuiCapabilities({
+    configuration: overrides.configuration,
     rootDir,
     missionStore,
     database,

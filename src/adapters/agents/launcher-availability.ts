@@ -1,5 +1,6 @@
 import { workflowLauncherStatus } from './launcher-selection.js';
 import type { AgentFamily } from '../../domain/agents.js';
+import type { ParallixConfiguration } from '../../application/ports/configuration.js';
 
 // ---------------------------------------------------------------------------
 // Launcher availability probe for read-only consumers (board / TUI).
@@ -25,6 +26,9 @@ export interface LauncherProbeResult {
 }
 
 export interface LauncherProbeOptions {
+  readonly configuration?: ParallixConfiguration;
+  /** Repository authority for configured Custom runner resolution. */
+  readonly worktree?: string;
   readonly ttlMs?: number;
   readonly now?: () => number;
   /** Injection seam for tests; defaults to the real launcher status probe. */
@@ -54,7 +58,7 @@ function describeUnavailable(status: { health?: string; reason?: string }): stri
 export function createLauncherProbe(options: LauncherProbeOptions = {}): (_family: AgentFamily) => LauncherProbeResult {
   const ttlMs = options.ttlMs ?? DEFAULT_LAUNCHER_PROBE_TTL_MS;
   const now = options.now ?? Date.now;
-  const probe = options.probe ?? ((family: string) => workflowLauncherStatus(family));
+  const probe = options.probe ?? ((family: string) => workflowLauncherStatus(family, options.worktree, options.configuration));
   const cache = new Map<string, CacheEntry>();
 
   return (family: AgentFamily): LauncherProbeResult => {

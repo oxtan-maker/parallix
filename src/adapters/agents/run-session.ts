@@ -84,20 +84,20 @@ export function findTranscript(root: string, sessionId: string, depth = 5): stri
 }
 
 /** Where each family keeps its native transcript for a worktree. */
-function transcriptRoot(family: string, worktree: string): string | null {
-  if (family === 'claude') { return claudeProjectDir(worktree); }
+function transcriptRoot(family: string, worktree: string, configuration: ParallixConfiguration): string | null {
+  if (family === 'claude') { return claudeProjectDir(worktree, configuration); }
   if (family === 'codex') { return path.join(codexHomeRoot(worktree), 'sessions'); }
   if (family === 'qwen') { return path.join(qwenHomeRoot(worktree), 'projects'); }
   return null;
 }
 
-function providerSources(capture: RunCapture, family: string, worktree: string, sessionId: string | null, tmux: boolean): { sources: RunSource[]; omissions: string[] } {
+function providerSources(capture: RunCapture, family: string, worktree: string, sessionId: string | null, tmux: boolean, configuration: ParallixConfiguration): { sources: RunSource[]; omissions: string[] } {
   const terminal = tmux ? 'stdout (pane bytes, stderr merged)' : 'stdout and stderr';
   const sources: RunSource[] = [family === 'claude'
     ? { kind: 'provider-stream', path: 'stdout', covers: `Claude stream-json events from ${terminal}: assistant text, tool calls and tool results the CLI emitted`, complete: true }
     : { kind: 'terminal-bytes', path: 'stdout', covers: `raw bytes ${family} wrote to ${terminal}, including ANSI control and alternate-screen output`, complete: true }];
   const omissions = ['Model reasoning and tool activity the provider did not print or log are not captured.'];
-  const root = transcriptRoot(family, worktree);
+  const root = transcriptRoot(family, worktree, configuration);
   const file = root && sessionId ? findTranscript(root, sessionId) : null;
   const kept = file ? capture.retainProviderFile(file, path.basename(file)) : null;
   if (kept) {
@@ -189,7 +189,7 @@ export function openRunSession(input: RunSessionInput, deps: RunSessionDeps = {}
       if (!capture) { return; }
       try {
         const sessionId = result?.sessionId ?? null;
-        const provider = providerSources(capture, input.family, worktree, sessionId, useTmux && !inheritedTerminal);
+        const provider = providerSources(capture, input.family, worktree, sessionId, useTmux && !inheritedTerminal, configuration);
         if (IN_PROCESS_FAMILIES.has(input.family)) {
           provider.sources[0] = { kind: 'terminal-bytes', path: 'stdout', covers: `text the in-process ${input.family} session rendered`, complete: true };
         }

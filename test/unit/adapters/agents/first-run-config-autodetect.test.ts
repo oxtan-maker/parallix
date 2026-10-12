@@ -15,6 +15,7 @@ import {
 import { readAgentConfig } from '../../../../src/adapters/agents/agent-config.js';
 import { eligibleAgentsForStep } from '../../../../src/adapters/agents/launcher-selection.js';
 import { mkdtemp as registeredMkdtemp } from '../../../helpers/temp-dir.js';
+import { resolveConfiguration } from '../../../../src/composition/config.js';
 
 const CONFIG_REL = 'config/agents.json';
 
@@ -249,6 +250,36 @@ test('force skips an empty detection instead of overwriting a live config', () =
       assert.equal(result.emptyDetection, true);
       const after = fs.readFileSync(path.join(root, CONFIG_REL));
       assert.deepEqual(after, before); // do not clobber user config on empty detection
+    } finally {
+      clearSeams();
+    }
+  });
+});
+
+test('supplied runner configuration controls partial, empty and preserved detection (TASK-2724)', () => {
+  withTempDir(root => {
+    const runner = path.join(root, 'supplied-opencode');
+    fs.writeFileSync(runner, '', { mode: 0o755 });
+    const configuration = resolveConfiguration({ HOME: root, PATH: '', OPENCODE_BIN: runner });
+    const probed: string[] = [];
+    setCommandPathProbe(() => null);
+    setLauncherHealthProbe(command => { probed.push(command); return { ok: true }; });
+    try {
+      const result = ensureFirstRunAgentConfig({ rootDir: root, worktree: root, configuration });
+      assert.equal(result.written, true);
+      assert.deepEqual(result.eligibleByStep, { draft: ['custom'], active: ['custom'], review: ['custom'] });
+      assert.deepEqual(probed, [runner], 'one health probe for the configured Custom runner');
+      const before = fs.readFileSync(result.configPath, 'utf8');
+      fs.rmSync(runner);
+      const preserved = ensureFirstRunAgentConfig({ rootDir: root, worktree: root, configuration });
+      assert.equal(preserved.written, false);
+      assert.deepEqual(preserved.eligibleByStep, { draft: [], active: [], review: [] });
+      assert.equal(fs.readFileSync(result.configPath, 'utf8'), before);
+      fs.rmSync(result.configPath);
+      const empty = ensureFirstRunAgentConfig({ rootDir: root, worktree: root, configuration });
+      assert.equal(empty.emptyDetection, true);
+      assert.equal(empty.written, false);
+      assert.equal(fs.existsSync(result.configPath), false);
     } finally {
       clearSeams();
     }

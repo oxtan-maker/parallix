@@ -1,4 +1,5 @@
 import fs from 'node:fs';
+import type { ParallixConfiguration } from '../../application/ports/configuration.js';
 import path from 'node:path';
 import * as storage from '../storage/storage.js';
 import { runtimeAssetStore } from '../assets/runtime-assets.js';
@@ -21,6 +22,7 @@ export interface FirstRunAgentConfigResult {
 }
 
 export interface FirstRunAgentConfigOptions {
+  configuration?: ParallixConfiguration;
   rootDir?: string;
   /** Worktree passed to `workflowLauncherStatus` so `custom` resolves its runner. */
   worktree?: string;
@@ -46,11 +48,11 @@ function bundledDefault(): { [key: string]: any } {
 }
 
 /** Probe availability once per family, grouped by step (all steps share one probe). */
-function filterEligible(worktree: string | undefined): { [step: string]: string[] } {
+function filterEligible(worktree: string | undefined, configuration?: ParallixConfiguration): { [step: string]: string[] } {
   const byStep: { [step: string]: string[] } = {};
   const available = WORKFLOW_AGENT_NAMES.filter((agent) => {
     try {
-      return workflowLauncherStatus(agent, worktree).supported;
+      return workflowLauncherStatus(agent, worktree, configuration).supported;
     } catch {
       // A probe that throws (unknown family, spawn failure) drops the family
       // rather than aborting the whole first-run write.
@@ -91,7 +93,7 @@ export function ensureFirstRunAgentConfig(options: FirstRunAgentConfigOptions = 
   const configPath = path.join(rootDir, CONFIG_PATH);
   const exists = fs.existsSync(configPath);
 
-  const eligibleByStep = filterEligible(worktree);
+  const eligibleByStep = filterEligible(worktree, options.configuration);
   const anyAvailable = CONFIG_STEPS.some((step) => (eligibleByStep[step] || []).length > 0);
 
   // Idempotent implicit hook: never touch a pre-existing working-tree config.

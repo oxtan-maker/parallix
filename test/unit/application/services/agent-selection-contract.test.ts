@@ -26,6 +26,9 @@ import os from 'node:os';
 import path from 'node:path';
 import { resolveKnownAgentFamilies } from '../../../../src/adapters/agents/known-agent-families.js';
 import { mkdtemp as registeredMkdtemp } from '../../../helpers/temp-dir.js';
+import { resolveConfiguration } from '../../../../src/composition/config.js';
+import { setCommandPathProbe, setLauncherHealthProbe } from '../../../../src/adapters/agents/launcher-probes.js';
+import { projectAgentAvailability } from '../../../../src/application/projections/agent-status.js';
 
 describe('Domain agent selection', () => {
   const codex = agentFamily('codex');
@@ -354,6 +357,73 @@ describe("Agent selection telemetry outcomes", () => {
 });
 
 describe('Launcher availability', () => {
+  test('configured Custom probes retain authority through TTL expiry and separate caches (TASK-2724)', () => {
+    const root = registeredMkdtemp('launcher-cache-authority-');
+    const runner = path.join(root, 'configured-runner');
+    fs.writeFileSync(runner, '', { mode: 0o755 });
+    fs.writeFileSync(path.join(root, 'workflow.config.json'), JSON.stringify({ adapters: { agents: { runners: { custom: 'opencode' } } } }));
+    let clock = 0;
+    const commands: string[] = [];
+    setCommandPathProbe(() => null);
+    setLauncherHealthProbe(command => { commands.push(command); return { ok: true }; });
+    try {
+      const configured = createLauncherProbe({
+        configuration: resolveConfiguration({ HOME: root, PATH: '', OPENCODE_BIN: runner }),
+        worktree: root, ttlMs: 100, now: () => clock,
+      });
+      const absent = createLauncherProbe({
+        configuration: resolveConfiguration({ HOME: root, PATH: '' }),
+        worktree: root, ttlMs: 100, now: () => clock,
+      });
+      assert.equal(configured(agentFamily('custom')).available, true);
+      assert.equal(absent(agentFamily('custom')).available, false);
+      assert.equal(configured(agentFamily('custom')).available, true);
+      assert.deepEqual(commands, [runner]);
+      clock = 100;
+      assert.equal(configured(agentFamily('custom')).available, true);
+      assert.deepEqual(commands, [runner, runner], 'expiry retains supplied runner authority');
+      assert.equal(configured(agentFamily('codex')).available, false, 'families have separate entries');
+      fs.rmSync(runner);
+      assert.equal(configured(agentFamily('custom')).available, true, 'refresh uses bounded cached result');
+      clock = 200;
+      assert.deepEqual(configured(agentFamily('custom')), { available: false, detail: 'launcher missing' });
+    } finally {
+      setCommandPathProbe(name => name);
+      setLauncherHealthProbe(() => ({ ok: true }));
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  test('real status mapping preserves failed health and inconclusive timeout (TASK-2724)', () => {
+    setCommandPathProbe(name => name);
+    try {
+      setLauncherHealthProbe(() => ({ ok: false, reason: 'exit 9' }));
+      assert.deepEqual(createLauncherProbe()(agentFamily('codex')), { available: false, detail: 'launcher probe-failed: exit 9' });
+      setLauncherHealthProbe(() => ({ ok: false, reason: 'ETIMEDOUT' }));
+      assert.deepEqual(createLauncherProbe()(agentFamily('codex')), { available: true, detail: null });
+    } finally {
+      setLauncherHealthProbe(() => ({ ok: true }));
+    }
+  });
+
+  test('launcher availability leaves runtime block and expiry authoritative (TASK-2724)', async () => {
+    const untilMs = Date.now() + 60_000;
+    const adapter = new ConcreteAgentReadAdapter({
+      rootDir: '/fixture',
+      knownAgentFamilies: [agentFamily('codex')],
+      blocklistRepo: {
+        async findAll() { return [{ agent: 'codex', blocked: true, until: new Date(untilMs).toISOString(), reason: 'runtime limit' }]; },
+        async findByAgent() { return undefined; }, async save() {}, async deleteByAgent() {}, async clear() {},
+      },
+      readAgentConfig: () => null,
+      launcherAvailable: createLauncherProbe({ probe: () => ({ supported: true }) }),
+    });
+    const availability = await adapter.loadAgentAvailability();
+    assert.equal(projectAgentAvailability(availability, untilMs - 1)[0].available, false);
+    assert.equal(projectAgentAvailability(availability, untilMs - 1)[0].reason, 'runtime limit');
+    assert.equal(projectAgentAvailability(availability, untilMs)[0].available, true);
+    assert.equal(projectAgentAvailability(availability, untilMs)[0].reason, null);
+  });
   // ---------------------------------------------------------------------------
   // The board's launcher probe. `workflowLauncherStatus` spawns per call, so the
   // probe caches; a board that never probes reports every configured family as

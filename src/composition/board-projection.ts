@@ -1,4 +1,5 @@
 import type { AgentFamily } from '../domain/agents.js';
+import type { ParallixConfiguration } from '../application/ports/configuration.js';
 import { createGitChangeIdentity } from '../adapters/git/change-identity.js';
 import type { RepositoryId } from '../domain/repository.js';
 import type {
@@ -34,6 +35,7 @@ import { SqliteReviewProjectionReader } from '../adapters/sqlite/review-projecti
 import { loadEffectiveConfig } from '../adapters/config/product-config.js';
 
 export interface BoardProjectionCompositionDeps {
+  readonly configuration?: ParallixConfiguration;
   readonly rootDir: string;
   readonly missionStore: MissionStore | null;
   readonly database?: SqliteDatabaseAdapter | null;
@@ -149,7 +151,7 @@ export function composeBoardProjection(deps: BoardProjectionCompositionDeps) {
       knownAgentFamilies: deps.knownAgentFamilies,
       // Without a probe the board would report every configured family as
       // available even when its CLI is absent from this workstation.
-      launcherAvailable: deps.launcherProbe ?? createLauncherProbe(),
+      launcherAvailable: deps.launcherProbe ?? createLauncherProbe({ configuration: deps.configuration, worktree: deps.rootDir }),
       // Attributes a live `px` process to the family that launched it. Without
       // it the strip cannot report running sessions and says so.
       sessionMarkers: deps.sessionMarkers ?? null,

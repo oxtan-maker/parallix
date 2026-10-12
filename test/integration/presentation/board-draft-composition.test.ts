@@ -20,6 +20,7 @@ import { repositoryId } from '../../../src/domain/repository.js';
 import { makeExecutePorts } from '../../fixtures/execute-mission-ports.js';
 import { mkdtemp as registeredMkdtemp } from '../../helpers/temp-dir.js';
 import { resolveConfiguration } from '../../../src/composition/config.js';
+import { setCommandPathProbe, setLauncherHealthProbe } from '../../../src/adapters/agents/launcher-probes.js';
 
 const directories: string[] = [];
 const repositories = {
@@ -28,6 +29,41 @@ const repositories = {
   boardLaneEvents: { async findAll() { return []; }, async findByMissionId() { return []; }, async findByRepositoryId() { return []; }, async append() { return true; }, async clear() {} },
   usage: { async findAll() { return []; }, async findWhere() { return []; }, async save() {}, async saveAll() {}, async clear() {} },
 };
+
+test('shared web and TUI board discovers launchers only on supplied PATH (TASK-2724)', async () => {
+  const root = registeredMkdtemp('board-launcher-authority-');
+  directories.push(root);
+  const bin = path.join(root, 'bin');
+  fs.mkdirSync(bin);
+  // Bash is a probe dependency; no host launcher directory enters this PATH.
+  fs.symlinkSync('/bin/bash', path.join(bin, 'bash'));
+  for (const family of ['codex', 'claude']) {
+    fs.writeFileSync(path.join(bin, family), '#!/bin/sh\nexit 0\n', { mode: 0o755 });
+  }
+  fs.mkdirSync(path.join(root, 'config'));
+  fs.writeFileSync(path.join(root, 'config/agents.json'), JSON.stringify({ families: ['codex', 'claude', 'qwen'] }));
+  setCommandPathProbe(null);
+  setLauncherHealthProbe(null);
+  try {
+    const { ports } = makeExecutePorts();
+    const capabilities = composeProductionCapabilities(
+      root, repositoryId('isolated-board'), repositories, ports, null, NO_CURRENT_WORK_PORT,
+      undefined, undefined, { configuration: resolveConfiguration({ PATH: bin, HOME: root }) },
+    );
+    assert.equal(capabilities.boardProjection, capabilities.tui.boardProjection);
+    for (let refresh = 0; refresh < 2; refresh += 1) {
+      const board = await capabilities.boardProjection.build();
+      const agents = board.metrics.agentAvailability;
+      assert.equal(agents.find(agent => agent.family === 'codex')?.available, true);
+      assert.equal(agents.find(agent => agent.family === 'claude')?.available, true);
+      assert.equal(agents.find(agent => agent.family === 'qwen')?.available, false);
+      assert.equal(agents.find(agent => agent.family === 'qwen')?.reason, 'launcher missing');
+    }
+  } finally {
+    setCommandPathProbe(name => name);
+    setLauncherHealthProbe(() => ({ ok: true }));
+  }
+});
 
 async function isolatedStore() {
   const directory = registeredMkdtemp('parallix-task-2426-');

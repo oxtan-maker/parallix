@@ -461,6 +461,11 @@ so results are cached for `DEFAULT_LAUNCHER_PROBE_TTL_MS` (5 minutes) — a
 launcher installed or removed while the board is open is picked up on the next
 refresh after that window, not instantly.
 
+The web and TUI boards use the launcher environment supplied when Parallix
+starts, including its `PATH` and configured Custom runner. First-run detection
+and `px config --write` use that same environment, so start Parallix from a
+shell where the intended launchers are available.
+
 ## Local blocklist overrides
 
 Temporary local blocking uses the operator-owned
